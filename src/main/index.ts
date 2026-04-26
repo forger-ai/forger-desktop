@@ -1360,20 +1360,22 @@ const resolveRuntimeExecutables = async (runtimeRoot: string, type: 'node' | 'py
   const pip = await findExistingFile(root, [
     path.join('bin', 'pip3'),
     path.join('bin', 'pip'),
+    path.join('Scripts', 'pip.exe'),
     'pip.exe',
     path.join('python', 'bin', 'pip3'),
     path.join('python', 'bin', 'pip'),
+    path.join('python', 'Scripts', 'pip.exe'),
     path.join('python', 'pip.exe'),
   ]);
 
-  if (!python || !pip) {
+  if (!python) {
     throw new Error('runtime_python_executable_not_found');
   }
 
   return {
     rootDir: root,
     python,
-    pip,
+    pip: pip ?? undefined,
   };
 };
 
