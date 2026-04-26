@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 218" fill="none">
+
+  <!-- Self-contained dark background so it looks right on any surface -->
+  <rect width="200" height="218" rx="36" fill="#0D1117"/>
+
+  <defs>
+    <!-- Splits the orbit: above icon center = back/dashed, below = front/solid -->
+    <clipPath id="orbitBack">
+      <rect x="0" y="0" width="200" height="48"/>
+    </clipPath>
+    <clipPath id="orbitFront">
+      <rect x="0" y="48" width="200" height="200"/>
+    </clipPath>
+  </defs>
+
+  <!-- Orbit: back arc (dashed) — goes "behind" the icon block -->
+  <g clip-path="url(#orbitBack)">
+    <ellipse
+      cx="100" cy="48" rx="78" ry="19"
+      stroke="#E28A5A" stroke-width="3" stroke-dasharray="8 5"
+      fill="none"
+      transform="rotate(-14, 100, 48)"
+    />
+  </g>
+
+  <!-- App icon square (the nucleus) -->
+  <rect x="62" y="10" width="76" height="76" rx="13" fill="#1C2228"/>
+
+  <!-- Orbit: front arc (solid) — passes in front of the icon block -->
+  <g clip-path="url(#orbitFront)">
+    <ellipse
+      cx="100" cy="48" rx="78" ry="19"
+      stroke="#E28A5A" stroke-width="3"
+      fill="none"
+      transform="rotate(-14, 100, 48)"
+    />
+  </g>
+
+  <!-- Orbit dot — right end of the rotated ellipse (~176, 29) -->
+  <circle cx="176" cy="29" r="7.5" fill="#E28A5A"/>
+
+  <!--
+    Anvil:
+    Top face (wide, flat)
+    → cubic bezier curves inward forming the waist
+    → pedestal step outward
+    → wide rounded base
+  -->
+  <path
+    fill="#1C2228"
+    d="
+      M 22 90
+      Q 22 86 26 86
+      L 174 86
+      Q 178 86 178 90
+      L 178 108
+      C 164 118 148 126 146 134
+      L 146 148
+      L 168 148
+      Q 172 148 172 152
+      L 172 166
+      Q 172 170 168 170
+      L 32 170
+      Q 28 170 28 166
+      L 28 152
+      Q 28 148 32 148
+      L 54 148
+      L 54 134
+      C 52 126 36 118 22 108
+      Z
+    "
+  />
+
+</svg>

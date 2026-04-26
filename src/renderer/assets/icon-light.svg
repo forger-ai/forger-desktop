@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <clipPath id="frontOrbitLight">
+      <rect x="0" y="128" width="512" height="92"/>
+    </clipPath>
+  </defs>
+  <!-- ÓRBITAS detrás del app icon -->
+  <g>
+    <ellipse cx="256" cy="132" rx="184" ry="40" transform="rotate(-14 256 132)" stroke="#D97832" stroke-width="12" fill="none"/>
+    <ellipse cx="256" cy="132" rx="178" ry="38" transform="rotate(16 256 132)" stroke="#D97832" stroke-width="12" fill="none"/>
+  </g>
+  <!-- App icon -->
+  <rect x="166" y="42" width="180" height="180" rx="38" fill="#1C2228"/>
+  <!-- ÓRBITAS delante del app icon -->
+  <g clip-path="url(#frontOrbitLight)">
+    <ellipse cx="256" cy="132" rx="184" ry="40" transform="rotate(-14 256 132)" stroke="#D97832" stroke-width="12" fill="none"/>
+    <ellipse cx="256" cy="132" rx="178" ry="38" transform="rotate(16 256 132)" stroke="#D97832" stroke-width="12" fill="none"/>
+  </g>
+  <!-- Puntito orbital -->
+  <circle cx="390" cy="70" r="22" fill="#D97832"/>
+  <!-- Anvil -->
+  <path fill="#1C2228" d="M 48 260 Q 48 250 58 250 L 454 250 Q 464 250 464 260 C 458 294 424 310 390 314 C 360 318 344 342 344 376 L 344 426 L 386 426 Q 396 426 396 436 L 396 462 Q 396 472 386 472 L 126 472 Q 116 472 116 462 L 116 436 Q 116 426 126 426 L 168 426 L 168 376 C 168 342 152 318 122 314 C 88 310 54 294 48 260 Z"/>
+</svg>
