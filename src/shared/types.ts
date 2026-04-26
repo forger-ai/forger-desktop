@@ -18,6 +18,7 @@ export interface CatalogApp extends AppSummary {
   requiredPythonVersion?: string;
   requiredNodeVersion?: string;
   checksumSha256?: string;
+  downloadUrl?: string;
 }
 
 export interface Settings {

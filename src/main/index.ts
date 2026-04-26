@@ -41,6 +41,8 @@ import type {
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 const backendBaseUrl = process.env.FORGER_BACKEND_URL ?? 'http://127.0.0.1:3300';
+const catalogJsonUrl =
+  process.env.FORGER_CATALOG_URL ?? 'https://forger-ai.github.io/apps-catalog/catalog.json';
 const DEFAULT_NODE_VERSION = '24';
 const DEFAULT_PYTHON_VERSION = '3.12';
 const CODEX_CLI_VERSION = '0.125.0';
@@ -326,6 +328,14 @@ const mapBackendCategory = (backendCategory: string): AppCategory => {
     default:
       return 'productividad';
   }
+};
+
+const toCatalogStatus = (slug: string): AppStatus => {
+  const installed = registry.apps[slug];
+  if (!installed) {
+    return 'not_installed';
+  }
+  return runningApps.has(slug) ? 'running' : installed.status;
 };
 
 const buildHeaders = (): Record<string, string> => {
@@ -735,6 +745,52 @@ const buildCodexPromptWithAppContext = (appId: string, userPrompt: string): stri
 };
 
 const listCatalogFromBackend = async (): Promise<CatalogApp[]> => {
+  type PublicCatalogResponseItem = {
+    slug: string;
+    name: string;
+    short_description?: string | null;
+    description?: string | null;
+    category: string;
+    latest_version?: {
+      version?: string;
+      required_python_version?: string | null;
+      required_node_version?: string | null;
+      checksum_sha256?: string | null;
+      download_url?: string | null;
+    };
+  };
+
+  try {
+    const publicResponse = await fetch(catalogJsonUrl, {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json',
+      },
+    });
+
+    if (publicResponse.ok) {
+      const publicPayload = await readJson<PublicCatalogResponseItem[]>(publicResponse);
+      if (Array.isArray(publicPayload) && publicPayload.length > 0) {
+        return publicPayload.map((appEntry) => ({
+          id: appEntry.slug,
+          category: mapBackendCategory(appEntry.category),
+          status: toCatalogStatus(appEntry.slug),
+          name: appEntry.name,
+          description: appEntry.short_description ?? appEntry.description ?? '',
+          latestVersion: appEntry.latest_version?.version,
+          requiredPythonVersion: appEntry.latest_version?.required_python_version ?? undefined,
+          requiredNodeVersion: appEntry.latest_version?.required_node_version ?? undefined,
+          checksumSha256: appEntry.latest_version?.checksum_sha256 ?? undefined,
+          downloadUrl: appEntry.latest_version?.download_url ?? undefined,
+          version: appEntry.latest_version?.version,
+          userMessage: registry.apps[appEntry.slug]?.userMessage,
+        }));
+      }
+    }
+  } catch {
+    // Fallback to backend catalog API below.
+  }
+
   const response = await fetch(`${backendBaseUrl}/api/v1/catalog/apps`, {
     method: 'GET',
     headers: buildHeaders(),
@@ -765,12 +821,10 @@ const listCatalogFromBackend = async (): Promise<CatalogApp[]> => {
   }
 
   return payload.map((appEntry) => {
-    const installed = registry.apps[appEntry.slug];
-
     return {
       id: appEntry.slug,
       category: mapBackendCategory(appEntry.category),
-      status: installed ? (runningApps.has(appEntry.slug) ? 'running' : installed.status) : 'not_installed',
+      status: toCatalogStatus(appEntry.slug),
       name: appEntry.name,
       description: appEntry.short_description ?? appEntry.description ?? '',
       latestVersionId: appEntry.latest_version?.id,
@@ -779,7 +833,7 @@ const listCatalogFromBackend = async (): Promise<CatalogApp[]> => {
       requiredNodeVersion: appEntry.latest_version?.required_node_version ?? undefined,
       checksumSha256: appEntry.latest_version?.checksum_sha256 ?? undefined,
       version: appEntry.latest_version?.version,
-      userMessage: installed?.userMessage,
+      userMessage: registry.apps[appEntry.slug]?.userMessage,
     };
   });
 };
@@ -1450,14 +1504,6 @@ const disconnectCodexAuth = async (): Promise<{ success: boolean; userMessage: s
 const fetchDownloadBundle = async (
   appEntry: CatalogApp,
 ): Promise<{ zipPath: string; version: string; checksumSha256?: string }> => {
-  if (!sessionToken) {
-    throw new Error('auth_required');
-  }
-
-  if (!appEntry.latestVersionId) {
-    throw new Error('latest_version_not_found');
-  }
-
   type DownloadPayload = {
     download_url: string;
     version: {
@@ -1466,30 +1512,48 @@ const fetchDownloadBundle = async (
     };
   };
 
-  const platform = resolvePlatformAlias();
+  let downloadUrl = appEntry.downloadUrl;
+  let resolvedVersion = appEntry.latestVersion;
+  let expectedChecksum = appEntry.checksumSha256;
 
-  const response = await fetch(`${backendBaseUrl}/api/v1/app_versions/${appEntry.latestVersionId}/download`, {
-    method: 'POST',
-    headers: {
-      ...buildHeaders(),
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      platform,
-      device_identifier: os.hostname(),
-    }),
-  });
+  if (!downloadUrl) {
+    if (!sessionToken) {
+      throw new Error('auth_required');
+    }
 
-  if (!response.ok) {
-    throw new Error(`download_request_failed_${response.status}`);
+    if (!appEntry.latestVersionId) {
+      throw new Error('latest_version_not_found');
+    }
+
+    const platform = resolvePlatformAlias();
+
+    const response = await fetch(`${backendBaseUrl}/api/v1/app_versions/${appEntry.latestVersionId}/download`, {
+      method: 'POST',
+      headers: {
+        ...buildHeaders(),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        platform,
+        device_identifier: os.hostname(),
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`download_request_failed_${response.status}`);
+    }
+
+    const payload = await readJson<DownloadPayload>(response);
+    if (!payload?.download_url || !payload.version?.version) {
+      throw new Error('download_payload_invalid');
+    }
+
+    downloadUrl = payload.download_url;
+    resolvedVersion = payload.version.version;
+    expectedChecksum = payload.version.checksum_sha256 ?? expectedChecksum;
   }
 
-  const payload = await readJson<DownloadPayload>(response);
-  if (!payload?.download_url || !payload.version?.version) {
-    throw new Error('download_payload_invalid');
-  }
-
-  const zipResponse = await fetch(payload.download_url, {
+  const zipResponse = await fetch(downloadUrl, {
     method: 'GET',
     headers: {
       Accept: 'application/zip',
@@ -1507,7 +1571,6 @@ const fetchDownloadBundle = async (
   await fs.mkdir(path.dirname(zipPath), { recursive: true });
   await fs.writeFile(zipPath, buffer);
 
-  const expectedChecksum = payload.version.checksum_sha256 ?? appEntry.checksumSha256;
   if (expectedChecksum) {
     const actual = createHash('sha256').update(buffer).digest('hex');
     if (actual !== expectedChecksum) {
@@ -1517,7 +1580,7 @@ const fetchDownloadBundle = async (
 
   return {
     zipPath,
-    version: payload.version.version,
+    version: resolvedVersion ?? '0.0.0',
     checksumSha256: expectedChecksum ?? undefined,
   };
 };
