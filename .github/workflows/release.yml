@@ -92,9 +92,10 @@ jobs:
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
           TAG_NAME: ${{ github.ref_name }}
-          VERSION: ${{ needs.validate.outputs.version }}
         run: |
+          VERSION="${TAG_NAME#forger-desktop/v}"
           gh release view "$TAG_NAME" >/dev/null 2>&1 || gh release create "$TAG_NAME" --title "Forger Desktop v$VERSION" --notes "Forger Desktop v$VERSION"
           gh release upload "$TAG_NAME" release-artifacts/* --clobber
           gh release edit "$TAG_NAME" --latest
