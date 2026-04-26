@@ -36,6 +36,10 @@ interface PluginManifestV1 {
   sha256: string;
 }
 
+const requiresWindowsShell = (command: string): boolean => {
+  return process.platform === 'win32' && /\.(cmd|bat)$/i.test(command);
+};
+
 interface OperationEntry {
   operationId: string;
   runId: string;
@@ -808,12 +812,14 @@ const runCommandCapture = async (
   },
 ): Promise<CommandResult> => {
   return await new Promise<CommandResult>((resolve, reject) => {
+    const useShell = requiresWindowsShell(command);
     const child = spawn(command, args, {
       cwd: options.cwd,
       env: {
         ...process.env,
         ...(options.env ?? {}),
       },
+      shell: useShell,
       stdio: ['pipe', 'pipe', 'pipe'],
       detached: process.platform !== 'win32',
     });

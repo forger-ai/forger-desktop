@@ -1472,6 +1472,8 @@ const shellQuote = (value: string): string => {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 };
 
+const escapeCmdValue = (value: string): string => value.replace(/"/g, '""');
+
 const getCodexAuthFilePath = (): string => path.join(getCodexHome(), 'auth.json');
 
 const resolveCodexCliPath = async (baseDir: string): Promise<string | null> => {
@@ -1516,6 +1518,10 @@ const ensureCodexCliInstalled = async (): Promise<string> => {
     cwd: codexRoot,
     env: {
       PATH: `${path.dirname(nodeRuntime.node as string)}${path.delimiter}${process.env.PATH ?? ''}`,
+    },
+    log: {
+      phase: 'codex_auth',
+      label: 'install codex cli',
     },
     },
   );
@@ -1580,10 +1586,40 @@ const connectCodexAuth = async (): Promise<{ success: boolean; userMessage: stri
       };
     }
 
+    if (process.platform === 'win32') {
+      const loginCommand = `set "CODEX_HOME=${escapeCmdValue(codexHome)}" && "${escapeCmdValue(codexCliPath)}" login`;
+      const child = spawn(
+        'cmd.exe',
+        ['/c', 'start', 'Forger Codex Login', 'cmd.exe', '/k', loginCommand],
+        {
+          cwd: app.getPath('userData'),
+          detached: true,
+          stdio: 'ignore',
+          windowsHide: false,
+        },
+      );
+      child.unref();
+
+      await appendInstallLog('codex_auth:terminal_opened', {
+        platform: process.platform,
+        codexHome,
+        codexCliPath,
+      });
+
+      return {
+        success: true,
+        userMessage: 'Abrimos una consola para completar el login de Codex con ChatGPT.',
+      };
+    }
+
     await runCommand(codexCliPath, ['login'], {
       cwd: app.getPath('userData'),
       env: {
         CODEX_HOME: codexHome,
+      },
+      log: {
+        phase: 'codex_auth',
+        label: 'codex login',
       },
     });
 
@@ -1593,6 +1629,10 @@ const connectCodexAuth = async (): Promise<{ success: boolean; userMessage: stri
     };
   } catch (error) {
     const detail = error instanceof Error ? error.message : 'codex_auth_failed';
+    await appendInstallLog('codex_auth:failed', {
+      detail,
+      error: serializeErrorForInstallLog(error),
+    });
     return {
       success: false,
       userMessage: 'No pudimos iniciar el login de Codex.',
