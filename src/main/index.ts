@@ -169,9 +169,55 @@ const getRegistryPath = () => path.join(app.getPath('userData'), 'app_registry.j
 const getSessionPath = () => path.join(app.getPath('userData'), 'session.json');
 const getRuntimesRoot = () => path.join(app.getPath('userData'), 'runtimes');
 const getTempRoot = () => path.join(app.getPath('userData'), 'tmp');
+const getLogsRoot = () => path.join(app.getPath('userData'), 'logs');
+const getInstallLogPath = () => path.join(getLogsRoot(), 'install.log');
 const getPrivateAppsRoot = () => path.join(os.homedir(), 'Forger', isDev ? 'dev-apps' : 'apps');
 const getCodexRoot = () => path.join(app.getPath('userData'), 'codex-cli');
 const getCodexHome = () => path.join(app.getPath('userData'), 'codex-home');
+
+const MAX_INSTALL_LOG_FIELD_LENGTH = 60_000;
+
+const truncateForInstallLog = (value: string): string => {
+  if (value.length <= MAX_INSTALL_LOG_FIELD_LENGTH) {
+    return value;
+  }
+
+  return `${value.slice(0, MAX_INSTALL_LOG_FIELD_LENGTH)}\n...[truncated ${value.length - MAX_INSTALL_LOG_FIELD_LENGTH} chars]`;
+};
+
+const serializeErrorForInstallLog = (error: unknown): Record<string, unknown> => {
+  if (error instanceof Error) {
+    return {
+      name: error.name,
+      message: error.message,
+      stack: error.stack,
+    };
+  }
+
+  return {
+    message: String(error),
+  };
+};
+
+const appendInstallLog = async (event: string, payload: Record<string, unknown> = {}): Promise<void> => {
+  const logPath = getInstallLogPath();
+  const entry = {
+    timestamp: new Date().toISOString(),
+    event,
+    platform: process.platform,
+    arch: process.arch,
+    packaged: app.isPackaged,
+    dev: isDev,
+    ...payload,
+  };
+
+  try {
+    await fs.mkdir(path.dirname(logPath), { recursive: true });
+    await fs.appendFile(logPath, `${JSON.stringify(entry)}\n`, 'utf8');
+  } catch (error) {
+    console.warn('Failed to write Forger install log', error);
+  }
+};
 
 const getBundledResourcesRoot = (): string => {
   if (app.isPackaged) {
@@ -1024,8 +1070,27 @@ const hashFileSha256 = async (filePath: string): Promise<string> => {
 const runCommand = async (
   command: string,
   args: string[],
-  options: { cwd: string; env?: NodeJS.ProcessEnv },
+  options: {
+    cwd: string;
+    env?: NodeJS.ProcessEnv;
+    log?: {
+      appId?: string;
+      phase?: string;
+      label?: string;
+    };
+  },
 ): Promise<void> => {
+  if (options.log) {
+    await appendInstallLog('command:start', {
+      appId: options.log.appId,
+      phase: options.log.phase,
+      label: options.log.label,
+      command,
+      args,
+      cwd: options.cwd,
+    });
+  }
+
   await new Promise<void>((resolve, reject) => {
     const child = spawn(command, args, {
       cwd: options.cwd,
@@ -1047,10 +1112,38 @@ const runCommand = async (
     });
 
     child.on('error', (error) => {
+      if (options.log) {
+        void appendInstallLog('command:error', {
+          appId: options.log.appId,
+          phase: options.log.phase,
+          label: options.log.label,
+          command,
+          args,
+          cwd: options.cwd,
+          error: serializeErrorForInstallLog(error),
+          stdout: truncateForInstallLog(stdout),
+          stderr: truncateForInstallLog(stderr),
+        });
+      }
       reject(error);
     });
 
-    child.on('exit', (code) => {
+    child.on('exit', (code, signal) => {
+      if (options.log) {
+        void appendInstallLog('command:exit', {
+          appId: options.log.appId,
+          phase: options.log.phase,
+          label: options.log.label,
+          command,
+          args,
+          cwd: options.cwd,
+          code,
+          signal,
+          stdout: truncateForInstallLog(stdout),
+          stderr: truncateForInstallLog(stderr),
+        });
+      }
+
       if (code === 0) {
         resolve();
         return;
@@ -1614,9 +1707,15 @@ const getVenvExecutables = (backendDir: string): { python: string; pip: string }
 const installBackendDependenciesWithUv = async (
   pythonPath: string,
   backendDir: string,
+  appId: string,
 ): Promise<void> => {
   await runCommand(pythonPath, ['-m', 'pip', 'install', '--upgrade', 'pip', 'uv'], {
     cwd: backendDir,
+    log: {
+      appId,
+      phase: 'installing_backend',
+      label: 'install pip and uv',
+    },
   });
 
   const lockPath = path.join(backendDir, 'uv.lock');
@@ -1634,6 +1733,11 @@ const installBackendDependenciesWithUv = async (
     env: {
       UV_PROJECT_ENVIRONMENT: path.join(backendDir, '.venv'),
       UV_PYTHON: pythonPath,
+    },
+    log: {
+      appId,
+      phase: 'installing_backend',
+      label: 'uv sync',
     },
   });
 };
@@ -1658,8 +1762,20 @@ const installAppRuntime = async (appId: string): Promise<InstallAppResult> => {
   };
 
   await upsertInstalledRecord(initialRecord);
+  await appendInstallLog('install:start', {
+    appId,
+    catalogName: catalogApp.name,
+    catalogVersion: catalogApp.latestVersion,
+    logPath: getInstallLogPath(),
+  });
 
   const publishProgress = async (phase: InstallAppResult['phase'], userMessage: string): Promise<void> => {
+    await appendInstallLog('install:progress', {
+      appId,
+      phase,
+      userMessage,
+    });
+
     emitInstallProgress(appId, {
       success: true,
       phase,
@@ -1686,6 +1802,12 @@ const installAppRuntime = async (appId: string): Promise<InstallAppResult> => {
 
     await publishProgress('downloading', 'Descargando app...');
     const download = await fetchDownloadBundle(catalogApp);
+    await appendInstallLog('install:downloaded', {
+      appId,
+      version: download.version,
+      zipPath: download.zipPath,
+      checksumSha256: download.checksumSha256,
+    });
 
     const installRoot = path.join(getPrivateAppsRoot(), appId);
     const installDir = installRoot;
@@ -1693,6 +1815,11 @@ const installAppRuntime = async (appId: string): Promise<InstallAppResult> => {
     await fs.rm(installDir, { recursive: true, force: true });
 
     await publishProgress('extracting', 'Preparando archivos de la app...');
+    await appendInstallLog('install:extracting', {
+      appId,
+      installDir,
+      privateAppsRoot: getPrivateAppsRoot(),
+    });
     await extractArchive(download.zipPath, installDir);
     await flattenSingleTopLevelDirectory(installDir);
     await clearMacQuarantine(installDir);
@@ -1703,18 +1830,32 @@ const installAppRuntime = async (appId: string): Promise<InstallAppResult> => {
     await publishProgress('preparing_runtime', 'Preparando runtimes compartidos...');
     const nodeRuntime = await ensureRuntimeInstalled('node', nodeVersion);
     const pythonRuntime = await ensureRuntimeInstalled('python', pythonVersion);
+    await appendInstallLog('install:runtimes_ready', {
+      appId,
+      nodeVersion,
+      pythonVersion,
+      node: nodeRuntime.node,
+      npm: nodeRuntime.npm,
+      python: pythonRuntime.python,
+      pip: pythonRuntime.pip,
+    });
 
     const backendDir = path.join(installDir, 'backend');
     const frontendDir = path.join(installDir, 'frontend');
 
     await publishProgress('installing_backend', 'Instalando dependencias del backend con uv...');
-    await installBackendDependenciesWithUv(pythonRuntime.python as string, backendDir);
+    await installBackendDependenciesWithUv(pythonRuntime.python as string, backendDir, appId);
 
     await publishProgress('installing_frontend', 'Instalando dependencias del frontend...');
     await runCommand(nodeRuntime.npm as string, ['install'], {
       cwd: frontendDir,
       env: {
         PATH: `${path.dirname(nodeRuntime.node as string)}${path.delimiter}${process.env.PATH ?? ''}`,
+      },
+      log: {
+        appId,
+        phase: 'installing_frontend',
+        label: 'npm install',
       },
     });
 
@@ -1737,6 +1878,11 @@ const installAppRuntime = async (appId: string): Promise<InstallAppResult> => {
       phase: 'completed',
       userMessage: 'Instalacion completada.',
     });
+    await appendInstallLog('install:completed', {
+      appId,
+      installDir,
+      version: download.version,
+    });
 
     ensureCatalogStatuses();
 
@@ -1748,6 +1894,11 @@ const installAppRuntime = async (appId: string): Promise<InstallAppResult> => {
   } catch (error) {
     const detail = error instanceof Error ? error.message : 'install_failed_unknown';
     const current = registry.apps[appId];
+    await appendInstallLog('install:failed', {
+      appId,
+      detail,
+      error: serializeErrorForInstallLog(error),
+    });
 
     if (current) {
       await upsertInstalledRecord({
@@ -1929,6 +2080,14 @@ const openInstalledApp = async (appId: string): Promise<OpenAppResult> => {
     };
   }
 
+  await appendInstallLog('open:start', {
+    appId,
+    installDir: record.installDir,
+    requiredNodeVersion: record.requiredNodeVersion,
+    requiredPythonVersion: record.requiredPythonVersion,
+    logPath: getInstallLogPath(),
+  });
+
   const nodeRuntime = await ensureRuntimeInstalled('node', record.requiredNodeVersion);
   await ensureRuntimeInstalled('python', record.requiredPythonVersion);
 
@@ -1940,10 +2099,31 @@ const openInstalledApp = async (appId: string): Promise<OpenAppResult> => {
   const frontendPort = await getFreePort();
   const backendUrl = `http://127.0.0.1:${backendPort}`;
   const frontendUrl = `http://127.0.0.1:${frontendPort}`;
+  const backendArgs = ['-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', String(backendPort)];
+
+  if (isDev) {
+    backendArgs.push('--reload');
+  }
+
+  await appendInstallLog('open:spawn', {
+    appId,
+    backend: {
+      command: venv.python,
+      args: backendArgs,
+      cwd: backendDir,
+      url: backendUrl,
+    },
+    frontend: {
+      command: nodeRuntime.npm,
+      args: ['run', 'dev', '--', '--host', '127.0.0.1', '--port', String(frontendPort)],
+      cwd: frontendDir,
+      url: frontendUrl,
+    },
+  });
 
   const backend = spawn(
     venv.python,
-    ['-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', String(backendPort), '--reload'],
+    backendArgs,
     {
       cwd: backendDir,
       env: {
@@ -1954,7 +2134,8 @@ const openInstalledApp = async (appId: string): Promise<OpenAppResult> => {
     },
   );
 
-  const frontend = spawn(nodeRuntime.npm as string, ['run', 'dev', '--', '--host', '127.0.0.1', '--port', String(frontendPort)], {
+  const frontendArgs = ['run', 'dev', '--', '--host', '127.0.0.1', '--port', String(frontendPort)];
+  const frontend = spawn(nodeRuntime.npm as string, frontendArgs, {
     cwd: frontendDir,
     env: {
       ...process.env,
@@ -1962,6 +2143,48 @@ const openInstalledApp = async (appId: string): Promise<OpenAppResult> => {
       PATH: `${path.dirname(nodeRuntime.node as string)}${path.delimiter}${process.env.PATH ?? ''}`,
     },
     stdio: 'pipe',
+  });
+
+  backend.stdout.on('data', (chunk) => {
+    void appendInstallLog('open:backend:stdout', {
+      appId,
+      text: truncateForInstallLog(chunk.toString()),
+    });
+  });
+
+  backend.stderr.on('data', (chunk) => {
+    void appendInstallLog('open:backend:stderr', {
+      appId,
+      text: truncateForInstallLog(chunk.toString()),
+    });
+  });
+
+  backend.on('error', (error) => {
+    void appendInstallLog('open:backend:error', {
+      appId,
+      error: serializeErrorForInstallLog(error),
+    });
+  });
+
+  frontend.stdout.on('data', (chunk) => {
+    void appendInstallLog('open:frontend:stdout', {
+      appId,
+      text: truncateForInstallLog(chunk.toString()),
+    });
+  });
+
+  frontend.stderr.on('data', (chunk) => {
+    void appendInstallLog('open:frontend:stderr', {
+      appId,
+      text: truncateForInstallLog(chunk.toString()),
+    });
+  });
+
+  frontend.on('error', (error) => {
+    void appendInstallLog('open:frontend:error', {
+      appId,
+      error: serializeErrorForInstallLog(error),
+    });
   });
 
   const onProcessCrash = async (): Promise<void> => {
@@ -1980,11 +2203,21 @@ const openInstalledApp = async (appId: string): Promise<OpenAppResult> => {
     runningApps.delete(appId);
   };
 
-  backend.once('exit', () => {
+  backend.once('exit', (code, signal) => {
+    void appendInstallLog('open:backend:exit', {
+      appId,
+      code,
+      signal,
+    });
     void onProcessCrash();
   });
 
-  frontend.once('exit', () => {
+  frontend.once('exit', (code, signal) => {
+    void appendInstallLog('open:frontend:exit', {
+      appId,
+      code,
+      signal,
+    });
     void onProcessCrash();
   });
 
@@ -2000,6 +2233,11 @@ const openInstalledApp = async (appId: string): Promise<OpenAppResult> => {
     await waitForHttpOk(`${backendUrl}/health`, 60_000);
     await waitForHttpOk(frontendUrl, 60_000);
     await openOrFocusAppWindow(appId, record.name, frontendUrl);
+    await appendInstallLog('open:ready', {
+      appId,
+      backendUrl,
+      frontendUrl,
+    });
 
     await markAppRuntimeStatus(appId, 'running', 'App en ejecucion.');
     emitRuntimeStatus({
@@ -2020,6 +2258,11 @@ const openInstalledApp = async (appId: string): Promise<OpenAppResult> => {
     };
   } catch (error) {
     const detail = error instanceof Error ? error.message : 'open_failed';
+    await appendInstallLog('open:failed', {
+      appId,
+      detail,
+      error: serializeErrorForInstallLog(error),
+    });
 
     await terminateProcess(backend);
     await terminateProcess(frontend);
