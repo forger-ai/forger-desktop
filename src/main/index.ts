@@ -1067,6 +1067,10 @@ const hashFileSha256 = async (filePath: string): Promise<string> => {
   return createHash('sha256').update(content).digest('hex');
 };
 
+const requiresWindowsShell = (command: string): boolean => {
+  return process.platform === 'win32' && /\.(cmd|bat)$/i.test(command);
+};
+
 const runCommand = async (
   command: string,
   args: string[],
@@ -1080,6 +1084,8 @@ const runCommand = async (
     };
   },
 ): Promise<void> => {
+  const useShell = requiresWindowsShell(command);
+
   if (options.log) {
     await appendInstallLog('command:start', {
       appId: options.log.appId,
@@ -1088,6 +1094,7 @@ const runCommand = async (
       command,
       args,
       cwd: options.cwd,
+      shell: useShell,
     });
   }
 
@@ -1098,6 +1105,7 @@ const runCommand = async (
         ...process.env,
         ...(options.env ?? {}),
       },
+      shell: useShell,
       stdio: 'pipe',
     });
 
@@ -1120,6 +1128,7 @@ const runCommand = async (
           command,
           args,
           cwd: options.cwd,
+          shell: useShell,
           error: serializeErrorForInstallLog(error),
           stdout: truncateForInstallLog(stdout),
           stderr: truncateForInstallLog(stderr),
@@ -1137,6 +1146,7 @@ const runCommand = async (
           command,
           args,
           cwd: options.cwd,
+          shell: useShell,
           code,
           signal,
           stdout: truncateForInstallLog(stdout),
@@ -2144,6 +2154,7 @@ const openInstalledApp = async (appId: string): Promise<OpenAppResult> => {
       VITE_API_BASE_URL: backendUrl,
       PATH: `${path.dirname(nodeRuntime.node as string)}${path.delimiter}${process.env.PATH ?? ''}`,
     },
+    shell: requiresWindowsShell(nodeRuntime.npm as string),
     stdio: 'pipe',
   });
 
