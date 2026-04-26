@@ -50,6 +50,11 @@ const FORGER_AGENT_CONTRACT_VERSION = 2;
 const FORGER_AGENT_CONTRACT_MARKER = `FORGER_AGENT_CONTRACT_VERSION: ${FORGER_AGENT_CONTRACT_VERSION}`;
 const FORGER_AGENT_CONTRACT_MARKER_PREFIX = 'FORGER_AGENT_CONTRACT_VERSION:';
 
+if (isDev) {
+  app.setName('Forger Dev');
+  app.setPath('userData', path.join(app.getPath('appData'), 'forger-desktop-dev'));
+}
+
 const PLATFORM_KEY_BY_RUNTIME: Record<NodeJS.Platform, string> = {
   darwin: 'darwin',
   win32: 'win32',
@@ -164,7 +169,7 @@ const getRegistryPath = () => path.join(app.getPath('userData'), 'app_registry.j
 const getSessionPath = () => path.join(app.getPath('userData'), 'session.json');
 const getRuntimesRoot = () => path.join(app.getPath('userData'), 'runtimes');
 const getTempRoot = () => path.join(app.getPath('userData'), 'tmp');
-const getPrivateAppsRoot = () => path.join(os.homedir(), 'Forger', 'apps');
+const getPrivateAppsRoot = () => path.join(os.homedir(), 'Forger', isDev ? 'dev-apps' : 'apps');
 const getCodexRoot = () => path.join(app.getPath('userData'), 'codex-cli');
 const getCodexHome = () => path.join(app.getPath('userData'), 'codex-home');
 
@@ -455,7 +460,6 @@ const buildForgerAgentsMarkdown = (appId: string, manifest: AppManifest | null):
     '',
     '## Fuente de Verdad',
     '- Este `AGENTS.md` es la fuente principal de contexto funcional y operativo de la app.',
-    '- `APP.md`, si existe, es legado. Puedes leerlo solo como referencia secundaria, pero nunca debe contradecir ni reemplazar este archivo.',
     '- `manifest.json` describe instalacion, servicios, stack y scripts disponibles; no es una lista de capacidades visibles para el usuario.',
     '- `.agents/skills` contiene playbooks internos del agente para tareas concretas.',
     '- Antes de responder o actuar, revisa este archivo, `manifest.json`, `.agents/skills` y los scripts declarados que correspondan a la tarea.',
@@ -522,7 +526,6 @@ const buildGlobalForgerAgentsMarkdown = (): string => {
     '',
     '## Fuente de Verdad',
     '- El `AGENTS.md` de cada app es la fuente principal de contexto funcional y operativo.',
-    '- `APP.md`, si existe, es legado. Puedes leerlo como referencia secundaria, pero nunca debe prevalecer sobre `AGENTS.md`.',
     '- `manifest.json` describe instalacion, servicios, stack y scripts. No lo trates como una lista de funciones visibles para el usuario.',
     '- `.agents/skills` contiene habilidades internas del agente para tareas concretas.',
     '- Los scripts declarados en `manifest.json` o documentados en la app son herramientas internas del agente, salvo que `AGENTS.md` diga explicitamente que son parte de la interfaz visible.',
@@ -2146,7 +2149,7 @@ const createWindow = async (): Promise<void> => {
     minWidth: 1180,
     minHeight: 760,
     backgroundColor: '#F6F3EE',
-    title: 'Forger',
+    title: isDev ? 'Forger Dev' : 'Forger',
     webPreferences: {
       preload: preloadPath,
       nodeIntegration: false,

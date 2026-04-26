@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "Desktop launcher for Forger",
+  "author": "Forger",
   "main": "dist-electron/main/index.js",
   "type": "commonjs",
   "scripts": {
@@ -14,6 +15,8 @@
     "build:renderer": "vite build",
     "build:electron": "tsc -p tsconfig.electron.json",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.electron.json",
+    "dist:mac": "npm run build && electron-builder --mac dmg --arm64 --publish never",
+    "dist:win": "npm run build && electron-builder --win nsis --x64 --publish never",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -38,8 +41,68 @@
     "concurrently": "^9.2.1",
     "cross-env": "^10.1.0",
     "electron": "^38.3.0",
+    "electron-builder": "^26.8.1",
     "typescript": "^5.9.3",
     "vite": "^7.1.12",
     "wait-on": "^9.0.1"
+  },
+  "build": {
+    "appId": "ai.forger.desktop",
+    "productName": "Forger",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "resources/runtimes",
+        "to": "runtimes",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "asarUnpack": [
+      "node_modules/better-sqlite3/**/*"
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "icon": "build/icon.icns",
+      "identity": null,
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ]
+    },
+    "dmg": {
+      "artifactName": "forger-desktop-macos-arm64.${ext}"
+    },
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "artifactName": "forger-desktop-windows-x64.${ext}",
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
   }
 }

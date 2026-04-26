@@ -1,0 +1,100 @@
+name: Release Desktop
+
+on:
+  push:
+    tags:
+      - 'forger-desktop/v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: forger-desktop-release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+      - run: node scripts/validate-release-tag.mjs
+
+      - id: meta
+        run: |
+          echo "version=$(node -p 'require(\"./package.json\").version')" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: validate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            script: dist:mac
+            artifact: forger-desktop-macos-arm64.dmg
+          - os: windows-latest
+            script: dist:win
+            artifact: forger-desktop-windows-x64.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run ${{ matrix.script }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check artifact exists
+        shell: bash
+        run: test -f "release/${{ matrix.artifact }}"
+
+      - name: Write checksum
+        shell: bash
+        run: |
+          if command -v shasum >/dev/null 2>&1; then
+            shasum -a 256 "release/${{ matrix.artifact }}" > "release/${{ matrix.artifact }}.sha256"
+          else
+            certutil -hashfile "release/${{ matrix.artifact }}" SHA256 | awk 'NR==2 {print $1 "  release/${{ matrix.artifact }}"}' > "release/${{ matrix.artifact }}.sha256"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            release/${{ matrix.artifact }}
+            release/${{ matrix.artifact }}.sha256
+          if-no-files-found: error
+
+  publish:
+    needs: [validate, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ github.ref_name }}
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          gh release view "$TAG_NAME" >/dev/null 2>&1 || gh release create "$TAG_NAME" --title "Forger Desktop v$VERSION" --notes "Forger Desktop v$VERSION"
+          gh release upload "$TAG_NAME" release-artifacts/* --clobber
+          gh release edit "$TAG_NAME" --latest
