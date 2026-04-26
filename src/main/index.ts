@@ -1472,7 +1472,7 @@ const shellQuote = (value: string): string => {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 };
 
-const escapeCmdValue = (value: string): string => value.replace(/"/g, '""');
+const escapeWindowsBatchValue = (value: string): string => value.replace(/%/g, '%%').replace(/"/g, '""');
 
 const getCodexAuthFilePath = (): string => path.join(getCodexHome(), 'auth.json');
 
@@ -1595,10 +1595,23 @@ const connectCodexAuth = async (): Promise<{ success: boolean; userMessage: stri
     }
 
     if (process.platform === 'win32') {
-      const loginCommand = `set "CODEX_HOME=${escapeCmdValue(codexHome)}" && "${escapeCmdValue(codexCliPath)}" login`;
+      const loginScriptPath = path.join(getTempRoot(), 'codex-login.cmd');
+      const loginScript = [
+        '@echo off',
+        'title Forger Codex Login',
+        `set "CODEX_HOME=${escapeWindowsBatchValue(codexHome)}"`,
+        `"${escapeWindowsBatchValue(codexCliPath)}" login`,
+        'echo.',
+        'echo Codex login finished. You can close this window.',
+        'pause',
+      ].join('\r\n');
+
+      await fs.mkdir(path.dirname(loginScriptPath), { recursive: true });
+      await fs.writeFile(loginScriptPath, `${loginScript}\r\n`, 'utf8');
+
       const child = spawn(
         'cmd.exe',
-        ['/c', 'start', 'Forger Codex Login', 'cmd.exe', '/k', loginCommand],
+        ['/d', '/s', '/c', `start "Forger Codex Login" "${loginScriptPath}"`],
         {
           cwd: app.getPath('userData'),
           detached: true,
@@ -1612,6 +1625,7 @@ const connectCodexAuth = async (): Promise<{ success: boolean; userMessage: stri
         platform: process.platform,
         codexHome,
         codexCliPath,
+        loginScriptPath,
       });
 
       return {
