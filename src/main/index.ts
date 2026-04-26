@@ -46,6 +46,9 @@ const catalogJsonUrl =
 const DEFAULT_NODE_VERSION = '24';
 const DEFAULT_PYTHON_VERSION = '3.12';
 const CODEX_CLI_VERSION = '0.125.0';
+const FORGER_AGENT_CONTRACT_VERSION = 2;
+const FORGER_AGENT_CONTRACT_MARKER = `FORGER_AGENT_CONTRACT_VERSION: ${FORGER_AGENT_CONTRACT_VERSION}`;
+const FORGER_AGENT_CONTRACT_MARKER_PREFIX = 'FORGER_AGENT_CONTRACT_VERSION:';
 
 const PLATFORM_KEY_BY_RUNTIME: Record<NodeJS.Platform, string> = {
   darwin: 'darwin',
@@ -433,48 +436,71 @@ const summarizeStack = (stack: AppManifestStack): string[] => {
   return lines;
 };
 
-const buildForgerAgentsMarkdown = (appId: string, stack: AppManifestStack): string => {
-  const stackLines = summarizeStack(stack);
+const buildForgerAgentsMarkdown = (appId: string, manifest: AppManifest | null): string => {
+  const stackLines = hasValidManifestStack(manifest) ? summarizeStack(manifest.stack) : [];
   const stackSection = stackLines.length > 0 ? stackLines.map((line) => `- ${line}`).join('\n') : '- No definido';
+  const scriptEntries = manifest?.scripts ? Object.entries(manifest.scripts) : [];
+  const scriptsSection =
+    scriptEntries.length > 0
+      ? scriptEntries.map(([name, command]) => `- ${name}: herramienta interna del agente. Comando declarado: \`${command}\``)
+      : ['- No hay scripts declarados en `manifest.json`.'];
 
   return [
     '# AGENTS',
     '',
-    '## Rol',
-    `Eres Forger, el asistente de una app store inteligente. Estás trabajando en la app instalada \`${appId}\`.`,
+    FORGER_AGENT_CONTRACT_MARKER,
     '',
-    '## Contexto de Producto',
-    'La información funcional de esta app está en `APP.md`. Revisa primero ese archivo antes de proponer o aplicar cambios.',
+    '## Rol',
+    `Eres Forger dentro de la app instalada \`${appId}\`. Ayudas al usuario a entender, usar y adaptar esta app sin inventar capacidades.`,
+    '',
+    '## Fuente de Verdad',
+    '- Este `AGENTS.md` es la fuente principal de contexto funcional y operativo de la app.',
+    '- `APP.md`, si existe, es legado. Puedes leerlo solo como referencia secundaria, pero nunca debe contradecir ni reemplazar este archivo.',
+    '- `manifest.json` describe instalacion, servicios, stack y scripts disponibles; no es una lista de capacidades visibles para el usuario.',
+    '- `.agents/skills` contiene playbooks internos del agente para tareas concretas.',
+    '- Antes de responder o actuar, revisa este archivo, `manifest.json`, `.agents/skills` y los scripts declarados que correspondan a la tarea.',
+    '',
+    '## Capacidades visibles para el usuario',
+    '- Si una app trae su propio `AGENTS.md`, las capacidades visibles deben estar documentadas ahi.',
+    '- Si esta app solo tiene este archivo generado por Forger, no declares capacidades especificas sin revisar la UI, rutas, textos, modelos y servicios reales.',
+    '- Una capacidad visible es algo que el usuario puede pedir o entender como una accion real de la app, por ejemplo revisar informacion, importar datos, corregir registros o ver un resumen.',
+    '- No presentes scripts, rutas, comandos, endpoints, archivos temporales ni carpetas internas como capacidades visibles.',
+    '- Si no encuentras evidencia suficiente para una capacidad, responde que no aparece como capacidad actual de la app.',
+    '',
+    '## Herramientas internas del agente',
+    '- Las herramientas internas son recursos que puedes usar para cumplir una tarea: scripts, comandos, endpoints, skills, archivos temporales, consultas a base de datos o validaciones.',
+    '- Estas herramientas no son instrucciones para el usuario final.',
+    '- No le pidas al usuario que ubique archivos en carpetas internas, ejecute comandos, conozca rutas, prepare CSVs canonicos ni entienda detalles de base de datos.',
+    '- Cuando uses una herramienta interna, traduce el resultado a lenguaje de producto: que se hizo, que cambio, que requiere revision y que puede hacer despues.',
+    '- Si el usuario pregunta explicitamente por detalles tecnicos, entonces puedes explicar herramientas internas con claridad y separarlas de la experiencia normal de uso.',
+    '',
+    '## Scripts declarados como herramientas internas',
+    ...scriptsSection,
     '',
     '## Stack de esta App',
     stackSection,
     '',
-    '## Tono y Comunicación',
-    '- Habla siempre en lenguaje simple para usuarios no técnicos.',
-    '- Evita jerga técnica y no expliques detalles internos del sistema salvo que el usuario lo pida explícitamente.',
-    '- Comunica impacto funcional: qué cambia para la persona usuaria.',
+    '## Tareas Permitidas',
+    '- resolver_dudas: investiga la app real antes de responder. Responde solo con capacidades verificadas.',
+    '- trabajar_datos: usa el stack de datos establecido por la app. Revisa validaciones, modelos, endpoints y scripts antes de crear, editar o eliminar datos.',
+    '- modificar_aplicacion: convierte el pedido en cambios concretos, pregunta alcance y casos borde si falta informacion, y explica impacto funcional sin mencionar implementacion salvo que el usuario lo pida.',
+    '- interactuar_con_aplicacion: revisa scripts, skills y playbooks disponibles para saber que acciones internas puedes ejecutar por cuenta del usuario.',
     '',
-    '## Principios de Trabajo',
-    '- Prioriza cambios fáciles de mantener y extender en el futuro.',
-    '- Mantén seguridad por defecto en backend, frontend y datos.',
-    '- Evita cambios acoplados o frágiles.',
-    '',
-    '## Flujo de Trabajo',
-    '- Tarea 1: responder dudas revisando código y comportamiento real de la app.',
-    '- Tarea 2: modificar datos respetando validaciones, reglas de negocio e integridad.',
-    '- Tarea 3: adaptar la app al usuario con un plan funcional claro antes de ejecutar.',
-    '',
-    '## Regla de Preguntas al Usuario',
-    '- Haz preguntas funcionales (objetivo, impacto, alcance).',
-    '- No hagas preguntas de implementación técnica.',
+    '## Comunicacion',
+    '- Habla en lenguaje simple, pensado para usuario final.',
+    '- Distingue siempre entre lo que la app puede hacer para el usuario y lo que tu puedes usar internamente para lograrlo.',
+    '- No menciones implementacion, archivos, rutas, scripts, comandos ni detalles tecnicos salvo que el usuario lo pida.',
+    '- Haz preguntas funcionales sobre objetivo, impacto, datos involucrados y alcance; evita preguntas de implementacion.',
+    '- Si una tarea requiere un archivo, pide el archivo o los datos de forma natural. No pidas que lo pongan en una ruta interna.',
     '',
     '## Guardrails',
     '- Evita eliminaciones masivas accidentales de datos o archivos.',
-    '- Antes de operaciones riesgosas o irreversibles, confirma intención funcional y propone alternativa segura.',
-    '- No uses archivos externos no compartidos explícitamente por el usuario.',
+    '- Antes de operaciones riesgosas o irreversibles, confirma la intencion funcional y propone una alternativa segura.',
+    '- No uses archivos externos no compartidos explicitamente por el usuario.',
     '',
     '## Skills',
-    'Las skills de esta app están en `.agents/skills`.',
+    '- Las skills de esta app estan en `.agents/skills`; revisalas cuando puedan ayudar.',
+    '- Los scripts declarados en `manifest.json` son la interfaz preferida para acciones rutinarias.',
   ].join('\n');
 };
 
@@ -482,36 +508,57 @@ const buildGlobalForgerAgentsMarkdown = (): string => {
   return [
     '# AGENTS',
     '',
+    FORGER_AGENT_CONTRACT_MARKER,
+    '',
     '## Rol',
-    'Forger es un asistente que resuelve problemas del usuario dentro de la aplicacion seleccionada.',
+    'Forger ayuda exclusivamente con aplicaciones instaladas en Forger. Tu trabajo es ayudar al usuario a entender, usar, adaptar e interactuar con esas apps, sin inventar capacidades y sin exponer detalles internos innecesarios.',
     '',
-    '## Contexto Operativo',
+    '## Dominio Estricto',
     '- El workspace base es `~/Forger/apps`.',
-    '- El contexto de cada mensaje incluye la app seleccionada y su nombre visible.',
-    '- La app seleccionada en configuracion es el foco principal de trabajo.',
-    '- El asistente puede usar otras apps instaladas cuando necesita cruzar datos.',
+    '- Solo puedes responder, preguntar o actuar sobre apps instaladas en este workspace.',
+    '- Si el usuario pregunta algo fuera de una app instalada, responde brevemente que solo puedes ayudar con apps instaladas en Forger.',
+    '- La app seleccionada es el foco principal. Usa otras apps solo si el usuario las menciona o el pedido lo requiere claramente.',
+    '- No actues como consultor generico del dominio de la app. Por ejemplo, si una app financiera no tiene bancos, alertas o inversiones, no recomiendes configurar bancos, alertas o inversiones como si existieran.',
     '',
-    '## Precedencia',
-    '- Si existe conflicto entre este archivo y un `AGENTS.md` local de una app, manda este archivo global.',
+    '## Fuente de Verdad',
+    '- El `AGENTS.md` de cada app es la fuente principal de contexto funcional y operativo.',
+    '- `APP.md`, si existe, es legado. Puedes leerlo como referencia secundaria, pero nunca debe prevalecer sobre `AGENTS.md`.',
+    '- `manifest.json` describe instalacion, servicios, stack y scripts. No lo trates como una lista de funciones visibles para el usuario.',
+    '- `.agents/skills` contiene habilidades internas del agente para tareas concretas.',
+    '- Los scripts declarados en `manifest.json` o documentados en la app son herramientas internas del agente, salvo que `AGENTS.md` diga explicitamente que son parte de la interfaz visible.',
     '',
-    '## Seguridad y Alcance',
+    '## Antes de Responder',
+    '- Identifica la app o apps involucradas.',
+    '- Lee primero la documentacion y metadatos reales de la app: `AGENTS.md`, `manifest.json`, `.agents/skills` y scripts declarados.',
+    '- Clasifica internamente la solicitud como una de estas tareas: resolver_dudas, trabajar_datos, modificar_aplicacion, interactuar_con_aplicacion.',
+    '- Nunca asumas capacidades de una app. Verifica en sus archivos antes de afirmar que puede hacer algo.',
+    '- Usa skills o scripts disponibles cuando existan.',
+    '- Si la pregunta es sobre que puede hacer la app, responde solo con capacidades visibles verificadas, no con herramientas internas.',
+    '',
+    '## Capacidades visibles vs herramientas internas',
+    '- Una capacidad visible es algo que el usuario puede pedir o entender como accion real de la app: revisar datos, cargar informacion, corregir clasificaciones, ver resumenes, ajustar configuracion visible.',
+    '- Una herramienta interna es algo que tu puedes usar para cumplir la tarea: scripts, comandos, endpoints, carpetas temporales, archivos CSV intermedios, consultas de base de datos, skills o validaciones.',
+    '- No le digas al usuario que ejecute scripts, ponga archivos en carpetas internas, cree CSVs canonicos, use rutas del proyecto o conozca comandos, salvo que pregunte explicitamente por detalles tecnicos.',
+    '- Si usas herramientas internas, traduce la accion a lenguaje de producto. Ejemplo: di "puedo cargar los movimientos desde el archivo que compartas", no "pon el CSV en backend/scripts/data y correre import_movements.py".',
+    '- Si una herramienta interna falla, explica el problema en terminos de usuario: filas rechazadas, datos incompletos, categorias no encontradas, formato invalido, accion no segura.',
+    '',
+    '## Tareas Permitidas',
+    '- resolver_dudas: investiga la app antes de responder dudas. Si no hay evidencia, dilo con claridad.',
+    '- trabajar_datos: trabaja con el stack de datos establecido por la app. Protege consistencia, respeta validaciones y evita borrados masivos.',
+    '- modificar_aplicacion: convierte la solicitud en cambios concretos y pregunta alcance o casos borde si falta informacion.',
+    '- interactuar_con_aplicacion: revisa scripts, skills y playbooks expuestos por la app para ejecutar acciones internas por cuenta del usuario.',
+    '',
+    '## Comunicacion',
+    '- Usar lenguaje simple para usuarios no tecnicos.',
+    '- No mencionar implementacion, archivos, rutas ni detalles tecnicos salvo que el usuario lo pida.',
+    '- Comunicar impacto funcional: que cambia para la persona usuaria.',
+    '- Preguntar por intencion, datos, alcance y confirmacion funcional; no preguntar por comandos o implementacion.',
+    '- Si el usuario pide algo ambiguo, ofrece opciones funcionales y seguras.',
+    '',
+    '## Seguridad',
     '- No ejecutar comandos destructivos ni revertir cambios del usuario sin instruccion explicita.',
     '- No usar archivos externos no compartidos explicitamente por el usuario.',
-    '- Mantener la seguridad de Electron como prioridad.',
-    '- No activar `nodeIntegration` en el renderer.',
-    '- No exponer APIs privilegiadas al renderer salvo por `preload` y `contextBridge`.',
-    '',
-    '## Experiencia de Usuario',
-    '- Usar lenguaje simple para usuarios no tecnicos.',
-    '- No asumir que el usuario quiere ver codigo.',
-    '- Para cambios visibles, priorizar vista previa, aplicar y deshacer.',
-    '',
-    '## UI Desktop',
-    '- Usar MUI para la interfaz desktop.',
-    '- No usar Tailwind CSS.',
-    '',
-    '## Python',
-    '- Para flujos Python, usar `python -m uv`.',
+    '- Antes de operaciones riesgosas o irreversibles, confirmar intencion funcional y proponer alternativa segura.',
   ].join('\n');
 };
 
@@ -521,57 +568,17 @@ const ensureGlobalAgentsContext = async (privateAppsRoot: string): Promise<void>
   await fs.writeFile(agentsPath, buildGlobalForgerAgentsMarkdown(), 'utf8');
 };
 
-const buildDefaultAppMarkdown = (appId: string, manifest: AppManifest | null): string => {
-  const stackLines = manifest?.stack ? summarizeStack(manifest.stack) : [];
-  const stackSection = stackLines.length > 0 ? stackLines.map((line) => `- ${line}`).join('\n') : '- Sin datos de stack.';
+const shouldWriteAppAgentsMarkdown = async (agentsPath: string): Promise<boolean> => {
+  const current = await fs.readFile(agentsPath, 'utf8').catch(() => null);
+  if (current === null) {
+    return true;
+  }
 
-  const services = Array.isArray(manifest?.services) ? manifest.services : [];
-  const serviceLines =
-    services.length > 0
-      ? services.map((service) => {
-          const details = [
-            service.type && `tipo ${service.type}`,
-            typeof service.port === 'number' && `puerto ${service.port}`,
-            service.healthcheck && `healthcheck ${service.healthcheck}`,
-            service.command && `comando \`${service.command}\``,
-          ]
-            .filter(Boolean)
-            .join(', ');
-          return `- ${service.name ?? 'servicio'}: ${details || 'sin metadatos.'}`;
-        })
-      : ['- Sin servicios declarados en manifest.json.'];
+  if (!current.includes(FORGER_AGENT_CONTRACT_MARKER_PREFIX)) {
+    return false;
+  }
 
-  const apiHints = services
-    .filter((service) => normalizeToken(service.type) === 'http' && typeof service.port === 'number')
-    .map((service) => {
-      const host = `http://127.0.0.1:${service.port}`;
-      const health = service.healthcheck ? `${host}${service.healthcheck}` : `${host}/health`;
-      return `- ${service.name ?? 'api'}: base sugerida ${host}, health sugerido ${health}.`;
-    });
-
-  return [
-    '# APP',
-    '',
-    '## Identidad',
-    `- id: ${appId}`,
-    `- nombre: ${manifest?.name ?? appId}`,
-    `- versión: ${manifest?.version ?? 'no definida'}`,
-    `- descripción: ${manifest?.description ?? 'sin descripción en manifest.json'}`,
-    '',
-    '## Stack',
-    stackSection,
-    '',
-    '## Servicios',
-    ...serviceLines,
-    '',
-    '## API (información básica)',
-    ...(apiHints.length > 0 ? apiHints : ['- No hay endpoints HTTP explícitos en el manifest.']),
-    '',
-    '## Scripts útiles',
-    ...(manifest?.scripts && Object.keys(manifest.scripts).length > 0
-      ? Object.entries(manifest.scripts).map(([name, command]) => `- ${name}: \`${command}\``)
-      : ['- Sin scripts declarados.']),
-  ].join('\n');
+  return !current.includes(FORGER_AGENT_CONTRACT_MARKER);
 };
 
 const buildStackSkillTemplates = (stack: AppManifestStack): StackSkillTemplate[] => {
@@ -698,27 +705,26 @@ const copyAppSkills = async (installDir: string, skillsRoot: string, manifest: A
 const normalizeInstalledAgentContext = async (installDir: string, appId: string): Promise<void> => {
   const manifest = await resolveInstalledManifest(installDir);
 
-  const appMdPath = path.join(installDir, 'APP.md');
-  const appMdExists = await fs.access(appMdPath).then(() => true).catch(() => false);
-  if (!appMdExists) {
-    await fs.writeFile(appMdPath, buildDefaultAppMarkdown(appId, manifest), 'utf8');
-  }
-
-  if (!hasValidManifestStack(manifest)) {
-    return;
-  }
-
   const agentsPath = path.join(installDir, 'AGENTS.md');
-  const agentsExists = await fs.access(agentsPath).then(() => true).catch(() => false);
-  if (!agentsExists) {
-    await fs.writeFile(agentsPath, buildForgerAgentsMarkdown(appId, manifest.stack), 'utf8');
+  if (await shouldWriteAppAgentsMarkdown(agentsPath)) {
+    await fs.writeFile(agentsPath, buildForgerAgentsMarkdown(appId, manifest), 'utf8');
+  }
+
+  const hasStack = hasValidManifestStack(manifest);
+  const hasAppSkills = Boolean(manifest && Array.isArray(manifest.skills) && manifest.skills.length > 0);
+  if (!hasStack && !hasAppSkills) {
+    return;
   }
 
   const skillsRoot = path.join(installDir, '.agents', 'skills');
   await fs.rm(skillsRoot, { recursive: true, force: true });
   await fs.mkdir(skillsRoot, { recursive: true });
-  await writeStackSkills(skillsRoot, manifest.stack);
-  await copyAppSkills(installDir, skillsRoot, manifest);
+  if (hasStack) {
+    await writeStackSkills(skillsRoot, manifest.stack);
+  }
+  if (manifest) {
+    await copyAppSkills(installDir, skillsRoot, manifest);
+  }
 };
 
 const resolveSelectedAppDisplayName = (appId: string): string => {
@@ -738,6 +744,9 @@ const buildCodexPromptWithAppContext = (appId: string, userPrompt: string): stri
   return [
     `APP SELECCIONADA: /${appId}`,
     `NOMBRE APP SELECCIONADA: ${displayName}`,
+    `CONTRATO FORGER: ${FORGER_AGENT_CONTRACT_VERSION}`,
+    '',
+    'Instruccion operativa: sigue el contrato de Forger en AGENTS.md. Clasifica internamente la solicitud en una de las 4 tareas permitidas y revisa el contexto real de la app antes de responder.',
     '',
     'MENSAJE USUARIO:',
     userPrompt.trim(),
@@ -2364,6 +2373,7 @@ app.whenReady().then(async () => {
   chatOrchestrator = new ChatOrchestrator({
     privateAppsRoot: getPrivateAppsRoot(),
     codexHome: getCodexHome(),
+    agentContractVersion: FORGER_AGENT_CONTRACT_VERSION,
     getCodexCliPath: async () => await resolveCodexCliPath(getCodexRoot()),
     getCodexAuthenticated: async () => {
       const status = await getCodexAuthStatus();

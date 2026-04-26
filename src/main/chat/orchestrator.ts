@@ -21,6 +21,7 @@ import type {
 interface ChatOrchestratorOptions {
   privateAppsRoot: string;
   codexHome: string;
+  agentContractVersion: number;
   getCodexCliPath: () => Promise<string | null>;
   getCodexAuthenticated: () => Promise<boolean>;
   onRunUpdated: (event: ChatRunEvent) => void;
@@ -75,6 +76,7 @@ interface CodexUsage {
 interface AppThreadState {
   appId: string;
   threadId: string;
+  contractVersion: number;
   usage: CodexUsage;
   toolEvents: number;
   lastRunAt: string;
@@ -733,7 +735,12 @@ export class ChatOrchestrator {
     try {
       const parsed = JSON.parse(raw) as Record<string, AppThreadState>;
       for (const [appId, state] of Object.entries(parsed)) {
-        if (state && typeof state.threadId === 'string' && state.threadId) {
+        if (
+          state &&
+          typeof state.threadId === 'string' &&
+          state.threadId &&
+          state.contractVersion === this.options.agentContractVersion
+        ) {
           this.threadsByApp.set(appId, state);
         }
       }
@@ -766,6 +773,7 @@ export class ChatOrchestrator {
     const next: AppThreadState = {
       appId,
       threadId: threadId ?? existing?.threadId ?? '',
+      contractVersion: this.options.agentContractVersion,
       usage: {
         inputTokens: (existing?.usage.inputTokens ?? 0) + (usageDelta?.inputTokens ?? 0),
         cachedInputTokens: (existing?.usage.cachedInputTokens ?? 0) + (usageDelta?.cachedInputTokens ?? 0),
