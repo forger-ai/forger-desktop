@@ -1477,10 +1477,18 @@ const escapeCmdValue = (value: string): string => value.replace(/"/g, '""');
 const getCodexAuthFilePath = (): string => path.join(getCodexHome(), 'auth.json');
 
 const resolveCodexCliPath = async (baseDir: string): Promise<string | null> => {
-  return await findExistingFile(baseDir, [
+  const candidates =
+    process.platform === 'win32'
+      ? [
+          path.join('node_modules', '.bin', 'codex.cmd'),
+          path.join('node_modules', '.bin', 'codex'),
+        ]
+      : [
     path.join('node_modules', '.bin', 'codex'),
     path.join('node_modules', '.bin', 'codex.cmd'),
-  ]);
+        ];
+
+  return await findExistingFile(baseDir, candidates);
 };
 
 const ensureCodexCliInstalled = async (): Promise<string> => {
