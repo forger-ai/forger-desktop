@@ -185,6 +185,37 @@ class PluginRuntime {
 class SandboxRunner {
   public constructor(private readonly codexHome: string) {}
 
+  private async resolveCodexCommand(params: {
+    codexCliPath: string;
+    pathEntries: string[];
+  }): Promise<{ command: string; prefixArgs: string[]; pathEntries: string[] }> {
+    if (process.platform !== 'win32' || !/\.(cmd|bat)$/i.test(params.codexCliPath)) {
+      return {
+        command: params.codexCliPath,
+        prefixArgs: [],
+        pathEntries: [path.dirname(params.codexCliPath), ...params.pathEntries],
+      };
+    }
+
+    const nodePath = await findExecutableInPathEntries(params.pathEntries, ['node.exe', 'node']);
+    const nodeModulesRoot = path.resolve(path.dirname(params.codexCliPath), '..');
+    const codexEntrypoint = path.join(nodeModulesRoot, '@openai', 'codex', 'bin', 'codex.js');
+
+    if (!nodePath || !(await existsFile(codexEntrypoint))) {
+      return {
+        command: params.codexCliPath,
+        prefixArgs: [],
+        pathEntries: [path.dirname(params.codexCliPath), ...params.pathEntries],
+      };
+    }
+
+    return {
+      command: nodePath,
+      prefixArgs: [codexEntrypoint],
+      pathEntries: [path.dirname(nodePath), path.dirname(params.codexCliPath), ...params.pathEntries],
+    };
+  }
+
   public async runCodex(params: {
     codexCliPath: string;
     pathEntries: string[];
@@ -246,6 +277,7 @@ class SandboxRunner {
     const attemptInactivityTimeoutMs = Math.max(45_000, Math.floor(params.timeoutMs / attempts.length));
     let lastResult: CommandResult | null = null;
     let lastErrorMessage = '';
+    const codexCommand = await this.resolveCodexCommand(params);
     for (const [index, args] of attempts.entries()) {
       try {
         const mode = args.includes('resume') ? 'resume' : 'new';
@@ -255,18 +287,14 @@ class SandboxRunner {
           `Intento ${index + 1}/${attempts.length} (${mode}, ${json}, model=gpt-5.3-codex)`,
         );
         const result = await runCommandCapture(
-          params.codexCliPath,
-          args,
+          codexCommand.command,
+          [...codexCommand.prefixArgs, ...args],
           {
             cwd: params.workingDir,
             env: {
               CODEX_HOME: this.codexHome,
               FORGER_ALLOWED_ROOTS: allowedRoots,
-              PATH: [
-                path.dirname(params.codexCliPath),
-                ...params.pathEntries,
-                process.env.PATH ?? '',
-              ].filter(Boolean).join(path.delimiter),
+              PATH: [...codexCommand.pathEntries, process.env.PATH ?? ''].filter(Boolean).join(path.delimiter),
             },
             inactivityTimeoutMs: attemptInactivityTimeoutMs,
             onChild: params.onChild,
@@ -952,6 +980,31 @@ const existsDirectory = async (dirPath: string): Promise<boolean> => {
   } catch {
     return false;
   }
+};
+
+const existsFile = async (filePath: string): Promise<boolean> => {
+  try {
+    const stat = await fs.stat(filePath);
+    return stat.isFile();
+  } catch {
+    return false;
+  }
+};
+
+const findExecutableInPathEntries = async (
+  entries: string[],
+  executableNames: string[],
+): Promise<string | null> => {
+  for (const entry of entries) {
+    for (const executableName of executableNames) {
+      const candidate = path.join(entry, executableName);
+      if (await existsFile(candidate)) {
+        return candidate;
+      }
+    }
+  }
+
+  return null;
 };
 
 const ensureGitRepository = async (cwd: string): Promise<void> => {
