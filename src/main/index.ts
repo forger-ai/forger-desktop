@@ -1473,6 +1473,7 @@ const shellQuote = (value: string): string => {
 };
 
 const escapeWindowsBatchValue = (value: string): string => value.replace(/%/g, '%%').replace(/"/g, '""');
+const quotePowerShellSingle = (value: string): string => `'${value.replace(/'/g, "''")}'`;
 
 const getCodexAuthFilePath = (): string => path.join(getCodexHome(), 'auth.json');
 
@@ -1619,11 +1620,13 @@ const connectCodexAuth = async (): Promise<{ success: boolean; userMessage: stri
         `set "CODEX_HOME=${escapeWindowsBatchValue(codexHome)}"`,
         `set "FORGER_CODEX_LOGIN_LOG=${escapeWindowsBatchValue(loginLogPath)}"`,
         `set "PATH=${escapeWindowsBatchValue(nodePathPrefix)};%PATH%"`,
-        'echo [%DATE% %TIME%] Starting Codex login > "%FORGER_CODEX_LOGIN_LOG%"',
+        'echo [%DATE% %TIME%] Batch started >> "%FORGER_CODEX_LOGIN_LOG%"',
         'echo CODEX_HOME=%CODEX_HOME% >> "%FORGER_CODEX_LOGIN_LOG%"',
+        'echo PATH=%PATH% >> "%FORGER_CODEX_LOGIN_LOG%"',
         'where node >> "%FORGER_CODEX_LOGIN_LOG%" 2>&1',
         'where npm >> "%FORGER_CODEX_LOGIN_LOG%" 2>&1',
         'where codex >> "%FORGER_CODEX_LOGIN_LOG%" 2>&1',
+        'echo [%DATE% %TIME%] Running codex login >> "%FORGER_CODEX_LOGIN_LOG%"',
         `"${escapeWindowsBatchValue(codexCliPath)}" login`,
         'set "FORGER_CODEX_LOGIN_EXIT=%ERRORLEVEL%"',
         'echo [%DATE% %TIME%] Codex login exited with code %FORGER_CODEX_LOGIN_EXIT% >> "%FORGER_CODEX_LOGIN_LOG%"',
@@ -1632,20 +1635,47 @@ const connectCodexAuth = async (): Promise<{ success: boolean; userMessage: stri
         'pause',
       ].join('\r\n');
 
+      await fs.mkdir(path.dirname(loginLogPath), { recursive: true });
       await fs.mkdir(path.dirname(loginScriptPath), { recursive: true });
+      await fs.writeFile(
+        loginLogPath,
+        [
+          `[${new Date().toISOString()}] Forger prepared Codex login.`,
+          `codexHome=${codexHome}`,
+          `codexCliPath=${codexCliPath}`,
+          `loginScriptPath=${loginScriptPath}`,
+          `nodePathPrefix=${nodePathPrefix}`,
+          '',
+        ].join('\r\n'),
+        'utf8',
+      );
       await fs.writeFile(loginScriptPath, `${loginScript}\r\n`, 'utf8');
 
-      const child = spawn(
-        'cmd.exe',
-        ['/d', '/k', `call "${loginScriptPath}"`],
-        {
-          cwd: app.getPath('userData'),
-          detached: true,
-          stdio: 'ignore',
-          windowsHide: false,
-        },
-      );
-      child.unref();
+      const launchCommand = [
+        '$ErrorActionPreference = "Stop"',
+        `Start-Process -FilePath ${quotePowerShellSingle('cmd.exe')} -ArgumentList ${quotePowerShellSingle(`/d /k call "${loginScriptPath}"`)} -WorkingDirectory ${quotePowerShellSingle(app.getPath('userData'))}`,
+      ].join('; ');
+
+      await new Promise<void>((resolve, reject) => {
+        const child = spawn(
+          'powershell.exe',
+          ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', launchCommand],
+          {
+            cwd: app.getPath('userData'),
+            stdio: 'ignore',
+            windowsHide: true,
+          },
+        );
+
+        child.once('error', reject);
+        child.once('exit', (code) => {
+          if (code === 0) {
+            resolve();
+            return;
+          }
+          reject(new Error(`powershell Start-Process exited with code ${code ?? 'unknown'}`));
+        });
+      });
 
       await appendInstallLog('codex_auth:terminal_opened', {
         platform: process.platform,
