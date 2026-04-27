@@ -143,6 +143,24 @@ jobs:
         shell: bash
         run: test -f "release/${{ matrix.artifact }}"
 
+      - name: Notarize macOS DMG
+        if: matrix.os == 'macos-latest'
+        shell: bash
+        env:
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          set -euo pipefail
+
+          dmg_path="release/${{ matrix.artifact }}"
+          xcrun notarytool submit "$dmg_path" \
+            --key "$APPLE_API_KEY" \
+            --key-id "$APPLE_API_KEY_ID" \
+            --issuer "$APPLE_API_ISSUER" \
+            --wait \
+            --timeout 30m
+          xcrun stapler staple "$dmg_path"
+
       - name: Write checksum
         shell: bash
         run: |

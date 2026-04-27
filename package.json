@@ -1,6 +1,6 @@
 {
   "name": "forger-desktop",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "private": true,
   "description": "Desktop launcher for Forger",
   "author": "Forger",
@@ -76,7 +76,7 @@
       "gatekeeperAssess": false,
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.inherit.plist",
-      "notarize": true,
+      "notarize": false,
       "target": [
         {
           "target": "dmg",
