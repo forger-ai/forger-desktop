@@ -1,7 +1,9 @@
 name: Release Desktop
 
 on:
-  workflow_dispatch:
+  push:
+    tags:
+      - 'forger-desktop/v*'
 
 permissions:
   contents: write
@@ -53,111 +55,13 @@ jobs:
 
       - run: npm ci
       - run: npm run typecheck
-
-      - name: Prepare Apple signing credentials
-        if: matrix.os == 'macos-latest'
-        shell: bash
-        env:
-          APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
-          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-        run: |
-          missing=0
-          for name in APPLE_API_KEY_BASE64 APPLE_API_KEY_ID APPLE_API_ISSUER CSC_LINK CSC_KEY_PASSWORD; do
-            if [ -z "${!name}" ]; then
-              echo "::error::$name is required for signed and notarized macOS releases"
-              missing=1
-            fi
-          done
-          if [ "$missing" -ne 0 ]; then
-            exit 1
-          fi
-
-          key_path="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY_ID}.p8"
-          b64_path="$RUNNER_TEMP/apple-api-key.b64"
-          printf '%s' "$APPLE_API_KEY_BASE64" > "$b64_path"
-          base64 --decode "$b64_path" > "$key_path" 2>/dev/null || base64 -D -i "$b64_path" -o "$key_path"
-          chmod 600 "$key_path"
-          echo "APPLE_API_KEY=$key_path" >> "$GITHUB_ENV"
-
-      - name: Sign bundled macOS runtime archives
-        if: matrix.os == 'macos-latest'
-        shell: bash
-        env:
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-          CSC_NAME: ${{ secrets.CSC_NAME }}
-        run: |
-          set -euo pipefail
-
-          cert_path="$RUNNER_TEMP/developer-id.p12"
-          cert_b64_path="$RUNNER_TEMP/developer-id.b64"
-          keychain_path="$RUNNER_TEMP/forger-signing.keychain-db"
-          keychain_password="$(openssl rand -hex 24)"
-
-          printf '%s' "$CSC_LINK" > "$cert_b64_path"
-          base64 --decode "$cert_b64_path" > "$cert_path" 2>/dev/null || base64 -D -i "$cert_b64_path" -o "$cert_path"
-
-          security create-keychain -p "$keychain_password" "$keychain_path"
-          security set-keychain-settings -lut 21600 "$keychain_path"
-          security unlock-keychain -p "$keychain_password" "$keychain_path"
-          security import "$cert_path" -k "$keychain_path" -P "$CSC_KEY_PASSWORD" -T /usr/bin/codesign
-          security list-keychains -d user -s "$keychain_path" $(security list-keychains -d user | sed 's/[ "]//g')
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain_path"
-
-          identity="Developer ID Application: $CSC_NAME"
-          tmp_root="$RUNNER_TEMP/runtime-signing"
-          rm -rf "$tmp_root"
-          mkdir -p "$tmp_root"
-
-          find resources/runtimes -type f \( -name '*darwin*.tar.gz' -o -name '*apple-darwin*.tar.gz' \) | while IFS= read -r archive; do
-            work_dir="$tmp_root/$(basename "$archive").work"
-            rm -rf "$work_dir"
-            mkdir -p "$work_dir"
-            tar -xzf "$archive" -C "$work_dir"
-
-            while IFS= read -r file_path; do
-              if file "$file_path" | grep -q 'Mach-O'; then
-                codesign --force --timestamp --options runtime --sign "$identity" "$file_path"
-              fi
-            done < <(find "$work_dir" -type f)
-
-            tar -czf "$archive" -C "$work_dir" .
-            shasum -a 256 "$archive" > "$archive.sha256"
-          done
-
       - run: npm run ${{ matrix.script }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-          CSC_NAME: ${{ secrets.CSC_NAME }}
-          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
 
       - name: Check artifact exists
         shell: bash
         run: test -f "release/${{ matrix.artifact }}"
-
-      - name: Notarize macOS DMG
-        if: matrix.os == 'macos-latest'
-        shell: bash
-        env:
-          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-        run: |
-          set -euo pipefail
-
-          dmg_path="release/${{ matrix.artifact }}"
-          xcrun notarytool submit "$dmg_path" \
-            --key "$APPLE_API_KEY" \
-            --key-id "$APPLE_API_KEY_ID" \
-            --issuer "$APPLE_API_ISSUER" \
-            --wait \
-            --timeout 30m
-          xcrun stapler staple "$dmg_path"
 
       - name: Write checksum
         shell: bash
