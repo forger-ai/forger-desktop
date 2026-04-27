@@ -1,9 +1,7 @@
 name: Release Desktop
 
 on:
-  push:
-    tags:
-      - 'forger-desktop/v*'
+  workflow_dispatch:
 
 permissions:
   contents: write

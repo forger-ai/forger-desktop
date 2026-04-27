@@ -1,6 +1,6 @@
 {
   "name": "forger-desktop",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "private": true,
   "description": "Desktop launcher for Forger",
   "author": "Forger",
@@ -17,6 +17,9 @@
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.electron.json",
     "dist:mac": "npm run build && electron-builder --mac dmg --arm64 --publish never",
     "dist:win": "npm run build && electron-builder --win nsis --x64 --publish never",
+    "release:local": "node ./scripts/release-local.mjs",
+    "release:local:mac": "node ./scripts/release-local.mjs --platform=mac",
+    "release:local:win": "node ./scripts/release-local.mjs --platform=win",
     "preview": "vite preview"
   },
   "dependencies": {
