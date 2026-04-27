@@ -21,6 +21,7 @@ const parseArgs = () => {
     platform: 'current',
     skipBuild: false,
     skipNotarize: false,
+    waitNotarize: false,
     allowDirty: false,
     tag: null,
   };
@@ -30,6 +31,8 @@ const parseArgs = () => {
       options.skipBuild = true;
     } else if (arg === '--skip-notarize') {
       options.skipNotarize = true;
+    } else if (arg === '--wait-notarize') {
+      options.waitNotarize = true;
     } else if (arg === '--allow-dirty') {
       options.allowDirty = true;
     } else if (arg.startsWith('--platform=')) {
@@ -341,7 +344,7 @@ const resolveAppleApiKey = async () => {
   return keyPath;
 };
 
-const notarizeMacArtifact = async (artifactPath) => {
+const notarizeMacArtifact = async (artifactPath, waitForResult) => {
   const appleApiKey = await resolveAppleApiKey();
   const missing = [];
 
@@ -361,8 +364,8 @@ const notarizeMacArtifact = async (artifactPath) => {
     throw new Error(`Missing notarization env vars: ${missing.join(', ')}`);
   }
 
-  console.log(`Submitting ${path.basename(artifactPath)} to Apple notarization...`);
-  const submitResult = await capture('xcrun', [
+  console.log(`Submitting ${path.basename(artifactPath)} to Apple notarization${waitForResult ? '' : ' without waiting'}...`);
+  const submitArgs = [
     'notarytool',
     'submit',
     artifactPath,
@@ -372,17 +375,27 @@ const notarizeMacArtifact = async (artifactPath) => {
     process.env.APPLE_API_KEY_ID,
     '--issuer',
     process.env.APPLE_API_ISSUER,
-    '--wait',
-    '--timeout',
-    '30m',
     '--output-format',
     'json',
-  ]);
+  ];
+
+  if (waitForResult) {
+    submitArgs.push('--wait', '--timeout', '30m');
+  }
+
+  const submitResult = await capture('xcrun', submitArgs);
 
   const parsedResult = JSON.parse(submitResult);
   const submissionId = parsedResult.id;
   const status = parsedResult.status;
-  console.log(`Apple notarization status: ${status}${submissionId ? ` (${submissionId})` : ''}`);
+  const submissionPath = path.join(releaseDir, 'notarization-submission.json');
+  await fs.writeFile(submissionPath, `${JSON.stringify(parsedResult, null, 2)}\n`);
+  console.log(`Apple notarization submission: ${status}${submissionId ? ` (${submissionId})` : ''}`);
+
+  if (!waitForResult) {
+    console.log(`Submission metadata written to ${submissionPath}`);
+    return;
+  }
 
   if (status !== 'Accepted') {
     if (submissionId) {
@@ -484,7 +497,7 @@ const main = async () => {
     }
 
     if (platform === 'mac' && !options.skipNotarize) {
-      await notarizeMacArtifact(artifactPath);
+      await notarizeMacArtifact(artifactPath, options.waitNotarize);
     }
 
     const checksumPath = await writeChecksum(artifactPath);

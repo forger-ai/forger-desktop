@@ -19,6 +19,7 @@
     "dist:win": "npm run build && electron-builder --win nsis --x64 --publish never",
     "release:local": "node ./scripts/release-local.mjs",
     "release:local:mac": "node ./scripts/release-local.mjs --platform=mac",
+    "release:local:mac:wait": "node ./scripts/release-local.mjs --platform=mac --wait-notarize",
     "release:local:win": "node ./scripts/release-local.mjs --platform=win",
     "preview": "vite preview"
   },
