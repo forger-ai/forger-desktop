@@ -1476,6 +1476,17 @@ const escapeWindowsBatchValue = (value: string): string => value.replace(/%/g, '
 
 const getCodexAuthFilePath = (): string => path.join(getCodexHome(), 'auth.json');
 
+const getRuntimePathEntries = (runtime: RuntimeBinarySet): string[] => {
+  const entries = new Set<string>();
+  for (const executable of Object.values(runtime)) {
+    if (typeof executable === 'string') {
+      entries.add(path.dirname(executable));
+    }
+  }
+
+  return [...entries];
+};
+
 const resolveCodexCliPath = async (baseDir: string): Promise<string | null> => {
   const candidates =
     process.platform === 'win32'
@@ -1595,14 +1606,29 @@ const connectCodexAuth = async (): Promise<{ success: boolean; userMessage: stri
     }
 
     if (process.platform === 'win32') {
+      const nodeRuntime = await ensureRuntimeInstalled('node', DEFAULT_NODE_VERSION);
+      const nodePathPrefix = [
+        ...getRuntimePathEntries(nodeRuntime),
+        path.dirname(codexCliPath),
+      ].join(';');
+      const loginLogPath = path.join(getLogsRoot(), 'codex-login.log');
       const loginScriptPath = path.join(getTempRoot(), 'codex-login.cmd');
       const loginScript = [
         '@echo off',
         'title Forger Codex Login',
         `set "CODEX_HOME=${escapeWindowsBatchValue(codexHome)}"`,
+        `set "FORGER_CODEX_LOGIN_LOG=${escapeWindowsBatchValue(loginLogPath)}"`,
+        `set "PATH=${escapeWindowsBatchValue(nodePathPrefix)};%PATH%"`,
+        'echo [%DATE% %TIME%] Starting Codex login > "%FORGER_CODEX_LOGIN_LOG%"',
+        'echo CODEX_HOME=%CODEX_HOME% >> "%FORGER_CODEX_LOGIN_LOG%"',
+        'where node >> "%FORGER_CODEX_LOGIN_LOG%" 2>&1',
+        'where npm >> "%FORGER_CODEX_LOGIN_LOG%" 2>&1',
+        'where codex >> "%FORGER_CODEX_LOGIN_LOG%" 2>&1',
         `"${escapeWindowsBatchValue(codexCliPath)}" login`,
+        'set "FORGER_CODEX_LOGIN_EXIT=%ERRORLEVEL%"',
+        'echo [%DATE% %TIME%] Codex login exited with code %FORGER_CODEX_LOGIN_EXIT% >> "%FORGER_CODEX_LOGIN_LOG%"',
         'echo.',
-        'echo Codex login finished. You can close this window.',
+        'echo Codex login finished with exit code %FORGER_CODEX_LOGIN_EXIT%. You can close this window.',
         'pause',
       ].join('\r\n');
 
@@ -1611,7 +1637,7 @@ const connectCodexAuth = async (): Promise<{ success: boolean; userMessage: stri
 
       const child = spawn(
         'cmd.exe',
-        ['/d', '/k', loginScriptPath],
+        ['/d', '/k', `call "${loginScriptPath}"`],
         {
           cwd: app.getPath('userData'),
           detached: true,
@@ -1626,6 +1652,8 @@ const connectCodexAuth = async (): Promise<{ success: boolean; userMessage: stri
         codexHome,
         codexCliPath,
         loginScriptPath,
+        loginLogPath,
+        nodePathPrefix,
       });
 
       return {
@@ -2696,6 +2724,10 @@ app.whenReady().then(async () => {
     codexHome: getCodexHome(),
     agentContractVersion: FORGER_AGENT_CONTRACT_VERSION,
     getCodexCliPath: async () => await resolveCodexCliPath(getCodexRoot()),
+    getCodexPathEntries: async () => {
+      const nodeRuntime = await ensureRuntimeInstalled('node', DEFAULT_NODE_VERSION);
+      return getRuntimePathEntries(nodeRuntime);
+    },
     getCodexAuthenticated: async () => {
       const status = await getCodexAuthStatus();
       return status.authenticated;

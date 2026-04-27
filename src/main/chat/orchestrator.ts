@@ -23,6 +23,7 @@ interface ChatOrchestratorOptions {
   codexHome: string;
   agentContractVersion: number;
   getCodexCliPath: () => Promise<string | null>;
+  getCodexPathEntries: () => Promise<string[]>;
   getCodexAuthenticated: () => Promise<boolean>;
   onRunUpdated: (event: ChatRunEvent) => void;
 }
@@ -186,6 +187,7 @@ class SandboxRunner {
 
   public async runCodex(params: {
     codexCliPath: string;
+    pathEntries: string[];
     workingDir: string;
     prompt: string;
     timeoutMs: number;
@@ -260,7 +262,11 @@ class SandboxRunner {
             env: {
               CODEX_HOME: this.codexHome,
               FORGER_ALLOWED_ROOTS: allowedRoots,
-              PATH: `${path.dirname(params.codexCliPath)}${path.delimiter}${process.env.PATH ?? ''}`,
+              PATH: [
+                path.dirname(params.codexCliPath),
+                ...params.pathEntries,
+                process.env.PATH ?? '',
+              ].filter(Boolean).join(path.delimiter),
             },
             inactivityTimeoutMs: attemptInactivityTimeoutMs,
             onChild: params.onChild,
@@ -567,6 +573,7 @@ export class ChatOrchestrator {
       if (!codexCliPath) {
         throw createChatError('capability_unavailable', 'Codex CLI not installed');
       }
+      const codexPathEntries = await this.options.getCodexPathEntries();
 
       if (!(await existsDirectory(run.appRoot))) {
         throw createChatError('app_not_installed', 'Target app is not installed');
@@ -585,6 +592,7 @@ export class ChatOrchestrator {
 
       const assistantReply = await this.sandboxRunner.runCodex({
         codexCliPath,
+        pathEntries: codexPathEntries,
         workingDir: this.options.privateAppsRoot,
         prompt: run.prompt,
         timeoutMs: 300_000,
