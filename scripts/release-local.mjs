@@ -237,9 +237,11 @@ const prepareMacSigningKeychain = async () => {
 const signMacRuntimeArchives = async () => {
   const identity = await resolveMacSigningIdentity();
   const runtimeRoot = path.join(rootDir, 'resources', 'runtimes');
+  const backupRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'forger-runtime-backups-'));
   const backups = [];
 
   if (!(await exists(runtimeRoot))) {
+    await fs.rm(backupRoot, { recursive: true, force: true });
     return async () => {};
   }
 
@@ -261,13 +263,16 @@ const signMacRuntimeArchives = async () => {
       await fs.copyFile(backupPath, originalPath);
       await fs.rm(backupPath, { force: true });
     }
+
+    await fs.rm(backupRoot, { recursive: true, force: true });
   };
 
   try {
     for (const archive of archives) {
-      const archiveBackup = `${archive}.release-local-backup`;
+      const backupName = Buffer.from(archive).toString('base64url');
+      const archiveBackup = path.join(backupRoot, `${backupName}.tar.gz`);
       const checksumPath = `${archive}.sha256`;
-      const checksumBackup = `${checksumPath}.release-local-backup`;
+      const checksumBackup = path.join(backupRoot, `${backupName}.tar.gz.sha256`);
 
       await fs.copyFile(archive, archiveBackup);
       backups.push([archiveBackup, archive]);
@@ -356,7 +361,8 @@ const notarizeMacArtifact = async (artifactPath) => {
     throw new Error(`Missing notarization env vars: ${missing.join(', ')}`);
   }
 
-  await run('xcrun', [
+  console.log(`Submitting ${path.basename(artifactPath)} to Apple notarization...`);
+  const submitResult = await capture('xcrun', [
     'notarytool',
     'submit',
     artifactPath,
@@ -369,7 +375,35 @@ const notarizeMacArtifact = async (artifactPath) => {
     '--wait',
     '--timeout',
     '30m',
+    '--output-format',
+    'json',
   ]);
+
+  const parsedResult = JSON.parse(submitResult);
+  const submissionId = parsedResult.id;
+  const status = parsedResult.status;
+  console.log(`Apple notarization status: ${status}${submissionId ? ` (${submissionId})` : ''}`);
+
+  if (status !== 'Accepted') {
+    if (submissionId) {
+      const logPath = path.join(releaseDir, 'notarization-log.json');
+      const log = await capture('xcrun', [
+        'notarytool',
+        'log',
+        submissionId,
+        '--key',
+        appleApiKey,
+        '--key-id',
+        process.env.APPLE_API_KEY_ID,
+        '--issuer',
+        process.env.APPLE_API_ISSUER,
+      ]);
+      await fs.writeFile(logPath, log);
+      console.error(`Apple notarization log written to ${logPath}`);
+    }
+
+    throw new Error(`Apple notarization failed with status: ${status}`);
+  }
 
   await run('xcrun', ['stapler', 'staple', artifactPath]);
 };
