@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import { createHash } from 'node:crypto';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import fs from 'node:fs/promises';
@@ -18,6 +18,15 @@ try {
 import { settingsSeed } from '../shared/mock-data';
 import { IPC_CHANNELS } from '../shared/ipc';
 import { ChatOrchestrator } from './chat/orchestrator';
+import { FileLibrary } from './file-library';
+import {
+  FORGER_AGENT_CONTRACT_MARKER,
+  FORGER_AGENT_CONTRACT_MARKER_PREFIX,
+  FORGER_AGENT_CONTRACT_VERSION,
+  buildGlobalForgerAgentsMarkdown,
+} from './prompts/forger-base';
+import { buildForgerAppAgentsMarkdown } from './prompts/apps-base';
+import { buildCodexPromptWithAppContext } from './prompts/user-message';
 import type {
   AppCategory,
   AppDetails,
@@ -33,10 +42,19 @@ import type {
   ChatStartRunInput,
   ChatUndoInput,
   CodexAuthStatus,
+  FilesCreateCategoryInput,
+  FilesDeleteCategoryInput,
+  FilesDeleteInput,
+  FilesImportInput,
+  FilesListInput,
+  FilesMoveInput,
+  FilesRenameCategoryInput,
+  FilesRenameInput,
   InstallAppResult,
   OpenAppResult,
   RuntimeStatus,
   Settings,
+  SharedFileRef,
   StopAppResult,
 } from '../shared/types';
 
@@ -47,9 +65,7 @@ const catalogJsonUrl =
 const DEFAULT_NODE_VERSION = '24';
 const DEFAULT_PYTHON_VERSION = '3.12';
 const CODEX_CLI_VERSION = '0.125.0';
-const FORGER_AGENT_CONTRACT_VERSION = 2;
-const FORGER_AGENT_CONTRACT_MARKER = `FORGER_AGENT_CONTRACT_VERSION: ${FORGER_AGENT_CONTRACT_VERSION}`;
-const FORGER_AGENT_CONTRACT_MARKER_PREFIX = 'FORGER_AGENT_CONTRACT_VERSION:';
+const CODEX_USAGE_DASHBOARD_URL = 'https://chatgpt.com/codex/settings/usage';
 
 if (isDev) {
   app.setName('Forger Dev');
@@ -155,6 +171,7 @@ const appWindows = new Map<string, BrowserWindow>();
 const stoppingApps = new Set<string>();
 const runtimeLocks = new Map<string, Promise<RuntimeBinarySet>>();
 let chatOrchestrator: ChatOrchestrator | null = null;
+let fileLibrary: FileLibrary | null = null;
 
 const resolvePlatformAlias = (): string => {
   const platformPrefix = PLATFORM_KEY_BY_RUNTIME[process.platform] ?? process.platform;
@@ -166,7 +183,11 @@ const getRuntimesRoot = () => path.join(app.getPath('userData'), 'runtimes');
 const getTempRoot = () => path.join(app.getPath('userData'), 'tmp');
 const getLogsRoot = () => path.join(app.getPath('userData'), 'logs');
 const getInstallLogPath = () => path.join(getLogsRoot(), 'install.log');
-const getPrivateAppsRoot = () => path.join(os.homedir(), 'Forger', isDev ? 'dev-apps' : 'apps');
+const getForgerHomeRoot = () => path.join(os.homedir(), 'Forger');
+const getPrivateAppsRoot = () => path.join(getForgerHomeRoot(), isDev ? 'dev-apps' : 'apps');
+const getPrivateDataRoot = () => path.join(getForgerHomeRoot(), isDev ? 'dev-data' : 'data');
+const getForgerMetadataRoot = () => path.join(getForgerHomeRoot(), '.forger');
+const getLegacyForgerMetadataRoot = () => path.join(getPrivateAppsRoot(), '.forger');
 const getCodexRoot = () => path.join(app.getPath('userData'), 'codex-cli');
 const getCodexHome = () => path.join(app.getPath('userData'), 'codex-home');
 
@@ -416,8 +437,11 @@ const normalizeToken = (value: string | undefined): string => {
 
 const ensurePathInside = (rootPath: string, targetPath: string): boolean => {
   const relative = path.relative(rootPath, targetPath);
-  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+  const normalizedRelative = process.platform === 'win32' ? relative.toLowerCase() : relative;
+  return normalizedRelative === '' || (!normalizedRelative.startsWith('..') && !path.isAbsolute(relative));
 };
+
+const toPosixRelativePath = (value: string): string => value.replace(/\\/g, '/');
 
 const resolveInstalledManifest = async (installDir: string): Promise<AppManifest | null> => {
   const manifestPath = path.join(installDir, 'manifest.json');
@@ -442,167 +466,9 @@ const hasValidManifestStack = (manifest: AppManifest | null): manifest is AppMan
   return Boolean(backend || frontend);
 };
 
-const summarizeStack = (stack: AppManifestStack): string[] => {
-  const lines: string[] = [];
-  const backend = stack.backend;
-  const frontend = stack.frontend;
-
-  if (backend) {
-    lines.push(
-      `Backend: ${[
-        backend.language && `lenguaje ${backend.language}`,
-        backend.framework && `framework ${backend.framework}`,
-        backend.package_manager && `gestor ${backend.package_manager}`,
-        backend.database && `base de datos ${backend.database}`,
-      ]
-        .filter(Boolean)
-        .join(', ') || 'no definido'}`,
-    );
-  }
-
-  if (frontend) {
-    lines.push(
-      `Frontend: ${[
-        frontend.language && `lenguaje ${frontend.language}`,
-        frontend.framework && `framework ${frontend.framework}`,
-        frontend.bundler && `bundler ${frontend.bundler}`,
-        frontend.ui && `UI ${frontend.ui}`,
-      ]
-        .filter(Boolean)
-        .join(', ') || 'no definido'}`,
-    );
-  }
-
-  return lines;
-};
-
-const buildForgerAgentsMarkdown = (appId: string, manifest: AppManifest | null): string => {
-  const stackLines = hasValidManifestStack(manifest) ? summarizeStack(manifest.stack) : [];
-  const stackSection = stackLines.length > 0 ? stackLines.map((line) => `- ${line}`).join('\n') : '- No definido';
-  const scriptEntries = manifest?.scripts ? Object.entries(manifest.scripts) : [];
-  const scriptsSection =
-    scriptEntries.length > 0
-      ? scriptEntries.map(([name, command]) => `- ${name}: herramienta interna del agente. Comando declarado: \`${command}\``)
-      : ['- No hay scripts declarados en `manifest.json`.'];
-
-  return [
-    '# AGENTS',
-    '',
-    FORGER_AGENT_CONTRACT_MARKER,
-    '',
-    '## Rol',
-    `Eres Forger dentro de la app instalada \`${appId}\`. Ayudas al usuario a entender, usar y adaptar esta app sin inventar capacidades.`,
-    '',
-    '## Fuente de Verdad',
-    '- Este `AGENTS.md` es la fuente principal de contexto funcional y operativo de la app.',
-    '- `manifest.json` describe instalacion, servicios, stack y scripts disponibles; no es una lista de capacidades visibles para el usuario.',
-    '- `.agents/skills` contiene playbooks internos del agente para tareas concretas.',
-    '- Antes de responder o actuar, revisa este archivo, `manifest.json`, `.agents/skills` y los scripts declarados que correspondan a la tarea.',
-    '',
-    '## Capacidades visibles para el usuario',
-    '- Si una app trae su propio `AGENTS.md`, las capacidades visibles deben estar documentadas ahi.',
-    '- Si esta app solo tiene este archivo generado por Forger, no declares capacidades especificas sin revisar la UI, rutas, textos, modelos y servicios reales.',
-    '- Una capacidad visible es algo que el usuario puede pedir o entender como una accion real de la app, por ejemplo revisar informacion, importar datos, corregir registros o ver un resumen.',
-    '- No presentes scripts, rutas, comandos, endpoints, archivos temporales ni carpetas internas como capacidades visibles.',
-    '- Si no encuentras evidencia suficiente para una capacidad, responde que no aparece como capacidad actual de la app.',
-    '',
-    '## Herramientas internas del agente',
-    '- Las herramientas internas son recursos que puedes usar para cumplir una tarea: scripts, comandos, endpoints, skills, archivos temporales, consultas a base de datos o validaciones.',
-    '- Estas herramientas no son instrucciones para el usuario final.',
-    '- No le pidas al usuario que ubique archivos en carpetas internas, ejecute comandos, conozca rutas, prepare CSVs canonicos ni entienda detalles de base de datos.',
-    '- Cuando uses una herramienta interna, traduce el resultado a lenguaje de producto: que se hizo, que cambio, que requiere revision y que puede hacer despues.',
-    '- Si el usuario pregunta explicitamente por detalles tecnicos, entonces puedes explicar herramientas internas con claridad y separarlas de la experiencia normal de uso.',
-    '',
-    '## Scripts declarados como herramientas internas',
-    ...scriptsSection,
-    '',
-    '## Stack de esta App',
-    stackSection,
-    '',
-    '## Tareas Permitidas',
-    '- resolver_dudas: investiga la app real antes de responder. Responde solo con capacidades verificadas.',
-    '- trabajar_datos: usa el stack de datos establecido por la app. Revisa validaciones, modelos, endpoints y scripts antes de crear, editar o eliminar datos.',
-    '- modificar_aplicacion: convierte el pedido en cambios concretos, pregunta alcance y casos borde si falta informacion, y explica impacto funcional sin mencionar implementacion salvo que el usuario lo pida.',
-    '- interactuar_con_aplicacion: revisa scripts, skills y playbooks disponibles para saber que acciones internas puedes ejecutar por cuenta del usuario.',
-    '',
-    '## Comunicacion',
-    '- Habla en lenguaje simple, pensado para usuario final.',
-    '- Distingue siempre entre lo que la app puede hacer para el usuario y lo que tu puedes usar internamente para lograrlo.',
-    '- No menciones implementacion, archivos, rutas, scripts, comandos ni detalles tecnicos salvo que el usuario lo pida.',
-    '- Haz preguntas funcionales sobre objetivo, impacto, datos involucrados y alcance; evita preguntas de implementacion.',
-    '- Si una tarea requiere un archivo, pide el archivo o los datos de forma natural. No pidas que lo pongan en una ruta interna.',
-    '',
-    '## Guardrails',
-    '- Evita eliminaciones masivas accidentales de datos o archivos.',
-    '- Antes de operaciones riesgosas o irreversibles, confirma la intencion funcional y propone una alternativa segura.',
-    '- No uses archivos externos no compartidos explicitamente por el usuario.',
-    '',
-    '## Skills',
-    '- Las skills de esta app estan en `.agents/skills`; revisalas cuando puedan ayudar.',
-    '- Los scripts declarados en `manifest.json` son la interfaz preferida para acciones rutinarias.',
-  ].join('\n');
-};
-
-const buildGlobalForgerAgentsMarkdown = (): string => {
-  return [
-    '# AGENTS',
-    '',
-    FORGER_AGENT_CONTRACT_MARKER,
-    '',
-    '## Rol',
-    'Forger ayuda exclusivamente con aplicaciones instaladas en Forger. Tu trabajo es ayudar al usuario a entender, usar, adaptar e interactuar con esas apps, sin inventar capacidades y sin exponer detalles internos innecesarios.',
-    '',
-    '## Dominio Estricto',
-    '- El workspace base es `~/Forger/apps`.',
-    '- Solo puedes responder, preguntar o actuar sobre apps instaladas en este workspace.',
-    '- Si el usuario pregunta algo fuera de una app instalada, responde brevemente que solo puedes ayudar con apps instaladas en Forger.',
-    '- La app seleccionada es el foco principal. Usa otras apps solo si el usuario las menciona o el pedido lo requiere claramente.',
-    '- No actues como consultor generico del dominio de la app. Por ejemplo, si una app financiera no tiene bancos, alertas o inversiones, no recomiendes configurar bancos, alertas o inversiones como si existieran.',
-    '',
-    '## Fuente de Verdad',
-    '- El `AGENTS.md` de cada app es la fuente principal de contexto funcional y operativo.',
-    '- `manifest.json` describe instalacion, servicios, stack y scripts. No lo trates como una lista de funciones visibles para el usuario.',
-    '- `.agents/skills` contiene habilidades internas del agente para tareas concretas.',
-    '- Los scripts declarados en `manifest.json` o documentados en la app son herramientas internas del agente, salvo que `AGENTS.md` diga explicitamente que son parte de la interfaz visible.',
-    '',
-    '## Antes de Responder',
-    '- Identifica la app o apps involucradas.',
-    '- Lee primero la documentacion y metadatos reales de la app: `AGENTS.md`, `manifest.json`, `.agents/skills` y scripts declarados.',
-    '- Clasifica internamente la solicitud como una de estas tareas: resolver_dudas, trabajar_datos, modificar_aplicacion, interactuar_con_aplicacion.',
-    '- Nunca asumas capacidades de una app. Verifica en sus archivos antes de afirmar que puede hacer algo.',
-    '- Usa skills o scripts disponibles cuando existan.',
-    '- Si la pregunta es sobre que puede hacer la app, responde solo con capacidades visibles verificadas, no con herramientas internas.',
-    '',
-    '## Capacidades visibles vs herramientas internas',
-    '- Una capacidad visible es algo que el usuario puede pedir o entender como accion real de la app: revisar datos, cargar informacion, corregir clasificaciones, ver resumenes, ajustar configuracion visible.',
-    '- Una herramienta interna es algo que tu puedes usar para cumplir la tarea: scripts, comandos, endpoints, carpetas temporales, archivos CSV intermedios, consultas de base de datos, skills o validaciones.',
-    '- No le digas al usuario que ejecute scripts, ponga archivos en carpetas internas, cree CSVs canonicos, use rutas del proyecto o conozca comandos, salvo que pregunte explicitamente por detalles tecnicos.',
-    '- Si usas herramientas internas, traduce la accion a lenguaje de producto. Ejemplo: di "puedo cargar los movimientos desde el archivo que compartas", no "pon el CSV en backend/scripts/data y correre import_movements.py".',
-    '- Si una herramienta interna falla, explica el problema en terminos de usuario: filas rechazadas, datos incompletos, categorias no encontradas, formato invalido, accion no segura.',
-    '',
-    '## Tareas Permitidas',
-    '- resolver_dudas: investiga la app antes de responder dudas. Si no hay evidencia, dilo con claridad.',
-    '- trabajar_datos: trabaja con el stack de datos establecido por la app. Protege consistencia, respeta validaciones y evita borrados masivos.',
-    '- modificar_aplicacion: convierte la solicitud en cambios concretos y pregunta alcance o casos borde si falta informacion.',
-    '- interactuar_con_aplicacion: revisa scripts, skills y playbooks expuestos por la app para ejecutar acciones internas por cuenta del usuario.',
-    '',
-    '## Comunicacion',
-    '- Usar lenguaje simple para usuarios no tecnicos.',
-    '- No mencionar implementacion, archivos, rutas ni detalles tecnicos salvo que el usuario lo pida.',
-    '- Comunicar impacto funcional: que cambia para la persona usuaria.',
-    '- Preguntar por intencion, datos, alcance y confirmacion funcional; no preguntar por comandos o implementacion.',
-    '- Si el usuario pide algo ambiguo, ofrece opciones funcionales y seguras.',
-    '',
-    '## Seguridad',
-    '- No ejecutar comandos destructivos ni revertir cambios del usuario sin instruccion explicita.',
-    '- No usar archivos externos no compartidos explicitamente por el usuario.',
-    '- Antes de operaciones riesgosas o irreversibles, confirmar intencion funcional y proponer alternativa segura.',
-  ].join('\n');
-};
-
-const ensureGlobalAgentsContext = async (privateAppsRoot: string): Promise<void> => {
-  await fs.mkdir(privateAppsRoot, { recursive: true });
-  const agentsPath = path.join(privateAppsRoot, 'AGENTS.md');
+const ensureGlobalAgentsContext = async (forgerHomeRoot: string): Promise<void> => {
+  await fs.mkdir(forgerHomeRoot, { recursive: true });
+  const agentsPath = path.join(forgerHomeRoot, 'AGENTS.md');
   await fs.writeFile(agentsPath, buildGlobalForgerAgentsMarkdown(), 'utf8');
 };
 
@@ -745,7 +611,7 @@ const normalizeInstalledAgentContext = async (installDir: string, appId: string)
 
   const agentsPath = path.join(installDir, 'AGENTS.md');
   if (await shouldWriteAppAgentsMarkdown(agentsPath)) {
-    await fs.writeFile(agentsPath, buildForgerAgentsMarkdown(appId, manifest), 'utf8');
+    await fs.writeFile(agentsPath, buildForgerAppAgentsMarkdown(appId, manifest), 'utf8');
   }
 
   const hasStack = hasValidManifestStack(manifest);
@@ -777,18 +643,11 @@ const resolveSelectedAppDisplayName = (appId: string): string => {
   return appId;
 };
 
-const buildCodexPromptWithAppContext = (appId: string, userPrompt: string): string => {
-  const displayName = resolveSelectedAppDisplayName(appId);
-  return [
-    `APP SELECCIONADA: /${appId}`,
-    `NOMBRE APP SELECCIONADA: ${displayName}`,
-    `CONTRATO FORGER: ${FORGER_AGENT_CONTRACT_VERSION}`,
-    '',
-    'Instruccion operativa: sigue el contrato de Forger en AGENTS.md. Clasifica internamente la solicitud en una de las 4 tareas permitidas y revisa el contexto real de la app antes de responder.',
-    '',
-    'MENSAJE USUARIO:',
-    userPrompt.trim(),
-  ].join('\n');
+const getFileLibrary = (): FileLibrary => {
+  if (!fileLibrary) {
+    fileLibrary = new FileLibrary(getPrivateDataRoot(), getForgerMetadataRoot());
+  }
+  return fileLibrary;
 };
 
 const listCatalogFromBackend = async (): Promise<CatalogApp[]> => {
@@ -1893,7 +1752,7 @@ const installAppRuntime = async (appId: string): Promise<InstallAppResult> => {
     await flattenSingleTopLevelDirectory(installDir);
     await clearMacQuarantine(installDir);
     await normalizeInstalledAgentContext(installDir, appId);
-    await ensureGlobalAgentsContext(getPrivateAppsRoot());
+    await ensureGlobalAgentsContext(getForgerHomeRoot());
     await ensureAppGitRepository(installDir);
     const originalCommitSha = await getOriginalCommitSha(installDir);
 
@@ -2010,10 +1869,15 @@ interface StoredOperationEntry {
 }
 
 const operationsFile = (appId: string): string =>
-  path.join(getPrivateAppsRoot(), '.forger', 'operations', `${appId}.json`);
+  path.join(getForgerMetadataRoot(), 'operations', `${appId}.json`);
+
+const legacyOperationsFile = (appId: string): string =>
+  path.join(getLegacyForgerMetadataRoot(), 'operations', `${appId}.json`);
 
 const readOperationSummaries = async (appId: string): Promise<AppOperationSummary[]> => {
-  const raw = await fs.readFile(operationsFile(appId), 'utf8').catch(() => '[]');
+  const raw = await fs.readFile(operationsFile(appId), 'utf8').catch(async () => {
+    return await fs.readFile(legacyOperationsFile(appId), 'utf8').catch(() => '[]');
+  });
   try {
     const parsed = JSON.parse(raw) as StoredOperationEntry[];
     if (!Array.isArray(parsed)) {
@@ -2703,16 +2567,51 @@ const registerIpcHandlers = (): void => {
 
   ipcMain.handle(IPC_CHANNELS.getSettings, async () => settings);
   ipcMain.handle(IPC_CHANNELS.getCodexAuthStatus, async () => await getCodexAuthStatus());
+  ipcMain.handle(IPC_CHANNELS.openCodexUsageDashboard, async () => {
+    try {
+      await shell.openExternal(CODEX_USAGE_DASHBOARD_URL);
+      return { success: true };
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : 'open_codex_usage_failed';
+      return { success: false, technicalCode: detail, userMessage: 'No pudimos abrir el panel de uso de Codex.' };
+    }
+  });
   ipcMain.handle(IPC_CHANNELS.connectCodexAuth, async () => await connectCodexAuth());
   ipcMain.handle(IPC_CHANNELS.disconnectCodexAuth, async () => await disconnectCodexAuth());
   ipcMain.handle(IPC_CHANNELS.chatStartRun, async (_event, input: ChatStartRunInput) => {
     if (!chatOrchestrator) {
       return { runId: '', status: 'failed' };
     }
-    const enrichedPrompt = buildCodexPromptWithAppContext(input.appId, input.prompt);
+    const dataRootReal = await fs.realpath(getPrivateDataRoot()).catch(async () => {
+      await fs.mkdir(getPrivateDataRoot(), { recursive: true });
+      return fs.realpath(getPrivateDataRoot());
+    });
+    const sharedFiles: SharedFileRef[] = [];
+    for (const fileRef of input.sharedFiles ?? []) {
+      const candidatePath = path.isAbsolute(fileRef.path) ? fileRef.path : path.join(getPrivateDataRoot(), fileRef.path);
+      const realPath = await fs.realpath(candidatePath).catch(() => null);
+      if (!realPath || !ensurePathInside(dataRootReal, realPath)) {
+        continue;
+      }
+      sharedFiles.push({ ...fileRef, path: realPath });
+    }
+    const enrichedPrompt = buildCodexPromptWithAppContext({
+      appId: input.appId,
+      displayName: resolveSelectedAppDisplayName(input.appId),
+      userPrompt: input.prompt,
+      sharedFilesRootName: path.basename(getPrivateDataRoot()),
+      sharedFiles: sharedFiles.map((fileRef) => ({
+        name: fileRef.name ?? path.basename(fileRef.path),
+        relativePath: toPosixRelativePath(fileRef.relativePath ?? path.relative(getPrivateDataRoot(), fileRef.path)),
+        sizeBytes: fileRef.sizeBytes ?? 0,
+        modifiedAt: fileRef.modifiedAt ?? '',
+        source: fileRef.source ?? 'mentioned',
+      })),
+    });
     return await chatOrchestrator.startRun({
       ...input,
       prompt: enrichedPrompt,
+      sharedFiles,
     });
   });
   ipcMain.handle(IPC_CHANNELS.chatGetRun, async (_event, input: ChatGetRunInput) => {
@@ -2747,6 +2646,46 @@ const registerIpcHandlers = (): void => {
       return { success: false, technicalCode: 'chat_orchestrator_unavailable' };
     }
     return await chatOrchestrator.undo(input);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.filesPickForChat, async () => {
+    const options: Electron.OpenDialogOptions = {
+      properties: ['openFile', 'multiSelections'],
+    };
+    const result = mainWindow && !mainWindow.isDestroyed()
+      ? await dialog.showOpenDialog(mainWindow, options)
+      : await dialog.showOpenDialog(options);
+    if (result.canceled) {
+      return [];
+    }
+    return await getFileLibrary().pickFileInfo(result.filePaths);
+  });
+  ipcMain.handle(IPC_CHANNELS.filesList, async (_event, input?: FilesListInput) => {
+    return await getFileLibrary().list(input ?? {});
+  });
+  ipcMain.handle(IPC_CHANNELS.filesListCategories, async () => {
+    return await getFileLibrary().listCategories();
+  });
+  ipcMain.handle(IPC_CHANNELS.filesCreateCategory, async (_event, input: FilesCreateCategoryInput) => {
+    return await getFileLibrary().createCategory(input);
+  });
+  ipcMain.handle(IPC_CHANNELS.filesRenameCategory, async (_event, input: FilesRenameCategoryInput) => {
+    return await getFileLibrary().renameCategory(input);
+  });
+  ipcMain.handle(IPC_CHANNELS.filesDeleteCategory, async (_event, input: FilesDeleteCategoryInput) => {
+    return await getFileLibrary().deleteCategory(input);
+  });
+  ipcMain.handle(IPC_CHANNELS.filesImport, async (_event, input: FilesImportInput) => {
+    return await getFileLibrary().importFiles(input);
+  });
+  ipcMain.handle(IPC_CHANNELS.filesMove, async (_event, input: FilesMoveInput) => {
+    return await getFileLibrary().moveFiles(input);
+  });
+  ipcMain.handle(IPC_CHANNELS.filesRename, async (_event, input: FilesRenameInput) => {
+    return await getFileLibrary().renameFile(input);
+  });
+  ipcMain.handle(IPC_CHANNELS.filesDelete, async (_event, input: FilesDeleteInput) => {
+    return await getFileLibrary().deleteFiles(input);
   });
 
   ipcMain.handle(IPC_CHANNELS.dbListTables, async (_event, appId: string) => {
@@ -2798,13 +2737,20 @@ const registerIpcHandlers = (): void => {
 app.whenReady().then(async () => {
   await fs.mkdir(getTempRoot(), { recursive: true });
   await fs.mkdir(getRuntimesRoot(), { recursive: true });
+  await fs.mkdir(getForgerHomeRoot(), { recursive: true });
+  await fs.mkdir(getForgerMetadataRoot(), { recursive: true });
   await fs.mkdir(getPrivateAppsRoot(), { recursive: true });
-  await ensureGlobalAgentsContext(getPrivateAppsRoot());
+  await fs.mkdir(getPrivateDataRoot(), { recursive: true });
+  await ensureGlobalAgentsContext(getForgerHomeRoot());
   await fs.mkdir(getCodexRoot(), { recursive: true });
   await fs.mkdir(getCodexHome(), { recursive: true });
   await loadRegistry();
+  fileLibrary = new FileLibrary(getPrivateDataRoot(), getForgerMetadataRoot());
   chatOrchestrator = new ChatOrchestrator({
+    forgerHomeRoot: getForgerHomeRoot(),
     privateAppsRoot: getPrivateAppsRoot(),
+    metadataRoot: getForgerMetadataRoot(),
+    legacyMetadataRoot: getLegacyForgerMetadataRoot(),
     codexHome: getCodexHome(),
     agentContractVersion: FORGER_AGENT_CONTRACT_VERSION,
     getCodexCliPath: async () => await resolveCodexCliPath(getCodexRoot()),

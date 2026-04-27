@@ -1,10 +1,15 @@
 import SendRounded from '@mui/icons-material/SendRounded';
 import AddCommentRounded from '@mui/icons-material/AddCommentRounded';
+import AddRounded from '@mui/icons-material/AddRounded';
+import AttachFileRounded from '@mui/icons-material/AttachFileRounded';
+import CloseRounded from '@mui/icons-material/CloseRounded';
+import DonutLargeRounded from '@mui/icons-material/DonutLargeRounded';
 import HistoryRounded from '@mui/icons-material/HistoryRounded';
 import {
   Avatar,
   Box,
   Button,
+  Chip,
   CircularProgress,
   Divider,
   Drawer,
@@ -13,13 +18,22 @@ import {
   ListItem,
   ListItemButton,
   ListItemText,
+  MenuItem,
+  Paper,
+  Select,
   Stack,
-  TextField,
   Tooltip,
   Typography,
   useTheme,
 } from '@mui/material';
 import type { AppDictionary } from '@renderer/i18n';
+import type {
+  CodexModelOption,
+  CodexReasoningEffort,
+  ForgerFileCategory,
+  ForgerFileRecord,
+  PickedChatFile,
+} from '@shared/types';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useEffect, useRef, useState } from 'react';
@@ -29,6 +43,14 @@ export interface ChatMessage {
   id: string;
   role: 'assistant' | 'user';
   content: string;
+  files?: Array<{
+    id: string;
+    name: string;
+    relativePath: string;
+    sizeBytes: number;
+    displayPath?: string;
+    source: 'attached' | 'mentioned';
+  }>;
   action?: {
     type: 'open-app';
     appId: string;
@@ -112,6 +134,25 @@ interface ChatViewProps {
   inputValue: string;
   onInputChange: (value: string) => void;
   onSend: () => void;
+  pendingFiles: PickedChatFile[];
+  mentionedFiles: ForgerFileRecord[];
+  availableFiles: ForgerFileRecord[];
+  fileCategories: ForgerFileCategory[];
+  uploadCategoryPath: string;
+  onUploadCategoryChange: (categoryPath: string) => void;
+  onPickFiles: () => void;
+  onCreateUploadCategory: () => void;
+  onRemovePendingFile: (sourcePath: string) => void;
+  onMentionFile: (file: ForgerFileRecord) => void;
+  onRemoveMentionedFile: (fileId: string) => void;
+  modelOptions: CodexModelOption[];
+  selectedModel: string;
+  onSelectModel: (model: string) => void;
+  reasoningOptions: { label: string; value: CodexReasoningEffort }[];
+  selectedReasoningEffort: CodexReasoningEffort;
+  onSelectReasoningEffort: (reasoningEffort: CodexReasoningEffort) => void;
+  onOpenCodexUsageDashboard: () => void;
+  assistantAvatarSrc: string;
   isSending: boolean;
   progressLines: string[];
   codexConfigured: boolean;
@@ -131,6 +172,25 @@ export function ChatView({
   inputValue,
   onInputChange,
   onSend,
+  pendingFiles,
+  mentionedFiles,
+  availableFiles,
+  fileCategories,
+  uploadCategoryPath,
+  onUploadCategoryChange,
+  onPickFiles,
+  onCreateUploadCategory,
+  onRemovePendingFile,
+  onMentionFile,
+  onRemoveMentionedFile,
+  modelOptions,
+  selectedModel,
+  onSelectModel,
+  reasoningOptions,
+  selectedReasoningEffort,
+  onSelectReasoningEffort,
+  onOpenCodexUsageDashboard,
+  assistantAvatarSrc,
   isSending,
   progressLines,
   codexConfigured,
@@ -139,8 +199,182 @@ export function ChatView({
 }: ChatViewProps) {
   const theme = useTheme();
   const [historyOpen, setHistoryOpen] = useState(false);
-  const inputRef = useRef<HTMLInputElement | null>(null);
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const [mentionMenuPosition, setMentionMenuPosition] = useState<{ left: number; bottom: number } | null>(null);
+  const inputRef = useRef<HTMLDivElement | null>(null);
+  const composerAnchorRef = useRef<HTMLDivElement | null>(null);
+  const messagesScrollRef = useRef<HTMLDivElement | null>(null);
+  const shouldAutoScrollRef = useRef(true);
   const hasMessages = messages.length > 0;
+  const matchingFiles = mentionQuery === null
+    ? []
+    : availableFiles
+        .filter((file) => file.name.toLowerCase().includes(mentionQuery.toLowerCase()))
+        .slice(0, 8);
+
+  const formatBytes = (value: number): string => {
+    if (!Number.isFinite(value) || value <= 0) {
+      return '0 B';
+    }
+    const units = ['B', 'KB', 'MB', 'GB'];
+    let size = value;
+    let unitIndex = 0;
+    while (size >= 1024 && unitIndex < units.length - 1) {
+      size /= 1024;
+      unitIndex += 1;
+    }
+    return `${size.toFixed(unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
+  };
+
+  const serializeComposerText = () => {
+    const root = inputRef.current;
+    if (!root) {
+      return '';
+    }
+    const clone = root.cloneNode(true) as HTMLElement;
+    clone.querySelectorAll('[data-file-chip]').forEach((node) => node.remove());
+    return (clone.textContent ?? '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trimStart();
+  };
+
+  const getMentionIdsInComposer = () => {
+    const root = inputRef.current;
+    if (!root) {
+      return [];
+    }
+    return Array.from(root.querySelectorAll<HTMLElement>('[data-file-chip-id]'))
+      .map((node) => node.dataset.fileChipId)
+      .filter((id): id is string => Boolean(id));
+  };
+
+  const getTextBeforeCaret = () => {
+    const root = inputRef.current;
+    const selection = window.getSelection();
+    if (!root || !selection || selection.rangeCount === 0) {
+      return serializeComposerText();
+    }
+    const range = selection.getRangeAt(0);
+    if (!root.contains(range.startContainer)) {
+      return serializeComposerText();
+    }
+    const beforeRange = range.cloneRange();
+    beforeRange.selectNodeContents(root);
+    beforeRange.setEnd(range.startContainer, range.startOffset);
+    const fragment = beforeRange.cloneContents();
+    fragment.querySelectorAll?.('[data-file-chip]').forEach((node) => node.remove());
+    return (fragment.textContent ?? '').replace(/\u00a0/g, ' ');
+  };
+
+  const syncComposerText = () => {
+    const value = serializeComposerText();
+    onInputChange(value);
+    const existingMentionIds = getMentionIdsInComposer();
+    mentionedFiles.forEach((file) => {
+      if (!existingMentionIds.includes(file.id)) {
+        onRemoveMentionedFile(file.id);
+      }
+    });
+    const match = getTextBeforeCaret().match(/(?:^|\s)@([^\s@]*)$/);
+    if (match) {
+      const root = composerAnchorRef.current;
+      const selection = window.getSelection();
+      if (root && selection && selection.rangeCount > 0) {
+        const caretRect = selection.getRangeAt(0).getBoundingClientRect();
+        const rootRect = root.getBoundingClientRect();
+        if (caretRect.top || caretRect.left) {
+          setMentionMenuPosition({
+            left: Math.max(8, Math.min(caretRect.left - rootRect.left - 18, rootRect.width - 232)),
+            bottom: Math.max(58, rootRect.bottom - caretRect.top + 8),
+          });
+        }
+      }
+    } else {
+      setMentionMenuPosition(null);
+    }
+    setMentionQuery(match ? match[1] : null);
+  };
+
+  const makeMentionChip = (file: ForgerFileRecord) => {
+    const chip = document.createElement('span');
+    chip.setAttribute('contenteditable', 'false');
+    chip.dataset.fileChip = 'true';
+    chip.dataset.fileChipId = file.id;
+    chip.textContent = `@${file.name}`;
+    chip.className = 'forger-inline-file-chip';
+
+    const close = document.createElement('span');
+    close.dataset.fileChipRemove = 'true';
+    close.textContent = 'x';
+    close.className = 'forger-inline-file-chip-remove';
+    chip.appendChild(close);
+    return chip;
+  };
+
+  const handleSelectMention = (file: ForgerFileRecord) => {
+    const root = inputRef.current;
+    const selection = window.getSelection();
+    if (root && selection && selection.rangeCount > 0) {
+      const range = selection.getRangeAt(0);
+      if (root.contains(range.startContainer)) {
+        const textNode = range.startContainer;
+        if (textNode.nodeType === Node.TEXT_NODE) {
+          const text = textNode.textContent ?? '';
+          const before = text.slice(0, range.startOffset);
+          const match = before.match(/(?:^|\s)@([^\s@]*)$/);
+          if (match?.index !== undefined) {
+            range.setStart(textNode, match.index + (match[0].startsWith(' ') ? 1 : 0));
+          }
+        }
+        range.deleteContents();
+        const fragment = document.createDocumentFragment();
+        const chip = makeMentionChip(file);
+        const trailingSpace = document.createTextNode(' ');
+        fragment.append(chip, trailingSpace);
+        range.insertNode(fragment);
+        range.setStartAfter(trailingSpace);
+        range.setEndAfter(trailingSpace);
+        selection.removeAllRanges();
+        selection.addRange(range);
+      }
+    }
+    onMentionFile(file);
+    setMentionQuery(null);
+    setMentionMenuPosition(null);
+    inputRef.current?.focus();
+    window.setTimeout(syncComposerText, 0);
+  };
+
+  const compactFileName = (name: string): string => {
+    const dotIndex = name.lastIndexOf('.');
+    const extension = dotIndex > 0 ? name.slice(dotIndex) : '';
+    const base = dotIndex > 0 ? name.slice(0, dotIndex) : name;
+    const maxBaseLength = extension ? 18 : 24;
+    return base.length > maxBaseLength ? `${base.slice(0, maxBaseLength).trim()}...${extension}` : name;
+  };
+
+  const compactCategoryLabel = (value: string): string => {
+    if (!value) {
+      return t.sections.chat.rootCategory;
+    }
+    return fileCategories.find((category) => category.path === value)?.name ?? value.split('/').join(' / ');
+  };
+
+  const compactSelectMenuProps = {
+    PaperProps: {
+      sx: {
+        mt: 0.5,
+        borderRadius: 1.5,
+        maxHeight: 240,
+        '& .MuiMenuItem-root': {
+          minHeight: 32,
+          py: 0.75,
+          fontSize: 13,
+        },
+      },
+    },
+    MenuListProps: {
+      dense: true,
+    },
+  } as const;
 
   useEffect(() => {
     if (!codexConfigured || isSending) {
@@ -151,6 +385,20 @@ export function ChatView({
     }, 0);
     return () => window.clearTimeout(timer);
   }, [activeConversationId, codexConfigured, isSending]);
+
+  useEffect(() => {
+    if (!inputValue && mentionedFiles.length === 0 && inputRef.current?.textContent) {
+      inputRef.current.textContent = '';
+    }
+  }, [inputValue, mentionedFiles.length]);
+
+  useEffect(() => {
+    const scrollEl = messagesScrollRef.current;
+    if (!scrollEl || !shouldAutoScrollRef.current) {
+      return;
+    }
+    scrollEl.scrollTop = scrollEl.scrollHeight;
+  }, [messages.length, isSending, progressLines.length]);
 
   return (
     <Box
@@ -233,6 +481,12 @@ export function ChatView({
       </Box>
 
       <Box
+        ref={messagesScrollRef}
+        onScroll={(event) => {
+          const target = event.currentTarget;
+          const distanceFromBottom = target.scrollHeight - target.scrollTop - target.clientHeight;
+          shouldAutoScrollRef.current = distanceFromBottom <= 4;
+        }}
         sx={{
           flex: 1,
           minHeight: 0,
@@ -265,7 +519,17 @@ export function ChatView({
                   justifyContent={message.role === 'user' ? 'flex-end' : 'flex-start'}
                 >
                   {message.role === 'assistant' ? (
-                    <Avatar sx={{ width: 34, height: 34, bgcolor: 'secondary.main' }}>F</Avatar>
+                    <Avatar
+                      src={assistantAvatarSrc}
+                      sx={{
+                        width: 30,
+                        height: 30,
+                        bgcolor: '#fff',
+                        p: 0.05,
+                        pb: 0,
+                        '& img': { objectFit: 'contain' },
+                      }}
+                    />
                   ) : null}
                   <Box
                     sx={{
@@ -290,9 +554,41 @@ export function ChatView({
                         ) : null}
                       </Stack>
                     ) : (
-                      <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
-                        {message.content}
-                      </Typography>
+                      <Stack spacing={0.85}>
+                        <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
+                          {message.content}
+                        </Typography>
+                        {message.files?.length ? (
+                          <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                            {message.files.map((file) => (
+                              <Chip
+                                key={`${file.source}-${file.id}`}
+                                size="small"
+                                label={
+                                  file.source === 'mentioned'
+                                    ? `@${compactFileName(file.name)}`
+                                    : `${compactFileName(file.name)} · ${formatBytes(file.sizeBytes)}`
+                                }
+                                title={file.displayPath ?? file.relativePath}
+                                variant={file.source === 'mentioned' ? 'outlined' : 'filled'}
+                                sx={{
+                                  height: 23,
+                                  maxWidth: 220,
+                                  borderRadius: 1,
+                                  fontSize: 11,
+                                  bgcolor: file.source === 'mentioned' ? 'rgba(124,58,237,0.2)' : 'rgba(255,255,255,0.18)',
+                                  borderColor: file.source === 'mentioned' ? 'rgba(255,255,255,0.5)' : undefined,
+                                  color: 'inherit',
+                                  '& .MuiChip-label': {
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                  },
+                                }}
+                              />
+                            ))}
+                          </Stack>
+                        ) : null}
+                      </Stack>
                     )}
                   </Box>
                 </Stack>
@@ -301,7 +597,17 @@ export function ChatView({
           )}
           {isSending ? (
             <Stack direction="row" spacing={1.25} alignItems="flex-start">
-              <Avatar sx={{ width: 34, height: 34, bgcolor: 'secondary.main' }}>F</Avatar>
+              <Avatar
+                src={assistantAvatarSrc}
+                sx={{
+                  width: 30,
+                  height: 30,
+                  bgcolor: '#fff',
+                  p: 0.05,
+                  pb: 0,
+                  '& img': { objectFit: 'contain' },
+                }}
+              />
               <Box sx={{ maxWidth: '78%', color: 'text.secondary' }}>
                 <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
                   <CircularProgress size={14} />
@@ -322,43 +628,295 @@ export function ChatView({
         </Stack>
       </Box>
 
-      <Stack spacing={1.25}>
-        <TextField
-          fullWidth
-          multiline
-          minRows={2}
-          maxRows={4}
-          placeholder={t.sections.chat.inputPlaceholder}
-          value={inputValue}
-          disabled={isSending || !codexConfigured}
-          inputRef={inputRef}
-          onChange={(event) => onInputChange(event.target.value)}
-          onKeyDown={(event) => {
-            if (isSending || !codexConfigured) {
-              return;
-            }
-            if (event.key === 'Enter' && !event.shiftKey) {
-              event.preventDefault();
-              if (inputValue.trim()) {
-                onSend();
-              }
-            }
-          }}
-        />
+      <Stack spacing={1}>
+        <Box ref={composerAnchorRef} sx={{ position: 'relative' }}>
+          <Paper
+            variant="outlined"
+            sx={{
+              borderRadius: 2,
+              px: 1,
+              pt: 0.9,
+              pb: 0.8,
+              bgcolor: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.05)' : 'background.paper',
+              borderColor: theme.palette.divider,
+            }}
+          >
+            <Box
+              onClick={() => inputRef.current?.focus()}
+              sx={{
+                minHeight: 92,
+                borderRadius: 1.5,
+                px: 0.4,
+                py: 0.25,
+                cursor: 'text',
+              }}
+            >
+              {pendingFiles.length > 0 ? (
+                <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" sx={{ mb: 0.5 }}>
+                  {pendingFiles.map((file) => (
+                    <Chip
+                      key={file.sourcePath}
+                      label={compactFileName(file.name)}
+                      size="small"
+                      onDelete={() => onRemovePendingFile(file.sourcePath)}
+                      deleteIcon={<CloseRounded />}
+                      sx={{
+                        height: 24,
+                        maxWidth: 188,
+                        borderRadius: 1.25,
+                        fontSize: 12,
+                        '& .MuiChip-label': {
+                          pl: 1,
+                          pr: 0.25,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                        },
+                        '& .MuiChip-deleteIcon': { fontSize: 16 },
+                      }}
+                    />
+                  ))}
+                </Stack>
+              ) : null}
+
+              <Box
+                component="div"
+                ref={inputRef}
+                contentEditable={!isSending && codexConfigured}
+                suppressContentEditableWarning
+                role="textbox"
+                aria-label={t.sections.chat.inputPlaceholder}
+                data-placeholder={t.sections.chat.inputPlaceholder}
+                onInput={syncComposerText}
+                onPaste={(event) => {
+                  event.preventDefault();
+                  const text = event.clipboardData.getData('text/plain');
+                  document.execCommand('insertText', false, text);
+                }}
+                onClick={(event) => {
+                  const removeTarget = (event.target as HTMLElement).closest<HTMLElement>('[data-file-chip-remove]');
+                  const chip = removeTarget?.closest<HTMLElement>('[data-file-chip-id]');
+                  const fileId = chip?.dataset.fileChipId;
+                  if (chip && fileId) {
+                    chip.remove();
+                    onRemoveMentionedFile(fileId);
+                    syncComposerText();
+                  }
+                }}
+                onKeyDown={(event) => {
+                  if (isSending || !codexConfigured) {
+                    return;
+                  }
+                  if (event.key === 'Enter' && !event.shiftKey) {
+                    event.preventDefault();
+                    if (serializeComposerText().trim() || pendingFiles.length > 0 || mentionedFiles.length > 0) {
+                      onSend();
+                    }
+                  }
+                }}
+                sx={{
+                  width: '100%',
+                  minHeight: 56,
+                  maxHeight: 140,
+                  overflowY: 'auto',
+                  border: 0,
+                  outline: 0,
+                  bgcolor: 'transparent',
+                  color: 'text.primary',
+                  font: 'inherit',
+                  fontSize: theme.typography.body1.fontSize,
+                  lineHeight: 1.45,
+                  p: 0.35,
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                  '&:empty::before': {
+                    content: 'attr(data-placeholder)',
+                    color: theme.palette.text.disabled,
+                    pointerEvents: 'none',
+                  },
+                  '& .forger-inline-file-chip': {
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    maxWidth: 190,
+                    height: 24,
+                    mx: 0.25,
+                    px: 0.75,
+                    borderRadius: 1.25,
+                    bgcolor: 'rgba(124,58,237,0.16)',
+                    border: `1px solid ${theme.palette.secondary.main}`,
+                    color: theme.palette.secondary.main,
+                    fontSize: 12,
+                    fontWeight: 600,
+                    lineHeight: 1,
+                    verticalAlign: 'baseline',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  },
+                  '& .forger-inline-file-chip-remove': {
+                    ml: 0.5,
+                    color: theme.palette.text.secondary,
+                    cursor: 'pointer',
+                    fontSize: 13,
+                    lineHeight: '14px',
+                    height: 14,
+                    width: 14,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    alignSelf: 'center',
+                  },
+                }}
+              />
+            </Box>
+
+            <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1}>
+              <Stack direction="row" spacing={0.75} alignItems="center" sx={{ minWidth: 0 }}>
+                <Tooltip title={t.sections.chat.attachFiles}>
+                  <span>
+                    <IconButton size="small" onClick={onPickFiles} disabled={isSending || !codexConfigured}>
+                      <AttachFileRounded fontSize="small" />
+                    </IconButton>
+                  </span>
+                </Tooltip>
+                {pendingFiles.length > 0 ? (
+                  <>
+                    <Select
+                      size="small"
+                      value={uploadCategoryPath}
+                      onChange={(event) => onUploadCategoryChange(event.target.value)}
+                      displayEmpty
+                      renderValue={(value) => compactCategoryLabel(String(value))}
+                      MenuProps={compactSelectMenuProps}
+                      sx={{
+                        minWidth: 76,
+                        maxWidth: 120,
+                        height: 28,
+                        fontSize: 12,
+                        borderRadius: 1.25,
+                        '& .MuiSelect-select': { py: 0.35, pl: 1, pr: '26px !important' },
+                      }}
+                    >
+                      <MenuItem value="">{t.sections.chat.rootCategory}</MenuItem>
+                      {fileCategories.map((category) => (
+                        <MenuItem key={category.path} value={category.path}>{category.name}</MenuItem>
+                      ))}
+                    </Select>
+                    <Tooltip title={t.sections.files.createCategory}>
+                      <IconButton size="small" onClick={onCreateUploadCategory} disabled={isSending || !codexConfigured}>
+                        <AddRounded fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                  </>
+                ) : null}
+              </Stack>
+
+              <Stack direction="row" spacing={0.75} alignItems="center">
+                <Tooltip title={t.sections.chat.quotaOpenDashboard}>
+                  <span>
+                    <IconButton size="small" onClick={onOpenCodexUsageDashboard} disabled={!codexConfigured}>
+                      <DonutLargeRounded fontSize="small" />
+                    </IconButton>
+                  </span>
+                </Tooltip>
+                <Select
+                  size="small"
+                  value={selectedModel}
+                  onChange={(event) => onSelectModel(event.target.value)}
+                  MenuProps={compactSelectMenuProps}
+                  sx={{
+                    height: 28,
+                    minWidth: 104,
+                    fontSize: 12,
+                    borderRadius: 1.25,
+                    '& .MuiSelect-select': { py: 0.35, pl: 1, pr: '26px !important' },
+                  }}
+                >
+                  {modelOptions.map((option) => (
+                    <MenuItem key={option.realModelName} value={option.realModelName}>
+                      {option.displayModelName}
+                    </MenuItem>
+                  ))}
+                </Select>
+                <Select
+                  size="small"
+                  value={selectedReasoningEffort}
+                  onChange={(event) => onSelectReasoningEffort(event.target.value as CodexReasoningEffort)}
+                  MenuProps={compactSelectMenuProps}
+                  sx={{
+                    height: 28,
+                    minWidth: 82,
+                    fontSize: 12,
+                    borderRadius: 1.25,
+                    '& .MuiSelect-select': { py: 0.35, pl: 1, pr: '26px !important' },
+                  }}
+                >
+                  {reasoningOptions.map((option) => (
+                    <MenuItem key={option.value} value={option.value}>
+                      {option.label}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </Stack>
+            </Stack>
+          </Paper>
+
+          {mentionQuery !== null ? (
+            <Paper
+              elevation={8}
+              sx={{
+                position: 'absolute',
+                left: mentionMenuPosition?.left ?? 0,
+                right: 'auto',
+                bottom: mentionMenuPosition?.bottom ?? 'calc(100% + 8px)',
+                width: 228,
+                maxHeight: 220,
+                overflow: 'auto',
+                zIndex: 5,
+              }}
+            >
+              <Box sx={{ px: 1.5, py: 1 }}>
+                <Typography variant="caption" color="text.secondary">{t.sections.chat.mentionFilesTitle}</Typography>
+              </Box>
+              <Divider />
+              {matchingFiles.length === 0 ? (
+                <Box sx={{ px: 1.5, py: 1 }}>
+                  <Typography variant="body2" color="text.secondary">{t.sections.files.noFiles}</Typography>
+                </Box>
+              ) : (
+                <List dense disablePadding>
+                  {matchingFiles.map((file) => (
+                    <ListItemButton
+                      key={file.id}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => handleSelectMention(file)}
+                    >
+                      <ListItemText primary={file.name} secondary={file.categoryPath || t.sections.files.root} />
+                    </ListItemButton>
+                  ))}
+                </List>
+              )}
+            </Paper>
+          ) : null}
+        </Box>
+
         <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={2}>
           <Button
             variant="outlined"
+            size="small"
             startIcon={<AddCommentRounded />}
             onClick={onStartNewConversation}
             disabled={isSending || !codexConfigured}
+            sx={{ minHeight: 32, px: 1.5 }}
           >
             {t.sections.chat.newConversation}
           </Button>
           <Button
             variant="contained"
-            endIcon={isSending ? <CircularProgress size={16} color="inherit" /> : <SendRounded />}
+            size="small"
+            endIcon={isSending ? <CircularProgress size={14} color="inherit" /> : <SendRounded fontSize="small" />}
             onClick={onSend}
-            disabled={isSending || !codexConfigured || !inputValue.trim()}
+            disabled={isSending || !codexConfigured || (!inputValue.trim() && pendingFiles.length === 0 && mentionedFiles.length === 0)}
+            sx={{ minHeight: 32, px: 1.5 }}
           >
             {t.sections.chat.send}
           </Button>

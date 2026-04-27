@@ -1,6 +1,7 @@
 import AppsRounded from '@mui/icons-material/AppsRounded';
 import AutoAwesomeRounded from '@mui/icons-material/AutoAwesomeRounded';
 import CategoryRounded from '@mui/icons-material/CategoryRounded';
+import InsertDriveFileRounded from '@mui/icons-material/InsertDriveFileRounded';
 import TableChartRounded from '@mui/icons-material/TableChartRounded';
 import SettingsRounded from '@mui/icons-material/SettingsRounded';
 import {
@@ -18,7 +19,7 @@ import type { AppDictionary } from '@renderer/i18n';
 import iconDark from '@renderer/assets/icon-dark.svg';
 import iconLight from '@renderer/assets/icon-light.svg';
 
-export type View = 'my-apps' | 'catalog' | 'chat' | 'datos' | 'settings' | 'app';
+export type View = 'my-apps' | 'catalog' | 'chat' | 'files' | 'datos' | 'settings' | 'app';
 
 interface SidebarProps {
   currentView: View;
@@ -30,6 +31,7 @@ const mainNav = [
   { id: 'my-apps' as const, icon: <AppsRounded /> },
   { id: 'catalog' as const, icon: <CategoryRounded /> },
   { id: 'chat' as const, icon: <AutoAwesomeRounded /> },
+  { id: 'files' as const, icon: <InsertDriveFileRounded /> },
   { id: 'datos' as const, icon: <TableChartRounded /> },
 ];
 
@@ -40,6 +42,7 @@ export function Sidebar({ currentView, onNavigate, t }: SidebarProps) {
     'my-apps': t.nav.myApps,
     catalog: t.nav.catalog,
     chat: t.nav.chat,
+    files: t.nav.files,
     datos: t.nav.datos,
     settings: t.nav.settings,
     app: t.nav.catalog,
