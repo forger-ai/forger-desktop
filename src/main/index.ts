@@ -1611,7 +1611,7 @@ const connectCodexAuth = async (): Promise<{ success: boolean; userMessage: stri
 
       const child = spawn(
         'cmd.exe',
-        ['/d', '/s', '/c', `start "Forger Codex Login" "${loginScriptPath}"`],
+        ['/d', '/k', loginScriptPath],
         {
           cwd: app.getPath('userData'),
           detached: true,
