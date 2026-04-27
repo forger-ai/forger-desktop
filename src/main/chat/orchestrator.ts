@@ -14,12 +14,16 @@ import type {
   ChatStartRunInput,
   ChatUndoInput,
   ChatUndoResult,
+  CodexReasoningEffort,
   PermissionRequest,
   PreviewDiffFile,
 } from '../../shared/types';
 
 interface ChatOrchestratorOptions {
+  forgerHomeRoot: string;
   privateAppsRoot: string;
+  metadataRoot: string;
+  legacyMetadataRoot?: string;
   codexHome: string;
   agentContractVersion: number;
   getCodexCliPath: () => Promise<string | null>;
@@ -58,6 +62,8 @@ interface InternalChatRun extends ChatRun {
   baseHead: string | null;
   sharedRoots: string[];
   runLogPath: string;
+  model: string;
+  reasoningEffort: CodexReasoningEffort;
 }
 
 interface PendingPermission {
@@ -223,6 +229,8 @@ class SandboxRunner {
     pathEntries: string[];
     workingDir: string;
     prompt: string;
+    model: string;
+    reasoningEffort: CodexReasoningEffort;
     timeoutMs: number;
     onChild: (child: ChildProcessWithoutNullStreams) => void;
     onOutput?: (stream: 'stdout' | 'stderr' | 'meta', text: string) => void;
@@ -230,8 +238,8 @@ class SandboxRunner {
   }): Promise<CodexRunResult> {
     const allowedRoots = [params.workingDir].join(path.delimiter);
 
-    const modelArgs = ['--model', 'gpt-5.3-codex'];
-    const lowThinkingArgs = ['--config', 'reasoning_effort="low"'];
+    const modelArgs = ['--model', params.model];
+    const reasoningArgs = ['--config', `reasoning_effort="${params.reasoningEffort}"`];
     const commonArgs = ['--skip-git-repo-check', '-C', params.workingDir];
 
     const attempts: string[][] = params.threadId
@@ -241,7 +249,7 @@ class SandboxRunner {
             'resume',
             '--json',
             ...modelArgs,
-            ...lowThinkingArgs,
+            ...reasoningArgs,
             '--full-auto',
             '--skip-git-repo-check',
             params.threadId,
@@ -252,7 +260,7 @@ class SandboxRunner {
             'resume',
             '--json',
             ...modelArgs,
-            ...lowThinkingArgs,
+            ...reasoningArgs,
             '--skip-git-repo-check',
             params.threadId,
             params.prompt,
@@ -269,8 +277,8 @@ class SandboxRunner {
           ['exec', 'resume', ...modelArgs, '--skip-git-repo-check', params.threadId, params.prompt],
         ]
       : [
-          ['exec', '--json', ...modelArgs, ...lowThinkingArgs, '--full-auto', '--sandbox', 'workspace-write', ...commonArgs, params.prompt],
-          ['exec', '--json', ...modelArgs, ...lowThinkingArgs, '--sandbox', 'workspace-write', ...commonArgs, params.prompt],
+          ['exec', '--json', ...modelArgs, ...reasoningArgs, '--full-auto', '--sandbox', 'workspace-write', ...commonArgs, params.prompt],
+          ['exec', '--json', ...modelArgs, ...reasoningArgs, '--sandbox', 'workspace-write', ...commonArgs, params.prompt],
           ['exec', '--json', ...modelArgs, '--sandbox', 'workspace-write', ...commonArgs, params.prompt],
           ['exec', '--json', ...modelArgs, ...commonArgs, params.prompt],
           ['exec', ...modelArgs, ...commonArgs, params.prompt],
@@ -286,7 +294,7 @@ class SandboxRunner {
         const json = args.includes('--json') ? 'json' : 'plain';
         params.onOutput?.(
           'meta',
-          `Intento ${index + 1}/${attempts.length} (${mode}, ${json}, model=gpt-5.3-codex)`,
+          `Intento ${index + 1}/${attempts.length} (${mode}, ${json}, model=${params.model})`,
         );
         const result = await runCommandCapture(
           codexCommand.command,
@@ -371,7 +379,7 @@ export class ChatOrchestrator {
     }
 
     const appRoot = path.join(this.options.privateAppsRoot, input.appId);
-    const stagingDir = path.join(this.options.privateAppsRoot, '.forger', 'staging', randomUUID());
+    const stagingDir = path.join(this.options.metadataRoot, 'staging', randomUUID());
     const runId = randomUUID();
     const now = new Date().toISOString();
 
@@ -396,8 +404,10 @@ export class ChatOrchestrator {
       appRoot,
       baseHead,
       sharedRoots,
-      runLogPath: getRunLogPath(this.options.privateAppsRoot, runId),
+      runLogPath: getRunLogPath(this.options.metadataRoot, runId),
       progressLog: [],
+      model: input.model?.trim() || 'gpt-5.3-codex',
+      reasoningEffort: input.reasoningEffort ?? 'low',
     };
 
     this.runs.set(runId, run);
@@ -618,15 +628,17 @@ export class ChatOrchestrator {
       await fs.mkdir(path.dirname(run.runLogPath), { recursive: true });
       await fs.writeFile(
         run.runLogPath,
-        `[${new Date().toISOString()}] Run ${run.runId} app=${run.appId} cwd=${this.options.privateAppsRoot}\n`,
+        `[${new Date().toISOString()}] Run ${run.runId} app=${run.appId} cwd=${this.options.forgerHomeRoot}\n`,
         'utf8',
       );
 
       const assistantReply = await this.sandboxRunner.runCodex({
         codexCliPath,
         pathEntries: codexPathEntries,
-        workingDir: this.options.privateAppsRoot,
+        workingDir: this.options.forgerHomeRoot,
         prompt: run.prompt,
+        model: run.model,
+        reasoningEffort: run.reasoningEffort,
         timeoutMs: 300_000,
         onChild: () => {
           // hook reserved for cancellation propagation
@@ -738,14 +750,21 @@ export class ChatOrchestrator {
   }
 
   private async operationsFile(appId: string): Promise<string> {
-    const dir = path.join(this.options.privateAppsRoot, '.forger', 'operations');
+    const dir = path.join(this.options.metadataRoot, 'operations');
     await fs.mkdir(dir, { recursive: true });
     return path.join(dir, `${appId}.json`);
   }
 
+  private legacyOperationsFile(appId: string): string | null {
+    return this.options.legacyMetadataRoot ? path.join(this.options.legacyMetadataRoot, 'operations', `${appId}.json`) : null;
+  }
+
   private async readOperationHistory(appId: string): Promise<OperationEntry[]> {
     const filePath = await this.operationsFile(appId);
-    const raw = await fs.readFile(filePath, 'utf8').catch(() => '[]');
+    const raw = await fs.readFile(filePath, 'utf8').catch(async () => {
+      const legacyPath = this.legacyOperationsFile(appId);
+      return legacyPath ? await fs.readFile(legacyPath, 'utf8').catch(() => '[]') : '[]';
+    });
     try {
       const parsed = JSON.parse(raw) as OperationEntry[];
       return Array.isArray(parsed) ? parsed : [];
@@ -766,12 +785,19 @@ export class ChatOrchestrator {
   }
 
   private getThreadsFilePath(): string {
-    return path.join(this.options.privateAppsRoot, '.forger', 'threads.json');
+    return path.join(this.options.metadataRoot, 'threads.json');
+  }
+
+  private getLegacyThreadsFilePath(): string | null {
+    return this.options.legacyMetadataRoot ? path.join(this.options.legacyMetadataRoot, 'threads.json') : null;
   }
 
   private async loadThreadState(): Promise<void> {
     const filePath = this.getThreadsFilePath();
-    const raw = await fs.readFile(filePath, 'utf8').catch(() => '');
+    const raw = await fs.readFile(filePath, 'utf8').catch(async () => {
+      const legacyPath = this.getLegacyThreadsFilePath();
+      return legacyPath ? await fs.readFile(legacyPath, 'utf8').catch(() => '') : '';
+    });
     if (!raw) {
       return;
     }

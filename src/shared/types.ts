@@ -35,6 +35,14 @@ export interface CodexAuthStatus {
   codexCliPath?: string;
 }
 
+export type CodexReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh';
+
+export interface CodexModelOption {
+  displayModelName: string;
+  realModelName: string;
+  defaultReasoningEffort: CodexReasoningEffort;
+}
+
 export interface MockActionResult {
   ok: true;
 }
@@ -108,6 +116,12 @@ export type ChatErrorCode =
 
 export interface SharedFileRef {
   path: string;
+  id?: string;
+  name?: string;
+  relativePath?: string;
+  sizeBytes?: number;
+  modifiedAt?: string;
+  source?: 'attached' | 'mentioned';
 }
 
 export interface PermissionRequest {
@@ -191,6 +205,8 @@ export interface ChatStartRunInput {
   prompt: string;
   threadId?: string | null;
   sharedFiles?: SharedFileRef[];
+  model?: string;
+  reasoningEffort?: CodexReasoningEffort;
   dangerMode?: boolean;
 }
 
@@ -262,6 +278,83 @@ export interface DbQueryTableError {
 
 export type DbQueryTableResponse = DbQueryTableResult | DbQueryTableError;
 
+export interface ForgerFileRecord {
+  id: string;
+  name: string;
+  relativePath: string;
+  categoryPath: string;
+  sizeBytes: number;
+  uploadedAt: string;
+  modifiedAt: string;
+  type: string;
+  appId?: string;
+}
+
+export interface ForgerFileCategory {
+  path: string;
+  name: string;
+  parentPath: string;
+  createdAt?: string;
+  modifiedAt?: string;
+}
+
+export interface PickedChatFile {
+  sourcePath: string;
+  name: string;
+  sizeBytes: number;
+  modifiedAt: string;
+  type: string;
+}
+
+export interface FilesListInput {
+  query?: string;
+  categoryPath?: string;
+  type?: string;
+  sortBy?: 'name' | 'uploadedAt' | 'modifiedAt' | 'sizeBytes';
+  sortDirection?: 'asc' | 'desc';
+}
+
+export interface FilesImportInput {
+  sourcePaths: string[];
+  categoryPath?: string;
+  appId?: string;
+}
+
+export interface FilesMoveInput {
+  fileIds: string[];
+  categoryPath: string;
+}
+
+export interface FilesRenameInput {
+  fileId: string;
+  name: string;
+}
+
+export interface FilesDeleteInput {
+  fileIds: string[];
+}
+
+export interface FilesCreateCategoryInput {
+  parentPath?: string;
+  name: string;
+}
+
+export interface FilesRenameCategoryInput {
+  categoryPath: string;
+  newName: string;
+}
+
+export interface FilesDeleteCategoryInput {
+  categoryPath: string;
+  mode: 'emptyOnly';
+}
+
+export interface FilesActionResult {
+  success: boolean;
+  userMessage?: string;
+  technicalCode?: string;
+}
+
 export interface ForgerDesktopApi {
   listInstalledApps: () => Promise<AppSummary[]>;
   listCatalogApps: () => Promise<CatalogApp[]>;
@@ -276,6 +369,7 @@ export interface ForgerDesktopApi {
   onRuntimeStatusChanged: (listener: (event: RuntimeStatus) => void) => () => void;
   getSettings: () => Promise<Settings>;
   getCodexAuthStatus: () => Promise<CodexAuthStatus>;
+  openCodexUsageDashboard: () => Promise<{ success: boolean; userMessage?: string; technicalCode?: string }>;
   connectCodexAuth: () => Promise<{ success: boolean; userMessage: string; technicalCode?: string }>;
   disconnectCodexAuth: () => Promise<{ success: boolean; userMessage: string; technicalCode?: string }>;
   chatStartRun: (input: ChatStartRunInput) => Promise<{ runId: string; status: ChatRunStatus }>;
@@ -285,6 +379,16 @@ export interface ForgerDesktopApi {
   chatApplyRun: (input: ChatApplyRunInput) => Promise<ChatApplyResult>;
   chatUndo: (input: ChatUndoInput) => Promise<ChatUndoResult>;
   onChatRunUpdated: (listener: (event: ChatRunEvent) => void) => () => void;
+  filesPickForChat: () => Promise<PickedChatFile[]>;
+  filesList: (input?: FilesListInput) => Promise<ForgerFileRecord[]>;
+  filesListCategories: () => Promise<ForgerFileCategory[]>;
+  filesCreateCategory: (input: FilesCreateCategoryInput) => Promise<ForgerFileCategory>;
+  filesRenameCategory: (input: FilesRenameCategoryInput) => Promise<FilesActionResult>;
+  filesDeleteCategory: (input: FilesDeleteCategoryInput) => Promise<FilesActionResult>;
+  filesImport: (input: FilesImportInput) => Promise<ForgerFileRecord[]>;
+  filesMove: (input: FilesMoveInput) => Promise<ForgerFileRecord[]>;
+  filesRename: (input: FilesRenameInput) => Promise<ForgerFileRecord>;
+  filesDelete: (input: FilesDeleteInput) => Promise<FilesActionResult>;
   dbListTables: (appId: string) => Promise<DbListTablesResponse>;
   dbQueryTable: (appId: string, tableName: string, limit?: number) => Promise<DbQueryTableResponse>;
 }

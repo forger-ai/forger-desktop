@@ -75,17 +75,16 @@ export function CodexConfigModal({
               <Stack spacing={1}>
                 <Typography fontWeight={700}>{t.codexSetup.successTitle}</Typography>
                 <Typography variant="body2">{t.codexSetup.successBody}</Typography>
-                <Box>
-                  {t.codexSetup.messagesUrl ? (
-                    <Button component="a" href={t.codexSetup.messagesUrl} target="_blank" rel="noreferrer" size="small">
-                      {t.codexSetup.messagesLinkLabel}
-                    </Button>
-                  ) : null}
-                  {t.codexSetup.usageUrl ? (
-                    <Button component="a" href={t.codexSetup.usageUrl} target="_blank" rel="noreferrer" size="small">
-                      {t.codexSetup.usageLinkLabel}
-                    </Button>
-                  ) : null}
+                <Box sx={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12 }}>
+                  <Typography variant="caption" component="div" color="text.secondary">
+                    {t.settings.codexCliPathLabel}: {status.codexCliPath ?? '-'}
+                  </Typography>
+                  <Typography variant="caption" component="div" color="text.secondary">
+                    {t.settings.codexHomeLabel}: {status.codexHome || '-'}
+                  </Typography>
+                  <Typography variant="caption" component="div" color="text.secondary">
+                    {t.settings.codexAuthFileLabel}: {status.authFilePath || '-'}
+                  </Typography>
                 </Box>
               </Stack>
             </Alert>
