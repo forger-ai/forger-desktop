@@ -1,15 +1,17 @@
 import LaunchRounded from '@mui/icons-material/LaunchRounded';
 import DownloadRounded from '@mui/icons-material/DownloadRounded';
-import TuneRounded from '@mui/icons-material/TuneRounded';
 import StopCircleRounded from '@mui/icons-material/StopCircleRounded';
 import ReplayRounded from '@mui/icons-material/ReplayRounded';
+import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
 import {
   Avatar,
   Box,
   Button,
   Card,
   Chip,
+  IconButton,
   Stack,
+  Tooltip,
   Typography,
 } from '@mui/material';
 
@@ -25,6 +27,9 @@ interface AppCardProps {
   primaryDisabled?: boolean;
   secondaryActionLabel?: string;
   onSecondaryAction?: () => void;
+  tertiaryActionLabel?: string;
+  onTertiaryAction?: () => void;
+  onCardClick?: () => void;
 }
 
 const initialsFromName = (name: string) =>
@@ -46,6 +51,9 @@ export function AppCard({
   primaryDisabled = false,
   secondaryActionLabel,
   onSecondaryAction,
+  tertiaryActionLabel,
+  onTertiaryAction,
+  onCardClick,
 }: AppCardProps) {
   const primaryIcon =
     primaryAction === 'open' ? (
@@ -60,16 +68,46 @@ export function AppCard({
 
   return (
     <Card
+      onClick={onCardClick}
       sx={{
         minHeight: 244,
         height: '100%',
         display: 'flex',
         flexDirection: 'column',
         p: 2.25,
+        cursor: onCardClick ? 'pointer' : 'default',
+        transition: 'transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease',
+        '&:hover': onCardClick
+          ? {
+              transform: 'translateY(-3px)',
+              boxShadow: 6,
+            }
+          : undefined,
       }}
     >
       <Stack spacing={2} sx={{ height: '100%' }}>
         <Stack direction="row" justifyContent="space-between" spacing={2} alignItems="flex-start">
+          <Chip label={statusLabel} color={statusColor} size="small" />
+          {tertiaryActionLabel && onTertiaryAction ? (
+            <Tooltip title={tertiaryActionLabel}>
+              <IconButton
+                size="small"
+                color="error"
+                aria-label={tertiaryActionLabel}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onTertiaryAction();
+                }}
+              >
+                <DeleteOutlineRounded fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          ) : (
+            <Box sx={{ width: 30, height: 30 }} />
+          )}
+        </Stack>
+
+        <Stack direction="row" spacing={1.25} alignItems="center">
           <Avatar
             sx={{
               width: 42,
@@ -77,21 +115,20 @@ export function AppCard({
               bgcolor: 'secondary.main',
               color: 'secondary.contrastText',
               fontWeight: 700,
+              flexShrink: 0,
             }}
           >
             {initialsFromName(appName)}
           </Avatar>
-          <Chip label={statusLabel} color={statusColor} size="small" />
+          <Box sx={{ minWidth: 0 }}>
+            <Typography variant="subtitle1" sx={{ mb: 0.25 }} noWrap>
+              {appName}
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              {categoryLabel}
+            </Typography>
+          </Box>
         </Stack>
-
-        <Box>
-          <Typography variant="subtitle1" sx={{ mb: 0.5 }}>
-            {appName}
-          </Typography>
-          <Typography variant="caption" color="text.secondary">
-            {categoryLabel}
-          </Typography>
-        </Box>
 
         <Typography variant="body2" color="text.secondary" sx={{ flex: 1 }}>
           {description}
@@ -102,15 +139,20 @@ export function AppCard({
             variant="contained"
             startIcon={primaryIcon}
             disabled={primaryDisabled}
-            onClick={onPrimaryAction}
+            onClick={(event) => {
+              event.stopPropagation();
+              onPrimaryAction();
+            }}
           >
             {primaryActionLabel}
           </Button>
           {secondaryActionLabel && onSecondaryAction ? (
             <Button
               variant="outlined"
-              startIcon={<TuneRounded />}
-              onClick={onSecondaryAction}
+              onClick={(event) => {
+                event.stopPropagation();
+                onSecondaryAction();
+              }}
             >
               {secondaryActionLabel}
             </Button>

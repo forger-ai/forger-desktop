@@ -1,12 +1,10 @@
-import { useState } from 'react';
 import KeyboardArrowDownRounded from '@mui/icons-material/KeyboardArrowDownRounded';
+import PersonRounded from '@mui/icons-material/PersonRounded';
 import {
   alpha,
   Avatar,
   Box,
-  Divider,
   IconButton,
-  Menu,
   MenuItem,
   Select,
   Stack,
@@ -20,8 +18,6 @@ import type { View } from './Sidebar';
 interface TopbarProps {
   currentView: View;
   t: AppDictionary;
-  isAuthenticated: boolean;
-  userLabel: string;
   chatApps: AppSummary[];
   selectedChatAppId: string | null;
   dataApps: AppSummary[];
@@ -29,7 +25,7 @@ interface TopbarProps {
   getAppMeta: (appId: string) => { name: string; description: string };
   onSelectChatApp: (appId: string | null) => void;
   onSelectDataApp: (appId: string | null) => void;
-  onNavigate: (view: View) => void;
+  onOpenCloudModal: () => void;
 }
 
 const initialsFromName = (name: string) =>
@@ -101,8 +97,6 @@ const AppSelect = ({
 export function Topbar({
   currentView,
   t,
-  isAuthenticated,
-  userLabel,
   chatApps,
   selectedChatAppId,
   dataApps,
@@ -110,10 +104,9 @@ export function Topbar({
   getAppMeta,
   onSelectChatApp,
   onSelectDataApp,
-  onNavigate,
+  onOpenCloudModal,
 }: TopbarProps) {
   const theme = useTheme();
-  const [menuAnchor, setMenuAnchor] = useState<null | HTMLElement>(null);
 
   return (
     <Box
@@ -161,50 +154,16 @@ export function Topbar({
           ) : null}
         </Box>
 
-        {/* User button */}
         <IconButton
           size="small"
-          onClick={(e) => setMenuAnchor(e.currentTarget)}
+          onClick={onOpenCloudModal}
           sx={{ p: 0.25 }}
+          aria-label={t.cloud.openLabel}
         >
           <Avatar sx={{ width: 28, height: 28, bgcolor: 'primary.main', fontSize: 13, fontWeight: 600 }}>
-            {isAuthenticated ? userLabel.slice(0, 1).toUpperCase() : 'G'}
+            <PersonRounded fontSize="small" />
           </Avatar>
         </IconButton>
-
-        {/* Dropdown menu */}
-        <Menu
-          anchorEl={menuAnchor}
-          open={Boolean(menuAnchor)}
-          onClose={() => setMenuAnchor(null)}
-          transformOrigin={{ horizontal: 'right', vertical: 'top' }}
-          anchorOrigin={{ horizontal: 'right', vertical: 'bottom' }}
-          slotProps={{
-            paper: {
-              sx: {
-                mt: 0.75,
-                minWidth: 172,
-                border: `1px solid ${theme.palette.divider}`,
-                boxShadow: theme.palette.mode === 'dark'
-                  ? '0 8px 24px rgba(0,0,0,0.4)'
-                  : '0 8px 24px rgba(0,0,0,0.08)',
-              },
-            },
-          }}
-        >
-          <Box sx={{ px: 2, py: 1 }}>
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-              {isAuthenticated ? userLabel : t.topbar.guestUser}
-            </Typography>
-          </Box>
-          <Divider />
-          <MenuItem
-            dense
-            onClick={() => { onNavigate('settings'); setMenuAnchor(null); }}
-          >
-            <Typography variant="body2">{t.nav.settings}</Typography>
-          </MenuItem>
-        </Menu>
       </Stack>
     </Box>
   );

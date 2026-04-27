@@ -3,15 +3,18 @@ import { Alert, CssBaseline, Snackbar, ThemeProvider, useMediaQuery } from '@mui
 import type { AlertColor } from '@mui/material';
 import type {
   AppCategory,
+  AppDetails,
   AppSummary,
   CatalogApp,
   CodexAuthStatus,
-  SessionState,
   Settings,
 } from '@shared/types';
 import { AppShell } from '@renderer/components/AppShell';
+import { CodexConfigModal } from '@renderer/components/CodexConfigModal';
+import { ForgerCloudModal } from '@renderer/components/ForgerCloudModal';
 import { getDictionary } from '@renderer/i18n';
 import { buildAppTheme, resolveThemeMode, type ThemePreference } from '@renderer/theme/appTheme';
+import { AppView } from '@renderer/views/AppView';
 import { CatalogView } from '@renderer/views/CatalogView';
 import { ChatView, type ChatMessage, type ConversationHistoryItem } from '@renderer/views/ChatView';
 import { DataView } from '@renderer/views/DataView';
@@ -29,10 +32,6 @@ const initialSettings: Settings = {
   safeMode: false,
 };
 
-const initialSessionState: SessionState = {
-  authenticated: false,
-};
-
 const initialCodexAuthStatus: CodexAuthStatus = {
   installed: false,
   authenticated: false,
@@ -42,7 +41,7 @@ const initialCodexAuthStatus: CodexAuthStatus = {
 
 const getStoredThemePreference = (): ThemePreference => {
   if (typeof window === 'undefined') {
-    return 'light';
+    return 'system';
   }
 
   const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
@@ -50,7 +49,7 @@ const getStoredThemePreference = (): ThemePreference => {
     return stored;
   }
 
-  return 'light';
+  return 'system';
 };
 
 const getDesktopApi = () => {
@@ -137,10 +136,13 @@ function App() {
   const [installedApps, setInstalledApps] = useState<AppSummary[]>([]);
   const [catalogApps, setCatalogApps] = useState<CatalogApp[]>([]);
   const [settings, setSettings] = useState<Settings>(initialSettings);
-  const [session, setSession] = useState<SessionState>(initialSessionState);
-  const [authBusy, setAuthBusy] = useState(false);
   const [codexAuthBusy, setCodexAuthBusy] = useState(false);
   const [codexAuthStatus, setCodexAuthStatus] = useState<CodexAuthStatus>(initialCodexAuthStatus);
+  const [cloudModalOpen, setCloudModalOpen] = useState(false);
+  const [codexConfigOpen, setCodexConfigOpen] = useState(false);
+  const [selectedAppDetailsId, setSelectedAppDetailsId] = useState<string | null>(null);
+  const [selectedAppDetails, setSelectedAppDetails] = useState<AppDetails | null>(null);
+  const [appDetailsBackView, setAppDetailsBackView] = useState<View>('catalog');
   const [selectedAppId, setSelectedAppId] = useState<string | null>(null);
   const [selectedDataAppId, setSelectedDataAppId] = useState<string | null>(null);
   const [chatInput, setChatInput] = useState('');
@@ -160,6 +162,7 @@ function App() {
   const [bannerMessage, setBannerMessage] = useState<string | null>(null);
   const [bannerSeverity, setBannerSeverity] = useState<AlertColor>('success');
   const [catalogFilter, setCatalogFilter] = useState<'all' | AppCategory>('all');
+  const [catalogStatusFilter, setCatalogStatusFilter] = useState<'all' | 'installed' | 'not_installed'>('all');
   const [themePreference, setThemePreference] =
     useState<ThemePreference>(getStoredThemePreference);
   const prefersDark = useMediaQuery('(prefers-color-scheme: dark)');
@@ -186,17 +189,12 @@ function App() {
   useEffect(() => {
     const loadData = async () => {
       const desktopApi = getDesktopApi();
-      const [sessionResult, installedResult, catalogResult, settingsResult, codexAuthResult] = await Promise.allSettled([
-        desktopApi.getSession(),
+      const [installedResult, catalogResult, settingsResult, codexAuthResult] = await Promise.allSettled([
         desktopApi.listInstalledApps(),
         desktopApi.listCatalogApps(),
         desktopApi.getSettings(),
         desktopApi.getCodexAuthStatus(),
       ]);
-
-      if (sessionResult.status === 'fulfilled') {
-        setSession(sessionResult.value);
-      }
 
       if (installedResult.status === 'fulfilled') {
         setInstalledApps(installedResult.value);
@@ -215,6 +213,9 @@ function App() {
 
       if (codexAuthResult.status === 'fulfilled') {
         setCodexAuthStatus(codexAuthResult.value);
+        if (!codexAuthResult.value.authenticated) {
+          setCodexConfigOpen(true);
+        }
       }
     };
 
@@ -397,6 +398,14 @@ function App() {
   }, [currentView, selectedDataAppId, installedApps]);
 
   useEffect(() => {
+    if (currentView !== 'app' || !selectedAppDetailsId) {
+      return;
+    }
+    const desktopApi = getDesktopApi();
+    void desktopApi.getAppDetails(selectedAppDetailsId).then(setSelectedAppDetails);
+  }, [currentView, selectedAppDetailsId, installedApps, catalogApps]);
+
+  useEffect(() => {
     if (typeof window !== 'undefined') {
       window.localStorage.setItem(THEME_STORAGE_KEY, themePreference);
     }
@@ -445,6 +454,14 @@ function App() {
     deliveredRunRepliesRef.current.clear();
   };
 
+  const openAppDetails = async (appId: string, backView: View = currentView) => {
+    setAppDetailsBackView(backView);
+    setSelectedAppDetailsId(appId);
+    setCurrentView('app');
+    const details = await getDesktopApi().getAppDetails(appId);
+    setSelectedAppDetails(details);
+  };
+
   const handleSelectChatApp = (appId: string | null) => {
     if (!appId) {
       setSelectedAppId(null);
@@ -473,6 +490,12 @@ function App() {
       if (result.success) {
         setBannerSeverity('success');
         setBannerMessage(result.userMessage || t.banners.installed(getAppMeta(appId).name));
+        const welcome = await desktopApi.installWelcome(appId);
+        if (welcome.success && welcome.message) {
+          createInstallWelcomeConversation(appId, welcome.message);
+          setSelectedAppId(appId);
+          setCurrentView('chat');
+        }
       } else {
         setBannerSeverity('error');
         setBannerMessage(result.userMessage);
@@ -513,69 +536,65 @@ function App() {
     await handleInstall(appId);
   };
 
-  const handleLogin = async (email: string, password: string) => {
-    setAuthBusy(true);
-
-    try {
-      const desktopApi = getDesktopApi();
-      const nextSession = await desktopApi.login(email, password);
-      const [currentSettings, catalog, installed] = await Promise.all([
-        desktopApi.getSettings(),
-        desktopApi.listCatalogApps(),
-        desktopApi.listInstalledApps(),
-      ]);
-
-      setSession(nextSession);
-      setSettings(currentSettings);
-      setCatalogApps(catalog);
-      setInstalledApps(installed);
-
-      if (nextSession.authenticated) {
-        setBannerSeverity('success');
-        setBannerMessage(t.settings.loginSuccess);
-      } else {
-        setBannerSeverity('error');
-        setBannerMessage(nextSession.error ?? t.settings.authErrorFallback);
-      }
-    } catch (_error) {
-      setBannerSeverity('error');
-      const detail = _error instanceof Error ? _error.message : t.settings.authErrorFallback;
-      setBannerMessage(detail);
-    } finally {
-      setAuthBusy(false);
+  const handleDeleteApp = async (appId: string) => {
+    const meta = getAppMeta(appId);
+    const confirmed = window.confirm(t.appView.deleteConfirm(meta.name));
+    if (!confirmed) {
+      return;
     }
+
+    const desktopApi = getDesktopApi();
+    const result = await desktopApi.uninstallApp(appId);
+    const [installed, catalog] = await Promise.all([
+      desktopApi.listInstalledApps(),
+      desktopApi.listCatalogApps(),
+    ]);
+    setInstalledApps(installed);
+    setCatalogApps(catalog);
+    if (selectedAppDetailsId === appId) {
+      setSelectedAppDetails(null);
+      setCurrentView('my-apps');
+    }
+    setBannerSeverity(result.success ? 'success' : 'error');
+    setBannerMessage(result.userMessage);
   };
 
-  const handleLogout = async () => {
-    setAuthBusy(true);
-
-    try {
-      const desktopApi = getDesktopApi();
-      const [nextSession, currentSettings, catalog, installed] = await Promise.all([
-        desktopApi.logout(),
-        desktopApi.getSettings(),
-        desktopApi.listCatalogApps(),
-        desktopApi.listInstalledApps(),
-      ]);
-
-      setSession(nextSession);
-      setSettings(currentSettings);
-      setCatalogApps(catalog);
-      setInstalledApps(installed);
-      setBannerSeverity('success');
-      setBannerMessage(t.settings.logoutSuccess);
-    } catch (_error) {
-      setBannerSeverity('error');
-      setBannerMessage(t.settings.authErrorFallback);
-    } finally {
-      setAuthBusy(false);
-    }
+  const createInstallWelcomeConversation = (appId: string, message: string) => {
+    const now = new Date().toISOString();
+    const conversationId = makeConversationId();
+    const appName = getAppMeta(appId).name;
+    const conversation: ChatConversation = {
+      id: conversationId,
+      appId,
+      title: `Bienvenida a ${appName}`,
+      threadId: null,
+      createdAt: now,
+      updatedAt: now,
+      messages: [
+        {
+          id: `assistant-install-welcome-${Date.now()}`,
+          role: 'assistant',
+          content: message,
+          action: {
+            type: 'open-app',
+            appId,
+            label: t.actions.open,
+          },
+        },
+      ],
+    };
+    setChatConversations((current) => [conversation, ...current.filter((item) => !(item.appId === appId && item.title === conversation.title))]);
+    setActiveConversationByApp((current) => ({ ...current, [appId]: conversationId }));
+    setActiveConversationId(conversationId);
   };
 
   const handleSendMessage = async (nextMessage?: string) => {
     const trimmed = (nextMessage ?? chatInput).trim();
 
-    if (!trimmed || !selectedAppId || chatRunActive) {
+    if (!trimmed || !selectedAppId || chatRunActive || !codexAuthStatus.authenticated) {
+      if (!codexAuthStatus.authenticated) {
+        setCodexConfigOpen(true);
+      }
       return;
     }
 
@@ -769,8 +788,6 @@ function App() {
         currentView={currentView}
         onNavigate={setCurrentView}
         t={t}
-        isAuthenticated={session.authenticated}
-        userLabel={session.authenticated ? session.user.email : t.topbar.guestUser}
         chatApps={installedApps}
         selectedChatAppId={selectedAppId}
         dataApps={installedApps.filter((a) => a.status === 'installed' || a.status === 'running')}
@@ -778,6 +795,7 @@ function App() {
         getAppMeta={getAppMeta}
         onSelectChatApp={handleSelectChatApp}
         onSelectDataApp={setSelectedDataAppId}
+        onOpenCloudModal={() => setCloudModalOpen(true)}
       >
         {currentView === 'my-apps' ? (
           <InstalledAppsView
@@ -788,7 +806,9 @@ function App() {
             onOpen={handleOpen}
             onStop={handleStop}
             onRetry={handleRetry}
-            onConfigure={setChatContext}
+            onDetails={(appId) => void openAppDetails(appId, 'my-apps')}
+            onDelete={(appId) => void handleDeleteApp(appId)}
+            onGoCatalog={() => setCurrentView('catalog')}
           />
         ) : null}
 
@@ -797,10 +817,30 @@ function App() {
             apps={catalogApps}
             filter={catalogFilter}
             onFilterChange={setCatalogFilter}
+            statusFilter={catalogStatusFilter}
+            onStatusFilterChange={setCatalogStatusFilter}
             onInstall={handleInstall}
+            onOpen={handleOpen}
+            onStop={handleStop}
+            onRetry={handleRetry}
+            onDetails={(appId) => void openAppDetails(appId, 'catalog')}
+            onDelete={(appId) => void handleDeleteApp(appId)}
             t={t}
             getAppMeta={getAppMeta}
             getCategoryLabel={getCategoryLabel}
+          />
+        ) : null}
+
+        {currentView === 'app' ? (
+          <AppView
+            details={selectedAppDetails}
+            t={t}
+            categoryLabel={selectedAppDetails ? getCategoryLabel(selectedAppDetails.app.category) : ''}
+            onBack={() => setCurrentView(appDetailsBackView)}
+            onInstall={(appId) => void handleInstall(appId)}
+            onOpen={(appId) => void handleOpen(appId)}
+            onStop={(appId) => void handleStop(appId)}
+            onDelete={(appId) => void handleDeleteApp(appId)}
           />
         ) : null}
 
@@ -819,6 +859,9 @@ function App() {
             onSend={() => void handleSendMessage()}
             isSending={chatRunActive}
             progressLines={chatProgressLines}
+            codexConfigured={codexAuthStatus.authenticated}
+            onConfigureCodex={() => setCodexConfigOpen(true)}
+            onOpenApp={(appId) => void handleOpen(appId)}
           />
         ) : null}
 
@@ -833,22 +876,31 @@ function App() {
 
         {currentView === 'settings' ? (
           <SettingsView
-            settings={settings}
-            session={session}
-            authBusy={authBusy}
             codexAuthBusy={codexAuthBusy}
             codexAuthStatus={codexAuthStatus}
             t={t}
             themePreference={themePreference}
             onThemeChange={setThemePreference}
-            onLogin={handleLogin}
-            onLogout={handleLogout}
-            onConnectCodexAuth={handleConnectCodexAuth}
-            onDisconnectCodexAuth={handleDisconnectCodexAuth}
-            onRefreshCodexAuth={refreshCodexAuthStatus}
+            onOpenCodexConfig={() => setCodexConfigOpen(true)}
           />
         ) : null}
       </AppShell>
+
+      <ForgerCloudModal
+        open={cloudModalOpen}
+        t={t}
+        onClose={() => setCloudModalOpen(false)}
+      />
+
+      <CodexConfigModal
+        open={codexConfigOpen}
+        status={codexAuthStatus}
+        busy={codexAuthBusy}
+        t={t}
+        onClose={() => setCodexConfigOpen(false)}
+        onConnect={handleConnectCodexAuth}
+        onRefresh={refreshCodexAuthStatus}
+      />
 
       <Snackbar
         open={Boolean(bannerMessage)}

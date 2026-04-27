@@ -56,6 +56,12 @@ export interface InstallAppResult {
   technicalCode?: string;
 }
 
+export interface BasicActionResult {
+  success: boolean;
+  userMessage: string;
+  technicalCode?: string;
+}
+
 export interface OpenAppResult {
   success: boolean;
   userMessage: string;
@@ -77,21 +83,6 @@ export interface StopAppResult {
   userMessage: string;
   technicalCode?: string;
 }
-
-export interface SessionUser {
-  id: number;
-  email: string;
-}
-
-export type SessionState =
-  | {
-      authenticated: true;
-      user: SessionUser;
-    }
-  | {
-      authenticated: false;
-      error?: string;
-    };
 
 export type ChatRunStatus =
   | 'queued'
@@ -159,6 +150,36 @@ export interface ChatRun {
   progressLog?: string[];
   operationId?: string;
   commitSha?: string;
+}
+
+export interface AppOperationSummary {
+  operationId: string;
+  runId?: string;
+  commitSha?: string;
+  title: string;
+  summary: string;
+  createdAt: string;
+  revertedAt?: string;
+}
+
+export interface AppDetails {
+  app: CatalogApp | AppSummary;
+  installed: boolean;
+  status: AppStatus;
+  version?: string;
+  latestVersion?: string;
+  originalCommitSha?: string;
+  installedAt?: string;
+  operations: AppOperationSummary[];
+}
+
+export interface InstallWelcomeResult {
+  success: boolean;
+  appId: string;
+  message?: string;
+  usedCodex: boolean;
+  userMessage: string;
+  technicalCode?: string;
 }
 
 export interface ChatRunEvent {
@@ -242,12 +263,12 @@ export interface DbQueryTableError {
 export type DbQueryTableResponse = DbQueryTableResult | DbQueryTableError;
 
 export interface ForgerDesktopApi {
-  getSession: () => Promise<SessionState>;
-  login: (email: string, password: string) => Promise<SessionState>;
-  logout: () => Promise<SessionState>;
   listInstalledApps: () => Promise<AppSummary[]>;
   listCatalogApps: () => Promise<CatalogApp[]>;
   installApp: (appId: string) => Promise<InstallAppResult>;
+  uninstallApp: (appId: string) => Promise<BasicActionResult>;
+  getAppDetails: (appId: string) => Promise<AppDetails | null>;
+  installWelcome: (appId: string) => Promise<InstallWelcomeResult>;
   openApp: (appId: string) => Promise<OpenAppResult>;
   stopApp: (appId: string) => Promise<StopAppResult>;
   getAppRuntimeStatus: (appId: string) => Promise<RuntimeStatus>;

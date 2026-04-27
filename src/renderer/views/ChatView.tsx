@@ -22,13 +22,18 @@ import {
 import type { AppDictionary } from '@renderer/i18n';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
 
 export interface ChatMessage {
   id: string;
   role: 'assistant' | 'user';
   content: string;
+  action?: {
+    type: 'open-app';
+    appId: string;
+    label: string;
+  };
 }
 
 export interface ConversationHistoryItem {
@@ -109,6 +114,9 @@ interface ChatViewProps {
   onSend: () => void;
   isSending: boolean;
   progressLines: string[];
+  codexConfigured: boolean;
+  onConfigureCodex: () => void;
+  onOpenApp: (appId: string) => void;
 }
 
 export function ChatView({
@@ -125,10 +133,24 @@ export function ChatView({
   onSend,
   isSending,
   progressLines,
+  codexConfigured,
+  onConfigureCodex,
+  onOpenApp,
 }: ChatViewProps) {
   const theme = useTheme();
   const [historyOpen, setHistoryOpen] = useState(false);
+  const inputRef = useRef<HTMLInputElement | null>(null);
   const hasMessages = messages.length > 0;
+
+  useEffect(() => {
+    if (!codexConfigured || isSending) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      inputRef.current?.focus();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [activeConversationId, codexConfigured, isSending]);
 
   return (
     <Box
@@ -225,8 +247,13 @@ export function ChatView({
                 {conversationTitle}
               </Typography>
               <Typography color="text.secondary" textAlign="center" sx={{ maxWidth: 480 }}>
-                {t.sections.chat.introBody}
+                {codexConfigured ? t.sections.chat.introBody : t.sections.chat.codexMissingBody}
               </Typography>
+              {!codexConfigured ? (
+                <Button variant="contained" onClick={onConfigureCodex}>
+                  {t.sections.chat.configureCodex}
+                </Button>
+              ) : null}
             </Stack>
           ) : (
             <>
@@ -254,7 +281,14 @@ export function ChatView({
                     }}
                   >
                     {message.role === 'assistant' ? (
-                      <MarkdownMessage content={message.content} />
+                      <Stack spacing={1}>
+                        <MarkdownMessage content={message.content} />
+                        {message.action?.type === 'open-app' ? (
+                          <Button variant="contained" size="small" onClick={() => onOpenApp(message.action!.appId)} sx={{ alignSelf: 'flex-start' }}>
+                            {message.action.label}
+                          </Button>
+                        ) : null}
+                      </Stack>
                     ) : (
                       <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
                         {message.content}
@@ -296,15 +330,18 @@ export function ChatView({
           maxRows={4}
           placeholder={t.sections.chat.inputPlaceholder}
           value={inputValue}
-          disabled={isSending}
+          disabled={isSending || !codexConfigured}
+          inputRef={inputRef}
           onChange={(event) => onInputChange(event.target.value)}
           onKeyDown={(event) => {
-            if (isSending) {
+            if (isSending || !codexConfigured) {
               return;
             }
             if (event.key === 'Enter' && !event.shiftKey) {
               event.preventDefault();
-              onSend();
+              if (inputValue.trim()) {
+                onSend();
+              }
             }
           }}
         />
@@ -313,7 +350,7 @@ export function ChatView({
             variant="outlined"
             startIcon={<AddCommentRounded />}
             onClick={onStartNewConversation}
-            disabled={isSending}
+            disabled={isSending || !codexConfigured}
           >
             {t.sections.chat.newConversation}
           </Button>
@@ -321,7 +358,7 @@ export function ChatView({
             variant="contained"
             endIcon={isSending ? <CircularProgress size={16} color="inherit" /> : <SendRounded />}
             onClick={onSend}
-            disabled={isSending || !inputValue.trim()}
+            disabled={isSending || !codexConfigured || !inputValue.trim()}
           >
             {t.sections.chat.send}
           </Button>

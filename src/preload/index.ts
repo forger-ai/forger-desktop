@@ -3,12 +3,12 @@ import type { ForgerDesktopApi } from '../shared/types';
 
 // En modo sandbox de Electron, el preload no debe depender de imports locales en runtime.
 const IPC_CHANNELS = {
-  getSession: 'forger:get-session',
-  login: 'forger:login',
-  logout: 'forger:logout',
   listInstalledApps: 'forger:list-installed-apps',
   listCatalogApps: 'forger:list-catalog-apps',
   installApp: 'forger:install-app',
+  uninstallApp: 'forger:uninstall-app',
+  getAppDetails: 'forger:get-app-details',
+  installWelcome: 'forger:install-welcome',
   openApp: 'forger:open-app',
   stopApp: 'forger:stop-app',
   getAppRuntimeStatus: 'forger:get-app-runtime-status',
@@ -30,12 +30,12 @@ const IPC_CHANNELS = {
 } as const;
 
 const api: ForgerDesktopApi = {
-  getSession: () => ipcRenderer.invoke(IPC_CHANNELS.getSession),
-  login: (email, password) => ipcRenderer.invoke(IPC_CHANNELS.login, email, password),
-  logout: () => ipcRenderer.invoke(IPC_CHANNELS.logout),
   listInstalledApps: () => ipcRenderer.invoke(IPC_CHANNELS.listInstalledApps),
   listCatalogApps: () => ipcRenderer.invoke(IPC_CHANNELS.listCatalogApps),
   installApp: (appId) => ipcRenderer.invoke(IPC_CHANNELS.installApp, appId),
+  uninstallApp: (appId) => ipcRenderer.invoke(IPC_CHANNELS.uninstallApp, appId),
+  getAppDetails: (appId) => ipcRenderer.invoke(IPC_CHANNELS.getAppDetails, appId),
+  installWelcome: (appId) => ipcRenderer.invoke(IPC_CHANNELS.installWelcome, appId),
   openApp: (appId) => ipcRenderer.invoke(IPC_CHANNELS.openApp, appId),
   stopApp: (appId) => ipcRenderer.invoke(IPC_CHANNELS.stopApp, appId),
   getAppRuntimeStatus: (appId) => ipcRenderer.invoke(IPC_CHANNELS.getAppRuntimeStatus, appId),

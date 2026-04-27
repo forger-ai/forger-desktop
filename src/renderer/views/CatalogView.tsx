@@ -1,4 +1,4 @@
-import { Chip, Stack, Typography } from '@mui/material';
+import { Chip, MenuItem, Select, Stack, Typography } from '@mui/material';
 import type { AppCategory, CatalogApp } from '@shared/types';
 import type { AppDictionary } from '@renderer/i18n';
 import { AppCard } from '@renderer/components/AppCard';
@@ -8,7 +8,14 @@ interface CatalogViewProps {
   apps: CatalogApp[];
   filter: 'all' | AppCategory;
   onFilterChange: (filter: 'all' | AppCategory) => void;
+  statusFilter: 'all' | 'installed' | 'not_installed';
+  onStatusFilterChange: (filter: 'all' | 'installed' | 'not_installed') => void;
   onInstall: (appId: string) => void;
+  onOpen: (appId: string) => void;
+  onStop: (appId: string) => void;
+  onRetry: (appId: string) => void;
+  onDetails: (appId: string) => void;
+  onDelete: (appId: string) => void;
   t: AppDictionary;
   getAppMeta: (appId: string) => { name: string; description: string };
   getCategoryLabel: (category: AppCategory) => string;
@@ -20,12 +27,25 @@ export function CatalogView({
   apps,
   filter,
   onFilterChange,
+  statusFilter,
+  onStatusFilterChange,
   onInstall,
+  onOpen,
+  onStop,
+  onRetry,
+  onDetails,
+  onDelete,
   t,
   getAppMeta,
   getCategoryLabel,
 }: CatalogViewProps) {
-  const visibleApps = filter === 'all' ? apps : apps.filter((app) => app.category === filter);
+  const statusApps =
+    statusFilter === 'installed'
+      ? apps.filter((app) => app.status === 'installed' || app.status === 'running' || app.status === 'error')
+      : statusFilter === 'not_installed'
+        ? apps.filter((app) => app.status === 'not_installed')
+        : apps;
+  const visibleApps = filter === 'all' ? statusApps : statusApps.filter((app) => app.category === filter);
 
   return (
     <Stack spacing={2.5}>
@@ -34,6 +54,21 @@ export function CatalogView({
         <Typography color="text.secondary">{t.sections.catalog.subtitle}</Typography>
       </Stack>
       <Stack spacing={1}>
+        <Stack direction="row" spacing={1.25} alignItems="center">
+          <Typography variant="body2" color="text.secondary">
+            {t.sections.catalog.statusFilterLabel}
+          </Typography>
+          <Select
+            size="small"
+            value={statusFilter}
+            onChange={(event) => onStatusFilterChange(event.target.value as 'all' | 'installed' | 'not_installed')}
+            sx={{ minWidth: 180 }}
+          >
+            <MenuItem value="all">{t.sections.catalog.statusFilters.all}</MenuItem>
+            <MenuItem value="installed">{t.sections.catalog.statusFilters.installed}</MenuItem>
+            <MenuItem value="not_installed">{t.sections.catalog.statusFilters.notInstalled}</MenuItem>
+          </Select>
+        </Stack>
         <Typography variant="body2" color="text.secondary">
           {t.sections.catalog.filtersLabel}
         </Typography>
@@ -78,13 +113,15 @@ export function CatalogView({
                   : isInstalled
                     ? 'success'
                     : 'default';
-            const primaryAction = hasError ? 'retry' : 'install';
+            const primaryAction = hasError ? 'retry' : isInstalled ? (app.status === 'running' ? 'stop' : 'open') : 'install';
             const primaryActionLabel = hasError
               ? t.actions.retry
+              : app.status === 'running'
+                ? t.actions.stop
               : isInstalling
                 ? t.actions.installing
                 : isInstalled
-                  ? t.actions.installed
+                  ? t.actions.open
                   : t.actions.install;
 
             return (
@@ -97,12 +134,30 @@ export function CatalogView({
                 statusColor={statusColor}
                 primaryAction={primaryAction}
                 primaryActionLabel={primaryActionLabel}
-                primaryDisabled={isInstalled || isInstalling}
+                primaryDisabled={isInstalling}
                 onPrimaryAction={() => {
-                  if (!isInstalled && !isInstalling) {
+                  if (isInstalling) {
+                    return;
+                  }
+                  if (hasError) {
+                    onRetry(app.id);
+                    return;
+                  }
+                  if (app.status === 'running') {
+                    onStop(app.id);
+                    return;
+                  }
+                  if (isInstalled) {
+                    onOpen(app.id);
+                    return;
+                  }
+                  if (!isInstalled) {
                     onInstall(app.id);
                   }
                 }}
+                tertiaryActionLabel={isInstalled && !isInstalling ? t.actions.uninstall : undefined}
+                onTertiaryAction={isInstalled && !isInstalling ? () => onDelete(app.id) : undefined}
+                onCardClick={() => onDetails(app.id)}
               />
             );
           })}

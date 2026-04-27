@@ -18,7 +18,7 @@ import type { AppDictionary } from '@renderer/i18n';
 import iconDark from '@renderer/assets/icon-dark.svg';
 import iconLight from '@renderer/assets/icon-light.svg';
 
-export type View = 'my-apps' | 'catalog' | 'chat' | 'datos' | 'settings';
+export type View = 'my-apps' | 'catalog' | 'chat' | 'datos' | 'settings' | 'app';
 
 interface SidebarProps {
   currentView: View;
@@ -42,6 +42,7 @@ export function Sidebar({ currentView, onNavigate, t }: SidebarProps) {
     chat: t.nav.chat,
     datos: t.nav.datos,
     settings: t.nav.settings,
+    app: t.nav.catalog,
   };
 
   return (

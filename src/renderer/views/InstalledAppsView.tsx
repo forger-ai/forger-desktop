@@ -1,4 +1,4 @@
-import { Stack, Typography } from '@mui/material';
+import { Button, Stack, Typography } from '@mui/material';
 import type { AppSummary } from '@shared/types';
 import type { AppDictionary } from '@renderer/i18n';
 import { AppCard } from '@renderer/components/AppCard';
@@ -12,7 +12,9 @@ interface InstalledAppsViewProps {
   onOpen: (appId: string) => void;
   onStop: (appId: string) => void;
   onRetry: (appId: string) => void;
-  onConfigure: (appId: string) => void;
+  onDetails: (appId: string) => void;
+  onDelete: (appId: string) => void;
+  onGoCatalog: () => void;
 }
 
 export function InstalledAppsView({
@@ -23,10 +25,21 @@ export function InstalledAppsView({
   onOpen,
   onStop,
   onRetry,
-  onConfigure,
+  onDetails,
+  onDelete,
+  onGoCatalog,
 }: InstalledAppsViewProps) {
   if (apps.length === 0) {
-    return <Typography color="text.secondary">{t.sections.myApps.empty}</Typography>;
+    return (
+      <Stack alignItems="center" justifyContent="center" sx={{ minHeight: '60%' }} spacing={2}>
+        <Typography color="text.secondary" textAlign="center" sx={{ maxWidth: 460 }}>
+          {t.sections.myApps.empty}
+        </Typography>
+        <Button variant="contained" onClick={onGoCatalog}>
+          {t.sections.myApps.goToCatalog}
+        </Button>
+      </Stack>
+    );
   }
 
   return (
@@ -86,8 +99,9 @@ export function InstalledAppsView({
 
                 onOpen(app.id);
               }}
-              secondaryActionLabel={t.actions.configure}
-              onSecondaryAction={() => onConfigure(app.id)}
+              tertiaryActionLabel={isInstalling ? undefined : t.actions.uninstall}
+              onTertiaryAction={isInstalling ? undefined : () => onDelete(app.id)}
+              onCardClick={() => onDetails(app.id)}
             />
           );
         })}

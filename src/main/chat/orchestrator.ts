@@ -47,6 +47,8 @@ interface OperationEntry {
   appId: string;
   commitSha: string;
   createdAt: string;
+  title?: string;
+  summary?: string;
   revertedAt?: string;
 }
 
@@ -497,6 +499,8 @@ export class ChatOrchestrator {
         runId: run.runId,
         commitSha,
         createdAt: new Date().toISOString(),
+        title: summarizeOperationTitle(run.prompt),
+        summary: run.preview.summary || run.preview.impact || 'Cambio aplicado en la app.',
       });
 
       run.status = 'applied';
@@ -1080,6 +1084,16 @@ const getGitHead = async (cwd: string): Promise<string | null> => {
 
   const value = result.stdout.trim();
   return value || null;
+};
+
+const summarizeOperationTitle = (prompt: string): string => {
+  const userMessageIndex = prompt.indexOf('MENSAJE USUARIO:');
+  const raw = userMessageIndex >= 0 ? prompt.slice(userMessageIndex + 'MENSAJE USUARIO:'.length) : prompt;
+  const compact = raw.replace(/\s+/g, ' ').trim();
+  if (!compact) {
+    return 'Cambio aplicado';
+  }
+  return compact.length <= 64 ? compact : `${compact.slice(0, 61)}...`;
 };
 
 const buildPreview = async (stagingDir: string): Promise<{

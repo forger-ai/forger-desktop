@@ -1,10 +1,10 @@
 export const IPC_CHANNELS = {
-  getSession: 'forger:get-session',
-  login: 'forger:login',
-  logout: 'forger:logout',
   listInstalledApps: 'forger:list-installed-apps',
   listCatalogApps: 'forger:list-catalog-apps',
   installApp: 'forger:install-app',
+  uninstallApp: 'forger:uninstall-app',
+  getAppDetails: 'forger:get-app-details',
+  installWelcome: 'forger:install-welcome',
   openApp: 'forger:open-app',
   stopApp: 'forger:stop-app',
   getAppRuntimeStatus: 'forger:get-app-runtime-status',

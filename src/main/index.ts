@@ -20,8 +20,11 @@ import { IPC_CHANNELS } from '../shared/ipc';
 import { ChatOrchestrator } from './chat/orchestrator';
 import type {
   AppCategory,
+  AppDetails,
   AppStatus,
+  AppOperationSummary,
   AppSummary,
+  BasicActionResult,
   CatalogApp,
   ChatApplyRunInput,
   ChatApprovePermissionInput,
@@ -33,8 +36,6 @@ import type {
   InstallAppResult,
   OpenAppResult,
   RuntimeStatus,
-  SessionState,
-  SessionUser,
   Settings,
   StopAppResult,
 } from '../shared/types';
@@ -82,6 +83,8 @@ interface InstalledAppRecord {
   userMessage?: string;
   requiredNodeVersion: string;
   requiredPythonVersion: string;
+  originalCommitSha?: string;
+  installedAt?: string;
 }
 
 interface AppRegistry {
@@ -102,11 +105,6 @@ interface RunningAppProcess {
   frontend: ChildProcessWithoutNullStreams;
   backendUrl: string;
   frontendUrl: string;
-}
-
-interface PersistedSession {
-  token: string;
-  user: SessionUser;
 }
 
 interface AppManifestService {
@@ -151,8 +149,6 @@ interface StackSkillTemplate {
 let mainWindow: BrowserWindow | null = null;
 let catalogApps: CatalogApp[] = [];
 let settings: Settings = structuredClone(settingsSeed);
-let sessionToken: string | null = null;
-let sessionUser: SessionUser | null = null;
 let registry: AppRegistry = { apps: {} };
 const runningApps = new Map<string, RunningAppProcess>();
 const appWindows = new Map<string, BrowserWindow>();
@@ -166,7 +162,6 @@ const resolvePlatformAlias = (): string => {
 };
 
 const getRegistryPath = () => path.join(app.getPath('userData'), 'app_registry.json');
-const getSessionPath = () => path.join(app.getPath('userData'), 'session.json');
 const getRuntimesRoot = () => path.join(app.getPath('userData'), 'runtimes');
 const getTempRoot = () => path.join(app.getPath('userData'), 'tmp');
 const getLogsRoot = () => path.join(app.getPath('userData'), 'logs');
@@ -393,15 +388,9 @@ const toCatalogStatus = (slug: string): AppStatus => {
 };
 
 const buildHeaders = (): Record<string, string> => {
-  const headers: Record<string, string> = {
+  return {
     Accept: 'application/json',
   };
-
-  if (sessionToken) {
-    headers.Authorization = `Bearer ${sessionToken}`;
-  }
-
-  return headers;
 };
 
 const readJson = async <T>(response: Response): Promise<T | null> => {
@@ -896,118 +885,6 @@ const listCatalogFromBackend = async (): Promise<CatalogApp[]> => {
   });
 };
 
-const savePersistedSession = async (session: PersistedSession): Promise<void> => {
-  const sessionPath = getSessionPath();
-  await fs.mkdir(path.dirname(sessionPath), { recursive: true });
-  await fs.writeFile(sessionPath, JSON.stringify(session, null, 2), 'utf8');
-};
-
-const clearPersistedSession = async (): Promise<void> => {
-  await fs.rm(getSessionPath(), { force: true });
-};
-
-const loadPersistedSession = async (): Promise<void> => {
-  try {
-    const raw = await fs.readFile(getSessionPath(), 'utf8');
-    const parsed = JSON.parse(raw) as Partial<PersistedSession>;
-    const maybeUser = parsed?.user;
-    if (
-      typeof parsed?.token === 'string' &&
-      parsed.token &&
-      maybeUser &&
-      typeof maybeUser.id === 'number' &&
-      typeof maybeUser.email === 'string'
-    ) {
-      sessionToken = parsed.token;
-      sessionUser = {
-        id: maybeUser.id,
-        email: maybeUser.email,
-      };
-      settings = {
-        ...settings,
-        userEmail: maybeUser.email,
-      };
-      return;
-    }
-  } catch {
-    // no-op
-  }
-
-  sessionToken = null;
-  sessionUser = null;
-};
-
-const applyAuthenticatedSession = async (user: SessionUser, token: string): Promise<SessionState> => {
-  sessionToken = token;
-  sessionUser = user;
-  settings = {
-    ...settings,
-    userEmail: user.email,
-  };
-  await savePersistedSession({ token, user });
-
-  return {
-    authenticated: true,
-    user,
-  };
-};
-
-const clearSession = async (): Promise<SessionState> => {
-  sessionToken = null;
-  sessionUser = null;
-  settings = {
-    ...settings,
-    userEmail: '',
-  };
-  await clearPersistedSession();
-
-  return { authenticated: false };
-};
-
-const resolveSession = async (): Promise<SessionState> => {
-  if (!sessionToken) {
-    return { authenticated: false };
-  }
-
-  const response = await fetch(`${backendBaseUrl}/api/v1/session`, {
-    method: 'GET',
-    headers: buildHeaders(),
-  });
-
-  if (response.status === 401) {
-    return await clearSession();
-  }
-
-  if (!response.ok) {
-    return {
-      authenticated: false,
-      error: `session_request_failed_${response.status}`,
-    };
-  }
-
-  type SessionResponse = {
-    authenticated: true;
-    user: SessionUser;
-  };
-
-  const payload = await readJson<SessionResponse>(response);
-  if (!payload || payload.authenticated !== true) {
-    return await clearSession();
-  }
-
-  sessionUser = payload.user;
-  settings = {
-    ...settings,
-    userEmail: payload.user.email,
-  };
-  await savePersistedSession({ token: sessionToken, user: payload.user });
-
-  return {
-    authenticated: true,
-    user: payload.user,
-  };
-};
-
 const loadRegistry = async (): Promise<void> => {
   const registryPath = getRegistryPath();
 
@@ -1164,6 +1041,50 @@ const runCommand = async (
   });
 };
 
+const runCommandCapture = async (
+  command: string,
+  args: string[],
+  options: { cwd: string; env?: NodeJS.ProcessEnv; timeoutMs?: number },
+): Promise<{ code: number | null; stdout: string; stderr: string }> => {
+  const useShell = requiresWindowsShell(command);
+
+  return await new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd: options.cwd,
+      env: {
+        ...process.env,
+        ...(options.env ?? {}),
+      },
+      shell: useShell,
+      stdio: 'pipe',
+    });
+
+    let stdout = '';
+    let stderr = '';
+    const timer = options.timeoutMs
+      ? setTimeout(() => {
+          child.kill('SIGTERM');
+          reject(new Error('command_timeout'));
+        }, options.timeoutMs)
+      : null;
+
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on('error', (error) => {
+      if (timer) clearTimeout(timer);
+      reject(error);
+    });
+    child.on('exit', (code) => {
+      if (timer) clearTimeout(timer);
+      resolve({ code, stdout, stderr });
+    });
+  });
+};
+
 const canRunCommand = async (command: string, args: string[]): Promise<boolean> => {
   try {
     await runCommand(command, args, {
@@ -1240,6 +1161,25 @@ const ensureAppGitRepository = async (cwd: string): Promise<void> => {
   await runCommand('git', ['config', 'user.email', 'forger@local.invalid'], { cwd }).catch(() => undefined);
   await runCommand('git', ['config', 'user.name', 'Forger'], { cwd }).catch(() => undefined);
   await ensureGitMainBranch(cwd);
+};
+
+const getGitHead = async (cwd: string): Promise<string | null> => {
+  const result = await runCommandCapture('git', ['rev-parse', 'HEAD'], { cwd, timeoutMs: 5_000 }).catch(() => null);
+  if (!result || result.code !== 0) {
+    return null;
+  }
+  return result.stdout.trim() || null;
+};
+
+const getOriginalCommitSha = async (cwd: string): Promise<string | undefined> => {
+  const result = await runCommandCapture('git', ['rev-list', '--max-parents=0', 'HEAD'], {
+    cwd,
+    timeoutMs: 5_000,
+  }).catch(() => null);
+  if (!result || result.code !== 0) {
+    return (await getGitHead(cwd)) ?? undefined;
+  }
+  return result.stdout.split('\n')[0]?.trim() || ((await getGitHead(cwd)) ?? undefined);
 };
 
 const clearMacQuarantine = async (targetPath: string): Promise<void> => {
@@ -1754,12 +1694,8 @@ const fetchDownloadBundle = async (
   let expectedChecksum = appEntry.checksumSha256;
 
   if (!downloadUrl) {
-    if (!sessionToken) {
-      throw new Error('auth_required');
-    }
-
     if (!appEntry.latestVersionId) {
-      throw new Error('latest_version_not_found');
+      throw new Error('download_url_missing');
     }
 
     const platform = resolvePlatformAlias();
@@ -1891,6 +1827,7 @@ const installAppRuntime = async (appId: string): Promise<InstallAppResult> => {
     requiredPythonVersion: DEFAULT_PYTHON_VERSION,
     status: 'installing',
     userMessage: 'Preparando instalacion...',
+    installedAt: new Date().toISOString(),
   };
 
   await upsertInstalledRecord(initialRecord);
@@ -1958,6 +1895,7 @@ const installAppRuntime = async (appId: string): Promise<InstallAppResult> => {
     await normalizeInstalledAgentContext(installDir, appId);
     await ensureGlobalAgentsContext(getPrivateAppsRoot());
     await ensureAppGitRepository(installDir);
+    const originalCommitSha = await getOriginalCommitSha(installDir);
 
     await publishProgress('preparing_runtime', 'Preparando runtimes compartidos...');
     const nodeRuntime = await ensureRuntimeInstalled('node', nodeVersion);
@@ -2002,6 +1940,8 @@ const installAppRuntime = async (appId: string): Promise<InstallAppResult> => {
       requiredPythonVersion: pythonVersion,
       status: 'installed',
       userMessage: 'Instalada y lista para abrir.',
+      originalCommitSha,
+      installedAt: initialRecord.installedAt,
     };
     await upsertInstalledRecord(installed);
 
@@ -2053,6 +1993,187 @@ const installAppRuntime = async (appId: string): Promise<InstallAppResult> => {
       success: false,
       phase: 'failed',
       userMessage: 'No se pudo completar la instalacion. Reintenta.',
+      technicalCode: detail,
+    };
+  }
+};
+
+interface StoredOperationEntry {
+  operationId?: string;
+  runId?: string;
+  appId?: string;
+  commitSha?: string;
+  createdAt?: string;
+  title?: string;
+  summary?: string;
+  revertedAt?: string;
+}
+
+const operationsFile = (appId: string): string =>
+  path.join(getPrivateAppsRoot(), '.forger', 'operations', `${appId}.json`);
+
+const readOperationSummaries = async (appId: string): Promise<AppOperationSummary[]> => {
+  const raw = await fs.readFile(operationsFile(appId), 'utf8').catch(() => '[]');
+  try {
+    const parsed = JSON.parse(raw) as StoredOperationEntry[];
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed
+      .filter((entry) => typeof entry.createdAt === 'string')
+      .map((entry) => ({
+        operationId: entry.operationId ?? entry.commitSha ?? `${appId}-${entry.createdAt}`,
+        runId: entry.runId,
+        commitSha: entry.commitSha,
+        title: entry.title?.trim() || 'Cambio aplicado',
+        summary: entry.summary?.trim() || 'Forger aplico una modificacion en esta app.',
+        createdAt: entry.createdAt as string,
+        revertedAt: entry.revertedAt,
+      }));
+  } catch {
+    return [];
+  }
+};
+
+const getAppDetails = async (appId: string): Promise<AppDetails | null> => {
+  const installed = registry.apps[appId];
+  const catalog = catalogApps.find((entry) => entry.id === appId);
+  const appEntry = installed ? toAppSummary(installed) : catalog;
+  if (!appEntry) {
+    return null;
+  }
+
+  let originalCommitSha = installed?.originalCommitSha;
+  if (installed?.installDir && !originalCommitSha) {
+    originalCommitSha = await getOriginalCommitSha(installed.installDir);
+    await upsertInstalledRecord({ ...installed, originalCommitSha });
+  }
+
+  return {
+    app: appEntry,
+    installed: Boolean(installed),
+    status: installed ? (runningApps.has(appId) ? 'running' : installed.status) : 'not_installed',
+    version: installed?.version ?? catalog?.version,
+    latestVersion: catalog?.latestVersion,
+    originalCommitSha,
+    installedAt: installed?.installedAt,
+    operations: installed ? await readOperationSummaries(appId) : [],
+  };
+};
+
+const uninstallAppRuntime = async (appId: string): Promise<BasicActionResult> => {
+  const record = registry.apps[appId];
+  if (!record) {
+    return {
+      success: false,
+      userMessage: 'Esta app no esta instalada.',
+      technicalCode: 'app_not_installed',
+    };
+  }
+
+  try {
+    if (runningApps.has(appId)) {
+      await stopInstalledApp(appId);
+    }
+    closeAppWindow(appId);
+    if (record.installDir) {
+      await fs.rm(record.installDir, { recursive: true, force: true });
+    }
+    await fs.rm(operationsFile(appId), { force: true });
+    await removeInstalledRecord(appId);
+    ensureCatalogStatuses();
+    emitRuntimeStatus({
+      appId,
+      status: 'not_installed',
+      userMessage: 'App eliminada.',
+    });
+    return {
+      success: true,
+      userMessage: 'App eliminada de tu equipo.',
+    };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : 'uninstall_failed';
+    return {
+      success: false,
+      userMessage: 'No pudimos eliminar la app.',
+      technicalCode: detail,
+    };
+  }
+};
+
+const normalizePostinstallText = (value: string): string =>
+  value
+    .replace(/^#+\s*/gm, '')
+    .replace(/\r/g, '')
+    .split('\n')
+    .map((line) => line.replace(/^[-*]\s*/, '').trim())
+    .filter(Boolean)
+    .join('\n');
+
+const firstLines = (value: string, count: number): string => value.split('\n').slice(0, count).join(' ');
+
+const buildInstallWelcomeMessage = async (record: InstalledAppRecord): Promise<string> => {
+  const postinstallPath = path.join(record.installDir, 'POSTINSTALL.md');
+  const raw = await fs.readFile(postinstallPath, 'utf8').catch(() => '');
+  const normalized = normalizePostinstallText(raw);
+  const fallbackIntro = record.description || `${record.name} ya esta lista para usar.`;
+  const lines = normalized.split('\n').filter(Boolean);
+  const intro = firstLines(lines.slice(0, 3).join('\n') || fallbackIntro, 3);
+  const howTo =
+    lines.find((line) => /comenzar|empezar|inicio/i.test(line)) ??
+    'Abre la app para revisar sus pantallas principales y empezar con tu informacion local.';
+  const suggestion =
+    lines.find((line) => /suger/i.test(line)) ??
+    'Si quieres, puedo ayudarte a revisar la app y preparar los primeros pasos contigo.';
+
+  return [
+    `${record.name} ya esta instalada.`,
+    '',
+    intro,
+    '',
+    '**Como comenzar**',
+    howTo,
+    '',
+    '**Sugerencia para empezar**',
+    suggestion,
+  ].join('\n');
+};
+
+const installWelcome = async (appId: string): Promise<{
+  success: boolean;
+  appId: string;
+  message?: string;
+  usedCodex: boolean;
+  userMessage: string;
+  technicalCode?: string;
+}> => {
+  const record = registry.apps[appId];
+  if (!record?.installDir) {
+    return {
+      success: false,
+      appId,
+      usedCodex: false,
+      userMessage: 'Primero instala esta app.',
+      technicalCode: 'app_not_installed',
+    };
+  }
+
+  try {
+    const message = await buildInstallWelcomeMessage(record);
+    return {
+      success: true,
+      appId,
+      message,
+      usedCodex: false,
+      userMessage: 'Mensaje de bienvenida preparado.',
+    };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : 'install_welcome_failed';
+    return {
+      success: false,
+      appId,
+      usedCodex: false,
+      userMessage: 'No pudimos preparar el mensaje inicial.',
       technicalCode: detail,
     };
   }
@@ -2542,84 +2663,6 @@ const createWindow = async (): Promise<void> => {
 };
 
 const registerIpcHandlers = (): void => {
-  ipcMain.handle(IPC_CHANNELS.getSession, async () => {
-    return resolveSession();
-  });
-
-  ipcMain.handle(IPC_CHANNELS.login, async (_event, email: string, password: string) => {
-    let response: Response;
-
-    try {
-      response = await fetch(`${backendBaseUrl}/api/v1/session`, {
-        method: 'POST',
-        headers: {
-          Accept: 'application/json',
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ email, password }),
-      });
-    } catch (error) {
-      const detail = error instanceof Error ? error.message : 'network_error';
-      return {
-        authenticated: false,
-        error: `backend_unreachable: ${detail}`,
-      };
-    }
-
-    if (response.status === 401) {
-      type InvalidCredentials = {
-        authenticated: false;
-        error: string;
-      };
-
-      const payload = await readJson<InvalidCredentials>(response);
-      return {
-        authenticated: false,
-        error: payload?.error ?? 'invalid_credentials',
-      };
-    }
-
-    if (!response.ok) {
-      return {
-        authenticated: false,
-        error: `login_failed_${response.status}`,
-      };
-    }
-
-    type CreateSessionResponse = {
-      authenticated: true;
-      user: SessionUser;
-      token: string;
-    };
-
-    const payload = await readJson<CreateSessionResponse>(response);
-    if (!payload || payload.authenticated !== true || !payload.token) {
-      return {
-        authenticated: false,
-        error: 'invalid_login_response',
-      };
-    }
-
-    return await applyAuthenticatedSession(payload.user, payload.token);
-  });
-
-  ipcMain.handle(IPC_CHANNELS.logout, async () => {
-    if (!sessionToken) {
-      return await clearSession();
-    }
-
-    try {
-      await fetch(`${backendBaseUrl}/api/v1/session`, {
-        method: 'DELETE',
-        headers: buildHeaders(),
-      });
-    } catch {
-      return await clearSession();
-    }
-
-    return await clearSession();
-  });
-
   ipcMain.handle(IPC_CHANNELS.listInstalledApps, async () => {
     return Object.values(registry.apps).map(toAppSummary);
   });
@@ -2632,6 +2675,18 @@ const registerIpcHandlers = (): void => {
 
   ipcMain.handle(IPC_CHANNELS.installApp, async (_event, appId: string) => {
     return await installAppRuntime(appId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.uninstallApp, async (_event, appId: string) => {
+    return await uninstallAppRuntime(appId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.getAppDetails, async (_event, appId: string) => {
+    return await getAppDetails(appId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.installWelcome, async (_event, appId: string) => {
+    return await installWelcome(appId);
   });
 
   ipcMain.handle(IPC_CHANNELS.openApp, async (_event, appId: string) => {
@@ -2747,7 +2802,6 @@ app.whenReady().then(async () => {
   await ensureGlobalAgentsContext(getPrivateAppsRoot());
   await fs.mkdir(getCodexRoot(), { recursive: true });
   await fs.mkdir(getCodexHome(), { recursive: true });
-  await loadPersistedSession();
   await loadRegistry();
   chatOrchestrator = new ChatOrchestrator({
     privateAppsRoot: getPrivateAppsRoot(),

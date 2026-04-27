@@ -9,8 +9,6 @@ interface AppShellProps {
   currentView: View;
   onNavigate: (view: View) => void;
   t: AppDictionary;
-  isAuthenticated: boolean;
-  userLabel: string;
   chatApps: AppSummary[];
   selectedChatAppId: string | null;
   dataApps: AppSummary[];
@@ -18,6 +16,7 @@ interface AppShellProps {
   getAppMeta: (appId: string) => { name: string; description: string };
   onSelectChatApp: (appId: string | null) => void;
   onSelectDataApp: (appId: string | null) => void;
+  onOpenCloudModal: () => void;
   children: ReactNode;
 }
 
@@ -25,8 +24,6 @@ export function AppShell({
   currentView,
   onNavigate,
   t,
-  isAuthenticated,
-  userLabel,
   chatApps,
   selectedChatAppId,
   dataApps,
@@ -34,6 +31,7 @@ export function AppShell({
   getAppMeta,
   onSelectChatApp,
   onSelectDataApp,
+  onOpenCloudModal,
   children,
 }: AppShellProps) {
   return (
@@ -46,8 +44,6 @@ export function AppShell({
         <Topbar
           currentView={currentView}
           t={t}
-          isAuthenticated={isAuthenticated}
-          userLabel={userLabel}
           chatApps={chatApps}
           selectedChatAppId={selectedChatAppId}
           dataApps={dataApps}
@@ -55,7 +51,7 @@ export function AppShell({
           getAppMeta={getAppMeta}
           onSelectChatApp={onSelectChatApp}
           onSelectDataApp={onSelectDataApp}
-          onNavigate={onNavigate}
+          onOpenCloudModal={onOpenCloudModal}
         />
         <Box sx={{ p: 3, flex: 1, minHeight: 0, overflowY: 'auto' }}>{children}</Box>
       </Box>
