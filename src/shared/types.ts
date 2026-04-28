@@ -424,6 +424,57 @@ export interface FilesActionResult {
   technicalCode?: string;
 }
 
+export type AutomationFrequencyType = 'hourly' | 'daily' | 'weekly';
+
+export interface AutomationFrequency {
+  type: AutomationFrequencyType;
+  timeOfDay?: string;
+  weeklyDay?: number;
+}
+
+export type AutomationRunTrigger = 'manual' | 'scheduled';
+export type AutomationRunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'skipped';
+
+export interface AutomationRunSummary {
+  id: string;
+  automationId: string;
+  trigger: AutomationRunTrigger;
+  status: AutomationRunStatus;
+  startedAt: string;
+  finishedAt?: string;
+  error?: string;
+  userMessage?: string;
+  userMessages?: string[];
+  transcriptPreview?: string;
+}
+
+export interface Automation {
+  id: string;
+  name: string;
+  prompt: string;
+  frequency: AutomationFrequency;
+  selectedAppIds: string[];
+  enabled: boolean;
+  running: boolean;
+  nextRunAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  lastRun?: AutomationRunSummary;
+}
+
+export interface AutomationRun extends AutomationRunSummary {
+  transcript: string;
+}
+
+export interface AutomationUpsertInput {
+  id?: string;
+  name: string;
+  prompt: string;
+  frequency: AutomationFrequency;
+  selectedAppIds: string[];
+  enabled?: boolean;
+}
+
 export interface ForgerDesktopApi {
   listInstalledApps: () => Promise<AppSummary[]>;
   listCatalogApps: () => Promise<CatalogApp[]>;
@@ -466,4 +517,14 @@ export interface ForgerDesktopApi {
   filesDelete: (input: FilesDeleteInput) => Promise<FilesActionResult>;
   dbListTables: (appId: string) => Promise<DbListTablesResponse>;
   dbQueryTable: (appId: string, tableName: string, limit?: number) => Promise<DbQueryTableResponse>;
+  automationsList: () => Promise<Automation[]>;
+  automationsCreate: (input: AutomationUpsertInput) => Promise<Automation>;
+  automationsUpdate: (input: AutomationUpsertInput & { id: string }) => Promise<Automation>;
+  automationsDelete: (id: string) => Promise<FilesActionResult>;
+  automationsPause: (id: string) => Promise<Automation>;
+  automationsResume: (id: string) => Promise<Automation>;
+  automationsRunNow: (id: string) => Promise<AutomationRunSummary>;
+  automationsListRuns: (automationId: string) => Promise<AutomationRunSummary[]>;
+  automationsGetRunTranscript: (runId: string) => Promise<AutomationRun | null>;
+  onAutomationUpdated: (listener: (event: { automation: Automation; run?: AutomationRunSummary }) => void) => () => void;
 }
