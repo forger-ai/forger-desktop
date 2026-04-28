@@ -38,6 +38,16 @@ const IPC_CHANNELS = {
   filesDelete: 'forger:files:delete',
   dbListTables: 'forger:db:list-tables',
   dbQueryTable: 'forger:db:query-table',
+  automationsList: 'forger:automations:list',
+  automationsCreate: 'forger:automations:create',
+  automationsUpdate: 'forger:automations:update',
+  automationsDelete: 'forger:automations:delete',
+  automationsPause: 'forger:automations:pause',
+  automationsResume: 'forger:automations:resume',
+  automationsRunNow: 'forger:automations:run-now',
+  automationsListRuns: 'forger:automations:list-runs',
+  automationsGetRunTranscript: 'forger:automations:get-run-transcript',
+  automationUpdated: 'forger:automations:updated',
 } as const;
 
 const api: ForgerDesktopApi = {
@@ -100,6 +110,24 @@ const api: ForgerDesktopApi = {
   filesDelete: (input) => ipcRenderer.invoke(IPC_CHANNELS.filesDelete, input),
   dbListTables: (appId) => ipcRenderer.invoke(IPC_CHANNELS.dbListTables, appId),
   dbQueryTable: (appId, tableName, limit) => ipcRenderer.invoke(IPC_CHANNELS.dbQueryTable, appId, tableName, limit),
+  automationsList: () => ipcRenderer.invoke(IPC_CHANNELS.automationsList),
+  automationsCreate: (input) => ipcRenderer.invoke(IPC_CHANNELS.automationsCreate, input),
+  automationsUpdate: (input) => ipcRenderer.invoke(IPC_CHANNELS.automationsUpdate, input),
+  automationsDelete: (id) => ipcRenderer.invoke(IPC_CHANNELS.automationsDelete, id),
+  automationsPause: (id) => ipcRenderer.invoke(IPC_CHANNELS.automationsPause, id),
+  automationsResume: (id) => ipcRenderer.invoke(IPC_CHANNELS.automationsResume, id),
+  automationsRunNow: (id) => ipcRenderer.invoke(IPC_CHANNELS.automationsRunNow, id),
+  automationsListRuns: (automationId) => ipcRenderer.invoke(IPC_CHANNELS.automationsListRuns, automationId),
+  automationsGetRunTranscript: (runId) => ipcRenderer.invoke(IPC_CHANNELS.automationsGetRunTranscript, runId),
+  onAutomationUpdated: (listener) => {
+    const wrapped = (_event: unknown, payload: Parameters<typeof listener>[0]) => {
+      listener(payload);
+    };
+    ipcRenderer.on(IPC_CHANNELS.automationUpdated, wrapped);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.automationUpdated, wrapped);
+    };
+  },
 };
 
 contextBridge.exposeInMainWorld('forger', api);

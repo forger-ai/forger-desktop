@@ -19,6 +19,10 @@ import type {
   AppCategory,
   AppDetails,
   AppSummary,
+  Automation,
+  AutomationRun,
+  AutomationRunSummary,
+  AutomationUpsertInput,
   CatalogApp,
   CodexAuthStatus,
   CodexModelOption,
@@ -36,6 +40,7 @@ import { ForgerCloudModal } from '@renderer/components/ForgerCloudModal';
 import { getDictionary } from '@renderer/i18n';
 import { buildAppTheme, resolveThemeMode, type ThemePreference } from '@renderer/theme/appTheme';
 import { AppView } from '@renderer/views/AppView';
+import { AutomationsView } from '@renderer/views/AutomationsView';
 import { CatalogView } from '@renderer/views/CatalogView';
 import { ChatView, type ChatMessage, type ConversationHistoryItem } from '@renderer/views/ChatView';
 import { DataView } from '@renderer/views/DataView';
@@ -256,6 +261,11 @@ function App() {
   const [forgerFiles, setForgerFiles] = useState<ForgerFileRecord[]>([]);
   const [fileCategories, setFileCategories] = useState<ForgerFileCategory[]>([]);
   const [fileFilters, setFileFilters] = useState<FilesListInput>({ sortBy: 'uploadedAt', sortDirection: 'desc' });
+  const [automations, setAutomations] = useState<Automation[]>([]);
+  const [automationRuns, setAutomationRuns] = useState<AutomationRunSummary[]>([]);
+  const [selectedAutomationId, setSelectedAutomationId] = useState<string | null>(null);
+  const [selectedAutomationRun, setSelectedAutomationRun] = useState<AutomationRun | null>(null);
+  const [automationBusy, setAutomationBusy] = useState(false);
   const [chatConversations, setChatConversations] = useState<ChatConversation[]>(
     persistedChatState.conversations,
   );
@@ -268,6 +278,7 @@ function App() {
   const [chatRunActive, setChatRunActive] = useState(false);
   const [chatProgressLines, setChatProgressLines] = useState<string[]>([]);
   const activeRunConversationIdRef = useRef<string | null>(null);
+  const selectedAutomationIdRef = useRef<string | null>(null);
   const deliveredRunRepliesRef = useRef<Set<string>>(new Set());
   const [bannerMessage, setBannerMessage] = useState<string | null>(null);
   const [bannerSeverity, setBannerSeverity] = useState<AlertColor>('success');
@@ -313,16 +324,37 @@ function App() {
     setFileCategories(categories);
   };
 
+  const refreshAutomations = async () => {
+    const desktopApi = getDesktopApi();
+    const nextAutomations = await desktopApi.automationsList();
+    setAutomations(nextAutomations);
+    return nextAutomations;
+  };
+
+  const loadAutomationRuns = async (automationId: string, preferredRunId?: string) => {
+    const desktopApi = getDesktopApi();
+    const runs = await desktopApi.automationsListRuns(automationId);
+    setAutomationRuns(runs);
+    const targetRunId = preferredRunId ?? runs[0]?.id;
+    if (targetRunId) {
+      const run = await desktopApi.automationsGetRunTranscript(targetRunId);
+      setSelectedAutomationRun(run);
+    } else {
+      setSelectedAutomationRun(null);
+    }
+  };
+
   useEffect(() => {
     const loadData = async () => {
       const desktopApi = getDesktopApi();
-      const [installedResult, catalogResult, settingsResult, codexAuthResult, filesResult, categoriesResult] = await Promise.allSettled([
+      const [installedResult, catalogResult, settingsResult, codexAuthResult, filesResult, categoriesResult, automationsResult] = await Promise.allSettled([
         desktopApi.listInstalledApps(),
         desktopApi.listCatalogApps(),
         desktopApi.getSettings(),
         desktopApi.getCodexAuthStatus(),
         desktopApi.filesList(fileFilters),
         desktopApi.filesListCategories(),
+        desktopApi.automationsList(),
       ]);
 
       if (installedResult.status === 'fulfilled') {
@@ -346,6 +378,14 @@ function App() {
 
       if (categoriesResult.status === 'fulfilled') {
         setFileCategories(categoriesResult.value);
+      }
+
+      if (automationsResult.status === 'fulfilled') {
+        setAutomations(automationsResult.value);
+        if (automationsResult.value[0]) {
+          setSelectedAutomationId(automationsResult.value[0].id);
+          void loadAutomationRuns(automationsResult.value[0].id);
+        }
       }
 
       if (codexAuthResult.status === 'fulfilled') {
@@ -467,12 +507,35 @@ function App() {
       }
     });
 
+    const unsubscribeAutomation = desktopApi.onAutomationUpdated(({ automation, run }) => {
+      setAutomations((current) => {
+        const withoutCurrent = current.filter((item) => item.id !== automation.id);
+        return [automation, ...withoutCurrent].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+      });
+      if (selectedAutomationIdRef.current === automation.id) {
+        void desktopApi.automationsListRuns(automation.id).then((runs) => {
+          setAutomationRuns(runs);
+          const targetRunId = run?.id ?? selectedAutomationRun?.id ?? runs[0]?.id;
+          if (!targetRunId) {
+            setSelectedAutomationRun(null);
+            return;
+          }
+          void desktopApi.automationsGetRunTranscript(targetRunId).then(setSelectedAutomationRun);
+        });
+      }
+    });
+
     return () => {
       unsubscribeInstall();
       unsubscribeRuntime();
       unsubscribeChat();
+      unsubscribeAutomation();
     };
   }, []);
+
+  useEffect(() => {
+    selectedAutomationIdRef.current = selectedAutomationId;
+  }, [selectedAutomationId]);
 
   useEffect(() => {
     if (currentView !== 'chat') {
@@ -1067,6 +1130,97 @@ function App() {
     deliveredRunRepliesRef.current.clear();
   };
 
+  const handleSelectAutomation = (automationId: string) => {
+    setSelectedAutomationId(automationId);
+    void loadAutomationRuns(automationId);
+  };
+
+  const handleSelectAutomationRun = async (runId: string) => {
+    const run = await getDesktopApi().automationsGetRunTranscript(runId);
+    setSelectedAutomationRun(run);
+  };
+
+  const handleSaveAutomation = async (input: AutomationUpsertInput & { id?: string }) => {
+    setAutomationBusy(true);
+    try {
+      const desktopApi = getDesktopApi();
+      const saved = input.id
+        ? await desktopApi.automationsUpdate({ ...input, id: input.id })
+        : await desktopApi.automationsCreate(input);
+      const nextAutomations = await refreshAutomations();
+      setSelectedAutomationId(saved.id);
+      await loadAutomationRuns(saved.id);
+      setBannerSeverity('success');
+      setBannerMessage(saved.enabled ? 'Automatizacion guardada y activa.' : 'Automatizacion guardada pausada.');
+      if (nextAutomations.length === 0) {
+        setAutomations([saved]);
+      }
+    } catch (error) {
+      setBannerSeverity('error');
+      setBannerMessage(error instanceof Error ? error.message : t.settings.authErrorFallback);
+    } finally {
+      setAutomationBusy(false);
+    }
+  };
+
+  const handleDeleteAutomation = async (automationId: string) => {
+    if (!window.confirm(t.sections.automations.deleteConfirm)) {
+      return;
+    }
+    setAutomationBusy(true);
+    try {
+      const result = await getDesktopApi().automationsDelete(automationId);
+      const nextAutomations = await refreshAutomations();
+      const nextSelectedId = nextAutomations[0]?.id ?? null;
+      setSelectedAutomationId(nextSelectedId);
+      setAutomationRuns([]);
+      setSelectedAutomationRun(null);
+      if (nextSelectedId) {
+        await loadAutomationRuns(nextSelectedId);
+      }
+      setBannerSeverity(result.success ? 'success' : 'error');
+      setBannerMessage(result.userMessage ?? result.technicalCode ?? t.settings.authErrorFallback);
+    } finally {
+      setAutomationBusy(false);
+    }
+  };
+
+  const handlePauseAutomation = async (automationId: string) => {
+    setAutomationBusy(true);
+    try {
+      await getDesktopApi().automationsPause(automationId);
+      await refreshAutomations();
+    } finally {
+      setAutomationBusy(false);
+    }
+  };
+
+  const handleResumeAutomation = async (automationId: string) => {
+    setAutomationBusy(true);
+    try {
+      await getDesktopApi().automationsResume(automationId);
+      await refreshAutomations();
+    } finally {
+      setAutomationBusy(false);
+    }
+  };
+
+  const handleRunAutomationNow = async (automationId: string) => {
+    setAutomationBusy(true);
+    try {
+      const run = await getDesktopApi().automationsRunNow(automationId);
+      setSelectedAutomationId(automationId);
+      await loadAutomationRuns(automationId, run.id);
+      setBannerSeverity(run.status === 'skipped' ? 'warning' : 'info');
+      setBannerMessage(run.status === 'skipped' ? 'Ya hay un run activo para esta automatizacion.' : 'Run manual iniciado.');
+    } catch (error) {
+      setBannerSeverity('error');
+      setBannerMessage(error instanceof Error ? error.message : t.settings.authErrorFallback);
+    } finally {
+      setAutomationBusy(false);
+    }
+  };
+
   const refreshCodexAuthStatus = async () => {
     const desktopApi = getDesktopApi();
     const nextStatus = await desktopApi.getCodexAuthStatus();
@@ -1208,6 +1362,27 @@ function App() {
             codexConfigured={codexAuthStatus.authenticated}
             onConfigureCodex={() => setCodexConfigOpen(true)}
             onOpenApp={(appId) => void handleOpen(appId)}
+          />
+        ) : null}
+
+        {currentView === 'automations' ? (
+          <AutomationsView
+            t={t}
+            apps={installedApps.filter((a) => a.status === 'installed' || a.status === 'running')}
+            automations={automations}
+            selectedAutomationId={selectedAutomationId}
+            runs={automationRuns}
+            selectedRun={selectedAutomationRun}
+            transcript={selectedAutomationRun?.transcript ?? ''}
+            busy={automationBusy}
+            getAppMeta={getAppMeta}
+            onSave={(input) => void handleSaveAutomation(input)}
+            onDelete={(id) => void handleDeleteAutomation(id)}
+            onPause={(id) => void handlePauseAutomation(id)}
+            onResume={(id) => void handleResumeAutomation(id)}
+            onRunNow={(id) => void handleRunAutomationNow(id)}
+            onSelectAutomation={handleSelectAutomation}
+            onSelectRun={(runId) => void handleSelectAutomationRun(runId)}
           />
         ) : null}
 

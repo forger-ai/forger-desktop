@@ -18,6 +18,7 @@ try {
 import { settingsSeed } from '../shared/mock-data';
 import { IPC_CHANNELS } from '../shared/ipc';
 import { ChatOrchestrator } from './chat/orchestrator';
+import { AutomationManager } from './automation-manager';
 import { FileLibrary } from './file-library';
 import {
   FORGER_AGENT_CONTRACT_MARKER,
@@ -33,6 +34,7 @@ import type {
   AppStatus,
   AppOperationSummary,
   AppSummary,
+  AutomationUpsertInput,
   BasicActionResult,
   CatalogApp,
   ChatApplyRunInput,
@@ -172,6 +174,7 @@ const stoppingApps = new Set<string>();
 const runtimeLocks = new Map<string, Promise<RuntimeBinarySet>>();
 let chatOrchestrator: ChatOrchestrator | null = null;
 let fileLibrary: FileLibrary | null = null;
+let automationManager: AutomationManager | null = null;
 
 const resolvePlatformAlias = (): string => {
   const platformPrefix = PLATFORM_KEY_BY_RUNTIME[process.platform] ?? process.platform;
@@ -360,6 +363,14 @@ const emitChatRunUpdated = (payload: { run: unknown }): void => {
   }
 
   mainWindow.webContents.send(IPC_CHANNELS.chatRunUpdated, payload);
+};
+
+const emitAutomationUpdated = (payload: { automation: unknown; run?: unknown }): void => {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return;
+  }
+
+  mainWindow.webContents.send(IPC_CHANNELS.automationUpdated, payload);
 };
 
 const toAppSummary = (record: InstalledAppRecord): AppSummary => {
@@ -2732,6 +2743,61 @@ const registerIpcHandlers = (): void => {
       return { error: detail };
     }
   });
+
+  ipcMain.handle(IPC_CHANNELS.automationsList, async () => {
+    if (!automationManager) {
+      return [];
+    }
+    return automationManager.list();
+  });
+  ipcMain.handle(IPC_CHANNELS.automationsCreate, async (_event, input: AutomationUpsertInput) => {
+    if (!automationManager) {
+      throw new Error('automation_manager_unavailable');
+    }
+    return await automationManager.create(input);
+  });
+  ipcMain.handle(IPC_CHANNELS.automationsUpdate, async (_event, input: AutomationUpsertInput & { id: string }) => {
+    if (!automationManager) {
+      throw new Error('automation_manager_unavailable');
+    }
+    return await automationManager.update(input);
+  });
+  ipcMain.handle(IPC_CHANNELS.automationsDelete, async (_event, id: string) => {
+    if (!automationManager) {
+      return { success: false, technicalCode: 'automation_manager_unavailable' };
+    }
+    return await automationManager.delete(id);
+  });
+  ipcMain.handle(IPC_CHANNELS.automationsPause, async (_event, id: string) => {
+    if (!automationManager) {
+      throw new Error('automation_manager_unavailable');
+    }
+    return await automationManager.pause(id);
+  });
+  ipcMain.handle(IPC_CHANNELS.automationsResume, async (_event, id: string) => {
+    if (!automationManager) {
+      throw new Error('automation_manager_unavailable');
+    }
+    return await automationManager.resume(id);
+  });
+  ipcMain.handle(IPC_CHANNELS.automationsRunNow, async (_event, id: string) => {
+    if (!automationManager) {
+      throw new Error('automation_manager_unavailable');
+    }
+    return await automationManager.runNow(id);
+  });
+  ipcMain.handle(IPC_CHANNELS.automationsListRuns, async (_event, automationId: string) => {
+    if (!automationManager) {
+      return [];
+    }
+    return await automationManager.listRuns(automationId);
+  });
+  ipcMain.handle(IPC_CHANNELS.automationsGetRunTranscript, async (_event, runId: string) => {
+    if (!automationManager) {
+      return null;
+    }
+    return await automationManager.getRunTranscript(runId);
+  });
 };
 
 app.whenReady().then(async () => {
@@ -2766,6 +2832,25 @@ app.whenReady().then(async () => {
       emitChatRunUpdated(event as { run: unknown });
     },
   });
+  automationManager = new AutomationManager({
+    forgerHomeRoot: getForgerHomeRoot(),
+    metadataRoot: getForgerMetadataRoot(),
+    codexHome: getCodexHome(),
+    getInstalledApps: () => Object.values(registry.apps).map(toAppSummary),
+    getCodexCliPath: async () => await resolveCodexCliPath(getCodexRoot()),
+    getCodexPathEntries: async () => {
+      const nodeRuntime = await ensureRuntimeInstalled('node', DEFAULT_NODE_VERSION);
+      return getRuntimePathEntries(nodeRuntime);
+    },
+    getCodexAuthenticated: async () => {
+      const status = await getCodexAuthStatus();
+      return status.authenticated;
+    },
+    onAutomationUpdated: (event) => {
+      emitAutomationUpdated(event as { automation: unknown; run?: unknown });
+    },
+  });
+  await automationManager.initialize();
 
   registerIpcHandlers();
   ensureCatalogStatuses();
@@ -2779,6 +2864,7 @@ app.whenReady().then(async () => {
 });
 
 app.on('before-quit', () => {
+  automationManager?.dispose();
   for (const running of runningApps.values()) {
     void terminateProcess(running.backend);
     void terminateProcess(running.frontend);
