@@ -1,4 +1,4 @@
-export type AppStatus = 'not_installed' | 'installing' | 'installed' | 'running' | 'error';
+export type AppStatus = 'not_installed' | 'installing' | 'installed' | 'running' | 'error' | 'conflict';
 
 export type AppCategory = 'finanzas' | 'hogar' | 'salud' | 'productividad';
 
@@ -9,7 +9,16 @@ export interface AppSummary {
   name?: string;
   description?: string;
   version?: string;
+  latestVersion?: string;
+  updateAvailable?: boolean;
+  changelog?: VersionChangelog;
   userMessage?: string;
+}
+
+export interface VersionChangelog {
+  version: string;
+  summary?: string;
+  changes: string[];
 }
 
 export interface CatalogApp extends AppSummary {
@@ -54,6 +63,10 @@ export type InstallPhase =
   | 'preparing_runtime'
   | 'installing_backend'
   | 'installing_frontend'
+  | 'checking_update'
+  | 'updating_base'
+  | 'merging_user_changes'
+  | 'conflict'
   | 'completed'
   | 'failed';
 
@@ -92,6 +105,50 @@ export interface StopAppResult {
   technicalCode?: string;
 }
 
+export type AgentToolId =
+  | 'forger_list_catalog'
+  | 'forger_list_installed_apps'
+  | 'forger_check_updates'
+  | 'forger_get_app_runtime_status'
+  | 'forger_open_app'
+  | 'forger_stop_app'
+  | 'forger_restart_app'
+  | 'forger_refresh_app_view'
+  | 'forger_update_app';
+
+export type AgentToolCategory = 'consulta' | 'app' | 'actualizacion' | 'vista';
+
+export type AgentToolRisk = 'bajo' | 'medio' | 'alto';
+
+export interface AgentToolDefinition {
+  id: AgentToolId;
+  packageId: string;
+  name: string;
+  description: string;
+  category: AgentToolCategory;
+  risk: AgentToolRisk;
+  defaultRequiresApproval: boolean;
+}
+
+export interface AgentToolPackageDefinition {
+  id: string;
+  name: string;
+  description: string;
+  icon: 'forger';
+  tools: AgentToolDefinition[];
+}
+
+export type AgentToolApprovalSettings = Record<AgentToolId, boolean>;
+
+export interface AgentToolSettings {
+  approvals: AgentToolApprovalSettings;
+}
+
+export interface UpdateAgentToolApprovalInput {
+  toolId: AgentToolId;
+  requiresApproval: boolean;
+}
+
 export type ChatRunStatus =
   | 'queued'
   | 'running'
@@ -107,6 +164,7 @@ export type ChatRunStatus =
 export type ChatErrorCode =
   | 'auth_missing'
   | 'app_not_installed'
+  | 'dirty_worktree'
   | 'sandbox_violation'
   | 'permission_denied'
   | 'timeout'
@@ -182,9 +240,19 @@ export interface AppDetails {
   status: AppStatus;
   version?: string;
   latestVersion?: string;
+  updateAvailable?: boolean;
+  changelog?: VersionChangelog;
+  conflictInfo?: AppUpdateConflictInfo;
   originalCommitSha?: string;
   installedAt?: string;
   operations: AppOperationSummary[];
+}
+
+export interface AppUpdateConflictInfo {
+  fromVersion: string;
+  targetVersion: string;
+  startedAt: string;
+  message?: string;
 }
 
 export interface InstallWelcomeResult {
@@ -204,6 +272,7 @@ export interface ChatStartRunInput {
   appId: string;
   prompt: string;
   threadId?: string | null;
+  userLanguage?: string;
   sharedFiles?: SharedFileRef[];
   model?: string;
   reasoningEffort?: CodexReasoningEffort;
@@ -359,9 +428,12 @@ export interface ForgerDesktopApi {
   listInstalledApps: () => Promise<AppSummary[]>;
   listCatalogApps: () => Promise<CatalogApp[]>;
   installApp: (appId: string) => Promise<InstallAppResult>;
+  updateApp: (appId: string) => Promise<InstallAppResult>;
+  restoreAppUserVersion: (appId: string) => Promise<BasicActionResult>;
+  resolveAppUpdateConflict: (appId: string) => Promise<{ runId: string; status: ChatRunStatus } | BasicActionResult>;
   uninstallApp: (appId: string) => Promise<BasicActionResult>;
   getAppDetails: (appId: string) => Promise<AppDetails | null>;
-  installWelcome: (appId: string) => Promise<InstallWelcomeResult>;
+  installWelcome: (appId: string, userLanguage?: string) => Promise<InstallWelcomeResult>;
   openApp: (appId: string) => Promise<OpenAppResult>;
   stopApp: (appId: string) => Promise<StopAppResult>;
   getAppRuntimeStatus: (appId: string) => Promise<RuntimeStatus>;
@@ -372,6 +444,9 @@ export interface ForgerDesktopApi {
   openCodexUsageDashboard: () => Promise<{ success: boolean; userMessage?: string; technicalCode?: string }>;
   connectCodexAuth: () => Promise<{ success: boolean; userMessage: string; technicalCode?: string }>;
   disconnectCodexAuth: () => Promise<{ success: boolean; userMessage: string; technicalCode?: string }>;
+  listAgentTools: () => Promise<AgentToolPackageDefinition[]>;
+  getAgentToolSettings: () => Promise<AgentToolSettings>;
+  updateAgentToolApproval: (input: UpdateAgentToolApprovalInput) => Promise<AgentToolSettings>;
   chatStartRun: (input: ChatStartRunInput) => Promise<{ runId: string; status: ChatRunStatus }>;
   chatGetRun: (input: ChatGetRunInput) => Promise<ChatRun | null>;
   chatCancelRun: (input: ChatCancelRunInput) => Promise<{ success: boolean }>;

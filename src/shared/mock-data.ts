@@ -2,7 +2,7 @@ import type { AppSummary, CatalogApp, Settings } from './types';
 
 export const installedAppsSeed: AppSummary[] = [
   {
-    id: 'finance-os-lite',
+    id: 'finance-os',
     category: 'finanzas',
     status: 'installed',
   },
@@ -15,7 +15,7 @@ export const installedAppsSeed: AppSummary[] = [
 
 export const catalogAppsSeed: CatalogApp[] = [
   {
-    id: 'finance-os-lite',
+    id: 'finance-os',
     category: 'finanzas',
     status: 'installed',
   },
