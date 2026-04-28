@@ -120,6 +120,35 @@ export const buildAppTheme = (mode: ResolvedThemeMode) => {
     components: {
       MuiCssBaseline: {
         styleOverrides: {
+          'html, body, #root': {
+            width: '100%',
+            height: '100%',
+            overflow: 'hidden',
+          },
+          '*': {
+            scrollbarWidth: 'thin',
+            scrollbarColor: `${alpha(palette.muted, isDark ? 0.72 : 0.46)} transparent`,
+          },
+          '*::-webkit-scrollbar': {
+            width: 12,
+            height: 12,
+          },
+          '*::-webkit-scrollbar-track': {
+            backgroundColor: 'transparent',
+          },
+          '*::-webkit-scrollbar-thumb': {
+            minHeight: 36,
+            borderRadius: 999,
+            border: '3px solid transparent',
+            backgroundClip: 'content-box',
+            backgroundColor: alpha(palette.muted, isDark ? 0.58 : 0.34),
+          },
+          '*::-webkit-scrollbar-thumb:hover': {
+            backgroundColor: alpha(palette.muted, isDark ? 0.78 : 0.54),
+          },
+          '*::-webkit-scrollbar-corner': {
+            backgroundColor: 'transparent',
+          },
           body: {
             backgroundColor: palette.background,
             backgroundImage: isDark

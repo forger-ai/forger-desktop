@@ -58,4 +58,9 @@ export const IPC_CHANNELS = {
   automationsListRuns: 'forger:automations:list-runs',
   automationsGetRunTranscript: 'forger:automations:get-run-transcript',
   automationUpdated: 'forger:automations:updated',
+  windowMinimize: 'forger:window:minimize',
+  windowToggleMaximize: 'forger:window:toggle-maximize',
+  windowClose: 'forger:window:close',
+  windowGetState: 'forger:window:get-state',
+  windowStateChanged: 'forger:window:state-changed',
 } as const;

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, shell, type IpcMainInvokeEvent } from 'electron';
 import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import fs from 'node:fs/promises';
@@ -79,6 +79,7 @@ import type {
   UpdateAgentToolApprovalInput,
   UpdateUserSecretInput,
   VersionChangelog,
+  WindowControlState,
 } from '../shared/types';
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
@@ -92,6 +93,7 @@ const CODEX_USAGE_DASHBOARD_URL = 'https://chatgpt.com/codex/settings/usage';
 let devCatalogService: DevCatalogService | null = null;
 const APP_FOLDER_GRANT_TTL_MS = 5 * 60 * 1000;
 const appFolderGrantSecret = randomBytes(32).toString('base64url');
+const useCustomWindowFrame = process.platform === 'win32';
 
 if (isDev) {
   app.setName('Forger Dev');
@@ -4254,6 +4256,30 @@ const startForgerMcpServer = async (): Promise<void> => {
   await appendInstallLog('agent_tool:mcp_server_started', { url: forgerMcpServer.url });
 };
 
+const getWindowState = (window: BrowserWindow): WindowControlState => ({
+  isMaximized: window.isMaximized(),
+  isFullScreen: window.isFullScreen(),
+  usesCustomFrame: useCustomWindowFrame,
+});
+
+const emitWindowState = (window: BrowserWindow): void => {
+  if (!window.isDestroyed()) {
+    window.webContents.send(IPC_CHANNELS.windowStateChanged, getWindowState(window));
+  }
+};
+
+const registerWindowStateEvents = (window: BrowserWindow): void => {
+  const notify = () => emitWindowState(window);
+  window.on('maximize', notify);
+  window.on('unmaximize', notify);
+  window.on('restore', notify);
+  window.on('enter-full-screen', notify);
+  window.on('leave-full-screen', notify);
+};
+
+const getInvokingWindow = (event: IpcMainInvokeEvent): BrowserWindow | null =>
+  BrowserWindow.fromWebContents(event.sender);
+
 const findSqliteFile = async (searchDir: string): Promise<string | null> => {
   const extensions = ['.db', '.sqlite', '.sqlite3'];
   try {
@@ -4307,6 +4333,10 @@ const createWindow = async (): Promise<void> => {
     minHeight: 760,
     backgroundColor: '#F6F3EE',
     title: isDev ? 'Forger Dev' : 'Forger',
+    frame: !useCustomWindowFrame,
+    titleBarStyle: process.platform === 'darwin' ? 'hidden' : undefined,
+    trafficLightPosition: process.platform === 'darwin' ? { x: 14, y: 16 } : undefined,
+    autoHideMenuBar: true,
     webPreferences: {
       preload: preloadPath,
       nodeIntegration: false,
@@ -4314,6 +4344,7 @@ const createWindow = async (): Promise<void> => {
       sandbox: true,
     },
   });
+  registerWindowStateEvents(mainWindow);
 
   if (isDev && process.env.VITE_DEV_SERVER_URL) {
     await mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
@@ -4685,6 +4716,38 @@ const registerIpcHandlers = (): void => {
       return null;
     }
     return await automationManager.getRunTranscript(runId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.windowMinimize, async (event) => {
+    getInvokingWindow(event)?.minimize();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.windowToggleMaximize, async (event) => {
+    const window = getInvokingWindow(event);
+    if (!window) {
+      throw new Error('window_not_found');
+    }
+
+    if (window.isMaximized()) {
+      window.unmaximize();
+    } else {
+      window.maximize();
+    }
+
+    return getWindowState(window);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.windowClose, async (event) => {
+    getInvokingWindow(event)?.close();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.windowGetState, async (event) => {
+    const window = getInvokingWindow(event);
+    if (!window) {
+      throw new Error('window_not_found');
+    }
+
+    return getWindowState(window);
   });
 };
 

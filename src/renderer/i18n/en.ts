@@ -258,6 +258,12 @@ export const en = {
   shell: {
     safeModeHint: 'Forger works inside its private space. We only use files you explicitly choose to share.',
   },
+  window: {
+    minimize: 'Minimize',
+    maximize: 'Maximize',
+    restore: 'Restore',
+    close: 'Close',
+  },
   actions: {
     back: 'Back',
     close: 'Close',

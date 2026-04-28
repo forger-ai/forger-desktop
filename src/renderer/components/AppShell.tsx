@@ -35,7 +35,7 @@ export function AppShell({
   children,
 }: AppShellProps) {
   return (
-    <Box sx={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
+    <Box sx={{ display: 'flex', height: '100vh', overflow: 'hidden', WebkitAppRegion: 'no-drag' }}>
       <Sidebar currentView={currentView} onNavigate={onNavigate} t={t} />
       <Box
         component="main"
@@ -53,7 +53,7 @@ export function AppShell({
           onSelectDataApp={onSelectDataApp}
           onOpenCloudModal={onOpenCloudModal}
         />
-        <Box sx={{ p: 3, flex: 1, minHeight: 0, overflowY: 'auto' }}>{children}</Box>
+        <Box sx={{ p: 3, flex: 1, minHeight: 0, overflowY: 'auto', WebkitAppRegion: 'no-drag' }}>{children}</Box>
       </Box>
     </Box>
   );

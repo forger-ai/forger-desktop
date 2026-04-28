@@ -18,6 +18,8 @@ import {
   Typography,
   useTheme,
 } from '@mui/material';
+import { useEffect, useState } from 'react';
+import type { WindowControlState } from '@shared/types';
 import type { AppDictionary } from '@renderer/i18n';
 import iconDark from '@renderer/assets/icon-dark.svg';
 import iconLight from '@renderer/assets/icon-light.svg';
@@ -33,6 +35,7 @@ export type View =
   | 'tools'
   | 'settings'
   | 'app';
+const isMacOs = navigator.platform.toLowerCase().includes('mac');
 
 interface SidebarProps {
   currentView: View;
@@ -53,6 +56,36 @@ const mainNav = [
 
 export function Sidebar({ currentView, onNavigate, t }: SidebarProps) {
   const theme = useTheme();
+  const [windowState, setWindowState] = useState<WindowControlState | null>(null);
+  const shouldReserveMacTrafficLightSpace =
+    isMacOs && !windowState?.isMaximized && !windowState?.isFullScreen;
+
+  useEffect(() => {
+    if (!isMacOs) {
+      return undefined;
+    }
+
+    let mounted = true;
+    const desktopApi = window.forger;
+
+    void desktopApi
+      .getWindowState()
+      .then((state) => {
+        if (mounted) {
+          setWindowState(state);
+        }
+      })
+      .catch(() => undefined);
+
+    const removeListener = desktopApi.onWindowStateChanged((state) => {
+      setWindowState(state);
+    });
+
+    return () => {
+      mounted = false;
+      removeListener();
+    };
+  }, []);
 
   const labels: Record<View, string> = {
     'my-apps': t.nav.myApps,
@@ -79,11 +112,21 @@ export function Sidebar({ currentView, onNavigate, t }: SidebarProps) {
         bgcolor: alpha(theme.palette.background.paper, 0.84),
         backdropFilter: 'blur(16px)',
         overflow: 'hidden',
+        WebkitAppRegion: 'no-drag',
       }}
     >
       <Stack sx={{ height: '100%' }}>
         <Stack spacing={2}>
-          <Stack direction="row" spacing={1.5} alignItems="center">
+          <Stack
+            direction="row"
+            spacing={1.5}
+            alignItems="center"
+            sx={{
+              WebkitAppRegion: 'drag',
+              minHeight: 38,
+              pt: shouldReserveMacTrafficLightSpace ? 4 : 0,
+            }}
+          >
             <Box
               component="img"
               src={theme.palette.mode === 'dark' ? iconDark : iconLight}
