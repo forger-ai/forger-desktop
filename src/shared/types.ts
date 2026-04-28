@@ -12,6 +12,7 @@ export interface AppSummary {
   latestVersion?: string;
   updateAvailable?: boolean;
   changelog?: VersionChangelog;
+  capabilities?: AppCapability[];
   userMessage?: string;
 }
 
@@ -21,6 +22,12 @@ export interface VersionChangelog {
   changes: string[];
 }
 
+export interface AppCapability {
+  id: string;
+  title: string;
+  description?: string;
+}
+
 export interface CatalogApp extends AppSummary {
   latestVersionId?: number;
   latestVersion?: string;
@@ -28,6 +35,7 @@ export interface CatalogApp extends AppSummary {
   requiredNodeVersion?: string;
   checksumSha256?: string;
   downloadUrl?: string;
+  capabilities?: AppCapability[];
 }
 
 export interface Settings {

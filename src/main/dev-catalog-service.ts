@@ -144,6 +144,16 @@ const getRuntimeStack = (manifest: JsonObject): string => {
   return asString(catalog.runtime_stack, DEFAULT_RUNTIME_STACK);
 };
 
+const getCapabilities = (catalog: JsonObject): unknown[] => {
+  if (Array.isArray(catalog.capabilities)) {
+    return catalog.capabilities;
+  }
+  if (Array.isArray(catalog.permissions)) {
+    return catalog.permissions;
+  }
+  return [];
+};
+
 const toCatalogEntry = async (app: LocalApp, baseUrl: string): Promise<JsonObject> => {
   const catalog = asRecord(app.manifest.catalog);
   const stack = asRecord(app.manifest.stack);
@@ -169,7 +179,7 @@ const toCatalogEntry = async (app: LocalApp, baseUrl: string): Promise<JsonObjec
       supported_platforms: Array.isArray(catalog.supported_platforms)
         ? catalog.supported_platforms
         : ['darwin_arm64', 'darwin_x64'],
-      permissions: Array.isArray(catalog.permissions) ? catalog.permissions : ['app_data'],
+      capabilities: getCapabilities(catalog),
       download_url: `${baseUrl}/download/${encodeURIComponent(app.catalogSlug)}.zip`,
       file_size_bytes: null,
       checksum_sha256: null,

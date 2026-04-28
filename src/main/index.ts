@@ -38,6 +38,7 @@ import type {
   AgentToolId,
   AgentToolPackageDefinition,
   AgentToolSettings,
+  AppCapability,
   AppCategory,
   AppDetails,
   AppExternalFolderSelection,
@@ -683,6 +684,89 @@ const normalizeChangelog = (value: unknown, version?: string): VersionChangelog 
   return undefined;
 };
 
+const CAPABILITY_LABELS: Record<string, AppCapability> = {
+  app_data: {
+    id: 'app_data',
+    title: 'Guardar datos locales',
+    description: 'Usa el espacio privado de la app para guardar estado y datos propios.',
+  },
+  local_app_data: {
+    id: 'local_app_data',
+    title: 'Guardar datos locales',
+    description: 'Usa el espacio privado de la app para guardar estado y datos propios.',
+  },
+  internal_workspace: {
+    id: 'internal_workspace',
+    title: 'Guardar un workspace privado',
+    description: 'Crea y edita archivos dentro del espacio local privado de la app.',
+  },
+  local_finance_data: {
+    id: 'local_finance_data',
+    title: 'Guardar tus finanzas localmente',
+    description: 'Mantiene movimientos, categorias y presupuestos en una base de datos local.',
+  },
+  local_recipe_data: {
+    id: 'local_recipe_data',
+    title: 'Guardar recetas localmente',
+    description: 'Mantiene recetas, ingredientes, costos y menus dentro del espacio local de la app.',
+  },
+  user_selected_imports: {
+    id: 'user_selected_imports',
+    title: 'Importar archivos que eliges',
+    description: 'Carga archivos seleccionados por ti para procesarlos dentro de la app.',
+  },
+  app_exports: {
+    id: 'app_exports',
+    title: 'Exportar informacion',
+    description: 'Puede crear archivos de salida cuando eliges guardar o exportar datos.',
+  },
+  ai_api: {
+    id: 'ai_api',
+    title: 'Usar una API de IA',
+    description: 'Puede usar una clave configurada por ti para funciones asistidas por IA.',
+  },
+  ai_assisted_imports: {
+    id: 'ai_assisted_imports',
+    title: 'Usar IA para leer documentos',
+    description: 'Puede usar una API key configurada por ti para extraer movimientos desde PDFs o imagenes.',
+  },
+  user_selected_folders: {
+    id: 'user_selected_folders',
+    title: 'Abrir carpetas que eliges',
+    description: 'Trabaja con carpetas seleccionadas explicitamente por ti.',
+  },
+};
+
+const normalizeCapabilities = (value: unknown): AppCapability[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((item): AppCapability[] => {
+    if (typeof item === 'string') {
+      return [
+        CAPABILITY_LABELS[item] ?? {
+          id: item,
+          title: item.replace(/[_-]+/g, ' '),
+        },
+      ];
+    }
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      return [];
+    }
+    const record = item as Record<string, unknown>;
+    const id = typeof record.id === 'string' && record.id.trim() ? record.id.trim() : '';
+    const title = typeof record.title === 'string' && record.title.trim() ? record.title.trim() : id;
+    if (!id || !title) {
+      return [];
+    }
+    const description = typeof record.description === 'string' && record.description.trim()
+      ? record.description.trim()
+      : undefined;
+    return [{ id, title, description }];
+  });
+};
+
 const mapBackendCategory = (backendCategory: string): AppCategory => {
   switch (backendCategory) {
     case 'finance':
@@ -1113,6 +1197,8 @@ const listCatalogFromBackend = async (): Promise<CatalogApp[]> => {
       checksum_sha256?: string | null;
       download_url?: string | null;
       changelog?: unknown;
+      capabilities?: unknown;
+      permissions?: unknown;
     };
   };
 
@@ -1139,6 +1225,7 @@ const listCatalogFromBackend = async (): Promise<CatalogApp[]> => {
           checksumSha256: appEntry.latest_version?.checksum_sha256 ?? undefined,
           downloadUrl: appEntry.latest_version?.download_url ?? undefined,
           changelog: normalizeChangelog(appEntry.latest_version?.changelog, appEntry.latest_version?.version),
+          capabilities: normalizeCapabilities(appEntry.latest_version?.capabilities ?? appEntry.latest_version?.permissions),
           version: appEntry.latest_version?.version,
           userMessage: registry.apps[appEntry.slug]?.userMessage,
         }));
@@ -1170,6 +1257,8 @@ const listCatalogFromBackend = async (): Promise<CatalogApp[]> => {
       required_node_version?: string | null;
       checksum_sha256?: string | null;
       changelog?: unknown;
+      capabilities?: unknown;
+      permissions?: unknown;
     };
   };
 
@@ -1191,6 +1280,7 @@ const listCatalogFromBackend = async (): Promise<CatalogApp[]> => {
       requiredNodeVersion: appEntry.latest_version?.required_node_version ?? undefined,
       checksumSha256: appEntry.latest_version?.checksum_sha256 ?? undefined,
       changelog: normalizeChangelog(appEntry.latest_version?.changelog, appEntry.latest_version?.version),
+      capabilities: normalizeCapabilities(appEntry.latest_version?.capabilities ?? appEntry.latest_version?.permissions),
       version: appEntry.latest_version?.version,
       userMessage: registry.apps[appEntry.slug]?.userMessage,
     };
@@ -2854,7 +2944,9 @@ const readOperationSummaries = async (appId: string): Promise<AppOperationSummar
 const getAppDetails = async (appId: string): Promise<AppDetails | null> => {
   const installed = registry.apps[appId];
   const catalog = catalogApps.find((entry) => entry.id === appId);
-  const appEntry = installed ? toAppSummary(installed) : catalog;
+  const appEntry = installed
+    ? { ...toAppSummary(installed), capabilities: catalog?.capabilities }
+    : catalog;
   if (!appEntry) {
     return null;
   }
