@@ -5,6 +5,7 @@ import ConstructionRounded from '@mui/icons-material/ConstructionRounded';
 import InsertDriveFileRounded from '@mui/icons-material/InsertDriveFileRounded';
 import TableChartRounded from '@mui/icons-material/TableChartRounded';
 import SettingsRounded from '@mui/icons-material/SettingsRounded';
+import VpnKeyRounded from '@mui/icons-material/VpnKeyRounded';
 import {
   alpha,
   Box,
@@ -20,7 +21,7 @@ import type { AppDictionary } from '@renderer/i18n';
 import iconDark from '@renderer/assets/icon-dark.svg';
 import iconLight from '@renderer/assets/icon-light.svg';
 
-export type View = 'my-apps' | 'catalog' | 'chat' | 'files' | 'datos' | 'tools' | 'settings' | 'app';
+export type View = 'my-apps' | 'catalog' | 'chat' | 'files' | 'datos' | 'secrets' | 'tools' | 'settings' | 'app';
 
 interface SidebarProps {
   currentView: View;
@@ -34,6 +35,7 @@ const mainNav = [
   { id: 'chat' as const, icon: <AutoAwesomeRounded /> },
   { id: 'files' as const, icon: <InsertDriveFileRounded /> },
   { id: 'datos' as const, icon: <TableChartRounded /> },
+  { id: 'secrets' as const, icon: <VpnKeyRounded /> },
   { id: 'tools' as const, icon: <ConstructionRounded /> },
 ];
 
@@ -46,6 +48,7 @@ export function Sidebar({ currentView, onNavigate, t }: SidebarProps) {
     chat: t.nav.chat,
     files: t.nav.files,
     datos: t.nav.datos,
+    secrets: t.nav.secrets,
     tools: t.nav.tools,
     settings: t.nav.settings,
     app: t.nav.catalog,

@@ -30,7 +30,7 @@ import {
 } from './prompts/forger-base';
 import { buildForgerAppAgentsMarkdown } from './prompts/apps-base';
 import { buildCodexPromptWithAppContext } from './prompts/user-message';
-import { SecretsStore, appSecretEnvName } from './secrets-store';
+import { SecretsStore, appSecretEnvName, isSecretsVaultUnavailableError } from './secrets-store';
 import type {
   AgentToolApprovalSettings,
   AgentToolDefinition,
@@ -718,6 +718,29 @@ const getSecretsStore = (): SecretsStore => {
   return secretsStore;
 };
 
+const RESERVED_APP_SECRET_ENV_NAMES = new Set([
+  'APPDATA',
+  'CORS_ORIGINS',
+  'DATABASE_URL',
+  'ELECTRON_RUN_AS_NODE',
+  'HOME',
+  'NODE_ENV',
+  'PATH',
+  'PORT',
+  'PYTHONHOME',
+  'PYTHONPATH',
+  'SHELL',
+  'TEMP',
+  'TMP',
+  'TMPDIR',
+  'USER',
+  'USERNAME',
+  'VITE_API_BASE_URL',
+]);
+
+const isReservedAppSecretEnvName = (envName: string): boolean =>
+  RESERVED_APP_SECRET_ENV_NAMES.has(envName) || envName.startsWith('NPM_');
+
 const normalizeAppSecretDeclaration = (value: unknown): AppSecretDeclaration | null => {
   if (!value || typeof value !== 'object') {
     return null;
@@ -726,7 +749,8 @@ const normalizeAppSecretDeclaration = (value: unknown): AppSecretDeclaration | n
   const candidate = value as Partial<AppSecretDeclaration>;
   const name = typeof candidate.name === 'string' ? candidate.name.trim() : '';
   const usage = typeof candidate.usage === 'string' ? candidate.usage.trim() : '';
-  if (!name || !usage || !appSecretEnvName(name)) {
+  const envName = appSecretEnvName(name);
+  if (!name || !usage || !envName || isReservedAppSecretEnvName(envName)) {
     return null;
   }
 
@@ -744,18 +768,58 @@ const normalizeManifestAppSecrets = (manifest: AppManifest | null): AppSecretDec
     return [];
   }
 
-  const seen = new Set<string>();
+  const seenNames = new Set<string>();
+  const seenEnvNames = new Set<string>();
   const declarations: AppSecretDeclaration[] = [];
   for (const entry of manifest.appSecrets) {
     const declaration = normalizeAppSecretDeclaration(entry);
-    if (!declaration || seen.has(declaration.name)) {
+    if (!declaration) {
       continue;
     }
-    seen.add(declaration.name);
+    const envName = appSecretEnvName(declaration.name);
+    if (seenNames.has(declaration.name) || seenEnvNames.has(envName)) {
+      continue;
+    }
+    seenNames.add(declaration.name);
+    seenEnvNames.add(envName);
     declarations.push(declaration);
   }
 
   return declarations;
+};
+
+const getManifestAppSecretsValidationError = (manifest: AppManifest | null): string | null => {
+  if (!manifest || !Array.isArray(manifest.appSecrets)) {
+    return null;
+  }
+
+  const seenNames = new Set<string>();
+  const seenEnvNames = new Set<string>();
+  for (const entry of manifest.appSecrets) {
+    if (!entry || typeof entry !== 'object') {
+      return 'La app declara un secreto invalido.';
+    }
+
+    const candidate = entry as Partial<AppSecretDeclaration>;
+    const name = typeof candidate.name === 'string' ? candidate.name.trim() : '';
+    const usage = typeof candidate.usage === 'string' ? candidate.usage.trim() : '';
+    const envName = appSecretEnvName(name);
+
+    if (!name || !usage || !envName) {
+      return 'La app declara un secreto incompleto.';
+    }
+    if (isReservedAppSecretEnvName(envName)) {
+      return `La app declara un secreto con un nombre reservado: ${envName}.`;
+    }
+    if (seenNames.has(name) || seenEnvNames.has(envName)) {
+      return `La app declara secretos duplicados para la variable ${envName}.`;
+    }
+
+    seenNames.add(name);
+    seenEnvNames.add(envName);
+  }
+
+  return null;
 };
 
 const resolveInstalledAppSecrets = async (appId: string): Promise<AppSecretDeclaration[]> => {
@@ -794,16 +858,10 @@ const buildAppSecretsState = async (appId: string): Promise<AppSecretsState> => 
   };
 };
 
-const redactSensitiveText = (value: string, secretValues: string[]): string => {
-  let redacted = value;
-  for (const secretValue of secretValues) {
-    if (!secretValue) {
-      continue;
-    }
-    redacted = redacted.split(secretValue).join('[secreto]');
-  }
-  return redacted;
-};
+const formatProcessOutputForInstallLog = (value: string, secretValues: string[]): string =>
+  secretValues.length > 0
+    ? '[salida omitida porque la app recibio secretos]'
+    : value;
 
 const hasValidManifestStack = (manifest: AppManifest | null): manifest is AppManifest & { stack: AppManifestStack } => {
   if (!manifest?.stack || typeof manifest.stack !== 'object') {
@@ -3263,8 +3321,35 @@ const openInstalledApp = async (appId: string): Promise<OpenAppResult> => {
   }
 
   const manifest = await resolveInstalledManifest(record.installDir);
+  const appSecretsValidationError = getManifestAppSecretsValidationError(manifest);
+  if (appSecretsValidationError) {
+    return {
+      success: false,
+      userMessage: appSecretsValidationError,
+      technicalCode: 'invalid_app_secrets_manifest',
+    };
+  }
   const appSecretDeclarations = normalizeManifestAppSecrets(manifest);
-  const resolvedSecrets = await getSecretsStore().resolveAppEnv(appId, appSecretDeclarations);
+  let resolvedSecrets;
+  try {
+    resolvedSecrets = await getSecretsStore().resolveAppEnv(appId, appSecretDeclarations);
+  } catch (error) {
+    if (isSecretsVaultUnavailableError(error)) {
+      return {
+        success: false,
+        userMessage: 'No pudimos leer los secretos guardados. Revisa el espacio seguro antes de abrir esta app.',
+        technicalCode: 'secrets_vault_unavailable',
+      };
+    }
+    if (error instanceof Error && error.message === 'secrets_encryption_unavailable') {
+      return {
+        success: false,
+        userMessage: 'El sistema no tiene disponible el almacenamiento seguro de secretos.',
+        technicalCode: 'secrets_encryption_unavailable',
+      };
+    }
+    throw error;
+  }
   if (resolvedSecrets.missingRequired.length > 0) {
     const missingLabels = resolvedSecrets.missingRequired
       .map((secret) => secret.label ?? secret.name)
@@ -3355,14 +3440,14 @@ const openInstalledApp = async (appId: string): Promise<OpenAppResult> => {
   backend.stdout.on('data', (chunk) => {
     void appendInstallLog('open:backend:stdout', {
       appId,
-      text: truncateForInstallLog(redactSensitiveText(chunk.toString(), resolvedSecrets.secretValues)),
+      text: truncateForInstallLog(formatProcessOutputForInstallLog(chunk.toString(), resolvedSecrets.secretValues)),
     });
   });
 
   backend.stderr.on('data', (chunk) => {
     void appendInstallLog('open:backend:stderr', {
       appId,
-      text: truncateForInstallLog(redactSensitiveText(chunk.toString(), resolvedSecrets.secretValues)),
+      text: truncateForInstallLog(formatProcessOutputForInstallLog(chunk.toString(), resolvedSecrets.secretValues)),
     });
   });
 
@@ -3376,14 +3461,14 @@ const openInstalledApp = async (appId: string): Promise<OpenAppResult> => {
   frontend.stdout.on('data', (chunk) => {
     void appendInstallLog('open:frontend:stdout', {
       appId,
-      text: truncateForInstallLog(redactSensitiveText(chunk.toString(), resolvedSecrets.secretValues)),
+      text: truncateForInstallLog(formatProcessOutputForInstallLog(chunk.toString(), resolvedSecrets.secretValues)),
     });
   });
 
   frontend.stderr.on('data', (chunk) => {
     void appendInstallLog('open:frontend:stderr', {
       appId,
-      text: truncateForInstallLog(redactSensitiveText(chunk.toString(), resolvedSecrets.secretValues)),
+      text: truncateForInstallLog(formatProcessOutputForInstallLog(chunk.toString(), resolvedSecrets.secretValues)),
     });
   });
 
@@ -4400,7 +4485,6 @@ app.whenReady().then(async () => {
   await fs.mkdir(getCodexRoot(), { recursive: true });
   await fs.mkdir(getCodexHome(), { recursive: true });
   secretsStore = new SecretsStore(app.getPath('userData'));
-  await secretsStore.load();
   await loadAgentToolSettings();
   await loadRegistry();
   await startDevCatalogService();

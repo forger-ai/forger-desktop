@@ -1,29 +1,33 @@
+import { useState } from 'react';
 import ArrowBackRounded from '@mui/icons-material/ArrowBackRounded';
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
 import DownloadRounded from '@mui/icons-material/DownloadRounded';
 import LaunchRounded from '@mui/icons-material/LaunchRounded';
 import StopCircleRounded from '@mui/icons-material/StopCircleRounded';
 import SystemUpdateAltRounded from '@mui/icons-material/SystemUpdateAltRounded';
-import VpnKeyRounded from '@mui/icons-material/VpnKeyRounded';
 import {
   Avatar,
   Box,
   Button,
   Chip,
   CircularProgress,
-  Divider,
   Stack,
+  Tab,
+  Tabs,
   Tooltip,
   Typography,
 } from '@mui/material';
-import type { AppDetails } from '@shared/types';
+import type { AppDetails, AppSecretsState } from '@shared/types';
 import type { AppDictionary } from '@renderer/i18n';
+import { AppSecretsPanel } from '@renderer/components/AppSecretsDialog';
 
 interface AppViewProps {
   details: AppDetails | null;
   openingAppIds: Set<string>;
   t: AppDictionary;
   categoryLabel: string;
+  appSecretsState: AppSecretsState | null;
+  secretsBusy: boolean;
   onBack: () => void;
   onInstall: (appId: string) => void;
   onUpdate: (appId: string) => void;
@@ -31,7 +35,8 @@ interface AppViewProps {
   onStop: (appId: string) => void;
   onRestoreUserVersion: (appId: string) => void;
   onResolveConflict: (appId: string) => void;
-  onConfigureSecrets: (appId: string) => void;
+  onConnectSecret: (appSecretName: string, userSecretId: string) => Promise<void>;
+  onDisconnectSecret: (appSecretName: string) => Promise<void>;
   onDelete: (appId: string) => void;
 }
 
@@ -42,11 +47,24 @@ const initialsFromName = (name: string) =>
     .map((part) => part[0]?.toUpperCase() ?? '')
     .join('');
 
+type AppViewTab = 'general' | 'history' | 'updates' | 'secrets';
+
+const DetailRow = ({ label, value }: { label: string; value: string }) => (
+  <Stack spacing={0.25}>
+    <Typography variant="caption" color="text.secondary">
+      {label}
+    </Typography>
+    <Typography variant="body2">{value}</Typography>
+  </Stack>
+);
+
 export function AppView({
   details,
   openingAppIds,
   t,
   categoryLabel,
+  appSecretsState,
+  secretsBusy,
   onBack,
   onInstall,
   onUpdate,
@@ -54,9 +72,12 @@ export function AppView({
   onStop,
   onRestoreUserVersion,
   onResolveConflict,
-  onConfigureSecrets,
+  onConnectSecret,
+  onDisconnectSecret,
   onDelete,
 }: AppViewProps) {
+  const [activeTab, setActiveTab] = useState<AppViewTab>('general');
+
   if (!details) {
     return (
       <Stack spacing={2}>
@@ -74,6 +95,178 @@ export function AppView({
   const hasError = details.status === 'error';
   const hasConflict = details.status === 'conflict';
   const isOpening = openingAppIds.has(appId);
+
+  const actions = (
+    <Stack direction="row" spacing={1.25} useFlexGap flexWrap="wrap">
+      {!details.installed ? (
+        <Button variant="contained" startIcon={<DownloadRounded />} onClick={() => onInstall(appId)}>
+          {t.actions.install}
+        </Button>
+      ) : hasConflict ? (
+        <>
+          <Button variant="contained" color="warning" startIcon={<SystemUpdateAltRounded />} onClick={() => onResolveConflict(appId)}>
+            {t.actions.resolveWithForger}
+          </Button>
+          <Button variant="outlined" onClick={() => onRestoreUserVersion(appId)}>
+            {t.actions.restoreUserVersion}
+          </Button>
+        </>
+      ) : isRunning ? (
+        <Button variant="contained" color="warning" startIcon={<StopCircleRounded />} onClick={() => onStop(appId)}>
+          {t.actions.stop}
+        </Button>
+      ) : details.updateAvailable ? (
+        <Button variant="contained" startIcon={<SystemUpdateAltRounded />} onClick={() => onUpdate(appId)}>
+          {t.actions.update}
+        </Button>
+      ) : (
+        <Button
+          variant="contained"
+          startIcon={isOpening ? <CircularProgress color="inherit" size={16} /> : <LaunchRounded />}
+          disabled={isOpening}
+          aria-busy={isOpening}
+          onClick={() => onOpen(appId)}
+        >
+          {isOpening ? t.actions.opening : t.actions.open}
+        </Button>
+      )}
+      {details.installed ? (
+        <Button variant="outlined" color="error" startIcon={<DeleteOutlineRounded />} onClick={() => onDelete(appId)}>
+          {t.actions.delete}
+        </Button>
+      ) : null}
+      {hasError ? (
+        <Tooltip title={t.actions.comingSoon}>
+          <span>
+            <Button disabled>{t.actions.askForgerHelp}</Button>
+          </span>
+        </Tooltip>
+      ) : null}
+    </Stack>
+  );
+
+  const historyContent = (
+    <Stack spacing={1}>
+      <Typography variant="h5">{t.appView.historyTitle}</Typography>
+      {details.operations.length === 0 ? (
+        <Typography color="text.secondary">{t.appView.noHistory}</Typography>
+      ) : (
+        <Stack spacing={1.25}>
+          {details.operations.map((operation) => (
+            <Box key={operation.operationId} sx={{ borderLeft: '3px solid', borderColor: operation.revertedAt ? 'divider' : 'primary.main', pl: 1.5 }}>
+              <Typography fontWeight={600}>{operation.title}</Typography>
+              <Typography variant="body2" color="text.secondary">{operation.summary}</Typography>
+              <Typography variant="caption" color="text.secondary">
+                {new Date(operation.createdAt).toLocaleString()}
+                {operation.revertedAt ? ` · ${t.appView.reverted}` : ''}
+              </Typography>
+            </Box>
+          ))}
+        </Stack>
+      )}
+    </Stack>
+  );
+
+  const updatesContent = (
+    <Stack spacing={1}>
+      <Typography variant="h5">{t.appView.updatesTitle}</Typography>
+      {hasConflict ? <Typography color="error.main">{t.appView.conflictBody}</Typography> : null}
+      <Typography color="text.secondary">{t.appView.updatesBody}</Typography>
+      {details.changelog ? (
+        <Box sx={{ borderLeft: '3px solid', borderColor: 'warning.main', pl: 1.5 }}>
+          <Typography fontWeight={600}>{details.changelog.summary ?? t.appView.updateAvailable(details.changelog.version)}</Typography>
+          {details.changelog.changes.length > 0 ? (
+            <Stack component="ul" sx={{ m: 0, pl: 2 }}>
+              {details.changelog.changes.map((change) => (
+                <Typography component="li" variant="body2" color="text.secondary" key={change}>
+                  {change}
+                </Typography>
+              ))}
+            </Stack>
+          ) : (
+            <Typography variant="body2" color="text.secondary">{t.appView.updateNoChangelog}</Typography>
+          )}
+        </Box>
+      ) : null}
+    </Stack>
+  );
+
+  const secretsContent = (
+    <Stack spacing={1.5}>
+      <Typography variant="h5">{t.secrets.title}</Typography>
+      <Typography color="text.secondary">{t.appView.secretsBody}</Typography>
+      {details.installed ? (
+        <AppSecretsPanel
+          state={appSecretsState}
+          busy={secretsBusy}
+          t={t}
+          onConnectSecret={onConnectSecret}
+          onDisconnectSecret={onDisconnectSecret}
+        />
+      ) : (
+        <Typography color="text.secondary">{t.appView.secretsInstallRequired}</Typography>
+      )}
+    </Stack>
+  );
+
+  const generalContent = (
+    <Stack spacing={2.5}>
+      <Stack spacing={1}>
+        <Typography variant="h5">{t.appView.generalTitle}</Typography>
+        <Typography color="text.secondary" sx={{ maxWidth: 820 }}>
+          {details.app.description}
+        </Typography>
+      </Stack>
+      <Box
+        sx={{
+          display: 'grid',
+          gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))', lg: 'repeat(3, minmax(0, 1fr))' },
+          gap: 2,
+        }}
+      >
+        <DetailRow label={t.appView.nameLabel} value={appName} />
+        <DetailRow label={t.appView.categoryLabel} value={categoryLabel} />
+        <DetailRow
+          label={t.appView.statusLabel}
+          value={details.installed ? (isRunning ? t.actions.running : hasConflict ? t.actions.conflict : hasError ? t.actions.error : t.actions.installed) : t.actions.available}
+        />
+        <DetailRow label={t.appView.installedVersion} value={details.version ?? '-'} />
+        <DetailRow label={t.appView.availableVersion} value={details.latestVersion ?? details.version ?? '-'} />
+        <DetailRow label={t.appView.installedAtLabel} value={details.installedAt ? new Date(details.installedAt).toLocaleString() : '-'} />
+      </Box>
+      {details.changelog ? (
+        <Box sx={{ borderLeft: '3px solid', borderColor: 'warning.main', pl: 1.5 }}>
+          <Typography fontWeight={600}>{details.changelog.summary ?? t.appView.updateAvailable(details.changelog.version)}</Typography>
+          {details.changelog.changes.length > 0 ? (
+            <Stack component="ul" sx={{ m: 0, pl: 2 }}>
+              {details.changelog.changes.map((change) => (
+                <Typography component="li" variant="body2" color="text.secondary" key={change}>
+                  {change}
+                </Typography>
+              ))}
+            </Stack>
+          ) : (
+            <Typography variant="body2" color="text.secondary">{t.appView.updateNoChangelog}</Typography>
+          )}
+        </Box>
+      ) : null}
+      {!details.installed ? (
+        <Box
+          sx={{
+            border: '1px solid',
+            borderColor: 'divider',
+            minHeight: 220,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            bgcolor: 'background.paper',
+          }}
+        >
+          <Typography color="text.secondary">{t.appView.screenshotsPlaceholder}</Typography>
+        </Box>
+      ) : null}
+    </Stack>
+  );
 
   return (
     <Stack spacing={3}>
@@ -105,117 +298,28 @@ export function AppView({
         </Stack>
       </Stack>
 
-      <Stack direction="row" spacing={1.25} useFlexGap flexWrap="wrap">
-        {!details.installed ? (
-          <Button variant="contained" startIcon={<DownloadRounded />} onClick={() => onInstall(appId)}>
-            {t.actions.install}
-          </Button>
-        ) : hasConflict ? (
-          <>
-            <Button variant="contained" color="warning" startIcon={<SystemUpdateAltRounded />} onClick={() => onResolveConflict(appId)}>
-              {t.actions.resolveWithForger}
-            </Button>
-            <Button variant="outlined" onClick={() => onRestoreUserVersion(appId)}>
-              {t.actions.restoreUserVersion}
-            </Button>
-          </>
-        ) : isRunning ? (
-          <Button variant="contained" color="warning" startIcon={<StopCircleRounded />} onClick={() => onStop(appId)}>
-            {t.actions.stop}
-          </Button>
-        ) : details.updateAvailable ? (
-          <Button variant="contained" startIcon={<SystemUpdateAltRounded />} onClick={() => onUpdate(appId)}>
-            {t.actions.update}
-          </Button>
-        ) : (
-          <Button
-            variant="contained"
-            startIcon={isOpening ? <CircularProgress color="inherit" size={16} /> : <LaunchRounded />}
-            disabled={isOpening}
-            aria-busy={isOpening}
-            onClick={() => onOpen(appId)}
-          >
-            {isOpening ? t.actions.opening : t.actions.open}
-          </Button>
-        )}
-        {details.installed ? (
-          <Button variant="outlined" startIcon={<VpnKeyRounded />} onClick={() => onConfigureSecrets(appId)}>
-            {t.secrets.title}
-          </Button>
-        ) : null}
-        {details.installed ? (
-          <Button variant="outlined" color="error" startIcon={<DeleteOutlineRounded />} onClick={() => onDelete(appId)}>
-            {t.actions.delete}
-          </Button>
-        ) : null}
-        {hasError ? (
-          <Tooltip title={t.actions.comingSoon}>
-            <span>
-              <Button disabled>{t.actions.askForgerHelp}</Button>
-            </span>
-          </Tooltip>
-        ) : null}
-      </Stack>
+      {actions}
 
-      {!details.installed ? (
-        <Box
-          sx={{
-            border: '1px solid',
-            borderColor: 'divider',
-            minHeight: 220,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            bgcolor: 'background.paper',
-          }}
+      <Box sx={{ borderBottom: '1px solid', borderColor: 'divider' }}>
+        <Tabs
+          value={activeTab}
+          onChange={(_event, nextValue: AppViewTab) => setActiveTab(nextValue)}
+          variant="scrollable"
+          scrollButtons="auto"
         >
-          <Typography color="text.secondary">{t.appView.screenshotsPlaceholder}</Typography>
-        </Box>
-      ) : (
-        <Stack spacing={3}>
-          <Divider />
-          <Stack spacing={1}>
-            <Typography variant="h5">{t.appView.historyTitle}</Typography>
-            {details.operations.length === 0 ? (
-              <Typography color="text.secondary">{t.appView.noHistory}</Typography>
-            ) : (
-              <Stack spacing={1.25}>
-                {details.operations.map((operation) => (
-                  <Box key={operation.operationId} sx={{ borderLeft: '3px solid', borderColor: operation.revertedAt ? 'divider' : 'primary.main', pl: 1.5 }}>
-                    <Typography fontWeight={600}>{operation.title}</Typography>
-                    <Typography variant="body2" color="text.secondary">{operation.summary}</Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      {new Date(operation.createdAt).toLocaleString()}
-                      {operation.revertedAt ? ` · ${t.appView.reverted}` : ''}
-                    </Typography>
-                  </Box>
-                ))}
-              </Stack>
-            )}
-          </Stack>
-          <Stack spacing={1}>
-            <Typography variant="h5">{t.appView.updatesTitle}</Typography>
-            {hasConflict ? <Typography color="error.main">{t.appView.conflictBody}</Typography> : null}
-            <Typography color="text.secondary">{t.appView.updatesBody}</Typography>
-            {details.changelog ? (
-              <Box sx={{ borderLeft: '3px solid', borderColor: 'warning.main', pl: 1.5 }}>
-                <Typography fontWeight={600}>{details.changelog.summary ?? t.appView.updateAvailable(details.changelog.version)}</Typography>
-                {details.changelog.changes.length > 0 ? (
-                  <Stack component="ul" sx={{ m: 0, pl: 2 }}>
-                    {details.changelog.changes.map((change) => (
-                      <Typography component="li" variant="body2" color="text.secondary" key={change}>
-                        {change}
-                      </Typography>
-                    ))}
-                  </Stack>
-                ) : (
-                  <Typography variant="body2" color="text.secondary">{t.appView.updateNoChangelog}</Typography>
-                )}
-              </Box>
-            ) : null}
-          </Stack>
-        </Stack>
-      )}
+          <Tab value="general" label={t.appView.tabs.general} />
+          <Tab value="history" label={t.appView.tabs.history} />
+          <Tab value="updates" label={t.appView.tabs.updates} />
+          <Tab value="secrets" label={t.appView.tabs.secrets} />
+        </Tabs>
+      </Box>
+
+      {activeTab === 'general' ? (
+        generalContent
+      ) : null}
+      {activeTab === 'history' ? historyContent : null}
+      {activeTab === 'updates' ? updatesContent : null}
+      {activeTab === 'secrets' ? secretsContent : null}
     </Stack>
   );
 }
