@@ -485,6 +485,23 @@ export interface FilesActionResult {
   technicalCode?: string;
 }
 
+export interface AppExternalFolderGrant {
+  canceled: false;
+  path: string;
+  grantToken: string;
+  expiresAt: string;
+}
+
+export interface AppExternalFolderCanceled {
+  canceled: true;
+}
+
+export type AppExternalFolderSelection = AppExternalFolderGrant | AppExternalFolderCanceled;
+
+export interface ForgerAppApi {
+  selectExternalFolder: () => Promise<AppExternalFolderSelection>;
+}
+
 export type AutomationFrequencyType = 'hourly' | 'daily' | 'weekly';
 
 export interface AutomationFrequency {
@@ -595,4 +612,10 @@ export interface ForgerDesktopApi {
   automationsListRuns: (automationId: string) => Promise<AutomationRunSummary[]>;
   automationsGetRunTranscript: (runId: string) => Promise<AutomationRun | null>;
   onAutomationUpdated: (listener: (event: { automation: Automation; run?: AutomationRunSummary }) => void) => () => void;
+}
+
+declare global {
+  interface Window {
+    forgerApp?: ForgerAppApi;
+  }
 }
