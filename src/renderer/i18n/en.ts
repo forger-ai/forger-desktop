@@ -335,6 +335,7 @@ export const en = {
     availableVersion: 'Available version',
     screenshotsPlaceholder: 'Screenshots and previews will appear here soon.',
     capabilitiesTitle: 'This app can',
+    promptTemplatesTitle: 'Codex prompts this app can run',
     historyTitle: 'Modification history',
     noHistory: 'No saved modifications for this app yet.',
     reverted: 'reverted',
