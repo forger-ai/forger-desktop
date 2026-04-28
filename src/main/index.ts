@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import fs from 'node:fs/promises';
 import * as http from 'node:http';
@@ -38,8 +38,10 @@ import type {
   AgentToolId,
   AgentToolPackageDefinition,
   AgentToolSettings,
+  AppCapability,
   AppCategory,
   AppDetails,
+  AppExternalFolderSelection,
   AppSecretConnection,
   AppSecretDeclaration,
   AppSecretsState,
@@ -88,6 +90,8 @@ const DEFAULT_PYTHON_VERSION = '3.12';
 const CODEX_CLI_VERSION = '0.125.0';
 const CODEX_USAGE_DASHBOARD_URL = 'https://chatgpt.com/codex/settings/usage';
 let devCatalogService: DevCatalogService | null = null;
+const APP_FOLDER_GRANT_TTL_MS = 5 * 60 * 1000;
+const appFolderGrantSecret = randomBytes(32).toString('base64url');
 
 if (isDev) {
   app.setName('Forger Dev');
@@ -371,6 +375,34 @@ const serializeErrorForInstallLog = (error: unknown): Record<string, unknown> =>
   };
 };
 
+const encodeBase64Url = (value: string): string => Buffer.from(value, 'utf8').toString('base64url');
+
+const signAppFolderGrant = (appId: string, folderPath: string): AppExternalFolderSelection => {
+  const expiresAtMs = Date.now() + APP_FOLDER_GRANT_TTL_MS;
+  const payload = encodeBase64Url(JSON.stringify({
+    appId,
+    path: folderPath,
+    exp: Math.floor(expiresAtMs / 1000),
+  }));
+  const signature = createHmac('sha256', appFolderGrantSecret).update(payload).digest('base64url');
+
+  return {
+    canceled: false,
+    path: folderPath,
+    grantToken: `${payload}.${signature}`,
+    expiresAt: new Date(expiresAtMs).toISOString(),
+  };
+};
+
+const resolveAppIdForWebContents = (webContentsId: number): string | null => {
+  for (const [appId, appWindow] of appWindows.entries()) {
+    if (!appWindow.isDestroyed() && appWindow.webContents.id === webContentsId) {
+      return appId;
+    }
+  }
+  return null;
+};
+
 const appendInstallLog = async (event: string, payload: Record<string, unknown> = {}): Promise<void> => {
   const logPath = getInstallLogPath();
   const entry = {
@@ -650,6 +682,89 @@ const normalizeChangelog = (value: unknown, version?: string): VersionChangelog 
     };
   }
   return undefined;
+};
+
+const CAPABILITY_LABELS: Record<string, AppCapability> = {
+  app_data: {
+    id: 'app_data',
+    title: 'Guardar datos locales',
+    description: 'Usa el espacio privado de la app para guardar estado y datos propios.',
+  },
+  local_app_data: {
+    id: 'local_app_data',
+    title: 'Guardar datos locales',
+    description: 'Usa el espacio privado de la app para guardar estado y datos propios.',
+  },
+  internal_workspace: {
+    id: 'internal_workspace',
+    title: 'Guardar un workspace privado',
+    description: 'Crea y edita archivos dentro del espacio local privado de la app.',
+  },
+  local_finance_data: {
+    id: 'local_finance_data',
+    title: 'Guardar tus finanzas localmente',
+    description: 'Mantiene movimientos, categorias y presupuestos en una base de datos local.',
+  },
+  local_recipe_data: {
+    id: 'local_recipe_data',
+    title: 'Guardar recetas localmente',
+    description: 'Mantiene recetas, ingredientes, costos y menus dentro del espacio local de la app.',
+  },
+  user_selected_imports: {
+    id: 'user_selected_imports',
+    title: 'Importar archivos que eliges',
+    description: 'Carga archivos seleccionados por ti para procesarlos dentro de la app.',
+  },
+  app_exports: {
+    id: 'app_exports',
+    title: 'Exportar informacion',
+    description: 'Puede crear archivos de salida cuando eliges guardar o exportar datos.',
+  },
+  ai_api: {
+    id: 'ai_api',
+    title: 'Usar una API de IA',
+    description: 'Puede usar una clave configurada por ti para funciones asistidas por IA.',
+  },
+  ai_assisted_imports: {
+    id: 'ai_assisted_imports',
+    title: 'Usar IA para leer documentos',
+    description: 'Puede usar una API key configurada por ti para extraer movimientos desde PDFs o imagenes.',
+  },
+  user_selected_folders: {
+    id: 'user_selected_folders',
+    title: 'Abrir carpetas que eliges',
+    description: 'Trabaja con carpetas seleccionadas explicitamente por ti.',
+  },
+};
+
+const normalizeCapabilities = (value: unknown): AppCapability[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((item): AppCapability[] => {
+    if (typeof item === 'string') {
+      return [
+        CAPABILITY_LABELS[item] ?? {
+          id: item,
+          title: item.replace(/[_-]+/g, ' '),
+        },
+      ];
+    }
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      return [];
+    }
+    const record = item as Record<string, unknown>;
+    const id = typeof record.id === 'string' && record.id.trim() ? record.id.trim() : '';
+    const title = typeof record.title === 'string' && record.title.trim() ? record.title.trim() : id;
+    if (!id || !title) {
+      return [];
+    }
+    const description = typeof record.description === 'string' && record.description.trim()
+      ? record.description.trim()
+      : undefined;
+    return [{ id, title, description }];
+  });
 };
 
 const mapBackendCategory = (backendCategory: string): AppCategory => {
@@ -1082,6 +1197,8 @@ const listCatalogFromBackend = async (): Promise<CatalogApp[]> => {
       checksum_sha256?: string | null;
       download_url?: string | null;
       changelog?: unknown;
+      capabilities?: unknown;
+      permissions?: unknown;
     };
   };
 
@@ -1108,6 +1225,7 @@ const listCatalogFromBackend = async (): Promise<CatalogApp[]> => {
           checksumSha256: appEntry.latest_version?.checksum_sha256 ?? undefined,
           downloadUrl: appEntry.latest_version?.download_url ?? undefined,
           changelog: normalizeChangelog(appEntry.latest_version?.changelog, appEntry.latest_version?.version),
+          capabilities: normalizeCapabilities(appEntry.latest_version?.capabilities ?? appEntry.latest_version?.permissions),
           version: appEntry.latest_version?.version,
           userMessage: registry.apps[appEntry.slug]?.userMessage,
         }));
@@ -1139,6 +1257,8 @@ const listCatalogFromBackend = async (): Promise<CatalogApp[]> => {
       required_node_version?: string | null;
       checksum_sha256?: string | null;
       changelog?: unknown;
+      capabilities?: unknown;
+      permissions?: unknown;
     };
   };
 
@@ -1160,6 +1280,7 @@ const listCatalogFromBackend = async (): Promise<CatalogApp[]> => {
       requiredNodeVersion: appEntry.latest_version?.required_node_version ?? undefined,
       checksumSha256: appEntry.latest_version?.checksum_sha256 ?? undefined,
       changelog: normalizeChangelog(appEntry.latest_version?.changelog, appEntry.latest_version?.version),
+      capabilities: normalizeCapabilities(appEntry.latest_version?.capabilities ?? appEntry.latest_version?.permissions),
       version: appEntry.latest_version?.version,
       userMessage: registry.apps[appEntry.slug]?.userMessage,
     };
@@ -2823,7 +2944,9 @@ const readOperationSummaries = async (appId: string): Promise<AppOperationSummar
 const getAppDetails = async (appId: string): Promise<AppDetails | null> => {
   const installed = registry.apps[appId];
   const catalog = catalogApps.find((entry) => entry.id === appId);
-  const appEntry = installed ? toAppSummary(installed) : catalog;
+  const appEntry = installed
+    ? { ...toAppSummary(installed), capabilities: catalog?.capabilities }
+    : catalog;
   if (!appEntry) {
     return null;
   }
@@ -3130,6 +3253,7 @@ const openOrFocusAppWindow = async (appId: string, appName: string, frontendUrl:
     return;
   }
 
+  const appPreloadPath = path.join(__dirname, '..', 'preload', 'app.js');
   const appWindow = new BrowserWindow({
     width: 1280,
     height: 860,
@@ -3139,6 +3263,7 @@ const openOrFocusAppWindow = async (appId: string, appName: string, frontendUrl:
     title: appName,
     autoHideMenuBar: true,
     webPreferences: {
+      preload: appPreloadPath,
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: true,
@@ -3430,6 +3555,8 @@ const openInstalledApp = async (appId: string): Promise<OpenAppResult> => {
         ...backendConfig.environment,
         ...resolvedSecrets.env,
         CORS_ORIGINS: `${frontendUrl},http://127.0.0.1:${frontendPort}`,
+        FORGER_APP_ID: appId,
+        FORGER_APP_GRANT_SECRET: appFolderGrantSecret,
       },
       stdio: 'pipe',
     },
@@ -4437,6 +4564,27 @@ const registerIpcHandlers = (): void => {
   });
   ipcMain.handle(IPC_CHANNELS.filesDelete, async (_event, input: FilesDeleteInput) => {
     return await getFileLibrary().deleteFiles(input);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.appSelectExternalFolder, async (event): Promise<AppExternalFolderSelection> => {
+    const appId = resolveAppIdForWebContents(event.sender.id);
+    if (!appId) {
+      throw new Error('app_window_not_authorized');
+    }
+
+    const ownerWindow = BrowserWindow.fromWebContents(event.sender);
+    const options: Electron.OpenDialogOptions = {
+      properties: ['openDirectory'],
+    };
+    const result = ownerWindow && !ownerWindow.isDestroyed()
+      ? await dialog.showOpenDialog(ownerWindow, options)
+      : await dialog.showOpenDialog(options);
+    if (result.canceled || result.filePaths.length === 0) {
+      return { canceled: true };
+    }
+
+    const selectedPath = await fs.realpath(result.filePaths[0]);
+    return signAppFolderGrant(appId, selectedPath);
   });
 
   ipcMain.handle(IPC_CHANNELS.dbListTables, async (_event, appId: string) => {

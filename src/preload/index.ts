@@ -49,6 +49,7 @@ const IPC_CHANNELS = {
   filesMove: 'forger:files:move',
   filesRename: 'forger:files:rename',
   filesDelete: 'forger:files:delete',
+  appSelectExternalFolder: 'forger:app:select-external-folder',
   dbListTables: 'forger:db:list-tables',
   dbQueryTable: 'forger:db:query-table',
   automationsList: 'forger:automations:list',
