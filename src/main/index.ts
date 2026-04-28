@@ -3332,6 +3332,39 @@ const openOrFocusAppWindow = async (appId: string, appName: string, frontendUrl:
   });
 
   appWindows.set(appId, appWindow);
+  const expectedOrigin = new URL(frontendUrl).origin;
+  const isAllowedAppUrl = (targetUrl: string): boolean => {
+    try {
+      return new URL(targetUrl).origin === expectedOrigin;
+    } catch {
+      return false;
+    }
+  };
+  const openExternalUrl = (targetUrl: string): void => {
+    try {
+      const protocol = new URL(targetUrl).protocol;
+      if (protocol === 'http:' || protocol === 'https:' || protocol === 'mailto:') {
+        void shell.openExternal(targetUrl);
+      }
+    } catch {
+      // Ignore invalid navigation targets.
+    }
+  };
+
+  appWindow.webContents.on('will-navigate', (event, targetUrl) => {
+    if (!isAllowedAppUrl(targetUrl)) {
+      event.preventDefault();
+      openExternalUrl(targetUrl);
+    }
+  });
+  appWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (isAllowedAppUrl(url)) {
+      void appWindow.loadURL(url);
+      return { action: 'deny' };
+    }
+    openExternalUrl(url);
+    return { action: 'deny' };
+  });
   appWindow.on('closed', () => {
     appWindows.delete(appId);
     if (!stoppingApps.has(appId) && runningApps.has(appId)) {

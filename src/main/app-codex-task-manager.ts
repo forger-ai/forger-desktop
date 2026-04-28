@@ -123,7 +123,7 @@ export class AppCodexTaskManager {
     await this.persist(task);
     this.emit(task);
 
-    const attachments = await this.writeAttachments(task, input.attachments ?? []);
+    const attachments = await this.writeAttachments(task, template, input.attachments ?? []);
     const imageArgs = attachments
       .filter((attachment) => attachment.mimeType?.toLowerCase().startsWith('image/'))
       .flatMap((attachment) => ['--image', attachment.path]);
@@ -201,6 +201,7 @@ export class AppCodexTaskManager {
 
   private async writeAttachments(
     task: InternalTask,
+    template: AppPromptTemplate,
     attachments: AppCodexTaskAttachment[],
   ): Promise<Array<{ name: string; path: string; mimeType?: string }>> {
     const targetDir = path.join(task.appRoot, '.forger', 'codex-task-inputs', task.runId);
@@ -208,6 +209,7 @@ export class AppCodexTaskManager {
     const written: Array<{ name: string; path: string; mimeType?: string }> = [];
     for (const [index, attachment] of attachments.entries()) {
       const safeName = sanitizeFilename(attachment.name || `attachment-${index + 1}`);
+      validateAttachmentType(template, attachment, safeName);
       const bytes = Buffer.from(attachment.dataBase64, 'base64');
       if (bytes.length > MAX_ATTACHMENT_BYTES) {
         throw new Error('attachment_too_large');
@@ -271,6 +273,36 @@ const sanitizeId = (value: unknown): string =>
 
 const sanitizeFilename = (value: string): string =>
   value.replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').slice(0, 160) || 'attachment';
+
+const normalizeMimeType = (value: string | undefined): string =>
+  typeof value === 'string' ? value.trim().toLowerCase() : '';
+
+const validateAttachmentType = (
+  template: AppPromptTemplate,
+  attachment: AppCodexTaskAttachment,
+  safeName: string,
+): void => {
+  const accepted = template.acceptedFileTypes?.map((entry) => entry.trim().toLowerCase()).filter(Boolean) ?? [];
+  if (accepted.length === 0) {
+    return;
+  }
+
+  const mimeType = normalizeMimeType(attachment.mimeType);
+  const fileName = safeName.toLowerCase();
+  const matchesAcceptedType = accepted.some((entry) => {
+    if (entry.endsWith('/*')) {
+      return mimeType.startsWith(entry.slice(0, -1));
+    }
+    if (entry.startsWith('.')) {
+      return fileName.endsWith(entry);
+    }
+    return mimeType === entry;
+  });
+
+  if (!matchesAcceptedType) {
+    throw new Error('attachment_type_not_accepted');
+  }
+};
 
 const renderPrompt = (
   template: string,
