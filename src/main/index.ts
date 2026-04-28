@@ -31,6 +31,7 @@ import {
 } from './prompts/forger-base';
 import { buildForgerAppAgentsMarkdown } from './prompts/apps-base';
 import { buildCodexPromptWithAppContext } from './prompts/user-message';
+import { SecretsStore, appSecretEnvName, isSecretsVaultUnavailableError } from './secrets-store';
 import type {
   AgentToolApprovalSettings,
   AgentToolDefinition,
@@ -39,6 +40,9 @@ import type {
   AgentToolSettings,
   AppCategory,
   AppDetails,
+  AppSecretConnection,
+  AppSecretDeclaration,
+  AppSecretsState,
   AppStatus,
   AppOperationSummary,
   AppSummary,
@@ -52,6 +56,10 @@ import type {
   ChatStartRunInput,
   ChatUndoInput,
   CodexAuthStatus,
+  ConnectAppSecretInput,
+  CreateUserSecretInput,
+  DeleteUserSecretInput,
+  DisconnectAppSecretInput,
   FilesCreateCategoryInput,
   FilesDeleteCategoryInput,
   FilesDeleteInput,
@@ -67,6 +75,7 @@ import type {
   SharedFileRef,
   StopAppResult,
   UpdateAgentToolApprovalInput,
+  UpdateUserSecretInput,
   VersionChangelog,
 } from '../shared/types';
 
@@ -177,6 +186,7 @@ interface AppManifest {
   services?: AppManifestService[];
   scripts?: Record<string, string>;
   skills?: string[];
+  appSecrets?: unknown;
 }
 
 interface StackSkillTemplate {
@@ -195,6 +205,7 @@ const stoppingApps = new Set<string>();
 const runtimeLocks = new Map<string, Promise<RuntimeBinarySet>>();
 let chatOrchestrator: ChatOrchestrator | null = null;
 let fileLibrary: FileLibrary | null = null;
+let secretsStore: SecretsStore | null = null;
 let automationManager: AutomationManager | null = null;
 
 const resolvePlatformAlias = (): string => {
@@ -710,6 +721,158 @@ const resolveInstalledManifest = async (installDir: string): Promise<AppManifest
     return null;
   }
 };
+
+const getSecretsStore = (): SecretsStore => {
+  if (!secretsStore) {
+    secretsStore = new SecretsStore(app.getPath('userData'));
+  }
+  return secretsStore;
+};
+
+const RESERVED_APP_SECRET_ENV_NAMES = new Set([
+  'APPDATA',
+  'CORS_ORIGINS',
+  'DATABASE_URL',
+  'ELECTRON_RUN_AS_NODE',
+  'HOME',
+  'NODE_ENV',
+  'PATH',
+  'PORT',
+  'PYTHONHOME',
+  'PYTHONPATH',
+  'SHELL',
+  'TEMP',
+  'TMP',
+  'TMPDIR',
+  'USER',
+  'USERNAME',
+  'VITE_API_BASE_URL',
+]);
+
+const isReservedAppSecretEnvName = (envName: string): boolean =>
+  RESERVED_APP_SECRET_ENV_NAMES.has(envName) || envName.startsWith('NPM_');
+
+const normalizeAppSecretDeclaration = (value: unknown): AppSecretDeclaration | null => {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const candidate = value as Partial<AppSecretDeclaration>;
+  const name = typeof candidate.name === 'string' ? candidate.name.trim() : '';
+  const usage = typeof candidate.usage === 'string' ? candidate.usage.trim() : '';
+  const envName = appSecretEnvName(name);
+  if (!name || !usage || !envName || isReservedAppSecretEnvName(envName)) {
+    return null;
+  }
+
+  const label = typeof candidate.label === 'string' && candidate.label.trim() ? candidate.label.trim() : undefined;
+  return {
+    name,
+    required: candidate.required === true,
+    usage,
+    ...(label ? { label } : {}),
+  };
+};
+
+const normalizeManifestAppSecrets = (manifest: AppManifest | null): AppSecretDeclaration[] => {
+  if (!manifest || !Array.isArray(manifest.appSecrets)) {
+    return [];
+  }
+
+  const seenNames = new Set<string>();
+  const seenEnvNames = new Set<string>();
+  const declarations: AppSecretDeclaration[] = [];
+  for (const entry of manifest.appSecrets) {
+    const declaration = normalizeAppSecretDeclaration(entry);
+    if (!declaration) {
+      continue;
+    }
+    const envName = appSecretEnvName(declaration.name);
+    if (seenNames.has(declaration.name) || seenEnvNames.has(envName)) {
+      continue;
+    }
+    seenNames.add(declaration.name);
+    seenEnvNames.add(envName);
+    declarations.push(declaration);
+  }
+
+  return declarations;
+};
+
+const getManifestAppSecretsValidationError = (manifest: AppManifest | null): string | null => {
+  if (!manifest || !Array.isArray(manifest.appSecrets)) {
+    return null;
+  }
+
+  const seenNames = new Set<string>();
+  const seenEnvNames = new Set<string>();
+  for (const entry of manifest.appSecrets) {
+    if (!entry || typeof entry !== 'object') {
+      return 'La app declara un secreto invalido.';
+    }
+
+    const candidate = entry as Partial<AppSecretDeclaration>;
+    const name = typeof candidate.name === 'string' ? candidate.name.trim() : '';
+    const usage = typeof candidate.usage === 'string' ? candidate.usage.trim() : '';
+    const envName = appSecretEnvName(name);
+
+    if (!name || !usage || !envName) {
+      return 'La app declara un secreto incompleto.';
+    }
+    if (isReservedAppSecretEnvName(envName)) {
+      return `La app declara un secreto con un nombre reservado: ${envName}.`;
+    }
+    if (seenNames.has(name) || seenEnvNames.has(envName)) {
+      return `La app declara secretos duplicados para la variable ${envName}.`;
+    }
+
+    seenNames.add(name);
+    seenEnvNames.add(envName);
+  }
+
+  return null;
+};
+
+const resolveInstalledAppSecrets = async (appId: string): Promise<AppSecretDeclaration[]> => {
+  const record = registry.apps[appId];
+  if (!record?.installDir) {
+    return [];
+  }
+  const manifest = await resolveInstalledManifest(record.installDir);
+  return normalizeManifestAppSecrets(manifest);
+};
+
+const buildAppSecretsState = async (appId: string): Promise<AppSecretsState> => {
+  const record = registry.apps[appId];
+  const declarations = await resolveInstalledAppSecrets(appId);
+  const store = getSecretsStore();
+  const userSecrets = await store.listUserSecrets();
+  const userSecretById = new Map(userSecrets.map((secret) => [secret.id, secret]));
+  const appSecrets: AppSecretConnection[] = [];
+
+  for (const declaration of declarations) {
+    const userSecretId = await store.getMappedSecretId(appId, declaration.name);
+    const userSecret = userSecretId ? userSecretById.get(userSecretId) : undefined;
+    appSecrets.push({
+      appSecret: declaration,
+      envName: appSecretEnvName(declaration.name),
+      connected: Boolean(userSecret),
+      ...(userSecret ? { userSecretId: userSecret.id, userSecretName: userSecret.name } : {}),
+    });
+  }
+
+  return {
+    appId,
+    appName: record?.name ?? appId,
+    appSecrets,
+    userSecrets,
+  };
+};
+
+const formatProcessOutputForInstallLog = (value: string, secretValues: string[]): string =>
+  secretValues.length > 0
+    ? '[salida omitida porque la app recibio secretos]'
+    : value;
 
 const hasValidManifestStack = (manifest: AppManifest | null): manifest is AppManifest & { stack: AppManifestStack } => {
   if (!manifest?.stack || typeof manifest.stack !== 'object') {
@@ -3168,18 +3331,59 @@ const openInstalledApp = async (appId: string): Promise<OpenAppResult> => {
     };
   }
 
+  const manifest = await resolveInstalledManifest(record.installDir);
+  const appSecretsValidationError = getManifestAppSecretsValidationError(manifest);
+  if (appSecretsValidationError) {
+    return {
+      success: false,
+      userMessage: appSecretsValidationError,
+      technicalCode: 'invalid_app_secrets_manifest',
+    };
+  }
+  const appSecretDeclarations = normalizeManifestAppSecrets(manifest);
+  let resolvedSecrets;
+  try {
+    resolvedSecrets = await getSecretsStore().resolveAppEnv(appId, appSecretDeclarations);
+  } catch (error) {
+    if (isSecretsVaultUnavailableError(error)) {
+      return {
+        success: false,
+        userMessage: 'No pudimos leer los secretos guardados. Revisa el espacio seguro antes de abrir esta app.',
+        technicalCode: 'secrets_vault_unavailable',
+      };
+    }
+    if (error instanceof Error && error.message === 'secrets_encryption_unavailable') {
+      return {
+        success: false,
+        userMessage: 'El sistema no tiene disponible el almacenamiento seguro de secretos.',
+        technicalCode: 'secrets_encryption_unavailable',
+      };
+    }
+    throw error;
+  }
+  if (resolvedSecrets.missingRequired.length > 0) {
+    const missingLabels = resolvedSecrets.missingRequired
+      .map((secret) => secret.label ?? secret.name)
+      .join(', ');
+    return {
+      success: false,
+      userMessage: `Conecta los secretos requeridos antes de abrir esta app: ${missingLabels}.`,
+      technicalCode: 'required_app_secrets_missing',
+    };
+  }
+
   await appendInstallLog('open:start', {
     appId,
     installDir: record.installDir,
     requiredNodeVersion: record.requiredNodeVersion,
     requiredPythonVersion: record.requiredPythonVersion,
+    connectedSecrets: Object.keys(resolvedSecrets.env),
     logPath: getInstallLogPath(),
   });
 
   const nodeRuntime = await ensureRuntimeInstalled('node', record.requiredNodeVersion);
   await ensureRuntimeInstalled('python', record.requiredPythonVersion);
 
-  const manifest = await resolveInstalledManifest(record.installDir);
   const backendService = findManifestService(manifest, 'backend', './backend');
   const frontendService = findManifestService(manifest, 'frontend', './frontend');
   const backendDir = path.join(record.installDir, 'backend');
@@ -3224,6 +3428,7 @@ const openInstalledApp = async (appId: string): Promise<OpenAppResult> => {
       env: {
         ...process.env,
         ...backendConfig.environment,
+        ...resolvedSecrets.env,
         CORS_ORIGINS: `${frontendUrl},http://127.0.0.1:${frontendPort}`,
       },
       stdio: 'pipe',
@@ -3235,6 +3440,7 @@ const openInstalledApp = async (appId: string): Promise<OpenAppResult> => {
     env: {
       ...process.env,
       ...(frontendService?.environment && typeof frontendService.environment === 'object' ? frontendService.environment : {}),
+      ...resolvedSecrets.env,
       VITE_API_BASE_URL: backendUrl,
       PATH: `${path.dirname(nodeRuntime.node as string)}${path.delimiter}${process.env.PATH ?? ''}`,
     },
@@ -3245,14 +3451,14 @@ const openInstalledApp = async (appId: string): Promise<OpenAppResult> => {
   backend.stdout.on('data', (chunk) => {
     void appendInstallLog('open:backend:stdout', {
       appId,
-      text: truncateForInstallLog(chunk.toString()),
+      text: truncateForInstallLog(formatProcessOutputForInstallLog(chunk.toString(), resolvedSecrets.secretValues)),
     });
   });
 
   backend.stderr.on('data', (chunk) => {
     void appendInstallLog('open:backend:stderr', {
       appId,
-      text: truncateForInstallLog(chunk.toString()),
+      text: truncateForInstallLog(formatProcessOutputForInstallLog(chunk.toString(), resolvedSecrets.secretValues)),
     });
   });
 
@@ -3266,14 +3472,14 @@ const openInstalledApp = async (appId: string): Promise<OpenAppResult> => {
   frontend.stdout.on('data', (chunk) => {
     void appendInstallLog('open:frontend:stdout', {
       appId,
-      text: truncateForInstallLog(chunk.toString()),
+      text: truncateForInstallLog(formatProcessOutputForInstallLog(chunk.toString(), resolvedSecrets.secretValues)),
     });
   });
 
   frontend.stderr.on('data', (chunk) => {
     void appendInstallLog('open:frontend:stderr', {
       appId,
-      text: truncateForInstallLog(chunk.toString()),
+      text: truncateForInstallLog(formatProcessOutputForInstallLog(chunk.toString(), resolvedSecrets.secretValues)),
     });
   });
 
@@ -4068,6 +4274,42 @@ const registerIpcHandlers = (): void => {
     return getRuntimeStatus(appId);
   });
 
+  ipcMain.handle(IPC_CHANNELS.getAppSecrets, async (_event, appId: string) => {
+    return await buildAppSecretsState(appId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.listUserSecrets, async () => {
+    return await getSecretsStore().listUserSecrets();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.createUserSecret, async (_event, input: CreateUserSecretInput) => {
+    return await getSecretsStore().createUserSecret(input);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.updateUserSecret, async (_event, input: UpdateUserSecretInput) => {
+    return await getSecretsStore().updateUserSecret(input);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.deleteUserSecret, async (_event, input: DeleteUserSecretInput) => {
+    return await getSecretsStore().deleteUserSecret(input.id);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.connectAppSecret, async (_event, input: ConnectAppSecretInput) => {
+    const declarations = await resolveInstalledAppSecrets(input.appId);
+    if (!declarations.some((secret) => secret.name === input.appSecretName)) {
+      return {
+        success: false,
+        userMessage: 'La app no declara ese secreto.',
+        technicalCode: 'app_secret_not_declared',
+      };
+    }
+    return await getSecretsStore().connectAppSecret(input.appId, input.appSecretName, input.userSecretId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.disconnectAppSecret, async (_event, input: DisconnectAppSecretInput) => {
+    return await getSecretsStore().disconnectAppSecret(input.appId, input.appSecretName);
+  });
+
   ipcMain.handle(IPC_CHANNELS.getSettings, async () => settings);
   ipcMain.handle(IPC_CHANNELS.getCodexAuthStatus, async () => await getCodexAuthStatus());
   ipcMain.handle(IPC_CHANNELS.openCodexUsageDashboard, async () => {
@@ -4308,6 +4550,7 @@ app.whenReady().then(async () => {
   await ensureGlobalAgentsContext(getForgerHomeRoot());
   await fs.mkdir(getCodexRoot(), { recursive: true });
   await fs.mkdir(getCodexHome(), { recursive: true });
+  secretsStore = new SecretsStore(app.getPath('userData'));
   await loadAgentToolSettings();
   await loadRegistry();
   await startDevCatalogService();
