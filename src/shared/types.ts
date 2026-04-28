@@ -443,6 +443,8 @@ export interface AutomationRunSummary {
   startedAt: string;
   finishedAt?: string;
   error?: string;
+  userMessage?: string;
+  userMessages?: string[];
   transcriptPreview?: string;
 }
 

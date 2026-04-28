@@ -242,21 +242,40 @@ export class AutomationManager {
       await this.updateLastRun(automationId, toRunSummary(run));
 
       const command = await resolveCodexCommand(codexCliPath, pathEntries);
+      const activeRunId = run.id;
+      let latestUserMessage = run.userMessage ?? '';
+      let userMessages = run.userMessages ?? [];
       const result = await runCodexCommand(command, {
         cwd: this.options.forgerHomeRoot,
         codexHome: this.options.codexHome,
         prompt: this.buildPrompt(automation),
         transcriptPath,
+        onAssistantMessages: (assistantMessages) => {
+          const latest = assistantMessages[assistantMessages.length - 1] ?? '';
+          if (!latest || latest === latestUserMessage) {
+            return;
+          }
+          latestUserMessage = latest;
+          userMessages = assistantMessages;
+          void this.updateRunUserMessage(automationId, activeRunId, latest, assistantMessages);
+        },
       });
 
       if (result.code !== 0) {
         throw new Error((result.stderr || result.stdout || 'codex_exec_failed').trim());
       }
 
+      const parsedMessages = parseCodexAssistantMessages(result.stdout, result.stderr);
+      if (parsedMessages.length > 0) {
+        userMessages = parsedMessages;
+        latestUserMessage = parsedMessages[parsedMessages.length - 1] ?? latestUserMessage;
+      }
       run = {
         ...run,
         status: 'succeeded',
         finishedAt: new Date().toISOString(),
+        userMessage: latestUserMessage,
+        userMessages,
         transcript: await readText(transcriptPath),
         transcriptPreview: previewTranscript(await readText(transcriptPath)),
       };
@@ -270,6 +289,8 @@ export class AutomationManager {
         status: 'failed',
         finishedAt: new Date().toISOString(),
         error: message,
+        userMessage: run.userMessage || friendlyAutomationFailureMessage(message),
+        userMessages: run.userMessages?.length ? run.userMessages : [run.userMessage || friendlyAutomationFailureMessage(message)],
         transcript: await readText(this.runTranscriptPath(run.id)),
         transcriptPreview: previewTranscript(await readText(this.runTranscriptPath(run.id))),
       };
@@ -340,6 +361,8 @@ export class AutomationManager {
       startedAt: now,
       finishedAt: status === 'skipped' ? now : undefined,
       error,
+      userMessage: error ? friendlyAutomationFailureMessage(error) : '',
+      userMessages: error ? [friendlyAutomationFailureMessage(error)] : [],
       transcript: error ? `[${now}] [meta] ${error}\n` : '',
       transcriptPreview: error,
     };
@@ -448,16 +471,26 @@ export class AutomationManager {
     return path.join(this.options.metadataRoot, 'automation-runs');
   }
 
+  private runStoragePath(fileName: string): string {
+    const root = path.resolve(this.runsRoot());
+    const target = path.resolve(root, fileName);
+    const rootWithSeparator = root.endsWith(path.sep) ? root : `${root}${path.sep}`;
+    if (target !== root && !target.startsWith(rootWithSeparator)) {
+      throw new Error('automation_run_path_outside_storage');
+    }
+    return target;
+  }
+
   private runFilePath(runId: string): string {
-    return path.join(this.runsRoot(), `${runId}.json`);
+    return this.runStoragePath(`${runId}.json`);
   }
 
   private runTranscriptPath(runId: string): string {
-    return path.join(this.runsRoot(), `${runId}.log`);
+    return this.runStoragePath(`${runId}.log`);
   }
 
   private runIndexPath(automationId: string): string {
-    return path.join(this.runsRoot(), `${automationId}.index.json`);
+    return this.runStoragePath(`${automationId}.index.json`);
   }
 
   private async saveAutomations(): Promise<void> {
@@ -471,6 +504,25 @@ export class AutomationManager {
     if (run.transcript) {
       await fs.writeFile(this.runTranscriptPath(run.id), run.transcript, 'utf8');
     }
+  }
+
+  private async updateRunUserMessage(
+    automationId: string,
+    runId: string,
+    userMessage: string,
+    userMessages: string[],
+  ): Promise<void> {
+    const current = await this.readRun(runId);
+    if (!current || current.automationId !== automationId) {
+      return;
+    }
+    const next: AutomationRun = {
+      ...current,
+      userMessage,
+      userMessages,
+    };
+    await this.writeRun(next);
+    await this.updateLastRun(automationId, toRunSummary(next));
   }
 
   private async readRun(runId: string): Promise<AutomationRun | null> {
@@ -562,6 +614,8 @@ const toRunSummary = (run: AutomationRun): AutomationRunSummary => ({
   startedAt: run.startedAt,
   finishedAt: run.finishedAt,
   error: run.error,
+  userMessage: run.userMessage,
+  userMessages: run.userMessages,
   transcriptPreview: run.transcriptPreview ?? previewTranscript(run.transcript),
 });
 
@@ -583,8 +637,49 @@ const appendTranscript = async (
   await fs.appendFile(transcriptPath, line.endsWith('\n') ? line : `${line}\n`, 'utf8');
 };
 
-const requiresWindowsShell = (command: string): boolean =>
-  process.platform === 'win32' && /\.(cmd|bat)$/i.test(command);
+const parseCodexAssistantMessages = (stdout: string, stderr = ''): string[] => {
+  const raw = stdout.trim() || stderr.trim();
+  if (!raw) {
+    return [];
+  }
+
+  const assistantMessages: string[] = [];
+  for (const line of raw.split('\n').map((entry) => entry.trim()).filter(Boolean)) {
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(line) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+
+    if (parsed.type !== 'item.completed' || !parsed.item || typeof parsed.item !== 'object') {
+      continue;
+    }
+
+    const item = parsed.item as Record<string, unknown>;
+    if (item.type === 'agent_message' && typeof item.text === 'string') {
+      const text = item.text.trim();
+      if (text && assistantMessages[assistantMessages.length - 1] !== text) {
+        assistantMessages.push(text);
+      }
+    }
+  }
+
+  return assistantMessages;
+};
+
+const friendlyAutomationFailureMessage = (message: string): string => {
+  if (message === 'codex_auth_missing') {
+    return 'No se pudo ejecutar porque Codex no tiene una sesion activa.';
+  }
+  if (message === 'codex_cli_missing' || message === 'codex_js_entrypoint_missing') {
+    return 'No se pudo ejecutar porque Codex no esta listo en este equipo.';
+  }
+  if (message.startsWith('codex_timeout_after_')) {
+    return 'La automatizacion se detuvo porque tardo demasiado en responder.';
+  }
+  return 'La automatizacion no se pudo completar.';
+};
 
 const existsFile = async (filePath: string): Promise<boolean> => {
   try {
@@ -626,11 +721,7 @@ const resolveCodexCommand = async (
   const nodeModulesRoot = path.resolve(path.dirname(codexCliPath), '..');
   const codexEntrypoint = path.join(nodeModulesRoot, '@openai', 'codex', 'bin', 'codex.js');
   if (!nodePath || !(await existsFile(codexEntrypoint))) {
-    return {
-      command: codexCliPath,
-      prefixArgs: [],
-      pathEntries: [path.dirname(codexCliPath), ...pathEntries],
-    };
+    throw new Error('codex_js_entrypoint_missing');
   }
 
   return {
@@ -647,6 +738,7 @@ const runCodexCommand = async (
     codexHome: string;
     prompt: string;
     transcriptPath: string;
+    onAssistantMessages?: (assistantMessages: string[]) => void;
   },
 ): Promise<CommandResult> => {
   const args = [
@@ -666,6 +758,7 @@ const runCodexCommand = async (
     options.prompt,
   ];
   await appendTranscript(options.transcriptPath, 'meta', `${codexCommand.command} ${args.slice(codexCommand.prefixArgs.length).join(' ')}`);
+  let stdoutSoFar = '';
   return await runCommandCapture(codexCommand.command, args, {
     cwd: options.cwd,
     env: {
@@ -674,7 +767,11 @@ const runCodexCommand = async (
       PATH: [...codexCommand.pathEntries, process.env.PATH ?? ''].filter(Boolean).join(path.delimiter),
     },
     timeoutMs: AUTOMATION_TIMEOUT_MS,
-    onStdout: (text) => void appendTranscript(options.transcriptPath, 'stdout', text),
+    onStdout: (text) => {
+      stdoutSoFar += text;
+      options.onAssistantMessages?.(parseCodexAssistantMessages(stdoutSoFar));
+      void appendTranscript(options.transcriptPath, 'stdout', text);
+    },
     onStderr: (text) => void appendTranscript(options.transcriptPath, 'stderr', text),
   });
 };
@@ -697,7 +794,7 @@ const runCommandCapture = async (
         ...process.env,
         ...(options.env ?? {}),
       },
-      shell: requiresWindowsShell(command),
+      shell: false,
       stdio: ['pipe', 'pipe', 'pipe'],
       detached: process.platform !== 'win32',
     });

@@ -1629,7 +1629,6 @@ function App() {
             selectedAutomationId={selectedAutomationId}
             runs={automationRuns}
             selectedRun={selectedAutomationRun}
-            transcript={selectedAutomationRun?.transcript ?? ''}
             busy={automationBusy}
             getAppMeta={getAppMeta}
             onSave={(input) => void handleSaveAutomation(input)}

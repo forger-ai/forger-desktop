@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
+import AccessTimeRounded from '@mui/icons-material/AccessTimeRounded';
 import DeleteRounded from '@mui/icons-material/DeleteRounded';
 import EditRounded from '@mui/icons-material/EditRounded';
 import PauseRounded from '@mui/icons-material/PauseRounded';
 import PlayArrowRounded from '@mui/icons-material/PlayArrowRounded';
 import PlaylistAddCheckRounded from '@mui/icons-material/PlaylistAddCheckRounded';
 import ScienceRounded from '@mui/icons-material/ScienceRounded';
+import VisibilityRounded from '@mui/icons-material/VisibilityRounded';
 import {
   Box,
   Button,
@@ -21,6 +23,7 @@ import {
   FormControlLabel,
   FormGroup,
   IconButton,
+  InputAdornment,
   InputLabel,
   MenuItem,
   Select,
@@ -28,7 +31,10 @@ import {
   TextField,
   Tooltip,
   Typography,
+  useTheme,
 } from '@mui/material';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import type {
   AppSummary,
   Automation,
@@ -57,7 +63,6 @@ interface AutomationsViewProps {
   selectedAutomationId: string | null;
   runs: AutomationRunSummary[];
   selectedRun: AutomationRun | null;
-  transcript: string;
   busy: boolean;
   getAppMeta: (appId: string) => { name: string; description: string };
   onSave: (input: AutomationUpsertInput & { id?: string }) => void;
@@ -90,7 +95,7 @@ const formFromAutomation = (automation: Automation): AutomationFormState => ({
   enabled: automation.enabled,
 });
 
-const buildInput = (form: AutomationFormState): AutomationUpsertInput & { id?: string } => {
+const buildInput = (form: AutomationFormState, enabled = form.enabled): AutomationUpsertInput & { id?: string } => {
   const frequency: AutomationFrequency =
     form.frequencyType === 'hourly'
       ? { type: 'hourly' }
@@ -103,7 +108,7 @@ const buildInput = (form: AutomationFormState): AutomationUpsertInput & { id?: s
     prompt: form.prompt,
     frequency,
     selectedAppIds: form.selectedAppIds,
-    enabled: form.enabled,
+    enabled,
   };
 };
 
@@ -126,6 +131,34 @@ const statusColor = (status: AutomationRunSummary['status']): 'default' | 'succe
   return 'default';
 };
 
+function MarkdownRunOutput({ content }: { content: string }) {
+  const theme = useTheme();
+
+  return (
+    <Box
+      sx={{
+        color: content ? 'text.primary' : 'text.secondary',
+        fontSize: theme.typography.body2.fontSize,
+        lineHeight: 1.6,
+        '& p': { my: 0.85, lineHeight: 1.6 },
+        '& ul, & ol': { my: 0.85, pl: 2.7 },
+        '& li': { mb: 0.45 },
+        '& strong': { fontWeight: 700 },
+        '& code': {
+          fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+          bgcolor: 'rgba(148,163,184,0.18)',
+          px: 0.5,
+          py: 0.15,
+          borderRadius: 0.75,
+          fontSize: '0.9em',
+        },
+      }}
+    >
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+    </Box>
+  );
+}
+
 export function AutomationsView({
   t,
   apps,
@@ -133,7 +166,6 @@ export function AutomationsView({
   selectedAutomationId,
   runs,
   selectedRun,
-  transcript,
   busy,
   getAppMeta,
   onSave,
@@ -145,6 +177,7 @@ export function AutomationsView({
   onSelectRun,
 }: AutomationsViewProps) {
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [runLogOpen, setRunLogOpen] = useState(false);
   const [form, setForm] = useState<AutomationFormState>(emptyForm);
   const selectedAutomation = useMemo(
     () => automations.find((automation) => automation.id === selectedAutomationId) ?? null,
@@ -178,10 +211,19 @@ export function AutomationsView({
     }));
   };
 
-  const submit = () => {
-    onSave(buildInput(form));
+  const submit = (enabled = form.enabled) => {
+    onSave(buildInput(form, enabled));
     setDialogOpen(false);
   };
+
+  const runOutput = selectedRun?.userMessage?.trim()
+    || (selectedRun?.status === 'failed' ? selectedRun.error : '')
+    || '';
+  const runMessages = selectedRun?.userMessages?.length
+    ? selectedRun.userMessages
+    : runOutput
+      ? [runOutput]
+      : [];
 
   return (
     <Stack spacing={2}>
@@ -288,10 +330,23 @@ export function AutomationsView({
                     {runs.map((run) => (
                       <Button
                         key={run.id}
-                        variant={selectedRun?.id === run.id ? 'contained' : 'outlined'}
+                        variant="outlined"
                         color="inherit"
                         onClick={() => onSelectRun(run.id)}
-                        sx={{ justifyContent: 'space-between', minHeight: 42 }}
+                        sx={(theme) => {
+                          const selected = selectedRun?.id === run.id;
+                          return {
+                            justifyContent: 'space-between',
+                            minHeight: 42,
+                            bgcolor: selected ? 'action.selected' : 'transparent',
+                            borderColor: selected ? theme.palette.divider : 'divider',
+                            boxShadow: selected ? `inset 0 0 0 1px ${theme.palette.action.focus}` : 'none',
+                            '&:hover': {
+                              bgcolor: selected ? 'action.selected' : 'action.hover',
+                              borderColor: theme.palette.divider,
+                            },
+                          };
+                        }}
                       >
                         <Stack direction="row" spacing={1} alignItems="center" sx={{ minWidth: 0 }}>
                           <Chip size="small" color={statusColor(run.status)} label={t.sections.automations.runStatuses[run.status]} />
@@ -313,31 +368,66 @@ export function AutomationsView({
           <Card>
             <CardContent>
               <Stack spacing={1}>
-                <Typography variant="h6">{t.sections.automations.transcriptTitle}</Typography>
+                <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
+                  <Typography variant="h6">{t.sections.automations.outputTitle}</Typography>
+                  <Tooltip title={t.sections.automations.viewFullLog}>
+                    <span>
+                      <IconButton size="small" disabled={runMessages.length === 0} onClick={() => setRunLogOpen(true)}>
+                        <VisibilityRounded fontSize="small" />
+                      </IconButton>
+                    </span>
+                  </Tooltip>
+                </Stack>
                 <Divider />
                 <Box
-                  component="pre"
                   sx={{
-                    m: 0,
                     minHeight: 280,
                     maxHeight: '48vh',
                     overflow: 'auto',
-                    whiteSpace: 'pre-wrap',
                     wordBreak: 'break-word',
-                    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-                    fontSize: 12,
                     bgcolor: 'action.hover',
                     borderRadius: 1,
-                    p: 1.5,
+                    px: 2,
+                    py: 1.75,
                   }}
                 >
-                  {transcript || t.sections.automations.noTranscript}
+                  <MarkdownRunOutput content={runOutput || t.sections.automations.noOutput} />
                 </Box>
               </Stack>
             </CardContent>
           </Card>
         </Stack>
       </Box>
+
+      <Dialog open={runLogOpen} onClose={() => setRunLogOpen(false)} maxWidth="md" fullWidth>
+        <DialogTitle>{t.sections.automations.fullLogTitle}</DialogTitle>
+        <DialogContent>
+          {runMessages.length === 0 ? (
+            <Typography color="text.secondary">{t.sections.automations.noLogMessages}</Typography>
+          ) : (
+            <Stack spacing={1.5} sx={{ pt: 1 }}>
+              {runMessages.map((message, index) => (
+                <Box
+                  key={`${selectedRun?.id ?? 'run'}-${index}`}
+                  sx={{
+                    border: 1,
+                    borderColor: 'divider',
+                    borderRadius: 1,
+                    bgcolor: 'action.hover',
+                    px: 2,
+                    py: 1.5,
+                  }}
+                >
+                  <MarkdownRunOutput content={message} />
+                </Box>
+              ))}
+            </Stack>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setRunLogOpen(false)}>{t.actions.close}</Button>
+        </DialogActions>
+      </Dialog>
 
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="md" fullWidth>
         <DialogTitle>{form.id ? t.sections.automations.edit : t.sections.automations.newAutomation}</DialogTitle>
@@ -378,6 +468,28 @@ export function AutomationsView({
                   onChange={(event) => setForm((current) => ({ ...current, timeOfDay: event.target.value }))}
                   fullWidth
                   InputLabelProps={{ shrink: true }}
+                  slotProps={{
+                    input: {
+                      endAdornment: (
+                        <InputAdornment position="end" sx={{ pointerEvents: 'none' }}>
+                          <AccessTimeRounded fontSize="small" color="action" />
+                        </InputAdornment>
+                      ),
+                    },
+                  }}
+                  sx={(theme) => ({
+                    '& input[type="time"]': {
+                      colorScheme: theme.palette.mode,
+                    },
+                    '& input[type="time"]::-webkit-calendar-picker-indicator': {
+                      cursor: 'pointer',
+                      opacity: 0,
+                      position: 'absolute',
+                      right: 0,
+                      width: 48,
+                      height: '100%',
+                    },
+                  })}
                 />
               ) : null}
               {form.frequencyType === 'weekly' ? (
@@ -408,10 +520,16 @@ export function AutomationsView({
                   {allSelected ? t.sections.automations.clearApps : t.sections.automations.selectAllApps}
                 </Button>
               </Stack>
-              <FormGroup sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 0.5 }}>
+              <FormGroup sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, columnGap: 2, rowGap: 1 }}>
                 {apps.map((appEntry) => (
                   <FormControlLabel
                     key={appEntry.id}
+                    sx={{
+                      m: 0,
+                      alignItems: 'center',
+                      '& .MuiCheckbox-root': { p: 0.5, mr: 1 },
+                      '& .MuiFormControlLabel-label': { lineHeight: 1.35 },
+                    }}
                     control={<Checkbox checked={form.selectedAppIds.includes(appEntry.id)} onChange={() => toggleApp(appEntry.id)} />}
                     label={getAppMeta(appEntry.id).name}
                   />
@@ -421,16 +539,15 @@ export function AutomationsView({
                 <Typography variant="body2" color="text.secondary">{t.sections.automations.noInstalledApps}</Typography>
               ) : null}
             </Stack>
-            <FormControlLabel
-              control={<Checkbox checked={form.enabled} onChange={(event) => setForm((current) => ({ ...current, enabled: event.target.checked }))} />}
-              label={t.sections.automations.activateOnSave}
-            />
           </Stack>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setDialogOpen(false)}>{t.actions.close}</Button>
-          <Button variant="contained" disabled={!form.name.trim() || !form.prompt.trim()} onClick={submit}>
-            {t.sections.automations.save}
+          <Button disabled={!form.name.trim() || !form.prompt.trim()} onClick={() => form.id ? submit() : submit(false)}>
+            {form.id ? t.sections.automations.save : t.sections.automations.create}
+          </Button>
+          <Button variant="contained" disabled={!form.name.trim() || !form.prompt.trim()} onClick={() => submit(true)}>
+            {form.id ? t.sections.automations.saveAndActivate : t.sections.automations.createAndActivate}
           </Button>
         </DialogActions>
       </Dialog>

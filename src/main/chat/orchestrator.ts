@@ -222,11 +222,7 @@ class SandboxRunner {
     const codexEntrypoint = path.join(nodeModulesRoot, '@openai', 'codex', 'bin', 'codex.js');
 
     if (!nodePath || !(await existsFile(codexEntrypoint))) {
-      return {
-        command: params.codexCliPath,
-        prefixArgs: [],
-        pathEntries: [path.dirname(params.codexCliPath), ...params.pathEntries],
-      };
+      throw new Error('codex_js_entrypoint_missing');
     }
 
     return {
