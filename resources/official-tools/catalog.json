@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "publisher": "Forger",
+  "tools": [
+    {
+      "id": "gmail-oauth",
+      "name": "Gmail",
+      "description": "Conecta Gmail mediante OAuth con permisos explicitos y secretos guardados localmente.",
+      "version": "0.1.0",
+      "runtime": "oauth",
+      "archivePath": "dist/gmail-oauth-0.1.0.zip",
+      "signaturePath": "dist/gmail-oauth-0.1.0.zip.sig",
+      "checksumSha256": "0a9446fa1ec0302ab2e2cff9caa644a608f2348398ad626bafccb48b7ba2d444",
+      "signatureBase64": "hd79PYID61FZzz1vwqlibR6Y5d5YUnQ49FGJw9jwHeR4BEH9C3M6ymlw/XltPPWY/XDtNPKqKlFleGaeSWpgCg==",
+      "manifestPath": "manifest.json"
+    }
+  ]
+}

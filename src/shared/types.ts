@@ -174,7 +174,7 @@ export interface DisconnectAppSecretInput {
   appSecretName: string;
 }
 
-export type AgentToolId =
+export type BuiltInAgentToolId =
   | 'forger_list_catalog'
   | 'forger_list_installed_apps'
   | 'forger_check_updates'
@@ -184,6 +184,8 @@ export type AgentToolId =
   | 'forger_restart_app'
   | 'forger_refresh_app_view'
   | 'forger_update_app';
+
+export type AgentToolId = BuiltInAgentToolId | `official_${string}`;
 
 export type AgentToolCategory = 'consulta' | 'app' | 'actualizacion' | 'vista';
 
@@ -197,14 +199,18 @@ export interface AgentToolDefinition {
   category: AgentToolCategory;
   risk: AgentToolRisk;
   defaultRequiresApproval: boolean;
+  permissions?: OfficialToolPermission[];
+  secrets?: string[];
 }
 
 export interface AgentToolPackageDefinition {
   id: string;
   name: string;
   description: string;
-  icon: 'forger';
+  icon: 'forger' | 'official';
   tools: AgentToolDefinition[];
+  source?: 'integrated' | 'official';
+  version?: string;
 }
 
 export type AgentToolApprovalSettings = Record<AgentToolId, boolean>;
@@ -216,6 +222,68 @@ export interface AgentToolSettings {
 export interface UpdateAgentToolApprovalInput {
   toolId: AgentToolId;
   requiresApproval: boolean;
+}
+
+export type OfficialToolStatus = 'available' | 'installed' | 'integrated';
+
+export type OfficialToolRuntime = 'host' | 'node' | 'python' | 'oauth';
+
+export interface OfficialToolPermission {
+  id: string;
+  label: string;
+  description: string;
+  required: boolean;
+}
+
+export interface OfficialToolSecretDeclaration {
+  name: string;
+  label?: string;
+  usage: string;
+  required: boolean;
+}
+
+export interface OfficialToolActionDefinition {
+  id: AgentToolId;
+  name: string;
+  description: string;
+  category: AgentToolCategory;
+  risk: AgentToolRisk;
+  defaultRequiresApproval: boolean;
+  permissions: OfficialToolPermission[];
+  secrets: string[];
+}
+
+export interface OfficialToolSummary {
+  id: string;
+  name: string;
+  description: string;
+  version: string;
+  status: OfficialToolStatus;
+  runtime: OfficialToolRuntime;
+  actions: OfficialToolActionDefinition[];
+  permissions: OfficialToolPermission[];
+  secrets: OfficialToolSecretDeclaration[];
+  installedAt?: string;
+  documentation?: string;
+  technicalBlocker?: string;
+}
+
+export interface InstallOfficialToolResult {
+  success: boolean;
+  userMessage: string;
+  technicalCode?: string;
+  tool?: OfficialToolSummary;
+}
+
+export interface ConnectOfficialToolSecretInput {
+  toolId: string;
+  secretName: string;
+  userSecretId: string;
+}
+
+export interface DisconnectOfficialToolSecretInput {
+  toolId: string;
+  secretName: string;
 }
 
 export type ChatRunStatus =
@@ -587,6 +655,11 @@ export interface ForgerDesktopApi {
   deleteUserSecret: (input: DeleteUserSecretInput) => Promise<SecretMutationResult>;
   connectAppSecret: (input: ConnectAppSecretInput) => Promise<SecretMutationResult>;
   disconnectAppSecret: (input: DisconnectAppSecretInput) => Promise<SecretMutationResult>;
+  listOfficialTools: () => Promise<OfficialToolSummary[]>;
+  installOfficialTool: (toolId: string) => Promise<InstallOfficialToolResult>;
+  getOfficialToolSecrets: (toolId: string) => Promise<AppSecretsState>;
+  connectOfficialToolSecret: (input: ConnectOfficialToolSecretInput) => Promise<SecretMutationResult>;
+  disconnectOfficialToolSecret: (input: DisconnectOfficialToolSecretInput) => Promise<SecretMutationResult>;
   onInstallProgress: (listener: (event: { appId: string; progress: InstallAppResult }) => void) => () => void;
   onRuntimeStatusChanged: (listener: (event: RuntimeStatus) => void) => () => void;
   getSettings: () => Promise<Settings>;

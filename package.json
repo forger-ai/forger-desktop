@@ -70,6 +70,14 @@
         "filter": [
           "**/*"
         ]
+      },
+      {
+        "from": "resources/official-tools",
+        "to": "official-tools",
+        "filter": [
+          "catalog.json",
+          "dist/**/*"
+        ]
       }
     ],
     "asarUnpack": [

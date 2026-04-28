@@ -124,6 +124,21 @@ export const en = {
       approvalOn: 'Approval required',
       approvalOff: 'No approval',
       saveError: 'Could not save this tool setting.',
+      installError: 'Could not install this tool.',
+      install: 'Install',
+      installing: 'Installing',
+      searchPlaceholder: 'Search tools',
+      actionsTitle: 'Actions',
+      secretsTitle: 'Associated secrets',
+      secretSelectLabel: 'Saved secret',
+      secretNotConnected: 'Not connected',
+      integratedLocked: 'Integrated',
+      runtimeLabel: (runtime: string) => `Runtime: ${runtime}`,
+      statuses: {
+        available: 'Available',
+        installed: 'Installed',
+        integrated: 'Integrated',
+      },
       packages: {
         forger: {
           name: 'Forger tools',

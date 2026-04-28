@@ -34,6 +34,7 @@ import type {
   FilesListInput,
   ForgerFileCategory,
   ForgerFileRecord,
+  OfficialToolSummary,
   PickedChatFile,
   Settings,
   SharedFileRef,
@@ -286,8 +287,11 @@ function App() {
   const [codexAuthBusy, setCodexAuthBusy] = useState(false);
   const [codexAuthStatus, setCodexAuthStatus] = useState<CodexAuthStatus>(initialCodexAuthStatus);
   const [agentToolPackages, setAgentToolPackages] = useState<AgentToolPackageDefinition[]>([]);
+  const [officialTools, setOfficialTools] = useState<OfficialToolSummary[]>([]);
   const [agentToolSettings, setAgentToolSettings] = useState<AgentToolSettings>(initialAgentToolSettings);
   const [agentToolBusyId, setAgentToolBusyId] = useState<AgentToolDefinition['id'] | null>(null);
+  const [officialToolBusyId, setOfficialToolBusyId] = useState<string | null>(null);
+  const [officialToolSecretsById, setOfficialToolSecretsById] = useState<Record<string, AppSecretsState>>({});
   const [agentToolError, setAgentToolError] = useState<string | null>(null);
   const [cloudModalOpen, setCloudModalOpen] = useState(false);
   const [codexConfigOpen, setCodexConfigOpen] = useState(false);
@@ -427,12 +431,14 @@ function App() {
 
   const refreshAgentTools = async () => {
     const desktopApi = getDesktopApi();
-    const [toolPackages, toolSettings] = await Promise.all([
+    const [toolPackages, toolSettings, officialToolList] = await Promise.all([
       desktopApi.listAgentTools(),
       desktopApi.getAgentToolSettings(),
+      desktopApi.listOfficialTools(),
     ]);
     setAgentToolPackages(toolPackages);
     setAgentToolSettings(toolSettings);
+    setOfficialTools(officialToolList);
   };
 
   useEffect(() => {
@@ -936,6 +942,57 @@ function App() {
       setAgentToolError(t.sections.tools.saveError);
     } finally {
       setAgentToolBusyId(null);
+    }
+  };
+
+  const loadOfficialToolSecrets = async (toolId: string) => {
+    const state = await getDesktopApi().getOfficialToolSecrets(toolId);
+    setOfficialToolSecretsById((current) => ({
+      ...current,
+      [toolId]: state,
+    }));
+    return state;
+  };
+
+  const handleInstallOfficialTool = async (toolId: string) => {
+    setOfficialToolBusyId(toolId);
+    setAgentToolError(null);
+    try {
+      const result = await getDesktopApi().installOfficialTool(toolId);
+      await refreshAgentTools();
+      if (result.success) {
+        await loadOfficialToolSecrets(toolId);
+      }
+      setBannerSeverity(result.success ? 'success' : 'error');
+      setBannerMessage(result.userMessage);
+    } catch (_error) {
+      setAgentToolError(t.sections.tools.installError);
+    } finally {
+      setOfficialToolBusyId(null);
+    }
+  };
+
+  const handleConnectOfficialToolSecret = async (toolId: string, secretName: string, userSecretId: string) => {
+    setOfficialToolBusyId(toolId);
+    try {
+      const result = await getDesktopApi().connectOfficialToolSecret({ toolId, secretName, userSecretId });
+      await loadOfficialToolSecrets(toolId);
+      setBannerSeverity(result.success ? 'success' : 'error');
+      setBannerMessage(result.userMessage);
+    } finally {
+      setOfficialToolBusyId(null);
+    }
+  };
+
+  const handleDisconnectOfficialToolSecret = async (toolId: string, secretName: string) => {
+    setOfficialToolBusyId(toolId);
+    try {
+      const result = await getDesktopApi().disconnectOfficialToolSecret({ toolId, secretName });
+      await loadOfficialToolSecrets(toolId);
+      setBannerSeverity(result.success ? 'success' : 'error');
+      setBannerMessage(result.userMessage);
+    } finally {
+      setOfficialToolBusyId(null);
     }
   };
 
@@ -1791,10 +1848,21 @@ function App() {
         {currentView === 'tools' ? (
           <ToolsView
             packages={agentToolPackages}
+            officialTools={officialTools}
             settings={agentToolSettings}
             busyToolId={agentToolBusyId}
+            busyOfficialToolId={officialToolBusyId}
+            secretsByToolId={officialToolSecretsById}
             errorMessage={agentToolError}
             t={t}
+            onInstallOfficialTool={(toolId) => void handleInstallOfficialTool(toolId)}
+            onLoadOfficialToolSecrets={(toolId) => void loadOfficialToolSecrets(toolId)}
+            onConnectOfficialToolSecret={(toolId, secretName, userSecretId) =>
+              void handleConnectOfficialToolSecret(toolId, secretName, userSecretId)
+            }
+            onDisconnectOfficialToolSecret={(toolId, secretName) =>
+              void handleDisconnectOfficialToolSecret(toolId, secretName)
+            }
             onApprovalChange={(toolId, requiresApproval) =>
               void handleAgentToolApprovalChange(toolId, requiresApproval)
             }

@@ -23,6 +23,7 @@ import { ChatOrchestrator } from './chat/orchestrator';
 import { AutomationManager } from './automation-manager';
 import { DevCatalogService } from './dev-catalog-service';
 import { FileLibrary } from './file-library';
+import { OfficialToolsService } from './official-tools-service';
 import {
   FORGER_AGENT_CONTRACT_MARKER,
   FORGER_AGENT_CONTRACT_MARKER_PREFIX,
@@ -59,9 +60,11 @@ import type {
   ChatUndoInput,
   CodexAuthStatus,
   ConnectAppSecretInput,
+  ConnectOfficialToolSecretInput,
   CreateUserSecretInput,
   DeleteUserSecretInput,
   DisconnectAppSecretInput,
+  DisconnectOfficialToolSecretInput,
   FilesCreateCategoryInput,
   FilesDeleteCategoryInput,
   FilesDeleteInput,
@@ -71,7 +74,9 @@ import type {
   FilesRenameCategoryInput,
   FilesRenameInput,
   InstallAppResult,
+  InstallOfficialToolResult,
   OpenAppResult,
+  OfficialToolSummary,
   RuntimeStatus,
   Settings,
   SharedFileRef,
@@ -91,6 +96,8 @@ const DEFAULT_PYTHON_VERSION = '3.12';
 const CODEX_CLI_VERSION = '0.125.0';
 const CODEX_USAGE_DASHBOARD_URL = 'https://chatgpt.com/codex/settings/usage';
 let devCatalogService: DevCatalogService | null = null;
+let officialToolsService: OfficialToolsService | null = null;
+let installedOfficialToolPackages: AgentToolPackageDefinition[] = [];
 const APP_FOLDER_GRANT_TTL_MS = 5 * 60 * 1000;
 const appFolderGrantSecret = randomBytes(32).toString('base64url');
 const useCustomWindowFrame = process.platform === 'win32';
@@ -232,6 +239,12 @@ const getLegacyForgerMetadataRoot = () => path.join(getPrivateAppsRoot(), '.forg
 const getCodexRoot = () => path.join(app.getPath('userData'), 'codex-cli');
 const getCodexHome = () => path.join(app.getPath('userData'), 'codex-home');
 const getAgentToolSettingsPath = () => path.join(getForgerMetadataRoot(), 'agent-tools.json');
+const getOfficialToolsResourcesRoot = () => {
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, 'official-tools');
+  }
+  return path.join(app.getAppPath(), 'resources', 'official-tools');
+};
 
 const FORGER_TOOL_PACKAGE_ID = 'forger';
 
@@ -327,12 +340,19 @@ const AGENT_TOOL_PACKAGES: AgentToolPackageDefinition[] = [
   },
 ];
 
-const AGENT_TOOL_DEFINITIONS: AgentToolDefinition[] = AGENT_TOOL_PACKAGES.flatMap((toolPackage) => toolPackage.tools);
+const getAgentToolPackages = (): AgentToolPackageDefinition[] => [
+  ...AGENT_TOOL_PACKAGES,
+  ...installedOfficialToolPackages,
+];
 
-const AGENT_TOOL_IDS = new Set<AgentToolId>(AGENT_TOOL_DEFINITIONS.map((tool) => tool.id));
+const getAgentToolDefinitions = (): AgentToolDefinition[] =>
+  getAgentToolPackages().flatMap((toolPackage) => toolPackage.tools);
+
+const getAgentToolIds = (): Set<AgentToolId> =>
+  new Set(getAgentToolDefinitions().map((tool) => tool.id));
 
 let agentToolSettings: AgentToolSettings = {
-  approvals: AGENT_TOOL_DEFINITIONS.reduce((acc, tool) => {
+  approvals: AGENT_TOOL_PACKAGES.flatMap((toolPackage) => toolPackage.tools).reduce((acc, tool) => {
     acc[tool.id] = tool.defaultRequiresApproval;
     return acc;
   }, {} as AgentToolApprovalSettings),
@@ -426,10 +446,10 @@ const appendInstallLog = async (event: string, payload: Record<string, unknown> 
 };
 
 const isAgentToolId = (value: unknown): value is AgentToolId =>
-  typeof value === 'string' && AGENT_TOOL_IDS.has(value as AgentToolId);
+  typeof value === 'string' && getAgentToolIds().has(value as AgentToolId);
 
 const normalizeAgentToolSettings = (input?: Partial<AgentToolSettings>): AgentToolSettings => {
-  const approvals = AGENT_TOOL_DEFINITIONS.reduce((acc, tool) => {
+  const approvals = getAgentToolDefinitions().reduce((acc, tool) => {
     const configured = input?.approvals?.[tool.id];
     acc[tool.id] = typeof configured === 'boolean' ? configured : tool.defaultRequiresApproval;
     return acc;
@@ -846,6 +866,17 @@ const getSecretsStore = (): SecretsStore => {
   return secretsStore;
 };
 
+const getOfficialToolsService = (): OfficialToolsService => {
+  if (!officialToolsService) {
+    officialToolsService = new OfficialToolsService(
+      getOfficialToolsResourcesRoot(),
+      getForgerMetadataRoot(),
+      getTempRoot(),
+    );
+  }
+  return officialToolsService;
+};
+
 const RESERVED_APP_SECRET_ENV_NAMES = new Set([
   'APPDATA',
   'CORS_ORIGINS',
@@ -984,6 +1015,63 @@ const buildAppSecretsState = async (appId: string): Promise<AppSecretsState> => 
     appSecrets,
     userSecrets,
   };
+};
+
+const buildSecretConnectionsState = async (
+  mappingId: string,
+  displayId: string,
+  displayName: string,
+  declarations: AppSecretDeclaration[],
+): Promise<AppSecretsState> => {
+  const store = getSecretsStore();
+  const userSecrets = await store.listUserSecrets();
+  const userSecretById = new Map(userSecrets.map((secret) => [secret.id, secret]));
+  const appSecrets: AppSecretConnection[] = [];
+
+  for (const declaration of declarations) {
+    const userSecretId = await store.getMappedSecretId(mappingId, declaration.name);
+    const userSecret = userSecretId ? userSecretById.get(userSecretId) : undefined;
+    appSecrets.push({
+      appSecret: declaration,
+      envName: appSecretEnvName(declaration.name),
+      connected: Boolean(userSecret),
+      ...(userSecret ? { userSecretId: userSecret.id, userSecretName: userSecret.name } : {}),
+    });
+  }
+
+  return {
+    appId: displayId,
+    appName: displayName,
+    appSecrets,
+    userSecrets,
+  };
+};
+
+const refreshInstalledOfficialToolPackages = async (): Promise<void> => {
+  installedOfficialToolPackages = await getOfficialToolsService().listInstalledPackages();
+};
+
+const listOfficialTools = async (): Promise<OfficialToolSummary[]> => {
+  return await getOfficialToolsService().listTools(AGENT_TOOL_PACKAGES.flatMap((toolPackage) => toolPackage.tools));
+};
+
+const installOfficialTool = async (toolId: string): Promise<InstallOfficialToolResult> => {
+  const result = await getOfficialToolsService().installTool(toolId);
+  await refreshInstalledOfficialToolPackages();
+  agentToolSettings = normalizeAgentToolSettings(agentToolSettings);
+  await saveAgentToolSettings();
+  return result;
+};
+
+const buildOfficialToolSecretsState = async (toolId: string): Promise<AppSecretsState> => {
+  const manifest = await getOfficialToolsService().getManifest(toolId);
+  const declarations = getOfficialToolsService().secretDeclarations(manifest);
+  return await buildSecretConnectionsState(
+    getOfficialToolsService().toolMappingId(toolId),
+    toolId,
+    manifest?.name ?? toolId,
+    declarations,
+  );
 };
 
 const formatProcessOutputForInstallLog = (value: string, secretValues: string[]): string =>
@@ -3865,7 +3953,7 @@ const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unknown> => 
 };
 
 const getMcpTools = () =>
-  AGENT_TOOL_DEFINITIONS.map((tool) => ({
+  getAgentToolDefinitions().map((tool) => ({
     name: tool.id,
     description: tool.description,
     inputSchema: getMcpToolInputSchema(tool.id),
@@ -3960,7 +4048,7 @@ const executeAgentTool = async (
   toolId: AgentToolId,
   args: Record<string, unknown>,
 ): Promise<unknown> => {
-  const tool = AGENT_TOOL_DEFINITIONS.find((candidate) => candidate.id === toolId);
+  const tool = getAgentToolDefinitions().find((candidate) => candidate.id === toolId);
   if (!tool) {
     await appendInstallLog('agent_tool:not_found', {
       appId: session.appId,
@@ -4021,6 +4109,65 @@ const executeAgentTool = async (
       .filter((summary) => summary.updateAvailable);
     const result = { success: true, updates };
     await appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
+    return withToolAuthorization(result, approval);
+  }
+
+  if (toolId.startsWith('official_')) {
+    const manifest = await getOfficialToolsService().getManifest(tool.packageId);
+    if (!manifest) {
+      const result = { success: false, userMessage: 'La herramienta oficial no esta instalada.', technicalCode: 'official_tool_not_installed' };
+      await appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
+      return withToolAuthorization(result, approval);
+    }
+
+    const declarations = getOfficialToolsService().secretDeclarations(manifest)
+      .filter((declaration) => tool.secrets?.includes(declaration.name));
+    const mappingId = getOfficialToolsService().toolMappingId(manifest.id);
+    const store = getSecretsStore();
+    const missingSecrets: string[] = [];
+    const connectedSecrets = new Set<string>();
+    for (const declaration of declarations) {
+      const mappedSecretId = await store.getMappedSecretId(mappingId, declaration.name);
+      if (mappedSecretId) {
+        connectedSecrets.add(declaration.name);
+      }
+      if (declaration.required && !mappedSecretId) {
+        missingSecrets.push(declaration.label ?? declaration.name);
+      }
+    }
+
+    const result = {
+      success: missingSecrets.length === 0 && !manifest.technicalBlocker,
+      toolId: manifest.id,
+      actionId: toolId,
+      permissions: tool.permissions ?? [],
+      secrets: declarations.map((declaration) => ({
+        name: declaration.name,
+        label: declaration.label,
+        required: declaration.required,
+        connected: connectedSecrets.has(declaration.name),
+      })),
+      userMessage: missingSecrets.length > 0
+        ? 'Faltan secretos requeridos para usar esta herramienta.'
+        : manifest.technicalBlocker
+          ? 'La herramienta esta instalada, pero requiere completar la configuracion OAuth real.'
+          : 'Herramienta lista.',
+      technicalCode: missingSecrets.length > 0
+        ? 'official_tool_secrets_missing'
+        : manifest.technicalBlocker
+          ? 'official_tool_oauth_credentials_required'
+          : undefined,
+      technicalBlocker: manifest.technicalBlocker,
+    };
+    await appendInstallLog('agent_tool:call_result', {
+      appId: session.appId,
+      runId: session.runId,
+      toolId,
+      result: {
+        ...result,
+        secrets: result.secrets.map((secret) => ({ ...secret, connected: secret.connected })),
+      },
+    });
     return withToolAuthorization(result, approval);
   }
 
@@ -4468,6 +4615,42 @@ const registerIpcHandlers = (): void => {
     return await getSecretsStore().disconnectAppSecret(input.appId, input.appSecretName);
   });
 
+  ipcMain.handle(IPC_CHANNELS.listOfficialTools, async () => {
+    return await listOfficialTools();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.installOfficialTool, async (_event, toolId: string) => {
+    return await installOfficialTool(toolId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.getOfficialToolSecrets, async (_event, toolId: string) => {
+    return await buildOfficialToolSecretsState(toolId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.connectOfficialToolSecret, async (_event, input: ConnectOfficialToolSecretInput) => {
+    const manifest = await getOfficialToolsService().getManifest(input.toolId);
+    const declarations = getOfficialToolsService().secretDeclarations(manifest);
+    if (!declarations.some((secret) => secret.name === input.secretName)) {
+      return {
+        success: false,
+        userMessage: 'La herramienta no declara ese secreto.',
+        technicalCode: 'official_tool_secret_not_declared',
+      };
+    }
+    return await getSecretsStore().connectAppSecret(
+      getOfficialToolsService().toolMappingId(input.toolId),
+      input.secretName,
+      input.userSecretId,
+    );
+  });
+
+  ipcMain.handle(IPC_CHANNELS.disconnectOfficialToolSecret, async (_event, input: DisconnectOfficialToolSecretInput) => {
+    return await getSecretsStore().disconnectAppSecret(
+      getOfficialToolsService().toolMappingId(input.toolId),
+      input.secretName,
+    );
+  });
+
   ipcMain.handle(IPC_CHANNELS.getSettings, async () => settings);
   ipcMain.handle(IPC_CHANNELS.getCodexAuthStatus, async () => await getCodexAuthStatus());
   ipcMain.handle(IPC_CHANNELS.openCodexUsageDashboard, async () => {
@@ -4481,7 +4664,7 @@ const registerIpcHandlers = (): void => {
   });
   ipcMain.handle(IPC_CHANNELS.connectCodexAuth, async () => await connectCodexAuth());
   ipcMain.handle(IPC_CHANNELS.disconnectCodexAuth, async () => await disconnectCodexAuth());
-  ipcMain.handle(IPC_CHANNELS.listAgentTools, async () => AGENT_TOOL_PACKAGES);
+  ipcMain.handle(IPC_CHANNELS.listAgentTools, async () => getAgentToolPackages());
   ipcMain.handle(IPC_CHANNELS.getAgentToolSettings, async () => agentToolSettings);
   ipcMain.handle(IPC_CHANNELS.updateAgentToolApproval, async (_event, input: UpdateAgentToolApprovalInput) => {
     return await updateAgentToolApproval(input);
@@ -4762,8 +4945,11 @@ app.whenReady().then(async () => {
   await fs.mkdir(getCodexRoot(), { recursive: true });
   await fs.mkdir(getCodexHome(), { recursive: true });
   secretsStore = new SecretsStore(app.getPath('userData'));
-  await loadAgentToolSettings();
+  officialToolsService = new OfficialToolsService(getOfficialToolsResourcesRoot(), getForgerMetadataRoot(), getTempRoot());
+  await officialToolsService.load();
+  await refreshInstalledOfficialToolPackages();
   await loadRegistry();
+  await loadAgentToolSettings();
   await startDevCatalogService();
   await startForgerMcpServer();
   fileLibrary = new FileLibrary(getPrivateDataRoot(), getForgerMetadataRoot());

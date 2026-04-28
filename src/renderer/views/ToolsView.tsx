@@ -1,12 +1,17 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Box,
   Button,
   Chip,
+  FormControl,
+  InputLabel,
+  MenuItem,
   Paper,
+  Select,
   Stack,
   Switch,
+  TextField,
   Typography,
   useTheme,
 } from '@mui/material';
@@ -17,6 +22,8 @@ import type {
   AgentToolDefinition,
   AgentToolPackageDefinition,
   AgentToolSettings,
+  AppSecretsState,
+  OfficialToolSummary,
 } from '@shared/types';
 import type { AppDictionary } from '@renderer/i18n';
 import iconDark from '@renderer/assets/icon-dark.svg';
@@ -24,10 +31,17 @@ import iconLight from '@renderer/assets/icon-light.svg';
 
 interface ToolsViewProps {
   packages: AgentToolPackageDefinition[];
+  officialTools: OfficialToolSummary[];
   settings: AgentToolSettings;
   busyToolId: string | null;
+  busyOfficialToolId: string | null;
+  secretsByToolId: Record<string, AppSecretsState>;
   errorMessage: string | null;
   t: AppDictionary;
+  onInstallOfficialTool: (toolId: string) => void;
+  onLoadOfficialToolSecrets: (toolId: string) => void;
+  onConnectOfficialToolSecret: (toolId: string, secretName: string, userSecretId: string) => void;
+  onDisconnectOfficialToolSecret: (toolId: string, secretName: string) => void;
   onApprovalChange: (toolId: AgentToolDefinition['id'], requiresApproval: boolean) => void;
 }
 
@@ -42,12 +56,7 @@ const requiresApproval = (
   tool: AgentToolDefinition,
 ): boolean => approvals[tool.id] ?? tool.defaultRequiresApproval;
 
-const packageIconSrc = (toolPackage: AgentToolPackageDefinition, mode: 'light' | 'dark'): string => {
-  if (toolPackage.icon === 'forger') {
-    return mode === 'dark' ? iconDark : iconLight;
-  }
-  return mode === 'dark' ? iconDark : iconLight;
-};
+const packageIconSrc = (_mode: 'light' | 'dark'): string => (_mode === 'dark' ? iconDark : iconLight);
 
 const localizedPackageCopy = (
   t: AppDictionary,
@@ -62,28 +71,55 @@ const localizedPackageCopy = (
 
 export function ToolsView({
   packages,
+  officialTools,
   settings,
   busyToolId,
+  busyOfficialToolId,
+  secretsByToolId,
   errorMessage,
   t,
+  onInstallOfficialTool,
+  onLoadOfficialToolSecrets,
+  onConnectOfficialToolSecret,
+  onDisconnectOfficialToolSecret,
   onApprovalChange,
 }: ToolsViewProps) {
   const theme = useTheme();
-  const [selectedPackageId, setSelectedPackageId] = useState<string | null>(null);
-  const selectedPackage = useMemo(
-    () => packages.find((toolPackage) => toolPackage.id === selectedPackageId) ?? null,
-    [packages, selectedPackageId],
+  const [selectedToolId, setSelectedToolId] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  const selectedOfficialTool = useMemo(
+    () => officialTools.find((tool) => tool.id === selectedToolId) ?? null,
+    [officialTools, selectedToolId],
   );
+  const selectedPackage = useMemo(
+    () => packages.find((toolPackage) => toolPackage.id === selectedToolId) ?? null,
+    [packages, selectedToolId],
+  );
+  const filteredTools = useMemo(() => {
+    const normalized = query.trim().toLowerCase();
+    if (!normalized) {
+      return officialTools;
+    }
+    return officialTools.filter((tool) =>
+      [tool.name, tool.description, tool.status, tool.runtime].join(' ').toLowerCase().includes(normalized),
+    );
+  }, [officialTools, query]);
+
+  useEffect(() => {
+    if (selectedOfficialTool?.status === 'installed' && !secretsByToolId[selectedOfficialTool.id]) {
+      onLoadOfficialToolSecrets(selectedOfficialTool.id);
+    }
+  }, [onLoadOfficialToolSecrets, secretsByToolId, selectedOfficialTool]);
 
   const renderPackageList = () => (
     <Stack spacing={1}>
-      {packages.map((toolPackage) => {
-        const localized = localizedPackageCopy(t, toolPackage);
+      {filteredTools.map((tool) => {
+        const agentPackage = packages.find((candidate) => candidate.id === tool.id);
         return (
           <Paper
-            key={toolPackage.id}
+            key={tool.id}
             variant="outlined"
-            onClick={() => setSelectedPackageId(toolPackage.id)}
+            onClick={() => setSelectedToolId(tool.id)}
             sx={{
               p: 2,
               borderRadius: 1,
@@ -94,20 +130,24 @@ export function ToolsView({
             <Stack direction="row" spacing={2} alignItems="center">
               <Box
                 component="img"
-                src={packageIconSrc(toolPackage, theme.palette.mode)}
+                src={packageIconSrc(theme.palette.mode)}
                 alt=""
                 sx={{ width: 44, height: 44, flexShrink: 0 }}
               />
               <Stack spacing={0.5} sx={{ minWidth: 0, flex: 1 }}>
                 <Typography variant="subtitle1" fontWeight={700}>
-                  {localized.name}
+                  {tool.name}
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
-                  {localized.description}
+                  {tool.description}
                 </Typography>
-                <Typography variant="caption" color="text.secondary">
-                  {t.sections.tools.packageToolCount(toolPackage.tools.length)}
-                </Typography>
+                <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                  <Chip size="small" label={t.sections.tools.statuses[tool.status]} />
+                  <Chip size="small" variant="outlined" label={t.sections.tools.runtimeLabel(tool.runtime)} />
+                  <Typography variant="caption" color="text.secondary">
+                    {t.sections.tools.packageToolCount(agentPackage?.tools.length ?? tool.actions.length)}
+                  </Typography>
+                </Stack>
               </Stack>
               <ChevronRightRounded color="action" />
             </Stack>
@@ -117,27 +157,74 @@ export function ToolsView({
     </Stack>
   );
 
-  const renderToolList = (toolPackage: AgentToolPackageDefinition) => {
-    const localizedPackage = localizedPackageCopy(t, toolPackage);
+  const renderSecretConnections = (tool: OfficialToolSummary) => {
+    if (tool.status !== 'installed') {
+      return null;
+    }
+    const state = secretsByToolId[tool.id];
+    if (!state || state.appSecrets.length === 0) {
+      return null;
+    }
 
     return (
-      <Stack spacing={1.5}>
-        <Stack direction="row" spacing={1.5} alignItems="center">
-          <Button
-            variant="text"
-            size="small"
-            startIcon={<ArrowBackRounded />}
-            onClick={() => setSelectedPackageId(null)}
-          >
-            {t.sections.tools.backToPackages}
-          </Button>
+      <Paper variant="outlined" sx={{ p: 2, borderRadius: 1 }}>
+        <Stack spacing={1.5}>
+          <Typography variant="subtitle2">{t.sections.tools.secretsTitle}</Typography>
+          {state.appSecrets.map((connection) => (
+            <Stack
+              key={connection.appSecret.name}
+              direction={{ xs: 'column', md: 'row' }}
+              spacing={1.5}
+              alignItems={{ xs: 'stretch', md: 'center' }}
+              justifyContent="space-between"
+            >
+              <Stack spacing={0.25} sx={{ minWidth: 0 }}>
+                <Typography variant="body2" fontWeight={650}>
+                  {connection.appSecret.label ?? connection.appSecret.name}
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  {connection.appSecret.usage}
+                </Typography>
+              </Stack>
+              <FormControl size="small" sx={{ minWidth: 260 }}>
+                <InputLabel>{t.sections.tools.secretSelectLabel}</InputLabel>
+                <Select
+                  value={connection.userSecretId ?? ''}
+                  label={t.sections.tools.secretSelectLabel}
+                  disabled={busyOfficialToolId === tool.id}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    if (value) {
+                      onConnectOfficialToolSecret(tool.id, connection.appSecret.name, value);
+                    } else {
+                      onDisconnectOfficialToolSecret(tool.id, connection.appSecret.name);
+                    }
+                  }}
+                >
+                  <MenuItem value="">{t.sections.tools.secretNotConnected}</MenuItem>
+                  {state.userSecrets.map((secret) => (
+                    <MenuItem key={secret.id} value={secret.id}>
+                      {secret.name}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Stack>
+          ))}
         </Stack>
+      </Paper>
+    );
+  };
 
+  const renderAgentTools = (toolPackage: AgentToolPackageDefinition, integrated: boolean) => {
+    const localizedPackage = localizedPackageCopy(t, toolPackage);
+    return (
+      <Stack spacing={1.5}>
         <Paper variant="outlined" sx={{ p: 2, borderRadius: 1 }}>
           <Stack direction="row" spacing={2} alignItems="center">
             <Box
               component="img"
-              src={packageIconSrc(toolPackage, theme.palette.mode)}
+              src={packageIconSrc(theme.palette.mode)}
               alt=""
               sx={{ width: 48, height: 48, flexShrink: 0 }}
             />
@@ -151,7 +238,8 @@ export function ToolsView({
         </Paper>
 
         {toolPackage.tools.map((tool) => {
-          const localized = t.sections.tools.definitions[tool.id] ?? {
+          const definitions = t.sections.tools.definitions as Record<string, { name: string; description: string }>;
+          const localized = definitions[tool.id] ?? {
             name: tool.name,
             description: tool.description,
           };
@@ -188,12 +276,12 @@ export function ToolsView({
                 <Stack spacing={0.75} alignItems={{ xs: 'flex-start', md: 'flex-end' }} sx={{ flexShrink: 0 }}>
                   <Chip
                     size="small"
-                    color={approvalEnabled ? 'warning' : 'success'}
-                    label={approvalEnabled ? t.sections.tools.approvalOn : t.sections.tools.approvalOff}
+                    color={integrated ? 'success' : approvalEnabled ? 'warning' : 'success'}
+                    label={integrated ? t.sections.tools.integratedLocked : approvalEnabled ? t.sections.tools.approvalOn : t.sections.tools.approvalOff}
                   />
                   <Switch
                     checked={approvalEnabled}
-                    disabled={busyToolId === tool.id}
+                    disabled={integrated || busyToolId === tool.id}
                     onChange={(event) => onApprovalChange(tool.id, event.target.checked)}
                     inputProps={{ 'aria-label': t.sections.tools.approvalToggleLabel }}
                   />
@@ -202,6 +290,90 @@ export function ToolsView({
             </Paper>
           );
         })}
+      </Stack>
+    );
+  };
+
+  const renderToolDetails = (tool: OfficialToolSummary) => {
+    const agentPackage = selectedPackage;
+    return (
+      <Stack spacing={1.5}>
+        <Button
+          variant="text"
+          size="small"
+          startIcon={<ArrowBackRounded />}
+          onClick={() => setSelectedToolId(null)}
+          sx={{ alignSelf: 'flex-start' }}
+        >
+          {t.sections.tools.backToPackages}
+        </Button>
+
+        <Paper variant="outlined" sx={{ p: 2, borderRadius: 1 }}>
+          <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} alignItems={{ xs: 'flex-start', md: 'center' }}>
+            <Box
+              component="img"
+              src={packageIconSrc(theme.palette.mode)}
+              alt=""
+              sx={{ width: 48, height: 48, flexShrink: 0 }}
+            />
+            <Stack spacing={0.5} sx={{ minWidth: 0, flex: 1 }}>
+              <Typography variant="h6">{tool.name}</Typography>
+              <Typography variant="body2" color="text.secondary">
+                {tool.description}
+              </Typography>
+              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                <Chip size="small" label={t.sections.tools.statuses[tool.status]} />
+                <Chip size="small" variant="outlined" label={t.sections.tools.runtimeLabel(tool.runtime)} />
+              </Stack>
+            </Stack>
+            {tool.status === 'available' ? (
+              <Button
+                variant="contained"
+                disabled={busyOfficialToolId === tool.id}
+                onClick={() => onInstallOfficialTool(tool.id)}
+              >
+                {busyOfficialToolId === tool.id ? t.sections.tools.installing : t.sections.tools.install}
+              </Button>
+            ) : null}
+            {tool.status === 'integrated' ? <Chip color="success" label={t.sections.tools.integratedLocked} /> : null}
+          </Stack>
+        </Paper>
+
+        {tool.documentation ? (
+          <Alert severity={tool.technicalBlocker ? 'warning' : 'info'}>{tool.documentation}</Alert>
+        ) : null}
+
+        {renderSecretConnections(tool)}
+
+        {agentPackage ? renderAgentTools(agentPackage, tool.status === 'integrated') : (
+          <Stack spacing={1}>
+            <Typography variant="subtitle2">{t.sections.tools.actionsTitle}</Typography>
+            {tool.actions.map((action) => (
+              <Paper key={action.id} variant="outlined" sx={{ p: 2, borderRadius: 1 }}>
+                <Stack spacing={0.75}>
+                  <Typography variant="subtitle1" fontWeight={650}>
+                    {action.name}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    {action.description}
+                  </Typography>
+                  <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                    <Chip
+                      size="small"
+                      label={`${t.sections.tools.categoryLabel}: ${t.sections.tools.categories[action.category]}`}
+                    />
+                    <Chip
+                      size="small"
+                      color={riskColor(action.risk)}
+                      variant="outlined"
+                      label={`${t.sections.tools.riskLabel}: ${t.sections.tools.risks[action.risk]}`}
+                    />
+                  </Stack>
+                </Stack>
+              </Paper>
+            ))}
+          </Stack>
+        )}
       </Stack>
     );
   };
@@ -215,12 +387,19 @@ export function ToolsView({
 
       {errorMessage ? <Alert severity="error">{errorMessage}</Alert> : null}
 
-      {packages.length === 0 ? (
+      <TextField
+        size="small"
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+        placeholder={t.sections.tools.searchPlaceholder}
+      />
+
+      {officialTools.length === 0 ? (
         <Paper variant="outlined" sx={{ p: 2 }}>
           <Typography color="text.secondary">{t.sections.tools.empty}</Typography>
         </Paper>
-      ) : selectedPackage ? (
-        renderToolList(selectedPackage)
+      ) : selectedOfficialTool ? (
+        renderToolDetails(selectedOfficialTool)
       ) : (
         renderPackageList()
       )}

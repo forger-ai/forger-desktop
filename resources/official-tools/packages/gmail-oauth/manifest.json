@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "id": "gmail-oauth",
+  "name": "Gmail",
+  "description": "Conecta Gmail mediante OAuth para que el agente pueda preparar acciones de correo con permisos explicitos.",
+  "version": "0.1.0",
+  "runtime": "oauth",
+  "documentation": "Gmail OAuth requiere un OAuth Client ID real de Google Cloud con redirect URI local autorizado. El paquete declara el contrato y los secretos necesarios; la conexion completa queda bloqueada hasta configurar credenciales reales del proyecto Google.",
+  "technicalBlocker": "Google OAuth no puede cerrarse en desktop sin un OAuth Client ID y Client Secret reales emitidos por Google Cloud para Forger, con pantalla de consentimiento y redirect URI local registrados. La alternativa segura es almacenar esos valores en el vault local y ejecutar el flujo Authorization Code + PKCE desde el proceso main, sin exponer tokens al renderer.",
+  "permissions": [
+    {
+      "id": "gmail.readonly",
+      "label": "Leer Gmail",
+      "description": "Permite listar y leer mensajes cuando el usuario lo autoriza.",
+      "required": true
+    },
+    {
+      "id": "gmail.compose",
+      "label": "Preparar borradores",
+      "description": "Permite crear borradores, sin enviar correos automaticamente.",
+      "required": false
+    }
+  ],
+  "secrets": [
+    {
+      "name": "google_oauth_client_id",
+      "label": "Google OAuth Client ID",
+      "usage": "Identifica la app OAuth de Forger registrada en Google Cloud.",
+      "required": true
+    },
+    {
+      "name": "google_oauth_client_secret",
+      "label": "Google OAuth Client Secret",
+      "usage": "Se guarda solo en el vault seguro local y se usa desde el proceso main.",
+      "required": true
+    }
+  ],
+  "actions": [
+    {
+      "id": "official_gmail_oauth_status",
+      "name": "Revisar conexion Gmail",
+      "description": "Revisa si Gmail tiene credenciales OAuth conectadas sin revelar valores.",
+      "category": "consulta",
+      "risk": "bajo",
+      "defaultRequiresApproval": false,
+      "permissions": ["gmail.readonly"],
+      "secrets": ["google_oauth_client_id", "google_oauth_client_secret"]
+    },
+    {
+      "id": "official_gmail_prepare_draft",
+      "name": "Preparar borrador Gmail",
+      "description": "Prepara un borrador de correo cuando OAuth real esta configurado.",
+      "category": "app",
+      "risk": "medio",
+      "defaultRequiresApproval": true,
+      "permissions": ["gmail.compose"],
+      "secrets": ["google_oauth_client_id", "google_oauth_client_secret"]
+    }
+  ]
+}

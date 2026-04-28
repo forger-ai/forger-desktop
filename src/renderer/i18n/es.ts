@@ -124,6 +124,21 @@ export const es = {
       approvalOn: 'Con aprobacion',
       approvalOff: 'Sin aprobacion',
       saveError: 'No pudimos guardar la configuracion de esta herramienta.',
+      installError: 'No pudimos instalar esta herramienta.',
+      install: 'Instalar',
+      installing: 'Instalando',
+      searchPlaceholder: 'Buscar herramientas',
+      actionsTitle: 'Acciones',
+      secretsTitle: 'Secretos asociados',
+      secretSelectLabel: 'Secreto guardado',
+      secretNotConnected: 'Sin conectar',
+      integratedLocked: 'Integrada',
+      runtimeLabel: (runtime: string) => `Runtime: ${runtime}`,
+      statuses: {
+        available: 'Disponible',
+        installed: 'Instalada',
+        integrated: 'Integrada',
+      },
       packages: {
         forger: {
           name: 'Herramientas de Forger',

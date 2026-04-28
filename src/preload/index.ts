@@ -22,6 +22,11 @@ const IPC_CHANNELS = {
   deleteUserSecret: 'forger:delete-user-secret',
   connectAppSecret: 'forger:connect-app-secret',
   disconnectAppSecret: 'forger:disconnect-app-secret',
+  listOfficialTools: 'forger:official-tools:list',
+  installOfficialTool: 'forger:official-tools:install',
+  getOfficialToolSecrets: 'forger:official-tools:get-secrets',
+  connectOfficialToolSecret: 'forger:official-tools:connect-secret',
+  disconnectOfficialToolSecret: 'forger:official-tools:disconnect-secret',
   getSettings: 'forger:get-settings',
   getCodexAuthStatus: 'forger:get-codex-auth-status',
   openCodexUsageDashboard: 'forger:open-codex-usage-dashboard',
@@ -89,6 +94,11 @@ const api: ForgerDesktopApi = {
   deleteUserSecret: (input) => ipcRenderer.invoke(IPC_CHANNELS.deleteUserSecret, input),
   connectAppSecret: (input) => ipcRenderer.invoke(IPC_CHANNELS.connectAppSecret, input),
   disconnectAppSecret: (input) => ipcRenderer.invoke(IPC_CHANNELS.disconnectAppSecret, input),
+  listOfficialTools: () => ipcRenderer.invoke(IPC_CHANNELS.listOfficialTools),
+  installOfficialTool: (toolId) => ipcRenderer.invoke(IPC_CHANNELS.installOfficialTool, toolId),
+  getOfficialToolSecrets: (toolId) => ipcRenderer.invoke(IPC_CHANNELS.getOfficialToolSecrets, toolId),
+  connectOfficialToolSecret: (input) => ipcRenderer.invoke(IPC_CHANNELS.connectOfficialToolSecret, input),
+  disconnectOfficialToolSecret: (input) => ipcRenderer.invoke(IPC_CHANNELS.disconnectOfficialToolSecret, input),
   onInstallProgress: (listener) => {
     const wrapped = (_event: unknown, payload: Parameters<typeof listener>[0]) => {
       listener(payload);

@@ -1,5 +1,7 @@
 node_modules/
 dist/
+!resources/official-tools/dist/
+!resources/official-tools/dist/**
 dist-electron/
 release/
 tmp/
@@ -8,4 +10,3 @@ tmp/
 .env
 .env.*
 .vscode/
-
