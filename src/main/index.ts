@@ -1,7 +1,9 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import fs from 'node:fs/promises';
+import * as http from 'node:http';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
@@ -19,6 +21,7 @@ import { settingsSeed } from '../shared/mock-data';
 import { IPC_CHANNELS } from '../shared/ipc';
 import { ChatOrchestrator } from './chat/orchestrator';
 import { AutomationManager } from './automation-manager';
+import { DevCatalogService } from './dev-catalog-service';
 import { FileLibrary } from './file-library';
 import {
   FORGER_AGENT_CONTRACT_MARKER,
@@ -29,6 +32,11 @@ import {
 import { buildForgerAppAgentsMarkdown } from './prompts/apps-base';
 import { buildCodexPromptWithAppContext } from './prompts/user-message';
 import type {
+  AgentToolApprovalSettings,
+  AgentToolDefinition,
+  AgentToolId,
+  AgentToolPackageDefinition,
+  AgentToolSettings,
   AppCategory,
   AppDetails,
   AppStatus,
@@ -58,16 +66,19 @@ import type {
   Settings,
   SharedFileRef,
   StopAppResult,
+  UpdateAgentToolApprovalInput,
+  VersionChangelog,
 } from '../shared/types';
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 const backendBaseUrl = process.env.FORGER_BACKEND_URL ?? 'http://127.0.0.1:3300';
-const catalogJsonUrl =
+let catalogJsonUrl =
   process.env.FORGER_CATALOG_URL ?? 'https://forger-ai.github.io/apps-catalog/catalog.json';
 const DEFAULT_NODE_VERSION = '24';
 const DEFAULT_PYTHON_VERSION = '3.12';
 const CODEX_CLI_VERSION = '0.125.0';
 const CODEX_USAGE_DASHBOARD_URL = 'https://chatgpt.com/codex/settings/usage';
+let devCatalogService: DevCatalogService | null = null;
 
 if (isDev) {
   app.setName('Forger Dev');
@@ -103,6 +114,14 @@ interface InstalledAppRecord {
   requiredPythonVersion: string;
   originalCommitSha?: string;
   installedAt?: string;
+  pendingUpdate?: {
+    fromVersion: string;
+    targetVersion: string;
+    preUpdateUserHead: string;
+    baseCommitSha?: string;
+    startedAt: string;
+    message?: string;
+  };
 }
 
 interface AppRegistry {
@@ -132,6 +151,7 @@ interface AppManifestService {
   command?: string;
   healthcheck?: string;
   context?: string;
+  environment?: Record<string, string>;
 }
 
 interface AppManifestStackSection {
@@ -152,6 +172,7 @@ interface AppManifest {
   name?: string;
   version?: string;
   description?: string;
+  changelog?: VersionChangelog[];
   stack?: AppManifestStack;
   services?: AppManifestService[];
   scripts?: Record<string, string>;
@@ -193,6 +214,127 @@ const getForgerMetadataRoot = () => path.join(getForgerHomeRoot(), '.forger');
 const getLegacyForgerMetadataRoot = () => path.join(getPrivateAppsRoot(), '.forger');
 const getCodexRoot = () => path.join(app.getPath('userData'), 'codex-cli');
 const getCodexHome = () => path.join(app.getPath('userData'), 'codex-home');
+const getAgentToolSettingsPath = () => path.join(getForgerMetadataRoot(), 'agent-tools.json');
+
+const FORGER_TOOL_PACKAGE_ID = 'forger';
+
+const AGENT_TOOL_PACKAGES: AgentToolPackageDefinition[] = [
+  {
+    id: FORGER_TOOL_PACKAGE_ID,
+    name: 'Forger',
+    description: 'Built-in tools included with the Forger desktop application.',
+    icon: 'forger',
+    tools: [
+      {
+        id: 'forger_list_catalog',
+        packageId: FORGER_TOOL_PACKAGE_ID,
+        name: 'Obtener catalogo',
+        description: 'Revisa las apps publicadas y sus versiones disponibles.',
+        category: 'consulta',
+        risk: 'bajo',
+        defaultRequiresApproval: false,
+      },
+      {
+        id: 'forger_list_installed_apps',
+        packageId: FORGER_TOOL_PACKAGE_ID,
+        name: 'Listar apps instaladas',
+        description: 'Consulta que apps estan instaladas y su estado actual.',
+        category: 'consulta',
+        risk: 'bajo',
+        defaultRequiresApproval: false,
+      },
+      {
+        id: 'forger_check_updates',
+        packageId: FORGER_TOOL_PACKAGE_ID,
+        name: 'Revisar actualizaciones',
+        description: 'Compara versiones instaladas con el catalogo publicado.',
+        category: 'consulta',
+        risk: 'bajo',
+        defaultRequiresApproval: false,
+      },
+      {
+        id: 'forger_get_app_runtime_status',
+        packageId: FORGER_TOOL_PACKAGE_ID,
+        name: 'Consultar estado de app',
+        description: 'Revisa si una app esta abierta, detenida o requiere atencion.',
+        category: 'consulta',
+        risk: 'bajo',
+        defaultRequiresApproval: false,
+      },
+      {
+        id: 'forger_open_app',
+        packageId: FORGER_TOOL_PACKAGE_ID,
+        name: 'Abrir app',
+        description: 'Inicia una app instalada y abre su ventana.',
+        category: 'app',
+        risk: 'medio',
+        defaultRequiresApproval: true,
+      },
+      {
+        id: 'forger_stop_app',
+        packageId: FORGER_TOOL_PACKAGE_ID,
+        name: 'Cerrar app',
+        description: 'Detiene una app abierta y cierra sus servicios locales.',
+        category: 'app',
+        risk: 'medio',
+        defaultRequiresApproval: true,
+      },
+      {
+        id: 'forger_restart_app',
+        packageId: FORGER_TOOL_PACKAGE_ID,
+        name: 'Reiniciar app',
+        description: 'Cierra y vuelve a abrir una app instalada.',
+        category: 'app',
+        risk: 'medio',
+        defaultRequiresApproval: true,
+      },
+      {
+        id: 'forger_refresh_app_view',
+        packageId: FORGER_TOOL_PACKAGE_ID,
+        name: 'Reiniciar vista',
+        description: 'Recarga la ventana de una app que ya esta abierta.',
+        category: 'vista',
+        risk: 'medio',
+        defaultRequiresApproval: true,
+      },
+      {
+        id: 'forger_update_app',
+        packageId: FORGER_TOOL_PACKAGE_ID,
+        name: 'Actualizar app',
+        description: 'Aplica una nueva version publicada cuando esta disponible.',
+        category: 'actualizacion',
+        risk: 'alto',
+        defaultRequiresApproval: true,
+      },
+    ],
+  },
+];
+
+const AGENT_TOOL_DEFINITIONS: AgentToolDefinition[] = AGENT_TOOL_PACKAGES.flatMap((toolPackage) => toolPackage.tools);
+
+const AGENT_TOOL_IDS = new Set<AgentToolId>(AGENT_TOOL_DEFINITIONS.map((tool) => tool.id));
+
+let agentToolSettings: AgentToolSettings = {
+  approvals: AGENT_TOOL_DEFINITIONS.reduce((acc, tool) => {
+    acc[tool.id] = tool.defaultRequiresApproval;
+    return acc;
+  }, {} as AgentToolApprovalSettings),
+};
+
+interface AgentMcpSession {
+  runId: string;
+  appId: string;
+  token: string;
+  createdAt: string;
+}
+
+interface ForgerMcpServerState {
+  server: http.Server;
+  url: string;
+}
+
+const agentMcpSessions = new Map<string, AgentMcpSession>();
+let forgerMcpServer: ForgerMcpServerState | null = null;
 
 const MAX_INSTALL_LOG_FIELD_LENGTH = 60_000;
 
@@ -236,6 +378,47 @@ const appendInstallLog = async (event: string, payload: Record<string, unknown> 
   } catch (error) {
     console.warn('Failed to write Forger install log', error);
   }
+};
+
+const isAgentToolId = (value: unknown): value is AgentToolId =>
+  typeof value === 'string' && AGENT_TOOL_IDS.has(value as AgentToolId);
+
+const normalizeAgentToolSettings = (input?: Partial<AgentToolSettings>): AgentToolSettings => {
+  const approvals = AGENT_TOOL_DEFINITIONS.reduce((acc, tool) => {
+    const configured = input?.approvals?.[tool.id];
+    acc[tool.id] = typeof configured === 'boolean' ? configured : tool.defaultRequiresApproval;
+    return acc;
+  }, {} as AgentToolApprovalSettings);
+
+  return { approvals };
+};
+
+const loadAgentToolSettings = async (): Promise<void> => {
+  try {
+    const raw = await fs.readFile(getAgentToolSettingsPath(), 'utf8');
+    agentToolSettings = normalizeAgentToolSettings(JSON.parse(raw) as Partial<AgentToolSettings>);
+  } catch {
+    agentToolSettings = normalizeAgentToolSettings();
+  }
+};
+
+const saveAgentToolSettings = async (): Promise<void> => {
+  await fs.mkdir(path.dirname(getAgentToolSettingsPath()), { recursive: true });
+  await fs.writeFile(getAgentToolSettingsPath(), JSON.stringify(agentToolSettings, null, 2), 'utf8');
+};
+
+const updateAgentToolApproval = async (input: UpdateAgentToolApprovalInput): Promise<AgentToolSettings> => {
+  if (!isAgentToolId(input.toolId)) {
+    throw new Error('invalid_agent_tool_id');
+  }
+  agentToolSettings = normalizeAgentToolSettings({
+    approvals: {
+      ...agentToolSettings.approvals,
+      [input.toolId]: Boolean(input.requiresApproval),
+    },
+  });
+  await saveAgentToolSettings();
+  return agentToolSettings;
 };
 
 const getBundledResourcesRoot = (): string => {
@@ -375,6 +558,9 @@ const emitAutomationUpdated = (payload: { automation: unknown; run?: unknown }):
 
 const toAppSummary = (record: InstalledAppRecord): AppSummary => {
   const running = runningApps.get(record.appId);
+  const catalog = catalogApps.find((entry) => entry.id === record.appId);
+  const latestVersion = catalog?.latestVersion;
+  const updateAvailable = isVersionNewer(latestVersion, record.version);
   if (running) {
     return {
       id: record.appId,
@@ -382,6 +568,9 @@ const toAppSummary = (record: InstalledAppRecord): AppSummary => {
       description: record.description,
       category: record.category,
       version: record.version,
+      latestVersion,
+      updateAvailable,
+      changelog: catalog?.changelog,
       status: 'running',
       userMessage: 'En ejecucion',
     };
@@ -393,9 +582,63 @@ const toAppSummary = (record: InstalledAppRecord): AppSummary => {
     description: record.description,
     category: record.category,
     version: record.version,
+    latestVersion,
+    updateAvailable,
+    changelog: catalog?.changelog,
     status: record.status,
     userMessage: record.userMessage,
   };
+};
+
+const parseVersionParts = (value?: string): number[] | null => {
+  if (!value) {
+    return null;
+  }
+  const cleaned = value.trim().replace(/^v/i, '');
+  const match = cleaned.match(/^(\d+(?:\.\d+){0,3})/);
+  if (!match) {
+    return null;
+  }
+  return match[1].split('.').map((part) => Number.parseInt(part, 10));
+};
+
+const isVersionNewer = (candidate?: string, current?: string): boolean => {
+  const next = parseVersionParts(candidate);
+  const prev = parseVersionParts(current);
+  if (!next || !prev) {
+    return Boolean(candidate && current && candidate !== current);
+  }
+  const length = Math.max(next.length, prev.length);
+  for (let index = 0; index < length; index += 1) {
+    const a = next[index] ?? 0;
+    const b = prev[index] ?? 0;
+    if (a > b) return true;
+    if (a < b) return false;
+  }
+  return false;
+};
+
+const normalizeChangelog = (value: unknown, version?: string): VersionChangelog | undefined => {
+  const entries = Array.isArray(value) ? value : value ? [value] : [];
+  for (const entry of entries) {
+    if (!entry || typeof entry !== 'object') {
+      continue;
+    }
+    const raw = entry as { version?: unknown; summary?: unknown; changes?: unknown };
+    const entryVersion = typeof raw.version === 'string' ? raw.version : version;
+    if (version && entryVersion && entryVersion !== version) {
+      continue;
+    }
+    const changes = Array.isArray(raw.changes)
+      ? raw.changes.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+      : [];
+    return {
+      version: entryVersion ?? version ?? '',
+      summary: typeof raw.summary === 'string' ? raw.summary : undefined,
+      changes,
+    };
+  }
+  return undefined;
 };
 
 const mapBackendCategory = (backendCategory: string): AppCategory => {
@@ -508,16 +751,16 @@ const buildStackSkillTemplates = (stack: AppManifestStack): StackSkillTemplate[]
   if (backendLanguage === 'python') {
     templates.push({
       id: 'forger-python-backend',
-      description: 'Buenas prácticas para backend Python en Forger.',
+      description: 'Best practices for Python backends in Forger.',
       body: [
         '---',
         'name: forger-python-backend',
-        'description: Usa cambios pequeños y seguros en backend Python, con foco en validaciones e integridad.',
+        'description: Use small, safe Python backend changes focused on validation and integrity.',
         '---',
         '',
-        '- Mantén validaciones del dominio antes de persistir.',
-        '- Evita romper compatibilidad de payloads sin avisar impacto.',
-        '- Prefiere cambios claros, testeables y fáciles de revertir.',
+        '- Keep domain validations before persisting data.',
+        '- Avoid breaking payload compatibility without explaining the impact.',
+        '- Prefer clear, testable changes that are easy to revert.',
       ].join('\n'),
     });
   }
@@ -525,16 +768,16 @@ const buildStackSkillTemplates = (stack: AppManifestStack): StackSkillTemplate[]
   if (backendFramework === 'fastapi') {
     templates.push({
       id: 'forger-fastapi-contracts',
-      description: 'Guía para contratos y seguridad en endpoints FastAPI.',
+      description: 'Guidance for contracts and safety in FastAPI endpoints.',
       body: [
         '---',
         'name: forger-fastapi-contracts',
-        'description: Ajusta rutas FastAPI respetando contratos y respuestas consistentes para usuarios no técnicos.',
+        'description: Adjust FastAPI routes while preserving contracts and consistent responses for non-technical users.',
         '---',
         '',
-        '- Mantén semántica HTTP consistente.',
-        '- No elimines campos de respuesta usados por frontend sin plan de migración.',
-        '- Responde errores con mensajes claros y accionables.',
+        '- Keep HTTP semantics consistent.',
+        '- Do not remove response fields used by the frontend without a migration plan.',
+        '- Return errors with clear, actionable messages.',
       ].join('\n'),
     });
   }
@@ -542,16 +785,17 @@ const buildStackSkillTemplates = (stack: AppManifestStack): StackSkillTemplate[]
   if (frontendFramework === 'react') {
     templates.push({
       id: 'forger-react-ui',
-      description: 'Buenas prácticas de UI React para usuarios no técnicos.',
+      description: 'React UI best practices for non-technical users.',
       body: [
         '---',
         'name: forger-react-ui',
-        'description: Prioriza flujos claros de vista previa, aplicar y deshacer en interfaces React.',
+        'description: Prioritize clear flows with saved versions, adjustments, and return-to-previous-version behavior in React interfaces.',
         '---',
         '',
-        '- Usa textos simples y orientados a la acción.',
-        '- Evita estados ambiguos; muestra claramente éxito, error y próximos pasos.',
-        '- Mantén componentes predecibles y fáciles de extender.',
+        '- Use simple action-oriented copy.',
+        '- Avoid ambiguous states; clearly show success, error, and next steps.',
+        '- Keep components predictable and easy to extend.',
+        '- When the user asks for visible changes, describe screens, buttons, and flows instead of implementation.',
       ].join('\n'),
     });
   }
@@ -559,16 +803,16 @@ const buildStackSkillTemplates = (stack: AppManifestStack): StackSkillTemplate[]
   if (frontendUi === 'mui') {
     templates.push({
       id: 'forger-mui-consistency',
-      description: 'Consistencia visual y accesibilidad en MUI.',
+      description: 'Visual consistency and accessibility in MUI.',
       body: [
         '---',
         'name: forger-mui-consistency',
-        'description: Usa patrones MUI consistentes para mantener una experiencia estable.',
+        'description: Use consistent MUI patterns to keep the experience stable.',
         '---',
         '',
-        '- Reutiliza componentes de MUI antes de crear variantes ad hoc.',
-        '- Mantén jerarquía visual simple y mensajes fáciles de entender.',
-        '- No introduzcas estilos que dificulten mantenimiento.',
+        '- Reuse MUI components before creating ad hoc variants.',
+        '- Keep visual hierarchy simple and messages easy to understand.',
+        '- Do not introduce styles that make maintenance harder.',
       ].join('\n'),
     });
   }
@@ -674,6 +918,7 @@ const listCatalogFromBackend = async (): Promise<CatalogApp[]> => {
       required_node_version?: string | null;
       checksum_sha256?: string | null;
       download_url?: string | null;
+      changelog?: unknown;
     };
   };
 
@@ -699,6 +944,7 @@ const listCatalogFromBackend = async (): Promise<CatalogApp[]> => {
           requiredNodeVersion: appEntry.latest_version?.required_node_version ?? undefined,
           checksumSha256: appEntry.latest_version?.checksum_sha256 ?? undefined,
           downloadUrl: appEntry.latest_version?.download_url ?? undefined,
+          changelog: normalizeChangelog(appEntry.latest_version?.changelog, appEntry.latest_version?.version),
           version: appEntry.latest_version?.version,
           userMessage: registry.apps[appEntry.slug]?.userMessage,
         }));
@@ -729,6 +975,7 @@ const listCatalogFromBackend = async (): Promise<CatalogApp[]> => {
       required_python_version?: string | null;
       required_node_version?: string | null;
       checksum_sha256?: string | null;
+      changelog?: unknown;
     };
   };
 
@@ -749,10 +996,37 @@ const listCatalogFromBackend = async (): Promise<CatalogApp[]> => {
       requiredPythonVersion: appEntry.latest_version?.required_python_version ?? undefined,
       requiredNodeVersion: appEntry.latest_version?.required_node_version ?? undefined,
       checksumSha256: appEntry.latest_version?.checksum_sha256 ?? undefined,
+      changelog: normalizeChangelog(appEntry.latest_version?.changelog, appEntry.latest_version?.version),
       version: appEntry.latest_version?.version,
       userMessage: registry.apps[appEntry.slug]?.userMessage,
     };
   });
+};
+
+const startDevCatalogService = async (): Promise<void> => {
+  if (!isDev || !process.env.FORGER_LOCAL_APPS?.trim()) {
+    return;
+  }
+
+  const upstreamCatalogUrl = catalogJsonUrl;
+  devCatalogService = new DevCatalogService(upstreamCatalogUrl);
+  try {
+    await devCatalogService.start();
+    catalogJsonUrl = devCatalogService.url;
+    await appendInstallLog('dev_catalog:start', {
+      catalogUrl: catalogJsonUrl,
+      upstreamCatalogUrl,
+      localApps: process.env.FORGER_LOCAL_APPS,
+    });
+  } catch (error) {
+    devCatalogService = null;
+    await appendInstallLog('dev_catalog:failed', {
+      upstreamCatalogUrl,
+      localApps: process.env.FORGER_LOCAL_APPS,
+      error: serializeErrorForInstallLog(error),
+    });
+    console.warn('Failed to start Forger dev catalog service', error);
+  }
 };
 
 const loadRegistry = async (): Promise<void> => {
@@ -805,6 +1079,8 @@ const ensureCatalogStatuses = (): void => {
       status: installed ? (running ? 'running' : installed.status) : 'not_installed',
       userMessage: installed?.userMessage,
       version: installed?.version ?? appEntry.version,
+      latestVersion: appEntry.latestVersion,
+      updateAvailable: installed ? isVersionNewer(appEntry.latestVersion, installed.version) : false,
     };
   });
 };
@@ -1007,6 +1283,44 @@ const ensureGitMainBranch = async (cwd: string): Promise<void> => {
   });
 };
 
+const LOCAL_GIT_EXCLUDE_RULES = [
+  '',
+  '# Forger runtime artifacts',
+  'backend/.venv/',
+  'backend/__pycache__/',
+  'backend/**/__pycache__/',
+  'backend/**/*.pyc',
+  'backend/.ruff_cache/',
+  'backend/.pytest_cache/',
+  'backend/data/',
+  'frontend/node_modules/',
+  'frontend/dist/',
+  'frontend/.vite/',
+  'frontend/tsconfig.tsbuildinfo',
+  '.DS_Store',
+];
+
+const ensureForgerLocalGitExcludes = async (cwd: string): Promise<void> => {
+  const result = await runCommandCapture('git', ['rev-parse', '--git-path', 'info/exclude'], {
+    cwd,
+    timeoutMs: 5_000,
+  });
+  if (result.code !== 0) {
+    throw new Error(result.stderr || result.stdout || 'git_exclude_path_failed');
+  }
+
+  const excludePath = path.resolve(cwd, result.stdout.trim());
+  await fs.mkdir(path.dirname(excludePath), { recursive: true });
+  const existing = await fs.readFile(excludePath, 'utf8').catch(() => '');
+  const missingRules = LOCAL_GIT_EXCLUDE_RULES.filter((rule) => rule && !existing.split('\n').includes(rule));
+  if (missingRules.length === 0) {
+    return;
+  }
+
+  const prefix = existing && !existing.endsWith('\n') ? '\n' : '';
+  await fs.appendFile(excludePath, `${prefix}${missingRules.join('\n')}\n`, 'utf8');
+};
+
 const ensureAppGitRepository = async (cwd: string): Promise<void> => {
   await ensureGitAvailable();
 
@@ -1021,6 +1335,7 @@ const ensureAppGitRepository = async (cwd: string): Promise<void> => {
     });
     await runCommand('git', ['config', 'user.email', 'forger@local.invalid'], { cwd }).catch(() => undefined);
     await runCommand('git', ['config', 'user.name', 'Forger'], { cwd }).catch(() => undefined);
+    await ensureForgerLocalGitExcludes(cwd);
     await runCommand('git', ['add', '-A'], { cwd }).catch(() => undefined);
     await runCommand('git', ['commit', '--allow-empty', '-m', 'forger: initial state'], { cwd }).catch(
       () => undefined,
@@ -1031,6 +1346,64 @@ const ensureAppGitRepository = async (cwd: string): Promise<void> => {
   await runCommand('git', ['config', 'user.email', 'forger@local.invalid'], { cwd }).catch(() => undefined);
   await runCommand('git', ['config', 'user.name', 'Forger'], { cwd }).catch(() => undefined);
   await ensureGitMainBranch(cwd);
+  await ensureForgerLocalGitExcludes(cwd);
+};
+
+const ensureUserModifiedBranch = async (cwd: string): Promise<void> => {
+  await runCommand('git', ['checkout', 'user-modified'], { cwd }).catch(async () => {
+    await runCommand('git', ['checkout', '-b', 'user-modified'], { cwd });
+  });
+};
+
+const getGitStatusLines = async (cwd: string): Promise<string[]> => {
+  const result = await runCommandCapture('git', ['status', '--porcelain'], { cwd, timeoutMs: 10_000 });
+  if (result.code !== 0) {
+    throw new Error(result.stderr || result.stdout || 'git_status_failed');
+  }
+  return result.stdout
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+};
+
+const normalizeGitStatusPath = (line: string): string => {
+  const rawPath = line.slice(3).trim();
+  const renamedPath = rawPath.includes(' -> ') ? rawPath.split(' -> ').pop() ?? rawPath : rawPath;
+  return renamedPath.replace(/\\/g, '/');
+};
+
+const isRuntimeArtifactStatusLine = (line: string): boolean => {
+  const filePath = normalizeGitStatusPath(line);
+  return (
+    filePath === 'frontend/node_modules' ||
+    filePath.startsWith('frontend/node_modules/') ||
+    filePath === 'backend/.venv' ||
+    filePath.startsWith('backend/.venv/') ||
+    filePath === 'backend/data' ||
+    filePath.startsWith('backend/data/') ||
+    filePath === 'frontend/dist' ||
+    filePath.startsWith('frontend/dist/') ||
+    filePath === 'frontend/.vite' ||
+    filePath.startsWith('frontend/.vite/') ||
+    filePath.includes('/__pycache__/') ||
+    filePath.endsWith('/__pycache__') ||
+    filePath.endsWith('.pyc') ||
+    filePath.endsWith('tsconfig.tsbuildinfo') ||
+    filePath === '.DS_Store'
+  );
+};
+
+const getUserVisibleGitStatusLines = async (cwd: string): Promise<string[]> =>
+  (await getGitStatusLines(cwd)).filter((line) => !isRuntimeArtifactStatusLine(line));
+
+const gitCommitAll = async (cwd: string, message: string): Promise<string> => {
+  await runCommand('git', ['add', '-A'], { cwd });
+  await runCommand('git', ['commit', '--allow-empty', '-m', message], { cwd });
+  const head = await getGitHead(cwd);
+  if (!head) {
+    throw new Error('missing_git_head_after_commit');
+  }
+  return head;
 };
 
 const getGitHead = async (cwd: string): Promise<string | null> => {
@@ -1097,6 +1470,89 @@ const extractArchive = async (archivePath: string, destination: string): Promise
   }
 
   throw new Error(`unsupported_archive_format_${archivePath}`);
+};
+
+const validateArchiveEntries = async (archivePath: string): Promise<void> => {
+  const listResult = archivePath.endsWith('.zip')
+    ? await runCommandCapture('unzip', ['-Z', '-1', archivePath], { cwd: path.dirname(archivePath), timeoutMs: 30_000 })
+    : archivePath.endsWith('.tar.gz') || archivePath.endsWith('.tgz')
+      ? await runCommandCapture('tar', ['-tzf', archivePath], { cwd: path.dirname(archivePath), timeoutMs: 30_000 })
+      : { code: 1, stdout: '', stderr: 'unsupported_archive_format' };
+
+  if (listResult.code !== 0) {
+    throw new Error(listResult.stderr || listResult.stdout || 'archive_list_failed');
+  }
+
+  const entries = listResult.stdout.split('\n').map((line) => line.trim()).filter(Boolean);
+  for (const entry of entries) {
+    const normalized = entry.replace(/\\/g, '/');
+    const parts = normalized.split('/').filter(Boolean);
+    if (
+      normalized.startsWith('/') ||
+      /^[A-Za-z]:\//.test(normalized) ||
+      parts.includes('..') ||
+      parts.includes('.git') ||
+      normalized.includes('/.git/') ||
+      normalized.endsWith('/.git')
+    ) {
+      throw new Error(`unsafe_archive_entry_${normalized}`);
+    }
+  }
+};
+
+const removeInstalledContentsPreservingGit = async (installDir: string): Promise<void> => {
+  const entries = await fs.readdir(installDir, { withFileTypes: true });
+  await Promise.all(
+    entries
+      .filter((entry) => entry.name !== '.git')
+      .map((entry) => fs.rm(path.join(installDir, entry.name), { recursive: true, force: true })),
+  );
+};
+
+const copyDirectoryContents = async (sourceDir: string, targetDir: string): Promise<void> => {
+  await fs.mkdir(targetDir, { recursive: true });
+  const entries = await fs.readdir(sourceDir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (entry.name === '.git') {
+      throw new Error('unsafe_staged_git_entry');
+    }
+    await fs.cp(path.join(sourceDir, entry.name), path.join(targetDir, entry.name), {
+      recursive: true,
+      force: true,
+      verbatimSymlinks: false,
+    });
+  }
+};
+
+const installAppDependencies = async (
+  appId: string,
+  installDir: string,
+  nodeVersion: string,
+  pythonVersion: string,
+  publishProgress: (phase: InstallAppResult['phase'], userMessage: string) => Promise<void>,
+): Promise<void> => {
+  await publishProgress('preparing_runtime', 'Preparando runtimes compartidos...');
+  const nodeRuntime = await ensureRuntimeInstalled('node', nodeVersion);
+  const pythonRuntime = await ensureRuntimeInstalled('python', pythonVersion);
+
+  const backendDir = path.join(installDir, 'backend');
+  const frontendDir = path.join(installDir, 'frontend');
+
+  await publishProgress('installing_backend', 'Instalando dependencias del backend con uv...');
+  await installBackendDependenciesWithUv(pythonRuntime.python as string, backendDir, appId);
+
+  await publishProgress('installing_frontend', 'Instalando dependencias del frontend...');
+  await runCommand(nodeRuntime.npm as string, ['install'], {
+    cwd: frontendDir,
+    env: {
+      PATH: `${path.dirname(nodeRuntime.node as string)}${path.delimiter}${process.env.PATH ?? ''}`,
+    },
+    log: {
+      appId,
+      phase: 'installing_frontend',
+      label: 'npm install',
+    },
+  });
 };
 
 const flattenSingleTopLevelDirectory = async (targetDir: string): Promise<void> => {
@@ -1296,6 +1752,67 @@ const getRuntimePathEntries = (runtime: RuntimeBinarySet): string[] => {
   }
 
   return [...entries];
+};
+
+const existsDirectory = async (dir: string): Promise<boolean> => {
+  try {
+    return (await fs.stat(dir)).isDirectory();
+  } catch {
+    return false;
+  }
+};
+
+const getAppLocalToolPathEntries = async (record: InstalledAppRecord): Promise<string[]> => {
+  const candidates =
+    process.platform === 'win32'
+      ? [
+          path.join(record.installDir, 'backend', '.venv', 'Scripts'),
+          path.join(record.installDir, 'frontend', 'node_modules', '.bin'),
+        ]
+      : [
+          path.join(record.installDir, 'backend', '.venv', 'bin'),
+          path.join(record.installDir, 'frontend', 'node_modules', '.bin'),
+        ];
+  const entries: string[] = [];
+  for (const candidate of candidates) {
+    if (await existsDirectory(candidate)) {
+      entries.push(candidate);
+    }
+  }
+  return entries;
+};
+
+const getCodexToolEnvironment = async (
+  appId?: string,
+  pythonRuntime?: RuntimeBinarySet,
+): Promise<Record<string, string>> => {
+  const cacheKey = (appId ?? 'global').replace(/[^a-zA-Z0-9._-]/g, '_');
+  const cacheRoot = path.join(getForgerMetadataRoot(), 'tool-cache', cacheKey);
+  const uvCacheDir = path.join(cacheRoot, 'uv');
+  const pipCacheDir = path.join(cacheRoot, 'pip');
+  const npmCacheDir = path.join(cacheRoot, 'npm');
+  await Promise.all([
+    fs.mkdir(uvCacheDir, { recursive: true }),
+    fs.mkdir(pipCacheDir, { recursive: true }),
+    fs.mkdir(npmCacheDir, { recursive: true }),
+  ]);
+
+  const env: Record<string, string> = {
+    UV_CACHE_DIR: uvCacheDir,
+    PIP_CACHE_DIR: pipCacheDir,
+    NPM_CONFIG_CACHE: npmCacheDir,
+  };
+
+  if (pythonRuntime?.python) {
+    env.UV_PYTHON = pythonRuntime.python;
+  }
+
+  const record = appId ? registry.apps[appId] : undefined;
+  if (record) {
+    env.UV_PROJECT_ENVIRONMENT = path.join(record.installDir, 'backend', '.venv');
+  }
+
+  return env;
 };
 
 const resolveCodexCliPath = async (baseDir: string): Promise<string | null> => {
@@ -1759,6 +2276,7 @@ const installAppRuntime = async (appId: string): Promise<InstallAppResult> => {
       installDir,
       privateAppsRoot: getPrivateAppsRoot(),
     });
+    await validateArchiveEntries(download.zipPath);
     await extractArchive(download.zipPath, installDir);
     await flattenSingleTopLevelDirectory(installDir);
     await clearMacQuarantine(installDir);
@@ -1766,6 +2284,7 @@ const installAppRuntime = async (appId: string): Promise<InstallAppResult> => {
     await ensureGlobalAgentsContext(getForgerHomeRoot());
     await ensureAppGitRepository(installDir);
     const originalCommitSha = await getOriginalCommitSha(installDir);
+    await ensureUserModifiedBranch(installDir);
 
     await publishProgress('preparing_runtime', 'Preparando runtimes compartidos...');
     const nodeRuntime = await ensureRuntimeInstalled('node', nodeVersion);
@@ -1868,6 +2387,234 @@ const installAppRuntime = async (appId: string): Promise<InstallAppResult> => {
   }
 };
 
+const updateAppRuntime = async (appId: string): Promise<InstallAppResult> => {
+  const record = registry.apps[appId];
+  const catalogApp = catalogApps.find((entry) => entry.id === appId);
+  if (!record?.installDir) {
+    return runtimeError('Primero instala esta app.', 'app_not_installed');
+  }
+  if (!catalogApp) {
+    return runtimeError('No pudimos revisar la version disponible.', 'catalog_app_missing');
+  }
+  if (runningApps.has(appId)) {
+    return runtimeError('Deten la app antes de actualizarla.', 'app_running');
+  }
+  if (record.status === 'conflict') {
+    return runtimeError('Esta app ya tiene una actualizacion con conflicto pendiente.', 'app_update_conflict');
+  }
+  if (!isVersionNewer(catalogApp.latestVersion, record.version)) {
+    return {
+      success: true,
+      phase: 'completed',
+      userMessage: 'Ya tienes la version mas reciente.',
+    };
+  }
+
+  const publishProgress = async (phase: InstallAppResult['phase'], userMessage: string): Promise<void> => {
+    emitInstallProgress(appId, { success: true, phase, userMessage });
+    const current = registry.apps[appId];
+    if (current) {
+      await upsertInstalledRecord({
+        ...current,
+        status: phase === 'conflict' ? 'conflict' : 'installing',
+        userMessage,
+      });
+    }
+    await appendInstallLog('update:progress', { appId, phase, userMessage });
+  };
+
+  const startedAt = new Date().toISOString();
+  const targetVersion = catalogApp.latestVersion ?? catalogApp.version ?? '0.0.0';
+  let preUpdateUserHead = '';
+  let stageDir: string | null = null;
+
+  const abortUpdateAndRestoreInstalled = async (userMessage: string, technicalCode: string): Promise<InstallAppResult> => {
+    const current = registry.apps[appId] ?? record;
+    await upsertInstalledRecord({
+      ...current,
+      status: 'installed',
+      userMessage,
+    });
+    await appendInstallLog('update:blocked', { appId, detail: technicalCode, userMessage });
+    ensureCatalogStatuses();
+    return runtimeError(userMessage, technicalCode);
+  };
+
+  try {
+    await publishProgress('checking_update', 'Revisando actualizacion disponible...');
+    await ensureAppGitRepository(record.installDir);
+    await ensureUserModifiedBranch(record.installDir);
+    const status = await getUserVisibleGitStatusLines(record.installDir);
+    if (status.length > 0) {
+      return await abortUpdateAndRestoreInstalled(
+        'Antes de actualizar, guarda o descarta los cambios pendientes de esta app.',
+        'dirty_worktree',
+      );
+    }
+    preUpdateUserHead = (await getGitHead(record.installDir)) ?? '';
+    if (!preUpdateUserHead) {
+      throw new Error('missing_user_branch_head');
+    }
+
+    await publishProgress('downloading', 'Descargando actualizacion...');
+    const download = await fetchDownloadBundle(catalogApp);
+    await validateArchiveEntries(download.zipPath);
+
+    stageDir = path.join(getTempRoot(), `${appId}-update-${Date.now()}`);
+    await fs.rm(stageDir, { recursive: true, force: true });
+    await fs.mkdir(stageDir, { recursive: true });
+    await publishProgress('extracting', 'Preparando version nueva...');
+    await extractArchive(download.zipPath, stageDir);
+    await flattenSingleTopLevelDirectory(stageDir);
+    await clearMacQuarantine(stageDir);
+
+    await runCommand('git', ['checkout', 'main'], { cwd: record.installDir });
+    await removeInstalledContentsPreservingGit(record.installDir);
+    await copyDirectoryContents(stageDir, record.installDir);
+    await normalizeInstalledAgentContext(record.installDir, appId);
+    await ensureGlobalAgentsContext(getForgerHomeRoot());
+
+    await publishProgress('updating_base', 'Guardando la version nueva...');
+    const baseCommitSha = await gitCommitAll(record.installDir, `forger(base): update ${download.version}`);
+    await upsertInstalledRecord({
+      ...record,
+      status: 'installing',
+      userMessage: 'Combinando la actualizacion con tus cambios...',
+      pendingUpdate: {
+        fromVersion: record.version,
+        targetVersion: download.version,
+        preUpdateUserHead,
+        baseCommitSha,
+        startedAt,
+      },
+    });
+
+    await publishProgress('merging_user_changes', 'Combinando la actualizacion con tus cambios...');
+    await runCommand('git', ['checkout', 'user-modified'], { cwd: record.installDir });
+    const merge = await runCommandCapture('git', ['merge', 'main', '--no-edit'], {
+      cwd: record.installDir,
+      timeoutMs: 60_000,
+    });
+    if (merge.code !== 0) {
+      await upsertInstalledRecord({
+        ...record,
+        status: 'conflict',
+        userMessage: 'No pudimos combinar automaticamente la actualizacion con tus cambios.',
+        pendingUpdate: {
+          fromVersion: record.version,
+          targetVersion: download.version,
+          preUpdateUserHead,
+          baseCommitSha,
+          startedAt,
+          message: merge.stderr || merge.stdout || 'merge_conflict',
+        },
+      });
+      emitInstallProgress(appId, {
+        success: false,
+        phase: 'conflict',
+        userMessage: 'La actualizacion necesita ayuda para combinarse con tus cambios.',
+        technicalCode: merge.stderr || merge.stdout || 'merge_conflict',
+      });
+      await fs.rm(stageDir, { recursive: true, force: true }).catch(() => undefined);
+      ensureCatalogStatuses();
+      return {
+        success: false,
+        phase: 'conflict',
+        userMessage: 'La actualizacion necesita ayuda para combinarse con tus cambios.',
+        technicalCode: merge.stderr || merge.stdout || 'merge_conflict',
+      };
+    }
+
+    const nodeVersion = catalogApp.requiredNodeVersion ?? record.requiredNodeVersion;
+    const pythonVersion = catalogApp.requiredPythonVersion
+      ? normalizeVersionForFolder(catalogApp.requiredPythonVersion)
+      : record.requiredPythonVersion;
+    await installAppDependencies(appId, record.installDir, nodeVersion, pythonVersion, publishProgress);
+
+    await upsertInstalledRecord({
+      ...record,
+      version: download.version,
+      requiredNodeVersion: nodeVersion,
+      requiredPythonVersion: pythonVersion,
+      status: 'installed',
+      userMessage: 'Actualizacion instalada y lista para abrir.',
+      pendingUpdate: undefined,
+    });
+    await fs.rm(stageDir, { recursive: true, force: true }).catch(() => undefined);
+    ensureCatalogStatuses();
+    emitInstallProgress(appId, {
+      success: true,
+      phase: 'completed',
+      userMessage: 'Actualizacion completada.',
+    });
+    return {
+      success: true,
+      phase: 'completed',
+      userMessage: 'Actualizacion completada.',
+    };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : 'update_failed_unknown';
+    if (stageDir) {
+      await fs.rm(stageDir, { recursive: true, force: true }).catch(() => undefined);
+    }
+    await appendInstallLog('update:failed', {
+      appId,
+      detail,
+      error: serializeErrorForInstallLog(error),
+    });
+    await upsertInstalledRecord({
+      ...record,
+      status: 'error',
+      userMessage: 'No pudimos actualizar la app. Puedes reintentar.',
+    });
+    ensureCatalogStatuses();
+    return {
+      success: false,
+      phase: 'failed',
+      userMessage: 'No pudimos actualizar la app. Puedes reintentar.',
+      technicalCode: detail,
+    };
+  }
+};
+
+const restoreAppUserVersionRuntime = async (appId: string): Promise<BasicActionResult> => {
+  const record = registry.apps[appId];
+  if (!record?.installDir || !record.pendingUpdate) {
+    return {
+      success: false,
+      userMessage: 'No hay una actualizacion en conflicto para restaurar.',
+      technicalCode: 'no_pending_update_conflict',
+    };
+  }
+
+  try {
+    await runCommandCapture('git', ['merge', '--abort'], { cwd: record.installDir, timeoutMs: 30_000 }).catch(
+      () => undefined,
+    );
+    await runCommand('git', ['checkout', 'user-modified'], { cwd: record.installDir });
+    await runCommand('git', ['reset', '--hard', record.pendingUpdate.preUpdateUserHead], { cwd: record.installDir });
+    await upsertInstalledRecord({
+      ...record,
+      version: record.pendingUpdate.fromVersion,
+      status: 'installed',
+      userMessage: 'Restauramos tu version anterior.',
+      pendingUpdate: undefined,
+    });
+    ensureCatalogStatuses();
+    return {
+      success: true,
+      userMessage: 'Restauramos tu version anterior.',
+    };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : 'restore_failed';
+    return {
+      success: false,
+      userMessage: 'No pudimos restaurar la version anterior.',
+      technicalCode: detail,
+    };
+  }
+};
+
 interface StoredOperationEntry {
   operationId?: string;
   runId?: string;
@@ -1930,6 +2677,16 @@ const getAppDetails = async (appId: string): Promise<AppDetails | null> => {
     status: installed ? (runningApps.has(appId) ? 'running' : installed.status) : 'not_installed',
     version: installed?.version ?? catalog?.version,
     latestVersion: catalog?.latestVersion,
+    updateAvailable: installed ? isVersionNewer(catalog?.latestVersion, installed.version) : false,
+    changelog: catalog?.changelog,
+    conflictInfo: installed?.pendingUpdate
+      ? {
+          fromVersion: installed.pendingUpdate.fromVersion,
+          targetVersion: installed.pendingUpdate.targetVersion,
+          startedAt: installed.pendingUpdate.startedAt,
+          message: installed.pendingUpdate.message,
+        }
+      : undefined,
     originalCommitSha,
     installedAt: installed?.installedAt,
     operations: installed ? await readOperationSummaries(appId) : [],
@@ -1976,6 +2733,14 @@ const uninstallAppRuntime = async (appId: string): Promise<BasicActionResult> =>
   }
 };
 
+const normalizeLanguageCode = (value?: string): string => {
+  const normalized = value?.trim().toLowerCase().replace('_', '-') ?? '';
+  if (!normalized) {
+    return 'en';
+  }
+  return normalized.split('-')[0] || 'en';
+};
+
 const normalizePostinstallText = (value: string): string =>
   value
     .replace(/^#+\s*/gm, '')
@@ -1987,34 +2752,75 @@ const normalizePostinstallText = (value: string): string =>
 
 const firstLines = (value: string, count: number): string => value.split('\n').slice(0, count).join(' ');
 
-const buildInstallWelcomeMessage = async (record: InstalledAppRecord): Promise<string> => {
-  const postinstallPath = path.join(record.installDir, 'POSTINSTALL.md');
-  const raw = await fs.readFile(postinstallPath, 'utf8').catch(() => '');
+const readLocalizedPostinstall = async (installDir: string, userLanguage?: string): Promise<string> => {
+  const language = normalizeLanguageCode(userLanguage);
+  const candidates = [
+    path.join(installDir, `POSTINSTALL.${language}.md`),
+    path.join(installDir, 'POSTINSTALL.en.md'),
+    path.join(installDir, 'POSTINSTALL.md'),
+  ];
+
+  for (const candidate of candidates) {
+    const raw = await fs.readFile(candidate, 'utf8').catch(() => '');
+    if (raw.trim()) {
+      return raw.replace(/\r/g, '').trim();
+    }
+  }
+
+  return '';
+};
+
+const buildInstallWelcomeMessage = async (record: InstalledAppRecord, userLanguage?: string): Promise<string> => {
+  const raw = await readLocalizedPostinstall(record.installDir, userLanguage);
+  if (raw.trim()) {
+    return raw;
+  }
+
+  const language = normalizeLanguageCode(userLanguage);
   const normalized = normalizePostinstallText(raw);
-  const fallbackIntro = record.description || `${record.name} ya esta lista para usar.`;
+  const fallbackIntro =
+    record.description || (language === 'es' ? `${record.name} ya esta lista para usar.` : `${record.name} is ready to use.`);
   const lines = normalized.split('\n').filter(Boolean);
   const intro = firstLines(lines.slice(0, 3).join('\n') || fallbackIntro, 3);
   const howTo =
-    lines.find((line) => /comenzar|empezar|inicio/i.test(line)) ??
-    'Abre la app para revisar sus pantallas principales y empezar con tu informacion local.';
+    lines.find((line) => /start|begin|comenzar|empezar|inicio/i.test(line)) ??
+    (language === 'es'
+      ? 'Abre la app para revisar sus pantallas principales y empezar con tu informacion local.'
+      : 'Open the app to review its main screens and start with your local information.');
   const suggestion =
-    lines.find((line) => /suger/i.test(line)) ??
-    'Si quieres, puedo ayudarte a revisar la app y preparar los primeros pasos contigo.';
+    lines.find((line) => /suggest|suger/i.test(line)) ??
+    (language === 'es'
+      ? 'Si quieres, puedo ayudarte a revisar la app y preparar los primeros pasos contigo.'
+      : 'I can help you review the app and prepare the first steps with you.');
+
+  if (language === 'es') {
+    return [
+      `${record.name} ya esta instalada.`,
+      '',
+      intro,
+      '',
+      '**Como comenzar**',
+      howTo,
+      '',
+      '**Sugerencia para empezar**',
+      suggestion,
+    ].join('\n');
+  }
 
   return [
-    `${record.name} ya esta instalada.`,
+    `${record.name} is installed.`,
     '',
     intro,
     '',
-    '**Como comenzar**',
+    '**How to start**',
     howTo,
     '',
-    '**Sugerencia para empezar**',
+    '**Suggested first request**',
     suggestion,
   ].join('\n');
 };
 
-const installWelcome = async (appId: string): Promise<{
+const installWelcome = async (appId: string, userLanguage?: string): Promise<{
   success: boolean;
   appId: string;
   message?: string;
@@ -2034,7 +2840,7 @@ const installWelcome = async (appId: string): Promise<{
   }
 
   try {
-    const message = await buildInstallWelcomeMessage(record);
+    const message = await buildInstallWelcomeMessage(record, userLanguage);
     return {
       success: true,
       appId,
@@ -2187,6 +2993,153 @@ const openOrFocusAppWindow = async (appId: string, appName: string, frontendUrl:
   await appWindow.loadURL(frontendUrl);
 };
 
+const findManifestService = (
+  manifest: AppManifest | null,
+  name: string,
+  fallbackContext: string,
+): AppManifestService | null => {
+  const services = Array.isArray(manifest?.services) ? manifest.services : [];
+  return services.find((service) => service.name === name)
+    ?? services.find((service) => service.context === fallbackContext)
+    ?? null;
+};
+
+const replaceCommandOption = (args: string[], option: string, value: string): string[] => {
+  const next = [...args];
+  const index = next.indexOf(option);
+  if (index >= 0) {
+    if (index + 1 < next.length) {
+      next[index + 1] = value;
+    } else {
+      next.push(value);
+    }
+    return next;
+  }
+  next.push(option, value);
+  return next;
+};
+
+const splitManifestCommand = (command: string | undefined): string[] =>
+  command?.trim().split(/\s+/).filter(Boolean) ?? [];
+
+const resolvePythonAppImport = (appPath: string): { appImport: string; pythonPath: string } => {
+  const cleanPath = appPath.replace(/\\/g, '/').replace(/\.py$/i, '');
+  const parts = cleanPath.split('/').filter(Boolean);
+  const srcIndex = parts.indexOf('src');
+  const moduleParts = srcIndex >= 0 ? parts.slice(srcIndex + 1) : parts;
+  const pythonPath = srcIndex >= 0 ? parts.slice(0, srcIndex + 1).join('/') : '.';
+  return {
+    appImport: `${moduleParts.length ? moduleParts.join('.') : 'app.main'}:app`,
+    pythonPath,
+  };
+};
+
+const mergePythonPath = (
+  environment: Record<string, string>,
+  cwd: string,
+  pythonPath: string,
+): Record<string, string> => {
+  const resolvedPythonPath = path.resolve(cwd, pythonPath);
+  const currentPythonPath = environment.PYTHONPATH ?? process.env.PYTHONPATH;
+  return {
+    ...environment,
+    PYTHONPATH: currentPythonPath
+      ? `${resolvedPythonPath}${path.delimiter}${currentPythonPath}`
+      : resolvedPythonPath,
+  };
+};
+
+const translateManifestEnvironment = (
+  environment: Record<string, string>,
+  backendDir: string,
+): Record<string, string> => {
+  const translated = { ...environment };
+  const databaseUrl = translated.DATABASE_URL;
+  const sqliteAppPrefix = 'sqlite:////app/';
+  if (typeof databaseUrl === 'string' && databaseUrl.startsWith(sqliteAppPrefix)) {
+    const relativeDbPath = databaseUrl.slice(sqliteAppPrefix.length);
+    translated.DATABASE_URL = `sqlite:///${path.join(backendDir, relativeDbPath)}`;
+  }
+  return translated;
+};
+
+const ensureSqliteDatabaseParent = async (environment: Record<string, string>): Promise<void> => {
+  const databaseUrl = environment.DATABASE_URL;
+  if (!databaseUrl?.startsWith('sqlite:///')) {
+    return;
+  }
+  const filePath = databaseUrl.slice('sqlite:///'.length);
+  if (!path.isAbsolute(filePath)) {
+    return;
+  }
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+};
+
+const summarizeBackendEnvironment = (environment: Record<string, string>): Record<string, string> => {
+  const summary: Record<string, string> = {};
+  for (const key of ['DATABASE_URL', 'PYTHONPATH', 'CORS_ORIGINS']) {
+    const value = environment[key];
+    if (typeof value === 'string' && value.trim()) {
+      summary[key] = value;
+    }
+  }
+  return summary;
+};
+
+const buildBackendProcessConfig = (
+  service: AppManifestService | null,
+  backendDir: string,
+  python: string,
+  port: number,
+): { command: string; args: string[]; cwd: string; environment: Record<string, string> } => {
+  const rawArgs = splitManifestCommand(service?.command);
+  const fastapiIndex = rawArgs.indexOf('fastapi');
+  const uvicornIndex = rawArgs.indexOf('uvicorn');
+  const manifestEnvironment = service?.environment && typeof service.environment === 'object' ? service.environment : {};
+  const environment = translateManifestEnvironment(manifestEnvironment, backendDir);
+  const cwd = service?.context ? path.resolve(path.join(path.dirname(backendDir), service.context)) : backendDir;
+
+  if (fastapiIndex >= 0 && rawArgs[fastapiIndex + 1] === 'dev') {
+    const appPath = rawArgs[fastapiIndex + 2] && !rawArgs[fastapiIndex + 2].startsWith('-')
+      ? rawArgs[fastapiIndex + 2]
+      : 'src/app/main.py';
+    const resolvedApp = resolvePythonAppImport(appPath);
+    let args = ['-m', 'uvicorn', resolvedApp.appImport];
+    args = replaceCommandOption(args, '--host', '127.0.0.1');
+    args = replaceCommandOption(args, '--port', String(port));
+    return {
+      command: python,
+      args,
+      cwd,
+      environment: mergePythonPath(environment, cwd, resolvedApp.pythonPath),
+    };
+  }
+
+  if (uvicornIndex >= 0) {
+    const appImport = rawArgs[uvicornIndex + 1] && !rawArgs[uvicornIndex + 1].startsWith('-')
+      ? rawArgs[uvicornIndex + 1]
+      : 'app.main:app';
+    let args = ['-m', 'uvicorn', appImport];
+    args = replaceCommandOption(args, '--host', '127.0.0.1');
+    args = replaceCommandOption(args, '--port', String(port));
+    if (isDev && !args.includes('--reload')) {
+      args.push('--reload');
+    }
+    return { command: python, args, cwd, environment };
+  }
+
+  const args = ['-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', String(port)];
+  if (isDev) {
+    args.push('--reload');
+  }
+  return { command: python, args, cwd, environment };
+};
+
+const normalizeHealthcheckPath = (healthcheck: string | undefined): string => {
+  const value = healthcheck?.trim() || '/health';
+  return value.startsWith('/') ? value : `/${value}`;
+};
+
 const openInstalledApp = async (appId: string): Promise<OpenAppResult> => {
   const record = registry.apps[appId];
   if (!record || !record.installDir) {
@@ -2194,6 +3147,13 @@ const openInstalledApp = async (appId: string): Promise<OpenAppResult> => {
       success: false,
       userMessage: 'Primero instala esta app.',
       technicalCode: 'app_not_installed',
+    };
+  }
+  if (record.status === 'conflict') {
+    return {
+      success: false,
+      userMessage: 'Esta app necesita resolver una actualizacion antes de abrirse.',
+      technicalCode: 'app_update_conflict',
     };
   }
 
@@ -2219,6 +3179,9 @@ const openInstalledApp = async (appId: string): Promise<OpenAppResult> => {
   const nodeRuntime = await ensureRuntimeInstalled('node', record.requiredNodeVersion);
   await ensureRuntimeInstalled('python', record.requiredPythonVersion);
 
+  const manifest = await resolveInstalledManifest(record.installDir);
+  const backendService = findManifestService(manifest, 'backend', './backend');
+  const frontendService = findManifestService(manifest, 'frontend', './frontend');
   const backendDir = path.join(record.installDir, 'backend');
   const frontendDir = path.join(record.installDir, 'frontend');
   const venv = getVenvExecutables(backendDir);
@@ -2227,46 +3190,51 @@ const openInstalledApp = async (appId: string): Promise<OpenAppResult> => {
   const frontendPort = await getFreePort();
   const backendUrl = `http://127.0.0.1:${backendPort}`;
   const frontendUrl = `http://127.0.0.1:${frontendPort}`;
-  const backendArgs = ['-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', String(backendPort)];
-
-  if (isDev) {
-    backendArgs.push('--reload');
-  }
+  const backendConfig = buildBackendProcessConfig(backendService, backendDir, venv.python, backendPort);
+  const frontendArgs = ['run', 'dev', '--', '--host', '127.0.0.1', '--port', String(frontendPort)];
+  const backendHealthcheckPath = normalizeHealthcheckPath(backendService?.healthcheck);
+  await ensureSqliteDatabaseParent(backendConfig.environment);
 
   await appendInstallLog('open:spawn', {
     appId,
     backend: {
-      command: venv.python,
-      args: backendArgs,
-      cwd: backendDir,
+      command: backendConfig.command,
+      args: backendConfig.args,
+      cwd: backendConfig.cwd,
       url: backendUrl,
+      healthcheck: backendHealthcheckPath,
+      environment: summarizeBackendEnvironment({
+        ...backendConfig.environment,
+        CORS_ORIGINS: `${frontendUrl},http://127.0.0.1:${frontendPort}`,
+      }),
     },
     frontend: {
       command: nodeRuntime.npm,
-      args: ['run', 'dev', '--', '--host', '127.0.0.1', '--port', String(frontendPort)],
-      cwd: frontendDir,
+      args: frontendArgs,
+      cwd: frontendService?.context ? path.resolve(path.join(record.installDir, frontendService.context)) : frontendDir,
       url: frontendUrl,
     },
   });
 
   const backend = spawn(
-    venv.python,
-    backendArgs,
+    backendConfig.command,
+    backendConfig.args,
     {
-      cwd: backendDir,
+      cwd: backendConfig.cwd,
       env: {
         ...process.env,
+        ...backendConfig.environment,
         CORS_ORIGINS: `${frontendUrl},http://127.0.0.1:${frontendPort}`,
       },
       stdio: 'pipe',
     },
   );
 
-  const frontendArgs = ['run', 'dev', '--', '--host', '127.0.0.1', '--port', String(frontendPort)];
   const frontend = spawn(nodeRuntime.npm as string, frontendArgs, {
-    cwd: frontendDir,
+    cwd: frontendService?.context ? path.resolve(path.join(record.installDir, frontendService.context)) : frontendDir,
     env: {
       ...process.env,
+      ...(frontendService?.environment && typeof frontendService.environment === 'object' ? frontendService.environment : {}),
       VITE_API_BASE_URL: backendUrl,
       PATH: `${path.dirname(nodeRuntime.node as string)}${path.delimiter}${process.env.PATH ?? ''}`,
     },
@@ -2359,7 +3327,7 @@ const openInstalledApp = async (appId: string): Promise<OpenAppResult> => {
   });
 
   try {
-    await waitForHttpOk(`${backendUrl}/health`, 60_000);
+    await waitForHttpOk(`${backendUrl}${backendHealthcheckPath}`, 60_000);
     await waitForHttpOk(frontendUrl, 60_000);
     await openOrFocusAppWindow(appId, record.name, frontendUrl);
     await appendInstallLog('open:ready', {
@@ -2469,6 +3437,490 @@ const getRuntimeStatus = (appId: string): RuntimeStatus => {
   };
 };
 
+const createForgerMcpSession = (runId: string, appId: string): { url: string; token: string } | null => {
+  if (!forgerMcpServer) {
+    void appendInstallLog('agent_tool:mcp_session_unavailable', { runId, appId });
+    return null;
+  }
+  const token = randomBytes(32).toString('hex');
+  agentMcpSessions.set(token, {
+    runId,
+    appId,
+    token,
+    createdAt: new Date().toISOString(),
+  });
+  void appendInstallLog('agent_tool:mcp_session_created', {
+    runId,
+    appId,
+    url: forgerMcpServer.url,
+    tokenSuffix: token.slice(-6),
+  });
+  return { url: forgerMcpServer.url, token };
+};
+
+const releaseForgerMcpSession = (token: string): void => {
+  const session = agentMcpSessions.get(token);
+  agentMcpSessions.delete(token);
+  void appendInstallLog('agent_tool:mcp_session_released', {
+    runId: session?.runId ?? null,
+    appId: session?.appId ?? null,
+    tokenSuffix: token.slice(-6),
+  });
+};
+
+type JsonRpcRequest = {
+  jsonrpc?: string;
+  id?: string | number | null;
+  method?: string;
+  params?: unknown;
+};
+
+const sendMcpJson = (response: ServerResponse, statusCode: number, payload: unknown): void => {
+  response.writeHead(statusCode, {
+    'content-type': 'application/json',
+    'cache-control': 'no-store',
+  });
+  response.end(JSON.stringify(payload));
+};
+
+const readRequestBody = async (request: IncomingMessage): Promise<string> => {
+  const chunks: Buffer[] = [];
+  for await (const chunk of request) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks).toString('utf8');
+};
+
+const getBearerToken = (request: IncomingMessage): string | null => {
+  const header = request.headers.authorization;
+  if (!header || Array.isArray(header)) {
+    return null;
+  }
+  const match = /^Bearer\s+(.+)$/i.exec(header.trim());
+  return match?.[1] ?? null;
+};
+
+const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unknown> => {
+  if (
+    toolId === 'forger_get_app_runtime_status' ||
+    toolId === 'forger_open_app' ||
+    toolId === 'forger_stop_app' ||
+    toolId === 'forger_restart_app' ||
+    toolId === 'forger_refresh_app_view' ||
+    toolId === 'forger_update_app'
+  ) {
+    return {
+      type: 'object',
+      properties: {
+        appId: {
+          type: 'string',
+          description: 'ID de la app instalada sobre la que se ejecuta la herramienta.',
+        },
+      },
+      required: ['appId'],
+      additionalProperties: false,
+    };
+  }
+
+  return {
+    type: 'object',
+    properties: {},
+    additionalProperties: false,
+  };
+};
+
+const getMcpTools = () =>
+  AGENT_TOOL_DEFINITIONS.map((tool) => ({
+    name: tool.id,
+    description: tool.description,
+    inputSchema: getMcpToolInputSchema(tool.id),
+  }));
+
+const getToolAppId = (session: AgentMcpSession, params: Record<string, unknown>): string => {
+  const appId = typeof params.appId === 'string' && params.appId.trim() ? params.appId.trim() : session.appId;
+  return appId;
+};
+
+interface ToolApprovalResult {
+  approved: boolean;
+  required: boolean;
+  status: 'not_required' | 'approved' | 'denied' | 'unavailable';
+  userMessage: string;
+}
+
+const withToolAuthorization = (result: unknown, approval: ToolApprovalResult): unknown => {
+  if (!approval.required || !result || typeof result !== 'object' || Array.isArray(result)) {
+    return result;
+  }
+  return {
+    ...(result as Record<string, unknown>),
+    authorization: {
+      required: true,
+      status: approval.status,
+      userMessage: approval.userMessage,
+    },
+  };
+};
+
+const ensureToolApproval = async (session: AgentMcpSession, tool: AgentToolDefinition): Promise<ToolApprovalResult> => {
+  if (!agentToolSettings.approvals[tool.id]) {
+    await appendInstallLog('agent_tool:approval_skipped', {
+      appId: session.appId,
+      runId: session.runId,
+      toolId: tool.id,
+      reason: 'approval_not_required',
+    });
+    return {
+      approved: true,
+      required: false,
+      status: 'not_required',
+      userMessage: 'Esta herramienta no requirio autorizacion adicional.',
+    };
+  }
+  if (!chatOrchestrator) {
+    await appendInstallLog('agent_tool:approval_unavailable', {
+      appId: session.appId,
+      runId: session.runId,
+      toolId: tool.id,
+      reason: 'chat_orchestrator_unavailable',
+    });
+    return {
+      approved: false,
+      required: true,
+      status: 'unavailable',
+      userMessage: 'No se pudo solicitar autorizacion para esta herramienta.',
+    };
+  }
+  await appendInstallLog('agent_tool:approval_requested', {
+    appId: session.appId,
+    runId: session.runId,
+    toolId: tool.id,
+    toolName: tool.name,
+  });
+  const approved = await chatOrchestrator.requestExternalPermission(session.runId, {
+    pluginId: 'forger-agent-tools',
+    permission: tool.id,
+    reason: tool.description,
+    risk: tool.risk === 'alto' ? 'high' : tool.risk === 'medio' ? 'medium' : 'low',
+    resource: tool.name,
+  });
+  await appendInstallLog('agent_tool:approval_resolved', {
+    appId: session.appId,
+    runId: session.runId,
+    toolId: tool.id,
+    approved,
+  });
+  return {
+    approved,
+    required: true,
+    status: approved ? 'approved' : 'denied',
+    userMessage: approved
+      ? 'Autorizacion recibida. La herramienta continuo con la accion solicitada.'
+      : 'La autorizacion fue rechazada o cancelada.',
+  };
+};
+
+const executeAgentTool = async (
+  session: AgentMcpSession,
+  toolId: AgentToolId,
+  args: Record<string, unknown>,
+): Promise<unknown> => {
+  const tool = AGENT_TOOL_DEFINITIONS.find((candidate) => candidate.id === toolId);
+  if (!tool) {
+    await appendInstallLog('agent_tool:not_found', {
+      appId: session.appId,
+      runId: session.runId,
+      toolId,
+      args,
+    });
+    return { success: false, userMessage: 'La herramienta no esta disponible.', technicalCode: 'tool_not_found' };
+  }
+
+  await appendInstallLog('agent_tool:call_received', {
+    appId: session.appId,
+    runId: session.runId,
+    toolId,
+    args,
+    requiresApproval: Boolean(agentToolSettings.approvals[tool.id]),
+  });
+
+  const approval = await ensureToolApproval(session, tool);
+  if (!approval.approved) {
+    await appendInstallLog('agent_tool:call_cancelled', {
+      appId: session.appId,
+      runId: session.runId,
+      toolId,
+      reason: 'forger_permission_denied_or_unavailable',
+    });
+    return withToolAuthorization(
+      { success: false, userMessage: 'La accion fue cancelada por el usuario.', technicalCode: 'permission_denied' },
+      approval,
+    );
+  }
+
+  await appendInstallLog('agent_tool:call', {
+    appId: session.appId,
+    toolId,
+    runId: session.runId,
+  });
+
+  if (toolId === 'forger_list_catalog') {
+    catalogApps = await listCatalogFromBackend();
+    ensureCatalogStatuses();
+    const result = { success: true, apps: catalogApps };
+    await appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
+    return withToolAuthorization(result, approval);
+  }
+
+  if (toolId === 'forger_list_installed_apps') {
+    const result = { success: true, apps: Object.values(registry.apps).map(toAppSummary) };
+    await appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
+    return withToolAuthorization(result, approval);
+  }
+
+  if (toolId === 'forger_check_updates') {
+    catalogApps = await listCatalogFromBackend();
+    ensureCatalogStatuses();
+    const updates = Object.values(registry.apps)
+      .map((record) => toAppSummary(record))
+      .filter((summary) => summary.updateAvailable);
+    const result = { success: true, updates };
+    await appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
+    return withToolAuthorization(result, approval);
+  }
+
+  const appId = getToolAppId(session, args);
+
+  if (toolId === 'forger_get_app_runtime_status') {
+    const result = { success: true, status: getRuntimeStatus(appId) };
+    await appendInstallLog('agent_tool:call_result', { appId, runId: session.runId, toolId, result });
+    return withToolAuthorization(result, approval);
+  }
+
+  if (toolId === 'forger_open_app') {
+    const result = await openInstalledApp(appId);
+    await appendInstallLog('agent_tool:call_result', { appId, runId: session.runId, toolId, result });
+    return withToolAuthorization(result, approval);
+  }
+
+  if (toolId === 'forger_stop_app') {
+    const result = await stopInstalledApp(appId);
+    await appendInstallLog('agent_tool:call_result', { appId, runId: session.runId, toolId, result });
+    return withToolAuthorization(result, approval);
+  }
+
+  if (toolId === 'forger_restart_app') {
+    const stop = await stopInstalledApp(appId);
+    if (!stop.success) {
+      await appendInstallLog('agent_tool:call_result', { appId, runId: session.runId, toolId, result: stop });
+      return withToolAuthorization(stop, approval);
+    }
+    const result = await openInstalledApp(appId);
+    await appendInstallLog('agent_tool:call_result', { appId, runId: session.runId, toolId, result });
+    return withToolAuthorization(result, approval);
+  }
+
+  if (toolId === 'forger_refresh_app_view') {
+    const window = appWindows.get(appId);
+    const running = runningApps.get(appId);
+    if (window && !window.isDestroyed()) {
+      window.webContents.reloadIgnoringCache();
+      const result = { success: true, userMessage: 'Vista reiniciada correctamente.' };
+      await appendInstallLog('agent_tool:call_result', { appId, runId: session.runId, toolId, result });
+      return withToolAuthorization(result, approval);
+    }
+    if (running) {
+      const record = registry.apps[appId];
+      await openOrFocusAppWindow(appId, record?.name ?? appId, running.frontendUrl);
+      const result = { success: true, userMessage: 'Vista abierta correctamente.' };
+      await appendInstallLog('agent_tool:call_result', { appId, runId: session.runId, toolId, result });
+      return withToolAuthorization(result, approval);
+    }
+    const result = { success: false, userMessage: 'La app no esta abierta.', technicalCode: 'app_not_running' };
+    await appendInstallLog('agent_tool:call_result', { appId, runId: session.runId, toolId, result });
+    return withToolAuthorization(result, approval);
+  }
+
+  if (toolId === 'forger_update_app') {
+    const result = await updateAppRuntime(appId);
+    await appendInstallLog('agent_tool:call_result', { appId, runId: session.runId, toolId, result });
+    return withToolAuthorization(result, approval);
+  }
+
+  const result = { success: false, userMessage: 'La herramienta no esta disponible.', technicalCode: 'tool_not_found' };
+  await appendInstallLog('agent_tool:call_result', { appId, runId: session.runId, toolId, result });
+  return withToolAuthorization(result, approval);
+};
+
+const handleMcpRequest = async (
+  session: AgentMcpSession,
+  request: JsonRpcRequest,
+): Promise<Record<string, unknown> | null> => {
+  const id = request.id ?? null;
+  await appendInstallLog('agent_tool:mcp_request', {
+    appId: session.appId,
+    runId: session.runId,
+    method: request.method ?? null,
+    id,
+  });
+  if (!request.method) {
+    return { jsonrpc: '2.0', id, error: { code: -32600, message: 'Invalid request' } };
+  }
+
+  if (request.method === 'initialize') {
+    return {
+      jsonrpc: '2.0',
+      id,
+      result: {
+        protocolVersion: '2025-06-18',
+        capabilities: { tools: {} },
+        serverInfo: { name: 'forger', version: app.getVersion() },
+      },
+    };
+  }
+
+  if (request.method === 'notifications/initialized') {
+    return null;
+  }
+
+  if (request.method === 'ping') {
+    return { jsonrpc: '2.0', id, result: {} };
+  }
+
+  if (request.method === 'tools/list') {
+    return { jsonrpc: '2.0', id, result: { tools: getMcpTools() } };
+  }
+
+  if (request.method === 'tools/call') {
+    const params = request.params as { name?: unknown; arguments?: unknown } | undefined;
+    const toolName = params?.name;
+    await appendInstallLog('agent_tool:mcp_tools_call_received', {
+      appId: session.appId,
+      runId: session.runId,
+      id,
+      toolName,
+      arguments: params?.arguments ?? null,
+    });
+    if (!isAgentToolId(toolName)) {
+      await appendInstallLog('agent_tool:mcp_tools_call_rejected', {
+        appId: session.appId,
+        runId: session.runId,
+        id,
+        toolName,
+        reason: 'unknown_tool',
+      });
+      return { jsonrpc: '2.0', id, error: { code: -32602, message: 'Unknown tool' } };
+    }
+    const args = params?.arguments && typeof params.arguments === 'object'
+      ? (params.arguments as Record<string, unknown>)
+      : {};
+    const result = await executeAgentTool(session, toolName, args);
+    await appendInstallLog('agent_tool:mcp_tools_call_completed', {
+      appId: session.appId,
+      runId: session.runId,
+      id,
+      toolName,
+      isError: Boolean((result as { success?: unknown }).success === false),
+    });
+    return {
+      jsonrpc: '2.0',
+      id,
+      result: {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(result, null, 2),
+          },
+        ],
+        isError: Boolean((result as { success?: unknown }).success === false),
+      },
+    };
+  }
+
+  return { jsonrpc: '2.0', id, error: { code: -32601, message: 'Method not found' } };
+};
+
+const startForgerMcpServer = async (): Promise<void> => {
+  if (forgerMcpServer) {
+    return;
+  }
+
+  const server = http.createServer((request, response) => {
+    void (async () => {
+      const requestPath = new URL(request.url ?? '/', 'http://127.0.0.1').pathname;
+      if (request.method !== 'POST' || requestPath !== '/mcp') {
+        sendMcpJson(response, 404, { error: 'not_found' });
+        return;
+      }
+
+      const token = getBearerToken(request);
+      const session = token ? agentMcpSessions.get(token) : null;
+      if (!session) {
+        void appendInstallLog('agent_tool:mcp_unauthorized', {
+          path: requestPath,
+          hasToken: Boolean(token),
+        });
+        sendMcpJson(response, 401, { error: 'unauthorized' });
+        return;
+      }
+
+      const raw = await readRequestBody(request);
+      const parsed = JSON.parse(raw) as JsonRpcRequest | JsonRpcRequest[];
+      const requests = Array.isArray(parsed) ? parsed : [parsed];
+      await appendInstallLog('agent_tool:mcp_http_request', {
+        appId: session.appId,
+        runId: session.runId,
+        requestCount: requests.length,
+        methods: requests.map((entry) => entry.method ?? null),
+      });
+      const results = (await Promise.all(requests.map((entry) => handleMcpRequest(session, entry))))
+        .filter((entry): entry is Record<string, unknown> => Boolean(entry));
+
+      if (results.length === 0) {
+        response.writeHead(202);
+        response.end();
+        return;
+      }
+
+      sendMcpJson(response, 200, Array.isArray(parsed) ? results : results[0]);
+    })().catch((error) => {
+      void appendInstallLog('agent_tool:mcp_http_error', {
+        message: error instanceof Error ? error.message : 'internal_error',
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+      sendMcpJson(response, 500, {
+        jsonrpc: '2.0',
+        id: null,
+        error: {
+          code: -32603,
+          message: error instanceof Error ? error.message : 'internal_error',
+        },
+      });
+    });
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      server.off('error', reject);
+      resolve();
+    });
+  });
+
+  const address = server.address();
+  if (!address || typeof address === 'string') {
+    server.close();
+    throw new Error('forger_mcp_server_address_unavailable');
+  }
+
+  forgerMcpServer = {
+    server,
+    url: `http://127.0.0.1:${address.port}/mcp`,
+  };
+
+  await appendInstallLog('agent_tool:mcp_server_started', { url: forgerMcpServer.url });
+};
+
 const findSqliteFile = async (searchDir: string): Promise<string | null> => {
   const extensions = ['.db', '.sqlite', '.sqlite3'];
   try {
@@ -2552,6 +4004,46 @@ const registerIpcHandlers = (): void => {
     return await installAppRuntime(appId);
   });
 
+  ipcMain.handle(IPC_CHANNELS.updateApp, async (_event, appId: string) => {
+    return await updateAppRuntime(appId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.restoreAppUserVersion, async (_event, appId: string) => {
+    return await restoreAppUserVersionRuntime(appId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.resolveAppUpdateConflict, async (_event, appId: string) => {
+    const record = registry.apps[appId];
+    if (!record?.pendingUpdate || record.status !== 'conflict') {
+      return {
+        success: false,
+        userMessage: 'No hay una actualizacion en conflicto para resolver.',
+        technicalCode: 'no_pending_update_conflict',
+      };
+    }
+    if (!chatOrchestrator) {
+      return {
+        success: false,
+        userMessage: 'El agente no esta disponible para resolver el conflicto.',
+        technicalCode: 'chat_orchestrator_unavailable',
+      };
+    }
+    const prompt = buildCodexPromptWithAppContext({
+      appId,
+      displayName: resolveSelectedAppDisplayName(appId),
+      userLanguage: 'not configured',
+      userPrompt:
+        'Resolve this app update conflict. Preserve as much as possible from both the new version and the user customizations. If something cannot be integrated maintainably, leave that part out and explain it in functional terms. Finish the merge and leave a saved version.',
+      sharedFilesRootName: path.basename(getPrivateDataRoot()),
+      sharedFiles: [],
+    });
+    return await chatOrchestrator.startRun({
+      appId,
+      prompt,
+      dangerMode: true,
+    });
+  });
+
   ipcMain.handle(IPC_CHANNELS.uninstallApp, async (_event, appId: string) => {
     return await uninstallAppRuntime(appId);
   });
@@ -2560,8 +4052,8 @@ const registerIpcHandlers = (): void => {
     return await getAppDetails(appId);
   });
 
-  ipcMain.handle(IPC_CHANNELS.installWelcome, async (_event, appId: string) => {
-    return await installWelcome(appId);
+  ipcMain.handle(IPC_CHANNELS.installWelcome, async (_event, appId: string, userLanguage?: string) => {
+    return await installWelcome(appId, userLanguage);
   });
 
   ipcMain.handle(IPC_CHANNELS.openApp, async (_event, appId: string) => {
@@ -2589,6 +4081,11 @@ const registerIpcHandlers = (): void => {
   });
   ipcMain.handle(IPC_CHANNELS.connectCodexAuth, async () => await connectCodexAuth());
   ipcMain.handle(IPC_CHANNELS.disconnectCodexAuth, async () => await disconnectCodexAuth());
+  ipcMain.handle(IPC_CHANNELS.listAgentTools, async () => AGENT_TOOL_PACKAGES);
+  ipcMain.handle(IPC_CHANNELS.getAgentToolSettings, async () => agentToolSettings);
+  ipcMain.handle(IPC_CHANNELS.updateAgentToolApproval, async (_event, input: UpdateAgentToolApprovalInput) => {
+    return await updateAgentToolApproval(input);
+  });
   ipcMain.handle(IPC_CHANNELS.chatStartRun, async (_event, input: ChatStartRunInput) => {
     if (!chatOrchestrator) {
       return { runId: '', status: 'failed' };
@@ -2610,6 +4107,7 @@ const registerIpcHandlers = (): void => {
       appId: input.appId,
       displayName: resolveSelectedAppDisplayName(input.appId),
       userPrompt: input.prompt,
+      userLanguage: input.userLanguage,
       sharedFilesRootName: path.basename(getPrivateDataRoot()),
       sharedFiles: sharedFiles.map((fileRef) => ({
         name: fileRef.name ?? path.basename(fileRef.path),
@@ -2810,7 +4308,10 @@ app.whenReady().then(async () => {
   await ensureGlobalAgentsContext(getForgerHomeRoot());
   await fs.mkdir(getCodexRoot(), { recursive: true });
   await fs.mkdir(getCodexHome(), { recursive: true });
+  await loadAgentToolSettings();
   await loadRegistry();
+  await startDevCatalogService();
+  await startForgerMcpServer();
   fileLibrary = new FileLibrary(getPrivateDataRoot(), getForgerMetadataRoot());
   chatOrchestrator = new ChatOrchestrator({
     forgerHomeRoot: getForgerHomeRoot(),
@@ -2820,13 +4321,59 @@ app.whenReady().then(async () => {
     codexHome: getCodexHome(),
     agentContractVersion: FORGER_AGENT_CONTRACT_VERSION,
     getCodexCliPath: async () => await resolveCodexCliPath(getCodexRoot()),
-    getCodexPathEntries: async () => {
-      const nodeRuntime = await ensureRuntimeInstalled('node', DEFAULT_NODE_VERSION);
-      return getRuntimePathEntries(nodeRuntime);
+    getCodexPathEntries: async (appId?: string) => {
+      const pathEntries = new Set<string>();
+      const record = appId ? registry.apps[appId] : undefined;
+      if (record) {
+        for (const entry of await getAppLocalToolPathEntries(record)) {
+          pathEntries.add(entry);
+        }
+      }
+
+      const codexNodeRuntime = await ensureRuntimeInstalled('node', DEFAULT_NODE_VERSION);
+      for (const entry of getRuntimePathEntries(codexNodeRuntime)) {
+        pathEntries.add(entry);
+      }
+
+      if (record) {
+        const appNodeRuntime = await ensureRuntimeInstalled('node', record.requiredNodeVersion);
+        const appPythonRuntime = await ensureRuntimeInstalled('python', record.requiredPythonVersion);
+        for (const entry of getRuntimePathEntries(appNodeRuntime)) {
+          pathEntries.add(entry);
+        }
+        for (const entry of getRuntimePathEntries(appPythonRuntime)) {
+          pathEntries.add(entry);
+        }
+      }
+
+      return [...pathEntries];
+    },
+    getCodexEnvironment: async (appId?: string) => {
+      const record = appId ? registry.apps[appId] : undefined;
+      const appPythonRuntime = record
+        ? await ensureRuntimeInstalled('python', record.requiredPythonVersion)
+        : undefined;
+      return await getCodexToolEnvironment(appId, appPythonRuntime);
     },
     getCodexAuthenticated: async () => {
       const status = await getCodexAuthStatus();
       return status.authenticated;
+    },
+    createForgerMcpSession,
+    releaseForgerMcpSession,
+    onUpdateConflictResolved: async (appId: string) => {
+      const current = registry.apps[appId];
+      if (!current?.pendingUpdate) {
+        return;
+      }
+      await upsertInstalledRecord({
+        ...current,
+        version: current.pendingUpdate.targetVersion,
+        status: 'installed',
+        userMessage: 'Actualizacion combinada y lista para abrir.',
+        pendingUpdate: undefined,
+      });
+      ensureCatalogStatuses();
     },
     onRunUpdated: (event) => {
       emitChatRunUpdated(event as { run: unknown });
@@ -2865,6 +4412,9 @@ app.whenReady().then(async () => {
 
 app.on('before-quit', () => {
   automationManager?.dispose();
+  devCatalogService?.stop();
+  forgerMcpServer?.server.close();
+  forgerMcpServer = null;
   for (const running of runningApps.values()) {
     void terminateProcess(running.backend);
     void terminateProcess(running.frontend);

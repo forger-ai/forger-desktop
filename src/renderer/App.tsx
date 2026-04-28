@@ -16,6 +16,9 @@ import {
 } from '@mui/material';
 import type { AlertColor } from '@mui/material';
 import type {
+  AgentToolDefinition,
+  AgentToolPackageDefinition,
+  AgentToolSettings,
   AppCategory,
   AppDetails,
   AppSummary,
@@ -37,7 +40,7 @@ import type {
 import { AppShell } from '@renderer/components/AppShell';
 import { CodexConfigModal } from '@renderer/components/CodexConfigModal';
 import { ForgerCloudModal } from '@renderer/components/ForgerCloudModal';
-import { getDictionary } from '@renderer/i18n';
+import { defaultLocale, getDictionary, type Locale } from '@renderer/i18n';
 import { buildAppTheme, resolveThemeMode, type ThemePreference } from '@renderer/theme/appTheme';
 import { AppView } from '@renderer/views/AppView';
 import { AutomationsView } from '@renderer/views/AutomationsView';
@@ -47,13 +50,14 @@ import { DataView } from '@renderer/views/DataView';
 import { FilesView } from '@renderer/views/FilesView';
 import { InstalledAppsView } from '@renderer/views/InstalledAppsView';
 import { SettingsView } from '@renderer/views/SettingsView';
+import { ToolsView } from '@renderer/views/ToolsView';
 import type { View } from '@renderer/components/Sidebar';
 import chatBotIcon from '@renderer/assets/chat-bot-icon.png';
 import chatFemaleIcon from '@renderer/assets/chat-female-icon.png';
 import chatMaleIcon from '@renderer/assets/chat-male-icon.png';
 
-const t = getDictionary('es');
 const THEME_STORAGE_KEY = 'forger-theme-preference';
+const LANGUAGE_STORAGE_KEY = 'forger-language-preference';
 const CHAT_STORAGE_KEY = 'forger-chat-conversations-v1';
 const CODEX_MODEL_STORAGE_KEY = 'forger-codex-model-v1';
 const CODEX_REASONING_STORAGE_KEY = 'forger-codex-reasoning-effort-v1';
@@ -61,6 +65,9 @@ const CHAT_BOT_PICTURE_STORAGE_KEY = 'forger-chat-bot-picture-v1';
 const FORGER_DATA_ROOT_NAME = import.meta.env.DEV ? 'dev-data' : 'data';
 
 export type ChatBotPicture = 'bot' | 'female' | 'male';
+export type LanguagePreference = 'system' | Locale;
+
+const SUPPORTED_LOCALES: Locale[] = ['es', 'en'];
 
 const CHAT_BOT_PICTURE_OPTIONS: Array<{ value: ChatBotPicture; label: string; src: string }> = [
   { value: 'bot', label: 'Bot', src: chatBotIcon },
@@ -94,6 +101,52 @@ const initialCodexAuthStatus: CodexAuthStatus = {
   authenticated: false,
   authFilePath: '',
   codexHome: '',
+};
+
+const initialAgentToolSettings: AgentToolSettings = {
+  approvals: {
+    forger_list_catalog: false,
+    forger_list_installed_apps: false,
+    forger_check_updates: false,
+    forger_get_app_runtime_status: false,
+    forger_open_app: true,
+    forger_stop_app: true,
+    forger_restart_app: true,
+    forger_refresh_app_view: true,
+    forger_update_app: true,
+  },
+};
+
+const normalizeLocale = (value?: string | null): Locale | null => {
+  if (!value) {
+    return null;
+  }
+  const normalized = value.toLowerCase();
+  return SUPPORTED_LOCALES.find((locale) => normalized === locale || normalized.startsWith(`${locale}-`)) ?? null;
+};
+
+const resolveSystemLocale = (): Locale => {
+  if (typeof navigator === 'undefined') {
+    return defaultLocale;
+  }
+  for (const language of navigator.languages ?? []) {
+    const locale = normalizeLocale(language);
+    if (locale) {
+      return locale;
+    }
+  }
+  return normalizeLocale(navigator.language) ?? defaultLocale;
+};
+
+const getStoredLanguagePreference = (): LanguagePreference => {
+  if (typeof window === 'undefined') {
+    return 'system';
+  }
+  const stored = window.localStorage.getItem(LANGUAGE_STORAGE_KEY);
+  if (stored === 'system' || SUPPORTED_LOCALES.includes(stored as Locale)) {
+    return stored as LanguagePreference;
+  }
+  return 'system';
 };
 
 const getStoredThemePreference = (): ThemePreference => {
@@ -224,9 +277,15 @@ function App() {
   const [currentView, setCurrentView] = useState<View>('my-apps');
   const [installedApps, setInstalledApps] = useState<AppSummary[]>([]);
   const [catalogApps, setCatalogApps] = useState<CatalogApp[]>([]);
+  const [openingAppIds, setOpeningAppIds] = useState<Set<string>>(new Set());
+  const openingAppIdsRef = useRef<Set<string>>(new Set());
   const [settings, setSettings] = useState<Settings>(initialSettings);
   const [codexAuthBusy, setCodexAuthBusy] = useState(false);
   const [codexAuthStatus, setCodexAuthStatus] = useState<CodexAuthStatus>(initialCodexAuthStatus);
+  const [agentToolPackages, setAgentToolPackages] = useState<AgentToolPackageDefinition[]>([]);
+  const [agentToolSettings, setAgentToolSettings] = useState<AgentToolSettings>(initialAgentToolSettings);
+  const [agentToolBusyId, setAgentToolBusyId] = useState<AgentToolDefinition['id'] | null>(null);
+  const [agentToolError, setAgentToolError] = useState<string | null>(null);
   const [cloudModalOpen, setCloudModalOpen] = useState(false);
   const [codexConfigOpen, setCodexConfigOpen] = useState(false);
   const [selectedAppDetailsId, setSelectedAppDetailsId] = useState<string | null>(null);
@@ -279,13 +338,20 @@ function App() {
   const [chatProgressLines, setChatProgressLines] = useState<string[]>([]);
   const activeRunConversationIdRef = useRef<string | null>(null);
   const selectedAutomationIdRef = useRef<string | null>(null);
+  const runConversationIdByRunRef = useRef<Map<string, string>>(new Map());
   const deliveredRunRepliesRef = useRef<Set<string>>(new Set());
+  const promptedUpdateAppIdsRef = useRef<Set<string>>(new Set());
   const [bannerMessage, setBannerMessage] = useState<string | null>(null);
   const [bannerSeverity, setBannerSeverity] = useState<AlertColor>('success');
   const [catalogFilter, setCatalogFilter] = useState<'all' | AppCategory>('all');
   const [catalogStatusFilter, setCatalogStatusFilter] = useState<'all' | 'installed' | 'not_installed'>('all');
   const [themePreference, setThemePreference] =
     useState<ThemePreference>(getStoredThemePreference);
+  const [languagePreference, setLanguagePreference] =
+    useState<LanguagePreference>(getStoredLanguagePreference);
+  const [systemLocale, setSystemLocale] = useState<Locale>(resolveSystemLocale);
+  const activeLocale = languagePreference === 'system' ? systemLocale : languagePreference;
+  const t = useMemo(() => getDictionary(activeLocale), [activeLocale]);
   const [chatBotPicture, setChatBotPicture] = useState<ChatBotPicture>(getStoredChatBotPicture);
   const prefersDark = useMediaQuery('(prefers-color-scheme: dark)');
   const chatBotPictureSrc =
@@ -344,26 +410,39 @@ function App() {
     }
   };
 
+  const refreshApps = async () => {
+    const desktopApi = getDesktopApi();
+    const catalog = await desktopApi.listCatalogApps();
+    const installed = await desktopApi.listInstalledApps();
+    setCatalogApps(catalog);
+    setInstalledApps(installed);
+    return { catalog, installed };
+  };
+
+  const refreshAgentTools = async () => {
+    const desktopApi = getDesktopApi();
+    const [toolPackages, toolSettings] = await Promise.all([
+      desktopApi.listAgentTools(),
+      desktopApi.getAgentToolSettings(),
+    ]);
+    setAgentToolPackages(toolPackages);
+    setAgentToolSettings(toolSettings);
+  };
+
   useEffect(() => {
     const loadData = async () => {
       const desktopApi = getDesktopApi();
-      const [installedResult, catalogResult, settingsResult, codexAuthResult, filesResult, categoriesResult, automationsResult] = await Promise.allSettled([
-        desktopApi.listInstalledApps(),
-        desktopApi.listCatalogApps(),
+      const [appsResult, settingsResult, codexAuthResult, toolsResult, filesResult, categoriesResult, automationsResult] = await Promise.allSettled([
+        refreshApps(),
         desktopApi.getSettings(),
         desktopApi.getCodexAuthStatus(),
+        refreshAgentTools(),
         desktopApi.filesList(fileFilters),
         desktopApi.filesListCategories(),
         desktopApi.automationsList(),
       ]);
 
-      if (installedResult.status === 'fulfilled') {
-        setInstalledApps(installedResult.value);
-      }
-
-      if (catalogResult.status === 'fulfilled') {
-        setCatalogApps(catalogResult.value);
-      } else {
+      if (appsResult.status === 'rejected') {
         setBannerSeverity('error');
         setBannerMessage(t.settings.authErrorFallback);
       }
@@ -394,6 +473,10 @@ function App() {
           setCodexConfigOpen(true);
         }
       }
+
+      if (toolsResult.status === 'rejected') {
+        setAgentToolError(t.sections.tools.saveError);
+      }
     };
 
     void loadData();
@@ -418,12 +501,7 @@ function App() {
 
       setBannerMessage(progress.userMessage);
 
-      void Promise.all([desktopApi.listInstalledApps(), desktopApi.listCatalogApps()]).then(
-        ([installed, catalog]) => {
-          setInstalledApps(installed);
-          setCatalogApps(catalog);
-        },
-      );
+      void refreshApps();
 
       if (progress.phase === 'completed') {
         setSelectedAppId(appId);
@@ -442,12 +520,7 @@ function App() {
         setBannerMessage(status.userMessage ?? t.actions.installed);
       }
 
-      void Promise.all([desktopApi.listInstalledApps(), desktopApi.listCatalogApps()]).then(
-        ([installed, catalog]) => {
-          setInstalledApps(installed);
-          setCatalogApps(catalog);
-        },
-      );
+      void refreshApps();
     });
 
     const unsubscribeChat = desktopApi.onChatRunUpdated(({ run }) => {
@@ -460,8 +533,65 @@ function App() {
       setChatRunActive(!isTerminal);
       setChatProgressLines(run.progressLog ?? []);
 
+      if (run.status === 'needs_permission' && run.permissionRequest) {
+        const dedupePermissionKey = `${run.runId}:needs_permission:${run.permissionRequest.requestId}`;
+        if (!deliveredRunRepliesRef.current.has(dedupePermissionKey)) {
+          deliveredRunRepliesRef.current.add(dedupePermissionKey);
+          const targetConversationId =
+            runConversationIdByRunRef.current.get(run.runId) ??
+            activeRunConversationIdRef.current ??
+            activeConversationId;
+          if (targetConversationId) {
+            const permissionRequest = run.permissionRequest;
+            console.info('[Forger permission] rendering request', {
+              runId: run.runId,
+              requestId: permissionRequest.requestId,
+              permission: permissionRequest.permission,
+              resource: permissionRequest.resource,
+              targetConversationId,
+            });
+            setChatConversations((currentConversations) =>
+              currentConversations.map((conversation) => {
+                if (conversation.id !== targetConversationId) {
+                  return conversation;
+                }
+                return {
+                  ...conversation,
+                  updatedAt: new Date().toISOString(),
+                  messages: [
+                    ...conversation.messages,
+                    {
+                      id: `assistant-permission-${run.runId}-${permissionRequest.requestId}`,
+                      role: 'assistant',
+                      content: t.sections.chat.permissionPrompt(permissionRequest.resource),
+                      action: {
+                        type: 'permission',
+                        runId: run.runId,
+                        request: permissionRequest,
+                      },
+                    },
+                  ],
+                };
+              }),
+            );
+          } else {
+            console.warn('[Forger permission] request received without an active conversation target', {
+              runId: run.runId,
+              requestId: run.permissionRequest.requestId,
+              permission: run.permissionRequest.permission,
+              resource: run.permissionRequest.resource,
+            });
+            setBannerSeverity('warning');
+            setBannerMessage(t.sections.chat.permissionPrompt(run.permissionRequest.resource));
+          }
+        }
+        return;
+      }
+
       const isMessageTerminal =
         run.status === 'preview_ready' ||
+        run.status === 'applied' ||
+        run.status === 'undone' ||
         run.status === 'failed' ||
         run.status === 'canceled';
       if (isTerminal && !isMessageTerminal) {
@@ -474,7 +604,10 @@ function App() {
       }
 
       deliveredRunRepliesRef.current.add(dedupeKey);
-      const targetConversationId = activeRunConversationIdRef.current ?? activeConversationId;
+      const targetConversationId =
+        runConversationIdByRunRef.current.get(run.runId) ??
+        activeRunConversationIdRef.current ??
+        activeConversationId;
       if (!targetConversationId) {
         return;
       }
@@ -503,6 +636,7 @@ function App() {
         }),
       );
       if (isTerminal) {
+        runConversationIdByRunRef.current.delete(run.runId);
         activeRunConversationIdRef.current = null;
       }
     });
@@ -627,6 +761,21 @@ function App() {
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
+      window.localStorage.setItem(LANGUAGE_STORAGE_KEY, languagePreference);
+    }
+  }, [languagePreference]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return undefined;
+    }
+    const handleLanguageChange = () => setSystemLocale(resolveSystemLocale());
+    window.addEventListener('languagechange', handleLanguageChange);
+    return () => window.removeEventListener('languagechange', handleLanguageChange);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
       window.localStorage.setItem(CODEX_MODEL_STORAGE_KEY, selectedCodexModel);
     }
   }, [selectedCodexModel]);
@@ -711,18 +860,12 @@ function App() {
       const desktopApi = getDesktopApi();
       const result = await desktopApi.installApp(appId);
 
-      const [installed, catalog] = await Promise.all([
-        desktopApi.listInstalledApps(),
-        desktopApi.listCatalogApps(),
-      ]);
-
-      setInstalledApps(installed);
-      setCatalogApps(catalog);
+      await refreshApps();
 
       if (result.success) {
         setBannerSeverity('success');
         setBannerMessage(result.userMessage || t.banners.installed(getAppMeta(appId).name));
-        const welcome = await desktopApi.installWelcome(appId);
+        const welcome = await desktopApi.installWelcome(appId, activeLocale);
         if (welcome.success && welcome.message) {
           createInstallWelcomeConversation(appId, welcome.message);
           setSelectedAppId(appId);
@@ -738,16 +881,104 @@ function App() {
     }
   };
 
-  const handleOpen = async (appId: string) => {
-    const desktopApi = getDesktopApi();
-    const result = await desktopApi.openApp(appId);
-
-    if (result.success) {
-      setBannerSeverity('success');
+  const handleUpdate = async (appId: string) => {
+    try {
+      const desktopApi = getDesktopApi();
+      const result = await desktopApi.updateApp(appId);
+      await refreshApps();
+      setBannerSeverity(result.success ? 'success' : result.phase === 'conflict' ? 'warning' : 'error');
       setBannerMessage(result.userMessage);
-    } else {
+      if (selectedAppDetailsId === appId) {
+        setSelectedAppDetails(await desktopApi.getAppDetails(appId));
+      }
+    } catch (_error) {
       setBannerSeverity('error');
-      setBannerMessage(result.userMessage);
+      setBannerMessage(t.settings.authErrorFallback);
+    }
+  };
+
+  const handleAgentToolApprovalChange = async (
+    toolId: AgentToolDefinition['id'],
+    requiresApproval: boolean,
+  ) => {
+    setAgentToolBusyId(toolId);
+    setAgentToolError(null);
+    try {
+      const updated = await getDesktopApi().updateAgentToolApproval({ toolId, requiresApproval });
+      setAgentToolSettings(updated);
+    } catch (_error) {
+      setAgentToolError(t.sections.tools.saveError);
+    } finally {
+      setAgentToolBusyId(null);
+    }
+  };
+
+  const handleRestoreUserVersion = async (appId: string) => {
+    const desktopApi = getDesktopApi();
+    const result = await desktopApi.restoreAppUserVersion(appId);
+    await refreshApps();
+    setBannerSeverity(result.success ? 'success' : 'error');
+    setBannerMessage(result.userMessage ?? t.settings.authErrorFallback);
+    if (selectedAppDetailsId === appId) {
+      setSelectedAppDetails(await desktopApi.getAppDetails(appId));
+    }
+  };
+
+  const handleResolveConflict = async (appId: string) => {
+    const desktopApi = getDesktopApi();
+    const result = await desktopApi.resolveAppUpdateConflict(appId);
+    if ('success' in result && !result.success) {
+      setBannerSeverity('error');
+      setBannerMessage(result.userMessage ?? t.settings.authErrorFallback);
+      return;
+    }
+    setSelectedAppId(appId);
+    setCurrentView('chat');
+    setBannerSeverity('info');
+    setBannerMessage(t.actions.resolveWithForger);
+  };
+
+  useEffect(() => {
+    const candidate = installedApps.find((appEntry) => appEntry.updateAvailable && appEntry.latestVersion && appEntry.status === 'installed');
+    if (!candidate || promptedUpdateAppIdsRef.current.has(`${candidate.id}:${candidate.latestVersion}`)) {
+      return;
+    }
+    const latestVersion = candidate.latestVersion;
+    if (!latestVersion) {
+      return;
+    }
+    promptedUpdateAppIdsRef.current.add(`${candidate.id}:${candidate.latestVersion}`);
+    const meta = getAppMeta(candidate.id);
+    const changes = candidate.changelog?.changes?.length ? `\n\n${candidate.changelog.changes.map((change) => `- ${change}`).join('\n')}` : `\n\n${t.appView.updateNoChangelog}`;
+    const confirmed = window.confirm(`${t.appView.updatePrompt(meta.name, latestVersion)}${changes}`);
+    if (confirmed) {
+      void handleUpdate(candidate.id);
+    }
+  }, [installedApps]);
+
+  const handleOpen = async (appId: string) => {
+    if (openingAppIdsRef.current.has(appId)) {
+      return;
+    }
+    openingAppIdsRef.current = new Set(openingAppIdsRef.current).add(appId);
+    setOpeningAppIds(new Set(openingAppIdsRef.current));
+
+    const desktopApi = getDesktopApi();
+    try {
+      const result = await desktopApi.openApp(appId);
+
+      if (result.success) {
+        setBannerSeverity('success');
+        setBannerMessage(result.userMessage);
+      } else {
+        setBannerSeverity('error');
+        setBannerMessage(result.userMessage);
+      }
+    } finally {
+      const nextOpeningAppIds = new Set(openingAppIdsRef.current);
+      nextOpeningAppIds.delete(appId);
+      openingAppIdsRef.current = nextOpeningAppIds;
+      setOpeningAppIds(new Set(nextOpeningAppIds));
     }
   };
 
@@ -777,12 +1008,7 @@ function App() {
 
     const desktopApi = getDesktopApi();
     const result = await desktopApi.uninstallApp(appId);
-    const [installed, catalog] = await Promise.all([
-      desktopApi.listInstalledApps(),
-      desktopApi.listCatalogApps(),
-    ]);
-    setInstalledApps(installed);
-    setCatalogApps(catalog);
+    await refreshApps();
     if (selectedAppDetailsId === appId) {
       setSelectedAppDetails(null);
       setCurrentView('my-apps');
@@ -1036,14 +1262,16 @@ function App() {
           };
         }),
       );
-      await desktopApi.chatStartRun({
+      const startResult = await desktopApi.chatStartRun({
         appId: selectedAppId,
-        prompt: trimmed || 'Revisa los archivos compartidos en este mensaje.',
+        prompt: trimmed || 'Review the shared files in this message.',
         threadId: conversationForRun?.threadId ?? null,
+        userLanguage: activeLocale,
         sharedFiles,
         model: modelOption.realModelName,
         reasoningEffort: selectedCodexReasoningEffort,
       });
+      runConversationIdByRunRef.current.set(startResult.runId, targetConversationId);
     } catch (error) {
       setChatRunActive(false);
       activeRunConversationIdRef.current = null;
@@ -1071,6 +1299,20 @@ function App() {
           };
         }),
       );
+    }
+  };
+
+  const handleRespondPermission = async (
+    runId: string,
+    requestId: string,
+    decision: 'allow' | 'deny',
+  ) => {
+    console.info('[Forger permission] user decision', { runId, requestId, decision });
+    const result = await getDesktopApi().chatApprovePermission({ runId, requestId, decision });
+    if (!result.success) {
+      console.warn('[Forger permission] decision was rejected by main process', { runId, requestId, decision });
+      setBannerSeverity('error');
+      setBannerMessage(t.settings.authErrorFallback);
     }
   };
 
@@ -1281,12 +1523,16 @@ function App() {
         {currentView === 'my-apps' ? (
           <InstalledAppsView
             apps={installedApps}
+            openingAppIds={openingAppIds}
             t={t}
             getAppMeta={getAppMeta}
             getCategoryLabel={getCategoryLabel}
             onOpen={handleOpen}
             onStop={handleStop}
             onRetry={handleRetry}
+            onUpdate={(appId) => void handleUpdate(appId)}
+            onRestoreUserVersion={(appId) => void handleRestoreUserVersion(appId)}
+            onResolveConflict={(appId) => void handleResolveConflict(appId)}
             onDetails={(appId) => void openAppDetails(appId, 'my-apps')}
             onDelete={(appId) => void handleDeleteApp(appId)}
             onGoCatalog={() => setCurrentView('catalog')}
@@ -1296,14 +1542,18 @@ function App() {
         {currentView === 'catalog' ? (
           <CatalogView
             apps={catalogApps}
+            openingAppIds={openingAppIds}
             filter={catalogFilter}
             onFilterChange={setCatalogFilter}
             statusFilter={catalogStatusFilter}
             onStatusFilterChange={setCatalogStatusFilter}
             onInstall={handleInstall}
+            onUpdate={(appId) => void handleUpdate(appId)}
             onOpen={handleOpen}
             onStop={handleStop}
             onRetry={handleRetry}
+            onRestoreUserVersion={(appId) => void handleRestoreUserVersion(appId)}
+            onResolveConflict={(appId) => void handleResolveConflict(appId)}
             onDetails={(appId) => void openAppDetails(appId, 'catalog')}
             onDelete={(appId) => void handleDeleteApp(appId)}
             t={t}
@@ -1315,12 +1565,16 @@ function App() {
         {currentView === 'app' ? (
           <AppView
             details={selectedAppDetails}
+            openingAppIds={openingAppIds}
             t={t}
             categoryLabel={selectedAppDetails ? getCategoryLabel(selectedAppDetails.app.category) : ''}
             onBack={() => setCurrentView(appDetailsBackView)}
             onInstall={(appId) => void handleInstall(appId)}
+            onUpdate={(appId) => void handleUpdate(appId)}
             onOpen={(appId) => void handleOpen(appId)}
             onStop={(appId) => void handleStop(appId)}
+            onRestoreUserVersion={(appId) => void handleRestoreUserVersion(appId)}
+            onResolveConflict={(appId) => void handleResolveConflict(appId)}
             onDelete={(appId) => void handleDeleteApp(appId)}
           />
         ) : null}
@@ -1361,7 +1615,9 @@ function App() {
             progressLines={chatProgressLines}
             codexConfigured={codexAuthStatus.authenticated}
             onConfigureCodex={() => setCodexConfigOpen(true)}
+            openingAppIds={openingAppIds}
             onOpenApp={(appId) => void handleOpen(appId)}
+            onRespondPermission={handleRespondPermission}
           />
         ) : null}
 
@@ -1411,6 +1667,19 @@ function App() {
           />
         ) : null}
 
+        {currentView === 'tools' ? (
+          <ToolsView
+            packages={agentToolPackages}
+            settings={agentToolSettings}
+            busyToolId={agentToolBusyId}
+            errorMessage={agentToolError}
+            t={t}
+            onApprovalChange={(toolId, requiresApproval) =>
+              void handleAgentToolApprovalChange(toolId, requiresApproval)
+            }
+          />
+        ) : null}
+
         {currentView === 'settings' ? (
           <SettingsView
             codexAuthBusy={codexAuthBusy}
@@ -1418,6 +1687,10 @@ function App() {
             t={t}
             themePreference={themePreference}
             onThemeChange={setThemePreference}
+            languagePreference={languagePreference}
+            activeLocale={activeLocale}
+            systemLocale={systemLocale}
+            onLanguageChange={setLanguagePreference}
             chatBotPicture={chatBotPicture}
             chatBotPictureOptions={CHAT_BOT_PICTURE_OPTIONS}
             onChatBotPictureChange={setChatBotPicture}
