@@ -10,6 +10,7 @@ export const es = {
     chat: 'Chat',
     files: 'Archivos',
     datos: 'Datos',
+    tools: 'Herramientas',
     settings: 'Ajustes',
   },
   sections: {
@@ -63,9 +64,13 @@ export const es = {
       ],
       emptyState: '',
       assistantReply:
-        'Puedo ayudarte con eso. Prepararia una vista previa segura antes de aplicar cualquier cambio.',
+        'Puedo ayudarte con eso. Primero aclarare el cambio visual y el flujo antes de guardar una nueva version.',
       assistantGreeting:
         'Estoy listo para ayudarte a adaptar esta app con pasos claros y seguros.',
+      permissionPrompt: (resource: string) => `Forger quiere usar "${resource}" para continuar.`,
+      permissionBadge: 'Confirmacion requerida',
+      permissionApprove: 'Aprobar',
+      permissionDeny: 'Rechazar',
     },
     settings: {
       title: 'Ajustes',
@@ -85,6 +90,76 @@ export const es = {
       rowCount: (n: number, total: number) => `${n.toLocaleString()} filas${total > n ? ` de ${total.toLocaleString()}` : ''}`,
       dbModuleUnavailable: 'El modulo de base de datos no esta instalado. Ejecuta: npm install better-sqlite3 y electron-rebuild.',
       dbNotFound: 'No se encontro un archivo SQLite para esta app.',
+    },
+    tools: {
+      title: 'Herramientas',
+      subtitle: 'Administra los paquetes de herramientas que Forger puede usar por ti.',
+      empty: 'No hay paquetes de herramientas disponibles.',
+      toolLabel: 'Herramienta',
+      categoryLabel: 'Categoria',
+      riskLabel: 'Riesgo',
+      approvalLabel: 'Requiere aprobacion',
+      backToPackages: 'Paquetes',
+      packageToolCount: (count: number) => `${count.toLocaleString()} herramientas`,
+      approvalToggleLabel: 'Cambiar requisito de aprobacion',
+      categories: {
+        consulta: 'Consulta',
+        app: 'App',
+        actualizacion: 'Actualizacion',
+        vista: 'Vista',
+      },
+      risks: {
+        bajo: 'Bajo',
+        medio: 'Medio',
+        alto: 'Alto',
+      },
+      approvalOn: 'Con aprobacion',
+      approvalOff: 'Sin aprobacion',
+      saveError: 'No pudimos guardar la configuracion de esta herramienta.',
+      packages: {
+        forger: {
+          name: 'Herramientas de Forger',
+          description: 'Herramientas incluidas con la aplicacion desktop de Forger.',
+        },
+      },
+      definitions: {
+        forger_list_catalog: {
+          name: 'Obtener catalogo',
+          description: 'Revisa las apps publicadas y sus versiones disponibles.',
+        },
+        forger_list_installed_apps: {
+          name: 'Listar apps instaladas',
+          description: 'Consulta que apps estan instaladas y su estado actual.',
+        },
+        forger_check_updates: {
+          name: 'Revisar actualizaciones',
+          description: 'Compara versiones instaladas con el catalogo publicado.',
+        },
+        forger_get_app_runtime_status: {
+          name: 'Consultar estado de app',
+          description: 'Revisa si una app esta abierta, detenida o requiere atencion.',
+        },
+        forger_open_app: {
+          name: 'Abrir app',
+          description: 'Inicia una app instalada y abre su ventana.',
+        },
+        forger_stop_app: {
+          name: 'Cerrar app',
+          description: 'Detiene una app abierta y cierra sus servicios locales.',
+        },
+        forger_restart_app: {
+          name: 'Reiniciar app',
+          description: 'Cierra y vuelve a abrir una app instalada.',
+        },
+        forger_refresh_app_view: {
+          name: 'Reiniciar vista',
+          description: 'Recarga la ventana de una app que ya esta abierta.',
+        },
+        forger_update_app: {
+          name: 'Actualizar app',
+          description: 'Aplica una nueva version publicada cuando esta disponible.',
+        },
+      },
     },
     files: {
       title: 'Archivos',
@@ -125,14 +200,19 @@ export const es = {
     back: 'Volver',
     close: 'Cerrar',
     open: 'Abrir',
+    opening: 'Abriendo...',
     configure: 'Mas detalles',
     details: 'Mas detalles',
     delete: 'Eliminar',
     uninstall: 'Desinstalar',
     install: 'Instalar',
+    update: 'Actualizar',
     installing: 'Instalando',
     installed: 'Instalada',
     running: 'En ejecucion',
+    conflict: 'Conflicto',
+    restoreUserVersion: 'Restaurar mi version',
+    resolveWithForger: 'Resolver con Forger',
     stop: 'Detener',
     retry: 'Reintentar',
     error: 'Error',
@@ -180,6 +260,10 @@ export const es = {
     reverted: 'deshecho',
     updatesTitle: 'Actualizaciones',
     updatesBody: 'Forger conserva la version original para preparar actualizaciones futuras sin perder tus cambios locales.',
+    updateAvailable: (version: string) => `Version ${version} disponible`,
+    updatePrompt: (appName: string, version: string) => `${appName} tiene una actualizacion disponible (${version}).`,
+    updateNoChangelog: 'Esta version no incluye notas de cambios.',
+    conflictBody: 'No pudimos combinar automaticamente la actualizacion con tus cambios. La app queda pausada hasta restaurar tu version o pedir ayuda a Forger.',
     deleteConfirm: (appName: string) => `Eliminar ${appName} borrara la app y sus datos locales de este equipo. Esta accion no se puede deshacer. ¿Quieres continuar?`,
   },
   status: {
@@ -215,10 +299,17 @@ export const es = {
     codexHomeLabel: 'Home Codex',
     codexAuthFileLabel: 'Auth Codex',
     appearanceDescription: 'Elige como quieres ver Forger hoy.',
+    language: 'Idioma',
+    languageNames: {
+      es: 'Español',
+      en: 'Inglés',
+    },
+    languageSystem: (language: string) => `Sistema (${language})`,
+    activeLanguage: (language: string) => `Idioma activo: ${language}`,
     chatBotPicture: 'Imagen del chat bot',
     privacyDescription:
       'Forger trabaja en su propio espacio privado. Solo usamos los archivos que tu decides compartir.',
-    technicalDescription: 'La experiencia prioriza lenguaje simple, vista previa y acciones seguras.',
+    technicalDescription: 'La experiencia prioriza lenguaje simple, versiones guardadas y acciones seguras.',
     themeLight: 'Claro',
     themeDark: 'Oscuro',
     themeSystem: 'Sistema',
@@ -237,8 +328,8 @@ export const es = {
     productividad: 'Productividad',
   } satisfies Record<AppCategory, string>,
   apps: {
-    'finance-os-lite': {
-      name: 'Finance OS Lite',
+    'finance-os': {
+      name: 'Finance OS',
       description: 'Controla ingresos, gastos y reportes personales con una vista simple.',
     },
     'recetario-personal': {

@@ -6,14 +6,18 @@ import { AppsGrid } from '@renderer/components/AppsGrid';
 
 interface CatalogViewProps {
   apps: CatalogApp[];
+  openingAppIds: Set<string>;
   filter: 'all' | AppCategory;
   onFilterChange: (filter: 'all' | AppCategory) => void;
   statusFilter: 'all' | 'installed' | 'not_installed';
   onStatusFilterChange: (filter: 'all' | 'installed' | 'not_installed') => void;
   onInstall: (appId: string) => void;
+  onUpdate: (appId: string) => void;
   onOpen: (appId: string) => void;
   onStop: (appId: string) => void;
   onRetry: (appId: string) => void;
+  onRestoreUserVersion: (appId: string) => void;
+  onResolveConflict: (appId: string) => void;
   onDetails: (appId: string) => void;
   onDelete: (appId: string) => void;
   t: AppDictionary;
@@ -25,14 +29,18 @@ const filters: Array<'all' | AppCategory> = ['all', 'finanzas', 'hogar', 'salud'
 
 export function CatalogView({
   apps,
+  openingAppIds,
   filter,
   onFilterChange,
   statusFilter,
   onStatusFilterChange,
   onInstall,
+  onUpdate,
   onOpen,
   onStop,
   onRetry,
+  onRestoreUserVersion,
+  onResolveConflict,
   onDetails,
   onDelete,
   t,
@@ -41,7 +49,7 @@ export function CatalogView({
 }: CatalogViewProps) {
   const statusApps =
     statusFilter === 'installed'
-      ? apps.filter((app) => app.status === 'installed' || app.status === 'running' || app.status === 'error')
+      ? apps.filter((app) => app.status === 'installed' || app.status === 'running' || app.status === 'error' || app.status === 'conflict')
       : statusFilter === 'not_installed'
         ? apps.filter((app) => app.status === 'not_installed')
         : apps;
@@ -92,15 +100,20 @@ export function CatalogView({
         <AppsGrid>
           {visibleApps.map((app) => {
             const meta = getAppMeta(app.id);
-            const isInstalled = app.status === 'installed' || app.status === 'running';
+            const isInstalled = app.status === 'installed' || app.status === 'running' || app.status === 'conflict';
             const isInstalling = app.status === 'installing';
             const hasError = app.status === 'error';
+            const isConflict = app.status === 'conflict';
             const statusLabel = isInstalling
               ? t.actions.installing
               : app.status === 'running'
                 ? t.actions.running
+                : isConflict
+                  ? t.actions.conflict
                 : hasError
                   ? t.actions.error
+                  : app.updateAvailable && app.latestVersion
+                    ? t.appView.updateAvailable(app.latestVersion)
                   : isInstalled
                     ? t.actions.installed
                     : t.actions.available;
@@ -108,21 +121,32 @@ export function CatalogView({
               ? 'warning'
               : app.status === 'running'
                 ? 'info'
+                : isConflict
+                  ? 'error'
                 : hasError
                   ? 'error'
+                  : app.updateAvailable
+                    ? 'warning'
                   : isInstalled
                     ? 'success'
                     : 'default';
-            const primaryAction = hasError ? 'retry' : isInstalled ? (app.status === 'running' ? 'stop' : 'open') : 'install';
+            const primaryAction = hasError ? 'retry' : app.updateAvailable ? 'update' : isInstalled ? (app.status === 'running' ? 'stop' : 'open') : 'install';
+            const isOpening = primaryAction === 'open' && openingAppIds.has(app.id);
             const primaryActionLabel = hasError
               ? t.actions.retry
               : app.status === 'running'
                 ? t.actions.stop
               : isInstalling
                 ? t.actions.installing
-                : isInstalled
-                  ? t.actions.open
-                  : t.actions.install;
+              : isConflict
+                ? t.actions.resolveWithForger
+              : app.updateAvailable
+                ? t.actions.update
+              : isInstalled
+                ? isOpening
+                  ? t.actions.opening
+                  : t.actions.open
+                : t.actions.install;
 
             return (
               <AppCard
@@ -135,8 +159,13 @@ export function CatalogView({
                 primaryAction={primaryAction}
                 primaryActionLabel={primaryActionLabel}
                 primaryDisabled={isInstalling}
+                primaryLoading={isOpening}
                 onPrimaryAction={() => {
                   if (isInstalling) {
+                    return;
+                  }
+                  if (isConflict) {
+                    onResolveConflict(app.id);
                     return;
                   }
                   if (hasError) {
@@ -147,6 +176,10 @@ export function CatalogView({
                     onStop(app.id);
                     return;
                   }
+                  if (app.updateAvailable) {
+                    onUpdate(app.id);
+                    return;
+                  }
                   if (isInstalled) {
                     onOpen(app.id);
                     return;
@@ -155,6 +188,8 @@ export function CatalogView({
                     onInstall(app.id);
                   }
                 }}
+                secondaryActionLabel={isConflict ? t.actions.restoreUserVersion : undefined}
+                onSecondaryAction={isConflict ? () => onRestoreUserVersion(app.id) : undefined}
                 tertiaryActionLabel={isInstalled && !isInstalling ? t.actions.uninstall : undefined}
                 onTertiaryAction={isInstalled && !isInstalling ? () => onDelete(app.id) : undefined}
                 onCardClick={() => onDetails(app.id)}

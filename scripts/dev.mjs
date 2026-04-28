@@ -9,6 +9,48 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, '..');
 
+const parseEnvValue = (value) => {
+  const trimmed = value.trim();
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
+};
+
+const loadDotEnv = async () => {
+  const envPath = path.join(rootDir, '.env');
+  let raw;
+  try {
+    raw = await fs.readFile(envPath, 'utf8');
+  } catch {
+    return;
+  }
+
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) {
+      continue;
+    }
+
+    const separator = trimmed.indexOf('=');
+    if (separator <= 0) {
+      continue;
+    }
+
+    const key = trimmed.slice(0, separator).trim();
+    const value = parseEnvValue(trimmed.slice(separator + 1));
+    if (!key || process.env[key] !== undefined) {
+      continue;
+    }
+    process.env[key] = value;
+  }
+};
+
+await loadDotEnv();
+
 const binName = (name) => {
   if (process.platform === 'win32') {
     return `${name}.cmd`;

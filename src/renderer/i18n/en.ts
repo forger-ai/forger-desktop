@@ -10,6 +10,7 @@ export const en = {
     chat: 'Chat',
     files: 'Files',
     datos: 'Data',
+    tools: 'Tools',
     settings: 'Settings',
   },
   sections: {
@@ -63,9 +64,13 @@ export const en = {
       ],
       emptyState: '',
       assistantReply:
-        'I can help with that. I would prepare a safe preview before applying any change.',
+        'I can help with that. I will clarify the visual change and flow before saving a new version.',
       assistantGreeting:
         'I am ready to help you adapt this app with clear and safe steps.',
+      permissionPrompt: (resource: string) => `Forger wants to use "${resource}" to continue.`,
+      permissionBadge: 'Confirmation required',
+      permissionApprove: 'Approve',
+      permissionDeny: 'Deny',
     },
     settings: {
       title: 'Settings',
@@ -85,6 +90,76 @@ export const en = {
       rowCount: (n: number, total: number) => `${n.toLocaleString()} rows${total > n ? ` of ${total.toLocaleString()}` : ''}`,
       dbModuleUnavailable: 'The database module is not installed. Run: npm install better-sqlite3 and electron-rebuild.',
       dbNotFound: 'No SQLite file found for this app.',
+    },
+    tools: {
+      title: 'Tools',
+      subtitle: 'Manage the tool packages Forger can use for you.',
+      empty: 'No tool packages available.',
+      toolLabel: 'Tool',
+      categoryLabel: 'Category',
+      riskLabel: 'Risk',
+      approvalLabel: 'Requires approval',
+      backToPackages: 'Packages',
+      packageToolCount: (count: number) => `${count.toLocaleString()} tools`,
+      approvalToggleLabel: 'Toggle approval requirement',
+      categories: {
+        consulta: 'Query',
+        app: 'App',
+        actualizacion: 'Update',
+        vista: 'View',
+      },
+      risks: {
+        bajo: 'Low',
+        medio: 'Medium',
+        alto: 'High',
+      },
+      approvalOn: 'Approval required',
+      approvalOff: 'No approval',
+      saveError: 'Could not save this tool setting.',
+      packages: {
+        forger: {
+          name: 'Forger tools',
+          description: 'Built-in tools included with the Forger desktop application.',
+        },
+      },
+      definitions: {
+        forger_list_catalog: {
+          name: 'Get catalog',
+          description: 'Checks published apps and their available versions.',
+        },
+        forger_list_installed_apps: {
+          name: 'List installed apps',
+          description: 'Checks which apps are installed and their current status.',
+        },
+        forger_check_updates: {
+          name: 'Check updates',
+          description: 'Compares installed versions with the published catalog.',
+        },
+        forger_get_app_runtime_status: {
+          name: 'Check app status',
+          description: 'Checks whether an app is open, stopped, or needs attention.',
+        },
+        forger_open_app: {
+          name: 'Open app',
+          description: 'Starts an installed app and opens its window.',
+        },
+        forger_stop_app: {
+          name: 'Close app',
+          description: 'Stops an open app and closes its local services.',
+        },
+        forger_restart_app: {
+          name: 'Restart app',
+          description: 'Closes and opens an installed app again.',
+        },
+        forger_refresh_app_view: {
+          name: 'Refresh view',
+          description: 'Reloads the window of an app that is already open.',
+        },
+        forger_update_app: {
+          name: 'Update app',
+          description: 'Applies a newly published version when available.',
+        },
+      },
     },
     files: {
       title: 'Files',
@@ -125,14 +200,19 @@ export const en = {
     back: 'Back',
     close: 'Close',
     open: 'Open',
+    opening: 'Opening...',
     configure: 'More details',
     details: 'More details',
     delete: 'Delete',
     uninstall: 'Uninstall',
     install: 'Install',
+    update: 'Update',
     installing: 'Installing',
     installed: 'Installed',
     running: 'Running',
+    conflict: 'Conflict',
+    restoreUserVersion: 'Restore my version',
+    resolveWithForger: 'Resolve with Forger',
     stop: 'Stop',
     retry: 'Retry',
     error: 'Error',
@@ -180,6 +260,10 @@ export const en = {
     reverted: 'reverted',
     updatesTitle: 'Updates',
     updatesBody: 'Forger keeps the original version to prepare future updates without losing your local changes.',
+    updateAvailable: (version: string) => `Version ${version} available`,
+    updatePrompt: (appName: string, version: string) => `${appName} has an update available (${version}).`,
+    updateNoChangelog: 'This version does not include release notes.',
+    conflictBody: 'We could not automatically combine the update with your changes. The app stays paused until you restore your version or ask Forger for help.',
     deleteConfirm: (appName: string) => `Deleting ${appName} will remove the app and its local data from this computer. This cannot be undone. Continue?`,
   },
   status: {
@@ -215,10 +299,17 @@ export const en = {
     codexHomeLabel: 'Codex home',
     codexAuthFileLabel: 'Codex auth',
     appearanceDescription: 'Choose how Forger should look right now.',
+    language: 'Language',
+    languageNames: {
+      es: 'Spanish',
+      en: 'English',
+    },
+    languageSystem: (language: string) => `System (${language})`,
+    activeLanguage: (language: string) => `Active language: ${language}`,
     chatBotPicture: 'Chat bot picture',
     privacyDescription:
       'Forger works inside its private space. We only use files you explicitly choose to share.',
-    technicalDescription: 'The experience prioritizes simple language, preview, and safe actions.',
+    technicalDescription: 'The experience prioritizes simple language, saved versions, and safe actions.',
     themeLight: 'Light',
     themeDark: 'Dark',
     themeSystem: 'System',
@@ -237,8 +328,8 @@ export const en = {
     productividad: 'Productivity',
   } satisfies Record<AppCategory, string>,
   apps: {
-    'finance-os-lite': {
-      name: 'Finance OS Lite',
+    'finance-os': {
+      name: 'Finance OS',
       description: 'Track income, spending, and personal reports with a simple view.',
     },
     'recetario-personal': {

@@ -6,12 +6,16 @@ import { AppsGrid } from '@renderer/components/AppsGrid';
 
 interface InstalledAppsViewProps {
   apps: AppSummary[];
+  openingAppIds: Set<string>;
   t: AppDictionary;
   getAppMeta: (appId: string) => { name: string; description: string };
   getCategoryLabel: (category: AppSummary['category']) => string;
   onOpen: (appId: string) => void;
   onStop: (appId: string) => void;
   onRetry: (appId: string) => void;
+  onUpdate: (appId: string) => void;
+  onRestoreUserVersion: (appId: string) => void;
+  onResolveConflict: (appId: string) => void;
   onDetails: (appId: string) => void;
   onDelete: (appId: string) => void;
   onGoCatalog: () => void;
@@ -19,12 +23,16 @@ interface InstalledAppsViewProps {
 
 export function InstalledAppsView({
   apps,
+  openingAppIds,
   t,
   getAppMeta,
   getCategoryLabel,
   onOpen,
   onStop,
   onRetry,
+  onUpdate,
+  onRestoreUserVersion,
+  onResolveConflict,
   onDetails,
   onDelete,
   onGoCatalog,
@@ -54,26 +62,40 @@ export function InstalledAppsView({
           const isRunning = app.status === 'running';
           const isInstalling = app.status === 'installing';
           const isError = app.status === 'error';
+          const isConflict = app.status === 'conflict';
           const statusLabel = isRunning
             ? t.actions.running
             : isInstalling
               ? t.actions.installing
+              : isConflict
+                ? t.actions.conflict
               : isError
                 ? t.actions.error
+                : app.updateAvailable && app.latestVersion
+                  ? t.appView.updateAvailable(app.latestVersion)
                 : t.actions.installed;
           const statusColor = isRunning
             ? 'info'
             : isInstalling
               ? 'warning'
+              : isConflict
+                ? 'error'
               : isError
                 ? 'error'
+                : app.updateAvailable
+                  ? 'warning'
                 : 'success';
-          const primaryAction = isRunning ? 'stop' : isError ? 'retry' : 'open';
+          const primaryAction = isRunning ? 'stop' : isError ? 'retry' : app.updateAvailable ? 'update' : 'open';
+          const isOpening = primaryAction === 'open' && openingAppIds.has(app.id);
           const primaryActionLabel = isRunning
             ? t.actions.stop
             : isError
               ? t.actions.retry
-              : t.actions.open;
+              : app.updateAvailable
+                ? t.actions.update
+              : isOpening
+                ? t.actions.opening
+                : t.actions.open;
 
           return (
             <AppCard
@@ -84,9 +106,14 @@ export function InstalledAppsView({
               statusLabel={statusLabel}
               statusColor={statusColor}
               primaryAction={primaryAction}
-              primaryActionLabel={primaryActionLabel}
+              primaryActionLabel={isConflict ? t.actions.resolveWithForger : primaryActionLabel}
               primaryDisabled={isInstalling}
+              primaryLoading={isOpening}
               onPrimaryAction={() => {
+                if (isConflict) {
+                  onResolveConflict(app.id);
+                  return;
+                }
                 if (isRunning) {
                   onStop(app.id);
                   return;
@@ -97,8 +124,15 @@ export function InstalledAppsView({
                   return;
                 }
 
+                if (app.updateAvailable) {
+                  onUpdate(app.id);
+                  return;
+                }
+
                 onOpen(app.id);
               }}
+              secondaryActionLabel={isConflict ? t.actions.restoreUserVersion : undefined}
+              onSecondaryAction={isConflict ? () => onRestoreUserVersion(app.id) : undefined}
               tertiaryActionLabel={isInstalling ? undefined : t.actions.uninstall}
               onTertiaryAction={isInstalling ? undefined : () => onDelete(app.id)}
               onCardClick={() => onDetails(app.id)}
