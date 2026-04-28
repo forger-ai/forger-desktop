@@ -79,11 +79,12 @@ export function Sidebar({ currentView, onNavigate, t }: SidebarProps) {
         bgcolor: alpha(theme.palette.background.paper, 0.84),
         backdropFilter: 'blur(16px)',
         overflow: 'hidden',
+        WebkitAppRegion: 'no-drag',
       }}
     >
       <Stack sx={{ height: '100%' }}>
         <Stack spacing={2}>
-          <Stack direction="row" spacing={1.5} alignItems="center">
+          <Stack direction="row" spacing={1.5} alignItems="center" sx={{ WebkitAppRegion: 'drag' }}>
             <Box
               component="img"
               src={theme.palette.mode === 'dark' ? iconDark : iconLight}

@@ -561,6 +561,12 @@ export interface AutomationUpsertInput {
   enabled?: boolean;
 }
 
+export interface WindowControlState {
+  isMaximized: boolean;
+  isFullScreen: boolean;
+  usesCustomFrame: boolean;
+}
+
 export interface ForgerDesktopApi {
   listInstalledApps: () => Promise<AppSummary[]>;
   listCatalogApps: () => Promise<CatalogApp[]>;
@@ -620,6 +626,11 @@ export interface ForgerDesktopApi {
   automationsListRuns: (automationId: string) => Promise<AutomationRunSummary[]>;
   automationsGetRunTranscript: (runId: string) => Promise<AutomationRun | null>;
   onAutomationUpdated: (listener: (event: { automation: Automation; run?: AutomationRunSummary }) => void) => () => void;
+  minimizeWindow: () => Promise<void>;
+  toggleMaximizeWindow: () => Promise<WindowControlState>;
+  closeWindow: () => Promise<void>;
+  getWindowState: () => Promise<WindowControlState>;
+  onWindowStateChanged: (listener: (state: WindowControlState) => void) => () => void;
 }
 
 declare global {

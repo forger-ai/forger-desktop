@@ -62,6 +62,11 @@ const IPC_CHANNELS = {
   automationsListRuns: 'forger:automations:list-runs',
   automationsGetRunTranscript: 'forger:automations:get-run-transcript',
   automationUpdated: 'forger:automations:updated',
+  windowMinimize: 'forger:window:minimize',
+  windowToggleMaximize: 'forger:window:toggle-maximize',
+  windowClose: 'forger:window:close',
+  windowGetState: 'forger:window:get-state',
+  windowStateChanged: 'forger:window:state-changed',
 } as const;
 
 const api: ForgerDesktopApi = {
@@ -153,6 +158,19 @@ const api: ForgerDesktopApi = {
     ipcRenderer.on(IPC_CHANNELS.automationUpdated, wrapped);
     return () => {
       ipcRenderer.removeListener(IPC_CHANNELS.automationUpdated, wrapped);
+    };
+  },
+  minimizeWindow: () => ipcRenderer.invoke(IPC_CHANNELS.windowMinimize),
+  toggleMaximizeWindow: () => ipcRenderer.invoke(IPC_CHANNELS.windowToggleMaximize),
+  closeWindow: () => ipcRenderer.invoke(IPC_CHANNELS.windowClose),
+  getWindowState: () => ipcRenderer.invoke(IPC_CHANNELS.windowGetState),
+  onWindowStateChanged: (listener) => {
+    const wrapped = (_event: unknown, payload: Parameters<typeof listener>[0]) => {
+      listener(payload);
+    };
+    ipcRenderer.on(IPC_CHANNELS.windowStateChanged, wrapped);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.windowStateChanged, wrapped);
     };
   },
 };
