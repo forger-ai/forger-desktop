@@ -26,33 +26,38 @@ export const buildCodexPromptWithAppContext = (params: {
   appId: string;
   displayName: string;
   userPrompt: string;
+  userLanguage?: string;
   sharedFiles: PromptSharedFile[];
   sharedFilesRootName: string;
 }): string => {
+  const userLanguage = params.userLanguage?.trim() || 'not configured';
   const filesSection =
     params.sharedFiles.length === 0
-      ? ['- No hay archivos compartidos en este mensaje.']
+      ? ['- No shared files in this message.']
       : params.sharedFiles.map((file) =>
           [
-            `- Nombre: ${file.name}`,
-            `  Ruta relativa: ${params.sharedFilesRootName}/${file.relativePath}`,
-            `  Peso: ${formatBytes(file.sizeBytes)}`,
-            `  Fecha de modificacion: ${file.modifiedAt}`,
-            `  Origen: ${file.source === 'attached' ? 'adjuntado recien' : 'mencionado con @'}`,
+            `- Name: ${file.name}`,
+            `  Relative path: ${params.sharedFilesRootName}/${file.relativePath}`,
+            `  Size: ${formatBytes(file.sizeBytes)}`,
+            `  Modified at: ${file.modifiedAt}`,
+            `  Source: ${file.source === 'attached' ? 'attached in this message' : 'mentioned with @'}`,
           ].join('\n'),
         );
 
   return [
-    `APP SELECCIONADA: /${params.appId}`,
-    `NOMBRE APP SELECCIONADA: ${params.displayName}`,
-    `CONTRATO FORGER: ${FORGER_AGENT_CONTRACT_VERSION}`,
+    `SELECTED APP: /${params.appId}`,
+    `SELECTED APP NAME: ${params.displayName}`,
+    `FORGER CONTRACT: ${FORGER_AGENT_CONTRACT_VERSION}`,
+    `USER LANGUAGE: ${userLanguage}`,
     '',
-    'Instruccion operativa: sigue el contrato de Forger en AGENTS.md. Clasifica internamente la solicitud en una de las 4 tareas permitidas y revisa el contexto real de la app antes de responder.',
+    'Operational instruction: follow the Forger contract in AGENTS.md. Internally classify the request as one allowed task: resolver_dudas, trabajar_datos, interactuar_con_aplicacion, actualizar_aplicacion, or resolver_conflicto_actualizacion.',
+    'Prefer replying in the language the user used to write their question. Also consider USER LANGUAGE as the configured application language, especially when the user message is short, mixed-language, or ambiguous.',
+    'If the message contains tasks from different categories, handle one per turn. For actualizar_aplicacion, ground the scope in Visual + Flow before changing anything; if the scope is clear, complete the change and answer only with functional impact.',
     '',
-    'ARCHIVOS COMPARTIDOS EN ESTE MENSAJE:',
+    'SHARED FILES IN THIS MESSAGE:',
     ...filesSection,
     '',
-    'MENSAJE USUARIO:',
+    'USER MESSAGE:',
     params.userPrompt.trim(),
   ].join('\n');
 };

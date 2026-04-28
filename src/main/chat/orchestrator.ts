@@ -27,8 +27,12 @@ interface ChatOrchestratorOptions {
   codexHome: string;
   agentContractVersion: number;
   getCodexCliPath: () => Promise<string | null>;
-  getCodexPathEntries: () => Promise<string[]>;
+  getCodexPathEntries: (appId?: string) => Promise<string[]>;
+  getCodexEnvironment: (appId?: string) => Promise<Record<string, string>>;
   getCodexAuthenticated: () => Promise<boolean>;
+  createForgerMcpSession?: (runId: string, appId: string) => { url: string; token: string } | null;
+  releaseForgerMcpSession?: (token: string) => void;
+  onUpdateConflictResolved?: (appId: string) => Promise<void>;
   onRunUpdated: (event: ChatRunEvent) => void;
 }
 
@@ -64,7 +68,15 @@ interface InternalChatRun extends ChatRun {
   runLogPath: string;
   model: string;
   reasoningEffort: CodexReasoningEffort;
+  taskType: ForgerTaskType;
 }
+
+type ForgerTaskType =
+  | 'resolver_dudas'
+  | 'trabajar_datos'
+  | 'interactuar_con_aplicacion'
+  | 'actualizar_aplicacion'
+  | 'resolver_conflicto_actualizacion';
 
 interface PendingPermission {
   runId: string;
@@ -227,6 +239,8 @@ class SandboxRunner {
   public async runCodex(params: {
     codexCliPath: string;
     pathEntries: string[];
+    environment: Record<string, string>;
+    forgerMcp?: { url: string; token: string };
     workingDir: string;
     prompt: string;
     model: string;
@@ -240,7 +254,32 @@ class SandboxRunner {
 
     const modelArgs = ['--model', params.model];
     const reasoningArgs = ['--config', `reasoning_effort="${params.reasoningEffort}"`];
+    const mcpArgs = params.forgerMcp
+      ? [
+          '--config',
+          `mcp_servers.forger.url=${JSON.stringify(params.forgerMcp.url)}`,
+          '--config',
+          'mcp_servers.forger.bearer_token_env_var="FORGER_MCP_TOKEN"',
+          '--config',
+          'mcp_servers.forger.enabled=true',
+          '--config',
+          'mcp_servers.forger.tool_timeout_sec=600',
+          '--config',
+          'mcp_servers.forger.default_tools_approval_mode="approve"',
+          '--config',
+          'apps.forger.enabled=true',
+          '--config',
+          'apps.forger.default_tools_enabled=true',
+          '--config',
+          'apps.forger.default_tools_approval_mode="approve"',
+          '--config',
+          'apps.forger.destructive_enabled=true',
+          '--config',
+          'apps.forger.open_world_enabled=true',
+        ]
+      : [];
     const commonArgs = ['--skip-git-repo-check', '-C', params.workingDir];
+    const topLevelArgs = params.forgerMcp ? ['--ask-for-approval', 'never'] : [];
 
     const attempts: string[][] = params.threadId
       ? [
@@ -250,6 +289,7 @@ class SandboxRunner {
             '--json',
             ...modelArgs,
             ...reasoningArgs,
+            ...mcpArgs,
             '--full-auto',
             '--skip-git-repo-check',
             params.threadId,
@@ -261,6 +301,7 @@ class SandboxRunner {
             '--json',
             ...modelArgs,
             ...reasoningArgs,
+            ...mcpArgs,
             '--skip-git-repo-check',
             params.threadId,
             params.prompt,
@@ -270,18 +311,19 @@ class SandboxRunner {
             'resume',
             '--json',
             ...modelArgs,
+            ...mcpArgs,
             '--skip-git-repo-check',
             params.threadId,
             params.prompt,
           ],
-          ['exec', 'resume', ...modelArgs, '--skip-git-repo-check', params.threadId, params.prompt],
+          ['exec', 'resume', ...modelArgs, ...mcpArgs, '--skip-git-repo-check', params.threadId, params.prompt],
         ]
       : [
-          ['exec', '--json', ...modelArgs, ...reasoningArgs, '--full-auto', '--sandbox', 'workspace-write', ...commonArgs, params.prompt],
-          ['exec', '--json', ...modelArgs, ...reasoningArgs, '--sandbox', 'workspace-write', ...commonArgs, params.prompt],
-          ['exec', '--json', ...modelArgs, '--sandbox', 'workspace-write', ...commonArgs, params.prompt],
-          ['exec', '--json', ...modelArgs, ...commonArgs, params.prompt],
-          ['exec', ...modelArgs, ...commonArgs, params.prompt],
+          ['exec', '--json', ...modelArgs, ...reasoningArgs, ...mcpArgs, '--full-auto', '--sandbox', 'workspace-write', ...commonArgs, params.prompt],
+          ['exec', '--json', ...modelArgs, ...reasoningArgs, ...mcpArgs, '--sandbox', 'workspace-write', ...commonArgs, params.prompt],
+          ['exec', '--json', ...modelArgs, ...mcpArgs, '--sandbox', 'workspace-write', ...commonArgs, params.prompt],
+          ['exec', '--json', ...modelArgs, ...mcpArgs, ...commonArgs, params.prompt],
+          ['exec', ...modelArgs, ...mcpArgs, ...commonArgs, params.prompt],
         ];
 
     const attemptInactivityTimeoutMs = Math.max(45_000, Math.floor(params.timeoutMs / attempts.length));
@@ -298,12 +340,14 @@ class SandboxRunner {
         );
         const result = await runCommandCapture(
           codexCommand.command,
-          [...codexCommand.prefixArgs, ...args],
+          [...codexCommand.prefixArgs, ...topLevelArgs, ...args],
           {
             cwd: params.workingDir,
             env: {
               CODEX_HOME: this.codexHome,
               FORGER_ALLOWED_ROOTS: allowedRoots,
+              ...(params.forgerMcp ? { FORGER_MCP_TOKEN: params.forgerMcp.token } : {}),
+              ...params.environment,
               PATH: [...codexCommand.pathEntries, process.env.PATH ?? ''].filter(Boolean).join(path.delimiter),
             },
             inactivityTimeoutMs: attemptInactivityTimeoutMs,
@@ -355,7 +399,9 @@ export class ChatOrchestrator {
   private readonly runs = new Map<string, InternalChatRun>();
   private workspaceLockRunId: string | null = null;
   private readonly pendingPermissions = new Map<string, PendingPermission>();
+  private readonly completedPermissions = new Map<string, 'allow' | 'deny'>();
   private readonly threadsByApp = new Map<string, AppThreadState>();
+  private readonly pendingDirtySaveApps = new Set<string>();
   private readonly auditLogger: AuditLogger;
   private readonly pluginRuntime: PluginRuntime;
   private readonly sandboxRunner: SandboxRunner;
@@ -384,7 +430,11 @@ export class ChatOrchestrator {
     const now = new Date().toISOString();
 
     const sharedRoots = await this.resolveSharedRoots(input.sharedFiles ?? []);
-    const baseHead = await getGitHead(appRoot);
+    const taskType =
+      this.pendingDirtySaveApps.has(input.appId) && isSaveCurrentVersionRequest(input.prompt)
+        ? 'actualizar_aplicacion'
+        : classifyForgerTask(input.prompt);
+    const baseHead = taskType === 'actualizar_aplicacion' ? await getGitHead(appRoot) : null;
 
     const run: InternalChatRun = {
       runId,
@@ -408,6 +458,7 @@ export class ChatOrchestrator {
       progressLog: [],
       model: input.model?.trim() || 'gpt-5.3-codex',
       reasoningEffort: input.reasoningEffort ?? 'low',
+      taskType,
     };
 
     this.runs.set(runId, run);
@@ -452,16 +503,66 @@ export class ChatOrchestrator {
   public approvePermission(input: ChatApprovePermissionInput): { success: boolean } {
     const run = this.runs.get(input.runId);
     if (!run || !run.permissionRequest || run.permissionRequest.requestId !== input.requestId) {
+      if (this.completedPermissions.has(input.requestId)) {
+        void this.auditLogger.log({
+          type: 'permission_response_ignored_duplicate',
+          runId: input.runId,
+          requestId: input.requestId,
+          decision: input.decision,
+          originalDecision: this.completedPermissions.get(input.requestId),
+        });
+        return { success: true };
+      }
+      void this.auditLogger.log({
+        type: 'permission_response_rejected',
+        runId: input.runId,
+        requestId: input.requestId,
+        decision: input.decision,
+        reason: 'run_or_request_not_found',
+        runStatus: run?.status ?? null,
+        activeRequestId: run?.permissionRequest?.requestId ?? null,
+      });
       return { success: false };
     }
 
     const pending = this.pendingPermissions.get(input.requestId);
     if (!pending) {
+      void this.auditLogger.log({
+        type: 'permission_response_rejected',
+        runId: input.runId,
+        requestId: input.requestId,
+        decision: input.decision,
+        reason: 'pending_permission_not_found',
+        runStatus: run.status,
+      });
       return { success: false };
     }
 
+    void appendRunLog(
+      run.runLogPath,
+      'meta',
+      `Permission response received requestId=${input.requestId} decision=${input.decision}`,
+    );
+    void this.auditLogger.log({
+      type: 'permission_response_received',
+      runId: input.runId,
+      appId: run.appId,
+      requestId: input.requestId,
+      decision: input.decision,
+      permission: run.permissionRequest.permission,
+      resource: run.permissionRequest.resource,
+      runLogPath: run.runLogPath,
+    });
+
     pending.resolve(input.decision);
     this.pendingPermissions.delete(input.requestId);
+    this.completedPermissions.set(input.requestId, input.decision);
+    if (this.completedPermissions.size > 200) {
+      const oldest = this.completedPermissions.keys().next().value;
+      if (oldest) {
+        this.completedPermissions.delete(oldest);
+      }
+    }
     run.permissionRequest = undefined;
     run.updatedAt = new Date().toISOString();
     run.status = input.decision === 'allow' ? 'running' : 'failed';
@@ -517,7 +618,7 @@ export class ChatOrchestrator {
       run.updatedAt = new Date().toISOString();
       run.operationId = operationId;
       run.commitSha = commitSha;
-      run.userMessage = 'Cambios aplicados correctamente. Puedes deshacer cuando quieras.';
+      run.userMessage = 'Version guardada. Puedes volver a la version anterior cuando quieras.';
       this.emitRun(run);
 
       await this.auditLogger.log({
@@ -539,7 +640,7 @@ export class ChatOrchestrator {
       run.status = 'failed';
       run.errorCode = detail.code;
       run.updatedAt = new Date().toISOString();
-      run.userMessage = 'No pudimos aplicar cambios. Revisa la vista previa y reintenta.';
+      run.userMessage = 'No pudimos guardar esta version. Revisa el cambio y reintenta.';
       this.emitRun(run);
       return {
         success: false,
@@ -600,13 +701,46 @@ export class ChatOrchestrator {
     }
   }
 
+  public async requestExternalPermission(
+    runId: string,
+    input: Omit<PermissionRequest, 'requestId'>,
+  ): Promise<boolean> {
+    const run = this.runs.get(runId);
+    if (!run || run.status === 'canceled' || run.status === 'failed') {
+      await this.auditLogger.log({
+        type: 'permission_request_rejected_missing_run',
+        runId,
+        requestedPermission: input.permission,
+        resource: input.resource,
+        runStatus: run?.status ?? null,
+      });
+      return false;
+    }
+    return await this.requestPermission(run, input);
+  }
+
   private async executeRun(runId: string): Promise<void> {
     const run = this.runs.get(runId);
     if (!run) {
       return;
     }
+    let forgerMcpSession: { url: string; token: string } | null = null;
 
     try {
+      if (!(await existsDirectory(run.appRoot))) {
+        throw createChatError('app_not_installed', 'Target app is not installed');
+      }
+
+      if (isVersionUndoRequest(run.prompt)) {
+        const result = await this.undo({ appId: run.appId });
+        run.status = result.success ? 'undone' : 'failed';
+        run.updatedAt = new Date().toISOString();
+        run.userMessage = result.userMessage;
+        run.errorCode = result.success ? undefined : 'conflict';
+        this.emitRun(run);
+        return;
+      }
+
       if (!(await this.options.getCodexAuthenticated())) {
         throw createChatError('auth_missing', 'Codex authentication missing');
       }
@@ -615,10 +749,25 @@ export class ChatOrchestrator {
       if (!codexCliPath) {
         throw createChatError('capability_unavailable', 'Codex CLI not installed');
       }
-      const codexPathEntries = await this.options.getCodexPathEntries();
+      const codexPathEntries = await this.options.getCodexPathEntries(run.appId);
+      const codexEnvironment = await this.options.getCodexEnvironment(run.appId);
 
-      if (!(await existsDirectory(run.appRoot))) {
-        throw createChatError('app_not_installed', 'Target app is not installed');
+      if (run.taskType === 'actualizar_aplicacion') {
+        await ensureGitRepository(run.appRoot);
+        const status = await getGitStatus(run.appRoot);
+        if (status.length > 0) {
+          if (isSaveCurrentVersionRequest(run.prompt)) {
+            await this.saveCurrentDirtyVersion(run, status.length);
+            return;
+          }
+          this.pendingDirtySaveApps.add(run.appId);
+          throw createChatError('dirty_worktree', 'app_has_unsaved_changes');
+        }
+        this.pendingDirtySaveApps.delete(run.appId);
+        await ensureUserModifiedBranch(run.appRoot);
+        run.baseHead = await getGitHead(run.appRoot);
+      } else if (run.taskType === 'resolver_conflicto_actualizacion') {
+        await ensureGitRepository(run.appRoot);
       }
 
       run.updatedAt = new Date().toISOString();
@@ -631,10 +780,13 @@ export class ChatOrchestrator {
         `[${new Date().toISOString()}] Run ${run.runId} app=${run.appId} cwd=${this.options.forgerHomeRoot}\n`,
         'utf8',
       );
+      forgerMcpSession = this.options.createForgerMcpSession?.(run.runId, run.appId) ?? null;
 
       const assistantReply = await this.sandboxRunner.runCodex({
         codexCliPath,
         pathEntries: codexPathEntries,
+        environment: codexEnvironment,
+        forgerMcp: forgerMcpSession ?? undefined,
         workingDir: this.options.forgerHomeRoot,
         prompt: run.prompt,
         model: run.model,
@@ -657,10 +809,6 @@ export class ChatOrchestrator {
 
       run.threadId = assistantReply.threadId ?? run.threadId ?? this.threadsByApp.get(run.appId)?.threadId ?? null;
 
-      run.status = 'preview_ready';
-      run.updatedAt = new Date().toISOString();
-      run.userMessage = assistantReply.assistantText;
-      this.emitRun(run);
       this.updateThreadState(
         run.appId,
         assistantReply.threadId,
@@ -668,8 +816,24 @@ export class ChatOrchestrator {
         assistantReply.toolEvents,
       );
 
+      if (run.taskType === 'resolver_conflicto_actualizacion') {
+        await this.finalizeUpdateConflictResolution(run, assistantReply.assistantText);
+      } else if (run.taskType === 'actualizar_aplicacion') {
+        await this.finalizeAutoAppliedUpdate(run, assistantReply.assistantText);
+      } else {
+        run.status = 'preview_ready';
+        run.updatedAt = new Date().toISOString();
+        run.userMessage = assistantReply.assistantText;
+        this.emitRun(run);
+      }
+
       await this.auditLogger.log({
-        type: 'chat_reply',
+        type:
+          run.taskType === 'resolver_conflicto_actualizacion'
+            ? 'update_conflict_resolved'
+            : run.taskType === 'actualizar_aplicacion'
+              ? 'chat_update_auto_applied'
+              : 'chat_reply',
         runId: run.runId,
         appId: run.appId,
         replyLength: assistantReply.assistantText.length,
@@ -698,10 +862,125 @@ export class ChatOrchestrator {
         threadId: this.threadsByApp.get(run.appId)?.threadId ?? null,
       });
     } finally {
+      if (forgerMcpSession) {
+        this.options.releaseForgerMcpSession?.(forgerMcpSession.token);
+      }
       if (this.workspaceLockRunId === run.runId) {
         this.workspaceLockRunId = null;
       }
     }
+  }
+
+  private async finalizeAutoAppliedUpdate(run: InternalChatRun, assistantText: string): Promise<void> {
+    const status = await getGitStatus(run.appRoot);
+    if (status.length === 0) {
+      run.status = 'applied';
+      run.updatedAt = new Date().toISOString();
+      run.userMessage =
+        assistantText.trim() ||
+        'Revise la app y no encontre cambios que guardar. Si quieres, dime que ajustar visualmente o que flujo esperas cambiar.';
+      this.emitRun(run);
+      this.pendingDirtySaveApps.delete(run.appId);
+      return;
+    }
+
+    const commitSha = await gitCommit(run.appRoot, `forger(update): ${summarizeOperationTitle(run.prompt)}`);
+    const operationId = randomUUID();
+    await this.appendOperationHistory(run.appId, {
+      operationId,
+      appId: run.appId,
+      runId: run.runId,
+      commitSha,
+      createdAt: new Date().toISOString(),
+      title: summarizeOperationTitle(run.prompt),
+      summary: buildFunctionalOperationSummary(assistantText),
+    });
+
+    run.status = 'applied';
+    run.updatedAt = new Date().toISOString();
+    run.operationId = operationId;
+    run.commitSha = commitSha;
+    run.userMessage = buildAutoAppliedUserMessage(assistantText);
+    this.emitRun(run);
+    this.pendingDirtySaveApps.delete(run.appId);
+
+    await this.auditLogger.log({
+      type: 'auto_apply',
+      runId: run.runId,
+      appId: run.appId,
+      operationId,
+      commitSha,
+      changedFiles: status.length,
+    });
+  }
+
+  private async finalizeUpdateConflictResolution(run: InternalChatRun, assistantText: string): Promise<void> {
+    const status = await getGitStatus(run.appRoot);
+    const hasUnmerged = status.some((line) => /^(AA|DD|DU|UD|UA|AU|UU)\s/.test(line));
+    if (hasUnmerged) {
+      throw createChatError('conflict', 'merge_conflicts_remain');
+    }
+
+    const commitSha = await gitCommit(run.appRoot, `forger(update): resolve ${run.appId} conflict`);
+    const operationId = randomUUID();
+    await this.appendOperationHistory(run.appId, {
+      operationId,
+      appId: run.appId,
+      runId: run.runId,
+      commitSha,
+      createdAt: new Date().toISOString(),
+      title: 'Actualizacion combinada',
+      summary: buildFunctionalOperationSummary(assistantText),
+    });
+
+    await this.options.onUpdateConflictResolved?.(run.appId);
+
+    run.status = 'applied';
+    run.updatedAt = new Date().toISOString();
+    run.operationId = operationId;
+    run.commitSha = commitSha;
+    run.userMessage = buildAutoAppliedUserMessage(assistantText);
+    this.emitRun(run);
+
+    await this.auditLogger.log({
+      type: 'update_conflict_resolution_commit',
+      runId: run.runId,
+      appId: run.appId,
+      operationId,
+      commitSha,
+      changedFiles: status.length,
+    });
+  }
+
+  private async saveCurrentDirtyVersion(run: InternalChatRun, changedFiles: number): Promise<void> {
+    const commitSha = await gitCommit(run.appRoot, `forger(save): ${summarizeOperationTitle(run.prompt)}`);
+    const operationId = randomUUID();
+    await this.appendOperationHistory(run.appId, {
+      operationId,
+      appId: run.appId,
+      runId: run.runId,
+      commitSha,
+      createdAt: new Date().toISOString(),
+      title: 'Version guardada',
+      summary: 'Se guardo el estado actual de la app antes de continuar.',
+    });
+
+    run.status = 'applied';
+    run.updatedAt = new Date().toISOString();
+    run.operationId = operationId;
+    run.commitSha = commitSha;
+    run.userMessage = 'Listo, guarde esta version. Ahora puedes pedirme el siguiente ajuste y partire desde este estado limpio.';
+    this.emitRun(run);
+    this.pendingDirtySaveApps.delete(run.appId);
+
+    await this.auditLogger.log({
+      type: 'save_dirty_version',
+      runId: run.runId,
+      appId: run.appId,
+      operationId,
+      commitSha,
+      changedFiles,
+    });
   }
 
   private async requestPermission(
@@ -710,6 +989,23 @@ export class ChatOrchestrator {
   ): Promise<boolean> {
     const requestId = randomUUID();
     const request: PermissionRequest = { requestId, ...input };
+
+    await appendRunLog(
+      run.runLogPath,
+      'meta',
+      `Permission requested requestId=${requestId} permission=${request.permission} resource=${request.resource}`,
+    );
+    await this.auditLogger.log({
+      type: 'permission_requested',
+      runId: run.runId,
+      appId: run.appId,
+      requestId,
+      permission: request.permission,
+      resource: request.resource,
+      risk: request.risk,
+      reason: request.reason,
+      runLogPath: run.runLogPath,
+    });
 
     run.permissionRequest = request;
     run.status = 'needs_permission';
@@ -723,6 +1019,22 @@ export class ChatOrchestrator {
         requestId,
         resolve,
       });
+    });
+
+    await appendRunLog(
+      run.runLogPath,
+      'meta',
+      `Permission resolved requestId=${requestId} decision=${decision}`,
+    );
+    await this.auditLogger.log({
+      type: 'permission_resolved',
+      runId: run.runId,
+      appId: run.appId,
+      requestId,
+      permission: request.permission,
+      resource: request.resource,
+      decision,
+      runLogPath: run.runLogPath,
     });
 
     return decision === 'allow';
@@ -1084,6 +1396,38 @@ const ensureGitRepository = async (cwd: string): Promise<void> => {
   await ensureMain().catch(() => undefined);
 };
 
+const ensureUserModifiedBranch = async (cwd: string): Promise<void> => {
+  const checkout = await runCommandCapture('git', ['checkout', 'user-modified'], {
+    cwd,
+    timeoutMs: 10_000,
+  }).catch(() => null);
+  if (checkout && checkout.code === 0) {
+    return;
+  }
+
+  const create = await runCommandCapture('git', ['checkout', '-b', 'user-modified'], {
+    cwd,
+    timeoutMs: 10_000,
+  });
+  if (create.code !== 0) {
+    throw createChatError('conflict', create.stderr || create.stdout || 'user_modified_branch_failed');
+  }
+};
+
+const getGitStatus = async (cwd: string): Promise<string[]> => {
+  const status = await runCommandCapture('git', ['status', '--porcelain'], {
+    cwd,
+    timeoutMs: 10_000,
+  });
+  if (status.code !== 0) {
+    throw createChatError('conflict', status.stderr || status.stdout || 'git_status_failed');
+  }
+  return status.stdout
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+};
+
 const gitCommit = async (cwd: string, message: string): Promise<string> => {
   await runCommandCapture('git', ['add', '-A'], { cwd, timeoutMs: 20_000 });
   const commit = await runCommandCapture('git', ['commit', '-m', message], { cwd, timeoutMs: 20_000 });
@@ -1120,6 +1464,59 @@ const summarizeOperationTitle = (prompt: string): string => {
     return 'Cambio aplicado';
   }
   return compact.length <= 64 ? compact : `${compact.slice(0, 61)}...`;
+};
+
+const extractUserMessage = (prompt: string): string => {
+  const userMessageIndex = prompt.indexOf('MENSAJE USUARIO:');
+  return (userMessageIndex >= 0 ? prompt.slice(userMessageIndex + 'MENSAJE USUARIO:'.length) : prompt).trim();
+};
+
+const classifyForgerTask = (prompt: string): ForgerTaskType => {
+  const message = extractUserMessage(prompt).toLowerCase();
+  if (/\b(conflicto|conflict|merge)\b/.test(message) && /\b(actualizacion|actualización|update)\b/.test(message)) {
+    return 'resolver_conflicto_actualizacion';
+  }
+  if (
+    /\b(cambia|cambiar|modifica|modificar|actualiza|actualizar|agrega|agregar|anade|añade|quitar|quita|elimina|arregla|corrige|personaliza|ajusta|mejora|guarda|guardar|boton|botón|pantalla|vista|flujo|formulario|layout|diseno|diseño)\b/.test(
+      message,
+    )
+  ) {
+    return 'actualizar_aplicacion';
+  }
+  if (/\b(carga|cargar|importa|importar|datos|csv|excel|archivo|tabla|filas|registros|categorias|categorías)\b/.test(message)) {
+    return 'trabajar_datos';
+  }
+  if (/\b(abre|abrir|ejecuta|ejecutar|revisa en la app|usa la app|haz click|aprieta|navega)\b/.test(message)) {
+    return 'interactuar_con_aplicacion';
+  }
+  return 'resolver_dudas';
+};
+
+const isSaveCurrentVersionRequest = (prompt: string): boolean => {
+  const message = extractUserMessage(prompt).toLowerCase();
+  return /\b(guarda|guardar|guardalo|guárdalo|guarda esa version|guarda esta version|si|sí)\b/.test(message);
+};
+
+const isVersionUndoRequest = (prompt: string): boolean => {
+  const message = extractUserMessage(prompt).toLowerCase();
+  return /\b(volver|vuelve|regresa|regresar|deshacer|deshaz|revierte|revertir)\b/.test(message) && /\b(version|versión|anterior|cambio|ajuste)\b/.test(message);
+};
+
+const buildFunctionalOperationSummary = (assistantText: string): string => {
+  const compact = assistantText.replace(/\s+/g, ' ').trim();
+  if (!compact) {
+    return 'Se guardo una nueva version de la app.';
+  }
+  return compact.length <= 180 ? compact : `${compact.slice(0, 177)}...`;
+};
+
+const buildAutoAppliedUserMessage = (assistantText: string): string => {
+  const compact = assistantText.trim();
+  const suffix = 'Version guardada. Puedes probarla ahora; si no quedo como esperabas, puedo ajustarla o volver a la version anterior.';
+  if (!compact) {
+    return suffix;
+  }
+  return `${compact}\n\n${suffix}`;
 };
 
 const buildPreview = async (stagingDir: string): Promise<{
@@ -1387,6 +1784,8 @@ const mapFailureMessage = (code: ChatErrorCode, detail?: string, runLogPath?: st
       return 'La solicitud tardo demasiado y fue detenida.';
     case 'sandbox_violation':
       return 'Bloqueamos una accion fuera del workspace permitido.';
+    case 'dirty_worktree':
+      return 'Antes de comenzar, al parecer hay cambios sin guardar en tu aplicacion. ¿Quieres que guarde esa version antes de continuar?';
     case 'conflict':
       return 'Detectamos un conflicto con el estado actual de la app.';
     case 'canceled':

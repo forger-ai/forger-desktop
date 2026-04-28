@@ -3,12 +3,14 @@ import DownloadRounded from '@mui/icons-material/DownloadRounded';
 import StopCircleRounded from '@mui/icons-material/StopCircleRounded';
 import ReplayRounded from '@mui/icons-material/ReplayRounded';
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
+import SystemUpdateAltRounded from '@mui/icons-material/SystemUpdateAltRounded';
 import {
   Avatar,
   Box,
   Button,
   Card,
   Chip,
+  CircularProgress,
   IconButton,
   Stack,
   Tooltip,
@@ -22,9 +24,10 @@ interface AppCardProps {
   statusLabel: string;
   statusColor: 'success' | 'default' | 'warning' | 'error' | 'info';
   primaryActionLabel: string;
-  primaryAction: 'open' | 'install' | 'stop' | 'retry';
+  primaryAction: 'open' | 'install' | 'update' | 'stop' | 'retry';
   onPrimaryAction: () => void;
   primaryDisabled?: boolean;
+  primaryLoading?: boolean;
   secondaryActionLabel?: string;
   onSecondaryAction?: () => void;
   tertiaryActionLabel?: string;
@@ -49,6 +52,7 @@ export function AppCard({
   primaryAction,
   onPrimaryAction,
   primaryDisabled = false,
+  primaryLoading = false,
   secondaryActionLabel,
   onSecondaryAction,
   tertiaryActionLabel,
@@ -62,6 +66,8 @@ export function AppCard({
       <StopCircleRounded />
     ) : primaryAction === 'retry' ? (
       <ReplayRounded />
+    ) : primaryAction === 'update' ? (
+      <SystemUpdateAltRounded />
     ) : (
       <DownloadRounded />
     );
@@ -137,8 +143,9 @@ export function AppCard({
         <Stack direction="row" spacing={1.25} sx={{ mt: 'auto' }}>
           <Button
             variant="contained"
-            startIcon={primaryIcon}
-            disabled={primaryDisabled}
+            startIcon={primaryLoading ? <CircularProgress color="inherit" size={16} /> : primaryIcon}
+            disabled={primaryDisabled || primaryLoading}
+            aria-busy={primaryLoading}
             onClick={(event) => {
               event.stopPropagation();
               onPrimaryAction();

@@ -32,6 +32,7 @@ import type {
   CodexReasoningEffort,
   ForgerFileCategory,
   ForgerFileRecord,
+  PermissionRequest,
   PickedChatFile,
 } from '@shared/types';
 import ReactMarkdown from 'react-markdown';
@@ -55,6 +56,10 @@ export interface ChatMessage {
     type: 'open-app';
     appId: string;
     label: string;
+  } | {
+    type: 'permission';
+    runId: string;
+    request: PermissionRequest;
   };
 }
 
@@ -157,7 +162,9 @@ interface ChatViewProps {
   progressLines: string[];
   codexConfigured: boolean;
   onConfigureCodex: () => void;
+  openingAppIds: Set<string>;
   onOpenApp: (appId: string) => void;
+  onRespondPermission: (runId: string, requestId: string, decision: 'allow' | 'deny') => Promise<void>;
 }
 
 export function ChatView({
@@ -195,12 +202,15 @@ export function ChatView({
   progressLines,
   codexConfigured,
   onConfigureCodex,
+  openingAppIds,
   onOpenApp,
+  onRespondPermission,
 }: ChatViewProps) {
   const theme = useTheme();
   const [historyOpen, setHistoryOpen] = useState(false);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionMenuPosition, setMentionMenuPosition] = useState<{ left: number; bottom: number } | null>(null);
+  const [respondingPermissionIds, setRespondingPermissionIds] = useState<Set<string>>(new Set());
   const inputRef = useRef<HTMLDivElement | null>(null);
   const composerAnchorRef = useRef<HTMLDivElement | null>(null);
   const messagesScrollRef = useRef<HTMLDivElement | null>(null);
@@ -211,6 +221,15 @@ export function ChatView({
     : availableFiles
         .filter((file) => file.name.toLowerCase().includes(mentionQuery.toLowerCase()))
         .slice(0, 8);
+
+  const respondToPermission = (runId: string, requestId: string, decision: 'allow' | 'deny') => {
+    const key = `${runId}:${requestId}`;
+    if (respondingPermissionIds.has(key)) {
+      return;
+    }
+    setRespondingPermissionIds((current) => new Set(current).add(key));
+    void onRespondPermission(runId, requestId, decision);
+  };
 
   const formatBytes = (value: number): string => {
     if (!Number.isFinite(value) || value <= 0) {
@@ -548,9 +567,70 @@ export function ChatView({
                       <Stack spacing={1}>
                         <MarkdownMessage content={message.content} />
                         {message.action?.type === 'open-app' ? (
-                          <Button variant="contained" size="small" onClick={() => onOpenApp(message.action!.appId)} sx={{ alignSelf: 'flex-start' }}>
-                            {message.action.label}
-                          </Button>
+                          (() => {
+                            const action = message.action;
+                            const isOpening = openingAppIds.has(action.appId);
+                            return (
+                              <Button
+                                variant="contained"
+                                size="small"
+                                startIcon={isOpening ? <CircularProgress color="inherit" size={14} /> : undefined}
+                                disabled={isOpening}
+                                aria-busy={isOpening}
+                                onClick={() => onOpenApp(action.appId)}
+                                sx={{ alignSelf: 'flex-start' }}
+                              >
+                                {isOpening ? t.actions.opening : action.label}
+                              </Button>
+                            );
+                          })()
+                        ) : null}
+                        {message.action?.type === 'permission' ? (
+                          (() => {
+                            const action = message.action;
+                            const responseKey = `${action.runId}:${action.request.requestId}`;
+                            const isResponding = respondingPermissionIds.has(responseKey);
+                            return (
+                              <Paper
+                                variant="outlined"
+                                sx={{
+                                  p: 1.5,
+                                  borderRadius: 1,
+                                  bgcolor: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.04)' : 'background.paper',
+                                }}
+                              >
+                                <Stack spacing={1}>
+                                  <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+                                    <Chip size="small" color="warning" label={t.sections.chat.permissionBadge} />
+                                    <Chip size="small" variant="outlined" label={action.request.resource} />
+                                  </Stack>
+                                  <Typography variant="body2" color="text.secondary">
+                                    {action.request.reason}
+                                  </Typography>
+                                  <Stack direction="row" spacing={1}>
+                                    <Button
+                                      variant="contained"
+                                      size="small"
+                                      disabled={isResponding}
+                                      startIcon={isResponding ? <CircularProgress size={14} color="inherit" /> : undefined}
+                                      onClick={() => respondToPermission(action.runId, action.request.requestId, 'allow')}
+                                    >
+                                      {t.sections.chat.permissionApprove}
+                                    </Button>
+                                    <Button
+                                      variant="outlined"
+                                      color="inherit"
+                                      size="small"
+                                      disabled={isResponding}
+                                      onClick={() => respondToPermission(action.runId, action.request.requestId, 'deny')}
+                                    >
+                                      {t.sections.chat.permissionDeny}
+                                    </Button>
+                                  </Stack>
+                                </Stack>
+                              </Paper>
+                            );
+                          })()
                         ) : null}
                       </Stack>
                     ) : (
@@ -559,7 +639,17 @@ export function ChatView({
                           {message.content}
                         </Typography>
                         {message.files?.length ? (
-                          <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                          <Stack
+                            direction="row"
+                            spacing={0.75}
+                            flexWrap="wrap"
+                            useFlexGap
+                            sx={{
+                              maxWidth: '100%',
+                              alignItems: 'flex-start',
+                              overflow: 'hidden',
+                            }}
+                          >
                             {message.files.map((file) => (
                               <Chip
                                 key={`${file.source}-${file.id}`}
@@ -572,16 +662,21 @@ export function ChatView({
                                 title={file.displayPath ?? file.relativePath}
                                 variant={file.source === 'mentioned' ? 'outlined' : 'filled'}
                                 sx={{
-                                  height: 23,
-                                  maxWidth: 220,
-                                  borderRadius: 1,
-                                  fontSize: 11,
-                                  bgcolor: file.source === 'mentioned' ? 'rgba(124,58,237,0.2)' : 'rgba(255,255,255,0.18)',
-                                  borderColor: file.source === 'mentioned' ? 'rgba(255,255,255,0.5)' : undefined,
-                                  color: 'inherit',
+                                  boxSizing: 'border-box',
+                                  height: 28,
+                                  maxWidth: 'min(100%, 280px)',
+                                  borderRadius: '999px',
+                                  bgcolor: file.source === 'mentioned' ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.2)',
+                                  border: '1px solid rgba(255,255,255,0.58)',
+                                  color: theme.palette.primary.contrastText,
+                                  fontSize: 12,
+                                  fontWeight: 700,
                                   '& .MuiChip-label': {
                                     overflow: 'hidden',
                                     textOverflow: 'ellipsis',
+                                    display: 'block',
+                                    px: 1.25,
+                                    lineHeight: '26px',
                                   },
                                 }}
                               />
