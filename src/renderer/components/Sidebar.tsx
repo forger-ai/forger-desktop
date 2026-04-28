@@ -1,5 +1,6 @@
 import AppsRounded from '@mui/icons-material/AppsRounded';
 import AutoAwesomeRounded from '@mui/icons-material/AutoAwesomeRounded';
+import EventRepeatRounded from '@mui/icons-material/EventRepeatRounded';
 import CategoryRounded from '@mui/icons-material/CategoryRounded';
 import ConstructionRounded from '@mui/icons-material/ConstructionRounded';
 import InsertDriveFileRounded from '@mui/icons-material/InsertDriveFileRounded';
@@ -21,7 +22,17 @@ import type { AppDictionary } from '@renderer/i18n';
 import iconDark from '@renderer/assets/icon-dark.svg';
 import iconLight from '@renderer/assets/icon-light.svg';
 
-export type View = 'my-apps' | 'catalog' | 'chat' | 'files' | 'datos' | 'secrets' | 'tools' | 'settings' | 'app';
+export type View =
+  | 'my-apps'
+  | 'catalog'
+  | 'chat'
+  | 'automations'
+  | 'files'
+  | 'datos'
+  | 'secrets'
+  | 'tools'
+  | 'settings'
+  | 'app';
 
 interface SidebarProps {
   currentView: View;
@@ -33,6 +44,7 @@ const mainNav = [
   { id: 'my-apps' as const, icon: <AppsRounded /> },
   { id: 'catalog' as const, icon: <CategoryRounded /> },
   { id: 'chat' as const, icon: <AutoAwesomeRounded /> },
+  { id: 'automations' as const, icon: <EventRepeatRounded /> },
   { id: 'files' as const, icon: <InsertDriveFileRounded /> },
   { id: 'datos' as const, icon: <TableChartRounded /> },
   { id: 'secrets' as const, icon: <VpnKeyRounded /> },
@@ -46,6 +58,7 @@ export function Sidebar({ currentView, onNavigate, t }: SidebarProps) {
     'my-apps': t.nav.myApps,
     catalog: t.nav.catalog,
     chat: t.nav.chat,
+    automations: t.nav.automations,
     files: t.nav.files,
     datos: t.nav.datos,
     secrets: t.nav.secrets,
