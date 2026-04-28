@@ -121,6 +121,12 @@ export const es = {
   shell: {
     safeModeHint: 'Forger trabaja en su propio espacio privado. Solo usamos los archivos que tu decides compartir.',
   },
+  window: {
+    minimize: 'Minimizar',
+    maximize: 'Maximizar',
+    restore: 'Restaurar',
+    close: 'Cerrar',
+  },
   actions: {
     back: 'Volver',
     close: 'Cerrar',

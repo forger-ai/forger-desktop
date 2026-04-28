@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, shell, type IpcMainInvokeEvent } from 'electron';
 import { createHash } from 'node:crypto';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import fs from 'node:fs/promises';
@@ -56,6 +56,7 @@ import type {
   Settings,
   SharedFileRef,
   StopAppResult,
+  WindowControlState,
 } from '../shared/types';
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
@@ -66,6 +67,7 @@ const DEFAULT_NODE_VERSION = '24';
 const DEFAULT_PYTHON_VERSION = '3.12';
 const CODEX_CLI_VERSION = '0.125.0';
 const CODEX_USAGE_DASHBOARD_URL = 'https://chatgpt.com/codex/settings/usage';
+const useCustomWindowFrame = process.platform === 'darwin' || process.platform === 'win32';
 
 if (isDev) {
   app.setName('Forger Dev');
@@ -2458,6 +2460,30 @@ const getRuntimeStatus = (appId: string): RuntimeStatus => {
   };
 };
 
+const getWindowState = (window: BrowserWindow): WindowControlState => ({
+  isMaximized: window.isMaximized(),
+  isFullScreen: window.isFullScreen(),
+  usesCustomFrame: useCustomWindowFrame,
+});
+
+const emitWindowState = (window: BrowserWindow): void => {
+  if (!window.isDestroyed()) {
+    window.webContents.send(IPC_CHANNELS.windowStateChanged, getWindowState(window));
+  }
+};
+
+const registerWindowStateEvents = (window: BrowserWindow): void => {
+  const notify = () => emitWindowState(window);
+  window.on('maximize', notify);
+  window.on('unmaximize', notify);
+  window.on('restore', notify);
+  window.on('enter-full-screen', notify);
+  window.on('leave-full-screen', notify);
+};
+
+const getInvokingWindow = (event: IpcMainInvokeEvent): BrowserWindow | null =>
+  BrowserWindow.fromWebContents(event.sender);
+
 const findSqliteFile = async (searchDir: string): Promise<string | null> => {
   const extensions = ['.db', '.sqlite', '.sqlite3'];
   try {
@@ -2511,6 +2537,10 @@ const createWindow = async (): Promise<void> => {
     minHeight: 760,
     backgroundColor: '#F6F3EE',
     title: isDev ? 'Forger Dev' : 'Forger',
+    frame: !useCustomWindowFrame,
+    titleBarStyle: process.platform === 'darwin' ? 'hidden' : undefined,
+    trafficLightPosition: process.platform === 'darwin' ? { x: 12, y: 12 } : undefined,
+    autoHideMenuBar: true,
     webPreferences: {
       preload: preloadPath,
       nodeIntegration: false,
@@ -2518,6 +2548,8 @@ const createWindow = async (): Promise<void> => {
       sandbox: true,
     },
   });
+
+  registerWindowStateEvents(mainWindow);
 
   if (isDev && process.env.VITE_DEV_SERVER_URL) {
     await mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
@@ -2563,6 +2595,36 @@ const registerIpcHandlers = (): void => {
 
   ipcMain.handle(IPC_CHANNELS.getAppRuntimeStatus, async (_event, appId: string) => {
     return getRuntimeStatus(appId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.windowMinimize, async (event) => {
+    getInvokingWindow(event)?.minimize();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.windowToggleMaximize, async (event) => {
+    const window = getInvokingWindow(event);
+    if (!window) {
+      return { isMaximized: false, isFullScreen: false, usesCustomFrame: useCustomWindowFrame };
+    }
+    if (window.isFullScreen()) {
+      window.setFullScreen(false);
+    } else if (window.isMaximized()) {
+      window.unmaximize();
+    } else {
+      window.maximize();
+    }
+    const state = getWindowState(window);
+    emitWindowState(window);
+    return state;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.windowClose, async (event) => {
+    getInvokingWindow(event)?.close();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.windowGetState, async (event) => {
+    const window = getInvokingWindow(event);
+    return window ? getWindowState(window) : { isMaximized: false, isFullScreen: false, usesCustomFrame: useCustomWindowFrame };
   });
 
   ipcMain.handle(IPC_CHANNELS.getSettings, async () => settings);

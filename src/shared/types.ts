@@ -355,6 +355,12 @@ export interface FilesActionResult {
   technicalCode?: string;
 }
 
+export interface WindowControlState {
+  isMaximized: boolean;
+  isFullScreen: boolean;
+  usesCustomFrame: boolean;
+}
+
 export interface ForgerDesktopApi {
   listInstalledApps: () => Promise<AppSummary[]>;
   listCatalogApps: () => Promise<CatalogApp[]>;
@@ -391,4 +397,9 @@ export interface ForgerDesktopApi {
   filesDelete: (input: FilesDeleteInput) => Promise<FilesActionResult>;
   dbListTables: (appId: string) => Promise<DbListTablesResponse>;
   dbQueryTable: (appId: string, tableName: string, limit?: number) => Promise<DbQueryTableResponse>;
+  minimizeWindow: () => Promise<void>;
+  toggleMaximizeWindow: () => Promise<WindowControlState>;
+  closeWindow: () => Promise<void>;
+  getWindowState: () => Promise<WindowControlState>;
+  onWindowStateChanged: (listener: (state: WindowControlState) => void) => () => void;
 }

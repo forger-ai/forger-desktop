@@ -34,4 +34,9 @@ export const IPC_CHANNELS = {
   filesDelete: 'forger:files:delete',
   dbListTables: 'forger:db:list-tables',
   dbQueryTable: 'forger:db:query-table',
+  windowMinimize: 'forger:window:minimize',
+  windowToggleMaximize: 'forger:window:toggle-maximize',
+  windowClose: 'forger:window:close',
+  windowGetState: 'forger:window:get-state',
+  windowStateChanged: 'forger:window:state-changed',
 } as const;
