@@ -21,6 +21,7 @@ import type {
   AgentToolSettings,
   AppCategory,
   AppDetails,
+  AppSecretsState,
   AppSummary,
   CatalogApp,
   CodexAuthStatus,
@@ -34,6 +35,7 @@ import type {
   SharedFileRef,
 } from '@shared/types';
 import { AppShell } from '@renderer/components/AppShell';
+import { AppSecretsDialog } from '@renderer/components/AppSecretsDialog';
 import { CodexConfigModal } from '@renderer/components/CodexConfigModal';
 import { ForgerCloudModal } from '@renderer/components/ForgerCloudModal';
 import { defaultLocale, getDictionary, type Locale } from '@renderer/i18n';
@@ -288,6 +290,9 @@ function App() {
   const [appDetailsBackView, setAppDetailsBackView] = useState<View>('catalog');
   const [selectedAppId, setSelectedAppId] = useState<string | null>(null);
   const [selectedDataAppId, setSelectedDataAppId] = useState<string | null>(null);
+  const [secretsDialogAppId, setSecretsDialogAppId] = useState<string | null>(null);
+  const [appSecretsState, setAppSecretsState] = useState<AppSecretsState | null>(null);
+  const [secretsBusy, setSecretsBusy] = useState(false);
   const [chatInput, setChatInput] = useState('');
   const [pendingChatFiles, setPendingChatFiles] = useState<PickedChatFile[]>([]);
   const [mentionedChatFileIds, setMentionedChatFileIds] = useState<string[]>([]);
@@ -936,6 +941,88 @@ function App() {
     await handleInstall(appId);
   };
 
+  const refreshAppSecrets = async (appId: string) => {
+    const desktopApi = getDesktopApi();
+    const nextState = await desktopApi.getAppSecrets(appId);
+    setAppSecretsState(nextState);
+  };
+
+  const handleConfigureAppSecrets = async (appId: string) => {
+    setSecretsDialogAppId(appId);
+    setAppSecretsState(null);
+    setSecretsBusy(true);
+    try {
+      await refreshAppSecrets(appId);
+    } catch {
+      setBannerSeverity('error');
+      setBannerMessage('No pudimos cargar los secretos de esta app.');
+    } finally {
+      setSecretsBusy(false);
+    }
+  };
+
+  const runSecretMutation = async (
+    action: () => Promise<{ success: boolean; userMessage: string }>,
+  ) => {
+    if (!secretsDialogAppId) {
+      return;
+    }
+    setSecretsBusy(true);
+    try {
+      const result = await action();
+      setBannerSeverity(result.success ? 'success' : 'error');
+      setBannerMessage(result.userMessage);
+      await refreshAppSecrets(secretsDialogAppId);
+    } catch {
+      setBannerSeverity('error');
+      setBannerMessage('No pudimos actualizar los secretos.');
+    } finally {
+      setSecretsBusy(false);
+    }
+  };
+
+  const handleCreateSecret = async (input: { name: string; value: string }) => {
+    const desktopApi = getDesktopApi();
+    await runSecretMutation(() => desktopApi.createUserSecret(input));
+  };
+
+  const handleUpdateSecret = async (input: { id: string; name: string; value?: string }) => {
+    const desktopApi = getDesktopApi();
+    await runSecretMutation(() => desktopApi.updateUserSecret(input));
+  };
+
+  const handleDeleteSecret = async (id: string) => {
+    const desktopApi = getDesktopApi();
+    await runSecretMutation(() => desktopApi.deleteUserSecret({ id }));
+  };
+
+  const handleConnectSecret = async (appSecretName: string, userSecretId: string) => {
+    if (!secretsDialogAppId) {
+      return;
+    }
+    const desktopApi = getDesktopApi();
+    await runSecretMutation(() =>
+      desktopApi.connectAppSecret({
+        appId: secretsDialogAppId,
+        appSecretName,
+        userSecretId,
+      }),
+    );
+  };
+
+  const handleDisconnectSecret = async (appSecretName: string) => {
+    if (!secretsDialogAppId) {
+      return;
+    }
+    const desktopApi = getDesktopApi();
+    await runSecretMutation(() =>
+      desktopApi.disconnectAppSecret({
+        appId: secretsDialogAppId,
+        appSecretName,
+      }),
+    );
+  };
+
   const handleDeleteApp = async (appId: string) => {
     const meta = getAppMeta(appId);
     const confirmed = window.confirm(t.appView.deleteConfirm(meta.name));
@@ -1421,6 +1508,7 @@ function App() {
             onStop={(appId) => void handleStop(appId)}
             onRestoreUserVersion={(appId) => void handleRestoreUserVersion(appId)}
             onResolveConflict={(appId) => void handleResolveConflict(appId)}
+            onConfigureSecrets={(appId) => void handleConfigureAppSecrets(appId)}
             onDelete={(appId) => void handleDeleteApp(appId)}
           />
         ) : null}
@@ -1538,6 +1626,22 @@ function App() {
         onClose={() => setCodexConfigOpen(false)}
         onConnect={handleConnectCodexAuth}
         onRefresh={refreshCodexAuthStatus}
+      />
+
+      <AppSecretsDialog
+        open={Boolean(secretsDialogAppId)}
+        state={appSecretsState}
+        busy={secretsBusy}
+        t={t}
+        onClose={() => {
+          setSecretsDialogAppId(null);
+          setAppSecretsState(null);
+        }}
+        onCreateSecret={handleCreateSecret}
+        onUpdateSecret={handleUpdateSecret}
+        onDeleteSecret={handleDeleteSecret}
+        onConnectSecret={handleConnectSecret}
+        onDisconnectSecret={handleDisconnectSecret}
       />
 
       <Dialog open={categoryDialogOpen} onClose={() => setCategoryDialogOpen(false)} maxWidth="xs" fullWidth>

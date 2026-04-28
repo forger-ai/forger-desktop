@@ -105,6 +105,67 @@ export interface StopAppResult {
   technicalCode?: string;
 }
 
+export interface AppSecretDeclaration {
+  name: string;
+  required: boolean;
+  usage: string;
+  label?: string;
+}
+
+export interface UserSecretSummary {
+  id: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AppSecretConnection {
+  appSecret: AppSecretDeclaration;
+  envName: string;
+  connected: boolean;
+  userSecretId?: string;
+  userSecretName?: string;
+}
+
+export interface AppSecretsState {
+  appId: string;
+  appName: string;
+  appSecrets: AppSecretConnection[];
+  userSecrets: UserSecretSummary[];
+}
+
+export interface SecretMutationResult {
+  success: boolean;
+  userMessage: string;
+  technicalCode?: string;
+}
+
+export interface CreateUserSecretInput {
+  name: string;
+  value: string;
+}
+
+export interface UpdateUserSecretInput {
+  id: string;
+  name: string;
+  value?: string;
+}
+
+export interface DeleteUserSecretInput {
+  id: string;
+}
+
+export interface ConnectAppSecretInput {
+  appId: string;
+  appSecretName: string;
+  userSecretId: string;
+}
+
+export interface DisconnectAppSecretInput {
+  appId: string;
+  appSecretName: string;
+}
+
 export type AgentToolId =
   | 'forger_list_catalog'
   | 'forger_list_installed_apps'
@@ -437,6 +498,13 @@ export interface ForgerDesktopApi {
   openApp: (appId: string) => Promise<OpenAppResult>;
   stopApp: (appId: string) => Promise<StopAppResult>;
   getAppRuntimeStatus: (appId: string) => Promise<RuntimeStatus>;
+  getAppSecrets: (appId: string) => Promise<AppSecretsState>;
+  listUserSecrets: () => Promise<UserSecretSummary[]>;
+  createUserSecret: (input: CreateUserSecretInput) => Promise<SecretMutationResult>;
+  updateUserSecret: (input: UpdateUserSecretInput) => Promise<SecretMutationResult>;
+  deleteUserSecret: (input: DeleteUserSecretInput) => Promise<SecretMutationResult>;
+  connectAppSecret: (input: ConnectAppSecretInput) => Promise<SecretMutationResult>;
+  disconnectAppSecret: (input: DisconnectAppSecretInput) => Promise<SecretMutationResult>;
   onInstallProgress: (listener: (event: { appId: string; progress: InstallAppResult }) => void) => () => void;
   onRuntimeStatusChanged: (listener: (event: RuntimeStatus) => void) => () => void;
   getSettings: () => Promise<Settings>;

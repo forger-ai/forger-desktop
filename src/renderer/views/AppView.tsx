@@ -4,6 +4,7 @@ import DownloadRounded from '@mui/icons-material/DownloadRounded';
 import LaunchRounded from '@mui/icons-material/LaunchRounded';
 import StopCircleRounded from '@mui/icons-material/StopCircleRounded';
 import SystemUpdateAltRounded from '@mui/icons-material/SystemUpdateAltRounded';
+import VpnKeyRounded from '@mui/icons-material/VpnKeyRounded';
 import {
   Avatar,
   Box,
@@ -30,6 +31,7 @@ interface AppViewProps {
   onStop: (appId: string) => void;
   onRestoreUserVersion: (appId: string) => void;
   onResolveConflict: (appId: string) => void;
+  onConfigureSecrets: (appId: string) => void;
   onDelete: (appId: string) => void;
 }
 
@@ -52,6 +54,7 @@ export function AppView({
   onStop,
   onRestoreUserVersion,
   onResolveConflict,
+  onConfigureSecrets,
   onDelete,
 }: AppViewProps) {
   if (!details) {
@@ -135,6 +138,11 @@ export function AppView({
             {isOpening ? t.actions.opening : t.actions.open}
           </Button>
         )}
+        {details.installed ? (
+          <Button variant="outlined" startIcon={<VpnKeyRounded />} onClick={() => onConfigureSecrets(appId)}>
+            {t.secrets.title}
+          </Button>
+        ) : null}
         {details.installed ? (
           <Button variant="outlined" color="error" startIcon={<DeleteOutlineRounded />} onClick={() => onDelete(appId)}>
             {t.actions.delete}

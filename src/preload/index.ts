@@ -15,6 +15,13 @@ const IPC_CHANNELS = {
   openApp: 'forger:open-app',
   stopApp: 'forger:stop-app',
   getAppRuntimeStatus: 'forger:get-app-runtime-status',
+  getAppSecrets: 'forger:get-app-secrets',
+  listUserSecrets: 'forger:list-user-secrets',
+  createUserSecret: 'forger:create-user-secret',
+  updateUserSecret: 'forger:update-user-secret',
+  deleteUserSecret: 'forger:delete-user-secret',
+  connectAppSecret: 'forger:connect-app-secret',
+  disconnectAppSecret: 'forger:disconnect-app-secret',
   getSettings: 'forger:get-settings',
   getCodexAuthStatus: 'forger:get-codex-auth-status',
   openCodexUsageDashboard: 'forger:open-codex-usage-dashboard',
@@ -59,6 +66,13 @@ const api: ForgerDesktopApi = {
   openApp: (appId) => ipcRenderer.invoke(IPC_CHANNELS.openApp, appId),
   stopApp: (appId) => ipcRenderer.invoke(IPC_CHANNELS.stopApp, appId),
   getAppRuntimeStatus: (appId) => ipcRenderer.invoke(IPC_CHANNELS.getAppRuntimeStatus, appId),
+  getAppSecrets: (appId) => ipcRenderer.invoke(IPC_CHANNELS.getAppSecrets, appId),
+  listUserSecrets: () => ipcRenderer.invoke(IPC_CHANNELS.listUserSecrets),
+  createUserSecret: (input) => ipcRenderer.invoke(IPC_CHANNELS.createUserSecret, input),
+  updateUserSecret: (input) => ipcRenderer.invoke(IPC_CHANNELS.updateUserSecret, input),
+  deleteUserSecret: (input) => ipcRenderer.invoke(IPC_CHANNELS.deleteUserSecret, input),
+  connectAppSecret: (input) => ipcRenderer.invoke(IPC_CHANNELS.connectAppSecret, input),
+  disconnectAppSecret: (input) => ipcRenderer.invoke(IPC_CHANNELS.disconnectAppSecret, input),
   onInstallProgress: (listener) => {
     const wrapped = (_event: unknown, payload: Parameters<typeof listener>[0]) => {
       listener(payload);
