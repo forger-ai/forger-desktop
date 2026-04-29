@@ -946,16 +946,58 @@ const normalizeManifestPromptTemplates = (manifest: AppManifest | null): AppProm
     const acceptedFileTypes = Array.isArray(candidate.acceptedFileTypes)
       ? candidate.acceptedFileTypes.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
       : undefined;
+    const args = normalizePromptTemplateArguments(candidate.arguments);
     seenIds.add(id);
     templates.push({
       id,
       title,
       prompt,
       ...(description ? { description } : {}),
+      ...(args.length > 0 ? { arguments: args } : {}),
       ...(acceptedFileTypes && acceptedFileTypes.length > 0 ? { acceptedFileTypes } : {}),
     });
   }
   return templates;
+};
+
+const normalizePromptTemplateArguments = (input: unknown): NonNullable<AppPromptTemplate['arguments']> => {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+
+  const seenNames = new Set<string>();
+  const args: NonNullable<AppPromptTemplate['arguments']> = [];
+  for (const entry of input) {
+    if (!entry || typeof entry !== 'object') {
+      continue;
+    }
+    const candidate = entry as Record<string, unknown>;
+    const name = typeof candidate.name === 'string' ? candidate.name.trim() : '';
+    const type = candidate.type === 'file' || candidate.type === 'string' ? candidate.type : null;
+    if (!name || !type || seenNames.has(name)) {
+      continue;
+    }
+    const acceptedFileTypes = Array.isArray(candidate.acceptedFileTypes)
+      ? candidate.acceptedFileTypes.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+      : undefined;
+    const maxBytes = typeof candidate.maxBytes === 'number' && Number.isFinite(candidate.maxBytes) && candidate.maxBytes > 0
+      ? candidate.maxBytes
+      : undefined;
+    const maxLength = typeof candidate.maxLength === 'number' && Number.isFinite(candidate.maxLength) && candidate.maxLength > 0
+      ? candidate.maxLength
+      : undefined;
+    seenNames.add(name);
+    args.push({
+      name,
+      type,
+      ...(candidate.required === true ? { required: true } : {}),
+      ...(candidate.multiple === true ? { multiple: true } : {}),
+      ...(acceptedFileTypes && acceptedFileTypes.length > 0 ? { acceptedFileTypes } : {}),
+      ...(maxBytes ? { maxBytes } : {}),
+      ...(maxLength ? { maxLength } : {}),
+    });
+  }
+  return args;
 };
 
 const resolveInstalledPromptTemplates = async (appId: string): Promise<AppPromptTemplate[]> => {

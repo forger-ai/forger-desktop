@@ -5,9 +5,11 @@ import path from 'node:path';
 import type {
   AppCodexTaskAttachment,
   AppCodexTaskEvent,
+  AppCodexTaskFileArgument,
   AppCodexTaskStartInput,
   AppCodexTaskSummary,
   AppPromptTemplate,
+  AppPromptTemplateArgument,
 } from '../shared/types';
 
 interface AppCodexTaskManagerOptions {
@@ -32,6 +34,18 @@ interface CommandResult {
   code: number;
   stdout: string;
   stderr: string;
+}
+
+interface PreparedFileArgument {
+  argumentName: string;
+  name: string;
+  path: string;
+  mimeType?: string;
+}
+
+interface PreparedPromptArguments {
+  variables: Record<string, string | number | boolean | null>;
+  files: PreparedFileArgument[];
 }
 
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
@@ -125,12 +139,11 @@ export class AppCodexTaskManager {
     this.emit(task);
 
     try {
-      const attachments = await this.writeAttachments(task, template, input.attachments ?? []);
-      const imageArgs = attachments
-        .filter((attachment) => attachment.mimeType?.toLowerCase().startsWith('image/'))
-        .flatMap((attachment) => ['--image', attachment.path]);
-      const promptVariables = buildPromptVariables(input.variables ?? {}, attachments);
-      const prompt = renderPrompt(template.prompt, promptVariables, attachments);
+      const preparedArguments = await this.preparePromptArguments(task, template, input);
+      const imageArgs = preparedArguments.files
+        .filter((file) => file.mimeType?.toLowerCase().startsWith('image/'))
+        .flatMap((file) => ['--image', file.path]);
+      const prompt = renderPrompt(template.prompt, preparedArguments);
       const command = await resolveCodexCommand(codexCliPath, await this.options.getCodexPathEntries(task.appId));
       const environment = await this.options.getCodexEnvironment(task.appId);
       const args = [
@@ -205,14 +218,62 @@ export class AppCodexTaskManager {
     this.emit(task);
   }
 
-  private async writeAttachments(
+  private async preparePromptArguments(
+    task: InternalTask,
+    template: AppPromptTemplate,
+    input: AppCodexTaskStartInput,
+  ): Promise<PreparedPromptArguments> {
+    if (!template.arguments || template.arguments.length === 0) {
+      const files = await this.writeLegacyAttachments(task, template, input.attachments ?? []);
+      return {
+        variables: buildLegacyPromptVariables(input.variables ?? {}, files),
+        files,
+      };
+    }
+
+    const rawArguments = input.arguments ?? {};
+    const declaredNames = new Set(template.arguments.map((argument) => argument.name));
+    for (const name of Object.keys(rawArguments)) {
+      if (!declaredNames.has(name)) {
+        throw new Error(`app_prompt_argument_not_declared:${name}`);
+      }
+    }
+
+    const variables: PreparedPromptArguments['variables'] = {};
+    const files: PreparedFileArgument[] = [];
+    for (const argument of template.arguments) {
+      const value = rawArguments[argument.name];
+      if (value === undefined || value === null) {
+        if (argument.required) {
+          throw new Error(`app_prompt_argument_required:${argument.name}`);
+        }
+        variables[argument.name] = '';
+        continue;
+      }
+      if (argument.type === 'string') {
+        variables[argument.name] = normalizeStringArgument(argument, value);
+        continue;
+      }
+
+      const argumentFiles = await this.writeFileArgument(task, argument, value);
+      if (argument.required && argumentFiles.length === 0) {
+        throw new Error(`app_prompt_argument_required:${argument.name}`);
+      }
+      files.push(...argumentFiles);
+      variables[argument.name] = formatFileArgumentForPrompt(argumentFiles);
+    }
+
+    return { variables, files };
+  }
+
+  private async writeLegacyAttachments(
     task: InternalTask,
     template: AppPromptTemplate,
     attachments: AppCodexTaskAttachment[],
-  ): Promise<Array<{ name: string; path: string; mimeType?: string }>> {
+  ): Promise<PreparedFileArgument[]> {
     const targetDir = this.taskInputDir(task);
     await fs.mkdir(targetDir, { recursive: true });
-    const written: Array<{ name: string; path: string; mimeType?: string }> = [];
+    const written: PreparedFileArgument[] = [];
     for (const [index, attachment] of attachments.entries()) {
       const safeName = sanitizeFilename(attachment.name || `attachment-${index + 1}`);
       validateAttachmentType(template, attachment, safeName);
@@ -225,7 +286,37 @@ export class AppCodexTaskManager {
         throw new Error('attachment_path_outside_task_inputs');
       }
       await fs.writeFile(filePath, bytes);
-      written.push({ name: safeName, path: filePath, mimeType: attachment.mimeType });
+      written.push({ argumentName: 'attachment', name: safeName, path: filePath, mimeType: attachment.mimeType });
+    }
+    return written;
+  }
+
+  private async writeFileArgument(
+    task: InternalTask,
+    argument: AppPromptTemplateArgument,
+    value: unknown,
+  ): Promise<PreparedFileArgument[]> {
+    const incomingFiles = normalizeFileArgumentValue(argument, value);
+    const targetDir = this.taskInputDir(task);
+    await fs.mkdir(targetDir, { recursive: true });
+    const written: PreparedFileArgument[] = [];
+    const usedNames = new Set<string>();
+    for (const [index, file] of incomingFiles.entries()) {
+      const safeName = uniqueFilename(
+        sanitizeFilename(file.name || `${argument.name}-${index + 1}`),
+        usedNames,
+      );
+      validateFileArgumentType(argument, file, safeName);
+      const bytes = Buffer.from(file.dataBase64, 'base64');
+      if (bytes.length > (argument.maxBytes ?? MAX_ATTACHMENT_BYTES)) {
+        throw new Error(`app_prompt_file_too_large:${argument.name}`);
+      }
+      const filePath = path.join(targetDir, safeName);
+      if (!isPathInside(filePath, targetDir)) {
+        throw new Error('attachment_path_outside_task_inputs');
+      }
+      await fs.writeFile(filePath, bytes);
+      written.push({ argumentName: argument.name, name: safeName, path: filePath, mimeType: file.mimeType });
     }
     return written;
   }
@@ -301,8 +392,31 @@ const sanitizeDotFilename = (value: string): string => {
   return sanitized === '.' || sanitized === '..' ? 'attachment' : sanitized;
 };
 
+const uniqueFilename = (safeName: string, usedNames: Set<string>): string => {
+  if (!usedNames.has(safeName)) {
+    usedNames.add(safeName);
+    return safeName;
+  }
+  const parsed = path.parse(safeName);
+  for (let index = 2; ; index += 1) {
+    const candidate = `${parsed.name}-${index}${parsed.ext}`;
+    if (!usedNames.has(candidate)) {
+      usedNames.add(candidate);
+      return candidate;
+    }
+  }
+};
+
 const normalizeMimeType = (value: string | undefined): string =>
   typeof value === 'string' ? value.trim().toLowerCase() : '';
+
+const isCodexFileArgument = (value: unknown): value is AppCodexTaskFileArgument =>
+  Boolean(
+    value
+      && typeof value === 'object'
+      && (value as AppCodexTaskFileArgument).type === 'file'
+      && typeof (value as AppCodexTaskFileArgument).dataBase64 === 'string',
+  );
 
 const validateAttachmentType = (
   template: AppPromptTemplate,
@@ -331,30 +445,95 @@ const validateAttachmentType = (
   }
 };
 
-const buildPromptVariables = (
+const validateFileArgumentType = (
+  argument: AppPromptTemplateArgument,
+  file: AppCodexTaskFileArgument,
+  safeName: string,
+): void => {
+  const accepted = argument.acceptedFileTypes?.map((entry) => entry.trim().toLowerCase()).filter(Boolean) ?? [];
+  if (accepted.length === 0) {
+    return;
+  }
+
+  const mimeType = normalizeMimeType(file.mimeType);
+  const fileName = safeName.toLowerCase();
+  const matchesAcceptedType = accepted.some((entry) => {
+    if (entry.endsWith('/*')) {
+      return mimeType.startsWith(entry.slice(0, -1));
+    }
+    if (entry.startsWith('.')) {
+      return fileName.endsWith(entry);
+    }
+    return mimeType === entry;
+  });
+
+  if (!matchesAcceptedType) {
+    throw new Error(`app_prompt_file_type_not_accepted:${argument.name}`);
+  }
+};
+
+const normalizeStringArgument = (argument: AppPromptTemplateArgument, value: unknown): string => {
+  const text =
+    value && typeof value === 'object' && (value as { type?: unknown }).type === 'string'
+      ? (value as { value?: unknown }).value
+      : value;
+  if (typeof text !== 'string' && typeof text !== 'number' && typeof text !== 'boolean') {
+    throw new Error(`app_prompt_argument_invalid:${argument.name}`);
+  }
+  const normalized = String(text);
+  if (argument.maxLength && normalized.length > argument.maxLength) {
+    throw new Error(`app_prompt_string_too_long:${argument.name}`);
+  }
+  return normalized;
+};
+
+const normalizeFileArgumentValue = (
+  argument: AppPromptTemplateArgument,
+  value: unknown,
+): AppCodexTaskFileArgument[] => {
+  const values = Array.isArray(value) ? value : [value];
+  if (!argument.multiple && values.length > 1) {
+    throw new Error(`app_prompt_argument_multiple_not_allowed:${argument.name}`);
+  }
+  if (!values.every(isCodexFileArgument)) {
+    throw new Error(`app_prompt_argument_invalid:${argument.name}`);
+  }
+  return values;
+};
+
+const buildLegacyPromptVariables = (
   variables: Record<string, string | number | boolean | null>,
-  attachments: Array<{ name: string; path: string; mimeType?: string }>,
+  files: PreparedFileArgument[],
 ): Record<string, string | number | boolean | null> => {
-  if (attachments.length !== 1) {
+  if (files.length !== 1) {
     return variables;
   }
   return {
     ...variables,
-    filename: attachments[0].path,
+    filename: files[0].path,
   };
+};
+
+const formatFileArgumentForPrompt = (files: PreparedFileArgument[]): string => {
+  if (files.length === 0) {
+    return '';
+  }
+  if (files.length === 1) {
+    return files[0].path;
+  }
+  return files.map((file) => `- ${file.name}: ${file.path}`).join('\n');
 };
 
 const renderPrompt = (
   template: string,
-  variables: Record<string, string | number | boolean | null>,
-  attachments: Array<{ name: string; path: string; mimeType?: string }>,
+  preparedArguments: PreparedPromptArguments,
 ): string => {
   let rendered = template;
-  for (const [key, value] of Object.entries(variables)) {
+  for (const [key, value] of Object.entries(preparedArguments.variables)) {
     rendered = rendered.replaceAll(`{{${key}}}`, value == null ? '' : String(value));
   }
-  const attachmentLines = attachments.length
-    ? attachments.map((file) => `- ${file.name}: ${file.path}${file.mimeType ? ` (${file.mimeType})` : ''}`)
+  const attachmentLines = preparedArguments.files.length
+    ? preparedArguments.files.map((file) => `- ${file.argumentName}.${file.name}: ${file.path}${file.mimeType ? ` (${file.mimeType})` : ''}`)
     : ['- No se adjuntaron archivos.'];
   return [
     rendered.trim(),

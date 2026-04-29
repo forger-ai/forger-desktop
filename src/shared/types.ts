@@ -32,8 +32,21 @@ export interface AppPromptTemplate {
   id: string;
   title: string;
   description?: string;
-  prompt: string;
+  arguments?: AppPromptTemplateArgument[];
   acceptedFileTypes?: string[];
+  prompt: string;
+}
+
+export type AppPromptTemplateArgumentType = 'file' | 'string';
+
+export interface AppPromptTemplateArgument {
+  name: string;
+  type: AppPromptTemplateArgumentType;
+  required?: boolean;
+  multiple?: boolean;
+  acceptedFileTypes?: string[];
+  maxBytes?: number;
+  maxLength?: number;
 }
 
 export interface CatalogApp extends AppSummary {
@@ -529,8 +542,30 @@ export interface AppCodexTaskAttachment {
   dataBase64: string;
 }
 
+export interface AppCodexTaskFileArgument {
+  type: 'file';
+  name: string;
+  mimeType?: string;
+  dataBase64: string;
+}
+
+export interface AppCodexTaskStringArgument {
+  type: 'string';
+  value: string;
+}
+
+export type AppCodexTaskArgumentValue =
+  | string
+  | number
+  | boolean
+  | null
+  | AppCodexTaskStringArgument
+  | AppCodexTaskFileArgument
+  | AppCodexTaskFileArgument[];
+
 export interface AppCodexTaskStartInput {
   templateId: string;
+  arguments?: Record<string, AppCodexTaskArgumentValue>;
   variables?: Record<string, string | number | boolean | null>;
   attachments?: AppCodexTaskAttachment[];
 }
