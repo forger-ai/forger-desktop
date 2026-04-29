@@ -609,7 +609,7 @@ const progressFromAgentMessage = (item: Record<string, unknown>): string | null 
   if (typeof item.text !== 'string') {
     return null;
   }
-  const firstSentence = item.text
+  const firstSentence = stripMarkdown(item.text)
     .replace(/\s+/g, ' ')
     .split(/(?<=[.!?])\s+/)[0]
     .trim();
@@ -618,6 +618,19 @@ const progressFromAgentMessage = (item: Record<string, unknown>): string | null 
   }
   return firstSentence.length > 140 ? `${firstSentence.slice(0, 137)}...` : firstSentence;
 };
+
+const stripMarkdown = (text: string): string =>
+  text
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/!\[[^\]]*]\([^)]*\)/g, ' ')
+    .replace(/\[([^\]]+)]\([^)]*\)/g, '$1')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/^>\s?/gm, '')
+    .replace(/^[\s*-]*[-*+]\s+/gm, '')
+    .replace(/^[\s\d.]+[.)]\s+/gm, '')
+    .replace(/[*_~]+/g, '')
+    .trim();
 
 const progressFromCommandExecution = (item: Record<string, unknown>): string | null => {
   const command = typeof item.command === 'string' ? item.command : '';
