@@ -100,6 +100,7 @@ export class AppCodexTaskManager {
     task.updatedAt = new Date().toISOString();
     task.error = 'canceled';
     void this.persist(task);
+    void this.cleanupTaskInputs(task);
     this.emit(task);
     return { success: true };
   }
@@ -123,68 +124,73 @@ export class AppCodexTaskManager {
     await this.persist(task);
     this.emit(task);
 
-    const attachments = await this.writeAttachments(task, template, input.attachments ?? []);
-    const imageArgs = attachments
-      .filter((attachment) => attachment.mimeType?.toLowerCase().startsWith('image/'))
-      .flatMap((attachment) => ['--image', attachment.path]);
-    const prompt = renderPrompt(template.prompt, input.variables ?? {}, attachments);
-    const command = await resolveCodexCommand(codexCliPath, await this.options.getCodexPathEntries(task.appId));
-    const environment = await this.options.getCodexEnvironment(task.appId);
-    const args = [
-      ...command.prefixArgs,
-      'exec',
-      '--json',
-      '--model',
-      'gpt-5.3-codex',
-      '--config',
-      'reasoning_effort="low"',
-      '--full-auto',
-      '--sandbox',
-      'workspace-write',
-      '--skip-git-repo-check',
-      '-C',
-      task.appRoot,
-      ...imageArgs,
-      prompt,
-    ];
+    try {
+      const attachments = await this.writeAttachments(task, template, input.attachments ?? []);
+      const imageArgs = attachments
+        .filter((attachment) => attachment.mimeType?.toLowerCase().startsWith('image/'))
+        .flatMap((attachment) => ['--image', attachment.path]);
+      const promptVariables = buildPromptVariables(input.variables ?? {}, attachments);
+      const prompt = renderPrompt(template.prompt, promptVariables, attachments);
+      const command = await resolveCodexCommand(codexCliPath, await this.options.getCodexPathEntries(task.appId));
+      const environment = await this.options.getCodexEnvironment(task.appId);
+      const args = [
+        ...command.prefixArgs,
+        'exec',
+        '--json',
+        '--model',
+        'gpt-5.3-codex',
+        '--config',
+        'reasoning_effort="low"',
+        '--full-auto',
+        '--sandbox',
+        'workspace-write',
+        '--skip-git-repo-check',
+        '-C',
+        task.appRoot,
+        ...imageArgs,
+        prompt,
+      ];
 
-    await appendTranscript(task.transcriptPath, 'meta', `${command.command} exec --json -C ${task.appRoot}`);
-    const result = await runCommandCapture(command.command, args, {
-      cwd: task.appRoot,
-      env: {
-        CODEX_HOME: this.options.codexHome,
-        FORGER_ALLOWED_ROOTS: task.appRoot,
-        ...environment,
-        PATH: [...command.pathEntries, process.env.PATH ?? ''].filter(Boolean).join(path.delimiter),
-      },
-      timeoutMs: 300_000,
-      onChild: (child) => {
-        task.child = child;
-      },
-      onStdout: (text) => {
-        void appendTranscript(task.transcriptPath, 'stdout', text);
-        this.updateProgressFromOutput(task, text);
-      },
-      onStderr: (text) => {
-        void appendTranscript(task.transcriptPath, 'stderr', text);
-        this.updateProgressFromOutput(task, text);
-      },
-    });
+      await appendTranscript(task.transcriptPath, 'meta', `${command.command} exec --json -C ${task.appRoot}`);
+      const result = await runCommandCapture(command.command, args, {
+        cwd: task.appRoot,
+        env: {
+          CODEX_HOME: this.options.codexHome,
+          FORGER_ALLOWED_ROOTS: task.appRoot,
+          ...environment,
+          PATH: [...command.pathEntries, process.env.PATH ?? ''].filter(Boolean).join(path.delimiter),
+        },
+        timeoutMs: 300_000,
+        onChild: (child) => {
+          task.child = child;
+        },
+        onStdout: (text) => {
+          void appendTranscript(task.transcriptPath, 'stdout', text);
+          this.updateProgressFromOutput(task, text);
+        },
+        onStderr: (text) => {
+          void appendTranscript(task.transcriptPath, 'stderr', text);
+          this.updateProgressFromOutput(task, text);
+        },
+      });
 
-    if ((task as AppCodexTaskSummary).status === 'canceled') {
-      return;
+      if ((task as AppCodexTaskSummary).status === 'canceled') {
+        return;
+      }
+      if (result.code !== 0) {
+        throw new Error((result.stderr || result.stdout || 'codex_exec_failed').trim());
+      }
+
+      const parsed = parseCodexJsonl(result.stdout, result.stderr);
+      task.status = 'completed';
+      task.updatedAt = new Date().toISOString();
+      task.resultText = parsed || 'Codex completo la tarea.';
+      this.addProgress(task, 'Codex termino la tarea.');
+      await this.persist(task);
+      this.emit(task);
+    } finally {
+      await this.cleanupTaskInputs(task).catch(() => undefined);
     }
-    if (result.code !== 0) {
-      throw new Error((result.stderr || result.stdout || 'codex_exec_failed').trim());
-    }
-
-    const parsed = parseCodexJsonl(result.stdout, result.stderr);
-    task.status = 'completed';
-    task.updatedAt = new Date().toISOString();
-    task.resultText = parsed || 'Codex completo la tarea.';
-    this.addProgress(task, 'Codex termino la tarea.');
-    await this.persist(task);
-    this.emit(task);
   }
 
   private async failTask(task: InternalTask, message: string): Promise<void> {
@@ -204,7 +210,7 @@ export class AppCodexTaskManager {
     template: AppPromptTemplate,
     attachments: AppCodexTaskAttachment[],
   ): Promise<Array<{ name: string; path: string; mimeType?: string }>> {
-    const targetDir = path.join(task.appRoot, '.forger', 'codex-task-inputs', task.runId);
+    const targetDir = this.taskInputDir(task);
     await fs.mkdir(targetDir, { recursive: true });
     const written: Array<{ name: string; path: string; mimeType?: string }> = [];
     for (const [index, attachment] of attachments.entries()) {
@@ -215,10 +221,26 @@ export class AppCodexTaskManager {
         throw new Error('attachment_too_large');
       }
       const filePath = path.join(targetDir, safeName);
+      if (!isPathInside(filePath, targetDir)) {
+        throw new Error('attachment_path_outside_task_inputs');
+      }
       await fs.writeFile(filePath, bytes);
       written.push({ name: safeName, path: filePath, mimeType: attachment.mimeType });
     }
     return written;
+  }
+
+  private taskInputDir(task: InternalTask): string {
+    const root = path.resolve(task.appRoot, '.forger', 'tmp', 'codex-task-inputs');
+    const target = path.resolve(root, task.runId);
+    if (!isPathInside(target, root)) {
+      throw new Error('app_codex_task_path_outside_tmp');
+    }
+    return target;
+  }
+
+  private async cleanupTaskInputs(task: InternalTask): Promise<void> {
+    await fs.rm(this.taskInputDir(task), { recursive: true, force: true });
   }
 
   private addProgress(task: InternalTask, message: string): void {
@@ -272,7 +294,12 @@ const sanitizeId = (value: unknown): string =>
   typeof value === 'string' ? value.trim().slice(0, 120) : '';
 
 const sanitizeFilename = (value: string): string =>
-  value.replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').slice(0, 160) || 'attachment';
+  sanitizeDotFilename(value.replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').slice(0, 160));
+
+const sanitizeDotFilename = (value: string): string => {
+  const sanitized = value.trim() || 'attachment';
+  return sanitized === '.' || sanitized === '..' ? 'attachment' : sanitized;
+};
 
 const normalizeMimeType = (value: string | undefined): string =>
   typeof value === 'string' ? value.trim().toLowerCase() : '';
@@ -302,6 +329,19 @@ const validateAttachmentType = (
   if (!matchesAcceptedType) {
     throw new Error('attachment_type_not_accepted');
   }
+};
+
+const buildPromptVariables = (
+  variables: Record<string, string | number | boolean | null>,
+  attachments: Array<{ name: string; path: string; mimeType?: string }>,
+): Record<string, string | number | boolean | null> => {
+  if (attachments.length !== 1) {
+    return variables;
+  }
+  return {
+    ...variables,
+    filename: attachments[0].path,
+  };
 };
 
 const renderPrompt = (
