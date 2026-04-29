@@ -21,7 +21,17 @@ interface AppCodexTaskManagerOptions {
   getCodexEnvironment: (appId?: string) => Promise<Record<string, string>>;
   getCodexAuthenticated: () => Promise<boolean>;
   resolvePromptTemplates: (appId: string) => Promise<AppPromptTemplate[]>;
+  listenAppMcps?: (appIds: string[], runId: string) => Promise<CodexMcpServerConfig[]>;
+  releaseAppMcps?: (runId: string) => void;
   onTaskUpdated: (event: AppCodexTaskEvent) => void;
+}
+
+interface CodexMcpServerConfig {
+  name: string;
+  url: string;
+  token: string;
+  tokenEnvVar: string;
+  toolTimeoutSec?: number;
 }
 
 interface InternalTask extends AppCodexTaskSummary {
@@ -146,8 +156,12 @@ export class AppCodexTaskManager {
       const prompt = renderPrompt(template.prompt, preparedArguments);
       const command = await resolveCodexCommand(codexCliPath, await this.options.getCodexPathEntries(task.appId));
       const environment = await this.options.getCodexEnvironment(task.appId);
+      const mcpServers = await (this.options.listenAppMcps?.([task.appId], task.runId) ?? Promise.resolve([]));
+      const mcpArgs = buildMcpArgs(mcpServers);
+      const topLevelArgs = mcpServers.length > 0 ? ['--ask-for-approval', 'never'] : [];
       const args = [
         ...command.prefixArgs,
+        ...topLevelArgs,
         'exec',
         '--json',
         '--model',
@@ -158,6 +172,7 @@ export class AppCodexTaskManager {
         '--sandbox',
         'workspace-write',
         '--skip-git-repo-check',
+        ...mcpArgs,
         '-C',
         task.appRoot,
         ...imageArgs,
@@ -170,6 +185,7 @@ export class AppCodexTaskManager {
         env: {
           CODEX_HOME: this.options.codexHome,
           FORGER_ALLOWED_ROOTS: task.appRoot,
+          ...Object.fromEntries(mcpServers.map((server) => [server.tokenEnvVar, server.token])),
           ...environment,
           PATH: [...command.pathEntries, process.env.PATH ?? ''].filter(Boolean).join(path.delimiter),
         },
@@ -202,6 +218,7 @@ export class AppCodexTaskManager {
       await this.persist(task);
       this.emit(task);
     } finally {
+      this.options.releaseAppMcps?.(task.runId);
       await this.cleanupTaskInputs(task).catch(() => undefined);
     }
   }
@@ -739,6 +756,20 @@ const killProcessTree = (child: ChildProcessWithoutNullStreams | undefined): voi
     child.kill('SIGKILL');
   }
 };
+
+const buildMcpArgs = (mcpServers: CodexMcpServerConfig[]): string[] =>
+  mcpServers.flatMap((server) => [
+    '--config',
+    `mcp_servers.${server.name}.url=${JSON.stringify(server.url)}`,
+    '--config',
+    `mcp_servers.${server.name}.bearer_token_env_var=${JSON.stringify(server.tokenEnvVar)}`,
+    '--config',
+    `mcp_servers.${server.name}.enabled=true`,
+    '--config',
+    `mcp_servers.${server.name}.tool_timeout_sec=${server.toolTimeoutSec ?? 600}`,
+    '--config',
+    `mcp_servers.${server.name}.default_tools_approval_mode="approve"`,
+  ]);
 
 const resolveCodexCommand = async (
   codexCliPath: string,

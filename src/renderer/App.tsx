@@ -65,7 +65,7 @@ const CHAT_STORAGE_KEY = 'forger-chat-conversations-v1';
 const CODEX_MODEL_STORAGE_KEY = 'forger-codex-model-v1';
 const CODEX_REASONING_STORAGE_KEY = 'forger-codex-reasoning-effort-v1';
 const CHAT_BOT_PICTURE_STORAGE_KEY = 'forger-chat-bot-picture-v1';
-const FORGER_DATA_ROOT_NAME = import.meta.env.DEV ? 'dev-data' : 'data';
+const FORGER_DATA_ROOT_NAME = 'data';
 
 export type ChatBotPicture = 'bot' | 'female' | 'male';
 export type LanguagePreference = 'system' | Locale;
