@@ -335,6 +335,9 @@ export class AppCodexTaskManager {
   }
 
   private addProgress(task: InternalTask, message: string): void {
+    if (task.progressLog?.at(-1) === message) {
+      return;
+    }
     task.progressLog = [...(task.progressLog ?? []), message].slice(-40);
     task.updatedAt = new Date().toISOString();
   }
@@ -582,16 +585,67 @@ const progressFromCodexOutput = (text: string): string | null => {
       }
       if (parsed.type === 'item.completed' && parsed.item && typeof parsed.item === 'object') {
         const item = parsed.item as Record<string, unknown>;
-        if (typeof item.type === 'string' && item.type.includes('tool')) {
-          return 'Codex uso herramientas de la app.';
+        if (item.type === 'command_execution') {
+          return progressFromCommandExecution(item);
         }
         if (item.type === 'agent_message') {
-          return 'Codex preparo un resultado.';
+          return progressFromAgentMessage(item);
+        }
+      }
+      if (parsed.type === 'item.started' && parsed.item && typeof parsed.item === 'object') {
+        const item = parsed.item as Record<string, unknown>;
+        if (item.type === 'command_execution') {
+          return progressFromCommandExecution(item);
         }
       }
     } catch {
       continue;
     }
+  }
+  return null;
+};
+
+const progressFromAgentMessage = (item: Record<string, unknown>): string | null => {
+  if (typeof item.text !== 'string') {
+    return null;
+  }
+  const firstSentence = item.text
+    .replace(/\s+/g, ' ')
+    .split(/(?<=[.!?])\s+/)[0]
+    .trim();
+  if (!firstSentence) {
+    return null;
+  }
+  return firstSentence.length > 140 ? `${firstSentence.slice(0, 137)}...` : firstSentence;
+};
+
+const progressFromCommandExecution = (item: Record<string, unknown>): string | null => {
+  const command = typeof item.command === 'string' ? item.command : '';
+  const status = typeof item.status === 'string' ? item.status : '';
+  const exitCode = typeof item.exit_code === 'number' ? item.exit_code : null;
+  if (status === 'failed' || (exitCode !== null && exitCode !== 0)) {
+    return 'Codex encontro una limitacion tecnica y esta probando otra estrategia.';
+  }
+  if (command.includes('list_categories.py')) {
+    return 'Revisando categorias disponibles para clasificar.';
+  }
+  if (command.includes('import_movements.py')) {
+    return 'Cargando movimientos en la base local.';
+  }
+  if (command.includes('verify_data_integrity.py') || command.includes('scripts/verify.py')) {
+    return 'Validando que los datos queden consistentes.';
+  }
+  if (command.includes('list_movements.py')) {
+    return 'Confirmando los movimientos cargados.';
+  }
+  if (command.includes('pdftotext') || command.includes('PdfReader') || command.includes('.pdf')) {
+    return 'Leyendo el contenido del documento.';
+  }
+  if (command.includes('skills/load-movements') || command.includes('AGENTS.md')) {
+    return 'Revisando las instrucciones internas de Finance OS.';
+  }
+  if (command) {
+    return 'Usando herramientas internas de Finance OS.';
   }
   return null;
 };
