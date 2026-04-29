@@ -32,6 +32,7 @@ interface AppCardProps {
   onSecondaryAction?: () => void;
   tertiaryActionLabel?: string;
   onTertiaryAction?: () => void;
+  beta?: boolean;
   onCardClick?: () => void;
 }
 
@@ -57,6 +58,7 @@ export function AppCard({
   onSecondaryAction,
   tertiaryActionLabel,
   onTertiaryAction,
+  beta = false,
   onCardClick,
 }: AppCardProps) {
   const primaryIcon =
@@ -80,6 +82,8 @@ export function AppCard({
         height: '100%',
         display: 'flex',
         flexDirection: 'column',
+        position: 'relative',
+        overflow: 'visible',
         p: 2.25,
         cursor: onCardClick ? 'pointer' : 'default',
         transition: 'transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease',
@@ -91,6 +95,30 @@ export function AppCard({
           : undefined,
       }}
     >
+      {beta ? (
+        <Box
+          sx={{
+            position: 'absolute',
+            top: -10,
+            right: 16,
+            px: 1,
+            py: 0.25,
+            borderRadius: 999,
+            border: '1px solid',
+            borderColor: 'divider',
+            bgcolor: 'background.paper',
+            color: 'text.secondary',
+            fontSize: 10,
+            fontWeight: 800,
+            letterSpacing: 0.6,
+            lineHeight: 1.4,
+            textTransform: 'uppercase',
+            zIndex: 1,
+          }}
+        >
+          Beta
+        </Box>
+      ) : null}
       <Stack spacing={2} sx={{ height: '100%' }}>
         <Stack direction="row" justifyContent="space-between" spacing={2} alignItems="flex-start">
           <Chip label={statusLabel} color={statusColor} size="small" />

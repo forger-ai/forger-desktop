@@ -103,6 +103,7 @@ export function InstalledAppsView({
               appName={meta.name}
               categoryLabel={getCategoryLabel(app.category)}
               description={meta.description}
+              beta={app.beta}
               statusLabel={statusLabel}
               statusColor={statusColor}
               primaryAction={primaryAction}

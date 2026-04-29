@@ -170,6 +170,7 @@ const toCatalogEntry = async (app: LocalApp, baseUrl: string): Promise<JsonObjec
     short_description: asString(catalog.short_description),
     description: asString(catalog.description, asString(app.manifest.description)),
     category: asString(catalog.category, 'utilities'),
+    beta: catalog.beta === true,
     runtime_stack: runtimeStack,
     latest_version: {
       version: devVersion,
