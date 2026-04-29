@@ -21,6 +21,7 @@ import { settingsSeed } from '../shared/mock-data';
 import { IPC_CHANNELS } from '../shared/ipc';
 import { ChatOrchestrator } from './chat/orchestrator';
 import { AppCodexTaskManager } from './app-codex-task-manager';
+import { AppCodexConversationManager } from './app-codex-conversation-manager';
 import { AutomationManager } from './automation-manager';
 import { DevCatalogService } from './dev-catalog-service';
 import { FileLibrary } from './file-library';
@@ -44,6 +45,8 @@ import type {
   AppDetails,
   AppExternalFolderSelection,
   AppCodexTaskStartInput,
+  AppCodexConversationCreateInput,
+  AppCodexConversationSendMessageInput,
   AppPromptTemplate,
   AppSecretConnection,
   AppSecretDeclaration,
@@ -201,12 +204,17 @@ interface AppManifest {
   description?: string;
   changelog?: VersionChangelog[];
   promptTemplates?: unknown;
+  codexConversation?: unknown;
   stack?: AppManifestStack;
   services?: AppManifestService[];
   mcp?: AppManifestMcp;
   scripts?: Record<string, string>;
   skills?: string[];
   appSecrets?: unknown;
+}
+
+interface AppManifestCodexConversation {
+  enabled: boolean;
 }
 
 interface StackSkillTemplate {
@@ -250,6 +258,7 @@ const stoppingApps = new Set<string>();
 const runtimeLocks = new Map<string, Promise<RuntimeBinarySet>>();
 let chatOrchestrator: ChatOrchestrator | null = null;
 let appCodexTaskManager: AppCodexTaskManager | null = null;
+let appCodexConversationManager: AppCodexConversationManager | null = null;
 let fileLibrary: FileLibrary | null = null;
 let secretsStore: SecretsStore | null = null;
 let automationManager: AutomationManager | null = null;
@@ -657,6 +666,7 @@ const toAppSummary = (record: InstalledAppRecord): AppSummary => {
       latestVersion,
       updateAvailable,
       changelog: catalog?.changelog,
+      beta: catalog?.beta,
       status: 'running',
       userMessage: 'En ejecucion',
     };
@@ -671,6 +681,7 @@ const toAppSummary = (record: InstalledAppRecord): AppSummary => {
     latestVersion,
     updateAvailable,
     changelog: catalog?.changelog,
+    beta: catalog?.beta,
     status: record.status,
     userMessage: record.userMessage,
   };
@@ -1036,6 +1047,14 @@ const normalizePromptTemplateArguments = (input: unknown): NonNullable<AppPrompt
   return args;
 };
 
+const normalizeManifestCodexConversation = (manifest: AppManifest | null): AppManifestCodexConversation | null => {
+  if (!manifest || !manifest.codexConversation || typeof manifest.codexConversation !== 'object') {
+    return null;
+  }
+  const candidate = manifest.codexConversation as Record<string, unknown>;
+  return candidate.enabled === true ? { enabled: true } : null;
+};
+
 const resolveInstalledPromptTemplates = async (appId: string): Promise<AppPromptTemplate[]> => {
   const record = registry.apps[appId];
   if (!record?.installDir) {
@@ -1043,6 +1062,17 @@ const resolveInstalledPromptTemplates = async (appId: string): Promise<AppPrompt
   }
   return normalizeManifestPromptTemplates(await resolveInstalledManifest(record.installDir));
 };
+
+const resolveInstalledCodexConversation = async (appId: string): Promise<AppManifestCodexConversation | null> => {
+  const record = registry.apps[appId];
+  if (!record?.installDir) {
+    return null;
+  }
+  return normalizeManifestCodexConversation(await resolveInstalledManifest(record.installDir));
+};
+
+const hasInstalledCodexConversation = async (appId: string): Promise<boolean> =>
+  Boolean(await resolveInstalledCodexConversation(appId));
 
 const getManifestAppSecretsValidationError = (manifest: AppManifest | null): string | null => {
   if (!manifest || !Array.isArray(manifest.appSecrets)) {
@@ -1350,6 +1380,7 @@ const listCatalogFromBackend = async (): Promise<CatalogApp[]> => {
     short_description?: string | null;
     description?: string | null;
     category: string;
+    beta?: boolean | null;
     latest_version?: {
       version?: string;
       required_python_version?: string | null;
@@ -1379,6 +1410,7 @@ const listCatalogFromBackend = async (): Promise<CatalogApp[]> => {
           status: toCatalogStatus(appEntry.slug),
           name: appEntry.name,
           description: appEntry.short_description ?? appEntry.description ?? '',
+          beta: Boolean(appEntry.beta),
           latestVersion: appEntry.latest_version?.version,
           requiredPythonVersion: appEntry.latest_version?.required_python_version ?? undefined,
           requiredNodeVersion: appEntry.latest_version?.required_node_version ?? undefined,
@@ -1410,6 +1442,7 @@ const listCatalogFromBackend = async (): Promise<CatalogApp[]> => {
     short_description: string | null;
     description: string | null;
     category: string;
+    beta?: boolean | null;
     latest_version?: {
       id: number;
       version: string;
@@ -1434,6 +1467,7 @@ const listCatalogFromBackend = async (): Promise<CatalogApp[]> => {
       status: toCatalogStatus(appEntry.slug),
       name: appEntry.name,
       description: appEntry.short_description ?? appEntry.description ?? '',
+      beta: Boolean(appEntry.beta),
       latestVersionId: appEntry.latest_version?.id,
       latestVersion: appEntry.latest_version?.version,
       requiredPythonVersion: appEntry.latest_version?.required_python_version ?? undefined,
@@ -3145,6 +3179,7 @@ const getAppDetails = async (appId: string): Promise<AppDetails | null> => {
     installedAt: installed?.installedAt,
     operations: installed ? await readOperationSummaries(appId) : [],
     promptTemplates: installed ? await resolveInstalledPromptTemplates(appId) : [],
+    codexConversation: installed && await hasInstalledCodexConversation(appId) ? { enabled: true } : undefined,
   };
 };
 
@@ -3543,7 +3578,22 @@ const translateManifestEnvironment = (
   environment: Record<string, string>,
   backendDir: string,
 ): Record<string, string> => {
-  const translated = { ...environment };
+  const appRoot = path.dirname(backendDir);
+  const appDataDir = path.join(backendDir, 'data');
+  const placeholders: Record<string, string> = {
+    '{app_root}': appRoot,
+    '{backend}': backendDir,
+    '{app_data}': appDataDir,
+  };
+  const translated = Object.fromEntries(
+    Object.entries(environment).map(([key, value]) => {
+      let resolved = value;
+      for (const [placeholder, replacement] of Object.entries(placeholders)) {
+        resolved = resolved.split(placeholder).join(replacement);
+      }
+      return [key, resolved];
+    }),
+  );
   const databaseUrl = translated.DATABASE_URL;
   const sqliteAppPrefix = 'sqlite:////app/';
   if (typeof databaseUrl === 'string' && databaseUrl.startsWith(sqliteAppPrefix)) {
@@ -5174,6 +5224,59 @@ const registerIpcHandlers = (): void => {
     return appCodexTaskManager.cancel(appId, runId);
   });
 
+  ipcMain.handle(IPC_CHANNELS.appCodexConversationCreate, async (event, input: AppCodexConversationCreateInput) => {
+    const appId = resolveAppIdForWebContents(event.sender.id);
+    if (!appId) {
+      throw new Error('app_window_not_authorized');
+    }
+    if (!appCodexConversationManager) {
+      throw new Error('app_codex_conversation_manager_unavailable');
+    }
+    return await appCodexConversationManager.create(appId, input ?? {});
+  });
+
+  ipcMain.handle(IPC_CHANNELS.appCodexConversationSendMessage, async (
+    event,
+    input: AppCodexConversationSendMessageInput,
+  ) => {
+    const appId = resolveAppIdForWebContents(event.sender.id);
+    if (!appId) {
+      throw new Error('app_window_not_authorized');
+    }
+    if (!appCodexConversationManager) {
+      throw new Error('app_codex_conversation_manager_unavailable');
+    }
+    return await appCodexConversationManager.sendMessage(appId, input);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.appCodexConversationGet, async (event, conversationId: string) => {
+    const appId = resolveAppIdForWebContents(event.sender.id);
+    if (!appId || !appCodexConversationManager) {
+      return null;
+    }
+    return await appCodexConversationManager.get(appId, conversationId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.appCodexConversationList, async (event) => {
+    const appId = resolveAppIdForWebContents(event.sender.id);
+    if (!appId || !appCodexConversationManager) {
+      return [];
+    }
+    return await appCodexConversationManager.list(appId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.appCodexConversationCancelRun, async (
+    event,
+    conversationId: string,
+    runId: string,
+  ) => {
+    const appId = resolveAppIdForWebContents(event.sender.id);
+    if (!appId || !appCodexConversationManager) {
+      return { success: false };
+    }
+    return await appCodexConversationManager.cancel(appId, conversationId, runId);
+  });
+
   ipcMain.handle(IPC_CHANNELS.dbListTables, async (_event, appId: string) => {
     if (!BetterSqlite3) {
       return { error: 'db_module_unavailable' };
@@ -5448,6 +5551,62 @@ app.whenReady().then(async () => {
       const target = appWindows.get(event.task.appId);
       if (target && !target.isDestroyed()) {
         target.webContents.send(IPC_CHANNELS.appCodexTaskUpdated, event);
+      }
+    },
+  });
+  appCodexConversationManager = new AppCodexConversationManager({
+    privateAppsRoot: getPrivateAppsRoot(),
+    metadataRoot: getForgerMetadataRoot(),
+    codexHome: getCodexHome(),
+    getCodexCliPath: async () => await resolveCodexCliPath(getCodexRoot()),
+    getCodexPathEntries: async (appId?: string) => {
+      const pathEntries = new Set<string>();
+      const record = appId ? registry.apps[appId] : undefined;
+      if (record) {
+        for (const entry of await getAppLocalToolPathEntries(record)) {
+          pathEntries.add(entry);
+        }
+      }
+
+      const codexNodeRuntime = await ensureRuntimeInstalled('node', DEFAULT_NODE_VERSION);
+      for (const entry of getRuntimePathEntries(codexNodeRuntime)) {
+        pathEntries.add(entry);
+      }
+
+      if (record) {
+        const appNodeRuntime = await ensureRuntimeInstalled('node', record.requiredNodeVersion);
+        const appPythonRuntime = await ensureRuntimeInstalled('python', record.requiredPythonVersion);
+        for (const entry of getRuntimePathEntries(appNodeRuntime)) {
+          pathEntries.add(entry);
+        }
+        for (const entry of getRuntimePathEntries(appPythonRuntime)) {
+          pathEntries.add(entry);
+        }
+      }
+
+      return [...pathEntries];
+    },
+    getCodexEnvironment: async (appId?: string) => {
+      const record = appId ? registry.apps[appId] : undefined;
+      const appPythonRuntime = record
+        ? await ensureRuntimeInstalled('python', record.requiredPythonVersion)
+        : undefined;
+      return await getCodexToolEnvironment(appId, appPythonRuntime);
+    },
+    getCodexAuthenticated: async () => {
+      const status = await getCodexAuthStatus();
+      return status.authenticated;
+    },
+    hasCodexConversation: hasInstalledCodexConversation,
+    listenAppMcps: async (appIds: string[], runId: string) =>
+      await (appMcpManager?.listenMcps(appIds, runId) ?? Promise.resolve([])),
+    releaseAppMcps: (runId: string) => {
+      appMcpManager?.releaseMcps(runId);
+    },
+    onConversationEvent: (event) => {
+      const target = appWindows.get(event.conversation.appId);
+      if (target && !target.isDestroyed()) {
+        target.webContents.send(IPC_CHANNELS.appCodexConversationEvent, event);
       }
     },
   });

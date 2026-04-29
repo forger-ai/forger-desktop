@@ -11,6 +11,7 @@ export interface AppSummary {
   version?: string;
   latestVersion?: string;
   updateAvailable?: boolean;
+  beta?: boolean;
   changelog?: VersionChangelog;
   capabilities?: AppCapability[];
   userMessage?: string;
@@ -337,6 +338,7 @@ export interface AppDetails {
   installedAt?: string;
   operations: AppOperationSummary[];
   promptTemplates?: AppPromptTemplate[];
+  codexConversation?: { enabled: boolean };
 }
 
 export interface AppUpdateConflictInfo {
@@ -586,12 +588,93 @@ export interface AppCodexTaskEvent {
   task: AppCodexTaskSummary;
 }
 
+export type AppCodexConversationRole = 'user' | 'assistant';
+
+export type AppCodexConversationRunStatus =
+  | 'queued'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'canceled';
+
+export interface AppCodexConversationMessage {
+  messageId: string;
+  role: AppCodexConversationRole;
+  text: string;
+  runId?: string;
+  createdAt: string;
+}
+
+export interface AppCodexConversationRun {
+  runId: string;
+  status: AppCodexConversationRunStatus;
+  createdAt: string;
+  updatedAt: string;
+  error?: string;
+  progressLog?: string[];
+}
+
+export interface AppCodexConversation {
+  conversationId: string;
+  appId: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  messages: AppCodexConversationMessage[];
+  activeRun?: AppCodexConversationRun;
+}
+
+export interface AppCodexConversationCreateInput {
+  title?: string;
+  metadata?: Record<string, string | number | boolean | null>;
+}
+
+export interface AppCodexConversationAttachment {
+  name: string;
+  mimeType?: string;
+  dataBase64: string;
+}
+
+export interface AppCodexConversationSendMessageInput {
+  conversationId: string;
+  message: string;
+  context?: string;
+  model?: string;
+  reasoningEffort?: CodexReasoningEffort;
+  attachments?: AppCodexConversationAttachment[];
+}
+
+export interface AppCodexConversationEvent {
+  type:
+    | 'conversation.created'
+    | 'message.created'
+    | 'run.started'
+    | 'run.progress'
+    | 'run.message.completed'
+    | 'run.completed'
+    | 'run.failed'
+    | 'run.canceled';
+  conversation: AppCodexConversation;
+  run?: AppCodexConversationRun;
+  message?: AppCodexConversationMessage;
+  progress?: string;
+}
+
 export interface ForgerAppApi {
   selectExternalFolder: () => Promise<AppExternalFolderSelection>;
   startCodexTask: (input: AppCodexTaskStartInput) => Promise<AppCodexTaskSummary>;
   getCodexTask: (runId: string) => Promise<AppCodexTaskSummary | null>;
   cancelCodexTask: (runId: string) => Promise<{ success: boolean }>;
   onCodexTaskUpdated: (listener: (event: AppCodexTaskEvent) => void) => () => void;
+  createCodexConversation: (input?: AppCodexConversationCreateInput) => Promise<AppCodexConversation>;
+  sendCodexConversationMessage: (input: AppCodexConversationSendMessageInput) => Promise<AppCodexConversation>;
+  getCodexConversation: (conversationId: string) => Promise<AppCodexConversation | null>;
+  listCodexConversations: () => Promise<AppCodexConversation[]>;
+  cancelCodexConversationRun: (
+    conversationId: string,
+    runId: string,
+  ) => Promise<{ success: boolean }>;
+  onCodexConversationEvent: (listener: (event: AppCodexConversationEvent) => void) => () => void;
 }
 
 export type AutomationFrequencyType = 'hourly' | 'daily' | 'weekly';
