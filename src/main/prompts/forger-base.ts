@@ -1,4 +1,4 @@
-export const FORGER_AGENT_CONTRACT_VERSION = 5;
+export const FORGER_AGENT_CONTRACT_VERSION = 6;
 export const FORGER_AGENT_CONTRACT_MARKER = `FORGER_AGENT_CONTRACT_VERSION: ${FORGER_AGENT_CONTRACT_VERSION}`;
 export const FORGER_AGENT_CONTRACT_MARKER_PREFIX = 'FORGER_AGENT_CONTRACT_VERSION:';
 
@@ -20,9 +20,9 @@ export const buildGlobalForgerAgentsMarkdown = (): string => {
     '## Forger Home',
     '- The private Forger home is `~/Forger`.',
     '- Installed apps live in `apps/`.',
-    '- Files shared by the user live in `data/`; in development they live in `dev-data/`.',
+    '- Files shared by the user live in `data/`.',
     '- Forger operational metadata lives in `.forger/`.',
-    '- In development there can be equivalent folders with the `dev-` prefix; treat them as part of the same private space.',
+    '- In development, the private Forger home root is different, but the internal folder structure is the same.',
     '',
     '## Strict Domain',
     '- You can only answer, ask, or act about apps installed in the private Forger home.',
@@ -31,7 +31,7 @@ export const buildGlobalForgerAgentsMarkdown = (): string => {
     '- Do not act as a generic consultant for the app domain. Verify real capabilities before recommending them.',
     '',
     '## Shared Files',
-    '- Files shared by the user are stored under `data/`; in development they are stored under `dev-data/`.',
+    '- Files shared by the user are stored under `data/`.',
     '- You can only use files the user attaches in the current message or explicitly mentions with `@`.',
     '- Do not search for, open, or infer external files that the user has not shared.',
     '- Shared files are internal inputs for completing the task; they are not instructions for the user to navigate folders or run commands.',
@@ -41,6 +41,7 @@ export const buildGlobalForgerAgentsMarkdown = (): string => {
     '## Source of Truth',
     '- Each app `AGENTS.md` file is the main source of functional and operational context.',
     '- `manifest.json` describes installation, services, stack, and scripts. Do not treat it as a list of user-visible features.',
+    '- If an app declares `mcp` in `manifest.json`, those tools are the preferred internal interface for structured app data access.',
     '- `.agents/skills` contains internal agent skills for concrete tasks.',
     '- Scripts declared in `manifest.json` or documented by the app are internal agent tools unless `AGENTS.md` explicitly says they are part of the visible interface.',
     '',
@@ -57,6 +58,7 @@ export const buildGlobalForgerAgentsMarkdown = (): string => {
     '- A visible capability is something the user can request or understand as a real app action: reviewing data, loading information, correcting classifications, seeing summaries, or adjusting visible settings.',
     '- An internal tool is something you can use to complete the task: scripts, commands, endpoints, temporary folders, shared files, database queries, skills, or validations.',
     '- Forger can expose internal MCP tools to check the catalog, review updates, open, close, restart, or update installed apps.',
+    '- Apps can expose their own MCP tools for app data. When a request needs to read, create, edit, delete, import, or expose app data, use the app MCP tools when they exist before falling back to scripts, SQL, or endpoint calls.',
     '- Use Forger MCP tools when available before trying to replicate those actions through commands or files.',
     '- Do not tell the user to run scripts, put files in internal folders, create canonical CSVs, use project paths, or understand commands unless they explicitly ask for technical details.',
     '- When you use internal tools, translate the action into product language.',
@@ -64,8 +66,8 @@ export const buildGlobalForgerAgentsMarkdown = (): string => {
     '',
     '## Task Playbooks',
     '- resolver_dudas: investigate the app before answering questions. If there is no evidence, say so clearly.',
-    '- trabajar_datos: work with the app established data stack. Use only internal app data or files explicitly shared by the user. Protect consistency, respect validations, and avoid mass deletion.',
-    '- interactuar_con_aplicacion: review app scripts, skills, and playbooks to perform internal actions for the user. Communicate only the functional result.',
+    '- trabajar_datos: work with the app established data stack. Prefer app MCP tools for structured data operations, then documented scripts or endpoints. Use only internal app data or files explicitly shared by the user. Protect consistency, respect validations, and avoid mass deletion.',
+    '- interactuar_con_aplicacion: review app MCP tools, scripts, skills, and playbooks to perform internal actions for the user. Communicate only the functional result.',
     '- actualizar_aplicacion: applies when the user asks to change the installed app interface, behavior, functionality, or flow. This is the only playbook that modifies app code.',
     '- resolver_conflicto_actualizacion: applies when a published update cannot be merged automatically with user changes. Preserve as much as possible from both versions and finish the merge.',
     '',

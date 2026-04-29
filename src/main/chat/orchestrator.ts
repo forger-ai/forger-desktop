@@ -32,8 +32,18 @@ interface ChatOrchestratorOptions {
   getCodexAuthenticated: () => Promise<boolean>;
   createForgerMcpSession?: (runId: string, appId: string) => { url: string; token: string } | null;
   releaseForgerMcpSession?: (token: string) => void;
+  listenAppMcps?: (appIds: string[], runId: string) => Promise<CodexMcpServerConfig[]>;
+  releaseAppMcps?: (runId: string) => void;
   onUpdateConflictResolved?: (appId: string) => Promise<void>;
   onRunUpdated: (event: ChatRunEvent) => void;
+}
+
+interface CodexMcpServerConfig {
+  name: string;
+  url: string;
+  token: string;
+  tokenEnvVar: string;
+  toolTimeoutSec?: number;
 }
 
 interface PluginManifestV1 {
@@ -236,7 +246,7 @@ class SandboxRunner {
     codexCliPath: string;
     pathEntries: string[];
     environment: Record<string, string>;
-    forgerMcp?: { url: string; token: string };
+    mcpServers?: CodexMcpServerConfig[];
     workingDir: string;
     prompt: string;
     model: string;
@@ -250,18 +260,20 @@ class SandboxRunner {
 
     const modelArgs = ['--model', params.model];
     const reasoningArgs = ['--config', `reasoning_effort="${params.reasoningEffort}"`];
-    const mcpArgs = params.forgerMcp
-      ? [
+    const mcpServers = params.mcpServers ?? [];
+    const mcpArgs = mcpServers.flatMap((server) => [
           '--config',
-          `mcp_servers.forger.url=${JSON.stringify(params.forgerMcp.url)}`,
+          `mcp_servers.${server.name}.url=${JSON.stringify(server.url)}`,
           '--config',
-          'mcp_servers.forger.bearer_token_env_var="FORGER_MCP_TOKEN"',
+          `mcp_servers.${server.name}.bearer_token_env_var=${JSON.stringify(server.tokenEnvVar)}`,
           '--config',
-          'mcp_servers.forger.enabled=true',
+          `mcp_servers.${server.name}.enabled=true`,
           '--config',
-          'mcp_servers.forger.tool_timeout_sec=600',
+          `mcp_servers.${server.name}.tool_timeout_sec=${server.toolTimeoutSec ?? 600}`,
           '--config',
-          'mcp_servers.forger.default_tools_approval_mode="approve"',
+          `mcp_servers.${server.name}.default_tools_approval_mode="approve"`,
+          ...(server.name === 'forger'
+            ? [
           '--config',
           'apps.forger.enabled=true',
           '--config',
@@ -272,10 +284,11 @@ class SandboxRunner {
           'apps.forger.destructive_enabled=true',
           '--config',
           'apps.forger.open_world_enabled=true',
-        ]
-      : [];
+            ]
+            : []),
+        ]);
     const commonArgs = ['--skip-git-repo-check', '-C', params.workingDir];
-    const topLevelArgs = params.forgerMcp ? ['--ask-for-approval', 'never'] : [];
+    const topLevelArgs = mcpServers.length > 0 ? ['--ask-for-approval', 'never'] : [];
 
     const attempts: string[][] = params.threadId
       ? [
@@ -342,7 +355,7 @@ class SandboxRunner {
             env: {
               CODEX_HOME: this.codexHome,
               FORGER_ALLOWED_ROOTS: allowedRoots,
-              ...(params.forgerMcp ? { FORGER_MCP_TOKEN: params.forgerMcp.token } : {}),
+              ...Object.fromEntries(mcpServers.map((server) => [server.tokenEnvVar, server.token])),
               ...params.environment,
               PATH: [...codexCommand.pathEntries, process.env.PATH ?? ''].filter(Boolean).join(path.delimiter),
             },
@@ -717,6 +730,7 @@ export class ChatOrchestrator {
       return;
     }
     let forgerMcpSession: { url: string; token: string } | null = null;
+    let appMcpServers: CodexMcpServerConfig[] = [];
 
     try {
       if (!(await existsDirectory(run.appRoot))) {
@@ -753,12 +767,25 @@ export class ChatOrchestrator {
         'utf8',
       );
       forgerMcpSession = this.options.createForgerMcpSession?.(run.runId, run.appId) ?? null;
+      appMcpServers = await (this.options.listenAppMcps?.([run.appId], run.runId) ?? Promise.resolve([]));
+      const mcpServers: CodexMcpServerConfig[] = [
+        ...(forgerMcpSession
+          ? [{
+              name: 'forger',
+              url: forgerMcpSession.url,
+              token: forgerMcpSession.token,
+              tokenEnvVar: 'FORGER_MCP_TOKEN',
+              toolTimeoutSec: 600,
+            }]
+          : []),
+        ...appMcpServers,
+      ];
 
       const assistantReply = await this.sandboxRunner.runCodex({
         codexCliPath,
         pathEntries: codexPathEntries,
         environment: codexEnvironment,
-        forgerMcp: forgerMcpSession ?? undefined,
+        mcpServers,
         workingDir: this.options.forgerHomeRoot,
         prompt: run.prompt,
         model: run.model,
@@ -837,6 +864,7 @@ export class ChatOrchestrator {
       if (forgerMcpSession) {
         this.options.releaseForgerMcpSession?.(forgerMcpSession.token);
       }
+      this.options.releaseAppMcps?.(run.runId);
       if (this.workspaceLockRunId === run.runId) {
         this.workspaceLockRunId = null;
       }

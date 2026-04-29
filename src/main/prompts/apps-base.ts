@@ -29,6 +29,7 @@ export interface PromptAppManifest {
   description?: string;
   stack?: PromptAppManifestStack;
   services?: PromptAppManifestService[];
+  mcp?: unknown;
   scripts?: Record<string, string>;
   skills?: string[];
 }
@@ -84,6 +85,14 @@ export const buildForgerAppAgentsMarkdown = (appId: string, manifest: PromptAppM
     scriptEntries.length > 0
       ? scriptEntries.map(([name, command]) => `- ${name}: internal agent tool. Declared command: \`${command}\``)
       : ['- No scripts declared in `manifest.json`.'];
+  const hasMcp = Boolean(manifest?.mcp && typeof manifest.mcp === 'object');
+  const mcpSection = hasMcp
+    ? [
+        '- This app declares MCP tools in `manifest.json`.',
+        '- Use app MCP tools as the preferred internal interface when the user asks to read, expose, create, edit, delete, import, or validate app data.',
+        '- MCP tools are still internal tools. Do not present them as user-visible commands.',
+      ]
+    : ['- No app MCP tools are declared in `manifest.json`.'];
 
   return [
     '# AGENTS',
@@ -102,12 +111,13 @@ export const buildForgerAppAgentsMarkdown = (appId: string, manifest: PromptAppM
     '## Source of Truth',
     '- This `AGENTS.md` is the main source of app functional and operational context.',
     '- `manifest.json` describes installation, services, stack, and available scripts; it is not a list of user-visible capabilities.',
+    '- If `manifest.json` declares app MCP tools, use them as internal structured data tools before scripts, SQL, or ad hoc endpoint calls.',
     '- `.agents/skills` contains internal agent playbooks for concrete tasks.',
     '- Before responding or acting, review this file, `manifest.json`, `.agents/skills`, and any declared scripts relevant to the task.',
     '',
     '## Shared Files From Forger',
     '- The app can receive shared files from the global Forger home when the user attaches them or explicitly mentions them.',
-    '- Those files live under `data/` or `dev-data/` in the Forger home, depending on environment, and are listed in the message prompt.',
+    '- Those files live under `data/` in the Forger home and are listed in the message prompt.',
     '- Use only the files listed in the current message. Do not search for additional files on your own.',
     '- Shared files are user input for completing a task; they are not permanent app capabilities unless the app explicitly imports or processes them.',
     '',
@@ -120,10 +130,14 @@ export const buildForgerAppAgentsMarkdown = (appId: string, manifest: PromptAppM
     '',
     '## Internal Agent Tools',
     '- Internal tools are resources you can use to complete a task: scripts, commands, endpoints, skills, shared files, temporary files, database queries, or validations.',
+    '- When app MCP tools exist, prefer them for structured data operations because they express the app validations and domain language directly.',
     '- These tools are not instructions for the final user.',
     '- Do not ask the user to place files in internal folders, run commands, know paths, prepare canonical CSVs, or understand database details.',
     '- When you use an internal tool, translate the result into product language: what was done, what changed, what needs review, and what the user can do next.',
     '- If the user explicitly asks for technical details, you can explain internal tools clearly and separate them from the normal user experience.',
+    '',
+    '## App MCP Tools',
+    ...mcpSection,
     '',
     '## Scripts Declared as Internal Tools',
     ...scriptsSection,
@@ -133,8 +147,8 @@ export const buildForgerAppAgentsMarkdown = (appId: string, manifest: PromptAppM
     '',
     '## Task Playbooks',
     '- resolver_dudas: investigate the real app before answering. Answer only with verified capabilities.',
-    '- trabajar_datos: use the data stack established by the app. Review validations, models, endpoints, and scripts before creating, editing, or deleting data.',
-    '- interactuar_con_aplicacion: review available scripts, skills, and playbooks to know which internal actions you can perform for the user.',
+    '- trabajar_datos: use the data stack established by the app. Prefer app MCP tools when available; otherwise review validations, models, endpoints, and scripts before creating, editing, or deleting data.',
+    '- interactuar_con_aplicacion: review available MCP tools, scripts, skills, and playbooks to know which internal actions you can perform for the user.',
     '- actualizar_aplicacion: applies when the user asks to change the installed app interface, behavior, functionality, or flow.',
     '- resolver_conflicto_actualizacion: applies when a published update conflicts with user changes. Resolve the merge while preserving as much as possible from both versions.',
     '- If the user asks for tasks from different categories, work one per turn.',
@@ -161,6 +175,7 @@ export const buildForgerAppAgentsMarkdown = (appId: string, manifest: PromptAppM
     '',
     '## Skills',
     '- This app skills are in `.agents/skills`; review them when they can help.',
-    '- Scripts declared in `manifest.json` are the preferred interface for routine actions.',
+    '- App MCP tools declared in `manifest.json` are the preferred interface for structured data actions.',
+    '- Scripts declared in `manifest.json` are the fallback interface for routine actions not covered by MCP tools.',
   ].join('\n');
 };

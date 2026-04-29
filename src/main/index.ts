@@ -172,6 +172,15 @@ interface AppManifestService {
   environment?: Record<string, string>;
 }
 
+interface AppManifestMcp {
+  type?: string;
+  context?: string;
+  command?: string;
+  healthcheck?: string;
+  environment?: Record<string, string>;
+  toolTimeoutSec?: number;
+}
+
 interface AppManifestStackSection {
   language?: string;
   framework?: string;
@@ -194,6 +203,7 @@ interface AppManifest {
   promptTemplates?: unknown;
   stack?: AppManifestStack;
   services?: AppManifestService[];
+  mcp?: AppManifestMcp;
   scripts?: Record<string, string>;
   skills?: string[];
   appSecrets?: unknown;
@@ -203,6 +213,31 @@ interface StackSkillTemplate {
   id: string;
   description: string;
   body: string;
+}
+
+interface CodexMcpServerConfig {
+  name: string;
+  url: string;
+  token: string;
+  tokenEnvVar: string;
+  toolTimeoutSec?: number;
+}
+
+type AppMcpStatus = 'down' | 'starting' | 'up' | 'shutting_down';
+
+interface AppMcpState {
+  appId: string;
+  status: AppMcpStatus;
+  listeners: Set<string>;
+  generation: number;
+  process?: ChildProcessWithoutNullStreams;
+  url?: string;
+  token?: string;
+  tokenEnvVar?: string;
+  toolTimeoutSec?: number;
+  startPromise?: Promise<CodexMcpServerConfig | null>;
+  stopPromise?: Promise<void>;
+  stopTimer?: NodeJS.Timeout;
 }
 
 let mainWindow: BrowserWindow | null = null;
@@ -218,6 +253,7 @@ let appCodexTaskManager: AppCodexTaskManager | null = null;
 let fileLibrary: FileLibrary | null = null;
 let secretsStore: SecretsStore | null = null;
 let automationManager: AutomationManager | null = null;
+let appMcpManager: AppMcpManager | null = null;
 
 const resolvePlatformAlias = (): string => {
   const platformPrefix = PLATFORM_KEY_BY_RUNTIME[process.platform] ?? process.platform;
@@ -229,9 +265,9 @@ const getRuntimesRoot = () => path.join(app.getPath('userData'), 'runtimes');
 const getTempRoot = () => path.join(app.getPath('userData'), 'tmp');
 const getLogsRoot = () => path.join(app.getPath('userData'), 'logs');
 const getInstallLogPath = () => path.join(getLogsRoot(), 'install.log');
-const getForgerHomeRoot = () => path.join(os.homedir(), 'Forger');
-const getPrivateAppsRoot = () => path.join(getForgerHomeRoot(), isDev ? 'dev-apps' : 'apps');
-const getPrivateDataRoot = () => path.join(getForgerHomeRoot(), isDev ? 'dev-data' : 'data');
+const getForgerHomeRoot = () => path.join(os.homedir(), isDev ? 'Forger-dev' : 'Forger');
+const getPrivateAppsRoot = () => path.join(getForgerHomeRoot(), 'apps');
+const getPrivateDataRoot = () => path.join(getForgerHomeRoot(), 'data');
 const getForgerMetadataRoot = () => path.join(getForgerHomeRoot(), '.forger');
 const getLegacyForgerMetadataRoot = () => path.join(getPrivateAppsRoot(), '.forger');
 const getCodexRoot = () => path.join(app.getPath('userData'), 'codex-cli');
@@ -1111,7 +1147,7 @@ const shouldWriteAppAgentsMarkdown = async (agentsPath: string): Promise<boolean
   return !current.includes(FORGER_AGENT_CONTRACT_MARKER);
 };
 
-const buildStackSkillTemplates = (stack: AppManifestStack): StackSkillTemplate[] => {
+const buildStackSkillTemplates = (stack: AppManifestStack, hasAppMcp = false): StackSkillTemplate[] => {
   const templates: StackSkillTemplate[] = [];
   const backend = stack.backend ?? {};
   const frontend = stack.frontend ?? {};
@@ -1189,6 +1225,27 @@ const buildStackSkillTemplates = (stack: AppManifestStack): StackSkillTemplate[]
     });
   }
 
+  if (hasAppMcp) {
+    templates.push({
+      id: 'forger-app-mcp-data-tools',
+      description: 'Use app MCP tools for structured Forger app data operations.',
+      body: [
+        '---',
+        'name: forger-app-mcp-data-tools',
+        'description: Prefer app MCP tools when app data needs to be read, exposed, created, edited, deleted, imported, or validated.',
+        '---',
+        '',
+        '- Review the app `AGENTS.md` and `manifest.json` before using tools.',
+        '- Use app MCP tools before scripts, direct database access, or ad hoc endpoint calls for structured data operations.',
+        '- Treat MCP tools as internal agent tools, not user-visible commands.',
+        '- Let MCP validation errors shape the user-facing answer: explain missing data, rejected records, invalid categories, duplicates, or unsupported operations in product language.',
+        '- If MCP does not expose the needed operation, fall back to documented scripts or endpoints when they preserve app validations.',
+        '- Avoid direct SQL writes unless there is no MCP or documented tool for the task and the change is narrow, validated, and safe.',
+        '- Confirm before destructive or irreversible data changes.',
+      ].join('\n'),
+    });
+  }
+
   return templates;
 };
 
@@ -1197,8 +1254,8 @@ const copyDirectory = async (sourceDir: string, targetDir: string): Promise<void
   await fs.cp(sourceDir, targetDir, { recursive: true, force: true });
 };
 
-const writeStackSkills = async (skillsRoot: string, stack: AppManifestStack): Promise<void> => {
-  const templates = buildStackSkillTemplates(stack);
+const writeStackSkills = async (skillsRoot: string, stack: AppManifestStack, hasAppMcp = false): Promise<void> => {
+  const templates = buildStackSkillTemplates(stack, hasAppMcp);
   for (const template of templates) {
     const targetDir = path.join(skillsRoot, template.id);
     await fs.rm(targetDir, { recursive: true, force: true });
@@ -1242,8 +1299,14 @@ const normalizeInstalledAgentContext = async (installDir: string, appId: string)
   }
 
   const hasStack = hasValidManifestStack(manifest);
+  const hasAppMcp = Boolean(
+    manifest?.mcp
+    && typeof manifest.mcp === 'object'
+    && (!manifest.mcp.type || manifest.mcp.type === 'http')
+    && typeof manifest.mcp.command === 'string',
+  );
   const hasAppSkills = Boolean(manifest && Array.isArray(manifest.skills) && manifest.skills.length > 0);
-  if (!hasStack && !hasAppSkills) {
+  if (!hasStack && !hasAppSkills && !hasAppMcp) {
     return;
   }
 
@@ -1251,7 +1314,10 @@ const normalizeInstalledAgentContext = async (installDir: string, appId: string)
   await fs.rm(skillsRoot, { recursive: true, force: true });
   await fs.mkdir(skillsRoot, { recursive: true });
   if (hasStack) {
-    await writeStackSkills(skillsRoot, manifest.stack);
+    await writeStackSkills(skillsRoot, manifest.stack, hasAppMcp);
+  }
+  if (!hasStack && hasAppMcp) {
+    await writeStackSkills(skillsRoot, {}, hasAppMcp);
   }
   if (manifest) {
     await copyAppSkills(installDir, skillsRoot, manifest);
@@ -3559,6 +3625,335 @@ const buildBackendProcessConfig = (
   return { command: python, args, cwd, environment };
 };
 
+const findManifestMcp = (manifest: AppManifest | null): AppManifestMcp | null => {
+  if (!manifest?.mcp || typeof manifest.mcp !== 'object') {
+    return null;
+  }
+  if (manifest.mcp.type && manifest.mcp.type !== 'http') {
+    return null;
+  }
+  if (!manifest.mcp.command || typeof manifest.mcp.command !== 'string') {
+    return null;
+  }
+  return manifest.mcp;
+};
+
+const safeMcpServerName = (appId: string): string =>
+  `app_${appId.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+
+const safeMcpTokenEnvVar = (appId: string): string =>
+  `FORGER_APP_MCP_TOKEN_${appId.replace(/[^a-zA-Z0-9]/g, '_').toUpperCase()}`;
+
+const translateMcpEnvironment = (
+  environment: Record<string, string>,
+  backendDir: string,
+  cwd: string,
+): Record<string, string> => {
+  const translated = translateManifestEnvironment(environment, backendDir);
+  if (typeof translated.PYTHONPATH === 'string' && translated.PYTHONPATH.trim()) {
+    const entries = translated.PYTHONPATH.split(path.delimiter)
+      .map((entry) => entry.trim())
+      .filter(Boolean)
+      .map((entry) => path.isAbsolute(entry) ? entry : path.resolve(cwd, entry));
+    translated.PYTHONPATH = entries.join(path.delimiter);
+  }
+  return translated;
+};
+
+const buildAppMcpProcessConfig = (
+  mcp: AppManifestMcp,
+  record: InstalledAppRecord,
+  python: string,
+  port: number,
+  token: string,
+): {
+  command: string;
+  args: string[];
+  cwd: string;
+  url: string;
+  healthUrl: string;
+  environment: Record<string, string>;
+  tokenEnvVar: string;
+  toolTimeoutSec: number;
+} => {
+  const rawArgs = splitManifestCommand(mcp.command);
+  if (rawArgs.length === 0) {
+    throw new Error('app_mcp_command_missing');
+  }
+  const backendDir = path.join(record.installDir, 'backend');
+  const cwd = mcp.context ? path.resolve(path.join(record.installDir, mcp.context)) : backendDir;
+  if (!ensurePathInside(record.installDir, cwd)) {
+    throw new Error('app_mcp_context_outside_app');
+  }
+  const commandToken = rawArgs[0];
+  const command = commandToken === 'python' || commandToken === 'python3' ? python : commandToken;
+  const args = rawArgs.slice(1);
+  const healthcheck = normalizeHealthcheckPath(mcp.healthcheck);
+  const url = `http://127.0.0.1:${port}/mcp`;
+  const tokenEnvVar = safeMcpTokenEnvVar(record.appId);
+  const manifestEnvironment = mcp.environment && typeof mcp.environment === 'object' ? mcp.environment : {};
+  const environment = translateMcpEnvironment(manifestEnvironment, backendDir, cwd);
+  return {
+    command,
+    args,
+    cwd,
+    url,
+    healthUrl: `http://127.0.0.1:${port}${healthcheck}`,
+    environment: {
+      ...environment,
+      HOST: '127.0.0.1',
+      PORT: String(port),
+      FORGER_APP_ID: record.appId,
+      FORGER_APP_MCP_TOKEN: token,
+      [tokenEnvVar]: token,
+    },
+    tokenEnvVar,
+    toolTimeoutSec: Math.max(1, Math.floor(mcp.toolTimeoutSec ?? 600)),
+  };
+};
+
+class AppMcpManager {
+  private readonly states = new Map<string, AppMcpState>();
+  private readonly runListeners = new Map<string, Set<string>>();
+
+  public async listenMcps(appIds: string[], runId: string): Promise<CodexMcpServerConfig[]> {
+    const configs = await Promise.all(
+      Array.from(new Set(appIds)).map((appId) => this.listenOne(appId, runId)),
+    );
+    return configs.filter((config): config is CodexMcpServerConfig => Boolean(config));
+  }
+
+  public releaseMcps(runId: string): void {
+    const appIds = this.runListeners.get(runId);
+    if (!appIds) {
+      return;
+    }
+    this.runListeners.delete(runId);
+    for (const appId of appIds) {
+      const state = this.states.get(appId);
+      if (!state) {
+        continue;
+      }
+      state.listeners.delete(runId);
+      if (state.listeners.size === 0) {
+        this.scheduleStop(state);
+      }
+    }
+  }
+
+  public dispose(): void {
+    for (const state of this.states.values()) {
+      if (state.stopTimer) {
+        clearTimeout(state.stopTimer);
+      }
+      if (state.process) {
+        void terminateProcess(state.process);
+      }
+    }
+    this.states.clear();
+    this.runListeners.clear();
+  }
+
+  private async listenOne(appId: string, runId: string): Promise<CodexMcpServerConfig | null> {
+    const record = registry.apps[appId];
+    if (!record?.installDir) {
+      return null;
+    }
+    const manifest = await resolveInstalledManifest(record.installDir);
+    const mcp = findManifestMcp(manifest);
+    if (!mcp) {
+      return null;
+    }
+
+    const state = this.getState(appId);
+    state.listeners.add(runId);
+    const runApps = this.runListeners.get(runId) ?? new Set<string>();
+    runApps.add(appId);
+    this.runListeners.set(runId, runApps);
+
+    if (state.stopTimer) {
+      clearTimeout(state.stopTimer);
+      state.stopTimer = undefined;
+    }
+    if (state.status === 'up' && state.url && state.token && state.tokenEnvVar) {
+      return this.toConfig(state);
+    }
+    if (state.status === 'starting' && state.startPromise) {
+      return await state.startPromise;
+    }
+    if (state.status === 'shutting_down' && state.stopPromise) {
+      await state.stopPromise.catch(() => undefined);
+    }
+    if (state.status === 'up' && state.url && state.token && state.tokenEnvVar) {
+      return this.toConfig(state);
+    }
+    state.startPromise = this.startOne(record, mcp, state);
+    return await state.startPromise;
+  }
+
+  private async startOne(
+    record: InstalledAppRecord,
+    mcp: AppManifestMcp,
+    state: AppMcpState,
+  ): Promise<CodexMcpServerConfig | null> {
+    const generation = state.generation + 1;
+    state.generation = generation;
+    state.status = 'starting';
+    try {
+      const pythonRuntime = await ensureRuntimeInstalled('python', record.requiredPythonVersion);
+      const venv = getVenvExecutables(path.join(record.installDir, 'backend'));
+      const port = await getFreePort();
+      const token = randomBytes(32).toString('hex');
+      const config = buildAppMcpProcessConfig(mcp, record, venv.python, port, token);
+      await ensureSqliteDatabaseParent(config.environment);
+      await appendInstallLog('app_mcp:start', {
+        appId: record.appId,
+        command: config.command,
+        args: config.args,
+        cwd: config.cwd,
+        url: config.url,
+        healthUrl: config.healthUrl,
+        pythonRuntime: pythonRuntime.rootDir,
+      });
+      const child = spawn(config.command, config.args, {
+        cwd: config.cwd,
+        env: {
+          ...process.env,
+          ...config.environment,
+          PATH: [
+            path.dirname(venv.python),
+            ...getRuntimePathEntries(pythonRuntime),
+            process.env.PATH ?? '',
+          ].filter(Boolean).join(path.delimiter),
+        },
+        stdio: 'pipe',
+      });
+      child.stdout.on('data', (chunk) => {
+        void appendInstallLog('app_mcp:stdout', {
+          appId: record.appId,
+          text: truncateForInstallLog(chunk.toString()),
+        });
+      });
+      child.stderr.on('data', (chunk) => {
+        void appendInstallLog('app_mcp:stderr', {
+          appId: record.appId,
+          text: truncateForInstallLog(chunk.toString()),
+        });
+      });
+      child.once('exit', (code, signal) => {
+        void appendInstallLog('app_mcp:exit', { appId: record.appId, code, signal });
+        if (this.states.get(record.appId) === state && state.process === child) {
+          state.process = undefined;
+          state.url = undefined;
+          state.token = undefined;
+          state.tokenEnvVar = undefined;
+          state.status = state.listeners.size > 0 ? 'down' : 'down';
+        }
+      });
+
+      state.process = child;
+      state.url = config.url;
+      state.token = token;
+      state.tokenEnvVar = config.tokenEnvVar;
+      state.toolTimeoutSec = config.toolTimeoutSec;
+      await waitForHttpOk(config.healthUrl, 30_000);
+      if (state.generation !== generation || state.listeners.size === 0) {
+        await terminateProcess(child);
+        state.status = 'down';
+        return null;
+      }
+      state.status = 'up';
+      await appendInstallLog('app_mcp:ready', { appId: record.appId, url: config.url });
+      return this.toConfig(state);
+    } catch (error) {
+      await appendInstallLog('app_mcp:start_failed', {
+        appId: record.appId,
+        error: serializeErrorForInstallLog(error),
+      });
+      if (state.process) {
+        await terminateProcess(state.process).catch(() => undefined);
+      }
+      state.process = undefined;
+      state.url = undefined;
+      state.token = undefined;
+      state.tokenEnvVar = undefined;
+      state.status = 'down';
+      return null;
+    } finally {
+      state.startPromise = undefined;
+    }
+  }
+
+  private scheduleStop(state: AppMcpState): void {
+    if (state.stopTimer || state.status === 'down') {
+      return;
+    }
+    state.stopTimer = setTimeout(() => {
+      state.stopTimer = undefined;
+      if (state.listeners.size === 0) {
+        state.stopPromise = this.stopOne(state);
+      }
+    }, 1_000);
+  }
+
+  private async stopOne(state: AppMcpState): Promise<void> {
+    if (state.listeners.size > 0) {
+      return;
+    }
+    if (state.status === 'starting' && state.startPromise) {
+      await state.startPromise.catch(() => null);
+      if (state.listeners.size > 0) {
+        return;
+      }
+    }
+    const child = state.process;
+    state.status = 'shutting_down';
+    state.generation += 1;
+    if (child) {
+      await appendInstallLog('app_mcp:stop', { appId: state.appId });
+      await terminateProcess(child).catch(() => undefined);
+    }
+    if (state.listeners.size === 0) {
+      state.process = undefined;
+      state.url = undefined;
+      state.token = undefined;
+      state.tokenEnvVar = undefined;
+      state.status = 'down';
+    } else {
+      state.status = 'down';
+    }
+    state.stopPromise = undefined;
+  }
+
+  private getState(appId: string): AppMcpState {
+    const existing = this.states.get(appId);
+    if (existing) {
+      return existing;
+    }
+    const state: AppMcpState = {
+      appId,
+      status: 'down',
+      listeners: new Set<string>(),
+      generation: 0,
+    };
+    this.states.set(appId, state);
+    return state;
+  }
+
+  private toConfig(state: AppMcpState): CodexMcpServerConfig | null {
+    if (!state.url || !state.token || !state.tokenEnvVar) {
+      return null;
+    }
+    return {
+      name: safeMcpServerName(state.appId),
+      url: state.url,
+      token: state.token,
+      tokenEnvVar: state.tokenEnvVar,
+      toolTimeoutSec: state.toolTimeoutSec,
+    };
+  }
+}
+
 const normalizeHealthcheckPath = (healthcheck: string | undefined): string => {
   const value = healthcheck?.trim() || '/health';
   return value.startsWith('/') ? value : `/${value}`;
@@ -4927,6 +5322,7 @@ app.whenReady().then(async () => {
   await loadRegistry();
   await startDevCatalogService();
   await startForgerMcpServer();
+  appMcpManager = new AppMcpManager();
   fileLibrary = new FileLibrary(getPrivateDataRoot(), getForgerMetadataRoot());
   chatOrchestrator = new ChatOrchestrator({
     forgerHomeRoot: getForgerHomeRoot(),
@@ -4976,6 +5372,11 @@ app.whenReady().then(async () => {
     },
     createForgerMcpSession,
     releaseForgerMcpSession,
+    listenAppMcps: async (appIds: string[], runId: string) =>
+      await (appMcpManager?.listenMcps(appIds, runId) ?? Promise.resolve([])),
+    releaseAppMcps: (runId: string) => {
+      appMcpManager?.releaseMcps(runId);
+    },
     onUpdateConflictResolved: async (appId: string) => {
       const current = registry.apps[appId];
       if (!current?.pendingUpdate) {
@@ -5038,6 +5439,11 @@ app.whenReady().then(async () => {
       return status.authenticated;
     },
     resolvePromptTemplates: resolveInstalledPromptTemplates,
+    listenAppMcps: async (appIds: string[], runId: string) =>
+      await (appMcpManager?.listenMcps(appIds, runId) ?? Promise.resolve([])),
+    releaseAppMcps: (runId: string) => {
+      appMcpManager?.releaseMcps(runId);
+    },
     onTaskUpdated: (event) => {
       const target = appWindows.get(event.task.appId);
       if (target && !target.isDestroyed()) {
@@ -5059,6 +5465,13 @@ app.whenReady().then(async () => {
       const status = await getCodexAuthStatus();
       return status.authenticated;
     },
+    createForgerMcpSession,
+    releaseForgerMcpSession,
+    listenAppMcps: async (appIds: string[], runId: string) =>
+      await (appMcpManager?.listenMcps(appIds, runId) ?? Promise.resolve([])),
+    releaseAppMcps: (runId: string) => {
+      appMcpManager?.releaseMcps(runId);
+    },
     onAutomationUpdated: (event) => {
       emitAutomationUpdated(event as { automation: unknown; run?: unknown });
     },
@@ -5078,6 +5491,7 @@ app.whenReady().then(async () => {
 
 app.on('before-quit', () => {
   automationManager?.dispose();
+  appMcpManager?.dispose();
   devCatalogService?.stop();
   forgerMcpServer?.server.close();
   forgerMcpServer = null;

@@ -40,6 +40,7 @@ The agent internally classifies each user request before acting. If a message co
 ### trabajar_datos
 
 - Use only internal app data or files explicitly shared by the user.
+- When an installed app declares MCP tools, prefer those tools for structured data operations before scripts, direct database access, or ad hoc endpoint calls.
 - Validate consistency before loading, correcting, or transforming data.
 - Confirm before destructive or irreversible actions.
 - Communicate what was loaded, reviewed, corrected, or left pending.
@@ -48,6 +49,7 @@ The agent internally classifies each user request before acting. If a message co
 ### interactuar_con_aplicacion
 
 - Operate the app using available internal tools when appropriate.
+- Prefer app MCP tools when the task needs to read, expose, create, edit, delete, import, or validate app data.
 - Translate the result into functional language: what opened, what was reviewed, what happened, and what remains.
 - Do not ask the user to run commands or navigate internal folders.
 - Do not create code versions.

@@ -22,7 +22,19 @@ interface AutomationManagerOptions {
   getCodexCliPath: () => Promise<string | null>;
   getCodexPathEntries: () => Promise<string[]>;
   getCodexAuthenticated: () => Promise<boolean>;
+  createForgerMcpSession?: (runId: string, appId: string) => { url: string; token: string } | null;
+  releaseForgerMcpSession?: (token: string) => void;
+  listenAppMcps?: (appIds: string[], runId: string) => Promise<CodexMcpServerConfig[]>;
+  releaseAppMcps?: (runId: string) => void;
   onAutomationUpdated: (event: { automation: Automation; run?: AutomationRunSummary }) => void;
+}
+
+interface CodexMcpServerConfig {
+  name: string;
+  url: string;
+  token: string;
+  tokenEnvVar: string;
+  toolTimeoutSec?: number;
 }
 
 interface CommandResult {
@@ -221,6 +233,7 @@ export class AutomationManager {
       this.activeRunAutomationIds.delete(automationId);
       return;
     }
+    let forgerMcpSession: { url: string; token: string } | null = null;
     try {
       const automation = this.requireAutomation(automationId);
       if (!(await this.options.getCodexAuthenticated())) {
@@ -245,11 +258,26 @@ export class AutomationManager {
       const activeRunId = run.id;
       let latestUserMessage = run.userMessage ?? '';
       let userMessages = run.userMessages ?? [];
+      forgerMcpSession = this.options.createForgerMcpSession?.(run.id, 'forger') ?? null;
+      const appMcpServers = await (this.options.listenAppMcps?.(automation.selectedAppIds, run.id) ?? Promise.resolve([]));
+      const mcpServers: CodexMcpServerConfig[] = [
+        ...(forgerMcpSession
+          ? [{
+              name: 'forger',
+              url: forgerMcpSession.url,
+              token: forgerMcpSession.token,
+              tokenEnvVar: 'FORGER_MCP_TOKEN',
+              toolTimeoutSec: 600,
+            }]
+          : []),
+        ...appMcpServers,
+      ];
       const result = await runCodexCommand(command, {
         cwd: this.options.forgerHomeRoot,
         codexHome: this.options.codexHome,
         prompt: this.buildPrompt(automation),
         transcriptPath,
+        mcpServers,
         onAssistantMessages: (assistantMessages) => {
           const latest = assistantMessages[assistantMessages.length - 1] ?? '';
           if (!latest || latest === latestUserMessage) {
@@ -297,6 +325,10 @@ export class AutomationManager {
       await this.writeRun(run);
       await this.updateLastRun(automationId, toRunSummary(run));
     } finally {
+      if (forgerMcpSession) {
+        this.options.releaseForgerMcpSession?.(forgerMcpSession.token);
+      }
+      this.options.releaseAppMcps?.(run.id);
       this.activeRunAutomationIds.delete(automationId);
       const current = this.automations.get(automationId);
       if (current) {
@@ -738,11 +770,15 @@ const runCodexCommand = async (
     codexHome: string;
     prompt: string;
     transcriptPath: string;
+    mcpServers?: CodexMcpServerConfig[];
     onAssistantMessages?: (assistantMessages: string[]) => void;
   },
 ): Promise<CommandResult> => {
+  const mcpServers = options.mcpServers ?? [];
+  const topLevelArgs = mcpServers.length > 0 ? ['--ask-for-approval', 'never'] : [];
   const args = [
     ...codexCommand.prefixArgs,
+    ...topLevelArgs,
     'exec',
     '--json',
     '--model',
@@ -753,6 +789,7 @@ const runCodexCommand = async (
     '--sandbox',
     'workspace-write',
     '--skip-git-repo-check',
+    ...buildMcpArgs(mcpServers),
     '-C',
     options.cwd,
     options.prompt,
@@ -764,6 +801,7 @@ const runCodexCommand = async (
     env: {
       CODEX_HOME: options.codexHome,
       FORGER_ALLOWED_ROOTS: options.cwd,
+      ...Object.fromEntries(mcpServers.map((server) => [server.tokenEnvVar, server.token])),
       PATH: [...codexCommand.pathEntries, process.env.PATH ?? ''].filter(Boolean).join(path.delimiter),
     },
     timeoutMs: AUTOMATION_TIMEOUT_MS,
@@ -775,6 +813,34 @@ const runCodexCommand = async (
     onStderr: (text) => void appendTranscript(options.transcriptPath, 'stderr', text),
   });
 };
+
+const buildMcpArgs = (mcpServers: CodexMcpServerConfig[]): string[] =>
+  mcpServers.flatMap((server) => [
+    '--config',
+    `mcp_servers.${server.name}.url=${JSON.stringify(server.url)}`,
+    '--config',
+    `mcp_servers.${server.name}.bearer_token_env_var=${JSON.stringify(server.tokenEnvVar)}`,
+    '--config',
+    `mcp_servers.${server.name}.enabled=true`,
+    '--config',
+    `mcp_servers.${server.name}.tool_timeout_sec=${server.toolTimeoutSec ?? 600}`,
+    '--config',
+    `mcp_servers.${server.name}.default_tools_approval_mode="approve"`,
+    ...(server.name === 'forger'
+      ? [
+          '--config',
+          'apps.forger.enabled=true',
+          '--config',
+          'apps.forger.default_tools_enabled=true',
+          '--config',
+          'apps.forger.default_tools_approval_mode="approve"',
+          '--config',
+          'apps.forger.destructive_enabled=true',
+          '--config',
+          'apps.forger.open_world_enabled=true',
+        ]
+      : []),
+  ]);
 
 const runCommandCapture = async (
   command: string,
