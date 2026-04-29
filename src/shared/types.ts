@@ -28,6 +28,27 @@ export interface AppCapability {
   description?: string;
 }
 
+export interface AppPromptTemplate {
+  id: string;
+  title: string;
+  description?: string;
+  arguments?: AppPromptTemplateArgument[];
+  acceptedFileTypes?: string[];
+  prompt: string;
+}
+
+export type AppPromptTemplateArgumentType = 'file' | 'string';
+
+export interface AppPromptTemplateArgument {
+  name: string;
+  type: AppPromptTemplateArgumentType;
+  required?: boolean;
+  multiple?: boolean;
+  acceptedFileTypes?: string[];
+  maxBytes?: number;
+  maxLength?: number;
+}
+
 export interface CatalogApp extends AppSummary {
   latestVersionId?: number;
   latestVersion?: string;
@@ -315,6 +336,7 @@ export interface AppDetails {
   originalCommitSha?: string;
   installedAt?: string;
   operations: AppOperationSummary[];
+  promptTemplates?: AppPromptTemplate[];
 }
 
 export interface AppUpdateConflictInfo {
@@ -506,8 +528,70 @@ export interface AppExternalFolderCanceled {
 
 export type AppExternalFolderSelection = AppExternalFolderGrant | AppExternalFolderCanceled;
 
+export type AppCodexTaskStatus =
+  | 'queued'
+  | 'running'
+  | 'needs_permission'
+  | 'completed'
+  | 'failed'
+  | 'canceled';
+
+export interface AppCodexTaskAttachment {
+  name: string;
+  mimeType?: string;
+  dataBase64: string;
+}
+
+export interface AppCodexTaskFileArgument {
+  type: 'file';
+  name: string;
+  mimeType?: string;
+  dataBase64: string;
+}
+
+export interface AppCodexTaskStringArgument {
+  type: 'string';
+  value: string;
+}
+
+export type AppCodexTaskArgumentValue =
+  | string
+  | number
+  | boolean
+  | null
+  | AppCodexTaskStringArgument
+  | AppCodexTaskFileArgument
+  | AppCodexTaskFileArgument[];
+
+export interface AppCodexTaskStartInput {
+  templateId: string;
+  arguments?: Record<string, AppCodexTaskArgumentValue>;
+  variables?: Record<string, string | number | boolean | null>;
+  attachments?: AppCodexTaskAttachment[];
+}
+
+export interface AppCodexTaskSummary {
+  runId: string;
+  appId: string;
+  templateId: string;
+  status: AppCodexTaskStatus;
+  createdAt: string;
+  updatedAt: string;
+  resultText?: string;
+  error?: string;
+  progressLog?: string[];
+}
+
+export interface AppCodexTaskEvent {
+  task: AppCodexTaskSummary;
+}
+
 export interface ForgerAppApi {
   selectExternalFolder: () => Promise<AppExternalFolderSelection>;
+  startCodexTask: (input: AppCodexTaskStartInput) => Promise<AppCodexTaskSummary>;
+  getCodexTask: (runId: string) => Promise<AppCodexTaskSummary | null>;
+  cancelCodexTask: (runId: string) => Promise<{ success: boolean }>;
+  onCodexTaskUpdated: (listener: (event: AppCodexTaskEvent) => void) => () => void;
 }
 
 export type AutomationFrequencyType = 'hourly' | 'daily' | 'weekly';

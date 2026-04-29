@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import ArrowBackRounded from '@mui/icons-material/ArrowBackRounded';
+import AutoAwesomeRounded from '@mui/icons-material/AutoAwesomeRounded';
 import CheckCircleOutlineRounded from '@mui/icons-material/CheckCircleOutlineRounded';
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
 import DownloadRounded from '@mui/icons-material/DownloadRounded';
@@ -97,6 +98,7 @@ export function AppView({
   const hasConflict = details.status === 'conflict';
   const isOpening = openingAppIds.has(appId);
   const capabilities = 'capabilities' in details.app ? details.app.capabilities ?? [] : [];
+  const promptTemplates = details.promptTemplates ?? [];
 
   const actions = (
     <Stack direction="row" spacing={1.25} useFlexGap flexWrap="wrap">
@@ -251,6 +253,46 @@ export function AppView({
                   {capability.description ? (
                     <Typography variant="body2" color="text.secondary">
                       {capability.description}
+                    </Typography>
+                  ) : null}
+                </Stack>
+              </Box>
+            ))}
+          </Box>
+        </Stack>
+      ) : null}
+      {promptTemplates.length > 0 ? (
+        <Stack spacing={1.5}>
+          <Typography variant="h5">{t.appView.promptTemplatesTitle}</Typography>
+          <Box
+            sx={{
+              display: 'grid',
+              gap: 1.25,
+              gridTemplateColumns: {
+                xs: '1fr',
+                md: 'repeat(2, minmax(0, 1fr))',
+              },
+            }}
+          >
+            {promptTemplates.map((template) => (
+              <Box
+                key={template.id}
+                sx={{
+                  border: '1px solid',
+                  borderColor: 'divider',
+                  bgcolor: 'background.paper',
+                  p: 1.5,
+                  display: 'grid',
+                  gridTemplateColumns: '28px minmax(0, 1fr)',
+                  gap: 1,
+                }}
+              >
+                <AutoAwesomeRounded color="primary" fontSize="small" />
+                <Stack spacing={0.35} sx={{ minWidth: 0 }}>
+                  <Typography fontWeight={700}>{template.title}</Typography>
+                  {template.description ? (
+                    <Typography variant="body2" color="text.secondary">
+                      {template.description}
                     </Typography>
                   ) : null}
                 </Stack>

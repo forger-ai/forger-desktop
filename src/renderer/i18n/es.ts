@@ -335,6 +335,7 @@ export const es = {
     availableVersion: 'Version disponible',
     screenshotsPlaceholder: 'Pronto mostraremos capturas y previews de esta app.',
     capabilitiesTitle: 'Esta app puede',
+    promptTemplatesTitle: 'Prompts de Codex que esta app puede usar',
     historyTitle: 'Historial de modificaciones',
     noHistory: 'Todavia no hay modificaciones guardadas para esta app.',
     reverted: 'deshecho',

@@ -20,6 +20,7 @@ try {
 import { settingsSeed } from '../shared/mock-data';
 import { IPC_CHANNELS } from '../shared/ipc';
 import { ChatOrchestrator } from './chat/orchestrator';
+import { AppCodexTaskManager } from './app-codex-task-manager';
 import { AutomationManager } from './automation-manager';
 import { DevCatalogService } from './dev-catalog-service';
 import { FileLibrary } from './file-library';
@@ -42,6 +43,8 @@ import type {
   AppCategory,
   AppDetails,
   AppExternalFolderSelection,
+  AppCodexTaskStartInput,
+  AppPromptTemplate,
   AppSecretConnection,
   AppSecretDeclaration,
   AppSecretsState,
@@ -188,6 +191,7 @@ interface AppManifest {
   version?: string;
   description?: string;
   changelog?: VersionChangelog[];
+  promptTemplates?: unknown;
   stack?: AppManifestStack;
   services?: AppManifestService[];
   scripts?: Record<string, string>;
@@ -210,6 +214,7 @@ const appWindows = new Map<string, BrowserWindow>();
 const stoppingApps = new Set<string>();
 const runtimeLocks = new Map<string, Promise<RuntimeBinarySet>>();
 let chatOrchestrator: ChatOrchestrator | null = null;
+let appCodexTaskManager: AppCodexTaskManager | null = null;
 let fileLibrary: FileLibrary | null = null;
 let secretsStore: SecretsStore | null = null;
 let automationManager: AutomationManager | null = null;
@@ -914,6 +919,93 @@ const normalizeManifestAppSecrets = (manifest: AppManifest | null): AppSecretDec
   }
 
   return declarations;
+};
+
+const normalizeManifestPromptTemplates = (manifest: AppManifest | null): AppPromptTemplate[] => {
+  if (!manifest || !Array.isArray(manifest.promptTemplates)) {
+    return [];
+  }
+
+  const seenIds = new Set<string>();
+  const templates: AppPromptTemplate[] = [];
+  for (const entry of manifest.promptTemplates) {
+    if (!entry || typeof entry !== 'object') {
+      continue;
+    }
+    const candidate = entry as Partial<AppPromptTemplate>;
+    const id = typeof candidate.id === 'string' ? candidate.id.trim() : '';
+    const title = typeof candidate.title === 'string' ? candidate.title.trim() : '';
+    const prompt = typeof candidate.prompt === 'string' ? candidate.prompt.trim() : '';
+    if (!id || !title || !prompt || seenIds.has(id)) {
+      continue;
+    }
+    const description =
+      typeof candidate.description === 'string' && candidate.description.trim()
+        ? candidate.description.trim()
+        : undefined;
+    const acceptedFileTypes = Array.isArray(candidate.acceptedFileTypes)
+      ? candidate.acceptedFileTypes.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+      : undefined;
+    const args = normalizePromptTemplateArguments(candidate.arguments);
+    seenIds.add(id);
+    templates.push({
+      id,
+      title,
+      prompt,
+      ...(description ? { description } : {}),
+      ...(args.length > 0 ? { arguments: args } : {}),
+      ...(acceptedFileTypes && acceptedFileTypes.length > 0 ? { acceptedFileTypes } : {}),
+    });
+  }
+  return templates;
+};
+
+const normalizePromptTemplateArguments = (input: unknown): NonNullable<AppPromptTemplate['arguments']> => {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+
+  const seenNames = new Set<string>();
+  const args: NonNullable<AppPromptTemplate['arguments']> = [];
+  for (const entry of input) {
+    if (!entry || typeof entry !== 'object') {
+      continue;
+    }
+    const candidate = entry as Record<string, unknown>;
+    const name = typeof candidate.name === 'string' ? candidate.name.trim() : '';
+    const type = candidate.type === 'file' || candidate.type === 'string' ? candidate.type : null;
+    if (!name || !type || seenNames.has(name)) {
+      continue;
+    }
+    const acceptedFileTypes = Array.isArray(candidate.acceptedFileTypes)
+      ? candidate.acceptedFileTypes.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+      : undefined;
+    const maxBytes = typeof candidate.maxBytes === 'number' && Number.isFinite(candidate.maxBytes) && candidate.maxBytes > 0
+      ? candidate.maxBytes
+      : undefined;
+    const maxLength = typeof candidate.maxLength === 'number' && Number.isFinite(candidate.maxLength) && candidate.maxLength > 0
+      ? candidate.maxLength
+      : undefined;
+    seenNames.add(name);
+    args.push({
+      name,
+      type,
+      ...(candidate.required === true ? { required: true } : {}),
+      ...(candidate.multiple === true ? { multiple: true } : {}),
+      ...(acceptedFileTypes && acceptedFileTypes.length > 0 ? { acceptedFileTypes } : {}),
+      ...(maxBytes ? { maxBytes } : {}),
+      ...(maxLength ? { maxLength } : {}),
+    });
+  }
+  return args;
+};
+
+const resolveInstalledPromptTemplates = async (appId: string): Promise<AppPromptTemplate[]> => {
+  const record = registry.apps[appId];
+  if (!record?.installDir) {
+    return [];
+  }
+  return normalizeManifestPromptTemplates(await resolveInstalledManifest(record.installDir));
 };
 
 const getManifestAppSecretsValidationError = (manifest: AppManifest | null): string | null => {
@@ -2096,6 +2188,14 @@ const getCodexToolEnvironment = async (
   const record = appId ? registry.apps[appId] : undefined;
   if (record) {
     env.UV_PROJECT_ENVIRONMENT = path.join(record.installDir, 'backend', '.venv');
+    const manifest = await resolveInstalledManifest(record.installDir);
+    const backendService = findManifestService(manifest, 'backend', './backend');
+    const backendDir = path.join(record.installDir, 'backend');
+    const manifestEnvironment =
+      backendService?.environment && typeof backendService.environment === 'object'
+        ? backendService.environment
+        : {};
+    Object.assign(env, translateManifestEnvironment(manifestEnvironment, backendDir));
   }
 
   return env;
@@ -2978,6 +3078,7 @@ const getAppDetails = async (appId: string): Promise<AppDetails | null> => {
     originalCommitSha,
     installedAt: installed?.installedAt,
     operations: installed ? await readOperationSummaries(appId) : [],
+    promptTemplates: installed ? await resolveInstalledPromptTemplates(appId) : [],
   };
 };
 
@@ -3273,6 +3374,39 @@ const openOrFocusAppWindow = async (appId: string, appName: string, frontendUrl:
   });
 
   appWindows.set(appId, appWindow);
+  const expectedOrigin = new URL(frontendUrl).origin;
+  const isAllowedAppUrl = (targetUrl: string): boolean => {
+    try {
+      return new URL(targetUrl).origin === expectedOrigin;
+    } catch {
+      return false;
+    }
+  };
+  const openExternalUrl = (targetUrl: string): void => {
+    try {
+      const protocol = new URL(targetUrl).protocol;
+      if (protocol === 'http:' || protocol === 'https:' || protocol === 'mailto:') {
+        void shell.openExternal(targetUrl);
+      }
+    } catch {
+      // Ignore invalid navigation targets.
+    }
+  };
+
+  appWindow.webContents.on('will-navigate', (event, targetUrl) => {
+    if (!isAllowedAppUrl(targetUrl)) {
+      event.preventDefault();
+      openExternalUrl(targetUrl);
+    }
+  });
+  appWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (isAllowedAppUrl(url)) {
+      void appWindow.loadURL(url);
+      return { action: 'deny' };
+    }
+    openExternalUrl(url);
+    return { action: 'deny' };
+  });
   appWindow.on('closed', () => {
     appWindows.delete(appId);
     if (!stoppingApps.has(appId) && runningApps.has(appId)) {
@@ -4618,6 +4752,33 @@ const registerIpcHandlers = (): void => {
     return signAppFolderGrant(appId, selectedPath);
   });
 
+  ipcMain.handle(IPC_CHANNELS.appCodexTaskStart, async (event, input: AppCodexTaskStartInput) => {
+    const appId = resolveAppIdForWebContents(event.sender.id);
+    if (!appId) {
+      throw new Error('app_window_not_authorized');
+    }
+    if (!appCodexTaskManager) {
+      throw new Error('app_codex_task_manager_unavailable');
+    }
+    return await appCodexTaskManager.start(appId, input);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.appCodexTaskGet, async (event, runId: string) => {
+    const appId = resolveAppIdForWebContents(event.sender.id);
+    if (!appId || !appCodexTaskManager) {
+      return null;
+    }
+    return appCodexTaskManager.get(appId, runId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.appCodexTaskCancel, async (event, runId: string) => {
+    const appId = resolveAppIdForWebContents(event.sender.id);
+    if (!appId || !appCodexTaskManager) {
+      return { success: false };
+    }
+    return appCodexTaskManager.cancel(appId, runId);
+  });
+
   ipcMain.handle(IPC_CHANNELS.dbListTables, async (_event, appId: string) => {
     if (!BetterSqlite3) {
       return { error: 'db_module_unavailable' };
@@ -4831,6 +4992,57 @@ app.whenReady().then(async () => {
     },
     onRunUpdated: (event) => {
       emitChatRunUpdated(event as { run: unknown });
+    },
+  });
+  appCodexTaskManager = new AppCodexTaskManager({
+    privateAppsRoot: getPrivateAppsRoot(),
+    metadataRoot: getForgerMetadataRoot(),
+    codexHome: getCodexHome(),
+    getCodexCliPath: async () => await resolveCodexCliPath(getCodexRoot()),
+    getCodexPathEntries: async (appId?: string) => {
+      const pathEntries = new Set<string>();
+      const record = appId ? registry.apps[appId] : undefined;
+      if (record) {
+        for (const entry of await getAppLocalToolPathEntries(record)) {
+          pathEntries.add(entry);
+        }
+      }
+
+      const codexNodeRuntime = await ensureRuntimeInstalled('node', DEFAULT_NODE_VERSION);
+      for (const entry of getRuntimePathEntries(codexNodeRuntime)) {
+        pathEntries.add(entry);
+      }
+
+      if (record) {
+        const appNodeRuntime = await ensureRuntimeInstalled('node', record.requiredNodeVersion);
+        const appPythonRuntime = await ensureRuntimeInstalled('python', record.requiredPythonVersion);
+        for (const entry of getRuntimePathEntries(appNodeRuntime)) {
+          pathEntries.add(entry);
+        }
+        for (const entry of getRuntimePathEntries(appPythonRuntime)) {
+          pathEntries.add(entry);
+        }
+      }
+
+      return [...pathEntries];
+    },
+    getCodexEnvironment: async (appId?: string) => {
+      const record = appId ? registry.apps[appId] : undefined;
+      const appPythonRuntime = record
+        ? await ensureRuntimeInstalled('python', record.requiredPythonVersion)
+        : undefined;
+      return await getCodexToolEnvironment(appId, appPythonRuntime);
+    },
+    getCodexAuthenticated: async () => {
+      const status = await getCodexAuthStatus();
+      return status.authenticated;
+    },
+    resolvePromptTemplates: resolveInstalledPromptTemplates,
+    onTaskUpdated: (event) => {
+      const target = appWindows.get(event.task.appId);
+      if (target && !target.isDestroyed()) {
+        target.webContents.send(IPC_CHANNELS.appCodexTaskUpdated, event);
+      }
     },
   });
   automationManager = new AutomationManager({
