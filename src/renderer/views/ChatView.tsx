@@ -78,6 +78,16 @@ function MarkdownMessage({ content }: { content: string }) {
       sx={{
         fontSize: theme.typography.body2.fontSize,
         lineHeight: 1.55,
+        '& > :first-child': { mt: 0 },
+        '& > :last-child': { mb: 0 },
+        '& h1, & h2, & h3, & h4': {
+          mt: 1.2,
+          mb: 0.9,
+          lineHeight: 1.15,
+        },
+        '& h1:first-of-type, & h2:first-of-type, & h3:first-of-type, & h4:first-of-type': {
+          mt: 0,
+        },
         '& p': { my: 0.7, lineHeight: 1.55, fontSize: 'inherit' },
         '& ul, & ol': { my: 0.8, pl: 2.5 },
         '& li': { mb: 0.45, fontSize: 'inherit' },
