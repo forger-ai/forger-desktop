@@ -126,6 +126,10 @@ export function ForgerCloudModal({
     void onLogin(email, password);
   };
 
+  const updateAge = (value: string) => {
+    setAge(value.replace(/\D/g, '').slice(0, 3));
+  };
+
   const submitRegister = async () => {
     const success = await onRegister({
       firstName,
@@ -342,7 +346,18 @@ export function ForgerCloudModal({
                       )}
                       fullWidth
                     />
-                    <TextField label={t.cloud.age} type="number" value={age} onChange={(event) => setAge(event.target.value)} fullWidth />
+                    <TextField
+                      label={t.cloud.age}
+                      value={age}
+                      onChange={(event) => updateAge(event.target.value)}
+                      slotProps={{
+                        htmlInput: {
+                          inputMode: 'numeric',
+                          pattern: '[0-9]*',
+                        },
+                      }}
+                      fullWidth
+                    />
                   </Stack>
                   <TextField select label={t.cloud.gender} value={gender} onChange={(event) => setGender(event.target.value as ForgerAccountRegisterInput['gender'])} fullWidth>
                     <MenuItem value="">{t.cloud.preferNotToSay}</MenuItem>
