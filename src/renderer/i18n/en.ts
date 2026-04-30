@@ -292,6 +292,7 @@ export const en = {
   cloud: {
     openLabel: 'Open Forger account',
     title: 'Forger Cloud',
+    tagline: 'Make it your own',
     body: 'Your account connects the Forger catalog, reviews, and feedback.',
     loginTitle: 'Sign in with your email.',
     registerTitle: 'Create your Forger Cloud account.',

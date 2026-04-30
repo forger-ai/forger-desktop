@@ -5,6 +5,8 @@ import PersonAddAltRounded from '@mui/icons-material/PersonAddAltRounded';
 import RateReviewRounded from '@mui/icons-material/RateReviewRounded';
 import CloudSyncRounded from '@mui/icons-material/CloudSyncRounded';
 import FeedbackRounded from '@mui/icons-material/FeedbackRounded';
+import CloseRounded from '@mui/icons-material/CloseRounded';
+import OpenInNewRounded from '@mui/icons-material/OpenInNewRounded';
 import {
   Alert,
   Avatar,
@@ -15,6 +17,7 @@ import {
   DialogContent,
   DialogTitle,
   Divider,
+  IconButton,
   Link,
   MenuItem,
   Stack,
@@ -22,6 +25,7 @@ import {
   Typography,
   useTheme,
 } from '@mui/material';
+import 'flag-icons/css/flag-icons.min.css';
 import type { ForgerAccountRegisterInput, ForgerAccountSession } from '@shared/types';
 import type { AppDictionary } from '@renderer/i18n';
 import iconDark from '@renderer/assets/icon-dark.svg';
@@ -42,17 +46,6 @@ interface ForgerCloudModalProps {
 type CloudModalMode = 'intro' | 'login' | 'register';
 
 const FALLBACK_COUNTRY_CODES = ['CL', 'US', 'AR', 'BR', 'MX', 'CO', 'PE', 'ES', 'UY', 'GB', 'CA'];
-
-const flagFromCountryCode = (countryCode: string): string => {
-  const normalized = countryCode.toUpperCase();
-  if (!/^[A-Z]{2}$/.test(normalized)) {
-    return '';
-  }
-  return normalized
-    .split('')
-    .map((letter) => String.fromCodePoint(127397 + letter.charCodeAt(0)))
-    .join('');
-};
 
 const getSupportedRegionCodes = (): string[] => {
   const intlWithSupportedValues = Intl as typeof Intl & { supportedValuesOf?: (key: string) => string[] };
@@ -77,7 +70,6 @@ const countryOptions = (() => {
     .map((code) => ({
       code,
       label: displayNames.of(code) ?? code,
-      flag: flagFromCountryCode(code),
     }))
     .sort((a, b) => a.label.localeCompare(b.label, navigator.language));
 })();
@@ -125,45 +117,102 @@ export function ForgerCloudModal({
     });
   };
 
+  const openExternalLink = (url: string) => {
+    void window.forger.openExternalUrl(url);
+  };
+
+  const renderCountryOption = (code: string, label: string) => (
+    <Stack component="span" direction="row" spacing={1} alignItems="center">
+      <Box
+        component="span"
+        className={`fi fi-${code.toLowerCase()}`}
+        sx={{ width: 22, height: 16, borderRadius: 0.25, boxShadow: '0 0 0 1px rgba(0,0,0,0.16)' }}
+      />
+      <span>{label}</span>
+    </Stack>
+  );
+
   const cloudCards = [
     { icon: <RateReviewRounded color="primary" />, title: t.cloud.cards.reviews.title, body: t.cloud.cards.reviews.body },
     { icon: <FeedbackRounded color="primary" />, title: t.cloud.cards.feedback.title, body: t.cloud.cards.feedback.body },
     { icon: <CloudSyncRounded color="primary" />, title: t.cloud.cards.sync.title, body: t.cloud.cards.sync.body },
   ];
+  const formTitle = mode === 'login' ? t.cloud.loginTitle : mode === 'register' ? t.cloud.registerTitle : null;
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
-      <DialogTitle>
-        <Stack direction="row" spacing={1.5} alignItems="center">
-          <Avatar
-            sx={{
-              width: 54,
-              height: 54,
-              bgcolor: 'background.paper',
-              border: '1px solid',
-              borderColor: 'divider',
-            }}
-          >
+      <DialogTitle sx={{ position: 'relative', px: 4, pt: 4, pb: 0.5 }}>
+        <IconButton
+          aria-label={t.actions.close}
+          onClick={onClose}
+          size="small"
+          sx={{
+            position: 'absolute',
+            right: 12,
+            top: 12,
+            color: 'text.secondary',
+            '&:hover': { color: 'text.primary', bgcolor: 'action.hover' },
+          }}
+        >
+          <CloseRounded fontSize="small" />
+        </IconButton>
+        <Stack spacing={0.5} alignItems="center" textAlign="center">
+          <Stack direction="row" spacing={1} alignItems="center" justifyContent="center">
             <Box
               component="img"
               src={theme.palette.mode === 'dark' ? iconDark : iconLight}
               alt="Forger"
-              sx={{ width: 34, height: 34 }}
+              sx={{ width: 32, height: 32 }}
             />
-          </Avatar>
-          <Stack>
-            <Typography variant="h5">{t.cloud.title}</Typography>
-            <Typography variant="body2" color="text.secondary">
-              {mode === 'intro' ? t.cloud.body : mode === 'login' ? t.cloud.loginTitle : t.cloud.registerTitle}
-            </Typography>
+            <Stack direction="row" spacing={0.5} alignItems="baseline">
+              <Typography
+                component="span"
+                sx={{ fontFamily: 'Poppins, sans-serif', fontSize: 25, fontWeight: 800, letterSpacing: '0.18em' }}
+              >
+                FORGER
+              </Typography>
+              <Typography
+                component="span"
+                color="text.secondary"
+                sx={{ fontFamily: 'Poppins, sans-serif', fontSize: 14, fontWeight: 700 }}
+              >
+                Cloud
+              </Typography>
+            </Stack>
           </Stack>
+          <Typography variant="body2" color="text.secondary">
+            {t.cloud.tagline}
+          </Typography>
         </Stack>
       </DialogTitle>
-      <DialogContent>
-        <Stack spacing={2}>
+      <DialogContent sx={{ px: 4, pb: account.authenticated ? 2 : 3 }}>
+        <Stack
+          spacing={2}
+          alignItems="center"
+          sx={{
+            minHeight: mode === 'login' ? 430 : undefined,
+            justifyContent: mode === 'login' ? 'center' : undefined,
+          }}
+        >
           {message ? <Alert severity={account.authenticated ? 'success' : 'info'}>{message}</Alert> : null}
           {account.authenticated && account.user ? (
-            <Stack spacing={1.5}>
+            <Stack spacing={1.5} alignItems="center" textAlign="center">
+              <Avatar
+                sx={{
+                  width: 54,
+                  height: 54,
+                  bgcolor: 'background.paper',
+                  border: '1px solid',
+                  borderColor: 'divider',
+                }}
+              >
+                <Box
+                  component="img"
+                  src={theme.palette.mode === 'dark' ? iconDark : iconLight}
+                  alt="Forger"
+                  sx={{ width: 34, height: 34 }}
+                />
+              </Avatar>
               <Typography fontWeight={700}>{t.cloud.signedInAs(account.user.email)}</Typography>
               <Typography color="text.secondary">
                 {account.user.confirmed ? t.cloud.confirmed : t.cloud.confirmationRequired}
@@ -172,7 +221,7 @@ export function ForgerCloudModal({
           ) : (
             <>
               {mode === 'intro' ? (
-                <Stack spacing={2}>
+                <Stack spacing={2.5}>
                   <Box
                     sx={{
                       display: 'grid',
@@ -199,20 +248,30 @@ export function ForgerCloudModal({
                       </Box>
                     ))}
                   </Box>
-                  <Button variant="contained" size="large" onClick={() => setMode('login')} startIcon={<LoginRounded />} sx={{ alignSelf: 'center' }}>
-                    {t.cloud.loginOrRegister}
-                  </Button>
+                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.25} justifyContent="center">
+                    <Button variant="contained" size="large" onClick={() => setMode('login')} startIcon={<LoginRounded />}>
+                      {t.cloud.login}
+                    </Button>
+                    <Button variant="outlined" size="large" onClick={() => setMode('register')} startIcon={<PersonAddAltRounded />}>
+                      {t.cloud.register}
+                    </Button>
+                  </Stack>
                 </Stack>
               ) : null}
 
               {mode === 'login' ? (
-                <Stack spacing={1.5} sx={{ maxWidth: 360, mx: 'auto', width: '100%' }}>
+                <Stack spacing={1.5} alignItems="center" sx={{ width: 'min(100%, 420px)' }}>
+                  {formTitle ? (
+                    <Typography variant="h6" color="text.primary" textAlign="center" sx={{ mb: 0.5 }}>
+                      {formTitle}
+                    </Typography>
+                  ) : null}
                   <TextField label={t.settings.emailLabel} type="email" value={email} onChange={(event) => setEmail(event.target.value)} fullWidth />
                   <TextField label={t.settings.passwordLabel} type="password" value={password} onChange={(event) => setPassword(event.target.value)} fullWidth />
                   <Button variant="contained" startIcon={<LoginRounded />} onClick={submitLogin} disabled={busy || !email.trim() || !password.trim()} fullWidth>
                     {t.cloud.login}
                   </Button>
-                  <Divider>{t.cloud.noAccount}</Divider>
+                  <Divider flexItem>{t.cloud.noAccount}</Divider>
                   <Button variant="text" onClick={() => setMode('register')}>
                     {t.cloud.register}
                   </Button>
@@ -220,7 +279,12 @@ export function ForgerCloudModal({
               ) : null}
 
               {mode === 'register' ? (
-                <Stack spacing={1.5}>
+                <Stack spacing={1.5} sx={{ width: 'min(100%, 520px)' }}>
+                  {formTitle ? (
+                    <Typography variant="h6" color="text.primary" textAlign="center" sx={{ mb: 0.5 }}>
+                      {formTitle}
+                    </Typography>
+                  ) : null}
                   <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
                     <TextField label={t.cloud.firstName} value={firstName} onChange={(event) => setFirstName(event.target.value)} fullWidth />
                     <TextField label={t.cloud.lastName} value={lastName} onChange={(event) => setLastName(event.target.value)} fullWidth />
@@ -232,7 +296,7 @@ export function ForgerCloudModal({
                       <MenuItem value="">{t.cloud.countryAuto}</MenuItem>
                       {countryOptions.map((option) => (
                         <MenuItem key={option.code} value={option.code}>
-                          {option.flag} {option.label}
+                          {renderCountryOption(option.code, option.label)}
                         </MenuItem>
                       ))}
                     </TextField>
@@ -256,23 +320,28 @@ export function ForgerCloudModal({
             </>
           )}
           <Stack direction="row" spacing={1.5} justifyContent="center" sx={{ pt: 1 }}>
-            <Link href={t.cloud.privacyUrl} target="_blank" rel="noreferrer" underline="hover" variant="caption">
-              {t.cloud.privacyLink}
+            <Link component="button" type="button" onClick={() => openExternalLink(t.cloud.privacyUrl)} underline="hover" variant="caption">
+              <Stack component="span" direction="row" spacing={0.5} alignItems="center">
+                <span>{t.cloud.privacyLink}</span>
+                <OpenInNewRounded sx={{ fontSize: 14 }} />
+              </Stack>
             </Link>
-            <Link href={t.cloud.termsUrl} target="_blank" rel="noreferrer" underline="hover" variant="caption">
-              {t.cloud.termsLink}
+            <Link component="button" type="button" onClick={() => openExternalLink(t.cloud.termsUrl)} underline="hover" variant="caption">
+              <Stack component="span" direction="row" spacing={0.5} alignItems="center">
+                <span>{t.cloud.termsLink}</span>
+                <OpenInNewRounded sx={{ fontSize: 14 }} />
+              </Stack>
             </Link>
           </Stack>
         </Stack>
       </DialogContent>
-      <DialogActions>
-        <Button onClick={onClose}>{t.secrets.close}</Button>
-        {account.authenticated ? (
+      {account.authenticated ? (
+        <DialogActions sx={{ px: 4, pb: 3, justifyContent: 'center' }}>
           <Button startIcon={<LogoutRounded />} onClick={() => void onLogout()} disabled={busy}>
             {t.cloud.logout}
           </Button>
-        ) : null}
-      </DialogActions>
+        </DialogActions>
+      ) : null}
     </Dialog>
   );
 }

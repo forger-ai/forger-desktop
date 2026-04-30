@@ -821,6 +821,7 @@ export interface ForgerDesktopApi {
   logoutForgerAccount: () => Promise<ForgerAccountSession & { success: boolean }>;
   submitAppRating: (input: SubmitAppRatingInput) => Promise<{ success: boolean; rating?: AppRatingSummary; userMessage?: string; technicalCode?: string }>;
   submitAppFeedback: (input: SubmitAppFeedbackInput) => Promise<{ success: boolean; userMessage?: string; technicalCode?: string }>;
+  openExternalUrl: (url: string) => Promise<{ success: boolean; userMessage?: string; technicalCode?: string }>;
   getCodexAuthStatus: () => Promise<CodexAuthStatus>;
   openCodexUsageDashboard: () => Promise<{ success: boolean; userMessage?: string; technicalCode?: string }>;
   connectCodexAuth: () => Promise<{ success: boolean; userMessage: string; technicalCode?: string }>;

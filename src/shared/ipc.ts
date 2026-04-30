@@ -25,6 +25,7 @@ export const IPC_CHANNELS = {
   logoutForgerAccount: 'forger:account:logout',
   submitAppRating: 'forger:catalog:rating:submit',
   submitAppFeedback: 'forger:catalog:feedback:submit',
+  openExternalUrl: 'forger:open-external-url',
   getCodexAuthStatus: 'forger:get-codex-auth-status',
   openCodexUsageDashboard: 'forger:open-codex-usage-dashboard',
   connectCodexAuth: 'forger:connect-codex-auth',

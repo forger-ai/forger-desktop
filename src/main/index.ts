@@ -4881,6 +4881,20 @@ const registerIpcHandlers = (): void => {
       ? await forgerBackendClient.submitAppFeedback(input)
       : { success: false, userMessage: 'No pudimos enviar el feedback.', technicalCode: 'backend_client_missing' };
   });
+  ipcMain.handle(IPC_CHANNELS.openExternalUrl, async (_event, targetUrl: string) => {
+    try {
+      const parsed = new URL(targetUrl);
+      if (parsed.protocol !== 'https:') {
+        return { success: false, userMessage: 'No pudimos abrir ese enlace.', technicalCode: 'unsupported_url_protocol' };
+      }
+
+      await shell.openExternal(parsed.toString());
+      return { success: true };
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : 'open_external_url_failed';
+      return { success: false, userMessage: 'No pudimos abrir ese enlace.', technicalCode: detail };
+    }
+  });
   ipcMain.handle(IPC_CHANNELS.getCodexAuthStatus, async () => await getCodexAuthStatus());
   ipcMain.handle(IPC_CHANNELS.openCodexUsageDashboard, async () => {
     try {

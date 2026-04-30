@@ -82,6 +82,16 @@ export function AppCard({
   return (
     <Card
       onClick={onCardClick}
+      role={onCardClick ? 'button' : undefined}
+      tabIndex={onCardClick ? 0 : undefined}
+      onKeyDown={(event) => {
+        if (!onCardClick || (event.key !== 'Enter' && event.key !== ' ')) {
+          return;
+        }
+
+        event.preventDefault();
+        onCardClick();
+      }}
       sx={{
         minHeight: 244,
         height: '100%',
@@ -90,12 +100,23 @@ export function AppCard({
         position: 'relative',
         overflow: 'visible',
         p: 2.25,
+        border: '1px solid',
+        borderColor: 'divider',
         cursor: onCardClick ? 'pointer' : 'default',
-        transition: 'transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease',
+        transition: 'transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease, background-color 160ms ease',
         '&:hover': onCardClick
           ? {
               transform: 'translateY(-3px)',
+              borderColor: 'primary.main',
+              bgcolor: 'action.hover',
               boxShadow: 6,
+            }
+          : undefined,
+        '&:focus-visible': onCardClick
+          ? {
+              outline: '2px solid',
+              outlineColor: 'primary.main',
+              outlineOffset: 3,
             }
           : undefined,
       }}
