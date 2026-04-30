@@ -94,7 +94,7 @@ import type {
 } from '../shared/types';
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
-const backendBaseUrl = process.env.FORGER_BACKEND_URL ?? 'http://127.0.0.1:3300';
+const backendBaseUrl = process.env.FORGER_BACKEND_URL ?? (isDev ? 'http://127.0.0.1:3300' : 'https://platform.forger.cloud');
 let localCatalogJsonUrl: string | undefined;
 const DEFAULT_NODE_VERSION = '24';
 const DEFAULT_PYTHON_VERSION = '3.12';
