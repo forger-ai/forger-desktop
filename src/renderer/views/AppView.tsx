@@ -370,21 +370,6 @@ export function AppView({
           )}
         </Box>
       ) : null}
-      {!details.installed ? (
-        <Box
-          sx={{
-            border: '1px solid',
-            borderColor: 'divider',
-            minHeight: 220,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            bgcolor: 'background.paper',
-          }}
-        >
-          <Typography color="text.secondary">{t.appView.screenshotsPlaceholder}</Typography>
-        </Box>
-      ) : null}
     </Stack>
   );
 
@@ -405,7 +390,7 @@ export function AppView({
             startIcon={<StarRounded />}
             onClick={() => setReviewEditorOpen((open) => !open)}
           >
-            {reviewEditorOpen ? t.actions.close : t.appView.createEditReview}
+            {reviewEditorOpen ? t.actions.close : currentUserRating ? t.appView.editReview : t.appView.createReview}
           </Button>
         ) : (
           <Button variant="outlined" onClick={onOpenAccount}>{t.cloud.login}</Button>
