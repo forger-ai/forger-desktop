@@ -155,6 +155,8 @@ export function CatalogView({
                 categoryLabel={getCategoryLabel(app.category)}
                 description={meta.description}
                 beta={app.beta}
+                averageRating={app.averageRating}
+                ratingsCount={app.ratingsCount}
                 statusLabel={statusLabel}
                 statusColor={statusColor}
                 primaryAction={primaryAction}

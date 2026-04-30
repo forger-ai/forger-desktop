@@ -43,6 +43,7 @@ import type {
   AppCapability,
   AppCategory,
   AppDetails,
+  AppRatingSummary,
   AppExternalFolderSelection,
   AppCodexTaskStartInput,
   AppCodexConversationCreateInput,
@@ -76,11 +77,16 @@ import type {
   FilesMoveInput,
   FilesRenameCategoryInput,
   FilesRenameInput,
+  ForgerAccountLoginInput,
+  ForgerAccountRegisterInput,
+  ForgerAccountSession,
   InstallAppResult,
   OpenAppResult,
   RuntimeStatus,
   Settings,
   SharedFileRef,
+  SubmitAppFeedbackInput,
+  SubmitAppRatingInput,
   StopAppResult,
   UpdateAgentToolApprovalInput,
   UpdateUserSecretInput,
@@ -252,6 +258,7 @@ let mainWindow: BrowserWindow | null = null;
 let catalogApps: CatalogApp[] = [];
 let settings: Settings = structuredClone(settingsSeed);
 let registry: AppRegistry = { apps: {} };
+let forgerAccount: ForgerAccountSession & { token?: string } = { authenticated: false };
 const runningApps = new Map<string, RunningAppProcess>();
 const appWindows = new Map<string, BrowserWindow>();
 const stoppingApps = new Set<string>();
@@ -282,6 +289,7 @@ const getLegacyForgerMetadataRoot = () => path.join(getPrivateAppsRoot(), '.forg
 const getCodexRoot = () => path.join(app.getPath('userData'), 'codex-cli');
 const getCodexHome = () => path.join(app.getPath('userData'), 'codex-home');
 const getAgentToolSettingsPath = () => path.join(getForgerMetadataRoot(), 'agent-tools.json');
+const getForgerAccountPath = () => path.join(getForgerMetadataRoot(), 'account.json');
 
 const FORGER_TOOL_PACKAGE_ID = 'forger';
 
@@ -500,6 +508,58 @@ const loadAgentToolSettings = async (): Promise<void> => {
 const saveAgentToolSettings = async (): Promise<void> => {
   await fs.mkdir(path.dirname(getAgentToolSettingsPath()), { recursive: true });
   await fs.writeFile(getAgentToolSettingsPath(), JSON.stringify(agentToolSettings, null, 2), 'utf8');
+};
+
+const normalizeForgerAccountUser = (value: unknown): ForgerAccountSession['user'] => {
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const id = typeof record.id === 'number' ? record.id : Number(record.id);
+  const email = typeof record.email === 'string' ? record.email : '';
+  if (!Number.isFinite(id) || !email) {
+    return undefined;
+  }
+
+  return {
+    id,
+    email,
+    firstName: typeof record.first_name === 'string' ? record.first_name : typeof record.firstName === 'string' ? record.firstName : undefined,
+    lastName: typeof record.last_name === 'string' ? record.last_name : typeof record.lastName === 'string' ? record.lastName : undefined,
+    confirmed: Boolean(record.confirmed),
+  };
+};
+
+const publicForgerAccount = (): ForgerAccountSession => ({
+  authenticated: Boolean(forgerAccount.authenticated && forgerAccount.token),
+  confirmationRequired: forgerAccount.confirmationRequired,
+  user: forgerAccount.user,
+});
+
+const loadForgerAccount = async (): Promise<void> => {
+  try {
+    const raw = await fs.readFile(getForgerAccountPath(), 'utf8');
+    const parsed = JSON.parse(raw) as ForgerAccountSession & { token?: string };
+    const user = normalizeForgerAccountUser(parsed.user);
+    forgerAccount = {
+      authenticated: Boolean(parsed.authenticated && parsed.token && user),
+      confirmationRequired: Boolean(parsed.confirmationRequired),
+      token: typeof parsed.token === 'string' ? parsed.token : undefined,
+      user,
+    };
+  } catch {
+    forgerAccount = { authenticated: false };
+  }
+};
+
+const saveForgerAccount = async (): Promise<void> => {
+  await fs.mkdir(path.dirname(getForgerAccountPath()), { recursive: true });
+  await fs.writeFile(getForgerAccountPath(), JSON.stringify(forgerAccount, null, 2), 'utf8');
+};
+
+const clearForgerAccount = async (): Promise<void> => {
+  forgerAccount = { authenticated: false };
+  await fs.rm(getForgerAccountPath(), { force: true }).catch(() => undefined);
 };
 
 const updateAgentToolApproval = async (input: UpdateAgentToolApprovalInput): Promise<AgentToolSettings> => {
@@ -843,9 +903,13 @@ const toCatalogStatus = (slug: string): AppStatus => {
 };
 
 const buildHeaders = (): Record<string, string> => {
-  return {
+  const headers: Record<string, string> = {
     Accept: 'application/json',
   };
+  if (forgerAccount.token) {
+    headers.Authorization = `Bearer ${forgerAccount.token}`;
+  }
+  return headers;
 };
 
 const readJson = async <T>(response: Response): Promise<T | null> => {
@@ -860,6 +924,42 @@ const readJson = async <T>(response: Response): Promise<T | null> => {
   } catch {
     return null;
   }
+};
+
+const normalizeRating = (value: unknown): AppRatingSummary | undefined => {
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const user = record.user && typeof record.user === 'object' ? record.user as Record<string, unknown> : undefined;
+  return {
+    id: Number(record.id),
+    score: Number(record.score),
+    comment: typeof record.comment === 'string' ? record.comment : null,
+    forgerResponse: typeof record.forger_response === 'string' ? record.forger_response : null,
+    createdAt: typeof record.created_at === 'string' ? record.created_at : undefined,
+    updatedAt: typeof record.updated_at === 'string' ? record.updated_at : undefined,
+    user: user
+      ? {
+          firstName: typeof user.first_name === 'string' ? user.first_name : undefined,
+          lastInitial: typeof user.last_initial === 'string' ? user.last_initial : null,
+        }
+      : undefined,
+  };
+};
+
+const parseBackendAccount = (payload: unknown, token?: string): ForgerAccountSession & { token?: string } => {
+  if (!payload || typeof payload !== 'object') {
+    return { authenticated: false };
+  }
+  const record = payload as Record<string, unknown>;
+  const user = normalizeForgerAccountUser(record.user);
+  return {
+    authenticated: Boolean(record.authenticated && (token || forgerAccount.token) && user),
+    confirmationRequired: Boolean(record.confirmation_required ?? record.confirmationRequired),
+    token,
+    user,
+  };
 };
 
 const normalizeToken = (value: string | undefined): string => {
@@ -1393,48 +1493,36 @@ const listCatalogFromBackend = async (): Promise<CatalogApp[]> => {
     };
   };
 
-  try {
-    const publicResponse = await fetch(catalogJsonUrl, {
-      method: 'GET',
-      headers: {
-        Accept: 'application/json',
-      },
-    });
+  const mapCatalogItem = (appEntry: CatalogResponseItem | PublicCatalogResponseItem, includeDirectDownloadUrl: boolean): CatalogApp => {
+    const latestVersion = appEntry.latest_version;
+    const recentRatings = Array.isArray((appEntry as CatalogResponseItem).recent_ratings)
+      ? ((appEntry as CatalogResponseItem).recent_ratings ?? []).map(normalizeRating).filter((rating): rating is AppRatingSummary => Boolean(rating))
+      : [];
+    const currentUserRating = normalizeRating((appEntry as CatalogResponseItem).current_user_rating);
 
-    if (publicResponse.ok) {
-      const publicPayload = await readJson<PublicCatalogResponseItem[]>(publicResponse);
-      if (Array.isArray(publicPayload) && publicPayload.length > 0) {
-        return publicPayload.map((appEntry) => ({
-          id: appEntry.slug,
-          category: mapBackendCategory(appEntry.category),
-          status: toCatalogStatus(appEntry.slug),
-          name: appEntry.name,
-          description: appEntry.short_description ?? appEntry.description ?? '',
-          beta: Boolean(appEntry.beta),
-          latestVersion: appEntry.latest_version?.version,
-          requiredPythonVersion: appEntry.latest_version?.required_python_version ?? undefined,
-          requiredNodeVersion: appEntry.latest_version?.required_node_version ?? undefined,
-          checksumSha256: appEntry.latest_version?.checksum_sha256 ?? undefined,
-          downloadUrl: appEntry.latest_version?.download_url ?? undefined,
-          changelog: normalizeChangelog(appEntry.latest_version?.changelog, appEntry.latest_version?.version),
-          capabilities: normalizeCapabilities(appEntry.latest_version?.capabilities ?? appEntry.latest_version?.permissions),
-          version: appEntry.latest_version?.version,
-          userMessage: registry.apps[appEntry.slug]?.userMessage,
-        }));
-      }
-    }
-  } catch {
-    // Fallback to backend catalog API below.
-  }
-
-  const response = await fetch(`${backendBaseUrl}/api/v1/catalog/apps`, {
-    method: 'GET',
-    headers: buildHeaders(),
-  });
-
-  if (!response.ok) {
-    throw new Error(`catalog_request_failed_${response.status}`);
-  }
+    return {
+      id: appEntry.slug,
+      category: mapBackendCategory(appEntry.category),
+      status: toCatalogStatus(appEntry.slug),
+      name: appEntry.name,
+      description: appEntry.short_description ?? appEntry.description ?? '',
+      beta: Boolean(appEntry.beta),
+      latestVersionId: 'id' in (latestVersion ?? {}) ? (latestVersion as CatalogResponseItem['latest_version'])?.id : undefined,
+      latestVersion: latestVersion?.version,
+      requiredPythonVersion: latestVersion?.required_python_version ?? undefined,
+      requiredNodeVersion: latestVersion?.required_node_version ?? undefined,
+      checksumSha256: latestVersion?.checksum_sha256 ?? undefined,
+      downloadUrl: includeDirectDownloadUrl ? latestVersion?.download_url ?? undefined : undefined,
+      changelog: normalizeChangelog(latestVersion?.changelog, latestVersion?.version),
+      capabilities: normalizeCapabilities(latestVersion?.capabilities ?? latestVersion?.permissions),
+      version: latestVersion?.version,
+      userMessage: registry.apps[appEntry.slug]?.userMessage,
+      averageRating: (appEntry as CatalogResponseItem).average_rating ?? undefined,
+      ratingsCount: (appEntry as CatalogResponseItem).ratings_count ?? undefined,
+      recentRatings,
+      currentUserRating,
+    };
+  };
 
   type CatalogResponseItem = {
     slug: string;
@@ -1443,42 +1531,52 @@ const listCatalogFromBackend = async (): Promise<CatalogApp[]> => {
     description: string | null;
     category: string;
     beta?: boolean | null;
+    average_rating?: number | null;
+    ratings_count?: number | null;
+    recent_ratings?: unknown[];
+    current_user_rating?: unknown;
     latest_version?: {
       id: number;
       version: string;
       required_python_version?: string | null;
       required_node_version?: string | null;
       checksum_sha256?: string | null;
+      download_url?: string | null;
       changelog?: unknown;
       capabilities?: unknown;
       permissions?: unknown;
     };
   };
 
-  const payload = await readJson<CatalogResponseItem[]>(response);
-  if (!Array.isArray(payload)) {
+  try {
+    const response = await fetch(`${backendBaseUrl}/api/v1/catalog/apps`, {
+      method: 'GET',
+      headers: buildHeaders(),
+    });
+
+    if (response.ok) {
+      const payload = await readJson<CatalogResponseItem[]>(response);
+      if (Array.isArray(payload)) {
+        return payload.map((appEntry) => mapCatalogItem(appEntry, false));
+      }
+    }
+  } catch {
+    // Fallback to static catalog below.
+  }
+
+  const publicResponse = await fetch(catalogJsonUrl, {
+    method: 'GET',
+    headers: {
+      Accept: 'application/json',
+    },
+  });
+
+  if (!publicResponse.ok) {
     return [];
   }
 
-  return payload.map((appEntry) => {
-    return {
-      id: appEntry.slug,
-      category: mapBackendCategory(appEntry.category),
-      status: toCatalogStatus(appEntry.slug),
-      name: appEntry.name,
-      description: appEntry.short_description ?? appEntry.description ?? '',
-      beta: Boolean(appEntry.beta),
-      latestVersionId: appEntry.latest_version?.id,
-      latestVersion: appEntry.latest_version?.version,
-      requiredPythonVersion: appEntry.latest_version?.required_python_version ?? undefined,
-      requiredNodeVersion: appEntry.latest_version?.required_node_version ?? undefined,
-      checksumSha256: appEntry.latest_version?.checksum_sha256 ?? undefined,
-      changelog: normalizeChangelog(appEntry.latest_version?.changelog, appEntry.latest_version?.version),
-      capabilities: normalizeCapabilities(appEntry.latest_version?.capabilities ?? appEntry.latest_version?.permissions),
-      version: appEntry.latest_version?.version,
-      userMessage: registry.apps[appEntry.slug]?.userMessage,
-    };
-  });
+  const publicPayload = await readJson<PublicCatalogResponseItem[]>(publicResponse);
+  return Array.isArray(publicPayload) ? publicPayload.map((appEntry) => mapCatalogItem(appEntry, true)) : [];
 };
 
 const startDevCatalogService = async (): Promise<void> => {
@@ -1505,6 +1603,129 @@ const startDevCatalogService = async (): Promise<void> => {
     });
     console.warn('Failed to start Forger dev catalog service', error);
   }
+};
+
+const registerForgerAccount = async (
+  input: ForgerAccountRegisterInput,
+): Promise<ForgerAccountSession & { success: boolean; userMessage?: string; technicalCode?: string }> => {
+  const response = await fetch(`${backendBaseUrl}/api/v1/users`, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      first_name: input.firstName,
+      last_name: input.lastName,
+      email: input.email,
+      password: input.password,
+      password_confirmation: input.password,
+      country: input.country,
+      age: input.age,
+      gender: input.gender,
+    }),
+  });
+  const payload = await readJson<Record<string, unknown>>(response);
+
+  if (!response.ok) {
+    return { success: false, authenticated: false, userMessage: 'No pudimos crear la cuenta.', technicalCode: `register_failed_${response.status}` };
+  }
+
+  return {
+    ...parseBackendAccount(payload),
+    success: true,
+    confirmationRequired: true,
+    userMessage: 'Cuenta creada. Revisa tu correo para confirmar tu cuenta.',
+  };
+};
+
+const loginForgerAccount = async (
+  input: ForgerAccountLoginInput,
+): Promise<ForgerAccountSession & { success: boolean; userMessage?: string; technicalCode?: string }> => {
+  const response = await fetch(`${backendBaseUrl}/api/v1/session`, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      email: input.email,
+      password: input.password,
+    }),
+  });
+  const payload = await readJson<Record<string, unknown>>(response);
+  const token = payload && typeof payload.token === 'string' ? payload.token : undefined;
+
+  if (!response.ok || !token) {
+    return {
+      success: false,
+      authenticated: false,
+      confirmationRequired: response.status === 403,
+      userMessage: response.status === 403 ? 'Confirma tu correo antes de iniciar sesion.' : 'No pudimos iniciar sesion.',
+      technicalCode: `login_failed_${response.status}`,
+    };
+  }
+
+  forgerAccount = parseBackendAccount(payload, token);
+  await saveForgerAccount();
+  return { ...publicForgerAccount(), success: true, userMessage: 'Sesion iniciada.' };
+};
+
+const logoutForgerAccount = async (): Promise<ForgerAccountSession & { success: boolean }> => {
+  if (forgerAccount.token) {
+    await fetch(`${backendBaseUrl}/api/v1/session`, {
+      method: 'DELETE',
+      headers: buildHeaders(),
+    }).catch(() => undefined);
+  }
+  await clearForgerAccount();
+  return { ...publicForgerAccount(), success: true };
+};
+
+const submitAppRating = async (
+  input: SubmitAppRatingInput,
+): Promise<{ success: boolean; rating?: AppRatingSummary; userMessage?: string; technicalCode?: string }> => {
+  const response = await fetch(`${backendBaseUrl}/api/v1/catalog/apps/${encodeURIComponent(input.appId)}/rating`, {
+    method: 'PUT',
+    headers: {
+      ...buildHeaders(),
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      score: input.score,
+      comment: input.comment,
+    }),
+  });
+  const payload = await readJson<unknown>(response);
+  if (!response.ok) {
+    return {
+      success: false,
+      userMessage: response.status === 403 ? 'Confirma tu correo para publicar una review.' : 'No pudimos guardar tu review.',
+      technicalCode: `rating_failed_${response.status}`,
+    };
+  }
+  return { success: true, rating: normalizeRating(payload), userMessage: 'Review guardada.' };
+};
+
+const submitAppFeedback = async (
+  input: SubmitAppFeedbackInput,
+): Promise<{ success: boolean; userMessage?: string; technicalCode?: string }> => {
+  const response = await fetch(`${backendBaseUrl}/api/v1/catalog/apps/${encodeURIComponent(input.appId)}/feedbacks`, {
+    method: 'POST',
+    headers: {
+      ...buildHeaders(),
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      kind: input.kind,
+      body: input.body,
+    }),
+  });
+
+  if (!response.ok) {
+    return { success: false, userMessage: 'No pudimos enviar el feedback.', technicalCode: `feedback_failed_${response.status}` };
+  }
+  return { success: true, userMessage: 'Feedback enviado.' };
 };
 
 const loadRegistry = async (): Promise<void> => {
@@ -3147,7 +3368,15 @@ const getAppDetails = async (appId: string): Promise<AppDetails | null> => {
   const installed = registry.apps[appId];
   const catalog = catalogApps.find((entry) => entry.id === appId);
   const appEntry = installed
-    ? { ...toAppSummary(installed), capabilities: catalog?.capabilities }
+    ? {
+        ...catalog,
+        ...toAppSummary(installed),
+        capabilities: catalog?.capabilities,
+        averageRating: catalog?.averageRating,
+        ratingsCount: catalog?.ratingsCount,
+        recentRatings: catalog?.recentRatings,
+        currentUserRating: catalog?.currentUserRating,
+      }
     : catalog;
   if (!appEntry) {
     return null;
@@ -5048,6 +5277,28 @@ const registerIpcHandlers = (): void => {
   });
 
   ipcMain.handle(IPC_CHANNELS.getSettings, async () => settings);
+  ipcMain.handle(IPC_CHANNELS.getForgerAccount, async () => publicForgerAccount());
+  ipcMain.handle(IPC_CHANNELS.registerForgerAccount, async (_event, input: ForgerAccountRegisterInput) => {
+    return await registerForgerAccount(input);
+  });
+  ipcMain.handle(IPC_CHANNELS.loginForgerAccount, async (_event, input: ForgerAccountLoginInput) => {
+    const result = await loginForgerAccount(input);
+    catalogApps = await listCatalogFromBackend();
+    return result;
+  });
+  ipcMain.handle(IPC_CHANNELS.logoutForgerAccount, async () => {
+    const result = await logoutForgerAccount();
+    catalogApps = await listCatalogFromBackend();
+    return result;
+  });
+  ipcMain.handle(IPC_CHANNELS.submitAppRating, async (_event, input: SubmitAppRatingInput) => {
+    const result = await submitAppRating(input);
+    catalogApps = await listCatalogFromBackend();
+    return result;
+  });
+  ipcMain.handle(IPC_CHANNELS.submitAppFeedback, async (_event, input: SubmitAppFeedbackInput) => {
+    return await submitAppFeedback(input);
+  });
   ipcMain.handle(IPC_CHANNELS.getCodexAuthStatus, async () => await getCodexAuthStatus());
   ipcMain.handle(IPC_CHANNELS.openCodexUsageDashboard, async () => {
     try {
@@ -5422,6 +5673,7 @@ app.whenReady().then(async () => {
   await fs.mkdir(getCodexHome(), { recursive: true });
   secretsStore = new SecretsStore(app.getPath('userData'));
   await loadAgentToolSettings();
+  await loadForgerAccount();
   await loadRegistry();
   await startDevCatalogService();
   await startForgerMcpServer();

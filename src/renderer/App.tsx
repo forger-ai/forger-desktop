@@ -32,11 +32,15 @@ import type {
   CodexModelOption,
   CodexReasoningEffort,
   FilesListInput,
+  ForgerAccountRegisterInput,
+  ForgerAccountSession,
   ForgerFileCategory,
   ForgerFileRecord,
   PickedChatFile,
   Settings,
   SharedFileRef,
+  SubmitAppFeedbackInput,
+  SubmitAppRatingInput,
   UserSecretSummary,
 } from '@shared/types';
 import { AppShell } from '@renderer/components/AppShell';
@@ -104,6 +108,10 @@ const initialCodexAuthStatus: CodexAuthStatus = {
   authenticated: false,
   authFilePath: '',
   codexHome: '',
+};
+
+const initialForgerAccount: ForgerAccountSession = {
+  authenticated: false,
 };
 
 const initialAgentToolSettings: AgentToolSettings = {
@@ -290,6 +298,9 @@ function App() {
   const [agentToolBusyId, setAgentToolBusyId] = useState<AgentToolDefinition['id'] | null>(null);
   const [agentToolError, setAgentToolError] = useState<string | null>(null);
   const [cloudModalOpen, setCloudModalOpen] = useState(false);
+  const [forgerAccount, setForgerAccount] = useState<ForgerAccountSession>(initialForgerAccount);
+  const [forgerAccountBusy, setForgerAccountBusy] = useState(false);
+  const [forgerAccountMessage, setForgerAccountMessage] = useState<string | null>(null);
   const [codexConfigOpen, setCodexConfigOpen] = useState(false);
   const [selectedAppDetailsId, setSelectedAppDetailsId] = useState<string | null>(null);
   const [selectedAppDetails, setSelectedAppDetails] = useState<AppDetails | null>(null);
@@ -438,9 +449,10 @@ function App() {
   useEffect(() => {
     const loadData = async () => {
       const desktopApi = getDesktopApi();
-      const [appsResult, settingsResult, codexAuthResult, toolsResult, filesResult, categoriesResult, automationsResult] = await Promise.allSettled([
+      const [appsResult, settingsResult, accountResult, codexAuthResult, toolsResult, filesResult, categoriesResult, automationsResult] = await Promise.allSettled([
         refreshApps(),
         desktopApi.getSettings(),
+        desktopApi.getForgerAccount(),
         desktopApi.getCodexAuthStatus(),
         refreshAgentTools(),
         desktopApi.filesList(fileFilters),
@@ -455,6 +467,10 @@ function App() {
 
       if (settingsResult.status === 'fulfilled') {
         setSettings(settingsResult.value);
+      }
+
+      if (accountResult.status === 'fulfilled') {
+        setForgerAccount(accountResult.value);
       }
 
       if (filesResult.status === 'fulfilled') {
@@ -1608,6 +1624,69 @@ function App() {
     }
   };
 
+  const handleForgerLogin = async (email: string, password: string) => {
+    setForgerAccountBusy(true);
+    try {
+      const result = await getDesktopApi().loginForgerAccount({ email, password });
+      setForgerAccount(result);
+      setForgerAccountMessage(result.userMessage ?? null);
+      setBannerSeverity(result.success ? 'success' : 'error');
+      setBannerMessage(result.userMessage ?? t.settings.authErrorFallback);
+      await refreshApps();
+    } catch {
+      setBannerSeverity('error');
+      setBannerMessage(t.settings.authErrorFallback);
+    } finally {
+      setForgerAccountBusy(false);
+    }
+  };
+
+  const handleForgerRegister = async (input: ForgerAccountRegisterInput) => {
+    setForgerAccountBusy(true);
+    try {
+      const result = await getDesktopApi().registerForgerAccount(input);
+      setForgerAccount(result);
+      setForgerAccountMessage(result.userMessage ?? null);
+      setBannerSeverity(result.success ? 'info' : 'error');
+      setBannerMessage(result.userMessage ?? t.settings.authErrorFallback);
+    } catch {
+      setBannerSeverity('error');
+      setBannerMessage(t.settings.authErrorFallback);
+    } finally {
+      setForgerAccountBusy(false);
+    }
+  };
+
+  const handleForgerLogout = async () => {
+    setForgerAccountBusy(true);
+    try {
+      const result = await getDesktopApi().logoutForgerAccount();
+      setForgerAccount(result);
+      setForgerAccountMessage(null);
+      await refreshApps();
+    } finally {
+      setForgerAccountBusy(false);
+    }
+  };
+
+  const handleSubmitRating = async (input: SubmitAppRatingInput) => {
+    const result = await getDesktopApi().submitAppRating(input);
+    setBannerSeverity(result.success ? 'success' : 'error');
+    setBannerMessage(result.userMessage ?? t.settings.authErrorFallback);
+    await refreshApps();
+    if (selectedAppDetailsId) {
+      setSelectedAppDetails(await getDesktopApi().getAppDetails(selectedAppDetailsId));
+    }
+    return result;
+  };
+
+  const handleSubmitFeedback = async (input: SubmitAppFeedbackInput) => {
+    const result = await getDesktopApi().submitAppFeedback(input);
+    setBannerSeverity(result.success ? 'success' : 'error');
+    setBannerMessage(result.userMessage ?? t.settings.authErrorFallback);
+    return result;
+  };
+
   const resolvedMode = resolveThemeMode(themePreference, prefersDark);
   const theme = useMemo(() => buildAppTheme(resolvedMode), [resolvedMode]);
 
@@ -1677,6 +1756,7 @@ function App() {
             categoryLabel={selectedAppDetails ? getCategoryLabel(selectedAppDetails.app.category) : ''}
             appSecretsState={appSecretsState}
             secretsBusy={secretsBusy}
+            account={forgerAccount}
             onBack={() => setCurrentView(appDetailsBackView)}
             onInstall={(appId) => void handleInstall(appId)}
             onUpdate={(appId) => void handleUpdate(appId)}
@@ -1687,6 +1767,9 @@ function App() {
             onConnectSecret={handleConnectSecret}
             onDisconnectSecret={handleDisconnectSecret}
             onDelete={(appId) => void handleDeleteApp(appId)}
+            onOpenAccount={() => setCloudModalOpen(true)}
+            onSubmitRating={handleSubmitRating}
+            onSubmitFeedback={handleSubmitFeedback}
           />
         ) : null}
 
@@ -1823,7 +1906,13 @@ function App() {
       <ForgerCloudModal
         open={cloudModalOpen}
         t={t}
+        account={forgerAccount}
+        busy={forgerAccountBusy}
+        message={forgerAccountMessage}
         onClose={() => setCloudModalOpen(false)}
+        onLogin={handleForgerLogin}
+        onRegister={handleForgerRegister}
+        onLogout={handleForgerLogout}
       />
 
       <CodexConfigModal

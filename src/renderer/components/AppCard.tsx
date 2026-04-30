@@ -4,6 +4,7 @@ import StopCircleRounded from '@mui/icons-material/StopCircleRounded';
 import ReplayRounded from '@mui/icons-material/ReplayRounded';
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
 import SystemUpdateAltRounded from '@mui/icons-material/SystemUpdateAltRounded';
+import StarRounded from '@mui/icons-material/StarRounded';
 import {
   Avatar,
   Box,
@@ -33,6 +34,8 @@ interface AppCardProps {
   tertiaryActionLabel?: string;
   onTertiaryAction?: () => void;
   beta?: boolean;
+  averageRating?: number;
+  ratingsCount?: number;
   onCardClick?: () => void;
 }
 
@@ -59,6 +62,8 @@ export function AppCard({
   tertiaryActionLabel,
   onTertiaryAction,
   beta = false,
+  averageRating,
+  ratingsCount = 0,
   onCardClick,
 }: AppCardProps) {
   const primaryIcon =
@@ -167,6 +172,18 @@ export function AppCard({
         <Typography variant="body2" color="text.secondary" sx={{ flex: 1 }}>
           {description}
         </Typography>
+
+        {averageRating ? (
+          <Stack direction="row" spacing={0.5} alignItems="center">
+            <StarRounded color="warning" fontSize="small" />
+            <Typography variant="body2" fontWeight={700}>
+              {averageRating.toFixed(1)}
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              ({ratingsCount.toLocaleString()})
+            </Typography>
+          </Stack>
+        ) : null}
 
         <Stack direction="row" spacing={1.25} sx={{ mt: 'auto' }}>
           <Button
