@@ -54,11 +54,22 @@ const flagFromCountryCode = (countryCode: string): string => {
     .join('');
 };
 
-const countryOptions = (() => {
+const getSupportedRegionCodes = (): string[] => {
   const intlWithSupportedValues = Intl as typeof Intl & { supportedValuesOf?: (key: string) => string[] };
-  const codes = typeof intlWithSupportedValues.supportedValuesOf === 'function'
-    ? intlWithSupportedValues.supportedValuesOf('region')
-    : FALLBACK_COUNTRY_CODES;
+
+  if (typeof intlWithSupportedValues.supportedValuesOf !== 'function') {
+    return FALLBACK_COUNTRY_CODES;
+  }
+
+  try {
+    return intlWithSupportedValues.supportedValuesOf('region');
+  } catch {
+    return FALLBACK_COUNTRY_CODES;
+  }
+};
+
+const countryOptions = (() => {
+  const codes = getSupportedRegionCodes();
   const displayNames = new Intl.DisplayNames([navigator.language], { type: 'region' });
 
   return codes
