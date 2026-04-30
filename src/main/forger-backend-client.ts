@@ -9,6 +9,7 @@ import type {
   SubmitAppFeedbackInput,
   SubmitAppRatingInput,
 } from '../shared/types';
+import { normalizeAppCapabilities } from '../shared/capabilities';
 import { normalizeForgerAccountUser, type StoredForgerAccount } from './forger-account-store';
 
 interface ClientOptions {
@@ -291,7 +292,7 @@ export class ForgerBackendClient {
       checksumSha256: latestVersion?.checksum_sha256 ?? undefined,
       downloadUrl: includeDirectDownloadUrl ? latestVersion?.download_url ?? undefined : undefined,
       changelog: this.normalizeChangelog(latestVersion?.changelog, latestVersion?.version),
-      capabilities: this.normalizeCapabilities(latestVersion?.capabilities ?? latestVersion?.permissions),
+      capabilities: normalizeAppCapabilities(latestVersion?.capabilities ?? latestVersion?.permissions),
       version: latestVersion?.version,
       userMessage: this.options.getUserMessage(appEntry.slug),
       averageRating: this.normalizeNumber(backendEntry.average_rating),
@@ -299,32 +300,6 @@ export class ForgerBackendClient {
       recentRatings,
       currentUserRating: this.normalizeRating(backendEntry.current_user_rating),
     };
-  }
-
-  private normalizeCapabilities(value: unknown): CatalogApp['capabilities'] {
-    if (!Array.isArray(value)) {
-      return undefined;
-    }
-
-    return value.map((entry) => {
-      if (typeof entry === 'string') {
-        return { id: entry, title: entry.replace(/_/g, ' ') };
-      }
-      if (!entry || typeof entry !== 'object') {
-        return null;
-      }
-      const record = entry as Record<string, unknown>;
-      const id = typeof record.id === 'string' ? record.id : typeof record.name === 'string' ? record.name : undefined;
-      const title = typeof record.title === 'string' ? record.title : id;
-      if (!id || !title) {
-        return null;
-      }
-      return {
-        id,
-        title,
-        description: typeof record.description === 'string' ? record.description : undefined,
-      };
-    }).filter((entry): entry is NonNullable<CatalogApp['capabilities']>[number] => Boolean(entry));
   }
 
   private normalizeNumber(value: unknown): number | undefined {

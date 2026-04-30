@@ -345,7 +345,7 @@ export const en = {
     installedVersion: 'Installed version',
     availableVersion: 'Available version',
     screenshotsPlaceholder: 'Screenshots and previews will appear here soon.',
-    capabilitiesTitle: 'This app can',
+    capabilitiesTitle: 'Forger access',
     promptTemplatesTitle: 'Codex prompts this app can run',
     historyTitle: 'Modification history',
     noHistory: 'No saved modifications for this app yet.',
