@@ -1,74 +1,24 @@
 import type { AppCapability } from './types';
 
-export const APP_CAPABILITY_DEFINITIONS = {
-  app_data: {
-    id: 'app_data',
-    title: 'Datos privados de la app',
-    description: 'Usa el almacenamiento local privado que Forger crea para esta app.',
-  },
-  local_app_data: {
-    id: 'local_app_data',
-    title: 'Datos privados de la app',
-    description: 'Usa el almacenamiento local privado que Forger crea para esta app.',
-  },
-  internal_workspace: {
-    id: 'internal_workspace',
-    title: 'Workspace privado',
-    description: 'Crea y edita archivos dentro del workspace privado de la app.',
-  },
-  local_finance_data: {
-    id: 'local_finance_data',
-    title: 'Datos financieros locales',
-    description: 'Guarda registros financieros en la base local privada de la app.',
-  },
-  local_recipe_data: {
-    id: 'local_recipe_data',
-    title: 'Datos locales de recetas',
-    description: 'Guarda recetas, ingredientes, menus y registros relacionados localmente.',
-  },
-  user_selected_imports: {
-    id: 'user_selected_imports',
-    title: 'Archivos seleccionados',
-    description: 'Lee archivos solo cuando el usuario los selecciona o comparte con la app.',
-  },
-  user_selected_folders: {
-    id: 'user_selected_folders',
-    title: 'Carpetas seleccionadas',
-    description: 'Lee carpetas solo cuando el usuario las selecciona o comparte con la app.',
-  },
-  app_exports: {
-    id: 'app_exports',
-    title: 'Archivos exportados',
-    description: 'Crea archivos cuando el usuario elige exportar o guardar resultados.',
-  },
-  ai_api: {
-    id: 'ai_api',
-    title: 'Servicio de IA',
-    description: 'Usa una credencial o servicio de IA configurado mediante Forger.',
-  },
-  ai_assisted_imports: {
-    id: 'ai_assisted_imports',
-    title: 'Importaciones asistidas por IA',
-    description: 'Usa asistencia de IA de Forger para procesar archivos seleccionados por el usuario.',
-  },
-  local_business_data: {
-    id: 'local_business_data',
-    title: 'Datos de negocio locales',
-    description: 'Guarda registros de negocio en la base local privada de la app.',
-  },
-  local_visual_assets: {
-    id: 'local_visual_assets',
-    title: 'Assets visuales locales',
-    description: 'Guarda proyectos, referencias de imagen y exports en el workspace privado de la app.',
-  },
-  agent_assisted_edits: {
-    id: 'agent_assisted_edits',
-    title: 'Ediciones asistidas por agente',
-    description: 'Permite a Forger aplicar cambios pedidos por el usuario dentro del workspace de la app.',
-  },
-} as const satisfies Record<string, AppCapability>;
+export const APP_CAPABILITY_IDS = [
+  'app_data',
+  'local_app_data',
+  'internal_workspace',
+  'local_finance_data',
+  'local_recipe_data',
+  'user_selected_imports',
+  'user_selected_folders',
+  'app_exports',
+  'ai_api',
+  'ai_assisted_imports',
+  'local_business_data',
+  'local_visual_assets',
+  'agent_assisted_edits',
+] as const;
 
-export type AppCapabilityId = keyof typeof APP_CAPABILITY_DEFINITIONS;
+export type AppCapabilityId = (typeof APP_CAPABILITY_IDS)[number];
+
+const APP_CAPABILITY_ID_SET = new Set<string>(APP_CAPABILITY_IDS);
 
 const CAPABILITY_ALIASES: Record<string, AppCapabilityId> = {
   employees_and_contracts: 'local_business_data',
@@ -110,7 +60,7 @@ export const normalizeAppCapabilityIds = (value: unknown): AppCapabilityId[] => 
       continue;
     }
     const id = (CAPABILITY_ALIASES[rawId] ?? rawId) as AppCapabilityId;
-    if (id in APP_CAPABILITY_DEFINITIONS) {
+    if (APP_CAPABILITY_ID_SET.has(id)) {
       ids.add(id);
     }
   }
@@ -118,5 +68,5 @@ export const normalizeAppCapabilityIds = (value: unknown): AppCapabilityId[] => 
 };
 
 export const normalizeAppCapabilities = (value: unknown): AppCapability[] => {
-  return normalizeAppCapabilityIds(value).map((id) => APP_CAPABILITY_DEFINITIONS[id]);
+  return normalizeAppCapabilityIds(value).map((id) => ({ id }));
 };

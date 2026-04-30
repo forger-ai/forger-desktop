@@ -25,7 +25,7 @@ export interface VersionChangelog {
 
 export interface AppCapability {
   id: string;
-  title: string;
+  title?: string;
   description?: string;
 }
 

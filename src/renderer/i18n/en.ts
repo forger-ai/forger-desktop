@@ -380,6 +380,60 @@ export const en = {
       other: 'Other',
     },
   },
+  appCapabilities: {
+    app_data: {
+      title: 'Private app data',
+      description: 'Uses the private local storage Forger creates for this app.',
+    },
+    local_app_data: {
+      title: 'Private app data',
+      description: 'Uses the private local storage Forger creates for this app.',
+    },
+    internal_workspace: {
+      title: 'Private workspace',
+      description: 'Creates and edits files inside the app private workspace.',
+    },
+    local_finance_data: {
+      title: 'Local finance data',
+      description: 'Stores finance records in the app private local database.',
+    },
+    local_recipe_data: {
+      title: 'Local recipe data',
+      description: 'Stores recipes, ingredients, menus, and related records locally.',
+    },
+    user_selected_imports: {
+      title: 'Selected files',
+      description: 'Reads files only after the user selects or shares them with the app.',
+    },
+    user_selected_folders: {
+      title: 'Selected folders',
+      description: 'Reads folders only after the user selects or shares them with the app.',
+    },
+    app_exports: {
+      title: 'Exported files',
+      description: 'Creates files when the user chooses to export or save output.',
+    },
+    ai_api: {
+      title: 'AI service',
+      description: 'Uses an AI credential or service configured through Forger.',
+    },
+    ai_assisted_imports: {
+      title: 'AI-assisted imports',
+      description: 'Uses Forger AI assistance to process files the user selected.',
+    },
+    local_business_data: {
+      title: 'Local business data',
+      description: 'Stores business records in the app private local database.',
+    },
+    local_visual_assets: {
+      title: 'Local visual assets',
+      description: 'Stores projects, image references, and exports in the app private workspace.',
+    },
+    agent_assisted_edits: {
+      title: 'Agent-assisted edits',
+      description: 'Allows Forger to make user-requested changes inside the app workspace.',
+    },
+  },
   status: {
     safeModeOn: 'Safe mode active',
     technicalDetailsOff: 'Technical details disabled',

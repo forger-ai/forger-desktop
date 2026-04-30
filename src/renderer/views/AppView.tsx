@@ -22,7 +22,7 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material';
-import type { AppDetails, AppSecretsState, ForgerAccountSession, SubmitAppFeedbackInput, SubmitAppRatingInput } from '@shared/types';
+import type { AppCapability, AppDetails, AppSecretsState, ForgerAccountSession, SubmitAppFeedbackInput, SubmitAppRatingInput } from '@shared/types';
 import type { AppDictionary } from '@renderer/i18n';
 import { AppSecretsPanel } from '@renderer/components/AppSecretsDialog';
 
@@ -120,6 +120,15 @@ export function AppView({
   const hasConflict = details.status === 'conflict';
   const isOpening = openingAppIds.has(appId);
   const capabilities = 'capabilities' in details.app ? details.app.capabilities ?? [] : [];
+  const capabilityTranslations = t.appCapabilities as Record<string, Pick<AppCapability, 'title' | 'description'> | undefined>;
+  const localizedCapabilities = capabilities.map((capability) => {
+    const localized = capabilityTranslations[capability.id];
+    return {
+      ...capability,
+      title: localized?.title ?? capability.title ?? capability.id,
+      description: localized?.description ?? capability.description,
+    };
+  });
   const averageRating = 'averageRating' in details.app ? details.app.averageRating : undefined;
   const ratingsCount = 'ratingsCount' in details.app ? details.app.ratingsCount ?? 0 : 0;
   const recentRatings = 'recentRatings' in details.app ? details.app.recentRatings ?? [] : [];
@@ -246,7 +255,7 @@ export function AppView({
           {details.app.description}
         </Typography>
       </Stack>
-      {capabilities.length > 0 ? (
+      {localizedCapabilities.length > 0 ? (
         <Stack spacing={1.5}>
           <Typography variant="h5">{t.appView.capabilitiesTitle}</Typography>
           <Box
@@ -259,7 +268,7 @@ export function AppView({
               },
             }}
           >
-            {capabilities.map((capability) => (
+            {localizedCapabilities.map((capability) => (
               <Box
                 key={capability.id}
                 sx={{
