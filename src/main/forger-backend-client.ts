@@ -33,8 +33,8 @@ interface PublicCatalogResponseItem {
 interface CatalogResponseItem extends PublicCatalogResponseItem {
   short_description: string | null;
   description: string | null;
-  average_rating?: number | null;
-  ratings_count?: number | null;
+  average_rating?: number | string | null;
+  ratings_count?: number | string | null;
   recent_ratings?: unknown[];
   current_user_rating?: unknown;
   latest_version?: CatalogVersionPayload & { id: number };
@@ -294,8 +294,8 @@ export class ForgerBackendClient {
       capabilities: this.normalizeCapabilities(latestVersion?.capabilities ?? latestVersion?.permissions),
       version: latestVersion?.version,
       userMessage: this.options.getUserMessage(appEntry.slug),
-      averageRating: backendEntry.average_rating ?? undefined,
-      ratingsCount: backendEntry.ratings_count ?? undefined,
+      averageRating: this.normalizeNumber(backendEntry.average_rating),
+      ratingsCount: this.normalizeNumber(backendEntry.ratings_count),
       recentRatings,
       currentUserRating: this.normalizeRating(backendEntry.current_user_rating),
     };
@@ -325,6 +325,17 @@ export class ForgerBackendClient {
         description: typeof record.description === 'string' ? record.description : undefined,
       };
     }).filter((entry): entry is NonNullable<CatalogApp['capabilities']>[number] => Boolean(entry));
+  }
+
+  private normalizeNumber(value: unknown): number | undefined {
+    if (typeof value === 'number') {
+      return Number.isFinite(value) ? value : undefined;
+    }
+    if (typeof value === 'string' && value.trim()) {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : undefined;
+    }
+    return undefined;
   }
 
   private normalizeChangelog(value: unknown, version?: string): CatalogApp['changelog'] {
