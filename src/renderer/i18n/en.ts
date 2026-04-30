@@ -320,6 +320,7 @@ export const en = {
     loginTab: 'Sign in',
     registerTab: 'Register',
     login: 'Sign in',
+    loginSuccess: 'Signed in successfully.',
     register: 'Create account',
     logout: 'Sign out',
     firstName: 'First name',

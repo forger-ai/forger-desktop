@@ -320,6 +320,7 @@ export const es = {
     loginTab: 'Iniciar sesión',
     registerTab: 'Registrarse',
     login: 'Iniciar sesión',
+    loginSuccess: 'Sesión iniciada con éxito.',
     register: 'Crear cuenta',
     logout: 'Cerrar sesión',
     firstName: 'Nombre',

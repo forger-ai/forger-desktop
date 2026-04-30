@@ -1629,9 +1629,12 @@ function App() {
     try {
       const result = await getDesktopApi().loginForgerAccount({ email, password });
       setForgerAccount(result);
-      setForgerAccountMessage(result.userMessage ?? null);
+      setForgerAccountMessage(result.success ? null : result.userMessage ?? null);
       setBannerSeverity(result.success ? 'success' : 'error');
-      setBannerMessage(result.userMessage ?? t.settings.authErrorFallback);
+      setBannerMessage(result.success ? t.cloud.loginSuccess : result.userMessage ?? t.settings.authErrorFallback);
+      if (result.success) {
+        setCloudModalOpen(false);
+      }
       await refreshApps();
     } catch {
       setBannerSeverity('error');
@@ -1707,6 +1710,9 @@ function App() {
         onSelectChatApp={handleSelectChatApp}
         onSelectDataApp={setSelectedDataAppId}
         onOpenCloudModal={() => setCloudModalOpen(true)}
+        account={forgerAccount}
+        accountBusy={forgerAccountBusy}
+        onLogout={() => void handleForgerLogout()}
       >
         {currentView === 'my-apps' ? (
           <InstalledAppsView

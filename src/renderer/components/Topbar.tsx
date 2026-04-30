@@ -2,13 +2,17 @@ import CloseRounded from '@mui/icons-material/CloseRounded';
 import CropSquareRounded from '@mui/icons-material/CropSquareRounded';
 import FilterNoneRounded from '@mui/icons-material/FilterNoneRounded';
 import KeyboardArrowDownRounded from '@mui/icons-material/KeyboardArrowDownRounded';
+import LogoutRounded from '@mui/icons-material/LogoutRounded';
 import MinimizeRounded from '@mui/icons-material/MinimizeRounded';
 import PersonRounded from '@mui/icons-material/PersonRounded';
 import {
   alpha,
   Avatar,
   Box,
+  Button,
+  Divider,
   IconButton,
+  Menu,
   MenuItem,
   Select,
   Stack,
@@ -16,8 +20,8 @@ import {
   Typography,
   useTheme,
 } from '@mui/material';
-import { useEffect, useState } from 'react';
-import type { AppSummary, WindowControlState } from '@shared/types';
+import { useEffect, useState, type MouseEvent } from 'react';
+import type { AppSummary, ForgerAccountSession, WindowControlState } from '@shared/types';
 import type { AppDictionary } from '@renderer/i18n';
 import type { View } from './Sidebar';
 
@@ -32,6 +36,9 @@ interface TopbarProps {
   onSelectChatApp: (appId: string | null) => void;
   onSelectDataApp: (appId: string | null) => void;
   onOpenCloudModal: () => void;
+  account: ForgerAccountSession;
+  accountBusy: boolean;
+  onLogout: () => void;
 }
 
 const initialsFromName = (name: string) =>
@@ -193,8 +200,29 @@ export function Topbar({
   onSelectChatApp,
   onSelectDataApp,
   onOpenCloudModal,
+  account,
+  accountBusy,
+  onLogout,
 }: TopbarProps) {
   const theme = useTheme();
+  const [accountAnchorEl, setAccountAnchorEl] = useState<HTMLElement | null>(null);
+  const accountMenuOpen = Boolean(accountAnchorEl);
+  const accountUser = account.authenticated ? account.user : null;
+  const accountName = accountUser?.firstName?.trim() || accountUser?.email.split('@')[0] || '';
+
+  const handleAccountClick = (event: MouseEvent<HTMLElement>) => {
+    if (accountUser) {
+      setAccountAnchorEl(event.currentTarget);
+      return;
+    }
+
+    onOpenCloudModal();
+  };
+
+  const handleLogout = () => {
+    setAccountAnchorEl(null);
+    onLogout();
+  };
 
   return (
     <Box
@@ -246,14 +274,59 @@ export function Topbar({
         <Stack direction="row" alignItems="center" spacing={1} sx={{ WebkitAppRegion: 'no-drag', flexShrink: 0 }}>
           <IconButton
             size="small"
-            onClick={onOpenCloudModal}
+            onClick={handleAccountClick}
             sx={{ p: 0.25 }}
             aria-label={t.cloud.openLabel}
+            aria-controls={accountMenuOpen ? 'forger-account-menu' : undefined}
+            aria-haspopup={accountUser ? 'menu' : undefined}
+            aria-expanded={accountMenuOpen ? 'true' : undefined}
           >
             <Avatar sx={{ width: 28, height: 28, bgcolor: 'primary.main', fontSize: 13, fontWeight: 600 }}>
-              <PersonRounded fontSize="small" />
+              {accountName ? accountName[0].toUpperCase() : <PersonRounded fontSize="small" />}
             </Avatar>
           </IconButton>
+          <Menu
+            id="forger-account-menu"
+            anchorEl={accountAnchorEl}
+            open={accountMenuOpen}
+            onClose={() => setAccountAnchorEl(null)}
+            anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+            transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+            slotProps={{
+              paper: {
+                sx: {
+                  mt: 1,
+                  width: 260,
+                  borderRadius: 1,
+                  border: '1px solid',
+                  borderColor: 'divider',
+                  boxShadow: theme.shadows[8],
+                },
+              },
+            }}
+          >
+            <Box sx={{ px: 2, pt: 1.5, pb: 1.25 }}>
+              <Typography variant="subtitle1" fontWeight={700} noWrap>
+                {accountName}
+              </Typography>
+              <Typography variant="body2" color="text.secondary" noWrap>
+                {accountUser?.email}
+              </Typography>
+            </Box>
+            <Divider />
+            <Box sx={{ px: 1, py: 1 }}>
+              <Button
+                color="inherit"
+                fullWidth
+                startIcon={<LogoutRounded />}
+                onClick={handleLogout}
+                disabled={accountBusy}
+                sx={{ justifyContent: 'flex-start' }}
+              >
+                {t.cloud.logout}
+              </Button>
+            </Box>
+          </Menu>
           <WindowControls t={t} />
         </Stack>
       </Stack>

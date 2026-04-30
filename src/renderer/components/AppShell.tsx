@@ -1,6 +1,6 @@
 import { Box } from '@mui/material';
 import type { ReactNode } from 'react';
-import type { AppSummary } from '@shared/types';
+import type { AppSummary, ForgerAccountSession } from '@shared/types';
 import type { AppDictionary } from '@renderer/i18n';
 import { Sidebar, type View } from './Sidebar';
 import { Topbar } from './Topbar';
@@ -17,6 +17,9 @@ interface AppShellProps {
   onSelectChatApp: (appId: string | null) => void;
   onSelectDataApp: (appId: string | null) => void;
   onOpenCloudModal: () => void;
+  account: ForgerAccountSession;
+  accountBusy: boolean;
+  onLogout: () => void;
   children: ReactNode;
 }
 
@@ -32,6 +35,9 @@ export function AppShell({
   onSelectChatApp,
   onSelectDataApp,
   onOpenCloudModal,
+  account,
+  accountBusy,
+  onLogout,
   children,
 }: AppShellProps) {
   return (
@@ -52,6 +58,9 @@ export function AppShell({
           onSelectChatApp={onSelectChatApp}
           onSelectDataApp={onSelectDataApp}
           onOpenCloudModal={onOpenCloudModal}
+          account={account}
+          accountBusy={accountBusy}
+          onLogout={onLogout}
         />
         <Box sx={{ p: 3, flex: 1, minHeight: 0, overflowY: 'auto', WebkitAppRegion: 'no-drag' }}>{children}</Box>
       </Box>
