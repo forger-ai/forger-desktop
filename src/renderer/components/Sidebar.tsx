@@ -58,7 +58,7 @@ export function Sidebar({ currentView, onNavigate, t }: SidebarProps) {
   const theme = useTheme();
   const [windowState, setWindowState] = useState<WindowControlState | null>(null);
   const shouldReserveMacTrafficLightSpace =
-    isMacOs && !windowState?.isMaximized && !windowState?.isFullScreen;
+    isMacOs && !windowState?.isFullScreen;
 
   useEffect(() => {
     if (!isMacOs) {

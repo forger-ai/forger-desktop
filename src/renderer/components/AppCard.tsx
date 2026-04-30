@@ -4,6 +4,7 @@ import StopCircleRounded from '@mui/icons-material/StopCircleRounded';
 import ReplayRounded from '@mui/icons-material/ReplayRounded';
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
 import SystemUpdateAltRounded from '@mui/icons-material/SystemUpdateAltRounded';
+import StarRounded from '@mui/icons-material/StarRounded';
 import {
   Avatar,
   Box,
@@ -33,6 +34,8 @@ interface AppCardProps {
   tertiaryActionLabel?: string;
   onTertiaryAction?: () => void;
   beta?: boolean;
+  averageRating?: number;
+  ratingsCount?: number;
   onCardClick?: () => void;
 }
 
@@ -59,6 +62,8 @@ export function AppCard({
   tertiaryActionLabel,
   onTertiaryAction,
   beta = false,
+  averageRating,
+  ratingsCount = 0,
   onCardClick,
 }: AppCardProps) {
   const primaryIcon =
@@ -77,6 +82,16 @@ export function AppCard({
   return (
     <Card
       onClick={onCardClick}
+      role={onCardClick ? 'button' : undefined}
+      tabIndex={onCardClick ? 0 : undefined}
+      onKeyDown={(event) => {
+        if (!onCardClick || (event.key !== 'Enter' && event.key !== ' ')) {
+          return;
+        }
+
+        event.preventDefault();
+        onCardClick();
+      }}
       sx={{
         minHeight: 244,
         height: '100%',
@@ -85,12 +100,23 @@ export function AppCard({
         position: 'relative',
         overflow: 'visible',
         p: 2.25,
+        border: '1px solid',
+        borderColor: 'divider',
         cursor: onCardClick ? 'pointer' : 'default',
-        transition: 'transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease',
+        transition: 'transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease, background-color 160ms ease',
         '&:hover': onCardClick
           ? {
               transform: 'translateY(-3px)',
+              borderColor: 'primary.main',
+              bgcolor: 'action.hover',
               boxShadow: 6,
+            }
+          : undefined,
+        '&:focus-visible': onCardClick
+          ? {
+              outline: '2px solid',
+              outlineColor: 'primary.main',
+              outlineOffset: 3,
             }
           : undefined,
       }}
@@ -167,6 +193,18 @@ export function AppCard({
         <Typography variant="body2" color="text.secondary" sx={{ flex: 1 }}>
           {description}
         </Typography>
+
+        {averageRating ? (
+          <Stack direction="row" spacing={0.5} alignItems="center">
+            <StarRounded color="warning" fontSize="small" />
+            <Typography variant="body2" fontWeight={700}>
+              {averageRating.toFixed(1)}
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              ({ratingsCount.toLocaleString()})
+            </Typography>
+          </Stack>
+        ) : null}
 
         <Stack direction="row" spacing={1.25} sx={{ mt: 'auto' }}>
           <Button

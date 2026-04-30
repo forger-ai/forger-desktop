@@ -25,7 +25,7 @@ export interface VersionChangelog {
 
 export interface AppCapability {
   id: string;
-  title: string;
+  title?: string;
   description?: string;
 }
 
@@ -58,6 +58,64 @@ export interface CatalogApp extends AppSummary {
   checksumSha256?: string;
   downloadUrl?: string;
   capabilities?: AppCapability[];
+  averageRating?: number;
+  ratingsCount?: number;
+  recentRatings?: AppRatingSummary[];
+  currentUserRating?: AppRatingSummary;
+}
+
+export interface ForgerAccountUser {
+  id: number;
+  email: string;
+  firstName?: string;
+  lastName?: string;
+  confirmed: boolean;
+}
+
+export interface ForgerAccountSession {
+  authenticated: boolean;
+  confirmationRequired?: boolean;
+  user?: ForgerAccountUser;
+}
+
+export interface ForgerAccountRegisterInput {
+  firstName: string;
+  lastName?: string;
+  email: string;
+  password: string;
+  country?: string;
+  age?: number;
+  gender?: 'male' | 'female' | 'other';
+}
+
+export interface ForgerAccountLoginInput {
+  email: string;
+  password: string;
+}
+
+export interface AppRatingSummary {
+  id: number;
+  score: number;
+  comment?: string | null;
+  forgerResponse?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+  user?: {
+    firstName?: string;
+    lastInitial?: string | null;
+  };
+}
+
+export interface SubmitAppRatingInput {
+  appId: string;
+  score: number;
+  comment?: string;
+}
+
+export interface SubmitAppFeedbackInput {
+  appId: string;
+  kind: 'bug' | 'idea' | 'support' | 'other';
+  body: string;
 }
 
 export interface Settings {
@@ -757,6 +815,13 @@ export interface ForgerDesktopApi {
   onInstallProgress: (listener: (event: { appId: string; progress: InstallAppResult }) => void) => () => void;
   onRuntimeStatusChanged: (listener: (event: RuntimeStatus) => void) => () => void;
   getSettings: () => Promise<Settings>;
+  getForgerAccount: () => Promise<ForgerAccountSession>;
+  registerForgerAccount: (input: ForgerAccountRegisterInput) => Promise<ForgerAccountSession & { success: boolean; userMessage?: string; technicalCode?: string }>;
+  loginForgerAccount: (input: ForgerAccountLoginInput) => Promise<ForgerAccountSession & { success: boolean; userMessage?: string; technicalCode?: string }>;
+  logoutForgerAccount: () => Promise<ForgerAccountSession & { success: boolean }>;
+  submitAppRating: (input: SubmitAppRatingInput) => Promise<{ success: boolean; rating?: AppRatingSummary; userMessage?: string; technicalCode?: string }>;
+  submitAppFeedback: (input: SubmitAppFeedbackInput) => Promise<{ success: boolean; userMessage?: string; technicalCode?: string }>;
+  openExternalUrl: (url: string) => Promise<{ success: boolean; userMessage?: string; technicalCode?: string }>;
   getCodexAuthStatus: () => Promise<CodexAuthStatus>;
   openCodexUsageDashboard: () => Promise<{ success: boolean; userMessage?: string; technicalCode?: string }>;
   connectCodexAuth: () => Promise<{ success: boolean; userMessage: string; technicalCode?: string }>;

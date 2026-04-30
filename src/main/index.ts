@@ -25,6 +25,8 @@ import { AppCodexConversationManager } from './app-codex-conversation-manager';
 import { AutomationManager } from './automation-manager';
 import { DevCatalogService } from './dev-catalog-service';
 import { FileLibrary } from './file-library';
+import { ForgerAccountStore, publicForgerAccount, type StoredForgerAccount } from './forger-account-store';
+import { ForgerBackendClient } from './forger-backend-client';
 import {
   FORGER_AGENT_CONTRACT_MARKER,
   FORGER_AGENT_CONTRACT_MARKER_PREFIX,
@@ -40,7 +42,6 @@ import type {
   AgentToolId,
   AgentToolPackageDefinition,
   AgentToolSettings,
-  AppCapability,
   AppCategory,
   AppDetails,
   AppExternalFolderSelection,
@@ -76,11 +77,15 @@ import type {
   FilesMoveInput,
   FilesRenameCategoryInput,
   FilesRenameInput,
+  ForgerAccountLoginInput,
+  ForgerAccountRegisterInput,
   InstallAppResult,
   OpenAppResult,
   RuntimeStatus,
   Settings,
   SharedFileRef,
+  SubmitAppFeedbackInput,
+  SubmitAppRatingInput,
   StopAppResult,
   UpdateAgentToolApprovalInput,
   UpdateUserSecretInput,
@@ -90,8 +95,7 @@ import type {
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 const backendBaseUrl = process.env.FORGER_BACKEND_URL ?? 'http://127.0.0.1:3300';
-let catalogJsonUrl =
-  process.env.FORGER_CATALOG_URL ?? 'https://forger-ai.github.io/apps-catalog/catalog.json';
+let localCatalogJsonUrl: string | undefined;
 const DEFAULT_NODE_VERSION = '24';
 const DEFAULT_PYTHON_VERSION = '3.12';
 const CODEX_CLI_VERSION = '0.125.0';
@@ -252,6 +256,9 @@ let mainWindow: BrowserWindow | null = null;
 let catalogApps: CatalogApp[] = [];
 let settings: Settings = structuredClone(settingsSeed);
 let registry: AppRegistry = { apps: {} };
+let forgerAccount: StoredForgerAccount = { authenticated: false };
+let forgerAccountStore: ForgerAccountStore | null = null;
+let forgerBackendClient: ForgerBackendClient | null = null;
 const runningApps = new Map<string, RunningAppProcess>();
 const appWindows = new Map<string, BrowserWindow>();
 const stoppingApps = new Set<string>();
@@ -282,6 +289,7 @@ const getLegacyForgerMetadataRoot = () => path.join(getPrivateAppsRoot(), '.forg
 const getCodexRoot = () => path.join(app.getPath('userData'), 'codex-cli');
 const getCodexHome = () => path.join(app.getPath('userData'), 'codex-home');
 const getAgentToolSettingsPath = () => path.join(getForgerMetadataRoot(), 'agent-tools.json');
+const getForgerAccountPath = () => path.join(getForgerMetadataRoot(), 'account.json');
 
 const FORGER_TOOL_PACKAGE_ID = 'forger';
 
@@ -656,32 +664,35 @@ const toAppSummary = (record: InstalledAppRecord): AppSummary => {
   const catalog = catalogApps.find((entry) => entry.id === record.appId);
   const latestVersion = catalog?.latestVersion;
   const updateAvailable = isVersionNewer(latestVersion, record.version);
+  const base = {
+    capabilities: catalog?.capabilities,
+    changelog: catalog?.changelog,
+    beta: catalog?.beta,
+  };
   if (running) {
     return {
+      ...base,
       id: record.appId,
-      name: record.name,
-      description: record.description,
-      category: record.category,
+      name: catalog?.name ?? record.name,
+      description: catalog?.description ?? record.description,
+      category: catalog?.category ?? record.category,
       version: record.version,
       latestVersion,
       updateAvailable,
-      changelog: catalog?.changelog,
-      beta: catalog?.beta,
       status: 'running',
       userMessage: 'En ejecucion',
     };
   }
 
   return {
+    ...base,
     id: record.appId,
-    name: record.name,
-    description: record.description,
-    category: record.category,
+    name: catalog?.name ?? record.name,
+    description: catalog?.description ?? record.description,
+    category: catalog?.category ?? record.category,
     version: record.version,
     latestVersion,
     updateAvailable,
-    changelog: catalog?.changelog,
-    beta: catalog?.beta,
     status: record.status,
     userMessage: record.userMessage,
   };
@@ -738,89 +749,6 @@ const normalizeChangelog = (value: unknown, version?: string): VersionChangelog 
   return undefined;
 };
 
-const CAPABILITY_LABELS: Record<string, AppCapability> = {
-  app_data: {
-    id: 'app_data',
-    title: 'Guardar datos locales',
-    description: 'Usa el espacio privado de la app para guardar estado y datos propios.',
-  },
-  local_app_data: {
-    id: 'local_app_data',
-    title: 'Guardar datos locales',
-    description: 'Usa el espacio privado de la app para guardar estado y datos propios.',
-  },
-  internal_workspace: {
-    id: 'internal_workspace',
-    title: 'Guardar un workspace privado',
-    description: 'Crea y edita archivos dentro del espacio local privado de la app.',
-  },
-  local_finance_data: {
-    id: 'local_finance_data',
-    title: 'Guardar tus finanzas localmente',
-    description: 'Mantiene movimientos, categorias y presupuestos en una base de datos local.',
-  },
-  local_recipe_data: {
-    id: 'local_recipe_data',
-    title: 'Guardar recetas localmente',
-    description: 'Mantiene recetas, ingredientes, costos y menus dentro del espacio local de la app.',
-  },
-  user_selected_imports: {
-    id: 'user_selected_imports',
-    title: 'Importar archivos que eliges',
-    description: 'Carga archivos seleccionados por ti para procesarlos dentro de la app.',
-  },
-  app_exports: {
-    id: 'app_exports',
-    title: 'Exportar informacion',
-    description: 'Puede crear archivos de salida cuando eliges guardar o exportar datos.',
-  },
-  ai_api: {
-    id: 'ai_api',
-    title: 'Usar una API de IA',
-    description: 'Puede usar una clave configurada por ti para funciones asistidas por IA.',
-  },
-  ai_assisted_imports: {
-    id: 'ai_assisted_imports',
-    title: 'Usar IA para leer documentos',
-    description: 'Puede usar una API key configurada por ti para extraer movimientos desde PDFs o imagenes.',
-  },
-  user_selected_folders: {
-    id: 'user_selected_folders',
-    title: 'Abrir carpetas que eliges',
-    description: 'Trabaja con carpetas seleccionadas explicitamente por ti.',
-  },
-};
-
-const normalizeCapabilities = (value: unknown): AppCapability[] => {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  return value.flatMap((item): AppCapability[] => {
-    if (typeof item === 'string') {
-      return [
-        CAPABILITY_LABELS[item] ?? {
-          id: item,
-          title: item.replace(/[_-]+/g, ' '),
-        },
-      ];
-    }
-    if (!item || typeof item !== 'object' || Array.isArray(item)) {
-      return [];
-    }
-    const record = item as Record<string, unknown>;
-    const id = typeof record.id === 'string' && record.id.trim() ? record.id.trim() : '';
-    const title = typeof record.title === 'string' && record.title.trim() ? record.title.trim() : id;
-    if (!id || !title) {
-      return [];
-    }
-    const description = typeof record.description === 'string' && record.description.trim()
-      ? record.description.trim()
-      : undefined;
-    return [{ id, title, description }];
-  });
-};
-
 const mapBackendCategory = (backendCategory: string): AppCategory => {
   switch (backendCategory) {
     case 'finance':
@@ -840,26 +768,6 @@ const toCatalogStatus = (slug: string): AppStatus => {
     return 'not_installed';
   }
   return runningApps.has(slug) ? 'running' : installed.status;
-};
-
-const buildHeaders = (): Record<string, string> => {
-  return {
-    Accept: 'application/json',
-  };
-};
-
-const readJson = async <T>(response: Response): Promise<T | null> => {
-  const raw = await response.text();
-
-  if (!raw) {
-    return null;
-  }
-
-  try {
-    return JSON.parse(raw) as T;
-  } catch {
-    return null;
-  }
 };
 
 const normalizeToken = (value: string | undefined): string => {
@@ -1374,111 +1282,7 @@ const getFileLibrary = (): FileLibrary => {
 };
 
 const listCatalogFromBackend = async (): Promise<CatalogApp[]> => {
-  type PublicCatalogResponseItem = {
-    slug: string;
-    name: string;
-    short_description?: string | null;
-    description?: string | null;
-    category: string;
-    beta?: boolean | null;
-    latest_version?: {
-      version?: string;
-      required_python_version?: string | null;
-      required_node_version?: string | null;
-      checksum_sha256?: string | null;
-      download_url?: string | null;
-      changelog?: unknown;
-      capabilities?: unknown;
-      permissions?: unknown;
-    };
-  };
-
-  try {
-    const publicResponse = await fetch(catalogJsonUrl, {
-      method: 'GET',
-      headers: {
-        Accept: 'application/json',
-      },
-    });
-
-    if (publicResponse.ok) {
-      const publicPayload = await readJson<PublicCatalogResponseItem[]>(publicResponse);
-      if (Array.isArray(publicPayload) && publicPayload.length > 0) {
-        return publicPayload.map((appEntry) => ({
-          id: appEntry.slug,
-          category: mapBackendCategory(appEntry.category),
-          status: toCatalogStatus(appEntry.slug),
-          name: appEntry.name,
-          description: appEntry.short_description ?? appEntry.description ?? '',
-          beta: Boolean(appEntry.beta),
-          latestVersion: appEntry.latest_version?.version,
-          requiredPythonVersion: appEntry.latest_version?.required_python_version ?? undefined,
-          requiredNodeVersion: appEntry.latest_version?.required_node_version ?? undefined,
-          checksumSha256: appEntry.latest_version?.checksum_sha256 ?? undefined,
-          downloadUrl: appEntry.latest_version?.download_url ?? undefined,
-          changelog: normalizeChangelog(appEntry.latest_version?.changelog, appEntry.latest_version?.version),
-          capabilities: normalizeCapabilities(appEntry.latest_version?.capabilities ?? appEntry.latest_version?.permissions),
-          version: appEntry.latest_version?.version,
-          userMessage: registry.apps[appEntry.slug]?.userMessage,
-        }));
-      }
-    }
-  } catch {
-    // Fallback to backend catalog API below.
-  }
-
-  const response = await fetch(`${backendBaseUrl}/api/v1/catalog/apps`, {
-    method: 'GET',
-    headers: buildHeaders(),
-  });
-
-  if (!response.ok) {
-    throw new Error(`catalog_request_failed_${response.status}`);
-  }
-
-  type CatalogResponseItem = {
-    slug: string;
-    name: string;
-    short_description: string | null;
-    description: string | null;
-    category: string;
-    beta?: boolean | null;
-    latest_version?: {
-      id: number;
-      version: string;
-      required_python_version?: string | null;
-      required_node_version?: string | null;
-      checksum_sha256?: string | null;
-      changelog?: unknown;
-      capabilities?: unknown;
-      permissions?: unknown;
-    };
-  };
-
-  const payload = await readJson<CatalogResponseItem[]>(response);
-  if (!Array.isArray(payload)) {
-    return [];
-  }
-
-  return payload.map((appEntry) => {
-    return {
-      id: appEntry.slug,
-      category: mapBackendCategory(appEntry.category),
-      status: toCatalogStatus(appEntry.slug),
-      name: appEntry.name,
-      description: appEntry.short_description ?? appEntry.description ?? '',
-      beta: Boolean(appEntry.beta),
-      latestVersionId: appEntry.latest_version?.id,
-      latestVersion: appEntry.latest_version?.version,
-      requiredPythonVersion: appEntry.latest_version?.required_python_version ?? undefined,
-      requiredNodeVersion: appEntry.latest_version?.required_node_version ?? undefined,
-      checksumSha256: appEntry.latest_version?.checksum_sha256 ?? undefined,
-      changelog: normalizeChangelog(appEntry.latest_version?.changelog, appEntry.latest_version?.version),
-      capabilities: normalizeCapabilities(appEntry.latest_version?.capabilities ?? appEntry.latest_version?.permissions),
-      version: appEntry.latest_version?.version,
-      userMessage: registry.apps[appEntry.slug]?.userMessage,
-    };
-  });
+  return forgerBackendClient ? await forgerBackendClient.listCatalogApps() : [];
 };
 
 const startDevCatalogService = async (): Promise<void> => {
@@ -1486,20 +1290,17 @@ const startDevCatalogService = async (): Promise<void> => {
     return;
   }
 
-  const upstreamCatalogUrl = catalogJsonUrl;
-  devCatalogService = new DevCatalogService(upstreamCatalogUrl);
+  devCatalogService = new DevCatalogService();
   try {
     await devCatalogService.start();
-    catalogJsonUrl = devCatalogService.url;
+    localCatalogJsonUrl = devCatalogService.url;
     await appendInstallLog('dev_catalog:start', {
-      catalogUrl: catalogJsonUrl,
-      upstreamCatalogUrl,
+      catalogUrl: localCatalogJsonUrl,
       localApps: process.env.FORGER_LOCAL_APPS,
     });
   } catch (error) {
     devCatalogService = null;
     await appendInstallLog('dev_catalog:failed', {
-      upstreamCatalogUrl,
       localApps: process.env.FORGER_LOCAL_APPS,
       error: serializeErrorForInstallLog(error),
     });
@@ -2554,45 +2355,19 @@ const disconnectCodexAuth = async (): Promise<{ success: boolean; userMessage: s
 const fetchDownloadBundle = async (
   appEntry: CatalogApp,
 ): Promise<{ zipPath: string; version: string; checksumSha256?: string }> => {
-  type DownloadPayload = {
-    download_url: string;
-    version: {
-      version: string;
-      checksum_sha256?: string | null;
-    };
-  };
-
   let downloadUrl = appEntry.downloadUrl;
   let resolvedVersion = appEntry.latestVersion;
   let expectedChecksum = appEntry.checksumSha256;
 
   if (!downloadUrl) {
-    if (!appEntry.latestVersionId) {
+    if (!appEntry.latestVersionId || !forgerBackendClient) {
       throw new Error('download_url_missing');
     }
 
-    const platform = resolvePlatformAlias();
-
-    const response = await fetch(`${backendBaseUrl}/api/v1/app_versions/${appEntry.latestVersionId}/download`, {
-      method: 'POST',
-      headers: {
-        ...buildHeaders(),
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        platform,
-        device_identifier: os.hostname(),
-      }),
+    const payload = await forgerBackendClient.requestDownload(appEntry.latestVersionId, {
+      platform: resolvePlatformAlias(),
+      deviceIdentifier: os.hostname(),
     });
-
-    if (!response.ok) {
-      throw new Error(`download_request_failed_${response.status}`);
-    }
-
-    const payload = await readJson<DownloadPayload>(response);
-    if (!payload?.download_url || !payload.version?.version) {
-      throw new Error('download_payload_invalid');
-    }
 
     downloadUrl = payload.download_url;
     resolvedVersion = payload.version.version;
@@ -3145,9 +2920,31 @@ const readOperationSummaries = async (appId: string): Promise<AppOperationSummar
 
 const getAppDetails = async (appId: string): Promise<AppDetails | null> => {
   const installed = registry.apps[appId];
-  const catalog = catalogApps.find((entry) => entry.id === appId);
+  let catalog = catalogApps.find((entry) => entry.id === appId);
+  if (!catalog) {
+    catalogApps = await listCatalogFromBackend();
+    ensureCatalogStatuses();
+    catalog = catalogApps.find((entry) => entry.id === appId);
+  }
+  const detailStatus: AppStatus | undefined = installed
+    ? runningApps.has(appId)
+      ? 'running'
+      : installed.status
+    : undefined;
   const appEntry = installed
-    ? { ...toAppSummary(installed), capabilities: catalog?.capabilities }
+    ? {
+        ...toAppSummary(installed),
+        ...catalog,
+        id: installed.appId,
+        status: detailStatus ?? installed.status,
+        version: installed.version,
+        userMessage: installed.userMessage,
+        updateAvailable: isVersionNewer(catalog?.latestVersion, installed.version),
+        averageRating: catalog?.averageRating,
+        ratingsCount: catalog?.ratingsCount,
+        recentRatings: catalog?.recentRatings,
+        currentUserRating: catalog?.currentUserRating,
+      }
     : catalog;
   if (!appEntry) {
     return null;
@@ -5048,6 +4845,56 @@ const registerIpcHandlers = (): void => {
   });
 
   ipcMain.handle(IPC_CHANNELS.getSettings, async () => settings);
+  ipcMain.handle(IPC_CHANNELS.getForgerAccount, async () => publicForgerAccount(forgerAccount));
+  ipcMain.handle(IPC_CHANNELS.registerForgerAccount, async (_event, input: ForgerAccountRegisterInput) => {
+    return forgerBackendClient
+      ? await forgerBackendClient.registerAccount(input)
+      : { success: false, authenticated: false, userMessage: 'No pudimos crear la cuenta.', technicalCode: 'backend_client_missing' };
+  });
+  ipcMain.handle(IPC_CHANNELS.loginForgerAccount, async (_event, input: ForgerAccountLoginInput) => {
+    const result = forgerBackendClient
+      ? await forgerBackendClient.loginAccount(input)
+      : { success: false, authenticated: false, userMessage: 'No pudimos iniciar sesion.', technicalCode: 'backend_client_missing' };
+    if (result.success) {
+      forgerAccount = result;
+      await forgerAccountStore?.save(forgerAccount);
+    }
+    catalogApps = await listCatalogFromBackend();
+    return { ...publicForgerAccount(forgerAccount), success: result.success, userMessage: result.userMessage, technicalCode: result.technicalCode };
+  });
+  ipcMain.handle(IPC_CHANNELS.logoutForgerAccount, async () => {
+    await forgerBackendClient?.logoutAccount();
+    forgerAccount = { authenticated: false };
+    await forgerAccountStore?.clear();
+    catalogApps = await listCatalogFromBackend();
+    return { ...publicForgerAccount(forgerAccount), success: true };
+  });
+  ipcMain.handle(IPC_CHANNELS.submitAppRating, async (_event, input: SubmitAppRatingInput) => {
+    const result = forgerBackendClient
+      ? await forgerBackendClient.submitAppRating(input)
+      : { success: false, userMessage: 'No pudimos guardar tu review.', technicalCode: 'backend_client_missing' };
+    catalogApps = await listCatalogFromBackend();
+    return result;
+  });
+  ipcMain.handle(IPC_CHANNELS.submitAppFeedback, async (_event, input: SubmitAppFeedbackInput) => {
+    return forgerBackendClient
+      ? await forgerBackendClient.submitAppFeedback(input)
+      : { success: false, userMessage: 'No pudimos enviar el feedback.', technicalCode: 'backend_client_missing' };
+  });
+  ipcMain.handle(IPC_CHANNELS.openExternalUrl, async (_event, targetUrl: string) => {
+    try {
+      const parsed = new URL(targetUrl);
+      if (parsed.protocol !== 'https:') {
+        return { success: false, userMessage: 'No pudimos abrir ese enlace.', technicalCode: 'unsupported_url_protocol' };
+      }
+
+      await shell.openExternal(parsed.toString());
+      return { success: true };
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : 'open_external_url_failed';
+      return { success: false, userMessage: 'No pudimos abrir ese enlace.', technicalCode: detail };
+    }
+  });
   ipcMain.handle(IPC_CHANNELS.getCodexAuthStatus, async () => await getCodexAuthStatus());
   ipcMain.handle(IPC_CHANNELS.openCodexUsageDashboard, async () => {
     try {
@@ -5422,8 +5269,18 @@ app.whenReady().then(async () => {
   await fs.mkdir(getCodexHome(), { recursive: true });
   secretsStore = new SecretsStore(app.getPath('userData'));
   await loadAgentToolSettings();
+  forgerAccountStore = new ForgerAccountStore(getForgerAccountPath());
+  forgerAccount = await forgerAccountStore.load();
   await loadRegistry();
   await startDevCatalogService();
+  forgerBackendClient = new ForgerBackendClient({
+    backendBaseUrl,
+    localCatalogJsonUrl: () => localCatalogJsonUrl,
+    token: () => forgerAccount.token,
+    mapBackendCategory,
+    toCatalogStatus,
+    getUserMessage: (slug) => registry.apps[slug]?.userMessage,
+  });
   await startForgerMcpServer();
   appMcpManager = new AppMcpManager();
   fileLibrary = new FileLibrary(getPrivateDataRoot(), getForgerMetadataRoot());

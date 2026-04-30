@@ -293,11 +293,6 @@ const sendNotFound = (response: ServerResponse): void => {
 
 export class DevCatalogService {
   private server: http.Server | null = null;
-  private readonly upstreamCatalogUrl: string;
-
-  constructor(upstreamCatalogUrl: string) {
-    this.upstreamCatalogUrl = upstreamCatalogUrl;
-  }
 
   get url(): string {
     return `http://${DEV_CATALOG_HOST}:${DEV_CATALOG_PORT}/catalog.json`;
@@ -342,16 +337,15 @@ export class DevCatalogService {
         const apps = await readLocalApps();
         sendJson(response, {
           ok: true,
-          upstream_catalog_url: this.upstreamCatalogUrl,
           local_apps: apps.map((app) => app.catalogSlug),
         });
         return;
       }
 
       if (requestUrl.pathname === '/catalog.json') {
-        const [prodCatalog, localApps] = await Promise.all([this.fetchProdCatalog(), readLocalApps()]);
+        const localApps = await readLocalApps();
         const localCatalog = await Promise.all(localApps.map((app) => toCatalogEntry(app, this.baseUrl())));
-        sendJson(response, [...prodCatalog, ...localCatalog]);
+        sendJson(response, localCatalog);
         return;
       }
 
@@ -365,22 +359,6 @@ export class DevCatalogService {
     } catch (error) {
       sendJson(response, { error: 'dev_catalog_error', detail: error instanceof Error ? error.message : String(error) }, 500);
     }
-  }
-
-  private async fetchProdCatalog(): Promise<JsonObject[]> {
-    const response = await fetch(this.upstreamCatalogUrl, {
-      method: 'GET',
-      headers: {
-        Accept: 'application/json',
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(`prod_catalog_request_failed_${response.status}`);
-    }
-
-    const payload = (await response.json()) as unknown;
-    return Array.isArray(payload) ? payload.filter(isRecord) : [];
   }
 
   private async handleDownload(catalogSlug: string, response: ServerResponse): Promise<void> {

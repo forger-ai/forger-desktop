@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import ArrowBackRounded from '@mui/icons-material/ArrowBackRounded';
 import AutoAwesomeRounded from '@mui/icons-material/AutoAwesomeRounded';
 import CheckCircleOutlineRounded from '@mui/icons-material/CheckCircleOutlineRounded';
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
 import DownloadRounded from '@mui/icons-material/DownloadRounded';
 import LaunchRounded from '@mui/icons-material/LaunchRounded';
+import StarRounded from '@mui/icons-material/StarRounded';
 import StopCircleRounded from '@mui/icons-material/StopCircleRounded';
 import SystemUpdateAltRounded from '@mui/icons-material/SystemUpdateAltRounded';
 import {
@@ -13,13 +14,16 @@ import {
   Button,
   Chip,
   CircularProgress,
+  MenuItem,
+  Rating,
   Stack,
   Tab,
   Tabs,
+  TextField,
   Tooltip,
   Typography,
 } from '@mui/material';
-import type { AppDetails, AppSecretsState } from '@shared/types';
+import type { AppCapability, AppDetails, AppSecretsState, ForgerAccountSession, SubmitAppFeedbackInput, SubmitAppRatingInput } from '@shared/types';
 import type { AppDictionary } from '@renderer/i18n';
 import { AppSecretsPanel } from '@renderer/components/AppSecretsDialog';
 
@@ -30,6 +34,7 @@ interface AppViewProps {
   categoryLabel: string;
   appSecretsState: AppSecretsState | null;
   secretsBusy: boolean;
+  account: ForgerAccountSession;
   onBack: () => void;
   onInstall: (appId: string) => void;
   onUpdate: (appId: string) => void;
@@ -40,6 +45,9 @@ interface AppViewProps {
   onConnectSecret: (appSecretName: string, userSecretId: string) => Promise<void>;
   onDisconnectSecret: (appSecretName: string) => Promise<void>;
   onDelete: (appId: string) => void;
+  onOpenAccount: () => void;
+  onSubmitRating: (input: SubmitAppRatingInput) => Promise<{ success: boolean }>;
+  onSubmitFeedback: (input: SubmitAppFeedbackInput) => Promise<{ success: boolean }>;
 }
 
 const initialsFromName = (name: string) =>
@@ -49,7 +57,7 @@ const initialsFromName = (name: string) =>
     .map((part) => part[0]?.toUpperCase() ?? '')
     .join('');
 
-type AppViewTab = 'general' | 'history' | 'updates' | 'secrets';
+type AppViewTab = 'general' | 'reviews' | 'history' | 'updates' | 'secrets';
 
 const DetailRow = ({ label, value }: { label: string; value: string }) => (
   <Stack spacing={0.25}>
@@ -67,6 +75,7 @@ export function AppView({
   categoryLabel,
   appSecretsState,
   secretsBusy,
+  account,
   onBack,
   onInstall,
   onUpdate,
@@ -77,8 +86,23 @@ export function AppView({
   onConnectSecret,
   onDisconnectSecret,
   onDelete,
+  onOpenAccount,
+  onSubmitRating,
+  onSubmitFeedback,
 }: AppViewProps) {
   const [activeTab, setActiveTab] = useState<AppViewTab>('general');
+  const currentUserRating = details?.app && 'currentUserRating' in details.app ? details.app.currentUserRating : undefined;
+  const [ratingScore, setRatingScore] = useState<number>(currentUserRating?.score ?? 5);
+  const [ratingComment, setRatingComment] = useState(currentUserRating?.comment ?? '');
+  const [feedbackKind, setFeedbackKind] = useState<SubmitAppFeedbackInput['kind']>('other');
+  const [feedbackBody, setFeedbackBody] = useState('');
+  const [reviewBusy, setReviewBusy] = useState(false);
+  const [reviewEditorOpen, setReviewEditorOpen] = useState(false);
+
+  useEffect(() => {
+    setRatingScore(currentUserRating?.score ?? 5);
+    setRatingComment(currentUserRating?.comment ?? '');
+  }, [currentUserRating?.comment, currentUserRating?.score]);
 
   if (!details) {
     return (
@@ -98,6 +122,18 @@ export function AppView({
   const hasConflict = details.status === 'conflict';
   const isOpening = openingAppIds.has(appId);
   const capabilities = 'capabilities' in details.app ? details.app.capabilities ?? [] : [];
+  const capabilityTranslations = t.appCapabilities as Record<string, Pick<AppCapability, 'title' | 'description'> | undefined>;
+  const localizedCapabilities = capabilities.map((capability) => {
+    const localized = capabilityTranslations[capability.id];
+    return {
+      ...capability,
+      title: localized?.title ?? capability.title ?? capability.id,
+      description: localized?.description ?? capability.description,
+    };
+  });
+  const averageRating = 'averageRating' in details.app ? details.app.averageRating : undefined;
+  const ratingsCount = 'ratingsCount' in details.app ? details.app.ratingsCount ?? 0 : 0;
+  const recentRatings = 'recentRatings' in details.app ? details.app.recentRatings ?? [] : [];
   const promptTemplates = details.promptTemplates ?? [];
 
   const actions = (
@@ -221,7 +257,7 @@ export function AppView({
           {details.app.description}
         </Typography>
       </Stack>
-      {capabilities.length > 0 ? (
+      {localizedCapabilities.length > 0 ? (
         <Stack spacing={1.5}>
           <Typography variant="h5">{t.appView.capabilitiesTitle}</Typography>
           <Box
@@ -234,7 +270,7 @@ export function AppView({
               },
             }}
           >
-            {capabilities.map((capability) => (
+            {localizedCapabilities.map((capability) => (
               <Box
                 key={capability.id}
                 sx={{
@@ -334,21 +370,140 @@ export function AppView({
           )}
         </Box>
       ) : null}
-      {!details.installed ? (
-        <Box
-          sx={{
-            border: '1px solid',
-            borderColor: 'divider',
-            minHeight: 220,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            bgcolor: 'background.paper',
-          }}
-        >
-          <Typography color="text.secondary">{t.appView.screenshotsPlaceholder}</Typography>
+    </Stack>
+  );
+
+  const reviewsContent = (
+    <Stack spacing={2.5}>
+      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems={{ xs: 'stretch', sm: 'center' }}>
+        <Stack spacing={0.5} sx={{ flex: 1, minWidth: 0 }}>
+          <Stack direction="row" spacing={1} alignItems="center">
+            <Rating value={averageRating ?? 0} precision={0.5} readOnly size="small" />
+            <Typography color="text.secondary">
+              {averageRating ? t.appView.ratingSummary(averageRating, ratingsCount) : t.appView.noRatings}
+            </Typography>
+          </Stack>
+        </Stack>
+        {account.authenticated && account.user?.confirmed ? (
+          <Button
+            variant={reviewEditorOpen ? 'outlined' : 'contained'}
+            startIcon={<StarRounded />}
+            onClick={() => setReviewEditorOpen((open) => !open)}
+          >
+            {reviewEditorOpen ? t.actions.close : currentUserRating ? t.appView.editReview : t.appView.createReview}
+          </Button>
+        ) : (
+          <Button variant="outlined" onClick={onOpenAccount}>{t.cloud.login}</Button>
+        )}
+      </Stack>
+
+      {account.authenticated && account.user?.confirmed && reviewEditorOpen ? (
+        <Box sx={{ border: '1px solid', borderColor: 'divider', p: 2, bgcolor: 'background.paper' }}>
+          <Stack spacing={1.5}>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems={{ xs: 'flex-start', sm: 'center' }}>
+              <Typography variant="body2" color="text.secondary">{t.appView.ratingLabel}</Typography>
+              <Rating
+                value={ratingScore}
+                onChange={(_event, value) => setRatingScore(value ?? ratingScore)}
+                max={5}
+                size="large"
+              />
+              <Typography fontWeight={700}>{ratingScore}/5</Typography>
+            </Stack>
+            <TextField
+              label={t.appView.reviewCommentLabel}
+              value={ratingComment}
+              onChange={(event) => setRatingComment(event.target.value)}
+              fullWidth
+              multiline
+              minRows={3}
+            />
+            <Button
+              variant="contained"
+              startIcon={<StarRounded />}
+              disabled={reviewBusy}
+              onClick={() => {
+                setReviewBusy(true);
+                void onSubmitRating({ appId, score: ratingScore, comment: ratingComment })
+                  .then((result) => {
+                    if (result.success) {
+                      setReviewEditorOpen(false);
+                    }
+                  })
+                  .finally(() => setReviewBusy(false));
+              }}
+              sx={{ alignSelf: 'flex-start' }}
+            >
+              {t.appView.saveReview}
+            </Button>
+          </Stack>
         </Box>
       ) : null}
+
+      {!account.authenticated || !account.user?.confirmed ? (
+        <Box sx={{ border: '1px solid', borderColor: 'divider', p: 1.5, bgcolor: 'background.paper' }}>
+          <Typography color="text.secondary">{t.appView.signInToReview}</Typography>
+        </Box>
+      ) : null}
+
+      {recentRatings.length > 0 ? (
+        <Stack spacing={1.25}>
+          {recentRatings.map((rating) => (
+            <Box
+              key={rating.id}
+              sx={{
+                border: '1px solid',
+                borderColor: 'divider',
+                bgcolor: 'background.paper',
+                p: 1.5,
+              }}
+            >
+              <Stack spacing={0.75}>
+                <Stack direction="row" spacing={1} alignItems="center" useFlexGap flexWrap="wrap">
+                  <Rating value={rating.score} readOnly size="small" />
+                  <Typography fontWeight={700}>{rating.user?.firstName ?? t.appView.reviewUserFallback}</Typography>
+                </Stack>
+                {rating.comment ? <Typography color="text.secondary">{rating.comment}</Typography> : null}
+                {rating.forgerResponse ? (
+                  <Box sx={{ borderLeft: '3px solid', borderColor: 'primary.main', pl: 1.25 }}>
+                    <Typography variant="body2" fontWeight={700}>{t.appView.forgerResponse}</Typography>
+                    <Typography variant="body2" color="text.secondary">{rating.forgerResponse}</Typography>
+                  </Box>
+                ) : null}
+              </Stack>
+            </Box>
+          ))}
+        </Stack>
+      ) : (
+        <Typography color="text.secondary">{t.appView.noRatings}</Typography>
+      )}
+
+      <Box sx={{ border: '1px solid', borderColor: 'divider', p: 2, bgcolor: 'background.paper' }}>
+        <Stack spacing={1.5}>
+          <Typography variant="h5">{t.appView.feedbackTitle}</Typography>
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.25}>
+            <TextField select label={t.appView.feedbackKind} value={feedbackKind} onChange={(event) => setFeedbackKind(event.target.value as SubmitAppFeedbackInput['kind'])} sx={{ minWidth: 170 }}>
+              <MenuItem value="bug">{t.appView.feedbackKinds.bug}</MenuItem>
+              <MenuItem value="idea">{t.appView.feedbackKinds.idea}</MenuItem>
+              <MenuItem value="support">{t.appView.feedbackKinds.support}</MenuItem>
+              <MenuItem value="other">{t.appView.feedbackKinds.other}</MenuItem>
+            </TextField>
+            <TextField label={t.appView.feedbackBody} value={feedbackBody} onChange={(event) => setFeedbackBody(event.target.value)} fullWidth multiline minRows={2} />
+          </Stack>
+          <Button
+            variant="outlined"
+            disabled={!feedbackBody.trim()}
+            onClick={() => {
+              const body = feedbackBody;
+              setFeedbackBody('');
+              void onSubmitFeedback({ appId, kind: feedbackKind, body });
+            }}
+            sx={{ alignSelf: 'flex-start' }}
+          >
+            {t.appView.sendFeedback}
+          </Button>
+        </Stack>
+      </Box>
     </Stack>
   );
 
@@ -371,6 +526,12 @@ export function AppView({
               label={details.installed ? (isRunning ? t.actions.running : hasConflict ? t.actions.conflict : hasError ? t.actions.error : details.updateAvailable && details.latestVersion ? t.appView.updateAvailable(details.latestVersion) : t.actions.installed) : t.actions.available}
             />
           </Stack>
+          <Stack direction="row" spacing={1} alignItems="center">
+            <Rating value={averageRating ?? 0} precision={0.5} readOnly size="small" />
+            <Typography variant="body2" color="text.secondary">
+              {averageRating ? t.appView.ratingSummary(averageRating, ratingsCount) : t.appView.noRatings}
+            </Typography>
+          </Stack>
           <Typography color="text.secondary" sx={{ maxWidth: 760 }}>
             {details.app.description}
           </Typography>
@@ -392,6 +553,7 @@ export function AppView({
           scrollButtons="auto"
         >
           <Tab value="general" label={t.appView.tabs.general} />
+          <Tab value="reviews" label={t.appView.tabs.reviews} />
           <Tab value="history" label={t.appView.tabs.history} />
           <Tab value="updates" label={t.appView.tabs.updates} />
           <Tab value="secrets" label={t.appView.tabs.secrets} />
@@ -401,6 +563,7 @@ export function AppView({
       {activeTab === 'general' ? (
         generalContent
       ) : null}
+      {activeTab === 'reviews' ? reviewsContent : null}
       {activeTab === 'history' ? historyContent : null}
       {activeTab === 'updates' ? updatesContent : null}
       {activeTab === 'secrets' ? secretsContent : null}
