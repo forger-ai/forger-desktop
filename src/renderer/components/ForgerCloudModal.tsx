@@ -7,6 +7,9 @@ import CloudSyncRounded from '@mui/icons-material/CloudSyncRounded';
 import FeedbackRounded from '@mui/icons-material/FeedbackRounded';
 import CloseRounded from '@mui/icons-material/CloseRounded';
 import OpenInNewRounded from '@mui/icons-material/OpenInNewRounded';
+import countries from 'i18n-iso-countries';
+import countriesEn from 'i18n-iso-countries/langs/en.json';
+import countriesEs from 'i18n-iso-countries/langs/es.json';
 import {
   Alert,
   Autocomplete,
@@ -40,35 +43,35 @@ interface ForgerCloudModalProps {
   message?: string | null;
   onClose: () => void;
   onLogin: (email: string, password: string) => Promise<void>;
-  onRegister: (input: ForgerAccountRegisterInput) => Promise<void>;
+  onRegister: (input: ForgerAccountRegisterInput) => Promise<boolean>;
   onLogout: () => Promise<void>;
 }
 
 type CloudModalMode = 'intro' | 'login' | 'register';
 
-const FALLBACK_COUNTRY_CODES = ['CL', 'US', 'AR', 'BR', 'MX', 'CO', 'PE', 'ES', 'UY', 'GB', 'CA'];
+countries.registerLocale(countriesEn);
+countries.registerLocale(countriesEs);
+
+const PRIORITY_COUNTRY_CODES = ['CL', 'PE', 'AR', 'CO', 'UY'];
+const SOUTH_AMERICA_COUNTRY_CODES = ['BO', 'BR', 'EC', 'FK', 'GF', 'GY', 'PY', 'SR', 'VE'];
 
 type CountryOption = {
   code: string;
   label: string;
 };
 
-const getSupportedRegionCodes = (): string[] => {
-  const intlWithSupportedValues = Intl as typeof Intl & { supportedValuesOf?: (key: string) => string[] };
-
-  if (typeof intlWithSupportedValues.supportedValuesOf !== 'function') {
-    return FALLBACK_COUNTRY_CODES;
+const countrySortGroup = (code: string): number => {
+  if (PRIORITY_COUNTRY_CODES.includes(code)) {
+    return 0;
   }
-
-  try {
-    return intlWithSupportedValues.supportedValuesOf('region');
-  } catch {
-    return FALLBACK_COUNTRY_CODES;
+  if (SOUTH_AMERICA_COUNTRY_CODES.includes(code)) {
+    return 1;
   }
+  return 2;
 };
 
 const countryOptions = (() => {
-  const codes = getSupportedRegionCodes();
+  const codes = Object.keys(countries.getAlpha2Codes());
   const displayNames = new Intl.DisplayNames([navigator.language], { type: 'region' });
 
   return codes
@@ -77,7 +80,19 @@ const countryOptions = (() => {
       code,
       label: displayNames.of(code) ?? code,
     }))
-    .sort((a, b) => a.label.localeCompare(b.label, navigator.language));
+    .sort((a, b) => {
+      const groupDifference = countrySortGroup(a.code) - countrySortGroup(b.code);
+      if (groupDifference !== 0) {
+        return groupDifference;
+      }
+
+      const priorityDifference = PRIORITY_COUNTRY_CODES.indexOf(a.code) - PRIORITY_COUNTRY_CODES.indexOf(b.code);
+      if (countrySortGroup(a.code) === 0 && priorityDifference !== 0) {
+        return priorityDifference;
+      }
+
+      return a.label.localeCompare(b.label, navigator.language);
+    });
 })();
 
 export function ForgerCloudModal({
@@ -111,8 +126,8 @@ export function ForgerCloudModal({
     void onLogin(email, password);
   };
 
-  const submitRegister = () => {
-    void onRegister({
+  const submitRegister = async () => {
+    const success = await onRegister({
       firstName,
       lastName,
       email,
@@ -121,6 +136,11 @@ export function ForgerCloudModal({
       age: age ? Number(age) : undefined,
       gender: gender || undefined,
     });
+
+    if (success) {
+      setPassword('');
+      setMode('login');
+    }
   };
 
   const openExternalLink = (url: string) => {

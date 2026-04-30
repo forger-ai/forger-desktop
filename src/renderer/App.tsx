@@ -1649,9 +1649,11 @@ function App() {
       setForgerAccountMessage(result.userMessage ?? null);
       setBannerSeverity(result.success ? 'info' : 'error');
       setBannerMessage(result.userMessage ?? t.settings.authErrorFallback);
+      return result.success;
     } catch {
       setBannerSeverity('error');
       setBannerMessage(t.settings.authErrorFallback);
+      return false;
     } finally {
       setForgerAccountBusy(false);
     }
