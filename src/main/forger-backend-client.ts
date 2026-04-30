@@ -141,6 +141,7 @@ export class ForgerBackendClient {
         country: input.country,
         age: input.age,
         gender: input.gender,
+        locale: input.locale,
       }),
     });
     const payload = await this.readJson<Record<string, unknown>>(response);
@@ -169,6 +170,7 @@ export class ForgerBackendClient {
       body: JSON.stringify({
         email: input.email,
         password: input.password,
+        locale: input.locale,
       }),
     });
     const payload = await this.readJson<Record<string, unknown>>(response);
@@ -210,6 +212,7 @@ export class ForgerBackendClient {
       body: JSON.stringify({
         score: input.score,
         comment: input.comment,
+        locale: input.locale,
       }),
     });
     const payload = await this.readJson<unknown>(response);
@@ -237,6 +240,7 @@ export class ForgerBackendClient {
       body: JSON.stringify({
         kind: input.kind,
         body: input.body,
+        locale: input.locale,
       }),
     });
 

@@ -86,11 +86,13 @@ export interface ForgerAccountRegisterInput {
   country?: string;
   age?: number;
   gender?: 'male' | 'female' | 'other';
+  locale?: string;
 }
 
 export interface ForgerAccountLoginInput {
   email: string;
   password: string;
+  locale?: string;
 }
 
 export interface AppRatingSummary {
@@ -110,12 +112,14 @@ export interface SubmitAppRatingInput {
   appId: string;
   score: number;
   comment?: string;
+  locale?: string;
 }
 
 export interface SubmitAppFeedbackInput {
   appId: string;
   kind: 'bug' | 'idea' | 'support' | 'other';
   body: string;
+  locale?: string;
 }
 
 export interface Settings {
