@@ -95,8 +95,7 @@ import type {
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 const backendBaseUrl = process.env.FORGER_BACKEND_URL ?? 'http://127.0.0.1:3300';
-let catalogJsonUrl =
-  process.env.FORGER_CATALOG_URL ?? 'https://forger-ai.github.io/apps-catalog/catalog.json';
+let localCatalogJsonUrl: string | undefined;
 const DEFAULT_NODE_VERSION = '24';
 const DEFAULT_PYTHON_VERSION = '3.12';
 const CODEX_CLI_VERSION = '0.125.0';
@@ -1291,20 +1290,17 @@ const startDevCatalogService = async (): Promise<void> => {
     return;
   }
 
-  const upstreamCatalogUrl = catalogJsonUrl;
-  devCatalogService = new DevCatalogService(upstreamCatalogUrl);
+  devCatalogService = new DevCatalogService();
   try {
     await devCatalogService.start();
-    catalogJsonUrl = devCatalogService.url;
+    localCatalogJsonUrl = devCatalogService.url;
     await appendInstallLog('dev_catalog:start', {
-      catalogUrl: catalogJsonUrl,
-      upstreamCatalogUrl,
+      catalogUrl: localCatalogJsonUrl,
       localApps: process.env.FORGER_LOCAL_APPS,
     });
   } catch (error) {
     devCatalogService = null;
     await appendInstallLog('dev_catalog:failed', {
-      upstreamCatalogUrl,
       localApps: process.env.FORGER_LOCAL_APPS,
       error: serializeErrorForInstallLog(error),
     });
@@ -5262,15 +5258,15 @@ app.whenReady().then(async () => {
   forgerAccountStore = new ForgerAccountStore(getForgerAccountPath());
   forgerAccount = await forgerAccountStore.load();
   await loadRegistry();
+  await startDevCatalogService();
   forgerBackendClient = new ForgerBackendClient({
     backendBaseUrl,
-    catalogJsonUrl: () => catalogJsonUrl,
+    localCatalogJsonUrl: () => localCatalogJsonUrl,
     token: () => forgerAccount.token,
     mapBackendCategory,
     toCatalogStatus,
     getUserMessage: (slug) => registry.apps[slug]?.userMessage,
   });
-  await startDevCatalogService();
   await startForgerMcpServer();
   appMcpManager = new AppMcpManager();
   fileLibrary = new FileLibrary(getPrivateDataRoot(), getForgerMetadataRoot());

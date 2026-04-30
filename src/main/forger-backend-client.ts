@@ -14,7 +14,7 @@ import { normalizeForgerAccountUser, type StoredForgerAccount } from './forger-a
 
 interface ClientOptions {
   backendBaseUrl: string;
-  catalogJsonUrl: () => string;
+  localCatalogJsonUrl: () => string | undefined;
   token: () => string | undefined;
   mapBackendCategory: (backendCategory: string) => AppCategory;
   toCatalogStatus: (slug: string) => AppStatus;
@@ -78,19 +78,24 @@ export class ForgerBackendClient {
         }
       }
     } catch {
-      // Fallback to static catalog below.
+      // Local dev catalog can still be used below.
     }
 
-    const publicApps = await this.listPublicCatalogApps().catch(() => []);
+    const localApps = await this.listLocalCatalogApps().catch(() => []);
     if (backendApps.length === 0) {
-      return publicApps;
+      return localApps;
     }
 
-    return this.mergeCatalogApps(backendApps, publicApps);
+    return this.mergeCatalogApps(backendApps, localApps);
   }
 
-  private async listPublicCatalogApps(): Promise<CatalogApp[]> {
-    const publicResponse = await fetch(this.options.catalogJsonUrl(), {
+  private async listLocalCatalogApps(): Promise<CatalogApp[]> {
+    const localCatalogJsonUrl = this.options.localCatalogJsonUrl();
+    if (!localCatalogJsonUrl) {
+      return [];
+    }
+
+    const publicResponse = await fetch(localCatalogJsonUrl, {
       method: 'GET',
       headers: {
         Accept: 'application/json',
