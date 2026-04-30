@@ -9,6 +9,7 @@ import CloseRounded from '@mui/icons-material/CloseRounded';
 import OpenInNewRounded from '@mui/icons-material/OpenInNewRounded';
 import {
   Alert,
+  Autocomplete,
   Avatar,
   Box,
   Button,
@@ -46,6 +47,11 @@ interface ForgerCloudModalProps {
 type CloudModalMode = 'intro' | 'login' | 'register';
 
 const FALLBACK_COUNTRY_CODES = ['CL', 'US', 'AR', 'BR', 'MX', 'CO', 'PE', 'ES', 'UY', 'GB', 'CA'];
+
+type CountryOption = {
+  code: string;
+  label: string;
+};
 
 const getSupportedRegionCodes = (): string[] => {
   const intlWithSupportedValues = Intl as typeof Intl & { supportedValuesOf?: (key: string) => string[] };
@@ -121,6 +127,8 @@ export function ForgerCloudModal({
     void window.forger.openExternalUrl(url);
   };
 
+  const selectedCountry = countryOptions.find((option) => option.code === country) ?? null;
+
   const renderCountryOption = (code: string, label: string) => (
     <Stack component="span" direction="row" spacing={1} alignItems="center">
       <Box
@@ -128,7 +136,7 @@ export function ForgerCloudModal({
         className={`fi fi-${code.toLowerCase()}`}
         sx={{ width: 22, height: 16, borderRadius: 0.25, boxShadow: '0 0 0 1px rgba(0,0,0,0.16)' }}
       />
-      <span>{label}</span>
+      <Box component="span" sx={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</Box>
     </Stack>
   );
 
@@ -141,7 +149,7 @@ export function ForgerCloudModal({
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
-      <DialogTitle sx={{ position: 'relative', px: 4, pt: 4, pb: 0.5 }}>
+      <DialogTitle sx={{ position: 'relative', px: 4, pt: 4, pb: 3 }}>
         <IconButton
           aria-label={t.actions.close}
           onClick={onClose}
@@ -156,18 +164,18 @@ export function ForgerCloudModal({
         >
           <CloseRounded fontSize="small" />
         </IconButton>
-        <Stack spacing={0.5} alignItems="center" textAlign="center">
-          <Stack direction="row" spacing={1} alignItems="center" justifyContent="center">
+        <Stack spacing={0.25} alignItems="center" textAlign="center">
+          <Stack direction="row" spacing={0.75} alignItems="center" justifyContent="center">
             <Box
               component="img"
               src={theme.palette.mode === 'dark' ? iconDark : iconLight}
               alt="Forger"
               sx={{ width: 32, height: 32 }}
             />
-            <Stack direction="row" spacing={0.5} alignItems="baseline">
+            <Stack direction="row" spacing={0.1} alignItems="baseline">
               <Typography
                 component="span"
-                sx={{ fontFamily: 'Poppins, sans-serif', fontSize: 25, fontWeight: 800, letterSpacing: '0.18em' }}
+                sx={{ fontFamily: 'Poppins, sans-serif', fontSize: 25, fontWeight: 800, letterSpacing: '0.1em' }}
               >
                 FORGER
               </Typography>
@@ -185,7 +193,7 @@ export function ForgerCloudModal({
           </Typography>
         </Stack>
       </DialogTitle>
-      <DialogContent sx={{ px: 4, pb: account.authenticated ? 2 : 3 }}>
+      <DialogContent sx={{ px: 4, pt: 0, pb: account.authenticated ? 2 : 3 }}>
         <Stack
           spacing={2}
           alignItems="center"
@@ -292,14 +300,28 @@ export function ForgerCloudModal({
                   <TextField label={t.settings.emailLabel} type="email" value={email} onChange={(event) => setEmail(event.target.value)} fullWidth />
                   <TextField label={t.settings.passwordLabel} type="password" value={password} onChange={(event) => setPassword(event.target.value)} fullWidth />
                   <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
-                    <TextField select label={t.cloud.country} value={country} onChange={(event) => setCountry(event.target.value)} fullWidth>
-                      <MenuItem value="">{t.cloud.countryAuto}</MenuItem>
-                      {countryOptions.map((option) => (
-                        <MenuItem key={option.code} value={option.code}>
+                    <Autocomplete<CountryOption>
+                      value={selectedCountry}
+                      options={countryOptions}
+                      autoHighlight
+                      clearOnEscape
+                      getOptionLabel={(option) => option.label}
+                      isOptionEqualToValue={(option, value) => option.code === value.code}
+                      onChange={(_event, option) => setCountry(option?.code ?? '')}
+                      renderOption={(props, option) => (
+                        <Box component="li" {...props} key={option.code}>
                           {renderCountryOption(option.code, option.label)}
-                        </MenuItem>
-                      ))}
-                    </TextField>
+                        </Box>
+                      )}
+                      renderInput={(params) => (
+                        <TextField
+                          {...params}
+                          label={t.cloud.country}
+                          placeholder={t.cloud.countryAuto}
+                        />
+                      )}
+                      fullWidth
+                    />
                     <TextField label={t.cloud.age} type="number" value={age} onChange={(event) => setAge(event.target.value)} fullWidth />
                   </Stack>
                   <TextField select label={t.cloud.gender} value={gender} onChange={(event) => setGender(event.target.value as ForgerAccountRegisterInput['gender'])} fullWidth>
