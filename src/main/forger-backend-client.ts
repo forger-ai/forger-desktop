@@ -64,6 +64,7 @@ export class ForgerBackendClient {
   constructor(private readonly options: ClientOptions) {}
 
   async listCatalogApps(): Promise<CatalogApp[]> {
+    let backendApps: CatalogApp[] = [];
     try {
       const response = await fetch(`${this.options.backendBaseUrl}/api/v1/catalog/apps`, {
         method: 'GET',
@@ -73,13 +74,22 @@ export class ForgerBackendClient {
       if (response.ok) {
         const payload = await this.readJson<CatalogResponseItem[]>(response);
         if (Array.isArray(payload)) {
-          return payload.map((appEntry) => this.mapCatalogItem(appEntry, false));
+          backendApps = payload.map((appEntry) => this.mapCatalogItem(appEntry, false));
         }
       }
     } catch {
       // Fallback to static catalog below.
     }
 
+    const publicApps = await this.listPublicCatalogApps().catch(() => []);
+    if (backendApps.length === 0) {
+      return publicApps;
+    }
+
+    return this.mergeCatalogApps(backendApps, publicApps);
+  }
+
+  private async listPublicCatalogApps(): Promise<CatalogApp[]> {
     const publicResponse = await fetch(this.options.catalogJsonUrl(), {
       method: 'GET',
       headers: {
@@ -93,6 +103,19 @@ export class ForgerBackendClient {
 
     const publicPayload = await this.readJson<PublicCatalogResponseItem[]>(publicResponse);
     return Array.isArray(publicPayload) ? publicPayload.map((appEntry) => this.mapCatalogItem(appEntry, true)) : [];
+  }
+
+  private mergeCatalogApps(primaryApps: CatalogApp[], secondaryApps: CatalogApp[]): CatalogApp[] {
+    const entries = new Map<string, CatalogApp>();
+    for (const app of primaryApps) {
+      entries.set(app.id, app);
+    }
+    for (const app of secondaryApps) {
+      if (!entries.has(app.id)) {
+        entries.set(app.id, app);
+      }
+    }
+    return Array.from(entries.values());
   }
 
   async registerAccount(
