@@ -15,6 +15,7 @@ import {
   Chip,
   CircularProgress,
   MenuItem,
+  Rating,
   Stack,
   Tab,
   Tabs,
@@ -56,7 +57,7 @@ const initialsFromName = (name: string) =>
     .map((part) => part[0]?.toUpperCase() ?? '')
     .join('');
 
-type AppViewTab = 'general' | 'history' | 'updates' | 'secrets';
+type AppViewTab = 'general' | 'reviews' | 'history' | 'updates' | 'secrets';
 
 const DetailRow = ({ label, value }: { label: string; value: string }) => (
   <Stack spacing={0.25}>
@@ -96,6 +97,7 @@ export function AppView({
   const [feedbackKind, setFeedbackKind] = useState<SubmitAppFeedbackInput['kind']>('other');
   const [feedbackBody, setFeedbackBody] = useState('');
   const [reviewBusy, setReviewBusy] = useState(false);
+  const [reviewEditorOpen, setReviewEditorOpen] = useState(false);
 
   useEffect(() => {
     setRatingScore(currentUserRating?.score ?? 5);
@@ -368,82 +370,131 @@ export function AppView({
           )}
         </Box>
       ) : null}
-      <Stack spacing={1.5}>
-        <Stack direction="row" spacing={1} alignItems="center">
-          <StarRounded color={averageRating ? 'warning' : 'disabled'} />
-          <Typography variant="h5">{t.appView.reviewsTitle}</Typography>
-          <Typography color="text.secondary">
-            {averageRating ? t.appView.ratingSummary(averageRating, ratingsCount) : t.appView.noRatings}
-          </Typography>
+      {!details.installed ? (
+        <Box
+          sx={{
+            border: '1px solid',
+            borderColor: 'divider',
+            minHeight: 220,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            bgcolor: 'background.paper',
+          }}
+        >
+          <Typography color="text.secondary">{t.appView.screenshotsPlaceholder}</Typography>
+        </Box>
+      ) : null}
+    </Stack>
+  );
+
+  const reviewsContent = (
+    <Stack spacing={2.5}>
+      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems={{ xs: 'stretch', sm: 'center' }}>
+        <Stack spacing={0.5} sx={{ flex: 1, minWidth: 0 }}>
+          <Stack direction="row" spacing={1} alignItems="center">
+            <Rating value={averageRating ?? 0} precision={0.5} readOnly size="small" />
+            <Typography color="text.secondary">
+              {averageRating ? t.appView.ratingSummary(averageRating, ratingsCount) : t.appView.noRatings}
+            </Typography>
+          </Stack>
         </Stack>
         {account.authenticated && account.user?.confirmed ? (
-          <Box sx={{ border: '1px solid', borderColor: 'divider', p: 1.5, bgcolor: 'background.paper' }}>
-            <Stack spacing={1.25}>
-              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.25}>
-                <TextField
-                  select
-                  label={t.appView.ratingLabel}
-                  value={ratingScore}
-                  onChange={(event) => setRatingScore(Number(event.target.value))}
-                  sx={{ minWidth: 140 }}
-                >
-                  {[1, 2, 3, 4, 5].map((score) => (
-                    <MenuItem key={score} value={score}>{score}</MenuItem>
-                  ))}
-                </TextField>
-                <TextField
-                  label={t.appView.reviewCommentLabel}
-                  value={ratingComment}
-                  onChange={(event) => setRatingComment(event.target.value)}
-                  fullWidth
-                  multiline
-                  minRows={2}
-                />
-              </Stack>
-              <Button
-                variant="contained"
-                startIcon={<StarRounded />}
-                disabled={reviewBusy}
-                onClick={() => {
-                  setReviewBusy(true);
-                  void onSubmitRating({ appId, score: ratingScore, comment: ratingComment }).finally(() => setReviewBusy(false));
-                }}
-                sx={{ alignSelf: 'flex-start' }}
-              >
-                {t.appView.saveReview}
-              </Button>
-            </Stack>
-          </Box>
+          <Button
+            variant={reviewEditorOpen ? 'outlined' : 'contained'}
+            startIcon={<StarRounded />}
+            onClick={() => setReviewEditorOpen((open) => !open)}
+          >
+            {reviewEditorOpen ? t.actions.close : t.appView.createEditReview}
+          </Button>
         ) : (
-          <Box sx={{ border: '1px solid', borderColor: 'divider', p: 1.5, bgcolor: 'background.paper' }}>
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.25} alignItems={{ xs: 'stretch', sm: 'center' }}>
-              <Typography color="text.secondary" sx={{ flex: 1 }}>
-                {t.appView.signInToReview}
-              </Typography>
-              <Button variant="outlined" onClick={onOpenAccount}>{t.cloud.login}</Button>
-            </Stack>
-          </Box>
+          <Button variant="outlined" onClick={onOpenAccount}>{t.cloud.login}</Button>
         )}
-        {recentRatings.length > 0 ? (
-          <Stack spacing={1}>
-            {recentRatings.map((rating) => (
-              <Box key={rating.id} sx={{ borderLeft: '3px solid', borderColor: 'warning.main', pl: 1.5 }}>
-                <Typography fontWeight={700}>
-                  {rating.score}/5 · {rating.user?.firstName ?? t.appView.reviewUserFallback}
-                </Typography>
-                {rating.comment ? <Typography variant="body2" color="text.secondary">{rating.comment}</Typography> : null}
-                {rating.forgerResponse ? (
-                  <Typography variant="body2" sx={{ mt: 0.75 }}>
-                    {t.appView.forgerResponse}: {rating.forgerResponse}
-                  </Typography>
-                ) : null}
-              </Box>
-            ))}
-          </Stack>
-        ) : null}
       </Stack>
-      <Box sx={{ border: '1px solid', borderColor: 'divider', p: 1.5, bgcolor: 'background.paper' }}>
+
+      {account.authenticated && account.user?.confirmed && reviewEditorOpen ? (
+        <Box sx={{ border: '1px solid', borderColor: 'divider', p: 2, bgcolor: 'background.paper' }}>
+          <Stack spacing={1.5}>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems={{ xs: 'flex-start', sm: 'center' }}>
+              <Typography variant="body2" color="text.secondary">{t.appView.ratingLabel}</Typography>
+              <Rating
+                value={ratingScore}
+                onChange={(_event, value) => setRatingScore(value ?? ratingScore)}
+                max={5}
+                size="large"
+              />
+              <Typography fontWeight={700}>{ratingScore}/5</Typography>
+            </Stack>
+            <TextField
+              label={t.appView.reviewCommentLabel}
+              value={ratingComment}
+              onChange={(event) => setRatingComment(event.target.value)}
+              fullWidth
+              multiline
+              minRows={3}
+            />
+            <Button
+              variant="contained"
+              startIcon={<StarRounded />}
+              disabled={reviewBusy}
+              onClick={() => {
+                setReviewBusy(true);
+                void onSubmitRating({ appId, score: ratingScore, comment: ratingComment })
+                  .then((result) => {
+                    if (result.success) {
+                      setReviewEditorOpen(false);
+                    }
+                  })
+                  .finally(() => setReviewBusy(false));
+              }}
+              sx={{ alignSelf: 'flex-start' }}
+            >
+              {t.appView.saveReview}
+            </Button>
+          </Stack>
+        </Box>
+      ) : null}
+
+      {!account.authenticated || !account.user?.confirmed ? (
+        <Box sx={{ border: '1px solid', borderColor: 'divider', p: 1.5, bgcolor: 'background.paper' }}>
+          <Typography color="text.secondary">{t.appView.signInToReview}</Typography>
+        </Box>
+      ) : null}
+
+      {recentRatings.length > 0 ? (
         <Stack spacing={1.25}>
+          {recentRatings.map((rating) => (
+            <Box
+              key={rating.id}
+              sx={{
+                border: '1px solid',
+                borderColor: 'divider',
+                bgcolor: 'background.paper',
+                p: 1.5,
+              }}
+            >
+              <Stack spacing={0.75}>
+                <Stack direction="row" spacing={1} alignItems="center" useFlexGap flexWrap="wrap">
+                  <Rating value={rating.score} readOnly size="small" />
+                  <Typography fontWeight={700}>{rating.user?.firstName ?? t.appView.reviewUserFallback}</Typography>
+                </Stack>
+                {rating.comment ? <Typography color="text.secondary">{rating.comment}</Typography> : null}
+                {rating.forgerResponse ? (
+                  <Box sx={{ borderLeft: '3px solid', borderColor: 'primary.main', pl: 1.25 }}>
+                    <Typography variant="body2" fontWeight={700}>{t.appView.forgerResponse}</Typography>
+                    <Typography variant="body2" color="text.secondary">{rating.forgerResponse}</Typography>
+                  </Box>
+                ) : null}
+              </Stack>
+            </Box>
+          ))}
+        </Stack>
+      ) : (
+        <Typography color="text.secondary">{t.appView.noRatings}</Typography>
+      )}
+
+      <Box sx={{ border: '1px solid', borderColor: 'divider', p: 2, bgcolor: 'background.paper' }}>
+        <Stack spacing={1.5}>
           <Typography variant="h5">{t.appView.feedbackTitle}</Typography>
           <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.25}>
             <TextField select label={t.appView.feedbackKind} value={feedbackKind} onChange={(event) => setFeedbackKind(event.target.value as SubmitAppFeedbackInput['kind'])} sx={{ minWidth: 170 }}>
@@ -468,21 +519,6 @@ export function AppView({
           </Button>
         </Stack>
       </Box>
-      {!details.installed ? (
-        <Box
-          sx={{
-            border: '1px solid',
-            borderColor: 'divider',
-            minHeight: 220,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            bgcolor: 'background.paper',
-          }}
-        >
-          <Typography color="text.secondary">{t.appView.screenshotsPlaceholder}</Typography>
-        </Box>
-      ) : null}
     </Stack>
   );
 
@@ -505,6 +541,12 @@ export function AppView({
               label={details.installed ? (isRunning ? t.actions.running : hasConflict ? t.actions.conflict : hasError ? t.actions.error : details.updateAvailable && details.latestVersion ? t.appView.updateAvailable(details.latestVersion) : t.actions.installed) : t.actions.available}
             />
           </Stack>
+          <Stack direction="row" spacing={1} alignItems="center">
+            <Rating value={averageRating ?? 0} precision={0.5} readOnly size="small" />
+            <Typography variant="body2" color="text.secondary">
+              {averageRating ? t.appView.ratingSummary(averageRating, ratingsCount) : t.appView.noRatings}
+            </Typography>
+          </Stack>
           <Typography color="text.secondary" sx={{ maxWidth: 760 }}>
             {details.app.description}
           </Typography>
@@ -526,6 +568,7 @@ export function AppView({
           scrollButtons="auto"
         >
           <Tab value="general" label={t.appView.tabs.general} />
+          <Tab value="reviews" label={t.appView.tabs.reviews} />
           <Tab value="history" label={t.appView.tabs.history} />
           <Tab value="updates" label={t.appView.tabs.updates} />
           <Tab value="secrets" label={t.appView.tabs.secrets} />
@@ -535,6 +578,7 @@ export function AppView({
       {activeTab === 'general' ? (
         generalContent
       ) : null}
+      {activeTab === 'reviews' ? reviewsContent : null}
       {activeTab === 'history' ? historyContent : null}
       {activeTab === 'updates' ? updatesContent : null}
       {activeTab === 'secrets' ? secretsContent : null}

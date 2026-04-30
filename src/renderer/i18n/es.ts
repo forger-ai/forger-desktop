@@ -333,6 +333,7 @@ export const es = {
     notFound: 'No encontramos esta app.',
     tabs: {
       general: 'General',
+      reviews: 'Reviews',
       history: 'Historial de cambios',
       updates: 'Actualizaciones',
       secrets: 'Secretos',
@@ -365,6 +366,7 @@ export const es = {
     noRatings: 'Sin reviews todavia',
     ratingLabel: 'Rating',
     reviewCommentLabel: 'Comentario',
+    createEditReview: 'Crear/editar review',
     saveReview: 'Guardar review',
     signInToReview: 'Inicia sesion con una cuenta confirmada para dejar tu review.',
     reviewUserFallback: 'Usuario',

@@ -665,32 +665,35 @@ const toAppSummary = (record: InstalledAppRecord): AppSummary => {
   const catalog = catalogApps.find((entry) => entry.id === record.appId);
   const latestVersion = catalog?.latestVersion;
   const updateAvailable = isVersionNewer(latestVersion, record.version);
+  const base = {
+    capabilities: catalog?.capabilities,
+    changelog: catalog?.changelog,
+    beta: catalog?.beta,
+  };
   if (running) {
     return {
+      ...base,
       id: record.appId,
-      name: record.name,
-      description: record.description,
-      category: record.category,
+      name: catalog?.name ?? record.name,
+      description: catalog?.description ?? record.description,
+      category: catalog?.category ?? record.category,
       version: record.version,
       latestVersion,
       updateAvailable,
-      changelog: catalog?.changelog,
-      beta: catalog?.beta,
       status: 'running',
       userMessage: 'En ejecucion',
     };
   }
 
   return {
+    ...base,
     id: record.appId,
-    name: record.name,
-    description: record.description,
-    category: record.category,
+    name: catalog?.name ?? record.name,
+    description: catalog?.description ?? record.description,
+    category: catalog?.category ?? record.category,
     version: record.version,
     latestVersion,
     updateAvailable,
-    changelog: catalog?.changelog,
-    beta: catalog?.beta,
     status: record.status,
     userMessage: record.userMessage,
   };
@@ -2921,12 +2924,26 @@ const readOperationSummaries = async (appId: string): Promise<AppOperationSummar
 
 const getAppDetails = async (appId: string): Promise<AppDetails | null> => {
   const installed = registry.apps[appId];
-  const catalog = catalogApps.find((entry) => entry.id === appId);
+  let catalog = catalogApps.find((entry) => entry.id === appId);
+  if (!catalog) {
+    catalogApps = await listCatalogFromBackend();
+    ensureCatalogStatuses();
+    catalog = catalogApps.find((entry) => entry.id === appId);
+  }
+  const detailStatus: AppStatus | undefined = installed
+    ? runningApps.has(appId)
+      ? 'running'
+      : installed.status
+    : undefined;
   const appEntry = installed
     ? {
-        ...catalog,
         ...toAppSummary(installed),
-        capabilities: catalog?.capabilities,
+        ...catalog,
+        id: installed.appId,
+        status: detailStatus ?? installed.status,
+        version: installed.version,
+        userMessage: installed.userMessage,
+        updateAvailable: isVersionNewer(catalog?.latestVersion, installed.version),
         averageRating: catalog?.averageRating,
         ratingsCount: catalog?.ratingsCount,
         recentRatings: catalog?.recentRatings,

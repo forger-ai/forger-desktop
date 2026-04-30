@@ -333,6 +333,7 @@ export const en = {
     notFound: 'We could not find this app.',
     tabs: {
       general: 'General',
+      reviews: 'Reviews',
       history: 'Change history',
       updates: 'Updates',
       secrets: 'Secrets',
@@ -365,6 +366,7 @@ export const en = {
     noRatings: 'No reviews yet',
     ratingLabel: 'Rating',
     reviewCommentLabel: 'Comment',
+    createEditReview: 'Create/edit review',
     saveReview: 'Save review',
     signInToReview: 'Sign in with a confirmed account to leave your review.',
     reviewUserFallback: 'User',
