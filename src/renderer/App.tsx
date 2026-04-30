@@ -1627,7 +1627,7 @@ function App() {
   const handleForgerLogin = async (email: string, password: string) => {
     setForgerAccountBusy(true);
     try {
-      const result = await getDesktopApi().loginForgerAccount({ email, password });
+      const result = await getDesktopApi().loginForgerAccount({ email, password, locale: t.locale });
       setForgerAccount(result);
       setForgerAccountMessage(result.success ? null : result.userMessage ?? null);
       setBannerSeverity(result.success ? 'success' : 'error');
@@ -1647,7 +1647,7 @@ function App() {
   const handleForgerRegister = async (input: ForgerAccountRegisterInput) => {
     setForgerAccountBusy(true);
     try {
-      const result = await getDesktopApi().registerForgerAccount(input);
+      const result = await getDesktopApi().registerForgerAccount({ ...input, locale: t.locale });
       setForgerAccount(result);
       setForgerAccountMessage(result.userMessage ?? null);
       setBannerSeverity(result.success ? 'info' : 'error');
@@ -1675,7 +1675,7 @@ function App() {
   };
 
   const handleSubmitRating = async (input: SubmitAppRatingInput) => {
-    const result = await getDesktopApi().submitAppRating(input);
+    const result = await getDesktopApi().submitAppRating({ ...input, locale: t.locale });
     setBannerSeverity(result.success ? 'success' : 'error');
     setBannerMessage(result.userMessage ?? t.settings.authErrorFallback);
     await refreshApps();
@@ -1686,7 +1686,7 @@ function App() {
   };
 
   const handleSubmitFeedback = async (input: SubmitAppFeedbackInput) => {
-    const result = await getDesktopApi().submitAppFeedback(input);
+    const result = await getDesktopApi().submitAppFeedback({ ...input, locale: t.locale });
     setBannerSeverity(result.success ? 'success' : 'error');
     setBannerMessage(result.userMessage ?? t.settings.authErrorFallback);
     return result;
