@@ -83,6 +83,8 @@ jobs:
   publish:
     needs: [validate, build]
     runs-on: ubuntu-latest
+    env:
+      PAGES_TOKEN: ${{ secrets.FORGER_PAGES_WORKFLOW_TOKEN }}
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -99,3 +101,19 @@ jobs:
           gh release view "$TAG_NAME" >/dev/null 2>&1 || gh release create "$TAG_NAME" --title "Forger Desktop v$VERSION" --notes "Forger Desktop v$VERSION"
           gh release upload "$TAG_NAME" release-artifacts/* --clobber
           gh release edit "$TAG_NAME" --latest
+
+      - name: Trigger Pages desktop metadata refresh
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          if [ -z "$PAGES_TOKEN" ]; then
+            echo "FORGER_PAGES_WORKFLOW_TOKEN is not configured; skipping Pages metadata refresh."
+            exit 0
+          fi
+          curl -fsSL \
+            -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $PAGES_TOKEN" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/forger-ai/forger-ai.github.io/dispatches \
+            -d "{\"event_type\":\"desktop-release\",\"client_payload\":{\"tag\":\"$TAG_NAME\"}}"

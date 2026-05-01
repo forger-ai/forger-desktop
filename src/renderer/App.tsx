@@ -31,6 +31,7 @@ import type {
   CodexAuthStatus,
   CodexModelOption,
   CodexReasoningEffort,
+  DesktopUpdateState,
   FilesListInput,
   ForgerAccountRegisterInput,
   ForgerAccountSession,
@@ -69,6 +70,7 @@ const CHAT_STORAGE_KEY = 'forger-chat-conversations-v1';
 const CODEX_MODEL_STORAGE_KEY = 'forger-codex-model-v1';
 const CODEX_REASONING_STORAGE_KEY = 'forger-codex-reasoning-effort-v1';
 const CHAT_BOT_PICTURE_STORAGE_KEY = 'forger-chat-bot-picture-v1';
+const STARTUP_UPDATE_CHECK_STORAGE_KEY = 'forger-desktop-startup-update-check-v1';
 const FORGER_DATA_ROOT_NAME = 'data';
 
 export type ChatBotPicture = 'bot' | 'female' | 'male';
@@ -112,6 +114,11 @@ const initialCodexAuthStatus: CodexAuthStatus = {
 
 const initialForgerAccount: ForgerAccountSession = {
   authenticated: false,
+};
+
+const initialDesktopUpdateState: DesktopUpdateState = {
+  status: 'idle',
+  currentVersion: '',
 };
 
 const initialAgentToolSettings: AgentToolSettings = {
@@ -301,6 +308,8 @@ function App() {
   const [forgerAccount, setForgerAccount] = useState<ForgerAccountSession>(initialForgerAccount);
   const [forgerAccountBusy, setForgerAccountBusy] = useState(false);
   const [forgerAccountMessage, setForgerAccountMessage] = useState<string | null>(null);
+  const [desktopUpdateState, setDesktopUpdateState] = useState<DesktopUpdateState>(initialDesktopUpdateState);
+  const [desktopUpdateBusy, setDesktopUpdateBusy] = useState(false);
   const [codexConfigOpen, setCodexConfigOpen] = useState(false);
   const [selectedAppDetailsId, setSelectedAppDetailsId] = useState<string | null>(null);
   const [selectedAppDetails, setSelectedAppDetails] = useState<AppDetails | null>(null);
@@ -357,7 +366,6 @@ function App() {
   const selectedAutomationIdRef = useRef<string | null>(null);
   const runConversationIdByRunRef = useRef<Map<string, string>>(new Map());
   const deliveredRunRepliesRef = useRef<Set<string>>(new Set());
-  const promptedUpdateAppIdsRef = useRef<Set<string>>(new Set());
   const [bannerMessage, setBannerMessage] = useState<string | null>(null);
   const [bannerSeverity, setBannerSeverity] = useState<AlertColor>('success');
   const [catalogFilter, setCatalogFilter] = useState<'all' | AppCategory>('all');
@@ -449,11 +457,22 @@ function App() {
   useEffect(() => {
     const loadData = async () => {
       const desktopApi = getDesktopApi();
-      const [appsResult, settingsResult, accountResult, codexAuthResult, toolsResult, filesResult, categoriesResult, automationsResult] = await Promise.allSettled([
+      const [
+        appsResult,
+        settingsResult,
+        accountResult,
+        codexAuthResult,
+        desktopUpdateResult,
+        toolsResult,
+        filesResult,
+        categoriesResult,
+        automationsResult,
+      ] = await Promise.allSettled([
         refreshApps(),
         desktopApi.getSettings(),
         desktopApi.getForgerAccount(),
         desktopApi.getCodexAuthStatus(),
+        desktopApi.getDesktopUpdateState(),
         refreshAgentTools(),
         desktopApi.filesList(fileFilters),
         desktopApi.filesListCategories(),
@@ -494,6 +513,26 @@ function App() {
         if (!codexAuthResult.value.authenticated) {
           setCodexConfigOpen(true);
         }
+      }
+
+      if (desktopUpdateResult.status === 'fulfilled') {
+        setDesktopUpdateState(desktopUpdateResult.value);
+      }
+
+      const today = new Date().toISOString().slice(0, 10);
+      const lastStartupCheck = window.localStorage.getItem(STARTUP_UPDATE_CHECK_STORAGE_KEY);
+      if (lastStartupCheck !== today) {
+        window.localStorage.setItem(STARTUP_UPDATE_CHECK_STORAGE_KEY, today);
+        void desktopApi.checkDesktopUpdates().then((state) => {
+          setDesktopUpdateState(state);
+          if (state.status === 'available' && state.availableVersion) {
+            setBannerSeverity('info');
+            setBannerMessage(t.settings.desktopStartupUpdateAvailable(state.availableVersion));
+          } else if (state.status === 'unsupported' && state.userMessage) {
+            setBannerSeverity('warning');
+            setBannerMessage(state.userMessage);
+          }
+        }).catch(() => undefined);
       }
 
       if (toolsResult.status === 'rejected') {
@@ -681,11 +720,16 @@ function App() {
       }
     });
 
+    const unsubscribeDesktopUpdate = desktopApi.onDesktopUpdateProgress((state) => {
+      setDesktopUpdateState(state);
+    });
+
     return () => {
       unsubscribeInstall();
       unsubscribeRuntime();
       unsubscribeChat();
       unsubscribeAutomation();
+      unsubscribeDesktopUpdate();
     };
   }, []);
 
@@ -958,6 +1002,23 @@ function App() {
     }
   };
 
+  const runDesktopUpdateAction = async (action: () => Promise<DesktopUpdateState>) => {
+    setDesktopUpdateBusy(true);
+    try {
+      const state = await action();
+      setDesktopUpdateState(state);
+      if (state.userMessage) {
+        setBannerSeverity(state.status === 'error' || state.status === 'unsupported' ? 'error' : 'info');
+        setBannerMessage(state.userMessage);
+      }
+    } catch (_error) {
+      setBannerSeverity('error');
+      setBannerMessage(t.settings.authErrorFallback);
+    } finally {
+      setDesktopUpdateBusy(false);
+    }
+  };
+
   const handleRestoreUserVersion = async (appId: string) => {
     const desktopApi = getDesktopApi();
     const result = await desktopApi.restoreAppUserVersion(appId);
@@ -982,24 +1043,6 @@ function App() {
     setBannerSeverity('info');
     setBannerMessage(t.actions.resolveWithForger);
   };
-
-  useEffect(() => {
-    const candidate = installedApps.find((appEntry) => appEntry.updateAvailable && appEntry.latestVersion && appEntry.status === 'installed');
-    if (!candidate || promptedUpdateAppIdsRef.current.has(`${candidate.id}:${candidate.latestVersion}`)) {
-      return;
-    }
-    const latestVersion = candidate.latestVersion;
-    if (!latestVersion) {
-      return;
-    }
-    promptedUpdateAppIdsRef.current.add(`${candidate.id}:${candidate.latestVersion}`);
-    const meta = getAppMeta(candidate.id);
-    const changes = candidate.changelog?.changes?.length ? `\n\n${candidate.changelog.changes.map((change) => `- ${change}`).join('\n')}` : `\n\n${t.appView.updateNoChangelog}`;
-    const confirmed = window.confirm(`${t.appView.updatePrompt(meta.name, latestVersion)}${changes}`);
-    if (confirmed) {
-      void handleUpdate(candidate.id);
-    }
-  }, [installedApps]);
 
   const handleOpen = async (appId: string) => {
     if (openingAppIdsRef.current.has(appId)) {
@@ -1910,6 +1953,11 @@ function App() {
             chatBotPictureOptions={CHAT_BOT_PICTURE_OPTIONS}
             onChatBotPictureChange={setChatBotPicture}
             onOpenCodexConfig={() => setCodexConfigOpen(true)}
+            desktopUpdateState={desktopUpdateState}
+            desktopUpdateBusy={desktopUpdateBusy}
+            onCheckDesktopUpdates={() => void runDesktopUpdateAction(() => getDesktopApi().checkDesktopUpdates())}
+            onDownloadDesktopUpdate={() => void runDesktopUpdateAction(() => getDesktopApi().downloadDesktopUpdate())}
+            onInstallDesktopUpdate={() => void runDesktopUpdateAction(() => getDesktopApi().installDesktopUpdate())}
           />
         ) : null}
       </AppShell>

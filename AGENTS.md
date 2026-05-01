@@ -84,6 +84,8 @@ This playbook applies when Forger detects a new published version of an already 
 - When refreshing `My Apps`, desktop also checks the published catalog.
 - If the catalog version is newer than the installed version, desktop shows an update-available notice.
 - If the catalog exposes a changelog, the notice shows the summary and visible changes for that version.
+- Opening the installed app remains available while an update is merely available.
+- The user can keep their current local version and skip an available update.
 - The update is not applied without user action.
 - Before updating, the app must be stopped and the user branch must be clean.
 - Before modifying files or database, desktop creates a verifiable backup of the installed app local database.
@@ -99,7 +101,7 @@ This playbook applies when Forger detects a new published version of an already 
 - Then it switches to `user-modified` and attempts to merge `main`.
 - If the automatic merge succeeds, the app remains installed on the new version with user customizations preserved.
 - If the merge fails, the app enters `conflict` state.
-- In `conflict` state, the app cannot be opened.
+- In `conflict` state, the app cannot be opened because an update attempt is partially applied.
 - In `conflict` state, the user can restore their previous version or ask Forger to resolve the conflict.
 - Restoring returns to the user state before the update attempt.
 - When resolving with the agent, the agent preserves as much as possible from the new version and from the user's customizations.

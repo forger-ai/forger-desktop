@@ -136,6 +136,7 @@ export function AppView({
   const ratingsCount = 'ratingsCount' in details.app ? details.app.ratingsCount ?? 0 : 0;
   const recentRatings = 'recentRatings' in details.app ? details.app.recentRatings ?? [] : [];
   const promptTemplates = details.promptTemplates ?? [];
+  const localChanges = details.localChanges ?? [];
 
   const actions = (
     <Stack direction="row" spacing={1.25} useFlexGap flexWrap="wrap">
@@ -156,20 +157,23 @@ export function AppView({
         <Button variant="contained" color="warning" startIcon={<StopCircleRounded />} onClick={() => onStop(appId)}>
           {t.actions.stop}
         </Button>
-      ) : details.updateAvailable ? (
-        <Button variant="contained" startIcon={<SystemUpdateAltRounded />} onClick={() => onUpdate(appId)}>
-          {t.actions.update}
-        </Button>
       ) : (
-        <Button
-          variant="contained"
-          startIcon={isOpening ? <CircularProgress color="inherit" size={16} /> : <LaunchRounded />}
-          disabled={isOpening}
-          aria-busy={isOpening}
-          onClick={() => onOpen(appId)}
-        >
-          {isOpening ? t.actions.opening : t.actions.open}
-        </Button>
+        <>
+          <Button
+            variant="contained"
+            startIcon={isOpening ? <CircularProgress color="inherit" size={16} /> : <LaunchRounded />}
+            disabled={isOpening}
+            aria-busy={isOpening}
+            onClick={() => onOpen(appId)}
+          >
+            {isOpening ? t.actions.opening : t.actions.open}
+          </Button>
+          {details.updateAvailable ? (
+            <Button variant="outlined" startIcon={<SystemUpdateAltRounded />} onClick={() => onUpdate(appId)}>
+              {t.actions.update}
+            </Button>
+          ) : null}
+        </>
       )}
       {details.installed ? (
         <Button variant="outlined" color="error" startIcon={<DeleteOutlineRounded />} onClick={() => onDelete(appId)}>
@@ -189,7 +193,7 @@ export function AppView({
   const historyContent = (
     <Stack spacing={1}>
       <Typography variant="h5">{t.appView.historyTitle}</Typography>
-      {details.operations.length === 0 ? (
+      {details.operations.length === 0 && localChanges.length === 0 ? (
         <Typography color="text.secondary">{t.appView.noHistory}</Typography>
       ) : (
         <Stack spacing={1.25}>
@@ -205,6 +209,21 @@ export function AppView({
           ))}
         </Stack>
       )}
+      {localChanges.length > 0 ? (
+        <Stack spacing={1.25}>
+          <Typography variant="h6">{t.appView.localChangesTitle}</Typography>
+          {localChanges.map((change) => (
+            <Box key={change.id} sx={{ borderLeft: '3px solid', borderColor: 'info.main', pl: 1.5 }}>
+              <Typography fontWeight={600}>{change.title}</Typography>
+              {change.createdAt ? (
+                <Typography variant="caption" color="text.secondary">
+                  {new Date(change.createdAt).toLocaleString()}
+                </Typography>
+              ) : null}
+            </Box>
+          ))}
+        </Stack>
+      ) : null}
     </Stack>
   );
 

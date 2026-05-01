@@ -130,7 +130,7 @@ export function CatalogView({
                   : isInstalled
                     ? 'success'
                     : 'default';
-            const primaryAction = hasError ? 'retry' : app.updateAvailable ? 'update' : isInstalled ? (app.status === 'running' ? 'stop' : 'open') : 'install';
+            const primaryAction = isConflict ? 'update' : hasError ? 'retry' : isInstalled ? (app.status === 'running' ? 'stop' : 'open') : 'install';
             const isOpening = primaryAction === 'open' && openingAppIds.has(app.id);
             const primaryActionLabel = hasError
               ? t.actions.retry
@@ -140,8 +140,6 @@ export function CatalogView({
                 ? t.actions.installing
               : isConflict
                 ? t.actions.resolveWithForger
-              : app.updateAvailable
-                ? t.actions.update
               : isInstalled
                 ? isOpening
                   ? t.actions.opening
@@ -180,10 +178,6 @@ export function CatalogView({
                     onStop(app.id);
                     return;
                   }
-                  if (app.updateAvailable) {
-                    onUpdate(app.id);
-                    return;
-                  }
                   if (isInstalled) {
                     onOpen(app.id);
                     return;
@@ -192,8 +186,14 @@ export function CatalogView({
                     onInstall(app.id);
                   }
                 }}
-                secondaryActionLabel={isConflict ? t.actions.restoreUserVersion : undefined}
-                onSecondaryAction={isConflict ? () => onRestoreUserVersion(app.id) : undefined}
+                secondaryActionLabel={isConflict ? t.actions.restoreUserVersion : app.updateAvailable ? t.actions.update : undefined}
+                onSecondaryAction={
+                  isConflict
+                    ? () => onRestoreUserVersion(app.id)
+                    : app.updateAvailable
+                      ? () => onUpdate(app.id)
+                      : undefined
+                }
                 tertiaryActionLabel={isInstalled && !isInstalling ? t.actions.uninstall : undefined}
                 onTertiaryAction={isInstalled && !isInstalling ? () => onDelete(app.id) : undefined}
                 onCardClick={() => onDetails(app.id)}
