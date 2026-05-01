@@ -27,6 +27,7 @@ interface PublicCatalogResponseItem {
   short_description?: string | null;
   description?: string | null;
   category: string;
+  icon_url?: string | null;
   beta?: boolean | null;
   latest_version?: CatalogVersionPayload;
 }
@@ -316,6 +317,7 @@ export class ForgerBackendClient {
       status: this.options.toCatalogStatus(appEntry.slug),
       name: appEntry.name,
       description: appEntry.short_description ?? appEntry.description ?? '',
+      iconUrl: this.absoluteBackendUrl(appEntry.icon_url),
       beta: Boolean(appEntry.beta),
       latestVersionId: 'id' in (latestVersion ?? {}) ? (latestVersion as CatalogResponseItem['latest_version'])?.id : undefined,
       latestVersion: latestVersion?.version,
@@ -332,6 +334,17 @@ export class ForgerBackendClient {
       recentRatings,
       currentUserRating: this.normalizeRating(backendEntry.current_user_rating),
     };
+  }
+
+  private absoluteBackendUrl(value: string | null | undefined): string | undefined {
+    if (!value) {
+      return undefined;
+    }
+    try {
+      return new URL(value, this.options.backendBaseUrl).toString();
+    } catch {
+      return undefined;
+    }
   }
 
   private normalizeNumber(value: unknown): number | undefined {

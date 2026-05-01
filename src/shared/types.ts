@@ -11,6 +11,7 @@ export interface AppSummary {
   version?: string;
   latestVersion?: string;
   updateAvailable?: boolean;
+  iconUrl?: string;
   beta?: boolean;
   changelog?: VersionChangelog;
   capabilities?: AppCapability[];
@@ -134,6 +135,10 @@ export interface CodexAuthStatus {
   authFilePath: string;
   codexHome: string;
   codexCliPath?: string;
+}
+
+export interface AppAiSubscriptionStatus {
+  connected: boolean;
 }
 
 export type CodexReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh';
@@ -629,6 +634,7 @@ export type AppCodexTaskArgumentValue =
 
 export interface AppCodexTaskStartInput {
   templateId: string;
+  locale?: string;
   arguments?: Record<string, AppCodexTaskArgumentValue>;
   variables?: Record<string, string | number | boolean | null>;
   attachments?: AppCodexTaskAttachment[];
@@ -723,6 +729,8 @@ export interface AppCodexConversationEvent {
 }
 
 export interface ForgerAppApi {
+  getContext: () => Promise<{ locale?: string }>;
+  getAiSubscriptionStatus: () => Promise<AppAiSubscriptionStatus>;
   selectExternalFolder: () => Promise<AppExternalFolderSelection>;
   startCodexTask: (input: AppCodexTaskStartInput) => Promise<AppCodexTaskSummary>;
   getCodexTask: (runId: string) => Promise<AppCodexTaskSummary | null>;
@@ -806,7 +814,7 @@ export interface ForgerDesktopApi {
   uninstallApp: (appId: string) => Promise<BasicActionResult>;
   getAppDetails: (appId: string) => Promise<AppDetails | null>;
   installWelcome: (appId: string, userLanguage?: string) => Promise<InstallWelcomeResult>;
-  openApp: (appId: string) => Promise<OpenAppResult>;
+  openApp: (appId: string, locale?: string) => Promise<OpenAppResult>;
   stopApp: (appId: string) => Promise<StopAppResult>;
   getAppRuntimeStatus: (appId: string) => Promise<RuntimeStatus>;
   getAppSecrets: (appId: string) => Promise<AppSecretsState>;

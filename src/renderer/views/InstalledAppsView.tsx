@@ -8,7 +8,7 @@ interface InstalledAppsViewProps {
   apps: AppSummary[];
   openingAppIds: Set<string>;
   t: AppDictionary;
-  getAppMeta: (appId: string) => { name: string; description: string };
+  getAppMeta: (appId: string) => { name: string; description: string; iconUrl?: string };
   getCategoryLabel: (category: AppSummary['category']) => string;
   onOpen: (appId: string) => void;
   onStop: (appId: string) => void;
@@ -101,6 +101,7 @@ export function InstalledAppsView({
             <AppCard
               key={app.id}
               appName={meta.name}
+              iconUrl={app.iconUrl}
               categoryLabel={getCategoryLabel(app.category)}
               description={meta.description}
               beta={app.beta}

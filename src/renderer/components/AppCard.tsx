@@ -20,6 +20,7 @@ import {
 
 interface AppCardProps {
   appName: string;
+  iconUrl?: string;
   categoryLabel: string;
   description: string;
   statusLabel: string;
@@ -48,6 +49,7 @@ const initialsFromName = (name: string) =>
 
 export function AppCard({
   appName,
+  iconUrl,
   categoryLabel,
   description,
   statusLabel,
@@ -169,16 +171,22 @@ export function AppCard({
 
         <Stack direction="row" spacing={1.25} alignItems="center">
           <Avatar
+            src={iconUrl}
+            alt={appName}
+            variant="rounded"
             sx={{
               width: 42,
               height: 42,
-              bgcolor: 'secondary.main',
+              bgcolor: iconUrl ? 'transparent' : 'secondary.main',
               color: 'secondary.contrastText',
               fontWeight: 700,
               flexShrink: 0,
+              '& .MuiAvatar-img': {
+                objectFit: 'cover',
+              },
             }}
           >
-            {initialsFromName(appName)}
+            {iconUrl ? null : initialsFromName(appName)}
           </Avatar>
           <Box sx={{ minWidth: 0 }}>
             <Typography variant="subtitle1" sx={{ mb: 0.25 }} noWrap>

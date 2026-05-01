@@ -3,6 +3,7 @@ import type { ForgerAppApi } from '../shared/types';
 
 const IPC_CHANNELS = {
   appSelectExternalFolder: 'forger:app:select-external-folder',
+  appAiSubscriptionStatus: 'forger:app:ai-subscription-status',
   appCodexTaskStart: 'forger:app:codex-task:start',
   appCodexTaskGet: 'forger:app:codex-task:get',
   appCodexTaskCancel: 'forger:app:codex-task:cancel',
@@ -16,6 +17,11 @@ const IPC_CHANNELS = {
 } as const;
 
 const api: ForgerAppApi = {
+  getContext: async () => {
+    const params = new URLSearchParams(window.location.search);
+    return { locale: params.get('forgerLocale') ?? undefined };
+  },
+  getAiSubscriptionStatus: () => ipcRenderer.invoke(IPC_CHANNELS.appAiSubscriptionStatus),
   selectExternalFolder: () => ipcRenderer.invoke(IPC_CHANNELS.appSelectExternalFolder),
   startCodexTask: (input) => ipcRenderer.invoke(IPC_CHANNELS.appCodexTaskStart, input),
   getCodexTask: (runId) => ipcRenderer.invoke(IPC_CHANNELS.appCodexTaskGet, runId),

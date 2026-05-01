@@ -53,6 +53,7 @@ export const IPC_CHANNELS = {
   filesRename: 'forger:files:rename',
   filesDelete: 'forger:files:delete',
   appSelectExternalFolder: 'forger:app:select-external-folder',
+  appAiSubscriptionStatus: 'forger:app:ai-subscription-status',
   appCodexTaskStart: 'forger:app:codex-task:start',
   appCodexTaskGet: 'forger:app:codex-task:get',
   appCodexTaskCancel: 'forger:app:codex-task:cancel',
