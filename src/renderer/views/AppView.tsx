@@ -117,6 +117,7 @@ export function AppView({
 
   const appId = details.app.id;
   const appName = details.app.name ?? appId;
+  const iconUrl = details.app.iconUrl;
   const isRunning = details.status === 'running';
   const hasError = details.status === 'error';
   const hasConflict = details.status === 'conflict';
@@ -514,8 +515,24 @@ export function AppView({
       </Button>
 
       <Stack direction={{ xs: 'column', md: 'row' }} spacing={3} alignItems={{ xs: 'flex-start', md: 'center' }}>
-        <Avatar sx={{ width: 84, height: 84, bgcolor: 'secondary.main', color: 'secondary.contrastText', fontSize: 28, fontWeight: 700 }}>
-          {initialsFromName(appName)}
+        <Avatar
+          src={iconUrl}
+          alt={appName}
+          variant="rounded"
+          sx={{
+            width: 84,
+            height: 84,
+            borderRadius: 3,
+            bgcolor: iconUrl ? 'transparent' : 'secondary.main',
+            color: 'secondary.contrastText',
+            fontSize: 28,
+            fontWeight: 700,
+            '& .MuiAvatar-img': {
+              objectFit: 'cover',
+            },
+          }}
+        >
+          {iconUrl ? null : initialsFromName(appName)}
         </Avatar>
         <Stack spacing={1} sx={{ flex: 1, minWidth: 0 }}>
           <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" alignItems="center">

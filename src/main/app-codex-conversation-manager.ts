@@ -57,6 +57,7 @@ const DEFAULT_MODEL = 'gpt-5.3-codex';
 const DEFAULT_REASONING: CodexReasoningEffort = 'low';
 const MAX_CONTEXT_CHARS = 40_000;
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
+const CODEX_CONVERSATION_RUN_TIMEOUT_MS = 600_000;
 
 export class AppCodexConversationManager {
   private readonly conversations = new Map<string, InternalConversation>();
@@ -270,7 +271,7 @@ export class AppCodexConversationManager {
           ...environment,
           PATH: [...command.pathEntries, process.env.PATH ?? ''].filter(Boolean).join(path.delimiter),
         },
-        timeoutMs: 300_000,
+        timeoutMs: CODEX_CONVERSATION_RUN_TIMEOUT_MS,
         onChild: (child) => {
           run.child = child;
         },
@@ -620,35 +621,49 @@ const runCommandCapture = async (
     let stdout = '';
     let stderr = '';
     let settled = false;
-    const timeout = options.timeoutMs
-      ? setTimeout(() => {
+    let timeout: NodeJS.Timeout | null = null;
+    const clearCommandTimeout = (): void => {
+      if (timeout) {
+        clearTimeout(timeout);
+        timeout = null;
+      }
+    };
+    const refreshCommandTimeout = (): void => {
+      if (!options.timeoutMs || settled) {
+        return;
+      }
+      clearCommandTimeout();
+      timeout = setTimeout(() => {
           killProcessTree(child);
           if (!settled) {
             settled = true;
             reject(new Error(`codex_timeout_after_${options.timeoutMs}ms`));
           }
-        }, options.timeoutMs)
-      : null;
+        }, options.timeoutMs);
+    };
+    refreshCommandTimeout();
 
     child.stdout.on('data', (chunk) => {
       const text = chunk.toString();
       stdout += text;
       options.onStdout?.(text);
+      refreshCommandTimeout();
     });
     child.stderr.on('data', (chunk) => {
       const text = chunk.toString();
       stderr += text;
       options.onStderr?.(text);
+      refreshCommandTimeout();
     });
     child.on('error', (error) => {
-      if (timeout) clearTimeout(timeout);
+      clearCommandTimeout();
       if (!settled) {
         settled = true;
         reject(error);
       }
     });
     child.on('close', (code) => {
-      if (timeout) clearTimeout(timeout);
+      clearCommandTimeout();
       if (!settled) {
         settled = true;
         resolve({ code: typeof code === 'number' ? code : 1, stdout, stderr });

@@ -667,6 +667,7 @@ const toAppSummary = (record: InstalledAppRecord): AppSummary => {
   const base = {
     capabilities: catalog?.capabilities,
     changelog: catalog?.changelog,
+    iconUrl: catalog?.iconUrl,
     beta: catalog?.beta,
   };
   if (running) {
@@ -1359,6 +1360,7 @@ const ensureCatalogStatuses = (): void => {
       userMessage: installed?.userMessage,
       version: installed?.version ?? appEntry.version,
       latestVersion: appEntry.latestVersion,
+      iconUrl: appEntry.iconUrl,
       updateAvailable: installed ? isVersionNewer(appEntry.latestVersion, installed.version) : false,
     };
   });
@@ -3238,11 +3240,26 @@ const closeAppWindow = (appId: string): void => {
   }
 };
 
-const openOrFocusAppWindow = async (appId: string, appName: string, frontendUrl: string): Promise<void> => {
+const withAppLocale = (frontendUrl: string, locale?: string): string => {
+  if (!locale) {
+    return frontendUrl;
+  }
+  const url = new URL(frontendUrl);
+  url.searchParams.set('forgerLocale', locale);
+  return url.toString();
+};
+
+const openOrFocusAppWindow = async (
+  appId: string,
+  appName: string,
+  frontendUrl: string,
+  locale?: string,
+): Promise<void> => {
+  const localizedFrontendUrl = withAppLocale(frontendUrl, locale);
   const existing = appWindows.get(appId);
   if (existing && !existing.isDestroyed()) {
-    if (existing.webContents.getURL() !== frontendUrl) {
-      await existing.loadURL(frontendUrl).catch(() => {
+    if (existing.webContents.getURL() !== localizedFrontendUrl) {
+      await existing.loadURL(localizedFrontendUrl).catch(() => {
         // keep current URL if reload fails
       });
     }
@@ -3272,7 +3289,7 @@ const openOrFocusAppWindow = async (appId: string, appName: string, frontendUrl:
   });
 
   appWindows.set(appId, appWindow);
-  const expectedOrigin = new URL(frontendUrl).origin;
+  const expectedOrigin = new URL(localizedFrontendUrl).origin;
   const isAllowedAppUrl = (targetUrl: string): boolean => {
     try {
       return new URL(targetUrl).origin === expectedOrigin;
@@ -3312,7 +3329,7 @@ const openOrFocusAppWindow = async (appId: string, appName: string, frontendUrl:
     }
   });
 
-  await appWindow.loadURL(frontendUrl);
+  await appWindow.loadURL(localizedFrontendUrl);
 };
 
 const findManifestService = (
@@ -3806,7 +3823,7 @@ const normalizeHealthcheckPath = (healthcheck: string | undefined): string => {
   return value.startsWith('/') ? value : `/${value}`;
 };
 
-const openInstalledApp = async (appId: string): Promise<OpenAppResult> => {
+const openInstalledApp = async (appId: string, locale?: string): Promise<OpenAppResult> => {
   const record = registry.apps[appId];
   if (!record || !record.installDir) {
     return {
@@ -3825,7 +3842,7 @@ const openInstalledApp = async (appId: string): Promise<OpenAppResult> => {
 
   const running = runningApps.get(appId);
   if (running) {
-    await openOrFocusAppWindow(appId, record.name, running.frontendUrl);
+    await openOrFocusAppWindow(appId, record.name, running.frontendUrl, locale);
     return {
       success: true,
       userMessage: 'La app ya esta en ejecucion.',
@@ -4040,7 +4057,7 @@ const openInstalledApp = async (appId: string): Promise<OpenAppResult> => {
   try {
     await waitForHttpOk(`${backendUrl}${backendHealthcheckPath}`, 60_000);
     await waitForHttpOk(frontendUrl, 60_000);
-    await openOrFocusAppWindow(appId, record.name, frontendUrl);
+    await openOrFocusAppWindow(appId, record.name, frontendUrl, locale);
     await appendInstallLog('open:ready', {
       appId,
       backendUrl,
@@ -4796,8 +4813,8 @@ const registerIpcHandlers = (): void => {
     return await installWelcome(appId, userLanguage);
   });
 
-  ipcMain.handle(IPC_CHANNELS.openApp, async (_event, appId: string) => {
-    return await openInstalledApp(appId);
+  ipcMain.handle(IPC_CHANNELS.openApp, async (_event, appId: string, locale?: string) => {
+    return await openInstalledApp(appId, locale);
   });
 
   ipcMain.handle(IPC_CHANNELS.stopApp, async (_event, appId: string) => {
@@ -5042,6 +5059,15 @@ const registerIpcHandlers = (): void => {
 
     const selectedPath = await fs.realpath(result.filePaths[0]);
     return signAppFolderGrant(appId, selectedPath);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.appAiSubscriptionStatus, async (event) => {
+    const appId = resolveAppIdForWebContents(event.sender.id);
+    if (!appId) {
+      throw new Error('app_window_not_authorized');
+    }
+    const status = await getCodexAuthStatus();
+    return { connected: status.authenticated };
   });
 
   ipcMain.handle(IPC_CHANNELS.appCodexTaskStart, async (event, input: AppCodexTaskStartInput) => {

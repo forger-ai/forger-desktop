@@ -840,6 +840,7 @@ function App() {
       return {
         name: fromCatalog.name,
         description: fromCatalog.description ?? '',
+        iconUrl: fromCatalog.iconUrl,
       };
     }
 
@@ -848,6 +849,7 @@ function App() {
       return {
         name: fromInstalled.name,
         description: fromInstalled.description ?? '',
+        iconUrl: fromInstalled.iconUrl,
       };
     }
 
@@ -855,6 +857,7 @@ function App() {
       t.apps[appId as keyof typeof t.apps] ?? {
         name: appId,
         description: '',
+        iconUrl: undefined,
       }
     );
   };
@@ -1007,7 +1010,7 @@ function App() {
 
     const desktopApi = getDesktopApi();
     try {
-      const result = await desktopApi.openApp(appId);
+      const result = await desktopApi.openApp(appId, activeLocale);
 
       if (result.success) {
         setBannerSeverity('success');

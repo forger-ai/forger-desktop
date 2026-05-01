@@ -59,6 +59,7 @@ interface PreparedPromptArguments {
 }
 
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
+const CODEX_TASK_TIMEOUT_MS = 600_000;
 
 export class AppCodexTaskManager {
   private readonly tasks = new Map<string, InternalTask>();
@@ -134,6 +135,7 @@ export class AppCodexTaskManager {
     template: AppPromptTemplate,
     input: AppCodexTaskStartInput,
   ): Promise<void> {
+    const locale = normalizeTaskLocale(input.locale);
     if (!(await this.options.getCodexAuthenticated())) {
       throw new Error('codex_auth_missing');
     }
@@ -144,7 +146,7 @@ export class AppCodexTaskManager {
 
     task.status = 'running';
     task.updatedAt = new Date().toISOString();
-    this.addProgress(task, 'Codex esta preparando el analisis.');
+    this.addProgress(task, taskMessage(locale, 'preparing'));
     await this.persist(task);
     this.emit(task);
 
@@ -189,17 +191,17 @@ export class AppCodexTaskManager {
           ...environment,
           PATH: [...command.pathEntries, process.env.PATH ?? ''].filter(Boolean).join(path.delimiter),
         },
-        timeoutMs: 300_000,
+        timeoutMs: CODEX_TASK_TIMEOUT_MS,
         onChild: (child) => {
           task.child = child;
         },
         onStdout: (text) => {
           void appendTranscript(task.transcriptPath, 'stdout', text);
-          this.updateProgressFromOutput(task, text);
+          this.updateProgressFromOutput(task, text, locale);
         },
         onStderr: (text) => {
           void appendTranscript(task.transcriptPath, 'stderr', text);
-          this.updateProgressFromOutput(task, text);
+          this.updateProgressFromOutput(task, text, locale);
         },
       });
 
@@ -213,8 +215,8 @@ export class AppCodexTaskManager {
       const parsed = parseCodexJsonl(result.stdout, result.stderr);
       task.status = 'completed';
       task.updatedAt = new Date().toISOString();
-      task.resultText = parsed || 'Codex completo la tarea.';
-      this.addProgress(task, 'Codex termino la tarea.');
+      task.resultText = parsed || taskMessage(locale, 'completed');
+      this.addProgress(task, taskMessage(locale, 'finished'));
       await this.persist(task);
       this.emit(task);
     } finally {
@@ -359,8 +361,8 @@ export class AppCodexTaskManager {
     task.updatedAt = new Date().toISOString();
   }
 
-  private updateProgressFromOutput(task: InternalTask, text: string): void {
-    const message = progressFromCodexOutput(text);
+  private updateProgressFromOutput(task: InternalTask, text: string, locale: TaskLocale): void {
+    const message = progressFromCodexOutput(text, locale);
     if (!message) {
       return;
     }
@@ -403,6 +405,60 @@ const toSummary = (task: InternalTask): AppCodexTaskSummary => ({
 
 const sanitizeId = (value: unknown): string =>
   typeof value === 'string' ? value.trim().slice(0, 120) : '';
+
+type TaskLocale = 'es' | 'en';
+type TaskMessageKey =
+  | 'preparing'
+  | 'working'
+  | 'completed'
+  | 'finished'
+  | 'technicalLimit'
+  | 'reviewingCategories'
+  | 'loadingMovements'
+  | 'validatingData'
+  | 'confirmingMovements'
+  | 'readingDocument'
+  | 'reviewingInstructions'
+  | 'usingTools';
+
+const normalizeTaskLocale = (value: unknown): TaskLocale => {
+  const normalized = typeof value === 'string' ? value.toLowerCase() : '';
+  return normalized === 'en' || normalized.startsWith('en-') ? 'en' : 'es';
+};
+
+const taskMessages: Record<TaskLocale, Record<TaskMessageKey, string>> = {
+  es: {
+    preparing: 'El asistente está preparando el análisis.',
+    working: 'El asistente está trabajando en el documento.',
+    completed: 'El asistente completó la tarea.',
+    finished: 'El asistente terminó la tarea.',
+    technicalLimit: 'El asistente encontró una limitación técnica y está probando otra estrategia.',
+    reviewingCategories: 'Revisando categorías disponibles para clasificar.',
+    loadingMovements: 'Cargando movimientos en la base local.',
+    validatingData: 'Validando que los datos queden consistentes.',
+    confirmingMovements: 'Confirmando los movimientos cargados.',
+    readingDocument: 'Leyendo el contenido del documento.',
+    reviewingInstructions: 'Revisando las instrucciones internas de Finance OS.',
+    usingTools: 'Usando herramientas internas de Finance OS.',
+  },
+  en: {
+    preparing: 'The assistant is preparing the analysis.',
+    working: 'The assistant is working on the document.',
+    completed: 'The assistant completed the task.',
+    finished: 'The assistant finished the task.',
+    technicalLimit: 'The assistant found a technical limitation and is trying another approach.',
+    reviewingCategories: 'Reviewing available categories for classification.',
+    loadingMovements: 'Loading movements into the local database.',
+    validatingData: 'Validating that the data is consistent.',
+    confirmingMovements: 'Confirming the loaded movements.',
+    readingDocument: 'Reading the document contents.',
+    reviewingInstructions: 'Reviewing the internal Finance OS instructions.',
+    usingTools: 'Using internal Finance OS tools.',
+  },
+};
+
+const taskMessage = (locale: TaskLocale, key: TaskMessageKey): string =>
+  taskMessages[locale][key];
 
 const sanitizeFilename = (value: string): string =>
   sanitizeDotFilename(value.replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').slice(0, 160));
@@ -593,17 +649,17 @@ const parseCodexJsonl = (stdout: string, stderr: string): string => {
   return assistantText.trim();
 };
 
-const progressFromCodexOutput = (text: string): string | null => {
+const progressFromCodexOutput = (text: string, locale: TaskLocale): string | null => {
   for (const line of text.split('\n').map((entry) => entry.trim()).filter(Boolean)) {
     try {
       const parsed = JSON.parse(line) as Record<string, unknown>;
       if (parsed.type === 'turn.started') {
-        return 'Codex esta trabajando en el documento.';
+        return taskMessage(locale, 'working');
       }
       if (parsed.type === 'item.completed' && parsed.item && typeof parsed.item === 'object') {
         const item = parsed.item as Record<string, unknown>;
         if (item.type === 'command_execution') {
-          return progressFromCommandExecution(item);
+          return progressFromCommandExecution(item, locale);
         }
         if (item.type === 'agent_message') {
           return progressFromAgentMessage(item);
@@ -612,7 +668,7 @@ const progressFromCodexOutput = (text: string): string | null => {
       if (parsed.type === 'item.started' && parsed.item && typeof parsed.item === 'object') {
         const item = parsed.item as Record<string, unknown>;
         if (item.type === 'command_execution') {
-          return progressFromCommandExecution(item);
+          return progressFromCommandExecution(item, locale);
         }
       }
     } catch {
@@ -649,33 +705,33 @@ const stripMarkdown = (text: string): string =>
     .replace(/[*_~]+/g, '')
     .trim();
 
-const progressFromCommandExecution = (item: Record<string, unknown>): string | null => {
+const progressFromCommandExecution = (item: Record<string, unknown>, locale: TaskLocale): string | null => {
   const command = typeof item.command === 'string' ? item.command : '';
   const status = typeof item.status === 'string' ? item.status : '';
   const exitCode = typeof item.exit_code === 'number' ? item.exit_code : null;
   if (status === 'failed' || (exitCode !== null && exitCode !== 0)) {
-    return 'Codex encontro una limitacion tecnica y esta probando otra estrategia.';
+    return taskMessage(locale, 'technicalLimit');
   }
   if (command.includes('list_categories.py')) {
-    return 'Revisando categorias disponibles para clasificar.';
+    return taskMessage(locale, 'reviewingCategories');
   }
   if (command.includes('import_movements.py')) {
-    return 'Cargando movimientos en la base local.';
+    return taskMessage(locale, 'loadingMovements');
   }
   if (command.includes('verify_data_integrity.py') || command.includes('scripts/verify.py')) {
-    return 'Validando que los datos queden consistentes.';
+    return taskMessage(locale, 'validatingData');
   }
   if (command.includes('list_movements.py')) {
-    return 'Confirmando los movimientos cargados.';
+    return taskMessage(locale, 'confirmingMovements');
   }
   if (command.includes('pdftotext') || command.includes('PdfReader') || command.includes('.pdf')) {
-    return 'Leyendo el contenido del documento.';
+    return taskMessage(locale, 'readingDocument');
   }
   if (command.includes('skills/load-movements') || command.includes('AGENTS.md')) {
-    return 'Revisando las instrucciones internas de Finance OS.';
+    return taskMessage(locale, 'reviewingInstructions');
   }
   if (command) {
-    return 'Usando herramientas internas de Finance OS.';
+    return taskMessage(locale, 'usingTools');
   }
   return null;
 };
@@ -706,35 +762,49 @@ const runCommandCapture = async (
     let stdout = '';
     let stderr = '';
     let settled = false;
-    const timeout = options.timeoutMs
-      ? setTimeout(() => {
+    let timeout: NodeJS.Timeout | null = null;
+    const clearCommandTimeout = (): void => {
+      if (timeout) {
+        clearTimeout(timeout);
+        timeout = null;
+      }
+    };
+    const refreshCommandTimeout = (): void => {
+      if (!options.timeoutMs || settled) {
+        return;
+      }
+      clearCommandTimeout();
+      timeout = setTimeout(() => {
           killProcessTree(child);
           if (!settled) {
             settled = true;
             reject(new Error(`codex_timeout_after_${options.timeoutMs}ms`));
           }
-        }, options.timeoutMs)
-      : null;
+        }, options.timeoutMs);
+    };
+    refreshCommandTimeout();
 
     child.stdout.on('data', (chunk) => {
       const text = chunk.toString();
       stdout += text;
       options.onStdout?.(text);
+      refreshCommandTimeout();
     });
     child.stderr.on('data', (chunk) => {
       const text = chunk.toString();
       stderr += text;
       options.onStderr?.(text);
+      refreshCommandTimeout();
     });
     child.on('error', (error) => {
-      if (timeout) clearTimeout(timeout);
+      clearCommandTimeout();
       if (!settled) {
         settled = true;
         reject(error);
       }
     });
     child.on('exit', (code) => {
-      if (timeout) clearTimeout(timeout);
+      clearCommandTimeout();
       if (!settled) {
         settled = true;
         resolve({ code: typeof code === 'number' ? code : 1, stdout, stderr });

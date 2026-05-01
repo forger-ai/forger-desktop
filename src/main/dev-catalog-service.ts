@@ -154,6 +154,14 @@ const getCapabilities = (catalog: JsonObject): unknown[] => {
   return [];
 };
 
+const getIconUrl = (app: LocalApp, catalog: JsonObject, baseUrl: string): string | undefined => {
+  const iconPath = asString(catalog.icon_path);
+  if (!iconPath) {
+    return undefined;
+  }
+  return `${baseUrl}/assets/${encodeURIComponent(app.catalogSlug)}/${iconPath.split('/').map(encodeURIComponent).join('/')}`;
+};
+
 const toCatalogEntry = async (app: LocalApp, baseUrl: string): Promise<JsonObject> => {
   const catalog = asRecord(app.manifest.catalog);
   const stack = asRecord(app.manifest.stack);
@@ -170,6 +178,7 @@ const toCatalogEntry = async (app: LocalApp, baseUrl: string): Promise<JsonObjec
     short_description: asString(catalog.short_description),
     description: asString(catalog.description, asString(app.manifest.description)),
     category: asString(catalog.category, 'utilities'),
+    icon_url: getIconUrl(app, catalog, baseUrl),
     beta: catalog.beta === true,
     runtime_stack: runtimeStack,
     latest_version: {
@@ -349,6 +358,16 @@ export class DevCatalogService {
         return;
       }
 
+      const assetMatch = /^\/assets\/([^/]+)\/(.+)$/.exec(requestUrl.pathname);
+      if (assetMatch) {
+        await this.handleAsset(
+          decodeURIComponent(assetMatch[1] ?? ''),
+          decodeURIComponent(assetMatch[2] ?? ''),
+          response,
+        );
+        return;
+      }
+
       const downloadMatch = /^\/download\/([^/]+)\.zip$/.exec(requestUrl.pathname);
       if (downloadMatch) {
         await this.handleDownload(decodeURIComponent(downloadMatch[1] ?? ''), response);
@@ -385,5 +404,48 @@ export class DevCatalogService {
       bundle.cleanup();
       response.destroy();
     });
+  }
+
+  private async handleAsset(catalogSlug: string, relativePath: string, response: ServerResponse): Promise<void> {
+    const app = (await readLocalApps()).find((candidate) => candidate.catalogSlug === catalogSlug);
+    if (!app) {
+      sendJson(response, { error: 'app_not_found', slug: catalogSlug }, 404);
+      return;
+    }
+
+    const catalog = asRecord(app.manifest.catalog);
+    const iconPath = asString(catalog.icon_path);
+    if (!iconPath || relativePath !== iconPath) {
+      sendNotFound(response);
+      return;
+    }
+
+    const appRoot = await fsp.realpath(app.appDir);
+    const assetPath = path.resolve(appRoot, iconPath);
+    const realAssetPath = await fsp.realpath(assetPath).catch(() => null);
+    if (!realAssetPath || !realAssetPath.startsWith(`${appRoot}${path.sep}`)) {
+      sendNotFound(response);
+      return;
+    }
+
+    const extension = path.extname(realAssetPath).toLowerCase();
+    const contentType =
+      extension === '.png'
+        ? 'image/png'
+        : extension === '.jpg' || extension === '.jpeg'
+          ? 'image/jpeg'
+          : extension === '.webp'
+            ? 'image/webp'
+            : extension === '.svg'
+              ? 'image/svg+xml'
+              : 'application/octet-stream';
+    const stat = await fsp.stat(realAssetPath);
+    response.writeHead(200, {
+      'Access-Control-Allow-Origin': '*',
+      'Cache-Control': 'no-store',
+      'Content-Type': contentType,
+      'Content-Length': String(stat.size),
+    });
+    fs.createReadStream(realAssetPath).pipe(response);
   }
 }

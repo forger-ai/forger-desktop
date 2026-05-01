@@ -21,7 +21,7 @@ interface CatalogViewProps {
   onDetails: (appId: string) => void;
   onDelete: (appId: string) => void;
   t: AppDictionary;
-  getAppMeta: (appId: string) => { name: string; description: string };
+  getAppMeta: (appId: string) => { name: string; description: string; iconUrl?: string };
   getCategoryLabel: (category: AppCategory) => string;
 }
 
@@ -152,6 +152,7 @@ export function CatalogView({
               <AppCard
                 key={app.id}
                 appName={meta.name}
+                iconUrl={app.iconUrl}
                 categoryLabel={getCategoryLabel(app.category)}
                 description={meta.description}
                 beta={app.beta}
