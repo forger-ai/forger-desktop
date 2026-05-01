@@ -129,6 +129,53 @@ export interface Settings {
   safeMode: boolean;
 }
 
+export type DesktopUpdateStatus =
+  | 'idle'
+  | 'checking'
+  | 'up_to_date'
+  | 'available'
+  | 'downloading'
+  | 'ready'
+  | 'unsupported'
+  | 'error';
+
+export interface DesktopUpdateReleaseNotes {
+  summary?: string;
+  changes: string[];
+}
+
+export interface DesktopUpdateAsset {
+  platform: string;
+  arch: string;
+  kind: string;
+  url: string;
+  sha256?: string;
+  size?: number;
+}
+
+export interface DesktopUpdateMetadata {
+  schemaVersion: 1;
+  version: string;
+  publishedAt: string;
+  releaseNotes: DesktopUpdateReleaseNotes;
+  assets: DesktopUpdateAsset[];
+}
+
+export interface DesktopUpdateState {
+  status: DesktopUpdateStatus;
+  currentVersion: string;
+  availableVersion?: string;
+  publishedAt?: string;
+  releaseNotes?: DesktopUpdateReleaseNotes;
+  asset?: DesktopUpdateAsset;
+  downloadedPath?: string;
+  progress?: number;
+  downloadedBytes?: number;
+  totalBytes?: number;
+  userMessage?: string;
+  technicalCode?: string;
+}
+
 export interface CodexAuthStatus {
   installed: boolean;
   authenticated: boolean;
@@ -392,6 +439,12 @@ export interface AppOperationSummary {
   revertedAt?: string;
 }
 
+export interface AppLocalChangeSummary {
+  id: string;
+  title: string;
+  createdAt?: string;
+}
+
 export interface AppDetails {
   app: CatalogApp | AppSummary;
   installed: boolean;
@@ -404,6 +457,7 @@ export interface AppDetails {
   originalCommitSha?: string;
   installedAt?: string;
   operations: AppOperationSummary[];
+  localChanges?: AppLocalChangeSummary[];
   promptTemplates?: AppPromptTemplate[];
   codexConversation?: { enabled: boolean };
 }
@@ -827,6 +881,11 @@ export interface ForgerDesktopApi {
   onInstallProgress: (listener: (event: { appId: string; progress: InstallAppResult }) => void) => () => void;
   onRuntimeStatusChanged: (listener: (event: RuntimeStatus) => void) => () => void;
   getSettings: () => Promise<Settings>;
+  getDesktopUpdateState: () => Promise<DesktopUpdateState>;
+  checkDesktopUpdates: () => Promise<DesktopUpdateState>;
+  downloadDesktopUpdate: () => Promise<DesktopUpdateState>;
+  installDesktopUpdate: () => Promise<DesktopUpdateState>;
+  onDesktopUpdateProgress: (listener: (event: DesktopUpdateState) => void) => () => void;
   getForgerAccount: () => Promise<ForgerAccountSession>;
   registerForgerAccount: (input: ForgerAccountRegisterInput) => Promise<ForgerAccountSession & { success: boolean; userMessage?: string; technicalCode?: string }>;
   loginForgerAccount: (input: ForgerAccountLoginInput) => Promise<ForgerAccountSession & { success: boolean; userMessage?: string; technicalCode?: string }>;

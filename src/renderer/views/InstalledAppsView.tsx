@@ -85,14 +85,12 @@ export function InstalledAppsView({
                 : app.updateAvailable
                   ? 'warning'
                 : 'success';
-          const primaryAction = isRunning ? 'stop' : isError ? 'retry' : app.updateAvailable ? 'update' : 'open';
+          const primaryAction = isConflict ? 'update' : isRunning ? 'stop' : isError ? 'retry' : 'open';
           const isOpening = primaryAction === 'open' && openingAppIds.has(app.id);
           const primaryActionLabel = isRunning
             ? t.actions.stop
             : isError
               ? t.actions.retry
-              : app.updateAvailable
-                ? t.actions.update
               : isOpening
                 ? t.actions.opening
                 : t.actions.open;
@@ -126,15 +124,16 @@ export function InstalledAppsView({
                   return;
                 }
 
-                if (app.updateAvailable) {
-                  onUpdate(app.id);
-                  return;
-                }
-
                 onOpen(app.id);
               }}
-              secondaryActionLabel={isConflict ? t.actions.restoreUserVersion : undefined}
-              onSecondaryAction={isConflict ? () => onRestoreUserVersion(app.id) : undefined}
+              secondaryActionLabel={isConflict ? t.actions.restoreUserVersion : app.updateAvailable ? t.actions.update : undefined}
+              onSecondaryAction={
+                isConflict
+                  ? () => onRestoreUserVersion(app.id)
+                  : app.updateAvailable
+                    ? () => onUpdate(app.id)
+                    : undefined
+              }
               tertiaryActionLabel={isInstalling ? undefined : t.actions.uninstall}
               onTertiaryAction={isInstalling ? undefined : () => onDelete(app.id)}
               onCardClick={() => onDetails(app.id)}

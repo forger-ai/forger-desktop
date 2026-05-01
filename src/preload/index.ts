@@ -23,6 +23,11 @@ const IPC_CHANNELS = {
   connectAppSecret: 'forger:connect-app-secret',
   disconnectAppSecret: 'forger:disconnect-app-secret',
   getSettings: 'forger:get-settings',
+  getDesktopUpdateState: 'forger:desktop-update:get-state',
+  checkDesktopUpdates: 'forger:desktop-update:check',
+  downloadDesktopUpdate: 'forger:desktop-update:download',
+  installDesktopUpdate: 'forger:desktop-update:install',
+  desktopUpdateProgress: 'forger:desktop-update:progress',
   getForgerAccount: 'forger:account:get',
   registerForgerAccount: 'forger:account:register',
   loginForgerAccount: 'forger:account:login',
@@ -115,6 +120,19 @@ const api: ForgerDesktopApi = {
     };
   },
   getSettings: () => ipcRenderer.invoke(IPC_CHANNELS.getSettings),
+  getDesktopUpdateState: () => ipcRenderer.invoke(IPC_CHANNELS.getDesktopUpdateState),
+  checkDesktopUpdates: () => ipcRenderer.invoke(IPC_CHANNELS.checkDesktopUpdates),
+  downloadDesktopUpdate: () => ipcRenderer.invoke(IPC_CHANNELS.downloadDesktopUpdate),
+  installDesktopUpdate: () => ipcRenderer.invoke(IPC_CHANNELS.installDesktopUpdate),
+  onDesktopUpdateProgress: (listener) => {
+    const wrapped = (_event: unknown, payload: Parameters<typeof listener>[0]) => {
+      listener(payload);
+    };
+    ipcRenderer.on(IPC_CHANNELS.desktopUpdateProgress, wrapped);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.desktopUpdateProgress, wrapped);
+    };
+  },
   getForgerAccount: () => ipcRenderer.invoke(IPC_CHANNELS.getForgerAccount),
   registerForgerAccount: (input) => ipcRenderer.invoke(IPC_CHANNELS.registerForgerAccount, input),
   loginForgerAccount: (input) => ipcRenderer.invoke(IPC_CHANNELS.loginForgerAccount, input),

@@ -24,6 +24,7 @@ import { AppCodexTaskManager } from './app-codex-task-manager';
 import { AppCodexConversationManager } from './app-codex-conversation-manager';
 import { AutomationManager } from './automation-manager';
 import { DevCatalogService } from './dev-catalog-service';
+import { DesktopUpdater } from './desktop-updater';
 import { FileLibrary } from './file-library';
 import { ForgerAccountStore, publicForgerAccount, type StoredForgerAccount } from './forger-account-store';
 import { ForgerBackendClient } from './forger-backend-client';
@@ -48,6 +49,7 @@ import type {
   AppCodexTaskStartInput,
   AppCodexConversationCreateInput,
   AppCodexConversationSendMessageInput,
+  AppLocalChangeSummary,
   AppPromptTemplate,
   AppSecretConnection,
   AppSecretDeclaration,
@@ -68,6 +70,7 @@ import type {
   ConnectAppSecretInput,
   CreateUserSecretInput,
   DeleteUserSecretInput,
+  DesktopUpdateState,
   DisconnectAppSecretInput,
   FilesCreateCategoryInput,
   FilesDeleteCategoryInput,
@@ -268,6 +271,7 @@ let appCodexTaskManager: AppCodexTaskManager | null = null;
 let appCodexConversationManager: AppCodexConversationManager | null = null;
 let fileLibrary: FileLibrary | null = null;
 let secretsStore: SecretsStore | null = null;
+let desktopUpdater: DesktopUpdater | null = null;
 let automationManager: AutomationManager | null = null;
 let appMcpManager: AppMcpManager | null = null;
 
@@ -657,6 +661,25 @@ const emitAutomationUpdated = (payload: { automation: unknown; run?: unknown }):
   }
 
   mainWindow.webContents.send(IPC_CHANNELS.automationUpdated, payload);
+};
+
+const emitDesktopUpdateProgress = (payload: DesktopUpdateState): void => {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return;
+  }
+
+  mainWindow.webContents.send(IPC_CHANNELS.desktopUpdateProgress, payload);
+};
+
+const getDesktopUpdater = (): DesktopUpdater => {
+  if (!desktopUpdater) {
+    desktopUpdater = new DesktopUpdater({
+      currentVersion: app.getVersion(),
+      userDataPath: app.getPath('userData'),
+      onStateChanged: emitDesktopUpdateProgress,
+    });
+  }
+  return desktopUpdater;
 };
 
 const toAppSummary = (record: InstalledAppRecord): AppSummary => {
@@ -2920,6 +2943,26 @@ const readOperationSummaries = async (appId: string): Promise<AppOperationSummar
   }
 };
 
+const readLocalChangeSummaries = async (appDir: string): Promise<AppLocalChangeSummary[]> => {
+  const result = await runCommandCapture(
+    'git',
+    ['log', 'main..user-modified', '--max-count=10', '--pretty=format:%H%x1f%s%x1f%cI'],
+    { cwd: appDir, timeoutMs: 5_000 },
+  ).catch(() => null);
+  if (!result || result.code !== 0 || !result.stdout.trim()) {
+    return [];
+  }
+  return result.stdout
+    .split('\n')
+    .map((line) => line.split('\x1f'))
+    .filter((parts) => parts.length >= 2)
+    .map(([commitSha, subject, createdAt]) => ({
+      id: commitSha,
+      title: subject?.replace(/^forger\([^)]+\):\s*/i, '').trim() || 'Cambio guardado',
+      createdAt: createdAt || new Date().toISOString(),
+    }));
+};
+
 const getAppDetails = async (appId: string): Promise<AppDetails | null> => {
   const installed = registry.apps[appId];
   let catalog = catalogApps.find((entry) => entry.id === appId);
@@ -2977,6 +3020,7 @@ const getAppDetails = async (appId: string): Promise<AppDetails | null> => {
     originalCommitSha,
     installedAt: installed?.installedAt,
     operations: installed ? await readOperationSummaries(appId) : [],
+    localChanges: installed?.installDir ? await readLocalChangeSummaries(installed.installDir) : [],
     promptTemplates: installed ? await resolveInstalledPromptTemplates(appId) : [],
     codexConversation: installed && await hasInstalledCodexConversation(appId) ? { enabled: true } : undefined,
   };
@@ -4862,6 +4906,10 @@ const registerIpcHandlers = (): void => {
   });
 
   ipcMain.handle(IPC_CHANNELS.getSettings, async () => settings);
+  ipcMain.handle(IPC_CHANNELS.getDesktopUpdateState, async () => getDesktopUpdater().getState());
+  ipcMain.handle(IPC_CHANNELS.checkDesktopUpdates, async () => await getDesktopUpdater().check());
+  ipcMain.handle(IPC_CHANNELS.downloadDesktopUpdate, async () => await getDesktopUpdater().download());
+  ipcMain.handle(IPC_CHANNELS.installDesktopUpdate, async () => await getDesktopUpdater().install());
   ipcMain.handle(IPC_CHANNELS.getForgerAccount, async () => publicForgerAccount(forgerAccount));
   ipcMain.handle(IPC_CHANNELS.registerForgerAccount, async (_event, input: ForgerAccountRegisterInput) => {
     return forgerBackendClient
