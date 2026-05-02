@@ -67,6 +67,8 @@ import type {
   ChatStartRunInput,
   ChatUndoInput,
   CodexAuthStatus,
+  DesktopErrorReportInput,
+  DesktopErrorReportPreview,
   ConnectAppSecretInput,
   CreateUserSecretInput,
   DeleteUserSecretInput,
@@ -677,6 +679,45 @@ const emitDesktopUpdateProgress = (payload: DesktopUpdateState): void => {
 
   mainWindow.webContents.send(IPC_CHANNELS.desktopUpdateProgress, payload);
 };
+
+const buildDesktopErrorReportPreview = (input: DesktopErrorReportInput): DesktopErrorReportPreview => ({
+  ...input,
+  desktopVersion: app.getVersion(),
+  platform: process.platform,
+  arch: process.arch,
+  occurredAt: new Date().toISOString(),
+});
+
+const emitDesktopErrorReportRequested = (input: DesktopErrorReportInput): void => {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return;
+  }
+
+  mainWindow.webContents.send(IPC_CHANNELS.desktopErrorReportRequested, buildDesktopErrorReportPreview(input));
+};
+
+process.on('uncaughtException', (error) => {
+  emitDesktopErrorReportRequested({
+    source: 'desktop',
+    operation: 'uncaughtException',
+    message: error.message,
+    technicalCode: 'main_uncaught_exception',
+    sensitiveDetails: { stack: error.stack },
+  });
+});
+
+process.on('unhandledRejection', (reason) => {
+  emitDesktopErrorReportRequested({
+    source: 'desktop',
+    operation: 'unhandledRejection',
+    message: reason instanceof Error ? reason.message : String(reason ?? 'Unhandled rejection'),
+    technicalCode: 'main_unhandled_rejection',
+    sensitiveDetails: {
+      stack: reason instanceof Error ? reason.stack : undefined,
+      reason: reason instanceof Error ? undefined : String(reason ?? ''),
+    },
+  });
+});
 
 const getDesktopUpdater = (): DesktopUpdater => {
   if (!desktopUpdater) {
@@ -2499,6 +2540,34 @@ const disconnectCodexAuth = async (): Promise<{ success: boolean; userMessage: s
       success: false,
       userMessage: 'No pudimos cerrar la sesion de Codex.',
       technicalCode: detail,
+    };
+  }
+};
+
+const reinstallCodex = async (): Promise<{ success: boolean; userMessage: string; technicalCode?: string; status?: CodexAuthStatus }> => {
+  try {
+    await fs.rm(getCodexRoot(), { recursive: true, force: true });
+    await fs.rm(getCodexHome(), { recursive: true, force: true });
+    await fs.mkdir(getCodexRoot(), { recursive: true });
+    await fs.mkdir(getCodexHome(), { recursive: true });
+    await ensureCodexCliInstalled();
+    const status = await getCodexAuthStatus();
+    return {
+      success: true,
+      userMessage: 'Codex fue reinstalado. Vuelve a conectar ChatGPT para usar agentes desde Forger.',
+      status,
+    };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : 'codex_reinstall_failed';
+    await appendInstallLog('codex_auth:reinstall_failed', {
+      detail,
+      error: serializeErrorForInstallLog(error),
+    });
+    return {
+      success: false,
+      userMessage: 'No pudimos reinstalar Codex.',
+      technicalCode: detail,
+      status: await getCodexAuthStatus().catch(() => undefined),
     };
   }
 };
@@ -4913,6 +4982,18 @@ const createWindow = async (): Promise<void> => {
     },
   });
   registerWindowStateEvents(mainWindow);
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    emitDesktopErrorReportRequested({
+      source: 'renderer',
+      operation: 'render-process-gone',
+      message: `Renderer process ended: ${details.reason}`,
+      technicalCode: 'renderer_process_gone',
+      details: {
+        reason: details.reason,
+        exitCode: details.exitCode,
+      },
+    });
+  });
 
   if (isDev && process.env.VITE_DEV_SERVER_URL) {
     await mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
@@ -5077,6 +5158,18 @@ const registerIpcHandlers = (): void => {
       ? await forgerBackendClient.submitAppFeedback(input)
       : { success: false, userMessage: 'No pudimos enviar el feedback.', technicalCode: 'backend_client_missing' };
   });
+  ipcMain.handle(IPC_CHANNELS.submitDesktopErrorReport, async (_event, input: DesktopErrorReportPreview) => {
+    const report: DesktopErrorReportPreview = {
+      ...input,
+      desktopVersion: input.desktopVersion || app.getVersion(),
+      platform: process.platform,
+      arch: process.arch,
+      occurredAt: input.occurredAt || new Date().toISOString(),
+    };
+    return forgerBackendClient
+      ? await forgerBackendClient.submitDesktopErrorReport(report)
+      : { success: false, userMessage: 'No pudimos enviar el reporte.', technicalCode: 'backend_client_missing' };
+  });
   ipcMain.handle(IPC_CHANNELS.openExternalUrl, async (_event, targetUrl: string) => {
     try {
       const parsed = new URL(targetUrl);
@@ -5103,6 +5196,7 @@ const registerIpcHandlers = (): void => {
   });
   ipcMain.handle(IPC_CHANNELS.connectCodexAuth, async () => await connectCodexAuth());
   ipcMain.handle(IPC_CHANNELS.disconnectCodexAuth, async () => await disconnectCodexAuth());
+  ipcMain.handle(IPC_CHANNELS.reinstallCodex, async () => await reinstallCodex());
   ipcMain.handle(IPC_CHANNELS.listAgentTools, async () => AGENT_TOOL_PACKAGES);
   ipcMain.handle(IPC_CHANNELS.getAgentToolSettings, async () => agentToolSettings);
   ipcMain.handle(IPC_CHANNELS.updateAgentToolApproval, async (_event, input: UpdateAgentToolApprovalInput) => {

@@ -184,6 +184,24 @@ export interface CodexAuthStatus {
   codexCliPath?: string;
 }
 
+export interface DesktopErrorReportInput {
+  source: 'desktop' | 'renderer' | 'app' | 'codex' | 'automation' | 'update';
+  operation?: string;
+  message: string;
+  technicalCode?: string;
+  appId?: string;
+  appVersion?: string;
+  details?: Record<string, unknown>;
+  sensitiveDetails?: Record<string, unknown>;
+}
+
+export interface DesktopErrorReportPreview extends DesktopErrorReportInput {
+  desktopVersion?: string;
+  platform?: string;
+  arch?: string;
+  occurredAt: string;
+}
+
 export interface AppAiSubscriptionStatus {
   connected: boolean;
 }
@@ -897,6 +915,9 @@ export interface ForgerDesktopApi {
   openCodexUsageDashboard: () => Promise<{ success: boolean; userMessage?: string; technicalCode?: string }>;
   connectCodexAuth: () => Promise<{ success: boolean; userMessage: string; technicalCode?: string }>;
   disconnectCodexAuth: () => Promise<{ success: boolean; userMessage: string; technicalCode?: string }>;
+  reinstallCodex: () => Promise<{ success: boolean; userMessage: string; technicalCode?: string; status?: CodexAuthStatus }>;
+  submitDesktopErrorReport: (input: DesktopErrorReportPreview) => Promise<{ success: boolean; userMessage: string; technicalCode?: string }>;
+  onDesktopErrorReportRequested: (listener: (event: DesktopErrorReportPreview) => void) => () => void;
   listAgentTools: () => Promise<AgentToolPackageDefinition[]>;
   getAgentToolSettings: () => Promise<AgentToolSettings>;
   updateAgentToolApproval: (input: UpdateAgentToolApprovalInput) => Promise<AgentToolSettings>;

@@ -1,6 +1,6 @@
 import { Box } from '@mui/material';
 import type { ReactNode } from 'react';
-import type { AppSummary, ForgerAccountSession } from '@shared/types';
+import type { AppSummary, DesktopUpdateState, ForgerAccountSession } from '@shared/types';
 import type { AppDictionary } from '@renderer/i18n';
 import { Sidebar, type View } from './Sidebar';
 import { Topbar } from './Topbar';
@@ -20,6 +20,7 @@ interface AppShellProps {
   account: ForgerAccountSession;
   accountBusy: boolean;
   onLogout: () => void;
+  desktopUpdateState: DesktopUpdateState;
   children: ReactNode;
 }
 
@@ -38,11 +39,12 @@ export function AppShell({
   account,
   accountBusy,
   onLogout,
+  desktopUpdateState,
   children,
 }: AppShellProps) {
   return (
     <Box sx={{ display: 'flex', height: '100vh', overflow: 'hidden', WebkitAppRegion: 'no-drag' }}>
-      <Sidebar currentView={currentView} onNavigate={onNavigate} t={t} />
+      <Sidebar currentView={currentView} onNavigate={onNavigate} t={t} desktopUpdateState={desktopUpdateState} />
       <Box
         component="main"
         sx={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}
