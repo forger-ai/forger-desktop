@@ -180,6 +180,7 @@ interface AppManifestService {
   healthcheck?: string;
   context?: string;
   environment?: Record<string, string>;
+  volumes?: AppManifestVolume[];
 }
 
 interface AppManifestMcp {
@@ -218,6 +219,12 @@ interface AppManifest {
   scripts?: Record<string, string>;
   skills?: string[];
   appSecrets?: unknown;
+}
+
+interface AppManifestVolume {
+  source?: string;
+  target?: string;
+  persist?: boolean;
 }
 
 interface AppManifestCodexConversation {
@@ -1804,13 +1811,132 @@ const validateArchiveEntries = async (archivePath: string): Promise<void> => {
   }
 };
 
-const removeInstalledContentsPreservingGit = async (installDir: string): Promise<void> => {
-  const entries = await fs.readdir(installDir, { withFileTypes: true });
+const normalizeRelativeInstallPath = (value: string): string | null => {
+  const normalized = toPosixRelativePath(value).replace(/^\.\//, '').replace(/\/+$/, '');
+  if (!normalized || normalized === '.' || normalized.startsWith('../') || normalized.includes('/../')) {
+    return null;
+  }
+  return normalized;
+};
+
+const runtimeArtifactRoots = [
+  'backend/.venv',
+  'backend/data',
+  'frontend/node_modules',
+  'frontend/dist',
+  'frontend/.vite',
+];
+
+const isPathAtOrInside = (filePath: string, rootPath: string): boolean =>
+  filePath === rootPath || filePath.startsWith(`${rootPath}/`);
+
+const collectPersistentInstallPaths = (manifest: AppManifest | null): string[] => {
+  const paths = new Set(runtimeArtifactRoots);
+  for (const service of manifest?.services ?? []) {
+    for (const volume of service.volumes ?? []) {
+      if (!volume?.persist || typeof volume.source !== 'string') {
+        continue;
+      }
+      const normalized = normalizeRelativeInstallPath(volume.source);
+      if (normalized) {
+        paths.add(normalized);
+      }
+    }
+  }
+  return [...paths].sort();
+};
+
+const isPreservedInstallPath = (relativePath: string, preservedPaths: string[]): boolean => {
+  const normalized = normalizeRelativeInstallPath(relativePath);
+  return Boolean(normalized && preservedPaths.some((preservedPath) => isPathAtOrInside(normalized, preservedPath)));
+};
+
+const gitCommitAllExcept = async (cwd: string, message: string, excludedPaths: string[]): Promise<string> => {
+  await runCommand('git', ['add', '-A'], { cwd });
+  const safeExcludedPaths = excludedPaths
+    .map((entry) => normalizeRelativeInstallPath(entry))
+    .filter((entry): entry is string => Boolean(entry));
+  if (safeExcludedPaths.length > 0) {
+    await runCommand('git', ['reset', '--', ...safeExcludedPaths], { cwd });
+  }
+  await runCommand('git', ['commit', '--allow-empty', '-m', message], { cwd });
+  const head = await getGitHead(cwd);
+  if (!head) {
+    throw new Error('missing_git_head_after_commit');
+  }
+  return head;
+};
+
+const removeTrackedFilesMissingFromStage = async (
+  stageDir: string,
+  installDir: string,
+  preservedPaths: string[],
+): Promise<void> => {
+  const result = await runCommandCapture('git', ['ls-files', '-z'], { cwd: installDir, timeoutMs: 30_000 });
+  if (result.code !== 0) {
+    throw new Error(result.stderr || result.stdout || 'git_ls_files_failed');
+  }
+  const trackedPaths = result.stdout.split('\0').filter(Boolean);
   await Promise.all(
-    entries
-      .filter((entry) => entry.name !== '.git')
-      .map((entry) => fs.rm(path.join(installDir, entry.name), { recursive: true, force: true })),
+    trackedPaths.map(async (trackedPath) => {
+      const normalized = normalizeRelativeInstallPath(trackedPath);
+      if (!normalized || isPreservedInstallPath(normalized, preservedPaths)) {
+        return;
+      }
+      const stagedPath = path.join(stageDir, normalized);
+      const stagedStat = await fs.stat(stagedPath).catch(() => null);
+      if (stagedStat) {
+        return;
+      }
+      await fs.rm(path.join(installDir, normalized), { recursive: true, force: true });
+    }),
   );
+};
+
+const copyReleaseContentsForUpdate = async (
+  sourceDir: string,
+  targetDir: string,
+  preservedPaths: string[],
+  relativeRoot = '',
+): Promise<void> => {
+  await fs.mkdir(targetDir, { recursive: true });
+  const entries = await fs.readdir(sourceDir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (entry.name === '.git') {
+      throw new Error('unsafe_staged_git_entry');
+    }
+    const relativePath = normalizeRelativeInstallPath(path.posix.join(relativeRoot, entry.name));
+    if (!relativePath || isPreservedInstallPath(relativePath, preservedPaths)) {
+      continue;
+    }
+
+    const sourcePath = path.join(sourceDir, entry.name);
+    const targetPath = path.join(targetDir, entry.name);
+    const targetStat = await fs.lstat(targetPath).catch(() => null);
+    if (targetStat && targetStat.isDirectory() !== entry.isDirectory()) {
+      await fs.rm(targetPath, { recursive: true, force: true });
+    }
+
+    if (entry.isDirectory()) {
+      await copyReleaseContentsForUpdate(sourcePath, targetPath, preservedPaths, relativePath);
+      continue;
+    }
+
+    await fs.cp(sourcePath, targetPath, {
+      recursive: true,
+      force: true,
+      verbatimSymlinks: false,
+    });
+  }
+};
+
+const syncReleaseIntoInstalledApp = async (
+  stageDir: string,
+  installDir: string,
+  preservedPaths: string[],
+): Promise<void> => {
+  await copyReleaseContentsForUpdate(stageDir, installDir, preservedPaths);
+  await removeTrackedFilesMissingFromStage(stageDir, installDir, preservedPaths);
 };
 
 const copyDirectoryContents = async (sourceDir: string, targetDir: string): Promise<void> => {
@@ -2730,6 +2856,8 @@ const updateAppRuntime = async (appId: string): Promise<InstallAppResult> => {
     await publishProgress('checking_update', 'Revisando actualizacion disponible...');
     await ensureAppGitRepository(record.installDir);
     await ensureUserModifiedBranch(record.installDir);
+    const installedManifest = await resolveInstalledManifest(record.installDir);
+    const preservedInstallPaths = collectPersistentInstallPaths(installedManifest);
     const status = await getUserVisibleGitStatusLines(record.installDir);
     if (status.length > 0) {
       return await abortUpdateAndRestoreInstalled(
@@ -2755,13 +2883,16 @@ const updateAppRuntime = async (appId: string): Promise<InstallAppResult> => {
     await clearMacQuarantine(stageDir);
 
     await runCommand('git', ['checkout', 'main'], { cwd: record.installDir });
-    await removeInstalledContentsPreservingGit(record.installDir);
-    await copyDirectoryContents(stageDir, record.installDir);
+    await syncReleaseIntoInstalledApp(stageDir, record.installDir, preservedInstallPaths);
     await normalizeInstalledAgentContext(record.installDir, appId);
     await ensureGlobalAgentsContext(getForgerHomeRoot());
 
     await publishProgress('updating_base', 'Guardando la version nueva...');
-    const baseCommitSha = await gitCommitAll(record.installDir, `forger(base): update ${download.version}`);
+    const baseCommitSha = await gitCommitAllExcept(
+      record.installDir,
+      `forger(base): update ${download.version}`,
+      preservedInstallPaths,
+    );
     await upsertInstalledRecord({
       ...record,
       status: 'installing',
