@@ -326,6 +326,17 @@ const writeChecksum = async (artifactPath) => {
   return checksumPath;
 };
 
+const signMacDmg = async (artifactPath) => {
+  const identity = await resolveMacSigningIdentity();
+  await run('codesign', [
+    '--force',
+    '--timestamp',
+    '--sign',
+    identity,
+    artifactPath,
+  ]);
+};
+
 const resolveAppleApiKey = async () => {
   if (process.env.APPLE_API_KEY) {
     return process.env.APPLE_API_KEY;
@@ -356,10 +367,6 @@ const notarizeMacArtifact = async (artifactPath, waitForResult) => {
     missing.push('APPLE_API_KEY_ID');
   }
 
-  if (!process.env.APPLE_API_ISSUER) {
-    missing.push('APPLE_API_ISSUER');
-  }
-
   if (missing.length > 0) {
     throw new Error(`Missing notarization env vars: ${missing.join(', ')}`);
   }
@@ -373,11 +380,13 @@ const notarizeMacArtifact = async (artifactPath, waitForResult) => {
     appleApiKey,
     '--key-id',
     process.env.APPLE_API_KEY_ID,
-    '--issuer',
-    process.env.APPLE_API_ISSUER,
     '--output-format',
     'json',
   ];
+
+  if (process.env.APPLE_API_ISSUER) {
+    submitArgs.push('--issuer', process.env.APPLE_API_ISSUER);
+  }
 
   if (waitForResult) {
     submitArgs.push('--wait', '--timeout', '30m');
@@ -400,7 +409,7 @@ const notarizeMacArtifact = async (artifactPath, waitForResult) => {
   if (status !== 'Accepted') {
     if (submissionId) {
       const logPath = path.join(releaseDir, 'notarization-log.json');
-      const log = await capture('xcrun', [
+      const logArgs = [
         'notarytool',
         'log',
         submissionId,
@@ -408,10 +417,12 @@ const notarizeMacArtifact = async (artifactPath, waitForResult) => {
         appleApiKey,
         '--key-id',
         process.env.APPLE_API_KEY_ID,
-        '--issuer',
-        process.env.APPLE_API_ISSUER,
-      ]);
-      await fs.writeFile(logPath, log);
+      ];
+      if (process.env.APPLE_API_ISSUER) {
+        logArgs.push('--issuer', process.env.APPLE_API_ISSUER);
+      }
+      const logOutput = await capture('xcrun', logArgs);
+      await fs.writeFile(logPath, logOutput);
       console.error(`Apple notarization log written to ${logPath}`);
     }
 
@@ -496,8 +507,11 @@ const main = async () => {
       throw new Error(`Expected artifact does not exist: ${artifactPath}`);
     }
 
-    if (platform === 'mac' && !options.skipNotarize) {
-      await notarizeMacArtifact(artifactPath, options.waitNotarize);
+    if (platform === 'mac') {
+      await signMacDmg(artifactPath);
+      if (!options.skipNotarize) {
+        await notarizeMacArtifact(artifactPath, options.waitNotarize);
+      }
     }
 
     const checksumPath = await writeChecksum(artifactPath);
