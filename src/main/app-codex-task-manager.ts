@@ -178,7 +178,8 @@ export class AppCodexTaskManager {
         '-C',
         task.appRoot,
         ...imageArgs,
-        prompt,
+        '--',
+        '-',
       ];
 
       await appendTranscript(task.transcriptPath, 'meta', `${command.command} exec --json -C ${task.appRoot}`);
@@ -203,6 +204,7 @@ export class AppCodexTaskManager {
           void appendTranscript(task.transcriptPath, 'stderr', text);
           this.updateProgressFromOutput(task, text, locale);
         },
+        stdinText: prompt,
       });
 
       if ((task as AppCodexTaskSummary).status === 'canceled') {
@@ -743,6 +745,7 @@ const runCommandCapture = async (
     cwd: string;
     env?: NodeJS.ProcessEnv;
     timeoutMs?: number;
+    stdinText?: string;
     onChild?: (child: ChildProcessWithoutNullStreams) => void;
     onStdout?: (text: string) => void;
     onStderr?: (text: string) => void;
@@ -757,7 +760,7 @@ const runCommandCapture = async (
       detached: process.platform !== 'win32',
     });
     options.onChild?.(child);
-    child.stdin.end();
+    child.stdin.end(options.stdinText ?? '');
 
     let stdout = '';
     let stderr = '';
