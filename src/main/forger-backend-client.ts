@@ -6,6 +6,7 @@ import type {
   ForgerAccountLoginInput,
   ForgerAccountRegisterInput,
   ForgerAccountSession,
+  DesktopErrorReportPreview,
   SubmitAppFeedbackInput,
   SubmitAppRatingInput,
 } from '../shared/types';
@@ -250,6 +251,37 @@ export class ForgerBackendClient {
     }
 
     return { success: true, userMessage: 'Feedback enviado.' };
+  }
+
+  async submitDesktopErrorReport(
+    input: DesktopErrorReportPreview,
+  ): Promise<{ success: boolean; userMessage: string; technicalCode?: string }> {
+    const response = await fetch(`${this.options.backendBaseUrl}/api/v1/desktop_error_reports`, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        source: input.source,
+        operation: input.operation,
+        message: input.message,
+        technical_code: input.technicalCode,
+        desktop_version: input.desktopVersion,
+        platform: input.platform,
+        arch: input.arch,
+        app_id: input.appId,
+        app_version: input.appVersion,
+        details: input.details ?? {},
+        sensitive_details: input.sensitiveDetails ?? {},
+      }),
+    });
+
+    if (!response.ok) {
+      return { success: false, userMessage: 'No pudimos enviar el reporte.', technicalCode: `desktop_error_report_failed_${response.status}` };
+    }
+
+    return { success: true, userMessage: 'Reporte enviado. Gracias por ayudarnos a corregir Forger.' };
   }
 
   async requestDownload(

@@ -10,6 +10,7 @@ import VpnKeyRounded from '@mui/icons-material/VpnKeyRounded';
 import {
   alpha,
   Box,
+  Chip,
   List,
   ListItemButton,
   ListItemIcon,
@@ -20,6 +21,7 @@ import {
 } from '@mui/material';
 import { useEffect, useState } from 'react';
 import type { WindowControlState } from '@shared/types';
+import type { DesktopUpdateState } from '@shared/types';
 import type { AppDictionary } from '@renderer/i18n';
 import iconDark from '@renderer/assets/icon-dark.svg';
 import iconLight from '@renderer/assets/icon-light.svg';
@@ -41,6 +43,7 @@ interface SidebarProps {
   currentView: View;
   onNavigate: (view: View) => void;
   t: AppDictionary;
+  desktopUpdateState: DesktopUpdateState;
 }
 
 const mainNav = [
@@ -54,7 +57,7 @@ const mainNav = [
   { id: 'tools' as const, icon: <ConstructionRounded /> },
 ];
 
-export function Sidebar({ currentView, onNavigate, t }: SidebarProps) {
+export function Sidebar({ currentView, onNavigate, t, desktopUpdateState }: SidebarProps) {
   const theme = useTheme();
   const [windowState, setWindowState] = useState<WindowControlState | null>(null);
   const shouldReserveMacTrafficLightSpace =
@@ -99,6 +102,7 @@ export function Sidebar({ currentView, onNavigate, t }: SidebarProps) {
     settings: t.nav.settings,
     app: t.nav.catalog,
   };
+  const showUpdateBanner = desktopUpdateState.status === 'available' || desktopUpdateState.status === 'ready';
 
   return (
     <Box
@@ -165,6 +169,38 @@ export function Sidebar({ currentView, onNavigate, t }: SidebarProps) {
         <Box sx={{ flex: 1 }} />
 
         <Stack spacing={1.25}>
+          {showUpdateBanner ? (
+            <Box
+              role="button"
+              tabIndex={0}
+              onClick={() => onNavigate('settings')}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  onNavigate('settings');
+                }
+              }}
+              sx={{
+                p: 1,
+                borderRadius: 1,
+                cursor: 'pointer',
+                border: `1px solid ${alpha(theme.palette.warning.main, 0.4)}`,
+                bgcolor: alpha(theme.palette.warning.main, theme.palette.mode === 'dark' ? 0.16 : 0.1),
+              }}
+            >
+              <Stack spacing={0.5}>
+                <Chip
+                  size="small"
+                  color="warning"
+                  label={t.settings.desktopUpdateStatuses[desktopUpdateState.status]}
+                  sx={{ alignSelf: 'flex-start' }}
+                />
+                <Typography variant="caption" color="text.secondary">
+                  {t.settings.sidebarUpdateAvailable(desktopUpdateState.availableVersion)}
+                </Typography>
+              </Stack>
+            </Box>
+          ) : null}
           <List disablePadding>
             <ListItemButton
               selected={currentView === 'settings'}

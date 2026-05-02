@@ -39,6 +39,9 @@ const IPC_CHANNELS = {
   openCodexUsageDashboard: 'forger:open-codex-usage-dashboard',
   connectCodexAuth: 'forger:connect-codex-auth',
   disconnectCodexAuth: 'forger:disconnect-codex-auth',
+  reinstallCodex: 'forger:reinstall-codex',
+  submitDesktopErrorReport: 'forger:error-report:submit',
+  desktopErrorReportRequested: 'forger:error-report:requested',
   listAgentTools: 'forger:agent-tools:list',
   getAgentToolSettings: 'forger:agent-tools:get-settings',
   updateAgentToolApproval: 'forger:agent-tools:update-approval',
@@ -144,6 +147,17 @@ const api: ForgerDesktopApi = {
   openCodexUsageDashboard: () => ipcRenderer.invoke(IPC_CHANNELS.openCodexUsageDashboard),
   connectCodexAuth: () => ipcRenderer.invoke(IPC_CHANNELS.connectCodexAuth),
   disconnectCodexAuth: () => ipcRenderer.invoke(IPC_CHANNELS.disconnectCodexAuth),
+  reinstallCodex: () => ipcRenderer.invoke(IPC_CHANNELS.reinstallCodex),
+  submitDesktopErrorReport: (input) => ipcRenderer.invoke(IPC_CHANNELS.submitDesktopErrorReport, input),
+  onDesktopErrorReportRequested: (listener) => {
+    const wrapped = (_event: unknown, payload: Parameters<typeof listener>[0]) => {
+      listener(payload);
+    };
+    ipcRenderer.on(IPC_CHANNELS.desktopErrorReportRequested, wrapped);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.desktopErrorReportRequested, wrapped);
+    };
+  },
   listAgentTools: () => ipcRenderer.invoke(IPC_CHANNELS.listAgentTools),
   getAgentToolSettings: () => ipcRenderer.invoke(IPC_CHANNELS.getAgentToolSettings),
   updateAgentToolApproval: (input) => ipcRenderer.invoke(IPC_CHANNELS.updateAgentToolApproval, input),

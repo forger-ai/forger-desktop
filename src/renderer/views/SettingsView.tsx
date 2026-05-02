@@ -13,6 +13,7 @@ import {
 import SystemUpdateAltRounded from '@mui/icons-material/SystemUpdateAltRounded';
 import DownloadRounded from '@mui/icons-material/DownloadRounded';
 import LaunchRounded from '@mui/icons-material/LaunchRounded';
+import RestartAltRounded from '@mui/icons-material/RestartAltRounded';
 import type { CodexAuthStatus, DesktopUpdateState } from '@shared/types';
 import type { AppDictionary, Locale } from '@renderer/i18n';
 import type { ThemePreference } from '@renderer/theme/appTheme';
@@ -32,6 +33,7 @@ interface SettingsViewProps {
   chatBotPictureOptions: Array<{ value: ChatBotPicture; label: string; src: string }>;
   onChatBotPictureChange: (picture: ChatBotPicture) => void;
   onOpenCodexConfig: () => void;
+  onReinstallCodex: () => void;
   desktopUpdateState: DesktopUpdateState;
   desktopUpdateBusy: boolean;
   onCheckDesktopUpdates: () => void;
@@ -53,6 +55,7 @@ export function SettingsView({
   chatBotPictureOptions,
   onChatBotPictureChange,
   onOpenCodexConfig,
+  onReinstallCodex,
   desktopUpdateState,
   desktopUpdateBusy,
   onCheckDesktopUpdates,
@@ -98,7 +101,20 @@ export function SettingsView({
               >
                 {codexAuthStatus.authenticated ? t.settings.codexConfiguredAction : t.settings.codexConnectAction}
               </Button>
+              <Button
+                variant="outlined"
+                color="warning"
+                size="small"
+                startIcon={<RestartAltRounded />}
+                disabled={codexAuthBusy}
+                onClick={onReinstallCodex}
+              >
+                {t.settings.codexReinstallAction}
+              </Button>
             </Stack>
+            <Typography variant="caption" color="text.secondary">
+              {t.settings.codexReinstallHint}
+            </Typography>
             <Stack spacing={0.35} sx={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>
               <Typography variant="caption" color="text.secondary">
                 {t.settings.codexCliPathLabel}: {codexAuthStatus.codexCliPath ?? '-'}

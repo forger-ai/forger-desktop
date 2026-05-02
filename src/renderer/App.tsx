@@ -9,7 +9,9 @@ import {
   DialogTitle,
   MenuItem,
   Select,
+  Stack,
   TextField,
+  Typography,
   Snackbar,
   ThemeProvider,
   useMediaQuery,
@@ -31,6 +33,8 @@ import type {
   CodexAuthStatus,
   CodexModelOption,
   CodexReasoningEffort,
+  DesktopErrorReportInput,
+  DesktopErrorReportPreview,
   DesktopUpdateState,
   FilesListInput,
   ForgerAccountRegisterInput,
@@ -72,6 +76,15 @@ const CODEX_REASONING_STORAGE_KEY = 'forger-codex-reasoning-effort-v1';
 const CHAT_BOT_PICTURE_STORAGE_KEY = 'forger-chat-bot-picture-v1';
 const STARTUP_UPDATE_CHECK_STORAGE_KEY = 'forger-desktop-startup-update-check-v1';
 const FORGER_DATA_ROOT_NAME = 'data';
+
+const EXPECTED_ERROR_CODES = new Set([
+  'permission_denied',
+  'app_not_installed',
+  'missing_secrets',
+  'no_pending_update_conflict',
+  'codex_auth_missing',
+  'auth_missing',
+]);
 
 export type ChatBotPicture = 'bot' | 'female' | 'male';
 export type LanguagePreference = 'system' | Locale;
@@ -239,6 +252,13 @@ interface PersistedChatState {
   lastActiveConversationId: string | null;
 }
 
+interface ErrorReportDialogState {
+  open: boolean;
+  report: DesktopErrorReportPreview | null;
+  busy: boolean;
+  userMessage?: string;
+}
+
 const readPersistedChatState = (): PersistedChatState => {
   if (typeof window === 'undefined') {
     return {
@@ -311,6 +331,11 @@ function App() {
   const [desktopUpdateState, setDesktopUpdateState] = useState<DesktopUpdateState>(initialDesktopUpdateState);
   const [desktopUpdateBusy, setDesktopUpdateBusy] = useState(false);
   const [codexConfigOpen, setCodexConfigOpen] = useState(false);
+  const [errorReportDialog, setErrorReportDialog] = useState<ErrorReportDialogState>({
+    open: false,
+    report: null,
+    busy: false,
+  });
   const [selectedAppDetailsId, setSelectedAppDetailsId] = useState<string | null>(null);
   const [selectedAppDetails, setSelectedAppDetails] = useState<AppDetails | null>(null);
   const [appDetailsBackView, setAppDetailsBackView] = useState<View>('catalog');
@@ -404,6 +429,49 @@ function App() {
         })),
     [chatConversations, selectedAppId],
   );
+
+  const buildErrorReport = (input: DesktopErrorReportInput): DesktopErrorReportPreview => ({
+    ...input,
+    desktopVersion: desktopUpdateState.currentVersion || undefined,
+    platform: navigator.platform,
+    occurredAt: new Date().toISOString(),
+  });
+
+  const shouldPromptForErrorReport = (technicalCode?: string): boolean => {
+    if (!technicalCode) {
+      return true;
+    }
+    return !EXPECTED_ERROR_CODES.has(technicalCode);
+  };
+
+  const requestErrorReport = (input: DesktopErrorReportInput) => {
+    if (!shouldPromptForErrorReport(input.technicalCode)) {
+      return;
+    }
+    setErrorReportDialog({
+      open: true,
+      report: buildErrorReport(input),
+      busy: false,
+    });
+  };
+
+  const requestErrorReportFromResult = (
+    source: DesktopErrorReportInput['source'],
+    operation: string,
+    result: { success: boolean; userMessage?: string; technicalCode?: string },
+    extra?: Pick<DesktopErrorReportInput, 'appId' | 'appVersion' | 'details' | 'sensitiveDetails'>,
+  ) => {
+    if (result.success || !result.technicalCode || !shouldPromptForErrorReport(result.technicalCode)) {
+      return;
+    }
+    requestErrorReport({
+      source,
+      operation,
+      message: result.userMessage ?? result.technicalCode,
+      technicalCode: result.technicalCode,
+      ...extra,
+    });
+  };
 
   const refreshFiles = async (filters: FilesListInput = fileFilters) => {
     const desktopApi = getDesktopApi();
@@ -544,6 +612,46 @@ function App() {
   }, []);
 
   useEffect(() => {
+    const handleError = (event: ErrorEvent) => {
+      requestErrorReport({
+        source: 'renderer',
+        operation: 'window.error',
+        message: event.message || 'Renderer error',
+        technicalCode: 'renderer_error',
+        details: {
+          filename: event.filename,
+          lineno: event.lineno,
+          colno: event.colno,
+        },
+        sensitiveDetails: {
+          stack: event.error instanceof Error ? event.error.stack : undefined,
+        },
+      });
+    };
+
+    const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
+      const reason = event.reason;
+      requestErrorReport({
+        source: 'renderer',
+        operation: 'unhandledrejection',
+        message: reason instanceof Error ? reason.message : String(reason ?? 'Unhandled renderer rejection'),
+        technicalCode: 'renderer_unhandled_rejection',
+        sensitiveDetails: {
+          stack: reason instanceof Error ? reason.stack : undefined,
+          reason: reason instanceof Error ? undefined : String(reason ?? ''),
+        },
+      });
+    };
+
+    window.addEventListener('error', handleError);
+    window.addEventListener('unhandledrejection', handleUnhandledRejection);
+    return () => {
+      window.removeEventListener('error', handleError);
+      window.removeEventListener('unhandledrejection', handleUnhandledRejection);
+    };
+  }, [desktopUpdateState.currentVersion]);
+
+  useEffect(() => {
     let desktopApi: ReturnType<typeof getDesktopApi>;
     try {
       desktopApi = getDesktopApi();
@@ -576,6 +684,14 @@ function App() {
       } else if (status.status === 'error') {
         setBannerSeverity('error');
         setBannerMessage(status.userMessage ?? t.settings.authErrorFallback);
+        requestErrorReport({
+          source: 'app',
+          operation: 'runtime.status',
+          message: status.userMessage ?? t.settings.authErrorFallback,
+          technicalCode: 'app_runtime_error',
+          appId: status.appId,
+          details: { status: status.status },
+        });
       } else if (status.status === 'installed') {
         setBannerSeverity('info');
         setBannerMessage(status.userMessage ?? t.actions.installed);
@@ -724,12 +840,17 @@ function App() {
       setDesktopUpdateState(state);
     });
 
+    const unsubscribeErrorReport = desktopApi.onDesktopErrorReportRequested((report) => {
+      setErrorReportDialog({ open: true, report, busy: false });
+    });
+
     return () => {
       unsubscribeInstall();
       unsubscribeRuntime();
       unsubscribeChat();
       unsubscribeAutomation();
       unsubscribeDesktopUpdate();
+      unsubscribeErrorReport();
     };
   }, []);
 
@@ -963,10 +1084,22 @@ function App() {
       } else {
         setBannerSeverity('error');
         setBannerMessage(result.userMessage);
+        requestErrorReportFromResult('app', 'install', result, {
+          appId,
+          appVersion: installedApps.find((appEntry) => appEntry.id === appId)?.version,
+        });
       }
-    } catch (_error) {
+    } catch (error) {
       setBannerSeverity('error');
       setBannerMessage(t.settings.authErrorFallback);
+      requestErrorReport({
+        source: 'app',
+        operation: 'install',
+        message: error instanceof Error ? error.message : t.settings.authErrorFallback,
+        technicalCode: 'install_unhandled_error',
+        appId,
+        sensitiveDetails: { stack: error instanceof Error ? error.stack : undefined },
+      });
     }
   };
 
@@ -977,12 +1110,25 @@ function App() {
       await refreshApps();
       setBannerSeverity(result.success ? 'success' : result.phase === 'conflict' ? 'warning' : 'error');
       setBannerMessage(result.userMessage);
+      requestErrorReportFromResult('app', 'update', result, {
+        appId,
+        appVersion: installedApps.find((appEntry) => appEntry.id === appId)?.version,
+        details: { phase: result.phase },
+      });
       if (selectedAppDetailsId === appId) {
         setSelectedAppDetails(await desktopApi.getAppDetails(appId));
       }
-    } catch (_error) {
+    } catch (error) {
       setBannerSeverity('error');
       setBannerMessage(t.settings.authErrorFallback);
+      requestErrorReport({
+        source: 'app',
+        operation: 'update',
+        message: error instanceof Error ? error.message : t.settings.authErrorFallback,
+        technicalCode: 'update_unhandled_error',
+        appId,
+        sensitiveDetails: { stack: error instanceof Error ? error.stack : undefined },
+      });
     }
   };
 
@@ -1011,9 +1157,25 @@ function App() {
         setBannerSeverity(state.status === 'error' || state.status === 'unsupported' ? 'error' : 'info');
         setBannerMessage(state.userMessage);
       }
-    } catch (_error) {
+      if (state.status === 'error' && state.technicalCode) {
+        requestErrorReport({
+          source: 'update',
+          operation: 'desktop-update',
+          message: state.userMessage ?? state.technicalCode,
+          technicalCode: state.technicalCode,
+          details: { status: state.status, availableVersion: state.availableVersion },
+        });
+      }
+    } catch (error) {
       setBannerSeverity('error');
       setBannerMessage(t.settings.authErrorFallback);
+      requestErrorReport({
+        source: 'update',
+        operation: 'desktop-update',
+        message: error instanceof Error ? error.message : t.settings.authErrorFallback,
+        technicalCode: 'desktop_update_unhandled_error',
+        sensitiveDetails: { stack: error instanceof Error ? error.stack : undefined },
+      });
     } finally {
       setDesktopUpdateBusy(false);
     }
@@ -1061,7 +1223,23 @@ function App() {
       } else {
         setBannerSeverity('error');
         setBannerMessage(result.userMessage);
+        requestErrorReportFromResult('app', 'open', result, {
+          appId,
+          appVersion: installedApps.find((appEntry) => appEntry.id === appId)?.version,
+        });
       }
+    } catch (error) {
+      setBannerSeverity('error');
+      setBannerMessage(t.settings.authErrorFallback);
+      requestErrorReport({
+        source: 'app',
+        operation: 'open',
+        message: error instanceof Error ? error.message : t.settings.authErrorFallback,
+        technicalCode: 'open_app_unhandled_error',
+        appId,
+        appVersion: installedApps.find((appEntry) => appEntry.id === appId)?.version,
+        sensitiveDetails: { stack: error instanceof Error ? error.stack : undefined },
+      });
     } finally {
       const nextOpeningAppIds = new Set(openingAppIdsRef.current);
       nextOpeningAppIds.delete(appId);
@@ -1468,6 +1646,15 @@ function App() {
           };
         }),
       );
+      requestErrorReport({
+        source: 'codex',
+        operation: 'chat.start-run',
+        message: detail,
+        technicalCode: 'chat_start_run_failed',
+        appId: selectedAppId,
+        appVersion: installedApps.find((appEntry) => appEntry.id === selectedAppId)?.version,
+        sensitiveDetails: { stack: error instanceof Error ? error.stack : undefined },
+      });
     }
   };
 
@@ -1645,10 +1832,46 @@ function App() {
       const result = await desktopApi.connectCodexAuth();
       setBannerSeverity(result.success ? 'info' : 'error');
       setBannerMessage(result.userMessage);
+      requestErrorReportFromResult('codex', 'connect', result);
       await refreshCodexAuthStatus();
-    } catch {
+    } catch (error) {
       setBannerSeverity('error');
       setBannerMessage(t.settings.codexConnectError);
+      requestErrorReport({
+        source: 'codex',
+        operation: 'connect',
+        message: error instanceof Error ? error.message : t.settings.codexConnectError,
+        technicalCode: 'codex_connect_unhandled_error',
+        sensitiveDetails: { stack: error instanceof Error ? error.stack : undefined },
+      });
+    } finally {
+      setCodexAuthBusy(false);
+    }
+  };
+
+  const handleReinstallCodex = async () => {
+    setCodexAuthBusy(true);
+    try {
+      const desktopApi = getDesktopApi();
+      const result = await desktopApi.reinstallCodex();
+      setBannerSeverity(result.success ? 'success' : 'error');
+      setBannerMessage(result.userMessage);
+      if (result.status) {
+        setCodexAuthStatus(result.status);
+      } else {
+        await refreshCodexAuthStatus();
+      }
+      requestErrorReportFromResult('codex', 'reinstall', result);
+    } catch (error) {
+      setBannerSeverity('error');
+      setBannerMessage(t.settings.codexReinstallError);
+      requestErrorReport({
+        source: 'codex',
+        operation: 'reinstall',
+        message: error instanceof Error ? error.message : t.settings.codexReinstallError,
+        technicalCode: 'codex_reinstall_unhandled_error',
+        sensitiveDetails: { stack: error instanceof Error ? error.stack : undefined },
+      });
     } finally {
       setCodexAuthBusy(false);
     }
@@ -1687,6 +1910,48 @@ function App() {
       setBannerMessage(t.settings.authErrorFallback);
     } finally {
       setForgerAccountBusy(false);
+    }
+  };
+
+  const closeErrorReportDialog = () => {
+    if (errorReportDialog.busy) {
+      return;
+    }
+    setErrorReportDialog({ open: false, report: null, busy: false });
+  };
+
+  const copyErrorReportDetails = async () => {
+    if (!errorReportDialog.report) {
+      return;
+    }
+    await navigator.clipboard.writeText(JSON.stringify(errorReportDialog.report, null, 2));
+    setErrorReportDialog((current) => ({ ...current, userMessage: t.settings.errorReportCopied }));
+  };
+
+  const submitErrorReport = async () => {
+    if (!errorReportDialog.report) {
+      return;
+    }
+    setErrorReportDialog((current) => ({ ...current, busy: true, userMessage: undefined }));
+    try {
+      const result = await getDesktopApi().submitDesktopErrorReport(errorReportDialog.report);
+      if (result.success) {
+        setBannerSeverity('success');
+        setBannerMessage(result.userMessage || t.settings.errorReportSent);
+        setErrorReportDialog({ open: false, report: null, busy: false });
+        return;
+      }
+      setErrorReportDialog((current) => ({
+        ...current,
+        busy: false,
+        userMessage: result.userMessage || t.settings.errorReportSendError,
+      }));
+    } catch {
+      setErrorReportDialog((current) => ({
+        ...current,
+        busy: false,
+        userMessage: t.settings.errorReportSendError,
+      }));
     }
   };
 
@@ -1759,6 +2024,7 @@ function App() {
         account={forgerAccount}
         accountBusy={forgerAccountBusy}
         onLogout={() => void handleForgerLogout()}
+        desktopUpdateState={desktopUpdateState}
       >
         {currentView === 'my-apps' ? (
           <InstalledAppsView
@@ -1953,6 +2219,7 @@ function App() {
             chatBotPictureOptions={CHAT_BOT_PICTURE_OPTIONS}
             onChatBotPictureChange={setChatBotPicture}
             onOpenCodexConfig={() => setCodexConfigOpen(true)}
+            onReinstallCodex={() => void handleReinstallCodex()}
             desktopUpdateState={desktopUpdateState}
             desktopUpdateBusy={desktopUpdateBusy}
             onCheckDesktopUpdates={() => void runDesktopUpdateAction(() => getDesktopApi().checkDesktopUpdates())}
@@ -2097,6 +2364,49 @@ function App() {
           <Button onClick={() => setMoveFileDialog({ open: false, file: null, categoryPath: '' })}>{t.actions.close}</Button>
           <Button variant="contained" onClick={() => void handleMoveFileSubmit()}>
             {t.sections.files.move}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={errorReportDialog.open}
+        onClose={closeErrorReportDialog}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>{t.settings.errorReportTitle}</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ pt: 0.5 }}>
+            <Typography color="text.secondary">{t.settings.errorReportBody}</Typography>
+            {errorReportDialog.report ? (
+              <TextField
+                fullWidth
+                multiline
+                minRows={8}
+                maxRows={14}
+                label={t.settings.errorReportDetailsLabel}
+                value={JSON.stringify(errorReportDialog.report, null, 2)}
+                InputProps={{ readOnly: true }}
+              />
+            ) : null}
+            {errorReportDialog.userMessage ? (
+              <Alert severity="info">{errorReportDialog.userMessage}</Alert>
+            ) : null}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeErrorReportDialog} disabled={errorReportDialog.busy}>
+            {t.settings.errorReportNoSend}
+          </Button>
+          <Button onClick={() => void copyErrorReportDetails()} disabled={errorReportDialog.busy || !errorReportDialog.report}>
+            {t.settings.errorReportCopy}
+          </Button>
+          <Button
+            variant="contained"
+            onClick={() => void submitErrorReport()}
+            disabled={errorReportDialog.busy || !errorReportDialog.report}
+          >
+            {t.settings.errorReportSend}
           </Button>
         </DialogActions>
       </Dialog>
