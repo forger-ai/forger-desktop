@@ -39,6 +39,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useEffect, useRef, useState } from 'react';
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
+import { compactCategoryLabel, compactFileName, formatBytes } from './chat-view-helpers';
 
 export interface ChatMessage {
   id: string;
@@ -241,20 +242,6 @@ export function ChatView({
     void onRespondPermission(runId, requestId, decision);
   };
 
-  const formatBytes = (value: number): string => {
-    if (!Number.isFinite(value) || value <= 0) {
-      return '0 B';
-    }
-    const units = ['B', 'KB', 'MB', 'GB'];
-    let size = value;
-    let unitIndex = 0;
-    while (size >= 1024 && unitIndex < units.length - 1) {
-      size /= 1024;
-      unitIndex += 1;
-    }
-    return `${size.toFixed(unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
-  };
-
   const serializeComposerText = () => {
     const root = inputRef.current;
     if (!root) {
@@ -376,21 +363,6 @@ export function ChatView({
     setMentionMenuPosition(null);
     inputRef.current?.focus();
     window.setTimeout(syncComposerText, 0);
-  };
-
-  const compactFileName = (name: string): string => {
-    const dotIndex = name.lastIndexOf('.');
-    const extension = dotIndex > 0 ? name.slice(dotIndex) : '';
-    const base = dotIndex > 0 ? name.slice(0, dotIndex) : name;
-    const maxBaseLength = extension ? 18 : 24;
-    return base.length > maxBaseLength ? `${base.slice(0, maxBaseLength).trim()}...${extension}` : name;
-  };
-
-  const compactCategoryLabel = (value: string): string => {
-    if (!value) {
-      return t.sections.chat.rootCategory;
-    }
-    return fileCategories.find((category) => category.path === value)?.name ?? value.split('/').join(' / ');
   };
 
   const compactSelectMenuProps = {
@@ -897,7 +869,7 @@ export function ChatView({
                       value={uploadCategoryPath}
                       onChange={(event) => onUploadCategoryChange(event.target.value)}
                       displayEmpty
-                      renderValue={(value) => compactCategoryLabel(String(value))}
+                      renderValue={(value) => compactCategoryLabel(String(value), fileCategories, t.sections.chat.rootCategory)}
                       MenuProps={compactSelectMenuProps}
                       sx={{
                         minWidth: 76,

@@ -2,8 +2,6 @@ import { app, BrowserWindow, dialog, ipcMain, shell, type IpcMainInvokeEvent } f
 import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import fs from 'node:fs/promises';
-import * as http from 'node:http';
-import type { IncomingMessage, ServerResponse } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
@@ -22,10 +20,13 @@ import { IPC_CHANNELS } from '../shared/ipc';
 import { ChatOrchestrator } from './chat/orchestrator';
 import { AppCodexTaskManager } from './app-codex-task-manager';
 import { AppCodexConversationManager } from './app-codex-conversation-manager';
+import { AppMcpManager, type CodexMcpServerConfig } from './app-mcp-manager';
 import { AutomationManager } from './automation-manager';
 import { DevCatalogService } from './dev-catalog-service';
 import { DesktopUpdater } from './desktop-updater';
+import { DesktopErrorReporter } from './error-reporting';
 import { FileLibrary } from './file-library';
+import { ForgerMcpServer } from './forger-mcp-server';
 import { ForgerAccountStore, publicForgerAccount, type StoredForgerAccount } from './forger-account-store';
 import { ForgerBackendClient } from './forger-backend-client';
 import {
@@ -67,7 +68,6 @@ import type {
   ChatStartRunInput,
   ChatUndoInput,
   CodexAuthStatus,
-  DesktopErrorReportInput,
   DesktopErrorReportPreview,
   ConnectAppSecretInput,
   CreateUserSecretInput,
@@ -239,31 +239,6 @@ interface StackSkillTemplate {
   body: string;
 }
 
-interface CodexMcpServerConfig {
-  name: string;
-  url: string;
-  token: string;
-  tokenEnvVar: string;
-  toolTimeoutSec?: number;
-}
-
-type AppMcpStatus = 'down' | 'starting' | 'up' | 'shutting_down';
-
-interface AppMcpState {
-  appId: string;
-  status: AppMcpStatus;
-  listeners: Set<string>;
-  generation: number;
-  process?: ChildProcessWithoutNullStreams;
-  url?: string;
-  token?: string;
-  tokenEnvVar?: string;
-  toolTimeoutSec?: number;
-  startPromise?: Promise<CodexMcpServerConfig | null>;
-  stopPromise?: Promise<void>;
-  stopTimer?: NodeJS.Timeout;
-}
-
 let mainWindow: BrowserWindow | null = null;
 let catalogApps: CatalogApp[] = [];
 let settings: Settings = structuredClone(settingsSeed);
@@ -281,8 +256,15 @@ let appCodexConversationManager: AppCodexConversationManager | null = null;
 let fileLibrary: FileLibrary | null = null;
 let secretsStore: SecretsStore | null = null;
 let desktopUpdater: DesktopUpdater | null = null;
+let desktopErrorReporter: DesktopErrorReporter | null = null;
 let automationManager: AutomationManager | null = null;
 let appMcpManager: AppMcpManager | null = null;
+
+desktopErrorReporter = new DesktopErrorReporter({
+  getMainWindow: () => mainWindow,
+  getAppVersion: () => app.getVersion(),
+  getInstalledApp: (appId) => registry.apps[appId],
+});
 
 const resolvePlatformAlias = (): string => {
   const platformPrefix = PLATFORM_KEY_BY_RUNTIME[process.platform] ?? process.platform;
@@ -409,20 +391,7 @@ let agentToolSettings: AgentToolSettings = {
   }, {} as AgentToolApprovalSettings),
 };
 
-interface AgentMcpSession {
-  runId: string;
-  appId: string;
-  token: string;
-  createdAt: string;
-}
-
-interface ForgerMcpServerState {
-  server: http.Server;
-  url: string;
-}
-
-const agentMcpSessions = new Map<string, AgentMcpSession>();
-let forgerMcpServer: ForgerMcpServerState | null = null;
+let forgerMcpServer: ForgerMcpServer | null = null;
 
 const MAX_INSTALL_LOG_FIELD_LENGTH = 60_000;
 
@@ -680,43 +649,12 @@ const emitDesktopUpdateProgress = (payload: DesktopUpdateState): void => {
   mainWindow.webContents.send(IPC_CHANNELS.desktopUpdateProgress, payload);
 };
 
-const buildDesktopErrorReportPreview = (input: DesktopErrorReportInput): DesktopErrorReportPreview => ({
-  ...input,
-  desktopVersion: app.getVersion(),
-  platform: process.platform,
-  arch: process.arch,
-  occurredAt: new Date().toISOString(),
-});
-
-const emitDesktopErrorReportRequested = (input: DesktopErrorReportInput): void => {
-  if (!mainWindow || mainWindow.isDestroyed()) {
-    return;
-  }
-
-  mainWindow.webContents.send(IPC_CHANNELS.desktopErrorReportRequested, buildDesktopErrorReportPreview(input));
-};
-
 process.on('uncaughtException', (error) => {
-  emitDesktopErrorReportRequested({
-    source: 'desktop',
-    operation: 'uncaughtException',
-    message: error.message,
-    technicalCode: 'main_uncaught_exception',
-    sensitiveDetails: { stack: error.stack },
-  });
+  desktopErrorReporter?.reportMainUncaughtException(error);
 });
 
 process.on('unhandledRejection', (reason) => {
-  emitDesktopErrorReportRequested({
-    source: 'desktop',
-    operation: 'unhandledRejection',
-    message: reason instanceof Error ? reason.message : String(reason ?? 'Unhandled rejection'),
-    technicalCode: 'main_unhandled_rejection',
-    sensitiveDetails: {
-      stack: reason instanceof Error ? reason.stack : undefined,
-      reason: reason instanceof Error ? undefined : String(reason ?? ''),
-    },
-  });
+  desktopErrorReporter?.reportMainUnhandledRejection(reason);
 });
 
 const getDesktopUpdater = (): DesktopUpdater => {
@@ -3733,335 +3671,6 @@ const buildBackendProcessConfig = (
   return { command: python, args, cwd, environment };
 };
 
-const findManifestMcp = (manifest: AppManifest | null): AppManifestMcp | null => {
-  if (!manifest?.mcp || typeof manifest.mcp !== 'object') {
-    return null;
-  }
-  if (manifest.mcp.type && manifest.mcp.type !== 'http') {
-    return null;
-  }
-  if (!manifest.mcp.command || typeof manifest.mcp.command !== 'string') {
-    return null;
-  }
-  return manifest.mcp;
-};
-
-const safeMcpServerName = (appId: string): string =>
-  `app_${appId.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
-
-const safeMcpTokenEnvVar = (appId: string): string =>
-  `FORGER_APP_MCP_TOKEN_${appId.replace(/[^a-zA-Z0-9]/g, '_').toUpperCase()}`;
-
-const translateMcpEnvironment = (
-  environment: Record<string, string>,
-  backendDir: string,
-  cwd: string,
-): Record<string, string> => {
-  const translated = translateManifestEnvironment(environment, backendDir);
-  if (typeof translated.PYTHONPATH === 'string' && translated.PYTHONPATH.trim()) {
-    const entries = translated.PYTHONPATH.split(path.delimiter)
-      .map((entry) => entry.trim())
-      .filter(Boolean)
-      .map((entry) => path.isAbsolute(entry) ? entry : path.resolve(cwd, entry));
-    translated.PYTHONPATH = entries.join(path.delimiter);
-  }
-  return translated;
-};
-
-const buildAppMcpProcessConfig = (
-  mcp: AppManifestMcp,
-  record: InstalledAppRecord,
-  python: string,
-  port: number,
-  token: string,
-): {
-  command: string;
-  args: string[];
-  cwd: string;
-  url: string;
-  healthUrl: string;
-  environment: Record<string, string>;
-  tokenEnvVar: string;
-  toolTimeoutSec: number;
-} => {
-  const rawArgs = splitManifestCommand(mcp.command);
-  if (rawArgs.length === 0) {
-    throw new Error('app_mcp_command_missing');
-  }
-  const backendDir = path.join(record.installDir, 'backend');
-  const cwd = mcp.context ? path.resolve(path.join(record.installDir, mcp.context)) : backendDir;
-  if (!ensurePathInside(record.installDir, cwd)) {
-    throw new Error('app_mcp_context_outside_app');
-  }
-  const commandToken = rawArgs[0];
-  const command = commandToken === 'python' || commandToken === 'python3' ? python : commandToken;
-  const args = rawArgs.slice(1);
-  const healthcheck = normalizeHealthcheckPath(mcp.healthcheck);
-  const url = `http://127.0.0.1:${port}/mcp`;
-  const tokenEnvVar = safeMcpTokenEnvVar(record.appId);
-  const manifestEnvironment = mcp.environment && typeof mcp.environment === 'object' ? mcp.environment : {};
-  const environment = translateMcpEnvironment(manifestEnvironment, backendDir, cwd);
-  return {
-    command,
-    args,
-    cwd,
-    url,
-    healthUrl: `http://127.0.0.1:${port}${healthcheck}`,
-    environment: {
-      ...environment,
-      HOST: '127.0.0.1',
-      PORT: String(port),
-      FORGER_APP_ID: record.appId,
-      FORGER_APP_MCP_TOKEN: token,
-      [tokenEnvVar]: token,
-    },
-    tokenEnvVar,
-    toolTimeoutSec: Math.max(1, Math.floor(mcp.toolTimeoutSec ?? 600)),
-  };
-};
-
-class AppMcpManager {
-  private readonly states = new Map<string, AppMcpState>();
-  private readonly runListeners = new Map<string, Set<string>>();
-
-  public async listenMcps(appIds: string[], runId: string): Promise<CodexMcpServerConfig[]> {
-    const configs = await Promise.all(
-      Array.from(new Set(appIds)).map((appId) => this.listenOne(appId, runId)),
-    );
-    return configs.filter((config): config is CodexMcpServerConfig => Boolean(config));
-  }
-
-  public releaseMcps(runId: string): void {
-    const appIds = this.runListeners.get(runId);
-    if (!appIds) {
-      return;
-    }
-    this.runListeners.delete(runId);
-    for (const appId of appIds) {
-      const state = this.states.get(appId);
-      if (!state) {
-        continue;
-      }
-      state.listeners.delete(runId);
-      if (state.listeners.size === 0) {
-        this.scheduleStop(state);
-      }
-    }
-  }
-
-  public dispose(): void {
-    for (const state of this.states.values()) {
-      if (state.stopTimer) {
-        clearTimeout(state.stopTimer);
-      }
-      if (state.process) {
-        void terminateProcess(state.process);
-      }
-    }
-    this.states.clear();
-    this.runListeners.clear();
-  }
-
-  private async listenOne(appId: string, runId: string): Promise<CodexMcpServerConfig | null> {
-    const record = registry.apps[appId];
-    if (!record?.installDir) {
-      return null;
-    }
-    const manifest = await resolveInstalledManifest(record.installDir);
-    const mcp = findManifestMcp(manifest);
-    if (!mcp) {
-      return null;
-    }
-
-    const state = this.getState(appId);
-    state.listeners.add(runId);
-    const runApps = this.runListeners.get(runId) ?? new Set<string>();
-    runApps.add(appId);
-    this.runListeners.set(runId, runApps);
-
-    if (state.stopTimer) {
-      clearTimeout(state.stopTimer);
-      state.stopTimer = undefined;
-    }
-    if (state.status === 'up' && state.url && state.token && state.tokenEnvVar) {
-      return this.toConfig(state);
-    }
-    if (state.status === 'starting' && state.startPromise) {
-      return await state.startPromise;
-    }
-    if (state.status === 'shutting_down' && state.stopPromise) {
-      await state.stopPromise.catch(() => undefined);
-    }
-    if (state.status === 'up' && state.url && state.token && state.tokenEnvVar) {
-      return this.toConfig(state);
-    }
-    state.startPromise = this.startOne(record, mcp, state);
-    return await state.startPromise;
-  }
-
-  private async startOne(
-    record: InstalledAppRecord,
-    mcp: AppManifestMcp,
-    state: AppMcpState,
-  ): Promise<CodexMcpServerConfig | null> {
-    const generation = state.generation + 1;
-    state.generation = generation;
-    state.status = 'starting';
-    try {
-      const pythonRuntime = await ensureRuntimeInstalled('python', record.requiredPythonVersion);
-      const venv = getVenvExecutables(path.join(record.installDir, 'backend'));
-      const port = await getFreePort();
-      const token = randomBytes(32).toString('hex');
-      const config = buildAppMcpProcessConfig(mcp, record, venv.python, port, token);
-      await ensureSqliteDatabaseParent(config.environment);
-      await appendInstallLog('app_mcp:start', {
-        appId: record.appId,
-        command: config.command,
-        args: config.args,
-        cwd: config.cwd,
-        url: config.url,
-        healthUrl: config.healthUrl,
-        pythonRuntime: pythonRuntime.rootDir,
-      });
-      const child = spawn(config.command, config.args, {
-        cwd: config.cwd,
-        env: {
-          ...process.env,
-          ...config.environment,
-          PATH: [
-            path.dirname(venv.python),
-            ...getRuntimePathEntries(pythonRuntime),
-            process.env.PATH ?? '',
-          ].filter(Boolean).join(path.delimiter),
-        },
-        stdio: 'pipe',
-      });
-      child.stdout.on('data', (chunk) => {
-        void appendInstallLog('app_mcp:stdout', {
-          appId: record.appId,
-          text: truncateForInstallLog(chunk.toString()),
-        });
-      });
-      child.stderr.on('data', (chunk) => {
-        void appendInstallLog('app_mcp:stderr', {
-          appId: record.appId,
-          text: truncateForInstallLog(chunk.toString()),
-        });
-      });
-      child.once('exit', (code, signal) => {
-        void appendInstallLog('app_mcp:exit', { appId: record.appId, code, signal });
-        if (this.states.get(record.appId) === state && state.process === child) {
-          state.process = undefined;
-          state.url = undefined;
-          state.token = undefined;
-          state.tokenEnvVar = undefined;
-          state.status = state.listeners.size > 0 ? 'down' : 'down';
-        }
-      });
-
-      state.process = child;
-      state.url = config.url;
-      state.token = token;
-      state.tokenEnvVar = config.tokenEnvVar;
-      state.toolTimeoutSec = config.toolTimeoutSec;
-      await waitForHttpOk(config.healthUrl, 30_000);
-      if (state.generation !== generation || state.listeners.size === 0) {
-        await terminateProcess(child);
-        state.status = 'down';
-        return null;
-      }
-      state.status = 'up';
-      await appendInstallLog('app_mcp:ready', { appId: record.appId, url: config.url });
-      return this.toConfig(state);
-    } catch (error) {
-      await appendInstallLog('app_mcp:start_failed', {
-        appId: record.appId,
-        error: serializeErrorForInstallLog(error),
-      });
-      if (state.process) {
-        await terminateProcess(state.process).catch(() => undefined);
-      }
-      state.process = undefined;
-      state.url = undefined;
-      state.token = undefined;
-      state.tokenEnvVar = undefined;
-      state.status = 'down';
-      return null;
-    } finally {
-      state.startPromise = undefined;
-    }
-  }
-
-  private scheduleStop(state: AppMcpState): void {
-    if (state.stopTimer || state.status === 'down') {
-      return;
-    }
-    state.stopTimer = setTimeout(() => {
-      state.stopTimer = undefined;
-      if (state.listeners.size === 0) {
-        state.stopPromise = this.stopOne(state);
-      }
-    }, 1_000);
-  }
-
-  private async stopOne(state: AppMcpState): Promise<void> {
-    if (state.listeners.size > 0) {
-      return;
-    }
-    if (state.status === 'starting' && state.startPromise) {
-      await state.startPromise.catch(() => null);
-      if (state.listeners.size > 0) {
-        return;
-      }
-    }
-    const child = state.process;
-    state.status = 'shutting_down';
-    state.generation += 1;
-    if (child) {
-      await appendInstallLog('app_mcp:stop', { appId: state.appId });
-      await terminateProcess(child).catch(() => undefined);
-    }
-    if (state.listeners.size === 0) {
-      state.process = undefined;
-      state.url = undefined;
-      state.token = undefined;
-      state.tokenEnvVar = undefined;
-      state.status = 'down';
-    } else {
-      state.status = 'down';
-    }
-    state.stopPromise = undefined;
-  }
-
-  private getState(appId: string): AppMcpState {
-    const existing = this.states.get(appId);
-    if (existing) {
-      return existing;
-    }
-    const state: AppMcpState = {
-      appId,
-      status: 'down',
-      listeners: new Set<string>(),
-      generation: 0,
-    };
-    this.states.set(appId, state);
-    return state;
-  }
-
-  private toConfig(state: AppMcpState): CodexMcpServerConfig | null {
-    if (!state.url || !state.token || !state.tokenEnvVar) {
-      return null;
-    }
-    return {
-      name: safeMcpServerName(state.appId),
-      url: state.url,
-      token: state.token,
-      tokenEnvVar: state.tokenEnvVar,
-      toolTimeoutSec: state.toolTimeoutSec,
-    };
-  }
-}
-
 const normalizeHealthcheckPath = (healthcheck: string | undefined): string => {
   const value = healthcheck?.trim() || '/health';
   return value.startsWith('/') ? value : `/${value}`;
@@ -4409,490 +4018,6 @@ const getRuntimeStatus = (appId: string): RuntimeStatus => {
   };
 };
 
-const createForgerMcpSession = (runId: string, appId: string): { url: string; token: string } | null => {
-  if (!forgerMcpServer) {
-    void appendInstallLog('agent_tool:mcp_session_unavailable', { runId, appId });
-    return null;
-  }
-  const token = randomBytes(32).toString('hex');
-  agentMcpSessions.set(token, {
-    runId,
-    appId,
-    token,
-    createdAt: new Date().toISOString(),
-  });
-  void appendInstallLog('agent_tool:mcp_session_created', {
-    runId,
-    appId,
-    url: forgerMcpServer.url,
-    tokenSuffix: token.slice(-6),
-  });
-  return { url: forgerMcpServer.url, token };
-};
-
-const releaseForgerMcpSession = (token: string): void => {
-  const session = agentMcpSessions.get(token);
-  agentMcpSessions.delete(token);
-  void appendInstallLog('agent_tool:mcp_session_released', {
-    runId: session?.runId ?? null,
-    appId: session?.appId ?? null,
-    tokenSuffix: token.slice(-6),
-  });
-};
-
-type JsonRpcRequest = {
-  jsonrpc?: string;
-  id?: string | number | null;
-  method?: string;
-  params?: unknown;
-};
-
-const sendMcpJson = (response: ServerResponse, statusCode: number, payload: unknown): void => {
-  response.writeHead(statusCode, {
-    'content-type': 'application/json',
-    'cache-control': 'no-store',
-  });
-  response.end(JSON.stringify(payload));
-};
-
-const readRequestBody = async (request: IncomingMessage): Promise<string> => {
-  const chunks: Buffer[] = [];
-  for await (const chunk of request) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  }
-  return Buffer.concat(chunks).toString('utf8');
-};
-
-const getBearerToken = (request: IncomingMessage): string | null => {
-  const header = request.headers.authorization;
-  if (!header || Array.isArray(header)) {
-    return null;
-  }
-  const match = /^Bearer\s+(.+)$/i.exec(header.trim());
-  return match?.[1] ?? null;
-};
-
-const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unknown> => {
-  if (
-    toolId === 'forger_get_app_runtime_status' ||
-    toolId === 'forger_open_app' ||
-    toolId === 'forger_stop_app' ||
-    toolId === 'forger_restart_app' ||
-    toolId === 'forger_refresh_app_view' ||
-    toolId === 'forger_update_app'
-  ) {
-    return {
-      type: 'object',
-      properties: {
-        appId: {
-          type: 'string',
-          description: 'ID de la app instalada sobre la que se ejecuta la herramienta.',
-        },
-      },
-      required: ['appId'],
-      additionalProperties: false,
-    };
-  }
-
-  return {
-    type: 'object',
-    properties: {},
-    additionalProperties: false,
-  };
-};
-
-const getMcpTools = () =>
-  AGENT_TOOL_DEFINITIONS.map((tool) => ({
-    name: tool.id,
-    description: tool.description,
-    inputSchema: getMcpToolInputSchema(tool.id),
-  }));
-
-const getToolAppId = (session: AgentMcpSession, params: Record<string, unknown>): string => {
-  const appId = typeof params.appId === 'string' && params.appId.trim() ? params.appId.trim() : session.appId;
-  return appId;
-};
-
-interface ToolApprovalResult {
-  approved: boolean;
-  required: boolean;
-  status: 'not_required' | 'approved' | 'denied' | 'unavailable';
-  userMessage: string;
-}
-
-const withToolAuthorization = (result: unknown, approval: ToolApprovalResult): unknown => {
-  if (!approval.required || !result || typeof result !== 'object' || Array.isArray(result)) {
-    return result;
-  }
-  return {
-    ...(result as Record<string, unknown>),
-    authorization: {
-      required: true,
-      status: approval.status,
-      userMessage: approval.userMessage,
-    },
-  };
-};
-
-const ensureToolApproval = async (session: AgentMcpSession, tool: AgentToolDefinition): Promise<ToolApprovalResult> => {
-  if (!agentToolSettings.approvals[tool.id]) {
-    await appendInstallLog('agent_tool:approval_skipped', {
-      appId: session.appId,
-      runId: session.runId,
-      toolId: tool.id,
-      reason: 'approval_not_required',
-    });
-    return {
-      approved: true,
-      required: false,
-      status: 'not_required',
-      userMessage: 'Esta herramienta no requirio autorizacion adicional.',
-    };
-  }
-  if (!chatOrchestrator) {
-    await appendInstallLog('agent_tool:approval_unavailable', {
-      appId: session.appId,
-      runId: session.runId,
-      toolId: tool.id,
-      reason: 'chat_orchestrator_unavailable',
-    });
-    return {
-      approved: false,
-      required: true,
-      status: 'unavailable',
-      userMessage: 'No se pudo solicitar autorizacion para esta herramienta.',
-    };
-  }
-  await appendInstallLog('agent_tool:approval_requested', {
-    appId: session.appId,
-    runId: session.runId,
-    toolId: tool.id,
-    toolName: tool.name,
-  });
-  const approved = await chatOrchestrator.requestExternalPermission(session.runId, {
-    pluginId: 'forger-agent-tools',
-    permission: tool.id,
-    reason: tool.description,
-    risk: tool.risk === 'alto' ? 'high' : tool.risk === 'medio' ? 'medium' : 'low',
-    resource: tool.name,
-  });
-  await appendInstallLog('agent_tool:approval_resolved', {
-    appId: session.appId,
-    runId: session.runId,
-    toolId: tool.id,
-    approved,
-  });
-  return {
-    approved,
-    required: true,
-    status: approved ? 'approved' : 'denied',
-    userMessage: approved
-      ? 'Autorizacion recibida. La herramienta continuo con la accion solicitada.'
-      : 'La autorizacion fue rechazada o cancelada.',
-  };
-};
-
-const executeAgentTool = async (
-  session: AgentMcpSession,
-  toolId: AgentToolId,
-  args: Record<string, unknown>,
-): Promise<unknown> => {
-  const tool = AGENT_TOOL_DEFINITIONS.find((candidate) => candidate.id === toolId);
-  if (!tool) {
-    await appendInstallLog('agent_tool:not_found', {
-      appId: session.appId,
-      runId: session.runId,
-      toolId,
-      args,
-    });
-    return { success: false, userMessage: 'La herramienta no esta disponible.', technicalCode: 'tool_not_found' };
-  }
-
-  await appendInstallLog('agent_tool:call_received', {
-    appId: session.appId,
-    runId: session.runId,
-    toolId,
-    args,
-    requiresApproval: Boolean(agentToolSettings.approvals[tool.id]),
-  });
-
-  const approval = await ensureToolApproval(session, tool);
-  if (!approval.approved) {
-    await appendInstallLog('agent_tool:call_cancelled', {
-      appId: session.appId,
-      runId: session.runId,
-      toolId,
-      reason: 'forger_permission_denied_or_unavailable',
-    });
-    return withToolAuthorization(
-      { success: false, userMessage: 'La accion fue cancelada por el usuario.', technicalCode: 'permission_denied' },
-      approval,
-    );
-  }
-
-  await appendInstallLog('agent_tool:call', {
-    appId: session.appId,
-    toolId,
-    runId: session.runId,
-  });
-
-  if (toolId === 'forger_list_catalog') {
-    catalogApps = await listCatalogFromBackend();
-    ensureCatalogStatuses();
-    const result = { success: true, apps: catalogApps };
-    await appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
-    return withToolAuthorization(result, approval);
-  }
-
-  if (toolId === 'forger_list_installed_apps') {
-    const result = { success: true, apps: Object.values(registry.apps).map(toAppSummary) };
-    await appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
-    return withToolAuthorization(result, approval);
-  }
-
-  if (toolId === 'forger_check_updates') {
-    catalogApps = await listCatalogFromBackend();
-    ensureCatalogStatuses();
-    const updates = Object.values(registry.apps)
-      .map((record) => toAppSummary(record))
-      .filter((summary) => summary.updateAvailable);
-    const result = { success: true, updates };
-    await appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
-    return withToolAuthorization(result, approval);
-  }
-
-  const appId = getToolAppId(session, args);
-
-  if (toolId === 'forger_get_app_runtime_status') {
-    const result = { success: true, status: getRuntimeStatus(appId) };
-    await appendInstallLog('agent_tool:call_result', { appId, runId: session.runId, toolId, result });
-    return withToolAuthorization(result, approval);
-  }
-
-  if (toolId === 'forger_open_app') {
-    const result = await openInstalledApp(appId);
-    await appendInstallLog('agent_tool:call_result', { appId, runId: session.runId, toolId, result });
-    return withToolAuthorization(result, approval);
-  }
-
-  if (toolId === 'forger_stop_app') {
-    const result = await stopInstalledApp(appId);
-    await appendInstallLog('agent_tool:call_result', { appId, runId: session.runId, toolId, result });
-    return withToolAuthorization(result, approval);
-  }
-
-  if (toolId === 'forger_restart_app') {
-    const stop = await stopInstalledApp(appId);
-    if (!stop.success) {
-      await appendInstallLog('agent_tool:call_result', { appId, runId: session.runId, toolId, result: stop });
-      return withToolAuthorization(stop, approval);
-    }
-    const result = await openInstalledApp(appId);
-    await appendInstallLog('agent_tool:call_result', { appId, runId: session.runId, toolId, result });
-    return withToolAuthorization(result, approval);
-  }
-
-  if (toolId === 'forger_refresh_app_view') {
-    const window = appWindows.get(appId);
-    const running = runningApps.get(appId);
-    if (window && !window.isDestroyed()) {
-      window.webContents.reloadIgnoringCache();
-      const result = { success: true, userMessage: 'Vista reiniciada correctamente.' };
-      await appendInstallLog('agent_tool:call_result', { appId, runId: session.runId, toolId, result });
-      return withToolAuthorization(result, approval);
-    }
-    if (running) {
-      const record = registry.apps[appId];
-      await openOrFocusAppWindow(appId, record?.name ?? appId, running.frontendUrl);
-      const result = { success: true, userMessage: 'Vista abierta correctamente.' };
-      await appendInstallLog('agent_tool:call_result', { appId, runId: session.runId, toolId, result });
-      return withToolAuthorization(result, approval);
-    }
-    const result = { success: false, userMessage: 'La app no esta abierta.', technicalCode: 'app_not_running' };
-    await appendInstallLog('agent_tool:call_result', { appId, runId: session.runId, toolId, result });
-    return withToolAuthorization(result, approval);
-  }
-
-  if (toolId === 'forger_update_app') {
-    const result = await updateAppRuntime(appId);
-    await appendInstallLog('agent_tool:call_result', { appId, runId: session.runId, toolId, result });
-    return withToolAuthorization(result, approval);
-  }
-
-  const result = { success: false, userMessage: 'La herramienta no esta disponible.', technicalCode: 'tool_not_found' };
-  await appendInstallLog('agent_tool:call_result', { appId, runId: session.runId, toolId, result });
-  return withToolAuthorization(result, approval);
-};
-
-const handleMcpRequest = async (
-  session: AgentMcpSession,
-  request: JsonRpcRequest,
-): Promise<Record<string, unknown> | null> => {
-  const id = request.id ?? null;
-  await appendInstallLog('agent_tool:mcp_request', {
-    appId: session.appId,
-    runId: session.runId,
-    method: request.method ?? null,
-    id,
-  });
-  if (!request.method) {
-    return { jsonrpc: '2.0', id, error: { code: -32600, message: 'Invalid request' } };
-  }
-
-  if (request.method === 'initialize') {
-    return {
-      jsonrpc: '2.0',
-      id,
-      result: {
-        protocolVersion: '2025-06-18',
-        capabilities: { tools: {} },
-        serverInfo: { name: 'forger', version: app.getVersion() },
-      },
-    };
-  }
-
-  if (request.method === 'notifications/initialized') {
-    return null;
-  }
-
-  if (request.method === 'ping') {
-    return { jsonrpc: '2.0', id, result: {} };
-  }
-
-  if (request.method === 'tools/list') {
-    return { jsonrpc: '2.0', id, result: { tools: getMcpTools() } };
-  }
-
-  if (request.method === 'tools/call') {
-    const params = request.params as { name?: unknown; arguments?: unknown } | undefined;
-    const toolName = params?.name;
-    await appendInstallLog('agent_tool:mcp_tools_call_received', {
-      appId: session.appId,
-      runId: session.runId,
-      id,
-      toolName,
-      arguments: params?.arguments ?? null,
-    });
-    if (!isAgentToolId(toolName)) {
-      await appendInstallLog('agent_tool:mcp_tools_call_rejected', {
-        appId: session.appId,
-        runId: session.runId,
-        id,
-        toolName,
-        reason: 'unknown_tool',
-      });
-      return { jsonrpc: '2.0', id, error: { code: -32602, message: 'Unknown tool' } };
-    }
-    const args = params?.arguments && typeof params.arguments === 'object'
-      ? (params.arguments as Record<string, unknown>)
-      : {};
-    const result = await executeAgentTool(session, toolName, args);
-    await appendInstallLog('agent_tool:mcp_tools_call_completed', {
-      appId: session.appId,
-      runId: session.runId,
-      id,
-      toolName,
-      isError: Boolean((result as { success?: unknown }).success === false),
-    });
-    return {
-      jsonrpc: '2.0',
-      id,
-      result: {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(result, null, 2),
-          },
-        ],
-        isError: Boolean((result as { success?: unknown }).success === false),
-      },
-    };
-  }
-
-  return { jsonrpc: '2.0', id, error: { code: -32601, message: 'Method not found' } };
-};
-
-const startForgerMcpServer = async (): Promise<void> => {
-  if (forgerMcpServer) {
-    return;
-  }
-
-  const server = http.createServer((request, response) => {
-    void (async () => {
-      const requestPath = new URL(request.url ?? '/', 'http://127.0.0.1').pathname;
-      if (request.method !== 'POST' || requestPath !== '/mcp') {
-        sendMcpJson(response, 404, { error: 'not_found' });
-        return;
-      }
-
-      const token = getBearerToken(request);
-      const session = token ? agentMcpSessions.get(token) : null;
-      if (!session) {
-        void appendInstallLog('agent_tool:mcp_unauthorized', {
-          path: requestPath,
-          hasToken: Boolean(token),
-        });
-        sendMcpJson(response, 401, { error: 'unauthorized' });
-        return;
-      }
-
-      const raw = await readRequestBody(request);
-      const parsed = JSON.parse(raw) as JsonRpcRequest | JsonRpcRequest[];
-      const requests = Array.isArray(parsed) ? parsed : [parsed];
-      await appendInstallLog('agent_tool:mcp_http_request', {
-        appId: session.appId,
-        runId: session.runId,
-        requestCount: requests.length,
-        methods: requests.map((entry) => entry.method ?? null),
-      });
-      const results = (await Promise.all(requests.map((entry) => handleMcpRequest(session, entry))))
-        .filter((entry): entry is Record<string, unknown> => Boolean(entry));
-
-      if (results.length === 0) {
-        response.writeHead(202);
-        response.end();
-        return;
-      }
-
-      sendMcpJson(response, 200, Array.isArray(parsed) ? results : results[0]);
-    })().catch((error) => {
-      void appendInstallLog('agent_tool:mcp_http_error', {
-        message: error instanceof Error ? error.message : 'internal_error',
-        stack: error instanceof Error ? error.stack : undefined,
-      });
-      sendMcpJson(response, 500, {
-        jsonrpc: '2.0',
-        id: null,
-        error: {
-          code: -32603,
-          message: error instanceof Error ? error.message : 'internal_error',
-        },
-      });
-    });
-  });
-
-  await new Promise<void>((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(0, '127.0.0.1', () => {
-      server.off('error', reject);
-      resolve();
-    });
-  });
-
-  const address = server.address();
-  if (!address || typeof address === 'string') {
-    server.close();
-    throw new Error('forger_mcp_server_address_unavailable');
-  }
-
-  forgerMcpServer = {
-    server,
-    url: `http://127.0.0.1:${address.port}/mcp`,
-  };
-
-  await appendInstallLog('agent_tool:mcp_server_started', { url: forgerMcpServer.url });
-};
-
 const getWindowState = (window: BrowserWindow): WindowControlState => ({
   isMaximized: window.isMaximized(),
   isFullScreen: window.isFullScreen(),
@@ -4983,16 +4108,7 @@ const createWindow = async (): Promise<void> => {
   });
   registerWindowStateEvents(mainWindow);
   mainWindow.webContents.on('render-process-gone', (_event, details) => {
-    emitDesktopErrorReportRequested({
-      source: 'renderer',
-      operation: 'render-process-gone',
-      message: `Renderer process ended: ${details.reason}`,
-      technicalCode: 'renderer_process_gone',
-      details: {
-        reason: details.reason,
-        exitCode: details.exitCode,
-      },
-    });
+    desktopErrorReporter?.reportRendererProcessGone(details);
   });
 
   if (isDev && process.env.VITE_DEV_SERVER_URL) {
@@ -5351,7 +4467,16 @@ const registerIpcHandlers = (): void => {
     if (!appCodexTaskManager) {
       throw new Error('app_codex_task_manager_unavailable');
     }
-    return await appCodexTaskManager.start(appId, input);
+    try {
+      return await appCodexTaskManager.start(appId, input);
+    } catch (error) {
+      desktopErrorReporter?.reportAppCodexStartFailure({
+        appId,
+        operation: 'app.codex-task.start',
+        error,
+      });
+      throw error;
+    }
   });
 
   ipcMain.handle(IPC_CHANNELS.appCodexTaskGet, async (event, runId: string) => {
@@ -5378,7 +4503,16 @@ const registerIpcHandlers = (): void => {
     if (!appCodexConversationManager) {
       throw new Error('app_codex_conversation_manager_unavailable');
     }
-    return await appCodexConversationManager.create(appId, input ?? {});
+    try {
+      return await appCodexConversationManager.create(appId, input ?? {});
+    } catch (error) {
+      desktopErrorReporter?.reportAppCodexStartFailure({
+        appId,
+        operation: 'app.codex-conversation.create',
+        error,
+      });
+      throw error;
+    }
   });
 
   ipcMain.handle(IPC_CHANNELS.appCodexConversationSendMessage, async (
@@ -5392,7 +4526,16 @@ const registerIpcHandlers = (): void => {
     if (!appCodexConversationManager) {
       throw new Error('app_codex_conversation_manager_unavailable');
     }
-    return await appCodexConversationManager.sendMessage(appId, input);
+    try {
+      return await appCodexConversationManager.sendMessage(appId, input);
+    } catch (error) {
+      desktopErrorReporter?.reportAppCodexStartFailure({
+        appId,
+        operation: 'app.codex-conversation.send-message',
+        error,
+      });
+      throw error;
+    }
   });
 
   ipcMain.handle(IPC_CHANNELS.appCodexConversationGet, async (event, conversationId: string) => {
@@ -5580,8 +4723,65 @@ app.whenReady().then(async () => {
     toCatalogStatus,
     getUserMessage: (slug) => registry.apps[slug]?.userMessage,
   });
-  await startForgerMcpServer();
-  appMcpManager = new AppMcpManager();
+  forgerMcpServer = new ForgerMcpServer({
+    getAppVersion: () => app.getVersion(),
+    getToolDefinitions: () => AGENT_TOOL_DEFINITIONS,
+    getToolSettings: () => agentToolSettings,
+    appendInstallLog,
+    requestPermission: (runId, request) => chatOrchestrator?.requestExternalPermission(runId, request) ?? null,
+    listCatalog: async () => {
+      catalogApps = await listCatalogFromBackend();
+      ensureCatalogStatuses();
+      return catalogApps;
+    },
+    listInstalledApps: () => Object.values(registry.apps).map(toAppSummary),
+    checkUpdates: async () => {
+      catalogApps = await listCatalogFromBackend();
+      ensureCatalogStatuses();
+      return Object.values(registry.apps)
+        .map((record) => toAppSummary(record))
+        .filter((summary) => summary.updateAvailable);
+    },
+    getRuntimeStatus,
+    openApp: openInstalledApp,
+    stopApp: stopInstalledApp,
+    refreshAppView: async (appId) => {
+      const appWindow = appWindows.get(appId);
+      const running = runningApps.get(appId);
+      if (appWindow && !appWindow.isDestroyed()) {
+        appWindow.webContents.reloadIgnoringCache();
+        return { success: true, userMessage: 'Vista reiniciada correctamente.' };
+      }
+      if (running) {
+        const record = registry.apps[appId];
+        await openOrFocusAppWindow(appId, record?.name ?? appId, running.frontendUrl);
+        return { success: true, userMessage: 'Vista abierta correctamente.' };
+      }
+      return { success: false, userMessage: 'La app no esta abierta.', technicalCode: 'app_not_running' };
+    },
+    updateApp: updateAppRuntime,
+    onToolFailure: (input) => desktopErrorReporter?.reportForgerMcpToolFailure(input),
+    onHttpFailure: (input) => desktopErrorReporter?.reportForgerMcpHttpFailure(input),
+  });
+  await forgerMcpServer.start();
+  appMcpManager = new AppMcpManager({
+    getInstalledApp: (appId) => registry.apps[appId],
+    resolveInstalledManifest,
+    ensureRuntimeInstalled,
+    getVenvExecutables,
+    getFreePort,
+    splitManifestCommand,
+    ensurePathInside,
+    translateManifestEnvironment,
+    ensureSqliteDatabaseParent,
+    getRuntimePathEntries,
+    waitForHttpOk,
+    terminateProcess,
+    appendInstallLog,
+    truncateForInstallLog,
+    serializeErrorForInstallLog,
+    onMcpStartFailed: (input) => desktopErrorReporter?.reportAppMcpStartFailure(input),
+  });
   fileLibrary = new FileLibrary(getPrivateDataRoot(), getForgerMetadataRoot());
   chatOrchestrator = new ChatOrchestrator({
     forgerHomeRoot: getForgerHomeRoot(),
@@ -5629,8 +4829,8 @@ app.whenReady().then(async () => {
       const status = await getCodexAuthStatus();
       return status.authenticated;
     },
-    createForgerMcpSession,
-    releaseForgerMcpSession,
+    createForgerMcpSession: (runId, appId) => forgerMcpServer?.createSession(runId, appId) ?? null,
+    releaseForgerMcpSession: (token) => forgerMcpServer?.releaseSession(token),
     listenAppMcps: async (appIds: string[], runId: string) =>
       await (appMcpManager?.listenMcps(appIds, runId) ?? Promise.resolve([])),
     releaseAppMcps: (runId: string) => {
@@ -5651,6 +4851,14 @@ app.whenReady().then(async () => {
       ensureCatalogStatuses();
     },
     onRunUpdated: (event) => {
+      if (event.run.status === 'failed') {
+        desktopErrorReporter?.reportChatRunFailure({
+          appId: event.run.appId,
+          runId: event.run.runId,
+          errorCode: event.run.errorCode,
+          message: event.run.userMessage,
+        });
+      }
       emitChatRunUpdated(event as { run: unknown });
     },
   });
@@ -5704,6 +4912,7 @@ app.whenReady().then(async () => {
       appMcpManager?.releaseMcps(runId);
     },
     onTaskUpdated: (event) => {
+      desktopErrorReporter?.reportAppCodexTaskEvent(event);
       const target = appWindows.get(event.task.appId);
       if (target && !target.isDestroyed()) {
         target.webContents.send(IPC_CHANNELS.appCodexTaskUpdated, event);
@@ -5760,6 +4969,7 @@ app.whenReady().then(async () => {
       appMcpManager?.releaseMcps(runId);
     },
     onConversationEvent: (event) => {
+      desktopErrorReporter?.reportAppCodexConversationEvent(event);
       const target = appWindows.get(event.conversation.appId);
       if (target && !target.isDestroyed()) {
         target.webContents.send(IPC_CHANNELS.appCodexConversationEvent, event);
@@ -5780,14 +4990,22 @@ app.whenReady().then(async () => {
       const status = await getCodexAuthStatus();
       return status.authenticated;
     },
-    createForgerMcpSession,
-    releaseForgerMcpSession,
+    createForgerMcpSession: (runId, appId) => forgerMcpServer?.createSession(runId, appId) ?? null,
+    releaseForgerMcpSession: (token) => forgerMcpServer?.releaseSession(token),
     listenAppMcps: async (appIds: string[], runId: string) =>
       await (appMcpManager?.listenMcps(appIds, runId) ?? Promise.resolve([])),
     releaseAppMcps: (runId: string) => {
       appMcpManager?.releaseMcps(runId);
     },
     onAutomationUpdated: (event) => {
+      if (event.run?.status === 'failed') {
+        desktopErrorReporter?.reportAutomationRunFailure({
+          automationId: event.automation.id,
+          runId: event.run.id,
+          selectedAppIds: event.automation.selectedAppIds,
+          error: event.run.error ?? event.run.userMessage ?? 'automation_run_failed',
+        });
+      }
       emitAutomationUpdated(event as { automation: unknown; run?: unknown });
     },
   });
@@ -5808,7 +5026,7 @@ app.on('before-quit', () => {
   automationManager?.dispose();
   appMcpManager?.dispose();
   devCatalogService?.stop();
-  forgerMcpServer?.server.close();
+  forgerMcpServer?.stop();
   forgerMcpServer = null;
   for (const running of runningApps.values()) {
     void terminateProcess(running.backend);

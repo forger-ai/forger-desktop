@@ -31,7 +31,6 @@ import type {
   AutomationUpsertInput,
   CatalogApp,
   CodexAuthStatus,
-  CodexModelOption,
   CodexReasoningEffort,
   DesktopErrorReportInput,
   DesktopErrorReportPreview,
@@ -51,7 +50,7 @@ import type {
 import { AppShell } from '@renderer/components/AppShell';
 import { CodexConfigModal } from '@renderer/components/CodexConfigModal';
 import { ForgerCloudModal } from '@renderer/components/ForgerCloudModal';
-import { defaultLocale, getDictionary, type Locale } from '@renderer/i18n';
+import { getDictionary, type Locale } from '@renderer/i18n';
 import { buildAppTheme, resolveThemeMode, type ThemePreference } from '@renderer/theme/appTheme';
 import { AppView } from '@renderer/views/AppView';
 import { AutomationsView } from '@renderer/views/AutomationsView';
@@ -64,53 +63,39 @@ import { SettingsView } from '@renderer/views/SettingsView';
 import { SecretsView } from '@renderer/views/SecretsView';
 import { ToolsView } from '@renderer/views/ToolsView';
 import type { View } from '@renderer/components/Sidebar';
-import chatBotIcon from '@renderer/assets/chat-bot-icon.png';
-import chatFemaleIcon from '@renderer/assets/chat-female-icon.png';
-import chatMaleIcon from '@renderer/assets/chat-male-icon.png';
+import {
+  CHAT_BOT_PICTURE_OPTIONS,
+  CHAT_BOT_PICTURE_STORAGE_KEY,
+  CODEX_MODEL_OPTIONS,
+  CODEX_MODEL_STORAGE_KEY,
+  CODEX_REASONING_OPTIONS,
+  CODEX_REASONING_STORAGE_KEY,
+  LANGUAGE_STORAGE_KEY,
+  STARTUP_UPDATE_CHECK_STORAGE_KEY,
+  THEME_STORAGE_KEY,
+  getStoredChatBotPicture,
+  getStoredCodexModel,
+  getStoredCodexReasoningEffort,
+  getStoredLanguagePreference,
+  getStoredThemePreference,
+  resolveSystemLocale,
+  type ChatBotPicture,
+  type LanguagePreference,
+} from '@renderer/preferences';
+import {
+  CHAT_STORAGE_KEY,
+  makeConversationId,
+  readPersistedChatState,
+  summarizeConversationTitle,
+  type ChatConversation,
+  type PersistedChatState,
+} from '@renderer/chat-state';
+import {
+  buildErrorReport as buildErrorReportPreview,
+  shouldPromptForErrorReport,
+} from '@renderer/error-reporting';
 
-const THEME_STORAGE_KEY = 'forger-theme-preference';
-const LANGUAGE_STORAGE_KEY = 'forger-language-preference';
-const CHAT_STORAGE_KEY = 'forger-chat-conversations-v1';
-const CODEX_MODEL_STORAGE_KEY = 'forger-codex-model-v1';
-const CODEX_REASONING_STORAGE_KEY = 'forger-codex-reasoning-effort-v1';
-const CHAT_BOT_PICTURE_STORAGE_KEY = 'forger-chat-bot-picture-v1';
-const STARTUP_UPDATE_CHECK_STORAGE_KEY = 'forger-desktop-startup-update-check-v1';
 const FORGER_DATA_ROOT_NAME = 'data';
-
-const EXPECTED_ERROR_CODES = new Set([
-  'permission_denied',
-  'app_not_installed',
-  'missing_secrets',
-  'no_pending_update_conflict',
-  'codex_auth_missing',
-  'auth_missing',
-]);
-
-export type ChatBotPicture = 'bot' | 'female' | 'male';
-export type LanguagePreference = 'system' | Locale;
-
-const SUPPORTED_LOCALES: Locale[] = ['es', 'en'];
-
-const CHAT_BOT_PICTURE_OPTIONS: Array<{ value: ChatBotPicture; label: string; src: string }> = [
-  { value: 'bot', label: 'Bot', src: chatBotIcon },
-  { value: 'female', label: 'Female', src: chatFemaleIcon },
-  { value: 'male', label: 'Male', src: chatMaleIcon },
-];
-
-const CODEX_MODEL_OPTIONS: CodexModelOption[] = [
-  { displayModelName: '5.3 Codex', realModelName: 'gpt-5.3-codex', defaultReasoningEffort: 'low' as const },
-  { displayModelName: '5.3 Spark', realModelName: 'gpt-5.3-codex-spark', defaultReasoningEffort: 'high' as const },
-  { displayModelName: '5.4', realModelName: 'gpt-5.4', defaultReasoningEffort: 'medium' as const },
-  { displayModelName: '5.4 Mini', realModelName: 'gpt-5.4-mini', defaultReasoningEffort: 'medium' as const },
-  { displayModelName: '5.5', realModelName: 'gpt-5.5', defaultReasoningEffort: 'medium' as const },
-];
-
-const CODEX_REASONING_OPTIONS: { label: string; value: CodexReasoningEffort }[] = [
-  { label: 'Low', value: 'low' },
-  { label: 'Medium', value: 'medium' },
-  { label: 'High', value: 'high' },
-  { label: 'XHigh', value: 'xhigh' },
-];
 
 const initialSettings: Settings = {
   userEmail: '',
@@ -148,83 +133,6 @@ const initialAgentToolSettings: AgentToolSettings = {
   },
 };
 
-const normalizeLocale = (value?: string | null): Locale | null => {
-  if (!value) {
-    return null;
-  }
-  const normalized = value.toLowerCase();
-  return SUPPORTED_LOCALES.find((locale) => normalized === locale || normalized.startsWith(`${locale}-`)) ?? null;
-};
-
-const resolveSystemLocale = (): Locale => {
-  if (typeof navigator === 'undefined') {
-    return defaultLocale;
-  }
-  for (const language of navigator.languages ?? []) {
-    const locale = normalizeLocale(language);
-    if (locale) {
-      return locale;
-    }
-  }
-  return normalizeLocale(navigator.language) ?? defaultLocale;
-};
-
-const getStoredLanguagePreference = (): LanguagePreference => {
-  if (typeof window === 'undefined') {
-    return 'system';
-  }
-  const stored = window.localStorage.getItem(LANGUAGE_STORAGE_KEY);
-  if (stored === 'system' || SUPPORTED_LOCALES.includes(stored as Locale)) {
-    return stored as LanguagePreference;
-  }
-  return 'system';
-};
-
-const getStoredThemePreference = (): ThemePreference => {
-  if (typeof window === 'undefined') {
-    return 'system';
-  }
-
-  const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
-  if (stored === 'light' || stored === 'dark' || stored === 'system') {
-    return stored;
-  }
-
-  return 'system';
-};
-
-const getStoredCodexModel = (): string => {
-  if (typeof window === 'undefined') {
-    return CODEX_MODEL_OPTIONS[0].realModelName;
-  }
-  const stored = window.localStorage.getItem(CODEX_MODEL_STORAGE_KEY);
-  return CODEX_MODEL_OPTIONS.some((option) => option.realModelName === stored)
-    ? stored as string
-    : CODEX_MODEL_OPTIONS[0].realModelName;
-};
-
-const getStoredCodexReasoningEffort = (): CodexReasoningEffort => {
-  if (typeof window === 'undefined') {
-    return CODEX_MODEL_OPTIONS[0].defaultReasoningEffort;
-  }
-  const stored = window.localStorage.getItem(CODEX_REASONING_STORAGE_KEY);
-  return CODEX_REASONING_OPTIONS.some((option) => option.value === stored)
-    ? stored as CodexReasoningEffort
-    : CODEX_MODEL_OPTIONS[0].defaultReasoningEffort;
-};
-
-const getStoredChatBotPicture = (): ChatBotPicture => {
-  if (typeof window === 'undefined') {
-    return 'bot';
-  }
-  const stored = window.localStorage.getItem(CHAT_BOT_PICTURE_STORAGE_KEY);
-  if (stored === 'bot' || stored === 'female' || stored === 'male') {
-    return stored;
-  }
-  const options = CHAT_BOT_PICTURE_OPTIONS.map((option) => option.value);
-  return options[Math.floor(Math.random() * options.length)] ?? 'bot';
-};
-
 const getDesktopApi = () => {
   const desktopApi = window.forger;
   if (!desktopApi) {
@@ -236,79 +144,12 @@ const getDesktopApi = () => {
   return desktopApi;
 };
 
-interface ChatConversation {
-  id: string;
-  appId: string;
-  title: string;
-  threadId: string | null;
-  createdAt: string;
-  updatedAt: string;
-  messages: ChatMessage[];
-}
-
-interface PersistedChatState {
-  conversations: ChatConversation[];
-  activeConversationByApp: Record<string, string>;
-  lastActiveConversationId: string | null;
-}
-
 interface ErrorReportDialogState {
   open: boolean;
   report: DesktopErrorReportPreview | null;
   busy: boolean;
   userMessage?: string;
 }
-
-const readPersistedChatState = (): PersistedChatState => {
-  if (typeof window === 'undefined') {
-    return {
-      conversations: [],
-      activeConversationByApp: {},
-      lastActiveConversationId: null,
-    };
-  }
-
-  const raw = window.localStorage.getItem(CHAT_STORAGE_KEY);
-  if (!raw) {
-    return {
-      conversations: [],
-      activeConversationByApp: {},
-      lastActiveConversationId: null,
-    };
-  }
-
-  try {
-    const parsed = JSON.parse(raw) as Partial<PersistedChatState>;
-    return {
-      conversations: Array.isArray(parsed.conversations) ? parsed.conversations : [],
-      activeConversationByApp:
-        parsed.activeConversationByApp && typeof parsed.activeConversationByApp === 'object'
-          ? (parsed.activeConversationByApp as Record<string, string>)
-          : {},
-      lastActiveConversationId:
-        typeof parsed.lastActiveConversationId === 'string' ? parsed.lastActiveConversationId : null,
-    };
-  } catch {
-    return {
-      conversations: [],
-      activeConversationByApp: {},
-      lastActiveConversationId: null,
-    };
-  }
-};
-
-const makeConversationId = () =>
-  typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-    ? crypto.randomUUID()
-    : `conv-${Date.now()}`;
-
-const summarizeConversationTitle = (prompt: string): string => {
-  const compact = prompt.replace(/\s+/g, ' ').trim();
-  if (!compact) {
-    return 'Conversacion nueva';
-  }
-  return compact.length <= 56 ? compact : `${compact.slice(0, 56)}...`;
-};
 
 function App() {
   const persistedChatState = useMemo(() => readPersistedChatState(), []);
@@ -400,12 +241,12 @@ function App() {
   const [languagePreference, setLanguagePreference] =
     useState<LanguagePreference>(getStoredLanguagePreference);
   const [systemLocale, setSystemLocale] = useState<Locale>(resolveSystemLocale);
-  const activeLocale = languagePreference === 'system' ? systemLocale : languagePreference;
+const activeLocale = languagePreference === 'system' ? systemLocale : languagePreference;
   const t = useMemo(() => getDictionary(activeLocale), [activeLocale]);
   const [chatBotPicture, setChatBotPicture] = useState<ChatBotPicture>(getStoredChatBotPicture);
   const prefersDark = useMediaQuery('(prefers-color-scheme: dark)');
   const chatBotPictureSrc =
-    CHAT_BOT_PICTURE_OPTIONS.find((option) => option.value === chatBotPicture)?.src ?? chatBotIcon;
+    CHAT_BOT_PICTURE_OPTIONS.find((option) => option.value === chatBotPicture)?.src ?? CHAT_BOT_PICTURE_OPTIONS[0].src;
 
   const activeConversation = useMemo(
     () => chatConversations.find((conversation) => conversation.id === activeConversationId) ?? null,
@@ -430,27 +271,13 @@ function App() {
     [chatConversations, selectedAppId],
   );
 
-  const buildErrorReport = (input: DesktopErrorReportInput): DesktopErrorReportPreview => ({
-    ...input,
-    desktopVersion: desktopUpdateState.currentVersion || undefined,
-    platform: navigator.platform,
-    occurredAt: new Date().toISOString(),
-  });
-
-  const shouldPromptForErrorReport = (technicalCode?: string): boolean => {
-    if (!technicalCode) {
-      return true;
-    }
-    return !EXPECTED_ERROR_CODES.has(technicalCode);
-  };
-
   const requestErrorReport = (input: DesktopErrorReportInput) => {
     if (!shouldPromptForErrorReport(input.technicalCode)) {
       return;
     }
     setErrorReportDialog({
       open: true,
-      report: buildErrorReport(input),
+      report: buildErrorReportPreview(input, desktopUpdateState.currentVersion),
       busy: false,
     });
   };

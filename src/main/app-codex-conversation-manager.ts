@@ -239,8 +239,9 @@ export class AppCodexConversationManager {
             ...mcpArgs,
             '--skip-git-repo-check',
             ...imageArgs,
+            '--',
             conversation.threadId,
-            prompt,
+            '-',
           ]
         : [
             ...command.prefixArgs,
@@ -259,7 +260,8 @@ export class AppCodexConversationManager {
             '-C',
             appRoot,
             ...imageArgs,
-            prompt,
+            '--',
+            '-',
           ];
 
       const result = await runCommandCapture(command.command, args, {
@@ -277,6 +279,7 @@ export class AppCodexConversationManager {
         },
         onStdout: (text) => this.handleOutput(conversation, run, text),
         onStderr: (text) => this.handleOutput(conversation, run, text),
+        stdinText: prompt,
       });
 
       if (this.runs.get(run.runId)?.status === 'canceled') {
@@ -602,6 +605,7 @@ const runCommandCapture = async (
     cwd: string;
     env?: NodeJS.ProcessEnv;
     timeoutMs?: number;
+    stdinText?: string;
     onChild?: (child: ChildProcessWithoutNullStreams) => void;
     onStdout?: (text: string) => void;
     onStderr?: (text: string) => void;
@@ -616,7 +620,7 @@ const runCommandCapture = async (
       detached: process.platform !== 'win32',
     });
     options.onChild?.(child);
-    child.stdin.end();
+    child.stdin.end(options.stdinText ?? '');
 
     let stdout = '';
     let stderr = '';

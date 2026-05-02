@@ -17,7 +17,7 @@ import RestartAltRounded from '@mui/icons-material/RestartAltRounded';
 import type { CodexAuthStatus, DesktopUpdateState } from '@shared/types';
 import type { AppDictionary, Locale } from '@renderer/i18n';
 import type { ThemePreference } from '@renderer/theme/appTheme';
-import type { ChatBotPicture, LanguagePreference } from '@renderer/App';
+import type { ChatBotPicture, LanguagePreference } from '@renderer/preferences';
 
 interface SettingsViewProps {
   codexAuthBusy: boolean;
