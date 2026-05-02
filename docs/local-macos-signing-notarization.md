@@ -25,7 +25,7 @@ CSC_KEY_PASSWORD="$(tr -d '\r\n' < /Users/felipepezoa/Forger/signing/forger-deve
 npm run release:local:mac -- --allow-dirty --skip-notarize
 ```
 
-That signs `release/mac-arm64/Forger.app` with Developer ID. The DMG also needs to be signed explicitly after `electron-builder` creates it:
+That signs `release/mac-arm64/Forger.app` with Developer ID. `release-local` also signs the DMG explicitly after `electron-builder` creates it:
 
 ```sh
 codesign --force --timestamp \
@@ -69,7 +69,7 @@ origin=Developer ID Application: Felipe Pezoa (Q58U66S52T)
 Use one of these credential options:
 
 ```sh
-# App Store Connect API key
+# App Store Connect team API key
 xcrun notarytool submit release/forger-desktop-macos-arm64.dmg \
   --key /path/to/AuthKey_KEYID.p8 \
   --key-id KEYID \
@@ -77,6 +77,8 @@ xcrun notarytool submit release/forger-desktop-macos-arm64.dmg \
   --wait \
   --timeout 30m
 ```
+
+Individual API keys use the same command without `--issuer`.
 
 or:
 
