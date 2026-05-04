@@ -50,6 +50,12 @@ const asString = (value: unknown, fallback = ''): string => {
 
 const safeJson = (payload: unknown): Buffer => Buffer.from(JSON.stringify(payload, null, 2), 'utf8');
 
+const readDevVersionOverride = async (appDir: string): Promise<string | undefined> => {
+  const raw = await fsp.readFile(path.join(appDir, '.version.dev'), 'utf8').catch(() => '');
+  const version = raw.trim();
+  return version || undefined;
+};
+
 const runCommand = async (
   command: string,
   args: string[],
@@ -168,7 +174,7 @@ const toCatalogEntry = async (app: LocalApp, baseUrl: string): Promise<JsonObjec
   const backend = asRecord(stack.backend);
   const frontend = asRecord(stack.frontend);
   const version = asString(app.manifest.version, '0.0.0');
-  const devVersion = `${version}-dev`;
+  const devVersion = (await readDevVersionOverride(app.appDir)) ?? `${version}-dev`;
   const branch = await getGitValue(app.appDir, ['rev-parse', '--abbrev-ref', 'HEAD']);
   const runtimeStack = getRuntimeStack(app.manifest);
 

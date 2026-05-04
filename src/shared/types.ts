@@ -39,6 +39,14 @@ export interface AppPromptTemplate {
   prompt: string;
 }
 
+export interface AppAgent {
+  id: string;
+  title: string;
+  description?: string;
+  initialPrompt: string;
+  legacy?: boolean;
+}
+
 export type AppPromptTemplateArgumentType = 'file' | 'string';
 
 export interface AppPromptTemplateArgument {
@@ -127,6 +135,43 @@ export interface Settings {
   userEmail: string;
   plan: string;
   safeMode: boolean;
+}
+
+export type MemoryScope = 'global' | 'app';
+export type MemoryKind = 'preference' | 'profile' | 'workflow' | 'constraint' | 'fact';
+export type MemorySource = 'user' | 'agent' | 'settings' | 'automation';
+
+export interface MemoryEntry {
+  id: string;
+  scope: MemoryScope;
+  appId?: string;
+  kind: MemoryKind;
+  text: string;
+  source: MemorySource;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MemoryListInput {
+  scope?: MemoryScope;
+  appId?: string;
+  kind?: MemoryKind;
+}
+
+export interface MemoryCreateInput {
+  scope: MemoryScope;
+  appId?: string;
+  kind: MemoryKind;
+  text: string;
+  source?: MemorySource;
+}
+
+export interface MemoryUpdateInput {
+  id: string;
+  scope?: MemoryScope;
+  appId?: string;
+  kind?: MemoryKind;
+  text?: string;
 }
 
 export type DesktopUpdateStatus =
@@ -245,6 +290,46 @@ export interface BasicActionResult {
   technicalCode?: string;
 }
 
+export type AppBackupReason = 'manual' | 'update' | 'pre_restore';
+
+export interface AppBackupFileSummary {
+  sourceRelativePath: string;
+  backupRelativePath: string;
+  sha256: string;
+  sizeBytes: number;
+}
+
+export interface AppBackupSummary {
+  appId: string;
+  appName: string;
+  appVersion: string;
+  backupId: string;
+  createdAt: string;
+  reason: AppBackupReason;
+  fileCount: number;
+  totalBytes: number;
+  files: AppBackupFileSummary[];
+}
+
+export interface CreateAppBackupInput {
+  appId: string;
+  reason?: AppBackupReason;
+}
+
+export interface CreateAppBackupResult extends BasicActionResult {
+  backup?: AppBackupSummary;
+}
+
+export interface DeleteAppBackupInput {
+  appId: string;
+  backupId: string;
+}
+
+export interface RestoreAppBackupInput {
+  appId: string;
+  backupId: string;
+}
+
 export interface OpenAppResult {
   success: boolean;
   userMessage: string;
@@ -332,6 +417,10 @@ export type AgentToolId =
   | 'forger_list_catalog'
   | 'forger_list_installed_apps'
   | 'forger_check_updates'
+  | 'memory_list'
+  | 'memory_create'
+  | 'memory_update'
+  | 'memory_delete'
   | 'forger_get_app_runtime_status'
   | 'forger_open_app'
   | 'forger_stop_app'
@@ -339,7 +428,7 @@ export type AgentToolId =
   | 'forger_refresh_app_view'
   | 'forger_update_app';
 
-export type AgentToolCategory = 'consulta' | 'app' | 'actualizacion' | 'vista';
+export type AgentToolCategory = 'consulta' | 'app' | 'actualizacion' | 'vista' | 'memoria';
 
 export type AgentToolRisk = 'bajo' | 'medio' | 'alto';
 
@@ -477,6 +566,7 @@ export interface AppDetails {
   operations: AppOperationSummary[];
   localChanges?: AppLocalChangeSummary[];
   promptTemplates?: AppPromptTemplate[];
+  agents?: AppAgent[];
   codexConversation?: { enabled: boolean };
 }
 
@@ -766,6 +856,7 @@ export interface AppCodexConversation {
 
 export interface AppCodexConversationCreateInput {
   title?: string;
+  agentId?: string;
   metadata?: Record<string, string | number | boolean | null>;
 }
 
@@ -787,6 +878,7 @@ export interface AppCodexConversationSendMessageInput {
 export interface AppCodexConversationEvent {
   type:
     | 'conversation.created'
+    | 'conversation.deleted'
     | 'message.created'
     | 'run.started'
     | 'run.progress'
@@ -801,7 +893,7 @@ export interface AppCodexConversationEvent {
 }
 
 export interface ForgerAppApi {
-  getContext: () => Promise<{ locale?: string }>;
+  getContext: () => Promise<{ locale?: string; agents?: AppAgent[] }>;
   getAiSubscriptionStatus: () => Promise<AppAiSubscriptionStatus>;
   selectExternalFolder: () => Promise<AppExternalFolderSelection>;
   startCodexTask: (input: AppCodexTaskStartInput) => Promise<AppCodexTaskSummary>;
@@ -812,6 +904,7 @@ export interface ForgerAppApi {
   sendCodexConversationMessage: (input: AppCodexConversationSendMessageInput) => Promise<AppCodexConversation>;
   getCodexConversation: (conversationId: string) => Promise<AppCodexConversation | null>;
   listCodexConversations: () => Promise<AppCodexConversation[]>;
+  deleteCodexConversation: (conversationId: string) => Promise<{ success: boolean }>;
   cancelCodexConversationRun: (
     conversationId: string,
     runId: string,
@@ -881,6 +974,10 @@ export interface ForgerDesktopApi {
   listCatalogApps: () => Promise<CatalogApp[]>;
   installApp: (appId: string) => Promise<InstallAppResult>;
   updateApp: (appId: string) => Promise<InstallAppResult>;
+  listBackups: (appId?: string) => Promise<AppBackupSummary[]>;
+  createBackup: (input: CreateAppBackupInput) => Promise<CreateAppBackupResult>;
+  deleteBackup: (input: DeleteAppBackupInput) => Promise<BasicActionResult>;
+  restoreBackup: (input: RestoreAppBackupInput) => Promise<BasicActionResult>;
   restoreAppUserVersion: (appId: string) => Promise<BasicActionResult>;
   resolveAppUpdateConflict: (appId: string) => Promise<{ runId: string; status: ChatRunStatus } | BasicActionResult>;
   uninstallApp: (appId: string) => Promise<BasicActionResult>;
@@ -921,6 +1018,10 @@ export interface ForgerDesktopApi {
   listAgentTools: () => Promise<AgentToolPackageDefinition[]>;
   getAgentToolSettings: () => Promise<AgentToolSettings>;
   updateAgentToolApproval: (input: UpdateAgentToolApprovalInput) => Promise<AgentToolSettings>;
+  memoryList: (input?: MemoryListInput) => Promise<MemoryEntry[]>;
+  memoryCreate: (input: MemoryCreateInput) => Promise<MemoryEntry>;
+  memoryUpdate: (input: MemoryUpdateInput) => Promise<MemoryEntry>;
+  memoryDelete: (id: string) => Promise<{ success: boolean }>;
   chatStartRun: (input: ChatStartRunInput) => Promise<{ runId: string; status: ChatRunStatus }>;
   chatGetRun: (input: ChatGetRunInput) => Promise<ChatRun | null>;
   chatCancelRun: (input: ChatCancelRunInput) => Promise<{ success: boolean }>;

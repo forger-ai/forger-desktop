@@ -27,8 +27,10 @@ import { DesktopUpdater } from './desktop-updater';
 import { DesktopErrorReporter } from './error-reporting';
 import { FileLibrary } from './file-library';
 import { ForgerMcpServer } from './forger-mcp-server';
+import { MemoryStore } from './memory-store';
 import { ForgerAccountStore, publicForgerAccount, type StoredForgerAccount } from './forger-account-store';
 import { ForgerBackendClient } from './forger-backend-client';
+import { BackupsManager } from './backups-manager';
 import {
   FORGER_AGENT_CONTRACT_MARKER,
   FORGER_AGENT_CONTRACT_MARKER_PREFIX,
@@ -44,9 +46,11 @@ import type {
   AgentToolId,
   AgentToolPackageDefinition,
   AgentToolSettings,
+  AppBackupSummary,
   AppCategory,
   AppDetails,
   AppExternalFolderSelection,
+  AppAgent,
   AppCodexTaskStartInput,
   AppCodexConversationCreateInput,
   AppCodexConversationSendMessageInput,
@@ -85,6 +89,9 @@ import type {
   ForgerAccountLoginInput,
   ForgerAccountRegisterInput,
   InstallAppResult,
+  MemoryCreateInput,
+  MemoryListInput,
+  MemoryUpdateInput,
   OpenAppResult,
   RuntimeStatus,
   Settings,
@@ -149,6 +156,7 @@ interface InstalledAppRecord {
     targetVersion: string;
     preUpdateUserHead: string;
     baseCommitSha?: string;
+    backup?: AppBackupSummary;
     startedAt: string;
     message?: string;
   };
@@ -215,6 +223,7 @@ interface AppManifest {
   changelog?: VersionChangelog[];
   promptTemplates?: unknown;
   codexConversation?: unknown;
+  agents?: unknown;
   stack?: AppManifestStack;
   services?: AppManifestService[];
   mcp?: AppManifestMcp;
@@ -227,10 +236,6 @@ interface AppManifestVolume {
   source?: string;
   target?: string;
   persist?: boolean;
-}
-
-interface AppManifestCodexConversation {
-  enabled: boolean;
 }
 
 interface StackSkillTemplate {
@@ -259,6 +264,8 @@ let desktopUpdater: DesktopUpdater | null = null;
 let desktopErrorReporter: DesktopErrorReporter | null = null;
 let automationManager: AutomationManager | null = null;
 let appMcpManager: AppMcpManager | null = null;
+let backupsManager: BackupsManager | null = null;
+let memoryStore: MemoryStore | null = null;
 
 desktopErrorReporter = new DesktopErrorReporter({
   getMainWindow: () => mainWindow,
@@ -279,6 +286,7 @@ const getInstallLogPath = () => path.join(getLogsRoot(), 'install.log');
 const getForgerHomeRoot = () => path.join(os.homedir(), isDev ? 'Forger-dev' : 'Forger');
 const getPrivateAppsRoot = () => path.join(getForgerHomeRoot(), 'apps');
 const getPrivateDataRoot = () => path.join(getForgerHomeRoot(), 'data');
+const getBackupsRoot = () => path.join(getForgerHomeRoot(), 'backups');
 const getForgerMetadataRoot = () => path.join(getForgerHomeRoot(), '.forger');
 const getLegacyForgerMetadataRoot = () => path.join(getPrivateAppsRoot(), '.forger');
 const getCodexRoot = () => path.join(app.getPath('userData'), 'codex-cli');
@@ -319,6 +327,42 @@ const AGENT_TOOL_PACKAGES: AgentToolPackageDefinition[] = [
         name: 'Revisar actualizaciones',
         description: 'Compara versiones instaladas con el catalogo publicado.',
         category: 'consulta',
+        risk: 'bajo',
+        defaultRequiresApproval: false,
+      },
+      {
+        id: 'memory_list',
+        packageId: FORGER_TOOL_PACKAGE_ID,
+        name: 'Consultar memoria',
+        description: 'Consulta preferencias y notas guardadas en la memoria local de Forger.',
+        category: 'memoria',
+        risk: 'bajo',
+        defaultRequiresApproval: false,
+      },
+      {
+        id: 'memory_create',
+        packageId: FORGER_TOOL_PACKAGE_ID,
+        name: 'Guardar memoria',
+        description: 'Guarda una preferencia o nota util en la memoria local de Forger.',
+        category: 'memoria',
+        risk: 'bajo',
+        defaultRequiresApproval: false,
+      },
+      {
+        id: 'memory_update',
+        packageId: FORGER_TOOL_PACKAGE_ID,
+        name: 'Actualizar memoria',
+        description: 'Actualiza una preferencia o nota guardada en la memoria local de Forger.',
+        category: 'memoria',
+        risk: 'bajo',
+        defaultRequiresApproval: false,
+      },
+      {
+        id: 'memory_delete',
+        packageId: FORGER_TOOL_PACKAGE_ID,
+        name: 'Eliminar memoria',
+        description: 'Elimina una preferencia o nota guardada en la memoria local de Forger.',
+        category: 'memoria',
         risk: 'bajo',
         defaultRequiresApproval: false,
       },
@@ -721,6 +765,11 @@ const parseVersionParts = (value?: string): number[] | null => {
 };
 
 const isVersionNewer = (candidate?: string, current?: string): boolean => {
+  const normalizedCandidate = candidate?.trim();
+  const normalizedCurrent = current?.trim();
+  if (normalizedCandidate && normalizedCurrent && normalizedCandidate === normalizedCurrent) {
+    return false;
+  }
   const next = parseVersionParts(candidate);
   const prev = parseVersionParts(current);
   if (!next || !prev) {
@@ -732,6 +781,9 @@ const isVersionNewer = (candidate?: string, current?: string): boolean => {
     const b = prev[index] ?? 0;
     if (a > b) return true;
     if (a < b) return false;
+  }
+  if (normalizedCandidate && normalizedCurrent) {
+    return normalizedCandidate > normalizedCurrent;
   }
   return false;
 };
@@ -814,6 +866,49 @@ const getSecretsStore = (): SecretsStore => {
     secretsStore = new SecretsStore(app.getPath('userData'));
   }
   return secretsStore;
+};
+
+const getMemoryStore = (): MemoryStore => {
+  if (!memoryStore) {
+    memoryStore = new MemoryStore(getForgerMetadataRoot());
+  }
+  return memoryStore;
+};
+
+const buildMemoryContextForApps = async (appIds: string[]): Promise<string> => {
+  return await getMemoryStore().buildContext({ caller: 'automation', appIds });
+};
+
+const buildMemoryContextForApp = async (appId: string): Promise<string> => {
+  return await getMemoryStore().buildContext({ caller: 'app-agent', appId, appIds: [appId] });
+};
+
+const getBackupsManager = (): BackupsManager => {
+  if (!backupsManager) {
+    backupsManager = new BackupsManager({
+      backupsRoot: getBackupsRoot(),
+      listInstalledApps: () => Object.values(registry.apps).map((record) => ({
+        appId: record.appId,
+        name: record.name,
+        version: record.version,
+        installDir: record.installDir,
+      })),
+      getInstalledApp: (appId) => {
+        const record = registry.apps[appId];
+        return record
+          ? {
+              appId: record.appId,
+              name: record.name,
+              version: record.version,
+              installDir: record.installDir,
+            }
+          : undefined;
+      },
+      isAppRunning: (appId) => runningApps.has(appId),
+      log: appendInstallLog,
+    });
+  }
+  return backupsManager;
 };
 
 const RESERVED_APP_SECRET_ENV_NAMES = new Set([
@@ -925,6 +1020,54 @@ const normalizeManifestPromptTemplates = (manifest: AppManifest | null): AppProm
   return templates;
 };
 
+const normalizeManifestAgents = (manifest: AppManifest | null): AppAgent[] => {
+  const agents: AppAgent[] = [];
+  const seenIds = new Set<string>();
+  if (manifest && Array.isArray(manifest.agents)) {
+    for (const entry of manifest.agents) {
+      if (!entry || typeof entry !== 'object') {
+        continue;
+      }
+      const candidate = entry as Partial<AppAgent>;
+      const id = typeof candidate.id === 'string' ? candidate.id.trim() : '';
+      const title = typeof candidate.title === 'string' ? candidate.title.trim() : '';
+      const initialPrompt =
+        typeof candidate.initialPrompt === 'string' ? candidate.initialPrompt.trim() : '';
+      if (!id || !title || !initialPrompt || seenIds.has(id)) {
+        continue;
+      }
+      const description =
+        typeof candidate.description === 'string' && candidate.description.trim()
+          ? candidate.description.trim()
+          : undefined;
+      seenIds.add(id);
+      agents.push({
+        id,
+        title,
+        initialPrompt,
+        ...(description ? { description } : {}),
+      });
+    }
+  }
+
+  if (
+    agents.length === 0 &&
+    manifest?.codexConversation &&
+    typeof manifest.codexConversation === 'object' &&
+    (manifest.codexConversation as Record<string, unknown>).enabled === true
+  ) {
+    agents.push({
+      id: 'legacy-codex-conversation',
+      title: 'App Agent',
+      description: 'Conversacion asistida declarada por la app.',
+      initialPrompt: 'Ayuda al usuario con esta app usando su documentacion y herramientas disponibles.',
+      legacy: true,
+    });
+  }
+
+  return agents;
+};
+
 const normalizePromptTemplateArguments = (input: unknown): NonNullable<AppPromptTemplate['arguments']> => {
   if (!Array.isArray(input)) {
     return [];
@@ -965,14 +1108,6 @@ const normalizePromptTemplateArguments = (input: unknown): NonNullable<AppPrompt
   return args;
 };
 
-const normalizeManifestCodexConversation = (manifest: AppManifest | null): AppManifestCodexConversation | null => {
-  if (!manifest || !manifest.codexConversation || typeof manifest.codexConversation !== 'object') {
-    return null;
-  }
-  const candidate = manifest.codexConversation as Record<string, unknown>;
-  return candidate.enabled === true ? { enabled: true } : null;
-};
-
 const resolveInstalledPromptTemplates = async (appId: string): Promise<AppPromptTemplate[]> => {
   const record = registry.apps[appId];
   if (!record?.installDir) {
@@ -981,16 +1116,16 @@ const resolveInstalledPromptTemplates = async (appId: string): Promise<AppPrompt
   return normalizeManifestPromptTemplates(await resolveInstalledManifest(record.installDir));
 };
 
-const resolveInstalledCodexConversation = async (appId: string): Promise<AppManifestCodexConversation | null> => {
+const resolveInstalledAgents = async (appId: string): Promise<AppAgent[]> => {
   const record = registry.apps[appId];
   if (!record?.installDir) {
-    return null;
+    return [];
   }
-  return normalizeManifestCodexConversation(await resolveInstalledManifest(record.installDir));
+  return normalizeManifestAgents(await resolveInstalledManifest(record.installDir));
 };
 
 const hasInstalledCodexConversation = async (appId: string): Promise<boolean> =>
-  Boolean(await resolveInstalledCodexConversation(appId));
+  (await resolveInstalledAgents(appId)).length > 0;
 
 const getManifestAppSecretsValidationError = (manifest: AppManifest | null): string | null => {
   if (!manifest || !Array.isArray(manifest.appSecrets)) {
@@ -2877,6 +3012,14 @@ const updateAppRuntime = async (appId: string): Promise<InstallAppResult> => {
       throw new Error('missing_user_branch_head');
     }
 
+    const updateBackup = await getBackupsManager().createBackup({ appId, reason: 'update' });
+    if (!updateBackup.success || !updateBackup.backup) {
+      return await abortUpdateAndRestoreInstalled(
+        updateBackup.userMessage || 'No pudimos respaldar tus datos antes de actualizar.',
+        updateBackup.technicalCode || 'backup_failed',
+      );
+    }
+
     await publishProgress('downloading', 'Descargando actualizacion...');
     const download = await fetchDownloadBundle(catalogApp);
     await validateArchiveEntries(download.zipPath);
@@ -2909,6 +3052,7 @@ const updateAppRuntime = async (appId: string): Promise<InstallAppResult> => {
         targetVersion: download.version,
         preUpdateUserHead,
         baseCommitSha,
+        backup: updateBackup.backup,
         startedAt,
       },
     });
@@ -2929,6 +3073,7 @@ const updateAppRuntime = async (appId: string): Promise<InstallAppResult> => {
           targetVersion: download.version,
           preUpdateUserHead,
           baseCommitSha,
+          backup: updateBackup.backup,
           startedAt,
           message: merge.stderr || merge.stdout || 'merge_conflict',
         },
@@ -3138,6 +3283,7 @@ const getAppDetails = async (appId: string): Promise<AppDetails | null> => {
     originalCommitSha = await getOriginalCommitSha(installed.installDir);
     await upsertInstalledRecord({ ...installed, originalCommitSha });
   }
+  const agents = installed ? await resolveInstalledAgents(appId) : [];
 
   return {
     app: appEntry,
@@ -3160,7 +3306,8 @@ const getAppDetails = async (appId: string): Promise<AppDetails | null> => {
     operations: installed ? await readOperationSummaries(appId) : [],
     localChanges: installed?.installDir ? await readLocalChangeSummaries(installed.installDir) : [],
     promptTemplates: installed ? await resolveInstalledPromptTemplates(appId) : [],
-    codexConversation: installed && await hasInstalledCodexConversation(appId) ? { enabled: true } : undefined,
+    agents,
+    codexConversation: installed && agents.length > 0 ? { enabled: true } : undefined,
   };
 };
 
@@ -4137,6 +4284,66 @@ const registerIpcHandlers = (): void => {
     return await updateAppRuntime(appId);
   });
 
+  ipcMain.handle(IPC_CHANNELS.listBackups, async (_event, appId?: string) => {
+    return await getBackupsManager().listBackups(appId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.createBackup, async (_event, input: { appId: string; reason?: 'manual' | 'update' | 'pre_restore' }) => {
+    try {
+      return await getBackupsManager().createBackup(input);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : 'backup_create_failed';
+      await appendInstallLog('backup:create_failed', {
+        appId: input?.appId,
+        detail,
+        error: serializeErrorForInstallLog(error),
+      });
+      return {
+        success: false,
+        userMessage: 'No pudimos crear el respaldo.',
+        technicalCode: detail,
+      };
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.deleteBackup, async (_event, input: { appId: string; backupId: string }) => {
+    try {
+      return await getBackupsManager().deleteBackup(input);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : 'backup_delete_failed';
+      await appendInstallLog('backup:delete_failed', {
+        appId: input?.appId,
+        backupId: input?.backupId,
+        detail,
+        error: serializeErrorForInstallLog(error),
+      });
+      return {
+        success: false,
+        userMessage: 'No pudimos eliminar ese respaldo.',
+        technicalCode: detail,
+      };
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.restoreBackup, async (_event, input: { appId: string; backupId: string }) => {
+    try {
+      return await getBackupsManager().restoreBackup(input);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : 'backup_restore_failed';
+      await appendInstallLog('backup:restore_failed', {
+        appId: input?.appId,
+        backupId: input?.backupId,
+        detail,
+        error: serializeErrorForInstallLog(error),
+      });
+      return {
+        success: false,
+        userMessage: 'No pudimos restaurar ese respaldo.',
+        technicalCode: detail,
+      };
+    }
+  });
+
   ipcMain.handle(IPC_CHANNELS.restoreAppUserVersion, async (_event, appId: string) => {
     return await restoreAppUserVersionRuntime(appId);
   });
@@ -4234,6 +4441,18 @@ const registerIpcHandlers = (): void => {
   });
 
   ipcMain.handle(IPC_CHANNELS.getSettings, async () => settings);
+  ipcMain.handle(IPC_CHANNELS.memoryList, async (_event, input: MemoryListInput = {}) => {
+    return await getMemoryStore().list(input, { caller: 'settings' });
+  });
+  ipcMain.handle(IPC_CHANNELS.memoryCreate, async (_event, input: MemoryCreateInput) => {
+    return await getMemoryStore().create({ ...input, source: 'settings' }, { caller: 'settings' });
+  });
+  ipcMain.handle(IPC_CHANNELS.memoryUpdate, async (_event, input: MemoryUpdateInput) => {
+    return await getMemoryStore().update(input, { caller: 'settings' });
+  });
+  ipcMain.handle(IPC_CHANNELS.memoryDelete, async (_event, id: string) => {
+    return await getMemoryStore().delete(id, { caller: 'settings' });
+  });
   ipcMain.handle(IPC_CHANNELS.getDesktopUpdateState, async () => getDesktopUpdater().getState());
   ipcMain.handle(IPC_CHANNELS.checkDesktopUpdates, async () => await getDesktopUpdater().check());
   ipcMain.handle(IPC_CHANNELS.downloadDesktopUpdate, async () => await getDesktopUpdater().download());
@@ -4459,6 +4678,16 @@ const registerIpcHandlers = (): void => {
     return { connected: status.authenticated };
   });
 
+  ipcMain.handle(IPC_CHANNELS.appGetContext, async (event) => {
+    const appId = resolveAppIdForWebContents(event.sender.id);
+    if (!appId) {
+      return {};
+    }
+    return {
+      agents: await resolveInstalledAgents(appId),
+    };
+  });
+
   ipcMain.handle(IPC_CHANNELS.appCodexTaskStart, async (event, input: AppCodexTaskStartInput) => {
     const appId = resolveAppIdForWebContents(event.sender.id);
     if (!appId) {
@@ -4552,6 +4781,14 @@ const registerIpcHandlers = (): void => {
       return [];
     }
     return await appCodexConversationManager.list(appId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.appCodexConversationDelete, async (event, conversationId: string) => {
+    const appId = resolveAppIdForWebContents(event.sender.id);
+    if (!appId || !appCodexConversationManager) {
+      return { success: false };
+    }
+    return await appCodexConversationManager.delete(appId, conversationId);
   });
 
   ipcMain.handle(IPC_CHANNELS.appCodexConversationCancelRun, async (
@@ -4686,7 +4923,15 @@ const registerIpcHandlers = (): void => {
   });
 
   ipcMain.handle(IPC_CHANNELS.windowClose, async (event) => {
-    getInvokingWindow(event)?.close();
+    const window = getInvokingWindow(event);
+    if (!window) {
+      return;
+    }
+    if (window === mainWindow) {
+      app.quit();
+      return;
+    }
+    window.close();
   });
 
   ipcMain.handle(IPC_CHANNELS.windowGetState, async (event) => {
@@ -4706,6 +4951,7 @@ app.whenReady().then(async () => {
   await fs.mkdir(getForgerMetadataRoot(), { recursive: true });
   await fs.mkdir(getPrivateAppsRoot(), { recursive: true });
   await fs.mkdir(getPrivateDataRoot(), { recursive: true });
+  await fs.mkdir(getBackupsRoot(), { recursive: true });
   await ensureGlobalAgentsContext(getForgerHomeRoot());
   await fs.mkdir(getCodexRoot(), { recursive: true });
   await fs.mkdir(getCodexHome(), { recursive: true });
@@ -4713,6 +4959,7 @@ app.whenReady().then(async () => {
   await loadAgentToolSettings();
   forgerAccountStore = new ForgerAccountStore(getForgerAccountPath());
   forgerAccount = await forgerAccountStore.load();
+  memoryStore = new MemoryStore(getForgerMetadataRoot());
   await loadRegistry();
   await startDevCatalogService();
   forgerBackendClient = new ForgerBackendClient({
@@ -4760,6 +5007,10 @@ app.whenReady().then(async () => {
       return { success: false, userMessage: 'La app no esta abierta.', technicalCode: 'app_not_running' };
     },
     updateApp: updateAppRuntime,
+    memoryList: async (input, access) => await getMemoryStore().list(input, access),
+    memoryCreate: async (input, access) => await getMemoryStore().create(input, access),
+    memoryUpdate: async (input, access) => await getMemoryStore().update(input, access),
+    memoryDelete: async (id, access) => await getMemoryStore().delete(id, access),
     onToolFailure: (input) => desktopErrorReporter?.reportForgerMcpToolFailure(input),
     onHttpFailure: (input) => desktopErrorReporter?.reportForgerMcpHttpFailure(input),
   });
@@ -4829,8 +5080,10 @@ app.whenReady().then(async () => {
       const status = await getCodexAuthStatus();
       return status.authenticated;
     },
-    createForgerMcpSession: (runId, appId) => forgerMcpServer?.createSession(runId, appId) ?? null,
+    createForgerMcpSession: (runId, appId) =>
+      forgerMcpServer?.createSession(runId, appId, { caller: 'desktop-chat', appIds: [appId] }) ?? null,
     releaseForgerMcpSession: (token) => forgerMcpServer?.releaseSession(token),
+    buildMemoryContext: buildMemoryContextForApps,
     listenAppMcps: async (appIds: string[], runId: string) =>
       await (appMcpManager?.listenMcps(appIds, runId) ?? Promise.resolve([])),
     releaseAppMcps: (runId: string) => {
@@ -4906,6 +5159,10 @@ app.whenReady().then(async () => {
       return status.authenticated;
     },
     resolvePromptTemplates: resolveInstalledPromptTemplates,
+    createForgerMcpSession: (runId, appId) =>
+      forgerMcpServer?.createSession(runId, appId, { caller: 'app-agent', appIds: [appId] }) ?? null,
+    releaseForgerMcpSession: (token) => forgerMcpServer?.releaseSession(token),
+    buildMemoryContext: buildMemoryContextForApp,
     listenAppMcps: async (appIds: string[], runId: string) =>
       await (appMcpManager?.listenMcps(appIds, runId) ?? Promise.resolve([])),
     releaseAppMcps: (runId: string) => {
@@ -4963,6 +5220,11 @@ app.whenReady().then(async () => {
       return status.authenticated;
     },
     hasCodexConversation: hasInstalledCodexConversation,
+    resolveAgents: resolveInstalledAgents,
+    createForgerMcpSession: (runId, appId) =>
+      forgerMcpServer?.createSession(runId, appId, { caller: 'app-agent', appIds: [appId] }) ?? null,
+    releaseForgerMcpSession: (token) => forgerMcpServer?.releaseSession(token),
+    buildMemoryContext: buildMemoryContextForApp,
     listenAppMcps: async (appIds: string[], runId: string) =>
       await (appMcpManager?.listenMcps(appIds, runId) ?? Promise.resolve([])),
     releaseAppMcps: (runId: string) => {
@@ -4990,8 +5252,10 @@ app.whenReady().then(async () => {
       const status = await getCodexAuthStatus();
       return status.authenticated;
     },
-    createForgerMcpSession: (runId, appId) => forgerMcpServer?.createSession(runId, appId) ?? null,
+    createForgerMcpSession: (runId, appId, appIds) =>
+      forgerMcpServer?.createSession(runId, appId, { caller: 'automation', appIds }) ?? null,
     releaseForgerMcpSession: (token) => forgerMcpServer?.releaseSession(token),
+    buildMemoryContext: buildMemoryContextForApps,
     listenAppMcps: async (appIds: string[], runId: string) =>
       await (appMcpManager?.listenMcps(appIds, runId) ?? Promise.resolve([])),
     releaseAppMcps: (runId: string) => {

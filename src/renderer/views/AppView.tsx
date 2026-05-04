@@ -14,6 +14,10 @@ import {
   Button,
   Chip,
   CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   MenuItem,
   Rating,
   Stack,
@@ -58,6 +62,7 @@ const initialsFromName = (name: string) =>
     .join('');
 
 type AppViewTab = 'general' | 'reviews' | 'history' | 'updates' | 'secrets';
+type PromptPreview = { title: string; description?: string; prompt: string } | null;
 
 const DetailRow = ({ label, value }: { label: string; value: string }) => (
   <Stack spacing={0.25}>
@@ -98,6 +103,7 @@ export function AppView({
   const [feedbackBody, setFeedbackBody] = useState('');
   const [reviewBusy, setReviewBusy] = useState(false);
   const [reviewEditorOpen, setReviewEditorOpen] = useState(false);
+  const [promptPreview, setPromptPreview] = useState<PromptPreview>(null);
 
   useEffect(() => {
     setRatingScore(currentUserRating?.score ?? 5);
@@ -136,6 +142,7 @@ export function AppView({
   const ratingsCount = 'ratingsCount' in details.app ? details.app.ratingsCount ?? 0 : 0;
   const recentRatings = 'recentRatings' in details.app ? details.app.recentRatings ?? [] : [];
   const promptTemplates = details.promptTemplates ?? [];
+  const agents = details.agents ?? [];
   const localChanges = details.localChanges ?? [];
 
   const actions = (
@@ -333,6 +340,15 @@ export function AppView({
             {promptTemplates.map((template) => (
               <Box
                 key={template.id}
+                role="button"
+                tabIndex={0}
+                onClick={() => setPromptPreview({ title: template.title, description: template.description, prompt: template.prompt })}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    setPromptPreview({ title: template.title, description: template.description, prompt: template.prompt });
+                  }
+                }}
                 sx={{
                   border: '1px solid',
                   borderColor: 'divider',
@@ -341,6 +357,12 @@ export function AppView({
                   display: 'grid',
                   gridTemplateColumns: '28px minmax(0, 1fr)',
                   gap: 1,
+                  cursor: 'pointer',
+                  transition: 'border-color 120ms ease, background-color 120ms ease',
+                  '&:hover': {
+                    borderColor: 'primary.main',
+                    bgcolor: 'action.hover',
+                  },
                 }}
               >
                 <AutoAwesomeRounded color="primary" fontSize="small" />
@@ -349,6 +371,61 @@ export function AppView({
                   {template.description ? (
                     <Typography variant="body2" color="text.secondary">
                       {template.description}
+                    </Typography>
+                  ) : null}
+                </Stack>
+              </Box>
+            ))}
+          </Box>
+        </Stack>
+      ) : null}
+      {agents.length > 0 ? (
+        <Stack spacing={1.5}>
+          <Typography variant="h5">{t.appView.agentsTitle}</Typography>
+          <Box
+            sx={{
+              display: 'grid',
+              gap: 1.25,
+              gridTemplateColumns: {
+                xs: '1fr',
+                md: 'repeat(2, minmax(0, 1fr))',
+              },
+            }}
+          >
+            {agents.map((agent) => (
+              <Box
+                key={agent.id}
+                role="button"
+                tabIndex={0}
+                onClick={() => setPromptPreview({ title: agent.title, description: agent.description, prompt: agent.initialPrompt })}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    setPromptPreview({ title: agent.title, description: agent.description, prompt: agent.initialPrompt });
+                  }
+                }}
+                sx={{
+                  border: '1px solid',
+                  borderColor: 'divider',
+                  bgcolor: 'background.paper',
+                  p: 1.5,
+                  display: 'grid',
+                  gridTemplateColumns: '28px minmax(0, 1fr)',
+                  gap: 1,
+                  cursor: 'pointer',
+                  transition: 'border-color 120ms ease, background-color 120ms ease',
+                  '&:hover': {
+                    borderColor: 'primary.main',
+                    bgcolor: 'action.hover',
+                  },
+                }}
+              >
+                <AutoAwesomeRounded color="primary" fontSize="small" />
+                <Stack spacing={0.35} sx={{ minWidth: 0 }}>
+                  <Typography fontWeight={700}>{agent.title}</Typography>
+                  {agent.description ? (
+                    <Typography variant="body2" color="text.secondary">
+                      {agent.description}
                     </Typography>
                   ) : null}
                 </Stack>
@@ -603,6 +680,39 @@ export function AppView({
       {activeTab === 'history' ? historyContent : null}
       {activeTab === 'updates' ? updatesContent : null}
       {activeTab === 'secrets' ? secretsContent : null}
+      <Dialog open={promptPreview !== null} onClose={() => setPromptPreview(null)} fullWidth maxWidth="md">
+        <DialogTitle>{promptPreview?.title}</DialogTitle>
+        <DialogContent>
+          <Stack spacing={1.5}>
+            {promptPreview?.description ? (
+              <Typography color="text.secondary">{promptPreview.description}</Typography>
+            ) : null}
+            <Typography variant="caption" color="text.secondary">
+              {t.appView.promptPreviewLabel}
+            </Typography>
+            <Box
+              component="pre"
+              sx={{
+                m: 0,
+                p: 1.5,
+                border: '1px solid',
+                borderColor: 'divider',
+                bgcolor: 'background.default',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+                fontFamily: 'monospace',
+                fontSize: 13,
+                lineHeight: 1.55,
+              }}
+            >
+              {promptPreview?.prompt}
+            </Box>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setPromptPreview(null)}>{t.actions.close}</Button>
+        </DialogActions>
+      </Dialog>
     </Stack>
   );
 }

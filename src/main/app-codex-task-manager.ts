@@ -21,6 +21,9 @@ interface AppCodexTaskManagerOptions {
   getCodexEnvironment: (appId?: string) => Promise<Record<string, string>>;
   getCodexAuthenticated: () => Promise<boolean>;
   resolvePromptTemplates: (appId: string) => Promise<AppPromptTemplate[]>;
+  createForgerMcpSession?: (runId: string, appId: string) => { url: string; token: string } | null;
+  releaseForgerMcpSession?: (token: string) => void;
+  buildMemoryContext?: (appId: string) => Promise<string>;
   listenAppMcps?: (appIds: string[], runId: string) => Promise<CodexMcpServerConfig[]>;
   releaseAppMcps?: (runId: string) => void;
   onTaskUpdated: (event: AppCodexTaskEvent) => void;
@@ -150,15 +153,31 @@ export class AppCodexTaskManager {
     await this.persist(task);
     this.emit(task);
 
+    let forgerMcpSession: { url: string; token: string } | null = null;
     try {
       const preparedArguments = await this.preparePromptArguments(task, template, input);
       const imageArgs = preparedArguments.files
         .filter((file) => file.mimeType?.toLowerCase().startsWith('image/'))
         .flatMap((file) => ['--image', file.path]);
-      const prompt = renderPrompt(template.prompt, preparedArguments);
+      const renderedPrompt = renderPrompt(template.prompt, preparedArguments);
+      const memoryContext = await (this.options.buildMemoryContext?.(task.appId) ?? Promise.resolve(''));
+      const prompt = memoryContext ? `${memoryContext}\n\n${renderedPrompt}` : renderedPrompt;
       const command = await resolveCodexCommand(codexCliPath, await this.options.getCodexPathEntries(task.appId));
       const environment = await this.options.getCodexEnvironment(task.appId);
-      const mcpServers = await (this.options.listenAppMcps?.([task.appId], task.runId) ?? Promise.resolve([]));
+      const appMcpServers = await (this.options.listenAppMcps?.([task.appId], task.runId) ?? Promise.resolve([]));
+      forgerMcpSession = this.options.createForgerMcpSession?.(task.runId, task.appId) ?? null;
+      const mcpServers = [
+        ...(forgerMcpSession
+          ? [{
+              name: 'forger',
+              url: forgerMcpSession.url,
+              token: forgerMcpSession.token,
+              tokenEnvVar: 'FORGER_MCP_TOKEN',
+              toolTimeoutSec: 600,
+            }]
+          : []),
+        ...appMcpServers,
+      ];
       const mcpArgs = buildMcpArgs(mcpServers);
       const topLevelArgs = mcpServers.length > 0 ? ['--ask-for-approval', 'never'] : [];
       const args = [
@@ -206,7 +225,6 @@ export class AppCodexTaskManager {
         },
         stdinText: prompt,
       });
-
       if ((task as AppCodexTaskSummary).status === 'canceled') {
         return;
       }
@@ -222,6 +240,9 @@ export class AppCodexTaskManager {
       await this.persist(task);
       this.emit(task);
     } finally {
+      if (forgerMcpSession) {
+        this.options.releaseForgerMcpSession?.(forgerMcpSession.token);
+      }
       this.options.releaseAppMcps?.(task.runId);
       await this.cleanupTaskInputs(task).catch(() => undefined);
     }

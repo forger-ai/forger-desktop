@@ -1,20 +1,46 @@
+import { useMemo, useState } from 'react';
 import {
   Button,
   Card,
   CardContent,
   Chip,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  Divider,
+  FormControl,
+  IconButton,
+  InputLabel,
+  MenuItem,
   Avatar,
   LinearProgress,
+  Select,
   Stack,
+  TextField,
   ToggleButton,
   ToggleButtonGroup,
+  Tooltip,
   Typography,
 } from '@mui/material';
+import AddRounded from '@mui/icons-material/AddRounded';
+import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
+import EditRounded from '@mui/icons-material/EditRounded';
+import MemoryRounded from '@mui/icons-material/MemoryRounded';
 import SystemUpdateAltRounded from '@mui/icons-material/SystemUpdateAltRounded';
 import DownloadRounded from '@mui/icons-material/DownloadRounded';
 import LaunchRounded from '@mui/icons-material/LaunchRounded';
 import RestartAltRounded from '@mui/icons-material/RestartAltRounded';
-import type { CodexAuthStatus, DesktopUpdateState } from '@shared/types';
+import type {
+  AppSummary,
+  CodexAuthStatus,
+  DesktopUpdateState,
+  MemoryCreateInput,
+  MemoryEntry,
+  MemoryKind,
+  MemoryScope,
+  MemoryUpdateInput,
+} from '@shared/types';
 import type { AppDictionary, Locale } from '@renderer/i18n';
 import type { ThemePreference } from '@renderer/theme/appTheme';
 import type { ChatBotPicture, LanguagePreference } from '@renderer/preferences';
@@ -39,7 +65,29 @@ interface SettingsViewProps {
   onCheckDesktopUpdates: () => void;
   onDownloadDesktopUpdate: () => void;
   onInstallDesktopUpdate: () => void;
+  installedApps: AppSummary[];
+  memories: MemoryEntry[];
+  onCreateMemory: (input: MemoryCreateInput) => void;
+  onUpdateMemory: (input: MemoryUpdateInput) => void;
+  onDeleteMemory: (id: string) => void;
 }
+
+interface MemoryFormState {
+  id?: string;
+  scope: MemoryScope;
+  appId: string;
+  kind: MemoryKind;
+  text: string;
+}
+
+const EMPTY_MEMORY_FORM: MemoryFormState = {
+  scope: 'global',
+  appId: '',
+  kind: 'preference',
+  text: '',
+};
+
+const MEMORY_KINDS: MemoryKind[] = ['preference', 'profile', 'workflow', 'constraint', 'fact'];
 
 export function SettingsView({
   codexAuthBusy,
@@ -61,7 +109,14 @@ export function SettingsView({
   onCheckDesktopUpdates,
   onDownloadDesktopUpdate,
   onInstallDesktopUpdate,
+  installedApps,
+  memories,
+  onCreateMemory,
+  onUpdateMemory,
+  onDeleteMemory,
 }: SettingsViewProps) {
+  const [memoryDialogOpen, setMemoryDialogOpen] = useState(false);
+  const [memoryForm, setMemoryForm] = useState<MemoryFormState>(EMPTY_MEMORY_FORM);
   const canDownload = desktopUpdateState.status === 'available' && Boolean(desktopUpdateState.asset);
   const canInstall = desktopUpdateState.status === 'ready' && Boolean(desktopUpdateState.downloadedPath);
   const progressPercent =
@@ -69,6 +124,48 @@ export function SettingsView({
       ? Math.round(desktopUpdateState.progress * 100)
       : undefined;
   const statusLabel = t.settings.desktopUpdateStatuses[desktopUpdateState.status];
+  const appNames = useMemo(
+    () => new Map(installedApps.map((appEntry) => [appEntry.id, appEntry.name])),
+    [installedApps],
+  );
+  const globalMemories = memories.filter((entry) => entry.scope === 'global');
+  const appMemoryGroups = useMemo(() => {
+    const groups = new Map<string, MemoryEntry[]>();
+    for (const entry of memories) {
+      if (entry.scope !== 'app' || !entry.appId) continue;
+      groups.set(entry.appId, [...(groups.get(entry.appId) ?? []), entry]);
+    }
+    return [...groups.entries()];
+  }, [memories]);
+  const memoryFormAppRequired = memoryForm.scope === 'app' && !memoryForm.appId;
+  const memoryFormInvalid = !memoryForm.text.trim() || memoryFormAppRequired;
+
+  const resetMemoryForm = () => setMemoryForm(EMPTY_MEMORY_FORM);
+  const submitMemoryForm = () => {
+    if (memoryFormInvalid) return;
+    const payload = {
+      scope: memoryForm.scope,
+      appId: memoryForm.scope === 'app' ? memoryForm.appId : undefined,
+      kind: memoryForm.kind,
+      text: memoryForm.text,
+    };
+    if (memoryForm.id) {
+      onUpdateMemory({ id: memoryForm.id, ...payload });
+    } else {
+      onCreateMemory(payload);
+    }
+    resetMemoryForm();
+  };
+  const editMemory = (entry: MemoryEntry) => {
+    setMemoryForm({
+      id: entry.id,
+      scope: entry.scope,
+      appId: entry.appId ?? '',
+      kind: entry.kind,
+      text: entry.text,
+    });
+    setMemoryDialogOpen(true);
+  };
 
   return (
     <Stack spacing={2}>
@@ -125,6 +222,30 @@ export function SettingsView({
               <Typography variant="caption" color="text.secondary">
                 {t.settings.codexAuthFileLabel}: {codexAuthStatus.authFilePath || '-'}
               </Typography>
+            </Stack>
+          </Stack>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent>
+          <Stack spacing={1.5}>
+            <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" spacing={1.5}>
+              <Stack spacing={0.5}>
+                <Typography variant="h6">{t.settings.memoryTitle}</Typography>
+                <Typography variant="body2" color="text.secondary">{t.settings.memoryDescription}</Typography>
+              </Stack>
+              <Chip size="small" icon={<MemoryRounded />} label={t.settings.memoryCount(memories.length)} />
+            </Stack>
+            <Stack direction="row">
+              <Button
+                variant="outlined"
+                size="small"
+                startIcon={<MemoryRounded />}
+                onClick={() => setMemoryDialogOpen(true)}
+              >
+                {t.settings.memoryViewAction}
+              </Button>
             </Stack>
           </Stack>
         </CardContent>
@@ -301,6 +422,171 @@ export function SettingsView({
         </CardContent>
       </Card>
 
+      <Dialog open={memoryDialogOpen} onClose={() => setMemoryDialogOpen(false)} maxWidth="md" fullWidth>
+        <DialogTitle>{t.settings.memoryDialogTitle}</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ pt: 1 }}>
+            <Card variant="outlined">
+              <CardContent>
+                <Stack spacing={1.5}>
+                  <Typography variant="subtitle1">
+                    {memoryForm.id ? t.settings.memoryEdit : t.settings.memoryNew}
+                  </Typography>
+                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
+                    <FormControl fullWidth size="small">
+                      <InputLabel>{t.settings.memoryScope}</InputLabel>
+                      <Select
+                        label={t.settings.memoryScope}
+                        value={memoryForm.scope}
+                        onChange={(event) => setMemoryForm((current) => ({
+                          ...current,
+                          scope: event.target.value as MemoryScope,
+                          appId: event.target.value === 'global' ? '' : current.appId,
+                        }))}
+                      >
+                        <MenuItem value="global">{t.settings.memoryScopeGlobal}</MenuItem>
+                        <MenuItem value="app">{t.settings.memoryScopeApp}</MenuItem>
+                      </Select>
+                    </FormControl>
+                    <FormControl fullWidth size="small" disabled={memoryForm.scope !== 'app'}>
+                      <InputLabel>{t.settings.memoryApp}</InputLabel>
+                      <Select
+                        label={t.settings.memoryApp}
+                        value={memoryForm.appId}
+                        onChange={(event) => setMemoryForm((current) => ({
+                          ...current,
+                          appId: event.target.value,
+                        }))}
+                      >
+                        {installedApps.map((appEntry) => (
+                          <MenuItem value={appEntry.id} key={appEntry.id}>{appEntry.name}</MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                    <FormControl fullWidth size="small">
+                      <InputLabel>{t.settings.memoryKind}</InputLabel>
+                      <Select
+                        label={t.settings.memoryKind}
+                        value={memoryForm.kind}
+                        onChange={(event) => setMemoryForm((current) => ({
+                          ...current,
+                          kind: event.target.value as MemoryKind,
+                        }))}
+                      >
+                        {MEMORY_KINDS.map((kind) => (
+                          <MenuItem value={kind} key={kind}>{t.settings.memoryKinds[kind]}</MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  </Stack>
+                  <TextField
+                    label={t.settings.memoryText}
+                    value={memoryForm.text}
+                    onChange={(event) => setMemoryForm((current) => ({ ...current, text: event.target.value }))}
+                    multiline
+                    minRows={3}
+                    fullWidth
+                  />
+                  <Stack direction="row" spacing={1} justifyContent="flex-end">
+                    <Button size="small" onClick={resetMemoryForm}>{t.settings.memoryCancel}</Button>
+                    <Button
+                      size="small"
+                      variant="contained"
+                      startIcon={<AddRounded />}
+                      disabled={memoryFormInvalid}
+                      onClick={submitMemoryForm}
+                    >
+                      {t.settings.memorySave}
+                    </Button>
+                  </Stack>
+                </Stack>
+              </CardContent>
+            </Card>
+
+            <MemoryGroup
+              title={t.settings.memoryGlobalGroup}
+              memories={globalMemories}
+              t={t}
+              onEdit={editMemory}
+              onDelete={onDeleteMemory}
+            />
+            {appMemoryGroups.map(([appId, entries]) => (
+              <MemoryGroup
+                key={appId}
+                title={t.settings.memoryAppGroup(appNames.get(appId) ?? appId)}
+                memories={entries}
+                t={t}
+                onEdit={editMemory}
+                onDelete={onDeleteMemory}
+              />
+            ))}
+            {memories.length === 0 ? (
+              <Typography variant="body2" color="text.secondary">{t.settings.memoryEmpty}</Typography>
+            ) : null}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setMemoryDialogOpen(false)}>{t.settings.memoryClose}</Button>
+        </DialogActions>
+      </Dialog>
+
+    </Stack>
+  );
+}
+
+function MemoryGroup({
+  title,
+  memories,
+  t,
+  onEdit,
+  onDelete,
+}: {
+  title: string;
+  memories: MemoryEntry[];
+  t: AppDictionary;
+  onEdit: (entry: MemoryEntry) => void;
+  onDelete: (id: string) => void;
+}) {
+  if (memories.length === 0) {
+    return null;
+  }
+  return (
+    <Stack spacing={1}>
+      <Typography variant="subtitle2">{title}</Typography>
+      <Stack divider={<Divider flexItem />} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2 }}>
+        {memories.map((entry) => (
+          <Stack
+            key={entry.id}
+            direction="row"
+            spacing={1.5}
+            alignItems="flex-start"
+            justifyContent="space-between"
+            sx={{ p: 1.25 }}
+          >
+            <Stack spacing={0.5}>
+              <Stack direction="row" spacing={1} alignItems="center">
+                <Chip size="small" label={t.settings.memoryKinds[entry.kind]} />
+                <Typography variant="caption" color="text.secondary">
+                  {new Date(entry.updatedAt).toLocaleString()}
+                </Typography>
+              </Stack>
+              <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>{entry.text}</Typography>
+            </Stack>
+            <Stack direction="row" spacing={0.5}>
+              <Tooltip title={t.settings.memoryEdit}>
+                <IconButton size="small" onClick={() => onEdit(entry)}>
+                  <EditRounded fontSize="small" />
+                </IconButton>
+              </Tooltip>
+              <Tooltip title={t.settings.memoryDelete}>
+                <IconButton size="small" color="error" onClick={() => onDelete(entry.id)}>
+                  <DeleteOutlineRounded fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            </Stack>
+          </Stack>
+        ))}
+      </Stack>
     </Stack>
   );
 }

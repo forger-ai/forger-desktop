@@ -1,4 +1,4 @@
-export const FORGER_AGENT_CONTRACT_VERSION = 6;
+export const FORGER_AGENT_CONTRACT_VERSION = 7;
 export const FORGER_AGENT_CONTRACT_MARKER = `FORGER_AGENT_CONTRACT_VERSION: ${FORGER_AGENT_CONTRACT_VERSION}`;
 export const FORGER_AGENT_CONTRACT_MARKER_PREFIX = 'FORGER_AGENT_CONTRACT_VERSION:';
 
@@ -60,6 +60,10 @@ export const buildGlobalForgerAgentsMarkdown = (): string => {
     '- Forger can expose internal MCP tools to check the catalog, review updates, open, close, restart, or update installed apps.',
     '- Apps can expose their own MCP tools for app data. When a request needs to read, create, edit, delete, import, or expose app data, use the app MCP tools when they exist before falling back to scripts, SQL, or endpoint calls.',
     '- Use Forger MCP tools when available before trying to replicate those actions through commands or files.',
+    '- Forger MCP can expose memory tools to read, create, update, and delete user preferences or useful facts.',
+    '- You may save useful memory proactively, but only for stable preferences, workflow constraints, or facts that will help future Forger conversations.',
+    '- Never save secrets, credentials, sensitive personal data, or delicate personal inferences in memory.',
+    '- When you save memory, explicitly tell the user what you saved in plain language. Use wording like: "He tomado nota de esto en la memoria de Forger. Puedes verla o eliminarla en Configuraciones > Memoria."',
     '- Do not tell the user to run scripts, put files in internal folders, create canonical CSVs, use project paths, or understand commands unless they explicitly ask for technical details.',
     '- When you use internal tools, translate the action into product language.',
     '- If an internal tool fails, explain the problem in user terms: rejected rows, incomplete data, missing categories, invalid format, or unsafe action.',

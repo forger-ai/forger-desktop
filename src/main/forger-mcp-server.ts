@@ -11,6 +11,10 @@ import type {
   RuntimeStatus,
   StopAppResult,
   InstallAppResult,
+  MemoryCreateInput,
+  MemoryEntry,
+  MemoryListInput,
+  MemoryUpdateInput,
 } from '../shared/types';
 
 export interface ForgerMcpSessionRef {
@@ -21,8 +25,15 @@ export interface ForgerMcpSessionRef {
 interface AgentMcpSession {
   runId: string;
   appId: string;
+  caller: 'desktop-chat' | 'app-agent' | 'automation';
+  appIds: string[];
   token: string;
   createdAt: string;
+}
+
+export interface ForgerMcpSessionAccess {
+  caller: AgentMcpSession['caller'];
+  appIds?: string[];
 }
 
 interface ForgerMcpServerOptions {
@@ -48,6 +59,10 @@ interface ForgerMcpServerOptions {
   stopApp: (appId: string) => Promise<StopAppResult>;
   refreshAppView: (appId: string) => Promise<{ success: boolean; userMessage?: string; technicalCode?: string }>;
   updateApp: (appId: string) => Promise<InstallAppResult>;
+  memoryList: (input: MemoryListInput, access: MemoryAccessInput) => Promise<MemoryEntry[]>;
+  memoryCreate: (input: MemoryCreateInput, access: MemoryAccessInput) => Promise<MemoryEntry>;
+  memoryUpdate: (input: MemoryUpdateInput, access: MemoryAccessInput) => Promise<MemoryEntry>;
+  memoryDelete: (id: string, access: MemoryAccessInput) => Promise<{ success: boolean }>;
   onToolFailure?: (input: { appId: string; runId: string; toolName?: unknown; error: unknown }) => void;
   onHttpFailure?: (input: { appId?: string; runId?: string; error: unknown }) => void;
 }
@@ -64,6 +79,12 @@ interface ToolApprovalResult {
   required: boolean;
   status: 'not_required' | 'approved' | 'denied' | 'unavailable';
   userMessage: string;
+}
+
+interface MemoryAccessInput {
+  caller: AgentMcpSession['caller'];
+  appId?: string;
+  appIds?: string[];
 }
 
 export class ForgerMcpServer {
@@ -122,7 +143,7 @@ export class ForgerMcpServer {
     this.sessions.clear();
   }
 
-  public createSession(runId: string, appId: string): ForgerMcpSessionRef | null {
+  public createSession(runId: string, appId: string, access?: ForgerMcpSessionAccess): ForgerMcpSessionRef | null {
     if (!this.url) {
       void this.options.appendInstallLog('agent_tool:mcp_session_unavailable', { runId, appId });
       return null;
@@ -131,6 +152,8 @@ export class ForgerMcpServer {
     this.sessions.set(token, {
       runId,
       appId,
+      caller: access?.caller ?? 'desktop-chat',
+      appIds: access?.appIds ?? (appId === 'forger' ? [] : [appId]),
       token,
       createdAt: new Date().toISOString(),
     });
@@ -314,6 +337,14 @@ export class ForgerMcpServer {
     session: AgentMcpSession,
     tool: AgentToolDefinition,
   ): Promise<ToolApprovalResult> {
+    if (isMemoryTool(tool.id)) {
+      return {
+        approved: true,
+        required: false,
+        status: 'not_required',
+        userMessage: 'La herramienta de memoria no requiere autorizacion adicional.',
+      };
+    }
     if (!this.options.getToolSettings().approvals[tool.id]) {
       await this.options.appendInstallLog('agent_tool:approval_skipped', {
         appId: session.appId,
@@ -436,6 +467,59 @@ export class ForgerMcpServer {
       return withToolAuthorization(result, approval);
     }
 
+    if (isMemoryTool(toolId)) {
+      try {
+        if (toolId === 'memory_list') {
+          const memories = await this.options.memoryList(args, memoryAccess(session));
+          const result = { success: true, memories };
+          await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
+          return result;
+        }
+
+        if (toolId === 'memory_create') {
+          const memory = await this.options.memoryCreate(
+            { ...args, source: 'agent' } as MemoryCreateInput,
+            memoryAccess(session),
+          );
+          const result = {
+            success: true,
+            memory,
+            userMessage: memory.scope === 'global'
+              ? 'He tomado nota de esto en la memoria de Forger. Puedes verla o eliminarla en Configuraciones > Memoria.'
+              : 'He tomado nota de esto para esta app. Puedes administrarlo en Configuraciones > Memoria.',
+          };
+          await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
+          return result;
+        }
+
+        if (toolId === 'memory_update') {
+          const memory = await this.options.memoryUpdate(args as unknown as MemoryUpdateInput, memoryAccess(session));
+          const result = {
+            success: true,
+            memory,
+            userMessage: 'He actualizado esa memoria. Puedes administrarla en Configuraciones > Memoria.',
+          };
+          await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
+          return result;
+        }
+
+        if (toolId === 'memory_delete') {
+          const result = await this.options.memoryDelete(String(args.id ?? ''), memoryAccess(session));
+          const response = { ...result, userMessage: result.success ? 'Elimine esa memoria.' : 'No encontre esa memoria.' };
+          await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result: response });
+          return response;
+        }
+      } catch (error) {
+        const result = {
+          success: false,
+          userMessage: memoryErrorMessage(error),
+          technicalCode: error instanceof Error ? error.message : 'memory_error',
+        };
+        await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
+        return result;
+      }
+    }
+
     const appId = getToolAppId(session, args);
 
     if (toolId === 'forger_get_app_runtime_status') {
@@ -486,6 +570,53 @@ export class ForgerMcpServer {
 }
 
 const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unknown> => {
+  if (toolId === 'memory_list') {
+    return {
+      type: 'object',
+      properties: {
+        scope: { type: 'string', enum: ['global', 'app'] },
+        appId: { type: 'string' },
+        kind: { type: 'string', enum: ['preference', 'profile', 'workflow', 'constraint', 'fact'] },
+      },
+      additionalProperties: false,
+    };
+  }
+  if (toolId === 'memory_create') {
+    return {
+      type: 'object',
+      properties: {
+        scope: { type: 'string', enum: ['global', 'app'] },
+        appId: { type: 'string' },
+        kind: { type: 'string', enum: ['preference', 'profile', 'workflow', 'constraint', 'fact'] },
+        text: { type: 'string' },
+      },
+      required: ['scope', 'kind', 'text'],
+      additionalProperties: false,
+    };
+  }
+  if (toolId === 'memory_update') {
+    return {
+      type: 'object',
+      properties: {
+        id: { type: 'string' },
+        scope: { type: 'string', enum: ['global', 'app'] },
+        appId: { type: 'string' },
+        kind: { type: 'string', enum: ['preference', 'profile', 'workflow', 'constraint', 'fact'] },
+        text: { type: 'string' },
+      },
+      required: ['id'],
+      additionalProperties: false,
+    };
+  }
+  if (toolId === 'memory_delete') {
+    return {
+      type: 'object',
+      properties: { id: { type: 'string' } },
+      required: ['id'],
+      additionalProperties: false,
+    };
+  }
+
   if (
     toolId === 'forger_get_app_runtime_status' ||
     toolId === 'forger_open_app' ||
@@ -512,6 +643,31 @@ const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unknown> => 
     properties: {},
     additionalProperties: false,
   };
+};
+
+const isMemoryTool = (toolId: AgentToolId): boolean => toolId.startsWith('memory_');
+
+const memoryAccess = (session: AgentMcpSession): MemoryAccessInput => ({
+  caller: session.caller,
+  appId: session.appId === 'forger' ? undefined : session.appId,
+  appIds: session.appIds,
+});
+
+const memoryErrorMessage = (error: unknown): string => {
+  const code = error instanceof Error ? error.message : 'memory_error';
+  if (code === 'memory_scope_forbidden') {
+    return 'No puedo operar memoria fuera del alcance permitido para esta conversación.';
+  }
+  if (code === 'memory_text_required') {
+    return 'La memoria necesita un texto para guardarse.';
+  }
+  if (code === 'memory_app_required') {
+    return 'La memoria de app necesita una app asociada.';
+  }
+  if (code === 'memory_not_found') {
+    return 'No encontre esa memoria.';
+  }
+  return 'No pude completar la operacion de memoria.';
 };
 
 const getToolAppId = (session: AgentMcpSession, params: Record<string, unknown>): string => {

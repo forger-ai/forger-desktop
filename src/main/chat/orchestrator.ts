@@ -32,6 +32,7 @@ interface ChatOrchestratorOptions {
   getCodexAuthenticated: () => Promise<boolean>;
   createForgerMcpSession?: (runId: string, appId: string) => { url: string; token: string } | null;
   releaseForgerMcpSession?: (token: string) => void;
+  buildMemoryContext?: (appIds: string[]) => Promise<string>;
   listenAppMcps?: (appIds: string[], runId: string) => Promise<CodexMcpServerConfig[]>;
   releaseAppMcps?: (runId: string) => void;
   onUpdateConflictResolved?: (appId: string) => Promise<void>;
@@ -781,13 +782,21 @@ export class ChatOrchestrator {
         ...appMcpServers,
       ];
 
+      const resolvedThreadId = run.threadId === null
+        ? undefined
+        : run.threadId ?? this.threadsByApp.get(run.appId)?.threadId;
+      const memoryContext = !resolvedThreadId
+        ? await (this.options.buildMemoryContext?.([run.appId]) ?? Promise.resolve(''))
+        : '';
+      const prompt = memoryContext ? `${memoryContext}\n\n${run.prompt}` : run.prompt;
+
       const assistantReply = await this.sandboxRunner.runCodex({
         codexCliPath,
         pathEntries: codexPathEntries,
         environment: codexEnvironment,
         mcpServers,
         workingDir: this.options.forgerHomeRoot,
-        prompt: run.prompt,
+        prompt,
         model: run.model,
         reasoningEffort: run.reasoningEffort,
         timeoutMs: 300_000,
@@ -803,7 +812,7 @@ export class ChatOrchestrator {
             this.emitRun(run);
           }
         },
-        threadId: run.threadId === null ? undefined : run.threadId ?? this.threadsByApp.get(run.appId)?.threadId,
+        threadId: resolvedThreadId,
       });
 
       run.threadId = assistantReply.threadId ?? run.threadId ?? this.threadsByApp.get(run.appId)?.threadId ?? null;

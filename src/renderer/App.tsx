@@ -21,6 +21,7 @@ import type {
   AgentToolDefinition,
   AgentToolPackageDefinition,
   AgentToolSettings,
+  AppBackupSummary,
   AppCategory,
   AppDetails,
   AppSecretsState,
@@ -40,6 +41,9 @@ import type {
   ForgerAccountSession,
   ForgerFileCategory,
   ForgerFileRecord,
+  MemoryCreateInput,
+  MemoryEntry,
+  MemoryUpdateInput,
   PickedChatFile,
   Settings,
   SharedFileRef,
@@ -54,6 +58,7 @@ import { getDictionary, type Locale } from '@renderer/i18n';
 import { buildAppTheme, resolveThemeMode, type ThemePreference } from '@renderer/theme/appTheme';
 import { AppView } from '@renderer/views/AppView';
 import { AutomationsView } from '@renderer/views/AutomationsView';
+import { BackupsView } from '@renderer/views/BackupsView';
 import { CatalogView } from '@renderer/views/CatalogView';
 import { ChatView, type ChatMessage, type ConversationHistoryItem } from '@renderer/views/ChatView';
 import { DataView } from '@renderer/views/DataView';
@@ -130,6 +135,10 @@ const initialAgentToolSettings: AgentToolSettings = {
     forger_restart_app: true,
     forger_refresh_app_view: true,
     forger_update_app: true,
+    memory_list: false,
+    memory_create: false,
+    memory_update: false,
+    memory_delete: false,
   },
 };
 
@@ -155,6 +164,7 @@ function App() {
   const persistedChatState = useMemo(() => readPersistedChatState(), []);
   const [currentView, setCurrentView] = useState<View>('my-apps');
   const [installedApps, setInstalledApps] = useState<AppSummary[]>([]);
+  const [memories, setMemories] = useState<MemoryEntry[]>([]);
   const [catalogApps, setCatalogApps] = useState<CatalogApp[]>([]);
   const [openingAppIds, setOpeningAppIds] = useState<Set<string>>(new Set());
   const openingAppIdsRef = useRef<Set<string>>(new Set());
@@ -217,6 +227,8 @@ function App() {
   const [selectedAutomationId, setSelectedAutomationId] = useState<string | null>(null);
   const [selectedAutomationRun, setSelectedAutomationRun] = useState<AutomationRun | null>(null);
   const [automationBusy, setAutomationBusy] = useState(false);
+  const [backups, setBackups] = useState<AppBackupSummary[]>([]);
+  const [backupsBusy, setBackupsBusy] = useState(false);
   const [chatConversations, setChatConversations] = useState<ChatConversation[]>(
     persistedChatState.conversations,
   );
@@ -317,6 +329,12 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
     return nextAutomations;
   };
 
+  const refreshBackups = async () => {
+    const nextBackups = await getDesktopApi().listBackups();
+    setBackups(nextBackups);
+    return nextBackups;
+  };
+
   const loadAutomationRuns = async (automationId: string, preferredRunId?: string) => {
     const desktopApi = getDesktopApi();
     const runs = await desktopApi.automationsListRuns(automationId);
@@ -362,6 +380,8 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
         filesResult,
         categoriesResult,
         automationsResult,
+        backupsResult,
+        memoriesResult,
       ] = await Promise.allSettled([
         refreshApps(),
         desktopApi.getSettings(),
@@ -372,6 +392,8 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
         desktopApi.filesList(fileFilters),
         desktopApi.filesListCategories(),
         desktopApi.automationsList(),
+        desktopApi.listBackups(),
+        desktopApi.memoryList(),
       ]);
 
       if (appsResult.status === 'rejected') {
@@ -401,6 +423,14 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
           setSelectedAutomationId(automationsResult.value[0].id);
           void loadAutomationRuns(automationsResult.value[0].id);
         }
+      }
+
+      if (backupsResult.status === 'fulfilled') {
+        setBackups(backupsResult.value);
+      }
+
+      if (memoriesResult.status === 'fulfilled') {
+        setMemories(memoriesResult.value);
       }
 
       if (codexAuthResult.status === 'fulfilled') {
@@ -753,6 +783,16 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
   }, [currentView, fileFilters]);
 
   useEffect(() => {
+    if (currentView !== 'backups') {
+      return;
+    }
+    void refreshBackups().catch(() => {
+      setBannerSeverity('error');
+      setBannerMessage(t.sections.backups.loadError);
+    });
+  }, [currentView, installedApps]);
+
+  useEffect(() => {
     if (currentView !== 'secrets') {
       return;
     }
@@ -959,6 +999,81 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
     }
   };
 
+  const handleCreateBackup = async (appId: string) => {
+    setBackupsBusy(true);
+    try {
+      const result = await getDesktopApi().createBackup({ appId, reason: 'manual' });
+      setBannerSeverity(result.success ? 'success' : 'error');
+      setBannerMessage(result.userMessage);
+      await refreshBackups();
+    } catch (error) {
+      setBannerSeverity('error');
+      setBannerMessage(t.sections.backups.createError);
+      requestErrorReport({
+        source: 'desktop',
+        operation: 'backup.create',
+        message: error instanceof Error ? error.message : t.sections.backups.createError,
+        technicalCode: 'backup_create_unhandled_error',
+        appId,
+        sensitiveDetails: { stack: error instanceof Error ? error.stack : undefined },
+      });
+    } finally {
+      setBackupsBusy(false);
+    }
+  };
+
+  const handleDeleteBackup = async (backup: AppBackupSummary) => {
+    if (!window.confirm(t.sections.backups.deleteConfirm(backup.appName))) {
+      return;
+    }
+    setBackupsBusy(true);
+    try {
+      const result = await getDesktopApi().deleteBackup({ appId: backup.appId, backupId: backup.backupId });
+      setBannerSeverity(result.success ? 'success' : 'error');
+      setBannerMessage(result.userMessage);
+      await refreshBackups();
+    } catch (error) {
+      setBannerSeverity('error');
+      setBannerMessage(t.sections.backups.loadError);
+      requestErrorReport({
+        source: 'desktop',
+        operation: 'backup.delete',
+        message: error instanceof Error ? error.message : t.sections.backups.loadError,
+        technicalCode: 'backup_delete_unhandled_error',
+        appId: backup.appId,
+        sensitiveDetails: { stack: error instanceof Error ? error.stack : undefined },
+      });
+    } finally {
+      setBackupsBusy(false);
+    }
+  };
+
+  const handleRestoreBackup = async (backup: AppBackupSummary) => {
+    if (!window.confirm(t.sections.backups.restoreConfirm(backup.appName))) {
+      return;
+    }
+    setBackupsBusy(true);
+    try {
+      const result = await getDesktopApi().restoreBackup({ appId: backup.appId, backupId: backup.backupId });
+      setBannerSeverity(result.success ? 'success' : 'error');
+      setBannerMessage(result.userMessage);
+      await Promise.all([refreshBackups(), refreshApps()]);
+    } catch (error) {
+      setBannerSeverity('error');
+      setBannerMessage(t.sections.backups.loadError);
+      requestErrorReport({
+        source: 'desktop',
+        operation: 'backup.restore',
+        message: error instanceof Error ? error.message : t.sections.backups.loadError,
+        technicalCode: 'backup_restore_unhandled_error',
+        appId: backup.appId,
+        sensitiveDetails: { stack: error instanceof Error ? error.stack : undefined },
+      });
+    } finally {
+      setBackupsBusy(false);
+    }
+  };
+
   const handleAgentToolApprovalChange = async (
     toolId: AgentToolDefinition['id'],
     requiresApproval: boolean,
@@ -1005,6 +1120,36 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
       });
     } finally {
       setDesktopUpdateBusy(false);
+    }
+  };
+
+  const handleCreateMemory = async (input: MemoryCreateInput) => {
+    try {
+      const created = await getDesktopApi().memoryCreate(input);
+      setMemories((current) => [created, ...current.filter((entry) => entry.id !== created.id)]);
+    } catch (error) {
+      setBannerSeverity('error');
+      setBannerMessage(error instanceof Error ? error.message : t.settings.memorySaveError);
+    }
+  };
+
+  const handleUpdateMemory = async (input: MemoryUpdateInput) => {
+    try {
+      const updated = await getDesktopApi().memoryUpdate(input);
+      setMemories((current) => current.map((entry) => (entry.id === updated.id ? updated : entry)));
+    } catch (error) {
+      setBannerSeverity('error');
+      setBannerMessage(error instanceof Error ? error.message : t.settings.memorySaveError);
+    }
+  };
+
+  const handleDeleteMemory = async (id: string) => {
+    try {
+      await getDesktopApi().memoryDelete(id);
+      setMemories((current) => current.filter((entry) => entry.id !== id));
+    } catch (error) {
+      setBannerSeverity('error');
+      setBannerMessage(error instanceof Error ? error.message : t.settings.memoryDeleteError);
     }
   };
 
@@ -1998,6 +2143,18 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
           />
         ) : null}
 
+        {currentView === 'backups' ? (
+          <BackupsView
+            backups={backups}
+            apps={installedApps}
+            busy={backupsBusy}
+            t={t}
+            onCreateBackup={(appId) => void handleCreateBackup(appId)}
+            onDeleteBackup={(backup) => void handleDeleteBackup(backup)}
+            onRestoreBackup={(backup) => void handleRestoreBackup(backup)}
+          />
+        ) : null}
+
         {currentView === 'datos' ? (
           <DataView
             t={t}
@@ -2052,6 +2209,11 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
             onCheckDesktopUpdates={() => void runDesktopUpdateAction(() => getDesktopApi().checkDesktopUpdates())}
             onDownloadDesktopUpdate={() => void runDesktopUpdateAction(() => getDesktopApi().downloadDesktopUpdate())}
             onInstallDesktopUpdate={() => void runDesktopUpdateAction(() => getDesktopApi().installDesktopUpdate())}
+            installedApps={installedApps}
+            memories={memories}
+            onCreateMemory={(input) => void handleCreateMemory(input)}
+            onUpdateMemory={(input) => void handleUpdateMemory(input)}
+            onDeleteMemory={(id) => void handleDeleteMemory(id)}
           />
         ) : null}
       </AppShell>
