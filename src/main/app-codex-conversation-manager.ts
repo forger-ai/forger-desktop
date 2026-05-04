@@ -10,6 +10,7 @@ import type {
   AppCodexConversationRun,
   AppCodexConversationSendMessageInput,
   AppCodexConversationRunStatus,
+  AppAgent,
   CodexReasoningEffort,
 } from '../shared/types';
 
@@ -30,6 +31,10 @@ interface AppCodexConversationManagerOptions {
   getCodexEnvironment: (appId?: string) => Promise<Record<string, string>>;
   getCodexAuthenticated: () => Promise<boolean>;
   hasCodexConversation: (appId: string) => Promise<boolean>;
+  resolveAgents: (appId: string) => Promise<AppAgent[]>;
+  createForgerMcpSession?: (runId: string, appId: string) => { url: string; token: string } | null;
+  releaseForgerMcpSession?: (token: string) => void;
+  buildMemoryContext?: (appId: string) => Promise<string>;
   listenAppMcps?: (appIds: string[], runId: string) => Promise<CodexMcpServerConfig[]>;
   releaseAppMcps?: (runId: string) => void;
   onConversationEvent: (event: AppCodexConversationEvent) => void;
@@ -70,6 +75,11 @@ export class AppCodexConversationManager {
     await this.assertEnabled(appId);
     await this.load();
     const now = new Date().toISOString();
+    const metadata = normalizeMetadata(input.metadata) ?? {};
+    const agentId = typeof input.agentId === 'string' ? input.agentId.trim() : '';
+    if (agentId) {
+      metadata.agentId = agentId;
+    }
     const conversation: InternalConversation = {
       conversationId: randomUUID(),
       appId,
@@ -78,7 +88,7 @@ export class AppCodexConversationManager {
       updatedAt: now,
       messages: [],
       threadId: null,
-      metadata: normalizeMetadata(input.metadata),
+      metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
     };
     this.conversations.set(conversation.conversationId, conversation);
     await this.persistApp(appId);
@@ -186,6 +196,28 @@ export class AppCodexConversationManager {
     return { success: true };
   }
 
+  public async delete(appId: string, conversationId: string): Promise<{ success: boolean }> {
+    await this.assertEnabled(appId);
+    await this.load();
+    const conversation = this.conversations.get(conversationId);
+    if (!conversation || conversation.appId !== appId) {
+      return { success: false };
+    }
+    const activeRun = conversation.activeRun;
+    if (activeRun && !isTerminalRunStatus(activeRun.status)) {
+      const run = this.runs.get(activeRun.runId);
+      killProcessTree(run?.child);
+      this.runs.delete(activeRun.runId);
+    }
+    this.conversations.delete(conversationId);
+    await this.persistApp(appId);
+    this.options.onConversationEvent({
+      type: 'conversation.deleted',
+      conversation: toConversation(conversation),
+    });
+    return { success: true };
+  }
+
   private async execute(conversationId: string, runId: string, input: AppCodexConversationSendMessageInput): Promise<void> {
     const conversation = this.conversations.get(conversationId);
     const run = this.runs.get(runId);
@@ -216,14 +248,32 @@ export class AppCodexConversationManager {
     });
 
     let mcpServers: CodexMcpServerConfig[] = [];
+    let forgerMcpSession: { url: string; token: string } | null = null;
     try {
       const command = await resolveCodexCommand(codexCliPath, await this.options.getCodexPathEntries(conversation.appId));
       const environment = await this.options.getCodexEnvironment(conversation.appId);
-      mcpServers = await (this.options.listenAppMcps?.([conversation.appId], run.runId) ?? Promise.resolve([]));
+      const appMcpServers = await (this.options.listenAppMcps?.([conversation.appId], run.runId) ?? Promise.resolve([]));
+      forgerMcpSession = this.options.createForgerMcpSession?.(run.runId, conversation.appId) ?? null;
+      mcpServers = [
+        ...(forgerMcpSession
+          ? [{
+              name: 'forger',
+              url: forgerMcpSession.url,
+              token: forgerMcpSession.token,
+              tokenEnvVar: 'FORGER_MCP_TOKEN',
+              toolTimeoutSec: 600,
+            }]
+          : []),
+        ...appMcpServers,
+      ];
       const mcpArgs = buildMcpArgs(mcpServers);
       const model = input.model?.trim() || DEFAULT_MODEL;
       const reasoningEffort = input.reasoningEffort ?? DEFAULT_REASONING;
-      const prompt = buildPrompt(input.message, input.context);
+      const initialPrompt = await this.resolveInitialPrompt(conversation);
+      const memoryContext = !conversation.threadId
+        ? await (this.options.buildMemoryContext?.(conversation.appId) ?? Promise.resolve(''))
+        : '';
+      const prompt = buildPrompt(input.message, input.context, [initialPrompt, memoryContext].filter(Boolean).join('\n\n'));
       const attachmentPaths = await this.prepareAttachments(conversation.appId, run, input);
       const imageArgs = attachmentPaths.flatMap((filePath) => ['--image', filePath]);
       const args = conversation.threadId
@@ -319,6 +369,9 @@ export class AppCodexConversationManager {
         run: toRun(run),
       });
     } finally {
+      if (forgerMcpSession) {
+        this.options.releaseForgerMcpSession?.(forgerMcpSession.token);
+      }
       this.options.releaseAppMcps?.(run.runId);
       await this.cleanupRunAttachments(run).catch(() => undefined);
     }
@@ -413,6 +466,26 @@ export class AppCodexConversationManager {
     }
   }
 
+  private async resolveInitialPrompt(conversation: InternalConversation): Promise<string | undefined> {
+    const metadata = conversation.metadata;
+    if (!metadata || metadata.initialPromptApplied === true) {
+      return undefined;
+    }
+    const agentId = typeof metadata.agentId === 'string' ? metadata.agentId.trim() : '';
+    if (!agentId) {
+      return undefined;
+    }
+    const agent = (await this.options.resolveAgents(conversation.appId)).find((entry) => entry.id === agentId);
+    const initialPrompt = agent?.initialPrompt.trim();
+    if (!initialPrompt) {
+      return undefined;
+    }
+    metadata.initialPromptApplied = true;
+    conversation.updatedAt = new Date().toISOString();
+    await this.persistApp(conversation.appId);
+    return initialPrompt;
+  }
+
   private async load(): Promise<void> {
     if (!this.loadPromise) {
       this.loadPromise = this.loadAll();
@@ -463,12 +536,18 @@ export class AppCodexConversationManager {
   }
 }
 
-const buildPrompt = (message: string, context: string | undefined): string => {
+const buildPrompt = (message: string, context: string | undefined, initialPrompt?: string): string => {
   const trimmedContext = (context ?? '').trim().slice(0, MAX_CONTEXT_CHARS);
-  if (!trimmedContext) {
-    return message.trim();
+  const parts: string[] = [];
+  const trimmedInitialPrompt = initialPrompt?.trim();
+  if (trimmedInitialPrompt) {
+    parts.push(trimmedInitialPrompt, '');
   }
-  return [
+  if (!trimmedContext) {
+    parts.push(message.trim());
+    return parts.join('\n');
+  }
+  parts.push(
     'Contexto actual de la app:',
     trimmedContext,
     '',
@@ -476,7 +555,8 @@ const buildPrompt = (message: string, context: string | undefined): string => {
     message.trim(),
     '',
     'Usa las herramientas MCP de la app cuando necesites modificar su estado. Responde breve para mostrar el resultado dentro de la app.',
-  ].join('\n');
+  );
+  return parts.join('\n');
 };
 
 const toConversation = (conversation: InternalConversation): AppCodexConversation => ({
@@ -560,7 +640,7 @@ const progressFromCodexOutput = (text: string): string | null => {
     try {
       const parsed = JSON.parse(line) as Record<string, unknown>;
       if (parsed.type === 'turn.started') {
-        return 'Codex esta trabajando en el canvas.';
+        return 'El agente esta pensando.';
       }
       if (parsed.type === 'item.completed' && parsed.item && typeof parsed.item === 'object') {
         const item = parsed.item as Record<string, unknown>;
@@ -569,13 +649,13 @@ const progressFromCodexOutput = (text: string): string | null => {
           return compact.length > 160 ? `${compact.slice(0, 157)}...` : compact;
         }
         if (String(item.type ?? '').includes('tool') || item.type === 'command_execution') {
-          return 'Codex esta usando herramientas de Studio.';
+          return 'El agente esta usando herramientas de Studio.';
         }
       }
       if (parsed.type === 'item.started' && parsed.item && typeof parsed.item === 'object') {
         const item = parsed.item as Record<string, unknown>;
         if (String(item.type ?? '').includes('tool') || item.type === 'command_execution') {
-          return 'Codex esta usando herramientas de Studio.';
+          return 'El agente esta usando herramientas de Studio.';
         }
       }
     } catch {

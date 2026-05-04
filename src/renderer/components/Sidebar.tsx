@@ -1,5 +1,6 @@
 import AppsRounded from '@mui/icons-material/AppsRounded';
 import AutoAwesomeRounded from '@mui/icons-material/AutoAwesomeRounded';
+import BackupRounded from '@mui/icons-material/BackupRounded';
 import EventRepeatRounded from '@mui/icons-material/EventRepeatRounded';
 import CategoryRounded from '@mui/icons-material/CategoryRounded';
 import ConstructionRounded from '@mui/icons-material/ConstructionRounded';
@@ -32,6 +33,7 @@ export type View =
   | 'chat'
   | 'automations'
   | 'files'
+  | 'backups'
   | 'datos'
   | 'secrets'
   | 'tools'
@@ -52,6 +54,7 @@ const mainNav = [
   { id: 'chat' as const, icon: <AutoAwesomeRounded /> },
   { id: 'automations' as const, icon: <EventRepeatRounded /> },
   { id: 'files' as const, icon: <InsertDriveFileRounded /> },
+  { id: 'backups' as const, icon: <BackupRounded /> },
   { id: 'datos' as const, icon: <TableChartRounded /> },
   { id: 'secrets' as const, icon: <VpnKeyRounded /> },
   { id: 'tools' as const, icon: <ConstructionRounded /> },
@@ -96,6 +99,7 @@ export function Sidebar({ currentView, onNavigate, t, desktopUpdateState }: Side
     chat: t.nav.chat,
     automations: t.nav.automations,
     files: t.nav.files,
+    backups: t.nav.backups,
     datos: t.nav.datos,
     secrets: t.nav.secrets,
     tools: t.nav.tools,

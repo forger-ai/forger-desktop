@@ -22,8 +22,9 @@ interface AutomationManagerOptions {
   getCodexCliPath: () => Promise<string | null>;
   getCodexPathEntries: () => Promise<string[]>;
   getCodexAuthenticated: () => Promise<boolean>;
-  createForgerMcpSession?: (runId: string, appId: string) => { url: string; token: string } | null;
+  createForgerMcpSession?: (runId: string, appId: string, appIds: string[]) => { url: string; token: string } | null;
   releaseForgerMcpSession?: (token: string) => void;
+  buildMemoryContext?: (appIds: string[]) => Promise<string>;
   listenAppMcps?: (appIds: string[], runId: string) => Promise<CodexMcpServerConfig[]>;
   releaseAppMcps?: (runId: string) => void;
   onAutomationUpdated: (event: { automation: Automation; run?: AutomationRunSummary }) => void;
@@ -258,7 +259,7 @@ export class AutomationManager {
       const activeRunId = run.id;
       let latestUserMessage = run.userMessage ?? '';
       let userMessages = run.userMessages ?? [];
-      forgerMcpSession = this.options.createForgerMcpSession?.(run.id, 'forger') ?? null;
+      forgerMcpSession = this.options.createForgerMcpSession?.(run.id, 'forger', automation.selectedAppIds) ?? null;
       const appMcpServers = await (this.options.listenAppMcps?.(automation.selectedAppIds, run.id) ?? Promise.resolve([]));
       const mcpServers: CodexMcpServerConfig[] = [
         ...(forgerMcpSession
@@ -272,10 +273,12 @@ export class AutomationManager {
           : []),
         ...appMcpServers,
       ];
+      const memoryContext = await (this.options.buildMemoryContext?.(automation.selectedAppIds) ?? Promise.resolve(''));
+      const prompt = memoryContext ? `${memoryContext}\n\n${this.buildPrompt(automation)}` : this.buildPrompt(automation);
       const result = await runCodexCommand(command, {
         cwd: this.options.forgerHomeRoot,
         codexHome: this.options.codexHome,
-        prompt: this.buildPrompt(automation),
+        prompt,
         transcriptPath,
         mcpServers,
         onAssistantMessages: (assistantMessages) => {
