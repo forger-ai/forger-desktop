@@ -32,6 +32,7 @@ import type {
   CodexReasoningEffort,
   ForgerFileCategory,
   ForgerFileRecord,
+  FilesStageForChatInput,
   PermissionRequest,
   PickedChatFile,
 } from '@shared/types';
@@ -138,6 +139,17 @@ function MarkdownMessage({ content }: { content: string }) {
   );
 }
 
+const readFileAsBase64 = async (file: File): Promise<string> =>
+  await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const value = typeof reader.result === 'string' ? reader.result : '';
+      resolve(value.includes(',') ? value.split(',').pop() ?? '' : value);
+    };
+    reader.onerror = () => reject(reader.error ?? new Error('clipboard_image_read_failed'));
+    reader.readAsDataURL(file);
+  });
+
 interface ChatViewProps {
   t: AppDictionary;
   conversationTitle: string;
@@ -157,6 +169,7 @@ interface ChatViewProps {
   uploadCategoryPath: string;
   onUploadCategoryChange: (categoryPath: string) => void;
   onPickFiles: () => void;
+  onStagePastedFile: (input: FilesStageForChatInput) => Promise<void>;
   onCreateUploadCategory: () => void;
   onRemovePendingFile: (sourcePath: string) => void;
   onMentionFile: (file: ForgerFileRecord) => void;
@@ -197,6 +210,7 @@ export function ChatView({
   uploadCategoryPath,
   onUploadCategoryChange,
   onPickFiles,
+  onStagePastedFile,
   onCreateUploadCategory,
   onRemovePendingFile,
   onMentionFile,
@@ -363,6 +377,43 @@ export function ChatView({
     setMentionMenuPosition(null);
     inputRef.current?.focus();
     window.setTimeout(syncComposerText, 0);
+  };
+
+  const handlePaste = (event: React.ClipboardEvent<HTMLDivElement>) => {
+    const imageItems = Array.from(event.clipboardData.items)
+      .filter((item) => item.kind === 'file' && item.type.toLowerCase().startsWith('image/'));
+    const text = event.clipboardData.getData('text/plain');
+    if (imageItems.length === 0) {
+      event.preventDefault();
+      document.execCommand('insertText', false, text);
+      window.setTimeout(syncComposerText, 0);
+      return;
+    }
+
+    event.preventDefault();
+    if (text) {
+      document.execCommand('insertText', false, text);
+    }
+    void Promise.all(
+      imageItems.map(async (item, index) => {
+        const file = item.getAsFile();
+        if (!file) {
+          return;
+        }
+        const dataBase64 = await readFileAsBase64(file);
+        await onStagePastedFile({
+          name: file.name || `imagen-pegada-${index + 1}`,
+          mimeType: file.type,
+          dataBase64,
+        });
+      }),
+    )
+      .catch((error) => {
+        console.warn('Could not stage pasted chat image', error);
+      })
+      .finally(() => {
+        window.setTimeout(syncComposerText, 0);
+      });
   };
 
   const compactSelectMenuProps = {
@@ -770,12 +821,7 @@ export function ChatView({
                 aria-label={t.sections.chat.inputPlaceholder}
                 data-placeholder={t.sections.chat.inputPlaceholder}
                 onInput={syncComposerText}
-                onPaste={(event) => {
-                  event.preventDefault();
-                  const text = event.clipboardData.getData('text/plain');
-                  document.execCommand('insertText', false, text);
-                  window.setTimeout(syncComposerText, 0);
-                }}
+                onPaste={handlePaste}
                 onClick={(event) => {
                   const removeTarget = (event.target as HTMLElement).closest<HTMLElement>('[data-file-chip-remove]');
                   const chip = removeTarget?.closest<HTMLElement>('[data-file-chip-id]');

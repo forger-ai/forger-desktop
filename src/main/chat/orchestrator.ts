@@ -725,6 +725,17 @@ export class ChatOrchestrator {
     return await this.requestPermission(run, input);
   }
 
+  public appendExternalProgress(runId: string, message: string): void {
+    const run = this.runs.get(runId);
+    const trimmed = message.trim();
+    if (!run || !trimmed || run.status === 'canceled' || run.status === 'failed') {
+      return;
+    }
+    run.progressLog = [...(run.progressLog ?? []), trimmed].slice(-40);
+    run.updatedAt = new Date().toISOString();
+    this.emitRun(run);
+  }
+
   private async executeRun(runId: string): Promise<void> {
     const run = this.runs.get(runId);
     if (!run) {

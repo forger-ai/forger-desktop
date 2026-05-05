@@ -6,11 +6,13 @@ import type {
   FilesCreateCategoryInput,
   FilesDeleteCategoryInput,
   FilesDeleteInput,
+  FilesDiscardStagedForChatInput,
   FilesImportInput,
   FilesListInput,
   FilesMoveInput,
   FilesRenameCategoryInput,
   FilesRenameInput,
+  FilesStageForChatInput,
   ForgerFileCategory,
   ForgerFileRecord,
   PickedChatFile,
@@ -24,6 +26,16 @@ interface StoredFileIndex {
 const EMPTY_INDEX: StoredFileIndex = {
   files: [],
   categories: [],
+};
+
+const MAX_STAGED_CHAT_FILE_BYTES = 20 * 1024 * 1024;
+const CHAT_STAGING_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const CHAT_STAGING_DIR = 'chat-staging';
+const IMAGE_EXTENSION_BY_MIME_TYPE: Record<string, string> = {
+  'image/png': '.png',
+  'image/jpeg': '.jpg',
+  'image/webp': '.webp',
+  'image/gif': '.gif',
 };
 
 const TYPE_BY_EXTENSION: Record<string, string> = {
@@ -67,6 +79,61 @@ export class FileLibrary {
       });
     }
     return picked;
+  }
+
+  public async stageFileForChat(input: FilesStageForChatInput): Promise<PickedChatFile> {
+    const mimeType = input.mimeType.toLowerCase().trim();
+    const extension = IMAGE_EXTENSION_BY_MIME_TYPE[mimeType];
+    if (!extension) {
+      throw new Error('unsupported_chat_image_type');
+    }
+    const bytes = Buffer.from(input.dataBase64, 'base64');
+    if (bytes.byteLength === 0 || bytes.byteLength > MAX_STAGED_CHAT_FILE_BYTES) {
+      throw new Error('chat_image_too_large');
+    }
+    const stagingRoot = await this.chatStagingRoot();
+    const baseName = sanitizeSegment(path.parse(input.name ?? '').name) || 'imagen pegada';
+    const filePath = path.join(stagingRoot, `${Date.now()}-${randomUUID()}-${baseName}${extension}`);
+    if (!isPathInside(filePath, stagingRoot)) {
+      throw new Error('chat_staging_path_outside_root');
+    }
+    await fs.writeFile(filePath, bytes);
+    const stat = await fs.stat(filePath);
+    return {
+      sourcePath: filePath,
+      name: path.basename(filePath).replace(/^\d+-[a-f0-9-]+-/i, ''),
+      sizeBytes: stat.size,
+      modifiedAt: stat.mtime.toISOString(),
+      type: 'image',
+      staged: true,
+    };
+  }
+
+  public async discardStagedFilesForChat(input: FilesDiscardStagedForChatInput): Promise<FilesActionResult> {
+    const stagingRoot = await this.chatStagingRoot();
+    for (const sourcePath of input.sourcePaths) {
+      const target = path.resolve(sourcePath);
+      if (isPathInside(target, stagingRoot)) {
+        await fs.rm(target, { force: true });
+      }
+    }
+    return { success: true };
+  }
+
+  public async cleanupStagedFilesForChat(maxAgeMs = CHAT_STAGING_MAX_AGE_MS): Promise<void> {
+    const stagingRoot = await this.chatStagingRoot();
+    const entries = await fs.readdir(stagingRoot, { withFileTypes: true }).catch(() => []);
+    const cutoff = Date.now() - maxAgeMs;
+    for (const entry of entries) {
+      if (!entry.isFile()) {
+        continue;
+      }
+      const filePath = path.join(stagingRoot, entry.name);
+      const stat = await fs.stat(filePath).catch(() => null);
+      if (stat && stat.mtimeMs < cutoff) {
+        await fs.rm(filePath, { force: true });
+      }
+    }
   }
 
   public async list(input: FilesListInput = {}): Promise<ForgerFileRecord[]> {
@@ -451,6 +518,16 @@ export class FileLibrary {
 
   private indexPath(): string {
     return path.join(this.metadataRoot, 'files', 'index.json');
+  }
+
+  private async chatStagingRoot(): Promise<string> {
+    const target = path.resolve(this.metadataRoot, 'files', CHAT_STAGING_DIR);
+    const root = path.resolve(this.metadataRoot, 'files');
+    if (!isPathInside(target, root)) {
+      throw new Error('chat_staging_root_invalid');
+    }
+    await fs.mkdir(target, { recursive: true });
+    return target;
   }
 
   private async scanCategories(parentPath: string): Promise<ForgerFileCategory[]> {

@@ -1,4 +1,4 @@
-export const FORGER_AGENT_CONTRACT_VERSION = 7;
+export const FORGER_AGENT_CONTRACT_VERSION = 8;
 export const FORGER_AGENT_CONTRACT_MARKER = `FORGER_AGENT_CONTRACT_VERSION: ${FORGER_AGENT_CONTRACT_VERSION}`;
 export const FORGER_AGENT_CONTRACT_MARKER_PREFIX = 'FORGER_AGENT_CONTRACT_VERSION:';
 
@@ -57,7 +57,8 @@ export const buildGlobalForgerAgentsMarkdown = (): string => {
     '## Visible Capabilities vs Internal Tools',
     '- A visible capability is something the user can request or understand as a real app action: reviewing data, loading information, correcting classifications, seeing summaries, or adjusting visible settings.',
     '- An internal tool is something you can use to complete the task: scripts, commands, endpoints, temporary folders, shared files, database queries, skills, or validations.',
-    '- Forger can expose internal MCP tools to check the catalog, review updates, open, close, restart, or update installed apps.',
+    '- Forger can expose internal MCP tools to check the catalog, review updates, open, close, refresh the app view, restart, or update installed apps.',
+    '- When the app services are already running and the user needs to see recent app changes or clear a stuck view, prefer the Forger MCP tool that refreshes the app view before restarting the app. Restart only when services are stopped, unhealthy, or refreshing the view is not enough.',
     '- Apps can expose their own MCP tools for app data. When a request needs to read, create, edit, delete, import, or expose app data, use the app MCP tools when they exist before falling back to scripts, SQL, or endpoint calls.',
     '- Use Forger MCP tools when available before trying to replicate those actions through commands or files.',
     '- Forger MCP can expose memory tools to read, create, update, and delete user preferences or useful facts.',

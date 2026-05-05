@@ -1373,6 +1373,29 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
     });
   };
 
+  const discardStagedChatFiles = (files: PickedChatFile[]) => {
+    const sourcePaths = files.filter((file) => file.staged).map((file) => file.sourcePath);
+    if (sourcePaths.length > 0) {
+      void getDesktopApi().filesDiscardStagedForChat({ sourcePaths });
+    }
+  };
+
+  const handleStagePastedChatFile = async (input: Parameters<ReturnType<typeof getDesktopApi>['filesStageForChat']>[0]) => {
+    const staged = await getDesktopApi().filesStageForChat(input);
+    setPendingChatFiles((current) => {
+      const seen = new Set(current.map((file) => file.sourcePath));
+      return seen.has(staged.sourcePath) ? current : [...current, staged];
+    });
+  };
+
+  const handleRemovePendingChatFile = (sourcePath: string) => {
+    setPendingChatFiles((current) => {
+      const removed = current.filter((file) => file.sourcePath === sourcePath);
+      discardStagedChatFiles(removed);
+      return current.filter((file) => file.sourcePath !== sourcePath);
+    });
+  };
+
   const handleMentionFile = (file: ForgerFileRecord) => {
     setMentionedChatFileIds((current) => current.includes(file.id) ? current : [...current, file.id]);
   };
@@ -1514,6 +1537,7 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
       const desktopApi = getDesktopApi();
       const modelOption =
         CODEX_MODEL_OPTIONS.find((option) => option.realModelName === selectedCodexModel) ?? CODEX_MODEL_OPTIONS[0];
+      const stagedFilesForCleanup = pendingChatFiles.filter((file) => file.staged);
       const importedFiles = pendingChatFiles.length > 0
         ? await desktopApi.filesImport({
             sourcePaths: pendingChatFiles.map((file) => file.sourcePath),
@@ -1521,6 +1545,7 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
             appId: selectedAppId,
           })
         : [];
+      discardStagedChatFiles(stagedFilesForCleanup);
       const mentionedFilesForRun = forgerFiles.filter((file) => mentionedChatFileIds.includes(file.id));
       const sharedFiles: SharedFileRef[] = [
         ...importedFiles.map((file) => ({
@@ -1696,6 +1721,9 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
     setActiveConversationId(nextConversation.id);
     setActiveConversationByApp((current) => ({ ...current, [selectedAppId]: nextConversation.id }));
     setChatInput('');
+    discardStagedChatFiles(pendingChatFiles);
+    setPendingChatFiles([]);
+    setMentionedChatFileIds([]);
     setChatProgressLines([]);
     deliveredRunRepliesRef.current.clear();
   };
@@ -2085,8 +2113,9 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
             uploadCategoryPath={uploadCategoryPath}
             onUploadCategoryChange={setUploadCategoryPath}
             onPickFiles={() => void handlePickChatFiles()}
+            onStagePastedFile={handleStagePastedChatFile}
             onCreateUploadCategory={() => openCreateCategoryDialog(undefined, true)}
-            onRemovePendingFile={(sourcePath) => setPendingChatFiles((current) => current.filter((file) => file.sourcePath !== sourcePath))}
+            onRemovePendingFile={handleRemovePendingChatFile}
             onMentionFile={handleMentionFile}
             onRemoveMentionedFile={(fileId) => setMentionedChatFileIds((current) => current.filter((id) => id !== fileId))}
             modelOptions={CODEX_MODEL_OPTIONS}
