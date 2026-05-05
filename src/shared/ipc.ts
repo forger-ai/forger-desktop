@@ -59,6 +59,8 @@ export const IPC_CHANNELS = {
   runtimeStatusChanged: 'forger:runtime-status-changed',
   chatRunUpdated: 'forger:chat:run-updated',
   filesPickForChat: 'forger:files:pick-for-chat',
+  filesStageForChat: 'forger:files:stage-for-chat',
+  filesDiscardStagedForChat: 'forger:files:discard-staged-for-chat',
   filesList: 'forger:files:list',
   filesListCategories: 'forger:files:list-categories',
   filesCreateCategory: 'forger:files:create-category',

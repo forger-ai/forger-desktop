@@ -162,8 +162,8 @@ export const es = {
           description: 'Cierra y vuelve a abrir una app instalada.',
         },
         forger_refresh_app_view: {
-          name: 'Reiniciar vista',
-          description: 'Recarga la ventana de una app que ya está abierta.',
+          name: 'Refrescar vista',
+          description: 'Refresca la ventana de una app que ya está abierta.',
         },
         forger_update_app: {
           name: 'Actualizar app',

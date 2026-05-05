@@ -63,6 +63,8 @@ const IPC_CHANNELS = {
   runtimeStatusChanged: 'forger:runtime-status-changed',
   chatRunUpdated: 'forger:chat:run-updated',
   filesPickForChat: 'forger:files:pick-for-chat',
+  filesStageForChat: 'forger:files:stage-for-chat',
+  filesDiscardStagedForChat: 'forger:files:discard-staged-for-chat',
   filesList: 'forger:files:list',
   filesListCategories: 'forger:files:list-categories',
   filesCreateCategory: 'forger:files:create-category',
@@ -193,6 +195,8 @@ const api: ForgerDesktopApi = {
     };
   },
   filesPickForChat: () => ipcRenderer.invoke(IPC_CHANNELS.filesPickForChat),
+  filesStageForChat: (input) => ipcRenderer.invoke(IPC_CHANNELS.filesStageForChat, input),
+  filesDiscardStagedForChat: (input) => ipcRenderer.invoke(IPC_CHANNELS.filesDiscardStagedForChat, input),
   filesList: (input) => ipcRenderer.invoke(IPC_CHANNELS.filesList, input),
   filesListCategories: () => ipcRenderer.invoke(IPC_CHANNELS.filesListCategories),
   filesCreateCategory: (input) => ipcRenderer.invoke(IPC_CHANNELS.filesCreateCategory, input),

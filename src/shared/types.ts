@@ -695,6 +695,17 @@ export interface PickedChatFile {
   sizeBytes: number;
   modifiedAt: string;
   type: string;
+  staged?: boolean;
+}
+
+export interface FilesStageForChatInput {
+  name?: string;
+  mimeType: string;
+  dataBase64: string;
+}
+
+export interface FilesDiscardStagedForChatInput {
+  sourcePaths: string[];
 }
 
 export interface FilesListInput {
@@ -1030,6 +1041,8 @@ export interface ForgerDesktopApi {
   chatUndo: (input: ChatUndoInput) => Promise<ChatUndoResult>;
   onChatRunUpdated: (listener: (event: ChatRunEvent) => void) => () => void;
   filesPickForChat: () => Promise<PickedChatFile[]>;
+  filesStageForChat: (input: FilesStageForChatInput) => Promise<PickedChatFile>;
+  filesDiscardStagedForChat: (input: FilesDiscardStagedForChatInput) => Promise<FilesActionResult>;
   filesList: (input?: FilesListInput) => Promise<ForgerFileRecord[]>;
   filesListCategories: () => Promise<ForgerFileCategory[]>;
   filesCreateCategory: (input: FilesCreateCategoryInput) => Promise<ForgerFileCategory>;

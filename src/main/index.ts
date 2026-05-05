@@ -81,11 +81,13 @@ import type {
   FilesCreateCategoryInput,
   FilesDeleteCategoryInput,
   FilesDeleteInput,
+  FilesDiscardStagedForChatInput,
   FilesImportInput,
   FilesListInput,
   FilesMoveInput,
   FilesRenameCategoryInput,
   FilesRenameInput,
+  FilesStageForChatInput,
   ForgerAccountLoginInput,
   ForgerAccountRegisterInput,
   InstallAppResult,
@@ -254,6 +256,7 @@ let forgerBackendClient: ForgerBackendClient | null = null;
 const runningApps = new Map<string, RunningAppProcess>();
 const appWindows = new Map<string, BrowserWindow>();
 const stoppingApps = new Set<string>();
+const appLifecycleLocks = new Map<string, Promise<unknown>>();
 const runtimeLocks = new Map<string, Promise<RuntimeBinarySet>>();
 let chatOrchestrator: ChatOrchestrator | null = null;
 let appCodexTaskManager: AppCodexTaskManager | null = null;
@@ -405,8 +408,8 @@ const AGENT_TOOL_PACKAGES: AgentToolPackageDefinition[] = [
       {
         id: 'forger_refresh_app_view',
         packageId: FORGER_TOOL_PACKAGE_ID,
-        name: 'Reiniciar vista',
-        description: 'Recarga la ventana de una app que ya esta abierta.',
+        name: 'Refrescar vista',
+        description: 'Refresca la ventana de una app que ya esta abierta.',
         category: 'vista',
         risk: 'medio',
         defaultRequiresApproval: true,
@@ -1424,6 +1427,25 @@ const getFileLibrary = (): FileLibrary => {
     fileLibrary = new FileLibrary(getPrivateDataRoot(), getForgerMetadataRoot());
   }
   return fileLibrary;
+};
+
+const withAppLifecycleLock = async <T>(appId: string, operation: () => Promise<T>): Promise<T> => {
+  const previous = appLifecycleLocks.get(appId) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const chain = previous.catch(() => undefined).then(() => current);
+  appLifecycleLocks.set(appId, chain);
+  await previous.catch(() => undefined);
+  try {
+    return await operation();
+  } finally {
+    release();
+    if (appLifecycleLocks.get(appId) === chain) {
+      appLifecycleLocks.delete(appId);
+    }
+  }
 };
 
 const listCatalogFromBackend = async (): Promise<CatalogApp[]> => {
@@ -3790,6 +3812,9 @@ const buildBackendProcessConfig = (
     let args = ['-m', 'uvicorn', resolvedApp.appImport];
     args = replaceCommandOption(args, '--host', '127.0.0.1');
     args = replaceCommandOption(args, '--port', String(port));
+    if (!args.includes('--reload')) {
+      args.push('--reload');
+    }
     return {
       command: python,
       args,
@@ -3823,7 +3848,7 @@ const normalizeHealthcheckPath = (healthcheck: string | undefined): string => {
   return value.startsWith('/') ? value : `/${value}`;
 };
 
-const openInstalledApp = async (appId: string, locale?: string): Promise<OpenAppResult> => {
+const openInstalledAppUnlocked = async (appId: string, locale?: string): Promise<OpenAppResult> => {
   const record = registry.apps[appId];
   if (!record || !record.installDir) {
     return {
@@ -4103,7 +4128,7 @@ const openInstalledApp = async (appId: string, locale?: string): Promise<OpenApp
   }
 };
 
-const stopInstalledApp = async (appId: string): Promise<StopAppResult> => {
+const stopInstalledAppUnlocked = async (appId: string): Promise<StopAppResult> => {
   const running = runningApps.get(appId);
   if (!running) {
     return {
@@ -4135,6 +4160,66 @@ const stopInstalledApp = async (appId: string): Promise<StopAppResult> => {
     userMessage: 'App detenida correctamente.',
   };
 };
+
+const openInstalledApp = async (appId: string, locale?: string): Promise<OpenAppResult> =>
+  await withAppLifecycleLock(appId, async () => await openInstalledAppUnlocked(appId, locale));
+
+const stopInstalledApp = async (appId: string): Promise<StopAppResult> =>
+  await withAppLifecycleLock(appId, async () => await stopInstalledAppUnlocked(appId));
+
+const restartInstalledApp = async (
+  appId: string,
+  options: { onProgress?: (message: string) => void } = {},
+): Promise<OpenAppResult> =>
+  await withAppLifecycleLock(appId, async () => {
+    await appendInstallLog('restart:start', { appId });
+    options.onProgress?.('Deteniendo la app...');
+    const stop = await stopInstalledAppUnlocked(appId);
+    await appendInstallLog('restart:stop_done', { appId, result: stop });
+    if (!stop.success) {
+      await appendInstallLog('restart:failed', { appId, phase: 'stop', result: stop });
+      options.onProgress?.('No pude detener la app.');
+      return {
+        success: false,
+        userMessage: stop.userMessage || 'No pudimos detener la app para reiniciarla.',
+        technicalCode: stop.technicalCode ?? 'restart_stop_failed',
+      };
+    }
+
+    options.onProgress?.('App detenida. Iniciando servicios locales y esperando que quede lista...');
+    await appendInstallLog('restart:open_start', { appId });
+    const open = await openInstalledAppUnlocked(appId);
+    if (!open.success) {
+      await appendInstallLog('restart:failed', { appId, phase: 'open', result: open });
+      options.onProgress?.('La app se detuvo, pero no pude volver a abrirla.');
+      if (!runningApps.has(appId)) {
+        const current = registry.apps[appId];
+        const nextStatus = current?.status === 'error' ? 'error' : 'installed';
+        await markAppRuntimeStatus(appId, nextStatus, open.userMessage || 'La app quedo detenida.');
+        emitRuntimeStatus({
+          appId,
+          status: nextStatus,
+          userMessage: open.userMessage || 'La app quedo detenida.',
+        });
+      }
+      return {
+        ...open,
+        userMessage: open.userMessage || 'La app se detuvo, pero no pudimos volver a abrirla.',
+        technicalCode: open.technicalCode ?? 'restart_open_failed',
+      };
+    }
+
+    await appendInstallLog('restart:ready', {
+      appId,
+      backendUrl: open.backendUrl,
+      frontendUrl: open.frontendUrl,
+    });
+    options.onProgress?.('App reiniciada correctamente.');
+    return {
+      ...open,
+      userMessage: 'App reiniciada correctamente.',
+    };
+  });
 
 const getRuntimeStatus = (appId: string): RuntimeStatus => {
   const running = runningApps.get(appId);
@@ -4620,6 +4705,12 @@ const registerIpcHandlers = (): void => {
     }
     return await getFileLibrary().pickFileInfo(result.filePaths);
   });
+  ipcMain.handle(IPC_CHANNELS.filesStageForChat, async (_event, input: FilesStageForChatInput) => {
+    return await getFileLibrary().stageFileForChat(input);
+  });
+  ipcMain.handle(IPC_CHANNELS.filesDiscardStagedForChat, async (_event, input: FilesDiscardStagedForChatInput) => {
+    return await getFileLibrary().discardStagedFilesForChat(input);
+  });
   ipcMain.handle(IPC_CHANNELS.filesList, async (_event, input?: FilesListInput) => {
     return await getFileLibrary().list(input ?? {});
   });
@@ -4992,6 +5083,7 @@ app.whenReady().then(async () => {
     getRuntimeStatus,
     openApp: openInstalledApp,
     stopApp: stopInstalledApp,
+    restartApp: restartInstalledApp,
     refreshAppView: async (appId) => {
       const appWindow = appWindows.get(appId);
       const running = runningApps.get(appId);
@@ -5011,6 +5103,7 @@ app.whenReady().then(async () => {
     memoryCreate: async (input, access) => await getMemoryStore().create(input, access),
     memoryUpdate: async (input, access) => await getMemoryStore().update(input, access),
     memoryDelete: async (id, access) => await getMemoryStore().delete(id, access),
+    onToolProgress: (input) => chatOrchestrator?.appendExternalProgress(input.runId, input.message),
     onToolFailure: (input) => desktopErrorReporter?.reportForgerMcpToolFailure(input),
     onHttpFailure: (input) => desktopErrorReporter?.reportForgerMcpHttpFailure(input),
   });
@@ -5034,6 +5127,11 @@ app.whenReady().then(async () => {
     onMcpStartFailed: (input) => desktopErrorReporter?.reportAppMcpStartFailure(input),
   });
   fileLibrary = new FileLibrary(getPrivateDataRoot(), getForgerMetadataRoot());
+  await fileLibrary.cleanupStagedFilesForChat().catch((error) => {
+    void appendInstallLog('files:chat_staging_cleanup_failed', {
+      error: serializeErrorForInstallLog(error),
+    });
+  });
   chatOrchestrator = new ChatOrchestrator({
     forgerHomeRoot: getForgerHomeRoot(),
     privateAppsRoot: getPrivateAppsRoot(),

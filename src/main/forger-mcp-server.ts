@@ -57,12 +57,14 @@ interface ForgerMcpServerOptions {
   getRuntimeStatus: (appId: string) => RuntimeStatus;
   openApp: (appId: string) => Promise<OpenAppResult>;
   stopApp: (appId: string) => Promise<StopAppResult>;
+  restartApp: (appId: string, options?: { onProgress?: (message: string) => void }) => Promise<OpenAppResult>;
   refreshAppView: (appId: string) => Promise<{ success: boolean; userMessage?: string; technicalCode?: string }>;
   updateApp: (appId: string) => Promise<InstallAppResult>;
   memoryList: (input: MemoryListInput, access: MemoryAccessInput) => Promise<MemoryEntry[]>;
   memoryCreate: (input: MemoryCreateInput, access: MemoryAccessInput) => Promise<MemoryEntry>;
   memoryUpdate: (input: MemoryUpdateInput, access: MemoryAccessInput) => Promise<MemoryEntry>;
   memoryDelete: (id: string, access: MemoryAccessInput) => Promise<{ success: boolean }>;
+  onToolProgress?: (input: { appId: string; runId: string; toolName?: unknown; message: string }) => void;
   onToolFailure?: (input: { appId: string; runId: string; toolName?: unknown; error: unknown }) => void;
   onHttpFailure?: (input: { appId?: string; runId?: string; error: unknown }) => void;
 }
@@ -386,6 +388,7 @@ export class ForgerMcpServer {
       toolId: tool.id,
       toolName: tool.name,
     });
+    this.emitToolProgress(session, tool.id, `Esperando autorizacion para ${tool.name}...`);
     const approved = await requestPermission;
     await this.options.appendInstallLog('agent_tool:approval_resolved', {
       appId: session.appId,
@@ -446,6 +449,7 @@ export class ForgerMcpServer {
       toolId,
       runId: session.runId,
     });
+    this.emitToolProgress(session, toolId, toolId === 'forger_restart_app' ? 'Preparando reinicio de la app...' : '');
 
     if (toolId === 'forger_list_catalog') {
       const apps = await this.options.listCatalog();
@@ -541,12 +545,9 @@ export class ForgerMcpServer {
     }
 
     if (toolId === 'forger_restart_app') {
-      const stop = await this.options.stopApp(appId);
-      if (!stop.success) {
-        await this.options.appendInstallLog('agent_tool:call_result', { appId, runId: session.runId, toolId, result: stop });
-        return withToolAuthorization(stop, approval);
-      }
-      const result = await this.options.openApp(appId);
+      const result = await this.options.restartApp(appId, {
+        onProgress: (message) => this.emitToolProgress(session, toolId, message),
+      });
       await this.options.appendInstallLog('agent_tool:call_result', { appId, runId: session.runId, toolId, result });
       return withToolAuthorization(result, approval);
     }
@@ -566,6 +567,18 @@ export class ForgerMcpServer {
     const result = { success: false, userMessage: 'La herramienta no esta disponible.', technicalCode: 'tool_not_found' };
     await this.options.appendInstallLog('agent_tool:call_result', { appId, runId: session.runId, toolId, result });
     return withToolAuthorization(result, approval);
+  }
+
+  private emitToolProgress(session: AgentMcpSession, toolId: AgentToolId, message: string): void {
+    if (!message.trim()) {
+      return;
+    }
+    this.options.onToolProgress?.({
+      appId: session.appId,
+      runId: session.runId,
+      toolName: toolId,
+      message,
+    });
   }
 }
 
