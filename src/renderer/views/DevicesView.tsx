@@ -51,6 +51,15 @@ export function DevicesView({ account }: DevicesViewProps) {
     }
   };
 
+  const currentDevice = state.currentDevice;
+  const currentCloudDevice = currentDevice
+    ? state.devices.find((device) => device.id === currentDevice.id)
+    : undefined;
+  const currentDeviceOnline = state.connected || Boolean(currentCloudDevice?.online);
+  const pairedDevices = currentDevice
+    ? state.devices.filter((device) => device.id !== currentDevice.id)
+    : state.devices;
+
   if (!account.authenticated) {
     return (
       <Stack spacing={2}>
@@ -82,10 +91,10 @@ export function DevicesView({ account }: DevicesViewProps) {
             <Box>
               <Typography variant="h6">This desktop</Typography>
               <Typography color="text.secondary">
-                {state.currentDevice?.name ?? 'Forger Desktop'} · {state.connected ? 'Connected' : 'Not connected'}
+                {currentDevice?.name ?? 'Forger Desktop'} · {currentDeviceOnline ? 'Connected' : 'Not connected'}
               </Typography>
             </Box>
-            <Chip color={state.connected ? 'success' : 'default'} label={state.connected ? 'Online' : 'Offline'} />
+            <Chip color={currentDeviceOnline ? 'success' : 'default'} label={currentDeviceOnline ? 'Online' : 'Offline'} />
           </Stack>
 
           <Divider />
@@ -124,7 +133,7 @@ export function DevicesView({ account }: DevicesViewProps) {
 
       <Stack spacing={1.5}>
         <Typography variant="h6">Paired devices</Typography>
-        {state.devices.map((device) => (
+        {pairedDevices.map((device) => (
           <Paper key={device.id} variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
             <Stack direction="row" justifyContent="space-between" gap={2}>
               <Box>
@@ -135,7 +144,7 @@ export function DevicesView({ account }: DevicesViewProps) {
             </Stack>
           </Paper>
         ))}
-        {state.devices.length === 0 ? <Typography color="text.secondary">No paired devices yet.</Typography> : null}
+        {pairedDevices.length === 0 ? <Typography color="text.secondary">No other paired devices yet.</Typography> : null}
       </Stack>
     </Stack>
   );
