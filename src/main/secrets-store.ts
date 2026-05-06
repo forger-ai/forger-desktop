@@ -246,7 +246,6 @@ export class SecretsStore {
 
   async resolveAppEnv(appId: string, declarations: AppSecretDeclaration[]): Promise<ResolvedAppSecretsEnv> {
     await this.load();
-    this.requireSafeStorage();
     const env: Record<string, string> = {};
     const missingRequired: AppSecretDeclaration[] = [];
     const secretValues: string[] = [];
