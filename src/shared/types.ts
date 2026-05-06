@@ -104,6 +104,34 @@ export interface ForgerAccountLoginInput {
   locale?: string;
 }
 
+export interface CloudDeviceAppSummary {
+  id: string;
+  name: string;
+  status: string;
+  version?: string;
+}
+
+export interface CloudDeviceSummary {
+  id: number;
+  deviceUid: string;
+  name: string;
+  platform?: string;
+  paired: boolean;
+  online: boolean;
+  lastSeenAt?: string;
+  installedApps: CloudDeviceAppSummary[];
+}
+
+export interface CloudDevicesState {
+  currentDevice?: CloudDeviceSummary;
+  devices: CloudDeviceSummary[];
+  connected: boolean;
+  pairingCode?: string;
+  pairingExpiresAt?: string;
+  userMessage?: string;
+  technicalCode?: string;
+}
+
 export interface AppRatingSummary {
   id: number;
   score: number;
@@ -1016,6 +1044,8 @@ export interface ForgerDesktopApi {
   registerForgerAccount: (input: ForgerAccountRegisterInput) => Promise<ForgerAccountSession & { success: boolean; userMessage?: string; technicalCode?: string }>;
   loginForgerAccount: (input: ForgerAccountLoginInput) => Promise<ForgerAccountSession & { success: boolean; userMessage?: string; technicalCode?: string }>;
   logoutForgerAccount: () => Promise<ForgerAccountSession & { success: boolean }>;
+  getCloudDevices: () => Promise<CloudDevicesState>;
+  generateDevicePairingCode: () => Promise<CloudDevicesState & { success: boolean }>;
   submitAppRating: (input: SubmitAppRatingInput) => Promise<{ success: boolean; rating?: AppRatingSummary; userMessage?: string; technicalCode?: string }>;
   submitAppFeedback: (input: SubmitAppFeedbackInput) => Promise<{ success: boolean; userMessage?: string; technicalCode?: string }>;
   openExternalUrl: (url: string) => Promise<{ success: boolean; userMessage?: string; technicalCode?: string }>;

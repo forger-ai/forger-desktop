@@ -32,6 +32,8 @@ export const IPC_CHANNELS = {
   registerForgerAccount: 'forger:account:register',
   loginForgerAccount: 'forger:account:login',
   logoutForgerAccount: 'forger:account:logout',
+  getCloudDevices: 'forger:cloud-devices:get',
+  generateDevicePairingCode: 'forger:cloud-devices:pairing-code',
   submitAppRating: 'forger:catalog:rating:submit',
   submitAppFeedback: 'forger:catalog:feedback:submit',
   openExternalUrl: 'forger:open-external-url',

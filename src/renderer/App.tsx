@@ -62,6 +62,7 @@ import { BackupsView } from '@renderer/views/BackupsView';
 import { CatalogView } from '@renderer/views/CatalogView';
 import { ChatView, type ChatMessage, type ConversationHistoryItem } from '@renderer/views/ChatView';
 import { DataView } from '@renderer/views/DataView';
+import { DevicesView } from '@renderer/views/DevicesView';
 import { FilesView } from '@renderer/views/FilesView';
 import { InstalledAppsView } from '@renderer/views/InstalledAppsView';
 import { SettingsView } from '@renderer/views/SettingsView';
@@ -2182,6 +2183,10 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
             onDeleteBackup={(backup) => void handleDeleteBackup(backup)}
             onRestoreBackup={(backup) => void handleRestoreBackup(backup)}
           />
+        ) : null}
+
+        {currentView === 'devices' ? (
+          <DevicesView account={forgerAccount} />
         ) : null}
 
         {currentView === 'datos' ? (
