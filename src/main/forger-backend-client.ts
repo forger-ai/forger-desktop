@@ -7,6 +7,7 @@ import type {
   ForgerAccountRegisterInput,
   ForgerAccountSession,
   DesktopErrorReportPreview,
+  CloudDeviceSummary,
   SubmitAppFeedbackInput,
   SubmitAppRatingInput,
 } from '../shared/types';
@@ -200,6 +201,61 @@ export class ForgerBackendClient {
       method: 'DELETE',
       headers: this.buildHeaders(),
     }).catch(() => undefined);
+  }
+
+  async registerDevice(input: {
+    deviceUid: string;
+    deviceSecret: string;
+    name: string;
+    platform: string;
+  }): Promise<CloudDeviceSummary & { registered: boolean }> {
+    const response = await fetch(`${this.options.backendBaseUrl}/api/v1/me/devices/register`, {
+      method: 'POST',
+      headers: {
+        ...this.buildHeaders(),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        device_uid: input.deviceUid,
+        device_secret: input.deviceSecret,
+        name: input.name,
+        platform: input.platform,
+      }),
+    });
+    const payload = await this.readJson<Record<string, unknown>>(response);
+    if (!response.ok) {
+      throw new Error(`device_register_failed_${response.status}`);
+    }
+    return this.normalizeCloudDevice(payload) as CloudDeviceSummary & { registered: boolean };
+  }
+
+  async listDevices(): Promise<CloudDeviceSummary[]> {
+    const response = await fetch(`${this.options.backendBaseUrl}/api/v1/me/devices`, {
+      method: 'GET',
+      headers: this.buildHeaders(),
+    });
+    const payload = await this.readJson<unknown>(response);
+    if (!response.ok || !Array.isArray(payload)) {
+      return [];
+    }
+    return payload.map((entry) => this.normalizeCloudDevice(entry)).filter((entry): entry is CloudDeviceSummary => Boolean(entry));
+  }
+
+  async createDevicePairingCode(input: { deviceId: number; codeDigest: string; expiresAt: string }): Promise<void> {
+    const response = await fetch(`${this.options.backendBaseUrl}/api/v1/me/devices/${input.deviceId}/pairing_codes`, {
+      method: 'POST',
+      headers: {
+        ...this.buildHeaders(),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        code_digest: input.codeDigest,
+        expires_at: input.expiresAt,
+      }),
+    });
+    if (!response.ok) {
+      throw new Error(`pairing_code_failed_${response.status}`);
+    }
   }
 
   async submitAppRating(
@@ -424,6 +480,47 @@ export class ForgerBackendClient {
             lastInitial: typeof user.last_initial === 'string' ? user.last_initial : null,
           }
         : undefined,
+    };
+  }
+
+  private normalizeCloudDevice(value: unknown): CloudDeviceSummary | undefined {
+    if (!value || typeof value !== 'object') {
+      return undefined;
+    }
+    const record = value as Record<string, unknown>;
+    const id = Number(record.id);
+    if (!Number.isFinite(id)) {
+      return undefined;
+    }
+    const apps = Array.isArray(record.installed_apps)
+      ? record.installed_apps
+        .map((entry) => {
+          if (!entry || typeof entry !== 'object') {
+            return undefined;
+          }
+          const app = entry as Record<string, unknown>;
+          const appId = typeof app.id === 'string' ? app.id : '';
+          if (!appId) {
+            return undefined;
+          }
+          return {
+            id: appId,
+            name: typeof app.name === 'string' ? app.name : appId,
+            status: typeof app.status === 'string' ? app.status : 'installed',
+            version: typeof app.version === 'string' ? app.version : undefined,
+          };
+        })
+        .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
+      : [];
+    return {
+      id,
+      deviceUid: typeof record.device_uid === 'string' ? record.device_uid : '',
+      name: typeof record.name === 'string' ? record.name : 'Forger Desktop',
+      platform: typeof record.platform === 'string' ? record.platform : undefined,
+      paired: Boolean(record.paired),
+      online: Boolean(record.online),
+      lastSeenAt: typeof record.last_seen_at === 'string' ? record.last_seen_at : undefined,
+      installedApps: apps,
     };
   }
 

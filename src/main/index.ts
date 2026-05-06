@@ -5,6 +5,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
+import http, { type IncomingMessage, type ServerResponse } from 'node:http';
 
 // better-sqlite3 is optional — gracefully unavailable if not installed / rebuilt
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -30,6 +31,7 @@ import { ForgerMcpServer } from './forger-mcp-server';
 import { MemoryStore } from './memory-store';
 import { ForgerAccountStore, publicForgerAccount, type StoredForgerAccount } from './forger-account-store';
 import { ForgerBackendClient } from './forger-backend-client';
+import { CloudDeviceManager, type CloudRelayRequest, type CloudRelayResponse } from './cloud-device-manager';
 import { BackupsManager } from './backups-manager';
 import {
   FORGER_AGENT_CONTRACT_MARKER,
@@ -182,6 +184,8 @@ interface RunningAppProcess {
   frontend: ChildProcessWithoutNullStreams;
   backendUrl: string;
   frontendUrl: string;
+  rawFrontendUrl: string;
+  proxyServer: http.Server;
 }
 
 interface AppManifestService {
@@ -252,6 +256,7 @@ let settings: Settings = structuredClone(settingsSeed);
 let registry: AppRegistry = { apps: {} };
 let forgerAccount: StoredForgerAccount = { authenticated: false };
 let forgerAccountStore: ForgerAccountStore | null = null;
+let cloudDeviceManager: CloudDeviceManager | null = null;
 let forgerBackendClient: ForgerBackendClient | null = null;
 const runningApps = new Map<string, RunningAppProcess>();
 const appWindows = new Map<string, BrowserWindow>();
@@ -282,6 +287,7 @@ const resolvePlatformAlias = (): string => {
 };
 
 const getRegistryPath = () => path.join(app.getPath('userData'), 'app_registry.json');
+const getRegistryBackupPath = () => `${getRegistryPath()}.bak`;
 const getRuntimesRoot = () => path.join(app.getPath('userData'), 'runtimes');
 const getTempRoot = () => path.join(app.getPath('userData'), 'tmp');
 const getLogsRoot = () => path.join(app.getPath('userData'), 'logs');
@@ -296,6 +302,7 @@ const getCodexRoot = () => path.join(app.getPath('userData'), 'codex-cli');
 const getCodexHome = () => path.join(app.getPath('userData'), 'codex-home');
 const getAgentToolSettingsPath = () => path.join(getForgerMetadataRoot(), 'agent-tools.json');
 const getForgerAccountPath = () => path.join(getForgerMetadataRoot(), 'account.json');
+const getCloudDevicePath = () => path.join(getForgerMetadataRoot(), 'cloud-device.json');
 
 const FORGER_TOOL_PACKAGE_ID = 'forger';
 
@@ -1475,18 +1482,44 @@ const startDevCatalogService = async (): Promise<void> => {
   }
 };
 
-const loadRegistry = async (): Promise<void> => {
-  const registryPath = getRegistryPath();
+const parseRegistry = (raw: string): AppRegistry | null => {
+  const parsed = JSON.parse(raw) as Partial<AppRegistry>;
+  if (!parsed || !parsed.apps || typeof parsed.apps !== 'object') {
+    return null;
+  }
 
+  return { apps: parsed.apps as Record<string, InstalledAppRecord> };
+};
+
+const loadRegistryFile = async (registryPath: string): Promise<AppRegistry | null> => {
   try {
-    const raw = await fs.readFile(registryPath, 'utf8');
-    const parsed = JSON.parse(raw) as Partial<AppRegistry>;
-    if (parsed && parsed.apps && typeof parsed.apps === 'object') {
-      registry = { apps: parsed.apps as Record<string, InstalledAppRecord> };
+    return parseRegistry(await fs.readFile(registryPath, 'utf8'));
+  } catch {
+    return null;
+  }
+};
+
+const syncDirectory = async (directoryPath: string): Promise<void> => {
+  let directoryHandle: fs.FileHandle | null = null;
+  try {
+    directoryHandle = await fs.open(directoryPath, 'r');
+    await directoryHandle.sync();
+  } catch {
+    // Some platforms do not allow fsync on directories.
+  } finally {
+    await directoryHandle?.close().catch(() => undefined);
+  }
+};
+
+const loadRegistry = async (): Promise<void> => {
+  const registryPaths = [getRegistryPath(), getRegistryBackupPath()];
+
+  for (const registryPath of registryPaths) {
+    const loadedRegistry = await loadRegistryFile(registryPath);
+    if (loadedRegistry) {
+      registry = loadedRegistry;
       return;
     }
-  } catch {
-    // no-op
   }
 
   registry = { apps: {} };
@@ -1494,8 +1527,32 @@ const loadRegistry = async (): Promise<void> => {
 
 const saveRegistry = async (): Promise<void> => {
   const registryPath = getRegistryPath();
-  await fs.mkdir(path.dirname(registryPath), { recursive: true });
-  await fs.writeFile(registryPath, JSON.stringify(registry, null, 2), 'utf8');
+  const backupPath = getRegistryBackupPath();
+  const registryDir = path.dirname(registryPath);
+  const tempPath = path.join(registryDir, `.app_registry.${process.pid}.${Date.now()}.tmp`);
+  const payload = JSON.stringify(registry, null, 2);
+  await fs.mkdir(registryDir, { recursive: true });
+
+  let tempHandle: fs.FileHandle | null = null;
+  try {
+    tempHandle = await fs.open(tempPath, 'w');
+    await tempHandle.writeFile(payload, 'utf8');
+    await tempHandle.sync();
+    await tempHandle.close();
+    tempHandle = null;
+
+    const currentRegistry = await loadRegistryFile(registryPath);
+    if (currentRegistry) {
+      await fs.copyFile(registryPath, backupPath);
+    }
+
+    await fs.rename(tempPath, registryPath);
+    await syncDirectory(registryDir);
+  } catch (error) {
+    await tempHandle?.close().catch(() => undefined);
+    await fs.unlink(tempPath).catch(() => undefined);
+    throw error;
+  }
 };
 
 const upsertInstalledRecord = async (record: InstalledAppRecord): Promise<void> => {
@@ -3535,6 +3592,82 @@ const getFreePort = async (): Promise<number> => {
   });
 };
 
+const proxyHttpRequest = async (
+  targetBaseUrl: string,
+  incoming: IncomingMessage,
+  outgoing: ServerResponse,
+  pathPrefix = '',
+): Promise<void> => {
+  const targetUrl = new URL(incoming.url ?? '/', targetBaseUrl);
+  if (pathPrefix && targetUrl.pathname.startsWith(pathPrefix)) {
+    targetUrl.pathname = targetUrl.pathname.slice(pathPrefix.length) || '/';
+  }
+  const body = await new Promise<Buffer>((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    incoming.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+    incoming.on('end', () => resolve(Buffer.concat(chunks)));
+    incoming.on('error', reject);
+  });
+  const response = await fetch(targetUrl, {
+    method: incoming.method,
+    headers: filterProxyRequestHeaders(incoming.headers),
+    body: incoming.method === 'GET' || incoming.method === 'HEAD' ? undefined : fetchBodyFromBuffer(body),
+  });
+  outgoing.statusCode = response.status;
+  for (const [key, value] of response.headers.entries()) {
+    if (['content-type', 'cache-control', 'etag', 'last-modified'].includes(key.toLowerCase())) {
+      outgoing.setHeader(key, value);
+    }
+  }
+  outgoing.end(Buffer.from(await response.arrayBuffer()));
+};
+
+const filterProxyRequestHeaders = (headers: IncomingMessage['headers']): Record<string, string> => {
+  const allowed = new Set(['accept', 'accept-language', 'content-type']);
+  const result: Record<string, string> = {};
+  for (const [key, value] of Object.entries(headers)) {
+    if (!allowed.has(key.toLowerCase()) || typeof value !== 'string') {
+      continue;
+    }
+    result[key] = value;
+  }
+  return result;
+};
+
+const fetchBodyFromBuffer = (body: Buffer): ArrayBuffer =>
+  body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength) as ArrayBuffer;
+
+const createLocalAppProxy = async (
+  backendUrl: string,
+  rawFrontendUrl: string,
+): Promise<{ server: http.Server; url: string }> => {
+  const server = http.createServer((request, response) => {
+    const requestUrl = new URL(request.url ?? '/', 'http://127.0.0.1');
+    const target = requestUrl.pathname.startsWith('/__forger_api') ? backendUrl : rawFrontendUrl;
+    const prefix = requestUrl.pathname.startsWith('/__forger_api') ? '/__forger_api' : '';
+    void proxyHttpRequest(target, request, response, prefix).catch(() => {
+      response.statusCode = 502;
+      response.end('Forger app proxy failed.');
+    });
+  });
+  const port = await new Promise<number>((resolve, reject) => {
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      if (address && typeof address === 'object') {
+        resolve(address.port);
+      } else {
+        reject(new Error('proxy_port_not_available'));
+      }
+    });
+    server.on('error', reject);
+  });
+  return { server, url: `http://127.0.0.1:${port}` };
+};
+
+const closeServer = async (server: http.Server): Promise<void> => {
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+};
+
 const terminateProcess = async (child: ChildProcessWithoutNullStreams): Promise<void> => {
   if (child.killed) {
     return;
@@ -3848,7 +3981,12 @@ const normalizeHealthcheckPath = (healthcheck: string | undefined): string => {
   return value.startsWith('/') ? value : `/${value}`;
 };
 
-const openInstalledAppUnlocked = async (appId: string, locale?: string): Promise<OpenAppResult> => {
+const openInstalledAppUnlocked = async (
+  appId: string,
+  locale?: string,
+  options: { openWindow?: boolean } = {},
+): Promise<OpenAppResult> => {
+  const shouldOpenWindow = options.openWindow !== false;
   const record = registry.apps[appId];
   if (!record || !record.installDir) {
     return {
@@ -3867,7 +4005,9 @@ const openInstalledAppUnlocked = async (appId: string, locale?: string): Promise
 
   const running = runningApps.get(appId);
   if (running) {
-    await openOrFocusAppWindow(appId, record.name, running.frontendUrl, locale);
+    if (shouldOpenWindow) {
+      await openOrFocusAppWindow(appId, record.name, running.frontendUrl, locale);
+    }
     return {
       success: true,
       userMessage: 'La app ya esta en ejecucion.',
@@ -3938,7 +4078,9 @@ const openInstalledAppUnlocked = async (appId: string, locale?: string): Promise
   const backendPort = await getFreePort();
   const frontendPort = await getFreePort();
   const backendUrl = `http://127.0.0.1:${backendPort}`;
-  const frontendUrl = `http://127.0.0.1:${frontendPort}`;
+  const rawFrontendUrl = `http://127.0.0.1:${frontendPort}`;
+  const proxy = await createLocalAppProxy(backendUrl, rawFrontendUrl);
+  const frontendUrl = proxy.url;
   const backendConfig = buildBackendProcessConfig(backendService, backendDir, venv.python, backendPort);
   const frontendArgs = ['run', 'dev', '--', '--host', '127.0.0.1', '--port', String(frontendPort)];
   const backendHealthcheckPath = normalizeHealthcheckPath(backendService?.healthcheck);
@@ -3954,7 +4096,7 @@ const openInstalledAppUnlocked = async (appId: string, locale?: string): Promise
       healthcheck: backendHealthcheckPath,
       environment: summarizeBackendEnvironment({
         ...backendConfig.environment,
-        CORS_ORIGINS: `${frontendUrl},http://127.0.0.1:${frontendPort}`,
+        CORS_ORIGINS: `${frontendUrl},${rawFrontendUrl},http://127.0.0.1:${frontendPort}`,
       }),
     },
     frontend: {
@@ -3974,7 +4116,7 @@ const openInstalledAppUnlocked = async (appId: string, locale?: string): Promise
         ...process.env,
         ...backendConfig.environment,
         ...resolvedSecrets.env,
-        CORS_ORIGINS: `${frontendUrl},http://127.0.0.1:${frontendPort}`,
+        CORS_ORIGINS: `${frontendUrl},${rawFrontendUrl},http://127.0.0.1:${frontendPort}`,
         FORGER_APP_ID: appId,
         FORGER_APP_GRANT_SECRET: appFolderGrantSecret,
       },
@@ -3988,7 +4130,7 @@ const openInstalledAppUnlocked = async (appId: string, locale?: string): Promise
       ...process.env,
       ...(frontendService?.environment && typeof frontendService.environment === 'object' ? frontendService.environment : {}),
       ...resolvedSecrets.env,
-      VITE_API_BASE_URL: backendUrl,
+      VITE_API_BASE_URL: `${frontendUrl}/__forger_api`,
       PATH: `${path.dirname(nodeRuntime.node as string)}${path.delimiter}${process.env.PATH ?? ''}`,
     },
     shell: requiresWindowsShell(nodeRuntime.npm as string),
@@ -4051,6 +4193,7 @@ const openInstalledAppUnlocked = async (appId: string, locale?: string): Promise
     });
 
     runningApps.delete(appId);
+    await closeServer(proxy.server).catch(() => undefined);
   };
 
   backend.once('exit', (code, signal) => {
@@ -4077,12 +4220,17 @@ const openInstalledAppUnlocked = async (appId: string, locale?: string): Promise
     frontend,
     backendUrl,
     frontendUrl,
+    rawFrontendUrl,
+    proxyServer: proxy.server,
   });
 
   try {
     await waitForHttpOk(`${backendUrl}${backendHealthcheckPath}`, 60_000);
+    await waitForHttpOk(rawFrontendUrl, 60_000);
     await waitForHttpOk(frontendUrl, 60_000);
-    await openOrFocusAppWindow(appId, record.name, frontendUrl, locale);
+    if (shouldOpenWindow) {
+      await openOrFocusAppWindow(appId, record.name, frontendUrl, locale);
+    }
     await appendInstallLog('open:ready', {
       appId,
       backendUrl,
@@ -4116,6 +4264,7 @@ const openInstalledAppUnlocked = async (appId: string, locale?: string): Promise
 
     await terminateProcess(backend);
     await terminateProcess(frontend);
+    await closeServer(proxy.server).catch(() => undefined);
     runningApps.delete(appId);
     closeAppWindow(appId);
     await markAppRuntimeStatus(appId, 'error', 'No pudimos iniciar la app. Reintenta.');
@@ -4142,6 +4291,7 @@ const stopInstalledAppUnlocked = async (appId: string): Promise<StopAppResult> =
     closeAppWindow(appId);
     await terminateProcess(running.backend);
     await terminateProcess(running.frontend);
+    await closeServer(running.proxyServer).catch(() => undefined);
     runningApps.delete(appId);
   } finally {
     stoppingApps.delete(appId);
@@ -4249,6 +4399,50 @@ const getRuntimeStatus = (appId: string): RuntimeStatus => {
     userMessage: record.userMessage,
   };
 };
+
+const handleCloudRelayRequest = async (request: CloudRelayRequest): Promise<CloudRelayResponse> => {
+  try {
+    const open = await openInstalledAppUnlocked(request.app_id, undefined, { openWindow: false });
+    if (!open.success) {
+      return relayError(request.request_id, 424, open.technicalCode ?? 'app_open_failed');
+    }
+    const running = runningApps.get(request.app_id);
+    if (!running) {
+      return relayError(request.request_id, 424, 'app_not_running');
+    }
+    const pathValue = request.path?.startsWith('/') ? request.path : `/${request.path || ''}`;
+    if (pathValue.includes('..') || pathValue.toLowerCase().startsWith('/__forger_internal')) {
+      return relayError(request.request_id, 403, 'path_blocked');
+    }
+    const target = new URL(pathValue, running.frontendUrl);
+    const response = await fetch(target, {
+      method: request.method,
+      headers: request.headers ?? {},
+      body: request.method === 'GET' || request.method === 'HEAD' ? undefined : fetchBodyFromBuffer(Buffer.from(request.body ?? [])),
+    });
+    const headers: Record<string, string> = {};
+    for (const [key, value] of response.headers.entries()) {
+      if (['content-type', 'cache-control', 'etag', 'last-modified'].includes(key.toLowerCase())) {
+        headers[key] = value;
+      }
+    }
+    return {
+      request_id: request.request_id,
+      status: response.status,
+      headers,
+      body: [...Buffer.from(await response.arrayBuffer())],
+    };
+  } catch (error) {
+    return relayError(request.request_id, 502, error instanceof Error ? error.message : 'relay_failed');
+  }
+};
+
+const relayError = (requestId: string, status: number, message: string): CloudRelayResponse => ({
+  request_id: requestId,
+  status,
+  headers: { 'content-type': 'text/plain; charset=utf-8' },
+  body: [...Buffer.from(message)],
+});
 
 const getWindowState = (window: BrowserWindow): WindowControlState => ({
   isMaximized: window.isMaximized(),
@@ -4555,16 +4749,26 @@ const registerIpcHandlers = (): void => {
     if (result.success) {
       forgerAccount = result;
       await forgerAccountStore?.save(forgerAccount);
+      await cloudDeviceManager?.start();
     }
     catalogApps = await listCatalogFromBackend();
     return { ...publicForgerAccount(forgerAccount), success: result.success, userMessage: result.userMessage, technicalCode: result.technicalCode };
   });
   ipcMain.handle(IPC_CHANNELS.logoutForgerAccount, async () => {
+    cloudDeviceManager?.stop();
     await forgerBackendClient?.logoutAccount();
     forgerAccount = { authenticated: false };
     await forgerAccountStore?.clear();
     catalogApps = await listCatalogFromBackend();
     return { ...publicForgerAccount(forgerAccount), success: true };
+  });
+  ipcMain.handle(IPC_CHANNELS.getCloudDevices, async () => {
+    return cloudDeviceManager ? await cloudDeviceManager.getState() : { devices: [], connected: false };
+  });
+  ipcMain.handle(IPC_CHANNELS.generateDevicePairingCode, async () => {
+    return cloudDeviceManager
+      ? await cloudDeviceManager.generatePairingCode()
+      : { devices: [], connected: false, success: false, userMessage: 'No pudimos preparar este equipo.', technicalCode: 'cloud_device_manager_missing' };
   });
   ipcMain.handle(IPC_CHANNELS.submitAppRating, async (_event, input: SubmitAppRatingInput) => {
     const result = forgerBackendClient
@@ -5061,6 +5265,15 @@ app.whenReady().then(async () => {
     toCatalogStatus,
     getUserMessage: (slug) => registry.apps[slug]?.userMessage,
   });
+  cloudDeviceManager = new CloudDeviceManager({
+    filePath: getCloudDevicePath(),
+    backendBaseUrl,
+    backendClient: () => forgerBackendClient,
+    token: () => forgerAccount.token,
+    getInstalledApps: () => Object.values(registry.apps).map(toAppSummary),
+    handleRelayRequest: handleCloudRelayRequest,
+  });
+  await cloudDeviceManager.start();
   forgerMcpServer = new ForgerMcpServer({
     getAppVersion: () => app.getVersion(),
     getToolDefinitions: () => AGENT_TOOL_DEFINITIONS,
@@ -5387,12 +5600,14 @@ app.whenReady().then(async () => {
 app.on('before-quit', () => {
   automationManager?.dispose();
   appMcpManager?.dispose();
+  cloudDeviceManager?.stop();
   devCatalogService?.stop();
   forgerMcpServer?.stop();
   forgerMcpServer = null;
   for (const running of runningApps.values()) {
     void terminateProcess(running.backend);
     void terminateProcess(running.frontend);
+    void closeServer(running.proxyServer);
   }
 });
 

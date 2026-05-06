@@ -4,6 +4,7 @@ import BackupRounded from '@mui/icons-material/BackupRounded';
 import EventRepeatRounded from '@mui/icons-material/EventRepeatRounded';
 import CategoryRounded from '@mui/icons-material/CategoryRounded';
 import ConstructionRounded from '@mui/icons-material/ConstructionRounded';
+import DevicesRounded from '@mui/icons-material/DevicesRounded';
 import InsertDriveFileRounded from '@mui/icons-material/InsertDriveFileRounded';
 import TableChartRounded from '@mui/icons-material/TableChartRounded';
 import SettingsRounded from '@mui/icons-material/SettingsRounded';
@@ -34,6 +35,7 @@ export type View =
   | 'automations'
   | 'files'
   | 'backups'
+  | 'devices'
   | 'datos'
   | 'secrets'
   | 'tools'
@@ -55,6 +57,7 @@ const mainNav = [
   { id: 'automations' as const, icon: <EventRepeatRounded /> },
   { id: 'files' as const, icon: <InsertDriveFileRounded /> },
   { id: 'backups' as const, icon: <BackupRounded /> },
+  { id: 'devices' as const, icon: <DevicesRounded /> },
   { id: 'datos' as const, icon: <TableChartRounded /> },
   { id: 'secrets' as const, icon: <VpnKeyRounded /> },
   { id: 'tools' as const, icon: <ConstructionRounded /> },
@@ -100,6 +103,7 @@ export function Sidebar({ currentView, onNavigate, t, desktopUpdateState }: Side
     automations: t.nav.automations,
     files: t.nav.files,
     backups: t.nav.backups,
+    devices: t.nav.devices,
     datos: t.nav.datos,
     secrets: t.nav.secrets,
     tools: t.nav.tools,

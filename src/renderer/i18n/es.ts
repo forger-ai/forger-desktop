@@ -11,6 +11,7 @@ export const es = {
     automations: 'Automatizaciones',
     files: 'Archivos',
     backups: 'Respaldos',
+    devices: 'Dispositivos',
     datos: 'Datos',
     secrets: 'Secretos',
     tools: 'Herramientas',
