@@ -4412,6 +4412,9 @@ const handleCloudRelayRequest = async (request: CloudRelayRequest): Promise<Clou
     }
     const pathValue = request.path?.startsWith('/') ? request.path : `/${request.path || ''}`;
     if (pathValue.includes('..') || pathValue.toLowerCase().startsWith('/__forger_internal')) {
+      if (pathValue.toLowerCase().startsWith('/__forger_internal/forger_app/')) {
+        return await handleCloudForgerAppRequest(request, pathValue);
+      }
       return relayError(request.request_id, 403, 'path_blocked');
     }
     const target = new URL(pathValue, running.frontendUrl);
@@ -4436,6 +4439,73 @@ const handleCloudRelayRequest = async (request: CloudRelayRequest): Promise<Clou
     return relayError(request.request_id, 502, error instanceof Error ? error.message : 'relay_failed');
   }
 };
+
+const handleCloudForgerAppRequest = async (
+  request: CloudRelayRequest,
+  pathValue: string,
+): Promise<CloudRelayResponse> => {
+  try {
+    if (request.method !== 'POST') {
+      return relayJson(request.request_id, 405, { error: 'method_not_allowed' });
+    }
+
+    const body = parseRelayJsonBody(request.body);
+    const action = pathValue.replace(/^\/__forger_internal\/forger_app\/?/i, '').replace(/\/+$/, '');
+    const json = async (value: unknown, status = 200): Promise<CloudRelayResponse> =>
+      relayJson(request.request_id, status, value);
+
+    if (action === 'ai-subscription-status') {
+      const status = await getCodexAuthStatus();
+      return json({ connected: status.authenticated });
+    }
+
+    if (action === 'context') {
+      return json({ agents: await resolveInstalledAgents(request.app_id) });
+    }
+
+    if (action === 'codex-task/start') {
+      if (!appCodexTaskManager) {
+        return json({ error: 'app_codex_task_manager_unavailable' }, 503);
+      }
+      const task = await appCodexTaskManager.start(request.app_id, body as unknown as AppCodexTaskStartInput);
+      return json(task);
+    }
+
+    if (action === 'codex-task/get') {
+      const runId = typeof body.runId === 'string' ? body.runId : '';
+      return json(appCodexTaskManager?.get(request.app_id, runId) ?? null);
+    }
+
+    if (action === 'codex-task/cancel') {
+      const runId = typeof body.runId === 'string' ? body.runId : '';
+      return json(appCodexTaskManager?.cancel(request.app_id, runId) ?? { success: false });
+    }
+
+    return json({ error: 'unknown_forger_app_action' }, 404);
+  } catch (error) {
+    return relayJson(request.request_id, 500, {
+      error: error instanceof Error ? error.message : 'forger_app_request_failed',
+    });
+  }
+};
+
+const parseRelayJsonBody = (body?: number[]): Record<string, unknown> => {
+  if (!body || body.length === 0) {
+    return {};
+  }
+  const raw = Buffer.from(body).toString('utf8');
+  const parsed = JSON.parse(raw) as unknown;
+  return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+    ? parsed as Record<string, unknown>
+    : {};
+};
+
+const relayJson = (requestId: string, status: number, value: unknown): CloudRelayResponse => ({
+  request_id: requestId,
+  status,
+  headers: { 'content-type': 'application/json; charset=utf-8' },
+  body: [...Buffer.from(JSON.stringify(value))],
+});
 
 const relayError = (requestId: string, status: number, message: string): CloudRelayResponse => ({
   request_id: requestId,
