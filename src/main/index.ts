@@ -52,6 +52,8 @@ import type {
   AppBackupSummary,
   AppCategory,
   AppDetails,
+  CloudSyncSettings,
+  CreateRemoteAppBackupInput,
   AppExternalFolderSelection,
   AppAgent,
   AppCodexTaskStartInput,
@@ -99,6 +101,7 @@ import type {
   MemoryListInput,
   MemoryUpdateInput,
   OpenAppResult,
+  RemoteAppBackupSummary,
   RuntimeStatus,
   Settings,
   SharedFileRef,
@@ -274,6 +277,7 @@ let forgerAccount: StoredForgerAccount = { authenticated: false };
 let forgerAccountStore: ForgerAccountStore | null = null;
 let cloudDeviceManager: CloudDeviceManager | null = null;
 let forgerBackendClient: ForgerBackendClient | null = null;
+let cloudSyncSettings: CloudSyncSettings = { appSync: {} };
 const runningApps = new Map<string, RunningAppProcess>();
 const appWindows = new Map<string, BrowserWindow>();
 const stoppingApps = new Set<string>();
@@ -319,6 +323,7 @@ const getCodexHome = () => path.join(app.getPath('userData'), 'codex-home');
 const getAgentToolSettingsPath = () => path.join(getForgerMetadataRoot(), 'agent-tools.json');
 const getForgerAccountPath = () => path.join(getForgerMetadataRoot(), 'account.json');
 const getCloudDevicePath = () => path.join(getForgerMetadataRoot(), 'cloud-device.json');
+const getCloudSyncSettingsPath = () => path.join(getForgerMetadataRoot(), 'cloud-sync.json');
 
 const FORGER_TOOL_PACKAGE_ID = 'forger';
 
@@ -964,6 +969,89 @@ const getBackupsManager = (): BackupsManager => {
     });
   }
   return backupsManager;
+};
+
+const createRemoteAppBackup = async (
+  input: CreateRemoteAppBackupInput,
+): Promise<{ success: boolean; userMessage: string; technicalCode?: string; remoteBackup?: RemoteAppBackupSummary }> => {
+  if (!forgerBackendClient) {
+    return { success: false, userMessage: 'No pudimos conectar con Forger Cloud.', technicalCode: 'backend_client_missing' };
+  }
+  if (!forgerAccount.authenticated || !forgerAccount.token) {
+    return { success: false, userMessage: 'Inicia sesion en Forger Cloud para usar esta funcionalidad.', technicalCode: 'cloud_account_required' };
+  }
+  if (!canUseCloudDataSync()) {
+    return { success: false, userMessage: 'Forger Cloud Sync requiere una cuenta demo o pro.', technicalCode: 'subscription_required' };
+  }
+
+  const localBackup = await getBackupsManager().createBackup({ appId: input.appId, reason: 'manual' });
+  if (!localBackup.success || !localBackup.backup) {
+    return localBackup;
+  }
+  const backupDir = getBackupsManager().backupDirectory(localBackup.backup.appId, localBackup.backup.backupId);
+  if (!backupDir) {
+    return { success: false, userMessage: 'No pudimos preparar el respaldo para subir.', technicalCode: 'local_backup_missing' };
+  }
+
+  const archivePath = path.join(getTempRoot(), 'cloud-backups', `${localBackup.backup.appId}-${localBackup.backup.backupId}.zip`);
+  await fs.rm(archivePath, { force: true }).catch(() => undefined);
+  await zipDirectory(backupDir, archivePath);
+
+  try {
+    return await forgerBackendClient.createRemoteBackup({
+      archivePath,
+      localBackup: localBackup.backup,
+      backupType: input.backupType,
+      source: input.source ?? 'manual',
+    });
+  } finally {
+    await fs.rm(archivePath, { force: true }).catch(() => undefined);
+  }
+};
+
+const restoreRemoteAppBackup = async (remoteBackupId: number): Promise<BasicActionResult> => {
+  if (!forgerBackendClient) {
+    return { success: false, userMessage: 'No pudimos conectar con Forger Cloud.', technicalCode: 'backend_client_missing' };
+  }
+  if (!canUseCloudDataSync()) {
+    return { success: false, userMessage: 'Forger Cloud Sync requiere una cuenta demo o pro.', technicalCode: 'subscription_required' };
+  }
+
+  const remoteBackup = (await forgerBackendClient.listRemoteBackups()).backups.find((backup) => backup.id === remoteBackupId);
+  if (!remoteBackup) {
+    return { success: false, userMessage: 'No encontramos ese respaldo cloud.', technicalCode: 'remote_backup_not_found' };
+  }
+
+  const downloadPath = path.join(getTempRoot(), 'cloud-backups', `${remoteBackup.id}.zip`);
+  const extractDir = path.join(getTempRoot(), 'cloud-backups', `${remoteBackup.id}-extracted-${Date.now()}`);
+  await fs.rm(downloadPath, { force: true }).catch(() => undefined);
+  await fs.rm(extractDir, { recursive: true, force: true }).catch(() => undefined);
+
+  try {
+    const download = await forgerBackendClient.downloadRemoteBackup(remoteBackup.id, downloadPath);
+    const actualChecksum = await hashFileSha256(downloadPath);
+    const expectedChecksum = download.checksumSha256 || remoteBackup.checksumSha256;
+    if (expectedChecksum && actualChecksum !== expectedChecksum) {
+      throw new Error('remote_backup_checksum_mismatch');
+    }
+    await validateArchiveEntries(downloadPath);
+    await extractArchive(downloadPath, extractDir);
+    return await getBackupsManager().restoreBackupDirectory({ appId: remoteBackup.appId, backupDir: extractDir });
+  } finally {
+    await fs.rm(downloadPath, { force: true }).catch(() => undefined);
+    await fs.rm(extractDir, { recursive: true, force: true }).catch(() => undefined);
+  }
+};
+
+const syncAppToCloudIfEnabled = async (appId: string): Promise<void> => {
+  if (!cloudSyncSettings.appSync[appId]?.autoSync || !canUseCloudDataSync()) {
+    return;
+  }
+  const result = await createRemoteAppBackup({ appId, backupType: 'sync_snapshot', source: 'auto_sync' });
+  await appendInstallLog(result.success ? 'cloud_sync:auto_success' : 'cloud_sync:auto_failed', {
+    appId,
+    technicalCode: result.technicalCode,
+  });
 };
 
 const RESERVED_APP_SECRET_ENV_NAMES = new Set([
@@ -1633,6 +1721,40 @@ const saveRegistry = async (): Promise<void> => {
   }
 };
 
+const loadCloudSyncSettings = async (): Promise<void> => {
+  try {
+    const raw = await fs.readFile(getCloudSyncSettingsPath(), 'utf8');
+    const parsed = JSON.parse(raw) as CloudSyncSettings;
+    cloudSyncSettings = {
+      appSync: parsed && typeof parsed.appSync === 'object' && parsed.appSync ? parsed.appSync : {},
+    };
+  } catch {
+    cloudSyncSettings = { appSync: {} };
+  }
+};
+
+const saveCloudSyncSettings = async (): Promise<void> => {
+  const settingsPath = getCloudSyncSettingsPath();
+  await fs.mkdir(path.dirname(settingsPath), { recursive: true });
+  await fs.writeFile(settingsPath, JSON.stringify(cloudSyncSettings, null, 2), 'utf8');
+};
+
+const setAppAutoSyncSetting = async (appId: string, autoSync: boolean): Promise<CloudSyncSettings> => {
+  cloudSyncSettings = {
+    appSync: {
+      ...cloudSyncSettings.appSync,
+      [appId]: { autoSync },
+    },
+  };
+  await saveCloudSyncSettings();
+  return cloudSyncSettings;
+};
+
+const canUseCloudDataSync = (): boolean => {
+  const tier = forgerAccount.user?.subscriptionTier;
+  return Boolean(forgerAccount.authenticated && forgerAccount.token && (tier === 'demo' || tier === 'pro'));
+};
+
 const upsertInstalledRecord = async (record: InstalledAppRecord): Promise<void> => {
   const normalized = normalizeInstalledAppRecord(record);
   registry.apps[normalized.appId] = normalized;
@@ -1812,6 +1934,22 @@ const runCommandCapture = async (
       resolve({ code, stdout, stderr });
     });
   });
+};
+
+const zipDirectory = async (sourceDir: string, zipPath: string): Promise<void> => {
+  await fs.mkdir(path.dirname(zipPath), { recursive: true });
+  if (process.platform === 'win32') {
+    const escapedSource = path.join(sourceDir, '*').replace(/'/g, "''");
+    const escapedZip = zipPath.replace(/'/g, "''");
+    await runCommand(
+      'powershell',
+      ['-NoProfile', '-Command', `Compress-Archive -Path '${escapedSource}' -DestinationPath '${escapedZip}' -Force`],
+      { cwd: sourceDir },
+    );
+    return;
+  }
+
+  await runCommand('zip', ['-qry', zipPath, '.'], { cwd: sourceDir });
 };
 
 const canRunCommand = async (command: string, args: string[]): Promise<boolean> => {
@@ -4382,6 +4520,12 @@ const stopInstalledAppUnlocked = async (appId: string): Promise<StopAppResult> =
     userMessage: 'App detenida.',
   });
   ensureCatalogStatuses();
+  await syncAppToCloudIfEnabled(appId).catch((error) => {
+    void appendInstallLog('cloud_sync:auto_error', {
+      appId,
+      error: serializeErrorForInstallLog(error),
+    });
+  });
 
   return {
     success: true,
@@ -4769,6 +4913,60 @@ const registerIpcHandlers = (): void => {
         ...diagnostic,
       };
     }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.listRemoteBackups, async (_event, appId?: string) => {
+    if (!forgerBackendClient || !canUseCloudDataSync()) {
+      return { backups: [], usage: { usedBytes: 0, limitBytes: 0, backupCount: 0, backupCountLimit: 0 } };
+    }
+    return await forgerBackendClient.listRemoteBackups(appId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.createRemoteBackup, async (_event, input: CreateRemoteAppBackupInput) => {
+    try {
+      return await createRemoteAppBackup(input);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : 'remote_backup_create_failed';
+      await appendInstallLog('remote_backup:create_failed', {
+        appId: input?.appId,
+        detail,
+        error: serializeErrorForInstallLog(error),
+      });
+      return {
+        success: false,
+        userMessage: 'No pudimos subir el respaldo a Forger Cloud.',
+        technicalCode: detail,
+      };
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.deleteRemoteBackup, async (_event, remoteBackupId: number) => {
+    return forgerBackendClient && canUseCloudDataSync()
+      ? await forgerBackendClient.deleteRemoteBackup(remoteBackupId)
+      : { success: false, userMessage: 'Forger Cloud Sync requiere una cuenta demo o pro.', technicalCode: 'subscription_required' };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.restoreRemoteBackup, async (_event, input: { remoteBackupId: number }) => {
+    try {
+      return await restoreRemoteAppBackup(input.remoteBackupId);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : 'remote_backup_restore_failed';
+      await appendInstallLog('remote_backup:restore_failed', {
+        remoteBackupId: input?.remoteBackupId,
+        detail,
+        error: serializeErrorForInstallLog(error),
+      });
+      return {
+        success: false,
+        userMessage: 'No pudimos restaurar el respaldo cloud.',
+        technicalCode: detail,
+      };
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.getCloudSyncSettings, async () => cloudSyncSettings);
+  ipcMain.handle(IPC_CHANNELS.setAppAutoSync, async (_event, appId: string, autoSync: boolean) => {
+    return await setAppAutoSyncSetting(appId, autoSync);
   });
 
   ipcMain.handle(IPC_CHANNELS.restoreAppUserVersion, async (_event, appId: string) => {
@@ -5400,6 +5598,7 @@ app.whenReady().then(async () => {
   await loadAgentToolSettings();
   forgerAccountStore = new ForgerAccountStore(getForgerAccountPath());
   forgerAccount = await forgerAccountStore.load();
+  await loadCloudSyncSettings();
   memoryStore = new MemoryStore(getForgerMetadataRoot());
   await loadRegistry();
   await startDevCatalogService();

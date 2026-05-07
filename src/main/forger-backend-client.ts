@@ -3,14 +3,22 @@ import type {
   AppRatingSummary,
   AppStatus,
   CatalogApp,
+  AppBackupSummary,
+  RemoteBackupType,
+  RemoteBackupSource,
   ForgerAccountLoginInput,
   ForgerAccountRegisterInput,
   ForgerAccountSession,
   DesktopErrorReportPreview,
   CloudDeviceSummary,
+  RemoteAppBackupSummary,
+  RemoteBackupsState,
+  RemoteBackupsUsage,
   SubmitAppFeedbackInput,
   SubmitAppRatingInput,
 } from '../shared/types';
+import fs from 'node:fs/promises';
+import path from 'node:path';
 import { normalizeAppCapabilities } from '../shared/capabilities';
 import { normalizeErrorReportDiagnostic } from '../shared/error-diagnostics';
 import { normalizeForgerAccountUser, type StoredForgerAccount } from './forger-account-store';
@@ -63,6 +71,42 @@ interface DownloadPayload {
     checksum_sha256?: string | null;
   };
 }
+
+interface RemoteBackupPayload {
+  id: number | string;
+  app_id: string;
+  app_name: string;
+  app_version?: string | null;
+  backup_type: RemoteBackupType;
+  source: RemoteBackupSource;
+  metadata?: Record<string, unknown> | null;
+  file_count?: number | string | null;
+  total_bytes?: number | string | null;
+  checksum_sha256?: string | null;
+  created_at?: string;
+  updated_at?: string;
+  download_url?: string;
+}
+
+interface RemoteBackupsResponse {
+  backups?: unknown[];
+  usage?: {
+    used_bytes?: number | string | null;
+    limit_bytes?: number | string | null;
+    backup_count?: number | string | null;
+    backup_count_limit?: number | string | null;
+  } | null;
+}
+
+const emptyRemoteBackupsState = (): RemoteBackupsState => ({
+  backups: [],
+  usage: {
+    usedBytes: 0,
+    limitBytes: 0,
+    backupCount: 0,
+    backupCountLimit: 0,
+  },
+});
 
 export class ForgerBackendClient {
   constructor(private readonly options: ClientOptions) {}
@@ -342,6 +386,107 @@ export class ForgerBackendClient {
     return { success: true, userMessage: 'Reporte enviado. Gracias por ayudarnos a corregir Forger.' };
   }
 
+  async listRemoteBackups(appId?: string): Promise<RemoteBackupsState> {
+    const url = new URL(`${this.options.backendBaseUrl}/api/v1/me/backups`);
+    if (appId) {
+      url.searchParams.set('app_id', appId);
+    }
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: this.buildHeaders(),
+    });
+    const payload = await this.readJson<unknown>(response);
+    if (!response.ok) {
+      return emptyRemoteBackupsState();
+    }
+    if (Array.isArray(payload)) {
+      return {
+        backups: payload.map((entry) => this.normalizeRemoteBackup(entry)).filter((entry): entry is RemoteAppBackupSummary => Boolean(entry)),
+        usage: emptyRemoteBackupsState().usage,
+      };
+    }
+    if (!payload || typeof payload !== 'object') {
+      return emptyRemoteBackupsState();
+    }
+    const record = payload as RemoteBackupsResponse;
+    const backups = Array.isArray(record.backups) ? record.backups : [];
+    return {
+      backups: backups.map((entry) => this.normalizeRemoteBackup(entry)).filter((entry): entry is RemoteAppBackupSummary => Boolean(entry)),
+      usage: this.normalizeRemoteBackupsUsage(record.usage),
+    };
+  }
+
+  async createRemoteBackup(input: {
+    archivePath: string;
+    localBackup: AppBackupSummary;
+    backupType: RemoteBackupType;
+    source: RemoteBackupSource;
+  }): Promise<{ success: boolean; remoteBackup?: RemoteAppBackupSummary; userMessage: string; technicalCode?: string }> {
+    const archive = await fs.readFile(input.archivePath);
+    const form = new FormData();
+    form.set('app_id', input.localBackup.appId);
+    form.set('app_name', input.localBackup.appName);
+    form.set('app_version', input.localBackup.appVersion);
+    form.set('backup_type', input.backupType);
+    form.set('source', input.source);
+    form.set('file_count', String(input.localBackup.fileCount));
+    form.set('metadata', JSON.stringify({
+      local_backup_id: input.localBackup.backupId,
+      reason: input.localBackup.reason,
+      files: input.localBackup.files,
+    }));
+    form.set(
+      'archive',
+      new Blob([archive], { type: 'application/zip' }),
+      `${input.localBackup.appId}-${input.localBackup.backupId}.zip`,
+    );
+
+    const response = await fetch(`${this.options.backendBaseUrl}/api/v1/me/backups`, {
+      method: 'POST',
+      headers: this.buildHeaders({ contentType: false }),
+      body: form,
+    });
+    const payload = await this.readJson<unknown>(response);
+    if (!response.ok) {
+      return {
+        success: false,
+        userMessage: this.remoteBackupErrorMessage(response.status, payload),
+        technicalCode: `remote_backup_create_failed_${response.status}`,
+      };
+    }
+
+    return {
+      success: true,
+      remoteBackup: this.normalizeRemoteBackup(payload),
+      userMessage: input.backupType === 'sync_snapshot' ? 'Datos sincronizados con Forger Cloud.' : 'Respaldo subido a Forger Cloud.',
+    };
+  }
+
+  async downloadRemoteBackup(remoteBackupId: number, targetPath: string): Promise<{ checksumSha256?: string }> {
+    const response = await fetch(`${this.options.backendBaseUrl}/api/v1/me/backups/${remoteBackupId}/download`, {
+      method: 'GET',
+      headers: this.buildHeaders({ accept: 'application/zip' }),
+    });
+    if (!response.ok) {
+      throw new Error(`remote_backup_download_failed_${response.status}`);
+    }
+    const buffer = Buffer.from(await response.arrayBuffer());
+    await fs.mkdir(path.dirname(targetPath), { recursive: true });
+    await fs.writeFile(targetPath, buffer);
+    return { checksumSha256: response.headers.get('X-Forger-Backup-Sha256') ?? undefined };
+  }
+
+  async deleteRemoteBackup(remoteBackupId: number): Promise<{ success: boolean; userMessage: string; technicalCode?: string }> {
+    const response = await fetch(`${this.options.backendBaseUrl}/api/v1/me/backups/${remoteBackupId}`, {
+      method: 'DELETE',
+      headers: this.buildHeaders(),
+    });
+    if (!response.ok) {
+      return { success: false, userMessage: 'No pudimos eliminar el respaldo cloud.', technicalCode: `remote_backup_delete_failed_${response.status}` };
+    }
+    return { success: true, userMessage: 'Respaldo cloud eliminado.' };
+  }
+
   async requestDownload(
     appVersionId: number,
     input: { platform: string; deviceIdentifier: string },
@@ -370,10 +515,13 @@ export class ForgerBackendClient {
     return payload;
   }
 
-  private buildHeaders(): Record<string, string> {
+  private buildHeaders(options: { accept?: string; contentType?: false | string } = {}): Record<string, string> {
     const headers: Record<string, string> = {
-      Accept: 'application/json',
+      Accept: options.accept ?? 'application/json',
     };
+    if (typeof options.contentType === 'string') {
+      headers['Content-Type'] = options.contentType;
+    }
     const token = this.options.token();
     if (token) {
       headers.Authorization = `Bearer ${token}`;
@@ -524,6 +672,59 @@ export class ForgerBackendClient {
       lastSeenAt: typeof record.last_seen_at === 'string' ? record.last_seen_at : undefined,
       installedApps: apps,
     };
+  }
+
+  private normalizeRemoteBackup(value: unknown): RemoteAppBackupSummary | undefined {
+    if (!value || typeof value !== 'object') {
+      return undefined;
+    }
+    const record = value as RemoteBackupPayload;
+    const id = typeof record.id === 'number' ? record.id : Number(record.id);
+    if (!Number.isFinite(id) || !record.app_id || !record.app_name) {
+      return undefined;
+    }
+    return {
+      id,
+      appId: record.app_id,
+      appName: record.app_name,
+      appVersion: record.app_version ?? undefined,
+      backupType: record.backup_type === 'sync_snapshot' ? 'sync_snapshot' : 'backup',
+      source: record.source === 'auto_sync' ? 'auto_sync' : 'manual',
+      metadata: record.metadata && typeof record.metadata === 'object' ? record.metadata : {},
+      fileCount: Number(record.file_count ?? 0),
+      totalBytes: Number(record.total_bytes ?? 0),
+      checksumSha256: record.checksum_sha256 ?? '',
+      createdAt: record.created_at ?? new Date().toISOString(),
+      updatedAt: record.updated_at,
+      downloadUrl: record.download_url,
+    };
+  }
+
+  private normalizeRemoteBackupsUsage(value: unknown): RemoteBackupsUsage {
+    if (!value || typeof value !== 'object') {
+      return emptyRemoteBackupsState().usage;
+    }
+    const record = value as NonNullable<RemoteBackupsResponse['usage']>;
+    return {
+      usedBytes: Number(record.used_bytes ?? 0),
+      limitBytes: Number(record.limit_bytes ?? 0),
+      backupCount: Number(record.backup_count ?? 0),
+      backupCountLimit: Number(record.backup_count_limit ?? 0),
+    };
+  }
+
+  private remoteBackupErrorMessage(status: number, payload: unknown): string {
+    const error = payload && typeof payload === 'object' ? (payload as Record<string, unknown>).error : undefined;
+    if (status === 403) {
+      return 'Forger Cloud Sync requiere una cuenta demo o pro.';
+    }
+    if (error === 'storage_limit_exceeded') {
+      return 'Tu espacio de Forger Cloud esta lleno. Elimina respaldos cloud antes de subir otro.';
+    }
+    if (error === 'backup_count_limit_exceeded') {
+      return 'Llegaste al maximo de respaldos cloud. Elimina algunos antes de subir otro.';
+    }
+    return 'No pudimos subir el respaldo a Forger Cloud.';
   }
 
   private parseAccount(payload: unknown, token?: string): StoredForgerAccount {

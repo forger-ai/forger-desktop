@@ -79,6 +79,7 @@ export interface ForgerAccountUser {
   firstName?: string;
   lastName?: string;
   confirmed: boolean;
+  subscriptionTier: SubscriptionTier;
 }
 
 export interface ForgerAccountSession {
@@ -86,6 +87,8 @@ export interface ForgerAccountSession {
   confirmationRequired?: boolean;
   user?: ForgerAccountUser;
 }
+
+export type SubscriptionTier = 'free' | 'demo' | 'pro';
 
 export interface ForgerAccountRegisterInput {
   firstName: string;
@@ -323,6 +326,8 @@ export interface BasicActionResult extends FailureDiagnosticFields {
 }
 
 export type AppBackupReason = 'manual' | 'update' | 'pre_restore';
+export type RemoteBackupType = 'backup' | 'sync_snapshot';
+export type RemoteBackupSource = 'manual' | 'auto_sync';
 
 export interface AppBackupFileSummary {
   sourceRelativePath: string;
@@ -360,6 +365,52 @@ export interface DeleteAppBackupInput {
 export interface RestoreAppBackupInput {
   appId: string;
   backupId: string;
+}
+
+export interface RemoteAppBackupSummary {
+  id: number;
+  appId: string;
+  appName: string;
+  appVersion?: string;
+  backupType: RemoteBackupType;
+  source: RemoteBackupSource;
+  metadata: Record<string, unknown>;
+  fileCount: number;
+  totalBytes: number;
+  checksumSha256: string;
+  createdAt: string;
+  updatedAt?: string;
+  downloadUrl?: string;
+}
+
+export interface RemoteBackupsUsage {
+  usedBytes: number;
+  limitBytes: number;
+  backupCount: number;
+  backupCountLimit: number;
+}
+
+export interface RemoteBackupsState {
+  backups: RemoteAppBackupSummary[];
+  usage: RemoteBackupsUsage;
+}
+
+export interface CreateRemoteAppBackupInput {
+  appId: string;
+  backupType: RemoteBackupType;
+  source?: RemoteBackupSource;
+}
+
+export interface CreateRemoteAppBackupResult extends BasicActionResult {
+  remoteBackup?: RemoteAppBackupSummary;
+}
+
+export interface RestoreRemoteAppBackupInput {
+  remoteBackupId: number;
+}
+
+export interface CloudSyncSettings {
+  appSync: Record<string, { autoSync: boolean }>;
 }
 
 export interface OpenAppResult extends FailureDiagnosticFields {
@@ -1015,6 +1066,12 @@ export interface ForgerDesktopApi {
   createBackup: (input: CreateAppBackupInput) => Promise<CreateAppBackupResult>;
   deleteBackup: (input: DeleteAppBackupInput) => Promise<BasicActionResult>;
   restoreBackup: (input: RestoreAppBackupInput) => Promise<BasicActionResult>;
+  listRemoteBackups: (appId?: string) => Promise<RemoteBackupsState>;
+  createRemoteBackup: (input: CreateRemoteAppBackupInput) => Promise<CreateRemoteAppBackupResult>;
+  deleteRemoteBackup: (remoteBackupId: number) => Promise<BasicActionResult>;
+  restoreRemoteBackup: (input: RestoreRemoteAppBackupInput) => Promise<BasicActionResult>;
+  getCloudSyncSettings: () => Promise<CloudSyncSettings>;
+  setAppAutoSync: (appId: string, autoSync: boolean) => Promise<CloudSyncSettings>;
   restoreAppUserVersion: (appId: string) => Promise<BasicActionResult>;
   resolveAppUpdateConflict: (appId: string) => Promise<{ runId: string; status: ChatRunStatus } | BasicActionResult>;
   uninstallApp: (appId: string) => Promise<BasicActionResult>;
