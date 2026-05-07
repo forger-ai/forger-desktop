@@ -12,6 +12,7 @@ import type {
   SubmitAppRatingInput,
 } from '../shared/types';
 import { normalizeAppCapabilities } from '../shared/capabilities';
+import { normalizeErrorReportDiagnostic } from '../shared/error-diagnostics';
 import { normalizeForgerAccountUser, type StoredForgerAccount } from './forger-account-store';
 
 interface ClientOptions {
@@ -312,6 +313,7 @@ export class ForgerBackendClient {
   async submitDesktopErrorReport(
     input: DesktopErrorReportPreview,
   ): Promise<{ success: boolean; userMessage: string; technicalCode?: string }> {
+    const report = normalizeErrorReportDiagnostic(input);
     const response = await fetch(`${this.options.backendBaseUrl}/api/v1/desktop_error_reports`, {
       method: 'POST',
       headers: {
@@ -319,17 +321,17 @@ export class ForgerBackendClient {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        source: input.source,
-        operation: input.operation,
-        message: input.message,
-        technical_code: input.technicalCode,
-        desktop_version: input.desktopVersion,
-        platform: input.platform,
-        arch: input.arch,
-        app_id: input.appId,
-        app_version: input.appVersion,
-        details: input.details ?? {},
-        sensitive_details: input.sensitiveDetails ?? {},
+        source: report.source,
+        operation: report.operation,
+        message: report.message,
+        technical_code: report.technicalCode,
+        desktop_version: report.desktopVersion,
+        platform: report.platform,
+        arch: report.arch,
+        app_id: report.appId,
+        app_version: report.appVersion,
+        details: report.details ?? {},
+        sensitive_details: report.sensitiveDetails ?? {},
       }),
     });
 

@@ -16,6 +16,7 @@ import type {
   MemoryListInput,
   MemoryUpdateInput,
 } from '../shared/types';
+import { buildFailureDiagnostic } from '../shared/error-diagnostics';
 
 export interface ForgerMcpSessionRef {
   url: string;
@@ -517,7 +518,7 @@ export class ForgerMcpServer {
         const result = {
           success: false,
           userMessage: memoryErrorMessage(error),
-          technicalCode: error instanceof Error ? error.message : 'memory_error',
+          ...buildFailureDiagnostic({ error, fallbackCode: 'memory_error' }),
         };
         await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
         return result;
