@@ -31,6 +31,7 @@ import type {
   AutomationRunSummary,
   AutomationUpsertInput,
   CatalogApp,
+  CloudSyncSettings,
   CodexAuthStatus,
   CodexReasoningEffort,
   DesktopErrorReportInput,
@@ -46,6 +47,8 @@ import type {
   MemoryEntry,
   MemoryUpdateInput,
   PickedChatFile,
+  RemoteAppBackupSummary,
+  RemoteBackupsUsage,
   Settings,
   SharedFileRef,
   SubmitAppFeedbackInput,
@@ -127,6 +130,13 @@ const initialCodexAuthStatus: CodexAuthStatus = {
 
 const initialForgerAccount: ForgerAccountSession = {
   authenticated: false,
+};
+
+const initialRemoteBackupsUsage: RemoteBackupsUsage = {
+  usedBytes: 0,
+  limitBytes: 0,
+  backupCount: 0,
+  backupCountLimit: 0,
 };
 
 const initialDesktopUpdateState: DesktopUpdateState = {
@@ -238,6 +248,9 @@ function App() {
   const [selectedAutomationRun, setSelectedAutomationRun] = useState<AutomationRun | null>(null);
   const [automationBusy, setAutomationBusy] = useState(false);
   const [backups, setBackups] = useState<AppBackupSummary[]>([]);
+  const [remoteBackups, setRemoteBackups] = useState<RemoteAppBackupSummary[]>([]);
+  const [remoteBackupsUsage, setRemoteBackupsUsage] = useState<RemoteBackupsUsage>(initialRemoteBackupsUsage);
+  const [cloudSyncSettings, setCloudSyncSettings] = useState<CloudSyncSettings>({ appSync: {} });
   const [backupsBusy, setBackupsBusy] = useState(false);
   const [chatConversations, setChatConversations] = useState<ChatConversation[]>(
     persistedChatState.conversations,
@@ -343,8 +356,16 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
   };
 
   const refreshBackups = async () => {
-    const nextBackups = await getDesktopApi().listBackups();
+    const desktopApi = getDesktopApi();
+    const [nextBackups, nextRemoteBackups, nextCloudSyncSettings] = await Promise.all([
+      desktopApi.listBackups(),
+      desktopApi.listRemoteBackups(),
+      desktopApi.getCloudSyncSettings(),
+    ]);
     setBackups(nextBackups);
+    setRemoteBackups(nextRemoteBackups.backups);
+    setRemoteBackupsUsage(nextRemoteBackups.usage);
+    setCloudSyncSettings(nextCloudSyncSettings);
     return nextBackups;
   };
 
@@ -394,6 +415,8 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
         categoriesResult,
         automationsResult,
         backupsResult,
+        remoteBackupsResult,
+        cloudSyncSettingsResult,
         memoriesResult,
       ] = await Promise.allSettled([
         refreshApps(),
@@ -406,6 +429,8 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
         desktopApi.filesListCategories(),
         desktopApi.automationsList(),
         desktopApi.listBackups(),
+        desktopApi.listRemoteBackups(),
+        desktopApi.getCloudSyncSettings(),
         desktopApi.memoryList(),
       ]);
 
@@ -440,6 +465,15 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
 
       if (backupsResult.status === 'fulfilled') {
         setBackups(backupsResult.value);
+      }
+
+      if (remoteBackupsResult.status === 'fulfilled') {
+        setRemoteBackups(remoteBackupsResult.value.backups);
+        setRemoteBackupsUsage(remoteBackupsResult.value.usage);
+      }
+
+      if (cloudSyncSettingsResult.status === 'fulfilled') {
+        setCloudSyncSettings(cloudSyncSettingsResult.value);
       }
 
       if (memoriesResult.status === 'fulfilled') {
@@ -1084,6 +1118,109 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
       });
     } finally {
       setBackupsBusy(false);
+    }
+  };
+
+  const openCloudUpsell = () => {
+    setForgerAccountMessage(t.cloud.backupsUpsellBody);
+    setCloudModalOpen(true);
+  };
+
+  const handleSyncNow = async (appId: string) => {
+    setBackupsBusy(true);
+    try {
+      const result = await getDesktopApi().createRemoteBackup({ appId, backupType: 'sync_snapshot', source: 'manual' });
+      if (result.technicalCode === 'cloud_account_required' || result.technicalCode === 'subscription_required') {
+        openCloudUpsell();
+      }
+      setBannerSeverity(result.success ? 'success' : 'error');
+      setBannerMessage(result.userMessage);
+      await refreshBackups();
+    } catch (error) {
+      setBannerSeverity('error');
+      setBannerMessage(t.sections.backups.cloudCreateError);
+      requestErrorReport({
+        source: 'desktop',
+        operation: 'backup.sync_now',
+        message: error instanceof Error ? error.message : t.sections.backups.cloudCreateError,
+        technicalCode: 'remote_backup_sync_unhandled_error',
+        appId,
+        sensitiveDetails: { stack: error instanceof Error ? error.stack : undefined },
+      });
+    } finally {
+      setBackupsBusy(false);
+    }
+  };
+
+  const handleDeleteRemoteBackup = async (backup: RemoteAppBackupSummary) => {
+    if (!window.confirm(t.sections.backups.deleteConfirm(backup.appName))) {
+      return;
+    }
+    setBackupsBusy(true);
+    try {
+      const result = await getDesktopApi().deleteRemoteBackup(backup.id);
+      setBannerSeverity(result.success ? 'success' : 'error');
+      setBannerMessage(result.userMessage);
+      await refreshBackups();
+    } catch (error) {
+      setBannerSeverity('error');
+      setBannerMessage(t.sections.backups.loadError);
+      requestErrorReport({
+        source: 'desktop',
+        operation: 'backup.remote_delete',
+        message: error instanceof Error ? error.message : t.sections.backups.loadError,
+        technicalCode: 'remote_backup_delete_unhandled_error',
+        appId: backup.appId,
+        sensitiveDetails: { stack: error instanceof Error ? error.stack : undefined },
+      });
+    } finally {
+      setBackupsBusy(false);
+    }
+  };
+
+  const handleRestoreRemoteBackup = async (backup: RemoteAppBackupSummary) => {
+    if (!window.confirm(t.sections.backups.restoreConfirm(backup.appName))) {
+      return;
+    }
+    setBackupsBusy(true);
+    try {
+      const result = await getDesktopApi().restoreRemoteBackup({ remoteBackupId: backup.id });
+      setBannerSeverity(result.success ? 'success' : 'error');
+      setBannerMessage(result.userMessage);
+      await Promise.all([refreshBackups(), refreshApps()]);
+    } catch (error) {
+      setBannerSeverity('error');
+      setBannerMessage(t.sections.backups.loadError);
+      requestErrorReport({
+        source: 'desktop',
+        operation: 'backup.remote_restore',
+        message: error instanceof Error ? error.message : t.sections.backups.loadError,
+        technicalCode: 'remote_backup_restore_unhandled_error',
+        appId: backup.appId,
+        sensitiveDetails: { stack: error instanceof Error ? error.stack : undefined },
+      });
+    } finally {
+      setBackupsBusy(false);
+    }
+  };
+
+  const handleSetAutoSync = async (appId: string, autoSync: boolean) => {
+    try {
+      const nextSettings = await getDesktopApi().setAppAutoSync(appId, autoSync);
+      setCloudSyncSettings(nextSettings);
+      setBannerSeverity('success');
+      setBannerMessage(autoSync ? t.sections.backups.autoSyncEnabled : t.sections.backups.autoSyncDisabled);
+    } catch (error) {
+      setBannerSeverity('error');
+      setBannerMessage(t.sections.backups.loadError);
+      requestErrorReport({
+        source: 'desktop',
+        operation: 'backup.auto_sync',
+        message: error instanceof Error ? error.message : t.sections.backups.loadError,
+        technicalCode: 'auto_sync_setting_unhandled_error',
+        appId,
+        sensitiveDetails: { stack: error instanceof Error ? error.stack : undefined },
+      });
     }
   };
 
@@ -1915,6 +2052,9 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
       setBannerSeverity(result.success ? 'success' : 'error');
       setBannerMessage(result.success ? t.cloud.loginSuccess : result.userMessage ?? t.settings.authErrorFallback);
       if (result.success) {
+        void refreshBackups();
+      }
+      if (result.success) {
         setCloudModalOpen(false);
       }
       await refreshApps();
@@ -1991,6 +2131,8 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
     try {
       const result = await getDesktopApi().logoutForgerAccount();
       setForgerAccount(result);
+      setRemoteBackups([]);
+      setRemoteBackupsUsage(initialRemoteBackupsUsage);
       setForgerAccountMessage(null);
       await refreshApps();
     } finally {
@@ -2188,12 +2330,21 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
         {currentView === 'backups' ? (
           <BackupsView
             backups={backups}
+            remoteBackups={remoteBackups}
+            remoteBackupsUsage={remoteBackupsUsage}
             apps={installedApps}
+            account={forgerAccount}
+            cloudSyncSettings={cloudSyncSettings}
             busy={backupsBusy}
             t={t}
             onCreateBackup={(appId) => void handleCreateBackup(appId)}
+            onSyncNow={(appId) => void handleSyncNow(appId)}
             onDeleteBackup={(backup) => void handleDeleteBackup(backup)}
+            onDeleteRemoteBackup={(backup) => void handleDeleteRemoteBackup(backup)}
             onRestoreBackup={(backup) => void handleRestoreBackup(backup)}
+            onRestoreRemoteBackup={(backup) => void handleRestoreRemoteBackup(backup)}
+            onSetAutoSync={(appId, autoSync) => void handleSetAutoSync(appId, autoSync)}
+            onRequireCloud={openCloudUpsell}
           />
         ) : null}
 

@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import type { ForgerAccountSession } from '../shared/types';
+import type { ForgerAccountSession, SubscriptionTier } from '../shared/types';
 
 export type StoredForgerAccount = ForgerAccountSession & { token?: string };
 
@@ -22,7 +22,12 @@ export const normalizeForgerAccountUser = (value: unknown): ForgerAccountSession
     firstName: typeof record.first_name === 'string' ? record.first_name : typeof record.firstName === 'string' ? record.firstName : undefined,
     lastName: typeof record.last_name === 'string' ? record.last_name : typeof record.lastName === 'string' ? record.lastName : undefined,
     confirmed: Boolean(record.confirmed),
+    subscriptionTier: normalizeSubscriptionTier(record.subscription_tier ?? record.subscriptionTier),
   };
+};
+
+const normalizeSubscriptionTier = (value: unknown): SubscriptionTier => {
+  return value === 'demo' || value === 'pro' ? value : 'free';
 };
 
 export const publicForgerAccount = (account: StoredForgerAccount): ForgerAccountSession => ({

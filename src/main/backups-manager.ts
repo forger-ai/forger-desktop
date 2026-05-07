@@ -187,6 +187,10 @@ export class BackupsManager {
     return backups.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 
+  backupDirectory(appId: string, backupId: string): string | null {
+    return this.resolveBackupPath(appId, backupId);
+  }
+
   async createBackup(input: CreateAppBackupInput): Promise<CreateAppBackupResult> {
     const appRecord = this.getInstalledApp(input.appId);
     if (!appRecord?.installDir) {
@@ -293,7 +297,7 @@ export class BackupsManager {
     }
 
     const metadata = await this.readMetadata(input.appId, input.backupId);
-    await this.verifyBackupFiles(input.appId, metadata);
+    await this.verifyBackupFiles(path.resolve(this.backupsRoot, input.appId, input.backupId), metadata);
     const preRestore = await this.createBackup({ appId: input.appId, reason: 'pre_restore' });
     if (!preRestore.success) {
       return preRestore;
@@ -324,6 +328,61 @@ export class BackupsManager {
     return {
       success: true,
       userMessage: 'Respaldo restaurado.',
+    };
+  }
+
+  async restoreBackupDirectory(input: { appId: string; backupDir: string }): Promise<BasicActionResult> {
+    const appRecord = this.getInstalledApp(input.appId);
+    if (!appRecord?.installDir) {
+      return {
+        success: false,
+        userMessage: 'Primero instala esta app.',
+        technicalCode: 'app_not_installed',
+      };
+    }
+    if (this.isAppRunning(input.appId)) {
+      return {
+        success: false,
+        userMessage: 'Cierra la app antes de restaurar un respaldo.',
+        technicalCode: 'app_running',
+      };
+    }
+
+    const metadata = await this.readMetadataFromDirectory(input.backupDir);
+    if (metadata.appId !== input.appId) {
+      throw new Error('remote_backup_app_mismatch');
+    }
+    await this.verifyBackupFiles(input.backupDir, metadata);
+    const preRestore = await this.createBackup({ appId: input.appId, reason: 'pre_restore' });
+    if (!preRestore.success) {
+      return preRestore;
+    }
+
+    const installRoot = path.resolve(appRecord.installDir);
+    for (const file of metadata.files) {
+      const sourceRelative = normalizeRelativePath(file.sourceRelativePath);
+      const backupRelative = normalizeRelativePath(file.backupRelativePath);
+      if (!sourceRelative || !backupRelative) {
+        throw new Error('invalid_backup_metadata_path');
+      }
+      const targetPath = path.resolve(appRecord.installDir, sourceRelative);
+      const backupPath = path.resolve(input.backupDir, backupRelative);
+      if (!ensurePathInside(installRoot, targetPath) || !ensurePathInside(path.resolve(input.backupDir), backupPath)) {
+        throw new Error('unsafe_backup_restore_path');
+      }
+      await fs.mkdir(path.dirname(targetPath), { recursive: true });
+      await fs.copyFile(backupPath, targetPath);
+    }
+
+    await this.log?.('backup:remote_restored', {
+      appId: input.appId,
+      backupId: metadata.backupId,
+      preRestoreBackupId: preRestore.backup?.backupId,
+      fileCount: metadata.files.length,
+    });
+    return {
+      success: true,
+      userMessage: 'Respaldo cloud restaurado.',
     };
   }
 
@@ -382,22 +441,30 @@ export class BackupsManager {
     if (!backupPath) {
       throw new Error('invalid_backup_id');
     }
-    const raw = await fs.readFile(path.join(backupPath, METADATA_FILE), 'utf8');
-    const metadata = JSON.parse(raw) as BackupMetadata;
-    if (!metadata || metadata.schemaVersion !== 1 || metadata.appId !== appId || metadata.backupId !== backupId) {
+    const metadata = await this.readMetadataFromDirectory(backupPath);
+    if (metadata.appId !== appId || metadata.backupId !== backupId) {
       throw new Error('invalid_backup_metadata');
     }
     return metadata;
   }
 
-  private async verifyBackupFiles(appId: string, metadata: BackupMetadata): Promise<void> {
+  private async readMetadataFromDirectory(backupPath: string): Promise<BackupMetadata> {
+    const raw = await fs.readFile(path.join(backupPath, METADATA_FILE), 'utf8');
+    const metadata = JSON.parse(raw) as BackupMetadata;
+    if (!metadata || metadata.schemaVersion !== 1 || !metadata.appId || !metadata.backupId) {
+      throw new Error('invalid_backup_metadata');
+    }
+    return metadata;
+  }
+
+  private async verifyBackupFiles(backupRoot: string, metadata: BackupMetadata): Promise<void> {
     for (const file of metadata.files) {
       const backupRelative = normalizeRelativePath(file.backupRelativePath);
       if (!backupRelative) {
         throw new Error('invalid_backup_metadata_path');
       }
-      const backupPath = path.resolve(this.backupsRoot, appId, metadata.backupId, backupRelative);
-      if (!ensurePathInside(this.backupsRoot, backupPath)) {
+      const backupPath = path.resolve(backupRoot, backupRelative);
+      if (!ensurePathInside(path.resolve(backupRoot), backupPath)) {
         throw new Error('unsafe_backup_file_path');
       }
       const stat = await fs.stat(backupPath);
