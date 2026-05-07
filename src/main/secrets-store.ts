@@ -94,6 +94,9 @@ const encryptionUnavailableResult = (): SecretMutationResult => ({
   technicalCode: 'secrets_encryption_unavailable',
 });
 
+const isSecretsEncryptionUnavailableError = (error: unknown): boolean =>
+  error instanceof Error && error.message === 'secrets_encryption_unavailable';
+
 export class SecretsStore {
   private vault: SecretsVault = createEmptyVault();
   private loaded = false;
@@ -260,7 +263,18 @@ export class SecretsStore {
         continue;
       }
 
-      const value = this.decrypt(secret.encryptedValue);
+      let value: string;
+      try {
+        value = this.decrypt(secret.encryptedValue);
+      } catch (error) {
+        if (!isSecretsEncryptionUnavailableError(error)) {
+          throw error;
+        }
+        if (declaration.required) {
+          missingRequired.push(declaration);
+        }
+        continue;
+      }
       env[appSecretEnvName(declaration.name)] = value;
       secretValues.push(value);
     }

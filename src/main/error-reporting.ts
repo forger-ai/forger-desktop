@@ -6,6 +6,7 @@ import type {
   DesktopErrorReportInput,
   DesktopErrorReportPreview,
 } from '../shared/types';
+import { normalizeErrorReportDiagnostic } from '../shared/error-diagnostics';
 
 type InstalledAppLookup = (appId: string) => { version?: string } | null | undefined;
 
@@ -49,13 +50,13 @@ export class DesktopErrorReporter {
   }
 
   public buildPreview(input: DesktopErrorReportInput): DesktopErrorReportPreview {
-    return {
+    return normalizeErrorReportDiagnostic({
       ...input,
       desktopVersion: this.options.getAppVersion(),
       platform: this.platform,
       arch: this.arch,
       occurredAt: new Date().toISOString(),
-    };
+    });
   }
 
   public request(input: DesktopErrorReportInput): void {

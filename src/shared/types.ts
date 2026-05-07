@@ -159,6 +159,12 @@ export interface SubmitAppFeedbackInput {
   locale?: string;
 }
 
+export interface FailureDiagnosticFields {
+  technicalCode?: string;
+  details?: Record<string, unknown>;
+  sensitiveDetails?: Record<string, unknown>;
+}
+
 export interface Settings {
   userEmail: string;
   plan: string;
@@ -305,17 +311,15 @@ export type InstallPhase =
   | 'completed'
   | 'failed';
 
-export interface InstallAppResult {
+export interface InstallAppResult extends FailureDiagnosticFields {
   success: boolean;
   phase: InstallPhase;
   userMessage: string;
-  technicalCode?: string;
 }
 
-export interface BasicActionResult {
+export interface BasicActionResult extends FailureDiagnosticFields {
   success: boolean;
   userMessage: string;
-  technicalCode?: string;
 }
 
 export type AppBackupReason = 'manual' | 'update' | 'pre_restore';
@@ -358,10 +362,9 @@ export interface RestoreAppBackupInput {
   backupId: string;
 }
 
-export interface OpenAppResult {
+export interface OpenAppResult extends FailureDiagnosticFields {
   success: boolean;
   userMessage: string;
-  technicalCode?: string;
   backendUrl?: string;
   frontendUrl?: string;
 }
@@ -374,10 +377,9 @@ export interface RuntimeStatus {
   frontendUrl?: string;
 }
 
-export interface StopAppResult {
+export interface StopAppResult extends FailureDiagnosticFields {
   success: boolean;
   userMessage: string;
-  technicalCode?: string;
 }
 
 export interface AppSecretDeclaration {
@@ -605,13 +607,12 @@ export interface AppUpdateConflictInfo {
   message?: string;
 }
 
-export interface InstallWelcomeResult {
+export interface InstallWelcomeResult extends FailureDiagnosticFields {
   success: boolean;
   appId: string;
   message?: string;
   usedCodex: boolean;
   userMessage: string;
-  technicalCode?: string;
 }
 
 export interface ChatRunEvent {
@@ -652,19 +653,17 @@ export interface ChatUndoInput {
   operationId?: string;
 }
 
-export interface ChatApplyResult {
+export interface ChatApplyResult extends FailureDiagnosticFields {
   success: boolean;
   operationId?: string;
   commitSha?: string;
   userMessage?: string;
-  technicalCode?: string;
 }
 
-export interface ChatUndoResult {
+export interface ChatUndoResult extends FailureDiagnosticFields {
   success: boolean;
   revertedCommitSha?: string;
   userMessage?: string;
-  technicalCode?: string;
 }
 
 export interface DbListTablesResult {
@@ -779,10 +778,9 @@ export interface FilesDeleteCategoryInput {
   mode: 'emptyOnly';
 }
 
-export interface FilesActionResult {
+export interface FilesActionResult extends FailureDiagnosticFields {
   success: boolean;
   userMessage?: string;
-  technicalCode?: string;
 }
 
 export interface AppExternalFolderGrant {
@@ -1048,12 +1046,12 @@ export interface ForgerDesktopApi {
   generateDevicePairingCode: () => Promise<CloudDevicesState & { success: boolean }>;
   submitAppRating: (input: SubmitAppRatingInput) => Promise<{ success: boolean; rating?: AppRatingSummary; userMessage?: string; technicalCode?: string }>;
   submitAppFeedback: (input: SubmitAppFeedbackInput) => Promise<{ success: boolean; userMessage?: string; technicalCode?: string }>;
-  openExternalUrl: (url: string) => Promise<{ success: boolean; userMessage?: string; technicalCode?: string }>;
+  openExternalUrl: (url: string) => Promise<{ success: boolean; userMessage?: string } & FailureDiagnosticFields>;
   getCodexAuthStatus: () => Promise<CodexAuthStatus>;
-  openCodexUsageDashboard: () => Promise<{ success: boolean; userMessage?: string; technicalCode?: string }>;
-  connectCodexAuth: () => Promise<{ success: boolean; userMessage: string; technicalCode?: string }>;
-  disconnectCodexAuth: () => Promise<{ success: boolean; userMessage: string; technicalCode?: string }>;
-  reinstallCodex: () => Promise<{ success: boolean; userMessage: string; technicalCode?: string; status?: CodexAuthStatus }>;
+  openCodexUsageDashboard: () => Promise<{ success: boolean; userMessage?: string } & FailureDiagnosticFields>;
+  connectCodexAuth: () => Promise<{ success: boolean; userMessage: string } & FailureDiagnosticFields>;
+  disconnectCodexAuth: () => Promise<{ success: boolean; userMessage: string } & FailureDiagnosticFields>;
+  reinstallCodex: () => Promise<{ success: boolean; userMessage: string; status?: CodexAuthStatus } & FailureDiagnosticFields>;
   submitDesktopErrorReport: (input: DesktopErrorReportPreview) => Promise<{ success: boolean; userMessage: string; technicalCode?: string }>;
   onDesktopErrorReportRequested: (listener: (event: DesktopErrorReportPreview) => void) => () => void;
   listAgentTools: () => Promise<AgentToolPackageDefinition[]>;

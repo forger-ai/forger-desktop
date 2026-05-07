@@ -18,6 +18,7 @@ import type {
   PermissionRequest,
   PreviewDiffFile,
 } from '../../shared/types';
+import { buildFailureDiagnostic } from '../../shared/error-diagnostics';
 
 interface ChatOrchestratorOptions {
   forgerHomeRoot: string;
@@ -650,7 +651,7 @@ export class ChatOrchestrator {
       this.emitRun(run);
       return {
         success: false,
-        technicalCode: detail.message,
+        ...buildFailureDiagnostic({ fallbackCode: detail.code, rawError: detail.message }),
         userMessage: run.userMessage,
       };
     }
@@ -701,7 +702,7 @@ export class ChatOrchestrator {
       const detail = normalizeErrorCode(error);
       return {
         success: false,
-        technicalCode: detail.message,
+        ...buildFailureDiagnostic({ fallbackCode: detail.code, rawError: detail.message }),
         userMessage: 'No pudimos deshacer el cambio.',
       };
     }

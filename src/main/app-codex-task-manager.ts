@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import type {
   AppCodexTaskAttachment,
@@ -63,6 +64,7 @@ interface PreparedPromptArguments {
 
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 const CODEX_TASK_TIMEOUT_MS = 600_000;
+const CLEAN_CODEX_HOME_FILES = ['auth.json', 'config.toml'] as const;
 
 export class AppCodexTaskManager {
   private readonly tasks = new Map<string, InternalTask>();
@@ -154,6 +156,7 @@ export class AppCodexTaskManager {
     this.emit(task);
 
     let forgerMcpSession: { url: string; token: string } | null = null;
+    const temporaryCodexHomes: string[] = [];
     try {
       const preparedArguments = await this.preparePromptArguments(task, template, input);
       const imageArgs = preparedArguments.files
@@ -200,33 +203,55 @@ export class AppCodexTaskManager {
         '--',
         '-',
       ];
+      const baseEnv = {
+        FORGER_ALLOWED_ROOTS: task.appRoot,
+        ...Object.fromEntries(mcpServers.map((server) => [server.tokenEnvVar, server.token])),
+        ...environment,
+        PATH: [...command.pathEntries, process.env.PATH ?? ''].filter(Boolean).join(path.delimiter),
+      };
+      const runCodex = async (codexHome: string): Promise<CommandResult> =>
+        await runCommandCapture(command.command, args, {
+          cwd: task.appRoot,
+          env: {
+            ...baseEnv,
+            CODEX_HOME: codexHome,
+          },
+          timeoutMs: CODEX_TASK_TIMEOUT_MS,
+          onChild: (child) => {
+            task.child = child;
+          },
+          onStdout: (text) => {
+            void appendTranscript(task.transcriptPath, 'stdout', text);
+            this.updateProgressFromOutput(task, text, locale);
+          },
+          onStderr: (text) => {
+            void appendTranscript(task.transcriptPath, 'stderr', text);
+            this.updateProgressFromOutput(task, text, locale);
+          },
+          stdinText: prompt,
+        });
 
       await appendTranscript(task.transcriptPath, 'meta', `${command.command} exec --json -C ${task.appRoot}`);
-      const result = await runCommandCapture(command.command, args, {
-        cwd: task.appRoot,
-        env: {
-          CODEX_HOME: this.options.codexHome,
-          FORGER_ALLOWED_ROOTS: task.appRoot,
-          ...Object.fromEntries(mcpServers.map((server) => [server.tokenEnvVar, server.token])),
-          ...environment,
-          PATH: [...command.pathEntries, process.env.PATH ?? ''].filter(Boolean).join(path.delimiter),
-        },
-        timeoutMs: CODEX_TASK_TIMEOUT_MS,
-        onChild: (child) => {
-          task.child = child;
-        },
-        onStdout: (text) => {
-          void appendTranscript(task.transcriptPath, 'stdout', text);
-          this.updateProgressFromOutput(task, text, locale);
-        },
-        onStderr: (text) => {
-          void appendTranscript(task.transcriptPath, 'stderr', text);
-          this.updateProgressFromOutput(task, text, locale);
-        },
-        stdinText: prompt,
-      });
+      let result = await runCodex(this.options.codexHome);
       if ((task as AppCodexTaskSummary).status === 'canceled') {
         return;
+      }
+      if (result.code !== 0 && isStaleCodexThreadError(result.stderr || result.stdout)) {
+        const recoveredText = parseCodexJsonl(result.stdout, '');
+        if (recoveredText) {
+          result = { code: 0, stdout: result.stdout, stderr: result.stderr };
+        } else {
+          this.addProgress(task, taskMessage(locale, 'technicalLimit'));
+          await this.persist(task);
+          this.emit(task);
+          const cleanCodexHome = await createCleanCodexHome(this.options.codexHome);
+          temporaryCodexHomes.push(cleanCodexHome);
+          await appendTranscript(task.transcriptPath, 'meta', 'Retrying Codex task with a clean temporary Codex home.');
+          result = await runCodex(cleanCodexHome);
+          if ((task as AppCodexTaskSummary).status === 'canceled') {
+            return;
+          }
+        }
       }
       if (result.code !== 0) {
         throw new Error((result.stderr || result.stdout || 'codex_exec_failed').trim());
@@ -245,6 +270,7 @@ export class AppCodexTaskManager {
       }
       this.options.releaseAppMcps?.(task.runId);
       await this.cleanupTaskInputs(task).catch(() => undefined);
+      await Promise.all(temporaryCodexHomes.map((dirPath) => fs.rm(dirPath, { recursive: true, force: true }).catch(() => undefined)));
     }
   }
 
@@ -670,6 +696,28 @@ const parseCodexJsonl = (stdout: string, stderr: string): string => {
     }
   }
   return assistantText.trim();
+};
+
+const isStaleCodexThreadError = (text: string): boolean =>
+  /failed to record rollout items:\s*thread\s+.+\s+not found/i.test(text);
+
+const createCleanCodexHome = async (sourceCodexHome: string): Promise<string> => {
+  const targetCodexHome = await fs.mkdtemp(path.join(os.tmpdir(), 'forger-codex-task-home-'));
+  for (const filename of CLEAN_CODEX_HOME_FILES) {
+    await copyCodexHomeFile(path.join(sourceCodexHome, filename), path.join(targetCodexHome, filename));
+  }
+  return targetCodexHome;
+};
+
+const copyCodexHomeFile = async (sourcePath: string, targetPath: string): Promise<void> => {
+  try {
+    await fs.copyFile(sourcePath, targetPath);
+    await fs.chmod(targetPath, 0o600).catch(() => undefined);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw error;
+    }
+  }
 };
 
 const progressFromCodexOutput = (text: string, locale: TaskLocale): string | null => {

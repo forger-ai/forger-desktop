@@ -36,6 +36,7 @@ import type {
   DesktopErrorReportInput,
   DesktopErrorReportPreview,
   DesktopUpdateState,
+  FailureDiagnosticFields,
   FilesListInput,
   ForgerAccountRegisterInput,
   ForgerAccountSession,
@@ -102,6 +103,14 @@ import {
 } from '@renderer/error-reporting';
 
 const FORGER_DATA_ROOT_NAME = 'data';
+
+const mergeRecords = (
+  first?: Record<string, unknown>,
+  second?: Record<string, unknown>,
+): Record<string, unknown> | undefined => {
+  const merged = { ...(first ?? {}), ...(second ?? {}) };
+  return Object.keys(merged).length > 0 ? merged : undefined;
+};
 
 const initialSettings: Settings = {
   userEmail: '',
@@ -298,7 +307,7 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
   const requestErrorReportFromResult = (
     source: DesktopErrorReportInput['source'],
     operation: string,
-    result: { success: boolean; userMessage?: string; technicalCode?: string },
+    result: { success: boolean; userMessage?: string } & FailureDiagnosticFields,
     extra?: Pick<DesktopErrorReportInput, 'appId' | 'appVersion' | 'details' | 'sensitiveDetails'>,
   ) => {
     if (result.success || !result.technicalCode || !shouldPromptForErrorReport(result.technicalCode)) {
@@ -309,7 +318,10 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
       operation,
       message: result.userMessage ?? result.technicalCode,
       technicalCode: result.technicalCode,
-      ...extra,
+      appId: extra?.appId,
+      appVersion: extra?.appVersion,
+      details: mergeRecords(result.details, extra?.details),
+      sensitiveDetails: mergeRecords(result.sensitiveDetails, extra?.sensitiveDetails),
     });
   };
 

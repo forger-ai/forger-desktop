@@ -1,4 +1,5 @@
 import type { DesktopErrorReportInput, DesktopErrorReportPreview } from '@shared/types';
+import { normalizeErrorReportDiagnostic } from '@shared/error-diagnostics';
 
 const EXPECTED_ERROR_CODES = new Set([
   'permission_denied',
@@ -12,12 +13,13 @@ const EXPECTED_ERROR_CODES = new Set([
 export const buildErrorReport = (
   input: DesktopErrorReportInput,
   currentVersion?: string,
-): DesktopErrorReportPreview => ({
-  ...input,
-  desktopVersion: currentVersion || undefined,
-  platform: navigator.platform,
-  occurredAt: new Date().toISOString(),
-});
+): DesktopErrorReportPreview =>
+  normalizeErrorReportDiagnostic({
+    ...input,
+    desktopVersion: currentVersion || undefined,
+    platform: navigator.platform,
+    occurredAt: new Date().toISOString(),
+  });
 
 export const shouldPromptForErrorReport = (technicalCode?: string): boolean => {
   if (!technicalCode) {

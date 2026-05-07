@@ -39,6 +39,7 @@ import {
   FORGER_AGENT_CONTRACT_VERSION,
   buildGlobalForgerAgentsMarkdown,
 } from './prompts/forger-base';
+import { buildFailureDiagnostic } from '../shared/error-diagnostics';
 import { buildForgerAppAgentsMarkdown } from './prompts/apps-base';
 import { buildCodexPromptWithAppContext } from './prompts/user-message';
 import { SecretsStore, appSecretEnvName, isSecretsVaultUnavailableError } from './secrets-store';
@@ -80,6 +81,7 @@ import type {
   DeleteUserSecretInput,
   DesktopUpdateState,
   DisconnectAppSecretInput,
+  FailureDiagnosticFields,
   FilesCreateCategoryInput,
   FilesDeleteCategoryInput,
   FilesDeleteInput,
@@ -112,7 +114,7 @@ import type {
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 const backendBaseUrl = process.env.FORGER_BACKEND_URL ?? (isDev ? 'http://127.0.0.1:3300' : 'https://platform.forger.cloud');
 let localCatalogJsonUrl: string | undefined;
-const DEFAULT_NODE_VERSION = '24';
+const DEFAULT_NODE_VERSION = '22';
 const DEFAULT_PYTHON_VERSION = '3.12';
 const CODEX_CLI_VERSION = '0.125.0';
 const CODEX_USAGE_DASHBOARD_URL = 'https://chatgpt.com/codex/settings/usage';
@@ -120,6 +122,20 @@ let devCatalogService: DevCatalogService | null = null;
 const APP_FOLDER_GRANT_TTL_MS = 5 * 60 * 1000;
 const appFolderGrantSecret = randomBytes(32).toString('base64url');
 const useCustomWindowFrame = process.platform === 'win32';
+
+const normalizeVersionForFolder = (value: string): string => {
+  const [major, minor] = value.split('.');
+  if (major && minor) {
+    return `${major}.${minor}`;
+  }
+  return value;
+};
+
+const normalizeNodeRuntimeVersion = (value?: string | null): string => {
+  const rawValue = typeof value === 'string' ? value.trim() : '';
+  const normalized = normalizeVersionForFolder(rawValue || DEFAULT_NODE_VERSION);
+  return /^24(?:\.|$)/.test(normalized) ? DEFAULT_NODE_VERSION : normalized;
+};
 
 if (isDev) {
   app.setName('Forger Dev');
@@ -449,6 +465,21 @@ let forgerMcpServer: ForgerMcpServer | null = null;
 
 const MAX_INSTALL_LOG_FIELD_LENGTH = 60_000;
 
+class CommandFailedError extends Error {
+  public constructor(
+    public readonly command: string,
+    public readonly args: string[],
+    public readonly cwd: string,
+    public readonly exitCode: number | null,
+    public readonly signal: NodeJS.Signals | null,
+    public readonly stdout: string,
+    public readonly stderr: string,
+  ) {
+    super(`command_failed_${exitCode ?? 'null'}`);
+    this.name = 'CommandFailedError';
+  }
+}
+
 const truncateForInstallLog = (value: string): string => {
   if (value.length <= MAX_INSTALL_LOG_FIELD_LENGTH) {
     return value;
@@ -463,6 +494,17 @@ const serializeErrorForInstallLog = (error: unknown): Record<string, unknown> =>
       name: error.name,
       message: error.message,
       stack: error.stack,
+      ...(error instanceof CommandFailedError
+        ? {
+            command: error.command,
+            args: error.args,
+            cwd: error.cwd,
+            exitCode: error.exitCode,
+            signal: error.signal,
+            stdout: truncateForInstallLog(error.stdout),
+            stderr: truncateForInstallLog(error.stderr),
+          }
+        : {}),
     };
   }
 
@@ -659,6 +701,9 @@ const runtimeError = (message: string, technicalCode: string): InstallAppResult 
   userMessage: message,
   technicalCode,
 });
+
+const failureDiagnostic = (error: unknown, fallbackCode: string) =>
+  buildFailureDiagnostic({ error, fallbackCode });
 
 const emitInstallProgress = (appId: string, payload: InstallAppResult): void => {
   if (!mainWindow || mainWindow.isDestroyed()) {
@@ -1491,6 +1536,35 @@ const parseRegistry = (raw: string): AppRegistry | null => {
   return { apps: parsed.apps as Record<string, InstalledAppRecord> };
 };
 
+const normalizeInstalledAppRecord = (record: InstalledAppRecord): InstalledAppRecord => {
+  const pythonVersion =
+    typeof record.requiredPythonVersion === 'string' && record.requiredPythonVersion.trim()
+      ? normalizeVersionForFolder(record.requiredPythonVersion.trim())
+      : DEFAULT_PYTHON_VERSION;
+  return {
+    ...record,
+    requiredNodeVersion: normalizeNodeRuntimeVersion(record.requiredNodeVersion),
+    requiredPythonVersion: pythonVersion,
+  };
+};
+
+const normalizeRegistryRuntimeVersions = (input: AppRegistry): { registry: AppRegistry; changed: boolean } => {
+  let changed = false;
+  const apps = Object.fromEntries(
+    Object.entries(input.apps).map(([appId, record]) => {
+      const normalized = normalizeInstalledAppRecord(record);
+      if (
+        normalized.requiredNodeVersion !== record.requiredNodeVersion ||
+        normalized.requiredPythonVersion !== record.requiredPythonVersion
+      ) {
+        changed = true;
+      }
+      return [appId, normalized];
+    }),
+  );
+  return { registry: { apps }, changed };
+};
+
 const loadRegistryFile = async (registryPath: string): Promise<AppRegistry | null> => {
   try {
     return parseRegistry(await fs.readFile(registryPath, 'utf8'));
@@ -1517,7 +1591,11 @@ const loadRegistry = async (): Promise<void> => {
   for (const registryPath of registryPaths) {
     const loadedRegistry = await loadRegistryFile(registryPath);
     if (loadedRegistry) {
-      registry = loadedRegistry;
+      const normalized = normalizeRegistryRuntimeVersions(loadedRegistry);
+      registry = normalized.registry;
+      if (normalized.changed) {
+        await saveRegistry();
+      }
       return;
     }
   }
@@ -1556,14 +1634,15 @@ const saveRegistry = async (): Promise<void> => {
 };
 
 const upsertInstalledRecord = async (record: InstalledAppRecord): Promise<void> => {
-  registry.apps[record.appId] = record;
+  const normalized = normalizeInstalledAppRecord(record);
+  registry.apps[normalized.appId] = normalized;
   await saveRegistry();
   emitRuntimeStatus({
-    appId: record.appId,
-    status: runningApps.has(record.appId) ? 'running' : record.status,
-    userMessage: record.userMessage,
-    backendUrl: runningApps.get(record.appId)?.backendUrl,
-    frontendUrl: runningApps.get(record.appId)?.frontendUrl,
+    appId: normalized.appId,
+    status: runningApps.has(normalized.appId) ? 'running' : normalized.status,
+    userMessage: normalized.userMessage,
+    backendUrl: runningApps.get(normalized.appId)?.backendUrl,
+    frontendUrl: runningApps.get(normalized.appId)?.frontendUrl,
   });
 };
 
@@ -1686,7 +1765,7 @@ const runCommand = async (
         return;
       }
 
-      reject(new Error(`command_failed_${code}: ${stdout}\n${stderr}`));
+      reject(new CommandFailedError(command, args, options.cwd, code, signal, stdout, stderr));
     });
   });
 };
@@ -2194,14 +2273,6 @@ const flattenSingleTopLevelDirectory = async (targetDir: string): Promise<void> 
   await fs.rm(topFolder, { recursive: true, force: true });
 };
 
-const normalizeVersionForFolder = (value: string): string => {
-  const [major, minor] = value.split('.');
-  if (major && minor) {
-    return `${major}.${minor}`;
-  }
-  return value;
-};
-
 const findExistingFile = async (baseDir: string, candidates: string[]): Promise<string | null> => {
   for (const candidate of candidates) {
     const attempt = path.join(baseDir, candidate);
@@ -2287,7 +2358,7 @@ const ensureRuntimeInstalled = async (
     throw new Error(`unsupported_platform_${platformAlias}`);
   }
 
-  const version = normalizeVersionForFolder(rawVersion);
+  const version = type === 'node' ? normalizeNodeRuntimeVersion(rawVersion) : normalizeVersionForFolder(rawVersion);
   const lockKey = `${type}:${version}:${platformAlias}`;
   const pending = runtimeLocks.get(lockKey);
   if (pending) {
@@ -2535,7 +2606,7 @@ const getCodexAuthStatus = async (): Promise<CodexAuthStatus> => {
   };
 };
 
-const connectCodexAuth = async (): Promise<{ success: boolean; userMessage: string; technicalCode?: string }> => {
+const connectCodexAuth = async (): Promise<{ success: boolean; userMessage: string } & FailureDiagnosticFields> => {
   try {
     const codexCliPath = await ensureCodexCliInstalled();
     const codexHome = getCodexHome();
@@ -2666,20 +2737,20 @@ const connectCodexAuth = async (): Promise<{ success: boolean; userMessage: stri
       userMessage: 'Login de Codex completado.',
     };
   } catch (error) {
-    const detail = error instanceof Error ? error.message : 'codex_auth_failed';
+    const diagnostic = failureDiagnostic(error, 'codex_connect_failed');
     await appendInstallLog('codex_auth:failed', {
-      detail,
+      detail: diagnostic.technicalCode,
       error: serializeErrorForInstallLog(error),
     });
     return {
       success: false,
       userMessage: 'No pudimos iniciar el login de Codex.',
-      technicalCode: detail,
+      ...diagnostic,
     };
   }
 };
 
-const disconnectCodexAuth = async (): Promise<{ success: boolean; userMessage: string; technicalCode?: string }> => {
+const disconnectCodexAuth = async (): Promise<{ success: boolean; userMessage: string } & FailureDiagnosticFields> => {
   try {
     await fs.rm(getCodexAuthFilePath(), { force: true });
     return {
@@ -2687,16 +2758,16 @@ const disconnectCodexAuth = async (): Promise<{ success: boolean; userMessage: s
       userMessage: 'Sesion de Codex desconectada.',
     };
   } catch (error) {
-    const detail = error instanceof Error ? error.message : 'codex_logout_failed';
+    const diagnostic = failureDiagnostic(error, 'codex_logout_failed');
     return {
       success: false,
       userMessage: 'No pudimos cerrar la sesion de Codex.',
-      technicalCode: detail,
+      ...diagnostic,
     };
   }
 };
 
-const reinstallCodex = async (): Promise<{ success: boolean; userMessage: string; technicalCode?: string; status?: CodexAuthStatus }> => {
+const reinstallCodex = async (): Promise<{ success: boolean; userMessage: string; status?: CodexAuthStatus } & FailureDiagnosticFields> => {
   try {
     await fs.rm(getCodexRoot(), { recursive: true, force: true });
     await fs.rm(getCodexHome(), { recursive: true, force: true });
@@ -2710,15 +2781,15 @@ const reinstallCodex = async (): Promise<{ success: boolean; userMessage: string
       status,
     };
   } catch (error) {
-    const detail = error instanceof Error ? error.message : 'codex_reinstall_failed';
+    const diagnostic = failureDiagnostic(error, 'codex_reinstall_failed');
     await appendInstallLog('codex_auth:reinstall_failed', {
-      detail,
+      detail: diagnostic.technicalCode,
       error: serializeErrorForInstallLog(error),
     });
     return {
       success: false,
       userMessage: 'No pudimos reinstalar Codex.',
-      technicalCode: detail,
+      ...diagnostic,
       status: await getCodexAuthStatus().catch(() => undefined),
     };
   }
@@ -2986,11 +3057,11 @@ const installAppRuntime = async (appId: string): Promise<InstallAppResult> => {
       userMessage: 'Instalacion completada.',
     };
   } catch (error) {
-    const detail = error instanceof Error ? error.message : 'install_failed_unknown';
+    const diagnostic = failureDiagnostic(error, 'install_failed_unknown');
     const current = registry.apps[appId];
     await appendInstallLog('install:failed', {
       appId,
-      detail,
+      detail: diagnostic.technicalCode,
       error: serializeErrorForInstallLog(error),
     });
 
@@ -3006,7 +3077,7 @@ const installAppRuntime = async (appId: string): Promise<InstallAppResult> => {
       success: false,
       phase: 'failed',
       userMessage: 'No se pudo completar la instalacion. Reintenta.',
-      technicalCode: detail,
+      ...diagnostic,
     });
 
     ensureCatalogStatuses();
@@ -3015,7 +3086,7 @@ const installAppRuntime = async (appId: string): Promise<InstallAppResult> => {
       success: false,
       phase: 'failed',
       userMessage: 'No se pudo completar la instalacion. Reintenta.',
-      technicalCode: detail,
+      ...diagnostic,
     };
   }
 };
@@ -3143,6 +3214,11 @@ const updateAppRuntime = async (appId: string): Promise<InstallAppResult> => {
       timeoutMs: 60_000,
     });
     if (merge.code !== 0) {
+      const diagnostic = buildFailureDiagnostic({
+        fallbackCode: 'merge_conflict',
+        rawError: merge.stderr || merge.stdout || 'merge_conflict',
+        details: { exitCode: merge.code },
+      });
       await upsertInstalledRecord({
         ...record,
         status: 'conflict',
@@ -3161,7 +3237,7 @@ const updateAppRuntime = async (appId: string): Promise<InstallAppResult> => {
         success: false,
         phase: 'conflict',
         userMessage: 'La actualizacion necesita ayuda para combinarse con tus cambios.',
-        technicalCode: merge.stderr || merge.stdout || 'merge_conflict',
+        ...diagnostic,
       });
       await fs.rm(stageDir, { recursive: true, force: true }).catch(() => undefined);
       ensureCatalogStatuses();
@@ -3169,11 +3245,11 @@ const updateAppRuntime = async (appId: string): Promise<InstallAppResult> => {
         success: false,
         phase: 'conflict',
         userMessage: 'La actualizacion necesita ayuda para combinarse con tus cambios.',
-        technicalCode: merge.stderr || merge.stdout || 'merge_conflict',
+        ...diagnostic,
       };
     }
 
-    const nodeVersion = catalogApp.requiredNodeVersion ?? record.requiredNodeVersion;
+    const nodeVersion = normalizeNodeRuntimeVersion(catalogApp.requiredNodeVersion ?? record.requiredNodeVersion);
     const pythonVersion = catalogApp.requiredPythonVersion
       ? normalizeVersionForFolder(catalogApp.requiredPythonVersion)
       : record.requiredPythonVersion;
@@ -3201,13 +3277,13 @@ const updateAppRuntime = async (appId: string): Promise<InstallAppResult> => {
       userMessage: 'Actualizacion completada.',
     };
   } catch (error) {
-    const detail = error instanceof Error ? error.message : 'update_failed_unknown';
+    const diagnostic = failureDiagnostic(error, 'update_failed_unknown');
     if (stageDir) {
       await fs.rm(stageDir, { recursive: true, force: true }).catch(() => undefined);
     }
     await appendInstallLog('update:failed', {
       appId,
-      detail,
+      detail: diagnostic.technicalCode,
       error: serializeErrorForInstallLog(error),
     });
     await upsertInstalledRecord({
@@ -3220,7 +3296,7 @@ const updateAppRuntime = async (appId: string): Promise<InstallAppResult> => {
       success: false,
       phase: 'failed',
       userMessage: 'No pudimos actualizar la app. Puedes reintentar.',
-      technicalCode: detail,
+      ...diagnostic,
     };
   }
 };
@@ -3254,11 +3330,11 @@ const restoreAppUserVersionRuntime = async (appId: string): Promise<BasicActionR
       userMessage: 'Restauramos tu version anterior.',
     };
   } catch (error) {
-    const detail = error instanceof Error ? error.message : 'restore_failed';
+    const diagnostic = failureDiagnostic(error, 'restore_failed');
     return {
       success: false,
       userMessage: 'No pudimos restaurar la version anterior.',
-      technicalCode: detail,
+      ...diagnostic,
     };
   }
 };
@@ -3421,11 +3497,11 @@ const uninstallAppRuntime = async (appId: string): Promise<BasicActionResult> =>
       userMessage: 'App eliminada de tu equipo.',
     };
   } catch (error) {
-    const detail = error instanceof Error ? error.message : 'uninstall_failed';
+    const diagnostic = failureDiagnostic(error, 'uninstall_failed');
     return {
       success: false,
       userMessage: 'No pudimos eliminar la app.',
-      technicalCode: detail,
+      ...diagnostic,
     };
   }
 };
@@ -3524,6 +3600,8 @@ const installWelcome = async (appId: string, userLanguage?: string): Promise<{
   usedCodex: boolean;
   userMessage: string;
   technicalCode?: string;
+  details?: Record<string, unknown>;
+  sensitiveDetails?: Record<string, unknown>;
 }> => {
   const record = registry.apps[appId];
   if (!record?.installDir) {
@@ -3546,13 +3624,12 @@ const installWelcome = async (appId: string, userLanguage?: string): Promise<{
       userMessage: 'Mensaje de bienvenida preparado.',
     };
   } catch (error) {
-    const detail = error instanceof Error ? error.message : 'install_welcome_failed';
     return {
       success: false,
       appId,
       usedCodex: false,
       userMessage: 'No pudimos preparar el mensaje inicial.',
-      technicalCode: detail,
+      ...failureDiagnostic(error, 'install_welcome_failed'),
     };
   }
 };
@@ -4057,16 +4134,17 @@ const openInstalledAppUnlocked = async (
     };
   }
 
+  const nodeVersion = normalizeNodeRuntimeVersion(record.requiredNodeVersion);
   await appendInstallLog('open:start', {
     appId,
     installDir: record.installDir,
-    requiredNodeVersion: record.requiredNodeVersion,
+    requiredNodeVersion: nodeVersion,
     requiredPythonVersion: record.requiredPythonVersion,
     connectedSecrets: Object.keys(resolvedSecrets.env),
     logPath: getInstallLogPath(),
   });
 
-  const nodeRuntime = await ensureRuntimeInstalled('node', record.requiredNodeVersion);
+  const nodeRuntime = await ensureRuntimeInstalled('node', nodeVersion);
   await ensureRuntimeInstalled('python', record.requiredPythonVersion);
 
   const backendService = findManifestService(manifest, 'backend', './backend');
@@ -4255,10 +4333,10 @@ const openInstalledAppUnlocked = async (
       frontendUrl,
     };
   } catch (error) {
-    const detail = error instanceof Error ? error.message : 'open_failed';
+    const diagnostic = failureDiagnostic(error, 'open_failed');
     await appendInstallLog('open:failed', {
       appId,
-      detail,
+      detail: diagnostic.technicalCode,
       error: serializeErrorForInstallLog(error),
     });
 
@@ -4272,7 +4350,7 @@ const openInstalledAppUnlocked = async (
     return {
       success: false,
       userMessage: 'No pudimos iniciar la app. Reintenta.',
-      technicalCode: detail,
+      ...diagnostic,
     };
   }
 };
@@ -4641,16 +4719,16 @@ const registerIpcHandlers = (): void => {
     try {
       return await getBackupsManager().createBackup(input);
     } catch (error) {
-      const detail = error instanceof Error ? error.message : 'backup_create_failed';
+      const diagnostic = failureDiagnostic(error, 'backup_create_failed');
       await appendInstallLog('backup:create_failed', {
         appId: input?.appId,
-        detail,
+        detail: diagnostic.technicalCode,
         error: serializeErrorForInstallLog(error),
       });
       return {
         success: false,
         userMessage: 'No pudimos crear el respaldo.',
-        technicalCode: detail,
+        ...diagnostic,
       };
     }
   });
@@ -4659,17 +4737,17 @@ const registerIpcHandlers = (): void => {
     try {
       return await getBackupsManager().deleteBackup(input);
     } catch (error) {
-      const detail = error instanceof Error ? error.message : 'backup_delete_failed';
+      const diagnostic = failureDiagnostic(error, 'backup_delete_failed');
       await appendInstallLog('backup:delete_failed', {
         appId: input?.appId,
         backupId: input?.backupId,
-        detail,
+        detail: diagnostic.technicalCode,
         error: serializeErrorForInstallLog(error),
       });
       return {
         success: false,
         userMessage: 'No pudimos eliminar ese respaldo.',
-        technicalCode: detail,
+        ...diagnostic,
       };
     }
   });
@@ -4678,17 +4756,17 @@ const registerIpcHandlers = (): void => {
     try {
       return await getBackupsManager().restoreBackup(input);
     } catch (error) {
-      const detail = error instanceof Error ? error.message : 'backup_restore_failed';
+      const diagnostic = failureDiagnostic(error, 'backup_restore_failed');
       await appendInstallLog('backup:restore_failed', {
         appId: input?.appId,
         backupId: input?.backupId,
-        detail,
+        detail: diagnostic.technicalCode,
         error: serializeErrorForInstallLog(error),
       });
       return {
         success: false,
         userMessage: 'No pudimos restaurar ese respaldo.',
-        technicalCode: detail,
+        ...diagnostic,
       };
     }
   });
@@ -4874,8 +4952,7 @@ const registerIpcHandlers = (): void => {
       await shell.openExternal(parsed.toString());
       return { success: true };
     } catch (error) {
-      const detail = error instanceof Error ? error.message : 'open_external_url_failed';
-      return { success: false, userMessage: 'No pudimos abrir ese enlace.', technicalCode: detail };
+      return { success: false, userMessage: 'No pudimos abrir ese enlace.', ...failureDiagnostic(error, 'open_external_url_failed') };
     }
   });
   ipcMain.handle(IPC_CHANNELS.getCodexAuthStatus, async () => await getCodexAuthStatus());
@@ -4884,8 +4961,7 @@ const registerIpcHandlers = (): void => {
       await shell.openExternal(CODEX_USAGE_DASHBOARD_URL);
       return { success: true };
     } catch (error) {
-      const detail = error instanceof Error ? error.message : 'open_codex_usage_failed';
-      return { success: false, technicalCode: detail, userMessage: 'No pudimos abrir el panel de uso de Codex.' };
+      return { success: false, ...failureDiagnostic(error, 'open_codex_usage_failed'), userMessage: 'No pudimos abrir el panel de uso de Codex.' };
     }
   });
   ipcMain.handle(IPC_CHANNELS.connectCodexAuth, async () => await connectCodexAuth());
@@ -5438,7 +5514,7 @@ app.whenReady().then(async () => {
       }
 
       if (record) {
-        const appNodeRuntime = await ensureRuntimeInstalled('node', record.requiredNodeVersion);
+        const appNodeRuntime = await ensureRuntimeInstalled('node', normalizeNodeRuntimeVersion(record.requiredNodeVersion));
         const appPythonRuntime = await ensureRuntimeInstalled('python', record.requiredPythonVersion);
         for (const entry of getRuntimePathEntries(appNodeRuntime)) {
           pathEntries.add(entry);
@@ -5516,7 +5592,7 @@ app.whenReady().then(async () => {
       }
 
       if (record) {
-        const appNodeRuntime = await ensureRuntimeInstalled('node', record.requiredNodeVersion);
+        const appNodeRuntime = await ensureRuntimeInstalled('node', normalizeNodeRuntimeVersion(record.requiredNodeVersion));
         const appPythonRuntime = await ensureRuntimeInstalled('python', record.requiredPythonVersion);
         for (const entry of getRuntimePathEntries(appNodeRuntime)) {
           pathEntries.add(entry);
@@ -5577,7 +5653,7 @@ app.whenReady().then(async () => {
       }
 
       if (record) {
-        const appNodeRuntime = await ensureRuntimeInstalled('node', record.requiredNodeVersion);
+        const appNodeRuntime = await ensureRuntimeInstalled('node', normalizeNodeRuntimeVersion(record.requiredNodeVersion));
         const appPythonRuntime = await ensureRuntimeInstalled('python', record.requiredPythonVersion);
         for (const entry of getRuntimePathEntries(appNodeRuntime)) {
           pathEntries.add(entry);
