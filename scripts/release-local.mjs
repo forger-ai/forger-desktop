@@ -353,12 +353,7 @@ const notarizeMacArtifact = async (artifactPath, waitForResult) => {
 
 const buildPlatform = async (platform) => {
   if (platform === 'mac') {
-    const cleanupSigningKeychain = await prepareMacSigningKeychain();
-    try {
-      await run('npm', ['run', 'dist:mac']);
-    } finally {
-      await cleanupSigningKeychain();
-    }
+    await run('npm', ['run', 'dist:mac']);
     return;
   }
 
@@ -408,37 +403,45 @@ const main = async () => {
   const platforms = getPlatforms(options.platform);
   await ensureCleanTree(options.allowDirty);
 
-  if (!options.skipBuild) {
-    for (const platform of platforms) {
-      await buildPlatform(platform);
-    }
-  }
+  const cleanupMacSigningKeychain = platforms.includes('mac')
+    ? await prepareMacSigningKeychain()
+    : async () => {};
 
-  const uploadFiles = [];
-
-  for (const platform of platforms) {
-    const artifactPath = path.join(releaseDir, artifactNames[platform]);
-
-    if (!(await exists(artifactPath))) {
-      throw new Error(`Expected artifact does not exist: ${artifactPath}`);
-    }
-
-    if (platform === 'mac') {
-      await signMacDmg(artifactPath);
-      if (!options.skipNotarize) {
-        await notarizeMacArtifact(artifactPath, options.waitNotarize);
+  try {
+    if (!options.skipBuild) {
+      for (const platform of platforms) {
+        await buildPlatform(platform);
       }
     }
 
-    const checksumPath = await writeChecksum(artifactPath);
-    uploadFiles.push(artifactPath, checksumPath);
+    const uploadFiles = [];
+
+    for (const platform of platforms) {
+      const artifactPath = path.join(releaseDir, artifactNames[platform]);
+
+      if (!(await exists(artifactPath))) {
+        throw new Error(`Expected artifact does not exist: ${artifactPath}`);
+      }
+
+      if (platform === 'mac') {
+        await signMacDmg(artifactPath);
+        if (!options.skipNotarize) {
+          await notarizeMacArtifact(artifactPath, options.waitNotarize);
+        }
+      }
+
+      const checksumPath = await writeChecksum(artifactPath);
+      uploadFiles.push(artifactPath, checksumPath);
+    }
+
+    await ensureTag(tag);
+    await ensureRelease(tag, pkg.version);
+    await uploadArtifacts(tag, uploadFiles);
+
+    console.log(`Published ${tag} as latest with ${uploadFiles.length / 2} artifact set(s).`);
+  } finally {
+    await cleanupMacSigningKeychain();
   }
-
-  await ensureTag(tag);
-  await ensureRelease(tag, pkg.version);
-  await uploadArtifacts(tag, uploadFiles);
-
-  console.log(`Published ${tag} as latest with ${uploadFiles.length / 2} artifact set(s).`);
 };
 
 main().catch((error) => {
