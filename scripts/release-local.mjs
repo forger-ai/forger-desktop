@@ -237,87 +237,6 @@ const prepareMacSigningKeychain = async () => {
   };
 };
 
-const signMacRuntimeArchives = async () => {
-  const identity = await resolveMacSigningIdentity();
-  const runtimeRoot = path.join(rootDir, 'resources', 'runtimes');
-  const backupRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'forger-runtime-backups-'));
-  const backups = [];
-
-  if (!(await exists(runtimeRoot))) {
-    await fs.rm(backupRoot, { recursive: true, force: true });
-    return async () => {};
-  }
-
-  const archives = (await capture('find', [
-    runtimeRoot,
-    '-type',
-    'f',
-    '(',
-    '-name',
-    '*darwin*.tar.gz',
-    '-o',
-    '-name',
-    '*apple-darwin*.tar.gz',
-    ')',
-  ])).split('\n').filter(Boolean);
-
-  const restoreBackups = async () => {
-    for (const [backupPath, originalPath] of backups.reverse()) {
-      await fs.copyFile(backupPath, originalPath);
-      await fs.rm(backupPath, { force: true });
-    }
-
-    await fs.rm(backupRoot, { recursive: true, force: true });
-  };
-
-  try {
-    for (const archive of archives) {
-      const backupName = Buffer.from(archive).toString('base64url');
-      const archiveBackup = path.join(backupRoot, `${backupName}.tar.gz`);
-      const checksumPath = `${archive}.sha256`;
-      const checksumBackup = path.join(backupRoot, `${backupName}.tar.gz.sha256`);
-
-      await fs.copyFile(archive, archiveBackup);
-      backups.push([archiveBackup, archive]);
-
-      if (await exists(checksumPath)) {
-        await fs.copyFile(checksumPath, checksumBackup);
-        backups.push([checksumBackup, checksumPath]);
-      }
-
-      const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'forger-runtime-signing-'));
-      await run('tar', ['-xzf', archive, '-C', workDir]);
-
-      const files = (await capture('find', [workDir, '-type', 'f'])).split('\n').filter(Boolean);
-      for (const filePath of files) {
-        const description = await capture('file', [filePath]);
-        if (!description.includes('Mach-O')) {
-          continue;
-        }
-
-        await run('codesign', [
-          '--force',
-          '--timestamp',
-          '--options',
-          'runtime',
-          '--sign',
-          identity,
-          filePath,
-        ]);
-      }
-
-      await run('tar', ['-czf', archive, '-C', workDir, '.']);
-      await writeChecksum(archive);
-      await fs.rm(workDir, { recursive: true, force: true });
-    }
-  } catch (error) {
-    await restoreBackups();
-    throw error;
-  }
-
-  return restoreBackups;
-};
-
 const writeChecksum = async (artifactPath) => {
   const buffer = await fs.readFile(artifactPath);
   const checksum = createHash('sha256').update(buffer).digest('hex');
@@ -435,12 +354,9 @@ const notarizeMacArtifact = async (artifactPath, waitForResult) => {
 const buildPlatform = async (platform) => {
   if (platform === 'mac') {
     const cleanupSigningKeychain = await prepareMacSigningKeychain();
-    let restoreRuntimeArchives = async () => {};
     try {
-      restoreRuntimeArchives = await signMacRuntimeArchives();
       await run('npm', ['run', 'dist:mac']);
     } finally {
-      await restoreRuntimeArchives();
       await cleanupSigningKeychain();
     }
     return;
