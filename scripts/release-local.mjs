@@ -357,13 +357,14 @@ const resolveAppleApiKey = async () => {
 
 const notarizeMacArtifact = async (artifactPath, waitForResult) => {
   const appleApiKey = await resolveAppleApiKey();
+  const keychainProfile = process.env.APPLE_KEYCHAIN_PROFILE ?? 'forger-notary';
   const missing = [];
 
-  if (!appleApiKey) {
-    missing.push('APPLE_API_KEY or APPLE_API_KEY_BASE64');
+  if (!appleApiKey && !keychainProfile) {
+    missing.push('APPLE_API_KEY, APPLE_API_KEY_BASE64, or APPLE_KEYCHAIN_PROFILE');
   }
 
-  if (!process.env.APPLE_API_KEY_ID) {
+  if (appleApiKey && !process.env.APPLE_API_KEY_ID) {
     missing.push('APPLE_API_KEY_ID');
   }
 
@@ -376,16 +377,17 @@ const notarizeMacArtifact = async (artifactPath, waitForResult) => {
     'notarytool',
     'submit',
     artifactPath,
-    '--key',
-    appleApiKey,
-    '--key-id',
-    process.env.APPLE_API_KEY_ID,
     '--output-format',
     'json',
   ];
 
-  if (process.env.APPLE_API_ISSUER) {
-    submitArgs.push('--issuer', process.env.APPLE_API_ISSUER);
+  if (appleApiKey) {
+    submitArgs.push('--key', appleApiKey, '--key-id', process.env.APPLE_API_KEY_ID);
+    if (process.env.APPLE_API_ISSUER) {
+      submitArgs.push('--issuer', process.env.APPLE_API_ISSUER);
+    }
+  } else {
+    submitArgs.push('--keychain-profile', keychainProfile);
   }
 
   if (waitForResult) {
@@ -413,13 +415,14 @@ const notarizeMacArtifact = async (artifactPath, waitForResult) => {
         'notarytool',
         'log',
         submissionId,
-        '--key',
-        appleApiKey,
-        '--key-id',
-        process.env.APPLE_API_KEY_ID,
       ];
-      if (process.env.APPLE_API_ISSUER) {
-        logArgs.push('--issuer', process.env.APPLE_API_ISSUER);
+      if (appleApiKey) {
+        logArgs.push('--key', appleApiKey, '--key-id', process.env.APPLE_API_KEY_ID);
+        if (process.env.APPLE_API_ISSUER) {
+          logArgs.push('--issuer', process.env.APPLE_API_ISSUER);
+        }
+      } else {
+        logArgs.push('--keychain-profile', keychainProfile);
       }
       const logOutput = await capture('xcrun', logArgs);
       await fs.writeFile(logPath, logOutput);
