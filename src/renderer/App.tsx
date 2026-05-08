@@ -24,9 +24,11 @@ import type {
   AgentToolDefinition,
   AgentToolPackageDefinition,
   AgentToolSettings,
+  AppAgent,
   AppBackupSummary,
   AppCategory,
   AppDetails,
+  AppPromptTemplate,
   AppPromptRestoreInput,
   AppPromptReviewInput,
   AppSecretsState,
@@ -173,6 +175,7 @@ const initialAgentToolSettings: AgentToolSettings = {
     'gmail.connection.status': false,
     'gmail.search_messages': true,
     'gmail.read_thread': true,
+    'gmail.read_attachment': true,
     'gmail.send_email': true,
   },
 };
@@ -1038,7 +1041,7 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
   const handleInstall = async (appId: string) => {
     try {
       const gate = await getDesktopApi().getAppToolsInstallGate(appId);
-      if (gate && (gate.required.length > 0 || gate.optional.length > 0)) {
+      if (gate) {
         setPendingInstallGate(gate);
         return;
       }
@@ -1054,7 +1057,7 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
     }
     if (!pendingInstallGate.canInstall) {
       setBannerSeverity('warning');
-      setBannerMessage('Instala y configura las herramientas necesarias antes de instalar esta app.');
+      setBannerMessage(t.installGate.missingRequiredTools);
       return;
     }
     setPendingInstallBusy(true);
@@ -1073,6 +1076,83 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
       setPendingInstallGate(updated);
     }
   };
+
+  const renderInstallTool = (item: AppToolsInstallGate['required'][number] | AppToolsInstallGate['optional'][number], required: boolean) => {
+    const configured = item.available && item.configured;
+    const statusLabel = configured
+      ? t.installGate.toolActive
+      : item.available
+        ? t.installGate.toolNeedsConfiguration
+        : t.installGate.toolInactive;
+    return (
+      <Paper
+        key={`${required ? 'required' : 'optional'}-${item.declaration.toolId}`}
+        variant="outlined"
+        sx={{ p: 1.5, borderRadius: 1, borderColor: 'divider', bgcolor: 'background.paper' }}
+      >
+        <Stack direction="row" spacing={1.5} justifyContent="space-between" alignItems="flex-start">
+          <Stack spacing={0.75} sx={{ minWidth: 0 }}>
+            <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+              <Typography fontWeight={700}>{item.tool?.name ?? item.declaration.toolId}</Typography>
+              <Chip
+                size="small"
+                label={required ? t.installGate.requiredTool : t.installGate.optionalTool}
+                sx={{ height: 24, fontWeight: 650, bgcolor: 'action.hover' }}
+              />
+              <Chip
+                size="small"
+                label={statusLabel}
+                sx={{
+                  height: 24,
+                  fontWeight: 700,
+                  color: configured ? 'success.main' : 'warning.main',
+                  borderColor: configured ? 'success.main' : 'warning.main',
+                  bgcolor: configured ? 'rgba(46, 125, 50, 0.12)' : 'rgba(237, 108, 2, 0.12)',
+                }}
+                variant="outlined"
+              />
+            </Stack>
+            <Typography variant="body2" color="text.secondary">
+              {item.declaration.reason}
+            </Typography>
+          </Stack>
+          {required ? (
+            !configured ? (
+              <Button
+                size="small"
+                sx={{ flexShrink: 0 }}
+                onClick={() => {
+                  setPendingInstallGate(null);
+                  setCurrentView('tools');
+                }}
+              >
+                {t.installGate.openTools}
+              </Button>
+            ) : null
+          ) : (
+            <Switch
+              checked={item.granted}
+              disabled={!configured}
+              onChange={(event) => void handleOptionalToolGrant(item.declaration.toolId, event.target.checked)}
+            />
+          )}
+        </Stack>
+      </Paper>
+    );
+  };
+
+  const renderInstallItem = (item: AppAgent | AppPromptTemplate) => (
+    <Paper key={item.id} variant="outlined" sx={{ p: 1.5, borderRadius: 1, borderColor: 'divider', bgcolor: 'background.paper' }}>
+      <Stack spacing={0.5}>
+        <Typography fontWeight={700}>{item.title}</Typography>
+        {item.description ? (
+          <Typography variant="body2" color="text.secondary">
+            {item.description}
+          </Typography>
+        ) : null}
+      </Stack>
+    </Paper>
+  );
 
   const handleUpdate = async (appId: string) => {
     try {
@@ -2574,75 +2654,60 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
         fullWidth
         maxWidth="sm"
       >
-        <DialogTitle>Herramientas de la app</DialogTitle>
+        <DialogTitle>
+          {t.installGate.title(pendingInstallGate?.appName ?? t.installGate.fallbackAppName)}
+        </DialogTitle>
         <DialogContent>
-          <Stack spacing={2} sx={{ pt: 1 }}>
+          <Stack spacing={2.25} sx={{ pt: 1 }}>
             <Typography color="text.secondary">
-              {pendingInstallGate?.appName} pide estas herramientas antes de instalarse.
+              {t.installGate.body}
             </Typography>
-            {pendingInstallGate?.required.length ? (
-              <Stack spacing={1}>
-                <Typography variant="subtitle2">Necesarias</Typography>
-                {pendingInstallGate.required.map((item) => (
-                  <Paper key={item.declaration.toolId} variant="outlined" sx={{ p: 1.5, borderRadius: 1 }}>
-                    <Stack direction="row" spacing={1.5} justifyContent="space-between" alignItems="center">
-                      <Stack spacing={0.5}>
-                        <Typography fontWeight={650}>{item.tool?.name ?? item.declaration.toolId}</Typography>
-                        <Typography variant="body2" color="text.secondary">{item.declaration.reason}</Typography>
-                        <Chip
-                          size="small"
-                          color={item.configured ? 'success' : 'warning'}
-                          label={item.configured ? 'Lista' : 'Falta activar o configurar'}
-                        />
-                      </Stack>
-                      {!item.configured ? (
-                        <Button size="small" onClick={() => {
-                          setPendingInstallGate(null);
-                          setCurrentView('tools');
-                        }}>
-                          Ver herramientas
-                        </Button>
-                      ) : null}
-                    </Stack>
-                  </Paper>
-                ))}
-              </Stack>
-            ) : null}
-            {pendingInstallGate?.optional.length ? (
-              <Stack spacing={1}>
-                <Typography variant="subtitle2">Opcionales</Typography>
-                {pendingInstallGate.optional.map((item) => (
-                  <Paper key={item.declaration.toolId} variant="outlined" sx={{ p: 1.5, borderRadius: 1 }}>
-                    <Stack direction="row" spacing={1.5} justifyContent="space-between" alignItems="center">
-                      <Stack spacing={0.5}>
-                        <Typography fontWeight={650}>{item.tool?.name ?? item.declaration.toolId}</Typography>
-                        <Typography variant="body2" color="text.secondary">{item.declaration.reason}</Typography>
-                        <Chip
-                          size="small"
-                          color={item.configured ? 'success' : 'warning'}
-                          label={item.configured ? 'Lista' : 'No configurada'}
-                        />
-                      </Stack>
-                      <Switch
-                        checked={item.granted}
-                        disabled={!item.configured}
-                        onChange={(event) => void handleOptionalToolGrant(item.declaration.toolId, event.target.checked)}
-                      />
-                    </Stack>
-                  </Paper>
-                ))}
-              </Stack>
-            ) : null}
+
+            <Stack spacing={1}>
+              <Typography variant="subtitle2">{t.installGate.toolsTitle}</Typography>
+              {pendingInstallGate && (pendingInstallGate.required.length > 0 || pendingInstallGate.optional.length > 0) ? (
+                <Stack spacing={1}>
+                  {pendingInstallGate.required.map((item) => renderInstallTool(item, true))}
+                  {pendingInstallGate.optional.map((item) => renderInstallTool(item, false))}
+                </Stack>
+              ) : (
+                <Typography variant="body2" color="text.secondary">
+                  {t.installGate.noTools}
+                </Typography>
+              )}
+            </Stack>
+
+            <Stack spacing={1}>
+              <Typography variant="subtitle2">{t.installGate.agentsTitle}</Typography>
+              {pendingInstallGate?.agents.length ? (
+                <Stack spacing={1}>{pendingInstallGate.agents.map(renderInstallItem)}</Stack>
+              ) : (
+                <Typography variant="body2" color="text.secondary">
+                  {t.installGate.noAgents}
+                </Typography>
+              )}
+            </Stack>
+
+            <Stack spacing={1}>
+              <Typography variant="subtitle2">{t.installGate.aiTasksTitle}</Typography>
+              {pendingInstallGate?.promptTemplates.length ? (
+                <Stack spacing={1}>{pendingInstallGate.promptTemplates.map(renderInstallItem)}</Stack>
+              ) : (
+                <Typography variant="body2" color="text.secondary">
+                  {t.installGate.noAiTasks}
+                </Typography>
+              )}
+            </Stack>
           </Stack>
         </DialogContent>
-        <DialogActions>
-          <Button disabled={pendingInstallBusy} onClick={() => setPendingInstallGate(null)}>Cancelar</Button>
+        <DialogActions sx={{ px: 3, pb: 2.5 }}>
+          <Button disabled={pendingInstallBusy} onClick={() => setPendingInstallGate(null)}>{t.installGate.cancel}</Button>
           <Button
             variant="contained"
             disabled={pendingInstallBusy || !pendingInstallGate?.canInstall}
             onClick={() => void handleConfirmInstallWithTools()}
           >
-            Instalar app
+            {t.installGate.confirm}
           </Button>
         </DialogActions>
       </Dialog>

@@ -1,6 +1,7 @@
 import type { InternalToolContext } from '../types';
 import { refreshGmailAccessToken } from './oauth';
 import type {
+  GmailAttachmentSummary,
   GmailDecodedMessage,
   GmailDecodedThread,
   GmailMessageSummary,
@@ -80,6 +81,29 @@ const findTextBody = (payload: Record<string, unknown>): string | undefined => {
   return undefined;
 };
 
+const collectAttachments = (payload: Record<string, unknown>): GmailAttachmentSummary[] => {
+  const attachments: GmailAttachmentSummary[] = [];
+  const visit = (part: Record<string, unknown>): void => {
+    const body = asRecord(part.body);
+    const filename = typeof part.filename === 'string' ? part.filename.trim() : '';
+    const attachmentId = typeof body.attachmentId === 'string' ? body.attachmentId : '';
+    if (filename && attachmentId) {
+      attachments.push({
+        attachmentId,
+        filename,
+        mimeType: typeof part.mimeType === 'string' ? part.mimeType : undefined,
+        size: typeof body.size === 'number' ? body.size : undefined,
+      });
+    }
+    const parts = Array.isArray(part.parts) ? part.parts : [];
+    for (const child of parts) {
+      visit(asRecord(child));
+    }
+  };
+  visit(payload);
+  return attachments;
+};
+
 const decodeMessage = (value: unknown): GmailDecodedMessage => {
   const message = asRecord(value);
   const payload = asRecord(message.payload);
@@ -89,6 +113,7 @@ const decodeMessage = (value: unknown): GmailDecodedMessage => {
     snippet: typeof message.snippet === 'string' ? message.snippet : undefined,
     headers: headersFromPayload(payload),
     textBody: findTextBody(payload),
+    attachments: collectAttachments(payload),
   };
 };
 
@@ -134,6 +159,23 @@ export const readThread = async (context: InternalToolContext, threadId: string)
     id: String(parsed.id ?? threadId),
     messages,
   };
+};
+
+export const readAttachment = async (
+  context: InternalToolContext,
+  messageId: string,
+  attachmentId: string,
+): Promise<Buffer> => {
+  const parsed = asRecord(await gmailFetch(
+    context,
+    `/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}`,
+  ));
+  if (typeof parsed.data !== 'string') {
+    throw new GmailApiError('gmail_attachment_data_missing', 'gmail_attachment_data_missing');
+  }
+  const normalized = parsed.data.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=');
+  return Buffer.from(padded, 'base64');
 };
 
 export const sendMessage = async (context: InternalToolContext, raw: string): Promise<{ id: string; threadId?: string }> => {

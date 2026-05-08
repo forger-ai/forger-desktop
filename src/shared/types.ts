@@ -561,6 +561,7 @@ export type AgentToolId =
   | 'gmail.connection.status'
   | 'gmail.search_messages'
   | 'gmail.read_thread'
+  | 'gmail.read_attachment'
   | 'gmail.send_email';
 
 export type AgentToolCategory = 'consulta' | 'app' | 'actualizacion' | 'vista' | 'memoria';
@@ -700,6 +701,8 @@ export interface AppToolsInstallGate {
   appName: string;
   required: AppToolRequirementState[];
   optional: AppToolRequirementState[];
+  agents: AppAgent[];
+  promptTemplates: AppPromptTemplate[];
   canInstall: boolean;
 }
 
