@@ -541,7 +541,16 @@ const AGENT_TOOL_PACKAGES: AgentToolPackageDefinition[] = [
         id: 'gmail.read_thread',
         packageId: 'official:gmail',
         name: 'Leer correo',
-        description: 'Lee una conversacion o mensaje de Gmail.',
+        description: 'Lee una conversacion o mensaje de Gmail e identifica adjuntos.',
+        category: 'consulta',
+        risk: 'alto',
+        defaultRequiresApproval: true,
+      },
+      {
+        id: 'gmail.read_attachment',
+        packageId: 'official:gmail',
+        name: 'Leer adjunto',
+        description: 'Descarga un adjunto de Gmail para que el agente pueda revisarlo o reutilizarlo.',
         category: 'consulta',
         risk: 'alto',
         defaultRequiresApproval: true,
@@ -1292,13 +1301,21 @@ const normalizeManifestAppSecrets = (manifest: AppManifest | null): AppSecretDec
 
 const resolveAppToolDeclarations = async (
   appId: string,
-): Promise<{ appName: string; required: AppToolDeclaration[]; optional: AppToolDeclaration[] } | null> => {
+): Promise<{
+  appName: string;
+  required: AppToolDeclaration[];
+  optional: AppToolDeclaration[];
+  agents: AppAgent[];
+  promptTemplates: AppPromptTemplate[];
+} | null> => {
   const record = registry.apps[appId];
   if (record?.installDir) {
     const manifest = await resolveInstalledManifest(record.installDir);
     const declarations = normalizeAppToolDeclarations(manifest?.tools);
     return {
       appName: record.name ?? appId,
+      agents: normalizeManifestAgents(manifest),
+      promptTemplates: normalizeManifestPromptTemplates(manifest),
       ...declarations,
     };
   }
@@ -1310,6 +1327,8 @@ const resolveAppToolDeclarations = async (
   const declarations = normalizeAppToolDeclarations(catalog.tools);
   return {
     appName: catalog.name ?? appId,
+    agents: catalog.agents ?? [],
+    promptTemplates: catalog.promptTemplates ?? [],
     ...declarations,
   };
 };
@@ -2506,7 +2525,7 @@ const getGitStatusLines = async (cwd: string): Promise<string[]> => {
   }
   return result.stdout
     .split('\n')
-    .map((line) => line.trim())
+    .map((line) => line.trimEnd())
     .filter(Boolean);
 };
 

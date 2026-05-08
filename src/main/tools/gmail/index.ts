@@ -1,3 +1,6 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import type {
   CallOfficialToolInput,
   CallOfficialToolResult,
@@ -7,6 +10,7 @@ import type {
 import type { InternalToolContext, InternalToolModule } from '../types';
 import {
   GmailApiError,
+  readAttachment,
   readMessage,
   readThread,
   searchMessages,
@@ -18,9 +22,14 @@ import { GmailOAuthError, runGmailOAuthFlow } from './oauth';
 import {
   GMAIL_REFRESH_TOKEN_SECRET,
   GMAIL_TOOL_ID,
+  type GmailAttachmentSummary,
+  type GmailReadAttachmentInput,
   type GmailReadInput,
   type GmailSearchInput,
 } from './types';
+
+const MAX_READ_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+const MAX_INLINE_ATTACHMENT_BYTES = 2 * 1024 * 1024;
 
 const definition: OfficialToolDefinition = {
   id: GMAIL_TOOL_ID,
@@ -53,7 +62,13 @@ const definition: OfficialToolDefinition = {
     {
       id: 'gmail.read_thread',
       name: 'Leer conversacion',
-      description: 'Lee una conversacion o mensaje de Gmail.',
+      description: 'Lee una conversacion o mensaje de Gmail e incluye metadata de adjuntos.',
+      risk: 'high',
+    },
+    {
+      id: 'gmail.read_attachment',
+      name: 'Leer adjunto',
+      description: 'Descarga un adjunto de Gmail y lo deja disponible para el agente.',
       risk: 'high',
     },
     {
@@ -119,6 +134,57 @@ const parseReadInput = (input: unknown): GmailReadInput | null => {
   };
 };
 
+const parseReadAttachmentInput = (input: unknown): GmailReadAttachmentInput | null => {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    return null;
+  }
+  const candidate = input as Record<string, unknown>;
+  const messageId = typeof candidate.messageId === 'string' ? candidate.messageId.trim() : '';
+  const attachmentId = typeof candidate.attachmentId === 'string' ? candidate.attachmentId.trim() : '';
+  const filename = typeof candidate.filename === 'string' ? candidate.filename.trim() : '';
+  if (!messageId || (!attachmentId && !filename)) {
+    return null;
+  }
+  return {
+    messageId,
+    ...(attachmentId ? { attachmentId } : {}),
+    ...(filename ? { filename } : {}),
+  };
+};
+
+const sanitizeFilename = (value: string): string => {
+  const sanitized = value.replace(/[/:\\]/g, '-').replace(/[\x00-\x1F\x7F]/g, '').trim();
+  return sanitized && sanitized !== '.' && sanitized !== '..' ? sanitized : 'attachment';
+};
+
+const findAttachmentByInput = async (
+  context: InternalToolContext,
+  input: GmailReadAttachmentInput,
+): Promise<GmailAttachmentSummary | null> => {
+  const message = await readMessage(context, input.messageId);
+  if (input.attachmentId) {
+    return message.attachments.find((attachment) => attachment.attachmentId === input.attachmentId) ?? null;
+  }
+  const normalizedFilename = input.filename?.toLowerCase();
+  return message.attachments.find((attachment) => attachment.filename.toLowerCase() === normalizedFilename) ?? null;
+};
+
+const saveAttachment = async (
+  context: InternalToolContext,
+  messageId: string,
+  attachment: GmailAttachmentSummary,
+  buffer: Buffer,
+): Promise<string> => {
+  if (buffer.byteLength > MAX_READ_ATTACHMENT_BYTES) {
+    throw new Error('gmail_attachment_too_large');
+  }
+  const directory = path.join(context.metadataRoot, 'official-tools', 'gmail', 'attachments', sanitizeFilename(messageId), randomUUID());
+  await fs.mkdir(directory, { recursive: true });
+  const filePath = path.join(directory, sanitizeFilename(attachment.filename));
+  await fs.writeFile(filePath, buffer, { mode: 0o600 });
+  return filePath;
+};
+
 const configure = async (context: InternalToolContext): Promise<ToolMutationResult> => {
   try {
     await runGmailOAuthFlow(context);
@@ -167,12 +233,38 @@ const execute = async (
       return { success: true, data };
     }
 
+    if (input.actionId === 'gmail.read_attachment') {
+      const parsed = parseReadAttachmentInput(input.input);
+      if (!parsed) {
+        return { success: false, userMessage: 'Indica el mensaje y el adjunto de Gmail para leer.', technicalCode: 'gmail_read_attachment_input_invalid' };
+      }
+      const attachment = await findAttachmentByInput(context, parsed);
+      if (!attachment) {
+        return { success: false, userMessage: 'No encontramos ese adjunto en el correo.', technicalCode: 'gmail_attachment_not_found' };
+      }
+      const buffer = await readAttachment(context, parsed.messageId, attachment.attachmentId);
+      const filePath = await saveAttachment(context, parsed.messageId, attachment, buffer);
+      return {
+        success: true,
+        data: {
+          messageId: parsed.messageId,
+          attachmentId: attachment.attachmentId,
+          filename: attachment.filename,
+          mimeType: attachment.mimeType,
+          size: buffer.byteLength,
+          filePath,
+          inlineBase64Available: buffer.byteLength <= MAX_INLINE_ATTACHMENT_BYTES,
+          ...(buffer.byteLength <= MAX_INLINE_ATTACHMENT_BYTES ? { dataBase64: buffer.toString('base64') } : {}),
+        },
+      };
+    }
+
     if (input.actionId === 'gmail.send_email') {
       const parsed = parseSendInput(input.input);
       if (!parsed) {
         return { success: false, userMessage: 'Completa destinatario, asunto y cuerpo del correo.', technicalCode: 'gmail_send_input_invalid' };
       }
-      const sent = await sendMessage(context, buildRawEmail(parsed));
+      const sent = await sendMessage(context, await buildRawEmail(parsed));
       return { success: true, userMessage: 'Correo enviado.', data: sent };
     }
 

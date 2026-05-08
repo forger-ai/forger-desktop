@@ -1,6 +1,8 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type {
+  AppAgent,
+  AppPromptTemplate,
   AppToolDeclaration,
   AppToolsInstallGate,
   CallOfficialToolInput,
@@ -42,7 +44,13 @@ interface OfficialToolsServiceOptions {
     refreshToken: string;
   }) => Promise<InternalOAuthTokenResponse>;
   appendLog?: (event: string, payload?: Record<string, unknown>) => Promise<void>;
-  getAppToolDeclarations: (appId: string) => Promise<{ appName: string; required: AppToolDeclaration[]; optional: AppToolDeclaration[] } | null>;
+  getAppToolDeclarations: (appId: string) => Promise<{
+    appName: string;
+    required: AppToolDeclaration[];
+    optional: AppToolDeclaration[];
+    agents: AppAgent[];
+    promptTemplates: AppPromptTemplate[];
+  } | null>;
 }
 
 const emptyRegistry = (): ToolRegistryFile => ({
@@ -140,6 +148,7 @@ export class OfficialToolsService {
 
   private getContext() {
     return {
+      metadataRoot: this.options.metadataRoot,
       secretsStore: this.options.secretsStore,
       getFreePort: this.options.getFreePort,
       openExternalUrl: this.options.openExternalUrl,
@@ -248,6 +257,8 @@ export class OfficialToolsService {
       appName: declarations.appName,
       required,
       optional,
+      agents: declarations.agents,
+      promptTemplates: declarations.promptTemplates,
       canInstall: required.every((item) => item.available && item.configured),
     };
   }

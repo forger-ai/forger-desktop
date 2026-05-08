@@ -16,12 +16,32 @@ export interface GmailReadInput {
   messageId?: string;
 }
 
+export interface GmailReadAttachmentInput {
+  messageId: string;
+  attachmentId?: string;
+  filename?: string;
+}
+
+export interface GmailSendAttachmentInput {
+  filePath: string;
+  filename?: string;
+  mimeType?: string;
+}
+
 export interface GmailSendInput {
   to: string[];
   cc?: string[];
   bcc?: string[];
   subject: string;
   body: string;
+  attachments?: GmailSendAttachmentInput[];
+}
+
+export interface GmailAttachmentSummary {
+  attachmentId: string;
+  filename: string;
+  mimeType?: string;
+  size?: number;
 }
 
 export interface GmailMessageSummary {
@@ -36,6 +56,7 @@ export interface GmailDecodedMessage {
   snippet?: string;
   headers: Record<string, string>;
   textBody?: string;
+  attachments: GmailAttachmentSummary[];
 }
 
 export interface GmailDecodedThread {

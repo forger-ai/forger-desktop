@@ -853,6 +853,19 @@ const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unknown> => 
     };
   }
 
+  if (toolId === 'gmail.read_attachment') {
+    return {
+      type: 'object',
+      properties: {
+        messageId: { type: 'string' },
+        attachmentId: { type: 'string' },
+        filename: { type: 'string' },
+      },
+      required: ['messageId'],
+      additionalProperties: false,
+    };
+  }
+
   if (toolId === 'gmail.send_email') {
     return {
       type: 'object',
@@ -860,6 +873,21 @@ const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unknown> => 
         to: { type: 'array', items: { type: 'string' } },
         subject: { type: 'string' },
         body: { type: 'string' },
+        cc: { type: 'array', items: { type: 'string' } },
+        bcc: { type: 'array', items: { type: 'string' } },
+        attachments: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              filePath: { type: 'string' },
+              filename: { type: 'string' },
+              mimeType: { type: 'string' },
+            },
+            required: ['filePath'],
+            additionalProperties: false,
+          },
+        },
       },
       required: ['to', 'subject', 'body'],
       additionalProperties: false,
