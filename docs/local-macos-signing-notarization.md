@@ -1,111 +1,102 @@
 # Local macOS signing and notarization
 
-This documents the local state verified on 2026-05-01.
+This documents the local macOS release flow verified on 2026-05-08.
 
-## What works
+## Release command
 
-The Developer ID certificate exists locally as a password-protected p12:
-
-```sh
-/Users/felipepezoa/Forger/signing/forger-developer-id.p12
-/Users/felipepezoa/Forger/signing/forger-developer-id.p12.password
-```
-
-Importing it into a temporary keychain exposes this identity:
-
-```text
-Developer ID Application: Felipe Pezoa (Q58U66S52T)
-```
-
-A local macOS build can be signed with:
+The local macOS release uses `release-local.mjs` as the single signing and notarization path:
 
 ```sh
+cd /Users/felipepezoa/Projects/forger-workspace/desktop
+
 CSC_LINK=/Users/felipepezoa/Forger/signing/forger-developer-id.p12 \
 CSC_KEY_PASSWORD="$(tr -d '\r\n' < /Users/felipepezoa/Forger/signing/forger-developer-id.p12.password)" \
-npm run release:local:mac -- --allow-dirty --skip-notarize
+npm run release:local:mac:wait -- --allow-dirty --tag=forger-desktop/vX.Y.Z
 ```
 
-That signs `release/mac-arm64/Forger.app` with Developer ID. `release-local` also signs the DMG explicitly after `electron-builder` creates it:
+Use `--allow-dirty` only when unrelated local changes are present and have been reviewed. The release changes themselves must still be committed before tagging.
 
-```sh
-codesign --force --timestamp \
-  --sign "Developer ID Application: Felipe Pezoa (Q58U66S52T)" \
-  release/forger-desktop-macos-arm64.dmg
+The command performs these steps:
 
-shasum -a 256 release/forger-desktop-macos-arm64.dmg > release/forger-desktop-macos-arm64.dmg.sha256
-```
+1. Imports the Developer ID certificate into a temporary keychain.
+2. Temporarily signs macOS runtime archives that require Forger signing.
+3. Builds the macOS DMG through `electron-builder`.
+4. Restores the runtime archives in the working tree.
+5. Signs the DMG with the Developer ID identity.
+6. Submits the DMG with `xcrun notarytool submit --keychain-profile forger-notary --wait`.
+7. Staples the accepted notarization ticket.
+8. Writes checksums and uploads the DMG assets to the GitHub Release.
 
-After this, `codesign --display --verbose=4 release/forger-desktop-macos-arm64.dmg` reports the Developer ID authority and secure timestamp.
+## Runtime signing policy
 
-## Current blocker
-
-Notarization credentials are not configured locally.
-
-Local checks found no stored `notarytool` profile:
-
-```sh
-security find-generic-password -s com.apple.gke.notary.tool
-```
-
-The available App Store Connect key files are:
+The script signs only macOS archives under these runtime roots:
 
 ```text
-/Users/felipepezoa/Downloads/AuthKey_69QTQ3DBHK.p8
-/Users/felipepezoa/Downloads/AuthKey_KGXXL653H6.p8
-/Users/felipepezoa/Downloads/AuthKey_NBAJTS7U52.p8
+resources/runtimes/python
+resources/runtimes/git
 ```
 
-Testing those keys without an issuer returned `401 Unauthenticated`, so they are either not Individual API keys, are revoked, or require the App Store Connect issuer UUID. No local `APPLE_API_ISSUER` value was found.
-
-Until a valid `notarytool` credential is available, Gatekeeper reports:
+The script does not sign or repack archives under:
 
 ```text
-source=Unnotarized Developer ID
-origin=Developer ID Application: Felipe Pezoa (Q58U66S52T)
+resources/runtimes/node
 ```
 
-## Needed to complete notarization
+Node archives are distributed with their upstream signature and entitlements. Re-signing Node replaces those entitlements and can cause macOS to reject the runtime when Desktop launches installed apps.
 
-Use one of these credential options:
+Runtime archive changes are temporary during the build. `release-local.mjs` backs up the original archive and checksum files before signing, builds the DMG with the signed copies, then restores the original files before upload.
 
-```sh
-# App Store Connect team API key
-xcrun notarytool submit release/forger-desktop-macos-arm64.dmg \
-  --key /path/to/AuthKey_KEYID.p8 \
-  --key-id KEYID \
-  --issuer APP_STORE_CONNECT_ISSUER_UUID \
-  --wait \
-  --timeout 30m
-```
+## Notarization path
 
-Individual API keys use the same command without `--issuer`.
+`electron-builder` is configured with `mac.notarize = false`. The build does not rely on Electron Builder notarization or a second manual notarization path after a failed attempt.
 
-or:
+Notarization is handled directly by the release script:
 
 ```sh
-# Apple ID app-specific password
-xcrun notarytool store-credentials forger-notary \
-  --apple-id APPLE_ID \
-  --team-id Q58U66S52T \
-  --password APP_SPECIFIC_PASSWORD
-
 xcrun notarytool submit release/forger-desktop-macos-arm64.dmg \
   --keychain-profile forger-notary \
   --wait \
-  --timeout 30m
+  --timeout 30m \
+  --output-format json
 ```
 
-If Apple returns `Accepted`, staple the ticket:
+The expected accepted response contains:
+
+```json
+{
+  "status": "Accepted",
+  "message": "Processing complete"
+}
+```
+
+When Apple returns a non-accepted status, the script writes the submission metadata to:
+
+```text
+release/notarization-submission.json
+```
+
+If a submission id is available, it also writes the Apple notarization log to:
+
+```text
+release/notarization-log.json
+```
+
+The script stops on notarization failure. Do not continue with a manual DMG-only path unless the script itself is being repaired.
+
+## Validation
+
+After a successful notarization, the script staples the DMG. Validate the final artifact with:
 
 ```sh
-xcrun stapler staple release/forger-desktop-macos-arm64.dmg
-xcrun stapler validate -v release/forger-desktop-macos-arm64.dmg
 spctl -a -vvv -t open --context context:primary-signature release/forger-desktop-macos-arm64.dmg
 ```
 
-Expected final Gatekeeper result:
+Expected result:
 
 ```text
 accepted
 source=Notarized Developer ID
+origin=Developer ID Application: Felipe Pezoa (Q58U66S52T)
 ```
+
+The final release asset checksum must match the checksum published in the desktop metadata after the Pages metadata refresh.

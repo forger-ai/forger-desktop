@@ -239,27 +239,39 @@ const prepareMacSigningKeychain = async () => {
 
 const signMacRuntimeArchives = async () => {
   const identity = await resolveMacSigningIdentity();
-  const runtimeRoot = path.join(rootDir, 'resources', 'runtimes');
+  const runtimeRoots = [
+    path.join(rootDir, 'resources', 'runtimes', 'python'),
+    path.join(rootDir, 'resources', 'runtimes', 'git'),
+  ];
   const backupRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'forger-runtime-backups-'));
   const backups = [];
 
-  if (!(await exists(runtimeRoot))) {
+  const existingRuntimeRoots = [];
+  for (const runtimeRoot of runtimeRoots) {
+    if (await exists(runtimeRoot)) {
+      existingRuntimeRoots.push(runtimeRoot);
+    }
+  }
+
+  if (existingRuntimeRoots.length === 0) {
     await fs.rm(backupRoot, { recursive: true, force: true });
     return async () => {};
   }
 
-  const archives = (await capture('find', [
-    runtimeRoot,
-    '-type',
-    'f',
-    '(',
-    '-name',
-    '*darwin*.tar.gz',
-    '-o',
-    '-name',
-    '*apple-darwin*.tar.gz',
-    ')',
-  ])).split('\n').filter(Boolean);
+  const archives = (
+    await Promise.all(existingRuntimeRoots.map((runtimeRoot) => capture('find', [
+      runtimeRoot,
+      '-type',
+      'f',
+      '(',
+      '-name',
+      '*darwin*.tar.gz',
+      '-o',
+      '-name',
+      '*apple-darwin*.tar.gz',
+      ')',
+    ])))
+  ).flatMap((output) => output.split('\n').filter(Boolean));
 
   const restoreBackups = async () => {
     for (const [backupPath, originalPath] of backups.reverse()) {
@@ -272,6 +284,7 @@ const signMacRuntimeArchives = async () => {
 
   try {
     for (const archive of archives) {
+      console.log(`Signing macOS runtime archive: ${path.relative(rootDir, archive)}`);
       const backupName = Buffer.from(archive).toString('base64url');
       const archiveBackup = path.join(backupRoot, `${backupName}.tar.gz`);
       const checksumPath = `${archive}.sha256`;
