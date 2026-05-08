@@ -237,9 +237,9 @@ const prepareMacSigningKeychain = async () => {
   };
 };
 
-const signMacPythonRuntimeArchives = async () => {
+const signMacRuntimeArchives = async () => {
   const identity = await resolveMacSigningIdentity();
-  const runtimeRoot = path.join(rootDir, 'resources', 'runtimes', 'python');
+  const runtimeRoot = path.join(rootDir, 'resources', 'runtimes');
   const backupRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'forger-runtime-backups-'));
   const backups = [];
 
@@ -493,15 +493,15 @@ const main = async () => {
 
   try {
     if (!options.skipBuild) {
-      const restorePythonRuntimeArchives = platforms.includes('mac')
-        ? await signMacPythonRuntimeArchives()
+      const restoreMacRuntimeArchives = platforms.includes('mac')
+        ? await signMacRuntimeArchives()
         : async () => {};
       try {
         for (const platform of platforms) {
           await buildPlatform(platform);
         }
       } finally {
-        await restorePythonRuntimeArchives();
+        await restoreMacRuntimeArchives();
       }
     }
 
