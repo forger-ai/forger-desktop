@@ -160,6 +160,14 @@ const getCapabilities = (catalog: JsonObject): unknown[] => {
   return [];
 };
 
+const optionalArray = (value: unknown): unknown[] | undefined => {
+  return Array.isArray(value) ? value : undefined;
+};
+
+const optionalRecord = (value: unknown): JsonObject | undefined => {
+  return isRecord(value) ? value : undefined;
+};
+
 const getIconUrl = (app: LocalApp, catalog: JsonObject, baseUrl: string): string | undefined => {
   const iconPath = asString(catalog.icon_path);
   if (!iconPath) {
@@ -196,6 +204,9 @@ const toCatalogEntry = async (app: LocalApp, baseUrl: string): Promise<JsonObjec
         ? catalog.supported_platforms
         : ['darwin_arm64', 'darwin_x64'],
       capabilities: getCapabilities(catalog),
+      agents: optionalArray(app.manifest.agents),
+      prompt_templates: optionalArray(app.manifest.promptTemplates),
+      tools: optionalRecord(app.manifest.tools),
       download_url: `${baseUrl}/download/${encodeURIComponent(app.catalogSlug)}.zip`,
       file_size_bytes: null,
       checksum_sha256: null,

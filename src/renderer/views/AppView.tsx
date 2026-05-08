@@ -5,9 +5,12 @@ import CheckCircleOutlineRounded from '@mui/icons-material/CheckCircleOutlineRou
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
 import DownloadRounded from '@mui/icons-material/DownloadRounded';
 import LaunchRounded from '@mui/icons-material/LaunchRounded';
+import RestoreRounded from '@mui/icons-material/RestoreRounded';
+import SaveRounded from '@mui/icons-material/SaveRounded';
 import StarRounded from '@mui/icons-material/StarRounded';
 import StopCircleRounded from '@mui/icons-material/StopCircleRounded';
 import SystemUpdateAltRounded from '@mui/icons-material/SystemUpdateAltRounded';
+import WarningAmberRounded from '@mui/icons-material/WarningAmberRounded';
 import {
   Avatar,
   Box,
@@ -27,7 +30,18 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material';
-import type { AppCapability, AppDetails, AppSecretsState, ForgerAccountSession, SubmitAppFeedbackInput, SubmitAppRatingInput } from '@shared/types';
+import type {
+  AppCapability,
+  AppDetails,
+  AppPromptMutationResult,
+  AppPromptRestoreInput,
+  AppPromptReviewInput,
+  AppPromptValidationResult,
+  AppSecretsState,
+  ForgerAccountSession,
+  SubmitAppFeedbackInput,
+  SubmitAppRatingInput,
+} from '@shared/types';
 import type { AppDictionary } from '@renderer/i18n';
 import { AppSecretsPanel } from '@renderer/components/AppSecretsDialog';
 
@@ -52,6 +66,8 @@ interface AppViewProps {
   onOpenAccount: () => void;
   onSubmitRating: (input: SubmitAppRatingInput) => Promise<{ success: boolean }>;
   onSubmitFeedback: (input: SubmitAppFeedbackInput) => Promise<{ success: boolean }>;
+  onUpdatePrompt: (input: AppPromptReviewInput) => Promise<AppPromptMutationResult>;
+  onRestorePrompt: (input: AppPromptRestoreInput) => Promise<AppPromptMutationResult>;
 }
 
 const initialsFromName = (name: string) =>
@@ -61,8 +77,10 @@ const initialsFromName = (name: string) =>
     .map((part) => part[0]?.toUpperCase() ?? '')
     .join('');
 
-type AppViewTab = 'general' | 'reviews' | 'history' | 'updates' | 'secrets';
+type AppViewTab = 'general' | 'prompts' | 'reviews' | 'history' | 'updates' | 'secrets';
 type PromptPreview = { title: string; description?: string; prompt: string } | null;
+
+const promptReviewKey = (kind: string, id: string) => `${kind}:${id}`;
 
 const DetailRow = ({ label, value }: { label: string; value: string }) => (
   <Stack spacing={0.25}>
@@ -94,8 +112,16 @@ export function AppView({
   onOpenAccount,
   onSubmitRating,
   onSubmitFeedback,
+  onUpdatePrompt,
+  onRestorePrompt,
 }: AppViewProps) {
   const [activeTab, setActiveTab] = useState<AppViewTab>('general');
+  const promptReviewsForState = details?.promptReviews ?? [];
+  const [selectedPromptKey, setSelectedPromptKey] = useState<string | null>(null);
+  const selectedPrompt = promptReviewsForState.find((prompt) => promptReviewKey(prompt.kind, prompt.id) === selectedPromptKey) ?? null;
+  const [promptDraft, setPromptDraft] = useState('');
+  const [promptValidation, setPromptValidation] = useState<AppPromptValidationResult | null>(null);
+  const [promptBusy, setPromptBusy] = useState(false);
   const currentUserRating = details?.app && 'currentUserRating' in details.app ? details.app.currentUserRating : undefined;
   const [ratingScore, setRatingScore] = useState<number>(currentUserRating?.score ?? 5);
   const [ratingComment, setRatingComment] = useState(currentUserRating?.comment ?? '');
@@ -109,6 +135,50 @@ export function AppView({
     setRatingScore(currentUserRating?.score ?? 5);
     setRatingComment(currentUserRating?.comment ?? '');
   }, [currentUserRating?.comment, currentUserRating?.score]);
+
+  useEffect(() => {
+    if (!details || promptReviewsForState.length === 0) {
+      setSelectedPromptKey(null);
+      return;
+    }
+    const currentStillExists = promptReviewsForState.some((prompt) => promptReviewKey(prompt.kind, prompt.id) === selectedPromptKey);
+    if (!currentStillExists) {
+      const firstPrompt = promptReviewsForState[0];
+      setSelectedPromptKey(promptReviewKey(firstPrompt.kind, firstPrompt.id));
+    }
+  }, [details, promptReviewsForState, selectedPromptKey]);
+
+  useEffect(() => {
+    if (!selectedPrompt) {
+      setPromptDraft('');
+      setPromptValidation(null);
+      return;
+    }
+    setPromptDraft(selectedPrompt.overridePrompt ?? selectedPrompt.prompt);
+    setPromptValidation(selectedPrompt.validation);
+  }, [selectedPrompt]);
+
+  useEffect(() => {
+    if (!details || !selectedPrompt) {
+      return undefined;
+    }
+    const handle = window.setTimeout(() => {
+      void window.forger.validateAppPrompt({
+        appId: details.app.id,
+        kind: selectedPrompt.kind,
+        id: selectedPrompt.id,
+        prompt: promptDraft,
+      }).then(setPromptValidation).catch(() => {
+        setPromptValidation({
+          valid: false,
+          errors: [t.appView.promptErrorFallback],
+          missingVariables: [],
+          extraVariables: [],
+        });
+      });
+    }, 250);
+    return () => window.clearTimeout(handle);
+  }, [details, selectedPrompt, promptDraft, t.appView.promptErrorFallback]);
 
   if (!details) {
     return (
@@ -143,6 +213,7 @@ export function AppView({
   const recentRatings = 'recentRatings' in details.app ? details.app.recentRatings ?? [] : [];
   const promptTemplates = details.promptTemplates ?? [];
   const agents = details.agents ?? [];
+  const promptReviews = details.promptReviews ?? [];
   const localChanges = details.localChanges ?? [];
 
   const actions = (
@@ -272,6 +343,165 @@ export function AppView({
         />
       ) : (
         <Typography color="text.secondary">{t.appView.secretsInstallRequired}</Typography>
+      )}
+    </Stack>
+  );
+
+  const promptErrors = promptValidation?.errors ?? [];
+  const promptsContent = (
+    <Stack spacing={1.5}>
+      <Stack spacing={0.5}>
+        <Typography variant="h5">{t.appView.promptsTitle}</Typography>
+        <Typography color="text.secondary">{t.appView.promptsBody}</Typography>
+      </Stack>
+      {promptReviews.length === 0 ? (
+        <Typography color="text.secondary">{t.appView.promptEmpty}</Typography>
+      ) : (
+        <Box
+          sx={{
+            display: 'grid',
+            gridTemplateColumns: { xs: '1fr', lg: 'minmax(240px, 340px) minmax(0, 1fr)' },
+            gap: 1.5,
+          }}
+        >
+          <Stack spacing={1}>
+            {promptReviews.map((prompt) => {
+              const key = promptReviewKey(prompt.kind, prompt.id);
+              const selected = key === selectedPromptKey;
+              return (
+                <Box
+                  key={key}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setSelectedPromptKey(key)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      setSelectedPromptKey(key);
+                    }
+                  }}
+                  sx={{
+                    border: '1px solid',
+                    borderColor: selected ? 'primary.main' : 'divider',
+                    bgcolor: selected ? 'action.selected' : 'background.paper',
+                    p: 1.25,
+                    cursor: 'pointer',
+                  }}
+                >
+                  <Stack spacing={0.75}>
+                    <Stack direction="row" spacing={0.75} alignItems="center" useFlexGap flexWrap="wrap">
+                      <Chip size="small" label={prompt.kind === 'agent' ? t.appView.promptTypeAgent : t.appView.promptTypeTemplate} />
+                      {prompt.edited ? <Chip size="small" color="primary" label={t.appView.promptEdited} /> : null}
+                      {prompt.overrideInvalid ? <Chip size="small" color="warning" label={t.appView.promptNeedsReview} /> : null}
+                    </Stack>
+                    <Typography fontWeight={700}>{prompt.title}</Typography>
+                    {prompt.description ? (
+                      <Typography variant="body2" color="text.secondary">
+                        {prompt.description}
+                      </Typography>
+                    ) : null}
+                  </Stack>
+                </Box>
+              );
+            })}
+          </Stack>
+          {selectedPrompt ? (
+            <Stack spacing={1.25}>
+              {selectedPrompt.overrideInvalid ? (
+                <Box sx={{ border: '1px solid', borderColor: 'warning.main', bgcolor: 'warning.light', color: 'warning.contrastText', p: 1.25 }}>
+                  <Stack direction="row" spacing={1} alignItems="center">
+                    <WarningAmberRounded fontSize="small" />
+                    <Typography variant="body2">{t.appView.promptNeedsReview}</Typography>
+                  </Stack>
+                </Box>
+              ) : null}
+              <TextField
+                label={t.appView.promptEditorLabel}
+                value={promptDraft}
+                onChange={(event) => setPromptDraft(event.target.value)}
+                fullWidth
+                multiline
+                minRows={14}
+                inputProps={{ spellCheck: false }}
+                sx={{
+                  '& textarea': {
+                    fontFamily: 'monospace',
+                    fontSize: 13,
+                    lineHeight: 1.55,
+                  },
+                }}
+              />
+              {promptErrors.length > 0 ? (
+                <Box sx={{ border: '1px solid', borderColor: 'error.main', p: 1.25 }}>
+                  <Stack component="ul" sx={{ m: 0, pl: 2 }}>
+                    {promptErrors.map((error) => (
+                      <Typography component="li" variant="body2" color="error.main" key={error}>
+                        {error}
+                      </Typography>
+                    ))}
+                  </Stack>
+                </Box>
+              ) : null}
+              <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+                <Button
+                  variant="contained"
+                  startIcon={promptBusy ? <CircularProgress color="inherit" size={16} /> : <SaveRounded />}
+                  disabled={promptBusy || !promptValidation?.valid}
+                  onClick={() => {
+                    setPromptBusy(true);
+                    void onUpdatePrompt({
+                      appId,
+                      kind: selectedPrompt.kind,
+                      id: selectedPrompt.id,
+                      prompt: promptDraft,
+                    }).finally(() => setPromptBusy(false));
+                  }}
+                >
+                  {t.appView.promptSave}
+                </Button>
+                <Button
+                  variant="outlined"
+                  startIcon={<RestoreRounded />}
+                  disabled={promptBusy || !selectedPrompt.edited}
+                  onClick={() => {
+                    setPromptBusy(true);
+                    void onRestorePrompt({
+                      appId,
+                      kind: selectedPrompt.kind,
+                      id: selectedPrompt.id,
+                    }).finally(() => setPromptBusy(false));
+                  }}
+                >
+                  {t.appView.promptRestore}
+                </Button>
+              </Stack>
+              <Stack spacing={0.75}>
+                <Typography variant="caption" color="text.secondary">
+                  {t.appView.promptOriginalLabel}
+                </Typography>
+                <Box
+                  component="pre"
+                  sx={{
+                    m: 0,
+                    p: 1.25,
+                    border: '1px solid',
+                    borderColor: 'divider',
+                    bgcolor: 'background.default',
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word',
+                    fontFamily: 'monospace',
+                    fontSize: 12,
+                    lineHeight: 1.5,
+                    maxHeight: 260,
+                    overflow: 'auto',
+                  }}
+                >
+                  {selectedPrompt.originalPrompt}
+                </Box>
+              </Stack>
+            </Stack>
+          ) : null}
+        </Box>
       )}
     </Stack>
   );
@@ -666,6 +896,7 @@ export function AppView({
           scrollButtons="auto"
         >
           <Tab value="general" label={t.appView.tabs.general} />
+          <Tab value="prompts" label={t.appView.tabs.prompts} />
           <Tab value="reviews" label={t.appView.tabs.reviews} />
           <Tab value="history" label={t.appView.tabs.history} />
           <Tab value="updates" label={t.appView.tabs.updates} />
@@ -676,6 +907,7 @@ export function AppView({
       {activeTab === 'general' ? (
         generalContent
       ) : null}
+      {activeTab === 'prompts' ? promptsContent : null}
       {activeTab === 'reviews' ? reviewsContent : null}
       {activeTab === 'history' ? historyContent : null}
       {activeTab === 'updates' ? updatesContent : null}

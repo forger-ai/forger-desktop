@@ -6,6 +6,10 @@ import type {
   AgentToolId,
   AgentToolSettings,
   AppSummary,
+  AppPromptMutationResult,
+  AppPromptRestoreInput,
+  AppPromptReviewInput,
+  AppPromptReviewItem,
   CatalogApp,
   OpenAppResult,
   RuntimeStatus,
@@ -63,6 +67,9 @@ interface ForgerMcpServerOptions {
   restartApp: (appId: string, options?: { onProgress?: (message: string) => void }) => Promise<OpenAppResult>;
   refreshAppView: (appId: string) => Promise<{ success: boolean; userMessage?: string; technicalCode?: string }>;
   updateApp: (appId: string) => Promise<InstallAppResult>;
+  listAppPrompts: (appId: string) => Promise<AppPromptReviewItem[]>;
+  updateAppPrompt: (input: AppPromptReviewInput) => Promise<AppPromptMutationResult>;
+  restoreAppPrompt: (input: AppPromptRestoreInput) => Promise<AppPromptMutationResult>;
   memoryList: (input: MemoryListInput, access: MemoryAccessInput) => Promise<MemoryEntry[]>;
   memoryCreate: (input: MemoryCreateInput, access: MemoryAccessInput) => Promise<MemoryEntry>;
   memoryUpdate: (input: MemoryUpdateInput, access: MemoryAccessInput) => Promise<MemoryEntry>;
@@ -544,6 +551,14 @@ export class ForgerMcpServer {
       return withToolAuthorization(result, approval);
     }
 
+    if (toolId === 'forger_list_app_prompts') {
+      const appId = getToolAppId(session, args);
+      const prompts = await this.options.listAppPrompts(appId);
+      const result = { success: true, prompts };
+      await this.options.appendInstallLog('agent_tool:call_result', { appId, runId: session.runId, toolId, result });
+      return withToolAuthorization(result, approval);
+    }
+
     if (isMemoryTool(toolId)) {
       try {
         if (toolId === 'memory_list') {
@@ -646,6 +661,39 @@ export class ForgerMcpServer {
       return withToolAuthorization(result, approval);
     }
 
+    if (toolId === 'forger_update_app_prompt') {
+      const kind = parsePromptReviewKind(args.kind);
+      if (!kind) {
+        const result = { success: false, userMessage: 'Tipo de prompt invalido.', technicalCode: 'app_prompt_kind_invalid' };
+        await this.options.appendInstallLog('agent_tool:call_result', { appId, runId: session.runId, toolId, result });
+        return withToolAuthorization(result, approval);
+      }
+      const result = await this.options.updateAppPrompt({
+        appId,
+        kind,
+        id: String(args.id ?? ''),
+        prompt: String(args.prompt ?? ''),
+      });
+      await this.options.appendInstallLog('agent_tool:call_result', { appId, runId: session.runId, toolId, result });
+      return withToolAuthorization(result, approval);
+    }
+
+    if (toolId === 'forger_restore_app_prompt') {
+      const kind = parsePromptReviewKind(args.kind);
+      if (!kind) {
+        const result = { success: false, userMessage: 'Tipo de prompt invalido.', technicalCode: 'app_prompt_kind_invalid' };
+        await this.options.appendInstallLog('agent_tool:call_result', { appId, runId: session.runId, toolId, result });
+        return withToolAuthorization(result, approval);
+      }
+      const result = await this.options.restoreAppPrompt({
+        appId,
+        kind,
+        id: String(args.id ?? ''),
+      });
+      await this.options.appendInstallLog('agent_tool:call_result', { appId, runId: session.runId, toolId, result });
+      return withToolAuthorization(result, approval);
+    }
+
     const result = { success: false, userMessage: 'La herramienta no esta disponible.', technicalCode: 'tool_not_found' };
     await this.options.appendInstallLog('agent_tool:call_result', { appId, runId: session.runId, toolId, result });
     return withToolAuthorization(result, approval);
@@ -718,7 +766,8 @@ const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unknown> => 
     toolId === 'forger_stop_app' ||
     toolId === 'forger_restart_app' ||
     toolId === 'forger_refresh_app_view' ||
-    toolId === 'forger_update_app'
+    toolId === 'forger_update_app' ||
+    toolId === 'forger_list_app_prompts'
   ) {
     return {
       type: 'object',
@@ -729,6 +778,54 @@ const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unknown> => 
         },
       },
       required: ['appId'],
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'forger_update_app_prompt') {
+    return {
+      type: 'object',
+      properties: {
+        appId: {
+          type: 'string',
+          description: 'ID de la app instalada.',
+        },
+        kind: {
+          type: 'string',
+          enum: ['promptTemplate', 'agent'],
+        },
+        id: {
+          type: 'string',
+          description: 'ID del prompt declarado por la app.',
+        },
+        prompt: {
+          type: 'string',
+          description: 'Nuevo texto plano del prompt. Debe conservar las variables {{...}} del original.',
+        },
+      },
+      required: ['appId', 'kind', 'id', 'prompt'],
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'forger_restore_app_prompt') {
+    return {
+      type: 'object',
+      properties: {
+        appId: {
+          type: 'string',
+          description: 'ID de la app instalada.',
+        },
+        kind: {
+          type: 'string',
+          enum: ['promptTemplate', 'agent'],
+        },
+        id: {
+          type: 'string',
+          description: 'ID del prompt declarado por la app.',
+        },
+      },
+      required: ['appId', 'kind', 'id'],
       additionalProperties: false,
     };
   }
@@ -779,6 +876,13 @@ const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unknown> => 
 const isMemoryTool = (toolId: AgentToolId): boolean => toolId.startsWith('memory_');
 
 const isOfficialTool = (toolId: AgentToolId): boolean => toolId.startsWith('gmail.');
+
+const parsePromptReviewKind = (value: unknown): 'promptTemplate' | 'agent' | null => {
+  if (value === 'promptTemplate' || value === 'agent') {
+    return value;
+  }
+  return null;
+};
 
 const buildOfficialToolCallInput = (
   actionId: AgentToolId,

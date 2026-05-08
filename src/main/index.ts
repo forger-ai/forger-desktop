@@ -30,6 +30,11 @@ import { DesktopErrorReporter } from './error-reporting';
 import { FileLibrary } from './file-library';
 import { ForgerMcpServer } from './forger-mcp-server';
 import { MemoryStore } from './memory-store';
+import {
+  PromptOverridesStore,
+  buildPromptBases,
+  promptOverrideErrorResult,
+} from './prompt-overrides';
 import { OfficialToolsService, normalizeAppToolDeclarations } from './official-tools-service';
 import { ForgerAccountStore, publicForgerAccount, type StoredForgerAccount } from './forger-account-store';
 import { ForgerBackendClient } from './forger-backend-client';
@@ -68,7 +73,12 @@ import type {
   AppCodexConversationCreateInput,
   AppCodexConversationSendMessageInput,
   AppLocalChangeSummary,
+  AppPromptMutationResult,
+  AppPromptRestoreInput,
+  AppPromptReviewInput,
+  AppPromptReviewItem,
   AppPromptTemplate,
+  AppPromptValidationResult,
   AppSecretConnection,
   AppSecretDeclaration,
   AppSecretsState,
@@ -130,6 +140,7 @@ const backendBaseUrl = process.env.FORGER_BACKEND_URL ?? (isDev ? 'http://127.0.
 let localCatalogJsonUrl: string | undefined;
 const DEFAULT_NODE_VERSION = '22';
 const DEFAULT_PYTHON_VERSION = '3.12';
+const BUNDLED_GIT_VERSION = '2.54.0';
 const CODEX_CLI_VERSION = '0.129.0';
 const CODEX_USAGE_DASHBOARD_URL = 'https://chatgpt.com/codex/settings/usage';
 let devCatalogService: DevCatalogService | null = null;
@@ -295,6 +306,7 @@ const appWindows = new Map<string, BrowserWindow>();
 const stoppingApps = new Set<string>();
 const appLifecycleLocks = new Map<string, Promise<unknown>>();
 const runtimeLocks = new Map<string, Promise<RuntimeBinarySet>>();
+const gitToolLocks = new Map<string, Promise<string | null>>();
 let chatOrchestrator: ChatOrchestrator | null = null;
 let appCodexTaskManager: AppCodexTaskManager | null = null;
 let appCodexConversationManager: AppCodexConversationManager | null = null;
@@ -334,11 +346,19 @@ const getLegacyForgerMetadataRoot = () => path.join(getPrivateAppsRoot(), '.forg
 const getCodexRoot = () => path.join(app.getPath('userData'), 'codex-cli');
 const getCodexHome = () => path.join(app.getPath('userData'), 'codex-home');
 const getAgentToolSettingsPath = () => path.join(getForgerMetadataRoot(), 'agent-tools.json');
+const getPromptOverridesPath = () => path.join(getForgerMetadataRoot(), 'prompt-overrides.json');
 const getForgerAccountPath = () => path.join(getForgerMetadataRoot(), 'account.json');
 const getCloudDevicePath = () => path.join(getForgerMetadataRoot(), 'cloud-device.json');
 const getCloudSyncSettingsPath = () => path.join(getForgerMetadataRoot(), 'cloud-sync.json');
 
 const FORGER_TOOL_PACKAGE_ID = 'forger';
+
+let promptOverridesStore: PromptOverridesStore | null = null;
+
+const getPromptOverridesStore = (): PromptOverridesStore => {
+  promptOverridesStore ??= new PromptOverridesStore(getPromptOverridesPath());
+  return promptOverridesStore;
+};
 
 const AGENT_TOOL_PACKAGES: AgentToolPackageDefinition[] = [
   {
@@ -373,6 +393,33 @@ const AGENT_TOOL_PACKAGES: AgentToolPackageDefinition[] = [
         category: 'consulta',
         risk: 'bajo',
         defaultRequiresApproval: false,
+      },
+      {
+        id: 'forger_list_app_prompts',
+        packageId: FORGER_TOOL_PACKAGE_ID,
+        name: 'Listar prompts de app',
+        description: 'Revisa los prompts declarados por una app instalada y si tienen cambios locales.',
+        category: 'consulta',
+        risk: 'bajo',
+        defaultRequiresApproval: false,
+      },
+      {
+        id: 'forger_update_app_prompt',
+        packageId: FORGER_TOOL_PACKAGE_ID,
+        name: 'Editar prompt de app',
+        description: 'Actualiza un prompt local de una app instalada despues de validar sus variables.',
+        category: 'app',
+        risk: 'medio',
+        defaultRequiresApproval: true,
+      },
+      {
+        id: 'forger_restore_app_prompt',
+        packageId: FORGER_TOOL_PACKAGE_ID,
+        name: 'Restaurar prompt de app',
+        description: 'Restaura el prompt original declarado por una app instalada.',
+        category: 'app',
+        risk: 'medio',
+        defaultRequiresApproval: true,
       },
       {
         id: 'memory_list',
@@ -695,6 +742,7 @@ const runtimePlatformTokens = (platformAlias: string): string[] => {
     tokens.add('win-x64');
     tokens.add('x86_64-pc-windows-msvc');
     tokens.add('windows-x64');
+    tokens.add('64-bit');
   }
 
   return Array.from(tokens);
@@ -1398,7 +1446,8 @@ const resolveInstalledPromptTemplates = async (appId: string): Promise<AppPrompt
   if (!record?.installDir) {
     return [];
   }
-  return normalizeManifestPromptTemplates(await resolveInstalledManifest(record.installDir));
+  const templates = normalizeManifestPromptTemplates(await resolveInstalledManifest(record.installDir));
+  return await getPromptOverridesStore().applyToPromptTemplates(appId, templates);
 };
 
 const resolveInstalledAgents = async (appId: string): Promise<AppAgent[]> => {
@@ -1406,11 +1455,69 @@ const resolveInstalledAgents = async (appId: string): Promise<AppAgent[]> => {
   if (!record?.installDir) {
     return [];
   }
-  return normalizeManifestAgents(await resolveInstalledManifest(record.installDir));
+  const agents = normalizeManifestAgents(await resolveInstalledManifest(record.installDir));
+  return await getPromptOverridesStore().applyToAgents(appId, agents);
 };
 
 const hasInstalledCodexConversation = async (appId: string): Promise<boolean> =>
   (await resolveInstalledAgents(appId)).length > 0;
+
+const resolveInstalledPromptBases = async (appId: string) => {
+  const record = registry.apps[appId];
+  if (!record?.installDir) {
+    return [];
+  }
+  const manifest = await resolveInstalledManifest(record.installDir);
+  return buildPromptBases(normalizeManifestPromptTemplates(manifest), normalizeManifestAgents(manifest));
+};
+
+const listAppPrompts = async (appId: string): Promise<AppPromptReviewItem[]> => {
+  const bases = await resolveInstalledPromptBases(appId);
+  return await getPromptOverridesStore().list(appId, bases);
+};
+
+const validateAppPrompt = async (input: AppPromptReviewInput): Promise<AppPromptValidationResult> => {
+  try {
+    const bases = await resolveInstalledPromptBases(input.appId);
+    return await getPromptOverridesStore().validate(input.appId, bases, input);
+  } catch (error) {
+    const result = promptOverrideErrorResult(error);
+    return {
+      valid: false,
+      errors: [result.userMessage ?? 'No se pudo validar el prompt.'],
+      missingVariables: [],
+      extraVariables: [],
+    };
+  }
+};
+
+const updateAppPrompt = async (input: AppPromptReviewInput): Promise<AppPromptMutationResult> => {
+  try {
+    const bases = await resolveInstalledPromptBases(input.appId);
+    const prompt = await getPromptOverridesStore().update(input.appId, bases, input);
+    return {
+      success: true,
+      userMessage: 'Prompt actualizado.',
+      prompt,
+    };
+  } catch (error) {
+    return promptOverrideErrorResult(error);
+  }
+};
+
+const restoreAppPrompt = async (input: AppPromptRestoreInput): Promise<AppPromptMutationResult> => {
+  try {
+    const bases = await resolveInstalledPromptBases(input.appId);
+    const prompt = await getPromptOverridesStore().restore(input.appId, bases, input);
+    return {
+      success: true,
+      userMessage: 'Prompt original restaurado.',
+      prompt,
+    };
+  } catch (error) {
+    return promptOverrideErrorResult(error);
+  }
+};
 
 const getManifestAppSecretsValidationError = (manifest: AppManifest | null): string | null => {
   if (!manifest || !Array.isArray(manifest.appSecrets)) {
@@ -2110,8 +2217,173 @@ const canRunCommand = async (command: string, args: string[]): Promise<boolean> 
   }
 };
 
+const existsFile = async (filePath: string): Promise<boolean> => {
+  try {
+    return (await fs.stat(filePath)).isFile();
+  } catch {
+    return false;
+  }
+};
+
+const appendProcessPathEntry = (entry: string): void => {
+  const currentPath = process.env.PATH ?? '';
+  const entries = currentPath.split(path.delimiter).filter(Boolean);
+  if (entries.some((existing) => existing.toLowerCase() === entry.toLowerCase())) {
+    return;
+  }
+
+  process.env.PATH = [entry, currentPath].filter(Boolean).join(path.delimiter);
+};
+
+const findGitExecutableOutsidePath = async (): Promise<string | null> => {
+  const localAppData = process.env.LocalAppData;
+  const candidates =
+    process.platform === 'win32'
+      ? [
+          path.join(process.env.ProgramFiles ?? 'C:\\Program Files', 'Git', 'cmd', 'git.exe'),
+          path.join(process.env.ProgramFiles ?? 'C:\\Program Files', 'Git', 'bin', 'git.exe'),
+          path.join(process.env['ProgramFiles(x86)'] ?? 'C:\\Program Files (x86)', 'Git', 'cmd', 'git.exe'),
+          path.join(process.env['ProgramFiles(x86)'] ?? 'C:\\Program Files (x86)', 'Git', 'bin', 'git.exe'),
+          ...(localAppData
+            ? [
+                path.join(localAppData, 'Programs', 'Git', 'cmd', 'git.exe'),
+                path.join(localAppData, 'Programs', 'Git', 'bin', 'git.exe'),
+              ]
+            : []),
+        ]
+      : ['/usr/bin/git', '/usr/local/bin/git', '/opt/homebrew/bin/git'];
+
+  for (const candidate of candidates) {
+    if (!candidate || !(await existsFile(candidate))) {
+      continue;
+    }
+    if (await canRunCommand(candidate, ['--version'])) {
+      return candidate;
+    }
+  }
+
+  return null;
+};
+
+const makeDiscoveredGitAvailable = async (): Promise<boolean> => {
+  const gitPath = await findGitExecutableOutsidePath();
+  if (!gitPath) {
+    return false;
+  }
+
+  appendProcessPathEntry(path.dirname(gitPath));
+  return await canRunCommand('git', ['--version']);
+};
+
+const configureBundledGitEnvironment = (root: string): void => {
+  appendProcessPathEntry(path.join(root, 'bin'));
+  appendProcessPathEntry(path.join(root, 'cmd'));
+  process.env.GIT_EXEC_PATH = path.join(root, 'libexec', 'git-core');
+  process.env.GIT_TEMPLATE_DIR = path.join(root, 'share', 'git-core', 'templates');
+};
+
+const resolveGitExecutableInRoot = async (root: string): Promise<string | null> => {
+  const candidates =
+    process.platform === 'win32'
+      ? [
+          path.join(root, 'cmd', 'git.exe'),
+          path.join(root, 'bin', 'git.exe'),
+          path.join(root, 'mingw64', 'bin', 'git.exe'),
+        ]
+      : [
+          path.join(root, 'bin', 'git'),
+          path.join(root, 'cmd', 'git'),
+        ];
+
+  for (const candidate of candidates) {
+    if ((await existsFile(candidate)) && (await canRunCommand(candidate, ['--version']))) {
+      return candidate;
+    }
+  }
+
+  return null;
+};
+
+const ensureBundledGitAvailable = async (): Promise<boolean> => {
+  const platformAlias = resolvePlatformAlias();
+  if (platformAlias !== 'win32_x64' && platformAlias !== 'darwin_arm64') {
+    return false;
+  }
+
+  const lockKey = `git:${BUNDLED_GIT_VERSION}:${platformAlias}`;
+  const pending = gitToolLocks.get(lockKey);
+  const gitPath = pending
+    ? await pending
+    : await (async () => {
+        const task = (async (): Promise<string | null> => {
+          const targetRoot = path.join(getRuntimesRoot(), 'git', BUNDLED_GIT_VERSION, platformAlias);
+          const readyPath = path.join(targetRoot, '.ready');
+
+          try {
+            await fs.access(readyPath);
+            return await resolveGitExecutableInRoot(targetRoot);
+          } catch {
+            // continue with extraction
+          }
+
+          const resourcesRoot = getBundledResourcesRoot();
+          const gitVersionDir = path.join(resourcesRoot, 'git', BUNDLED_GIT_VERSION);
+          const gitArchive = await findRuntimeArchive(gitVersionDir, platformAlias);
+          if (!gitArchive) {
+            return null;
+          }
+
+          const checksumFile = await findRuntimeChecksumFile(gitVersionDir, gitArchive, platformAlias);
+          if (checksumFile) {
+            const checksumRaw = await fs.readFile(checksumFile, 'utf8');
+            const expected = checksumRaw.trim().split(/\s+/)[0];
+            if (expected && (await hashFileSha256(gitArchive)) !== expected) {
+              throw new Error(`git_checksum_mismatch_${BUNDLED_GIT_VERSION}_${platformAlias}`);
+            }
+          }
+
+          const tempDir = path.join(getTempRoot(), `git-${BUNDLED_GIT_VERSION}-${platformAlias}-${Date.now()}`);
+          await fs.mkdir(path.dirname(targetRoot), { recursive: true });
+          await fs.rm(tempDir, { recursive: true, force: true });
+          await extractArchive(gitArchive, tempDir);
+          await flattenSingleTopLevelDirectory(tempDir);
+          await fs.rm(targetRoot, { recursive: true, force: true });
+          await fs.mkdir(path.dirname(targetRoot), { recursive: true });
+          await fs.rename(tempDir, targetRoot);
+          await fs.writeFile(readyPath, new Date().toISOString(), 'utf8');
+          return await resolveGitExecutableInRoot(targetRoot);
+        })();
+
+        gitToolLocks.set(lockKey, task);
+        try {
+          return await task;
+        } finally {
+          gitToolLocks.delete(lockKey);
+        }
+      })();
+
+  if (!gitPath) {
+    return false;
+  }
+
+  configureBundledGitEnvironment(path.dirname(path.dirname(gitPath)));
+  return await canRunCommand('git', ['--version']);
+};
+
 const ensureGitAvailable = async (): Promise<void> => {
+  if (process.platform === 'darwin' && (await ensureBundledGitAvailable())) {
+    return;
+  }
+
   if (await canRunCommand('git', ['--version'])) {
+    return;
+  }
+
+  if (await ensureBundledGitAvailable()) {
+    return;
+  }
+
+  if (await makeDiscoveredGitAvailable()) {
     return;
   }
 
@@ -2140,7 +2412,11 @@ const ensureGitAvailable = async (): Promise<void> => {
     }
   }
 
-  if (!(await canRunCommand('git', ['--version']))) {
+  if (
+    !(await canRunCommand('git', ['--version'])) &&
+    !(await ensureBundledGitAvailable()) &&
+    !(await makeDiscoveredGitAvailable())
+  ) {
     throw new Error('git_unavailable');
   }
 };
@@ -3801,7 +4077,8 @@ const getAppDetails = async (appId: string): Promise<AppDetails | null> => {
     originalCommitSha = await getOriginalCommitSha(installed.installDir);
     await upsertInstalledRecord({ ...installed, originalCommitSha });
   }
-  const agents = installed ? await resolveInstalledAgents(appId) : [];
+  const agents = installed ? await resolveInstalledAgents(appId) : catalog?.agents ?? [];
+  const promptReviews = installed ? await listAppPrompts(appId) : [];
 
   return {
     app: appEntry,
@@ -3823,9 +4100,10 @@ const getAppDetails = async (appId: string): Promise<AppDetails | null> => {
     installedAt: installed?.installedAt,
     operations: installed ? await readOperationSummaries(appId) : [],
     localChanges: installed?.installDir ? await readLocalChangeSummaries(installed.installDir) : [],
-    promptTemplates: installed ? await resolveInstalledPromptTemplates(appId) : [],
+    promptTemplates: installed ? await resolveInstalledPromptTemplates(appId) : catalog?.promptTemplates ?? [],
     agents,
-    codexConversation: installed && agents.length > 0 ? { enabled: true } : undefined,
+    promptReviews,
+    codexConversation: agents.length > 0 ? { enabled: true } : undefined,
   };
 };
 
@@ -5241,6 +5519,22 @@ const registerIpcHandlers = (): void => {
     return await getAppDetails(appId);
   });
 
+  ipcMain.handle(IPC_CHANNELS.listAppPrompts, async (_event, appId: string) => {
+    return await listAppPrompts(appId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.validateAppPrompt, async (_event, input: AppPromptReviewInput) => {
+    return await validateAppPrompt(input);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.updateAppPrompt, async (_event, input: AppPromptReviewInput) => {
+    return await updateAppPrompt(input);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.restoreAppPrompt, async (_event, input: AppPromptRestoreInput) => {
+    return await restoreAppPrompt(input);
+  });
+
   ipcMain.handle(IPC_CHANNELS.installWelcome, async (_event, appId: string, userLanguage?: string) => {
     return await installWelcome(appId, userLanguage);
   });
@@ -5977,6 +6271,9 @@ app.whenReady().then(async () => {
       return { success: false, userMessage: 'La app no esta abierta.', technicalCode: 'app_not_running' };
     },
     updateApp: updateAppRuntime,
+    listAppPrompts,
+    updateAppPrompt,
+    restoreAppPrompt,
     memoryList: async (input, access) => await getMemoryStore().list(input, access),
     memoryCreate: async (input, access) => await getMemoryStore().create(input, access),
     memoryUpdate: async (input, access) => await getMemoryStore().update(input, access),
