@@ -19,6 +19,12 @@ import type {
   PreviewDiffFile,
 } from '../../shared/types';
 import { buildFailureDiagnostic } from '../../shared/error-diagnostics';
+import {
+  assertAllowedMcpServers,
+  createIsolatedCodexHome,
+  DisallowedMcpServerError,
+  removeIsolatedCodexHome,
+} from '../codex-run-isolation';
 
 interface ChatOrchestratorOptions {
   forgerHomeRoot: string;
@@ -273,7 +279,7 @@ class SandboxRunner {
           '--config',
           `mcp_servers.${server.name}.tool_timeout_sec=${server.toolTimeoutSec ?? 600}`,
           '--config',
-          `mcp_servers.${server.name}.default_tools_approval_mode="approve"`,
+          `mcp_servers.${server.name}.default_tools_approval_mode="auto"`,
           ...(server.name === 'forger'
             ? [
           '--config',
@@ -281,7 +287,7 @@ class SandboxRunner {
           '--config',
           'apps.forger.default_tools_enabled=true',
           '--config',
-          'apps.forger.default_tools_approval_mode="approve"',
+          'apps.forger.default_tools_approval_mode="auto"',
           '--config',
           'apps.forger.destructive_enabled=true',
           '--config',
@@ -341,50 +347,73 @@ class SandboxRunner {
     let lastResult: CommandResult | null = null;
     let lastErrorMessage = '';
     const codexCommand = await this.resolveCodexCommand(params);
-    for (const [index, args] of attempts.entries()) {
-      try {
-        const mode = args.includes('resume') ? 'resume' : 'new';
-        const json = args.includes('--json') ? 'json' : 'plain';
-        params.onOutput?.(
-          'meta',
-          `Intento ${index + 1}/${attempts.length} (${mode}, ${json}, model=${params.model})`,
-        );
-        const result = await runCommandCapture(
-          codexCommand.command,
-          [...codexCommand.prefixArgs, ...topLevelArgs, ...args],
-          {
-            cwd: params.workingDir,
-            env: {
-              CODEX_HOME: this.codexHome,
-              FORGER_ALLOWED_ROOTS: allowedRoots,
-              ...Object.fromEntries(mcpServers.map((server) => [server.tokenEnvVar, server.token])),
-              ...params.environment,
-              PATH: [...codexCommand.pathEntries, process.env.PATH ?? ''].filter(Boolean).join(path.delimiter),
+    const isolatedCodexHome = await createIsolatedCodexHome(this.codexHome, {
+      prefix: 'forger-chat-codex-home',
+      trustedRoots: [params.workingDir],
+    });
+    const allowedMcpServers = new Set(mcpServers.map((server) => server.name));
+    try {
+      params.onOutput?.(
+        'meta',
+        [
+          `Codex isolated CODEX_HOME=${isolatedCodexHome}`,
+          `workingDir=${params.workingDir}`,
+          `allowedMcpServers=${mcpServers.map((server) => server.name).join(',') || '(none)'}`,
+          'askForApproval=never',
+          'mcpDefaultToolsApprovalMode=auto',
+        ].join(' '),
+      );
+      for (const [index, args] of attempts.entries()) {
+        try {
+          const mode = args.includes('resume') ? 'resume' : 'new';
+          const json = args.includes('--json') ? 'json' : 'plain';
+          params.onOutput?.(
+            'meta',
+            `Intento ${index + 1}/${attempts.length} (${mode}, ${json}, model=${params.model})`,
+          );
+          const result = await runCommandCapture(
+            codexCommand.command,
+            [...codexCommand.prefixArgs, ...topLevelArgs, ...args],
+            {
+              cwd: params.workingDir,
+              env: {
+                CODEX_HOME: isolatedCodexHome,
+                FORGER_ALLOWED_ROOTS: allowedRoots,
+                ...Object.fromEntries(mcpServers.map((server) => [server.tokenEnvVar, server.token])),
+                ...params.environment,
+                PATH: [...codexCommand.pathEntries, process.env.PATH ?? ''].filter(Boolean).join(path.delimiter),
+              },
+              inactivityTimeoutMs: attemptInactivityTimeoutMs,
+              onChild: params.onChild,
+              onStdout: (text) => params.onOutput?.('stdout', text),
+              onStderr: (text) => params.onOutput?.('stderr', text),
             },
-            inactivityTimeoutMs: attemptInactivityTimeoutMs,
-            onChild: params.onChild,
-            onStdout: (text) => params.onOutput?.('stdout', text),
-            onStderr: (text) => params.onOutput?.('stderr', text),
-          },
-        );
+          );
 
-        lastResult = result;
-        if (result.code === 0) {
-          const parsed = parseCodexJsonl(result.stdout, result.stderr);
-          return {
-            assistantText: parsed.assistantText || 'Listo. ¿Qué te gustaría hacer ahora en esta app?',
-            threadId: parsed.threadId,
-            usageDelta: parsed.usageDelta,
-            toolEvents: parsed.toolEvents,
-          };
-        }
-        lastErrorMessage = (result.stderr || result.stdout || '').trim();
-      } catch (error) {
-        if (error instanceof Error) {
-          lastErrorMessage = error.message;
-          params.onOutput?.('meta', `Intento ${index + 1} falló: ${error.message}`);
+          assertAllowedMcpServers(result.stdout, result.stderr, allowedMcpServers);
+          lastResult = result;
+          if (result.code === 0) {
+            const parsed = parseCodexJsonl(result.stdout, result.stderr);
+            return {
+              assistantText: parsed.assistantText || 'Listo. ¿Qué te gustaría hacer ahora en esta app?',
+              threadId: parsed.threadId,
+              usageDelta: parsed.usageDelta,
+              toolEvents: parsed.toolEvents,
+            };
+          }
+          lastErrorMessage = (result.stderr || result.stdout || '').trim();
+        } catch (error) {
+          if (error instanceof DisallowedMcpServerError) {
+            throw error;
+          }
+          if (error instanceof Error) {
+            lastErrorMessage = error.message;
+            params.onOutput?.('meta', `Intento ${index + 1} falló: ${error.message}`);
+          }
         }
       }
+    } finally {
+      await removeIsolatedCodexHome(isolatedCodexHome);
     }
 
     const message = (
@@ -424,7 +453,7 @@ export class ChatOrchestrator {
   }
 
   public async startRun(input: ChatStartRunInput): Promise<{ runId: string; status: ChatRunStatus }> {
-    if (!input.appId || !input.prompt.trim()) {
+    if (!input.prompt.trim()) {
       throw new Error('invalid_chat_start_input');
     }
 
@@ -434,18 +463,20 @@ export class ChatOrchestrator {
       throw error;
     }
 
-    const appRoot = path.join(this.options.privateAppsRoot, input.appId);
+    const appId = input.appId?.trim() || 'forger';
+    const isFreeChat = appId === 'forger';
+    const appRoot = isFreeChat ? this.options.forgerHomeRoot : path.join(this.options.privateAppsRoot, appId);
     const stagingDir = path.join(this.options.metadataRoot, 'staging', randomUUID());
     const runId = randomUUID();
     const now = new Date().toISOString();
 
     const sharedRoots = await this.resolveSharedRoots(input.sharedFiles ?? []);
-    const taskType = classifyForgerTask(input.prompt);
+    const taskType = isFreeChat ? 'resolver_dudas' : classifyForgerTask(input.prompt);
     const baseHead = taskType === 'actualizar_aplicacion' ? await getGitHead(appRoot) : null;
 
     const run: InternalChatRun = {
       runId,
-      appId: input.appId,
+      appId,
       prompt: input.prompt,
       threadId:
         input.threadId === null
@@ -466,6 +497,7 @@ export class ChatOrchestrator {
       model: input.model?.trim() || 'gpt-5.3-codex',
       reasoningEffort: input.reasoningEffort ?? 'low',
       taskType,
+      conversationId: typeof input.conversationId === 'string' ? input.conversationId : undefined,
     };
 
     this.runs.set(runId, run);
@@ -780,7 +812,7 @@ export class ChatOrchestrator {
         'utf8',
       );
       forgerMcpSession = this.options.createForgerMcpSession?.(run.runId, run.appId) ?? null;
-      appMcpServers = await (this.options.listenAppMcps?.([run.appId], run.runId) ?? Promise.resolve([]));
+      appMcpServers = await (this.options.listenAppMcps?.(run.appId === 'forger' ? [] : [run.appId], run.runId) ?? Promise.resolve([]));
       const mcpServers: CodexMcpServerConfig[] = [
         ...(forgerMcpSession
           ? [{

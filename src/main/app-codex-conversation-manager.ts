@@ -12,7 +12,13 @@ import type {
   AppCodexConversationRunStatus,
   AppAgent,
   CodexReasoningEffort,
+  PermissionRequest,
 } from '../shared/types';
+import {
+  assertAllowedMcpServers,
+  createIsolatedCodexHome,
+  removeIsolatedCodexHome,
+} from './codex-run-isolation';
 
 interface CodexMcpServerConfig {
   name: string;
@@ -35,8 +41,10 @@ interface AppCodexConversationManagerOptions {
   createForgerMcpSession?: (runId: string, appId: string) => { url: string; token: string } | null;
   releaseForgerMcpSession?: (token: string) => void;
   buildMemoryContext?: (appId: string) => Promise<string>;
+  buildForgerToolsContext?: (appId: string) => Promise<string>;
   listenAppMcps?: (appIds: string[], runId: string) => Promise<CodexMcpServerConfig[]>;
   releaseAppMcps?: (runId: string) => void;
+  canRequestPermission?: (appId: string) => boolean;
   onConversationEvent: (event: AppCodexConversationEvent) => void;
 }
 
@@ -58,6 +66,12 @@ interface CommandResult {
   stderr: string;
 }
 
+interface PendingPermission {
+  runId: string;
+  requestId: string;
+  resolve: (decision: 'allow' | 'deny') => void;
+}
+
 const DEFAULT_MODEL = 'gpt-5.3-codex';
 const DEFAULT_REASONING: CodexReasoningEffort = 'low';
 const MAX_CONTEXT_CHARS = 40_000;
@@ -67,6 +81,7 @@ const CODEX_CONVERSATION_RUN_TIMEOUT_MS = 600_000;
 export class AppCodexConversationManager {
   private readonly conversations = new Map<string, InternalConversation>();
   private readonly runs = new Map<string, InternalRun>();
+  private readonly pendingPermissions = new Map<string, PendingPermission>();
   private loadPromise: Promise<void> | null = null;
 
   public constructor(private readonly options: AppCodexConversationManagerOptions) {}
@@ -183,6 +198,8 @@ export class AppCodexConversationManager {
       return { success: true };
     }
     killProcessTree(run.child);
+    this.resolvePendingPermission(runId, 'deny');
+    run.permissionRequest = undefined;
     run.status = 'canceled';
     run.updatedAt = new Date().toISOString();
     conversation.activeRun = toRun(run);
@@ -196,6 +213,93 @@ export class AppCodexConversationManager {
     return { success: true };
   }
 
+  public async requestPermission(
+    runId: string,
+    input: Omit<PermissionRequest, 'requestId'>,
+  ): Promise<boolean | null> {
+    const run = this.runs.get(runId);
+    const conversation = run ? this.conversations.get(run.conversationId) : null;
+    if (!run || !conversation || run.status === 'canceled' || run.status === 'failed') {
+      return null;
+    }
+    if (this.options.canRequestPermission && !this.options.canRequestPermission(run.appId)) {
+      return null;
+    }
+
+    const request: PermissionRequest = { requestId: randomUUID(), ...input };
+    run.permissionRequest = request;
+    run.status = 'needs_permission';
+    run.updatedAt = new Date().toISOString();
+    conversation.activeRun = toRun(run);
+    conversation.updatedAt = run.updatedAt;
+    await this.persistApp(run.appId);
+    this.options.onConversationEvent({
+      type: 'run.needs_permission',
+      conversation: toConversation(conversation),
+      run: toRun(run),
+    });
+
+    const decision = await new Promise<'allow' | 'deny'>((resolve) => {
+      this.pendingPermissions.set(request.requestId, { runId, requestId: request.requestId, resolve });
+    });
+
+    if (this.runs.get(runId)?.permissionRequest?.requestId === request.requestId) {
+      run.permissionRequest = undefined;
+      run.status = run.status === 'needs_permission' ? 'running' : run.status;
+      run.updatedAt = new Date().toISOString();
+      conversation.activeRun = toRun(run);
+      conversation.updatedAt = run.updatedAt;
+      await this.persistApp(run.appId);
+      this.options.onConversationEvent({
+        type: 'run.progress',
+        conversation: toConversation(conversation),
+        run: toRun(run),
+      });
+    }
+
+    return decision === 'allow';
+  }
+
+  public approvePermission(
+    appId: string,
+    conversationId: string,
+    runId: string,
+    requestId: string,
+    decision: 'allow' | 'deny',
+  ): { success: boolean } {
+    const run = this.runs.get(runId);
+    const pending = this.pendingPermissions.get(requestId);
+    if (!run || run.appId !== appId || run.conversationId !== conversationId || !pending || pending.runId !== runId) {
+      return { success: false };
+    }
+    this.pendingPermissions.delete(requestId);
+    pending.resolve(decision);
+    return { success: true };
+  }
+
+  public rejectPendingPermissionsForApp(appId: string): void {
+    for (const run of this.runs.values()) {
+      if (run.appId !== appId) {
+        continue;
+      }
+      const conversation = this.conversations.get(run.conversationId);
+      this.resolvePendingPermission(run.runId, 'deny');
+      run.permissionRequest = undefined;
+      if (conversation && run.status === 'needs_permission') {
+        run.status = 'running';
+        run.updatedAt = new Date().toISOString();
+        conversation.activeRun = toRun(run);
+        conversation.updatedAt = run.updatedAt;
+        void this.persistApp(appId);
+        this.options.onConversationEvent({
+          type: 'run.progress',
+          conversation: toConversation(conversation),
+          run: toRun(run),
+        });
+      }
+    }
+  }
+
   public async delete(appId: string, conversationId: string): Promise<{ success: boolean }> {
     await this.assertEnabled(appId);
     await this.load();
@@ -207,6 +311,10 @@ export class AppCodexConversationManager {
     if (activeRun && !isTerminalRunStatus(activeRun.status)) {
       const run = this.runs.get(activeRun.runId);
       killProcessTree(run?.child);
+      this.resolvePendingPermission(activeRun.runId, 'deny');
+      if (run) {
+        run.permissionRequest = undefined;
+      }
       this.runs.delete(activeRun.runId);
     }
     this.conversations.delete(conversationId);
@@ -273,7 +381,8 @@ export class AppCodexConversationManager {
       const memoryContext = !conversation.threadId
         ? await (this.options.buildMemoryContext?.(conversation.appId) ?? Promise.resolve(''))
         : '';
-      const prompt = buildPrompt(input.message, input.context, [initialPrompt, memoryContext].filter(Boolean).join('\n\n'));
+      const forgerToolsContext = await (this.options.buildForgerToolsContext?.(conversation.appId) ?? Promise.resolve(''));
+      const prompt = buildPrompt(input.message, input.context, [initialPrompt, memoryContext, forgerToolsContext].filter(Boolean).join('\n\n'));
       const attachmentPaths = await this.prepareAttachments(conversation.appId, run, input);
       const imageArgs = attachmentPaths.flatMap((filePath) => ['--image', filePath]);
       const args = conversation.threadId
@@ -313,24 +422,32 @@ export class AppCodexConversationManager {
             '--',
             '-',
           ];
+      const isolatedCodexHome = await createIsolatedCodexHome(this.options.codexHome, {
+        prefix: 'forger-conversation-codex-home',
+        trustedRoots: [appRoot],
+      });
+      const allowedMcpServers = new Set(mcpServers.map((server) => server.name));
 
       const result = await runCommandCapture(command.command, args, {
-        cwd: appRoot,
-        env: {
-          CODEX_HOME: this.options.codexHome,
-          FORGER_ALLOWED_ROOTS: appRoot,
-          ...Object.fromEntries(mcpServers.map((server) => [server.tokenEnvVar, server.token])),
-          ...environment,
-          PATH: [...command.pathEntries, process.env.PATH ?? ''].filter(Boolean).join(path.delimiter),
-        },
-        timeoutMs: CODEX_CONVERSATION_RUN_TIMEOUT_MS,
-        onChild: (child) => {
-          run.child = child;
-        },
-        onStdout: (text) => this.handleOutput(conversation, run, text),
-        onStderr: (text) => this.handleOutput(conversation, run, text),
-        stdinText: prompt,
-      });
+          cwd: appRoot,
+          env: {
+            CODEX_HOME: isolatedCodexHome,
+            FORGER_ALLOWED_ROOTS: appRoot,
+            ...Object.fromEntries(mcpServers.map((server) => [server.tokenEnvVar, server.token])),
+            ...environment,
+            PATH: [...command.pathEntries, process.env.PATH ?? ''].filter(Boolean).join(path.delimiter),
+          },
+          timeoutMs: CODEX_CONVERSATION_RUN_TIMEOUT_MS,
+          onChild: (child) => {
+            run.child = child;
+          },
+          onStdout: (text) => this.handleOutput(conversation, run, text),
+          onStderr: (text) => this.handleOutput(conversation, run, text),
+          stdinText: prompt,
+        }).finally(async () => {
+          await removeIsolatedCodexHome(isolatedCodexHome);
+        });
+      assertAllowedMcpServers(result.stdout, result.stderr, allowedMcpServers);
 
       if (this.runs.get(run.runId)?.status === 'canceled') {
         return;
@@ -447,6 +564,8 @@ export class AppCodexConversationManager {
     if (!conversation) {
       return;
     }
+    this.resolvePendingPermission(runId, 'deny');
+    run.permissionRequest = undefined;
     run.status = 'failed';
     run.error = message;
     run.updatedAt = new Date().toISOString();
@@ -458,6 +577,15 @@ export class AppCodexConversationManager {
       conversation: toConversation(conversation),
       run: toRun(run),
     });
+  }
+
+  private resolvePendingPermission(runId: string, decision: 'allow' | 'deny'): void {
+    for (const [requestId, pending] of this.pendingPermissions.entries()) {
+      if (pending.runId === runId) {
+        this.pendingPermissions.delete(requestId);
+        pending.resolve(decision);
+      }
+    }
   }
 
   private async assertEnabled(appId: string): Promise<void> {
@@ -576,6 +704,7 @@ const toRun = (run: AppCodexConversationRun): AppCodexConversationRun => ({
   updatedAt: run.updatedAt,
   ...(run.error ? { error: run.error } : {}),
   ...(run.progressLog ? { progressLog: run.progressLog } : {}),
+  ...(run.permissionRequest ? { permissionRequest: run.permissionRequest } : {}),
 });
 
 const isTerminalRunStatus = (status: AppCodexConversationRunStatus): boolean =>
@@ -781,7 +910,7 @@ const buildMcpArgs = (mcpServers: CodexMcpServerConfig[]): string[] =>
     '--config',
     `mcp_servers.${server.name}.tool_timeout_sec=${server.toolTimeoutSec ?? 600}`,
     '--config',
-    `mcp_servers.${server.name}.default_tools_approval_mode="approve"`,
+    `mcp_servers.${server.name}.default_tools_approval_mode="auto"`,
   ]);
 
 const resolveCodexCommand = async (

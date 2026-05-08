@@ -11,6 +11,8 @@ import type {
   RuntimeStatus,
   StopAppResult,
   InstallAppResult,
+  CallOfficialToolInput,
+  CallOfficialToolResult,
   MemoryCreateInput,
   MemoryEntry,
   MemoryListInput,
@@ -26,7 +28,7 @@ export interface ForgerMcpSessionRef {
 interface AgentMcpSession {
   runId: string;
   appId: string;
-  caller: 'desktop-chat' | 'app-agent' | 'automation';
+  caller: 'desktop-chat' | 'app-agent' | 'automation' | 'free-chat';
   appIds: string[];
   token: string;
   createdAt: string;
@@ -51,7 +53,7 @@ interface ForgerMcpServerOptions {
       risk: 'low' | 'medium' | 'high';
       resource: string;
     },
-  ) => Promise<boolean> | null;
+  ) => Promise<boolean | null> | null;
   listCatalog: () => Promise<CatalogApp[]>;
   listInstalledApps: () => AppSummary[];
   checkUpdates: () => Promise<AppSummary[]>;
@@ -65,6 +67,15 @@ interface ForgerMcpServerOptions {
   memoryCreate: (input: MemoryCreateInput, access: MemoryAccessInput) => Promise<MemoryEntry>;
   memoryUpdate: (input: MemoryUpdateInput, access: MemoryAccessInput) => Promise<MemoryEntry>;
   memoryDelete: (id: string, access: MemoryAccessInput) => Promise<{ success: boolean }>;
+  listOfficialToolActionIdsForApp: (appId: string) => Promise<Set<string>>;
+  validateOfficialTool: (
+    input: CallOfficialToolInput,
+    access: { caller: AgentMcpSession['caller']; appId: string },
+  ) => Promise<CallOfficialToolResult | null>;
+  callOfficialTool: (
+    input: CallOfficialToolInput,
+    access: { caller: AgentMcpSession['caller']; appId: string },
+  ) => Promise<CallOfficialToolResult>;
   onToolProgress?: (input: { appId: string; runId: string; toolName?: unknown; message: string }) => void;
   onToolFailure?: (input: { appId: string; runId: string; toolName?: unknown; error: unknown }) => void;
   onHttpFailure?: (input: { appId?: string; runId?: string; error: unknown }) => void;
@@ -82,6 +93,20 @@ interface ToolApprovalResult {
   required: boolean;
   status: 'not_required' | 'approved' | 'denied' | 'unavailable';
   userMessage: string;
+}
+
+interface McpToolAnnotations {
+  readOnlyHint: boolean;
+  destructiveHint: boolean;
+  idempotentHint: boolean;
+  openWorldHint: boolean;
+}
+
+interface ForgerMcpTool {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+  annotations: McpToolAnnotations;
 }
 
 interface MemoryAccessInput {
@@ -259,7 +284,7 @@ export class ForgerMcpServer {
     }
 
     if (request.method === 'tools/list') {
-      return { jsonrpc: '2.0', id, result: { tools: this.getMcpTools() } };
+      return { jsonrpc: '2.0', id, result: { tools: await this.getMcpTools(session) } };
     }
 
     if (request.method === 'tools/call') {
@@ -324,12 +349,34 @@ export class ForgerMcpServer {
     }
   }
 
-  private getMcpTools(): Array<{ name: string; description: string; inputSchema: Record<string, unknown> }> {
-    return this.options.getToolDefinitions().map((tool) => ({
+  private async getMcpTools(session: AgentMcpSession): Promise<ForgerMcpTool[]> {
+    const allowedOfficialActions = session.caller === 'app-agent'
+      ? await this.options.listOfficialToolActionIdsForApp(session.appId)
+      : null;
+    const tools = this.options.getToolDefinitions().filter((tool) => {
+      if (!isOfficialTool(tool.id)) {
+        return true;
+      }
+      return allowedOfficialActions ? allowedOfficialActions.has(tool.id) : true;
+    }).map((tool) => ({
       name: tool.id,
       description: tool.description,
       inputSchema: getMcpToolInputSchema(tool.id),
+      annotations: getMcpToolAnnotations(tool),
     }));
+    await this.options.appendInstallLog('agent_tool:mcp_tools_list_built', {
+      appId: session.appId,
+      runId: session.runId,
+      caller: session.caller,
+      toolCount: tools.length,
+      nativeApprovalMode: 'auto',
+      forgerPermissionBroker: true,
+      tools: tools.map((tool) => ({
+        name: tool.name,
+        annotations: tool.annotations,
+      })),
+    });
+    return tools;
   }
 
   private isAgentToolId(value: unknown): value is AgentToolId {
@@ -391,6 +438,14 @@ export class ForgerMcpServer {
     });
     this.emitToolProgress(session, tool.id, `Esperando autorizacion para ${tool.name}...`);
     const approved = await requestPermission;
+    if (approved === null) {
+      return {
+        approved: false,
+        required: true,
+        status: 'unavailable',
+        userMessage: 'No se pudo solicitar autorizacion para esta herramienta.',
+      };
+    }
     await this.options.appendInstallLog('agent_tool:approval_resolved', {
       appId: session.appId,
       runId: session.runId,
@@ -431,6 +486,17 @@ export class ForgerMcpServer {
       requiresApproval: Boolean(this.options.getToolSettings().approvals[tool.id]),
     });
 
+    if (isOfficialTool(toolId)) {
+      const validation = await this.options.validateOfficialTool(
+        buildOfficialToolCallInput(toolId, args),
+        { caller: session.caller, appId: session.appId },
+      );
+      if (validation) {
+        await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result: validation });
+        return validation;
+      }
+    }
+
     const approval = await this.ensureToolApproval(session, tool);
     if (!approval.approved) {
       await this.options.appendInstallLog('agent_tool:call_cancelled', {
@@ -440,7 +506,13 @@ export class ForgerMcpServer {
         reason: 'forger_permission_denied_or_unavailable',
       });
       return withToolAuthorization(
-        { success: false, userMessage: 'La accion fue cancelada por el usuario.', technicalCode: 'permission_denied' },
+        {
+          success: false,
+          userMessage: approval.status === 'unavailable'
+            ? 'No se pudo mostrar la autorizacion para esta herramienta.'
+            : 'La accion fue cancelada por el usuario.',
+          technicalCode: approval.status === 'unavailable' ? 'permission_unavailable' : 'permission_denied',
+        },
         approval,
       );
     }
@@ -523,6 +595,15 @@ export class ForgerMcpServer {
         await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
         return result;
       }
+    }
+
+    if (isOfficialTool(toolId)) {
+      const result = await this.options.callOfficialTool(
+        buildOfficialToolCallInput(toolId, args),
+        { caller: session.caller, appId: session.appId },
+      );
+      await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
+      return withToolAuthorization(result, approval);
     }
 
     const appId = getToolAppId(session, args);
@@ -652,6 +733,42 @@ const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unknown> => 
     };
   }
 
+  if (toolId === 'gmail.search_messages') {
+    return {
+      type: 'object',
+      properties: {
+        query: { type: 'string' },
+        maxResults: { type: 'number' },
+      },
+      required: ['query'],
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'gmail.read_thread') {
+    return {
+      type: 'object',
+      properties: {
+        threadId: { type: 'string' },
+        messageId: { type: 'string' },
+      },
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'gmail.send_email') {
+    return {
+      type: 'object',
+      properties: {
+        to: { type: 'array', items: { type: 'string' } },
+        subject: { type: 'string' },
+        body: { type: 'string' },
+      },
+      required: ['to', 'subject', 'body'],
+      additionalProperties: false,
+    };
+  }
+
   return {
     type: 'object',
     properties: {},
@@ -660,6 +777,37 @@ const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unknown> => 
 };
 
 const isMemoryTool = (toolId: AgentToolId): boolean => toolId.startsWith('memory_');
+
+const isOfficialTool = (toolId: AgentToolId): boolean => toolId.startsWith('gmail.');
+
+const buildOfficialToolCallInput = (
+  actionId: AgentToolId,
+  input: Record<string, unknown>,
+): CallOfficialToolInput => {
+  if (actionId.startsWith('gmail.')) {
+    return { toolId: 'gmail', actionId, input };
+  }
+  return { toolId: actionId, actionId, input };
+};
+
+const getMcpToolAnnotations = (tool: AgentToolDefinition): McpToolAnnotations => {
+  if (tool.category === 'consulta' || tool.category === 'memoria') {
+    return {
+      readOnlyHint: tool.category === 'consulta' || tool.id === 'memory_list',
+      destructiveHint: false,
+      idempotentHint: tool.id !== 'memory_create',
+      openWorldHint: false,
+    };
+  }
+  // Codex native approval must not block Forger runs; sensitive actions are
+  // still gated inside executeAgentTool through ensureToolApproval().
+  return {
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: false,
+    openWorldHint: false,
+  };
+};
 
 const memoryAccess = (session: AgentMcpSession): MemoryAccessInput => ({
   caller: session.caller,

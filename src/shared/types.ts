@@ -16,6 +16,10 @@ export interface AppSummary {
   changelog?: VersionChangelog;
   capabilities?: AppCapability[];
   userMessage?: string;
+  tools?: {
+    required?: AppToolDeclaration[];
+    optional?: AppToolDeclaration[];
+  };
 }
 
 export interface VersionChangelog {
@@ -507,7 +511,11 @@ export type AgentToolId =
   | 'forger_stop_app'
   | 'forger_restart_app'
   | 'forger_refresh_app_view'
-  | 'forger_update_app';
+  | 'forger_update_app'
+  | 'gmail.connection.status'
+  | 'gmail.search_messages'
+  | 'gmail.read_thread'
+  | 'gmail.send_email';
 
 export type AgentToolCategory = 'consulta' | 'app' | 'actualizacion' | 'vista' | 'memoria';
 
@@ -540,6 +548,119 @@ export interface AgentToolSettings {
 export interface UpdateAgentToolApprovalInput {
   toolId: AgentToolId;
   requiresApproval: boolean;
+}
+
+export type OfficialToolRuntime = 'node' | 'python' | 'builtin';
+
+export type OfficialToolInstallState =
+  | 'available'
+  | 'installed'
+  | 'configured'
+  | 'error';
+
+export type OfficialToolRisk = 'low' | 'medium' | 'high';
+
+export interface OfficialToolActionDefinition {
+  id: string;
+  name: string;
+  description: string;
+  risk: OfficialToolRisk;
+  inputSchema?: Record<string, unknown>;
+}
+
+export interface OfficialToolSecretDefinition {
+  name: string;
+  label: string;
+  required: boolean;
+  usage: string;
+}
+
+export interface OfficialToolDefinition {
+  id: string;
+  name: string;
+  description: string;
+  version: string;
+  runtime: OfficialToolRuntime;
+  actions: OfficialToolActionDefinition[];
+  secrets: OfficialToolSecretDefinition[];
+  changelog?: string[];
+  official: true;
+}
+
+export interface InstalledOfficialToolRecord {
+  id: string;
+  version: string;
+  status: Exclude<OfficialToolInstallState, 'available'>;
+  installDir?: string;
+  configured: boolean;
+  installedAt: string;
+  updatedAt: string;
+  error?: string;
+  grantedAppIds?: string[];
+}
+
+export interface OfficialToolSummary extends OfficialToolDefinition {
+  status: OfficialToolInstallState;
+  installedVersion?: string;
+  configured: boolean;
+  error?: string;
+}
+
+export interface OfficialToolsState {
+  tools: OfficialToolSummary[];
+}
+
+export interface ToolMutationResult {
+  success: boolean;
+  userMessage: string;
+  technicalCode?: string;
+  tool?: OfficialToolSummary;
+}
+
+export interface ConfigureOfficialToolInput {
+  toolId: string;
+}
+
+export interface CallOfficialToolInput {
+  toolId: string;
+  actionId: string;
+  input?: Record<string, unknown>;
+}
+
+export interface CallOfficialToolResult {
+  success: boolean;
+  userMessage?: string;
+  technicalCode?: string;
+  data?: unknown;
+}
+
+export interface AppToolDeclaration {
+  toolId: string;
+  actions: string[];
+  reason: string;
+}
+
+export interface AppToolRequirementState {
+  declaration: AppToolDeclaration;
+  required: boolean;
+  tool?: OfficialToolSummary;
+  granted: boolean;
+  available: boolean;
+  configured: boolean;
+}
+
+export interface AppToolsInstallGate {
+  appId: string;
+  appName: string;
+  required: AppToolRequirementState[];
+  optional: AppToolRequirementState[];
+  canInstall: boolean;
+}
+
+export interface SetAppToolGrantInput {
+  appId: string;
+  toolId: string;
+  granted: boolean;
 }
 
 export type ChatRunStatus =
@@ -615,6 +736,7 @@ export interface ChatRun {
   progressLog?: string[];
   operationId?: string;
   commitSha?: string;
+  conversationId?: string;
 }
 
 export interface AppOperationSummary {
@@ -671,7 +793,7 @@ export interface ChatRunEvent {
 }
 
 export interface ChatStartRunInput {
-  appId: string;
+  appId?: string | null;
   prompt: string;
   threadId?: string | null;
   userLanguage?: string;
@@ -679,6 +801,7 @@ export interface ChatStartRunInput {
   model?: string;
   reasoningEffort?: CodexReasoningEffort;
   dangerMode?: boolean;
+  conversationId?: string;
 }
 
 export interface ChatGetRunInput {
@@ -900,6 +1023,7 @@ export interface AppCodexTaskSummary {
   resultText?: string;
   error?: string;
   progressLog?: string[];
+  permissionRequest?: PermissionRequest;
 }
 
 export interface AppCodexTaskEvent {
@@ -911,6 +1035,7 @@ export type AppCodexConversationRole = 'user' | 'assistant';
 export type AppCodexConversationRunStatus =
   | 'queued'
   | 'running'
+  | 'needs_permission'
   | 'completed'
   | 'failed'
   | 'canceled';
@@ -930,6 +1055,7 @@ export interface AppCodexConversationRun {
   updatedAt: string;
   error?: string;
   progressLog?: string[];
+  permissionRequest?: PermissionRequest;
 }
 
 export interface AppCodexConversation {
@@ -969,6 +1095,7 @@ export interface AppCodexConversationEvent {
     | 'conversation.deleted'
     | 'message.created'
     | 'run.started'
+    | 'run.needs_permission'
     | 'run.progress'
     | 'run.message.completed'
     | 'run.completed'
@@ -984,6 +1111,11 @@ export interface ForgerAppApi {
   getContext: () => Promise<{ locale?: string; agents?: AppAgent[] }>;
   getAiSubscriptionStatus: () => Promise<AppAiSubscriptionStatus>;
   selectExternalFolder: () => Promise<AppExternalFolderSelection>;
+  tools: {
+    listAvailable: () => Promise<OfficialToolSummary[]>;
+    getStatus: (toolId: string) => Promise<OfficialToolSummary | null>;
+    call: (input: CallOfficialToolInput) => Promise<CallOfficialToolResult>;
+  };
   startCodexTask: (input: AppCodexTaskStartInput) => Promise<AppCodexTaskSummary>;
   getCodexTask: (runId: string) => Promise<AppCodexTaskSummary | null>;
   cancelCodexTask: (runId: string) => Promise<{ success: boolean }>;
@@ -998,6 +1130,17 @@ export interface ForgerAppApi {
     runId: string,
   ) => Promise<{ success: boolean }>;
   onCodexConversationEvent: (listener: (event: AppCodexConversationEvent) => void) => () => void;
+  approveCodexTaskPermission: (
+    runId: string,
+    requestId: string,
+    decision: 'allow' | 'deny',
+  ) => Promise<{ success: boolean }>;
+  approveCodexConversationPermission: (
+    conversationId: string,
+    runId: string,
+    requestId: string,
+    decision: 'allow' | 'deny',
+  ) => Promise<{ success: boolean }>;
 }
 
 export type AutomationFrequencyType = 'hourly' | 'daily' | 'weekly';
@@ -1114,6 +1257,13 @@ export interface ForgerDesktopApi {
   listAgentTools: () => Promise<AgentToolPackageDefinition[]>;
   getAgentToolSettings: () => Promise<AgentToolSettings>;
   updateAgentToolApproval: (input: UpdateAgentToolApprovalInput) => Promise<AgentToolSettings>;
+  listOfficialTools: () => Promise<OfficialToolsState>;
+  refreshOfficialTools: () => Promise<OfficialToolsState>;
+  activateOfficialTool: (toolId: string) => Promise<ToolMutationResult>;
+  configureOfficialTool: (input: ConfigureOfficialToolInput) => Promise<ToolMutationResult>;
+  deactivateOfficialTool: (toolId: string) => Promise<ToolMutationResult>;
+  getAppToolsInstallGate: (appId: string) => Promise<AppToolsInstallGate | null>;
+  setAppToolGrant: (input: SetAppToolGrantInput) => Promise<AppToolsInstallGate | null>;
   memoryList: (input?: MemoryListInput) => Promise<MemoryEntry[]>;
   memoryCreate: (input: MemoryCreateInput) => Promise<MemoryEntry>;
   memoryUpdate: (input: MemoryUpdateInput) => Promise<MemoryEntry>;

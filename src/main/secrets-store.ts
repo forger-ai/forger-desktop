@@ -30,6 +30,7 @@ interface SecretsVault {
   version: typeof VAULT_VERSION;
   secrets: Record<string, PersistedSecretRecord>;
   appMappings: Record<string, Record<string, string>>;
+  toolSecrets: Record<string, Record<string, EncryptedSecretValue>>;
 }
 
 export interface ResolvedAppSecretsEnv {
@@ -52,6 +53,7 @@ const createEmptyVault = (): SecretsVault => ({
   version: VAULT_VERSION,
   secrets: {},
   appMappings: {},
+  toolSecrets: {},
 });
 
 const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
@@ -65,6 +67,7 @@ const isVault = (value: unknown): value is SecretsVault => {
     value.version === VAULT_VERSION
     && isPlainRecord(value.secrets)
     && isPlainRecord(value.appMappings)
+    && (value.toolSecrets === undefined || isPlainRecord(value.toolSecrets))
   );
 };
 
@@ -282,6 +285,50 @@ export class SecretsStore {
     return { env, missingRequired, secretValues };
   }
 
+  async setToolSecret(toolId: string, secretName: string, value: string): Promise<SecretMutationResult> {
+    const loadError = await this.loadForMutation();
+    if (loadError) {
+      return loadError;
+    }
+
+    const normalizedToolId = normalizeSecretName(toolId);
+    const normalizedSecretName = normalizeSecretName(secretName);
+    if (!normalizedToolId || !normalizedSecretName || !value) {
+      return { success: false, userMessage: 'No pudimos guardar este secreto de herramienta.', technicalCode: 'invalid_tool_secret' };
+    }
+
+    this.vault.toolSecrets[normalizedToolId] = {
+      ...(this.vault.toolSecrets[normalizedToolId] ?? {}),
+      [normalizedSecretName]: this.encrypt(value),
+    };
+    await this.saveVault();
+    return { success: true, userMessage: 'Secreto de herramienta guardado.' };
+  }
+
+  async getToolSecret(toolId: string, secretName: string): Promise<string | null> {
+    await this.load();
+    const encrypted = this.vault.toolSecrets[toolId]?.[secretName];
+    if (!encrypted) {
+      return null;
+    }
+    return this.decrypt(encrypted);
+  }
+
+  async hasToolSecret(toolId: string, secretName: string): Promise<boolean> {
+    await this.load();
+    return Boolean(this.vault.toolSecrets[toolId]?.[secretName]);
+  }
+
+  async deleteToolSecrets(toolId: string): Promise<SecretMutationResult> {
+    const loadError = await this.loadForMutation();
+    if (loadError) {
+      return loadError;
+    }
+    delete this.vault.toolSecrets[toolId];
+    await this.saveVault();
+    return { success: true, userMessage: 'Secretos de herramienta eliminados.' };
+  }
+
   private async loadForMutation(): Promise<SecretMutationResult | null> {
     try {
       await this.load();
@@ -342,7 +389,10 @@ export class SecretsStore {
       if (!isVault(parsed)) {
         throw new SecretsVaultUnavailableError('secrets_vault_invalid');
       }
-      return parsed;
+      return {
+        ...parsed,
+        toolSecrets: parsed.toolSecrets ?? {},
+      };
     } catch (error) {
       if (isSecretsVaultUnavailableError(error)) {
         throw error;

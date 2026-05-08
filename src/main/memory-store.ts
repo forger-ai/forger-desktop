@@ -9,7 +9,7 @@ import type {
 } from '../shared/types';
 
 export interface MemoryAccess {
-  caller: 'desktop-chat' | 'app-agent' | 'automation' | 'settings';
+  caller: 'desktop-chat' | 'app-agent' | 'automation' | 'free-chat' | 'settings';
   appId?: string;
   appIds?: string[];
 }

@@ -29,6 +29,7 @@ import { DesktopErrorReporter } from './error-reporting';
 import { FileLibrary } from './file-library';
 import { ForgerMcpServer } from './forger-mcp-server';
 import { MemoryStore } from './memory-store';
+import { OfficialToolsService, normalizeAppToolDeclarations } from './official-tools-service';
 import { ForgerAccountStore, publicForgerAccount, type StoredForgerAccount } from './forger-account-store';
 import { ForgerBackendClient } from './forger-backend-client';
 import { CloudDeviceManager, type CloudRelayRequest, type CloudRelayResponse } from './cloud-device-manager';
@@ -41,7 +42,11 @@ import {
 } from './prompts/forger-base';
 import { buildFailureDiagnostic } from '../shared/error-diagnostics';
 import { buildForgerAppAgentsMarkdown } from './prompts/apps-base';
-import { buildCodexPromptWithAppContext } from './prompts/user-message';
+import { buildCodexPromptForFreeChat, buildCodexPromptWithAppContext } from './prompts/user-message';
+import {
+  buildForgerOfficialToolSkillTemplates,
+  buildForgerOfficialToolsPromptSection,
+} from './prompts/official-tools';
 import { SecretsStore, appSecretEnvName, isSecretsVaultUnavailableError } from './secrets-store';
 import type {
   AgentToolApprovalSettings,
@@ -49,6 +54,8 @@ import type {
   AgentToolId,
   AgentToolPackageDefinition,
   AgentToolSettings,
+  AppToolDeclaration,
+  AppToolsInstallGate,
   AppBackupSummary,
   AppCategory,
   AppDetails,
@@ -76,6 +83,8 @@ import type {
   ChatGetRunInput,
   ChatStartRunInput,
   ChatUndoInput,
+  CallOfficialToolInput,
+  ConfigureOfficialToolInput,
   CodexAuthStatus,
   DesktopErrorReportPreview,
   ConnectAppSecretInput,
@@ -109,6 +118,7 @@ import type {
   SubmitAppRatingInput,
   StopAppResult,
   UpdateAgentToolApprovalInput,
+  SetAppToolGrantInput,
   UpdateUserSecretInput,
   VersionChangelog,
   WindowControlState,
@@ -119,7 +129,7 @@ const backendBaseUrl = process.env.FORGER_BACKEND_URL ?? (isDev ? 'http://127.0.
 let localCatalogJsonUrl: string | undefined;
 const DEFAULT_NODE_VERSION = '22';
 const DEFAULT_PYTHON_VERSION = '3.12';
-const CODEX_CLI_VERSION = '0.125.0';
+const CODEX_CLI_VERSION = '0.129.0';
 const CODEX_USAGE_DASHBOARD_URL = 'https://chatgpt.com/codex/settings/usage';
 let devCatalogService: DevCatalogService | null = null;
 const APP_FOLDER_GRANT_TTL_MS = 5 * 60 * 1000;
@@ -255,6 +265,7 @@ interface AppManifest {
   scripts?: Record<string, string>;
   skills?: string[];
   appSecrets?: unknown;
+  tools?: unknown;
 }
 
 interface AppManifestVolume {
@@ -288,6 +299,7 @@ let appCodexTaskManager: AppCodexTaskManager | null = null;
 let appCodexConversationManager: AppCodexConversationManager | null = null;
 let fileLibrary: FileLibrary | null = null;
 let secretsStore: SecretsStore | null = null;
+let officialToolsService: OfficialToolsService | null = null;
 let desktopUpdater: DesktopUpdater | null = null;
 let desktopErrorReporter: DesktopErrorReporter | null = null;
 let automationManager: AutomationManager | null = null;
@@ -448,6 +460,50 @@ const AGENT_TOOL_PACKAGES: AgentToolPackageDefinition[] = [
         name: 'Actualizar app',
         description: 'Aplica una nueva version publicada cuando esta disponible.',
         category: 'actualizacion',
+        risk: 'alto',
+        defaultRequiresApproval: true,
+      },
+    ],
+  },
+  {
+    id: 'official:gmail',
+    name: 'Gmail',
+    description: 'Herramienta oficial para buscar, leer y enviar correos de Gmail.',
+    icon: 'forger',
+    tools: [
+      {
+        id: 'gmail.connection.status',
+        packageId: 'official:gmail',
+        name: 'Estado de Gmail',
+        description: 'Revisa si la cuenta de Gmail esta conectada.',
+        category: 'consulta',
+        risk: 'bajo',
+        defaultRequiresApproval: false,
+      },
+      {
+        id: 'gmail.search_messages',
+        packageId: 'official:gmail',
+        name: 'Buscar correos',
+        description: 'Busca correos de Gmail usando una consulta.',
+        category: 'consulta',
+        risk: 'medio',
+        defaultRequiresApproval: true,
+      },
+      {
+        id: 'gmail.read_thread',
+        packageId: 'official:gmail',
+        name: 'Leer correo',
+        description: 'Lee una conversacion o mensaje de Gmail.',
+        category: 'consulta',
+        risk: 'alto',
+        defaultRequiresApproval: true,
+      },
+      {
+        id: 'gmail.send_email',
+        packageId: 'official:gmail',
+        name: 'Enviar correo',
+        description: 'Envia un correo desde Gmail.',
+        category: 'app',
         risk: 'alto',
         defaultRequiresApproval: true,
       },
@@ -928,6 +984,41 @@ const getSecretsStore = (): SecretsStore => {
   return secretsStore;
 };
 
+const getOfficialToolsService = (): OfficialToolsService => {
+  if (!officialToolsService) {
+    officialToolsService = new OfficialToolsService({
+      metadataRoot: getForgerMetadataRoot(),
+      secretsStore: getSecretsStore(),
+      getFreePort,
+      openExternalUrl: async (url) => {
+        await shell.openExternal(url);
+      },
+      isForgerAccountAuthenticated: () => Boolean(forgerAccount.token),
+      getGmailOAuthClientId: async () => {
+        if (!forgerAccount.token || !forgerBackendClient) {
+          throw new Error('forger_account_required');
+        }
+        return await forgerBackendClient.getGmailOAuthClientId();
+      },
+      exchangeGmailOAuthCode: async (input) => {
+        if (!forgerAccount.token || !forgerBackendClient) {
+          throw new Error('forger_account_required');
+        }
+        return await forgerBackendClient.exchangeGmailOAuthCode(input);
+      },
+      refreshGmailOAuthAccessToken: async (input) => {
+        if (!forgerAccount.token || !forgerBackendClient) {
+          throw new Error('forger_account_required');
+        }
+        return await forgerBackendClient.refreshGmailOAuthAccessToken(input);
+      },
+      appendLog: appendInstallLog,
+      getAppToolDeclarations: resolveAppToolDeclarations,
+    });
+  }
+  return officialToolsService;
+};
+
 const getMemoryStore = (): MemoryStore => {
   if (!memoryStore) {
     memoryStore = new MemoryStore(getForgerMetadataRoot());
@@ -941,6 +1032,32 @@ const buildMemoryContextForApps = async (appIds: string[]): Promise<string> => {
 
 const buildMemoryContextForApp = async (appId: string): Promise<string> => {
   return await getMemoryStore().buildContext({ caller: 'app-agent', appId, appIds: [appId] });
+};
+
+const buildForgerToolsContextForApp = async (appId: string): Promise<string> => {
+  const state = await getOfficialToolsService().list().catch(() => null);
+  const gmail = state?.tools.find((tool) => tool.id === 'gmail');
+  const gmailReady = gmail?.status === 'configured';
+  const allowedActions = await getOfficialToolsService().listAgentActionIdsForApp(appId).catch(() => new Set<string>());
+  return buildForgerOfficialToolsPromptSection({
+    mode: 'app-agent',
+    gmailReady,
+    allowedActions: [...allowedActions],
+  });
+};
+
+const buildForgerToolsContextForFreeChat = async (): Promise<string> => {
+  const state = await getOfficialToolsService().list().catch(() => null);
+  const gmail = state?.tools.find((tool) => tool.id === 'gmail');
+  const gmailReady = gmail?.status === 'configured';
+  const gmailActions = AGENT_TOOL_DEFINITIONS
+    .map((tool) => tool.id)
+    .filter((toolId) => toolId.startsWith('gmail.'));
+  return buildForgerOfficialToolsPromptSection({
+    mode: 'free-chat',
+    gmailReady,
+    allowedActions: gmailActions,
+  });
 };
 
 const getBackupsManager = (): BackupsManager => {
@@ -1122,6 +1239,30 @@ const normalizeManifestAppSecrets = (manifest: AppManifest | null): AppSecretDec
   }
 
   return declarations;
+};
+
+const resolveAppToolDeclarations = async (
+  appId: string,
+): Promise<{ appName: string; required: AppToolDeclaration[]; optional: AppToolDeclaration[] } | null> => {
+  const record = registry.apps[appId];
+  if (record?.installDir) {
+    const manifest = await resolveInstalledManifest(record.installDir);
+    const declarations = normalizeAppToolDeclarations(manifest?.tools);
+    return {
+      appName: record.name ?? appId,
+      ...declarations,
+    };
+  }
+
+  const catalog = catalogApps.find((entry) => entry.id === appId);
+  if (!catalog) {
+    return null;
+  }
+  const declarations = normalizeAppToolDeclarations(catalog.tools);
+  return {
+    appName: catalog.name ?? appId,
+    ...declarations,
+  };
 };
 
 const normalizeManifestPromptTemplates = (manifest: AppManifest | null): AppPromptTemplate[] => {
@@ -1358,6 +1499,8 @@ const ensureGlobalAgentsContext = async (forgerHomeRoot: string): Promise<void> 
   await fs.mkdir(forgerHomeRoot, { recursive: true });
   const agentsPath = path.join(forgerHomeRoot, 'AGENTS.md');
   await fs.writeFile(agentsPath, buildGlobalForgerAgentsMarkdown(), 'utf8');
+  const skillsRoot = path.join(forgerHomeRoot, '.agents', 'skills');
+  await writeSkillTemplates(skillsRoot, buildForgerOfficialToolSkillTemplates());
 };
 
 const shouldWriteAppAgentsMarkdown = async (agentsPath: string): Promise<boolean> => {
@@ -1374,7 +1517,7 @@ const shouldWriteAppAgentsMarkdown = async (agentsPath: string): Promise<boolean
 };
 
 const buildStackSkillTemplates = (stack: AppManifestStack, hasAppMcp = false): StackSkillTemplate[] => {
-  const templates: StackSkillTemplate[] = [];
+  const templates: StackSkillTemplate[] = buildForgerOfficialToolSkillTemplates();
   const backend = stack.backend ?? {};
   const frontend = stack.frontend ?? {};
   const backendLanguage = normalizeToken(backend.language);
@@ -1475,13 +1618,7 @@ const buildStackSkillTemplates = (stack: AppManifestStack, hasAppMcp = false): S
   return templates;
 };
 
-const copyDirectory = async (sourceDir: string, targetDir: string): Promise<void> => {
-  await fs.mkdir(path.dirname(targetDir), { recursive: true });
-  await fs.cp(sourceDir, targetDir, { recursive: true, force: true });
-};
-
-const writeStackSkills = async (skillsRoot: string, stack: AppManifestStack, hasAppMcp = false): Promise<void> => {
-  const templates = buildStackSkillTemplates(stack, hasAppMcp);
+const writeSkillTemplates = async (skillsRoot: string, templates: StackSkillTemplate[]): Promise<void> => {
   for (const template of templates) {
     const targetDir = path.join(skillsRoot, template.id);
     await fs.rm(targetDir, { recursive: true, force: true });
@@ -1489,6 +1626,15 @@ const writeStackSkills = async (skillsRoot: string, stack: AppManifestStack, has
     await fs.writeFile(path.join(targetDir, 'SKILL.md'), template.body, 'utf8');
     await fs.writeFile(path.join(targetDir, 'README.md'), `${template.description}\n`, 'utf8');
   }
+};
+
+const copyDirectory = async (sourceDir: string, targetDir: string): Promise<void> => {
+  await fs.mkdir(path.dirname(targetDir), { recursive: true });
+  await fs.cp(sourceDir, targetDir, { recursive: true, force: true });
+};
+
+const writeStackSkills = async (skillsRoot: string, stack: AppManifestStack, hasAppMcp = false): Promise<void> => {
+  await writeSkillTemplates(skillsRoot, buildStackSkillTemplates(stack, hasAppMcp));
 };
 
 const copyAppSkills = async (installDir: string, skillsRoot: string, manifest: AppManifest): Promise<void> => {
@@ -2689,10 +2835,27 @@ const resolveCodexCliPath = async (baseDir: string): Promise<string | null> => {
   return await findExistingFile(baseDir, candidates);
 };
 
+const getInstalledCodexCliVersion = async (baseDir: string): Promise<string | null> => {
+  const packageJsonPath = path.join(baseDir, 'node_modules', '@openai', 'codex', 'package.json');
+  try {
+    const parsed = JSON.parse(await fs.readFile(packageJsonPath, 'utf8')) as { version?: unknown };
+    return typeof parsed.version === 'string' ? parsed.version : null;
+  } catch {
+    return null;
+  }
+};
+
 const ensureCodexCliInstalled = async (): Promise<string> => {
   const existing = await resolveCodexCliPath(getCodexRoot());
-  if (existing) {
+  const installedVersion = existing ? await getInstalledCodexCliVersion(getCodexRoot()) : null;
+  if (existing && installedVersion === CODEX_CLI_VERSION) {
     return existing;
+  }
+  if (existing && installedVersion !== CODEX_CLI_VERSION) {
+    await appendInstallLog('codex_auth:version_mismatch', {
+      installedVersion,
+      expectedVersion: CODEX_CLI_VERSION,
+    });
   }
 
   const nodeRuntime = await ensureRuntimeInstalled('node', DEFAULT_NODE_VERSION);
@@ -3062,6 +3225,14 @@ const installAppRuntime = async (appId: string): Promise<InstallAppResult> => {
   const catalogApp = catalogApps.find((entry) => entry.id === appId);
   if (!catalogApp) {
     return runtimeError('La app no esta disponible para instalar.', 'catalog_app_missing');
+  }
+
+  const toolGate = await getOfficialToolsService().getInstallGate(appId);
+  if (toolGate && !toolGate.canInstall) {
+    return runtimeError(
+      'Esta app necesita herramientas oficiales instaladas y configuradas antes de instalarse.',
+      'required_app_tools_missing',
+    );
   }
 
   const initialRecord: InstalledAppRecord = {
@@ -4032,6 +4203,8 @@ const openOrFocusAppWindow = async (
   });
   appWindow.on('closed', () => {
     appWindows.delete(appId);
+    appCodexTaskManager?.rejectPendingPermissionsForApp(appId);
+    appCodexConversationManager?.rejectPendingPermissionsForApp(appId);
     if (!stoppingApps.has(appId) && runningApps.has(appId)) {
       void stopInstalledApp(appId);
     }
@@ -5002,6 +5175,7 @@ const registerIpcHandlers = (): void => {
       appId,
       displayName: resolveSelectedAppDisplayName(appId),
       userLanguage: 'not configured',
+      officialToolsContext: await buildForgerToolsContextForApp(appId),
       userPrompt:
         'Resolve this app update conflict. Preserve as much as possible from both the new version and the user customizations. If something cannot be integrated maintainably, leave that part out and explain it in functional terms. Finish the merge and leave a saved version.',
       sharedFilesRootName: path.basename(getPrivateDataRoot()),
@@ -5179,6 +5353,23 @@ const registerIpcHandlers = (): void => {
   ipcMain.handle(IPC_CHANNELS.updateAgentToolApproval, async (_event, input: UpdateAgentToolApprovalInput) => {
     return await updateAgentToolApproval(input);
   });
+  ipcMain.handle(IPC_CHANNELS.listOfficialTools, async () => await getOfficialToolsService().list());
+  ipcMain.handle(IPC_CHANNELS.refreshOfficialTools, async () => await getOfficialToolsService().refresh());
+  ipcMain.handle(IPC_CHANNELS.activateOfficialTool, async (_event, toolId: string) => {
+    return await getOfficialToolsService().activate(toolId);
+  });
+  ipcMain.handle(IPC_CHANNELS.configureOfficialTool, async (_event, input: ConfigureOfficialToolInput) => {
+    return await getOfficialToolsService().configure(input);
+  });
+  ipcMain.handle(IPC_CHANNELS.deactivateOfficialTool, async (_event, toolId: string) => {
+    return await getOfficialToolsService().deactivate(toolId);
+  });
+  ipcMain.handle(IPC_CHANNELS.getAppToolsInstallGate, async (_event, appId: string): Promise<AppToolsInstallGate | null> => {
+    return await getOfficialToolsService().getInstallGate(appId);
+  });
+  ipcMain.handle(IPC_CHANNELS.setAppToolGrant, async (_event, input: SetAppToolGrantInput): Promise<AppToolsInstallGate | null> => {
+    return await getOfficialToolsService().setAppToolGrant(input);
+  });
   ipcMain.handle(IPC_CHANNELS.chatStartRun, async (_event, input: ChatStartRunInput) => {
     if (!chatOrchestrator) {
       return { runId: '', status: 'failed' };
@@ -5196,22 +5387,33 @@ const registerIpcHandlers = (): void => {
       }
       sharedFiles.push({ ...fileRef, path: realPath });
     }
-    const enrichedPrompt = buildCodexPromptWithAppContext({
-      appId: input.appId,
-      displayName: resolveSelectedAppDisplayName(input.appId),
-      userPrompt: input.prompt,
-      userLanguage: input.userLanguage,
-      sharedFilesRootName: path.basename(getPrivateDataRoot()),
-      sharedFiles: sharedFiles.map((fileRef) => ({
-        name: fileRef.name ?? path.basename(fileRef.path),
-        relativePath: toPosixRelativePath(fileRef.relativePath ?? path.relative(getPrivateDataRoot(), fileRef.path)),
-        sizeBytes: fileRef.sizeBytes ?? 0,
-        modifiedAt: fileRef.modifiedAt ?? '',
-        source: fileRef.source ?? 'mentioned',
-      })),
-    });
+    const sharedPromptFiles = sharedFiles.map((fileRef) => ({
+      name: fileRef.name ?? path.basename(fileRef.path),
+      relativePath: toPosixRelativePath(fileRef.relativePath ?? path.relative(getPrivateDataRoot(), fileRef.path)),
+      sizeBytes: fileRef.sizeBytes ?? 0,
+      modifiedAt: fileRef.modifiedAt ?? '',
+      source: fileRef.source ?? 'mentioned',
+    }));
+    const enrichedPrompt = input.appId
+      ? buildCodexPromptWithAppContext({
+          appId: input.appId,
+          displayName: resolveSelectedAppDisplayName(input.appId),
+          userPrompt: input.prompt,
+          userLanguage: input.userLanguage,
+          officialToolsContext: await buildForgerToolsContextForApp(input.appId),
+          sharedFilesRootName: path.basename(getPrivateDataRoot()),
+          sharedFiles: sharedPromptFiles,
+        })
+      : buildCodexPromptForFreeChat({
+          userPrompt: input.prompt,
+          userLanguage: input.userLanguage,
+          officialToolsContext: await buildForgerToolsContextForFreeChat(),
+          sharedFilesRootName: path.basename(getPrivateDataRoot()),
+          sharedFiles: sharedPromptFiles,
+        });
     return await chatOrchestrator.startRun({
       ...input,
+      appId: input.appId ?? null,
       prompt: enrichedPrompt,
       sharedFiles,
     });
@@ -5336,6 +5538,31 @@ const registerIpcHandlers = (): void => {
     };
   });
 
+  ipcMain.handle(IPC_CHANNELS.appToolsListAvailable, async (event) => {
+    const appId = resolveAppIdForWebContents(event.sender.id);
+    if (!appId) {
+      throw new Error('app_window_not_authorized');
+    }
+    return await getOfficialToolsService().listToolsForApp(appId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.appToolsGetStatus, async (event, toolId: string) => {
+    const appId = resolveAppIdForWebContents(event.sender.id);
+    if (!appId) {
+      throw new Error('app_window_not_authorized');
+    }
+    const available = await getOfficialToolsService().listToolsForApp(appId);
+    return available.find((tool) => tool.id === toolId) ?? null;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.appToolsCall, async (event, input: CallOfficialToolInput) => {
+    const appId = resolveAppIdForWebContents(event.sender.id);
+    if (!appId) {
+      throw new Error('app_window_not_authorized');
+    }
+    return await getOfficialToolsService().callFromApp(appId, input);
+  });
+
   ipcMain.handle(IPC_CHANNELS.appCodexTaskStart, async (event, input: AppCodexTaskStartInput) => {
     const appId = resolveAppIdForWebContents(event.sender.id);
     if (!appId) {
@@ -5370,6 +5597,19 @@ const registerIpcHandlers = (): void => {
       return { success: false };
     }
     return appCodexTaskManager.cancel(appId, runId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.appCodexTaskApprovePermission, async (
+    event,
+    runId: string,
+    requestId: string,
+    decision: 'allow' | 'deny',
+  ) => {
+    const appId = resolveAppIdForWebContents(event.sender.id);
+    if (!appId || !appCodexTaskManager) {
+      return { success: false };
+    }
+    return appCodexTaskManager.approvePermission(appId, runId, requestId, decision);
   });
 
   ipcMain.handle(IPC_CHANNELS.appCodexConversationCreate, async (event, input: AppCodexConversationCreateInput) => {
@@ -5449,6 +5689,20 @@ const registerIpcHandlers = (): void => {
       return { success: false };
     }
     return await appCodexConversationManager.cancel(appId, conversationId, runId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.appCodexConversationApprovePermission, async (
+    event,
+    conversationId: string,
+    runId: string,
+    requestId: string,
+    decision: 'allow' | 'deny',
+  ) => {
+    const appId = resolveAppIdForWebContents(event.sender.id);
+    if (!appId || !appCodexConversationManager) {
+      return { success: false };
+    }
+    return appCodexConversationManager.approvePermission(appId, conversationId, runId, requestId, decision);
   });
 
   ipcMain.handle(IPC_CHANNELS.dbListTables, async (_event, appId: string) => {
@@ -5604,6 +5858,8 @@ app.whenReady().then(async () => {
   await fs.mkdir(getCodexRoot(), { recursive: true });
   await fs.mkdir(getCodexHome(), { recursive: true });
   secretsStore = new SecretsStore(app.getPath('userData'));
+  officialToolsService = getOfficialToolsService();
+  await officialToolsService.load();
   await loadAgentToolSettings();
   forgerAccountStore = new ForgerAccountStore(getForgerAccountPath());
   forgerAccount = await forgerAccountStore.load();
@@ -5633,7 +5889,17 @@ app.whenReady().then(async () => {
     getToolDefinitions: () => AGENT_TOOL_DEFINITIONS,
     getToolSettings: () => agentToolSettings,
     appendInstallLog,
-    requestPermission: (runId, request) => chatOrchestrator?.requestExternalPermission(runId, request) ?? null,
+    requestPermission: async (runId, request) => {
+      const taskDecision = await (appCodexTaskManager?.requestPermission(runId, request) ?? Promise.resolve(null));
+      if (taskDecision !== null) {
+        return taskDecision;
+      }
+      const conversationDecision = await (appCodexConversationManager?.requestPermission(runId, request) ?? Promise.resolve(null));
+      if (conversationDecision !== null) {
+        return conversationDecision;
+      }
+      return chatOrchestrator?.requestExternalPermission(runId, request) ?? null;
+    },
     listCatalog: async () => {
       catalogApps = await listCatalogFromBackend();
       ensureCatalogStatuses();
@@ -5670,6 +5936,15 @@ app.whenReady().then(async () => {
     memoryCreate: async (input, access) => await getMemoryStore().create(input, access),
     memoryUpdate: async (input, access) => await getMemoryStore().update(input, access),
     memoryDelete: async (id, access) => await getMemoryStore().delete(id, access),
+    listOfficialToolActionIdsForApp: async (appId) => await getOfficialToolsService().listAgentActionIdsForApp(appId),
+    validateOfficialTool: async (input, access) => await getOfficialToolsService().validateAgentCall(input, {
+      appId: access.appId,
+      requireAppGrant: access.caller === 'app-agent',
+    }),
+    callOfficialTool: async (input, access) => await getOfficialToolsService().callFromAgent(input, {
+      appId: access.appId,
+      requireAppGrant: access.caller === 'app-agent',
+    }),
     onToolProgress: (input) => chatOrchestrator?.appendExternalProgress(input.runId, input.message),
     onToolFailure: (input) => desktopErrorReporter?.reportForgerMcpToolFailure(input),
     onHttpFailure: (input) => desktopErrorReporter?.reportForgerMcpHttpFailure(input),
@@ -5746,11 +6021,14 @@ app.whenReady().then(async () => {
       return status.authenticated;
     },
     createForgerMcpSession: (runId, appId) =>
-      forgerMcpServer?.createSession(runId, appId, { caller: 'desktop-chat', appIds: [appId] }) ?? null,
+      forgerMcpServer?.createSession(runId, appId, {
+        caller: appId === 'forger' ? 'free-chat' : 'desktop-chat',
+        appIds: appId === 'forger' ? Object.keys(registry.apps) : [appId],
+      }) ?? null,
     releaseForgerMcpSession: (token) => forgerMcpServer?.releaseSession(token),
     buildMemoryContext: buildMemoryContextForApps,
     listenAppMcps: async (appIds: string[], runId: string) =>
-      await (appMcpManager?.listenMcps(appIds, runId) ?? Promise.resolve([])),
+      await (appMcpManager?.listenMcps(appIds.length > 0 ? appIds : Object.keys(registry.apps), runId) ?? Promise.resolve([])),
     releaseAppMcps: (runId: string) => {
       appMcpManager?.releaseMcps(runId);
     },
@@ -5828,10 +6106,15 @@ app.whenReady().then(async () => {
       forgerMcpServer?.createSession(runId, appId, { caller: 'app-agent', appIds: [appId] }) ?? null,
     releaseForgerMcpSession: (token) => forgerMcpServer?.releaseSession(token),
     buildMemoryContext: buildMemoryContextForApp,
+    buildForgerToolsContext: buildForgerToolsContextForApp,
     listenAppMcps: async (appIds: string[], runId: string) =>
       await (appMcpManager?.listenMcps(appIds, runId) ?? Promise.resolve([])),
     releaseAppMcps: (runId: string) => {
       appMcpManager?.releaseMcps(runId);
+    },
+    canRequestPermission: (appId: string) => {
+      const target = appWindows.get(appId);
+      return Boolean(target && !target.isDestroyed());
     },
     onTaskUpdated: (event) => {
       desktopErrorReporter?.reportAppCodexTaskEvent(event);
@@ -5890,10 +6173,15 @@ app.whenReady().then(async () => {
       forgerMcpServer?.createSession(runId, appId, { caller: 'app-agent', appIds: [appId] }) ?? null,
     releaseForgerMcpSession: (token) => forgerMcpServer?.releaseSession(token),
     buildMemoryContext: buildMemoryContextForApp,
+    buildForgerToolsContext: buildForgerToolsContextForApp,
     listenAppMcps: async (appIds: string[], runId: string) =>
       await (appMcpManager?.listenMcps(appIds, runId) ?? Promise.resolve([])),
     releaseAppMcps: (runId: string) => {
       appMcpManager?.releaseMcps(runId);
+    },
+    canRequestPermission: (appId: string) => {
+      const target = appWindows.get(appId);
+      return Boolean(target && !target.isDestroyed());
     },
     onConversationEvent: (event) => {
       desktopErrorReporter?.reportAppCodexConversationEvent(event);
