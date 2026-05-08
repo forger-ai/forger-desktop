@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
 import http, { type IncomingMessage, type ServerResponse } from 'node:http';
+import yauzl from 'yauzl';
 
 // better-sqlite3 is optional — gracefully unavailable if not installed / rebuilt
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -2340,18 +2341,62 @@ const extractArchive = async (archivePath: string, destination: string): Promise
   throw new Error(`unsupported_archive_format_${archivePath}`);
 };
 
-const validateArchiveEntries = async (archivePath: string): Promise<void> => {
-  const listResult = archivePath.endsWith('.zip')
-    ? await runCommandCapture('unzip', ['-Z', '-1', archivePath], { cwd: path.dirname(archivePath), timeoutMs: 30_000 })
-    : archivePath.endsWith('.tar.gz') || archivePath.endsWith('.tgz')
-      ? await runCommandCapture('tar', ['-tzf', archivePath], { cwd: path.dirname(archivePath), timeoutMs: 30_000 })
-      : { code: 1, stdout: '', stderr: 'unsupported_archive_format' };
+const listZipEntries = async (archivePath: string): Promise<string[]> =>
+  new Promise((resolve, reject) => {
+    yauzl.open(archivePath, { lazyEntries: true }, (openError, zipFile) => {
+      if (openError || !zipFile) {
+        reject(openError ?? new Error('archive_open_failed'));
+        return;
+      }
 
-  if (listResult.code !== 0) {
-    throw new Error(listResult.stderr || listResult.stdout || 'archive_list_failed');
+      const entries: string[] = [];
+      let settled = false;
+      const fail = (error: Error) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        zipFile.close();
+        reject(error);
+      };
+
+      zipFile.once('error', fail);
+      zipFile.on('entry', (entry: yauzl.Entry) => {
+        entries.push(entry.fileName);
+        zipFile.readEntry();
+      });
+      zipFile.once('end', () => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        zipFile.close();
+        resolve(entries);
+      });
+      zipFile.readEntry();
+    });
+  });
+
+const validateArchiveEntries = async (archivePath: string): Promise<void> => {
+  const entries = archivePath.endsWith('.zip')
+    ? await listZipEntries(archivePath)
+    : archivePath.endsWith('.tar.gz') || archivePath.endsWith('.tgz')
+      ? await (async () => {
+          const listResult = await runCommandCapture('tar', ['-tzf', archivePath], {
+            cwd: path.dirname(archivePath),
+            timeoutMs: 30_000,
+          });
+          if (listResult.code !== 0) {
+            throw new Error(listResult.stderr || listResult.stdout || 'archive_list_failed');
+          }
+          return listResult.stdout.split('\n').map((line) => line.trim()).filter(Boolean);
+        })()
+      : null;
+
+  if (!entries) {
+    throw new Error(`unsupported_archive_format_${archivePath}`);
   }
 
-  const entries = listResult.stdout.split('\n').map((line) => line.trim()).filter(Boolean);
   for (const entry of entries) {
     const normalized = entry.replace(/\\/g, '/');
     const parts = normalized.split('/').filter(Boolean);
