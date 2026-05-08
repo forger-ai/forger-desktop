@@ -62,6 +62,7 @@ export interface ChatMessage {
     type: 'permission';
     runId: string;
     request: PermissionRequest;
+    status?: 'pending' | 'approved' | 'denied';
   };
 }
 
@@ -628,7 +629,9 @@ export function ChatView({
                           (() => {
                             const action = message.action;
                             const responseKey = `${action.runId}:${action.request.requestId}`;
-                            const isResponding = respondingPermissionIds.has(responseKey);
+                            const status = action.status ?? 'pending';
+                            const isPending = status === 'pending';
+                            const isResponding = isPending && respondingPermissionIds.has(responseKey);
                             return (
                               <Paper
                                 variant="outlined"
@@ -640,32 +643,44 @@ export function ChatView({
                               >
                                 <Stack spacing={1}>
                                   <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-                                    <Chip size="small" color="warning" label={t.sections.chat.permissionBadge} />
+                                    <Chip
+                                      size="small"
+                                      color={status === 'approved' ? 'success' : status === 'denied' ? 'default' : 'warning'}
+                                      label={
+                                        status === 'approved'
+                                          ? t.sections.chat.permissionApproved
+                                          : status === 'denied'
+                                            ? t.sections.chat.permissionDenied
+                                            : t.sections.chat.permissionBadge
+                                      }
+                                    />
                                     <Chip size="small" variant="outlined" label={action.request.resource} />
                                   </Stack>
                                   <Typography variant="body2" color="text.secondary">
                                     {action.request.reason}
                                   </Typography>
-                                  <Stack direction="row" spacing={1}>
-                                    <Button
-                                      variant="contained"
-                                      size="small"
-                                      disabled={isResponding}
-                                      startIcon={isResponding ? <CircularProgress size={14} color="inherit" /> : undefined}
-                                      onClick={() => respondToPermission(action.runId, action.request.requestId, 'allow')}
-                                    >
-                                      {t.sections.chat.permissionApprove}
-                                    </Button>
-                                    <Button
-                                      variant="outlined"
-                                      color="inherit"
-                                      size="small"
-                                      disabled={isResponding}
-                                      onClick={() => respondToPermission(action.runId, action.request.requestId, 'deny')}
-                                    >
-                                      {t.sections.chat.permissionDeny}
-                                    </Button>
-                                  </Stack>
+                                  {isPending ? (
+                                    <Stack direction="row" spacing={1}>
+                                      <Button
+                                        variant="contained"
+                                        size="small"
+                                        disabled={isResponding}
+                                        startIcon={isResponding ? <CircularProgress size={14} color="inherit" /> : undefined}
+                                        onClick={() => respondToPermission(action.runId, action.request.requestId, 'allow')}
+                                      >
+                                        {t.sections.chat.permissionApprove}
+                                      </Button>
+                                      <Button
+                                        variant="outlined"
+                                        color="inherit"
+                                        size="small"
+                                        disabled={isResponding}
+                                        onClick={() => respondToPermission(action.runId, action.request.requestId, 'deny')}
+                                      >
+                                        {t.sections.chat.permissionDeny}
+                                      </Button>
+                                    </Stack>
+                                  ) : null}
                                 </Stack>
                               </Paper>
                             );

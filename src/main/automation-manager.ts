@@ -13,6 +13,11 @@ import type {
   AutomationUpsertInput,
   FilesActionResult,
 } from '../shared/types';
+import {
+  assertAllowedMcpServers,
+  createIsolatedCodexHome,
+  removeIsolatedCodexHome,
+} from './codex-run-isolation';
 
 interface AutomationManagerOptions {
   forgerHomeRoot: string;
@@ -799,22 +804,33 @@ const runCodexCommand = async (
   ];
   await appendTranscript(options.transcriptPath, 'meta', `${codexCommand.command} ${args.slice(codexCommand.prefixArgs.length).join(' ')}`);
   let stdoutSoFar = '';
-  return await runCommandCapture(codexCommand.command, args, {
-    cwd: options.cwd,
-    env: {
-      CODEX_HOME: options.codexHome,
-      FORGER_ALLOWED_ROOTS: options.cwd,
-      ...Object.fromEntries(mcpServers.map((server) => [server.tokenEnvVar, server.token])),
-      PATH: [...codexCommand.pathEntries, process.env.PATH ?? ''].filter(Boolean).join(path.delimiter),
-    },
-    timeoutMs: AUTOMATION_TIMEOUT_MS,
-    onStdout: (text) => {
-      stdoutSoFar += text;
-      options.onAssistantMessages?.(parseCodexAssistantMessages(stdoutSoFar));
-      void appendTranscript(options.transcriptPath, 'stdout', text);
-    },
-    onStderr: (text) => void appendTranscript(options.transcriptPath, 'stderr', text),
+  const isolatedCodexHome = await createIsolatedCodexHome(options.codexHome, {
+    prefix: 'forger-automation-codex-home',
+    trustedRoots: [options.cwd],
   });
+  const allowedMcpServers = new Set(mcpServers.map((server) => server.name));
+  try {
+    const result = await runCommandCapture(codexCommand.command, args, {
+      cwd: options.cwd,
+      env: {
+        CODEX_HOME: isolatedCodexHome,
+        FORGER_ALLOWED_ROOTS: options.cwd,
+        ...Object.fromEntries(mcpServers.map((server) => [server.tokenEnvVar, server.token])),
+        PATH: [...codexCommand.pathEntries, process.env.PATH ?? ''].filter(Boolean).join(path.delimiter),
+      },
+      timeoutMs: AUTOMATION_TIMEOUT_MS,
+      onStdout: (text) => {
+        stdoutSoFar += text;
+        options.onAssistantMessages?.(parseCodexAssistantMessages(stdoutSoFar));
+        void appendTranscript(options.transcriptPath, 'stdout', text);
+      },
+      onStderr: (text) => void appendTranscript(options.transcriptPath, 'stderr', text),
+    });
+    assertAllowedMcpServers(result.stdout, result.stderr, allowedMcpServers);
+    return result;
+  } finally {
+    await removeIsolatedCodexHome(isolatedCodexHome);
+  }
 };
 
 const buildMcpArgs = (mcpServers: CodexMcpServerConfig[]): string[] =>
@@ -828,7 +844,7 @@ const buildMcpArgs = (mcpServers: CodexMcpServerConfig[]): string[] =>
     '--config',
     `mcp_servers.${server.name}.tool_timeout_sec=${server.toolTimeoutSec ?? 600}`,
     '--config',
-    `mcp_servers.${server.name}.default_tools_approval_mode="approve"`,
+    `mcp_servers.${server.name}.default_tools_approval_mode="auto"`,
     ...(server.name === 'forger'
       ? [
           '--config',
@@ -836,7 +852,7 @@ const buildMcpArgs = (mcpServers: CodexMcpServerConfig[]): string[] =>
           '--config',
           'apps.forger.default_tools_enabled=true',
           '--config',
-          'apps.forger.default_tools_approval_mode="approve"',
+          'apps.forger.default_tools_approval_mode="auto"',
           '--config',
           'apps.forger.destructive_enabled=true',
           '--config',

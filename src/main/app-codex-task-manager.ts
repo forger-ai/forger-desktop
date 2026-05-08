@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import fs from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 import type {
   AppCodexTaskAttachment,
@@ -11,7 +10,13 @@ import type {
   AppCodexTaskSummary,
   AppPromptTemplate,
   AppPromptTemplateArgument,
+  PermissionRequest,
 } from '../shared/types';
+import {
+  assertAllowedMcpServers,
+  createIsolatedCodexHome,
+  removeIsolatedCodexHome,
+} from './codex-run-isolation';
 
 interface AppCodexTaskManagerOptions {
   privateAppsRoot: string;
@@ -25,8 +30,10 @@ interface AppCodexTaskManagerOptions {
   createForgerMcpSession?: (runId: string, appId: string) => { url: string; token: string } | null;
   releaseForgerMcpSession?: (token: string) => void;
   buildMemoryContext?: (appId: string) => Promise<string>;
+  buildForgerToolsContext?: (appId: string) => Promise<string>;
   listenAppMcps?: (appIds: string[], runId: string) => Promise<CodexMcpServerConfig[]>;
   releaseAppMcps?: (runId: string) => void;
+  canRequestPermission?: (appId: string) => boolean;
   onTaskUpdated: (event: AppCodexTaskEvent) => void;
 }
 
@@ -50,6 +57,12 @@ interface CommandResult {
   stderr: string;
 }
 
+interface PendingPermission {
+  runId: string;
+  requestId: string;
+  resolve: (decision: 'allow' | 'deny') => void;
+}
+
 interface PreparedFileArgument {
   argumentName: string;
   name: string;
@@ -64,10 +77,10 @@ interface PreparedPromptArguments {
 
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 const CODEX_TASK_TIMEOUT_MS = 600_000;
-const CLEAN_CODEX_HOME_FILES = ['auth.json', 'config.toml'] as const;
 
 export class AppCodexTaskManager {
   private readonly tasks = new Map<string, InternalTask>();
+  private readonly pendingPermissions = new Map<string, PendingPermission>();
 
   public constructor(private readonly options: AppCodexTaskManagerOptions) {}
 
@@ -126,6 +139,8 @@ export class AppCodexTaskManager {
       return { success: true };
     }
     killProcessTree(task.child);
+    this.resolvePendingPermission(runId, 'deny');
+    task.permissionRequest = undefined;
     task.status = 'canceled';
     task.updatedAt = new Date().toISOString();
     task.error = 'canceled';
@@ -133,6 +148,70 @@ export class AppCodexTaskManager {
     void this.cleanupTaskInputs(task);
     this.emit(task);
     return { success: true };
+  }
+
+  public async requestPermission(
+    runId: string,
+    input: Omit<PermissionRequest, 'requestId'>,
+  ): Promise<boolean | null> {
+    const task = this.tasks.get(runId);
+    if (!task || task.status === 'canceled' || task.status === 'failed') {
+      return null;
+    }
+    if (this.options.canRequestPermission && !this.options.canRequestPermission(task.appId)) {
+      return null;
+    }
+
+    const request: PermissionRequest = { requestId: randomUUID(), ...input };
+    task.permissionRequest = request;
+    task.status = 'needs_permission';
+    task.updatedAt = new Date().toISOString();
+    await this.persist(task);
+    this.emit(task);
+
+    const decision = await new Promise<'allow' | 'deny'>((resolve) => {
+      this.pendingPermissions.set(request.requestId, { runId, requestId: request.requestId, resolve });
+    });
+
+    if (this.tasks.get(runId)?.permissionRequest?.requestId === request.requestId) {
+      task.permissionRequest = undefined;
+      task.status = task.status === 'needs_permission' ? 'running' : task.status;
+      task.updatedAt = new Date().toISOString();
+      await this.persist(task);
+      this.emit(task);
+    }
+    return decision === 'allow';
+  }
+
+  public approvePermission(
+    appId: string,
+    runId: string,
+    requestId: string,
+    decision: 'allow' | 'deny',
+  ): { success: boolean } {
+    const task = this.tasks.get(runId);
+    const pending = this.pendingPermissions.get(requestId);
+    if (!task || task.appId !== appId || !pending || pending.runId !== runId) {
+      return { success: false };
+    }
+    this.pendingPermissions.delete(requestId);
+    pending.resolve(decision);
+    return { success: true };
+  }
+
+  public rejectPendingPermissionsForApp(appId: string): void {
+    for (const task of this.tasks.values()) {
+      if (task.appId === appId) {
+        this.resolvePendingPermission(task.runId, 'deny');
+        task.permissionRequest = undefined;
+        if (task.status === 'needs_permission') {
+          task.status = 'running';
+          task.updatedAt = new Date().toISOString();
+          void this.persist(task);
+          this.emit(task);
+        }
+      }
+    }
   }
 
   private async execute(
@@ -164,7 +243,9 @@ export class AppCodexTaskManager {
         .flatMap((file) => ['--image', file.path]);
       const renderedPrompt = renderPrompt(template.prompt, preparedArguments);
       const memoryContext = await (this.options.buildMemoryContext?.(task.appId) ?? Promise.resolve(''));
-      const prompt = memoryContext ? `${memoryContext}\n\n${renderedPrompt}` : renderedPrompt;
+      const forgerToolsContext = await (this.options.buildForgerToolsContext?.(task.appId) ?? Promise.resolve(''));
+      const promptContext = [memoryContext, forgerToolsContext].filter((section) => section.trim()).join('\n\n');
+      const prompt = promptContext ? `${promptContext}\n\n${renderedPrompt}` : renderedPrompt;
       const command = await resolveCodexCommand(codexCliPath, await this.options.getCodexPathEntries(task.appId));
       const environment = await this.options.getCodexEnvironment(task.appId);
       const appMcpServers = await (this.options.listenAppMcps?.([task.appId], task.runId) ?? Promise.resolve([]));
@@ -232,7 +313,14 @@ export class AppCodexTaskManager {
         });
 
       await appendTranscript(task.transcriptPath, 'meta', `${command.command} exec --json -C ${task.appRoot}`);
-      let result = await runCodex(this.options.codexHome);
+      const isolatedCodexHome = await createIsolatedCodexHome(this.options.codexHome, {
+        prefix: 'forger-task-codex-home',
+        trustedRoots: [task.appRoot],
+      });
+      temporaryCodexHomes.push(isolatedCodexHome);
+      const allowedMcpServers = new Set(mcpServers.map((server) => server.name));
+      let result = await runCodex(isolatedCodexHome);
+      assertAllowedMcpServers(result.stdout, result.stderr, allowedMcpServers);
       if ((task as AppCodexTaskSummary).status === 'canceled') {
         return;
       }
@@ -244,10 +332,14 @@ export class AppCodexTaskManager {
           this.addProgress(task, taskMessage(locale, 'technicalLimit'));
           await this.persist(task);
           this.emit(task);
-          const cleanCodexHome = await createCleanCodexHome(this.options.codexHome);
+          const cleanCodexHome = await createIsolatedCodexHome(this.options.codexHome, {
+            prefix: 'forger-task-codex-home',
+            trustedRoots: [task.appRoot],
+          });
           temporaryCodexHomes.push(cleanCodexHome);
           await appendTranscript(task.transcriptPath, 'meta', 'Retrying Codex task with a clean temporary Codex home.');
           result = await runCodex(cleanCodexHome);
+          assertAllowedMcpServers(result.stdout, result.stderr, allowedMcpServers);
           if ((task as AppCodexTaskSummary).status === 'canceled') {
             return;
           }
@@ -270,7 +362,7 @@ export class AppCodexTaskManager {
       }
       this.options.releaseAppMcps?.(task.runId);
       await this.cleanupTaskInputs(task).catch(() => undefined);
-      await Promise.all(temporaryCodexHomes.map((dirPath) => fs.rm(dirPath, { recursive: true, force: true }).catch(() => undefined)));
+      await Promise.all(temporaryCodexHomes.map((dirPath) => removeIsolatedCodexHome(dirPath)));
     }
   }
 
@@ -279,11 +371,22 @@ export class AppCodexTaskManager {
       return;
     }
     task.status = 'failed';
+    this.resolvePendingPermission(task.runId, 'deny');
+    task.permissionRequest = undefined;
     task.updatedAt = new Date().toISOString();
     task.error = message;
     await appendTranscript(task.transcriptPath, 'meta', `Run failed: ${message}`);
     await this.persist(task);
     this.emit(task);
+  }
+
+  private resolvePendingPermission(runId: string, decision: 'allow' | 'deny'): void {
+    for (const [requestId, pending] of this.pendingPermissions.entries()) {
+      if (pending.runId === runId) {
+        this.pendingPermissions.delete(requestId);
+        pending.resolve(decision);
+      }
+    }
   }
 
   private async preparePromptArguments(
@@ -450,6 +553,7 @@ const toSummary = (task: InternalTask): AppCodexTaskSummary => ({
   resultText: task.resultText,
   error: task.error,
   progressLog: task.progressLog,
+  permissionRequest: task.permissionRequest,
 });
 
 const sanitizeId = (value: unknown): string =>
@@ -701,25 +805,6 @@ const parseCodexJsonl = (stdout: string, stderr: string): string => {
 const isStaleCodexThreadError = (text: string): boolean =>
   /failed to record rollout items:\s*thread\s+.+\s+not found/i.test(text);
 
-const createCleanCodexHome = async (sourceCodexHome: string): Promise<string> => {
-  const targetCodexHome = await fs.mkdtemp(path.join(os.tmpdir(), 'forger-codex-task-home-'));
-  for (const filename of CLEAN_CODEX_HOME_FILES) {
-    await copyCodexHomeFile(path.join(sourceCodexHome, filename), path.join(targetCodexHome, filename));
-  }
-  return targetCodexHome;
-};
-
-const copyCodexHomeFile = async (sourcePath: string, targetPath: string): Promise<void> => {
-  try {
-    await fs.copyFile(sourcePath, targetPath);
-    await fs.chmod(targetPath, 0o600).catch(() => undefined);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-      throw error;
-    }
-  }
-};
-
 const progressFromCodexOutput = (text: string, locale: TaskLocale): string | null => {
   for (const line of text.split('\n').map((entry) => entry.trim()).filter(Boolean)) {
     try {
@@ -910,7 +995,7 @@ const buildMcpArgs = (mcpServers: CodexMcpServerConfig[]): string[] =>
     '--config',
     `mcp_servers.${server.name}.tool_timeout_sec=${server.toolTimeoutSec ?? 600}`,
     '--config',
-    `mcp_servers.${server.name}.default_tools_approval_mode="approve"`,
+    `mcp_servers.${server.name}.default_tools_approval_mode="auto"`,
   ]);
 
 const resolveCodexCommand = async (

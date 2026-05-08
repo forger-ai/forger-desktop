@@ -2,14 +2,17 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Button,
+  Chip,
   CssBaseline,
   Dialog,
   DialogActions,
   DialogContent,
   DialogTitle,
   MenuItem,
+  Paper,
   Select,
   Stack,
+  Switch,
   TextField,
   Typography,
   Snackbar,
@@ -26,6 +29,7 @@ import type {
   AppDetails,
   AppSecretsState,
   AppSummary,
+  AppToolsInstallGate,
   Automation,
   AutomationRun,
   AutomationRunSummary,
@@ -46,6 +50,7 @@ import type {
   MemoryCreateInput,
   MemoryEntry,
   MemoryUpdateInput,
+  OfficialToolSummary,
   PickedChatFile,
   RemoteAppBackupSummary,
   RemoteBackupsUsage,
@@ -106,6 +111,7 @@ import {
 } from '@renderer/error-reporting';
 
 const FORGER_DATA_ROOT_NAME = 'data';
+const FREE_CHAT_APP_ID = 'forger';
 
 const mergeRecords = (
   first?: Record<string, unknown>,
@@ -159,6 +165,10 @@ const initialAgentToolSettings: AgentToolSettings = {
     memory_create: false,
     memory_update: false,
     memory_delete: false,
+    'gmail.connection.status': false,
+    'gmail.search_messages': true,
+    'gmail.read_thread': true,
+    'gmail.send_email': true,
   },
 };
 
@@ -195,6 +205,8 @@ function App() {
   const [agentToolSettings, setAgentToolSettings] = useState<AgentToolSettings>(initialAgentToolSettings);
   const [agentToolBusyId, setAgentToolBusyId] = useState<AgentToolDefinition['id'] | null>(null);
   const [agentToolError, setAgentToolError] = useState<string | null>(null);
+  const [officialTools, setOfficialTools] = useState<OfficialToolSummary[]>([]);
+  const [officialToolBusyId, setOfficialToolBusyId] = useState<string | null>(null);
   const [cloudModalOpen, setCloudModalOpen] = useState(false);
   const [forgerAccount, setForgerAccount] = useState<ForgerAccountSession>(initialForgerAccount);
   const [forgerAccountBusy, setForgerAccountBusy] = useState(false);
@@ -213,6 +225,8 @@ function App() {
   const [selectedAppId, setSelectedAppId] = useState<string | null>(null);
   const [selectedDataAppId, setSelectedDataAppId] = useState<string | null>(null);
   const [appSecretsState, setAppSecretsState] = useState<AppSecretsState | null>(null);
+  const [pendingInstallGate, setPendingInstallGate] = useState<AppToolsInstallGate | null>(null);
+  const [pendingInstallBusy, setPendingInstallBusy] = useState(false);
   const [userSecrets, setUserSecrets] = useState<UserSecretSummary[]>([]);
   const [secretsBusy, setSecretsBusy] = useState(false);
   const [chatInput, setChatInput] = useState('');
@@ -293,16 +307,18 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
     [forgerFiles, mentionedChatFileIds],
   );
   const chatHistoryItems = useMemo<ConversationHistoryItem[]>(
-    () =>
-      chatConversations
-        .filter((conversation) => (selectedAppId ? conversation.appId === selectedAppId : true))
+    () => {
+      const chatScopeId = selectedAppId ?? FREE_CHAT_APP_ID;
+      return chatConversations
+        .filter((conversation) => conversation.appId === chatScopeId)
         .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
         .map((conversation) => ({
           id: conversation.id,
           title: conversation.title,
           threadId: conversation.threadId,
           updatedAt: conversation.updatedAt,
-        })),
+        }));
+    },
     [chatConversations, selectedAppId],
   );
 
@@ -401,6 +417,12 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
     setAgentToolSettings(toolSettings);
   };
 
+  const refreshOfficialTools = async () => {
+    const state = await getDesktopApi().listOfficialTools();
+    setOfficialTools(state.tools);
+    return state.tools;
+  };
+
   useEffect(() => {
     const loadData = async () => {
       const desktopApi = getDesktopApi();
@@ -411,6 +433,7 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
         codexAuthResult,
         desktopUpdateResult,
         toolsResult,
+        officialToolsResult,
         filesResult,
         categoriesResult,
         automationsResult,
@@ -425,6 +448,7 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
         desktopApi.getCodexAuthStatus(),
         desktopApi.getDesktopUpdateState(),
         refreshAgentTools(),
+        refreshOfficialTools(),
         desktopApi.filesList(fileFilters),
         desktopApi.filesListCategories(),
         desktopApi.automationsList(),
@@ -508,6 +532,9 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
       }
 
       if (toolsResult.status === 'rejected') {
+        setAgentToolError(t.sections.tools.saveError);
+      }
+      if (officialToolsResult.status === 'rejected') {
         setAgentToolError(t.sections.tools.saveError);
       }
     };
@@ -618,7 +645,8 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
         const dedupePermissionKey = `${run.runId}:needs_permission:${run.permissionRequest.requestId}`;
         if (!deliveredRunRepliesRef.current.has(dedupePermissionKey)) {
           deliveredRunRepliesRef.current.add(dedupePermissionKey);
-          const targetConversationId =
+      const targetConversationId =
+            run.conversationId ??
             runConversationIdByRunRef.current.get(run.runId) ??
             activeRunConversationIdRef.current ??
             activeConversationId;
@@ -649,6 +677,7 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
                         type: 'permission',
                         runId: run.runId,
                         request: permissionRequest,
+                        status: 'pending',
                       },
                     },
                   ],
@@ -686,6 +715,7 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
 
       deliveredRunRepliesRef.current.add(dedupeKey);
       const targetConversationId =
+        run.conversationId ??
         runConversationIdByRunRef.current.get(run.runId) ??
         activeRunConversationIdRef.current ??
         activeConversationId;
@@ -763,19 +793,6 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
   }, [selectedAutomationId]);
 
   useEffect(() => {
-    if (currentView !== 'chat') {
-      return;
-    }
-    if (selectedAppId) {
-      return;
-    }
-    if (installedApps.length === 0) {
-      return;
-    }
-    setSelectedAppId(installedApps[0].id);
-  }, [currentView, selectedAppId, installedApps]);
-
-  useEffect(() => {
     if (typeof window === 'undefined') {
       return;
     }
@@ -790,14 +807,10 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
   }, [chatConversations, activeConversationByApp, activeConversationId]);
 
   useEffect(() => {
-    if (!selectedAppId) {
-      setActiveConversationId(null);
-      return;
-    }
-
-    const appSpecificActive = activeConversationByApp[selectedAppId];
+    const chatScopeId = selectedAppId ?? FREE_CHAT_APP_ID;
+    const appSpecificActive = activeConversationByApp[chatScopeId];
     const appConversations = chatConversations
-      .filter((conversation) => conversation.appId === selectedAppId)
+      .filter((conversation) => conversation.appId === chatScopeId)
       .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
     const fallback = appConversations[0]?.id ?? null;
 
@@ -979,7 +992,7 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
     setChatContext(appId);
   };
 
-  const handleInstall = async (appId: string) => {
+  const performInstall = async (appId: string) => {
     try {
       const desktopApi = getDesktopApi();
       const result = await desktopApi.installApp(appId);
@@ -1014,6 +1027,45 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
         appId,
         sensitiveDetails: { stack: error instanceof Error ? error.stack : undefined },
       });
+    }
+  };
+
+  const handleInstall = async (appId: string) => {
+    try {
+      const gate = await getDesktopApi().getAppToolsInstallGate(appId);
+      if (gate && (gate.required.length > 0 || gate.optional.length > 0)) {
+        setPendingInstallGate(gate);
+        return;
+      }
+    } catch {
+      // Installation still performs the authoritative main-process gate.
+    }
+    await performInstall(appId);
+  };
+
+  const handleConfirmInstallWithTools = async () => {
+    if (!pendingInstallGate) {
+      return;
+    }
+    if (!pendingInstallGate.canInstall) {
+      setBannerSeverity('warning');
+      setBannerMessage('Instala y configura las herramientas necesarias antes de instalar esta app.');
+      return;
+    }
+    setPendingInstallBusy(true);
+    const appId = pendingInstallGate.appId;
+    setPendingInstallGate(null);
+    await performInstall(appId);
+    setPendingInstallBusy(false);
+  };
+
+  const handleOptionalToolGrant = async (toolId: string, granted: boolean) => {
+    if (!pendingInstallGate) {
+      return;
+    }
+    const updated = await getDesktopApi().setAppToolGrant({ appId: pendingInstallGate.appId, toolId, granted });
+    if (updated) {
+      setPendingInstallGate(updated);
     }
   };
 
@@ -1237,6 +1289,24 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
       setAgentToolError(t.sections.tools.saveError);
     } finally {
       setAgentToolBusyId(null);
+    }
+  };
+
+  const runOfficialToolAction = async (
+    toolId: string,
+    action: () => Promise<{ success: boolean; userMessage: string }>,
+  ) => {
+    setOfficialToolBusyId(toolId);
+    setAgentToolError(null);
+    try {
+      const result = await action();
+      await refreshOfficialTools();
+      setBannerSeverity(result.success ? 'success' : 'error');
+      setBannerMessage(result.userMessage);
+    } catch (_error) {
+      setAgentToolError(t.sections.tools.saveError);
+    } finally {
+      setOfficialToolBusyId(null);
     }
   };
 
@@ -1653,19 +1723,20 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
     ];
     const userVisibleContent = trimmed || `Archivos compartidos: ${sharedFileNames.join(', ')}`;
 
-    if ((!trimmed && pendingChatFiles.length === 0 && mentionedChatFileIds.length === 0) || !selectedAppId || chatRunActive || !codexAuthStatus.authenticated) {
+    if ((!trimmed && pendingChatFiles.length === 0 && mentionedChatFileIds.length === 0) || chatRunActive || !codexAuthStatus.authenticated) {
       if (!codexAuthStatus.authenticated) {
         setCodexConfigOpen(true);
       }
       return;
     }
 
+    const chatScopeId = selectedAppId ?? FREE_CHAT_APP_ID;
     let targetConversationId = activeConversationId;
     if (!targetConversationId) {
       const now = new Date().toISOString();
       const createdConversation: ChatConversation = {
         id: makeConversationId(),
-        appId: selectedAppId,
+        appId: chatScopeId,
         title: summarizeConversationTitle(userVisibleContent),
         threadId: null,
         createdAt: now,
@@ -1675,11 +1746,11 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
       targetConversationId = createdConversation.id;
       setChatConversations((current) => [createdConversation, ...current]);
       setActiveConversationId(createdConversation.id);
-      setActiveConversationByApp((current) => ({ ...current, [selectedAppId]: createdConversation.id }));
+      setActiveConversationByApp((current) => ({ ...current, [chatScopeId]: createdConversation.id }));
     }
 
     const conversationForRun = chatConversations.find((conversation) => conversation.id === targetConversationId);
-    setActiveConversationByApp((current) => ({ ...current, [selectedAppId]: targetConversationId as string }));
+    setActiveConversationByApp((current) => ({ ...current, [chatScopeId]: targetConversationId as string }));
     setChatRunActive(true);
     activeRunConversationIdRef.current = targetConversationId;
 
@@ -1692,7 +1763,7 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
         ? await desktopApi.filesImport({
             sourcePaths: pendingChatFiles.map((file) => file.sourcePath),
             categoryPath: uploadCategoryPath,
-            appId: selectedAppId,
+            ...(selectedAppId ? { appId: selectedAppId } : {}),
           })
         : [];
       discardStagedChatFiles(stagedFilesForCleanup);
@@ -1757,13 +1828,14 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
         }),
       );
       const startResult = await desktopApi.chatStartRun({
-        appId: selectedAppId,
+        appId: selectedAppId ?? undefined,
         prompt: trimmed || 'Review the shared files in this message.',
         threadId: conversationForRun?.threadId ?? null,
         userLanguage: activeLocale,
         sharedFiles,
         model: modelOption.realModelName,
         reasoningEffort: selectedCodexReasoningEffort,
+        conversationId: targetConversationId,
       });
       runConversationIdByRunRef.current.set(startResult.runId, targetConversationId);
     } catch (error) {
@@ -1798,7 +1870,7 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
         operation: 'chat.start-run',
         message: detail,
         technicalCode: 'chat_start_run_failed',
-        appId: selectedAppId,
+        appId: selectedAppId ?? undefined,
         appVersion: installedApps.find((appEntry) => appEntry.id === selectedAppId)?.version,
         sensitiveDetails: { stack: error instanceof Error ? error.stack : undefined },
       });
@@ -1816,7 +1888,50 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
       console.warn('[Forger permission] decision was rejected by main process', { runId, requestId, decision });
       setBannerSeverity('error');
       setBannerMessage(t.settings.authErrorFallback);
+      setChatConversations((currentConversations) =>
+        currentConversations.map((conversation) => ({
+          ...conversation,
+          messages: conversation.messages.map((message) => {
+            if (
+              message.action?.type === 'permission' &&
+              message.action.runId === runId &&
+              message.action.request.requestId === requestId
+            ) {
+              return {
+                ...message,
+                action: {
+                  ...message.action,
+                  status: 'pending',
+                },
+              };
+            }
+            return message;
+          }),
+        })),
+      );
+      return;
     }
+    setChatConversations((currentConversations) =>
+      currentConversations.map((conversation) => ({
+        ...conversation,
+        messages: conversation.messages.map((message) => {
+          if (
+            message.action?.type === 'permission' &&
+            message.action.runId === runId &&
+            message.action.request.requestId === requestId
+          ) {
+            return {
+              ...message,
+              action: {
+                ...message.action,
+                status: decision === 'allow' ? 'approved' : 'denied',
+              },
+            };
+          }
+          return message;
+        }),
+      })),
+    );
   };
 
   const handleOpenConversation = (conversationId: string) => {
@@ -1824,7 +1939,7 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
     if (!target) {
       return;
     }
-    setSelectedAppId(target.appId);
+    setSelectedAppId(target.appId === FREE_CHAT_APP_ID ? null : target.appId);
     setCurrentView('chat');
     setActiveConversationId(target.id);
     setActiveConversationByApp((current) => ({ ...current, [target.appId]: target.id }));
@@ -1854,13 +1969,11 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
   };
 
   const handleStartNewConversation = () => {
-    if (!selectedAppId) {
-      return;
-    }
+    const chatScopeId = selectedAppId ?? FREE_CHAT_APP_ID;
     const now = new Date().toISOString();
     const nextConversation: ChatConversation = {
       id: makeConversationId(),
-      appId: selectedAppId,
+      appId: chatScopeId,
       title: 'Conversacion nueva',
       threadId: null,
       createdAt: now,
@@ -1869,7 +1982,7 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
     };
     setChatConversations((current) => [nextConversation, ...current]);
     setActiveConversationId(nextConversation.id);
-    setActiveConversationByApp((current) => ({ ...current, [selectedAppId]: nextConversation.id }));
+    setActiveConversationByApp((current) => ({ ...current, [chatScopeId]: nextConversation.id }));
     setChatInput('');
     discardStagedChatFiles(pendingChatFiles);
     setPendingChatFiles([]);
@@ -2376,11 +2489,22 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
           <ToolsView
             packages={agentToolPackages}
             settings={agentToolSettings}
+            officialTools={officialTools}
             busyToolId={agentToolBusyId}
+            busyOfficialToolId={officialToolBusyId}
             errorMessage={agentToolError}
             t={t}
             onApprovalChange={(toolId, requiresApproval) =>
               void handleAgentToolApprovalChange(toolId, requiresApproval)
+            }
+            onActivateOfficialTool={(toolId) =>
+              void runOfficialToolAction(toolId, () => getDesktopApi().activateOfficialTool(toolId))
+            }
+            onConfigureOfficialTool={(toolId) =>
+              void runOfficialToolAction(toolId, () => getDesktopApi().configureOfficialTool({ toolId }))
+            }
+            onDeactivateOfficialTool={(toolId) =>
+              void runOfficialToolAction(toolId, () => getDesktopApi().deactivateOfficialTool(toolId))
             }
           />
         ) : null}
@@ -2414,6 +2538,87 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
           />
         ) : null}
       </AppShell>
+
+      <Dialog
+        open={Boolean(pendingInstallGate)}
+        onClose={() => {
+          if (!pendingInstallBusy) setPendingInstallGate(null);
+        }}
+        fullWidth
+        maxWidth="sm"
+      >
+        <DialogTitle>Herramientas de la app</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ pt: 1 }}>
+            <Typography color="text.secondary">
+              {pendingInstallGate?.appName} pide estas herramientas antes de instalarse.
+            </Typography>
+            {pendingInstallGate?.required.length ? (
+              <Stack spacing={1}>
+                <Typography variant="subtitle2">Necesarias</Typography>
+                {pendingInstallGate.required.map((item) => (
+                  <Paper key={item.declaration.toolId} variant="outlined" sx={{ p: 1.5, borderRadius: 1 }}>
+                    <Stack direction="row" spacing={1.5} justifyContent="space-between" alignItems="center">
+                      <Stack spacing={0.5}>
+                        <Typography fontWeight={650}>{item.tool?.name ?? item.declaration.toolId}</Typography>
+                        <Typography variant="body2" color="text.secondary">{item.declaration.reason}</Typography>
+                        <Chip
+                          size="small"
+                          color={item.configured ? 'success' : 'warning'}
+                          label={item.configured ? 'Lista' : 'Falta activar o configurar'}
+                        />
+                      </Stack>
+                      {!item.configured ? (
+                        <Button size="small" onClick={() => {
+                          setPendingInstallGate(null);
+                          setCurrentView('tools');
+                        }}>
+                          Ver herramientas
+                        </Button>
+                      ) : null}
+                    </Stack>
+                  </Paper>
+                ))}
+              </Stack>
+            ) : null}
+            {pendingInstallGate?.optional.length ? (
+              <Stack spacing={1}>
+                <Typography variant="subtitle2">Opcionales</Typography>
+                {pendingInstallGate.optional.map((item) => (
+                  <Paper key={item.declaration.toolId} variant="outlined" sx={{ p: 1.5, borderRadius: 1 }}>
+                    <Stack direction="row" spacing={1.5} justifyContent="space-between" alignItems="center">
+                      <Stack spacing={0.5}>
+                        <Typography fontWeight={650}>{item.tool?.name ?? item.declaration.toolId}</Typography>
+                        <Typography variant="body2" color="text.secondary">{item.declaration.reason}</Typography>
+                        <Chip
+                          size="small"
+                          color={item.configured ? 'success' : 'warning'}
+                          label={item.configured ? 'Lista' : 'No configurada'}
+                        />
+                      </Stack>
+                      <Switch
+                        checked={item.granted}
+                        disabled={!item.configured}
+                        onChange={(event) => void handleOptionalToolGrant(item.declaration.toolId, event.target.checked)}
+                      />
+                    </Stack>
+                  </Paper>
+                ))}
+              </Stack>
+            ) : null}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button disabled={pendingInstallBusy} onClick={() => setPendingInstallGate(null)}>Cancelar</Button>
+          <Button
+            variant="contained"
+            disabled={pendingInstallBusy || !pendingInstallGate?.canInstall}
+            onClick={() => void handleConfirmInstallWithTools()}
+          >
+            Instalar app
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <ForgerCloudModal
         open={cloudModalOpen}

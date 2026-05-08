@@ -98,6 +98,19 @@ interface RemoteBackupsResponse {
   } | null;
 }
 
+interface GmailOAuthTokenResponse {
+  access_token?: string;
+  refresh_token?: string;
+  expires_in?: number;
+  token_type?: string;
+  scope?: string;
+  error?: string;
+  error_description?: string;
+}
+
+const backendError = (message: string, technicalCode: string): Error & { technicalCode: string } =>
+  Object.assign(new Error(message), { technicalCode });
+
 const emptyRemoteBackupsState = (): RemoteBackupsState => ({
   backups: [],
   usage: {
@@ -246,6 +259,46 @@ export class ForgerBackendClient {
       method: 'DELETE',
       headers: this.buildHeaders(),
     }).catch(() => undefined);
+  }
+
+  async getGmailOAuthClientId(): Promise<string> {
+    const response = await fetch(`${this.options.backendBaseUrl}/api/v1/oauth/gmail/config`, {
+      method: 'GET',
+      headers: this.buildHeaders(),
+    });
+    const payload = await this.readJson<Record<string, unknown>>(response);
+    if (!response.ok) {
+      throw backendError('Inicia sesion en Forger antes de conectar Gmail.', `gmail_oauth_config_failed_${response.status}`);
+    }
+    const clientId = typeof payload?.client_id === 'string' ? payload.client_id.trim() : '';
+    if (!clientId) {
+      throw backendError('Gmail no esta configurado en Forger Cloud.', 'gmail_oauth_client_missing');
+    }
+    return clientId;
+  }
+
+  async exchangeGmailOAuthCode(input: {
+    clientId: string;
+    code: string;
+    codeVerifier: string;
+    redirectUri: string;
+  }): Promise<GmailOAuthTokenResponse> {
+    return this.postGmailOAuth('/api/v1/oauth/gmail/token', {
+      client_id: input.clientId,
+      code: input.code,
+      code_verifier: input.codeVerifier,
+      redirect_uri: input.redirectUri,
+    });
+  }
+
+  async refreshGmailOAuthAccessToken(input: {
+    clientId: string;
+    refreshToken: string;
+  }): Promise<GmailOAuthTokenResponse> {
+    return this.postGmailOAuth('/api/v1/oauth/gmail/refresh', {
+      client_id: input.clientId,
+      refresh_token: input.refreshToken,
+    });
   }
 
   async registerDevice(input: {
@@ -527,6 +580,27 @@ export class ForgerBackendClient {
       headers.Authorization = `Bearer ${token}`;
     }
     return headers;
+  }
+
+  private async postGmailOAuth(path: string, body: Record<string, string>): Promise<GmailOAuthTokenResponse> {
+    const response = await fetch(`${this.options.backendBaseUrl}${path}`, {
+      method: 'POST',
+      headers: {
+        ...this.buildHeaders(),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+    const payload = await this.readJson<GmailOAuthTokenResponse>(response);
+    if (!response.ok) {
+      const code = payload?.error || `gmail_oauth_backend_failed_${response.status}`;
+      const description = payload?.error_description || 'No pudimos conectar Gmail desde Forger Cloud.';
+      throw backendError(description, code);
+    }
+    if (!payload || typeof payload !== 'object') {
+      throw backendError('Forger Cloud devolvio una respuesta Gmail invalida.', 'gmail_oauth_backend_response_invalid');
+    }
+    return payload;
   }
 
   private async readJson<T>(response: Response): Promise<T | null> {

@@ -27,6 +27,7 @@ export const buildCodexPromptWithAppContext = (params: {
   displayName: string;
   userPrompt: string;
   userLanguage?: string;
+  officialToolsContext?: string;
   sharedFiles: PromptSharedFile[];
   sharedFilesRootName: string;
 }): string => {
@@ -53,6 +54,47 @@ export const buildCodexPromptWithAppContext = (params: {
     'Operational instruction: follow the Forger contract in AGENTS.md. Internally classify the request as one allowed task: resolver_dudas, trabajar_datos, interactuar_con_aplicacion, actualizar_aplicacion, or resolver_conflicto_actualizacion.',
     'Prefer replying in the language the user used to write their question. Also consider USER LANGUAGE as the configured application language, especially when the user message is short, mixed-language, or ambiguous.',
     'If the message contains tasks from different categories, handle one per turn. For actualizar_aplicacion, ground the scope in Visual + Flow before changing anything; if the scope is clear, complete the change and answer only with functional impact.',
+    params.officialToolsContext?.trim() ? `\n${params.officialToolsContext.trim()}` : '',
+    '',
+    'SHARED FILES IN THIS MESSAGE:',
+    ...filesSection,
+    '',
+    'USER MESSAGE:',
+    params.userPrompt.trim(),
+  ].join('\n');
+};
+
+export const buildCodexPromptForFreeChat = (params: {
+  userPrompt: string;
+  userLanguage?: string;
+  officialToolsContext?: string;
+  sharedFiles: PromptSharedFile[];
+  sharedFilesRootName: string;
+}): string => {
+  const userLanguage = params.userLanguage?.trim() || 'not configured';
+  const filesSection =
+    params.sharedFiles.length === 0
+      ? ['- No shared files in this message.']
+      : params.sharedFiles.map((file) =>
+          [
+            `- Name: ${file.name}`,
+            `  Relative path: ${params.sharedFilesRootName}/${file.relativePath}`,
+            `  Size: ${formatBytes(file.sizeBytes)}`,
+            `  Modified at: ${file.modifiedAt}`,
+            `  Source: ${file.source === 'attached' ? 'attached in this message' : 'mentioned with @'}`,
+          ].join('\n'),
+        );
+
+  return [
+    'FORGER CHAT MODE: free chat',
+    `FORGER CONTRACT: ${FORGER_AGENT_CONTRACT_VERSION}`,
+    `USER LANGUAGE: ${userLanguage}`,
+    '',
+    'You are Forger chat in free mode. Work from the Forger home workspace.',
+    'Do not assume the user is focused on one app. Ask only when the target app or action is ambiguous.',
+    'Use Forger MCP tools and available app MCP tools when the user asks to inspect or act across installed apps.',
+    'Official Forger tools are not installed apps. Do not reject a Gmail request only because there is no installed mail app.',
+    params.officialToolsContext?.trim() ? `\n${params.officialToolsContext.trim()}` : '',
     '',
     'SHARED FILES IN THIS MESSAGE:',
     ...filesSection,
