@@ -2098,6 +2098,7 @@ const isRuntimeArtifactStatusLine = (line: string): boolean => {
   return (
     filePath === 'frontend/node_modules' ||
     filePath.startsWith('frontend/node_modules/') ||
+    filePath === 'frontend/package-lock.json' ||
     filePath === 'backend/.venv' ||
     filePath.startsWith('backend/.venv/') ||
     filePath === 'backend/data' ||
@@ -2364,6 +2365,34 @@ const copyDirectoryContents = async (sourceDir: string, targetDir: string): Prom
   }
 };
 
+const fileExists = async (filePath: string): Promise<boolean> => {
+  const stat = await fs.stat(filePath).catch(() => null);
+  return Boolean(stat?.isFile());
+};
+
+const installFrontendDependenciesWithNpm = async (
+  nodePath: string,
+  npmPath: string,
+  frontendDir: string,
+  appId: string,
+): Promise<void> => {
+  const hasPackageLock = await fileExists(path.join(frontendDir, 'package-lock.json'));
+  const args = hasPackageLock ? ['ci'] : ['install', '--package-lock=false'];
+  const label = hasPackageLock ? 'npm ci' : 'npm install --package-lock=false';
+
+  await runCommand(npmPath, args, {
+    cwd: frontendDir,
+    env: {
+      PATH: `${path.dirname(nodePath)}${path.delimiter}${process.env.PATH ?? ''}`,
+    },
+    log: {
+      appId,
+      phase: 'installing_frontend',
+      label,
+    },
+  });
+};
+
 const installAppDependencies = async (
   appId: string,
   installDir: string,
@@ -2382,17 +2411,7 @@ const installAppDependencies = async (
   await installBackendDependenciesWithUv(pythonRuntime.python as string, backendDir, appId);
 
   await publishProgress('installing_frontend', 'Instalando dependencias del frontend...');
-  await runCommand(nodeRuntime.npm as string, ['install'], {
-    cwd: frontendDir,
-    env: {
-      PATH: `${path.dirname(nodeRuntime.node as string)}${path.delimiter}${process.env.PATH ?? ''}`,
-    },
-    log: {
-      appId,
-      phase: 'installing_frontend',
-      label: 'npm install',
-    },
-  });
+  await installFrontendDependenciesWithNpm(nodeRuntime.node as string, nodeRuntime.npm as string, frontendDir, appId);
 };
 
 const flattenSingleTopLevelDirectory = async (targetDir: string): Promise<void> => {
@@ -3148,17 +3167,7 @@ const installAppRuntime = async (appId: string): Promise<InstallAppResult> => {
     await installBackendDependenciesWithUv(pythonRuntime.python as string, backendDir, appId);
 
     await publishProgress('installing_frontend', 'Instalando dependencias del frontend...');
-    await runCommand(nodeRuntime.npm as string, ['install'], {
-      cwd: frontendDir,
-      env: {
-        PATH: `${path.dirname(nodeRuntime.node as string)}${path.delimiter}${process.env.PATH ?? ''}`,
-      },
-      log: {
-        appId,
-        phase: 'installing_frontend',
-        label: 'npm install',
-      },
-    });
+    await installFrontendDependenciesWithNpm(nodeRuntime.node as string, nodeRuntime.npm as string, frontendDir, appId);
 
     const installed: InstalledAppRecord = {
       appId,
