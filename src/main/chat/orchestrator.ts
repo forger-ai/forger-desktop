@@ -279,7 +279,7 @@ class SandboxRunner {
           '--config',
           `mcp_servers.${server.name}.tool_timeout_sec=${server.toolTimeoutSec ?? 600}`,
           '--config',
-          `mcp_servers.${server.name}.default_tools_approval_mode="auto"`,
+          `mcp_servers.${server.name}.default_tools_approval_mode="${getMcpApprovalMode(server)}"`,
           ...(server.name === 'forger'
             ? [
           '--config',
@@ -360,7 +360,7 @@ class SandboxRunner {
           `workingDir=${params.workingDir}`,
           `allowedMcpServers=${mcpServers.map((server) => server.name).join(',') || '(none)'}`,
           'askForApproval=never',
-          'mcpDefaultToolsApprovalMode=auto',
+          'mcpDefaultToolsApprovalMode=forger:auto app:approve',
         ].join(' '),
       );
       for (const [index, args] of attempts.entries()) {
@@ -1696,6 +1696,9 @@ const parseCodexJsonl = (
 const toNumber = (value: unknown): number => {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0;
 };
+
+const getMcpApprovalMode = (server: CodexMcpServerConfig): 'auto' | 'approve' =>
+  server.name === 'forger' ? 'auto' : 'approve';
 
 const toProgressMessages = (
   stream: 'stdout' | 'stderr' | 'meta',

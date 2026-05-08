@@ -995,8 +995,11 @@ const buildMcpArgs = (mcpServers: CodexMcpServerConfig[]): string[] =>
     '--config',
     `mcp_servers.${server.name}.tool_timeout_sec=${server.toolTimeoutSec ?? 600}`,
     '--config',
-    `mcp_servers.${server.name}.default_tools_approval_mode="auto"`,
+    `mcp_servers.${server.name}.default_tools_approval_mode="${getMcpApprovalMode(server)}"`,
   ]);
+
+const getMcpApprovalMode = (server: CodexMcpServerConfig): 'auto' | 'approve' =>
+  server.name === 'forger' ? 'auto' : 'approve';
 
 const resolveCodexCommand = async (
   codexCliPath: string,

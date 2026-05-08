@@ -63,6 +63,47 @@ export interface AppPromptTemplateArgument {
   maxLength?: number;
 }
 
+export type AppPromptReviewKind = 'promptTemplate' | 'agent';
+
+export interface AppPromptValidationResult {
+  valid: boolean;
+  errors: string[];
+  missingVariables: string[];
+  extraVariables: string[];
+}
+
+export interface AppPromptReviewItem {
+  appId: string;
+  kind: AppPromptReviewKind;
+  id: string;
+  title: string;
+  description?: string;
+  originalPrompt: string;
+  prompt: string;
+  overridePrompt?: string;
+  edited: boolean;
+  overrideInvalid: boolean;
+  updatedAt?: string;
+  validation: AppPromptValidationResult;
+}
+
+export interface AppPromptReviewInput {
+  appId: string;
+  kind: AppPromptReviewKind;
+  id: string;
+  prompt: string;
+}
+
+export interface AppPromptRestoreInput {
+  appId: string;
+  kind: AppPromptReviewKind;
+  id: string;
+}
+
+export interface AppPromptMutationResult extends BasicActionResult {
+  prompt?: AppPromptReviewItem;
+}
+
 export interface CatalogApp extends AppSummary {
   latestVersionId?: number;
   latestVersion?: string;
@@ -75,6 +116,8 @@ export interface CatalogApp extends AppSummary {
   ratingsCount?: number;
   recentRatings?: AppRatingSummary[];
   currentUserRating?: AppRatingSummary;
+  promptTemplates?: AppPromptTemplate[];
+  agents?: AppAgent[];
 }
 
 export interface ForgerAccountUser {
@@ -502,6 +545,9 @@ export type AgentToolId =
   | 'forger_list_catalog'
   | 'forger_list_installed_apps'
   | 'forger_check_updates'
+  | 'forger_list_app_prompts'
+  | 'forger_update_app_prompt'
+  | 'forger_restore_app_prompt'
   | 'memory_list'
   | 'memory_create'
   | 'memory_update'
@@ -770,6 +816,7 @@ export interface AppDetails {
   localChanges?: AppLocalChangeSummary[];
   promptTemplates?: AppPromptTemplate[];
   agents?: AppAgent[];
+  promptReviews?: AppPromptReviewItem[];
   codexConversation?: { enabled: boolean };
 }
 
@@ -1219,6 +1266,10 @@ export interface ForgerDesktopApi {
   resolveAppUpdateConflict: (appId: string) => Promise<{ runId: string; status: ChatRunStatus } | BasicActionResult>;
   uninstallApp: (appId: string) => Promise<BasicActionResult>;
   getAppDetails: (appId: string) => Promise<AppDetails | null>;
+  listAppPrompts: (appId: string) => Promise<AppPromptReviewItem[]>;
+  validateAppPrompt: (input: AppPromptReviewInput) => Promise<AppPromptValidationResult>;
+  updateAppPrompt: (input: AppPromptReviewInput) => Promise<AppPromptMutationResult>;
+  restoreAppPrompt: (input: AppPromptRestoreInput) => Promise<AppPromptMutationResult>;
   installWelcome: (appId: string, userLanguage?: string) => Promise<InstallWelcomeResult>;
   openApp: (appId: string, locale?: string) => Promise<OpenAppResult>;
   stopApp: (appId: string) => Promise<StopAppResult>;

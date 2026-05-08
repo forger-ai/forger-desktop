@@ -8,6 +8,8 @@ Forger expects embedded runtime archives in this tree.
 - `node/22/<platform-arch>.sha256` (optional in dev, required in packaged builds)
 - `python/3.12/<runtime-file>.zip|.tar.gz|.tgz`
 - `python/3.12/<platform-arch>.sha256` (optional in dev, required in packaged builds)
+- `git/2.54.0/<git-runtime-file>.zip|.tar.gz`
+- `git/2.54.0/<git-runtime-file>.zip.sha256|.tar.gz.sha256`
 
 Supported platform aliases for this release:
 
@@ -18,5 +20,6 @@ The runtime archive should extract to a folder containing:
 
 - Node runtime: `bin/node` and `bin/npm` (or Windows equivalents)
 - Python runtime: `bin/python` + `bin/pip` (or Windows equivalents)
+- Git runtime: `cmd/git.exe` from MinGit on Windows, or `bin/git` on macOS
 
 Top-level wrappers are supported (for example, `node-v22.../` or `python/`), because Forger flattens a single top-level directory automatically after extraction.

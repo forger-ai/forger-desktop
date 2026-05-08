@@ -1,8 +1,11 @@
 import type {
   AppCategory,
+  AppAgent,
   AppRatingSummary,
   AppStatus,
   CatalogApp,
+  AppPromptTemplate,
+  AppToolDeclaration,
   AppBackupSummary,
   RemoteBackupType,
   RemoteBackupSource,
@@ -40,6 +43,10 @@ interface PublicCatalogResponseItem {
   category: string;
   icon_url?: string | null;
   beta?: boolean | null;
+  agents?: unknown;
+  prompt_templates?: unknown;
+  promptTemplates?: unknown;
+  tools?: unknown;
   latest_version?: CatalogVersionPayload;
 }
 
@@ -62,6 +69,10 @@ interface CatalogVersionPayload {
   changelog?: unknown;
   capabilities?: unknown;
   permissions?: unknown;
+  agents?: unknown;
+  prompt_templates?: unknown;
+  promptTemplates?: unknown;
+  tools?: unknown;
 }
 
 interface DownloadPayload {
@@ -639,6 +650,14 @@ export class ForgerBackendClient {
       downloadUrl: includeDirectDownloadUrl ? latestVersion?.download_url ?? undefined : undefined,
       changelog: this.normalizeChangelog(latestVersion?.changelog, latestVersion?.version),
       capabilities: normalizeAppCapabilities(latestVersion?.capabilities ?? latestVersion?.permissions),
+      tools: this.normalizeCatalogTools(latestVersion?.tools ?? appEntry.tools),
+      agents: this.normalizeCatalogAgents(latestVersion?.agents ?? appEntry.agents),
+      promptTemplates: this.normalizeCatalogPromptTemplates(
+        latestVersion?.prompt_templates
+          ?? latestVersion?.promptTemplates
+          ?? appEntry.prompt_templates
+          ?? appEntry.promptTemplates,
+      ),
       version: latestVersion?.version,
       userMessage: this.options.getUserMessage(appEntry.slug),
       averageRating: this.normalizeNumber(backendEntry.average_rating),
@@ -646,6 +665,88 @@ export class ForgerBackendClient {
       recentRatings,
       currentUserRating: this.normalizeRating(backendEntry.current_user_rating),
     };
+  }
+
+  private normalizeCatalogTools(value: unknown): CatalogApp['tools'] | undefined {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return undefined;
+    }
+    const record = value as Record<string, unknown>;
+    const normalizeList = (items: unknown): AppToolDeclaration[] =>
+      Array.isArray(items)
+        ? items.flatMap((item) => {
+            if (!item || typeof item !== 'object' || Array.isArray(item)) {
+              return [];
+            }
+            const candidate = item as Record<string, unknown>;
+            const toolId = typeof candidate.toolId === 'string' ? candidate.toolId.trim() : '';
+            const actions = Array.isArray(candidate.actions)
+              ? candidate.actions.filter((action): action is string => typeof action === 'string' && action.trim().length > 0)
+              : [];
+            if (!toolId || actions.length === 0) {
+              return [];
+            }
+            const reason =
+              typeof candidate.reason === 'string' && candidate.reason.trim()
+                ? candidate.reason.trim()
+                : undefined;
+            if (!reason) {
+              return [];
+            }
+            return [{ toolId, actions, reason }];
+          })
+        : [];
+    const required = normalizeList(record.required);
+    const optional = normalizeList(record.optional);
+    return required.length > 0 || optional.length > 0 ? { required, optional } : undefined;
+  }
+
+  private normalizeCatalogAgents(value: unknown): AppAgent[] | undefined {
+    if (!Array.isArray(value)) {
+      return undefined;
+    }
+    const agents = value.flatMap((item) => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) {
+        return [];
+      }
+      const candidate = item as Record<string, unknown>;
+      const id = typeof candidate.id === 'string' ? candidate.id.trim() : '';
+      const title = typeof candidate.title === 'string' ? candidate.title.trim() : '';
+      const initialPrompt = typeof candidate.initialPrompt === 'string' ? candidate.initialPrompt.trim() : '';
+      if (!id || !title || !initialPrompt) {
+        return [];
+      }
+      const description =
+        typeof candidate.description === 'string' && candidate.description.trim()
+          ? candidate.description.trim()
+          : undefined;
+      return [{ id, title, initialPrompt, ...(description ? { description } : {}) }];
+    });
+    return agents.length > 0 ? agents : undefined;
+  }
+
+  private normalizeCatalogPromptTemplates(value: unknown): AppPromptTemplate[] | undefined {
+    if (!Array.isArray(value)) {
+      return undefined;
+    }
+    const templates = value.flatMap((item) => {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) {
+        return [];
+      }
+      const candidate = item as Record<string, unknown>;
+      const id = typeof candidate.id === 'string' ? candidate.id.trim() : '';
+      const title = typeof candidate.title === 'string' ? candidate.title.trim() : '';
+      const prompt = typeof candidate.prompt === 'string' ? candidate.prompt.trim() : '';
+      if (!id || !title || !prompt) {
+        return [];
+      }
+      const description =
+        typeof candidate.description === 'string' && candidate.description.trim()
+          ? candidate.description.trim()
+          : undefined;
+      return [{ id, title, prompt, ...(description ? { description } : {}) }];
+    });
+    return templates.length > 0 ? templates : undefined;
   }
 
   private absoluteBackendUrl(value: string | null | undefined): string | undefined {

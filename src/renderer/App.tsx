@@ -27,6 +27,8 @@ import type {
   AppBackupSummary,
   AppCategory,
   AppDetails,
+  AppPromptRestoreInput,
+  AppPromptReviewInput,
   AppSecretsState,
   AppSummary,
   AppToolsInstallGate,
@@ -155,6 +157,9 @@ const initialAgentToolSettings: AgentToolSettings = {
     forger_list_catalog: false,
     forger_list_installed_apps: false,
     forger_check_updates: false,
+    forger_list_app_prompts: false,
+    forger_update_app_prompt: true,
+    forger_restore_app_prompt: true,
     forger_get_app_runtime_status: false,
     forger_open_app: true,
     forger_stop_app: true,
@@ -2271,6 +2276,26 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
     return result;
   };
 
+  const handleUpdateAppPrompt = async (input: AppPromptReviewInput) => {
+    const result = await getDesktopApi().updateAppPrompt(input);
+    setBannerSeverity(result.success ? 'success' : 'error');
+    setBannerMessage(result.userMessage ?? t.appView.promptErrorFallback);
+    if (selectedAppDetailsId) {
+      setSelectedAppDetails(await getDesktopApi().getAppDetails(selectedAppDetailsId));
+    }
+    return result;
+  };
+
+  const handleRestoreAppPrompt = async (input: AppPromptRestoreInput) => {
+    const result = await getDesktopApi().restoreAppPrompt(input);
+    setBannerSeverity(result.success ? 'success' : 'error');
+    setBannerMessage(result.userMessage ?? t.appView.promptErrorFallback);
+    if (selectedAppDetailsId) {
+      setSelectedAppDetails(await getDesktopApi().getAppDetails(selectedAppDetailsId));
+    }
+    return result;
+  };
+
   const resolvedMode = resolveThemeMode(themePreference, prefersDark);
   const theme = useMemo(() => buildAppTheme(resolvedMode), [resolvedMode]);
 
@@ -2358,6 +2383,8 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
             onOpenAccount={() => setCloudModalOpen(true)}
             onSubmitRating={handleSubmitRating}
             onSubmitFeedback={handleSubmitFeedback}
+            onUpdatePrompt={handleUpdateAppPrompt}
+            onRestorePrompt={handleRestoreAppPrompt}
           />
         ) : null}
 
