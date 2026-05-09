@@ -37,6 +37,7 @@ const IPC_CHANNELS = {
   connectAppSecret: 'forger:connect-app-secret',
   disconnectAppSecret: 'forger:disconnect-app-secret',
   getSettings: 'forger:get-settings',
+  updateCodexDefaults: 'forger:update-codex-defaults',
   getDesktopUpdateState: 'forger:desktop-update:get-state',
   checkDesktopUpdates: 'forger:desktop-update:check',
   downloadDesktopUpdate: 'forger:desktop-update:download',
@@ -46,6 +47,7 @@ const IPC_CHANNELS = {
   registerForgerAccount: 'forger:account:register',
   loginForgerAccount: 'forger:account:login',
   logoutForgerAccount: 'forger:account:logout',
+  forgerAccountUpdated: 'forger:account:updated',
   getCloudDevices: 'forger:cloud-devices:get',
   generateDevicePairingCode: 'forger:cloud-devices:pairing-code',
   submitAppRating: 'forger:catalog:rating:submit',
@@ -116,8 +118,8 @@ const IPC_CHANNELS = {
 const api: ForgerDesktopApi = {
   listInstalledApps: () => ipcRenderer.invoke(IPC_CHANNELS.listInstalledApps),
   listCatalogApps: () => ipcRenderer.invoke(IPC_CHANNELS.listCatalogApps),
-  installApp: (appId) => ipcRenderer.invoke(IPC_CHANNELS.installApp, appId),
-  updateApp: (appId) => ipcRenderer.invoke(IPC_CHANNELS.updateApp, appId),
+  installApp: (appId, locale) => ipcRenderer.invoke(IPC_CHANNELS.installApp, appId, locale),
+  updateApp: (appId, locale) => ipcRenderer.invoke(IPC_CHANNELS.updateApp, appId, locale),
   listBackups: (appId) => ipcRenderer.invoke(IPC_CHANNELS.listBackups, appId),
   createBackup: (input) => ipcRenderer.invoke(IPC_CHANNELS.createBackup, input),
   deleteBackup: (input) => ipcRenderer.invoke(IPC_CHANNELS.deleteBackup, input),
@@ -166,6 +168,7 @@ const api: ForgerDesktopApi = {
     };
   },
   getSettings: () => ipcRenderer.invoke(IPC_CHANNELS.getSettings),
+  updateCodexDefaults: (input) => ipcRenderer.invoke(IPC_CHANNELS.updateCodexDefaults, input),
   getDesktopUpdateState: () => ipcRenderer.invoke(IPC_CHANNELS.getDesktopUpdateState),
   checkDesktopUpdates: () => ipcRenderer.invoke(IPC_CHANNELS.checkDesktopUpdates),
   downloadDesktopUpdate: () => ipcRenderer.invoke(IPC_CHANNELS.downloadDesktopUpdate),
@@ -183,6 +186,15 @@ const api: ForgerDesktopApi = {
   registerForgerAccount: (input) => ipcRenderer.invoke(IPC_CHANNELS.registerForgerAccount, input),
   loginForgerAccount: (input) => ipcRenderer.invoke(IPC_CHANNELS.loginForgerAccount, input),
   logoutForgerAccount: () => ipcRenderer.invoke(IPC_CHANNELS.logoutForgerAccount),
+  onForgerAccountUpdated: (listener) => {
+    const wrapped = (_event: unknown, payload: Parameters<typeof listener>[0]) => {
+      listener(payload);
+    };
+    ipcRenderer.on(IPC_CHANNELS.forgerAccountUpdated, wrapped);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.forgerAccountUpdated, wrapped);
+    };
+  },
   getCloudDevices: () => ipcRenderer.invoke(IPC_CHANNELS.getCloudDevices),
   generateDevicePairingCode: () => ipcRenderer.invoke(IPC_CHANNELS.generateDevicePairingCode),
   submitAppRating: (input) => ipcRenderer.invoke(IPC_CHANNELS.submitAppRating, input),
@@ -206,13 +218,13 @@ const api: ForgerDesktopApi = {
   listAgentTools: () => ipcRenderer.invoke(IPC_CHANNELS.listAgentTools),
   getAgentToolSettings: () => ipcRenderer.invoke(IPC_CHANNELS.getAgentToolSettings),
   updateAgentToolApproval: (input) => ipcRenderer.invoke(IPC_CHANNELS.updateAgentToolApproval, input),
-  listOfficialTools: () => ipcRenderer.invoke(IPC_CHANNELS.listOfficialTools),
-  refreshOfficialTools: () => ipcRenderer.invoke(IPC_CHANNELS.refreshOfficialTools),
-  activateOfficialTool: (toolId) => ipcRenderer.invoke(IPC_CHANNELS.activateOfficialTool, toolId),
+  listOfficialTools: (locale) => ipcRenderer.invoke(IPC_CHANNELS.listOfficialTools, locale),
+  refreshOfficialTools: (locale) => ipcRenderer.invoke(IPC_CHANNELS.refreshOfficialTools, locale),
+  activateOfficialTool: (toolId, locale) => ipcRenderer.invoke(IPC_CHANNELS.activateOfficialTool, toolId, locale),
   configureOfficialTool: (input) => ipcRenderer.invoke(IPC_CHANNELS.configureOfficialTool, input),
-  deactivateOfficialTool: (toolId) => ipcRenderer.invoke(IPC_CHANNELS.deactivateOfficialTool, toolId),
-  getAppToolsInstallGate: (appId) => ipcRenderer.invoke(IPC_CHANNELS.getAppToolsInstallGate, appId),
-  setAppToolGrant: (input) => ipcRenderer.invoke(IPC_CHANNELS.setAppToolGrant, input),
+  deactivateOfficialTool: (toolId, locale) => ipcRenderer.invoke(IPC_CHANNELS.deactivateOfficialTool, toolId, locale),
+  getAppToolsInstallGate: (appId, locale) => ipcRenderer.invoke(IPC_CHANNELS.getAppToolsInstallGate, appId, locale),
+  setAppToolGrant: (input, locale) => ipcRenderer.invoke(IPC_CHANNELS.setAppToolGrant, input, locale),
   memoryList: (input) => ipcRenderer.invoke(IPC_CHANNELS.memoryList, input ?? {}),
   memoryCreate: (input) => ipcRenderer.invoke(IPC_CHANNELS.memoryCreate, input),
   memoryUpdate: (input) => ipcRenderer.invoke(IPC_CHANNELS.memoryUpdate, input),

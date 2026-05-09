@@ -14,6 +14,7 @@ import type {
   CodexReasoningEffort,
   PermissionRequest,
 } from '../shared/types';
+import { getSharedCopy, normalizeLocale, type Locale } from '../shared/i18n';
 import {
   assertAllowedMcpServers,
   createIsolatedCodexHome,
@@ -38,7 +39,7 @@ interface AppCodexConversationManagerOptions {
   getCodexAuthenticated: () => Promise<boolean>;
   hasCodexConversation: (appId: string) => Promise<boolean>;
   resolveAgents: (appId: string) => Promise<AppAgent[]>;
-  createForgerMcpSession?: (runId: string, appId: string) => { url: string; token: string } | null;
+  createForgerMcpSession?: (runId: string, appId: string, locale?: string) => { url: string; token: string } | null;
   releaseForgerMcpSession?: (token: string) => void;
   buildMemoryContext?: (appId: string) => Promise<string>;
   buildForgerToolsContext?: (appId: string) => Promise<string>;
@@ -56,6 +57,7 @@ interface InternalConversation extends AppCodexConversation {
 interface InternalRun extends AppCodexConversationRun {
   appId: string;
   conversationId: string;
+  locale: Locale;
   child?: ChildProcessWithoutNullStreams;
   attachmentPaths?: string[];
 }
@@ -72,8 +74,8 @@ interface PendingPermission {
   resolve: (decision: 'allow' | 'deny') => void;
 }
 
-const DEFAULT_MODEL = 'gpt-5.3-codex';
-const DEFAULT_REASONING: CodexReasoningEffort = 'low';
+const DEFAULT_MODEL = 'gpt-5.4';
+const DEFAULT_REASONING: CodexReasoningEffort = 'medium';
 const MAX_CONTEXT_CHARS = 40_000;
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 const CODEX_CONVERSATION_RUN_TIMEOUT_MS = 600_000;
@@ -95,10 +97,12 @@ export class AppCodexConversationManager {
     if (agentId) {
       metadata.agentId = agentId;
     }
+    const locale = normalizeLocale(input.locale);
+    metadata.locale = locale;
     const conversation: InternalConversation = {
       conversationId: randomUUID(),
       appId,
-      title: sanitizeTitle(input.title) || 'Conversacion',
+      title: sanitizeTitle(input.title) || getSharedCopy(locale).appConversation.defaultTitle,
       createdAt: now,
       updatedAt: now,
       messages: [],
@@ -162,6 +166,7 @@ export class AppCodexConversationManager {
       runId,
       appId,
       conversationId: conversation.conversationId,
+      locale: normalizeLocale(input.locale ?? (typeof conversation.metadata?.locale === 'string' ? conversation.metadata.locale : undefined)),
       status: 'queued',
       createdAt: now,
       updatedAt: now,
@@ -361,7 +366,7 @@ export class AppCodexConversationManager {
       const command = await resolveCodexCommand(codexCliPath, await this.options.getCodexPathEntries(conversation.appId));
       const environment = await this.options.getCodexEnvironment(conversation.appId);
       const appMcpServers = await (this.options.listenAppMcps?.([conversation.appId], run.runId) ?? Promise.resolve([]));
-      forgerMcpSession = this.options.createForgerMcpSession?.(run.runId, conversation.appId) ?? null;
+      forgerMcpSession = this.options.createForgerMcpSession?.(run.runId, conversation.appId, run.locale) ?? null;
       mcpServers = [
         ...(forgerMcpSession
           ? [{
@@ -375,8 +380,9 @@ export class AppCodexConversationManager {
         ...appMcpServers,
       ];
       const mcpArgs = buildMcpArgs(mcpServers);
-      const model = input.model?.trim() || DEFAULT_MODEL;
-      const reasoningEffort = input.reasoningEffort ?? DEFAULT_REASONING;
+      const agentRuntime = await this.resolveAgentRuntime(conversation);
+      const model = input.model?.trim() || agentRuntime.model;
+      const reasoningEffort = input.reasoningEffort ?? agentRuntime.reasoningEffort;
       const initialPrompt = await this.resolveInitialPrompt(conversation);
       const memoryContext = !conversation.threadId
         ? await (this.options.buildMemoryContext?.(conversation.appId) ?? Promise.resolve(''))
@@ -460,7 +466,7 @@ export class AppCodexConversationManager {
       if (parsed.threadId) {
         conversation.threadId = parsed.threadId;
       }
-      const assistantText = parsed.assistantText || 'Listo.';
+      const assistantText = parsed.assistantText || getSharedCopy(run.locale).appConversation.done;
       const assistantMessage: AppCodexConversationMessage = {
         messageId: randomUUID(),
         role: 'assistant',
@@ -538,7 +544,7 @@ export class AppCodexConversationManager {
   }
 
   private handleOutput(conversation: InternalConversation, run: InternalRun, text: string): void {
-    const progress = progressFromCodexOutput(text);
+    const progress = progressFromCodexOutput(text, run.locale);
     if (!progress) {
       return;
     }
@@ -612,6 +618,22 @@ export class AppCodexConversationManager {
     conversation.updatedAt = new Date().toISOString();
     await this.persistApp(conversation.appId);
     return initialPrompt;
+  }
+
+  private async resolveAgentRuntime(conversation: InternalConversation): Promise<{
+    model: string;
+    reasoningEffort: CodexReasoningEffort;
+  }> {
+    const metadata = normalizeMetadata(conversation.metadata);
+    const agentId = typeof metadata?.agentId === 'string' ? metadata.agentId.trim() : '';
+    if (!agentId) {
+      return { model: DEFAULT_MODEL, reasoningEffort: DEFAULT_REASONING };
+    }
+    const agent = (await this.options.resolveAgents(conversation.appId)).find((entry) => entry.id === agentId);
+    return {
+      model: agent?.model?.trim() || DEFAULT_MODEL,
+      reasoningEffort: agent?.reasoningEffort ?? DEFAULT_REASONING,
+    };
   }
 
   private async load(): Promise<void> {
@@ -764,12 +786,13 @@ const parseCodexJsonl = (stdout: string, stderr: string): { assistantText: strin
   return { assistantText: assistantText.trim(), threadId };
 };
 
-const progressFromCodexOutput = (text: string): string | null => {
+const progressFromCodexOutput = (text: string, locale?: string): string | null => {
+  const copy = getSharedCopy(locale).appConversation;
   for (const line of text.split('\n').map((entry) => entry.trim()).filter(Boolean)) {
     try {
       const parsed = JSON.parse(line) as Record<string, unknown>;
       if (parsed.type === 'turn.started') {
-        return 'El agente esta pensando.';
+        return copy.agentThinking;
       }
       if (parsed.type === 'item.completed' && parsed.item && typeof parsed.item === 'object') {
         const item = parsed.item as Record<string, unknown>;
@@ -778,13 +801,13 @@ const progressFromCodexOutput = (text: string): string | null => {
           return compact.length > 160 ? `${compact.slice(0, 157)}...` : compact;
         }
         if (String(item.type ?? '').includes('tool') || item.type === 'command_execution') {
-          return 'El agente esta usando herramientas de Studio.';
+          return copy.usingTools;
         }
       }
       if (parsed.type === 'item.started' && parsed.item && typeof parsed.item === 'object') {
         const item = parsed.item as Record<string, unknown>;
         if (String(item.type ?? '').includes('tool') || item.type === 'command_execution') {
-          return 'El agente esta usando herramientas de Studio.';
+          return copy.usingTools;
         }
       }
     } catch {

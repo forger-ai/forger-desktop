@@ -17,6 +17,7 @@ export interface InternalOAuthTokenResponse {
 export interface InternalToolContext {
   metadataRoot: string;
   secretsStore: SecretsStore;
+  locale?: string;
   getFreePort: () => Promise<number>;
   openExternalUrl: (url: string) => Promise<void>;
   isForgerAccountAuthenticated: () => boolean;

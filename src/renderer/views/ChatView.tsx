@@ -760,7 +760,7 @@ export function ChatView({
               <Box sx={{ maxWidth: '78%', color: 'text.secondary' }}>
                 <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
                   <CircularProgress size={14} />
-                  <Typography variant="caption">Codex pensando...</Typography>
+                  <Typography variant="caption">{t.sections.chat.codexThinking}</Typography>
                 </Stack>
                 {progressLines.length > 0 ? (
                   <Box component="ul" sx={{ m: 0, pl: 2 }}>

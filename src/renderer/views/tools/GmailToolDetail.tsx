@@ -19,10 +19,13 @@ export const GmailToolDetail = ({
   settings,
   busyToolId,
   busyOfficialToolId,
+  errorMessage,
+  showAccountHelp,
   t,
   onBack,
   onConnect,
   onDisconnect,
+  onAccountHelp,
   onApprovalChange,
 }: {
   description: string;
@@ -32,15 +35,18 @@ export const GmailToolDetail = ({
   settings: AgentToolSettings;
   busyToolId: string | null;
   busyOfficialToolId: string | null;
+  errorMessage: string | null;
+  showAccountHelp: boolean;
   t: AppDictionary;
   onBack: () => void;
   onConnect: () => void;
   onDisconnect: () => void;
+  onAccountHelp: () => void;
   onApprovalChange: (toolId: AgentToolDefinition['id'], requiresApproval: boolean) => void;
 }) => (
   <Stack spacing={1.5}>
     <Button variant="text" size="small" startIcon={<ArrowBackRounded />} onClick={onBack} sx={{ alignSelf: 'flex-start' }}>
-      Tools
+      {t.sections.tools.title}
     </Button>
     <Paper variant="outlined" sx={{ p: 2, borderRadius: 1 }}>
       <Stack
@@ -54,23 +60,34 @@ export const GmailToolDetail = ({
           <Stack spacing={0.5}>
             <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
               <Typography variant="h6">Gmail</Typography>
-              <Chip size="small" color={connected ? 'success' : 'default'} label={connected ? 'Activada' : 'Desactivada'} />
+              <Chip size="small" color={connected ? 'success' : 'default'} label={connected ? t.sections.tools.active : t.sections.tools.inactive} />
             </Stack>
             <Typography variant="body2" color="text.secondary">{description}</Typography>
           </Stack>
         </Stack>
         {connected ? (
           <Button color="error" variant="outlined" disabled={busyOfficialToolId === GMAIL_TOOL_ID} onClick={onDisconnect}>
-            Desconectar
+            {t.sections.tools.disconnect}
           </Button>
         ) : (
           <Button variant="contained" disabled={busyOfficialToolId === GMAIL_TOOL_ID} onClick={onConnect}>
-            Conectar Gmail
+            {t.sections.tools.connectGmail}
           </Button>
         )}
       </Stack>
-      {tool?.error ? <Alert severity="warning" sx={{ mt: 2 }}>{tool.error}</Alert> : null}
     </Paper>
+    {errorMessage ? (
+      <Alert
+        severity="error"
+        action={showAccountHelp ? (
+          <Button color="inherit" size="small" onClick={onAccountHelp}>
+            {t.sections.tools.gmailAccountRequiredHelp}
+          </Button>
+        ) : undefined}
+      >
+        {errorMessage}
+      </Alert>
+    ) : null}
     {connected && toolPackage ? (
       <PermissionList
         tools={toolPackage.tools}

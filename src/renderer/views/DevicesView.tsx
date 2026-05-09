@@ -14,9 +14,11 @@ import QrCode2Rounded from '@mui/icons-material/QrCode2Rounded';
 import RefreshRounded from '@mui/icons-material/RefreshRounded';
 import { alpha, useTheme } from '@mui/material/styles';
 import type { CloudDevicesState, ForgerAccountSession } from '@shared/types';
+import type { AppDictionary } from '@renderer/i18n';
 
 interface DevicesViewProps {
   account: ForgerAccountSession;
+  t: AppDictionary;
 }
 
 const emptyState: CloudDevicesState = {
@@ -24,7 +26,7 @@ const emptyState: CloudDevicesState = {
   connected: false,
 };
 
-export function DevicesView({ account }: DevicesViewProps) {
+export function DevicesView({ account, t }: DevicesViewProps) {
   const theme = useTheme();
   const [state, setState] = useState<CloudDevicesState>(emptyState);
   const [busy, setBusy] = useState(false);
@@ -63,8 +65,8 @@ export function DevicesView({ account }: DevicesViewProps) {
   if (!account.authenticated) {
     return (
       <Stack spacing={2}>
-        <Typography variant="h4">Devices</Typography>
-        <Alert severity="info">Sign in to Forger Cloud before pairing this desktop.</Alert>
+        <Typography variant="h4">{t.sections.devices.title}</Typography>
+        <Alert severity="info">{t.sections.devices.signInRequired}</Alert>
       </Stack>
     );
   }
@@ -73,11 +75,11 @@ export function DevicesView({ account }: DevicesViewProps) {
     <Stack spacing={3}>
       <Stack direction="row" alignItems="center" justifyContent="space-between" gap={2}>
         <Box>
-          <Typography variant="h4">Devices</Typography>
-          <Typography color="text.secondary">Pair this desktop and keep remote app access under your Forger Cloud account.</Typography>
+          <Typography variant="h4">{t.sections.devices.title}</Typography>
+          <Typography color="text.secondary">{t.sections.devices.subtitle}</Typography>
         </Box>
         <Button startIcon={<RefreshRounded />} onClick={() => void refresh()} disabled={busy}>
-          Refresh
+          {t.sections.devices.refresh}
         </Button>
       </Stack>
 
@@ -89,23 +91,23 @@ export function DevicesView({ account }: DevicesViewProps) {
         <Stack spacing={2}>
           <Stack direction="row" alignItems="center" justifyContent="space-between" gap={2}>
             <Box>
-              <Typography variant="h6">This desktop</Typography>
+              <Typography variant="h6">{t.sections.devices.thisDesktop}</Typography>
               <Typography color="text.secondary">
-                {currentDevice?.name ?? 'Forger Desktop'} · {currentDeviceOnline ? 'Connected' : 'Not connected'}
+                {currentDevice?.name ?? t.sections.devices.fallbackDesktopName} · {currentDeviceOnline ? t.sections.devices.connected : t.sections.devices.notConnected}
               </Typography>
             </Box>
-            <Chip color={currentDeviceOnline ? 'success' : 'default'} label={currentDeviceOnline ? 'Online' : 'Offline'} />
+            <Chip color={currentDeviceOnline ? 'success' : 'default'} label={currentDeviceOnline ? t.sections.devices.online : t.sections.devices.offline} />
           </Stack>
 
           <Divider />
 
           <Stack direction={{ xs: 'column', sm: 'row' }} alignItems={{ sm: 'center' }} justifyContent="space-between" gap={2}>
             <Box>
-              <Typography fontWeight={700}>Pairing code</Typography>
-              <Typography color="text.secondary">Enter this code in the Forger Cloud portal while signed in with the same account.</Typography>
+              <Typography fontWeight={700}>{t.sections.devices.pairingCode}</Typography>
+              <Typography color="text.secondary">{t.sections.devices.pairingCodeBody}</Typography>
             </Box>
             <Button variant="contained" startIcon={busy ? <CircularProgress size={16} color="inherit" /> : <QrCode2Rounded />} onClick={() => void generateCode()} disabled={busy}>
-              Generate code
+              {t.sections.devices.generateCode}
             </Button>
           </Stack>
 
@@ -132,19 +134,19 @@ export function DevicesView({ account }: DevicesViewProps) {
       </Paper>
 
       <Stack spacing={1.5}>
-        <Typography variant="h6">Paired devices</Typography>
+        <Typography variant="h6">{t.sections.devices.pairedDevices}</Typography>
         {pairedDevices.map((device) => (
           <Paper key={device.id} variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
             <Stack direction="row" justifyContent="space-between" gap={2}>
               <Box>
                 <Typography fontWeight={700}>{device.name}</Typography>
-                <Typography color="text.secondary">{device.platform ?? 'Desktop'} · {device.installedApps.length} apps</Typography>
+                <Typography color="text.secondary">{device.platform ?? t.sections.devices.desktopPlatform} · {t.sections.devices.appsCount(device.installedApps.length)}</Typography>
               </Box>
-              <Chip size="small" color={device.online ? 'success' : 'default'} label={device.online ? 'Online' : 'Offline'} />
+              <Chip size="small" color={device.online ? 'success' : 'default'} label={device.online ? t.sections.devices.online : t.sections.devices.offline} />
             </Stack>
           </Paper>
         ))}
-        {pairedDevices.length === 0 ? <Typography color="text.secondary">No other paired devices yet.</Typography> : null}
+        {pairedDevices.length === 0 ? <Typography color="text.secondary">{t.sections.devices.noPairedDevices}</Typography> : null}
       </Stack>
     </Stack>
   );

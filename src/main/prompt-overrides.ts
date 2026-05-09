@@ -5,11 +5,13 @@ import type {
   AppPromptReviewInput,
   AppPromptReviewItem,
   AppPromptReviewKind,
+  AppPromptSettingSource,
   AppPromptRestoreInput,
   AppPromptTemplate,
   AppPromptTemplateArgument,
   AppPromptValidationResult,
   BasicActionResult,
+  CodexReasoningEffort,
 } from '../shared/types';
 
 const PROMPT_OVERRIDES_VERSION = 1;
@@ -19,6 +21,8 @@ interface StoredPromptOverride {
   kind: AppPromptReviewKind;
   id: string;
   prompt: string;
+  model?: string;
+  reasoningEffort?: CodexReasoningEffort;
   updatedAt: string;
 }
 
@@ -33,8 +37,19 @@ interface PromptBase {
   title: string;
   description?: string;
   prompt: string;
+  model?: string;
+  reasoningEffort?: CodexReasoningEffort;
+  defaultModel: string;
+  defaultReasoningEffort: CodexReasoningEffort;
   arguments?: AppPromptTemplateArgument[];
 }
+
+interface PromptRuntimeDefaults {
+  model: string;
+  reasoningEffort: CodexReasoningEffort;
+}
+
+const REASONING_VALUES = new Set<CodexReasoningEffort>(['low', 'medium', 'high', 'xhigh']);
 
 const emptyStore = (): PromptOverridesFile => ({
   version: PROMPT_OVERRIDES_VERSION,
@@ -66,10 +81,23 @@ export class PromptOverridesStore {
     const store = await this.readStore();
     const appOverrides = store.apps[appId] ?? {};
     const key = promptKey(input.kind, input.id);
+    const existing = appOverrides[key];
+    const model = input.model === null
+      ? undefined
+      : typeof input.model === 'string' && input.model.trim()
+        ? input.model.trim()
+        : existing?.model;
+    const reasoningEffort = input.reasoningEffort === null
+      ? undefined
+      : REASONING_VALUES.has(input.reasoningEffort as CodexReasoningEffort)
+        ? input.reasoningEffort as CodexReasoningEffort
+        : existing?.reasoningEffort;
     const override: StoredPromptOverride = {
       kind: input.kind,
       id: input.id,
       prompt: normalizedPrompt,
+      ...(model ? { model } : {}),
+      ...(reasoningEffort ? { reasoningEffort } : {}),
       updatedAt: new Date().toISOString(),
     };
     store.apps[appId] = {
@@ -112,9 +140,17 @@ export class PromptOverridesStore {
       if (!override) {
         return template;
       }
-      const base = promptTemplateBase(template);
+      const base = promptTemplateBase(template, {
+        model: template.model ?? 'gpt-5.4',
+        reasoningEffort: template.reasoningEffort ?? 'medium',
+      });
       const validation = validatePromptEdit(base, override.prompt);
-      return validation.valid ? { ...template, prompt: override.prompt } : template;
+      return {
+        ...template,
+        ...(validation.valid ? { prompt: override.prompt } : {}),
+        ...(override.model ? { model: override.model } : {}),
+        ...(override.reasoningEffort ? { reasoningEffort: override.reasoningEffort } : {}),
+      };
     });
   }
 
@@ -126,9 +162,17 @@ export class PromptOverridesStore {
       if (!override) {
         return agent;
       }
-      const base = agentBase(agent);
+      const base = agentBase(agent, {
+        model: agent.model ?? 'gpt-5.4',
+        reasoningEffort: agent.reasoningEffort ?? 'medium',
+      });
       const validation = validatePromptEdit(base, override.prompt);
-      return validation.valid ? { ...agent, initialPrompt: override.prompt } : agent;
+      return {
+        ...agent,
+        ...(validation.valid ? { initialPrompt: override.prompt } : {}),
+        ...(override.model ? { model: override.model } : {}),
+        ...(override.reasoningEffort ? { reasoningEffort: override.reasoningEffort } : {}),
+      };
     });
   }
 
@@ -136,6 +180,8 @@ export class PromptOverridesStore {
     const overrideValidation = override ? validatePromptEdit(base, override.prompt) : null;
     const validation = overrideValidation ?? validatePromptEdit(base, base.prompt);
     const overrideInvalid = Boolean(override && !validation.valid);
+    const modelSource = settingSource(base.model, override?.model) as AppPromptSettingSource;
+    const reasoningEffortSource = settingSource(base.reasoningEffort, override?.reasoningEffort) as AppPromptSettingSource;
     return {
       appId,
       kind: base.kind,
@@ -144,7 +190,15 @@ export class PromptOverridesStore {
       ...(base.description ? { description: base.description } : {}),
       originalPrompt: base.prompt,
       prompt: override && validation.valid ? override.prompt : base.prompt,
+      ...(base.model ? { originalModel: base.model } : {}),
+      ...(base.reasoningEffort ? { originalReasoningEffort: base.reasoningEffort } : {}),
+      model: override?.model ?? base.model ?? base.defaultModel,
+      reasoningEffort: override?.reasoningEffort ?? base.reasoningEffort ?? base.defaultReasoningEffort,
       ...(override ? { overridePrompt: override.prompt, updatedAt: override.updatedAt } : {}),
+      ...(override?.model ? { overrideModel: override.model } : {}),
+      ...(override?.reasoningEffort ? { overrideReasoningEffort: override.reasoningEffort } : {}),
+      modelSource,
+      reasoningEffortSource,
       edited: Boolean(override),
       overrideInvalid,
       validation,
@@ -172,26 +226,38 @@ export class PromptOverrideError extends Error {
   }
 }
 
-export const promptTemplateBase = (template: AppPromptTemplate): PromptBase => ({
+export const promptTemplateBase = (template: AppPromptTemplate, defaults: PromptRuntimeDefaults): PromptBase => ({
   kind: 'promptTemplate',
   id: template.id,
   title: template.title,
   ...(template.description ? { description: template.description } : {}),
   prompt: template.prompt,
+  ...(template.model ? { model: template.model } : {}),
+  ...(template.reasoningEffort ? { reasoningEffort: template.reasoningEffort } : {}),
+  defaultModel: defaults.model,
+  defaultReasoningEffort: defaults.reasoningEffort,
   ...(template.arguments ? { arguments: template.arguments } : {}),
 });
 
-export const agentBase = (agent: AppAgent): PromptBase => ({
+export const agentBase = (agent: AppAgent, defaults: PromptRuntimeDefaults): PromptBase => ({
   kind: 'agent',
   id: agent.id,
   title: agent.title,
   ...(agent.description ? { description: agent.description } : {}),
   prompt: agent.initialPrompt,
+  ...(agent.model ? { model: agent.model } : {}),
+  ...(agent.reasoningEffort ? { reasoningEffort: agent.reasoningEffort } : {}),
+  defaultModel: defaults.model,
+  defaultReasoningEffort: defaults.reasoningEffort,
 });
 
-export const buildPromptBases = (templates: AppPromptTemplate[], agents: AppAgent[]): PromptBase[] => [
-  ...templates.map(promptTemplateBase),
-  ...agents.map(agentBase),
+export const buildPromptBases = (
+  templates: AppPromptTemplate[],
+  agents: AppAgent[],
+  defaults: PromptRuntimeDefaults,
+): PromptBase[] => [
+  ...templates.map((template) => promptTemplateBase(template, defaults)),
+  ...agents.map((agent) => agentBase(agent, defaults)),
 ];
 
 export const normalizePromptText = (prompt: string): string => prompt.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
@@ -297,13 +363,24 @@ const normalizeStore = (input?: Partial<PromptOverridesFile>): PromptOverridesFi
       const kind = entry.kind === 'promptTemplate' || entry.kind === 'agent' ? entry.kind : null;
       const id = typeof entry.id === 'string' ? entry.id.trim() : '';
       const prompt = typeof entry.prompt === 'string' ? normalizePromptText(entry.prompt) : '';
+      const model = typeof entry.model === 'string' && entry.model.trim() ? entry.model.trim() : undefined;
+      const reasoningEffort = REASONING_VALUES.has(entry.reasoningEffort as CodexReasoningEffort)
+        ? entry.reasoningEffort as CodexReasoningEffort
+        : undefined;
       const updatedAt = typeof entry.updatedAt === 'string' && entry.updatedAt.trim()
         ? entry.updatedAt
         : new Date().toISOString();
       if (!kind || !id || !prompt) {
         continue;
       }
-      normalizedEntries[promptKey(kind, id)] = { kind, id, prompt, updatedAt };
+      normalizedEntries[promptKey(kind, id)] = {
+        kind,
+        id,
+        prompt,
+        ...(model ? { model } : {}),
+        ...(reasoningEffort ? { reasoningEffort } : {}),
+        updatedAt,
+      };
     }
     if (Object.keys(normalizedEntries).length > 0) {
       store.apps[appId] = normalizedEntries;
@@ -311,4 +388,14 @@ const normalizeStore = (input?: Partial<PromptOverridesFile>): PromptOverridesFi
   }
 
   return store;
+};
+
+const settingSource = (manifestValue: unknown, overrideValue: unknown): AppPromptSettingSource => {
+  if (overrideValue) {
+    return 'override';
+  }
+  if (manifestValue) {
+    return 'manifest';
+  }
+  return 'global';
 };

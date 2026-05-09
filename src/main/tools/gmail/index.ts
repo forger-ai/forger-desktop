@@ -8,6 +8,7 @@ import type {
   ToolMutationResult,
 } from '../../../shared/types';
 import type { InternalToolContext, InternalToolModule } from '../types';
+import { getSharedCopy } from '../../../shared/i18n';
 import {
   GmailApiError,
   readAttachment,
@@ -186,14 +187,15 @@ const saveAttachment = async (
 };
 
 const configure = async (context: InternalToolContext): Promise<ToolMutationResult> => {
+  const copy = getSharedCopy(context.locale);
   try {
     await runGmailOAuthFlow(context);
-    return { success: true, userMessage: 'Gmail conectado.' };
+    return { success: true, userMessage: copy.tools.gmailConnected };
   } catch (error) {
-    const result = toToolResult(error, 'No pudimos conectar Gmail.', 'gmail_oauth_failed');
+    const result = toToolResult(error, copy.tools.gmailConnectFailed, 'gmail_oauth_failed');
     return {
       success: false,
-      userMessage: result.userMessage ?? 'No pudimos conectar Gmail.',
+      userMessage: result.userMessage ?? copy.tools.gmailConnectFailed,
       technicalCode: result.technicalCode,
     };
   }

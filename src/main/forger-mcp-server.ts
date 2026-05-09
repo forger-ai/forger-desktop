@@ -23,6 +23,7 @@ import type {
   MemoryUpdateInput,
 } from '../shared/types';
 import { buildFailureDiagnostic } from '../shared/error-diagnostics';
+import { getSharedCopy } from '../shared/i18n';
 
 export interface ForgerMcpSessionRef {
   url: string;
@@ -34,6 +35,7 @@ interface AgentMcpSession {
   appId: string;
   caller: 'desktop-chat' | 'app-agent' | 'automation' | 'free-chat';
   appIds: string[];
+  locale?: string;
   token: string;
   createdAt: string;
 }
@@ -41,6 +43,7 @@ interface AgentMcpSession {
 export interface ForgerMcpSessionAccess {
   caller: AgentMcpSession['caller'];
   appIds?: string[];
+  locale?: string;
 }
 
 interface ForgerMcpServerOptions {
@@ -66,7 +69,7 @@ interface ForgerMcpServerOptions {
   stopApp: (appId: string) => Promise<StopAppResult>;
   restartApp: (appId: string, options?: { onProgress?: (message: string) => void }) => Promise<OpenAppResult>;
   refreshAppView: (appId: string) => Promise<{ success: boolean; userMessage?: string; technicalCode?: string }>;
-  updateApp: (appId: string) => Promise<InstallAppResult>;
+  updateApp: (appId: string, locale?: string) => Promise<InstallAppResult>;
   listAppPrompts: (appId: string) => Promise<AppPromptReviewItem[]>;
   updateAppPrompt: (input: AppPromptReviewInput) => Promise<AppPromptMutationResult>;
   restoreAppPrompt: (input: AppPromptRestoreInput) => Promise<AppPromptMutationResult>;
@@ -189,6 +192,7 @@ export class ForgerMcpServer {
       appId,
       caller: access?.caller ?? 'desktop-chat',
       appIds: access?.appIds ?? (appId === 'forger' ? [] : [appId]),
+      locale: access?.locale,
       token,
       createdAt: new Date().toISOString(),
     });
@@ -394,12 +398,13 @@ export class ForgerMcpServer {
     session: AgentMcpSession,
     tool: AgentToolDefinition,
   ): Promise<ToolApprovalResult> {
+    const copy = getSharedCopy(session.locale).agentTools;
     if (isMemoryTool(tool.id)) {
       return {
         approved: true,
         required: false,
         status: 'not_required',
-        userMessage: 'La herramienta de memoria no requiere autorizacion adicional.',
+        userMessage: copy.memoryApprovalNotRequired,
       };
     }
     if (!this.options.getToolSettings().approvals[tool.id]) {
@@ -413,7 +418,7 @@ export class ForgerMcpServer {
         approved: true,
         required: false,
         status: 'not_required',
-        userMessage: 'Esta herramienta no requirio autorizacion adicional.',
+        userMessage: copy.approvalNotRequired,
       };
     }
     const requestPermission = this.options.requestPermission(session.runId, {
@@ -434,7 +439,7 @@ export class ForgerMcpServer {
         approved: false,
         required: true,
         status: 'unavailable',
-        userMessage: 'No se pudo solicitar autorizacion para esta herramienta.',
+        userMessage: copy.approvalUnavailable,
       };
     }
     await this.options.appendInstallLog('agent_tool:approval_requested', {
@@ -443,14 +448,14 @@ export class ForgerMcpServer {
       toolId: tool.id,
       toolName: tool.name,
     });
-    this.emitToolProgress(session, tool.id, `Esperando autorizacion para ${tool.name}...`);
+    this.emitToolProgress(session, tool.id, copy.approvalWaiting(tool.name));
     const approved = await requestPermission;
     if (approved === null) {
       return {
         approved: false,
         required: true,
         status: 'unavailable',
-        userMessage: 'No se pudo solicitar autorizacion para esta herramienta.',
+        userMessage: copy.approvalUnavailable,
       };
     }
     await this.options.appendInstallLog('agent_tool:approval_resolved', {
@@ -463,9 +468,7 @@ export class ForgerMcpServer {
       approved,
       required: true,
       status: approved ? 'approved' : 'denied',
-      userMessage: approved
-        ? 'Autorizacion recibida. La herramienta continuo con la accion solicitada.'
-        : 'La autorizacion fue rechazada o cancelada.',
+      userMessage: approved ? copy.approvalReceived : copy.approvalRejected,
     };
   }
 
@@ -474,6 +477,7 @@ export class ForgerMcpServer {
     toolId: AgentToolId,
     args: Record<string, unknown>,
   ): Promise<unknown> {
+    const copy = getSharedCopy(session.locale).agentTools;
     const tool = this.options.getToolDefinitions().find((candidate) => candidate.id === toolId);
     if (!tool) {
       await this.options.appendInstallLog('agent_tool:not_found', {
@@ -482,7 +486,7 @@ export class ForgerMcpServer {
         toolId,
         args,
       });
-      return { success: false, userMessage: 'La herramienta no esta disponible.', technicalCode: 'tool_not_found' };
+      return { success: false, userMessage: getSharedCopy(session.locale).tools.unavailable, technicalCode: 'tool_not_found' };
     }
 
     await this.options.appendInstallLog('agent_tool:call_received', {
@@ -516,8 +520,8 @@ export class ForgerMcpServer {
         {
           success: false,
           userMessage: approval.status === 'unavailable'
-            ? 'No se pudo mostrar la autorizacion para esta herramienta.'
-            : 'La accion fue cancelada por el usuario.',
+            ? copy.approvalDisplayFailed
+            : copy.canceledByUser,
           technicalCode: approval.status === 'unavailable' ? 'permission_unavailable' : 'permission_denied',
         },
         approval,
@@ -529,7 +533,7 @@ export class ForgerMcpServer {
       toolId,
       runId: session.runId,
     });
-    this.emitToolProgress(session, toolId, toolId === 'forger_restart_app' ? 'Preparando reinicio de la app...' : '');
+    this.emitToolProgress(session, toolId, toolId === 'forger_restart_app' ? copy.restartPreparing : '');
 
     if (toolId === 'forger_list_catalog') {
       const apps = await this.options.listCatalog();
@@ -577,8 +581,8 @@ export class ForgerMcpServer {
             success: true,
             memory,
             userMessage: memory.scope === 'global'
-              ? 'He tomado nota de esto en la memoria de Forger. Puedes verla o eliminarla en Configuraciones > Memoria.'
-              : 'He tomado nota de esto para esta app. Puedes administrarlo en Configuraciones > Memoria.',
+              ? copy.memoryCreatedGlobal
+              : copy.memoryCreatedApp,
           };
           await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
           return result;
@@ -589,7 +593,7 @@ export class ForgerMcpServer {
           const result = {
             success: true,
             memory,
-            userMessage: 'He actualizado esa memoria. Puedes administrarla en Configuraciones > Memoria.',
+            userMessage: copy.memoryUpdated,
           };
           await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
           return result;
@@ -597,14 +601,14 @@ export class ForgerMcpServer {
 
         if (toolId === 'memory_delete') {
           const result = await this.options.memoryDelete(String(args.id ?? ''), memoryAccess(session));
-          const response = { ...result, userMessage: result.success ? 'Elimine esa memoria.' : 'No encontre esa memoria.' };
+          const response = { ...result, userMessage: result.success ? copy.memoryDeleted : copy.memoryNotFound };
           await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result: response });
           return response;
         }
       } catch (error) {
         const result = {
           success: false,
-          userMessage: memoryErrorMessage(error),
+          userMessage: memoryErrorMessage(error, session.locale),
           ...buildFailureDiagnostic({ error, fallbackCode: 'memory_error' }),
         };
         await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
@@ -656,7 +660,7 @@ export class ForgerMcpServer {
     }
 
     if (toolId === 'forger_update_app') {
-      const result = await this.options.updateApp(appId);
+      const result = await this.options.updateApp(appId, session.locale);
       await this.options.appendInstallLog('agent_tool:call_result', { appId, runId: session.runId, toolId, result });
       return withToolAuthorization(result, approval);
     }
@@ -664,7 +668,7 @@ export class ForgerMcpServer {
     if (toolId === 'forger_update_app_prompt') {
       const kind = parsePromptReviewKind(args.kind);
       if (!kind) {
-        const result = { success: false, userMessage: 'Tipo de prompt invalido.', technicalCode: 'app_prompt_kind_invalid' };
+        const result = { success: false, userMessage: copy.invalidPromptKind, technicalCode: 'app_prompt_kind_invalid' };
         await this.options.appendInstallLog('agent_tool:call_result', { appId, runId: session.runId, toolId, result });
         return withToolAuthorization(result, approval);
       }
@@ -681,7 +685,7 @@ export class ForgerMcpServer {
     if (toolId === 'forger_restore_app_prompt') {
       const kind = parsePromptReviewKind(args.kind);
       if (!kind) {
-        const result = { success: false, userMessage: 'Tipo de prompt invalido.', technicalCode: 'app_prompt_kind_invalid' };
+        const result = { success: false, userMessage: copy.invalidPromptKind, technicalCode: 'app_prompt_kind_invalid' };
         await this.options.appendInstallLog('agent_tool:call_result', { appId, runId: session.runId, toolId, result });
         return withToolAuthorization(result, approval);
       }
@@ -694,7 +698,7 @@ export class ForgerMcpServer {
       return withToolAuthorization(result, approval);
     }
 
-    const result = { success: false, userMessage: 'La herramienta no esta disponible.', technicalCode: 'tool_not_found' };
+    const result = { success: false, userMessage: getSharedCopy(session.locale).tools.unavailable, technicalCode: 'tool_not_found' };
     await this.options.appendInstallLog('agent_tool:call_result', { appId, runId: session.runId, toolId, result });
     return withToolAuthorization(result, approval);
   }
@@ -947,21 +951,22 @@ const memoryAccess = (session: AgentMcpSession): MemoryAccessInput => ({
   appIds: session.appIds,
 });
 
-const memoryErrorMessage = (error: unknown): string => {
+const memoryErrorMessage = (error: unknown, locale?: string): string => {
+  const copy = getSharedCopy(locale).agentTools;
   const code = error instanceof Error ? error.message : 'memory_error';
   if (code === 'memory_scope_forbidden') {
-    return 'No puedo operar memoria fuera del alcance permitido para esta conversación.';
+    return copy.memoryScopeForbidden;
   }
   if (code === 'memory_text_required') {
-    return 'La memoria necesita un texto para guardarse.';
+    return copy.memoryTextRequired;
   }
   if (code === 'memory_app_required') {
-    return 'La memoria de app necesita una app asociada.';
+    return copy.memoryAppRequired;
   }
   if (code === 'memory_not_found') {
-    return 'No encontre esa memoria.';
+    return copy.memoryNotFound;
   }
-  return 'No pude completar la operacion de memoria.';
+  return copy.memoryOperationFailed;
 };
 
 const getToolAppId = (session: AgentMcpSession, params: Record<string, unknown>): string => {

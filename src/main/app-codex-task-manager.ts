@@ -10,6 +10,7 @@ import type {
   AppCodexTaskSummary,
   AppPromptTemplate,
   AppPromptTemplateArgument,
+  CodexReasoningEffort,
   PermissionRequest,
 } from '../shared/types';
 import {
@@ -77,6 +78,8 @@ interface PreparedPromptArguments {
 
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 const CODEX_TASK_TIMEOUT_MS = 600_000;
+const DEFAULT_MODEL = 'gpt-5.4';
+const DEFAULT_REASONING: CodexReasoningEffort = 'medium';
 
 export class AppCodexTaskManager {
   private readonly tasks = new Map<string, InternalTask>();
@@ -248,6 +251,8 @@ export class AppCodexTaskManager {
       const prompt = promptContext ? `${promptContext}\n\n${renderedPrompt}` : renderedPrompt;
       const command = await resolveCodexCommand(codexCliPath, await this.options.getCodexPathEntries(task.appId));
       const environment = await this.options.getCodexEnvironment(task.appId);
+      const model = template.model?.trim() || DEFAULT_MODEL;
+      const reasoningEffort = template.reasoningEffort ?? DEFAULT_REASONING;
       const appMcpServers = await (this.options.listenAppMcps?.([task.appId], task.runId) ?? Promise.resolve([]));
       forgerMcpSession = this.options.createForgerMcpSession?.(task.runId, task.appId) ?? null;
       const mcpServers = [
@@ -270,9 +275,9 @@ export class AppCodexTaskManager {
         'exec',
         '--json',
         '--model',
-        'gpt-5.3-codex',
+        model,
         '--config',
-        'reasoning_effort="low"',
+        `reasoning_effort="${reasoningEffort}"`,
         '--full-auto',
         '--sandbox',
         'workspace-write',

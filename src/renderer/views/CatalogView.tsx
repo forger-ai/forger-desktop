@@ -1,5 +1,5 @@
 import { Chip, MenuItem, Select, Stack, Typography } from '@mui/material';
-import type { AppCategory, CatalogApp } from '@shared/types';
+import type { AppCategory, CatalogApp, InstallAppResult } from '@shared/types';
 import type { AppDictionary } from '@renderer/i18n';
 import { AppCard } from '@renderer/components/AppCard';
 import { AppsGrid } from '@renderer/components/AppsGrid';
@@ -23,6 +23,7 @@ interface CatalogViewProps {
   t: AppDictionary;
   getAppMeta: (appId: string) => { name: string; description: string; iconUrl?: string };
   getCategoryLabel: (category: AppCategory) => string;
+  installProgressByApp: Record<string, InstallAppResult>;
 }
 
 const filters: Array<'all' | AppCategory> = ['all', 'finanzas', 'hogar', 'salud', 'productividad'];
@@ -46,6 +47,7 @@ export function CatalogView({
   t,
   getAppMeta,
   getCategoryLabel,
+  installProgressByApp,
 }: CatalogViewProps) {
   const statusApps =
     statusFilter === 'installed'
@@ -100,6 +102,7 @@ export function CatalogView({
         <AppsGrid>
           {visibleApps.map((app) => {
             const meta = getAppMeta(app.id);
+            const installProgress = installProgressByApp[app.id];
             const isInstalled = app.status === 'installed' || app.status === 'running' || app.status === 'conflict';
             const isInstalling = app.status === 'installing';
             const hasError = app.status === 'error';
@@ -162,6 +165,7 @@ export function CatalogView({
                 primaryActionLabel={primaryActionLabel}
                 primaryDisabled={isInstalling}
                 primaryLoading={isOpening}
+                installProgress={installProgress}
                 onPrimaryAction={() => {
                   if (isInstalling) {
                     return;

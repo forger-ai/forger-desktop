@@ -19,6 +19,7 @@ import type {
   PreviewDiffFile,
 } from '../../shared/types';
 import { buildFailureDiagnostic } from '../../shared/error-diagnostics';
+import { getSharedCopy, normalizeLocale, type Locale } from '../../shared/i18n';
 import {
   assertAllowedMcpServers,
   createIsolatedCodexHome,
@@ -37,7 +38,7 @@ interface ChatOrchestratorOptions {
   getCodexPathEntries: (appId?: string) => Promise<string[]>;
   getCodexEnvironment: (appId?: string) => Promise<Record<string, string>>;
   getCodexAuthenticated: () => Promise<boolean>;
-  createForgerMcpSession?: (runId: string, appId: string) => { url: string; token: string } | null;
+  createForgerMcpSession?: (runId: string, appId: string, locale?: string) => { url: string; token: string } | null;
   releaseForgerMcpSession?: (token: string) => void;
   buildMemoryContext?: (appIds: string[]) => Promise<string>;
   listenAppMcps?: (appIds: string[], runId: string) => Promise<CodexMcpServerConfig[]>;
@@ -87,6 +88,7 @@ interface InternalChatRun extends ChatRun {
   model: string;
   reasoningEffort: CodexReasoningEffort;
   taskType: ForgerTaskType;
+  locale: Locale;
 }
 
 type ForgerTaskType =
@@ -473,6 +475,7 @@ export class ChatOrchestrator {
     const sharedRoots = await this.resolveSharedRoots(input.sharedFiles ?? []);
     const taskType = isFreeChat ? 'resolver_dudas' : classifyForgerTask(input.prompt);
     const baseHead = taskType === 'actualizar_aplicacion' ? await getGitHead(appRoot) : null;
+    const locale = normalizeLocale(input.userLanguage);
 
     const run: InternalChatRun = {
       runId,
@@ -494,9 +497,10 @@ export class ChatOrchestrator {
       sharedRoots,
       runLogPath: getRunLogPath(this.options.metadataRoot, runId),
       progressLog: [],
-      model: input.model?.trim() || 'gpt-5.3-codex',
-      reasoningEffort: input.reasoningEffort ?? 'low',
+      model: input.model?.trim() || 'gpt-5.4',
+      reasoningEffort: input.reasoningEffort ?? 'medium',
       taskType,
+      locale,
       conversationId: typeof input.conversationId === 'string' ? input.conversationId : undefined,
     };
 
@@ -607,7 +611,7 @@ export class ChatOrchestrator {
     run.status = input.decision === 'allow' ? 'running' : 'failed';
     run.errorCode = input.decision === 'allow' ? undefined : 'permission_denied';
     run.userMessage =
-      input.decision === 'allow' ? undefined : 'Permiso denegado para ejecutar la acción solicitada.';
+      input.decision === 'allow' ? undefined : getSharedCopy(run.locale).chat.permissionDeniedRun;
     this.emitRun(run);
 
     return { success: true };
@@ -657,7 +661,7 @@ export class ChatOrchestrator {
       run.updatedAt = new Date().toISOString();
       run.operationId = operationId;
       run.commitSha = commitSha;
-      run.userMessage = 'Version guardada. Puedes volver a la version anterior cuando quieras.';
+      run.userMessage = getSharedCopy(run.locale).chat.saveVersionSuccess;
       this.emitRun(run);
 
       await this.auditLogger.log({
@@ -679,7 +683,7 @@ export class ChatOrchestrator {
       run.status = 'failed';
       run.errorCode = detail.code;
       run.updatedAt = new Date().toISOString();
-      run.userMessage = 'No pudimos guardar esta version. Revisa el cambio y reintenta.';
+      run.userMessage = getSharedCopy(run.locale).chat.saveVersionFailed;
       this.emitRun(run);
       return {
         success: false,
@@ -728,14 +732,14 @@ export class ChatOrchestrator {
       return {
         success: true,
         revertedCommitSha: revertedCommitSha ?? undefined,
-        userMessage: 'Cambio deshecho correctamente.',
+        userMessage: getSharedCopy().chat.undoSuccess,
       };
     } catch (error) {
       const detail = normalizeErrorCode(error);
       return {
         success: false,
         ...buildFailureDiagnostic({ fallbackCode: detail.code, rawError: detail.message }),
-        userMessage: 'No pudimos deshacer el cambio.',
+        userMessage: getSharedCopy().chat.undoFailed,
       };
     }
   }
@@ -811,7 +815,7 @@ export class ChatOrchestrator {
         `[${new Date().toISOString()}] Run ${run.runId} app=${run.appId} cwd=${this.options.forgerHomeRoot}\n`,
         'utf8',
       );
-      forgerMcpSession = this.options.createForgerMcpSession?.(run.runId, run.appId) ?? null;
+      forgerMcpSession = this.options.createForgerMcpSession?.(run.runId, run.appId, run.locale) ?? null;
       appMcpServers = await (this.options.listenAppMcps?.(run.appId === 'forger' ? [] : [run.appId], run.runId) ?? Promise.resolve([]));
       const mcpServers: CodexMcpServerConfig[] = [
         ...(forgerMcpSession
@@ -900,7 +904,7 @@ export class ChatOrchestrator {
       run.status = run.status === 'canceled' ? 'canceled' : 'failed';
       run.updatedAt = new Date().toISOString();
       run.errorCode = detail.code;
-      run.userMessage = mapFailureMessage(detail.code, detail.message, run.runLogPath);
+      run.userMessage = mapFailureMessage(detail.code, detail.message, run.runLogPath, run.locale);
       this.emitRun(run);
       await appendRunLog(run.runLogPath, 'meta', `Run failed: [${detail.code}] ${detail.message}`);
 
@@ -931,7 +935,7 @@ export class ChatOrchestrator {
       run.updatedAt = new Date().toISOString();
       run.userMessage =
         assistantText.trim() ||
-        'Revise la app y no encontre cambios que guardar. Si quieres, dime que ajustar visualmente o que flujo esperas cambiar.';
+        getSharedCopy(run.locale).chat.autoUpdateNoChanges;
       this.emitRun(run);
       return;
     }
@@ -980,7 +984,7 @@ export class ChatOrchestrator {
       runId: run.runId,
       commitSha,
       createdAt: new Date().toISOString(),
-      title: 'Actualizacion combinada',
+      title: getSharedCopy(run.locale).chat.updateConflictTitle,
       summary: buildFunctionalOperationSummary(assistantText),
     });
 
@@ -1789,30 +1793,31 @@ const normalizeErrorCode = (error: unknown): { code: ChatErrorCode; message: str
   };
 };
 
-const mapFailureMessage = (code: ChatErrorCode, detail?: string, runLogPath?: string): string => {
+const mapFailureMessage = (code: ChatErrorCode, detail?: string, runLogPath?: string, locale?: string): string => {
+  const copy = getSharedCopy(locale).chat.failures;
   const snippet = detail?.split('\n').slice(0, 2).join(' ').trim();
   const logHint = runLogPath ? ` Log: ${runLogPath}` : '';
   switch (code) {
     case 'auth_missing':
-      return 'Primero conecta Codex en Ajustes para usar Chat con cambios reales.';
+      return copy.authMissing;
     case 'app_not_installed':
-      return 'La app objetivo no esta instalada en tu workspace privado.';
+      return copy.appNotInstalled;
     case 'permission_denied':
-      return 'No continuamos porque el permiso fue denegado.';
+      return copy.permissionDenied;
     case 'timeout':
-      return 'La solicitud tardo demasiado y fue detenida.';
+      return copy.timeout;
     case 'sandbox_violation':
-      return 'Bloqueamos una accion fuera del workspace permitido.';
+      return copy.sandboxViolation;
     case 'dirty_worktree':
-      return 'Antes de comenzar, al parecer hay cambios sin guardar en tu aplicacion. ¿Quieres que guarde esa version antes de continuar?';
+      return copy.dirtyWorktree;
     case 'conflict':
-      return 'Detectamos un conflicto con el estado actual de la app.';
+      return copy.conflict;
     case 'canceled':
-      return `Solicitud cancelada.${logHint}`;
+      return copy.canceled(logHint);
     default:
       if (detail && /exec|unknown|command|not found|usage/i.test(detail)) {
-        return `No pude ejecutar Codex CLI en este equipo. Revisa login y version en Ajustes. ${snippet ? `Detalle: ${snippet}` : ''}${logHint}`.trim();
+        return copy.codexCliFailed(snippet ?? '', logHint).trim();
       }
-      return `No pude completar la solicitud con Codex.${snippet ? ` Detalle: ${snippet}` : ''}${logHint}`;
+      return copy.codexRequestFailed(snippet ?? '', logHint);
   }
 };

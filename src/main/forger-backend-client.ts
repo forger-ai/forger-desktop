@@ -19,12 +19,18 @@ import type {
   RemoteBackupsUsage,
   SubmitAppFeedbackInput,
   SubmitAppRatingInput,
+  CodexReasoningEffort,
 } from '../shared/types';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { normalizeAppCapabilities } from '../shared/capabilities';
 import { normalizeErrorReportDiagnostic } from '../shared/error-diagnostics';
 import { normalizeForgerAccountUser, type StoredForgerAccount } from './forger-account-store';
+
+const CODEX_REASONING_VALUES = new Set<CodexReasoningEffort>(['low', 'medium', 'high', 'xhigh']);
+
+const normalizeReasoningEffort = (value: unknown): CodexReasoningEffort | undefined =>
+  CODEX_REASONING_VALUES.has(value as CodexReasoningEffort) ? value as CodexReasoningEffort : undefined;
 
 interface ClientOptions {
   backendBaseUrl: string;
@@ -331,10 +337,10 @@ export class ForgerBackendClient {
         platform: input.platform,
       }),
     });
-    const payload = await this.readJson<Record<string, unknown>>(response);
     if (!response.ok) {
-      throw new Error(`device_register_failed_${response.status}`);
+      throw backendError('Forger Cloud session is no longer valid.', `device_register_failed_${response.status}`);
     }
+    const payload = await this.readJson<Record<string, unknown>>(response);
     return this.normalizeCloudDevice(payload) as CloudDeviceSummary & { registered: boolean };
   }
 
@@ -343,8 +349,11 @@ export class ForgerBackendClient {
       method: 'GET',
       headers: this.buildHeaders(),
     });
+    if (!response.ok) {
+      throw backendError('Forger Cloud session is no longer valid.', `devices_list_failed_${response.status}`);
+    }
     const payload = await this.readJson<unknown>(response);
-    if (!response.ok || !Array.isArray(payload)) {
+    if (!Array.isArray(payload)) {
       return [];
     }
     return payload.map((entry) => this.normalizeCloudDevice(entry)).filter((entry): entry is CloudDeviceSummary => Boolean(entry));
@@ -363,7 +372,7 @@ export class ForgerBackendClient {
       }),
     });
     if (!response.ok) {
-      throw new Error(`pairing_code_failed_${response.status}`);
+      throw backendError('Forger Cloud session is no longer valid.', `pairing_code_failed_${response.status}`);
     }
   }
 
@@ -720,7 +729,16 @@ export class ForgerBackendClient {
         typeof candidate.description === 'string' && candidate.description.trim()
           ? candidate.description.trim()
           : undefined;
-      return [{ id, title, initialPrompt, ...(description ? { description } : {}) }];
+      const model = typeof candidate.model === 'string' && candidate.model.trim() ? candidate.model.trim() : undefined;
+      const reasoningEffort = normalizeReasoningEffort(candidate.reasoningEffort);
+      return [{
+        id,
+        title,
+        initialPrompt,
+        ...(description ? { description } : {}),
+        ...(model ? { model } : {}),
+        ...(reasoningEffort ? { reasoningEffort } : {}),
+      }];
     });
     return agents.length > 0 ? agents : undefined;
   }
@@ -744,7 +762,16 @@ export class ForgerBackendClient {
         typeof candidate.description === 'string' && candidate.description.trim()
           ? candidate.description.trim()
           : undefined;
-      return [{ id, title, prompt, ...(description ? { description } : {}) }];
+      const model = typeof candidate.model === 'string' && candidate.model.trim() ? candidate.model.trim() : undefined;
+      const reasoningEffort = normalizeReasoningEffort(candidate.reasoningEffort);
+      return [{
+        id,
+        title,
+        prompt,
+        ...(description ? { description } : {}),
+        ...(model ? { model } : {}),
+        ...(reasoningEffort ? { reasoningEffort } : {}),
+      }];
     });
     return templates.length > 0 ? templates : undefined;
   }
