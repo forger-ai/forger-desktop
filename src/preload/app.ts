@@ -53,8 +53,14 @@ const api: ForgerAppApi = {
       ipcRenderer.removeListener(IPC_CHANNELS.appCodexTaskUpdated, wrapped);
     };
   },
-  createCodexConversation: (input) => ipcRenderer.invoke(IPC_CHANNELS.appCodexConversationCreate, input ?? {}),
-  sendCodexConversationMessage: (input) => ipcRenderer.invoke(IPC_CHANNELS.appCodexConversationSendMessage, input),
+  createCodexConversation: (input) => {
+    const locale = new URLSearchParams(window.location.search).get('forgerLocale') ?? undefined;
+    return ipcRenderer.invoke(IPC_CHANNELS.appCodexConversationCreate, { ...(input ?? {}), locale });
+  },
+  sendCodexConversationMessage: (input) => {
+    const locale = new URLSearchParams(window.location.search).get('forgerLocale') ?? undefined;
+    return ipcRenderer.invoke(IPC_CHANNELS.appCodexConversationSendMessage, { ...input, locale });
+  },
   getCodexConversation: (conversationId) => ipcRenderer.invoke(IPC_CHANNELS.appCodexConversationGet, conversationId),
   listCodexConversations: () => ipcRenderer.invoke(IPC_CHANNELS.appCodexConversationList),
   deleteCodexConversation: (conversationId) =>
@@ -99,6 +105,38 @@ type PermissionOverlayInput =
 
 let activePermissionKey: string | null = null;
 
+type OverlayLocale = 'es' | 'en';
+
+const overlayCopy = {
+  es: {
+    title: 'Forger necesita autorización',
+    body: (resource: string) => `El agente quiere usar "${resource}" para continuar.`,
+    deny: 'Rechazar',
+    allow: 'Aprobar',
+    risks: {
+      low: 'Riesgo bajo',
+      medium: 'Riesgo medio',
+      high: 'Riesgo alto',
+    },
+  },
+  en: {
+    title: 'Forger needs authorization',
+    body: (resource: string) => `The agent wants to use "${resource}" to continue.`,
+    deny: 'Deny',
+    allow: 'Approve',
+    risks: {
+      low: 'Low risk',
+      medium: 'Medium risk',
+      high: 'High risk',
+    },
+  },
+} as const;
+
+const overlayLocale = (): OverlayLocale => {
+  const raw = new URLSearchParams(window.location.search).get('forgerLocale')?.toLowerCase() ?? '';
+  return raw === 'en' || raw.startsWith('en-') ? 'en' : 'es';
+};
+
 const isPermissionRequest = (value: unknown): value is PermissionRequestPayload => {
   if (!value || typeof value !== 'object') {
     return false;
@@ -114,9 +152,7 @@ const isPermissionRequest = (value: unknown): value is PermissionRequestPayload 
 };
 
 const riskLabel = (risk: PermissionRequestPayload['risk']): string => {
-  if (risk === 'high') return 'Riesgo alto';
-  if (risk === 'medium') return 'Riesgo medio';
-  return 'Riesgo bajo';
+  return overlayCopy[overlayLocale()].risks[risk];
 };
 
 const removePermissionOverlay = (key: string): void => {
@@ -153,6 +189,7 @@ const renderPermissionOverlay = (input: PermissionOverlayInput): void => {
   }
   document.querySelector('[data-forger-permission-overlay="true"]')?.remove();
   activePermissionKey = key;
+  const copy = overlayCopy[overlayLocale()];
 
   const overlay = document.createElement('div');
   overlay.dataset.forgerPermissionOverlay = 'true';
@@ -179,11 +216,11 @@ const renderPermissionOverlay = (input: PermissionOverlayInput): void => {
   ].join(';');
 
   const title = document.createElement('div');
-  title.textContent = 'Forger necesita autorización';
+  title.textContent = copy.title;
   title.style.cssText = 'font-size:20px;font-weight:700;letter-spacing:0;margin-bottom:8px';
 
   const body = document.createElement('div');
-  body.textContent = `El agente quiere usar "${input.request.resource}" para continuar.`;
+  body.textContent = copy.body(input.request.resource);
   body.style.cssText = 'font-size:14px;line-height:1.45;color:#c4cad4;margin-bottom:16px';
 
   const reason = document.createElement('div');
@@ -211,12 +248,12 @@ const renderPermissionOverlay = (input: PermissionOverlayInput): void => {
 
   const deny = document.createElement('button');
   deny.type = 'button';
-  deny.textContent = 'Rechazar';
+  deny.textContent = copy.deny;
   deny.style.cssText = 'border:1px solid rgba(255,255,255,0.18);background:transparent;color:#f5f7fb;border-radius:8px;padding:9px 14px;font-weight:700;cursor:pointer';
 
   const allow = document.createElement('button');
   allow.type = 'button';
-  allow.textContent = 'Aprobar';
+  allow.textContent = copy.allow;
   allow.style.cssText = 'border:0;background:#f5f7fb;color:#12171f;border-radius:8px;padding:9px 14px;font-weight:800;cursor:pointer';
 
   deny.addEventListener('click', () => {

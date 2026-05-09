@@ -45,4 +45,8 @@ export const settingsSeed: Settings = {
   userEmail: '',
   plan: 'Free',
   safeMode: true,
+  codexDefaults: {
+    model: 'gpt-5.4',
+    reasoningEffort: 'medium',
+  },
 };

@@ -51,6 +51,7 @@ import type {
   ForgerAccountSession,
   ForgerFileCategory,
   ForgerFileRecord,
+  InstallAppResult,
   MemoryCreateInput,
   MemoryEntry,
   MemoryUpdateInput,
@@ -129,6 +130,10 @@ const initialSettings: Settings = {
   userEmail: '',
   plan: 'Free',
   safeMode: false,
+  codexDefaults: {
+    model: 'gpt-5.4',
+    reasoningEffort: 'medium',
+  },
 };
 
 const initialCodexAuthStatus: CodexAuthStatus = {
@@ -206,6 +211,7 @@ function App() {
   const [catalogApps, setCatalogApps] = useState<CatalogApp[]>([]);
   const [openingAppIds, setOpeningAppIds] = useState<Set<string>>(new Set());
   const openingAppIdsRef = useRef<Set<string>>(new Set());
+  const [installProgressByApp, setInstallProgressByApp] = useState<Record<string, InstallAppResult>>({});
   const [settings, setSettings] = useState<Settings>(initialSettings);
   const [codexAuthBusy, setCodexAuthBusy] = useState(false);
   const [codexAuthStatus, setCodexAuthStatus] = useState<CodexAuthStatus>(initialCodexAuthStatus);
@@ -213,6 +219,7 @@ function App() {
   const [agentToolSettings, setAgentToolSettings] = useState<AgentToolSettings>(initialAgentToolSettings);
   const [agentToolBusyId, setAgentToolBusyId] = useState<AgentToolDefinition['id'] | null>(null);
   const [agentToolError, setAgentToolError] = useState<string | null>(null);
+  const [agentToolErrorCode, setAgentToolErrorCode] = useState<string | null>(null);
   const [officialTools, setOfficialTools] = useState<OfficialToolSummary[]>([]);
   const [officialToolBusyId, setOfficialToolBusyId] = useState<string | null>(null);
   const [cloudModalOpen, setCloudModalOpen] = useState(false);
@@ -426,7 +433,7 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
   };
 
   const refreshOfficialTools = async () => {
-    const state = await getDesktopApi().listOfficialTools();
+    const state = await getDesktopApi().listOfficialTools(activeLocale);
     setOfficialTools(state.tools);
     return state.tools;
   };
@@ -599,6 +606,16 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
     }
 
     const unsubscribeInstall = desktopApi.onInstallProgress(({ appId, progress }) => {
+      setInstallProgressByApp((current) => {
+        const next = { ...current };
+        if (progress.phase === 'completed' || progress.phase === 'failed' || progress.phase === 'conflict') {
+          delete next[appId];
+        } else {
+          next[appId] = progress;
+        }
+        return next;
+      });
+
       if (progress.phase === 'completed') {
         setBannerSeverity('success');
       } else if (progress.phase === 'failed') {
@@ -782,6 +799,11 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
       setDesktopUpdateState(state);
     });
 
+    const unsubscribeForgerAccount = desktopApi.onForgerAccountUpdated((account) => {
+      setForgerAccount(account);
+      setForgerAccountMessage(account.userMessage ?? null);
+    });
+
     const unsubscribeErrorReport = desktopApi.onDesktopErrorReportRequested((report) => {
       setErrorReportDialog({ open: true, report, busy: false });
     });
@@ -792,6 +814,7 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
       unsubscribeChat();
       unsubscribeAutomation();
       unsubscribeDesktopUpdate();
+      unsubscribeForgerAccount();
       unsubscribeErrorReport();
     };
   }, []);
@@ -1003,7 +1026,7 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
   const performInstall = async (appId: string) => {
     try {
       const desktopApi = getDesktopApi();
-      const result = await desktopApi.installApp(appId);
+      const result = await desktopApi.installApp(appId, activeLocale);
 
       await refreshApps();
 
@@ -1040,7 +1063,7 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
 
   const handleInstall = async (appId: string) => {
     try {
-      const gate = await getDesktopApi().getAppToolsInstallGate(appId);
+      const gate = await getDesktopApi().getAppToolsInstallGate(appId, activeLocale);
       if (gate) {
         setPendingInstallGate(gate);
         return;
@@ -1071,7 +1094,7 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
     if (!pendingInstallGate) {
       return;
     }
-    const updated = await getDesktopApi().setAppToolGrant({ appId: pendingInstallGate.appId, toolId, granted });
+    const updated = await getDesktopApi().setAppToolGrant({ appId: pendingInstallGate.appId, toolId, granted }, activeLocale);
     if (updated) {
       setPendingInstallGate(updated);
     }
@@ -1157,7 +1180,7 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
   const handleUpdate = async (appId: string) => {
     try {
       const desktopApi = getDesktopApi();
-      const result = await desktopApi.updateApp(appId);
+      const result = await desktopApi.updateApp(appId, activeLocale);
       await refreshApps();
       setBannerSeverity(result.success ? 'success' : result.phase === 'conflict' ? 'warning' : 'error');
       setBannerMessage(result.userMessage);
@@ -1367,11 +1390,13 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
   ) => {
     setAgentToolBusyId(toolId);
     setAgentToolError(null);
+    setAgentToolErrorCode(null);
     try {
       const updated = await getDesktopApi().updateAgentToolApproval({ toolId, requiresApproval });
       setAgentToolSettings(updated);
     } catch (_error) {
       setAgentToolError(t.sections.tools.saveError);
+      setAgentToolErrorCode(null);
     } finally {
       setAgentToolBusyId(null);
     }
@@ -1379,17 +1404,27 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
 
   const runOfficialToolAction = async (
     toolId: string,
-    action: () => Promise<{ success: boolean; userMessage: string }>,
+    action: () => Promise<{ success: boolean; userMessage: string; technicalCode?: string }>,
   ) => {
     setOfficialToolBusyId(toolId);
     setAgentToolError(null);
+    setAgentToolErrorCode(null);
     try {
       const result = await action();
       await refreshOfficialTools();
       setBannerSeverity(result.success ? 'success' : 'error');
-      setBannerMessage(result.userMessage);
+      const userMessage =
+        !result.success && result.technicalCode === 'forger_account_required'
+          ? t.sections.tools.gmailAccountRequired
+          : result.userMessage;
+      setBannerMessage(userMessage);
+      if (!result.success) {
+        setAgentToolError(userMessage);
+        setAgentToolErrorCode(result.technicalCode ?? null);
+      }
     } catch (_error) {
       setAgentToolError(t.sections.tools.saveError);
+      setAgentToolErrorCode(null);
     } finally {
       setOfficialToolBusyId(null);
     }
@@ -1455,6 +1490,23 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
     } catch (error) {
       setBannerSeverity('error');
       setBannerMessage(error instanceof Error ? error.message : t.settings.memoryDeleteError);
+    }
+  };
+
+  const handleCodexDefaultsChange = async (codexDefaults: Settings['codexDefaults']) => {
+    setSettings((current) => ({ ...current, codexDefaults }));
+    try {
+      const updated = await getDesktopApi().updateCodexDefaults(codexDefaults);
+      setSettings(updated);
+      setSelectedCodexModel(updated.codexDefaults.model);
+      setSelectedCodexReasoningEffort(updated.codexDefaults.reasoningEffort);
+      if (selectedAppDetailsId) {
+        setSelectedAppDetails(await getDesktopApi().getAppDetails(selectedAppDetailsId));
+      }
+    } catch (error) {
+      setBannerSeverity('error');
+      setBannerMessage(error instanceof Error ? error.message : t.settings.authErrorFallback);
+      void getDesktopApi().getSettings().then(setSettings).catch(() => undefined);
     }
   };
 
@@ -1893,8 +1945,9 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
             return conversation;
           }
           const nextTitle =
-            conversation.title === 'Conversacion nueva' && conversation.messages.length === 0
-              ? summarizeConversationTitle(userVisibleContent)
+            (conversation.title === 'Conversacion nueva' || conversation.title === t.sections.chat.newConversationTitle) &&
+              conversation.messages.length === 0
+              ? summarizeConversationTitle(userVisibleContent, t.sections.chat.newConversationTitle)
               : conversation.title;
           return {
             ...conversation,
@@ -1929,8 +1982,8 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
       const detail = error instanceof Error ? error.message : t.settings.authErrorFallback;
       const friendly =
         /another_run_in_progress/i.test(detail)
-          ? 'Todavia estoy procesando tu mensaje anterior. Espera la respuesta o cancela esa solicitud.'
-          : `No pude enviar tu mensaje a Codex. ${detail}`;
+          ? t.sections.chat.sendInProgress
+          : t.sections.chat.sendFailed(detail);
       setChatConversations((currentConversations) =>
         currentConversations.map((conversation) => {
           if (conversation.id !== targetConversationId) {
@@ -2059,7 +2112,7 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
     const nextConversation: ChatConversation = {
       id: makeConversationId(),
       appId: chatScopeId,
-      title: 'Conversacion nueva',
+      title: t.sections.chat.newConversationTitle,
       threadId: null,
       createdAt: now,
       updatedAt: now,
@@ -2415,6 +2468,7 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
             onDetails={(appId) => void openAppDetails(appId, 'my-apps')}
             onDelete={(appId) => void handleDeleteApp(appId)}
             onGoCatalog={() => setCurrentView('catalog')}
+            installProgressByApp={installProgressByApp}
           />
         ) : null}
 
@@ -2438,6 +2492,7 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
             t={t}
             getAppMeta={getAppMeta}
             getCategoryLabel={getCategoryLabel}
+            installProgressByApp={installProgressByApp}
           />
         ) : null}
 
@@ -2445,11 +2500,15 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
           <AppView
             details={selectedAppDetails}
             openingAppIds={openingAppIds}
+            installProgress={selectedAppDetailsId ? installProgressByApp[selectedAppDetailsId] : undefined}
             t={t}
             categoryLabel={selectedAppDetails ? getCategoryLabel(selectedAppDetails.app.category) : ''}
             appSecretsState={appSecretsState}
             secretsBusy={secretsBusy}
             account={forgerAccount}
+            modelOptions={CODEX_MODEL_OPTIONS}
+            reasoningOptions={CODEX_REASONING_OPTIONS}
+            codexDefaults={settings.codexDefaults}
             onBack={() => setCurrentView(appDetailsBackView)}
             onInstall={(appId) => void handleInstall(appId)}
             onUpdate={(appId) => void handleUpdate(appId)}
@@ -2569,7 +2628,7 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
         ) : null}
 
         {currentView === 'devices' ? (
-          <DevicesView account={forgerAccount} />
+          <DevicesView account={forgerAccount} t={t} />
         ) : null}
 
         {currentView === 'datos' ? (
@@ -2600,18 +2659,19 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
             busyToolId={agentToolBusyId}
             busyOfficialToolId={officialToolBusyId}
             errorMessage={agentToolError}
+            errorTechnicalCode={agentToolErrorCode}
             t={t}
             onApprovalChange={(toolId, requiresApproval) =>
               void handleAgentToolApprovalChange(toolId, requiresApproval)
             }
             onActivateOfficialTool={(toolId) =>
-              void runOfficialToolAction(toolId, () => getDesktopApi().activateOfficialTool(toolId))
+              void runOfficialToolAction(toolId, () => getDesktopApi().activateOfficialTool(toolId, activeLocale))
             }
             onConfigureOfficialTool={(toolId) =>
-              void runOfficialToolAction(toolId, () => getDesktopApi().configureOfficialTool({ toolId }))
+              void runOfficialToolAction(toolId, () => getDesktopApi().configureOfficialTool({ toolId, locale: activeLocale }))
             }
             onDeactivateOfficialTool={(toolId) =>
-              void runOfficialToolAction(toolId, () => getDesktopApi().deactivateOfficialTool(toolId))
+              void runOfficialToolAction(toolId, () => getDesktopApi().deactivateOfficialTool(toolId, activeLocale))
             }
           />
         ) : null}
@@ -2630,6 +2690,10 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
             chatBotPicture={chatBotPicture}
             chatBotPictureOptions={CHAT_BOT_PICTURE_OPTIONS}
             onChatBotPictureChange={setChatBotPicture}
+            modelOptions={CODEX_MODEL_OPTIONS}
+            reasoningOptions={CODEX_REASONING_OPTIONS}
+            codexDefaults={settings.codexDefaults}
+            onCodexDefaultsChange={(defaults) => void handleCodexDefaultsChange(defaults)}
             onOpenCodexConfig={() => setCodexConfigOpen(true)}
             onReinstallCodex={() => void handleReinstallCodex()}
             desktopUpdateState={desktopUpdateState}

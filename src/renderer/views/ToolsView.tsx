@@ -1,5 +1,18 @@
 import { useMemo, useState } from 'react';
-import { Alert, Chip, Paper, Stack, TextField, Typography, useTheme } from '@mui/material';
+import {
+  Alert,
+  Button,
+  Chip,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  Paper,
+  Stack,
+  TextField,
+  Typography,
+  useTheme,
+} from '@mui/material';
 import type {
   AgentToolDefinition,
   AgentToolPackageDefinition,
@@ -21,6 +34,7 @@ interface ToolsViewProps {
   busyToolId: string | null;
   busyOfficialToolId: string | null;
   errorMessage: string | null;
+  errorTechnicalCode: string | null;
   t: AppDictionary;
   onApprovalChange: (toolId: AgentToolDefinition['id'], requiresApproval: boolean) => void;
   onActivateOfficialTool: (toolId: string) => void;
@@ -37,6 +51,7 @@ export function ToolsView({
   busyToolId,
   busyOfficialToolId,
   errorMessage,
+  errorTechnicalCode,
   t,
   onApprovalChange,
   onConfigureOfficialTool,
@@ -45,7 +60,22 @@ export function ToolsView({
   const theme = useTheme();
   const [selectedTool, setSelectedTool] = useState<SelectedTool>(null);
   const [query, setQuery] = useState('');
+  const [gmailAccountHelpOpen, setGmailAccountHelpOpen] = useState(false);
   const normalizedQuery = query.trim().toLowerCase();
+  const showGmailAccountHelp = errorTechnicalCode === 'forger_account_required';
+  const gmailAccountHelpDialog = (
+    <Dialog open={gmailAccountHelpOpen} onClose={() => setGmailAccountHelpOpen(false)} maxWidth="sm" fullWidth>
+      <DialogTitle>{t.sections.tools.gmailAccountRequiredTitle}</DialogTitle>
+      <DialogContent>
+        <Typography variant="body2" color="text.secondary">
+          {t.sections.tools.gmailAccountRequiredBody}
+        </Typography>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={() => setGmailAccountHelpOpen(false)}>{t.actions.close}</Button>
+      </DialogActions>
+    </Dialog>
+  );
 
   const forgerPackage = useMemo(
     () => packages.find((toolPackage) => toolPackage.id === FORGER_PACKAGE_ID)
@@ -64,9 +94,9 @@ export function ToolsView({
 
   const forgerCopy = forgerPackage
     ? localizedPackageCopy(t, forgerPackage)
-    : { name: 'Forger tools', description: 'Built-in tools included with Forger.' };
+    : t.sections.tools.packages.forger;
   const gmailDescription = gmailTool?.description
-    ?? 'Herramienta oficial para buscar, leer y enviar correos de Gmail.';
+    ?? t.sections.tools.gmailDescription;
   const gmailConnected = Boolean(gmailTool?.configured);
 
   const visibleRows = useMemo(
@@ -101,41 +131,60 @@ export function ToolsView({
 
   if (selectedTool === 'gmail') {
     return (
-      <GmailToolDetail
-        description={gmailDescription}
-        connected={gmailConnected}
-        tool={gmailTool}
-        toolPackage={gmailPackage}
-        settings={settings}
-        busyToolId={busyToolId}
-        busyOfficialToolId={busyOfficialToolId}
-        t={t}
-        onBack={() => setSelectedTool(null)}
-        onConnect={() => onConfigureOfficialTool(GMAIL_TOOL_ID)}
-        onDisconnect={() => onDeactivateOfficialTool(GMAIL_TOOL_ID)}
-        onApprovalChange={onApprovalChange}
-      />
+      <>
+        <GmailToolDetail
+          description={gmailDescription}
+          connected={gmailConnected}
+          tool={gmailTool}
+          toolPackage={gmailPackage}
+          settings={settings}
+          busyToolId={busyToolId}
+          busyOfficialToolId={busyOfficialToolId}
+          errorMessage={errorMessage}
+          showAccountHelp={showGmailAccountHelp}
+          t={t}
+          onBack={() => setSelectedTool(null)}
+          onConnect={() => onConfigureOfficialTool(GMAIL_TOOL_ID)}
+          onDisconnect={() => onDeactivateOfficialTool(GMAIL_TOOL_ID)}
+          onAccountHelp={() => setGmailAccountHelpOpen(true)}
+          onApprovalChange={onApprovalChange}
+        />
+        {gmailAccountHelpDialog}
+      </>
     );
   }
 
   return (
     <Stack spacing={2.5}>
       <Stack spacing={0.75}>
-        <Typography variant="h3" fontWeight={750}>Tools</Typography>
+        <Typography variant="h3" fontWeight={750}>{t.sections.tools.title}</Typography>
         <Typography variant="body1" color="text.secondary">
-          Manage the tools Forger can use for you.
+          {t.sections.tools.subtitle}
         </Typography>
       </Stack>
 
       <TextField
         fullWidth
-        placeholder="Buscar herramientas"
+        placeholder={t.sections.tools.searchPlaceholder}
         value={query}
         onChange={(event) => setQuery(event.target.value)}
-        inputProps={{ 'aria-label': 'Buscar herramientas' }}
+        inputProps={{ 'aria-label': t.sections.tools.searchPlaceholder }}
       />
 
-      {errorMessage ? <Alert severity="error">{errorMessage}</Alert> : null}
+      {errorMessage ? (
+        <Alert
+          severity="error"
+          action={showGmailAccountHelp ? (
+            <Button color="inherit" size="small" onClick={() => setGmailAccountHelpOpen(true)}>
+              {t.sections.tools.gmailAccountRequiredHelp}
+            </Button>
+          ) : undefined}
+        >
+          {errorMessage}
+        </Alert>
+      ) : null}
+
+      {gmailAccountHelpDialog}
 
       <Stack spacing={1}>
         {visibleRows.some((row) => row.id === 'forger') ? (
@@ -143,8 +192,8 @@ export function ToolsView({
             icon={<ForgerToolIcon mode={theme.palette.mode} />}
             title={forgerCopy.name}
             description={forgerCopy.description}
-            meta={forgerPackage ? t.sections.tools.packageToolCount(forgerPackage.tools.length) : 'Built in'}
-            pill={<Chip size="small" label="Built in" />}
+            meta={forgerPackage ? t.sections.tools.packageToolCount(forgerPackage.tools.length) : t.sections.tools.builtIn}
+            pill={<Chip size="small" label={t.sections.tools.builtIn} />}
             onClick={() => setSelectedTool('forger')}
           />
         ) : null}
@@ -159,7 +208,7 @@ export function ToolsView({
               <Chip
                 size="small"
                 color={gmailConnected ? 'success' : 'default'}
-                label={gmailConnected ? 'Activada' : 'Desactivada'}
+                label={gmailConnected ? t.sections.tools.active : t.sections.tools.inactive}
               />
             )}
             onClick={() => setSelectedTool('gmail')}
@@ -169,7 +218,7 @@ export function ToolsView({
         {visibleRows.length === 0 ? (
           <Paper variant="outlined" sx={{ p: 2, borderRadius: 1 }}>
             <Typography variant="body2" color="text.secondary">
-              No hay herramientas para esta busqueda.
+              {t.sections.tools.emptySearch}
             </Typography>
           </Paper>
         ) : null}

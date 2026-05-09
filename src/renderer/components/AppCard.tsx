@@ -13,10 +13,12 @@ import {
   Chip,
   CircularProgress,
   IconButton,
+  LinearProgress,
   Stack,
   Tooltip,
   Typography,
 } from '@mui/material';
+import type { InstallAppResult } from '@shared/types';
 
 interface AppCardProps {
   appName: string;
@@ -30,6 +32,7 @@ interface AppCardProps {
   onPrimaryAction: () => void;
   primaryDisabled?: boolean;
   primaryLoading?: boolean;
+  installProgress?: Pick<InstallAppResult, 'phase' | 'progress' | 'userMessage'>;
   secondaryActionLabel?: string;
   onSecondaryAction?: () => void;
   tertiaryActionLabel?: string;
@@ -59,6 +62,7 @@ export function AppCard({
   onPrimaryAction,
   primaryDisabled = false,
   primaryLoading = false,
+  installProgress,
   secondaryActionLabel,
   onSecondaryAction,
   tertiaryActionLabel,
@@ -68,6 +72,7 @@ export function AppCard({
   ratingsCount = 0,
   onCardClick,
 }: AppCardProps) {
+  const installing = Boolean(installProgress);
   const primaryIcon =
     primaryAction === 'open' ? (
       <LaunchRounded />
@@ -149,7 +154,10 @@ export function AppCard({
       ) : null}
       <Stack spacing={2} sx={{ height: '100%' }}>
         <Stack direction="row" justifyContent="space-between" spacing={2} alignItems="flex-start">
-          <Chip label={statusLabel} color={statusColor} size="small" />
+          <Stack direction="row" spacing={1} alignItems="center">
+            <Chip label={statusLabel} color={statusColor} size="small" />
+            {installing ? <CircularProgress size={14} color="inherit" /> : null}
+          </Stack>
           {tertiaryActionLabel && onTertiaryAction ? (
             <Tooltip title={tertiaryActionLabel}>
               <IconButton
@@ -214,12 +222,25 @@ export function AppCard({
           </Stack>
         ) : null}
 
+        {installing ? (
+          <Stack spacing={0.75}>
+            <LinearProgress
+              variant={typeof installProgress?.progress === 'number' ? 'determinate' : 'indeterminate'}
+              value={Math.min(Math.max(installProgress?.progress ?? 0, 0), 100)}
+              sx={{ height: 6, borderRadius: 999 }}
+            />
+            <Typography variant="caption" color="text.secondary">
+              {installProgress?.userMessage}
+            </Typography>
+          </Stack>
+        ) : null}
+
         <Stack direction="row" spacing={1.25} sx={{ mt: 'auto' }}>
           <Button
             variant="contained"
-            startIcon={primaryLoading ? <CircularProgress color="inherit" size={16} /> : primaryIcon}
-            disabled={primaryDisabled || primaryLoading}
-            aria-busy={primaryLoading}
+            startIcon={primaryLoading || installing ? <CircularProgress color="inherit" size={16} /> : primaryIcon}
+            disabled={primaryDisabled || primaryLoading || installing}
+            aria-busy={primaryLoading || installing}
             onClick={(event) => {
               event.stopPropagation();
               onPrimaryAction();

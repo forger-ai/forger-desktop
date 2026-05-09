@@ -19,6 +19,7 @@ interface CloudDeviceManagerOptions {
   token: () => string | undefined;
   getInstalledApps: () => AppSummary[];
   handleRelayRequest: (request: CloudRelayRequest) => Promise<CloudRelayResponse>;
+  onAuthenticationInvalid?: (technicalCode: string) => Promise<void> | void;
 }
 
 export interface CloudRelayRequest {
@@ -36,6 +37,15 @@ export interface CloudRelayResponse {
   headers: Record<string, string>;
   body: number[];
 }
+
+const technicalCodeForError = (error: unknown, fallback: string): string =>
+  error instanceof Error
+    ? typeof (error as Error & { technicalCode?: unknown }).technicalCode === 'string'
+      ? (error as Error & { technicalCode: string }).technicalCode
+      : error.message
+    : fallback;
+
+const isAuthenticationInvalidError = (technicalCode: string): boolean => /_failed_401$/.test(technicalCode);
 
 export class CloudDeviceManager {
   private stored: StoredCloudDevice | null = null;
@@ -56,9 +66,13 @@ export class CloudDeviceManager {
       this.stop();
       return;
     }
-    await this.ensureRegistered();
-    await this.refreshDevices();
-    this.connectSocket();
+    try {
+      await this.ensureRegistered();
+      await this.refreshDevices();
+      this.connectSocket();
+    } catch (error) {
+      await this.handleCloudError(error, 'No pudimos conectar este equipo con Forger Cloud.', 'cloud_device_start_failed');
+    }
   }
 
   stop(): void {
@@ -75,9 +89,13 @@ export class CloudDeviceManager {
 
   async getState(): Promise<CloudDevicesState> {
     if (this.options.token()) {
-      await this.ensureRegistered().catch(() => undefined);
-      await this.refreshDevices().catch(() => undefined);
-      this.connectSocket();
+      try {
+        await this.ensureRegistered();
+        await this.refreshDevices();
+        this.connectSocket();
+      } catch (error) {
+        await this.handleCloudError(error, 'No pudimos revisar los dispositivos conectados.', 'cloud_devices_state_failed');
+      }
     }
     return this.state();
   }
@@ -99,8 +117,7 @@ export class CloudDeviceManager {
       this.connectSocket();
       return { ...this.state(), success: true };
     } catch (error) {
-      this.lastMessage = 'No pudimos generar el codigo de emparejamiento.';
-      this.lastTechnicalCode = error instanceof Error ? error.message : 'pairing_failed';
+      await this.handleCloudError(error, 'No pudimos generar el codigo de emparejamiento.', 'pairing_failed');
       return { ...this.state(), success: false };
     }
   }
@@ -133,6 +150,15 @@ export class CloudDeviceManager {
     this.stored = { ...stored, cloudId: device.id };
     await this.saveStored(this.stored);
     return device;
+  }
+
+  private async handleCloudError(error: unknown, userMessage: string, fallbackCode: string): Promise<void> {
+    const technicalCode = technicalCodeForError(error, fallbackCode);
+    this.lastMessage = userMessage;
+    this.lastTechnicalCode = technicalCode;
+    if (isAuthenticationInvalidError(technicalCode)) {
+      await this.options.onAuthenticationInvalid?.(technicalCode);
+    }
   }
 
   private async refreshDevices(): Promise<void> {

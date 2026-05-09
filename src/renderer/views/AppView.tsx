@@ -21,6 +21,7 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  LinearProgress,
   MenuItem,
   Rating,
   Stack,
@@ -38,7 +39,11 @@ import type {
   AppPromptReviewInput,
   AppPromptValidationResult,
   AppSecretsState,
+  CodexModelOption,
+  CodexReasoningEffort,
   ForgerAccountSession,
+  InstallAppResult,
+  Settings,
   SubmitAppFeedbackInput,
   SubmitAppRatingInput,
 } from '@shared/types';
@@ -48,11 +53,15 @@ import { AppSecretsPanel } from '@renderer/components/AppSecretsDialog';
 interface AppViewProps {
   details: AppDetails | null;
   openingAppIds: Set<string>;
+  installProgress?: InstallAppResult;
   t: AppDictionary;
   categoryLabel: string;
   appSecretsState: AppSecretsState | null;
   secretsBusy: boolean;
   account: ForgerAccountSession;
+  modelOptions: CodexModelOption[];
+  reasoningOptions: { label: string; value: CodexReasoningEffort }[];
+  codexDefaults: Settings['codexDefaults'];
   onBack: () => void;
   onInstall: (appId: string) => void;
   onUpdate: (appId: string) => void;
@@ -94,11 +103,15 @@ const DetailRow = ({ label, value }: { label: string; value: string }) => (
 export function AppView({
   details,
   openingAppIds,
+  installProgress,
   t,
   categoryLabel,
   appSecretsState,
   secretsBusy,
   account,
+  modelOptions,
+  reasoningOptions,
+  codexDefaults,
   onBack,
   onInstall,
   onUpdate,
@@ -120,6 +133,8 @@ export function AppView({
   const [selectedPromptKey, setSelectedPromptKey] = useState<string | null>(null);
   const selectedPrompt = promptReviewsForState.find((prompt) => promptReviewKey(prompt.kind, prompt.id) === selectedPromptKey) ?? null;
   const [promptDraft, setPromptDraft] = useState('');
+  const [promptModelDraft, setPromptModelDraft] = useState('');
+  const [promptReasoningDraft, setPromptReasoningDraft] = useState<CodexReasoningEffort>('medium');
   const [promptValidation, setPromptValidation] = useState<AppPromptValidationResult | null>(null);
   const [promptBusy, setPromptBusy] = useState(false);
   const currentUserRating = details?.app && 'currentUserRating' in details.app ? details.app.currentUserRating : undefined;
@@ -155,6 +170,8 @@ export function AppView({
       return;
     }
     setPromptDraft(selectedPrompt.overridePrompt ?? selectedPrompt.prompt);
+    setPromptModelDraft(selectedPrompt.overrideModel ?? selectedPrompt.model);
+    setPromptReasoningDraft(selectedPrompt.overrideReasoningEffort ?? selectedPrompt.reasoningEffort);
     setPromptValidation(selectedPrompt.validation);
   }, [selectedPrompt]);
 
@@ -197,6 +214,7 @@ export function AppView({
   const isRunning = details.status === 'running';
   const hasError = details.status === 'error';
   const hasConflict = details.status === 'conflict';
+  const isInstalling = details.status === 'installing' || Boolean(installProgress);
   const isOpening = openingAppIds.has(appId);
   const capabilities = 'capabilities' in details.app ? details.app.capabilities ?? [] : [];
   const capabilityTranslations = t.appCapabilities as Record<string, Pick<AppCapability, 'title' | 'description'> | undefined>;
@@ -218,8 +236,16 @@ export function AppView({
 
   const actions = (
     <Stack direction="row" spacing={1.25} useFlexGap flexWrap="wrap">
-      {!details.installed ? (
-        <Button variant="contained" startIcon={<DownloadRounded />} onClick={() => onInstall(appId)}>
+      {isInstalling ? (
+        <Button variant="contained" startIcon={<CircularProgress color="inherit" size={16} />} disabled aria-busy>
+          {t.actions.installing}
+        </Button>
+      ) : !details.installed ? (
+        <Button
+          variant="contained"
+          startIcon={<DownloadRounded />}
+          onClick={() => onInstall(appId)}
+        >
           {t.actions.install}
         </Button>
       ) : hasConflict ? (
@@ -348,6 +374,24 @@ export function AppView({
   );
 
   const promptErrors = promptValidation?.errors ?? [];
+  const selectedPromptModelFallback = selectedPrompt
+    ? selectedPrompt.originalModel ?? codexDefaults.model
+    : codexDefaults.model;
+  const selectedPromptReasoningFallback = selectedPrompt
+    ? selectedPrompt.originalReasoningEffort ?? codexDefaults.reasoningEffort
+    : codexDefaults.reasoningEffort;
+  const modelEdited = Boolean(selectedPrompt && promptModelDraft !== selectedPromptModelFallback);
+  const reasoningEdited = Boolean(selectedPrompt && promptReasoningDraft !== selectedPromptReasoningFallback);
+  const selectedPromptModelSource = selectedPrompt?.modelSource === 'override'
+    ? t.appView.promptSettingCustom
+    : selectedPrompt?.modelSource === 'manifest'
+      ? t.appView.promptSettingApp
+      : t.appView.promptSettingGlobal;
+  const selectedPromptReasoningSource = selectedPrompt?.reasoningEffortSource === 'override'
+    ? t.appView.promptSettingCustom
+    : selectedPrompt?.reasoningEffortSource === 'manifest'
+      ? t.appView.promptSettingApp
+      : t.appView.promptSettingGlobal;
   const promptsContent = (
     <Stack spacing={1.5}>
       <Stack spacing={0.5}>
@@ -431,6 +475,44 @@ export function AppView({
                   },
                 }}
               />
+              <Box
+                sx={{
+                  display: 'grid',
+                  gridTemplateColumns: { xs: '1fr', sm: 'minmax(0, 1fr) minmax(0, 1fr)' },
+                  gap: 1,
+                }}
+              >
+                <TextField
+                  select
+                  size="small"
+                  label={t.appView.promptModelLabel}
+                  value={promptModelDraft}
+                  onChange={(event) => setPromptModelDraft(event.target.value)}
+                  helperText={modelEdited ? t.appView.promptSettingCustom : selectedPromptModelSource}
+                  fullWidth
+                >
+                  {modelOptions.map((option) => (
+                    <MenuItem value={option.realModelName} key={option.realModelName}>
+                      {option.displayModelName}
+                    </MenuItem>
+                  ))}
+                </TextField>
+                <TextField
+                  select
+                  size="small"
+                  label={t.appView.promptThinkingLabel}
+                  value={promptReasoningDraft}
+                  onChange={(event) => setPromptReasoningDraft(event.target.value as CodexReasoningEffort)}
+                  helperText={reasoningEdited ? t.appView.promptSettingCustom : selectedPromptReasoningSource}
+                  fullWidth
+                >
+                  {reasoningOptions.map((option) => (
+                    <MenuItem value={option.value} key={option.value}>
+                      {option.label}
+                    </MenuItem>
+                  ))}
+                </TextField>
+              </Box>
               {promptErrors.length > 0 ? (
                 <Box sx={{ border: '1px solid', borderColor: 'error.main', p: 1.25 }}>
                   <Stack component="ul" sx={{ m: 0, pl: 2 }}>
@@ -454,6 +536,8 @@ export function AppView({
                       kind: selectedPrompt.kind,
                       id: selectedPrompt.id,
                       prompt: promptDraft,
+                      model: modelEdited ? promptModelDraft : null,
+                      reasoningEffort: reasoningEdited ? promptReasoningDraft : null,
                     }).finally(() => setPromptBusy(false));
                   }}
                 >
@@ -865,8 +949,8 @@ export function AppView({
             <Typography variant="h3">{appName}</Typography>
             <Chip label={categoryLabel} />
             <Chip
-              color={details.installed ? (hasError || hasConflict ? 'error' : isRunning ? 'info' : details.updateAvailable ? 'warning' : 'success') : 'default'}
-              label={details.installed ? (isRunning ? t.actions.running : hasConflict ? t.actions.conflict : hasError ? t.actions.error : details.updateAvailable && details.latestVersion ? t.appView.updateAvailable(details.latestVersion) : t.actions.installed) : t.actions.available}
+              color={isInstalling ? 'warning' : details.installed ? (hasError || hasConflict ? 'error' : isRunning ? 'info' : details.updateAvailable ? 'warning' : 'success') : 'default'}
+              label={isInstalling ? t.actions.installing : details.installed ? (isRunning ? t.actions.running : hasConflict ? t.actions.conflict : hasError ? t.actions.error : details.updateAvailable && details.latestVersion ? t.appView.updateAvailable(details.latestVersion) : t.actions.installed) : t.actions.available}
             />
           </Stack>
           <Stack direction="row" spacing={1} alignItems="center">
@@ -887,6 +971,19 @@ export function AppView({
       </Stack>
 
       {actions}
+
+      {isInstalling && installProgress ? (
+        <Stack spacing={0.75} sx={{ maxWidth: 520 }}>
+          <LinearProgress
+            variant={typeof installProgress.progress === 'number' ? 'determinate' : 'indeterminate'}
+            value={Math.min(Math.max(installProgress.progress ?? 0, 0), 100)}
+            sx={{ height: 6, borderRadius: 999 }}
+          />
+          <Typography variant="body2" color="text.secondary">
+            {installProgress.userMessage}
+          </Typography>
+        </Stack>
+      ) : null}
 
       <Box sx={{ borderBottom: '1px solid', borderColor: 'divider' }}>
         <Tabs

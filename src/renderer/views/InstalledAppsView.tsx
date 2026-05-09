@@ -1,5 +1,5 @@
 import { Button, Stack, Typography } from '@mui/material';
-import type { AppSummary } from '@shared/types';
+import type { AppSummary, InstallAppResult } from '@shared/types';
 import type { AppDictionary } from '@renderer/i18n';
 import { AppCard } from '@renderer/components/AppCard';
 import { AppsGrid } from '@renderer/components/AppsGrid';
@@ -19,6 +19,7 @@ interface InstalledAppsViewProps {
   onDetails: (appId: string) => void;
   onDelete: (appId: string) => void;
   onGoCatalog: () => void;
+  installProgressByApp: Record<string, InstallAppResult>;
 }
 
 export function InstalledAppsView({
@@ -36,6 +37,7 @@ export function InstalledAppsView({
   onDetails,
   onDelete,
   onGoCatalog,
+  installProgressByApp,
 }: InstalledAppsViewProps) {
   if (apps.length === 0) {
     return (
@@ -59,6 +61,7 @@ export function InstalledAppsView({
       <AppsGrid>
         {apps.map((app) => {
           const meta = getAppMeta(app.id);
+          const installProgress = installProgressByApp[app.id];
           const isRunning = app.status === 'running';
           const isInstalling = app.status === 'installing';
           const isError = app.status === 'error';
@@ -109,6 +112,7 @@ export function InstalledAppsView({
               primaryActionLabel={isConflict ? t.actions.resolveWithForger : primaryActionLabel}
               primaryDisabled={isInstalling}
               primaryLoading={isOpening}
+              installProgress={installProgress}
               onPrimaryAction={() => {
                 if (isConflict) {
                   onResolveConflict(app.id);

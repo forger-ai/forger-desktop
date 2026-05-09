@@ -41,6 +41,8 @@ export interface AppPromptTemplate {
   arguments?: AppPromptTemplateArgument[];
   acceptedFileTypes?: string[];
   prompt: string;
+  model?: string;
+  reasoningEffort?: CodexReasoningEffort;
 }
 
 export interface AppAgent {
@@ -48,6 +50,8 @@ export interface AppAgent {
   title: string;
   description?: string;
   initialPrompt: string;
+  model?: string;
+  reasoningEffort?: CodexReasoningEffort;
   legacy?: boolean;
 }
 
@@ -64,6 +68,7 @@ export interface AppPromptTemplateArgument {
 }
 
 export type AppPromptReviewKind = 'promptTemplate' | 'agent';
+export type AppPromptSettingSource = 'override' | 'manifest' | 'global';
 
 export interface AppPromptValidationResult {
   valid: boolean;
@@ -80,7 +85,15 @@ export interface AppPromptReviewItem {
   description?: string;
   originalPrompt: string;
   prompt: string;
+  originalModel?: string;
+  originalReasoningEffort?: CodexReasoningEffort;
+  model: string;
+  reasoningEffort: CodexReasoningEffort;
   overridePrompt?: string;
+  overrideModel?: string;
+  overrideReasoningEffort?: CodexReasoningEffort;
+  modelSource: AppPromptSettingSource;
+  reasoningEffortSource: AppPromptSettingSource;
   edited: boolean;
   overrideInvalid: boolean;
   updatedAt?: string;
@@ -92,6 +105,8 @@ export interface AppPromptReviewInput {
   kind: AppPromptReviewKind;
   id: string;
   prompt: string;
+  model?: string | null;
+  reasoningEffort?: CodexReasoningEffort | null;
 }
 
 export interface AppPromptRestoreInput {
@@ -219,6 +234,15 @@ export interface Settings {
   userEmail: string;
   plan: string;
   safeMode: boolean;
+  codexDefaults: {
+    model: string;
+    reasoningEffort: CodexReasoningEffort;
+  };
+}
+
+export interface UpdateCodexDefaultsInput {
+  model: string;
+  reasoningEffort: CodexReasoningEffort;
 }
 
 export type MemoryScope = 'global' | 'app';
@@ -365,6 +389,7 @@ export interface InstallAppResult extends FailureDiagnosticFields {
   success: boolean;
   phase: InstallPhase;
   userMessage: string;
+  progress?: number;
 }
 
 export interface BasicActionResult extends FailureDiagnosticFields {
@@ -666,6 +691,7 @@ export interface ToolMutationResult {
 
 export interface ConfigureOfficialToolInput {
   toolId: string;
+  locale?: string;
 }
 
 export interface CallOfficialToolInput {
@@ -1121,6 +1147,7 @@ export interface AppCodexConversation {
 export interface AppCodexConversationCreateInput {
   title?: string;
   agentId?: string;
+  locale?: string;
   metadata?: Record<string, string | number | boolean | null>;
 }
 
@@ -1136,6 +1163,7 @@ export interface AppCodexConversationSendMessageInput {
   context?: string;
   model?: string;
   reasoningEffort?: CodexReasoningEffort;
+  locale?: string;
   attachments?: AppCodexConversationAttachment[];
 }
 
@@ -1253,8 +1281,8 @@ export interface WindowControlState {
 export interface ForgerDesktopApi {
   listInstalledApps: () => Promise<AppSummary[]>;
   listCatalogApps: () => Promise<CatalogApp[]>;
-  installApp: (appId: string) => Promise<InstallAppResult>;
-  updateApp: (appId: string) => Promise<InstallAppResult>;
+  installApp: (appId: string, locale?: string) => Promise<InstallAppResult>;
+  updateApp: (appId: string, locale?: string) => Promise<InstallAppResult>;
   listBackups: (appId?: string) => Promise<AppBackupSummary[]>;
   createBackup: (input: CreateAppBackupInput) => Promise<CreateAppBackupResult>;
   deleteBackup: (input: DeleteAppBackupInput) => Promise<BasicActionResult>;
@@ -1287,6 +1315,7 @@ export interface ForgerDesktopApi {
   onInstallProgress: (listener: (event: { appId: string; progress: InstallAppResult }) => void) => () => void;
   onRuntimeStatusChanged: (listener: (event: RuntimeStatus) => void) => () => void;
   getSettings: () => Promise<Settings>;
+  updateCodexDefaults: (input: UpdateCodexDefaultsInput) => Promise<Settings>;
   getDesktopUpdateState: () => Promise<DesktopUpdateState>;
   checkDesktopUpdates: () => Promise<DesktopUpdateState>;
   downloadDesktopUpdate: () => Promise<DesktopUpdateState>;
@@ -1296,6 +1325,7 @@ export interface ForgerDesktopApi {
   registerForgerAccount: (input: ForgerAccountRegisterInput) => Promise<ForgerAccountSession & { success: boolean; userMessage?: string; technicalCode?: string }>;
   loginForgerAccount: (input: ForgerAccountLoginInput) => Promise<ForgerAccountSession & { success: boolean; userMessage?: string; technicalCode?: string }>;
   logoutForgerAccount: () => Promise<ForgerAccountSession & { success: boolean }>;
+  onForgerAccountUpdated: (listener: (event: ForgerAccountSession & { userMessage?: string; technicalCode?: string }) => void) => () => void;
   getCloudDevices: () => Promise<CloudDevicesState>;
   generateDevicePairingCode: () => Promise<CloudDevicesState & { success: boolean }>;
   submitAppRating: (input: SubmitAppRatingInput) => Promise<{ success: boolean; rating?: AppRatingSummary; userMessage?: string; technicalCode?: string }>;
@@ -1311,13 +1341,13 @@ export interface ForgerDesktopApi {
   listAgentTools: () => Promise<AgentToolPackageDefinition[]>;
   getAgentToolSettings: () => Promise<AgentToolSettings>;
   updateAgentToolApproval: (input: UpdateAgentToolApprovalInput) => Promise<AgentToolSettings>;
-  listOfficialTools: () => Promise<OfficialToolsState>;
-  refreshOfficialTools: () => Promise<OfficialToolsState>;
-  activateOfficialTool: (toolId: string) => Promise<ToolMutationResult>;
+  listOfficialTools: (locale?: string) => Promise<OfficialToolsState>;
+  refreshOfficialTools: (locale?: string) => Promise<OfficialToolsState>;
+  activateOfficialTool: (toolId: string, locale?: string) => Promise<ToolMutationResult>;
   configureOfficialTool: (input: ConfigureOfficialToolInput) => Promise<ToolMutationResult>;
-  deactivateOfficialTool: (toolId: string) => Promise<ToolMutationResult>;
-  getAppToolsInstallGate: (appId: string) => Promise<AppToolsInstallGate | null>;
-  setAppToolGrant: (input: SetAppToolGrantInput) => Promise<AppToolsInstallGate | null>;
+  deactivateOfficialTool: (toolId: string, locale?: string) => Promise<ToolMutationResult>;
+  getAppToolsInstallGate: (appId: string, locale?: string) => Promise<AppToolsInstallGate | null>;
+  setAppToolGrant: (input: SetAppToolGrantInput, locale?: string) => Promise<AppToolsInstallGate | null>;
   memoryList: (input?: MemoryListInput) => Promise<MemoryEntry[]>;
   memoryCreate: (input: MemoryCreateInput) => Promise<MemoryEntry>;
   memoryUpdate: (input: MemoryUpdateInput) => Promise<MemoryEntry>;

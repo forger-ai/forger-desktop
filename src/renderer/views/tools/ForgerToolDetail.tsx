@@ -32,7 +32,7 @@ export const ForgerToolDetail = ({
 }) => (
   <Stack spacing={1.5}>
     <Button variant="text" size="small" startIcon={<ArrowBackRounded />} onClick={onBack} sx={{ alignSelf: 'flex-start' }}>
-      Tools
+      {t.sections.tools.title}
     </Button>
     <Paper variant="outlined" sx={{ p: 2, borderRadius: 1 }}>
       <Stack direction="row" spacing={2} alignItems="center">
@@ -40,7 +40,7 @@ export const ForgerToolDetail = ({
         <Stack spacing={0.5}>
           <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
             <Typography variant="h6">{title}</Typography>
-            <Chip size="small" color="default" label="Built in" />
+            <Chip size="small" color="default" label={t.sections.tools.builtIn} />
           </Stack>
           <Typography variant="body2" color="text.secondary">{description}</Typography>
         </Stack>

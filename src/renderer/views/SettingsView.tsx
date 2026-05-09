@@ -40,6 +40,9 @@ import type {
   MemoryKind,
   MemoryScope,
   MemoryUpdateInput,
+  CodexModelOption,
+  CodexReasoningEffort,
+  Settings,
 } from '@shared/types';
 import type { AppDictionary, Locale } from '@renderer/i18n';
 import type { ThemePreference } from '@renderer/theme/appTheme';
@@ -58,6 +61,10 @@ interface SettingsViewProps {
   chatBotPicture: ChatBotPicture;
   chatBotPictureOptions: Array<{ value: ChatBotPicture; label: string; src: string }>;
   onChatBotPictureChange: (picture: ChatBotPicture) => void;
+  modelOptions: CodexModelOption[];
+  reasoningOptions: { label: string; value: CodexReasoningEffort }[];
+  codexDefaults: Settings['codexDefaults'];
+  onCodexDefaultsChange: (defaults: Settings['codexDefaults']) => void;
   onOpenCodexConfig: () => void;
   onReinstallCodex: () => void;
   desktopUpdateState: DesktopUpdateState;
@@ -102,6 +109,10 @@ export function SettingsView({
   chatBotPicture,
   chatBotPictureOptions,
   onChatBotPictureChange,
+  modelOptions,
+  reasoningOptions,
+  codexDefaults,
+  onCodexDefaultsChange,
   onOpenCodexConfig,
   onReinstallCodex,
   desktopUpdateState,
@@ -212,6 +223,53 @@ export function SettingsView({
             <Typography variant="caption" color="text.secondary">
               {t.settings.codexReinstallHint}
             </Typography>
+            <Divider />
+            <Stack spacing={1}>
+              <Stack spacing={0.25}>
+                <Typography variant="subtitle2">{t.settings.codexDefaultsTitle}</Typography>
+                <Typography variant="body2" color="text.secondary">{t.settings.codexDefaultsDescription}</Typography>
+              </Stack>
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+                <FormControl size="small" fullWidth>
+                  <InputLabel>{t.settings.codexDefaultModel}</InputLabel>
+                  <Select
+                    label={t.settings.codexDefaultModel}
+                    value={codexDefaults.model}
+                    onChange={(event) =>
+                      onCodexDefaultsChange({
+                        ...codexDefaults,
+                        model: event.target.value,
+                      })
+                    }
+                  >
+                    {modelOptions.map((option) => (
+                      <MenuItem value={option.realModelName} key={option.realModelName}>
+                        {option.displayModelName}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+                <FormControl size="small" fullWidth>
+                  <InputLabel>{t.settings.codexDefaultThinking}</InputLabel>
+                  <Select
+                    label={t.settings.codexDefaultThinking}
+                    value={codexDefaults.reasoningEffort}
+                    onChange={(event) =>
+                      onCodexDefaultsChange({
+                        ...codexDefaults,
+                        reasoningEffort: event.target.value as CodexReasoningEffort,
+                      })
+                    }
+                  >
+                    {reasoningOptions.map((option) => (
+                      <MenuItem value={option.value} key={option.value}>
+                        {option.label}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Stack>
+            </Stack>
             <Stack spacing={0.35} sx={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>
               <Typography variant="caption" color="text.secondary">
                 {t.settings.codexCliPathLabel}: {codexAuthStatus.codexCliPath ?? '-'}

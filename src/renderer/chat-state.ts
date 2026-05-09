@@ -55,10 +55,10 @@ export const makeConversationId = () =>
     ? crypto.randomUUID()
     : `conv-${Date.now()}`;
 
-export const summarizeConversationTitle = (prompt: string): string => {
+export const summarizeConversationTitle = (prompt: string, fallback = 'New conversation'): string => {
   const compact = prompt.replace(/\s+/g, ' ').trim();
   if (!compact) {
-    return 'Conversacion nueva';
+    return fallback;
   }
   return compact.length <= 56 ? compact : `${compact.slice(0, 56)}...`;
 };

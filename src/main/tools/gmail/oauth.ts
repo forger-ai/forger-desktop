@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import http from 'node:http';
 import type { Server } from 'node:http';
 import type { InternalToolContext } from '../types';
+import { getSharedCopy } from '../../../shared/i18n';
 import {
   GMAIL_REFRESH_TOKEN_SECRET,
   GMAIL_SCOPES,
@@ -35,7 +36,7 @@ const createPkcePair = (): { verifier: string; challenge: string } => {
 const getClientId = async (context: InternalToolContext): Promise<string> => {
   if (!context.isForgerAccountAuthenticated()) {
     throw new GmailOAuthError(
-      'Inicia sesion en Forger antes de conectar Gmail.',
+      getSharedCopy(context.locale).tools.gmailForgerAccountRequired,
       'forger_account_required',
     );
   }
@@ -71,7 +72,7 @@ const exchangeCode = async (input: {
 }): Promise<GoogleTokenResponse> => {
   if (!input.context.isForgerAccountAuthenticated()) {
     throw new GmailOAuthError(
-      'Inicia sesion en Forger antes de conectar Gmail.',
+      getSharedCopy(input.context.locale).tools.gmailForgerAccountRequired,
       'forger_account_required',
     );
   }
@@ -94,7 +95,7 @@ const exchangeCode = async (input: {
 export const refreshGmailAccessToken = async (context: InternalToolContext): Promise<string> => {
   if (!context.isForgerAccountAuthenticated()) {
     throw new GmailOAuthError(
-      'Inicia sesion en Forger para usar Gmail.',
+      getSharedCopy(context.locale).tools.gmailForgerAccountRequired,
       'forger_account_required',
     );
   }
@@ -233,6 +234,7 @@ const appendOAuthLog = (context: InternalToolContext, event: string, payload?: R
 };
 
 export const runGmailOAuthFlow = async (context: InternalToolContext): Promise<void> => {
+  const copy = getSharedCopy(context.locale).gmailOAuth;
   const clientId = await getClientId(context);
   const state = base64Url(randomBytes(32));
   const pkce = createPkcePair();
@@ -248,23 +250,23 @@ export const runGmailOAuthFlow = async (context: InternalToolContext): Promise<v
       void (async () => {
         const requestUrl = new URL(request.url ?? '/', redirectUri || 'http://127.0.0.1');
         if (requestUrl.pathname !== CALLBACK_PATH) {
-          sendHtml(response, 404, 'Forger', 'Esta pagina no pertenece al flujo de Gmail.');
+          sendHtml(response, 404, 'Forger', copy.notFoundBody);
           return;
         }
         appendOAuthLog(context, 'callback_received');
 
         if (requestUrl.searchParams.get('state') !== state) {
           appendOAuthLog(context, 'state_mismatch');
-          sendHtml(response, 400, 'No pudimos conectar Gmail', 'La respuesta de Google no coincide con la solicitud original.');
-          throw new GmailOAuthError('La respuesta de Google no coincide con la solicitud original.', 'gmail_oauth_state_mismatch');
+          sendHtml(response, 400, copy.errorTitle, copy.stateMismatch);
+          throw new GmailOAuthError(copy.stateMismatch, 'gmail_oauth_state_mismatch');
         }
 
         const oauthError = requestUrl.searchParams.get('error');
         if (oauthError) {
           appendOAuthLog(context, 'google_error', { error: oauthError });
-          sendHtml(response, 400, 'No pudimos conectar Gmail', 'Google cancelo o rechazo la autorizacion.');
+          sendHtml(response, 400, copy.errorTitle, copy.googleRejected);
           throw new GmailOAuthError(
-            oauthError === 'access_denied' ? 'La autorizacion de Gmail fue cancelada.' : 'Google rechazo la autorizacion de Gmail.',
+            oauthError === 'access_denied' ? copy.accessDenied : copy.googleError,
             oauthError === 'access_denied' ? 'gmail_oauth_access_denied' : 'gmail_oauth_google_error',
           );
         }
@@ -272,8 +274,8 @@ export const runGmailOAuthFlow = async (context: InternalToolContext): Promise<v
         const code = requestUrl.searchParams.get('code');
         if (!code) {
           appendOAuthLog(context, 'code_missing');
-          sendHtml(response, 400, 'No pudimos conectar Gmail', 'Google no devolvio un codigo de autorizacion.');
-          throw new GmailOAuthError('Google no devolvio un codigo de autorizacion.', 'gmail_oauth_code_missing');
+          sendHtml(response, 400, copy.errorTitle, copy.codeMissing);
+          throw new GmailOAuthError(copy.codeMissing, 'gmail_oauth_code_missing');
         }
         appendOAuthLog(context, 'code_received');
 
@@ -286,19 +288,19 @@ export const runGmailOAuthFlow = async (context: InternalToolContext): Promise<v
         });
         if (!token.refresh_token) {
           appendOAuthLog(context, 'refresh_token_missing');
-          sendHtml(response, 400, 'No pudimos conectar Gmail', 'Google no devolvio permiso para mantener la conexion.');
-          throw new GmailOAuthError('Google no devolvio permiso para mantener la conexion.', 'gmail_oauth_refresh_token_missing');
+          sendHtml(response, 400, copy.errorTitle, copy.refreshTokenMissing);
+          throw new GmailOAuthError(copy.refreshTokenMissing, 'gmail_oauth_refresh_token_missing');
         }
 
         const saved = await context.secretsStore.setToolSecret(GMAIL_TOOL_ID, GMAIL_REFRESH_TOKEN_SECRET, token.refresh_token);
         if (!saved.success) {
           appendOAuthLog(context, 'secret_save_failed', { technicalCode: saved.technicalCode });
-          sendHtml(response, 500, 'No pudimos conectar Gmail', saved.userMessage);
+          sendHtml(response, 500, copy.errorTitle, saved.userMessage);
           throw new GmailOAuthError(saved.technicalCode ?? 'gmail_oauth_secret_save_failed', saved.technicalCode ?? 'gmail_oauth_secret_save_failed');
         }
 
         appendOAuthLog(context, 'refresh_token_saved');
-        sendHtml(response, 200, 'Gmail conectado', 'Puedes volver a Forger.');
+        sendHtml(response, 200, copy.successTitle, copy.successBody);
         settled = true;
         resolve();
       })().catch((error) => {
@@ -306,8 +308,8 @@ export const runGmailOAuthFlow = async (context: InternalToolContext): Promise<v
           sendHtml(
             response,
             500,
-            'No pudimos conectar Gmail',
-            error instanceof Error ? error.message : 'Forger no pudo completar OAuth con Gmail.',
+            copy.errorTitle,
+            error instanceof Error ? error.message : copy.fallbackError,
           );
         } else if (!response.writableEnded) {
           response.end();
@@ -330,7 +332,7 @@ export const runGmailOAuthFlow = async (context: InternalToolContext): Promise<v
     server.listen(0, '127.0.0.1', () => {
       const address = server?.address();
       if (!address || typeof address !== 'object') {
-        const error = new GmailOAuthError('No pudimos abrir el servidor local de OAuth.', 'gmail_oauth_port_unavailable');
+        const error = new GmailOAuthError(copy.portUnavailable, 'gmail_oauth_port_unavailable');
         appendOAuthLog(context, 'port_unavailable');
         listeningReject?.(error);
         if (!settled) {
@@ -351,7 +353,7 @@ export const runGmailOAuthFlow = async (context: InternalToolContext): Promise<v
 
   let timeoutId: NodeJS.Timeout | null = null;
   const timeout = new Promise<never>((_resolve, reject) => {
-    timeoutId = setTimeout(() => reject(new GmailOAuthError('La conexion con Gmail expiro.', 'gmail_oauth_timeout')), OAUTH_TIMEOUT_MS);
+    timeoutId = setTimeout(() => reject(new GmailOAuthError(copy.timeout, 'gmail_oauth_timeout')), OAUTH_TIMEOUT_MS);
   });
 
   try {
