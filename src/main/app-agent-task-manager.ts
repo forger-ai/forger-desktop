@@ -10,6 +10,8 @@ import type {
   AppCodexTaskSummary,
   AppPromptTemplate,
   AppPromptTemplateArgument,
+  AgentRuntime,
+  ClaudeEffort,
   CodexReasoningEffort,
   PermissionRequest,
 } from '../shared/types';
@@ -19,14 +21,17 @@ import {
   removeIsolatedCodexHome,
 } from './codex-run-isolation';
 
-interface AppCodexTaskManagerOptions {
+interface AppAgentTaskManagerOptions {
   privateAppsRoot: string;
   metadataRoot: string;
   codexHome: string;
+  getAgentRuntime: (requested?: Partial<AgentRuntime>) => Promise<AgentRuntime>;
   getCodexCliPath: () => Promise<string | null>;
+  getClaudeCliPath: () => Promise<string | null>;
   getCodexPathEntries: (appId?: string) => Promise<string[]>;
   getCodexEnvironment: (appId?: string) => Promise<Record<string, string>>;
   getCodexAuthenticated: () => Promise<boolean>;
+  getClaudeAuthenticated: () => Promise<boolean>;
   resolvePromptTemplates: (appId: string) => Promise<AppPromptTemplate[]>;
   createForgerMcpSession?: (runId: string, appId: string) => { url: string; token: string } | null;
   releaseForgerMcpSession?: (token: string) => void;
@@ -81,11 +86,11 @@ const CODEX_TASK_TIMEOUT_MS = 600_000;
 const DEFAULT_MODEL = 'gpt-5.4';
 const DEFAULT_REASONING: CodexReasoningEffort = 'medium';
 
-export class AppCodexTaskManager {
+export class AppAgentTaskManager {
   private readonly tasks = new Map<string, InternalTask>();
   private readonly pendingPermissions = new Map<string, PendingPermission>();
 
-  public constructor(private readonly options: AppCodexTaskManagerOptions) {}
+  public constructor(private readonly options: AppAgentTaskManagerOptions) {}
 
   public async start(appId: string, input: AppCodexTaskStartInput): Promise<AppCodexTaskSummary> {
     const templateId = sanitizeId(input.templateId);
@@ -223,12 +228,25 @@ export class AppCodexTaskManager {
     input: AppCodexTaskStartInput,
   ): Promise<void> {
     const locale = normalizeTaskLocale(input.locale);
-    if (!(await this.options.getCodexAuthenticated())) {
+    const runtime = await this.options.getAgentRuntime(template.runtime ?? {
+      provider: template.model || template.reasoningEffort ? 'codex' : undefined,
+      model: template.model,
+      effort: template.reasoningEffort,
+    });
+    if (runtime.provider === 'claude') {
+      if (!(await this.options.getClaudeAuthenticated())) {
+        throw new Error('claude_auth_missing');
+      }
+    } else if (!(await this.options.getCodexAuthenticated())) {
       throw new Error('codex_auth_missing');
     }
-    const codexCliPath = await this.options.getCodexCliPath();
-    if (!codexCliPath) {
+    const codexCliPath = runtime.provider === 'codex' ? await this.options.getCodexCliPath() : null;
+    const claudeCliPath = runtime.provider === 'claude' ? await this.options.getClaudeCliPath() : null;
+    if (runtime.provider === 'codex' && !codexCliPath) {
       throw new Error('codex_cli_missing');
+    }
+    if (runtime.provider === 'claude' && !claudeCliPath) {
+      throw new Error('claude_cli_missing');
     }
 
     task.status = 'running';
@@ -239,6 +257,7 @@ export class AppCodexTaskManager {
 
     let forgerMcpSession: { url: string; token: string } | null = null;
     const temporaryCodexHomes: string[] = [];
+    let claudeMcpConfigPath: string | null = null;
     try {
       const preparedArguments = await this.preparePromptArguments(task, template, input);
       const imageArgs = preparedArguments.files
@@ -249,10 +268,12 @@ export class AppCodexTaskManager {
       const forgerToolsContext = await (this.options.buildForgerToolsContext?.(task.appId) ?? Promise.resolve(''));
       const promptContext = [memoryContext, forgerToolsContext].filter((section) => section.trim()).join('\n\n');
       const prompt = promptContext ? `${promptContext}\n\n${renderedPrompt}` : renderedPrompt;
-      const command = await resolveCodexCommand(codexCliPath, await this.options.getCodexPathEntries(task.appId));
+      const command = runtime.provider === 'codex'
+        ? await resolveCodexCommand(codexCliPath as string, await this.options.getCodexPathEntries(task.appId))
+        : { command: claudeCliPath as string, prefixArgs: [], pathEntries: await this.options.getCodexPathEntries(task.appId) };
       const environment = await this.options.getCodexEnvironment(task.appId);
-      const model = template.model?.trim() || DEFAULT_MODEL;
-      const reasoningEffort = template.reasoningEffort ?? DEFAULT_REASONING;
+      const model = runtime.model || DEFAULT_MODEL;
+      const reasoningEffort = runtime.provider === 'codex' ? runtime.effort as CodexReasoningEffort : DEFAULT_REASONING;
       const appMcpServers = await (this.options.listenAppMcps?.([task.appId], task.runId) ?? Promise.resolve([]));
       forgerMcpSession = this.options.createForgerMcpSession?.(task.runId, task.appId) ?? null;
       const mcpServers = [
@@ -269,38 +290,57 @@ export class AppCodexTaskManager {
       ];
       const mcpArgs = buildMcpArgs(mcpServers);
       const topLevelArgs = mcpServers.length > 0 ? ['--ask-for-approval', 'never'] : [];
-      const args = [
-        ...command.prefixArgs,
-        ...topLevelArgs,
-        'exec',
-        '--json',
-        '--model',
-        model,
-        '--config',
-        `reasoning_effort="${reasoningEffort}"`,
-        '--full-auto',
-        '--sandbox',
-        'workspace-write',
-        '--skip-git-repo-check',
-        ...mcpArgs,
-        '-C',
-        task.appRoot,
-        ...imageArgs,
-        '--',
-        '-',
-      ];
+      claudeMcpConfigPath = runtime.provider === 'claude'
+        ? await writeClaudeMcpConfig(task.appRoot, mcpServers)
+        : null;
+      const args = runtime.provider === 'claude'
+        ? [
+            '-p',
+            prompt,
+            '--output-format',
+            'stream-json',
+            '--verbose',
+            '--model',
+            model,
+            '--effort',
+            runtime.effort as ClaudeEffort,
+            '--permission-mode',
+            'bypassPermissions',
+            ...(claudeMcpConfigPath ? ['--mcp-config', claudeMcpConfigPath] : []),
+            ...imageArgs,
+          ]
+        : [
+            ...command.prefixArgs,
+            ...topLevelArgs,
+            'exec',
+            '--json',
+            '--model',
+            model,
+            '--config',
+            `reasoning_effort="${reasoningEffort}"`,
+            '--full-auto',
+            '--sandbox',
+            'workspace-write',
+            '--skip-git-repo-check',
+            ...mcpArgs,
+            '-C',
+            task.appRoot,
+            ...imageArgs,
+            '--',
+            '-',
+          ];
       const baseEnv = {
         FORGER_ALLOWED_ROOTS: task.appRoot,
         ...Object.fromEntries(mcpServers.map((server) => [server.tokenEnvVar, server.token])),
         ...environment,
         PATH: [...command.pathEntries, process.env.PATH ?? ''].filter(Boolean).join(path.delimiter),
       };
-      const runCodex = async (codexHome: string): Promise<CommandResult> =>
+      const runAgent = async (codexHome: string): Promise<CommandResult> =>
         await runCommandCapture(command.command, args, {
           cwd: task.appRoot,
           env: {
             ...baseEnv,
-            CODEX_HOME: codexHome,
+            ...(runtime.provider === 'codex' ? { CODEX_HOME: codexHome } : {}),
           },
           timeoutMs: CODEX_TASK_TIMEOUT_MS,
           onChild: (child) => {
@@ -314,22 +354,26 @@ export class AppCodexTaskManager {
             void appendTranscript(task.transcriptPath, 'stderr', text);
             this.updateProgressFromOutput(task, text, locale);
           },
-          stdinText: prompt,
+          stdinText: runtime.provider === 'codex' ? prompt : undefined,
         });
 
-      await appendTranscript(task.transcriptPath, 'meta', `${command.command} exec --json -C ${task.appRoot}`);
-      const isolatedCodexHome = await createIsolatedCodexHome(this.options.codexHome, {
-        prefix: 'forger-task-codex-home',
-        trustedRoots: [task.appRoot],
-      });
-      temporaryCodexHomes.push(isolatedCodexHome);
+      await appendTranscript(task.transcriptPath, 'meta', `${runtime.provider} ${command.command}`);
+      const isolatedCodexHome = runtime.provider === 'codex'
+        ? await createIsolatedCodexHome(this.options.codexHome, {
+            prefix: 'forger-task-codex-home',
+            trustedRoots: [task.appRoot],
+          })
+        : '';
+      if (isolatedCodexHome) {
+        temporaryCodexHomes.push(isolatedCodexHome);
+      }
       const allowedMcpServers = new Set(mcpServers.map((server) => server.name));
-      let result = await runCodex(isolatedCodexHome);
+      let result = await runAgent(isolatedCodexHome);
       assertAllowedMcpServers(result.stdout, result.stderr, allowedMcpServers);
       if ((task as AppCodexTaskSummary).status === 'canceled') {
         return;
       }
-      if (result.code !== 0 && isStaleCodexThreadError(result.stderr || result.stdout)) {
+      if (runtime.provider === 'codex' && result.code !== 0 && isStaleCodexThreadError(result.stderr || result.stdout)) {
         const recoveredText = parseCodexJsonl(result.stdout, '');
         if (recoveredText) {
           result = { code: 0, stdout: result.stdout, stderr: result.stderr };
@@ -343,7 +387,7 @@ export class AppCodexTaskManager {
           });
           temporaryCodexHomes.push(cleanCodexHome);
           await appendTranscript(task.transcriptPath, 'meta', 'Retrying Codex task with a clean temporary Codex home.');
-          result = await runCodex(cleanCodexHome);
+          result = await runAgent(cleanCodexHome);
           assertAllowedMcpServers(result.stdout, result.stderr, allowedMcpServers);
           if ((task as AppCodexTaskSummary).status === 'canceled') {
             return;
@@ -354,7 +398,9 @@ export class AppCodexTaskManager {
         throw new Error((result.stderr || result.stdout || 'codex_exec_failed').trim());
       }
 
-      const parsed = parseCodexJsonl(result.stdout, result.stderr);
+      const parsed = runtime.provider === 'claude'
+        ? parseClaudeJsonl(result.stdout, result.stderr)
+        : parseCodexJsonl(result.stdout, result.stderr);
       task.status = 'completed';
       task.updatedAt = new Date().toISOString();
       task.resultText = parsed || taskMessage(locale, 'completed');
@@ -367,6 +413,7 @@ export class AppCodexTaskManager {
       }
       this.options.releaseAppMcps?.(task.runId);
       await this.cleanupTaskInputs(task).catch(() => undefined);
+      await fs.rm(claudeMcpConfigPath ?? '', { force: true }).catch(() => undefined);
       await Promise.all(temporaryCodexHomes.map((dirPath) => removeIsolatedCodexHome(dirPath)));
     }
   }
@@ -805,6 +852,74 @@ const parseCodexJsonl = (stdout: string, stderr: string): string => {
     }
   }
   return assistantText.trim();
+};
+
+const parseClaudeJsonl = (stdout: string, stderr: string): string => {
+  const raw = stdout.trim() || stderr.trim();
+  let assistantText = '';
+  for (const line of raw.split('\n').map((entry) => entry.trim()).filter(Boolean)) {
+    try {
+      const parsed = JSON.parse(line) as Record<string, unknown>;
+      if (typeof parsed.result === 'string') {
+        assistantText = parsed.result.trim();
+        continue;
+      }
+      const text = extractClaudeText(parsed);
+      if (text) {
+        assistantText = text.trim();
+      }
+    } catch {
+      assistantText = assistantText ? `${assistantText}\n${line}` : line;
+    }
+  }
+  return assistantText.trim();
+};
+
+const extractClaudeText = (entry: Record<string, unknown>): string => {
+  if (typeof entry.text === 'string') {
+    return entry.text;
+  }
+  const message = entry.message;
+  if (!message || typeof message !== 'object') {
+    return '';
+  }
+  const content = (message as Record<string, unknown>).content;
+  if (typeof content === 'string') {
+    return content;
+  }
+  if (!Array.isArray(content)) {
+    return '';
+  }
+  return content
+    .map((item) => {
+      if (!item || typeof item !== 'object') {
+        return '';
+      }
+      const text = (item as Record<string, unknown>).text;
+      return typeof text === 'string' ? text : '';
+    })
+    .filter(Boolean)
+    .join('\n');
+};
+
+const writeClaudeMcpConfig = async (
+  appRoot: string,
+  mcpServers: CodexMcpServerConfig[],
+): Promise<string> => {
+  const configPath = path.join(appRoot, '.forger', 'tmp', `claude-mcp-${randomUUID()}.json`);
+  const mcpServersConfig = Object.fromEntries(mcpServers.map((server) => [
+    server.name,
+    {
+      type: 'http',
+      url: server.url,
+      headers: {
+        Authorization: `Bearer \${${server.tokenEnvVar}}`,
+      },
+    },
+  ]));
+  await fs.mkdir(path.dirname(configPath), { recursive: true });
+  await fs.writeFile(configPath, JSON.stringify({ mcpServers: mcpServersConfig }, null, 2), 'utf8');
+  return configPath;
 };
 
 const isStaleCodexThreadError = (text: string): boolean =>

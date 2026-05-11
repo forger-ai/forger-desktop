@@ -7,6 +7,10 @@ interface IsolatedCodexHomeOptions {
   trustedRoots: string[];
 }
 
+interface PersistentCodexHomeOptions {
+  trustedRoots: string[];
+}
+
 export class DisallowedMcpServerError extends Error {
   public constructor(public readonly serverName: string) {
     super(`disallowed_mcp_server:${serverName}`);
@@ -19,6 +23,20 @@ export const createIsolatedCodexHome = async (
   options: IsolatedCodexHomeOptions,
 ): Promise<string> => {
   const targetCodexHome = await fs.mkdtemp(path.join(os.tmpdir(), `${options.prefix}-`));
+  await copyCodexHomeFile(path.join(sourceCodexHome, 'auth.json'), path.join(targetCodexHome, 'auth.json'));
+  await fs.writeFile(path.join(targetCodexHome, 'config.toml'), buildIsolatedConfig(options.trustedRoots), {
+    encoding: 'utf8',
+    mode: 0o600,
+  });
+  return targetCodexHome;
+};
+
+export const preparePersistentIsolatedCodexHome = async (
+  sourceCodexHome: string,
+  targetCodexHome: string,
+  options: PersistentCodexHomeOptions,
+): Promise<string> => {
+  await fs.mkdir(targetCodexHome, { recursive: true, mode: 0o700 });
   await copyCodexHomeFile(path.join(sourceCodexHome, 'auth.json'), path.join(targetCodexHome, 'auth.json'));
   await fs.writeFile(path.join(targetCodexHome, 'config.toml'), buildIsolatedConfig(options.trustedRoots), {
     encoding: 'utf8',

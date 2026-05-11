@@ -1,4 +1,5 @@
 import type { ChatMessage } from '@renderer/views/ChatView';
+import type { AgentEffort, AgentProvider } from '@shared/types';
 
 export const CHAT_STORAGE_KEY = 'forger-chat-conversations-v1';
 
@@ -7,6 +8,11 @@ export interface ChatConversation {
   appId: string;
   title: string;
   threadId: string | null;
+  runtime?: {
+    provider: AgentProvider;
+    model: string;
+    effort: AgentEffort;
+  };
   createdAt: string;
   updatedAt: string;
   messages: ChatMessage[];
@@ -24,6 +30,23 @@ const emptyPersistedChatState = (): PersistedChatState => ({
   lastActiveConversationId: null,
 });
 
+const migrateLegacyConversationRuntime = (conversation: ChatConversation): ChatConversation => {
+  if (conversation.runtime) {
+    return conversation;
+  }
+  if (!conversation.threadId && conversation.messages.length === 0) {
+    return conversation;
+  }
+  return {
+    ...conversation,
+    runtime: {
+      provider: 'codex',
+      model: 'gpt-5.4',
+      effort: 'medium',
+    },
+  };
+};
+
 export const readPersistedChatState = (): PersistedChatState => {
   if (typeof window === 'undefined') {
     return emptyPersistedChatState();
@@ -37,7 +60,9 @@ export const readPersistedChatState = (): PersistedChatState => {
   try {
     const parsed = JSON.parse(raw) as Partial<PersistedChatState>;
     return {
-      conversations: Array.isArray(parsed.conversations) ? parsed.conversations : [],
+      conversations: Array.isArray(parsed.conversations)
+        ? parsed.conversations.map(migrateLegacyConversationRuntime)
+        : [],
       activeConversationByApp:
         parsed.activeConversationByApp && typeof parsed.activeConversationByApp === 'object'
           ? (parsed.activeConversationByApp as Record<string, string>)

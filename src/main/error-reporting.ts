@@ -116,10 +116,10 @@ export class DesktopErrorReporter {
     }
     const record = this.options.getInstalledApp(event.task.appId);
     this.request({
-      source: 'codex',
-      operation: 'app.codex-task',
-      message: event.task.error || 'App Codex task failed.',
-      technicalCode: 'app_codex_task_failed',
+      source: 'agent',
+      operation: 'app.agent-task',
+      message: event.task.error || 'App agent task failed.',
+      technicalCode: 'app_agent_task_failed',
       appId: event.task.appId,
       appVersion: record?.version,
       details: {
@@ -137,10 +137,10 @@ export class DesktopErrorReporter {
     }
     const record = this.options.getInstalledApp(event.conversation.appId);
     this.request({
-      source: 'codex',
-      operation: 'app.codex-conversation',
-      message: event.run.error || 'App Codex conversation failed.',
-      technicalCode: 'app_codex_conversation_failed',
+      source: 'agent',
+      operation: 'app.agent-conversation',
+      message: event.run.error || 'App agent conversation failed.',
+      technicalCode: 'app_agent_conversation_failed',
       appId: event.conversation.appId,
       appVersion: record?.version,
       details: {
@@ -159,10 +159,10 @@ export class DesktopErrorReporter {
   }): void {
     const record = this.options.getInstalledApp(input.appId);
     this.request({
-      source: 'codex',
-      operation: input.operation,
-      message: errorMessage(input.error, 'App Codex invocation failed.'),
-      technicalCode: input.operation.replace(/\./g, '_'),
+      source: 'agent',
+      operation: input.operation.replace('codex', 'agent'),
+      message: errorMessage(input.error, 'App agent invocation failed.'),
+      technicalCode: input.operation.replace('codex', 'agent').replace(/\./g, '_'),
       appId: input.appId,
       appVersion: record?.version,
       sensitiveDetails: {
@@ -174,7 +174,7 @@ export class DesktopErrorReporter {
   public reportAppMcpStartFailure(input: { appId: string; runId: string; error: unknown }): void {
     const record = this.options.getInstalledApp(input.appId);
     this.request({
-      source: 'codex',
+      source: 'agent',
       operation: 'app.mcp.start',
       message: errorMessage(input.error, 'App MCP server failed to start.'),
       technicalCode: 'app_mcp_start_failed',
@@ -196,7 +196,7 @@ export class DesktopErrorReporter {
     error: unknown;
   }): void {
     this.request({
-      source: 'codex',
+      source: 'agent',
       operation: 'forger-mcp.tools-call',
       message: errorMessage(input.error, 'Forger MCP tool call failed.'),
       technicalCode: 'forger_mcp_tool_call_failed',
@@ -213,7 +213,7 @@ export class DesktopErrorReporter {
 
   public reportForgerMcpHttpFailure(input: { error: unknown; appId?: string; runId?: string }): void {
     this.request({
-      source: 'codex',
+      source: 'agent',
       operation: 'forger-mcp.http',
       message: errorMessage(input.error, 'Forger MCP request failed.'),
       technicalCode: 'forger_mcp_http_failed',
@@ -234,7 +234,7 @@ export class DesktopErrorReporter {
     message?: string;
   }): void {
     this.request({
-      source: 'codex',
+      source: 'agent',
       operation: 'desktop-chat.run',
       message: input.message || input.errorCode || 'Desktop chat run failed.',
       technicalCode: input.errorCode || 'desktop_chat_run_failed',

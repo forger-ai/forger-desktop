@@ -40,7 +40,11 @@ import type {
   AutomationUpsertInput,
   CatalogApp,
   CloudSyncSettings,
+  AgentProvider,
+  AgentEffort,
+  ClaudeEffort,
   CodexAuthStatus,
+  ClaudeAuthStatus,
   CodexReasoningEffort,
   DesktopErrorReportInput,
   DesktopErrorReportPreview,
@@ -63,10 +67,12 @@ import type {
   SharedFileRef,
   SubmitAppFeedbackInput,
   SubmitAppRatingInput,
+  UpdateAgentDefaultsInput,
   UserSecretSummary,
 } from '@shared/types';
 import { AppShell } from '@renderer/components/AppShell';
 import { CodexConfigModal } from '@renderer/components/CodexConfigModal';
+import { ClaudeConfigModal } from '@renderer/components/ClaudeConfigModal';
 import { ForgerCloudModal } from '@renderer/components/ForgerCloudModal';
 import { getDictionary, type Locale } from '@renderer/i18n';
 import { buildAppTheme, resolveThemeMode, type ThemePreference } from '@renderer/theme/appTheme';
@@ -90,12 +96,21 @@ import {
   CODEX_MODEL_STORAGE_KEY,
   CODEX_REASONING_OPTIONS,
   CODEX_REASONING_STORAGE_KEY,
+  AGENT_PROVIDER_OPTIONS,
+  CHAT_AGENT_PROVIDER_STORAGE_KEY,
+  CLAUDE_EFFORT_OPTIONS,
+  CLAUDE_EFFORT_STORAGE_KEY,
+  CLAUDE_MODEL_OPTIONS,
+  CLAUDE_MODEL_STORAGE_KEY,
   LANGUAGE_STORAGE_KEY,
   STARTUP_UPDATE_CHECK_STORAGE_KEY,
   THEME_STORAGE_KEY,
   getStoredChatBotPicture,
   getStoredCodexModel,
   getStoredCodexReasoningEffort,
+  getStoredChatAgentProvider,
+  getStoredClaudeEffort,
+  getStoredClaudeModel,
   getStoredLanguagePreference,
   getStoredThemePreference,
   resolveSystemLocale,
@@ -134,6 +149,18 @@ const initialSettings: Settings = {
     model: 'gpt-5.4',
     reasoningEffort: 'medium',
   },
+  defaultAgentProvider: 'auto',
+  agentDefaults: {
+    codex: {
+      model: 'gpt-5.4',
+      reasoningEffort: 'medium',
+    },
+    claude: {
+      model: 'sonnet',
+      effort: 'medium',
+    },
+  },
+  providerConnections: {},
 };
 
 const initialCodexAuthStatus: CodexAuthStatus = {
@@ -141,6 +168,25 @@ const initialCodexAuthStatus: CodexAuthStatus = {
   authenticated: false,
   authFilePath: '',
   codexHome: '',
+};
+
+const initialClaudeAuthStatus: ClaudeAuthStatus = {
+  installed: false,
+  authenticated: false,
+  source: 'missing',
+};
+
+const resolveChatRuntimeDraft = (
+  provider: AgentProvider,
+  codexModel: string,
+  codexReasoningEffort: CodexReasoningEffort,
+  claudeModel: string,
+  claudeEffort: ClaudeEffort,
+): { provider: AgentProvider; model: string; effort: AgentEffort; reasoningEffort?: CodexReasoningEffort } => {
+  if (provider === 'codex') {
+    return { provider: 'codex', model: codexModel, reasoningEffort: codexReasoningEffort, effort: codexReasoningEffort };
+  }
+  return { provider: 'claude', model: claudeModel, effort: claudeEffort };
 };
 
 const initialForgerAccount: ForgerAccountSession = {
@@ -215,6 +261,7 @@ function App() {
   const [settings, setSettings] = useState<Settings>(initialSettings);
   const [codexAuthBusy, setCodexAuthBusy] = useState(false);
   const [codexAuthStatus, setCodexAuthStatus] = useState<CodexAuthStatus>(initialCodexAuthStatus);
+  const [claudeAuthStatus, setClaudeAuthStatus] = useState<ClaudeAuthStatus>(initialClaudeAuthStatus);
   const [agentToolPackages, setAgentToolPackages] = useState<AgentToolPackageDefinition[]>([]);
   const [agentToolSettings, setAgentToolSettings] = useState<AgentToolSettings>(initialAgentToolSettings);
   const [agentToolBusyId, setAgentToolBusyId] = useState<AgentToolDefinition['id'] | null>(null);
@@ -229,6 +276,8 @@ function App() {
   const [desktopUpdateState, setDesktopUpdateState] = useState<DesktopUpdateState>(initialDesktopUpdateState);
   const [desktopUpdateBusy, setDesktopUpdateBusy] = useState(false);
   const [codexConfigOpen, setCodexConfigOpen] = useState(false);
+  const [claudeConfigOpen, setClaudeConfigOpen] = useState(false);
+  const [agentProviderConfigOpen, setAgentProviderConfigOpen] = useState(false);
   const [errorReportDialog, setErrorReportDialog] = useState<ErrorReportDialogState>({
     open: false,
     report: null,
@@ -250,6 +299,9 @@ function App() {
   const [uploadCategoryPath, setUploadCategoryPath] = useState('');
   const [selectedCodexModel, setSelectedCodexModel] = useState(getStoredCodexModel);
   const [selectedCodexReasoningEffort, setSelectedCodexReasoningEffort] = useState(getStoredCodexReasoningEffort);
+  const [selectedAgentProvider, setSelectedAgentProvider] = useState<AgentProvider | 'auto'>(getStoredChatAgentProvider);
+  const [selectedClaudeModel, setSelectedClaudeModel] = useState(getStoredClaudeModel);
+  const [selectedClaudeEffort, setSelectedClaudeEffort] = useState<ClaudeEffort>(getStoredClaudeEffort);
   const [categoryDialogOpen, setCategoryDialogOpen] = useState(false);
   const [categoryDialogSelectAfterCreate, setCategoryDialogSelectAfterCreate] = useState(false);
   const [categoryDialogName, setCategoryDialogName] = useState('');
@@ -336,6 +388,34 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
     },
     [chatConversations, selectedAppId],
   );
+  const resolvedChatProvider = useMemo<AgentProvider>(() => {
+    if (activeConversation?.runtime) {
+      return activeConversation.runtime.provider;
+    }
+    if (selectedAgentProvider !== 'auto') {
+      return selectedAgentProvider;
+    }
+    if (settings.defaultAgentProvider !== 'auto') {
+      return settings.defaultAgentProvider;
+    }
+    if (claudeAuthStatus.authenticated && !codexAuthStatus.authenticated) {
+      return 'claude';
+    }
+    if (codexAuthStatus.authenticated && !claudeAuthStatus.authenticated) {
+      return 'codex';
+    }
+    const connectedProviders = (Object.entries(settings.providerConnections) as Array<[AgentProvider, string | undefined]>)
+      .filter(([, connectedAt]) => Boolean(connectedAt))
+      .sort(([, left], [, right]) => Date.parse(left ?? '') - Date.parse(right ?? ''));
+    return connectedProviders[0]?.[0] ?? 'codex';
+  }, [
+    activeConversation?.runtime,
+    claudeAuthStatus.authenticated,
+    codexAuthStatus.authenticated,
+    selectedAgentProvider,
+    settings.defaultAgentProvider,
+    settings.providerConnections,
+  ]);
 
   const requestErrorReport = (input: DesktopErrorReportInput) => {
     if (!shouldPromptForErrorReport(input.technicalCode)) {
@@ -446,6 +526,7 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
         settingsResult,
         accountResult,
         codexAuthResult,
+        claudeAuthResult,
         desktopUpdateResult,
         toolsResult,
         officialToolsResult,
@@ -461,6 +542,7 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
         desktopApi.getSettings(),
         desktopApi.getForgerAccount(),
         desktopApi.getCodexAuthStatus(),
+        desktopApi.getClaudeAuthStatus(),
         desktopApi.getDesktopUpdateState(),
         refreshAgentTools(),
         refreshOfficialTools(),
@@ -521,9 +603,19 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
 
       if (codexAuthResult.status === 'fulfilled') {
         setCodexAuthStatus(codexAuthResult.value);
-        if (!codexAuthResult.value.authenticated) {
-          setCodexConfigOpen(true);
-        }
+      }
+
+      if (claudeAuthResult.status === 'fulfilled') {
+        setClaudeAuthStatus(claudeAuthResult.value);
+      }
+
+      if (
+        codexAuthResult.status === 'fulfilled'
+        && claudeAuthResult.status === 'fulfilled'
+        && !codexAuthResult.value.authenticated
+        && !claudeAuthResult.value.authenticated
+      ) {
+        setAgentProviderConfigOpen(true);
       }
 
       if (desktopUpdateResult.status === 'fulfilled') {
@@ -950,6 +1042,24 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
       window.localStorage.setItem(CODEX_REASONING_STORAGE_KEY, selectedCodexReasoningEffort);
     }
   }, [selectedCodexReasoningEffort]);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(CHAT_AGENT_PROVIDER_STORAGE_KEY, selectedAgentProvider);
+    }
+  }, [selectedAgentProvider]);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(CLAUDE_MODEL_STORAGE_KEY, selectedClaudeModel);
+    }
+  }, [selectedClaudeModel]);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(CLAUDE_EFFORT_STORAGE_KEY, selectedClaudeEffort);
+    }
+  }, [selectedClaudeEffort]);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -1493,13 +1603,46 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
     }
   };
 
-  const handleCodexDefaultsChange = async (codexDefaults: Settings['codexDefaults']) => {
-    setSettings((current) => ({ ...current, codexDefaults }));
+  const handleAgentDefaultsChange = async (input: UpdateAgentDefaultsInput) => {
+    setSettings((current) => {
+      const nextDefaultProvider = input.defaultProvider ?? current.defaultAgentProvider;
+      if (!input.provider) {
+        return { ...current, defaultAgentProvider: nextDefaultProvider };
+      }
+      if (input.provider === 'codex') {
+        const nextCodexDefaults = {
+          model: input.model ?? current.agentDefaults.codex.model,
+          reasoningEffort: (input.effort as CodexReasoningEffort | undefined) ?? current.agentDefaults.codex.reasoningEffort,
+        };
+        return {
+          ...current,
+          defaultAgentProvider: nextDefaultProvider,
+          codexDefaults: nextCodexDefaults,
+          agentDefaults: {
+            ...current.agentDefaults,
+            codex: nextCodexDefaults,
+          },
+        };
+      }
+      return {
+        ...current,
+        defaultAgentProvider: nextDefaultProvider,
+        agentDefaults: {
+          ...current.agentDefaults,
+          claude: {
+            model: input.model ?? current.agentDefaults.claude.model,
+            effort: (input.effort as ClaudeEffort | undefined) ?? current.agentDefaults.claude.effort,
+          },
+        },
+      };
+    });
     try {
-      const updated = await getDesktopApi().updateCodexDefaults(codexDefaults);
+      const updated = await getDesktopApi().updateAgentDefaults(input);
       setSettings(updated);
-      setSelectedCodexModel(updated.codexDefaults.model);
-      setSelectedCodexReasoningEffort(updated.codexDefaults.reasoningEffort);
+      setSelectedCodexModel(updated.agentDefaults.codex.model);
+      setSelectedCodexReasoningEffort(updated.agentDefaults.codex.reasoningEffort);
+      setSelectedClaudeModel(updated.agentDefaults.claude.model);
+      setSelectedClaudeEffort(updated.agentDefaults.claude.effort);
       if (selectedAppDetailsId) {
         setSelectedAppDetails(await getDesktopApi().getAppDetails(selectedAppDetailsId));
       }
@@ -1860,22 +2003,33 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
     ];
     const userVisibleContent = trimmed || `Archivos compartidos: ${sharedFileNames.join(', ')}`;
 
-    if ((!trimmed && pendingChatFiles.length === 0 && mentionedChatFileIds.length === 0) || chatRunActive || !codexAuthStatus.authenticated) {
-      if (!codexAuthStatus.authenticated) {
-        setCodexConfigOpen(true);
+    const hasAgentProvider = codexAuthStatus.authenticated || claudeAuthStatus.authenticated;
+    if ((!trimmed && pendingChatFiles.length === 0 && mentionedChatFileIds.length === 0) || chatRunActive || !hasAgentProvider) {
+      if (!hasAgentProvider) {
+        setAgentProviderConfigOpen(true);
       }
       return;
     }
 
     const chatScopeId = selectedAppId ?? FREE_CHAT_APP_ID;
     let targetConversationId = activeConversationId;
+    let createdRuntime: ChatConversation['runtime'] | undefined;
     if (!targetConversationId) {
       const now = new Date().toISOString();
+      const draft = resolveChatRuntimeDraft(
+        resolvedChatProvider,
+        selectedCodexModel,
+        selectedCodexReasoningEffort,
+        selectedClaudeModel,
+        selectedClaudeEffort,
+      );
+      createdRuntime = { provider: draft.provider, model: draft.model, effort: draft.effort };
       const createdConversation: ChatConversation = {
         id: makeConversationId(),
         appId: chatScopeId,
         title: summarizeConversationTitle(userVisibleContent),
         threadId: null,
+        ...(createdRuntime ? { runtime: createdRuntime } : {}),
         createdAt: now,
         updatedAt: now,
         messages: [],
@@ -1887,14 +2041,27 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
     }
 
     const conversationForRun = chatConversations.find((conversation) => conversation.id === targetConversationId);
+    const lockedRuntime = conversationForRun?.runtime ?? createdRuntime;
+    const runtimeDraft = lockedRuntime
+      ? {
+          provider: lockedRuntime.provider,
+          model: lockedRuntime.model,
+          effort: lockedRuntime.effort,
+          ...(lockedRuntime.provider === 'codex' ? { reasoningEffort: lockedRuntime.effort as CodexReasoningEffort } : {}),
+        }
+      : resolveChatRuntimeDraft(
+          resolvedChatProvider,
+          selectedCodexModel,
+          selectedCodexReasoningEffort,
+          selectedClaudeModel,
+          selectedClaudeEffort,
+        );
     setActiveConversationByApp((current) => ({ ...current, [chatScopeId]: targetConversationId as string }));
     setChatRunActive(true);
     activeRunConversationIdRef.current = targetConversationId;
 
     try {
       const desktopApi = getDesktopApi();
-      const modelOption =
-        CODEX_MODEL_OPTIONS.find((option) => option.realModelName === selectedCodexModel) ?? CODEX_MODEL_OPTIONS[0];
       const stagedFilesForCleanup = pendingChatFiles.filter((file) => file.staged);
       const importedFiles = pendingChatFiles.length > 0
         ? await desktopApi.filesImport({
@@ -1953,6 +2120,15 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
             ...conversation,
             title: nextTitle,
             updatedAt: now,
+            runtime: conversation.runtime ?? (
+              runtimeDraft.provider && runtimeDraft.model && runtimeDraft.effort
+                ? {
+                    provider: runtimeDraft.provider,
+                    model: runtimeDraft.model,
+                    effort: runtimeDraft.effort,
+                  }
+                : undefined
+            ),
             messages: [
               ...conversation.messages,
               {
@@ -1971,8 +2147,7 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
         threadId: conversationForRun?.threadId ?? null,
         userLanguage: activeLocale,
         sharedFiles,
-        model: modelOption.realModelName,
-        reasoningEffort: selectedCodexReasoningEffort,
+        ...runtimeDraft,
         conversationId: targetConversationId,
       });
       runConversationIdByRunRef.current.set(startResult.runId, targetConversationId);
@@ -2004,7 +2179,7 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
         }),
       );
       requestErrorReport({
-        source: 'codex',
+        source: 'agent',
         operation: 'chat.start-run',
         message: detail,
         technicalCode: 'chat_start_run_failed',
@@ -2226,6 +2401,12 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
     setCodexAuthStatus(nextStatus);
   };
 
+  const refreshClaudeAuthStatus = async () => {
+    const desktopApi = getDesktopApi();
+    const nextStatus = await desktopApi.getClaudeAuthStatus();
+    setClaudeAuthStatus(nextStatus);
+  };
+
   const handleConnectCodexAuth = async () => {
     setCodexAuthBusy(true);
     try {
@@ -2233,16 +2414,72 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
       const result = await desktopApi.connectCodexAuth();
       setBannerSeverity(result.success ? 'info' : 'error');
       setBannerMessage(result.userMessage);
-      requestErrorReportFromResult('codex', 'connect', result);
+      requestErrorReportFromResult('agent', 'codex-connect', result);
       await refreshCodexAuthStatus();
+      setAgentProviderConfigOpen(false);
     } catch (error) {
       setBannerSeverity('error');
       setBannerMessage(t.settings.codexConnectError);
       requestErrorReport({
-        source: 'codex',
-        operation: 'connect',
+        source: 'agent',
+        operation: 'codex-connect',
         message: error instanceof Error ? error.message : t.settings.codexConnectError,
         technicalCode: 'codex_connect_unhandled_error',
+        sensitiveDetails: { stack: error instanceof Error ? error.stack : undefined },
+      });
+    } finally {
+      setCodexAuthBusy(false);
+    }
+  };
+
+  const handleConnectClaudeAuth = async () => {
+    setCodexAuthBusy(true);
+    try {
+      const result = await getDesktopApi().connectClaudeAuth();
+      setBannerSeverity(result.success ? 'info' : 'error');
+      setBannerMessage(result.userMessage);
+      if (result.status) {
+        setClaudeAuthStatus(result.status);
+      } else {
+        await refreshClaudeAuthStatus();
+      }
+      setAgentProviderConfigOpen(false);
+      requestErrorReportFromResult('agent', 'claude-connect', result);
+    } catch (error) {
+      setBannerSeverity('error');
+      setBannerMessage('No pudimos iniciar la conexion con Claude Code.');
+      requestErrorReport({
+        source: 'agent',
+        operation: 'claude-connect',
+        message: error instanceof Error ? error.message : 'No pudimos iniciar la conexion con Claude Code.',
+        technicalCode: 'claude_connect_unhandled_error',
+        sensitiveDetails: { stack: error instanceof Error ? error.stack : undefined },
+      });
+    } finally {
+      setCodexAuthBusy(false);
+    }
+  };
+
+  const handleReinstallClaude = async () => {
+    setCodexAuthBusy(true);
+    try {
+      const result = await getDesktopApi().reinstallClaude();
+      setBannerSeverity(result.success ? 'success' : 'error');
+      setBannerMessage(result.userMessage);
+      if (result.status) {
+        setClaudeAuthStatus(result.status);
+      } else {
+        await refreshClaudeAuthStatus();
+      }
+      requestErrorReportFromResult('agent', 'claude-reinstall', result);
+    } catch (error) {
+      setBannerSeverity('error');
+      setBannerMessage('No pudimos instalar Claude Code.');
+      requestErrorReport({
+        source: 'agent',
+        operation: 'claude-reinstall',
+        message: error instanceof Error ? error.message : 'No pudimos instalar Claude Code.',
+        technicalCode: 'claude_reinstall_unhandled_error',
         sensitiveDetails: { stack: error instanceof Error ? error.stack : undefined },
       });
     } finally {
@@ -2262,13 +2499,13 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
       } else {
         await refreshCodexAuthStatus();
       }
-      requestErrorReportFromResult('codex', 'reinstall', result);
+      requestErrorReportFromResult('agent', 'codex-reinstall', result);
     } catch (error) {
       setBannerSeverity('error');
       setBannerMessage(t.settings.codexReinstallError);
       requestErrorReport({
-        source: 'codex',
-        operation: 'reinstall',
+        source: 'agent',
+        operation: 'codex-reinstall',
         message: error instanceof Error ? error.message : t.settings.codexReinstallError,
         technicalCode: 'codex_reinstall_unhandled_error',
         sensitiveDetails: { stack: error instanceof Error ? error.stack : undefined },
@@ -2552,18 +2789,29 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
             onRemovePendingFile={handleRemovePendingChatFile}
             onMentionFile={handleMentionFile}
             onRemoveMentionedFile={(fileId) => setMentionedChatFileIds((current) => current.filter((id) => id !== fileId))}
+            providerOptions={AGENT_PROVIDER_OPTIONS}
+            selectedProvider={activeConversation?.runtime?.provider ?? selectedAgentProvider}
+            resolvedProviderForAuto={resolvedChatProvider}
+            onSelectProvider={setSelectedAgentProvider}
+            providerLocked={Boolean(activeConversation?.runtime || activeConversation?.threadId || activeConversation?.messages.length)}
             modelOptions={CODEX_MODEL_OPTIONS}
-            selectedModel={selectedCodexModel}
+            selectedModel={activeConversation?.runtime?.provider === 'codex' ? activeConversation.runtime.model : selectedCodexModel}
             onSelectModel={setSelectedCodexModel}
             reasoningOptions={CODEX_REASONING_OPTIONS}
-            selectedReasoningEffort={selectedCodexReasoningEffort}
+            selectedReasoningEffort={activeConversation?.runtime?.provider === 'codex' ? activeConversation.runtime.effort as CodexReasoningEffort : selectedCodexReasoningEffort}
             onSelectReasoningEffort={setSelectedCodexReasoningEffort}
+            claudeModelOptions={CLAUDE_MODEL_OPTIONS}
+            selectedClaudeModel={activeConversation?.runtime?.provider === 'claude' ? activeConversation.runtime.model : selectedClaudeModel}
+            onSelectClaudeModel={setSelectedClaudeModel}
+            claudeEffortOptions={CLAUDE_EFFORT_OPTIONS}
+            selectedClaudeEffort={activeConversation?.runtime?.provider === 'claude' ? activeConversation.runtime.effort as ClaudeEffort : selectedClaudeEffort}
+            onSelectClaudeEffort={setSelectedClaudeEffort}
             onOpenCodexUsageDashboard={() => void getDesktopApi().openCodexUsageDashboard()}
             assistantAvatarSrc={chatBotPictureSrc}
             isSending={chatRunActive}
             progressLines={chatProgressLines}
-            codexConfigured={codexAuthStatus.authenticated}
-            onConfigureCodex={() => setCodexConfigOpen(true)}
+            codexConfigured={codexAuthStatus.authenticated || claudeAuthStatus.authenticated}
+            onConfigureCodex={() => setAgentProviderConfigOpen(true)}
             openingAppIds={openingAppIds}
             onOpenApp={(appId) => void handleOpen(appId)}
             onRespondPermission={handleRespondPermission}
@@ -2680,6 +2928,7 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
           <SettingsView
             codexAuthBusy={codexAuthBusy}
             codexAuthStatus={codexAuthStatus}
+            claudeAuthStatus={claudeAuthStatus}
             t={t}
             themePreference={themePreference}
             onThemeChange={setThemePreference}
@@ -2692,10 +2941,16 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
             onChatBotPictureChange={setChatBotPicture}
             modelOptions={CODEX_MODEL_OPTIONS}
             reasoningOptions={CODEX_REASONING_OPTIONS}
-            codexDefaults={settings.codexDefaults}
-            onCodexDefaultsChange={(defaults) => void handleCodexDefaultsChange(defaults)}
+            providerOptions={AGENT_PROVIDER_OPTIONS}
+            claudeModelOptions={CLAUDE_MODEL_OPTIONS}
+            claudeEffortOptions={CLAUDE_EFFORT_OPTIONS}
+            defaultAgentProvider={settings.defaultAgentProvider}
+            agentDefaults={settings.agentDefaults}
+            onAgentDefaultsChange={(input) => void handleAgentDefaultsChange(input)}
             onOpenCodexConfig={() => setCodexConfigOpen(true)}
             onReinstallCodex={() => void handleReinstallCodex()}
+            onOpenClaudeConfig={() => setClaudeConfigOpen(true)}
+            onReinstallClaude={() => void handleReinstallClaude()}
             desktopUpdateState={desktopUpdateState}
             desktopUpdateBusy={desktopUpdateBusy}
             onCheckDesktopUpdates={() => void runDesktopUpdateAction(() => getDesktopApi().checkDesktopUpdates())}
@@ -2797,6 +3052,52 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
         onConnect={handleConnectCodexAuth}
         onRefresh={refreshCodexAuthStatus}
       />
+
+      <ClaudeConfigModal
+        open={claudeConfigOpen}
+        status={claudeAuthStatus}
+        busy={codexAuthBusy}
+        t={t}
+        onClose={() => setClaudeConfigOpen(false)}
+        onConnect={handleConnectClaudeAuth}
+        onRefresh={refreshClaudeAuthStatus}
+        onReinstall={handleReinstallClaude}
+      />
+
+      <Dialog open={agentProviderConfigOpen} onClose={() => setAgentProviderConfigOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Conectar agente</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2}>
+            <Typography color="text.secondary">
+              Para conversar con tus apps o pedir cambios, conecta una cuenta de ChatGPT/Codex o Claude Code.
+            </Typography>
+            <Alert severity="warning">
+              Claude Code puede usar la sesion local del usuario del computador. Si ya usas Claude Code fuera de Forger, Forger puede detectar esa sesion.
+            </Alert>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setAgentProviderConfigOpen(false)}>{t.actions.close}</Button>
+          <Button
+            variant="outlined"
+            onClick={() => {
+              setAgentProviderConfigOpen(false);
+              setClaudeConfigOpen(true);
+            }}
+          >
+            Conectar Claude
+          </Button>
+          <Button
+            variant="contained"
+            onClick={() => {
+              setAgentProviderConfigOpen(false);
+              setCodexConfigOpen(true);
+            }}
+          >
+            Conectar ChatGPT
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <Dialog open={categoryDialogOpen} onClose={() => setCategoryDialogOpen(false)} maxWidth="xs" fullWidth>
         <DialogTitle>{t.sections.files.createCategory}</DialogTitle>

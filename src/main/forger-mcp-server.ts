@@ -407,6 +407,20 @@ export class ForgerMcpServer {
         userMessage: copy.memoryApprovalNotRequired,
       };
     }
+    if (session.caller === 'automation') {
+      await this.options.appendInstallLog('agent_tool:approval_skipped', {
+        appId: session.appId,
+        runId: session.runId,
+        toolId: tool.id,
+        reason: 'automation_non_interactive',
+      });
+      return {
+        approved: true,
+        required: false,
+        status: 'not_required',
+        userMessage: copy.approvalNotRequired,
+      };
+    }
     if (!this.options.getToolSettings().approvals[tool.id]) {
       await this.options.appendInstallLog('agent_tool:approval_skipped', {
         appId: session.appId,
