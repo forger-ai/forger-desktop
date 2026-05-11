@@ -26,7 +26,7 @@ interface CatalogViewProps {
   installProgressByApp: Record<string, InstallAppResult>;
 }
 
-const filters: Array<'all' | AppCategory> = ['all', 'finanzas', 'hogar', 'salud', 'productividad'];
+const filters: Array<'all' | AppCategory> = ['all', 'finanzas', 'hogar', 'salud', 'productividad', 'developer_tools'];
 
 export function CatalogView({
   apps,

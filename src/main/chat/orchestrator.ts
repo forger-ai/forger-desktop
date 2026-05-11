@@ -14,6 +14,10 @@ import type {
   ChatStartRunInput,
   ChatUndoInput,
   ChatUndoResult,
+  AgentEffort,
+  AgentProvider,
+  AgentRuntime,
+  ClaudeEffort,
   CodexReasoningEffort,
   PermissionRequest,
   PreviewDiffFile,
@@ -33,11 +37,14 @@ interface ChatOrchestratorOptions {
   metadataRoot: string;
   legacyMetadataRoot?: string;
   codexHome: string;
+  getAgentRuntime: (requested?: Partial<AgentRuntime>) => Promise<AgentRuntime>;
   agentContractVersion: number;
   getCodexCliPath: () => Promise<string | null>;
+  getClaudeCliPath: () => Promise<string | null>;
   getCodexPathEntries: (appId?: string) => Promise<string[]>;
   getCodexEnvironment: (appId?: string) => Promise<Record<string, string>>;
   getCodexAuthenticated: () => Promise<boolean>;
+  getClaudeAuthenticated: () => Promise<boolean>;
   createForgerMcpSession?: (runId: string, appId: string, locale?: string) => { url: string; token: string } | null;
   releaseForgerMcpSession?: (token: string) => void;
   buildMemoryContext?: (appIds: string[]) => Promise<string>;
@@ -87,6 +94,8 @@ interface InternalChatRun extends ChatRun {
   runLogPath: string;
   model: string;
   reasoningEffort: CodexReasoningEffort;
+  provider: AgentProvider;
+  effort: AgentEffort;
   taskType: ForgerTaskType;
   locale: Locale;
 }
@@ -435,6 +444,76 @@ class SandboxRunner {
     };
     throw error;
   }
+
+  public async runClaude(params: {
+    claudeCliPath: string;
+    pathEntries: string[];
+    environment: Record<string, string>;
+    mcpServers?: CodexMcpServerConfig[];
+    workingDir: string;
+    prompt: string;
+    model: string;
+    effort: ClaudeEffort;
+    timeoutMs: number;
+    onChild: (child: ChildProcessWithoutNullStreams) => void;
+    onOutput?: (stream: 'stdout' | 'stderr' | 'meta', text: string) => void;
+    threadId?: string;
+  }): Promise<CodexRunResult> {
+    const mcpServers = params.mcpServers ?? [];
+    const mcpConfigPath = await writeClaudeMcpConfig(params.workingDir, mcpServers);
+    const allowedMcpServers = new Set(mcpServers.map((server) => server.name));
+    const args = [
+      '-p',
+      params.prompt,
+      '--output-format',
+      'stream-json',
+      '--verbose',
+      '--model',
+      params.model,
+      '--effort',
+      params.effort,
+      '--permission-mode',
+      'bypassPermissions',
+      ...(mcpServers.length > 0 ? ['--mcp-config', mcpConfigPath] : []),
+      ...(params.threadId ? ['--resume', params.threadId] : []),
+    ];
+    params.onOutput?.(
+      'meta',
+      [
+        `Claude Code workingDir=${params.workingDir}`,
+        `allowedMcpServers=${mcpServers.map((server) => server.name).join(',') || '(none)'}`,
+        `model=${params.model}`,
+        `effort=${params.effort}`,
+      ].join(' '),
+    );
+    try {
+      const result = await runCommandCapture(params.claudeCliPath, args, {
+        cwd: params.workingDir,
+        env: {
+          FORGER_ALLOWED_ROOTS: params.workingDir,
+          ...Object.fromEntries(mcpServers.map((server) => [server.tokenEnvVar, server.token])),
+          ...params.environment,
+          PATH: [path.dirname(params.claudeCliPath), ...params.pathEntries, process.env.PATH ?? ''].filter(Boolean).join(path.delimiter),
+        },
+        inactivityTimeoutMs: params.timeoutMs,
+        onChild: params.onChild,
+        onStdout: (text) => params.onOutput?.('stdout', text),
+        onStderr: (text) => params.onOutput?.('stderr', text),
+      });
+      assertAllowedMcpServers(result.stdout, result.stderr, allowedMcpServers);
+      if (result.code !== 0) {
+        throw new Error((result.stderr || result.stdout || 'claude_exec_failed').trim());
+      }
+      const parsed = parseClaudeJsonl(result.stdout, result.stderr);
+      return {
+        assistantText: parsed.assistantText || 'Listo. ¿Qué te gustaría hacer ahora en esta app?',
+        threadId: parsed.threadId ?? params.threadId,
+        toolEvents: parsed.toolEvents,
+      };
+    } finally {
+      await fs.rm(mcpConfigPath, { force: true }).catch(() => undefined);
+    }
+  }
 }
 
 export class ChatOrchestrator {
@@ -476,6 +555,11 @@ export class ChatOrchestrator {
     const taskType = isFreeChat ? 'resolver_dudas' : classifyForgerTask(input.prompt);
     const baseHead = taskType === 'actualizar_aplicacion' ? await getGitHead(appRoot) : null;
     const locale = normalizeLocale(input.userLanguage);
+    const runtime = await this.options.getAgentRuntime({
+      provider: input.provider,
+      model: input.model,
+      effort: input.effort ?? input.reasoningEffort,
+    });
 
     const run: InternalChatRun = {
       runId,
@@ -497,8 +581,10 @@ export class ChatOrchestrator {
       sharedRoots,
       runLogPath: getRunLogPath(this.options.metadataRoot, runId),
       progressLog: [],
-      model: input.model?.trim() || 'gpt-5.4',
-      reasoningEffort: input.reasoningEffort ?? 'medium',
+      model: runtime.model,
+      reasoningEffort: runtime.provider === 'codex' ? runtime.effort as CodexReasoningEffort : 'medium',
+      provider: runtime.provider,
+      effort: runtime.effort,
       taskType,
       locale,
       conversationId: typeof input.conversationId === 'string' ? input.conversationId : undefined,
@@ -786,13 +872,21 @@ export class ChatOrchestrator {
         throw createChatError('app_not_installed', 'Target app is not installed');
       }
 
-      if (!(await this.options.getCodexAuthenticated())) {
+      if (run.provider === 'claude') {
+        if (!(await this.options.getClaudeAuthenticated())) {
+          throw createChatError('auth_missing', 'Claude Code authentication missing');
+        }
+      } else if (!(await this.options.getCodexAuthenticated())) {
         throw createChatError('auth_missing', 'Codex authentication missing');
       }
 
-      const codexCliPath = await this.options.getCodexCliPath();
-      if (!codexCliPath) {
+      const codexCliPath = run.provider === 'codex' ? await this.options.getCodexCliPath() : null;
+      const claudeCliPath = run.provider === 'claude' ? await this.options.getClaudeCliPath() : null;
+      if (run.provider === 'codex' && !codexCliPath) {
         throw createChatError('capability_unavailable', 'Codex CLI not installed');
+      }
+      if (run.provider === 'claude' && !claudeCliPath) {
+        throw createChatError('capability_unavailable', 'Claude Code CLI not installed');
       }
       const codexPathEntries = await this.options.getCodexPathEntries(run.appId);
       const codexEnvironment = await this.options.getCodexEnvironment(run.appId);
@@ -838,20 +932,18 @@ export class ChatOrchestrator {
         : '';
       const prompt = memoryContext ? `${memoryContext}\n\n${run.prompt}` : run.prompt;
 
-      const assistantReply = await this.sandboxRunner.runCodex({
-        codexCliPath,
+      const commonRunOptions = {
         pathEntries: codexPathEntries,
         environment: codexEnvironment,
         mcpServers,
         workingDir: this.options.forgerHomeRoot,
         prompt,
         model: run.model,
-        reasoningEffort: run.reasoningEffort,
         timeoutMs: 300_000,
         onChild: () => {
           // hook reserved for cancellation propagation
         },
-        onOutput: (stream, text) => {
+        onOutput: (stream: 'stdout' | 'stderr' | 'meta', text: string) => {
           void appendRunLog(run.runLogPath, stream, text);
           const steps = toProgressMessages(stream, text);
           if (steps.length > 0) {
@@ -861,7 +953,18 @@ export class ChatOrchestrator {
           }
         },
         threadId: resolvedThreadId,
-      });
+      };
+      const assistantReply = run.provider === 'claude'
+        ? await this.sandboxRunner.runClaude({
+            ...commonRunOptions,
+            claudeCliPath: claudeCliPath as string,
+            effort: run.effort as ClaudeEffort,
+          })
+        : await this.sandboxRunner.runCodex({
+            ...commonRunOptions,
+            codexCliPath: codexCliPath as string,
+            reasoningEffort: run.reasoningEffort,
+          });
 
       run.threadId = assistantReply.threadId ?? run.threadId ?? this.threadsByApp.get(run.appId)?.threadId ?? null;
 
@@ -1695,6 +1798,97 @@ const parseCodexJsonl = (
     usageDelta,
     toolEvents,
   };
+};
+
+const parseClaudeJsonl = (
+  stdout: string,
+  stderr: string,
+): {
+  assistantText: string;
+  threadId?: string;
+  toolEvents: number;
+} => {
+  const raw = stdout.trim() || stderr.trim();
+  if (!raw) {
+    return { assistantText: '', toolEvents: 0 };
+  }
+  const lines = raw.split('\n').map((line) => line.trim()).filter(Boolean);
+  let assistantText = '';
+  let threadId: string | undefined;
+  let toolEvents = 0;
+  for (const line of lines) {
+    let entry: Record<string, unknown>;
+    try {
+      entry = JSON.parse(line) as Record<string, unknown>;
+    } catch {
+      assistantText = [assistantText, line].filter(Boolean).join('\n');
+      continue;
+    }
+    const type = typeof entry.type === 'string' ? entry.type : '';
+    if (!threadId) {
+      const sessionId = entry.session_id ?? entry.sessionId ?? entry.conversation_id;
+      if (typeof sessionId === 'string' && sessionId.trim()) {
+        threadId = sessionId.trim();
+      }
+    }
+    if (type.includes('tool')) {
+      toolEvents += 1;
+    }
+    const text = extractClaudeText(entry);
+    if (text) {
+      assistantText = text;
+    }
+  }
+  return { assistantText: assistantText.trim(), threadId, toolEvents };
+};
+
+const extractClaudeText = (entry: Record<string, unknown>): string => {
+  if (typeof entry.result === 'string') {
+    return entry.result;
+  }
+  if (typeof entry.text === 'string') {
+    return entry.text;
+  }
+  const message = entry.message;
+  if (message && typeof message === 'object') {
+    const content = (message as Record<string, unknown>).content;
+    if (typeof content === 'string') {
+      return content;
+    }
+    if (Array.isArray(content)) {
+      return content
+        .map((item) => {
+          if (!item || typeof item !== 'object') {
+            return '';
+          }
+          const record = item as Record<string, unknown>;
+          return typeof record.text === 'string' ? record.text : '';
+        })
+        .filter(Boolean)
+        .join('\n');
+    }
+  }
+  return '';
+};
+
+const writeClaudeMcpConfig = async (
+  workingDir: string,
+  mcpServers: CodexMcpServerConfig[],
+): Promise<string> => {
+  const configPath = path.join(workingDir, '.forger', 'tmp', `claude-mcp-${randomUUID()}.json`);
+  const mcpServersConfig = Object.fromEntries(mcpServers.map((server) => [
+    server.name,
+    {
+      type: 'http',
+      url: server.url,
+      headers: {
+        Authorization: `Bearer \${${server.tokenEnvVar}}`,
+      },
+    },
+  ]));
+  await fs.mkdir(path.dirname(configPath), { recursive: true });
+  await fs.writeFile(configPath, JSON.stringify({ mcpServers: mcpServersConfig }, null, 2), 'utf8');
+  return configPath;
 };
 
 const toNumber = (value: unknown): number => {

@@ -42,8 +42,8 @@ export const es = {
       introBody:
         'Pregunta cómo se usan, analiza y modifica los datos que almacenas en ellas, e incluso pide modificaciones para que se adapten a ti.',
       codexMissingBody:
-        'Configura Codex para conversar con tus apps y pedir cambios. No es obligatorio para abrir apps instaladas.',
-      configureCodex: 'Configurar Codex',
+        'Configura un agente para conversar con tus apps y pedir cambios. No es obligatorio para abrir apps instaladas.',
+      configureCodex: 'Configurar agente',
       quotaOpenDashboard: 'Ver uso y créditos',
       activeAppLabel: 'Conversando con:',
       inactiveApp: 'Chat libre',
@@ -77,10 +77,10 @@ export const es = {
       permissionDenied: 'Rechazado',
       permissionApprove: 'Aprobar',
       permissionDeny: 'Rechazar',
-      codexThinking: 'Codex está pensando...',
+      codexThinking: 'El agente está pensando...',
       newConversationTitle: 'Conversación nueva',
       sendInProgress: 'Todavía estoy procesando tu mensaje anterior. Espera la respuesta o cancela esa solicitud.',
-      sendFailed: (detail: string) => `No pude enviar tu mensaje a Codex. ${detail}`,
+      sendFailed: (detail: string) => `No pude enviar tu mensaje al agente. ${detail}`,
     },
     settings: {
       title: 'Ajustes',
@@ -344,7 +344,7 @@ export const es = {
     },
     automations: {
       title: 'Automatizaciones',
-      subtitle: 'Programa tareas locales de Forger con Codex y contexto explícito de tus apps.',
+      subtitle: 'Programa tareas locales de Forger con el agente y contexto explícito de tus apps.',
       empty: 'Todavía no hay automatizaciones.',
       newAutomation: 'Nueva automatización',
       edit: 'Editar',
@@ -540,7 +540,7 @@ export const es = {
     installedVersion: 'Versión instalada',
     availableVersion: 'Versión disponible',
     capabilitiesTitle: 'Acceso de Forger',
-    promptTemplatesTitle: 'Prompts de Codex que esta app puede usar',
+    promptTemplatesTitle: 'Prompts de agente que esta app puede usar',
     agentsTitle: 'Agents de esta app',
     promptPreviewLabel: 'Prompt exacto',
     promptsTitle: 'Prompts',
@@ -808,12 +808,14 @@ export const es = {
     hogar: 'Hogar',
     salud: 'Salud',
     productividad: 'Productividad',
+    developer_tools: 'Desarrollo',
   },
   appCategories: {
     finanzas: 'Finanzas',
     hogar: 'Hogar',
     salud: 'Salud',
     productividad: 'Productividad',
+    developer_tools: 'Desarrollo',
   } satisfies Record<AppCategory, string>,
   apps: {
     'finance-os': {

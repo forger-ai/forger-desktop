@@ -134,7 +134,7 @@ export const sharedCopy = {
     appConversation: {
       defaultTitle: 'Conversación',
       agentThinking: 'El agente está pensando.',
-      usingTools: 'El agente está usando herramientas de Studio.',
+      usingTools: 'El agente está usando herramientas de la app.',
       done: 'Listo.',
     },
     gmailOAuth: {
@@ -289,7 +289,7 @@ export const sharedCopy = {
     appConversation: {
       defaultTitle: 'Conversation',
       agentThinking: 'The agent is thinking.',
-      usingTools: 'The agent is using Studio tools.',
+      usingTools: 'The agent is using app tools.',
       done: 'Done.',
     },
     gmailOAuth: {

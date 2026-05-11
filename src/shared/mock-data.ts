@@ -49,4 +49,16 @@ export const settingsSeed: Settings = {
     model: 'gpt-5.4',
     reasoningEffort: 'medium',
   },
+  defaultAgentProvider: 'auto',
+  agentDefaults: {
+    codex: {
+      model: 'gpt-5.4',
+      reasoningEffort: 'medium',
+    },
+    claude: {
+      model: 'sonnet',
+      effort: 'medium',
+    },
+  },
+  providerConnections: {},
 };

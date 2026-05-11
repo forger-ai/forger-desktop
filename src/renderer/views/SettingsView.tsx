@@ -33,6 +33,8 @@ import LaunchRounded from '@mui/icons-material/LaunchRounded';
 import RestartAltRounded from '@mui/icons-material/RestartAltRounded';
 import type {
   AppSummary,
+  ClaudeAuthStatus,
+  ClaudeEffort,
   CodexAuthStatus,
   DesktopUpdateState,
   MemoryCreateInput,
@@ -42,7 +44,9 @@ import type {
   MemoryUpdateInput,
   CodexModelOption,
   CodexReasoningEffort,
+  AgentProvider,
   Settings,
+  UpdateAgentDefaultsInput,
 } from '@shared/types';
 import type { AppDictionary, Locale } from '@renderer/i18n';
 import type { ThemePreference } from '@renderer/theme/appTheme';
@@ -51,6 +55,7 @@ import type { ChatBotPicture, LanguagePreference } from '@renderer/preferences';
 interface SettingsViewProps {
   codexAuthBusy: boolean;
   codexAuthStatus: CodexAuthStatus;
+  claudeAuthStatus: ClaudeAuthStatus;
   t: AppDictionary;
   themePreference: ThemePreference;
   onThemeChange: (theme: ThemePreference) => void;
@@ -63,10 +68,16 @@ interface SettingsViewProps {
   onChatBotPictureChange: (picture: ChatBotPicture) => void;
   modelOptions: CodexModelOption[];
   reasoningOptions: { label: string; value: CodexReasoningEffort }[];
-  codexDefaults: Settings['codexDefaults'];
-  onCodexDefaultsChange: (defaults: Settings['codexDefaults']) => void;
+  providerOptions: Array<{ label: string; value: AgentProvider | 'auto' }>;
+  claudeModelOptions: Array<{ displayModelName: string; realModelName: string }>;
+  claudeEffortOptions: { label: string; value: ClaudeEffort }[];
+  defaultAgentProvider: Settings['defaultAgentProvider'];
+  agentDefaults: Settings['agentDefaults'];
+  onAgentDefaultsChange: (input: UpdateAgentDefaultsInput) => void;
   onOpenCodexConfig: () => void;
   onReinstallCodex: () => void;
+  onOpenClaudeConfig: () => void;
+  onReinstallClaude: () => void;
   desktopUpdateState: DesktopUpdateState;
   desktopUpdateBusy: boolean;
   onCheckDesktopUpdates: () => void;
@@ -99,6 +110,7 @@ const MEMORY_KINDS: MemoryKind[] = ['preference', 'profile', 'workflow', 'constr
 export function SettingsView({
   codexAuthBusy,
   codexAuthStatus,
+  claudeAuthStatus,
   t,
   themePreference,
   onThemeChange,
@@ -111,10 +123,16 @@ export function SettingsView({
   onChatBotPictureChange,
   modelOptions,
   reasoningOptions,
-  codexDefaults,
-  onCodexDefaultsChange,
+  providerOptions,
+  claudeModelOptions,
+  claudeEffortOptions,
+  defaultAgentProvider,
+  agentDefaults,
+  onAgentDefaultsChange,
   onOpenCodexConfig,
   onReinstallCodex,
+  onOpenClaudeConfig,
+  onReinstallClaude,
   desktopUpdateState,
   desktopUpdateBusy,
   onCheckDesktopUpdates,
@@ -224,21 +242,93 @@ export function SettingsView({
               {t.settings.codexReinstallHint}
             </Typography>
             <Divider />
+            <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
+              <Stack spacing={0.5}>
+                <Typography variant="h6">Claude Code</Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Conecta Claude Code para usar agentes desde Forger.
+                </Typography>
+              </Stack>
+              <Chip
+                size="small"
+                color={claudeAuthStatus.installed && claudeAuthStatus.authenticated ? 'success' : 'default'}
+                label={claudeAuthStatus.authenticated ? t.settings.codexConnected : t.settings.codexDisconnected}
+              />
+            </Stack>
+            <Stack direction="row" spacing={1}>
+              <Button
+                variant={claudeAuthStatus.authenticated ? 'outlined' : 'contained'}
+                size="small"
+                disabled={codexAuthBusy}
+                onClick={onOpenClaudeConfig}
+              >
+                {claudeAuthStatus.authenticated ? t.settings.codexConfiguredAction : 'Conectar Claude'}
+              </Button>
+              <Button
+                variant="outlined"
+                color="warning"
+                size="small"
+                startIcon={<RestartAltRounded />}
+                disabled={codexAuthBusy}
+                onClick={onReinstallClaude}
+              >
+                Instalar/Reinstalar Claude
+              </Button>
+            </Stack>
+            <Typography variant="caption" color="text.secondary">
+              Claude Code puede usar una sesion local del sistema, especialmente en macOS Keychain.
+            </Typography>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+              <Chip
+                size="small"
+                label={
+                  claudeAuthStatus.source === 'managed'
+                    ? 'Instalacion administrada por Forger'
+                    : claudeAuthStatus.source === 'system'
+                      ? 'Instalacion existente en este equipo'
+                      : 'Claude Code no instalado'
+                }
+              />
+              {claudeAuthStatus.version ? <Chip size="small" label={`Version ${claudeAuthStatus.version}`} /> : null}
+            </Stack>
+            <Divider />
             <Stack spacing={1}>
               <Stack spacing={0.25}>
-                <Typography variant="subtitle2">{t.settings.codexDefaultsTitle}</Typography>
-                <Typography variant="body2" color="text.secondary">{t.settings.codexDefaultsDescription}</Typography>
+                <Typography variant="subtitle2">Defaults de agentes</Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Elige el proveedor por defecto y los modelos que se usan al crear nuevos chats, prompts o automatizaciones sin override.
+                </Typography>
               </Stack>
               <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
                 <FormControl size="small" fullWidth>
-                  <InputLabel>{t.settings.codexDefaultModel}</InputLabel>
+                  <InputLabel>Proveedor</InputLabel>
                   <Select
-                    label={t.settings.codexDefaultModel}
-                    value={codexDefaults.model}
+                    label="Proveedor"
+                    value={defaultAgentProvider}
                     onChange={(event) =>
-                      onCodexDefaultsChange({
-                        ...codexDefaults,
+                      onAgentDefaultsChange({
+                        defaultProvider: event.target.value as AgentProvider | 'auto',
+                      })
+                    }
+                  >
+                    {providerOptions.map((option) => (
+                      <MenuItem value={option.value} key={option.value}>
+                        {option.label}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+                <FormControl size="small" fullWidth>
+                  <InputLabel>Modelo Codex</InputLabel>
+                  <Select
+                    label="Modelo Codex"
+                    value={agentDefaults.codex.model}
+                    onChange={(event) =>
+                      onAgentDefaultsChange({
+                        defaultProvider: defaultAgentProvider,
+                        provider: 'codex',
                         model: event.target.value,
+                        effort: agentDefaults.codex.reasoningEffort,
                       })
                     }
                   >
@@ -250,18 +340,64 @@ export function SettingsView({
                   </Select>
                 </FormControl>
                 <FormControl size="small" fullWidth>
-                  <InputLabel>{t.settings.codexDefaultThinking}</InputLabel>
+                  <InputLabel>Razonamiento Codex</InputLabel>
                   <Select
-                    label={t.settings.codexDefaultThinking}
-                    value={codexDefaults.reasoningEffort}
+                    label="Razonamiento Codex"
+                    value={agentDefaults.codex.reasoningEffort}
                     onChange={(event) =>
-                      onCodexDefaultsChange({
-                        ...codexDefaults,
-                        reasoningEffort: event.target.value as CodexReasoningEffort,
+                      onAgentDefaultsChange({
+                        defaultProvider: defaultAgentProvider,
+                        provider: 'codex',
+                        model: agentDefaults.codex.model,
+                        effort: event.target.value as CodexReasoningEffort,
                       })
                     }
                   >
                     {reasoningOptions.map((option) => (
+                      <MenuItem value={option.value} key={option.value}>
+                        {option.label}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Stack>
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+                <FormControl size="small" fullWidth>
+                  <InputLabel>Modelo Claude</InputLabel>
+                  <Select
+                    label="Modelo Claude"
+                    value={agentDefaults.claude.model}
+                    onChange={(event) =>
+                      onAgentDefaultsChange({
+                        defaultProvider: defaultAgentProvider,
+                        provider: 'claude',
+                        model: event.target.value,
+                        effort: agentDefaults.claude.effort,
+                      })
+                    }
+                  >
+                    {claudeModelOptions.map((option) => (
+                      <MenuItem value={option.realModelName} key={option.realModelName}>
+                        {option.displayModelName}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+                <FormControl size="small" fullWidth>
+                  <InputLabel>Esfuerzo Claude</InputLabel>
+                  <Select
+                    label="Esfuerzo Claude"
+                    value={agentDefaults.claude.effort}
+                    onChange={(event) =>
+                      onAgentDefaultsChange({
+                        defaultProvider: defaultAgentProvider,
+                        provider: 'claude',
+                        model: agentDefaults.claude.model,
+                        effort: event.target.value as ClaudeEffort,
+                      })
+                    }
+                  >
+                    {claudeEffortOptions.map((option) => (
                       <MenuItem value={option.value} key={option.value}>
                         {option.label}
                       </MenuItem>

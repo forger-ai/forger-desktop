@@ -731,11 +731,18 @@ export class ForgerBackendClient {
           : undefined;
       const model = typeof candidate.model === 'string' && candidate.model.trim() ? candidate.model.trim() : undefined;
       const reasoningEffort = normalizeReasoningEffort(candidate.reasoningEffort);
+      const kind: AppAgent['kind'] = candidate.kind === 'thread_interface' ? 'thread_interface' : undefined;
+      const initialPromptTemplate =
+        typeof candidate.initialPromptTemplate === 'string' && candidate.initialPromptTemplate.trim()
+          ? candidate.initialPromptTemplate.trim()
+          : undefined;
       return [{
         id,
         title,
         initialPrompt,
         ...(description ? { description } : {}),
+        ...(kind ? { kind } : {}),
+        ...(initialPromptTemplate ? { initialPromptTemplate } : {}),
         ...(model ? { model } : {}),
         ...(reasoningEffort ? { reasoningEffort } : {}),
       }];

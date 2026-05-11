@@ -11,14 +11,16 @@ import type {
   AppCodexConversationSendMessageInput,
   AppCodexConversationRunStatus,
   AppAgent,
+  AppAgentThreadSteerResult,
+  AgentRuntime,
+  ClaudeEffort,
   CodexReasoningEffort,
   PermissionRequest,
 } from '../shared/types';
 import { getSharedCopy, normalizeLocale, type Locale } from '../shared/i18n';
 import {
   assertAllowedMcpServers,
-  createIsolatedCodexHome,
-  removeIsolatedCodexHome,
+  preparePersistentIsolatedCodexHome,
 } from './codex-run-isolation';
 
 interface CodexMcpServerConfig {
@@ -29,14 +31,17 @@ interface CodexMcpServerConfig {
   toolTimeoutSec?: number;
 }
 
-interface AppCodexConversationManagerOptions {
+interface AppAgentConversationManagerOptions {
   privateAppsRoot: string;
   metadataRoot: string;
   codexHome: string;
+  getAgentRuntime: (requested?: Partial<AgentRuntime>) => Promise<AgentRuntime>;
   getCodexCliPath: () => Promise<string | null>;
+  getClaudeCliPath: () => Promise<string | null>;
   getCodexPathEntries: (appId?: string) => Promise<string[]>;
   getCodexEnvironment: (appId?: string) => Promise<Record<string, string>>;
   getCodexAuthenticated: () => Promise<boolean>;
+  getClaudeAuthenticated: () => Promise<boolean>;
   hasCodexConversation: (appId: string) => Promise<boolean>;
   resolveAgents: (appId: string) => Promise<AppAgent[]>;
   createForgerMcpSession?: (runId: string, appId: string, locale?: string) => { url: string; token: string } | null;
@@ -51,6 +56,7 @@ interface AppCodexConversationManagerOptions {
 
 interface InternalConversation extends AppCodexConversation {
   threadId?: string | null;
+  runtime?: AgentRuntime;
   metadata?: Record<string, string | number | boolean | null>;
 }
 
@@ -80,13 +86,13 @@ const MAX_CONTEXT_CHARS = 40_000;
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 const CODEX_CONVERSATION_RUN_TIMEOUT_MS = 600_000;
 
-export class AppCodexConversationManager {
+export class AppAgentConversationManager {
   private readonly conversations = new Map<string, InternalConversation>();
   private readonly runs = new Map<string, InternalRun>();
   private readonly pendingPermissions = new Map<string, PendingPermission>();
   private loadPromise: Promise<void> | null = null;
 
-  public constructor(private readonly options: AppCodexConversationManagerOptions) {}
+  public constructor(private readonly options: AppAgentConversationManagerOptions) {}
 
   public async create(appId: string, input: AppCodexConversationCreateInput = {}): Promise<AppCodexConversation> {
     await this.assertEnabled(appId);
@@ -218,6 +224,47 @@ export class AppCodexConversationManager {
     return { success: true };
   }
 
+  public async steerRun(
+    appId: string,
+    conversationId: string,
+    runId: string,
+    input: Pick<AppCodexConversationSendMessageInput, 'message' | 'context' | 'workspacePath' | 'provider' | 'model' | 'effort' | 'reasoningEffort'>,
+  ): Promise<AppAgentThreadSteerResult> {
+    await this.assertEnabled(appId);
+    await this.load();
+    const conversation = this.conversations.get(conversationId);
+    if (!conversation || conversation.appId !== appId) {
+      throw new Error('codex_conversation_not_found');
+    }
+    const activeRun = conversation.activeRun;
+    const hasActiveRun = activeRun && !isTerminalRunStatus(activeRun.status);
+    if (hasActiveRun && activeRun.runId !== runId) {
+      throw new Error('codex_conversation_run_mismatch');
+    }
+    if (hasActiveRun) {
+      this.options.onConversationEvent({
+        type: 'run.steering.accepted',
+        conversation: toConversation(conversation),
+        run: activeRun,
+      });
+      await this.cancel(appId, conversationId, runId);
+    }
+    await this.sendMessage(appId, {
+      conversationId,
+      message: input.message,
+      context: input.context,
+      workspacePath: input.workspacePath,
+      provider: input.provider,
+      model: input.model,
+      effort: input.effort,
+      reasoningEffort: input.reasoningEffort,
+    });
+    return {
+      accepted: true,
+      mode: 'queued_for_next_run',
+    };
+  }
+
   public async requestPermission(
     runId: string,
     input: Omit<PermissionRequest, 'requestId'>,
@@ -323,6 +370,7 @@ export class AppCodexConversationManager {
       this.runs.delete(activeRun.runId);
     }
     this.conversations.delete(conversationId);
+    await this.removeConversationRuntime(appId, conversationId);
     await this.persistApp(appId);
     this.options.onConversationEvent({
       type: 'conversation.deleted',
@@ -331,7 +379,12 @@ export class AppCodexConversationManager {
     return { success: true };
   }
 
-  private async execute(conversationId: string, runId: string, input: AppCodexConversationSendMessageInput): Promise<void> {
+  private async execute(
+    conversationId: string,
+    runId: string,
+    input: AppCodexConversationSendMessageInput,
+    allowResumeRecovery = true,
+  ): Promise<void> {
     const conversation = this.conversations.get(conversationId);
     const run = this.runs.get(runId);
     if (!conversation || !run) {
@@ -341,12 +394,26 @@ export class AppCodexConversationManager {
     if (!(await existsDirectory(appRoot))) {
       throw new Error('app_not_installed');
     }
-    if (!(await this.options.getCodexAuthenticated())) {
+    const agentRuntime = await this.resolveAgentRuntime(conversation);
+    const runtime = await this.options.getAgentRuntime({
+      provider: input.provider ?? agentRuntime.runtime?.provider,
+      model: input.model ?? agentRuntime.runtime?.model ?? agentRuntime.model,
+      effort: input.effort ?? input.reasoningEffort ?? agentRuntime.runtime?.effort ?? agentRuntime.reasoningEffort,
+    });
+    if (runtime.provider === 'claude') {
+      if (!(await this.options.getClaudeAuthenticated())) {
+        throw new Error('claude_auth_missing');
+      }
+    } else if (!(await this.options.getCodexAuthenticated())) {
       throw new Error('codex_auth_missing');
     }
-    const codexCliPath = await this.options.getCodexCliPath();
-    if (!codexCliPath) {
+    const codexCliPath = runtime.provider === 'codex' ? await this.options.getCodexCliPath() : null;
+    const claudeCliPath = runtime.provider === 'claude' ? await this.options.getClaudeCliPath() : null;
+    if (runtime.provider === 'codex' && !codexCliPath) {
       throw new Error('codex_cli_missing');
+    }
+    if (runtime.provider === 'claude' && !claudeCliPath) {
+      throw new Error('claude_cli_missing');
     }
 
     run.status = 'running';
@@ -363,7 +430,10 @@ export class AppCodexConversationManager {
     let mcpServers: CodexMcpServerConfig[] = [];
     let forgerMcpSession: { url: string; token: string } | null = null;
     try {
-      const command = await resolveCodexCommand(codexCliPath, await this.options.getCodexPathEntries(conversation.appId));
+      const runRoot = this.resolveRunRoot(appRoot, input.workspacePath);
+      const command = runtime.provider === 'codex'
+        ? await resolveCodexCommand(codexCliPath as string, await this.options.getCodexPathEntries(conversation.appId))
+        : { command: claudeCliPath as string, prefixArgs: [], pathEntries: await this.options.getCodexPathEntries(conversation.appId) };
       const environment = await this.options.getCodexEnvironment(conversation.appId);
       const appMcpServers = await (this.options.listenAppMcps?.([conversation.appId], run.runId) ?? Promise.resolve([]));
       forgerMcpSession = this.options.createForgerMcpSession?.(run.runId, conversation.appId, run.locale) ?? null;
@@ -380,18 +450,40 @@ export class AppCodexConversationManager {
         ...appMcpServers,
       ];
       const mcpArgs = buildMcpArgs(mcpServers);
-      const agentRuntime = await this.resolveAgentRuntime(conversation);
-      const model = input.model?.trim() || agentRuntime.model;
-      const reasoningEffort = input.reasoningEffort ?? agentRuntime.reasoningEffort;
+      const model = runtime.model;
+      const reasoningEffort = runtime.provider === 'codex' ? runtime.effort as CodexReasoningEffort : DEFAULT_REASONING;
       const initialPrompt = await this.resolveInitialPrompt(conversation);
+      const recoveryContext = !conversation.threadId && conversation.messages.length > 1
+        ? buildConversationRecoveryContext(conversation, run.runId)
+        : '';
       const memoryContext = !conversation.threadId
         ? await (this.options.buildMemoryContext?.(conversation.appId) ?? Promise.resolve(''))
         : '';
       const forgerToolsContext = await (this.options.buildForgerToolsContext?.(conversation.appId) ?? Promise.resolve(''));
-      const prompt = buildPrompt(input.message, input.context, [initialPrompt, memoryContext, forgerToolsContext].filter(Boolean).join('\n\n'));
+      const prompt = buildPrompt(input.message, input.context, [initialPrompt, recoveryContext, memoryContext, forgerToolsContext].filter(Boolean).join('\n\n'));
       const attachmentPaths = await this.prepareAttachments(conversation.appId, run, input);
       const imageArgs = attachmentPaths.flatMap((filePath) => ['--image', filePath]);
-      const args = conversation.threadId
+      const claudeMcpConfigPath = runtime.provider === 'claude'
+        ? await writeClaudeMcpConfig(appRoot, mcpServers)
+        : null;
+      const args = runtime.provider === 'claude'
+        ? [
+            '-p',
+            prompt,
+            '--output-format',
+            'stream-json',
+            '--verbose',
+            '--model',
+            model,
+            '--effort',
+            runtime.effort as ClaudeEffort,
+            '--permission-mode',
+            'bypassPermissions',
+            ...(claudeMcpConfigPath ? ['--mcp-config', claudeMcpConfigPath] : []),
+            ...(conversation.threadId ? ['--resume', conversation.threadId] : []),
+            ...imageArgs,
+          ]
+        : conversation.threadId
         ? [
             ...command.prefixArgs,
             'exec',
@@ -423,22 +515,27 @@ export class AppCodexConversationManager {
             '--skip-git-repo-check',
             ...mcpArgs,
             '-C',
-            appRoot,
+            runRoot,
             ...imageArgs,
             '--',
             '-',
           ];
-      const isolatedCodexHome = await createIsolatedCodexHome(this.options.codexHome, {
-        prefix: 'forger-conversation-codex-home',
-        trustedRoots: [appRoot],
-      });
+      const codexHome = runtime.provider === 'codex'
+        ? await preparePersistentIsolatedCodexHome(
+            this.options.codexHome,
+            this.conversationCodexHome(conversation.appId, conversation.conversationId),
+            {
+              trustedRoots: Array.from(new Set([appRoot, runRoot])),
+            },
+          )
+        : '';
       const allowedMcpServers = new Set(mcpServers.map((server) => server.name));
 
       const result = await runCommandCapture(command.command, args, {
-          cwd: appRoot,
+          cwd: runRoot,
           env: {
-            CODEX_HOME: isolatedCodexHome,
-            FORGER_ALLOWED_ROOTS: appRoot,
+            ...(runtime.provider === 'codex' ? { CODEX_HOME: codexHome } : {}),
+            FORGER_ALLOWED_ROOTS: Array.from(new Set([appRoot, runRoot])).join(path.delimiter),
             ...Object.fromEntries(mcpServers.map((server) => [server.tokenEnvVar, server.token])),
             ...environment,
             PATH: [...command.pathEntries, process.env.PATH ?? ''].filter(Boolean).join(path.delimiter),
@@ -449,9 +546,9 @@ export class AppCodexConversationManager {
           },
           onStdout: (text) => this.handleOutput(conversation, run, text),
           onStderr: (text) => this.handleOutput(conversation, run, text),
-          stdinText: prompt,
+          stdinText: runtime.provider === 'codex' ? prompt : undefined,
         }).finally(async () => {
-          await removeIsolatedCodexHome(isolatedCodexHome);
+          await fs.rm(claudeMcpConfigPath ?? '', { force: true }).catch(() => undefined);
         });
       assertAllowedMcpServers(result.stdout, result.stderr, allowedMcpServers);
 
@@ -459,10 +556,39 @@ export class AppCodexConversationManager {
         return;
       }
       if (result.code !== 0) {
-        throw new Error((result.stderr || result.stdout || 'codex_conversation_exec_failed').trim());
+        if (allowResumeRecovery && conversation.threadId && isMissingProviderThread(result.stdout, result.stderr)) {
+          const lostThreadId = conversation.threadId;
+          conversation.threadId = null;
+          if (conversation.metadata) {
+            conversation.metadata.initialPromptApplied = false;
+          }
+          run.progressLog = [
+            ...(run.progressLog ?? []),
+            `Provider thread ${lostThreadId} is unavailable. Starting a fresh provider thread for this Vibe conversation.`,
+          ].slice(-40);
+          run.updatedAt = new Date().toISOString();
+          conversation.activeRun = toRun(run);
+          conversation.updatedAt = run.updatedAt;
+          await this.persistApp(conversation.appId);
+          this.options.onConversationEvent({
+            type: 'run.progress',
+            conversation: toConversation(conversation),
+            run: toRun(run),
+          });
+          if (forgerMcpSession) {
+            this.options.releaseForgerMcpSession?.(forgerMcpSession.token);
+            forgerMcpSession = null;
+          }
+          this.options.releaseAppMcps?.(run.runId);
+          await this.execute(conversationId, runId, input, false);
+          return;
+        }
+        throw new Error((result.stderr || result.stdout || `${runtime.provider}_conversation_exec_failed`).trim());
       }
 
-      const parsed = parseCodexJsonl(result.stdout, result.stderr);
+      const parsed = runtime.provider === 'claude'
+        ? parseClaudeJsonl(result.stdout, result.stderr)
+        : parseCodexJsonl(result.stdout, result.stderr);
       if (parsed.threadId) {
         conversation.threadId = parsed.threadId;
       }
@@ -543,6 +669,19 @@ export class AppCodexConversationManager {
     run.attachmentPaths = [];
   }
 
+  private resolveRunRoot(appRoot: string, workspacePath: string | undefined): string {
+    const requested = typeof workspacePath === 'string' ? workspacePath.trim() : '';
+    if (!requested) {
+      return appRoot;
+    }
+    const resolved = path.resolve(requested);
+    const relative = path.relative(appRoot, resolved);
+    if (relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative))) {
+      return resolved;
+    }
+    throw new Error('agent_run_workspace_outside_app');
+  }
+
   private handleOutput(conversation: InternalConversation, run: InternalRun, text: string): void {
     const progress = progressFromCodexOutput(text, run.locale);
     if (!progress) {
@@ -605,6 +744,13 @@ export class AppCodexConversationManager {
     if (!metadata || metadata.initialPromptApplied === true) {
       return undefined;
     }
+    const customInitialPrompt = typeof metadata.initialPrompt === 'string' ? metadata.initialPrompt.trim() : '';
+    if (customInitialPrompt) {
+      metadata.initialPromptApplied = true;
+      conversation.updatedAt = new Date().toISOString();
+      await this.persistApp(conversation.appId);
+      return customInitialPrompt;
+    }
     const agentId = typeof metadata.agentId === 'string' ? metadata.agentId.trim() : '';
     if (!agentId) {
       return undefined;
@@ -623,6 +769,7 @@ export class AppCodexConversationManager {
   private async resolveAgentRuntime(conversation: InternalConversation): Promise<{
     model: string;
     reasoningEffort: CodexReasoningEffort;
+    runtime?: AgentRuntime;
   }> {
     const metadata = normalizeMetadata(conversation.metadata);
     const agentId = typeof metadata?.agentId === 'string' ? metadata.agentId.trim() : '';
@@ -633,6 +780,7 @@ export class AppCodexConversationManager {
     return {
       model: agent?.model?.trim() || DEFAULT_MODEL,
       reasoningEffort: agent?.reasoningEffort ?? DEFAULT_REASONING,
+      ...(agent?.runtime ? { runtime: agent.runtime } : {}),
     };
   }
 
@@ -654,20 +802,41 @@ export class AppCodexConversationManager {
       try {
         const raw = await fs.readFile(path.join(root, entry.name), 'utf8');
         const parsed = JSON.parse(raw) as { conversations?: InternalConversation[] };
+        let migrated = false;
         for (const conversation of parsed.conversations ?? []) {
           if (conversation?.conversationId && conversation.appId) {
+            const normalizedConversation = this.migrateLegacyRuntime(conversation);
+            migrated = migrated || normalizedConversation !== conversation;
             this.conversations.set(conversation.conversationId, {
-              ...conversation,
-              activeRun: conversation.activeRun && isTerminalRunStatus(conversation.activeRun.status)
-                ? conversation.activeRun
+              ...normalizedConversation,
+              activeRun: normalizedConversation.activeRun && isTerminalRunStatus(normalizedConversation.activeRun.status)
+                ? normalizedConversation.activeRun
                 : undefined,
             });
           }
+        }
+        if (migrated) {
+          const appId = path.basename(entry.name, '.json');
+          await this.persistApp(appId);
         }
       } catch {
         continue;
       }
     }
+  }
+
+  private migrateLegacyRuntime(conversation: InternalConversation): InternalConversation {
+    if (conversation.runtime || (!conversation.threadId && conversation.messages.length === 0)) {
+      return conversation;
+    }
+    return {
+      ...conversation,
+      runtime: {
+        provider: 'codex',
+        model: DEFAULT_MODEL,
+        effort: DEFAULT_REASONING,
+      },
+    };
   }
 
   private async persistApp(appId: string): Promise<void> {
@@ -683,6 +852,23 @@ export class AppCodexConversationManager {
 
   private conversationsRoot(): string {
     return path.join(this.options.metadataRoot, 'app-codex-conversations');
+  }
+
+  private conversationRuntimeRoot(appId: string, conversationId: string): string {
+    return path.join(
+      this.options.metadataRoot,
+      'app-agent-conversations-runtime',
+      sanitizeId(appId),
+      sanitizeId(conversationId),
+    );
+  }
+
+  private conversationCodexHome(appId: string, conversationId: string): string {
+    return path.join(this.conversationRuntimeRoot(appId, conversationId), 'codex-home');
+  }
+
+  private async removeConversationRuntime(appId: string, conversationId: string): Promise<void> {
+    await fs.rm(this.conversationRuntimeRoot(appId, conversationId), { recursive: true, force: true }).catch(() => undefined);
   }
 }
 
@@ -709,6 +895,23 @@ const buildPrompt = (message: string, context: string | undefined, initialPrompt
   return parts.join('\n');
 };
 
+const buildConversationRecoveryContext = (conversation: InternalConversation, activeRunId: string): string => {
+  const priorMessages = conversation.messages.filter((message) => message.runId !== activeRunId);
+  if (priorMessages.length === 0) {
+    return '';
+  }
+  const transcript = priorMessages
+    .map((message) => `${message.role}: ${message.text.trim()}`)
+    .join('\n\n')
+    .slice(-MAX_CONTEXT_CHARS);
+  return [
+    'Historial persistido de este Desktop thread:',
+    transcript,
+    '',
+    'Continúa en el mismo Desktop thread usando este historial como contexto.',
+  ].join('\n');
+};
+
 const toConversation = (conversation: InternalConversation): AppCodexConversation => ({
   conversationId: conversation.conversationId,
   appId: conversation.appId,
@@ -731,6 +934,16 @@ const toRun = (run: AppCodexConversationRun): AppCodexConversationRun => ({
 
 const isTerminalRunStatus = (status: AppCodexConversationRunStatus): boolean =>
   status === 'completed' || status === 'failed' || status === 'canceled';
+
+const isMissingProviderThread = (stdout: string, stderr: string): boolean => {
+  const combined = `${stderr}\n${stdout}`.toLowerCase();
+  return (
+    combined.includes('no rollout found for thread id') ||
+    combined.includes('thread/resume failed') ||
+    combined.includes('conversation not found') ||
+    combined.includes('session not found')
+  );
+};
 
 const sanitizeId = (value: string): string => value.replace(/[^a-zA-Z0-9._-]+/g, '-').slice(0, 120) || 'app';
 
@@ -784,6 +997,81 @@ const parseCodexJsonl = (stdout: string, stderr: string): { assistantText: strin
     }
   }
   return { assistantText: assistantText.trim(), threadId };
+};
+
+const parseClaudeJsonl = (stdout: string, stderr: string): { assistantText: string; threadId?: string } => {
+  const raw = stdout.trim() || stderr.trim();
+  let assistantText = '';
+  let threadId: string | undefined;
+  for (const line of raw.split('\n').map((entry) => entry.trim()).filter(Boolean)) {
+    try {
+      const parsed = JSON.parse(line) as Record<string, unknown>;
+      if (!threadId) {
+        const sessionId = parsed.session_id ?? parsed.sessionId ?? parsed.conversation_id;
+        if (typeof sessionId === 'string' && sessionId.trim()) {
+          threadId = sessionId.trim();
+        }
+      }
+      if (typeof parsed.result === 'string') {
+        assistantText = parsed.result.trim();
+        continue;
+      }
+      const text = extractClaudeText(parsed);
+      if (text) {
+        assistantText = text.trim();
+      }
+    } catch {
+      assistantText = assistantText ? `${assistantText}\n${line}` : line;
+    }
+  }
+  return { assistantText: assistantText.trim(), threadId };
+};
+
+const extractClaudeText = (entry: Record<string, unknown>): string => {
+  if (typeof entry.text === 'string') {
+    return entry.text;
+  }
+  const message = entry.message;
+  if (!message || typeof message !== 'object') {
+    return '';
+  }
+  const content = (message as Record<string, unknown>).content;
+  if (typeof content === 'string') {
+    return content;
+  }
+  if (!Array.isArray(content)) {
+    return '';
+  }
+  return content
+    .map((item) => {
+      if (!item || typeof item !== 'object') {
+        return '';
+      }
+      const text = (item as Record<string, unknown>).text;
+      return typeof text === 'string' ? text : '';
+    })
+    .filter(Boolean)
+    .join('\n');
+};
+
+const writeClaudeMcpConfig = async (
+  appRoot: string,
+  mcpServers: CodexMcpServerConfig[],
+): Promise<string> => {
+  const configPath = path.join(appRoot, '.forger', 'tmp', `claude-mcp-${randomUUID()}.json`);
+  const mcpServersConfig = Object.fromEntries(mcpServers.map((server) => [
+    server.name,
+    {
+      type: 'http',
+      url: server.url,
+      headers: {
+        Authorization: `Bearer \${${server.tokenEnvVar}}`,
+      },
+    },
+  ]));
+  await fs.mkdir(path.dirname(configPath), { recursive: true });
+  await fs.writeFile(configPath, JSON.stringify({ mcpServers: mcpServersConfig }, null, 2), 'utf8');
+  return configPath;
 };
 
 const progressFromCodexOutput = (text: string, locale?: string): string | null => {

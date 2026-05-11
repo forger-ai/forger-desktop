@@ -21,8 +21,8 @@ import { settingsSeed } from '../shared/mock-data';
 import { IPC_CHANNELS } from '../shared/ipc';
 import { getSharedCopy, installProgressByPhase } from '../shared/i18n';
 import { ChatOrchestrator } from './chat/orchestrator';
-import { AppCodexTaskManager } from './app-codex-task-manager';
-import { AppCodexConversationManager } from './app-codex-conversation-manager';
+import { AppAgentTaskManager } from './app-agent-task-manager';
+import { AppAgentConversationManager } from './app-agent-conversation-manager';
 import { AppMcpManager, type CodexMcpServerConfig } from './app-mcp-manager';
 import { AutomationManager } from './automation-manager';
 import { DevCatalogService } from './dev-catalog-service';
@@ -70,6 +70,11 @@ import type {
   CreateRemoteAppBackupInput,
   AppExternalFolderSelection,
   AppAgent,
+  AppAgentRuntimeInput,
+  AppAgentThreadCreateInput,
+  AppAgentThreadRunControlInput,
+  AppAgentThreadRunStartInput,
+  AppAgentThreadRunSteerInput,
   AppCodexTaskStartInput,
   AppCodexConversationCreateInput,
   AppCodexConversationSendMessageInput,
@@ -86,6 +91,9 @@ import type {
   AppStatus,
   AppOperationSummary,
   AppSummary,
+  AgentEffort,
+  AgentProvider,
+  AgentRuntime,
   AutomationUpsertInput,
   BasicActionResult,
   CatalogApp,
@@ -97,6 +105,8 @@ import type {
   ChatUndoInput,
   CallOfficialToolInput,
   ConfigureOfficialToolInput,
+  ClaudeAuthStatus,
+  ClaudeEffort,
   CodexAuthStatus,
   CodexReasoningEffort,
   DesktopErrorReportPreview,
@@ -125,11 +135,13 @@ import type {
   OpenAppResult,
   RemoteAppBackupSummary,
   RuntimeStatus,
+  AgentDefaults,
   Settings,
   SharedFileRef,
   SubmitAppFeedbackInput,
   SubmitAppRatingInput,
   StopAppResult,
+  UpdateAgentDefaultsInput,
   UpdateAgentToolApprovalInput,
   UpdateCodexDefaultsInput,
   SetAppToolGrantInput,
@@ -145,10 +157,26 @@ const DEFAULT_NODE_VERSION = '22';
 const DEFAULT_PYTHON_VERSION = '3.12';
 const BUNDLED_GIT_VERSION = '2.54.0';
 const CODEX_CLI_VERSION = '0.129.0';
+const CLAUDE_CODE_VERSION = 'latest';
 const CODEX_USAGE_DASHBOARD_URL = 'https://chatgpt.com/codex/settings/usage';
 const BUILT_IN_CODEX_MODEL = 'gpt-5.4';
 const BUILT_IN_CODEX_REASONING: CodexReasoningEffort = 'medium';
+const BUILT_IN_CLAUDE_MODEL = 'sonnet';
+const BUILT_IN_CLAUDE_EFFORT: ClaudeEffort = 'medium';
+const APP_CODEX_MODEL_OPTIONS = [
+  { displayModelName: '5.4', realModelName: 'gpt-5.4', defaultReasoningEffort: 'medium' as const },
+  { displayModelName: '5.3 Codex', realModelName: 'gpt-5.3-codex', defaultReasoningEffort: 'low' as const },
+  { displayModelName: '5.3 Spark', realModelName: 'gpt-5.3-codex-spark', defaultReasoningEffort: 'high' as const },
+  { displayModelName: '5.4 Mini', realModelName: 'gpt-5.4-mini', defaultReasoningEffort: 'medium' as const },
+  { displayModelName: '5.5', realModelName: 'gpt-5.5', defaultReasoningEffort: 'medium' as const },
+];
+const APP_CLAUDE_MODEL_OPTIONS = [
+  { displayModelName: 'Sonnet latest', realModelName: 'sonnet', defaultEffort: 'medium' as const },
+  { displayModelName: 'Opus latest', realModelName: 'opus', defaultEffort: 'high' as const },
+  { displayModelName: 'Haiku latest', realModelName: 'haiku', defaultEffort: 'low' as const },
+];
 const CODEX_REASONING_VALUES = new Set<CodexReasoningEffort>(['low', 'medium', 'high', 'xhigh']);
+const CLAUDE_EFFORT_VALUES = new Set<ClaudeEffort>(['low', 'medium', 'high', 'xhigh', 'max']);
 let devCatalogService: DevCatalogService | null = null;
 const APP_FOLDER_GRANT_TTL_MS = 5 * 60 * 1000;
 const appFolderGrantSecret = randomBytes(32).toString('base64url');
@@ -277,6 +305,7 @@ interface AppManifest {
   promptTemplates?: unknown;
   codexConversation?: unknown;
   agents?: unknown;
+  agentProviders?: unknown;
   stack?: AppManifestStack;
   services?: AppManifestService[];
   mcp?: AppManifestMcp;
@@ -314,8 +343,8 @@ const appLifecycleLocks = new Map<string, Promise<unknown>>();
 const runtimeLocks = new Map<string, Promise<RuntimeBinarySet>>();
 const gitToolLocks = new Map<string, Promise<string | null>>();
 let chatOrchestrator: ChatOrchestrator | null = null;
-let appCodexTaskManager: AppCodexTaskManager | null = null;
-let appCodexConversationManager: AppCodexConversationManager | null = null;
+let appAgentTaskManager: AppAgentTaskManager | null = null;
+let appAgentConversationManager: AppAgentConversationManager | null = null;
 let fileLibrary: FileLibrary | null = null;
 let secretsStore: SecretsStore | null = null;
 let officialToolsService: OfficialToolsService | null = null;
@@ -351,6 +380,7 @@ const getForgerMetadataRoot = () => path.join(getForgerHomeRoot(), '.forger');
 const getLegacyForgerMetadataRoot = () => path.join(getPrivateAppsRoot(), '.forger');
 const getCodexRoot = () => path.join(app.getPath('userData'), 'codex-cli');
 const getCodexHome = () => path.join(app.getPath('userData'), 'codex-home');
+const getClaudeRoot = () => path.join(app.getPath('userData'), 'claude-code-cli');
 const getAgentToolSettingsPath = () => path.join(getForgerMetadataRoot(), 'agent-tools.json');
 const getSettingsPath = () => path.join(getForgerMetadataRoot(), 'settings.json');
 const getPromptOverridesPath = () => path.join(getForgerMetadataRoot(), 'prompt-overrides.json');
@@ -370,26 +400,80 @@ const getPromptOverridesStore = (): PromptOverridesStore => {
 const normalizeCodexReasoningEffort = (value: unknown, fallback: CodexReasoningEffort): CodexReasoningEffort =>
   CODEX_REASONING_VALUES.has(value as CodexReasoningEffort) ? value as CodexReasoningEffort : fallback;
 
+const normalizeClaudeEffort = (value: unknown, fallback: ClaudeEffort): ClaudeEffort =>
+  CLAUDE_EFFORT_VALUES.has(value as ClaudeEffort) ? value as ClaudeEffort : fallback;
+
+const normalizeAgentProvider = (value: unknown): AgentProvider | undefined =>
+  value === 'codex' || value === 'claude' ? value : undefined;
+
+const normalizeDefaultAgentProvider = (value: unknown): AgentProvider | 'auto' =>
+  value === 'codex' || value === 'claude' || value === 'auto' ? value : 'auto';
+
 const normalizeSettings = (input?: Partial<Settings>): Settings => {
   const defaults = structuredClone(settingsSeed);
   const rawCodexDefaults =
     input?.codexDefaults && typeof input.codexDefaults === 'object'
       ? input.codexDefaults
       : undefined;
+  const rawAgentDefaults =
+    input?.agentDefaults && typeof input.agentDefaults === 'object'
+      ? input.agentDefaults
+      : undefined;
+  const rawAgentCodexDefaults =
+    rawAgentDefaults?.codex && typeof rawAgentDefaults.codex === 'object'
+      ? rawAgentDefaults.codex
+      : rawCodexDefaults;
+  const rawAgentClaudeDefaults =
+    rawAgentDefaults?.claude && typeof rawAgentDefaults.claude === 'object'
+      ? rawAgentDefaults.claude
+      : undefined;
+  const codexModel =
+    typeof rawCodexDefaults?.model === 'string' && rawCodexDefaults.model.trim()
+      ? rawCodexDefaults.model.trim()
+      : BUILT_IN_CODEX_MODEL;
+  const codexReasoningEffort = normalizeCodexReasoningEffort(
+    rawCodexDefaults?.reasoningEffort,
+    BUILT_IN_CODEX_REASONING,
+  );
+  const providerConnections: Partial<Record<AgentProvider, string>> = {};
+  const rawConnections = input?.providerConnections;
+  if (rawConnections && typeof rawConnections === 'object') {
+    for (const provider of ['codex', 'claude'] as const) {
+      const value = rawConnections[provider];
+      if (typeof value === 'string' && value.trim()) {
+        providerConnections[provider] = value;
+      }
+    }
+  }
   return {
     userEmail: typeof input?.userEmail === 'string' ? input.userEmail : defaults.userEmail,
     plan: typeof input?.plan === 'string' ? input.plan : defaults.plan,
     safeMode: typeof input?.safeMode === 'boolean' ? input.safeMode : defaults.safeMode,
+    defaultAgentProvider: normalizeDefaultAgentProvider(input?.defaultAgentProvider),
     codexDefaults: {
-      model:
-        typeof rawCodexDefaults?.model === 'string' && rawCodexDefaults.model.trim()
-          ? rawCodexDefaults.model.trim()
-          : BUILT_IN_CODEX_MODEL,
-      reasoningEffort: normalizeCodexReasoningEffort(
-        rawCodexDefaults?.reasoningEffort,
-        BUILT_IN_CODEX_REASONING,
-      ),
+      model: codexModel,
+      reasoningEffort: codexReasoningEffort,
     },
+    agentDefaults: {
+      codex: {
+        model:
+          typeof rawAgentCodexDefaults?.model === 'string' && rawAgentCodexDefaults.model.trim()
+            ? rawAgentCodexDefaults.model.trim()
+            : codexModel,
+        reasoningEffort: normalizeCodexReasoningEffort(
+          rawAgentCodexDefaults?.reasoningEffort,
+          codexReasoningEffort,
+        ),
+      },
+      claude: {
+        model:
+          typeof rawAgentClaudeDefaults?.model === 'string' && rawAgentClaudeDefaults.model.trim()
+            ? rawAgentClaudeDefaults.model.trim()
+            : BUILT_IN_CLAUDE_MODEL,
+        effort: normalizeClaudeEffort(rawAgentClaudeDefaults?.effort, BUILT_IN_CLAUDE_EFFORT),
+      },
+    },
+    providerConnections,
   };
 };
 
@@ -416,9 +500,121 @@ const updateCodexDefaults = async (input: UpdateCodexDefaultsInput): Promise<Set
       model: typeof input.model === 'string' ? input.model : '',
       reasoningEffort: input.reasoningEffort,
     },
+    agentDefaults: {
+      ...settings.agentDefaults,
+      codex: {
+        model: typeof input.model === 'string' ? input.model : '',
+        reasoningEffort: input.reasoningEffort,
+      },
+    },
   });
   await saveSettings();
   return settings;
+};
+
+const updateAgentDefaults = async (input: UpdateAgentDefaultsInput): Promise<Settings> => {
+  const current = normalizeSettings(settings);
+  const defaultAgentProvider = input.defaultProvider === undefined
+    ? current.defaultAgentProvider
+    : normalizeDefaultAgentProvider(input.defaultProvider);
+  const provider = normalizeAgentProvider(input.provider);
+  if (!provider) {
+    settings = normalizeSettings({ ...current, defaultAgentProvider });
+    await saveSettings();
+    return settings;
+  }
+  if (provider === 'codex') {
+    settings = normalizeSettings({
+      ...current,
+      defaultAgentProvider,
+      codexDefaults: {
+        model: input.model ?? current.agentDefaults.codex.model,
+        reasoningEffort: normalizeCodexReasoningEffort(input.effort, current.agentDefaults.codex.reasoningEffort),
+      },
+      agentDefaults: {
+        ...current.agentDefaults,
+        codex: {
+          model: input.model ?? current.agentDefaults.codex.model,
+          reasoningEffort: normalizeCodexReasoningEffort(input.effort, current.agentDefaults.codex.reasoningEffort),
+        },
+      },
+    });
+    await saveSettings();
+    return settings;
+  }
+  settings = normalizeSettings({
+    ...current,
+    defaultAgentProvider,
+    agentDefaults: {
+      ...current.agentDefaults,
+      claude: {
+        model: typeof input.model === 'string' ? input.model : current.agentDefaults.claude.model,
+        effort: normalizeClaudeEffort(input.effort, current.agentDefaults.claude.effort),
+      },
+    },
+  });
+  await saveSettings();
+  return settings;
+};
+
+const markProviderConnected = async (provider: AgentProvider): Promise<void> => {
+  const current = normalizeSettings(settings);
+  if (current.providerConnections[provider]) {
+    settings = current;
+    return;
+  }
+  settings = normalizeSettings({
+    ...current,
+    providerConnections: {
+      ...current.providerConnections,
+      [provider]: new Date().toISOString(),
+    },
+  });
+  await saveSettings();
+};
+
+const chooseAgentRuntime = async (requested?: Partial<AgentRuntime>): Promise<AgentRuntime> => {
+  const provider = requested?.provider ?? await chooseConnectedProvider();
+  const defaults = normalizeSettings(settings).agentDefaults;
+  if (provider === 'claude') {
+    return {
+      provider,
+      model: requested?.model?.trim() || defaults.claude.model || BUILT_IN_CLAUDE_MODEL,
+      effort: normalizeClaudeEffort(requested?.effort, defaults.claude.effort),
+    };
+  }
+  return {
+    provider: 'codex',
+    model: requested?.model?.trim() || defaults.codex.model || BUILT_IN_CODEX_MODEL,
+    effort: normalizeCodexReasoningEffort(requested?.effort, defaults.codex.reasoningEffort),
+  };
+};
+
+const chooseConnectedProvider = async (): Promise<AgentProvider> => {
+  const [codexStatus, claudeStatus] = await Promise.all([
+    getCodexAuthStatus().catch(() => null),
+    getClaudeAuthStatus().catch(() => null),
+  ]);
+  const connected: AgentProvider[] = [
+    ...(codexStatus?.authenticated ? ['codex' as const] : []),
+    ...(claudeStatus?.authenticated ? ['claude' as const] : []),
+  ];
+  if (connected.length === 0) {
+    return 'codex';
+  }
+  if (connected.length === 1) {
+    return connected[0];
+  }
+  const preferred = normalizeSettings(settings).defaultAgentProvider;
+  if (preferred !== 'auto' && connected.includes(preferred)) {
+    return preferred;
+  }
+  const connections = normalizeSettings(settings).providerConnections;
+  const sorted = connected
+    .map((provider) => ({ provider, connectedAt: connections[provider] }))
+    .filter((entry): entry is { provider: AgentProvider; connectedAt: string } => Boolean(entry.connectedAt))
+    .sort((left, right) => left.connectedAt.localeCompare(right.connectedAt));
+  return sorted[0]?.provider ?? 'codex';
 };
 
 const withCodexDefaults = <T extends { model?: string; reasoningEffort?: CodexReasoningEffort }>(entry: T): T & {
@@ -430,6 +626,32 @@ const withCodexDefaults = <T extends { model?: string; reasoningEffort?: CodexRe
     ...entry,
     model: entry.model?.trim() || defaults.model || BUILT_IN_CODEX_MODEL,
     reasoningEffort: entry.reasoningEffort ?? defaults.reasoningEffort ?? BUILT_IN_CODEX_REASONING,
+  };
+};
+
+const withAgentDefaults = <T extends { model?: string; reasoningEffort?: CodexReasoningEffort; runtime?: AgentRuntime }>(
+  entry: T,
+  defaults: AgentDefaults = normalizeSettings(settings).agentDefaults,
+): T & {
+  model: string;
+  reasoningEffort: CodexReasoningEffort;
+} => {
+  if (entry.runtime?.provider === 'claude') {
+    return {
+      ...entry,
+      model: entry.model?.trim() || defaults.codex.model || BUILT_IN_CODEX_MODEL,
+      reasoningEffort: entry.reasoningEffort ?? defaults.codex.reasoningEffort ?? BUILT_IN_CODEX_REASONING,
+      runtime: {
+        provider: 'claude',
+        model: entry.runtime.model?.trim() || defaults.claude.model || BUILT_IN_CLAUDE_MODEL,
+        effort: normalizeClaudeEffort(entry.runtime.effort, defaults.claude.effort),
+      },
+    };
+  }
+  return {
+    ...entry,
+    model: entry.model?.trim() || defaults.codex.model || BUILT_IN_CODEX_MODEL,
+    reasoningEffort: entry.reasoningEffort ?? defaults.codex.reasoningEffort ?? BUILT_IN_CODEX_REASONING,
   };
 };
 
@@ -1092,6 +1314,8 @@ const mapBackendCategory = (backendCategory: string): AppCategory => {
       return 'hogar';
     case 'health':
       return 'salud';
+    case 'developer_tools':
+      return 'developer_tools';
     default:
       return 'productividad';
   }
@@ -1459,6 +1683,7 @@ const normalizeManifestPromptTemplates = (manifest: AppManifest | null): AppProm
       : undefined;
     const model = typeof candidate.model === 'string' && candidate.model.trim() ? candidate.model.trim() : undefined;
     const reasoningEffort = normalizeManifestReasoningEffort(candidate.reasoningEffort);
+    const runtime = normalizeManifestRuntime((candidate as Record<string, unknown>).runtime);
     const args = normalizePromptTemplateArguments(candidate.arguments);
     seenIds.add(id);
     templates.push({
@@ -1470,6 +1695,7 @@ const normalizeManifestPromptTemplates = (manifest: AppManifest | null): AppProm
       ...(acceptedFileTypes && acceptedFileTypes.length > 0 ? { acceptedFileTypes } : {}),
       ...(model ? { model } : {}),
       ...(reasoningEffort ? { reasoningEffort } : {}),
+      ...(runtime ? { runtime } : {}),
     });
   }
   return templates;
@@ -1497,14 +1723,24 @@ const normalizeManifestAgents = (manifest: AppManifest | null): AppAgent[] => {
           : undefined;
       const model = typeof candidate.model === 'string' && candidate.model.trim() ? candidate.model.trim() : undefined;
       const reasoningEffort = normalizeManifestReasoningEffort(candidate.reasoningEffort);
+      const runtime = normalizeManifestRuntime((candidate as Record<string, unknown>).runtime);
+      const kind = (candidate as Record<string, unknown>).kind === 'thread_interface' ? 'thread_interface' : undefined;
+      const initialPromptTemplate =
+        typeof (candidate as Record<string, unknown>).initialPromptTemplate === 'string'
+        && ((candidate as Record<string, unknown>).initialPromptTemplate as string).trim()
+          ? ((candidate as Record<string, unknown>).initialPromptTemplate as string).trim()
+          : undefined;
       seenIds.add(id);
       agents.push({
         id,
         title,
         initialPrompt,
         ...(description ? { description } : {}),
+        ...(kind ? { kind } : {}),
+        ...(initialPromptTemplate ? { initialPromptTemplate } : {}),
         ...(model ? { model } : {}),
         ...(reasoningEffort ? { reasoningEffort } : {}),
+        ...(runtime ? { runtime } : {}),
       });
     }
   }
@@ -1531,6 +1767,52 @@ const normalizeManifestAgents = (manifest: AppManifest | null): AppAgent[] => {
 
 const normalizeManifestReasoningEffort = (value: unknown): CodexReasoningEffort | undefined =>
   CODEX_REASONING_VALUES.has(value as CodexReasoningEffort) ? value as CodexReasoningEffort : undefined;
+
+const normalizeManifestAgentDefaults = (manifest: AppManifest | null): AgentDefaults => {
+  const base = normalizeSettings(settings).agentDefaults;
+  if (!manifest?.agentProviders || typeof manifest.agentProviders !== 'object' || Array.isArray(manifest.agentProviders)) {
+    return base;
+  }
+  const providers = manifest.agentProviders as Record<string, unknown>;
+  const codex = providers.codex && typeof providers.codex === 'object' && !Array.isArray(providers.codex)
+    ? providers.codex as Record<string, unknown>
+    : {};
+  const claude = providers.claude && typeof providers.claude === 'object' && !Array.isArray(providers.claude)
+    ? providers.claude as Record<string, unknown>
+    : {};
+  const codexModel = typeof codex.defaultModel === 'string' && codex.defaultModel.trim()
+    ? codex.defaultModel.trim()
+    : base.codex.model;
+  const claudeModel = typeof claude.defaultModel === 'string' && claude.defaultModel.trim()
+    ? claude.defaultModel.trim()
+    : base.claude.model;
+  return {
+    codex: {
+      model: codexModel,
+      reasoningEffort: normalizeCodexReasoningEffort(codex.defaultEffort, base.codex.reasoningEffort),
+    },
+    claude: {
+      model: claudeModel,
+      effort: normalizeClaudeEffort(claude.defaultEffort, base.claude.effort),
+    },
+  };
+};
+
+const normalizeManifestRuntime = (value: unknown): AgentRuntime | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const provider = normalizeAgentProvider(record.provider);
+  const model = typeof record.model === 'string' && record.model.trim() ? record.model.trim() : '';
+  const effort = provider === 'claude'
+    ? normalizeClaudeEffort(record.effort, BUILT_IN_CLAUDE_EFFORT)
+    : normalizeCodexReasoningEffort(record.effort, BUILT_IN_CODEX_REASONING);
+  if (!provider || !model) {
+    return undefined;
+  }
+  return { provider, model, effort };
+};
 
 const normalizePromptTemplateArguments = (input: unknown): NonNullable<AppPromptTemplate['arguments']> => {
   if (!Array.isArray(input)) {
@@ -1577,8 +1859,11 @@ const resolveInstalledPromptTemplates = async (appId: string): Promise<AppPrompt
   if (!record?.installDir) {
     return [];
   }
-  const templates = normalizeManifestPromptTemplates(await resolveInstalledManifest(record.installDir));
-  return (await getPromptOverridesStore().applyToPromptTemplates(appId, templates)).map(withCodexDefaults);
+  const manifest = await resolveInstalledManifest(record.installDir);
+  const templates = normalizeManifestPromptTemplates(manifest);
+  const defaults = normalizeManifestAgentDefaults(manifest);
+  return (await getPromptOverridesStore().applyToPromptTemplates(appId, templates))
+    .map((template) => withAgentDefaults(template, defaults));
 };
 
 const resolveInstalledAgents = async (appId: string): Promise<AppAgent[]> => {
@@ -1586,8 +1871,11 @@ const resolveInstalledAgents = async (appId: string): Promise<AppAgent[]> => {
   if (!record?.installDir) {
     return [];
   }
-  const agents = normalizeManifestAgents(await resolveInstalledManifest(record.installDir));
-  return (await getPromptOverridesStore().applyToAgents(appId, agents)).map(withCodexDefaults);
+  const manifest = await resolveInstalledManifest(record.installDir);
+  const agents = normalizeManifestAgents(manifest);
+  const defaults = normalizeManifestAgentDefaults(manifest);
+  return (await getPromptOverridesStore().applyToAgents(appId, agents))
+    .map((agent) => withAgentDefaults(agent, defaults));
 };
 
 const hasInstalledCodexConversation = async (appId: string): Promise<boolean> =>
@@ -3402,6 +3690,7 @@ const connectCodexAuth = async (): Promise<{ success: boolean; userMessage: stri
         { cwd: app.getPath('userData') },
       );
 
+      await markProviderConnected('codex');
       return {
         success: true,
         userMessage: 'Abrimos Terminal para completar el login de Codex con ChatGPT.',
@@ -3488,6 +3777,7 @@ const connectCodexAuth = async (): Promise<{ success: boolean; userMessage: stri
         nodePathPrefix,
       });
 
+      await markProviderConnected('codex');
       return {
         success: true,
         userMessage: 'Abrimos una consola para completar el login de Codex con ChatGPT.',
@@ -3505,6 +3795,7 @@ const connectCodexAuth = async (): Promise<{ success: boolean; userMessage: stri
       },
     });
 
+    await markProviderConnected('codex');
     return {
       success: true,
       userMessage: 'Login de Codex completado.',
@@ -3564,6 +3855,157 @@ const reinstallCodex = async (): Promise<{ success: boolean; userMessage: string
       userMessage: 'No pudimos reinstalar Codex.',
       ...diagnostic,
       status: await getCodexAuthStatus().catch(() => undefined),
+    };
+  }
+};
+
+const getClaudeAuthStatus = async (): Promise<ClaudeAuthStatus> => {
+  const resolved = await resolveClaudeCli();
+  if (!resolved) {
+    return {
+      installed: false,
+      authenticated: false,
+      source: 'missing',
+      userMessage: 'Claude Code no esta instalado en este equipo.',
+    };
+  }
+
+  const [versionResult, authResult] = await Promise.all([
+    runCommandCapture(resolved.path, ['--version'], { cwd: app.getPath('userData'), timeoutMs: 10_000 }).catch(() => null),
+    runCommandCapture(resolved.path, ['auth', 'status'], { cwd: app.getPath('userData'), timeoutMs: 15_000 }).catch(() => null),
+  ]);
+  const statusText = [authResult?.stdout, authResult?.stderr].filter(Boolean).join('\n').trim();
+  const authenticated = Boolean(
+    authResult
+    && authResult.code === 0
+    && !/not\s+(authenticated|logged\s*in)|login required|no active/i.test(statusText),
+  );
+
+  return {
+    installed: true,
+    authenticated,
+    source: resolved.source,
+    claudeCliPath: resolved.path,
+    version: versionResult?.stdout.trim() || versionResult?.stderr.trim() || undefined,
+    statusText: statusText || undefined,
+  };
+};
+
+const connectClaudeAuth = async (): Promise<{ success: boolean; userMessage: string; status?: ClaudeAuthStatus } & FailureDiagnosticFields> => {
+  try {
+    const cliPath = (await resolveClaudeCli())?.path ?? await ensureClaudeCliInstalled();
+
+    if (process.platform === 'darwin') {
+      const loginCommand = `${shellQuote(cliPath)} auth login`;
+      await runCommand(
+        '/usr/bin/osascript',
+        [
+          '-e',
+          'tell application "Terminal"',
+          '-e',
+          'activate',
+          '-e',
+          `do script ${JSON.stringify(loginCommand)}`,
+          '-e',
+          'end tell',
+        ],
+        { cwd: app.getPath('userData') },
+      );
+      await markProviderConnected('claude');
+      return {
+        success: true,
+        userMessage: 'Abrimos Terminal para completar el login local de Claude Code.',
+        status: await getClaudeAuthStatus().catch(() => undefined),
+      };
+    }
+
+    if (process.platform === 'win32') {
+      const loginScriptPath = path.join(getTempRoot(), 'claude-login.cmd');
+      const loginScript = [
+        '@echo off',
+        'title Forger Claude Code Login',
+        `"${escapeWindowsBatchValue(cliPath)}" auth login`,
+        'set "FORGER_CLAUDE_LOGIN_EXIT=%ERRORLEVEL%"',
+        'echo.',
+        'echo Claude Code login finished with exit code %FORGER_CLAUDE_LOGIN_EXIT%. You can close this window.',
+        'pause',
+      ].join('\r\n');
+      await fs.mkdir(path.dirname(loginScriptPath), { recursive: true });
+      await fs.writeFile(loginScriptPath, `${loginScript}\r\n`, 'utf8');
+      const launchCommand = [
+        '$ErrorActionPreference = "Stop"',
+        `Start-Process -FilePath ${quotePowerShellSingle('cmd.exe')} -ArgumentList ${quotePowerShellSingle(`/d /k call "${loginScriptPath}"`)} -WorkingDirectory ${quotePowerShellSingle(app.getPath('userData'))}`,
+      ].join('; ');
+      await new Promise<void>((resolve, reject) => {
+        const child = spawn(
+          'powershell.exe',
+          ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', launchCommand],
+          {
+            cwd: app.getPath('userData'),
+            stdio: 'ignore',
+            windowsHide: true,
+          },
+        );
+        child.once('error', reject);
+        child.once('exit', (code) => code === 0 ? resolve() : reject(new Error(`powershell Start-Process exited with code ${code ?? 'unknown'}`)));
+      });
+      await markProviderConnected('claude');
+      return {
+        success: true,
+        userMessage: 'Abrimos una consola para completar el login local de Claude Code.',
+        status: await getClaudeAuthStatus().catch(() => undefined),
+      };
+    }
+
+    await runCommand(cliPath, ['auth', 'login'], {
+      cwd: app.getPath('userData'),
+      log: {
+        phase: 'claude_auth',
+        label: 'claude auth login',
+      },
+    });
+    await markProviderConnected('claude');
+    return {
+      success: true,
+      userMessage: 'Login de Claude Code completado.',
+      status: await getClaudeAuthStatus().catch(() => undefined),
+    };
+  } catch (error) {
+    const diagnostic = failureDiagnostic(error, 'claude_connect_failed');
+    await appendInstallLog('claude_auth:failed', {
+      detail: diagnostic.technicalCode,
+      error: serializeErrorForInstallLog(error),
+    });
+    return {
+      success: false,
+      userMessage: 'No pudimos iniciar el login de Claude Code.',
+      ...diagnostic,
+      status: await getClaudeAuthStatus().catch(() => undefined),
+    };
+  }
+};
+
+const reinstallClaude = async (): Promise<{ success: boolean; userMessage: string; status?: ClaudeAuthStatus } & FailureDiagnosticFields> => {
+  try {
+    await fs.rm(getClaudeRoot(), { recursive: true, force: true });
+    await fs.mkdir(getClaudeRoot(), { recursive: true });
+    await ensureClaudeCliInstalled();
+    return {
+      success: true,
+      userMessage: 'Claude Code fue instalado por Forger. Si no hay sesion activa, conecta Claude para usarlo.',
+      status: await getClaudeAuthStatus().catch(() => undefined),
+    };
+  } catch (error) {
+    const diagnostic = failureDiagnostic(error, 'claude_reinstall_failed');
+    await appendInstallLog('claude_auth:reinstall_failed', {
+      detail: diagnostic.technicalCode,
+      error: serializeErrorForInstallLog(error),
+    });
+    return {
+      success: false,
+      userMessage: 'No pudimos instalar Claude Code.',
+      ...diagnostic,
+      status: await getClaudeAuthStatus().catch(() => undefined),
     };
   }
 };
@@ -4675,8 +5117,8 @@ const openOrFocusAppWindow = async (
   });
   appWindow.on('closed', () => {
     appWindows.delete(appId);
-    appCodexTaskManager?.rejectPendingPermissionsForApp(appId);
-    appCodexConversationManager?.rejectPendingPermissionsForApp(appId);
+    appAgentTaskManager?.rejectPendingPermissionsForApp(appId);
+    appAgentConversationManager?.rejectPendingPermissionsForApp(appId);
     if (!stoppingApps.has(appId) && runningApps.has(appId)) {
       void stopInstalledApp(appId);
     }
@@ -5340,21 +5782,21 @@ const handleCloudForgerAppRequest = async (
     }
 
     if (action === 'codex-task/start') {
-      if (!appCodexTaskManager) {
+      if (!appAgentTaskManager) {
         return json({ error: 'app_codex_task_manager_unavailable' }, 503);
       }
-      const task = await appCodexTaskManager.start(request.app_id, body as unknown as AppCodexTaskStartInput);
+      const task = await appAgentTaskManager.start(request.app_id, body as unknown as AppCodexTaskStartInput);
       return json(task);
     }
 
     if (action === 'codex-task/get') {
       const runId = typeof body.runId === 'string' ? body.runId : '';
-      return json(appCodexTaskManager?.get(request.app_id, runId) ?? null);
+      return json(appAgentTaskManager?.get(request.app_id, runId) ?? null);
     }
 
     if (action === 'codex-task/cancel') {
       const runId = typeof body.runId === 'string' ? body.runId : '';
-      return json(appCodexTaskManager?.cancel(request.app_id, runId) ?? { success: false });
+      return json(appAgentTaskManager?.cancel(request.app_id, runId) ?? { success: false });
     }
 
     return json({ error: 'unknown_forger_app_action' }, 404);
@@ -5428,6 +5870,97 @@ const findSqliteFile = async (searchDir: string): Promise<string | null> => {
     // directory may not exist
   }
   return null;
+};
+
+const resolveManagedClaudeCliPath = async (baseDir: string): Promise<string | null> => {
+  const candidates = process.platform === 'win32'
+    ? [
+        path.join(baseDir, 'node_modules', '.bin', 'claude.cmd'),
+        path.join(baseDir, 'node_modules', '.bin', 'claude'),
+      ]
+    : [
+        path.join(baseDir, 'node_modules', '.bin', 'claude'),
+        path.join(baseDir, 'node_modules', '.bin', 'claude.cmd'),
+      ];
+  for (const candidate of candidates) {
+    if ((await existsFile(candidate)) && (await canRunCommand(candidate, ['--version']))) {
+      return candidate;
+    }
+  }
+  return null;
+};
+
+const resolveSystemClaudeCliPath = async (): Promise<string | null> => {
+  try {
+    const result = await runCommandCapture(
+      process.platform === 'win32' ? 'where' : 'which',
+      ['claude'],
+      { cwd: app.getPath('userData'), timeoutMs: 10_000 },
+    );
+    if (result.code !== 0) {
+      return null;
+    }
+    const candidate = result.stdout.split(/\r?\n/).map((line) => line.trim()).find(Boolean);
+    if (!candidate) {
+      return null;
+    }
+    return await canRunCommand(candidate, ['--version']) ? candidate : null;
+  } catch {
+    return null;
+  }
+};
+
+const resolveClaudeCli = async (): Promise<{ path: string; source: 'managed' | 'system' } | null> => {
+  const managed = await resolveManagedClaudeCliPath(getClaudeRoot());
+  if (managed) {
+    return { path: managed, source: 'managed' };
+  }
+  const system = await resolveSystemClaudeCliPath();
+  return system ? { path: system, source: 'system' } : null;
+};
+
+const ensureClaudeCliInstalled = async (): Promise<string> => {
+  const existing = await resolveManagedClaudeCliPath(getClaudeRoot());
+  if (existing) {
+    return existing;
+  }
+  const claudeRoot = getClaudeRoot();
+  await fs.mkdir(claudeRoot, { recursive: true });
+  const packageJsonPath = path.join(claudeRoot, 'package.json');
+  if (!(await existsFile(packageJsonPath))) {
+    await fs.writeFile(
+      packageJsonPath,
+      JSON.stringify({
+        name: 'forger-claude-code-runtime',
+        private: true,
+        description: 'Forger-managed Claude Code runtime',
+      }, null, 2),
+      'utf8',
+    );
+  }
+  const nodeRuntime = await ensureRuntimeInstalled('node', DEFAULT_NODE_VERSION);
+  if (!nodeRuntime.npm) {
+    throw new Error('runtime_npm_executable_not_found');
+  }
+  await runCommand(
+    nodeRuntime.npm,
+    ['install', '--no-audit', '--no-fund', `@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}`],
+    {
+      cwd: claudeRoot,
+      env: {
+        PATH: [...getRuntimePathEntries(nodeRuntime), process.env.PATH ?? ''].filter(Boolean).join(path.delimiter),
+      },
+      log: {
+        phase: 'claude_auth',
+        label: 'install claude code cli',
+      },
+    },
+  );
+  const installed = await resolveManagedClaudeCliPath(claudeRoot);
+  if (!installed) {
+    throw new Error('claude_cli_install_failed');
+  }
+  return installed;
 };
 
 const resolveAppDbPath = async (appId: string): Promise<string | null> => {
@@ -5740,6 +6273,9 @@ const registerIpcHandlers = (): void => {
   ipcMain.handle(IPC_CHANNELS.updateCodexDefaults, async (_event, input: UpdateCodexDefaultsInput) => {
     return await updateCodexDefaults(input);
   });
+  ipcMain.handle(IPC_CHANNELS.updateAgentDefaults, async (_event, input: UpdateAgentDefaultsInput) => {
+    return await updateAgentDefaults(input);
+  });
   ipcMain.handle(IPC_CHANNELS.memoryList, async (_event, input: MemoryListInput = {}) => {
     return await getMemoryStore().list(input, { caller: 'settings' });
   });
@@ -5839,6 +6375,9 @@ const registerIpcHandlers = (): void => {
   ipcMain.handle(IPC_CHANNELS.connectCodexAuth, async () => await connectCodexAuth());
   ipcMain.handle(IPC_CHANNELS.disconnectCodexAuth, async () => await disconnectCodexAuth());
   ipcMain.handle(IPC_CHANNELS.reinstallCodex, async () => await reinstallCodex());
+  ipcMain.handle(IPC_CHANNELS.getClaudeAuthStatus, async () => await getClaudeAuthStatus());
+  ipcMain.handle(IPC_CHANNELS.connectClaudeAuth, async () => await connectClaudeAuth());
+  ipcMain.handle(IPC_CHANNELS.reinstallClaude, async () => await reinstallClaude());
   ipcMain.handle(IPC_CHANNELS.listAgentTools, async () => AGENT_TOOL_PACKAGES);
   ipcMain.handle(IPC_CHANNELS.getAgentToolSettings, async () => agentToolSettings);
   ipcMain.handle(IPC_CHANNELS.updateAgentToolApproval, async (_event, input: UpdateAgentToolApprovalInput) => {
@@ -6024,8 +6563,15 @@ const registerIpcHandlers = (): void => {
     if (!appId) {
       return {};
     }
+    const record = registry.apps[appId];
+    const manifest = record?.installDir ? await resolveInstalledManifest(record.installDir) : null;
     return {
       agents: await resolveInstalledAgents(appId),
+      agentDefaults: normalizeManifestAgentDefaults(manifest),
+      agentModelOptions: {
+        codex: APP_CODEX_MODEL_OPTIONS,
+        claude: APP_CLAUDE_MODEL_OPTIONS,
+      },
     };
   });
 
@@ -6054,16 +6600,16 @@ const registerIpcHandlers = (): void => {
     return await getOfficialToolsService().callFromApp(appId, input);
   });
 
-  ipcMain.handle(IPC_CHANNELS.appCodexTaskStart, async (event, input: AppCodexTaskStartInput) => {
+  const handleAppAgentTaskStart = async (event: IpcMainInvokeEvent, input: AppCodexTaskStartInput) => {
     const appId = resolveAppIdForWebContents(event.sender.id);
     if (!appId) {
       throw new Error('app_window_not_authorized');
     }
-    if (!appCodexTaskManager) {
+    if (!appAgentTaskManager) {
       throw new Error('app_codex_task_manager_unavailable');
     }
     try {
-      return await appCodexTaskManager.start(appId, input);
+      return await appAgentTaskManager.start(appId, input);
     } catch (error) {
       desktopErrorReporter?.reportAppCodexStartFailure({
         appId,
@@ -6072,47 +6618,199 @@ const registerIpcHandlers = (): void => {
       });
       throw error;
     }
-  });
+  };
+  ipcMain.handle(IPC_CHANNELS.appAgentTaskStart, handleAppAgentTaskStart);
+  ipcMain.handle(IPC_CHANNELS.appCodexTaskStart, handleAppAgentTaskStart);
 
-  ipcMain.handle(IPC_CHANNELS.appCodexTaskGet, async (event, runId: string) => {
+  const handleAppAgentTaskGet = async (event: IpcMainInvokeEvent, runId: string) => {
     const appId = resolveAppIdForWebContents(event.sender.id);
-    if (!appId || !appCodexTaskManager) {
+    if (!appId || !appAgentTaskManager) {
       return null;
     }
-    return appCodexTaskManager.get(appId, runId);
-  });
+    return appAgentTaskManager.get(appId, runId);
+  };
+  ipcMain.handle(IPC_CHANNELS.appAgentTaskGet, handleAppAgentTaskGet);
+  ipcMain.handle(IPC_CHANNELS.appCodexTaskGet, handleAppAgentTaskGet);
 
-  ipcMain.handle(IPC_CHANNELS.appCodexTaskCancel, async (event, runId: string) => {
+  const handleAppAgentTaskCancel = async (event: IpcMainInvokeEvent, runId: string) => {
     const appId = resolveAppIdForWebContents(event.sender.id);
-    if (!appId || !appCodexTaskManager) {
+    if (!appId || !appAgentTaskManager) {
       return { success: false };
     }
-    return appCodexTaskManager.cancel(appId, runId);
-  });
+    return appAgentTaskManager.cancel(appId, runId);
+  };
+  ipcMain.handle(IPC_CHANNELS.appAgentTaskCancel, handleAppAgentTaskCancel);
+  ipcMain.handle(IPC_CHANNELS.appCodexTaskCancel, handleAppAgentTaskCancel);
 
-  ipcMain.handle(IPC_CHANNELS.appCodexTaskApprovePermission, async (
-    event,
+  const handleAppAgentTaskApprovePermission = async (
+    event: IpcMainInvokeEvent,
     runId: string,
     requestId: string,
     decision: 'allow' | 'deny',
   ) => {
     const appId = resolveAppIdForWebContents(event.sender.id);
-    if (!appId || !appCodexTaskManager) {
+    if (!appId || !appAgentTaskManager) {
       return { success: false };
     }
-    return appCodexTaskManager.approvePermission(appId, runId, requestId, decision);
-  });
+    return appAgentTaskManager.approvePermission(appId, runId, requestId, decision);
+  };
+  ipcMain.handle(IPC_CHANNELS.appAgentTaskApprovePermission, handleAppAgentTaskApprovePermission);
+  ipcMain.handle(IPC_CHANNELS.appCodexTaskApprovePermission, handleAppAgentTaskApprovePermission);
 
-  ipcMain.handle(IPC_CHANNELS.appCodexConversationCreate, async (event, input: AppCodexConversationCreateInput) => {
+  const normalizeAppAgentRuntime = (runtime?: AppAgentRuntimeInput): Partial<AgentRuntime> => {
+    const provider = normalizeAgentProvider(runtime?.provider);
+    const rawModel = typeof runtime?.model === 'string' ? runtime.model.trim() : '';
+    const model = provider && rawModel && rawModel !== 'auto' ? rawModel : undefined;
+    const params = runtime?.modelParams && typeof runtime.modelParams === 'object' ? runtime.modelParams : {};
+    const rawEffort = runtime?.effort === 'default' ? undefined : runtime?.effort;
+    const effort = rawEffort ?? params.effort ?? params.reasoningEffort;
+    const normalizedEffort = provider && effort !== undefined
+      ? provider === 'claude'
+        ? normalizeClaudeEffort(effort, BUILT_IN_CLAUDE_EFFORT)
+        : normalizeCodexReasoningEffort(effort, BUILT_IN_CODEX_REASONING)
+      : undefined;
+    return {
+      ...(provider ? { provider } : {}),
+      ...(model ? { model } : {}),
+      ...(normalizedEffort ? { effort: normalizedEffort } : {}),
+    };
+  };
+
+  const conversationToThreadSummary = (conversation: Awaited<ReturnType<AppAgentConversationManager['get']>>) => {
+    if (!conversation) {
+      return null;
+    }
+    return {
+      desktop_thread_id: conversation.conversationId,
+      title: conversation.title,
+      status: conversation.activeRun?.status ?? 'idle',
+      ...(conversation.activeRun ? { active_run: conversationToRunSummary(conversation.conversationId, conversation.activeRun) ?? undefined } : {}),
+      messages: conversation.messages.map((message) => ({
+        id: message.messageId,
+        role: message.role,
+        content: message.text,
+        created_at: message.createdAt,
+      })),
+      ...(conversation.activeRun?.progressLog ? { progressLog: conversation.activeRun.progressLog } : {}),
+    };
+  };
+
+  const conversationToRunSummary = (
+    desktopThreadId: string,
+    run: NonNullable<Awaited<ReturnType<AppAgentConversationManager['get']>>>['activeRun'],
+  ) => {
+    if (!run) {
+      return null;
+    }
+    return {
+      desktop_thread_id: desktopThreadId,
+      desktop_run_id: run.runId,
+      status: run.status,
+      ...(run.error ? { error: run.error } : {}),
+      ...(run.progressLog ? { progressLog: run.progressLog } : {}),
+    };
+  };
+
+  const handleAppAgentThreadCreate = async (event: IpcMainInvokeEvent, input: AppAgentThreadCreateInput) => {
+    const appId = resolveAppIdForWebContents(event.sender.id);
+    if (!appId || !appAgentConversationManager) {
+      throw new Error('app_agent_thread_unavailable');
+    }
+    const initialPrompt = typeof input?.initialPrompt === 'string' ? input.initialPrompt.trim() : '';
+    if (!initialPrompt) {
+      throw new Error('agent_thread_initial_prompt_required');
+    }
+    const conversation = await appAgentConversationManager.create(appId, {
+      title: input.title,
+      agentId: input.manifestAgentId,
+      metadata: {
+        ...(input.metadata ?? {}),
+        agentId: input.manifestAgentId ?? '',
+        manifestAgentId: input.manifestAgentId ?? '',
+        initialPrompt,
+      },
+    });
+    return conversationToThreadSummary(conversation);
+  };
+  ipcMain.handle(IPC_CHANNELS.appAgentThreadCreate, handleAppAgentThreadCreate);
+
+  const handleAppAgentThreadRunStart = async (event: IpcMainInvokeEvent, input: AppAgentThreadRunStartInput) => {
+    const appId = resolveAppIdForWebContents(event.sender.id);
+    if (!appId || !appAgentConversationManager) {
+      throw new Error('app_agent_thread_unavailable');
+    }
+    const conversation = await appAgentConversationManager.sendMessage(appId, {
+      conversationId: input.desktopThreadId,
+      message: input.message,
+      context: input.context,
+      workspacePath: input.workspacePath,
+      ...normalizeAppAgentRuntime(input.runtime),
+    });
+    return conversationToRunSummary(input.desktopThreadId, conversation.activeRun) ?? {
+      desktop_thread_id: input.desktopThreadId,
+      desktop_run_id: '',
+      status: 'queued',
+    };
+  };
+  ipcMain.handle(IPC_CHANNELS.appAgentThreadRunStart, handleAppAgentThreadRunStart);
+
+  const handleAppAgentThreadGet = async (event: IpcMainInvokeEvent, desktopThreadId: string) => {
+    const appId = resolveAppIdForWebContents(event.sender.id);
+    if (!appId || !appAgentConversationManager) {
+      return null;
+    }
+    return conversationToThreadSummary(await appAgentConversationManager.get(appId, desktopThreadId));
+  };
+  ipcMain.handle(IPC_CHANNELS.appAgentThreadGet, handleAppAgentThreadGet);
+
+  const handleAppAgentThreadRunGet = async (
+    event: IpcMainInvokeEvent,
+    desktopThreadId: string,
+    desktopRunId: string,
+  ) => {
+    const appId = resolveAppIdForWebContents(event.sender.id);
+    if (!appId || !appAgentConversationManager) {
+      return null;
+    }
+    const conversation = await appAgentConversationManager.get(appId, desktopThreadId);
+    const run = conversation?.activeRun?.runId === desktopRunId ? conversation.activeRun : undefined;
+    return conversationToRunSummary(desktopThreadId, run);
+  };
+  ipcMain.handle(IPC_CHANNELS.appAgentThreadRunGet, handleAppAgentThreadRunGet);
+
+  const handleAppAgentThreadRunCancel = async (event: IpcMainInvokeEvent, input: AppAgentThreadRunControlInput) => {
+    const appId = resolveAppIdForWebContents(event.sender.id);
+    if (!appId || !appAgentConversationManager) {
+      return { success: false };
+    }
+    return await appAgentConversationManager.cancel(appId, input.desktopThreadId, input.desktopRunId);
+  };
+  ipcMain.handle(IPC_CHANNELS.appAgentThreadRunCancel, handleAppAgentThreadRunCancel);
+
+  const handleAppAgentThreadRunSteer = async (event: IpcMainInvokeEvent, input: AppAgentThreadRunSteerInput) => {
+    const appId = resolveAppIdForWebContents(event.sender.id);
+    if (!appId || !appAgentConversationManager) {
+      throw new Error('app_agent_thread_unavailable');
+    }
+    return await appAgentConversationManager.steerRun(appId, input.desktopThreadId, input.desktopRunId, {
+      message: input.message,
+      context: input.context,
+      workspacePath: input.workspacePath,
+      ...normalizeAppAgentRuntime(input.runtime),
+    });
+  };
+  ipcMain.handle(IPC_CHANNELS.appAgentThreadRunSteer, handleAppAgentThreadRunSteer);
+
+  const handleAppAgentConversationCreate = async (event: IpcMainInvokeEvent, input: AppCodexConversationCreateInput) => {
     const appId = resolveAppIdForWebContents(event.sender.id);
     if (!appId) {
       throw new Error('app_window_not_authorized');
     }
-    if (!appCodexConversationManager) {
+    if (!appAgentConversationManager) {
       throw new Error('app_codex_conversation_manager_unavailable');
     }
     try {
-      return await appCodexConversationManager.create(appId, input ?? {});
+      return await appAgentConversationManager.create(appId, input ?? {});
     } catch (error) {
       desktopErrorReporter?.reportAppCodexStartFailure({
         appId,
@@ -6121,21 +6819,23 @@ const registerIpcHandlers = (): void => {
       });
       throw error;
     }
-  });
+  };
+  ipcMain.handle(IPC_CHANNELS.appAgentConversationCreate, handleAppAgentConversationCreate);
+  ipcMain.handle(IPC_CHANNELS.appCodexConversationCreate, handleAppAgentConversationCreate);
 
-  ipcMain.handle(IPC_CHANNELS.appCodexConversationSendMessage, async (
-    event,
+  const handleAppAgentConversationSendMessage = async (
+    event: IpcMainInvokeEvent,
     input: AppCodexConversationSendMessageInput,
   ) => {
     const appId = resolveAppIdForWebContents(event.sender.id);
     if (!appId) {
       throw new Error('app_window_not_authorized');
     }
-    if (!appCodexConversationManager) {
+    if (!appAgentConversationManager) {
       throw new Error('app_codex_conversation_manager_unavailable');
     }
     try {
-      return await appCodexConversationManager.sendMessage(appId, input);
+      return await appAgentConversationManager.sendMessage(appId, input);
     } catch (error) {
       desktopErrorReporter?.reportAppCodexStartFailure({
         appId,
@@ -6144,57 +6844,69 @@ const registerIpcHandlers = (): void => {
       });
       throw error;
     }
-  });
+  };
+  ipcMain.handle(IPC_CHANNELS.appAgentConversationSendMessage, handleAppAgentConversationSendMessage);
+  ipcMain.handle(IPC_CHANNELS.appCodexConversationSendMessage, handleAppAgentConversationSendMessage);
 
-  ipcMain.handle(IPC_CHANNELS.appCodexConversationGet, async (event, conversationId: string) => {
+  const handleAppAgentConversationGet = async (event: IpcMainInvokeEvent, conversationId: string) => {
     const appId = resolveAppIdForWebContents(event.sender.id);
-    if (!appId || !appCodexConversationManager) {
+    if (!appId || !appAgentConversationManager) {
       return null;
     }
-    return await appCodexConversationManager.get(appId, conversationId);
-  });
+    return await appAgentConversationManager.get(appId, conversationId);
+  };
+  ipcMain.handle(IPC_CHANNELS.appAgentConversationGet, handleAppAgentConversationGet);
+  ipcMain.handle(IPC_CHANNELS.appCodexConversationGet, handleAppAgentConversationGet);
 
-  ipcMain.handle(IPC_CHANNELS.appCodexConversationList, async (event) => {
+  const handleAppAgentConversationList = async (event: IpcMainInvokeEvent) => {
     const appId = resolveAppIdForWebContents(event.sender.id);
-    if (!appId || !appCodexConversationManager) {
+    if (!appId || !appAgentConversationManager) {
       return [];
     }
-    return await appCodexConversationManager.list(appId);
-  });
+    return await appAgentConversationManager.list(appId);
+  };
+  ipcMain.handle(IPC_CHANNELS.appAgentConversationList, handleAppAgentConversationList);
+  ipcMain.handle(IPC_CHANNELS.appCodexConversationList, handleAppAgentConversationList);
 
-  ipcMain.handle(IPC_CHANNELS.appCodexConversationDelete, async (event, conversationId: string) => {
+  const handleAppAgentConversationDelete = async (event: IpcMainInvokeEvent, conversationId: string) => {
     const appId = resolveAppIdForWebContents(event.sender.id);
-    if (!appId || !appCodexConversationManager) {
+    if (!appId || !appAgentConversationManager) {
       return { success: false };
     }
-    return await appCodexConversationManager.delete(appId, conversationId);
-  });
+    return await appAgentConversationManager.delete(appId, conversationId);
+  };
+  ipcMain.handle(IPC_CHANNELS.appAgentConversationDelete, handleAppAgentConversationDelete);
+  ipcMain.handle(IPC_CHANNELS.appCodexConversationDelete, handleAppAgentConversationDelete);
 
-  ipcMain.handle(IPC_CHANNELS.appCodexConversationCancelRun, async (
-    event,
+  const handleAppAgentConversationCancelRun = async (
+    event: IpcMainInvokeEvent,
     conversationId: string,
     runId: string,
   ) => {
     const appId = resolveAppIdForWebContents(event.sender.id);
-    if (!appId || !appCodexConversationManager) {
+    if (!appId || !appAgentConversationManager) {
       return { success: false };
     }
-    return await appCodexConversationManager.cancel(appId, conversationId, runId);
-  });
+    return await appAgentConversationManager.cancel(appId, conversationId, runId);
+  };
+  ipcMain.handle(IPC_CHANNELS.appAgentConversationCancelRun, handleAppAgentConversationCancelRun);
+  ipcMain.handle(IPC_CHANNELS.appCodexConversationCancelRun, handleAppAgentConversationCancelRun);
 
-  ipcMain.handle(IPC_CHANNELS.appCodexConversationApprovePermission, async (
-    event,
+  const handleAppAgentConversationApprovePermission = async (
+    event: IpcMainInvokeEvent,
     conversationId: string,
     runId: string,
     requestId: string,
     decision: 'allow' | 'deny',
   ) => {
     const appId = resolveAppIdForWebContents(event.sender.id);
-    if (!appId || !appCodexConversationManager) {
+    if (!appId || !appAgentConversationManager) {
       return { success: false };
     }
-    return appCodexConversationManager.approvePermission(appId, conversationId, runId, requestId, decision);
-  });
+    return appAgentConversationManager.approvePermission(appId, conversationId, runId, requestId, decision);
+  };
+  ipcMain.handle(IPC_CHANNELS.appAgentConversationApprovePermission, handleAppAgentConversationApprovePermission);
+  ipcMain.handle(IPC_CHANNELS.appCodexConversationApprovePermission, handleAppAgentConversationApprovePermission);
 
   ipcMain.handle(IPC_CHANNELS.dbListTables, async (_event, appId: string) => {
     if (!BetterSqlite3) {
@@ -6383,11 +7095,11 @@ app.whenReady().then(async () => {
     getToolSettings: () => agentToolSettings,
     appendInstallLog,
     requestPermission: async (runId, request) => {
-      const taskDecision = await (appCodexTaskManager?.requestPermission(runId, request) ?? Promise.resolve(null));
+      const taskDecision = await (appAgentTaskManager?.requestPermission(runId, request) ?? Promise.resolve(null));
       if (taskDecision !== null) {
         return taskDecision;
       }
-      const conversationDecision = await (appCodexConversationManager?.requestPermission(runId, request) ?? Promise.resolve(null));
+      const conversationDecision = await (appAgentConversationManager?.requestPermission(runId, request) ?? Promise.resolve(null));
       if (conversationDecision !== null) {
         return conversationDecision;
       }
@@ -6476,8 +7188,10 @@ app.whenReady().then(async () => {
     metadataRoot: getForgerMetadataRoot(),
     legacyMetadataRoot: getLegacyForgerMetadataRoot(),
     codexHome: getCodexHome(),
+    getAgentRuntime: chooseAgentRuntime,
     agentContractVersion: FORGER_AGENT_CONTRACT_VERSION,
     getCodexCliPath: async () => await resolveCodexCliPath(getCodexRoot()),
+    getClaudeCliPath: async () => (await resolveClaudeCli())?.path ?? null,
     getCodexPathEntries: async (appId?: string) => {
       const pathEntries = new Set<string>();
       const record = appId ? registry.apps[appId] : undefined;
@@ -6514,6 +7228,10 @@ app.whenReady().then(async () => {
     },
     getCodexAuthenticated: async () => {
       const status = await getCodexAuthStatus();
+      return status.authenticated;
+    },
+    getClaudeAuthenticated: async () => {
+      const status = await getClaudeAuthStatus();
       return status.authenticated;
     },
     createForgerMcpSession: (runId, appId, locale) =>
@@ -6555,11 +7273,13 @@ app.whenReady().then(async () => {
       emitChatRunUpdated(event as { run: unknown });
     },
   });
-  appCodexTaskManager = new AppCodexTaskManager({
+  appAgentTaskManager = new AppAgentTaskManager({
     privateAppsRoot: getPrivateAppsRoot(),
     metadataRoot: getForgerMetadataRoot(),
     codexHome: getCodexHome(),
+    getAgentRuntime: chooseAgentRuntime,
     getCodexCliPath: async () => await resolveCodexCliPath(getCodexRoot()),
+    getClaudeCliPath: async () => (await resolveClaudeCli())?.path ?? null,
     getCodexPathEntries: async (appId?: string) => {
       const pathEntries = new Set<string>();
       const record = appId ? registry.apps[appId] : undefined;
@@ -6598,6 +7318,10 @@ app.whenReady().then(async () => {
       const status = await getCodexAuthStatus();
       return status.authenticated;
     },
+    getClaudeAuthenticated: async () => {
+      const status = await getClaudeAuthStatus();
+      return status.authenticated;
+    },
     resolvePromptTemplates: resolveInstalledPromptTemplates,
     createForgerMcpSession: (runId, appId) =>
       forgerMcpServer?.createSession(runId, appId, { caller: 'app-agent', appIds: [appId] }) ?? null,
@@ -6617,15 +7341,18 @@ app.whenReady().then(async () => {
       desktopErrorReporter?.reportAppCodexTaskEvent(event);
       const target = appWindows.get(event.task.appId);
       if (target && !target.isDestroyed()) {
+        target.webContents.send(IPC_CHANNELS.appAgentTaskUpdated, event);
         target.webContents.send(IPC_CHANNELS.appCodexTaskUpdated, event);
       }
     },
   });
-  appCodexConversationManager = new AppCodexConversationManager({
+  appAgentConversationManager = new AppAgentConversationManager({
     privateAppsRoot: getPrivateAppsRoot(),
     metadataRoot: getForgerMetadataRoot(),
     codexHome: getCodexHome(),
+    getAgentRuntime: chooseAgentRuntime,
     getCodexCliPath: async () => await resolveCodexCliPath(getCodexRoot()),
+    getClaudeCliPath: async () => (await resolveClaudeCli())?.path ?? null,
     getCodexPathEntries: async (appId?: string) => {
       const pathEntries = new Set<string>();
       const record = appId ? registry.apps[appId] : undefined;
@@ -6662,6 +7389,10 @@ app.whenReady().then(async () => {
     },
     getCodexAuthenticated: async () => {
       const status = await getCodexAuthStatus();
+      return status.authenticated;
+    },
+    getClaudeAuthenticated: async () => {
+      const status = await getClaudeAuthStatus();
       return status.authenticated;
     },
     hasCodexConversation: hasInstalledCodexConversation,
@@ -6684,7 +7415,39 @@ app.whenReady().then(async () => {
       desktopErrorReporter?.reportAppCodexConversationEvent(event);
       const target = appWindows.get(event.conversation.appId);
       if (target && !target.isDestroyed()) {
+        target.webContents.send(IPC_CHANNELS.appAgentConversationEvent, event);
         target.webContents.send(IPC_CHANNELS.appCodexConversationEvent, event);
+        if (event.type === 'run.message.completed') {
+          return;
+        }
+        const desktopThreadId = event.conversation.conversationId;
+        const normalizedType = event.type === 'conversation.created'
+          ? 'thread.created'
+          : event.type === 'message.created'
+            ? 'run.message'
+            : event.type;
+        target.webContents.send(IPC_CHANNELS.appAgentThreadEvent, {
+          type: normalizedType,
+          desktop_thread_id: desktopThreadId,
+          ...(event.run ? { desktop_run_id: event.run.runId } : {}),
+          thread: {
+            desktop_thread_id: desktopThreadId,
+            title: event.conversation.title,
+            status: event.run?.status ?? event.conversation.activeRun?.status ?? 'idle',
+          },
+          ...(event.run
+            ? {
+                run: {
+                  desktop_thread_id: desktopThreadId,
+                  desktop_run_id: event.run.runId,
+                  status: event.run.status,
+                  ...(event.run.error ? { error: event.run.error } : {}),
+                  ...(event.run.progressLog ? { progressLog: event.run.progressLog } : {}),
+                },
+              }
+            : {}),
+          ...(event.progress ? { progress: event.progress } : {}),
+        });
       }
     },
   });
@@ -6692,14 +7455,20 @@ app.whenReady().then(async () => {
     forgerHomeRoot: getForgerHomeRoot(),
     metadataRoot: getForgerMetadataRoot(),
     codexHome: getCodexHome(),
+    getAgentRuntime: chooseAgentRuntime,
     getInstalledApps: () => Object.values(registry.apps).map(toAppSummary),
     getCodexCliPath: async () => await resolveCodexCliPath(getCodexRoot()),
+    getClaudeCliPath: async () => (await resolveClaudeCli())?.path ?? null,
     getCodexPathEntries: async () => {
       const nodeRuntime = await ensureRuntimeInstalled('node', DEFAULT_NODE_VERSION);
       return getRuntimePathEntries(nodeRuntime);
     },
     getCodexAuthenticated: async () => {
       const status = await getCodexAuthStatus();
+      return status.authenticated;
+    },
+    getClaudeAuthenticated: async () => {
+      const status = await getClaudeAuthStatus();
       return status.authenticated;
     },
     createForgerMcpSession: (runId, appId, appIds) =>

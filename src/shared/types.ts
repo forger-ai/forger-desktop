@@ -1,6 +1,6 @@
 export type AppStatus = 'not_installed' | 'installing' | 'installed' | 'running' | 'error' | 'conflict';
 
-export type AppCategory = 'finanzas' | 'hogar' | 'salud' | 'productividad';
+export type AppCategory = 'finanzas' | 'hogar' | 'salud' | 'productividad' | 'developer_tools';
 
 export interface AppSummary {
   id: string;
@@ -43,6 +43,7 @@ export interface AppPromptTemplate {
   prompt: string;
   model?: string;
   reasoningEffort?: CodexReasoningEffort;
+  runtime?: AgentRuntime;
 }
 
 export interface AppAgent {
@@ -50,8 +51,11 @@ export interface AppAgent {
   title: string;
   description?: string;
   initialPrompt: string;
+  kind?: 'classic' | 'thread_interface';
+  initialPromptTemplate?: string;
   model?: string;
   reasoningEffort?: CodexReasoningEffort;
+  runtime?: AgentRuntime;
   legacy?: boolean;
 }
 
@@ -238,11 +242,21 @@ export interface Settings {
     model: string;
     reasoningEffort: CodexReasoningEffort;
   };
+  defaultAgentProvider: AgentProvider | 'auto';
+  agentDefaults: AgentDefaults;
+  providerConnections: Partial<Record<AgentProvider, string>>;
 }
 
 export interface UpdateCodexDefaultsInput {
   model: string;
   reasoningEffort: CodexReasoningEffort;
+}
+
+export interface UpdateAgentDefaultsInput {
+  defaultProvider?: AgentProvider | 'auto';
+  provider?: AgentProvider;
+  model?: string;
+  effort?: AgentEffort;
 }
 
 export type MemoryScope = 'global' | 'app';
@@ -337,8 +351,44 @@ export interface CodexAuthStatus {
   codexCliPath?: string;
 }
 
+export type AgentProvider = 'codex' | 'claude';
+export type ClaudeEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+export type AgentEffort = CodexReasoningEffort | ClaudeEffort;
+
+export interface AgentRuntime {
+  provider: AgentProvider;
+  model: string;
+  effort: AgentEffort;
+}
+
+export interface AgentDefaults {
+  codex: {
+    model: string;
+    reasoningEffort: CodexReasoningEffort;
+  };
+  claude: {
+    model: string;
+    effort: ClaudeEffort;
+  };
+}
+
+export interface AgentModelOptions {
+  codex: CodexModelOption[];
+  claude: Array<{ displayModelName: string; realModelName: string; defaultEffort: ClaudeEffort }>;
+}
+
+export interface ClaudeAuthStatus {
+  installed: boolean;
+  authenticated: boolean;
+  source: 'managed' | 'system' | 'missing';
+  claudeCliPath?: string;
+  version?: string;
+  statusText?: string;
+  userMessage?: string;
+}
+
 export interface DesktopErrorReportInput {
-  source: 'desktop' | 'renderer' | 'app' | 'codex' | 'automation' | 'update';
+  source: 'desktop' | 'renderer' | 'app' | 'agent' | 'codex' | 'automation' | 'update';
   operation?: string;
   message: string;
   technicalCode?: string;
@@ -874,8 +924,10 @@ export interface ChatStartRunInput {
   threadId?: string | null;
   userLanguage?: string;
   sharedFiles?: SharedFileRef[];
+  provider?: AgentProvider;
   model?: string;
   reasoningEffort?: CodexReasoningEffort;
+  effort?: AgentEffort;
   dangerMode?: boolean;
   conversationId?: string;
 }
@@ -1161,8 +1213,11 @@ export interface AppCodexConversationSendMessageInput {
   conversationId: string;
   message: string;
   context?: string;
+  workspacePath?: string;
+  provider?: AgentProvider;
   model?: string;
   reasoningEffort?: CodexReasoningEffort;
+  effort?: AgentEffort;
   locale?: string;
   attachments?: AppCodexConversationAttachment[];
 }
@@ -1175,6 +1230,7 @@ export interface AppCodexConversationEvent {
     | 'run.started'
     | 'run.needs_permission'
     | 'run.progress'
+    | 'run.steering.accepted'
     | 'run.message.completed'
     | 'run.completed'
     | 'run.failed'
@@ -1185,8 +1241,98 @@ export interface AppCodexConversationEvent {
   progress?: string;
 }
 
+export type AppAgentRunEventType =
+  | 'thread.created'
+  | 'run.started'
+  | 'run.progress'
+  | 'run.message'
+  | 'run.needs_permission'
+  | 'run.steering.accepted'
+  | 'run.completed'
+  | 'run.failed'
+  | 'run.canceled';
+
+export interface AppAgentRuntimeInput {
+  provider?: string;
+  model?: string;
+  effort?: AgentEffort | 'default';
+  modelParams?: Record<string, unknown>;
+}
+
+export interface AppAgentThreadCreateInput {
+  title?: string;
+  manifestAgentId?: string;
+  initialPrompt: string;
+  runtime?: AppAgentRuntimeInput;
+  workspacePath?: string;
+  metadata?: Record<string, string | number | boolean | null>;
+}
+
+export interface AppAgentThreadRunStartInput {
+  desktopThreadId: string;
+  message: string;
+  context?: string;
+  runtime?: AppAgentRuntimeInput;
+  workspacePath?: string;
+  metadata?: Record<string, string | number | boolean | null>;
+}
+
+export interface AppAgentThreadRunControlInput {
+  desktopThreadId: string;
+  desktopRunId: string;
+}
+
+export interface AppAgentThreadRunSteerInput extends AppAgentThreadRunControlInput {
+  message: string;
+  context?: string;
+  runtime?: AppAgentRuntimeInput;
+  workspacePath?: string;
+}
+
+export interface AppAgentThreadSummary {
+  desktop_thread_id: string;
+  title: string;
+  status: string;
+  active_run?: AppAgentRunSummary;
+  messages?: Array<{
+    id: string;
+    role: string;
+    content: string;
+    created_at: string;
+  }>;
+  progressLog?: string[];
+}
+
+export interface AppAgentRunSummary {
+  desktop_thread_id: string;
+  desktop_run_id: string;
+  status: string;
+  error?: string;
+  progressLog?: string[];
+}
+
+export interface AppAgentThreadEvent {
+  type: AppAgentRunEventType;
+  desktop_thread_id: string;
+  desktop_run_id?: string;
+  thread?: AppAgentThreadSummary;
+  run?: AppAgentRunSummary;
+  message?: string;
+  progress?: string;
+}
+
+export interface AppAgentThreadSteerResult {
+  accepted: boolean;
+  mode: 'live' | 'queued_for_next_run' | 'requires_cancel_resume';
+}
+
 export interface ForgerAppApi {
-  getContext: () => Promise<{ locale?: string; agents?: AppAgent[] }>;
+  getContext: () => Promise<{
+    locale?: string;
+    agents?: AppAgent[];
+    agentModelOptions?: AgentModelOptions;
+    agentDefaults?: AgentDefaults;
+  }>;
   getAiSubscriptionStatus: () => Promise<AppAiSubscriptionStatus>;
   selectExternalFolder: () => Promise<AppExternalFolderSelection>;
   tools: {
@@ -1194,6 +1340,40 @@ export interface ForgerAppApi {
     getStatus: (toolId: string) => Promise<OfficialToolSummary | null>;
     call: (input: CallOfficialToolInput) => Promise<CallOfficialToolResult>;
   };
+  agentRuns: {
+    createAgentThread: (input: AppAgentThreadCreateInput) => Promise<AppAgentThreadSummary>;
+    startAgentThreadRun: (input: AppAgentThreadRunStartInput) => Promise<AppAgentRunSummary>;
+    getAgentThread: (desktopThreadId: string) => Promise<AppAgentThreadSummary | null>;
+    getAgentRun: (desktopThreadId: string, desktopRunId: string) => Promise<AppAgentRunSummary | null>;
+    cancelAgentThreadRun: (input: AppAgentThreadRunControlInput) => Promise<{ success: boolean }>;
+    steerAgentThreadRun: (input: AppAgentThreadRunSteerInput) => Promise<AppAgentThreadSteerResult>;
+    onAgentThreadEvent: (listener: (event: AppAgentThreadEvent) => void) => () => void;
+  };
+  startAgentTask: (input: AppCodexTaskStartInput) => Promise<AppCodexTaskSummary>;
+  getAgentTask: (runId: string) => Promise<AppCodexTaskSummary | null>;
+  cancelAgentTask: (runId: string) => Promise<{ success: boolean }>;
+  onAgentTaskUpdated: (listener: (event: AppCodexTaskEvent) => void) => () => void;
+  createAgentConversation: (input?: AppCodexConversationCreateInput) => Promise<AppCodexConversation>;
+  sendAgentConversationMessage: (input: AppCodexConversationSendMessageInput) => Promise<AppCodexConversation>;
+  getAgentConversation: (conversationId: string) => Promise<AppCodexConversation | null>;
+  listAgentConversations: () => Promise<AppCodexConversation[]>;
+  deleteAgentConversation: (conversationId: string) => Promise<{ success: boolean }>;
+  cancelAgentConversationRun: (
+    conversationId: string,
+    runId: string,
+  ) => Promise<{ success: boolean }>;
+  onAgentConversationEvent: (listener: (event: AppCodexConversationEvent) => void) => () => void;
+  approveAgentTaskPermission: (
+    runId: string,
+    requestId: string,
+    decision: 'allow' | 'deny',
+  ) => Promise<{ success: boolean }>;
+  approveAgentConversationPermission: (
+    conversationId: string,
+    runId: string,
+    requestId: string,
+    decision: 'allow' | 'deny',
+  ) => Promise<{ success: boolean }>;
   startCodexTask: (input: AppCodexTaskStartInput) => Promise<AppCodexTaskSummary>;
   getCodexTask: (runId: string) => Promise<AppCodexTaskSummary | null>;
   cancelCodexTask: (runId: string) => Promise<{ success: boolean }>;
@@ -1316,6 +1496,7 @@ export interface ForgerDesktopApi {
   onRuntimeStatusChanged: (listener: (event: RuntimeStatus) => void) => () => void;
   getSettings: () => Promise<Settings>;
   updateCodexDefaults: (input: UpdateCodexDefaultsInput) => Promise<Settings>;
+  updateAgentDefaults: (input: UpdateAgentDefaultsInput) => Promise<Settings>;
   getDesktopUpdateState: () => Promise<DesktopUpdateState>;
   checkDesktopUpdates: () => Promise<DesktopUpdateState>;
   downloadDesktopUpdate: () => Promise<DesktopUpdateState>;
@@ -1336,6 +1517,9 @@ export interface ForgerDesktopApi {
   connectCodexAuth: () => Promise<{ success: boolean; userMessage: string } & FailureDiagnosticFields>;
   disconnectCodexAuth: () => Promise<{ success: boolean; userMessage: string } & FailureDiagnosticFields>;
   reinstallCodex: () => Promise<{ success: boolean; userMessage: string; status?: CodexAuthStatus } & FailureDiagnosticFields>;
+  getClaudeAuthStatus: () => Promise<ClaudeAuthStatus>;
+  connectClaudeAuth: () => Promise<{ success: boolean; userMessage: string; status?: ClaudeAuthStatus } & FailureDiagnosticFields>;
+  reinstallClaude: () => Promise<{ success: boolean; userMessage: string; status?: ClaudeAuthStatus } & FailureDiagnosticFields>;
   submitDesktopErrorReport: (input: DesktopErrorReportPreview) => Promise<{ success: boolean; userMessage: string; technicalCode?: string }>;
   onDesktopErrorReportRequested: (listener: (event: DesktopErrorReportPreview) => void) => () => void;
   listAgentTools: () => Promise<AgentToolPackageDefinition[]>;
