@@ -2,6 +2,7 @@ import AppsRounded from '@mui/icons-material/AppsRounded';
 import AutoAwesomeRounded from '@mui/icons-material/AutoAwesomeRounded';
 import BackupRounded from '@mui/icons-material/BackupRounded';
 import EventRepeatRounded from '@mui/icons-material/EventRepeatRounded';
+import ForumRounded from '@mui/icons-material/ForumRounded';
 import CategoryRounded from '@mui/icons-material/CategoryRounded';
 import ConstructionRounded from '@mui/icons-material/ConstructionRounded';
 import DevicesRounded from '@mui/icons-material/DevicesRounded';
@@ -32,6 +33,7 @@ export type View =
   | 'my-apps'
   | 'catalog'
   | 'chat'
+  | 'friends'
   | 'automations'
   | 'files'
   | 'backups'
@@ -54,6 +56,7 @@ const mainNav = [
   { id: 'my-apps' as const, icon: <AppsRounded /> },
   { id: 'catalog' as const, icon: <CategoryRounded /> },
   { id: 'chat' as const, icon: <AutoAwesomeRounded /> },
+  { id: 'friends' as const, icon: <ForumRounded /> },
   { id: 'automations' as const, icon: <EventRepeatRounded /> },
   { id: 'files' as const, icon: <InsertDriveFileRounded /> },
   { id: 'backups' as const, icon: <BackupRounded /> },
@@ -100,6 +103,7 @@ export function Sidebar({ currentView, onNavigate, t, desktopUpdateState }: Side
     'my-apps': t.nav.myApps,
     catalog: t.nav.catalog,
     chat: t.nav.chat,
+    friends: 'Friends',
     automations: t.nav.automations,
     files: t.nav.files,
     backups: t.nav.backups,

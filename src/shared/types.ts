@@ -142,6 +142,7 @@ export interface CatalogApp extends AppSummary {
 export interface ForgerAccountUser {
   id: number;
   email: string;
+  username?: string;
   firstName?: string;
   lastName?: string;
   confirmed: boolean;
@@ -159,6 +160,7 @@ export type SubscriptionTier = 'free' | 'demo' | 'pro';
 export interface ForgerAccountRegisterInput {
   firstName: string;
   lastName?: string;
+  username?: string;
   email: string;
   password: string;
   country?: string;
@@ -185,6 +187,8 @@ export interface CloudDeviceSummary {
   deviceUid: string;
   name: string;
   platform?: string;
+  publicKey?: string;
+  keyFingerprint?: string;
   paired: boolean;
   online: boolean;
   lastSeenAt?: string;
@@ -199,6 +203,84 @@ export interface CloudDevicesState {
   pairingExpiresAt?: string;
   userMessage?: string;
   technicalCode?: string;
+}
+
+export type FriendshipStatus = 'pending' | 'accepted' | 'declined' | 'canceled';
+
+export interface CloudFriendUser {
+  id: number;
+  username: string;
+  firstName?: string;
+  lastName?: string;
+  devices?: Array<{
+    id: number;
+    deviceUid: string;
+    publicKey?: string;
+    keyFingerprint?: string;
+    online?: boolean;
+  }>;
+}
+
+export interface CloudFriendship {
+  id: number;
+  status: FriendshipStatus;
+  requesterId: number;
+  addresseeId: number;
+  friend: CloudFriendUser;
+  createdAt: string;
+  updatedAt: string;
+  respondedAt?: string;
+}
+
+export type CloudMessageDeliveryMode = 'persistent' | 'ephemeral';
+export type CloudMessageSource = 'user' | 'app';
+export type CloudMessageStatus = 'stored' | 'delivered' | 'not_delivered' | 'pending_permission' | 'blocked';
+export type CloudAppMessagePermissionDecision = 'allow_once' | 'allow_always' | 'decline_once' | 'decline_always';
+
+export interface CloudMessageEnvelope {
+  id?: number;
+  recipientUserId?: number;
+  cloudDeviceId?: number;
+  deviceUid?: string;
+  keyFingerprint?: string;
+  ciphertext: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface CloudMessage {
+  id?: number;
+  sender: CloudFriendUser;
+  recipient: CloudFriendUser;
+  deliveryMode: CloudMessageDeliveryMode;
+  source: CloudMessageSource;
+  sourceAppId?: string;
+  sourceAppName?: string;
+  status: CloudMessageStatus;
+  clientMessageId?: string;
+  metadata: Record<string, unknown>;
+  envelopes: CloudMessageEnvelope[];
+  plaintext?: string;
+  deliveredAt?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface CloudSendMessageInput {
+  recipientUsername?: string;
+  recipientUserId?: number;
+  text: string;
+  delivery?: CloudMessageDeliveryMode;
+  source?: CloudMessageSource;
+  sourceAppId?: string;
+  sourceAppName?: string;
+}
+
+export interface CloudIdentityState {
+  publicKey: string;
+  keyFingerprint: string;
+  secretKeyPreview: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface AppRatingSummary {
@@ -500,6 +582,9 @@ export interface RemoteAppBackupSummary {
   fileCount: number;
   totalBytes: number;
   checksumSha256: string;
+  signature?: string;
+  signatureKeyFingerprint?: string;
+  signatureAlgorithm?: string;
   createdAt: string;
   updatedAt?: string;
   downloadUrl?: string;
@@ -1340,6 +1425,11 @@ export interface ForgerAppApi {
     getStatus: (toolId: string) => Promise<OfficialToolSummary | null>;
     call: (input: CallOfficialToolInput) => Promise<CallOfficialToolResult>;
   };
+  messages: {
+    sendMessage: (input: CloudSendMessageInput) => Promise<CloudMessage>;
+    listMessages: (friendUserId: number) => Promise<CloudMessage[]>;
+    onMessage: (listener: (message: CloudMessage) => void) => () => void;
+  };
   agentRuns: {
     createAgentThread: (input: AppAgentThreadCreateInput) => Promise<AppAgentThreadSummary>;
     startAgentThreadRun: (input: AppAgentThreadRunStartInput) => Promise<AppAgentRunSummary>;
@@ -1509,6 +1599,18 @@ export interface ForgerDesktopApi {
   onForgerAccountUpdated: (listener: (event: ForgerAccountSession & { userMessage?: string; technicalCode?: string }) => void) => () => void;
   getCloudDevices: () => Promise<CloudDevicesState>;
   generateDevicePairingCode: () => Promise<CloudDevicesState & { success: boolean }>;
+  listFriends: () => Promise<CloudFriendship[]>;
+  searchFriends: (username: string) => Promise<CloudFriendUser[]>;
+  sendFriendRequest: (username: string) => Promise<CloudFriendship>;
+  acceptFriendRequest: (id: number) => Promise<CloudFriendship>;
+  declineFriendRequest: (id: number) => Promise<CloudFriendship>;
+  cancelFriendRequest: (id: number) => Promise<CloudFriendship>;
+  listCloudMessages: (friendUserId: number) => Promise<CloudMessage[]>;
+  sendCloudMessage: (input: CloudSendMessageInput) => Promise<CloudMessage>;
+  decideAppMessagePermission: (cloudMessageId: number, decision: CloudAppMessagePermissionDecision) => Promise<CloudMessage>;
+  getCloudIdentity: () => Promise<CloudIdentityState>;
+  revealCloudSecretKey: () => Promise<string>;
+  regenerateCloudSecretKey: () => Promise<CloudIdentityState>;
   submitAppRating: (input: SubmitAppRatingInput) => Promise<{ success: boolean; rating?: AppRatingSummary; userMessage?: string; technicalCode?: string }>;
   submitAppFeedback: (input: SubmitAppFeedbackInput) => Promise<{ success: boolean; userMessage?: string; technicalCode?: string }>;
   openExternalUrl: (url: string) => Promise<{ success: boolean; userMessage?: string } & FailureDiagnosticFields>;

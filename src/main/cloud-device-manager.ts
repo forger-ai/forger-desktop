@@ -17,8 +17,10 @@ interface CloudDeviceManagerOptions {
   backendBaseUrl: string;
   backendClient: () => ForgerBackendClient | null;
   token: () => string | undefined;
+  getCloudIdentity: () => Promise<{ publicKey: string; keyFingerprint: string }>;
   getInstalledApps: () => AppSummary[];
   handleRelayRequest: (request: CloudRelayRequest) => Promise<CloudRelayResponse>;
+  handleFriendshipEvent?: (event: unknown) => Promise<void> | void;
   onAuthenticationInvalid?: (technicalCode: string) => Promise<void> | void;
 }
 
@@ -145,6 +147,7 @@ export class CloudDeviceManager {
       deviceSecret: stored.deviceSecret,
       name: os.hostname() || 'Forger Desktop',
       platform: `${process.platform}_${process.arch}`,
+      ...(await this.options.getCloudIdentity()),
     });
     this.currentDevice = device;
     this.stored = { ...stored, cloudId: device.id };
@@ -183,14 +186,16 @@ export class CloudDeviceManager {
 
     const socket = new WebSocket(url.toString());
     this.socket = socket;
-    const identifier = JSON.stringify({ channel: 'DeviceChannel' });
+    const deviceIdentifier = JSON.stringify({ channel: 'DeviceChannel' });
+    const friendshipIdentifier = JSON.stringify({ channel: 'FriendshipChannel' });
 
     socket.addEventListener('open', () => {
-      socket.send(JSON.stringify({ command: 'subscribe', identifier }));
+      socket.send(JSON.stringify({ command: 'subscribe', identifier: deviceIdentifier }));
+      socket.send(JSON.stringify({ command: 'subscribe', identifier: friendshipIdentifier }));
     });
 
     socket.addEventListener('message', (event) => {
-      void this.handleSocketMessage(identifier, event.data.toString());
+      void this.handleSocketMessage(deviceIdentifier, event.data.toString());
     });
 
     socket.addEventListener('close', () => {
@@ -227,10 +232,12 @@ export class CloudDeviceManager {
       return;
     }
     if (parsed.type === 'confirm_subscription') {
-      this.connected = true;
-      this.sendHeartbeat(identifier);
-      if (!this.heartbeatTimer) {
-        this.heartbeatTimer = setInterval(() => this.sendHeartbeat(identifier), 20_000);
+      if (raw.includes('DeviceChannel')) {
+        this.connected = true;
+        this.sendHeartbeat(identifier);
+        if (!this.heartbeatTimer) {
+          this.heartbeatTimer = setInterval(() => this.sendHeartbeat(identifier), 20_000);
+        }
       }
       return;
     }
@@ -240,6 +247,9 @@ export class CloudDeviceManager {
       return;
     }
     if (parsed.message?.type !== 'relay_request') {
+      if (parsed.message) {
+        await this.options.handleFriendshipEvent?.(parsed.message);
+      }
       return;
     }
     const response = await this.options.handleRelayRequest(parsed.message);

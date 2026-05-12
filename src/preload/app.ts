@@ -41,6 +41,9 @@ const IPC_CHANNELS = {
   appToolsListAvailable: 'forger:app:tools:list-available',
   appToolsGetStatus: 'forger:app:tools:get-status',
   appToolsCall: 'forger:app:tools:call',
+  appMessagesSend: 'forger:app:messages:send',
+  appMessagesList: 'forger:app:messages:list',
+  appMessagesEvent: 'forger:app:messages:event',
 } as const;
 
 const api: ForgerAppApi = {
@@ -58,6 +61,19 @@ const api: ForgerAppApi = {
     listAvailable: () => ipcRenderer.invoke(IPC_CHANNELS.appToolsListAvailable),
     getStatus: (toolId) => ipcRenderer.invoke(IPC_CHANNELS.appToolsGetStatus, toolId),
     call: (input) => ipcRenderer.invoke(IPC_CHANNELS.appToolsCall, input),
+  },
+  messages: {
+    sendMessage: (input) => ipcRenderer.invoke(IPC_CHANNELS.appMessagesSend, input),
+    listMessages: (friendUserId) => ipcRenderer.invoke(IPC_CHANNELS.appMessagesList, friendUserId),
+    onMessage: (listener) => {
+      const wrapped = (_event: Electron.IpcRendererEvent, event: unknown) => {
+        listener(event as Parameters<typeof listener>[0]);
+      };
+      ipcRenderer.on(IPC_CHANNELS.appMessagesEvent, wrapped);
+      return () => {
+        ipcRenderer.removeListener(IPC_CHANNELS.appMessagesEvent, wrapped);
+      };
+    },
   },
   agentRuns: {
     createAgentThread: (input) => ipcRenderer.invoke(IPC_CHANNELS.appAgentThreadCreate, input),

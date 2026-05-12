@@ -40,6 +40,7 @@ import type {
   AutomationUpsertInput,
   CatalogApp,
   CloudSyncSettings,
+  CloudIdentityState,
   AgentProvider,
   AgentEffort,
   ClaudeEffort,
@@ -84,6 +85,7 @@ import { ChatView, type ChatMessage, type ConversationHistoryItem } from '@rende
 import { DataView } from '@renderer/views/DataView';
 import { DevicesView } from '@renderer/views/DevicesView';
 import { FilesView } from '@renderer/views/FilesView';
+import { FriendsView } from '@renderer/views/FriendsView';
 import { InstalledAppsView } from '@renderer/views/InstalledAppsView';
 import { SettingsView } from '@renderer/views/SettingsView';
 import { SecretsView } from '@renderer/views/SecretsView';
@@ -332,6 +334,7 @@ function App() {
   const [remoteBackups, setRemoteBackups] = useState<RemoteAppBackupSummary[]>([]);
   const [remoteBackupsUsage, setRemoteBackupsUsage] = useState<RemoteBackupsUsage>(initialRemoteBackupsUsage);
   const [cloudSyncSettings, setCloudSyncSettings] = useState<CloudSyncSettings>({ appSync: {} });
+  const [cloudIdentity, setCloudIdentity] = useState<CloudIdentityState | null>(null);
   const [backupsBusy, setBackupsBusy] = useState(false);
   const [chatConversations, setChatConversations] = useState<ChatConversation[]>(
     persistedChatState.conversations,
@@ -536,6 +539,7 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
         backupsResult,
         remoteBackupsResult,
         cloudSyncSettingsResult,
+        cloudIdentityResult,
         memoriesResult,
       ] = await Promise.allSettled([
         refreshApps(),
@@ -552,6 +556,7 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
         desktopApi.listBackups(),
         desktopApi.listRemoteBackups(),
         desktopApi.getCloudSyncSettings(),
+        desktopApi.getCloudIdentity(),
         desktopApi.memoryList(),
       ]);
 
@@ -595,6 +600,10 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
 
       if (cloudSyncSettingsResult.status === 'fulfilled') {
         setCloudSyncSettings(cloudSyncSettingsResult.value);
+      }
+
+      if (cloudIdentityResult.status === 'fulfilled') {
+        setCloudIdentity(cloudIdentityResult.value);
       }
 
       if (memoriesResult.status === 'fulfilled') {
@@ -2838,6 +2847,10 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
           />
         ) : null}
 
+        {currentView === 'friends' ? (
+          <FriendsView account={forgerAccount} />
+        ) : null}
+
         {currentView === 'files' ? (
           <FilesView
             t={t}
@@ -2961,6 +2974,11 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
             onCreateMemory={(input) => void handleCreateMemory(input)}
             onUpdateMemory={(input) => void handleUpdateMemory(input)}
             onDeleteMemory={(id) => void handleDeleteMemory(id)}
+            cloudIdentity={cloudIdentity}
+            onRevealCloudSecretKey={() => getDesktopApi().revealCloudSecretKey()}
+            onRegenerateCloudSecretKey={() => {
+              void getDesktopApi().regenerateCloudSecretKey().then(setCloudIdentity);
+            }}
           />
         ) : null}
       </AppShell>

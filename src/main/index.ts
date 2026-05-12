@@ -40,6 +40,7 @@ import { OfficialToolsService, normalizeAppToolDeclarations } from './official-t
 import { ForgerAccountStore, publicForgerAccount, type StoredForgerAccount } from './forger-account-store';
 import { ForgerBackendClient } from './forger-backend-client';
 import { CloudDeviceManager, type CloudRelayRequest, type CloudRelayResponse } from './cloud-device-manager';
+import { CloudIdentityStore, type EncryptedCloudText } from './cloud-identity-store';
 import { BackupsManager } from './backups-manager';
 import {
   FORGER_AGENT_CONTRACT_MARKER,
@@ -67,6 +68,10 @@ import type {
   AppCategory,
   AppDetails,
   CloudSyncSettings,
+  CloudMessage,
+  CloudMessageEnvelope,
+  CloudSendMessageInput,
+  CloudAppMessagePermissionDecision,
   CreateRemoteAppBackupInput,
   AppExternalFolderSelection,
   AppAgent,
@@ -313,6 +318,10 @@ interface AppManifest {
   skills?: string[];
   appSecrets?: unknown;
   tools?: unknown;
+  cloudMessaging?: {
+    enabled?: boolean;
+    defaultDelivery?: 'persistent' | 'ephemeral';
+  };
 }
 
 interface AppManifestVolume {
@@ -334,6 +343,7 @@ let registry: AppRegistry = { apps: {} };
 let forgerAccount: StoredForgerAccount = { authenticated: false };
 let forgerAccountStore: ForgerAccountStore | null = null;
 let cloudDeviceManager: CloudDeviceManager | null = null;
+let cloudIdentityStore: CloudIdentityStore | null = null;
 let forgerBackendClient: ForgerBackendClient | null = null;
 let cloudSyncSettings: CloudSyncSettings = { appSync: {} };
 const runningApps = new Map<string, RunningAppProcess>();
@@ -386,6 +396,7 @@ const getSettingsPath = () => path.join(getForgerMetadataRoot(), 'settings.json'
 const getPromptOverridesPath = () => path.join(getForgerMetadataRoot(), 'prompt-overrides.json');
 const getForgerAccountPath = () => path.join(getForgerMetadataRoot(), 'account.json');
 const getCloudDevicePath = () => path.join(getForgerMetadataRoot(), 'cloud-device.json');
+const getCloudIdentityPath = () => path.join(getForgerMetadataRoot(), 'cloud-identity.json');
 const getCloudSyncSettingsPath = () => path.join(getForgerMetadataRoot(), 'cloud-sync.json');
 
 const FORGER_TOOL_PACKAGE_ID = 'forger';
@@ -1494,6 +1505,12 @@ const createRemoteAppBackup = async (
   const archivePath = path.join(getTempRoot(), 'cloud-backups', `${localBackup.backup.appId}-${localBackup.backup.backupId}.zip`);
   await fs.rm(archivePath, { force: true }).catch(() => undefined);
   await zipDirectory(backupDir, archivePath);
+  const archiveChecksum = await hashFileSha256(archivePath);
+  const backupSignature = await getCloudIdentityStore().signText(JSON.stringify({
+    appId: localBackup.backup.appId,
+    backupId: localBackup.backup.backupId,
+    checksumSha256: archiveChecksum,
+  })).catch(() => null);
 
   try {
     return await forgerBackendClient.createRemoteBackup({
@@ -1501,6 +1518,9 @@ const createRemoteAppBackup = async (
       localBackup: localBackup.backup,
       backupType: input.backupType,
       source: input.source ?? 'manual',
+      signature: backupSignature?.signature,
+      signatureKeyFingerprint: backupSignature?.keyFingerprint,
+      signatureAlgorithm: backupSignature?.algorithm,
     });
   } finally {
     await fs.rm(archivePath, { force: true }).catch(() => undefined);
@@ -5990,6 +6010,63 @@ const resolveAppDbPath = async (appId: string): Promise<string | null> => {
   return null;
 };
 
+const getCloudIdentityStore = (): CloudIdentityStore => {
+  if (!cloudIdentityStore) {
+    cloudIdentityStore = new CloudIdentityStore(getCloudIdentityPath());
+  }
+  return cloudIdentityStore;
+};
+
+const decryptCloudMessage = async (message: CloudMessage): Promise<CloudMessage> => {
+  const envelope = message.envelopes.find((entry) => Boolean(entry.ciphertext));
+  if (!envelope) {
+    return message;
+  }
+  try {
+    const payload = JSON.parse(envelope.ciphertext) as EncryptedCloudText;
+    const plaintext = await getCloudIdentityStore().decrypt(payload);
+    return { ...message, plaintext };
+  } catch {
+    return message;
+  }
+};
+
+const decryptCloudMessages = async (messages: CloudMessage[]): Promise<CloudMessage[]> =>
+  Promise.all(messages.map((message) => decryptCloudMessage(message)));
+
+const buildEncryptedEnvelopes = async (friend: { devices?: Array<{ id: number; deviceUid: string; publicKey?: string; keyFingerprint?: string }> }, text: string): Promise<CloudMessageEnvelope[]> => {
+  const devices = friend.devices?.filter((device) => device.publicKey) ?? [];
+  if (devices.length === 0) {
+    throw new Error('recipient_cloud_key_missing');
+  }
+  return devices.map((device) => ({
+    recipientUserId: undefined,
+    cloudDeviceId: device.id,
+    deviceUid: device.deviceUid,
+    keyFingerprint: device.keyFingerprint,
+    ciphertext: JSON.stringify(getCloudIdentityStore().encryptFor(device.publicKey as string, text, device.keyFingerprint)),
+  }));
+};
+
+const sendEncryptedCloudMessage = async (input: CloudSendMessageInput): Promise<CloudMessage> => {
+  if (!forgerBackendClient) {
+    throw new Error('backend_client_missing');
+  }
+  const friend = input.recipientUserId
+    ? (await forgerBackendClient.listFriends()).find((entry) => entry.friend.id === input.recipientUserId)?.friend
+    : (await forgerBackendClient.searchFriends(input.recipientUsername ?? '')).find((entry) => entry.username === input.recipientUsername?.replace(/^@/, ''));
+  if (!friend) {
+    throw new Error('recipient_not_found');
+  }
+  const message = await forgerBackendClient.sendCloudMessage({
+    ...input,
+    recipientUserId: input.recipientUserId ?? friend.id,
+    envelopes: await buildEncryptedEnvelopes(friend, input.text),
+    clientMessageId: `${Date.now()}-${randomBytes(8).toString('hex')}`,
+  });
+  return { ...(await decryptCloudMessage(message)), plaintext: input.text };
+};
+
 const createWindow = async (): Promise<void> => {
   const preloadPath = path.join(__dirname, '..', 'preload', 'index.js');
 
@@ -6326,6 +6403,45 @@ const registerIpcHandlers = (): void => {
       ? await cloudDeviceManager.generatePairingCode()
       : { devices: [], connected: false, success: false, userMessage: 'No pudimos preparar este equipo.', technicalCode: 'cloud_device_manager_missing' };
   });
+  ipcMain.handle(IPC_CHANNELS.listFriends, async () => {
+    return forgerBackendClient ? await forgerBackendClient.listFriends() : [];
+  });
+  ipcMain.handle(IPC_CHANNELS.searchFriends, async (_event, username: string) => {
+    return forgerBackendClient ? await forgerBackendClient.searchFriends(username) : [];
+  });
+  ipcMain.handle(IPC_CHANNELS.sendFriendRequest, async (_event, username: string) => {
+    if (!forgerBackendClient) throw new Error('backend_client_missing');
+    return await forgerBackendClient.sendFriendRequest(username);
+  });
+  ipcMain.handle(IPC_CHANNELS.acceptFriendRequest, async (_event, id: number) => {
+    if (!forgerBackendClient) throw new Error('backend_client_missing');
+    return await forgerBackendClient.acceptFriendRequest(id);
+  });
+  ipcMain.handle(IPC_CHANNELS.declineFriendRequest, async (_event, id: number) => {
+    if (!forgerBackendClient) throw new Error('backend_client_missing');
+    return await forgerBackendClient.declineFriendRequest(id);
+  });
+  ipcMain.handle(IPC_CHANNELS.cancelFriendRequest, async (_event, id: number) => {
+    if (!forgerBackendClient) throw new Error('backend_client_missing');
+    return await forgerBackendClient.cancelFriendRequest(id);
+  });
+  ipcMain.handle(IPC_CHANNELS.listCloudMessages, async (_event, friendUserId: number) => {
+    return forgerBackendClient ? await decryptCloudMessages(await forgerBackendClient.listCloudMessages(friendUserId)) : [];
+  });
+  ipcMain.handle(IPC_CHANNELS.sendCloudMessage, async (_event, input: CloudSendMessageInput) => {
+    return await sendEncryptedCloudMessage(input);
+  });
+  ipcMain.handle(IPC_CHANNELS.decideAppMessagePermission, async (_event, cloudMessageId: number, decision: CloudAppMessagePermissionDecision) => {
+    if (!forgerBackendClient) throw new Error('backend_client_missing');
+    return await decryptCloudMessage(await forgerBackendClient.decideAppMessagePermission(cloudMessageId, decision));
+  });
+  ipcMain.handle(IPC_CHANNELS.getCloudIdentity, async () => await getCloudIdentityStore().getSummary());
+  ipcMain.handle(IPC_CHANNELS.revealCloudSecretKey, async () => await getCloudIdentityStore().revealSecretKey());
+  ipcMain.handle(IPC_CHANNELS.regenerateCloudSecretKey, async () => {
+    const identity = await getCloudIdentityStore().regenerate();
+    await cloudDeviceManager?.start();
+    return identity;
+  });
   ipcMain.handle(IPC_CHANNELS.submitAppRating, async (_event, input: SubmitAppRatingInput) => {
     const result = forgerBackendClient
       ? await forgerBackendClient.submitAppRating(input)
@@ -6598,6 +6714,38 @@ const registerIpcHandlers = (): void => {
       throw new Error('app_window_not_authorized');
     }
     return await getOfficialToolsService().callFromApp(appId, input);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.appMessagesSend, async (event, input: CloudSendMessageInput) => {
+    const appId = resolveAppIdForWebContents(event.sender.id);
+    if (!appId) {
+      throw new Error('app_window_not_authorized');
+    }
+    const record = registry.apps[appId];
+    const manifest = record?.installDir ? await resolveInstalledManifest(record.installDir) : null;
+    if (manifest?.cloudMessaging?.enabled !== true) {
+      throw new Error('app_cloud_messaging_not_declared');
+    }
+    return await sendEncryptedCloudMessage({
+      ...input,
+      delivery: input.delivery ?? manifest.cloudMessaging.defaultDelivery ?? 'persistent',
+      source: 'app',
+      sourceAppId: appId,
+      sourceAppName: record?.name ?? appId,
+    });
+  });
+
+  ipcMain.handle(IPC_CHANNELS.appMessagesList, async (event, friendUserId: number) => {
+    const appId = resolveAppIdForWebContents(event.sender.id);
+    if (!appId) {
+      throw new Error('app_window_not_authorized');
+    }
+    const record = registry.apps[appId];
+    const manifest = record?.installDir ? await resolveInstalledManifest(record.installDir) : null;
+    if (manifest?.cloudMessaging?.enabled !== true) {
+      throw new Error('app_cloud_messaging_not_declared');
+    }
+    return forgerBackendClient ? await decryptCloudMessages(await forgerBackendClient.listCloudMessages(friendUserId)) : [];
   });
 
   const handleAppAgentTaskStart = async (event: IpcMainInvokeEvent, input: AppCodexTaskStartInput) => {
@@ -7067,6 +7215,8 @@ app.whenReady().then(async () => {
   await loadAgentToolSettings();
   forgerAccountStore = new ForgerAccountStore(getForgerAccountPath());
   forgerAccount = await forgerAccountStore.load();
+  cloudIdentityStore = new CloudIdentityStore(getCloudIdentityPath());
+  await cloudIdentityStore.getSummary().catch(() => undefined);
   await loadCloudSyncSettings();
   memoryStore = new MemoryStore(getForgerMetadataRoot());
   await loadRegistry();
@@ -7084,8 +7234,15 @@ app.whenReady().then(async () => {
     backendBaseUrl,
     backendClient: () => forgerBackendClient,
     token: () => forgerAccount.token,
+    getCloudIdentity: () => getCloudIdentityStore().getPublicRegistration(),
     getInstalledApps: () => Object.values(registry.apps).map(toAppSummary),
     handleRelayRequest: handleCloudRelayRequest,
+    handleFriendshipEvent: async (event) => {
+      mainWindow?.webContents.send(IPC_CHANNELS.cloudFriendshipEvent, event);
+      for (const window of appWindows.values()) {
+        window.webContents.send(IPC_CHANNELS.appMessagesEvent, event);
+      }
+    },
     onAuthenticationInvalid: clearForgerAccountSession,
   });
   await cloudDeviceManager.start();
