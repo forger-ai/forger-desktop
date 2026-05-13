@@ -1113,6 +1113,7 @@ export class ForgerBackendClient {
       username,
       firstName: typeof record.first_name === 'string' ? record.first_name : undefined,
       lastName: typeof record.last_name === 'string' ? record.last_name : undefined,
+      online: typeof record.online === 'boolean' ? record.online : undefined,
       devices: Array.isArray(record.devices)
         ? record.devices.flatMap((entry) => {
             if (!entry || typeof entry !== 'object') return [];
@@ -1152,6 +1153,7 @@ export class ForgerBackendClient {
       createdAt: typeof record.created_at === 'string' ? record.created_at : new Date().toISOString(),
       updatedAt: typeof record.updated_at === 'string' ? record.updated_at : new Date().toISOString(),
       respondedAt: typeof record.responded_at === 'string' ? record.responded_at : undefined,
+      lastMessageAt: typeof record.last_message_at === 'string' ? record.last_message_at : undefined,
     };
   }
 

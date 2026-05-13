@@ -41,6 +41,7 @@ import type {
   CatalogApp,
   CloudSyncSettings,
   CloudIdentityState,
+  CloudFriendship,
   AgentProvider,
   AgentEffort,
   ClaudeEffort,
@@ -86,6 +87,7 @@ import { DataView } from '@renderer/views/DataView';
 import { DevicesView } from '@renderer/views/DevicesView';
 import { FilesView } from '@renderer/views/FilesView';
 import { FriendsView } from '@renderer/views/FriendsView';
+import { FriendChatWindowView } from '@renderer/views/FriendChatWindowView';
 import { InstalledAppsView } from '@renderer/views/InstalledAppsView';
 import { SettingsView } from '@renderer/views/SettingsView';
 import { SecretsView } from '@renderer/views/SecretsView';
@@ -251,8 +253,39 @@ interface ErrorReportDialogState {
   userMessage?: string;
 }
 
+interface SocialChatWindowRoute {
+  friendUserId: number;
+  friendUsername: string;
+  friendDisplayName: string;
+}
+
+const resolveSocialChatWindowRoute = (): SocialChatWindowRoute | null => {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('socialChat') !== '1') {
+    return null;
+  }
+
+  const friendUserId = Number(params.get('friendUserId'));
+  const friendUsername = params.get('friendUsername')?.trim();
+  const friendDisplayName = params.get('friendDisplayName')?.trim();
+  if (!Number.isFinite(friendUserId) || !friendUsername || !friendDisplayName) {
+    return null;
+  }
+
+  return {
+    friendUserId,
+    friendUsername,
+    friendDisplayName,
+  };
+};
+
 function App() {
   const persistedChatState = useMemo(() => readPersistedChatState(), []);
+  const socialChatWindowRoute = useMemo(() => resolveSocialChatWindowRoute(), []);
   const [currentView, setCurrentView] = useState<View>('my-apps');
   const [installedApps, setInstalledApps] = useState<AppSummary[]>([]);
   const [memories, setMemories] = useState<MemoryEntry[]>([]);
@@ -2677,27 +2710,36 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
 
   const resolvedMode = resolveThemeMode(themePreference, prefersDark);
   const theme = useMemo(() => buildAppTheme(resolvedMode), [resolvedMode]);
+  const handleOpenFriendChat = async (friendship: CloudFriendship) => await getDesktopApi().openFriendChatWindow(friendship);
 
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
-      <AppShell
-        currentView={currentView}
-        onNavigate={setCurrentView}
-        t={t}
-        chatApps={installedApps}
-        selectedChatAppId={selectedAppId}
-        dataApps={installedApps.filter((a) => a.status === 'installed' || a.status === 'running')}
-        selectedDataAppId={selectedDataAppId}
-        getAppMeta={getAppMeta}
-        onSelectChatApp={handleSelectChatApp}
-        onSelectDataApp={setSelectedDataAppId}
-        onOpenCloudModal={() => setCloudModalOpen(true)}
-        account={forgerAccount}
-        accountBusy={forgerAccountBusy}
-        onLogout={() => void handleForgerLogout()}
-        desktopUpdateState={desktopUpdateState}
-      >
+      {socialChatWindowRoute ? (
+        <FriendChatWindowView
+          account={forgerAccount}
+          friendUserId={socialChatWindowRoute.friendUserId}
+          friendUsername={socialChatWindowRoute.friendUsername}
+          friendDisplayName={socialChatWindowRoute.friendDisplayName}
+        />
+      ) : (
+        <AppShell
+          currentView={currentView}
+          onNavigate={setCurrentView}
+          t={t}
+          chatApps={installedApps}
+          selectedChatAppId={selectedAppId}
+          dataApps={installedApps.filter((a) => a.status === 'installed' || a.status === 'running')}
+          selectedDataAppId={selectedDataAppId}
+          getAppMeta={getAppMeta}
+          onSelectChatApp={handleSelectChatApp}
+          onSelectDataApp={setSelectedDataAppId}
+          onOpenCloudModal={() => setCloudModalOpen(true)}
+          account={forgerAccount}
+          accountBusy={forgerAccountBusy}
+          onLogout={() => void handleForgerLogout()}
+          desktopUpdateState={desktopUpdateState}
+        >
         {currentView === 'my-apps' ? (
           <InstalledAppsView
             apps={installedApps}
@@ -2847,10 +2889,6 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
           />
         ) : null}
 
-        {currentView === 'friends' ? (
-          <FriendsView account={forgerAccount} />
-        ) : null}
-
         {currentView === 'files' ? (
           <FilesView
             t={t}
@@ -2866,6 +2904,15 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
             onDeleteFile={(file) => void handleDeleteFile(file)}
           />
         ) : null}
+
+        <FriendsView
+          account={forgerAccount}
+          onOpenFriendChat={(friendship) => handleOpenFriendChat(friendship)}
+          onNotify={(message, severity = 'info') => {
+            setBannerSeverity(severity);
+            setBannerMessage(message);
+          }}
+        />
 
         {currentView === 'backups' ? (
           <BackupsView
@@ -2981,7 +3028,8 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
             }}
           />
         ) : null}
-      </AppShell>
+        </AppShell>
+      )}
 
       <Dialog
         open={Boolean(pendingInstallGate)}

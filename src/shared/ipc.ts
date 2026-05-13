@@ -56,6 +56,7 @@ export const IPC_CHANNELS = {
   listCloudMessages: 'forger:cloud-messages:list',
   sendCloudMessage: 'forger:cloud-messages:send',
   decideAppMessagePermission: 'forger:cloud-messages:permission',
+  openFriendChatWindow: 'forger:friends:open-chat-window',
   cloudFriendshipEvent: 'forger:cloud-friendship:event',
   getCloudIdentity: 'forger:cloud-identity:get',
   revealCloudSecretKey: 'forger:cloud-identity:reveal',

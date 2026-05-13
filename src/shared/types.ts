@@ -235,6 +235,7 @@ export interface CloudFriendUser {
   username: string;
   firstName?: string;
   lastName?: string;
+  online?: boolean;
   devices?: Array<{
     id: number;
     deviceUid: string;
@@ -253,6 +254,7 @@ export interface CloudFriendship {
   createdAt: string;
   updatedAt: string;
   respondedAt?: string;
+  lastMessageAt?: string;
 }
 
 export type CloudMessageDeliveryMode = 'persistent' | 'ephemeral';
@@ -296,6 +298,11 @@ export interface CloudSendMessageInput {
   source?: CloudMessageSource;
   sourceAppId?: string;
   sourceAppName?: string;
+}
+
+export interface FriendChatWindowOpenResult {
+  action: 'opened' | 'focused-existing' | 'already-open';
+  userMessage: string;
 }
 
 export interface CloudIdentityState {
@@ -1674,9 +1681,11 @@ export interface ForgerDesktopApi {
   acceptFriendRequest: (id: number) => Promise<CloudFriendship>;
   declineFriendRequest: (id: number) => Promise<CloudFriendship>;
   cancelFriendRequest: (id: number) => Promise<CloudFriendship>;
+  openFriendChatWindow: (friendship: CloudFriendship) => Promise<FriendChatWindowOpenResult>;
   listCloudMessages: (friendUserId: number) => Promise<CloudMessage[]>;
   sendCloudMessage: (input: CloudSendMessageInput) => Promise<CloudMessage>;
   decideAppMessagePermission: (cloudMessageId: number, decision: CloudAppMessagePermissionDecision) => Promise<CloudMessage>;
+  onCloudFriendshipEvent: (listener: (event: unknown) => void) => () => void;
   getCloudIdentity: () => Promise<CloudIdentityState>;
   revealCloudSecretKey: () => Promise<string>;
   regenerateCloudSecretKey: () => Promise<CloudIdentityState>;

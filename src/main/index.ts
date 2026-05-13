@@ -69,6 +69,7 @@ import type {
   AppBackupSummary,
   AppCategory,
   AppDetails,
+  CloudFriendship,
   CloudSyncSettings,
   CloudMessage,
   CloudMessageEnvelope,
@@ -141,6 +142,7 @@ import type {
   FilesRenameCategoryInput,
   FilesRenameInput,
   FilesStageForChatInput,
+  FriendChatWindowOpenResult,
   ForgerAccountLoginInput,
   ForgerAccountRegisterInput,
   InstallAppResult,
@@ -361,6 +363,7 @@ let forgerBackendClient: ForgerBackendClient | null = null;
 let cloudSyncSettings: CloudSyncSettings = { appSync: {} };
 const runningApps = new Map<string, RunningAppProcess>();
 const appWindows = new Map<string, BrowserWindow>();
+const friendChatWindows = new Map<number, BrowserWindow>();
 const stoppingApps = new Set<string>();
 const appLifecycleLocks = new Map<string, Promise<unknown>>();
 const runtimeLocks = new Map<string, Promise<RuntimeBinarySet>>();
@@ -5161,6 +5164,19 @@ const withAppLocale = (frontendUrl: string, locale?: string): string => {
   return url.toString();
 };
 
+const loadDesktopWindow = async (window: BrowserWindow, query: Record<string, string> = {}): Promise<void> => {
+  if (isDev && process.env.VITE_DEV_SERVER_URL) {
+    const url = new URL(process.env.VITE_DEV_SERVER_URL);
+    for (const [key, value] of Object.entries(query)) {
+      url.searchParams.set(key, value);
+    }
+    await window.loadURL(url.toString());
+    return;
+  }
+
+  await window.loadFile(path.join(app.getAppPath(), 'dist', 'index.html'), { query });
+};
+
 const openOrFocusAppWindow = async (
   appId: string,
   appName: string,
@@ -5244,6 +5260,74 @@ const openOrFocusAppWindow = async (
   });
 
   await appWindow.loadURL(localizedFrontendUrl);
+};
+
+const openOrFocusFriendChatWindow = async (friendship: CloudFriendship): Promise<FriendChatWindowOpenResult> => {
+  const friendUserId = friendship.friend.id;
+  const friendUsername = friendship.friend.username;
+  const displayName = friendship.friend.firstName?.trim() || friendship.friend.username;
+  const existing = friendChatWindows.get(friendUserId);
+
+  if (existing && !existing.isDestroyed()) {
+    if (existing.isMinimized()) {
+      existing.restore();
+    }
+    if (process.platform === 'darwin') {
+      app.focus({ steal: true });
+    }
+    existing.show();
+    existing.moveTop();
+    existing.focus();
+    await wait(150);
+
+    if (existing.isFocused()) {
+      return {
+        action: 'focused-existing',
+        userMessage: `El chat con @${friendUsername} ya estaba abierto. Lo reenfoqué.`,
+      };
+    }
+
+    existing.flashFrame(true);
+    setTimeout(() => existing.flashFrame(false), 3000);
+    return {
+      action: 'already-open',
+      userMessage: `El chat con @${friendUsername} ya estaba abierto. Intenté traerlo al frente, pero puede seguir en otro Space de macOS.`,
+    };
+  }
+
+  const preloadPath = path.join(__dirname, '..', 'preload', 'index.js');
+  const chatWindow = new BrowserWindow({
+    width: 420,
+    height: 640,
+    minWidth: 360,
+    minHeight: 520,
+    backgroundColor: '#F6F3EE',
+    title: `${displayName} · Social`,
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: preloadPath,
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+    },
+  });
+
+  friendChatWindows.set(friendUserId, chatWindow);
+  chatWindow.on('closed', () => {
+    friendChatWindows.delete(friendUserId);
+  });
+
+  await loadDesktopWindow(chatWindow, {
+    socialChat: '1',
+    friendUserId: String(friendUserId),
+    friendUsername,
+    friendDisplayName: displayName,
+  });
+
+  return {
+    action: 'opened',
+    userMessage: `Abrí el chat con @${friendUsername}.`,
+  };
 };
 
 const findManifestService = (
@@ -6134,6 +6218,9 @@ const decryptCloudMessage = async (message: CloudMessage): Promise<CloudMessage>
 const decryptCloudMessages = async (messages: CloudMessage[]): Promise<CloudMessage[]> =>
   Promise.all(messages.map((message) => decryptCloudMessage(message)));
 
+const wait = async (milliseconds: number): Promise<void> =>
+  await new Promise((resolve) => setTimeout(resolve, milliseconds));
+
 const buildEncryptedEnvelopes = async (friend: { devices?: Array<{ id: number; deviceUid: string; publicKey?: string; keyFingerprint?: string }> }, text: string): Promise<CloudMessageEnvelope[]> => {
   const devices = friend.devices?.filter((device) => device.publicKey) ?? [];
   if (devices.length === 0) {
@@ -6152,9 +6239,13 @@ const sendEncryptedCloudMessage = async (input: CloudSendMessageInput): Promise<
   if (!forgerBackendClient) {
     throw new Error('backend_client_missing');
   }
-  const friend = input.recipientUserId
-    ? (await forgerBackendClient.listFriends()).find((entry) => entry.friend.id === input.recipientUserId)?.friend
-    : (await forgerBackendClient.searchFriends(input.recipientUsername ?? '')).find((entry) => entry.username === input.recipientUsername?.replace(/^@/, ''));
+  const normalizedUsername = input.recipientUsername?.replace(/^@/, '');
+  const recipientUsername = normalizedUsername
+    ?? (await forgerBackendClient.listFriends()).find((entry) => entry.friend.id === input.recipientUserId)?.friend.username;
+  const friend = recipientUsername
+    ? (await forgerBackendClient.searchFriends(recipientUsername)).find((entry) =>
+      input.recipientUserId ? entry.id === input.recipientUserId : entry.username === recipientUsername)
+    : undefined;
   if (!friend) {
     throw new Error('recipient_not_found');
   }
@@ -6193,11 +6284,7 @@ const createWindow = async (): Promise<void> => {
     desktopErrorReporter?.reportRendererProcessGone(details);
   });
 
-  if (isDev && process.env.VITE_DEV_SERVER_URL) {
-    await mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
-  } else {
-    await mainWindow.loadFile(path.join(app.getAppPath(), 'dist', 'index.html'));
-  }
+  await loadDesktopWindow(mainWindow);
 };
 
 const registerIpcHandlers = (): void => {
@@ -6524,6 +6611,9 @@ const registerIpcHandlers = (): void => {
   ipcMain.handle(IPC_CHANNELS.cancelFriendRequest, async (_event, id: number) => {
     if (!forgerBackendClient) throw new Error('backend_client_missing');
     return await forgerBackendClient.cancelFriendRequest(id);
+  });
+  ipcMain.handle(IPC_CHANNELS.openFriendChatWindow, async (_event, friendship: CloudFriendship) => {
+    return await openOrFocusFriendChatWindow(friendship);
   });
   ipcMain.handle(IPC_CHANNELS.listCloudMessages, async (_event, friendUserId: number) => {
     return forgerBackendClient ? await decryptCloudMessages(await forgerBackendClient.listCloudMessages(friendUserId)) : [];
@@ -7483,6 +7573,9 @@ app.whenReady().then(async () => {
     handleRelayRequest: handleCloudRelayRequest,
     handleFriendshipEvent: async (event) => {
       mainWindow?.webContents.send(IPC_CHANNELS.cloudFriendshipEvent, event);
+      for (const window of friendChatWindows.values()) {
+        window.webContents.send(IPC_CHANNELS.cloudFriendshipEvent, event);
+      }
       for (const window of appWindows.values()) {
         window.webContents.send(IPC_CHANNELS.appMessagesEvent, event);
       }
