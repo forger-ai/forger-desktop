@@ -28,6 +28,7 @@ import { AutomationManager } from './automation-manager';
 import {
   extractDeepLinkFromArgv,
   focusWindow as focusDeepLinkWindow,
+  FORGER_PROTOCOL,
   parseForgerUrl,
   registerForgerProtocol,
   type ForgerDeepLink,
@@ -4663,6 +4664,15 @@ const openOrFocusAppWindow = async (
   const openExternalUrl = (targetUrl: string): void => {
     try {
       const protocol = new URL(targetUrl).protocol;
+      if (protocol === `${FORGER_PROTOCOL}:`) {
+        // `forger://` URLs originated from an app's BrowserWindow are
+        // routed in-process — same effect as the OS-level handler,
+        // without the round-trip and without depending on the dev
+        // build having protocol registration that survived rebuilds.
+        const link = parseForgerUrl(targetUrl);
+        if (link) dispatchDeepLink(link);
+        return;
+      }
       if (protocol === 'http:' || protocol === 'https:' || protocol === 'mailto:') {
         void shell.openExternal(targetUrl);
       }
