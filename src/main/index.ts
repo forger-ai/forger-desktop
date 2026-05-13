@@ -23,10 +23,12 @@ import { getSharedCopy, installProgressByPhase } from '../shared/i18n';
 import { ChatOrchestrator } from './chat/orchestrator';
 import { AppAgentTaskManager } from './app-agent-task-manager';
 import { AppAgentConversationManager } from './app-agent-conversation-manager';
+import { renderManifestAgentPrompt, type ManifestAgentPromptKind } from './manifest-agent-prompts';
 import { AppMcpManager, type CodexMcpServerConfig } from './app-mcp-manager';
 import { AutomationManager } from './automation-manager';
 import { DevCatalogService } from './dev-catalog-service';
 import { DesktopUpdater } from './desktop-updater';
+import { DesktopRuntimeBridge } from './desktop-runtime-bridge';
 import { DesktopErrorReporter } from './error-reporting';
 import { FileLibrary } from './file-library';
 import { ForgerMcpServer } from './forger-mcp-server';
@@ -77,9 +79,17 @@ import type {
   AppAgent,
   AppAgentRuntimeInput,
   AppAgentThreadCreateInput,
+  AppAgentPromptSet,
+  AppAgentPromptTemplate,
+  AppAgentPromptVariable,
+  AppAgentPromptVariableType,
   AppAgentThreadRunControlInput,
   AppAgentThreadRunStartInput,
   AppAgentThreadRunSteerInput,
+  AppManifestAgentResumeInput,
+  AppManifestAgentStartInput,
+  AppManifestAgentSteerInput,
+  AppManifestAgentStopInput,
   AppCodexTaskStartInput,
   AppCodexConversationCreateInput,
   AppCodexConversationSendMessageInput,
@@ -318,6 +328,9 @@ interface AppManifest {
   skills?: string[];
   appSecrets?: unknown;
   tools?: unknown;
+  agentRuntime?: {
+    networkAccess?: boolean;
+  };
   cloudMessaging?: {
     enabled?: boolean;
     defaultDelivery?: 'persistent' | 'ephemeral';
@@ -364,6 +377,7 @@ let automationManager: AutomationManager | null = null;
 let appMcpManager: AppMcpManager | null = null;
 let backupsManager: BackupsManager | null = null;
 let memoryStore: MemoryStore | null = null;
+let desktopRuntimeBridge: DesktopRuntimeBridge | null = null;
 
 desktopErrorReporter = new DesktopErrorReporter({
   getMainWindow: () => mainWindow,
@@ -1369,6 +1383,26 @@ const resolveInstalledManifest = async (installDir: string): Promise<AppManifest
   }
 };
 
+const manifestAllowsAgentNetworkAccess = (manifest: AppManifest | null): boolean =>
+  manifest?.agentRuntime?.networkAccess === true;
+
+const appAllowsAgentNetworkAccess = async (appId: string): Promise<boolean> => {
+  const record = registry.apps[appId];
+  if (!record?.installDir) {
+    return false;
+  }
+  return manifestAllowsAgentNetworkAccess(await resolveInstalledManifest(record.installDir));
+};
+
+const anyAppAllowsAgentNetworkAccess = async (appIds: string[]): Promise<boolean> => {
+  for (const appId of appIds) {
+    if (await appAllowsAgentNetworkAccess(appId)) {
+      return true;
+    }
+  }
+  return false;
+};
+
 const getSecretsStore = (): SecretsStore => {
   if (!secretsStore) {
     secretsStore = new SecretsStore(app.getPath('userData'));
@@ -1732,9 +1766,12 @@ const normalizeManifestAgents = (manifest: AppManifest | null): AppAgent[] => {
       const candidate = entry as Partial<AppAgent>;
       const id = typeof candidate.id === 'string' ? candidate.id.trim() : '';
       const title = typeof candidate.title === 'string' ? candidate.title.trim() : '';
+      const prompts = normalizeManifestAgentPrompts((candidate as Record<string, unknown>).prompts);
       const initialPrompt =
-        typeof candidate.initialPrompt === 'string' ? candidate.initialPrompt.trim() : '';
-      if (!id || !title || !initialPrompt || seenIds.has(id)) {
+        typeof candidate.initialPrompt === 'string' && candidate.initialPrompt.trim()
+          ? candidate.initialPrompt.trim()
+          : prompts?.initial?.body ?? '';
+      if (!id || !title || (!initialPrompt && !prompts?.initial) || seenIds.has(id)) {
         continue;
       }
       const description =
@@ -1744,7 +1781,7 @@ const normalizeManifestAgents = (manifest: AppManifest | null): AppAgent[] => {
       const model = typeof candidate.model === 'string' && candidate.model.trim() ? candidate.model.trim() : undefined;
       const reasoningEffort = normalizeManifestReasoningEffort(candidate.reasoningEffort);
       const runtime = normalizeManifestRuntime((candidate as Record<string, unknown>).runtime);
-      const kind = (candidate as Record<string, unknown>).kind === 'thread_interface' ? 'thread_interface' : undefined;
+      const kind = normalizeManifestAgentKind((candidate as Record<string, unknown>).kind);
       const initialPromptTemplate =
         typeof (candidate as Record<string, unknown>).initialPromptTemplate === 'string'
         && ((candidate as Record<string, unknown>).initialPromptTemplate as string).trim()
@@ -1758,6 +1795,7 @@ const normalizeManifestAgents = (manifest: AppManifest | null): AppAgent[] => {
         ...(description ? { description } : {}),
         ...(kind ? { kind } : {}),
         ...(initialPromptTemplate ? { initialPromptTemplate } : {}),
+        ...(prompts ? { prompts } : {}),
         ...(model ? { model } : {}),
         ...(reasoningEffort ? { reasoningEffort } : {}),
         ...(runtime ? { runtime } : {}),
@@ -1784,6 +1822,67 @@ const normalizeManifestAgents = (manifest: AppManifest | null): AppAgent[] => {
 
   return agents;
 };
+
+const normalizeManifestAgentKind = (value: unknown): AppAgent['kind'] =>
+  value === 'classic' || value === 'thread_interface' || value === 'orchestrator' || value === 'agent_invocation'
+    ? value
+    : undefined;
+
+const normalizeManifestAgentPrompts = (value: unknown): AppAgentPromptSet | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const raw = value as Record<string, unknown>;
+  const output: AppAgentPromptSet = {};
+  for (const key of ['initial', 'resume', 'steer'] as const) {
+    const template = normalizeManifestAgentPromptTemplate(raw[key]);
+    if (template) {
+      output[key] = template;
+    }
+  }
+  return Object.keys(output).length > 0 ? output : undefined;
+};
+
+const normalizeManifestAgentPromptTemplate = (value: unknown): AppAgentPromptTemplate | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const raw = value as Record<string, unknown>;
+  const body = typeof raw.body === 'string' ? raw.body.trim() : '';
+  if (!body) {
+    return undefined;
+  }
+  const variables = normalizeManifestAgentPromptVariables(raw.variables);
+  return {
+    body,
+    ...(Object.keys(variables).length > 0 ? { variables } : {}),
+  };
+};
+
+const normalizeManifestAgentPromptVariables = (value: unknown): Record<string, AppAgentPromptVariable> => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {};
+  }
+  const output: Record<string, AppAgentPromptVariable> = {};
+  for (const [name, rawDeclaration] of Object.entries(value as Record<string, unknown>)) {
+    if (!/^[a-zA-Z0-9_.-]+$/.test(name) || !rawDeclaration || typeof rawDeclaration !== 'object' || Array.isArray(rawDeclaration)) {
+      continue;
+    }
+    const declaration = rawDeclaration as Record<string, unknown>;
+    const type = declaration.type;
+    if (!isAppAgentPromptVariableType(type)) {
+      continue;
+    }
+    output[name] = {
+      type,
+      ...(typeof declaration.required === 'boolean' ? { required: declaration.required } : {}),
+    };
+  }
+  return output;
+};
+
+const isAppAgentPromptVariableType = (value: unknown): value is AppAgentPromptVariableType =>
+  value === 'text' || value === 'string' || value === 'json' || value === 'path';
 
 const normalizeManifestReasoningEffort = (value: unknown): CodexReasoningEffort | undefined =>
   CODEX_REASONING_VALUES.has(value as CodexReasoningEffort) ? value as CodexReasoningEffort : undefined;
@@ -5447,6 +5546,7 @@ const openInstalledAppUnlocked = async (
       env: {
         ...process.env,
         ...backendConfig.environment,
+        ...(desktopRuntimeBridge?.environmentForApp(appId) ?? {}),
         ...resolvedSecrets.env,
         CORS_ORIGINS: `${frontendUrl},${rawFrontendUrl},http://127.0.0.1:${frontendPort}`,
         FORGER_APP_ID: appId,
@@ -6824,6 +6924,48 @@ const registerIpcHandlers = (): void => {
     };
   };
 
+  const resolveManifestAgentPromptRun = async (
+    appId: string,
+    agentId: string,
+    kind: ManifestAgentPromptKind,
+    variables?: Record<string, unknown>,
+  ): Promise<{ agent: AppAgent; prompt: string; appRoot: string }> => {
+    const record = registry.apps[appId];
+    if (!record?.installDir) {
+      throw new Error('app_not_installed');
+    }
+    const agent = (await resolveInstalledAgents(appId)).find((item) => item.id === agentId);
+    if (!agent) {
+      throw new Error('manifest_agent_not_found');
+    }
+    return {
+      agent,
+      appRoot: record.installDir,
+      prompt: renderManifestAgentPrompt({
+        agent,
+        kind,
+        variables,
+        appRoot: record.installDir,
+      }),
+    };
+  };
+
+  const manifestAgentIdForThread = async (appId: string, threadId: string): Promise<string> => {
+    if (!appAgentConversationManager) {
+      throw new Error('app_agent_thread_unavailable');
+    }
+    const metadata = await appAgentConversationManager.getMetadata(appId, threadId);
+    const agentId = typeof metadata?.manifestAgentId === 'string' && metadata.manifestAgentId.trim()
+      ? metadata.manifestAgentId.trim()
+      : typeof metadata?.agentId === 'string' && metadata.agentId.trim()
+        ? metadata.agentId.trim()
+        : '';
+    if (!agentId) {
+      throw new Error('manifest_agent_thread_agent_missing');
+    }
+    return agentId;
+  };
+
   const conversationToThreadSummary = (conversation: Awaited<ReturnType<AppAgentConversationManager['get']>>) => {
     if (!conversation) {
       return null;
@@ -6948,6 +7090,108 @@ const registerIpcHandlers = (): void => {
     });
   };
   ipcMain.handle(IPC_CHANNELS.appAgentThreadRunSteer, handleAppAgentThreadRunSteer);
+
+  const handleAppManifestAgentStart = async (event: IpcMainInvokeEvent, input: AppManifestAgentStartInput) => {
+    const appId = resolveAppIdForWebContents(event.sender.id);
+    if (!appId || !appAgentConversationManager) {
+      throw new Error('app_agent_thread_unavailable');
+    }
+    const agentId = typeof input?.agentId === 'string' ? input.agentId.trim() : '';
+    if (!agentId) {
+      throw new Error('manifest_agent_required');
+    }
+    const { prompt } = await resolveManifestAgentPromptRun(appId, agentId, 'initial', input.variables);
+    const conversation = await appAgentConversationManager.create(appId, {
+      title: input.title,
+      agentId,
+      metadata: {
+        ...(input.metadata ?? {}),
+        agentId,
+        manifestAgentId: agentId,
+        promptApi: 'manifest',
+        initialPromptApplied: true,
+      },
+    });
+    const started = await appAgentConversationManager.sendMessage(appId, {
+      conversationId: conversation.conversationId,
+      message: prompt,
+      workspacePath: input.workspacePath,
+      ...normalizeAppAgentRuntime(input.runtime),
+    });
+    const summary = conversationToThreadSummary(started);
+    if (!summary) {
+      throw new Error('manifest_agent_thread_start_failed');
+    }
+    return {
+      ...summary,
+      manifest_agent_id: agentId,
+    };
+  };
+  ipcMain.handle(IPC_CHANNELS.appManifestAgentStart, handleAppManifestAgentStart);
+
+  const handleAppManifestAgentResume = async (event: IpcMainInvokeEvent, input: AppManifestAgentResumeInput) => {
+    const appId = resolveAppIdForWebContents(event.sender.id);
+    if (!appId || !appAgentConversationManager) {
+      throw new Error('app_agent_thread_unavailable');
+    }
+    const threadId = typeof input?.threadId === 'string' ? input.threadId.trim() : '';
+    if (!threadId) {
+      throw new Error('manifest_agent_thread_required');
+    }
+    const agentId = await manifestAgentIdForThread(appId, threadId);
+    const { prompt } = await resolveManifestAgentPromptRun(appId, agentId, 'resume', input.variables);
+    const conversation = await appAgentConversationManager.sendMessage(appId, {
+      conversationId: threadId,
+      message: prompt,
+      workspacePath: input.workspacePath,
+      ...normalizeAppAgentRuntime(input.runtime),
+    });
+    return conversationToRunSummary(threadId, conversation.activeRun) ?? {
+      desktop_thread_id: threadId,
+      desktop_run_id: '',
+      status: 'queued',
+    };
+  };
+  ipcMain.handle(IPC_CHANNELS.appManifestAgentResume, handleAppManifestAgentResume);
+
+  const handleAppManifestAgentSteer = async (event: IpcMainInvokeEvent, input: AppManifestAgentSteerInput) => {
+    const appId = resolveAppIdForWebContents(event.sender.id);
+    if (!appId || !appAgentConversationManager) {
+      throw new Error('app_agent_thread_unavailable');
+    }
+    const threadId = typeof input?.threadId === 'string' ? input.threadId.trim() : '';
+    const runId = typeof input?.runId === 'string' ? input.runId.trim() : '';
+    if (!threadId || !runId) {
+      throw new Error('manifest_agent_thread_run_required');
+    }
+    const agentId = await manifestAgentIdForThread(appId, threadId);
+    const { prompt } = await resolveManifestAgentPromptRun(appId, agentId, 'steer', input.variables);
+    return await appAgentConversationManager.steerRun(appId, threadId, runId, {
+      message: prompt,
+      workspacePath: input.workspacePath,
+      ...normalizeAppAgentRuntime(input.runtime),
+    });
+  };
+  ipcMain.handle(IPC_CHANNELS.appManifestAgentSteer, handleAppManifestAgentSteer);
+
+  const handleAppManifestAgentStop = async (event: IpcMainInvokeEvent, input: AppManifestAgentStopInput) => {
+    const appId = resolveAppIdForWebContents(event.sender.id);
+    if (!appId || !appAgentConversationManager) {
+      return { success: false };
+    }
+    const threadId = typeof input?.threadId === 'string' ? input.threadId.trim() : '';
+    if (!threadId) {
+      return { success: false };
+    }
+    const runId = typeof input?.runId === 'string' && input.runId.trim()
+      ? input.runId.trim()
+      : (await appAgentConversationManager.get(appId, threadId))?.activeRun?.runId ?? '';
+    if (!runId) {
+      return { success: true };
+    }
+    return await appAgentConversationManager.cancel(appId, threadId, runId);
+  };
+  ipcMain.handle(IPC_CHANNELS.appManifestAgentStop, handleAppManifestAgentStop);
 
   const handleAppAgentConversationCreate = async (event: IpcMainInvokeEvent, input: AppCodexConversationCreateInput) => {
     const appId = resolveAppIdForWebContents(event.sender.id);
@@ -7325,6 +7569,7 @@ app.whenReady().then(async () => {
     ensurePathInside,
     translateManifestEnvironment,
     ensureSqliteDatabaseParent,
+    getDesktopRuntimeEnvironment: (appId) => desktopRuntimeBridge?.environmentForApp(appId) ?? {},
     getRuntimePathEntries,
     waitForHttpOk,
     terminateProcess,
@@ -7383,6 +7628,7 @@ app.whenReady().then(async () => {
         : undefined;
       return await getCodexToolEnvironment(appId, appPythonRuntime);
     },
+    getAgentNetworkAccess: appAllowsAgentNetworkAccess,
     getCodexAuthenticated: async () => {
       const status = await getCodexAuthStatus();
       return status.authenticated;
@@ -7471,6 +7717,7 @@ app.whenReady().then(async () => {
         : undefined;
       return await getCodexToolEnvironment(appId, appPythonRuntime);
     },
+    getAgentNetworkAccess: appAllowsAgentNetworkAccess,
     getCodexAuthenticated: async () => {
       const status = await getCodexAuthStatus();
       return status.authenticated;
@@ -7544,6 +7791,7 @@ app.whenReady().then(async () => {
         : undefined;
       return await getCodexToolEnvironment(appId, appPythonRuntime);
     },
+    getAgentNetworkAccess: appAllowsAgentNetworkAccess,
     getCodexAuthenticated: async () => {
       const status = await getCodexAuthStatus();
       return status.authenticated;
@@ -7570,6 +7818,7 @@ app.whenReady().then(async () => {
     },
     onConversationEvent: (event) => {
       desktopErrorReporter?.reportAppCodexConversationEvent(event);
+      desktopRuntimeBridge?.publishAgentEvent(event);
       const target = appWindows.get(event.conversation.appId);
       if (target && !target.isDestroyed()) {
         target.webContents.send(IPC_CHANNELS.appAgentConversationEvent, event);
@@ -7608,6 +7857,13 @@ app.whenReady().then(async () => {
       }
     },
   });
+  desktopRuntimeBridge = new DesktopRuntimeBridge({
+    getInstalledApp: (appId) => registry.apps[appId],
+    getConversationManager: () => appAgentConversationManager,
+    appendInstallLog,
+    serializeErrorForInstallLog,
+  });
+  await desktopRuntimeBridge.start();
   automationManager = new AutomationManager({
     forgerHomeRoot: getForgerHomeRoot(),
     metadataRoot: getForgerMetadataRoot(),
@@ -7620,6 +7876,7 @@ app.whenReady().then(async () => {
       const nodeRuntime = await ensureRuntimeInstalled('node', DEFAULT_NODE_VERSION);
       return getRuntimePathEntries(nodeRuntime);
     },
+    getAgentNetworkAccess: anyAppAllowsAgentNetworkAccess,
     getCodexAuthenticated: async () => {
       const status = await getCodexAuthStatus();
       return status.authenticated;
@@ -7665,6 +7922,8 @@ app.whenReady().then(async () => {
 app.on('before-quit', () => {
   automationManager?.dispose();
   appMcpManager?.dispose();
+  void desktopRuntimeBridge?.stop();
+  desktopRuntimeBridge = null;
   cloudDeviceManager?.stop();
   devCatalogService?.stop();
   forgerMcpServer?.stop();

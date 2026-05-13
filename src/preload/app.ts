@@ -30,6 +30,10 @@ const IPC_CHANNELS = {
   appAgentThreadRunCancel: 'forger:app:agent-thread-run:cancel',
   appAgentThreadRunSteer: 'forger:app:agent-thread-run:steer',
   appAgentThreadEvent: 'forger:app:agent-thread:event',
+  appManifestAgentStart: 'forger:app:agents:start',
+  appManifestAgentResume: 'forger:app:agents:resume',
+  appManifestAgentSteer: 'forger:app:agents:steer',
+  appManifestAgentStop: 'forger:app:agents:stop',
   appCodexConversationCreate: 'forger:app:codex-conversation:create',
   appCodexConversationSendMessage: 'forger:app:codex-conversation:send-message',
   appCodexConversationGet: 'forger:app:codex-conversation:get',
@@ -84,6 +88,23 @@ const api: ForgerAppApi = {
     cancelAgentThreadRun: (input) => ipcRenderer.invoke(IPC_CHANNELS.appAgentThreadRunCancel, input),
     steerAgentThreadRun: (input) => ipcRenderer.invoke(IPC_CHANNELS.appAgentThreadRunSteer, input),
     onAgentThreadEvent: (listener) => {
+      const wrapped = (_event: Electron.IpcRendererEvent, event: unknown) => {
+        listener(event as Parameters<typeof listener>[0]);
+      };
+      ipcRenderer.on(IPC_CHANNELS.appAgentThreadEvent, wrapped);
+      return () => {
+        ipcRenderer.removeListener(IPC_CHANNELS.appAgentThreadEvent, wrapped);
+      };
+    },
+  },
+  agents: {
+    start: (input) => ipcRenderer.invoke(IPC_CHANNELS.appManifestAgentStart, input),
+    resume: (input) => ipcRenderer.invoke(IPC_CHANNELS.appManifestAgentResume, input),
+    steer: (input) => ipcRenderer.invoke(IPC_CHANNELS.appManifestAgentSteer, input),
+    stop: (input) => ipcRenderer.invoke(IPC_CHANNELS.appManifestAgentStop, input),
+    getThread: (threadId) => ipcRenderer.invoke(IPC_CHANNELS.appAgentThreadGet, threadId),
+    getRun: (threadId, runId) => ipcRenderer.invoke(IPC_CHANNELS.appAgentThreadRunGet, threadId, runId),
+    onEvent: (listener) => {
       const wrapped = (_event: Electron.IpcRendererEvent, event: unknown) => {
         listener(event as Parameters<typeof listener>[0]);
       };

@@ -17,6 +17,7 @@ import type {
 } from '../shared/types';
 import {
   assertAllowedMcpServers,
+  codexWorkspaceNetworkConfigArgs,
   createIsolatedCodexHome,
   removeIsolatedCodexHome,
 } from './codex-run-isolation';
@@ -30,6 +31,7 @@ interface AutomationManagerOptions {
   getCodexCliPath: () => Promise<string | null>;
   getClaudeCliPath: () => Promise<string | null>;
   getCodexPathEntries: () => Promise<string[]>;
+  getAgentNetworkAccess?: (appIds: string[]) => Promise<boolean>;
   getCodexAuthenticated: () => Promise<boolean>;
   getClaudeAuthenticated: () => Promise<boolean>;
   createForgerMcpSession?: (runId: string, appId: string, appIds: string[]) => { url: string; token: string } | null;
@@ -282,6 +284,7 @@ export class AutomationManager {
       let userMessages = run.userMessages ?? [];
       forgerMcpSession = this.options.createForgerMcpSession?.(run.id, 'forger', automation.selectedAppIds) ?? null;
       const appMcpServers = await (this.options.listenAppMcps?.(automation.selectedAppIds, run.id) ?? Promise.resolve([]));
+      const networkAccess = await (this.options.getAgentNetworkAccess?.(automation.selectedAppIds) ?? Promise.resolve(false));
       const mcpServers: CodexMcpServerConfig[] = [
         ...(forgerMcpSession
           ? [{
@@ -303,6 +306,7 @@ export class AutomationManager {
         prompt,
         transcriptPath,
         mcpServers,
+        networkAccess,
         onAssistantMessages: (assistantMessages) => {
           const latest = assistantMessages[assistantMessages.length - 1] ?? '';
           if (!latest || latest === latestUserMessage) {
@@ -876,6 +880,7 @@ const runAgentCommand = async (
     prompt: string;
     transcriptPath: string;
     mcpServers?: CodexMcpServerConfig[];
+    networkAccess?: boolean;
     onAssistantMessages?: (assistantMessages: string[]) => void;
   },
 ): Promise<CommandResult> => {
@@ -908,6 +913,7 @@ const runAgentCommand = async (
         options.runtime.model || 'gpt-5.3-codex',
         '--config',
         `reasoning_effort="${options.runtime.effort || 'low'}"`,
+        ...codexWorkspaceNetworkConfigArgs(options.networkAccess === true),
         '--full-auto',
         '--sandbox',
         'workspace-write',
@@ -923,6 +929,7 @@ const runAgentCommand = async (
     ? await createIsolatedCodexHome(options.codexHome, {
         prefix: 'forger-automation-codex-home',
         trustedRoots: [options.cwd],
+        networkAccess: options.networkAccess === true,
       })
     : '';
   const allowedMcpServers = new Set(mcpServers.map((server) => server.name));

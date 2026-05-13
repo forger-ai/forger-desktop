@@ -51,12 +51,31 @@ export interface AppAgent {
   title: string;
   description?: string;
   initialPrompt: string;
-  kind?: 'classic' | 'thread_interface';
+  kind?: 'classic' | 'thread_interface' | 'orchestrator' | 'agent_invocation';
   initialPromptTemplate?: string;
+  prompts?: AppAgentPromptSet;
   model?: string;
   reasoningEffort?: CodexReasoningEffort;
   runtime?: AgentRuntime;
   legacy?: boolean;
+}
+
+export type AppAgentPromptVariableType = 'text' | 'string' | 'json' | 'path';
+
+export interface AppAgentPromptVariable {
+  type: AppAgentPromptVariableType;
+  required?: boolean;
+}
+
+export interface AppAgentPromptTemplate {
+  body: string;
+  variables?: Record<string, AppAgentPromptVariable>;
+}
+
+export interface AppAgentPromptSet {
+  initial?: AppAgentPromptTemplate;
+  resume?: AppAgentPromptTemplate;
+  steer?: AppAgentPromptTemplate;
 }
 
 export type AppPromptTemplateArgumentType = 'file' | 'string';
@@ -71,7 +90,7 @@ export interface AppPromptTemplateArgument {
   maxLength?: number;
 }
 
-export type AppPromptReviewKind = 'promptTemplate' | 'agent';
+export type AppPromptReviewKind = 'promptTemplate' | 'agent' | 'agentPrompt';
 export type AppPromptSettingSource = 'override' | 'manifest' | 'global';
 
 export interface AppPromptValidationResult {
@@ -85,6 +104,10 @@ export interface AppPromptReviewItem {
   appId: string;
   kind: AppPromptReviewKind;
   id: string;
+  agentId?: string;
+  promptKind?: keyof AppAgentPromptSet;
+  declaredVariables?: string[];
+  sourcePath?: string;
   title: string;
   description?: string;
   originalPrompt: string;
@@ -1353,6 +1376,38 @@ export interface AppAgentThreadCreateInput {
   metadata?: Record<string, string | number | boolean | null>;
 }
 
+export type AppAgentPromptVariables = Record<string, unknown>;
+
+export interface AppManifestAgentStartInput {
+  agentId: string;
+  title?: string;
+  variables?: AppAgentPromptVariables;
+  runtime?: AppAgentRuntimeInput;
+  workspacePath?: string;
+  metadata?: Record<string, string | number | boolean | null>;
+}
+
+export interface AppManifestAgentResumeInput {
+  threadId: string;
+  variables?: AppAgentPromptVariables;
+  runtime?: AppAgentRuntimeInput;
+  workspacePath?: string;
+  metadata?: Record<string, string | number | boolean | null>;
+}
+
+export interface AppManifestAgentSteerInput {
+  threadId: string;
+  runId: string;
+  variables?: AppAgentPromptVariables;
+  runtime?: AppAgentRuntimeInput;
+  workspacePath?: string;
+}
+
+export interface AppManifestAgentStopInput {
+  threadId: string;
+  runId?: string;
+}
+
 export interface AppAgentThreadRunStartInput {
   desktopThreadId: string;
   message: string;
@@ -1376,6 +1431,7 @@ export interface AppAgentThreadRunSteerInput extends AppAgentThreadRunControlInp
 
 export interface AppAgentThreadSummary {
   desktop_thread_id: string;
+  manifest_agent_id?: string;
   title: string;
   status: string;
   active_run?: AppAgentRunSummary;
@@ -1431,13 +1487,26 @@ export interface ForgerAppApi {
     onMessage: (listener: (message: CloudMessage) => void) => () => void;
   };
   agentRuns: {
+    /** @deprecated Use forgerApp.agents.start/resume/steer/stop with manifest-declared prompts. */
     createAgentThread: (input: AppAgentThreadCreateInput) => Promise<AppAgentThreadSummary>;
+    /** @deprecated Use forgerApp.agents.resume with manifest-declared prompts. */
     startAgentThreadRun: (input: AppAgentThreadRunStartInput) => Promise<AppAgentRunSummary>;
     getAgentThread: (desktopThreadId: string) => Promise<AppAgentThreadSummary | null>;
     getAgentRun: (desktopThreadId: string, desktopRunId: string) => Promise<AppAgentRunSummary | null>;
+    /** @deprecated Use forgerApp.agents.stop. */
     cancelAgentThreadRun: (input: AppAgentThreadRunControlInput) => Promise<{ success: boolean }>;
+    /** @deprecated Use forgerApp.agents.steer with manifest-declared prompts. */
     steerAgentThreadRun: (input: AppAgentThreadRunSteerInput) => Promise<AppAgentThreadSteerResult>;
     onAgentThreadEvent: (listener: (event: AppAgentThreadEvent) => void) => () => void;
+  };
+  agents: {
+    start: (input: AppManifestAgentStartInput) => Promise<AppAgentThreadSummary>;
+    resume: (input: AppManifestAgentResumeInput) => Promise<AppAgentRunSummary>;
+    steer: (input: AppManifestAgentSteerInput) => Promise<AppAgentThreadSteerResult>;
+    stop: (input: AppManifestAgentStopInput) => Promise<{ success: boolean }>;
+    getThread: (threadId: string) => Promise<AppAgentThreadSummary | null>;
+    getRun: (threadId: string, runId: string) => Promise<AppAgentRunSummary | null>;
+    onEvent: (listener: (event: AppAgentThreadEvent) => void) => () => void;
   };
   startAgentTask: (input: AppCodexTaskStartInput) => Promise<AppCodexTaskSummary>;
   getAgentTask: (runId: string) => Promise<AppCodexTaskSummary | null>;

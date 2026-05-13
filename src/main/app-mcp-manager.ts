@@ -67,6 +67,7 @@ interface AppMcpManagerOptions {
     backendDir: string,
   ) => Record<string, string>;
   ensureSqliteDatabaseParent: (environment: Record<string, string>) => Promise<void>;
+  getDesktopRuntimeEnvironment?: (appId: string) => Record<string, string>;
   getRuntimePathEntries: (runtime: RuntimeBinarySet) => string[];
   waitForHttpOk: (url: string, timeoutMs: number) => Promise<void>;
   terminateProcess: (child: ChildProcessWithoutNullStreams) => Promise<void>;
@@ -311,6 +312,7 @@ export class AppMcpManager {
       healthUrl: `http://127.0.0.1:${port}${healthcheck}`,
       environment: {
         ...environment,
+        ...(this.options.getDesktopRuntimeEnvironment?.(record.appId) ?? {}),
         HOST: '127.0.0.1',
         PORT: String(port),
         FORGER_APP_ID: record.appId,

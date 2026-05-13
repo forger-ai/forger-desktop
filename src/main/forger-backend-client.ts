@@ -1,6 +1,10 @@
 import type {
   AppCategory,
   AppAgent,
+  AppAgentPromptSet,
+  AppAgentPromptTemplate,
+  AppAgentPromptVariable,
+  AppAgentPromptVariableType,
   AppRatingSummary,
   AppStatus,
   CatalogApp,
@@ -37,6 +41,66 @@ const CODEX_REASONING_VALUES = new Set<CodexReasoningEffort>(['low', 'medium', '
 
 const normalizeReasoningEffort = (value: unknown): CodexReasoningEffort | undefined =>
   CODEX_REASONING_VALUES.has(value as CodexReasoningEffort) ? value as CodexReasoningEffort : undefined;
+
+const normalizeCatalogAgentKind = (value: unknown): AppAgent['kind'] =>
+  value === 'classic' || value === 'thread_interface' || value === 'orchestrator' || value === 'agent_invocation'
+    ? value
+    : undefined;
+
+const normalizeCatalogAgentPrompts = (value: unknown): AppAgentPromptSet | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const raw = value as Record<string, unknown>;
+  const output: AppAgentPromptSet = {};
+  for (const key of ['initial', 'resume', 'steer'] as const) {
+    const template = normalizeCatalogAgentPromptTemplate(raw[key]);
+    if (template) {
+      output[key] = template;
+    }
+  }
+  return Object.keys(output).length > 0 ? output : undefined;
+};
+
+const normalizeCatalogAgentPromptTemplate = (value: unknown): AppAgentPromptTemplate | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const raw = value as Record<string, unknown>;
+  const body = typeof raw.body === 'string' ? raw.body.trim() : '';
+  if (!body) {
+    return undefined;
+  }
+  const variables = normalizeCatalogAgentPromptVariables(raw.variables);
+  return {
+    body,
+    ...(Object.keys(variables).length > 0 ? { variables } : {}),
+  };
+};
+
+const normalizeCatalogAgentPromptVariables = (value: unknown): Record<string, AppAgentPromptVariable> => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {};
+  }
+  const output: Record<string, AppAgentPromptVariable> = {};
+  for (const [name, rawDeclaration] of Object.entries(value as Record<string, unknown>)) {
+    if (!/^[a-zA-Z0-9_.-]+$/.test(name) || !rawDeclaration || typeof rawDeclaration !== 'object' || Array.isArray(rawDeclaration)) {
+      continue;
+    }
+    const declaration = rawDeclaration as Record<string, unknown>;
+    if (!isCatalogAgentPromptVariableType(declaration.type)) {
+      continue;
+    }
+    output[name] = {
+      type: declaration.type,
+      ...(typeof declaration.required === 'boolean' ? { required: declaration.required } : {}),
+    };
+  }
+  return output;
+};
+
+const isCatalogAgentPromptVariableType = (value: unknown): value is AppAgentPromptVariableType =>
+  value === 'text' || value === 'string' || value === 'json' || value === 'path';
 
 interface ClientOptions {
   backendBaseUrl: string;
@@ -865,8 +929,12 @@ export class ForgerBackendClient {
       const candidate = item as Record<string, unknown>;
       const id = typeof candidate.id === 'string' ? candidate.id.trim() : '';
       const title = typeof candidate.title === 'string' ? candidate.title.trim() : '';
-      const initialPrompt = typeof candidate.initialPrompt === 'string' ? candidate.initialPrompt.trim() : '';
-      if (!id || !title || !initialPrompt) {
+      const prompts = normalizeCatalogAgentPrompts(candidate.prompts);
+      const initialPrompt =
+        typeof candidate.initialPrompt === 'string' && candidate.initialPrompt.trim()
+          ? candidate.initialPrompt.trim()
+          : prompts?.initial?.body ?? '';
+      if (!id || !title || (!initialPrompt && !prompts?.initial)) {
         return [];
       }
       const description =
@@ -875,7 +943,7 @@ export class ForgerBackendClient {
           : undefined;
       const model = typeof candidate.model === 'string' && candidate.model.trim() ? candidate.model.trim() : undefined;
       const reasoningEffort = normalizeReasoningEffort(candidate.reasoningEffort);
-      const kind: AppAgent['kind'] = candidate.kind === 'thread_interface' ? 'thread_interface' : undefined;
+      const kind = normalizeCatalogAgentKind(candidate.kind);
       const initialPromptTemplate =
         typeof candidate.initialPromptTemplate === 'string' && candidate.initialPromptTemplate.trim()
           ? candidate.initialPromptTemplate.trim()
@@ -887,6 +955,7 @@ export class ForgerBackendClient {
         ...(description ? { description } : {}),
         ...(kind ? { kind } : {}),
         ...(initialPromptTemplate ? { initialPromptTemplate } : {}),
+        ...(prompts ? { prompts } : {}),
         ...(model ? { model } : {}),
         ...(reasoningEffort ? { reasoningEffort } : {}),
       }];
