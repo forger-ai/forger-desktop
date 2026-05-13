@@ -113,6 +113,7 @@ const IPC_CHANNELS = {
   windowClose: 'forger:window:close',
   windowGetState: 'forger:window:get-state',
   windowStateChanged: 'forger:window:state-changed',
+  deepLink: 'forger:deep-link',
 } as const;
 
 const api: ForgerDesktopApi = {
@@ -287,6 +288,15 @@ const api: ForgerDesktopApi = {
     ipcRenderer.on(IPC_CHANNELS.windowStateChanged, wrapped);
     return () => {
       ipcRenderer.removeListener(IPC_CHANNELS.windowStateChanged, wrapped);
+    };
+  },
+  onDeepLink: (listener) => {
+    const wrapped = (_event: unknown, payload: Parameters<typeof listener>[0]) => {
+      listener(payload);
+    };
+    ipcRenderer.on(IPC_CHANNELS.deepLink, wrapped);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.deepLink, wrapped);
     };
   },
 };
