@@ -26,6 +26,7 @@ import { buildFailureDiagnostic } from '../../shared/error-diagnostics';
 import { getSharedCopy, normalizeLocale, type Locale } from '../../shared/i18n';
 import {
   assertAllowedMcpServers,
+  codexWorkspaceNetworkConfigArgs,
   createIsolatedCodexHome,
   DisallowedMcpServerError,
   removeIsolatedCodexHome,
@@ -43,6 +44,7 @@ interface ChatOrchestratorOptions {
   getClaudeCliPath: () => Promise<string | null>;
   getCodexPathEntries: (appId?: string) => Promise<string[]>;
   getCodexEnvironment: (appId?: string) => Promise<Record<string, string>>;
+  getAgentNetworkAccess?: (appId: string) => Promise<boolean>;
   getCodexAuthenticated: () => Promise<boolean>;
   getClaudeAuthenticated: () => Promise<boolean>;
   createForgerMcpSession?: (runId: string, appId: string, locale?: string) => { url: string; token: string } | null;
@@ -270,6 +272,7 @@ class SandboxRunner {
     prompt: string;
     model: string;
     reasoningEffort: CodexReasoningEffort;
+    networkAccess?: boolean;
     timeoutMs: number;
     onChild: (child: ChildProcessWithoutNullStreams) => void;
     onOutput?: (stream: 'stdout' | 'stderr' | 'meta', text: string) => void;
@@ -279,6 +282,7 @@ class SandboxRunner {
 
     const modelArgs = ['--model', params.model];
     const reasoningArgs = ['--config', `reasoning_effort="${params.reasoningEffort}"`];
+    const networkArgs = codexWorkspaceNetworkConfigArgs(params.networkAccess === true);
     const mcpServers = params.mcpServers ?? [];
     const mcpArgs = mcpServers.flatMap((server) => [
           '--config',
@@ -317,6 +321,7 @@ class SandboxRunner {
             '--json',
             ...modelArgs,
             ...reasoningArgs,
+            ...networkArgs,
             ...mcpArgs,
             '--full-auto',
             '--skip-git-repo-check',
@@ -329,6 +334,7 @@ class SandboxRunner {
             '--json',
             ...modelArgs,
             ...reasoningArgs,
+            ...networkArgs,
             ...mcpArgs,
             '--skip-git-repo-check',
             params.threadId,
@@ -347,11 +353,11 @@ class SandboxRunner {
           ['exec', 'resume', ...modelArgs, ...mcpArgs, '--skip-git-repo-check', params.threadId, params.prompt],
         ]
       : [
-          ['exec', '--json', ...modelArgs, ...reasoningArgs, ...mcpArgs, '--full-auto', '--sandbox', 'workspace-write', ...commonArgs, params.prompt],
-          ['exec', '--json', ...modelArgs, ...reasoningArgs, ...mcpArgs, '--sandbox', 'workspace-write', ...commonArgs, params.prompt],
-          ['exec', '--json', ...modelArgs, ...mcpArgs, '--sandbox', 'workspace-write', ...commonArgs, params.prompt],
-          ['exec', '--json', ...modelArgs, ...mcpArgs, ...commonArgs, params.prompt],
-          ['exec', ...modelArgs, ...mcpArgs, ...commonArgs, params.prompt],
+          ['exec', '--json', ...modelArgs, ...reasoningArgs, ...networkArgs, ...mcpArgs, '--full-auto', '--sandbox', 'workspace-write', ...commonArgs, params.prompt],
+          ['exec', '--json', ...modelArgs, ...reasoningArgs, ...networkArgs, ...mcpArgs, '--sandbox', 'workspace-write', ...commonArgs, params.prompt],
+          ['exec', '--json', ...modelArgs, ...networkArgs, ...mcpArgs, '--sandbox', 'workspace-write', ...commonArgs, params.prompt],
+          ['exec', '--json', ...modelArgs, ...networkArgs, ...mcpArgs, ...commonArgs, params.prompt],
+          ['exec', ...modelArgs, ...networkArgs, ...mcpArgs, ...commonArgs, params.prompt],
         ];
 
     const attemptInactivityTimeoutMs = Math.max(45_000, Math.floor(params.timeoutMs / attempts.length));
@@ -361,6 +367,7 @@ class SandboxRunner {
     const isolatedCodexHome = await createIsolatedCodexHome(this.codexHome, {
       prefix: 'forger-chat-codex-home',
       trustedRoots: [params.workingDir],
+      networkAccess: params.networkAccess === true,
     });
     const allowedMcpServers = new Set(mcpServers.map((server) => server.name));
     try {
@@ -890,6 +897,7 @@ export class ChatOrchestrator {
       }
       const codexPathEntries = await this.options.getCodexPathEntries(run.appId);
       const codexEnvironment = await this.options.getCodexEnvironment(run.appId);
+      const networkAccess = await (this.options.getAgentNetworkAccess?.(run.appId) ?? Promise.resolve(false));
 
       if (run.taskType === 'actualizar_aplicacion') {
         await ensureGitRepository(run.appRoot);
@@ -939,6 +947,7 @@ export class ChatOrchestrator {
         workingDir: this.options.forgerHomeRoot,
         prompt,
         model: run.model,
+        networkAccess,
         timeoutMs: 300_000,
         onChild: () => {
           // hook reserved for cancellation propagation

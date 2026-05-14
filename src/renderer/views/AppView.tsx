@@ -91,6 +91,16 @@ type PromptPreview = { title: string; description?: string; prompt: string } | n
 
 const promptReviewKey = (kind: string, id: string) => `${kind}:${id}`;
 
+const promptTypeLabel = (kind: string) => {
+  if (kind === 'agentPrompt') {
+    return 'Agent prompt';
+  }
+  if (kind === 'agent') {
+    return 'Agent';
+  }
+  return 'Template';
+};
+
 const DetailRow = ({ label, value }: { label: string; value: string }) => (
   <Stack spacing={0.25}>
     <Typography variant="caption" color="text.secondary">
@@ -434,7 +444,8 @@ export function AppView({
                 >
                   <Stack spacing={0.75}>
                     <Stack direction="row" spacing={0.75} alignItems="center" useFlexGap flexWrap="wrap">
-                      <Chip size="small" label={prompt.kind === 'agent' ? t.appView.promptTypeAgent : t.appView.promptTypeTemplate} />
+                      <Chip size="small" label={promptTypeLabel(prompt.kind)} />
+                      {prompt.promptKind ? <Chip size="small" variant="outlined" label={prompt.promptKind} /> : null}
                       {prompt.edited ? <Chip size="small" color="primary" label={t.appView.promptEdited} /> : null}
                       {prompt.overrideInvalid ? <Chip size="small" color="warning" label={t.appView.promptNeedsReview} /> : null}
                     </Stack>
@@ -459,6 +470,24 @@ export function AppView({
                   </Stack>
                 </Box>
               ) : null}
+              {selectedPrompt.kind === 'agentPrompt' ? (
+                <Box sx={{ border: '1px solid', borderColor: 'divider', p: 1.25, bgcolor: 'background.paper' }}>
+                  <Stack spacing={0.75}>
+                    {selectedPrompt.sourcePath ? (
+                      <Typography variant="caption" color="text.secondary">
+                        {selectedPrompt.sourcePath}
+                      </Typography>
+                    ) : null}
+                    {selectedPrompt.declaredVariables && selectedPrompt.declaredVariables.length > 0 ? (
+                      <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
+                        {selectedPrompt.declaredVariables.map((variable) => (
+                          <Chip key={variable} size="small" variant="outlined" label={variable} />
+                        ))}
+                      </Stack>
+                    ) : null}
+                  </Stack>
+                </Box>
+              ) : null}
               <TextField
                 label={t.appView.promptEditorLabel}
                 value={promptDraft}
@@ -475,44 +504,46 @@ export function AppView({
                   },
                 }}
               />
-              <Box
-                sx={{
-                  display: 'grid',
-                  gridTemplateColumns: { xs: '1fr', sm: 'minmax(0, 1fr) minmax(0, 1fr)' },
-                  gap: 1,
-                }}
-              >
-                <TextField
-                  select
-                  size="small"
-                  label={t.appView.promptModelLabel}
-                  value={promptModelDraft}
-                  onChange={(event) => setPromptModelDraft(event.target.value)}
-                  helperText={modelEdited ? t.appView.promptSettingCustom : selectedPromptModelSource}
-                  fullWidth
+              {selectedPrompt.kind !== 'agentPrompt' ? (
+                <Box
+                  sx={{
+                    display: 'grid',
+                    gridTemplateColumns: { xs: '1fr', sm: 'minmax(0, 1fr) minmax(0, 1fr)' },
+                    gap: 1,
+                  }}
                 >
-                  {modelOptions.map((option) => (
-                    <MenuItem value={option.realModelName} key={option.realModelName}>
-                      {option.displayModelName}
-                    </MenuItem>
-                  ))}
-                </TextField>
-                <TextField
-                  select
-                  size="small"
-                  label={t.appView.promptThinkingLabel}
-                  value={promptReasoningDraft}
-                  onChange={(event) => setPromptReasoningDraft(event.target.value as CodexReasoningEffort)}
-                  helperText={reasoningEdited ? t.appView.promptSettingCustom : selectedPromptReasoningSource}
-                  fullWidth
-                >
-                  {reasoningOptions.map((option) => (
-                    <MenuItem value={option.value} key={option.value}>
-                      {option.label}
-                    </MenuItem>
-                  ))}
-                </TextField>
-              </Box>
+                  <TextField
+                    select
+                    size="small"
+                    label={t.appView.promptModelLabel}
+                    value={promptModelDraft}
+                    onChange={(event) => setPromptModelDraft(event.target.value)}
+                    helperText={modelEdited ? t.appView.promptSettingCustom : selectedPromptModelSource}
+                    fullWidth
+                  >
+                    {modelOptions.map((option) => (
+                      <MenuItem value={option.realModelName} key={option.realModelName}>
+                        {option.displayModelName}
+                      </MenuItem>
+                    ))}
+                  </TextField>
+                  <TextField
+                    select
+                    size="small"
+                    label={t.appView.promptThinkingLabel}
+                    value={promptReasoningDraft}
+                    onChange={(event) => setPromptReasoningDraft(event.target.value as CodexReasoningEffort)}
+                    helperText={reasoningEdited ? t.appView.promptSettingCustom : selectedPromptReasoningSource}
+                    fullWidth
+                  >
+                    {reasoningOptions.map((option) => (
+                      <MenuItem value={option.value} key={option.value}>
+                        {option.label}
+                      </MenuItem>
+                    ))}
+                  </TextField>
+                </Box>
+              ) : null}
               {promptErrors.length > 0 ? (
                 <Box sx={{ border: '1px solid', borderColor: 'error.main', p: 1.25 }}>
                   <Stack component="ul" sx={{ m: 0, pl: 2 }}>
@@ -536,8 +567,8 @@ export function AppView({
                       kind: selectedPrompt.kind,
                       id: selectedPrompt.id,
                       prompt: promptDraft,
-                      model: modelEdited ? promptModelDraft : null,
-                      reasoningEffort: reasoningEdited ? promptReasoningDraft : null,
+                      model: selectedPrompt.kind !== 'agentPrompt' && modelEdited ? promptModelDraft : null,
+                      reasoningEffort: selectedPrompt.kind !== 'agentPrompt' && reasoningEdited ? promptReasoningDraft : null,
                     }).finally(() => setPromptBusy(false));
                   }}
                 >

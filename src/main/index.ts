@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, shell, type IpcMainInvokeEvent } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Notification, shell, type IpcMainInvokeEvent } from 'electron';
 import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import fs from 'node:fs/promises';
@@ -23,10 +23,12 @@ import { getSharedCopy, installProgressByPhase } from '../shared/i18n';
 import { ChatOrchestrator } from './chat/orchestrator';
 import { AppAgentTaskManager } from './app-agent-task-manager';
 import { AppAgentConversationManager } from './app-agent-conversation-manager';
+import { renderManifestAgentPrompt, type ManifestAgentPromptKind } from './manifest-agent-prompts';
 import { AppMcpManager, type CodexMcpServerConfig } from './app-mcp-manager';
 import { AutomationManager } from './automation-manager';
 import { DevCatalogService } from './dev-catalog-service';
 import { DesktopUpdater } from './desktop-updater';
+import { DesktopRuntimeBridge } from './desktop-runtime-bridge';
 import { DesktopErrorReporter } from './error-reporting';
 import { FileLibrary } from './file-library';
 import { ForgerMcpServer } from './forger-mcp-server';
@@ -40,6 +42,7 @@ import { OfficialToolsService, normalizeAppToolDeclarations } from './official-t
 import { ForgerAccountStore, publicForgerAccount, type StoredForgerAccount } from './forger-account-store';
 import { ForgerBackendClient } from './forger-backend-client';
 import { CloudDeviceManager, type CloudRelayRequest, type CloudRelayResponse } from './cloud-device-manager';
+import { CloudIdentityStore, type EncryptedCloudText } from './cloud-identity-store';
 import { BackupsManager } from './backups-manager';
 import {
   FORGER_AGENT_CONTRACT_MARKER,
@@ -66,15 +69,30 @@ import type {
   AppBackupSummary,
   AppCategory,
   AppDetails,
+  CloudFriendship,
+  CloudFriendUser,
   CloudSyncSettings,
+  CloudMessage,
+  CloudMessageEnvelope,
+  CloudSendMessageInput,
+  CloudSocialEvent,
+  CloudAppMessagePermissionDecision,
   CreateRemoteAppBackupInput,
   AppExternalFolderSelection,
   AppAgent,
   AppAgentRuntimeInput,
   AppAgentThreadCreateInput,
+  AppAgentPromptSet,
+  AppAgentPromptTemplate,
+  AppAgentPromptVariable,
+  AppAgentPromptVariableType,
   AppAgentThreadRunControlInput,
   AppAgentThreadRunStartInput,
   AppAgentThreadRunSteerInput,
+  AppManifestAgentResumeInput,
+  AppManifestAgentStartInput,
+  AppManifestAgentSteerInput,
+  AppManifestAgentStopInput,
   AppCodexTaskStartInput,
   AppCodexConversationCreateInput,
   AppCodexConversationSendMessageInput,
@@ -126,6 +144,7 @@ import type {
   FilesRenameCategoryInput,
   FilesRenameInput,
   FilesStageForChatInput,
+  FriendChatWindowOpenResult,
   ForgerAccountLoginInput,
   ForgerAccountRegisterInput,
   InstallAppResult,
@@ -313,6 +332,13 @@ interface AppManifest {
   skills?: string[];
   appSecrets?: unknown;
   tools?: unknown;
+  agentRuntime?: {
+    networkAccess?: boolean;
+  };
+  cloudMessaging?: {
+    enabled?: boolean;
+    defaultDelivery?: 'persistent' | 'ephemeral';
+  };
 }
 
 interface AppManifestVolume {
@@ -334,10 +360,12 @@ let registry: AppRegistry = { apps: {} };
 let forgerAccount: StoredForgerAccount = { authenticated: false };
 let forgerAccountStore: ForgerAccountStore | null = null;
 let cloudDeviceManager: CloudDeviceManager | null = null;
+let cloudIdentityStore: CloudIdentityStore | null = null;
 let forgerBackendClient: ForgerBackendClient | null = null;
 let cloudSyncSettings: CloudSyncSettings = { appSync: {} };
 const runningApps = new Map<string, RunningAppProcess>();
 const appWindows = new Map<string, BrowserWindow>();
+const friendChatWindows = new Map<number, BrowserWindow>();
 const stoppingApps = new Set<string>();
 const appLifecycleLocks = new Map<string, Promise<unknown>>();
 const runtimeLocks = new Map<string, Promise<RuntimeBinarySet>>();
@@ -354,6 +382,7 @@ let automationManager: AutomationManager | null = null;
 let appMcpManager: AppMcpManager | null = null;
 let backupsManager: BackupsManager | null = null;
 let memoryStore: MemoryStore | null = null;
+let desktopRuntimeBridge: DesktopRuntimeBridge | null = null;
 
 desktopErrorReporter = new DesktopErrorReporter({
   getMainWindow: () => mainWindow,
@@ -386,7 +415,9 @@ const getSettingsPath = () => path.join(getForgerMetadataRoot(), 'settings.json'
 const getPromptOverridesPath = () => path.join(getForgerMetadataRoot(), 'prompt-overrides.json');
 const getForgerAccountPath = () => path.join(getForgerMetadataRoot(), 'account.json');
 const getCloudDevicePath = () => path.join(getForgerMetadataRoot(), 'cloud-device.json');
+const getCloudIdentityPath = () => path.join(getForgerMetadataRoot(), 'cloud-identity.json');
 const getCloudSyncSettingsPath = () => path.join(getForgerMetadataRoot(), 'cloud-sync.json');
+const getCloudDeviceAccountStorageKey = () => forgerAccount.user?.id ? `user-${forgerAccount.user.id}` : undefined;
 
 const FORGER_TOOL_PACKAGE_ID = 'forger';
 
@@ -1174,15 +1205,44 @@ const emitForgerAccountUpdated = (payload: ReturnType<typeof publicForgerAccount
   mainWindow.webContents.send(IPC_CHANNELS.forgerAccountUpdated, payload);
 };
 
+const closeFriendChatWindows = (): void => {
+  for (const window of friendChatWindows.values()) {
+    if (!window.isDestroyed()) {
+      window.close();
+    }
+  }
+  friendChatWindows.clear();
+};
+
+const switchForgerAccountSession = async (
+  nextAccount: StoredForgerAccount,
+  options: { userMessage?: string; technicalCode?: string } = {},
+): Promise<ReturnType<typeof publicForgerAccount> & { userMessage?: string; technicalCode?: string }> => {
+  cloudDeviceManager?.stop();
+  closeFriendChatWindows();
+  forgerAccount = nextAccount;
+
+  if (forgerAccount.authenticated && forgerAccount.token) {
+    await forgerAccountStore?.save(forgerAccount);
+    await cloudDeviceManager?.start();
+  } else {
+    await forgerAccountStore?.clear();
+  }
+
+  const payload = {
+    ...publicForgerAccount(forgerAccount),
+    userMessage: options.userMessage,
+    technicalCode: options.technicalCode,
+  };
+  emitForgerAccountUpdated(payload);
+  return payload;
+};
+
 const clearForgerAccountSession = async (technicalCode: string): Promise<void> => {
   if (!forgerAccount.authenticated && !forgerAccount.token) {
     return;
   }
-  cloudDeviceManager?.stop();
-  forgerAccount = { authenticated: false };
-  await forgerAccountStore?.clear();
-  emitForgerAccountUpdated({
-    ...publicForgerAccount(forgerAccount),
+  await switchForgerAccountSession({ authenticated: false }, {
     userMessage: 'Tu sesion de Forger Cloud expiro. Inicia sesion nuevamente.',
     technicalCode,
   });
@@ -1358,6 +1418,26 @@ const resolveInstalledManifest = async (installDir: string): Promise<AppManifest
   }
 };
 
+const manifestAllowsAgentNetworkAccess = (manifest: AppManifest | null): boolean =>
+  manifest?.agentRuntime?.networkAccess === true;
+
+const appAllowsAgentNetworkAccess = async (appId: string): Promise<boolean> => {
+  const record = registry.apps[appId];
+  if (!record?.installDir) {
+    return false;
+  }
+  return manifestAllowsAgentNetworkAccess(await resolveInstalledManifest(record.installDir));
+};
+
+const anyAppAllowsAgentNetworkAccess = async (appIds: string[]): Promise<boolean> => {
+  for (const appId of appIds) {
+    if (await appAllowsAgentNetworkAccess(appId)) {
+      return true;
+    }
+  }
+  return false;
+};
+
 const getSecretsStore = (): SecretsStore => {
   if (!secretsStore) {
     secretsStore = new SecretsStore(app.getPath('userData'));
@@ -1494,6 +1574,12 @@ const createRemoteAppBackup = async (
   const archivePath = path.join(getTempRoot(), 'cloud-backups', `${localBackup.backup.appId}-${localBackup.backup.backupId}.zip`);
   await fs.rm(archivePath, { force: true }).catch(() => undefined);
   await zipDirectory(backupDir, archivePath);
+  const archiveChecksum = await hashFileSha256(archivePath);
+  const backupSignature = await getCloudIdentityStore().signText(JSON.stringify({
+    appId: localBackup.backup.appId,
+    backupId: localBackup.backup.backupId,
+    checksumSha256: archiveChecksum,
+  })).catch(() => null);
 
   try {
     return await forgerBackendClient.createRemoteBackup({
@@ -1501,6 +1587,9 @@ const createRemoteAppBackup = async (
       localBackup: localBackup.backup,
       backupType: input.backupType,
       source: input.source ?? 'manual',
+      signature: backupSignature?.signature,
+      signatureKeyFingerprint: backupSignature?.keyFingerprint,
+      signatureAlgorithm: backupSignature?.algorithm,
     });
   } finally {
     await fs.rm(archivePath, { force: true }).catch(() => undefined);
@@ -1712,9 +1801,12 @@ const normalizeManifestAgents = (manifest: AppManifest | null): AppAgent[] => {
       const candidate = entry as Partial<AppAgent>;
       const id = typeof candidate.id === 'string' ? candidate.id.trim() : '';
       const title = typeof candidate.title === 'string' ? candidate.title.trim() : '';
+      const prompts = normalizeManifestAgentPrompts((candidate as Record<string, unknown>).prompts);
       const initialPrompt =
-        typeof candidate.initialPrompt === 'string' ? candidate.initialPrompt.trim() : '';
-      if (!id || !title || !initialPrompt || seenIds.has(id)) {
+        typeof candidate.initialPrompt === 'string' && candidate.initialPrompt.trim()
+          ? candidate.initialPrompt.trim()
+          : prompts?.initial?.body ?? '';
+      if (!id || !title || (!initialPrompt && !prompts?.initial) || seenIds.has(id)) {
         continue;
       }
       const description =
@@ -1724,7 +1816,7 @@ const normalizeManifestAgents = (manifest: AppManifest | null): AppAgent[] => {
       const model = typeof candidate.model === 'string' && candidate.model.trim() ? candidate.model.trim() : undefined;
       const reasoningEffort = normalizeManifestReasoningEffort(candidate.reasoningEffort);
       const runtime = normalizeManifestRuntime((candidate as Record<string, unknown>).runtime);
-      const kind = (candidate as Record<string, unknown>).kind === 'thread_interface' ? 'thread_interface' : undefined;
+      const kind = normalizeManifestAgentKind((candidate as Record<string, unknown>).kind);
       const initialPromptTemplate =
         typeof (candidate as Record<string, unknown>).initialPromptTemplate === 'string'
         && ((candidate as Record<string, unknown>).initialPromptTemplate as string).trim()
@@ -1738,6 +1830,7 @@ const normalizeManifestAgents = (manifest: AppManifest | null): AppAgent[] => {
         ...(description ? { description } : {}),
         ...(kind ? { kind } : {}),
         ...(initialPromptTemplate ? { initialPromptTemplate } : {}),
+        ...(prompts ? { prompts } : {}),
         ...(model ? { model } : {}),
         ...(reasoningEffort ? { reasoningEffort } : {}),
         ...(runtime ? { runtime } : {}),
@@ -1764,6 +1857,67 @@ const normalizeManifestAgents = (manifest: AppManifest | null): AppAgent[] => {
 
   return agents;
 };
+
+const normalizeManifestAgentKind = (value: unknown): AppAgent['kind'] =>
+  value === 'classic' || value === 'thread_interface' || value === 'orchestrator' || value === 'agent_invocation'
+    ? value
+    : undefined;
+
+const normalizeManifestAgentPrompts = (value: unknown): AppAgentPromptSet | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const raw = value as Record<string, unknown>;
+  const output: AppAgentPromptSet = {};
+  for (const key of ['initial', 'resume', 'steer'] as const) {
+    const template = normalizeManifestAgentPromptTemplate(raw[key]);
+    if (template) {
+      output[key] = template;
+    }
+  }
+  return Object.keys(output).length > 0 ? output : undefined;
+};
+
+const normalizeManifestAgentPromptTemplate = (value: unknown): AppAgentPromptTemplate | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const raw = value as Record<string, unknown>;
+  const body = typeof raw.body === 'string' ? raw.body.trim() : '';
+  if (!body) {
+    return undefined;
+  }
+  const variables = normalizeManifestAgentPromptVariables(raw.variables);
+  return {
+    body,
+    ...(Object.keys(variables).length > 0 ? { variables } : {}),
+  };
+};
+
+const normalizeManifestAgentPromptVariables = (value: unknown): Record<string, AppAgentPromptVariable> => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {};
+  }
+  const output: Record<string, AppAgentPromptVariable> = {};
+  for (const [name, rawDeclaration] of Object.entries(value as Record<string, unknown>)) {
+    if (!/^[a-zA-Z0-9_.-]+$/.test(name) || !rawDeclaration || typeof rawDeclaration !== 'object' || Array.isArray(rawDeclaration)) {
+      continue;
+    }
+    const declaration = rawDeclaration as Record<string, unknown>;
+    const type = declaration.type;
+    if (!isAppAgentPromptVariableType(type)) {
+      continue;
+    }
+    output[name] = {
+      type,
+      ...(typeof declaration.required === 'boolean' ? { required: declaration.required } : {}),
+    };
+  }
+  return output;
+};
+
+const isAppAgentPromptVariableType = (value: unknown): value is AppAgentPromptVariableType =>
+  value === 'text' || value === 'string' || value === 'json' || value === 'path';
 
 const normalizeManifestReasoningEffort = (value: unknown): CodexReasoningEffort | undefined =>
   CODEX_REASONING_VALUES.has(value as CodexReasoningEffort) ? value as CodexReasoningEffort : undefined;
@@ -5042,6 +5196,19 @@ const withAppLocale = (frontendUrl: string, locale?: string): string => {
   return url.toString();
 };
 
+const loadDesktopWindow = async (window: BrowserWindow, query: Record<string, string> = {}): Promise<void> => {
+  if (isDev && process.env.VITE_DEV_SERVER_URL) {
+    const url = new URL(process.env.VITE_DEV_SERVER_URL);
+    for (const [key, value] of Object.entries(query)) {
+      url.searchParams.set(key, value);
+    }
+    await window.loadURL(url.toString());
+    return;
+  }
+
+  await window.loadFile(path.join(app.getAppPath(), 'dist', 'index.html'), { query });
+};
+
 const openOrFocusAppWindow = async (
   appId: string,
   appName: string,
@@ -5126,6 +5293,77 @@ const openOrFocusAppWindow = async (
 
   await appWindow.loadURL(localizedFrontendUrl);
 };
+
+const openOrFocusFriendChatWindowForFriend = async (friend: CloudFriendUser): Promise<FriendChatWindowOpenResult> => {
+  const friendUserId = friend.id;
+  const friendUsername = friend.username;
+  const displayName = friend.firstName?.trim() || friend.username;
+  const existing = friendChatWindows.get(friendUserId);
+
+  if (existing && !existing.isDestroyed()) {
+    if (existing.isMinimized()) {
+      existing.restore();
+    }
+    if (process.platform === 'darwin') {
+      app.focus({ steal: true });
+    }
+    existing.show();
+    existing.moveTop();
+    existing.focus();
+    await wait(150);
+
+    if (existing.isFocused()) {
+      return {
+        action: 'focused-existing',
+        userMessage: `El chat con @${friendUsername} ya estaba abierto. Lo reenfoqué.`,
+      };
+    }
+
+    existing.flashFrame(true);
+    setTimeout(() => existing.flashFrame(false), 3000);
+    return {
+      action: 'already-open',
+      userMessage: `El chat con @${friendUsername} ya estaba abierto. Intenté traerlo al frente, pero puede seguir en otro Space de macOS.`,
+    };
+  }
+
+  const preloadPath = path.join(__dirname, '..', 'preload', 'index.js');
+  const chatWindow = new BrowserWindow({
+    width: 420,
+    height: 640,
+    minWidth: 360,
+    minHeight: 520,
+    backgroundColor: '#F6F3EE',
+    title: `${displayName} · Social`,
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: preloadPath,
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+    },
+  });
+
+  friendChatWindows.set(friendUserId, chatWindow);
+  chatWindow.on('closed', () => {
+    friendChatWindows.delete(friendUserId);
+  });
+
+  await loadDesktopWindow(chatWindow, {
+    socialChat: '1',
+    friendUserId: String(friendUserId),
+    friendUsername,
+    friendDisplayName: displayName,
+  });
+
+  return {
+    action: 'opened',
+    userMessage: `Abrí el chat con @${friendUsername}.`,
+  };
+};
+
+const openOrFocusFriendChatWindow = async (friendship: CloudFriendship): Promise<FriendChatWindowOpenResult> =>
+  await openOrFocusFriendChatWindowForFriend(friendship.friend);
 
 const findManifestService = (
   manifest: AppManifest | null,
@@ -5427,6 +5665,7 @@ const openInstalledAppUnlocked = async (
       env: {
         ...process.env,
         ...backendConfig.environment,
+        ...(desktopRuntimeBridge?.environmentForApp(appId) ?? {}),
         ...resolvedSecrets.env,
         CORS_ORIGINS: `${frontendUrl},${rawFrontendUrl},http://127.0.0.1:${frontendPort}`,
         FORGER_APP_ID: appId,
@@ -5990,6 +6229,173 @@ const resolveAppDbPath = async (appId: string): Promise<string | null> => {
   return null;
 };
 
+const getCloudIdentityStore = (): CloudIdentityStore => {
+  if (!cloudIdentityStore) {
+    cloudIdentityStore = new CloudIdentityStore(getCloudIdentityPath());
+  }
+  return cloudIdentityStore;
+};
+
+const decryptCloudMessage = async (message: CloudMessage): Promise<CloudMessage> => {
+  const envelope = message.envelopes.find((entry) => Boolean(entry.ciphertext));
+  if (!envelope) {
+    return message;
+  }
+  try {
+    const payload = JSON.parse(envelope.ciphertext) as EncryptedCloudText;
+    const plaintext = await getCloudIdentityStore().decrypt(payload);
+    return { ...message, plaintext };
+  } catch {
+    return message;
+  }
+};
+
+const decryptCloudMessages = async (messages: CloudMessage[]): Promise<CloudMessage[]> =>
+  Promise.all(messages.map((message) => decryptCloudMessage(message)));
+
+const wait = async (milliseconds: number): Promise<void> =>
+  await new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+const buildEncryptedEnvelopes = async (
+  friend: { devices?: Array<{ id: number; deviceUid: string; publicKey?: string; keyFingerprint?: string }> },
+  text: string,
+): Promise<CloudMessageEnvelope[]> => {
+  const devices = friend.devices?.filter((device) => device.publicKey) ?? [];
+  if (devices.length === 0) {
+    throw Object.assign(
+      new Error('No pudimos enviar el mensaje porque este contacto todavia no tiene una clave cloud activa. Pidele que abra Forger Desktop con su cuenta y vuelve a intentarlo.'),
+      { technicalCode: 'recipient_cloud_key_missing' },
+    );
+  }
+  const recipientEnvelopes = devices.map((device) => ({
+    recipientUserId: undefined,
+    cloudDeviceId: device.id,
+    deviceUid: device.deviceUid,
+    keyFingerprint: device.keyFingerprint,
+    ciphertext: JSON.stringify(getCloudIdentityStore().encryptFor(device.publicKey as string, text, device.keyFingerprint)),
+  }));
+  const currentDevice = (await cloudDeviceManager?.getState())?.currentDevice;
+  const senderEnvelope = currentDevice?.publicKey && forgerAccount.user?.id
+    ? [{
+        recipientUserId: forgerAccount.user.id,
+        cloudDeviceId: currentDevice.id,
+        deviceUid: currentDevice.deviceUid,
+        keyFingerprint: currentDevice.keyFingerprint,
+        ciphertext: JSON.stringify(getCloudIdentityStore().encryptFor(currentDevice.publicKey, text, currentDevice.keyFingerprint)),
+      }]
+    : [];
+  return [...recipientEnvelopes, ...senderEnvelope];
+};
+
+const sendEncryptedCloudMessage = async (input: CloudSendMessageInput): Promise<CloudMessage> => {
+  if (!forgerBackendClient) {
+    throw new Error('backend_client_missing');
+  }
+  const normalizedUsername = input.recipientUsername?.replace(/^@/, '');
+  const recipientUsername = normalizedUsername
+    ?? (await forgerBackendClient.listFriends()).find((entry) => entry.friend.id === input.recipientUserId)?.friend.username;
+  const friend = recipientUsername
+    ? (await forgerBackendClient.searchFriends(recipientUsername)).find((entry) =>
+      input.recipientUserId ? entry.id === input.recipientUserId : entry.username === recipientUsername)
+    : undefined;
+  if (!friend) {
+    throw new Error('recipient_not_found');
+  }
+  const message = await forgerBackendClient.sendCloudMessage({
+    ...input,
+    recipientUserId: input.recipientUserId ?? friend.id,
+    envelopes: await buildEncryptedEnvelopes(friend, input.text),
+    clientMessageId: `${Date.now()}-${randomBytes(8).toString('hex')}`,
+  });
+  return { ...(await decryptCloudMessage(message)), plaintext: input.text };
+};
+
+const isCloudSocialEvent = (event: unknown): event is CloudSocialEvent => {
+  if (!event || typeof event !== 'object') {
+    return false;
+  }
+  const type = (event as { type?: unknown }).type;
+  return type === 'friendship_changed' || type === 'cloud_message' || type === 'ephemeral_cloud_message';
+};
+
+const prepareCloudSocialEvent = async (event: unknown): Promise<CloudSocialEvent | null> => {
+  if (!isCloudSocialEvent(event)) {
+    return null;
+  }
+  if (event.type === 'friendship_changed') {
+    const friendship = forgerBackendClient?.normalizeFriendshipPayload(event.friendship);
+    return friendship ? { type: event.type, friendship } : null;
+  }
+  if (event.type === 'cloud_message' || event.type === 'ephemeral_cloud_message') {
+    const message = forgerBackendClient?.normalizeCloudMessagePayload(event.message);
+    return message ? { type: event.type, message: await decryptCloudMessage(message) } : null;
+  }
+  return null;
+};
+
+const isUnreadIncomingCloudMessage = (event: CloudSocialEvent): boolean => {
+  if (event.type !== 'cloud_message' && event.type !== 'ephemeral_cloud_message') {
+    return false;
+  }
+  const currentUserId = forgerAccount.user?.id;
+  const message = event.message;
+  if (!currentUserId || message.sender.id === currentUserId || message.recipient.id !== currentUserId) {
+    return false;
+  }
+
+  const chatWindow = friendChatWindows.get(message.sender.id);
+  if (chatWindow && !chatWindow.isDestroyed() && chatWindow.isFocused()) {
+    return false;
+  }
+  return true;
+};
+
+const showIncomingCloudMessageNotification = (event: CloudSocialEvent): void => {
+  if (!isUnreadIncomingCloudMessage(event)) {
+    return;
+  }
+  if (event.type !== 'cloud_message' && event.type !== 'ephemeral_cloud_message') {
+    return;
+  }
+  if (!Notification.isSupported()) {
+    return;
+  }
+
+  const message = event.message;
+  const senderName = message.sender.firstName?.trim() || `@${message.sender.username}`;
+  const body = message.plaintext?.trim() || 'Nuevo mensaje en Social';
+  const notification = new Notification({
+    title: senderName,
+    body: body.length > 120 ? `${body.slice(0, 117)}...` : body,
+  });
+  notification.on('click', () => {
+    void openOrFocusFriendChatWindowForFriend(message.sender);
+  });
+  notification.show();
+};
+
+const forwardCloudSocialEvent = (event: CloudSocialEvent): void => {
+  mainWindow?.webContents.send(IPC_CHANNELS.cloudFriendshipEvent, event);
+  for (const window of friendChatWindows.values()) {
+    window.webContents.send(IPC_CHANNELS.cloudFriendshipEvent, event);
+  }
+  for (const window of appWindows.values()) {
+    window.webContents.send(IPC_CHANNELS.appMessagesEvent, event);
+  }
+};
+
+const handleCloudSocialEvent = async (event: unknown): Promise<void> => {
+  const prepared = await prepareCloudSocialEvent(event);
+  if (!prepared) {
+    return;
+  }
+  const eventForRenderer = prepared.type === 'cloud_message' || prepared.type === 'ephemeral_cloud_message'
+    ? { ...prepared, unread: isUnreadIncomingCloudMessage(prepared) }
+    : prepared;
+  showIncomingCloudMessageNotification(eventForRenderer);
+  forwardCloudSocialEvent(eventForRenderer);
+};
+
 const createWindow = async (): Promise<void> => {
   const preloadPath = path.join(__dirname, '..', 'preload', 'index.js');
 
@@ -6016,11 +6422,7 @@ const createWindow = async (): Promise<void> => {
     desktopErrorReporter?.reportRendererProcessGone(details);
   });
 
-  if (isDev && process.env.VITE_DEV_SERVER_URL) {
-    await mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
-  } else {
-    await mainWindow.loadFile(path.join(app.getAppPath(), 'dist', 'index.html'));
-  }
+  await loadDesktopWindow(mainWindow);
 };
 
 const registerIpcHandlers = (): void => {
@@ -6303,20 +6705,16 @@ const registerIpcHandlers = (): void => {
       ? await forgerBackendClient.loginAccount(input)
       : { success: false, authenticated: false, userMessage: 'No pudimos iniciar sesion.', technicalCode: 'backend_client_missing' };
     if (result.success) {
-      forgerAccount = result;
-      await forgerAccountStore?.save(forgerAccount);
-      await cloudDeviceManager?.start();
+      await switchForgerAccountSession(result, { userMessage: result.userMessage, technicalCode: result.technicalCode });
     }
     catalogApps = await listCatalogFromBackend();
     return { ...publicForgerAccount(forgerAccount), success: result.success, userMessage: result.userMessage, technicalCode: result.technicalCode };
   });
   ipcMain.handle(IPC_CHANNELS.logoutForgerAccount, async () => {
-    cloudDeviceManager?.stop();
-    await forgerBackendClient?.logoutAccount();
-    forgerAccount = { authenticated: false };
-    await forgerAccountStore?.clear();
+    await forgerBackendClient?.logoutAccount().catch(() => undefined);
+    const account = await switchForgerAccountSession({ authenticated: false });
     catalogApps = await listCatalogFromBackend();
-    return { ...publicForgerAccount(forgerAccount), success: true };
+    return { ...account, success: true };
   });
   ipcMain.handle(IPC_CHANNELS.getCloudDevices, async () => {
     return cloudDeviceManager ? await cloudDeviceManager.getState() : { devices: [], connected: false };
@@ -6325,6 +6723,54 @@ const registerIpcHandlers = (): void => {
     return cloudDeviceManager
       ? await cloudDeviceManager.generatePairingCode()
       : { devices: [], connected: false, success: false, userMessage: 'No pudimos preparar este equipo.', technicalCode: 'cloud_device_manager_missing' };
+  });
+  ipcMain.handle(IPC_CHANNELS.listFriends, async () => {
+    return forgerBackendClient ? await forgerBackendClient.listFriends() : [];
+  });
+  ipcMain.handle(IPC_CHANNELS.searchFriends, async (_event, username: string) => {
+    return forgerBackendClient ? await forgerBackendClient.searchFriends(username) : [];
+  });
+  ipcMain.handle(IPC_CHANNELS.sendFriendRequest, async (_event, username: string) => {
+    if (!forgerBackendClient) throw new Error('backend_client_missing');
+    return await forgerBackendClient.sendFriendRequest(username);
+  });
+  ipcMain.handle(IPC_CHANNELS.acceptFriendRequest, async (_event, id: number) => {
+    if (!forgerBackendClient) throw new Error('backend_client_missing');
+    return await forgerBackendClient.acceptFriendRequest(id);
+  });
+  ipcMain.handle(IPC_CHANNELS.declineFriendRequest, async (_event, id: number) => {
+    if (!forgerBackendClient) throw new Error('backend_client_missing');
+    return await forgerBackendClient.declineFriendRequest(id);
+  });
+  ipcMain.handle(IPC_CHANNELS.cancelFriendRequest, async (_event, id: number) => {
+    if (!forgerBackendClient) throw new Error('backend_client_missing');
+    return await forgerBackendClient.cancelFriendRequest(id);
+  });
+  ipcMain.handle(IPC_CHANNELS.markFriendChatRead, async (_event, friendUserId: number) => {
+    if (!forgerBackendClient) throw new Error('backend_client_missing');
+    const friendship = await forgerBackendClient.markFriendChatRead(friendUserId);
+    forwardCloudSocialEvent({ type: 'friendship_changed', friendship });
+    return friendship;
+  });
+  ipcMain.handle(IPC_CHANNELS.openFriendChatWindow, async (_event, friendship: CloudFriendship) => {
+    return await openOrFocusFriendChatWindow(friendship);
+  });
+  ipcMain.handle(IPC_CHANNELS.listCloudMessages, async (_event, friendUserId: number) => {
+    return forgerBackendClient ? await decryptCloudMessages(await forgerBackendClient.listCloudMessages(friendUserId)) : [];
+  });
+  ipcMain.handle(IPC_CHANNELS.sendCloudMessage, async (_event, input: CloudSendMessageInput) => {
+    return await sendEncryptedCloudMessage(input);
+  });
+  ipcMain.handle(IPC_CHANNELS.decideAppMessagePermission, async (_event, cloudMessageId: number, decision: CloudAppMessagePermissionDecision) => {
+    if (!forgerBackendClient) throw new Error('backend_client_missing');
+    return await decryptCloudMessage(await forgerBackendClient.decideAppMessagePermission(cloudMessageId, decision));
+  });
+  ipcMain.handle(IPC_CHANNELS.getCloudIdentity, async () => await getCloudIdentityStore().getSummary());
+  ipcMain.handle(IPC_CHANNELS.revealCloudSecretKey, async () => await getCloudIdentityStore().revealSecretKey());
+  ipcMain.handle(IPC_CHANNELS.regenerateCloudSecretKey, async () => {
+    const identity = await getCloudIdentityStore().regenerate();
+    await cloudDeviceManager?.start();
+    return identity;
   });
   ipcMain.handle(IPC_CHANNELS.submitAppRating, async (_event, input: SubmitAppRatingInput) => {
     const result = forgerBackendClient
@@ -6600,6 +7046,38 @@ const registerIpcHandlers = (): void => {
     return await getOfficialToolsService().callFromApp(appId, input);
   });
 
+  ipcMain.handle(IPC_CHANNELS.appMessagesSend, async (event, input: CloudSendMessageInput) => {
+    const appId = resolveAppIdForWebContents(event.sender.id);
+    if (!appId) {
+      throw new Error('app_window_not_authorized');
+    }
+    const record = registry.apps[appId];
+    const manifest = record?.installDir ? await resolveInstalledManifest(record.installDir) : null;
+    if (manifest?.cloudMessaging?.enabled !== true) {
+      throw new Error('app_cloud_messaging_not_declared');
+    }
+    return await sendEncryptedCloudMessage({
+      ...input,
+      delivery: input.delivery ?? manifest.cloudMessaging.defaultDelivery ?? 'persistent',
+      source: 'app',
+      sourceAppId: appId,
+      sourceAppName: record?.name ?? appId,
+    });
+  });
+
+  ipcMain.handle(IPC_CHANNELS.appMessagesList, async (event, friendUserId: number) => {
+    const appId = resolveAppIdForWebContents(event.sender.id);
+    if (!appId) {
+      throw new Error('app_window_not_authorized');
+    }
+    const record = registry.apps[appId];
+    const manifest = record?.installDir ? await resolveInstalledManifest(record.installDir) : null;
+    if (manifest?.cloudMessaging?.enabled !== true) {
+      throw new Error('app_cloud_messaging_not_declared');
+    }
+    return forgerBackendClient ? await decryptCloudMessages(await forgerBackendClient.listCloudMessages(friendUserId)) : [];
+  });
+
   const handleAppAgentTaskStart = async (event: IpcMainInvokeEvent, input: AppCodexTaskStartInput) => {
     const appId = resolveAppIdForWebContents(event.sender.id);
     if (!appId) {
@@ -6674,6 +7152,48 @@ const registerIpcHandlers = (): void => {
       ...(model ? { model } : {}),
       ...(normalizedEffort ? { effort: normalizedEffort } : {}),
     };
+  };
+
+  const resolveManifestAgentPromptRun = async (
+    appId: string,
+    agentId: string,
+    kind: ManifestAgentPromptKind,
+    variables?: Record<string, unknown>,
+  ): Promise<{ agent: AppAgent; prompt: string; appRoot: string }> => {
+    const record = registry.apps[appId];
+    if (!record?.installDir) {
+      throw new Error('app_not_installed');
+    }
+    const agent = (await resolveInstalledAgents(appId)).find((item) => item.id === agentId);
+    if (!agent) {
+      throw new Error('manifest_agent_not_found');
+    }
+    return {
+      agent,
+      appRoot: record.installDir,
+      prompt: renderManifestAgentPrompt({
+        agent,
+        kind,
+        variables,
+        appRoot: record.installDir,
+      }),
+    };
+  };
+
+  const manifestAgentIdForThread = async (appId: string, threadId: string): Promise<string> => {
+    if (!appAgentConversationManager) {
+      throw new Error('app_agent_thread_unavailable');
+    }
+    const metadata = await appAgentConversationManager.getMetadata(appId, threadId);
+    const agentId = typeof metadata?.manifestAgentId === 'string' && metadata.manifestAgentId.trim()
+      ? metadata.manifestAgentId.trim()
+      : typeof metadata?.agentId === 'string' && metadata.agentId.trim()
+        ? metadata.agentId.trim()
+        : '';
+    if (!agentId) {
+      throw new Error('manifest_agent_thread_agent_missing');
+    }
+    return agentId;
   };
 
   const conversationToThreadSummary = (conversation: Awaited<ReturnType<AppAgentConversationManager['get']>>) => {
@@ -6800,6 +7320,108 @@ const registerIpcHandlers = (): void => {
     });
   };
   ipcMain.handle(IPC_CHANNELS.appAgentThreadRunSteer, handleAppAgentThreadRunSteer);
+
+  const handleAppManifestAgentStart = async (event: IpcMainInvokeEvent, input: AppManifestAgentStartInput) => {
+    const appId = resolveAppIdForWebContents(event.sender.id);
+    if (!appId || !appAgentConversationManager) {
+      throw new Error('app_agent_thread_unavailable');
+    }
+    const agentId = typeof input?.agentId === 'string' ? input.agentId.trim() : '';
+    if (!agentId) {
+      throw new Error('manifest_agent_required');
+    }
+    const { prompt } = await resolveManifestAgentPromptRun(appId, agentId, 'initial', input.variables);
+    const conversation = await appAgentConversationManager.create(appId, {
+      title: input.title,
+      agentId,
+      metadata: {
+        ...(input.metadata ?? {}),
+        agentId,
+        manifestAgentId: agentId,
+        promptApi: 'manifest',
+        initialPromptApplied: true,
+      },
+    });
+    const started = await appAgentConversationManager.sendMessage(appId, {
+      conversationId: conversation.conversationId,
+      message: prompt,
+      workspacePath: input.workspacePath,
+      ...normalizeAppAgentRuntime(input.runtime),
+    });
+    const summary = conversationToThreadSummary(started);
+    if (!summary) {
+      throw new Error('manifest_agent_thread_start_failed');
+    }
+    return {
+      ...summary,
+      manifest_agent_id: agentId,
+    };
+  };
+  ipcMain.handle(IPC_CHANNELS.appManifestAgentStart, handleAppManifestAgentStart);
+
+  const handleAppManifestAgentResume = async (event: IpcMainInvokeEvent, input: AppManifestAgentResumeInput) => {
+    const appId = resolveAppIdForWebContents(event.sender.id);
+    if (!appId || !appAgentConversationManager) {
+      throw new Error('app_agent_thread_unavailable');
+    }
+    const threadId = typeof input?.threadId === 'string' ? input.threadId.trim() : '';
+    if (!threadId) {
+      throw new Error('manifest_agent_thread_required');
+    }
+    const agentId = await manifestAgentIdForThread(appId, threadId);
+    const { prompt } = await resolveManifestAgentPromptRun(appId, agentId, 'resume', input.variables);
+    const conversation = await appAgentConversationManager.sendMessage(appId, {
+      conversationId: threadId,
+      message: prompt,
+      workspacePath: input.workspacePath,
+      ...normalizeAppAgentRuntime(input.runtime),
+    });
+    return conversationToRunSummary(threadId, conversation.activeRun) ?? {
+      desktop_thread_id: threadId,
+      desktop_run_id: '',
+      status: 'queued',
+    };
+  };
+  ipcMain.handle(IPC_CHANNELS.appManifestAgentResume, handleAppManifestAgentResume);
+
+  const handleAppManifestAgentSteer = async (event: IpcMainInvokeEvent, input: AppManifestAgentSteerInput) => {
+    const appId = resolveAppIdForWebContents(event.sender.id);
+    if (!appId || !appAgentConversationManager) {
+      throw new Error('app_agent_thread_unavailable');
+    }
+    const threadId = typeof input?.threadId === 'string' ? input.threadId.trim() : '';
+    const runId = typeof input?.runId === 'string' ? input.runId.trim() : '';
+    if (!threadId || !runId) {
+      throw new Error('manifest_agent_thread_run_required');
+    }
+    const agentId = await manifestAgentIdForThread(appId, threadId);
+    const { prompt } = await resolveManifestAgentPromptRun(appId, agentId, 'steer', input.variables);
+    return await appAgentConversationManager.steerRun(appId, threadId, runId, {
+      message: prompt,
+      workspacePath: input.workspacePath,
+      ...normalizeAppAgentRuntime(input.runtime),
+    });
+  };
+  ipcMain.handle(IPC_CHANNELS.appManifestAgentSteer, handleAppManifestAgentSteer);
+
+  const handleAppManifestAgentStop = async (event: IpcMainInvokeEvent, input: AppManifestAgentStopInput) => {
+    const appId = resolveAppIdForWebContents(event.sender.id);
+    if (!appId || !appAgentConversationManager) {
+      return { success: false };
+    }
+    const threadId = typeof input?.threadId === 'string' ? input.threadId.trim() : '';
+    if (!threadId) {
+      return { success: false };
+    }
+    const runId = typeof input?.runId === 'string' && input.runId.trim()
+      ? input.runId.trim()
+      : (await appAgentConversationManager.get(appId, threadId))?.activeRun?.runId ?? '';
+    if (!runId) {
+      return { success: true };
+    }
+    return await appAgentConversationManager.cancel(appId, threadId, runId);
+  };
+  ipcMain.handle(IPC_CHANNELS.appManifestAgentStop, handleAppManifestAgentStop);
 
   const handleAppAgentConversationCreate = async (event: IpcMainInvokeEvent, input: AppCodexConversationCreateInput) => {
     const appId = resolveAppIdForWebContents(event.sender.id);
@@ -7067,6 +7689,8 @@ app.whenReady().then(async () => {
   await loadAgentToolSettings();
   forgerAccountStore = new ForgerAccountStore(getForgerAccountPath());
   forgerAccount = await forgerAccountStore.load();
+  cloudIdentityStore = new CloudIdentityStore(getCloudIdentityPath());
+  await cloudIdentityStore.getSummary().catch(() => undefined);
   await loadCloudSyncSettings();
   memoryStore = new MemoryStore(getForgerMetadataRoot());
   await loadRegistry();
@@ -7081,11 +7705,14 @@ app.whenReady().then(async () => {
   });
   cloudDeviceManager = new CloudDeviceManager({
     filePath: getCloudDevicePath(),
+    accountStorageKey: getCloudDeviceAccountStorageKey,
     backendBaseUrl,
     backendClient: () => forgerBackendClient,
     token: () => forgerAccount.token,
+    getCloudIdentity: () => getCloudIdentityStore().getPublicRegistration(),
     getInstalledApps: () => Object.values(registry.apps).map(toAppSummary),
     handleRelayRequest: handleCloudRelayRequest,
+    handleFriendshipEvent: handleCloudSocialEvent,
     onAuthenticationInvalid: clearForgerAccountSession,
   });
   await cloudDeviceManager.start();
@@ -7168,6 +7795,7 @@ app.whenReady().then(async () => {
     ensurePathInside,
     translateManifestEnvironment,
     ensureSqliteDatabaseParent,
+    getDesktopRuntimeEnvironment: (appId) => desktopRuntimeBridge?.environmentForApp(appId) ?? {},
     getRuntimePathEntries,
     waitForHttpOk,
     terminateProcess,
@@ -7226,6 +7854,7 @@ app.whenReady().then(async () => {
         : undefined;
       return await getCodexToolEnvironment(appId, appPythonRuntime);
     },
+    getAgentNetworkAccess: appAllowsAgentNetworkAccess,
     getCodexAuthenticated: async () => {
       const status = await getCodexAuthStatus();
       return status.authenticated;
@@ -7314,6 +7943,7 @@ app.whenReady().then(async () => {
         : undefined;
       return await getCodexToolEnvironment(appId, appPythonRuntime);
     },
+    getAgentNetworkAccess: appAllowsAgentNetworkAccess,
     getCodexAuthenticated: async () => {
       const status = await getCodexAuthStatus();
       return status.authenticated;
@@ -7387,6 +8017,7 @@ app.whenReady().then(async () => {
         : undefined;
       return await getCodexToolEnvironment(appId, appPythonRuntime);
     },
+    getAgentNetworkAccess: appAllowsAgentNetworkAccess,
     getCodexAuthenticated: async () => {
       const status = await getCodexAuthStatus();
       return status.authenticated;
@@ -7413,6 +8044,7 @@ app.whenReady().then(async () => {
     },
     onConversationEvent: (event) => {
       desktopErrorReporter?.reportAppCodexConversationEvent(event);
+      desktopRuntimeBridge?.publishAgentEvent(event);
       const target = appWindows.get(event.conversation.appId);
       if (target && !target.isDestroyed()) {
         target.webContents.send(IPC_CHANNELS.appAgentConversationEvent, event);
@@ -7451,6 +8083,13 @@ app.whenReady().then(async () => {
       }
     },
   });
+  desktopRuntimeBridge = new DesktopRuntimeBridge({
+    getInstalledApp: (appId) => registry.apps[appId],
+    getConversationManager: () => appAgentConversationManager,
+    appendInstallLog,
+    serializeErrorForInstallLog,
+  });
+  await desktopRuntimeBridge.start();
   automationManager = new AutomationManager({
     forgerHomeRoot: getForgerHomeRoot(),
     metadataRoot: getForgerMetadataRoot(),
@@ -7463,6 +8102,7 @@ app.whenReady().then(async () => {
       const nodeRuntime = await ensureRuntimeInstalled('node', DEFAULT_NODE_VERSION);
       return getRuntimePathEntries(nodeRuntime);
     },
+    getAgentNetworkAccess: anyAppAllowsAgentNetworkAccess,
     getCodexAuthenticated: async () => {
       const status = await getCodexAuthStatus();
       return status.authenticated;
@@ -7508,6 +8148,8 @@ app.whenReady().then(async () => {
 app.on('before-quit', () => {
   automationManager?.dispose();
   appMcpManager?.dispose();
+  void desktopRuntimeBridge?.stop();
+  desktopRuntimeBridge = null;
   cloudDeviceManager?.stop();
   devCatalogService?.stop();
   forgerMcpServer?.stop();

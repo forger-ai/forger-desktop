@@ -492,6 +492,8 @@ export const es = {
     logout: 'Cerrar sesión',
     firstName: 'Nombre',
     lastName: 'Apellido (opcional)',
+    username: 'Username',
+    usernameHelp: 'Usa letras, números o guion bajo.',
     country: 'País (opcional)',
     countryAuto: 'Detectar automáticamente',
     age: 'Edad (opcional)',

@@ -32,6 +32,7 @@ export type View =
   | 'my-apps'
   | 'catalog'
   | 'chat'
+  | 'friends'
   | 'automations'
   | 'files'
   | 'backups'
@@ -100,6 +101,7 @@ export function Sidebar({ currentView, onNavigate, t, desktopUpdateState }: Side
     'my-apps': t.nav.myApps,
     catalog: t.nav.catalog,
     chat: t.nav.chat,
+    friends: 'Friends',
     automations: t.nav.automations,
     files: t.nav.files,
     backups: t.nav.backups,

@@ -51,6 +51,21 @@ const IPC_CHANNELS = {
   forgerAccountUpdated: 'forger:account:updated',
   getCloudDevices: 'forger:cloud-devices:get',
   generateDevicePairingCode: 'forger:cloud-devices:pairing-code',
+  listFriends: 'forger:friends:list',
+  searchFriends: 'forger:friends:search',
+  sendFriendRequest: 'forger:friends:request',
+  acceptFriendRequest: 'forger:friends:accept',
+  declineFriendRequest: 'forger:friends:decline',
+  cancelFriendRequest: 'forger:friends:cancel',
+  markFriendChatRead: 'forger:friends:mark-chat-read',
+  listCloudMessages: 'forger:cloud-messages:list',
+  sendCloudMessage: 'forger:cloud-messages:send',
+  decideAppMessagePermission: 'forger:cloud-messages:permission',
+  openFriendChatWindow: 'forger:friends:open-chat-window',
+  cloudFriendshipEvent: 'forger:cloud-friendship:event',
+  getCloudIdentity: 'forger:cloud-identity:get',
+  revealCloudSecretKey: 'forger:cloud-identity:reveal',
+  regenerateCloudSecretKey: 'forger:cloud-identity:regenerate',
   submitAppRating: 'forger:catalog:rating:submit',
   submitAppFeedback: 'forger:catalog:feedback:submit',
   openExternalUrl: 'forger:open-external-url',
@@ -202,6 +217,30 @@ const api: ForgerDesktopApi = {
   },
   getCloudDevices: () => ipcRenderer.invoke(IPC_CHANNELS.getCloudDevices),
   generateDevicePairingCode: () => ipcRenderer.invoke(IPC_CHANNELS.generateDevicePairingCode),
+  listFriends: () => ipcRenderer.invoke(IPC_CHANNELS.listFriends),
+  searchFriends: (username) => ipcRenderer.invoke(IPC_CHANNELS.searchFriends, username),
+  sendFriendRequest: (username) => ipcRenderer.invoke(IPC_CHANNELS.sendFriendRequest, username),
+  acceptFriendRequest: (id) => ipcRenderer.invoke(IPC_CHANNELS.acceptFriendRequest, id),
+  declineFriendRequest: (id) => ipcRenderer.invoke(IPC_CHANNELS.declineFriendRequest, id),
+  cancelFriendRequest: (id) => ipcRenderer.invoke(IPC_CHANNELS.cancelFriendRequest, id),
+  markFriendChatRead: (friendUserId) => ipcRenderer.invoke(IPC_CHANNELS.markFriendChatRead, friendUserId),
+  openFriendChatWindow: (friendship) => ipcRenderer.invoke(IPC_CHANNELS.openFriendChatWindow, friendship),
+  listCloudMessages: (friendUserId) => ipcRenderer.invoke(IPC_CHANNELS.listCloudMessages, friendUserId),
+  sendCloudMessage: (input) => ipcRenderer.invoke(IPC_CHANNELS.sendCloudMessage, input),
+  decideAppMessagePermission: (cloudMessageId, decision) =>
+    ipcRenderer.invoke(IPC_CHANNELS.decideAppMessagePermission, cloudMessageId, decision),
+  onCloudFriendshipEvent: (listener) => {
+    const wrapped = (_event: unknown, payload: Parameters<typeof listener>[0]) => {
+      listener(payload);
+    };
+    ipcRenderer.on(IPC_CHANNELS.cloudFriendshipEvent, wrapped);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.cloudFriendshipEvent, wrapped);
+    };
+  },
+  getCloudIdentity: () => ipcRenderer.invoke(IPC_CHANNELS.getCloudIdentity),
+  revealCloudSecretKey: () => ipcRenderer.invoke(IPC_CHANNELS.revealCloudSecretKey),
+  regenerateCloudSecretKey: () => ipcRenderer.invoke(IPC_CHANNELS.regenerateCloudSecretKey),
   submitAppRating: (input) => ipcRenderer.invoke(IPC_CHANNELS.submitAppRating, input),
   submitAppFeedback: (input) => ipcRenderer.invoke(IPC_CHANNELS.submitAppFeedback, input),
   openExternalUrl: (url) => ipcRenderer.invoke(IPC_CHANNELS.openExternalUrl, url),

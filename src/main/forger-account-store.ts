@@ -19,6 +19,7 @@ export const normalizeForgerAccountUser = (value: unknown): ForgerAccountSession
   return {
     id,
     email,
+    username: typeof record.username === 'string' ? record.username : undefined,
     firstName: typeof record.first_name === 'string' ? record.first_name : typeof record.firstName === 'string' ? record.firstName : undefined,
     lastName: typeof record.last_name === 'string' ? record.last_name : typeof record.lastName === 'string' ? record.lastName : undefined,
     confirmed: Boolean(record.confirmed),

@@ -24,6 +24,7 @@ import {
   Typography,
 } from '@mui/material';
 import AddRounded from '@mui/icons-material/AddRounded';
+import ContentCopyRounded from '@mui/icons-material/ContentCopyRounded';
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
 import EditRounded from '@mui/icons-material/EditRounded';
 import MemoryRounded from '@mui/icons-material/MemoryRounded';
@@ -45,6 +46,7 @@ import type {
   CodexModelOption,
   CodexReasoningEffort,
   AgentProvider,
+  CloudIdentityState,
   Settings,
   UpdateAgentDefaultsInput,
 } from '@shared/types';
@@ -88,6 +90,9 @@ interface SettingsViewProps {
   onCreateMemory: (input: MemoryCreateInput) => void;
   onUpdateMemory: (input: MemoryUpdateInput) => void;
   onDeleteMemory: (id: string) => void;
+  cloudIdentity: CloudIdentityState | null;
+  onRevealCloudSecretKey: () => Promise<string>;
+  onRegenerateCloudSecretKey: () => void;
 }
 
 interface MemoryFormState {
@@ -143,8 +148,12 @@ export function SettingsView({
   onCreateMemory,
   onUpdateMemory,
   onDeleteMemory,
+  cloudIdentity,
+  onRevealCloudSecretKey,
+  onRegenerateCloudSecretKey,
 }: SettingsViewProps) {
   const [memoryDialogOpen, setMemoryDialogOpen] = useState(false);
+  const [revealedSecretKey, setRevealedSecretKey] = useState('');
   const [memoryForm, setMemoryForm] = useState<MemoryFormState>(EMPTY_MEMORY_FORM);
   const canDownload = desktopUpdateState.status === 'available' && Boolean(desktopUpdateState.asset);
   const canInstall = desktopUpdateState.status === 'ready' && Boolean(desktopUpdateState.downloadedPath);
@@ -205,6 +214,58 @@ export function SettingsView({
       <Card>
         <CardContent>
           <Stack spacing={1.5}>
+            <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
+              <Stack spacing={0.5} sx={{ flex: 1 }}>
+                <Typography variant="h6">Llave secreta / Secret key</Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Protege mensajes cifrados y puede firmar respaldos cloud.
+                </Typography>
+              </Stack>
+            </Stack>
+            <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} alignItems="center">
+              <TextField
+                size="small"
+                type={revealedSecretKey ? 'text' : 'password'}
+                value={revealedSecretKey || cloudIdentity?.secretKeyPreview || ''}
+                label="Secret key"
+                fullWidth
+                InputProps={{ readOnly: true }}
+              />
+              <Button
+                variant="outlined"
+                size="small"
+                onClick={() => {
+                  void onRevealCloudSecretKey().then((value) => setRevealedSecretKey(value));
+                }}
+              >
+                Reveal
+              </Button>
+              <Button
+                variant="outlined"
+                size="small"
+                startIcon={<ContentCopyRounded />}
+                onClick={() => {
+                  const value = revealedSecretKey || cloudIdentity?.secretKeyPreview || '';
+                  void navigator.clipboard.writeText(value);
+                }}
+              >
+                Copy
+              </Button>
+              <Button
+                variant="outlined"
+                color="warning"
+                size="small"
+                onClick={() => {
+                  if (window.confirm('Regenerar esta llave puede invalidar respaldos cloud cifrados o mensajes antiguos.')) {
+                    setRevealedSecretKey('');
+                    onRegenerateCloudSecretKey();
+                  }
+                }}
+              >
+                Regenerate
+              </Button>
+            </Stack>
+            <Divider />
             <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
               <Stack spacing={0.5}>
                 <Typography variant="h6">{t.settings.codexTitle}</Typography>

@@ -20,6 +20,7 @@ import type {
 import { getSharedCopy, normalizeLocale, type Locale } from '../shared/i18n';
 import {
   assertAllowedMcpServers,
+  codexWorkspaceNetworkConfigArgs,
   preparePersistentIsolatedCodexHome,
 } from './codex-run-isolation';
 
@@ -40,6 +41,7 @@ interface AppAgentConversationManagerOptions {
   getClaudeCliPath: () => Promise<string | null>;
   getCodexPathEntries: (appId?: string) => Promise<string[]>;
   getCodexEnvironment: (appId?: string) => Promise<Record<string, string>>;
+  getAgentNetworkAccess?: (appId: string) => Promise<boolean>;
   getCodexAuthenticated: () => Promise<boolean>;
   getClaudeAuthenticated: () => Promise<boolean>;
   hasCodexConversation: (appId: string) => Promise<boolean>;
@@ -139,6 +141,16 @@ export class AppAgentConversationManager {
       return null;
     }
     return toConversation(conversation);
+  }
+
+  public async getMetadata(appId: string, conversationId: string): Promise<Record<string, string | number | boolean | null> | undefined> {
+    await this.assertEnabled(appId);
+    await this.load();
+    const conversation = this.conversations.get(conversationId);
+    if (!conversation || conversation.appId !== appId) {
+      return undefined;
+    }
+    return normalizeMetadata(conversation.metadata);
   }
 
   public async sendMessage(
@@ -435,6 +447,7 @@ export class AppAgentConversationManager {
         ? await resolveCodexCommand(codexCliPath as string, await this.options.getCodexPathEntries(conversation.appId))
         : { command: claudeCliPath as string, prefixArgs: [], pathEntries: await this.options.getCodexPathEntries(conversation.appId) };
       const environment = await this.options.getCodexEnvironment(conversation.appId);
+      const networkAccess = await (this.options.getAgentNetworkAccess?.(conversation.appId) ?? Promise.resolve(false));
       const appMcpServers = await (this.options.listenAppMcps?.([conversation.appId], run.runId) ?? Promise.resolve([]));
       forgerMcpSession = this.options.createForgerMcpSession?.(run.runId, conversation.appId, run.locale) ?? null;
       mcpServers = [
@@ -460,7 +473,7 @@ export class AppAgentConversationManager {
         ? await (this.options.buildMemoryContext?.(conversation.appId) ?? Promise.resolve(''))
         : '';
       const forgerToolsContext = await (this.options.buildForgerToolsContext?.(conversation.appId) ?? Promise.resolve(''));
-      const prompt = buildPrompt(input.message, input.context, [initialPrompt, recoveryContext, memoryContext, forgerToolsContext].filter(Boolean).join('\n\n'));
+      const prompt = buildAppAgentPrompt(input.message, input.context, [initialPrompt, recoveryContext, memoryContext, forgerToolsContext].filter(Boolean).join('\n\n'));
       const attachmentPaths = await this.prepareAttachments(conversation.appId, run, input);
       const imageArgs = attachmentPaths.flatMap((filePath) => ['--image', filePath]);
       const claudeMcpConfigPath = runtime.provider === 'claude'
@@ -493,6 +506,7 @@ export class AppAgentConversationManager {
             model,
             '--config',
             `reasoning_effort="${reasoningEffort}"`,
+            ...codexWorkspaceNetworkConfigArgs(networkAccess),
             ...mcpArgs,
             '--skip-git-repo-check',
             ...imageArgs,
@@ -509,6 +523,7 @@ export class AppAgentConversationManager {
             model,
             '--config',
             `reasoning_effort="${reasoningEffort}"`,
+            ...codexWorkspaceNetworkConfigArgs(networkAccess),
             '--full-auto',
             '--sandbox',
             'workspace-write',
@@ -526,6 +541,7 @@ export class AppAgentConversationManager {
             this.conversationCodexHome(conversation.appId, conversation.conversationId),
             {
               trustedRoots: Array.from(new Set([appRoot, runRoot])),
+              networkAccess,
             },
           )
         : '';
@@ -872,20 +888,44 @@ export class AppAgentConversationManager {
   }
 }
 
-const buildPrompt = (message: string, context: string | undefined, initialPrompt?: string): string => {
-  const trimmedContext = (context ?? '').trim().slice(0, MAX_CONTEXT_CHARS);
+interface RuntimePromptEnvelope {
+  runtimeContract?: string;
+  interfaceObjective?: string;
+  turnPayload: string;
+}
+
+export const buildAppAgentPrompt = (message: string, context: string | undefined, initialPrompt?: string): string => {
+  const trimmedContext = (context ?? '').trim();
+  const promptEnvelope = parseRuntimePromptEnvelope(trimmedContext);
   const parts: string[] = [];
   const trimmedInitialPrompt = initialPrompt?.trim();
   if (trimmedInitialPrompt) {
     parts.push(trimmedInitialPrompt, '');
   }
-  if (!trimmedContext) {
+  if (promptEnvelope.runtimeContract) {
+    parts.push(
+      'Runtime contract:',
+      promptEnvelope.runtimeContract,
+      '',
+      'Interface objective:',
+      promptEnvelope.interfaceObjective || 'Follow the current app interface objective from the turn payload.',
+      '',
+      'Turn payload:',
+      promptEnvelope.turnPayload || '{}',
+      '',
+      'Message:',
+      message.trim(),
+    );
+    return parts.join('\n');
+  }
+  const legacyContext = trimmedContext.slice(0, MAX_CONTEXT_CHARS);
+  if (!legacyContext) {
     parts.push(message.trim());
     return parts.join('\n');
   }
   parts.push(
     'Contexto actual de la app:',
-    trimmedContext,
+    legacyContext,
     '',
     'Mensaje del usuario:',
     message.trim(),
@@ -893,6 +933,30 @@ const buildPrompt = (message: string, context: string | undefined, initialPrompt
     'Usa las herramientas MCP de la app cuando necesites modificar su estado. Responde breve para mostrar el resultado dentro de la app.',
   );
   return parts.join('\n');
+};
+
+const parseRuntimePromptEnvelope = (context: string): RuntimePromptEnvelope => {
+  if (!context) {
+    return { turnPayload: '' };
+  }
+  try {
+    const parsed = JSON.parse(context) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return { turnPayload: context.slice(0, MAX_CONTEXT_CHARS) };
+    }
+    const payload = { ...(parsed as Record<string, unknown>) };
+    const runtimeContract = typeof payload.runtime_contract === 'string' ? payload.runtime_contract.trim() : '';
+    const interfaceObjective = typeof payload.interface_objective === 'string' ? payload.interface_objective.trim() : '';
+    delete payload.runtime_contract;
+    delete payload.interface_objective;
+    return {
+      runtimeContract,
+      interfaceObjective,
+      turnPayload: JSON.stringify(payload, null, 2).slice(0, MAX_CONTEXT_CHARS),
+    };
+  } catch {
+    return { turnPayload: context.slice(0, MAX_CONTEXT_CHARS) };
+  }
 };
 
 const buildConversationRecoveryContext = (conversation: InternalConversation, activeRunId: string): string => {

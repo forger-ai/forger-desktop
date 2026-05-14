@@ -51,12 +51,31 @@ export interface AppAgent {
   title: string;
   description?: string;
   initialPrompt: string;
-  kind?: 'classic' | 'thread_interface';
+  kind?: 'classic' | 'thread_interface' | 'orchestrator' | 'agent_invocation';
   initialPromptTemplate?: string;
+  prompts?: AppAgentPromptSet;
   model?: string;
   reasoningEffort?: CodexReasoningEffort;
   runtime?: AgentRuntime;
   legacy?: boolean;
+}
+
+export type AppAgentPromptVariableType = 'text' | 'string' | 'json' | 'path';
+
+export interface AppAgentPromptVariable {
+  type: AppAgentPromptVariableType;
+  required?: boolean;
+}
+
+export interface AppAgentPromptTemplate {
+  body: string;
+  variables?: Record<string, AppAgentPromptVariable>;
+}
+
+export interface AppAgentPromptSet {
+  initial?: AppAgentPromptTemplate;
+  resume?: AppAgentPromptTemplate;
+  steer?: AppAgentPromptTemplate;
 }
 
 export type AppPromptTemplateArgumentType = 'file' | 'string';
@@ -71,7 +90,7 @@ export interface AppPromptTemplateArgument {
   maxLength?: number;
 }
 
-export type AppPromptReviewKind = 'promptTemplate' | 'agent';
+export type AppPromptReviewKind = 'promptTemplate' | 'agent' | 'agentPrompt';
 export type AppPromptSettingSource = 'override' | 'manifest' | 'global';
 
 export interface AppPromptValidationResult {
@@ -85,6 +104,10 @@ export interface AppPromptReviewItem {
   appId: string;
   kind: AppPromptReviewKind;
   id: string;
+  agentId?: string;
+  promptKind?: keyof AppAgentPromptSet;
+  declaredVariables?: string[];
+  sourcePath?: string;
   title: string;
   description?: string;
   originalPrompt: string;
@@ -142,6 +165,7 @@ export interface CatalogApp extends AppSummary {
 export interface ForgerAccountUser {
   id: number;
   email: string;
+  username?: string;
   firstName?: string;
   lastName?: string;
   confirmed: boolean;
@@ -159,6 +183,7 @@ export type SubscriptionTier = 'free' | 'demo' | 'pro';
 export interface ForgerAccountRegisterInput {
   firstName: string;
   lastName?: string;
+  username?: string;
   email: string;
   password: string;
   country?: string;
@@ -185,6 +210,8 @@ export interface CloudDeviceSummary {
   deviceUid: string;
   name: string;
   platform?: string;
+  publicKey?: string;
+  keyFingerprint?: string;
   paired: boolean;
   online: boolean;
   lastSeenAt?: string;
@@ -199,6 +226,99 @@ export interface CloudDevicesState {
   pairingExpiresAt?: string;
   userMessage?: string;
   technicalCode?: string;
+}
+
+export type FriendshipStatus = 'pending' | 'accepted' | 'declined' | 'canceled';
+
+export interface CloudFriendUser {
+  id: number;
+  username: string;
+  firstName?: string;
+  lastName?: string;
+  online?: boolean;
+  devices?: Array<{
+    id: number;
+    deviceUid: string;
+    publicKey?: string;
+    keyFingerprint?: string;
+    online?: boolean;
+  }>;
+}
+
+export interface CloudFriendship {
+  id: number;
+  status: FriendshipStatus;
+  requesterId: number;
+  addresseeId: number;
+  friend: CloudFriendUser;
+  createdAt: string;
+  updatedAt: string;
+  respondedAt?: string;
+  lastMessageAt?: string;
+  unreadCount?: number;
+  lastReadAt?: string;
+}
+
+export type CloudMessageDeliveryMode = 'persistent' | 'ephemeral';
+export type CloudMessageSource = 'user' | 'app';
+export type CloudMessageStatus = 'stored' | 'delivered' | 'not_delivered' | 'pending_permission' | 'blocked';
+export type CloudAppMessagePermissionDecision = 'allow_once' | 'allow_always' | 'decline_once' | 'decline_always';
+
+export interface CloudMessageEnvelope {
+  id?: number;
+  recipientUserId?: number;
+  cloudDeviceId?: number;
+  deviceUid?: string;
+  keyFingerprint?: string;
+  ciphertext: string;
+  metadata?: Record<string, unknown>;
+  readAt?: string;
+}
+
+export interface CloudMessage {
+  id?: number;
+  sender: CloudFriendUser;
+  recipient: CloudFriendUser;
+  deliveryMode: CloudMessageDeliveryMode;
+  source: CloudMessageSource;
+  sourceAppId?: string;
+  sourceAppName?: string;
+  status: CloudMessageStatus;
+  clientMessageId?: string;
+  metadata: Record<string, unknown>;
+  envelopes: CloudMessageEnvelope[];
+  plaintext?: string;
+  deliveredAt?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export type CloudSocialEvent =
+  | { type: 'friendship_changed'; friendship: CloudFriendship }
+  | { type: 'cloud_message'; message: CloudMessage; unread?: boolean }
+  | { type: 'ephemeral_cloud_message'; message: CloudMessage; unread?: boolean };
+
+export interface CloudSendMessageInput {
+  recipientUsername?: string;
+  recipientUserId?: number;
+  text: string;
+  delivery?: CloudMessageDeliveryMode;
+  source?: CloudMessageSource;
+  sourceAppId?: string;
+  sourceAppName?: string;
+}
+
+export interface FriendChatWindowOpenResult {
+  action: 'opened' | 'focused-existing' | 'already-open';
+  userMessage: string;
+}
+
+export interface CloudIdentityState {
+  publicKey: string;
+  keyFingerprint: string;
+  secretKeyPreview: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface AppRatingSummary {
@@ -500,6 +620,9 @@ export interface RemoteAppBackupSummary {
   fileCount: number;
   totalBytes: number;
   checksumSha256: string;
+  signature?: string;
+  signatureKeyFingerprint?: string;
+  signatureAlgorithm?: string;
   createdAt: string;
   updatedAt?: string;
   downloadUrl?: string;
@@ -1268,6 +1391,38 @@ export interface AppAgentThreadCreateInput {
   metadata?: Record<string, string | number | boolean | null>;
 }
 
+export type AppAgentPromptVariables = Record<string, unknown>;
+
+export interface AppManifestAgentStartInput {
+  agentId: string;
+  title?: string;
+  variables?: AppAgentPromptVariables;
+  runtime?: AppAgentRuntimeInput;
+  workspacePath?: string;
+  metadata?: Record<string, string | number | boolean | null>;
+}
+
+export interface AppManifestAgentResumeInput {
+  threadId: string;
+  variables?: AppAgentPromptVariables;
+  runtime?: AppAgentRuntimeInput;
+  workspacePath?: string;
+  metadata?: Record<string, string | number | boolean | null>;
+}
+
+export interface AppManifestAgentSteerInput {
+  threadId: string;
+  runId: string;
+  variables?: AppAgentPromptVariables;
+  runtime?: AppAgentRuntimeInput;
+  workspacePath?: string;
+}
+
+export interface AppManifestAgentStopInput {
+  threadId: string;
+  runId?: string;
+}
+
 export interface AppAgentThreadRunStartInput {
   desktopThreadId: string;
   message: string;
@@ -1291,6 +1446,7 @@ export interface AppAgentThreadRunSteerInput extends AppAgentThreadRunControlInp
 
 export interface AppAgentThreadSummary {
   desktop_thread_id: string;
+  manifest_agent_id?: string;
   title: string;
   status: string;
   active_run?: AppAgentRunSummary;
@@ -1340,14 +1496,32 @@ export interface ForgerAppApi {
     getStatus: (toolId: string) => Promise<OfficialToolSummary | null>;
     call: (input: CallOfficialToolInput) => Promise<CallOfficialToolResult>;
   };
+  messages: {
+    sendMessage: (input: CloudSendMessageInput) => Promise<CloudMessage>;
+    listMessages: (friendUserId: number) => Promise<CloudMessage[]>;
+    onMessage: (listener: (message: CloudMessage) => void) => () => void;
+  };
   agentRuns: {
+    /** @deprecated Use forgerApp.agents.start/resume/steer/stop with manifest-declared prompts. */
     createAgentThread: (input: AppAgentThreadCreateInput) => Promise<AppAgentThreadSummary>;
+    /** @deprecated Use forgerApp.agents.resume with manifest-declared prompts. */
     startAgentThreadRun: (input: AppAgentThreadRunStartInput) => Promise<AppAgentRunSummary>;
     getAgentThread: (desktopThreadId: string) => Promise<AppAgentThreadSummary | null>;
     getAgentRun: (desktopThreadId: string, desktopRunId: string) => Promise<AppAgentRunSummary | null>;
+    /** @deprecated Use forgerApp.agents.stop. */
     cancelAgentThreadRun: (input: AppAgentThreadRunControlInput) => Promise<{ success: boolean }>;
+    /** @deprecated Use forgerApp.agents.steer with manifest-declared prompts. */
     steerAgentThreadRun: (input: AppAgentThreadRunSteerInput) => Promise<AppAgentThreadSteerResult>;
     onAgentThreadEvent: (listener: (event: AppAgentThreadEvent) => void) => () => void;
+  };
+  agents: {
+    start: (input: AppManifestAgentStartInput) => Promise<AppAgentThreadSummary>;
+    resume: (input: AppManifestAgentResumeInput) => Promise<AppAgentRunSummary>;
+    steer: (input: AppManifestAgentSteerInput) => Promise<AppAgentThreadSteerResult>;
+    stop: (input: AppManifestAgentStopInput) => Promise<{ success: boolean }>;
+    getThread: (threadId: string) => Promise<AppAgentThreadSummary | null>;
+    getRun: (threadId: string, runId: string) => Promise<AppAgentRunSummary | null>;
+    onEvent: (listener: (event: AppAgentThreadEvent) => void) => () => void;
   };
   startAgentTask: (input: AppCodexTaskStartInput) => Promise<AppCodexTaskSummary>;
   getAgentTask: (runId: string) => Promise<AppCodexTaskSummary | null>;
@@ -1509,6 +1683,21 @@ export interface ForgerDesktopApi {
   onForgerAccountUpdated: (listener: (event: ForgerAccountSession & { userMessage?: string; technicalCode?: string }) => void) => () => void;
   getCloudDevices: () => Promise<CloudDevicesState>;
   generateDevicePairingCode: () => Promise<CloudDevicesState & { success: boolean }>;
+  listFriends: () => Promise<CloudFriendship[]>;
+  searchFriends: (username: string) => Promise<CloudFriendUser[]>;
+  sendFriendRequest: (username: string) => Promise<CloudFriendship>;
+  acceptFriendRequest: (id: number) => Promise<CloudFriendship>;
+  declineFriendRequest: (id: number) => Promise<CloudFriendship>;
+  cancelFriendRequest: (id: number) => Promise<CloudFriendship>;
+  markFriendChatRead: (friendUserId: number) => Promise<CloudFriendship>;
+  openFriendChatWindow: (friendship: CloudFriendship) => Promise<FriendChatWindowOpenResult>;
+  listCloudMessages: (friendUserId: number) => Promise<CloudMessage[]>;
+  sendCloudMessage: (input: CloudSendMessageInput) => Promise<CloudMessage>;
+  decideAppMessagePermission: (cloudMessageId: number, decision: CloudAppMessagePermissionDecision) => Promise<CloudMessage>;
+  onCloudFriendshipEvent: (listener: (event: CloudSocialEvent) => void) => () => void;
+  getCloudIdentity: () => Promise<CloudIdentityState>;
+  revealCloudSecretKey: () => Promise<string>;
+  regenerateCloudSecretKey: () => Promise<CloudIdentityState>;
   submitAppRating: (input: SubmitAppRatingInput) => Promise<{ success: boolean; rating?: AppRatingSummary; userMessage?: string; technicalCode?: string }>;
   submitAppFeedback: (input: SubmitAppFeedbackInput) => Promise<{ success: boolean; userMessage?: string; technicalCode?: string }>;
   openExternalUrl: (url: string) => Promise<{ success: boolean; userMessage?: string } & FailureDiagnosticFields>;

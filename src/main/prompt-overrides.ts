@@ -10,6 +10,8 @@ import type {
   AppPromptTemplate,
   AppPromptTemplateArgument,
   AppPromptValidationResult,
+  AppAgentPromptSet,
+  AppAgentPromptVariable,
   BasicActionResult,
   CodexReasoningEffort,
 } from '../shared/types';
@@ -34,6 +36,10 @@ interface PromptOverridesFile {
 interface PromptBase {
   kind: AppPromptReviewKind;
   id: string;
+  agentId?: string;
+  promptKind?: keyof AppAgentPromptSet;
+  declaredVariables?: Record<string, AppAgentPromptVariable>;
+  sourcePath?: string;
   title: string;
   description?: string;
   prompt: string;
@@ -82,12 +88,16 @@ export class PromptOverridesStore {
     const appOverrides = store.apps[appId] ?? {};
     const key = promptKey(input.kind, input.id);
     const existing = appOverrides[key];
-    const model = input.model === null
+    const model = base.kind === 'agentPrompt'
+      ? undefined
+      : input.model === null
       ? undefined
       : typeof input.model === 'string' && input.model.trim()
         ? input.model.trim()
         : existing?.model;
-    const reasoningEffort = input.reasoningEffort === null
+    const reasoningEffort = base.kind === 'agentPrompt'
+      ? undefined
+      : input.reasoningEffort === null
       ? undefined
       : REASONING_VALUES.has(input.reasoningEffort as CodexReasoningEffort)
         ? input.reasoningEffort as CodexReasoningEffort
@@ -158,6 +168,32 @@ export class PromptOverridesStore {
     const store = await this.readStore();
     const appOverrides = store.apps[appId] ?? {};
     return agents.map((agent) => {
+      if (hasAgentPromptSet(agent)) {
+        const prompts = { ...agent.prompts };
+        for (const key of ['initial', 'resume', 'steer'] as const) {
+          const prompt = prompts[key];
+          if (!prompt) {
+            continue;
+          }
+          const override = appOverrides[promptKey('agentPrompt', agentPromptId(agent.id, key))];
+          if (!override) {
+            continue;
+          }
+          const base = agentPromptBase(agent, key, {
+            model: agent.model ?? 'gpt-5.4',
+            reasoningEffort: agent.reasoningEffort ?? 'medium',
+          });
+          const validation = validatePromptEdit(base, override.prompt);
+          prompts[key] = {
+            ...prompt,
+            ...(validation.valid ? { body: override.prompt } : {}),
+          };
+        }
+        return {
+          ...agent,
+          prompts,
+        };
+      }
       const override = appOverrides[promptKey('agent', agent.id)];
       if (!override) {
         return agent;
@@ -186,6 +222,10 @@ export class PromptOverridesStore {
       appId,
       kind: base.kind,
       id: base.id,
+      ...(base.agentId ? { agentId: base.agentId } : {}),
+      ...(base.promptKind ? { promptKind: base.promptKind } : {}),
+      ...(base.declaredVariables ? { declaredVariables: Object.keys(base.declaredVariables).sort() } : {}),
+      ...(base.sourcePath ? { sourcePath: base.sourcePath } : {}),
       title: base.title,
       ...(base.description ? { description: base.description } : {}),
       originalPrompt: base.prompt,
@@ -251,13 +291,43 @@ export const agentBase = (agent: AppAgent, defaults: PromptRuntimeDefaults): Pro
   defaultReasoningEffort: defaults.reasoningEffort,
 });
 
+export const agentPromptBase = (
+  agent: AppAgent,
+  promptKind: keyof AppAgentPromptSet,
+  defaults: PromptRuntimeDefaults,
+): PromptBase => {
+  const prompt = agent.prompts?.[promptKind];
+  if (!prompt) {
+    throw new PromptOverrideError('app_prompt_not_found', 'No encontramos ese prompt en la app instalada.');
+  }
+  return {
+    kind: 'agentPrompt',
+    id: agentPromptId(agent.id, promptKind),
+    agentId: agent.id,
+    promptKind,
+    declaredVariables: prompt.variables,
+    sourcePath: `agents[].prompts.${promptKind}.body`,
+    title: `${agent.title} · ${promptKind}`,
+    ...(agent.description ? { description: agent.description } : {}),
+    prompt: prompt.body,
+    ...(agent.model ? { model: agent.model } : {}),
+    ...(agent.reasoningEffort ? { reasoningEffort: agent.reasoningEffort } : {}),
+    defaultModel: defaults.model,
+    defaultReasoningEffort: defaults.reasoningEffort,
+  };
+};
+
 export const buildPromptBases = (
   templates: AppPromptTemplate[],
   agents: AppAgent[],
   defaults: PromptRuntimeDefaults,
 ): PromptBase[] => [
   ...templates.map((template) => promptTemplateBase(template, defaults)),
-  ...agents.map((agent) => agentBase(agent, defaults)),
+  ...agents.flatMap((agent) => hasAgentPromptSet(agent)
+    ? (['initial', 'resume', 'steer'] as const)
+      .filter((key) => Boolean(agent.prompts?.[key]))
+      .map((key) => agentPromptBase(agent, key, defaults))
+    : [agentBase(agent, defaults)]),
 ];
 
 export const normalizePromptText = (prompt: string): string => prompt.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
@@ -281,6 +351,14 @@ export const validatePromptEdit = (base: PromptBase, prompt: string): AppPromptV
   }
   if (extraVariables.length > 0) {
     errors.push(`El prompt agrega variables no declaradas: ${extraVariables.join(', ')}.`);
+  }
+
+  if (base.kind === 'agentPrompt' && base.declaredVariables) {
+    const declaredVariables = new Set(Object.keys(base.declaredVariables));
+    const undeclaredVariables = [...editedVariables].filter((variable) => !declaredVariables.has(variable)).sort();
+    if (undeclaredVariables.length > 0) {
+      errors.push(`El prompt usa variables no declaradas por el manifest: ${undeclaredVariables.join(', ')}.`);
+    }
   }
 
   if (base.kind === 'promptTemplate') {
@@ -345,6 +423,11 @@ const findPromptBase = (
 
 const promptKey = (kind: AppPromptReviewKind, id: string): string => `${kind}:${id}`;
 
+const agentPromptId = (agentId: string, promptKind: keyof AppAgentPromptSet): string => `${agentId}:${promptKind}`;
+
+const hasAgentPromptSet = (agent: AppAgent): boolean =>
+  Boolean(agent.prompts && (agent.prompts.initial || agent.prompts.resume || agent.prompts.steer));
+
 const normalizeStore = (input?: Partial<PromptOverridesFile>): PromptOverridesFile => {
   const store = emptyStore();
   if (!input?.apps || typeof input.apps !== 'object') {
@@ -360,7 +443,7 @@ const normalizeStore = (input?: Partial<PromptOverridesFile>): PromptOverridesFi
       if (!entry || typeof entry !== 'object') {
         continue;
       }
-      const kind = entry.kind === 'promptTemplate' || entry.kind === 'agent' ? entry.kind : null;
+      const kind = entry.kind === 'promptTemplate' || entry.kind === 'agent' || entry.kind === 'agentPrompt' ? entry.kind : null;
       const id = typeof entry.id === 'string' ? entry.id.trim() : '';
       const prompt = typeof entry.prompt === 'string' ? normalizePromptText(entry.prompt) : '';
       const model = typeof entry.model === 'string' && entry.model.trim() ? entry.model.trim() : undefined;

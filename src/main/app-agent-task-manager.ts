@@ -17,6 +17,7 @@ import type {
 } from '../shared/types';
 import {
   assertAllowedMcpServers,
+  codexWorkspaceNetworkConfigArgs,
   createIsolatedCodexHome,
   removeIsolatedCodexHome,
 } from './codex-run-isolation';
@@ -30,6 +31,7 @@ interface AppAgentTaskManagerOptions {
   getClaudeCliPath: () => Promise<string | null>;
   getCodexPathEntries: (appId?: string) => Promise<string[]>;
   getCodexEnvironment: (appId?: string) => Promise<Record<string, string>>;
+  getAgentNetworkAccess?: (appId: string) => Promise<boolean>;
   getCodexAuthenticated: () => Promise<boolean>;
   getClaudeAuthenticated: () => Promise<boolean>;
   resolvePromptTemplates: (appId: string) => Promise<AppPromptTemplate[]>;
@@ -272,6 +274,7 @@ export class AppAgentTaskManager {
         ? await resolveCodexCommand(codexCliPath as string, await this.options.getCodexPathEntries(task.appId))
         : { command: claudeCliPath as string, prefixArgs: [], pathEntries: await this.options.getCodexPathEntries(task.appId) };
       const environment = await this.options.getCodexEnvironment(task.appId);
+      const networkAccess = await (this.options.getAgentNetworkAccess?.(task.appId) ?? Promise.resolve(false));
       const model = runtime.model || DEFAULT_MODEL;
       const reasoningEffort = runtime.provider === 'codex' ? runtime.effort as CodexReasoningEffort : DEFAULT_REASONING;
       const appMcpServers = await (this.options.listenAppMcps?.([task.appId], task.runId) ?? Promise.resolve([]));
@@ -318,6 +321,7 @@ export class AppAgentTaskManager {
             model,
             '--config',
             `reasoning_effort="${reasoningEffort}"`,
+            ...codexWorkspaceNetworkConfigArgs(networkAccess),
             '--full-auto',
             '--sandbox',
             'workspace-write',
@@ -362,6 +366,7 @@ export class AppAgentTaskManager {
         ? await createIsolatedCodexHome(this.options.codexHome, {
             prefix: 'forger-task-codex-home',
             trustedRoots: [task.appRoot],
+            networkAccess,
           })
         : '';
       if (isolatedCodexHome) {
@@ -384,6 +389,7 @@ export class AppAgentTaskManager {
           const cleanCodexHome = await createIsolatedCodexHome(this.options.codexHome, {
             prefix: 'forger-task-codex-home',
             trustedRoots: [task.appRoot],
+            networkAccess,
           });
           temporaryCodexHomes.push(cleanCodexHome);
           await appendTranscript(task.transcriptPath, 'meta', 'Retrying Codex task with a clean temporary Codex home.');
