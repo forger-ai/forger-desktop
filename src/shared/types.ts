@@ -255,6 +255,8 @@ export interface CloudFriendship {
   updatedAt: string;
   respondedAt?: string;
   lastMessageAt?: string;
+  unreadCount?: number;
+  lastReadAt?: string;
 }
 
 export type CloudMessageDeliveryMode = 'persistent' | 'ephemeral';
@@ -270,6 +272,7 @@ export interface CloudMessageEnvelope {
   keyFingerprint?: string;
   ciphertext: string;
   metadata?: Record<string, unknown>;
+  readAt?: string;
 }
 
 export interface CloudMessage {
@@ -289,6 +292,11 @@ export interface CloudMessage {
   createdAt: string;
   updatedAt?: string;
 }
+
+export type CloudSocialEvent =
+  | { type: 'friendship_changed'; friendship: CloudFriendship }
+  | { type: 'cloud_message'; message: CloudMessage; unread?: boolean }
+  | { type: 'ephemeral_cloud_message'; message: CloudMessage; unread?: boolean };
 
 export interface CloudSendMessageInput {
   recipientUsername?: string;
@@ -1681,11 +1689,12 @@ export interface ForgerDesktopApi {
   acceptFriendRequest: (id: number) => Promise<CloudFriendship>;
   declineFriendRequest: (id: number) => Promise<CloudFriendship>;
   cancelFriendRequest: (id: number) => Promise<CloudFriendship>;
+  markFriendChatRead: (friendUserId: number) => Promise<CloudFriendship>;
   openFriendChatWindow: (friendship: CloudFriendship) => Promise<FriendChatWindowOpenResult>;
   listCloudMessages: (friendUserId: number) => Promise<CloudMessage[]>;
   sendCloudMessage: (input: CloudSendMessageInput) => Promise<CloudMessage>;
   decideAppMessagePermission: (cloudMessageId: number, decision: CloudAppMessagePermissionDecision) => Promise<CloudMessage>;
-  onCloudFriendshipEvent: (listener: (event: unknown) => void) => () => void;
+  onCloudFriendshipEvent: (listener: (event: CloudSocialEvent) => void) => () => void;
   getCloudIdentity: () => Promise<CloudIdentityState>;
   revealCloudSecretKey: () => Promise<string>;
   regenerateCloudSecretKey: () => Promise<CloudIdentityState>;

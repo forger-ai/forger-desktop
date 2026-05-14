@@ -14,6 +14,7 @@ interface StoredCloudDevice {
 
 interface CloudDeviceManagerOptions {
   filePath: string;
+  accountStorageKey: () => string | undefined;
   backendBaseUrl: string;
   backendClient: () => ForgerBackendClient | null;
   token: () => string | undefined;
@@ -60,24 +61,40 @@ export class CloudDeviceManager {
   private pairingExpiresAt: string | undefined;
   private lastMessage: string | undefined;
   private lastTechnicalCode: string | undefined;
+  private storedPath: string | undefined;
+  private activeSessionKey: string | undefined;
+  private generation = 0;
 
   constructor(private readonly options: CloudDeviceManagerOptions) {}
 
   async start(): Promise<void> {
+    const sessionKey = this.options.accountStorageKey();
+    if (this.activeSessionKey && this.activeSessionKey !== sessionKey) {
+      this.stop();
+    }
+    this.activeSessionKey = sessionKey;
+    const generation = ++this.generation;
     if (!this.options.token()) {
       this.stop();
       return;
     }
     try {
       await this.ensureRegistered();
+      if (generation !== this.generation) {
+        return;
+      }
       await this.refreshDevices();
-      this.connectSocket();
+      if (generation !== this.generation) {
+        return;
+      }
+      this.connectSocket(generation);
     } catch (error) {
       await this.handleCloudError(error, 'No pudimos conectar este equipo con Forger Cloud.', 'cloud_device_start_failed');
     }
   }
 
   stop(): void {
+    this.generation += 1;
     this.connected = false;
     if (this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer);
@@ -87,14 +104,28 @@ export class CloudDeviceManager {
       this.socket.close();
       this.socket = null;
     }
+    this.stored = null;
+    this.storedPath = undefined;
+    this.devices = [];
+    this.currentDevice = undefined;
+    this.pairingCode = undefined;
+    this.pairingExpiresAt = undefined;
+    this.lastMessage = undefined;
+    this.lastTechnicalCode = undefined;
+    this.activeSessionKey = undefined;
   }
 
   async getState(): Promise<CloudDevicesState> {
     if (this.options.token()) {
       try {
+        const sessionKey = this.options.accountStorageKey();
+        if (this.activeSessionKey && this.activeSessionKey !== sessionKey) {
+          this.stop();
+        }
+        this.activeSessionKey = sessionKey;
         await this.ensureRegistered();
         await this.refreshDevices();
-        this.connectSocket();
+        this.connectSocket(this.generation);
       } catch (error) {
         await this.handleCloudError(error, 'No pudimos revisar los dispositivos conectados.', 'cloud_devices_state_failed');
       }
@@ -104,6 +135,11 @@ export class CloudDeviceManager {
 
   async generatePairingCode(): Promise<CloudDevicesState & { success: boolean }> {
     try {
+      const sessionKey = this.options.accountStorageKey();
+      if (this.activeSessionKey && this.activeSessionKey !== sessionKey) {
+        this.stop();
+      }
+      this.activeSessionKey = sessionKey;
       const device = await this.ensureRegistered();
       const code = this.randomPairingCode();
       const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
@@ -116,7 +152,7 @@ export class CloudDeviceManager {
       this.pairingExpiresAt = expiresAt;
       this.lastMessage = 'Codigo listo para emparejar este equipo.';
       this.lastTechnicalCode = undefined;
-      this.connectSocket();
+      this.connectSocket(this.generation);
       return { ...this.state(), success: true };
     } catch (error) {
       await this.handleCloudError(error, 'No pudimos generar el codigo de emparejamiento.', 'pairing_failed');
@@ -175,7 +211,7 @@ export class CloudDeviceManager {
     }
   }
 
-  private connectSocket(): void {
+  private connectSocket(generation = this.generation): void {
     if (!this.stored || this.socket) {
       return;
     }
@@ -183,6 +219,10 @@ export class CloudDeviceManager {
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
     url.searchParams.set('device_uid', this.stored.deviceUid);
     url.searchParams.set('device_secret', this.stored.deviceSecret);
+    const token = this.options.token();
+    if (token) {
+      url.searchParams.set('token', token);
+    }
 
     const socket = new WebSocket(url.toString());
     this.socket = socket;
@@ -190,15 +230,25 @@ export class CloudDeviceManager {
     const friendshipIdentifier = JSON.stringify({ channel: 'FriendshipChannel' });
 
     socket.addEventListener('open', () => {
+      if (generation !== this.generation || this.socket !== socket) {
+        socket.close();
+        return;
+      }
       socket.send(JSON.stringify({ command: 'subscribe', identifier: deviceIdentifier }));
       socket.send(JSON.stringify({ command: 'subscribe', identifier: friendshipIdentifier }));
     });
 
     socket.addEventListener('message', (event) => {
+      if (generation !== this.generation || this.socket !== socket) {
+        return;
+      }
       void this.handleSocketMessage(deviceIdentifier, event.data.toString());
     });
 
     socket.addEventListener('close', () => {
+      if (generation !== this.generation || this.socket !== socket) {
+        return;
+      }
       this.connected = false;
       this.socket = null;
       if (this.heartbeatTimer) {
@@ -206,7 +256,11 @@ export class CloudDeviceManager {
         this.heartbeatTimer = null;
       }
       if (this.options.token()) {
-        setTimeout(() => this.connectSocket(), 5000);
+        setTimeout(() => {
+          if (generation === this.generation) {
+            this.connectSocket(generation);
+          }
+        }, 5000);
       }
     });
   }
@@ -264,11 +318,14 @@ export class CloudDeviceManager {
   }
 
   private async loadOrCreateStored(): Promise<StoredCloudDevice> {
-    if (this.stored) {
+    const filePath = this.currentFilePath();
+    if (this.stored && this.storedPath === filePath) {
       return this.stored;
     }
+    this.stored = null;
+    this.storedPath = filePath;
     try {
-      const raw = await fs.readFile(this.options.filePath, 'utf8');
+      const raw = await fs.readFile(filePath, 'utf8');
       const parsed = JSON.parse(raw) as StoredCloudDevice & { encrypted?: boolean };
       if (parsed.encrypted && safeStorage.isEncryptionAvailable()) {
         parsed.deviceSecret = safeStorage.decryptString(Buffer.from(parsed.deviceSecret, 'base64'));
@@ -288,8 +345,19 @@ export class CloudDeviceManager {
     return this.stored;
   }
 
+  private currentFilePath(): string {
+    const accountStorageKey = this.options.accountStorageKey()?.replace(/[^a-zA-Z0-9_-]/g, '_');
+    if (!accountStorageKey) {
+      return this.options.filePath;
+    }
+    const extension = path.extname(this.options.filePath);
+    const basename = path.basename(this.options.filePath, extension);
+    return path.join(path.dirname(this.options.filePath), `${basename}-${accountStorageKey}${extension}`);
+  }
+
   private async saveStored(stored: StoredCloudDevice): Promise<void> {
-    await fs.mkdir(path.dirname(this.options.filePath), { recursive: true });
+    const filePath = this.storedPath ?? this.currentFilePath();
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
     const payload = safeStorage.isEncryptionAvailable()
       ? {
           ...stored,
@@ -297,7 +365,7 @@ export class CloudDeviceManager {
           deviceSecret: safeStorage.encryptString(stored.deviceSecret).toString('base64'),
         }
       : stored;
-    await fs.writeFile(this.options.filePath, JSON.stringify(payload, null, 2), 'utf8');
+    await fs.writeFile(filePath, JSON.stringify(payload, null, 2), 'utf8');
   }
 
   private randomPairingCode(): string {

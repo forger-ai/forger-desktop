@@ -492,6 +492,8 @@ export const en = {
     logout: 'Sign out',
     firstName: 'First name',
     lastName: 'Last name (optional)',
+    username: 'Username',
+    usernameHelp: 'Use letters, numbers, or underscore.',
     country: 'Country (optional)',
     countryAuto: 'Detect automatically',
     age: 'Age (optional)',

@@ -19,11 +19,13 @@ import {
   Tooltip,
   Typography,
   useTheme,
+  type AlertColor,
 } from '@mui/material';
 import { useEffect, useState, type MouseEvent } from 'react';
-import type { AppSummary, ForgerAccountSession, WindowControlState } from '@shared/types';
+import type { AppSummary, CloudFriendship, ForgerAccountSession, FriendChatWindowOpenResult, WindowControlState } from '@shared/types';
 import type { AppDictionary } from '@renderer/i18n';
 import type { View } from './Sidebar';
+import { FriendsView } from '../views/FriendsView';
 
 interface TopbarProps {
   currentView: View;
@@ -38,6 +40,8 @@ interface TopbarProps {
   onOpenCloudModal: () => void;
   account: ForgerAccountSession;
   accountBusy: boolean;
+  onOpenFriendChat: (friendship: CloudFriendship) => Promise<FriendChatWindowOpenResult> | FriendChatWindowOpenResult;
+  onSocialNotify: (message: string, severity?: AlertColor) => void;
   onLogout: () => void;
 }
 
@@ -202,6 +206,8 @@ export function Topbar({
   onOpenCloudModal,
   account,
   accountBusy,
+  onOpenFriendChat,
+  onSocialNotify,
   onLogout,
 }: TopbarProps) {
   const theme = useTheme();
@@ -272,6 +278,12 @@ export function Topbar({
         </Box>
 
         <Stack direction="row" alignItems="center" spacing={1} sx={{ WebkitAppRegion: 'no-drag', flexShrink: 0 }}>
+          <FriendsView
+            variant="topbar"
+            account={account}
+            onOpenFriendChat={onOpenFriendChat}
+            onNotify={onSocialNotify}
+          />
           <IconButton
             size="small"
             onClick={handleAccountClick}

@@ -16,7 +16,7 @@ import {
   alpha,
   useTheme,
 } from '@mui/material';
-import type { CloudMessage, ForgerAccountSession } from '@shared/types';
+import type { CloudMessage, CloudSocialEvent, ForgerAccountSession } from '@shared/types';
 
 interface FriendChatWindowViewProps {
   account: ForgerAccountSession;
@@ -25,18 +25,41 @@ interface FriendChatWindowViewProps {
   friendDisplayName: string;
 }
 
-const formatMessageTime = (value: string) =>
-  new Intl.DateTimeFormat('es-CL', {
+const messageTimestamp = (value?: string) => {
+  const timestamp = new Date(value ?? '').getTime();
+  return Number.isFinite(timestamp) ? timestamp : 0;
+};
+
+const formatMessageTime = (value?: string) => {
+  const timestamp = messageTimestamp(value);
+  if (!timestamp) {
+    return '';
+  }
+  return new Intl.DateTimeFormat('es-CL', {
     hour: '2-digit',
     minute: '2-digit',
-  }).format(new Date(value));
+  }).format(new Date(timestamp));
+};
 
 const sortMessages = (entries: CloudMessage[]) =>
   [...entries].sort((left, right) => {
-    const leftTime = new Date(left.createdAt).getTime();
-    const rightTime = new Date(right.createdAt).getTime();
+    const leftTime = messageTimestamp(left.createdAt);
+    const rightTime = messageTimestamp(right.createdAt);
     return leftTime - rightTime;
   });
+
+const messageIdentity = (message: CloudMessage) =>
+  message.id ? `id:${message.id}` : message.clientMessageId ? `client:${message.clientMessageId}` : null;
+
+const mergeMessage = (messages: CloudMessage[], message: CloudMessage) => {
+  const identity = messageIdentity(message);
+  if (!identity) {
+    return sortMessages([...messages, message]);
+  }
+  const next = messages.filter((entry) => messageIdentity(entry) !== identity);
+  next.push(message);
+  return sortMessages(next);
+};
 
 export function FriendChatWindowView({
   account,
@@ -46,6 +69,7 @@ export function FriendChatWindowView({
 }: FriendChatWindowViewProps) {
   const theme = useTheme();
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const shouldStickToBottomRef = useRef(true);
   const [messages, setMessages] = useState<CloudMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -72,24 +96,72 @@ export function FriendChatWindowView({
     }
   }, [account.authenticated, account.user?.confirmed, friendUserId]);
 
+  const markConversationRead = useCallback(async () => {
+    if (!account.authenticated || !account.user?.confirmed) {
+      return;
+    }
+    try {
+      await window.forger.markFriendChatRead(friendUserId);
+    } catch {
+      // Loading and sending remain usable even if the read receipt update is delayed.
+    }
+  }, [account.authenticated, account.user?.confirmed, friendUserId]);
+
   useEffect(() => {
     void loadMessages();
   }, [loadMessages]);
 
   useEffect(() => {
-    const removeListener = window.forger.onCloudFriendshipEvent(() => {
-      void loadMessages();
-    });
-    return removeListener;
-  }, [loadMessages]);
+    void markConversationRead();
+
+    const handleFocus = () => {
+      void markConversationRead();
+    };
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
+  }, [markConversationRead]);
 
   useEffect(() => {
+    const removeListener = window.forger.onCloudFriendshipEvent((event: CloudSocialEvent) => {
+      if (event.type !== 'cloud_message' && event.type !== 'ephemeral_cloud_message') {
+        return;
+      }
+      const currentUserId = account.user?.id;
+      if (!currentUserId) {
+        return;
+      }
+      const message = event.message;
+      const belongsToConversation =
+        (message.sender.id === currentUserId && message.recipient.id === friendUserId)
+        || (message.sender.id === friendUserId && message.recipient.id === currentUserId);
+      if (!belongsToConversation) {
+        return;
+      }
+      setMessages((current) => mergeMessage(current, message));
+      if (message.sender.id === friendUserId && document.hasFocus()) {
+        void markConversationRead();
+      }
+      setError(null);
+    });
+    return removeListener;
+  }, [account.user?.id, friendUserId, markConversationRead]);
+
+  useEffect(() => {
+    const container = scrollRef.current;
+    if (!container || !shouldStickToBottomRef.current) {
+      return;
+    }
+    container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+  }, [messages]);
+
+  const handleMessagesScroll = () => {
     const container = scrollRef.current;
     if (!container) {
       return;
     }
-    container.scrollTop = container.scrollHeight;
-  }, [messages]);
+    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+    shouldStickToBottomRef.current = distanceFromBottom < 96;
+  };
 
   const handleSend = async () => {
     const text = draft.trim();
@@ -106,7 +178,7 @@ export function FriendChatWindowView({
         delivery: 'persistent',
         source: 'user',
       });
-      setMessages((current) => sortMessages([...current, sent]));
+      setMessages((current) => mergeMessage(current, sent));
       setDraft('');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No pudimos enviar el mensaje.');
@@ -153,6 +225,7 @@ export function FriendChatWindowView({
 
       <Box
         ref={scrollRef}
+        onScroll={handleMessagesScroll}
         sx={{
           flex: 1,
           minHeight: 0,
@@ -196,6 +269,7 @@ export function FriendChatWindowView({
             {sortedMessages.map((message, index) => {
               const outgoing = message.sender.id === account.user?.id;
               const key = message.id ?? `${message.clientMessageId ?? 'message'}-${index}`;
+              const body = message.plaintext?.trim();
 
               return (
                 <Stack key={key} alignItems={outgoing ? 'flex-end' : 'flex-start'}>
@@ -213,8 +287,20 @@ export function FriendChatWindowView({
                       }`,
                     }}
                   >
-                    <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                      {message.plaintext ?? ''}
+                    <Typography
+                      variant="body2"
+                      sx={{
+                        whiteSpace: 'pre-wrap',
+                        wordBreak: 'break-word',
+                        color: body
+                          ? 'inherit'
+                          : outgoing
+                            ? alpha(theme.palette.primary.contrastText, 0.78)
+                            : theme.palette.text.secondary,
+                        fontStyle: body ? 'normal' : 'italic',
+                      }}
+                    >
+                      {body ?? 'No se pudo desencriptar este mensaje en este dispositivo.'}
                     </Typography>
                     <Typography
                       variant="caption"

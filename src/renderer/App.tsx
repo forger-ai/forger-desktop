@@ -86,7 +86,6 @@ import { ChatView, type ChatMessage, type ConversationHistoryItem } from '@rende
 import { DataView } from '@renderer/views/DataView';
 import { DevicesView } from '@renderer/views/DevicesView';
 import { FilesView } from '@renderer/views/FilesView';
-import { FriendsView } from '@renderer/views/FriendsView';
 import { FriendChatWindowView } from '@renderer/views/FriendChatWindowView';
 import { InstalledAppsView } from '@renderer/views/InstalledAppsView';
 import { SettingsView } from '@renderer/views/SettingsView';
@@ -2737,6 +2736,11 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
           onOpenCloudModal={() => setCloudModalOpen(true)}
           account={forgerAccount}
           accountBusy={forgerAccountBusy}
+          onOpenFriendChat={(friendship) => handleOpenFriendChat(friendship)}
+          onSocialNotify={(message, severity = 'info') => {
+            setBannerSeverity(severity);
+            setBannerMessage(message);
+          }}
           onLogout={() => void handleForgerLogout()}
           desktopUpdateState={desktopUpdateState}
         >
@@ -2904,15 +2908,6 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
             onDeleteFile={(file) => void handleDeleteFile(file)}
           />
         ) : null}
-
-        <FriendsView
-          account={forgerAccount}
-          onOpenFriendChat={(friendship) => handleOpenFriendChat(friendship)}
-          onNotify={(message, severity = 'info') => {
-            setBannerSeverity(severity);
-            setBannerMessage(message);
-          }}
-        />
 
         {currentView === 'backups' ? (
           <BackupsView

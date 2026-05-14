@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, shell, type IpcMainInvokeEvent } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Notification, shell, type IpcMainInvokeEvent } from 'electron';
 import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import fs from 'node:fs/promises';
@@ -70,10 +70,12 @@ import type {
   AppCategory,
   AppDetails,
   CloudFriendship,
+  CloudFriendUser,
   CloudSyncSettings,
   CloudMessage,
   CloudMessageEnvelope,
   CloudSendMessageInput,
+  CloudSocialEvent,
   CloudAppMessagePermissionDecision,
   CreateRemoteAppBackupInput,
   AppExternalFolderSelection,
@@ -415,6 +417,7 @@ const getForgerAccountPath = () => path.join(getForgerMetadataRoot(), 'account.j
 const getCloudDevicePath = () => path.join(getForgerMetadataRoot(), 'cloud-device.json');
 const getCloudIdentityPath = () => path.join(getForgerMetadataRoot(), 'cloud-identity.json');
 const getCloudSyncSettingsPath = () => path.join(getForgerMetadataRoot(), 'cloud-sync.json');
+const getCloudDeviceAccountStorageKey = () => forgerAccount.user?.id ? `user-${forgerAccount.user.id}` : undefined;
 
 const FORGER_TOOL_PACKAGE_ID = 'forger';
 
@@ -1202,15 +1205,44 @@ const emitForgerAccountUpdated = (payload: ReturnType<typeof publicForgerAccount
   mainWindow.webContents.send(IPC_CHANNELS.forgerAccountUpdated, payload);
 };
 
+const closeFriendChatWindows = (): void => {
+  for (const window of friendChatWindows.values()) {
+    if (!window.isDestroyed()) {
+      window.close();
+    }
+  }
+  friendChatWindows.clear();
+};
+
+const switchForgerAccountSession = async (
+  nextAccount: StoredForgerAccount,
+  options: { userMessage?: string; technicalCode?: string } = {},
+): Promise<ReturnType<typeof publicForgerAccount> & { userMessage?: string; technicalCode?: string }> => {
+  cloudDeviceManager?.stop();
+  closeFriendChatWindows();
+  forgerAccount = nextAccount;
+
+  if (forgerAccount.authenticated && forgerAccount.token) {
+    await forgerAccountStore?.save(forgerAccount);
+    await cloudDeviceManager?.start();
+  } else {
+    await forgerAccountStore?.clear();
+  }
+
+  const payload = {
+    ...publicForgerAccount(forgerAccount),
+    userMessage: options.userMessage,
+    technicalCode: options.technicalCode,
+  };
+  emitForgerAccountUpdated(payload);
+  return payload;
+};
+
 const clearForgerAccountSession = async (technicalCode: string): Promise<void> => {
   if (!forgerAccount.authenticated && !forgerAccount.token) {
     return;
   }
-  cloudDeviceManager?.stop();
-  forgerAccount = { authenticated: false };
-  await forgerAccountStore?.clear();
-  emitForgerAccountUpdated({
-    ...publicForgerAccount(forgerAccount),
+  await switchForgerAccountSession({ authenticated: false }, {
     userMessage: 'Tu sesion de Forger Cloud expiro. Inicia sesion nuevamente.',
     technicalCode,
   });
@@ -5262,10 +5294,10 @@ const openOrFocusAppWindow = async (
   await appWindow.loadURL(localizedFrontendUrl);
 };
 
-const openOrFocusFriendChatWindow = async (friendship: CloudFriendship): Promise<FriendChatWindowOpenResult> => {
-  const friendUserId = friendship.friend.id;
-  const friendUsername = friendship.friend.username;
-  const displayName = friendship.friend.firstName?.trim() || friendship.friend.username;
+const openOrFocusFriendChatWindowForFriend = async (friend: CloudFriendUser): Promise<FriendChatWindowOpenResult> => {
+  const friendUserId = friend.id;
+  const friendUsername = friend.username;
+  const displayName = friend.firstName?.trim() || friend.username;
   const existing = friendChatWindows.get(friendUserId);
 
   if (existing && !existing.isDestroyed()) {
@@ -5329,6 +5361,9 @@ const openOrFocusFriendChatWindow = async (friendship: CloudFriendship): Promise
     userMessage: `Abrí el chat con @${friendUsername}.`,
   };
 };
+
+const openOrFocusFriendChatWindow = async (friendship: CloudFriendship): Promise<FriendChatWindowOpenResult> =>
+  await openOrFocusFriendChatWindowForFriend(friendship.friend);
 
 const findManifestService = (
   manifest: AppManifest | null,
@@ -6221,18 +6256,35 @@ const decryptCloudMessages = async (messages: CloudMessage[]): Promise<CloudMess
 const wait = async (milliseconds: number): Promise<void> =>
   await new Promise((resolve) => setTimeout(resolve, milliseconds));
 
-const buildEncryptedEnvelopes = async (friend: { devices?: Array<{ id: number; deviceUid: string; publicKey?: string; keyFingerprint?: string }> }, text: string): Promise<CloudMessageEnvelope[]> => {
+const buildEncryptedEnvelopes = async (
+  friend: { devices?: Array<{ id: number; deviceUid: string; publicKey?: string; keyFingerprint?: string }> },
+  text: string,
+): Promise<CloudMessageEnvelope[]> => {
   const devices = friend.devices?.filter((device) => device.publicKey) ?? [];
   if (devices.length === 0) {
-    throw new Error('recipient_cloud_key_missing');
+    throw Object.assign(
+      new Error('No pudimos enviar el mensaje porque este contacto todavia no tiene una clave cloud activa. Pidele que abra Forger Desktop con su cuenta y vuelve a intentarlo.'),
+      { technicalCode: 'recipient_cloud_key_missing' },
+    );
   }
-  return devices.map((device) => ({
+  const recipientEnvelopes = devices.map((device) => ({
     recipientUserId: undefined,
     cloudDeviceId: device.id,
     deviceUid: device.deviceUid,
     keyFingerprint: device.keyFingerprint,
     ciphertext: JSON.stringify(getCloudIdentityStore().encryptFor(device.publicKey as string, text, device.keyFingerprint)),
   }));
+  const currentDevice = (await cloudDeviceManager?.getState())?.currentDevice;
+  const senderEnvelope = currentDevice?.publicKey && forgerAccount.user?.id
+    ? [{
+        recipientUserId: forgerAccount.user.id,
+        cloudDeviceId: currentDevice.id,
+        deviceUid: currentDevice.deviceUid,
+        keyFingerprint: currentDevice.keyFingerprint,
+        ciphertext: JSON.stringify(getCloudIdentityStore().encryptFor(currentDevice.publicKey, text, currentDevice.keyFingerprint)),
+      }]
+    : [];
+  return [...recipientEnvelopes, ...senderEnvelope];
 };
 
 const sendEncryptedCloudMessage = async (input: CloudSendMessageInput): Promise<CloudMessage> => {
@@ -6256,6 +6308,92 @@ const sendEncryptedCloudMessage = async (input: CloudSendMessageInput): Promise<
     clientMessageId: `${Date.now()}-${randomBytes(8).toString('hex')}`,
   });
   return { ...(await decryptCloudMessage(message)), plaintext: input.text };
+};
+
+const isCloudSocialEvent = (event: unknown): event is CloudSocialEvent => {
+  if (!event || typeof event !== 'object') {
+    return false;
+  }
+  const type = (event as { type?: unknown }).type;
+  return type === 'friendship_changed' || type === 'cloud_message' || type === 'ephemeral_cloud_message';
+};
+
+const prepareCloudSocialEvent = async (event: unknown): Promise<CloudSocialEvent | null> => {
+  if (!isCloudSocialEvent(event)) {
+    return null;
+  }
+  if (event.type === 'friendship_changed') {
+    const friendship = forgerBackendClient?.normalizeFriendshipPayload(event.friendship);
+    return friendship ? { type: event.type, friendship } : null;
+  }
+  if (event.type === 'cloud_message' || event.type === 'ephemeral_cloud_message') {
+    const message = forgerBackendClient?.normalizeCloudMessagePayload(event.message);
+    return message ? { type: event.type, message: await decryptCloudMessage(message) } : null;
+  }
+  return null;
+};
+
+const isUnreadIncomingCloudMessage = (event: CloudSocialEvent): boolean => {
+  if (event.type !== 'cloud_message' && event.type !== 'ephemeral_cloud_message') {
+    return false;
+  }
+  const currentUserId = forgerAccount.user?.id;
+  const message = event.message;
+  if (!currentUserId || message.sender.id === currentUserId || message.recipient.id !== currentUserId) {
+    return false;
+  }
+
+  const chatWindow = friendChatWindows.get(message.sender.id);
+  if (chatWindow && !chatWindow.isDestroyed() && chatWindow.isFocused()) {
+    return false;
+  }
+  return true;
+};
+
+const showIncomingCloudMessageNotification = (event: CloudSocialEvent): void => {
+  if (!isUnreadIncomingCloudMessage(event)) {
+    return;
+  }
+  if (event.type !== 'cloud_message' && event.type !== 'ephemeral_cloud_message') {
+    return;
+  }
+  if (!Notification.isSupported()) {
+    return;
+  }
+
+  const message = event.message;
+  const senderName = message.sender.firstName?.trim() || `@${message.sender.username}`;
+  const body = message.plaintext?.trim() || 'Nuevo mensaje en Social';
+  const notification = new Notification({
+    title: senderName,
+    body: body.length > 120 ? `${body.slice(0, 117)}...` : body,
+  });
+  notification.on('click', () => {
+    void openOrFocusFriendChatWindowForFriend(message.sender);
+  });
+  notification.show();
+};
+
+const forwardCloudSocialEvent = (event: CloudSocialEvent): void => {
+  mainWindow?.webContents.send(IPC_CHANNELS.cloudFriendshipEvent, event);
+  for (const window of friendChatWindows.values()) {
+    window.webContents.send(IPC_CHANNELS.cloudFriendshipEvent, event);
+  }
+  for (const window of appWindows.values()) {
+    window.webContents.send(IPC_CHANNELS.appMessagesEvent, event);
+  }
+};
+
+const handleCloudSocialEvent = async (event: unknown): Promise<void> => {
+  const prepared = await prepareCloudSocialEvent(event);
+  if (!prepared) {
+    return;
+  }
+  const eventForRenderer = prepared.type === 'cloud_message' || prepared.type === 'ephemeral_cloud_message'
+    ? { ...prepared, unread: isUnreadIncomingCloudMessage(prepared) }
+    : prepared;
+  showIncomingCloudMessageNotification(eventForRenderer);
+  forwardCloudSocialEvent(eventForRenderer);
 };
 
 const createWindow = async (): Promise<void> => {
@@ -6567,20 +6705,16 @@ const registerIpcHandlers = (): void => {
       ? await forgerBackendClient.loginAccount(input)
       : { success: false, authenticated: false, userMessage: 'No pudimos iniciar sesion.', technicalCode: 'backend_client_missing' };
     if (result.success) {
-      forgerAccount = result;
-      await forgerAccountStore?.save(forgerAccount);
-      await cloudDeviceManager?.start();
+      await switchForgerAccountSession(result, { userMessage: result.userMessage, technicalCode: result.technicalCode });
     }
     catalogApps = await listCatalogFromBackend();
     return { ...publicForgerAccount(forgerAccount), success: result.success, userMessage: result.userMessage, technicalCode: result.technicalCode };
   });
   ipcMain.handle(IPC_CHANNELS.logoutForgerAccount, async () => {
-    cloudDeviceManager?.stop();
-    await forgerBackendClient?.logoutAccount();
-    forgerAccount = { authenticated: false };
-    await forgerAccountStore?.clear();
+    await forgerBackendClient?.logoutAccount().catch(() => undefined);
+    const account = await switchForgerAccountSession({ authenticated: false });
     catalogApps = await listCatalogFromBackend();
-    return { ...publicForgerAccount(forgerAccount), success: true };
+    return { ...account, success: true };
   });
   ipcMain.handle(IPC_CHANNELS.getCloudDevices, async () => {
     return cloudDeviceManager ? await cloudDeviceManager.getState() : { devices: [], connected: false };
@@ -6611,6 +6745,12 @@ const registerIpcHandlers = (): void => {
   ipcMain.handle(IPC_CHANNELS.cancelFriendRequest, async (_event, id: number) => {
     if (!forgerBackendClient) throw new Error('backend_client_missing');
     return await forgerBackendClient.cancelFriendRequest(id);
+  });
+  ipcMain.handle(IPC_CHANNELS.markFriendChatRead, async (_event, friendUserId: number) => {
+    if (!forgerBackendClient) throw new Error('backend_client_missing');
+    const friendship = await forgerBackendClient.markFriendChatRead(friendUserId);
+    forwardCloudSocialEvent({ type: 'friendship_changed', friendship });
+    return friendship;
   });
   ipcMain.handle(IPC_CHANNELS.openFriendChatWindow, async (_event, friendship: CloudFriendship) => {
     return await openOrFocusFriendChatWindow(friendship);
@@ -7565,21 +7705,14 @@ app.whenReady().then(async () => {
   });
   cloudDeviceManager = new CloudDeviceManager({
     filePath: getCloudDevicePath(),
+    accountStorageKey: getCloudDeviceAccountStorageKey,
     backendBaseUrl,
     backendClient: () => forgerBackendClient,
     token: () => forgerAccount.token,
     getCloudIdentity: () => getCloudIdentityStore().getPublicRegistration(),
     getInstalledApps: () => Object.values(registry.apps).map(toAppSummary),
     handleRelayRequest: handleCloudRelayRequest,
-    handleFriendshipEvent: async (event) => {
-      mainWindow?.webContents.send(IPC_CHANNELS.cloudFriendshipEvent, event);
-      for (const window of friendChatWindows.values()) {
-        window.webContents.send(IPC_CHANNELS.cloudFriendshipEvent, event);
-      }
-      for (const window of appWindows.values()) {
-        window.webContents.send(IPC_CHANNELS.appMessagesEvent, event);
-      }
-    },
+    handleFriendshipEvent: handleCloudSocialEvent,
     onAuthenticationInvalid: clearForgerAccountSession,
   });
   await cloudDeviceManager.start();

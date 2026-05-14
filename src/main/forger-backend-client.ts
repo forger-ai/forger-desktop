@@ -486,6 +486,15 @@ export class ForgerBackendClient {
     return await this.friendRequestAction(id, 'cancel');
   }
 
+  async markFriendChatRead(friendUserId: number): Promise<CloudFriendship> {
+    const payload = await this.patchJson(`/api/v1/me/friends/${encodeURIComponent(String(friendUserId))}/read_receipt`, {}, 'friend_read_receipt_failed');
+    const friendship = this.normalizeFriendship(payload);
+    if (!friendship) {
+      throw backendError('No pudimos actualizar la lectura del chat.', 'friend_read_receipt_response_invalid');
+    }
+    return friendship;
+  }
+
   async listCloudMessages(friendUserId: number): Promise<CloudMessage[]> {
     const query = new URLSearchParams({ friend_user_id: String(friendUserId) });
     const payload = await this.getJson(`/api/v1/me/cloud_messages?${query.toString()}`, 'cloud_messages_list_failed');
@@ -527,6 +536,14 @@ export class ForgerBackendClient {
       throw backendError('No pudimos actualizar el permiso.', 'app_message_permission_response_invalid');
     }
     return message;
+  }
+
+  normalizeCloudMessagePayload(value: unknown): CloudMessage | undefined {
+    return this.normalizeCloudMessage(value);
+  }
+
+  normalizeFriendshipPayload(value: unknown): CloudFriendship | undefined {
+    return this.normalizeFriendship(value);
   }
 
   private async friendRequestAction(id: number, action: 'accept' | 'decline' | 'cancel'): Promise<CloudFriendship> {
@@ -1154,6 +1171,8 @@ export class ForgerBackendClient {
       updatedAt: typeof record.updated_at === 'string' ? record.updated_at : new Date().toISOString(),
       respondedAt: typeof record.responded_at === 'string' ? record.responded_at : undefined,
       lastMessageAt: typeof record.last_message_at === 'string' ? record.last_message_at : undefined,
+      unreadCount: Number.isFinite(Number(record.unread_count)) ? Number(record.unread_count) : 0,
+      lastReadAt: typeof record.last_read_at === 'string' ? record.last_read_at : undefined,
     };
   }
 
@@ -1203,6 +1222,7 @@ export class ForgerBackendClient {
       keyFingerprint: typeof record.key_fingerprint === 'string' ? record.key_fingerprint : undefined,
       ciphertext,
       metadata: record.metadata && typeof record.metadata === 'object' && !Array.isArray(record.metadata) ? record.metadata as Record<string, unknown> : {},
+      readAt: typeof record.read_at === 'string' ? record.read_at : undefined,
     };
   }
 

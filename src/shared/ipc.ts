@@ -53,6 +53,7 @@ export const IPC_CHANNELS = {
   acceptFriendRequest: 'forger:friends:accept',
   declineFriendRequest: 'forger:friends:decline',
   cancelFriendRequest: 'forger:friends:cancel',
+  markFriendChatRead: 'forger:friends:mark-chat-read',
   listCloudMessages: 'forger:cloud-messages:list',
   sendCloudMessage: 'forger:cloud-messages:send',
   decideAppMessagePermission: 'forger:cloud-messages:permission',
