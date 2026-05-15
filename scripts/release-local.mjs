@@ -23,6 +23,7 @@ const parseArgs = () => {
     skipNotarize: false,
     waitNotarize: false,
     allowDirty: false,
+    skipPublish: false,
     tag: null,
   };
 
@@ -35,6 +36,8 @@ const parseArgs = () => {
       options.waitNotarize = true;
     } else if (arg === '--allow-dirty') {
       options.allowDirty = true;
+    } else if (arg === '--skip-publish') {
+      options.skipPublish = true;
     } else if (arg.startsWith('--platform=')) {
       options.platform = arg.slice('--platform='.length);
     } else if (arg.startsWith('--tag=')) {
@@ -538,10 +541,14 @@ const main = async () => {
       uploadFiles.push(artifactPath, checksumPath);
     }
 
+    if (options.skipPublish) {
+      console.log(`Prepared ${uploadFiles.length / 2} artifact set(s) for ${tag}; skipping tag push and release upload.`);
+      return;
+    }
+
     await ensureTag(tag);
     await ensureRelease(tag, pkg.version);
     await uploadArtifacts(tag, uploadFiles);
-
     console.log(`Published ${tag} as latest with ${uploadFiles.length / 2} artifact set(s).`);
   } finally {
     await cleanupMacSigningKeychain();
