@@ -1,6 +1,6 @@
 {
   "name": "forger-desktop",
-  "version": "0.1.49",
+  "version": "0.1.50",
   "private": true,
   "description": "Desktop launcher for Forger",
   "author": "Forger",
@@ -22,6 +22,7 @@
     "test:automation-approval": "npm run build:electron && node ./scripts/test-automation-approval-policy.mjs",
     "test:app-agent-runtime-contract": "npm run build:electron && node ./scripts/test-app-agent-runtime-contract.mjs",
     "dist:mac": "npm run build && electron-builder --mac dmg --arm64 --publish never",
+    "release:ci:mac": "node ./scripts/release-local.mjs --platform=mac --wait-notarize --skip-publish",
     "dist:win": "npm run build && electron-builder --win nsis --x64 --publish never",
     "release:local": "node ./scripts/release-local.mjs",
     "release:local:mac": "node ./scripts/release-local.mjs --platform=mac",
