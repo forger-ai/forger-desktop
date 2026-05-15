@@ -25,6 +25,14 @@ import { AppAgentConversationManager } from './app-agent-conversation-manager';
 import { renderManifestAgentPrompt, type ManifestAgentPromptKind } from './manifest-agent-prompts';
 import { AppMcpManager } from './app-mcp-manager';
 import { AutomationManager } from './automation-manager';
+import {
+  extractDeepLinkFromArgv,
+  focusWindow as focusDeepLinkWindow,
+  FORGER_PROTOCOL,
+  parseForgerUrl,
+  registerForgerProtocol,
+  type ForgerDeepLink,
+} from './deep-links';
 import { DevCatalogService } from './dev-catalog-service';
 import { DesktopUpdater } from './desktop-updater';
 import { DesktopRuntimeBridge } from './desktop-runtime-bridge';
@@ -352,6 +360,11 @@ interface StackSkillTemplate {
 }
 
 let mainWindow: BrowserWindow | null = null;
+// Holds a deep-link captured before the renderer is ready (cold boot
+// from `process.argv` or an `open-url` event firing during startup).
+// `flushPendingDeepLink` ships it to the renderer once the window is
+// ready, then clears the slot.
+let pendingDeepLink: ForgerDeepLink | null = null;
 let catalogApps: CatalogApp[] = [];
 let settings: Settings = structuredClone(settingsSeed);
 let registry: AppRegistry = { apps: {} };
@@ -5293,6 +5306,15 @@ const openOrFocusAppWindow = async (
   const openExternalUrl = (targetUrl: string): void => {
     try {
       const protocol = new URL(targetUrl).protocol;
+      if (protocol === `${FORGER_PROTOCOL}:`) {
+        // `forger://` URLs originated from an app's BrowserWindow are
+        // routed in-process — same effect as the OS-level handler,
+        // without the round-trip and without depending on the dev
+        // build having protocol registration that survived rebuilds.
+        const link = parseForgerUrl(targetUrl);
+        if (link) dispatchDeepLink(link);
+        return;
+      }
       if (protocol === 'http:' || protocol === 'https:' || protocol === 'mailto:') {
         void shell.openExternal(targetUrl);
       }
@@ -7705,6 +7727,75 @@ const registerIpcHandlers = (): void => {
   });
 };
 
+// ── Deep-link routing ────────────────────────────────────────────────
+// Handles `forger://` URLs from any source (OS protocol activation,
+// `open-url` on macOS, or `second-instance` re-entry on Win/Linux).
+// Defers delivery to the renderer when the main window is not ready
+// yet via `pendingDeepLink` + `flushPendingDeepLink`.
+
+const dispatchDeepLink = (link: ForgerDeepLink): void => {
+  if (!mainWindow || mainWindow.webContents.isLoading()) {
+    pendingDeepLink = link;
+    if (mainWindow) {
+      // Window exists but content still loading — flush once the load
+      // completes. Reusing `did-finish-load` over `dom-ready` because
+      // the renderer needs its IPC subscriptions registered, which
+      // happens during script execution.
+      mainWindow.webContents.once('did-finish-load', flushPendingDeepLink);
+    }
+    return;
+  }
+  focusDeepLinkWindow(mainWindow);
+  mainWindow.webContents.send(IPC_CHANNELS.deepLink, link);
+};
+
+const flushPendingDeepLink = (): void => {
+  if (!pendingDeepLink || !mainWindow) return;
+  const link = pendingDeepLink;
+  pendingDeepLink = null;
+  focusDeepLinkWindow(mainWindow);
+  mainWindow.webContents.send(IPC_CHANNELS.deepLink, link);
+};
+
+const handleIncomingUrl = (rawUrl: string): void => {
+  const link = parseForgerUrl(rawUrl);
+  if (!link) return;
+  dispatchDeepLink(link);
+};
+
+registerForgerProtocol();
+
+// Single-instance lock: when the OS opens a `forger://` URL while a
+// Desktop instance is already running, Electron spawns a second
+// instance. `requestSingleInstanceLock` makes that second instance
+// quit immediately and pipe its argv into the running one via
+// `second-instance`, so we always have exactly one Desktop process
+// handling deep-links.
+const gotSingleInstance = app.requestSingleInstanceLock();
+if (!gotSingleInstance) {
+  app.quit();
+} else {
+  app.on('second-instance', (_event, argv) => {
+    const link = extractDeepLinkFromArgv(argv);
+    if (link) dispatchDeepLink(link);
+    else focusDeepLinkWindow(mainWindow);
+  });
+}
+
+// macOS path: the OS does not pass URLs in argv; it fires `open-url`
+// (and re-fires it after activation if the URL arrived before ready).
+app.on('open-url', (event, url) => {
+  event.preventDefault();
+  handleIncomingUrl(url);
+});
+
+// Cold-start argv: on Windows/Linux a `forger://` URL is passed as the
+// last argv entry. On macOS this is empty (URLs arrive via open-url).
+const coldStartLink = extractDeepLinkFromArgv(process.argv);
+if (coldStartLink) {
+  pendingDeepLink = coldStartLink;
+}
+
 app.whenReady().then(async () => {
   await fs.mkdir(getTempRoot(), { recursive: true });
   await fs.mkdir(getRuntimesRoot(), { recursive: true });
@@ -8172,6 +8263,12 @@ app.whenReady().then(async () => {
   registerIpcHandlers();
   ensureCatalogStatuses();
   await createWindow();
+
+  // Deliver any deep-link captured before the renderer existed (cold
+  // boot from `process.argv` or an `open-url` fired during startup).
+  if (mainWindow && pendingDeepLink) {
+    mainWindow.webContents.once('did-finish-load', flushPendingDeepLink);
+  }
 
   app.on('activate', async () => {
     if (BrowserWindow.getAllWindows().length === 0) {

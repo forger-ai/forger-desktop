@@ -173,6 +173,10 @@ export const IPC_CHANNELS = {
   windowClose: 'forger:window:close',
   windowGetState: 'forger:window:get-state',
   windowStateChanged: 'forger:window:state-changed',
+  // Emitted by the main process when a `forger://` URL is opened from
+  // the OS (or another app). The renderer subscribes via the preload
+  // bridge to react — e.g. focusing the chat and prefilling the input.
+  deepLink: 'forger:deep-link',
 } as const;
 
 export const LEGACY_AGENT_IPC_CHANNELS = {

@@ -471,8 +471,30 @@ export function ChatView({
   }, [activeConversationId, codexConfigured, isSending]);
 
   useEffect(() => {
-    if (!inputValue && mentionedFiles.length === 0 && inputRef.current?.textContent) {
-      inputRef.current.textContent = '';
+    const root = inputRef.current;
+    if (!root) return;
+    // Mention chips are stored as inline DOM nodes the composer manages
+    // directly; bail out so we never wipe them by overwriting textContent.
+    if (mentionedFiles.length > 0) return;
+
+    // The composer is a contenteditable, but `inputValue` is the
+    // controlled mirror. They normally stay in sync because typing
+    // funnels through `syncComposerText → onInputChange`. When the
+    // controlled value changes from outside (clear after send, deep-link
+    // prefill, etc.) we have to push it into the DOM ourselves.
+    const currentText = serializeComposerText();
+    if (currentText === inputValue) return;
+
+    root.textContent = inputValue;
+    if (inputValue) {
+      // Place the caret at the end so the user can keep typing after the
+      // injected text instead of finding the cursor at position 0.
+      const range = document.createRange();
+      range.selectNodeContents(root);
+      range.collapse(false);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
     }
   }, [inputValue, mentionedFiles.length]);
 

@@ -1765,7 +1765,28 @@ export interface ForgerDesktopApi {
   closeWindow: () => Promise<void>;
   getWindowState: () => Promise<WindowControlState>;
   onWindowStateChanged: (listener: (state: WindowControlState) => void) => () => void;
+  onDeepLink: (listener: (link: ForgerDeepLink) => void) => () => void;
 }
+
+/**
+ * Structured representation of a `forger://` URL delivered to the
+ * renderer. The shape mirrors the parser in `main/deep-links.ts`. Add
+ * new variants as more deep-link kinds are introduced.
+ */
+export type ForgerDeepLink =
+  | {
+      kind: 'chat';
+      /** Manifest name of the target app (`pyme-os`). Renderer resolves it against the installed list. `null` means the global free chat. */
+      app: string | null;
+      /** Composer text to prefill, when provided by the URL. */
+      prompt: string | null;
+      /** The raw URL, for logging / debugging. */
+      raw: string;
+    }
+  | {
+      kind: 'unknown';
+      raw: string;
+    }
 
 declare global {
   interface Window {

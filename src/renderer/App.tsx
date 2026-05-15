@@ -291,6 +291,10 @@ function App() {
   const [catalogApps, setCatalogApps] = useState<CatalogApp[]>([]);
   const [openingAppIds, setOpeningAppIds] = useState<Set<string>>(new Set());
   const openingAppIdsRef = useRef<Set<string>>(new Set());
+  // Latest installed app list, mirrored for use inside long-lived
+  // event subscriptions (e.g. deep-link handler) that close over state
+  // captured at mount time.
+  const installedAppsRef = useRef<AppSummary[]>([]);
   const [installProgressByApp, setInstallProgressByApp] = useState<Record<string, InstallAppResult>>({});
   const [settings, setSettings] = useState<Settings>(initialSettings);
   const [codexAuthBusy, setCodexAuthBusy] = useState(false);
@@ -941,6 +945,40 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
       setErrorReportDialog({ open: true, report, busy: false });
     });
 
+    // `forger://chat` URLs arrive here, dispatched by the main process
+    // after parsing the protocol URL. We resolve the manifest name to
+    // an installed appId (preferring `<name>-dev` when only the dev
+    // install is present), switch to the chat view, and prefill the
+    // composer with the provided prompt. Anything we cannot resolve is
+    // logged but does not throw, so a malformed deep-link never breaks
+    // the renderer.
+    const unsubscribeDeepLink = desktopApi.onDeepLink((link) => {
+      if (link.kind !== 'chat') return;
+      const requestedName = link.app?.trim() || null;
+      let targetAppId: string | null = null;
+      if (requestedName) {
+        const exact = installedAppsRef.current.find((entry) => entry.id === requestedName);
+        const devVariant = installedAppsRef.current.find(
+          (entry) => entry.id === `${requestedName}-dev`,
+        );
+        targetAppId = exact?.id ?? devVariant?.id ?? null;
+        if (!targetAppId) {
+          // Unknown app — fall back to the free chat rather than
+          // ignoring the deep-link entirely. The prompt still lands.
+          console.warn('[deep-link] unknown app, falling back to free chat:', requestedName);
+        }
+      }
+      if (targetAppId) {
+        setSelectedAppId(targetAppId);
+      } else {
+        setSelectedAppId(null);
+      }
+      setCurrentView('chat');
+      if (link.prompt) {
+        setChatInput(link.prompt);
+      }
+    });
+
     return () => {
       unsubscribeInstall();
       unsubscribeRuntime();
@@ -949,12 +987,17 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
       unsubscribeDesktopUpdate();
       unsubscribeForgerAccount();
       unsubscribeErrorReport();
+      unsubscribeDeepLink();
     };
   }, []);
 
   useEffect(() => {
     selectedAutomationIdRef.current = selectedAutomationId;
   }, [selectedAutomationId]);
+
+  useEffect(() => {
+    installedAppsRef.current = installedApps;
+  }, [installedApps]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
