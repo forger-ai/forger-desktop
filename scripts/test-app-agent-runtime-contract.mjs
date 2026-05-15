@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -12,6 +12,7 @@ const {
   buildPromptBases,
   validatePromptEdit,
 } = require('../dist-electron/main/prompt-overrides.js');
+const { AppMcpManager } = require('../dist-electron/main/app-mcp-manager.js');
 
 const manifestAgent = {
   id: 'feature-intake-agent',
@@ -252,6 +253,57 @@ try {
   assert.match(appliedManifestAgent.prompts.initial.body, /^Runtime contract:/);
 } finally {
   await rm(storeDir, { recursive: true, force: true });
+}
+
+const mcpInstallDir = await mkdtemp(join(tmpdir(), 'forger-app-mcp-'));
+try {
+  await mkdir(join(mcpInstallDir, 'backend'));
+  const calls = [];
+  const manager = new AppMcpManager({
+    getInstalledApp: (appId) => ({
+      appId,
+      installDir: mcpInstallDir,
+      requiredPythonVersion: '3.12',
+    }),
+    resolveInstalledManifest: async () => ({
+      mcp: {
+        command: 'python -e 0',
+        healthcheck: '/health',
+      },
+    }),
+    ensureRuntimeInstalled: async () => ({
+      rootDir: tmpdir(),
+      python: process.execPath,
+    }),
+    ensureBackendPythonEnvironment: async (pythonPath, backendDir, appId, reason) => {
+      calls.push({ pythonPath, backendDir, appId, reason });
+    },
+    getVenvExecutables: (backendDir) => ({
+      python: process.execPath,
+      pip: join(backendDir, '.venv', 'bin', 'pip'),
+    }),
+    getFreePort: async () => 65500,
+    splitManifestCommand: (command) => command.split(/\s+/).filter(Boolean),
+    ensurePathInside: () => true,
+    translateManifestEnvironment: () => ({}),
+    ensureSqliteDatabaseParent: async () => {},
+    getRuntimePathEntries: () => [],
+    waitForHttpOk: async () => {},
+    terminateProcess: async (child) => {
+      child.kill();
+    },
+    appendInstallLog: async () => {},
+    truncateForInstallLog: (value) => value,
+    serializeErrorForInstallLog: (error) => ({ message: String(error) }),
+  });
+  const configs = await manager.listenMcps(['vibe'], 'run-1');
+  assert.equal(configs.length, 1);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].appId, 'vibe');
+  assert.equal(calls[0].reason, 'app_mcp_start');
+  assert.equal(calls[0].backendDir, join(mcpInstallDir, 'backend'));
+} finally {
+  await rm(mcpInstallDir, { recursive: true, force: true });
 }
 
 function escapeRegExp(value) {

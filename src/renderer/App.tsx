@@ -2186,6 +2186,16 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
         appId: selectedAppId ?? undefined,
         prompt: trimmed || 'Review the shared files in this message.',
         threadId: conversationForRun?.threadId ?? null,
+        conversationHistory: [
+          ...(conversationForRun?.messages ?? []).map((message) => ({
+            role: message.role,
+            content: message.content,
+          })),
+          {
+            role: 'user',
+            content: userVisibleContent,
+          },
+        ],
         userLanguage: activeLocale,
         sharedFiles,
         ...runtimeDraft,
@@ -2551,22 +2561,6 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
         technicalCode: 'codex_reinstall_unhandled_error',
         sensitiveDetails: { stack: error instanceof Error ? error.stack : undefined },
       });
-    } finally {
-      setCodexAuthBusy(false);
-    }
-  };
-
-  const handleDisconnectCodexAuth = async () => {
-    setCodexAuthBusy(true);
-    try {
-      const desktopApi = getDesktopApi();
-      const result = await desktopApi.disconnectCodexAuth();
-      setBannerSeverity(result.success ? 'success' : 'error');
-      setBannerMessage(result.userMessage);
-      await refreshCodexAuthStatus();
-    } catch {
-      setBannerSeverity('error');
-      setBannerMessage(t.settings.codexDisconnectError);
     } finally {
       setCodexAuthBusy(false);
     }

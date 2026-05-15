@@ -8,6 +8,9 @@ on:
 permissions:
   contents: write
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 concurrency:
   group: forger-desktop-release-${{ github.ref_name }}
   cancel-in-progress: false
@@ -18,15 +21,16 @@ jobs:
     outputs:
       version: ${{ steps.meta.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
-          node-version-file: .nvmrc
+          node-version: 24
           cache: npm
 
       - run: npm ci
       - run: node scripts/validate-release-tag.mjs
+      - run: npm run test:coverage
 
       - id: meta
         run: |
@@ -46,11 +50,11 @@ jobs:
             artifact: forger-desktop-windows-x64.exe
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
-          node-version-file: .nvmrc
+          node-version: 24
           cache: npm
 
       - run: npm ci

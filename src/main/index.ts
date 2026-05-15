@@ -9,7 +9,6 @@ import http, { type IncomingMessage, type ServerResponse } from 'node:http';
 import yauzl from 'yauzl';
 
 // better-sqlite3 is optional — gracefully unavailable if not installed / rebuilt
-// eslint-disable-next-line @typescript-eslint/no-require-imports
 let BetterSqlite3: (typeof import('better-sqlite3')) | null = null;
 try {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -24,7 +23,7 @@ import { ChatOrchestrator } from './chat/orchestrator';
 import { AppAgentTaskManager } from './app-agent-task-manager';
 import { AppAgentConversationManager } from './app-agent-conversation-manager';
 import { renderManifestAgentPrompt, type ManifestAgentPromptKind } from './manifest-agent-prompts';
-import { AppMcpManager, type CodexMcpServerConfig } from './app-mcp-manager';
+import { AppMcpManager } from './app-mcp-manager';
 import { AutomationManager } from './automation-manager';
 import { DevCatalogService } from './dev-catalog-service';
 import { DesktopUpdater } from './desktop-updater';
@@ -109,7 +108,6 @@ import type {
   AppStatus,
   AppOperationSummary,
   AppSummary,
-  AgentEffort,
   AgentProvider,
   AgentRuntime,
   AutomationUpsertInput,
@@ -368,6 +366,7 @@ const appWindows = new Map<string, BrowserWindow>();
 const friendChatWindows = new Map<number, BrowserWindow>();
 const stoppingApps = new Set<string>();
 const appLifecycleLocks = new Map<string, Promise<unknown>>();
+const backendPythonEnvironmentLocks = new Map<string, Promise<void>>();
 const runtimeLocks = new Map<string, Promise<RuntimeBinarySet>>();
 const gitToolLocks = new Map<string, Promise<string | null>>();
 let chatOrchestrator: ChatOrchestrator | null = null;
@@ -646,18 +645,6 @@ const chooseConnectedProvider = async (): Promise<AgentProvider> => {
     .filter((entry): entry is { provider: AgentProvider; connectedAt: string } => Boolean(entry.connectedAt))
     .sort((left, right) => left.connectedAt.localeCompare(right.connectedAt));
   return sorted[0]?.provider ?? 'codex';
-};
-
-const withCodexDefaults = <T extends { model?: string; reasoningEffort?: CodexReasoningEffort }>(entry: T): T & {
-  model: string;
-  reasoningEffort: CodexReasoningEffort;
-} => {
-  const defaults = getCodexDefaults();
-  return {
-    ...entry,
-    model: entry.model?.trim() || defaults.model || BUILT_IN_CODEX_MODEL,
-    reasoningEffort: entry.reasoningEffort ?? defaults.reasoningEffort ?? BUILT_IN_CODEX_REASONING,
-  };
 };
 
 const withAgentDefaults = <T extends { model?: string; reasoningEffort?: CodexReasoningEffort; runtime?: AgentRuntime }>(
@@ -1341,29 +1328,6 @@ const isVersionNewer = (candidate?: string, current?: string): boolean => {
     return normalizedCandidate > normalizedCurrent;
   }
   return false;
-};
-
-const normalizeChangelog = (value: unknown, version?: string): VersionChangelog | undefined => {
-  const entries = Array.isArray(value) ? value : value ? [value] : [];
-  for (const entry of entries) {
-    if (!entry || typeof entry !== 'object') {
-      continue;
-    }
-    const raw = entry as { version?: unknown; summary?: unknown; changes?: unknown };
-    const entryVersion = typeof raw.version === 'string' ? raw.version : version;
-    if (version && entryVersion && entryVersion !== version) {
-      continue;
-    }
-    const changes = Array.isArray(raw.changes)
-      ? raw.changes.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
-      : [];
-    return {
-      version: entryVersion ?? version ?? '',
-      summary: typeof raw.summary === 'string' ? raw.summary : undefined,
-      changes,
-    };
-  }
-  return undefined;
 };
 
 const mapBackendCategory = (backendCategory: string): AppCategory => {
@@ -3114,16 +3078,6 @@ const isRuntimeArtifactStatusLine = (line: string): boolean => {
 const getUserVisibleGitStatusLines = async (cwd: string): Promise<string[]> =>
   (await getGitStatusLines(cwd)).filter((line) => !isRuntimeArtifactStatusLine(line));
 
-const gitCommitAll = async (cwd: string, message: string): Promise<string> => {
-  await runCommand('git', ['add', '-A'], { cwd });
-  await runCommand('git', ['commit', '--allow-empty', '-m', message], { cwd });
-  const head = await getGitHead(cwd);
-  if (!head) {
-    throw new Error('missing_git_head_after_commit');
-  }
-  return head;
-};
-
 const getGitHead = async (cwd: string): Promise<string | null> => {
   const result = await runCommandCapture('git', ['rev-parse', 'HEAD'], { cwd, timeoutMs: 5_000 }).catch(() => null);
   if (!result || result.code !== 0) {
@@ -3388,21 +3342,6 @@ const syncReleaseIntoInstalledApp = async (
 ): Promise<void> => {
   await copyReleaseContentsForUpdate(stageDir, installDir, preservedPaths);
   await removeTrackedFilesMissingFromStage(stageDir, installDir, preservedPaths);
-};
-
-const copyDirectoryContents = async (sourceDir: string, targetDir: string): Promise<void> => {
-  await fs.mkdir(targetDir, { recursive: true });
-  const entries = await fs.readdir(sourceDir, { withFileTypes: true });
-  for (const entry of entries) {
-    if (entry.name === '.git') {
-      throw new Error('unsafe_staged_git_entry');
-    }
-    await fs.cp(path.join(sourceDir, entry.name), path.join(targetDir, entry.name), {
-      recursive: true,
-      force: true,
-      verbatimSymlinks: false,
-    });
-  }
 };
 
 const fileExists = async (filePath: string): Promise<boolean> => {
@@ -4270,6 +4209,101 @@ const installBackendDependenciesWithUv = async (
   });
 };
 
+const isBackendPythonEnvironmentUsable = async (
+  backendDir: string,
+): Promise<{ usable: boolean; detail?: string; stdout?: string; stderr?: string }> => {
+  const venv = getVenvExecutables(backendDir);
+  try {
+    await fs.access(venv.python);
+  } catch (error) {
+    return {
+      usable: false,
+      detail: 'venv_python_missing',
+      stderr: error instanceof Error ? error.message : String(error),
+    };
+  }
+
+  try {
+    const result = await runCommandCapture(
+      venv.python,
+      [
+        '-c',
+        'import importlib.util, sys; sys.exit(0 if importlib.util.find_spec("uvicorn") else 42)',
+      ],
+      {
+        cwd: backendDir,
+        env: { PYTHONNOUSERSITE: '1' },
+        timeoutMs: 15_000,
+      },
+    );
+    return {
+      usable: result.code === 0,
+      detail: result.code === 0 ? undefined : `venv_uvicorn_missing_${result.code ?? 'signal'}`,
+      stdout: result.stdout,
+      stderr: result.stderr,
+    };
+  } catch (error) {
+    return {
+      usable: false,
+      detail: error instanceof Error ? error.message : 'venv_check_failed',
+      stderr: error instanceof Error ? error.stack ?? error.message : String(error),
+    };
+  }
+};
+
+const ensureBackendPythonEnvironment = async (
+  pythonPath: string,
+  backendDir: string,
+  appId: string,
+  reason: string,
+): Promise<void> => {
+  const lockKey = path.resolve(backendDir);
+  const pending = backendPythonEnvironmentLocks.get(lockKey);
+  if (pending) {
+    await pending;
+    return;
+  }
+
+  const task = (async () => {
+    const check = await isBackendPythonEnvironmentUsable(backendDir);
+    if (check.usable) {
+      await appendInstallLog('backend_python_env:ready', { appId, reason, backendDir });
+      return;
+    }
+
+    await appendInstallLog('backend_python_env:repair_start', {
+      appId,
+      reason,
+      backendDir,
+      detail: check.detail,
+      stdout: truncateForInstallLog(check.stdout ?? ''),
+      stderr: truncateForInstallLog(check.stderr ?? ''),
+    });
+    await fs.rm(path.join(backendDir, '.venv'), { recursive: true, force: true });
+    await installBackendDependenciesWithUv(pythonPath, backendDir, appId);
+    const repaired = await isBackendPythonEnvironmentUsable(backendDir);
+    if (!repaired.usable) {
+      await appendInstallLog('backend_python_env:repair_failed', {
+        appId,
+        reason,
+        backendDir,
+        detail: repaired.detail,
+        stdout: truncateForInstallLog(repaired.stdout ?? ''),
+        stderr: truncateForInstallLog(repaired.stderr ?? ''),
+      });
+      throw new Error(`backend_python_env_unusable_${repaired.detail ?? 'unknown'}`);
+    }
+    await appendInstallLog('backend_python_env:repair_ready', { appId, reason, backendDir });
+  })();
+
+  backendPythonEnvironmentLocks.set(lockKey, task);
+  try {
+    await task;
+  } finally {
+    backendPythonEnvironmentLocks.delete(lockKey);
+  }
+};
+
 const installAppRuntime = async (appId: string, localeInput?: string): Promise<InstallAppResult> => {
   const copy = getSharedCopy(localeInput);
   const catalogApp = catalogApps.find((entry) => entry.id === appId);
@@ -4500,7 +4534,6 @@ const updateAppRuntime = async (appId: string, localeInput?: string): Promise<In
   };
 
   const startedAt = new Date().toISOString();
-  const targetVersion = catalogApp.latestVersion ?? catalogApp.version ?? '0.0.0';
   let preUpdateUserHead = '';
   let stageDir: string | null = null;
 
@@ -5617,12 +5650,13 @@ const openInstalledAppUnlocked = async (
   });
 
   const nodeRuntime = await ensureRuntimeInstalled('node', nodeVersion);
-  await ensureRuntimeInstalled('python', record.requiredPythonVersion);
+  const pythonRuntime = await ensureRuntimeInstalled('python', record.requiredPythonVersion);
 
   const backendService = findManifestService(manifest, 'backend', './backend');
   const frontendService = findManifestService(manifest, 'frontend', './frontend');
   const backendDir = path.join(record.installDir, 'backend');
   const frontendDir = path.join(record.installDir, 'frontend');
+  await ensureBackendPythonEnvironment(pythonRuntime.python as string, backendDir, appId, 'open_app');
   const venv = getVenvExecutables(backendDir);
 
   const backendPort = await getFreePort();
@@ -7789,6 +7823,7 @@ app.whenReady().then(async () => {
     getInstalledApp: (appId) => registry.apps[appId],
     resolveInstalledManifest,
     ensureRuntimeInstalled,
+    ensureBackendPythonEnvironment,
     getVenvExecutables,
     getFreePort,
     splitManifestCommand,
