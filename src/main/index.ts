@@ -368,6 +368,7 @@ const appWindows = new Map<string, BrowserWindow>();
 const friendChatWindows = new Map<number, BrowserWindow>();
 const stoppingApps = new Set<string>();
 const appLifecycleLocks = new Map<string, Promise<unknown>>();
+const backendPythonEnvironmentLocks = new Map<string, Promise<void>>();
 const runtimeLocks = new Map<string, Promise<RuntimeBinarySet>>();
 const gitToolLocks = new Map<string, Promise<string | null>>();
 let chatOrchestrator: ChatOrchestrator | null = null;
@@ -4270,6 +4271,101 @@ const installBackendDependenciesWithUv = async (
   });
 };
 
+const isBackendPythonEnvironmentUsable = async (
+  backendDir: string,
+): Promise<{ usable: boolean; detail?: string; stdout?: string; stderr?: string }> => {
+  const venv = getVenvExecutables(backendDir);
+  try {
+    await fs.access(venv.python);
+  } catch (error) {
+    return {
+      usable: false,
+      detail: 'venv_python_missing',
+      stderr: error instanceof Error ? error.message : String(error),
+    };
+  }
+
+  try {
+    const result = await runCommandCapture(
+      venv.python,
+      [
+        '-c',
+        'import importlib.util, sys; sys.exit(0 if importlib.util.find_spec("uvicorn") else 42)',
+      ],
+      {
+        cwd: backendDir,
+        env: { PYTHONNOUSERSITE: '1' },
+        timeoutMs: 15_000,
+      },
+    );
+    return {
+      usable: result.code === 0,
+      detail: result.code === 0 ? undefined : `venv_uvicorn_missing_${result.code ?? 'signal'}`,
+      stdout: result.stdout,
+      stderr: result.stderr,
+    };
+  } catch (error) {
+    return {
+      usable: false,
+      detail: error instanceof Error ? error.message : 'venv_check_failed',
+      stderr: error instanceof Error ? error.stack ?? error.message : String(error),
+    };
+  }
+};
+
+const ensureBackendPythonEnvironment = async (
+  pythonPath: string,
+  backendDir: string,
+  appId: string,
+  reason: string,
+): Promise<void> => {
+  const lockKey = path.resolve(backendDir);
+  const pending = backendPythonEnvironmentLocks.get(lockKey);
+  if (pending) {
+    await pending;
+    return;
+  }
+
+  const task = (async () => {
+    const check = await isBackendPythonEnvironmentUsable(backendDir);
+    if (check.usable) {
+      await appendInstallLog('backend_python_env:ready', { appId, reason, backendDir });
+      return;
+    }
+
+    await appendInstallLog('backend_python_env:repair_start', {
+      appId,
+      reason,
+      backendDir,
+      detail: check.detail,
+      stdout: truncateForInstallLog(check.stdout ?? ''),
+      stderr: truncateForInstallLog(check.stderr ?? ''),
+    });
+    await fs.rm(path.join(backendDir, '.venv'), { recursive: true, force: true });
+    await installBackendDependenciesWithUv(pythonPath, backendDir, appId);
+    const repaired = await isBackendPythonEnvironmentUsable(backendDir);
+    if (!repaired.usable) {
+      await appendInstallLog('backend_python_env:repair_failed', {
+        appId,
+        reason,
+        backendDir,
+        detail: repaired.detail,
+        stdout: truncateForInstallLog(repaired.stdout ?? ''),
+        stderr: truncateForInstallLog(repaired.stderr ?? ''),
+      });
+      throw new Error(`backend_python_env_unusable_${repaired.detail ?? 'unknown'}`);
+    }
+    await appendInstallLog('backend_python_env:repair_ready', { appId, reason, backendDir });
+  })();
+
+  backendPythonEnvironmentLocks.set(lockKey, task);
+  try {
+    await task;
+  } finally {
+    backendPythonEnvironmentLocks.delete(lockKey);
+  }
+};
+
 const installAppRuntime = async (appId: string, localeInput?: string): Promise<InstallAppResult> => {
   const copy = getSharedCopy(localeInput);
   const catalogApp = catalogApps.find((entry) => entry.id === appId);
@@ -5617,12 +5713,13 @@ const openInstalledAppUnlocked = async (
   });
 
   const nodeRuntime = await ensureRuntimeInstalled('node', nodeVersion);
-  await ensureRuntimeInstalled('python', record.requiredPythonVersion);
+  const pythonRuntime = await ensureRuntimeInstalled('python', record.requiredPythonVersion);
 
   const backendService = findManifestService(manifest, 'backend', './backend');
   const frontendService = findManifestService(manifest, 'frontend', './frontend');
   const backendDir = path.join(record.installDir, 'backend');
   const frontendDir = path.join(record.installDir, 'frontend');
+  await ensureBackendPythonEnvironment(pythonRuntime.python as string, backendDir, appId, 'open_app');
   const venv = getVenvExecutables(backendDir);
 
   const backendPort = await getFreePort();
@@ -7789,6 +7886,7 @@ app.whenReady().then(async () => {
     getInstalledApp: (appId) => registry.apps[appId],
     resolveInstalledManifest,
     ensureRuntimeInstalled,
+    ensureBackendPythonEnvironment,
     getVenvExecutables,
     getFreePort,
     splitManifestCommand,

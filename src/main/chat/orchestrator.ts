@@ -29,6 +29,7 @@ import {
   codexWorkspaceNetworkConfigArgs,
   createIsolatedCodexHome,
   DisallowedMcpServerError,
+  preparePersistentIsolatedCodexHome,
   removeIsolatedCodexHome,
 } from '../codex-run-isolation';
 
@@ -77,6 +78,10 @@ const requiresWindowsShell = (command: string): boolean => {
   return process.platform === 'win32' && /\.(cmd|bat)$/i.test(command);
 };
 
+function sanitizeId(value: string): string {
+  return value.replace(/[^a-zA-Z0-9._-]+/g, '-').slice(0, 120) || 'item';
+}
+
 interface OperationEntry {
   operationId: string;
   runId: string;
@@ -100,6 +105,12 @@ interface InternalChatRun extends ChatRun {
   effort: AgentEffort;
   taskType: ForgerTaskType;
   locale: Locale;
+  conversationHistory: ChatHistoryMessage[];
+}
+
+interface ChatHistoryMessage {
+  role: 'assistant' | 'user';
+  content: string;
 }
 
 type ForgerTaskType =
@@ -277,6 +288,7 @@ class SandboxRunner {
     onChild: (child: ChildProcessWithoutNullStreams) => void;
     onOutput?: (stream: 'stdout' | 'stderr' | 'meta', text: string) => void;
     threadId?: string;
+    codexHome?: string;
   }): Promise<CodexRunResult> {
     const allowedRoots = [params.workingDir].join(path.delimiter);
 
@@ -364,7 +376,7 @@ class SandboxRunner {
     let lastResult: CommandResult | null = null;
     let lastErrorMessage = '';
     const codexCommand = await this.resolveCodexCommand(params);
-    const isolatedCodexHome = await createIsolatedCodexHome(this.codexHome, {
+    const isolatedCodexHome = params.codexHome ?? await createIsolatedCodexHome(this.codexHome, {
       prefix: 'forger-chat-codex-home',
       trustedRoots: [params.workingDir],
       networkAccess: params.networkAccess === true,
@@ -431,7 +443,9 @@ class SandboxRunner {
         }
       }
     } finally {
-      await removeIsolatedCodexHome(isolatedCodexHome);
+      if (!params.codexHome) {
+        await removeIsolatedCodexHome(isolatedCodexHome);
+      }
     }
 
     const message = (
@@ -595,6 +609,7 @@ export class ChatOrchestrator {
       taskType,
       locale,
       conversationId: typeof input.conversationId === 'string' ? input.conversationId : undefined,
+      conversationHistory: normalizeChatHistory(input.conversationHistory),
     };
 
     this.runs.set(runId, run);
@@ -932,20 +947,32 @@ export class ChatOrchestrator {
         ...appMcpServers,
       ];
 
-      const resolvedThreadId = run.threadId === null
+      let resolvedThreadId = run.threadId === null
         ? undefined
         : run.threadId ?? this.threadsByApp.get(run.appId)?.threadId;
-      const memoryContext = !resolvedThreadId
-        ? await (this.options.buildMemoryContext?.([run.appId]) ?? Promise.resolve(''))
-        : '';
-      const prompt = memoryContext ? `${memoryContext}\n\n${run.prompt}` : run.prompt;
+      const buildPrompt = async (includeRecoveryContext: boolean): Promise<string> => {
+        const memoryContext = !resolvedThreadId
+          ? await (this.options.buildMemoryContext?.([run.appId]) ?? Promise.resolve(''))
+          : '';
+        const recoveryContext = includeRecoveryContext ? buildChatRecoveryContext(run.conversationHistory) : '';
+        return [memoryContext, recoveryContext, run.prompt].filter(Boolean).join('\n\n');
+      };
+      const persistentCodexHome = run.provider === 'codex'
+        ? await preparePersistentIsolatedCodexHome(
+            this.options.codexHome,
+            this.conversationCodexHome(run.appId, run.conversationId ?? run.runId),
+            {
+              trustedRoots: [this.options.forgerHomeRoot],
+              networkAccess,
+            },
+          )
+        : undefined;
 
-      const commonRunOptions = {
+      const commonRunOptionsBase = {
         pathEntries: codexPathEntries,
         environment: codexEnvironment,
         mcpServers,
         workingDir: this.options.forgerHomeRoot,
-        prompt,
         model: run.model,
         networkAccess,
         timeoutMs: 300_000,
@@ -961,19 +988,53 @@ export class ChatOrchestrator {
             this.emitRun(run);
           }
         },
-        threadId: resolvedThreadId,
       };
-      const assistantReply = run.provider === 'claude'
-        ? await this.sandboxRunner.runClaude({
-            ...commonRunOptions,
-            claudeCliPath: claudeCliPath as string,
-            effort: run.effort as ClaudeEffort,
-          })
-        : await this.sandboxRunner.runCodex({
-            ...commonRunOptions,
-            codexCliPath: codexCliPath as string,
-            reasoningEffort: run.reasoningEffort,
-          });
+
+      const runProvider = async (includeRecoveryContext: boolean): Promise<CodexRunResult> => {
+        const commonRunOptions = {
+          ...commonRunOptionsBase,
+          prompt: await buildPrompt(includeRecoveryContext),
+          threadId: resolvedThreadId,
+        };
+        return run.provider === 'claude'
+          ? await this.sandboxRunner.runClaude({
+              ...commonRunOptions,
+              claudeCliPath: claudeCliPath as string,
+              effort: run.effort as ClaudeEffort,
+            })
+          : await this.sandboxRunner.runCodex({
+              ...commonRunOptions,
+              codexCliPath: codexCliPath as string,
+              reasoningEffort: run.reasoningEffort,
+              codexHome: persistentCodexHome,
+            });
+      };
+
+      let assistantReply: CodexRunResult;
+      try {
+        assistantReply = await runProvider(false);
+      } catch (error) {
+        const canRecoverMissingThread = Boolean(resolvedThreadId && isMissingProviderThreadError(error));
+        if (!canRecoverMissingThread) {
+          throw error;
+        }
+        const lostThreadId = resolvedThreadId;
+        resolvedThreadId = undefined;
+        run.threadId = null;
+        this.clearThreadState(run.appId);
+        run.progressLog = [
+          ...(run.progressLog ?? []),
+          `Provider thread ${lostThreadId} is unavailable. Starting a fresh provider thread for this Chat conversation.`,
+        ].slice(-40);
+        run.updatedAt = new Date().toISOString();
+        this.emitRun(run);
+        await appendRunLog(
+          run.runLogPath,
+          'meta',
+          `Provider thread ${lostThreadId} is unavailable. Retrying with local conversation context.`,
+        );
+        assistantReply = await runProvider(true);
+      }
 
       run.threadId = assistantReply.threadId ?? run.threadId ?? this.threadsByApp.get(run.appId)?.threadId ?? null;
 
@@ -1240,6 +1301,19 @@ export class ChatOrchestrator {
     return this.options.legacyMetadataRoot ? path.join(this.options.legacyMetadataRoot, 'threads.json') : null;
   }
 
+  private conversationRuntimeRoot(appId: string, conversationId: string): string {
+    return path.join(
+      this.options.metadataRoot,
+      'chat-conversations-runtime',
+      sanitizeId(appId),
+      sanitizeId(conversationId),
+    );
+  }
+
+  private conversationCodexHome(appId: string, conversationId: string): string {
+    return path.join(this.conversationRuntimeRoot(appId, conversationId), 'codex-home');
+  }
+
   private async loadThreadState(): Promise<void> {
     const filePath = this.getThreadsFilePath();
     const raw = await fs.readFile(filePath, 'utf8').catch(async () => {
@@ -1308,6 +1382,13 @@ export class ChatOrchestrator {
       return;
     }
     this.threadsByApp.set(appId, next);
+    void this.saveThreadState();
+  }
+
+  private clearThreadState(appId: string): void {
+    if (!this.threadsByApp.delete(appId)) {
+      return;
+    }
     void this.saveThreadState();
   }
 }
@@ -1902,6 +1983,51 @@ const writeClaudeMcpConfig = async (
 
 const toNumber = (value: unknown): number => {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+};
+
+const MAX_CHAT_RECOVERY_CONTEXT_CHARS = 24_000;
+
+const normalizeChatHistory = (messages: ChatStartRunInput['conversationHistory']): ChatHistoryMessage[] => {
+  if (!Array.isArray(messages)) {
+    return [];
+  }
+  return messages
+    .map((message) => {
+      const role = message?.role === 'assistant' ? 'assistant' : message?.role === 'user' ? 'user' : null;
+      const content = typeof message?.content === 'string' ? message.content.trim() : '';
+      return role && content ? { role, content } : null;
+    })
+    .filter((message): message is ChatHistoryMessage => Boolean(message))
+    .slice(-40);
+};
+
+const buildChatRecoveryContext = (messages: ChatHistoryMessage[]): string => {
+  if (messages.length === 0) {
+    return '';
+  }
+  const transcript = messages
+    .map((message) => `${message.role}: ${message.content}`)
+    .join('\n\n')
+    .slice(-MAX_CHAT_RECOVERY_CONTEXT_CHARS);
+  return [
+    'Historial persistido de este Desktop Chat:',
+    transcript,
+    '',
+    'Continúa en el mismo Desktop Chat usando este historial como contexto.',
+  ].join('\n');
+};
+
+const isMissingProviderThreadError = (error: unknown): boolean => {
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  const combined = message.toLowerCase();
+  return (
+    combined.includes('no rollout found for thread id') ||
+    combined.includes('thread/resume failed') ||
+    combined.includes('conversation not found') ||
+    combined.includes('session not found') ||
+    combined.includes('could not resume') ||
+    combined.includes('cannot resume')
+  );
 };
 
 const getMcpApprovalMode = (server: CodexMcpServerConfig): 'auto' | 'approve' =>

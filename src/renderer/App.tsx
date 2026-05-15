@@ -2186,6 +2186,16 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
         appId: selectedAppId ?? undefined,
         prompt: trimmed || 'Review the shared files in this message.',
         threadId: conversationForRun?.threadId ?? null,
+        conversationHistory: [
+          ...(conversationForRun?.messages ?? []).map((message) => ({
+            role: message.role,
+            content: message.content,
+          })),
+          {
+            role: 'user',
+            content: userVisibleContent,
+          },
+        ],
         userLanguage: activeLocale,
         sharedFiles,
         ...runtimeDraft,

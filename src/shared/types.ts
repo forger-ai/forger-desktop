@@ -1045,6 +1045,10 @@ export interface ChatStartRunInput {
   appId?: string | null;
   prompt: string;
   threadId?: string | null;
+  conversationHistory?: Array<{
+    role: 'assistant' | 'user';
+    content: string;
+  }>;
   userLanguage?: string;
   sharedFiles?: SharedFileRef[];
   provider?: AgentProvider;
