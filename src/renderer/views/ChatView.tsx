@@ -28,6 +28,8 @@ import {
 } from '@mui/material';
 import type { AppDictionary } from '@renderer/i18n';
 import type {
+  AgentProvider,
+  ClaudeEffort,
   CodexModelOption,
   CodexReasoningEffort,
   ForgerFileCategory,
@@ -175,12 +177,23 @@ interface ChatViewProps {
   onRemovePendingFile: (sourcePath: string) => void;
   onMentionFile: (file: ForgerFileRecord) => void;
   onRemoveMentionedFile: (fileId: string) => void;
+  providerOptions: Array<{ label: string; value: AgentProvider | 'auto' }>;
+  selectedProvider: AgentProvider | 'auto';
+  resolvedProviderForAuto: AgentProvider;
+  onSelectProvider: (provider: AgentProvider | 'auto') => void;
+  providerLocked: boolean;
   modelOptions: CodexModelOption[];
   selectedModel: string;
   onSelectModel: (model: string) => void;
   reasoningOptions: { label: string; value: CodexReasoningEffort }[];
   selectedReasoningEffort: CodexReasoningEffort;
   onSelectReasoningEffort: (reasoningEffort: CodexReasoningEffort) => void;
+  claudeModelOptions: Array<{ displayModelName: string; realModelName: string }>;
+  selectedClaudeModel: string;
+  onSelectClaudeModel: (model: string) => void;
+  claudeEffortOptions: { label: string; value: ClaudeEffort }[];
+  selectedClaudeEffort: ClaudeEffort;
+  onSelectClaudeEffort: (effort: ClaudeEffort) => void;
   onOpenCodexUsageDashboard: () => void;
   assistantAvatarSrc: string;
   isSending: boolean;
@@ -216,12 +229,23 @@ export function ChatView({
   onRemovePendingFile,
   onMentionFile,
   onRemoveMentionedFile,
+  providerOptions,
+  selectedProvider,
+  resolvedProviderForAuto,
+  onSelectProvider,
+  providerLocked,
   modelOptions,
   selectedModel,
   onSelectModel,
   reasoningOptions,
   selectedReasoningEffort,
   onSelectReasoningEffort,
+  claudeModelOptions,
+  selectedClaudeModel,
+  onSelectClaudeModel,
+  claudeEffortOptions,
+  selectedClaudeEffort,
+  onSelectClaudeEffort,
   onOpenCodexUsageDashboard,
   assistantAvatarSrc,
   isSending,
@@ -242,6 +266,7 @@ export function ChatView({
   const messagesScrollRef = useRef<HTMLDivElement | null>(null);
   const shouldAutoScrollRef = useRef(true);
   const hasMessages = messages.length > 0;
+  const effectiveProvider = selectedProvider === 'auto' ? resolvedProviderForAuto : selectedProvider;
   const matchingFiles = mentionQuery === null
     ? []
     : availableFiles
@@ -987,8 +1012,29 @@ export function ChatView({
                 </Tooltip>
                 <Select
                   size="small"
+                  value={selectedProvider}
+                  onChange={(event) => onSelectProvider(event.target.value as AgentProvider | 'auto')}
+                  disabled={providerLocked || isSending}
+                  MenuProps={compactSelectMenuProps}
+                  sx={{
+                    height: 28,
+                    minWidth: 86,
+                    fontSize: 12,
+                    borderRadius: 1.25,
+                    '& .MuiSelect-select': { py: 0.35, pl: 1, pr: '26px !important' },
+                  }}
+                >
+                  {providerOptions.map((option) => (
+                    <MenuItem key={option.value} value={option.value}>
+                      {option.label}
+                    </MenuItem>
+                  ))}
+                </Select>
+                <Select
+                  size="small"
                   value={selectedModel}
                   onChange={(event) => onSelectModel(event.target.value)}
+                  disabled={effectiveProvider !== 'codex' || providerLocked || isSending}
                   MenuProps={compactSelectMenuProps}
                   sx={{
                     height: 28,
@@ -996,6 +1042,7 @@ export function ChatView({
                     fontSize: 12,
                     borderRadius: 1.25,
                     '& .MuiSelect-select': { py: 0.35, pl: 1, pr: '26px !important' },
+                    display: effectiveProvider === 'codex' ? 'inline-flex' : 'none',
                   }}
                 >
                   {modelOptions.map((option) => (
@@ -1008,6 +1055,7 @@ export function ChatView({
                   size="small"
                   value={selectedReasoningEffort}
                   onChange={(event) => onSelectReasoningEffort(event.target.value as CodexReasoningEffort)}
+                  disabled={effectiveProvider !== 'codex' || providerLocked || isSending}
                   MenuProps={compactSelectMenuProps}
                   sx={{
                     height: 28,
@@ -1015,9 +1063,52 @@ export function ChatView({
                     fontSize: 12,
                     borderRadius: 1.25,
                     '& .MuiSelect-select': { py: 0.35, pl: 1, pr: '26px !important' },
+                    display: effectiveProvider === 'codex' ? 'inline-flex' : 'none',
                   }}
                 >
                   {reasoningOptions.map((option) => (
+                    <MenuItem key={option.value} value={option.value}>
+                      {option.label}
+                    </MenuItem>
+                  ))}
+                </Select>
+                <Select
+                  size="small"
+                  value={selectedClaudeModel}
+                  onChange={(event) => onSelectClaudeModel(event.target.value)}
+                  disabled={effectiveProvider !== 'claude' || providerLocked || isSending}
+                  MenuProps={compactSelectMenuProps}
+                  sx={{
+                    height: 28,
+                    minWidth: 90,
+                    fontSize: 12,
+                    borderRadius: 1.25,
+                    '& .MuiSelect-select': { py: 0.35, pl: 1, pr: '26px !important' },
+                    display: effectiveProvider === 'claude' ? 'inline-flex' : 'none',
+                  }}
+                >
+                  {claudeModelOptions.map((option) => (
+                    <MenuItem key={option.realModelName} value={option.realModelName}>
+                      {option.displayModelName}
+                    </MenuItem>
+                  ))}
+                </Select>
+                <Select
+                  size="small"
+                  value={selectedClaudeEffort}
+                  onChange={(event) => onSelectClaudeEffort(event.target.value as ClaudeEffort)}
+                  disabled={effectiveProvider !== 'claude' || providerLocked || isSending}
+                  MenuProps={compactSelectMenuProps}
+                  sx={{
+                    height: 28,
+                    minWidth: 82,
+                    fontSize: 12,
+                    borderRadius: 1.25,
+                    '& .MuiSelect-select': { py: 0.35, pl: 1, pr: '26px !important' },
+                    display: effectiveProvider === 'claude' ? 'inline-flex' : 'none',
+                  }}
+                >
+                  {claudeEffortOptions.map((option) => (
                     <MenuItem key={option.value} value={option.value}>
                       {option.label}
                     </MenuItem>

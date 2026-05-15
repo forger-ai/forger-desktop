@@ -58,6 +58,12 @@ interface AppMcpManagerOptions {
   getInstalledApp: (appId: string) => AppMcpInstalledAppRecord | null | undefined;
   resolveInstalledManifest: (installDir: string) => Promise<AppMcpManifest | null>;
   ensureRuntimeInstalled: (type: 'python', version: string) => Promise<RuntimeBinarySet>;
+  ensureBackendPythonEnvironment: (
+    pythonPath: string,
+    backendDir: string,
+    appId: string,
+    reason: string,
+  ) => Promise<void>;
   getVenvExecutables: (backendDir: string) => { python: string; pip: string };
   getFreePort: () => Promise<number>;
   splitManifestCommand: (command: string | undefined) => string[];
@@ -67,6 +73,7 @@ interface AppMcpManagerOptions {
     backendDir: string,
   ) => Record<string, string>;
   ensureSqliteDatabaseParent: (environment: Record<string, string>) => Promise<void>;
+  getDesktopRuntimeEnvironment?: (appId: string) => Record<string, string>;
   getRuntimePathEntries: (runtime: RuntimeBinarySet) => string[];
   waitForHttpOk: (url: string, timeoutMs: number) => Promise<void>;
   terminateProcess: (child: ChildProcessWithoutNullStreams) => Promise<void>;
@@ -181,7 +188,14 @@ export class AppMcpManager {
     state.status = 'starting';
     try {
       const pythonRuntime = await this.options.ensureRuntimeInstalled('python', record.requiredPythonVersion);
-      const venv = this.options.getVenvExecutables(path.join(record.installDir, 'backend'));
+      const backendDir = path.join(record.installDir, 'backend');
+      await this.options.ensureBackendPythonEnvironment(
+        pythonRuntime.python as string,
+        backendDir,
+        record.appId,
+        'app_mcp_start',
+      );
+      const venv = this.options.getVenvExecutables(backendDir);
       const port = await this.options.getFreePort();
       const token = randomBytes(32).toString('hex');
       const config = this.buildProcessConfig(mcp, record, venv.python, port, token);
@@ -311,6 +325,7 @@ export class AppMcpManager {
       healthUrl: `http://127.0.0.1:${port}${healthcheck}`,
       environment: {
         ...environment,
+        ...(this.options.getDesktopRuntimeEnvironment?.(record.appId) ?? {}),
         HOST: '127.0.0.1',
         PORT: String(port),
         FORGER_APP_ID: record.appId,

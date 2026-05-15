@@ -132,11 +132,10 @@ export function ToolsView({
   if (selectedTool === 'gmail') {
     return (
       <>
-        <GmailToolDetail
-          description={gmailDescription}
-          connected={gmailConnected}
-          tool={gmailTool}
-          toolPackage={gmailPackage}
+          <GmailToolDetail
+            description={gmailDescription}
+            connected={gmailConnected}
+            toolPackage={gmailPackage}
           settings={settings}
           busyToolId={busyToolId}
           busyOfficialToolId={busyOfficialToolId}

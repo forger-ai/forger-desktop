@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, shell, type IpcMainInvokeEvent } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Notification, shell, type IpcMainInvokeEvent } from 'electron';
 import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import fs from 'node:fs/promises';
@@ -9,7 +9,6 @@ import http, { type IncomingMessage, type ServerResponse } from 'node:http';
 import yauzl from 'yauzl';
 
 // better-sqlite3 is optional — gracefully unavailable if not installed / rebuilt
-// eslint-disable-next-line @typescript-eslint/no-require-imports
 let BetterSqlite3: (typeof import('better-sqlite3')) | null = null;
 try {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -21,9 +20,10 @@ import { settingsSeed } from '../shared/mock-data';
 import { IPC_CHANNELS } from '../shared/ipc';
 import { getSharedCopy, installProgressByPhase } from '../shared/i18n';
 import { ChatOrchestrator } from './chat/orchestrator';
-import { AppCodexTaskManager } from './app-codex-task-manager';
-import { AppCodexConversationManager } from './app-codex-conversation-manager';
-import { AppMcpManager, type CodexMcpServerConfig } from './app-mcp-manager';
+import { AppAgentTaskManager } from './app-agent-task-manager';
+import { AppAgentConversationManager } from './app-agent-conversation-manager';
+import { renderManifestAgentPrompt, type ManifestAgentPromptKind } from './manifest-agent-prompts';
+import { AppMcpManager } from './app-mcp-manager';
 import { AutomationManager } from './automation-manager';
 import {
   extractDeepLinkFromArgv,
@@ -35,6 +35,7 @@ import {
 } from './deep-links';
 import { DevCatalogService } from './dev-catalog-service';
 import { DesktopUpdater } from './desktop-updater';
+import { DesktopRuntimeBridge } from './desktop-runtime-bridge';
 import { DesktopErrorReporter } from './error-reporting';
 import { FileLibrary } from './file-library';
 import { ForgerMcpServer } from './forger-mcp-server';
@@ -48,6 +49,7 @@ import { OfficialToolsService, normalizeAppToolDeclarations } from './official-t
 import { ForgerAccountStore, publicForgerAccount, type StoredForgerAccount } from './forger-account-store';
 import { ForgerBackendClient } from './forger-backend-client';
 import { CloudDeviceManager, type CloudRelayRequest, type CloudRelayResponse } from './cloud-device-manager';
+import { CloudIdentityStore, type EncryptedCloudText } from './cloud-identity-store';
 import { BackupsManager } from './backups-manager';
 import {
   FORGER_AGENT_CONTRACT_MARKER,
@@ -74,10 +76,30 @@ import type {
   AppBackupSummary,
   AppCategory,
   AppDetails,
+  CloudFriendship,
+  CloudFriendUser,
   CloudSyncSettings,
+  CloudMessage,
+  CloudMessageEnvelope,
+  CloudSendMessageInput,
+  CloudSocialEvent,
+  CloudAppMessagePermissionDecision,
   CreateRemoteAppBackupInput,
   AppExternalFolderSelection,
   AppAgent,
+  AppAgentRuntimeInput,
+  AppAgentThreadCreateInput,
+  AppAgentPromptSet,
+  AppAgentPromptTemplate,
+  AppAgentPromptVariable,
+  AppAgentPromptVariableType,
+  AppAgentThreadRunControlInput,
+  AppAgentThreadRunStartInput,
+  AppAgentThreadRunSteerInput,
+  AppManifestAgentResumeInput,
+  AppManifestAgentStartInput,
+  AppManifestAgentSteerInput,
+  AppManifestAgentStopInput,
   AppCodexTaskStartInput,
   AppCodexConversationCreateInput,
   AppCodexConversationSendMessageInput,
@@ -94,6 +116,8 @@ import type {
   AppStatus,
   AppOperationSummary,
   AppSummary,
+  AgentProvider,
+  AgentRuntime,
   AutomationUpsertInput,
   BasicActionResult,
   CatalogApp,
@@ -105,6 +129,8 @@ import type {
   ChatUndoInput,
   CallOfficialToolInput,
   ConfigureOfficialToolInput,
+  ClaudeAuthStatus,
+  ClaudeEffort,
   CodexAuthStatus,
   CodexReasoningEffort,
   DesktopErrorReportPreview,
@@ -124,6 +150,7 @@ import type {
   FilesRenameCategoryInput,
   FilesRenameInput,
   FilesStageForChatInput,
+  FriendChatWindowOpenResult,
   ForgerAccountLoginInput,
   ForgerAccountRegisterInput,
   InstallAppResult,
@@ -133,11 +160,13 @@ import type {
   OpenAppResult,
   RemoteAppBackupSummary,
   RuntimeStatus,
+  AgentDefaults,
   Settings,
   SharedFileRef,
   SubmitAppFeedbackInput,
   SubmitAppRatingInput,
   StopAppResult,
+  UpdateAgentDefaultsInput,
   UpdateAgentToolApprovalInput,
   UpdateCodexDefaultsInput,
   SetAppToolGrantInput,
@@ -153,10 +182,26 @@ const DEFAULT_NODE_VERSION = '22';
 const DEFAULT_PYTHON_VERSION = '3.12';
 const BUNDLED_GIT_VERSION = '2.54.0';
 const CODEX_CLI_VERSION = '0.129.0';
+const CLAUDE_CODE_VERSION = 'latest';
 const CODEX_USAGE_DASHBOARD_URL = 'https://chatgpt.com/codex/settings/usage';
 const BUILT_IN_CODEX_MODEL = 'gpt-5.4';
 const BUILT_IN_CODEX_REASONING: CodexReasoningEffort = 'medium';
+const BUILT_IN_CLAUDE_MODEL = 'sonnet';
+const BUILT_IN_CLAUDE_EFFORT: ClaudeEffort = 'medium';
+const APP_CODEX_MODEL_OPTIONS = [
+  { displayModelName: '5.4', realModelName: 'gpt-5.4', defaultReasoningEffort: 'medium' as const },
+  { displayModelName: '5.3 Codex', realModelName: 'gpt-5.3-codex', defaultReasoningEffort: 'low' as const },
+  { displayModelName: '5.3 Spark', realModelName: 'gpt-5.3-codex-spark', defaultReasoningEffort: 'high' as const },
+  { displayModelName: '5.4 Mini', realModelName: 'gpt-5.4-mini', defaultReasoningEffort: 'medium' as const },
+  { displayModelName: '5.5', realModelName: 'gpt-5.5', defaultReasoningEffort: 'medium' as const },
+];
+const APP_CLAUDE_MODEL_OPTIONS = [
+  { displayModelName: 'Sonnet latest', realModelName: 'sonnet', defaultEffort: 'medium' as const },
+  { displayModelName: 'Opus latest', realModelName: 'opus', defaultEffort: 'high' as const },
+  { displayModelName: 'Haiku latest', realModelName: 'haiku', defaultEffort: 'low' as const },
+];
 const CODEX_REASONING_VALUES = new Set<CodexReasoningEffort>(['low', 'medium', 'high', 'xhigh']);
+const CLAUDE_EFFORT_VALUES = new Set<ClaudeEffort>(['low', 'medium', 'high', 'xhigh', 'max']);
 let devCatalogService: DevCatalogService | null = null;
 const APP_FOLDER_GRANT_TTL_MS = 5 * 60 * 1000;
 const appFolderGrantSecret = randomBytes(32).toString('base64url');
@@ -285,6 +330,7 @@ interface AppManifest {
   promptTemplates?: unknown;
   codexConversation?: unknown;
   agents?: unknown;
+  agentProviders?: unknown;
   stack?: AppManifestStack;
   services?: AppManifestService[];
   mcp?: AppManifestMcp;
@@ -292,6 +338,13 @@ interface AppManifest {
   skills?: string[];
   appSecrets?: unknown;
   tools?: unknown;
+  agentRuntime?: {
+    networkAccess?: boolean;
+  };
+  cloudMessaging?: {
+    enabled?: boolean;
+    defaultDelivery?: 'persistent' | 'ephemeral';
+  };
 }
 
 interface AppManifestVolume {
@@ -318,17 +371,20 @@ let registry: AppRegistry = { apps: {} };
 let forgerAccount: StoredForgerAccount = { authenticated: false };
 let forgerAccountStore: ForgerAccountStore | null = null;
 let cloudDeviceManager: CloudDeviceManager | null = null;
+let cloudIdentityStore: CloudIdentityStore | null = null;
 let forgerBackendClient: ForgerBackendClient | null = null;
 let cloudSyncSettings: CloudSyncSettings = { appSync: {} };
 const runningApps = new Map<string, RunningAppProcess>();
 const appWindows = new Map<string, BrowserWindow>();
+const friendChatWindows = new Map<number, BrowserWindow>();
 const stoppingApps = new Set<string>();
 const appLifecycleLocks = new Map<string, Promise<unknown>>();
+const backendPythonEnvironmentLocks = new Map<string, Promise<void>>();
 const runtimeLocks = new Map<string, Promise<RuntimeBinarySet>>();
 const gitToolLocks = new Map<string, Promise<string | null>>();
 let chatOrchestrator: ChatOrchestrator | null = null;
-let appCodexTaskManager: AppCodexTaskManager | null = null;
-let appCodexConversationManager: AppCodexConversationManager | null = null;
+let appAgentTaskManager: AppAgentTaskManager | null = null;
+let appAgentConversationManager: AppAgentConversationManager | null = null;
 let fileLibrary: FileLibrary | null = null;
 let secretsStore: SecretsStore | null = null;
 let officialToolsService: OfficialToolsService | null = null;
@@ -338,6 +394,7 @@ let automationManager: AutomationManager | null = null;
 let appMcpManager: AppMcpManager | null = null;
 let backupsManager: BackupsManager | null = null;
 let memoryStore: MemoryStore | null = null;
+let desktopRuntimeBridge: DesktopRuntimeBridge | null = null;
 
 desktopErrorReporter = new DesktopErrorReporter({
   getMainWindow: () => mainWindow,
@@ -364,12 +421,15 @@ const getForgerMetadataRoot = () => path.join(getForgerHomeRoot(), '.forger');
 const getLegacyForgerMetadataRoot = () => path.join(getPrivateAppsRoot(), '.forger');
 const getCodexRoot = () => path.join(app.getPath('userData'), 'codex-cli');
 const getCodexHome = () => path.join(app.getPath('userData'), 'codex-home');
+const getClaudeRoot = () => path.join(app.getPath('userData'), 'claude-code-cli');
 const getAgentToolSettingsPath = () => path.join(getForgerMetadataRoot(), 'agent-tools.json');
 const getSettingsPath = () => path.join(getForgerMetadataRoot(), 'settings.json');
 const getPromptOverridesPath = () => path.join(getForgerMetadataRoot(), 'prompt-overrides.json');
 const getForgerAccountPath = () => path.join(getForgerMetadataRoot(), 'account.json');
 const getCloudDevicePath = () => path.join(getForgerMetadataRoot(), 'cloud-device.json');
+const getCloudIdentityPath = () => path.join(getForgerMetadataRoot(), 'cloud-identity.json');
 const getCloudSyncSettingsPath = () => path.join(getForgerMetadataRoot(), 'cloud-sync.json');
+const getCloudDeviceAccountStorageKey = () => forgerAccount.user?.id ? `user-${forgerAccount.user.id}` : undefined;
 
 const FORGER_TOOL_PACKAGE_ID = 'forger';
 
@@ -383,26 +443,80 @@ const getPromptOverridesStore = (): PromptOverridesStore => {
 const normalizeCodexReasoningEffort = (value: unknown, fallback: CodexReasoningEffort): CodexReasoningEffort =>
   CODEX_REASONING_VALUES.has(value as CodexReasoningEffort) ? value as CodexReasoningEffort : fallback;
 
+const normalizeClaudeEffort = (value: unknown, fallback: ClaudeEffort): ClaudeEffort =>
+  CLAUDE_EFFORT_VALUES.has(value as ClaudeEffort) ? value as ClaudeEffort : fallback;
+
+const normalizeAgentProvider = (value: unknown): AgentProvider | undefined =>
+  value === 'codex' || value === 'claude' ? value : undefined;
+
+const normalizeDefaultAgentProvider = (value: unknown): AgentProvider | 'auto' =>
+  value === 'codex' || value === 'claude' || value === 'auto' ? value : 'auto';
+
 const normalizeSettings = (input?: Partial<Settings>): Settings => {
   const defaults = structuredClone(settingsSeed);
   const rawCodexDefaults =
     input?.codexDefaults && typeof input.codexDefaults === 'object'
       ? input.codexDefaults
       : undefined;
+  const rawAgentDefaults =
+    input?.agentDefaults && typeof input.agentDefaults === 'object'
+      ? input.agentDefaults
+      : undefined;
+  const rawAgentCodexDefaults =
+    rawAgentDefaults?.codex && typeof rawAgentDefaults.codex === 'object'
+      ? rawAgentDefaults.codex
+      : rawCodexDefaults;
+  const rawAgentClaudeDefaults =
+    rawAgentDefaults?.claude && typeof rawAgentDefaults.claude === 'object'
+      ? rawAgentDefaults.claude
+      : undefined;
+  const codexModel =
+    typeof rawCodexDefaults?.model === 'string' && rawCodexDefaults.model.trim()
+      ? rawCodexDefaults.model.trim()
+      : BUILT_IN_CODEX_MODEL;
+  const codexReasoningEffort = normalizeCodexReasoningEffort(
+    rawCodexDefaults?.reasoningEffort,
+    BUILT_IN_CODEX_REASONING,
+  );
+  const providerConnections: Partial<Record<AgentProvider, string>> = {};
+  const rawConnections = input?.providerConnections;
+  if (rawConnections && typeof rawConnections === 'object') {
+    for (const provider of ['codex', 'claude'] as const) {
+      const value = rawConnections[provider];
+      if (typeof value === 'string' && value.trim()) {
+        providerConnections[provider] = value;
+      }
+    }
+  }
   return {
     userEmail: typeof input?.userEmail === 'string' ? input.userEmail : defaults.userEmail,
     plan: typeof input?.plan === 'string' ? input.plan : defaults.plan,
     safeMode: typeof input?.safeMode === 'boolean' ? input.safeMode : defaults.safeMode,
+    defaultAgentProvider: normalizeDefaultAgentProvider(input?.defaultAgentProvider),
     codexDefaults: {
-      model:
-        typeof rawCodexDefaults?.model === 'string' && rawCodexDefaults.model.trim()
-          ? rawCodexDefaults.model.trim()
-          : BUILT_IN_CODEX_MODEL,
-      reasoningEffort: normalizeCodexReasoningEffort(
-        rawCodexDefaults?.reasoningEffort,
-        BUILT_IN_CODEX_REASONING,
-      ),
+      model: codexModel,
+      reasoningEffort: codexReasoningEffort,
     },
+    agentDefaults: {
+      codex: {
+        model:
+          typeof rawAgentCodexDefaults?.model === 'string' && rawAgentCodexDefaults.model.trim()
+            ? rawAgentCodexDefaults.model.trim()
+            : codexModel,
+        reasoningEffort: normalizeCodexReasoningEffort(
+          rawAgentCodexDefaults?.reasoningEffort,
+          codexReasoningEffort,
+        ),
+      },
+      claude: {
+        model:
+          typeof rawAgentClaudeDefaults?.model === 'string' && rawAgentClaudeDefaults.model.trim()
+            ? rawAgentClaudeDefaults.model.trim()
+            : BUILT_IN_CLAUDE_MODEL,
+        effort: normalizeClaudeEffort(rawAgentClaudeDefaults?.effort, BUILT_IN_CLAUDE_EFFORT),
+      },
+    },
+    providerConnections,
   };
 };
 
@@ -429,20 +543,146 @@ const updateCodexDefaults = async (input: UpdateCodexDefaultsInput): Promise<Set
       model: typeof input.model === 'string' ? input.model : '',
       reasoningEffort: input.reasoningEffort,
     },
+    agentDefaults: {
+      ...settings.agentDefaults,
+      codex: {
+        model: typeof input.model === 'string' ? input.model : '',
+        reasoningEffort: input.reasoningEffort,
+      },
+    },
   });
   await saveSettings();
   return settings;
 };
 
-const withCodexDefaults = <T extends { model?: string; reasoningEffort?: CodexReasoningEffort }>(entry: T): T & {
+const updateAgentDefaults = async (input: UpdateAgentDefaultsInput): Promise<Settings> => {
+  const current = normalizeSettings(settings);
+  const defaultAgentProvider = input.defaultProvider === undefined
+    ? current.defaultAgentProvider
+    : normalizeDefaultAgentProvider(input.defaultProvider);
+  const provider = normalizeAgentProvider(input.provider);
+  if (!provider) {
+    settings = normalizeSettings({ ...current, defaultAgentProvider });
+    await saveSettings();
+    return settings;
+  }
+  if (provider === 'codex') {
+    settings = normalizeSettings({
+      ...current,
+      defaultAgentProvider,
+      codexDefaults: {
+        model: input.model ?? current.agentDefaults.codex.model,
+        reasoningEffort: normalizeCodexReasoningEffort(input.effort, current.agentDefaults.codex.reasoningEffort),
+      },
+      agentDefaults: {
+        ...current.agentDefaults,
+        codex: {
+          model: input.model ?? current.agentDefaults.codex.model,
+          reasoningEffort: normalizeCodexReasoningEffort(input.effort, current.agentDefaults.codex.reasoningEffort),
+        },
+      },
+    });
+    await saveSettings();
+    return settings;
+  }
+  settings = normalizeSettings({
+    ...current,
+    defaultAgentProvider,
+    agentDefaults: {
+      ...current.agentDefaults,
+      claude: {
+        model: typeof input.model === 'string' ? input.model : current.agentDefaults.claude.model,
+        effort: normalizeClaudeEffort(input.effort, current.agentDefaults.claude.effort),
+      },
+    },
+  });
+  await saveSettings();
+  return settings;
+};
+
+const markProviderConnected = async (provider: AgentProvider): Promise<void> => {
+  const current = normalizeSettings(settings);
+  if (current.providerConnections[provider]) {
+    settings = current;
+    return;
+  }
+  settings = normalizeSettings({
+    ...current,
+    providerConnections: {
+      ...current.providerConnections,
+      [provider]: new Date().toISOString(),
+    },
+  });
+  await saveSettings();
+};
+
+const chooseAgentRuntime = async (requested?: Partial<AgentRuntime>): Promise<AgentRuntime> => {
+  const provider = requested?.provider ?? await chooseConnectedProvider();
+  const defaults = normalizeSettings(settings).agentDefaults;
+  if (provider === 'claude') {
+    return {
+      provider,
+      model: requested?.model?.trim() || defaults.claude.model || BUILT_IN_CLAUDE_MODEL,
+      effort: normalizeClaudeEffort(requested?.effort, defaults.claude.effort),
+    };
+  }
+  return {
+    provider: 'codex',
+    model: requested?.model?.trim() || defaults.codex.model || BUILT_IN_CODEX_MODEL,
+    effort: normalizeCodexReasoningEffort(requested?.effort, defaults.codex.reasoningEffort),
+  };
+};
+
+const chooseConnectedProvider = async (): Promise<AgentProvider> => {
+  const [codexStatus, claudeStatus] = await Promise.all([
+    getCodexAuthStatus().catch(() => null),
+    getClaudeAuthStatus().catch(() => null),
+  ]);
+  const connected: AgentProvider[] = [
+    ...(codexStatus?.authenticated ? ['codex' as const] : []),
+    ...(claudeStatus?.authenticated ? ['claude' as const] : []),
+  ];
+  if (connected.length === 0) {
+    return 'codex';
+  }
+  if (connected.length === 1) {
+    return connected[0];
+  }
+  const preferred = normalizeSettings(settings).defaultAgentProvider;
+  if (preferred !== 'auto' && connected.includes(preferred)) {
+    return preferred;
+  }
+  const connections = normalizeSettings(settings).providerConnections;
+  const sorted = connected
+    .map((provider) => ({ provider, connectedAt: connections[provider] }))
+    .filter((entry): entry is { provider: AgentProvider; connectedAt: string } => Boolean(entry.connectedAt))
+    .sort((left, right) => left.connectedAt.localeCompare(right.connectedAt));
+  return sorted[0]?.provider ?? 'codex';
+};
+
+const withAgentDefaults = <T extends { model?: string; reasoningEffort?: CodexReasoningEffort; runtime?: AgentRuntime }>(
+  entry: T,
+  defaults: AgentDefaults = normalizeSettings(settings).agentDefaults,
+): T & {
   model: string;
   reasoningEffort: CodexReasoningEffort;
 } => {
-  const defaults = getCodexDefaults();
+  if (entry.runtime?.provider === 'claude') {
+    return {
+      ...entry,
+      model: entry.model?.trim() || defaults.codex.model || BUILT_IN_CODEX_MODEL,
+      reasoningEffort: entry.reasoningEffort ?? defaults.codex.reasoningEffort ?? BUILT_IN_CODEX_REASONING,
+      runtime: {
+        provider: 'claude',
+        model: entry.runtime.model?.trim() || defaults.claude.model || BUILT_IN_CLAUDE_MODEL,
+        effort: normalizeClaudeEffort(entry.runtime.effort, defaults.claude.effort),
+      },
+    };
+  }
   return {
     ...entry,
-    model: entry.model?.trim() || defaults.model || BUILT_IN_CODEX_MODEL,
-    reasoningEffort: entry.reasoningEffort ?? defaults.reasoningEffort ?? BUILT_IN_CODEX_REASONING,
+    model: entry.model?.trim() || defaults.codex.model || BUILT_IN_CODEX_MODEL,
+    reasoningEffort: entry.reasoningEffort ?? defaults.codex.reasoningEffort ?? BUILT_IN_CODEX_REASONING,
   };
 };
 
@@ -965,15 +1205,44 @@ const emitForgerAccountUpdated = (payload: ReturnType<typeof publicForgerAccount
   mainWindow.webContents.send(IPC_CHANNELS.forgerAccountUpdated, payload);
 };
 
+const closeFriendChatWindows = (): void => {
+  for (const window of friendChatWindows.values()) {
+    if (!window.isDestroyed()) {
+      window.close();
+    }
+  }
+  friendChatWindows.clear();
+};
+
+const switchForgerAccountSession = async (
+  nextAccount: StoredForgerAccount,
+  options: { userMessage?: string; technicalCode?: string } = {},
+): Promise<ReturnType<typeof publicForgerAccount> & { userMessage?: string; technicalCode?: string }> => {
+  cloudDeviceManager?.stop();
+  closeFriendChatWindows();
+  forgerAccount = nextAccount;
+
+  if (forgerAccount.authenticated && forgerAccount.token) {
+    await forgerAccountStore?.save(forgerAccount);
+    await cloudDeviceManager?.start();
+  } else {
+    await forgerAccountStore?.clear();
+  }
+
+  const payload = {
+    ...publicForgerAccount(forgerAccount),
+    userMessage: options.userMessage,
+    technicalCode: options.technicalCode,
+  };
+  emitForgerAccountUpdated(payload);
+  return payload;
+};
+
 const clearForgerAccountSession = async (technicalCode: string): Promise<void> => {
   if (!forgerAccount.authenticated && !forgerAccount.token) {
     return;
   }
-  cloudDeviceManager?.stop();
-  forgerAccount = { authenticated: false };
-  await forgerAccountStore?.clear();
-  emitForgerAccountUpdated({
-    ...publicForgerAccount(forgerAccount),
+  await switchForgerAccountSession({ authenticated: false }, {
     userMessage: 'Tu sesion de Forger Cloud expiro. Inicia sesion nuevamente.',
     technicalCode,
   });
@@ -1074,29 +1343,6 @@ const isVersionNewer = (candidate?: string, current?: string): boolean => {
   return false;
 };
 
-const normalizeChangelog = (value: unknown, version?: string): VersionChangelog | undefined => {
-  const entries = Array.isArray(value) ? value : value ? [value] : [];
-  for (const entry of entries) {
-    if (!entry || typeof entry !== 'object') {
-      continue;
-    }
-    const raw = entry as { version?: unknown; summary?: unknown; changes?: unknown };
-    const entryVersion = typeof raw.version === 'string' ? raw.version : version;
-    if (version && entryVersion && entryVersion !== version) {
-      continue;
-    }
-    const changes = Array.isArray(raw.changes)
-      ? raw.changes.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
-      : [];
-    return {
-      version: entryVersion ?? version ?? '',
-      summary: typeof raw.summary === 'string' ? raw.summary : undefined,
-      changes,
-    };
-  }
-  return undefined;
-};
-
 const mapBackendCategory = (backendCategory: string): AppCategory => {
   switch (backendCategory) {
     case 'finance':
@@ -1105,6 +1351,8 @@ const mapBackendCategory = (backendCategory: string): AppCategory => {
       return 'hogar';
     case 'health':
       return 'salud';
+    case 'developer_tools':
+      return 'developer_tools';
     default:
       return 'productividad';
   }
@@ -1145,6 +1393,26 @@ const resolveInstalledManifest = async (installDir: string): Promise<AppManifest
   } catch {
     return null;
   }
+};
+
+const manifestAllowsAgentNetworkAccess = (manifest: AppManifest | null): boolean =>
+  manifest?.agentRuntime?.networkAccess === true;
+
+const appAllowsAgentNetworkAccess = async (appId: string): Promise<boolean> => {
+  const record = registry.apps[appId];
+  if (!record?.installDir) {
+    return false;
+  }
+  return manifestAllowsAgentNetworkAccess(await resolveInstalledManifest(record.installDir));
+};
+
+const anyAppAllowsAgentNetworkAccess = async (appIds: string[]): Promise<boolean> => {
+  for (const appId of appIds) {
+    if (await appAllowsAgentNetworkAccess(appId)) {
+      return true;
+    }
+  }
+  return false;
 };
 
 const getSecretsStore = (): SecretsStore => {
@@ -1283,6 +1551,12 @@ const createRemoteAppBackup = async (
   const archivePath = path.join(getTempRoot(), 'cloud-backups', `${localBackup.backup.appId}-${localBackup.backup.backupId}.zip`);
   await fs.rm(archivePath, { force: true }).catch(() => undefined);
   await zipDirectory(backupDir, archivePath);
+  const archiveChecksum = await hashFileSha256(archivePath);
+  const backupSignature = await getCloudIdentityStore().signText(JSON.stringify({
+    appId: localBackup.backup.appId,
+    backupId: localBackup.backup.backupId,
+    checksumSha256: archiveChecksum,
+  })).catch(() => null);
 
   try {
     return await forgerBackendClient.createRemoteBackup({
@@ -1290,6 +1564,9 @@ const createRemoteAppBackup = async (
       localBackup: localBackup.backup,
       backupType: input.backupType,
       source: input.source ?? 'manual',
+      signature: backupSignature?.signature,
+      signatureKeyFingerprint: backupSignature?.keyFingerprint,
+      signatureAlgorithm: backupSignature?.algorithm,
     });
   } finally {
     await fs.rm(archivePath, { force: true }).catch(() => undefined);
@@ -1472,6 +1749,7 @@ const normalizeManifestPromptTemplates = (manifest: AppManifest | null): AppProm
       : undefined;
     const model = typeof candidate.model === 'string' && candidate.model.trim() ? candidate.model.trim() : undefined;
     const reasoningEffort = normalizeManifestReasoningEffort(candidate.reasoningEffort);
+    const runtime = normalizeManifestRuntime((candidate as Record<string, unknown>).runtime);
     const args = normalizePromptTemplateArguments(candidate.arguments);
     seenIds.add(id);
     templates.push({
@@ -1483,6 +1761,7 @@ const normalizeManifestPromptTemplates = (manifest: AppManifest | null): AppProm
       ...(acceptedFileTypes && acceptedFileTypes.length > 0 ? { acceptedFileTypes } : {}),
       ...(model ? { model } : {}),
       ...(reasoningEffort ? { reasoningEffort } : {}),
+      ...(runtime ? { runtime } : {}),
     });
   }
   return templates;
@@ -1499,9 +1778,12 @@ const normalizeManifestAgents = (manifest: AppManifest | null): AppAgent[] => {
       const candidate = entry as Partial<AppAgent>;
       const id = typeof candidate.id === 'string' ? candidate.id.trim() : '';
       const title = typeof candidate.title === 'string' ? candidate.title.trim() : '';
+      const prompts = normalizeManifestAgentPrompts((candidate as Record<string, unknown>).prompts);
       const initialPrompt =
-        typeof candidate.initialPrompt === 'string' ? candidate.initialPrompt.trim() : '';
-      if (!id || !title || !initialPrompt || seenIds.has(id)) {
+        typeof candidate.initialPrompt === 'string' && candidate.initialPrompt.trim()
+          ? candidate.initialPrompt.trim()
+          : prompts?.initial?.body ?? '';
+      if (!id || !title || (!initialPrompt && !prompts?.initial) || seenIds.has(id)) {
         continue;
       }
       const description =
@@ -1510,14 +1792,25 @@ const normalizeManifestAgents = (manifest: AppManifest | null): AppAgent[] => {
           : undefined;
       const model = typeof candidate.model === 'string' && candidate.model.trim() ? candidate.model.trim() : undefined;
       const reasoningEffort = normalizeManifestReasoningEffort(candidate.reasoningEffort);
+      const runtime = normalizeManifestRuntime((candidate as Record<string, unknown>).runtime);
+      const kind = normalizeManifestAgentKind((candidate as Record<string, unknown>).kind);
+      const initialPromptTemplate =
+        typeof (candidate as Record<string, unknown>).initialPromptTemplate === 'string'
+        && ((candidate as Record<string, unknown>).initialPromptTemplate as string).trim()
+          ? ((candidate as Record<string, unknown>).initialPromptTemplate as string).trim()
+          : undefined;
       seenIds.add(id);
       agents.push({
         id,
         title,
         initialPrompt,
         ...(description ? { description } : {}),
+        ...(kind ? { kind } : {}),
+        ...(initialPromptTemplate ? { initialPromptTemplate } : {}),
+        ...(prompts ? { prompts } : {}),
         ...(model ? { model } : {}),
         ...(reasoningEffort ? { reasoningEffort } : {}),
+        ...(runtime ? { runtime } : {}),
       });
     }
   }
@@ -1542,8 +1835,115 @@ const normalizeManifestAgents = (manifest: AppManifest | null): AppAgent[] => {
   return agents;
 };
 
+const normalizeManifestAgentKind = (value: unknown): AppAgent['kind'] =>
+  value === 'classic' || value === 'thread_interface' || value === 'orchestrator' || value === 'agent_invocation'
+    ? value
+    : undefined;
+
+const normalizeManifestAgentPrompts = (value: unknown): AppAgentPromptSet | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const raw = value as Record<string, unknown>;
+  const output: AppAgentPromptSet = {};
+  for (const key of ['initial', 'resume', 'steer'] as const) {
+    const template = normalizeManifestAgentPromptTemplate(raw[key]);
+    if (template) {
+      output[key] = template;
+    }
+  }
+  return Object.keys(output).length > 0 ? output : undefined;
+};
+
+const normalizeManifestAgentPromptTemplate = (value: unknown): AppAgentPromptTemplate | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const raw = value as Record<string, unknown>;
+  const body = typeof raw.body === 'string' ? raw.body.trim() : '';
+  if (!body) {
+    return undefined;
+  }
+  const variables = normalizeManifestAgentPromptVariables(raw.variables);
+  return {
+    body,
+    ...(Object.keys(variables).length > 0 ? { variables } : {}),
+  };
+};
+
+const normalizeManifestAgentPromptVariables = (value: unknown): Record<string, AppAgentPromptVariable> => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {};
+  }
+  const output: Record<string, AppAgentPromptVariable> = {};
+  for (const [name, rawDeclaration] of Object.entries(value as Record<string, unknown>)) {
+    if (!/^[a-zA-Z0-9_.-]+$/.test(name) || !rawDeclaration || typeof rawDeclaration !== 'object' || Array.isArray(rawDeclaration)) {
+      continue;
+    }
+    const declaration = rawDeclaration as Record<string, unknown>;
+    const type = declaration.type;
+    if (!isAppAgentPromptVariableType(type)) {
+      continue;
+    }
+    output[name] = {
+      type,
+      ...(typeof declaration.required === 'boolean' ? { required: declaration.required } : {}),
+    };
+  }
+  return output;
+};
+
+const isAppAgentPromptVariableType = (value: unknown): value is AppAgentPromptVariableType =>
+  value === 'text' || value === 'string' || value === 'json' || value === 'path';
+
 const normalizeManifestReasoningEffort = (value: unknown): CodexReasoningEffort | undefined =>
   CODEX_REASONING_VALUES.has(value as CodexReasoningEffort) ? value as CodexReasoningEffort : undefined;
+
+const normalizeManifestAgentDefaults = (manifest: AppManifest | null): AgentDefaults => {
+  const base = normalizeSettings(settings).agentDefaults;
+  if (!manifest?.agentProviders || typeof manifest.agentProviders !== 'object' || Array.isArray(manifest.agentProviders)) {
+    return base;
+  }
+  const providers = manifest.agentProviders as Record<string, unknown>;
+  const codex = providers.codex && typeof providers.codex === 'object' && !Array.isArray(providers.codex)
+    ? providers.codex as Record<string, unknown>
+    : {};
+  const claude = providers.claude && typeof providers.claude === 'object' && !Array.isArray(providers.claude)
+    ? providers.claude as Record<string, unknown>
+    : {};
+  const codexModel = typeof codex.defaultModel === 'string' && codex.defaultModel.trim()
+    ? codex.defaultModel.trim()
+    : base.codex.model;
+  const claudeModel = typeof claude.defaultModel === 'string' && claude.defaultModel.trim()
+    ? claude.defaultModel.trim()
+    : base.claude.model;
+  return {
+    codex: {
+      model: codexModel,
+      reasoningEffort: normalizeCodexReasoningEffort(codex.defaultEffort, base.codex.reasoningEffort),
+    },
+    claude: {
+      model: claudeModel,
+      effort: normalizeClaudeEffort(claude.defaultEffort, base.claude.effort),
+    },
+  };
+};
+
+const normalizeManifestRuntime = (value: unknown): AgentRuntime | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const provider = normalizeAgentProvider(record.provider);
+  const model = typeof record.model === 'string' && record.model.trim() ? record.model.trim() : '';
+  const effort = provider === 'claude'
+    ? normalizeClaudeEffort(record.effort, BUILT_IN_CLAUDE_EFFORT)
+    : normalizeCodexReasoningEffort(record.effort, BUILT_IN_CODEX_REASONING);
+  if (!provider || !model) {
+    return undefined;
+  }
+  return { provider, model, effort };
+};
 
 const normalizePromptTemplateArguments = (input: unknown): NonNullable<AppPromptTemplate['arguments']> => {
   if (!Array.isArray(input)) {
@@ -1590,8 +1990,11 @@ const resolveInstalledPromptTemplates = async (appId: string): Promise<AppPrompt
   if (!record?.installDir) {
     return [];
   }
-  const templates = normalizeManifestPromptTemplates(await resolveInstalledManifest(record.installDir));
-  return (await getPromptOverridesStore().applyToPromptTemplates(appId, templates)).map(withCodexDefaults);
+  const manifest = await resolveInstalledManifest(record.installDir);
+  const templates = normalizeManifestPromptTemplates(manifest);
+  const defaults = normalizeManifestAgentDefaults(manifest);
+  return (await getPromptOverridesStore().applyToPromptTemplates(appId, templates))
+    .map((template) => withAgentDefaults(template, defaults));
 };
 
 const resolveInstalledAgents = async (appId: string): Promise<AppAgent[]> => {
@@ -1599,8 +2002,11 @@ const resolveInstalledAgents = async (appId: string): Promise<AppAgent[]> => {
   if (!record?.installDir) {
     return [];
   }
-  const agents = normalizeManifestAgents(await resolveInstalledManifest(record.installDir));
-  return (await getPromptOverridesStore().applyToAgents(appId, agents)).map(withCodexDefaults);
+  const manifest = await resolveInstalledManifest(record.installDir);
+  const agents = normalizeManifestAgents(manifest);
+  const defaults = normalizeManifestAgentDefaults(manifest);
+  return (await getPromptOverridesStore().applyToAgents(appId, agents))
+    .map((agent) => withAgentDefaults(agent, defaults));
 };
 
 const hasInstalledCodexConversation = async (appId: string): Promise<boolean> =>
@@ -2685,16 +3091,6 @@ const isRuntimeArtifactStatusLine = (line: string): boolean => {
 const getUserVisibleGitStatusLines = async (cwd: string): Promise<string[]> =>
   (await getGitStatusLines(cwd)).filter((line) => !isRuntimeArtifactStatusLine(line));
 
-const gitCommitAll = async (cwd: string, message: string): Promise<string> => {
-  await runCommand('git', ['add', '-A'], { cwd });
-  await runCommand('git', ['commit', '--allow-empty', '-m', message], { cwd });
-  const head = await getGitHead(cwd);
-  if (!head) {
-    throw new Error('missing_git_head_after_commit');
-  }
-  return head;
-};
-
 const getGitHead = async (cwd: string): Promise<string | null> => {
   const result = await runCommandCapture('git', ['rev-parse', 'HEAD'], { cwd, timeoutMs: 5_000 }).catch(() => null);
   if (!result || result.code !== 0) {
@@ -2959,21 +3355,6 @@ const syncReleaseIntoInstalledApp = async (
 ): Promise<void> => {
   await copyReleaseContentsForUpdate(stageDir, installDir, preservedPaths);
   await removeTrackedFilesMissingFromStage(stageDir, installDir, preservedPaths);
-};
-
-const copyDirectoryContents = async (sourceDir: string, targetDir: string): Promise<void> => {
-  await fs.mkdir(targetDir, { recursive: true });
-  const entries = await fs.readdir(sourceDir, { withFileTypes: true });
-  for (const entry of entries) {
-    if (entry.name === '.git') {
-      throw new Error('unsafe_staged_git_entry');
-    }
-    await fs.cp(path.join(sourceDir, entry.name), path.join(targetDir, entry.name), {
-      recursive: true,
-      force: true,
-      verbatimSymlinks: false,
-    });
-  }
 };
 
 const fileExists = async (filePath: string): Promise<boolean> => {
@@ -3415,6 +3796,7 @@ const connectCodexAuth = async (): Promise<{ success: boolean; userMessage: stri
         { cwd: app.getPath('userData') },
       );
 
+      await markProviderConnected('codex');
       return {
         success: true,
         userMessage: 'Abrimos Terminal para completar el login de Codex con ChatGPT.',
@@ -3501,6 +3883,7 @@ const connectCodexAuth = async (): Promise<{ success: boolean; userMessage: stri
         nodePathPrefix,
       });
 
+      await markProviderConnected('codex');
       return {
         success: true,
         userMessage: 'Abrimos una consola para completar el login de Codex con ChatGPT.',
@@ -3518,6 +3901,7 @@ const connectCodexAuth = async (): Promise<{ success: boolean; userMessage: stri
       },
     });
 
+    await markProviderConnected('codex');
     return {
       success: true,
       userMessage: 'Login de Codex completado.',
@@ -3577,6 +3961,157 @@ const reinstallCodex = async (): Promise<{ success: boolean; userMessage: string
       userMessage: 'No pudimos reinstalar Codex.',
       ...diagnostic,
       status: await getCodexAuthStatus().catch(() => undefined),
+    };
+  }
+};
+
+const getClaudeAuthStatus = async (): Promise<ClaudeAuthStatus> => {
+  const resolved = await resolveClaudeCli();
+  if (!resolved) {
+    return {
+      installed: false,
+      authenticated: false,
+      source: 'missing',
+      userMessage: 'Claude Code no esta instalado en este equipo.',
+    };
+  }
+
+  const [versionResult, authResult] = await Promise.all([
+    runCommandCapture(resolved.path, ['--version'], { cwd: app.getPath('userData'), timeoutMs: 10_000 }).catch(() => null),
+    runCommandCapture(resolved.path, ['auth', 'status'], { cwd: app.getPath('userData'), timeoutMs: 15_000 }).catch(() => null),
+  ]);
+  const statusText = [authResult?.stdout, authResult?.stderr].filter(Boolean).join('\n').trim();
+  const authenticated = Boolean(
+    authResult
+    && authResult.code === 0
+    && !/not\s+(authenticated|logged\s*in)|login required|no active/i.test(statusText),
+  );
+
+  return {
+    installed: true,
+    authenticated,
+    source: resolved.source,
+    claudeCliPath: resolved.path,
+    version: versionResult?.stdout.trim() || versionResult?.stderr.trim() || undefined,
+    statusText: statusText || undefined,
+  };
+};
+
+const connectClaudeAuth = async (): Promise<{ success: boolean; userMessage: string; status?: ClaudeAuthStatus } & FailureDiagnosticFields> => {
+  try {
+    const cliPath = (await resolveClaudeCli())?.path ?? await ensureClaudeCliInstalled();
+
+    if (process.platform === 'darwin') {
+      const loginCommand = `${shellQuote(cliPath)} auth login`;
+      await runCommand(
+        '/usr/bin/osascript',
+        [
+          '-e',
+          'tell application "Terminal"',
+          '-e',
+          'activate',
+          '-e',
+          `do script ${JSON.stringify(loginCommand)}`,
+          '-e',
+          'end tell',
+        ],
+        { cwd: app.getPath('userData') },
+      );
+      await markProviderConnected('claude');
+      return {
+        success: true,
+        userMessage: 'Abrimos Terminal para completar el login local de Claude Code.',
+        status: await getClaudeAuthStatus().catch(() => undefined),
+      };
+    }
+
+    if (process.platform === 'win32') {
+      const loginScriptPath = path.join(getTempRoot(), 'claude-login.cmd');
+      const loginScript = [
+        '@echo off',
+        'title Forger Claude Code Login',
+        `"${escapeWindowsBatchValue(cliPath)}" auth login`,
+        'set "FORGER_CLAUDE_LOGIN_EXIT=%ERRORLEVEL%"',
+        'echo.',
+        'echo Claude Code login finished with exit code %FORGER_CLAUDE_LOGIN_EXIT%. You can close this window.',
+        'pause',
+      ].join('\r\n');
+      await fs.mkdir(path.dirname(loginScriptPath), { recursive: true });
+      await fs.writeFile(loginScriptPath, `${loginScript}\r\n`, 'utf8');
+      const launchCommand = [
+        '$ErrorActionPreference = "Stop"',
+        `Start-Process -FilePath ${quotePowerShellSingle('cmd.exe')} -ArgumentList ${quotePowerShellSingle(`/d /k call "${loginScriptPath}"`)} -WorkingDirectory ${quotePowerShellSingle(app.getPath('userData'))}`,
+      ].join('; ');
+      await new Promise<void>((resolve, reject) => {
+        const child = spawn(
+          'powershell.exe',
+          ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', launchCommand],
+          {
+            cwd: app.getPath('userData'),
+            stdio: 'ignore',
+            windowsHide: true,
+          },
+        );
+        child.once('error', reject);
+        child.once('exit', (code) => code === 0 ? resolve() : reject(new Error(`powershell Start-Process exited with code ${code ?? 'unknown'}`)));
+      });
+      await markProviderConnected('claude');
+      return {
+        success: true,
+        userMessage: 'Abrimos una consola para completar el login local de Claude Code.',
+        status: await getClaudeAuthStatus().catch(() => undefined),
+      };
+    }
+
+    await runCommand(cliPath, ['auth', 'login'], {
+      cwd: app.getPath('userData'),
+      log: {
+        phase: 'claude_auth',
+        label: 'claude auth login',
+      },
+    });
+    await markProviderConnected('claude');
+    return {
+      success: true,
+      userMessage: 'Login de Claude Code completado.',
+      status: await getClaudeAuthStatus().catch(() => undefined),
+    };
+  } catch (error) {
+    const diagnostic = failureDiagnostic(error, 'claude_connect_failed');
+    await appendInstallLog('claude_auth:failed', {
+      detail: diagnostic.technicalCode,
+      error: serializeErrorForInstallLog(error),
+    });
+    return {
+      success: false,
+      userMessage: 'No pudimos iniciar el login de Claude Code.',
+      ...diagnostic,
+      status: await getClaudeAuthStatus().catch(() => undefined),
+    };
+  }
+};
+
+const reinstallClaude = async (): Promise<{ success: boolean; userMessage: string; status?: ClaudeAuthStatus } & FailureDiagnosticFields> => {
+  try {
+    await fs.rm(getClaudeRoot(), { recursive: true, force: true });
+    await fs.mkdir(getClaudeRoot(), { recursive: true });
+    await ensureClaudeCliInstalled();
+    return {
+      success: true,
+      userMessage: 'Claude Code fue instalado por Forger. Si no hay sesion activa, conecta Claude para usarlo.',
+      status: await getClaudeAuthStatus().catch(() => undefined),
+    };
+  } catch (error) {
+    const diagnostic = failureDiagnostic(error, 'claude_reinstall_failed');
+    await appendInstallLog('claude_auth:reinstall_failed', {
+      detail: diagnostic.technicalCode,
+      error: serializeErrorForInstallLog(error),
+    });
+    return {
+      success: false,
+      userMessage: 'No pudimos instalar Claude Code.',
+      ...diagnostic,
+      status: await getClaudeAuthStatus().catch(() => undefined),
     };
   }
 };
@@ -3685,6 +4220,101 @@ const installBackendDependenciesWithUv = async (
       label: 'uv sync',
     },
   });
+};
+
+const isBackendPythonEnvironmentUsable = async (
+  backendDir: string,
+): Promise<{ usable: boolean; detail?: string; stdout?: string; stderr?: string }> => {
+  const venv = getVenvExecutables(backendDir);
+  try {
+    await fs.access(venv.python);
+  } catch (error) {
+    return {
+      usable: false,
+      detail: 'venv_python_missing',
+      stderr: error instanceof Error ? error.message : String(error),
+    };
+  }
+
+  try {
+    const result = await runCommandCapture(
+      venv.python,
+      [
+        '-c',
+        'import importlib.util, sys; sys.exit(0 if importlib.util.find_spec("uvicorn") else 42)',
+      ],
+      {
+        cwd: backendDir,
+        env: { PYTHONNOUSERSITE: '1' },
+        timeoutMs: 15_000,
+      },
+    );
+    return {
+      usable: result.code === 0,
+      detail: result.code === 0 ? undefined : `venv_uvicorn_missing_${result.code ?? 'signal'}`,
+      stdout: result.stdout,
+      stderr: result.stderr,
+    };
+  } catch (error) {
+    return {
+      usable: false,
+      detail: error instanceof Error ? error.message : 'venv_check_failed',
+      stderr: error instanceof Error ? error.stack ?? error.message : String(error),
+    };
+  }
+};
+
+const ensureBackendPythonEnvironment = async (
+  pythonPath: string,
+  backendDir: string,
+  appId: string,
+  reason: string,
+): Promise<void> => {
+  const lockKey = path.resolve(backendDir);
+  const pending = backendPythonEnvironmentLocks.get(lockKey);
+  if (pending) {
+    await pending;
+    return;
+  }
+
+  const task = (async () => {
+    const check = await isBackendPythonEnvironmentUsable(backendDir);
+    if (check.usable) {
+      await appendInstallLog('backend_python_env:ready', { appId, reason, backendDir });
+      return;
+    }
+
+    await appendInstallLog('backend_python_env:repair_start', {
+      appId,
+      reason,
+      backendDir,
+      detail: check.detail,
+      stdout: truncateForInstallLog(check.stdout ?? ''),
+      stderr: truncateForInstallLog(check.stderr ?? ''),
+    });
+    await fs.rm(path.join(backendDir, '.venv'), { recursive: true, force: true });
+    await installBackendDependenciesWithUv(pythonPath, backendDir, appId);
+    const repaired = await isBackendPythonEnvironmentUsable(backendDir);
+    if (!repaired.usable) {
+      await appendInstallLog('backend_python_env:repair_failed', {
+        appId,
+        reason,
+        backendDir,
+        detail: repaired.detail,
+        stdout: truncateForInstallLog(repaired.stdout ?? ''),
+        stderr: truncateForInstallLog(repaired.stderr ?? ''),
+      });
+      throw new Error(`backend_python_env_unusable_${repaired.detail ?? 'unknown'}`);
+    }
+    await appendInstallLog('backend_python_env:repair_ready', { appId, reason, backendDir });
+  })();
+
+  backendPythonEnvironmentLocks.set(lockKey, task);
+  try {
+    await task;
+  } finally {
+    backendPythonEnvironmentLocks.delete(lockKey);
+  }
 };
 
 const installAppRuntime = async (appId: string, localeInput?: string): Promise<InstallAppResult> => {
@@ -3917,7 +4547,6 @@ const updateAppRuntime = async (appId: string, localeInput?: string): Promise<In
   };
 
   const startedAt = new Date().toISOString();
-  const targetVersion = catalogApp.latestVersion ?? catalogApp.version ?? '0.0.0';
   let preUpdateUserHead = '';
   let stageDir: string | null = null;
 
@@ -4613,6 +5242,19 @@ const withAppLocale = (frontendUrl: string, locale?: string): string => {
   return url.toString();
 };
 
+const loadDesktopWindow = async (window: BrowserWindow, query: Record<string, string> = {}): Promise<void> => {
+  if (isDev && process.env.VITE_DEV_SERVER_URL) {
+    const url = new URL(process.env.VITE_DEV_SERVER_URL);
+    for (const [key, value] of Object.entries(query)) {
+      url.searchParams.set(key, value);
+    }
+    await window.loadURL(url.toString());
+    return;
+  }
+
+  await window.loadFile(path.join(app.getAppPath(), 'dist', 'index.html'), { query });
+};
+
 const openOrFocusAppWindow = async (
   appId: string,
   appName: string,
@@ -4697,8 +5339,8 @@ const openOrFocusAppWindow = async (
   });
   appWindow.on('closed', () => {
     appWindows.delete(appId);
-    appCodexTaskManager?.rejectPendingPermissionsForApp(appId);
-    appCodexConversationManager?.rejectPendingPermissionsForApp(appId);
+    appAgentTaskManager?.rejectPendingPermissionsForApp(appId);
+    appAgentConversationManager?.rejectPendingPermissionsForApp(appId);
     if (!stoppingApps.has(appId) && runningApps.has(appId)) {
       void stopInstalledApp(appId);
     }
@@ -4706,6 +5348,77 @@ const openOrFocusAppWindow = async (
 
   await appWindow.loadURL(localizedFrontendUrl);
 };
+
+const openOrFocusFriendChatWindowForFriend = async (friend: CloudFriendUser): Promise<FriendChatWindowOpenResult> => {
+  const friendUserId = friend.id;
+  const friendUsername = friend.username;
+  const displayName = friend.firstName?.trim() || friend.username;
+  const existing = friendChatWindows.get(friendUserId);
+
+  if (existing && !existing.isDestroyed()) {
+    if (existing.isMinimized()) {
+      existing.restore();
+    }
+    if (process.platform === 'darwin') {
+      app.focus({ steal: true });
+    }
+    existing.show();
+    existing.moveTop();
+    existing.focus();
+    await wait(150);
+
+    if (existing.isFocused()) {
+      return {
+        action: 'focused-existing',
+        userMessage: `El chat con @${friendUsername} ya estaba abierto. Lo reenfoqué.`,
+      };
+    }
+
+    existing.flashFrame(true);
+    setTimeout(() => existing.flashFrame(false), 3000);
+    return {
+      action: 'already-open',
+      userMessage: `El chat con @${friendUsername} ya estaba abierto. Intenté traerlo al frente, pero puede seguir en otro Space de macOS.`,
+    };
+  }
+
+  const preloadPath = path.join(__dirname, '..', 'preload', 'index.js');
+  const chatWindow = new BrowserWindow({
+    width: 420,
+    height: 640,
+    minWidth: 360,
+    minHeight: 520,
+    backgroundColor: '#F6F3EE',
+    title: `${displayName} · Social`,
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: preloadPath,
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+    },
+  });
+
+  friendChatWindows.set(friendUserId, chatWindow);
+  chatWindow.on('closed', () => {
+    friendChatWindows.delete(friendUserId);
+  });
+
+  await loadDesktopWindow(chatWindow, {
+    socialChat: '1',
+    friendUserId: String(friendUserId),
+    friendUsername,
+    friendDisplayName: displayName,
+  });
+
+  return {
+    action: 'opened',
+    userMessage: `Abrí el chat con @${friendUsername}.`,
+  };
+};
+
+const openOrFocusFriendChatWindow = async (friendship: CloudFriendship): Promise<FriendChatWindowOpenResult> =>
+  await openOrFocusFriendChatWindowForFriend(friendship.friend);
 
 const findManifestService = (
   manifest: AppManifest | null,
@@ -4959,12 +5672,13 @@ const openInstalledAppUnlocked = async (
   });
 
   const nodeRuntime = await ensureRuntimeInstalled('node', nodeVersion);
-  await ensureRuntimeInstalled('python', record.requiredPythonVersion);
+  const pythonRuntime = await ensureRuntimeInstalled('python', record.requiredPythonVersion);
 
   const backendService = findManifestService(manifest, 'backend', './backend');
   const frontendService = findManifestService(manifest, 'frontend', './frontend');
   const backendDir = path.join(record.installDir, 'backend');
   const frontendDir = path.join(record.installDir, 'frontend');
+  await ensureBackendPythonEnvironment(pythonRuntime.python as string, backendDir, appId, 'open_app');
   const venv = getVenvExecutables(backendDir);
 
   const backendPort = await getFreePort();
@@ -5007,6 +5721,7 @@ const openInstalledAppUnlocked = async (
       env: {
         ...process.env,
         ...backendConfig.environment,
+        ...(desktopRuntimeBridge?.environmentForApp(appId) ?? {}),
         ...resolvedSecrets.env,
         CORS_ORIGINS: `${frontendUrl},${rawFrontendUrl},http://127.0.0.1:${frontendPort}`,
         FORGER_APP_ID: appId,
@@ -5362,21 +6077,21 @@ const handleCloudForgerAppRequest = async (
     }
 
     if (action === 'codex-task/start') {
-      if (!appCodexTaskManager) {
+      if (!appAgentTaskManager) {
         return json({ error: 'app_codex_task_manager_unavailable' }, 503);
       }
-      const task = await appCodexTaskManager.start(request.app_id, body as unknown as AppCodexTaskStartInput);
+      const task = await appAgentTaskManager.start(request.app_id, body as unknown as AppCodexTaskStartInput);
       return json(task);
     }
 
     if (action === 'codex-task/get') {
       const runId = typeof body.runId === 'string' ? body.runId : '';
-      return json(appCodexTaskManager?.get(request.app_id, runId) ?? null);
+      return json(appAgentTaskManager?.get(request.app_id, runId) ?? null);
     }
 
     if (action === 'codex-task/cancel') {
       const runId = typeof body.runId === 'string' ? body.runId : '';
-      return json(appCodexTaskManager?.cancel(request.app_id, runId) ?? { success: false });
+      return json(appAgentTaskManager?.cancel(request.app_id, runId) ?? { success: false });
     }
 
     return json({ error: 'unknown_forger_app_action' }, 404);
@@ -5452,6 +6167,97 @@ const findSqliteFile = async (searchDir: string): Promise<string | null> => {
   return null;
 };
 
+const resolveManagedClaudeCliPath = async (baseDir: string): Promise<string | null> => {
+  const candidates = process.platform === 'win32'
+    ? [
+        path.join(baseDir, 'node_modules', '.bin', 'claude.cmd'),
+        path.join(baseDir, 'node_modules', '.bin', 'claude'),
+      ]
+    : [
+        path.join(baseDir, 'node_modules', '.bin', 'claude'),
+        path.join(baseDir, 'node_modules', '.bin', 'claude.cmd'),
+      ];
+  for (const candidate of candidates) {
+    if ((await existsFile(candidate)) && (await canRunCommand(candidate, ['--version']))) {
+      return candidate;
+    }
+  }
+  return null;
+};
+
+const resolveSystemClaudeCliPath = async (): Promise<string | null> => {
+  try {
+    const result = await runCommandCapture(
+      process.platform === 'win32' ? 'where' : 'which',
+      ['claude'],
+      { cwd: app.getPath('userData'), timeoutMs: 10_000 },
+    );
+    if (result.code !== 0) {
+      return null;
+    }
+    const candidate = result.stdout.split(/\r?\n/).map((line) => line.trim()).find(Boolean);
+    if (!candidate) {
+      return null;
+    }
+    return await canRunCommand(candidate, ['--version']) ? candidate : null;
+  } catch {
+    return null;
+  }
+};
+
+const resolveClaudeCli = async (): Promise<{ path: string; source: 'managed' | 'system' } | null> => {
+  const managed = await resolveManagedClaudeCliPath(getClaudeRoot());
+  if (managed) {
+    return { path: managed, source: 'managed' };
+  }
+  const system = await resolveSystemClaudeCliPath();
+  return system ? { path: system, source: 'system' } : null;
+};
+
+const ensureClaudeCliInstalled = async (): Promise<string> => {
+  const existing = await resolveManagedClaudeCliPath(getClaudeRoot());
+  if (existing) {
+    return existing;
+  }
+  const claudeRoot = getClaudeRoot();
+  await fs.mkdir(claudeRoot, { recursive: true });
+  const packageJsonPath = path.join(claudeRoot, 'package.json');
+  if (!(await existsFile(packageJsonPath))) {
+    await fs.writeFile(
+      packageJsonPath,
+      JSON.stringify({
+        name: 'forger-claude-code-runtime',
+        private: true,
+        description: 'Forger-managed Claude Code runtime',
+      }, null, 2),
+      'utf8',
+    );
+  }
+  const nodeRuntime = await ensureRuntimeInstalled('node', DEFAULT_NODE_VERSION);
+  if (!nodeRuntime.npm) {
+    throw new Error('runtime_npm_executable_not_found');
+  }
+  await runCommand(
+    nodeRuntime.npm,
+    ['install', '--no-audit', '--no-fund', `@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}`],
+    {
+      cwd: claudeRoot,
+      env: {
+        PATH: [...getRuntimePathEntries(nodeRuntime), process.env.PATH ?? ''].filter(Boolean).join(path.delimiter),
+      },
+      log: {
+        phase: 'claude_auth',
+        label: 'install claude code cli',
+      },
+    },
+  );
+  const installed = await resolveManagedClaudeCliPath(claudeRoot);
+  if (!installed) {
+    throw new Error('claude_cli_install_failed');
+  }
+  return installed;
+};
+
 const resolveAppDbPath = async (appId: string): Promise<string | null> => {
   const record = registry.apps[appId];
   if (!record?.installDir) {
@@ -5477,6 +6283,173 @@ const resolveAppDbPath = async (appId: string): Promise<string | null> => {
     // ignore
   }
   return null;
+};
+
+const getCloudIdentityStore = (): CloudIdentityStore => {
+  if (!cloudIdentityStore) {
+    cloudIdentityStore = new CloudIdentityStore(getCloudIdentityPath());
+  }
+  return cloudIdentityStore;
+};
+
+const decryptCloudMessage = async (message: CloudMessage): Promise<CloudMessage> => {
+  const envelope = message.envelopes.find((entry) => Boolean(entry.ciphertext));
+  if (!envelope) {
+    return message;
+  }
+  try {
+    const payload = JSON.parse(envelope.ciphertext) as EncryptedCloudText;
+    const plaintext = await getCloudIdentityStore().decrypt(payload);
+    return { ...message, plaintext };
+  } catch {
+    return message;
+  }
+};
+
+const decryptCloudMessages = async (messages: CloudMessage[]): Promise<CloudMessage[]> =>
+  Promise.all(messages.map((message) => decryptCloudMessage(message)));
+
+const wait = async (milliseconds: number): Promise<void> =>
+  await new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+const buildEncryptedEnvelopes = async (
+  friend: { devices?: Array<{ id: number; deviceUid: string; publicKey?: string; keyFingerprint?: string }> },
+  text: string,
+): Promise<CloudMessageEnvelope[]> => {
+  const devices = friend.devices?.filter((device) => device.publicKey) ?? [];
+  if (devices.length === 0) {
+    throw Object.assign(
+      new Error('No pudimos enviar el mensaje porque este contacto todavia no tiene una clave cloud activa. Pidele que abra Forger Desktop con su cuenta y vuelve a intentarlo.'),
+      { technicalCode: 'recipient_cloud_key_missing' },
+    );
+  }
+  const recipientEnvelopes = devices.map((device) => ({
+    recipientUserId: undefined,
+    cloudDeviceId: device.id,
+    deviceUid: device.deviceUid,
+    keyFingerprint: device.keyFingerprint,
+    ciphertext: JSON.stringify(getCloudIdentityStore().encryptFor(device.publicKey as string, text, device.keyFingerprint)),
+  }));
+  const currentDevice = (await cloudDeviceManager?.getState())?.currentDevice;
+  const senderEnvelope = currentDevice?.publicKey && forgerAccount.user?.id
+    ? [{
+        recipientUserId: forgerAccount.user.id,
+        cloudDeviceId: currentDevice.id,
+        deviceUid: currentDevice.deviceUid,
+        keyFingerprint: currentDevice.keyFingerprint,
+        ciphertext: JSON.stringify(getCloudIdentityStore().encryptFor(currentDevice.publicKey, text, currentDevice.keyFingerprint)),
+      }]
+    : [];
+  return [...recipientEnvelopes, ...senderEnvelope];
+};
+
+const sendEncryptedCloudMessage = async (input: CloudSendMessageInput): Promise<CloudMessage> => {
+  if (!forgerBackendClient) {
+    throw new Error('backend_client_missing');
+  }
+  const normalizedUsername = input.recipientUsername?.replace(/^@/, '');
+  const recipientUsername = normalizedUsername
+    ?? (await forgerBackendClient.listFriends()).find((entry) => entry.friend.id === input.recipientUserId)?.friend.username;
+  const friend = recipientUsername
+    ? (await forgerBackendClient.searchFriends(recipientUsername)).find((entry) =>
+      input.recipientUserId ? entry.id === input.recipientUserId : entry.username === recipientUsername)
+    : undefined;
+  if (!friend) {
+    throw new Error('recipient_not_found');
+  }
+  const message = await forgerBackendClient.sendCloudMessage({
+    ...input,
+    recipientUserId: input.recipientUserId ?? friend.id,
+    envelopes: await buildEncryptedEnvelopes(friend, input.text),
+    clientMessageId: `${Date.now()}-${randomBytes(8).toString('hex')}`,
+  });
+  return { ...(await decryptCloudMessage(message)), plaintext: input.text };
+};
+
+const isCloudSocialEvent = (event: unknown): event is CloudSocialEvent => {
+  if (!event || typeof event !== 'object') {
+    return false;
+  }
+  const type = (event as { type?: unknown }).type;
+  return type === 'friendship_changed' || type === 'cloud_message' || type === 'ephemeral_cloud_message';
+};
+
+const prepareCloudSocialEvent = async (event: unknown): Promise<CloudSocialEvent | null> => {
+  if (!isCloudSocialEvent(event)) {
+    return null;
+  }
+  if (event.type === 'friendship_changed') {
+    const friendship = forgerBackendClient?.normalizeFriendshipPayload(event.friendship);
+    return friendship ? { type: event.type, friendship } : null;
+  }
+  if (event.type === 'cloud_message' || event.type === 'ephemeral_cloud_message') {
+    const message = forgerBackendClient?.normalizeCloudMessagePayload(event.message);
+    return message ? { type: event.type, message: await decryptCloudMessage(message) } : null;
+  }
+  return null;
+};
+
+const isUnreadIncomingCloudMessage = (event: CloudSocialEvent): boolean => {
+  if (event.type !== 'cloud_message' && event.type !== 'ephemeral_cloud_message') {
+    return false;
+  }
+  const currentUserId = forgerAccount.user?.id;
+  const message = event.message;
+  if (!currentUserId || message.sender.id === currentUserId || message.recipient.id !== currentUserId) {
+    return false;
+  }
+
+  const chatWindow = friendChatWindows.get(message.sender.id);
+  if (chatWindow && !chatWindow.isDestroyed() && chatWindow.isFocused()) {
+    return false;
+  }
+  return true;
+};
+
+const showIncomingCloudMessageNotification = (event: CloudSocialEvent): void => {
+  if (!isUnreadIncomingCloudMessage(event)) {
+    return;
+  }
+  if (event.type !== 'cloud_message' && event.type !== 'ephemeral_cloud_message') {
+    return;
+  }
+  if (!Notification.isSupported()) {
+    return;
+  }
+
+  const message = event.message;
+  const senderName = message.sender.firstName?.trim() || `@${message.sender.username}`;
+  const body = message.plaintext?.trim() || 'Nuevo mensaje en Social';
+  const notification = new Notification({
+    title: senderName,
+    body: body.length > 120 ? `${body.slice(0, 117)}...` : body,
+  });
+  notification.on('click', () => {
+    void openOrFocusFriendChatWindowForFriend(message.sender);
+  });
+  notification.show();
+};
+
+const forwardCloudSocialEvent = (event: CloudSocialEvent): void => {
+  mainWindow?.webContents.send(IPC_CHANNELS.cloudFriendshipEvent, event);
+  for (const window of friendChatWindows.values()) {
+    window.webContents.send(IPC_CHANNELS.cloudFriendshipEvent, event);
+  }
+  for (const window of appWindows.values()) {
+    window.webContents.send(IPC_CHANNELS.appMessagesEvent, event);
+  }
+};
+
+const handleCloudSocialEvent = async (event: unknown): Promise<void> => {
+  const prepared = await prepareCloudSocialEvent(event);
+  if (!prepared) {
+    return;
+  }
+  const eventForRenderer = prepared.type === 'cloud_message' || prepared.type === 'ephemeral_cloud_message'
+    ? { ...prepared, unread: isUnreadIncomingCloudMessage(prepared) }
+    : prepared;
+  showIncomingCloudMessageNotification(eventForRenderer);
+  forwardCloudSocialEvent(eventForRenderer);
 };
 
 const createWindow = async (): Promise<void> => {
@@ -5505,11 +6478,7 @@ const createWindow = async (): Promise<void> => {
     desktopErrorReporter?.reportRendererProcessGone(details);
   });
 
-  if (isDev && process.env.VITE_DEV_SERVER_URL) {
-    await mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
-  } else {
-    await mainWindow.loadFile(path.join(app.getAppPath(), 'dist', 'index.html'));
-  }
+  await loadDesktopWindow(mainWindow);
 };
 
 const registerIpcHandlers = (): void => {
@@ -5762,6 +6731,9 @@ const registerIpcHandlers = (): void => {
   ipcMain.handle(IPC_CHANNELS.updateCodexDefaults, async (_event, input: UpdateCodexDefaultsInput) => {
     return await updateCodexDefaults(input);
   });
+  ipcMain.handle(IPC_CHANNELS.updateAgentDefaults, async (_event, input: UpdateAgentDefaultsInput) => {
+    return await updateAgentDefaults(input);
+  });
   ipcMain.handle(IPC_CHANNELS.memoryList, async (_event, input: MemoryListInput = {}) => {
     return await getMemoryStore().list(input, { caller: 'settings' });
   });
@@ -5789,20 +6761,16 @@ const registerIpcHandlers = (): void => {
       ? await forgerBackendClient.loginAccount(input)
       : { success: false, authenticated: false, userMessage: 'No pudimos iniciar sesion.', technicalCode: 'backend_client_missing' };
     if (result.success) {
-      forgerAccount = result;
-      await forgerAccountStore?.save(forgerAccount);
-      await cloudDeviceManager?.start();
+      await switchForgerAccountSession(result, { userMessage: result.userMessage, technicalCode: result.technicalCode });
     }
     catalogApps = await listCatalogFromBackend();
     return { ...publicForgerAccount(forgerAccount), success: result.success, userMessage: result.userMessage, technicalCode: result.technicalCode };
   });
   ipcMain.handle(IPC_CHANNELS.logoutForgerAccount, async () => {
-    cloudDeviceManager?.stop();
-    await forgerBackendClient?.logoutAccount();
-    forgerAccount = { authenticated: false };
-    await forgerAccountStore?.clear();
+    await forgerBackendClient?.logoutAccount().catch(() => undefined);
+    const account = await switchForgerAccountSession({ authenticated: false });
     catalogApps = await listCatalogFromBackend();
-    return { ...publicForgerAccount(forgerAccount), success: true };
+    return { ...account, success: true };
   });
   ipcMain.handle(IPC_CHANNELS.getCloudDevices, async () => {
     return cloudDeviceManager ? await cloudDeviceManager.getState() : { devices: [], connected: false };
@@ -5811,6 +6779,54 @@ const registerIpcHandlers = (): void => {
     return cloudDeviceManager
       ? await cloudDeviceManager.generatePairingCode()
       : { devices: [], connected: false, success: false, userMessage: 'No pudimos preparar este equipo.', technicalCode: 'cloud_device_manager_missing' };
+  });
+  ipcMain.handle(IPC_CHANNELS.listFriends, async () => {
+    return forgerBackendClient ? await forgerBackendClient.listFriends() : [];
+  });
+  ipcMain.handle(IPC_CHANNELS.searchFriends, async (_event, username: string) => {
+    return forgerBackendClient ? await forgerBackendClient.searchFriends(username) : [];
+  });
+  ipcMain.handle(IPC_CHANNELS.sendFriendRequest, async (_event, username: string) => {
+    if (!forgerBackendClient) throw new Error('backend_client_missing');
+    return await forgerBackendClient.sendFriendRequest(username);
+  });
+  ipcMain.handle(IPC_CHANNELS.acceptFriendRequest, async (_event, id: number) => {
+    if (!forgerBackendClient) throw new Error('backend_client_missing');
+    return await forgerBackendClient.acceptFriendRequest(id);
+  });
+  ipcMain.handle(IPC_CHANNELS.declineFriendRequest, async (_event, id: number) => {
+    if (!forgerBackendClient) throw new Error('backend_client_missing');
+    return await forgerBackendClient.declineFriendRequest(id);
+  });
+  ipcMain.handle(IPC_CHANNELS.cancelFriendRequest, async (_event, id: number) => {
+    if (!forgerBackendClient) throw new Error('backend_client_missing');
+    return await forgerBackendClient.cancelFriendRequest(id);
+  });
+  ipcMain.handle(IPC_CHANNELS.markFriendChatRead, async (_event, friendUserId: number) => {
+    if (!forgerBackendClient) throw new Error('backend_client_missing');
+    const friendship = await forgerBackendClient.markFriendChatRead(friendUserId);
+    forwardCloudSocialEvent({ type: 'friendship_changed', friendship });
+    return friendship;
+  });
+  ipcMain.handle(IPC_CHANNELS.openFriendChatWindow, async (_event, friendship: CloudFriendship) => {
+    return await openOrFocusFriendChatWindow(friendship);
+  });
+  ipcMain.handle(IPC_CHANNELS.listCloudMessages, async (_event, friendUserId: number) => {
+    return forgerBackendClient ? await decryptCloudMessages(await forgerBackendClient.listCloudMessages(friendUserId)) : [];
+  });
+  ipcMain.handle(IPC_CHANNELS.sendCloudMessage, async (_event, input: CloudSendMessageInput) => {
+    return await sendEncryptedCloudMessage(input);
+  });
+  ipcMain.handle(IPC_CHANNELS.decideAppMessagePermission, async (_event, cloudMessageId: number, decision: CloudAppMessagePermissionDecision) => {
+    if (!forgerBackendClient) throw new Error('backend_client_missing');
+    return await decryptCloudMessage(await forgerBackendClient.decideAppMessagePermission(cloudMessageId, decision));
+  });
+  ipcMain.handle(IPC_CHANNELS.getCloudIdentity, async () => await getCloudIdentityStore().getSummary());
+  ipcMain.handle(IPC_CHANNELS.revealCloudSecretKey, async () => await getCloudIdentityStore().revealSecretKey());
+  ipcMain.handle(IPC_CHANNELS.regenerateCloudSecretKey, async () => {
+    const identity = await getCloudIdentityStore().regenerate();
+    await cloudDeviceManager?.start();
+    return identity;
   });
   ipcMain.handle(IPC_CHANNELS.submitAppRating, async (_event, input: SubmitAppRatingInput) => {
     const result = forgerBackendClient
@@ -5861,6 +6877,9 @@ const registerIpcHandlers = (): void => {
   ipcMain.handle(IPC_CHANNELS.connectCodexAuth, async () => await connectCodexAuth());
   ipcMain.handle(IPC_CHANNELS.disconnectCodexAuth, async () => await disconnectCodexAuth());
   ipcMain.handle(IPC_CHANNELS.reinstallCodex, async () => await reinstallCodex());
+  ipcMain.handle(IPC_CHANNELS.getClaudeAuthStatus, async () => await getClaudeAuthStatus());
+  ipcMain.handle(IPC_CHANNELS.connectClaudeAuth, async () => await connectClaudeAuth());
+  ipcMain.handle(IPC_CHANNELS.reinstallClaude, async () => await reinstallClaude());
   ipcMain.handle(IPC_CHANNELS.listAgentTools, async () => AGENT_TOOL_PACKAGES);
   ipcMain.handle(IPC_CHANNELS.getAgentToolSettings, async () => agentToolSettings);
   ipcMain.handle(IPC_CHANNELS.updateAgentToolApproval, async (_event, input: UpdateAgentToolApprovalInput) => {
@@ -6046,8 +7065,15 @@ const registerIpcHandlers = (): void => {
     if (!appId) {
       return {};
     }
+    const record = registry.apps[appId];
+    const manifest = record?.installDir ? await resolveInstalledManifest(record.installDir) : null;
     return {
       agents: await resolveInstalledAgents(appId),
+      agentDefaults: normalizeManifestAgentDefaults(manifest),
+      agentModelOptions: {
+        codex: APP_CODEX_MODEL_OPTIONS,
+        claude: APP_CLAUDE_MODEL_OPTIONS,
+      },
     };
   });
 
@@ -6076,16 +7102,48 @@ const registerIpcHandlers = (): void => {
     return await getOfficialToolsService().callFromApp(appId, input);
   });
 
-  ipcMain.handle(IPC_CHANNELS.appCodexTaskStart, async (event, input: AppCodexTaskStartInput) => {
+  ipcMain.handle(IPC_CHANNELS.appMessagesSend, async (event, input: CloudSendMessageInput) => {
     const appId = resolveAppIdForWebContents(event.sender.id);
     if (!appId) {
       throw new Error('app_window_not_authorized');
     }
-    if (!appCodexTaskManager) {
+    const record = registry.apps[appId];
+    const manifest = record?.installDir ? await resolveInstalledManifest(record.installDir) : null;
+    if (manifest?.cloudMessaging?.enabled !== true) {
+      throw new Error('app_cloud_messaging_not_declared');
+    }
+    return await sendEncryptedCloudMessage({
+      ...input,
+      delivery: input.delivery ?? manifest.cloudMessaging.defaultDelivery ?? 'persistent',
+      source: 'app',
+      sourceAppId: appId,
+      sourceAppName: record?.name ?? appId,
+    });
+  });
+
+  ipcMain.handle(IPC_CHANNELS.appMessagesList, async (event, friendUserId: number) => {
+    const appId = resolveAppIdForWebContents(event.sender.id);
+    if (!appId) {
+      throw new Error('app_window_not_authorized');
+    }
+    const record = registry.apps[appId];
+    const manifest = record?.installDir ? await resolveInstalledManifest(record.installDir) : null;
+    if (manifest?.cloudMessaging?.enabled !== true) {
+      throw new Error('app_cloud_messaging_not_declared');
+    }
+    return forgerBackendClient ? await decryptCloudMessages(await forgerBackendClient.listCloudMessages(friendUserId)) : [];
+  });
+
+  const handleAppAgentTaskStart = async (event: IpcMainInvokeEvent, input: AppCodexTaskStartInput) => {
+    const appId = resolveAppIdForWebContents(event.sender.id);
+    if (!appId) {
+      throw new Error('app_window_not_authorized');
+    }
+    if (!appAgentTaskManager) {
       throw new Error('app_codex_task_manager_unavailable');
     }
     try {
-      return await appCodexTaskManager.start(appId, input);
+      return await appAgentTaskManager.start(appId, input);
     } catch (error) {
       desktopErrorReporter?.reportAppCodexStartFailure({
         appId,
@@ -6094,47 +7152,343 @@ const registerIpcHandlers = (): void => {
       });
       throw error;
     }
-  });
+  };
+  ipcMain.handle(IPC_CHANNELS.appAgentTaskStart, handleAppAgentTaskStart);
+  ipcMain.handle(IPC_CHANNELS.appCodexTaskStart, handleAppAgentTaskStart);
 
-  ipcMain.handle(IPC_CHANNELS.appCodexTaskGet, async (event, runId: string) => {
+  const handleAppAgentTaskGet = async (event: IpcMainInvokeEvent, runId: string) => {
     const appId = resolveAppIdForWebContents(event.sender.id);
-    if (!appId || !appCodexTaskManager) {
+    if (!appId || !appAgentTaskManager) {
       return null;
     }
-    return appCodexTaskManager.get(appId, runId);
-  });
+    return appAgentTaskManager.get(appId, runId);
+  };
+  ipcMain.handle(IPC_CHANNELS.appAgentTaskGet, handleAppAgentTaskGet);
+  ipcMain.handle(IPC_CHANNELS.appCodexTaskGet, handleAppAgentTaskGet);
 
-  ipcMain.handle(IPC_CHANNELS.appCodexTaskCancel, async (event, runId: string) => {
+  const handleAppAgentTaskCancel = async (event: IpcMainInvokeEvent, runId: string) => {
     const appId = resolveAppIdForWebContents(event.sender.id);
-    if (!appId || !appCodexTaskManager) {
+    if (!appId || !appAgentTaskManager) {
       return { success: false };
     }
-    return appCodexTaskManager.cancel(appId, runId);
-  });
+    return appAgentTaskManager.cancel(appId, runId);
+  };
+  ipcMain.handle(IPC_CHANNELS.appAgentTaskCancel, handleAppAgentTaskCancel);
+  ipcMain.handle(IPC_CHANNELS.appCodexTaskCancel, handleAppAgentTaskCancel);
 
-  ipcMain.handle(IPC_CHANNELS.appCodexTaskApprovePermission, async (
-    event,
+  const handleAppAgentTaskApprovePermission = async (
+    event: IpcMainInvokeEvent,
     runId: string,
     requestId: string,
     decision: 'allow' | 'deny',
   ) => {
     const appId = resolveAppIdForWebContents(event.sender.id);
-    if (!appId || !appCodexTaskManager) {
+    if (!appId || !appAgentTaskManager) {
       return { success: false };
     }
-    return appCodexTaskManager.approvePermission(appId, runId, requestId, decision);
-  });
+    return appAgentTaskManager.approvePermission(appId, runId, requestId, decision);
+  };
+  ipcMain.handle(IPC_CHANNELS.appAgentTaskApprovePermission, handleAppAgentTaskApprovePermission);
+  ipcMain.handle(IPC_CHANNELS.appCodexTaskApprovePermission, handleAppAgentTaskApprovePermission);
 
-  ipcMain.handle(IPC_CHANNELS.appCodexConversationCreate, async (event, input: AppCodexConversationCreateInput) => {
+  const normalizeAppAgentRuntime = (runtime?: AppAgentRuntimeInput): Partial<AgentRuntime> => {
+    const provider = normalizeAgentProvider(runtime?.provider);
+    const rawModel = typeof runtime?.model === 'string' ? runtime.model.trim() : '';
+    const model = provider && rawModel && rawModel !== 'auto' ? rawModel : undefined;
+    const params = runtime?.modelParams && typeof runtime.modelParams === 'object' ? runtime.modelParams : {};
+    const rawEffort = runtime?.effort === 'default' ? undefined : runtime?.effort;
+    const effort = rawEffort ?? params.effort ?? params.reasoningEffort;
+    const normalizedEffort = provider && effort !== undefined
+      ? provider === 'claude'
+        ? normalizeClaudeEffort(effort, BUILT_IN_CLAUDE_EFFORT)
+        : normalizeCodexReasoningEffort(effort, BUILT_IN_CODEX_REASONING)
+      : undefined;
+    return {
+      ...(provider ? { provider } : {}),
+      ...(model ? { model } : {}),
+      ...(normalizedEffort ? { effort: normalizedEffort } : {}),
+    };
+  };
+
+  const resolveManifestAgentPromptRun = async (
+    appId: string,
+    agentId: string,
+    kind: ManifestAgentPromptKind,
+    variables?: Record<string, unknown>,
+  ): Promise<{ agent: AppAgent; prompt: string; appRoot: string }> => {
+    const record = registry.apps[appId];
+    if (!record?.installDir) {
+      throw new Error('app_not_installed');
+    }
+    const agent = (await resolveInstalledAgents(appId)).find((item) => item.id === agentId);
+    if (!agent) {
+      throw new Error('manifest_agent_not_found');
+    }
+    return {
+      agent,
+      appRoot: record.installDir,
+      prompt: renderManifestAgentPrompt({
+        agent,
+        kind,
+        variables,
+        appRoot: record.installDir,
+      }),
+    };
+  };
+
+  const manifestAgentIdForThread = async (appId: string, threadId: string): Promise<string> => {
+    if (!appAgentConversationManager) {
+      throw new Error('app_agent_thread_unavailable');
+    }
+    const metadata = await appAgentConversationManager.getMetadata(appId, threadId);
+    const agentId = typeof metadata?.manifestAgentId === 'string' && metadata.manifestAgentId.trim()
+      ? metadata.manifestAgentId.trim()
+      : typeof metadata?.agentId === 'string' && metadata.agentId.trim()
+        ? metadata.agentId.trim()
+        : '';
+    if (!agentId) {
+      throw new Error('manifest_agent_thread_agent_missing');
+    }
+    return agentId;
+  };
+
+  const conversationToThreadSummary = (conversation: Awaited<ReturnType<AppAgentConversationManager['get']>>) => {
+    if (!conversation) {
+      return null;
+    }
+    return {
+      desktop_thread_id: conversation.conversationId,
+      title: conversation.title,
+      status: conversation.activeRun?.status ?? 'idle',
+      ...(conversation.activeRun ? { active_run: conversationToRunSummary(conversation.conversationId, conversation.activeRun) ?? undefined } : {}),
+      messages: conversation.messages.map((message) => ({
+        id: message.messageId,
+        role: message.role,
+        content: message.text,
+        created_at: message.createdAt,
+      })),
+      ...(conversation.activeRun?.progressLog ? { progressLog: conversation.activeRun.progressLog } : {}),
+    };
+  };
+
+  const conversationToRunSummary = (
+    desktopThreadId: string,
+    run: NonNullable<Awaited<ReturnType<AppAgentConversationManager['get']>>>['activeRun'],
+  ) => {
+    if (!run) {
+      return null;
+    }
+    return {
+      desktop_thread_id: desktopThreadId,
+      desktop_run_id: run.runId,
+      status: run.status,
+      ...(run.error ? { error: run.error } : {}),
+      ...(run.progressLog ? { progressLog: run.progressLog } : {}),
+    };
+  };
+
+  const handleAppAgentThreadCreate = async (event: IpcMainInvokeEvent, input: AppAgentThreadCreateInput) => {
+    const appId = resolveAppIdForWebContents(event.sender.id);
+    if (!appId || !appAgentConversationManager) {
+      throw new Error('app_agent_thread_unavailable');
+    }
+    const initialPrompt = typeof input?.initialPrompt === 'string' ? input.initialPrompt.trim() : '';
+    if (!initialPrompt) {
+      throw new Error('agent_thread_initial_prompt_required');
+    }
+    const conversation = await appAgentConversationManager.create(appId, {
+      title: input.title,
+      agentId: input.manifestAgentId,
+      metadata: {
+        ...(input.metadata ?? {}),
+        agentId: input.manifestAgentId ?? '',
+        manifestAgentId: input.manifestAgentId ?? '',
+        initialPrompt,
+      },
+    });
+    return conversationToThreadSummary(conversation);
+  };
+  ipcMain.handle(IPC_CHANNELS.appAgentThreadCreate, handleAppAgentThreadCreate);
+
+  const handleAppAgentThreadRunStart = async (event: IpcMainInvokeEvent, input: AppAgentThreadRunStartInput) => {
+    const appId = resolveAppIdForWebContents(event.sender.id);
+    if (!appId || !appAgentConversationManager) {
+      throw new Error('app_agent_thread_unavailable');
+    }
+    const conversation = await appAgentConversationManager.sendMessage(appId, {
+      conversationId: input.desktopThreadId,
+      message: input.message,
+      context: input.context,
+      workspacePath: input.workspacePath,
+      ...normalizeAppAgentRuntime(input.runtime),
+    });
+    return conversationToRunSummary(input.desktopThreadId, conversation.activeRun) ?? {
+      desktop_thread_id: input.desktopThreadId,
+      desktop_run_id: '',
+      status: 'queued',
+    };
+  };
+  ipcMain.handle(IPC_CHANNELS.appAgentThreadRunStart, handleAppAgentThreadRunStart);
+
+  const handleAppAgentThreadGet = async (event: IpcMainInvokeEvent, desktopThreadId: string) => {
+    const appId = resolveAppIdForWebContents(event.sender.id);
+    if (!appId || !appAgentConversationManager) {
+      return null;
+    }
+    return conversationToThreadSummary(await appAgentConversationManager.get(appId, desktopThreadId));
+  };
+  ipcMain.handle(IPC_CHANNELS.appAgentThreadGet, handleAppAgentThreadGet);
+
+  const handleAppAgentThreadRunGet = async (
+    event: IpcMainInvokeEvent,
+    desktopThreadId: string,
+    desktopRunId: string,
+  ) => {
+    const appId = resolveAppIdForWebContents(event.sender.id);
+    if (!appId || !appAgentConversationManager) {
+      return null;
+    }
+    const conversation = await appAgentConversationManager.get(appId, desktopThreadId);
+    const run = conversation?.activeRun?.runId === desktopRunId ? conversation.activeRun : undefined;
+    return conversationToRunSummary(desktopThreadId, run);
+  };
+  ipcMain.handle(IPC_CHANNELS.appAgentThreadRunGet, handleAppAgentThreadRunGet);
+
+  const handleAppAgentThreadRunCancel = async (event: IpcMainInvokeEvent, input: AppAgentThreadRunControlInput) => {
+    const appId = resolveAppIdForWebContents(event.sender.id);
+    if (!appId || !appAgentConversationManager) {
+      return { success: false };
+    }
+    return await appAgentConversationManager.cancel(appId, input.desktopThreadId, input.desktopRunId);
+  };
+  ipcMain.handle(IPC_CHANNELS.appAgentThreadRunCancel, handleAppAgentThreadRunCancel);
+
+  const handleAppAgentThreadRunSteer = async (event: IpcMainInvokeEvent, input: AppAgentThreadRunSteerInput) => {
+    const appId = resolveAppIdForWebContents(event.sender.id);
+    if (!appId || !appAgentConversationManager) {
+      throw new Error('app_agent_thread_unavailable');
+    }
+    return await appAgentConversationManager.steerRun(appId, input.desktopThreadId, input.desktopRunId, {
+      message: input.message,
+      context: input.context,
+      workspacePath: input.workspacePath,
+      ...normalizeAppAgentRuntime(input.runtime),
+    });
+  };
+  ipcMain.handle(IPC_CHANNELS.appAgentThreadRunSteer, handleAppAgentThreadRunSteer);
+
+  const handleAppManifestAgentStart = async (event: IpcMainInvokeEvent, input: AppManifestAgentStartInput) => {
+    const appId = resolveAppIdForWebContents(event.sender.id);
+    if (!appId || !appAgentConversationManager) {
+      throw new Error('app_agent_thread_unavailable');
+    }
+    const agentId = typeof input?.agentId === 'string' ? input.agentId.trim() : '';
+    if (!agentId) {
+      throw new Error('manifest_agent_required');
+    }
+    const { prompt } = await resolveManifestAgentPromptRun(appId, agentId, 'initial', input.variables);
+    const conversation = await appAgentConversationManager.create(appId, {
+      title: input.title,
+      agentId,
+      metadata: {
+        ...(input.metadata ?? {}),
+        agentId,
+        manifestAgentId: agentId,
+        promptApi: 'manifest',
+        initialPromptApplied: true,
+      },
+    });
+    const started = await appAgentConversationManager.sendMessage(appId, {
+      conversationId: conversation.conversationId,
+      message: prompt,
+      workspacePath: input.workspacePath,
+      ...normalizeAppAgentRuntime(input.runtime),
+    });
+    const summary = conversationToThreadSummary(started);
+    if (!summary) {
+      throw new Error('manifest_agent_thread_start_failed');
+    }
+    return {
+      ...summary,
+      manifest_agent_id: agentId,
+    };
+  };
+  ipcMain.handle(IPC_CHANNELS.appManifestAgentStart, handleAppManifestAgentStart);
+
+  const handleAppManifestAgentResume = async (event: IpcMainInvokeEvent, input: AppManifestAgentResumeInput) => {
+    const appId = resolveAppIdForWebContents(event.sender.id);
+    if (!appId || !appAgentConversationManager) {
+      throw new Error('app_agent_thread_unavailable');
+    }
+    const threadId = typeof input?.threadId === 'string' ? input.threadId.trim() : '';
+    if (!threadId) {
+      throw new Error('manifest_agent_thread_required');
+    }
+    const agentId = await manifestAgentIdForThread(appId, threadId);
+    const { prompt } = await resolveManifestAgentPromptRun(appId, agentId, 'resume', input.variables);
+    const conversation = await appAgentConversationManager.sendMessage(appId, {
+      conversationId: threadId,
+      message: prompt,
+      workspacePath: input.workspacePath,
+      ...normalizeAppAgentRuntime(input.runtime),
+    });
+    return conversationToRunSummary(threadId, conversation.activeRun) ?? {
+      desktop_thread_id: threadId,
+      desktop_run_id: '',
+      status: 'queued',
+    };
+  };
+  ipcMain.handle(IPC_CHANNELS.appManifestAgentResume, handleAppManifestAgentResume);
+
+  const handleAppManifestAgentSteer = async (event: IpcMainInvokeEvent, input: AppManifestAgentSteerInput) => {
+    const appId = resolveAppIdForWebContents(event.sender.id);
+    if (!appId || !appAgentConversationManager) {
+      throw new Error('app_agent_thread_unavailable');
+    }
+    const threadId = typeof input?.threadId === 'string' ? input.threadId.trim() : '';
+    const runId = typeof input?.runId === 'string' ? input.runId.trim() : '';
+    if (!threadId || !runId) {
+      throw new Error('manifest_agent_thread_run_required');
+    }
+    const agentId = await manifestAgentIdForThread(appId, threadId);
+    const { prompt } = await resolveManifestAgentPromptRun(appId, agentId, 'steer', input.variables);
+    return await appAgentConversationManager.steerRun(appId, threadId, runId, {
+      message: prompt,
+      workspacePath: input.workspacePath,
+      ...normalizeAppAgentRuntime(input.runtime),
+    });
+  };
+  ipcMain.handle(IPC_CHANNELS.appManifestAgentSteer, handleAppManifestAgentSteer);
+
+  const handleAppManifestAgentStop = async (event: IpcMainInvokeEvent, input: AppManifestAgentStopInput) => {
+    const appId = resolveAppIdForWebContents(event.sender.id);
+    if (!appId || !appAgentConversationManager) {
+      return { success: false };
+    }
+    const threadId = typeof input?.threadId === 'string' ? input.threadId.trim() : '';
+    if (!threadId) {
+      return { success: false };
+    }
+    const runId = typeof input?.runId === 'string' && input.runId.trim()
+      ? input.runId.trim()
+      : (await appAgentConversationManager.get(appId, threadId))?.activeRun?.runId ?? '';
+    if (!runId) {
+      return { success: true };
+    }
+    return await appAgentConversationManager.cancel(appId, threadId, runId);
+  };
+  ipcMain.handle(IPC_CHANNELS.appManifestAgentStop, handleAppManifestAgentStop);
+
+  const handleAppAgentConversationCreate = async (event: IpcMainInvokeEvent, input: AppCodexConversationCreateInput) => {
     const appId = resolveAppIdForWebContents(event.sender.id);
     if (!appId) {
       throw new Error('app_window_not_authorized');
     }
-    if (!appCodexConversationManager) {
+    if (!appAgentConversationManager) {
       throw new Error('app_codex_conversation_manager_unavailable');
     }
     try {
-      return await appCodexConversationManager.create(appId, input ?? {});
+      return await appAgentConversationManager.create(appId, input ?? {});
     } catch (error) {
       desktopErrorReporter?.reportAppCodexStartFailure({
         appId,
@@ -6143,21 +7497,23 @@ const registerIpcHandlers = (): void => {
       });
       throw error;
     }
-  });
+  };
+  ipcMain.handle(IPC_CHANNELS.appAgentConversationCreate, handleAppAgentConversationCreate);
+  ipcMain.handle(IPC_CHANNELS.appCodexConversationCreate, handleAppAgentConversationCreate);
 
-  ipcMain.handle(IPC_CHANNELS.appCodexConversationSendMessage, async (
-    event,
+  const handleAppAgentConversationSendMessage = async (
+    event: IpcMainInvokeEvent,
     input: AppCodexConversationSendMessageInput,
   ) => {
     const appId = resolveAppIdForWebContents(event.sender.id);
     if (!appId) {
       throw new Error('app_window_not_authorized');
     }
-    if (!appCodexConversationManager) {
+    if (!appAgentConversationManager) {
       throw new Error('app_codex_conversation_manager_unavailable');
     }
     try {
-      return await appCodexConversationManager.sendMessage(appId, input);
+      return await appAgentConversationManager.sendMessage(appId, input);
     } catch (error) {
       desktopErrorReporter?.reportAppCodexStartFailure({
         appId,
@@ -6166,57 +7522,69 @@ const registerIpcHandlers = (): void => {
       });
       throw error;
     }
-  });
+  };
+  ipcMain.handle(IPC_CHANNELS.appAgentConversationSendMessage, handleAppAgentConversationSendMessage);
+  ipcMain.handle(IPC_CHANNELS.appCodexConversationSendMessage, handleAppAgentConversationSendMessage);
 
-  ipcMain.handle(IPC_CHANNELS.appCodexConversationGet, async (event, conversationId: string) => {
+  const handleAppAgentConversationGet = async (event: IpcMainInvokeEvent, conversationId: string) => {
     const appId = resolveAppIdForWebContents(event.sender.id);
-    if (!appId || !appCodexConversationManager) {
+    if (!appId || !appAgentConversationManager) {
       return null;
     }
-    return await appCodexConversationManager.get(appId, conversationId);
-  });
+    return await appAgentConversationManager.get(appId, conversationId);
+  };
+  ipcMain.handle(IPC_CHANNELS.appAgentConversationGet, handleAppAgentConversationGet);
+  ipcMain.handle(IPC_CHANNELS.appCodexConversationGet, handleAppAgentConversationGet);
 
-  ipcMain.handle(IPC_CHANNELS.appCodexConversationList, async (event) => {
+  const handleAppAgentConversationList = async (event: IpcMainInvokeEvent) => {
     const appId = resolveAppIdForWebContents(event.sender.id);
-    if (!appId || !appCodexConversationManager) {
+    if (!appId || !appAgentConversationManager) {
       return [];
     }
-    return await appCodexConversationManager.list(appId);
-  });
+    return await appAgentConversationManager.list(appId);
+  };
+  ipcMain.handle(IPC_CHANNELS.appAgentConversationList, handleAppAgentConversationList);
+  ipcMain.handle(IPC_CHANNELS.appCodexConversationList, handleAppAgentConversationList);
 
-  ipcMain.handle(IPC_CHANNELS.appCodexConversationDelete, async (event, conversationId: string) => {
+  const handleAppAgentConversationDelete = async (event: IpcMainInvokeEvent, conversationId: string) => {
     const appId = resolveAppIdForWebContents(event.sender.id);
-    if (!appId || !appCodexConversationManager) {
+    if (!appId || !appAgentConversationManager) {
       return { success: false };
     }
-    return await appCodexConversationManager.delete(appId, conversationId);
-  });
+    return await appAgentConversationManager.delete(appId, conversationId);
+  };
+  ipcMain.handle(IPC_CHANNELS.appAgentConversationDelete, handleAppAgentConversationDelete);
+  ipcMain.handle(IPC_CHANNELS.appCodexConversationDelete, handleAppAgentConversationDelete);
 
-  ipcMain.handle(IPC_CHANNELS.appCodexConversationCancelRun, async (
-    event,
+  const handleAppAgentConversationCancelRun = async (
+    event: IpcMainInvokeEvent,
     conversationId: string,
     runId: string,
   ) => {
     const appId = resolveAppIdForWebContents(event.sender.id);
-    if (!appId || !appCodexConversationManager) {
+    if (!appId || !appAgentConversationManager) {
       return { success: false };
     }
-    return await appCodexConversationManager.cancel(appId, conversationId, runId);
-  });
+    return await appAgentConversationManager.cancel(appId, conversationId, runId);
+  };
+  ipcMain.handle(IPC_CHANNELS.appAgentConversationCancelRun, handleAppAgentConversationCancelRun);
+  ipcMain.handle(IPC_CHANNELS.appCodexConversationCancelRun, handleAppAgentConversationCancelRun);
 
-  ipcMain.handle(IPC_CHANNELS.appCodexConversationApprovePermission, async (
-    event,
+  const handleAppAgentConversationApprovePermission = async (
+    event: IpcMainInvokeEvent,
     conversationId: string,
     runId: string,
     requestId: string,
     decision: 'allow' | 'deny',
   ) => {
     const appId = resolveAppIdForWebContents(event.sender.id);
-    if (!appId || !appCodexConversationManager) {
+    if (!appId || !appAgentConversationManager) {
       return { success: false };
     }
-    return appCodexConversationManager.approvePermission(appId, conversationId, runId, requestId, decision);
-  });
+    return appAgentConversationManager.approvePermission(appId, conversationId, runId, requestId, decision);
+  };
+  ipcMain.handle(IPC_CHANNELS.appAgentConversationApprovePermission, handleAppAgentConversationApprovePermission);
+  ipcMain.handle(IPC_CHANNELS.appCodexConversationApprovePermission, handleAppAgentConversationApprovePermission);
 
   ipcMain.handle(IPC_CHANNELS.dbListTables, async (_event, appId: string) => {
     if (!BetterSqlite3) {
@@ -6446,6 +7814,8 @@ app.whenReady().then(async () => {
   await loadAgentToolSettings();
   forgerAccountStore = new ForgerAccountStore(getForgerAccountPath());
   forgerAccount = await forgerAccountStore.load();
+  cloudIdentityStore = new CloudIdentityStore(getCloudIdentityPath());
+  await cloudIdentityStore.getSummary().catch(() => undefined);
   await loadCloudSyncSettings();
   memoryStore = new MemoryStore(getForgerMetadataRoot());
   await loadRegistry();
@@ -6460,11 +7830,14 @@ app.whenReady().then(async () => {
   });
   cloudDeviceManager = new CloudDeviceManager({
     filePath: getCloudDevicePath(),
+    accountStorageKey: getCloudDeviceAccountStorageKey,
     backendBaseUrl,
     backendClient: () => forgerBackendClient,
     token: () => forgerAccount.token,
+    getCloudIdentity: () => getCloudIdentityStore().getPublicRegistration(),
     getInstalledApps: () => Object.values(registry.apps).map(toAppSummary),
     handleRelayRequest: handleCloudRelayRequest,
+    handleFriendshipEvent: handleCloudSocialEvent,
     onAuthenticationInvalid: clearForgerAccountSession,
   });
   await cloudDeviceManager.start();
@@ -6474,11 +7847,11 @@ app.whenReady().then(async () => {
     getToolSettings: () => agentToolSettings,
     appendInstallLog,
     requestPermission: async (runId, request) => {
-      const taskDecision = await (appCodexTaskManager?.requestPermission(runId, request) ?? Promise.resolve(null));
+      const taskDecision = await (appAgentTaskManager?.requestPermission(runId, request) ?? Promise.resolve(null));
       if (taskDecision !== null) {
         return taskDecision;
       }
-      const conversationDecision = await (appCodexConversationManager?.requestPermission(runId, request) ?? Promise.resolve(null));
+      const conversationDecision = await (appAgentConversationManager?.requestPermission(runId, request) ?? Promise.resolve(null));
       if (conversationDecision !== null) {
         return conversationDecision;
       }
@@ -6541,12 +7914,14 @@ app.whenReady().then(async () => {
     getInstalledApp: (appId) => registry.apps[appId],
     resolveInstalledManifest,
     ensureRuntimeInstalled,
+    ensureBackendPythonEnvironment,
     getVenvExecutables,
     getFreePort,
     splitManifestCommand,
     ensurePathInside,
     translateManifestEnvironment,
     ensureSqliteDatabaseParent,
+    getDesktopRuntimeEnvironment: (appId) => desktopRuntimeBridge?.environmentForApp(appId) ?? {},
     getRuntimePathEntries,
     waitForHttpOk,
     terminateProcess,
@@ -6567,8 +7942,10 @@ app.whenReady().then(async () => {
     metadataRoot: getForgerMetadataRoot(),
     legacyMetadataRoot: getLegacyForgerMetadataRoot(),
     codexHome: getCodexHome(),
+    getAgentRuntime: chooseAgentRuntime,
     agentContractVersion: FORGER_AGENT_CONTRACT_VERSION,
     getCodexCliPath: async () => await resolveCodexCliPath(getCodexRoot()),
+    getClaudeCliPath: async () => (await resolveClaudeCli())?.path ?? null,
     getCodexPathEntries: async (appId?: string) => {
       const pathEntries = new Set<string>();
       const record = appId ? registry.apps[appId] : undefined;
@@ -6603,8 +7980,13 @@ app.whenReady().then(async () => {
         : undefined;
       return await getCodexToolEnvironment(appId, appPythonRuntime);
     },
+    getAgentNetworkAccess: appAllowsAgentNetworkAccess,
     getCodexAuthenticated: async () => {
       const status = await getCodexAuthStatus();
+      return status.authenticated;
+    },
+    getClaudeAuthenticated: async () => {
+      const status = await getClaudeAuthStatus();
       return status.authenticated;
     },
     createForgerMcpSession: (runId, appId, locale) =>
@@ -6646,11 +8028,13 @@ app.whenReady().then(async () => {
       emitChatRunUpdated(event as { run: unknown });
     },
   });
-  appCodexTaskManager = new AppCodexTaskManager({
+  appAgentTaskManager = new AppAgentTaskManager({
     privateAppsRoot: getPrivateAppsRoot(),
     metadataRoot: getForgerMetadataRoot(),
     codexHome: getCodexHome(),
+    getAgentRuntime: chooseAgentRuntime,
     getCodexCliPath: async () => await resolveCodexCliPath(getCodexRoot()),
+    getClaudeCliPath: async () => (await resolveClaudeCli())?.path ?? null,
     getCodexPathEntries: async (appId?: string) => {
       const pathEntries = new Set<string>();
       const record = appId ? registry.apps[appId] : undefined;
@@ -6685,8 +8069,13 @@ app.whenReady().then(async () => {
         : undefined;
       return await getCodexToolEnvironment(appId, appPythonRuntime);
     },
+    getAgentNetworkAccess: appAllowsAgentNetworkAccess,
     getCodexAuthenticated: async () => {
       const status = await getCodexAuthStatus();
+      return status.authenticated;
+    },
+    getClaudeAuthenticated: async () => {
+      const status = await getClaudeAuthStatus();
       return status.authenticated;
     },
     resolvePromptTemplates: resolveInstalledPromptTemplates,
@@ -6708,15 +8097,18 @@ app.whenReady().then(async () => {
       desktopErrorReporter?.reportAppCodexTaskEvent(event);
       const target = appWindows.get(event.task.appId);
       if (target && !target.isDestroyed()) {
+        target.webContents.send(IPC_CHANNELS.appAgentTaskUpdated, event);
         target.webContents.send(IPC_CHANNELS.appCodexTaskUpdated, event);
       }
     },
   });
-  appCodexConversationManager = new AppCodexConversationManager({
+  appAgentConversationManager = new AppAgentConversationManager({
     privateAppsRoot: getPrivateAppsRoot(),
     metadataRoot: getForgerMetadataRoot(),
     codexHome: getCodexHome(),
+    getAgentRuntime: chooseAgentRuntime,
     getCodexCliPath: async () => await resolveCodexCliPath(getCodexRoot()),
+    getClaudeCliPath: async () => (await resolveClaudeCli())?.path ?? null,
     getCodexPathEntries: async (appId?: string) => {
       const pathEntries = new Set<string>();
       const record = appId ? registry.apps[appId] : undefined;
@@ -6751,8 +8143,13 @@ app.whenReady().then(async () => {
         : undefined;
       return await getCodexToolEnvironment(appId, appPythonRuntime);
     },
+    getAgentNetworkAccess: appAllowsAgentNetworkAccess,
     getCodexAuthenticated: async () => {
       const status = await getCodexAuthStatus();
+      return status.authenticated;
+    },
+    getClaudeAuthenticated: async () => {
+      const status = await getClaudeAuthStatus();
       return status.authenticated;
     },
     hasCodexConversation: hasInstalledCodexConversation,
@@ -6773,24 +8170,71 @@ app.whenReady().then(async () => {
     },
     onConversationEvent: (event) => {
       desktopErrorReporter?.reportAppCodexConversationEvent(event);
+      desktopRuntimeBridge?.publishAgentEvent(event);
       const target = appWindows.get(event.conversation.appId);
       if (target && !target.isDestroyed()) {
+        target.webContents.send(IPC_CHANNELS.appAgentConversationEvent, event);
         target.webContents.send(IPC_CHANNELS.appCodexConversationEvent, event);
+        if (event.type === 'run.message.completed') {
+          return;
+        }
+        const desktopThreadId = event.conversation.conversationId;
+        const normalizedType = event.type === 'conversation.created'
+          ? 'thread.created'
+          : event.type === 'message.created'
+            ? 'run.message'
+            : event.type;
+        target.webContents.send(IPC_CHANNELS.appAgentThreadEvent, {
+          type: normalizedType,
+          desktop_thread_id: desktopThreadId,
+          ...(event.run ? { desktop_run_id: event.run.runId } : {}),
+          thread: {
+            desktop_thread_id: desktopThreadId,
+            title: event.conversation.title,
+            status: event.run?.status ?? event.conversation.activeRun?.status ?? 'idle',
+          },
+          ...(event.run
+            ? {
+                run: {
+                  desktop_thread_id: desktopThreadId,
+                  desktop_run_id: event.run.runId,
+                  status: event.run.status,
+                  ...(event.run.error ? { error: event.run.error } : {}),
+                  ...(event.run.progressLog ? { progressLog: event.run.progressLog } : {}),
+                },
+              }
+            : {}),
+          ...(event.progress ? { progress: event.progress } : {}),
+        });
       }
     },
   });
+  desktopRuntimeBridge = new DesktopRuntimeBridge({
+    getInstalledApp: (appId) => registry.apps[appId],
+    getConversationManager: () => appAgentConversationManager,
+    appendInstallLog,
+    serializeErrorForInstallLog,
+  });
+  await desktopRuntimeBridge.start();
   automationManager = new AutomationManager({
     forgerHomeRoot: getForgerHomeRoot(),
     metadataRoot: getForgerMetadataRoot(),
     codexHome: getCodexHome(),
+    getAgentRuntime: chooseAgentRuntime,
     getInstalledApps: () => Object.values(registry.apps).map(toAppSummary),
     getCodexCliPath: async () => await resolveCodexCliPath(getCodexRoot()),
+    getClaudeCliPath: async () => (await resolveClaudeCli())?.path ?? null,
     getCodexPathEntries: async () => {
       const nodeRuntime = await ensureRuntimeInstalled('node', DEFAULT_NODE_VERSION);
       return getRuntimePathEntries(nodeRuntime);
     },
+    getAgentNetworkAccess: anyAppAllowsAgentNetworkAccess,
     getCodexAuthenticated: async () => {
       const status = await getCodexAuthStatus();
+      return status.authenticated;
+    },
+    getClaudeAuthenticated: async () => {
+      const status = await getClaudeAuthStatus();
       return status.authenticated;
     },
     createForgerMcpSession: (runId, appId, appIds) =>
@@ -6836,6 +8280,8 @@ app.whenReady().then(async () => {
 app.on('before-quit', () => {
   automationManager?.dispose();
   appMcpManager?.dispose();
+  void desktopRuntimeBridge?.stop();
+  desktopRuntimeBridge = null;
   cloudDeviceManager?.stop();
   devCatalogService?.stop();
   forgerMcpServer?.stop();

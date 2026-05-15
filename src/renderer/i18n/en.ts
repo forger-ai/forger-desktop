@@ -42,8 +42,8 @@ export const en = {
       introBody:
         'Ask how each app works, analyze and edit the data you store in them, and even request app changes so they fit you better.',
       codexMissingBody:
-        'Configure Codex to chat with your apps and request changes. This is not required to open installed apps.',
-      configureCodex: 'Configure Codex',
+        'Configure an agent to chat with your apps and request changes. This is not required to open installed apps.',
+      configureCodex: 'Configure agent',
       quotaOpenDashboard: 'View usage and credits',
       activeAppLabel: 'Chatting with:',
       inactiveApp: 'Free chat',
@@ -77,10 +77,10 @@ export const en = {
       permissionDenied: 'Denied',
       permissionApprove: 'Approve',
       permissionDeny: 'Deny',
-      codexThinking: 'Codex is thinking...',
+      codexThinking: 'The agent is thinking...',
       newConversationTitle: 'New conversation',
       sendInProgress: 'I am still processing your previous message. Wait for the response or cancel that request.',
-      sendFailed: (detail: string) => `I could not send your message to Codex. ${detail}`,
+      sendFailed: (detail: string) => `I could not send your message to the agent. ${detail}`,
     },
     settings: {
       title: 'Settings',
@@ -344,7 +344,7 @@ export const en = {
     },
     automations: {
       title: 'Automations',
-      subtitle: 'Schedule local Forger tasks with Codex and explicit app context.',
+      subtitle: 'Schedule local Forger tasks with the agent and explicit app context.',
       empty: 'No automations yet.',
       newAutomation: 'New automation',
       edit: 'Edit',
@@ -492,6 +492,8 @@ export const en = {
     logout: 'Sign out',
     firstName: 'First name',
     lastName: 'Last name (optional)',
+    username: 'Username',
+    usernameHelp: 'Use letters, numbers, or underscore.',
     country: 'Country (optional)',
     countryAuto: 'Detect automatically',
     age: 'Age (optional)',
@@ -540,7 +542,7 @@ export const en = {
     installedVersion: 'Installed version',
     availableVersion: 'Available version',
     capabilitiesTitle: 'Forger access',
-    promptTemplatesTitle: 'Codex prompts this app can run',
+    promptTemplatesTitle: 'Agent prompts this app can run',
     agentsTitle: 'App Agents',
     promptPreviewLabel: 'Exact prompt',
     promptsTitle: 'Prompts',
@@ -808,12 +810,14 @@ export const en = {
     hogar: 'Home',
     salud: 'Health',
     productividad: 'Productivity',
+    developer_tools: 'Developer Tools',
   },
   appCategories: {
     finanzas: 'Finance',
     hogar: 'Home',
     salud: 'Health',
     productividad: 'Productivity',
+    developer_tools: 'Developer Tools',
   } satisfies Record<AppCategory, string>,
   apps: {
     'finance-os': {

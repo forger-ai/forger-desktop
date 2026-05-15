@@ -112,6 +112,7 @@ export function ForgerCloudModal({
   const [password, setPassword] = useState('');
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
+  const [username, setUsername] = useState('');
   const [country, setCountry] = useState('');
   const [age, setAge] = useState('');
   const [gender, setGender] = useState<ForgerAccountRegisterInput['gender'] | ''>('');
@@ -134,6 +135,7 @@ export function ForgerCloudModal({
     const success = await onRegister({
       firstName,
       lastName,
+      username,
       email,
       password,
       country: country || undefined,
@@ -321,6 +323,14 @@ export function ForgerCloudModal({
                     <TextField label={t.cloud.firstName} value={firstName} onChange={(event) => setFirstName(event.target.value)} fullWidth />
                     <TextField label={t.cloud.lastName} value={lastName} onChange={(event) => setLastName(event.target.value)} fullWidth />
                   </Stack>
+                  <TextField
+                    label={t.cloud.username}
+                    value={username}
+                    onChange={(event) => setUsername(event.target.value)}
+                    placeholder="username"
+                    helperText={t.cloud.usernameHelp}
+                    fullWidth
+                  />
                   <TextField label={t.settings.emailLabel} type="email" value={email} onChange={(event) => setEmail(event.target.value)} fullWidth />
                   <TextField label={t.settings.passwordLabel} type="password" value={password} onChange={(event) => setPassword(event.target.value)} fullWidth />
                   <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
@@ -365,7 +375,7 @@ export function ForgerCloudModal({
                     <MenuItem value="female">{t.cloud.genders.female}</MenuItem>
                     <MenuItem value="other">{t.cloud.genders.other}</MenuItem>
                   </TextField>
-                  <Button variant="contained" startIcon={<PersonAddAltRounded />} onClick={submitRegister} disabled={busy || !firstName.trim() || !email.trim() || !password.trim()} fullWidth>
+                  <Button variant="contained" startIcon={<PersonAddAltRounded />} onClick={submitRegister} disabled={busy || !firstName.trim() || !username.trim() || !email.trim() || !password.trim()} fullWidth>
                     {t.cloud.register}
                   </Button>
                   <Divider>{t.cloud.hasAccount}</Divider>

@@ -5,11 +5,35 @@ const IPC_CHANNELS = {
   appSelectExternalFolder: 'forger:app:select-external-folder',
   appGetContext: 'forger:app:get-context',
   appAiSubscriptionStatus: 'forger:app:ai-subscription-status',
+  appAgentTaskStart: 'forger:app:agent-task:start',
+  appAgentTaskGet: 'forger:app:agent-task:get',
+  appAgentTaskCancel: 'forger:app:agent-task:cancel',
+  appAgentTaskApprovePermission: 'forger:app:agent-task:approve-permission',
+  appAgentTaskUpdated: 'forger:app:agent-task:updated',
   appCodexTaskStart: 'forger:app:codex-task:start',
   appCodexTaskGet: 'forger:app:codex-task:get',
   appCodexTaskCancel: 'forger:app:codex-task:cancel',
   appCodexTaskApprovePermission: 'forger:app:codex-task:approve-permission',
   appCodexTaskUpdated: 'forger:app:codex-task:updated',
+  appAgentConversationCreate: 'forger:app:agent-conversation:create',
+  appAgentConversationSendMessage: 'forger:app:agent-conversation:send-message',
+  appAgentConversationGet: 'forger:app:agent-conversation:get',
+  appAgentConversationList: 'forger:app:agent-conversation:list',
+  appAgentConversationDelete: 'forger:app:agent-conversation:delete',
+  appAgentConversationCancelRun: 'forger:app:agent-conversation:cancel-run',
+  appAgentConversationApprovePermission: 'forger:app:agent-conversation:approve-permission',
+  appAgentConversationEvent: 'forger:app:agent-conversation:event',
+  appAgentThreadCreate: 'forger:app:agent-thread:create',
+  appAgentThreadRunStart: 'forger:app:agent-thread-run:start',
+  appAgentThreadGet: 'forger:app:agent-thread:get',
+  appAgentThreadRunGet: 'forger:app:agent-thread-run:get',
+  appAgentThreadRunCancel: 'forger:app:agent-thread-run:cancel',
+  appAgentThreadRunSteer: 'forger:app:agent-thread-run:steer',
+  appAgentThreadEvent: 'forger:app:agent-thread:event',
+  appManifestAgentStart: 'forger:app:agents:start',
+  appManifestAgentResume: 'forger:app:agents:resume',
+  appManifestAgentSteer: 'forger:app:agents:steer',
+  appManifestAgentStop: 'forger:app:agents:stop',
   appCodexConversationCreate: 'forger:app:codex-conversation:create',
   appCodexConversationSendMessage: 'forger:app:codex-conversation:send-message',
   appCodexConversationGet: 'forger:app:codex-conversation:get',
@@ -21,6 +45,9 @@ const IPC_CHANNELS = {
   appToolsListAvailable: 'forger:app:tools:list-available',
   appToolsGetStatus: 'forger:app:tools:get-status',
   appToolsCall: 'forger:app:tools:call',
+  appMessagesSend: 'forger:app:messages:send',
+  appMessagesList: 'forger:app:messages:list',
+  appMessagesEvent: 'forger:app:messages:event',
 } as const;
 
 const api: ForgerAppApi = {
@@ -39,43 +66,130 @@ const api: ForgerAppApi = {
     getStatus: (toolId) => ipcRenderer.invoke(IPC_CHANNELS.appToolsGetStatus, toolId),
     call: (input) => ipcRenderer.invoke(IPC_CHANNELS.appToolsCall, input),
   },
-  startCodexTask: (input) => ipcRenderer.invoke(IPC_CHANNELS.appCodexTaskStart, input),
-  getCodexTask: (runId) => ipcRenderer.invoke(IPC_CHANNELS.appCodexTaskGet, runId),
-  cancelCodexTask: (runId) => ipcRenderer.invoke(IPC_CHANNELS.appCodexTaskCancel, runId),
+  messages: {
+    sendMessage: (input) => ipcRenderer.invoke(IPC_CHANNELS.appMessagesSend, input),
+    listMessages: (friendUserId) => ipcRenderer.invoke(IPC_CHANNELS.appMessagesList, friendUserId),
+    onMessage: (listener) => {
+      const wrapped = (_event: Electron.IpcRendererEvent, event: unknown) => {
+        listener(event as Parameters<typeof listener>[0]);
+      };
+      ipcRenderer.on(IPC_CHANNELS.appMessagesEvent, wrapped);
+      return () => {
+        ipcRenderer.removeListener(IPC_CHANNELS.appMessagesEvent, wrapped);
+      };
+    },
+  },
+  agentRuns: {
+    createAgentThread: (input) => ipcRenderer.invoke(IPC_CHANNELS.appAgentThreadCreate, input),
+    startAgentThreadRun: (input) => ipcRenderer.invoke(IPC_CHANNELS.appAgentThreadRunStart, input),
+    getAgentThread: (desktopThreadId) => ipcRenderer.invoke(IPC_CHANNELS.appAgentThreadGet, desktopThreadId),
+    getAgentRun: (desktopThreadId, desktopRunId) =>
+      ipcRenderer.invoke(IPC_CHANNELS.appAgentThreadRunGet, desktopThreadId, desktopRunId),
+    cancelAgentThreadRun: (input) => ipcRenderer.invoke(IPC_CHANNELS.appAgentThreadRunCancel, input),
+    steerAgentThreadRun: (input) => ipcRenderer.invoke(IPC_CHANNELS.appAgentThreadRunSteer, input),
+    onAgentThreadEvent: (listener) => {
+      const wrapped = (_event: Electron.IpcRendererEvent, event: unknown) => {
+        listener(event as Parameters<typeof listener>[0]);
+      };
+      ipcRenderer.on(IPC_CHANNELS.appAgentThreadEvent, wrapped);
+      return () => {
+        ipcRenderer.removeListener(IPC_CHANNELS.appAgentThreadEvent, wrapped);
+      };
+    },
+  },
+  agents: {
+    start: (input) => ipcRenderer.invoke(IPC_CHANNELS.appManifestAgentStart, input),
+    resume: (input) => ipcRenderer.invoke(IPC_CHANNELS.appManifestAgentResume, input),
+    steer: (input) => ipcRenderer.invoke(IPC_CHANNELS.appManifestAgentSteer, input),
+    stop: (input) => ipcRenderer.invoke(IPC_CHANNELS.appManifestAgentStop, input),
+    getThread: (threadId) => ipcRenderer.invoke(IPC_CHANNELS.appAgentThreadGet, threadId),
+    getRun: (threadId, runId) => ipcRenderer.invoke(IPC_CHANNELS.appAgentThreadRunGet, threadId, runId),
+    onEvent: (listener) => {
+      const wrapped = (_event: Electron.IpcRendererEvent, event: unknown) => {
+        listener(event as Parameters<typeof listener>[0]);
+      };
+      ipcRenderer.on(IPC_CHANNELS.appAgentThreadEvent, wrapped);
+      return () => {
+        ipcRenderer.removeListener(IPC_CHANNELS.appAgentThreadEvent, wrapped);
+      };
+    },
+  },
+  startAgentTask: (input) => ipcRenderer.invoke(IPC_CHANNELS.appAgentTaskStart, input),
+  getAgentTask: (runId) => ipcRenderer.invoke(IPC_CHANNELS.appAgentTaskGet, runId),
+  cancelAgentTask: (runId) => ipcRenderer.invoke(IPC_CHANNELS.appAgentTaskCancel, runId),
+  approveAgentTaskPermission: (runId, requestId, decision) =>
+    ipcRenderer.invoke(IPC_CHANNELS.appAgentTaskApprovePermission, runId, requestId, decision),
+  onAgentTaskUpdated: (listener) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, event: unknown) => {
+      listener(event as Parameters<typeof listener>[0]);
+    };
+    ipcRenderer.on(IPC_CHANNELS.appAgentTaskUpdated, wrapped);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.appAgentTaskUpdated, wrapped);
+    };
+  },
+  startCodexTask: (input) => ipcRenderer.invoke(IPC_CHANNELS.appAgentTaskStart, input),
+  getCodexTask: (runId) => ipcRenderer.invoke(IPC_CHANNELS.appAgentTaskGet, runId),
+  cancelCodexTask: (runId) => ipcRenderer.invoke(IPC_CHANNELS.appAgentTaskCancel, runId),
   approveCodexTaskPermission: (runId, requestId, decision) =>
-    ipcRenderer.invoke(IPC_CHANNELS.appCodexTaskApprovePermission, runId, requestId, decision),
+    ipcRenderer.invoke(IPC_CHANNELS.appAgentTaskApprovePermission, runId, requestId, decision),
   onCodexTaskUpdated: (listener) => {
     const wrapped = (_event: Electron.IpcRendererEvent, event: unknown) => {
       listener(event as Parameters<typeof listener>[0]);
     };
-    ipcRenderer.on(IPC_CHANNELS.appCodexTaskUpdated, wrapped);
+    ipcRenderer.on(IPC_CHANNELS.appAgentTaskUpdated, wrapped);
     return () => {
-      ipcRenderer.removeListener(IPC_CHANNELS.appCodexTaskUpdated, wrapped);
+      ipcRenderer.removeListener(IPC_CHANNELS.appAgentTaskUpdated, wrapped);
+    };
+  },
+  createAgentConversation: (input) => {
+    const locale = new URLSearchParams(window.location.search).get('forgerLocale') ?? undefined;
+    return ipcRenderer.invoke(IPC_CHANNELS.appAgentConversationCreate, { ...(input ?? {}), locale });
+  },
+  sendAgentConversationMessage: (input) => {
+    const locale = new URLSearchParams(window.location.search).get('forgerLocale') ?? undefined;
+    return ipcRenderer.invoke(IPC_CHANNELS.appAgentConversationSendMessage, { ...input, locale });
+  },
+  getAgentConversation: (conversationId) => ipcRenderer.invoke(IPC_CHANNELS.appAgentConversationGet, conversationId),
+  listAgentConversations: () => ipcRenderer.invoke(IPC_CHANNELS.appAgentConversationList),
+  deleteAgentConversation: (conversationId) =>
+    ipcRenderer.invoke(IPC_CHANNELS.appAgentConversationDelete, conversationId),
+  cancelAgentConversationRun: (conversationId, runId) =>
+    ipcRenderer.invoke(IPC_CHANNELS.appAgentConversationCancelRun, conversationId, runId),
+  approveAgentConversationPermission: (conversationId, runId, requestId, decision) =>
+    ipcRenderer.invoke(IPC_CHANNELS.appAgentConversationApprovePermission, conversationId, runId, requestId, decision),
+  onAgentConversationEvent: (listener) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, event: unknown) => {
+      listener(event as Parameters<typeof listener>[0]);
+    };
+    ipcRenderer.on(IPC_CHANNELS.appAgentConversationEvent, wrapped);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.appAgentConversationEvent, wrapped);
     };
   },
   createCodexConversation: (input) => {
     const locale = new URLSearchParams(window.location.search).get('forgerLocale') ?? undefined;
-    return ipcRenderer.invoke(IPC_CHANNELS.appCodexConversationCreate, { ...(input ?? {}), locale });
+    return ipcRenderer.invoke(IPC_CHANNELS.appAgentConversationCreate, { ...(input ?? {}), locale });
   },
   sendCodexConversationMessage: (input) => {
     const locale = new URLSearchParams(window.location.search).get('forgerLocale') ?? undefined;
-    return ipcRenderer.invoke(IPC_CHANNELS.appCodexConversationSendMessage, { ...input, locale });
+    return ipcRenderer.invoke(IPC_CHANNELS.appAgentConversationSendMessage, { ...input, locale });
   },
-  getCodexConversation: (conversationId) => ipcRenderer.invoke(IPC_CHANNELS.appCodexConversationGet, conversationId),
-  listCodexConversations: () => ipcRenderer.invoke(IPC_CHANNELS.appCodexConversationList),
+  getCodexConversation: (conversationId) => ipcRenderer.invoke(IPC_CHANNELS.appAgentConversationGet, conversationId),
+  listCodexConversations: () => ipcRenderer.invoke(IPC_CHANNELS.appAgentConversationList),
   deleteCodexConversation: (conversationId) =>
-    ipcRenderer.invoke(IPC_CHANNELS.appCodexConversationDelete, conversationId),
+    ipcRenderer.invoke(IPC_CHANNELS.appAgentConversationDelete, conversationId),
   cancelCodexConversationRun: (conversationId, runId) =>
-    ipcRenderer.invoke(IPC_CHANNELS.appCodexConversationCancelRun, conversationId, runId),
+    ipcRenderer.invoke(IPC_CHANNELS.appAgentConversationCancelRun, conversationId, runId),
   approveCodexConversationPermission: (conversationId, runId, requestId, decision) =>
-    ipcRenderer.invoke(IPC_CHANNELS.appCodexConversationApprovePermission, conversationId, runId, requestId, decision),
+    ipcRenderer.invoke(IPC_CHANNELS.appAgentConversationApprovePermission, conversationId, runId, requestId, decision),
   onCodexConversationEvent: (listener) => {
     const wrapped = (_event: Electron.IpcRendererEvent, event: unknown) => {
       listener(event as Parameters<typeof listener>[0]);
     };
-    ipcRenderer.on(IPC_CHANNELS.appCodexConversationEvent, wrapped);
+    ipcRenderer.on(IPC_CHANNELS.appAgentConversationEvent, wrapped);
     return () => {
-      ipcRenderer.removeListener(IPC_CHANNELS.appCodexConversationEvent, wrapped);
+      ipcRenderer.removeListener(IPC_CHANNELS.appAgentConversationEvent, wrapped);
     };
   },
 };
@@ -169,10 +283,10 @@ const respondToPermission = async (
 ): Promise<void> => {
   const key = `${input.source}:${input.runId}:${input.request.requestId}`;
   if (input.source === 'task') {
-    await ipcRenderer.invoke(IPC_CHANNELS.appCodexTaskApprovePermission, input.runId, input.request.requestId, decision);
+    await ipcRenderer.invoke(IPC_CHANNELS.appAgentTaskApprovePermission, input.runId, input.request.requestId, decision);
   } else {
     await ipcRenderer.invoke(
-      IPC_CHANNELS.appCodexConversationApprovePermission,
+      IPC_CHANNELS.appAgentConversationApprovePermission,
       input.conversationId,
       input.runId,
       input.request.requestId,
@@ -269,7 +383,7 @@ const renderPermissionOverlay = (input: PermissionOverlayInput): void => {
   document.documentElement.append(overlay);
 };
 
-ipcRenderer.on(IPC_CHANNELS.appCodexTaskUpdated, (_event: Electron.IpcRendererEvent, event: unknown) => {
+ipcRenderer.on(IPC_CHANNELS.appAgentTaskUpdated, (_event: Electron.IpcRendererEvent, event: unknown) => {
   const task = event && typeof event === 'object' ? (event as { task?: unknown }).task : null;
   if (!task || typeof task !== 'object') {
     return;
@@ -284,7 +398,7 @@ ipcRenderer.on(IPC_CHANNELS.appCodexTaskUpdated, (_event: Electron.IpcRendererEv
   }
 });
 
-ipcRenderer.on(IPC_CHANNELS.appCodexConversationEvent, (_event: Electron.IpcRendererEvent, event: unknown) => {
+ipcRenderer.on(IPC_CHANNELS.appAgentConversationEvent, (_event: Electron.IpcRendererEvent, event: unknown) => {
   if (!event || typeof event !== 'object') {
     return;
   }

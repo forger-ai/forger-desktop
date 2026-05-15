@@ -1,6 +1,6 @@
-import { Box } from '@mui/material';
+import { Box, type AlertColor } from '@mui/material';
 import type { ReactNode } from 'react';
-import type { AppSummary, DesktopUpdateState, ForgerAccountSession } from '@shared/types';
+import type { AppSummary, CloudFriendship, DesktopUpdateState, ForgerAccountSession, FriendChatWindowOpenResult } from '@shared/types';
 import type { AppDictionary } from '@renderer/i18n';
 import { Sidebar, type View } from './Sidebar';
 import { Topbar } from './Topbar';
@@ -19,6 +19,8 @@ interface AppShellProps {
   onOpenCloudModal: () => void;
   account: ForgerAccountSession;
   accountBusy: boolean;
+  onOpenFriendChat: (friendship: CloudFriendship) => Promise<FriendChatWindowOpenResult> | FriendChatWindowOpenResult;
+  onSocialNotify: (message: string, severity?: AlertColor) => void;
   onLogout: () => void;
   desktopUpdateState: DesktopUpdateState;
   children: ReactNode;
@@ -38,6 +40,8 @@ export function AppShell({
   onOpenCloudModal,
   account,
   accountBusy,
+  onOpenFriendChat,
+  onSocialNotify,
   onLogout,
   desktopUpdateState,
   children,
@@ -62,6 +66,8 @@ export function AppShell({
           onOpenCloudModal={onOpenCloudModal}
           account={account}
           accountBusy={accountBusy}
+          onOpenFriendChat={onOpenFriendChat}
+          onSocialNotify={onSocialNotify}
           onLogout={onLogout}
         />
         <Box sx={{ p: 3, flex: 1, minHeight: 0, overflowY: 'auto', WebkitAppRegion: 'no-drag' }}>{children}</Box>

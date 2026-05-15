@@ -3,12 +3,15 @@ import chatFemaleIcon from '@renderer/assets/chat-female-icon.png';
 import chatMaleIcon from '@renderer/assets/chat-male-icon.png';
 import { defaultLocale, type Locale } from '@renderer/i18n';
 import type { ThemePreference } from '@renderer/theme/appTheme';
-import type { CodexModelOption, CodexReasoningEffort } from '@shared/types';
+import type { AgentProvider, ClaudeEffort, CodexModelOption, CodexReasoningEffort } from '@shared/types';
 
 export const THEME_STORAGE_KEY = 'forger-theme-preference';
 export const LANGUAGE_STORAGE_KEY = 'forger-language-preference';
 export const CODEX_MODEL_STORAGE_KEY = 'forger-codex-model-v1';
 export const CODEX_REASONING_STORAGE_KEY = 'forger-codex-reasoning-effort-v1';
+export const CHAT_AGENT_PROVIDER_STORAGE_KEY = 'forger-chat-agent-provider-v1';
+export const CLAUDE_MODEL_STORAGE_KEY = 'forger-claude-model-v1';
+export const CLAUDE_EFFORT_STORAGE_KEY = 'forger-claude-effort-v1';
 export const CHAT_BOT_PICTURE_STORAGE_KEY = 'forger-chat-bot-picture-v1';
 export const STARTUP_UPDATE_CHECK_STORAGE_KEY = 'forger-desktop-startup-update-check-v1';
 
@@ -36,6 +39,26 @@ export const CODEX_REASONING_OPTIONS: { label: string; value: CodexReasoningEffo
   { label: 'Medium', value: 'medium' },
   { label: 'High', value: 'high' },
   { label: 'XHigh', value: 'xhigh' },
+];
+
+export const AGENT_PROVIDER_OPTIONS: Array<{ label: string; value: AgentProvider | 'auto' }> = [
+  { label: 'Auto', value: 'auto' },
+  { label: 'Codex', value: 'codex' },
+  { label: 'Claude', value: 'claude' },
+];
+
+export const CLAUDE_MODEL_OPTIONS: Array<{ displayModelName: string; realModelName: string; defaultEffort: ClaudeEffort }> = [
+  { displayModelName: 'Sonnet latest (Claude Code alias)', realModelName: 'sonnet', defaultEffort: 'medium' },
+  { displayModelName: 'Opus latest (Claude Code alias)', realModelName: 'opus', defaultEffort: 'high' },
+  { displayModelName: 'Haiku latest (Claude Code alias)', realModelName: 'haiku', defaultEffort: 'low' },
+];
+
+export const CLAUDE_EFFORT_OPTIONS: { label: string; value: ClaudeEffort }[] = [
+  { label: 'Low', value: 'low' },
+  { label: 'Medium', value: 'medium' },
+  { label: 'High', value: 'high' },
+  { label: 'XHigh', value: 'xhigh' },
+  { label: 'Max', value: 'max' },
 ];
 
 export const normalizeLocale = (value?: string | null): Locale | null => {
@@ -101,6 +124,34 @@ export const getStoredCodexReasoningEffort = (): CodexReasoningEffort => {
   return CODEX_REASONING_OPTIONS.some((option) => option.value === stored)
     ? stored as CodexReasoningEffort
     : CODEX_MODEL_OPTIONS[0].defaultReasoningEffort;
+};
+
+export const getStoredChatAgentProvider = (): AgentProvider | 'auto' => {
+  if (typeof window === 'undefined') {
+    return 'auto';
+  }
+  const stored = window.localStorage.getItem(CHAT_AGENT_PROVIDER_STORAGE_KEY);
+  return stored === 'codex' || stored === 'claude' || stored === 'auto' ? stored : 'auto';
+};
+
+export const getStoredClaudeModel = (): string => {
+  if (typeof window === 'undefined') {
+    return CLAUDE_MODEL_OPTIONS[0].realModelName;
+  }
+  const stored = window.localStorage.getItem(CLAUDE_MODEL_STORAGE_KEY);
+  return CLAUDE_MODEL_OPTIONS.some((option) => option.realModelName === stored)
+    ? stored as string
+    : CLAUDE_MODEL_OPTIONS[0].realModelName;
+};
+
+export const getStoredClaudeEffort = (): ClaudeEffort => {
+  if (typeof window === 'undefined') {
+    return CLAUDE_MODEL_OPTIONS[0].defaultEffort;
+  }
+  const stored = window.localStorage.getItem(CLAUDE_EFFORT_STORAGE_KEY);
+  return CLAUDE_EFFORT_OPTIONS.some((option) => option.value === stored)
+    ? stored as ClaudeEffort
+    : CLAUDE_MODEL_OPTIONS[0].defaultEffort;
 };
 
 export const getStoredChatBotPicture = (): ChatBotPicture => {

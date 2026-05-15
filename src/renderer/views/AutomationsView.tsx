@@ -280,7 +280,18 @@ export function AutomationsView({
                       </Tooltip>
                       <Tooltip title={automation.enabled ? t.sections.automations.pause : t.sections.automations.resume}>
                         <span>
-                          <IconButton size="small" disabled={busy} onClick={(event) => { event.stopPropagation(); automation.enabled ? onPause(automation.id) : onResume(automation.id); }}>
+                          <IconButton
+                            size="small"
+                            disabled={busy}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              if (automation.enabled) {
+                                onPause(automation.id);
+                              } else {
+                                onResume(automation.id);
+                              }
+                            }}
+                          >
                             {automation.enabled ? <PauseRounded fontSize="small" /> : <PlayArrowRounded fontSize="small" />}
                           </IconButton>
                         </span>
