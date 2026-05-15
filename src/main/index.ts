@@ -9,7 +9,6 @@ import http, { type IncomingMessage, type ServerResponse } from 'node:http';
 import yauzl from 'yauzl';
 
 // better-sqlite3 is optional — gracefully unavailable if not installed / rebuilt
-// eslint-disable-next-line @typescript-eslint/no-require-imports
 let BetterSqlite3: (typeof import('better-sqlite3')) | null = null;
 try {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -24,7 +23,7 @@ import { ChatOrchestrator } from './chat/orchestrator';
 import { AppAgentTaskManager } from './app-agent-task-manager';
 import { AppAgentConversationManager } from './app-agent-conversation-manager';
 import { renderManifestAgentPrompt, type ManifestAgentPromptKind } from './manifest-agent-prompts';
-import { AppMcpManager, type CodexMcpServerConfig } from './app-mcp-manager';
+import { AppMcpManager } from './app-mcp-manager';
 import { AutomationManager } from './automation-manager';
 import { DevCatalogService } from './dev-catalog-service';
 import { DesktopUpdater } from './desktop-updater';
@@ -109,7 +108,6 @@ import type {
   AppStatus,
   AppOperationSummary,
   AppSummary,
-  AgentEffort,
   AgentProvider,
   AgentRuntime,
   AutomationUpsertInput,
@@ -647,18 +645,6 @@ const chooseConnectedProvider = async (): Promise<AgentProvider> => {
     .filter((entry): entry is { provider: AgentProvider; connectedAt: string } => Boolean(entry.connectedAt))
     .sort((left, right) => left.connectedAt.localeCompare(right.connectedAt));
   return sorted[0]?.provider ?? 'codex';
-};
-
-const withCodexDefaults = <T extends { model?: string; reasoningEffort?: CodexReasoningEffort }>(entry: T): T & {
-  model: string;
-  reasoningEffort: CodexReasoningEffort;
-} => {
-  const defaults = getCodexDefaults();
-  return {
-    ...entry,
-    model: entry.model?.trim() || defaults.model || BUILT_IN_CODEX_MODEL,
-    reasoningEffort: entry.reasoningEffort ?? defaults.reasoningEffort ?? BUILT_IN_CODEX_REASONING,
-  };
 };
 
 const withAgentDefaults = <T extends { model?: string; reasoningEffort?: CodexReasoningEffort; runtime?: AgentRuntime }>(
@@ -1342,29 +1328,6 @@ const isVersionNewer = (candidate?: string, current?: string): boolean => {
     return normalizedCandidate > normalizedCurrent;
   }
   return false;
-};
-
-const normalizeChangelog = (value: unknown, version?: string): VersionChangelog | undefined => {
-  const entries = Array.isArray(value) ? value : value ? [value] : [];
-  for (const entry of entries) {
-    if (!entry || typeof entry !== 'object') {
-      continue;
-    }
-    const raw = entry as { version?: unknown; summary?: unknown; changes?: unknown };
-    const entryVersion = typeof raw.version === 'string' ? raw.version : version;
-    if (version && entryVersion && entryVersion !== version) {
-      continue;
-    }
-    const changes = Array.isArray(raw.changes)
-      ? raw.changes.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
-      : [];
-    return {
-      version: entryVersion ?? version ?? '',
-      summary: typeof raw.summary === 'string' ? raw.summary : undefined,
-      changes,
-    };
-  }
-  return undefined;
 };
 
 const mapBackendCategory = (backendCategory: string): AppCategory => {
@@ -3115,16 +3078,6 @@ const isRuntimeArtifactStatusLine = (line: string): boolean => {
 const getUserVisibleGitStatusLines = async (cwd: string): Promise<string[]> =>
   (await getGitStatusLines(cwd)).filter((line) => !isRuntimeArtifactStatusLine(line));
 
-const gitCommitAll = async (cwd: string, message: string): Promise<string> => {
-  await runCommand('git', ['add', '-A'], { cwd });
-  await runCommand('git', ['commit', '--allow-empty', '-m', message], { cwd });
-  const head = await getGitHead(cwd);
-  if (!head) {
-    throw new Error('missing_git_head_after_commit');
-  }
-  return head;
-};
-
 const getGitHead = async (cwd: string): Promise<string | null> => {
   const result = await runCommandCapture('git', ['rev-parse', 'HEAD'], { cwd, timeoutMs: 5_000 }).catch(() => null);
   if (!result || result.code !== 0) {
@@ -3389,21 +3342,6 @@ const syncReleaseIntoInstalledApp = async (
 ): Promise<void> => {
   await copyReleaseContentsForUpdate(stageDir, installDir, preservedPaths);
   await removeTrackedFilesMissingFromStage(stageDir, installDir, preservedPaths);
-};
-
-const copyDirectoryContents = async (sourceDir: string, targetDir: string): Promise<void> => {
-  await fs.mkdir(targetDir, { recursive: true });
-  const entries = await fs.readdir(sourceDir, { withFileTypes: true });
-  for (const entry of entries) {
-    if (entry.name === '.git') {
-      throw new Error('unsafe_staged_git_entry');
-    }
-    await fs.cp(path.join(sourceDir, entry.name), path.join(targetDir, entry.name), {
-      recursive: true,
-      force: true,
-      verbatimSymlinks: false,
-    });
-  }
 };
 
 const fileExists = async (filePath: string): Promise<boolean> => {
@@ -4596,7 +4534,6 @@ const updateAppRuntime = async (appId: string, localeInput?: string): Promise<In
   };
 
   const startedAt = new Date().toISOString();
-  const targetVersion = catalogApp.latestVersion ?? catalogApp.version ?? '0.0.0';
   let preUpdateUserHead = '';
   let stageDir: string | null = null;
 

@@ -1732,62 +1732,6 @@ const buildAutoAppliedUserMessage = (assistantText: string): string => {
   return `${compact}\n\n${suffix}`;
 };
 
-const buildPreview = async (stagingDir: string): Promise<{
-  summary: string;
-  impact: string;
-  riskLevel: 'low' | 'medium' | 'high';
-  filesChanged: number;
-  diffFiles: PreviewDiffFile[];
-  checks: string[];
-}> => {
-  const nameStatus = await runCommandCapture('git', ['status', '--porcelain'], {
-    cwd: stagingDir,
-    timeoutMs: 10_000,
-  });
-
-  const diffFiles: PreviewDiffFile[] = [];
-  const lines = nameStatus.stdout
-    .split('\n')
-    .map((line) => line.trimEnd())
-    .filter(Boolean);
-
-  for (const line of lines) {
-    const status = line.slice(0, 2).trim();
-    const rawPath = line.slice(3).trim();
-    const changeType: PreviewDiffFile['changeType'] =
-      status === 'A' || status === '??' ? 'added' : status === 'D' ? 'deleted' : 'modified';
-
-    const diff = await runCommandCapture('git', ['diff', '--', rawPath], {
-      cwd: stagingDir,
-      timeoutMs: 10_000,
-    });
-
-    diffFiles.push({
-      path: rawPath,
-      changeType,
-      diff: (diff.stdout || diff.stderr).slice(0, 30_000),
-    });
-  }
-
-  const filesChanged = diffFiles.length;
-  const summary =
-    filesChanged === 0
-      ? 'No se detectaron cambios en archivos.'
-      : `Se prepararon ${filesChanged} cambios para esta app.`;
-
-  return {
-    summary,
-    impact:
-      filesChanged === 0
-        ? 'No hay impacto para aplicar.'
-        : 'Los cambios afectan solo archivos de la app objetivo dentro del workspace privado.',
-    riskLevel: filesChanged > 15 ? 'high' : filesChanged > 5 ? 'medium' : 'low',
-    filesChanged,
-    diffFiles,
-    checks: ['Sandbox privado activo', 'Sin acceso a archivos externos no compartidos'],
-  };
-};
-
 const applyPreviewChanges = async (
   appRoot: string,
   stagingDir: string,

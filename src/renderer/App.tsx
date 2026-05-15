@@ -2566,22 +2566,6 @@ const activeLocale = languagePreference === 'system' ? systemLocale : languagePr
     }
   };
 
-  const handleDisconnectCodexAuth = async () => {
-    setCodexAuthBusy(true);
-    try {
-      const desktopApi = getDesktopApi();
-      const result = await desktopApi.disconnectCodexAuth();
-      setBannerSeverity(result.success ? 'success' : 'error');
-      setBannerMessage(result.userMessage);
-      await refreshCodexAuthStatus();
-    } catch {
-      setBannerSeverity('error');
-      setBannerMessage(t.settings.codexDisconnectError);
-    } finally {
-      setCodexAuthBusy(false);
-    }
-  };
-
   const handleForgerLogin = async (email: string, password: string) => {
     setForgerAccountBusy(true);
     try {

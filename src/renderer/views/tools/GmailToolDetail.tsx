@@ -4,7 +4,6 @@ import type {
   AgentToolDefinition,
   AgentToolPackageDefinition,
   AgentToolSettings,
-  OfficialToolSummary,
 } from '@shared/types';
 import type { AppDictionary } from '@renderer/i18n';
 import { GMAIL_TOOL_ID } from './constants';
@@ -14,7 +13,6 @@ import { PermissionList } from './PermissionList';
 export const GmailToolDetail = ({
   description,
   connected,
-  tool,
   toolPackage,
   settings,
   busyToolId,
@@ -30,7 +28,6 @@ export const GmailToolDetail = ({
 }: {
   description: string;
   connected: boolean;
-  tool: OfficialToolSummary | null;
   toolPackage: AgentToolPackageDefinition | null;
   settings: AgentToolSettings;
   busyToolId: string | null;

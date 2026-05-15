@@ -15,6 +15,7 @@
     "build:renderer": "vite build",
     "build:electron": "tsc -p tsconfig.electron.json",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.electron.json",
+    "lint": "eslint .",
     "test": "npm run test:contracts",
     "test:contracts": "npm run build:electron && node --test test/contracts/*.test.mjs test/main/*.test.mjs",
     "test:coverage": "npm run build:electron && c8 --all --include='dist-electron/**/*.js' --reporter=text node --test test/contracts/*.test.mjs test/main/*.test.mjs",
@@ -49,6 +50,7 @@
   },
   "devDependencies": {
     "@electron/rebuild": "^4.0.4",
+    "@eslint/js": "^9.39.4",
     "@types/node": "^22.19.17",
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.2",
@@ -60,7 +62,11 @@
     "cross-env": "^10.1.0",
     "electron": "^38.3.0",
     "electron-builder": "^26.8.1",
+    "eslint": "^9.39.4",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.6.0",
     "typescript": "^5.9.3",
+    "typescript-eslint": "^8.59.3",
     "vite": "^7.1.12",
     "wait-on": "^9.0.1"
   },
