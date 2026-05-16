@@ -8,7 +8,6 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
-  Paper,
   MenuItem,
   Select,
   Snackbar,

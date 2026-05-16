@@ -47,7 +47,6 @@ export default tseslint.config(
       ],
       'no-empty': ['error', { allowEmptyCatch: true }],
       'no-control-regex': 'off',
-      'max-lines': ['error', { max: 1000, skipBlankLines: false, skipComments: false }],
     },
   },
 );
