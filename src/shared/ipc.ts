@@ -63,7 +63,7 @@ export const IPC_CHANNELS = {
   revealCloudSecretKey: 'forger:cloud-identity:reveal',
   regenerateCloudSecretKey: 'forger:cloud-identity:regenerate',
   submitAppRating: 'forger:catalog:rating:submit',
-  submitAppFeedback: 'forger:catalog:feedback:submit',
+  submitProductFeedback: 'forger:feedback:submit',
   openExternalUrl: 'forger:open-external-url',
   getCodexAuthStatus: 'forger:get-codex-auth-status',
   openCodexUsageDashboard: 'forger:open-codex-usage-dashboard',

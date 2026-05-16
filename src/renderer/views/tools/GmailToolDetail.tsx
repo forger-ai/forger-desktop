@@ -67,7 +67,12 @@ export const GmailToolDetail = ({
             {t.sections.tools.disconnect}
           </Button>
         ) : (
-          <Button variant="contained" disabled={busyOfficialToolId === GMAIL_TOOL_ID} onClick={onConnect}>
+          <Button
+            variant="contained"
+            data-onboarding-target="gmail-connect-button"
+            disabled={busyOfficialToolId === GMAIL_TOOL_ID}
+            onClick={onConnect}
+          >
             {t.sections.tools.connectGmail}
           </Button>
         )}
@@ -91,6 +96,7 @@ export const GmailToolDetail = ({
         settings={settings}
         busyToolId={busyToolId}
         t={t}
+        onboardingTarget="gmail-tool-permissions"
         onApprovalChange={onApprovalChange}
       />
     ) : null}

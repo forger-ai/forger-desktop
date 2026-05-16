@@ -1,0 +1,171 @@
+import type { AppSummary } from './catalog';
+import type { CatalogApp } from './catalog-app';
+import type { InstallAppResult, OpenAppResult, StopAppResult, RuntimeStatus } from './runtime';
+import type { BasicActionResult } from './base';
+import type { AppBackupSummary, CreateAppBackupInput, CreateAppBackupResult, DeleteAppBackupInput, RestoreAppBackupInput, RemoteBackupsState, CreateRemoteAppBackupInput, CreateRemoteAppBackupResult, RestoreRemoteAppBackupInput, CloudSyncSettings } from './backups';
+import type { AppDetails, ChatRunStatus, ChatRun, ChatRunEvent, ChatStartRunInput, ChatGetRunInput, ChatCancelRunInput, ChatApprovePermissionInput, ChatApplyRunInput, ChatApplyResult, ChatUndoInput, ChatUndoResult } from './chat';
+import type { AppPromptMutationResult, AppPromptRestoreInput, AppPromptReviewInput, AppPromptReviewItem, AppPromptValidationResult } from './prompts';
+import type { InstallWelcomeResult } from './chat';
+import type { AppSecretsState, UserSecretSummary, CreateUserSecretInput, UpdateUserSecretInput, DeleteUserSecretInput, ConnectAppSecretInput, DisconnectAppSecretInput, SecretMutationResult } from './secrets';
+import type { Settings, UpdateCodexDefaultsInput, UpdateAgentDefaultsInput, MemoryListInput, MemoryEntry, MemoryCreateInput, MemoryUpdateInput } from './settings';
+import type { DesktopUpdateState } from './updates';
+import type { ForgerAccountSession, ForgerAccountRegisterInput, ForgerAccountLoginInput, CloudDevicesState } from './account';
+import type { FriendChatWindowOpenResult, CloudFriendship, CloudFriendUser, CloudMessage, CloudSendMessageInput, CloudAppMessagePermissionDecision, CloudSocialEvent, CloudIdentityState } from './social';
+import type { AppRatingSummary, SubmitAppRatingInput, SubmitProductFeedbackInput } from './feedback';
+import type { FailureDiagnosticFields } from './base';
+import type { CodexAuthStatus, ClaudeAuthStatus, DesktopErrorReportPreview } from './auth';
+import type { AgentToolPackageDefinition, AgentToolSettings, UpdateAgentToolApprovalInput, OfficialToolsState, ToolMutationResult, ConfigureOfficialToolInput, AppToolsInstallGate, SetAppToolGrantInput } from './tools';
+import type { PickedChatFile, FilesStageForChatInput, FilesDiscardStagedForChatInput, FilesActionResult, FilesListInput, ForgerFileRecord, ForgerFileCategory, FilesCreateCategoryInput, FilesRenameCategoryInput, FilesDeleteCategoryInput, FilesImportInput, FilesMoveInput, FilesRenameInput, FilesDeleteInput, DbListTablesResponse, DbQueryTableResponse } from './data';
+import type { Automation, AutomationRun, AutomationRunSummary, AutomationUpsertInput, WindowControlState } from './automations';
+
+export interface ForgerDesktopApi {
+  listInstalledApps: () => Promise<AppSummary[]>;
+  listCatalogApps: () => Promise<CatalogApp[]>;
+  installApp: (appId: string, locale?: string) => Promise<InstallAppResult>;
+  updateApp: (appId: string, locale?: string) => Promise<InstallAppResult>;
+  listBackups: (appId?: string) => Promise<AppBackupSummary[]>;
+  createBackup: (input: CreateAppBackupInput) => Promise<CreateAppBackupResult>;
+  deleteBackup: (input: DeleteAppBackupInput) => Promise<BasicActionResult>;
+  restoreBackup: (input: RestoreAppBackupInput) => Promise<BasicActionResult>;
+  listRemoteBackups: (appId?: string) => Promise<RemoteBackupsState>;
+  createRemoteBackup: (input: CreateRemoteAppBackupInput) => Promise<CreateRemoteAppBackupResult>;
+  deleteRemoteBackup: (remoteBackupId: number) => Promise<BasicActionResult>;
+  restoreRemoteBackup: (input: RestoreRemoteAppBackupInput) => Promise<BasicActionResult>;
+  getCloudSyncSettings: () => Promise<CloudSyncSettings>;
+  setAppAutoSync: (appId: string, autoSync: boolean) => Promise<CloudSyncSettings>;
+  restoreAppUserVersion: (appId: string) => Promise<BasicActionResult>;
+  resolveAppUpdateConflict: (appId: string) => Promise<{ runId: string; status: ChatRunStatus } | BasicActionResult>;
+  uninstallApp: (appId: string) => Promise<BasicActionResult>;
+  getAppDetails: (appId: string) => Promise<AppDetails | null>;
+  listAppPrompts: (appId: string) => Promise<AppPromptReviewItem[]>;
+  validateAppPrompt: (input: AppPromptReviewInput) => Promise<AppPromptValidationResult>;
+  updateAppPrompt: (input: AppPromptReviewInput) => Promise<AppPromptMutationResult>;
+  restoreAppPrompt: (input: AppPromptRestoreInput) => Promise<AppPromptMutationResult>;
+  installWelcome: (appId: string, userLanguage?: string) => Promise<InstallWelcomeResult>;
+  openApp: (appId: string, locale?: string) => Promise<OpenAppResult>;
+  stopApp: (appId: string) => Promise<StopAppResult>;
+  getAppRuntimeStatus: (appId: string) => Promise<RuntimeStatus>;
+  getAppSecrets: (appId: string) => Promise<AppSecretsState>;
+  listUserSecrets: () => Promise<UserSecretSummary[]>;
+  createUserSecret: (input: CreateUserSecretInput) => Promise<SecretMutationResult>;
+  updateUserSecret: (input: UpdateUserSecretInput) => Promise<SecretMutationResult>;
+  deleteUserSecret: (input: DeleteUserSecretInput) => Promise<SecretMutationResult>;
+  connectAppSecret: (input: ConnectAppSecretInput) => Promise<SecretMutationResult>;
+  disconnectAppSecret: (input: DisconnectAppSecretInput) => Promise<SecretMutationResult>;
+  onInstallProgress: (listener: (event: { appId: string; progress: InstallAppResult }) => void) => () => void;
+  onRuntimeStatusChanged: (listener: (event: RuntimeStatus) => void) => () => void;
+  getSettings: () => Promise<Settings>;
+  updateCodexDefaults: (input: UpdateCodexDefaultsInput) => Promise<Settings>;
+  updateAgentDefaults: (input: UpdateAgentDefaultsInput) => Promise<Settings>;
+  getDesktopUpdateState: () => Promise<DesktopUpdateState>;
+  checkDesktopUpdates: () => Promise<DesktopUpdateState>;
+  downloadDesktopUpdate: () => Promise<DesktopUpdateState>;
+  installDesktopUpdate: () => Promise<DesktopUpdateState>;
+  onDesktopUpdateProgress: (listener: (event: DesktopUpdateState) => void) => () => void;
+  getForgerAccount: () => Promise<ForgerAccountSession>;
+  registerForgerAccount: (input: ForgerAccountRegisterInput) => Promise<ForgerAccountSession & { success: boolean; userMessage?: string; technicalCode?: string }>;
+  loginForgerAccount: (input: ForgerAccountLoginInput) => Promise<ForgerAccountSession & { success: boolean; userMessage?: string; technicalCode?: string }>;
+  logoutForgerAccount: () => Promise<ForgerAccountSession & { success: boolean }>;
+  onForgerAccountUpdated: (listener: (event: ForgerAccountSession & { userMessage?: string; technicalCode?: string }) => void) => () => void;
+  getCloudDevices: () => Promise<CloudDevicesState>;
+  generateDevicePairingCode: () => Promise<CloudDevicesState & { success: boolean }>;
+  listFriends: () => Promise<CloudFriendship[]>;
+  searchFriends: (username: string) => Promise<CloudFriendUser[]>;
+  sendFriendRequest: (username: string) => Promise<CloudFriendship>;
+  acceptFriendRequest: (id: number) => Promise<CloudFriendship>;
+  declineFriendRequest: (id: number) => Promise<CloudFriendship>;
+  cancelFriendRequest: (id: number) => Promise<CloudFriendship>;
+  markFriendChatRead: (friendUserId: number) => Promise<CloudFriendship>;
+  openFriendChatWindow: (friendship: CloudFriendship) => Promise<FriendChatWindowOpenResult>;
+  listCloudMessages: (friendUserId: number) => Promise<CloudMessage[]>;
+  sendCloudMessage: (input: CloudSendMessageInput) => Promise<CloudMessage>;
+  decideAppMessagePermission: (cloudMessageId: number, decision: CloudAppMessagePermissionDecision) => Promise<CloudMessage>;
+  onCloudFriendshipEvent: (listener: (event: CloudSocialEvent) => void) => () => void;
+  getCloudIdentity: () => Promise<CloudIdentityState>;
+  revealCloudSecretKey: () => Promise<string>;
+  regenerateCloudSecretKey: () => Promise<CloudIdentityState>;
+  submitAppRating: (input: SubmitAppRatingInput) => Promise<{ success: boolean; rating?: AppRatingSummary; userMessage?: string; technicalCode?: string }>;
+  submitProductFeedback: (input: SubmitProductFeedbackInput) => Promise<{ success: boolean; userMessage?: string; technicalCode?: string }>;
+  openExternalUrl: (url: string) => Promise<{ success: boolean; userMessage?: string } & FailureDiagnosticFields>;
+  getCodexAuthStatus: () => Promise<CodexAuthStatus>;
+  openCodexUsageDashboard: () => Promise<{ success: boolean; userMessage?: string } & FailureDiagnosticFields>;
+  connectCodexAuth: () => Promise<{ success: boolean; userMessage: string } & FailureDiagnosticFields>;
+  disconnectCodexAuth: () => Promise<{ success: boolean; userMessage: string } & FailureDiagnosticFields>;
+  reinstallCodex: () => Promise<{ success: boolean; userMessage: string; status?: CodexAuthStatus } & FailureDiagnosticFields>;
+  getClaudeAuthStatus: () => Promise<ClaudeAuthStatus>;
+  connectClaudeAuth: () => Promise<{ success: boolean; userMessage: string; status?: ClaudeAuthStatus } & FailureDiagnosticFields>;
+  reinstallClaude: () => Promise<{ success: boolean; userMessage: string; status?: ClaudeAuthStatus } & FailureDiagnosticFields>;
+  submitDesktopErrorReport: (input: DesktopErrorReportPreview) => Promise<{ success: boolean; userMessage: string; technicalCode?: string }>;
+  onDesktopErrorReportRequested: (listener: (event: DesktopErrorReportPreview) => void) => () => void;
+  listAgentTools: () => Promise<AgentToolPackageDefinition[]>;
+  getAgentToolSettings: () => Promise<AgentToolSettings>;
+  updateAgentToolApproval: (input: UpdateAgentToolApprovalInput) => Promise<AgentToolSettings>;
+  listOfficialTools: (locale?: string) => Promise<OfficialToolsState>;
+  refreshOfficialTools: (locale?: string) => Promise<OfficialToolsState>;
+  activateOfficialTool: (toolId: string, locale?: string) => Promise<ToolMutationResult>;
+  configureOfficialTool: (input: ConfigureOfficialToolInput) => Promise<ToolMutationResult>;
+  deactivateOfficialTool: (toolId: string, locale?: string) => Promise<ToolMutationResult>;
+  getAppToolsInstallGate: (appId: string, locale?: string) => Promise<AppToolsInstallGate | null>;
+  setAppToolGrant: (input: SetAppToolGrantInput, locale?: string) => Promise<AppToolsInstallGate | null>;
+  memoryList: (input?: MemoryListInput) => Promise<MemoryEntry[]>;
+  memoryCreate: (input: MemoryCreateInput) => Promise<MemoryEntry>;
+  memoryUpdate: (input: MemoryUpdateInput) => Promise<MemoryEntry>;
+  memoryDelete: (id: string) => Promise<{ success: boolean }>;
+  chatStartRun: (input: ChatStartRunInput) => Promise<{ runId: string; status: ChatRunStatus }>;
+  chatGetRun: (input: ChatGetRunInput) => Promise<ChatRun | null>;
+  chatCancelRun: (input: ChatCancelRunInput) => Promise<{ success: boolean }>;
+  chatApprovePermission: (input: ChatApprovePermissionInput) => Promise<{ success: boolean }>;
+  chatApplyRun: (input: ChatApplyRunInput) => Promise<ChatApplyResult>;
+  chatUndo: (input: ChatUndoInput) => Promise<ChatUndoResult>;
+  onChatRunUpdated: (listener: (event: ChatRunEvent) => void) => () => void;
+  filesPickForChat: () => Promise<PickedChatFile[]>;
+  filesStageForChat: (input: FilesStageForChatInput) => Promise<PickedChatFile>;
+  filesDiscardStagedForChat: (input: FilesDiscardStagedForChatInput) => Promise<FilesActionResult>;
+  filesList: (input?: FilesListInput) => Promise<ForgerFileRecord[]>;
+  filesListCategories: () => Promise<ForgerFileCategory[]>;
+  filesCreateCategory: (input: FilesCreateCategoryInput) => Promise<ForgerFileCategory>;
+  filesRenameCategory: (input: FilesRenameCategoryInput) => Promise<FilesActionResult>;
+  filesDeleteCategory: (input: FilesDeleteCategoryInput) => Promise<FilesActionResult>;
+  filesImport: (input: FilesImportInput) => Promise<ForgerFileRecord[]>;
+  filesMove: (input: FilesMoveInput) => Promise<ForgerFileRecord[]>;
+  filesRename: (input: FilesRenameInput) => Promise<ForgerFileRecord>;
+  filesDelete: (input: FilesDeleteInput) => Promise<FilesActionResult>;
+  dbListTables: (appId: string) => Promise<DbListTablesResponse>;
+  dbQueryTable: (appId: string, tableName: string, limit?: number) => Promise<DbQueryTableResponse>;
+  automationsList: () => Promise<Automation[]>;
+  automationsCreate: (input: AutomationUpsertInput) => Promise<Automation>;
+  automationsUpdate: (input: AutomationUpsertInput & { id: string }) => Promise<Automation>;
+  automationsDelete: (id: string) => Promise<FilesActionResult>;
+  automationsPause: (id: string) => Promise<Automation>;
+  automationsResume: (id: string) => Promise<Automation>;
+  automationsRunNow: (id: string) => Promise<AutomationRunSummary>;
+  automationsListRuns: (automationId: string) => Promise<AutomationRunSummary[]>;
+  automationsGetRunTranscript: (runId: string) => Promise<AutomationRun | null>;
+  onAutomationUpdated: (listener: (event: { automation: Automation; run?: AutomationRunSummary }) => void) => () => void;
+  minimizeWindow: () => Promise<void>;
+  toggleMaximizeWindow: () => Promise<WindowControlState>;
+  closeWindow: () => Promise<void>;
+  getWindowState: () => Promise<WindowControlState>;
+  onWindowStateChanged: (listener: (state: WindowControlState) => void) => () => void;
+  onDeepLink: (listener: (link: ForgerDeepLink) => void) => () => void;
+}
+
+/**
+ * Structured representation of a `forger://` URL delivered to the
+ * renderer. The shape mirrors the parser in `main/deep-links.ts`. Add
+ * new variants as more deep-link kinds are introduced.
+ */
+export type ForgerDeepLink =
+  | {
+      kind: 'chat';
+      /** Manifest name of the target app (`pyme-os`). Renderer resolves it against the installed list. `null` means the global free chat. */
+      app: string | null;
+      /** Composer text to prefill, when provided by the URL. */
+      prompt: string | null;
+      /** The raw URL, for logging / debugging. */
+      raw: string;
+    }
+  | {
+      kind: 'unknown';
+      raw: string;
+    };

@@ -160,6 +160,10 @@ const getCapabilities = (catalog: JsonObject): unknown[] => {
   return [];
 };
 
+const getCatalogStatus = (app: LocalApp, catalog: JsonObject): string => {
+  return asString(catalog.status, app.sourceSlug === 'finance-os' ? 'beta' : 'coming');
+};
+
 const optionalArray = (value: unknown): unknown[] | undefined => {
   return Array.isArray(value) ? value : undefined;
 };
@@ -193,7 +197,7 @@ const toCatalogEntry = async (app: LocalApp, baseUrl: string): Promise<JsonObjec
     description: asString(catalog.description, asString(app.manifest.description)),
     category: asString(catalog.category, 'utilities'),
     icon_url: getIconUrl(app, catalog, baseUrl),
-    beta: catalog.beta === true,
+    status: getCatalogStatus(app, catalog),
     runtime_stack: runtimeStack,
     latest_version: {
       version: devVersion,

@@ -11,20 +11,27 @@ export const PermissionList = ({
   settings,
   busyToolId,
   t,
+  onboardingTarget,
   onApprovalChange,
 }: {
   tools: AgentToolDefinition[];
   settings: AgentToolSettings;
   busyToolId: string | null;
   t: AppDictionary;
+  onboardingTarget?: string;
   onApprovalChange: (toolId: AgentToolDefinition['id'], requiresApproval: boolean) => void;
 }) => (
-  <Stack spacing={1}>
+  <Stack spacing={1} data-onboarding-target={onboardingTarget}>
     {tools.map((tool) => {
       const localized = localizedToolCopy(t, tool);
       const approvalEnabled = requiresApproval(settings.approvals, tool);
       return (
-        <Paper key={tool.id} variant="outlined" sx={{ p: 2, borderRadius: 1 }}>
+        <Paper
+          key={tool.id}
+          variant="outlined"
+          data-onboarding-target={`tool-permission-${tool.id}`}
+          sx={{ p: 2, borderRadius: 1 }}
+        >
           <Stack
             direction={{ xs: 'column', md: 'row' }}
             spacing={2}

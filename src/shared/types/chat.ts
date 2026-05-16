@@ -1,0 +1,189 @@
+import type { AppStatus, AppSummary, VersionChangelog } from './catalog';
+import type { CatalogApp } from './catalog-app';
+import type { AgentEffort, AgentProvider, CodexReasoningEffort } from './agent-runtime';
+import type { AppAgent, AppPromptReviewItem, AppPromptTemplate } from './prompts';
+import type { FailureDiagnosticFields } from './base';
+
+export type ChatRunStatus =
+  | 'queued'
+  | 'running'
+  | 'needs_permission'
+  | 'preview_ready'
+  | 'applying'
+  | 'applied'
+  | 'undoing'
+  | 'undone'
+  | 'failed'
+  | 'canceled';
+
+export type ChatErrorCode =
+  | 'auth_missing'
+  | 'app_not_installed'
+  | 'dirty_worktree'
+  | 'sandbox_violation'
+  | 'permission_denied'
+  | 'timeout'
+  | 'canceled'
+  | 'conflict'
+  | 'capability_unavailable';
+
+export interface SharedFileRef {
+  path: string;
+  id?: string;
+  name?: string;
+  relativePath?: string;
+  sizeBytes?: number;
+  modifiedAt?: string;
+  source?: 'attached' | 'mentioned';
+}
+
+export interface PermissionRequest {
+  requestId: string;
+  pluginId: string;
+  permission: string;
+  reason: string;
+  risk: 'low' | 'medium' | 'high';
+  resource: string;
+}
+
+export interface PreviewDiffFile {
+  path: string;
+  changeType: 'added' | 'modified' | 'deleted';
+  diff: string;
+}
+
+export interface PreviewModel {
+  summary: string;
+  impact: string;
+  riskLevel: 'low' | 'medium' | 'high';
+  filesChanged: number;
+  diffFiles: PreviewDiffFile[];
+  checks: string[];
+}
+
+export interface ChatRun {
+  runId: string;
+  appId: string;
+  prompt: string;
+  threadId?: string | null;
+  status: ChatRunStatus;
+  createdAt: string;
+  updatedAt: string;
+  dangerMode: boolean;
+  permissionRequest?: PermissionRequest;
+  preview?: PreviewModel;
+  errorCode?: ChatErrorCode;
+  userMessage?: string;
+  progressLog?: string[];
+  operationId?: string;
+  commitSha?: string;
+  conversationId?: string;
+}
+
+export interface AppOperationSummary {
+  operationId: string;
+  runId?: string;
+  commitSha?: string;
+  title: string;
+  summary: string;
+  createdAt: string;
+  revertedAt?: string;
+}
+
+export interface AppLocalChangeSummary {
+  id: string;
+  title: string;
+  createdAt?: string;
+}
+
+export interface AppDetails {
+  app: CatalogApp | AppSummary;
+  installed: boolean;
+  status: AppStatus;
+  version?: string;
+  latestVersion?: string;
+  updateAvailable?: boolean;
+  changelog?: VersionChangelog;
+  conflictInfo?: AppUpdateConflictInfo;
+  originalCommitSha?: string;
+  installedAt?: string;
+  operations: AppOperationSummary[];
+  localChanges?: AppLocalChangeSummary[];
+  promptTemplates?: AppPromptTemplate[];
+  agents?: AppAgent[];
+  promptReviews?: AppPromptReviewItem[];
+  codexConversation?: { enabled: boolean };
+}
+
+export interface AppUpdateConflictInfo {
+  fromVersion: string;
+  targetVersion: string;
+  startedAt: string;
+  message?: string;
+}
+
+export interface InstallWelcomeResult extends FailureDiagnosticFields {
+  success: boolean;
+  appId: string;
+  message?: string;
+  usedCodex: boolean;
+  userMessage: string;
+}
+
+export interface ChatRunEvent {
+  run: ChatRun;
+}
+
+export interface ChatStartRunInput {
+  appId?: string | null;
+  prompt: string;
+  threadId?: string | null;
+  conversationHistory?: Array<{
+    role: 'assistant' | 'user';
+    content: string;
+  }>;
+  userLanguage?: string;
+  sharedFiles?: SharedFileRef[];
+  provider?: AgentProvider;
+  model?: string;
+  reasoningEffort?: CodexReasoningEffort;
+  effort?: AgentEffort;
+  dangerMode?: boolean;
+  conversationId?: string;
+}
+
+export interface ChatGetRunInput {
+  runId: string;
+}
+
+export interface ChatCancelRunInput {
+  runId: string;
+}
+
+export interface ChatApprovePermissionInput {
+  runId: string;
+  requestId: string;
+  decision: 'allow' | 'deny';
+}
+
+export interface ChatApplyRunInput {
+  runId: string;
+}
+
+export interface ChatUndoInput {
+  appId: string;
+  operationId?: string;
+}
+
+export interface ChatApplyResult extends FailureDiagnosticFields {
+  success: boolean;
+  operationId?: string;
+  commitSha?: string;
+  userMessage?: string;
+}
+
+export interface ChatUndoResult extends FailureDiagnosticFields {
+  success: boolean;
+  revertedCommitSha?: string;
+  userMessage?: string;
+}

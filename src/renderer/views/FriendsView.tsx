@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction, type SyntheticEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type SyntheticEvent } from 'react';
 import ForumRounded from '@mui/icons-material/ForumRounded';
 import CheckRounded from '@mui/icons-material/CheckRounded';
 import CloseRounded from '@mui/icons-material/CloseRounded';
@@ -41,6 +41,18 @@ import type {
   ForgerAccountSession,
   FriendChatWindowOpenResult,
 } from '@shared/types';
+import {
+  LAST_SOCIAL_TAB_KEY,
+  activityTimestamp,
+  formatRelativeActivity,
+  friendLabel,
+  isFriendOnline,
+  readLastSessionTab,
+  requestLabel,
+  setTimedFeedback,
+  sortFriends,
+  type SocialTab,
+} from './friends/socialViewHelpers';
 
 interface FriendsViewProps {
   account: ForgerAccountSession;
@@ -48,90 +60,6 @@ interface FriendsViewProps {
   onNotify?: (message: string, severity?: AlertColor) => void;
   variant?: 'floating' | 'topbar';
 }
-
-type SocialTab = 'friends' | 'requests' | 'add';
-
-const LAST_SOCIAL_TAB_KEY = 'forger.social.last-tab';
-
-const friendLabel = (friendship: CloudFriendship) =>
-  friendship.friend.firstName || friendship.friend.username;
-
-const requestLabel = (friendship: CloudFriendship) =>
-  friendship.friend.firstName || `@${friendship.friend.username}`;
-
-const isFriendOnline = (friendship: CloudFriendship) =>
-  Boolean(friendship.friend.online);
-
-const activityTimestamp = (friendship: CloudFriendship) =>
-  friendship.lastMessageAt ?? friendship.updatedAt;
-
-const formatRelativeActivity = (value?: string) => {
-  if (!value) {
-    return 'Sin actividad reciente';
-  }
-
-  const timestamp = new Date(value).getTime();
-  if (Number.isNaN(timestamp)) {
-    return 'Actividad reciente';
-  }
-
-  const diffMinutes = Math.max(0, Math.round((Date.now() - timestamp) / 60000));
-  if (diffMinutes < 2) {
-    return 'Activo ahora';
-  }
-  if (diffMinutes < 60) {
-    return `Activo hace ${diffMinutes} min`;
-  }
-
-  const diffHours = Math.round(diffMinutes / 60);
-  if (diffHours < 24) {
-    return `Activo hace ${diffHours} h`;
-  }
-
-  const diffDays = Math.round(diffHours / 24);
-  return `Activo hace ${diffDays} d`;
-};
-
-const sortFriends = (entries: CloudFriendship[]) =>
-  [...entries].sort((left, right) => {
-    const leftOnline = isFriendOnline(left) ? 1 : 0;
-    const rightOnline = isFriendOnline(right) ? 1 : 0;
-    if (leftOnline !== rightOnline) {
-      return rightOnline - leftOnline;
-    }
-
-    const leftUpdated = new Date(activityTimestamp(left)).getTime();
-    const rightUpdated = new Date(activityTimestamp(right)).getTime();
-    if (leftUpdated !== rightUpdated) {
-      return rightUpdated - leftUpdated;
-    }
-
-    return friendLabel(left).localeCompare(friendLabel(right), 'es', { sensitivity: 'base' });
-  });
-
-const readLastSessionTab = (): SocialTab | null => {
-  if (typeof window === 'undefined') {
-    return null;
-  }
-
-  const value = window.sessionStorage.getItem(LAST_SOCIAL_TAB_KEY);
-  return value === 'requests' || value === 'add' ? value : 'friends';
-};
-
-const setTimedFeedback = (
-  setter: Dispatch<SetStateAction<Record<number, string>>>,
-  key: number,
-  message: string,
-) => {
-  setter((current) => ({ ...current, [key]: message }));
-  window.setTimeout(() => {
-    setter((current) => {
-      const next = { ...current };
-      delete next[key];
-      return next;
-    });
-  }, 2200);
-};
 
 export function FriendsView({ account, onOpenFriendChat, onNotify, variant = 'floating' }: FriendsViewProps) {
   const theme = useTheme();

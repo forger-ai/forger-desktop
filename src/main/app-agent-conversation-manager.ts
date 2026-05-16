@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type {
@@ -9,7 +9,6 @@ import type {
   AppCodexConversationMessage,
   AppCodexConversationRun,
   AppCodexConversationSendMessageInput,
-  AppCodexConversationRunStatus,
   AppAgent,
   AppAgentThreadSteerResult,
   AgentRuntime,
@@ -23,14 +22,28 @@ import {
   codexWorkspaceNetworkConfigArgs,
   preparePersistentIsolatedCodexHome,
 } from './codex-run-isolation';
-
-interface CodexMcpServerConfig {
-  name: string;
-  url: string;
-  token: string;
-  tokenEnvVar: string;
-  toolTimeoutSec?: number;
-}
+import {
+  buildAppAgentPrompt,
+  buildConversationRecoveryContext,
+  extensionForMimeType,
+  isMissingProviderThread,
+  isTerminalRunStatus,
+  normalizeMetadata,
+  progressFromCodexOutput,
+  sanitizeId,
+  sanitizeTitle,
+  toConversation,
+  toRun,
+} from './app-agent/conversation-helpers';
+import { parseClaudeConversationJsonl, parseCodexConversationJsonl } from './app-agent/jsonl';
+import { buildMcpArgs, writeClaudeMcpConfig } from './app-agent/mcp';
+import {
+  existsDirectory,
+  killProcessTree,
+  resolveCodexCommand,
+  runCommandCapture,
+} from './app-agent/process';
+import type { CodexMcpServerConfig } from './app-agent/types';
 
 interface AppAgentConversationManagerOptions {
   privateAppsRoot: string;
@@ -70,12 +83,6 @@ interface InternalRun extends AppCodexConversationRun {
   attachmentPaths?: string[];
 }
 
-interface CommandResult {
-  code: number;
-  stdout: string;
-  stderr: string;
-}
-
 interface PendingPermission {
   runId: string;
   requestId: string;
@@ -84,7 +91,6 @@ interface PendingPermission {
 
 const DEFAULT_MODEL = 'gpt-5.4';
 const DEFAULT_REASONING: CodexReasoningEffort = 'medium';
-const MAX_CONTEXT_CHARS = 40_000;
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 const CODEX_CONVERSATION_RUN_TIMEOUT_MS = 600_000;
 
@@ -603,8 +609,8 @@ export class AppAgentConversationManager {
       }
 
       const parsed = runtime.provider === 'claude'
-        ? parseClaudeJsonl(result.stdout, result.stderr)
-        : parseCodexJsonl(result.stdout, result.stderr);
+        ? parseClaudeConversationJsonl(result.stdout, result.stderr)
+        : parseCodexConversationJsonl(result.stdout, result.stderr);
       if (parsed.threadId) {
         conversation.threadId = parsed.threadId;
       }
@@ -887,457 +893,3 @@ export class AppAgentConversationManager {
     await fs.rm(this.conversationRuntimeRoot(appId, conversationId), { recursive: true, force: true }).catch(() => undefined);
   }
 }
-
-interface RuntimePromptEnvelope {
-  runtimeContract?: string;
-  interfaceObjective?: string;
-  turnPayload: string;
-}
-
-export const buildAppAgentPrompt = (message: string, context: string | undefined, initialPrompt?: string): string => {
-  const trimmedContext = (context ?? '').trim();
-  const promptEnvelope = parseRuntimePromptEnvelope(trimmedContext);
-  const parts: string[] = [];
-  const trimmedInitialPrompt = initialPrompt?.trim();
-  if (trimmedInitialPrompt) {
-    parts.push(trimmedInitialPrompt, '');
-  }
-  if (promptEnvelope.runtimeContract) {
-    parts.push(
-      'Runtime contract:',
-      promptEnvelope.runtimeContract,
-      '',
-      'Interface objective:',
-      promptEnvelope.interfaceObjective || 'Follow the current app interface objective from the turn payload.',
-      '',
-      'Turn payload:',
-      promptEnvelope.turnPayload || '{}',
-      '',
-      'Message:',
-      message.trim(),
-    );
-    return parts.join('\n');
-  }
-  const legacyContext = trimmedContext.slice(0, MAX_CONTEXT_CHARS);
-  if (!legacyContext) {
-    parts.push(message.trim());
-    return parts.join('\n');
-  }
-  parts.push(
-    'Contexto actual de la app:',
-    legacyContext,
-    '',
-    'Mensaje del usuario:',
-    message.trim(),
-    '',
-    'Usa las herramientas MCP de la app cuando necesites modificar su estado. Responde breve para mostrar el resultado dentro de la app.',
-  );
-  return parts.join('\n');
-};
-
-const parseRuntimePromptEnvelope = (context: string): RuntimePromptEnvelope => {
-  if (!context) {
-    return { turnPayload: '' };
-  }
-  try {
-    const parsed = JSON.parse(context) as unknown;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return { turnPayload: context.slice(0, MAX_CONTEXT_CHARS) };
-    }
-    const payload = { ...(parsed as Record<string, unknown>) };
-    const runtimeContract = typeof payload.runtime_contract === 'string' ? payload.runtime_contract.trim() : '';
-    const interfaceObjective = typeof payload.interface_objective === 'string' ? payload.interface_objective.trim() : '';
-    delete payload.runtime_contract;
-    delete payload.interface_objective;
-    return {
-      runtimeContract,
-      interfaceObjective,
-      turnPayload: JSON.stringify(payload, null, 2).slice(0, MAX_CONTEXT_CHARS),
-    };
-  } catch {
-    return { turnPayload: context.slice(0, MAX_CONTEXT_CHARS) };
-  }
-};
-
-const buildConversationRecoveryContext = (conversation: InternalConversation, activeRunId: string): string => {
-  const priorMessages = conversation.messages.filter((message) => message.runId !== activeRunId);
-  if (priorMessages.length === 0) {
-    return '';
-  }
-  const transcript = priorMessages
-    .map((message) => `${message.role}: ${message.text.trim()}`)
-    .join('\n\n')
-    .slice(-MAX_CONTEXT_CHARS);
-  return [
-    'Historial persistido de este Desktop thread:',
-    transcript,
-    '',
-    'Continúa en el mismo Desktop thread usando este historial como contexto.',
-  ].join('\n');
-};
-
-const toConversation = (conversation: InternalConversation): AppCodexConversation => ({
-  conversationId: conversation.conversationId,
-  appId: conversation.appId,
-  title: conversation.title,
-  createdAt: conversation.createdAt,
-  updatedAt: conversation.updatedAt,
-  messages: conversation.messages,
-  ...(conversation.activeRun ? { activeRun: conversation.activeRun } : {}),
-});
-
-const toRun = (run: AppCodexConversationRun): AppCodexConversationRun => ({
-  runId: run.runId,
-  status: run.status,
-  createdAt: run.createdAt,
-  updatedAt: run.updatedAt,
-  ...(run.error ? { error: run.error } : {}),
-  ...(run.progressLog ? { progressLog: run.progressLog } : {}),
-  ...(run.permissionRequest ? { permissionRequest: run.permissionRequest } : {}),
-});
-
-const isTerminalRunStatus = (status: AppCodexConversationRunStatus): boolean =>
-  status === 'completed' || status === 'failed' || status === 'canceled';
-
-const isMissingProviderThread = (stdout: string, stderr: string): boolean => {
-  const combined = `${stderr}\n${stdout}`.toLowerCase();
-  return (
-    combined.includes('no rollout found for thread id') ||
-    combined.includes('thread/resume failed') ||
-    combined.includes('conversation not found') ||
-    combined.includes('session not found')
-  );
-};
-
-const sanitizeId = (value: string): string => value.replace(/[^a-zA-Z0-9._-]+/g, '-').slice(0, 120) || 'app';
-
-const extensionForMimeType = (mimeType: string): string => {
-  if (mimeType.includes('jpeg') || mimeType.includes('jpg')) {
-    return 'jpg';
-  }
-  if (mimeType.includes('webp')) {
-    return 'webp';
-  }
-  if (mimeType.includes('svg')) {
-    return 'svg';
-  }
-  return 'png';
-};
-
-const sanitizeTitle = (value: unknown): string =>
-  typeof value === 'string' ? value.trim().replace(/\s+/g, ' ').slice(0, 120) : '';
-
-const normalizeMetadata = (value: unknown): Record<string, string | number | boolean | null> | undefined => {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return undefined;
-  }
-  const output: Record<string, string | number | boolean | null> = {};
-  for (const [key, item] of Object.entries(value)) {
-    if (typeof item === 'string' || typeof item === 'number' || typeof item === 'boolean' || item === null) {
-      output[key] = item;
-    }
-  }
-  return output;
-};
-
-const parseCodexJsonl = (stdout: string, stderr: string): { assistantText: string; threadId?: string } => {
-  const raw = stdout.trim() || stderr.trim();
-  let assistantText = '';
-  let threadId: string | undefined;
-  for (const line of raw.split('\n').map((entry) => entry.trim()).filter(Boolean)) {
-    try {
-      const parsed = JSON.parse(line) as Record<string, unknown>;
-      if (parsed.type === 'thread.started' && typeof parsed.thread_id === 'string') {
-        threadId = parsed.thread_id;
-      }
-      if (parsed.type === 'item.completed' && parsed.item && typeof parsed.item === 'object') {
-        const item = parsed.item as Record<string, unknown>;
-        if (item.type === 'agent_message' && typeof item.text === 'string') {
-          assistantText = item.text.trim();
-        }
-      }
-    } catch {
-      assistantText = assistantText ? `${assistantText}\n${line}` : line;
-    }
-  }
-  return { assistantText: assistantText.trim(), threadId };
-};
-
-const parseClaudeJsonl = (stdout: string, stderr: string): { assistantText: string; threadId?: string } => {
-  const raw = stdout.trim() || stderr.trim();
-  let assistantText = '';
-  let threadId: string | undefined;
-  for (const line of raw.split('\n').map((entry) => entry.trim()).filter(Boolean)) {
-    try {
-      const parsed = JSON.parse(line) as Record<string, unknown>;
-      if (!threadId) {
-        const sessionId = parsed.session_id ?? parsed.sessionId ?? parsed.conversation_id;
-        if (typeof sessionId === 'string' && sessionId.trim()) {
-          threadId = sessionId.trim();
-        }
-      }
-      if (typeof parsed.result === 'string') {
-        assistantText = parsed.result.trim();
-        continue;
-      }
-      const text = extractClaudeText(parsed);
-      if (text) {
-        assistantText = text.trim();
-      }
-    } catch {
-      assistantText = assistantText ? `${assistantText}\n${line}` : line;
-    }
-  }
-  return { assistantText: assistantText.trim(), threadId };
-};
-
-const extractClaudeText = (entry: Record<string, unknown>): string => {
-  if (typeof entry.text === 'string') {
-    return entry.text;
-  }
-  const message = entry.message;
-  if (!message || typeof message !== 'object') {
-    return '';
-  }
-  const content = (message as Record<string, unknown>).content;
-  if (typeof content === 'string') {
-    return content;
-  }
-  if (!Array.isArray(content)) {
-    return '';
-  }
-  return content
-    .map((item) => {
-      if (!item || typeof item !== 'object') {
-        return '';
-      }
-      const text = (item as Record<string, unknown>).text;
-      return typeof text === 'string' ? text : '';
-    })
-    .filter(Boolean)
-    .join('\n');
-};
-
-const writeClaudeMcpConfig = async (
-  appRoot: string,
-  mcpServers: CodexMcpServerConfig[],
-): Promise<string> => {
-  const configPath = path.join(appRoot, '.forger', 'tmp', `claude-mcp-${randomUUID()}.json`);
-  const mcpServersConfig = Object.fromEntries(mcpServers.map((server) => [
-    server.name,
-    {
-      type: 'http',
-      url: server.url,
-      headers: {
-        Authorization: `Bearer \${${server.tokenEnvVar}}`,
-      },
-    },
-  ]));
-  await fs.mkdir(path.dirname(configPath), { recursive: true });
-  await fs.writeFile(configPath, JSON.stringify({ mcpServers: mcpServersConfig }, null, 2), 'utf8');
-  return configPath;
-};
-
-const progressFromCodexOutput = (text: string, locale?: string): string | null => {
-  const copy = getSharedCopy(locale).appConversation;
-  for (const line of text.split('\n').map((entry) => entry.trim()).filter(Boolean)) {
-    try {
-      const parsed = JSON.parse(line) as Record<string, unknown>;
-      if (parsed.type === 'turn.started') {
-        return copy.agentThinking;
-      }
-      if (parsed.type === 'item.completed' && parsed.item && typeof parsed.item === 'object') {
-        const item = parsed.item as Record<string, unknown>;
-        if (item.type === 'agent_message' && typeof item.text === 'string') {
-          const compact = stripMarkdown(item.text).replace(/\s+/g, ' ').trim();
-          return compact.length > 160 ? `${compact.slice(0, 157)}...` : compact;
-        }
-        if (String(item.type ?? '').includes('tool') || item.type === 'command_execution') {
-          return copy.usingTools;
-        }
-      }
-      if (parsed.type === 'item.started' && parsed.item && typeof parsed.item === 'object') {
-        const item = parsed.item as Record<string, unknown>;
-        if (String(item.type ?? '').includes('tool') || item.type === 'command_execution') {
-          return copy.usingTools;
-        }
-      }
-    } catch {
-      continue;
-    }
-  }
-  return null;
-};
-
-const stripMarkdown = (text: string): string =>
-  text
-    .replace(/```[\s\S]*?```/g, ' ')
-    .replace(/`([^`]+)`/g, '$1')
-    .replace(/!\[[^\]]*]\([^)]*\)/g, ' ')
-    .replace(/\[([^\]]+)]\([^)]*\)/g, '$1')
-    .replace(/^#{1,6}\s+/gm, '')
-    .replace(/^>\s?/gm, '')
-    .replace(/^[\s*-]*[-*+]\s+/gm, '')
-    .replace(/^[\s\d.]+[.)]\s+/gm, '')
-    .replace(/[*_~]+/g, '')
-    .trim();
-
-const runCommandCapture = async (
-  command: string,
-  args: string[],
-  options: {
-    cwd: string;
-    env?: NodeJS.ProcessEnv;
-    timeoutMs?: number;
-    stdinText?: string;
-    onChild?: (child: ChildProcessWithoutNullStreams) => void;
-    onStdout?: (text: string) => void;
-    onStderr?: (text: string) => void;
-  },
-): Promise<CommandResult> =>
-  await new Promise<CommandResult>((resolve, reject) => {
-    const child = spawn(command, args, {
-      cwd: options.cwd,
-      env: { ...process.env, ...(options.env ?? {}) },
-      shell: process.platform === 'win32' && /\.(cmd|bat)$/i.test(command),
-      stdio: ['pipe', 'pipe', 'pipe'],
-      detached: process.platform !== 'win32',
-    });
-    options.onChild?.(child);
-    child.stdin.end(options.stdinText ?? '');
-
-    let stdout = '';
-    let stderr = '';
-    let settled = false;
-    let timeout: NodeJS.Timeout | null = null;
-    const clearCommandTimeout = (): void => {
-      if (timeout) {
-        clearTimeout(timeout);
-        timeout = null;
-      }
-    };
-    const refreshCommandTimeout = (): void => {
-      if (!options.timeoutMs || settled) {
-        return;
-      }
-      clearCommandTimeout();
-      timeout = setTimeout(() => {
-          killProcessTree(child);
-          if (!settled) {
-            settled = true;
-            reject(new Error(`codex_timeout_after_${options.timeoutMs}ms`));
-          }
-        }, options.timeoutMs);
-    };
-    refreshCommandTimeout();
-
-    child.stdout.on('data', (chunk) => {
-      const text = chunk.toString();
-      stdout += text;
-      options.onStdout?.(text);
-      refreshCommandTimeout();
-    });
-    child.stderr.on('data', (chunk) => {
-      const text = chunk.toString();
-      stderr += text;
-      options.onStderr?.(text);
-      refreshCommandTimeout();
-    });
-    child.on('error', (error) => {
-      clearCommandTimeout();
-      if (!settled) {
-        settled = true;
-        reject(error);
-      }
-    });
-    child.on('close', (code) => {
-      clearCommandTimeout();
-      if (!settled) {
-        settled = true;
-        resolve({ code: typeof code === 'number' ? code : 1, stdout, stderr });
-      }
-    });
-  });
-
-const killProcessTree = (child: ChildProcessWithoutNullStreams | undefined): void => {
-  if (!child || child.killed) {
-    return;
-  }
-  try {
-    if (process.platform !== 'win32' && typeof child.pid === 'number') {
-      process.kill(-child.pid, 'SIGKILL');
-    } else {
-      child.kill('SIGKILL');
-    }
-  } catch {
-    child.kill('SIGKILL');
-  }
-};
-
-const buildMcpArgs = (mcpServers: CodexMcpServerConfig[]): string[] =>
-  mcpServers.flatMap((server) => [
-    '--config',
-    `mcp_servers.${server.name}.url=${JSON.stringify(server.url)}`,
-    '--config',
-    `mcp_servers.${server.name}.bearer_token_env_var=${JSON.stringify(server.tokenEnvVar)}`,
-    '--config',
-    `mcp_servers.${server.name}.enabled=true`,
-    '--config',
-    `mcp_servers.${server.name}.tool_timeout_sec=${server.toolTimeoutSec ?? 600}`,
-    '--config',
-    `mcp_servers.${server.name}.default_tools_approval_mode="${getMcpApprovalMode(server)}"`,
-  ]);
-
-const getMcpApprovalMode = (server: CodexMcpServerConfig): 'auto' | 'approve' =>
-  server.name === 'forger' ? 'auto' : 'approve';
-
-const resolveCodexCommand = async (
-  codexCliPath: string,
-  pathEntries: string[],
-): Promise<{ command: string; prefixArgs: string[]; pathEntries: string[] }> => {
-  if (process.platform !== 'win32' || !/\.(cmd|bat)$/i.test(codexCliPath)) {
-    return {
-      command: codexCliPath,
-      prefixArgs: [],
-      pathEntries: [path.dirname(codexCliPath), ...pathEntries],
-    };
-  }
-  const nodePath = await findExecutableInPathEntries(pathEntries, ['node.exe', 'node']);
-  const codexEntrypoint = path.join(path.resolve(path.dirname(codexCliPath), '..'), '@openai', 'codex', 'bin', 'codex.js');
-  if (!nodePath || !(await existsFile(codexEntrypoint))) {
-    throw new Error('codex_js_entrypoint_missing');
-  }
-  return {
-    command: nodePath,
-    prefixArgs: [codexEntrypoint],
-    pathEntries: [path.dirname(nodePath), path.dirname(codexCliPath), ...pathEntries],
-  };
-};
-
-const findExecutableInPathEntries = async (entries: string[], executableNames: string[]): Promise<string | null> => {
-  for (const entry of entries) {
-    for (const executableName of executableNames) {
-      const candidate = path.join(entry, executableName);
-      if (await existsFile(candidate)) {
-        return candidate;
-      }
-    }
-  }
-  return null;
-};
-
-const existsFile = async (filePath: string): Promise<boolean> => {
-  try {
-    return (await fs.stat(filePath)).isFile();
-  } catch {
-    return false;
-  }
-};
-
-const existsDirectory = async (dirPath: string): Promise<boolean> => {
-  try {
-    return (await fs.stat(dirPath)).isDirectory();
-  } catch {
-    return false;
-  }
-};

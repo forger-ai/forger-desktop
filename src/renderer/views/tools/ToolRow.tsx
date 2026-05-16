@@ -8,6 +8,7 @@ export const ToolRow = ({
   description,
   meta,
   pill,
+  onboardingTarget,
   onClick,
 }: {
   icon: ReactNode;
@@ -15,10 +16,12 @@ export const ToolRow = ({
   description: string;
   meta: string;
   pill: ReactNode;
+  onboardingTarget?: string;
   onClick: () => void;
 }) => (
   <Paper
     variant="outlined"
+    data-onboarding-target={onboardingTarget}
     onClick={onClick}
     sx={{
       p: 2,

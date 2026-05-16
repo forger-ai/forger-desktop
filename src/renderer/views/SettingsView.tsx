@@ -1,7 +1,10 @@
 import { useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
 import {
+  Box,
   Button,
   Card,
+  CardActionArea,
   CardContent,
   Chip,
   Dialog,
@@ -10,6 +13,7 @@ import {
   DialogTitle,
   Divider,
   FormControl,
+  FormControlLabel,
   IconButton,
   InputLabel,
   MenuItem,
@@ -17,6 +21,7 @@ import {
   LinearProgress,
   Select,
   Stack,
+  Switch,
   TextField,
   ToggleButton,
   ToggleButtonGroup,
@@ -24,14 +29,21 @@ import {
   Typography,
 } from '@mui/material';
 import AddRounded from '@mui/icons-material/AddRounded';
+import BackupRounded from '@mui/icons-material/BackupRounded';
+import ConstructionRounded from '@mui/icons-material/ConstructionRounded';
 import ContentCopyRounded from '@mui/icons-material/ContentCopyRounded';
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
+import DevicesRounded from '@mui/icons-material/DevicesRounded';
 import EditRounded from '@mui/icons-material/EditRounded';
+import EventRepeatRounded from '@mui/icons-material/EventRepeatRounded';
+import InsertDriveFileRounded from '@mui/icons-material/InsertDriveFileRounded';
 import MemoryRounded from '@mui/icons-material/MemoryRounded';
 import SystemUpdateAltRounded from '@mui/icons-material/SystemUpdateAltRounded';
 import DownloadRounded from '@mui/icons-material/DownloadRounded';
 import LaunchRounded from '@mui/icons-material/LaunchRounded';
 import RestartAltRounded from '@mui/icons-material/RestartAltRounded';
+import TableChartRounded from '@mui/icons-material/TableChartRounded';
+import VpnKeyRounded from '@mui/icons-material/VpnKeyRounded';
 import type {
   AppSummary,
   ClaudeAuthStatus,
@@ -53,6 +65,7 @@ import type {
 import type { AppDictionary, Locale } from '@renderer/i18n';
 import type { ThemePreference } from '@renderer/theme/appTheme';
 import type { ChatBotPicture, LanguagePreference } from '@renderer/preferences';
+import type { View } from '@renderer/components/Sidebar';
 
 interface SettingsViewProps {
   codexAuthBusy: boolean;
@@ -93,6 +106,12 @@ interface SettingsViewProps {
   cloudIdentity: CloudIdentityState | null;
   onRevealCloudSecretKey: () => Promise<string>;
   onRegenerateCloudSecretKey: () => void;
+  earlyAccessEnabled: boolean;
+  advancedMode: boolean;
+  onEarlyAccessChange: (enabled: boolean) => void;
+  onAdvancedModeChange: (enabled: boolean) => void;
+  onNavigate: (view: View) => void;
+  onResetOnboarding: () => void;
 }
 
 interface MemoryFormState {
@@ -151,6 +170,12 @@ export function SettingsView({
   cloudIdentity,
   onRevealCloudSecretKey,
   onRegenerateCloudSecretKey,
+  earlyAccessEnabled,
+  advancedMode,
+  onEarlyAccessChange,
+  onAdvancedModeChange,
+  onNavigate,
+  onResetOnboarding,
 }: SettingsViewProps) {
   const [memoryDialogOpen, setMemoryDialogOpen] = useState(false);
   const [revealedSecretKey, setRevealedSecretKey] = useState('');
@@ -177,6 +202,15 @@ export function SettingsView({
   }, [memories]);
   const memoryFormAppRequired = memoryForm.scope === 'app' && !memoryForm.appId;
   const memoryFormInvalid = !memoryForm.text.trim() || memoryFormAppRequired;
+  const advancedLinks: Array<{ view: View; label: string; description: string; icon: ReactNode }> = [
+    { view: 'tools', label: t.nav.tools, description: t.settings.advancedSurfaces.tools, icon: <ConstructionRounded /> },
+    { view: 'files', label: t.nav.files, description: t.settings.advancedSurfaces.files, icon: <InsertDriveFileRounded /> },
+    { view: 'backups', label: t.nav.backups, description: t.settings.advancedSurfaces.backups, icon: <BackupRounded /> },
+    { view: 'devices', label: t.nav.devices, description: t.settings.advancedSurfaces.devices, icon: <DevicesRounded /> },
+    { view: 'datos', label: t.nav.datos, description: t.settings.advancedSurfaces.datos, icon: <TableChartRounded /> },
+    { view: 'secrets', label: t.nav.secrets, description: t.settings.advancedSurfaces.secrets, icon: <VpnKeyRounded /> },
+    { view: 'automations', label: t.nav.automations, description: t.settings.advancedSurfaces.automations, icon: <EventRepeatRounded /> },
+  ];
 
   const resetMemoryForm = () => setMemoryForm(EMPTY_MEMORY_FORM);
   const submitMemoryForm = () => {
@@ -211,6 +245,81 @@ export function SettingsView({
         <Typography variant="h4">{t.sections.settings.title}</Typography>
         <Typography color="text.secondary">{t.sections.settings.subtitle}</Typography>
       </Stack>
+      <Card
+        variant="outlined"
+        sx={{
+          borderColor: 'warning.main',
+          bgcolor: 'warning.main',
+          color: 'warning.contrastText',
+          '& .MuiChip-root': {
+            bgcolor: 'rgba(0, 0, 0, 0.18)',
+            color: 'inherit',
+          },
+        }}
+      >
+        <CardContent>
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }}>
+            <Stack spacing={0.5}>
+              <Typography variant="h6">{t.settings.openBetaTitle}</Typography>
+              <Typography variant="body2" sx={{ opacity: 0.9 }}>{t.settings.openBetaDescription}</Typography>
+            </Stack>
+            <Chip label="Open Beta" size="small" />
+          </Stack>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardContent>
+          <Stack spacing={1.5}>
+            <Stack spacing={0.5}>
+              <Typography variant="h6">{t.settings.betaTitle}</Typography>
+              <Typography variant="body2" color="text.secondary">{t.settings.betaDescription}</Typography>
+            </Stack>
+            <Stack spacing={1}>
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={earlyAccessEnabled}
+                    onChange={(event) => onEarlyAccessChange(event.target.checked)}
+                  />
+                }
+                label={t.settings.earlyAccessToggle}
+              />
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={advancedMode}
+                    onChange={(event) => onAdvancedModeChange(event.target.checked)}
+                  />
+                }
+                label={t.settings.advancedModeToggle}
+              />
+            </Stack>
+            <Stack spacing={1}>
+              <Typography variant="subtitle2">{t.settings.advancedSurfacesTitle}</Typography>
+              <Stack spacing={1}>
+                {advancedLinks.map((item) => (
+                  <Card key={item.view} variant="outlined" sx={{ borderRadius: 1 }}>
+                    <CardActionArea onClick={() => onNavigate(item.view)}>
+                      <CardContent sx={{ py: 1.25, '&:last-child': { pb: 1.25 } }}>
+                        <Stack direction="row" spacing={1.5} alignItems="center">
+                          <Box sx={{ color: 'primary.main', display: 'grid', placeItems: 'center' }}>{item.icon}</Box>
+                          <Box sx={{ minWidth: 0 }}>
+                            <Typography variant="subtitle2">{item.label}</Typography>
+                            <Typography variant="body2" color="text.secondary">{item.description}</Typography>
+                          </Box>
+                        </Stack>
+                      </CardContent>
+                    </CardActionArea>
+                  </Card>
+                ))}
+              </Stack>
+            </Stack>
+            <Button size="small" variant="outlined" onClick={onResetOnboarding} sx={{ alignSelf: 'flex-start' }}>
+              {t.settings.resetOnboarding}
+            </Button>
+          </Stack>
+        </CardContent>
+      </Card>
       <Card>
         <CardContent>
           <Stack spacing={1.5}>

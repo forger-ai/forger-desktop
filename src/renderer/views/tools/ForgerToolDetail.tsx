@@ -52,6 +52,7 @@ export const ForgerToolDetail = ({
         settings={settings}
         busyToolId={busyToolId}
         t={t}
+        onboardingTarget="forger-tool-permissions"
         onApprovalChange={onApprovalChange}
       />
     ) : null}

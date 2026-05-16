@@ -61,9 +61,6 @@ export function ClaudeConfigModal({
               Claude Code esta listo para usarse desde Forger.
             </Alert>
           ) : null}
-          <Alert severity="warning">
-            Forger puede instalar su propia copia de Claude Code, pero el login de Claude puede usar la sesion local del usuario del computador. En macOS, las credenciales pueden quedar en Keychain y tambien pueden ser visibles para Claude Code fuera de Forger.
-          </Alert>
           <Typography color="text.secondary">
             Si Claude Code ya esta instalado en este equipo, Forger lo detecta y lo puede usar. Si no existe, Forger instala una copia local con su runtime de Node.
           </Typography>

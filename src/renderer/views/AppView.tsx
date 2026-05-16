@@ -2,14 +2,9 @@ import { useEffect, useState } from 'react';
 import ArrowBackRounded from '@mui/icons-material/ArrowBackRounded';
 import AutoAwesomeRounded from '@mui/icons-material/AutoAwesomeRounded';
 import CheckCircleOutlineRounded from '@mui/icons-material/CheckCircleOutlineRounded';
-import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
-import DownloadRounded from '@mui/icons-material/DownloadRounded';
-import LaunchRounded from '@mui/icons-material/LaunchRounded';
 import RestoreRounded from '@mui/icons-material/RestoreRounded';
 import SaveRounded from '@mui/icons-material/SaveRounded';
 import StarRounded from '@mui/icons-material/StarRounded';
-import StopCircleRounded from '@mui/icons-material/StopCircleRounded';
-import SystemUpdateAltRounded from '@mui/icons-material/SystemUpdateAltRounded';
 import WarningAmberRounded from '@mui/icons-material/WarningAmberRounded';
 import {
   Avatar,
@@ -28,7 +23,6 @@ import {
   Tab,
   Tabs,
   TextField,
-  Tooltip,
   Typography,
 } from '@mui/material';
 import type {
@@ -44,11 +38,11 @@ import type {
   ForgerAccountSession,
   InstallAppResult,
   Settings,
-  SubmitAppFeedbackInput,
   SubmitAppRatingInput,
 } from '@shared/types';
 import type { AppDictionary } from '@renderer/i18n';
 import { AppSecretsPanel } from '@renderer/components/AppSecretsDialog';
+import { AppViewActions } from './app-view/AppViewActions';
 
 interface AppViewProps {
   details: AppDetails | null;
@@ -74,7 +68,6 @@ interface AppViewProps {
   onDelete: (appId: string) => void;
   onOpenAccount: () => void;
   onSubmitRating: (input: SubmitAppRatingInput) => Promise<{ success: boolean }>;
-  onSubmitFeedback: (input: SubmitAppFeedbackInput) => Promise<{ success: boolean }>;
   onUpdatePrompt: (input: AppPromptReviewInput) => Promise<AppPromptMutationResult>;
   onRestorePrompt: (input: AppPromptRestoreInput) => Promise<AppPromptMutationResult>;
 }
@@ -134,7 +127,6 @@ export function AppView({
   onDelete,
   onOpenAccount,
   onSubmitRating,
-  onSubmitFeedback,
   onUpdatePrompt,
   onRestorePrompt,
 }: AppViewProps) {
@@ -150,8 +142,6 @@ export function AppView({
   const currentUserRating = details?.app && 'currentUserRating' in details.app ? details.app.currentUserRating : undefined;
   const [ratingScore, setRatingScore] = useState<number>(currentUserRating?.score ?? 5);
   const [ratingComment, setRatingComment] = useState(currentUserRating?.comment ?? '');
-  const [feedbackKind, setFeedbackKind] = useState<SubmitAppFeedbackInput['kind']>('other');
-  const [feedbackBody, setFeedbackBody] = useState('');
   const [reviewBusy, setReviewBusy] = useState(false);
   const [reviewEditorOpen, setReviewEditorOpen] = useState(false);
   const [promptPreview, setPromptPreview] = useState<PromptPreview>(null);
@@ -245,63 +235,20 @@ export function AppView({
   const localChanges = details.localChanges ?? [];
 
   const actions = (
-    <Stack direction="row" spacing={1.25} useFlexGap flexWrap="wrap">
-      {isInstalling ? (
-        <Button variant="contained" startIcon={<CircularProgress color="inherit" size={16} />} disabled aria-busy>
-          {t.actions.installing}
-        </Button>
-      ) : !details.installed ? (
-        <Button
-          variant="contained"
-          startIcon={<DownloadRounded />}
-          onClick={() => onInstall(appId)}
-        >
-          {t.actions.install}
-        </Button>
-      ) : hasConflict ? (
-        <>
-          <Button variant="contained" color="warning" startIcon={<SystemUpdateAltRounded />} onClick={() => onResolveConflict(appId)}>
-            {t.actions.resolveWithForger}
-          </Button>
-          <Button variant="outlined" onClick={() => onRestoreUserVersion(appId)}>
-            {t.actions.restoreUserVersion}
-          </Button>
-        </>
-      ) : isRunning ? (
-        <Button variant="contained" color="warning" startIcon={<StopCircleRounded />} onClick={() => onStop(appId)}>
-          {t.actions.stop}
-        </Button>
-      ) : (
-        <>
-          <Button
-            variant="contained"
-            startIcon={isOpening ? <CircularProgress color="inherit" size={16} /> : <LaunchRounded />}
-            disabled={isOpening}
-            aria-busy={isOpening}
-            onClick={() => onOpen(appId)}
-          >
-            {isOpening ? t.actions.opening : t.actions.open}
-          </Button>
-          {details.updateAvailable ? (
-            <Button variant="outlined" startIcon={<SystemUpdateAltRounded />} onClick={() => onUpdate(appId)}>
-              {t.actions.update}
-            </Button>
-          ) : null}
-        </>
-      )}
-      {details.installed ? (
-        <Button variant="outlined" color="error" startIcon={<DeleteOutlineRounded />} onClick={() => onDelete(appId)}>
-          {t.actions.delete}
-        </Button>
-      ) : null}
-      {hasError ? (
-        <Tooltip title={t.actions.comingSoon}>
-          <span>
-            <Button disabled>{t.actions.askForgerHelp}</Button>
-          </span>
-        </Tooltip>
-      ) : null}
-    </Stack>
+    <AppViewActions
+      appId={appId}
+      details={details}
+      installProgress={installProgress}
+      isOpening={isOpening}
+      t={t}
+      onInstall={onInstall}
+      onUpdate={onUpdate}
+      onOpen={onOpen}
+      onStop={onStop}
+      onRestoreUserVersion={onRestoreUserVersion}
+      onResolveConflict={onResolveConflict}
+      onDelete={onDelete}
+    />
   );
 
   const historyContent = (
@@ -919,33 +866,6 @@ export function AppView({
       ) : (
         <Typography color="text.secondary">{t.appView.noRatings}</Typography>
       )}
-
-      <Box sx={{ border: '1px solid', borderColor: 'divider', p: 2, bgcolor: 'background.paper' }}>
-        <Stack spacing={1.5}>
-          <Typography variant="h5">{t.appView.feedbackTitle}</Typography>
-          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.25}>
-            <TextField select label={t.appView.feedbackKind} value={feedbackKind} onChange={(event) => setFeedbackKind(event.target.value as SubmitAppFeedbackInput['kind'])} sx={{ minWidth: 170 }}>
-              <MenuItem value="bug">{t.appView.feedbackKinds.bug}</MenuItem>
-              <MenuItem value="idea">{t.appView.feedbackKinds.idea}</MenuItem>
-              <MenuItem value="support">{t.appView.feedbackKinds.support}</MenuItem>
-              <MenuItem value="other">{t.appView.feedbackKinds.other}</MenuItem>
-            </TextField>
-            <TextField label={t.appView.feedbackBody} value={feedbackBody} onChange={(event) => setFeedbackBody(event.target.value)} fullWidth multiline minRows={2} />
-          </Stack>
-          <Button
-            variant="outlined"
-            disabled={!feedbackBody.trim()}
-            onClick={() => {
-              const body = feedbackBody;
-              setFeedbackBody('');
-              void onSubmitFeedback({ appId, kind: feedbackKind, body });
-            }}
-            sx={{ alignSelf: 'flex-start' }}
-          >
-            {t.appView.sendFeedback}
-          </Button>
-        </Stack>
-      </Box>
     </Stack>
   );
 

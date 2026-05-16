@@ -31,34 +31,37 @@ interface ToolsViewProps {
   packages: AgentToolPackageDefinition[];
   settings: AgentToolSettings;
   officialTools: OfficialToolSummary[];
+  selectedTool: SelectedTool;
   busyToolId: string | null;
   busyOfficialToolId: string | null;
   errorMessage: string | null;
   errorTechnicalCode: string | null;
   t: AppDictionary;
+  onSelectedToolChange: (tool: SelectedTool) => void;
   onApprovalChange: (toolId: AgentToolDefinition['id'], requiresApproval: boolean) => void;
   onActivateOfficialTool: (toolId: string) => void;
   onConfigureOfficialTool: (toolId: string) => void;
   onDeactivateOfficialTool: (toolId: string) => void;
 }
 
-type SelectedTool = 'forger' | 'gmail' | null;
+export type SelectedTool = 'forger' | 'gmail' | null;
 
 export function ToolsView({
   packages,
   settings,
   officialTools,
+  selectedTool,
   busyToolId,
   busyOfficialToolId,
   errorMessage,
   errorTechnicalCode,
   t,
+  onSelectedToolChange,
   onApprovalChange,
   onConfigureOfficialTool,
   onDeactivateOfficialTool,
 }: ToolsViewProps) {
   const theme = useTheme();
-  const [selectedTool, setSelectedTool] = useState<SelectedTool>(null);
   const [query, setQuery] = useState('');
   const [gmailAccountHelpOpen, setGmailAccountHelpOpen] = useState(false);
   const normalizedQuery = query.trim().toLowerCase();
@@ -123,7 +126,7 @@ export function ToolsView({
         settings={settings}
         busyToolId={busyToolId}
         t={t}
-        onBack={() => setSelectedTool(null)}
+        onBack={() => onSelectedToolChange(null)}
         onApprovalChange={onApprovalChange}
       />
     );
@@ -142,7 +145,7 @@ export function ToolsView({
           errorMessage={errorMessage}
           showAccountHelp={showGmailAccountHelp}
           t={t}
-          onBack={() => setSelectedTool(null)}
+          onBack={() => onSelectedToolChange(null)}
           onConnect={() => onConfigureOfficialTool(GMAIL_TOOL_ID)}
           onDisconnect={() => onDeactivateOfficialTool(GMAIL_TOOL_ID)}
           onAccountHelp={() => setGmailAccountHelpOpen(true)}
@@ -154,7 +157,7 @@ export function ToolsView({
   }
 
   return (
-    <Stack spacing={2.5}>
+    <Stack spacing={2.5} data-onboarding-target="tools-list">
       <Stack spacing={0.75}>
         <Typography variant="h3" fontWeight={750}>{t.sections.tools.title}</Typography>
         <Typography variant="body1" color="text.secondary">
@@ -164,6 +167,7 @@ export function ToolsView({
 
       <TextField
         fullWidth
+        data-onboarding-target="tools-search"
         placeholder={t.sections.tools.searchPlaceholder}
         value={query}
         onChange={(event) => setQuery(event.target.value)}
@@ -193,7 +197,8 @@ export function ToolsView({
             description={forgerCopy.description}
             meta={forgerPackage ? t.sections.tools.packageToolCount(forgerPackage.tools.length) : t.sections.tools.builtIn}
             pill={<Chip size="small" label={t.sections.tools.builtIn} />}
-            onClick={() => setSelectedTool('forger')}
+            onboardingTarget="tool-row-forger"
+            onClick={() => onSelectedToolChange('forger')}
           />
         ) : null}
 
@@ -210,7 +215,8 @@ export function ToolsView({
                 label={gmailConnected ? t.sections.tools.active : t.sections.tools.inactive}
               />
             )}
-            onClick={() => setSelectedTool('gmail')}
+            onboardingTarget="tool-row-gmail"
+            onClick={() => onSelectedToolChange('gmail')}
           />
         ) : null}
 

@@ -278,13 +278,16 @@ export function Topbar({
         </Box>
 
         <Stack direction="row" alignItems="center" spacing={1} sx={{ WebkitAppRegion: 'no-drag', flexShrink: 0 }}>
-          <FriendsView
-            variant="topbar"
-            account={account}
-            onOpenFriendChat={onOpenFriendChat}
-            onNotify={onSocialNotify}
-          />
+          <Box data-onboarding-target="social-actions">
+            <FriendsView
+              variant="topbar"
+              account={account}
+              onOpenFriendChat={onOpenFriendChat}
+              onNotify={onSocialNotify}
+            />
+          </Box>
           <IconButton
+            data-onboarding-target="account-actions"
             size="small"
             onClick={handleAccountClick}
             sx={{ p: 0.25 }}

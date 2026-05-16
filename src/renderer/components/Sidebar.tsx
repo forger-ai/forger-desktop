@@ -2,11 +2,11 @@ import AppsRounded from '@mui/icons-material/AppsRounded';
 import AutoAwesomeRounded from '@mui/icons-material/AutoAwesomeRounded';
 import BackupRounded from '@mui/icons-material/BackupRounded';
 import EventRepeatRounded from '@mui/icons-material/EventRepeatRounded';
-import CategoryRounded from '@mui/icons-material/CategoryRounded';
 import ConstructionRounded from '@mui/icons-material/ConstructionRounded';
 import DevicesRounded from '@mui/icons-material/DevicesRounded';
 import InsertDriveFileRounded from '@mui/icons-material/InsertDriveFileRounded';
 import TableChartRounded from '@mui/icons-material/TableChartRounded';
+import FeedbackRounded from '@mui/icons-material/FeedbackRounded';
 import SettingsRounded from '@mui/icons-material/SettingsRounded';
 import VpnKeyRounded from '@mui/icons-material/VpnKeyRounded';
 import {
@@ -32,6 +32,7 @@ export type View =
   | 'my-apps'
   | 'catalog'
   | 'chat'
+  | 'feedback'
   | 'friends'
   | 'automations'
   | 'files'
@@ -49,12 +50,16 @@ interface SidebarProps {
   onNavigate: (view: View) => void;
   t: AppDictionary;
   desktopUpdateState: DesktopUpdateState;
+  advancedMode: boolean;
 }
 
-const mainNav = [
-  { id: 'my-apps' as const, icon: <AppsRounded /> },
-  { id: 'catalog' as const, icon: <CategoryRounded /> },
+const defaultNav = [
+  { id: 'catalog' as const, icon: <AppsRounded /> },
   { id: 'chat' as const, icon: <AutoAwesomeRounded /> },
+  { id: 'feedback' as const, icon: <FeedbackRounded /> },
+];
+
+const advancedNav = [
   { id: 'automations' as const, icon: <EventRepeatRounded /> },
   { id: 'files' as const, icon: <InsertDriveFileRounded /> },
   { id: 'backups' as const, icon: <BackupRounded /> },
@@ -64,7 +69,7 @@ const mainNav = [
   { id: 'tools' as const, icon: <ConstructionRounded /> },
 ];
 
-export function Sidebar({ currentView, onNavigate, t, desktopUpdateState }: SidebarProps) {
+export function Sidebar({ currentView, onNavigate, t, desktopUpdateState, advancedMode }: SidebarProps) {
   const theme = useTheme();
   const [windowState, setWindowState] = useState<WindowControlState | null>(null);
   const shouldReserveMacTrafficLightSpace =
@@ -99,8 +104,9 @@ export function Sidebar({ currentView, onNavigate, t, desktopUpdateState }: Side
 
   const labels: Record<View, string> = {
     'my-apps': t.nav.myApps,
-    catalog: t.nav.catalog,
+    catalog: t.nav.apps,
     chat: t.nav.chat,
+    feedback: t.nav.feedback,
     friends: 'Friends',
     automations: t.nav.automations,
     files: t.nav.files,
@@ -113,6 +119,9 @@ export function Sidebar({ currentView, onNavigate, t, desktopUpdateState }: Side
     app: t.nav.catalog,
   };
   const showUpdateBanner = desktopUpdateState.status === 'available' || desktopUpdateState.status === 'ready';
+  const mainNav = advancedMode
+    ? [defaultNav[0], defaultNav[1], defaultNav[2], ...advancedNav]
+    : defaultNav;
 
   return (
     <Box
@@ -165,6 +174,7 @@ export function Sidebar({ currentView, onNavigate, t, desktopUpdateState }: Side
             {mainNav.map((item) => (
               <ListItemButton
                 key={item.id}
+                data-onboarding-target={`nav-${item.id}`}
                 selected={currentView === item.id}
                 onClick={() => onNavigate(item.id)}
                 sx={{ minHeight: 38, py: 0.5 }}

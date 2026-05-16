@@ -24,6 +24,7 @@ import type {
 } from '../shared/types';
 import { buildFailureDiagnostic } from '../shared/error-diagnostics';
 import { getSharedCopy } from '../shared/i18n';
+import { getMcpToolAnnotations, getMcpToolInputSchema, type McpToolAnnotations } from './forger-mcp/tool-metadata';
 
 export interface ForgerMcpSessionRef {
   url: string;
@@ -103,13 +104,6 @@ interface ToolApprovalResult {
   required: boolean;
   status: 'not_required' | 'approved' | 'denied' | 'unavailable';
   userMessage: string;
-}
-
-interface McpToolAnnotations {
-  readOnlyHint: boolean;
-  destructiveHint: boolean;
-  idempotentHint: boolean;
-  openWorldHint: boolean;
 }
 
 interface ForgerMcpTool {
@@ -730,195 +724,6 @@ export class ForgerMcpServer {
   }
 }
 
-const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unknown> => {
-  if (toolId === 'memory_list') {
-    return {
-      type: 'object',
-      properties: {
-        scope: { type: 'string', enum: ['global', 'app'] },
-        appId: { type: 'string' },
-        kind: { type: 'string', enum: ['preference', 'profile', 'workflow', 'constraint', 'fact'] },
-      },
-      additionalProperties: false,
-    };
-  }
-  if (toolId === 'memory_create') {
-    return {
-      type: 'object',
-      properties: {
-        scope: { type: 'string', enum: ['global', 'app'] },
-        appId: { type: 'string' },
-        kind: { type: 'string', enum: ['preference', 'profile', 'workflow', 'constraint', 'fact'] },
-        text: { type: 'string' },
-      },
-      required: ['scope', 'kind', 'text'],
-      additionalProperties: false,
-    };
-  }
-  if (toolId === 'memory_update') {
-    return {
-      type: 'object',
-      properties: {
-        id: { type: 'string' },
-        scope: { type: 'string', enum: ['global', 'app'] },
-        appId: { type: 'string' },
-        kind: { type: 'string', enum: ['preference', 'profile', 'workflow', 'constraint', 'fact'] },
-        text: { type: 'string' },
-      },
-      required: ['id'],
-      additionalProperties: false,
-    };
-  }
-  if (toolId === 'memory_delete') {
-    return {
-      type: 'object',
-      properties: { id: { type: 'string' } },
-      required: ['id'],
-      additionalProperties: false,
-    };
-  }
-
-  if (
-    toolId === 'forger_get_app_runtime_status' ||
-    toolId === 'forger_open_app' ||
-    toolId === 'forger_stop_app' ||
-    toolId === 'forger_restart_app' ||
-    toolId === 'forger_refresh_app_view' ||
-    toolId === 'forger_update_app' ||
-    toolId === 'forger_list_app_prompts'
-  ) {
-    return {
-      type: 'object',
-      properties: {
-        appId: {
-          type: 'string',
-          description: 'ID de la app instalada sobre la que se ejecuta la herramienta.',
-        },
-      },
-      required: ['appId'],
-      additionalProperties: false,
-    };
-  }
-
-  if (toolId === 'forger_update_app_prompt') {
-    return {
-      type: 'object',
-      properties: {
-        appId: {
-          type: 'string',
-          description: 'ID de la app instalada.',
-        },
-        kind: {
-          type: 'string',
-          enum: ['promptTemplate', 'agent'],
-        },
-        id: {
-          type: 'string',
-          description: 'ID del prompt declarado por la app.',
-        },
-        prompt: {
-          type: 'string',
-          description: 'Nuevo texto plano del prompt. Debe conservar las variables {{...}} del original.',
-        },
-      },
-      required: ['appId', 'kind', 'id', 'prompt'],
-      additionalProperties: false,
-    };
-  }
-
-  if (toolId === 'forger_restore_app_prompt') {
-    return {
-      type: 'object',
-      properties: {
-        appId: {
-          type: 'string',
-          description: 'ID de la app instalada.',
-        },
-        kind: {
-          type: 'string',
-          enum: ['promptTemplate', 'agent'],
-        },
-        id: {
-          type: 'string',
-          description: 'ID del prompt declarado por la app.',
-        },
-      },
-      required: ['appId', 'kind', 'id'],
-      additionalProperties: false,
-    };
-  }
-
-  if (toolId === 'gmail.search_messages') {
-    return {
-      type: 'object',
-      properties: {
-        query: { type: 'string' },
-        maxResults: { type: 'number' },
-      },
-      required: ['query'],
-      additionalProperties: false,
-    };
-  }
-
-  if (toolId === 'gmail.read_thread') {
-    return {
-      type: 'object',
-      properties: {
-        threadId: { type: 'string' },
-        messageId: { type: 'string' },
-      },
-      additionalProperties: false,
-    };
-  }
-
-  if (toolId === 'gmail.read_attachment') {
-    return {
-      type: 'object',
-      properties: {
-        messageId: { type: 'string' },
-        attachmentId: { type: 'string' },
-        filename: { type: 'string' },
-      },
-      required: ['messageId'],
-      additionalProperties: false,
-    };
-  }
-
-  if (toolId === 'gmail.send_email') {
-    return {
-      type: 'object',
-      properties: {
-        to: { type: 'array', items: { type: 'string' } },
-        subject: { type: 'string' },
-        body: { type: 'string' },
-        cc: { type: 'array', items: { type: 'string' } },
-        bcc: { type: 'array', items: { type: 'string' } },
-        attachments: {
-          type: 'array',
-          items: {
-            type: 'object',
-            properties: {
-              filePath: { type: 'string' },
-              filename: { type: 'string' },
-              mimeType: { type: 'string' },
-            },
-            required: ['filePath'],
-            additionalProperties: false,
-          },
-        },
-      },
-      required: ['to', 'subject', 'body'],
-      additionalProperties: false,
-    };
-  }
-
-  return {
-    type: 'object',
-    properties: {},
-    additionalProperties: false,
-  };
-};
-
 const isMemoryTool = (toolId: AgentToolId): boolean => toolId.startsWith('memory_');
 
 const isOfficialTool = (toolId: AgentToolId): boolean => toolId.startsWith('gmail.');
@@ -938,25 +743,6 @@ const buildOfficialToolCallInput = (
     return { toolId: 'gmail', actionId, input };
   }
   return { toolId: actionId, actionId, input };
-};
-
-const getMcpToolAnnotations = (tool: AgentToolDefinition): McpToolAnnotations => {
-  if (tool.category === 'consulta' || tool.category === 'memoria') {
-    return {
-      readOnlyHint: tool.category === 'consulta' || tool.id === 'memory_list',
-      destructiveHint: false,
-      idempotentHint: tool.id !== 'memory_create',
-      openWorldHint: false,
-    };
-  }
-  // Codex native approval must not block Forger runs; sensitive actions are
-  // still gated inside executeAgentTool through ensureToolApproval().
-  return {
-    readOnlyHint: false,
-    destructiveHint: false,
-    idempotentHint: false,
-    openWorldHint: false,
-  };
 };
 
 const memoryAccess = (session: AgentMcpSession): MemoryAccessInput => ({

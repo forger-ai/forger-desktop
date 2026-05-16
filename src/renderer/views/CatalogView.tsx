@@ -21,6 +21,7 @@ interface CatalogViewProps {
   onDetails: (appId: string) => void;
   onDelete: (appId: string) => void;
   t: AppDictionary;
+  earlyAccessEnabled: boolean;
   getAppMeta: (appId: string) => { name: string; description: string; iconUrl?: string };
   getCategoryLabel: (category: AppCategory) => string;
   installProgressByApp: Record<string, InstallAppResult>;
@@ -45,6 +46,7 @@ export function CatalogView({
   onDetails,
   onDelete,
   t,
+  earlyAccessEnabled,
   getAppMeta,
   getCategoryLabel,
   installProgressByApp,
@@ -107,6 +109,10 @@ export function CatalogView({
             const isInstalling = app.status === 'installing';
             const hasError = app.status === 'error';
             const isConflict = app.status === 'conflict';
+            const isEarlyAccess = app.catalogStatus === 'coming';
+            const isBeta = app.catalogStatus === 'beta' || Boolean(app.beta);
+            const hasDownloadableVersion = Boolean(app.downloadUrl || app.latestVersionId);
+            const canInstallEarlyAccess = !isEarlyAccess || (earlyAccessEnabled && hasDownloadableVersion);
             const statusLabel = isInstalling
               ? t.actions.installing
               : app.status === 'running'
@@ -115,6 +121,8 @@ export function CatalogView({
                   ? t.actions.conflict
                 : hasError
                   ? t.actions.error
+                  : !isInstalled && isEarlyAccess
+                    ? t.beta.earlyAccessBadge
                   : app.updateAvailable && app.latestVersion
                     ? t.appView.updateAvailable(app.latestVersion)
                   : isInstalled
@@ -147,7 +155,11 @@ export function CatalogView({
                 ? isOpening
                   ? t.actions.opening
                   : t.actions.open
-                : t.actions.install;
+                : isEarlyAccess && !earlyAccessEnabled
+                  ? t.beta.enableEarlyAccessAction
+                  : isEarlyAccess && !hasDownloadableVersion
+                    ? t.beta.comingSoonAction
+                    : t.actions.install;
 
             return (
               <AppCard
@@ -155,15 +167,17 @@ export function CatalogView({
                 appName={meta.name}
                 iconUrl={app.iconUrl}
                 categoryLabel={getCategoryLabel(app.category)}
-                description={meta.description}
-                beta={app.beta}
+                description={isEarlyAccess ? `${meta.description} ${t.beta.earlyAccessCardBody}` : meta.description}
+                beta={isBeta || isEarlyAccess}
+                betaLabel={isEarlyAccess ? t.beta.earlyAccessBadge : 'Beta'}
                 averageRating={app.averageRating}
                 ratingsCount={app.ratingsCount}
+                onboardingTarget={app.id === 'finance-os' ? 'finance-os-card' : undefined}
                 statusLabel={statusLabel}
                 statusColor={statusColor}
                 primaryAction={primaryAction}
                 primaryActionLabel={primaryActionLabel}
-                primaryDisabled={isInstalling}
+                primaryDisabled={isInstalling || (!isInstalled && !canInstallEarlyAccess)}
                 primaryLoading={isOpening}
                 installProgress={installProgress}
                 onPrimaryAction={() => {

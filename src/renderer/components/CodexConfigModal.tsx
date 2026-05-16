@@ -75,17 +75,6 @@ export function CodexConfigModal({
               <Stack spacing={1}>
                 <Typography fontWeight={700}>{t.codexSetup.successTitle}</Typography>
                 <Typography variant="body2">{t.codexSetup.successBody}</Typography>
-                <Box sx={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12 }}>
-                  <Typography variant="caption" component="div" color="text.secondary">
-                    {t.settings.codexCliPathLabel}: {status.codexCliPath ?? '-'}
-                  </Typography>
-                  <Typography variant="caption" component="div" color="text.secondary">
-                    {t.settings.codexHomeLabel}: {status.codexHome || '-'}
-                  </Typography>
-                  <Typography variant="caption" component="div" color="text.secondary">
-                    {t.settings.codexAuthFileLabel}: {status.authFilePath || '-'}
-                  </Typography>
-                </Box>
               </Stack>
             </Alert>
           ) : (
@@ -124,6 +113,24 @@ export function CodexConfigModal({
               />
             </>
           )}
+          <Accordion disableGutters>
+            <AccordionSummary expandIcon={<ExpandMoreRounded />}>
+              <Typography fontWeight={700}>{t.settings.technicalDetails}</Typography>
+            </AccordionSummary>
+            <AccordionDetails>
+              <Box sx={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12 }}>
+                <Typography variant="caption" component="div" color="text.secondary">
+                  {t.settings.codexCliPathLabel}: {status.codexCliPath ?? '-'}
+                </Typography>
+                <Typography variant="caption" component="div" color="text.secondary">
+                  {t.settings.codexHomeLabel}: {status.codexHome || '-'}
+                </Typography>
+                <Typography variant="caption" component="div" color="text.secondary">
+                  {t.settings.codexAuthFileLabel}: {status.authFilePath || '-'}
+                </Typography>
+              </Box>
+            </AccordionDetails>
+          </Accordion>
         </Stack>
       </DialogContent>
       <DialogActions>

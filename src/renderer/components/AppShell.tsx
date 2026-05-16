@@ -23,6 +23,7 @@ interface AppShellProps {
   onSocialNotify: (message: string, severity?: AlertColor) => void;
   onLogout: () => void;
   desktopUpdateState: DesktopUpdateState;
+  advancedMode: boolean;
   children: ReactNode;
 }
 
@@ -44,11 +45,18 @@ export function AppShell({
   onSocialNotify,
   onLogout,
   desktopUpdateState,
+  advancedMode,
   children,
 }: AppShellProps) {
   return (
     <Box sx={{ display: 'flex', height: '100vh', overflow: 'hidden', WebkitAppRegion: 'no-drag' }}>
-      <Sidebar currentView={currentView} onNavigate={onNavigate} t={t} desktopUpdateState={desktopUpdateState} />
+      <Sidebar
+        currentView={currentView}
+        onNavigate={onNavigate}
+        t={t}
+        desktopUpdateState={desktopUpdateState}
+        advancedMode={advancedMode}
+      />
       <Box
         component="main"
         sx={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}

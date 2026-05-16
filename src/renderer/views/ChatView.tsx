@@ -6,7 +6,6 @@ import CloseRounded from '@mui/icons-material/CloseRounded';
 import DonutLargeRounded from '@mui/icons-material/DonutLargeRounded';
 import HistoryRounded from '@mui/icons-material/HistoryRounded';
 import {
-  Avatar,
   Box,
   Button,
   Chip,
@@ -38,11 +37,10 @@ import type {
   PermissionRequest,
   PickedChatFile,
 } from '@shared/types';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import { useEffect, useRef, useState } from 'react';
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
-import { compactCategoryLabel, compactFileName, formatBytes } from './chat-view-helpers';
+import { compactCategoryLabel, compactFileName } from './chat-view-helpers';
+import { ChatMessagesPanel } from './chat/ChatMessagesPanel';
 
 export interface ChatMessage {
   id: string;
@@ -73,73 +71,6 @@ export interface ConversationHistoryItem {
   title: string;
   threadId: string | null;
   updatedAt: string;
-}
-
-function MarkdownMessage({ content }: { content: string }) {
-  const theme = useTheme();
-
-  return (
-    <Box
-      sx={{
-        fontSize: theme.typography.body2.fontSize,
-        lineHeight: 1.55,
-        '& > :first-child': { mt: 0 },
-        '& > :last-child': { mb: 0 },
-        '& h1, & h2, & h3, & h4': {
-          mt: 1.2,
-          mb: 0.9,
-          lineHeight: 1.15,
-        },
-        '& h1:first-of-type, & h2:first-of-type, & h3:first-of-type, & h4:first-of-type': {
-          mt: 0,
-        },
-        '& p': { my: 0.7, lineHeight: 1.55, fontSize: 'inherit' },
-        '& ul, & ol': { my: 0.8, pl: 2.5 },
-        '& li': { mb: 0.45, fontSize: 'inherit' },
-        '& a': {
-          color: theme.palette.primary.main,
-          textDecorationColor: theme.palette.primary.main,
-          textUnderlineOffset: '2px',
-          fontWeight: 500,
-          transition: 'color 120ms ease',
-        },
-        '& a:hover': {
-          color: theme.palette.primary.light,
-        },
-        '& code': {
-          fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-          bgcolor: 'rgba(148,163,184,0.18)',
-          px: 0.5,
-          py: 0.15,
-          borderRadius: 1,
-          fontSize: '0.88em',
-        },
-        '& pre': {
-          bgcolor: 'rgba(15,23,42,0.6)',
-          border: `1px solid ${theme.palette.divider}`,
-          borderRadius: 2,
-          p: 1.25,
-          overflowX: 'auto',
-          my: 1,
-        },
-        '& pre code': {
-          bgcolor: 'transparent',
-          p: 0,
-          borderRadius: 0,
-        },
-        '& blockquote': {
-          my: 1,
-          pl: 1.5,
-          ml: 0,
-          borderLeft: `3px solid ${theme.palette.divider}`,
-          color: 'text.secondary',
-          fontSize: 'inherit',
-        },
-      }}
-    >
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
-    </Box>
-  );
 }
 
 const readFileAsBase64 = async (file: File): Promise<string> =>
@@ -265,7 +196,6 @@ export function ChatView({
   const composerAnchorRef = useRef<HTMLDivElement | null>(null);
   const messagesScrollRef = useRef<HTMLDivElement | null>(null);
   const shouldAutoScrollRef = useRef(true);
-  const hasMessages = messages.length > 0;
   const effectiveProvider = selectedProvider === 'auto' ? resolvedProviderForAuto : selectedProvider;
   const matchingFiles = mentionQuery === null
     ? []
@@ -586,243 +516,24 @@ export function ChatView({
         </Drawer>
       </Box>
 
-      <Box
-        ref={messagesScrollRef}
-        onScroll={(event) => {
-          const target = event.currentTarget;
-          const distanceFromBottom = target.scrollHeight - target.scrollTop - target.clientHeight;
-          shouldAutoScrollRef.current = distanceFromBottom <= 4;
+      <ChatMessagesPanel
+        messages={messages}
+        conversationTitle={conversationTitle}
+        codexConfigured={codexConfigured}
+        assistantAvatarSrc={assistantAvatarSrc}
+        isSending={isSending}
+        progressLines={progressLines}
+        openingAppIds={openingAppIds}
+        respondingPermissionIds={respondingPermissionIds}
+        scrollRef={messagesScrollRef}
+        t={t}
+        onConfigureCodex={onConfigureCodex}
+        onOpenApp={onOpenApp}
+        onRespondPermission={respondToPermission}
+        onAutoScrollChange={(shouldAutoScroll) => {
+          shouldAutoScrollRef.current = shouldAutoScroll;
         }}
-        sx={{
-          flex: 1,
-          minHeight: 0,
-          overflowY: 'auto',
-          py: 1,
-        }}
-      >
-        <Stack spacing={2}>
-          {!hasMessages ? (
-            <Stack alignItems="center" justifyContent="center" sx={{ pt: 6 }} spacing={1}>
-              <Typography variant="h4" textAlign="center">
-                {conversationTitle}
-              </Typography>
-              <Typography color="text.secondary" textAlign="center" sx={{ maxWidth: 480 }}>
-                {codexConfigured ? t.sections.chat.introBody : t.sections.chat.codexMissingBody}
-              </Typography>
-              {!codexConfigured ? (
-                <Button variant="contained" onClick={onConfigureCodex}>
-                  {t.sections.chat.configureCodex}
-                </Button>
-              ) : null}
-            </Stack>
-          ) : (
-            <>
-              {messages.map((message) => (
-                <Stack
-                  key={message.id}
-                  direction="row"
-                  spacing={1.25}
-                  justifyContent={message.role === 'user' ? 'flex-end' : 'flex-start'}
-                >
-                  {message.role === 'assistant' ? (
-                    <Avatar
-                      src={assistantAvatarSrc}
-                      sx={{
-                        width: 30,
-                        height: 30,
-                        bgcolor: '#fff',
-                        p: 0.05,
-                        pb: 0,
-                        '& img': { objectFit: 'contain' },
-                      }}
-                    />
-                  ) : null}
-                  <Box
-                    sx={{
-                      maxWidth: message.role === 'user' ? '72%' : '78%',
-                      px: message.role === 'user' ? 1.6 : 0,
-                      py: message.role === 'user' ? 1.2 : 0,
-                      borderRadius: message.role === 'user' ? 1 : 0,
-                      bgcolor: message.role === 'user' ? 'primary.main' : 'transparent',
-                      color:
-                        message.role === 'user'
-                          ? theme.palette.primary.contrastText
-                          : theme.palette.text.primary,
-                    }}
-                  >
-                    {message.role === 'assistant' ? (
-                      <Stack spacing={1}>
-                        <MarkdownMessage content={message.content} />
-                        {message.action?.type === 'open-app' ? (
-                          (() => {
-                            const action = message.action;
-                            const isOpening = openingAppIds.has(action.appId);
-                            return (
-                              <Button
-                                variant="contained"
-                                size="small"
-                                startIcon={isOpening ? <CircularProgress color="inherit" size={14} /> : undefined}
-                                disabled={isOpening}
-                                aria-busy={isOpening}
-                                onClick={() => onOpenApp(action.appId)}
-                                sx={{ alignSelf: 'flex-start' }}
-                              >
-                                {isOpening ? t.actions.opening : action.label}
-                              </Button>
-                            );
-                          })()
-                        ) : null}
-                        {message.action?.type === 'permission' ? (
-                          (() => {
-                            const action = message.action;
-                            const responseKey = `${action.runId}:${action.request.requestId}`;
-                            const status = action.status ?? 'pending';
-                            const isPending = status === 'pending';
-                            const isResponding = isPending && respondingPermissionIds.has(responseKey);
-                            return (
-                              <Paper
-                                variant="outlined"
-                                sx={{
-                                  p: 1.5,
-                                  borderRadius: 1,
-                                  bgcolor: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.04)' : 'background.paper',
-                                }}
-                              >
-                                <Stack spacing={1}>
-                                  <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-                                    <Chip
-                                      size="small"
-                                      color={status === 'approved' ? 'success' : status === 'denied' ? 'default' : 'warning'}
-                                      label={
-                                        status === 'approved'
-                                          ? t.sections.chat.permissionApproved
-                                          : status === 'denied'
-                                            ? t.sections.chat.permissionDenied
-                                            : t.sections.chat.permissionBadge
-                                      }
-                                    />
-                                    <Chip size="small" variant="outlined" label={action.request.resource} />
-                                  </Stack>
-                                  <Typography variant="body2" color="text.secondary">
-                                    {action.request.reason}
-                                  </Typography>
-                                  {isPending ? (
-                                    <Stack direction="row" spacing={1}>
-                                      <Button
-                                        variant="contained"
-                                        size="small"
-                                        disabled={isResponding}
-                                        startIcon={isResponding ? <CircularProgress size={14} color="inherit" /> : undefined}
-                                        onClick={() => respondToPermission(action.runId, action.request.requestId, 'allow')}
-                                      >
-                                        {t.sections.chat.permissionApprove}
-                                      </Button>
-                                      <Button
-                                        variant="outlined"
-                                        color="inherit"
-                                        size="small"
-                                        disabled={isResponding}
-                                        onClick={() => respondToPermission(action.runId, action.request.requestId, 'deny')}
-                                      >
-                                        {t.sections.chat.permissionDeny}
-                                      </Button>
-                                    </Stack>
-                                  ) : null}
-                                </Stack>
-                              </Paper>
-                            );
-                          })()
-                        ) : null}
-                      </Stack>
-                    ) : (
-                      <Stack spacing={0.85}>
-                        <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
-                          {message.content}
-                        </Typography>
-                        {message.files?.length ? (
-                          <Stack
-                            direction="row"
-                            spacing={0.75}
-                            flexWrap="wrap"
-                            useFlexGap
-                            sx={{
-                              maxWidth: '100%',
-                              alignItems: 'flex-start',
-                              overflow: 'hidden',
-                            }}
-                          >
-                            {message.files.map((file) => (
-                              <Chip
-                                key={`${file.source}-${file.id}`}
-                                size="small"
-                                label={
-                                  file.source === 'mentioned'
-                                    ? `@${compactFileName(file.name)}`
-                                    : `${compactFileName(file.name)} · ${formatBytes(file.sizeBytes)}`
-                                }
-                                title={file.displayPath ?? file.relativePath}
-                                variant={file.source === 'mentioned' ? 'outlined' : 'filled'}
-                                sx={{
-                                  boxSizing: 'border-box',
-                                  height: 28,
-                                  maxWidth: 'min(100%, 280px)',
-                                  borderRadius: '999px',
-                                  bgcolor: file.source === 'mentioned' ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.2)',
-                                  border: '1px solid rgba(255,255,255,0.58)',
-                                  color: theme.palette.primary.contrastText,
-                                  fontSize: 12,
-                                  fontWeight: 700,
-                                  '& .MuiChip-label': {
-                                    overflow: 'hidden',
-                                    textOverflow: 'ellipsis',
-                                    display: 'block',
-                                    px: 1.25,
-                                    lineHeight: '26px',
-                                  },
-                                }}
-                              />
-                            ))}
-                          </Stack>
-                        ) : null}
-                      </Stack>
-                    )}
-                  </Box>
-                </Stack>
-              ))}
-            </>
-          )}
-          {isSending ? (
-            <Stack direction="row" spacing={1.25} alignItems="flex-start">
-              <Avatar
-                src={assistantAvatarSrc}
-                sx={{
-                  width: 30,
-                  height: 30,
-                  bgcolor: '#fff',
-                  p: 0.05,
-                  pb: 0,
-                  '& img': { objectFit: 'contain' },
-                }}
-              />
-              <Box sx={{ maxWidth: '78%', color: 'text.secondary' }}>
-                <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
-                  <CircularProgress size={14} />
-                  <Typography variant="caption">{t.sections.chat.codexThinking}</Typography>
-                </Stack>
-                {progressLines.length > 0 ? (
-                  <Box component="ul" sx={{ m: 0, pl: 2 }}>
-                    {progressLines.slice(-6).map((line, idx) => (
-                      <Typography component="li" variant="caption" key={`${idx}-${line}`}>
-                        {line}
-                      </Typography>
-                    ))}
-                  </Box>
-                ) : null}
-              </Box>
-            </Stack>
-          ) : null}
-        </Stack>
-      </Box>
+      />
 
       <Stack spacing={1}>
         <Box ref={composerAnchorRef} sx={{ position: 'relative' }}>

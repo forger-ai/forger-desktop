@@ -38,9 +38,11 @@ interface AppCardProps {
   tertiaryActionLabel?: string;
   onTertiaryAction?: () => void;
   beta?: boolean;
+  betaLabel?: string;
   averageRating?: number;
   ratingsCount?: number;
   onCardClick?: () => void;
+  onboardingTarget?: string;
 }
 
 const initialsFromName = (name: string) =>
@@ -68,9 +70,11 @@ export function AppCard({
   tertiaryActionLabel,
   onTertiaryAction,
   beta = false,
+  betaLabel = 'Beta',
   averageRating,
   ratingsCount = 0,
   onCardClick,
+  onboardingTarget,
 }: AppCardProps) {
   const installing = Boolean(installProgress);
   const primaryIcon =
@@ -88,6 +92,7 @@ export function AppCard({
 
   return (
     <Card
+      data-onboarding-target={onboardingTarget}
       onClick={onCardClick}
       role={onCardClick ? 'button' : undefined}
       tabIndex={onCardClick ? 0 : undefined}
@@ -149,7 +154,7 @@ export function AppCard({
             zIndex: 1,
           }}
         >
-          Beta
+          {betaLabel}
         </Box>
       ) : null}
       <Stack spacing={2} sx={{ height: '100%' }}>

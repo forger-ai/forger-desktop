@@ -1,15 +1,8 @@
 import type {
   AppCategory,
-  AppAgent,
-  AppAgentPromptSet,
-  AppAgentPromptTemplate,
-  AppAgentPromptVariable,
-  AppAgentPromptVariableType,
   AppRatingSummary,
   AppStatus,
   CatalogApp,
-  AppPromptTemplate,
-  AppToolDeclaration,
   AppBackupSummary,
   RemoteBackupType,
   RemoteBackupSource,
@@ -27,80 +20,25 @@ import type {
   RemoteAppBackupSummary,
   RemoteBackupsState,
   RemoteBackupsUsage,
-  SubmitAppFeedbackInput,
+  SubmitProductFeedbackInput,
   SubmitAppRatingInput,
-  CodexReasoningEffort,
 } from '../shared/types';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { normalizeAppCapabilities } from '../shared/capabilities';
 import { normalizeErrorReportDiagnostic } from '../shared/error-diagnostics';
 import { normalizeForgerAccountUser, type StoredForgerAccount } from './forger-account-store';
-
-const CODEX_REASONING_VALUES = new Set<CodexReasoningEffort>(['low', 'medium', 'high', 'xhigh']);
-
-const normalizeReasoningEffort = (value: unknown): CodexReasoningEffort | undefined =>
-  CODEX_REASONING_VALUES.has(value as CodexReasoningEffort) ? value as CodexReasoningEffort : undefined;
-
-const normalizeCatalogAgentKind = (value: unknown): AppAgent['kind'] =>
-  value === 'classic' || value === 'thread_interface' || value === 'orchestrator' || value === 'agent_invocation'
-    ? value
-    : undefined;
-
-const normalizeCatalogAgentPrompts = (value: unknown): AppAgentPromptSet | undefined => {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return undefined;
-  }
-  const raw = value as Record<string, unknown>;
-  const output: AppAgentPromptSet = {};
-  for (const key of ['initial', 'resume', 'steer'] as const) {
-    const template = normalizeCatalogAgentPromptTemplate(raw[key]);
-    if (template) {
-      output[key] = template;
-    }
-  }
-  return Object.keys(output).length > 0 ? output : undefined;
-};
-
-const normalizeCatalogAgentPromptTemplate = (value: unknown): AppAgentPromptTemplate | undefined => {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return undefined;
-  }
-  const raw = value as Record<string, unknown>;
-  const body = typeof raw.body === 'string' ? raw.body.trim() : '';
-  if (!body) {
-    return undefined;
-  }
-  const variables = normalizeCatalogAgentPromptVariables(raw.variables);
-  return {
-    body,
-    ...(Object.keys(variables).length > 0 ? { variables } : {}),
-  };
-};
-
-const normalizeCatalogAgentPromptVariables = (value: unknown): Record<string, AppAgentPromptVariable> => {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return {};
-  }
-  const output: Record<string, AppAgentPromptVariable> = {};
-  for (const [name, rawDeclaration] of Object.entries(value as Record<string, unknown>)) {
-    if (!/^[a-zA-Z0-9_.-]+$/.test(name) || !rawDeclaration || typeof rawDeclaration !== 'object' || Array.isArray(rawDeclaration)) {
-      continue;
-    }
-    const declaration = rawDeclaration as Record<string, unknown>;
-    if (!isCatalogAgentPromptVariableType(declaration.type)) {
-      continue;
-    }
-    output[name] = {
-      type: declaration.type,
-      ...(typeof declaration.required === 'boolean' ? { required: declaration.required } : {}),
-    };
-  }
-  return output;
-};
-
-const isCatalogAgentPromptVariableType = (value: unknown): value is AppAgentPromptVariableType =>
-  value === 'text' || value === 'string' || value === 'json' || value === 'path';
+import {
+  mapCatalogItem,
+  normalizeRating,
+  type CatalogResponseItem,
+  type PublicCatalogResponseItem,
+} from './forger-backend/catalog-normalizers';
+import {
+  normalizeCloudDevice,
+  normalizeCloudMessage,
+  normalizeCloudUser,
+  normalizeFriendship,
+} from './forger-backend/cloud-normalizers';
 
 interface ClientOptions {
   backendBaseUrl: string;
@@ -109,46 +47,6 @@ interface ClientOptions {
   mapBackendCategory: (backendCategory: string) => AppCategory;
   toCatalogStatus: (slug: string) => AppStatus;
   getUserMessage: (slug: string) => string | undefined;
-}
-
-interface PublicCatalogResponseItem {
-  slug: string;
-  name: string;
-  short_description?: string | null;
-  description?: string | null;
-  category: string;
-  icon_url?: string | null;
-  beta?: boolean | null;
-  agents?: unknown;
-  prompt_templates?: unknown;
-  promptTemplates?: unknown;
-  tools?: unknown;
-  latest_version?: CatalogVersionPayload;
-}
-
-interface CatalogResponseItem extends PublicCatalogResponseItem {
-  short_description: string | null;
-  description: string | null;
-  average_rating?: number | string | null;
-  ratings_count?: number | string | null;
-  recent_ratings?: unknown[];
-  current_user_rating?: unknown;
-  latest_version?: CatalogVersionPayload & { id: number };
-}
-
-interface CatalogVersionPayload {
-  version?: string;
-  required_python_version?: string | null;
-  required_node_version?: string | null;
-  checksum_sha256?: string | null;
-  download_url?: string | null;
-  changelog?: unknown;
-  capabilities?: unknown;
-  permissions?: unknown;
-  agents?: unknown;
-  prompt_templates?: unknown;
-  promptTemplates?: unknown;
-  tools?: unknown;
 }
 
 interface DownloadPayload {
@@ -225,7 +123,7 @@ export class ForgerBackendClient {
       if (response.ok) {
         const payload = await this.readJson<CatalogResponseItem[]>(response);
         if (Array.isArray(payload)) {
-          backendApps = payload.map((appEntry) => this.mapCatalogItem(appEntry, false));
+          backendApps = payload.map((appEntry) => mapCatalogItem(appEntry, false, this.options));
         }
       }
     } catch {
@@ -258,7 +156,7 @@ export class ForgerBackendClient {
     }
 
     const publicPayload = await this.readJson<PublicCatalogResponseItem[]>(publicResponse);
-    return Array.isArray(publicPayload) ? publicPayload.map((appEntry) => this.mapCatalogItem(appEntry, true)) : [];
+    return Array.isArray(publicPayload) ? publicPayload.map((appEntry) => mapCatalogItem(appEntry, true, this.options)) : [];
   }
 
   private mergeCatalogApps(primaryApps: CatalogApp[], secondaryApps: CatalogApp[]): CatalogApp[] {
@@ -419,7 +317,7 @@ export class ForgerBackendClient {
       throw backendError('Forger Cloud session is no longer valid.', `device_register_failed_${response.status}`);
     }
     const payload = await this.readJson<Record<string, unknown>>(response);
-    return this.normalizeCloudDevice(payload) as CloudDeviceSummary & { registered: boolean };
+    return normalizeCloudDevice(payload) as CloudDeviceSummary & { registered: boolean };
   }
 
   async listDevices(): Promise<CloudDeviceSummary[]> {
@@ -434,7 +332,7 @@ export class ForgerBackendClient {
     if (!Array.isArray(payload)) {
       return [];
     }
-    return payload.map((entry) => this.normalizeCloudDevice(entry)).filter((entry): entry is CloudDeviceSummary => Boolean(entry));
+    return payload.map((entry) => normalizeCloudDevice(entry)).filter((entry): entry is CloudDeviceSummary => Boolean(entry));
   }
 
   async createDevicePairingCode(input: { deviceId: number; codeDigest: string; expiresAt: string }): Promise<void> {
@@ -456,18 +354,18 @@ export class ForgerBackendClient {
 
   async listFriends(): Promise<CloudFriendship[]> {
     const payload = await this.getJson('/api/v1/me/friends', 'friends_list_failed');
-    return Array.isArray(payload) ? payload.map((entry) => this.normalizeFriendship(entry)).filter(Boolean) as CloudFriendship[] : [];
+    return Array.isArray(payload) ? payload.map((entry) => normalizeFriendship(entry)).filter(Boolean) as CloudFriendship[] : [];
   }
 
   async searchFriends(username: string): Promise<CloudFriendUser[]> {
     const query = new URLSearchParams({ username });
     const payload = await this.getJson(`/api/v1/me/friends/search?${query.toString()}`, 'friends_search_failed');
-    return Array.isArray(payload) ? payload.map((entry) => this.normalizeCloudUser(entry)).filter(Boolean) as CloudFriendUser[] : [];
+    return Array.isArray(payload) ? payload.map((entry) => normalizeCloudUser(entry)).filter(Boolean) as CloudFriendUser[] : [];
   }
 
   async sendFriendRequest(username: string): Promise<CloudFriendship> {
     const payload = await this.postJson('/api/v1/me/friend_requests', { username }, 'friend_request_create_failed');
-    const friendship = this.normalizeFriendship(payload);
+    const friendship = normalizeFriendship(payload);
     if (!friendship) {
       throw backendError('No pudimos enviar la solicitud.', 'friend_request_response_invalid');
     }
@@ -488,7 +386,7 @@ export class ForgerBackendClient {
 
   async markFriendChatRead(friendUserId: number): Promise<CloudFriendship> {
     const payload = await this.patchJson(`/api/v1/me/friends/${encodeURIComponent(String(friendUserId))}/read_receipt`, {}, 'friend_read_receipt_failed');
-    const friendship = this.normalizeFriendship(payload);
+    const friendship = normalizeFriendship(payload);
     if (!friendship) {
       throw backendError('No pudimos actualizar la lectura del chat.', 'friend_read_receipt_response_invalid');
     }
@@ -498,7 +396,7 @@ export class ForgerBackendClient {
   async listCloudMessages(friendUserId: number): Promise<CloudMessage[]> {
     const query = new URLSearchParams({ friend_user_id: String(friendUserId) });
     const payload = await this.getJson(`/api/v1/me/cloud_messages?${query.toString()}`, 'cloud_messages_list_failed');
-    return Array.isArray(payload) ? payload.map((entry) => this.normalizeCloudMessage(entry)).filter(Boolean) as CloudMessage[] : [];
+    return Array.isArray(payload) ? payload.map((entry) => normalizeCloudMessage(entry)).filter(Boolean) as CloudMessage[] : [];
   }
 
   async sendCloudMessage(input: CloudSendMessageInput & { envelopes: CloudMessageEnvelope[]; clientMessageId?: string }): Promise<CloudMessage> {
@@ -519,7 +417,7 @@ export class ForgerBackendClient {
         metadata: envelope.metadata,
       })),
     }, 'cloud_message_send_failed');
-    const message = this.normalizeCloudMessage(payload);
+    const message = normalizeCloudMessage(payload);
     if (!message) {
       throw backendError('No pudimos enviar el mensaje.', 'cloud_message_response_invalid');
     }
@@ -531,7 +429,7 @@ export class ForgerBackendClient {
       cloud_message_id: cloudMessageId,
       decision,
     }, 'app_message_permission_failed');
-    const message = this.normalizeCloudMessage(payload);
+    const message = normalizeCloudMessage(payload);
     if (!message) {
       throw backendError('No pudimos actualizar el permiso.', 'app_message_permission_response_invalid');
     }
@@ -539,16 +437,16 @@ export class ForgerBackendClient {
   }
 
   normalizeCloudMessagePayload(value: unknown): CloudMessage | undefined {
-    return this.normalizeCloudMessage(value);
+    return normalizeCloudMessage(value);
   }
 
   normalizeFriendshipPayload(value: unknown): CloudFriendship | undefined {
-    return this.normalizeFriendship(value);
+    return normalizeFriendship(value);
   }
 
   private async friendRequestAction(id: number, action: 'accept' | 'decline' | 'cancel'): Promise<CloudFriendship> {
     const payload = await this.postJson(`/api/v1/me/friend_requests/${id}/${action}`, {}, `friend_request_${action}_failed`);
-    const friendship = this.normalizeFriendship(payload);
+    const friendship = normalizeFriendship(payload);
     if (!friendship) {
       throw backendError('No pudimos actualizar la solicitud.', `friend_request_${action}_response_invalid`);
     }
@@ -580,22 +478,28 @@ export class ForgerBackendClient {
       };
     }
 
-    return { success: true, rating: this.normalizeRating(payload), userMessage: 'Review guardada.' };
+    return { success: true, rating: normalizeRating(payload), userMessage: 'Review guardada.' };
   }
 
-  async submitAppFeedback(
-    input: SubmitAppFeedbackInput,
+  async submitProductFeedback(
+    input: SubmitProductFeedbackInput,
   ): Promise<{ success: boolean; userMessage?: string; technicalCode?: string }> {
-    const response = await fetch(`${this.options.backendBaseUrl}/api/v1/catalog/apps/${encodeURIComponent(input.appId)}/feedbacks`, {
+    const response = await fetch(`${this.options.backendBaseUrl}/api/v1/feedbacks`, {
       method: 'POST',
       headers: {
         ...this.buildHeaders(),
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
+        target: input.target,
+        app_id: input.appId,
         kind: input.kind,
         body: input.body,
+        surface: input.surface,
         locale: input.locale,
+        platform: input.platform,
+        desktop_version: input.desktopVersion,
+        app_version_label: input.appVersionLabel,
       }),
     });
 
@@ -859,377 +763,6 @@ export class ForgerBackendClient {
       throw backendError('No pudimos completar la accion en Forger Cloud.', `${code}_${response.status}`);
     }
     return payload;
-  }
-
-  private mapCatalogItem(appEntry: CatalogResponseItem | PublicCatalogResponseItem, includeDirectDownloadUrl: boolean): CatalogApp {
-    const latestVersion = appEntry.latest_version;
-    const backendEntry = appEntry as CatalogResponseItem;
-    const recentRatings = Array.isArray(backendEntry.recent_ratings)
-      ? backendEntry.recent_ratings.map((rating) => this.normalizeRating(rating)).filter((rating): rating is AppRatingSummary => Boolean(rating))
-      : [];
-
-    return {
-      id: appEntry.slug,
-      category: this.options.mapBackendCategory(appEntry.category),
-      status: this.options.toCatalogStatus(appEntry.slug),
-      name: appEntry.name,
-      description: appEntry.short_description ?? appEntry.description ?? '',
-      iconUrl: this.absoluteBackendUrl(appEntry.icon_url),
-      beta: Boolean(appEntry.beta),
-      latestVersionId: 'id' in (latestVersion ?? {}) ? (latestVersion as CatalogResponseItem['latest_version'])?.id : undefined,
-      latestVersion: latestVersion?.version,
-      requiredPythonVersion: latestVersion?.required_python_version ?? undefined,
-      requiredNodeVersion: latestVersion?.required_node_version ?? undefined,
-      checksumSha256: latestVersion?.checksum_sha256 ?? undefined,
-      downloadUrl: includeDirectDownloadUrl ? latestVersion?.download_url ?? undefined : undefined,
-      changelog: this.normalizeChangelog(latestVersion?.changelog, latestVersion?.version),
-      capabilities: normalizeAppCapabilities(latestVersion?.capabilities ?? latestVersion?.permissions),
-      tools: this.normalizeCatalogTools(latestVersion?.tools ?? appEntry.tools),
-      agents: this.normalizeCatalogAgents(latestVersion?.agents ?? appEntry.agents),
-      promptTemplates: this.normalizeCatalogPromptTemplates(
-        latestVersion?.prompt_templates
-          ?? latestVersion?.promptTemplates
-          ?? appEntry.prompt_templates
-          ?? appEntry.promptTemplates,
-      ),
-      version: latestVersion?.version,
-      userMessage: this.options.getUserMessage(appEntry.slug),
-      averageRating: this.normalizeNumber(backendEntry.average_rating),
-      ratingsCount: this.normalizeNumber(backendEntry.ratings_count),
-      recentRatings,
-      currentUserRating: this.normalizeRating(backendEntry.current_user_rating),
-    };
-  }
-
-  private normalizeCatalogTools(value: unknown): CatalogApp['tools'] | undefined {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) {
-      return undefined;
-    }
-    const record = value as Record<string, unknown>;
-    const normalizeList = (items: unknown): AppToolDeclaration[] =>
-      Array.isArray(items)
-        ? items.flatMap((item) => {
-            if (!item || typeof item !== 'object' || Array.isArray(item)) {
-              return [];
-            }
-            const candidate = item as Record<string, unknown>;
-            const toolId = typeof candidate.toolId === 'string' ? candidate.toolId.trim() : '';
-            const actions = Array.isArray(candidate.actions)
-              ? candidate.actions.filter((action): action is string => typeof action === 'string' && action.trim().length > 0)
-              : [];
-            if (!toolId || actions.length === 0) {
-              return [];
-            }
-            const reason =
-              typeof candidate.reason === 'string' && candidate.reason.trim()
-                ? candidate.reason.trim()
-                : undefined;
-            if (!reason) {
-              return [];
-            }
-            return [{ toolId, actions, reason }];
-          })
-        : [];
-    const required = normalizeList(record.required);
-    const optional = normalizeList(record.optional);
-    return required.length > 0 || optional.length > 0 ? { required, optional } : undefined;
-  }
-
-  private normalizeCatalogAgents(value: unknown): AppAgent[] | undefined {
-    if (!Array.isArray(value)) {
-      return undefined;
-    }
-    const agents = value.flatMap((item) => {
-      if (!item || typeof item !== 'object' || Array.isArray(item)) {
-        return [];
-      }
-      const candidate = item as Record<string, unknown>;
-      const id = typeof candidate.id === 'string' ? candidate.id.trim() : '';
-      const title = typeof candidate.title === 'string' ? candidate.title.trim() : '';
-      const prompts = normalizeCatalogAgentPrompts(candidate.prompts);
-      const initialPrompt =
-        typeof candidate.initialPrompt === 'string' && candidate.initialPrompt.trim()
-          ? candidate.initialPrompt.trim()
-          : prompts?.initial?.body ?? '';
-      if (!id || !title || (!initialPrompt && !prompts?.initial)) {
-        return [];
-      }
-      const description =
-        typeof candidate.description === 'string' && candidate.description.trim()
-          ? candidate.description.trim()
-          : undefined;
-      const model = typeof candidate.model === 'string' && candidate.model.trim() ? candidate.model.trim() : undefined;
-      const reasoningEffort = normalizeReasoningEffort(candidate.reasoningEffort);
-      const kind = normalizeCatalogAgentKind(candidate.kind);
-      const initialPromptTemplate =
-        typeof candidate.initialPromptTemplate === 'string' && candidate.initialPromptTemplate.trim()
-          ? candidate.initialPromptTemplate.trim()
-          : undefined;
-      return [{
-        id,
-        title,
-        initialPrompt,
-        ...(description ? { description } : {}),
-        ...(kind ? { kind } : {}),
-        ...(initialPromptTemplate ? { initialPromptTemplate } : {}),
-        ...(prompts ? { prompts } : {}),
-        ...(model ? { model } : {}),
-        ...(reasoningEffort ? { reasoningEffort } : {}),
-      }];
-    });
-    return agents.length > 0 ? agents : undefined;
-  }
-
-  private normalizeCatalogPromptTemplates(value: unknown): AppPromptTemplate[] | undefined {
-    if (!Array.isArray(value)) {
-      return undefined;
-    }
-    const templates = value.flatMap((item) => {
-      if (!item || typeof item !== 'object' || Array.isArray(item)) {
-        return [];
-      }
-      const candidate = item as Record<string, unknown>;
-      const id = typeof candidate.id === 'string' ? candidate.id.trim() : '';
-      const title = typeof candidate.title === 'string' ? candidate.title.trim() : '';
-      const prompt = typeof candidate.prompt === 'string' ? candidate.prompt.trim() : '';
-      if (!id || !title || !prompt) {
-        return [];
-      }
-      const description =
-        typeof candidate.description === 'string' && candidate.description.trim()
-          ? candidate.description.trim()
-          : undefined;
-      const model = typeof candidate.model === 'string' && candidate.model.trim() ? candidate.model.trim() : undefined;
-      const reasoningEffort = normalizeReasoningEffort(candidate.reasoningEffort);
-      return [{
-        id,
-        title,
-        prompt,
-        ...(description ? { description } : {}),
-        ...(model ? { model } : {}),
-        ...(reasoningEffort ? { reasoningEffort } : {}),
-      }];
-    });
-    return templates.length > 0 ? templates : undefined;
-  }
-
-  private absoluteBackendUrl(value: string | null | undefined): string | undefined {
-    if (!value) {
-      return undefined;
-    }
-    try {
-      return new URL(value, this.options.backendBaseUrl).toString();
-    } catch {
-      return undefined;
-    }
-  }
-
-  private normalizeNumber(value: unknown): number | undefined {
-    if (typeof value === 'number') {
-      return Number.isFinite(value) ? value : undefined;
-    }
-    if (typeof value === 'string' && value.trim()) {
-      const parsed = Number(value);
-      return Number.isFinite(parsed) ? parsed : undefined;
-    }
-    return undefined;
-  }
-
-  private normalizeChangelog(value: unknown, version?: string): CatalogApp['changelog'] {
-    if (!value || typeof value !== 'object' || !version) {
-      return undefined;
-    }
-
-    const record = value as Record<string, unknown>;
-    const changes = Array.isArray(record.changes) ? record.changes.filter((entry): entry is string => typeof entry === 'string') : [];
-    return {
-      version,
-      summary: typeof record.summary === 'string' ? record.summary : undefined,
-      changes,
-    };
-  }
-
-  private normalizeRating(value: unknown): AppRatingSummary | undefined {
-    if (!value || typeof value !== 'object') {
-      return undefined;
-    }
-
-    const record = value as Record<string, unknown>;
-    const user = record.user && typeof record.user === 'object' ? record.user as Record<string, unknown> : undefined;
-    return {
-      id: Number(record.id),
-      score: Number(record.score),
-      comment: typeof record.comment === 'string' ? record.comment : null,
-      forgerResponse: typeof record.forger_response === 'string' ? record.forger_response : null,
-      createdAt: typeof record.created_at === 'string' ? record.created_at : undefined,
-      updatedAt: typeof record.updated_at === 'string' ? record.updated_at : undefined,
-      user: user
-        ? {
-            firstName: typeof user.first_name === 'string' ? user.first_name : undefined,
-            lastInitial: typeof user.last_initial === 'string' ? user.last_initial : null,
-          }
-        : undefined,
-    };
-  }
-
-  private normalizeCloudDevice(value: unknown): CloudDeviceSummary | undefined {
-    if (!value || typeof value !== 'object') {
-      return undefined;
-    }
-    const record = value as Record<string, unknown>;
-    const id = Number(record.id);
-    if (!Number.isFinite(id)) {
-      return undefined;
-    }
-    const apps = Array.isArray(record.installed_apps)
-      ? record.installed_apps
-        .map((entry) => {
-          if (!entry || typeof entry !== 'object') {
-            return undefined;
-          }
-          const app = entry as Record<string, unknown>;
-          const appId = typeof app.id === 'string' ? app.id : '';
-          if (!appId) {
-            return undefined;
-          }
-          return {
-            id: appId,
-            name: typeof app.name === 'string' ? app.name : appId,
-            status: typeof app.status === 'string' ? app.status : 'installed',
-            version: typeof app.version === 'string' ? app.version : undefined,
-          };
-        })
-        .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
-      : [];
-    return {
-      id,
-      deviceUid: typeof record.device_uid === 'string' ? record.device_uid : '',
-      name: typeof record.name === 'string' ? record.name : 'Forger Desktop',
-      platform: typeof record.platform === 'string' ? record.platform : undefined,
-      publicKey: typeof record.public_key === 'string' ? record.public_key : undefined,
-      keyFingerprint: typeof record.key_fingerprint === 'string' ? record.key_fingerprint : undefined,
-      paired: Boolean(record.paired),
-      online: Boolean(record.online),
-      lastSeenAt: typeof record.last_seen_at === 'string' ? record.last_seen_at : undefined,
-      installedApps: apps,
-    };
-  }
-
-  private normalizeCloudUser(value: unknown): CloudFriendUser | undefined {
-    if (!value || typeof value !== 'object') {
-      return undefined;
-    }
-    const record = value as Record<string, unknown>;
-    const id = Number(record.id);
-    const username = typeof record.username === 'string' ? record.username : '';
-    if (!Number.isFinite(id) || !username) {
-      return undefined;
-    }
-    return {
-      id,
-      username,
-      firstName: typeof record.first_name === 'string' ? record.first_name : undefined,
-      lastName: typeof record.last_name === 'string' ? record.last_name : undefined,
-      online: typeof record.online === 'boolean' ? record.online : undefined,
-      devices: Array.isArray(record.devices)
-        ? record.devices.flatMap((entry) => {
-            if (!entry || typeof entry !== 'object') return [];
-            const device = entry as Record<string, unknown>;
-            const deviceId = Number(device.id);
-            const deviceUid = typeof device.device_uid === 'string' ? device.device_uid : '';
-            if (!Number.isFinite(deviceId) || !deviceUid) return [];
-            return [{
-              id: deviceId,
-              deviceUid,
-              publicKey: typeof device.public_key === 'string' ? device.public_key : undefined,
-              keyFingerprint: typeof device.key_fingerprint === 'string' ? device.key_fingerprint : undefined,
-              online: Boolean(device.online),
-            }];
-          })
-        : [],
-    };
-  }
-
-  private normalizeFriendship(value: unknown): CloudFriendship | undefined {
-    if (!value || typeof value !== 'object') {
-      return undefined;
-    }
-    const record = value as Record<string, unknown>;
-    const id = Number(record.id);
-    const friend = this.normalizeCloudUser(record.friend);
-    const status = record.status === 'accepted' || record.status === 'declined' || record.status === 'canceled' ? record.status : 'pending';
-    if (!Number.isFinite(id) || !friend) {
-      return undefined;
-    }
-    return {
-      id,
-      status,
-      requesterId: Number(record.requester_id ?? 0),
-      addresseeId: Number(record.addressee_id ?? 0),
-      friend,
-      createdAt: typeof record.created_at === 'string' ? record.created_at : new Date().toISOString(),
-      updatedAt: typeof record.updated_at === 'string' ? record.updated_at : new Date().toISOString(),
-      respondedAt: typeof record.responded_at === 'string' ? record.responded_at : undefined,
-      lastMessageAt: typeof record.last_message_at === 'string' ? record.last_message_at : undefined,
-      unreadCount: Number.isFinite(Number(record.unread_count)) ? Number(record.unread_count) : 0,
-      lastReadAt: typeof record.last_read_at === 'string' ? record.last_read_at : undefined,
-    };
-  }
-
-  private normalizeCloudMessage(value: unknown): CloudMessage | undefined {
-    if (!value || typeof value !== 'object') {
-      return undefined;
-    }
-    const record = value as Record<string, unknown>;
-    const sender = this.normalizeCloudUser(record.sender);
-    const recipient = this.normalizeCloudUser(record.recipient);
-    if (!sender || !recipient) {
-      return undefined;
-    }
-    const envelopes = Array.isArray(record.envelopes)
-      ? record.envelopes.map((entry) => this.normalizeCloudMessageEnvelope(entry)).filter(Boolean) as CloudMessageEnvelope[]
-      : [];
-    return {
-      id: typeof record.id === 'number' ? record.id : Number.isFinite(Number(record.id)) ? Number(record.id) : undefined,
-      sender,
-      recipient,
-      deliveryMode: record.delivery_mode === 'ephemeral' ? 'ephemeral' : 'persistent',
-      source: record.source === 'app' ? 'app' : 'user',
-      sourceAppId: typeof record.source_app_id === 'string' ? record.source_app_id : undefined,
-      sourceAppName: typeof record.source_app_name === 'string' ? record.source_app_name : undefined,
-      status: this.normalizeCloudMessageStatus(record.status),
-      clientMessageId: typeof record.client_message_id === 'string' ? record.client_message_id : undefined,
-      metadata: record.metadata && typeof record.metadata === 'object' && !Array.isArray(record.metadata) ? record.metadata as Record<string, unknown> : {},
-      envelopes,
-      deliveredAt: typeof record.delivered_at === 'string' ? record.delivered_at : undefined,
-      createdAt: typeof record.created_at === 'string' ? record.created_at : new Date().toISOString(),
-      updatedAt: typeof record.updated_at === 'string' ? record.updated_at : undefined,
-    };
-  }
-
-  private normalizeCloudMessageEnvelope(value: unknown): CloudMessageEnvelope | undefined {
-    if (!value || typeof value !== 'object') {
-      return undefined;
-    }
-    const record = value as Record<string, unknown>;
-    const ciphertext = typeof record.ciphertext === 'string' ? record.ciphertext : '';
-    if (!ciphertext) {
-      return undefined;
-    }
-    return {
-      id: Number.isFinite(Number(record.id)) ? Number(record.id) : undefined,
-      deviceUid: typeof record.device_uid === 'string' ? record.device_uid : undefined,
-      keyFingerprint: typeof record.key_fingerprint === 'string' ? record.key_fingerprint : undefined,
-      ciphertext,
-      metadata: record.metadata && typeof record.metadata === 'object' && !Array.isArray(record.metadata) ? record.metadata as Record<string, unknown> : {},
-      readAt: typeof record.read_at === 'string' ? record.read_at : undefined,
-    };
-  }
-
-  private normalizeCloudMessageStatus(value: unknown): CloudMessage['status'] {
-    return value === 'delivered' || value === 'not_delivered' || value === 'pending_permission' || value === 'blocked'
-      ? value
-      : 'stored';
   }
 
   private normalizeRemoteBackup(value: unknown): RemoteAppBackupSummary | undefined {
