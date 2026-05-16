@@ -224,7 +224,9 @@ void refreshFiles({ sortBy: 'uploadedAt', sortDirection: 'desc' }); }, [currentV
 const desktopApi = getDesktopApi(); void desktopApi.getAppDetails(selectedAppDetailsId).then((details) => { setSelectedAppDetails(details); if (details?.installed) { void refreshAppSecrets(selectedAppDetailsId).catch(() => { setBannerSeverity('error'); setBannerMessage('No pudimos cargar los secretos de esta app.'); }); } else { setAppSecretsState(null); }
 }); }, [currentView, selectedAppDetailsId, installedApps, catalogApps]); useEffect(() => { if (typeof window !== 'undefined') { window.localStorage.setItem(THEME_STORAGE_KEY, themePreference); }
 }, [themePreference]); useEffect(() => { if (typeof window !== 'undefined') { window.localStorage.setItem(LANGUAGE_STORAGE_KEY, languagePreference); }
-}, [languagePreference]); useEffect(() => { if (typeof window === 'undefined') { return undefined; }
+}, [languagePreference]); useEffect(() => { if (typeof window !== 'undefined') { window.localStorage.setItem(EARLY_ACCESS_STORAGE_KEY, String(earlyAccessEnabled)); }
+}, [earlyAccessEnabled]); useEffect(() => { if (typeof window !== 'undefined') { window.localStorage.setItem(ADVANCED_MODE_STORAGE_KEY, String(advancedMode)); }
+}, [advancedMode]); useEffect(() => { if (typeof window === 'undefined') { return undefined; }
 const handleLanguageChange = () => setSystemLocale(resolveSystemLocale()); window.addEventListener('languagechange', handleLanguageChange); return () => window.removeEventListener('languagechange', handleLanguageChange); }, []); useEffect(() => { if (typeof window !== 'undefined') { window.localStorage.setItem(CODEX_MODEL_STORAGE_KEY, selectedCodexModel); }
 }, [selectedCodexModel]); useEffect(() => { if (typeof window !== 'undefined') { window.localStorage.setItem(CODEX_REASONING_STORAGE_KEY, selectedCodexReasoningEffort); }
 }, [selectedCodexReasoningEffort]); useEffect(() => { if (typeof window !== 'undefined') { window.localStorage.setItem(CHAT_AGENT_PROVIDER_STORAGE_KEY, selectedAgentProvider); }

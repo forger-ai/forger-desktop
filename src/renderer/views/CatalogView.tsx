@@ -29,6 +29,9 @@ interface CatalogViewProps {
 
 const filters: Array<'all' | AppCategory> = ['all', 'finanzas', 'hogar', 'salud', 'productividad', 'developer_tools'];
 
+const isInstalledLike = (app: CatalogApp) =>
+  app.status === 'installed' || app.status === 'running' || app.status === 'error' || app.status === 'conflict' || app.status === 'installing';
+
 export function CatalogView({
   apps,
   openingAppIds,
@@ -51,12 +54,13 @@ export function CatalogView({
   getCategoryLabel,
   installProgressByApp,
 }: CatalogViewProps) {
+  const catalogApps = apps.filter((app) => app.catalogStatus !== 'coming' || earlyAccessEnabled || isInstalledLike(app));
   const statusApps =
     statusFilter === 'installed'
-      ? apps.filter((app) => app.status === 'installed' || app.status === 'running' || app.status === 'error' || app.status === 'conflict')
+      ? catalogApps.filter((app) => app.status === 'installed' || app.status === 'running' || app.status === 'error' || app.status === 'conflict')
       : statusFilter === 'not_installed'
-        ? apps.filter((app) => app.status === 'not_installed')
-        : apps;
+        ? catalogApps.filter((app) => app.status === 'not_installed')
+        : catalogApps;
   const visibleApps = filter === 'all' ? statusApps : statusApps.filter((app) => app.category === filter);
 
   return (
