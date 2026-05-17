@@ -4,6 +4,11 @@ import type { View } from '@renderer/components/Sidebar';
 import type { SelectedTool as SelectedToolsTool } from '@renderer/views/ToolsView';
 import { GMAIL_TOOL_ID } from '@renderer/views/tools/constants';
 import type { ClaudeAuthStatus, CodexAuthStatus, OfficialToolSummary } from '@shared/types';
+import {
+  getUsageAnalyticsEnabled,
+  recordLegalWelcomeDecision,
+  submitUsageEvent,
+} from '@renderer/usage-analytics';
 
 const GLOBAL_TOUR_STORAGE_KEY = 'forger.onboarding.global.dismissed';
 const ADVANCED_TOUR_STORAGE_PREFIX = 'forger.onboarding.advanced.';
@@ -66,6 +71,7 @@ export function useForgerTour({
   const [activeAdvancedTour, setActiveAdvancedTour] = useState<AdvancedView | null>(null);
   const [activeToolsStepIndex, setActiveToolsStepIndex] = useState<number | null>(null);
   const [highlightRect, setHighlightRect] = useState<DOMRect | null>(null);
+  const [welcomeUsageAnalyticsEnabled, setWelcomeUsageAnalyticsEnabled] = useState(getUsageAnalyticsEnabled);
 
   const globalSteps = useMemo<TourStep[]>(
     () => [
@@ -228,19 +234,11 @@ export function useForgerTour({
       return toolsSteps[activeToolsStepIndex] ?? null;
     }
     if (activeAdvancedTour) {
-      const labels = {
-        tools: t.nav.tools,
-        files: t.nav.files,
-        backups: t.nav.backups,
-        devices: t.nav.devices,
-        datos: t.nav.datos,
-        secrets: t.nav.secrets,
-        automations: t.nav.automations,
-      } satisfies Record<AdvancedView, string>;
+      const step = t.onboarding.advanced.views[activeAdvancedTour];
       return {
         id: `advanced-${activeAdvancedTour}`,
-        title: t.onboarding.advanced.title(labels[activeAdvancedTour]),
-        body: t.onboarding.advanced.body,
+        title: step.title,
+        body: step.body,
         target: `advanced-${activeAdvancedTour}`,
       };
     }
@@ -294,6 +292,20 @@ export function useForgerTour({
       setActiveAdvancedTour(null);
       return;
     }
+    if (activeStep?.id === 'welcome') {
+      recordLegalWelcomeDecision(welcomeUsageAnalyticsEnabled);
+      submitUsageEvent({
+        eventName: welcomeUsageAnalyticsEnabled ? 'usage_analytics_accepted' : 'usage_analytics_declined',
+        surface: 'onboarding',
+        locale: t.locale,
+        stringParameters: { decision_source: 'onboarding_skip' },
+      });
+    }
+    submitUsageEvent({
+      eventName: 'onboarding_skipped',
+      surface: 'onboarding',
+      locale: t.locale,
+    });
     window.localStorage.setItem(GLOBAL_TOUR_STORAGE_KEY, 'true');
     setGlobalDismissed(true);
   };
@@ -318,7 +330,26 @@ export function useForgerTour({
       setActiveAdvancedTour(null);
       return;
     }
+    if (activeStep?.id === 'welcome') {
+      recordLegalWelcomeDecision(welcomeUsageAnalyticsEnabled);
+      submitUsageEvent({
+        eventName: welcomeUsageAnalyticsEnabled ? 'usage_analytics_accepted' : 'usage_analytics_declined',
+        surface: 'onboarding',
+        locale: t.locale,
+        stringParameters: { decision_source: 'onboarding_continue' },
+      });
+      submitUsageEvent({
+        eventName: 'onboarding_started',
+        surface: 'onboarding',
+        locale: t.locale,
+      });
+    }
     if (globalStepIndex >= globalSteps.length - 1) {
+      submitUsageEvent({
+        eventName: 'onboarding_completed',
+        surface: 'onboarding',
+        locale: t.locale,
+      });
       window.localStorage.setItem(GLOBAL_TOUR_STORAGE_KEY, 'true');
       setGlobalDismissed(true);
       return;
@@ -327,8 +358,11 @@ export function useForgerTour({
   };
 
   const isAgentStep = activeStep?.id === 'agent';
+  const isWelcomeStep = activeStep?.id === 'welcome';
   const hasConnectedAgentProvider = codexAuthStatus.authenticated || claudeAuthStatus.authenticated;
-  const primaryLabel = isAgentStep && !hasConnectedAgentProvider
+  const primaryLabel = isWelcomeStep
+    ? t.onboarding.startTour
+    : isAgentStep && !hasConnectedAgentProvider
     ? t.onboarding.later
     : !activeAdvancedTour && activeToolsStepIndex === null && globalStepIndex >= globalSteps.length - 1
       ? t.onboarding.finish
@@ -340,6 +374,9 @@ export function useForgerTour({
     isAgentStep,
     hasConnectedAgentProvider,
     modalWidth: isAgentStep ? 720 : 360,
+    isWelcomeStep,
+    welcomeUsageAnalyticsEnabled,
+    setWelcomeUsageAnalyticsEnabled,
     primaryLabel,
     primaryVariant: isAgentStep && !hasConnectedAgentProvider ? 'outlined' as const : 'contained' as const,
     primaryColor: isAgentStep && !hasConnectedAgentProvider ? 'inherit' as const : 'primary' as const,

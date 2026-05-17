@@ -8,12 +8,16 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  FormControlLabel,
+  Link,
   MenuItem,
   Select,
   Snackbar,
   Stack,
+  Switch,
   TextField,
   ThemeProvider,
+  Tooltip,
   Typography,
 } from '@mui/material';
 import type { ReactNode } from 'react';
@@ -103,6 +107,8 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     handleDisconnectSecret,
     handleSubmitRating,
     handleSubmitFeedback,
+    usageAnalyticsEnabled,
+    handleUsageAnalyticsChange,
     handleUpdateAppPrompt,
     handleRestoreAppPrompt,
     chatMessages,
@@ -340,6 +346,55 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
           <Typography variant="body2" color="text.secondary">{t.agentProvider.claudeBody}</Typography>
           <Typography variant="caption" color="warning.main">{t.agentProvider.claudeDisclaimer}</Typography>
           <Typography variant="button" color="primary.main">{t.agentProvider.claudeAction}</Typography>
+        </Stack>
+      </Box>
+    </Stack>
+  );
+
+  const renderWelcomeContent = () => (
+    <Stack spacing={2}>
+      <Typography color="text.secondary" textAlign="center">
+        {t.onboarding.steps.welcome.localDataBody}
+      </Typography>
+      <Typography variant="body2" color="text.secondary" textAlign="center">
+        {t.onboarding.steps.welcome.legalPrefix}{' '}
+        <Link
+          href={activeLocale === 'es' ? 'https://forger.cloud/es/terms' : 'https://forger.cloud/terms'}
+          onClick={(event) => {
+            event.preventDefault();
+            void getDesktopApi().openExternalUrl(event.currentTarget.href);
+          }}
+        >
+          {t.onboarding.steps.welcome.termsLink}
+        </Link>{' '}
+        {t.onboarding.steps.welcome.legalJoiner}{' '}
+        <Link
+          href={activeLocale === 'es' ? 'https://forger.cloud/es/privacy' : 'https://forger.cloud/privacy'}
+          onClick={(event) => {
+            event.preventDefault();
+            void getDesktopApi().openExternalUrl(event.currentTarget.href);
+          }}
+        >
+          {t.onboarding.steps.welcome.privacyLink}
+        </Link>
+        .
+      </Typography>
+      <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1, p: 1.5 }}>
+        <Stack spacing={0.75}>
+          <Tooltip title={t.onboarding.steps.welcome.analyticsTooltip} placement="top">
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={tour.welcomeUsageAnalyticsEnabled}
+                  onChange={(event) => tour.setWelcomeUsageAnalyticsEnabled(event.target.checked)}
+                />
+              }
+              label={t.onboarding.steps.welcome.analyticsLabel}
+            />
+          </Tooltip>
+          <Typography variant="caption" color="text.secondary">
+            {t.onboarding.steps.welcome.analyticsSettingsNote}
+          </Typography>
         </Stack>
       </Box>
     </Stack>
@@ -680,8 +735,10 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             }}
             earlyAccessEnabled={earlyAccessEnabled}
             advancedMode={advancedMode}
+            usageAnalyticsEnabled={usageAnalyticsEnabled}
             onEarlyAccessChange={setEarlyAccessEnabled}
             onAdvancedModeChange={setAdvancedMode}
+            onUsageAnalyticsChange={handleUsageAnalyticsChange}
             onNavigate={setCurrentView}
             onResetOnboarding={resetOnboarding}
           />
@@ -697,7 +754,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
         primaryVariant={tour.primaryVariant}
         primaryColor={tour.primaryColor}
         t={t}
-        extraContent={tour.isAgentStep ? renderAgentProviderCards() : undefined}
+        extraContent={tour.isWelcomeStep ? renderWelcomeContent() : tour.isAgentStep ? renderAgentProviderCards() : undefined}
         onSkip={tour.skipTour}
         onContinue={tour.continueTour}
       />

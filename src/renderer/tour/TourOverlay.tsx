@@ -31,6 +31,7 @@ export function TourOverlay({
   if (!step) {
     return null;
   }
+  const isWelcome = step.id === 'welcome';
 
   const position = highlightRect
     ? {
@@ -40,7 +41,12 @@ export function TourOverlay({
           Math.max(24, highlightRect.left + Math.min(80, highlightRect.width / 2)),
         ),
       }
-    : {
+    : isWelcome
+      ? {
+          top: Math.max(32, window.innerHeight / 2),
+          left: Math.max(24, window.innerWidth / 2 - modalWidth / 2),
+        }
+      : {
         top: Math.max(72, window.innerHeight * 0.28),
         left: Math.max(24, window.innerWidth / 2 - modalWidth / 2),
       };
@@ -72,15 +78,16 @@ export function TourOverlay({
           left: position.left,
           width: modalWidth,
           maxWidth: 'calc(100vw - 48px)',
-          p: 2,
+          p: isWelcome ? 3 : 2,
           border: '1px solid',
           borderColor: 'divider',
+          transform: isWelcome ? 'translateY(-50%)' : undefined,
         }}
       >
-        <Stack spacing={1.5}>
-          <Stack spacing={0.5}>
-            <Typography variant="h6">{step.title}</Typography>
-            <Typography variant="body2" color="text.secondary">{step.body}</Typography>
+        <Stack spacing={isWelcome ? 2.25 : 1.5}>
+          <Stack spacing={isWelcome ? 1 : 0.5} textAlign={isWelcome ? 'center' : 'left'}>
+            <Typography variant={isWelcome ? 'h4' : 'h6'}>{step.title}</Typography>
+            <Typography variant={isWelcome ? 'body1' : 'body2'} color="text.secondary">{step.body}</Typography>
           </Stack>
           {extraContent}
           <Stack direction="row" justifyContent="space-between" spacing={1}>

@@ -6,6 +6,7 @@ export type { AppAgentPromptSet, AppAgentPromptTemplate, AppAgentPromptVariable,
 export type { AppCapability, AppCategory, AppStatus, AppSummary, CatalogPublicationStatus, VersionChangelog } from './types/catalog';
 export type { CatalogApp } from './types/catalog-app';
 export type { AppRatingSummary, SubmitAppRatingInput, SubmitProductFeedbackInput } from './types/feedback';
+export type { SubmitUsageEventInput, SubmitUsageEventResult, UsageEventName } from './types/usage-events';
 export type { CloudAppMessagePermissionDecision, CloudFriendUser, CloudFriendship, CloudIdentityState, CloudMessage, CloudMessageDeliveryMode, CloudMessageEnvelope, CloudMessageSource, CloudMessageStatus, CloudSendMessageInput, CloudSocialEvent, FriendshipStatus, FriendChatWindowOpenResult } from './types/social';
 export type { BasicActionResult, FailureDiagnosticFields } from './types/base';
 export type { MemoryCreateInput, MemoryEntry, MemoryKind, MemoryListInput, MemoryScope, MemorySource, MemoryUpdateInput, Settings, UpdateAgentDefaultsInput, UpdateCodexDefaultsInput } from './types/settings';

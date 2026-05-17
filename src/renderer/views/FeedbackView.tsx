@@ -13,14 +13,14 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
-import type { CatalogApp, SubmitProductFeedbackInput } from '@shared/types';
+import type { CatalogApp, FailureDiagnosticFields, SubmitProductFeedbackInput } from '@shared/types';
 import type { AppDictionary } from '@renderer/i18n';
 
 interface FeedbackViewProps {
   apps: CatalogApp[];
   t: AppDictionary;
   desktopVersion?: string;
-  onSubmitFeedback: (input: SubmitProductFeedbackInput) => Promise<{ success: boolean }>;
+  onSubmitFeedback: (input: SubmitProductFeedbackInput) => Promise<{ success: boolean } & FailureDiagnosticFields>;
 }
 
 export function FeedbackView({ apps, t, desktopVersion, onSubmitFeedback }: FeedbackViewProps) {
@@ -35,7 +35,7 @@ export function FeedbackView({ apps, t, desktopVersion, onSubmitFeedback }: Feed
   const [busy, setBusy] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const selectedApp = appOptions.find((app) => app.id === appId);
-  const bodyInvalid = body.trim().length < 10;
+  const bodyInvalid = body.trim().length === 0;
   const appTargetInvalid = target === 'app' && !appId;
 
   const submit = async () => {
@@ -128,6 +128,8 @@ export function FeedbackView({ apps, t, desktopVersion, onSubmitFeedback }: Feed
                 <MenuItem value="error">{t.sections.feedback.kinds.error}</MenuItem>
                 <MenuItem value="confusing">{t.sections.feedback.kinds.confusing}</MenuItem>
                 <MenuItem value="feature_request">{t.sections.feedback.kinds.featureRequest}</MenuItem>
+                <MenuItem value="would_use_if">{t.sections.feedback.kinds.wouldUseIf}</MenuItem>
+                <MenuItem value="would_not_use_because">{t.sections.feedback.kinds.wouldNotUseBecause}</MenuItem>
                 <MenuItem value="other">{t.sections.feedback.kinds.other}</MenuItem>
               </Select>
             </FormControl>
@@ -141,6 +143,7 @@ export function FeedbackView({ apps, t, desktopVersion, onSubmitFeedback }: Feed
               fullWidth
               multiline
               minRows={5}
+              helperText={t.sections.feedback.bodyHelper}
             />
             <Button
               variant="contained"

@@ -5,6 +5,7 @@ const IPC_CHANNELS = {
   appSelectExternalFolder: 'forger:app:select-external-folder',
   appGetContext: 'forger:app:get-context',
   appAiSubscriptionStatus: 'forger:app:ai-subscription-status',
+  appRendererError: 'forger:app:renderer-error',
   appAgentTaskStart: 'forger:app:agent-task:start',
   appAgentTaskGet: 'forger:app:agent-task:get',
   appAgentTaskCancel: 'forger:app:agent-task:cancel',
@@ -49,6 +50,62 @@ const IPC_CHANNELS = {
   appMessagesList: 'forger:app:messages:list',
   appMessagesEvent: 'forger:app:messages:event',
 } as const;
+
+const currentLocationContext = () => {
+  try {
+    return {
+      origin: window.location.origin,
+      pathname: window.location.pathname,
+    };
+  } catch {
+    return {};
+  }
+};
+
+const reportRendererError = (input: {
+  operation: string;
+  message: string;
+  technicalCode: string;
+  details?: Record<string, unknown>;
+  sensitiveDetails?: Record<string, unknown>;
+}) => {
+  void ipcRenderer.invoke(IPC_CHANNELS.appRendererError, {
+    ...input,
+    details: {
+      ...currentLocationContext(),
+      ...(input.details ?? {}),
+    },
+  }).catch(() => undefined);
+};
+
+window.addEventListener('error', (event) => {
+  reportRendererError({
+    operation: 'app.window.error',
+    message: event.message || 'Unexpected app renderer error.',
+    technicalCode: 'app_renderer_window_error',
+    details: {
+      filename: event.filename,
+      lineno: event.lineno,
+      colno: event.colno,
+    },
+    sensitiveDetails: {
+      stack: event.error instanceof Error ? event.error.stack : undefined,
+    },
+  });
+});
+
+window.addEventListener('unhandledrejection', (event) => {
+  const reason = event.reason;
+  reportRendererError({
+    operation: 'app.window.unhandledrejection',
+    message: reason instanceof Error ? reason.message : String(reason ?? 'Unhandled app renderer rejection.'),
+    technicalCode: 'app_renderer_unhandled_rejection',
+    sensitiveDetails: {
+      stack: reason instanceof Error ? reason.stack : undefined,
+      reason: reason instanceof Error ? undefined : String(reason ?? ''),
+    },
+  });
+});
 
 const api: ForgerAppApi = {
   getContext: async () => {

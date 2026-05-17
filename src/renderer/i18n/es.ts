@@ -97,6 +97,7 @@ export const es = {
       appLabel: 'App',
       kindLabel: 'Qué nos quieres decir?',
       bodyLabel: 'Escríbenos en detalle',
+      bodyHelper: 'Cuéntanos qué pasó, qué fue confuso o qué haría que Forger fuera más útil para ti.',
       send: 'Enviar feedback',
       sending: 'Enviando...',
       sent: 'Feedback enviado.',
@@ -107,7 +108,9 @@ export const es = {
       kinds: {
         error: 'Tuve un error',
         confusing: 'Algo es confuso',
-        featureRequest: 'Podrían agregar esto',
+        featureRequest: 'Tengo una idea',
+        wouldUseIf: 'Lo usaría si tuviera',
+        wouldNotUseBecause: 'No lo usaría porque',
         other: 'Otro',
       },
     },
@@ -125,7 +128,7 @@ export const es = {
       kinds: {
         bug: 'Tuve un error',
         support: 'Algo es confuso',
-        idea: 'Podrían agregar esto',
+        idea: 'Tengo una idea',
         other: 'Otro',
       },
     },
@@ -722,6 +725,7 @@ export const es = {
   onboarding: {
     skip: 'Saltar tutorial',
     continue: 'Continuar',
+    startTour: 'Comenzar tour',
     later: 'Lo haré más tarde',
     finish: 'Empezar a usar Forger',
     resetDone: 'El onboarding se restableció.',
@@ -729,6 +733,14 @@ export const es = {
       welcome: {
         title: 'Bienvenido a Forger',
         body: 'Forger es una app store local para herramientas personales que puedes abrir, usar y adaptar en tu computador.',
+        localDataBody: 'Tus apps y datos viven en tu computador salvo que actives funciones que envían datos fuera de tu equipo.',
+        legalPrefix: 'Al continuar aceptas nuestros',
+        termsLink: 'términos y condiciones',
+        legalJoiner: 'y nuestra',
+        privacyLink: 'política de privacidad',
+        analyticsLabel: 'Ayudar a mejorar Forger',
+        analyticsTooltip: 'Recopilamos solamente datos de uso: no contenido personal, archivos, chats, datos de apps ni credenciales. Usamos un identificador aleatorio de instalación para entender uso agregado.',
+        analyticsSettingsNote: 'Puedes cambiar esta configuración cuando quieras desde Settings.',
       },
       apps: {
         title: 'Las aplicaciones viven en Apps',
@@ -748,7 +760,7 @@ export const es = {
       },
       cloud: {
         title: 'Forger Cloud es opcional',
-        body: 'Puedes crear una cuenta en Forger Cloud y agregar amigos. Las apps compartidas, mejoras compartidas y perfiles públicos son parte del camino social.',
+        body: 'Agrega amigos hoy. Pronto, Forger Cloud te permitirá abrir tus apps desde el teléfono, compartir mejoras desde tu perfil público y publicar nuevas apps para otros usuarios.',
       },
       finance: {
         title: 'Parte con Finance OS',
@@ -756,8 +768,36 @@ export const es = {
       },
     },
     advanced: {
-      title: (moduleName: string) => `${moduleName} es un módulo avanzado`,
-      body: 'Esta sección te da más control sobre Forger. Está disponible desde Configuración y aparece en el menú lateral cuando Modo avanzado está activo.',
+      views: {
+        tools: {
+          title: 'Herramientas de agentes',
+          body: 'Tools controla qué capacidades puede usar el agente y cuándo debe pedir aprobación. Revisa cada paquete para entender qué acciones locales o conectadas están disponibles.',
+        },
+        files: {
+          title: 'Archivos compartidos con chat',
+          body: 'Aquí ves los archivos que entregaste a Forger para una conversación. Úsalo para confirmar qué material está disponible antes de pedir análisis, imports o transformaciones.',
+        },
+        backups: {
+          title: 'Respaldos de apps locales',
+          body: 'Backups muestra copias de seguridad de tus apps instaladas. Desde aquí puedes revisar estados, crear respaldos y restaurar datos cuando una actualización o cambio necesita recuperación.',
+        },
+        devices: {
+          title: 'Dispositivos vinculados',
+          body: 'Devices reúne los equipos conectados a tu cuenta de Forger Cloud. Sirve para revisar sesiones, sincronización y acceso remoto sin mezclarlo con el uso normal de apps.',
+        },
+        datos: {
+          title: 'Datos locales de apps',
+          body: 'Datos permite inspeccionar tablas locales de una app instalada. Es una vista avanzada para diagnosticar registros, validar imports y entender qué información guarda cada app.',
+        },
+        secrets: {
+          title: 'Credenciales y secretos',
+          body: 'Secrets guarda credenciales que una app o agente puede necesitar. Úsalo solo para datos sensibles que quieras administrar explícitamente desde Forger.',
+        },
+        automations: {
+          title: 'Automatizaciones',
+          body: 'Automations muestra tareas repetidas o programadas. Desde aquí puedes revisar qué hará Forger, cuándo se ejecuta y si una automatización sigue activa.',
+        },
+      },
     },
     tools: {
       intro: {
@@ -798,6 +838,10 @@ export const es = {
     account: 'Cuenta',
     appearance: 'Apariencia',
     privacy: 'Privacidad y seguridad',
+    usageAnalyticsTitle: 'Ayudar a mejorar Forger',
+    usageAnalyticsDescription: 'Comparte métricas anónimas de uso para entender qué partes de Forger se usan y cuáles necesitan mejorar.',
+    usageAnalyticsToggle: 'Compartir datos de uso',
+    usageAnalyticsHelp: 'No enviamos contenido personal, archivos, chats, datos de apps ni credenciales. Puedes usar Forger sin compartir estas métricas.',
     technicalDetails: 'Detalles técnicos',
     loggedOutLabel: 'No has iniciado sesión',
     loggedInLabel: 'Sesión activa',
@@ -881,6 +925,7 @@ export const es = {
       fact: 'Dato',
     },
     sidebarUpdateAvailable: (version?: string) => version ? `Forger ${version} disponible` : 'Actualización disponible',
+    sidebarBetaThanks: 'Gracias por participar en la beta',
     errorReportTitle: 'Oops, parece que ha habido un error',
     errorReportBody:
       'Aquí se muestra el detalle que nos ayuda a entender el problema. Este reporte es anónimo. La información sensible que compartas para ayudarnos a corregirlo será eliminada apenas el error sea solucionado.',

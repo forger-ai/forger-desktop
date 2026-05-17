@@ -12,6 +12,7 @@ import type { DesktopUpdateState } from './updates';
 import type { ForgerAccountSession, ForgerAccountRegisterInput, ForgerAccountLoginInput, CloudDevicesState } from './account';
 import type { FriendChatWindowOpenResult, CloudFriendship, CloudFriendUser, CloudMessage, CloudSendMessageInput, CloudAppMessagePermissionDecision, CloudSocialEvent, CloudIdentityState } from './social';
 import type { AppRatingSummary, SubmitAppRatingInput, SubmitProductFeedbackInput } from './feedback';
+import type { SubmitUsageEventInput, SubmitUsageEventResult } from './usage-events';
 import type { FailureDiagnosticFields } from './base';
 import type { CodexAuthStatus, ClaudeAuthStatus, DesktopErrorReportPreview } from './auth';
 import type { AgentToolPackageDefinition, AgentToolSettings, UpdateAgentToolApprovalInput, OfficialToolsState, ToolMutationResult, ConfigureOfficialToolInput, AppToolsInstallGate, SetAppToolGrantInput } from './tools';
@@ -85,7 +86,8 @@ export interface ForgerDesktopApi {
   revealCloudSecretKey: () => Promise<string>;
   regenerateCloudSecretKey: () => Promise<CloudIdentityState>;
   submitAppRating: (input: SubmitAppRatingInput) => Promise<{ success: boolean; rating?: AppRatingSummary; userMessage?: string; technicalCode?: string }>;
-  submitProductFeedback: (input: SubmitProductFeedbackInput) => Promise<{ success: boolean; userMessage?: string; technicalCode?: string }>;
+  submitProductFeedback: (input: SubmitProductFeedbackInput) => Promise<{ success: boolean; userMessage?: string; technicalCode?: string } & FailureDiagnosticFields>;
+  submitUsageEvent: (input: SubmitUsageEventInput) => Promise<SubmitUsageEventResult>;
   openExternalUrl: (url: string) => Promise<{ success: boolean; userMessage?: string } & FailureDiagnosticFields>;
   getCodexAuthStatus: () => Promise<CodexAuthStatus>;
   openCodexUsageDashboard: () => Promise<{ success: boolean; userMessage?: string } & FailureDiagnosticFields>;

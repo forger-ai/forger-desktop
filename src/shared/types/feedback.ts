@@ -21,7 +21,7 @@ export interface SubmitAppRatingInput {
 export interface SubmitProductFeedbackInput {
   target: 'forger' | 'app';
   appId?: string;
-  kind: 'error' | 'confusing' | 'feature_request' | 'other';
+  kind: 'error' | 'confusing' | 'feature_request' | 'would_use_if' | 'would_not_use_because' | 'other';
   body: string;
   surface?: string;
   platform?: string;
