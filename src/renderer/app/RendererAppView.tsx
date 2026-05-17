@@ -231,7 +231,9 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     cloudModalOpen,
     forgerAccountMessage,
     handleForgerLogin,
+    handleForgerGoogleLogin,
     handleForgerRegister,
+    handleForgerUsernameUpdate,
     codexConfigOpen,
     handleConnectCodexAuth,
     refreshCodexAuthStatus,
@@ -833,7 +835,9 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
         message={forgerAccountMessage}
         onClose={() => setCloudModalOpen(false)}
         onLogin={handleForgerLogin}
+        onGoogleLogin={handleForgerGoogleLogin}
         onRegister={handleForgerRegister}
+        onUpdateUsername={handleForgerUsernameUpdate}
         onLogout={handleForgerLogout}
       />
 
@@ -866,7 +870,10 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
               Para conversar con tus apps o pedir cambios, conecta una cuenta de ChatGPT/Codex o Claude Code.
             </Typography>
             <Alert severity="warning">
-              Claude Code puede usar la sesion local del usuario del computador. Si ya usas Claude Code fuera de Forger, Forger puede detectar esa sesion.
+              {t.agentProvider.quotaDisclaimer}
+            </Alert>
+            <Alert severity="warning">
+              {t.agentProvider.claudeDisclaimer}
             </Alert>
           </Stack>
         </DialogContent>

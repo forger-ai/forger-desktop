@@ -34,6 +34,10 @@ export interface ForgerAccountLoginInput {
   locale?: string;
 }
 
+export interface ForgerAccountProfileInput {
+  username: string;
+}
+
 export interface CloudDeviceAppSummary {
   id: string;
   name: string;

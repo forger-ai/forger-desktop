@@ -80,6 +80,9 @@ export function CodexConfigModal({
           ) : (
             <>
               <Typography color="text.secondary">{t.codexSetup.body}</Typography>
+              <Alert severity="warning">
+                <Typography variant="body2">{t.codexSetup.quotaDisclaimer}</Typography>
+              </Alert>
               <List>
                 {t.codexSetup.steps.map((step, index) => (
                   <ListItem key={step} disableGutters>

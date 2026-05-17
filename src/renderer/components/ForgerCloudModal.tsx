@@ -2,9 +2,12 @@ import { useEffect, useState } from 'react';
 import LoginRounded from '@mui/icons-material/LoginRounded';
 import LogoutRounded from '@mui/icons-material/LogoutRounded';
 import PersonAddAltRounded from '@mui/icons-material/PersonAddAltRounded';
+import GoogleIcon from '@mui/icons-material/Google';
+import EditRounded from '@mui/icons-material/EditRounded';
+import SaveRounded from '@mui/icons-material/SaveRounded';
 import RateReviewRounded from '@mui/icons-material/RateReviewRounded';
-import CloudSyncRounded from '@mui/icons-material/CloudSyncRounded';
-import FeedbackRounded from '@mui/icons-material/FeedbackRounded';
+import PeopleAltRounded from '@mui/icons-material/PeopleAltRounded';
+import SmartphoneRounded from '@mui/icons-material/SmartphoneRounded';
 import CloseRounded from '@mui/icons-material/CloseRounded';
 import OpenInNewRounded from '@mui/icons-material/OpenInNewRounded';
 import countries from 'i18n-iso-countries';
@@ -43,7 +46,9 @@ interface ForgerCloudModalProps {
   message?: string | null;
   onClose: () => void;
   onLogin: (email: string, password: string) => Promise<void>;
+  onGoogleLogin: () => Promise<void>;
   onRegister: (input: ForgerAccountRegisterInput) => Promise<boolean>;
+  onUpdateUsername: (username: string) => Promise<boolean>;
   onLogout: () => Promise<void>;
 }
 
@@ -103,7 +108,9 @@ export function ForgerCloudModal({
   message,
   onClose,
   onLogin,
+  onGoogleLogin,
   onRegister,
+  onUpdateUsername,
   onLogout,
 }: ForgerCloudModalProps) {
   const theme = useTheme();
@@ -116,12 +123,18 @@ export function ForgerCloudModal({
   const [country, setCountry] = useState('');
   const [age, setAge] = useState('');
   const [gender, setGender] = useState<ForgerAccountRegisterInput['gender'] | ''>('');
+  const [profileUsername, setProfileUsername] = useState('');
+  const [editingUsername, setEditingUsername] = useState(false);
 
   useEffect(() => {
     if (open) {
       setMode(account.authenticated ? 'intro' : mode);
+      if (account.user?.username) {
+        setProfileUsername(account.user.username);
+      }
+      setEditingUsername(false);
     }
-  }, [account.authenticated, mode, open]);
+  }, [account.authenticated, account.user?.username, mode, open]);
 
   const submitLogin = () => {
     void onLogin(email, password);
@@ -149,6 +162,13 @@ export function ForgerCloudModal({
     }
   };
 
+  const submitUsernameUpdate = async () => {
+    const success = await onUpdateUsername(profileUsername);
+    if (success) {
+      setEditingUsername(false);
+    }
+  };
+
   const openExternalLink = (url: string) => {
     void window.forger.openExternalUrl(url);
   };
@@ -168,8 +188,8 @@ export function ForgerCloudModal({
 
   const cloudCards = [
     { icon: <RateReviewRounded color="primary" />, title: t.cloud.cards.reviews.title, body: t.cloud.cards.reviews.body },
-    { icon: <FeedbackRounded color="primary" />, title: t.cloud.cards.feedback.title, body: t.cloud.cards.feedback.body },
-    { icon: <CloudSyncRounded color="primary" />, title: t.cloud.cards.sync.title, body: t.cloud.cards.sync.body },
+    { icon: <PeopleAltRounded color="primary" />, title: t.cloud.cards.feedback.title, body: t.cloud.cards.feedback.body },
+    { icon: <SmartphoneRounded color="primary" />, title: t.cloud.cards.sync.title, body: t.cloud.cards.sync.body },
   ];
   const formTitle = mode === 'login' ? t.cloud.loginTitle : mode === 'register' ? t.cloud.registerTitle : null;
 
@@ -230,7 +250,7 @@ export function ForgerCloudModal({
         >
           {message ? <Alert severity={account.authenticated ? 'success' : 'info'}>{message}</Alert> : null}
           {account.authenticated && account.user ? (
-            <Stack spacing={1.5} alignItems="center" textAlign="center">
+            <Stack spacing={1.5} alignItems="center" textAlign="center" sx={{ width: 'min(100%, 420px)' }}>
               <Avatar
                 sx={{
                   width: 54,
@@ -248,6 +268,56 @@ export function ForgerCloudModal({
                 />
               </Avatar>
               <Typography fontWeight={700}>{t.cloud.signedInAs(account.user.email)}</Typography>
+              <Stack spacing={1} alignItems="center" sx={{ width: '100%' }}>
+                {editingUsername ? (
+                  <Stack spacing={1} sx={{ width: '100%' }}>
+                    <TextField
+                      label={t.cloud.username}
+                      value={profileUsername}
+                      onChange={(event) => setProfileUsername(event.target.value)}
+                      placeholder={t.cloud.usernamePlaceholder}
+                      helperText={t.cloud.usernameHelp}
+                      disabled={busy}
+                      fullWidth
+                    />
+                    <Stack direction="row" spacing={1} justifyContent="center">
+                      <Button
+                        variant="contained"
+                        size="small"
+                        startIcon={<SaveRounded />}
+                        onClick={() => void submitUsernameUpdate()}
+                        disabled={busy || !profileUsername.trim()}
+                      >
+                        {t.cloud.saveUsername}
+                      </Button>
+                      <Button
+                        variant="text"
+                        size="small"
+                        onClick={() => {
+                          setProfileUsername(account.user?.username ?? '');
+                          setEditingUsername(false);
+                        }}
+                        disabled={busy}
+                      >
+                        {t.cloud.cancelUsername}
+                      </Button>
+                    </Stack>
+                  </Stack>
+                ) : (
+                  <Stack direction="row" spacing={1} alignItems="center" justifyContent="center">
+                    <Typography color="text.secondary">@{account.user.username}</Typography>
+                    <Button
+                      variant="text"
+                      size="small"
+                      startIcon={<EditRounded />}
+                      onClick={() => setEditingUsername(true)}
+                      disabled={busy}
+                    >
+                      {t.cloud.changeUsername}
+                    </Button>
+                  </Stack>
+                )}
+              </Stack>
               <Typography color="text.secondary">
                 {account.user.confirmed ? t.cloud.confirmed : t.cloud.confirmationRequired}
               </Typography>
@@ -282,13 +352,19 @@ export function ForgerCloudModal({
                       </Box>
                     ))}
                   </Box>
-                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.25} justifyContent="center">
-                    <Button variant="contained" size="large" onClick={() => setMode('login')} startIcon={<LoginRounded />}>
-                      {t.cloud.login}
+                  <Stack spacing={1.25} alignItems="center">
+                    <Button variant="outlined" size="large" onClick={() => void onGoogleLogin()} startIcon={<GoogleIcon />} disabled={busy} sx={{ minWidth: 260 }}>
+                      {t.cloud.googleLogin}
                     </Button>
-                    <Button variant="outlined" size="large" onClick={() => setMode('register')} startIcon={<PersonAddAltRounded />}>
-                      {t.cloud.register}
-                    </Button>
+                    <Divider flexItem>{t.cloud.or}</Divider>
+                    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.25} justifyContent="center" sx={{ width: '100%' }}>
+                      <Button variant="contained" size="large" onClick={() => setMode('login')} startIcon={<LoginRounded />}>
+                        {t.cloud.login}
+                      </Button>
+                      <Button variant="outlined" size="large" onClick={() => setMode('register')} startIcon={<PersonAddAltRounded />}>
+                        {t.cloud.register}
+                      </Button>
+                    </Stack>
                   </Stack>
                 </Stack>
               ) : null}
@@ -304,6 +380,9 @@ export function ForgerCloudModal({
                   <TextField label={t.settings.passwordLabel} type="password" value={password} onChange={(event) => setPassword(event.target.value)} fullWidth />
                   <Button variant="contained" startIcon={<LoginRounded />} onClick={submitLogin} disabled={busy || !email.trim() || !password.trim()} fullWidth>
                     {t.cloud.login}
+                  </Button>
+                  <Button variant="outlined" startIcon={<GoogleIcon />} onClick={() => void onGoogleLogin()} disabled={busy} fullWidth>
+                    {t.cloud.googleLogin}
                   </Button>
                   <Divider flexItem>{t.cloud.noAccount}</Divider>
                   <Button variant="text" onClick={() => setMode('register')}>
@@ -327,7 +406,7 @@ export function ForgerCloudModal({
                     label={t.cloud.username}
                     value={username}
                     onChange={(event) => setUsername(event.target.value)}
-                    placeholder="username"
+                    placeholder={t.cloud.usernamePlaceholder}
                     helperText={t.cloud.usernameHelp}
                     fullWidth
                   />
@@ -377,6 +456,9 @@ export function ForgerCloudModal({
                   </TextField>
                   <Button variant="contained" startIcon={<PersonAddAltRounded />} onClick={submitRegister} disabled={busy || !firstName.trim() || !username.trim() || !email.trim() || !password.trim()} fullWidth>
                     {t.cloud.register}
+                  </Button>
+                  <Button variant="outlined" startIcon={<GoogleIcon />} onClick={() => void onGoogleLogin()} disabled={busy} fullWidth>
+                    {t.cloud.googleLogin}
                   </Button>
                   <Divider>{t.cloud.hasAccount}</Divider>
                   <Button variant="text" onClick={() => setMode('login')}>

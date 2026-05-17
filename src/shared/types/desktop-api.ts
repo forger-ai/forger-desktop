@@ -9,7 +9,7 @@ import type { InstallWelcomeResult } from './chat';
 import type { AppSecretsState, UserSecretSummary, CreateUserSecretInput, UpdateUserSecretInput, DeleteUserSecretInput, ConnectAppSecretInput, DisconnectAppSecretInput, SecretMutationResult } from './secrets';
 import type { Settings, UpdateCodexDefaultsInput, UpdateAgentDefaultsInput, MemoryListInput, MemoryEntry, MemoryCreateInput, MemoryUpdateInput } from './settings';
 import type { DesktopUpdateState } from './updates';
-import type { ForgerAccountSession, ForgerAccountRegisterInput, ForgerAccountLoginInput, CloudDevicesState } from './account';
+import type { ForgerAccountSession, ForgerAccountRegisterInput, ForgerAccountLoginInput, ForgerAccountProfileInput, CloudDevicesState } from './account';
 import type { FriendChatWindowOpenResult, CloudFriendship, CloudFriendUser, CloudMessage, CloudSendMessageInput, CloudAppMessagePermissionDecision, CloudSocialEvent, CloudIdentityState } from './social';
 import type { AppRatingSummary, SubmitAppRatingInput, SubmitProductFeedbackInput } from './feedback';
 import type { SubmitUsageEventInput, SubmitUsageEventResult } from './usage-events';
@@ -66,6 +66,8 @@ export interface ForgerDesktopApi {
   getForgerAccount: () => Promise<ForgerAccountSession>;
   registerForgerAccount: (input: ForgerAccountRegisterInput) => Promise<ForgerAccountSession & { success: boolean; userMessage?: string; technicalCode?: string }>;
   loginForgerAccount: (input: ForgerAccountLoginInput) => Promise<ForgerAccountSession & { success: boolean; userMessage?: string; technicalCode?: string }>;
+  loginForgerAccountWithGoogle: () => Promise<ForgerAccountSession & { success: boolean; userMessage?: string; technicalCode?: string }>;
+  updateForgerAccountProfile: (input: ForgerAccountProfileInput) => Promise<ForgerAccountSession & { success: boolean; userMessage?: string; technicalCode?: string }>;
   logoutForgerAccount: () => Promise<ForgerAccountSession & { success: boolean }>;
   onForgerAccountUpdated: (listener: (event: ForgerAccountSession & { userMessage?: string; technicalCode?: string }) => void) => () => void;
   getCloudDevices: () => Promise<CloudDevicesState>;

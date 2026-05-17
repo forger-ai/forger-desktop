@@ -31,6 +31,7 @@ export function ClaudeConfigModal({
   open,
   status,
   busy,
+  t,
   onClose,
   onConnect,
   onRefresh,
@@ -64,6 +65,9 @@ export function ClaudeConfigModal({
           <Typography color="text.secondary">
             Si Claude Code ya esta instalado en este equipo, Forger lo detecta y lo puede usar. Si no existe, Forger instala una copia local con su runtime de Node.
           </Typography>
+          <Alert severity="warning">
+            <Typography variant="body2">{t.agentProvider.claudeQuotaDisclaimer}</Typography>
+          </Alert>
           <Stack spacing={0.75}>
             <Typography variant="body2">
               {connectionDetail}
