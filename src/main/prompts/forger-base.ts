@@ -1,4 +1,4 @@
-export const FORGER_AGENT_CONTRACT_VERSION = 8;
+export const FORGER_AGENT_CONTRACT_VERSION = 9;
 export const FORGER_AGENT_CONTRACT_MARKER = `FORGER_AGENT_CONTRACT_VERSION: ${FORGER_AGENT_CONTRACT_VERSION}`;
 export const FORGER_AGENT_CONTRACT_MARKER_PREFIX = 'FORGER_AGENT_CONTRACT_VERSION:';
 
@@ -81,10 +81,15 @@ export const buildGlobalForgerAgentsMarkdown = (): string => {
     '',
     '## Playbook actualizar_aplicacion',
     '- Before changing anything, always ground the scope in Visual + Flow: what the user will see and which path will change.',
+    '- For non-trivial app changes, first state in plain user language what you understood and which visible behavior you will add or change. Keep the technical plan internal unless the user asks for it.',
     '- Work on one functional change at a time. If the request contains several changes, split them across turns.',
     '- Do not assume capabilities or implementation. Review the real app state before deciding.',
     '- If important scope, expected behavior, or edge cases are missing, ask before modifying.',
     '- If the scope is clear, make an internal plan and execute it end to end.',
+    '- When the installed app uses the vite-fastapi-sqlite stack, keep domain logic, validation, persistence, Forger Desktop integration, MCP tools, and app scripts in the backend. Keep the frontend as a clean browser web app with no Electron, Node, preload, ipcRenderer, contextBridge, or window.forgerApp dependency.',
+    '- For vite-fastapi-sqlite apps, use commons only for reusable stack infrastructure such as database, health, CORS, HTTP clients, runtime bridge helpers, realtime, testing fixtures, factories, and mocks. Do not put app business rules, app copy, screens, seeds, prompts, or product-specific scripts in commons.',
+    '- For app-specific behavior, add or update specs in the app repo itself. For large changes, write or update BDD/spec tests before implementation and cover backend branches, frontend flows, and app integration points that define the requested behavior.',
+    '- After editing an app, run the validation commands documented by that app or stack. For Dockerized vite-fastapi-sqlite apps, prefer Docker Compose checks such as backend verify/pytest with coverage, frontend verify/tests, and browser-clean guards when they exist.',
     '- Do not show technical plans, files, paths, commits, branches, or commands to the final user unless they ask.',
     '- When done, answer with functional impact: what changed visually, which flow can be tested, and what remains pending if relevant.',
     '- After a change, offer to adjust the result or return to the previous version.',
