@@ -9,18 +9,23 @@ import type {
   AppCodexConversation,
   AppCodexConversationEvent,
   AppCodexConversationSendMessageInput,
+  AppCodexTaskStartInput,
   AgentProvider,
 } from '../shared/types';
+import type { AppAgentTaskManager } from './app-agent-task-manager';
 import type { AppAgentConversationManager } from './app-agent-conversation-manager';
 
-const MAX_BODY_BYTES = 512 * 1024;
+const MAX_BODY_BYTES = 96 * 1024 * 1024;
 const SIGNATURE_WINDOW_MS = 5 * 60 * 1000;
 
 export interface DesktopRuntimeBridgeOptions {
   getInstalledApp: (appId: string) => unknown;
   getConversationManager: () => AppAgentConversationManager | null;
+  getTaskManager?: () => AppAgentTaskManager | null;
+  getTaskStatus?: (appId: string) => Promise<Record<string, unknown>>;
   appendInstallLog: (event: string, payload?: Record<string, unknown>) => Promise<void>;
   serializeErrorForInstallLog: (error: unknown) => Record<string, unknown>;
+  maxBodyBytes?: number;
 }
 
 export class DesktopRuntimeBridge {
@@ -106,7 +111,7 @@ export class DesktopRuntimeBridge {
     try {
       const method = request.method ?? 'GET';
       const url = new URL(request.url ?? '/', 'http://127.0.0.1');
-      const bodyText = await readBody(request);
+      const bodyText = await readBody(request, this.options.maxBodyBytes ?? MAX_BODY_BYTES);
       const appId = this.authorize(request, method, url.pathname, bodyText);
       const result = await this.route(appId, method, url.pathname, bodyText);
       writeJson(response, 200, result);
@@ -191,6 +196,47 @@ export class DesktopRuntimeBridge {
   }
 
   private async route(appId: string, method: string, pathname: string, bodyText: string): Promise<unknown> {
+    const taskStatusMatch = pathname.match(/^\/v1\/apps\/([^/]+)\/agent-tasks\/status$/);
+    if (taskStatusMatch) {
+      if (decodeURIComponent(taskStatusMatch[1]) !== appId) {
+        throw new BridgeError(403, 'desktop_runtime_app_forbidden');
+      }
+      if (method !== 'GET') {
+        throw new BridgeError(404, 'desktop_runtime_route_not_found');
+      }
+      const taskManager = this.options.getTaskManager?.() ?? null;
+      const status = await (this.options.getTaskStatus?.(appId) ?? Promise.resolve({}));
+      return {
+        available: Boolean(taskManager),
+        ...status,
+      };
+    }
+
+    const taskMatch = pathname.match(/^\/v1\/apps\/([^/]+)\/agent-tasks(?:\/([^/]+))?(?:\/cancel)?$/);
+    if (taskMatch) {
+      if (decodeURIComponent(taskMatch[1]) !== appId) {
+        throw new BridgeError(403, 'desktop_runtime_app_forbidden');
+      }
+      const taskManager = this.options.getTaskManager?.() ?? null;
+      if (!taskManager) {
+        throw new BridgeError(503, 'desktop_runtime_agent_task_manager_unavailable');
+      }
+      const runId = taskMatch[2] ? decodeURIComponent(taskMatch[2]) : '';
+      const isCancel = pathname.endsWith('/cancel');
+      const body = parseJsonBody(bodyText);
+
+      if (method === 'POST' && !runId && !isCancel) {
+        return await taskManager.start(appId, body as unknown as AppCodexTaskStartInput);
+      }
+      if (method === 'GET' && runId && !isCancel) {
+        return taskManager.get(appId, runId);
+      }
+      if (method === 'POST' && runId && isCancel) {
+        return taskManager.cancel(appId, runId);
+      }
+      throw new BridgeError(404, 'desktop_runtime_route_not_found');
+    }
+
     const manager = this.options.getConversationManager();
     if (!manager) {
       throw new BridgeError(503, 'desktop_runtime_agent_manager_unavailable');
@@ -202,7 +248,7 @@ export class DesktopRuntimeBridge {
     const threadId = match[2] ? decodeURIComponent(match[2]) : '';
     const runId = match[3] ? decodeURIComponent(match[3]) : '';
     const isCancel = pathname.endsWith('/cancel');
-    const body = bodyText ? JSON.parse(bodyText) as Record<string, unknown> : {};
+    const body = parseJsonBody(bodyText);
 
     if (method === 'POST' && !threadId && !runId) {
       const input = body as unknown as AppAgentThreadCreateInput;
@@ -324,13 +370,31 @@ class BridgeError extends Error {
   }
 }
 
-const readBody = async (request: IncomingMessage): Promise<string> => {
+const parseJsonBody = (bodyText: string): Record<string, unknown> => {
+  if (!bodyText) {
+    return {};
+  }
+  try {
+    const parsed = JSON.parse(bodyText) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new BridgeError(400, 'desktop_runtime_body_invalid');
+    }
+    return parsed as Record<string, unknown>;
+  } catch (error) {
+    if (error instanceof BridgeError) {
+      throw error;
+    }
+    throw new BridgeError(400, 'desktop_runtime_body_invalid');
+  }
+};
+
+const readBody = async (request: IncomingMessage, maxBodyBytes: number): Promise<string> => {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of request) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     size += buffer.length;
-    if (size > MAX_BODY_BYTES) {
+    if (size > maxBodyBytes) {
       throw new BridgeError(413, 'desktop_runtime_body_too_large');
     }
     chunks.push(buffer);
