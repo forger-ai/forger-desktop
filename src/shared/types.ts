@@ -1,7 +1,7 @@
 import type { ForgerAppApi } from './types/app-api';
 
 export type { AgentDefaults, AgentEffort, AgentModelOptions, AgentProvider, AgentRuntime, ClaudeEffort, CodexModelOption, CodexReasoningEffort } from './types/agent-runtime';
-export type { ForgerAccountLoginInput, ForgerAccountRegisterInput, ForgerAccountSession, ForgerAccountUser, SubscriptionTier, CloudDeviceAppSummary, CloudDeviceSummary, CloudDevicesState } from './types/account';
+export type { ForgerAccountLoginInput, ForgerAccountProfileInput, ForgerAccountRegisterInput, ForgerAccountSession, ForgerAccountUser, SubscriptionTier, CloudDeviceAppSummary, CloudDeviceSummary, CloudDevicesState } from './types/account';
 export type { AppAgentPromptSet, AppAgentPromptTemplate, AppAgentPromptVariable, AppAgentPromptVariableType, AppAgent, AppPromptMutationResult, AppPromptRestoreInput, AppPromptReviewInput, AppPromptReviewItem, AppPromptReviewKind, AppPromptSettingSource, AppPromptTemplate, AppPromptTemplateArgument, AppPromptTemplateArgumentType, AppPromptValidationResult } from './types/prompts';
 export type { AppCapability, AppCategory, AppStatus, AppSummary, CatalogPublicationStatus, VersionChangelog } from './types/catalog';
 export type { CatalogApp } from './types/catalog-app';

@@ -8,13 +8,13 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const { ForgerBackendClient } = require('../../dist-electron/main/forger-backend-client.js');
 
-const createClient = (root, fetchImpl) => {
+const createClient = (root, fetchImpl, token = undefined) => {
   const previousFetch = globalThis.fetch;
   globalThis.fetch = fetchImpl;
   const client = new ForgerBackendClient({
     backendBaseUrl: 'https://platform.test',
     localCatalogJsonUrl: () => undefined,
-    token: () => undefined,
+    token: () => token,
     mapBackendCategory: () => 'productividad',
     toCatalogStatus: () => 'not_installed',
     getUserMessage: () => undefined,
@@ -42,6 +42,40 @@ const readLogEntries = async (root) => {
   const raw = await readFile(join(root, 'reporting.log'), 'utf8');
   return raw.trim().split('\n').map((line) => JSON.parse(line));
 };
+
+test('updateAccountProfile sends username with the current Forger token and parses the account payload', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'forger-profile-test-'));
+  let requestUrl;
+  let requestInit;
+  const harness = createClient(root, async (url, init) => {
+    requestUrl = url;
+    requestInit = init;
+    return jsonResponse(200, {
+      authenticated: true,
+      user: {
+        id: 7,
+        email: 'felipe@example.com',
+        username: 'felipe_cloud',
+        confirmed: true,
+        subscription_tier: 'free',
+      },
+    });
+  }, 'session-token');
+
+  try {
+    const result = await harness.client.updateAccountProfile({ username: 'felipe_cloud' });
+
+    assert.equal(requestUrl, 'https://platform.test/api/v1/me/profile');
+    assert.equal(requestInit.method, 'PATCH');
+    assert.equal(requestInit.headers.Authorization, 'Bearer session-token');
+    assert.equal(JSON.parse(requestInit.body).username, 'felipe_cloud');
+    assert.equal(result.success, true);
+    assert.equal(result.user.username, 'felipe_cloud');
+  } finally {
+    harness.restore();
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test('submitProductFeedback normalizes platform in main and logs successful attempts without the body', async () => {
   const root = await mkdtemp(join(tmpdir(), 'forger-feedback-test-'));
@@ -222,6 +256,87 @@ test('submitUsageEvent logs failed attempts without parameter values', async () 
     assert.equal(entry.eventName, 'app_opened');
     assert.equal(entry.requestId, 'req-usage-422');
     assert.equal(JSON.stringify(entry).includes('finance-os'), false);
+  } finally {
+    harness.restore();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('getGoogleLoginOAuthClientId reads the public Google login config', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'forger-google-login-test-'));
+  const harness = createClient(root, async (url) => {
+    assert.equal(url, 'https://platform.test/api/v1/oauth/google/config');
+    return jsonResponse(200, { client_id: 'forger-cloud.apps.googleusercontent.com' });
+  });
+
+  try {
+    const clientId = await harness.client.getGoogleLoginOAuthClientId();
+    assert.equal(clientId, 'forger-cloud.apps.googleusercontent.com');
+  } finally {
+    harness.restore();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('createGoogleLoginSession returns the existing Forger account session shape', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'forger-google-login-test-'));
+  let requestBody;
+  const harness = createClient(root, async (url, init) => {
+    assert.equal(url, 'https://platform.test/api/v1/oauth/google/session');
+    requestBody = JSON.parse(init.body);
+    return jsonResponse(201, {
+      authenticated: true,
+      token: 'forger-token',
+      user: {
+        id: 7,
+        email: 'user@example.com',
+        username: 'user',
+        confirmed: true,
+        subscription_tier: 'free',
+      },
+    });
+  });
+
+  try {
+    const result = await harness.client.createGoogleLoginSession({
+      clientId: 'client-id',
+      code: 'code',
+      codeVerifier: 'verifier',
+      redirectUri: 'http://127.0.0.1:1234/oauth/google/callback',
+    });
+
+    assert.equal(result.success, true);
+    assert.equal(result.authenticated, true);
+    assert.equal(result.token, 'forger-token');
+    assert.equal(result.user.email, 'user@example.com');
+    assert.deepEqual(requestBody, {
+      client_id: 'client-id',
+      code: 'code',
+      code_verifier: 'verifier',
+      redirect_uri: 'http://127.0.0.1:1234/oauth/google/callback',
+    });
+  } finally {
+    harness.restore();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('createGoogleLoginSession maps backend Google login failures to a safe result', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'forger-google-login-test-'));
+  const harness = createClient(root, async () => jsonResponse(403, { error: 'google_login_email_unverified' }));
+
+  try {
+    const result = await harness.client.createGoogleLoginSession({
+      clientId: 'client-id',
+      code: 'code',
+      codeVerifier: 'verifier',
+      redirectUri: 'http://127.0.0.1:1234/oauth/google/callback',
+    });
+
+    assert.equal(result.success, false);
+    assert.equal(result.authenticated, false);
+    assert.equal(result.technicalCode, 'google_login_failed_403');
+    assert.equal(result.userMessage, 'Google no confirmo este correo.');
   } finally {
     harness.restore();
     await rm(root, { recursive: true, force: true });

@@ -47,6 +47,8 @@ const IPC_CHANNELS = {
   getForgerAccount: 'forger:account:get',
   registerForgerAccount: 'forger:account:register',
   loginForgerAccount: 'forger:account:login',
+  loginForgerAccountWithGoogle: 'forger:account:login-google',
+  updateForgerAccountProfile: 'forger:account:update-profile',
   logoutForgerAccount: 'forger:account:logout',
   forgerAccountUpdated: 'forger:account:updated',
   getCloudDevices: 'forger:cloud-devices:get',
@@ -207,6 +209,8 @@ const api: ForgerDesktopApi = {
   getForgerAccount: () => ipcRenderer.invoke(IPC_CHANNELS.getForgerAccount),
   registerForgerAccount: (input) => ipcRenderer.invoke(IPC_CHANNELS.registerForgerAccount, input),
   loginForgerAccount: (input) => ipcRenderer.invoke(IPC_CHANNELS.loginForgerAccount, input),
+  loginForgerAccountWithGoogle: () => ipcRenderer.invoke(IPC_CHANNELS.loginForgerAccountWithGoogle),
+  updateForgerAccountProfile: (input) => ipcRenderer.invoke(IPC_CHANNELS.updateForgerAccountProfile, input),
   logoutForgerAccount: () => ipcRenderer.invoke(IPC_CHANNELS.logoutForgerAccount),
   onForgerAccountUpdated: (listener) => {
     const wrapped = (_event: unknown, payload: Parameters<typeof listener>[0]) => {

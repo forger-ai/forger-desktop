@@ -7,6 +7,7 @@ import type {
   RemoteBackupType,
   RemoteBackupSource,
   ForgerAccountLoginInput,
+  ForgerAccountProfileInput,
   ForgerAccountRegisterInput,
   ForgerAccountSession,
   DesktopErrorReportPreview,
@@ -100,6 +101,13 @@ interface GmailOAuthTokenResponse {
   scope?: string;
   error?: string;
   error_description?: string;
+}
+
+interface GoogleLoginSessionInput {
+  clientId: string;
+  code: string;
+  codeVerifier: string;
+  redirectUri: string;
 }
 
 const backendError = (message: string, technicalCode: string): Error & { technicalCode: string } =>
@@ -320,6 +328,35 @@ export class ForgerBackendClient {
     }).catch(() => undefined);
   }
 
+  async updateAccountProfile(
+    input: ForgerAccountProfileInput,
+  ): Promise<StoredForgerAccount & { success: boolean; userMessage?: string; technicalCode?: string }> {
+    const response = await fetch(`${this.options.backendBaseUrl}/api/v1/me/profile`, {
+      method: 'PATCH',
+      headers: {
+        ...this.buildHeaders(),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        username: input.username,
+      }),
+    });
+    const payload = await this.readJson<Record<string, unknown>>(response);
+
+    if (!response.ok) {
+      return {
+        success: false,
+        authenticated: Boolean(this.options.token()),
+        userMessage: response.status === 422
+          ? 'Ese username no esta disponible o no cumple el formato.'
+          : 'No pudimos actualizar tu perfil.',
+        technicalCode: `profile_update_failed_${response.status}`,
+      };
+    }
+
+    return { ...this.parseAccount(payload), success: true, userMessage: 'Username actualizado.' };
+  }
+
   async getGmailOAuthClientId(): Promise<string> {
     const response = await fetch(`${this.options.backendBaseUrl}/api/v1/oauth/gmail/config`, {
       method: 'GET',
@@ -358,6 +395,55 @@ export class ForgerBackendClient {
       client_id: input.clientId,
       refresh_token: input.refreshToken,
     });
+  }
+
+  async getGoogleLoginOAuthClientId(): Promise<string> {
+    const response = await fetch(`${this.options.backendBaseUrl}/api/v1/oauth/google/config`, {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json',
+      },
+    });
+    const payload = await this.readJson<Record<string, unknown>>(response);
+    if (!response.ok) {
+      throw backendError('Google login no esta configurado en Forger Cloud.', `google_login_config_failed_${response.status}`);
+    }
+    const clientId = typeof payload?.client_id === 'string' ? payload.client_id.trim() : '';
+    if (!clientId) {
+      throw backendError('Google login no esta configurado en Forger Cloud.', 'google_login_client_missing');
+    }
+    return clientId;
+  }
+
+  async createGoogleLoginSession(
+    input: GoogleLoginSessionInput,
+  ): Promise<StoredForgerAccount & { success: boolean; userMessage?: string; technicalCode?: string }> {
+    const response = await fetch(`${this.options.backendBaseUrl}/api/v1/oauth/google/session`, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        client_id: input.clientId,
+        code: input.code,
+        code_verifier: input.codeVerifier,
+        redirect_uri: input.redirectUri,
+      }),
+    });
+    const payload = await this.readJson<Record<string, unknown>>(response);
+    const token = payload && typeof payload.token === 'string' ? payload.token : undefined;
+
+    if (!response.ok || !token) {
+      return {
+        success: false,
+        authenticated: false,
+        userMessage: this.googleLoginErrorMessage(payload),
+        technicalCode: `google_login_failed_${response.status}`,
+      };
+    }
+
+    return { ...this.parseAccount(payload, token), success: true, userMessage: 'Sesion iniciada.' };
   }
 
   async registerDevice(input: {
@@ -1043,6 +1129,23 @@ export class ForgerBackendClient {
       return 'Llegaste al maximo de respaldos cloud. Elimina algunos antes de subir otro.';
     }
     return 'No pudimos subir el respaldo a Forger Cloud.';
+  }
+
+  private googleLoginErrorMessage(payload: unknown): string {
+    const error = payload && typeof payload === 'object' ? (payload as Record<string, unknown>).error : undefined;
+    if (error === 'google_login_server_not_configured') {
+      return 'Google login no esta configurado en Forger Cloud.';
+    }
+    if (error === 'google_login_email_unverified') {
+      return 'Google no confirmo este correo.';
+    }
+    if (error === 'google_login_account_conflict') {
+      return 'Este correo ya esta vinculado a otra cuenta de Google.';
+    }
+    if (error === 'access_denied') {
+      return 'Google cancelo el inicio de sesion.';
+    }
+    return 'No pudimos iniciar sesion con Google.';
   }
 
   private parseAccount(payload: unknown, token?: string): StoredForgerAccount {
