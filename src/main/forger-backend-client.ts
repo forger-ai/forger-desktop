@@ -22,8 +22,11 @@ import type {
   RemoteBackupsUsage,
   SubmitProductFeedbackInput,
   SubmitAppRatingInput,
+  SubmitUsageEventInput,
+  SubmitUsageEventResult,
 } from '../shared/types';
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { normalizeErrorReportDiagnostic } from '../shared/error-diagnostics';
 import { normalizeForgerAccountUser, type StoredForgerAccount } from './forger-account-store';
@@ -47,6 +50,9 @@ interface ClientOptions {
   mapBackendCategory: (backendCategory: string) => AppCategory;
   toCatalogStatus: (slug: string) => AppStatus;
   getUserMessage: (slug: string) => string | undefined;
+  platform?: () => string;
+  desktopVersion?: () => string;
+  reportingLogPath?: () => string;
 }
 
 interface DownloadPayload {
@@ -99,6 +105,44 @@ interface GmailOAuthTokenResponse {
 const backendError = (message: string, technicalCode: string): Error & { technicalCode: string } =>
   Object.assign(new Error(message), { technicalCode });
 
+const normalizeRuntimePlatform = (platform: NodeJS.Platform, arch: string): string => {
+  const normalizedArch = arch === 'x64' || arch === 'arm64' ? arch : arch.replace(/[^a-zA-Z0-9_-]/g, '_');
+  return `${platform}_${normalizedArch}`;
+};
+
+const safeValidationKeys = (payload: unknown): Record<string, string[]> | undefined => {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return undefined;
+  }
+  const errors = (payload as { errors?: unknown }).errors;
+  if (!errors || typeof errors !== 'object' || Array.isArray(errors)) {
+    return undefined;
+  }
+  const entries = Object.entries(errors)
+    .filter(([key]) => /^[a-zA-Z0-9_.-]+$/.test(key))
+    .map(([key, value]) => [
+      key,
+      Array.isArray(value)
+        ? value.map((entry) => String(entry)).slice(0, 5)
+        : [String(value)],
+    ] as const);
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+};
+
+const responseRequestId = (response: Response): string | undefined =>
+  response.headers.get('x-request-id') ?? response.headers.get('x-correlation-id') ?? undefined;
+
+const defaultReportingLogPath = (): string => {
+  const appDataName = process.env.VITE_DEV_SERVER_URL ? 'forger-desktop-dev' : 'forger-desktop';
+  if (process.platform === 'darwin') {
+    return path.join(os.homedir(), 'Library', 'Application Support', appDataName, 'logs', 'reporting.log');
+  }
+  if (process.platform === 'win32') {
+    return path.join(process.env.APPDATA ?? os.homedir(), appDataName, 'logs', 'reporting.log');
+  }
+  return path.join(process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), '.config'), appDataName, 'logs', 'reporting.log');
+};
+
 const emptyRemoteBackupsState = (): RemoteBackupsState => ({
   backups: [],
   usage: {
@@ -111,6 +155,32 @@ const emptyRemoteBackupsState = (): RemoteBackupsState => ({
 
 export class ForgerBackendClient {
   constructor(private readonly options: ClientOptions) {}
+
+  private desktopPlatform(): string {
+    return this.options.platform?.() ?? normalizeRuntimePlatform(process.platform, process.arch);
+  }
+
+  private desktopVersion(): string | undefined {
+    return this.options.desktopVersion?.();
+  }
+
+  private async appendReportingLog(event: string, details: Record<string, unknown>): Promise<void> {
+    const logPath = this.options.reportingLogPath?.() ?? defaultReportingLogPath();
+    if (!logPath) {
+      return;
+    }
+    const entry = {
+      timestamp: new Date().toISOString(),
+      event,
+      ...details,
+    };
+    try {
+      await fs.mkdir(path.dirname(logPath), { recursive: true });
+      await fs.appendFile(logPath, `${JSON.stringify(entry)}\n`, 'utf8');
+    } catch {
+      // Reporting logs must never break user-facing flows.
+    }
+  }
 
   async listCatalogApps(): Promise<CatalogApp[]> {
     let backendApps: CatalogApp[] = [];
@@ -483,63 +553,217 @@ export class ForgerBackendClient {
 
   async submitProductFeedback(
     input: SubmitProductFeedbackInput,
-  ): Promise<{ success: boolean; userMessage?: string; technicalCode?: string }> {
-    const response = await fetch(`${this.options.backendBaseUrl}/api/v1/feedbacks`, {
-      method: 'POST',
-      headers: {
-        ...this.buildHeaders(),
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        target: input.target,
-        app_id: input.appId,
-        kind: input.kind,
-        body: input.body,
-        surface: input.surface,
-        locale: input.locale,
-        platform: input.platform,
-        desktop_version: input.desktopVersion,
-        app_version_label: input.appVersionLabel,
-      }),
-    });
+  ): Promise<{ success: boolean; userMessage?: string; technicalCode?: string; details?: Record<string, unknown> }> {
+    const platform = this.desktopPlatform();
+    const desktopVersion = input.desktopVersion ?? this.desktopVersion();
+    const logBase = {
+      operation: 'feedback.submit',
+      target: input.target,
+      kind: input.kind,
+      appId: input.appId,
+      appVersionLabel: input.appVersionLabel,
+      desktopVersion,
+      platform,
+    };
+    try {
+      const response = await fetch(`${this.options.backendBaseUrl}/api/v1/feedbacks`, {
+        method: 'POST',
+        headers: {
+          ...this.buildHeaders(),
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          target: input.target,
+          app_id: input.appId,
+          kind: input.kind,
+          body: input.body,
+          surface: input.surface,
+          locale: input.locale,
+          platform,
+          desktop_version: desktopVersion,
+          app_version_label: input.appVersionLabel,
+        }),
+      });
+      const payload = await this.readJson<unknown>(response);
+      const requestId = responseRequestId(response);
 
-    if (!response.ok) {
-      return { success: false, userMessage: 'No pudimos enviar el feedback.', technicalCode: `feedback_failed_${response.status}` };
+      if (!response.ok) {
+        const technicalCode = `feedback_failed_${response.status}`;
+        const validationErrors = safeValidationKeys(payload);
+        await this.appendReportingLog('feedback:submit_failed', {
+          ...logBase,
+          success: false,
+          httpStatus: response.status,
+          technicalCode,
+          requestId,
+          validationErrors,
+        });
+        return {
+          success: false,
+          userMessage: 'No pudimos enviar el feedback.',
+          technicalCode,
+          details: {
+            httpStatus: response.status,
+            requestId,
+            validationErrors,
+          },
+        };
+      }
+
+      await this.appendReportingLog('feedback:submit_success', {
+        ...logBase,
+        success: true,
+        httpStatus: response.status,
+        requestId,
+      });
+      return { success: true, userMessage: 'Feedback enviado.' };
+    } catch (error) {
+      const technicalCode = 'feedback_network_failed';
+      await this.appendReportingLog('feedback:submit_failed', {
+        ...logBase,
+        success: false,
+        technicalCode,
+        errorName: error instanceof Error ? error.name : undefined,
+        errorMessage: error instanceof Error ? error.message : String(error),
+      });
+      return {
+        success: false,
+        userMessage: 'No pudimos enviar el feedback.',
+        technicalCode,
+        details: { reason: 'network_or_fetch_error' },
+      };
     }
+  }
 
-    return { success: true, userMessage: 'Feedback enviado.' };
+  async submitUsageEvent(input: SubmitUsageEventInput): Promise<SubmitUsageEventResult> {
+    const platform = input.platform ?? this.desktopPlatform();
+    const desktopVersion = input.desktopVersion ?? this.desktopVersion();
+    try {
+      const response = await fetch(`${this.options.backendBaseUrl}/api/v1/usage_events`, {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          event_name: input.eventName,
+          installation_identifier: input.installationIdentifier,
+          surface: input.surface,
+          desktop_version: desktopVersion,
+          platform,
+          locale: input.locale,
+          occurred_at: input.occurredAt,
+          string_parameters: input.stringParameters ?? {},
+          int_parameters: input.intParameters ?? {},
+        }),
+      });
+      const payload = await this.readJson<unknown>(response);
+      const requestId = responseRequestId(response);
+
+      if (!response.ok) {
+        const technicalCode = `usage_event_failed_${response.status}`;
+        await this.appendReportingLog('usage_event:submit_failed', {
+          eventName: input.eventName,
+          surface: input.surface,
+          success: false,
+          httpStatus: response.status,
+          technicalCode,
+          requestId,
+          validationErrors: safeValidationKeys(payload),
+        });
+        return {
+          success: false,
+          userMessage: 'No pudimos enviar la métrica de uso.',
+          technicalCode,
+          details: {
+            httpStatus: response.status,
+            requestId,
+            validationErrors: safeValidationKeys(payload),
+          },
+        };
+      }
+
+      return { success: true };
+    } catch (error) {
+      await this.appendReportingLog('usage_event:submit_failed', {
+        eventName: input.eventName,
+        surface: input.surface,
+        success: false,
+        technicalCode: 'usage_event_network_failed',
+        errorName: error instanceof Error ? error.name : undefined,
+      });
+      return { success: false, technicalCode: 'usage_event_network_failed' };
+    }
   }
 
   async submitDesktopErrorReport(
     input: DesktopErrorReportPreview,
   ): Promise<{ success: boolean; userMessage: string; technicalCode?: string }> {
     const report = normalizeErrorReportDiagnostic(input);
-    const response = await fetch(`${this.options.backendBaseUrl}/api/v1/desktop_error_reports`, {
-      method: 'POST',
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        source: report.source,
-        operation: report.operation,
-        message: report.message,
-        technical_code: report.technicalCode,
-        desktop_version: report.desktopVersion,
-        platform: report.platform,
-        arch: report.arch,
-        app_id: report.appId,
-        app_version: report.appVersion,
-        details: report.details ?? {},
-        sensitive_details: report.sensitiveDetails ?? {},
-      }),
-    });
+    const logBase = {
+      operation: 'desktop_error_report.submit',
+      source: report.source,
+      reportOperation: report.operation,
+      technicalCode: report.technicalCode,
+      appId: report.appId,
+      appVersion: report.appVersion,
+      desktopVersion: report.desktopVersion,
+      platform: report.platform,
+      arch: report.arch,
+    };
+    try {
+      const response = await fetch(`${this.options.backendBaseUrl}/api/v1/desktop_error_reports`, {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          source: report.source,
+          operation: report.operation,
+          message: report.message,
+          technical_code: report.technicalCode,
+          desktop_version: report.desktopVersion,
+          platform: report.platform,
+          arch: report.arch,
+          app_id: report.appId,
+          app_version: report.appVersion,
+          details: report.details ?? {},
+          sensitive_details: report.sensitiveDetails ?? {},
+        }),
+      });
+      const requestId = responseRequestId(response);
 
-    if (!response.ok) {
-      return { success: false, userMessage: 'No pudimos enviar el reporte.', technicalCode: `desktop_error_report_failed_${response.status}` };
+      if (!response.ok) {
+        const technicalCode = `desktop_error_report_failed_${response.status}`;
+        await this.appendReportingLog('desktop_error_report:submit_failed', {
+          ...logBase,
+          success: false,
+          httpStatus: response.status,
+          requestId,
+          technicalCode,
+        });
+        return { success: false, userMessage: 'No pudimos enviar el reporte.', technicalCode };
+      }
+
+      await this.appendReportingLog('desktop_error_report:submit_success', {
+        ...logBase,
+        success: true,
+        httpStatus: response.status,
+        requestId,
+      });
+      return { success: true, userMessage: 'Reporte enviado. Gracias por ayudarnos a corregir Forger.' };
+    } catch (error) {
+      const technicalCode = 'desktop_error_report_network_failed';
+      await this.appendReportingLog('desktop_error_report:submit_failed', {
+        ...logBase,
+        success: false,
+        technicalCode,
+        errorName: error instanceof Error ? error.name : undefined,
+        errorMessage: error instanceof Error ? error.message : String(error),
+      });
+      return { success: false, userMessage: 'No pudimos enviar el reporte.', technicalCode };
     }
-
-    return { success: true, userMessage: 'Reporte enviado. Gracias por ayudarnos a corregir Forger.' };
   }
 
   async listRemoteBackups(appId?: string): Promise<RemoteBackupsState> {

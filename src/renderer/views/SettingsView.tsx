@@ -108,8 +108,10 @@ interface SettingsViewProps {
   onRegenerateCloudSecretKey: () => void;
   earlyAccessEnabled: boolean;
   advancedMode: boolean;
+  usageAnalyticsEnabled: boolean;
   onEarlyAccessChange: (enabled: boolean) => void;
   onAdvancedModeChange: (enabled: boolean) => void;
+  onUsageAnalyticsChange: (enabled: boolean) => void;
   onNavigate: (view: View) => void;
   onResetOnboarding: () => void;
 }
@@ -172,8 +174,10 @@ export function SettingsView({
   onRegenerateCloudSecretKey,
   earlyAccessEnabled,
   advancedMode,
+  usageAnalyticsEnabled,
   onEarlyAccessChange,
   onAdvancedModeChange,
+  onUsageAnalyticsChange,
   onNavigate,
   onResetOnboarding,
 }: SettingsViewProps) {
@@ -248,6 +252,7 @@ export function SettingsView({
       <Card
         variant="outlined"
         sx={{
+          order: 0,
           borderColor: 'warning.main',
           bgcolor: 'warning.main',
           color: 'warning.contrastText',
@@ -267,7 +272,7 @@ export function SettingsView({
           </Stack>
         </CardContent>
       </Card>
-      <Card>
+      <Card sx={{ order: 5 }}>
         <CardContent>
           <Stack spacing={1.5}>
             <Stack spacing={0.5}>
@@ -320,10 +325,31 @@ export function SettingsView({
           </Stack>
         </CardContent>
       </Card>
-      <Card>
+      <Card sx={{ order: 4 }}>
+        <CardContent>
+          <Stack spacing={1.25}>
+            <Stack spacing={0.5}>
+              <Typography variant="h6">{t.settings.privacy}</Typography>
+              <Typography variant="body2" color="text.secondary">{t.settings.usageAnalyticsDescription}</Typography>
+            </Stack>
+            <Tooltip title={t.settings.usageAnalyticsHelp} placement="top">
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={usageAnalyticsEnabled}
+                    onChange={(event) => onUsageAnalyticsChange(event.target.checked)}
+                  />
+                }
+                label={t.settings.usageAnalyticsToggle}
+              />
+            </Tooltip>
+          </Stack>
+        </CardContent>
+      </Card>
+      <Card sx={{ order: 2 }}>
         <CardContent>
           <Stack spacing={1.5}>
-            <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
+            <Stack direction="row" justifyContent="space-between" alignItems="flex-start" sx={{ order: 20 }}>
               <Stack spacing={0.5} sx={{ flex: 1 }}>
                 <Typography variant="h6">Llave secreta / Secret key</Typography>
                 <Typography variant="body2" color="text.secondary">
@@ -331,7 +357,7 @@ export function SettingsView({
                 </Typography>
               </Stack>
             </Stack>
-            <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} alignItems="center">
+            <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} alignItems="center" sx={{ order: 21 }}>
               <TextField
                 size="small"
                 type={revealedSecretKey ? 'text' : 'password'}
@@ -374,7 +400,7 @@ export function SettingsView({
                 Regenerate
               </Button>
             </Stack>
-            <Divider />
+            <Divider sx={{ order: 22 }} />
             <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
               <Stack spacing={0.5}>
                 <Typography variant="h6">{t.settings.codexTitle}</Typography>
@@ -591,7 +617,7 @@ export function SettingsView({
         </CardContent>
       </Card>
 
-      <Card>
+      <Card sx={{ order: 6 }}>
         <CardContent>
           <Stack spacing={1.5}>
             <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" spacing={1.5}>
@@ -615,7 +641,7 @@ export function SettingsView({
         </CardContent>
       </Card>
 
-      <Card>
+      <Card sx={{ order: 1 }}>
         <CardContent>
           <Stack spacing={1.5}>
             <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" spacing={1.5}>
@@ -713,7 +739,7 @@ export function SettingsView({
         </CardContent>
       </Card>
 
-      <Card>
+      <Card sx={{ order: 3 }}>
         <CardContent>
           <Stack spacing={1.5}>
             <Typography variant="h6">{t.settings.appearance}</Typography>

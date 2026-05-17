@@ -1,0 +1,70 @@
+import type { SubmitUsageEventInput, UsageEventName } from '@shared/types';
+
+const TERMS_ACCEPTED_AT_KEY = 'forger.terms.acceptedAt';
+const PRIVACY_ACCEPTED_AT_KEY = 'forger.privacy.acceptedAt';
+const USAGE_ANALYTICS_ENABLED_KEY = 'forger.usageAnalytics.enabled';
+const USAGE_ANALYTICS_DECIDED_AT_KEY = 'forger.usageAnalytics.decidedAt';
+const INSTALLATION_IDENTIFIER_KEY = 'forger.installation.identifier';
+
+const CONSENT_EVENTS = new Set<UsageEventName>([
+  'usage_analytics_accepted',
+  'usage_analytics_declined',
+  'usage_analytics_revoked',
+  'usage_analytics_enabled',
+  'settings_usage_analytics_changed',
+]);
+
+const randomInstallationIdentifier = () => {
+  const webCrypto = globalThis.crypto;
+  if (webCrypto?.randomUUID) {
+    return webCrypto.randomUUID();
+  }
+  const values = new Uint8Array(16);
+  webCrypto.getRandomValues(values);
+  return Array.from(values, (value) => value.toString(16).padStart(2, '0')).join('');
+};
+
+export const getInstallationIdentifier = () => {
+  const current = window.localStorage.getItem(INSTALLATION_IDENTIFIER_KEY);
+  if (current) {
+    return current;
+  }
+  const next = randomInstallationIdentifier();
+  window.localStorage.setItem(INSTALLATION_IDENTIFIER_KEY, next);
+  return next;
+};
+
+export const getUsageAnalyticsEnabled = () => window.localStorage.getItem(USAGE_ANALYTICS_ENABLED_KEY) !== 'false';
+
+export const hasAcceptedLegalWelcome = () =>
+  Boolean(window.localStorage.getItem(TERMS_ACCEPTED_AT_KEY)) && Boolean(window.localStorage.getItem(PRIVACY_ACCEPTED_AT_KEY));
+
+export const recordLegalWelcomeDecision = (enabled: boolean) => {
+  const now = new Date().toISOString();
+  window.localStorage.setItem(TERMS_ACCEPTED_AT_KEY, window.localStorage.getItem(TERMS_ACCEPTED_AT_KEY) ?? now);
+  window.localStorage.setItem(PRIVACY_ACCEPTED_AT_KEY, window.localStorage.getItem(PRIVACY_ACCEPTED_AT_KEY) ?? now);
+  window.localStorage.setItem(USAGE_ANALYTICS_ENABLED_KEY, String(enabled));
+  window.localStorage.setItem(USAGE_ANALYTICS_DECIDED_AT_KEY, now);
+  getInstallationIdentifier();
+  return now;
+};
+
+export const setUsageAnalyticsPreference = (enabled: boolean) => {
+  window.localStorage.setItem(USAGE_ANALYTICS_ENABLED_KEY, String(enabled));
+  window.localStorage.setItem(USAGE_ANALYTICS_DECIDED_AT_KEY, new Date().toISOString());
+  getInstallationIdentifier();
+};
+
+export const shouldSubmitUsageEvent = (eventName: UsageEventName) =>
+  CONSENT_EVENTS.has(eventName) || (hasAcceptedLegalWelcome() && getUsageAnalyticsEnabled());
+
+export const submitUsageEvent = (input: Omit<SubmitUsageEventInput, 'installationIdentifier'>) => {
+  if (!shouldSubmitUsageEvent(input.eventName)) {
+    return;
+  }
+  window.forger?.submitUsageEvent({
+    ...input,
+    installationIdentifier: getInstallationIdentifier(),
+    occurredAt: input.occurredAt ?? new Date().toISOString(),
+  }).catch(() => undefined);
+};

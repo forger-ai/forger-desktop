@@ -97,6 +97,7 @@ export const en = {
       appLabel: 'App',
       kindLabel: 'What do you want to tell us?',
       bodyLabel: 'Write the details',
+      bodyHelper: 'Tell us what happened, what felt confusing, or what would make Forger more useful for you.',
       send: 'Send feedback',
       sending: 'Sending...',
       sent: 'Feedback sent.',
@@ -107,7 +108,9 @@ export const en = {
       kinds: {
         error: 'I had an error',
         confusing: 'Something is confusing',
-        featureRequest: 'Could you add this?',
+        featureRequest: 'I have an idea',
+        wouldUseIf: 'I would use it if it had',
+        wouldNotUseBecause: 'I would not use it because',
         other: 'Other',
       },
     },
@@ -125,7 +128,7 @@ export const en = {
       kinds: {
         bug: 'I had an error',
         support: 'Something is confusing',
-        idea: 'Could you add this?',
+        idea: 'I have an idea',
         other: 'Other',
       },
     },
@@ -722,6 +725,7 @@ export const en = {
   onboarding: {
     skip: 'Skip tutorial',
     continue: 'Continue',
+    startTour: 'Start tour',
     later: "I'll do it later",
     finish: 'Start using Forger',
     resetDone: 'Onboarding was reset.',
@@ -729,6 +733,14 @@ export const en = {
       welcome: {
         title: 'Welcome to Forger',
         body: 'Forger is a local app store for personal tools you can open, use, and adapt on your computer.',
+        localDataBody: 'Your apps and data live on your computer unless you turn on features that send data outside your device.',
+        legalPrefix: 'By continuing, you accept our',
+        termsLink: 'terms and conditions',
+        legalJoiner: 'and',
+        privacyLink: 'privacy policy',
+        analyticsLabel: 'Help improve Forger',
+        analyticsTooltip: 'We collect only usage data: no personal content, files, chats, app data, or credentials. We use a random installation identifier to understand aggregate usage.',
+        analyticsSettingsNote: 'You can change this setting anytime from Settings.',
       },
       apps: {
         title: 'Apps live here',
@@ -748,7 +760,7 @@ export const en = {
       },
       cloud: {
         title: 'Forger Cloud is optional',
-        body: 'You can create a Forger Cloud account and add friends. Shared apps, shared improvements, and public profiles are part of the social direction.',
+        body: 'Add friends today. Soon, Forger Cloud will let you open your apps from your phone, share improvements from your public profile, and publish new apps for others to use.',
       },
       finance: {
         title: 'Start with Finance OS',
@@ -756,8 +768,36 @@ export const en = {
       },
     },
     advanced: {
-      title: (moduleName: string) => `${moduleName} is an advanced module`,
-      body: 'This area gives you more control over Forger. It is available from Settings and appears in the sidebar when Advanced Mode is enabled.',
+      views: {
+        tools: {
+          title: 'Agent tools',
+          body: 'Tools controls which capabilities agents can use and when they must ask for approval. Review each package to understand the local or connected actions available.',
+        },
+        files: {
+          title: 'Files shared with chat',
+          body: 'This view shows files you gave Forger for a conversation. Use it to confirm what material is available before asking for analysis, imports, or transformations.',
+        },
+        backups: {
+          title: 'Local app backups',
+          body: 'Backups shows safety copies for installed apps. From here you can review states, create backups, and restore data when an update or change needs recovery.',
+        },
+        devices: {
+          title: 'Linked devices',
+          body: 'Devices gathers computers connected to your Forger Cloud account. Use it to review sessions, sync, and remote access separately from everyday app use.',
+        },
+        datos: {
+          title: 'Local app data',
+          body: 'Data lets you inspect local tables for an installed app. It is an advanced view for diagnosing records, validating imports, and understanding what each app stores.',
+        },
+        secrets: {
+          title: 'Credentials and secrets',
+          body: 'Secrets stores credentials an app or agent may need. Use it only for sensitive values you explicitly want to manage from Forger.',
+        },
+        automations: {
+          title: 'Automations',
+          body: 'Automations shows repeated or scheduled tasks. From here you can review what Forger will do, when it runs, and whether an automation is still active.',
+        },
+      },
     },
     tools: {
       intro: {
@@ -798,6 +838,10 @@ export const en = {
     account: 'Account',
     appearance: 'Appearance',
     privacy: 'Privacy and security',
+    usageAnalyticsTitle: 'Help improve Forger',
+    usageAnalyticsDescription: 'Share anonymous usage metrics so we can understand which parts of Forger are useful and what needs work.',
+    usageAnalyticsToggle: 'Share usage data',
+    usageAnalyticsHelp: 'We do not send personal content, files, chats, app data, or credentials. You can use Forger without sharing these metrics.',
     technicalDetails: 'Technical details',
     loggedOutLabel: 'You are not signed in',
     loggedInLabel: 'Signed in',
@@ -881,6 +925,7 @@ export const en = {
       fact: 'Fact',
     },
     sidebarUpdateAvailable: (version?: string) => version ? `Forger ${version} available` : 'Update available',
+    sidebarBetaThanks: 'Thanks for joining the beta',
     errorReportTitle: 'Oops, something went wrong',
     errorReportBody:
       'Here are the details that help us understand the issue. This report is anonymous. Sensitive information you share to help us fix it is deleted once the error is resolved.',

@@ -221,6 +221,18 @@ export function Sidebar({ currentView, onNavigate, t, desktopUpdateState, advanc
               </Stack>
             </Box>
           ) : null}
+          <Box
+            sx={{
+              p: 1.15,
+              borderRadius: 1,
+              border: `1px solid ${alpha(theme.palette.primary.main, 0.24)}`,
+              background: `linear-gradient(135deg, ${alpha(theme.palette.primary.main, theme.palette.mode === 'dark' ? 0.18 : 0.1)}, ${alpha(theme.palette.success.main, theme.palette.mode === 'dark' ? 0.14 : 0.08)})`,
+            }}
+          >
+            <Typography variant="caption" sx={{ display: 'block', fontWeight: 700, lineHeight: 1.3 }}>
+              {t.settings.sidebarBetaThanks}
+            </Typography>
+          </Box>
           <List disablePadding>
             <ListItemButton
               selected={currentView === 'settings'}
