@@ -21,6 +21,7 @@ import type {
   MemoryEntry,
   MemoryListInput,
   MemoryUpdateInput,
+  AgentRuntime,
 } from '../shared/types';
 import { buildFailureDiagnostic } from '../shared/error-diagnostics';
 import { getSharedCopy } from '../shared/i18n';
@@ -685,6 +686,7 @@ export class ForgerMcpServer {
         kind,
         id: String(args.id ?? ''),
         prompt: String(args.prompt ?? ''),
+        ...parsePromptRuntimeOverride(args),
       });
       await this.options.appendInstallLog('agent_tool:call_result', { appId, runId: session.runId, toolId, result });
       return withToolAuthorization(result, approval);
@@ -728,12 +730,56 @@ const isMemoryTool = (toolId: AgentToolId): boolean => toolId.startsWith('memory
 
 const isOfficialTool = (toolId: AgentToolId): boolean => toolId.startsWith('gmail.');
 
-const parsePromptReviewKind = (value: unknown): 'promptTemplate' | 'agent' | null => {
-  if (value === 'promptTemplate' || value === 'agent') {
+const parsePromptReviewKind = (value: unknown): 'promptTemplate' | 'agent' | 'agentPrompt' | null => {
+  if (value === 'promptTemplate' || value === 'agent' || value === 'agentPrompt') {
     return value;
   }
   return null;
 };
+
+const parsePromptRuntimeOverride = (
+  args: Record<string, unknown>,
+): Pick<AppPromptReviewInput, 'runtime' | 'provider' | 'model' | 'effort' | 'reasoningEffort'> => {
+  const runtime = parseAgentRuntime(args.runtime);
+  const provider = parseAgentProvider(args.provider);
+  const model = typeof args.model === 'string' && args.model.trim() ? args.model.trim() : undefined;
+  const effort = parseAgentEffort(args.effort);
+  const reasoningEffort = parseCodexReasoningEffort(args.reasoningEffort);
+  return {
+    ...(runtime ? { runtime } : {}),
+    ...(provider ? { provider } : {}),
+    ...(model ? { model } : {}),
+    ...(effort ? { effort } : {}),
+    ...(reasoningEffort ? { reasoningEffort } : {}),
+  };
+};
+
+const parseAgentRuntime = (value: unknown): AgentRuntime | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const provider = parseAgentProvider(record.provider);
+  const model = typeof record.model === 'string' && record.model.trim() ? record.model.trim() : undefined;
+  const effort = parseAgentEffort(record.effort);
+  if (!provider || !model || !effort) {
+    return undefined;
+  }
+  return { provider, model, effort };
+};
+
+const parseAgentProvider = (value: unknown): 'codex' | 'claude' | undefined =>
+  value === 'codex' || value === 'claude' ? value : undefined;
+
+const parseAgentEffort = (value: unknown): AgentRuntime['effort'] | undefined =>
+  value === 'none' || value === 'low' || value === 'medium' || value === 'high' || value === 'xhigh' || value === 'max'
+    ? value
+    : undefined;
+
+const parseCodexReasoningEffort = (value: unknown): AppPromptReviewInput['reasoningEffort'] | undefined =>
+  value === 'none' || value === 'low' || value === 'medium' || value === 'high' || value === 'xhigh'
+    ? value
+    : undefined;
 
 const buildOfficialToolCallInput = (
   actionId: AgentToolId,

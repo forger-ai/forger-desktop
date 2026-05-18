@@ -14,7 +14,14 @@ import type {
   AppAgentPromptVariable,
   BasicActionResult,
   CodexReasoningEffort,
+  AgentRuntime,
 } from '../shared/types';
+import {
+  legacyCodexRuntime,
+  normalizeAgentRuntime,
+  normalizeCodexReasoningEffort,
+  resolveRuntimeSource,
+} from '../shared/agent-runtime-registry';
 
 const PROMPT_OVERRIDES_VERSION = 1;
 const MAX_PROMPT_LENGTH = 50_000;
@@ -25,6 +32,7 @@ interface StoredPromptOverride {
   prompt: string;
   model?: string;
   reasoningEffort?: CodexReasoningEffort;
+  runtime?: AgentRuntime;
   updatedAt: string;
 }
 
@@ -45,17 +53,20 @@ interface PromptBase {
   prompt: string;
   model?: string;
   reasoningEffort?: CodexReasoningEffort;
+  runtime?: AgentRuntime;
   defaultModel: string;
   defaultReasoningEffort: CodexReasoningEffort;
+  defaultRuntime: AgentRuntime;
   arguments?: AppPromptTemplateArgument[];
 }
 
 interface PromptRuntimeDefaults {
   model: string;
   reasoningEffort: CodexReasoningEffort;
+  runtime?: AgentRuntime;
 }
 
-const REASONING_VALUES = new Set<CodexReasoningEffort>(['low', 'medium', 'high', 'xhigh']);
+const REASONING_VALUES = new Set<CodexReasoningEffort>(['none', 'low', 'medium', 'high', 'xhigh']);
 
 const emptyStore = (): PromptOverridesFile => ({
   version: PROMPT_OVERRIDES_VERSION,
@@ -88,26 +99,30 @@ export class PromptOverridesStore {
     const appOverrides = store.apps[appId] ?? {};
     const key = promptKey(input.kind, input.id);
     const existing = appOverrides[key];
-    const model = base.kind === 'agentPrompt'
+    const runtime = input.runtime === null
       ? undefined
-      : input.model === null
+      : normalizePromptRuntimeInput(input) ?? existing?.runtime;
+    const model = input.model === null || input.runtime === null
       ? undefined
-      : typeof input.model === 'string' && input.model.trim()
-        ? input.model.trim()
-        : existing?.model;
-    const reasoningEffort = base.kind === 'agentPrompt'
+      : runtime?.provider === 'codex'
+        ? runtime.model
+        : typeof input.model === 'string' && input.model.trim()
+          ? input.model.trim()
+          : existing?.model;
+    const reasoningEffort = input.reasoningEffort === null || input.runtime === null
       ? undefined
-      : input.reasoningEffort === null
-      ? undefined
-      : REASONING_VALUES.has(input.reasoningEffort as CodexReasoningEffort)
-        ? input.reasoningEffort as CodexReasoningEffort
-        : existing?.reasoningEffort;
+      : runtime?.provider === 'codex'
+        ? runtime.effort as CodexReasoningEffort
+        : REASONING_VALUES.has(input.reasoningEffort as CodexReasoningEffort)
+          ? input.reasoningEffort as CodexReasoningEffort
+          : existing?.reasoningEffort;
     const override: StoredPromptOverride = {
       kind: input.kind,
       id: input.id,
       prompt: normalizedPrompt,
       ...(model ? { model } : {}),
       ...(reasoningEffort ? { reasoningEffort } : {}),
+      ...(runtime ? { runtime } : {}),
       updatedAt: new Date().toISOString(),
     };
     store.apps[appId] = {
@@ -158,8 +173,7 @@ export class PromptOverridesStore {
       return {
         ...template,
         ...(validation.valid ? { prompt: override.prompt } : {}),
-        ...(override.model ? { model: override.model } : {}),
-        ...(override.reasoningEffort ? { reasoningEffort: override.reasoningEffort } : {}),
+        ...runtimeFieldsForPrompt(override.runtime, override.model, override.reasoningEffort),
       };
     });
   }
@@ -170,6 +184,7 @@ export class PromptOverridesStore {
     return agents.map((agent) => {
       if (hasAgentPromptSet(agent)) {
         const prompts = { ...agent.prompts };
+        let runtimeOverride: AgentRuntime | undefined;
         for (const key of ['initial', 'resume', 'steer'] as const) {
           const prompt = prompts[key];
           if (!prompt) {
@@ -184,14 +199,17 @@ export class PromptOverridesStore {
             reasoningEffort: agent.reasoningEffort ?? 'medium',
           });
           const validation = validatePromptEdit(base, override.prompt);
+          runtimeOverride ??= override.runtime;
           prompts[key] = {
             ...prompt,
             ...(validation.valid ? { body: override.prompt } : {}),
+            ...(override.runtime ? { runtime: override.runtime } : {}),
           };
         }
         return {
           ...agent,
           prompts,
+          ...runtimeFieldsForPrompt(runtimeOverride),
         };
       }
       const override = appOverrides[promptKey('agent', agent.id)];
@@ -206,8 +224,7 @@ export class PromptOverridesStore {
       return {
         ...agent,
         ...(validation.valid ? { initialPrompt: override.prompt } : {}),
-        ...(override.model ? { model: override.model } : {}),
-        ...(override.reasoningEffort ? { reasoningEffort: override.reasoningEffort } : {}),
+        ...runtimeFieldsForPrompt(override.runtime, override.model, override.reasoningEffort),
       };
     });
   }
@@ -218,6 +235,8 @@ export class PromptOverridesStore {
     const overrideInvalid = Boolean(override && !validation.valid);
     const modelSource = settingSource(base.model, override?.model) as AppPromptSettingSource;
     const reasoningEffortSource = settingSource(base.reasoningEffort, override?.reasoningEffort) as AppPromptSettingSource;
+    const baseRuntime = base.runtime ?? legacyCodexRuntime(base);
+    const runtime = override?.runtime ?? baseRuntime ?? base.defaultRuntime;
     return {
       appId,
       kind: base.kind,
@@ -232,13 +251,19 @@ export class PromptOverridesStore {
       prompt: override && validation.valid ? override.prompt : base.prompt,
       ...(base.model ? { originalModel: base.model } : {}),
       ...(base.reasoningEffort ? { originalReasoningEffort: base.reasoningEffort } : {}),
-      model: override?.model ?? base.model ?? base.defaultModel,
-      reasoningEffort: override?.reasoningEffort ?? base.reasoningEffort ?? base.defaultReasoningEffort,
+      ...(base.runtime ? { originalRuntime: base.runtime } : {}),
+      model: runtime.provider === 'codex' ? runtime.model : override?.model ?? base.model ?? base.defaultModel,
+      reasoningEffort: runtime.provider === 'codex'
+        ? runtime.effort as CodexReasoningEffort
+        : override?.reasoningEffort ?? base.reasoningEffort ?? base.defaultReasoningEffort,
+      runtime,
       ...(override ? { overridePrompt: override.prompt, updatedAt: override.updatedAt } : {}),
       ...(override?.model ? { overrideModel: override.model } : {}),
       ...(override?.reasoningEffort ? { overrideReasoningEffort: override.reasoningEffort } : {}),
+      ...(override?.runtime ? { overrideRuntime: override.runtime } : {}),
       modelSource,
       reasoningEffortSource,
+      runtimeSource: resolveRuntimeSource(baseRuntime, override?.runtime),
       edited: Boolean(override),
       overrideInvalid,
       validation,
@@ -274,8 +299,10 @@ export const promptTemplateBase = (template: AppPromptTemplate, defaults: Prompt
   prompt: template.prompt,
   ...(template.model ? { model: template.model } : {}),
   ...(template.reasoningEffort ? { reasoningEffort: template.reasoningEffort } : {}),
+  ...(template.runtime ? { runtime: template.runtime } : {}),
   defaultModel: defaults.model,
   defaultReasoningEffort: defaults.reasoningEffort,
+  defaultRuntime: promptDefaultRuntime(defaults),
   ...(template.arguments ? { arguments: template.arguments } : {}),
 });
 
@@ -287,8 +314,10 @@ export const agentBase = (agent: AppAgent, defaults: PromptRuntimeDefaults): Pro
   prompt: agent.initialPrompt,
   ...(agent.model ? { model: agent.model } : {}),
   ...(agent.reasoningEffort ? { reasoningEffort: agent.reasoningEffort } : {}),
+  ...(agent.runtime ? { runtime: agent.runtime } : {}),
   defaultModel: defaults.model,
   defaultReasoningEffort: defaults.reasoningEffort,
+  defaultRuntime: promptDefaultRuntime(defaults),
 });
 
 export const agentPromptBase = (
@@ -312,8 +341,10 @@ export const agentPromptBase = (
     prompt: prompt.body,
     ...(agent.model ? { model: agent.model } : {}),
     ...(agent.reasoningEffort ? { reasoningEffort: agent.reasoningEffort } : {}),
+    ...(prompt.runtime ? { runtime: prompt.runtime } : agent.runtime ? { runtime: agent.runtime } : {}),
     defaultModel: defaults.model,
     defaultReasoningEffort: defaults.reasoningEffort,
+    defaultRuntime: promptDefaultRuntime(defaults),
   };
 };
 
@@ -450,6 +481,7 @@ const normalizeStore = (input?: Partial<PromptOverridesFile>): PromptOverridesFi
       const reasoningEffort = REASONING_VALUES.has(entry.reasoningEffort as CodexReasoningEffort)
         ? entry.reasoningEffort as CodexReasoningEffort
         : undefined;
+      const runtime = normalizeAgentRuntime(entry.runtime, { model, reasoningEffort });
       const updatedAt = typeof entry.updatedAt === 'string' && entry.updatedAt.trim()
         ? entry.updatedAt
         : new Date().toISOString();
@@ -462,6 +494,7 @@ const normalizeStore = (input?: Partial<PromptOverridesFile>): PromptOverridesFi
         prompt,
         ...(model ? { model } : {}),
         ...(reasoningEffort ? { reasoningEffort } : {}),
+        ...(runtime ? { runtime } : {}),
         updatedAt,
       };
     }
@@ -471,6 +504,44 @@ const normalizeStore = (input?: Partial<PromptOverridesFile>): PromptOverridesFi
   }
 
   return store;
+};
+
+const promptDefaultRuntime = (defaults: PromptRuntimeDefaults): AgentRuntime =>
+  defaults.runtime ?? legacyCodexRuntime(defaults) ?? {
+    provider: 'codex',
+    model: defaults.model,
+    effort: normalizeCodexReasoningEffort(defaults.reasoningEffort, 'medium'),
+  };
+
+const normalizePromptRuntimeInput = (input: AppPromptReviewInput): AgentRuntime | undefined => {
+  if (input.runtime) {
+    return normalizeAgentRuntime(input.runtime);
+  }
+  return normalizeAgentRuntime(
+    input.provider ? { provider: input.provider, model: input.model, effort: input.effort ?? input.reasoningEffort } : undefined,
+    { model: input.model, reasoningEffort: input.reasoningEffort, effort: input.effort },
+  );
+};
+
+const runtimeFieldsForPrompt = (
+  runtime?: AgentRuntime,
+  legacyModel?: string,
+  legacyReasoningEffort?: CodexReasoningEffort,
+): Pick<AppAgent, 'model' | 'reasoningEffort' | 'runtime'> => {
+  if (!runtime) {
+    return {
+      ...(legacyModel ? { model: legacyModel } : {}),
+      ...(legacyReasoningEffort ? { reasoningEffort: legacyReasoningEffort } : {}),
+    };
+  }
+  if (runtime.provider === 'codex') {
+    return {
+      model: runtime.model,
+      reasoningEffort: runtime.effort as CodexReasoningEffort,
+      runtime,
+    };
+  }
+  return { model: undefined, reasoningEffort: undefined, runtime };
 };
 
 const settingSource = (manifestValue: unknown, overrideValue: unknown): AppPromptSettingSource => {

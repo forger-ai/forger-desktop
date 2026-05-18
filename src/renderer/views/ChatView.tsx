@@ -5,6 +5,7 @@ import AttachFileRounded from '@mui/icons-material/AttachFileRounded';
 import CloseRounded from '@mui/icons-material/CloseRounded';
 import DonutLargeRounded from '@mui/icons-material/DonutLargeRounded';
 import HistoryRounded from '@mui/icons-material/HistoryRounded';
+import StopCircleRounded from '@mui/icons-material/StopCircleRounded';
 import {
   Box,
   Button,
@@ -128,11 +129,13 @@ interface ChatViewProps {
   onOpenCodexUsageDashboard: () => void;
   assistantAvatarSrc: string;
   isSending: boolean;
+  canStopRun: boolean;
   progressLines: string[];
   codexConfigured: boolean;
   onConfigureCodex: () => void;
   openingAppIds: Set<string>;
   onOpenApp: (appId: string) => void;
+  onStopRun: () => Promise<void>;
   onRespondPermission: (runId: string, requestId: string, decision: 'allow' | 'deny') => Promise<void>;
 }
 
@@ -180,11 +183,13 @@ export function ChatView({
   onOpenCodexUsageDashboard,
   assistantAvatarSrc,
   isSending,
+  canStopRun,
   progressLines,
   codexConfigured,
   onConfigureCodex,
   openingAppIds,
   onOpenApp,
+  onStopRun,
   onRespondPermission,
 }: ChatViewProps) {
   const theme = useTheme();
@@ -192,6 +197,7 @@ export function ChatView({
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionMenuPosition, setMentionMenuPosition] = useState<{ left: number; bottom: number } | null>(null);
   const [respondingPermissionIds, setRespondingPermissionIds] = useState<Set<string>>(new Set());
+  const [stopBusy, setStopBusy] = useState(false);
   const inputRef = useRef<HTMLDivElement | null>(null);
   const composerAnchorRef = useRef<HTMLDivElement | null>(null);
   const messagesScrollRef = useRef<HTMLDivElement | null>(null);
@@ -210,6 +216,18 @@ export function ChatView({
     }
     setRespondingPermissionIds((current) => new Set(current).add(key));
     void onRespondPermission(runId, requestId, decision);
+  };
+
+  const handleStopRun = async () => {
+    if (!canStopRun || stopBusy) {
+      return;
+    }
+    setStopBusy(true);
+    try {
+      await onStopRun();
+    } finally {
+      setStopBusy(false);
+    }
   };
 
   const serializeComposerText = () => {
@@ -721,110 +739,136 @@ export function ChatView({
                     </IconButton>
                   </span>
                 </Tooltip>
-                <Select
-                  size="small"
-                  value={selectedProvider}
-                  onChange={(event) => onSelectProvider(event.target.value as AgentProvider | 'auto')}
-                  disabled={providerLocked || isSending}
-                  MenuProps={compactSelectMenuProps}
-                  sx={{
-                    height: 28,
-                    minWidth: 86,
-                    fontSize: 12,
-                    borderRadius: 1.25,
-                    '& .MuiSelect-select': { py: 0.35, pl: 1, pr: '26px !important' },
-                  }}
-                >
-                  {providerOptions.map((option) => (
-                    <MenuItem key={option.value} value={option.value}>
-                      {option.label}
-                    </MenuItem>
-                  ))}
-                </Select>
-                <Select
-                  size="small"
-                  value={selectedModel}
-                  onChange={(event) => onSelectModel(event.target.value)}
-                  disabled={effectiveProvider !== 'codex' || providerLocked || isSending}
-                  MenuProps={compactSelectMenuProps}
-                  sx={{
-                    height: 28,
-                    minWidth: 104,
-                    fontSize: 12,
-                    borderRadius: 1.25,
-                    '& .MuiSelect-select': { py: 0.35, pl: 1, pr: '26px !important' },
-                    display: effectiveProvider === 'codex' ? 'inline-flex' : 'none',
-                  }}
-                >
-                  {modelOptions.map((option) => (
-                    <MenuItem key={option.realModelName} value={option.realModelName}>
-                      {option.displayModelName}
-                    </MenuItem>
-                  ))}
-                </Select>
-                <Select
-                  size="small"
-                  value={selectedReasoningEffort}
-                  onChange={(event) => onSelectReasoningEffort(event.target.value as CodexReasoningEffort)}
-                  disabled={effectiveProvider !== 'codex' || providerLocked || isSending}
-                  MenuProps={compactSelectMenuProps}
-                  sx={{
-                    height: 28,
-                    minWidth: 82,
-                    fontSize: 12,
-                    borderRadius: 1.25,
-                    '& .MuiSelect-select': { py: 0.35, pl: 1, pr: '26px !important' },
-                    display: effectiveProvider === 'codex' ? 'inline-flex' : 'none',
-                  }}
-                >
-                  {reasoningOptions.map((option) => (
-                    <MenuItem key={option.value} value={option.value}>
-                      {option.label}
-                    </MenuItem>
-                  ))}
-                </Select>
-                <Select
-                  size="small"
-                  value={selectedClaudeModel}
-                  onChange={(event) => onSelectClaudeModel(event.target.value)}
-                  disabled={effectiveProvider !== 'claude' || providerLocked || isSending}
-                  MenuProps={compactSelectMenuProps}
-                  sx={{
-                    height: 28,
-                    minWidth: 90,
-                    fontSize: 12,
-                    borderRadius: 1.25,
-                    '& .MuiSelect-select': { py: 0.35, pl: 1, pr: '26px !important' },
-                    display: effectiveProvider === 'claude' ? 'inline-flex' : 'none',
-                  }}
-                >
-                  {claudeModelOptions.map((option) => (
-                    <MenuItem key={option.realModelName} value={option.realModelName}>
-                      {option.displayModelName}
-                    </MenuItem>
-                  ))}
-                </Select>
-                <Select
-                  size="small"
-                  value={selectedClaudeEffort}
-                  onChange={(event) => onSelectClaudeEffort(event.target.value as ClaudeEffort)}
-                  disabled={effectiveProvider !== 'claude' || providerLocked || isSending}
-                  MenuProps={compactSelectMenuProps}
-                  sx={{
-                    height: 28,
-                    minWidth: 82,
-                    fontSize: 12,
-                    borderRadius: 1.25,
-                    '& .MuiSelect-select': { py: 0.35, pl: 1, pr: '26px !important' },
-                    display: effectiveProvider === 'claude' ? 'inline-flex' : 'none',
-                  }}
-                >
-                  {claudeEffortOptions.map((option) => (
-                    <MenuItem key={option.value} value={option.value}>
-                      {option.label}
-                    </MenuItem>
-                  ))}
-                </Select>
+                <Tooltip title={providerLocked ? t.sections.chat.lockedRuntimeTooltip : t.sections.chat.providerSelectorLabel}>
+                  <span>
+                    <Select
+                      size="small"
+                      value={selectedProvider}
+                      onChange={(event) => onSelectProvider(event.target.value as AgentProvider | 'auto')}
+                      disabled={providerLocked || isSending}
+                      MenuProps={compactSelectMenuProps}
+                      inputProps={{ 'aria-label': t.sections.chat.providerSelectorLabel }}
+                      renderValue={(value) => value === 'auto' ? t.sections.chat.autoProviderLabel(resolvedProviderForAuto === 'claude' ? 'Claude' : 'Codex') : providerOptions.find((option) => option.value === value)?.label}
+                      sx={{
+                        height: 28,
+                        minWidth: 98,
+                        fontSize: 12,
+                        borderRadius: 1.25,
+                        '& .MuiSelect-select': { py: 0.35, pl: 1, pr: '26px !important' },
+                      }}
+                    >
+                      {providerOptions.map((option) => (
+                        <MenuItem key={option.value} value={option.value}>
+                          {option.value === 'auto' ? t.sections.chat.autoProviderLabel(resolvedProviderForAuto === 'claude' ? 'Claude' : 'Codex') : option.label}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </span>
+                </Tooltip>
+                <Tooltip title={providerLocked ? t.sections.chat.lockedRuntimeTooltip : t.sections.chat.modelSelectorLabel}>
+                  <span>
+                    <Select
+                      size="small"
+                      value={selectedModel}
+                      onChange={(event) => onSelectModel(event.target.value)}
+                      disabled={effectiveProvider !== 'codex' || providerLocked || isSending}
+                      MenuProps={compactSelectMenuProps}
+                      inputProps={{ 'aria-label': t.sections.chat.modelSelectorLabel }}
+                      sx={{
+                        height: 28,
+                        minWidth: 104,
+                        fontSize: 12,
+                        borderRadius: 1.25,
+                        '& .MuiSelect-select': { py: 0.35, pl: 1, pr: '26px !important' },
+                        display: effectiveProvider === 'codex' ? 'inline-flex' : 'none',
+                      }}
+                    >
+                      {modelOptions.map((option) => (
+                        <MenuItem key={option.realModelName} value={option.realModelName}>
+                          {option.displayModelName}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </span>
+                </Tooltip>
+                <Tooltip title={providerLocked ? t.sections.chat.lockedRuntimeTooltip : t.sections.chat.effortSelectorLabel}>
+                  <span>
+                    <Select
+                      size="small"
+                      value={selectedReasoningEffort}
+                      onChange={(event) => onSelectReasoningEffort(event.target.value as CodexReasoningEffort)}
+                      disabled={effectiveProvider !== 'codex' || providerLocked || isSending}
+                      MenuProps={compactSelectMenuProps}
+                      inputProps={{ 'aria-label': t.sections.chat.effortSelectorLabel }}
+                      sx={{
+                        height: 28,
+                        minWidth: 82,
+                        fontSize: 12,
+                        borderRadius: 1.25,
+                        '& .MuiSelect-select': { py: 0.35, pl: 1, pr: '26px !important' },
+                        display: effectiveProvider === 'codex' ? 'inline-flex' : 'none',
+                      }}
+                    >
+                      {reasoningOptions.map((option) => (
+                        <MenuItem key={option.value} value={option.value}>
+                          {option.label}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </span>
+                </Tooltip>
+                <Tooltip title={providerLocked ? t.sections.chat.lockedRuntimeTooltip : t.sections.chat.modelSelectorLabel}>
+                  <span>
+                    <Select
+                      size="small"
+                      value={selectedClaudeModel}
+                      onChange={(event) => onSelectClaudeModel(event.target.value)}
+                      disabled={effectiveProvider !== 'claude' || providerLocked || isSending}
+                      MenuProps={compactSelectMenuProps}
+                      inputProps={{ 'aria-label': t.sections.chat.modelSelectorLabel }}
+                      sx={{
+                        height: 28,
+                        minWidth: 90,
+                        fontSize: 12,
+                        borderRadius: 1.25,
+                        '& .MuiSelect-select': { py: 0.35, pl: 1, pr: '26px !important' },
+                        display: effectiveProvider === 'claude' ? 'inline-flex' : 'none',
+                      }}
+                    >
+                      {claudeModelOptions.map((option) => (
+                        <MenuItem key={option.realModelName} value={option.realModelName}>
+                          {option.displayModelName}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </span>
+                </Tooltip>
+                <Tooltip title={providerLocked ? t.sections.chat.lockedRuntimeTooltip : t.sections.chat.effortSelectorLabel}>
+                  <span>
+                    <Select
+                      size="small"
+                      value={selectedClaudeEffort}
+                      onChange={(event) => onSelectClaudeEffort(event.target.value as ClaudeEffort)}
+                      disabled={effectiveProvider !== 'claude' || providerLocked || isSending}
+                      MenuProps={compactSelectMenuProps}
+                      inputProps={{ 'aria-label': t.sections.chat.effortSelectorLabel }}
+                      sx={{
+                        height: 28,
+                        minWidth: 82,
+                        fontSize: 12,
+                        borderRadius: 1.25,
+                        '& .MuiSelect-select': { py: 0.35, pl: 1, pr: '26px !important' },
+                        display: effectiveProvider === 'claude' ? 'inline-flex' : 'none',
+                      }}
+                    >
+                      {claudeEffortOptions.map((option) => (
+                        <MenuItem key={option.value} value={option.value}>
+                          {option.label}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </span>
+                </Tooltip>
               </Stack>
             </Stack>
           </Paper>
@@ -879,16 +923,31 @@ export function ChatView({
           >
             {t.sections.chat.newConversation}
           </Button>
-          <Button
-            variant="contained"
-            size="small"
-            endIcon={isSending ? <CircularProgress size={14} color="inherit" /> : <SendRounded fontSize="small" />}
-            onClick={onSend}
-            disabled={isSending || !codexConfigured || (!inputValue.trim() && pendingFiles.length === 0 && mentionedFiles.length === 0)}
-            sx={{ minHeight: 32, px: 1.5 }}
-          >
-            {t.sections.chat.send}
-          </Button>
+          <Stack direction="row" spacing={0.75} alignItems="center">
+            {isSending ? (
+              <Button
+                variant="outlined"
+                color="error"
+                size="small"
+                startIcon={stopBusy ? <CircularProgress size={14} color="inherit" /> : <StopCircleRounded fontSize="small" />}
+                onClick={() => void handleStopRun()}
+                disabled={!canStopRun || stopBusy}
+                sx={{ minHeight: 32, px: 1.5 }}
+              >
+                {t.sections.chat.stopResponse}
+              </Button>
+            ) : null}
+            <Button
+              variant="contained"
+              size="small"
+              endIcon={isSending ? <CircularProgress size={14} color="inherit" /> : <SendRounded fontSize="small" />}
+              onClick={onSend}
+              disabled={isSending || !codexConfigured || (!inputValue.trim() && pendingFiles.length === 0 && mentionedFiles.length === 0)}
+              sx={{ minHeight: 32, px: 1.5 }}
+            >
+              {t.sections.chat.send}
+            </Button>
+          </Stack>
         </Stack>
       </Stack>
     </Box>

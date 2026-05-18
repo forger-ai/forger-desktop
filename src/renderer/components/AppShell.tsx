@@ -21,6 +21,7 @@ interface AppShellProps {
   accountBusy: boolean;
   onOpenFriendChat: (friendship: CloudFriendship) => Promise<FriendChatWindowOpenResult> | FriendChatWindowOpenResult;
   onSocialNotify: (message: string, severity?: AlertColor) => void;
+  onUpdateUsername: (username: string) => Promise<boolean>;
   onLogout: () => void;
   desktopUpdateState: DesktopUpdateState;
   advancedMode: boolean;
@@ -43,6 +44,7 @@ export function AppShell({
   accountBusy,
   onOpenFriendChat,
   onSocialNotify,
+  onUpdateUsername,
   onLogout,
   desktopUpdateState,
   advancedMode,
@@ -76,6 +78,7 @@ export function AppShell({
           accountBusy={accountBusy}
           onOpenFriendChat={onOpenFriendChat}
           onSocialNotify={onSocialNotify}
+          onUpdateUsername={onUpdateUsername}
           onLogout={onLogout}
         />
         <Box sx={{ p: 3, flex: 1, minHeight: 0, overflowY: 'auto', WebkitAppRegion: 'no-drag' }}>{children}</Box>

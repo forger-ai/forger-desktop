@@ -64,6 +64,19 @@ interface DownloadPayload {
   };
 }
 
+const usernameCooldownMessage = (availableAt?: string): string => {
+  if (!availableAt) {
+    return 'Podras cambiar tu username cuando se cumplan 30 dias desde el ultimo cambio.';
+  }
+
+  const date = new Date(availableAt);
+  if (Number.isNaN(date.getTime())) {
+    return 'Podras cambiar tu username cuando se cumplan 30 dias desde el ultimo cambio.';
+  }
+
+  return `Podras cambiar tu username desde el ${date.toLocaleDateString('es-CL', { dateStyle: 'medium' })}.`;
+};
+
 interface RemoteBackupPayload {
   id: number | string;
   app_id: string;
@@ -344,12 +357,18 @@ export class ForgerBackendClient {
     const payload = await this.readJson<Record<string, unknown>>(response);
 
     if (!response.ok) {
+      const errorCode = typeof payload?.error === 'string' ? payload.error : undefined;
+      const availableAt = typeof payload?.username_change_available_at === 'string'
+        ? payload.username_change_available_at
+        : undefined;
       return {
         success: false,
         authenticated: Boolean(this.options.token()),
-        userMessage: response.status === 422
-          ? 'Ese username no esta disponible o no cumple el formato.'
-          : 'No pudimos actualizar tu perfil.',
+        userMessage: errorCode === 'username_change_cooldown'
+          ? usernameCooldownMessage(availableAt)
+          : response.status === 422
+            ? 'Ese username no esta disponible o no cumple el formato.'
+            : 'No pudimos actualizar tu perfil.',
         technicalCode: `profile_update_failed_${response.status}`,
       };
     }

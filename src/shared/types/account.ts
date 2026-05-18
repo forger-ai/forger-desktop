@@ -6,6 +6,8 @@ export interface ForgerAccountUser {
   lastName?: string;
   confirmed: boolean;
   subscriptionTier: SubscriptionTier;
+  usernameChangedAt?: string;
+  usernameChangeAvailableAt?: string;
 }
 
 export interface ForgerAccountSession {

@@ -29,7 +29,7 @@ export interface AgentDefaults {
 
 export interface AgentModelOptions {
   codex: CodexModelOption[];
-  claude: Array<{ displayModelName: string; realModelName: string; defaultEffort: ClaudeEffort }>;
+  claude: ClaudeModelOption[];
 }
 
 export interface ClaudeAuthStatus {
@@ -64,10 +64,16 @@ export interface AppAiSubscriptionStatus {
   connected: boolean;
 }
 
-export type CodexReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh';
+export type CodexReasoningEffort = 'none' | 'low' | 'medium' | 'high' | 'xhigh';
 
 export interface CodexModelOption {
   displayModelName: string;
   realModelName: string;
   defaultReasoningEffort: CodexReasoningEffort;
+}
+
+export interface ClaudeModelOption {
+  displayModelName: string;
+  realModelName: string;
+  defaultEffort: ClaudeEffort;
 }

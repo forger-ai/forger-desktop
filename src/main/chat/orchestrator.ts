@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type {
@@ -25,6 +26,7 @@ import { getSharedCopy, normalizeLocale, type Locale } from '../../shared/i18n';
 import {
   preparePersistentIsolatedCodexHome,
 } from '../codex-run-isolation';
+import { killProcessTree } from '../app-agent/process';
 import {
   AuditLogger,
   PluginRuntime,
@@ -108,6 +110,7 @@ interface InternalChatRun extends ChatRun {
   taskType: ForgerTaskType;
   locale: Locale;
   conversationHistory: ChatHistoryMessage[];
+  child?: ChildProcessWithoutNullStreams;
 }
 
 interface PendingPermission {
@@ -222,6 +225,7 @@ export class ChatOrchestrator {
       return { success: false };
     }
 
+    killProcessTree(run.child);
     run.status = 'canceled';
     run.updatedAt = new Date().toISOString();
     this.emitRun(run);
@@ -510,6 +514,10 @@ export class ChatOrchestrator {
         await ensureGitRepository(run.appRoot);
       }
 
+      if (run.status === 'canceled') {
+        return;
+      }
+
       run.updatedAt = new Date().toISOString();
       run.status = 'running';
       run.userMessage = undefined;
@@ -564,10 +572,16 @@ export class ChatOrchestrator {
         model: run.model,
         networkAccess,
         timeoutMs: 300_000,
-        onChild: () => {
-          // hook reserved for cancellation propagation
+        onChild: (child: ChildProcessWithoutNullStreams) => {
+          run.child = child;
+          if (run.status === 'canceled') {
+            killProcessTree(child);
+          }
         },
         onOutput: (stream: 'stdout' | 'stderr' | 'meta', text: string) => {
+          if (run.status === 'canceled') {
+            return;
+          }
           void appendRunLog(run.runLogPath, stream, text);
           const steps = toProgressMessages(stream, text);
           if (steps.length > 0) {
@@ -622,6 +636,10 @@ export class ChatOrchestrator {
           `Provider thread ${lostThreadId} is unavailable. Retrying with local conversation context.`,
         );
         assistantReply = await runProvider(true);
+      }
+
+      if (this.runs.get(run.runId)?.status === 'canceled') {
+        return;
       }
 
       run.threadId = assistantReply.threadId ?? run.threadId ?? this.threadsByApp.get(run.appId)?.threadId ?? null;

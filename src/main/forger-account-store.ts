@@ -24,6 +24,8 @@ export const normalizeForgerAccountUser = (value: unknown): ForgerAccountSession
     lastName: typeof record.last_name === 'string' ? record.last_name : typeof record.lastName === 'string' ? record.lastName : undefined,
     confirmed: Boolean(record.confirmed),
     subscriptionTier: normalizeSubscriptionTier(record.subscription_tier ?? record.subscriptionTier),
+    usernameChangedAt: typeof record.username_changed_at === 'string' ? record.username_changed_at : typeof record.usernameChangedAt === 'string' ? record.usernameChangedAt : undefined,
+    usernameChangeAvailableAt: typeof record.username_change_available_at === 'string' ? record.username_change_available_at : typeof record.usernameChangeAvailableAt === 'string' ? record.usernameChangeAvailableAt : undefined,
   };
 };
 

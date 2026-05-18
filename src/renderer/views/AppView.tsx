@@ -33,6 +33,10 @@ import type {
   AppPromptReviewInput,
   AppPromptValidationResult,
   AppSecretsState,
+  AgentProvider,
+  AgentRuntime,
+  ClaudeEffort,
+  ClaudeModelOption,
   CodexModelOption,
   CodexReasoningEffort,
   ForgerAccountSession,
@@ -53,8 +57,11 @@ interface AppViewProps {
   appSecretsState: AppSecretsState | null;
   secretsBusy: boolean;
   account: ForgerAccountSession;
+  providerOptions: Array<{ label: string; value: AgentProvider | 'auto' }>;
   modelOptions: CodexModelOption[];
   reasoningOptions: { label: string; value: CodexReasoningEffort }[];
+  claudeModelOptions: ClaudeModelOption[];
+  claudeEffortOptions: { label: string; value: ClaudeEffort }[];
   codexDefaults: Settings['codexDefaults'];
   onBack: () => void;
   onInstall: (appId: string) => void;
@@ -112,8 +119,11 @@ export function AppView({
   appSecretsState,
   secretsBusy,
   account,
+  providerOptions,
   modelOptions,
   reasoningOptions,
+  claudeModelOptions,
+  claudeEffortOptions,
   codexDefaults,
   onBack,
   onInstall,
@@ -135,8 +145,11 @@ export function AppView({
   const [selectedPromptKey, setSelectedPromptKey] = useState<string | null>(null);
   const selectedPrompt = promptReviewsForState.find((prompt) => promptReviewKey(prompt.kind, prompt.id) === selectedPromptKey) ?? null;
   const [promptDraft, setPromptDraft] = useState('');
-  const [promptModelDraft, setPromptModelDraft] = useState('');
-  const [promptReasoningDraft, setPromptReasoningDraft] = useState<CodexReasoningEffort>('medium');
+  const [promptRuntimeDraft, setPromptRuntimeDraft] = useState<AgentRuntime>({
+    provider: 'codex',
+    model: codexDefaults.model,
+    effort: codexDefaults.reasoningEffort,
+  });
   const [promptValidation, setPromptValidation] = useState<AppPromptValidationResult | null>(null);
   const [promptBusy, setPromptBusy] = useState(false);
   const currentUserRating = details?.app && 'currentUserRating' in details.app ? details.app.currentUserRating : undefined;
@@ -170,8 +183,7 @@ export function AppView({
       return;
     }
     setPromptDraft(selectedPrompt.overridePrompt ?? selectedPrompt.prompt);
-    setPromptModelDraft(selectedPrompt.overrideModel ?? selectedPrompt.model);
-    setPromptReasoningDraft(selectedPrompt.overrideReasoningEffort ?? selectedPrompt.reasoningEffort);
+    setPromptRuntimeDraft(selectedPrompt.overrideRuntime ?? selectedPrompt.runtime);
     setPromptValidation(selectedPrompt.validation);
   }, [selectedPrompt]);
 
@@ -331,24 +343,26 @@ export function AppView({
   );
 
   const promptErrors = promptValidation?.errors ?? [];
-  const selectedPromptModelFallback = selectedPrompt
-    ? selectedPrompt.originalModel ?? codexDefaults.model
-    : codexDefaults.model;
-  const selectedPromptReasoningFallback = selectedPrompt
-    ? selectedPrompt.originalReasoningEffort ?? codexDefaults.reasoningEffort
-    : codexDefaults.reasoningEffort;
-  const modelEdited = Boolean(selectedPrompt && promptModelDraft !== selectedPromptModelFallback);
-  const reasoningEdited = Boolean(selectedPrompt && promptReasoningDraft !== selectedPromptReasoningFallback);
-  const selectedPromptModelSource = selectedPrompt?.modelSource === 'override'
+  const selectedPromptRuntimeFallback = selectedPrompt?.originalRuntime ?? {
+    provider: 'codex' as const,
+    model: selectedPrompt?.originalModel ?? codexDefaults.model,
+    effort: selectedPrompt?.originalReasoningEffort ?? codexDefaults.reasoningEffort,
+  };
+  const runtimeEdited = Boolean(
+    selectedPrompt
+      && (
+        promptRuntimeDraft.provider !== selectedPromptRuntimeFallback.provider
+        || promptRuntimeDraft.model !== selectedPromptRuntimeFallback.model
+        || promptRuntimeDraft.effort !== selectedPromptRuntimeFallback.effort
+      ),
+  );
+  const selectedPromptRuntimeSource = selectedPrompt?.runtimeSource === 'override'
     ? t.appView.promptSettingCustom
-    : selectedPrompt?.modelSource === 'manifest'
+    : selectedPrompt?.runtimeSource === 'manifest'
       ? t.appView.promptSettingApp
       : t.appView.promptSettingGlobal;
-  const selectedPromptReasoningSource = selectedPrompt?.reasoningEffortSource === 'override'
-    ? t.appView.promptSettingCustom
-    : selectedPrompt?.reasoningEffortSource === 'manifest'
-      ? t.appView.promptSettingApp
-      : t.appView.promptSettingGlobal;
+  const promptModelOptions = promptRuntimeDraft.provider === 'claude' ? claudeModelOptions : modelOptions;
+  const promptEffortOptions = promptRuntimeDraft.provider === 'claude' ? claudeEffortOptions : reasoningOptions;
   const promptsContent = (
     <Stack spacing={1.5}>
       <Stack spacing={0.5}>
@@ -393,6 +407,7 @@ export function AppView({
                     <Stack direction="row" spacing={0.75} alignItems="center" useFlexGap flexWrap="wrap">
                       <Chip size="small" label={promptTypeLabel(prompt.kind)} />
                       {prompt.promptKind ? <Chip size="small" variant="outlined" label={prompt.promptKind} /> : null}
+                      <Chip size="small" variant="outlined" label={`${prompt.runtime.provider} · ${prompt.runtime.model} · ${prompt.runtime.effort}`} />
                       {prompt.edited ? <Chip size="small" color="primary" label={t.appView.promptEdited} /> : null}
                       {prompt.overrideInvalid ? <Chip size="small" color="warning" label={t.appView.promptNeedsReview} /> : null}
                     </Stack>
@@ -451,46 +466,67 @@ export function AppView({
                   },
                 }}
               />
-              {selectedPrompt.kind !== 'agentPrompt' ? (
-                <Box
-                  sx={{
-                    display: 'grid',
-                    gridTemplateColumns: { xs: '1fr', sm: 'minmax(0, 1fr) minmax(0, 1fr)' },
-                    gap: 1,
+              <Box
+                sx={{
+                  display: 'grid',
+                  gridTemplateColumns: { xs: '1fr', sm: '0.75fr minmax(0, 1fr) 0.75fr' },
+                  gap: 1,
+                }}
+              >
+                <TextField
+                  select
+                  size="small"
+                  label={t.appView.promptProviderLabel}
+                  value={promptRuntimeDraft.provider}
+                  onChange={(event) => {
+                    const provider = event.target.value as AgentProvider;
+                    const options = provider === 'claude' ? claudeModelOptions : modelOptions;
+                    const nextModel = options[0]?.realModelName ?? promptRuntimeDraft.model;
+                    const nextEffort = provider === 'claude'
+                      ? (claudeModelOptions[0]?.defaultEffort ?? 'medium')
+                      : (modelOptions[0]?.defaultReasoningEffort ?? 'medium');
+                    setPromptRuntimeDraft({ provider, model: nextModel, effort: nextEffort });
                   }}
+                  helperText={runtimeEdited ? t.appView.promptSettingCustom : selectedPromptRuntimeSource}
+                  fullWidth
                 >
-                  <TextField
-                    select
-                    size="small"
-                    label={t.appView.promptModelLabel}
-                    value={promptModelDraft}
-                    onChange={(event) => setPromptModelDraft(event.target.value)}
-                    helperText={modelEdited ? t.appView.promptSettingCustom : selectedPromptModelSource}
-                    fullWidth
-                  >
-                    {modelOptions.map((option) => (
-                      <MenuItem value={option.realModelName} key={option.realModelName}>
-                        {option.displayModelName}
-                      </MenuItem>
-                    ))}
-                  </TextField>
-                  <TextField
-                    select
-                    size="small"
-                    label={t.appView.promptThinkingLabel}
-                    value={promptReasoningDraft}
-                    onChange={(event) => setPromptReasoningDraft(event.target.value as CodexReasoningEffort)}
-                    helperText={reasoningEdited ? t.appView.promptSettingCustom : selectedPromptReasoningSource}
-                    fullWidth
-                  >
-                    {reasoningOptions.map((option) => (
-                      <MenuItem value={option.value} key={option.value}>
-                        {option.label}
-                      </MenuItem>
-                    ))}
-                  </TextField>
-                </Box>
-              ) : null}
+                  {providerOptions.filter((option) => option.value !== 'auto').map((option) => (
+                    <MenuItem value={option.value} key={option.value}>
+                      {option.label}
+                    </MenuItem>
+                  ))}
+                </TextField>
+                <TextField
+                  select
+                  size="small"
+                  label={t.appView.promptModelLabel}
+                  value={promptRuntimeDraft.model}
+                  onChange={(event) => setPromptRuntimeDraft((current) => ({ ...current, model: event.target.value }))}
+                  helperText={t.appView.promptRuntimeHelper}
+                  fullWidth
+                >
+                  {promptModelOptions.map((option) => (
+                    <MenuItem value={option.realModelName} key={option.realModelName}>
+                      {option.displayModelName}
+                    </MenuItem>
+                  ))}
+                </TextField>
+                <TextField
+                  select
+                  size="small"
+                  label={t.appView.promptThinkingLabel}
+                  value={promptRuntimeDraft.effort}
+                  onChange={(event) => setPromptRuntimeDraft((current) => ({ ...current, effort: event.target.value as AgentRuntime['effort'] }))}
+                  helperText={runtimeEdited ? t.appView.promptSettingCustom : selectedPromptRuntimeSource}
+                  fullWidth
+                >
+                  {promptEffortOptions.map((option) => (
+                    <MenuItem value={option.value} key={option.value}>
+                      {option.label}
+                    </MenuItem>
+                  ))}
+                </TextField>
+              </Box>
               {promptErrors.length > 0 ? (
                 <Box sx={{ border: '1px solid', borderColor: 'error.main', p: 1.25 }}>
                   <Stack component="ul" sx={{ m: 0, pl: 2 }}>
@@ -514,8 +550,7 @@ export function AppView({
                       kind: selectedPrompt.kind,
                       id: selectedPrompt.id,
                       prompt: promptDraft,
-                      model: selectedPrompt.kind !== 'agentPrompt' && modelEdited ? promptModelDraft : null,
-                      reasoningEffort: selectedPrompt.kind !== 'agentPrompt' && reasoningEdited ? promptReasoningDraft : null,
+                      runtime: runtimeEdited ? promptRuntimeDraft : null,
                     }).finally(() => setPromptBusy(false));
                   }}
                 >

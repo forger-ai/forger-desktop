@@ -1,4 +1,10 @@
 import type { AppSummary, CatalogApp, Settings } from './types';
+import {
+  DEFAULT_AGENT_PROVIDER,
+  DEFAULT_CODEX_MODEL,
+  DEFAULT_CODEX_REASONING_EFFORT,
+  getDefaultAgentDefaults,
+} from './agent-runtime-registry';
 
 export const installedAppsSeed: AppSummary[] = [
   {
@@ -46,19 +52,10 @@ export const settingsSeed: Settings = {
   plan: 'Free',
   safeMode: true,
   codexDefaults: {
-    model: 'gpt-5.4',
-    reasoningEffort: 'medium',
+    model: DEFAULT_CODEX_MODEL,
+    reasoningEffort: DEFAULT_CODEX_REASONING_EFFORT,
   },
-  defaultAgentProvider: 'auto',
-  agentDefaults: {
-    codex: {
-      model: 'gpt-5.4',
-      reasoningEffort: 'medium',
-    },
-    claude: {
-      model: 'sonnet',
-      effort: 'medium',
-    },
-  },
+  defaultAgentProvider: DEFAULT_AGENT_PROVIDER,
+  agentDefaults: getDefaultAgentDefaults(),
   providerConnections: {},
 };

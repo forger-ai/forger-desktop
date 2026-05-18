@@ -42,6 +42,7 @@ interface TopbarProps {
   accountBusy: boolean;
   onOpenFriendChat: (friendship: CloudFriendship) => Promise<FriendChatWindowOpenResult> | FriendChatWindowOpenResult;
   onSocialNotify: (message: string, severity?: AlertColor) => void;
+  onUpdateUsername: (username: string) => Promise<boolean>;
   onLogout: () => void;
 }
 
@@ -208,6 +209,7 @@ export function Topbar({
   accountBusy,
   onOpenFriendChat,
   onSocialNotify,
+  onUpdateUsername,
   onLogout,
 }: TopbarProps) {
   const theme = useTheme();
@@ -282,8 +284,10 @@ export function Topbar({
             <FriendsView
               variant="topbar"
               account={account}
+              accountBusy={accountBusy}
               onOpenFriendChat={onOpenFriendChat}
               onNotify={onSocialNotify}
+              onUpdateUsername={onUpdateUsername}
             />
           </Box>
           <IconButton

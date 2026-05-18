@@ -1,5 +1,5 @@
 import type { BasicActionResult } from './base';
-import type { AgentRuntime, CodexReasoningEffort } from './agent-runtime';
+import type { AgentEffort, AgentProvider, AgentRuntime, CodexReasoningEffort } from './agent-runtime';
 
 export interface AppPromptTemplate {
   id: string;
@@ -37,6 +37,7 @@ export interface AppAgentPromptVariable {
 export interface AppAgentPromptTemplate {
   body: string;
   variables?: Record<string, AppAgentPromptVariable>;
+  runtime?: AgentRuntime;
 }
 
 export interface AppAgentPromptSet {
@@ -81,13 +82,17 @@ export interface AppPromptReviewItem {
   prompt: string;
   originalModel?: string;
   originalReasoningEffort?: CodexReasoningEffort;
+  originalRuntime?: AgentRuntime;
   model: string;
   reasoningEffort: CodexReasoningEffort;
+  runtime: AgentRuntime;
   overridePrompt?: string;
   overrideModel?: string;
   overrideReasoningEffort?: CodexReasoningEffort;
+  overrideRuntime?: AgentRuntime;
   modelSource: AppPromptSettingSource;
   reasoningEffortSource: AppPromptSettingSource;
+  runtimeSource: AppPromptSettingSource;
   edited: boolean;
   overrideInvalid: boolean;
   updatedAt?: string;
@@ -101,6 +106,9 @@ export interface AppPromptReviewInput {
   prompt: string;
   model?: string | null;
   reasoningEffort?: CodexReasoningEffort | null;
+  runtime?: AgentRuntime | null;
+  provider?: AgentProvider | null;
+  effort?: AgentEffort | null;
 }
 
 export interface AppPromptRestoreInput {

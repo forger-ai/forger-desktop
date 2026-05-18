@@ -6,10 +6,12 @@ import {
   Alert,
   Button,
   Chip,
+  CircularProgress,
   Dialog,
   DialogActions,
   DialogContent,
   DialogTitle,
+  LinearProgress,
   Stack,
   Typography,
 } from '@mui/material';
@@ -61,6 +63,13 @@ export function ClaudeConfigModal({
             <Alert severity="success" icon={<CheckCircleRounded />}>
               Claude Code esta listo para usarse desde Forger.
             </Alert>
+          ) : busy ? (
+            <Alert severity="info">
+              <Stack spacing={1}>
+                <Typography variant="body2">{t.agentProvider.claudeConnecting}</Typography>
+                <LinearProgress />
+              </Stack>
+            </Alert>
           ) : null}
           <Typography color="text.secondary">
             Si Claude Code ya esta instalado en este equipo, Forger lo detecta y lo puede usar. Si no existe, Forger instala una copia local con su runtime de Node.
@@ -87,7 +96,12 @@ export function ClaudeConfigModal({
           Instalar/Reinstalar
         </Button>
         {!status.authenticated ? (
-          <Button variant="contained" startIcon={<TerminalRounded />} disabled={busy} onClick={() => void onConnect()}>
+          <Button
+            variant="contained"
+            startIcon={busy ? <CircularProgress color="inherit" size={16} /> : <TerminalRounded />}
+            disabled={busy}
+            onClick={() => void onConnect()}
+          >
             Conectar Claude
           </Button>
         ) : null}
