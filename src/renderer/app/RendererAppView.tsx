@@ -146,8 +146,9 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     setSelectedClaudeEffort,
     chatBotPictureSrc,
     chatRunActive,
-    activeChatRunId,
-    chatProgressLines,
+    activeConversationRunActive,
+    activeConversationRunId,
+    activeConversationProgressLines,
     codexAuthStatus,
     claudeAuthStatus,
     setAgentProviderConfigOpen,
@@ -573,8 +574,9 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             onOpenCodexUsageDashboard={() => void getDesktopApi().openCodexUsageDashboard()}
             assistantAvatarSrc={chatBotPictureSrc}
             isSending={chatRunActive}
-            canStopRun={Boolean(activeChatRunId)}
-            progressLines={chatProgressLines}
+            isResponding={activeConversationRunActive}
+            canStopRun={Boolean(activeConversationRunId)}
+            progressLines={activeConversationProgressLines}
             codexConfigured={codexAuthStatus.authenticated || claudeAuthStatus.authenticated}
             onConfigureCodex={() => setAgentProviderConfigOpen(true)}
             openingAppIds={openingAppIds}

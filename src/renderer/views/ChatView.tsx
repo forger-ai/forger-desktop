@@ -129,6 +129,7 @@ interface ChatViewProps {
   onOpenCodexUsageDashboard: () => void;
   assistantAvatarSrc: string;
   isSending: boolean;
+  isResponding: boolean;
   canStopRun: boolean;
   progressLines: string[];
   codexConfigured: boolean;
@@ -183,6 +184,7 @@ export function ChatView({
   onOpenCodexUsageDashboard,
   assistantAvatarSrc,
   isSending,
+  isResponding,
   canStopRun,
   progressLines,
   codexConfigured,
@@ -452,7 +454,7 @@ export function ChatView({
       return;
     }
     scrollEl.scrollTop = scrollEl.scrollHeight;
-  }, [messages.length, isSending, progressLines.length]);
+  }, [messages.length, isResponding, progressLines.length]);
 
   return (
     <Box
@@ -539,7 +541,7 @@ export function ChatView({
         conversationTitle={conversationTitle}
         codexConfigured={codexConfigured}
         assistantAvatarSrc={assistantAvatarSrc}
-        isSending={isSending}
+        isSending={isResponding}
         progressLines={progressLines}
         openingAppIds={openingAppIds}
         respondingPermissionIds={respondingPermissionIds}
@@ -918,13 +920,12 @@ export function ChatView({
             size="small"
             startIcon={<AddCommentRounded />}
             onClick={onStartNewConversation}
-            disabled={isSending || !codexConfigured}
             sx={{ minHeight: 32, px: 1.5 }}
           >
             {t.sections.chat.newConversation}
           </Button>
           <Stack direction="row" spacing={0.75} alignItems="center">
-            {isSending ? (
+            {isResponding ? (
               <Button
                 variant="outlined"
                 color="error"
@@ -940,7 +941,7 @@ export function ChatView({
             <Button
               variant="contained"
               size="small"
-              endIcon={isSending ? <CircularProgress size={14} color="inherit" /> : <SendRounded fontSize="small" />}
+              endIcon={isResponding ? <CircularProgress size={14} color="inherit" /> : <SendRounded fontSize="small" />}
               onClick={onSend}
               disabled={isSending || !codexConfigured || (!inputValue.trim() && pendingFiles.length === 0 && mentionedFiles.length === 0)}
               sx={{ minHeight: 32, px: 1.5 }}
