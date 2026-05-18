@@ -58,6 +58,7 @@ export const removeIsolatedCodexHome = async (codexHome: string | null | undefin
 };
 
 export const assertAllowedMcpServers = (stdout: string, stderr: string, allowedServers: Set<string>): void => {
+  const allowedServerNames = expandAllowedMcpServerNames(allowedServers);
   for (const line of `${stdout}\n${stderr}`.split('\n').map((entry) => entry.trim()).filter(Boolean)) {
     let parsed: Record<string, unknown>;
     try {
@@ -71,10 +72,21 @@ export const assertAllowedMcpServers = (stdout: string, stderr: string, allowedS
       continue;
     }
     const server = typeof item?.server === 'string' ? item.server.trim() : '';
-    if (server && !allowedServers.has(server)) {
+    if (server && !allowedServerNames.has(server)) {
       throw new DisallowedMcpServerError(server);
     }
   }
+};
+
+const expandAllowedMcpServerNames = (allowedServers: Set<string>): Set<string> => {
+  const expanded = new Set<string>();
+  for (const server of allowedServers) {
+    expanded.add(server);
+    const normalized = server.replace(/[^a-zA-Z0-9]/g, '_');
+    expanded.add(`mcp_${normalized}__`);
+    expanded.add(`mcp_${normalized.toLowerCase()}__`);
+  }
+  return expanded;
 };
 
 const copyCodexHomeFile = async (sourcePath: string, targetPath: string): Promise<void> => {
