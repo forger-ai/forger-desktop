@@ -1,4 +1,5 @@
 import { normalizeAppCapabilities } from '../../shared/capabilities';
+import { normalizeAgentRuntime } from '../../shared/agent-runtime-registry';
 import type {
   AppAgent,
   AppAgentPromptSet,
@@ -15,7 +16,7 @@ import type {
   CodexReasoningEffort,
 } from '../../shared/types';
 
-const CODEX_REASONING_VALUES = new Set<CodexReasoningEffort>(['low', 'medium', 'high', 'xhigh']);
+const CODEX_REASONING_VALUES = new Set<CodexReasoningEffort>(['none', 'low', 'medium', 'high', 'xhigh']);
 
 export interface PublicCatalogResponseItem {
   slug: string;
@@ -192,6 +193,12 @@ const normalizeCatalogAgents = (value: unknown): AppAgent[] | undefined => {
         : undefined;
     const model = typeof candidate.model === 'string' && candidate.model.trim() ? candidate.model.trim() : undefined;
     const reasoningEffort = normalizeReasoningEffort(candidate.reasoningEffort);
+    const runtime = normalizeAgentRuntime(candidate.runtime ?? candidate, {
+      model,
+      reasoningEffort,
+      provider: candidate.provider,
+      effort: candidate.effort,
+    });
     const kind = normalizeCatalogAgentKind(candidate.kind);
     const initialPromptTemplate =
       typeof candidate.initialPromptTemplate === 'string' && candidate.initialPromptTemplate.trim()
@@ -207,6 +214,7 @@ const normalizeCatalogAgents = (value: unknown): AppAgent[] | undefined => {
       ...(prompts ? { prompts } : {}),
       ...(model ? { model } : {}),
       ...(reasoningEffort ? { reasoningEffort } : {}),
+      ...(runtime ? { runtime } : {}),
     }];
   });
   return agents.length > 0 ? agents : undefined;
@@ -233,6 +241,12 @@ const normalizeCatalogPromptTemplates = (value: unknown): AppPromptTemplate[] | 
         : undefined;
     const model = typeof candidate.model === 'string' && candidate.model.trim() ? candidate.model.trim() : undefined;
     const reasoningEffort = normalizeReasoningEffort(candidate.reasoningEffort);
+    const runtime = normalizeAgentRuntime(candidate.runtime ?? candidate, {
+      model,
+      reasoningEffort,
+      provider: candidate.provider,
+      effort: candidate.effort,
+    });
     return [{
       id,
       title,
@@ -240,6 +254,7 @@ const normalizeCatalogPromptTemplates = (value: unknown): AppPromptTemplate[] | 
       ...(description ? { description } : {}),
       ...(model ? { model } : {}),
       ...(reasoningEffort ? { reasoningEffort } : {}),
+      ...(runtime ? { runtime } : {}),
     }];
   });
   return templates.length > 0 ? templates : undefined;

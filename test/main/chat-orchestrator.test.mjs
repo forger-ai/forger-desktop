@@ -50,9 +50,16 @@ if (!state.threads.includes(nextThreadId)) {
   state.threads.push(nextThreadId);
 }
 fs.writeFileSync(statePath, JSON.stringify(state, null, 2));
-console.log(JSON.stringify({ type: 'thread.started', thread_id: nextThreadId }));
-console.log(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: mode + ' reply for ' + nextThreadId } }));
-console.log(JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 1, output_tokens: 1 } }));
+const emitReply = () => {
+  console.log(JSON.stringify({ type: 'thread.started', thread_id: nextThreadId }));
+  console.log(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: mode + ' reply for ' + nextThreadId } }));
+  console.log(JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 1, output_tokens: 1 } }));
+};
+if (prompt.includes('slow cancel')) {
+  setTimeout(emitReply, 5000);
+} else {
+  emitReply();
+}
 `, 'utf8');
   await chmod(cliPath, 0o755);
   return cliPath;
@@ -199,6 +206,31 @@ test('chat recovers from a stale provider thread by starting a fresh thread with
     const calls = await readFakeCalls(harness.metadataRoot, 'forger', conversationId);
     assert.deepEqual(calls.map((call) => call.mode), ['new', 'resume', 'resume', 'resume', 'resume', 'new']);
     assert.equal(new Set(calls.map((call) => call.codexHome)).size, 1);
+  } finally {
+    await harness.cleanup();
+  }
+});
+
+test('canceling a chat run kills the provider process and keeps the run canceled', async () => {
+  const harness = await createHarness();
+  try {
+    const started = await harness.orchestrator.startRun({
+      prompt: 'slow cancel',
+      threadId: null,
+      conversationId: 'conversation-cancel',
+      conversationHistory: [{ role: 'user', content: 'slow cancel' }],
+    });
+
+    assert.deepEqual(harness.orchestrator.cancelRun({ runId: started.runId }), { success: true });
+    const canceledRun = await waitForRun(harness.events, started.runId);
+    assert.equal(canceledRun.status, 'canceled');
+
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const statuses = harness.events
+      .filter((entry) => entry.runId === started.runId)
+      .map((entry) => entry.status);
+    assert.equal(statuses.includes('preview_ready'), false);
+    assert.equal(harness.orchestrator.getRun({ runId: started.runId })?.status, 'canceled');
   } finally {
     await harness.cleanup();
   }

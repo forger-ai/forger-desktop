@@ -12,11 +12,13 @@ import {
   Button,
   Checkbox,
   Chip,
+  CircularProgress,
   Dialog,
   DialogActions,
   DialogContent,
   DialogTitle,
   FormControlLabel,
+  LinearProgress,
   List,
   ListItem,
   ListItemIcon,
@@ -75,6 +77,13 @@ export function CodexConfigModal({
               <Stack spacing={1}>
                 <Typography fontWeight={700}>{t.codexSetup.successTitle}</Typography>
                 <Typography variant="body2">{t.codexSetup.successBody}</Typography>
+              </Stack>
+            </Alert>
+          ) : busy ? (
+            <Alert severity="info">
+              <Stack spacing={1}>
+                <Typography variant="body2">{t.codexSetup.connecting}</Typography>
+                <LinearProgress />
               </Stack>
             </Alert>
           ) : (
@@ -144,7 +153,7 @@ export function CodexConfigModal({
         {!status.authenticated ? (
           <Button
             variant="contained"
-            startIcon={<TerminalRounded />}
+            startIcon={busy ? <CircularProgress color="inherit" size={16} /> : <TerminalRounded />}
             disabled={busy || !acceptedConditions}
             onClick={() => void onConnect()}
           >

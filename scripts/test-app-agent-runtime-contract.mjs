@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const require = createRequire(import.meta.url);
-const { buildAppAgentPrompt } = require('../dist-electron/main/app-agent-conversation-manager.js');
+const { buildAppAgentPrompt } = require('../dist-electron/main/app-agent/conversation-helpers.js');
 const { renderManifestAgentPrompt } = require('../dist-electron/main/manifest-agent-prompts.js');
 const {
   PromptOverridesStore,

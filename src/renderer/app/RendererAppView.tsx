@@ -146,10 +146,12 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     setSelectedClaudeEffort,
     chatBotPictureSrc,
     chatRunActive,
+    activeChatRunId,
     chatProgressLines,
     codexAuthStatus,
     claudeAuthStatus,
     setAgentProviderConfigOpen,
+    handleStopChatRun,
     handleRespondPermission,
     automations,
     selectedAutomationId,
@@ -443,6 +445,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             setBannerSeverity(severity);
             setBannerMessage(message);
           }}
+          onUpdateUsername={handleForgerUsernameUpdate}
           onLogout={() => void handleForgerLogout()}
           desktopUpdateState={desktopUpdateState}
           advancedMode={advancedMode}
@@ -502,8 +505,11 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             appSecretsState={appSecretsState}
             secretsBusy={secretsBusy}
             account={forgerAccount}
+            providerOptions={AGENT_PROVIDER_OPTIONS}
             modelOptions={CODEX_MODEL_OPTIONS}
             reasoningOptions={CODEX_REASONING_OPTIONS}
+            claudeModelOptions={CLAUDE_MODEL_OPTIONS}
+            claudeEffortOptions={CLAUDE_EFFORT_OPTIONS}
             codexDefaults={settings.codexDefaults}
             onBack={() => setCurrentView(appDetailsBackView)}
             onInstall={(appId) => void handleInstall(appId)}
@@ -567,11 +573,13 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             onOpenCodexUsageDashboard={() => void getDesktopApi().openCodexUsageDashboard()}
             assistantAvatarSrc={chatBotPictureSrc}
             isSending={chatRunActive}
+            canStopRun={Boolean(activeChatRunId)}
             progressLines={chatProgressLines}
             codexConfigured={codexAuthStatus.authenticated || claudeAuthStatus.authenticated}
             onConfigureCodex={() => setAgentProviderConfigOpen(true)}
             openingAppIds={openingAppIds}
             onOpenApp={(appId) => void handleOpen(appId)}
+            onStopRun={handleStopChatRun}
             onRespondPermission={handleRespondPermission}
           />
         ) : null}

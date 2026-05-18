@@ -174,6 +174,11 @@ export function ForgerCloudModal({
   };
 
   const selectedCountry = countryOptions.find((option) => option.code === country) ?? null;
+  const usernameAvailableAt = account.user?.usernameChangeAvailableAt ? new Date(account.user.usernameChangeAvailableAt) : null;
+  const usernameChangeBlocked = Boolean(usernameAvailableAt && usernameAvailableAt.getTime() > Date.now());
+  const usernameAvailableLabel = usernameAvailableAt && !Number.isNaN(usernameAvailableAt.getTime())
+    ? usernameAvailableAt.toLocaleDateString('es-CL', { dateStyle: 'medium' })
+    : null;
 
   const renderCountryOption = (code: string, label: string) => (
     <Stack component="span" direction="row" spacing={1} alignItems="center">
@@ -276,7 +281,7 @@ export function ForgerCloudModal({
                       value={profileUsername}
                       onChange={(event) => setProfileUsername(event.target.value)}
                       placeholder={t.cloud.usernamePlaceholder}
-                      helperText={t.cloud.usernameHelp}
+                      helperText={usernameChangeBlocked && usernameAvailableLabel ? `Disponible desde el ${usernameAvailableLabel}.` : t.cloud.usernameHelp}
                       disabled={busy}
                       fullWidth
                     />
@@ -286,7 +291,7 @@ export function ForgerCloudModal({
                         size="small"
                         startIcon={<SaveRounded />}
                         onClick={() => void submitUsernameUpdate()}
-                        disabled={busy || !profileUsername.trim()}
+                        disabled={busy || usernameChangeBlocked || !profileUsername.trim()}
                       >
                         {t.cloud.saveUsername}
                       </Button>
@@ -311,13 +316,18 @@ export function ForgerCloudModal({
                       size="small"
                       startIcon={<EditRounded />}
                       onClick={() => setEditingUsername(true)}
-                      disabled={busy}
+                      disabled={busy || usernameChangeBlocked}
                     >
                       {t.cloud.changeUsername}
                     </Button>
                   </Stack>
                 )}
               </Stack>
+              {usernameChangeBlocked && usernameAvailableLabel ? (
+                <Typography variant="caption" color="text.secondary">
+                  Puedes cambiar tu username desde el {usernameAvailableLabel}.
+                </Typography>
+              ) : null}
               <Typography color="text.secondary">
                 {account.user.confirmed ? t.cloud.confirmed : t.cloud.confirmationRequired}
               </Typography>

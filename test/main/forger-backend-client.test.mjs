@@ -58,6 +58,8 @@ test('updateAccountProfile sends username with the current Forger token and pars
         username: 'felipe_cloud',
         confirmed: true,
         subscription_tier: 'free',
+        username_changed_at: '2026-05-18T12:00:00Z',
+        username_change_available_at: '2026-06-17T12:00:00Z',
       },
     });
   }, 'session-token');
@@ -71,6 +73,8 @@ test('updateAccountProfile sends username with the current Forger token and pars
     assert.equal(JSON.parse(requestInit.body).username, 'felipe_cloud');
     assert.equal(result.success, true);
     assert.equal(result.user.username, 'felipe_cloud');
+    assert.equal(result.user.usernameChangedAt, '2026-05-18T12:00:00Z');
+    assert.equal(result.user.usernameChangeAvailableAt, '2026-06-17T12:00:00Z');
   } finally {
     harness.restore();
     await rm(root, { recursive: true, force: true });

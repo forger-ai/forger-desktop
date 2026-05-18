@@ -2,10 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState, type SyntheticEvent 
 import ForumRounded from '@mui/icons-material/ForumRounded';
 import CheckRounded from '@mui/icons-material/CheckRounded';
 import CloseRounded from '@mui/icons-material/CloseRounded';
+import EditRounded from '@mui/icons-material/EditRounded';
 import PersonAddDisabledRounded from '@mui/icons-material/PersonAddDisabledRounded';
 import PersonAddRounded from '@mui/icons-material/PersonAddRounded';
 import SearchRounded from '@mui/icons-material/SearchRounded';
 import GroupsRounded from '@mui/icons-material/GroupsRounded';
+import SaveRounded from '@mui/icons-material/SaveRounded';
 import {
   Alert,
   Avatar,
@@ -56,12 +58,27 @@ import {
 
 interface FriendsViewProps {
   account: ForgerAccountSession;
+  accountBusy?: boolean;
   onOpenFriendChat?: (friendship: CloudFriendship) => Promise<FriendChatWindowOpenResult> | FriendChatWindowOpenResult;
   onNotify?: (message: string, severity?: AlertColor) => void;
+  onUpdateUsername?: (username: string) => Promise<boolean>;
   variant?: 'floating' | 'topbar';
 }
 
-export function FriendsView({ account, onOpenFriendChat, onNotify, variant = 'floating' }: FriendsViewProps) {
+const formatUsernameAvailableDate = (value?: string) => {
+  if (!value) {
+    return null;
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  return date.toLocaleDateString('es-CL', { dateStyle: 'medium' });
+};
+
+export function FriendsView({ account, accountBusy = false, onOpenFriendChat, onNotify, onUpdateUsername, variant = 'floating' }: FriendsViewProps) {
   const theme = useTheme();
   const launcherRef = useRef<HTMLButtonElement | null>(null);
   const previousAccountIdRef = useRef<number | undefined>(account.user?.id);
@@ -87,6 +104,9 @@ export function FriendsView({ account, onOpenFriendChat, onNotify, variant = 'fl
   const [friendRequestSendingId, setFriendRequestSendingId] = useState<number | null>(null);
   const [addFriendError, setAddFriendError] = useState<string | null>(null);
   const [addFriendFeedback, setAddFriendFeedback] = useState<string | null>(null);
+  const [editingUsername, setEditingUsername] = useState(false);
+  const [profileUsername, setProfileUsername] = useState(account.user?.username ?? '');
+  const [profileUsernameError, setProfileUsernameError] = useState<string | null>(null);
 
   const accountUserId = account.user?.id;
   const accepted = useMemo(
@@ -111,6 +131,17 @@ export function FriendsView({ account, onOpenFriendChat, onNotify, variant = 'fl
     [accepted],
   );
   const launcherBadgeCount = pendingRequestsCount + unseenMessagesCount;
+  const accountUsername = account.user?.username?.trim();
+  const usernameAvailableDate = formatUsernameAvailableDate(account.user?.usernameChangeAvailableAt);
+  const usernameChangeBlocked = Boolean(
+    account.user?.usernameChangeAvailableAt && new Date(account.user.usernameChangeAvailableAt).getTime() > Date.now(),
+  );
+
+  useEffect(() => {
+    setProfileUsername(account.user?.username ?? '');
+    setProfileUsernameError(null);
+    setEditingUsername(false);
+  }, [account.user?.id, account.user?.username]);
 
   const syncLastTab = (value: SocialTab) => {
     setLastSessionTab(value);
@@ -408,7 +439,24 @@ export function FriendsView({ account, onOpenFriendChat, onNotify, variant = 'fl
     }
   };
 
-  const accountUsername = account.user?.username?.trim();
+  const handleUsernameSubmit = async (event?: SyntheticEvent) => {
+    event?.preventDefault();
+    const nextUsername = profileUsername.trim().replace(/^@/, '');
+    if (!nextUsername || accountBusy || usernameChangeBlocked) {
+      return;
+    }
+
+    setProfileUsernameError(null);
+    const success = await onUpdateUsername?.(nextUsername);
+    if (success) {
+      setEditingUsername(false);
+      onNotify?.('Username actualizado.', 'success');
+      return;
+    }
+
+    setProfileUsernameError('No pudimos actualizar tu username.');
+  };
+
   const tabSubtitle =
     activeTab === 'friends'
       ? 'Tus conversaciones disponibles'
@@ -556,9 +604,87 @@ export function FriendsView({ account, onOpenFriendChat, onNotify, variant = 'fl
                         <Typography variant="body2" color="text.secondary">
                           {tabSubtitle}
                         </Typography>
-                        <Typography variant="caption" color="text.secondary" noWrap>
-                          {accountUsername ? `Tu username: @${accountUsername}` : 'Tu cuenta no tiene username visible'}
-                        </Typography>
+                        {editingUsername ? (
+                          <Box component="form" onSubmit={(event) => void handleUsernameSubmit(event)} sx={{ pt: 0.5 }}>
+                            <Stack direction="row" spacing={0.75} alignItems="flex-start">
+                              <TextField
+                                size="small"
+                                value={profileUsername}
+                                onChange={(event) => {
+                                  setProfileUsername(event.target.value);
+                                  setProfileUsernameError(null);
+                                }}
+                                placeholder="@username"
+                                error={Boolean(profileUsernameError)}
+                                helperText={profileUsernameError ?? 'Letras, numeros o guion bajo.'}
+                                disabled={accountBusy}
+                                inputProps={{ 'aria-label': 'Nuevo username' }}
+                                sx={{ flex: 1 }}
+                              />
+                              <Tooltip title="Guardar username">
+                                <span>
+                                  <IconButton
+                                    type="submit"
+                                    size="small"
+                                    color="primary"
+                                    disabled={accountBusy || !profileUsername.trim()}
+                                    sx={{ mt: 0.35 }}
+                                  >
+                                    {accountBusy ? <CircularProgress size={16} /> : <SaveRounded fontSize="small" />}
+                                  </IconButton>
+                                </span>
+                              </Tooltip>
+                              <Tooltip title="Cancelar">
+                                <span>
+                                  <IconButton
+                                    size="small"
+                                    onClick={() => {
+                                      setProfileUsername(account.user?.username ?? '');
+                                      setProfileUsernameError(null);
+                                      setEditingUsername(false);
+                                    }}
+                                    disabled={accountBusy}
+                                    sx={{ mt: 0.35 }}
+                                  >
+                                    <CloseRounded fontSize="small" />
+                                  </IconButton>
+                                </span>
+                              </Tooltip>
+                            </Stack>
+                          </Box>
+                        ) : (
+                          <Stack direction="row" spacing={0.75} alignItems="center" sx={{ minWidth: 0 }}>
+                            <Typography variant="caption" color="text.secondary" noWrap sx={{ minWidth: 0 }}>
+                              {accountUsername ? `Tu username: @${accountUsername}` : 'Tu cuenta no tiene username visible'}
+                            </Typography>
+                            {account.authenticated && account.user?.confirmed && onUpdateUsername ? (
+                              <Tooltip
+                                title={
+                                  usernameChangeBlocked && usernameAvailableDate
+                                    ? `Disponible desde el ${usernameAvailableDate}`
+                                    : 'Cambiar username'
+                                }
+                              >
+                                <span>
+                                  <IconButton
+                                    size="small"
+                                    aria-label="Cambiar username"
+                                    onClick={() => setEditingUsername(true)}
+                                    disabled={accountBusy || usernameChangeBlocked}
+                                    sx={{ width: 24, height: 24, flexShrink: 0 }}
+                                  >
+                                    <EditRounded sx={{ fontSize: 16 }} />
+                                  </IconButton>
+                                </span>
+                              </Tooltip>
+                            ) : null}
+                          </Stack>
+                        )}
+                        {usernameChangeBlocked && usernameAvailableDate && !editingUsername ? (
+                          <Typography variant="caption" color="text.secondary">
+                            Puedes cambiarlo desde el {usernameAvailableDate}.
+                          </Typography>
+                        ) : null}
                       </Stack>
                     </Stack>
 

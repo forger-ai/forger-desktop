@@ -1,6 +1,41 @@
 import type { ForgerAppApi } from './types/app-api';
 
-export type { AgentDefaults, AgentEffort, AgentModelOptions, AgentProvider, AgentRuntime, ClaudeEffort, CodexModelOption, CodexReasoningEffort } from './types/agent-runtime';
+export type { AgentDefaults, AgentEffort, AgentModelOptions, AgentProvider, AgentRuntime, ClaudeEffort, ClaudeModelOption, CodexModelOption, CodexReasoningEffort } from './types/agent-runtime';
+export {
+  AGENT_MODEL_OPTIONS,
+  AGENT_PROVIDER_OPTIONS,
+  CLAUDE_EFFORT_OPTIONS,
+  CLAUDE_MODEL_OPTIONS,
+  CODEX_MODEL_OPTIONS,
+  CODEX_REASONING_OPTIONS,
+  DEFAULT_AGENT_DEFAULTS,
+  DEFAULT_AGENT_PROVIDER,
+  DEFAULT_CLAUDE_EFFORT,
+  DEFAULT_CLAUDE_MODEL,
+  DEFAULT_CODEX_MODEL,
+  DEFAULT_CODEX_REASONING_EFFORT,
+  getAgentModelOptions,
+  getDefaultAgentDefaults,
+  getClaudeModelOption,
+  getCodexModelOption,
+  getDefaultClaudeEffort,
+  getDefaultCodexReasoningEffort,
+  isAgentProvider,
+  isAgentProviderPreference,
+  isClaudeEffort,
+  isClaudeModel,
+  isCodexModel,
+  isCodexReasoningEffort,
+  normalizeAgentProviderPreference,
+  normalizeAgentRuntime,
+  normalizeClaudeEffort,
+  normalizeClaudeModel,
+  normalizeCodexModel,
+  normalizeCodexReasoningEffort,
+  resolveAgentRuntime,
+  runtimeFromDefaults,
+  agentRuntimeEquals,
+} from './agent-runtime-registry';
 export type { ForgerAccountLoginInput, ForgerAccountProfileInput, ForgerAccountRegisterInput, ForgerAccountSession, ForgerAccountUser, SubscriptionTier, CloudDeviceAppSummary, CloudDeviceSummary, CloudDevicesState } from './types/account';
 export type { AppAgentPromptSet, AppAgentPromptTemplate, AppAgentPromptVariable, AppAgentPromptVariableType, AppAgent, AppPromptMutationResult, AppPromptRestoreInput, AppPromptReviewInput, AppPromptReviewItem, AppPromptReviewKind, AppPromptSettingSource, AppPromptTemplate, AppPromptTemplateArgument, AppPromptTemplateArgumentType, AppPromptValidationResult } from './types/prompts';
 export type { AppCapability, AppCategory, AppStatus, AppSummary, CatalogPublicationStatus, VersionChangelog } from './types/catalog';
