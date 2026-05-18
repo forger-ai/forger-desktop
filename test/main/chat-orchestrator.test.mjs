@@ -121,6 +121,27 @@ const waitForRunCleanup = async () => {
   await new Promise((resolve) => setTimeout(resolve, 25));
 };
 
+const assertPublicSerializableRun = (run) => {
+  assert.doesNotThrow(() => structuredClone(run));
+  for (const internalField of [
+    'child',
+    'stagingDir',
+    'appRoot',
+    'baseHead',
+    'sharedRoots',
+    'runLogPath',
+    'model',
+    'provider',
+    'reasoningEffort',
+    'effort',
+    'taskType',
+    'locale',
+    'conversationHistory',
+  ]) {
+    assert.equal(Object.hasOwn(run, internalField), false, internalField + ' should not be exposed');
+  }
+};
+
 const readFakeCalls = async (metadataRoot, appId, conversationId) => {
   const callsPath = join(
     metadataRoot,
@@ -206,6 +227,32 @@ test('chat recovers from a stale provider thread by starting a fresh thread with
     const calls = await readFakeCalls(harness.metadataRoot, 'forger', conversationId);
     assert.deepEqual(calls.map((call) => call.mode), ['new', 'resume', 'resume', 'resume', 'resume', 'new']);
     assert.equal(new Set(calls.map((call) => call.codexHome)).size, 1);
+  } finally {
+    await harness.cleanup();
+  }
+});
+
+test('chat run updates and getRun expose only serializable public run state', async () => {
+  const harness = await createHarness();
+  try {
+    const started = await harness.orchestrator.startRun({
+      prompt: 'hello',
+      threadId: null,
+      conversationId: 'conversation-serializable',
+      conversationHistory: [{ role: 'user', content: 'hello' }],
+    });
+    const finalRun = await waitForRun(harness.events, started.runId);
+    assert.equal(finalRun.status, 'preview_ready');
+
+    const runEvents = harness.events.filter((entry) => entry.runId === started.runId);
+    assert.ok(runEvents.length >= 2);
+    for (const eventRun of runEvents) {
+      assertPublicSerializableRun(eventRun);
+    }
+
+    const storedRun = harness.orchestrator.getRun({ runId: started.runId });
+    assert.ok(storedRun);
+    assertPublicSerializableRun(storedRun);
   } finally {
     await harness.cleanup();
   }

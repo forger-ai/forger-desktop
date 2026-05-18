@@ -46,6 +46,7 @@ import type {
   PickedChatFile,
   RemoteAppBackupSummary,
   RemoteBackupsUsage,
+  RendererChatTraceEvent,
   Settings,
   SharedFileRef,
   SubmitAppRatingInput,
@@ -114,6 +115,7 @@ const initialAgentToolSettings: AgentToolSettings = { approvals: { forger_list_c
 'gmail.connection.status': false, 'gmail.search_messages': true, 'gmail.read_thread': true, 'gmail.read_attachment': true, 'gmail.send_email': true, }, };
 const getDesktopApi = () => { const desktopApi = window.forger; if (!desktopApi) { throw new Error( 'Bridge de Electron no disponible. Ejecuta Forger con `npm run dev` en desktop (no solo Vite en navegador).', ); }
 return desktopApi; };
+const traceChatEvent = (event: RendererChatTraceEvent) => { try { void getDesktopApi().traceChatEvent({ ...event, timestamp: event.timestamp ?? new Date().toISOString() }); } catch { /* best-effort diagnostics only */ } };
 interface ErrorReportDialogState {
 open: boolean; report: DesktopErrorReportPreview | null; busy: boolean; userMessage?: string; }
 interface SocialChatWindowRoute {
@@ -193,7 +195,7 @@ return next; }); if (progress.phase === 'completed') { setBannerSeverity('succes
 setBannerMessage(progress.userMessage); void refreshApps(); if (progress.phase === 'completed') { setSelectedAppId(appId); }
 }); const unsubscribeRuntime = desktopApi.onRuntimeStatusChanged((status) => { if (status.status === 'running') { setBannerSeverity('success'); setBannerMessage(status.userMessage ?? t.actions.running); } else if (status.status === 'error') { setBannerSeverity('error'); setBannerMessage(status.userMessage ?? t.settings.authErrorFallback); requestErrorReport({ source: 'app', operation: 'runtime.status', message: status.userMessage ?? t.settings.authErrorFallback, technicalCode: 'app_runtime_error',
 appId: status.appId, details: { status: status.status }, }); } else if (status.status === 'installed') { setBannerSeverity('info'); setBannerMessage(status.userMessage ?? t.actions.installed); }
-void refreshApps(); }); const unsubscribeChat = desktopApi.onChatRunUpdated(({ run }) => { const isTerminal = run.status === 'preview_ready' || run.status === 'failed' || run.status === 'canceled' || run.status === 'applied' || run.status === 'undone'; setChatRunActive(!isTerminal); if (isTerminal) { if (activeChatRunIdRef.current === run.runId) { activeChatRunIdRef.current = null; setActiveChatRunId(null); } } else { activeChatRunIdRef.current = run.runId; setActiveChatRunId(run.runId); } setChatProgressLines(run.progressLog ?? []); if (run.status === 'needs_permission' && run.permissionRequest) { const dedupePermissionKey = `${run.runId}:needs_permission:${run.permissionRequest.requestId}`;
+void refreshApps(); }); const unsubscribeChat = desktopApi.onChatRunUpdated(({ run }) => { traceChatEvent({ event: 'chat_run_event_received', runId: run.runId, appId: run.appId, conversationId: run.conversationId ?? null, activeConversationId, status: run.status, messageCount: run.progressLog?.length ?? 0 }); const isTerminal = run.status === 'preview_ready' || run.status === 'failed' || run.status === 'canceled' || run.status === 'applied' || run.status === 'undone'; setChatRunActive(!isTerminal); if (isTerminal) { if (activeChatRunIdRef.current === run.runId) { activeChatRunIdRef.current = null; setActiveChatRunId(null); } } else { activeChatRunIdRef.current = run.runId; setActiveChatRunId(run.runId); } setChatProgressLines(run.progressLog ?? []); if (run.status === 'needs_permission' && run.permissionRequest) { const dedupePermissionKey = `${run.runId}:needs_permission:${run.permissionRequest.requestId}`;
 if (!deliveredRunRepliesRef.current.has(dedupePermissionKey)) { deliveredRunRepliesRef.current.add(dedupePermissionKey); const targetConversationId = run.conversationId ?? runConversationIdByRunRef.current.get(run.runId) ?? activeRunConversationIdRef.current ?? activeConversationId; if (targetConversationId) { const permissionRequest = run.permissionRequest; console.info('[Forger permission] rendering request', { runId: run.runId, requestId: permissionRequest.requestId, permission: permissionRequest.permission,
 resource: permissionRequest.resource, targetConversationId, }); setChatConversations((currentConversations) => currentConversations.map((conversation) => { if (conversation.id !== targetConversationId) { return conversation; }
 return { ...conversation, updatedAt: new Date().toISOString(), messages: [ ...conversation.messages, { id: `assistant-permission-${run.runId}-${permissionRequest.requestId}`, role: 'assistant', content: t.sections.chat.permissionPrompt(permissionRequest.resource), action: {
@@ -204,10 +206,11 @@ runId: run.runId, request: permissionRequest, status: 'pending', }, }, ], };
 return; }
 const isMessageTerminal = run.status === 'preview_ready' || run.status === 'applied' || run.status === 'undone' || run.status === 'failed' || run.status === 'canceled'; if (isTerminal && !isMessageTerminal) { updateActiveRunConversationId(null); }
 const hasMessage = typeof run.userMessage === 'string' && run.userMessage.trim().length > 0; const dedupeKey = `${run.runId}:${run.status}`; if (!isMessageTerminal || !hasMessage || deliveredRunRepliesRef.current.has(dedupeKey)) { return; }
-deliveredRunRepliesRef.current.add(dedupeKey); const targetConversationId = run.conversationId ?? runConversationIdByRunRef.current.get(run.runId) ?? activeRunConversationIdRef.current ?? activeConversationId; if (!targetConversationId) { return; }
+deliveredRunRepliesRef.current.add(dedupeKey); const targetConversationId = run.conversationId ?? runConversationIdByRunRef.current.get(run.runId) ?? activeRunConversationIdRef.current ?? activeConversationId; if (!targetConversationId) { traceChatEvent({ event: 'chat_run_message_append_attempt', runId: run.runId, appId: run.appId, conversationId: null, activeConversationId, status: run.status, foundConversation: false }); return; }
+const foundConversation = chatConversations.some((conversation) => conversation.id === targetConversationId); traceChatEvent({ event: 'chat_run_message_append_attempt', runId: run.runId, appId: run.appId, conversationId: targetConversationId, activeConversationId, status: run.status, foundConversation });
 setChatConversations((currentConversations) => currentConversations.map((conversation) => { if (conversation.id !== targetConversationId) { return conversation; }
 return { ...conversation, threadId: typeof run.threadId === 'string' && run.threadId.trim().length > 0 ? run.threadId : conversation.threadId, updatedAt: new Date().toISOString(), messages: [ ...conversation.messages, { id: `assistant-run-${run.runId}-${run.status}`, role: 'assistant', content: run.userMessage as string, }, ], };
-}), ); if (isTerminal) { runConversationIdByRunRef.current.delete(run.runId); updateActiveRunConversationId(null); }
+}), ); traceChatEvent({ event: 'chat_run_message_appended', runId: run.runId, appId: run.appId, conversationId: targetConversationId, activeConversationId, status: run.status, foundConversation }); if (isTerminal) { runConversationIdByRunRef.current.delete(run.runId); updateActiveRunConversationId(null); }
 }); const unsubscribeAutomation = desktopApi.onAutomationUpdated(({ automation, run }) => { setAutomations((current) => { const withoutCurrent = current.filter((item) => item.id !== automation.id); return [automation, ...withoutCurrent].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt)); }); if (selectedAutomationIdRef.current === automation.id) { void desktopApi.automationsListRuns(automation.id).then((runs) => { setAutomationRuns(runs);
 const targetRunId = run?.id ?? selectedAutomationRun?.id ?? runs[0]?.id; if (!targetRunId) { setSelectedAutomationRun(null); return; }
 void desktopApi.automationsGetRunTranscript(targetRunId).then(setSelectedAutomationRun); }); }
@@ -419,6 +422,7 @@ return next; }); if (activeConversationId === conversationId) { setActiveConvers
 if (activeRunConversationIdRef.current === conversationId) { updateActiveRunConversationId(null); }
 };
 const handleStartNewConversation = () => { const chatScopeId = selectedAppId ?? FREE_CHAT_APP_ID; const now = new Date().toISOString(); const nextConversation: ChatConversation = { id: makeConversationId(), appId: chatScopeId, title: t.sections.chat.newConversationTitle, threadId: null, createdAt: now, updatedAt: now, messages: [], };
+traceChatEvent({ event: 'chat_new_conversation_clicked', appId: chatScopeId, conversationId: nextConversation.id, activeConversationId, messageCount: 0 });
 setChatConversations((current) => [nextConversation, ...current]); setActiveConversationId(nextConversation.id); setActiveConversationByApp((current) => ({ ...current, [chatScopeId]: nextConversation.id })); setChatInput(''); discardStagedChatFiles(pendingChatFiles); setPendingChatFiles([]); setMentionedChatFileIds([]); resetIdleChatProgress(); };
 const handleSelectAutomation = (automationId: string) => { setSelectedAutomationId(automationId); void loadAutomationRuns(automationId); };
 const handleSelectAutomationRun = async (runId: string) => { const run = await getDesktopApi().automationsGetRunTranscript(runId); setSelectedAutomationRun(run); };

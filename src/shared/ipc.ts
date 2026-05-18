@@ -104,6 +104,7 @@ export const IPC_CHANNELS = {
   chatApprovePermission: 'forger:chat:approve-permission',
   chatApplyRun: 'forger:chat:apply-run',
   chatUndo: 'forger:chat:undo',
+  chatTrace: 'forger:chat:trace',
   installProgress: 'forger:install-progress',
   runtimeStatusChanged: 'forger:runtime-status-changed',
   chatRunUpdated: 'forger:chat:run-updated',

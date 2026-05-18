@@ -3,7 +3,7 @@ import type { CatalogApp } from './catalog-app';
 import type { InstallAppResult, OpenAppResult, StopAppResult, RuntimeStatus } from './runtime';
 import type { BasicActionResult } from './base';
 import type { AppBackupSummary, CreateAppBackupInput, CreateAppBackupResult, DeleteAppBackupInput, RestoreAppBackupInput, RemoteBackupsState, CreateRemoteAppBackupInput, CreateRemoteAppBackupResult, RestoreRemoteAppBackupInput, CloudSyncSettings } from './backups';
-import type { AppDetails, ChatRunStatus, ChatRun, ChatRunEvent, ChatStartRunInput, ChatGetRunInput, ChatCancelRunInput, ChatApprovePermissionInput, ChatApplyRunInput, ChatApplyResult, ChatUndoInput, ChatUndoResult } from './chat';
+import type { AppDetails, ChatRunStatus, ChatRun, ChatRunEvent, ChatStartRunInput, ChatGetRunInput, ChatCancelRunInput, ChatApprovePermissionInput, ChatApplyRunInput, ChatApplyResult, ChatUndoInput, ChatUndoResult, RendererChatTraceEvent } from './chat';
 import type { AppPromptMutationResult, AppPromptRestoreInput, AppPromptReviewInput, AppPromptReviewItem, AppPromptValidationResult } from './prompts';
 import type { InstallWelcomeResult } from './chat';
 import type { AppSecretsState, UserSecretSummary, CreateUserSecretInput, UpdateUserSecretInput, DeleteUserSecretInput, ConnectAppSecretInput, DisconnectAppSecretInput, SecretMutationResult } from './secrets';
@@ -121,6 +121,7 @@ export interface ForgerDesktopApi {
   chatApprovePermission: (input: ChatApprovePermissionInput) => Promise<{ success: boolean }>;
   chatApplyRun: (input: ChatApplyRunInput) => Promise<ChatApplyResult>;
   chatUndo: (input: ChatUndoInput) => Promise<ChatUndoResult>;
+  traceChatEvent: (event: RendererChatTraceEvent) => Promise<{ success: boolean }>;
   onChatRunUpdated: (listener: (event: ChatRunEvent) => void) => () => void;
   filesPickForChat: () => Promise<PickedChatFile[]>;
   filesStageForChat: (input: FilesStageForChatInput) => Promise<PickedChatFile>;

@@ -102,6 +102,7 @@ const IPC_CHANNELS = {
   chatApprovePermission: 'forger:chat:approve-permission',
   chatApplyRun: 'forger:chat:apply-run',
   chatUndo: 'forger:chat:undo',
+  chatTrace: 'forger:chat:trace',
   installProgress: 'forger:install-progress',
   runtimeStatusChanged: 'forger:runtime-status-changed',
   chatRunUpdated: 'forger:chat:run-updated',
@@ -289,6 +290,7 @@ const api: ForgerDesktopApi = {
   chatApprovePermission: (input) => ipcRenderer.invoke(IPC_CHANNELS.chatApprovePermission, input),
   chatApplyRun: (input) => ipcRenderer.invoke(IPC_CHANNELS.chatApplyRun, input),
   chatUndo: (input) => ipcRenderer.invoke(IPC_CHANNELS.chatUndo, input),
+  traceChatEvent: (event) => ipcRenderer.invoke(IPC_CHANNELS.chatTrace, event),
   onChatRunUpdated: (listener) => {
     const wrapped = (_event: unknown, payload: Parameters<typeof listener>[0]) => {
       listener(payload);

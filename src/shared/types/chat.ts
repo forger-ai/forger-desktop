@@ -134,6 +134,24 @@ export interface ChatRunEvent {
   run: ChatRun;
 }
 
+export type RendererChatTraceEventName =
+  | 'chat_run_event_received'
+  | 'chat_run_message_append_attempt'
+  | 'chat_run_message_appended'
+  | 'chat_new_conversation_clicked';
+
+export interface RendererChatTraceEvent {
+  event: RendererChatTraceEventName;
+  timestamp?: string;
+  runId?: string;
+  appId?: string;
+  conversationId?: string | null;
+  activeConversationId?: string | null;
+  status?: ChatRunStatus;
+  messageCount?: number;
+  foundConversation?: boolean;
+}
+
 export interface ChatStartRunInput {
   appId?: string | null;
   prompt: string;

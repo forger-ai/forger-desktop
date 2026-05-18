@@ -83,6 +83,7 @@ interface ChatOrchestratorOptions {
   listenAppMcps?: (appIds: string[], runId: string) => Promise<CodexMcpServerConfig[]>;
   releaseAppMcps?: (runId: string) => void;
   onUpdateConflictResolved?: (appId: string) => Promise<void>;
+  trace?: (event: string, payload?: Record<string, unknown>) => void | Promise<void>;
   onRunUpdated: (event: ChatRunEvent) => void;
 }
 
@@ -118,6 +119,38 @@ interface PendingPermission {
   requestId: string;
   resolve: (decision: 'allow' | 'deny') => void;
 }
+
+const toPublicChatRun = (run: InternalChatRun): ChatRun => ({
+  runId: run.runId,
+  appId: run.appId,
+  prompt: run.prompt,
+  threadId: run.threadId,
+  status: run.status,
+  createdAt: run.createdAt,
+  updatedAt: run.updatedAt,
+  dangerMode: run.dangerMode,
+  permissionRequest: run.permissionRequest,
+  preview: run.preview,
+  errorCode: run.errorCode,
+  userMessage: run.userMessage,
+  progressLog: run.progressLog,
+  operationId: run.operationId,
+  commitSha: run.commitSha,
+  conversationId: run.conversationId,
+});
+
+const buildChatRunTracePayload = (run: ChatRun): Record<string, unknown> => ({
+  runId: run.runId,
+  appId: run.appId,
+  conversationId: run.conversationId ?? null,
+  threadId: run.threadId ?? null,
+  status: run.status,
+  hasUserMessage: typeof run.userMessage === 'string' && run.userMessage.trim().length > 0,
+  userMessageLength: typeof run.userMessage === 'string' ? run.userMessage.length : 0,
+  progressCount: run.progressLog?.length ?? 0,
+  hasPermissionRequest: Boolean(run.permissionRequest),
+  hasPreview: Boolean(run.preview),
+});
 
 interface AppThreadState {
   appId: string;
@@ -216,7 +249,8 @@ export class ChatOrchestrator {
   }
 
   public getRun(input: ChatGetRunInput): ChatRun | null {
-    return this.runs.get(input.runId) ?? null;
+    const run = this.runs.get(input.runId);
+    return run ? toPublicChatRun(run) : null;
   }
 
   public cancelRun(input: ChatCancelRunInput): { success: boolean } {
@@ -844,7 +878,9 @@ export class ChatOrchestrator {
   }
 
   private emitRun(run: InternalChatRun): void {
-    this.options.onRunUpdated({ run });
+    const publicRun = toPublicChatRun(run);
+    void this.options.trace?.('chat_run_emit', buildChatRunTracePayload(publicRun));
+    this.options.onRunUpdated({ run: publicRun });
   }
 
   private async resolveSharedRoots(sharedFiles: Array<{ path: string }>): Promise<string[]> {
