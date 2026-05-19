@@ -38,6 +38,7 @@ import { DesktopUpdater } from './desktop-updater';
 import { DesktopRuntimeBridge } from './desktop-runtime-bridge';
 import { DesktopErrorReporter } from './error-reporting';
 import { FileLibrary } from './file-library';
+import { buildMacTerminalLoginScript } from './auth-login-scripts';
 import { ForgerMcpServer } from './forger-mcp-server';
 import { MemoryStore } from './memory-store';
 import {
@@ -3621,10 +3622,6 @@ const ensureRuntimeInstalled = async (
   }
 };
 
-const shellQuote = (value: string): string => {
-  return `'${value.replace(/'/g, `'\\''`)}'`;
-};
-
 const escapeWindowsBatchValue = (value: string): string => value.replace(/%/g, '%%').replace(/"/g, '""');
 const quotePowerShellSingle = (value: string): string => `'${value.replace(/'/g, "''")}'`;
 
@@ -3852,21 +3849,47 @@ const connectCodexAuth = async (): Promise<{ success: boolean; userMessage: stri
     await fs.mkdir(codexHome, { recursive: true });
 
     if (process.platform === 'darwin') {
-      const loginCommand = `export CODEX_HOME=${shellQuote(codexHome)}; ${shellQuote(codexCliPath)} login`;
-      await runCommand(
-        '/usr/bin/osascript',
+      const nodeRuntime = await ensureRuntimeInstalled('node', DEFAULT_NODE_VERSION);
+      const nodePathEntries = [
+        ...getRuntimePathEntries(nodeRuntime),
+        path.dirname(codexCliPath),
+      ];
+      const loginLogPath = path.join(getLogsRoot(), 'codex-login.log');
+      const loginScriptPath = path.join(getTempRoot(), 'codex-login.command');
+      const loginScript = buildMacTerminalLoginScript({
+        providerName: 'Codex',
+        logPath: loginLogPath,
+        command: [codexCliPath, 'login'],
+        env: { CODEX_HOME: codexHome },
+        pathEntries: nodePathEntries,
+      });
+
+      await fs.mkdir(path.dirname(loginLogPath), { recursive: true });
+      await fs.mkdir(path.dirname(loginScriptPath), { recursive: true });
+      await fs.writeFile(
+        loginLogPath,
         [
-          '-e',
-          'tell application "Terminal"',
-          '-e',
-          'activate',
-          '-e',
-          `do script ${JSON.stringify(loginCommand)}`,
-          '-e',
-          'end tell',
-        ],
-        { cwd: app.getPath('userData') },
+          `[${new Date().toISOString()}] Forger prepared Codex login.`,
+          `codexHome=${codexHome}`,
+          `codexCliPath=${codexCliPath}`,
+          `loginScriptPath=${loginScriptPath}`,
+          `nodePathEntries=${nodePathEntries.join(path.delimiter)}`,
+          '',
+        ].join('\n'),
+        'utf8',
       );
+      await fs.writeFile(loginScriptPath, loginScript, 'utf8');
+      await fs.chmod(loginScriptPath, 0o700);
+      await runCommand('/usr/bin/open', ['-a', 'Terminal', loginScriptPath], { cwd: app.getPath('userData') });
+
+      await appendInstallLog('codex_auth:terminal_opened', {
+        platform: process.platform,
+        codexHome,
+        codexCliPath,
+        loginScriptPath,
+        loginLogPath,
+        nodePathEntries,
+      });
 
       await markProviderConnected('codex');
       return {
@@ -4074,21 +4097,36 @@ const connectClaudeAuth = async (): Promise<{ success: boolean; userMessage: str
     const cliPath = (await resolveClaudeCli())?.path ?? await ensureClaudeCliInstalled();
 
     if (process.platform === 'darwin') {
-      const loginCommand = `${shellQuote(cliPath)} auth login`;
-      await runCommand(
-        '/usr/bin/osascript',
+      const loginLogPath = path.join(getLogsRoot(), 'claude-login.log');
+      const loginScriptPath = path.join(getTempRoot(), 'claude-login.command');
+      const loginScript = buildMacTerminalLoginScript({
+        providerName: 'Claude Code',
+        logPath: loginLogPath,
+        command: [cliPath, 'auth', 'login'],
+      });
+
+      await fs.mkdir(path.dirname(loginLogPath), { recursive: true });
+      await fs.mkdir(path.dirname(loginScriptPath), { recursive: true });
+      await fs.writeFile(
+        loginLogPath,
         [
-          '-e',
-          'tell application "Terminal"',
-          '-e',
-          'activate',
-          '-e',
-          `do script ${JSON.stringify(loginCommand)}`,
-          '-e',
-          'end tell',
-        ],
-        { cwd: app.getPath('userData') },
+          `[${new Date().toISOString()}] Forger prepared Claude Code login.`,
+          `claudeCliPath=${cliPath}`,
+          `loginScriptPath=${loginScriptPath}`,
+          '',
+        ].join('\n'),
+        'utf8',
       );
+      await fs.writeFile(loginScriptPath, loginScript, 'utf8');
+      await fs.chmod(loginScriptPath, 0o700);
+      await runCommand('/usr/bin/open', ['-a', 'Terminal', loginScriptPath], { cwd: app.getPath('userData') });
+
+      await appendInstallLog('claude_auth:terminal_opened', {
+        platform: process.platform,
+        cliPath,
+        loginScriptPath,
+        loginLogPath,
+      });
       await markProviderConnected('claude');
       return {
         success: true,

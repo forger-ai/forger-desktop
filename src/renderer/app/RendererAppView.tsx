@@ -203,6 +203,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     runOfficialToolAction,
     activeLocale,
     codexAuthBusy,
+    claudeAuthBusy,
     themePreference,
     setThemePreference,
     languagePreference,
@@ -212,8 +213,10 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     setChatBotPicture,
     handleAgentDefaultsChange,
     setCodexConfigOpen,
+    closeCodexConfig,
     handleReinstallCodex,
     setClaudeConfigOpen,
+    closeClaudeConfig,
     handleReinstallClaude,
     desktopUpdateBusy,
     runDesktopUpdateAction,
@@ -706,6 +709,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
         {currentView === 'settings' ? (
           <SettingsView
             codexAuthBusy={codexAuthBusy}
+            claudeAuthBusy={claudeAuthBusy}
             codexAuthStatus={codexAuthStatus}
             claudeAuthStatus={claudeAuthStatus}
             t={t}
@@ -856,7 +860,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
         status={codexAuthStatus}
         busy={codexAuthBusy}
         t={t}
-        onClose={() => setCodexConfigOpen(false)}
+        onClose={closeCodexConfig}
         onConnect={handleConnectCodexAuth}
         onRefresh={refreshCodexAuthStatus}
       />
@@ -864,9 +868,9 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
       <ClaudeConfigModal
         open={claudeConfigOpen}
         status={claudeAuthStatus}
-        busy={codexAuthBusy}
+        busy={claudeAuthBusy}
         t={t}
-        onClose={() => setClaudeConfigOpen(false)}
+        onClose={closeClaudeConfig}
         onConnect={handleConnectClaudeAuth}
         onRefresh={refreshClaudeAuthStatus}
         onReinstall={handleReinstallClaude}
