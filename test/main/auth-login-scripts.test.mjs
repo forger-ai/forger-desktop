@@ -3,7 +3,10 @@ import test from 'node:test';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
-const { buildMacTerminalLoginScript } = require('../../dist-electron/main/auth-login-scripts.js');
+const {
+  buildMacTerminalLoginScript,
+  buildMacTerminalScriptLaunchCommand,
+} = require('../../dist-electron/main/auth-login-scripts.js');
 
 test('macOS Codex login script carries CODEX_HOME, PATH, and codex login command', () => {
   const script = buildMacTerminalLoginScript({
@@ -42,4 +45,16 @@ test('macOS Claude login script uses script body instead of inline Terminal comm
   assert.match(script, /'\/opt\/claude\/bin\/claude' 'auth' 'login'/);
   assert.match(script, /Claude Code login finished/);
   assert.doesNotMatch(script, /do script/);
+});
+
+test('macOS Terminal launch command invokes the generated script with an absolute bash path', () => {
+  const command = buildMacTerminalScriptLaunchCommand(
+    '/Users/test/Library/Application Support/forger-desktop/tmp/codex-login.command',
+  );
+
+  assert.equal(
+    command,
+    "/bin/bash '/Users/test/Library/Application Support/forger-desktop/tmp/codex-login.command'",
+  );
+  assert.doesNotMatch(command, /^Users\//);
 });

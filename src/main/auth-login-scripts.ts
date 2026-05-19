@@ -10,6 +10,10 @@ export const shellQuote = (value: string): string => {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 };
 
+export const buildMacTerminalScriptLaunchCommand = (scriptPath: string): string => {
+  return `/bin/bash ${shellQuote(scriptPath)}`;
+};
+
 export const buildMacTerminalLoginScript = ({
   providerName,
   logPath,
