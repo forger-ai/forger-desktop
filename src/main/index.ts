@@ -39,6 +39,11 @@ import { DesktopRuntimeBridge } from './desktop-runtime-bridge';
 import { DesktopErrorReporter } from './error-reporting';
 import { FileLibrary } from './file-library';
 import { buildMacTerminalLoginScript, buildMacTerminalScriptLaunchCommand } from './auth-login-scripts';
+import {
+  buildCodexAuthEnvironment,
+  classifyCodexAuthOutput,
+  extractAllowedCodexAuthUrls,
+} from './codex-auth-helpers';
 import { ForgerMcpServer } from './forger-mcp-server';
 import { MemoryStore } from './memory-store';
 import {
@@ -3790,6 +3795,18 @@ const ensureCodexCliInstalled = async (): Promise<string> => {
   return installed;
 };
 
+const buildManagedCodexAuthEnvironment = async (
+  codexCliPath: string,
+  codexHome: string,
+): Promise<NodeJS.ProcessEnv> => {
+  const nodeRuntime = await ensureRuntimeInstalled('node', DEFAULT_NODE_VERSION);
+  return buildCodexAuthEnvironment({
+    codexHome,
+    codexCliPath,
+    nodePathEntries: getRuntimePathEntries(nodeRuntime),
+  });
+};
+
 const getCodexAuthStatus = async (): Promise<CodexAuthStatus> => {
   const authFilePath = getCodexAuthFilePath();
   const codexHome = getCodexHome();
@@ -3804,21 +3821,22 @@ const getCodexAuthStatus = async (): Promise<CodexAuthStatus> => {
   let authenticated = false;
   if (codexCliPath) {
     try {
+      const env = await buildManagedCodexAuthEnvironment(codexCliPath, codexHome);
       const status = await runCommandCapture(codexCliPath, ['login', 'status'], {
         cwd: app.getPath('userData'),
-        env: {
-          CODEX_HOME: codexHome,
-          PATH: `${path.dirname(codexCliPath)}${path.delimiter}${process.env.PATH ?? ''}`,
-        },
+        env,
         timeoutMs: 15_000,
       });
       const output = [status.stdout, status.stderr].filter(Boolean).join('\n');
       authenticated = status.code === 0 && /logged\s+in/i.test(output) && !/not\s+logged\s+in/i.test(output);
+      const technicalCode = authenticated ? undefined : classifyCodexAuthOutput(status.stdout, status.stderr);
       await appendInstallLog('codex_auth:status_checked', {
         codexHome,
         codexCliPath,
         authenticated,
         authFilePresent,
+        technicalCode,
+        pathPrefix: env.PATH?.split(path.delimiter).slice(0, 3).join(path.delimiter),
         stdout: truncateForInstallLog(status.stdout),
         stderr: truncateForInstallLog(status.stderr),
       });
@@ -3842,6 +3860,93 @@ const getCodexAuthStatus = async (): Promise<CodexAuthStatus> => {
   };
 };
 
+const appendCodexLoginLog = async (loginLogPath: string, stream: string, text: string): Promise<void> => {
+  await fs.appendFile(
+    loginLogPath,
+    `[${new Date().toISOString()}] [${stream}] ${text.endsWith('\n') ? text : `${text}\n`}`,
+    'utf8',
+  ).catch(() => undefined);
+};
+
+const installErrorMessage = (error: unknown): string => {
+  const serialized = serializeErrorForInstallLog(error);
+  return typeof serialized.message === 'string' ? serialized.message : String(error);
+};
+
+const launchMacCodexLoginProcess = async (
+  codexCliPath: string,
+  codexHome: string,
+): Promise<{ loginLogPath: string; env: NodeJS.ProcessEnv }> => {
+  const loginLogPath = path.join(getLogsRoot(), 'codex-login.log');
+  const env = await buildManagedCodexAuthEnvironment(codexCliPath, codexHome);
+  await fs.mkdir(path.dirname(loginLogPath), { recursive: true });
+  await fs.writeFile(
+    loginLogPath,
+    [
+      `[${new Date().toISOString()}] Forger prepared Codex login.`,
+      `codexHome=${codexHome}`,
+      `codexCliPath=${codexCliPath}`,
+      `pathPrefix=${env.PATH?.split(path.delimiter).slice(0, 3).join(path.delimiter) ?? ''}`,
+      '',
+    ].join('\n'),
+    'utf8',
+  );
+
+  const openedUrls = new Set<string>();
+  const child = spawn(codexCliPath, ['login'], {
+    cwd: app.getPath('userData'),
+    env,
+    shell: false,
+    stdio: 'pipe',
+  });
+
+  const handleOutput = (stream: 'stdout' | 'stderr', text: string): void => {
+    void appendCodexLoginLog(loginLogPath, stream, text);
+    for (const url of extractAllowedCodexAuthUrls(text)) {
+      if (openedUrls.has(url)) {
+        continue;
+      }
+      openedUrls.add(url);
+      void shell.openExternal(url).catch((error) => {
+        void appendCodexLoginLog(loginLogPath, 'open_external_error', installErrorMessage(error));
+      });
+    }
+  };
+
+  child.stdout.on('data', (chunk) => handleOutput('stdout', chunk.toString()));
+  child.stderr.on('data', (chunk) => handleOutput('stderr', chunk.toString()));
+  child.once('exit', (code, signal) => {
+    void appendInstallLog('codex_auth:login_process_exit', {
+      platform: process.platform,
+      code,
+      signal,
+      loginLogPath,
+    });
+    void appendCodexLoginLog(loginLogPath, 'exit', `code=${code ?? 'null'} signal=${signal ?? 'null'}`);
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    let settled = false;
+    child.once('error', (error) => {
+      if (settled) {
+        void appendCodexLoginLog(loginLogPath, 'error', installErrorMessage(error));
+        return;
+      }
+      settled = true;
+      reject(error);
+    });
+    setImmediate(() => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      resolve();
+    });
+  });
+
+  return { loginLogPath, env };
+};
+
 const connectCodexAuth = async (): Promise<{ success: boolean; userMessage: string } & FailureDiagnosticFields> => {
   try {
     const codexCliPath = await ensureCodexCliInstalled();
@@ -3849,67 +3954,19 @@ const connectCodexAuth = async (): Promise<{ success: boolean; userMessage: stri
     await fs.mkdir(codexHome, { recursive: true });
 
     if (process.platform === 'darwin') {
-      const nodeRuntime = await ensureRuntimeInstalled('node', DEFAULT_NODE_VERSION);
-      const nodePathEntries = [
-        ...getRuntimePathEntries(nodeRuntime),
-        path.dirname(codexCliPath),
-      ];
-      const loginLogPath = path.join(getLogsRoot(), 'codex-login.log');
-      const loginScriptPath = path.join(getTempRoot(), 'codex-login.command');
-      const loginScript = buildMacTerminalLoginScript({
-        providerName: 'Codex',
-        logPath: loginLogPath,
-        command: [codexCliPath, 'login'],
-        env: { CODEX_HOME: codexHome },
-        pathEntries: nodePathEntries,
-      });
+      const launched = await launchMacCodexLoginProcess(codexCliPath, codexHome);
 
-      await fs.mkdir(path.dirname(loginLogPath), { recursive: true });
-      await fs.mkdir(path.dirname(loginScriptPath), { recursive: true });
-      await fs.writeFile(
-        loginLogPath,
-        [
-          `[${new Date().toISOString()}] Forger prepared Codex login.`,
-          `codexHome=${codexHome}`,
-          `codexCliPath=${codexCliPath}`,
-          `loginScriptPath=${loginScriptPath}`,
-          `nodePathEntries=${nodePathEntries.join(path.delimiter)}`,
-          '',
-        ].join('\n'),
-        'utf8',
-      );
-      await fs.writeFile(loginScriptPath, loginScript, 'utf8');
-      await fs.chmod(loginScriptPath, 0o700);
-      const terminalCommand = buildMacTerminalScriptLaunchCommand(loginScriptPath);
-      await runCommand(
-        '/usr/bin/osascript',
-        [
-          '-e',
-          'tell application "Terminal"',
-          '-e',
-          'activate',
-          '-e',
-          `do script ${JSON.stringify(terminalCommand)}`,
-          '-e',
-          'end tell',
-        ],
-        { cwd: app.getPath('userData') },
-      );
-
-      await appendInstallLog('codex_auth:terminal_opened', {
+      await appendInstallLog('codex_auth:login_started', {
         platform: process.platform,
         codexHome,
         codexCliPath,
-        loginScriptPath,
-        terminalCommand,
-        loginLogPath,
-        nodePathEntries,
+        loginLogPath: launched.loginLogPath,
+        pathPrefix: launched.env.PATH?.split(path.delimiter).slice(0, 3).join(path.delimiter),
       });
 
-      await markProviderConnected('codex');
       return {
         success: true,
-        userMessage: 'Abrimos Terminal para completar el login de Codex con ChatGPT.',
+        userMessage: 'Iniciamos la conexion con Codex. Completa el login de ChatGPT en el navegador.',
       };
     }
 
@@ -3993,7 +4050,6 @@ const connectCodexAuth = async (): Promise<{ success: boolean; userMessage: stri
         nodePathPrefix,
       });
 
-      await markProviderConnected('codex');
       return {
         success: true,
         userMessage: 'Abrimos una consola para completar el login de Codex con ChatGPT.',
@@ -4011,10 +4067,9 @@ const connectCodexAuth = async (): Promise<{ success: boolean; userMessage: stri
       },
     });
 
-    await markProviderConnected('codex');
     return {
       success: true,
-      userMessage: 'Login de Codex completado.',
+      userMessage: 'Login de Codex iniciado.',
     };
   } catch (error) {
     const diagnostic = failureDiagnostic(error, 'codex_connect_failed');

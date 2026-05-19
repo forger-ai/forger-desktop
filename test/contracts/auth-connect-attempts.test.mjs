@@ -31,6 +31,31 @@ test('late results from a canceled attempt do not finish a new provider attempt'
   assert.equal(tracker.isActive(claudeAttempt), true);
 });
 
+test('closing the Claude modal cancels Claude polling and clears busy provider', () => {
+  const tracker = new AuthConnectAttemptTracker();
+  const claudeAttempt = tracker.begin('claude');
+
+  assert.equal(tracker.busyProvider, 'claude');
+  assert.equal(tracker.isActive(claudeAttempt), true);
+
+  const canceled = tracker.cancel('claude');
+
+  assert.equal(canceled, claudeAttempt);
+  assert.equal(claudeAttempt.canceled, true);
+  assert.equal(tracker.busyProvider, null);
+  assert.equal(tracker.isActive(claudeAttempt), false);
+});
+
+test('a late success from a canceled attempt cannot mutate active UI state', () => {
+  const tracker = new AuthConnectAttemptTracker();
+  const codexAttempt = tracker.begin('codex');
+  tracker.cancel('codex');
+
+  assert.equal(tracker.isActive(codexAttempt), false);
+  assert.equal(tracker.finish(codexAttempt), null);
+  assert.equal(tracker.busyProvider, null);
+});
+
 test('a new connect attempt after cancellation is active normally', () => {
   const tracker = new AuthConnectAttemptTracker();
   const first = tracker.begin('codex');
