@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { ChatErrorCode, ClaudeEffort, CodexReasoningEffort, PreviewDiffFile } from '../../shared/types';
 import { assertAllowedMcpServers, codexWorkspaceNetworkConfigArgs, createIsolatedCodexHome, DisallowedMcpServerError, removeIsolatedCodexHome } from '../codex-run-isolation';
+import { classifyCodexAuthOutput } from '../codex-auth-helpers';
 
 export interface CodexMcpServerConfig {
   name: string;
@@ -366,7 +367,13 @@ export class SandboxRunner {
     ).trim();
     const parsed = parseCodexJsonl(lastResult?.stdout ?? '', lastResult?.stderr ?? '');
     const error = new Error(message);
-    (error as Error & { chatCode?: ChatErrorCode }).chatCode = 'capability_unavailable';
+    const authFailure = classifyCodexAuthOutput(
+      [lastResult?.stdout, lastErrorMessage].filter(Boolean).join('\n'),
+      lastResult?.stderr ?? '',
+    );
+    (error as Error & { chatCode?: ChatErrorCode }).chatCode = authFailure === 'codex_auth_expired'
+      ? 'auth_missing'
+      : 'capability_unavailable';
     (error as Error & { parsedRun?: CodexRunResult }).parsedRun = {
       assistantText: parsed.assistantText,
       threadId: parsed.threadId,

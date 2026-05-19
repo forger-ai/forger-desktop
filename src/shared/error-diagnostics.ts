@@ -82,6 +82,20 @@ const classifyTechnicalCode = (
   text: string,
   fallbackCode: string,
 ): { technicalCode: string; details?: Record<string, unknown> } => {
+  if (/env:\s*node:\s*No such file or directory/i.test(text)) {
+    return {
+      technicalCode: 'codex_node_runtime_missing',
+      details: { classifier: 'codex_node_runtime_missing' },
+    };
+  }
+
+  if (/401\s+Unauthorized/i.test(text) && /refresh token|Failed to refresh token/i.test(text)) {
+    return {
+      technicalCode: 'codex_auth_expired',
+      details: { classifier: 'codex_auth_expired' },
+    };
+  }
+
   if (/Fatal process out of memory/i.test(text) && /Failed to reserve virtual memory for CodeRange/i.test(text)) {
     return {
       technicalCode: 'node_fatal_oom_code_range',
