@@ -69,6 +69,7 @@ import type { View } from '@renderer/components/Sidebar';
 
 interface SettingsViewProps {
   codexAuthBusy: boolean;
+  claudeAuthBusy: boolean;
   codexAuthStatus: CodexAuthStatus;
   claudeAuthStatus: ClaudeAuthStatus;
   t: AppDictionary;
@@ -135,6 +136,7 @@ const MEMORY_KINDS: MemoryKind[] = ['preference', 'profile', 'workflow', 'constr
 
 export function SettingsView({
   codexAuthBusy,
+  claudeAuthBusy,
   codexAuthStatus,
   claudeAuthStatus,
   t,
@@ -455,7 +457,7 @@ export function SettingsView({
               <Button
                 variant={claudeAuthStatus.authenticated ? 'outlined' : 'contained'}
                 size="small"
-                disabled={codexAuthBusy}
+                disabled={claudeAuthBusy}
                 onClick={onOpenClaudeConfig}
               >
                 {claudeAuthStatus.authenticated ? t.settings.codexConfiguredAction : 'Conectar Claude'}
@@ -465,7 +467,7 @@ export function SettingsView({
                 color="warning"
                 size="small"
                 startIcon={<RestartAltRounded />}
-                disabled={codexAuthBusy}
+                disabled={claudeAuthBusy}
                 onClick={onReinstallClaude}
               >
                 Instalar/Reinstalar Claude
