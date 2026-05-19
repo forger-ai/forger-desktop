@@ -38,7 +38,7 @@ import { DesktopUpdater } from './desktop-updater';
 import { DesktopRuntimeBridge } from './desktop-runtime-bridge';
 import { DesktopErrorReporter } from './error-reporting';
 import { FileLibrary } from './file-library';
-import { buildMacTerminalLoginScript } from './auth-login-scripts';
+import { buildMacTerminalLoginScript, buildMacTerminalScriptLaunchCommand } from './auth-login-scripts';
 import { ForgerMcpServer } from './forger-mcp-server';
 import { MemoryStore } from './memory-store';
 import {
@@ -3880,13 +3880,28 @@ const connectCodexAuth = async (): Promise<{ success: boolean; userMessage: stri
       );
       await fs.writeFile(loginScriptPath, loginScript, 'utf8');
       await fs.chmod(loginScriptPath, 0o700);
-      await runCommand('/usr/bin/open', ['-a', 'Terminal', loginScriptPath], { cwd: app.getPath('userData') });
+      const terminalCommand = buildMacTerminalScriptLaunchCommand(loginScriptPath);
+      await runCommand(
+        '/usr/bin/osascript',
+        [
+          '-e',
+          'tell application "Terminal"',
+          '-e',
+          'activate',
+          '-e',
+          `do script ${JSON.stringify(terminalCommand)}`,
+          '-e',
+          'end tell',
+        ],
+        { cwd: app.getPath('userData') },
+      );
 
       await appendInstallLog('codex_auth:terminal_opened', {
         platform: process.platform,
         codexHome,
         codexCliPath,
         loginScriptPath,
+        terminalCommand,
         loginLogPath,
         nodePathEntries,
       });
@@ -4119,12 +4134,27 @@ const connectClaudeAuth = async (): Promise<{ success: boolean; userMessage: str
       );
       await fs.writeFile(loginScriptPath, loginScript, 'utf8');
       await fs.chmod(loginScriptPath, 0o700);
-      await runCommand('/usr/bin/open', ['-a', 'Terminal', loginScriptPath], { cwd: app.getPath('userData') });
+      const terminalCommand = buildMacTerminalScriptLaunchCommand(loginScriptPath);
+      await runCommand(
+        '/usr/bin/osascript',
+        [
+          '-e',
+          'tell application "Terminal"',
+          '-e',
+          'activate',
+          '-e',
+          `do script ${JSON.stringify(terminalCommand)}`,
+          '-e',
+          'end tell',
+        ],
+        { cwd: app.getPath('userData') },
+      );
 
       await appendInstallLog('claude_auth:terminal_opened', {
         platform: process.platform,
         cliPath,
         loginScriptPath,
+        terminalCommand,
         loginLogPath,
       });
       await markProviderConnected('claude');
