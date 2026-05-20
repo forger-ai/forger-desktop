@@ -27,6 +27,10 @@ test('catalog normalizer preserves manifest runtime declarations on agents and p
           provider: 'claude',
           model: 'sonnet',
           effort: 'max',
+          runtimeRecommendations: {
+            codex: { model: 'gpt-5.4', reasoningEffort: 'medium' },
+            claude: { model: 'sonnet', effort: 'high' },
+          },
         },
       ],
       prompt_templates: [
@@ -35,11 +39,23 @@ test('catalog normalizer preserves manifest runtime declarations on agents and p
           title: 'Summary',
           prompt: 'Summarize {{file}}.',
           runtime: { provider: 'codex', model: 'gpt-5.5', effort: 'high' },
+          runtimeRecommendations: {
+            codex: { model: 'gpt-5.4', reasoningEffort: 'medium' },
+            claude: { model: 'sonnet', effort: 'medium' },
+          },
         },
       ],
     },
   });
 
   assert.deepEqual(app.agents[0].runtime, { provider: 'claude', model: 'sonnet', effort: 'max' });
+  assert.deepEqual(app.agents[0].runtimeRecommendations, {
+    codex: { model: 'gpt-5.4', reasoningEffort: 'medium' },
+    claude: { model: 'sonnet', effort: 'high' },
+  });
   assert.deepEqual(app.promptTemplates[0].runtime, { provider: 'codex', model: 'gpt-5.5', effort: 'high' });
+  assert.deepEqual(app.promptTemplates[0].runtimeRecommendations, {
+    codex: { model: 'gpt-5.4', reasoningEffort: 'medium' },
+    claude: { model: 'sonnet', effort: 'medium' },
+  });
 });

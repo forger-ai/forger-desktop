@@ -27,6 +27,12 @@ export interface AgentDefaults {
   };
 }
 
+export type AgentRuntimeRecommendations = Partial<AgentDefaults>;
+
+export interface AgentRuntimeRequest extends Partial<AgentRuntime> {
+  recommendations?: AgentRuntimeRecommendations;
+}
+
 export interface AgentModelOptions {
   codex: CodexModelOption[];
   claude: ClaudeModelOption[];

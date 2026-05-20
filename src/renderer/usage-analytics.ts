@@ -5,8 +5,10 @@ const PRIVACY_ACCEPTED_AT_KEY = 'forger.privacy.acceptedAt';
 const USAGE_ANALYTICS_ENABLED_KEY = 'forger.usageAnalytics.enabled';
 const USAGE_ANALYTICS_DECIDED_AT_KEY = 'forger.usageAnalytics.decidedAt';
 const INSTALLATION_IDENTIFIER_KEY = 'forger.installation.identifier';
+const FORGER_INSTALLED_RECORDED_KEY = 'forger.usageAnalytics.forgerInstalledRecorded';
 
 const CONSENT_EVENTS = new Set<UsageEventName>([
+  'forger_installed',
   'usage_analytics_accepted',
   'usage_analytics_declined',
   'usage_analytics_revoked',
@@ -67,4 +69,29 @@ export const submitUsageEvent = (input: Omit<SubmitUsageEventInput, 'installatio
     installationIdentifier: getInstallationIdentifier(),
     occurredAt: input.occurredAt ?? new Date().toISOString(),
   }).catch(() => undefined);
+};
+
+export const submitForgerInstalledEvent = (input: Pick<SubmitUsageEventInput, 'locale' | 'surface'> = {}) => {
+  if (!hasAcceptedLegalWelcome()) {
+    return;
+  }
+  const installationIdentifier = getInstallationIdentifier();
+  const recordedIdentifier = window.localStorage.getItem(FORGER_INSTALLED_RECORDED_KEY);
+  if (recordedIdentifier === installationIdentifier) {
+    return;
+  }
+  window.localStorage.setItem(FORGER_INSTALLED_RECORDED_KEY, installationIdentifier);
+  submitUsageEvent({
+    eventName: 'forger_installed',
+    surface: input.surface ?? 'onboarding',
+    locale: input.locale,
+  });
+};
+
+export const submitChatGptConnectedEvent = (input: Pick<SubmitUsageEventInput, 'locale' | 'surface'> = {}) => {
+  submitUsageEvent({
+    eventName: 'chatgpt_connected',
+    surface: input.surface ?? 'settings',
+    locale: input.locale,
+  });
 };

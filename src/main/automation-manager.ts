@@ -12,6 +12,7 @@ import type {
   AutomationUpsertInput,
   FilesActionResult,
   AgentRuntime,
+  AgentRuntimeRequest,
 } from '../shared/types';
 import {
   appendTranscript,
@@ -26,7 +27,7 @@ interface AutomationManagerOptions {
   forgerHomeRoot: string;
   metadataRoot: string;
   codexHome: string;
-  getAgentRuntime: (requested?: Partial<AgentRuntime>) => Promise<AgentRuntime>;
+  getAgentRuntime: (requested?: AgentRuntimeRequest) => Promise<AgentRuntime>;
   getInstalledApps: () => AppSummary[];
   getCodexCliPath: () => Promise<string | null>;
   getClaudeCliPath: () => Promise<string | null>;
