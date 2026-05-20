@@ -113,7 +113,7 @@ const initialForgerAccount: ForgerAccountSession = { authenticated: false, };
 const initialRemoteBackupsUsage: RemoteBackupsUsage = { usedBytes: 0, limitBytes: 0, backupCount: 0, backupCountLimit: 0, };
 const initialDesktopUpdateState: DesktopUpdateState = { status: 'idle', currentVersion: '', };
 const initialAgentToolSettings: AgentToolSettings = { approvals: { forger_list_catalog: false, forger_list_installed_apps: false, forger_check_updates: false, forger_list_app_prompts: false, forger_update_app_prompt: true, forger_restore_app_prompt: true, forger_get_app_runtime_status: false, forger_open_app: true, forger_stop_app: true, forger_restart_app: true, forger_refresh_app_view: true, forger_update_app: true, memory_list: false, memory_create: false, memory_update: false, memory_delete: false,
-'gmail.connection.status': false, 'gmail.search_messages': true, 'gmail.read_thread': true, 'gmail.read_attachment': true, 'gmail.send_email': true, }, };
+'gmail.connection.status': false, 'gmail.search_messages': true, 'gmail.read_thread': true, 'gmail.read_attachment': true, 'gmail.send_email': true, 'meta.connection.status': false, 'meta.list_pages': false, 'meta.list_lead_forms': true, 'meta.sync_leads': true, 'meta.get_lead': true, }, };
 const getDesktopApi = () => { const desktopApi = window.forger; if (!desktopApi) { throw new Error( 'Bridge de Electron no disponible. Ejecuta Forger con `npm run dev` en desktop (no solo Vite en navegador).', ); }
 return desktopApi; };
 const traceChatEvent = (event: RendererChatTraceEvent) => { try { void getDesktopApi().traceChatEvent({ ...event, timestamp: event.timestamp ?? new Date().toISOString() }); } catch { /* best-effort diagnostics only */ } };

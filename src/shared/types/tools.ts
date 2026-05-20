@@ -21,7 +21,12 @@ export type AgentToolId =
   | 'gmail.search_messages'
   | 'gmail.read_thread'
   | 'gmail.read_attachment'
-  | 'gmail.send_email';
+  | 'gmail.send_email'
+  | 'meta.connection.status'
+  | 'meta.list_pages'
+  | 'meta.list_lead_forms'
+  | 'meta.sync_leads'
+  | 'meta.get_lead';
 
 export type AgentToolCategory = 'consulta' | 'app' | 'actualizacion' | 'vista' | 'memoria';
 

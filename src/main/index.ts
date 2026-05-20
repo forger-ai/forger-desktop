@@ -1499,6 +1499,24 @@ const getOfficialToolsService = (): OfficialToolsService => {
         }
         return await forgerBackendClient.refreshGmailOAuthAccessToken(input);
       },
+      getMetaOAuthClientId: async () => {
+        if (!forgerAccount.token || !forgerBackendClient) {
+          throw new Error('forger_account_required');
+        }
+        return await forgerBackendClient.getMetaOAuthClientId();
+      },
+      exchangeMetaOAuthCode: async (input) => {
+        if (!forgerAccount.token || !forgerBackendClient) {
+          throw new Error('forger_account_required');
+        }
+        return await forgerBackendClient.exchangeMetaOAuthCode(input);
+      },
+      refreshMetaOAuthAccessToken: async (input) => {
+        if (!forgerAccount.token || !forgerBackendClient) {
+          throw new Error('forger_account_required');
+        }
+        return await forgerBackendClient.refreshMetaOAuthAccessToken(input);
+      },
       appendLog: appendInstallLog,
       getAppToolDeclarations: resolveAppToolDeclarations,
     });

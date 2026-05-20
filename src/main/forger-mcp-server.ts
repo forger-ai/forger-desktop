@@ -728,7 +728,8 @@ export class ForgerMcpServer {
 
 const isMemoryTool = (toolId: AgentToolId): boolean => toolId.startsWith('memory_');
 
-const isOfficialTool = (toolId: AgentToolId): boolean => toolId.startsWith('gmail.');
+const isOfficialTool = (toolId: AgentToolId): boolean =>
+  toolId.startsWith('gmail.') || toolId.startsWith('meta.');
 
 const parsePromptReviewKind = (value: unknown): 'promptTemplate' | 'agent' | 'agentPrompt' | null => {
   if (value === 'promptTemplate' || value === 'agent' || value === 'agentPrompt') {
@@ -787,6 +788,9 @@ const buildOfficialToolCallInput = (
 ): CallOfficialToolInput => {
   if (actionId.startsWith('gmail.')) {
     return { toolId: 'gmail', actionId, input };
+  }
+  if (actionId.startsWith('meta.')) {
+    return { toolId: 'meta', actionId, input };
   }
   return { toolId: actionId, actionId, input };
 };

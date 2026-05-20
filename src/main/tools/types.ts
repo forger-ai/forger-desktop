@@ -32,6 +32,20 @@ export interface InternalToolContext {
     clientId: string;
     refreshToken: string;
   }) => Promise<InternalOAuthTokenResponse>;
+  // Meta (Facebook/Instagram) Lead Ads OAuth. Forger Cloud holds the App
+  // Secret needed for the code and long-lived-token exchanges; Desktop only
+  // sees the resulting user access token.
+  getMetaOAuthClientId: () => Promise<string>;
+  exchangeMetaOAuthCode: (input: {
+    clientId: string;
+    code: string;
+    codeVerifier: string;
+    redirectUri: string;
+  }) => Promise<InternalOAuthTokenResponse>;
+  refreshMetaOAuthAccessToken: (input: {
+    clientId: string;
+    userToken: string;
+  }) => Promise<InternalOAuthTokenResponse>;
   appendLog?: (event: string, payload?: Record<string, unknown>) => Promise<void>;
 }
 

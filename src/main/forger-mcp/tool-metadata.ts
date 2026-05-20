@@ -223,6 +223,55 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
     };
   }
 
+  if (toolId === 'meta.list_pages') {
+    return {
+      type: 'object',
+      properties: {
+        maxResults: { type: 'number', minimum: 1, maximum: 200 },
+      },
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'meta.list_lead_forms') {
+    return {
+      type: 'object',
+      properties: {
+        pageId: { type: 'string' },
+        maxResults: { type: 'number', minimum: 1, maximum: 200 },
+        modifiedSince: { type: 'string', format: 'date-time' },
+      },
+      required: ['pageId'],
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'meta.sync_leads') {
+    return {
+      type: 'object',
+      properties: {
+        pageId: { type: 'string' },
+        formId: { type: 'string' },
+        since: { type: 'string', format: 'date-time' },
+        maxResults: { type: 'number', minimum: 1, maximum: 200 },
+      },
+      required: ['pageId', 'formId'],
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'meta.get_lead') {
+    return {
+      type: 'object',
+      properties: {
+        leadId: { type: 'string' },
+        pageId: { type: 'string' },
+      },
+      required: ['leadId'],
+      additionalProperties: false,
+    };
+  }
+
   return {
     type: 'object',
     properties: {},

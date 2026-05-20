@@ -416,6 +416,54 @@ export class ForgerBackendClient {
     });
   }
 
+  async getMetaOAuthClientId(): Promise<string> {
+    const response = await fetch(`${this.options.backendBaseUrl}/api/v1/oauth/meta/config`, {
+      method: 'GET',
+      headers: this.buildHeaders(),
+    });
+    const payload = await this.readJson<Record<string, unknown>>(response);
+    if (!response.ok) {
+      throw backendError(
+        'Inicia sesion en Forger antes de conectar Meta.',
+        `meta_oauth_config_failed_${response.status}`,
+      );
+    }
+    const clientId = typeof payload?.client_id === 'string' ? payload.client_id.trim() : '';
+    if (!clientId) {
+      throw backendError('Meta no esta configurado en Forger Cloud.', 'meta_oauth_client_missing');
+    }
+    return clientId;
+  }
+
+  async exchangeMetaOAuthCode(input: {
+    clientId: string;
+    code: string;
+    codeVerifier: string;
+    redirectUri: string;
+  }): Promise<GmailOAuthTokenResponse> {
+    return this.postMetaOAuth('/api/v1/oauth/meta/token', {
+      client_id: input.clientId,
+      code: input.code,
+      code_verifier: input.codeVerifier,
+      redirect_uri: input.redirectUri,
+    });
+  }
+
+  async refreshMetaOAuthAccessToken(input: {
+    clientId: string;
+    userToken: string;
+  }): Promise<GmailOAuthTokenResponse> {
+    // Meta does not expose a refresh_token. Forger Cloud exchanges the
+    // current long-lived user token for a fresh long-lived token via the
+    // App Secret (grant_type=fb_exchange_token) and returns the new token
+    // shape that mirrors the GmailOAuthTokenResponse so downstream code can
+    // be reused unchanged.
+    return this.postMetaOAuth('/api/v1/oauth/meta/refresh', {
+      client_id: input.clientId,
+      user_token: input.userToken,
+    });
+  }
+
   async getGoogleLoginOAuthClientId(): Promise<string> {
     const response = await fetch(`${this.options.backendBaseUrl}/api/v1/oauth/google/config`, {
       method: 'GET',
@@ -1039,6 +1087,27 @@ export class ForgerBackendClient {
     }
     if (!payload || typeof payload !== 'object') {
       throw backendError('Forger Cloud devolvio una respuesta Gmail invalida.', 'gmail_oauth_backend_response_invalid');
+    }
+    return payload;
+  }
+
+  private async postMetaOAuth(path: string, body: Record<string, string>): Promise<GmailOAuthTokenResponse> {
+    const response = await fetch(`${this.options.backendBaseUrl}${path}`, {
+      method: 'POST',
+      headers: {
+        ...this.buildHeaders(),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+    const payload = await this.readJson<GmailOAuthTokenResponse>(response);
+    if (!response.ok) {
+      const code = payload?.error || `meta_oauth_backend_failed_${response.status}`;
+      const description = payload?.error_description || 'No pudimos conectar Meta desde Forger Cloud.';
+      throw backendError(description, code);
+    }
+    if (!payload || typeof payload !== 'object') {
+      throw backendError('Forger Cloud devolvio una respuesta Meta invalida.', 'meta_oauth_backend_response_invalid');
     }
     return payload;
   }

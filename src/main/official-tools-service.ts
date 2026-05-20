@@ -44,6 +44,17 @@ interface OfficialToolsServiceOptions {
     clientId: string;
     refreshToken: string;
   }) => Promise<InternalOAuthTokenResponse>;
+  getMetaOAuthClientId: () => Promise<string>;
+  exchangeMetaOAuthCode: (input: {
+    clientId: string;
+    code: string;
+    codeVerifier: string;
+    redirectUri: string;
+  }) => Promise<InternalOAuthTokenResponse>;
+  refreshMetaOAuthAccessToken: (input: {
+    clientId: string;
+    userToken: string;
+  }) => Promise<InternalOAuthTokenResponse>;
   appendLog?: (event: string, payload?: Record<string, unknown>) => Promise<void>;
   getAppToolDeclarations: (appId: string) => Promise<{
     appName: string;
@@ -186,6 +197,9 @@ export class OfficialToolsService {
       getGmailOAuthClientId: this.options.getGmailOAuthClientId,
       exchangeGmailOAuthCode: this.options.exchangeGmailOAuthCode,
       refreshGmailOAuthAccessToken: this.options.refreshGmailOAuthAccessToken,
+      getMetaOAuthClientId: this.options.getMetaOAuthClientId,
+      exchangeMetaOAuthCode: this.options.exchangeMetaOAuthCode,
+      refreshMetaOAuthAccessToken: this.options.refreshMetaOAuthAccessToken,
       appendLog: this.options.appendLog,
     };
   }
