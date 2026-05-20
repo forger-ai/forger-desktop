@@ -10,6 +10,7 @@ import type {
   AppPromptTemplate,
   AppPromptTemplateArgument,
   AgentRuntime,
+  AgentRuntimeRequest,
   ClaudeEffort,
   CodexReasoningEffort,
   PermissionRequest,
@@ -54,7 +55,7 @@ interface AppAgentTaskManagerOptions {
   privateAppsRoot: string;
   metadataRoot: string;
   codexHome: string;
-  getAgentRuntime: (requested?: Partial<AgentRuntime>) => Promise<AgentRuntime>;
+  getAgentRuntime: (requested?: AgentRuntimeRequest) => Promise<AgentRuntime>;
   getCodexCliPath: () => Promise<string | null>;
   getClaudeCliPath: () => Promise<string | null>;
   getCodexPathEntries: (appId?: string) => Promise<string[]>;
@@ -233,9 +234,9 @@ export class AppAgentTaskManager {
   ): Promise<void> {
     const locale = normalizeTaskLocale(input.locale);
     const runtime = await this.options.getAgentRuntime(template.runtime ?? {
-      provider: template.model || template.reasoningEffort ? 'codex' : undefined,
-      model: template.model,
-      effort: template.reasoningEffort,
+      recommendations: template.runtimeRecommendations,
+      model: template.runtimeRecommendations ? undefined : template.model,
+      effort: template.runtimeRecommendations ? undefined : template.reasoningEffort,
     });
     if (runtime.provider === 'claude') {
       if (!(await this.options.getClaudeAuthenticated())) {

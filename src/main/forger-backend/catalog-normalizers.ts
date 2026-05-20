@@ -199,6 +199,7 @@ const normalizeCatalogAgents = (value: unknown): AppAgent[] | undefined => {
       provider: candidate.provider,
       effort: candidate.effort,
     });
+    const runtimeRecommendations = normalizeCatalogRuntimeRecommendations(candidate.runtimeRecommendations);
     const kind = normalizeCatalogAgentKind(candidate.kind);
     const initialPromptTemplate =
       typeof candidate.initialPromptTemplate === 'string' && candidate.initialPromptTemplate.trim()
@@ -215,6 +216,7 @@ const normalizeCatalogAgents = (value: unknown): AppAgent[] | undefined => {
       ...(model ? { model } : {}),
       ...(reasoningEffort ? { reasoningEffort } : {}),
       ...(runtime ? { runtime } : {}),
+      ...(runtimeRecommendations ? { runtimeRecommendations } : {}),
     }];
   });
   return agents.length > 0 ? agents : undefined;
@@ -247,6 +249,7 @@ const normalizeCatalogPromptTemplates = (value: unknown): AppPromptTemplate[] | 
       provider: candidate.provider,
       effort: candidate.effort,
     });
+    const runtimeRecommendations = normalizeCatalogRuntimeRecommendations(candidate.runtimeRecommendations);
     return [{
       id,
       title,
@@ -255,10 +258,14 @@ const normalizeCatalogPromptTemplates = (value: unknown): AppPromptTemplate[] | 
       ...(model ? { model } : {}),
       ...(reasoningEffort ? { reasoningEffort } : {}),
       ...(runtime ? { runtime } : {}),
+      ...(runtimeRecommendations ? { runtimeRecommendations } : {}),
     }];
   });
   return templates.length > 0 ? templates : undefined;
 };
+
+const normalizeCatalogRuntimeRecommendations = (value: unknown) =>
+  value && typeof value === 'object' && !Array.isArray(value) ? value : undefined;
 
 const normalizeReasoningEffort = (value: unknown): CodexReasoningEffort | undefined =>
   CODEX_REASONING_VALUES.has(value as CodexReasoningEffort) ? value as CodexReasoningEffort : undefined;

@@ -12,6 +12,8 @@ import type {
   AppAgent,
   AppAgentThreadSteerResult,
   AgentRuntime,
+  AgentRuntimeRecommendations,
+  AgentRuntimeRequest,
   ClaudeEffort,
   CodexReasoningEffort,
   PermissionRequest,
@@ -49,7 +51,7 @@ interface AppAgentConversationManagerOptions {
   privateAppsRoot: string;
   metadataRoot: string;
   codexHome: string;
-  getAgentRuntime: (requested?: Partial<AgentRuntime>) => Promise<AgentRuntime>;
+  getAgentRuntime: (requested?: AgentRuntimeRequest) => Promise<AgentRuntime>;
   getCodexCliPath: () => Promise<string | null>;
   getClaudeCliPath: () => Promise<string | null>;
   getCodexPathEntries: (appId?: string) => Promise<string[]>;
@@ -413,11 +415,20 @@ export class AppAgentConversationManager {
       throw new Error('app_not_installed');
     }
     const agentRuntime = await this.resolveAgentRuntime(conversation);
-    const runtime = await this.options.getAgentRuntime({
-      provider: input.provider ?? agentRuntime.runtime?.provider,
-      model: input.model ?? agentRuntime.runtime?.model ?? agentRuntime.model,
-      effort: input.effort ?? input.reasoningEffort ?? agentRuntime.runtime?.effort ?? agentRuntime.reasoningEffort,
-    });
+    const hasRunRuntimeInput = Boolean(input.provider || input.model || input.effort || input.reasoningEffort);
+    const runtime = await this.options.getAgentRuntime(
+      hasRunRuntimeInput
+        ? {
+            provider: input.provider ?? agentRuntime.runtime?.provider,
+            model: input.model ?? agentRuntime.runtime?.model,
+            effort: input.effort ?? input.reasoningEffort ?? agentRuntime.runtime?.effort,
+          }
+        : agentRuntime.runtime ?? {
+            recommendations: agentRuntime.runtimeRecommendations,
+            model: agentRuntime.model,
+            effort: agentRuntime.reasoningEffort,
+          },
+    );
     if (runtime.provider === 'claude') {
       if (!(await this.options.getClaudeAuthenticated())) {
         throw new Error('claude_auth_missing');
@@ -792,6 +803,7 @@ export class AppAgentConversationManager {
     model: string;
     reasoningEffort: CodexReasoningEffort;
     runtime?: AgentRuntime;
+    runtimeRecommendations?: AgentRuntimeRecommendations;
   }> {
     const metadata = normalizeMetadata(conversation.metadata);
     const agentId = typeof metadata?.agentId === 'string' ? metadata.agentId.trim() : '';
@@ -803,6 +815,7 @@ export class AppAgentConversationManager {
       model: agent?.model?.trim() || DEFAULT_MODEL,
       reasoningEffort: agent?.reasoningEffort ?? DEFAULT_REASONING,
       ...(agent?.runtime ? { runtime: agent.runtime } : {}),
+      ...(agent?.runtimeRecommendations ? { runtimeRecommendations: agent.runtimeRecommendations } : {}),
     };
   }
 

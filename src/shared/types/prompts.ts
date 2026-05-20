@@ -1,5 +1,5 @@
 import type { BasicActionResult } from './base';
-import type { AgentEffort, AgentProvider, AgentRuntime, CodexReasoningEffort } from './agent-runtime';
+import type { AgentDefaults, AgentEffort, AgentProvider, AgentRuntime, CodexReasoningEffort } from './agent-runtime';
 
 export interface AppPromptTemplate {
   id: string;
@@ -11,6 +11,7 @@ export interface AppPromptTemplate {
   model?: string;
   reasoningEffort?: CodexReasoningEffort;
   runtime?: AgentRuntime;
+  runtimeRecommendations?: Partial<AgentDefaults>;
 }
 
 export interface AppAgent {
@@ -24,6 +25,7 @@ export interface AppAgent {
   model?: string;
   reasoningEffort?: CodexReasoningEffort;
   runtime?: AgentRuntime;
+  runtimeRecommendations?: Partial<AgentDefaults>;
   legacy?: boolean;
 }
 
@@ -38,6 +40,7 @@ export interface AppAgentPromptTemplate {
   body: string;
   variables?: Record<string, AppAgentPromptVariable>;
   runtime?: AgentRuntime;
+  runtimeRecommendations?: Partial<AgentDefaults>;
 }
 
 export interface AppAgentPromptSet {

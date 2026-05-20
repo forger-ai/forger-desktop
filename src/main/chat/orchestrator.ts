@@ -17,6 +17,7 @@ import type {
   AgentEffort,
   AgentProvider,
   AgentRuntime,
+  AgentRuntimeRequest,
   ClaudeEffort,
   CodexReasoningEffort,
   PermissionRequest,
@@ -61,6 +62,11 @@ import {
   normalizeErrorCode,
   toProgressMessages,
 } from './progress-errors';
+import { OperationHistoryStore } from './operation-history';
+import {
+  buildChatRunTracePayload,
+  toPublicChatRun,
+} from './run-serialization';
 
 interface ChatOrchestratorOptions {
   forgerHomeRoot: string;
@@ -68,7 +74,7 @@ interface ChatOrchestratorOptions {
   metadataRoot: string;
   legacyMetadataRoot?: string;
   codexHome: string;
-  getAgentRuntime: (requested?: Partial<AgentRuntime>) => Promise<AgentRuntime>;
+  getAgentRuntime: (requested?: AgentRuntimeRequest) => Promise<AgentRuntime>;
   agentContractVersion: number;
   getCodexCliPath: () => Promise<string | null>;
   getClaudeCliPath: () => Promise<string | null>;
@@ -85,17 +91,6 @@ interface ChatOrchestratorOptions {
   onUpdateConflictResolved?: (appId: string) => Promise<void>;
   trace?: (event: string, payload?: Record<string, unknown>) => void | Promise<void>;
   onRunUpdated: (event: ChatRunEvent) => void;
-}
-
-interface OperationEntry {
-  operationId: string;
-  runId: string;
-  appId: string;
-  commitSha: string;
-  createdAt: string;
-  title?: string;
-  summary?: string;
-  revertedAt?: string;
 }
 
 interface InternalChatRun extends ChatRun {
@@ -120,38 +115,6 @@ interface PendingPermission {
   resolve: (decision: 'allow' | 'deny') => void;
 }
 
-const toPublicChatRun = (run: InternalChatRun): ChatRun => ({
-  runId: run.runId,
-  appId: run.appId,
-  prompt: run.prompt,
-  threadId: run.threadId,
-  status: run.status,
-  createdAt: run.createdAt,
-  updatedAt: run.updatedAt,
-  dangerMode: run.dangerMode,
-  permissionRequest: run.permissionRequest,
-  preview: run.preview,
-  errorCode: run.errorCode,
-  userMessage: run.userMessage,
-  progressLog: run.progressLog,
-  operationId: run.operationId,
-  commitSha: run.commitSha,
-  conversationId: run.conversationId,
-});
-
-const buildChatRunTracePayload = (run: ChatRun): Record<string, unknown> => ({
-  runId: run.runId,
-  appId: run.appId,
-  conversationId: run.conversationId ?? null,
-  threadId: run.threadId ?? null,
-  status: run.status,
-  hasUserMessage: typeof run.userMessage === 'string' && run.userMessage.trim().length > 0,
-  userMessageLength: typeof run.userMessage === 'string' ? run.userMessage.length : 0,
-  progressCount: run.progressLog?.length ?? 0,
-  hasPermissionRequest: Boolean(run.permissionRequest),
-  hasPreview: Boolean(run.preview),
-});
-
 interface AppThreadState {
   appId: string;
   threadId: string;
@@ -170,11 +133,13 @@ export class ChatOrchestrator {
   private readonly auditLogger: AuditLogger;
   private readonly pluginRuntime: PluginRuntime;
   private readonly sandboxRunner: SandboxRunner;
+  private readonly operationHistory: OperationHistoryStore;
 
   public constructor(private readonly options: ChatOrchestratorOptions) {
     this.auditLogger = new AuditLogger(options.privateAppsRoot);
     this.pluginRuntime = new PluginRuntime();
     this.sandboxRunner = new SandboxRunner(options.codexHome);
+    this.operationHistory = new OperationHistoryStore(options.metadataRoot, options.legacyMetadataRoot);
     void this.loadThreadState();
   }
 
@@ -381,7 +346,7 @@ export class ChatOrchestrator {
       await applyPreviewChanges(run.appRoot, run.stagingDir, run.preview.diffFiles);
       const commitSha = await gitCommit(run.appRoot, `forger(apply): run ${run.runId}`);
       const operationId = randomUUID();
-      await this.appendOperationHistory(run.appId, {
+      await this.operationHistory.append(run.appId, {
         operationId,
         appId: run.appId,
         runId: run.runId,
@@ -433,7 +398,7 @@ export class ChatOrchestrator {
       return { success: false, technicalCode: 'app_not_installed' };
     }
 
-    const history = await this.readOperationHistory(input.appId);
+    const history = await this.operationHistory.read(input.appId);
     const target = input.operationId
       ? history.find((entry) => entry.operationId === input.operationId)
       : history.find((entry) => !entry.revertedAt);
@@ -454,7 +419,7 @@ export class ChatOrchestrator {
 
       const revertedCommitSha = await getGitHead(appRoot);
       target.revertedAt = new Date().toISOString();
-      await this.writeOperationHistory(input.appId, history);
+      await this.operationHistory.write(input.appId, history);
 
       await this.auditLogger.log({
         type: 'undo',
@@ -755,7 +720,7 @@ export class ChatOrchestrator {
 
     const commitSha = await gitCommit(run.appRoot, `forger(update): ${summarizeOperationTitle(run.prompt)}`);
     const operationId = randomUUID();
-    await this.appendOperationHistory(run.appId, {
+    await this.operationHistory.append(run.appId, {
       operationId,
       appId: run.appId,
       runId: run.runId,
@@ -791,7 +756,7 @@ export class ChatOrchestrator {
 
     const commitSha = await gitCommit(run.appRoot, `forger(update): resolve ${run.appId} conflict`);
     const operationId = randomUUID();
-    await this.appendOperationHistory(run.appId, {
+    await this.operationHistory.append(run.appId, {
       operationId,
       appId: run.appId,
       runId: run.runId,
@@ -898,41 +863,6 @@ export class ChatOrchestrator {
     }
 
     return resolved;
-  }
-
-  private async operationsFile(appId: string): Promise<string> {
-    const dir = path.join(this.options.metadataRoot, 'operations');
-    await fs.mkdir(dir, { recursive: true });
-    return path.join(dir, `${appId}.json`);
-  }
-
-  private legacyOperationsFile(appId: string): string | null {
-    return this.options.legacyMetadataRoot ? path.join(this.options.legacyMetadataRoot, 'operations', `${appId}.json`) : null;
-  }
-
-  private async readOperationHistory(appId: string): Promise<OperationEntry[]> {
-    const filePath = await this.operationsFile(appId);
-    const raw = await fs.readFile(filePath, 'utf8').catch(async () => {
-      const legacyPath = this.legacyOperationsFile(appId);
-      return legacyPath ? await fs.readFile(legacyPath, 'utf8').catch(() => '[]') : '[]';
-    });
-    try {
-      const parsed = JSON.parse(raw) as OperationEntry[];
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
-  }
-
-  private async writeOperationHistory(appId: string, entries: OperationEntry[]): Promise<void> {
-    const filePath = await this.operationsFile(appId);
-    await fs.writeFile(filePath, JSON.stringify(entries, null, 2), 'utf8');
-  }
-
-  private async appendOperationHistory(appId: string, entry: OperationEntry): Promise<void> {
-    const entries = await this.readOperationHistory(appId);
-    entries.unshift(entry);
-    await this.writeOperationHistory(appId, entries);
   }
 
   private getThreadsFilePath(): string {
