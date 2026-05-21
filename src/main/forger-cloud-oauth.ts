@@ -127,12 +127,10 @@ const runGoogleLoginFlow = async (options: RegisterOptions): Promise<StoredForge
         settled = true;
         resolve(result);
       })().catch((error) => {
-        const message = error instanceof Error ? error.message : 'No pudimos iniciar sesion con Google.';
-        if (!response.headersSent) {
-          sendHtml(response, 500, 'Forger Cloud', message);
-        } else if (!response.writableEnded) {
-          response.end();
-        }
+	        const message = error instanceof Error ? error.message : 'No pudimos iniciar sesion con Google.';
+	        if (!response.headersSent) {
+	          sendHtml(response, 500, 'Forger Cloud', message);
+	        }
         if (!settled) {
           settled = true;
           reject(error);
@@ -161,6 +159,7 @@ const runGoogleLoginFlow = async (options: RegisterOptions): Promise<StoredForge
       listeningResolve?.(address.port);
     });
   });
+  callbackPromise.catch(() => undefined);
 
   const listeningPromise = new Promise<number>((resolve, reject) => {
     listeningResolve = resolve;

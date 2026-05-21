@@ -105,9 +105,16 @@ export const appendRunLog = async (
   stream: 'stdout' | 'stderr' | 'meta',
   text: string,
 ): Promise<void> => {
-  await fs.mkdir(path.dirname(runLogPath), { recursive: true });
-  const line = `[${new Date().toISOString()}] [${stream}] ${text}`;
-  await fs.appendFile(runLogPath, line.endsWith('\n') ? line : `${line}\n`, 'utf8');
+  try {
+    await fs.mkdir(path.dirname(runLogPath), { recursive: true });
+    const line = `[${new Date().toISOString()}] [${stream}] ${text}`;
+    await fs.appendFile(runLogPath, line.endsWith('\n') ? line : `${line}\n`, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return;
+    }
+    throw error;
+  }
 };
 
 export const normalizeErrorCode = (error: unknown): { code: ChatErrorCode; message: string } => {

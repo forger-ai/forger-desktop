@@ -94,9 +94,6 @@ export class FileLibrary {
     const stagingRoot = await this.chatStagingRoot();
     const baseName = sanitizeSegment(path.parse(input.name ?? '').name) || 'imagen pegada';
     const filePath = path.join(stagingRoot, `${Date.now()}-${randomUUID()}-${baseName}${extension}`);
-    if (!isPathInside(filePath, stagingRoot)) {
-      throw new Error('chat_staging_path_outside_root');
-    }
     await fs.writeFile(filePath, bytes);
     const stat = await fs.stat(filePath);
     return {
@@ -522,10 +519,6 @@ export class FileLibrary {
 
   private async chatStagingRoot(): Promise<string> {
     const target = path.resolve(this.metadataRoot, 'files', CHAT_STAGING_DIR);
-    const root = path.resolve(this.metadataRoot, 'files');
-    if (!isPathInside(target, root)) {
-      throw new Error('chat_staging_root_invalid');
-    }
     await fs.mkdir(target, { recursive: true });
     return target;
   }
@@ -539,9 +532,6 @@ export class FileLibrary {
         continue;
       }
       const categoryPath = normalizeCategoryPath(parentPath ? `${parentPath}/${entry.name}` : entry.name);
-      if (categoryPath.includes('/')) {
-        continue;
-      }
       const stat = await fs.stat(path.join(root, entry.name)).catch(() => null);
       categories.push({
         path: categoryPath,

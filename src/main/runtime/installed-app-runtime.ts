@@ -557,8 +557,11 @@ const buildBackendProcessConfig = (
     const appPath = rawArgs[fastapiIndex + 2] && !rawArgs[fastapiIndex + 2].startsWith('-')
       ? rawArgs[fastapiIndex + 2]
       : 'src/app/main.py';
+    const optionStartIndex = rawArgs[fastapiIndex + 2] && !rawArgs[fastapiIndex + 2].startsWith('-')
+      ? fastapiIndex + 3
+      : fastapiIndex + 2;
     const resolvedApp = resolvePythonAppImport(appPath);
-    let args = ['-m', 'uvicorn', resolvedApp.appImport];
+    let args = ['-m', 'uvicorn', resolvedApp.appImport, ...rawArgs.slice(optionStartIndex)];
     args = replaceCommandOption(args, '--host', '127.0.0.1');
     args = replaceCommandOption(args, '--port', String(port));
     if (!args.includes('--reload')) {
@@ -576,7 +579,10 @@ const buildBackendProcessConfig = (
     const appImport = rawArgs[uvicornIndex + 1] && !rawArgs[uvicornIndex + 1].startsWith('-')
       ? rawArgs[uvicornIndex + 1]
       : 'app.main:app';
-    let args = ['-m', 'uvicorn', appImport];
+    const optionStartIndex = rawArgs[uvicornIndex + 1] && !rawArgs[uvicornIndex + 1].startsWith('-')
+      ? uvicornIndex + 2
+      : uvicornIndex + 1;
+    let args = ['-m', 'uvicorn', appImport, ...rawArgs.slice(optionStartIndex)];
     args = replaceCommandOption(args, '--host', '127.0.0.1');
     args = replaceCommandOption(args, '--port', String(port));
     if (isDev && !args.includes('--reload')) {
@@ -798,21 +804,33 @@ const openInstalledAppUnlocked = async (
     });
   });
 
-  const onProcessCrash = async (): Promise<void> => {
+  const onProcessCrash = async (crashedProcess: ChildProcessWithoutNullStreams): Promise<void> => {
     if (stoppingApps.has(appId)) {
       return;
     }
 
-    closeAppWindow(appId);
+    const running = runningApps.get(appId);
+    if (!running) {
+      return;
+    }
+
+    runningApps.delete(appId);
+    stoppingApps.add(appId);
+    try {
+      closeAppWindow(appId);
+      const sibling = running.backend === crashedProcess ? running.frontend : running.backend;
+      await terminateProcess(sibling).catch(() => undefined);
+      await closeServer(running.proxyServer).catch(() => undefined);
+    } finally {
+      stoppingApps.delete(appId);
+    }
+
     await markAppRuntimeStatus(appId, 'error', 'La app se detuvo por un error. Inicia de nuevo.');
     emitRuntimeStatus({
       appId,
       status: 'error',
       userMessage: 'La app se detuvo por un error. Inicia de nuevo.',
     });
-
-    runningApps.delete(appId);
-    await closeServer(proxy.server).catch(() => undefined);
   };
 
   backend.once('exit', (code, signal) => {
@@ -821,7 +839,7 @@ const openInstalledAppUnlocked = async (
       code,
       signal,
     });
-    void onProcessCrash();
+    void onProcessCrash(backend);
   });
 
   frontend.once('exit', (code, signal) => {
@@ -830,7 +848,7 @@ const openInstalledAppUnlocked = async (
       code,
       signal,
     });
-    void onProcessCrash();
+    void onProcessCrash(frontend);
   });
 
   runningApps.set(appId, {
@@ -906,16 +924,36 @@ const stopInstalledAppUnlocked = async (appId: string): Promise<StopAppResult> =
   }
 
   stoppingApps.add(appId);
+  let stopError: unknown = null;
   try {
     closeAppWindow(appId);
-    await terminateProcess(running.backend);
-    await terminateProcess(running.frontend);
+    for (const child of [running.backend, running.frontend]) {
+      try {
+        await terminateProcess(child);
+      } catch (error) {
+        stopError ??= error;
+      }
+    }
     await closeServer(running.proxyServer).catch(() => undefined);
-    runningApps.delete(appId);
   } finally {
     stoppingApps.delete(appId);
   }
 
+  if (stopError) {
+    const diagnostic = failureDiagnostic(stopError, 'stop_failed');
+    await appendInstallLog('stop:failed', {
+      appId,
+      detail: diagnostic.technicalCode,
+      error: serializeErrorForInstallLog(stopError),
+    });
+    return {
+      success: false,
+      userMessage: 'No pudimos detener la app. Reintenta.',
+      ...diagnostic,
+    };
+  }
+
+  runningApps.delete(appId);
   await markAppRuntimeStatus(appId, 'installed', 'App detenida.');
   emitRuntimeStatus({
     appId,

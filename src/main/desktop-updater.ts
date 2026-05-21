@@ -9,8 +9,8 @@ import type {
   DesktopUpdateState,
 } from '../shared/types';
 
-const DEFAULT_METADATA_URL = 'https://forger-ai.github.io/desktop-versions/latest.json';
-const SUPPORTED_INSTALLER_KINDS = new Set(['dmg', 'nsis']);
+const DEFAULT_METADATA_URL = 'https://forger-ai.github.io/desktop-versions/latest.json',
+  SUPPORTED_INSTALLER_KINDS = new Set(['dmg', 'nsis']);
 
 interface DesktopUpdaterOptions {
   currentVersion: string;

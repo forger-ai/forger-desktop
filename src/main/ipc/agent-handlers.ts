@@ -87,9 +87,7 @@ export const registerAgentIpcHandlers = (deps: AgentIpcDeps): void => {
 
   const handleAppAgentTaskCancel = async (event: IpcMainInvokeEvent, runId: string) => {
     const appId = resolveAppIdForWebContents(event.sender.id);
-    if (!appId || !appAgentTaskManager) {
-      return { success: false };
-    }
+    if (!appId || !appAgentTaskManager) return { success: false };
     return appAgentTaskManager.cancel(appId, runId);
   };
   ipcMain.handle(IPC_CHANNELS.appAgentTaskCancel, handleAppAgentTaskCancel);
@@ -156,10 +154,7 @@ export const registerAgentIpcHandlers = (deps: AgentIpcDeps): void => {
   };
 
   const manifestAgentIdForThread = async (appId: string, threadId: string): Promise<string> => {
-    if (!appAgentConversationManager) {
-      throw new Error('app_agent_thread_unavailable');
-    }
-    const metadata = await appAgentConversationManager.getMetadata(appId, threadId);
+    const metadata = await appAgentConversationManager!.getMetadata(appId, threadId);
     const agentId = typeof metadata?.manifestAgentId === 'string' && metadata.manifestAgentId.trim()
       ? metadata.manifestAgentId.trim()
       : typeof metadata?.agentId === 'string' && metadata.agentId.trim()

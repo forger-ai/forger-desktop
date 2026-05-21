@@ -89,8 +89,9 @@ export const safeValidationKeys = (payload: unknown): Record<string, string[]> |
   if (!errors || typeof errors !== 'object' || Array.isArray(errors)) {
     return undefined;
   }
+  const blockedKeys = new Set(['__proto__', 'constructor', 'prototype']);
   const entries = Object.entries(errors)
-    .filter(([key]) => /^[a-zA-Z0-9_.-]+$/.test(key))
+    .filter(([key]) => /^[a-zA-Z0-9_.-]+$/.test(key) && !blockedKeys.has(key))
     .map(([key, value]) => [
       key,
       Array.isArray(value)
@@ -130,27 +131,34 @@ export const normalizeRemoteBackup = (value: unknown): RemoteAppBackupSummary | 
   }
   const record = value as RemoteBackupPayload;
   const id = typeof record.id === 'number' ? record.id : Number(record.id);
-  if (!Number.isFinite(id) || !record.app_id || !record.app_name) {
+  const appId = typeof record.app_id === 'string' ? record.app_id.trim() : '';
+  const appName = typeof record.app_name === 'string' ? record.app_name.trim() : '';
+  if (!Number.isFinite(id) || !appId || !appName) {
     return undefined;
   }
   return {
     id,
-    appId: record.app_id,
-    appName: record.app_name,
-    appVersion: record.app_version ?? undefined,
+    appId,
+    appName,
+    appVersion: typeof record.app_version === 'string' && record.app_version.trim() ? record.app_version : undefined,
     backupType: record.backup_type === 'sync_snapshot' ? 'sync_snapshot' : 'backup',
     source: record.source === 'auto_sync' ? 'auto_sync' : 'manual',
-    metadata: record.metadata && typeof record.metadata === 'object' ? record.metadata : {},
-    fileCount: Number(record.file_count ?? 0),
-    totalBytes: Number(record.total_bytes ?? 0),
-    checksumSha256: record.checksum_sha256 ?? '',
-    signature: record.signature ?? undefined,
-    signatureKeyFingerprint: record.signature_key_fingerprint ?? undefined,
-    signatureAlgorithm: record.signature_algorithm ?? undefined,
-    createdAt: record.created_at ?? new Date().toISOString(),
-    updatedAt: record.updated_at,
-    downloadUrl: record.download_url,
+    metadata: record.metadata && typeof record.metadata === 'object' && !Array.isArray(record.metadata) ? record.metadata : {},
+    fileCount: normalizeRemoteBackupNumber(record.file_count),
+    totalBytes: normalizeRemoteBackupNumber(record.total_bytes),
+    checksumSha256: typeof record.checksum_sha256 === 'string' ? record.checksum_sha256 : '',
+    signature: typeof record.signature === 'string' ? record.signature : undefined,
+    signatureKeyFingerprint: typeof record.signature_key_fingerprint === 'string' ? record.signature_key_fingerprint : undefined,
+    signatureAlgorithm: typeof record.signature_algorithm === 'string' ? record.signature_algorithm : undefined,
+    createdAt: typeof record.created_at === 'string' ? record.created_at : new Date().toISOString(),
+    updatedAt: typeof record.updated_at === 'string' ? record.updated_at : undefined,
+    downloadUrl: typeof record.download_url === 'string' ? record.download_url : undefined,
   };
+};
+
+const normalizeRemoteBackupNumber = (value: unknown): number => {
+  const numberValue = Number(value ?? 0);
+  return Number.isFinite(numberValue) && numberValue >= 0 ? numberValue : 0;
 };
 
 export const normalizeRemoteBackupsUsage = (value: unknown): RemoteBackupsUsage => {
@@ -159,10 +167,10 @@ export const normalizeRemoteBackupsUsage = (value: unknown): RemoteBackupsUsage 
   }
   const record = value as NonNullable<RemoteBackupsResponse['usage']>;
   return {
-    usedBytes: Number(record.used_bytes ?? 0),
-    limitBytes: Number(record.limit_bytes ?? 0),
-    backupCount: Number(record.backup_count ?? 0),
-    backupCountLimit: Number(record.backup_count_limit ?? 0),
+    usedBytes: normalizeRemoteBackupNumber(record.used_bytes),
+    limitBytes: normalizeRemoteBackupNumber(record.limit_bytes),
+    backupCount: normalizeRemoteBackupNumber(record.backup_count),
+    backupCountLimit: normalizeRemoteBackupNumber(record.backup_count_limit),
   };
 };
 

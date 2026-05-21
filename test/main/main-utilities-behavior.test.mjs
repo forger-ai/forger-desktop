@@ -1,0 +1,683 @@
+import assert from 'node:assert/strict';
+import { createHmac } from 'node:crypto';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import fs from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import test from 'node:test';
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
+const { IPC_CHANNELS } = require('../../dist-electron/shared/ipc.js');
+const { AGENT_TOOL_DEFINITIONS, AGENT_TOOL_IDS } = require('../../dist-electron/main/core/agent-tool-packages.js');
+const { createMainUtilitiesController } = require('../../dist-electron/main/core/main-utilities.js');
+
+const installProgressByPhase = {
+  downloading: 20,
+  extracting: 40,
+  preparing: 60,
+  installing: 80,
+  completed: 100,
+  failed: 100,
+};
+
+const createController = (overrides = {}) => {
+  const state = {
+    agentToolSettings: { approvals: {} },
+    catalogApps: [],
+    desktopUpdater: null,
+    forgerAccount: { authenticated: false },
+    settings: {},
+  };
+  const appWindows = new Map();
+  const friendChatWindows = new Map();
+  const sent = [];
+  const mainWindow = {
+    isDestroyed: () => false,
+    webContents: {
+      send: (...args) => sent.push(args),
+    },
+  };
+  const deps = {
+    AGENT_TOOL_DEFINITIONS,
+    AGENT_TOOL_IDS,
+    APP_FOLDER_GRANT_TTL_MS: 60_000,
+    Buffer,
+    Date,
+    DesktopUpdater: class DesktopUpdater {
+      constructor(options) {
+        this.options = options;
+      }
+    },
+    IPC_CHANNELS,
+    app: {
+      getAppPath: () => '/app',
+      getPath: (name) => `/user/${name}`,
+      getVersion: () => '0.0.0-test',
+      isPackaged: false,
+    },
+    appFolderGrantSecret: 'test-secret',
+    appWindows,
+    buildFailureDiagnostic: ({ error, fallbackCode }) => ({
+      technicalCode: error instanceof Error ? error.message : fallbackCode,
+    }),
+    cloudDeviceManager: null,
+    createHmac,
+    desktopErrorReporter: null,
+    forgerAccountStore: null,
+    friendChatWindows,
+    fs,
+    getAgentToolSettingsPath: () => '/tmp/forger-agent-tools.json',
+    getInstallLogPath: () => '/tmp/forger-install.log',
+    getMainWindow: () => mainWindow,
+    installProgressByPhase,
+    isDev: true,
+    path,
+    publicForgerAccount: (account) => ({ authenticated: Boolean(account.authenticated) }),
+    registry: { apps: {} },
+    runningApps: new Map(),
+    state,
+    ...overrides,
+  };
+  return {
+    appWindows,
+    controller: createMainUtilitiesController(deps),
+    deps,
+    friendChatWindows,
+    sent,
+    state,
+  };
+};
+
+test('main utility tool settings load, normalize, reject unknown tools, and persist known approvals', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'forger-tool-settings-'));
+  const settingsPath = path.join(root, 'agent-tools.json');
+  try {
+    await writeFile(settingsPath, JSON.stringify({
+      approvals: {
+        forger_open_app: false,
+        unknown_tool: true,
+      },
+    }), 'utf8');
+
+    const { controller, state } = createController({
+      getAgentToolSettingsPath: () => settingsPath,
+    });
+
+    await controller.loadAgentToolSettings();
+    assert.equal(typeof state.agentToolSettings.approvals.forger_open_app, 'boolean');
+    assert.equal(state.agentToolSettings.approvals.forger_list_catalog, false);
+    assert.equal(state.agentToolSettings.approvals.unknown_tool, undefined);
+    assert.equal(controller.isAgentToolId('forger_open_app'), true);
+    assert.equal(controller.isAgentToolId('unknown_tool'), false);
+
+    await assert.rejects(
+      controller.updateAgentToolApproval({ toolId: 'unknown_tool', requiresApproval: true }),
+      /invalid_agent_tool_id/,
+    );
+
+    await controller.updateAgentToolApproval({ toolId: 'forger_open_app', requiresApproval: true });
+    const saved = JSON.parse(await readFile(settingsPath, 'utf8'));
+    assert.equal(saved.approvals.forger_open_app, true);
+    assert.equal(saved.approvals.unknown_tool, undefined);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('main utility emits are no-ops for missing windows and send stable public payloads when available', () => {
+  const destroyed = createController({
+    getMainWindow: () => null,
+  });
+  assert.doesNotThrow(() => destroyed.controller.emitInstallProgress('finance-os', { success: true, phase: 'completed' }));
+  assert.doesNotThrow(() => destroyed.controller.emitRuntimeStatus({ appId: 'finance-os', status: 'stopped' }));
+  assert.doesNotThrow(() => destroyed.controller.emitChatRunUpdated({
+    run: { runId: 'run-1', appId: 'finance-os', status: 'running' },
+  }));
+  assert.doesNotThrow(() => destroyed.controller.emitAutomationUpdated({ automation: { id: 'auto-1' } }));
+  assert.doesNotThrow(() => destroyed.controller.emitDesktopUpdateProgress({ status: 'idle' }));
+  assert.doesNotThrow(() => destroyed.controller.emitForgerAccountUpdated({ authenticated: false }));
+
+  const destroyedWindow = createController({
+    getMainWindow: () => ({ isDestroyed: () => true, webContents: { send: () => assert.fail('should not send') } }),
+  });
+  assert.doesNotThrow(() => destroyedWindow.controller.emitRuntimeStatus({ appId: 'finance-os', status: 'stopped' }));
+  assert.doesNotThrow(() => destroyedWindow.controller.emitForgerAccountUpdated({ authenticated: false }));
+
+  const { controller, sent } = createController();
+  controller.emitInstallProgress('finance-os', { success: true, phase: 'completed' });
+  controller.emitRuntimeStatus({ appId: 'finance-os', status: 'running' });
+  controller.emitChatRunUpdated({
+    run: { runId: 'run-1', appId: 'finance-os', conversationId: 'conversation-1', status: 'running', progressLog: ['one'] },
+  });
+  controller.emitAutomationUpdated({ automation: { id: 'auto-1' } });
+  controller.emitDesktopUpdateProgress({ status: 'available' });
+  controller.emitForgerAccountUpdated({ authenticated: true, userMessage: 'ok' });
+
+  assert.deepEqual(sent, [
+    [IPC_CHANNELS.installProgress, { appId: 'finance-os', progress: { success: true, phase: 'completed' } }],
+    [IPC_CHANNELS.runtimeStatusChanged, { appId: 'finance-os', status: 'running' }],
+    [IPC_CHANNELS.chatRunUpdated, {
+      run: { runId: 'run-1', appId: 'finance-os', conversationId: 'conversation-1', status: 'running', progressLog: ['one'] },
+    }],
+    [IPC_CHANNELS.automationUpdated, { automation: { id: 'auto-1' } }],
+    [IPC_CHANNELS.desktopUpdateProgress, { status: 'available' }],
+    [IPC_CHANNELS.forgerAccountUpdated, { authenticated: true, userMessage: 'ok' }],
+  ]);
+});
+
+test('main utility chat emit logs send failures without throwing', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'forger-chat-emit-log-'));
+  const logPath = path.join(root, 'install.jsonl');
+  try {
+    const { controller } = createController({
+      getInstallLogPath: () => logPath,
+      getMainWindow: () => ({
+        isDestroyed: () => false,
+        webContents: {
+          send: () => {
+            throw new TypeError('renderer gone');
+          },
+        },
+      }),
+    });
+
+    assert.doesNotThrow(() => controller.emitChatRunUpdated({
+      run: {
+        runId: 'run-1',
+        appId: 'finance-os',
+        conversationId: 'conversation-1',
+        status: 'failed',
+        userMessage: 'nope',
+      },
+    }));
+
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    const entries = (await readFile(logPath, 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
+    assert.equal(entries.at(-1).event, 'chat_run_update_send_failed');
+    assert.equal(entries.at(-1).errorMessage, 'renderer gone');
+    assert.equal(entries.at(-1).hasUserMessage, true);
+
+    const stringErrorController = createController({
+      getInstallLogPath: () => logPath,
+      getMainWindow: () => ({
+        isDestroyed: () => false,
+        webContents: {
+          send: () => {
+            throw 'renderer string failure';
+          },
+        },
+      }),
+    }).controller;
+    assert.doesNotThrow(() => stringErrorController.emitChatRunUpdated({
+      run: {
+        runId: 'run-2',
+        appId: 'finance-os',
+        status: 'failed',
+      },
+    }));
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    const updatedEntries = (await readFile(logPath, 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
+    assert.equal(updatedEntries.at(-1).errorName, 'string');
+    assert.equal(updatedEntries.at(-1).errorMessage, 'renderer string failure');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('main utility install log and account helpers tolerate no-op failure paths', async () => {
+  const warns = [];
+  const originalWarn = console.warn;
+  console.warn = (...args) => warns.push(args);
+  try {
+    const { controller, state } = createController({
+      fs: {
+        ...fs,
+        mkdir: async () => undefined,
+        appendFile: async () => {
+          throw new Error('disk_full');
+        },
+      },
+    });
+
+    await controller.appendInstallLog('install:ignored');
+    await controller.loadAgentToolSettings();
+    await controller.clearForgerAccountSession('already_clear');
+
+    assert.equal(warns.length, 1);
+    assert.match(warns[0][0], /Failed to write Forger install log/);
+    assert.equal(state.forgerAccount.authenticated, false);
+    assert.equal(typeof state.agentToolSettings.approvals.forger_open_app, 'boolean');
+  } finally {
+    console.warn = originalWarn;
+  }
+});
+
+test('main utility forwards safe process diagnostics to the configured reporter', () => {
+  const reports = [];
+  const beforeUncaught = new Set(process.listeners('uncaughtException'));
+  const beforeUnhandled = new Set(process.listeners('unhandledRejection'));
+  createController({
+    desktopErrorReporter: {
+      reportMainUncaughtException: (error) => reports.push(['uncaught', error.message]),
+      reportMainUnhandledRejection: (reason) => reports.push(['rejection', reason]),
+    },
+  });
+  const newUncaught = process.listeners('uncaughtException').filter((listener) => !beforeUncaught.has(listener));
+  const newUnhandled = process.listeners('unhandledRejection').filter((listener) => !beforeUnhandled.has(listener));
+  try {
+    assert.equal(newUncaught.length, 1);
+    assert.equal(newUnhandled.length, 1);
+    newUncaught[0](new Error('main crashed'));
+    newUnhandled[0]('promise failed');
+    assert.deepEqual(reports, [
+      ['uncaught', 'main crashed'],
+      ['rejection', 'promise failed'],
+    ]);
+  } finally {
+    for (const listener of newUncaught) {
+      process.removeListener('uncaughtException', listener);
+    }
+    for (const listener of newUnhandled) {
+      process.removeListener('unhandledRejection', listener);
+    }
+  }
+});
+
+test('main utility signs folder grants and resolves app ids from live app windows only', () => {
+  const { appWindows, controller } = createController();
+  appWindows.set('finance-os', {
+    isDestroyed: () => false,
+    webContents: { id: 7 },
+  });
+  appWindows.set('recipes', {
+    isDestroyed: () => true,
+    webContents: { id: 8 },
+  });
+
+  assert.equal(controller.resolveAppIdForWebContents(7), 'finance-os');
+  assert.equal(controller.resolveAppIdForWebContents(8), null);
+
+  const grant = controller.signAppFolderGrant('finance-os', '/shared/folder');
+  assert.equal(grant.canceled, false);
+  assert.equal(grant.path, '/shared/folder');
+  assert.match(grant.grantToken, /^[^.]+\.[^.]+$/);
+  const [payload] = grant.grantToken.split('.');
+  assert.deepEqual(JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')), {
+    appId: 'finance-os',
+    path: '/shared/folder',
+    exp: Math.floor(new Date(grant.expiresAt).getTime() / 1000),
+  });
+});
+
+test('main utility summarizes updates and closes friend chat windows without touching destroyed windows', () => {
+  const closed = [];
+  const { controller, friendChatWindows, state } = createController({
+    runningApps: new Map([
+      ['finance-os', { frontendUrl: 'http://127.0.0.1:1' }],
+      ['notes', { frontendUrl: 'http://127.0.0.1:2' }],
+    ]),
+  });
+  state.catalogApps = [
+    { id: 'finance-os', name: 'Finance OS', description: 'Money', category: 'finanzas', latestVersion: '0.2.0' },
+    { id: 'recipes', name: 'Recipes', description: 'Food', category: 'hogar', latestVersion: '0.1.0' },
+  ];
+
+    assert.equal(controller.isVersionNewer('0.2.0', '0.1.9'), true);
+  assert.equal(controller.isVersionNewer('0.1.0', '0.2.0'), false);
+  assert.equal(controller.isVersionNewer('1.0.0', '1.0.0'), false);
+  assert.equal(controller.isVersionNewer('1.0.1', '1.0'), true);
+  assert.equal(controller.isVersionNewer('1.0', '1.0.1'), false);
+  assert.equal(controller.isVersionNewer(undefined, '1.0.0'), false);
+  assert.equal(controller.isVersionNewer('1.0.0', undefined), false);
+  assert.equal(controller.isVersionNewer('v1.0.0', '1.0.0'), true);
+  assert.equal(controller.isVersionNewer('1.0.0-beta.2', '1.0.0-beta.1'), true);
+  assert.equal(controller.isVersionNewer('beta-b', 'beta-a'), true);
+  assert.equal(controller.isVersionNewer('beta-a', 'beta-a'), false);
+  assert.deepEqual(controller.parseVersionParts(' v2.10.3-beta '), [2, 10, 3]);
+  assert.equal(controller.parseVersionParts('beta'), null);
+  assert.deepEqual(controller.toAppSummary({
+    appId: 'finance-os',
+    name: 'Old Finance',
+    description: 'Old',
+    category: 'productividad',
+    status: 'installed',
+    userMessage: 'Ready',
+    version: '0.1.9',
+  }), {
+    id: 'finance-os',
+    name: 'Finance OS',
+    description: 'Money',
+    category: 'finanzas',
+    version: '0.1.9',
+    latestVersion: '0.2.0',
+    updateAvailable: true,
+    status: 'running',
+    userMessage: 'En ejecucion',
+    capabilities: undefined,
+    changelog: undefined,
+    iconUrl: undefined,
+    beta: undefined,
+  });
+  assert.deepEqual(controller.toAppSummary({
+    appId: 'recipes',
+    name: 'Recipes Local',
+    description: 'Local recipes',
+    category: 'home',
+    status: 'installed',
+    userMessage: 'Ready',
+    version: '0.1.0',
+  }), {
+    id: 'recipes',
+    name: 'Recipes',
+    description: 'Food',
+    category: 'hogar',
+    version: '0.1.0',
+    latestVersion: '0.1.0',
+    updateAvailable: false,
+    status: 'installed',
+    userMessage: 'Ready',
+    capabilities: undefined,
+    changelog: undefined,
+    iconUrl: undefined,
+    beta: undefined,
+  });
+  assert.deepEqual(controller.toAppSummary({
+    appId: 'journal',
+    name: 'Journal',
+    description: 'Daily notes',
+    category: 'productividad',
+    status: 'installed',
+    userMessage: 'Ready',
+    version: '0.1.0',
+  }), {
+    id: 'journal',
+    name: 'Journal',
+    description: 'Daily notes',
+    category: 'productividad',
+    version: '0.1.0',
+    latestVersion: undefined,
+    updateAvailable: false,
+    status: 'installed',
+    userMessage: 'Ready',
+    capabilities: undefined,
+    changelog: undefined,
+    iconUrl: undefined,
+    beta: undefined,
+  });
+  assert.deepEqual(controller.toAppSummary({
+    appId: 'notes',
+    name: 'Local Notes',
+    description: 'Private notes',
+    category: 'productividad',
+    status: 'installed',
+    userMessage: 'Ready',
+    version: '0.1.0',
+  }), {
+    id: 'notes',
+    name: 'Local Notes',
+    description: 'Private notes',
+    category: 'productividad',
+    version: '0.1.0',
+    latestVersion: undefined,
+    updateAvailable: false,
+    status: 'running',
+    userMessage: 'En ejecucion',
+    capabilities: undefined,
+    changelog: undefined,
+    iconUrl: undefined,
+    beta: undefined,
+  });
+
+  friendChatWindows.set(1, { isDestroyed: () => false, close: () => closed.push(1) });
+  friendChatWindows.set(2, { isDestroyed: () => true, close: () => closed.push(2) });
+  controller.closeFriendChatWindows();
+  assert.deepEqual(closed, [1]);
+  assert.equal(friendChatWindows.size, 0);
+});
+
+test('main utility logs install diagnostics and serializes command failures with truncation', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'forger-install-log-'));
+  const logPath = path.join(root, 'install.jsonl');
+  try {
+    const { controller } = createController({
+      getInstallLogPath: () => logPath,
+      app: {
+        getAppPath: () => '/dev-app',
+        getPath: (name) => `/user/${name}`,
+        getVersion: () => '0.0.0-test',
+        isPackaged: true,
+      },
+      isDev: false,
+    });
+    const longStdout = 'x'.repeat(60_005);
+    const commandError = new controller.CommandFailedError('git', ['status'], '/repo', 1, null, longStdout, 'bad');
+
+    await controller.appendInstallLog('install:test', { appId: 'demo-app' });
+    const serialized = controller.serializeErrorForInstallLog(commandError);
+    const plain = controller.serializeErrorForInstallLog('plain failure');
+    const entry = JSON.parse(await readFile(logPath, 'utf8'));
+
+    assert.equal(entry.event, 'install:test');
+    assert.equal(entry.appId, 'demo-app');
+    assert.equal(entry.packaged, true);
+    assert.equal(entry.dev, false);
+    assert.equal(serialized.command, 'git');
+    assert.equal(serialized.exitCode, 1);
+    assert.match(serialized.stdout, /\.\.\.\[truncated 5 chars\]$/);
+    assert.deepEqual(plain, { message: 'plain failure' });
+    assert.equal(controller.truncateForInstallLog('short'), 'short');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('main utility discovers runtime archives and checksum files by platform token and fallback rules', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'forger-runtimes-'));
+  try {
+    const { controller } = createController({
+      app: {
+        getAppPath: () => root,
+        getPath: (name) => `/user/${name}`,
+        getVersion: () => '0.0.0-test',
+        isPackaged: false,
+      },
+    });
+    const runtimeRoot = path.join(root, 'resources', 'runtimes');
+    await fs.mkdir(runtimeRoot, { recursive: true });
+    await writeFile(path.join(runtimeRoot, 'node-darwin-arm64.tar.gz'), 'archive', 'utf8');
+    await writeFile(path.join(runtimeRoot, 'node-darwin-arm64.sha256'), 'sum', 'utf8');
+    const zipRoot = path.join(root, 'zip-runtimes');
+    await fs.mkdir(zipRoot, { recursive: true });
+    await writeFile(path.join(zipRoot, 'node-linux_x64.zip'), 'archive', 'utf8');
+    await writeFile(path.join(zipRoot, 'node-linux_x64.zip.sha256'), 'sum', 'utf8');
+    const emptyRoot = path.join(root, 'empty-runtimes');
+    await fs.mkdir(emptyRoot, { recursive: true });
+    const fallbackRoot = path.join(root, 'fallback-runtimes');
+    await fs.mkdir(fallbackRoot, { recursive: true });
+    await writeFile(path.join(fallbackRoot, 'single-runtime.zip'), 'archive', 'utf8');
+    const ambiguousRoot = path.join(root, 'ambiguous-runtimes');
+    await fs.mkdir(ambiguousRoot, { recursive: true });
+    await writeFile(path.join(ambiguousRoot, 'one-runtime.zip'), 'archive', 'utf8');
+    await writeFile(path.join(ambiguousRoot, 'two-runtime.zip'), 'archive', 'utf8');
+
+    const archive = await controller.findRuntimeArchive(runtimeRoot, 'darwin_arm64');
+    const checksum = await controller.findRuntimeChecksumFile(runtimeRoot, archive, 'darwin_arm64');
+    const zipArchive = await controller.findRuntimeArchive(zipRoot, 'linux_x64');
+    const zipChecksum = await controller.findRuntimeChecksumFile(zipRoot, zipArchive, 'linux_x64');
+    const fallbackArchive = await controller.findRuntimeArchive(fallbackRoot, 'linux_x64');
+
+    assert.equal(controller.getBundledResourcesRoot(), runtimeRoot);
+    const resourcesDescriptor = Object.getOwnPropertyDescriptor(process, 'resourcesPath');
+    Object.defineProperty(process, 'resourcesPath', {
+      configurable: true,
+      value: path.join(root, 'packaged-resources'),
+    });
+    try {
+      const packaged = createController({
+        app: {
+          getAppPath: () => root,
+          getPath: (name) => `/user/${name}`,
+          getVersion: () => '0.0.0-test',
+          isPackaged: true,
+        },
+      });
+      assert.equal(packaged.controller.getBundledResourcesRoot(), path.join(root, 'packaged-resources', 'runtimes'));
+    } finally {
+      if (resourcesDescriptor) {
+        Object.defineProperty(process, 'resourcesPath', resourcesDescriptor);
+      } else {
+        delete process.resourcesPath;
+      }
+    }
+    assert.equal(path.basename(archive), 'node-darwin-arm64.tar.gz');
+    assert.equal(path.basename(checksum), 'node-darwin-arm64.sha256');
+    assert.equal(path.basename(zipArchive), 'node-linux_x64.zip');
+    assert.equal(path.basename(zipChecksum), 'node-linux_x64.zip.sha256');
+    assert.equal(path.basename(fallbackArchive), 'single-runtime.zip');
+    assert.equal(await controller.findRuntimeArchive(ambiguousRoot, 'linux_x64'), null);
+    assert.equal(await controller.findRuntimeArchive(emptyRoot, 'linux_x64'), null);
+    assert.deepEqual(controller.runtimePlatformTokens('linux_x64'), ['linux_x64', 'linux-x64']);
+    assert.deepEqual(controller.runtimePlatformTokens('win32_x64').includes('windows-x64'), true);
+    assert.deepEqual(controller.runtimePlatformTokens('darwin_arm64').includes('aarch64-apple-darwin'), true);
+    assert.equal(controller.stripArchiveExtension('runtime.tar.gz'), 'runtime');
+    assert.equal(controller.stripArchiveExtension('runtime.tgz'), 'runtime');
+    assert.equal(controller.stripArchiveExtension('runtime.zip'), 'runtime');
+    assert.equal(controller.stripArchiveExtension('runtime.bin'), 'runtime.bin');
+    assert.equal(await controller.findRuntimeArchive(path.join(root, 'missing'), 'darwin_arm64'), null);
+    assert.equal(await controller.findRuntimeChecksumFile(runtimeRoot, path.join(runtimeRoot, 'no-sum.zip'), 'missing_platform'), null);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('main utility reports runtime errors, catalog statuses, account switches, and chat trace events', async () => {
+  const saved = [];
+  const cleared = [];
+  const cloudCalls = [];
+  const { controller, friendChatWindows, sent, state } = createController({
+    cloudDeviceManager: {
+      start: async () => cloudCalls.push('start'),
+      stop: () => cloudCalls.push('stop'),
+    },
+    forgerAccountStore: {
+      save: async (account) => saved.push(account),
+      clear: async () => cleared.push('clear'),
+    },
+    publicForgerAccount: (account) => ({
+      authenticated: Boolean(account.authenticated),
+      email: account.email,
+    }),
+    registry: {
+      apps: {
+        'finance-os': {
+          appId: 'finance-os',
+          name: 'Finance OS',
+          version: '0.1.0',
+          installDir: '/apps/finance-os',
+          status: 'installed',
+        },
+        recipes: {
+          appId: 'recipes',
+          name: 'Recipes',
+          version: '0.1.0',
+          installDir: '/apps/recipes',
+          status: 'installed',
+        },
+      },
+    },
+    runningApps: new Map([['finance-os', { frontendUrl: 'http://127.0.0.1:1' }]]),
+  });
+  friendChatWindows.set(3, { isDestroyed: () => false, close: () => undefined });
+
+  const runtimeError = controller.runtimeError('No runtime', 'missing_runtime', 'installing');
+  const diagnostic = controller.failureDiagnostic(new Error('bad'), 'fallback');
+  const trace = controller.buildChatRunIpcTracePayload({
+    runId: 'run-1',
+    appId: 'demo-app',
+    status: 'running',
+    userMessage: 'hello',
+    progressLog: [{ message: 'one' }, { message: 'two' }],
+  });
+  const rendererTrace = controller.sanitizeRendererChatTrace({
+    event: 'chat_run_message_appended',
+    timestamp: 123,
+    runId: 'run-1',
+    messageCount: 2,
+    foundConversation: true,
+  });
+  const completeRendererTrace = controller.sanitizeRendererChatTrace({
+    event: 'chat_run_event_received',
+    timestamp: '2026-05-21T00:00:00.000Z',
+    runId: 123,
+    appId: 'finance-os',
+    conversationId: 'conversation-1',
+    activeConversationId: 'conversation-2',
+    status: 'completed',
+    messageCount: '2',
+    foundConversation: 'yes',
+  });
+  const switched = await controller.switchForgerAccountSession({
+    authenticated: true,
+    token: 'token',
+    email: 'user@example.com',
+  }, { userMessage: 'ok' });
+  await controller.clearForgerAccountSession('expired');
+
+  assert.equal(runtimeError.progress, 80);
+  assert.equal(diagnostic.technicalCode, 'bad');
+  assert.deepEqual(trace, {
+    runId: 'run-1',
+    appId: 'demo-app',
+    conversationId: null,
+    status: 'running',
+    hasUserMessage: true,
+    progressCount: 2,
+  });
+  assert.deepEqual(rendererTrace, {
+    traceEvent: 'chat_run_message_appended',
+    timestamp: null,
+    runId: 'run-1',
+    appId: null,
+    conversationId: null,
+    activeConversationId: null,
+    status: null,
+    messageCount: 2,
+    foundConversation: true,
+  });
+  assert.deepEqual(completeRendererTrace, {
+    traceEvent: 'chat_run_event_received',
+    timestamp: '2026-05-21T00:00:00.000Z',
+    runId: null,
+    appId: 'finance-os',
+    conversationId: 'conversation-1',
+    activeConversationId: 'conversation-2',
+    status: 'completed',
+    messageCount: null,
+    foundConversation: null,
+  });
+  assert.deepEqual(switched, { authenticated: true, email: 'user@example.com', userMessage: 'ok', technicalCode: undefined });
+  assert.equal(state.forgerAccount.authenticated, false);
+  assert.equal(saved.length, 1);
+  assert.deepEqual(cleared, ['clear']);
+  assert.deepEqual(cloudCalls, ['stop', 'start', 'stop']);
+  assert.equal(controller.toCatalogStatus('finance-os'), 'running');
+  assert.equal(controller.toCatalogStatus('recipes'), 'installed');
+  assert.equal(controller.toCatalogStatus('missing'), 'not_installed');
+  assert.equal(controller.mapBackendCategory('finance'), 'finanzas');
+  assert.equal(controller.mapBackendCategory('home'), 'hogar');
+  assert.equal(controller.mapBackendCategory('health'), 'salud');
+  assert.equal(controller.mapBackendCategory('developer_tools'), 'developer_tools');
+  assert.equal(controller.mapBackendCategory('unknown'), 'productividad');
+  assert.equal(sent.at(-1)[0], IPC_CHANNELS.forgerAccountUpdated);
+});
+
+test('main utility desktop updater is cached and emits progress through the main window', () => {
+  const { controller, sent, state } = createController();
+  const updater = controller.getDesktopUpdater();
+  assert.equal(controller.getDesktopUpdater(), updater);
+  assert.equal(state.desktopUpdater, updater);
+
+  updater.options.onStateChanged({ status: 'checking' });
+  assert.deepEqual(sent.at(-1), [IPC_CHANNELS.desktopUpdateProgress, { status: 'checking' }]);
+});

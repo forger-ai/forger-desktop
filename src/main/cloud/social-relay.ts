@@ -74,7 +74,7 @@ const handleCloudRelayRequest = async (request: CloudRelayRequest): Promise<Clou
       return relayError(request.request_id, 424, 'app_not_running');
     }
     const pathValue = request.path?.startsWith('/') ? request.path : `/${request.path || ''}`;
-    if (pathValue.includes('..') || pathValue.toLowerCase().startsWith('/__forger_internal')) {
+    if (isUnsafeRelayPath(pathValue) || pathValue.toLowerCase().startsWith('/__forger_internal')) {
       if (pathValue.toLowerCase().startsWith('/__forger_internal/forger_app/')) {
         return await handleCloudForgerAppRequest(request, pathValue);
       }
@@ -146,9 +146,23 @@ const handleCloudForgerAppRequest = async (
 
     return json({ error: 'unknown_forger_app_action' }, 404);
   } catch (error) {
+    if (error instanceof Error && error.message === 'invalid_json_body') {
+      return relayJson(request.request_id, 400, { error: 'invalid_json_body' });
+    }
     return relayJson(request.request_id, 500, {
       error: error instanceof Error ? error.message : 'forger_app_request_failed',
     });
+  }
+};
+
+const isUnsafeRelayPath = (pathValue: string): boolean => {
+  if (pathValue.includes('..')) {
+    return true;
+  }
+  try {
+    return decodeURIComponent(pathValue).includes('..');
+  } catch {
+    return true;
   }
 };
 
@@ -157,7 +171,12 @@ const parseRelayJsonBody = (body?: number[]): Record<string, unknown> => {
     return {};
   }
   const raw = Buffer.from(body).toString('utf8');
-  const parsed = JSON.parse(raw) as unknown;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch {
+    throw new Error('invalid_json_body');
+  }
   return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
     ? parsed as Record<string, unknown>
     : {};

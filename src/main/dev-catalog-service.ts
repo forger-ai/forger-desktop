@@ -180,6 +180,11 @@ const getIconUrl = (app: LocalApp, catalog: JsonObject, baseUrl: string): string
   return `${baseUrl}/assets/${encodeURIComponent(app.catalogSlug)}/${iconPath.split('/').map(encodeURIComponent).join('/')}`;
 };
 
+const getDevDisplayName = (app: LocalApp, catalog: JsonObject): string => {
+  const displayName = asString(catalog.display_name, app.sourceSlug);
+  return /\bdev$/i.test(displayName) ? displayName : `${displayName} Dev`;
+};
+
 const toCatalogEntry = async (app: LocalApp, baseUrl: string): Promise<JsonObject> => {
   const catalog = asRecord(app.manifest.catalog);
   const stack = asRecord(app.manifest.stack);
@@ -192,7 +197,7 @@ const toCatalogEntry = async (app: LocalApp, baseUrl: string): Promise<JsonObjec
 
   return {
     slug: app.catalogSlug,
-    name: `${asString(catalog.display_name, app.sourceSlug)} Dev`,
+    name: getDevDisplayName(app, catalog),
     short_description: asString(catalog.short_description),
     description: asString(catalog.description, asString(app.manifest.description)),
     category: asString(catalog.category, 'utilities'),
@@ -321,6 +326,13 @@ const sendNotFound = (response: ServerResponse): void => {
   sendJson(response, { error: 'not_found' }, 404);
 };
 
+export const __testDevCatalogInternals = {
+  readDevVersionOverride,
+  runCommand,
+  shouldSkip,
+  zipDirectory,
+};
+
 export class DevCatalogService {
   private server: http.Server | null = null;
 
@@ -359,8 +371,7 @@ export class DevCatalogService {
     try {
       const requestUrl = new URL(request.url ?? '/', this.baseUrl());
       if (request.method !== 'GET') {
-        sendJson(response, { error: 'method_not_allowed' }, 405);
-        return;
+        return sendJson(response, { error: 'method_not_allowed' }, 405);
       }
 
       if (requestUrl.pathname === '/' || requestUrl.pathname === '/health') {

@@ -163,7 +163,7 @@ const resolveInstalledManifest = async (installDir: string): Promise<AppManifest
   try {
     const raw = await fs.readFile(manifestPath, 'utf8');
     const parsed = JSON.parse(raw) as AppManifest;
-    if (!parsed || typeof parsed !== 'object') {
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
       return null;
     }
     return parsed;

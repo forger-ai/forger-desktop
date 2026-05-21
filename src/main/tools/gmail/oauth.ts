@@ -295,8 +295,10 @@ export const runGmailOAuthFlow = async (context: InternalToolContext): Promise<v
         const saved = await context.secretsStore.setToolSecret(GMAIL_TOOL_ID, GMAIL_REFRESH_TOKEN_SECRET, token.refresh_token);
         if (!saved.success) {
           appendOAuthLog(context, 'secret_save_failed', { technicalCode: saved.technicalCode });
-          sendHtml(response, 500, copy.errorTitle, saved.userMessage);
-          throw new GmailOAuthError(saved.technicalCode ?? 'gmail_oauth_secret_save_failed', saved.technicalCode ?? 'gmail_oauth_secret_save_failed');
+          const message = saved.userMessage ?? copy.fallbackError;
+          const technicalCode = saved.technicalCode ?? 'gmail_oauth_secret_save_failed';
+          sendHtml(response, 500, copy.errorTitle, message);
+          throw new GmailOAuthError(message, technicalCode);
         }
 
         appendOAuthLog(context, 'refresh_token_saved');
@@ -304,16 +306,14 @@ export const runGmailOAuthFlow = async (context: InternalToolContext): Promise<v
         settled = true;
         resolve();
       })().catch((error) => {
-        if (!response.headersSent) {
-          sendHtml(
-            response,
-            500,
-            copy.errorTitle,
-            error instanceof Error ? error.message : copy.fallbackError,
-          );
-        } else if (!response.writableEnded) {
-          response.end();
-        }
+	        if (!response.headersSent) {
+	          sendHtml(
+	            response,
+	            500,
+	            copy.errorTitle,
+	            error instanceof Error ? error.message : copy.fallbackError,
+	          );
+	        }
         if (!settled) {
           settled = true;
           reject(error);
@@ -345,6 +345,7 @@ export const runGmailOAuthFlow = async (context: InternalToolContext): Promise<v
       listeningResolve?.(address.port);
     });
   });
+  callbackPromise.catch(() => undefined);
 
   const listeningPromise = new Promise<number>((resolve, reject) => {
     listeningResolve = resolve;

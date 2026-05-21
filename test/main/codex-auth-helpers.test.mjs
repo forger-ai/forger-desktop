@@ -56,6 +56,10 @@ test('Codex auth URL extraction opens only OpenAI auth URLs', () => {
   assert.deepEqual(urls, ['https://auth.openai.com/oauth/authorize?client_id=abc&state=123']);
 });
 
+test('Codex auth URL extraction ignores malformed CLI URL fragments', () => {
+  assert.deepEqual(extractAllowedCodexAuthUrls('Visit https://[broken-auth-url'), []);
+});
+
 test('Codex auth output classifies missing bundled Node and expired auth', () => {
   assert.equal(
     classifyCodexAuthOutput('', 'env: node: No such file or directory\n'),

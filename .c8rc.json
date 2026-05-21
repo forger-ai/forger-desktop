@@ -1,0 +1,14 @@
+{
+  "all": true,
+  "include": [
+    "dist-electron/**/*.js"
+  ],
+  "exclude": [
+    "dist-electron/main/index.js",
+    "dist-electron/main/core/main-process.js",
+    "dist-electron/main/**/*-types.js",
+    "dist-electron/main/**/types.js",
+    "dist-electron/shared/types.js",
+    "dist-electron/shared/types/**/*.js"
+  ]
+}

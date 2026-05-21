@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createRequire } from 'node:module';
+import { clearDistModule, createElectronAppMock, withMockedElectron } from './electron-test-helpers.mjs';
 
 const require = createRequire(import.meta.url);
 const { extractDeepLinkFromArgv, parseForgerUrl } = require('../../dist-electron/main/deep-links.js');
@@ -33,6 +34,7 @@ test('parseForgerUrl rejects non-Forger URLs and preserves unknown Forger links'
 
 test('extractDeepLinkFromArgv returns the first valid Forger link candidate', () => {
   assert.equal(extractDeepLinkFromArgv(['node', '.', 'https://example.com']), null);
+  assert.equal(extractDeepLinkFromArgv(['node', '.', 42, 'forger://chat?app=finance-os']).app, 'finance-os');
 
   assert.deepEqual(
     extractDeepLinkFromArgv([
@@ -48,4 +50,65 @@ test('extractDeepLinkFromArgv returns the first valid Forger link candidate', ()
       raw: 'forger://chat?app=recipes',
     },
   );
+});
+
+test('registerForgerProtocol registers packaged and dev protocol handlers', async () => {
+  const originalDefaultApp = process.defaultApp;
+  const originalArgv = process.argv;
+  const electronApp = createElectronAppMock();
+
+  try {
+    await withMockedElectron({ app: electronApp, BrowserWindow: class {} }, async (mockedRequire) => {
+      clearDistModule('main/deep-links.js');
+      const { registerForgerProtocol } = mockedRequire('../../dist-electron/main/deep-links.js');
+
+      process.defaultApp = false;
+      registerForgerProtocol();
+      assert.deepEqual(electronApp.protocolRegistrations.at(-1), ['forger']);
+
+      process.defaultApp = true;
+      process.argv = ['/Applications/Electron.app/Contents/MacOS/Electron', './dist-electron/main/index.js'];
+      registerForgerProtocol();
+      assert.equal(electronApp.protocolRegistrations.at(-1)[0], 'forger');
+      assert.equal(electronApp.protocolRegistrations.at(-1)[1], process.execPath);
+      assert.ok(electronApp.protocolRegistrations.at(-1)[2][0].endsWith('dist-electron/main/index.js'));
+
+      process.argv = ['/Applications/Electron.app/Contents/MacOS/Electron'];
+      registerForgerProtocol();
+      assert.deepEqual(electronApp.protocolRegistrations.at(-1), ['forger']);
+    });
+  } finally {
+    process.defaultApp = originalDefaultApp;
+    process.argv = originalArgv;
+  }
+});
+
+test('focusWindow restores usable windows and ignores missing or destroyed targets', async () => {
+  const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform');
+  const electronApp = createElectronAppMock();
+  const calls = [];
+
+  try {
+    await withMockedElectron({ app: electronApp, BrowserWindow: class {} }, async (mockedRequire) => {
+      clearDistModule('main/deep-links.js');
+      const { focusWindow } = mockedRequire('../../dist-electron/main/deep-links.js');
+
+      focusWindow(null);
+      focusWindow({ isDestroyed: () => true });
+      assert.deepEqual(calls, []);
+
+      Object.defineProperty(process, 'platform', { value: 'darwin' });
+      focusWindow({
+        isDestroyed: () => false,
+        isMinimized: () => true,
+        restore: () => calls.push('restore'),
+        show: () => calls.push('show'),
+        focus: () => calls.push('focus'),
+      });
+    });
+  } finally {
+    Object.defineProperty(process, 'platform', originalPlatform);
+  }
+  assert.deepEqual(calls, ['restore', 'show', 'focus']);
+  assert.deepEqual(electronApp.focusedWith, [{ steal: true }]);
 });

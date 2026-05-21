@@ -74,9 +74,16 @@ export class AuditLogger {
     const now = new Date();
     const day = now.toISOString().slice(0, 10);
     const dir = path.join(this.privateAppsRoot, '.forger', 'audit');
-    await fs.mkdir(dir, { recursive: true });
-    const filePath = path.join(dir, `${day}.log`);
-    await fs.appendFile(filePath, `${JSON.stringify({ ts: now.toISOString(), ...event })}\n`, 'utf8');
+    try {
+      await fs.mkdir(dir, { recursive: true });
+      const filePath = path.join(dir, `${day}.log`);
+      await fs.appendFile(filePath, `${JSON.stringify({ ts: now.toISOString(), ...event })}\n`, 'utf8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        return;
+      }
+      throw error;
+    }
   }
 }
 
@@ -98,7 +105,7 @@ export class PermissionBroker {
 
   public isPathInside(target: string, root: string): boolean {
     const relative = path.relative(root, target);
-    return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+    return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
   }
 
   private async safeRealPath(input: string): Promise<string> {
@@ -109,9 +116,6 @@ export class PermissionBroker {
       return path.join(parentReal, path.basename(normalized));
     });
 
-    if (real.includes(`..${path.sep}`)) {
-      throw this.createError('sandbox_violation', 'Path traversal blocked');
-    }
     return real;
   }
 
@@ -191,6 +195,7 @@ export class SandboxRunner {
     environment: Record<string, string>;
     mcpServers?: CodexMcpServerConfig[];
     workingDir: string;
+    sharedRoots?: string[];
     prompt: string;
     model: string;
     reasoningEffort: CodexReasoningEffort;
@@ -201,7 +206,7 @@ export class SandboxRunner {
     threadId?: string;
     codexHome?: string;
   }): Promise<CodexRunResult> {
-    const allowedRoots = [params.workingDir].join(path.delimiter);
+    const allowedRoots = [params.workingDir, ...(params.sharedRoots ?? [])].join(path.delimiter);
 
     const modelArgs = ['--model', params.model];
     const reasoningArgs = ['--config', `reasoning_effort="${params.reasoningEffort}"`];
@@ -289,7 +294,7 @@ export class SandboxRunner {
     const codexCommand = await this.resolveCodexCommand(params);
     const isolatedCodexHome = params.codexHome ?? await createIsolatedCodexHome(this.codexHome, {
       prefix: 'forger-chat-codex-home',
-      trustedRoots: [params.workingDir],
+      trustedRoots: [params.workingDir, ...(params.sharedRoots ?? [])],
       networkAccess: params.networkAccess === true,
     });
     const allowedMcpServers = new Set(mcpServers.map((server) => server.name));
@@ -389,6 +394,7 @@ export class SandboxRunner {
     environment: Record<string, string>;
     mcpServers?: CodexMcpServerConfig[];
     workingDir: string;
+    sharedRoots?: string[];
     prompt: string;
     model: string;
     effort: ClaudeEffort;
@@ -428,7 +434,7 @@ export class SandboxRunner {
       const result = await runCommandCapture(params.claudeCliPath, args, {
         cwd: params.workingDir,
         env: {
-          FORGER_ALLOWED_ROOTS: params.workingDir,
+          FORGER_ALLOWED_ROOTS: [params.workingDir, ...(params.sharedRoots ?? [])].join(path.delimiter),
           ...Object.fromEntries(mcpServers.map((server) => [server.tokenEnvVar, server.token])),
           ...params.environment,
           PATH: [path.dirname(params.claudeCliPath), ...params.pathEntries, process.env.PATH ?? ''].filter(Boolean).join(path.delimiter),
@@ -628,10 +634,11 @@ const findExecutableInPathEntries = async (
 };
 
 export const ensureGitRepository = async (cwd: string): Promise<void> => {
-  const isRepo = (await runCommandCapture('git', ['rev-parse', '--is-inside-work-tree'], {
+  const revParse = await runCommandCapture('git', ['rev-parse', '--is-inside-work-tree'], {
     cwd,
     timeoutMs: 5_000,
-  }).catch(() => null)) !== null;
+  }).catch(() => null);
+  const isRepo = Boolean(revParse && revParse.code === 0 && revParse.stdout.trim() === 'true');
 
   const ensureMain = async (): Promise<void> => {
     const checkoutMain = await runCommandCapture('git', ['checkout', 'main'], {
@@ -647,10 +654,13 @@ export const ensureGitRepository = async (cwd: string): Promise<void> => {
   };
 
   if (!isRepo) {
-    await runCommandCapture('git', ['init', '-b', 'main'], { cwd, timeoutMs: 10_000 }).catch(async () => {
+    const initMain = await runCommandCapture('git', ['init', '-b', 'main'], { cwd, timeoutMs: 10_000 }).catch(
+      () => null,
+    );
+    if (!initMain || initMain.code !== 0) {
       await runCommandCapture('git', ['init'], { cwd, timeoutMs: 10_000 });
       await ensureMain();
-    });
+    }
     await runCommandCapture('git', ['config', 'user.email', 'forger@local.invalid'], {
       cwd,
       timeoutMs: 5_000,

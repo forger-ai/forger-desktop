@@ -32,10 +32,13 @@ export class DesktopRuntimeBridge {
   private server: http.Server | null = null;
   private eventServer: WebSocketServer | null = null;
   private url: string | null = null;
-  private readonly secrets = new Map<string, string>();
-  private readonly eventClients = new Map<string, Set<WebSocket>>();
+  private readonly secrets: Map<string, string>;
+  private readonly eventClients: Map<string, Set<WebSocket>>;
 
-  public constructor(private readonly options: DesktopRuntimeBridgeOptions) {}
+  public constructor(private readonly options: DesktopRuntimeBridgeOptions) {
+    this.secrets = new Map<string, string>();
+    this.eventClients = new Map<string, Set<WebSocket>>();
+  }
 
   public async start(): Promise<void> {
     if (this.server) return;

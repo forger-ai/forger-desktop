@@ -195,8 +195,9 @@ export class CloudDeviceManager {
     const technicalCode = technicalCodeForError(error, fallbackCode);
     this.lastMessage = userMessage;
     this.lastTechnicalCode = technicalCode;
-    if (isAuthenticationInvalidError(technicalCode)) {
-      await this.options.onAuthenticationInvalid?.(technicalCode);
+    const onAuthenticationInvalid = this.options.onAuthenticationInvalid;
+    if (isAuthenticationInvalidError(technicalCode) && onAuthenticationInvalid) {
+      await onAuthenticationInvalid(technicalCode);
     }
   }
 
@@ -220,9 +221,7 @@ export class CloudDeviceManager {
     url.searchParams.set('device_uid', this.stored.deviceUid);
     url.searchParams.set('device_secret', this.stored.deviceSecret);
     const token = this.options.token();
-    if (token) {
-      url.searchParams.set('token', token);
-    }
+    if (token) url.searchParams.set('token', token);
 
     const socket = new WebSocket(url.toString());
     this.socket = socket;
@@ -281,7 +280,13 @@ export class CloudDeviceManager {
   }
 
   private async handleSocketMessage(identifier: string, raw: string): Promise<void> {
-    const parsed = JSON.parse(raw) as { type?: string; message?: CloudRelayRequest & { type?: string } };
+    let parsed: { type?: string; message?: CloudRelayRequest & { type?: string } };
+    try {
+      parsed = JSON.parse(raw) as { type?: string; message?: CloudRelayRequest & { type?: string } };
+    } catch {
+      this.lastTechnicalCode = 'cloud_socket_message_invalid';
+      return;
+    }
     if (parsed.type === 'ping') {
       return;
     }
@@ -369,7 +374,11 @@ export class CloudDeviceManager {
   }
 
   private randomPairingCode(): string {
-    return randomBytes(5).toString('base64url').replace(/[^A-Z0-9]/gi, '').slice(0, 8).toUpperCase();
+    let code = '';
+    while (code.length < 8) {
+      code += randomBytes(6).toString('base64url').replace(/[^A-Z0-9]/gi, '').toUpperCase();
+    }
+    return code.slice(0, 8);
   }
 
   private digestCode(code: string): string {
