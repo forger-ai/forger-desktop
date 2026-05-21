@@ -1,6 +1,47 @@
-// @ts-nocheck
 
-type SettingsServiceDeps = Record<string, any>;
+import type fs from 'node:fs/promises';
+import type path from 'node:path';
+
+import type { PromptOverridesStore } from '../prompt-overrides';
+import type {
+  AgentDefaults,
+  AgentProvider,
+  AgentRuntime,
+  AgentRuntimeRecommendations,
+  AgentRuntimeRequest,
+  ClaudeAuthStatus,
+  ClaudeEffort,
+  CodexAuthStatus,
+  CodexReasoningEffort,
+  Settings,
+  UpdateAgentDefaultsInput,
+  UpdateCodexDefaultsInput,
+} from '../../shared/types';
+
+interface SettingsServiceState {
+  promptOverridesStore: PromptOverridesStore | null;
+  settings: Settings;
+}
+
+interface SettingsServiceDeps {
+  BUILT_IN_CLAUDE_EFFORT: ClaudeEffort;
+  BUILT_IN_CLAUDE_MODEL: string;
+  BUILT_IN_CODEX_MODEL: string;
+  BUILT_IN_CODEX_REASONING: CodexReasoningEffort;
+  CLAUDE_EFFORT_VALUES: ReadonlySet<ClaudeEffort>;
+  CLAUDE_MODEL_VALUES: ReadonlySet<string>;
+  CODEX_MODEL_VALUES: ReadonlySet<string>;
+  CODEX_REASONING_VALUES: ReadonlySet<CodexReasoningEffort>;
+  PromptOverridesStore: new (filePath: string) => PromptOverridesStore;
+  fs: typeof fs;
+  getClaudeAuthStatus: () => Promise<ClaudeAuthStatus>;
+  getCodexAuthStatus: () => Promise<CodexAuthStatus>;
+  getPromptOverridesPath: () => string;
+  getSettingsPath: () => string;
+  path: typeof path;
+  settingsSeed: Settings;
+  state: SettingsServiceState;
+}
 
 export const createSettingsServiceController = (deps: SettingsServiceDeps) => {
   const { state, PromptOverridesStore, getPromptOverridesPath, settingsSeed, fs, path, getSettingsPath, BUILT_IN_CODEX_MODEL, BUILT_IN_CODEX_REASONING, BUILT_IN_CLAUDE_MODEL, BUILT_IN_CLAUDE_EFFORT, CODEX_MODEL_VALUES, CODEX_REASONING_VALUES, CLAUDE_MODEL_VALUES, CLAUDE_EFFORT_VALUES, getCodexAuthStatus, getClaudeAuthStatus } = deps;

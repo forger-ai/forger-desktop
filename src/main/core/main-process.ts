@@ -81,6 +81,7 @@ import { createWindowBootstrapController } from './window-bootstrap';
 import {
   AGENT_TOOL_DEFINITIONS,
   AGENT_TOOL_IDS,
+  AGENT_TOOL_PACKAGES,
   createInitialAgentToolSettings,
 } from './agent-tool-packages';
 import { registerMainLifecycle } from './main-lifecycle';
@@ -123,6 +124,7 @@ import type {
   CloudSocialEvent,
   CloudAppMessagePermissionDecision,
   CreateRemoteAppBackupInput,
+  CreateRemoteAppBackupResult,
   AppExternalFolderSelection,
   AppAgent,
   AppAgentRuntimeInput,
@@ -281,7 +283,7 @@ let appAgentConversationManager: AppAgentConversationManager | null = null;
 let fileLibrary: FileLibrary | null = null;
 let secretsStore: SecretsStore | null = null;
 let officialToolsService: OfficialToolsService | null = null;
-const desktopUpdater: DesktopUpdater | null = null;
+let desktopUpdater: DesktopUpdater | null = null;
 let desktopErrorReporter: DesktopErrorReporter | null = null;
 let automationManager: AutomationManager | null = null;
 let appMcpManager: AppMcpManager | null = null;
@@ -326,12 +328,7 @@ const getCloudIdentityPath = (): string => getPathConfigController().getCloudIde
 const getCloudSyncSettingsPath = (): string => getPathConfigController().getCloudSyncSettingsPath();
 const getCloudDeviceAccountStorageKey = (): string | undefined => getPathConfigController().getCloudDeviceAccountStorageKey();
 
-const settingsServiceState = {
-  get promptOverridesStore() { return promptOverridesStore; },
-  set promptOverridesStore(value) { promptOverridesStore = value; },
-  get settings() { return settings; },
-  set settings(value) { settings = value; },
-};
+const settingsServiceState = { get promptOverridesStore() { return promptOverridesStore; }, set promptOverridesStore(value) { promptOverridesStore = value; }, get settings() { return settings; }, set settings(value) { settings = value; } };
 const createSettingsServiceDeps = () => ({
   BUILT_IN_CLAUDE_EFFORT,
   BUILT_IN_CLAUDE_MODEL,
@@ -372,7 +369,9 @@ let agentToolSettings: AgentToolSettings = createInitialAgentToolSettings();
 
 let forgerMcpServer: ForgerMcpServer | null = null;
 
-const createMainUtilitiesDeps = () => ({ AGENT_TOOL_DEFINITIONS, AGENT_TOOL_IDS, APP_FOLDER_GRANT_TTL_MS, Buffer, Date, DesktopUpdater, IPC_CHANNELS, URL, agentToolSettings, app, appFolderGrantSecret, appWindows, buildFailureDiagnostic, catalogApps, cloudDeviceManager, createHmac, desktopErrorReporter, desktopUpdater, forgerAccount, forgerAccountStore, fs, getAgentToolSettingsPath, getBundledResourcesRoot, getInstallLogPath, getSharedCopy, installProgressByPhase, isDev, mainWindow, normalizeVersionForFolder, path, publicForgerAccount, registry, resolvePlatformAlias, runningApps, settings, stripArchiveExtension, toCatalogStatus });
+const mainUtilitiesState = { get agentToolSettings() { return agentToolSettings; }, set agentToolSettings(value) { agentToolSettings = value; }, get catalogApps() { return catalogApps; }, set catalogApps(value) { catalogApps = value; }, get desktopUpdater() { return desktopUpdater; }, set desktopUpdater(value) { desktopUpdater = value; }, get forgerAccount() { return forgerAccount; }, set forgerAccount(value) { forgerAccount = value; }, get settings() { return settings; }, set settings(value) { settings = value; } };
+const getMainWindow = (): BrowserWindow | null => mainWindow;
+const createMainUtilitiesDeps = () => ({ AGENT_TOOL_DEFINITIONS, AGENT_TOOL_IDS, APP_FOLDER_GRANT_TTL_MS, Buffer, Date, DesktopUpdater, IPC_CHANNELS, app, appFolderGrantSecret, appWindows, buildFailureDiagnostic, cloudDeviceManager, createHmac, desktopErrorReporter, forgerAccountStore, friendChatWindows, fs, getAgentToolSettingsPath, getInstallLogPath, installProgressByPhase, isDev, getMainWindow, path, publicForgerAccount, registry, runningApps, state: mainUtilitiesState });
 const getMainUtilitiesController = () => createMainUtilitiesController(createMainUtilitiesDeps());
 const CommandFailedError = getMainUtilitiesController().CommandFailedError;
 const truncateForInstallLog = (value: string): string => getMainUtilitiesController().truncateForInstallLog(value);
@@ -388,7 +387,8 @@ const runtimePlatformTokens = (platformAlias: string): string[] => getMainUtilit
 const findRuntimeArchive = async (runtimeVersionDir: string, platformAlias: string): Promise<string | null> => await getMainUtilitiesController().findRuntimeArchive(runtimeVersionDir, platformAlias);
 const findRuntimeChecksumFile = async (runtimeVersionDir: string, archivePath: string, platformAlias: string): Promise<string | null> => await getMainUtilitiesController().findRuntimeChecksumFile(runtimeVersionDir, archivePath, platformAlias);
 const runtimeError = (message: string, technicalCode: string, phase: InstallAppResult['phase'] = 'failed'): InstallAppResult => getMainUtilitiesController().runtimeError(message, technicalCode, phase);
-const failureDiagnostic = (error: unknown, fallbackCode: string) => getMainUtilitiesController().failureDiagnostic(error, fallbackCode);
+const failureDiagnostic = (error: unknown, fallbackCode: string): FailureDiagnosticFields =>
+  getMainUtilitiesController().failureDiagnostic(error, fallbackCode) as FailureDiagnosticFields;
 const emitInstallProgress = (appId: string, payload: InstallAppResult): void => getMainUtilitiesController().emitInstallProgress(appId, payload);
 const emitRuntimeStatus = (payload: RuntimeStatus): void => getMainUtilitiesController().emitRuntimeStatus(payload);
 const buildChatRunIpcTracePayload = (run: ChatRun): Record<string, unknown> => getMainUtilitiesController().buildChatRunIpcTracePayload(run);
@@ -407,45 +407,46 @@ const isVersionNewer = (candidate?: string, current?: string): boolean => getMai
 const mapBackendCategory = (backendCategory: string): AppCategory => getMainUtilitiesController().mapBackendCategory(backendCategory);
 const toCatalogStatus = (slug: string): AppStatus => getMainUtilitiesController().toCatalogStatus(slug);
 
+const manifestSupportState = { get secretsStore() { return secretsStore; }, set secretsStore(value) { secretsStore = value; }, get officialToolsService() { return officialToolsService; }, set officialToolsService(value) { officialToolsService = value; }, get memoryStore() { return memoryStore; }, set memoryStore(value) { memoryStore = value; }, get backupsManager() { return backupsManager; }, set backupsManager(value) { backupsManager = value; } };
 const createManifestSupportDeps = () => ({
   BackupsManager,
+  BUILT_IN_CLAUDE_EFFORT,
+  BUILT_IN_CODEX_REASONING,
+  CLAUDE_EFFORT_VALUES,
+  CODEX_REASONING_VALUES,
   MemoryStore,
   OfficialToolsService,
-  PromptOverridesStore,
   SecretsStore,
+  appendInstallLog,
   app,
-  appSecretEnvName,
-  backendBaseUrl,
-  buildForgerOfficialToolSkillTemplates,
-  buildForgerOfficialToolsPromptSection,
-  buildPromptBases,
   canUseCloudDataSync,
-  createHmac,
+  catalogApps,
+  cloudSyncSettings,
+  extractArchive,
   forgerAccount,
   forgerBackendClient,
   fs,
   getBackupsRoot,
   getCloudIdentityStore,
   getCodexDefaults,
-  getForgerAccountPath,
   getForgerMetadataRoot,
-  getPrivateDataRoot,
-  getPromptOverridesPath,
+  getFreePort,
+  getPromptOverridesStore,
+  getTempRoot,
   hashFileSha256,
-  isSecretsVaultUnavailableError,
-  BUILT_IN_CLAUDE_EFFORT,
-  BUILT_IN_CODEX_REASONING,
-  CLAUDE_EFFORT_VALUES,
-  normalizeAppToolDeclarations,
   normalizeClaudeEffort,
   normalizeCodexReasoningEffort,
   normalizeSettings,
   path,
-  promptOverrideErrorResult,
-  publicForgerAccount,
   registry,
   renderManifestAgentPrompt,
+  runningApps,
   settings,
+  shell,
+  state: manifestSupportState,
+  validateArchiveEntries,
+  withAgentDefaults,
+  zipDirectory,
 });
 const getManifestSupportController = () => createManifestSupportController(createManifestSupportDeps());
 const normalizeToken = (value: string | undefined): string => getManifestSupportController().normalizeToken(value);
@@ -463,7 +464,7 @@ const buildMemoryContextForApp = async (appId: string): Promise<string> => await
 const buildForgerToolsContextForApp = async (appId: string): Promise<string> => await getManifestSupportController().buildForgerToolsContextForApp(appId);
 const buildForgerToolsContextForFreeChat = async (): Promise<string> => await getManifestSupportController().buildForgerToolsContextForFreeChat();
 const getBackupsManager = (): BackupsManager => getManifestSupportController().getBackupsManager();
-const createRemoteAppBackup = async (input: CreateRemoteAppBackupInput): Promise<RemoteAppBackupSummary> => await getManifestSupportController().createRemoteAppBackup(input);
+const createRemoteAppBackup = async (input: CreateRemoteAppBackupInput): Promise<CreateRemoteAppBackupResult> => await getManifestSupportController().createRemoteAppBackup(input);
 const restoreRemoteAppBackup = async (remoteBackupId: number): Promise<BasicActionResult> => await getManifestSupportController().restoreRemoteAppBackup(remoteBackupId);
 const syncAppToCloudIfEnabled = async (appId: string): Promise<void> => await getManifestSupportController().syncAppToCloudIfEnabled(appId);
 const isReservedAppSecretEnvName = (envName: string): boolean => getManifestSupportController().isReservedAppSecretEnvName(envName);
@@ -495,20 +496,19 @@ const buildAppSecretsState = async (appId: string): Promise<AppSecretsState> => 
 const formatProcessOutputForInstallLog = (value: string, secretValues: string[]): string => getManifestSupportController().formatProcessOutputForInstallLog(value, secretValues);
 
 const createAppContextSupportDeps = () => ({
-  FORGER_AGENT_CONTRACT_MARKER,
-  FORGER_AGENT_CONTRACT_MARKER_PREFIX,
-  FileLibrary,
   appLifecycleLocks,
-  buildForgerAppAgentsMarkdown,
-  buildForgerOfficialToolSkillTemplates,
-  buildGlobalForgerAgentsMarkdown,
   catalogApps,
+  fileLibraryState: {
+    get current() { return fileLibrary; },
+    set current(value) { fileLibrary = value; },
+  },
   forgerBackendClient,
   fs,
   getForgerMetadataRoot,
   getPrivateDataRoot,
   mapBackendCategory,
   path,
+  registry,
   resolveAppToolDeclarations,
   toCatalogStatus,
 });
@@ -528,22 +528,28 @@ const withAppLifecycleLock = async <T>(appId: string, operation: () => Promise<T
 const listCatalogFromBackend = async (): Promise<CatalogApp[]> => await getAppContextSupportController().listCatalogFromBackend();
 
 const createRegistryStoreDeps = () => ({
+  DEFAULT_PYTHON_VERSION,
   DEFAULT_NODE_VERSION,
   DevCatalogService,
   app,
   appendInstallLog,
-  backendBaseUrl,
   catalogApps,
   cloudSyncSettings,
+  emitRuntimeStatus,
   forgerAccount,
   fs,
   getCloudSyncSettingsPath,
   getRegistryBackupPath,
   getRegistryPath,
+  isDev,
   isVersionNewer,
   localCatalogJsonUrl,
   normalizeNodeRuntimeVersion,
+  normalizeVersionForFolder,
+  path,
   registry,
+  runningApps,
+  serializeErrorForInstallLog,
   settings,
 });
 const getRegistryStoreController = () => createRegistryStoreController(createRegistryStoreDeps());
@@ -572,9 +578,11 @@ const createCommandGitDeps = () => ({
   findRuntimeChecksumFile,
   fs,
   getBundledResourcesRoot,
+  getRuntimesRoot,
+  getTempRoot,
   normalizeVersionForFolder,
   path,
-  requiresWindowsShell,
+  resolvePlatformAlias,
   runtimePlatformTokens,
   serializeErrorForInstallLog,
   spawn,
@@ -611,11 +619,32 @@ const gitCommitAllExcept = async (cwd: string, message: string, excludedPaths: s
 const copyReleaseContentsForUpdate = async (sourceDir: string, targetDir: string, preservedPaths: string[]): Promise<void> => await getCommandGitController().copyReleaseContentsForUpdate(sourceDir, targetDir, preservedPaths);
 const syncReleaseIntoInstalledApp = async (sourceDir: string, targetDir: string, preservedPaths: string[]): Promise<void> => await getCommandGitController().syncReleaseIntoInstalledApp(sourceDir, targetDir, preservedPaths);
 
-const createRuntimeInstallDeps = () => ({ DEFAULT_NODE_VERSION, DEFAULT_PYTHON_VERSION, appendInstallLog, app, canRunCommand, clearMacQuarantine, emitInstallProgress, ensureRuntimeInstalled, existsFile, extractArchive, findRuntimeArchive, findRuntimeChecksumFile, fs, getRuntimesRoot, getSharedCopy, hashFileSha256, installBackendDependenciesWithUv, normalizeVersionForFolder, path, requiresWindowsShell, resolvePlatformAlias, runCommand, runtimeError, runtimeLocks, serializeErrorForInstallLog });
+const createRuntimeInstallDeps = () => ({ DEFAULT_NODE_VERSION, DEFAULT_PYTHON_VERSION, app, clearMacQuarantine, extractArchive, findRuntimeArchive, findRuntimeChecksumFile, fs, getBundledResourcesRoot, getRuntimesRoot, getTempRoot, hashFileSha256, installBackendDependenciesWithUv, normalizeNodeRuntimeVersion, normalizeVersionForFolder, path, resolvePlatformAlias, runCommand, runtimeLocks });
 const getRuntimeInstallController = () => createRuntimeInstallController(createRuntimeInstallDeps());
 const fileExists = async (filePath: string): Promise<boolean> => await getRuntimeInstallController().fileExists(filePath);
-const installFrontendDependenciesWithNpm = async (...args: unknown[]): Promise<void> => await (getRuntimeInstallController().installFrontendDependenciesWithNpm as (...input: unknown[]) => Promise<void>)(...args);
-const installAppDependencies = async (...args: unknown[]): Promise<void> => await (getRuntimeInstallController().installAppDependencies as (...input: unknown[]) => Promise<void>)(...args);
+const installFrontendDependenciesWithNpm = async (
+  nodePath: string,
+  npmPath: string,
+  frontendDir: string,
+  appId: string,
+): Promise<void> =>
+  await getRuntimeInstallController().installFrontendDependenciesWithNpm(nodePath, npmPath, frontendDir, appId);
+const installAppDependencies = async (
+  appId: string,
+  installDir: string,
+  nodeVersion: string,
+  pythonVersion: string,
+  publishProgress: (phase: InstallAppResult['phase'], userMessage: string) => Promise<void>,
+  messages?: ReturnType<typeof getSharedCopy>['install'],
+): Promise<void> =>
+  await getRuntimeInstallController().installAppDependencies(
+    appId,
+    installDir,
+    nodeVersion,
+    pythonVersion,
+    publishProgress,
+    messages,
+  );
 const flattenSingleTopLevelDirectory = async (targetDir: string): Promise<void> => await getRuntimeInstallController().flattenSingleTopLevelDirectory(targetDir);
 const findExistingFile = async (baseDir: string, candidates: string[]): Promise<string | null> => await getRuntimeInstallController().findExistingFile(baseDir, candidates);
 const resolveRuntimeExecutables = async (runtimeRoot: string, type: 'node' | 'python'): Promise<RuntimeBinarySet> => await getRuntimeInstallController().resolveRuntimeExecutables(runtimeRoot, type);
@@ -635,6 +664,7 @@ const createAgentAuthDeps = () => ({
   ensureRuntimeInstalled,
   extractAllowedCodexAuthUrls,
   failureDiagnostic,
+  findExistingFile,
   findManifestService,
   fs,
   getClaudeRoot,
@@ -653,6 +683,7 @@ const createAgentAuthDeps = () => ({
   shell,
   spawn,
   translateManifestEnvironment,
+  truncateForInstallLog,
 });
 const getAgentAuthController = () => createAgentAuthController(createAgentAuthDeps());
 const getRuntimePathEntries = (runtime: RuntimeBinarySet): string[] => getAgentAuthController().getRuntimePathEntries(runtime);
@@ -672,8 +703,11 @@ const connectClaudeAuth = async (): Promise<{ success: boolean; userMessage: str
 const reinstallClaude = async (): Promise<{ success: boolean; userMessage: string; status?: ClaudeAuthStatus } & FailureDiagnosticFields> => await getAgentAuthController().reinstallClaude();
 
 const createInstalledAppLifecycleDeps = () => ({
+  DEFAULT_NODE_VERSION,
+  DEFAULT_PYTHON_VERSION,
   appendInstallLog,
   app,
+  backendPythonEnvironmentLocks,
   catalogApps,
   clearMacQuarantine,
   closeAppWindow,
@@ -682,6 +716,7 @@ const createInstalledAppLifecycleDeps = () => ({
   copyReleaseContentsForUpdate,
   createRemoteAppBackup,
   emitInstallProgress,
+  emitRuntimeStatus,
   ensureAppGitRepository,
   ensureCatalogStatuses,
   ensureGitAvailable,
@@ -692,47 +727,50 @@ const createInstalledAppLifecycleDeps = () => ({
   extractArchive,
   failureDiagnostic,
   flattenSingleTopLevelDirectory,
+  forgerBackendClient,
   fs,
   getBackupsManager,
   getForgerHomeRoot,
   getForgerMetadataRoot,
   getGitHead,
   getInstallLogPath,
+  getLegacyForgerMetadataRoot,
+  getOfficialToolsService,
   getOriginalCommitSha,
   getPrivateAppsRoot,
-  getPrivateDataRoot,
   getRuntimeStatus,
+  getTempRoot,
   getUserVisibleGitStatusLines,
   gitCommitAllExcept,
-  hasValidManifestStack,
   installAppDependencies,
+  installFrontendDependenciesWithNpm,
   installWelcome,
-  isDev,
   isVersionNewer,
   listCatalogFromBackend,
+  listAppPrompts,
   normalizeInstalledAgentContext,
   normalizeNodeRuntimeVersion,
+  normalizeVersionForFolder,
   openInstalledAppUnlocked,
   path,
-  readLocalChangeSummaries,
-  readOperationSummaries,
   registry,
   removeInstalledRecord,
+  resolveInstalledAgents,
   resolveInstalledManifest,
+  resolveInstalledPromptTemplates,
   resolvePlatformAlias,
-  restoreAppUserVersionRuntime,
-  restoreRemoteAppBackup,
+  runCommand,
+  runCommandCapture,
   runningApps,
+  runtimeError,
   serializeErrorForInstallLog,
   stopInstalledApp,
   syncAppToCloudIfEnabled,
-  syncDirectory,
   syncReleaseIntoInstalledApp,
   toAppSummary,
   upsertInstalledRecord,
   validateArchiveEntries,
-  withAppLifecycleLock,
-  writeStackSkills,
+  truncateForInstallLog,
 });
 
 const getInstalledAppLifecycleController = () => createInstalledAppLifecycleController(createInstalledAppLifecycleDeps());
@@ -774,7 +812,6 @@ const createInstalledAppRuntimeDeps = () => ({
   http,
   isDev,
   isSecretsVaultUnavailableError,
-  loadDesktopWindow,
   net,
   normalizeManifestAppSecrets,
   normalizeNodeRuntimeVersion,
@@ -817,22 +854,35 @@ const restartInstalledApp = async (appId: string, options: { onProgress?: (messa
 const getRuntimeStatus = (appId: string): RuntimeStatus => getInstalledAppRuntimeController().getRuntimeStatus(appId);
 
 const createCloudSocialRelayDeps = () => ({
+  CLAUDE_CODE_VERSION,
   CloudIdentityStore,
-  IPC_CHANNELS,
-  Notification,
+  DEFAULT_NODE_VERSION,
   app,
+  appAgentTaskManager,
+  appWindows,
+  canRunCommand,
   cloudDeviceManager,
   cloudIdentityStore,
+  ensureRuntimeInstalled,
+  existsFile,
   fetchBodyFromBuffer,
   forgerAccount,
   forgerBackendClient,
+  friendChatWindows,
+  fs,
+  getClaudeRoot,
   getCloudIdentityPath,
+  getCodexAuthStatus,
+  getRuntimePathEntries,
   getRuntimeStatus,
   mainWindow,
   openInstalledAppUnlocked,
   openOrFocusFriendChatWindowForFriend,
+  path,
   registry,
-  resolveAppDbPath,
+  resolveInstalledAgents,
+  runCommand,
+  runCommandCapture,
   runningApps,
 });
 const getCloudSocialRelayController = () => createCloudSocialRelayController(createCloudSocialRelayDeps());
@@ -860,8 +910,140 @@ const showIncomingCloudMessageNotification = (event: CloudSocialEvent): void => 
 const forwardCloudSocialEvent = (event: CloudSocialEvent): void => getCloudSocialRelayController().forwardCloudSocialEvent(event);
 const handleCloudSocialEvent = async (event: unknown): Promise<void> => await getCloudSocialRelayController().handleCloudSocialEvent(event);
 
+const getMainProcessIpcDeps = () => ({
+  state: {
+    get agentToolSettings() { return agentToolSettings; },
+    set agentToolSettings(value) { agentToolSettings = value; },
+    get catalogApps() { return catalogApps; },
+    set catalogApps(value) { catalogApps = value; },
+    get cloudSyncSettings() { return cloudSyncSettings; },
+    set cloudSyncSettings(value) {
+      Object.assign(cloudSyncSettings, value);
+    },
+    get forgerAccount() { return forgerAccount; },
+    set forgerAccount(value) { forgerAccount = value; },
+    get settings() { return settings; },
+    set settings(value) { settings = value; },
+  },
+  AGENT_TOOL_PACKAGES,
+  APP_CLAUDE_MODEL_OPTIONS,
+  APP_CODEX_MODEL_OPTIONS,
+  BetterSqlite3,
+  BrowserWindow,
+  BUILT_IN_CLAUDE_EFFORT,
+  BUILT_IN_CODEX_REASONING,
+  CODEX_USAGE_DASHBOARD_URL,
+  IPC_CHANNELS,
+  agentToolSettings,
+  app,
+  appAgentConversationManager,
+  appAgentTaskManager,
+  appFolderGrantSecret,
+  appendInstallLog,
+  automationManager,
+  buildAppSecretsState,
+  buildCodexPromptWithAppContext,
+  buildForgerToolsContextForApp,
+  buildForgerToolsContextForFreeChat,
+  canUseCloudDataSync,
+  catalogApps,
+  chatOrchestrator,
+  cloudDeviceManager,
+  cloudSyncSettings,
+  connectClaudeAuth,
+  connectCodexAuth,
+  createRemoteAppBackup,
+  decryptCloudMessage,
+  decryptCloudMessages,
+  desktopErrorReporter,
+  dialog,
+  disconnectCodexAuth,
+  ensureCatalogStatuses,
+  failureDiagnostic,
+  forgerAccount,
+  forgerBackendClient,
+  forwardCloudSocialEvent,
+  fs,
+  getAppDetails,
+  getAppRuntimeStatus: getRuntimeStatus,
+  getBackupsManager,
+  getClaudeAuthStatus,
+  getCloudIdentityStore,
+  getCodexAuthStatus,
+  getDesktopUpdater,
+  getFileLibrary,
+  getMemoryStore,
+  getOfficialToolsService,
+  getPrivateDataRoot,
+  getRuntimeStatus,
+  getSecretsStore,
+  getWindowState,
+  installAppRuntime,
+  installWelcome,
+  ipcMain,
+  listAppPrompts,
+  listCatalogFromBackend,
+  mainWindow: getMainWindow(),
+  normalizeAgentProvider,
+  normalizeClaudeEffort,
+  normalizeCodexReasoningEffort,
+  normalizeManifestAgentDefaults,
+  openInstalledApp,
+  openOrFocusFriendChatWindow,
+  path,
+  publicForgerAccount,
+  registry,
+  reinstallClaude,
+  reinstallCodex,
+  renderManifestAgentPrompt,
+  resolveAppDbPath,
+  resolveAppIdForWebContents,
+  resolveInstalledAgents,
+  resolveInstalledAppSecrets,
+  resolveInstalledManifest,
+  resolveSelectedAppDisplayName,
+  restoreAppPrompt,
+  restoreAppUserVersionRuntime,
+  restoreRemoteAppBackup,
+  sanitizeRendererChatTrace,
+  sendEncryptedCloudMessage,
+  serializeErrorForInstallLog,
+  setAppAutoSyncSetting,
+  settings,
+  shell,
+  signAppFolderGrant,
+  stopInstalledApp,
+  switchForgerAccountSession,
+  toAppSummary,
+  uninstallAppRuntime,
+  updateAgentDefaults,
+  updateAgentToolApproval,
+  updateAppPrompt,
+  updateAppRuntime,
+  updateCodexDefaults,
+  validateAppPrompt,
+});
 const windowBootstrapState = { get mainWindow() { return mainWindow; }, set mainWindow(value) { mainWindow = value; }, get pendingDeepLink() { return pendingDeepLink; }, set pendingDeepLink(value) { pendingDeepLink = value; } };
-const createWindowBootstrapDeps = () => ({ BrowserWindow, IPC_CHANNELS, app, desktopErrorReporter, focusDeepLinkWindow, getWindowState, ipcMain, isDev, loadDesktopWindow, path, registerAgentIpcHandlers, registerMainIpcHandlers, registerWindowIpcHandlers, registerWindowStateEvents, state: windowBootstrapState, useCustomWindowFrame });
+const createWindowBootstrapDeps = () => ({
+  BrowserWindow,
+  IPC_CHANNELS,
+  app,
+  desktopErrorReporter,
+  focusDeepLinkWindow,
+  getMainProcessIpcDeps,
+  getMainWindow,
+  getWindowState,
+  ipcMain,
+  isDev,
+  loadDesktopWindow,
+  path,
+  registerAgentIpcHandlers: (deps: unknown) => registerAgentIpcHandlers(deps as Parameters<typeof registerAgentIpcHandlers>[0]),
+  registerMainIpcHandlers: (deps: unknown) => registerMainIpcHandlers(deps as Parameters<typeof registerMainIpcHandlers>[0]),
+  registerWindowIpcHandlers,
+  registerWindowStateEvents,
+  state: windowBootstrapState,
+  useCustomWindowFrame,
+});
 const getWindowBootstrapController = () => createWindowBootstrapController(createWindowBootstrapDeps());
 const createWindow = async (): Promise<void> => await getWindowBootstrapController().createWindow();
 const registerIpcHandlers = (): void => getWindowBootstrapController().registerIpcHandlers();
@@ -963,6 +1145,7 @@ registerMainLifecycle({
   getPrivateDataRoot,
   getRuntimesRoot,
   getRuntimePathEntries,
+  getRuntimeStatus,
   getTempRoot,
   getVenvExecutables,
   handleCloudRelayRequest,

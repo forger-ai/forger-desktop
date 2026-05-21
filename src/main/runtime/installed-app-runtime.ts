@@ -1,9 +1,83 @@
-// @ts-nocheck
+import { BrowserWindow } from 'electron';
+import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import type fs from 'node:fs/promises';
+import type http from 'node:http';
+import type { IncomingMessage, ServerResponse } from 'node:http';
+import type net from 'node:net';
+import type path from 'node:path';
 
-type RuntimeDeps = Record<string, any>;
+import type {
+  AppManifest,
+  AppManifestService,
+  AppRegistry,
+  RuntimeBinarySet,
+  RunningAppProcess,
+} from '../core/main-process-types';
+import type { ForgerDeepLink } from '../deep-links';
+import type {
+  AppSecretDeclaration,
+  AppStatus,
+  CloudFriendship,
+  CloudFriendUser,
+  FriendChatWindowOpenResult,
+  OpenAppResult,
+  RuntimeStatus,
+  StopAppResult,
+} from '../../shared/types';
+
+interface RuntimeDeps {
+  FORGER_PROTOCOL: string;
+  app: Electron.App;
+  appAgentConversationManager: { rejectPendingPermissionsForApp: (appId: string) => void } | null;
+  appAgentTaskManager: { rejectPendingPermissionsForApp: (appId: string) => void } | null;
+  appFolderGrantSecret: string;
+  appWindows: Map<string, BrowserWindow>;
+  appendInstallLog: (event: string, payload: Record<string, unknown>) => Promise<void>;
+  desktopRuntimeBridge: { environmentForApp: (appId: string) => Record<string, string> } | null;
+  dispatchDeepLink: (link: ForgerDeepLink) => void;
+  emitRuntimeStatus: (payload: RuntimeStatus) => void;
+  ensureBackendPythonEnvironment: (pythonPath: string, backendDir: string, appId: string, reason: string) => Promise<void>;
+  ensureCatalogStatuses: () => void;
+  ensureRuntimeInstalled: (type: 'node' | 'python', version: string) => Promise<RuntimeBinarySet>;
+  failureDiagnostic: (error: unknown, fallbackCode: string) => { technicalCode?: string; details?: Record<string, unknown>; sensitiveDetails?: Record<string, unknown> };
+  formatProcessOutputForInstallLog: (text: string, secrets: string[]) => string;
+  friendChatWindows: Map<number, BrowserWindow>;
+  fs: typeof fs;
+  getInstallLogPath: () => string;
+  getManifestAppSecretsValidationError: (manifest: AppManifest | null) => string | null;
+  getSecretsStore: () => {
+    resolveAppEnv: (appId: string, declarations: AppSecretDeclaration[]) => Promise<{
+      env: Record<string, string>;
+      missingRequired: AppSecretDeclaration[];
+      secretValues: string[];
+    }>;
+  };
+  getVenvExecutables: (backendDir: string) => { python: string; pip: string };
+  http: typeof http;
+  isDev: boolean;
+  isSecretsVaultUnavailableError: (error: unknown) => boolean;
+  net: typeof net;
+  normalizeManifestAppSecrets: (manifest: AppManifest | null) => AppSecretDeclaration[];
+  normalizeNodeRuntimeVersion: (value?: string | null) => string;
+  parseForgerUrl: (url: string) => ForgerDeepLink | null;
+  path: typeof path;
+  registry: AppRegistry;
+  requiresWindowsShell: (command: string) => boolean;
+  resolveInstalledManifest: (installDir: string) => Promise<AppManifest | null>;
+  runCommand: (command: string, args: string[], options: Record<string, unknown> & { cwd: string }) => Promise<void>;
+  runningApps: Map<string, RunningAppProcess>;
+  serializeErrorForInstallLog: (error: unknown) => Record<string, unknown>;
+  shell: Electron.Shell;
+  stoppingApps: Set<string>;
+  syncAppToCloudIfEnabled: (appId: string) => Promise<void>;
+  truncateForInstallLog: (value: string) => string;
+  upsertInstalledRecord: (record: AppRegistry['apps'][string]) => Promise<void>;
+  wait: (milliseconds: number) => Promise<void>;
+  withAppLifecycleLock: <T>(appId: string, operation: () => Promise<T>) => Promise<T>;
+}
 
 export const createInstalledAppRuntimeController = (deps: RuntimeDeps) => {
-  const { net, http, runCommand, app, registry, upsertInstalledRecord, ensureCatalogStatuses, appWindows, appAgentTaskManager, appAgentConversationManager, stoppingApps, runningApps, path, isDev, FORGER_PROTOCOL, parseForgerUrl, dispatchDeepLink, shell, friendChatWindows, loadDesktopWindow, wait, resolveInstalledManifest, getManifestAppSecretsValidationError, normalizeManifestAppSecrets, getSecretsStore, isSecretsVaultUnavailableError, normalizeNodeRuntimeVersion, appendInstallLog, getInstallLogPath, ensureRuntimeInstalled, ensureBackendPythonEnvironment, getVenvExecutables, requiresWindowsShell, desktopRuntimeBridge, appFolderGrantSecret, truncateForInstallLog, formatProcessOutputForInstallLog, serializeErrorForInstallLog, failureDiagnostic, emitRuntimeStatus, syncAppToCloudIfEnabled, withAppLifecycleLock, fs } = deps;
+  const { net, http, runCommand, app, registry, upsertInstalledRecord, ensureCatalogStatuses, appWindows, appAgentTaskManager, appAgentConversationManager, stoppingApps, runningApps, path, isDev, FORGER_PROTOCOL, parseForgerUrl, dispatchDeepLink, shell, friendChatWindows, wait, resolveInstalledManifest, getManifestAppSecretsValidationError, normalizeManifestAppSecrets, getSecretsStore, isSecretsVaultUnavailableError, normalizeNodeRuntimeVersion, appendInstallLog, getInstallLogPath, ensureRuntimeInstalled, ensureBackendPythonEnvironment, getVenvExecutables, requiresWindowsShell, desktopRuntimeBridge, appFolderGrantSecret, truncateForInstallLog, formatProcessOutputForInstallLog, serializeErrorForInstallLog, failureDiagnostic, emitRuntimeStatus, syncAppToCloudIfEnabled, withAppLifecycleLock, fs } = deps;
 const waitForHttpOk = async (url: string, timeoutMs: number): Promise<void> => {
   const started = Date.now();
 

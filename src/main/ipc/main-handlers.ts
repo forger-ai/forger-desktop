@@ -1,10 +1,207 @@
-// @ts-nocheck
-import { registerWindowIpcHandlers } from './window';
+import type fs from 'node:fs/promises';
+import type path from 'node:path';
+import type * as Electron from 'electron';
+import { BrowserWindow, type IpcMain } from 'electron';
+import { AGENT_TOOL_PACKAGES } from '../core/agent-tool-packages';
+import { buildCodexPromptForFreeChat } from '../prompts/user-message';
+import type { AppAgentConversationManager } from '../app-agent-conversation-manager';
+import type { AppAgentTaskManager } from '../app-agent-task-manager';
+import type { AutomationManager } from '../automation-manager';
+import type { BackupsManager } from '../backups-manager';
+import type { ChatOrchestrator } from '../chat/orchestrator';
+import type { CloudDeviceManager } from '../cloud-device-manager';
+import type { CloudIdentityStore } from '../cloud-identity-store';
+import type { DesktopUpdater } from '../desktop-updater';
+import type { DesktopErrorReporter } from '../error-reporting';
+import type { FileLibrary } from '../file-library';
+import type { ForgerBackendClient } from '../forger-backend-client';
+import type { StoredForgerAccount } from '../forger-account-store';
+import type { MemoryStore } from '../memory-store';
+import type { OfficialToolsService } from '../official-tools-service';
+import type { SecretsStore } from '../secrets-store';
+import type { IPC_CHANNELS as IpcChannels } from '../../shared/ipc';
+import type {
+  AgentDefaults,
+  AgentToolPackageDefinition,
+  AgentToolSettings,
+  AppAgent,
+  AppExternalFolderSelection,
+  AppPromptMutationResult,
+  AppPromptRestoreInput,
+  AppPromptReviewInput,
+  AppPromptReviewItem,
+  AppPromptValidationResult,
+  AppSecretDeclaration,
+  AppSecretsState,
+  AppToolsInstallGate,
+  BasicActionResult,
+  CallOfficialToolInput,
+  CatalogApp,
+  ChatApplyRunInput,
+  ChatApprovePermissionInput,
+  ChatCancelRunInput,
+  ChatGetRunInput,
+  ChatStartRunInput,
+  ChatUndoInput,
+  CloudAppMessagePermissionDecision,
+  CloudFriendship,
+  CloudMessage,
+  CloudSendMessageInput,
+  CloudSyncSettings,
+  ConfigureOfficialToolInput,
+  ConnectAppSecretInput,
+  CreateRemoteAppBackupInput,
+  CreateRemoteAppBackupResult,
+  CreateUserSecretInput,
+  DeleteUserSecretInput,
+  DesktopErrorReportPreview,
+  DisconnectAppSecretInput,
+  FilesCreateCategoryInput,
+  FilesDeleteCategoryInput,
+  FilesDeleteInput,
+  FilesDiscardStagedForChatInput,
+  FilesImportInput,
+  FilesListInput,
+  FilesMoveInput,
+  FilesRenameCategoryInput,
+  FilesRenameInput,
+  FilesStageForChatInput,
+  ForgerAccountLoginInput,
+  ForgerAccountProfileInput,
+  ForgerAccountRegisterInput,
+  ForgerAccountSession,
+  FriendChatWindowOpenResult,
+  InstallAppResult,
+  InstallWelcomeResult,
+  MemoryCreateInput,
+  MemoryListInput,
+  MemoryUpdateInput,
+  OpenAppResult,
+  RendererChatTraceEvent,
+  RuntimeStatus,
+  SetAppToolGrantInput,
+  Settings,
+  SharedFileRef,
+  StopAppResult,
+  SubmitAppRatingInput,
+  SubmitProductFeedbackInput,
+  SubmitUsageEventInput,
+  UpdateAgentDefaultsInput,
+  UpdateAgentToolApprovalInput,
+  UpdateCodexDefaultsInput,
+  UpdateUserSecretInput,
+} from '../../shared/types';
+import type { AppManifest, AppRegistry, InstalledAppRecord } from '../core/main-process-types';
 
-type MainProcessIpcDeps = Record<string, any>;
+const RENDERER_CHAT_TRACE_EVENTS = new Set<RendererChatTraceEvent['event']>([
+  'chat_run_event_received',
+  'chat_run_message_append_attempt',
+  'chat_run_message_appended',
+  'chat_new_conversation_clicked',
+]);
+
+interface MainIpcState {
+  agentToolSettings: AgentToolSettings;
+  catalogApps: CatalogApp[];
+  cloudSyncSettings: CloudSyncSettings;
+  forgerAccount: StoredForgerAccount;
+  settings: Settings;
+}
+
+interface MainProcessIpcDeps {
+  state: MainIpcState;
+  APP_CLAUDE_MODEL_OPTIONS: unknown[];
+  APP_CODEX_MODEL_OPTIONS: unknown[];
+  BetterSqlite3: typeof import('better-sqlite3') | null;
+  BrowserWindow: typeof BrowserWindow;
+  CODEX_USAGE_DASHBOARD_URL: string;
+  IPC_CHANNELS: typeof IpcChannels;
+  app: Electron.App;
+  appAgentConversationManager: AppAgentConversationManager | null;
+  appAgentTaskManager: AppAgentTaskManager | null;
+  appendInstallLog: (event: string, payload?: Record<string, unknown>) => Promise<void>;
+  automationManager: AutomationManager | null;
+  buildAppSecretsState: (appId: string) => Promise<AppSecretsState>;
+  buildCodexPromptWithAppContext: (params: Parameters<typeof import('../prompts/user-message').buildCodexPromptWithAppContext>[0]) => string;
+  buildForgerToolsContextForApp: (appId: string) => Promise<string>;
+  buildForgerToolsContextForFreeChat: () => Promise<string>;
+  canUseCloudDataSync: () => boolean;
+  chatOrchestrator: ChatOrchestrator | null;
+  cloudDeviceManager: CloudDeviceManager | null;
+  connectClaudeAuth: () => Promise<unknown>;
+  connectCodexAuth: () => Promise<unknown>;
+  createRemoteAppBackup: (input: CreateRemoteAppBackupInput) => Promise<CreateRemoteAppBackupResult>;
+  decryptCloudMessage: (message: CloudMessage) => Promise<CloudMessage>;
+  decryptCloudMessages: (messages: CloudMessage[]) => Promise<CloudMessage[]>;
+  desktopErrorReporter: DesktopErrorReporter | null;
+  dialog: typeof Electron.dialog;
+  disconnectCodexAuth: () => Promise<unknown>;
+  ensureCatalogStatuses: () => void;
+  failureDiagnostic: (error: unknown, fallbackCode: string) => Record<string, unknown>;
+  forgerBackendClient: ForgerBackendClient | null;
+  forwardCloudSocialEvent: (event: { type: 'friendship_changed'; friendship: CloudFriendship }) => void;
+  fs: typeof fs;
+  getAppDetails: (appId: string) => Promise<unknown>;
+  getBackupsManager: () => BackupsManager;
+  getClaudeAuthStatus: () => Promise<unknown>;
+  getCloudIdentityStore: () => CloudIdentityStore;
+  getCodexAuthStatus: () => Promise<{ authenticated: boolean }>;
+  getDesktopUpdater: () => DesktopUpdater;
+  getFileLibrary: () => FileLibrary;
+  getMemoryStore: () => MemoryStore;
+  getOfficialToolsService: () => OfficialToolsService;
+  getPrivateDataRoot: () => string;
+  getRuntimeStatus: (appId: string) => RuntimeStatus;
+  getSecretsStore: () => SecretsStore;
+  installAppRuntime: (appId: string, locale?: string) => Promise<InstallAppResult>;
+  installWelcome: (appId: string, userLanguage?: string) => Promise<InstallWelcomeResult>;
+  ipcMain: IpcMain;
+  listAppPrompts: (appId: string) => Promise<AppPromptReviewItem[]>;
+  listCatalogFromBackend: () => Promise<CatalogApp[]>;
+  mainWindow: Electron.BrowserWindow | null;
+  normalizeManifestAgentDefaults: (manifest: AppManifest | null) => AgentDefaults;
+  openInstalledApp: (appId: string, locale?: string) => Promise<OpenAppResult>;
+  openOrFocusFriendChatWindow: (friendship: CloudFriendship) => Promise<FriendChatWindowOpenResult>;
+  path: typeof path;
+  publicForgerAccount: (account: StoredForgerAccount) => ForgerAccountSession;
+  registry: AppRegistry;
+  reinstallClaude: () => Promise<unknown>;
+  reinstallCodex: () => Promise<unknown>;
+  resolveAppDbPath: (appId: string) => Promise<string | null>;
+  resolveAppIdForWebContents: (webContentsId: number) => string | null;
+  resolveInstalledAgents: (appId: string) => Promise<AppAgent[]>;
+  resolveInstalledAppSecrets: (appId: string) => Promise<AppSecretDeclaration[]>;
+  resolveInstalledManifest: (installDir: string) => Promise<AppManifest | null>;
+  resolveSelectedAppDisplayName: (appId: string) => string;
+  restoreAppPrompt: (input: AppPromptRestoreInput) => Promise<AppPromptMutationResult>;
+  restoreAppUserVersionRuntime: (appId: string) => Promise<BasicActionResult>;
+  restoreRemoteAppBackup: (remoteBackupId: number) => Promise<BasicActionResult>;
+  sanitizeRendererChatTrace: (input: RendererChatTraceEvent) => Record<string, unknown>;
+  sendEncryptedCloudMessage: (input: CloudSendMessageInput) => Promise<CloudMessage>;
+  serializeErrorForInstallLog: (error: unknown) => Record<string, unknown>;
+  setAppAutoSyncSetting: (appId: string, autoSync: boolean) => Promise<CloudSyncSettings>;
+  shell: typeof Electron.shell;
+  signAppFolderGrant: (appId: string, folderPath: string) => AppExternalFolderSelection;
+  stopInstalledApp: (appId: string) => Promise<StopAppResult>;
+  switchForgerAccountSession: (account: StoredForgerAccount, result?: { userMessage?: string; technicalCode?: string }) => Promise<ForgerAccountSession>;
+  toAppSummary: (record: InstalledAppRecord) => unknown;
+  uninstallAppRuntime: (appId: string) => Promise<BasicActionResult>;
+  updateAgentDefaults: (input: UpdateAgentDefaultsInput) => Promise<Settings>;
+  updateAgentToolApproval: (input: UpdateAgentToolApprovalInput) => Promise<Settings>;
+  updateAppPrompt: (input: AppPromptReviewInput) => Promise<AppPromptMutationResult>;
+  updateAppRuntime: (appId: string, locale?: string) => Promise<InstallAppResult>;
+  updateCodexDefaults: (input: UpdateCodexDefaultsInput) => Promise<Settings>;
+  validateAppPrompt: (input: AppPromptReviewInput) => Promise<AppPromptValidationResult>;
+}
 
 export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
-  const { state, APP_CLAUDE_MODEL_OPTIONS, APP_CODEX_MODEL_OPTIONS, AGENT_TOOL_PACKAGES, BetterSqlite3, BrowserWindow, CODEX_USAGE_DASHBOARD_URL, IPC_CHANNELS, app, appAgentConversationManager, appAgentTaskManager, appFolderGrantSecret, appendInstallLog, automationManager, buildAppSecretsState, buildCodexPromptWithAppContext, buildForgerToolsContextForApp, canUseCloudDataSync, chatOrchestrator, cloudDeviceManager, connectClaudeAuth, connectCodexAuth, createRemoteAppBackup, decryptCloudMessage, decryptCloudMessages, desktopErrorReporter, dialog, disconnectCodexAuth, ensureCatalogStatuses, failureDiagnostic, forgerBackendClient, fs, getAppDetails, getBackupsManager, getClaudeAuthStatus, getCloudIdentityStore, getCodexAuthStatus, getDesktopUpdater, getFileLibrary, getMemoryStore, getOfficialToolsService, getPrivateDataRoot, getRuntimeStatus, getSecretsStore, installAppRuntime, installWelcome, ipcMain, listAppPrompts, listCatalogFromBackend, normalizeManifestAgentDefaults, openInstalledApp, openOrFocusFriendChatWindow, path, publicForgerAccount, registry, reinstallClaude, reinstallCodex, resolveAppDbPath, resolveAppIdForWebContents, resolveInstalledAgents, resolveInstalledAppSecrets, resolveInstalledManifest, resolveSelectedAppDisplayName, restoreAppPrompt, restoreAppUserVersionRuntime, restoreRemoteAppBackup, sanitizeRendererChatTrace, sendEncryptedCloudMessage, serializeErrorForInstallLog, setAppAutoSyncSetting, shell, signAppFolderGrant, stopInstalledApp, switchForgerAccountSession, toAppSummary, uninstallAppRuntime, updateAgentDefaults, updateAgentToolApproval, updateAppPrompt, updateAppRuntime, updateCodexDefaults, validateAppPrompt } = deps;
+  const { state, APP_CLAUDE_MODEL_OPTIONS, APP_CODEX_MODEL_OPTIONS, BetterSqlite3, BrowserWindow, CODEX_USAGE_DASHBOARD_URL, IPC_CHANNELS, app, appendInstallLog, buildAppSecretsState, buildCodexPromptWithAppContext, buildForgerToolsContextForApp, buildForgerToolsContextForFreeChat, canUseCloudDataSync, chatOrchestrator, cloudDeviceManager, connectClaudeAuth, connectCodexAuth, createRemoteAppBackup, decryptCloudMessage, decryptCloudMessages, dialog, disconnectCodexAuth, ensureCatalogStatuses, failureDiagnostic, forgerBackendClient, forwardCloudSocialEvent, fs, getAppDetails, getBackupsManager, getClaudeAuthStatus, getCloudIdentityStore, getCodexAuthStatus, getDesktopUpdater, getFileLibrary, getMemoryStore, getOfficialToolsService, getPrivateDataRoot, getRuntimeStatus, getSecretsStore, installAppRuntime, installWelcome, ipcMain, listAppPrompts, listCatalogFromBackend, mainWindow, normalizeManifestAgentDefaults, openInstalledApp, openOrFocusFriendChatWindow, path, publicForgerAccount, registry, reinstallClaude, reinstallCodex, resolveAppIdForWebContents, resolveInstalledAgents, resolveInstalledAppSecrets, resolveInstalledManifest, resolveSelectedAppDisplayName, restoreAppPrompt, restoreAppUserVersionRuntime, restoreRemoteAppBackup, sanitizeRendererChatTrace, sendEncryptedCloudMessage, serializeErrorForInstallLog, setAppAutoSyncSetting, shell, signAppFolderGrant, stopInstalledApp, switchForgerAccountSession, toAppSummary, uninstallAppRuntime, updateAgentDefaults, updateAgentToolApproval, updateAppPrompt, updateAppRuntime, updateCodexDefaults, validateAppPrompt } = deps;
+  const ensurePathInside = (rootPath: string, targetPath: string): boolean => {
+    const relative = path.relative(rootPath, targetPath);
+    const normalizedRelative = process.platform === 'win32' ? relative.toLowerCase() : relative;
+    return normalizedRelative === '' || (!normalizedRelative.startsWith('..') && !path.isAbsolute(relative));
+  };
+  const toPosixRelativePath = (value: string): string => value.replace(/\\/g, '/');
   ipcMain.handle(IPC_CHANNELS.listInstalledApps, async () => {
     return Object.values(registry.apps).map(toAppSummary);
   });
@@ -258,16 +455,16 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
     return await updateAgentDefaults(input);
   });
   ipcMain.handle(IPC_CHANNELS.memoryList, async (_event, input: MemoryListInput = {}) => {
-    return await getMemoryStore().list(input, { caller: 'state.settings' });
+    return await getMemoryStore().list(input, { caller: 'settings' });
   });
   ipcMain.handle(IPC_CHANNELS.memoryCreate, async (_event, input: MemoryCreateInput) => {
-    return await getMemoryStore().create({ ...input, source: 'state.settings' }, { caller: 'state.settings' });
+    return await getMemoryStore().create({ ...input, source: 'settings' }, { caller: 'settings' });
   });
   ipcMain.handle(IPC_CHANNELS.memoryUpdate, async (_event, input: MemoryUpdateInput) => {
-    return await getMemoryStore().update(input, { caller: 'state.settings' });
+    return await getMemoryStore().update(input, { caller: 'settings' });
   });
   ipcMain.handle(IPC_CHANNELS.memoryDelete, async (_event, id: string) => {
-    return await getMemoryStore().delete(id, { caller: 'state.settings' });
+    return await getMemoryStore().delete(id, { caller: 'settings' });
   });
   ipcMain.handle(IPC_CHANNELS.getDesktopUpdateState, async () => getDesktopUpdater().getState());
   ipcMain.handle(IPC_CHANNELS.checkDesktopUpdates, async () => await getDesktopUpdater().check());

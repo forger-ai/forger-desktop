@@ -1,9 +1,64 @@
-// @ts-nocheck
+import type { spawn as spawnFn } from 'node:child_process';
+import type fs from 'node:fs/promises';
+import type path from 'node:path';
 
-type AgentAuthDeps = Record<string, any>;
+import type {
+  AppManifest,
+  AppManifestService,
+  AppRegistry,
+  InstalledAppRecord,
+  RuntimeBinarySet,
+} from '../core/main-process-types';
+import type {
+  ClaudeAuthStatus,
+  CodexAuthStatus,
+  FailureDiagnosticFields,
+} from '../../shared/types';
+
+interface CommandCaptureResult {
+  code?: number | null;
+  stdout: string;
+  stderr: string;
+}
+
+interface AgentAuthDeps {
+  CLAUDE_CODE_VERSION: string;
+  CODEX_CLI_VERSION: string;
+  DEFAULT_NODE_VERSION: string;
+  appendInstallLog: (event: string, payload?: Record<string, unknown>) => Promise<void>;
+  app: Electron.App;
+  buildCodexAuthEnvironment: (input: { codexHome: string; codexCliPath: string; nodePathEntries: string[] }) => NodeJS.ProcessEnv;
+  buildMacTerminalLoginScript: (input: { providerName: string; logPath: string; command: string[] }) => string;
+  buildMacTerminalScriptLaunchCommand: (scriptPath: string) => string;
+  canRunCommand: (command: string, args: string[]) => Promise<boolean>;
+  classifyCodexAuthOutput: (stdout: string, stderr: string) => string | undefined;
+  ensureRuntimeInstalled: (type: 'node' | 'python', version: string) => Promise<RuntimeBinarySet>;
+  extractAllowedCodexAuthUrls: (text: string) => string[];
+  failureDiagnostic: (error: unknown, fallbackCode: string) => FailureDiagnosticFields;
+  findExistingFile: (baseDir: string, candidates: string[]) => Promise<string | null>;
+  findManifestService: (manifest: AppManifest | null, name: string, fallbackContext: string) => AppManifestService | null;
+  fs: typeof fs;
+  getClaudeRoot: () => string;
+  getCodexHome: () => string;
+  getCodexRoot: () => string;
+  getForgerMetadataRoot: () => string;
+  getLogsRoot: () => string;
+  getTempRoot: () => string;
+  markProviderConnected?: (provider: 'codex' | 'claude') => Promise<void> | void;
+  path: typeof path;
+  registry: AppRegistry;
+  resolveInstalledManifest: (installDir: string) => Promise<AppManifest | null>;
+  runCommand: (command: string, args: string[], options: Record<string, unknown> & { cwd: string }) => Promise<void>;
+  runCommandCapture: (command: string, args: string[], options: Record<string, unknown> & { cwd: string }) => Promise<CommandCaptureResult>;
+  serializeErrorForInstallLog: (error: unknown) => { message?: unknown } & Record<string, unknown>;
+  shell: Electron.Shell;
+  spawn: typeof spawnFn;
+  translateManifestEnvironment: (environment: Record<string, string>, backendDir: string) => Record<string, string>;
+  truncateForInstallLog: (value: string) => string;
+}
 
 export const createAgentAuthController = (deps: AgentAuthDeps) => {
-  const { path, fs, spawn, process, app, getCodexHome, getForgerMetadataRoot, registry, resolveInstalledManifest, findManifestService, translateManifestEnvironment, ensureRuntimeInstalled, DEFAULT_NODE_VERSION, getCodexRoot, CODEX_CLI_VERSION, runCommand, runCommandCapture, buildManagedCodexAuthEnvironment, buildCodexAuthEnvironment, classifyCodexAuthOutput, extractAllowedCodexAuthUrls, appendInstallLog, getLogsRoot, getTempRoot, serializeErrorForInstallLog, shell, buildMacTerminalLoginScript, buildMacTerminalScriptLaunchCommand, failureDiagnostic, CLAUDE_CODE_VERSION, getClaudeRoot, installErrorMessage, canRunCommand, markProviderConnected } = deps;
+  const { path, fs, spawn, app, getCodexHome, getForgerMetadataRoot, registry, resolveInstalledManifest, findManifestService, translateManifestEnvironment, ensureRuntimeInstalled, DEFAULT_NODE_VERSION, getCodexRoot, CODEX_CLI_VERSION, runCommand, runCommandCapture, buildCodexAuthEnvironment, classifyCodexAuthOutput, extractAllowedCodexAuthUrls, appendInstallLog, getLogsRoot, getTempRoot, serializeErrorForInstallLog, shell, buildMacTerminalLoginScript, buildMacTerminalScriptLaunchCommand, failureDiagnostic, CLAUDE_CODE_VERSION, getClaudeRoot, canRunCommand, markProviderConnected, findExistingFile, truncateForInstallLog } = deps;
 const escapeWindowsBatchValue = (value: string): string => value.replace(/%/g, '%%').replace(/"/g, '""');
 const quotePowerShellSingle = (value: string): string => `'${value.replace(/'/g, "''")}'`;
 
@@ -509,6 +564,99 @@ const reinstallCodex = async (): Promise<{ success: boolean; userMessage: string
       status: await getCodexAuthStatus().catch(() => undefined),
     };
   }
+};
+
+const resolveManagedClaudeCliPath = async (baseDir: string): Promise<string | null> => {
+  const candidates = process.platform === 'win32'
+    ? [
+        path.join(baseDir, 'node_modules', '.bin', 'claude.cmd'),
+        path.join(baseDir, 'node_modules', '.bin', 'claude'),
+      ]
+    : [
+        path.join(baseDir, 'node_modules', '.bin', 'claude'),
+        path.join(baseDir, 'node_modules', '.bin', 'claude.cmd'),
+      ];
+  for (const candidate of candidates) {
+    if ((await existsDirectory(candidate.replace(/[\\/][^\\/]+$/, ''))) && (await canRunCommand(candidate, ['--version']))) {
+      return candidate;
+    }
+  }
+  return null;
+};
+
+const resolveSystemClaudeCliPath = async (): Promise<string | null> => {
+  try {
+    const result = await runCommandCapture(
+      process.platform === 'win32' ? 'where' : 'which',
+      ['claude'],
+      { cwd: app.getPath('userData'), timeoutMs: 10_000 },
+    );
+    if (result.code !== 0) {
+      return null;
+    }
+    const candidate = result.stdout.split(/\r?\n/).map((line) => line.trim()).find(Boolean);
+    if (!candidate) {
+      return null;
+    }
+    return await canRunCommand(candidate, ['--version']) ? candidate : null;
+  } catch {
+    return null;
+  }
+};
+
+const resolveClaudeCli = async (): Promise<{ path: string; source: 'managed' | 'system' } | null> => {
+  const managed = await resolveManagedClaudeCliPath(getClaudeRoot());
+  if (managed) {
+    return { path: managed, source: 'managed' };
+  }
+  const system = await resolveSystemClaudeCliPath();
+  return system ? { path: system, source: 'system' } : null;
+};
+
+const ensureClaudeCliInstalled = async (): Promise<string> => {
+  const existing = await resolveManagedClaudeCliPath(getClaudeRoot());
+  if (existing) {
+    return existing;
+  }
+  const claudeRoot = getClaudeRoot();
+  await fs.mkdir(claudeRoot, { recursive: true });
+  const packageJsonPath = path.join(claudeRoot, 'package.json');
+  try {
+    await fs.access(packageJsonPath);
+  } catch {
+    await fs.writeFile(
+      packageJsonPath,
+      JSON.stringify({
+        name: 'forger-claude-code-runtime',
+        private: true,
+        description: 'Forger-managed Claude Code runtime',
+      }, null, 2),
+      'utf8',
+    );
+  }
+  const nodeRuntime = await ensureRuntimeInstalled('node', DEFAULT_NODE_VERSION);
+  if (!nodeRuntime.npm) {
+    throw new Error('runtime_npm_executable_not_found');
+  }
+  await runCommand(
+    nodeRuntime.npm,
+    ['install', '--no-audit', '--no-fund', `@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}`],
+    {
+      cwd: claudeRoot,
+      env: {
+        PATH: [...getRuntimePathEntries(nodeRuntime), process.env.PATH ?? ''].filter(Boolean).join(path.delimiter),
+      },
+      log: {
+        phase: 'claude_auth',
+        label: 'install claude code cli',
+      },
+    },
+  );
+  const installed = await resolveManagedClaudeCliPath(claudeRoot);
+  if (!installed) {
+    throw new Error('claude_cli_install_failed');
+  }
+  return installed;
 };
 
 const getClaudeAuthStatus = async (): Promise<ClaudeAuthStatus> => {

@@ -1,9 +1,130 @@
-// @ts-nocheck
+import { createHash } from 'node:crypto';
+import os from 'node:os';
+import type fs from 'node:fs/promises';
+import type path from 'node:path';
 
-type InstalledAppLifecycleDeps = Record<string, any>;
+import { getSharedCopy, installProgressByPhase } from '../../shared/i18n';
+import { buildFailureDiagnostic } from '../../shared/error-diagnostics';
+import type { ForgerBackendClient } from '../forger-backend-client';
+import type { OfficialToolsService } from '../official-tools-service';
+import type { BackupsManager } from '../backups-manager';
+import type {
+  AppManifest,
+  AppRegistry,
+  InstalledAppRecord,
+  RuntimeBinarySet,
+  RunningAppProcess,
+} from '../core/main-process-types';
+import type {
+  AppDetails,
+  AppAgent,
+  AppLocalChangeSummary,
+  AppOperationSummary,
+  AppPromptReviewItem,
+  AppPromptTemplate,
+  AppStatus,
+  AppSummary,
+  BasicActionResult,
+  CatalogApp,
+  InstallAppResult,
+  OpenAppResult,
+  RuntimeStatus,
+  StopAppResult,
+} from '../../shared/types';
+
+interface CommandCaptureResult {
+  code?: number | null;
+  stdout: string;
+  stderr: string;
+}
+
+interface InstallWelcomeResult {
+  success: boolean;
+  appId: string;
+  message?: string;
+  usedCodex: boolean;
+  userMessage: string;
+  technicalCode?: string;
+  details?: Record<string, unknown>;
+  sensitiveDetails?: Record<string, unknown>;
+}
+
+interface InstalledAppLifecycleDeps {
+  DEFAULT_NODE_VERSION: string;
+  DEFAULT_PYTHON_VERSION: string;
+  appendInstallLog: (event: string, payload?: Record<string, unknown>) => Promise<void>;
+  app: Electron.App;
+  backendPythonEnvironmentLocks: Map<string, Promise<void>>;
+  catalogApps: CatalogApp[];
+  clearMacQuarantine: (targetPath: string) => Promise<void>;
+  closeAppWindow: (appId: string) => void;
+  collectPersistentInstallPaths: (manifest: AppManifest | null) => string[];
+  copyReleaseContentsForUpdate: (sourceDir: string, targetDir: string, preservedPaths: string[]) => Promise<void>;
+  emitInstallProgress: (appId: string, payload: InstallAppResult) => void;
+  emitRuntimeStatus: (payload: RuntimeStatus) => void;
+  ensureAppGitRepository: (cwd: string) => Promise<void>;
+  ensureCatalogStatuses: () => void;
+  ensureGlobalAgentsContext: (forgerHomeRoot: string) => Promise<void>;
+  ensureRuntimeInstalled: (type: 'node' | 'python', version: string) => Promise<RuntimeBinarySet>;
+  ensureUserModifiedBranch: (cwd: string) => Promise<void>;
+  extractArchive: (archivePath: string, destination: string) => Promise<void>;
+  failureDiagnostic: (error: unknown, fallbackCode: string) => ReturnType<typeof buildFailureDiagnostic>;
+  flattenSingleTopLevelDirectory: (targetDir: string) => Promise<void>;
+  forgerBackendClient: ForgerBackendClient | null;
+  fs: typeof fs;
+  getBackupsManager: () => BackupsManager;
+  getForgerHomeRoot: () => string;
+  getForgerMetadataRoot: () => string;
+  getGitHead: (cwd: string) => Promise<string | null>;
+  getInstallLogPath: () => string;
+  getLegacyForgerMetadataRoot: () => string;
+  getOfficialToolsService: () => OfficialToolsService;
+  getOriginalCommitSha: (cwd: string) => Promise<string | undefined>;
+  getPrivateAppsRoot: () => string;
+  getRuntimeStatus: (appId: string) => RuntimeStatus;
+  getTempRoot: () => string;
+  getUserVisibleGitStatusLines: (cwd: string) => Promise<string[]>;
+  gitCommitAllExcept: (cwd: string, message: string, excludedPaths: string[]) => Promise<string>;
+  installAppDependencies: (
+    appId: string,
+    installDir: string,
+    nodeVersion: string,
+    pythonVersion: string,
+    publishProgress: (phase: InstallAppResult['phase'], userMessage: string) => Promise<void>,
+    messages?: ReturnType<typeof getSharedCopy>['install'],
+  ) => Promise<void>;
+  installFrontendDependenciesWithNpm: (nodePath: string, npmPath: string, frontendDir: string, appId: string) => Promise<void>;
+  isVersionNewer: (candidate?: string, current?: string) => boolean;
+  listAppPrompts: (appId: string) => Promise<AppPromptReviewItem[]>;
+  listCatalogFromBackend: () => Promise<CatalogApp[]>;
+  normalizeInstalledAgentContext: (installDir: string, appId: string) => Promise<void>;
+  normalizeNodeRuntimeVersion: (value?: string | null) => string;
+  normalizeVersionForFolder: (value: string) => string;
+  openInstalledAppUnlocked: (appId: string, locale?: string, options?: { openWindow?: boolean }) => Promise<OpenAppResult>;
+  path: typeof path;
+  registry: AppRegistry;
+  removeInstalledRecord: (appId: string) => Promise<void>;
+  resolveInstalledAgents: (appId: string) => Promise<AppAgent[]>;
+  resolveInstalledManifest: (installDir: string) => Promise<AppManifest | null>;
+  resolveInstalledPromptTemplates: (appId: string) => Promise<AppPromptTemplate[]>;
+  resolvePlatformAlias: () => string;
+  runCommand: (command: string, args: string[], options: Record<string, unknown> & { cwd: string }) => Promise<void>;
+  runCommandCapture: (command: string, args: string[], options: Record<string, unknown> & { cwd: string }) => Promise<CommandCaptureResult>;
+  runtimeError: (message: string, technicalCode: string, phase?: InstallAppResult['phase']) => InstallAppResult;
+  runningApps: Map<string, RunningAppProcess>;
+  serializeErrorForInstallLog: (error: unknown) => Record<string, unknown>;
+  stopInstalledApp: (appId: string) => Promise<StopAppResult>;
+  syncAppToCloudIfEnabled: (appId: string) => Promise<void>;
+  syncReleaseIntoInstalledApp: (sourceDir: string, targetDir: string, preservedPaths: string[]) => Promise<void>;
+  toAppSummary: (record: InstalledAppRecord) => AppSummary;
+  truncateForInstallLog: (value: string) => string;
+  upsertInstalledRecord: (record: InstalledAppRecord) => Promise<void>;
+  validateArchiveEntries: (archivePath: string) => Promise<void>;
+}
 
 export const createInstalledAppLifecycleController = (deps: InstalledAppLifecycleDeps) => {
-  const { appendInstallLog, serializeErrorForInstallLog, emitInstallProgress, failureDiagnostic, catalogApps, listCatalogFromBackend, ensureCatalogStatuses, registry, getPrivateAppsRoot, getPrivateDataRoot, getForgerHomeRoot, getForgerMetadataRoot, resolvePlatformAlias, normalizeNodeRuntimeVersion, ensureRuntimeInstalled, installAppDependencies, ensureGlobalAgentsContext, ensurePathInside, clearMacQuarantine, extractArchive, validateArchiveEntries, flattenSingleTopLevelDirectory, resolveInstalledManifest, hasValidManifestStack, writeStackSkills, copyAppSkills, normalizeInstalledAgentContext, ensureAppGitRepository, getGitHead, upsertInstalledRecord, toAppSummary, isVersionNewer, withAppLifecycleLock, stopInstalledApp, closeAppWindow, ensureGitAvailable, getUserVisibleGitStatusLines, syncAppToCloudIfEnabled, createRemoteAppBackup, collectPersistentInstallPaths, copyReleaseContentsForUpdate, gitCommitAllExcept, syncReleaseIntoInstalledApp, ensureUserModifiedBranch, openInstalledAppUnlocked, fs, path, isDev, app, getOriginalCommitSha, removeInstalledRecord, runningApps, restoreRemoteAppBackup, readOperationSummaries, readLocalChangeSummaries, getRuntimeStatus, installWelcome, getBackupsManager, restoreAppUserVersionRuntime, getInstallLogPath, syncDirectory } = deps;
+  let { catalogApps } = deps;
+  const { DEFAULT_NODE_VERSION, DEFAULT_PYTHON_VERSION, appendInstallLog, backendPythonEnvironmentLocks, clearMacQuarantine, closeAppWindow, collectPersistentInstallPaths, emitInstallProgress, emitRuntimeStatus, ensureAppGitRepository, ensureCatalogStatuses, ensureGlobalAgentsContext, ensureRuntimeInstalled, ensureUserModifiedBranch, extractArchive, failureDiagnostic, flattenSingleTopLevelDirectory, forgerBackendClient, fs, getBackupsManager, getForgerHomeRoot, getForgerMetadataRoot, getGitHead, getInstallLogPath, getLegacyForgerMetadataRoot, getOfficialToolsService, getOriginalCommitSha, getPrivateAppsRoot, getRuntimeStatus, getTempRoot, getUserVisibleGitStatusLines, gitCommitAllExcept, installAppDependencies, installFrontendDependenciesWithNpm, isVersionNewer, listAppPrompts, listCatalogFromBackend, normalizeInstalledAgentContext, normalizeNodeRuntimeVersion, normalizeVersionForFolder, openInstalledAppUnlocked, path, registry, removeInstalledRecord, resolveInstalledAgents, resolveInstalledManifest, resolveInstalledPromptTemplates, resolvePlatformAlias, runCommand, runCommandCapture, runningApps, runtimeError, serializeErrorForInstallLog, stopInstalledApp, syncAppToCloudIfEnabled, syncReleaseIntoInstalledApp, toAppSummary, truncateForInstallLog, upsertInstalledRecord, validateArchiveEntries } = deps;
 const fetchDownloadBundle = async (
   appEntry: CatalogApp,
 ): Promise<{ zipPath: string; version: string; checksumSha256?: string }> => {

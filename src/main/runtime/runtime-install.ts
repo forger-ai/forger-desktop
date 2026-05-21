@@ -1,9 +1,39 @@
-// @ts-nocheck
+import type fs from 'node:fs/promises';
+import type path from 'node:path';
 
-type RuntimeInstallDeps = Record<string, any>;
+import { getSharedCopy } from '../../shared/i18n';
+import type { InstallAppResult } from '../../shared/types';
+import type { RuntimeBinarySet } from '../core/main-process-types';
+
+interface RuntimeInstallDeps {
+  DEFAULT_NODE_VERSION: string;
+  DEFAULT_PYTHON_VERSION: string;
+  app: Electron.App;
+  clearMacQuarantine: (targetPath: string) => Promise<void>;
+  extractArchive: (archivePath: string, destination: string) => Promise<void>;
+  findRuntimeArchive: (baseDir: string, platformAlias: string) => Promise<string | null>;
+  findRuntimeChecksumFile: (baseDir: string, archivePath: string, platformAlias: string) => Promise<string | null>;
+  fs: typeof fs;
+  getBundledResourcesRoot: () => string;
+  getRuntimesRoot: () => string;
+  getTempRoot: () => string;
+  hashFileSha256: (filePath: string) => Promise<string>;
+  installBackendDependenciesWithUv: (pythonPath: string, backendDir: string, appId: string) => Promise<void>;
+  normalizeNodeRuntimeVersion: (value?: string | null) => string;
+  normalizeVersionForFolder: (value: string) => string;
+  path: typeof path;
+  resolvePlatformAlias: () => string;
+  runCommand: (
+    command: string,
+    args: string[],
+    options: { cwd: string; env?: NodeJS.ProcessEnv; log?: { appId?: string; phase?: string; label?: string } },
+  ) => Promise<void>;
+  runtimeLocks: Map<string, Promise<RuntimeBinarySet>>;
+}
 
 export const createRuntimeInstallController = (deps: RuntimeInstallDeps) => {
-  const { fs, path, app, runtimeLocks, getRuntimesRoot, resolvePlatformAlias, normalizeVersionForFolder, findRuntimeArchive, findRuntimeChecksumFile, hashFileSha256, extractArchive, clearMacQuarantine, runCommand, appendInstallLog, serializeErrorForInstallLog, runtimeError, emitInstallProgress, DEFAULT_NODE_VERSION, DEFAULT_PYTHON_VERSION, existsFile, canRunCommand, requiresWindowsShell } = deps;
+  const { fs, path, runtimeLocks, getBundledResourcesRoot, getTempRoot, getRuntimesRoot, resolvePlatformAlias, normalizeVersionForFolder, normalizeNodeRuntimeVersion, findRuntimeArchive, findRuntimeChecksumFile, hashFileSha256, extractArchive, clearMacQuarantine, runCommand, installBackendDependenciesWithUv } = deps;
+const RUNTIME_PLATFORM_ALIASES = new Set(['darwin_arm64', 'win32_x64']);
 const fileExists = async (filePath: string): Promise<boolean> => {
   const stat = await fs.stat(filePath).catch(() => null);
   return Boolean(stat?.isFile());

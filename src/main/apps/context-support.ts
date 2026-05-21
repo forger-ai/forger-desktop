@@ -1,9 +1,61 @@
-// @ts-nocheck
+import type fs from 'node:fs/promises';
+import type path from 'node:path';
+import { FileLibrary } from '../file-library';
+import { buildForgerAppAgentsMarkdown } from '../prompts/apps-base';
+import {
+  FORGER_AGENT_CONTRACT_MARKER,
+  FORGER_AGENT_CONTRACT_MARKER_PREFIX,
+  buildGlobalForgerAgentsMarkdown,
+} from '../prompts/forger-base';
+import { buildForgerOfficialToolSkillTemplates } from '../prompts/official-tools';
+import type { CatalogApp } from '../../shared/types';
+import type { AppManifest, AppManifestStack, AppRegistry, StackSkillTemplate } from '../core/main-process-types';
 
-type AppContextSupportDeps = Record<string, any>;
+interface FileLibraryState {
+  current: FileLibrary | null;
+}
+
+interface AppContextSupportDeps {
+  fs: typeof fs;
+  path: typeof path;
+  catalogApps: CatalogApp[];
+  registry: AppRegistry;
+  fileLibraryState: FileLibraryState;
+  getPrivateDataRoot: () => string;
+  getForgerMetadataRoot: () => string;
+  appLifecycleLocks: Map<string, Promise<unknown>>;
+  forgerBackendClient: { listCatalogApps: () => Promise<CatalogApp[]> } | null;
+}
 
 export const createAppContextSupportController = (deps: AppContextSupportDeps) => {
-  const { fs, path, buildGlobalForgerAgentsMarkdown, FORGER_AGENT_CONTRACT_MARKER, FORGER_AGENT_CONTRACT_MARKER_PREFIX, buildForgerAppAgentsMarkdown, buildForgerOfficialToolSkillTemplates, catalogApps, FileLibrary, getPrivateDataRoot, getForgerMetadataRoot, appLifecycleLocks, forgerBackendClient, mapBackendCategory, toCatalogStatus, resolveAppToolDeclarations } = deps;
+  const { fs, path, catalogApps, registry, fileLibraryState, getPrivateDataRoot, getForgerMetadataRoot, appLifecycleLocks, forgerBackendClient } = deps;
+const normalizeToken = (value: string | undefined): string => {
+  if (!value) {
+    return '';
+  }
+  return value.trim().toLowerCase();
+};
+
+const ensurePathInside = (rootPath: string, targetPath: string): boolean => {
+  const relative = path.relative(rootPath, targetPath);
+  const normalizedRelative = process.platform === 'win32' ? relative.toLowerCase() : relative;
+  return normalizedRelative === '' || (!normalizedRelative.startsWith('..') && !path.isAbsolute(relative));
+};
+
+const resolveInstalledManifest = async (installDir: string): Promise<AppManifest | null> => {
+  const manifestPath = path.join(installDir, 'manifest.json');
+  try {
+    const raw = await fs.readFile(manifestPath, 'utf8');
+    const parsed = JSON.parse(raw) as AppManifest;
+    if (!parsed || typeof parsed !== 'object') {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+};
+
 const hasValidManifestStack = (manifest: AppManifest | null): manifest is AppManifest & { stack: AppManifestStack } => {
   if (!manifest?.stack || typeof manifest.stack !== 'object') {
     return false;
@@ -227,10 +279,10 @@ const resolveSelectedAppDisplayName = (appId: string): string => {
 };
 
 const getFileLibrary = (): FileLibrary => {
-  if (!fileLibrary) {
-    fileLibrary = new FileLibrary(getPrivateDataRoot(), getForgerMetadataRoot());
+  if (!fileLibraryState.current) {
+    fileLibraryState.current = new FileLibrary(getPrivateDataRoot(), getForgerMetadataRoot());
   }
-  return fileLibrary;
+  return fileLibraryState.current;
 };
 
 const withAppLifecycleLock = async <T>(appId: string, operation: () => Promise<T>): Promise<T> => {

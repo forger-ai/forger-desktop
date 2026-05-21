@@ -1,6 +1,17 @@
-// @ts-nocheck
 
-type PathConfigDeps = Record<string, any>;
+import type { App } from 'electron';
+import type os from 'node:os';
+import type path from 'node:path';
+
+import type { StoredForgerAccount } from '../forger-account-store';
+
+interface PathConfigDeps {
+  app: App;
+  forgerAccount: StoredForgerAccount;
+  isDev: boolean;
+  os: typeof os;
+  path: typeof path;
+}
 
 const PLATFORM_KEY_BY_RUNTIME: Record<NodeJS.Platform, string> = {
   darwin: 'darwin',
