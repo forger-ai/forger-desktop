@@ -508,7 +508,7 @@ export class ForgerMcpServer {
 
     if (isOfficialTool(toolId)) {
       const validation = await this.options.validateOfficialTool(
-        buildOfficialToolCallInput(toolId, args),
+        { toolId: 'gmail', actionId: toolId, input: args },
         { caller: session.caller, appId: session.appId },
       );
       if (validation) {
@@ -627,7 +627,7 @@ export class ForgerMcpServer {
 
     if (isOfficialTool(toolId)) {
       const result = await this.options.callOfficialTool(
-        buildOfficialToolCallInput(toolId, args),
+        { toolId: 'gmail', actionId: toolId, input: args },
         { caller: session.caller, appId: session.appId },
       );
       await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
@@ -780,16 +780,6 @@ const parseCodexReasoningEffort = (value: unknown): AppPromptReviewInput['reason
   value === 'none' || value === 'low' || value === 'medium' || value === 'high' || value === 'xhigh'
     ? value
     : undefined;
-
-const buildOfficialToolCallInput = (
-  actionId: AgentToolId,
-  input: Record<string, unknown>,
-): CallOfficialToolInput => {
-  if (actionId.startsWith('gmail.')) {
-    return { toolId: 'gmail', actionId, input };
-  }
-  return { toolId: actionId, actionId, input };
-};
 
 const memoryAccess = (session: AgentMcpSession): MemoryAccessInput => ({
   caller: session.caller,

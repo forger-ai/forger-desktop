@@ -117,10 +117,15 @@ export const normalizeRating = (value: unknown): AppRatingSummary | undefined =>
   }
 
   const record = value as Record<string, unknown>;
+  const id = normalizeNumber(record.id);
+  const score = normalizeNumber(record.score);
+  if (id === undefined || score === undefined) {
+    return undefined;
+  }
   const user = record.user && typeof record.user === 'object' ? record.user as Record<string, unknown> : undefined;
   return {
-    id: Number(record.id),
-    score: Number(record.score),
+    id,
+    score,
     comment: typeof record.comment === 'string' ? record.comment : null,
     forgerResponse: typeof record.forger_response === 'string' ? record.forger_response : null,
     createdAt: typeof record.created_at === 'string' ? record.created_at : undefined,

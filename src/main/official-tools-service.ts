@@ -112,9 +112,7 @@ const localizeOfficialToolDefinition = (
     changelog?: readonly string[];
   }>>;
   const localized = localizedTools[entry.id];
-  if (!localized) {
-    return entry;
-  }
+  if (!localized) return entry;
   return {
     ...entry,
     name: localized.name,

@@ -47,7 +47,7 @@ const resolveInstalledManifest = async (installDir: string): Promise<AppManifest
   try {
     const raw = await fs.readFile(manifestPath, 'utf8');
     const parsed = JSON.parse(raw) as AppManifest;
-    if (!parsed || typeof parsed !== 'object') {
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
       return null;
     }
     return parsed;
@@ -57,11 +57,11 @@ const resolveInstalledManifest = async (installDir: string): Promise<AppManifest
 };
 
 const hasValidManifestStack = (manifest: AppManifest | null): manifest is AppManifest & { stack: AppManifestStack } => {
-  if (!manifest?.stack || typeof manifest.stack !== 'object') {
+  if (!manifest?.stack || typeof manifest.stack !== 'object' || Array.isArray(manifest.stack)) {
     return false;
   }
-  const backend = manifest.stack.backend && typeof manifest.stack.backend === 'object';
-  const frontend = manifest.stack.frontend && typeof manifest.stack.frontend === 'object';
+  const backend = manifest.stack.backend && typeof manifest.stack.backend === 'object' && !Array.isArray(manifest.stack.backend);
+  const frontend = manifest.stack.frontend && typeof manifest.stack.frontend === 'object' && !Array.isArray(manifest.stack.frontend);
   return Boolean(backend || frontend);
 };
 

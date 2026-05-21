@@ -87,9 +87,7 @@ export const findManifestMcp = (manifest: AppMcpManifest | null): AppManifestMcp
   if (!manifest?.mcp || typeof manifest.mcp !== 'object') {
     return null;
   }
-  if (manifest.mcp.type && manifest.mcp.type !== 'http') {
-    return null;
-  }
+  if (manifest.mcp.type && manifest.mcp.type !== 'http') return null;
   if (!manifest.mcp.command || typeof manifest.mcp.command !== 'string') {
     return null;
   }

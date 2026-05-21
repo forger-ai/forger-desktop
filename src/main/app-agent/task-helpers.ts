@@ -265,6 +265,9 @@ export const progressFromCodexOutput = (text: string, locale: TaskLocale): strin
       }
       if (parsed.type === 'item.started' && parsed.item && typeof parsed.item === 'object') {
         const item = parsed.item as Record<string, unknown>;
+        if (String(item.type ?? '').includes('tool')) {
+          return taskMessage(locale, 'usingTools');
+        }
         if (item.type === 'command_execution') {
           return progressFromCommandExecution(item, locale);
         }

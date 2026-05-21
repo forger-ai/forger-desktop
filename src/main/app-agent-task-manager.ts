@@ -398,9 +398,7 @@ export class AppAgentTaskManager {
           await appendTranscript(task.transcriptPath, 'meta', 'Retrying Codex task with a clean temporary Codex home.');
           result = await runAgent(cleanCodexHome);
           assertAllowedMcpServers(result.stdout, result.stderr, allowedMcpServers);
-          if ((task as AppCodexTaskSummary).status === 'canceled') {
-            return;
-          }
+          if ((task as AppCodexTaskSummary).status === 'canceled') return;
         }
       }
       if (result.code !== 0) {

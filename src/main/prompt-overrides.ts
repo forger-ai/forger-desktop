@@ -461,9 +461,7 @@ const hasAgentPromptSet = (agent: AppAgent): boolean =>
 
 const normalizeStore = (input?: Partial<PromptOverridesFile>): PromptOverridesFile => {
   const store = emptyStore();
-  if (!input?.apps || typeof input.apps !== 'object') {
-    return store;
-  }
+  if (!input?.apps || typeof input.apps !== 'object') return store;
 
   for (const [appId, entries] of Object.entries(input.apps)) {
     if (!appId || !entries || typeof entries !== 'object') {
@@ -505,7 +503,6 @@ const normalizeStore = (input?: Partial<PromptOverridesFile>): PromptOverridesFi
 
   return store;
 };
-
 const promptDefaultRuntime = (defaults: PromptRuntimeDefaults): AgentRuntime =>
   defaults.runtime ?? legacyCodexRuntime(defaults) ?? {
     provider: 'codex',

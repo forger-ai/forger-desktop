@@ -233,6 +233,10 @@ export class AutomationManager {
       return;
     }
     let forgerMcpSession: { url: string; token: string } | null = null;
+    const progressUpdates = new Set<Promise<void>>();
+    const waitForProgressUpdates = async (): Promise<void> => {
+      await Promise.allSettled(Array.from(progressUpdates));
+    };
     try {
       const automation = this.requireAutomation(automationId);
       const runtime = await this.options.getAgentRuntime();
@@ -300,9 +304,15 @@ export class AutomationManager {
           }
           latestUserMessage = latest;
           userMessages = assistantMessages;
-          void this.updateRunUserMessage(automationId, activeRunId, latest, assistantMessages);
+          const update = this.updateRunUserMessage(automationId, activeRunId, latest, assistantMessages)
+            .catch(() => undefined)
+            .finally(() => {
+              progressUpdates.delete(update);
+            });
+          progressUpdates.add(update);
         },
       });
+      await waitForProgressUpdates();
 
       if (result.code !== 0) {
         throw new Error((result.stderr || result.stdout || 'codex_exec_failed').trim());
@@ -327,6 +337,7 @@ export class AutomationManager {
       await this.writeRun(run);
       await this.updateLastRun(automationId, toRunSummary(run));
     } catch (error) {
+      await waitForProgressUpdates();
       const message = error instanceof Error ? error.message : 'automation_run_failed';
       await appendTranscript(this.runTranscriptPath(run.id), 'meta', `Run failed: ${message}`);
       run = {
@@ -616,7 +627,10 @@ const sanitizeAppIds = (value: unknown): string[] => {
   if (!Array.isArray(value)) {
     return [];
   }
-  return Array.from(new Set(value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)));
+  return Array.from(new Set(value
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => item.trim())
+    .filter((item) => /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/.test(item))));
 };
 
 const sanitizeFrequency = (value: unknown): AutomationFrequency => {

@@ -226,6 +226,7 @@ export class ChatOrchestrator {
 
     killProcessTree(run.child);
     run.status = 'canceled';
+    run.permissionRequest = undefined;
     run.updatedAt = new Date().toISOString();
     this.emitRun(run);
 
@@ -504,7 +505,6 @@ export class ChatOrchestrator {
       const codexPathEntries = await this.options.getCodexPathEntries(run.appId);
       const codexEnvironment = await this.options.getCodexEnvironment(run.appId);
       const networkAccess = await (this.options.getAgentNetworkAccess?.(run.appId) ?? Promise.resolve(false));
-
       if (run.taskType === 'actualizar_aplicacion') {
         await ensureGitRepository(run.appRoot);
         await ensureUserModifiedBranch(run.appRoot);
@@ -557,7 +557,7 @@ export class ChatOrchestrator {
             this.options.codexHome,
             this.conversationCodexHome(run.appId, run.conversationId ?? run.runId),
             {
-              trustedRoots: [this.options.forgerHomeRoot],
+              trustedRoots: [this.options.forgerHomeRoot, ...run.sharedRoots],
               networkAccess,
             },
           )
@@ -568,6 +568,7 @@ export class ChatOrchestrator {
         environment: codexEnvironment,
         mcpServers,
         workingDir: this.options.forgerHomeRoot,
+        sharedRoots: run.sharedRoots,
         model: run.model,
         networkAccess,
         timeoutMs: 300_000,
@@ -636,7 +637,6 @@ export class ChatOrchestrator {
         );
         assistantReply = await runProvider(true);
       }
-
       if (this.runs.get(run.runId)?.status === 'canceled') {
         return;
       }
@@ -649,7 +649,6 @@ export class ChatOrchestrator {
         assistantReply.usageDelta,
         assistantReply.toolEvents,
       );
-
       if (run.taskType === 'resolver_conflicto_actualizacion') {
         await this.finalizeUpdateConflictResolution(run, assistantReply.assistantText);
       } else if (run.taskType === 'actualizar_aplicacion') {

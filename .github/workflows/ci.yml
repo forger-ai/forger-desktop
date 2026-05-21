@@ -31,5 +31,5 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run typecheck
-      - run: npm run test:coverage
+      - run: npm run test:coverage:electron:strict
       - run: npm run build

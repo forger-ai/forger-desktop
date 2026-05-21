@@ -1,0 +1,955 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { createRequire } from 'node:module';
+
+import { createIpcMainRecorder } from './electron-test-helpers.mjs';
+
+const require = createRequire(import.meta.url);
+const { IPC_CHANNELS } = require('../../dist-electron/shared/ipc.js');
+const { registerAgentIpcHandlers } = require('../../dist-electron/main/ipc/agent-handlers.js');
+
+const createDeps = (overrides = {}) => {
+  const { handlers, ipcMain } = createIpcMainRecorder();
+  const deps = {
+    BUILT_IN_CLAUDE_EFFORT: 'medium',
+    BUILT_IN_CODEX_REASONING: 'medium',
+    BetterSqlite3: null,
+    IPC_CHANNELS,
+    appAgentConversationManager: null,
+    appAgentTaskManager: null,
+    automationManager: null,
+    desktopErrorReporter: null,
+    ipcMain,
+    normalizeAgentProvider: (value) => value,
+    normalizeClaudeEffort: (value, fallback) => value ?? fallback,
+    normalizeCodexReasoningEffort: (value, fallback) => value ?? fallback,
+    registry: { apps: {} },
+    renderManifestAgentPrompt: () => 'rendered prompt',
+    resolveAppDbPath: async () => null,
+    resolveAppIdForWebContents: () => null,
+    resolveInstalledAgents: async () => [],
+    ...overrides,
+  };
+  registerAgentIpcHandlers(deps);
+  return { deps, handlers };
+};
+
+const eventForWebContents = (id) => ({ sender: { id } });
+
+test('agent IPC registers current and legacy task/conversation aliases to the same handlers', () => {
+  const { handlers } = createDeps();
+
+  assert.ok(handlers.size >= 43, 'expected app-agent IPC registration to include agent, database, and automation handlers');
+  assert.equal(handlers.get(IPC_CHANNELS.appAgentTaskStart), handlers.get(IPC_CHANNELS.appCodexTaskStart));
+  assert.equal(handlers.get(IPC_CHANNELS.appAgentTaskGet), handlers.get(IPC_CHANNELS.appCodexTaskGet));
+  assert.equal(handlers.get(IPC_CHANNELS.appAgentTaskCancel), handlers.get(IPC_CHANNELS.appCodexTaskCancel));
+  assert.equal(
+    handlers.get(IPC_CHANNELS.appAgentTaskApprovePermission),
+    handlers.get(IPC_CHANNELS.appCodexTaskApprovePermission),
+  );
+  assert.equal(
+    handlers.get(IPC_CHANNELS.appAgentConversationCreate),
+    handlers.get(IPC_CHANNELS.appCodexConversationCreate),
+  );
+  assert.equal(
+    handlers.get(IPC_CHANNELS.appAgentConversationSendMessage),
+    handlers.get(IPC_CHANNELS.appCodexConversationSendMessage),
+  );
+  assert.equal(handlers.get(IPC_CHANNELS.appAgentConversationGet), handlers.get(IPC_CHANNELS.appCodexConversationGet));
+  assert.equal(handlers.get(IPC_CHANNELS.appAgentConversationList), handlers.get(IPC_CHANNELS.appCodexConversationList));
+  assert.equal(
+    handlers.get(IPC_CHANNELS.appAgentConversationDelete),
+    handlers.get(IPC_CHANNELS.appCodexConversationDelete),
+  );
+  assert.equal(
+    handlers.get(IPC_CHANNELS.appAgentConversationCancelRun),
+    handlers.get(IPC_CHANNELS.appCodexConversationCancelRun),
+  );
+  assert.equal(
+    handlers.get(IPC_CHANNELS.appAgentConversationApprovePermission),
+    handlers.get(IPC_CHANNELS.appCodexConversationApprovePermission),
+  );
+});
+
+test('app-agent task start enforces app-window authorization and manager availability', async () => {
+  const { handlers } = createDeps();
+
+  await assert.rejects(
+    handlers.get(IPC_CHANNELS.appAgentTaskStart)(eventForWebContents(10), { prompt: 'go' }),
+    /app_window_not_authorized/,
+  );
+
+  const authorized = createDeps({ resolveAppIdForWebContents: () => 'finance-os' });
+  await assert.rejects(
+    authorized.handlers.get(IPC_CHANNELS.appAgentTaskStart)(eventForWebContents(10), { prompt: 'go' }),
+    /app_codex_task_manager_unavailable/,
+  );
+});
+
+test('app-agent task start reports manager start failures and rethrows the original error', async () => {
+  const startError = new Error('runner_failed');
+  const reports = [];
+  const { handlers } = createDeps({
+    appAgentTaskManager: {
+      start: async () => {
+        throw startError;
+      },
+    },
+    desktopErrorReporter: {
+      reportAppCodexStartFailure: (input) => reports.push(input),
+    },
+    resolveAppIdForWebContents: () => 'finance-os',
+  });
+
+  await assert.rejects(
+    handlers.get(IPC_CHANNELS.appCodexTaskStart)(eventForWebContents(10), { prompt: 'go' }),
+    startError,
+  );
+  assert.deepEqual(reports, [
+    {
+      appId: 'finance-os',
+      operation: 'app.codex-task.start',
+      error: startError,
+    },
+  ]);
+});
+
+test('app-agent task and conversation handlers return safe fallbacks when context is unavailable', async () => {
+  const { handlers } = createDeps();
+
+  assert.equal(await handlers.get(IPC_CHANNELS.appAgentTaskGet)(eventForWebContents(1), 'run-1'), null);
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.appAgentTaskCancel)(eventForWebContents(1), 'run-1'), { success: false });
+  assert.deepEqual(
+    await handlers.get(IPC_CHANNELS.appAgentTaskApprovePermission)(eventForWebContents(1), 'run-1', 'req-1', 'allow'),
+    { success: false },
+  );
+  assert.equal(await handlers.get(IPC_CHANNELS.appAgentConversationGet)(eventForWebContents(1), 'thread-1'), null);
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.appAgentConversationList)(eventForWebContents(1)), []);
+  assert.deepEqual(
+    await handlers.get(IPC_CHANNELS.appAgentConversationDelete)(eventForWebContents(1), 'thread-1'),
+    { success: false },
+  );
+  assert.deepEqual(
+    await handlers.get(IPC_CHANNELS.appAgentConversationCancelRun)(eventForWebContents(1), 'thread-1', 'run-1'),
+    { success: false },
+  );
+  assert.deepEqual(
+    await handlers.get(IPC_CHANNELS.appAgentConversationApprovePermission)(
+      eventForWebContents(1),
+      'thread-1',
+      'run-1',
+      'req-1',
+      'deny',
+    ),
+    { success: false },
+  );
+});
+
+test('agent thread creation validates authorization, manager availability, and initial prompt', async () => {
+  await assert.rejects(
+    createDeps().handlers.get(IPC_CHANNELS.appAgentThreadCreate)(eventForWebContents(1), { initialPrompt: 'hello' }),
+    /app_agent_thread_unavailable/,
+  );
+
+  const withAppNoManager = createDeps({ resolveAppIdForWebContents: () => 'finance-os' });
+  await assert.rejects(
+    withAppNoManager.handlers.get(IPC_CHANNELS.appAgentThreadCreate)(eventForWebContents(1), { initialPrompt: 'hello' }),
+    /app_agent_thread_unavailable/,
+  );
+
+  const withManager = createDeps({
+    appAgentConversationManager: { create: async () => ({ conversationId: 'thread-1', title: 'T', messages: [] }) },
+    resolveAppIdForWebContents: () => 'finance-os',
+  });
+  await assert.rejects(
+    withManager.handlers.get(IPC_CHANNELS.appAgentThreadCreate)(eventForWebContents(1), { initialPrompt: '   ' }),
+    /agent_thread_initial_prompt_required/,
+  );
+});
+
+test('agent thread IPC returns safe unavailable fallbacks and queued run summaries', async () => {
+  const unavailable = createDeps();
+
+  await assert.rejects(
+    unavailable.handlers.get(IPC_CHANNELS.appAgentThreadRunStart)(eventForWebContents(1), {
+      desktopThreadId: 'thread-1',
+      message: 'hello',
+    }),
+    /app_agent_thread_unavailable/,
+  );
+  assert.equal(await unavailable.handlers.get(IPC_CHANNELS.appAgentThreadGet)(eventForWebContents(1), 'thread-1'), null);
+  assert.equal(
+    await unavailable.handlers.get(IPC_CHANNELS.appAgentThreadRunGet)(eventForWebContents(1), 'thread-1', 'run-1'),
+    null,
+  );
+  assert.deepEqual(
+    await unavailable.handlers.get(IPC_CHANNELS.appAgentThreadRunCancel)(eventForWebContents(1), {
+      desktopThreadId: 'thread-1',
+      desktopRunId: 'run-1',
+    }),
+    { success: false },
+  );
+  await assert.rejects(
+    unavailable.handlers.get(IPC_CHANNELS.appAgentThreadRunSteer)(eventForWebContents(1), {
+      desktopThreadId: 'thread-1',
+      desktopRunId: 'run-1',
+      message: 'steer',
+    }),
+    /app_agent_thread_unavailable/,
+  );
+  await assert.rejects(
+    unavailable.handlers.get(IPC_CHANNELS.appManifestAgentStart)(eventForWebContents(1), { agentId: 'advisor' }),
+    /app_agent_thread_unavailable/,
+  );
+
+  const manager = {
+    cancel: async () => ({ success: true }),
+    get: async (_appId, threadId) => threadId === 'thread-with-run'
+      ? {
+          conversationId: 'thread-with-run',
+          title: 'Running',
+          messages: [],
+          activeRun: { runId: 'run-1', status: 'running', error: 'provider_error' },
+        }
+      : null,
+    sendMessage: async () => ({ conversationId: 'thread-queued', title: 'Queued', messages: [] }),
+    steerRun: async () => ({ accepted: true }),
+  };
+  const available = createDeps({
+    appAgentConversationManager: manager,
+    resolveAppIdForWebContents: () => 'finance-os',
+  });
+
+  assert.deepEqual(
+    await available.handlers.get(IPC_CHANNELS.appAgentThreadRunStart)(eventForWebContents(1), {
+      desktopThreadId: 'thread-queued',
+      message: 'hello',
+    }),
+    { desktop_thread_id: 'thread-queued', desktop_run_id: '', status: 'queued' },
+  );
+  assert.deepEqual(await available.handlers.get(IPC_CHANNELS.appAgentThreadGet)(eventForWebContents(1), 'thread-with-run'), {
+    desktop_thread_id: 'thread-with-run',
+    title: 'Running',
+    status: 'running',
+    active_run: {
+      desktop_thread_id: 'thread-with-run',
+      desktop_run_id: 'run-1',
+      status: 'running',
+      error: 'provider_error',
+    },
+    messages: [],
+  });
+  assert.equal(await available.handlers.get(IPC_CHANNELS.appAgentThreadGet)(eventForWebContents(1), 'missing'), null);
+});
+
+test('agent thread IPC delegates run lifecycle with normalized runtime inputs and public summaries', async () => {
+  const calls = [];
+  const conversation = {
+    conversationId: 'thread-1',
+    title: 'Desk review',
+    messages: [
+      { messageId: 'msg-1', role: 'user', text: 'hello', createdAt: '2026-01-01T00:00:00.000Z' },
+    ],
+  };
+  const runningConversation = {
+    ...conversation,
+    activeRun: {
+      runId: 'run-1',
+      status: 'running',
+      createdAt: '2026-01-01T00:00:01.000Z',
+      updatedAt: '2026-01-01T00:00:02.000Z',
+      progressLog: ['working'],
+    },
+  };
+  const manager = {
+    create: async (appId, input) => {
+      calls.push(['create', appId, input]);
+      return conversation;
+    },
+    sendMessage: async (appId, input) => {
+      calls.push(['sendMessage', appId, input]);
+      return runningConversation;
+    },
+    get: async (appId, threadId) => {
+      calls.push(['get', appId, threadId]);
+      return threadId === 'thread-1' ? runningConversation : null;
+    },
+    cancel: async (appId, threadId, runId) => {
+      calls.push(['cancel', appId, threadId, runId]);
+      return { success: true };
+    },
+    steerRun: async (appId, threadId, runId, input) => {
+      calls.push(['steerRun', appId, threadId, runId, input]);
+      return { accepted: true, mode: 'queued_for_next_run' };
+    },
+  };
+  const { handlers } = createDeps({
+    appAgentConversationManager: manager,
+    normalizeCodexReasoningEffort: (value) => `codex:${value}`,
+    resolveAppIdForWebContents: () => 'finance-os',
+  });
+
+  const created = await handlers.get(IPC_CHANNELS.appAgentThreadCreate)(eventForWebContents(7), {
+    initialPrompt: '  Start with context  ',
+    manifestAgentId: 'advisor',
+    metadata: { keep: 'yes' },
+    title: 'Desk review',
+  });
+  assert.deepEqual(created, {
+    desktop_thread_id: 'thread-1',
+    title: 'Desk review',
+    status: 'idle',
+    messages: [
+      {
+        id: 'msg-1',
+        role: 'user',
+        content: 'hello',
+        created_at: '2026-01-01T00:00:00.000Z',
+      },
+    ],
+  });
+  assert.deepEqual(calls[0], ['create', 'finance-os', {
+    title: 'Desk review',
+    agentId: 'advisor',
+    metadata: {
+      keep: 'yes',
+      agentId: 'advisor',
+      manifestAgentId: 'advisor',
+      initialPrompt: 'Start with context',
+    },
+  }]);
+
+  assert.deepEqual(
+    await handlers.get(IPC_CHANNELS.appAgentThreadRunStart)(eventForWebContents(7), {
+      desktopThreadId: 'thread-1',
+      message: '  continue  ',
+      context: '{"task":"review"}',
+      workspacePath: '/tmp/app',
+      runtime: { provider: 'codex', model: 'gpt-test', effort: 'high' },
+    }),
+    {
+      desktop_thread_id: 'thread-1',
+      desktop_run_id: 'run-1',
+      status: 'running',
+      progressLog: ['working'],
+    },
+  );
+  assert.deepEqual(calls[1], ['sendMessage', 'finance-os', {
+    conversationId: 'thread-1',
+    message: '  continue  ',
+    context: '{"task":"review"}',
+    workspacePath: '/tmp/app',
+    provider: 'codex',
+    model: 'gpt-test',
+    effort: 'codex:high',
+  }]);
+  assert.deepEqual(
+    await handlers.get(IPC_CHANNELS.appAgentThreadRunGet)(eventForWebContents(7), 'thread-1', 'run-1'),
+    {
+      desktop_thread_id: 'thread-1',
+      desktop_run_id: 'run-1',
+      status: 'running',
+      progressLog: ['working'],
+    },
+  );
+  assert.equal(
+    await handlers.get(IPC_CHANNELS.appAgentThreadRunGet)(eventForWebContents(7), 'thread-1', 'missing-run'),
+    null,
+  );
+  assert.deepEqual(
+    await handlers.get(IPC_CHANNELS.appAgentThreadRunCancel)(eventForWebContents(7), {
+      desktopThreadId: 'thread-1',
+      desktopRunId: 'run-1',
+    }),
+    { success: true },
+  );
+  assert.deepEqual(
+    await handlers.get(IPC_CHANNELS.appAgentThreadRunSteer)(eventForWebContents(7), {
+      desktopThreadId: 'thread-1',
+      desktopRunId: 'run-1',
+      message: 'next',
+      runtime: { provider: 'codex', model: 'auto', effort: 'default' },
+    }),
+    { accepted: true, mode: 'queued_for_next_run' },
+  );
+  assert.deepEqual(calls.at(-1), ['steerRun', 'finance-os', 'thread-1', 'run-1', {
+    message: 'next',
+    context: undefined,
+    workspacePath: undefined,
+    provider: 'codex',
+  }]);
+});
+
+test('manifest-agent IPC renders declared prompts, resumes by stored agent metadata, and stops active runs', async () => {
+  const calls = [];
+  const renderCalls = [];
+  const manager = {
+    create: async (appId, input) => {
+      calls.push(['create', appId, input]);
+      return {
+        conversationId: 'thread-1',
+        title: input.title ?? 'Manifest agent',
+        messages: [],
+      };
+    },
+    sendMessage: async (appId, input) => {
+      calls.push(['sendMessage', appId, input]);
+      return {
+        conversationId: input.conversationId,
+        title: 'Manifest agent',
+        messages: [{ messageId: 'msg-1', role: 'user', text: input.message, createdAt: 'now' }],
+        activeRun: { runId: 'run-1', status: 'queued', createdAt: 'now', updatedAt: 'now' },
+      };
+    },
+    getMetadata: async (_appId, threadId) => threadId === 'thread-1' ? { manifestAgentId: 'advisor' } : undefined,
+    get: async (_appId, threadId) => threadId === 'thread-1'
+      ? {
+          conversationId: 'thread-1',
+          title: 'Manifest agent',
+          messages: [],
+          activeRun: { runId: 'run-1', status: 'running', createdAt: 'now', updatedAt: 'now' },
+        }
+      : null,
+    cancel: async (appId, threadId, runId) => {
+      calls.push(['cancel', appId, threadId, runId]);
+      return { success: true };
+    },
+    steerRun: async (appId, threadId, runId, input) => {
+      calls.push(['steerRun', appId, threadId, runId, input]);
+      return { accepted: true, mode: 'queued_for_next_run' };
+    },
+  };
+  const { handlers } = createDeps({
+    appAgentConversationManager: manager,
+    registry: { apps: { 'finance-os': { installDir: '/tmp/finance-os' } } },
+    renderManifestAgentPrompt: (input) => {
+      renderCalls.push(input);
+      return `${input.kind}:${input.agent.id}:${input.variables?.topic ?? 'none'}`;
+    },
+    resolveAppIdForWebContents: () => 'finance-os',
+    resolveInstalledAgents: async () => [{ id: 'advisor', title: 'Advisor' }],
+  });
+
+  const started = await handlers.get(IPC_CHANNELS.appManifestAgentStart)(eventForWebContents(2), {
+    agentId: ' advisor ',
+    title: 'Agent run',
+    variables: { topic: 'cash' },
+    metadata: { source: 'button' },
+    runtime: { provider: 'claude', model: 'claude-test', effort: 'high' },
+  });
+  assert.equal(started.manifest_agent_id, 'advisor');
+  assert.equal(started.desktop_thread_id, 'thread-1');
+  assert.deepEqual(calls[0], ['create', 'finance-os', {
+    title: 'Agent run',
+    agentId: 'advisor',
+    metadata: {
+      source: 'button',
+      agentId: 'advisor',
+      manifestAgentId: 'advisor',
+      promptApi: 'manifest',
+      initialPromptApplied: true,
+    },
+  }]);
+  assert.deepEqual(calls[1][2], {
+    conversationId: 'thread-1',
+    message: 'initial:advisor:cash',
+    workspacePath: undefined,
+    provider: 'claude',
+    model: 'claude-test',
+    effort: 'high',
+  });
+  assert.equal(renderCalls[0].kind, 'initial');
+  assert.equal(renderCalls[0].appRoot, '/tmp/finance-os');
+
+  assert.deepEqual(
+    await handlers.get(IPC_CHANNELS.appManifestAgentResume)(eventForWebContents(2), {
+      threadId: ' thread-1 ',
+      variables: { topic: 'resume' },
+      workspacePath: '/tmp/finance-os',
+    }),
+    {
+      desktop_thread_id: 'thread-1',
+      desktop_run_id: 'run-1',
+      status: 'queued',
+    },
+  );
+  assert.equal(calls.at(-1)[2].message, 'resume:advisor:resume');
+
+  assert.deepEqual(
+    await handlers.get(IPC_CHANNELS.appManifestAgentSteer)(eventForWebContents(2), {
+      threadId: 'thread-1',
+      runId: 'run-1',
+      variables: { topic: 'steer' },
+    }),
+    { accepted: true, mode: 'queued_for_next_run' },
+  );
+  assert.equal(calls.at(-1)[4].message, 'steer:advisor:steer');
+
+  assert.deepEqual(
+    await handlers.get(IPC_CHANNELS.appManifestAgentStop)(eventForWebContents(2), {
+      threadId: 'thread-1',
+    }),
+    { success: true },
+  );
+  assert.deepEqual(calls.at(-1), ['cancel', 'finance-os', 'thread-1', 'run-1']);
+
+  await assert.rejects(
+    handlers.get(IPC_CHANNELS.appManifestAgentResume)(eventForWebContents(2), { threadId: 'missing' }),
+    /manifest_agent_thread_agent_missing/,
+  );
+});
+
+test('manifest-agent IPC rejects missing identifiers, missing installs, and undeclared agents', async () => {
+  const manager = {
+    create: async () => ({ conversationId: 'thread-1', title: 'Manifest agent', messages: [] }),
+    get: async (_appId, threadId) => threadId === 'idle-thread'
+      ? { conversationId: 'idle-thread', title: 'Idle', messages: [] }
+      : null,
+    getMetadata: async (_appId, threadId) => threadId === 'thread-1'
+      ? { manifestAgentId: 'advisor' }
+      : undefined,
+    sendMessage: async () => ({ conversationId: 'thread-1', title: 'Manifest agent', messages: [] }),
+    steerRun: async () => ({ accepted: true }),
+  };
+  const base = {
+    appAgentConversationManager: manager,
+    resolveAppIdForWebContents: () => 'finance-os',
+  };
+
+  await assert.rejects(
+    createDeps(base).handlers.get(IPC_CHANNELS.appManifestAgentStart)(eventForWebContents(1), { agentId: '   ' }),
+    /manifest_agent_required/,
+  );
+
+  await assert.rejects(
+    createDeps(base).handlers.get(IPC_CHANNELS.appManifestAgentStart)(eventForWebContents(1), { agentId: 'advisor' }),
+    /app_not_installed/,
+  );
+
+  await assert.rejects(
+    createDeps({
+      ...base,
+      registry: { apps: { 'finance-os': { installDir: '/tmp/finance-os' } } },
+      resolveInstalledAgents: async () => [],
+    }).handlers.get(IPC_CHANNELS.appManifestAgentStart)(eventForWebContents(1), { agentId: 'advisor' }),
+    /manifest_agent_not_found/,
+  );
+
+  const installed = createDeps({
+    ...base,
+    registry: { apps: { 'finance-os': { installDir: '/tmp/finance-os' } } },
+    resolveInstalledAgents: async () => [{ id: 'advisor', title: 'Advisor' }],
+  });
+  await assert.rejects(
+    installed.handlers.get(IPC_CHANNELS.appManifestAgentResume)(eventForWebContents(1), { threadId: '   ' }),
+    /manifest_agent_thread_required/,
+  );
+  await assert.rejects(
+    installed.handlers.get(IPC_CHANNELS.appManifestAgentSteer)(eventForWebContents(1), { threadId: 'thread-1' }),
+    /manifest_agent_thread_run_required/,
+  );
+  assert.deepEqual(
+    await installed.handlers.get(IPC_CHANNELS.appManifestAgentStop)(eventForWebContents(1), { threadId: '   ' }),
+    { success: false },
+  );
+  assert.deepEqual(
+    await installed.handlers.get(IPC_CHANNELS.appManifestAgentStop)(eventForWebContents(1), { threadId: 'idle-thread' }),
+    { success: true },
+  );
+});
+
+test('database IPC handlers return explicit errors when sqlite or app database paths are unavailable', async () => {
+  const withoutSqlite = createDeps();
+
+  assert.deepEqual(await withoutSqlite.handlers.get(IPC_CHANNELS.dbListTables)(eventForWebContents(1), 'finance-os'), {
+    error: 'db_module_unavailable',
+  });
+  assert.deepEqual(
+    await withoutSqlite.handlers.get(IPC_CHANNELS.dbQueryTable)(eventForWebContents(1), 'finance-os', 'accounts'),
+    { error: 'db_module_unavailable' },
+  );
+
+  const withoutDbPath = createDeps({
+    BetterSqlite3: function BetterSqlite3() {},
+    resolveAppDbPath: async () => null,
+  });
+  assert.deepEqual(await withoutDbPath.handlers.get(IPC_CHANNELS.dbListTables)(eventForWebContents(1), 'finance-os'), {
+    error: 'db_file_not_found',
+  });
+  assert.deepEqual(
+    await withoutDbPath.handlers.get(IPC_CHANNELS.dbQueryTable)(eventForWebContents(1), 'finance-os', 'accounts'),
+    { error: 'db_file_not_found' },
+  );
+});
+
+test('database IPC handlers list and query sqlite tables with escaped table names', async () => {
+  const preparedSql = [];
+  const dbInstances = [];
+  class FakeSqlite {
+    constructor(dbPath, options) {
+      this.dbPath = dbPath;
+      this.options = options;
+      this.closed = false;
+      dbInstances.push(this);
+    }
+
+    prepare(sql) {
+      preparedSql.push(sql);
+      if (sql.includes('sqlite_master')) {
+        return { all: () => [{ name: 'accounts' }, { name: 'weird"name' }] };
+      }
+      if (sql.startsWith('SELECT *')) {
+        return {
+          all: (limit) => {
+            assert.equal(limit, 5);
+            return [{ id: 1, name: 'cash' }];
+          },
+          columns: () => [{ name: 'id' }, { name: 'name' }],
+        };
+      }
+      if (sql.startsWith('SELECT COUNT')) {
+        return { get: () => ({ total: 1 }) };
+      }
+      throw new Error(`unexpected_sql:${sql}`);
+    }
+
+    close() {
+      this.closed = true;
+    }
+  }
+
+  const { handlers } = createDeps({
+    BetterSqlite3: FakeSqlite,
+    resolveAppDbPath: async () => '/tmp/finance.sqlite',
+  });
+
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.dbListTables)(eventForWebContents(1), 'finance-os'), {
+    tables: ['accounts', 'weird"name'],
+    dbPath: '/tmp/finance.sqlite',
+  });
+  assert.deepEqual(
+    await handlers.get(IPC_CHANNELS.dbQueryTable)(eventForWebContents(1), 'finance-os', 'weird"name', 5),
+    { columns: ['id', 'name'], rows: [[1, 'cash']], total: 1 },
+  );
+  assert.equal(dbInstances.every((db) => db.options.readonly && db.closed), true);
+  assert.equal(preparedSql.includes('SELECT * FROM "weird""name" LIMIT ?'), true);
+
+  const failing = createDeps({
+    BetterSqlite3: class FailingSqlite {
+      prepare() {
+        throw new Error('sqlite_locked');
+      }
+    },
+    resolveAppDbPath: async () => '/tmp/finance.sqlite',
+  });
+  assert.deepEqual(await failing.handlers.get(IPC_CHANNELS.dbListTables)(eventForWebContents(1), 'finance-os'), {
+    error: 'sqlite_locked',
+  });
+  assert.deepEqual(
+    await failing.handlers.get(IPC_CHANNELS.dbQueryTable)(eventForWebContents(1), 'finance-os', 'accounts'),
+    { error: 'sqlite_locked' },
+  );
+});
+
+test('conversation start handlers report manager failures and delegate authorized lifecycle branches', async () => {
+  const reports = [];
+  const calls = [];
+  const createError = new Error('create_failed');
+  const sendError = new Error('send_failed');
+  const manager = {
+    create: async () => {
+      throw createError;
+    },
+    sendMessage: async () => {
+      throw sendError;
+    },
+  };
+  const failing = createDeps({
+    appAgentConversationManager: manager,
+    desktopErrorReporter: {
+      reportAppCodexStartFailure: (input) => reports.push(input),
+    },
+    resolveAppIdForWebContents: () => 'finance-os',
+  });
+
+  await assert.rejects(
+    failing.handlers.get(IPC_CHANNELS.appAgentConversationCreate)(eventForWebContents(1), { title: 'New' }),
+    createError,
+  );
+  await assert.rejects(
+    failing.handlers.get(IPC_CHANNELS.appAgentConversationSendMessage)(eventForWebContents(1), {
+      conversationId: 'thread-1',
+      message: 'hello',
+    }),
+    sendError,
+  );
+  assert.deepEqual(reports, [
+    {
+      appId: 'finance-os',
+      operation: 'app.codex-conversation.create',
+      error: createError,
+    },
+    {
+      appId: 'finance-os',
+      operation: 'app.codex-conversation.send-message',
+      error: sendError,
+    },
+  ]);
+
+  const { handlers } = createDeps({
+    appAgentConversationManager: {
+      approvePermission: async (...args) => {
+        calls.push(['approvePermission', ...args]);
+        return { success: true };
+      },
+      cancel: async (...args) => {
+        calls.push(['cancel', ...args]);
+        return { success: true };
+      },
+      delete: async (...args) => {
+        calls.push(['delete', ...args]);
+        return { success: true };
+      },
+      get: async (...args) => {
+        calls.push(['get', ...args]);
+        return { conversationId: args[1] };
+      },
+      list: async (appId) => {
+        calls.push(['list', appId]);
+        return [{ conversationId: 'thread-1' }];
+      },
+    },
+    resolveAppIdForWebContents: () => 'finance-os',
+  });
+
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.appAgentConversationList)(eventForWebContents(1)), [
+    { conversationId: 'thread-1' },
+  ]);
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.appAgentConversationGet)(eventForWebContents(1), 'thread-1'), {
+    conversationId: 'thread-1',
+  });
+  assert.deepEqual(
+    await handlers.get(IPC_CHANNELS.appAgentConversationDelete)(eventForWebContents(1), 'thread-1'),
+    { success: true },
+  );
+  assert.deepEqual(
+    await handlers.get(IPC_CHANNELS.appAgentConversationCancelRun)(eventForWebContents(1), 'thread-1', 'run-1'),
+    { success: true },
+  );
+  assert.deepEqual(
+    await handlers.get(IPC_CHANNELS.appAgentConversationApprovePermission)(
+      eventForWebContents(1),
+      'thread-1',
+      'run-1',
+      'req-1',
+      'allow',
+    ),
+    { success: true },
+  );
+  assert.deepEqual(calls, [
+    ['list', 'finance-os'],
+    ['get', 'finance-os', 'thread-1'],
+    ['delete', 'finance-os', 'thread-1'],
+    ['cancel', 'finance-os', 'thread-1', 'run-1'],
+    ['approvePermission', 'finance-os', 'thread-1', 'run-1', 'req-1', 'allow'],
+  ]);
+});
+
+test('agent IPC covers authorized task operations, conversation unavailable branches, and queued fallbacks', async () => {
+  const taskCalls = [];
+  const taskManager = {
+    approvePermission: async (...args) => {
+      taskCalls.push(['approvePermission', ...args]);
+      return { success: true };
+    },
+    cancel: async (...args) => {
+      taskCalls.push(['cancel', ...args]);
+      return { success: true };
+    },
+    get: (...args) => {
+      taskCalls.push(['get', ...args]);
+      return { runId: 'run-1' };
+    },
+    start: async (...args) => {
+      taskCalls.push(['start', ...args]);
+      return { runId: 'run-started' };
+    },
+  };
+  const { handlers } = createDeps({
+    appAgentTaskManager: taskManager,
+    resolveAppIdForWebContents: () => 'finance-os',
+  });
+
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.appAgentTaskStart)(eventForWebContents(1), { prompt: 'go' }), {
+    runId: 'run-started',
+  });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.appAgentTaskGet)(eventForWebContents(1), 'run-1'), {
+    runId: 'run-1',
+  });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.appAgentTaskCancel)(eventForWebContents(1), 'run-1'), {
+    success: true,
+  });
+  assert.deepEqual(
+    await handlers.get(IPC_CHANNELS.appAgentTaskApprovePermission)(eventForWebContents(1), 'run-1', 'req-1', 'allow'),
+    { success: true },
+  );
+  assert.deepEqual(taskCalls.map((entry) => entry[0]), ['start', 'get', 'cancel', 'approvePermission']);
+
+  const noManager = createDeps({ resolveAppIdForWebContents: () => 'finance-os' });
+  await assert.rejects(
+    noManager.handlers.get(IPC_CHANNELS.appAgentConversationCreate)(eventForWebContents(1), { title: 'New' }),
+    /app_codex_conversation_manager_unavailable/,
+  );
+  await assert.rejects(
+    noManager.handlers.get(IPC_CHANNELS.appAgentConversationSendMessage)(eventForWebContents(1), { message: 'hello' }),
+    /app_codex_conversation_manager_unavailable/,
+  );
+  await assert.rejects(
+    noManager.handlers.get(IPC_CHANNELS.appManifestAgentResume)(eventForWebContents(1), { threadId: 'thread-1' }),
+    /app_agent_thread_unavailable/,
+  );
+  await assert.rejects(
+    noManager.handlers.get(IPC_CHANNELS.appManifestAgentSteer)(eventForWebContents(1), {
+      threadId: 'thread-1',
+      runId: 'run-1',
+    }),
+    /app_agent_thread_unavailable/,
+  );
+  await assert.rejects(
+    createDeps().handlers.get(IPC_CHANNELS.appAgentConversationCreate)(eventForWebContents(1), { title: 'New' }),
+    /app_window_not_authorized/,
+  );
+  await assert.rejects(
+    createDeps().handlers.get(IPC_CHANNELS.appAgentConversationSendMessage)(eventForWebContents(1), { message: 'hello' }),
+    /app_window_not_authorized/,
+  );
+  assert.deepEqual(await createDeps().handlers.get(IPC_CHANNELS.appManifestAgentStop)(eventForWebContents(1), {
+    threadId: 'thread-1',
+  }), { success: false });
+
+  const queued = createDeps({
+    appAgentConversationManager: {
+      getMetadata: async () => ({ agentId: 'advisor' }),
+      sendMessage: async () => ({ conversationId: 'thread-1', title: 'No active run', messages: [] }),
+    },
+    registry: { apps: { 'finance-os': { installDir: '/tmp/finance-os' } } },
+    resolveAppIdForWebContents: () => 'finance-os',
+    resolveInstalledAgents: async () => [{ id: 'advisor', title: 'Advisor', initialPrompt: 'Help' }],
+  });
+  assert.deepEqual(
+    await queued.handlers.get(IPC_CHANNELS.appManifestAgentResume)(eventForWebContents(1), { threadId: 'thread-1' }),
+    { desktop_thread_id: 'thread-1', desktop_run_id: '', status: 'queued' },
+  );
+
+  const nullStarted = createDeps({
+    appAgentConversationManager: {
+      create: async () => ({ conversationId: 'thread-1', title: 'Manifest agent', messages: [] }),
+      sendMessage: async () => null,
+    },
+    registry: { apps: { 'finance-os': { installDir: '/tmp/finance-os' } } },
+    resolveAppIdForWebContents: () => 'finance-os',
+    resolveInstalledAgents: async () => [{ id: 'advisor', title: 'Advisor', initialPrompt: 'Help' }],
+  });
+  await assert.rejects(
+    nullStarted.handlers.get(IPC_CHANNELS.appManifestAgentStart)(eventForWebContents(1), { agentId: 'advisor' }),
+    /manifest_agent_thread_start_failed/,
+  );
+});
+
+test('automation IPC handlers expose safe missing-manager fallbacks and delegate when available', async () => {
+  const missing = createDeps();
+
+  assert.deepEqual(await missing.handlers.get(IPC_CHANNELS.automationsList)(), []);
+  await assert.rejects(
+    missing.handlers.get(IPC_CHANNELS.automationsCreate)(null, { title: 'Daily' }),
+    /automation_manager_unavailable/,
+  );
+  await assert.rejects(
+    missing.handlers.get(IPC_CHANNELS.automationsUpdate)(null, { id: 'auto-1' }),
+    /automation_manager_unavailable/,
+  );
+  assert.deepEqual(await missing.handlers.get(IPC_CHANNELS.automationsDelete)(null, 'auto-1'), {
+    success: false,
+    technicalCode: 'automation_manager_unavailable',
+  });
+  await assert.rejects(missing.handlers.get(IPC_CHANNELS.automationsPause)(null, 'auto-1'), /automation_manager_unavailable/);
+  await assert.rejects(missing.handlers.get(IPC_CHANNELS.automationsResume)(null, 'auto-1'), /automation_manager_unavailable/);
+  await assert.rejects(missing.handlers.get(IPC_CHANNELS.automationsRunNow)(null, 'auto-1'), /automation_manager_unavailable/);
+  assert.deepEqual(await missing.handlers.get(IPC_CHANNELS.automationsListRuns)(null, 'auto-1'), []);
+  assert.equal(await missing.handlers.get(IPC_CHANNELS.automationsGetRunTranscript)(null, 'run-1'), null);
+
+  const calls = [];
+  const manager = {
+    create: async (input) => {
+      calls.push(['create', input]);
+      return { id: 'auto-created' };
+    },
+    delete: async (id) => {
+      calls.push(['delete', id]);
+      return { success: true };
+    },
+    getRunTranscript: async (runId) => {
+      calls.push(['getRunTranscript', runId]);
+      return [{ role: 'assistant', content: 'done' }];
+    },
+    list: async () => {
+      calls.push(['list']);
+      return [{ id: 'auto-1' }];
+    },
+    listRuns: async (automationId) => {
+      calls.push(['listRuns', automationId]);
+      return [{ id: 'run-1' }];
+    },
+    pause: async (id) => {
+      calls.push(['pause', id]);
+      return { success: true, paused: true };
+    },
+    resume: async (id) => {
+      calls.push(['resume', id]);
+      return { success: true, paused: false };
+    },
+    runNow: async (id) => {
+      calls.push(['runNow', id]);
+      return { id: 'run-now' };
+    },
+    update: async (input) => {
+      calls.push(['update', input]);
+      return { id: input.id, updated: true };
+    },
+  };
+  const available = createDeps({ automationManager: manager });
+
+  assert.deepEqual(await available.handlers.get(IPC_CHANNELS.automationsList)(), [{ id: 'auto-1' }]);
+  assert.deepEqual(await available.handlers.get(IPC_CHANNELS.automationsCreate)(null, { title: 'Daily' }), {
+    id: 'auto-created',
+  });
+  assert.deepEqual(await available.handlers.get(IPC_CHANNELS.automationsUpdate)(null, { id: 'auto-1' }), {
+    id: 'auto-1',
+    updated: true,
+  });
+  assert.deepEqual(await available.handlers.get(IPC_CHANNELS.automationsDelete)(null, 'auto-1'), { success: true });
+  assert.deepEqual(await available.handlers.get(IPC_CHANNELS.automationsPause)(null, 'auto-1'), {
+    success: true,
+    paused: true,
+  });
+  assert.deepEqual(await available.handlers.get(IPC_CHANNELS.automationsResume)(null, 'auto-1'), {
+    success: true,
+    paused: false,
+  });
+  assert.deepEqual(await available.handlers.get(IPC_CHANNELS.automationsRunNow)(null, 'auto-1'), { id: 'run-now' });
+  assert.deepEqual(await available.handlers.get(IPC_CHANNELS.automationsListRuns)(null, 'auto-1'), [{ id: 'run-1' }]);
+  assert.deepEqual(await available.handlers.get(IPC_CHANNELS.automationsGetRunTranscript)(null, 'run-1'), [
+    { role: 'assistant', content: 'done' },
+  ]);
+  assert.deepEqual(calls.map((entry) => entry[0]), [
+    'list',
+    'create',
+    'update',
+    'delete',
+    'pause',
+    'resume',
+    'runNow',
+    'listRuns',
+    'getRunTranscript',
+  ]);
+});

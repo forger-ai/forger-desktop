@@ -547,10 +547,7 @@ const isVersionNewer = (candidate?: string, current?: string): boolean => {
     if (a > b) return true;
     if (a < b) return false;
   }
-  if (normalizedCandidate && normalizedCurrent) {
-    return normalizedCandidate > normalizedCurrent;
-  }
-  return false;
+  return (normalizedCandidate ?? '') > (normalizedCurrent ?? '');
 };
 
 const mapBackendCategory = (backendCategory: string): AppCategory => {
