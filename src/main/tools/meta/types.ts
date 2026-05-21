@@ -12,10 +12,8 @@ export const META_SCOPES = [
   'leads_retrieval',
 ] as const;
 
-export interface MetaListPagesInput {
-  // No input — returns all Pages the user manages. Filtering by name happens
-  // client-side after the call.
-}
+// meta.list_pages takes no required input. The optional `maxResults` is read
+// inline by the action handler, so there is no dedicated input interface.
 
 export interface MetaListLeadFormsInput {
   pageId: string;

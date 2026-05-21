@@ -55,11 +55,6 @@ interface LeadFormNode {
   leads_count?: number;
 }
 
-interface LeadFormsResponse {
-  data?: LeadFormNode[];
-  paging?: { next?: string };
-}
-
 interface LeadNode {
   id?: string;
   created_time?: string;
@@ -73,11 +68,6 @@ interface LeadNode {
   partner_name?: string;
   field_data?: Array<{ name?: string; values?: unknown }>;
   custom_disclaimer_responses?: Array<{ name?: string; values?: unknown }>;
-}
-
-interface LeadsResponse {
-  data?: LeadNode[];
-  paging?: { next?: string; cursors?: { before?: string; after?: string } };
 }
 
 const sanitizeText = (value: unknown): string | undefined => {

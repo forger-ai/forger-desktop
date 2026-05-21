@@ -309,8 +309,9 @@ const bindServerOnPreferredPort = async (
       lastError = error as Error;
     }
   }
+  const detail = lastError ? ` (${lastError.message})` : '';
   throw new MetaOAuthError(
-    'No hay puertos locales libres entre los preautorizados para OAuth de Meta.',
+    `No hay puertos locales libres entre los preautorizados para OAuth de Meta.${detail}`,
     'meta_oauth_no_redirect_port_available',
   );
 };
