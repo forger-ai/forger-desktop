@@ -1,6 +1,6 @@
 import type { ForgerAppApi } from './types/app-api';
 
-export type { AgentDefaults, AgentEffort, AgentModelOptions, AgentProvider, AgentRuntime, ClaudeEffort, ClaudeModelOption, CodexModelOption, CodexReasoningEffort } from './types/agent-runtime';
+export type { AgentDefaults, AgentEffort, AgentModelOptions, AgentProvider, AgentRuntime, AgentRuntimeRecommendations, AgentRuntimeRequest, ClaudeEffort, ClaudeModelOption, CodexModelOption, CodexReasoningEffort } from './types/agent-runtime';
 export {
   AGENT_MODEL_OPTIONS,
   AGENT_PROVIDER_OPTIONS,

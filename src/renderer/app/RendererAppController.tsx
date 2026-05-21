@@ -96,6 +96,8 @@ import { FORGER_TOUR_RESET_EVENT } from '@renderer/tour/useForgerTour';
 import {
   getUsageAnalyticsEnabled,
   setUsageAnalyticsPreference,
+  submitChatGptConnectedEvent,
+  submitForgerInstalledEvent,
   submitUsageEvent,
 } from '@renderer/usage-analytics';
 
@@ -181,6 +183,7 @@ if (memoriesResult.status === 'fulfilled') { setMemories(memoriesResult.value); 
 if (codexAuthResult.status === 'fulfilled') { setCodexAuthStatus(codexAuthResult.value); }
 if (claudeAuthResult.status === 'fulfilled') { setClaudeAuthStatus(claudeAuthResult.value); }
 if (desktopUpdateResult.status === 'fulfilled') { setDesktopUpdateState(desktopUpdateResult.value); }
+submitForgerInstalledEvent({ surface: 'startup', locale: t.locale });
 const today = new Date().toISOString().slice(0, 10); const lastStartupCheck = window.localStorage.getItem(STARTUP_UPDATE_CHECK_STORAGE_KEY); if (lastStartupCheck !== today) { window.localStorage.setItem(STARTUP_UPDATE_CHECK_STORAGE_KEY, today); void desktopApi.checkDesktopUpdates().then((state) => { setDesktopUpdateState(state); if (state.status === 'available' && state.availableVersion) { setBannerSeverity('info'); setBannerMessage(t.settings.desktopStartupUpdateAvailable(state.availableVersion));
 } else if (state.status === 'unsupported' && state.userMessage) { setBannerSeverity('warning'); setBannerMessage(state.userMessage); }
 }).catch(() => undefined); }
@@ -460,7 +463,7 @@ const closeCodexConfig = () => { cancelAuthConnectAttempt('codex'); setCodexConf
 const closeClaudeConfig = () => { cancelAuthConnectAttempt('claude'); setClaudeConfigOpen(false); };
 const handleConnectCodexAuth = async () => { const attempt = beginAuthConnectAttempt('codex'); let connectSettled = false; const polling = pollCodexAuthStatus(() => connectSettled || !isAuthConnectAttemptActive(attempt)).catch(() => undefined); try { const desktopApi = getDesktopApi(); const result = await desktopApi.connectCodexAuth(); connectSettled = true; await polling; if (!isAuthConnectAttemptActive(attempt)) { return; }
 setBannerSeverity(result.success ? 'info' : 'error'); setBannerMessage(result.userMessage); requestErrorReportFromResult('agent', 'codex-connect', result); const nextStatus = result.success ? await pollCodexAuthStatus(() => !isAuthConnectAttemptActive(attempt)) : await refreshCodexAuthStatus(); if (!isAuthConnectAttemptActive(attempt)) { return; }
-if (nextStatus.authenticated) { setCodexConfigOpen(false); setAgentProviderConfigOpen(false); } } catch (error) { connectSettled = true; await polling; if (!isAuthConnectAttemptActive(attempt)) { return; }
+if (result.success && nextStatus.authenticated) { submitChatGptConnectedEvent({ surface: 'settings', locale: t.locale }); setCodexConfigOpen(false); setAgentProviderConfigOpen(false); } } catch (error) { connectSettled = true; await polling; if (!isAuthConnectAttemptActive(attempt)) { return; }
 setBannerSeverity('error'); setBannerMessage(t.settings.codexConnectError); requestErrorReport({ source: 'agent',
 operation: 'codex-connect', message: error instanceof Error ? error.message : t.settings.codexConnectError, technicalCode: 'codex_connect_unhandled_error', sensitiveDetails: { stack: error instanceof Error ? error.stack : undefined }, }); } finally { connectSettled = true; finishAuthConnectAttempt(attempt); }
 };

@@ -7,6 +7,7 @@ import type { ClaudeAuthStatus, CodexAuthStatus, OfficialToolSummary } from '@sh
 import {
   getUsageAnalyticsEnabled,
   recordLegalWelcomeDecision,
+  submitForgerInstalledEvent,
   submitUsageEvent,
 } from '@renderer/usage-analytics';
 
@@ -294,6 +295,7 @@ export function useForgerTour({
     }
     if (activeStep?.id === 'welcome') {
       recordLegalWelcomeDecision(welcomeUsageAnalyticsEnabled);
+      submitForgerInstalledEvent({ surface: 'onboarding', locale: t.locale });
       submitUsageEvent({
         eventName: welcomeUsageAnalyticsEnabled ? 'usage_analytics_accepted' : 'usage_analytics_declined',
         surface: 'onboarding',
@@ -332,6 +334,7 @@ export function useForgerTour({
     }
     if (activeStep?.id === 'welcome') {
       recordLegalWelcomeDecision(welcomeUsageAnalyticsEnabled);
+      submitForgerInstalledEvent({ surface: 'onboarding', locale: t.locale });
       submitUsageEvent({
         eventName: welcomeUsageAnalyticsEnabled ? 'usage_analytics_accepted' : 'usage_analytics_declined',
         surface: 'onboarding',

@@ -69,7 +69,7 @@ test('Codex auth output classifies missing bundled Node and expired auth', () =>
 });
 
 test('macOS Codex login path is direct spawn, not Terminal or generated command script', async () => {
-  const source = await fs.readFile(new URL('../../src/main/index.ts', import.meta.url), 'utf8');
+  const source = await fs.readFile(new URL('../../src/main/runtime/agent-auth.ts', import.meta.url), 'utf8');
   const macBranchStart = source.indexOf("if (process.platform === 'darwin') {", source.indexOf('const connectCodexAuth'));
   const winBranchStart = source.indexOf("if (process.platform === 'win32') {", macBranchStart);
   assert.notEqual(macBranchStart, -1);

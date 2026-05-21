@@ -1,6 +1,7 @@
 import type { FailureDiagnosticFields } from './base';
 
 export type UsageEventName =
+  | 'forger_installed'
   | 'usage_analytics_accepted'
   | 'usage_analytics_declined'
   | 'usage_analytics_revoked'
@@ -15,6 +16,7 @@ export type UsageEventName =
   | 'app_install_failed'
   | 'app_opened'
   | 'chat_started'
+  | 'chatgpt_connected'
   | 'feedback_opened'
   | 'feedback_submitted';
 

@@ -20,17 +20,15 @@ import type {
   CloudAppMessagePermissionDecision,
   RemoteAppBackupSummary,
   RemoteBackupsState,
-  RemoteBackupsUsage,
   SubmitProductFeedbackInput,
   SubmitAppRatingInput,
   SubmitUsageEventInput,
   SubmitUsageEventResult,
 } from '../shared/types';
 import fs from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 import { normalizeErrorReportDiagnostic } from '../shared/error-diagnostics';
-import { normalizeForgerAccountUser, type StoredForgerAccount } from './forger-account-store';
+import type { StoredForgerAccount } from './forger-account-store';
 import {
   mapCatalogItem,
   normalizeRating,
@@ -43,6 +41,22 @@ import {
   normalizeCloudUser,
   normalizeFriendship,
 } from './forger-backend/cloud-normalizers';
+import {
+  backendError,
+  buildBackendHeaders,
+  defaultReportingLogPath,
+  emptyRemoteBackupsState,
+  googleLoginErrorMessage,
+  normalizeRemoteBackup,
+  normalizeRemoteBackupsUsage,
+  normalizeRuntimePlatform,
+  parseAccountPayload,
+  remoteBackupErrorMessage,
+  responseRequestId,
+  safeValidationKeys,
+  type RemoteBackupsResponse,
+  usernameCooldownMessage,
+} from './forger-backend/client-helpers';
 
 interface ClientOptions {
   backendBaseUrl: string;
@@ -64,48 +78,6 @@ interface DownloadPayload {
   };
 }
 
-const usernameCooldownMessage = (availableAt?: string): string => {
-  if (!availableAt) {
-    return 'Podras cambiar tu username cuando se cumplan 30 dias desde el ultimo cambio.';
-  }
-
-  const date = new Date(availableAt);
-  if (Number.isNaN(date.getTime())) {
-    return 'Podras cambiar tu username cuando se cumplan 30 dias desde el ultimo cambio.';
-  }
-
-  return `Podras cambiar tu username desde el ${date.toLocaleDateString('es-CL', { dateStyle: 'medium' })}.`;
-};
-
-interface RemoteBackupPayload {
-  id: number | string;
-  app_id: string;
-  app_name: string;
-  app_version?: string | null;
-  backup_type: RemoteBackupType;
-  source: RemoteBackupSource;
-  metadata?: Record<string, unknown> | null;
-  file_count?: number | string | null;
-  total_bytes?: number | string | null;
-  checksum_sha256?: string | null;
-  signature?: string | null;
-  signature_key_fingerprint?: string | null;
-  signature_algorithm?: string | null;
-  created_at?: string;
-  updated_at?: string;
-  download_url?: string;
-}
-
-interface RemoteBackupsResponse {
-  backups?: unknown[];
-  usage?: {
-    used_bytes?: number | string | null;
-    limit_bytes?: number | string | null;
-    backup_count?: number | string | null;
-    backup_count_limit?: number | string | null;
-  } | null;
-}
-
 interface GmailOAuthTokenResponse {
   access_token?: string;
   refresh_token?: string;
@@ -123,67 +95,8 @@ interface GoogleLoginSessionInput {
   redirectUri: string;
 }
 
-const backendError = (message: string, technicalCode: string): Error & { technicalCode: string } =>
-  Object.assign(new Error(message), { technicalCode });
-
-const normalizeRuntimePlatform = (platform: NodeJS.Platform, arch: string): string => {
-  const normalizedArch = arch === 'x64' || arch === 'arm64' ? arch : arch.replace(/[^a-zA-Z0-9_-]/g, '_');
-  return `${platform}_${normalizedArch}`;
-};
-
-const safeValidationKeys = (payload: unknown): Record<string, string[]> | undefined => {
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-    return undefined;
-  }
-  const errors = (payload as { errors?: unknown }).errors;
-  if (!errors || typeof errors !== 'object' || Array.isArray(errors)) {
-    return undefined;
-  }
-  const entries = Object.entries(errors)
-    .filter(([key]) => /^[a-zA-Z0-9_.-]+$/.test(key))
-    .map(([key, value]) => [
-      key,
-      Array.isArray(value)
-        ? value.map((entry) => String(entry)).slice(0, 5)
-        : [String(value)],
-    ] as const);
-  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
-};
-
-const responseRequestId = (response: Response): string | undefined =>
-  response.headers.get('x-request-id') ?? response.headers.get('x-correlation-id') ?? undefined;
-
-const defaultReportingLogPath = (): string => {
-  const appDataName = process.env.VITE_DEV_SERVER_URL ? 'forger-desktop-dev' : 'forger-desktop';
-  if (process.platform === 'darwin') {
-    return path.join(os.homedir(), 'Library', 'Application Support', appDataName, 'logs', 'reporting.log');
-  }
-  if (process.platform === 'win32') {
-    return path.join(process.env.APPDATA ?? os.homedir(), appDataName, 'logs', 'reporting.log');
-  }
-  return path.join(process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), '.config'), appDataName, 'logs', 'reporting.log');
-};
-
-const emptyRemoteBackupsState = (): RemoteBackupsState => ({
-  backups: [],
-  usage: {
-    usedBytes: 0,
-    limitBytes: 0,
-    backupCount: 0,
-    backupCountLimit: 0,
-  },
-});
-
 export class ForgerBackendClient {
   constructor(private readonly options: ClientOptions) {}
-
-  private desktopPlatform(): string {
-    return this.options.platform?.() ?? normalizeRuntimePlatform(process.platform, process.arch);
-  }
-
-  private desktopVersion(): string | undefined {
-    return this.options.desktopVersion?.();
-  }
 
   private async appendReportingLog(event: string, details: Record<string, unknown>): Promise<void> {
     const logPath = this.options.reportingLogPath?.() ?? defaultReportingLogPath();
@@ -208,7 +121,7 @@ export class ForgerBackendClient {
     try {
       const response = await fetch(`${this.options.backendBaseUrl}/api/v1/catalog/apps`, {
         method: 'GET',
-        headers: this.buildHeaders(),
+        headers: buildBackendHeaders(this.options.token()),
       });
 
       if (response.ok) {
@@ -337,7 +250,7 @@ export class ForgerBackendClient {
 
     await fetch(`${this.options.backendBaseUrl}/api/v1/session`, {
       method: 'DELETE',
-      headers: this.buildHeaders(),
+      headers: buildBackendHeaders(this.options.token()),
     }).catch(() => undefined);
   }
 
@@ -347,7 +260,7 @@ export class ForgerBackendClient {
     const response = await fetch(`${this.options.backendBaseUrl}/api/v1/me/profile`, {
       method: 'PATCH',
       headers: {
-        ...this.buildHeaders(),
+        ...buildBackendHeaders(this.options.token()),
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -379,7 +292,7 @@ export class ForgerBackendClient {
   async getGmailOAuthClientId(): Promise<string> {
     const response = await fetch(`${this.options.backendBaseUrl}/api/v1/oauth/gmail/config`, {
       method: 'GET',
-      headers: this.buildHeaders(),
+      headers: buildBackendHeaders(this.options.token()),
     });
     const payload = await this.readJson<Record<string, unknown>>(response);
     if (!response.ok) {
@@ -505,7 +418,7 @@ export class ForgerBackendClient {
       return {
         success: false,
         authenticated: false,
-        userMessage: this.googleLoginErrorMessage(payload),
+        userMessage: googleLoginErrorMessage(payload),
         technicalCode: `google_login_failed_${response.status}`,
       };
     }
@@ -524,7 +437,7 @@ export class ForgerBackendClient {
     const response = await fetch(`${this.options.backendBaseUrl}/api/v1/me/devices/register`, {
       method: 'POST',
       headers: {
-        ...this.buildHeaders(),
+        ...buildBackendHeaders(this.options.token()),
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -546,7 +459,7 @@ export class ForgerBackendClient {
   async listDevices(): Promise<CloudDeviceSummary[]> {
     const response = await fetch(`${this.options.backendBaseUrl}/api/v1/me/devices`, {
       method: 'GET',
-      headers: this.buildHeaders(),
+      headers: buildBackendHeaders(this.options.token()),
     });
     if (!response.ok) {
       throw backendError('Forger Cloud session is no longer valid.', `devices_list_failed_${response.status}`);
@@ -562,7 +475,7 @@ export class ForgerBackendClient {
     const response = await fetch(`${this.options.backendBaseUrl}/api/v1/me/devices/${input.deviceId}/pairing_codes`, {
       method: 'POST',
       headers: {
-        ...this.buildHeaders(),
+        ...buildBackendHeaders(this.options.token()),
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -682,7 +595,7 @@ export class ForgerBackendClient {
     const response = await fetch(`${this.options.backendBaseUrl}/api/v1/catalog/apps/${encodeURIComponent(input.appId)}/rating`, {
       method: 'PUT',
       headers: {
-        ...this.buildHeaders(),
+        ...buildBackendHeaders(this.options.token()),
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -707,8 +620,8 @@ export class ForgerBackendClient {
   async submitProductFeedback(
     input: SubmitProductFeedbackInput,
   ): Promise<{ success: boolean; userMessage?: string; technicalCode?: string; details?: Record<string, unknown> }> {
-    const platform = this.desktopPlatform();
-    const desktopVersion = input.desktopVersion ?? this.desktopVersion();
+    const platform = this.options.platform?.() ?? normalizeRuntimePlatform(process.platform, process.arch);
+    const desktopVersion = input.desktopVersion ?? this.options.desktopVersion?.();
     const logBase = {
       operation: 'feedback.submit',
       target: input.target,
@@ -722,7 +635,7 @@ export class ForgerBackendClient {
       const response = await fetch(`${this.options.backendBaseUrl}/api/v1/feedbacks`, {
         method: 'POST',
         headers: {
-          ...this.buildHeaders(),
+          ...buildBackendHeaders(this.options.token()),
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -789,8 +702,8 @@ export class ForgerBackendClient {
   }
 
   async submitUsageEvent(input: SubmitUsageEventInput): Promise<SubmitUsageEventResult> {
-    const platform = input.platform ?? this.desktopPlatform();
-    const desktopVersion = input.desktopVersion ?? this.desktopVersion();
+    const platform = input.platform ?? this.options.platform?.() ?? normalizeRuntimePlatform(process.platform, process.arch);
+    const desktopVersion = input.desktopVersion ?? this.options.desktopVersion?.();
     try {
       const response = await fetch(`${this.options.backendBaseUrl}/api/v1/usage_events`, {
         method: 'POST',
@@ -926,7 +839,7 @@ export class ForgerBackendClient {
     }
     const response = await fetch(url, {
       method: 'GET',
-      headers: this.buildHeaders(),
+      headers: buildBackendHeaders(this.options.token()),
     });
     const payload = await this.readJson<unknown>(response);
     if (!response.ok) {
@@ -934,7 +847,7 @@ export class ForgerBackendClient {
     }
     if (Array.isArray(payload)) {
       return {
-        backups: payload.map((entry) => this.normalizeRemoteBackup(entry)).filter((entry): entry is RemoteAppBackupSummary => Boolean(entry)),
+        backups: payload.map((entry) => normalizeRemoteBackup(entry)).filter((entry): entry is RemoteAppBackupSummary => Boolean(entry)),
         usage: emptyRemoteBackupsState().usage,
       };
     }
@@ -944,8 +857,8 @@ export class ForgerBackendClient {
     const record = payload as RemoteBackupsResponse;
     const backups = Array.isArray(record.backups) ? record.backups : [];
     return {
-      backups: backups.map((entry) => this.normalizeRemoteBackup(entry)).filter((entry): entry is RemoteAppBackupSummary => Boolean(entry)),
-      usage: this.normalizeRemoteBackupsUsage(record.usage),
+      backups: backups.map((entry) => normalizeRemoteBackup(entry)).filter((entry): entry is RemoteAppBackupSummary => Boolean(entry)),
+      usage: normalizeRemoteBackupsUsage(record.usage),
     };
   }
 
@@ -984,21 +897,21 @@ export class ForgerBackendClient {
 
     const response = await fetch(`${this.options.backendBaseUrl}/api/v1/me/backups`, {
       method: 'POST',
-      headers: this.buildHeaders({ contentType: false }),
+      headers: buildBackendHeaders(this.options.token(), { contentType: false }),
       body: form,
     });
     const payload = await this.readJson<unknown>(response);
     if (!response.ok) {
       return {
         success: false,
-        userMessage: this.remoteBackupErrorMessage(response.status, payload),
+        userMessage: remoteBackupErrorMessage(response.status, payload),
         technicalCode: `remote_backup_create_failed_${response.status}`,
       };
     }
 
     return {
       success: true,
-      remoteBackup: this.normalizeRemoteBackup(payload),
+      remoteBackup: normalizeRemoteBackup(payload),
       userMessage: input.backupType === 'sync_snapshot' ? 'Datos sincronizados con Forger Cloud.' : 'Respaldo subido a Forger Cloud.',
     };
   }
@@ -1006,7 +919,7 @@ export class ForgerBackendClient {
   async downloadRemoteBackup(remoteBackupId: number, targetPath: string): Promise<{ checksumSha256?: string }> {
     const response = await fetch(`${this.options.backendBaseUrl}/api/v1/me/backups/${remoteBackupId}/download`, {
       method: 'GET',
-      headers: this.buildHeaders({ accept: 'application/zip' }),
+      headers: buildBackendHeaders(this.options.token(), { accept: 'application/zip' }),
     });
     if (!response.ok) {
       throw new Error(`remote_backup_download_failed_${response.status}`);
@@ -1020,7 +933,7 @@ export class ForgerBackendClient {
   async deleteRemoteBackup(remoteBackupId: number): Promise<{ success: boolean; userMessage: string; technicalCode?: string }> {
     const response = await fetch(`${this.options.backendBaseUrl}/api/v1/me/backups/${remoteBackupId}`, {
       method: 'DELETE',
-      headers: this.buildHeaders(),
+      headers: buildBackendHeaders(this.options.token()),
     });
     if (!response.ok) {
       return { success: false, userMessage: 'No pudimos eliminar el respaldo cloud.', technicalCode: `remote_backup_delete_failed_${response.status}` };
@@ -1035,7 +948,7 @@ export class ForgerBackendClient {
     const response = await fetch(`${this.options.backendBaseUrl}/api/v1/app_versions/${appVersionId}/download`, {
       method: 'POST',
       headers: {
-        ...this.buildHeaders(),
+        ...buildBackendHeaders(this.options.token()),
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -1056,25 +969,11 @@ export class ForgerBackendClient {
     return payload;
   }
 
-  private buildHeaders(options: { accept?: string; contentType?: false | string } = {}): Record<string, string> {
-    const headers: Record<string, string> = {
-      Accept: options.accept ?? 'application/json',
-    };
-    if (typeof options.contentType === 'string') {
-      headers['Content-Type'] = options.contentType;
-    }
-    const token = this.options.token();
-    if (token) {
-      headers.Authorization = `Bearer ${token}`;
-    }
-    return headers;
-  }
-
   private async postGmailOAuth(path: string, body: Record<string, string>): Promise<GmailOAuthTokenResponse> {
     const response = await fetch(`${this.options.backendBaseUrl}${path}`, {
       method: 'POST',
       headers: {
-        ...this.buildHeaders(),
+        ...buildBackendHeaders(this.options.token()),
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(body),
@@ -1128,7 +1027,7 @@ export class ForgerBackendClient {
   private async getJson(pathname: string, code: string): Promise<unknown> {
     const response = await fetch(`${this.options.backendBaseUrl}${pathname}`, {
       method: 'GET',
-      headers: this.buildHeaders(),
+      headers: buildBackendHeaders(this.options.token()),
     });
     const payload = await this.readJson<unknown>(response);
     if (!response.ok) {
@@ -1140,7 +1039,7 @@ export class ForgerBackendClient {
   private async postJson(pathname: string, body: Record<string, unknown>, code: string): Promise<unknown> {
     const response = await fetch(`${this.options.backendBaseUrl}${pathname}`, {
       method: 'POST',
-      headers: { ...this.buildHeaders(), 'Content-Type': 'application/json' },
+      headers: { ...buildBackendHeaders(this.options.token()), 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
     const payload = await this.readJson<unknown>(response);
@@ -1153,7 +1052,7 @@ export class ForgerBackendClient {
   private async patchJson(pathname: string, body: Record<string, unknown>, code: string): Promise<unknown> {
     const response = await fetch(`${this.options.backendBaseUrl}${pathname}`, {
       method: 'PATCH',
-      headers: { ...this.buildHeaders(), 'Content-Type': 'application/json' },
+      headers: { ...buildBackendHeaders(this.options.token()), 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
     const payload = await this.readJson<unknown>(response);
@@ -1163,91 +1062,7 @@ export class ForgerBackendClient {
     return payload;
   }
 
-  private normalizeRemoteBackup(value: unknown): RemoteAppBackupSummary | undefined {
-    if (!value || typeof value !== 'object') {
-      return undefined;
-    }
-    const record = value as RemoteBackupPayload;
-    const id = typeof record.id === 'number' ? record.id : Number(record.id);
-    if (!Number.isFinite(id) || !record.app_id || !record.app_name) {
-      return undefined;
-    }
-    return {
-      id,
-      appId: record.app_id,
-      appName: record.app_name,
-      appVersion: record.app_version ?? undefined,
-      backupType: record.backup_type === 'sync_snapshot' ? 'sync_snapshot' : 'backup',
-      source: record.source === 'auto_sync' ? 'auto_sync' : 'manual',
-      metadata: record.metadata && typeof record.metadata === 'object' ? record.metadata : {},
-      fileCount: Number(record.file_count ?? 0),
-      totalBytes: Number(record.total_bytes ?? 0),
-      checksumSha256: record.checksum_sha256 ?? '',
-      signature: record.signature ?? undefined,
-      signatureKeyFingerprint: record.signature_key_fingerprint ?? undefined,
-      signatureAlgorithm: record.signature_algorithm ?? undefined,
-      createdAt: record.created_at ?? new Date().toISOString(),
-      updatedAt: record.updated_at,
-      downloadUrl: record.download_url,
-    };
-  }
-
-  private normalizeRemoteBackupsUsage(value: unknown): RemoteBackupsUsage {
-    if (!value || typeof value !== 'object') {
-      return emptyRemoteBackupsState().usage;
-    }
-    const record = value as NonNullable<RemoteBackupsResponse['usage']>;
-    return {
-      usedBytes: Number(record.used_bytes ?? 0),
-      limitBytes: Number(record.limit_bytes ?? 0),
-      backupCount: Number(record.backup_count ?? 0),
-      backupCountLimit: Number(record.backup_count_limit ?? 0),
-    };
-  }
-
-  private remoteBackupErrorMessage(status: number, payload: unknown): string {
-    const error = payload && typeof payload === 'object' ? (payload as Record<string, unknown>).error : undefined;
-    if (status === 403) {
-      return 'Forger Cloud Sync requiere una cuenta demo o pro.';
-    }
-    if (error === 'storage_limit_exceeded') {
-      return 'Tu espacio de Forger Cloud esta lleno. Elimina respaldos cloud antes de subir otro.';
-    }
-    if (error === 'backup_count_limit_exceeded') {
-      return 'Llegaste al maximo de respaldos cloud. Elimina algunos antes de subir otro.';
-    }
-    return 'No pudimos subir el respaldo a Forger Cloud.';
-  }
-
-  private googleLoginErrorMessage(payload: unknown): string {
-    const error = payload && typeof payload === 'object' ? (payload as Record<string, unknown>).error : undefined;
-    if (error === 'google_login_server_not_configured') {
-      return 'Google login no esta configurado en Forger Cloud.';
-    }
-    if (error === 'google_login_email_unverified') {
-      return 'Google no confirmo este correo.';
-    }
-    if (error === 'google_login_account_conflict') {
-      return 'Este correo ya esta vinculado a otra cuenta de Google.';
-    }
-    if (error === 'access_denied') {
-      return 'Google cancelo el inicio de sesion.';
-    }
-    return 'No pudimos iniciar sesion con Google.';
-  }
-
   private parseAccount(payload: unknown, token?: string): StoredForgerAccount {
-    if (!payload || typeof payload !== 'object') {
-      return { authenticated: false };
-    }
-
-    const record = payload as Record<string, unknown>;
-    const user = normalizeForgerAccountUser(record.user);
-    return {
-      authenticated: Boolean(record.authenticated && (token || this.options.token()) && user),
-      confirmationRequired: Boolean(record.confirmation_required ?? record.confirmationRequired),
-      token,
-      user,
-    };
+    return parseAccountPayload(payload, token, this.options.token());
   }
 }

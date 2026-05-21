@@ -1,13 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type SyntheticEvent } from 'react';
-import ForumRounded from '@mui/icons-material/ForumRounded';
 import CheckRounded from '@mui/icons-material/CheckRounded';
 import CloseRounded from '@mui/icons-material/CloseRounded';
-import EditRounded from '@mui/icons-material/EditRounded';
 import PersonAddDisabledRounded from '@mui/icons-material/PersonAddDisabledRounded';
 import PersonAddRounded from '@mui/icons-material/PersonAddRounded';
 import SearchRounded from '@mui/icons-material/SearchRounded';
-import GroupsRounded from '@mui/icons-material/GroupsRounded';
-import SaveRounded from '@mui/icons-material/SaveRounded';
 import {
   Alert,
   Avatar,
@@ -18,9 +14,7 @@ import {
   CircularProgress,
   ClickAwayListener,
   Divider,
-  Fab,
   Grow,
-  IconButton,
   List,
   ListItemButton,
   Paper,
@@ -29,7 +23,6 @@ import {
   Tab,
   Tabs,
   TextField,
-  Tooltip,
   Typography,
   alpha,
   useTheme,
@@ -55,6 +48,8 @@ import {
   sortFriends,
   type SocialTab,
 } from './friends/socialViewHelpers';
+import { SocialLauncherButton } from './friends/SocialLauncherButton';
+import { SocialPanelHeader } from './friends/SocialPanelHeader';
 
 interface FriendsViewProps {
   account: ForgerAccountSession;
@@ -471,99 +466,18 @@ export function FriendsView({ account, accountBusy = false, onOpenFriendChat, on
     ? error ?? 'No pudimos cargar tus amigos.'
     : error ?? 'No pudimos cargar tus solicitudes.';
 
-  const launcherButton = topbar ? (
-    <Tooltip title="Social">
-      <Badge
-        color="error"
-        badgeContent={launcherBadgeCount}
-        overlap="circular"
-        invisible={launcherBadgeCount === 0}
-        sx={{
-          '& .MuiBadge-badge': {
-            minWidth: 18,
-            height: 18,
-            borderRadius: 1,
-            fontWeight: 700,
-            boxShadow: `0 0 0 2px ${theme.palette.background.paper}`,
-          },
-        }}
-      >
-        <IconButton
-          ref={launcherRef}
-          size="small"
-          aria-label="Social"
-          aria-describedby={open ? panelId : undefined}
-          aria-expanded={open}
-          onClick={handleToggle}
-          sx={{
-            width: 32,
-            height: 32,
-            borderRadius: 1,
-            color: open ? 'primary.main' : 'text.secondary',
-            bgcolor: open ? alpha(theme.palette.primary.main, 0.12) : 'transparent',
-            '&:hover': {
-              bgcolor: alpha(theme.palette.primary.main, 0.12),
-              color: 'primary.main',
-            },
-          }}
-        >
-          <GroupsRounded sx={{ fontSize: 19 }} />
-        </IconButton>
-      </Badge>
-    </Tooltip>
-  ) : (
-    <Tooltip title="Social" placement="left">
-      <Badge
-        color="error"
-        badgeContent={launcherBadgeCount}
-        overlap="rectangular"
-        invisible={launcherBadgeCount === 0}
-        sx={{
-          '& .MuiBadge-badge': {
-            minWidth: 20,
-            height: 20,
-            borderRadius: 10,
-            fontWeight: 700,
-            boxShadow: `0 0 0 2px ${theme.palette.background.default}`,
-          },
-        }}
-      >
-        <Fab
-          ref={launcherRef}
-          aria-label="Social"
-          aria-describedby={open ? panelId : undefined}
-          aria-expanded={open}
-          onClick={handleToggle}
-          sx={{
-            width: 64,
-            height: 64,
-            minHeight: 64,
-            borderRadius: 1,
-            boxShadow: open ? theme.shadows[10] : theme.shadows[6],
-            bgcolor: open ? theme.palette.primary.main : alpha(theme.palette.background.paper, 0.96),
-            color: open ? theme.palette.primary.contrastText : theme.palette.text.primary,
-            border: `1px solid ${open ? alpha(theme.palette.primary.main, 0.9) : alpha(theme.palette.divider, 0.9)}`,
-            backdropFilter: 'blur(18px)',
-            transition: theme.transitions.create(['background-color', 'box-shadow', 'transform'], {
-              duration: theme.transitions.duration.shorter,
-            }),
-            '&:hover': {
-              bgcolor: open ? theme.palette.primary.dark : alpha(theme.palette.background.paper, 1),
-              transform: 'translateY(-1px)',
-            },
-          }}
-        >
-          <ForumRounded />
-        </Fab>
-      </Badge>
-    </Tooltip>
-  );
-
   return (
     <Box sx={topbar ? { position: 'relative' } : { position: 'fixed', right: 24, bottom: 24, zIndex: theme.zIndex.modal - 1 }}>
       <ClickAwayListener onClickAway={() => open && closePanel()}>
         <Box sx={{ position: 'relative' }}>
-          {launcherButton}
+          <SocialLauncherButton
+            badgeCount={launcherBadgeCount}
+            open={open}
+            panelId={panelId}
+            topbar={topbar}
+            launcherRef={launcherRef}
+            onToggle={handleToggle}
+          />
 
           <Popper
             id={panelId}
@@ -593,100 +507,28 @@ export function FriendsView({ account, accountBusy = false, onOpenFriendChat, on
                   }}
                 >
                   <Stack sx={{ minHeight: 420, maxHeight: 560 }}>
-                    <Stack spacing={0.5} sx={{ px: 2, pt: 1.8, pb: 1.4 }}>
-                      <Stack direction="row" alignItems="center" spacing={1}>
-                        <Typography variant="subtitle1" sx={{ fontWeight: 700, flex: 1 }}>
-                          Social
-                        </Typography>
-                        {launcherBusy ? <CircularProgress size={16} /> : null}
-                      </Stack>
-                      <Stack spacing={0.25}>
-                        <Typography variant="body2" color="text.secondary">
-                          {tabSubtitle}
-                        </Typography>
-                        {editingUsername ? (
-                          <Box component="form" onSubmit={(event) => void handleUsernameSubmit(event)} sx={{ pt: 0.5 }}>
-                            <Stack direction="row" spacing={0.75} alignItems="flex-start">
-                              <TextField
-                                size="small"
-                                value={profileUsername}
-                                onChange={(event) => {
-                                  setProfileUsername(event.target.value);
-                                  setProfileUsernameError(null);
-                                }}
-                                placeholder="@username"
-                                error={Boolean(profileUsernameError)}
-                                helperText={profileUsernameError ?? 'Letras, numeros o guion bajo.'}
-                                disabled={accountBusy}
-                                inputProps={{ 'aria-label': 'Nuevo username' }}
-                                sx={{ flex: 1 }}
-                              />
-                              <Tooltip title="Guardar username">
-                                <span>
-                                  <IconButton
-                                    type="submit"
-                                    size="small"
-                                    color="primary"
-                                    disabled={accountBusy || !profileUsername.trim()}
-                                    sx={{ mt: 0.35 }}
-                                  >
-                                    {accountBusy ? <CircularProgress size={16} /> : <SaveRounded fontSize="small" />}
-                                  </IconButton>
-                                </span>
-                              </Tooltip>
-                              <Tooltip title="Cancelar">
-                                <span>
-                                  <IconButton
-                                    size="small"
-                                    onClick={() => {
-                                      setProfileUsername(account.user?.username ?? '');
-                                      setProfileUsernameError(null);
-                                      setEditingUsername(false);
-                                    }}
-                                    disabled={accountBusy}
-                                    sx={{ mt: 0.35 }}
-                                  >
-                                    <CloseRounded fontSize="small" />
-                                  </IconButton>
-                                </span>
-                              </Tooltip>
-                            </Stack>
-                          </Box>
-                        ) : (
-                          <Stack direction="row" spacing={0.75} alignItems="center" sx={{ minWidth: 0 }}>
-                            <Typography variant="caption" color="text.secondary" noWrap sx={{ minWidth: 0 }}>
-                              {accountUsername ? `Tu username: @${accountUsername}` : 'Tu cuenta no tiene username visible'}
-                            </Typography>
-                            {account.authenticated && account.user?.confirmed && onUpdateUsername ? (
-                              <Tooltip
-                                title={
-                                  usernameChangeBlocked && usernameAvailableDate
-                                    ? `Disponible desde el ${usernameAvailableDate}`
-                                    : 'Cambiar username'
-                                }
-                              >
-                                <span>
-                                  <IconButton
-                                    size="small"
-                                    aria-label="Cambiar username"
-                                    onClick={() => setEditingUsername(true)}
-                                    disabled={accountBusy || usernameChangeBlocked}
-                                    sx={{ width: 24, height: 24, flexShrink: 0 }}
-                                  >
-                                    <EditRounded sx={{ fontSize: 16 }} />
-                                  </IconButton>
-                                </span>
-                              </Tooltip>
-                            ) : null}
-                          </Stack>
-                        )}
-                        {usernameChangeBlocked && usernameAvailableDate && !editingUsername ? (
-                          <Typography variant="caption" color="text.secondary">
-                            Puedes cambiarlo desde el {usernameAvailableDate}.
-                          </Typography>
-                        ) : null}
-                      </Stack>
-                    </Stack>
+                    <SocialPanelHeader
+                      account={account}
+                      accountBusy={accountBusy}
+                      accountUsername={accountUsername}
+                      editingUsername={editingUsername}
+                      launcherBusy={launcherBusy}
+                      profileUsername={profileUsername}
+                      profileUsernameError={profileUsernameError}
+                      tabSubtitle={tabSubtitle}
+                      usernameAvailableDate={usernameAvailableDate}
+                      usernameChangeBlocked={usernameChangeBlocked}
+                      canUpdateUsername={Boolean(onUpdateUsername)}
+                      onCancelUsernameEdit={() => {
+                        setProfileUsername(account.user?.username ?? '');
+                        setProfileUsernameError(null);
+                        setEditingUsername(false);
+                      }}
+                      onEditingUsernameChange={setEditingUsername}
+                      onProfileUsernameChange={setProfileUsername}
+                      onProfileUsernameErrorChange={setProfileUsernameError}
+                      onUsernameSubmit={(event) => void handleUsernameSubmit(event)}
+                    />
 
                     <Tabs
                       value={activeTab}

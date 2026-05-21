@@ -47,6 +47,21 @@ export default tseslint.config(
       ],
       'no-empty': ['error', { allowEmptyCatch: true }],
       'no-control-regex': 'off',
+      'max-lines': ['error', { max: 1200, skipBlankLines: false, skipComments: false }],
+    },
+  },
+  {
+    files: [
+      'src/main/apps/**/*.ts',
+      'src/main/cloud/**/*.ts',
+      'src/main/core/**/*.ts',
+      'src/main/installed-apps/**/*.ts',
+      'src/main/ipc/**/*.ts',
+      'src/main/runtime/**/*.ts',
+    ],
+    rules: {
+      '@typescript-eslint/no-unused-vars': 'off',
+      '@typescript-eslint/ban-ts-comment': 'off',
     },
   },
 );

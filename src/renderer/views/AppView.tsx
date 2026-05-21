@@ -12,10 +12,6 @@ import {
   Button,
   Chip,
   CircularProgress,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
   LinearProgress,
   MenuItem,
   Rating,
@@ -47,6 +43,7 @@ import type {
 import type { AppDictionary } from '@renderer/i18n';
 import { AppSecretsPanel } from '@renderer/components/AppSecretsDialog';
 import { AppViewActions } from './app-view/AppViewActions';
+import { PromptPreviewDialog, type PromptPreview } from './app-view/PromptPreviewDialog';
 
 interface AppViewProps {
   details: AppDetails | null;
@@ -87,7 +84,6 @@ const initialsFromName = (name: string) =>
     .join('');
 
 type AppViewTab = 'general' | 'prompts' | 'reviews' | 'history' | 'updates' | 'secrets';
-type PromptPreview = { title: string; description?: string; prompt: string } | null;
 
 const promptReviewKey = (kind: string, id: string) => `${kind}:${id}`;
 
@@ -995,39 +991,7 @@ export function AppView({
       {activeTab === 'history' ? historyContent : null}
       {activeTab === 'updates' ? updatesContent : null}
       {activeTab === 'secrets' ? secretsContent : null}
-      <Dialog open={promptPreview !== null} onClose={() => setPromptPreview(null)} fullWidth maxWidth="md">
-        <DialogTitle>{promptPreview?.title}</DialogTitle>
-        <DialogContent>
-          <Stack spacing={1.5}>
-            {promptPreview?.description ? (
-              <Typography color="text.secondary">{promptPreview.description}</Typography>
-            ) : null}
-            <Typography variant="caption" color="text.secondary">
-              {t.appView.promptPreviewLabel}
-            </Typography>
-            <Box
-              component="pre"
-              sx={{
-                m: 0,
-                p: 1.5,
-                border: '1px solid',
-                borderColor: 'divider',
-                bgcolor: 'background.default',
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word',
-                fontFamily: 'monospace',
-                fontSize: 13,
-                lineHeight: 1.55,
-              }}
-            >
-              {promptPreview?.prompt}
-            </Box>
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setPromptPreview(null)}>{t.actions.close}</Button>
-        </DialogActions>
-      </Dialog>
+      <PromptPreviewDialog preview={promptPreview} t={t} onClose={() => setPromptPreview(null)} />
     </Stack>
   );
 }
