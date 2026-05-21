@@ -332,7 +332,7 @@ export class ForgerBackendClient {
   async getMetaOAuthClientId(): Promise<string> {
     const response = await fetch(`${this.options.backendBaseUrl}/api/v1/oauth/meta/config`, {
       method: 'GET',
-      headers: this.buildHeaders(),
+      headers: buildBackendHeaders(this.options.token()),
     });
     const payload = await this.readJson<Record<string, unknown>>(response);
     if (!response.ok) {
@@ -994,7 +994,7 @@ export class ForgerBackendClient {
     const response = await fetch(`${this.options.backendBaseUrl}${path}`, {
       method: 'POST',
       headers: {
-        ...this.buildHeaders(),
+        ...buildBackendHeaders(this.options.token()),
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(body),
