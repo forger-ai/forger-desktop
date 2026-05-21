@@ -1,9 +1,80 @@
-// @ts-nocheck
+import type { ChildProcessWithoutNullStreams } from 'node:child_process';
+import type { createHash as createHashFn } from 'node:crypto';
+import type fs from 'node:fs/promises';
+import type path from 'node:path';
+import type { spawn as spawnFn } from 'node:child_process';
+import type yauzl from 'yauzl';
 
-type CommandGitDeps = Record<string, any>;
+import type { AppManifest } from '../core/main-process-types';
+
+interface CommandRunLog {
+  appId?: string;
+  phase?: string;
+  label?: string;
+}
+
+interface CommandRunOptions {
+  cwd: string;
+  env?: NodeJS.ProcessEnv;
+  log?: CommandRunLog;
+}
+
+interface CommandCaptureOptions {
+  cwd: string;
+  env?: NodeJS.ProcessEnv;
+  timeoutMs?: number;
+}
+
+interface CommandCaptureResult {
+  code: number | null;
+  stdout: string;
+  stderr: string;
+}
+
+type AppendInstallLog = (event: string, payload?: Record<string, unknown>) => Promise<void>;
+
+interface CommandGitDeps {
+  BUNDLED_GIT_VERSION: string;
+  appendInstallLog: AppendInstallLog;
+  app: Electron.App;
+  createHash: typeof createHashFn;
+  findRuntimeArchive: (baseDir: string, platformAlias: string) => Promise<string | null>;
+  findRuntimeChecksumFile: (baseDir: string, archivePath: string, platformAlias: string) => Promise<string | null>;
+  fs: typeof fs;
+  getBundledResourcesRoot: () => string;
+  getRuntimesRoot: () => string;
+  getTempRoot: () => string;
+  normalizeVersionForFolder: (value: string) => string;
+  path: typeof path;
+  resolvePlatformAlias: () => string;
+  runtimePlatformTokens: (platformAlias: string) => string[];
+  serializeErrorForInstallLog: (error: unknown) => Record<string, unknown>;
+  spawn: typeof spawnFn;
+  stripArchiveExtension: (archiveName: string) => string;
+  syncDirectory: (directoryPath: string) => Promise<void>;
+  truncateForInstallLog: (value: string) => string;
+  yauzl: typeof yauzl;
+}
 
 export const createCommandGitController = (deps: CommandGitDeps) => {
-  const { fs, path, spawn, app, createHash, appendInstallLog, serializeErrorForInstallLog, truncateForInstallLog, getBundledResourcesRoot, findRuntimeArchive, findRuntimeChecksumFile, BUNDLED_GIT_VERSION, runtimePlatformTokens, stripArchiveExtension, normalizeVersionForFolder, syncDirectory, requiresWindowsShell, yauzl } = deps;
+  const { fs, path, spawn, app, createHash, appendInstallLog, serializeErrorForInstallLog, truncateForInstallLog, getBundledResourcesRoot, getRuntimesRoot, getTempRoot, findRuntimeArchive, findRuntimeChecksumFile, BUNDLED_GIT_VERSION, runtimePlatformTokens, stripArchiveExtension, normalizeVersionForFolder, syncDirectory, resolvePlatformAlias, yauzl } = deps;
+const gitToolLocks = new Map<string, Promise<string | null>>();
+class CommandFailedError extends Error {
+  constructor(
+    command: string,
+    args: string[],
+    cwd: string,
+    code: number | null,
+    signal: NodeJS.Signals | null,
+    stdout: string,
+    stderr: string,
+  ) {
+    super(`Command failed: ${command} ${args.join(' ')} (code ${code ?? 'null'}, signal ${signal ?? 'null'})`);
+    this.name = 'CommandFailedError';
+    Object.assign(this, { command, args, cwd, code, signal, stdout, stderr });
+  }
+}
+
 const hashFileSha256 = async (filePath: string): Promise<string> => {
   const content = await fs.readFile(filePath);
   return createHash('sha256').update(content).digest('hex');
@@ -16,15 +87,7 @@ const requiresWindowsShell = (command: string): boolean => {
 const runCommand = async (
   command: string,
   args: string[],
-  options: {
-    cwd: string;
-    env?: NodeJS.ProcessEnv;
-    log?: {
-      appId?: string;
-      phase?: string;
-      label?: string;
-    };
-  },
+  options: CommandRunOptions,
 ): Promise<void> => {
   const useShell = requiresWindowsShell(command);
 
@@ -54,14 +117,14 @@ const runCommand = async (
     let stderr = '';
     let stdout = '';
 
-    child.stdout.on('data', (chunk) => {
+    child.stdout.on('data', (chunk: Buffer) => {
       stdout += chunk.toString();
     });
-    child.stderr.on('data', (chunk) => {
+    child.stderr.on('data', (chunk: Buffer) => {
       stderr += chunk.toString();
     });
 
-    child.on('error', (error) => {
+    child.on('error', (error: Error) => {
       if (options.log) {
         void appendInstallLog('command:error', {
           appId: options.log.appId,
@@ -79,7 +142,7 @@ const runCommand = async (
       reject(error);
     });
 
-    child.on('exit', (code, signal) => {
+    child.on('exit', (code: number | null, signal: NodeJS.Signals | null) => {
       if (options.log) {
         void appendInstallLog('command:exit', {
           appId: options.log.appId,
@@ -109,11 +172,11 @@ const runCommand = async (
 const runCommandCapture = async (
   command: string,
   args: string[],
-  options: { cwd: string; env?: NodeJS.ProcessEnv; timeoutMs?: number },
-): Promise<{ code: number | null; stdout: string; stderr: string }> => {
+  options: CommandCaptureOptions,
+): Promise<CommandCaptureResult> => {
   const useShell = requiresWindowsShell(command);
 
-  return await new Promise((resolve, reject) => {
+  return await new Promise<CommandCaptureResult>((resolve, reject) => {
     const child = spawn(command, args, {
       cwd: options.cwd,
       env: {
@@ -133,17 +196,17 @@ const runCommandCapture = async (
         }, options.timeoutMs)
       : null;
 
-    child.stdout.on('data', (chunk) => {
+    child.stdout.on('data', (chunk: Buffer) => {
       stdout += chunk.toString();
     });
-    child.stderr.on('data', (chunk) => {
+    child.stderr.on('data', (chunk: Buffer) => {
       stderr += chunk.toString();
     });
-    child.on('error', (error) => {
+    child.on('error', (error: Error) => {
       if (timer) clearTimeout(timer);
       reject(error);
     });
-    child.on('exit', (code) => {
+    child.on('exit', (code: number | null) => {
       if (timer) clearTimeout(timer);
       resolve({ code, stdout, stderr });
     });
@@ -183,6 +246,22 @@ const existsFile = async (filePath: string): Promise<boolean> => {
   } catch {
     return false;
   }
+};
+
+const flattenSingleTopLevelDirectory = async (targetDir: string): Promise<void> => {
+  const entries = await fs.readdir(targetDir, { withFileTypes: true });
+  const visibleEntries = entries.filter((entry) => !entry.name.startsWith('.'));
+
+  if (visibleEntries.length !== 1 || !visibleEntries[0].isDirectory()) {
+    return;
+  }
+
+  const topFolder = path.join(targetDir, visibleEntries[0].name);
+  const children = await fs.readdir(topFolder);
+  for (const child of children) {
+    await fs.rename(path.join(topFolder, child), path.join(targetDir, child));
+  }
+  await fs.rm(topFolder, { recursive: true, force: true });
 };
 
 const appendProcessPathEntry = (entry: string): void => {
@@ -569,7 +648,7 @@ const extractArchive = async (archivePath: string, destination: string): Promise
 
 const listZipEntries = async (archivePath: string): Promise<string[]> =>
   new Promise((resolve, reject) => {
-    yauzl.open(archivePath, { lazyEntries: true }, (openError, zipFile) => {
+    yauzl.open(archivePath, { lazyEntries: true }, (openError: Error | null, zipFile?: yauzl.ZipFile) => {
       if (openError || !zipFile) {
         reject(openError ?? new Error('archive_open_failed'));
         return;
@@ -640,7 +719,7 @@ const validateArchiveEntries = async (archivePath: string): Promise<void> => {
 };
 
 const normalizeRelativeInstallPath = (value: string): string | null => {
-  const normalized = toPosixRelativePath(value).replace(/^\.\//, '').replace(/\/+$/, '');
+  const normalized = value.replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '');
   if (!normalized || normalized === '.' || normalized.startsWith('../') || normalized.includes('/../')) {
     return null;
   }

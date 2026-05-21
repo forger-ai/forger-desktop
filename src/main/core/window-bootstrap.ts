@@ -1,9 +1,52 @@
-// @ts-nocheck
 
-type WindowBootstrapDeps = Record<string, any>;
+import type { App, BrowserWindow, IpcMain } from 'electron';
+import type path from 'node:path';
+
+import type { registerAgentIpcHandlers as registerAgentIpcHandlersFn } from '../ipc/agent-handlers';
+import type { registerMainIpcHandlers as registerMainIpcHandlersFn } from '../ipc/main-handlers';
+import {
+  extractDeepLinkFromArgv,
+  parseForgerUrl,
+  registerForgerProtocol,
+  type ForgerDeepLink,
+} from '../deep-links';
+import type { DesktopErrorReporter } from '../error-reporting';
+import type { IPC_CHANNELS } from '../../shared/ipc';
+import type { WindowControlState } from '../../shared/types';
+
+interface WindowBootstrapState {
+  mainWindow: BrowserWindow | null;
+  pendingDeepLink: ForgerDeepLink | null;
+}
+
+interface WindowBootstrapDeps {
+  BrowserWindow: typeof BrowserWindow;
+  IPC_CHANNELS: typeof IPC_CHANNELS;
+  app: App;
+  desktopErrorReporter: DesktopErrorReporter | null;
+  focusDeepLinkWindow: (window: BrowserWindow | null) => void;
+  getMainProcessIpcDeps: () => unknown;
+  getMainWindow: () => BrowserWindow | null;
+  getWindowState: (window: BrowserWindow) => WindowControlState;
+  ipcMain: IpcMain;
+  isDev: boolean;
+  loadDesktopWindow: (window: BrowserWindow) => Promise<void>;
+  path: typeof path;
+  registerAgentIpcHandlers: typeof registerAgentIpcHandlersFn;
+  registerMainIpcHandlers: typeof registerMainIpcHandlersFn;
+  registerWindowIpcHandlers: (deps: {
+    ipcMain: IpcMain;
+    getMainWindow: () => BrowserWindow | null;
+    readWindowState: (window: BrowserWindow) => WindowControlState;
+    quitApp: () => void;
+  }) => void;
+  registerWindowStateEvents: (window: BrowserWindow) => void;
+  state: WindowBootstrapState;
+  useCustomWindowFrame: boolean;
+}
 
 export const createWindowBootstrapController = (deps: WindowBootstrapDeps) => {
-  const { state, path, app, BrowserWindow, isDev, useCustomWindowFrame, registerWindowStateEvents, desktopErrorReporter, loadDesktopWindow, getMainProcessIpcDeps, registerMainIpcHandlers, registerAgentIpcHandlers, registerWindowIpcHandlers, ipcMain, getWindowState, focusDeepLinkWindow, IPC_CHANNELS } = deps;
+  const { state, path, app, BrowserWindow, isDev, useCustomWindowFrame, registerWindowStateEvents, desktopErrorReporter, loadDesktopWindow, getMainProcessIpcDeps, getMainWindow, registerMainIpcHandlers, registerAgentIpcHandlers, registerWindowIpcHandlers, ipcMain, getWindowState, focusDeepLinkWindow, IPC_CHANNELS } = deps;
 const createWindow = async (): Promise<void> => {
   const preloadPath = path.join(__dirname, '..', '..', 'preload', 'index.js');
 
@@ -33,144 +76,14 @@ const createWindow = async (): Promise<void> => {
   await loadDesktopWindow(state.mainWindow);
 };
 
-const getMainProcessIpcDeps = () => ({
-  state: {
-    get agentToolSettings() {
-      return agentToolSettings;
-    },
-    set agentToolSettings(value) {
-      agentToolSettings = value;
-    },
-    get catalogApps() {
-      return catalogApps;
-    },
-    set catalogApps(value) {
-      catalogApps = value;
-    },
-    get cloudSyncSettings() {
-      return cloudSyncSettings;
-    },
-    set cloudSyncSettings(value) {
-      cloudSyncSettings = value;
-    },
-    get forgerAccount() {
-      return forgerAccount;
-    },
-    set forgerAccount(value) {
-      forgerAccount = value;
-    },
-    get settings() {
-      return settings;
-    },
-    set settings(value) {
-      settings = value;
-    },
-  },
-  AGENT_TOOL_PACKAGES,
-  APP_CLAUDE_MODEL_OPTIONS,
-  APP_CODEX_MODEL_OPTIONS,
-  BetterSqlite3,
-  BrowserWindow,
-  BUILT_IN_CLAUDE_EFFORT,
-  BUILT_IN_CODEX_REASONING,
-  CODEX_USAGE_DASHBOARD_URL,
-  IPC_CHANNELS,
-  agentToolSettings,
-  app,
-  appAgentConversationManager,
-  appAgentTaskManager,
-  appFolderGrantSecret,
-  appendInstallLog,
-  automationManager,
-  buildAppSecretsState,
-  buildCodexPromptWithAppContext,
-  buildForgerToolsContextForApp,
-  canUseCloudDataSync,
-  catalogApps,
-  chatOrchestrator,
-  cloudDeviceManager,
-  cloudSyncSettings,
-  connectClaudeAuth,
-  connectCodexAuth,
-  createRemoteAppBackup,
-  decryptCloudMessage,
-  decryptCloudMessages,
-  desktopErrorReporter,
-  dialog,
-  disconnectCodexAuth,
-  ensureCatalogStatuses,
-  failureDiagnostic,
-  forgerAccount,
-  forgerBackendClient,
-  fs,
-  getAppDetails,
-  getAppRuntimeStatus: getRuntimeStatus,
-  getBackupsManager,
-  getClaudeAuthStatus,
-  getCloudIdentityStore,
-  getCodexAuthStatus,
-  getDesktopUpdater,
-  getFileLibrary,
-  getMemoryStore,
-  getOfficialToolsService,
-  getPrivateDataRoot,
-  getRuntimeStatus,
-  getSecretsStore,
-  getWindowState,
-  installAppRuntime,
-  installWelcome,
-  ipcMain,
-  listAppPrompts,
-  listCatalogFromBackend,
-  mainWindow: state.mainWindow,
-  normalizeAgentProvider,
-  normalizeClaudeEffort,
-  normalizeCodexReasoningEffort,
-  normalizeManifestAgentDefaults,
-  openInstalledApp,
-  openOrFocusFriendChatWindow,
-  path,
-  publicForgerAccount,
-  registry,
-  reinstallClaude,
-  reinstallCodex,
-  renderManifestAgentPrompt,
-  resolveAppDbPath,
-  resolveAppIdForWebContents,
-  resolveInstalledAgents,
-  resolveInstalledAppSecrets,
-  resolveInstalledManifest,
-  resolveSelectedAppDisplayName,
-  restoreAppPrompt,
-  restoreAppUserVersionRuntime,
-  restoreRemoteAppBackup,
-  sanitizeRendererChatTrace,
-  sendEncryptedCloudMessage,
-  serializeErrorForInstallLog,
-  setAppAutoSyncSetting,
-  settings,
-  shell,
-  signAppFolderGrant,
-  stopInstalledApp,
-  switchForgerAccountSession,
-  toAppSummary,
-  uninstallAppRuntime,
-  updateAgentDefaults,
-  updateAgentToolApproval,
-  updateAppPrompt,
-  updateAppRuntime,
-  updateCodexDefaults,
-  validateAppPrompt,
-});
-
 const registerIpcHandlers = (): void => {
   const deps = getMainProcessIpcDeps();
-  registerMainIpcHandlers(deps);
-  registerAgentIpcHandlers(deps);
+  registerMainIpcHandlers(deps as Parameters<typeof registerMainIpcHandlersFn>[0]);
+  registerAgentIpcHandlers(deps as Parameters<typeof registerAgentIpcHandlersFn>[0]);
 
   registerWindowIpcHandlers({
     ipcMain,
-    getMainWindow: () => state.mainWindow,
+    getMainWindow,
     readWindowState: getWindowState,
     quitApp: () => app.quit(),
   });

@@ -1,9 +1,148 @@
-// @ts-nocheck
+import type fs from 'node:fs/promises';
+import type path from 'node:path';
+import type { App as ElectronApp, shell as electronShell } from 'electron';
+import { AGENT_TOOL_DEFINITIONS } from '../core/agent-tool-packages';
+import type { ForgerBackendClient } from '../forger-backend-client';
+import type { CloudIdentityStore } from '../cloud-identity-store';
+import type { BackupsManager } from '../backups-manager';
+import type { MemoryStore } from '../memory-store';
+import type { OfficialToolsService } from '../official-tools-service';
+import { normalizeAppToolDeclarations } from '../official-tools-service';
+import type { PromptOverridesStore } from '../prompt-overrides';
+import { buildPromptBases, promptOverrideErrorResult } from '../prompt-overrides';
+import { appSecretEnvName } from '../secrets-store';
+import type { SecretsStore } from '../secrets-store';
+import { buildForgerOfficialToolsPromptSection } from '../prompts/official-tools';
+import type { ManifestAgentPromptKind } from '../manifest-agent-prompts';
+import type {
+  AgentDefaults,
+  AgentProvider,
+  AgentRuntime,
+  AgentRuntimeRecommendations,
+  AppAgent,
+  AppAgentPromptSet,
+  AppAgentPromptTemplate,
+  AppAgentPromptVariable,
+  AppAgentPromptVariableType,
+  AppPromptMutationResult,
+  AppPromptRestoreInput,
+  AppPromptReviewInput,
+  AppPromptReviewItem,
+  AppPromptTemplate,
+  AppPromptValidationResult,
+  AppSecretConnection,
+  AppSecretDeclaration,
+  AppSecretsState,
+  AppToolDeclaration,
+  BasicActionResult,
+  CatalogApp,
+  ClaudeEffort,
+  CodexReasoningEffort,
+  CreateRemoteAppBackupInput,
+  CreateRemoteAppBackupResult,
+  Settings,
+} from '../../shared/types';
+import type { AppManifest, AppRegistry, RunningAppProcess } from '../core/main-process-types';
 
-type ManifestSupportDeps = Record<string, any>;
+interface ManifestSupportState {
+  secretsStore: SecretsStore | null;
+  officialToolsService: OfficialToolsService | null;
+  memoryStore: MemoryStore | null;
+  backupsManager: BackupsManager | null;
+}
+
+interface ManifestSupportDeps {
+  fs: typeof fs;
+  path: typeof path;
+  app: Pick<ElectronApp, 'getPath'>;
+  shell: Pick<typeof electronShell, 'openExternal'>;
+  state: ManifestSupportState;
+  forgerBackendClient: ForgerBackendClient | null;
+  forgerAccount: { authenticated?: boolean; token?: string | null };
+  registry: AppRegistry;
+  catalogApps: CatalogApp[];
+  runningApps: Map<string, RunningAppProcess>;
+  cloudSyncSettings: { appSync: Record<string, { autoSync?: boolean }> };
+  settings: Settings;
+  normalizeSettings: (input?: Partial<Settings>) => Settings;
+  normalizeCodexReasoningEffort: (value: unknown, fallback: CodexReasoningEffort) => CodexReasoningEffort;
+  normalizeClaudeEffort: (value: unknown, fallback: ClaudeEffort) => ClaudeEffort;
+  getCodexDefaults: () => Settings['codexDefaults'];
+  BUILT_IN_CODEX_REASONING: CodexReasoningEffort;
+  BUILT_IN_CLAUDE_EFFORT: ClaudeEffort;
+  CLAUDE_EFFORT_VALUES: Set<ClaudeEffort>;
+  CODEX_REASONING_VALUES: Set<CodexReasoningEffort>;
+  SecretsStore: typeof import('../secrets-store').SecretsStore;
+  OfficialToolsService: typeof import('../official-tools-service').OfficialToolsService;
+  MemoryStore: typeof import('../memory-store').MemoryStore;
+  BackupsManager: typeof import('../backups-manager').BackupsManager;
+  getForgerMetadataRoot: () => string;
+  getBackupsRoot: () => string;
+  getTempRoot: () => string;
+  getFreePort: () => Promise<number>;
+  getPromptOverridesStore: () => PromptOverridesStore;
+  getCloudIdentityStore: () => CloudIdentityStore;
+  hashFileSha256: (filePath: string) => Promise<string>;
+  zipDirectory: (sourceDir: string, zipPath: string) => Promise<void>;
+  validateArchiveEntries: (archivePath: string) => Promise<void>;
+  extractArchive: (archivePath: string, destination: string) => Promise<void>;
+  appendInstallLog: (event: string, payload?: Record<string, unknown>) => Promise<void>;
+  canUseCloudDataSync: () => boolean;
+  renderManifestAgentPrompt: (input: {
+    agent: AppAgent;
+    kind: ManifestAgentPromptKind;
+    variables?: Record<string, unknown>;
+    appRoot: string;
+  }) => string;
+  withAgentDefaults: <T extends {
+    model?: string;
+    reasoningEffort?: CodexReasoningEffort;
+    runtime?: AgentRuntime;
+    runtimeRecommendations?: AgentRuntimeRecommendations;
+  }>(input: T, defaults?: AgentDefaults) => T;
+}
 
 export const createManifestSupportController = (deps: ManifestSupportDeps) => {
-  const { path, fs, app, backendBaseUrl, forgerBackendClient, getPrivateDataRoot, getForgerMetadataRoot, getPromptOverridesPath, getBackupsRoot, getForgerAccountPath, registry, settings, normalizeSettings, normalizeCodexReasoningEffort, normalizeClaudeEffort, getCodexDefaults, BUILT_IN_CODEX_REASONING, BUILT_IN_CLAUDE_EFFORT, CLAUDE_EFFORT_VALUES, PromptOverridesStore, buildPromptBases, promptOverrideErrorResult, SecretsStore, OfficialToolsService, normalizeAppToolDeclarations, MemoryStore, BackupsManager, appSecretEnvName, isReservedAppSecretEnvName, isSecretsVaultUnavailableError, resolveInstalledManifest, manifestAllowsAgentNetworkAccess, normalizeManifestAgents, normalizeManifestAppSecrets, normalizeManifestPromptTemplates, normalizeManifestAgentDefaults, normalizePromptTemplateArguments, renderManifestAgentPrompt, buildForgerOfficialToolsPromptSection, buildForgerOfficialToolSkillTemplates, publicForgerAccount, forgerAccount, getCloudIdentityStore, hashFileSha256, createHmac, createRemoteAppBackup, restoreRemoteAppBackup, canUseCloudDataSync } = deps;
+  const {
+    path,
+    fs,
+    app,
+    shell,
+    state,
+    forgerBackendClient,
+    forgerAccount,
+    registry,
+    catalogApps,
+    runningApps,
+    cloudSyncSettings,
+    settings,
+    normalizeSettings,
+    normalizeCodexReasoningEffort,
+    normalizeClaudeEffort,
+    getCodexDefaults,
+    BUILT_IN_CODEX_REASONING,
+    BUILT_IN_CLAUDE_EFFORT,
+    CLAUDE_EFFORT_VALUES,
+    CODEX_REASONING_VALUES,
+    SecretsStore,
+    OfficialToolsService,
+    MemoryStore,
+    BackupsManager,
+    getForgerMetadataRoot,
+    getBackupsRoot,
+    getTempRoot,
+    getFreePort,
+    getPromptOverridesStore,
+    getCloudIdentityStore,
+    hashFileSha256,
+    zipDirectory,
+    validateArchiveEntries,
+    extractArchive,
+    appendInstallLog,
+    canUseCloudDataSync,
+    renderManifestAgentPrompt,
+    withAgentDefaults,
+  } = deps;
 const normalizeToken = (value: string | undefined): string => {
   if (!value) {
     return '';
@@ -36,6 +175,9 @@ const resolveInstalledManifest = async (installDir: string): Promise<AppManifest
 const manifestAllowsAgentNetworkAccess = (manifest: AppManifest | null): boolean =>
   manifest?.agentRuntime?.networkAccess === true;
 
+const normalizeAgentProvider = (value: unknown): AgentProvider | undefined =>
+  value === 'codex' || value === 'claude' ? value : undefined;
+
 const appAllowsAgentNetworkAccess = async (appId: string): Promise<boolean> => {
   const record = registry.apps[appId];
   if (!record?.installDir) {
@@ -54,15 +196,15 @@ const anyAppAllowsAgentNetworkAccess = async (appIds: string[]): Promise<boolean
 };
 
 const getSecretsStore = (): SecretsStore => {
-  if (!secretsStore) {
-    secretsStore = new SecretsStore(app.getPath('userData'));
+  if (!state.secretsStore) {
+    state.secretsStore = new SecretsStore(app.getPath('userData'));
   }
-  return secretsStore;
+  return state.secretsStore;
 };
 
 const getOfficialToolsService = (): OfficialToolsService => {
-  if (!officialToolsService) {
-    officialToolsService = new OfficialToolsService({
+  if (!state.officialToolsService) {
+    state.officialToolsService = new OfficialToolsService({
       metadataRoot: getForgerMetadataRoot(),
       secretsStore: getSecretsStore(),
       getFreePort,
@@ -92,14 +234,14 @@ const getOfficialToolsService = (): OfficialToolsService => {
       getAppToolDeclarations: resolveAppToolDeclarations,
     });
   }
-  return officialToolsService;
+  return state.officialToolsService;
 };
 
 const getMemoryStore = (): MemoryStore => {
-  if (!memoryStore) {
-    memoryStore = new MemoryStore(getForgerMetadataRoot());
+  if (!state.memoryStore) {
+    state.memoryStore = new MemoryStore(getForgerMetadataRoot());
   }
-  return memoryStore;
+  return state.memoryStore;
 };
 
 const buildMemoryContextForApps = async (appIds: string[]): Promise<string> => {
@@ -137,8 +279,8 @@ const buildForgerToolsContextForFreeChat = async (): Promise<string> => {
 };
 
 const getBackupsManager = (): BackupsManager => {
-  if (!backupsManager) {
-    backupsManager = new BackupsManager({
+  if (!state.backupsManager) {
+    state.backupsManager = new BackupsManager({
       backupsRoot: getBackupsRoot(),
       listInstalledApps: () => Object.values(registry.apps).map((record) => ({
         appId: record.appId,
@@ -161,12 +303,12 @@ const getBackupsManager = (): BackupsManager => {
       log: appendInstallLog,
     });
   }
-  return backupsManager;
+  return state.backupsManager;
 };
 
 const createRemoteAppBackup = async (
   input: CreateRemoteAppBackupInput,
-): Promise<{ success: boolean; userMessage: string; technicalCode?: string; remoteBackup?: RemoteAppBackupSummary }> => {
+): Promise<CreateRemoteAppBackupResult> => {
   if (!forgerBackendClient) {
     return { success: false, userMessage: 'No pudimos conectar con Forger Cloud.', technicalCode: 'backend_client_missing' };
   }

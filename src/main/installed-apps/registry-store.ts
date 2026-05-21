@@ -1,9 +1,41 @@
-// @ts-nocheck
+import type fs from 'node:fs/promises';
+import type path from 'node:path';
 
-type RegistryStoreDeps = Record<string, any>;
+import type { DevCatalogService } from '../dev-catalog-service';
+import type { StoredForgerAccount } from '../forger-account-store';
+import type { AppRegistry, InstalledAppRecord, RunningAppProcess } from '../core/main-process-types';
+import type { CatalogApp, CloudSyncSettings, RuntimeStatus, Settings } from '../../shared/types';
+
+interface RegistryStoreDeps {
+  DEFAULT_NODE_VERSION: string;
+  DEFAULT_PYTHON_VERSION: string;
+  DevCatalogService: typeof DevCatalogService;
+  app: Electron.App;
+  appendInstallLog: (event: string, payload?: Record<string, unknown>) => Promise<void>;
+  catalogApps: CatalogApp[];
+  cloudSyncSettings: CloudSyncSettings;
+  emitRuntimeStatus: (payload: RuntimeStatus) => void;
+  forgerAccount: StoredForgerAccount;
+  fs: typeof fs;
+  getCloudSyncSettingsPath: () => string;
+  getRegistryBackupPath: () => string;
+  getRegistryPath: () => string;
+  isDev: boolean;
+  isVersionNewer: (candidate?: string, current?: string) => boolean;
+  localCatalogJsonUrl: string | null | undefined;
+  normalizeNodeRuntimeVersion: (value?: string | null) => string;
+  normalizeVersionForFolder: (value: string) => string;
+  path: typeof path;
+  registry: AppRegistry;
+  runningApps: Map<string, RunningAppProcess>;
+  serializeErrorForInstallLog: (error: unknown) => Record<string, unknown>;
+  settings: Settings;
+}
 
 export const createRegistryStoreController = (deps: RegistryStoreDeps) => {
-  const { DevCatalogService, app, localCatalogJsonUrl, appendInstallLog, backendBaseUrl, catalogApps, normalizeNodeRuntimeVersion, DEFAULT_NODE_VERSION, registry, fs, getRegistryPath, getRegistryBackupPath, getCloudSyncSettingsPath, cloudSyncSettings, forgerAccount, settings, isVersionNewer } = deps;
+  let { catalogApps, cloudSyncSettings, localCatalogJsonUrl, registry } = deps;
+  const { DEFAULT_PYTHON_VERSION, DevCatalogService, appendInstallLog, emitRuntimeStatus, fs, getCloudSyncSettingsPath, getRegistryBackupPath, getRegistryPath, isDev, isVersionNewer, normalizeNodeRuntimeVersion, normalizeVersionForFolder, path, runningApps, forgerAccount, serializeErrorForInstallLog } = deps;
+let devCatalogService: InstanceType<typeof DevCatalogService> | null = null;
 const startDevCatalogService = async (): Promise<void> => {
   if (!isDev || !process.env.FORGER_LOCAL_APPS?.trim()) {
     return;

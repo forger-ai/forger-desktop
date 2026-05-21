@@ -1,5 +1,214 @@
-// @ts-nocheck
-export const registerMainLifecycle = (deps) => {
+import type { App, BrowserWindow, IpcMain, Shell } from 'electron';
+import type fs from 'node:fs/promises';
+import type { Server } from 'node:http';
+import type { ChildProcessWithoutNullStreams } from 'node:child_process';
+
+import type { DesktopErrorReporter } from '../error-reporting';
+import type { StoredForgerAccount } from '../forger-account-store';
+import type {
+  AgentRuntime,
+  AgentRuntimeRequest,
+  AgentToolDefinition,
+  AgentToolSettings,
+  AppCodexConversationEvent,
+  AppCodexTaskEvent,
+  AppSummary,
+  BasicActionResult,
+  CatalogApp,
+  CodexAuthStatus,
+  ClaudeAuthStatus,
+  RuntimeStatus,
+} from '../../shared/types';
+import type {
+  AppRegistry,
+  InstalledAppRecord,
+  RuntimeBinarySet,
+  RunningAppProcess,
+} from './main-process-types';
+
+type ServiceConstructor<T> = new (...args: unknown[]) => T;
+type AsyncFn<T = unknown> = (...args: unknown[]) => Promise<T>;
+type SyncFn<T = unknown> = (...args: unknown[]) => T;
+type ToolAccess = { appId: string; caller: string };
+type PermissionDecision = unknown;
+type PermissionRequest = unknown;
+type ForgerMcpSessionOptions = { caller: string; appIds: string[]; locale?: string };
+type RunEventLike = {
+  run: { status: string; appId: string; runId: string; errorCode?: string; userMessage?: string };
+};
+type TaskEventLike = AppCodexTaskEvent;
+type ConversationEventLike = AppCodexConversationEvent;
+type AutomationEventLike = {
+  automation: { id: string; selectedAppIds: string[] };
+  run?: { id: string; status?: string; error?: unknown; userMessage?: string };
+};
+type ForgerMcpToolFailure = { appId: string; runId: string; toolName?: unknown; error: unknown };
+type ForgerMcpHttpFailure = { error: unknown; appId?: string; runId?: string };
+
+interface LifecycleService {
+  start: () => Promise<void> | void;
+  stop: () => Promise<void> | void;
+  dispose: () => void;
+  initialize: () => Promise<void>;
+  load: () => Promise<unknown>;
+  getSummary: () => Promise<unknown>;
+  getPublicRegistration: () => unknown;
+  requestPermission: (runId: string, request: PermissionRequest) => Promise<PermissionDecision | null>;
+  requestExternalPermission: (runId: string, request: PermissionRequest) => Promise<PermissionDecision | null>;
+  createSession: (runId: string, appId: string, options: ForgerMcpSessionOptions) => string | null;
+  releaseSession: (token: string) => void;
+  listenMcps: (appIds: string[], runId: string) => Promise<unknown[]>;
+  releaseMcps: (runId: string) => void;
+  appendExternalProgress: (runId: string, message: string) => void;
+  environmentForApp: (appId: string) => Record<string, string>;
+  publishAgentEvent: (event: ConversationEventLike) => void;
+}
+
+type ServiceWithLoad<T> = Omit<LifecycleService, 'load'> & { load: () => Promise<T> };
+
+interface MainLifecycleState {
+  agentToolSettings: AgentToolSettings;
+  appAgentConversationManager: LifecycleService | null;
+  appAgentTaskManager: LifecycleService | null;
+  appMcpManager: LifecycleService | null;
+  automationManager: LifecycleService | null;
+  catalogApps: CatalogApp[];
+  chatOrchestrator: LifecycleService | null;
+  cloudDeviceManager: LifecycleService | null;
+  cloudIdentityStore: LifecycleService | null;
+  desktopErrorReporter: DesktopErrorReporter | null;
+  desktopRuntimeBridge: LifecycleService | null;
+  devCatalogService: LifecycleService | null;
+  fileLibrary: (LifecycleService & { cleanupStagedFilesForChat?: () => Promise<void> }) | null;
+  forgerAccount: StoredForgerAccount;
+  forgerAccountStore: ServiceWithLoad<StoredForgerAccount> | null;
+  forgerBackendClient: LifecycleService | null;
+  forgerMcpServer: LifecycleService | null;
+  localCatalogJsonUrl: string | undefined;
+  mainWindow: BrowserWindow | null;
+  memoryStore: LifecycleService | null;
+  officialToolsService: (LifecycleService & {
+    listAgentActionIdsForApp: (appId: string) => Promise<string[]>;
+    validateAgentCall: (input: unknown, access: { appId: string; requireAppGrant: boolean }) => Promise<unknown>;
+    callFromAgent: (input: unknown, access: { appId: string; requireAppGrant: boolean }) => Promise<unknown>;
+  }) | null;
+  pendingDeepLink: unknown;
+  registry: AppRegistry;
+  secretsStore: LifecycleService | null;
+}
+
+interface MainLifecycleDeps {
+  AGENT_TOOL_DEFINITIONS: AgentToolDefinition[];
+  AppAgentConversationManager: ServiceConstructor<LifecycleService>;
+  AppAgentTaskManager: ServiceConstructor<LifecycleService>;
+  AppMcpManager: ServiceConstructor<LifecycleService>;
+  AutomationManager: ServiceConstructor<LifecycleService>;
+  BrowserWindow: typeof BrowserWindow;
+  ChatOrchestrator: ServiceConstructor<LifecycleService>;
+  CloudDeviceManager: ServiceConstructor<LifecycleService>;
+  CloudIdentityStore: ServiceConstructor<LifecycleService>;
+  DEFAULT_NODE_VERSION: string;
+  DesktopRuntimeBridge: ServiceConstructor<LifecycleService>;
+  DevCatalogService: ServiceConstructor<LifecycleService>;
+  FORGER_AGENT_CONTRACT_VERSION: string;
+  FileLibrary: ServiceConstructor<LifecycleService & { cleanupStagedFilesForChat: () => Promise<void> }>;
+  ForgerAccountStore: ServiceConstructor<ServiceWithLoad<StoredForgerAccount>>;
+  ForgerBackendClient: ServiceConstructor<LifecycleService>;
+  ForgerMcpServer: ServiceConstructor<LifecycleService>;
+  IPC_CHANNELS: Record<string, string>;
+  MemoryStore: ServiceConstructor<LifecycleService>;
+  SecretsStore: ServiceConstructor<LifecycleService>;
+  anyAppAllowsAgentNetworkAccess: AsyncFn<boolean>;
+  app: App;
+  appAllowsAgentNetworkAccess: AsyncFn<boolean>;
+  appWindows: Map<string, BrowserWindow>;
+  appendInstallLog: (event: string, payload?: Record<string, unknown>) => Promise<void>;
+  backendBaseUrl: string;
+  buildForgerToolsContextForApp: AsyncFn<string>;
+  buildMemoryContextForApp: AsyncFn<string>;
+  buildMemoryContextForApps: AsyncFn<string>;
+  chooseAgentRuntime: (request?: AgentRuntimeRequest) => Promise<AgentRuntime>;
+  clearForgerAccountSession: (technicalCode: string) => Promise<void>;
+  closeServer: (server: Server) => Promise<void>;
+  createWindow: () => Promise<void>;
+  emitAutomationUpdated: (payload: { automation: unknown; run?: unknown }) => void;
+  emitChatRunUpdated: (event: RunEventLike) => void;
+  ensureBackendPythonEnvironment: AsyncFn<void>;
+  ensureCatalogStatuses: () => void;
+  ensureGlobalAgentsContext: (root: string) => Promise<void>;
+  ensurePathInside: SyncFn<boolean>;
+  ensureRuntimeInstalled: (type: 'node' | 'python', version: string) => Promise<RuntimeBinarySet>;
+  ensureSqliteDatabaseParent: AsyncFn<void>;
+  flushPendingDeepLink: () => void;
+  fs: typeof fs;
+  getAppLocalToolPathEntries: (record: InstalledAppRecord) => Promise<string[]>;
+  getBackupsRoot: () => string;
+  getClaudeAuthStatus: () => Promise<ClaudeAuthStatus>;
+  getCloudDeviceAccountStorageKey: () => string | undefined;
+  getCloudDevicePath: () => string;
+  getCloudIdentityPath: () => string;
+  getCloudIdentityStore: () => LifecycleService & { getPublicRegistration: () => unknown };
+  getCodexAuthStatus: () => Promise<CodexAuthStatus>;
+  getCodexHome: () => string;
+  getCodexRoot: () => string;
+  getCodexToolEnvironment: (appId?: string, runtime?: RuntimeBinarySet) => Promise<Record<string, string>>;
+  getForgerAccountPath: () => string;
+  getForgerHomeRoot: () => string;
+  getForgerMetadataRoot: () => string;
+  getFreePort: () => Promise<number>;
+  getLegacyForgerMetadataRoot: () => string;
+  getMemoryStore: () => { list: AsyncFn; create: AsyncFn; update: AsyncFn; delete: AsyncFn };
+  getOfficialToolsService: () => NonNullable<MainLifecycleState['officialToolsService']>;
+  getPrivateAppsRoot: () => string;
+  getPrivateDataRoot: () => string;
+  getRuntimesRoot: () => string;
+  getRuntimePathEntries: (runtime: RuntimeBinarySet) => string[];
+  getRuntimeStatus: (appId: string) => RuntimeStatus;
+  getTempRoot: () => string;
+  getVenvExecutables: SyncFn;
+  handleCloudRelayRequest: AsyncFn;
+  handleCloudSocialEvent: AsyncFn<void>;
+  hasInstalledCodexConversation: AsyncFn<boolean>;
+  ipcMain: IpcMain;
+  listAppPrompts: AsyncFn;
+  listCatalogFromBackend: () => Promise<CatalogApp[]>;
+  loadAgentToolSettings: () => Promise<void>;
+  loadCloudSyncSettings: () => Promise<void>;
+  loadRegistry: () => Promise<void>;
+  loadSettings: () => Promise<void>;
+  mapBackendCategory: SyncFn;
+  normalizeNodeRuntimeVersion: (version?: string | null) => string;
+  openInstalledApp: AsyncFn;
+  openOrFocusAppWindow: (appId: string, appName: string, frontendUrl: string) => Promise<void>;
+  registerForgerCloudOAuth: SyncFn;
+  registerIpcHandlers: () => void;
+  resolveClaudeCli: () => Promise<{ path: string; source: string } | null>;
+  resolveCodexCliPath: (root: string) => Promise<string | null>;
+  resolveInstalledAgents: AsyncFn;
+  resolveInstalledManifest: AsyncFn;
+  resolveInstalledPromptTemplates: AsyncFn;
+  restoreAppPrompt: AsyncFn;
+  restartInstalledApp: AsyncFn;
+  runningApps: Map<string, RunningAppProcess>;
+  serializeErrorForInstallLog: (error: unknown) => Record<string, unknown>;
+  shell: Shell;
+  splitManifestCommand: SyncFn;
+  startDevCatalogService: () => Promise<void>;
+  state: MainLifecycleState;
+  stopInstalledApp: AsyncFn;
+  switchForgerAccountSession: AsyncFn;
+  terminateProcess: (child: ChildProcessWithoutNullStreams) => Promise<void>;
+  toAppSummary: (record: InstalledAppRecord) => AppSummary;
+  toCatalogStatus: SyncFn;
+  translateManifestEnvironment: SyncFn;
+  truncateForInstallLog: (value: string) => string;
+  updateAppPrompt: AsyncFn;
+  updateAppRuntime: AsyncFn;
+  upsertInstalledRecord: (record: InstalledAppRecord) => Promise<void>;
+  waitForHttpOk: AsyncFn<void>;
+}
+
+export const registerMainLifecycle = (deps: unknown) => {
   const {
     AGENT_TOOL_DEFINITIONS,
     AppAgentConversationManager,
@@ -66,6 +275,7 @@ export const registerMainLifecycle = (deps) => {
     getPrivateDataRoot,
     getRuntimesRoot,
     getRuntimePathEntries,
+    getRuntimeStatus,
     getTempRoot,
     getVenvExecutables,
     handleCloudRelayRequest,
@@ -108,7 +318,7 @@ export const registerMainLifecycle = (deps) => {
     updateAppRuntime,
     upsertInstalledRecord,
     waitForHttpOk,
-  } = deps;
+  } = deps as MainLifecycleDeps;
 
   app.whenReady().then(async () => {
   await fs.mkdir(getTempRoot(), { recursive: true });
@@ -140,14 +350,14 @@ export const registerMainLifecycle = (deps) => {
     token: () => state.forgerAccount.token,
     mapBackendCategory,
     toCatalogStatus,
-    getUserMessage: (slug) => state.registry.apps[slug]?.userMessage,
+    getUserMessage: (slug: string) => state.registry.apps[slug]?.userMessage,
   });
   registerForgerCloudOAuth({
     ipcMain,
     channel: IPC_CHANNELS.loginForgerAccountWithGoogle,
     backendClient: () => state.forgerBackendClient,
     saveAccount: switchForgerAccountSession,
-    openExternalUrl: async (url) => {
+    openExternalUrl: async (url: string) => {
       await shell.openExternal(url);
     },
     appendLog: appendInstallLog,
@@ -174,7 +384,7 @@ export const registerMainLifecycle = (deps) => {
     getToolDefinitions: () => AGENT_TOOL_DEFINITIONS,
     getToolSettings: () => state.agentToolSettings,
     appendInstallLog,
-    requestPermission: async (runId, request) => {
+    requestPermission: async (runId: string, request: PermissionRequest) => {
       const taskDecision = await (state.appAgentTaskManager?.requestPermission(runId, request) ?? Promise.resolve(null));
       if (taskDecision !== null) {
         return taskDecision;
@@ -202,7 +412,7 @@ export const registerMainLifecycle = (deps) => {
     openApp: openInstalledApp,
     stopApp: stopInstalledApp,
     restartApp: restartInstalledApp,
-    refreshAppView: async (appId) => {
+    refreshAppView: async (appId: string) => {
       const appWindow = appWindows.get(appId);
       const running = runningApps.get(appId);
       if (appWindow && !appWindow.isDestroyed()) {
@@ -220,26 +430,26 @@ export const registerMainLifecycle = (deps) => {
     listAppPrompts,
     updateAppPrompt,
     restoreAppPrompt,
-    memoryList: async (input, access) => await getMemoryStore().list(input, access),
-    memoryCreate: async (input, access) => await getMemoryStore().create(input, access),
-    memoryUpdate: async (input, access) => await getMemoryStore().update(input, access),
-    memoryDelete: async (id, access) => await getMemoryStore().delete(id, access),
-    listOfficialToolActionIdsForApp: async (appId) => await getOfficialToolsService().listAgentActionIdsForApp(appId),
-    validateOfficialTool: async (input, access) => await getOfficialToolsService().validateAgentCall(input, {
+    memoryList: async (input: unknown, access: unknown) => await getMemoryStore().list(input, access),
+    memoryCreate: async (input: unknown, access: unknown) => await getMemoryStore().create(input, access),
+    memoryUpdate: async (input: unknown, access: unknown) => await getMemoryStore().update(input, access),
+    memoryDelete: async (id: unknown, access: unknown) => await getMemoryStore().delete(id, access),
+    listOfficialToolActionIdsForApp: async (appId: string) => await getOfficialToolsService().listAgentActionIdsForApp(appId),
+    validateOfficialTool: async (input: unknown, access: ToolAccess) => await getOfficialToolsService().validateAgentCall(input, {
       appId: access.appId,
       requireAppGrant: access.caller === 'app-agent',
     }),
-    callOfficialTool: async (input, access) => await getOfficialToolsService().callFromAgent(input, {
+    callOfficialTool: async (input: unknown, access: ToolAccess) => await getOfficialToolsService().callFromAgent(input, {
       appId: access.appId,
       requireAppGrant: access.caller === 'app-agent',
     }),
-    onToolProgress: (input) => state.chatOrchestrator?.appendExternalProgress(input.runId, input.message),
-    onToolFailure: (input) => desktopErrorReporter?.reportForgerMcpToolFailure(input),
-    onHttpFailure: (input) => desktopErrorReporter?.reportForgerMcpHttpFailure(input),
+    onToolProgress: (input: { runId: string; message: string }) => state.chatOrchestrator?.appendExternalProgress(input.runId, input.message),
+    onToolFailure: (input: ForgerMcpToolFailure) => state.desktopErrorReporter?.reportForgerMcpToolFailure(input),
+    onHttpFailure: (input: ForgerMcpHttpFailure) => state.desktopErrorReporter?.reportForgerMcpHttpFailure(input),
   });
   await state.forgerMcpServer.start();
   state.appMcpManager = new AppMcpManager({
-    getInstalledApp: (appId) => state.registry.apps[appId],
+    getInstalledApp: (appId: string) => state.registry.apps[appId],
     resolveInstalledManifest,
     ensureRuntimeInstalled,
     ensureBackendPythonEnvironment,
@@ -249,17 +459,17 @@ export const registerMainLifecycle = (deps) => {
     ensurePathInside,
     translateManifestEnvironment,
     ensureSqliteDatabaseParent,
-    getDesktopRuntimeEnvironment: (appId) => state.desktopRuntimeBridge?.environmentForApp(appId) ?? {},
+    getDesktopRuntimeEnvironment: (appId: string) => state.desktopRuntimeBridge?.environmentForApp(appId) ?? {},
     getRuntimePathEntries,
     waitForHttpOk,
     terminateProcess,
     appendInstallLog,
     truncateForInstallLog,
     serializeErrorForInstallLog,
-    onMcpStartFailed: (input) => desktopErrorReporter?.reportAppMcpStartFailure(input),
+    onMcpStartFailed: (input: { appId: string; runId: string; error: unknown }) => state.desktopErrorReporter?.reportAppMcpStartFailure(input),
   });
   state.fileLibrary = new FileLibrary(getPrivateDataRoot(), getForgerMetadataRoot());
-  await state.fileLibrary.cleanupStagedFilesForChat().catch((error) => {
+  await state.fileLibrary.cleanupStagedFilesForChat?.().catch((error: unknown) => {
     void appendInstallLog('files:chat_staging_cleanup_failed', {
       error: serializeErrorForInstallLog(error),
     });
@@ -317,13 +527,13 @@ export const registerMainLifecycle = (deps) => {
       const status = await getClaudeAuthStatus();
       return status.authenticated;
     },
-    createForgerMcpSession: (runId, appId, locale) =>
+    createForgerMcpSession: (runId: string, appId: string, locale?: string) =>
       state.forgerMcpServer?.createSession(runId, appId, {
         caller: appId === 'forger' ? 'free-chat' : 'desktop-chat',
         appIds: appId === 'forger' ? Object.keys(state.registry.apps) : [appId],
         locale,
       }) ?? null,
-    releaseForgerMcpSession: (token) => state.forgerMcpServer?.releaseSession(token),
+    releaseForgerMcpSession: (token: string) => state.forgerMcpServer?.releaseSession(token),
     buildMemoryContext: buildMemoryContextForApps,
     listenAppMcps: async (appIds: string[], runId: string) =>
       await (state.appMcpManager?.listenMcps(appIds.length > 0 ? appIds : Object.keys(state.registry.apps), runId) ?? Promise.resolve([])),
@@ -345,9 +555,9 @@ export const registerMainLifecycle = (deps) => {
       });
       ensureCatalogStatuses();
     },
-    onRunUpdated: (event) => {
+    onRunUpdated: (event: RunEventLike) => {
       if (event.run.status === 'failed') {
-        desktopErrorReporter?.reportChatRunFailure({
+        state.desktopErrorReporter?.reportChatRunFailure({
           appId: event.run.appId,
           runId: event.run.runId,
           errorCode: event.run.errorCode,
@@ -408,9 +618,9 @@ export const registerMainLifecycle = (deps) => {
       return status.authenticated;
     },
     resolvePromptTemplates: resolveInstalledPromptTemplates,
-    createForgerMcpSession: (runId, appId) =>
+    createForgerMcpSession: (runId: string, appId: string) =>
       state.forgerMcpServer?.createSession(runId, appId, { caller: 'app-agent', appIds: [appId] }) ?? null,
-    releaseForgerMcpSession: (token) => state.forgerMcpServer?.releaseSession(token),
+    releaseForgerMcpSession: (token: string) => state.forgerMcpServer?.releaseSession(token),
     buildMemoryContext: buildMemoryContextForApp,
     buildForgerToolsContext: buildForgerToolsContextForApp,
     listenAppMcps: async (appIds: string[], runId: string) =>
@@ -422,8 +632,8 @@ export const registerMainLifecycle = (deps) => {
       const target = appWindows.get(appId);
       return Boolean(target && !target.isDestroyed());
     },
-    onTaskUpdated: (event) => {
-      desktopErrorReporter?.reportAppCodexTaskEvent(event);
+    onTaskUpdated: (event: TaskEventLike) => {
+      state.desktopErrorReporter?.reportAppCodexTaskEvent(event);
       const target = appWindows.get(event.task.appId);
       if (target && !target.isDestroyed()) {
         target.webContents.send(IPC_CHANNELS.appAgentTaskUpdated, event);
@@ -483,9 +693,9 @@ export const registerMainLifecycle = (deps) => {
     },
     hasCodexConversation: hasInstalledCodexConversation,
     resolveAgents: resolveInstalledAgents,
-    createForgerMcpSession: (runId, appId, locale) =>
+    createForgerMcpSession: (runId: string, appId: string, locale?: string) =>
       state.forgerMcpServer?.createSession(runId, appId, { caller: 'app-agent', appIds: [appId], locale }) ?? null,
-    releaseForgerMcpSession: (token) => state.forgerMcpServer?.releaseSession(token),
+    releaseForgerMcpSession: (token: string) => state.forgerMcpServer?.releaseSession(token),
     buildMemoryContext: buildMemoryContextForApp,
     buildForgerToolsContext: buildForgerToolsContextForApp,
     listenAppMcps: async (appIds: string[], runId: string) =>
@@ -497,8 +707,8 @@ export const registerMainLifecycle = (deps) => {
       const target = appWindows.get(appId);
       return Boolean(target && !target.isDestroyed());
     },
-    onConversationEvent: (event) => {
-      desktopErrorReporter?.reportAppCodexConversationEvent(event);
+    onConversationEvent: (event: ConversationEventLike) => {
+      state.desktopErrorReporter?.reportAppCodexConversationEvent(event);
       state.desktopRuntimeBridge?.publishAgentEvent(event);
       const target = appWindows.get(event.conversation.appId);
       if (target && !target.isDestroyed()) {
@@ -539,7 +749,7 @@ export const registerMainLifecycle = (deps) => {
     },
   });
   state.desktopRuntimeBridge = new DesktopRuntimeBridge({
-    getInstalledApp: (appId) => state.registry.apps[appId],
+    getInstalledApp: (appId: string) => state.registry.apps[appId],
     getConversationManager: () => state.appAgentConversationManager,
     getTaskManager: () => state.appAgentTaskManager,
     getTaskStatus: async () => {
@@ -580,18 +790,18 @@ export const registerMainLifecycle = (deps) => {
       const status = await getClaudeAuthStatus();
       return status.authenticated;
     },
-    createForgerMcpSession: (runId, appId, appIds) =>
+    createForgerMcpSession: (runId: string, appId: string, appIds: string[]) =>
       state.forgerMcpServer?.createSession(runId, appId, { caller: 'automation', appIds }) ?? null,
-    releaseForgerMcpSession: (token) => state.forgerMcpServer?.releaseSession(token),
+    releaseForgerMcpSession: (token: string) => state.forgerMcpServer?.releaseSession(token),
     buildMemoryContext: buildMemoryContextForApps,
     listenAppMcps: async (appIds: string[], runId: string) =>
       await (state.appMcpManager?.listenMcps(appIds, runId) ?? Promise.resolve([])),
     releaseAppMcps: (runId: string) => {
       state.appMcpManager?.releaseMcps(runId);
     },
-    onAutomationUpdated: (event) => {
+    onAutomationUpdated: (event: AutomationEventLike) => {
       if (event.run?.status === 'failed') {
-        desktopErrorReporter?.reportAutomationRunFailure({
+        state.desktopErrorReporter?.reportAutomationRunFailure({
           automationId: event.automation.id,
           runId: event.run.id,
           selectedAppIds: event.automation.selectedAppIds,
@@ -626,7 +836,7 @@ app.on('before-quit', () => {
   void state.desktopRuntimeBridge?.stop();
   state.desktopRuntimeBridge = null;
   state.cloudDeviceManager?.stop();
-  (state.devCatalogService as DevCatalogService | null)?.stop();
+  state.devCatalogService?.stop?.();
   state.forgerMcpServer?.stop();
   state.forgerMcpServer = null;
   for (const running of runningApps.values()) {

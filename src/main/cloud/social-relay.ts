@@ -1,9 +1,68 @@
-// @ts-nocheck
+import { Notification } from 'electron';
+import { randomBytes } from 'node:crypto';
+import type fs from 'node:fs/promises';
+import type path from 'node:path';
 
-type CloudSocialRelayDeps = Record<string, any>;
+import { IPC_CHANNELS } from '../../shared/ipc';
+import type { CloudRelayRequest, CloudRelayResponse } from '../cloud-device-manager';
+import type { CloudDeviceManager } from '../cloud-device-manager';
+import type { CloudIdentityStore, EncryptedCloudText } from '../cloud-identity-store';
+import type { ForgerBackendClient } from '../forger-backend-client';
+import type { AppRegistry, RuntimeBinarySet, RunningAppProcess } from '../core/main-process-types';
+import type {
+  AppAgent,
+  AppCodexTaskStartInput,
+  CloudFriendUser,
+  CloudMessage,
+  CloudMessageEnvelope,
+  CloudSendMessageInput,
+  CloudSocialEvent,
+  FriendChatWindowOpenResult,
+  OpenAppResult,
+  RuntimeStatus,
+} from '../../shared/types';
+import type { StoredForgerAccount } from '../forger-account-store';
+
+interface CloudSocialRelayDeps {
+  CLAUDE_CODE_VERSION: string;
+  DEFAULT_NODE_VERSION: string;
+  CloudIdentityStore: typeof CloudIdentityStore;
+  app: Electron.App;
+  appAgentTaskManager: {
+    start: (appId: string, input: AppCodexTaskStartInput) => Promise<unknown>;
+    get: (appId: string, runId: string) => unknown;
+    cancel: (appId: string, runId: string) => unknown;
+  } | null;
+  appWindows: Map<string, Electron.BrowserWindow>;
+  canRunCommand: (command: string, args: string[]) => Promise<boolean>;
+  cloudDeviceManager: CloudDeviceManager | null;
+  cloudIdentityStore: CloudIdentityStore | null;
+  ensureRuntimeInstalled: (type: 'node' | 'python', version: string) => Promise<RuntimeBinarySet>;
+  existsFile: (filePath: string) => Promise<boolean>;
+  fetchBodyFromBuffer: (body: Buffer) => ArrayBuffer;
+  forgerAccount: StoredForgerAccount;
+  forgerBackendClient: ForgerBackendClient | null;
+  friendChatWindows: Map<number, Electron.BrowserWindow>;
+  fs: typeof fs;
+  getClaudeRoot: () => string;
+  getCloudIdentityPath: () => string;
+  getCodexAuthStatus: () => Promise<{ authenticated: boolean }>;
+  getRuntimePathEntries: (runtime: RuntimeBinarySet) => string[];
+  getRuntimeStatus: (appId: string) => RuntimeStatus;
+  mainWindow: Electron.BrowserWindow | null;
+  openInstalledAppUnlocked: (appId: string, locale?: string, options?: { openWindow?: boolean }) => Promise<OpenAppResult>;
+  openOrFocusFriendChatWindowForFriend: (friend: CloudFriendUser) => Promise<FriendChatWindowOpenResult>;
+  path: typeof path;
+  registry: AppRegistry;
+  resolveInstalledAgents: (appId: string) => Promise<AppAgent[]>;
+  runCommand: (command: string, args: string[], options: Record<string, unknown> & { cwd: string }) => Promise<void>;
+  runCommandCapture: (command: string, args: string[], options: Record<string, unknown> & { cwd: string }) => Promise<{ code?: number | null; stdout: string; stderr: string }>;
+  runningApps: Map<string, RunningAppProcess>;
+}
 
 export const createCloudSocialRelayController = (deps: CloudSocialRelayDeps) => {
-  const { registry, openInstalledAppUnlocked, runningApps, fetchBodyFromBuffer, forgerBackendClient, getRuntimeStatus, resolveAppDbPath, cloudIdentityStore, CloudIdentityStore, getCloudIdentityPath, cloudDeviceManager, forgerAccount, app, Notification, openOrFocusFriendChatWindowForFriend, mainWindow, IPC_CHANNELS } = deps;
+  let { cloudIdentityStore } = deps;
+  const { CLAUDE_CODE_VERSION, DEFAULT_NODE_VERSION, CloudIdentityStore, app, appAgentTaskManager, appWindows, canRunCommand, cloudDeviceManager, ensureRuntimeInstalled, existsFile, fetchBodyFromBuffer, forgerAccount, forgerBackendClient, friendChatWindows, fs, getClaudeRoot, getCloudIdentityPath, getCodexAuthStatus, getRuntimePathEntries, mainWindow, openInstalledAppUnlocked, openOrFocusFriendChatWindowForFriend, path, registry, resolveInstalledAgents, runCommand, runCommandCapture, runningApps } = deps;
 const handleCloudRelayRequest = async (request: CloudRelayRequest): Promise<CloudRelayResponse> => {
   try {
     const open = await openInstalledAppUnlocked(request.app_id, undefined, { openWindow: false });

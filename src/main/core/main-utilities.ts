@@ -1,9 +1,79 @@
-// @ts-nocheck
 
-type MainUtilitiesDeps = Record<string, any>;
+import type { App, BrowserWindow } from 'electron';
+import type { BinaryLike } from 'node:crypto';
+import type fs from 'node:fs/promises';
+import type path from 'node:path';
+
+import type { DesktopUpdater } from '../desktop-updater';
+import type { DesktopErrorReporter } from '../error-reporting';
+import type { ForgerAccountStore, StoredForgerAccount, publicForgerAccount } from '../forger-account-store';
+import type { AGENT_TOOL_DEFINITIONS, AGENT_TOOL_IDS } from './agent-tool-packages';
+import type { IPC_CHANNELS } from '../../shared/ipc';
+import type {
+  AgentToolApprovalSettings,
+  AgentToolId,
+  AgentToolSettings,
+  AppCategory,
+  AppExternalFolderSelection,
+  AppStatus,
+  AppSummary,
+  CatalogApp,
+  ChatRun,
+  ChatRunEvent,
+  DesktopUpdateState,
+  FailureDiagnosticFields,
+  InstallAppResult,
+  RendererChatTraceEvent,
+  RuntimeStatus,
+  Settings,
+  UpdateAgentToolApprovalInput,
+} from '../../shared/types';
+import type { AppRegistry, InstalledAppRecord, RunningAppProcess } from './main-process-types';
+
+interface MainUtilitiesState {
+  agentToolSettings: AgentToolSettings;
+  catalogApps: CatalogApp[];
+  desktopUpdater: DesktopUpdater | null;
+  forgerAccount: StoredForgerAccount;
+  settings: Settings;
+}
+
+interface MainUtilitiesDeps {
+  AGENT_TOOL_DEFINITIONS: typeof AGENT_TOOL_DEFINITIONS;
+  AGENT_TOOL_IDS: typeof AGENT_TOOL_IDS;
+  APP_FOLDER_GRANT_TTL_MS: number;
+  Buffer: typeof Buffer;
+  Date: DateConstructor;
+  DesktopUpdater: new (options: {
+    currentVersion: string;
+    userDataPath: string;
+    onStateChanged: (state: DesktopUpdateState) => void;
+  }) => DesktopUpdater;
+  IPC_CHANNELS: typeof IPC_CHANNELS;
+  app: App;
+  appFolderGrantSecret: BinaryLike;
+  appWindows: Map<string, BrowserWindow>;
+  buildFailureDiagnostic: (input: { error: unknown; fallbackCode: string }) => FailureDiagnosticFields;
+  cloudDeviceManager: { start: () => Promise<void>; stop: () => void } | null;
+  createHmac: typeof import('node:crypto').createHmac;
+  desktopErrorReporter: DesktopErrorReporter | null;
+  forgerAccountStore: ForgerAccountStore | null;
+  friendChatWindows: Map<number, BrowserWindow>;
+  fs: typeof fs;
+  getAgentToolSettingsPath: () => string;
+  getInstallLogPath: () => string;
+  installProgressByPhase: Record<InstallAppResult['phase'], number>;
+  isDev: boolean;
+  getMainWindow: () => BrowserWindow | null;
+  path: typeof path;
+  publicForgerAccount: typeof publicForgerAccount;
+  registry: AppRegistry;
+  runningApps: Map<string, RunningAppProcess>;
+  state: MainUtilitiesState;
+}
 
 export const createMainUtilitiesController = (deps: MainUtilitiesDeps) => {
-  const { Buffer, Date, URL, app, path, fs, process, createHmac, appFolderGrantSecret, APP_FOLDER_GRANT_TTL_MS, appWindows, getInstallLogPath, isDev, AGENT_TOOL_IDS, AGENT_TOOL_DEFINITIONS, agentToolSettings, getAgentToolSettingsPath, mainWindow, IPC_CHANNELS, desktopUpdater, DesktopUpdater, desktopErrorReporter, forgerAccount, forgerAccountStore, cloudDeviceManager, publicForgerAccount, closeFriendChatWindows, settings, registry, runningApps, catalogApps, isVersionNewer, mapBackendCategory, toCatalogStatus, buildFailureDiagnostic, installProgressByPhase, getSharedCopy, getBundledResourcesRoot, resolvePlatformAlias, runtimePlatformTokens, stripArchiveExtension, normalizeVersionForFolder } = deps;
+  const { Buffer, Date, app, path, fs, createHmac, appFolderGrantSecret, APP_FOLDER_GRANT_TTL_MS, appWindows, friendChatWindows, getInstallLogPath, isDev, AGENT_TOOL_IDS, AGENT_TOOL_DEFINITIONS, getAgentToolSettingsPath, getMainWindow, IPC_CHANNELS, DesktopUpdater, desktopErrorReporter, forgerAccountStore, cloudDeviceManager, publicForgerAccount, state, registry, runningApps, buildFailureDiagnostic, installProgressByPhase } = deps;
 const MAX_INSTALL_LOG_FIELD_LENGTH = 60_000;
 
 class CommandFailedError extends Error {
@@ -118,29 +188,29 @@ const normalizeAgentToolSettings = (input?: Partial<AgentToolSettings>): AgentTo
 const loadAgentToolSettings = async (): Promise<void> => {
   try {
     const raw = await fs.readFile(getAgentToolSettingsPath(), 'utf8');
-    agentToolSettings = normalizeAgentToolSettings(JSON.parse(raw) as Partial<AgentToolSettings>);
+    state.agentToolSettings = normalizeAgentToolSettings(JSON.parse(raw) as Partial<AgentToolSettings>);
   } catch {
-    agentToolSettings = normalizeAgentToolSettings();
+    state.agentToolSettings = normalizeAgentToolSettings();
   }
 };
 
 const saveAgentToolSettings = async (): Promise<void> => {
   await fs.mkdir(path.dirname(getAgentToolSettingsPath()), { recursive: true });
-  await fs.writeFile(getAgentToolSettingsPath(), JSON.stringify(agentToolSettings, null, 2), 'utf8');
+  await fs.writeFile(getAgentToolSettingsPath(), JSON.stringify(state.agentToolSettings, null, 2), 'utf8');
 };
 
 const updateAgentToolApproval = async (input: UpdateAgentToolApprovalInput): Promise<AgentToolSettings> => {
   if (!isAgentToolId(input.toolId)) {
     throw new Error('invalid_agent_tool_id');
   }
-  agentToolSettings = normalizeAgentToolSettings({
+  state.agentToolSettings = normalizeAgentToolSettings({
     approvals: {
-      ...agentToolSettings.approvals,
+      ...state.agentToolSettings.approvals,
       [input.toolId]: Boolean(input.requiresApproval),
     },
   });
   await saveAgentToolSettings();
-  return agentToolSettings;
+  return state.agentToolSettings;
 };
 
 const getBundledResourcesRoot = (): string => {
@@ -249,6 +319,7 @@ const failureDiagnostic = (error: unknown, fallbackCode: string) =>
   buildFailureDiagnostic({ error, fallbackCode });
 
 const emitInstallProgress = (appId: string, payload: InstallAppResult): void => {
+  const mainWindow = getMainWindow();
   if (!mainWindow || mainWindow.isDestroyed()) {
     return;
   }
@@ -260,6 +331,7 @@ const emitInstallProgress = (appId: string, payload: InstallAppResult): void => 
 };
 
 const emitRuntimeStatus = (payload: RuntimeStatus): void => {
+  const mainWindow = getMainWindow();
   if (!mainWindow || mainWindow.isDestroyed()) {
     return;
   }
@@ -296,6 +368,7 @@ const sanitizeRendererChatTrace = (input: RendererChatTraceEvent): Record<string
 });
 
 const emitChatRunUpdated = (payload: ChatRunEvent): void => {
+  const mainWindow = getMainWindow();
   if (!mainWindow || mainWindow.isDestroyed()) {
     return;
   }
@@ -313,6 +386,7 @@ const emitChatRunUpdated = (payload: ChatRunEvent): void => {
 };
 
 const emitAutomationUpdated = (payload: { automation: unknown; run?: unknown }): void => {
+  const mainWindow = getMainWindow();
   if (!mainWindow || mainWindow.isDestroyed()) {
     return;
   }
@@ -321,6 +395,7 @@ const emitAutomationUpdated = (payload: { automation: unknown; run?: unknown }):
 };
 
 const emitDesktopUpdateProgress = (payload: DesktopUpdateState): void => {
+  const mainWindow = getMainWindow();
   if (!mainWindow || mainWindow.isDestroyed()) {
     return;
   }
@@ -332,6 +407,7 @@ const emitForgerAccountUpdated = (payload: ReturnType<typeof publicForgerAccount
   userMessage?: string;
   technicalCode?: string;
 }): void => {
+  const mainWindow = getMainWindow();
   if (!mainWindow || mainWindow.isDestroyed()) {
     return;
   }
@@ -354,17 +430,17 @@ const switchForgerAccountSession = async (
 ): Promise<ReturnType<typeof publicForgerAccount> & { userMessage?: string; technicalCode?: string }> => {
   cloudDeviceManager?.stop();
   closeFriendChatWindows();
-  forgerAccount = nextAccount;
+  state.forgerAccount = nextAccount;
 
-  if (forgerAccount.authenticated && forgerAccount.token) {
-    await forgerAccountStore?.save(forgerAccount);
+  if (state.forgerAccount.authenticated && state.forgerAccount.token) {
+    await forgerAccountStore?.save(state.forgerAccount);
     await cloudDeviceManager?.start();
   } else {
     await forgerAccountStore?.clear();
   }
 
   const payload = {
-    ...publicForgerAccount(forgerAccount),
+    ...publicForgerAccount(state.forgerAccount),
     userMessage: options.userMessage,
     technicalCode: options.technicalCode,
   };
@@ -373,7 +449,7 @@ const switchForgerAccountSession = async (
 };
 
 const clearForgerAccountSession = async (technicalCode: string): Promise<void> => {
-  if (!forgerAccount.authenticated && !forgerAccount.token) {
+  if (!state.forgerAccount.authenticated && !state.forgerAccount.token) {
     return;
   }
   await switchForgerAccountSession({ authenticated: false }, {
@@ -391,19 +467,19 @@ process.on('unhandledRejection', (reason) => {
 });
 
 const getDesktopUpdater = (): DesktopUpdater => {
-  if (!desktopUpdater) {
-    desktopUpdater = new DesktopUpdater({
+  if (!state.desktopUpdater) {
+    state.desktopUpdater = new DesktopUpdater({
       currentVersion: app.getVersion(),
       userDataPath: app.getPath('userData'),
       onStateChanged: emitDesktopUpdateProgress,
     });
   }
-  return desktopUpdater;
+  return state.desktopUpdater;
 };
 
 const toAppSummary = (record: InstalledAppRecord): AppSummary => {
   const running = runningApps.get(record.appId);
-  const catalog = catalogApps.find((entry) => entry.id === record.appId);
+  const catalog = state.catalogApps.find((entry) => entry.id === record.appId);
   const latestVersion = catalog?.latestVersion;
   const updateAvailable = isVersionNewer(latestVersion, record.version);
   const base = {

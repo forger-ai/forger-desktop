@@ -1,10 +1,58 @@
-// @ts-nocheck
-import { registerWindowIpcHandlers } from './window';
+import type { IpcMain, IpcMainInvokeEvent } from 'electron';
+import type { AppAgentConversationManager } from '../app-agent-conversation-manager';
+import type { AppAgentTaskManager } from '../app-agent-task-manager';
+import type { AutomationManager } from '../automation-manager';
+import type { DesktopErrorReporter } from '../error-reporting';
+import type { ManifestAgentPromptKind } from '../manifest-agent-prompts';
+import type {
+  AgentRuntime,
+  AppAgent,
+  AppAgentRuntimeInput,
+  AppAgentThreadCreateInput,
+  AppAgentThreadRunControlInput,
+  AppAgentThreadRunStartInput,
+  AppAgentThreadRunSteerInput,
+  AppCodexConversationCreateInput,
+  AppCodexConversationSendMessageInput,
+  AppCodexTaskStartInput,
+  AppManifestAgentResumeInput,
+  AppManifestAgentStartInput,
+  AppManifestAgentSteerInput,
+  AppManifestAgentStopInput,
+  AutomationUpsertInput,
+  ClaudeEffort,
+  CodexReasoningEffort,
+} from '../../shared/types';
+import type { AppRegistry } from '../core/main-process-types';
+import type { IPC_CHANNELS as IpcChannels } from '../../shared/ipc';
 
-type MainProcessIpcDeps = Record<string, any>;
+interface AgentIpcDeps {
+  BUILT_IN_CLAUDE_EFFORT: ClaudeEffort;
+  BUILT_IN_CODEX_REASONING: CodexReasoningEffort;
+  BetterSqlite3: typeof import('better-sqlite3') | null;
+  IPC_CHANNELS: typeof IpcChannels;
+  appAgentConversationManager: AppAgentConversationManager | null;
+  appAgentTaskManager: AppAgentTaskManager | null;
+  automationManager: AutomationManager | null;
+  desktopErrorReporter: DesktopErrorReporter | null;
+  ipcMain: IpcMain;
+  normalizeAgentProvider: (value: unknown) => AgentRuntime['provider'] | undefined;
+  normalizeClaudeEffort: (value: unknown, fallback: ClaudeEffort) => ClaudeEffort;
+  normalizeCodexReasoningEffort: (value: unknown, fallback: CodexReasoningEffort) => CodexReasoningEffort;
+  registry: AppRegistry;
+  renderManifestAgentPrompt: (input: {
+    agent: AppAgent;
+    kind: ManifestAgentPromptKind;
+    variables?: Record<string, unknown>;
+    appRoot: string;
+  }) => string;
+  resolveAppDbPath: (appId: string) => Promise<string | null>;
+  resolveAppIdForWebContents: (webContentsId: number) => string | null;
+  resolveInstalledAgents: (appId: string) => Promise<AppAgent[]>;
+}
 
-export const registerAgentIpcHandlers = (deps: MainProcessIpcDeps): void => {
-  const { state, BUILT_IN_CLAUDE_EFFORT, BUILT_IN_CODEX_REASONING, BetterSqlite3, IPC_CHANNELS, appAgentConversationManager, appAgentTaskManager, automationManager, desktopErrorReporter, ipcMain, normalizeAgentProvider, normalizeClaudeEffort, normalizeCodexReasoningEffort, registry, renderManifestAgentPrompt, resolveAppDbPath, resolveAppIdForWebContents, resolveInstalledAgents } = deps;
+export const registerAgentIpcHandlers = (deps: AgentIpcDeps): void => {
+  const { BUILT_IN_CLAUDE_EFFORT, BUILT_IN_CODEX_REASONING, BetterSqlite3, IPC_CHANNELS, appAgentConversationManager, appAgentTaskManager, automationManager, desktopErrorReporter, ipcMain, normalizeAgentProvider, normalizeClaudeEffort, normalizeCodexReasoningEffort, registry, renderManifestAgentPrompt, resolveAppDbPath, resolveAppIdForWebContents, resolveInstalledAgents } = deps;
   const handleAppAgentTaskStart = async (event: IpcMainInvokeEvent, input: AppCodexTaskStartInput) => {
     const appId = resolveAppIdForWebContents(event.sender.id);
     if (!appId) {
