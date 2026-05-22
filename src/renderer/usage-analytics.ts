@@ -38,9 +38,6 @@ export const getInstallationIdentifier = () => {
 
 export const getUsageAnalyticsEnabled = () => window.localStorage.getItem(USAGE_ANALYTICS_ENABLED_KEY) !== 'false';
 
-export const hasAcceptedLegalWelcome = () =>
-  Boolean(window.localStorage.getItem(TERMS_ACCEPTED_AT_KEY)) && Boolean(window.localStorage.getItem(PRIVACY_ACCEPTED_AT_KEY));
-
 export const recordLegalWelcomeDecision = (enabled: boolean) => {
   const now = new Date().toISOString();
   window.localStorage.setItem(TERMS_ACCEPTED_AT_KEY, window.localStorage.getItem(TERMS_ACCEPTED_AT_KEY) ?? now);
@@ -58,7 +55,7 @@ export const setUsageAnalyticsPreference = (enabled: boolean) => {
 };
 
 export const shouldSubmitUsageEvent = (eventName: UsageEventName) =>
-  CONSENT_EVENTS.has(eventName) || (hasAcceptedLegalWelcome() && getUsageAnalyticsEnabled());
+  CONSENT_EVENTS.has(eventName) || getUsageAnalyticsEnabled();
 
 export const submitUsageEvent = (input: Omit<SubmitUsageEventInput, 'installationIdentifier'>) => {
   if (!shouldSubmitUsageEvent(input.eventName)) {
@@ -72,9 +69,6 @@ export const submitUsageEvent = (input: Omit<SubmitUsageEventInput, 'installatio
 };
 
 export const submitForgerInstalledEvent = (input: Pick<SubmitUsageEventInput, 'locale' | 'surface'> = {}) => {
-  if (!hasAcceptedLegalWelcome()) {
-    return;
-  }
   const installationIdentifier = getInstallationIdentifier();
   const recordedIdentifier = window.localStorage.getItem(FORGER_INSTALLED_RECORDED_KEY);
   if (recordedIdentifier === installationIdentifier) {

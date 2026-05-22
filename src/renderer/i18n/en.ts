@@ -64,6 +64,7 @@ export const en = {
     activeBadge: 'Local network active',
     waitingBadge: 'Waiting for local device',
     connectedBadge: 'Connected with local device',
+    runningTooltip: 'running in local network',
     title: (appName: string) => `Share ${appName} on local network`,
     body: 'Available to devices on this same network while you keep it active.',
     waitingBody: 'Waiting for a device on this same network to open the link.',

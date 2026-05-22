@@ -39,6 +39,7 @@ const createController = (root, overrides = {}) => {
     forgerAccount: overrides.forgerAccount ?? { authenticated: false, token: null },
     fs: overrides.fs ?? fs,
     getCloudSyncSettingsPath: () => cloudSyncSettingsPath,
+    getPrivateAppsRoot: () => path.join(root, overrides.privateAppsFolderName ?? 'apps'),
     getRegistryBackupPath: () => backupPath,
     getRegistryPath: () => registryPath,
     isDev: overrides.isDev ?? false,
@@ -112,6 +113,88 @@ test('registry store parses only object registries and normalizes runtime versio
       },
     },
   }).changed, false);
+});
+
+test('registry store filters records outside the current environment app root', async (t) => {
+  const root = await tmpRoot('registry-environment-filter');
+  t.after(async () => {
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  const { controller, registryPath, state } = createController(root);
+  await fs.mkdir(root, { recursive: true });
+  await fs.writeFile(registryPath, JSON.stringify({
+    apps: {
+      prod: {
+        appId: 'prod',
+        status: 'installed',
+        installDir: path.join(root, 'apps', 'prod'),
+      },
+      siblingPrefix: {
+        appId: 'siblingPrefix',
+        status: 'installed',
+        installDir: path.join(root, 'apps-other', 'siblingPrefix'),
+      },
+      dev: {
+        appId: 'dev',
+        status: 'installed',
+        installDir: path.join(root, 'Forger-dev', 'apps', 'dev'),
+      },
+      legacy: {
+        appId: 'legacy',
+        status: 'installed',
+      },
+    },
+  }), 'utf8');
+
+  assert.deepEqual(Object.keys(controller.filterRegistryForCurrentEnvironment({
+    apps: {
+      prod: {
+        appId: 'prod',
+        status: 'installed',
+        installDir: path.join(root, 'apps', 'prod'),
+      },
+      outside: {
+        appId: 'outside',
+        status: 'installed',
+        installDir: path.join(root, 'outside', 'app'),
+      },
+    },
+  }).registry.apps), ['prod']);
+
+  await controller.loadRegistry();
+
+  assert.deepEqual(Object.keys(state.registry.apps).sort(), ['legacy', 'prod']);
+  const saved = JSON.parse(await fs.readFile(registryPath, 'utf8'));
+  assert.deepEqual(Object.keys(saved.apps).sort(), ['legacy', 'prod']);
+});
+
+test('registry store keeps dev records when the current app root is dev', async (t) => {
+  const root = await tmpRoot('registry-dev-filter');
+  t.after(async () => {
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  const { controller, registryPath, state } = createController(root, {
+    privateAppsFolderName: 'Forger-dev/apps',
+  });
+  await fs.mkdir(root, { recursive: true });
+  await fs.writeFile(registryPath, JSON.stringify({
+    apps: {
+      prod: {
+        appId: 'prod',
+        status: 'installed',
+        installDir: path.join(root, 'apps', 'prod'),
+      },
+      dev: {
+        appId: 'dev',
+        status: 'installed',
+        installDir: path.join(root, 'Forger-dev', 'apps', 'dev'),
+      },
+    },
+  }), 'utf8');
+
+  await controller.loadRegistry();
+
+  assert.deepEqual(Object.keys(state.registry.apps), ['dev']);
 });
 
 test('registry store saves atomically, backs up the previous valid registry, and emits status', async (t) => {
