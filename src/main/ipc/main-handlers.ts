@@ -154,6 +154,7 @@ interface MainProcessIpcDeps {
   getPrivateDataRoot: () => string;
   getRuntimeStatus: (appId: string) => RuntimeStatus;
   getLocalNetworkShareStatus?: (appId: string) => RuntimeStatus['localNetworkShare'];
+  getRemoteNetworkShareStatus?: (appId: string) => RuntimeStatus['remoteNetworkShare'];
   getSecretsStore: () => SecretsStore;
   installAppRuntime: (appId: string, locale?: string) => Promise<InstallAppResult>;
   installWelcome: (appId: string, userLanguage?: string) => Promise<InstallWelcomeResult>;
@@ -165,6 +166,8 @@ interface MainProcessIpcDeps {
   openInstalledApp: (appId: string, locale?: string) => Promise<OpenAppResult>;
   startLocalNetworkShare: (appId: string) => Promise<unknown>;
   stopLocalNetworkShare: (appId: string) => Promise<unknown>;
+  startRemoteNetworkShare: (appId: string) => Promise<unknown>;
+  stopRemoteNetworkShare: (appId: string) => Promise<unknown>;
   openOrFocusFriendChatWindow: (friendship: CloudFriendship) => Promise<FriendChatWindowOpenResult>;
   path: typeof path;
   publicForgerAccount: (account: StoredForgerAccount) => ForgerAccountSession;
@@ -199,11 +202,16 @@ interface MainProcessIpcDeps {
 }
 
 export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
-  const { state, APP_CLAUDE_MODEL_OPTIONS, APP_CODEX_MODEL_OPTIONS, BetterSqlite3, BrowserWindow, CODEX_USAGE_DASHBOARD_URL, IPC_CHANNELS, app, appendInstallLog, buildAppSecretsState, buildCodexPromptWithAppContext, buildForgerToolsContextForApp, buildForgerToolsContextForFreeChat, canUseCloudDataSync, chatOrchestrator, cloudDeviceManager, connectClaudeAuth, connectCodexAuth, createRemoteAppBackup, decryptCloudMessage, decryptCloudMessages, dialog, disconnectCodexAuth, ensureCatalogStatuses, failureDiagnostic, forgerBackendClient, forwardCloudSocialEvent, fs, getAppDetails, getBackupsManager, getClaudeAuthStatus, getCloudIdentityStore, getCodexAuthStatus, getDesktopUpdater, getFileLibrary, getMemoryStore, getOfficialToolsService, getPrivateDataRoot, getRuntimeStatus, getLocalNetworkShareStatus, getSecretsStore, installAppRuntime, installWelcome, ipcMain, listAppPrompts, listCatalogFromBackend, mainWindow, normalizeManifestAgentDefaults, openInstalledApp, startLocalNetworkShare, stopLocalNetworkShare, openOrFocusFriendChatWindow, path, publicForgerAccount, registry, reinstallClaude, reinstallCodex, resolveAppIdForWebContents, resolveInstalledAgents, resolveInstalledAppSecrets, resolveInstalledManifest, resolveSelectedAppDisplayName, restoreAppPrompt, restoreAppUserVersionRuntime, restoreRemoteAppBackup, sanitizeRendererChatTrace, sendEncryptedCloudMessage, serializeErrorForInstallLog, setAppAutoSyncSetting, shell, signAppFolderGrant, stopInstalledApp, switchForgerAccountSession, toAppSummary, uninstallAppRuntime, updateAgentDefaults, updateAgentToolApproval, updateAppPrompt, updateAppRuntime, updateCodexDefaults, validateAppPrompt } = deps;
+  const { state, APP_CLAUDE_MODEL_OPTIONS, APP_CODEX_MODEL_OPTIONS, BetterSqlite3, BrowserWindow, CODEX_USAGE_DASHBOARD_URL, IPC_CHANNELS, app, appendInstallLog, buildAppSecretsState, buildCodexPromptWithAppContext, buildForgerToolsContextForApp, buildForgerToolsContextForFreeChat, canUseCloudDataSync, chatOrchestrator, cloudDeviceManager, connectClaudeAuth, connectCodexAuth, createRemoteAppBackup, decryptCloudMessage, decryptCloudMessages, dialog, disconnectCodexAuth, ensureCatalogStatuses, failureDiagnostic, forgerBackendClient, forwardCloudSocialEvent, fs, getAppDetails, getBackupsManager, getClaudeAuthStatus, getCloudIdentityStore, getCodexAuthStatus, getDesktopUpdater, getFileLibrary, getMemoryStore, getOfficialToolsService, getPrivateDataRoot, getRuntimeStatus, getLocalNetworkShareStatus, getRemoteNetworkShareStatus, getSecretsStore, installAppRuntime, installWelcome, ipcMain, listAppPrompts, listCatalogFromBackend, mainWindow, normalizeManifestAgentDefaults, openInstalledApp, startLocalNetworkShare, stopLocalNetworkShare, startRemoteNetworkShare, stopRemoteNetworkShare, openOrFocusFriendChatWindow, path, publicForgerAccount, registry, reinstallClaude, reinstallCodex, resolveAppIdForWebContents, resolveInstalledAgents, resolveInstalledAppSecrets, resolveInstalledManifest, resolveSelectedAppDisplayName, restoreAppPrompt, restoreAppUserVersionRuntime, restoreRemoteAppBackup, sanitizeRendererChatTrace, sendEncryptedCloudMessage, serializeErrorForInstallLog, setAppAutoSyncSetting, shell, signAppFolderGrant, stopInstalledApp, switchForgerAccountSession, toAppSummary, uninstallAppRuntime, updateAgentDefaults, updateAgentToolApproval, updateAppPrompt, updateAppRuntime, updateCodexDefaults, validateAppPrompt } = deps;
   const localNetworkShareStatusFor = getLocalNetworkShareStatus ?? (() => undefined);
+  const remoteNetworkShareStatusFor = getRemoteNetworkShareStatus ?? (() => undefined);
   const localNetworkSharePayloadFor = (appId: string) => {
     const status = localNetworkShareStatusFor(appId);
-    return status ? { localNetworkShare: status } : {};
+    const remoteStatus = remoteNetworkShareStatusFor(appId);
+    return {
+      ...(status ? { localNetworkShare: status } : {}),
+      ...(remoteStatus ? { remoteNetworkShare: remoteStatus } : {}),
+    };
   };
   const ensurePathInside = (rootPath: string, targetPath: string): boolean => {
     const relative = path.relative(rootPath, targetPath);
@@ -433,6 +441,18 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
 
   ipcMain.handle(IPC_CHANNELS.getLocalNetworkShareStatus, async (_event, appId: string) => {
     return localNetworkShareStatusFor(appId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.startRemoteNetworkShare, async (_event, appId: string) => {
+    return await startRemoteNetworkShare(appId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.stopRemoteNetworkShare, async (_event, appId: string) => {
+    return await stopRemoteNetworkShare(appId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.getRemoteNetworkShareStatus, async (_event, appId: string) => {
+    return remoteNetworkShareStatusFor(appId);
   });
 
   ipcMain.handle(IPC_CHANNELS.getAppSecrets, async (_event, appId: string) => {

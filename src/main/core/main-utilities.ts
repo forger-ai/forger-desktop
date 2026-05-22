@@ -65,6 +65,7 @@ interface MainUtilitiesDeps {
   installProgressByPhase: Record<InstallAppResult['phase'], number>;
   isDev: boolean;
   getLocalNetworkShareStatus?: (appId: string) => AppSummary['localNetworkShare'];
+  getRemoteNetworkShareStatus?: (appId: string) => AppSummary['remoteNetworkShare'];
   getMainWindow: () => BrowserWindow | null;
   path: typeof path;
   publicForgerAccount: typeof publicForgerAccount;
@@ -106,12 +107,17 @@ export const __testMainUtilitiesInternals = {
 };
 
 export const createMainUtilitiesController = (deps: MainUtilitiesDeps) => {
-const { Buffer, Date, app, path, fs, createHmac, appFolderGrantSecret, APP_FOLDER_GRANT_TTL_MS, appWindows, friendChatWindows, getInstallLogPath, isDev, AGENT_TOOL_IDS, AGENT_TOOL_DEFINITIONS, getAgentToolSettingsPath, getLocalNetworkShareStatus, getMainWindow, IPC_CHANNELS, DesktopUpdater, desktopErrorReporter, forgerAccountStore, cloudDeviceManager, publicForgerAccount, state, registry, runningApps, buildFailureDiagnostic, installProgressByPhase } = deps;
+const { Buffer, Date, app, path, fs, createHmac, appFolderGrantSecret, APP_FOLDER_GRANT_TTL_MS, appWindows, friendChatWindows, getInstallLogPath, isDev, AGENT_TOOL_IDS, AGENT_TOOL_DEFINITIONS, getAgentToolSettingsPath, getLocalNetworkShareStatus, getRemoteNetworkShareStatus, getMainWindow, IPC_CHANNELS, DesktopUpdater, desktopErrorReporter, forgerAccountStore, cloudDeviceManager, publicForgerAccount, state, registry, runningApps, buildFailureDiagnostic, installProgressByPhase } = deps;
 registerProcessErrorHandlers(desktopErrorReporter);
 const localNetworkShareStatusFor = getLocalNetworkShareStatus ?? (() => undefined);
+const remoteNetworkShareStatusFor = getRemoteNetworkShareStatus ?? (() => undefined);
 const localNetworkSharePayloadFor = (appId: string) => {
   const status = localNetworkShareStatusFor(appId);
   return status ? { localNetworkShare: status } : {};
+};
+const remoteNetworkSharePayloadFor = (appId: string) => {
+  const status = remoteNetworkShareStatusFor(appId);
+  return status ? { remoteNetworkShare: status } : {};
 };
 const MAX_INSTALL_LOG_FIELD_LENGTH = 60_000;
 
@@ -519,6 +525,7 @@ const toAppSummary = (record: InstalledAppRecord): AppSummary => {
     iconUrl: catalog?.iconUrl,
     beta: catalog?.beta,
     ...localNetworkSharePayloadFor(record.appId),
+    ...remoteNetworkSharePayloadFor(record.appId),
   };
   if (running) {
     return {

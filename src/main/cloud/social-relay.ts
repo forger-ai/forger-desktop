@@ -4,22 +4,17 @@ import type fs from 'node:fs/promises';
 import type path from 'node:path';
 
 import { IPC_CHANNELS } from '../../shared/ipc';
-import type { CloudRelayRequest, CloudRelayResponse } from '../cloud-device-manager';
 import type { CloudDeviceManager } from '../cloud-device-manager';
 import type { CloudIdentityStore, EncryptedCloudText } from '../cloud-identity-store';
 import type { ForgerBackendClient } from '../forger-backend-client';
-import type { AppRegistry, RuntimeBinarySet, RunningAppProcess } from '../core/main-process-types';
+import type { AppRegistry, RuntimeBinarySet } from '../core/main-process-types';
 import type {
-  AppAgent,
-  AppCodexTaskStartInput,
   CloudFriendUser,
   CloudMessage,
   CloudMessageEnvelope,
   CloudSendMessageInput,
   CloudSocialEvent,
   FriendChatWindowOpenResult,
-  OpenAppResult,
-  RuntimeStatus,
 } from '../../shared/types';
 import type { StoredForgerAccount } from '../forger-account-store';
 
@@ -28,173 +23,30 @@ interface CloudSocialRelayDeps {
   DEFAULT_NODE_VERSION: string;
   CloudIdentityStore: typeof CloudIdentityStore;
   app: Electron.App;
-  appAgentTaskManager: {
-    start: (appId: string, input: AppCodexTaskStartInput) => Promise<unknown>;
-    get: (appId: string, runId: string) => unknown;
-    cancel: (appId: string, runId: string) => unknown;
-  } | null;
   appWindows: Map<string, Electron.BrowserWindow>;
   canRunCommand: (command: string, args: string[]) => Promise<boolean>;
   cloudDeviceManager: CloudDeviceManager | null;
   cloudIdentityStore: CloudIdentityStore | null;
   ensureRuntimeInstalled: (type: 'node' | 'python', version: string) => Promise<RuntimeBinarySet>;
   existsFile: (filePath: string) => Promise<boolean>;
-  fetchBodyFromBuffer: (body: Buffer) => ArrayBuffer;
   forgerAccount: StoredForgerAccount;
   forgerBackendClient: ForgerBackendClient | null;
   friendChatWindows: Map<number, Electron.BrowserWindow>;
   fs: typeof fs;
   getClaudeRoot: () => string;
   getCloudIdentityPath: () => string;
-  getCodexAuthStatus: () => Promise<{ authenticated: boolean }>;
   getRuntimePathEntries: (runtime: RuntimeBinarySet) => string[];
-  getRuntimeStatus: (appId: string) => RuntimeStatus;
   mainWindow: Electron.BrowserWindow | null;
-  openInstalledAppUnlocked: (appId: string, locale?: string, options?: { openWindow?: boolean }) => Promise<OpenAppResult>;
   openOrFocusFriendChatWindowForFriend: (friend: CloudFriendUser) => Promise<FriendChatWindowOpenResult>;
   path: typeof path;
   registry: AppRegistry;
-  resolveInstalledAgents: (appId: string) => Promise<AppAgent[]>;
   runCommand: (command: string, args: string[], options: Record<string, unknown> & { cwd: string }) => Promise<void>;
   runCommandCapture: (command: string, args: string[], options: Record<string, unknown> & { cwd: string }) => Promise<{ code?: number | null; stdout: string; stderr: string }>;
-  runningApps: Map<string, RunningAppProcess>;
 }
 
 export const createCloudSocialRelayController = (deps: CloudSocialRelayDeps) => {
   let { cloudIdentityStore } = deps;
-  const { CLAUDE_CODE_VERSION, DEFAULT_NODE_VERSION, CloudIdentityStore, app, appAgentTaskManager, appWindows, canRunCommand, cloudDeviceManager, ensureRuntimeInstalled, existsFile, fetchBodyFromBuffer, forgerAccount, forgerBackendClient, friendChatWindows, fs, getClaudeRoot, getCloudIdentityPath, getCodexAuthStatus, getRuntimePathEntries, mainWindow, openInstalledAppUnlocked, openOrFocusFriendChatWindowForFriend, path, registry, resolveInstalledAgents, runCommand, runCommandCapture, runningApps } = deps;
-const handleCloudRelayRequest = async (request: CloudRelayRequest): Promise<CloudRelayResponse> => {
-  try {
-    const open = await openInstalledAppUnlocked(request.app_id, undefined, { openWindow: false });
-    if (!open.success) {
-      return relayError(request.request_id, 424, open.technicalCode ?? 'app_open_failed');
-    }
-    const running = runningApps.get(request.app_id);
-    if (!running) {
-      return relayError(request.request_id, 424, 'app_not_running');
-    }
-    const pathValue = request.path?.startsWith('/') ? request.path : `/${request.path || ''}`;
-    if (isUnsafeRelayPath(pathValue) || pathValue.toLowerCase().startsWith('/__forger_internal')) {
-      if (pathValue.toLowerCase().startsWith('/__forger_internal/forger_app/')) {
-        return await handleCloudForgerAppRequest(request, pathValue);
-      }
-      return relayError(request.request_id, 403, 'path_blocked');
-    }
-    const target = new URL(pathValue, running.frontendUrl);
-    const response = await fetch(target, {
-      method: request.method,
-      headers: request.headers ?? {},
-      body: request.method === 'GET' || request.method === 'HEAD' ? undefined : fetchBodyFromBuffer(Buffer.from(request.body ?? [])),
-    });
-    const headers: Record<string, string> = {};
-    for (const [key, value] of response.headers.entries()) {
-      if (['content-type', 'cache-control', 'etag', 'last-modified'].includes(key.toLowerCase())) {
-        headers[key] = value;
-      }
-    }
-    return {
-      request_id: request.request_id,
-      status: response.status,
-      headers,
-      body: [...Buffer.from(await response.arrayBuffer())],
-    };
-  } catch (error) {
-    return relayError(request.request_id, 502, error instanceof Error ? error.message : 'relay_failed');
-  }
-};
-
-const handleCloudForgerAppRequest = async (
-  request: CloudRelayRequest,
-  pathValue: string,
-): Promise<CloudRelayResponse> => {
-  try {
-    if (request.method !== 'POST') {
-      return relayJson(request.request_id, 405, { error: 'method_not_allowed' });
-    }
-
-    const body = parseRelayJsonBody(request.body);
-    const action = pathValue.replace(/^\/__forger_internal\/forger_app\/?/i, '').replace(/\/+$/, '');
-    const json = async (value: unknown, status = 200): Promise<CloudRelayResponse> =>
-      relayJson(request.request_id, status, value);
-
-    if (action === 'ai-subscription-status') {
-      const status = await getCodexAuthStatus();
-      return json({ connected: status.authenticated });
-    }
-
-    if (action === 'context') {
-      return json({ agents: await resolveInstalledAgents(request.app_id) });
-    }
-
-    if (action === 'codex-task/start') {
-      if (!appAgentTaskManager) {
-        return json({ error: 'app_codex_task_manager_unavailable' }, 503);
-      }
-      const task = await appAgentTaskManager.start(request.app_id, body as unknown as AppCodexTaskStartInput);
-      return json(task);
-    }
-
-    if (action === 'codex-task/get') {
-      const runId = typeof body.runId === 'string' ? body.runId : '';
-      return json(appAgentTaskManager?.get(request.app_id, runId) ?? null);
-    }
-
-    if (action === 'codex-task/cancel') {
-      const runId = typeof body.runId === 'string' ? body.runId : '';
-      return json(appAgentTaskManager?.cancel(request.app_id, runId) ?? { success: false });
-    }
-
-    return json({ error: 'unknown_forger_app_action' }, 404);
-  } catch (error) {
-    if (error instanceof Error && error.message === 'invalid_json_body') {
-      return relayJson(request.request_id, 400, { error: 'invalid_json_body' });
-    }
-    return relayJson(request.request_id, 500, {
-      error: error instanceof Error ? error.message : 'forger_app_request_failed',
-    });
-  }
-};
-
-const isUnsafeRelayPath = (pathValue: string): boolean => {
-  if (pathValue.includes('..')) {
-    return true;
-  }
-  try {
-    return decodeURIComponent(pathValue).includes('..');
-  } catch {
-    return true;
-  }
-};
-
-const parseRelayJsonBody = (body?: number[]): Record<string, unknown> => {
-  if (!body || body.length === 0) {
-    return {};
-  }
-  const raw = Buffer.from(body).toString('utf8');
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw) as unknown;
-  } catch {
-    throw new Error('invalid_json_body');
-  }
-  return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-    ? parsed as Record<string, unknown>
-    : {};
-};
-
-const relayJson = (requestId: string, status: number, value: unknown): CloudRelayResponse => ({
-  request_id: requestId,
-  status,
-  headers: { 'content-type': 'application/json; charset=utf-8' },
-  body: [...Buffer.from(JSON.stringify(value))],
-});
-
-const relayError = (requestId: string, status: number, message: string): CloudRelayResponse => ({
-  request_id: requestId,
-  status,
-  headers: { 'content-type': 'text/plain; charset=utf-8' },
-  body: [...Buffer.from(message)],
-});
+  const { CLAUDE_CODE_VERSION, DEFAULT_NODE_VERSION, CloudIdentityStore, app, appWindows, canRunCommand, cloudDeviceManager, ensureRuntimeInstalled, existsFile, forgerAccount, forgerBackendClient, friendChatWindows, fs, getClaudeRoot, getCloudIdentityPath, getRuntimePathEntries, mainWindow, openOrFocusFriendChatWindowForFriend, path, registry, runCommand, runCommandCapture } = deps;
 
 const findSqliteFile = async (searchDir: string): Promise<string | null> => {
   const extensions = ['.db', '.sqlite', '.sqlite3'];
@@ -497,5 +349,5 @@ const handleCloudSocialEvent = async (event: unknown): Promise<void> => {
   forwardCloudSocialEvent(eventForRenderer);
 };
 
-  return { handleCloudRelayRequest, handleCloudForgerAppRequest, parseRelayJsonBody, relayJson, relayError, findSqliteFile, resolveManagedClaudeCliPath, resolveSystemClaudeCliPath, resolveClaudeCli, ensureClaudeCliInstalled, resolveAppDbPath, getCloudIdentityStore, decryptCloudMessage, decryptCloudMessages, wait, buildEncryptedEnvelopes, sendEncryptedCloudMessage, isCloudSocialEvent, prepareCloudSocialEvent, isUnreadIncomingCloudMessage, showIncomingCloudMessageNotification, forwardCloudSocialEvent, handleCloudSocialEvent };
+  return { findSqliteFile, resolveManagedClaudeCliPath, resolveSystemClaudeCliPath, resolveClaudeCli, ensureClaudeCliInstalled, resolveAppDbPath, getCloudIdentityStore, decryptCloudMessage, decryptCloudMessages, wait, buildEncryptedEnvelopes, sendEncryptedCloudMessage, isCloudSocialEvent, prepareCloudSocialEvent, isUnreadIncomingCloudMessage, showIncomingCloudMessageNotification, forwardCloudSocialEvent, handleCloudSocialEvent };
 };

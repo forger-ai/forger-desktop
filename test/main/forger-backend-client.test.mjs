@@ -218,6 +218,91 @@ test('submitDesktopErrorReport logs failed report submissions without stack deta
   }
 });
 
+test('remote tunnel session client creates, uploads, reports, closes, and hides best-effort failures', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'forger-remote-tunnel-client-test-'));
+  const requests = [];
+  const harness = createClient(root, async (url, init) => {
+    requests.push({ url, init });
+    if (url.endsWith('/api/v1/me/remote_tunnel_sessions/7/upload_frontend')) {
+      assert.equal(init.method, 'POST');
+      assert.equal(init.headers.Authorization, 'Bearer session-token');
+      assert.equal(init.headers['Content-Type'], undefined);
+      assert.equal(init.body instanceof FormData, true);
+      assert.equal(init.body.get('frontend_hash'), 'hash-1');
+      assert.equal(init.body.get('tunnel_url'), 'https://finance.loca.lt');
+      assert.equal(JSON.parse(init.body.get('desktop_public_key_jwk')).kty, 'EC');
+      assert.deepEqual(init.body.getAll('asset_paths[]'), ['index.html']);
+      return jsonResponse(200, { frontend_url: '/remote-assets/session/' });
+    }
+    return jsonResponse(200, { id: 7, session_id: 'session-1' });
+  }, 'session-token');
+
+  try {
+    assert.deepEqual(await harness.client.createRemoteTunnelSession({ deviceId: 5, appId: 'finance-os' }), {
+      id: 7,
+      session_id: 'session-1',
+    });
+    assert.deepEqual(await harness.client.uploadRemoteTunnelFrontend({
+      sessionId: 7,
+      assets: [{ path: 'index.html', data: Buffer.from('<html></html>'), type: 'text/html' }],
+      frontendHash: 'hash-1',
+      tunnelUrl: 'https://finance.loca.lt',
+      desktopPublicKeyJwk: { kty: 'EC' },
+    }), { frontend_url: '/remote-assets/session/' });
+    await harness.client.reportRemoteTunnelSession({
+      sessionId: 7,
+      status: 'connected',
+      tunnelUrl: 'https://finance.loca.lt',
+      connectionCount: 2,
+      lastError: 'none',
+    });
+    await harness.client.closeRemoteTunnelSession(7);
+
+    assert.equal(requests[0].url, 'https://platform.test/api/v1/me/remote_tunnel_sessions');
+    assert.equal(requests[0].init.method, 'POST');
+    assert.deepEqual(JSON.parse(requests[0].init.body), { device_id: 5, app_id: 'finance-os' });
+    assert.equal(requests[2].url, 'https://platform.test/api/v1/me/remote_tunnel_sessions/7/report');
+    assert.equal(requests[2].init.method, 'PATCH');
+    assert.deepEqual(JSON.parse(requests[2].init.body), {
+      status: 'connected',
+      tunnel_url: 'https://finance.loca.lt',
+      connection_count: 2,
+      last_error: 'none',
+    });
+    assert.equal(requests[3].url, 'https://platform.test/api/v1/me/remote_tunnel_sessions/7/close');
+    assert.equal(requests[3].init.method, 'POST');
+  } finally {
+    harness.restore();
+    await rm(root, { recursive: true, force: true });
+  }
+
+  const failingUpload = createClient(root, async () => jsonResponse(422, { error: 'bad_assets' }), 'session-token');
+  try {
+    await assert.rejects(
+      () => failingUpload.client.uploadRemoteTunnelFrontend({
+        sessionId: 7,
+        assets: [],
+        frontendHash: 'hash-1',
+        tunnelUrl: 'https://finance.loca.lt',
+        desktopPublicKeyJwk: { kty: 'EC' },
+      }),
+      /No pudimos subir el frontend remoto./,
+    );
+  } finally {
+    failingUpload.restore();
+  }
+
+  const bestEffort = createClient(root, async () => {
+    throw new TypeError('network down');
+  }, 'session-token');
+  try {
+    await bestEffort.client.reportRemoteTunnelSession({ sessionId: 7, status: 'error' });
+    await bestEffort.client.closeRemoteTunnelSession(7);
+  } finally {
+    bestEffort.restore();
+  }
+});
+
 test('submitUsageEvent sends allowlisted parameters without user content fields', async () => {
   const root = await mkdtemp(join(tmpdir(), 'forger-usage-test-'));
   let requestBody;

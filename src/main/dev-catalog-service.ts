@@ -368,9 +368,14 @@ export const __testDevCatalogInternals = {
 
 export class DevCatalogService {
   private server: http.Server | null = null;
+  private port: number;
+
+  constructor(port = DEV_CATALOG_PORT) {
+    this.port = port;
+  }
 
   get url(): string {
-    return `http://${DEV_CATALOG_HOST}:${DEV_CATALOG_PORT}/catalog.json`;
+    return `http://${DEV_CATALOG_HOST}:${this.port}/catalog.json`;
   }
 
   async start(): Promise<void> {
@@ -384,7 +389,11 @@ export class DevCatalogService {
 
     await new Promise<void>((resolve, reject) => {
       this.server?.once('error', reject);
-      this.server?.listen(DEV_CATALOG_PORT, DEV_CATALOG_HOST, () => {
+      this.server?.listen(this.port, DEV_CATALOG_HOST, () => {
+        const address = this.server?.address();
+        if (address && typeof address === 'object') {
+          this.port = address.port;
+        }
         this.server?.off('error', reject);
         resolve();
       });
@@ -397,7 +406,7 @@ export class DevCatalogService {
   }
 
   private baseUrl(): string {
-    return `http://${DEV_CATALOG_HOST}:${DEV_CATALOG_PORT}`;
+    return `http://${DEV_CATALOG_HOST}:${this.port}`;
   }
 
   private async handleRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {

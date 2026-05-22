@@ -71,6 +71,9 @@ export function RendererAppDialogs({ controller }: RendererAppDialogsProps) {
     setMoveFileDialog,
     handleMoveFileSubmit,
     fileCategories,
+    remoteTunnelReadyDialog,
+    closeRemoteTunnelReadyDialog,
+    openRemoteTunnelPortal,
     errorReportDialog,
     closeErrorReportDialog,
     copyErrorReportDetails,
@@ -334,6 +337,31 @@ export function RendererAppDialogs({ controller }: RendererAppDialogsProps) {
           <Button onClick={() => setMoveFileDialog({ open: false, file: null, categoryPath: '' })}>{t.actions.close}</Button>
           <Button variant="contained" onClick={() => void handleMoveFileSubmit()}>
             {t.sections.files.move}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={remoteTunnelReadyDialog.open}
+        onClose={closeRemoteTunnelReadyDialog}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>{t.remoteNetwork.readyTitle}</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ pt: 0.5 }}>
+            <Typography color="text.secondary">
+              {t.remoteNetwork.readyBody}
+            </Typography>
+            <Alert severity="info">
+              {t.remoteNetwork.readySecurityBody}
+            </Alert>
+          </Stack>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2.5 }}>
+          <Button onClick={closeRemoteTunnelReadyDialog}>{t.actions.close}</Button>
+          <Button variant="contained" onClick={() => void openRemoteTunnelPortal()}>
+            {t.remoteNetwork.openPortal}
           </Button>
         </DialogActions>
       </Dialog>

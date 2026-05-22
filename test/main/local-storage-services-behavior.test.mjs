@@ -1804,10 +1804,10 @@ test('DevCatalogService start is idempotent and reports malformed local app mani
   await fs.mkdir(appDir, { recursive: true });
   await fs.writeFile(path.join(appDir, 'manifest.json'), '{bad json', 'utf8');
   process.env.FORGER_LOCAL_APPS = appDir;
-  const service = new DevCatalogService();
-  assert.equal(service.url, 'http://127.0.0.1:8765/catalog.json');
+  const service = new DevCatalogService(0);
   await service.start();
   await service.start();
+  assert.match(service.url, /^http:\/\/127\.0\.0\.1:\d+\/catalog\.json$/);
   try {
     const response = await fetch(service.url);
     const payload = await response.json();

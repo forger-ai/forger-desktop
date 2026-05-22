@@ -77,6 +77,23 @@ export const es = {
     startError: 'No pudimos activar Red local.',
     stopError: 'No pudimos detener Red local.',
   },
+  remoteNetwork: {
+    menuAction: 'Compartir por internet',
+    preparingAction: 'Preparando',
+    preparingBadge: 'Preparando túnel remoto',
+    waitingBadge: 'Túnel remoto esperando sesión',
+    connectedBadge: 'Túnel remoto conectado',
+    errorBadge: 'Túnel remoto con error',
+    stop: 'Detener túnel remoto',
+    startError: 'No pudimos activar el túnel remoto.',
+    stopError: 'No pudimos detener el túnel remoto.',
+    readyTitle: 'Tu aplicación está disponible desde internet.',
+    readyBody: 'Ingresa al portal de Forger Cloud para acceder desde cualquier parte.',
+    readySecurityBody:
+      'Forger tiene un enfoque especial en la seguridad y privacidad de tus datos. Por eso implementamos una arquitectura que busca entregar la mayor seguridad y privacidad posible. Revisa el blog en forger.cloud para conocer más detalles.',
+    openPortal: 'Ir al portal',
+    portalUrl: 'https://platform.forger.cloud/portal',
+  },
   installGate: {
     fallbackAppName: 'esta app',
     title: (appName: string) => `Estás a punto de instalar ${appName}`,

@@ -268,7 +268,6 @@ const createLifecycleHarness = (overrides = {}) => {
     getRuntimeStatus: () => ({ status: 'stopped' }),
     getTempRoot: () => '/tmp/forger',
     getVenvExecutables: () => ({}),
-    handleCloudRelayRequest: async () => ({}),
     handleCloudSocialEvent: async () => undefined,
     hasInstalledCodexConversation: async () => false,
     ipcMain,
@@ -303,6 +302,10 @@ const createLifecycleHarness = (overrides = {}) => {
     startDevCatalogService: async () => undefined,
     state,
     stopInstalledApp: async () => ({}),
+    stopRemoteNetworkShareSession: async (sessionId) => {
+      calls.terminated.push(['remote-session', sessionId]);
+      throw new Error('cloud_close_failed');
+    },
     switchForgerAccountSession: async () => ({}),
     terminateProcess: async (child) => calls.terminated.push(['process', child]),
     toAppSummary: (record) => record,
@@ -355,8 +358,8 @@ test('main lifecycle initializes services, wires task status through provider-ag
   assert.equal(state.cloudDeviceManager.options.token(), 'token-1');
   assert.deepEqual(state.cloudDeviceManager.options.getCloudIdentity(), {});
   assert.deepEqual(state.cloudDeviceManager.options.getInstalledApps(), [state.registry.apps['finance-os']]);
-  await state.cloudDeviceManager.options.handleRelayRequest({ path: '/apps' });
   await state.cloudDeviceManager.options.handleFriendshipEvent({ type: 'noop' });
+  await state.cloudDeviceManager.options.handleFriendshipEvent({ type: 'remote_tunnel_close', session_id: 'session-1' });
   await state.cloudDeviceManager.options.onAuthenticationInvalid('cloud_session_expired');
 
   const taskStatus = await state.desktopRuntimeBridge.options.getTaskStatus();

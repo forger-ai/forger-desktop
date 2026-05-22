@@ -29,6 +29,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { normalizeErrorReportDiagnostic } from '../shared/error-diagnostics';
 import type { StoredForgerAccount } from './forger-account-store';
+import type { RemoteFrontendAsset } from './remote-frontend-packager';
 import {
   mapCatalogItem,
   normalizeRating,
@@ -438,6 +439,61 @@ export class ForgerBackendClient {
     if (!response.ok) {
       throw backendError('Forger Cloud session is no longer valid.', `pairing_code_failed_${response.status}`);
     }
+  }
+
+  async createRemoteTunnelSession(input: { deviceId: number; appId: string }): Promise<Record<string, unknown>> {
+    const payload = await this.postJson('/api/v1/me/remote_tunnel_sessions', {
+      device_id: input.deviceId,
+      app_id: input.appId,
+    }, 'remote_tunnel_create_failed');
+    return payload && typeof payload === 'object' ? payload as Record<string, unknown> : {};
+  }
+
+  async uploadRemoteTunnelFrontend(input: {
+    sessionId: number;
+    assets: RemoteFrontendAsset[];
+    frontendHash: string;
+    tunnelUrl: string;
+    desktopPublicKeyJwk: JsonWebKey;
+  }): Promise<Record<string, unknown>> {
+    const form = new FormData();
+    form.set('frontend_hash', input.frontendHash);
+    form.set('tunnel_url', input.tunnelUrl);
+    form.set('desktop_public_key_jwk', JSON.stringify(input.desktopPublicKeyJwk));
+    for (const asset of input.assets) {
+      form.append('asset_paths[]', asset.path);
+      const body = asset.data.buffer.slice(asset.data.byteOffset, asset.data.byteOffset + asset.data.byteLength) as ArrayBuffer;
+      form.append('assets[]', new Blob([body], { type: asset.type }), asset.path.split('/').pop() ?? 'asset');
+    }
+    const response = await fetch(`${this.options.backendBaseUrl}/api/v1/me/remote_tunnel_sessions/${input.sessionId}/upload_frontend`, {
+      method: 'POST',
+      headers: buildBackendHeaders(this.options.token(), { contentType: false }),
+      body: form,
+    });
+    const payload = await this.readJson<unknown>(response);
+    if (!response.ok) {
+      throw backendError('No pudimos subir el frontend remoto.', `remote_tunnel_upload_failed_${response.status}`);
+    }
+    return payload && typeof payload === 'object' ? payload as Record<string, unknown> : {};
+  }
+
+  async reportRemoteTunnelSession(input: {
+    sessionId: number;
+    status: string;
+    tunnelUrl?: string;
+    connectionCount?: number;
+    lastError?: string;
+  }): Promise<void> {
+    await this.patchJson(`/api/v1/me/remote_tunnel_sessions/${input.sessionId}/report`, {
+      status: input.status,
+      tunnel_url: input.tunnelUrl,
+      connection_count: input.connectionCount,
+      last_error: input.lastError,
+    }, 'remote_tunnel_report_failed').catch(() => undefined);
+  }
+
+  async closeRemoteTunnelSession(sessionId: number): Promise<void> {
+    await this.postJson(`/api/v1/me/remote_tunnel_sessions/${sessionId}/close`, {}, 'remote_tunnel_close_failed').catch(() => undefined);
   }
 
   async listFriends(): Promise<CloudFriendship[]> {

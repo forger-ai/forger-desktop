@@ -55,7 +55,7 @@ import { OfficialToolsService, normalizeAppToolDeclarations } from '../official-
 import { ForgerAccountStore, publicForgerAccount, type StoredForgerAccount } from '../forger-account-store';
 import { ForgerBackendClient } from '../forger-backend-client';
 import { registerForgerCloudOAuth } from '../forger-cloud-oauth';
-import { CloudDeviceManager, type CloudRelayRequest, type CloudRelayResponse } from '../cloud-device-manager';
+import { CloudDeviceManager } from '../cloud-device-manager';
 import { CloudIdentityStore, type EncryptedCloudText } from '../cloud-identity-store';
 import { BackupsManager } from '../backups-manager';
 import {
@@ -77,6 +77,7 @@ import { createSettingsServiceController } from './settings-service';
 import { configureDesktopUserDataPath, createPathConfigController } from './path-config';
 import { createMainUtilitiesController } from './main-utilities';
 import { createLocalNetworkShareController } from './local-network-share-service';
+import { RemoteNetworkShareManager } from '../remote-network-share-manager';
 import { createRuntimeInstallController } from '../runtime/runtime-install';
 import { createWindowBootstrapController } from './window-bootstrap';
 import {
@@ -373,7 +374,7 @@ let forgerMcpServer: ForgerMcpServer | null = null;
 
 const mainUtilitiesState = { get agentToolSettings() { return agentToolSettings; }, set agentToolSettings(value) { agentToolSettings = value; }, get catalogApps() { return catalogApps; }, set catalogApps(value) { catalogApps = value; }, get desktopUpdater() { return desktopUpdater; }, set desktopUpdater(value) { desktopUpdater = value; }, get forgerAccount() { return forgerAccount; }, set forgerAccount(value) { forgerAccount = value; }, get settings() { return settings; }, set settings(value) { settings = value; } };
 const getMainWindow = (): BrowserWindow | null => mainWindow;
-const createMainUtilitiesDeps = () => ({ AGENT_TOOL_DEFINITIONS, AGENT_TOOL_IDS, APP_FOLDER_GRANT_TTL_MS, Buffer, Date, DesktopUpdater, IPC_CHANNELS, app, appFolderGrantSecret, appWindows, buildFailureDiagnostic, cloudDeviceManager, createHmac, desktopErrorReporter, forgerAccountStore, friendChatWindows, fs, getAgentToolSettingsPath, getInstallLogPath, installProgressByPhase, isDev, getLocalNetworkShareStatus, getMainWindow, path, publicForgerAccount, registry, runningApps, state: mainUtilitiesState });
+const createMainUtilitiesDeps = () => ({ AGENT_TOOL_DEFINITIONS, AGENT_TOOL_IDS, APP_FOLDER_GRANT_TTL_MS, Buffer, Date, DesktopUpdater, IPC_CHANNELS, app, appFolderGrantSecret, appWindows, buildFailureDiagnostic, cloudDeviceManager, createHmac, desktopErrorReporter, forgerAccountStore, friendChatWindows, fs, getAgentToolSettingsPath, getInstallLogPath, installProgressByPhase, isDev, getLocalNetworkShareStatus, getRemoteNetworkShareStatus, getMainWindow, path, publicForgerAccount, registry, runningApps, state: mainUtilitiesState });
 const getMainUtilitiesController = () => createMainUtilitiesController(createMainUtilitiesDeps());
 const CommandFailedError = getMainUtilitiesController().CommandFailedError;
 const truncateForInstallLog = (value: string): string => getMainUtilitiesController().truncateForInstallLog(value);
@@ -846,6 +847,7 @@ const createInstalledAppRuntimeDeps = () => ({
   shell,
   stoppingApps,
   stopLocalNetworkShare,
+  stopRemoteNetworkShare,
   syncAppToCloudIfEnabled,
   truncateForInstallLog,
   upsertInstalledRecord,
@@ -882,6 +884,24 @@ const localNetworkShareController = createLocalNetworkShareController({
   emitRuntimeStatus,
 });
 
+const remoteNetworkShareManager = new RemoteNetworkShareManager({
+  runningApps,
+  openInstalledApp: openInstalledAppUnlocked,
+  resolveInstalledManifest: async (appId) => {
+    const installDir = registry.apps[appId]?.installDir;
+    return installDir ? await resolveInstalledManifest(installDir) : null;
+  },
+  backendBaseUrl,
+  backendClient: () => forgerBackendClient,
+  getCurrentDeviceId: async () => {
+    const state = await cloudDeviceManager?.getState?.();
+    return state?.currentDevice?.id;
+  },
+  installDirForApp: (appId: string) => registry.apps[appId]?.installDir,
+  appendInstallLog,
+  emitRuntimeStatus: (appId, remoteNetworkShare) => emitRuntimeStatus({ ...getRuntimeStatus(appId), remoteNetworkShare }),
+});
+
 function getLocalNetworkShareStatus(appId: string): ReturnType<typeof localNetworkShareController.getStatus> {
   return localNetworkShareController.getStatus(appId);
 }
@@ -892,6 +912,22 @@ async function startLocalNetworkShare(appId: string): ReturnType<typeof localNet
 
 async function stopLocalNetworkShare(appId: string): ReturnType<typeof localNetworkShareController.stop> {
   return await localNetworkShareController.stop(appId);
+}
+
+function getRemoteNetworkShareStatus(appId: string): ReturnType<typeof remoteNetworkShareManager.status> {
+  return remoteNetworkShareManager.status(appId);
+}
+
+async function startRemoteNetworkShare(appId: string): ReturnType<typeof remoteNetworkShareManager.start> {
+  return await remoteNetworkShareManager.start(appId);
+}
+
+async function stopRemoteNetworkShare(appId: string): ReturnType<typeof remoteNetworkShareManager.stop> {
+  return await remoteNetworkShareManager.stop(appId);
+}
+
+async function stopRemoteNetworkShareSession(sessionId: string): ReturnType<typeof remoteNetworkShareManager.stopBySession> {
+  return await remoteNetworkShareManager.stopBySession(sessionId);
 }
 
 const createCloudSocialRelayDeps = () => ({
@@ -927,11 +963,6 @@ const createCloudSocialRelayDeps = () => ({
   runningApps,
 });
 const getCloudSocialRelayController = () => createCloudSocialRelayController(createCloudSocialRelayDeps());
-const handleCloudRelayRequest = async (request: CloudRelayRequest): Promise<CloudRelayResponse> => await getCloudSocialRelayController().handleCloudRelayRequest(request);
-const handleCloudForgerAppRequest = async (request: CloudRelayRequest): Promise<CloudRelayResponse> => await (getCloudSocialRelayController().handleCloudForgerAppRequest as (...args: unknown[]) => Promise<CloudRelayResponse>)(request);
-const parseRelayJsonBody = (body?: number[]): Record<string, unknown> => getCloudSocialRelayController().parseRelayJsonBody(body);
-const relayJson = (requestId: string, status: number, value: unknown): CloudRelayResponse => getCloudSocialRelayController().relayJson(requestId, status, value);
-const relayError = (requestId: string, status: number, message: string): CloudRelayResponse => getCloudSocialRelayController().relayError(requestId, status, message);
 const findSqliteFile = async (searchDir: string): Promise<string | null> => await getCloudSocialRelayController().findSqliteFile(searchDir);
 const resolveManagedClaudeCliPath = async (baseDir: string): Promise<string | null> => await getCloudSocialRelayController().resolveManagedClaudeCliPath(baseDir);
 const resolveSystemClaudeCliPath = async (): Promise<string | null> => await getCloudSocialRelayController().resolveSystemClaudeCliPath();
@@ -1018,6 +1049,7 @@ const getMainProcessIpcDeps = () => ({
   getPrivateDataRoot,
   getRuntimeStatus,
   getLocalNetworkShareStatus,
+  getRemoteNetworkShareStatus,
   getSecretsStore,
   getWindowState,
   installAppRuntime,
@@ -1033,6 +1065,9 @@ const getMainProcessIpcDeps = () => ({
   openInstalledApp,
   startLocalNetworkShare,
   stopLocalNetworkShare,
+  startRemoteNetworkShare,
+  stopRemoteNetworkShare,
+  stopRemoteNetworkShareSession,
   openOrFocusFriendChatWindow,
   path,
   publicForgerAccount,
@@ -1120,6 +1155,7 @@ const mainLifecycleState = {
   get memoryStore() { return memoryStore; }, set memoryStore(value) { memoryStore = value; },
   get desktopRuntimeBridge() { return desktopRuntimeBridge; }, set desktopRuntimeBridge(value) { desktopRuntimeBridge = value; },
   get localNetworkShareManager() { return localNetworkShareController.manager; }, set localNetworkShareManager(value) { localNetworkShareController.manager = value; },
+  get remoteNetworkShareManager() { return remoteNetworkShareManager; },
   get forgerMcpServer() { return forgerMcpServer; }, set forgerMcpServer(value) { forgerMcpServer = value; },
   get agentToolSettings() { return agentToolSettings; }, set agentToolSettings(value) { agentToolSettings = value; },
 };
@@ -1137,10 +1173,10 @@ registerMainLifecycle({
   getCloudDevicePath, getCloudIdentityPath, getCloudIdentityStore, getCodexAuthStatus, getCodexHome, getCodexRoot,
   getCodexToolEnvironment, getForgerAccountPath, getForgerHomeRoot, getForgerMetadataRoot, getFreePort,
   getLegacyForgerMetadataRoot, getMemoryStore, getOfficialToolsService, getPrivateAppsRoot, getPrivateDataRoot,
-  getRuntimesRoot, getRuntimePathEntries, getRuntimeStatus, getTempRoot, getVenvExecutables, handleCloudRelayRequest,
+  getRuntimesRoot, getRuntimePathEntries, getRuntimeStatus, getLocalNetworkShareStatus, getRemoteNetworkShareStatus, getTempRoot, getVenvExecutables,
   handleCloudSocialEvent, hasInstalledCodexConversation, ipcMain, listAppPrompts, listCatalogFromBackend,
   loadAgentToolSettings, loadCloudSyncSettings, loadRegistry, loadSettings, mapBackendCategory, normalizeNodeRuntimeVersion,
-  openInstalledApp, startLocalNetworkShare, stopLocalNetworkShare, openOrFocusAppWindow, registerForgerCloudOAuth,
+  openInstalledApp, startLocalNetworkShare, stopLocalNetworkShare, startRemoteNetworkShare, stopRemoteNetworkShare, stopRemoteNetworkShareSession, openOrFocusAppWindow, registerForgerCloudOAuth,
   registerIpcHandlers, resolveClaudeCli, resolveCodexCliPath, resolveInstalledAgents, resolveInstalledManifest,
   resolveInstalledPromptTemplates, restoreAppPrompt, restartInstalledApp, runningApps, serializeErrorForInstallLog,
   shell, splitManifestCommand, startDevCatalogService, state: mainLifecycleState, stopInstalledApp,

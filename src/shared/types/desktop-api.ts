@@ -1,6 +1,6 @@
 import type { AppSummary } from './catalog';
 import type { CatalogApp } from './catalog-app';
-import type { InstallAppResult, LocalNetworkShareResult, LocalNetworkShareStatus, OpenAppResult, StopAppResult, RuntimeStatus } from './runtime';
+import type { InstallAppResult, LocalNetworkShareResult, LocalNetworkShareStatus, OpenAppResult, RemoteNetworkShareResult, RemoteNetworkShareStatus, StopAppResult, RuntimeStatus } from './runtime';
 import type { BasicActionResult } from './base';
 import type { AppBackupSummary, CreateAppBackupInput, CreateAppBackupResult, DeleteAppBackupInput, RestoreAppBackupInput, RemoteBackupsState, CreateRemoteAppBackupInput, CreateRemoteAppBackupResult, RestoreRemoteAppBackupInput, CloudSyncSettings } from './backups';
 import type { AppDetails, ChatRunStatus, ChatRun, ChatRunEvent, ChatStartRunInput, ChatGetRunInput, ChatCancelRunInput, ChatApprovePermissionInput, ChatApplyRunInput, ChatApplyResult, ChatUndoInput, ChatUndoResult, RendererChatTraceEvent } from './chat';
@@ -49,6 +49,9 @@ export interface ForgerDesktopApi {
   startLocalNetworkShare: (appId: string) => Promise<LocalNetworkShareResult>;
   stopLocalNetworkShare: (appId: string) => Promise<LocalNetworkShareResult>;
   getLocalNetworkShareStatus: (appId: string) => Promise<LocalNetworkShareStatus>;
+  startRemoteNetworkShare: (appId: string) => Promise<RemoteNetworkShareResult>;
+  stopRemoteNetworkShare: (appId: string) => Promise<RemoteNetworkShareResult>;
+  getRemoteNetworkShareStatus: (appId: string) => Promise<RemoteNetworkShareStatus>;
   getAppSecrets: (appId: string) => Promise<AppSecretsState>;
   listUserSecrets: () => Promise<UserSecretSummary[]>;
   createUserSecret: (input: CreateUserSecretInput) => Promise<SecretMutationResult>;

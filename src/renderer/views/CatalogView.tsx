@@ -21,6 +21,8 @@ interface CatalogViewProps {
   onDetails: (appId: string) => void;
   onDelete: (appId: string) => void;
   onStartLocalNetworkShare: (appId: string) => void;
+  onStartRemoteNetworkShare: (appId: string) => void;
+  onStopRemoteNetworkShare: (appId: string) => void;
   onRefresh: () => void;
   t: AppDictionary;
   earlyAccessEnabled: boolean;
@@ -53,6 +55,8 @@ export function CatalogView({
   onDetails,
   onDelete,
   onStartLocalNetworkShare,
+  onStartRemoteNetworkShare,
+  onStopRemoteNetworkShare,
   onRefresh,
   t,
   earlyAccessEnabled,
@@ -133,9 +137,19 @@ export function CatalogView({
             const hasDownloadableVersion = Boolean(app.downloadUrl || app.latestVersionId);
             const canInstallEarlyAccess = !isEarlyAccess || (earlyAccessEnabled && hasDownloadableVersion);
             const primaryAction = isConflict ? 'update' : hasError ? 'retry' : isInstalled ? (app.status === 'running' ? 'stop' : 'open') : 'install';
-            const isOpening = primaryAction === 'open' && openingAppIds.has(app.id);
+            const remoteNetworkState = app.remoteNetworkShare?.state;
+            const remoteNetworkPreparing = remoteNetworkState === 'preparing';
+            const isOpening = (primaryAction === 'open' && openingAppIds.has(app.id)) || remoteNetworkPreparing;
             const localNetworkRunning = Boolean(app.localNetworkShare?.connectedAt || app.localNetworkShare?.active);
-            const statusIndicatorLabel = localNetworkRunning
+            const statusIndicatorLabel = remoteNetworkState === 'preparing'
+              ? t.remoteNetwork.preparingBadge
+              : remoteNetworkState === 'waiting_for_session'
+                ? t.remoteNetwork.waitingBadge
+              : remoteNetworkState === 'connected'
+                ? t.remoteNetwork.connectedBadge
+              : remoteNetworkState === 'error'
+                ? t.remoteNetwork.errorBadge
+              : localNetworkRunning
               ? t.localNetwork.runningTooltip
               : app.status === 'running'
                 ? 'running'
@@ -143,8 +157,17 @@ export function CatalogView({
             const canShareLocalNetwork = earlyAccessEnabled
               && primaryAction === 'open'
               && app.capabilities?.some((capability) => capability.id === 'local_network_share');
+            const canShareRemoteNetwork = earlyAccessEnabled
+              && primaryAction === 'open'
+              && app.capabilities?.some((capability) => capability.id === 'remote_tunnel_share');
+            const canStopRemoteNetwork = earlyAccessEnabled
+              && Boolean(app.remoteNetworkShare?.active)
+              && app.remoteNetworkShare?.state !== 'closed'
+              && app.remoteNetworkShare?.state !== 'inactive';
             const primaryActionLabel = hasError
               ? t.actions.retry
+              : remoteNetworkPreparing
+                ? t.remoteNetwork.preparingAction
               : app.status === 'running'
                 ? t.actions.stop
               : isInstalling
@@ -178,7 +201,11 @@ export function CatalogView({
                 primaryActionLabel={primaryActionLabel}
                 primaryDisabled={isInstalling || (!isInstalled && !canInstallEarlyAccess)}
                 primaryLoading={isOpening}
-                primaryMenuActions={canShareLocalNetwork ? [{ label: t.localNetwork.menuAction, onClick: () => onStartLocalNetworkShare(app.id) }] : undefined}
+                primaryMenuActions={[
+                  ...(canShareLocalNetwork ? [{ label: t.localNetwork.menuAction, onClick: () => onStartLocalNetworkShare(app.id) }] : []),
+                  ...(canShareRemoteNetwork ? [{ label: t.remoteNetwork.menuAction, onClick: () => onStartRemoteNetworkShare(app.id) }] : []),
+                  ...(canStopRemoteNetwork ? [{ label: t.remoteNetwork.stop, onClick: () => onStopRemoteNetworkShare(app.id) }] : []),
+                ]}
                 installProgress={installProgress}
                 onPrimaryAction={() => {
                   if (isInstalling) {

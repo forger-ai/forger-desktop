@@ -7,7 +7,6 @@ import test from 'node:test';
 import { clearDistModule, withMockedElectron } from './electron-test-helpers.mjs';
 
 const tmpRoot = async (name) => await fs.mkdtemp(path.join(os.tmpdir(), `forger-${name}-`));
-const bufferText = (value) => Buffer.from(value).toString('utf8');
 const withPlatform = async (platform, operation) => {
   const descriptor = Object.getOwnPropertyDescriptor(process, 'platform');
   Object.defineProperty(process, 'platform', { value: platform });
@@ -133,218 +132,6 @@ const createSocialDeps = (overrides = {}) => {
   return { deps, sentToWindows, openedFriends };
 };
 
-test('cloud social relay blocks unsafe paths, proxies allowed requests, and serves app internal actions', async (t) => {
-  const originalFetch = globalThis.fetch;
-  t.after(() => {
-    globalThis.fetch = originalFetch;
-  });
-
-  await withMockedElectron({ Notification: FakeNotification }, async (require) => {
-    clearDistModule('main/cloud/social-relay.js');
-    const { createCloudSocialRelayController } = require('../../dist-electron/main/cloud/social-relay.js');
-    const requests = [];
-    globalThis.fetch = async (url, init) => {
-      requests.push({ url: String(url), init });
-      return new Response('ok', {
-        status: 201,
-        headers: {
-          'content-type': 'text/plain',
-          'x-secret': 'nope',
-          etag: 'abc',
-        },
-      });
-    };
-    const { deps } = createSocialDeps();
-    const controller = createCloudSocialRelayController(deps);
-
-    const blocked = await controller.handleCloudRelayRequest({
-      request_id: 'blocked',
-      app_id: 'finance-os',
-      method: 'GET',
-      path: '/../secrets',
-    });
-    const encodedBlocked = await controller.handleCloudRelayRequest({
-      request_id: 'encoded-blocked',
-      app_id: 'finance-os',
-      method: 'GET',
-      path: '/%2e%2e/secrets',
-    });
-    const proxied = await controller.handleCloudRelayRequest({
-      request_id: 'proxied',
-      app_id: 'finance-os',
-      method: 'POST',
-      path: 'api/import',
-      headers: { 'content-type': 'application/json' },
-      body: [...Buffer.from('{"ok":true}')],
-    });
-    const context = await controller.handleCloudRelayRequest({
-      request_id: 'context',
-      app_id: 'finance-os',
-      method: 'POST',
-      path: '/__forger_internal/forger_app/context',
-      body: [],
-    });
-    const start = await controller.handleCloudForgerAppRequest({
-      request_id: 'start',
-      app_id: 'finance-os',
-      method: 'POST',
-      path: '',
-      body: [...Buffer.from('{"prompt":"hello"}')],
-    }, '/__forger_internal/forger_app/codex-task/start');
-    const invalidJson = await controller.handleCloudForgerAppRequest({
-      request_id: 'bad-json',
-      app_id: 'finance-os',
-      method: 'POST',
-      path: '',
-      body: [...Buffer.from('{bad json')],
-    }, '/__forger_internal/forger_app/codex-task/start');
-
-    assert.equal(blocked.status, 403);
-    assert.equal(Buffer.from(blocked.body).toString('utf8'), 'path_blocked');
-    assert.equal(encodedBlocked.status, 403);
-    assert.equal(Buffer.from(encodedBlocked.body).toString('utf8'), 'path_blocked');
-    assert.equal(proxied.status, 201);
-    assert.deepEqual(proxied.headers, { 'content-type': 'text/plain', etag: 'abc' });
-    assert.equal(requests[0].url, 'http://app.local/api/import');
-    assert.equal(bufferText(requests[0].init.body), '{"ok":true}');
-    assert.deepEqual(JSON.parse(Buffer.from(context.body).toString('utf8')), {
-      agents: [{ id: 'assistant', name: 'Assistant' }],
-    });
-    assert.equal(JSON.parse(Buffer.from(start.body).toString('utf8')).input.prompt, 'hello');
-    assert.equal(invalidJson.status, 400);
-    assert.deepEqual(JSON.parse(Buffer.from(invalidJson.body).toString('utf8')), { error: 'invalid_json_body' });
-  });
-});
-
-test('cloud social relay normalizes open/proxy failures and internal action fallbacks', async (t) => {
-  const originalFetch = globalThis.fetch;
-  t.after(() => {
-    globalThis.fetch = originalFetch;
-  });
-
-  await withMockedElectron({ Notification: FakeNotification }, async (require) => {
-    clearDistModule('main/cloud/social-relay.js');
-    const { createCloudSocialRelayController } = require('../../dist-electron/main/cloud/social-relay.js');
-
-    const openBlocked = createCloudSocialRelayController(createSocialDeps({
-      openInstalledAppUnlocked: async () => ({ success: false, technicalCode: 'app_install_missing' }),
-    }).deps);
-    const openResponse = await openBlocked.handleCloudRelayRequest({
-      request_id: 'open-failed',
-      app_id: 'finance-os',
-      method: 'GET',
-      path: '/api',
-    });
-    assert.equal(openResponse.status, 424);
-    assert.equal(bufferText(openResponse.body), 'app_install_missing');
-
-    const notRunning = createCloudSocialRelayController(createSocialDeps({
-      runningApps: new Map(),
-    }).deps);
-    const notRunningResponse = await notRunning.handleCloudRelayRequest({
-      request_id: 'not-running',
-      app_id: 'finance-os',
-      method: 'GET',
-      path: '/api',
-    });
-    assert.equal(notRunningResponse.status, 424);
-    assert.equal(bufferText(notRunningResponse.body), 'app_not_running');
-
-    globalThis.fetch = async () => {
-      throw new Error('proxy exploded');
-    };
-    const proxy = createCloudSocialRelayController(createSocialDeps().deps);
-    const proxyError = await proxy.handleCloudRelayRequest({
-      request_id: 'proxy-error',
-      app_id: 'finance-os',
-      method: 'GET',
-      path: '/api',
-    });
-    assert.equal(proxyError.status, 502);
-    assert.equal(bufferText(proxyError.body), 'proxy exploded');
-
-    const unavailableTasks = createCloudSocialRelayController(createSocialDeps({
-      appAgentTaskManager: null,
-    }).deps);
-    const method = await unavailableTasks.handleCloudForgerAppRequest({
-      request_id: 'method',
-      app_id: 'finance-os',
-      method: 'GET',
-      path: '',
-      body: [],
-    }, '/__forger_internal/forger_app/ai-subscription-status');
-    const subscription = await unavailableTasks.handleCloudForgerAppRequest({
-      request_id: 'subscription',
-      app_id: 'finance-os',
-      method: 'POST',
-      path: '',
-      body: [],
-    }, '/__forger_internal/forger_app/ai-subscription-status/');
-    const start = await unavailableTasks.handleCloudForgerAppRequest({
-      request_id: 'start-missing',
-      app_id: 'finance-os',
-      method: 'POST',
-      path: '',
-      body: [],
-    }, '/__forger_internal/forger_app/codex-task/start');
-    const get = await unavailableTasks.handleCloudForgerAppRequest({
-      request_id: 'get-missing',
-      app_id: 'finance-os',
-      method: 'POST',
-      path: '',
-      body: [...Buffer.from('{"runId":99}')],
-    }, '/__forger_internal/forger_app/codex-task/get');
-    const cancel = await unavailableTasks.handleCloudForgerAppRequest({
-      request_id: 'cancel-missing',
-      app_id: 'finance-os',
-      method: 'POST',
-      path: '',
-      body: [],
-    }, '/__forger_internal/forger_app/codex-task/cancel');
-    const unknown = await unavailableTasks.handleCloudForgerAppRequest({
-      request_id: 'unknown',
-      app_id: 'finance-os',
-      method: 'POST',
-      path: '',
-      body: [],
-    }, '/__forger_internal/forger_app/nope');
-    const activeTaskManager = createCloudSocialRelayController(createSocialDeps().deps);
-    const activeGet = await activeTaskManager.handleCloudForgerAppRequest({
-      request_id: 'get-active',
-      app_id: 'finance-os',
-      method: 'POST',
-      path: '',
-      body: [...Buffer.from('{"runId":"run-1"}')],
-    }, '/__forger_internal/forger_app/codex-task/get');
-
-    assert.equal(method.status, 405);
-    assert.deepEqual(JSON.parse(bufferText(method.body)), { error: 'method_not_allowed' });
-    assert.deepEqual(JSON.parse(bufferText(subscription.body)), { connected: true });
-    assert.equal(start.status, 503);
-    assert.deepEqual(JSON.parse(bufferText(start.body)), { error: 'app_codex_task_manager_unavailable' });
-    assert.equal(JSON.parse(bufferText(get.body)), null);
-    assert.deepEqual(JSON.parse(bufferText(cancel.body)), { success: false });
-    assert.deepEqual(JSON.parse(bufferText(activeGet.body)), { runId: 'run-1', status: 'running' });
-    assert.equal(unknown.status, 404);
-    assert.deepEqual(JSON.parse(bufferText(unknown.body)), { error: 'unknown_forger_app_action' });
-
-    const failingContext = createCloudSocialRelayController(createSocialDeps({
-      resolveInstalledAgents: async () => {
-        throw new Error('context failed');
-      },
-    }).deps);
-    const contextError = await failingContext.handleCloudForgerAppRequest({
-      request_id: 'context-error',
-      app_id: 'finance-os',
-      method: 'POST',
-      path: '',
-      body: [],
-    }, '/__forger_internal/forger_app/context');
-    assert.equal(contextError.status, 500);
-    assert.deepEqual(JSON.parse(bufferText(contextError.body)), { error: 'context failed' });
-  });
-});
-
 test('cloud social relay resolves local database and Claude command paths without network installs', async (t) => {
   const root = await tmpRoot('social-relay-runtime');
   t.after(async () => {
@@ -408,45 +195,17 @@ test('cloud social relay resolves local database and Claude command paths withou
   });
 });
 
-test('cloud social relay covers relay body, Claude fallback, and recipient key edge cases', async (t) => {
+test('cloud social relay covers Claude fallback and recipient key edge cases', async (t) => {
   const root = await tmpRoot('social-relay-edges');
-  const originalFetch = globalThis.fetch;
   t.after(async () => {
-    globalThis.fetch = originalFetch;
     await fs.rm(root, { recursive: true, force: true });
   });
 
   await withMockedElectron({ Notification: FakeNotification }, async (require) => {
     clearDistModule('main/cloud/social-relay.js');
     const { createCloudSocialRelayController } = require('../../dist-electron/main/cloud/social-relay.js');
-    const relayRequests = [];
-    globalThis.fetch = async (url, init) => {
-      relayRequests.push({ url: String(url), init });
-      return new Response(null, { status: 204, headers: { 'last-modified': 'today', 'x-drop': 'secret' } });
-    };
 
     const relay = createCloudSocialRelayController(createSocialDeps().deps);
-    assert.deepEqual(relay.parseRelayJsonBody(), {});
-    assert.deepEqual(relay.parseRelayJsonBody([...Buffer.from('[1,2]')]), {});
-    const head = await relay.handleCloudRelayRequest({
-      request_id: 'head',
-      app_id: 'finance-os',
-      method: 'HEAD',
-      path: '/status',
-      body: [...Buffer.from('ignored')],
-    });
-    const malformedPath = await relay.handleCloudRelayRequest({
-      request_id: 'malformed-path',
-      app_id: 'finance-os',
-      method: 'GET',
-      path: '/%E0%A4%A',
-    });
-    assert.equal(head.status, 204);
-    assert.equal(relayRequests[0].init.body, undefined);
-    assert.deepEqual(head.headers, { 'last-modified': 'today' });
-    assert.equal(malformedPath.status, 403);
-    assert.equal(bufferText(malformedPath.body), 'path_blocked');
-
     assert.equal(await relay.resolveAppDbPath('missing-app'), null);
     assert.equal(await createCloudSocialRelayController(createSocialDeps({
       registry: { apps: { 'finance-os': { installDir: path.join(root, 'missing-backend') } } },

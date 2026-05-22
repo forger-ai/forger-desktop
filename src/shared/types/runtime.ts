@@ -136,6 +136,34 @@ export interface LocalNetworkShareStatus {
   connectedAt?: string;
 }
 
+export type RemoteNetworkShareState =
+  | 'inactive'
+  | 'preparing'
+  | 'waiting_for_session'
+  | 'connected'
+  | 'error'
+  | 'closed';
+
+export interface RemoteNetworkConnectionSummary {
+  id: string;
+  connectedAt: string;
+  lastSeenAt?: string;
+}
+
+export interface RemoteNetworkShareStatus {
+  active: boolean;
+  appId: string;
+  state: RemoteNetworkShareState;
+  sessionId?: string;
+  portalUrl?: string;
+  frontendUrl?: string;
+  tunnelUrl?: string;
+  connectionCount?: number;
+  connections?: RemoteNetworkConnectionSummary[];
+  userMessage?: string;
+  technicalCode?: string;
+}
+
 export interface RuntimeStatus {
   appId: string;
   status: AppStatus;
@@ -143,12 +171,19 @@ export interface RuntimeStatus {
   backendUrl?: string;
   frontendUrl?: string;
   localNetworkShare?: LocalNetworkShareStatus;
+  remoteNetworkShare?: RemoteNetworkShareStatus;
 }
 
 export interface LocalNetworkShareResult extends FailureDiagnosticFields {
   success: boolean;
   userMessage: string;
   status: LocalNetworkShareStatus;
+}
+
+export interface RemoteNetworkShareResult extends FailureDiagnosticFields {
+  success: boolean;
+  userMessage: string;
+  status: RemoteNetworkShareStatus;
 }
 
 export interface StopAppResult extends FailureDiagnosticFields {

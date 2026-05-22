@@ -72,7 +72,9 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     getCategoryLabel,
     handleOpen,
     handleStartLocalNetworkShare,
+    handleStartRemoteNetworkShare,
     handleStopLocalNetworkShare,
+    handleStopRemoteNetworkShare,
     localNetworkShareDialogOpen,
     setLocalNetworkShareDialogOpen,
     localNetworkShareStatus,
@@ -434,6 +436,8 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             onUpdate={(appId) => void handleUpdate(appId)}
             onOpen={handleOpen}
             onStartLocalNetworkShare={handleStartLocalNetworkShare}
+            onStartRemoteNetworkShare={handleStartRemoteNetworkShare}
+            onStopRemoteNetworkShare={handleStopRemoteNetworkShare}
             onRefresh={() => {
               void refreshApps().catch(() => {
                 setBannerSeverity('error');

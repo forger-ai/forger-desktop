@@ -106,6 +106,7 @@ export interface AppManifest {
     enabled?: boolean;
     defaultDelivery?: 'persistent' | 'ephemeral';
   };
+  remoteTunnel?: boolean;
 }
 
 export interface AppManifestVolume {

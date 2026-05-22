@@ -20,26 +20,17 @@ interface CloudDeviceManagerOptions {
   token: () => string | undefined;
   getCloudIdentity: () => Promise<{ publicKey: string; keyFingerprint: string }>;
   getInstalledApps: () => AppSummary[];
-  handleRelayRequest: (request: CloudRelayRequest) => Promise<CloudRelayResponse>;
   handleFriendshipEvent?: (event: unknown) => Promise<void> | void;
   onAuthenticationInvalid?: (technicalCode: string) => Promise<void> | void;
+  reconnectDelayMs?: number;
+  socketMonitorIntervalMs?: number;
+  socketStaleAfterMs?: number;
 }
 
-export interface CloudRelayRequest {
-  request_id: string;
-  app_id: string;
-  method: string;
-  path: string;
-  headers?: Record<string, string>;
-  body?: number[];
-}
-
-export interface CloudRelayResponse {
-  request_id: string;
-  status: number;
-  headers: Record<string, string>;
-  body: number[];
-}
+const HEARTBEAT_INTERVAL_MS = 20_000;
+const SOCKET_RECONNECT_DELAY_MS = 5_000;
+const SOCKET_MONITOR_INTERVAL_MS = 15_000;
+const SOCKET_STALE_AFTER_MS = 65_000;
 
 const technicalCodeForError = (error: unknown, fallback: string): string =>
   error instanceof Error
@@ -56,7 +47,9 @@ export class CloudDeviceManager {
   private currentDevice: CloudDeviceSummary | undefined;
   private socket: WebSocket | null = null;
   private heartbeatTimer: NodeJS.Timeout | null = null;
+  private socketMonitorTimer: NodeJS.Timeout | null = null;
   private connected = false;
+  private lastSocketActivityAt = 0;
   private pairingCode: string | undefined;
   private pairingExpiresAt: string | undefined;
   private lastMessage: string | undefined;
@@ -96,10 +89,7 @@ export class CloudDeviceManager {
   stop(): void {
     this.generation += 1;
     this.connected = false;
-    if (this.heartbeatTimer) {
-      clearInterval(this.heartbeatTimer);
-      this.heartbeatTimer = null;
-    }
+    this.clearSocketTimers();
     if (this.socket) {
       this.socket.close();
       this.socket = null;
@@ -213,7 +203,13 @@ export class CloudDeviceManager {
   }
 
   private connectSocket(generation = this.generation): void {
-    if (!this.stored || this.socket) {
+    if (!this.stored) {
+      return;
+    }
+    if (this.socket) {
+      this.ensureSocketHealth(generation);
+    }
+    if (this.socket) {
       return;
     }
     const url = new URL('/cable', this.options.backendBaseUrl);
@@ -225,6 +221,7 @@ export class CloudDeviceManager {
 
     const socket = new WebSocket(url.toString());
     this.socket = socket;
+    this.lastSocketActivityAt = Date.now();
     const deviceIdentifier = JSON.stringify({ channel: 'DeviceChannel' });
     const friendshipIdentifier = JSON.stringify({ channel: 'FriendshipChannel' });
 
@@ -233,8 +230,10 @@ export class CloudDeviceManager {
         socket.close();
         return;
       }
+      this.recordSocketActivity();
       socket.send(JSON.stringify({ command: 'subscribe', identifier: deviceIdentifier }));
       socket.send(JSON.stringify({ command: 'subscribe', identifier: friendshipIdentifier }));
+      this.startSocketMonitor(deviceIdentifier, generation);
     });
 
     socket.addEventListener('message', (event) => {
@@ -244,28 +243,27 @@ export class CloudDeviceManager {
       void this.handleSocketMessage(deviceIdentifier, event.data.toString());
     });
 
+    socket.addEventListener('error', () => {
+      this.forceReconnectSocket(generation, 'cloud_socket_error');
+    });
+
     socket.addEventListener('close', () => {
       if (generation !== this.generation || this.socket !== socket) {
         return;
       }
       this.connected = false;
       this.socket = null;
-      if (this.heartbeatTimer) {
-        clearInterval(this.heartbeatTimer);
-        this.heartbeatTimer = null;
-      }
-      if (this.options.token()) {
-        setTimeout(() => {
-          if (generation === this.generation) {
-            this.connectSocket(generation);
-          }
-        }, 5000);
-      }
+      this.clearSocketTimers();
+      this.scheduleReconnect(generation);
     });
   }
 
   private sendHeartbeat(identifier: string): void {
-    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
+    if (!this.socket) {
+      return;
+    }
+    if (this.socket.readyState !== WebSocket.OPEN) {
+      this.forceReconnectSocket(this.generation, 'cloud_socket_not_open');
       return;
     }
     this.socket.send(JSON.stringify({
@@ -280,13 +278,14 @@ export class CloudDeviceManager {
   }
 
   private async handleSocketMessage(identifier: string, raw: string): Promise<void> {
-    let parsed: { type?: string; message?: CloudRelayRequest & { type?: string } };
+    let parsed: { type?: string; message?: Record<string, unknown> & { type?: string } };
     try {
-      parsed = JSON.parse(raw) as { type?: string; message?: CloudRelayRequest & { type?: string } };
+      parsed = JSON.parse(raw) as { type?: string; message?: Record<string, unknown> & { type?: string } };
     } catch {
       this.lastTechnicalCode = 'cloud_socket_message_invalid';
       return;
     }
+    this.recordSocketActivity();
     if (parsed.type === 'ping') {
       return;
     }
@@ -295,7 +294,7 @@ export class CloudDeviceManager {
         this.connected = true;
         this.sendHeartbeat(identifier);
         if (!this.heartbeatTimer) {
-          this.heartbeatTimer = setInterval(() => this.sendHeartbeat(identifier), 20_000);
+          this.heartbeatTimer = setInterval(() => this.sendHeartbeat(identifier), HEARTBEAT_INTERVAL_MS);
         }
       }
       return;
@@ -305,21 +304,90 @@ export class CloudDeviceManager {
       this.socket?.close();
       return;
     }
-    if (parsed.message?.type !== 'relay_request') {
-      if (parsed.message) {
-        await this.options.handleFriendshipEvent?.(parsed.message);
-      }
+    if (parsed.message) {
+      await this.options.handleFriendshipEvent?.(parsed.message);
       return;
     }
-    const response = await this.options.handleRelayRequest(parsed.message);
-    this.socket?.send(JSON.stringify({
-      command: 'message',
-      identifier,
-      data: JSON.stringify({
-        action: 'relay_response',
-        ...response,
-      }),
-    }));
+  }
+
+  private clearSocketTimers(): void {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
+    if (this.socketMonitorTimer) {
+      clearInterval(this.socketMonitorTimer);
+      this.socketMonitorTimer = null;
+    }
+  }
+
+  private ensureSocketHealth(generation: number): void {
+    if (!this.socket) {
+      return;
+    }
+    if (this.socket.readyState !== WebSocket.OPEN && this.socket.readyState !== WebSocket.CONNECTING) {
+      this.forceReconnectSocket(generation, 'cloud_socket_not_open');
+      return;
+    }
+    const staleAfterMs = this.options.socketStaleAfterMs ?? SOCKET_STALE_AFTER_MS;
+    if (this.lastSocketActivityAt > 0 && Date.now() - this.lastSocketActivityAt > staleAfterMs) {
+      this.forceReconnectSocket(generation, 'cloud_socket_stale');
+    }
+  }
+
+  private forceReconnectSocket(generation: number, technicalCode: string): void {
+    if (generation !== this.generation) {
+      return;
+    }
+    this.lastTechnicalCode = technicalCode;
+    this.connected = false;
+    this.clearSocketTimers();
+    const socket = this.socket;
+    this.socket = null;
+    if (socket) {
+      socket.close();
+    }
+    this.scheduleReconnect(generation);
+  }
+
+  private recordSocketActivity(): void {
+    this.lastSocketActivityAt = Date.now();
+    this.lastTechnicalCode = undefined;
+  }
+
+  private scheduleReconnect(generation: number): void {
+    if (!this.options.token()) {
+      return;
+    }
+    setTimeout(() => {
+      if (generation === this.generation) {
+        this.connectSocket(generation);
+      }
+    }, this.options.reconnectDelayMs ?? SOCKET_RECONNECT_DELAY_MS);
+  }
+
+  private startSocketMonitor(identifier: string, generation: number): void {
+    if (this.socketMonitorTimer) {
+      return;
+    }
+    this.socketMonitorTimer = setInterval(() => {
+      if (generation !== this.generation) {
+        this.clearSocketTimers();
+        return;
+      }
+      if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
+        this.forceReconnectSocket(generation, 'cloud_socket_not_open');
+        return;
+      }
+      const staleAfterMs = this.options.socketStaleAfterMs ?? SOCKET_STALE_AFTER_MS;
+      if (Date.now() - this.lastSocketActivityAt > staleAfterMs) {
+        this.forceReconnectSocket(generation, 'cloud_socket_stale');
+        return;
+      }
+      if (this.connected) {
+        this.sendHeartbeat(identifier);
+      }
+    }, this.options.socketMonitorIntervalMs ?? SOCKET_MONITOR_INTERVAL_MS);
   }
 
   private async loadOrCreateStored(): Promise<StoredCloudDevice> {

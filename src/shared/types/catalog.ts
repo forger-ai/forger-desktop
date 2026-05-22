@@ -25,6 +25,7 @@ export interface AppSummary {
     optional?: AppToolDeclaration[];
   };
   localNetworkShare?: import('./runtime').LocalNetworkShareStatus;
+  remoteNetworkShare?: import('./runtime').RemoteNetworkShareStatus;
 }
 
 export interface VersionChangelog {

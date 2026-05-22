@@ -77,6 +77,23 @@ export const en = {
     startError: 'We could not turn on Local network.',
     stopError: 'We could not stop Local network.',
   },
+  remoteNetwork: {
+    menuAction: 'Share on internet',
+    preparingAction: 'Preparing',
+    preparingBadge: 'Preparing remote tunnel',
+    waitingBadge: 'Remote tunnel waiting for session',
+    connectedBadge: 'Remote tunnel connected',
+    errorBadge: 'Remote tunnel error',
+    stop: 'Stop remote tunnel',
+    startError: 'We could not turn on the remote tunnel.',
+    stopError: 'We could not stop the remote tunnel.',
+    readyTitle: 'Your application is available from the internet.',
+    readyBody: 'Go to the Forger Cloud portal to access it from anywhere.',
+    readySecurityBody:
+      'Forger has a special focus on the security and privacy of your data. That is why we implemented an architecture designed to provide the strongest security and privacy we can. Read the blog on forger.cloud for more details.',
+    openPortal: 'Go to portal',
+    portalUrl: 'https://platform.forger.cloud/portal',
+  },
   installGate: {
     fallbackAppName: 'this app',
     title: (appName: string) => `You are about to install ${appName}`,

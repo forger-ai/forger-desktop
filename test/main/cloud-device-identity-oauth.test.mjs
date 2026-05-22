@@ -75,7 +75,6 @@ test('CloudDeviceManager registers per-account devices, encrypts secrets, and re
     globalThis.WebSocket = FakeWebSocket;
     const { CloudDeviceManager } = require('../../dist-electron/main/cloud-device-manager.js');
     const backendCalls = [];
-    const relayRequests = [];
     const friendshipEvents = [];
     const backendClient = {
       async registerDevice(input) {
@@ -118,10 +117,6 @@ test('CloudDeviceManager registers per-account devices, encrypts secrets, and re
       token: () => 'session-token',
       getCloudIdentity: async () => ({ publicKey: 'public', keyFingerprint: 'fingerprint' }),
       getInstalledApps: () => [{ id: 'finance-os', name: 'Finance OS', status: 'running', version: '1.2.3' }],
-      handleRelayRequest: async (request) => {
-        relayRequests.push(request);
-        return { request_id: request.request_id, status: 204, headers: {}, body: [] };
-      },
       handleFriendshipEvent: async (event) => {
         friendshipEvents.push(event);
       },
@@ -137,28 +132,15 @@ test('CloudDeviceManager registers per-account devices, encrypts secrets, and re
         data: JSON.stringify({ type: 'confirm_subscription', identifier: JSON.stringify({ channel: 'DeviceChannel' }) }),
       });
       await manager.generatePairingCode();
-      socket.emit('message', {
-        data: JSON.stringify({
-          message: {
-            type: 'relay_request',
-            request_id: 'req-1',
-            app_id: 'finance-os',
-            method: 'GET',
-            path: '/health',
-          },
-        }),
-      });
       socket.emit('message', { data: JSON.stringify({ message: { type: 'friendship_changed', friendship: { id: 1 } } }) });
-      await waitFor(() => socketActions(socket).some((message) => message.action === 'relay_response'));
+      await waitFor(() => friendshipEvents.length === 1);
 
       const state = await manager.getState();
       assert.equal(state.connected, true);
       assert.equal(state.currentDevice.id, 7);
       assert.match(state.pairingCode, /^[A-Z0-9]{8}$/);
-      assert.equal(relayRequests[0].request_id, 'req-1');
       assert.deepEqual(friendshipEvents, [{ type: 'friendship_changed', friendship: { id: 1 } }]);
       assert.equal(backendCalls.find(([kind]) => kind === 'pairing')[1].deviceId, 7);
-      assert.ok(socketActions(socket).some((message) => message.action === 'relay_response' && message.request_id === 'req-1'));
       assert.ok(socketActions(socket).some((message) => message.action === 'heartbeat' && message.installed_apps[0].id === 'finance-os'));
     } finally {
       manager.stop();
@@ -213,7 +195,6 @@ test('CloudDeviceManager tolerates malformed socket frames, subscription rejecti
       token: () => token,
       getCloudIdentity: async () => ({ publicKey: 'public', keyFingerprint: 'fingerprint' }),
       getInstalledApps: () => [],
-      handleRelayRequest: async (request) => ({ request_id: request.request_id, status: 200, headers: {}, body: [] }),
       handleFriendshipEvent: async (event) => friendshipEvents.push(event),
       onAuthenticationInvalid: async (code) => invalidAuthCodes.push(code),
     });
@@ -260,12 +241,179 @@ test('CloudDeviceManager tolerates malformed socket frames, subscription rejecti
       token: () => 'session-token',
       getCloudIdentity: async () => ({ publicKey: 'public', keyFingerprint: 'fingerprint' }),
       getInstalledApps: () => [],
-      handleRelayRequest: async (request) => ({ request_id: request.request_id, status: 200, headers: {}, body: [] }),
       onAuthenticationInvalid: async (code) => invalidAuthCodes.push(code),
     });
     await authManager.start();
     assert.equal((await authManager.getState()).technicalCode, 'devices_register_failed_401');
     assert.ok(invalidAuthCodes.includes('devices_register_failed_401'));
+  });
+});
+
+test('CloudDeviceManager reconnects when an open socket stops receiving cloud activity', async (t) => {
+  const root = await tmpRoot('cloud-device-stale-socket');
+  const originalWebSocket = globalThis.WebSocket;
+  t.after(async () => {
+    globalThis.WebSocket = originalWebSocket;
+    FakeWebSocket.instances = [];
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  await withMockedElectron({ safeStorage: createSafeStorage() }, async (require) => {
+    clearDistModule('main/cloud-device-manager.js');
+    globalThis.WebSocket = FakeWebSocket;
+    const { CloudDeviceManager } = require('../../dist-electron/main/cloud-device-manager.js');
+    const backendClient = {
+      async registerDevice(input) {
+        return {
+          id: 11,
+          deviceUid: input.deviceUid,
+          name: 'Device',
+          platform: 'darwin_arm64',
+          paired: true,
+          online: true,
+          installedApps: [],
+        };
+      },
+      async listDevices() {
+        return [{ id: 11, deviceUid: 'uid', name: 'Device', platform: 'darwin_arm64', paired: true, online: true, installedApps: [] }];
+      },
+    };
+    const manager = new CloudDeviceManager({
+      filePath: path.join(root, 'cloud-device.json'),
+      accountStorageKey: () => 'person@example.com',
+      backendBaseUrl: 'http://cloud.test',
+      backendClient: () => backendClient,
+      token: () => 'session-token',
+      getCloudIdentity: async () => ({ publicKey: 'public', keyFingerprint: 'fingerprint' }),
+      getInstalledApps: () => [],
+      reconnectDelayMs: 0,
+      socketMonitorIntervalMs: 1,
+      socketStaleAfterMs: 1,
+    });
+
+    try {
+      await manager.start();
+      const socket = FakeWebSocket.instances[0];
+      socket.emit('open');
+      socket.emit('message', {
+        data: JSON.stringify({ type: 'confirm_subscription', identifier: JSON.stringify({ channel: 'DeviceChannel' }) }),
+      });
+
+      await waitFor(() => FakeWebSocket.instances.length > 1);
+
+      assert.equal(socket.closed, true);
+      assert.equal((await manager.getState()).technicalCode, 'cloud_socket_stale');
+    } finally {
+      manager.stop();
+    }
+  });
+});
+
+test('CloudDeviceManager socket monitor handles stale generations and closed sockets', async (t) => {
+  const root = await tmpRoot('cloud-device-socket-monitor');
+  const originalWebSocket = globalThis.WebSocket;
+  const originalSetInterval = globalThis.setInterval;
+  const originalClearInterval = globalThis.clearInterval;
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
+  t.after(async () => {
+    globalThis.WebSocket = originalWebSocket;
+    globalThis.setInterval = originalSetInterval;
+    globalThis.clearInterval = originalClearInterval;
+    globalThis.setTimeout = originalSetTimeout;
+    globalThis.clearTimeout = originalClearTimeout;
+    FakeWebSocket.instances = [];
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  await withMockedElectron({ safeStorage: createSafeStorage() }, async (require) => {
+    clearDistModule('main/cloud-device-manager.js');
+    const intervalCallbacks = [];
+    globalThis.WebSocket = FakeWebSocket;
+    globalThis.setInterval = (callback) => {
+      intervalCallbacks.push(callback);
+      return intervalCallbacks.length;
+    };
+    globalThis.clearInterval = () => undefined;
+    globalThis.setTimeout = () => 1;
+    globalThis.clearTimeout = () => undefined;
+    const { CloudDeviceManager } = require('../../dist-electron/main/cloud-device-manager.js');
+    const backendClient = {
+      async registerDevice(input) {
+        return {
+          id: 17,
+          deviceUid: input.deviceUid,
+          name: 'Device',
+          platform: 'darwin_arm64',
+          paired: true,
+          online: true,
+          installedApps: [],
+        };
+      },
+      async listDevices() {
+        return [{ id: 17, deviceUid: 'uid', name: 'Device', platform: 'darwin_arm64', paired: true, online: true, installedApps: [] }];
+      },
+    };
+    const manager = new CloudDeviceManager({
+      filePath: path.join(root, 'cloud-device.json'),
+      accountStorageKey: () => 'person@example.com',
+      backendBaseUrl: 'http://cloud.test',
+      backendClient: () => backendClient,
+      token: () => 'session-token',
+      getCloudIdentity: async () => ({ publicKey: 'public', keyFingerprint: 'fingerprint' }),
+      getInstalledApps: () => [],
+      reconnectDelayMs: 100_000,
+    });
+
+    await manager.start();
+    const socket = FakeWebSocket.instances[0];
+    socket.emit('open');
+    const monitorCallback = intervalCallbacks[0];
+    const savedSocket = manager.socket;
+    manager.socket = null;
+    manager.stored = null;
+    manager.connectSocket();
+    manager.socket = savedSocket;
+    manager.stored = { deviceUid: 'uid', deviceSecret: 'secret', cloudId: 17 };
+    manager.connected = true;
+    monitorCallback();
+    socket.readyState = 0;
+    manager.sendHeartbeat(JSON.stringify({ channel: 'DeviceChannel' }));
+    monitorCallback();
+    assert.equal(socket.closed, true);
+    assert.equal((await manager.getState()).technicalCode, 'cloud_socket_not_open');
+    manager.stop();
+    manager.ensureSocketHealth(999);
+
+    intervalCallbacks.length = 0;
+    await manager.start();
+    const healthSocket = FakeWebSocket.instances.at(-1);
+    healthSocket.emit('open');
+    healthSocket.readyState = 0;
+    await manager.start();
+    assert.equal(healthSocket.closed, true);
+    manager.stop();
+
+    intervalCallbacks.length = 0;
+    await manager.start();
+    const staleHealthSocket = FakeWebSocket.instances.at(-1);
+    staleHealthSocket.emit('open');
+    manager.lastSocketActivityAt = Date.now() - 100;
+    manager.options.socketStaleAfterMs = 1;
+    await manager.start();
+    assert.equal(staleHealthSocket.closed, true);
+    manager.stop();
+
+    intervalCallbacks.length = 0;
+    await manager.start();
+    const staleGenerationSocket = FakeWebSocket.instances.at(-1);
+    staleGenerationSocket.emit('open');
+    staleGenerationSocket.emit('open');
+    const staleGenerationMonitorCallback = intervalCallbacks[0];
+    await manager.start();
+    staleGenerationSocket.emit('error');
+    staleGenerationMonitorCallback();
+    manager.stop();
   });
 });
 
@@ -314,7 +462,6 @@ test('CloudDeviceManager supports unauthenticated idle state and plaintext devic
       token: () => token,
       getCloudIdentity: async () => ({ publicKey: 'public', keyFingerprint: 'fingerprint' }),
       getInstalledApps: () => [],
-      handleRelayRequest: async (request) => ({ request_id: request.request_id, status: 200, headers: {}, body: [] }),
     });
 
     await manager.start();
@@ -384,7 +531,6 @@ test('CloudDeviceManager reloads encrypted stored devices and resets state when 
       token: () => 'session-token',
       getCloudIdentity: async () => ({ publicKey: 'public', keyFingerprint: 'fingerprint' }),
       getInstalledApps: () => [],
-      handleRelayRequest: async (request) => ({ request_id: request.request_id, status: 200, headers: {}, body: [] }),
     });
 
     await manager.start();
@@ -438,7 +584,6 @@ test('CloudDeviceManager covers backend absence, fallback errors, optional pairi
       token: () => missingClientToken,
       getCloudIdentity: async () => ({ publicKey: 'public', keyFingerprint: 'fingerprint' }),
       getInstalledApps: () => [],
-      handleRelayRequest: async (request) => ({ request_id: request.request_id, status: 200, headers: {}, body: [] }),
     });
     await missingClient.start();
     missingClientToken = undefined;
@@ -457,7 +602,6 @@ test('CloudDeviceManager covers backend absence, fallback errors, optional pairi
       token: () => thrownStringToken,
       getCloudIdentity: async () => ({ publicKey: 'public', keyFingerprint: 'fingerprint' }),
       getInstalledApps: () => [],
-      handleRelayRequest: async (request) => ({ request_id: request.request_id, status: 200, headers: {}, body: [] }),
     });
     await thrownString.start();
     thrownStringToken = undefined;
@@ -478,7 +622,6 @@ test('CloudDeviceManager covers backend absence, fallback errors, optional pairi
       token: () => nonStringCodeToken,
       getCloudIdentity: async () => ({ publicKey: 'public', keyFingerprint: 'fingerprint' }),
       getInstalledApps: () => [],
-      handleRelayRequest: async (request) => ({ request_id: request.request_id, status: 200, headers: {}, body: [] }),
     });
     await nonStringCode.start();
     nonStringCodeToken = undefined;
@@ -512,7 +655,6 @@ test('CloudDeviceManager covers backend absence, fallback errors, optional pairi
       token: () => missingListToken,
       getCloudIdentity: async () => ({ publicKey: 'public', keyFingerprint: 'fingerprint' }),
       getInstalledApps: () => [],
-      handleRelayRequest: async (request) => ({ request_id: request.request_id, status: 200, headers: {}, body: [] }),
     });
     await missingListClient.start();
     missingListToken = undefined;
@@ -543,7 +685,6 @@ test('CloudDeviceManager covers backend absence, fallback errors, optional pairi
       token: () => 'session-token',
       getCloudIdentity: async () => ({ publicKey: 'public', keyFingerprint: 'fingerprint' }),
       getInstalledApps: () => [],
-      handleRelayRequest: async (request) => ({ request_id: request.request_id, status: 200, headers: {}, body: [] }),
     });
 
     await reconnecting.start();
@@ -590,7 +731,6 @@ test('CloudDeviceManager covers backend absence, fallback errors, optional pairi
       token: () => 'session-token',
       getCloudIdentity: async () => ({ publicKey: 'public', keyFingerprint: 'fingerprint' }),
       getInstalledApps: () => [],
-      handleRelayRequest: async (request) => ({ request_id: request.request_id, status: 200, headers: {}, body: [] }),
     });
     await staleDuringRegister.start();
     assert.equal(FakeWebSocket.instances.length, staleRegisterSocketCount);
@@ -621,7 +761,6 @@ test('CloudDeviceManager covers backend absence, fallback errors, optional pairi
       token: () => 'session-token',
       getCloudIdentity: async () => ({ publicKey: 'public', keyFingerprint: 'fingerprint' }),
       getInstalledApps: () => [],
-      handleRelayRequest: async (request) => ({ request_id: request.request_id, status: 200, headers: {}, body: [] }),
     });
     await staleDuringRefresh.start();
     assert.equal(FakeWebSocket.instances.length, staleRefreshSocketCount);

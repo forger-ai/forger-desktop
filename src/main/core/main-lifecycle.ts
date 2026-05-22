@@ -44,6 +44,15 @@ type AutomationEventLike = {
 };
 type ForgerMcpToolFailure = { appId: string; runId: string; toolName?: unknown; error: unknown };
 type ForgerMcpHttpFailure = { error: unknown; appId?: string; runId?: string };
+type RemoteTunnelCloseEvent = { type: 'remote_tunnel_close'; session_id: string };
+
+const isRemoteTunnelCloseEvent = (event: unknown): event is RemoteTunnelCloseEvent =>
+  Boolean(
+    event
+      && typeof event === 'object'
+      && (event as { type?: unknown }).type === 'remote_tunnel_close'
+      && typeof (event as { session_id?: unknown }).session_id === 'string',
+  );
 
 interface LifecycleService {
   start: () => Promise<void> | void;
@@ -86,6 +95,7 @@ interface MainLifecycleState {
   forgerMcpServer: LifecycleService | null;
   localCatalogJsonUrl: string | undefined;
   localNetworkShareManager: { stopAll?: () => Promise<void> } | null;
+  remoteNetworkShareManager: { stopAll?: () => Promise<void> } | null;
   mainWindow: BrowserWindow | null;
   memoryStore: LifecycleService | null;
   officialToolsService: (LifecycleService & {
@@ -166,9 +176,9 @@ interface MainLifecycleDeps {
   getRuntimePathEntries: (runtime: RuntimeBinarySet) => string[];
   getRuntimeStatus: (appId: string) => RuntimeStatus;
   getLocalNetworkShareStatus: SyncFn<unknown>;
+  getRemoteNetworkShareStatus: SyncFn<unknown>;
   getTempRoot: () => string;
   getVenvExecutables: SyncFn;
-  handleCloudRelayRequest: AsyncFn;
   handleCloudSocialEvent: AsyncFn<void>;
   hasInstalledCodexConversation: AsyncFn<boolean>;
   ipcMain: IpcMain;
@@ -183,6 +193,9 @@ interface MainLifecycleDeps {
   openInstalledApp: AsyncFn;
   startLocalNetworkShare: AsyncFn;
   stopLocalNetworkShare: AsyncFn;
+  startRemoteNetworkShare: AsyncFn;
+  stopRemoteNetworkShare: AsyncFn;
+  stopRemoteNetworkShareSession: (sessionId: string) => Promise<unknown>;
   openOrFocusAppWindow: (appId: string, appName: string, frontendUrl: string) => Promise<void>;
   registerForgerCloudOAuth: SyncFn;
   registerIpcHandlers: () => void;
@@ -282,7 +295,6 @@ export const registerMainLifecycle = (deps: unknown) => {
     getRuntimeStatus,
     getTempRoot,
     getVenvExecutables,
-    handleCloudRelayRequest,
     handleCloudSocialEvent,
     hasInstalledCodexConversation,
     ipcMain,
@@ -311,6 +323,7 @@ export const registerMainLifecycle = (deps: unknown) => {
     splitManifestCommand,
     startDevCatalogService,
     state,
+    stopRemoteNetworkShareSession,
     stopInstalledApp,
     switchForgerAccountSession,
     terminateProcess,
@@ -378,8 +391,17 @@ export const registerMainLifecycle = (deps: unknown) => {
     token: () => state.forgerAccount.token,
     getCloudIdentity: () => getCloudIdentityStore().getPublicRegistration(),
     getInstalledApps: () => Object.values(state.registry.apps).map(toAppSummary),
-    handleRelayRequest: handleCloudRelayRequest,
-    handleFriendshipEvent: handleCloudSocialEvent,
+    handleFriendshipEvent: async (event: unknown) => {
+      if (isRemoteTunnelCloseEvent(event)) {
+        await stopRemoteNetworkShareSession(event.session_id).catch((error) => {
+          void appendInstallLog('remote_network_share:cloud_close_failed', {
+            sessionId: event.session_id,
+            error: serializeErrorForInstallLog(error),
+          });
+        });
+      }
+      await handleCloudSocialEvent(event);
+    },
     onAuthenticationInvalid: clearForgerAccountSession,
   });
   await state.cloudDeviceManager.start();
@@ -838,6 +860,7 @@ app.on('before-quit', () => {
   state.automationManager?.dispose();
   state.appMcpManager?.dispose();
   void state.localNetworkShareManager?.stopAll?.();
+  void state.remoteNetworkShareManager?.stopAll?.();
   void state.desktopRuntimeBridge?.stop();
   state.desktopRuntimeBridge = null;
   state.cloudDeviceManager?.stop();
