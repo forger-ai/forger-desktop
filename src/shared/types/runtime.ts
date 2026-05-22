@@ -182,7 +182,7 @@ export interface LocalNetworkShareResult extends FailureDiagnosticFields {
 
 export interface RemoteNetworkShareResult extends FailureDiagnosticFields {
   success: boolean;
-  userMessage: string;
+  userMessage?: string;
   status: RemoteNetworkShareStatus;
 }
 

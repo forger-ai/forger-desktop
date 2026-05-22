@@ -260,6 +260,13 @@ return ( t.apps[appId as keyof typeof t.apps] ?? { name: appId, description: '',
 const getCategoryLabel = (category: AppCategory) => t.appCategories[category]; const maybeShowRemoteTunnelReadyDialog = (status?: RemoteNetworkShareStatus | null) => { if (!status || !status.active || (status.state !== 'waiting_for_session' && status.state !== 'connected')) { return; }
 const sessionKey = status.sessionId || `${status.appId}:${status.frontendUrl || status.portalUrl || status.tunnelUrl || ''}`; if (!sessionKey || remoteTunnelReadySessionsRef.current.has(sessionKey)) { return; }
 remoteTunnelReadySessionsRef.current.add(sessionKey); setRemoteTunnelReadyDialog({ open: true, appName: getAppMeta(status.appId).name, portalUrl: t.remoteNetwork.portalUrl, sessionId: status.sessionId }); };
+const remoteNetworkStartMessage = (result: { success: boolean; userMessage?: string; technicalCode?: string; status?: RemoteNetworkShareStatus }) => { if (result.success) { return result.status?.state === 'waiting_for_session' ? t.remoteNetwork.waitingBadge : t.remoteNetwork.active; }
+if (result.technicalCode === 'remote_tunnel_not_supported') { return t.remoteNetwork.notSupported; }
+if (result.technicalCode === 'forger_cloud_required') { return t.remoteNetwork.cloudRequired; }
+if (result.technicalCode === 'app_not_running') { return t.remoteNetwork.appNotRunning; }
+if (result.status?.state === 'error' || result.technicalCode?.startsWith('remote_tunnel_') || result.technicalCode?.startsWith('localtunnel_')) { return t.remoteNetwork.prepareError; }
+return t.remoteNetwork.startError; };
+const remoteNetworkStopMessage = (result: { success: boolean }) => result.success ? t.remoteNetwork.stopped : t.remoteNetwork.stopError;
 const resetIdleChatProgress = () => { if (!chatRunActive) { setChatProgressLines([]); deliveredRunRepliesRef.current.clear(); } }; const setChatContext = (appId: string) => { const appEntry = installedApps.find((app) => app.id === appId) ?? catalogApps.find((app) => app.id === appId); if (!appEntry) { return; }
 setSelectedAppId(appEntry.id); setCurrentView('chat'); setChatInput(''); resetIdleChatProgress(); };
 const openAppDetails = async (appId: string, backView: View = currentView) => { setAppDetailsBackView(backView); setSelectedAppDetailsId(appId); setCurrentView('app'); const details = await getDesktopApi().getAppDetails(appId); setSelectedAppDetails(details); };
@@ -353,13 +360,13 @@ openingAppIdsRef.current = new Set(openingAppIdsRef.current).add(appId); setOpen
 nextOpeningAppIds.delete(appId); openingAppIdsRef.current = nextOpeningAppIds; setOpeningAppIds(new Set(nextOpeningAppIds)); }
 };
 const handleStartRemoteNetworkShare = async (appId: string) => { if (openingAppIdsRef.current.has(appId)) { return; }
-openingAppIdsRef.current = new Set(openingAppIdsRef.current).add(appId); setOpeningAppIds(new Set(openingAppIdsRef.current)); const desktopApi = getDesktopApi(); try { const result = await desktopApi.startRemoteNetworkShare(appId); await refreshApps(); if (result.success) { maybeShowRemoteTunnelReadyDialog(result.status); } setBannerSeverity(result.success ? 'success' : 'error'); setBannerMessage(result.userMessage || (result.success ? t.remoteNetwork.waitingBadge : t.remoteNetwork.startError)); } catch { setBannerSeverity('error'); setBannerMessage(t.remoteNetwork.startError); } finally { const nextOpeningAppIds = new Set(openingAppIdsRef.current);
+openingAppIdsRef.current = new Set(openingAppIdsRef.current).add(appId); setOpeningAppIds(new Set(openingAppIdsRef.current)); const desktopApi = getDesktopApi(); try { const result = await desktopApi.startRemoteNetworkShare(appId); await refreshApps(); if (result.success) { maybeShowRemoteTunnelReadyDialog(result.status); } setBannerSeverity(result.success ? 'success' : 'error'); setBannerMessage(remoteNetworkStartMessage(result)); } catch { setBannerSeverity('error'); setBannerMessage(t.remoteNetwork.startError); } finally { const nextOpeningAppIds = new Set(openingAppIdsRef.current);
 nextOpeningAppIds.delete(appId); openingAppIdsRef.current = nextOpeningAppIds; setOpeningAppIds(new Set(nextOpeningAppIds)); }
 };
 const handleStopLocalNetworkShare = async (appId?: string) => { const targetAppId = appId ?? localNetworkShareStatus?.appId; if (!targetAppId) { return; }
 const desktopApi = getDesktopApi(); try { const result = await desktopApi.stopLocalNetworkShare(targetAppId); setLocalNetworkShareStatus(result.status); setLocalNetworkShareDialogOpen(false); await refreshApps(); setBannerSeverity(result.success ? 'info' : 'error'); setBannerMessage(result.userMessage || (result.success ? t.localNetwork.stop : t.localNetwork.stopError)); } catch { setBannerSeverity('error'); setBannerMessage(t.localNetwork.stopError); }
 };
-const handleStopRemoteNetworkShare = async (appId: string) => { const desktopApi = getDesktopApi(); try { const result = await desktopApi.stopRemoteNetworkShare(appId); await refreshApps(); setBannerSeverity(result.success ? 'info' : 'error'); setBannerMessage(result.userMessage || (result.success ? t.remoteNetwork.stop : t.remoteNetwork.stopError)); } catch { setBannerSeverity('error'); setBannerMessage(t.remoteNetwork.stopError); }
+const handleStopRemoteNetworkShare = async (appId: string) => { const desktopApi = getDesktopApi(); try { const result = await desktopApi.stopRemoteNetworkShare(appId); await refreshApps(); setBannerSeverity(result.success ? 'info' : 'error'); setBannerMessage(remoteNetworkStopMessage(result)); } catch { setBannerSeverity('error'); setBannerMessage(t.remoteNetwork.stopError); }
 };
 const handleStop = async (appId: string) => { const desktopApi = getDesktopApi(); const result = await desktopApi.stopApp(appId); if (result.success) { setBannerSeverity('info'); setBannerMessage(result.userMessage); } else { setBannerSeverity('error'); setBannerMessage(result.userMessage); }
 };

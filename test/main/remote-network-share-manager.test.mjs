@@ -196,6 +196,9 @@ const createManagerOptions = (overrides = {}) => {
       getCurrentDeviceId: async () => 5,
       appendInstallLog: async (event, payload) => logs.push({ event, payload }),
       emitRuntimeStatus: (appId, remoteNetworkShare) => statuses.push({ appId, remoteNetworkShare }),
+      ensureRuntimeInstalled: async () => ({ rootDir: '/runtime/node', node: process.execPath, npm: process.execPath }),
+      normalizeNodeRuntimeVersion: (value) => value ?? '24',
+      requiredNodeVersionForApp: () => '24',
       tunnelProvider: {
         open: async ({ port }) => ({
           url: `http://127.0.0.1:${port}`,
@@ -300,7 +303,15 @@ test('buildRemoteFrontend runs a build, reads assets, and computes a stable hash
   const { buildRemoteFrontend } = require('../../dist-electron/main/remote-frontend-packager.js');
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forger-remote-build-'));
   await fs.mkdir(path.join(root, 'dist', 'assets'), { recursive: true });
+  const npmPath = path.join(root, 'npm-bin');
   await fs.writeFile(path.join(root, 'package.json'), JSON.stringify({ scripts: { build: 'node build.mjs' } }));
+  await fs.writeFile(npmPath, `#!/usr/bin/env node
+import { spawnSync } from 'node:child_process';
+import process from 'node:process';
+const result = spawnSync(process.execPath, ['build.mjs'], { stdio: 'inherit' });
+process.exit(result.status ?? 1);
+`);
+  await fs.chmod(npmPath, 0o755);
   await fs.writeFile(path.join(root, 'build.mjs'), `
     import fs from 'node:fs/promises';
     await fs.mkdir('dist/assets', { recursive: true });
@@ -317,6 +328,8 @@ test('buildRemoteFrontend runs a build, reads assets, and computes a stable hash
     frontendDir: root,
     sessionId: 'session-1',
     handshakeUrl: 'https://platform.test/handshake',
+    nodePath: process.execPath,
+    npmPath,
   });
 
   assert.deepEqual(result.assets.map((asset) => [asset.path, asset.type]), [
@@ -331,10 +344,18 @@ test('buildRemoteFrontend runs a build, reads assets, and computes a stable hash
   assert.match(result.hash, /^[a-f0-9]{64}$/);
 
   const failing = await fs.mkdtemp(path.join(os.tmpdir(), 'forger-remote-build-fail-'));
+  const failingNpmPath = path.join(failing, 'npm-bin');
   await fs.writeFile(path.join(failing, 'package.json'), JSON.stringify({ scripts: { build: 'node fail.mjs' } }));
+  await fs.writeFile(failingNpmPath, `#!/usr/bin/env node
+import { spawnSync } from 'node:child_process';
+import process from 'node:process';
+const result = spawnSync(process.execPath, ['fail.mjs'], { stdio: 'inherit' });
+process.exit(result.status ?? 1);
+`);
+  await fs.chmod(failingNpmPath, 0o755);
   await fs.writeFile(path.join(failing, 'fail.mjs'), 'console.error("build nope"); process.exit(7);');
   await assert.rejects(
-    () => buildRemoteFrontend({ frontendDir: failing, sessionId: 'session-1', handshakeUrl: 'https://platform.test' }),
+    () => buildRemoteFrontend({ frontendDir: failing, sessionId: 'session-1', handshakeUrl: 'https://platform.test', nodePath: process.execPath, npmPath: failingNpmPath }),
     /remote_frontend_build_failed_7: build nope/,
   );
 });
@@ -347,7 +368,9 @@ test('buildRemoteFrontend times out long-running builds and ignores late child c
   Module._load = function loadWithSpawnMock(request, parent, isMain) {
     if (request === 'node:child_process') {
       return {
-        spawn() {
+        spawn(command, args, options) {
+          assert.equal(command, '/runtime/npm');
+          assert.equal(options.env.PATH.startsWith(`${path.dirname('/runtime/node')}${path.delimiter}`), true);
           const child = new EventEmitter();
           child.stderr = new EventEmitter();
           child.kill = (signal) => {
@@ -366,7 +389,7 @@ test('buildRemoteFrontend times out long-running builds and ignores late child c
     clearDistModule('main/remote-frontend-packager.js');
     const { buildRemoteFrontend } = require('../../dist-electron/main/remote-frontend-packager.js');
     await assert.rejects(
-      () => buildRemoteFrontend({ frontendDir: '/tmp/missing', sessionId: 'session-1', handshakeUrl: 'https://platform.test' }),
+      () => buildRemoteFrontend({ frontendDir: '/tmp/missing', sessionId: 'session-1', handshakeUrl: 'https://platform.test', nodePath: '/runtime/node', npmPath: '/runtime/npm' }),
       /remote_frontend_build_timeout_180000ms/,
     );
     assert.equal(killedSignal, 'SIGTERM');
@@ -386,7 +409,9 @@ test('buildRemoteFrontend ignores timeout callbacks after successful builds', as
   Module._load = function loadWithSpawnMock(request, parent, isMain) {
     if (request === 'node:child_process') {
       return {
-        spawn() {
+        spawn(command, args, options) {
+          assert.equal(command, '/runtime/npm');
+          assert.equal(options.env.PATH.startsWith(`${path.dirname('/runtime/node')}${path.delimiter}`), true);
           const child = new EventEmitter();
           child.stderr = new EventEmitter();
           child.kill = () => undefined;
@@ -408,7 +433,7 @@ test('buildRemoteFrontend ignores timeout callbacks after successful builds', as
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forger-remote-build-late-timeout-'));
     await fs.mkdir(path.join(root, 'dist'), { recursive: true });
     await fs.writeFile(path.join(root, 'dist/index.html'), '<html></html>');
-    const result = await buildRemoteFrontend({ frontendDir: root, sessionId: 'session-1', handshakeUrl: 'https://platform.test' });
+    const result = await buildRemoteFrontend({ frontendDir: root, sessionId: 'session-1', handshakeUrl: 'https://platform.test', nodePath: '/runtime/node', npmPath: '/runtime/npm' });
     assert.equal(result.assets.length, 1);
     timeoutCallback();
   } finally {
@@ -422,7 +447,11 @@ test('buildRemoteFrontend ignores timeout callbacks after successful builds', as
 test('RemoteNetworkShareManager starts, proxies encrypted RPC, rejects replays, and stops', async () => {
   const backend = await createBackendServer();
   await withMockedPackager(
-    async () => ({ assets: [{ path: 'index.html', data: Buffer.from('<html></html>'), type: 'text/html' }], hash: 'hash' }),
+    async (input) => {
+      assert.equal(input.nodePath, process.execPath);
+      assert.equal(input.npmPath, process.execPath);
+      return { assets: [{ path: 'index.html', data: Buffer.from('<html></html>'), type: 'text/html' }], hash: 'hash' };
+    },
     async ({ RemoteNetworkShareManager }) => {
       const context = createManagerOptions();
       context.runningApps.set('finance-os', { backendUrl: backend.backendUrl });
@@ -508,6 +537,9 @@ test('RemoteNetworkShareManager reports startup validation and cleanup failures'
       assert.equal((await new RemoteNetworkShareManager(openFailed.options).start('app')).technicalCode, 'open_failed');
       const notRunning = createManagerOptions();
       assert.equal((await new RemoteNetworkShareManager(notRunning.options).start('app')).technicalCode, 'app_not_running');
+      const missingRuntime = createManagerOptions({ ensureRuntimeInstalled: async () => ({ rootDir: '/runtime/node' }) });
+      missingRuntime.runningApps.set('app', { backendUrl: 'http://127.0.0.1:1' });
+      assert.equal((await new RemoteNetworkShareManager(missingRuntime.options).start('app')).technicalCode, 'remote_tunnel_node_runtime_missing');
       const invalidSession = createManagerOptions({
         backendClient: () => ({
           createRemoteTunnelSession: async () => ({ id: 'bad', session_id: '', handshake_url: '' }),

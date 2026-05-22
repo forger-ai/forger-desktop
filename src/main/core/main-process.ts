@@ -898,6 +898,9 @@ const remoteNetworkShareManager = new RemoteNetworkShareManager({
     return state?.currentDevice?.id;
   },
   installDirForApp: (appId: string) => registry.apps[appId]?.installDir,
+  ensureRuntimeInstalled,
+  normalizeNodeRuntimeVersion,
+  requiredNodeVersionForApp: (appId: string) => registry.apps[appId]?.requiredNodeVersion,
   appendInstallLog,
   emitRuntimeStatus: (appId, remoteNetworkShare) => emitRuntimeStatus({ ...getRuntimeStatus(appId), remoteNetworkShare }),
 });

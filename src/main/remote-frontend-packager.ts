@@ -13,14 +13,17 @@ export const buildRemoteFrontend = async (input: {
   frontendDir: string;
   sessionId: string;
   handshakeUrl: string;
+  nodePath: string;
+  npmPath: string;
 }): Promise<{ assets: RemoteFrontendAsset[]; hash: string }> => {
-  await run('npm', ['run', 'build', '--', '--base=./'], {
+  await run(input.npmPath, ['run', 'build', '--', '--base=./'], {
     cwd: input.frontendDir,
     env: {
       ...process.env,
       VITE_FORGER_REMOTE_TUNNEL: 'true',
       VITE_FORGER_REMOTE_SESSION_ID: input.sessionId,
       VITE_FORGER_CLOUD_HANDSHAKE_URL: input.handshakeUrl,
+      PATH: `${path.dirname(input.nodePath)}${path.delimiter}${process.env.PATH ?? ''}`,
     },
   }, 180_000);
   const distDir = path.join(input.frontendDir, 'dist');

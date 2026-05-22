@@ -2,7 +2,7 @@ import http, { type IncomingMessage, type ServerResponse } from 'node:http';
 import path from 'node:path';
 
 import type { RemoteNetworkShareResult, RemoteNetworkShareStatus } from '../shared/types';
-import type { AppManifest, RunningAppProcess } from './core/main-process-types';
+import type { AppManifest, RunningAppProcess, RuntimeBinarySet } from './core/main-process-types';
 import type { ForgerBackendClient } from './forger-backend-client';
 import { RemoteSessionCrypto, type RemoteEnvelope } from './remote-crypto';
 import { buildRemoteFrontend } from './remote-frontend-packager';
@@ -34,6 +34,9 @@ export interface RemoteNetworkShareManagerOptions {
   getCurrentDeviceId: () => Promise<number | undefined>;
   appendInstallLog: (event: string, payload?: Record<string, unknown>) => Promise<void>;
   emitRuntimeStatus: (appId: string, remoteNetworkShare: RemoteNetworkShareStatus) => void;
+  ensureRuntimeInstalled: (type: 'node' | 'python', version: string) => Promise<RuntimeBinarySet>;
+  normalizeNodeRuntimeVersion: (value?: string | null) => string;
+  requiredNodeVersionForApp: (appId: string) => string | undefined;
   tunnelProvider?: RemoteTunnelProvider;
 }
 
@@ -53,13 +56,12 @@ export class RemoteNetworkShareManager {
   async start(appId: string): Promise<RemoteNetworkShareResult> {
     const existing = this.shares.get(appId);
     if (existing) {
-      return { success: true, userMessage: 'Túnel remoto activo.', status: existing.status };
+      return { success: true, status: existing.status };
     }
     const manifest = await this.options.resolveInstalledManifest(appId);
     if (manifest?.remoteTunnel !== true) {
       return {
         success: false,
-        userMessage: 'Esta app no declara soporte para túneles remotos.',
         technicalCode: 'remote_tunnel_not_supported',
         status: { active: false, appId, state: 'inactive' },
       };
@@ -69,7 +71,6 @@ export class RemoteNetworkShareManager {
     if (!client || !deviceId) {
       return {
         success: false,
-        userMessage: 'Conecta Forger Cloud antes de compartir por internet.',
         technicalCode: 'forger_cloud_required',
         status: { active: false, appId, state: 'inactive' },
       };
@@ -78,7 +79,6 @@ export class RemoteNetworkShareManager {
     if (!open.success) {
       return {
         success: false,
-        userMessage: open.userMessage,
         technicalCode: open.technicalCode ?? 'remote_tunnel_open_failed',
         status: { active: false, appId, state: 'inactive' },
       };
@@ -87,7 +87,6 @@ export class RemoteNetworkShareManager {
     if (!running) {
       return {
         success: false,
-        userMessage: 'La app no está en ejecución.',
         technicalCode: 'app_not_running',
         status: { active: false, appId, state: 'inactive' },
       };
@@ -97,7 +96,6 @@ export class RemoteNetworkShareManager {
       active: true,
       appId,
       state: 'preparing',
-      userMessage: 'Preparando túnel remoto.',
     };
     this.pendingStatuses.set(appId, preparingStatus);
     this.options.emitRuntimeStatus(appId, preparingStatus);
@@ -125,11 +123,18 @@ export class RemoteNetworkShareManager {
       tunnel = await this.provider.open({ port, appId, sessionId });
       await this.options.appendInstallLog('remote_network_share:tunnel:ready', { appId, sessionId, tunnelUrl: tunnel.url });
       const frontendDir = this.frontendDir(appId, manifest);
-      await this.options.appendInstallLog('remote_network_share:frontend_build:start', { appId, sessionId, frontendDir });
+      const nodeVersion = this.options.normalizeNodeRuntimeVersion(this.options.requiredNodeVersionForApp(appId));
+      const nodeRuntime = await this.options.ensureRuntimeInstalled('node', nodeVersion);
+      if (!nodeRuntime.node || !nodeRuntime.npm) {
+        throw new Error('remote_tunnel_node_runtime_missing');
+      }
+      await this.options.appendInstallLog('remote_network_share:frontend_build:start', { appId, sessionId, frontendDir, nodeVersion, npmPath: nodeRuntime.npm });
       const { assets, hash } = await buildRemoteFrontend({
         frontendDir,
         sessionId,
         handshakeUrl,
+        nodePath: nodeRuntime.node,
+        npmPath: nodeRuntime.npm,
       });
       await this.options.appendInstallLog('remote_network_share:frontend_build:ready', { appId, sessionId, assetCount: assets.length, hash });
       await this.options.appendInstallLog('remote_network_share:upload:start', { appId, sessionId, assetCount: assets.length });
@@ -151,14 +156,13 @@ export class RemoteNetworkShareManager {
         tunnelUrl: tunnel.url,
         connectionCount: 0,
         connections: [],
-        userMessage: 'Túnel esperando sesión.',
       };
       const state: ShareState = { appId, server, sessionRowId, sessionId, tunnel, crypto, status, seenNonces: new Set(), connectionKeyIds: new Set() };
       this.pendingStatuses.delete(appId);
       this.shares.set(appId, state);
       this.emit(state);
       await this.options.appendInstallLog('remote_network_share:started', { appId, sessionId, tunnelUrl: tunnel.url });
-      return { success: true, userMessage: 'Túnel remoto activo.', status };
+      return { success: true, status };
     } catch (error) {
       const technicalCode = error instanceof Error ? error.message : 'remote_tunnel_start_failed';
       await Promise.allSettled([
@@ -177,12 +181,11 @@ export class RemoteNetworkShareManager {
         state: 'error',
         sessionId,
         technicalCode,
-        userMessage: 'No pudimos preparar el túnel remoto.',
       };
       this.pendingStatuses.set(appId, status);
       this.options.emitRuntimeStatus(appId, status);
       await this.options.appendInstallLog('remote_network_share:start_failed', { appId, sessionId, technicalCode });
-      return { success: false, userMessage: status.userMessage ?? 'No pudimos preparar el túnel remoto.', technicalCode, status };
+      return { success: false, technicalCode, status };
     }
 
   }
@@ -191,7 +194,7 @@ export class RemoteNetworkShareManager {
     const state = this.shares.get(appId);
     if (!state) {
       this.pendingStatuses.delete(appId);
-      return { success: true, userMessage: 'Túnel remoto detenido.', status: { active: false, appId, state: 'inactive' } };
+      return { success: true, status: { active: false, appId, state: 'inactive' } };
     }
     this.shares.delete(appId);
     this.pendingStatuses.delete(appId);
@@ -200,10 +203,10 @@ export class RemoteNetworkShareManager {
       new Promise<void>((resolve) => state.server.close(() => resolve())),
       this.options.backendClient()?.closeRemoteTunnelSession(state.sessionRowId) ?? Promise.resolve(),
     ]);
-    const status: RemoteNetworkShareStatus = { active: false, appId, state: 'closed', userMessage: 'Túnel remoto detenido.' };
+    const status: RemoteNetworkShareStatus = { active: false, appId, state: 'closed' };
     this.options.emitRuntimeStatus(appId, status);
     await this.options.appendInstallLog('remote_network_share:stopped', { appId, sessionId: state.sessionId });
-    return { success: true, userMessage: 'Túnel remoto detenido.', status };
+    return { success: true, status };
   }
 
   async stopBySession(sessionId: string): Promise<RemoteNetworkShareResult | undefined> {
