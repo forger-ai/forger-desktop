@@ -18,6 +18,7 @@ interface RegistryStoreDeps {
   forgerAccount: StoredForgerAccount;
   fs: typeof fs;
   getCloudSyncSettingsPath: () => string;
+  getPrivateAppsRoot: () => string;
   getRegistryBackupPath: () => string;
   getRegistryPath: () => string;
   isDev: boolean;
@@ -39,7 +40,7 @@ interface RegistryStoreDeps {
 
 export const createRegistryStoreController = (deps: RegistryStoreDeps) => {
   let { catalogApps, cloudSyncSettings, localCatalogJsonUrl, registry } = deps;
-  const { DEFAULT_PYTHON_VERSION, DevCatalogService, appendInstallLog, emitRuntimeStatus, fs, getCloudSyncSettingsPath, getRegistryBackupPath, getRegistryPath, isDev, isVersionNewer, normalizeNodeRuntimeVersion, normalizeVersionForFolder, path, runningApps, forgerAccount, serializeErrorForInstallLog, setCatalogApps, setCloudSyncSettings, setDevCatalogService, setLocalCatalogJsonUrl, setRegistry } = deps;
+  const { DEFAULT_PYTHON_VERSION, DevCatalogService, appendInstallLog, emitRuntimeStatus, fs, getCloudSyncSettingsPath, getPrivateAppsRoot, getRegistryBackupPath, getRegistryPath, isDev, isVersionNewer, normalizeNodeRuntimeVersion, normalizeVersionForFolder, path, runningApps, forgerAccount, serializeErrorForInstallLog, setCatalogApps, setCloudSyncSettings, setDevCatalogService, setLocalCatalogJsonUrl, setRegistry } = deps;
 let devCatalogService: InstanceType<typeof DevCatalogService> | null = null;
 const startDevCatalogService = async (): Promise<void> => {
   if (!isDev || !process.env.FORGER_LOCAL_APPS?.trim()) {
@@ -106,6 +107,27 @@ const normalizeRegistryRuntimeVersions = (input: AppRegistry): { registry: AppRe
   return { registry: { apps }, changed };
 };
 
+const isPathInside = (candidate: string, root: string): boolean => {
+  const relativePath = path.relative(path.resolve(root), path.resolve(candidate));
+  return relativePath === '' || (!relativePath.startsWith('..') && !path.isAbsolute(relativePath));
+};
+
+const filterRegistryForCurrentEnvironment = (input: AppRegistry): { registry: AppRegistry; changed: boolean } => {
+  let changed = false;
+  const privateAppsRoot = getPrivateAppsRoot();
+  const apps = Object.fromEntries(
+    Object.entries(input.apps).filter(([, record]) => {
+      if (typeof record.installDir !== 'string' || !record.installDir.trim()) {
+        return true;
+      }
+      const belongsToEnvironment = isPathInside(record.installDir, privateAppsRoot);
+      changed ||= !belongsToEnvironment;
+      return belongsToEnvironment;
+    }),
+  );
+  return { registry: { apps }, changed };
+};
+
 const loadRegistryFile = async (registryPath: string): Promise<AppRegistry | null> => {
   try {
     return parseRegistry(await fs.readFile(registryPath, 'utf8'));
@@ -133,9 +155,10 @@ const loadRegistry = async (): Promise<void> => {
     const loadedRegistry = await loadRegistryFile(registryPath);
     if (loadedRegistry) {
       const normalized = normalizeRegistryRuntimeVersions(loadedRegistry);
-      registry = normalized.registry;
+      const filtered = filterRegistryForCurrentEnvironment(normalized.registry);
+      registry = filtered.registry;
       setRegistry?.(registry);
-      if (normalized.changed) {
+      if (normalized.changed || filtered.changed) {
         await saveRegistry();
       }
       return;
@@ -250,5 +273,5 @@ const ensureCatalogStatuses = (): void => {
   setCatalogApps?.(catalogApps);
 };
 
-  return { startDevCatalogService, parseRegistry, normalizeInstalledAppRecord, normalizeRegistryRuntimeVersions, loadRegistryFile, syncDirectory, loadRegistry, saveRegistry, loadCloudSyncSettings, saveCloudSyncSettings, setAppAutoSyncSetting, canUseCloudDataSync, upsertInstalledRecord, removeInstalledRecord, ensureCatalogStatuses };
+  return { startDevCatalogService, parseRegistry, normalizeInstalledAppRecord, normalizeRegistryRuntimeVersions, filterRegistryForCurrentEnvironment, loadRegistryFile, syncDirectory, loadRegistry, saveRegistry, loadCloudSyncSettings, saveCloudSyncSettings, setAppAutoSyncSetting, canUseCloudDataSync, upsertInstalledRecord, removeInstalledRecord, ensureCatalogStatuses };
 };

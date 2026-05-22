@@ -16,7 +16,7 @@ test('forger_installed is privacy-safe and recorded once per local installation'
   const source = await readFile(path.join(root, 'src/renderer/usage-analytics.ts'), 'utf8');
 
   assert.match(source, /FORGER_INSTALLED_RECORDED_KEY/);
-  assert.match(source, /if \(!hasAcceptedLegalWelcome\(\)\)/);
+  assert.doesNotMatch(source, /hasAcceptedLegalWelcome/);
   assert.match(source, /recordedIdentifier === installationIdentifier/);
   assert.match(source, /eventName: 'forger_installed'/);
   assert.doesNotMatch(source, /forger_installed[\s\S]{0,220}stringParameters/);

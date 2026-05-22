@@ -4,7 +4,11 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
-const { createPathConfigController } = require('../../dist-electron/main/core/path-config.js');
+const {
+  configureDesktopUserDataPath,
+  createPathConfigController,
+  getDesktopUserDataName,
+} = require('../../dist-electron/main/core/path-config.js');
 const {
   AGENT_TOOL_DEFINITIONS,
   AGENT_TOOL_IDS,
@@ -60,6 +64,42 @@ test('path config normalizes runtime values and resolves private desktop roots',
   assert.equal(controller.getCloudIdentityPath(), '/home/test-user/Forger-dev/.forger/cloud-identity.json');
   assert.equal(controller.getCloudSyncSettingsPath(), '/home/test-user/Forger-dev/.forger/cloud-sync.json');
   assert.equal(controller.getCloudDeviceAccountStorageKey(), 'user-42');
+});
+
+test('path config isolates dev userData before runtime paths are resolved', () => {
+  const setPathCalls = [];
+  const devPath = configureDesktopUserDataPath({
+    app: {
+      getPath: (name) => {
+        assert.equal(name, 'appData');
+        return '/user-data/appData';
+      },
+      setPath: (name, value) => {
+        setPathCalls.push([name, value]);
+      },
+    },
+    isDev: true,
+    path,
+  });
+
+  assert.equal(getDesktopUserDataName(false), 'forger-desktop');
+  assert.equal(getDesktopUserDataName(true), 'forger-desktop-dev');
+  assert.equal(devPath, '/user-data/appData/forger-desktop-dev');
+  assert.deepEqual(setPathCalls, [['userData', '/user-data/appData/forger-desktop-dev']]);
+
+  const productionPath = configureDesktopUserDataPath({
+    app: {
+      getPath: () => {
+        throw new Error('prod_should_not_resolve_app_data');
+      },
+      setPath: () => {
+        throw new Error('prod_should_not_set_user_data');
+      },
+    },
+    isDev: false,
+    path,
+  });
+  assert.equal(productionPath, null);
 });
 
 test('path config uses production home and omits account storage key without a cloud user', () => {

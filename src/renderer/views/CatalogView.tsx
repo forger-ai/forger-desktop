@@ -34,6 +34,8 @@ const filters: Array<'all' | AppCategory> = ['all', 'finanzas', 'hogar', 'salud'
 const isInstalledLike = (app: CatalogApp) =>
   app.status === 'installed' || app.status === 'running' || app.status === 'error' || app.status === 'conflict' || app.status === 'installing';
 
+const installedSortRank = (app: CatalogApp) => (isInstalledLike(app) ? 0 : 1);
+
 export function CatalogView({
   apps,
   openingAppIds,
@@ -65,7 +67,11 @@ export function CatalogView({
       : statusFilter === 'not_installed'
         ? catalogApps.filter((app) => app.status === 'not_installed')
         : catalogApps;
-  const visibleApps = filter === 'all' ? statusApps : statusApps.filter((app) => app.category === filter);
+  const filteredApps = filter === 'all' ? statusApps : statusApps.filter((app) => app.category === filter);
+  const visibleApps = filteredApps
+    .map((app, index) => ({ app, index }))
+    .sort((left, right) => installedSortRank(left.app) - installedSortRank(right.app) || left.index - right.index)
+    .map(({ app }) => app);
 
   return (
     <Stack spacing={2.5}>
@@ -126,36 +132,14 @@ export function CatalogView({
             const isBeta = app.catalogStatus === 'beta' || Boolean(app.beta);
             const hasDownloadableVersion = Boolean(app.downloadUrl || app.latestVersionId);
             const canInstallEarlyAccess = !isEarlyAccess || (earlyAccessEnabled && hasDownloadableVersion);
-            const statusLabel = isInstalling
-              ? t.actions.installing
-              : app.status === 'running'
-                ? t.actions.running
-                : isConflict
-                  ? t.actions.conflict
-                : hasError
-                  ? t.actions.error
-                  : !isInstalled && isEarlyAccess
-                    ? t.beta.earlyAccessBadge
-                  : app.updateAvailable && app.latestVersion
-                    ? t.appView.updateAvailable(app.latestVersion)
-                  : isInstalled
-                    ? t.actions.installed
-                    : t.actions.available;
-            const statusColor = isInstalling
-              ? 'warning'
-              : app.status === 'running'
-                ? 'info'
-                : isConflict
-                  ? 'error'
-                : hasError
-                  ? 'error'
-                  : app.updateAvailable
-                    ? 'warning'
-                  : isInstalled
-                    ? 'success'
-                    : 'default';
             const primaryAction = isConflict ? 'update' : hasError ? 'retry' : isInstalled ? (app.status === 'running' ? 'stop' : 'open') : 'install';
             const isOpening = primaryAction === 'open' && openingAppIds.has(app.id);
+            const localNetworkRunning = Boolean(app.localNetworkShare?.connectedAt || app.localNetworkShare?.active);
+            const statusIndicatorLabel = localNetworkRunning
+              ? t.localNetwork.runningTooltip
+              : app.status === 'running'
+                ? 'running'
+                : undefined;
             const canShareLocalNetwork = earlyAccessEnabled
               && primaryAction === 'open'
               && app.capabilities?.some((capability) => capability.id === 'local_network_share');
@@ -189,14 +173,12 @@ export function CatalogView({
                 averageRating={app.averageRating}
                 ratingsCount={app.ratingsCount}
                 onboardingTarget={app.id === 'finance-os' ? 'finance-os-card' : undefined}
-                statusLabel={statusLabel}
-                statusColor={statusColor}
+                statusIndicatorLabel={statusIndicatorLabel}
                 primaryAction={primaryAction}
                 primaryActionLabel={primaryActionLabel}
                 primaryDisabled={isInstalling || (!isInstalled && !canInstallEarlyAccess)}
                 primaryLoading={isOpening}
                 primaryMenuActions={canShareLocalNetwork ? [{ label: t.localNetwork.menuAction, onClick: () => onStartLocalNetworkShare(app.id) }] : undefined}
-                extraStatusLabel={app.localNetworkShare?.connectedAt ? t.localNetwork.connectedBadge : app.localNetworkShare?.active ? t.localNetwork.waitingBadge : undefined}
                 installProgress={installProgress}
                 onPrimaryAction={() => {
                   if (isInstalling) {

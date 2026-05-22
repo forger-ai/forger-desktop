@@ -13,6 +13,12 @@ interface PathConfigDeps {
   path: typeof path;
 }
 
+interface ConfigureUserDataDeps {
+  app: Pick<App, 'getPath' | 'setPath'>;
+  isDev: boolean;
+  path: typeof path;
+}
+
 const PLATFORM_KEY_BY_RUNTIME: Record<NodeJS.Platform, string> = {
   darwin: 'darwin',
   win32: 'win32',
@@ -25,6 +31,17 @@ const PLATFORM_KEY_BY_RUNTIME: Record<NodeJS.Platform, string> = {
   cygwin: 'win32',
   netbsd: 'linux',
   haiku: 'linux',
+};
+
+export const getDesktopUserDataName = (isDev: boolean): string => (isDev ? 'forger-desktop-dev' : 'forger-desktop');
+
+export const configureDesktopUserDataPath = ({ app, isDev, path }: ConfigureUserDataDeps): string | null => {
+  if (!isDev) {
+    return null;
+  }
+  const userDataPath = path.join(app.getPath('appData'), getDesktopUserDataName(true));
+  app.setPath('userData', userDataPath);
+  return userDataPath;
 };
 
 export const createPathConfigController = (deps: PathConfigDeps) => {

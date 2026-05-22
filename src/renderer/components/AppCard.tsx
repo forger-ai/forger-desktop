@@ -12,7 +12,6 @@ import {
   Button,
   ButtonGroup,
   Card,
-  Chip,
   CircularProgress,
   IconButton,
   LinearProgress,
@@ -30,15 +29,13 @@ interface AppCardProps {
   iconUrl?: string;
   categoryLabel: string;
   description: string;
-  statusLabel: string;
-  statusColor: 'success' | 'default' | 'warning' | 'error' | 'info';
+  statusIndicatorLabel?: string;
   primaryActionLabel: string;
   primaryAction: 'open' | 'install' | 'update' | 'stop' | 'retry';
   onPrimaryAction: () => void;
   primaryDisabled?: boolean;
   primaryLoading?: boolean;
   primaryMenuActions?: Array<{ label: string; onClick: () => void }>;
-  extraStatusLabel?: string;
   installProgress?: Pick<InstallAppResult, 'phase' | 'progress' | 'userMessage'>;
   secondaryActionLabel?: string;
   onSecondaryAction?: () => void;
@@ -64,15 +61,13 @@ export function AppCard({
   iconUrl,
   categoryLabel,
   description,
-  statusLabel,
-  statusColor,
+  statusIndicatorLabel,
   primaryActionLabel,
   primaryAction,
   onPrimaryAction,
   primaryDisabled = false,
   primaryLoading = false,
   primaryMenuActions = [],
-  extraStatusLabel,
   installProgress,
   secondaryActionLabel,
   onSecondaryAction,
@@ -168,31 +163,57 @@ export function AppCard({
           {betaLabel}
         </Box>
       ) : null}
+      {statusIndicatorLabel ? (
+        <Tooltip title={statusIndicatorLabel}>
+          <Box
+            aria-label={statusIndicatorLabel}
+            sx={{
+              position: 'absolute',
+              top: 14,
+              right: 14,
+              width: 12,
+              height: 12,
+              borderRadius: '50%',
+              bgcolor: 'success.main',
+              border: '2px solid',
+              borderColor: 'background.paper',
+              boxShadow: 1,
+              zIndex: 2,
+              '&::after': {
+                content: '""',
+                position: 'absolute',
+                inset: -5,
+                borderRadius: '50%',
+                bgcolor: 'success.main',
+                opacity: 0.32,
+                animation: 'forger-status-pulse 1.6s ease-out infinite',
+              },
+              '@keyframes forger-status-pulse': {
+                '0%': {
+                  transform: 'scale(0.72)',
+                  opacity: 0.42,
+                },
+                '70%': {
+                  transform: 'scale(1.75)',
+                  opacity: 0,
+                },
+                '100%': {
+                  transform: 'scale(1.75)',
+                  opacity: 0,
+                },
+              },
+            }}
+          />
+        </Tooltip>
+      ) : null}
       <Stack spacing={2} sx={{ height: '100%' }}>
-        <Stack direction="row" justifyContent="space-between" spacing={2} alignItems="flex-start">
-          <Stack direction="row" spacing={1} alignItems="center">
-            <Chip label={statusLabel} color={statusColor} size="small" />
-            {extraStatusLabel ? <Chip label={extraStatusLabel} color="secondary" variant="outlined" size="small" /> : null}
-            {installing ? <CircularProgress size={14} color="inherit" /> : null}
+        {installing ? (
+          <Stack direction="row" spacing={1} alignItems="center" sx={{ minHeight: 24 }}>
+            <CircularProgress size={14} color="inherit" />
           </Stack>
-          {tertiaryActionLabel && onTertiaryAction ? (
-            <Tooltip title={tertiaryActionLabel}>
-              <IconButton
-                size="small"
-                color="error"
-                aria-label={tertiaryActionLabel}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onTertiaryAction();
-                }}
-              >
-                <DeleteOutlineRounded fontSize="small" />
-              </IconButton>
-            </Tooltip>
-          ) : (
-            <Box sx={{ width: 30, height: 30 }} />
-          )}
-        </Stack>
+        ) : (
+          <Box sx={{ height: 24 }} />
+        )}
 
         <Stack direction="row" spacing={1.25} alignItems="center">
           <Avatar
@@ -252,7 +273,7 @@ export function AppCard({
           </Stack>
         ) : null}
 
-        <Stack direction="row" spacing={1.25} sx={{ mt: 'auto' }}>
+        <Stack direction="row" spacing={1.25} alignItems="center" sx={{ mt: 'auto' }}>
           {primaryMenuActions.length > 0 ? (
             <>
               <ButtonGroup variant="contained" disabled={primaryDisabled || primaryLoading || installing} aria-busy={primaryLoading || installing}>
@@ -323,6 +344,22 @@ export function AppCard({
             >
               {secondaryActionLabel}
             </Button>
+          ) : null}
+          {tertiaryActionLabel && onTertiaryAction ? (
+            <Tooltip title={tertiaryActionLabel}>
+              <IconButton
+                size="small"
+                color="error"
+                aria-label={tertiaryActionLabel}
+                sx={{ ml: 'auto' }}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onTertiaryAction();
+                }}
+              >
+                <DeleteOutlineRounded fontSize="small" />
+              </IconButton>
+            </Tooltip>
           ) : null}
         </Stack>
       </Stack>

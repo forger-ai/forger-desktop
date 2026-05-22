@@ -64,6 +64,7 @@ export const es = {
     activeBadge: 'Red local activa',
     waitingBadge: 'Esperando dispositivo local',
     connectedBadge: 'Dispositivo local conectado',
+    runningTooltip: 'running in local network',
     title: (appName: string) => `Compartir ${appName} en red local`,
     body: 'Disponible para dispositivos en esta misma red mientras lo mantengas activo.',
     waitingBody: 'Esperando que un dispositivo en esta misma red abra el link.',

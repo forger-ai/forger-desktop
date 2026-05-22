@@ -74,7 +74,7 @@ import { createManifestSupportController } from '../apps/manifest-support';
 import { createAppContextSupportController } from '../apps/context-support';
 import { createRegistryStoreController } from '../installed-apps/registry-store';
 import { createSettingsServiceController } from './settings-service';
-import { createPathConfigController } from './path-config';
+import { configureDesktopUserDataPath, createPathConfigController } from './path-config';
 import { createMainUtilitiesController } from './main-utilities';
 import { createLocalNetworkShareController } from './local-network-share-service';
 import { createRuntimeInstallController } from '../runtime/runtime-install';
@@ -222,6 +222,7 @@ import type {
 } from '../../shared/types';
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
+configureDesktopUserDataPath({ app, isDev, path });
 const backendBaseUrl = process.env.FORGER_BACKEND_URL ?? (isDev ? 'http://127.0.0.1:3300' : 'https://platform.forger.cloud');
 let localCatalogJsonUrl: string | undefined;
 const DEFAULT_NODE_VERSION = '22';
@@ -540,6 +541,7 @@ const createRegistryStoreDeps = () => ({
   forgerAccount,
   fs,
   getCloudSyncSettingsPath,
+  getPrivateAppsRoot,
   getRegistryBackupPath,
   getRegistryPath,
   isDev,
