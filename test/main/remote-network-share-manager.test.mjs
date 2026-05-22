@@ -300,64 +300,76 @@ test('remote tunnel provider helpers normalize URLs, subdomains, and local ports
 });
 
 test('buildRemoteFrontend runs a build, reads assets, and computes a stable hash', async () => {
-  const { buildRemoteFrontend } = require('../../dist-electron/main/remote-frontend-packager.js');
+  const originalLoad = Module._load;
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forger-remote-build-'));
-  await fs.mkdir(path.join(root, 'dist', 'assets'), { recursive: true });
-  const npmPath = path.join(root, 'npm-bin');
-  await fs.writeFile(path.join(root, 'package.json'), JSON.stringify({ scripts: { build: 'node build.mjs' } }));
-  await fs.writeFile(npmPath, `#!/usr/bin/env node
-import { spawnSync } from 'node:child_process';
-import process from 'node:process';
-const result = spawnSync(process.execPath, ['build.mjs'], { stdio: 'inherit' });
-process.exit(result.status ?? 1);
-`);
-  await fs.chmod(npmPath, 0o755);
-  await fs.writeFile(path.join(root, 'build.mjs'), `
-    import fs from 'node:fs/promises';
-    await fs.mkdir('dist/assets', { recursive: true });
-    await fs.writeFile('dist/index.html', process.env.VITE_FORGER_REMOTE_SESSION_ID);
-    await fs.writeFile('dist/assets/app.js', process.env.VITE_FORGER_CLOUD_HANDSHAKE_URL);
-    await fs.writeFile('dist/assets/style.css', 'body{}');
-    await fs.writeFile('dist/assets/data.json', '{}');
-    await fs.writeFile('dist/assets/icon.png', '');
-    await fs.writeFile('dist/assets/icon.svg', '<svg />');
-    await fs.writeFile('dist/assets/file.bin', '');
-  `);
-
-  const result = await buildRemoteFrontend({
-    frontendDir: root,
-    sessionId: 'session-1',
-    handshakeUrl: 'https://platform.test/handshake',
-    nodePath: process.execPath,
-    npmPath,
-  });
-
-  assert.deepEqual(result.assets.map((asset) => [asset.path, asset.type]), [
-    ['assets/app.js', 'text/javascript; charset=utf-8'],
-    ['assets/data.json', 'application/json'],
-    ['assets/file.bin', 'application/octet-stream'],
-    ['assets/icon.png', 'image/png'],
-    ['assets/icon.svg', 'image/svg+xml'],
-    ['assets/style.css', 'text/css; charset=utf-8'],
-    ['index.html', 'text/html; charset=utf-8'],
-  ]);
-  assert.match(result.hash, /^[a-f0-9]{64}$/);
-
   const failing = await fs.mkdtemp(path.join(os.tmpdir(), 'forger-remote-build-fail-'));
-  const failingNpmPath = path.join(failing, 'npm-bin');
-  await fs.writeFile(path.join(failing, 'package.json'), JSON.stringify({ scripts: { build: 'node fail.mjs' } }));
-  await fs.writeFile(failingNpmPath, `#!/usr/bin/env node
-import { spawnSync } from 'node:child_process';
-import process from 'node:process';
-const result = spawnSync(process.execPath, ['fail.mjs'], { stdio: 'inherit' });
-process.exit(result.status ?? 1);
-`);
-  await fs.chmod(failingNpmPath, 0o755);
-  await fs.writeFile(path.join(failing, 'fail.mjs'), 'console.error("build nope"); process.exit(7);');
-  await assert.rejects(
-    () => buildRemoteFrontend({ frontendDir: failing, sessionId: 'session-1', handshakeUrl: 'https://platform.test', nodePath: process.execPath, npmPath: failingNpmPath }),
-    /remote_frontend_build_failed_7: build nope/,
-  );
+  Module._load = function loadWithSpawnMock(request, parent, isMain) {
+    if (request === 'node:child_process') {
+      return {
+        spawn(command, args, options) {
+          assert.equal(command, '/runtime/npm');
+          assert.deepEqual(args, ['run', 'build', '--', '--base=./']);
+          assert.equal(options.env.VITE_FORGER_REMOTE_TUNNEL, 'true');
+          assert.equal(options.env.VITE_FORGER_REMOTE_SESSION_ID, 'session-1');
+          assert.equal(options.env.VITE_FORGER_CLOUD_HANDSHAKE_URL, 'https://platform.test/handshake');
+          assert.equal(options.env.PATH.startsWith(`${path.dirname('/runtime/node')}${path.delimiter}`), true);
+          const child = new EventEmitter();
+          child.stderr = new EventEmitter();
+          child.kill = () => undefined;
+          if (options.cwd === failing) {
+            setImmediate(() => {
+              child.stderr.emit('data', 'build nope');
+              child.emit('close', 7);
+            });
+          } else {
+            setImmediate(async () => {
+              await fs.mkdir(path.join(options.cwd, 'dist', 'assets'), { recursive: true });
+              await fs.writeFile(path.join(options.cwd, 'dist/index.html'), options.env.VITE_FORGER_REMOTE_SESSION_ID);
+              await fs.writeFile(path.join(options.cwd, 'dist/assets/app.js'), options.env.VITE_FORGER_CLOUD_HANDSHAKE_URL);
+              await fs.writeFile(path.join(options.cwd, 'dist/assets/style.css'), 'body{}');
+              await fs.writeFile(path.join(options.cwd, 'dist/assets/data.json'), '{}');
+              await fs.writeFile(path.join(options.cwd, 'dist/assets/icon.png'), '');
+              await fs.writeFile(path.join(options.cwd, 'dist/assets/icon.svg'), '<svg />');
+              await fs.writeFile(path.join(options.cwd, 'dist/assets/file.bin'), '');
+              child.emit('close', 0);
+            });
+          }
+          return child;
+        },
+      };
+    }
+    return originalLoad.apply(this, [request, parent, isMain]);
+  };
+  try {
+    clearDistModule('main/remote-frontend-packager.js');
+    const { buildRemoteFrontend } = require('../../dist-electron/main/remote-frontend-packager.js');
+    const result = await buildRemoteFrontend({
+      frontendDir: root,
+      sessionId: 'session-1',
+      handshakeUrl: 'https://platform.test/handshake',
+      nodePath: '/runtime/node',
+      npmPath: '/runtime/npm',
+    });
+
+    assert.deepEqual(result.assets.map((asset) => [asset.path, asset.type]), [
+      ['assets/app.js', 'text/javascript; charset=utf-8'],
+      ['assets/data.json', 'application/json'],
+      ['assets/file.bin', 'application/octet-stream'],
+      ['assets/icon.png', 'image/png'],
+      ['assets/icon.svg', 'image/svg+xml'],
+      ['assets/style.css', 'text/css; charset=utf-8'],
+      ['index.html', 'text/html; charset=utf-8'],
+    ]);
+    assert.match(result.hash, /^[a-f0-9]{64}$/);
+
+    await assert.rejects(
+      () => buildRemoteFrontend({ frontendDir: failing, sessionId: 'session-1', handshakeUrl: 'https://platform.test/handshake', nodePath: '/runtime/node', npmPath: '/runtime/npm' }),
+      /remote_frontend_build_failed_7: build nope/,
+    );
+  } finally {
+    Module._load = originalLoad;
+    clearDistModule('main/remote-frontend-packager.js');
+  }
 });
 
 test('buildRemoteFrontend times out long-running builds and ignores late child close events', async () => {
