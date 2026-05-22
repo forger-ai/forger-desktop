@@ -1532,9 +1532,17 @@ test('DevCatalogService serves dev assets, rejects unsafe paths, and exposes fil
   const appDir = path.join(root, 'finance-os');
   await fs.mkdir(path.join(appDir, 'assets'), { recursive: true });
   await fs.mkdir(path.join(appDir, 'backend', 'data'), { recursive: true });
+  await fs.mkdir(path.join(appDir, 'backend', 'src', 'app'), { recursive: true });
+  await fs.mkdir(path.join(appDir, 'commons', 'backend'), { recursive: true });
+  await fs.mkdir(path.join(appDir, 'commons', 'frontend'), { recursive: true });
+  await fs.mkdir(path.join(appDir, 'frontend', 'src', 'api'), { recursive: true });
   await fs.mkdir(path.join(appDir, 'frontend', 'node_modules'), { recursive: true });
   await fs.mkdir(path.join(appDir, 'src'), { recursive: true });
   await fs.writeFile(path.join(appDir, 'assets', 'icon.svg'), '<svg />', 'utf8');
+  await fs.writeFile(path.join(appDir, 'backend', 'src', 'app', 'cors.py'), 'placeholder cors', 'utf8');
+  await fs.writeFile(path.join(appDir, 'commons', 'backend', 'cors.py'), 'commons cors', 'utf8');
+  await fs.writeFile(path.join(appDir, 'frontend', 'src', 'api', 'client.ts'), 'placeholder client', 'utf8');
+  await fs.writeFile(path.join(appDir, 'commons', 'frontend', 'client.ts'), 'commons client', 'utf8');
   await fs.writeFile(path.join(appDir, 'src', 'main.py'), 'print("ok")', 'utf8');
   await fs.writeFile(path.join(appDir, 'backend', 'data', 'private.sqlite'), 'private', 'utf8');
   await fs.writeFile(path.join(appDir, 'frontend', 'node_modules', 'skip.js'), 'skip', 'utf8');
@@ -1596,6 +1604,12 @@ test('DevCatalogService serves dev assets, rejects unsafe paths, and exposes fil
   assert.equal(download.headers['Content-Type'], 'application/zip');
   assert.match(download.headers['X-Forger-Checksum-Sha256'], /^[a-f0-9]{64}$/);
   assert.ok(download.bodyBuffer().length > 0);
+  const zipPath = path.join(root, 'finance-os-dev.zip');
+  await fs.writeFile(zipPath, download.bodyBuffer());
+  const zippedCors = await execFileAsync('unzip', ['-p', zipPath, 'backend/src/app/cors.py']);
+  const zippedClient = await execFileAsync('unzip', ['-p', zipPath, 'frontend/src/api/client.ts']);
+  assert.equal(zippedCors.stdout, 'commons cors');
+  assert.equal(zippedClient.stdout, 'commons client');
 
   const originalCreateReadStream = nodeFs.createReadStream;
   let cleanedStreamError = false;
@@ -1833,8 +1847,17 @@ test('DevCatalogService internal helpers cover command failures, version overrid
   );
 
   assert.equal(__testDevCatalogInternals.shouldSkip(path.join(root, 'backend', 'data', 'app.sqlite'), root), true);
+  assert.equal(__testDevCatalogInternals.shouldSkip(path.join(root, '.DS_Store'), root), true);
   assert.equal(__testDevCatalogInternals.shouldSkip(path.join(root, 'src', 'cache.pyo'), root), true);
+  assert.equal(__testDevCatalogInternals.shouldSkip(path.join(root, 'src', 'app.py'), root), false);
   assert.equal(__testDevCatalogInternals.shouldSkip(root, root), false);
+
+  await fs.mkdir(path.join(root, 'commons', 'backend', 'cors.py'), { recursive: true });
+  await __testDevCatalogInternals.applyCommonsOverlay(root, path.join(root, 'stage'));
+  await assert.rejects(
+    () => fs.readFile(path.join(root, 'stage', 'backend', 'src', 'app', 'cors.py'), 'utf8'),
+    /ENOENT/,
+  );
 
   await assert.rejects(
     () => __testDevCatalogInternals.zipDirectory(path.join(root, 'missing-source'), path.join(root, 'missing.zip')),

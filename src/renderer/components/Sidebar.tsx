@@ -29,7 +29,6 @@ import iconDark from '@renderer/assets/icon-dark.svg';
 import iconLight from '@renderer/assets/icon-light.svg';
 
 export type View =
-  | 'my-apps'
   | 'catalog'
   | 'chat'
   | 'feedback'
@@ -103,7 +102,6 @@ export function Sidebar({ currentView, onNavigate, t, desktopUpdateState, advanc
   }, []);
 
   const labels: Record<View, string> = {
-    'my-apps': t.nav.myApps,
     catalog: t.nav.apps,
     chat: t.nav.chat,
     feedback: t.nav.feedback,

@@ -23,6 +23,11 @@ interface RegistryStoreDeps {
   isDev: boolean;
   isVersionNewer: (candidate?: string, current?: string) => boolean;
   localCatalogJsonUrl: string | null | undefined;
+  setCatalogApps?: (apps: CatalogApp[]) => void;
+  setCloudSyncSettings?: (settings: CloudSyncSettings) => void;
+  setDevCatalogService?: (service: InstanceType<typeof DevCatalogService> | null) => void;
+  setLocalCatalogJsonUrl?: (url: string | undefined) => void;
+  setRegistry?: (registry: AppRegistry) => void;
   normalizeNodeRuntimeVersion: (value?: string | null) => string;
   normalizeVersionForFolder: (value: string) => string;
   path: typeof path;
@@ -34,7 +39,7 @@ interface RegistryStoreDeps {
 
 export const createRegistryStoreController = (deps: RegistryStoreDeps) => {
   let { catalogApps, cloudSyncSettings, localCatalogJsonUrl, registry } = deps;
-  const { DEFAULT_PYTHON_VERSION, DevCatalogService, appendInstallLog, emitRuntimeStatus, fs, getCloudSyncSettingsPath, getRegistryBackupPath, getRegistryPath, isDev, isVersionNewer, normalizeNodeRuntimeVersion, normalizeVersionForFolder, path, runningApps, forgerAccount, serializeErrorForInstallLog } = deps;
+  const { DEFAULT_PYTHON_VERSION, DevCatalogService, appendInstallLog, emitRuntimeStatus, fs, getCloudSyncSettingsPath, getRegistryBackupPath, getRegistryPath, isDev, isVersionNewer, normalizeNodeRuntimeVersion, normalizeVersionForFolder, path, runningApps, forgerAccount, serializeErrorForInstallLog, setCatalogApps, setCloudSyncSettings, setDevCatalogService, setLocalCatalogJsonUrl, setRegistry } = deps;
 let devCatalogService: InstanceType<typeof DevCatalogService> | null = null;
 const startDevCatalogService = async (): Promise<void> => {
   if (!isDev || !process.env.FORGER_LOCAL_APPS?.trim()) {
@@ -42,15 +47,19 @@ const startDevCatalogService = async (): Promise<void> => {
   }
 
   devCatalogService = new DevCatalogService();
+  setDevCatalogService?.(devCatalogService);
   try {
     await devCatalogService.start();
     localCatalogJsonUrl = devCatalogService.url;
+    setLocalCatalogJsonUrl?.(localCatalogJsonUrl);
     await appendInstallLog('dev_catalog:start', {
       catalogUrl: localCatalogJsonUrl,
       localApps: process.env.FORGER_LOCAL_APPS,
     });
   } catch (error) {
     devCatalogService = null;
+    setDevCatalogService?.(null);
+    setLocalCatalogJsonUrl?.(undefined);
     await appendInstallLog('dev_catalog:failed', {
       localApps: process.env.FORGER_LOCAL_APPS,
       error: serializeErrorForInstallLog(error),
@@ -125,6 +134,7 @@ const loadRegistry = async (): Promise<void> => {
     if (loadedRegistry) {
       const normalized = normalizeRegistryRuntimeVersions(loadedRegistry);
       registry = normalized.registry;
+      setRegistry?.(registry);
       if (normalized.changed) {
         await saveRegistry();
       }
@@ -133,6 +143,7 @@ const loadRegistry = async (): Promise<void> => {
   }
 
   registry = { apps: {} };
+  setRegistry?.(registry);
 };
 
 const saveRegistry = async (): Promise<void> => {
@@ -175,6 +186,7 @@ const loadCloudSyncSettings = async (): Promise<void> => {
   } catch {
     cloudSyncSettings = { appSync: {} };
   }
+  setCloudSyncSettings?.(cloudSyncSettings);
 };
 
 const saveCloudSyncSettings = async (): Promise<void> => {
@@ -190,6 +202,7 @@ const setAppAutoSyncSetting = async (appId: string, autoSync: boolean): Promise<
       [appId]: { autoSync },
     },
   };
+  setCloudSyncSettings?.(cloudSyncSettings);
   await saveCloudSyncSettings();
   return cloudSyncSettings;
 };
@@ -202,6 +215,7 @@ const canUseCloudDataSync = (): boolean => {
 const upsertInstalledRecord = async (record: InstalledAppRecord): Promise<void> => {
   const normalized = normalizeInstalledAppRecord(record);
   registry.apps[normalized.appId] = normalized;
+  setRegistry?.(registry);
   await saveRegistry();
   emitRuntimeStatus({
     appId: normalized.appId,
@@ -214,6 +228,7 @@ const upsertInstalledRecord = async (record: InstalledAppRecord): Promise<void> 
 
 const removeInstalledRecord = async (appId: string): Promise<void> => {
   delete registry.apps[appId];
+  setRegistry?.(registry);
   await saveRegistry();
 };
 
@@ -232,6 +247,7 @@ const ensureCatalogStatuses = (): void => {
       updateAvailable: installed ? isVersionNewer(appEntry.latestVersion, installed.version) : false,
     };
   });
+  setCatalogApps?.(catalogApps);
 };
 
   return { startDevCatalogService, parseRegistry, normalizeInstalledAppRecord, normalizeRegistryRuntimeVersions, loadRegistryFile, syncDirectory, loadRegistry, saveRegistry, loadCloudSyncSettings, saveCloudSyncSettings, setAppAutoSyncSetting, canUseCloudDataSync, upsertInstalledRecord, removeInstalledRecord, ensureCatalogStatuses };

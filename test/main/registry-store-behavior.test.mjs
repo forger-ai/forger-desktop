@@ -16,7 +16,13 @@ const createController = (root, overrides = {}) => {
   const cloudSyncSettingsPath = path.join(root, 'cloud-sync.json');
   const emitted = [];
   const logs = [];
+  const devState = { service: null, localCatalogJsonUrl: null };
   const registry = overrides.registry ?? { apps: {} };
+  const state = {
+    catalogApps: overrides.catalogApps ?? [],
+    cloudSyncSettings: overrides.cloudSyncSettings ?? { appSync: {} },
+    registry,
+  };
   const controller = createRegistryStoreController({
     DEFAULT_NODE_VERSION: '22',
     DEFAULT_PYTHON_VERSION: '3.12',
@@ -25,8 +31,8 @@ const createController = (root, overrides = {}) => {
     appendInstallLog: async (event, payload) => {
       logs.push({ event, payload });
     },
-    catalogApps: overrides.catalogApps ?? [],
-    cloudSyncSettings: overrides.cloudSyncSettings ?? { appSync: {} },
+    catalogApps: state.catalogApps,
+    cloudSyncSettings: state.cloudSyncSettings,
     emitRuntimeStatus: (payload) => {
       emitted.push(payload);
     },
@@ -38,18 +44,33 @@ const createController = (root, overrides = {}) => {
     isDev: overrides.isDev ?? false,
     isVersionNewer: (candidate, current) => candidate === '2.0.0' && current !== '2.0.0',
     localCatalogJsonUrl: null,
+    setCatalogApps: (apps) => {
+      state.catalogApps = apps;
+    },
+    setCloudSyncSettings: (settings) => {
+      state.cloudSyncSettings = settings;
+    },
+    setDevCatalogService: (service) => {
+      devState.service = service;
+    },
+    setLocalCatalogJsonUrl: (url) => {
+      devState.localCatalogJsonUrl = url;
+    },
+    setRegistry: (nextRegistry) => {
+      state.registry = nextRegistry;
+    },
     normalizeNodeRuntimeVersion: (value) => {
       const match = String(value ?? '').match(/\d+/);
       return match?.[0] ?? '22';
     },
     normalizeVersionForFolder: (value) => value.replace(/^python-/, '') || '3.12',
     path,
-    registry,
+    registry: state.registry,
     runningApps: overrides.runningApps ?? new Map(),
     serializeErrorForInstallLog: (error) => ({ message: error instanceof Error ? error.message : String(error) }),
     settings: {},
   });
-  return { controller, emitted, logs, registryPath, backupPath, cloudSyncSettingsPath };
+  return { controller, emitted, logs, devState, state, registryPath, backupPath, cloudSyncSettingsPath };
 };
 
 test('registry store parses only object registries and normalizes runtime versions', async (t) => {
@@ -139,7 +160,7 @@ test('registry store loads from backup when primary is corrupt and persists norm
   t.after(async () => {
     await fs.rm(root, { recursive: true, force: true });
   });
-  const { controller, registryPath, backupPath } = createController(root);
+  const { controller, registryPath, backupPath, state } = createController(root);
   await fs.mkdir(root, { recursive: true });
   await fs.writeFile(registryPath, '{bad json', 'utf8');
   await fs.writeFile(backupPath, JSON.stringify({
@@ -156,6 +177,8 @@ test('registry store loads from backup when primary is corrupt and persists norm
   }), 'utf8');
 
   await controller.loadRegistry();
+  assert.equal(state.registry.apps.backup.status, 'installed');
+  assert.equal(state.registry.apps.backup.requiredNodeVersion, '16');
   await controller.upsertInstalledRecord({
     appId: 'new',
     name: 'New',
@@ -181,7 +204,7 @@ test('registry store handles corrupted cloud sync settings, app auto-sync, cloud
     { id: 'demo', name: 'Demo', version: '1.0.0', latestVersion: '2.0.0' },
     { id: 'missing', name: 'Missing', version: '1.0.0', latestVersion: '1.0.0' },
   ];
-  const { controller, emitted, cloudSyncSettingsPath, registryPath } = createController(root, {
+  const { controller, emitted, cloudSyncSettingsPath, registryPath, state } = createController(root, {
     catalogApps,
     runningApps,
     forgerAccount: { authenticated: true, token: 'token', user: { subscriptionTier: 'pro' } },
@@ -190,7 +213,9 @@ test('registry store handles corrupted cloud sync settings, app auto-sync, cloud
   await fs.writeFile(cloudSyncSettingsPath, '{bad json', 'utf8');
 
   await controller.loadCloudSyncSettings();
+  assert.deepEqual(state.cloudSyncSettings, { appSync: {} });
   assert.deepEqual(await controller.setAppAutoSyncSetting('demo', true), { appSync: { demo: { autoSync: true } } });
+  assert.deepEqual(state.cloudSyncSettings, { appSync: { demo: { autoSync: true } } });
   assert.deepEqual(JSON.parse(await fs.readFile(cloudSyncSettingsPath, 'utf8')), { appSync: { demo: { autoSync: true } } });
   assert.equal(controller.canUseCloudDataSync(), true);
 
@@ -201,12 +226,16 @@ test('registry store handles corrupted cloud sync settings, app auto-sync, cloud
     status: 'installed',
     userMessage: 'Ready',
   });
+  assert.equal(state.registry.apps.demo.status, 'installed');
   controller.ensureCatalogStatuses();
   assert.equal(catalogApps[0].status, undefined, 'controller keeps catalog state internally and does not mutate caller array');
+  assert.equal(state.catalogApps[0].status, 'running');
+  assert.equal(state.catalogApps[0].updateAvailable, true);
   assert.equal(emitted.at(-1).status, 'running');
   assert.equal(emitted.at(-1).backendUrl, 'http://127.0.0.1:1');
 
   await controller.removeInstalledRecord('demo');
+  assert.equal(state.registry.apps.demo, undefined);
   const saved = JSON.parse(await fs.readFile(registryPath, 'utf8'));
   assert.deepEqual(saved.apps, {});
 });
@@ -241,6 +270,8 @@ test('registry store covers dev catalog startup, empty recovery, and atomic writ
   });
   await successfulDev.controller.startDevCatalogService();
   assert.equal(successfulDev.logs.some((entry) => entry.event === 'dev_catalog:start'), true);
+  assert.equal(successfulDev.devState.localCatalogJsonUrl, 'http://127.0.0.1:4411/catalog.json');
+  assert.ok(successfulDev.devState.service);
 
   class FailingDevCatalogService {
     async start() {
@@ -253,6 +284,8 @@ test('registry store covers dev catalog startup, empty recovery, and atomic writ
   });
   await failingDev.controller.startDevCatalogService();
   assert.equal(failingDev.logs.some((entry) => entry.event === 'dev_catalog:failed'), true);
+  assert.equal(failingDev.devState.localCatalogJsonUrl, undefined);
+  assert.equal(failingDev.devState.service, null);
 
   const emptyRecovery = createController(root);
   await emptyRecovery.controller.loadRegistry();

@@ -105,6 +105,7 @@ interface MainIpcState {
   catalogApps: CatalogApp[];
   cloudSyncSettings: CloudSyncSettings;
   forgerAccount: StoredForgerAccount;
+  localCatalogJsonUrl?: string | null;
   settings: Settings;
 }
 
@@ -152,6 +153,7 @@ interface MainProcessIpcDeps {
   getOfficialToolsService: () => OfficialToolsService;
   getPrivateDataRoot: () => string;
   getRuntimeStatus: (appId: string) => RuntimeStatus;
+  getLocalNetworkShareStatus?: (appId: string) => RuntimeStatus['localNetworkShare'];
   getSecretsStore: () => SecretsStore;
   installAppRuntime: (appId: string, locale?: string) => Promise<InstallAppResult>;
   installWelcome: (appId: string, userLanguage?: string) => Promise<InstallWelcomeResult>;
@@ -161,6 +163,8 @@ interface MainProcessIpcDeps {
   mainWindow: Electron.BrowserWindow | null;
   normalizeManifestAgentDefaults: (manifest: AppManifest | null) => AgentDefaults;
   openInstalledApp: (appId: string, locale?: string) => Promise<OpenAppResult>;
+  startLocalNetworkShare: (appId: string) => Promise<unknown>;
+  stopLocalNetworkShare: (appId: string) => Promise<unknown>;
   openOrFocusFriendChatWindow: (friendship: CloudFriendship) => Promise<FriendChatWindowOpenResult>;
   path: typeof path;
   publicForgerAccount: (account: StoredForgerAccount) => ForgerAccountSession;
@@ -195,7 +199,12 @@ interface MainProcessIpcDeps {
 }
 
 export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
-  const { state, APP_CLAUDE_MODEL_OPTIONS, APP_CODEX_MODEL_OPTIONS, BetterSqlite3, BrowserWindow, CODEX_USAGE_DASHBOARD_URL, IPC_CHANNELS, app, appendInstallLog, buildAppSecretsState, buildCodexPromptWithAppContext, buildForgerToolsContextForApp, buildForgerToolsContextForFreeChat, canUseCloudDataSync, chatOrchestrator, cloudDeviceManager, connectClaudeAuth, connectCodexAuth, createRemoteAppBackup, decryptCloudMessage, decryptCloudMessages, dialog, disconnectCodexAuth, ensureCatalogStatuses, failureDiagnostic, forgerBackendClient, forwardCloudSocialEvent, fs, getAppDetails, getBackupsManager, getClaudeAuthStatus, getCloudIdentityStore, getCodexAuthStatus, getDesktopUpdater, getFileLibrary, getMemoryStore, getOfficialToolsService, getPrivateDataRoot, getRuntimeStatus, getSecretsStore, installAppRuntime, installWelcome, ipcMain, listAppPrompts, listCatalogFromBackend, mainWindow, normalizeManifestAgentDefaults, openInstalledApp, openOrFocusFriendChatWindow, path, publicForgerAccount, registry, reinstallClaude, reinstallCodex, resolveAppIdForWebContents, resolveInstalledAgents, resolveInstalledAppSecrets, resolveInstalledManifest, resolveSelectedAppDisplayName, restoreAppPrompt, restoreAppUserVersionRuntime, restoreRemoteAppBackup, sanitizeRendererChatTrace, sendEncryptedCloudMessage, serializeErrorForInstallLog, setAppAutoSyncSetting, shell, signAppFolderGrant, stopInstalledApp, switchForgerAccountSession, toAppSummary, uninstallAppRuntime, updateAgentDefaults, updateAgentToolApproval, updateAppPrompt, updateAppRuntime, updateCodexDefaults, validateAppPrompt } = deps;
+  const { state, APP_CLAUDE_MODEL_OPTIONS, APP_CODEX_MODEL_OPTIONS, BetterSqlite3, BrowserWindow, CODEX_USAGE_DASHBOARD_URL, IPC_CHANNELS, app, appendInstallLog, buildAppSecretsState, buildCodexPromptWithAppContext, buildForgerToolsContextForApp, buildForgerToolsContextForFreeChat, canUseCloudDataSync, chatOrchestrator, cloudDeviceManager, connectClaudeAuth, connectCodexAuth, createRemoteAppBackup, decryptCloudMessage, decryptCloudMessages, dialog, disconnectCodexAuth, ensureCatalogStatuses, failureDiagnostic, forgerBackendClient, forwardCloudSocialEvent, fs, getAppDetails, getBackupsManager, getClaudeAuthStatus, getCloudIdentityStore, getCodexAuthStatus, getDesktopUpdater, getFileLibrary, getMemoryStore, getOfficialToolsService, getPrivateDataRoot, getRuntimeStatus, getLocalNetworkShareStatus, getSecretsStore, installAppRuntime, installWelcome, ipcMain, listAppPrompts, listCatalogFromBackend, mainWindow, normalizeManifestAgentDefaults, openInstalledApp, startLocalNetworkShare, stopLocalNetworkShare, openOrFocusFriendChatWindow, path, publicForgerAccount, registry, reinstallClaude, reinstallCodex, resolveAppIdForWebContents, resolveInstalledAgents, resolveInstalledAppSecrets, resolveInstalledManifest, resolveSelectedAppDisplayName, restoreAppPrompt, restoreAppUserVersionRuntime, restoreRemoteAppBackup, sanitizeRendererChatTrace, sendEncryptedCloudMessage, serializeErrorForInstallLog, setAppAutoSyncSetting, shell, signAppFolderGrant, stopInstalledApp, switchForgerAccountSession, toAppSummary, uninstallAppRuntime, updateAgentDefaults, updateAgentToolApproval, updateAppPrompt, updateAppRuntime, updateCodexDefaults, validateAppPrompt } = deps;
+  const localNetworkShareStatusFor = getLocalNetworkShareStatus ?? (() => undefined);
+  const localNetworkSharePayloadFor = (appId: string) => {
+    const status = localNetworkShareStatusFor(appId);
+    return status ? { localNetworkShare: status } : {};
+  };
   const ensurePathInside = (rootPath: string, targetPath: string): boolean => {
     const relative = path.relative(rootPath, targetPath);
     const normalizedRelative = process.platform === 'win32' ? relative.toLowerCase() : relative;
@@ -209,7 +218,10 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
   ipcMain.handle(IPC_CHANNELS.listCatalogApps, async () => {
     state.catalogApps = await listCatalogFromBackend();
     ensureCatalogStatuses();
-    return state.catalogApps;
+    return state.catalogApps.map((appEntry) => ({
+      ...appEntry,
+      ...localNetworkSharePayloadFor(appEntry.id),
+    }));
   });
 
   ipcMain.handle(IPC_CHANNELS.installApp, async (_event, appId: string, locale?: string) => {
@@ -409,6 +421,18 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
 
   ipcMain.handle(IPC_CHANNELS.getAppRuntimeStatus, async (_event, appId: string) => {
     return getRuntimeStatus(appId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.startLocalNetworkShare, async (_event, appId: string) => {
+    return await startLocalNetworkShare(appId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.stopLocalNetworkShare, async (_event, appId: string) => {
+    return await stopLocalNetworkShare(appId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.getLocalNetworkShareStatus, async (_event, appId: string) => {
+    return localNetworkShareStatusFor(appId);
   });
 
   ipcMain.handle(IPC_CHANNELS.getAppSecrets, async (_event, appId: string) => {

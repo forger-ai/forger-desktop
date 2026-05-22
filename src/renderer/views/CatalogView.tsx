@@ -1,4 +1,4 @@
-import { Chip, MenuItem, Select, Stack, Typography } from '@mui/material';
+import { Button, Chip, MenuItem, Select, Stack, Typography } from '@mui/material';
 import type { AppCategory, CatalogApp, InstallAppResult } from '@shared/types';
 import type { AppDictionary } from '@renderer/i18n';
 import { AppCard } from '@renderer/components/AppCard';
@@ -20,6 +20,8 @@ interface CatalogViewProps {
   onResolveConflict: (appId: string) => void;
   onDetails: (appId: string) => void;
   onDelete: (appId: string) => void;
+  onStartLocalNetworkShare: (appId: string) => void;
+  onRefresh: () => void;
   t: AppDictionary;
   earlyAccessEnabled: boolean;
   getAppMeta: (appId: string) => { name: string; description: string; iconUrl?: string };
@@ -48,6 +50,8 @@ export function CatalogView({
   onResolveConflict,
   onDetails,
   onDelete,
+  onStartLocalNetworkShare,
+  onRefresh,
   t,
   earlyAccessEnabled,
   getAppMeta,
@@ -103,7 +107,12 @@ export function CatalogView({
       </Stack>
 
       {visibleApps.length === 0 ? (
-        <Typography color="text.secondary">{t.sections.catalog.subtitle}</Typography>
+        <Stack spacing={1.5} alignItems="flex-start">
+          <Typography color="text.secondary">{t.sections.catalog.empty}</Typography>
+          <Button variant="outlined" onClick={onRefresh}>
+            {t.sections.catalog.refresh}
+          </Button>
+        </Stack>
       ) : (
         <AppsGrid>
           {visibleApps.map((app) => {
@@ -147,6 +156,9 @@ export function CatalogView({
                     : 'default';
             const primaryAction = isConflict ? 'update' : hasError ? 'retry' : isInstalled ? (app.status === 'running' ? 'stop' : 'open') : 'install';
             const isOpening = primaryAction === 'open' && openingAppIds.has(app.id);
+            const canShareLocalNetwork = earlyAccessEnabled
+              && primaryAction === 'open'
+              && app.capabilities?.some((capability) => capability.id === 'local_network_share');
             const primaryActionLabel = hasError
               ? t.actions.retry
               : app.status === 'running'
@@ -183,6 +195,8 @@ export function CatalogView({
                 primaryActionLabel={primaryActionLabel}
                 primaryDisabled={isInstalling || (!isInstalled && !canInstallEarlyAccess)}
                 primaryLoading={isOpening}
+                primaryMenuActions={canShareLocalNetwork ? [{ label: t.localNetwork.menuAction, onClick: () => onStartLocalNetworkShare(app.id) }] : undefined}
+                extraStatusLabel={app.localNetworkShare?.connectedAt ? t.localNetwork.connectedBadge : app.localNetworkShare?.active ? t.localNetwork.waitingBadge : undefined}
                 installProgress={installProgress}
                 onPrimaryAction={() => {
                   if (isInstalling) {

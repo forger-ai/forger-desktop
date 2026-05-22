@@ -85,6 +85,7 @@ interface MainLifecycleState {
   forgerBackendClient: LifecycleService | null;
   forgerMcpServer: LifecycleService | null;
   localCatalogJsonUrl: string | undefined;
+  localNetworkShareManager: { stopAll?: () => Promise<void> } | null;
   mainWindow: BrowserWindow | null;
   memoryStore: LifecycleService | null;
   officialToolsService: (LifecycleService & {
@@ -164,6 +165,7 @@ interface MainLifecycleDeps {
   getRuntimesRoot: () => string;
   getRuntimePathEntries: (runtime: RuntimeBinarySet) => string[];
   getRuntimeStatus: (appId: string) => RuntimeStatus;
+  getLocalNetworkShareStatus: SyncFn<unknown>;
   getTempRoot: () => string;
   getVenvExecutables: SyncFn;
   handleCloudRelayRequest: AsyncFn;
@@ -179,6 +181,8 @@ interface MainLifecycleDeps {
   mapBackendCategory: SyncFn;
   normalizeNodeRuntimeVersion: (version?: string | null) => string;
   openInstalledApp: AsyncFn;
+  startLocalNetworkShare: AsyncFn;
+  stopLocalNetworkShare: AsyncFn;
   openOrFocusAppWindow: (appId: string, appName: string, frontendUrl: string) => Promise<void>;
   registerForgerCloudOAuth: SyncFn;
   registerIpcHandlers: () => void;
@@ -833,6 +837,7 @@ export const registerMainLifecycle = (deps: unknown) => {
 app.on('before-quit', () => {
   state.automationManager?.dispose();
   state.appMcpManager?.dispose();
+  void state.localNetworkShareManager?.stopAll?.();
   void state.desktopRuntimeBridge?.stop();
   state.desktopRuntimeBridge = null;
   state.cloudDeviceManager?.stop();

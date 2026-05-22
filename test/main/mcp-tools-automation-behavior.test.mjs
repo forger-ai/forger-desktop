@@ -2351,26 +2351,27 @@ test('automation next-run calculation handles hourly, daily, and weekly rollover
   );
   const daily = new Date(computeNextRunAt(
     { type: 'daily', timeOfDay: '09:30' },
-    new Date('2026-05-21T10:00:00.000Z'),
+    new Date(2026, 4, 21, 10, 0, 0, 0),
   ));
+  assert.equal(daily.getDate(), 22);
   assert.equal(daily.getHours(), 9);
   assert.equal(daily.getMinutes(), 30);
-  assert.ok(daily > new Date('2026-05-21T10:00:00.000Z'));
+  assert.ok(daily > new Date(2026, 4, 21, 10, 0, 0, 0));
 
   const weekly = new Date(computeNextRunAt(
     { type: 'weekly', weeklyDay: 4, timeOfDay: '10:30' },
-    new Date('2026-05-21T10:00:00.000Z'),
+    new Date(2026, 4, 21, 10, 0, 0, 0),
   ));
   assert.equal(weekly.getDay(), 4);
   assert.equal(weekly.getHours(), 10);
   assert.equal(weekly.getMinutes(), 30);
-  assert.ok(weekly > new Date('2026-05-21T10:00:00.000Z'));
+  assert.ok(weekly > new Date(2026, 4, 21, 10, 0, 0, 0));
   const nextThursday = new Date(computeNextRunAt(
     { type: 'weekly', weeklyDay: 4, timeOfDay: '10:00' },
-    new Date('2026-05-21T14:00:00.000Z'),
+    new Date(2026, 4, 21, 14, 0, 0, 0),
   ));
   assert.equal(nextThursday.getDay(), 4);
   assert.equal(nextThursday.getHours(), 10);
   assert.equal(nextThursday.getMinutes(), 0);
-  assert.ok(nextThursday > new Date('2026-05-21T14:00:00.000Z'));
+  assert.ok(nextThursday > new Date(2026, 4, 21, 14, 0, 0, 0));
 });

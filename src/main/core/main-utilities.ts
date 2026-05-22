@@ -64,6 +64,7 @@ interface MainUtilitiesDeps {
   getInstallLogPath: () => string;
   installProgressByPhase: Record<InstallAppResult['phase'], number>;
   isDev: boolean;
+  getLocalNetworkShareStatus?: (appId: string) => AppSummary['localNetworkShare'];
   getMainWindow: () => BrowserWindow | null;
   path: typeof path;
   publicForgerAccount: typeof publicForgerAccount;
@@ -72,8 +73,46 @@ interface MainUtilitiesDeps {
   state: MainUtilitiesState;
 }
 
+let activeProcessErrorReporter: DesktopErrorReporter | null = null;
+let processErrorHandlersRegistered = false;
+
+const handleMainUncaughtException = (error: Error): void => {
+  activeProcessErrorReporter?.reportMainUncaughtException(error);
+};
+
+const handleMainUnhandledRejection = (reason: unknown): void => {
+  activeProcessErrorReporter?.reportMainUnhandledRejection(reason);
+};
+
+const registerProcessErrorHandlers = (reporter: DesktopErrorReporter | null): void => {
+  activeProcessErrorReporter = reporter;
+  if (processErrorHandlersRegistered) {
+    return;
+  }
+  process.on('uncaughtException', handleMainUncaughtException);
+  process.on('unhandledRejection', handleMainUnhandledRejection);
+  processErrorHandlersRegistered = true;
+};
+
+export const __testMainUtilitiesInternals = {
+  handleMainUncaughtException,
+  handleMainUnhandledRejection,
+  resetProcessErrorHandlersForTests: (): void => {
+    process.removeListener('uncaughtException', handleMainUncaughtException);
+    process.removeListener('unhandledRejection', handleMainUnhandledRejection);
+    activeProcessErrorReporter = null;
+    processErrorHandlersRegistered = false;
+  },
+};
+
 export const createMainUtilitiesController = (deps: MainUtilitiesDeps) => {
-  const { Buffer, Date, app, path, fs, createHmac, appFolderGrantSecret, APP_FOLDER_GRANT_TTL_MS, appWindows, friendChatWindows, getInstallLogPath, isDev, AGENT_TOOL_IDS, AGENT_TOOL_DEFINITIONS, getAgentToolSettingsPath, getMainWindow, IPC_CHANNELS, DesktopUpdater, desktopErrorReporter, forgerAccountStore, cloudDeviceManager, publicForgerAccount, state, registry, runningApps, buildFailureDiagnostic, installProgressByPhase } = deps;
+const { Buffer, Date, app, path, fs, createHmac, appFolderGrantSecret, APP_FOLDER_GRANT_TTL_MS, appWindows, friendChatWindows, getInstallLogPath, isDev, AGENT_TOOL_IDS, AGENT_TOOL_DEFINITIONS, getAgentToolSettingsPath, getLocalNetworkShareStatus, getMainWindow, IPC_CHANNELS, DesktopUpdater, desktopErrorReporter, forgerAccountStore, cloudDeviceManager, publicForgerAccount, state, registry, runningApps, buildFailureDiagnostic, installProgressByPhase } = deps;
+registerProcessErrorHandlers(desktopErrorReporter);
+const localNetworkShareStatusFor = getLocalNetworkShareStatus ?? (() => undefined);
+const localNetworkSharePayloadFor = (appId: string) => {
+  const status = localNetworkShareStatusFor(appId);
+  return status ? { localNetworkShare: status } : {};
+};
 const MAX_INSTALL_LOG_FIELD_LENGTH = 60_000;
 
 class CommandFailedError extends Error {
@@ -458,14 +497,6 @@ const clearForgerAccountSession = async (technicalCode: string): Promise<void> =
   });
 };
 
-process.on('uncaughtException', (error) => {
-  desktopErrorReporter?.reportMainUncaughtException(error);
-});
-
-process.on('unhandledRejection', (reason) => {
-  desktopErrorReporter?.reportMainUnhandledRejection(reason);
-});
-
 const getDesktopUpdater = (): DesktopUpdater => {
   if (!state.desktopUpdater) {
     state.desktopUpdater = new DesktopUpdater({
@@ -487,6 +518,7 @@ const toAppSummary = (record: InstalledAppRecord): AppSummary => {
     changelog: catalog?.changelog,
     iconUrl: catalog?.iconUrl,
     beta: catalog?.beta,
+    ...localNetworkSharePayloadFor(record.appId),
   };
   if (running) {
     return {

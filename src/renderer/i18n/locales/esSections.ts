@@ -1,13 +1,9 @@
 export const esSections = {
-    myApps: {
-      title: 'Mis Apps',
-      subtitle: 'Abre tus apps locales o configúralas conversando.',
-      empty: 'Todavía no tienes apps instaladas.',
-      goToCatalog: 'Ir al Catálogo',
-    },
     catalog: {
-      title: 'Catálogo',
-      subtitle: 'Instala apps personales listas para adaptar a tu forma de trabajar.',
+      title: 'Apps',
+      subtitle: 'Abre apps instaladas o agrega apps personales listas para adaptar a tu forma de trabajar.',
+      empty: 'No hay apps visibles con los filtros actuales.',
+      refresh: 'Recargar apps',
       filtersLabel: 'Explorar por categoría',
       statusFilterLabel: 'Filtrar por: Estado',
       statusFilters: {

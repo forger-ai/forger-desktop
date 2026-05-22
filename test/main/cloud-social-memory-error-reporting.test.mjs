@@ -961,6 +961,24 @@ test('DesktopErrorReporter covers crash, MCP, automation, conversation, and wind
   assert.equal(sent.length, 0);
   destroyed = false;
 
+  currentWindow = {
+    isDestroyed: () => false,
+    webContents: { isDestroyed: () => true, send: () => { throw new Error('should not send'); } },
+  };
+  reporter.reportRendererProcessGone({ reason: 'crashed', exitCode: 9 });
+  assert.equal(sent.length, 0);
+
+  currentWindow = {
+    isDestroyed: () => false,
+    webContents: { isDestroyed: () => false, send: () => { throw new Error('send failed'); } },
+  };
+  assert.doesNotThrow(() => reporter.reportMainUncaughtException(new Error('send should not rethrow')));
+  assert.equal(sent.length, 0);
+
+  currentWindow = {
+    isDestroyed: () => destroyed,
+    webContents: { send: (channel, payload) => sent.push({ channel, payload }) },
+  };
   reporter.reportRendererProcessGone({ reason: 'crashed', exitCode: 9 });
   reporter.reportRendererProcessGone({ reason: 'crashed-again', exitCode: 10 });
   assert.equal(sent.length, 1);

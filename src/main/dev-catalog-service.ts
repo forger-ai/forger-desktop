@@ -37,6 +37,14 @@ const EXCLUDED_DIR_NAMES = new Set([
 const EXCLUDED_RELATIVE_PATHS = new Set(['backend/data', 'frontend/node_modules']);
 const EXCLUDED_FILE_NAMES = new Set(['.DS_Store']);
 const EXCLUDED_EXTENSIONS = new Set(['.pyc', '.pyo']);
+const COMMONS_OVERLAY_FILES = [
+  ['commons/backend/database.py', 'backend/src/app/database.py'],
+  ['commons/backend/health.py', 'backend/src/app/health.py'],
+  ['commons/backend/cors.py', 'backend/src/app/cors.py'],
+  ['commons/backend/forger_desktop.py', 'backend/src/app/forger_desktop.py'],
+  ['commons/backend/mcp_runtime.py', 'backend/src/app/mcp_runtime.py'],
+  ['commons/frontend/client.ts', 'frontend/src/api/client.ts'],
+] as const;
 
 const isRecord = (value: unknown): value is JsonObject => {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -250,7 +258,13 @@ const shouldSkip = (sourcePath: string, root: string): boolean => {
   if (EXCLUDED_RELATIVE_PATHS.has(parts.slice(0, 2).join('/'))) {
     return true;
   }
-  return EXCLUDED_FILE_NAMES.has(path.basename(sourcePath)) || EXCLUDED_EXTENSIONS.has(path.extname(sourcePath));
+  if (EXCLUDED_FILE_NAMES.has(path.basename(sourcePath))) {
+    return true;
+  }
+  if (EXCLUDED_EXTENSIONS.has(path.extname(sourcePath))) {
+    return true;
+  }
+  return false;
 };
 
 const copyFiltered = async (sourceRoot: string, targetRoot: string, current = sourceRoot): Promise<void> => {
@@ -278,6 +292,23 @@ const copyFiltered = async (sourceRoot: string, targetRoot: string, current = so
   }
 };
 
+const applyCommonsOverlay = async (sourceRoot: string, targetRoot: string): Promise<void> => {
+  for (const [sourceRelativePath, targetRelativePath] of COMMONS_OVERLAY_FILES) {
+    const sourcePath = path.join(sourceRoot, sourceRelativePath);
+    const targetPath = path.join(targetRoot, targetRelativePath);
+    try {
+      const stat = await fsp.stat(sourcePath);
+      if (!stat.isFile()) {
+        continue;
+      }
+    } catch {
+      continue;
+    }
+    await fsp.mkdir(path.dirname(targetPath), { recursive: true });
+    await fsp.copyFile(sourcePath, targetPath);
+  }
+};
+
 const zipDirectory = async (sourceDir: string, zipPath: string): Promise<void> => {
   if (process.platform === 'win32') {
     const escapedSource = path.join(sourceDir, '*').replace(/'/g, "''");
@@ -299,6 +330,7 @@ const makeLocalAppZip = async (app: LocalApp): Promise<{ zipPath: string; checks
   const zipPath = path.join(tempRoot, `${app.catalogSlug}.zip`);
   await fsp.mkdir(stageDir, { recursive: true });
   await copyFiltered(app.appDir, stageDir);
+  await applyCommonsOverlay(app.appDir, stageDir);
   await zipDirectory(stageDir, zipPath);
   const buffer = await fsp.readFile(zipPath);
   return {
@@ -327,6 +359,7 @@ const sendNotFound = (response: ServerResponse): void => {
 };
 
 export const __testDevCatalogInternals = {
+  applyCommonsOverlay,
   readDevVersionOverride,
   runCommand,
   shouldSkip,

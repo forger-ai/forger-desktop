@@ -5,19 +5,24 @@ import ReplayRounded from '@mui/icons-material/ReplayRounded';
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
 import SystemUpdateAltRounded from '@mui/icons-material/SystemUpdateAltRounded';
 import StarRounded from '@mui/icons-material/StarRounded';
+import ArrowDropDownRounded from '@mui/icons-material/ArrowDropDownRounded';
 import {
   Avatar,
   Box,
   Button,
+  ButtonGroup,
   Card,
   Chip,
   CircularProgress,
   IconButton,
   LinearProgress,
+  Menu,
+  MenuItem,
   Stack,
   Tooltip,
   Typography,
 } from '@mui/material';
+import { useState } from 'react';
 import type { InstallAppResult } from '@shared/types';
 
 interface AppCardProps {
@@ -32,6 +37,8 @@ interface AppCardProps {
   onPrimaryAction: () => void;
   primaryDisabled?: boolean;
   primaryLoading?: boolean;
+  primaryMenuActions?: Array<{ label: string; onClick: () => void }>;
+  extraStatusLabel?: string;
   installProgress?: Pick<InstallAppResult, 'phase' | 'progress' | 'userMessage'>;
   secondaryActionLabel?: string;
   onSecondaryAction?: () => void;
@@ -64,6 +71,8 @@ export function AppCard({
   onPrimaryAction,
   primaryDisabled = false,
   primaryLoading = false,
+  primaryMenuActions = [],
+  extraStatusLabel,
   installProgress,
   secondaryActionLabel,
   onSecondaryAction,
@@ -76,7 +85,9 @@ export function AppCard({
   onCardClick,
   onboardingTarget,
 }: AppCardProps) {
+  const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
   const installing = Boolean(installProgress);
+  const primaryMenuEnabled = primaryMenuActions.length > 0 && !primaryDisabled && !primaryLoading && !installing;
   const primaryIcon =
     primaryAction === 'open' ? (
       <LaunchRounded />
@@ -161,6 +172,7 @@ export function AppCard({
         <Stack direction="row" justifyContent="space-between" spacing={2} alignItems="flex-start">
           <Stack direction="row" spacing={1} alignItems="center">
             <Chip label={statusLabel} color={statusColor} size="small" />
+            {extraStatusLabel ? <Chip label={extraStatusLabel} color="secondary" variant="outlined" size="small" /> : null}
             {installing ? <CircularProgress size={14} color="inherit" /> : null}
           </Stack>
           {tertiaryActionLabel && onTertiaryAction ? (
@@ -241,18 +253,66 @@ export function AppCard({
         ) : null}
 
         <Stack direction="row" spacing={1.25} sx={{ mt: 'auto' }}>
-          <Button
-            variant="contained"
-            startIcon={primaryLoading || installing ? <CircularProgress color="inherit" size={16} /> : primaryIcon}
-            disabled={primaryDisabled || primaryLoading || installing}
-            aria-busy={primaryLoading || installing}
-            onClick={(event) => {
-              event.stopPropagation();
-              onPrimaryAction();
-            }}
-          >
-            {primaryActionLabel}
-          </Button>
+          {primaryMenuActions.length > 0 ? (
+            <>
+              <ButtonGroup variant="contained" disabled={primaryDisabled || primaryLoading || installing} aria-busy={primaryLoading || installing}>
+                <Button
+                  startIcon={primaryLoading || installing ? <CircularProgress color="inherit" size={16} /> : primaryIcon}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onPrimaryAction();
+                  }}
+                >
+                  {primaryActionLabel}
+                </Button>
+                <Button
+                  size="small"
+                  aria-label={`${primaryActionLabel} menu`}
+                  aria-haspopup="menu"
+                  aria-expanded={Boolean(menuAnchor)}
+                  disabled={!primaryMenuEnabled}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setMenuAnchor(event.currentTarget);
+                  }}
+                >
+                  <ArrowDropDownRounded />
+                </Button>
+              </ButtonGroup>
+              <Menu
+                anchorEl={menuAnchor}
+                open={Boolean(menuAnchor)}
+                onClose={() => setMenuAnchor(null)}
+                onClick={(event) => event.stopPropagation()}
+              >
+                {primaryMenuActions.map((action) => (
+                  <MenuItem
+                    key={action.label}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setMenuAnchor(null);
+                      action.onClick();
+                    }}
+                  >
+                    {action.label}
+                  </MenuItem>
+                ))}
+              </Menu>
+            </>
+          ) : (
+            <Button
+              variant="contained"
+              startIcon={primaryLoading || installing ? <CircularProgress color="inherit" size={16} /> : primaryIcon}
+              disabled={primaryDisabled || primaryLoading || installing}
+              aria-busy={primaryLoading || installing}
+              onClick={(event) => {
+                event.stopPropagation();
+                onPrimaryAction();
+              }}
+            >
+              {primaryActionLabel}
+            </Button>
+          )}
           {secondaryActionLabel && onSecondaryAction ? (
             <Button
               variant="outlined"
