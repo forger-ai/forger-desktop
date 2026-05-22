@@ -11,6 +11,7 @@ export const APP_CAPABILITY_IDS = [
   'app_exports',
   'ai_api',
   'ai_assisted_imports',
+  'local_network_share',
   'local_business_data',
   'local_visual_assets',
   'agent_assisted_edits',

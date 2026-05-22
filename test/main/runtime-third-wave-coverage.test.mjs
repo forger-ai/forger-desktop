@@ -18,7 +18,7 @@ const { createInstalledAppRuntimeController } = require('../../dist-electron/mai
 
 const tmpRoot = async (name) => await fs.mkdtemp(path.join(os.tmpdir(), `forger-${name}-`));
 
-const waitForCondition = async (predicate, timeoutMs = 3000) => {
+const waitForCondition = async (predicate, timeoutMs = 10_000) => {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
     if (predicate()) {

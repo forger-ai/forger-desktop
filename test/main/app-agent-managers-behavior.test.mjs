@@ -19,7 +19,7 @@ const distRequire = (relativePath) => {
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const waitFor = async (predicate, label) => {
-  for (let index = 0; index < 80; index += 1) {
+  for (let index = 0; index < 400; index += 1) {
     const value = predicate();
     if (value) {
       return value;

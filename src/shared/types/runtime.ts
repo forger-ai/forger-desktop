@@ -128,12 +128,27 @@ export interface OpenAppResult extends FailureDiagnosticFields {
   frontendUrl?: string;
 }
 
+export interface LocalNetworkShareStatus {
+  active: boolean;
+  appId: string;
+  url?: string;
+  connectUrl?: string;
+  connectedAt?: string;
+}
+
 export interface RuntimeStatus {
   appId: string;
   status: AppStatus;
   userMessage?: string;
   backendUrl?: string;
   frontendUrl?: string;
+  localNetworkShare?: LocalNetworkShareStatus;
+}
+
+export interface LocalNetworkShareResult extends FailureDiagnosticFields {
+  success: boolean;
+  userMessage: string;
+  status: LocalNetworkShareStatus;
 }
 
 export interface StopAppResult extends FailureDiagnosticFields {

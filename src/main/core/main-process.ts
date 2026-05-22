@@ -58,6 +58,7 @@ import { registerForgerCloudOAuth } from '../forger-cloud-oauth';
 import { CloudDeviceManager, type CloudRelayRequest, type CloudRelayResponse } from '../cloud-device-manager';
 import { CloudIdentityStore, type EncryptedCloudText } from '../cloud-identity-store';
 import { BackupsManager } from '../backups-manager';
+import { LocalNetworkShareManager } from '../local-network-share-manager';
 import {
   createWindowStateEventRegistrar,
   createWindowStateReader,
@@ -290,6 +291,11 @@ let appMcpManager: AppMcpManager | null = null;
 let backupsManager: BackupsManager | null = null;
 let memoryStore: MemoryStore | null = null;
 let desktopRuntimeBridge: DesktopRuntimeBridge | null = null;
+let localNetworkShareManager: LocalNetworkShareManager | null = null;
+
+function getLocalNetworkShareStatus(appId: string) {
+  return localNetworkShareManager?.status(appId) ?? { active: false, appId };
+}
 
 desktopErrorReporter = new DesktopErrorReporter({
   getMainWindow: () => mainWindow,
@@ -371,7 +377,7 @@ let forgerMcpServer: ForgerMcpServer | null = null;
 
 const mainUtilitiesState = { get agentToolSettings() { return agentToolSettings; }, set agentToolSettings(value) { agentToolSettings = value; }, get catalogApps() { return catalogApps; }, set catalogApps(value) { catalogApps = value; }, get desktopUpdater() { return desktopUpdater; }, set desktopUpdater(value) { desktopUpdater = value; }, get forgerAccount() { return forgerAccount; }, set forgerAccount(value) { forgerAccount = value; }, get settings() { return settings; }, set settings(value) { settings = value; } };
 const getMainWindow = (): BrowserWindow | null => mainWindow;
-const createMainUtilitiesDeps = () => ({ AGENT_TOOL_DEFINITIONS, AGENT_TOOL_IDS, APP_FOLDER_GRANT_TTL_MS, Buffer, Date, DesktopUpdater, IPC_CHANNELS, app, appFolderGrantSecret, appWindows, buildFailureDiagnostic, cloudDeviceManager, createHmac, desktopErrorReporter, forgerAccountStore, friendChatWindows, fs, getAgentToolSettingsPath, getInstallLogPath, installProgressByPhase, isDev, getMainWindow, path, publicForgerAccount, registry, runningApps, state: mainUtilitiesState });
+const createMainUtilitiesDeps = () => ({ AGENT_TOOL_DEFINITIONS, AGENT_TOOL_IDS, APP_FOLDER_GRANT_TTL_MS, Buffer, Date, DesktopUpdater, IPC_CHANNELS, app, appFolderGrantSecret, appWindows, buildFailureDiagnostic, cloudDeviceManager, createHmac, desktopErrorReporter, forgerAccountStore, friendChatWindows, fs, getAgentToolSettingsPath, getInstallLogPath, installProgressByPhase, isDev, getLocalNetworkShareStatus, getMainWindow, path, publicForgerAccount, registry, runningApps, state: mainUtilitiesState });
 const getMainUtilitiesController = () => createMainUtilitiesController(createMainUtilitiesDeps());
 const CommandFailedError = getMainUtilitiesController().CommandFailedError;
 const truncateForInstallLog = (value: string): string => getMainUtilitiesController().truncateForInstallLog(value);
@@ -544,6 +550,21 @@ const createRegistryStoreDeps = () => ({
   isDev,
   isVersionNewer,
   localCatalogJsonUrl,
+  setCatalogApps: (value: CatalogApp[]) => {
+    catalogApps = value;
+  },
+  setCloudSyncSettings: (value: CloudSyncSettings) => {
+    Object.assign(cloudSyncSettings, value);
+  },
+  setDevCatalogService: (value: DevCatalogService | null) => {
+    devCatalogService = value;
+  },
+  setLocalCatalogJsonUrl: (value: string | undefined) => {
+    localCatalogJsonUrl = value;
+  },
+  setRegistry: (value: AppRegistry) => {
+    registry = value;
+  },
   normalizeNodeRuntimeVersion,
   normalizeVersionForFolder,
   path,
@@ -739,6 +760,7 @@ const createInstalledAppLifecycleDeps = () => ({
   getOriginalCommitSha,
   getPrivateAppsRoot,
   getRuntimeStatus,
+  getLocalNetworkShareStatus,
   getTempRoot,
   getUserVisibleGitStatusLines,
   gitCommitAllExcept,
@@ -806,6 +828,7 @@ const createInstalledAppRuntimeDeps = () => ({
   friendChatWindows,
   fs,
   getInstallLogPath,
+  getLocalNetworkShareStatus,
   getManifestAppSecretsValidationError,
   getSecretsStore,
   getVenvExecutables,
@@ -825,6 +848,7 @@ const createInstalledAppRuntimeDeps = () => ({
   serializeErrorForInstallLog,
   shell,
   stoppingApps,
+  stopLocalNetworkShare,
   syncAppToCloudIfEnabled,
   truncateForInstallLog,
   upsertInstalledRecord,
@@ -852,6 +876,32 @@ const openInstalledApp = async (appId: string, locale?: string): Promise<OpenApp
 const stopInstalledApp = async (appId: string): Promise<StopAppResult> => await getInstalledAppRuntimeController().stopInstalledApp(appId);
 const restartInstalledApp = async (appId: string, options: { onProgress?: (message: string) => void } = {}): Promise<OpenAppResult> => await getInstalledAppRuntimeController().restartInstalledApp(appId, options);
 const getRuntimeStatus = (appId: string): RuntimeStatus => getInstalledAppRuntimeController().getRuntimeStatus(appId);
+
+const getLocalNetworkShareManager = (): LocalNetworkShareManager => {
+  if (!localNetworkShareManager) {
+    localNetworkShareManager = new LocalNetworkShareManager({
+      runningApps,
+      openInstalledApp: openInstalledAppUnlocked,
+      appendInstallLog,
+      onConnected: (status) => {
+        emitRuntimeStatus({ ...getRuntimeStatus(status.appId), localNetworkShare: status });
+      },
+    });
+  }
+  return localNetworkShareManager;
+};
+
+const startLocalNetworkShare = async (appId: string) => {
+  const result = await getLocalNetworkShareManager().start(appId);
+  emitRuntimeStatus({ ...getRuntimeStatus(appId), localNetworkShare: result.status });
+  return result;
+};
+
+const stopLocalNetworkShare = async (appId: string) => {
+  const result = await getLocalNetworkShareManager().stop(appId);
+  emitRuntimeStatus({ ...getRuntimeStatus(appId), localNetworkShare: result.status });
+  return result;
+};
 
 const createCloudSocialRelayDeps = () => ({
   CLAUDE_CODE_VERSION,
@@ -976,6 +1026,7 @@ const getMainProcessIpcDeps = () => ({
   getOfficialToolsService,
   getPrivateDataRoot,
   getRuntimeStatus,
+  getLocalNetworkShareStatus,
   getSecretsStore,
   getWindowState,
   installAppRuntime,
@@ -989,6 +1040,8 @@ const getMainProcessIpcDeps = () => ({
   normalizeCodexReasoningEffort,
   normalizeManifestAgentDefaults,
   openInstalledApp,
+  startLocalNetworkShare,
+  stopLocalNetworkShare,
   openOrFocusFriendChatWindow,
   path,
   publicForgerAccount,
@@ -1075,6 +1128,7 @@ const mainLifecycleState = {
   get backupsManager() { return backupsManager; }, set backupsManager(value) { backupsManager = value; },
   get memoryStore() { return memoryStore; }, set memoryStore(value) { memoryStore = value; },
   get desktopRuntimeBridge() { return desktopRuntimeBridge; }, set desktopRuntimeBridge(value) { desktopRuntimeBridge = value; },
+  get localNetworkShareManager() { return localNetworkShareManager; }, set localNetworkShareManager(value) { localNetworkShareManager = value; },
   get forgerMcpServer() { return forgerMcpServer; }, set forgerMcpServer(value) { forgerMcpServer = value; },
   get agentToolSettings() { return agentToolSettings; }, set agentToolSettings(value) { agentToolSettings = value; },
 };
@@ -1161,6 +1215,8 @@ registerMainLifecycle({
   mapBackendCategory,
   normalizeNodeRuntimeVersion,
   openInstalledApp,
+  startLocalNetworkShare,
+  stopLocalNetworkShare,
   openOrFocusAppWindow,
   registerForgerCloudOAuth,
   registerIpcHandlers,

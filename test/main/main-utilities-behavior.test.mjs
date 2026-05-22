@@ -10,7 +10,7 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const { IPC_CHANNELS } = require('../../dist-electron/shared/ipc.js');
 const { AGENT_TOOL_DEFINITIONS, AGENT_TOOL_IDS } = require('../../dist-electron/main/core/agent-tool-packages.js');
-const { createMainUtilitiesController } = require('../../dist-electron/main/core/main-utilities.js');
+const { createMainUtilitiesController, __testMainUtilitiesInternals } = require('../../dist-electron/main/core/main-utilities.js');
 
 const installProgressByPhase = {
   downloading: 20,
@@ -255,6 +255,7 @@ test('main utility install log and account helpers tolerate no-op failure paths'
 
 test('main utility forwards safe process diagnostics to the configured reporter', () => {
   const reports = [];
+  __testMainUtilitiesInternals.resetProcessErrorHandlersForTests();
   const beforeUncaught = new Set(process.listeners('uncaughtException'));
   const beforeUnhandled = new Set(process.listeners('unhandledRejection'));
   createController({
@@ -263,24 +264,25 @@ test('main utility forwards safe process diagnostics to the configured reporter'
       reportMainUnhandledRejection: (reason) => reports.push(['rejection', reason]),
     },
   });
+  createController({
+    desktopErrorReporter: {
+      reportMainUncaughtException: (error) => reports.push(['second-uncaught', error.message]),
+      reportMainUnhandledRejection: (reason) => reports.push(['second-rejection', reason]),
+    },
+  });
   const newUncaught = process.listeners('uncaughtException').filter((listener) => !beforeUncaught.has(listener));
   const newUnhandled = process.listeners('unhandledRejection').filter((listener) => !beforeUnhandled.has(listener));
   try {
     assert.equal(newUncaught.length, 1);
     assert.equal(newUnhandled.length, 1);
-    newUncaught[0](new Error('main crashed'));
-    newUnhandled[0]('promise failed');
+    __testMainUtilitiesInternals.handleMainUncaughtException(new Error('main crashed'));
+    __testMainUtilitiesInternals.handleMainUnhandledRejection('promise failed');
     assert.deepEqual(reports, [
-      ['uncaught', 'main crashed'],
-      ['rejection', 'promise failed'],
+      ['second-uncaught', 'main crashed'],
+      ['second-rejection', 'promise failed'],
     ]);
   } finally {
-    for (const listener of newUncaught) {
-      process.removeListener('uncaughtException', listener);
-    }
-    for (const listener of newUnhandled) {
-      process.removeListener('unhandledRejection', listener);
-    }
+    __testMainUtilitiesInternals.resetProcessErrorHandlersForTests();
   }
 });
 

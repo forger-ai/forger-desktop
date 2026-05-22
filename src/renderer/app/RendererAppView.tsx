@@ -24,7 +24,6 @@ import { DevicesView } from '@renderer/views/DevicesView';
 import { FeedbackView } from '@renderer/views/FeedbackView';
 import { FilesView } from '@renderer/views/FilesView';
 import { FriendChatWindowView } from '@renderer/views/FriendChatWindowView';
-import { InstalledAppsView } from '@renderer/views/InstalledAppsView';
 import { SettingsView } from '@renderer/views/SettingsView';
 import { SecretsView } from '@renderer/views/SecretsView';
 import { ToolsView } from '@renderer/views/ToolsView';
@@ -39,6 +38,7 @@ import {
 import { TourOverlay } from '@renderer/tour/TourOverlay';
 import { useForgerTour } from '@renderer/tour/useForgerTour';
 import { RendererAppDialogs } from './RendererAppDialogs';
+import { LocalNetworkShareDialog } from '@renderer/components/LocalNetworkShareDialog';
 
 interface RendererAppViewProps {
   controller: Record<string, any>;
@@ -71,6 +71,11 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     openingAppIds,
     getCategoryLabel,
     handleOpen,
+    handleStartLocalNetworkShare,
+    handleStopLocalNetworkShare,
+    localNetworkShareDialogOpen,
+    setLocalNetworkShareDialogOpen,
+    localNetworkShareStatus,
     handleStop,
     handleRetry,
     handleUpdate,
@@ -80,6 +85,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     handleDeleteApp,
     installProgressByApp,
     catalogApps,
+    refreshApps,
     catalogFilter,
     setCatalogFilter,
     catalogStatusFilter,
@@ -384,9 +390,17 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
           friendDisplayName={socialChatWindowRoute.friendDisplayName}
         />
       ) : (
-        <AppShell
+          <AppShell
           currentView={currentView}
-          onNavigate={setCurrentView}
+          onNavigate={(view) => {
+            setCurrentView(view);
+            if (view === 'catalog') {
+              void refreshApps().catch(() => {
+                setBannerSeverity('error');
+                setBannerMessage(t.settings.authErrorFallback);
+              });
+            }
+          }}
           t={t}
           chatApps={installedApps}
           selectedChatAppId={selectedAppId}
@@ -408,26 +422,6 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
           desktopUpdateState={desktopUpdateState}
           advancedMode={advancedMode}
         >
-        {currentView === 'my-apps' ? (
-          <InstalledAppsView
-            apps={installedApps}
-            openingAppIds={openingAppIds}
-            t={t}
-            getAppMeta={getAppMeta}
-            getCategoryLabel={getCategoryLabel}
-            onOpen={handleOpen}
-            onStop={handleStop}
-            onRetry={handleRetry}
-            onUpdate={(appId) => void handleUpdate(appId)}
-            onRestoreUserVersion={(appId) => void handleRestoreUserVersion(appId)}
-            onResolveConflict={(appId) => void handleResolveConflict(appId)}
-            onDetails={(appId) => void openAppDetails(appId, 'my-apps')}
-            onDelete={(appId) => void handleDeleteApp(appId)}
-            onGoCatalog={() => setCurrentView('catalog')}
-            installProgressByApp={installProgressByApp}
-          />
-        ) : null}
-
         {currentView === 'catalog' ? (
           <CatalogView
             apps={catalogApps}
@@ -439,6 +433,13 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             onInstall={handleInstall}
             onUpdate={(appId) => void handleUpdate(appId)}
             onOpen={handleOpen}
+            onStartLocalNetworkShare={handleStartLocalNetworkShare}
+            onRefresh={() => {
+              void refreshApps().catch(() => {
+                setBannerSeverity('error');
+                setBannerMessage(t.settings.authErrorFallback);
+              });
+            }}
             onStop={handleStop}
             onRetry={handleRetry}
             onRestoreUserVersion={(appId) => void handleRestoreUserVersion(appId)}
@@ -730,6 +731,18 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
       />
 
       <RendererAppDialogs controller={controller} />
+      <LocalNetworkShareDialog
+        appName={localNetworkShareStatus ? getAppMeta(localNetworkShareStatus.appId).name : ''}
+        open={localNetworkShareDialogOpen}
+        status={localNetworkShareStatus}
+        t={t}
+        onClose={() => setLocalNetworkShareDialogOpen(false)}
+        onStop={() => void handleStopLocalNetworkShare()}
+        onCopied={() => {
+          setBannerSeverity('success');
+          setBannerMessage(t.localNetwork.copied);
+        }}
+      />
     </ThemeProvider>
   );
 }

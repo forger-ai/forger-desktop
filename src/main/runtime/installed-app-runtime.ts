@@ -44,6 +44,7 @@ interface RuntimeDeps {
   friendChatWindows: Map<number, BrowserWindow>;
   fs: typeof fs;
   getInstallLogPath: () => string;
+  getLocalNetworkShareStatus?: (appId: string) => RuntimeStatus['localNetworkShare'];
   getManifestAppSecretsValidationError: (manifest: AppManifest | null) => string | null;
   getSecretsStore: () => {
     resolveAppEnv: (appId: string, declarations: AppSecretDeclaration[]) => Promise<{
@@ -69,6 +70,7 @@ interface RuntimeDeps {
   serializeErrorForInstallLog: (error: unknown) => Record<string, unknown>;
   shell: Electron.Shell;
   stoppingApps: Set<string>;
+  stopLocalNetworkShare?: (appId: string) => Promise<unknown>;
   syncAppToCloudIfEnabled: (appId: string) => Promise<void>;
   truncateForInstallLog: (value: string) => string;
   upsertInstalledRecord: (record: AppRegistry['apps'][string]) => Promise<void>;
@@ -77,7 +79,13 @@ interface RuntimeDeps {
 }
 
 export const createInstalledAppRuntimeController = (deps: RuntimeDeps) => {
-  const { net, http, runCommand, app, registry, upsertInstalledRecord, ensureCatalogStatuses, appWindows, appAgentTaskManager, appAgentConversationManager, stoppingApps, runningApps, path, isDev, FORGER_PROTOCOL, parseForgerUrl, dispatchDeepLink, shell, friendChatWindows, wait, resolveInstalledManifest, getManifestAppSecretsValidationError, normalizeManifestAppSecrets, getSecretsStore, isSecretsVaultUnavailableError, normalizeNodeRuntimeVersion, appendInstallLog, getInstallLogPath, ensureRuntimeInstalled, ensureBackendPythonEnvironment, getVenvExecutables, requiresWindowsShell, desktopRuntimeBridge, appFolderGrantSecret, truncateForInstallLog, formatProcessOutputForInstallLog, serializeErrorForInstallLog, failureDiagnostic, emitRuntimeStatus, syncAppToCloudIfEnabled, withAppLifecycleLock, fs } = deps;
+const { net, http, runCommand, app, registry, upsertInstalledRecord, ensureCatalogStatuses, appWindows, appAgentTaskManager, appAgentConversationManager, stoppingApps, runningApps, path, isDev, FORGER_PROTOCOL, parseForgerUrl, dispatchDeepLink, shell, friendChatWindows, wait, resolveInstalledManifest, getLocalNetworkShareStatus, getManifestAppSecretsValidationError, normalizeManifestAppSecrets, getSecretsStore, isSecretsVaultUnavailableError, normalizeNodeRuntimeVersion, appendInstallLog, getInstallLogPath, ensureRuntimeInstalled, ensureBackendPythonEnvironment, getVenvExecutables, requiresWindowsShell, desktopRuntimeBridge, appFolderGrantSecret, truncateForInstallLog, formatProcessOutputForInstallLog, serializeErrorForInstallLog, failureDiagnostic, emitRuntimeStatus, stopLocalNetworkShare, syncAppToCloudIfEnabled, withAppLifecycleLock, fs } = deps;
+const localNetworkShareStatusFor = getLocalNetworkShareStatus ?? (() => undefined);
+const localNetworkSharePayloadFor = (appId: string) => {
+  const status = localNetworkShareStatusFor(appId);
+  return status ? { localNetworkShare: status } : {};
+};
+const stopLocalNetworkShareFor = stopLocalNetworkShare ?? (async () => undefined);
 const waitForHttpOk = async (url: string, timeoutMs: number): Promise<void> => {
   const started = Date.now();
 
@@ -817,6 +825,7 @@ const openInstalledAppUnlocked = async (
     runningApps.delete(appId);
     stoppingApps.add(appId);
     try {
+      await stopLocalNetworkShareFor(appId).catch(() => undefined);
       closeAppWindow(appId);
       const sibling = running.backend === crashedProcess ? running.frontend : running.backend;
       await terminateProcess(sibling).catch(() => undefined);
@@ -881,6 +890,7 @@ const openInstalledAppUnlocked = async (
       userMessage: 'App en ejecucion.',
       backendUrl,
       frontendUrl,
+      ...localNetworkSharePayloadFor(appId),
     });
 
     ensureCatalogStatuses();
@@ -926,6 +936,7 @@ const stopInstalledAppUnlocked = async (appId: string): Promise<StopAppResult> =
   stoppingApps.add(appId);
   let stopError: unknown = null;
   try {
+    await stopLocalNetworkShareFor(appId).catch(() => undefined);
     closeAppWindow(appId);
     for (const child of [running.backend, running.frontend]) {
       try {
@@ -959,6 +970,7 @@ const stopInstalledAppUnlocked = async (appId: string): Promise<StopAppResult> =
     appId,
     status: 'installed',
     userMessage: 'App detenida.',
+    ...localNetworkSharePayloadFor(appId),
   });
   ensureCatalogStatuses();
   await syncAppToCloudIfEnabled(appId).catch((error) => {
@@ -1045,6 +1057,7 @@ const getRuntimeStatus = (appId: string): RuntimeStatus => {
       userMessage: 'App en ejecucion.',
       backendUrl: running.backendUrl,
       frontendUrl: running.frontendUrl,
+      ...localNetworkSharePayloadFor(appId),
     };
   }
 
@@ -1053,6 +1066,7 @@ const getRuntimeStatus = (appId: string): RuntimeStatus => {
       appId,
       status: 'not_installed',
       userMessage: 'Aun no instalada.',
+      ...localNetworkSharePayloadFor(appId),
     };
   }
 
@@ -1060,6 +1074,7 @@ const getRuntimeStatus = (appId: string): RuntimeStatus => {
     appId,
     status: record.status,
     userMessage: record.userMessage,
+    ...localNetworkSharePayloadFor(appId),
   };
 };
 

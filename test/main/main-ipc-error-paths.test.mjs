@@ -712,6 +712,9 @@ test('main IPC delegates common service handlers and returns backend-missing fal
     },
     toAppSummary: (record) => ({ id: record.id, name: record.name }),
     listCatalogFromBackend: async () => [{ id: 'finance-os', name: 'Finance OS' }],
+    getLocalNetworkShareStatus: (appId) => ({ active: true, appId, url: 'http://192.168.1.20:5555' }),
+    startLocalNetworkShare: async (appId) => ({ success: true, appId, status: { active: true, appId } }),
+    stopLocalNetworkShare: async (appId) => ({ success: true, appId, status: { active: false, appId } }),
     ensureCatalogStatuses: () => calls.push(['ensureCatalogStatuses']),
     state: {
       agentToolSettings: { approvals: {} },
@@ -759,7 +762,26 @@ test('main IPC delegates common service handlers and returns backend-missing fal
   });
 
   assert.deepEqual(await handlers.get(IPC_CHANNELS.listInstalledApps)(), [{ id: 'finance-os', name: 'Finance OS' }]);
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.listCatalogApps)(), [{ id: 'finance-os', name: 'Finance OS' }]);
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.listCatalogApps)(), [{
+    id: 'finance-os',
+    name: 'Finance OS',
+    localNetworkShare: { active: true, appId: 'finance-os', url: 'http://192.168.1.20:5555' },
+  }]);
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.startLocalNetworkShare)(null, 'finance-os'), {
+    success: true,
+    appId: 'finance-os',
+    status: { active: true, appId: 'finance-os' },
+  });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.stopLocalNetworkShare)(null, 'finance-os'), {
+    success: true,
+    appId: 'finance-os',
+    status: { active: false, appId: 'finance-os' },
+  });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.getLocalNetworkShareStatus)(null, 'finance-os'), {
+    active: true,
+    appId: 'finance-os',
+    url: 'http://192.168.1.20:5555',
+  });
   assert.equal(calls.some(([name]) => name === 'ensureCatalogStatuses'), true);
   assert.deepEqual(await handlers.get(IPC_CHANNELS.getCloudSyncSettings)(), { enabled: true });
   assert.deepEqual(await handlers.get(IPC_CHANNELS.getSettings)(), { locale: 'es' });

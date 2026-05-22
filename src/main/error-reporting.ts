@@ -67,11 +67,18 @@ export class DesktopErrorReporter {
     if (!mainWindow || mainWindow.isDestroyed()) {
       return;
     }
+    if (mainWindow.webContents.isDestroyed?.()) {
+      return;
+    }
     const preview = this.buildPreview(input);
     if (this.shouldDedupe(preview)) {
       return;
     }
-    mainWindow.webContents.send(IPC_CHANNELS.desktopErrorReportRequested, preview);
+    try {
+      mainWindow.webContents.send(IPC_CHANNELS.desktopErrorReportRequested, preview);
+    } catch {
+      // Reporting must never become the uncaught exception handler's own failure.
+    }
   }
 
   public reportMainUncaughtException(error: Error): void {

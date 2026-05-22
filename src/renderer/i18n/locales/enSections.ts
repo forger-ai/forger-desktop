@@ -1,13 +1,9 @@
 export const enSections = {
-    myApps: {
-      title: 'My Apps',
-      subtitle: 'Open your local apps or configure them by chatting.',
-      empty: 'You do not have installed apps yet.',
-      goToCatalog: 'Go to Catalog',
-    },
     catalog: {
-      title: 'Catalog',
-      subtitle: 'Install personal apps ready to adapt to your way of working.',
+      title: 'Apps',
+      subtitle: 'Open installed apps or add personal apps ready to adapt to your way of working.',
+      empty: 'No apps are visible with the current filters.',
+      refresh: 'Refresh apps',
       filtersLabel: 'Browse by category',
       statusFilterLabel: 'Filter by: Status',
       statusFilters: {
