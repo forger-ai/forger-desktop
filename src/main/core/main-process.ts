@@ -58,7 +58,6 @@ import { registerForgerCloudOAuth } from '../forger-cloud-oauth';
 import { CloudDeviceManager, type CloudRelayRequest, type CloudRelayResponse } from '../cloud-device-manager';
 import { CloudIdentityStore, type EncryptedCloudText } from '../cloud-identity-store';
 import { BackupsManager } from '../backups-manager';
-import { LocalNetworkShareManager } from '../local-network-share-manager';
 import {
   createWindowStateEventRegistrar,
   createWindowStateReader,
@@ -77,6 +76,7 @@ import { createRegistryStoreController } from '../installed-apps/registry-store'
 import { createSettingsServiceController } from './settings-service';
 import { createPathConfigController } from './path-config';
 import { createMainUtilitiesController } from './main-utilities';
+import { createLocalNetworkShareController } from './local-network-share-service';
 import { createRuntimeInstallController } from '../runtime/runtime-install';
 import { createWindowBootstrapController } from './window-bootstrap';
 import {
@@ -291,11 +291,6 @@ let appMcpManager: AppMcpManager | null = null;
 let backupsManager: BackupsManager | null = null;
 let memoryStore: MemoryStore | null = null;
 let desktopRuntimeBridge: DesktopRuntimeBridge | null = null;
-let localNetworkShareManager: LocalNetworkShareManager | null = null;
-
-function getLocalNetworkShareStatus(appId: string) {
-  return localNetworkShareManager?.status(appId) ?? { active: false, appId };
-}
 
 desktopErrorReporter = new DesktopErrorReporter({
   getMainWindow: () => mainWindow,
@@ -877,31 +872,25 @@ const stopInstalledApp = async (appId: string): Promise<StopAppResult> => await 
 const restartInstalledApp = async (appId: string, options: { onProgress?: (message: string) => void } = {}): Promise<OpenAppResult> => await getInstalledAppRuntimeController().restartInstalledApp(appId, options);
 const getRuntimeStatus = (appId: string): RuntimeStatus => getInstalledAppRuntimeController().getRuntimeStatus(appId);
 
-const getLocalNetworkShareManager = (): LocalNetworkShareManager => {
-  if (!localNetworkShareManager) {
-    localNetworkShareManager = new LocalNetworkShareManager({
-      runningApps,
-      openInstalledApp: openInstalledAppUnlocked,
-      appendInstallLog,
-      onConnected: (status) => {
-        emitRuntimeStatus({ ...getRuntimeStatus(status.appId), localNetworkShare: status });
-      },
-    });
-  }
-  return localNetworkShareManager;
-};
+const localNetworkShareController = createLocalNetworkShareController({
+  runningApps,
+  openInstalledApp: openInstalledAppUnlocked,
+  appendInstallLog,
+  getRuntimeStatus,
+  emitRuntimeStatus,
+});
 
-const startLocalNetworkShare = async (appId: string) => {
-  const result = await getLocalNetworkShareManager().start(appId);
-  emitRuntimeStatus({ ...getRuntimeStatus(appId), localNetworkShare: result.status });
-  return result;
-};
+function getLocalNetworkShareStatus(appId: string): ReturnType<typeof localNetworkShareController.getStatus> {
+  return localNetworkShareController.getStatus(appId);
+}
 
-const stopLocalNetworkShare = async (appId: string) => {
-  const result = await getLocalNetworkShareManager().stop(appId);
-  emitRuntimeStatus({ ...getRuntimeStatus(appId), localNetworkShare: result.status });
-  return result;
-};
+async function startLocalNetworkShare(appId: string): ReturnType<typeof localNetworkShareController.start> {
+  return await localNetworkShareController.start(appId);
+}
+
+async function stopLocalNetworkShare(appId: string): ReturnType<typeof localNetworkShareController.stop> {
+  return await localNetworkShareController.stop(appId);
+}
 
 const createCloudSocialRelayDeps = () => ({
   CLAUDE_CODE_VERSION,
@@ -1128,120 +1117,31 @@ const mainLifecycleState = {
   get backupsManager() { return backupsManager; }, set backupsManager(value) { backupsManager = value; },
   get memoryStore() { return memoryStore; }, set memoryStore(value) { memoryStore = value; },
   get desktopRuntimeBridge() { return desktopRuntimeBridge; }, set desktopRuntimeBridge(value) { desktopRuntimeBridge = value; },
-  get localNetworkShareManager() { return localNetworkShareManager; }, set localNetworkShareManager(value) { localNetworkShareManager = value; },
+  get localNetworkShareManager() { return localNetworkShareController.manager; }, set localNetworkShareManager(value) { localNetworkShareController.manager = value; },
   get forgerMcpServer() { return forgerMcpServer; }, set forgerMcpServer(value) { forgerMcpServer = value; },
   get agentToolSettings() { return agentToolSettings; }, set agentToolSettings(value) { agentToolSettings = value; },
 };
 
 registerMainLifecycle({
-  AGENT_TOOL_DEFINITIONS,
-  AppAgentConversationManager,
-  AppAgentTaskManager,
-  AppMcpManager,
-  AutomationManager,
-  BrowserWindow,
-  ChatOrchestrator,
-  CloudDeviceManager,
-  CloudIdentityStore,
-  DEFAULT_NODE_VERSION,
-  DesktopRuntimeBridge,
-  DevCatalogService,
-  FORGER_AGENT_CONTRACT_VERSION,
-  FileLibrary,
-  ForgerAccountStore,
-  ForgerBackendClient,
-  ForgerMcpServer,
-  IPC_CHANNELS,
-  MemoryStore,
-  SecretsStore,
-  anyAppAllowsAgentNetworkAccess,
-  app,
-  appAllowsAgentNetworkAccess,
-  appWindows,
-  appendInstallLog,
-  backendBaseUrl,
-  buildForgerToolsContextForApp,
-  buildMemoryContextForApp,
-  buildMemoryContextForApps,
-  chooseAgentRuntime,
-  clearForgerAccountSession,
-  closeServer,
-  createWindow,
-  emitAutomationUpdated,
-  emitChatRunUpdated,
-  ensureBackendPythonEnvironment,
-  ensureCatalogStatuses,
-  ensureGlobalAgentsContext,
-  ensurePathInside,
-  ensureRuntimeInstalled,
-  ensureSqliteDatabaseParent,
-  flushPendingDeepLink,
-  fs,
-  getAppLocalToolPathEntries,
-  getBackupsRoot,
-  getClaudeAuthStatus,
-  getCloudDeviceAccountStorageKey,
-  getCloudDevicePath,
-  getCloudIdentityPath,
-  getCloudIdentityStore,
-  getCodexAuthStatus,
-  getCodexHome,
-  getCodexRoot,
-  getCodexToolEnvironment,
-  getForgerAccountPath,
-  getForgerHomeRoot,
-  getForgerMetadataRoot,
-  getFreePort,
-  getLegacyForgerMetadataRoot,
-  getMemoryStore,
-  getOfficialToolsService,
-  getPrivateAppsRoot,
-  getPrivateDataRoot,
-  getRuntimesRoot,
-  getRuntimePathEntries,
-  getRuntimeStatus,
-  getTempRoot,
-  getVenvExecutables,
-  handleCloudRelayRequest,
-  handleCloudSocialEvent,
-  hasInstalledCodexConversation,
-  ipcMain,
-  listAppPrompts,
-  listCatalogFromBackend,
-  loadAgentToolSettings,
-  loadCloudSyncSettings,
-  loadRegistry,
-  loadSettings,
-  mapBackendCategory,
-  normalizeNodeRuntimeVersion,
-  openInstalledApp,
-  startLocalNetworkShare,
-  stopLocalNetworkShare,
-  openOrFocusAppWindow,
-  registerForgerCloudOAuth,
-  registerIpcHandlers,
-  resolveClaudeCli,
-  resolveCodexCliPath,
-  resolveInstalledAgents,
-  resolveInstalledManifest,
-  resolveInstalledPromptTemplates,
-  restoreAppPrompt,
-  restartInstalledApp,
-  runningApps,
-  serializeErrorForInstallLog,
-  shell,
-  splitManifestCommand,
-  startDevCatalogService,
-  state: mainLifecycleState,
-  stopInstalledApp,
-  switchForgerAccountSession,
-  terminateProcess,
-  toAppSummary,
-  toCatalogStatus,
-  translateManifestEnvironment,
-  truncateForInstallLog,
-  updateAppPrompt,
-  updateAppRuntime,
-  upsertInstalledRecord,
-  waitForHttpOk,
+  AGENT_TOOL_DEFINITIONS, AppAgentConversationManager, AppAgentTaskManager, AppMcpManager, AutomationManager,
+  BrowserWindow, ChatOrchestrator, CloudDeviceManager, CloudIdentityStore, DEFAULT_NODE_VERSION, DesktopRuntimeBridge,
+  DevCatalogService, FORGER_AGENT_CONTRACT_VERSION, FileLibrary, ForgerAccountStore, ForgerBackendClient,
+  ForgerMcpServer, IPC_CHANNELS, MemoryStore, SecretsStore, anyAppAllowsAgentNetworkAccess, app,
+  appAllowsAgentNetworkAccess, appWindows, appendInstallLog, backendBaseUrl, buildForgerToolsContextForApp,
+  buildMemoryContextForApp, buildMemoryContextForApps, chooseAgentRuntime, clearForgerAccountSession, closeServer,
+  createWindow, emitAutomationUpdated, emitChatRunUpdated, ensureBackendPythonEnvironment, ensureCatalogStatuses,
+  ensureGlobalAgentsContext, ensurePathInside, ensureRuntimeInstalled, ensureSqliteDatabaseParent, flushPendingDeepLink,
+  fs, getAppLocalToolPathEntries, getBackupsRoot, getClaudeAuthStatus, getCloudDeviceAccountStorageKey,
+  getCloudDevicePath, getCloudIdentityPath, getCloudIdentityStore, getCodexAuthStatus, getCodexHome, getCodexRoot,
+  getCodexToolEnvironment, getForgerAccountPath, getForgerHomeRoot, getForgerMetadataRoot, getFreePort,
+  getLegacyForgerMetadataRoot, getMemoryStore, getOfficialToolsService, getPrivateAppsRoot, getPrivateDataRoot,
+  getRuntimesRoot, getRuntimePathEntries, getRuntimeStatus, getTempRoot, getVenvExecutables, handleCloudRelayRequest,
+  handleCloudSocialEvent, hasInstalledCodexConversation, ipcMain, listAppPrompts, listCatalogFromBackend,
+  loadAgentToolSettings, loadCloudSyncSettings, loadRegistry, loadSettings, mapBackendCategory, normalizeNodeRuntimeVersion,
+  openInstalledApp, startLocalNetworkShare, stopLocalNetworkShare, openOrFocusAppWindow, registerForgerCloudOAuth,
+  registerIpcHandlers, resolveClaudeCli, resolveCodexCliPath, resolveInstalledAgents, resolveInstalledManifest,
+  resolveInstalledPromptTemplates, restoreAppPrompt, restartInstalledApp, runningApps, serializeErrorForInstallLog,
+  shell, splitManifestCommand, startDevCatalogService, state: mainLifecycleState, stopInstalledApp,
+  switchForgerAccountSession, terminateProcess, toAppSummary, toCatalogStatus, translateManifestEnvironment,
+  truncateForInstallLog, updateAppPrompt, updateAppRuntime, upsertInstalledRecord, waitForHttpOk,
 });
