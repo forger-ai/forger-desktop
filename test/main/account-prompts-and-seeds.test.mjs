@@ -98,6 +98,8 @@ test('Forger prompt builders include contract, language, files, official tools, 
   });
   assert.match(officialTools, /Gmail status: connected and ready/);
   assert.match(officialTools, /`gmail.search_messages`/);
+  assert.match(officialTools, /opening, launching, starting, running, or bringing up the app means using Forger app tools/);
+  assert.match(officialTools, /Use the app runtime status tool/);
   assert.match(buildForgerOfficialToolsPromptSection({
     mode: 'free-chat',
     gmailReady: false,
@@ -135,6 +137,8 @@ test('Forger prompt builders include contract, language, files, official tools, 
   assert.match(appPrompt, /RUNTIME: provider codex, model gpt-5\.4/);
   assert.match(appPrompt, /NETWORK ACCESS: disabled/);
   assert.match(appPrompt, /use APP_ROOT for versioning checks/);
+  assert.match(appPrompt, /Opening or starting an installed app means opening it through Forger Desktop/);
+  assert.match(appPrompt, /Use Forger MCP app tools to open the app and to check runtime status/);
   assert.match(appPrompt, new RegExp(`FORGER CONTRACT: ${FORGER_AGENT_CONTRACT_VERSION}`));
   assert.match(appPrompt, /Size: 1.5 KB/);
   assert.match(appPrompt, /USER MESSAGE:\nRevisar presupuesto/);
@@ -162,6 +166,8 @@ test('Forger prompt builders include contract, language, files, official tools, 
   assert.doesNotMatch(appResumePrompt, /SELECTED APP/);
   assert.doesNotMatch(appResumePrompt, /APP_ROOT/);
   assert.doesNotMatch(appResumePrompt, /Gmail status/);
+  assert.match(appResumePrompt, /opening or starting an installed app means opening it through Forger Desktop/i);
+  assert.match(appResumePrompt, /Use Forger MCP app tools to open the app and to check runtime status/);
   assert.match(appResumePrompt, /SHARED FILES IN THIS MESSAGE:[\s\S]*budget\.csv/);
   assert.match(appResumePrompt, /USER MESSAGE:\nContinuar/);
   assert.match(buildCodexPromptWithAppContext({
@@ -262,6 +268,8 @@ test('Forger prompt builders include contract, language, files, official tools, 
   assert.match(appAgents, /Do not infer visible capabilities only from scripts/);
   assert.match(appAgents, /Shared files are task inputs only/);
   assert.match(appAgents, /Prefer structured app tools when they exist/);
+  assert.match(appAgents, /When the person asks to open, launch, start, run, or bring up the app, use Forger Desktop app controls/);
+  assert.match(appAgents, /Do not start app services manually with Python, uvicorn, npm, Vite, FastAPI, or localhost commands/);
   assert.match(appAgents, /Keep secret values out of prompts/);
   assert.doesNotMatch(appAgents, /## Response Language/);
   assert.doesNotMatch(appAgents, /You are the Forger agent/);
@@ -321,6 +329,9 @@ test('official tool skill templates and seed data keep expected Desktop defaults
     'forger-tools',
     'forger-tasks',
     'forger-app-design-guidelines',
+    'forger-app-shell-layout',
+    'forger-mui-component-patterns',
+    'forger-mui-date-pickers',
     'forger-mui-consistency',
     'forger-installed-app-change',
     'forger-python-backend',
@@ -343,12 +354,42 @@ test('official tool skill templates and seed data keep expected Desktop defaults
   assert.match(templates.find((template) => template.id === 'forger-agents')?.body ?? '', /^---\nname: forger-agents/m);
   assert.match(templates.find((template) => template.id === 'forger-tasks')?.body ?? '', /^---\nname: forger-tasks/m);
   assert.match(templates.find((template) => template.id === 'forger-tools')?.body ?? '', /^---\nname: forger-tools/m);
+  const appShellSkill = templates.find((template) => template.id === 'forger-app-shell-layout');
+  assert.ok(appShellSkill);
+  assert.match(appShellSkill.body, /only the main content region scrolls/);
+  assert.match(appShellSkill.body, /navigation rail on medium widths/);
+  assert.match(appShellSkill.body, /persistent navigation drawer/);
+  assert.match(appShellSkill.body, /MUI breakpoints and `useMediaQuery`/);
+  assert.match(appShellSkill.body, /If an `AppBar` uses `position="fixed"`/);
+  assert.match(appShellSkill.body, /Use MUI `Drawer` variants deliberately/);
+  assert.match(appShellSkill.body, /fixed `BottomNavigation`/);
+  const muiComponentSkill = templates.find((template) => template.id === 'forger-mui-component-patterns');
+  assert.ok(muiComponentSkill);
+  assert.match(muiComponentSkill.body, /MUI X Community packages/);
+  assert.match(muiComponentSkill.body, /Do not use MUI X Pro or Premium/);
+  assert.match(muiComponentSkill.body, /Use MUI X Community `DataGrid`/);
+  assert.match(muiComponentSkill.body, /Use MUI X Community Charts/);
+  assert.match(muiComponentSkill.body, /Use `DatePicker`/);
+  assert.match(muiComponentSkill.body, /Do not use `TextField type="date"`/);
+  assert.match(muiComponentSkill.body, /Use `Card` for content and actions about one subject/);
+  const muiDatePickerSkill = templates.find((template) => template.id === 'forger-mui-date-pickers');
+  assert.ok(muiDatePickerSkill);
+  assert.match(muiDatePickerSkill.body, /Use MUI X Community Date and Time Pickers/);
+  assert.match(muiDatePickerSkill.body, /Wrap picker usage in `LocalizationProvider`/);
+  assert.match(muiDatePickerSkill.body, /Do not use `TextField type="date"`/);
+  assert.match(muiDatePickerSkill.body, /Stored values remain stable across reloads/);
   const bridgeSkill = templates.find((template) => template.id === 'forger-desktop-runtime-bridge');
   assert.ok(bridgeSkill);
   assert.match(bridgeSkill.body, /commons\/backend\/forger_desktop\.py/);
   assert.match(bridgeSkill.body, /start_agent_task/);
   assert.match(bridgeSkill.body, /create_agent_thread/);
   assert.match(bridgeSkill.body, /Finance OS is the reference pattern/);
+  assert.match(bridgeSkill.body, /Opening, launching, starting, running, or bringing up an installed app means using Forger Desktop app controls/);
+  assert.match(bridgeSkill.body, /forger_get_app_runtime_status/);
+  const officialToolsSkill = templates.find((template) => template.id === 'forger-official-tools');
+  assert.ok(officialToolsSkill);
+  assert.match(officialToolsSkill.body, /forger_open_app/);
+  assert.match(officialToolsSkill.body, /Do not manually start app services/);
   const localizationSkill = templates.find((template) => template.id === 'forger-localization');
   assert.ok(localizationSkill);
   assert.match(localizationSkill.body, /\/api\/forger\/context/);

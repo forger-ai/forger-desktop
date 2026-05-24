@@ -38,6 +38,13 @@ This app may be installed and operated through Forger, but this file is app cont
 - Use scripts only when the app documents them or when no safer structured tool exists.
 - Do not ask the person to run commands, know paths, prepare internal formats, or understand implementation details unless they ask for technical detail.
 
+## Opening The App
+
+- When the person asks to open, launch, start, run, or bring up the app, use Forger Desktop app controls.
+- In agent work, use the Forger MCP app tools to open the app and to check the app runtime status when needed.
+- Do not start app services manually with Python, uvicorn, npm, Vite, FastAPI, or localhost commands just so the person can access the app.
+- Treat internal service startup as Desktop runtime work owned by Forger. To the person, the action is opening the app in Forger.
+
 ## App Tools
 
 {{mcpSection}}
