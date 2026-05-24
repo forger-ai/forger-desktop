@@ -69,6 +69,7 @@ fs.appendFileSync(callsPath, JSON.stringify({
   threadId,
   codexHome,
   args,
+  prompt,
   allowedRoots: process.env.FORGER_ALLOWED_ROOTS || '',
   leakedSecret: Boolean(process.env.FORGER_MCP_TOKEN),
 }) + '\\n');
@@ -245,7 +246,8 @@ test('chat uses a persistent Codex home so the second message can resume', async
   try {
     const conversationId = 'conversation-1';
     const first = await harness.orchestrator.startRun({
-      prompt: 'hello',
+      prompt: 'START hello',
+      resumePrompt: 'RESUME hello',
       threadId: null,
       conversationId,
       conversationHistory: [{ role: 'user', content: 'hello' }],
@@ -256,7 +258,8 @@ test('chat uses a persistent Codex home so the second message can resume', async
     await waitForRunCleanup();
 
     const second = await harness.orchestrator.startRun({
-      prompt: 'continue',
+      prompt: 'START continue',
+      resumePrompt: 'RESUME continue',
       threadId: firstRun.threadId,
       conversationId,
       conversationHistory: [
@@ -272,6 +275,10 @@ test('chat uses a persistent Codex home so the second message can resume', async
 
     const calls = await readFakeCalls(harness.metadataRoot, 'forger', conversationId);
     assert.deepEqual(calls.map((call) => call.mode), ['new', 'resume']);
+    assert.match(calls[0].prompt, /START hello/);
+    assert.doesNotMatch(calls[0].prompt, /RESUME hello/);
+    assert.match(calls[1].prompt, /RESUME continue/);
+    assert.doesNotMatch(calls[1].prompt, /START continue/);
     assert.equal(calls[0].codexHome, calls[1].codexHome);
     assert.equal(calls[0].allowedRoots, harness.forgerHomeRoot);
     assert.equal(calls[0].leakedSecret, false);
@@ -318,6 +325,7 @@ test('chat recovers from a stale provider thread by starting a fresh thread with
     const conversationId = 'conversation-stale';
     const first = await harness.orchestrator.startRun({
       prompt: 'hello',
+      resumePrompt: 'resume hello',
       threadId: null,
       conversationId,
       conversationHistory: [{ role: 'user', content: 'hello' }],
@@ -327,7 +335,8 @@ test('chat recovers from a stale provider thread by starting a fresh thread with
     await waitForRunCleanup();
 
     const second = await harness.orchestrator.startRun({
-      prompt: 'force stale provider thread',
+      prompt: 'START after stale recovery',
+      resumePrompt: 'RESUME force stale provider thread',
       threadId: firstRun.threadId,
       conversationId,
       conversationHistory: [
@@ -343,6 +352,9 @@ test('chat recovers from a stale provider thread by starting a fresh thread with
 
     const calls = await readFakeCalls(harness.metadataRoot, 'forger', conversationId);
     assert.deepEqual(calls.map((call) => call.mode), ['new', 'resume', 'resume', 'resume', 'resume', 'new']);
+    assert.match(calls[1].prompt, /RESUME force stale provider thread/);
+    assert.match(calls.at(-1).prompt, /START after stale recovery/);
+    assert.doesNotMatch(calls.at(-1).prompt, /RESUME force stale provider thread/);
     assert.equal(new Set(calls.map((call) => call.codexHome)).size, 1);
   } finally {
     await harness.cleanup();
@@ -1954,10 +1966,14 @@ test('chat auto-update finalizers save changed app versions and handle no-op upd
       locale: 'en',
       progressLog: [],
     };
-    await harness.orchestrator.finalizeAutoAppliedUpdate(changedRun, 'Updated the visible title.');
+    await harness.orchestrator.finalizeAutoAppliedUpdate(
+      changedRun,
+      'Updated the visible title.\n\nNo pude guardar el punto de retorno interno porque Git no pudo crear index.lock.',
+    );
     assert.equal(changedRun.status, 'applied');
     assert.ok(changedRun.operationId);
     assert.ok(changedRun.commitSha);
+    assert.doesNotMatch(changedRun.userMessage, /No pude guardar|index\.lock/);
     assert.match(changedRun.userMessage, /Version guardada/);
 
     await writeFile(targetFile, 'resolved conflict\n', 'utf8');

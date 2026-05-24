@@ -1232,7 +1232,7 @@ test('openInstalledApp returns missing required app secrets before starting loca
   assert.equal(result.userMessage, 'La app ya esta en ejecucion.');
 });
 
-test('normalizeInstalledAgentContext writes stack and app MCP skills while ignoring skill paths outside install root', async (t) => {
+test('normalizeInstalledAgentContext writes app runtime skills while ignoring skill paths outside install root', async (t) => {
   const root = await tmpRoot('app-context');
   t.after(async () => {
     await fs.rm(root, { recursive: true, force: true });
@@ -1267,13 +1267,21 @@ test('normalizeInstalledAgentContext writes stack and app MCP skills while ignor
 
   const skillsRoot = path.join(installDir, '.agents', 'skills');
   const generated = await fs.readdir(skillsRoot);
-  assert.ok(generated.includes('forger-python-backend'));
-  assert.ok(generated.includes('forger-fastapi-contracts'));
-  assert.ok(generated.includes('forger-react-ui'));
-  assert.ok(generated.includes('forger-mui-consistency'));
+  assert.ok(generated.includes('forger-context'));
+  assert.ok(generated.includes('forger-app-agents-authoring'));
+  assert.ok(generated.includes('forger-app-official-tools'));
+  assert.equal(generated.includes('forger-installed-app-change'), false);
+  assert.equal(generated.includes('forger-python-backend'), false);
+  assert.equal(generated.includes('forger-fastapi-contracts'), false);
+  assert.equal(generated.includes('forger-frontend-structure'), false);
+  assert.equal(generated.includes('forger-react-ui'), false);
+  assert.equal(generated.includes('forger-app-design-guidelines'), false);
+  assert.equal(generated.includes('forger-mui-consistency'), false);
   assert.ok(generated.includes('forger-app-mcp-data-tools'));
   assert.ok(generated.includes('inside'));
   assert.equal(generated.includes('outside-skill'), false);
+  const appToolSkill = await fs.readFile(path.join(skillsRoot, 'forger-app-official-tools', 'SKILL.md'), 'utf8');
+  assert.match(appToolSkill, /This app has not declared any official Forger tool actions/);
   const agentsMarkdown = await fs.readFile(path.join(installDir, 'AGENTS.md'), 'utf8');
   assert.match(agentsMarkdown, /Forger/);
 });

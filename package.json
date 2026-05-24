@@ -1,6 +1,6 @@
 {
   "name": "forger-desktop",
-  "version": "0.2.12",
+  "version": "0.2.13",
   "private": true,
   "description": "Desktop launcher for Forger",
   "author": "Forger",
@@ -97,6 +97,28 @@
         "to": "runtimes",
         "filter": [
           "**/*"
+        ]
+      },
+      {
+        "from": "src/main/prompt-builder/prompts",
+        "to": "prompt-builder/prompts",
+        "filter": [
+          "**/*.md"
+        ]
+      },
+      {
+        "from": "resources/app-skeletons/vite-fastapi-sqlite",
+        "to": "app-skeletons/vite-fastapi-sqlite",
+        "filter": [
+          "**/*",
+          "!**/.git/**",
+          "!**/node_modules/**",
+          "!**/.venv/**",
+          "!**/dist/**",
+          "!**/build/**",
+          "!**/coverage/**",
+          "!**/.pytest_cache/**",
+          "!**/.ruff_cache/**"
         ]
       }
     ],

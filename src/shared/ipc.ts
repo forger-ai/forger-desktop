@@ -2,6 +2,7 @@ export const IPC_CHANNELS = {
   listInstalledApps: 'forger:list-installed-apps',
   listCatalogApps: 'forger:list-catalog-apps',
   installApp: 'forger:install-app',
+  createLocalApp: 'forger:create-local-app',
   updateApp: 'forger:update-app',
   listBackups: 'forger:backups:list',
   createBackup: 'forger:backups:create',

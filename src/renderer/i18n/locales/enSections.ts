@@ -67,6 +67,46 @@ export const enSections = {
       sendInProgress: 'I am still processing your previous message. Wait for the response or cancel that request.',
       sendFailed: (detail: string) => `I could not send your message to the agent. ${detail}`,
     },
+    create: {
+      title: 'Create',
+      subtitle: 'Create a private local app and start designing it with Forger.',
+      nameLabel: 'Name',
+      namePlaceholder: 'My client app',
+      descriptionLabel: 'Short description',
+      descriptionPlaceholder: 'Organizes clients, tasks, and local follow-up.',
+      purposeLabel: 'What this app does',
+      purposePlaceholder: 'Tell Forger what problem it solves, what data it manages, and how you want to use it.',
+      nameFallback: 'this app',
+      purposeFallback: 'your purpose',
+      lookAndFeelLabel: 'Look and feel',
+      lookAndFeelHelper: 'Choose a visual direction so the app has identity from the first design.',
+      lookAndFeelOptions: ({ name, purpose }: { name: string; purpose: string }) => [
+        {
+          id: 'command-center',
+          title: 'Command center',
+          description: `${name} feels like an operational dashboard: calm, dense, clear, and ready to review ${purpose} without noise.`,
+        },
+        {
+          id: 'studio-editorial',
+          title: 'Editorial studio',
+          description: `${name} uses polished composition, careful spacing, and elegant hierarchy so ${purpose} feels more premium and memorable.`,
+        },
+        {
+          id: 'warm-workspace',
+          title: 'Warm workspace',
+          description: `${name} prioritizes a warmer, more human, organized experience with visual details that make ${purpose} feel simple.`,
+        },
+      ],
+      submit: 'Create app',
+      creating: 'Creating app...',
+      missingFields: 'Complete the fields and choose a look and feel to create the app.',
+      success: 'App created. I opened its chat to clarify the idea before building.',
+      startPromptTitle: (name: string) => `Create ${name}`,
+      userMessage: (name: string, description: string, purpose: string, lookAndFeel?: string) =>
+        `I want to create an app called ${name}.\n\nShort description:\n${description}\n\nWhat it does:\n${purpose}${lookAndFeel ? `\n\nSelected look and feel:\n${lookAndFeel}` : ''}`,
+      injectedPrompt: (name: string, description: string, purpose: string, lookAndFeel?: string) =>
+        `You just created a private local Forger app called "${name}".\n\nShort description you entered:\n${description}\n\nWhat you want the app to do:\n${purpose}${lookAndFeel ? `\n\nLook and feel selected by the user:\n${lookAndFeel}` : '\n\nBefore defining the interface, propose 2 or 3 look-and-feel directions based on the purpose and ask the user to choose one.'}\n\nBefore coding, produce a clear non-technical breakdown of the app you need. Clarify your goal, your data, your main screens, your mobile flow, possible appSecrets, official Forger tools in manifest.tools, conversational agents with provider-aware runtimeRecommendations for codex and claude when useful, promptTemplates for atomic tasks, storage patterns, risks, open questions, and acceptance criteria.\n\nProduct experience and structure: propose a dashboard plus feature views as the recommended structure. Each primary model or domain area must have its corresponding view, with a list, a clear create button, a delete action, and well-defined basic CRUD. Present this as a strong design recommendation, not an imposition: explicitly offer the user the option to choose their own screen structure or workflow if they prefer a different organization. Separate views by domain, avoid mixing large forms without purpose, and keep primary actions visible, ordered, and consistent. The UI should feel tasteful for the app purpose: a recognizable visual identity, careful hierarchy, useful empty states, clear controls, and its own visual rhythm. Do not settle for a generic correct screen.\n\nDesign skill: when implementation begins, use the forger-app-design-guidelines skill before creating or changing the app UI so the chosen look and feel keeps clear surfaces, visible interaction states, and accessible Material-grounded behavior.\n\nFrontend structure: when implementation begins, React/MUI code must follow the feature-first convention: frontend/src/app for root wiring, frontend/src/features/<area> for domain screens and feature-local components/hooks, frontend/src/components for cross-feature reusable UI, frontend/src/api for backend contracts, frontend/src/lib for pure helpers, frontend/src/i18n for copy, and frontend/src/theme for MUI theme. Keep App.tsx thin.\n\nManifest prompt contract: promptTemplates are atomic form-backed tasks and must use id, title, description, arguments, and prompt; do not use name or inputs. Agents are resumable conversations/coworkers and must use id, title, kind, description, and either initialPrompt or prompts.initial.body; do not use name or prompt. Prefer agents.prompts.initial/resume/steer with declared variables. Use runtimeRecommendations only when useful; codex recommendations use model and reasoningEffort, while claude recommendations use model and effort.\n\nOfficial Forger tools contract for manifest.tools: today the only official tool is Gmail. Gmail is not an app MCP tool, script, visible feature, or appSecret. If the app should use Gmail, declare it exactly with object entries, never strings. Use this shape and include only the actions the app needs: "tools": { "required": [], "optional": [{ "toolId": "gmail", "reason": "Lets this app help you search, read, download attachments from, or draft/send email when you explicitly ask.", "actions": ["gmail.connection.status", "gmail.search_messages", "gmail.read_thread", "gmail.read_attachment", "gmail.send_email"] }] }. Gmail actions: gmail.connection.status checks connection; gmail.search_messages searches mail by Gmail query; gmail.read_thread reads messages or threads and attachment metadata; gmail.read_attachment downloads an attachment for agent use; gmail.send_email sends mail from the connected account. Put Gmail in required only if the core app cannot work without Gmail; otherwise optional. Do not add Gmail OAuth to appSecrets because Forger Tools owns that connection.\n\nWhen implementation begins later, every applied app change must be saved as an internal version before finishing. If you ask for an adjustment after reviewing it, save that adjustment as a new internal version too. Use commits internally for rollback, but talk to you about saved versions and previous versions instead of Git unless you ask for technical details.\n\nDo not implement yet; first confirm functional scope, validate the selected visual direction, propose the recommended structure, and ask whether the user wants to use it or choose their own structure.`,
+    },
     settings: {
       title: 'Settings',
       subtitle: 'Choose the look and review how your space stays protected.',

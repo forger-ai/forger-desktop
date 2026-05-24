@@ -9,6 +9,7 @@ export const en = {
     apps: 'Apps',
     catalog: 'Apps',
     chat: 'Chat',
+    create: 'Create',
     feedback: 'Feedback',
     recommendations: 'Feedback',
     automations: 'Automations',
@@ -271,6 +272,7 @@ export const en = {
     configureSecrets: 'Connect credentials',
     secretsInstallRequired: 'Install the app to connect credentials.',
     deleteConfirm: (appName: string) => `Deleting ${appName} will remove the app and its local data from this computer. This cannot be undone. Continue?`,
+    deletePrivateLocalConfirm: (appName: string) => `You made ${appName}. Uninstalling it will delete the app and all of its local progress from this computer. You will not be able to recover it. Are you sure you want to continue?`,
     reviewsTitle: 'Reviews',
     ratingSummary: (average: number, count: number) => `${average.toFixed(1)}/5 (${count.toLocaleString()} reviews)`,
     noRatings: 'No reviews yet',
@@ -349,6 +351,7 @@ export const en = {
   },
   beta: {
     earlyAccessBadge: 'Early Access',
+    privateLocalBadge: 'Yours',
     earlyAccessCardBody: 'Try it ahead of time and leave a review to help us improve it.',
     enableEarlyAccessAction: 'Enable Early Access',
     comingSoonAction: 'Coming soon',

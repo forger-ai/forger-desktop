@@ -94,6 +94,7 @@ interface ChatOrchestratorOptions {
 }
 
 interface InternalChatRun extends ChatRun {
+  resumePrompt?: string;
   stagingDir: string;
   appRoot: string;
   baseHead: string | null;
@@ -175,6 +176,7 @@ export class ChatOrchestrator {
       runId,
       appId,
       prompt: input.prompt,
+      resumePrompt: input.resumePrompt,
       threadId:
         input.threadId === null
           ? null
@@ -550,7 +552,8 @@ export class ChatOrchestrator {
           ? await (this.options.buildMemoryContext?.([run.appId]) ?? Promise.resolve(''))
           : '';
         const recoveryContext = includeRecoveryContext ? buildChatRecoveryContext(run.conversationHistory) : '';
-        return [memoryContext, recoveryContext, run.prompt].filter(Boolean).join('\n\n');
+        const turnPrompt = resolvedThreadId ? (run.resumePrompt ?? run.prompt) : run.prompt;
+        return [memoryContext, recoveryContext, turnPrompt].filter(Boolean).join('\n\n');
       };
       const persistentCodexHome = run.provider === 'codex'
         ? await preparePersistentIsolatedCodexHome(

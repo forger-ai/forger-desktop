@@ -7,7 +7,7 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const { createAppContextSupportController } = require('../../dist-electron/main/apps/context-support.js');
-const { FORGER_AGENT_CONTRACT_MARKER_PREFIX } = require('../../dist-electron/main/prompts/forger-base.js');
+const { FORGER_AGENT_CONTRACT_MARKER_PREFIX } = require('../../dist-electron/main/prompt-builder/forger-base.js');
 
 const tmpRoot = async (name) => await fs.mkdtemp(path.join(os.tmpdir(), `forger-${name}-`));
 
@@ -40,7 +40,18 @@ test('context support writes global AGENTS and official tool skills into metadat
   const agentsMarkdown = await fs.readFile(path.join(homeRoot, 'AGENTS.md'), 'utf8');
   const skillDirs = await fs.readdir(path.join(homeRoot, '.agents', 'skills'));
   assert.match(agentsMarkdown, /Forger/);
+  assert.ok(skillDirs.includes('forger-context'));
+  assert.ok(skillDirs.includes('forger-app-agents-authoring'));
+  assert.ok(skillDirs.includes('forger-app-mcp-data-tools'));
   assert.ok(skillDirs.includes('forger-gmail'));
+  assert.ok(skillDirs.includes('forger-manifest-authoring'));
+  assert.ok(skillDirs.includes('forger-desktop-runtime-bridge'));
+  assert.ok(skillDirs.includes('forger-app-design-guidelines'));
+  assert.ok(skillDirs.includes('forger-installed-app-change'));
+  assert.ok(skillDirs.includes('forger-python-backend'));
+  assert.ok(skillDirs.includes('forger-fastapi-contracts'));
+  assert.ok(skillDirs.includes('forger-frontend-structure'));
+  assert.ok(skillDirs.includes('forger-react-ui'));
 });
 
 test('context support preserves user AGENTS files and upgrades older Forger contract markers', async (t) => {
@@ -88,30 +99,41 @@ test('context support normalizes installed app context for invalid, MCP-only, an
 
   await controller.normalizeInstalledAgentContext(invalidDir, 'invalid');
   assert.match(await fs.readFile(path.join(invalidDir, 'AGENTS.md'), 'utf8'), /invalid/);
-  await assert.rejects(fs.stat(path.join(invalidDir, '.agents', 'skills')), /ENOENT/);
+  assert.deepEqual(await fs.readdir(path.join(invalidDir, '.agents', 'skills')), [
+    'forger-app-agents-authoring',
+    'forger-app-mcp-data-tools',
+    'forger-app-official-tools',
+    'forger-context',
+  ]);
 
   await controller.normalizeInstalledAgentContext(arrayDir, 'array');
   assert.match(await fs.readFile(path.join(arrayDir, 'AGENTS.md'), 'utf8'), /array/);
-  await assert.rejects(fs.stat(path.join(arrayDir, '.agents', 'skills')), /ENOENT/);
+  assert.deepEqual(await fs.readdir(path.join(arrayDir, '.agents', 'skills')), [
+    'forger-app-agents-authoring',
+    'forger-app-mcp-data-tools',
+    'forger-app-official-tools',
+    'forger-context',
+  ]);
 
   await controller.normalizeInstalledAgentContext(mcpOnlyDir, 'mcp-only');
   assert.deepEqual(await fs.readdir(path.join(mcpOnlyDir, '.agents', 'skills')), [
+    'forger-app-agents-authoring',
     'forger-app-mcp-data-tools',
-    'forger-gmail',
-    'forger-official-tools',
-    'forger-permissions',
+    'forger-app-official-tools',
+    'forger-context',
   ]);
 
   await controller.normalizeInstalledAgentContext(skillsDir, 'skills');
   assert.deepEqual(await fs.readdir(path.join(skillsDir, '.agents', 'skills')), [
-    'forger-gmail',
-    'forger-official-tools',
-    'forger-permissions',
+    'forger-app-agents-authoring',
+    'forger-app-mcp-data-tools',
+    'forger-app-official-tools',
+    'forger-context',
     'inside',
   ]);
 });
 
-test('context support normalizes stack templates and rejects malformed stack shapes', async (t) => {
+test('context support normalizes installed app templates without stack-dependent development skills', async (t) => {
   const root = await tmpRoot('context-stack');
   t.after(async () => {
     await fs.rm(root, { recursive: true, force: true });
@@ -124,6 +146,9 @@ test('context support normalizes stack templates and rejects malformed stack sha
       backend: { language: ' Python ', framework: ' FastAPI ' },
       frontend: { framework: ' React ', ui: ' MUI ' },
     },
+    tools: {
+      optional: [{ toolId: 'gmail', reason: 'Search mail', actions: ['gmail.search_messages', 'gmail.read_thread'] }],
+    },
     mcp: { type: 'http', command: 'python -m app.mcp' },
   }), 'utf8');
 
@@ -133,28 +158,27 @@ test('context support normalizes stack templates and rejects malformed stack sha
   assert.deepEqual(controller.buildStackSkillTemplates({
     backend: { language: ' Python ', framework: ' FastAPI ' },
     frontend: { framework: ' React ', ui: ' MUI ' },
-  }, true).map((template) => template.id), [
-    'forger-official-tools',
-    'forger-gmail',
-    'forger-permissions',
-    'forger-python-backend',
-    'forger-fastapi-contracts',
-    'forger-react-ui',
-    'forger-mui-consistency',
+  }, true, ['gmail.search_messages']).map((template) => template.id), [
+    'forger-context',
+    'forger-app-agents-authoring',
     'forger-app-mcp-data-tools',
+    'forger-app-official-tools',
   ]);
 
   await controller.normalizeInstalledAgentContext(appDir, 'stack');
   assert.deepEqual(await fs.readdir(path.join(appDir, '.agents', 'skills')), [
+    'forger-app-agents-authoring',
     'forger-app-mcp-data-tools',
-    'forger-fastapi-contracts',
-    'forger-gmail',
-    'forger-mui-consistency',
-    'forger-official-tools',
-    'forger-permissions',
-    'forger-python-backend',
-    'forger-react-ui',
+    'forger-app-official-tools',
+    'forger-context',
   ]);
+  const officialToolSkill = await fs.readFile(path.join(appDir, '.agents', 'skills', 'forger-app-official-tools', 'SKILL.md'), 'utf8');
+  assert.match(officialToolSkill, /`gmail\.search_messages`/);
+  assert.match(officialToolSkill, /`gmail\.read_thread`/);
+  assert.doesNotMatch(officialToolSkill, /gmail\.send_email/);
+  const agentsSkill = await fs.readFile(path.join(appDir, '.agents', 'skills', 'forger-app-agents-authoring', 'SKILL.md'), 'utf8');
+  assert.match(agentsSkill, /current app facts/);
+  assert.match(agentsSkill, /turn-specific tone/);
 });
 
 test('context support serializes lifecycle locks after failures and releases lock state', async () => {

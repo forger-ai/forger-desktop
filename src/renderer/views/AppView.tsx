@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import ArrowBackRounded from '@mui/icons-material/ArrowBackRounded';
 import AutoAwesomeRounded from '@mui/icons-material/AutoAwesomeRounded';
-import CheckCircleOutlineRounded from '@mui/icons-material/CheckCircleOutlineRounded';
 import RestoreRounded from '@mui/icons-material/RestoreRounded';
 import SaveRounded from '@mui/icons-material/SaveRounded';
 import StarRounded from '@mui/icons-material/StarRounded';
@@ -22,7 +21,6 @@ import {
   Typography,
 } from '@mui/material';
 import type {
-  AppCapability,
   AppDetails,
   AppPromptMutationResult,
   AppPromptRestoreInput,
@@ -224,16 +222,6 @@ export function AppView({
   const hasConflict = details.status === 'conflict';
   const isInstalling = details.status === 'installing' || Boolean(installProgress);
   const isOpening = openingAppIds.has(appId);
-  const capabilities = 'capabilities' in details.app ? details.app.capabilities ?? [] : [];
-  const capabilityTranslations = t.appCapabilities as Record<string, Pick<AppCapability, 'title' | 'description'> | undefined>;
-  const localizedCapabilities = capabilities.map((capability) => {
-    const localized = capabilityTranslations[capability.id];
-    return {
-      ...capability,
-      title: localized?.title ?? capability.title ?? capability.id,
-      description: localized?.description ?? capability.description,
-    };
-  });
   const averageRating = 'averageRating' in details.app ? details.app.averageRating : undefined;
   const ratingsCount = 'ratingsCount' in details.app ? details.app.ratingsCount ?? 0 : 0;
   const recentRatings = 'recentRatings' in details.app ? details.app.recentRatings ?? [] : [];
@@ -607,46 +595,6 @@ export function AppView({
           {details.app.description}
         </Typography>
       </Stack>
-      {localizedCapabilities.length > 0 ? (
-        <Stack spacing={1.5}>
-          <Typography variant="h5">{t.appView.capabilitiesTitle}</Typography>
-          <Box
-            sx={{
-              display: 'grid',
-              gap: 1.25,
-              gridTemplateColumns: {
-                xs: '1fr',
-                md: 'repeat(2, minmax(0, 1fr))',
-              },
-            }}
-          >
-            {localizedCapabilities.map((capability) => (
-              <Box
-                key={capability.id}
-                sx={{
-                  border: '1px solid',
-                  borderColor: 'divider',
-                  bgcolor: 'background.paper',
-                  p: 1.5,
-                  display: 'grid',
-                  gridTemplateColumns: '28px minmax(0, 1fr)',
-                  gap: 1,
-                }}
-              >
-                <CheckCircleOutlineRounded color="primary" fontSize="small" />
-                <Stack spacing={0.35} sx={{ minWidth: 0 }}>
-                  <Typography fontWeight={700}>{capability.title}</Typography>
-                  {capability.description ? (
-                    <Typography variant="body2" color="text.secondary">
-                      {capability.description}
-                    </Typography>
-                  ) : null}
-                </Stack>
-              </Box>
-            ))}
-          </Box>
-        </Stack>
-      ) : null}
       {promptTemplates.length > 0 ? (
         <Stack spacing={1.5}>
           <Typography variant="h5">{t.appView.promptTemplatesTitle}</Typography>

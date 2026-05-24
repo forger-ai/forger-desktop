@@ -1,6 +1,6 @@
 import type { AppSummary } from './catalog';
 import type { CatalogApp } from './catalog-app';
-import type { InstallAppResult, LocalNetworkShareResult, LocalNetworkShareStatus, OpenAppResult, RemoteNetworkShareResult, RemoteNetworkShareStatus, StopAppResult, RuntimeStatus } from './runtime';
+import type { CreateLocalAppInput, CreateLocalAppResult, InstallAppResult, LocalNetworkShareResult, LocalNetworkShareStatus, OpenAppResult, RemoteNetworkShareResult, RemoteNetworkShareStatus, StopAppResult, RuntimeStatus } from './runtime';
 import type { BasicActionResult } from './base';
 import type { AppBackupSummary, CreateAppBackupInput, CreateAppBackupResult, DeleteAppBackupInput, RestoreAppBackupInput, RemoteBackupsState, CreateRemoteAppBackupInput, CreateRemoteAppBackupResult, RestoreRemoteAppBackupInput, CloudSyncSettings } from './backups';
 import type { AppDetails, ChatRunStatus, ChatRun, ChatRunEvent, ChatStartRunInput, ChatGetRunInput, ChatCancelRunInput, ChatApprovePermissionInput, ChatApplyRunInput, ChatApplyResult, ChatUndoInput, ChatUndoResult, RendererChatTraceEvent } from './chat';
@@ -23,6 +23,7 @@ export interface ForgerDesktopApi {
   listInstalledApps: () => Promise<AppSummary[]>;
   listCatalogApps: () => Promise<CatalogApp[]>;
   installApp: (appId: string, locale?: string) => Promise<InstallAppResult>;
+  createLocalApp: (input: CreateLocalAppInput, locale?: string) => Promise<CreateLocalAppResult>;
   updateApp: (appId: string, locale?: string) => Promise<InstallAppResult>;
   listBackups: (appId?: string) => Promise<AppBackupSummary[]>;
   createBackup: (input: CreateAppBackupInput) => Promise<CreateAppBackupResult>;

@@ -6,6 +6,7 @@ import type {
   AppPromptTemplate,
   AppPromptTemplateArgument,
 } from '../../shared/types';
+import { renderPromptFile } from '../prompt-builder';
 
 export interface PreparedFileArgument {
   argumentName: string;
@@ -73,6 +74,12 @@ const taskMessages: Record<TaskLocale, Record<TaskMessageKey, string>> = {
 
 export const taskMessage = (locale: TaskLocale, key: TaskMessageKey): string =>
   taskMessages[locale][key];
+
+const taskLocaleName = (locale: TaskLocale): string =>
+  locale === 'en' ? 'English' : 'Spanish';
+
+const escapePromptTemplateMarkers = (value: string): string =>
+  value.replaceAll('{{', '{ {').replaceAll('}}', '} }');
 
 export const sanitizeFilename = (value: string): string =>
   sanitizeDotFilename(value.replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').slice(0, 160));
@@ -217,22 +224,23 @@ export const formatFileArgumentForPrompt = (files: PreparedFileArgument[]): stri
 export const renderPrompt = (
   template: string,
   preparedArguments: PreparedPromptArguments,
+  locale: TaskLocale = 'es',
 ): string => {
   let rendered = template;
   for (const [key, value] of Object.entries(preparedArguments.variables)) {
-    rendered = rendered.replaceAll(`{{${key}}}`, value == null ? '' : String(value));
+    rendered = rendered.replaceAll(`{{${key}}}`, value == null ? '' : escapePromptTemplateMarkers(String(value)));
   }
-  const attachmentLines = preparedArguments.files.length
-    ? preparedArguments.files.map((file) => `- ${file.argumentName}.${file.name}: ${file.path}${file.mimeType ? ` (${file.mimeType})` : ''}`)
-    : ['- No se adjuntaron archivos.'];
-  return [
-    rendered.trim(),
-    '',
-    'ARCHIVOS COMPARTIDOS POR EL USUARIO:',
-    ...attachmentLines,
-    '',
-    'Responde con un resumen final breve en texto para mostrarlo dentro de la app.',
-  ].join('\n');
+  const fileLines = preparedArguments.files.length
+    ? preparedArguments.files.map((file) => {
+        const mimeType = file.mimeType ? ` (${file.mimeType})` : '';
+        return escapePromptTemplateMarkers(`- ${file.argumentName}.${file.name}: ${file.path}${mimeType}`);
+      })
+    : [locale === 'en' ? '- No files were provided.' : '- No se adjuntaron archivos.'];
+  return renderPromptFile('tasks/task-wrapper.md', {
+    taskInstructions: rendered.trim(),
+    fileLines: fileLines.join('\n'),
+    localeName: taskLocaleName(locale),
+  });
 };
 
 export const appendTranscript = async (

@@ -875,7 +875,7 @@ test('app-agent managers complete Codex runs with context, attachments, MCP sess
     );
     assert.equal(completedConversation.run.status, 'completed');
     assert.equal((await conversationManager.get('finance-os', conversation.conversationId)).messages.at(-1).text, 'codex completed task');
-    assert.equal((await conversationManager.getMetadata('finance-os', conversation.conversationId)).initialPromptApplied, true);
+    assert.equal((await conversationManager.getMetadata('finance-os', conversation.conversationId)).initialPromptApplied, undefined);
 
     const task = await taskManager.start('finance-os', {
       templateId: 'review',
@@ -898,7 +898,7 @@ test('app-agent managers complete Codex runs with context, attachments, MCP sess
 
     const calls = await readAgentCalls(roots.root);
     assert.equal(calls.length, 2);
-    assert.ok(calls.some((call) => call.stdin.includes('Agent initial prompt.') && call.args.includes('--image')));
+    assert.ok(calls.some((call) => call.stdin.includes('Summarize this screenshot') && call.args.includes('--image')));
     assert.ok(calls.some((call) => call.stdin.includes('Review cash flow') && call.hasForgerToken && call.hasAppToken));
     await assert.rejects(() => readFile(path.join(appRoot, '.forger', 'tmp', 'codex-task-inputs', task.runId, 'screen.png'), 'utf8'), /ENOENT/);
   } finally {
@@ -1158,7 +1158,7 @@ test('conversation manager executes a codex run with scoped workspace, MCP sessi
       (request) => {
         if (request === './app-agent/process') {
           return {
-            existsDirectory: async (targetPath) => targetPath === appRoot,
+            existsDirectory: async (targetPath) => targetPath === appRoot || targetPath === workspacePath,
             killProcessTree: () => undefined,
             resolveCodexCommand: async (cliPath, pathEntries) => ({
               command: cliPath,
@@ -1277,8 +1277,7 @@ test('conversation manager executes a codex run with scoped workspace, MCP sessi
         assert.equal(commandCalls[0].options.env.FORGER_MCP_TOKEN, 'forger-token');
         assert.equal(commandCalls[0].options.env.FORGER_APP_MCP_TOKEN_FINANCE_OS, 'app-token');
         assert.equal(commandCalls[0].args.includes('--image'), true);
-        assert.match(commandCalls[0].options.stdinText, /Use only app-local data/);
-        assert.match(commandCalls[0].options.stdinText, /Memory: keep it local/);
+        assert.equal(commandCalls[0].options.stdinText, 'Review this image');
         assert.deepEqual(releasedForgerSessions, ['forger-token']);
         assert.deepEqual(releasedAppMcps, [started.activeRun.runId]);
         assert.equal(isolationCalls.some((call) => call.allowed?.includes('app_finance-os')), true);
@@ -1302,6 +1301,18 @@ test('conversation manager executes a codex run with scoped workspace, MCP sessi
           'conversation_outside_workspace_failed',
         );
           assert.equal(failedEvent.run.error, 'agent_run_workspace_outside_app');
+
+          const missingWorkspaceConversation = await manager.create('finance-os', { title: 'Missing workspace' });
+          const missingWorkspace = await manager.sendMessage('finance-os', {
+            conversationId: missingWorkspaceConversation.conversationId,
+            message: 'Try missing workspace',
+            workspacePath: path.join(appRoot, 'missing-workspace'),
+          });
+          const missingWorkspaceFailed = await waitFor(
+            () => events.find((event) => event.type === 'run.failed' && event.run.runId === missingWorkspace.activeRun.runId),
+            'conversation_missing_workspace_failed',
+          );
+          assert.equal(missingWorkspaceFailed.run.error, 'agent_run_workspace_missing');
 
           const oversizedConversation = await manager.create('finance-os', { title: 'Oversized attachment' });
           const oversized = await manager.sendMessage('finance-os', {
@@ -1491,16 +1502,6 @@ test('app-agent manager guard helpers keep no-op edge cases safe', async () => {
       onConversationEvent: (event) => events.push(event),
     });
     const now = new Date().toISOString();
-    assert.equal(await conversationManager.resolveInitialPrompt({
-      conversationId: 'conversation-1',
-      appId: 'finance-os',
-      title: 'Conversation',
-      createdAt: now,
-      updatedAt: now,
-      messages: [],
-      threadId: null,
-      metadata: { agentId: 'advisor' },
-    }), undefined);
     conversationManager.runs.set('orphan-run', {
       runId: 'orphan-run',
       appId: 'finance-os',
@@ -1730,7 +1731,7 @@ test('conversation manager executes a claude run with resume state and cleans MC
         assert.equal(commandCalls[0].options.env.FORGER_MCP_TOKEN, 'claude-token');
         assert.equal(commandCalls[0].args.includes('--resume'), true);
         assert.equal(commandCalls[0].args.includes('claude-session-old'), true);
-        assert.match(commandCalls[0].args[1], /Use the Claude-only instructions/);
+        assert.equal(commandCalls[0].args[1], 'continue with Claude');
         const mcpConfigIndex = commandCalls[0].args.indexOf('--mcp-config');
         assert.notEqual(mcpConfigIndex, -1);
         assert.equal(await readFile(commandCalls[0].args[mcpConfigIndex + 1], 'utf8').then(() => 'exists', () => 'removed'), 'removed');

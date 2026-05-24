@@ -7,8 +7,11 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const {
-  buildAppAgentPrompt,
   buildConversationRecoveryContext,
+  buildManifestAgentRecoveryPrompt,
+  buildManifestAgentResumePrompt,
+  buildManifestAgentStartPrompt,
+  buildManifestAgentSteerPrompt,
   defaultAgentRuntime,
   extensionForMimeType,
   isMissingProviderThread,
@@ -237,25 +240,14 @@ test('app-agent process helpers reject inactive commands through timeout', async
   }), /codex_timeout_after_50ms/);
 });
 
-test('conversation helpers serialize public state and build runtime-envelope prompts', () => {
-  assert.equal(buildAppAgentPrompt('  hello  ', undefined), 'hello');
-  assert.match(buildAppAgentPrompt('hi', '"plain json"'), /Contexto actual de la app:\n"plain json"/);
-  assert.match(buildAppAgentPrompt('hi', '{bad json'), /Contexto actual de la app:\n\{bad json/);
-  assert.match(buildAppAgentPrompt('hi', JSON.stringify({ runtime_contract: 'Do it', value: 1 })), /Interface objective:\nFollow the current app interface objective/);
-  const prompt = buildAppAgentPrompt(
-    'Apply the change',
-    JSON.stringify({
-      runtime_contract: 'Use declared MCP tools only.',
-      interface_objective: 'Update the visible list.',
-      task_id: 7,
-    }),
-    'Initial instructions',
+test('conversation helpers serialize public state and build manifest-first prompts', () => {
+  assert.equal(buildManifestAgentStartPrompt('  # Start\nDo it.  '), '# Start\nDo it.');
+  assert.equal(buildManifestAgentResumePrompt('  # Resume\nContinue.  '), '# Resume\nContinue.');
+  assert.equal(buildManifestAgentSteerPrompt('  # Steer\nAdjust.  '), '# Steer\nAdjust.');
+  assert.equal(
+    buildManifestAgentRecoveryPrompt('# Resume\nContinue.', 'user: old\n\nassistant: prior'),
+    '# Resume\nContinue.\n\n# Previous Messages\nuser: old\n\nassistant: prior',
   );
-  assert.match(prompt, /Initial instructions/);
-  assert.match(prompt, /Runtime contract:\nUse declared MCP tools only\./);
-  assert.match(prompt, /Interface objective:\nUpdate the visible list\./);
-  assert.match(prompt, /"task_id": 7/);
-  assert.doesNotMatch(prompt, /runtime_contract/);
 
   const recovery = buildConversationRecoveryContext({
     messages: [
@@ -396,11 +388,19 @@ test('task helpers validate arguments, render prompts, and parse progress states
   assert.match(renderPrompt('Review {{category}} {{doc}}', {
     variables: { category: 'tax', doc: formatFileArgumentForPrompt(files) },
     files,
-  }), /ARCHIVOS COMPARTIDOS POR EL USUARIO:\n- doc\.report\.pdf: \/tmp\/report\.pdf \(application\/pdf\)/);
+  }), /# User-Provided Files\n\n- doc\.report\.pdf: \/tmp\/report\.pdf \(application\/pdf\)/);
   assert.match(renderPrompt('Review {{missing}}', {
     variables: { missing: null },
     files: [],
-  }), /ARCHIVOS COMPARTIDOS POR EL USUARIO:\n- No se adjuntaron archivos\./);
+  }), /# User-Provided Files\n\n- No se adjuntaron archivos\.[\s\S]*Respond in Spanish/);
+  assert.match(renderPrompt('Review {{note}}', {
+    variables: { note: 'literal {{braces}} from user' },
+    files: [],
+  }, 'en'), /literal \{ \{braces\} \} from user[\s\S]*Respond in English/);
+  assert.match(renderPrompt('Review {{doc}}', {
+    variables: { doc: '/tmp/{{file}}.csv' },
+    files: [{ argumentName: 'doc', name: '{{file}}.csv', path: '/tmp/{{file}}.csv', mimeType: 'text/csv' }],
+  }, 'en'), /doc\.\{ \{file\} \}\.csv: \/tmp\/\{ \{file\} \}\.csv/);
   assert.equal(progressFromTaskOutput(JSON.stringify({ type: 'turn.started' }), 'en'), 'The assistant is working on the document.');
   assert.equal(progressFromTaskOutput(JSON.stringify({ type: 'item.started', item: { type: 'mcp_tool_call' } }), 'en'), 'Using internal Finance OS tools.');
   assert.equal(progressFromTaskOutput(JSON.stringify({

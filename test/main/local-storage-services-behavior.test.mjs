@@ -1653,12 +1653,13 @@ test('DevCatalogService preserves explicit catalog fields and blocks symlinked i
   await fs.writeFile(path.join(appDir, 'manifest.json'), JSON.stringify({
     name: 'custom-app',
     version: '3.4.5',
+    localNetworkShare: true,
+    remoteTunnel: true,
     catalog: {
       display_name: 'Custom App',
       status: 'stable',
       runtime_stack: 'custom_stack',
       supported_platforms: ['darwin_arm64'],
-      capabilities: ['files', { id: 'gmail' }],
       icon_path: 'assets/icon.png',
     },
   }), 'utf8');
@@ -1677,7 +1678,9 @@ test('DevCatalogService preserves explicit catalog fields and blocks symlinked i
   assert.equal(entry.status, 'stable');
   assert.equal(entry.runtime_stack, 'custom_stack');
   assert.deepEqual(entry.latest_version.supported_platforms, ['darwin_arm64']);
-  assert.deepEqual(entry.latest_version.capabilities, ['files', { id: 'gmail' }]);
+  assert.equal(entry.latest_version.localNetworkShare, true);
+  assert.equal(entry.latest_version.remoteTunnel, true);
+  assert.equal(entry.latest_version.capabilities, undefined);
   assert.equal(entry.latest_version.changelog.changes.at(-1), 'Branch local no disponible');
 
   const pngAsset = streamResponse();
@@ -1747,9 +1750,9 @@ test('DevCatalogService uses manifest fallbacks and keeps dev bundles free of ig
   await fs.writeFile(path.join(appDir, '.version.dev'), '   \n', 'utf8');
   await fs.writeFile(path.join(appDir, 'manifest.json'), JSON.stringify({
     description: 'Fallback app',
-    catalog: {
-      permissions: ['user_selected_imports'],
-    },
+    localNetworkShare: false,
+    remoteTunnel: false,
+    catalog: {},
     agents: 'not-an-array',
     promptTemplates: 'not-an-array',
     tools: [],
@@ -1775,7 +1778,9 @@ test('DevCatalogService uses manifest fallbacks and keeps dev bundles free of ig
   assert.equal(entry.runtime_stack, 'vite_fastapi_sqlite');
   assert.equal(entry.icon_url, undefined);
   assert.equal(entry.latest_version.version, '0.0.0-dev');
-  assert.deepEqual(entry.latest_version.capabilities, ['user_selected_imports']);
+  assert.equal(entry.latest_version.localNetworkShare, false);
+  assert.equal(entry.latest_version.remoteTunnel, false);
+  assert.equal(entry.latest_version.capabilities, undefined);
   assert.equal(entry.latest_version.agents, undefined);
   assert.equal(entry.latest_version.prompt_templates, undefined);
   assert.equal(entry.latest_version.tools, undefined);

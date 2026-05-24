@@ -25,6 +25,17 @@ import type {
 } from '../../shared/types';
 import type { AppRegistry } from '../core/main-process-types';
 import type { IPC_CHANNELS as IpcChannels } from '../../shared/ipc';
+import {
+  buildManifestAgentResumePrompt,
+  buildManifestAgentStartPrompt,
+  buildManifestAgentSteerPrompt,
+  toAppAgentRunSummary,
+  toAppAgentRunSummaryForId,
+  toAppAgentThreadSummary,
+} from '../app-agent/conversation-helpers';
+
+export const REMOVED_FORGER_APP_BRIDGE_MESSAGE =
+  'The in-app forgerApp bridge has been removed. Use the signed Desktop HTTP runtime bridge from your backend instead.';
 
 interface AgentIpcDeps {
   BUILT_IN_CLAUDE_EFFORT: ClaudeEffort;
@@ -166,81 +177,13 @@ export const registerAgentIpcHandlers = (deps: AgentIpcDeps): void => {
     return agentId;
   };
 
-  const conversationToThreadSummary = (conversation: Awaited<ReturnType<AppAgentConversationManager['get']>>) => {
-    if (!conversation) {
-      return null;
-    }
-    return {
-      desktop_thread_id: conversation.conversationId,
-      title: conversation.title,
-      status: conversation.activeRun?.status ?? 'idle',
-      ...(conversation.activeRun ? { active_run: conversationToRunSummary(conversation.conversationId, conversation.activeRun) ?? undefined } : {}),
-      messages: conversation.messages.map((message) => ({
-        id: message.messageId,
-        role: message.role,
-        content: message.text,
-        created_at: message.createdAt,
-      })),
-      ...(conversation.activeRun?.progressLog ? { progressLog: conversation.activeRun.progressLog } : {}),
-    };
-  };
-
-  const conversationToRunSummary = (
-    desktopThreadId: string,
-    run: NonNullable<Awaited<ReturnType<AppAgentConversationManager['get']>>>['activeRun'],
-  ) => {
-    if (!run) {
-      return null;
-    }
-    return {
-      desktop_thread_id: desktopThreadId,
-      desktop_run_id: run.runId,
-      status: run.status,
-      ...(run.error ? { error: run.error } : {}),
-      ...(run.progressLog ? { progressLog: run.progressLog } : {}),
-    };
-  };
-
-  const handleAppAgentThreadCreate = async (event: IpcMainInvokeEvent, input: AppAgentThreadCreateInput) => {
-    const appId = resolveAppIdForWebContents(event.sender.id);
-    if (!appId || !appAgentConversationManager) {
-      throw new Error('app_agent_thread_unavailable');
-    }
-    const initialPrompt = typeof input?.initialPrompt === 'string' ? input.initialPrompt.trim() : '';
-    if (!initialPrompt) {
-      throw new Error('agent_thread_initial_prompt_required');
-    }
-    const conversation = await appAgentConversationManager.create(appId, {
-      title: input.title,
-      agentId: input.manifestAgentId,
-      metadata: {
-        ...(input.metadata ?? {}),
-        agentId: input.manifestAgentId ?? '',
-        manifestAgentId: input.manifestAgentId ?? '',
-        initialPrompt,
-      },
-    });
-    return conversationToThreadSummary(conversation);
+  const handleAppAgentThreadCreate = async (_event: IpcMainInvokeEvent, _input: AppAgentThreadCreateInput) => {
+    throw new Error(REMOVED_FORGER_APP_BRIDGE_MESSAGE);
   };
   ipcMain.handle(IPC_CHANNELS.appAgentThreadCreate, handleAppAgentThreadCreate);
 
-  const handleAppAgentThreadRunStart = async (event: IpcMainInvokeEvent, input: AppAgentThreadRunStartInput) => {
-    const appId = resolveAppIdForWebContents(event.sender.id);
-    if (!appId || !appAgentConversationManager) {
-      throw new Error('app_agent_thread_unavailable');
-    }
-    const conversation = await appAgentConversationManager.sendMessage(appId, {
-      conversationId: input.desktopThreadId,
-      message: input.message,
-      context: input.context,
-      workspacePath: input.workspacePath,
-      ...normalizeAppAgentRuntime(input.runtime),
-    });
-    return conversationToRunSummary(input.desktopThreadId, conversation.activeRun) ?? {
-      desktop_thread_id: input.desktopThreadId,
-      desktop_run_id: '',
-      status: 'queued',
-    };
+  const handleAppAgentThreadRunStart = async (_event: IpcMainInvokeEvent, _input: AppAgentThreadRunStartInput) => {
+    throw new Error(REMOVED_FORGER_APP_BRIDGE_MESSAGE);
   };
   ipcMain.handle(IPC_CHANNELS.appAgentThreadRunStart, handleAppAgentThreadRunStart);
 
@@ -249,7 +192,7 @@ export const registerAgentIpcHandlers = (deps: AgentIpcDeps): void => {
     if (!appId || !appAgentConversationManager) {
       return null;
     }
-    return conversationToThreadSummary(await appAgentConversationManager.get(appId, desktopThreadId));
+    return toAppAgentThreadSummary(await appAgentConversationManager.get(appId, desktopThreadId));
   };
   ipcMain.handle(IPC_CHANNELS.appAgentThreadGet, handleAppAgentThreadGet);
 
@@ -263,8 +206,7 @@ export const registerAgentIpcHandlers = (deps: AgentIpcDeps): void => {
       return null;
     }
     const conversation = await appAgentConversationManager.get(appId, desktopThreadId);
-    const run = conversation?.activeRun?.runId === desktopRunId ? conversation.activeRun : undefined;
-    return conversationToRunSummary(desktopThreadId, run);
+    return toAppAgentRunSummaryForId(conversation, desktopThreadId, desktopRunId);
   };
   ipcMain.handle(IPC_CHANNELS.appAgentThreadRunGet, handleAppAgentThreadRunGet);
 
@@ -277,17 +219,8 @@ export const registerAgentIpcHandlers = (deps: AgentIpcDeps): void => {
   };
   ipcMain.handle(IPC_CHANNELS.appAgentThreadRunCancel, handleAppAgentThreadRunCancel);
 
-  const handleAppAgentThreadRunSteer = async (event: IpcMainInvokeEvent, input: AppAgentThreadRunSteerInput) => {
-    const appId = resolveAppIdForWebContents(event.sender.id);
-    if (!appId || !appAgentConversationManager) {
-      throw new Error('app_agent_thread_unavailable');
-    }
-    return await appAgentConversationManager.steerRun(appId, input.desktopThreadId, input.desktopRunId, {
-      message: input.message,
-      context: input.context,
-      workspacePath: input.workspacePath,
-      ...normalizeAppAgentRuntime(input.runtime),
-    });
+  const handleAppAgentThreadRunSteer = async (_event: IpcMainInvokeEvent, _input: AppAgentThreadRunSteerInput) => {
+    throw new Error(REMOVED_FORGER_APP_BRIDGE_MESSAGE);
   };
   ipcMain.handle(IPC_CHANNELS.appAgentThreadRunSteer, handleAppAgentThreadRunSteer);
 
@@ -314,11 +247,11 @@ export const registerAgentIpcHandlers = (deps: AgentIpcDeps): void => {
     });
     const started = await appAgentConversationManager.sendMessage(appId, {
       conversationId: conversation.conversationId,
-      message: prompt,
+      message: buildManifestAgentStartPrompt(prompt),
       workspacePath: input.workspacePath,
       ...normalizeAppAgentRuntime(input.runtime),
     });
-    const summary = conversationToThreadSummary(started);
+    const summary = toAppAgentThreadSummary(started);
     if (!summary) {
       throw new Error('manifest_agent_thread_start_failed');
     }
@@ -342,11 +275,11 @@ export const registerAgentIpcHandlers = (deps: AgentIpcDeps): void => {
     const { prompt } = await resolveManifestAgentPromptRun(appId, agentId, 'resume', input.variables);
     const conversation = await appAgentConversationManager.sendMessage(appId, {
       conversationId: threadId,
-      message: prompt,
+      message: buildManifestAgentResumePrompt(prompt),
       workspacePath: input.workspacePath,
       ...normalizeAppAgentRuntime(input.runtime),
     });
-    return conversationToRunSummary(threadId, conversation.activeRun) ?? {
+    return toAppAgentRunSummary(threadId, conversation.activeRun, conversation.messages) ?? {
       desktop_thread_id: threadId,
       desktop_run_id: '',
       status: 'queued',
@@ -367,7 +300,7 @@ export const registerAgentIpcHandlers = (deps: AgentIpcDeps): void => {
     const agentId = await manifestAgentIdForThread(appId, threadId);
     const { prompt } = await resolveManifestAgentPromptRun(appId, agentId, 'steer', input.variables);
     return await appAgentConversationManager.steerRun(appId, threadId, runId, {
-      message: prompt,
+      message: buildManifestAgentSteerPrompt(prompt),
       workspacePath: input.workspacePath,
       ...normalizeAppAgentRuntime(input.runtime),
     });

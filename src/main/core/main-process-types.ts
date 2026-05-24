@@ -16,6 +16,9 @@ export interface InstalledAppRecord {
   requiredPythonVersion: string;
   originalCommitSha?: string;
   installedAt?: string;
+  privateLocal?: boolean;
+  localNetworkShareSupported?: boolean;
+  remoteTunnelSupported?: boolean;
   pendingUpdate?: {
     fromVersion: string;
     targetVersion: string;
@@ -87,6 +90,7 @@ export interface AppManifest {
   name?: string;
   version?: string;
   description?: string;
+  catalog?: unknown;
   changelog?: VersionChangelog[];
   promptTemplates?: unknown;
   codexConversation?: unknown;
@@ -106,6 +110,7 @@ export interface AppManifest {
     enabled?: boolean;
     defaultDelivery?: 'persistent' | 'ephemeral';
   };
+  localNetworkShare?: boolean;
   remoteTunnel?: boolean;
 }
 

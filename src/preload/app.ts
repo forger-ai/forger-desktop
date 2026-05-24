@@ -251,7 +251,77 @@ const api: ForgerAppApi = {
   },
 };
 
-contextBridge.exposeInMainWorld('forgerApp', api);
+const REMOVED_FORGER_APP_BRIDGE_MESSAGE =
+  'The in-app forgerApp bridge has been removed. Use the signed Desktop HTTP runtime bridge from your backend instead.';
+
+const rejectRemovedBridge = async (): Promise<never> => {
+  throw new Error(REMOVED_FORGER_APP_BRIDGE_MESSAGE);
+};
+
+const noopSubscription = () => () => undefined;
+
+const removedApi: ForgerAppApi = {
+  getContext: rejectRemovedBridge,
+  getAiSubscriptionStatus: rejectRemovedBridge,
+  selectExternalFolder: rejectRemovedBridge,
+  tools: {
+    listAvailable: rejectRemovedBridge,
+    getStatus: rejectRemovedBridge,
+    call: rejectRemovedBridge,
+  },
+  messages: {
+    sendMessage: rejectRemovedBridge,
+    listMessages: rejectRemovedBridge,
+    onMessage: noopSubscription,
+  },
+  agentRuns: {
+    createAgentThread: rejectRemovedBridge,
+    startAgentThreadRun: rejectRemovedBridge,
+    getAgentThread: rejectRemovedBridge,
+    getAgentRun: rejectRemovedBridge,
+    cancelAgentThreadRun: rejectRemovedBridge,
+    steerAgentThreadRun: rejectRemovedBridge,
+    onAgentThreadEvent: noopSubscription,
+  },
+  agents: {
+    start: rejectRemovedBridge,
+    resume: rejectRemovedBridge,
+    steer: rejectRemovedBridge,
+    stop: rejectRemovedBridge,
+    getThread: rejectRemovedBridge,
+    getRun: rejectRemovedBridge,
+    onEvent: noopSubscription,
+  },
+  startAgentTask: rejectRemovedBridge,
+  getAgentTask: rejectRemovedBridge,
+  cancelAgentTask: rejectRemovedBridge,
+  approveAgentTaskPermission: rejectRemovedBridge,
+  onAgentTaskUpdated: noopSubscription,
+  startCodexTask: rejectRemovedBridge,
+  getCodexTask: rejectRemovedBridge,
+  cancelCodexTask: rejectRemovedBridge,
+  approveCodexTaskPermission: rejectRemovedBridge,
+  onCodexTaskUpdated: noopSubscription,
+  createAgentConversation: rejectRemovedBridge,
+  sendAgentConversationMessage: rejectRemovedBridge,
+  getAgentConversation: rejectRemovedBridge,
+  listAgentConversations: rejectRemovedBridge,
+  deleteAgentConversation: rejectRemovedBridge,
+  cancelAgentConversationRun: rejectRemovedBridge,
+  approveAgentConversationPermission: rejectRemovedBridge,
+  onAgentConversationEvent: noopSubscription,
+  createCodexConversation: rejectRemovedBridge,
+  sendCodexConversationMessage: rejectRemovedBridge,
+  getCodexConversation: rejectRemovedBridge,
+  listCodexConversations: rejectRemovedBridge,
+  deleteCodexConversation: rejectRemovedBridge,
+  cancelCodexConversationRun: rejectRemovedBridge,
+  approveCodexConversationPermission: rejectRemovedBridge,
+  onCodexConversationEvent: noopSubscription,
+};
+
+void api;
+contextBridge.exposeInMainWorld('forgerApp', removedApi);
 
 type PermissionRequestPayload = {
   requestId: string;

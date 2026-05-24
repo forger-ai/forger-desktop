@@ -1,13 +1,16 @@
 import type fs from 'node:fs/promises';
 import type path from 'node:path';
 import { FileLibrary } from '../file-library';
-import { buildForgerAppAgentsMarkdown } from '../prompts/apps-base';
+import { buildForgerAppAgentsMarkdown } from '../prompt-builder/apps-base';
 import {
   FORGER_AGENT_CONTRACT_MARKER,
   FORGER_AGENT_CONTRACT_MARKER_PREFIX,
   buildGlobalForgerAgentsMarkdown,
-} from '../prompts/forger-base';
-import { buildForgerOfficialToolSkillTemplates } from '../prompts/official-tools';
+} from '../prompt-builder/forger-base';
+import {
+  buildInstalledAppSkillTemplates,
+  buildForgerWorkspaceSkillTemplates,
+} from '../prompt-builder/official-tools';
 import type { CatalogApp } from '../../shared/types';
 import type { AppManifest, AppManifestStack, AppRegistry, StackSkillTemplate } from '../core/main-process-types';
 
@@ -29,13 +32,6 @@ interface AppContextSupportDeps {
 
 export const createAppContextSupportController = (deps: AppContextSupportDeps) => {
   const { fs, path, catalogApps, registry, fileLibraryState, getPrivateDataRoot, getForgerMetadataRoot, appLifecycleLocks, forgerBackendClient } = deps;
-const normalizeToken = (value: string | undefined): string => {
-  if (!value) {
-    return '';
-  }
-  return value.trim().toLowerCase();
-};
-
 const ensurePathInside = (rootPath: string, targetPath: string): boolean => {
   const relative = path.relative(rootPath, targetPath);
   const normalizedRelative = process.platform === 'win32' ? relative.toLowerCase() : relative;
@@ -70,7 +66,7 @@ const ensureGlobalAgentsContext = async (forgerHomeRoot: string): Promise<void> 
   const agentsPath = path.join(forgerHomeRoot, 'AGENTS.md');
   await fs.writeFile(agentsPath, buildGlobalForgerAgentsMarkdown(), 'utf8');
   const skillsRoot = path.join(forgerHomeRoot, '.agents', 'skills');
-  await writeSkillTemplates(skillsRoot, buildForgerOfficialToolSkillTemplates());
+  await writeSkillTemplates(skillsRoot, buildForgerWorkspaceSkillTemplates());
 };
 
 const shouldWriteAppAgentsMarkdown = async (agentsPath: string): Promise<boolean> => {
@@ -86,107 +82,38 @@ const shouldWriteAppAgentsMarkdown = async (agentsPath: string): Promise<boolean
   return !current.includes(FORGER_AGENT_CONTRACT_MARKER);
 };
 
-const buildStackSkillTemplates = (stack: AppManifestStack, hasAppMcp = false): StackSkillTemplate[] => {
-  const templates: StackSkillTemplate[] = buildForgerOfficialToolSkillTemplates();
-  const backend = stack.backend ?? {};
-  const frontend = stack.frontend ?? {};
-  const backendLanguage = normalizeToken(backend.language);
-  const backendFramework = normalizeToken(backend.framework);
-  const frontendFramework = normalizeToken(frontend.framework);
-  const frontendUi = normalizeToken(frontend.ui);
-
-  if (backendLanguage === 'python') {
-    templates.push({
-      id: 'forger-python-backend',
-      description: 'Best practices for Python backends in Forger.',
-      body: [
-        '---',
-        'name: forger-python-backend',
-        'description: Use small, safe Python backend changes focused on validation and integrity.',
-        '---',
-        '',
-        '- Keep domain validations before persisting data.',
-        '- Avoid breaking payload compatibility without explaining the impact.',
-        '- Prefer clear, testable changes that are easy to revert.',
-      ].join('\n'),
-    });
+const normalizeToolActions = (manifest: AppManifest | null): string[] => {
+  const tools = manifest?.tools;
+  if (!tools || typeof tools !== 'object' || Array.isArray(tools)) {
+    return [];
   }
-
-  if (backendFramework === 'fastapi') {
-    templates.push({
-      id: 'forger-fastapi-contracts',
-      description: 'Guidance for contracts and safety in FastAPI endpoints.',
-      body: [
-        '---',
-        'name: forger-fastapi-contracts',
-        'description: Adjust FastAPI routes while preserving contracts and consistent responses for non-technical users.',
-        '---',
-        '',
-        '- Keep HTTP semantics consistent.',
-        '- Do not remove response fields used by the frontend without a migration plan.',
-        '- Return errors with clear, actionable messages.',
-      ].join('\n'),
-    });
+  const declaredTools = tools as { required?: unknown; optional?: unknown };
+  const required = Array.isArray(declaredTools.required) ? declaredTools.required : [];
+  const optional = Array.isArray(declaredTools.optional) ? declaredTools.optional : [];
+  const entries = [...required, ...optional];
+  const actions = new Set<string>();
+  for (const entry of entries) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      continue;
+    }
+    const rawActions = (entry as { actions?: unknown }).actions;
+    if (!Array.isArray(rawActions)) {
+      continue;
+    }
+    for (const action of rawActions) {
+      if (typeof action === 'string' && action.trim()) {
+        actions.add(action.trim());
+      }
+    }
   }
-
-  if (frontendFramework === 'react') {
-    templates.push({
-      id: 'forger-react-ui',
-      description: 'React UI best practices for non-technical users.',
-      body: [
-        '---',
-        'name: forger-react-ui',
-        'description: Prioritize clear flows with saved versions, adjustments, and return-to-previous-version behavior in React interfaces.',
-        '---',
-        '',
-        '- Use simple action-oriented copy.',
-        '- Avoid ambiguous states; clearly show success, error, and next steps.',
-        '- Keep components predictable and easy to extend.',
-        '- When the user asks for visible changes, describe screens, buttons, and flows instead of implementation.',
-      ].join('\n'),
-    });
-  }
-
-  if (frontendUi === 'mui') {
-    templates.push({
-      id: 'forger-mui-consistency',
-      description: 'Visual consistency and accessibility in MUI.',
-      body: [
-        '---',
-        'name: forger-mui-consistency',
-        'description: Use consistent MUI patterns to keep the experience stable.',
-        '---',
-        '',
-        '- Reuse MUI components before creating ad hoc variants.',
-        '- Keep visual hierarchy simple and messages easy to understand.',
-        '- Do not introduce styles that make maintenance harder.',
-      ].join('\n'),
-    });
-  }
-
-  if (hasAppMcp) {
-    templates.push({
-      id: 'forger-app-mcp-data-tools',
-      description: 'Use app MCP tools for structured Forger app data operations.',
-      body: [
-        '---',
-        'name: forger-app-mcp-data-tools',
-        'description: Prefer app MCP tools when app data needs to be read, exposed, created, edited, deleted, imported, or validated.',
-        '---',
-        '',
-        '- Review the app `AGENTS.md` and `manifest.json` before using tools.',
-        '- Use app MCP tools before scripts, direct database access, or ad hoc endpoint calls for structured data operations.',
-        '- Treat MCP tools as internal agent tools, not user-visible commands.',
-        '- Let MCP validation errors shape the user-facing answer: explain missing data, rejected records, invalid categories, duplicates, or unsupported operations in product language.',
-        '- If MCP does not expose the needed operation, fall back to documented scripts or endpoints when they preserve app validations.',
-        '- Avoid direct SQL writes unless there is no MCP or documented tool for the task and the change is narrow, validated, and safe.',
-        '- Confirm before destructive or irreversible data changes.',
-      ].join('\n'),
-    });
-  }
-
-  return templates;
+  return [...actions].sort();
 };
+
+const buildInstalledAppContextSkillTemplates = (allowedOfficialToolActions: string[] = []): StackSkillTemplate[] =>
+  buildInstalledAppSkillTemplates(allowedOfficialToolActions);
+
+const buildStackSkillTemplates = (_stack: AppManifestStack, _hasAppMcp = false, allowedOfficialToolActions: string[] = []): StackSkillTemplate[] =>
+  buildInstalledAppContextSkillTemplates(allowedOfficialToolActions);
 
 const writeSkillTemplates = async (skillsRoot: string, templates: StackSkillTemplate[]): Promise<void> => {
   for (const template of templates) {
@@ -203,8 +130,8 @@ const copyDirectory = async (sourceDir: string, targetDir: string): Promise<void
   await fs.cp(sourceDir, targetDir, { recursive: true, force: true });
 };
 
-const writeStackSkills = async (skillsRoot: string, stack: AppManifestStack, hasAppMcp = false): Promise<void> => {
-  await writeSkillTemplates(skillsRoot, buildStackSkillTemplates(stack, hasAppMcp));
+const writeStackSkills = async (skillsRoot: string, stack: AppManifestStack, hasAppMcp = false, allowedOfficialToolActions: string[] = []): Promise<void> => {
+  await writeSkillTemplates(skillsRoot, buildStackSkillTemplates(stack, hasAppMcp, allowedOfficialToolActions));
 };
 
 const copyAppSkills = async (installDir: string, skillsRoot: string, manifest: AppManifest): Promise<void> => {
@@ -240,27 +167,12 @@ const normalizeInstalledAgentContext = async (installDir: string, appId: string)
     await fs.writeFile(agentsPath, buildForgerAppAgentsMarkdown(appId, manifest), 'utf8');
   }
 
-  const hasStack = hasValidManifestStack(manifest);
-  const hasAppMcp = Boolean(
-    manifest?.mcp
-    && typeof manifest.mcp === 'object'
-    && (!manifest.mcp.type || manifest.mcp.type === 'http')
-    && typeof manifest.mcp.command === 'string',
-  );
-  const hasAppSkills = Boolean(manifest && Array.isArray(manifest.skills) && manifest.skills.length > 0);
-  if (!hasStack && !hasAppSkills && !hasAppMcp) {
-    return;
-  }
+  const allowedOfficialToolActions = normalizeToolActions(manifest);
 
   const skillsRoot = path.join(installDir, '.agents', 'skills');
   await fs.rm(skillsRoot, { recursive: true, force: true });
   await fs.mkdir(skillsRoot, { recursive: true });
-  if (hasStack) {
-    await writeStackSkills(skillsRoot, manifest.stack, hasAppMcp);
-  }
-  if (!hasStack && hasAppMcp) {
-    await writeStackSkills(skillsRoot, {}, hasAppMcp);
-  }
+  await writeSkillTemplates(skillsRoot, buildInstalledAppContextSkillTemplates(allowedOfficialToolActions));
   if (manifest) {
     await copyAppSkills(installDir, skillsRoot, manifest);
   }
@@ -308,5 +220,5 @@ const listCatalogFromBackend = async (): Promise<CatalogApp[]> => {
   return forgerBackendClient ? await forgerBackendClient.listCatalogApps() : [];
 };
 
-  return { hasValidManifestStack, ensureGlobalAgentsContext, shouldWriteAppAgentsMarkdown, buildStackSkillTemplates, writeSkillTemplates, copyDirectory, writeStackSkills, copyAppSkills, normalizeInstalledAgentContext, resolveSelectedAppDisplayName, getFileLibrary, withAppLifecycleLock, listCatalogFromBackend };
+  return { hasValidManifestStack, ensureGlobalAgentsContext, shouldWriteAppAgentsMarkdown, buildInstalledAppContextSkillTemplates, buildStackSkillTemplates, writeSkillTemplates, copyDirectory, writeStackSkills, copyAppSkills, normalizeInstalledAgentContext, resolveSelectedAppDisplayName, getFileLibrary, withAppLifecycleLock, listCatalogFromBackend };
 };

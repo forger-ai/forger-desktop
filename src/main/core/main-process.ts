@@ -67,6 +67,7 @@ import { registerAgentIpcHandlers } from '../ipc/agent-handlers';
 import { registerMainIpcHandlers } from '../ipc/main-handlers';
 import { createInstalledAppRuntimeController } from '../runtime/installed-app-runtime';
 import { createInstalledAppLifecycleController } from '../installed-apps/lifecycle';
+import { createLocalAppCreator } from '../installed-apps/local-app-creator';
 import { createCommandGitController } from '../runtime/command-git';
 import { createAgentAuthController } from '../runtime/agent-auth';
 import { createCloudSocialRelayController } from '../cloud/social-relay';
@@ -102,14 +103,14 @@ import {
   FORGER_AGENT_CONTRACT_MARKER_PREFIX,
   FORGER_AGENT_CONTRACT_VERSION,
   buildGlobalForgerAgentsMarkdown,
-} from '../prompts/forger-base';
+} from '../prompt-builder/forger-base';
 import { buildFailureDiagnostic } from '../../shared/error-diagnostics';
-import { buildForgerAppAgentsMarkdown } from '../prompts/apps-base';
-import { buildCodexPromptForFreeChat, buildCodexPromptWithAppContext } from '../prompts/user-message';
+import { buildForgerAppAgentsMarkdown } from '../prompt-builder/apps-base';
+import { buildCodexPromptForFreeChat, buildCodexPromptWithAppContext } from '../prompt-builder/user-message';
 import {
   buildForgerOfficialToolSkillTemplates,
   buildForgerOfficialToolsPromptSection,
-} from '../prompts/official-tools';
+} from '../prompt-builder/official-tools';
 import { SecretsStore, appSecretEnvName, isSecretsVaultUnavailableError } from '../secrets-store';
 import type {
   AgentToolSettings,
@@ -181,6 +182,8 @@ import type {
   CodexReasoningEffort,
   DesktopErrorReportPreview,
   ConnectAppSecretInput,
+  CreateLocalAppInput,
+  CreateLocalAppResult,
   CreateUserSecretInput,
   DeleteUserSecretInput,
   DesktopUpdateState,
@@ -428,6 +431,8 @@ const createManifestSupportDeps = () => ({
   extractArchive,
   forgerAccount,
   forgerBackendClient,
+  getForgerAccount: () => forgerAccount,
+  getForgerBackendClient: () => forgerBackendClient,
   fs,
   getBackupsRoot,
   getCloudIdentityStore,
@@ -799,6 +804,8 @@ const getVenvExecutables = (backendDir: string): { python: string; pip: string }
 const installBackendDependenciesWithUv = async (pythonPath: string, backendDir: string, appId: string): Promise<void> => await getInstalledAppLifecycleController().installBackendDependenciesWithUv(pythonPath, backendDir, appId);
 const ensureBackendPythonEnvironment = async (pythonPath: string, backendDir: string, appId: string, reason: string): Promise<void> => await getInstalledAppLifecycleController().ensureBackendPythonEnvironment(pythonPath, backendDir, appId, reason);
 const installAppRuntime = async (appId: string, localeInput?: string): Promise<InstallAppResult> => await getInstalledAppLifecycleController().installAppRuntime(appId, localeInput);
+const localAppCreator = createLocalAppCreator({ DEFAULT_NODE_VERSION, DEFAULT_PYTHON_VERSION, appendInstallLog, app, emitInstallProgress, failureDiagnostic, fs, getPrivateAppsRoot, installAppDependencies, normalizeInstalledAgentContext, path, registry, serializeErrorForInstallLog, upsertInstalledRecord, ensureAppGitRepository, ensureUserModifiedBranch, getOriginalCommitSha });
+const createLocalAppFromSkeleton = async (input: CreateLocalAppInput, localeInput?: string): Promise<CreateLocalAppResult> => await localAppCreator.createLocalAppFromSkeleton(input, localeInput);
 const updateAppRuntime = async (appId: string, localeInput?: string): Promise<InstallAppResult> => await getInstalledAppLifecycleController().updateAppRuntime(appId, localeInput);
 const restoreAppUserVersionRuntime = async (appId: string): Promise<BasicActionResult> => await getInstalledAppLifecycleController().restoreAppUserVersionRuntime(appId);
 const readOperationSummaries = async (appId: string): Promise<AppOperationSummary[]> => await getInstalledAppLifecycleController().readOperationSummaries(appId);
@@ -910,6 +917,10 @@ function getLocalNetworkShareStatus(appId: string): ReturnType<typeof localNetwo
 }
 
 async function startLocalNetworkShare(appId: string): ReturnType<typeof localNetworkShareController.start> {
+  const installDir = registry.apps[appId]?.installDir; const manifest = installDir ? await resolveInstalledManifest(installDir) : null;
+  if (manifest?.localNetworkShare !== true) {
+    return { success: false, userMessage: 'Esta app no soporta red local.', technicalCode: 'local_network_share_not_supported', status: { active: false, appId } };
+  }
   return await localNetworkShareController.start(appId);
 }
 
@@ -1027,6 +1038,7 @@ const getMainProcessIpcDeps = () => ({
   cloudSyncSettings,
   connectClaudeAuth,
   connectCodexAuth,
+  createLocalAppFromSkeleton,
   createRemoteAppBackup,
   decryptCloudMessage,
   decryptCloudMessages,

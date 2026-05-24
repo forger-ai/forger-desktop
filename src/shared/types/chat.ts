@@ -155,6 +155,7 @@ export interface RendererChatTraceEvent {
 export interface ChatStartRunInput {
   appId?: string | null;
   prompt: string;
+  resumePrompt?: string;
   threadId?: string | null;
   conversationHistory?: Array<{
     role: 'assistant' | 'user';

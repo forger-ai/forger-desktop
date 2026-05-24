@@ -1,0 +1,4 @@
+{{manifestPrompt}}
+
+# Previous Messages
+{{chatHistory}}
