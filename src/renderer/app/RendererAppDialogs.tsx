@@ -78,6 +78,10 @@ export function RendererAppDialogs({ controller }: RendererAppDialogsProps) {
     closeErrorReportDialog,
     copyErrorReportDetails,
     submitErrorReport,
+    conversationDiagnosticDialog,
+    closeConversationDiagnosticDialog,
+    copyConversationDiagnosticReport,
+    submitConversationDiagnosticReport,
     bannerMessage,
     setBannerMessage,
     bannerSeverity,
@@ -405,6 +409,49 @@ export function RendererAppDialogs({ controller }: RendererAppDialogsProps) {
             disabled={errorReportDialog.busy || !errorReportDialog.report}
           >
             {t.settings.errorReportSend}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={conversationDiagnosticDialog.open}
+        onClose={closeConversationDiagnosticDialog}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>{t.settings.conversationReportTitle}</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ pt: 0.5 }}>
+            <Typography color="text.secondary">{t.settings.conversationReportBody}</Typography>
+            {conversationDiagnosticDialog.report ? (
+              <TextField
+                fullWidth
+                multiline
+                minRows={10}
+                maxRows={16}
+                label={t.settings.conversationReportDetailsLabel}
+                value={JSON.stringify(conversationDiagnosticDialog.report, null, 2)}
+                InputProps={{ readOnly: true }}
+              />
+            ) : null}
+            {conversationDiagnosticDialog.userMessage ? (
+              <Alert severity="info">{conversationDiagnosticDialog.userMessage}</Alert>
+            ) : null}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeConversationDiagnosticDialog} disabled={conversationDiagnosticDialog.busy}>
+            {t.settings.errorReportNoSend}
+          </Button>
+          <Button onClick={() => void copyConversationDiagnosticReport()} disabled={conversationDiagnosticDialog.busy || !conversationDiagnosticDialog.report}>
+            {t.settings.errorReportCopy}
+          </Button>
+          <Button
+            variant="contained"
+            onClick={() => void submitConversationDiagnosticReport()}
+            disabled={conversationDiagnosticDialog.busy || !conversationDiagnosticDialog.report}
+          >
+            {conversationDiagnosticDialog.busy ? t.settings.conversationReportSending : t.settings.conversationReportSend}
           </Button>
         </DialogActions>
       </Dialog>

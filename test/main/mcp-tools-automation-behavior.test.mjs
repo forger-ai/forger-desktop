@@ -148,6 +148,15 @@ const defaultMcpToolDefinitions = [
     defaultRequiresApproval: false,
   },
   {
+    id: 'forger_test_app_prompt',
+    packageId: 'forger',
+    name: 'Probar prompt',
+    description: 'Valida prompt.',
+    category: 'consulta',
+    risk: 'bajo',
+    defaultRequiresApproval: false,
+  },
+  {
     id: 'forger_update_app_prompt',
     packageId: 'forger',
     name: 'Editar prompt',
@@ -235,6 +244,7 @@ const createForgerMcpHarness = async (overrides = {}) => {
     refreshAppView: async () => ({ success: true, userMessage: 'Vista refrescada.' }),
     updateApp: async (appId, locale) => ({ success: true, appId, locale }),
     listAppPrompts: async () => [{ kind: 'agent', id: 'assistant', title: 'Assistant' }],
+    testAppPrompt: async (input) => ({ success: true, valid: true, input, errors: [], declaredVariables: [], usedVariables: [], missingVariables: [], extraVariables: [] }),
     updateAppPrompt: async (input) => ({ success: true, input }),
     restoreAppPrompt: async (input) => ({ success: true, input }),
     memoryList: async () => [{ id: 'mem-1', scope: 'app', kind: 'fact', text: 'Dato' }],
@@ -276,6 +286,8 @@ test('MCP tool schemas expose strict Gmail contracts and safe annotations', () =
   assert.deepEqual(getMcpToolInputSchema('memory_delete').required, ['id']);
   assert.deepEqual(getMcpToolInputSchema('forger_open_app').required, ['appId']);
   assert.deepEqual(getMcpToolInputSchema('forger_restore_app_prompt').required, ['appId', 'kind', 'id']);
+  assert.deepEqual(getMcpToolInputSchema('forger_test_app_prompt').required, ['appId', 'kind', 'id']);
+  assert.equal(getMcpToolInputSchema('forger_test_app_prompt').properties.variables.type, 'object');
 
   const searchSchema = getMcpToolInputSchema('gmail.search_messages');
   assert.deepEqual(searchSchema.required, ['query']);
@@ -992,6 +1004,21 @@ test('Forger MCP tools cover approvals, memory failures, app operations, and pro
       method: 'tools/call',
       params: { name: 'forger_list_app_prompts', arguments: { appId: 'finance-os' } },
     })).json());
+    const testedPrompt = parseToolTextResult(await (await callMcp(automationSession, {
+      jsonrpc: '2.0',
+      id: 20,
+      method: 'tools/call',
+      params: {
+        name: 'forger_test_app_prompt',
+        arguments: {
+          appId: 'finance-os',
+          kind: 'agentPrompt',
+          id: 'advisor:initial',
+          prompt: 'Review {{topic}}',
+          variables: { topic: 'budget' },
+        },
+      },
+    })).json());
     assert.equal(catalog.apps.length, 1);
     assert.equal(installed.apps.length, 1);
     assert.equal(updates.updates.length, 1);
@@ -1000,6 +1027,8 @@ test('Forger MCP tools cover approvals, memory failures, app operations, and pro
     assert.equal(refreshed.userMessage, 'Vista refrescada.');
     assert.equal(updated.locale, undefined);
     assert.equal(prompts.prompts[0].id, 'assistant');
+    assert.equal(testedPrompt.input.id, 'advisor:initial');
+    assert.equal(testedPrompt.input.variables.topic, 'budget');
 
     const invalidPrompt = parseToolTextResult(await (await callMcp(automationSession, {
       jsonrpc: '2.0',

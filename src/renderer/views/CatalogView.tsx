@@ -23,6 +23,7 @@ interface CatalogViewProps {
   onStartLocalNetworkShare: (appId: string) => void;
   onStartRemoteNetworkShare: (appId: string) => void;
   onStopRemoteNetworkShare: (appId: string) => void;
+  onUploadSocial: (appId: string) => void;
   onRefresh: () => void;
   t: AppDictionary;
   earlyAccessEnabled: boolean;
@@ -57,6 +58,7 @@ export function CatalogView({
   onStartLocalNetworkShare,
   onStartRemoteNetworkShare,
   onStopRemoteNetworkShare,
+  onUploadSocial,
   onRefresh,
   t,
   earlyAccessEnabled,
@@ -128,16 +130,16 @@ export function CatalogView({
           {visibleApps.map((app) => {
             const meta = getAppMeta(app.id);
             const installProgress = installProgressByApp[app.id];
-            const isInstalled = app.status === 'installed' || app.status === 'running' || app.status === 'conflict';
+            const isPrivateLocal = app.privateLocal === true;
+            const isInstalled = app.status === 'installed' || app.status === 'running' || app.status === 'conflict' || (isPrivateLocal && app.status === 'error');
             const isInstalling = app.status === 'installing';
             const hasError = app.status === 'error';
             const isConflict = app.status === 'conflict';
-            const isPrivateLocal = app.privateLocal === true;
             const isEarlyAccess = app.catalogStatus === 'coming';
             const isBeta = app.catalogStatus === 'beta' || Boolean(app.beta);
             const hasDownloadableVersion = Boolean(app.downloadUrl || app.latestVersionId);
             const canInstallEarlyAccess = !isEarlyAccess || (earlyAccessEnabled && hasDownloadableVersion);
-            const primaryAction = isConflict ? 'update' : hasError ? 'retry' : isInstalled ? (app.status === 'running' ? 'stop' : 'open') : 'install';
+            const primaryAction = isConflict ? 'update' : hasError && !isPrivateLocal ? 'retry' : isInstalled ? (app.status === 'running' ? 'stop' : 'open') : 'install';
             const remoteNetworkState = app.remoteNetworkShare?.state;
             const remoteNetworkPreparing = remoteNetworkState === 'preparing';
             const isOpening = (primaryAction === 'open' && openingAppIds.has(app.id)) || remoteNetworkPreparing;
@@ -165,7 +167,7 @@ export function CatalogView({
               && Boolean(app.remoteNetworkShare?.active)
               && app.remoteNetworkShare?.state !== 'closed'
               && app.remoteNetworkShare?.state !== 'inactive';
-            const primaryActionLabel = hasError
+            const primaryActionLabel = hasError && !isPrivateLocal
               ? t.actions.retry
               : remoteNetworkPreparing
                 ? t.remoteNetwork.preparingAction
@@ -206,6 +208,7 @@ export function CatalogView({
                   ...(canShareLocalNetwork ? [{ label: t.localNetwork.menuAction, onClick: () => onStartLocalNetworkShare(app.id) }] : []),
                   ...(canShareRemoteNetwork ? [{ label: t.remoteNetwork.menuAction, onClick: () => onStartRemoteNetworkShare(app.id) }] : []),
                   ...(canStopRemoteNetwork ? [{ label: t.remoteNetwork.stop, onClick: () => onStopRemoteNetworkShare(app.id) }] : []),
+                  ...(isPrivateLocal ? [{ label: t.locale === 'es' ? 'Subir a Social' : 'Upload to Social', onClick: () => onUploadSocial(app.id) }] : []),
                 ]}
                 installProgress={installProgress}
                 onPrimaryAction={() => {
@@ -216,7 +219,7 @@ export function CatalogView({
                     onResolveConflict(app.id);
                     return;
                   }
-                  if (hasError) {
+                  if (hasError && !isPrivateLocal) {
                     onRetry(app.id);
                     return;
                   }

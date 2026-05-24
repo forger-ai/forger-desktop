@@ -10,13 +10,19 @@ import type {
   ForgerAccountProfileInput,
   ForgerAccountRegisterInput,
   ForgerAccountSession,
+  ConversationDiagnosticReportPreview,
   DesktopErrorReportPreview,
+  SubmitConversationDiagnosticReportResult,
   CloudDeviceSummary,
   CloudFriendship,
   CloudFriendUser,
   CloudMessage,
   CloudMessageEnvelope,
   CloudSendMessageInput,
+  SocialUserApp,
+  SocialUserAppDownload,
+  SocialUserAppList,
+  SocialUserAppShare,
   CloudAppMessagePermissionDecision,
   RemoteAppBackupSummary,
   RemoteBackupsState,
@@ -27,7 +33,7 @@ import type {
 } from '../shared/types';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { normalizeErrorReportDiagnostic } from '../shared/error-diagnostics';
+import type { ReportSanitizerRoot } from '../shared/report-sanitizer';
 import type { StoredForgerAccount } from './forger-account-store';
 import type { RemoteFrontendAsset } from './remote-frontend-packager';
 import {
@@ -58,6 +64,11 @@ import {
   type RemoteBackupsResponse,
   usernameCooldownMessage,
 } from './forger-backend/client-helpers';
+import {
+  submitConversationDiagnosticReport,
+  submitDesktopErrorReport,
+} from './forger-backend/report-submissions';
+import { toSocialUserApp, toSocialVersion } from './forger-backend/social-normalizers';
 
 interface ClientOptions {
   backendBaseUrl: string;
@@ -69,6 +80,7 @@ interface ClientOptions {
   platform?: () => string;
   desktopVersion?: () => string;
   reportingLogPath?: () => string;
+  reportSanitizerRoots?: () => ReportSanitizerRoot[];
 }
 
 interface DownloadPayload {
@@ -580,6 +592,110 @@ export class ForgerBackendClient {
     return message;
   }
 
+  async listMySocialApps(): Promise<SocialUserAppList> {
+    const payload = await this.getJson('/api/v1/me/user_apps', 'social_user_apps_list_failed') as Record<string, unknown>;
+    const usage = payload.usage && typeof payload.usage === 'object'
+      ? payload.usage as Record<string, unknown>
+      : {};
+    return {
+      usage: {
+        appCount: Number(usage.app_count ?? 0),
+        appCountLimit: Number(usage.app_count_limit ?? 0),
+        versionSizeLimitBytes: Number(usage.version_size_limit_bytes ?? 0),
+      },
+      apps: Array.isArray(payload.apps) ? payload.apps.map(toSocialUserApp).filter(Boolean) as SocialUserApp[] : [],
+    };
+  }
+
+  async uploadSocialApp(input: {
+    zipPath: string;
+    name?: string;
+    slug?: string;
+    description?: string;
+    shortDescription?: string;
+    category?: string;
+    visibility: 'public' | 'friends' | 'private';
+  }): Promise<SocialUserApp> {
+    const buffer = await fs.readFile(input.zipPath);
+    const form = new FormData();
+    form.set('visibility', input.visibility);
+    if (input.name) form.set('name', input.name);
+    if (input.slug) form.set('slug', input.slug);
+    if (input.description) form.set('description', input.description);
+    if (input.shortDescription) form.set('short_description', input.shortDescription);
+    if (input.category) form.set('category', input.category);
+    form.set('archive', new Blob([buffer], { type: 'application/zip' }), path.basename(input.zipPath));
+
+    const response = await fetch(`${this.options.backendBaseUrl}/api/v1/me/user_apps`, {
+      method: 'POST',
+      headers: buildBackendHeaders(this.options.token()),
+      body: form,
+    });
+    const payload = await this.readJson<unknown>(response);
+    if (!response.ok) {
+      throw backendError('No pudimos subir la app a Social.', `social_user_app_upload_failed_${response.status}`);
+    }
+    const app = toSocialUserApp(payload);
+    if (!app) throw backendError('Forger Cloud devolvio una app Social invalida.', 'social_user_app_response_invalid');
+    return app;
+  }
+
+  async createSocialAppShare(userAppId: number): Promise<SocialUserAppShare> {
+    const payload = await this.postJson(`/api/v1/me/user_apps/${userAppId}/shares`, { scope: 'private_link' }, 'social_user_app_share_failed') as Record<string, unknown>;
+    return {
+      id: Number(payload.id),
+      code: typeof payload.code === 'string' ? payload.code : '',
+      scope: typeof payload.scope === 'string' ? payload.scope : 'private_link',
+      expiresAt: typeof payload.expires_at === 'string' ? payload.expires_at : undefined,
+      maxUses: typeof payload.max_uses === 'number' ? payload.max_uses : undefined,
+      deepLink: typeof payload.deep_link === 'string' ? payload.deep_link : '',
+    };
+  }
+
+  async resolveSocialCode(code: string): Promise<{ app: SocialUserApp; share?: Record<string, unknown> }> {
+    const payload = await this.getJson(`/api/v1/social/codes/${encodeURIComponent(code)}`, 'social_code_resolve_failed') as Record<string, unknown>;
+    const app = toSocialUserApp(payload.app);
+    if (!app) throw backendError('No pudimos abrir esta app Social.', 'social_code_app_invalid');
+    return { app, share: payload.share && typeof payload.share === 'object' ? payload.share as Record<string, unknown> : undefined };
+  }
+
+  async requestSocialAppDownload(input: {
+    versionId: number;
+    shareCode?: string;
+    platform: string;
+    deviceIdentifier: string;
+    trustDecision?: 'not_reviewed' | 'reviewed' | 'skipped_review';
+  }): Promise<SocialUserAppDownload> {
+    const payload = await this.postJson(`/api/v1/social/user_app_versions/${input.versionId}/download`, {
+      share_code: input.shareCode,
+      platform: input.platform,
+      device_identifier: input.deviceIdentifier,
+      trust_decision: input.trustDecision ?? 'not_reviewed',
+    }, 'social_user_app_download_failed') as Record<string, unknown>;
+    const version = payload.version && typeof payload.version === 'object' ? toSocialVersion(payload.version as Record<string, unknown>) : undefined;
+    const app = payload.app && typeof payload.app === 'object' ? payload.app as Record<string, unknown> : {};
+    const install = payload.install && typeof payload.install === 'object' ? payload.install as Record<string, unknown> : {};
+    if (!version || typeof payload.download_url !== 'string') {
+      throw backendError('Forger Cloud devolvio una descarga Social invalida.', 'social_user_app_download_invalid');
+    }
+    return {
+      downloadUrl: payload.download_url,
+      version,
+      app: {
+        id: Number(app.id),
+        slug: typeof app.slug === 'string' ? app.slug : '',
+        name: typeof app.name === 'string' ? app.name : '',
+        ownerUsername: typeof app.owner_username === 'string' ? app.owner_username : '',
+      },
+      install: {
+        id: Number(install.id),
+        installedAt: typeof install.installed_at === 'string' ? install.installed_at : '',
+        source: typeof install.source === 'string' ? install.source : 'profile',
+        trustDecision: install.trust_decision === 'reviewed' || install.trust_decision === 'skipped_review' ? install.trust_decision : 'not_reviewed',
+      },
+    };
+  }
+
   normalizeCloudMessagePayload(value: unknown): CloudMessage | undefined {
     return normalizeCloudMessage(value);
   }
@@ -773,71 +889,13 @@ export class ForgerBackendClient {
   async submitDesktopErrorReport(
     input: DesktopErrorReportPreview,
   ): Promise<{ success: boolean; userMessage: string; technicalCode?: string }> {
-    const report = normalizeErrorReportDiagnostic(input);
-    const logBase = {
-      operation: 'desktop_error_report.submit',
-      source: report.source,
-      reportOperation: report.operation,
-      technicalCode: report.technicalCode,
-      appId: report.appId,
-      appVersion: report.appVersion,
-      desktopVersion: report.desktopVersion,
-      platform: report.platform,
-      arch: report.arch,
-    };
-    try {
-      const response = await fetch(`${this.options.backendBaseUrl}/api/v1/desktop_error_reports`, {
-        method: 'POST',
-        headers: {
-          Accept: 'application/json',
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          source: report.source,
-          operation: report.operation,
-          message: report.message,
-          technical_code: report.technicalCode,
-          desktop_version: report.desktopVersion,
-          platform: report.platform,
-          arch: report.arch,
-          app_id: report.appId,
-          app_version: report.appVersion,
-          details: report.details ?? {},
-          sensitive_details: report.sensitiveDetails ?? {},
-        }),
-      });
-      const requestId = responseRequestId(response);
+    return submitDesktopErrorReport(this.reportSubmissionOptions(), input);
+  }
 
-      if (!response.ok) {
-        const technicalCode = `desktop_error_report_failed_${response.status}`;
-        await this.appendReportingLog('desktop_error_report:submit_failed', {
-          ...logBase,
-          success: false,
-          httpStatus: response.status,
-          requestId,
-          technicalCode,
-        });
-        return { success: false, userMessage: 'No pudimos enviar el reporte.', technicalCode };
-      }
-
-      await this.appendReportingLog('desktop_error_report:submit_success', {
-        ...logBase,
-        success: true,
-        httpStatus: response.status,
-        requestId,
-      });
-      return { success: true, userMessage: 'Reporte enviado. Gracias por ayudarnos a corregir Forger.' };
-    } catch (error) {
-      const technicalCode = 'desktop_error_report_network_failed';
-      await this.appendReportingLog('desktop_error_report:submit_failed', {
-        ...logBase,
-        success: false,
-        technicalCode,
-        errorName: error instanceof Error ? error.name : undefined,
-        errorMessage: error instanceof Error ? error.message : String(error),
-      });
-      return { success: false, userMessage: 'No pudimos enviar el reporte.', technicalCode };
-    }
+  async submitConversationDiagnosticReport(
+    input: ConversationDiagnosticReportPreview,
+  ): Promise<SubmitConversationDiagnosticReportResult> {
+    return submitConversationDiagnosticReport(this.reportSubmissionOptions(), input);
   }
 
   async listRemoteBackups(appId?: string): Promise<RemoteBackupsState> {
@@ -996,6 +1054,15 @@ export class ForgerBackendClient {
       throw backendError('Forger Cloud devolvio una respuesta Gmail invalida.', 'gmail_oauth_backend_response_invalid');
     }
     return payload;
+  }
+
+  private reportSubmissionOptions() {
+    return {
+      backendBaseUrl: this.options.backendBaseUrl,
+      token: this.options.token(),
+      roots: this.options.reportSanitizerRoots?.() ?? [],
+      appendReportingLog: (event: string, details: Record<string, unknown>) => this.appendReportingLog(event, details),
+    };
   }
 
   private async readJson<T>(response: Response): Promise<T | null> {

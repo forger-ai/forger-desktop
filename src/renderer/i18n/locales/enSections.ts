@@ -41,6 +41,8 @@ export const enSections = {
       stopSuccess: 'Response stopped.',
       stopFailed: 'I could not stop the response.',
       newConversation: 'New conversation',
+      notifyForger: 'Notify',
+      notifyForgerTooltip: 'Share this sanitized conversation with Forger support',
       showHistoryTooltip: 'Show history',
       historyTitle: 'Conversation history',
       deleteConversationTooltip: 'Delete conversation',
@@ -240,6 +242,10 @@ export const enSections = {
         forger_list_app_prompts: {
           name: 'List app prompts',
           description: 'Reviews prompts declared by an installed app and their local changes.',
+        },
+        forger_test_app_prompt: {
+          name: 'Test app prompt',
+          description: 'Validates and renders a declared prompt without saving or running it.',
         },
         forger_update_app_prompt: {
           name: 'Edit app prompt',

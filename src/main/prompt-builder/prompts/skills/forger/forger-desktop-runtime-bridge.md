@@ -10,6 +10,7 @@ description: Call Forger Desktop prompt templates and manifest agents from a loc
 - Forger Desktop injects `FORGER_DESKTOP_RUNTIME_URL`, `FORGER_DESKTOP_RUNTIME_APP_ID`, and `FORGER_DESKTOP_RUNTIME_SECRET` into app services. Do not hard-code or expose those values.
 - App locale/context also travels through this signed HTTP bridge. For stack apps, expose it to the frontend through the app backend route `GET /api/forger/context` and the shared locale module; do not revive `window.forgerApp`.
 - Treat this bridge as an internal app mechanism. Explain visible progress and results, not runtime URLs, signatures, routes, or secrets.
+- This bridge is not how an agent opens an app for the person. Opening, launching, starting, running, or bringing up an installed app means using Forger Desktop app controls through the Forger MCP app tools: use `forger_open_app` to open the app and `forger_get_app_runtime_status` to check whether Forger has it running when needed. Do not manually start Python, uvicorn, npm, Vite, FastAPI, or localhost services just so the person can access the app.
 
 ## Prompt Template Tasks
 - Use prompt template tasks for bounded, form-backed work declared in `manifest.promptTemplates`, such as reading uploaded statements, extracting rows, or producing a recommendation.

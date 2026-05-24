@@ -1,5 +1,7 @@
 import type fs from 'node:fs/promises';
 import type path from 'node:path';
+import { createHash } from 'node:crypto';
+import os from 'node:os';
 import type * as Electron from 'electron';
 import { BrowserWindow, type IpcMain } from 'electron';
 import { AGENT_TOOL_PACKAGES } from '../core/agent-tool-packages';
@@ -19,7 +21,10 @@ import type { StoredForgerAccount } from '../forger-account-store';
 import type { MemoryStore } from '../memory-store';
 import type { OfficialToolsService } from '../official-tools-service';
 import type { SecretsStore } from '../secrets-store';
+import { buildConversationDiagnosticReport } from '../conversation-diagnostics';
 import type { IPC_CHANNELS as IpcChannels } from '../../shared/ipc';
+import { registerAppCloudMessagingIpcHandlers } from './app-cloud-messaging-handlers';
+import { RENDERER_CHAT_TRACE_EVENTS } from './renderer-chat-trace-events';
 import type {
   AgentDefaults,
   AgentToolPackageDefinition,
@@ -57,6 +62,7 @@ import type {
   CreateUserSecretInput,
   DeleteUserSecretInput,
   DesktopErrorReportPreview,
+  ConversationDiagnosticReportPreview,
   DisconnectAppSecretInput,
   FilesCreateCategoryInput,
   FilesDeleteCategoryInput,
@@ -79,12 +85,14 @@ import type {
   MemoryListInput,
   MemoryUpdateInput,
   OpenAppResult,
+  PrepareConversationDiagnosticReportInput,
   RendererChatTraceEvent,
   RuntimeStatus,
   SetAppToolGrantInput,
   Settings,
   SharedFileRef,
   StopAppResult,
+  SocialUserAppUploadInput,
   SubmitAppRatingInput,
   SubmitProductFeedbackInput,
   SubmitUsageEventInput,
@@ -94,13 +102,6 @@ import type {
   UpdateUserSecretInput,
 } from '../../shared/types';
 import type { AppManifest, AppRegistry, InstalledAppRecord } from '../core/main-process-types';
-
-const RENDERER_CHAT_TRACE_EVENTS = new Set<RendererChatTraceEvent['event']>([
-  'chat_run_event_received',
-  'chat_run_message_append_attempt',
-  'chat_run_message_appended',
-  'chat_new_conversation_clicked',
-]);
 
 interface MainIpcState {
   agentToolSettings: AgentToolSettings;
@@ -149,10 +150,15 @@ interface MainProcessIpcDeps {
   getClaudeAuthStatus: () => Promise<unknown>;
   getCloudIdentityStore: () => CloudIdentityStore;
   getCodexAuthStatus: () => Promise<{ authenticated: boolean }>;
+  getCodexHome: () => string;
   getDesktopUpdater: () => DesktopUpdater;
   getFileLibrary: () => FileLibrary;
+  getForgerHomeRoot: () => string;
+  getForgerMetadataRoot: () => string;
+  getInstallLogPath: () => string;
   getMemoryStore: () => MemoryStore;
   getOfficialToolsService: () => OfficialToolsService;
+  getPrivateAppsRoot: () => string;
   getPrivateDataRoot: () => string;
   getRuntimeStatus: (appId: string) => RuntimeStatus;
   getLocalNetworkShareStatus?: (appId: string) => RuntimeStatus['localNetworkShare'];
@@ -201,11 +207,125 @@ interface MainProcessIpcDeps {
   updateAppPrompt: (input: AppPromptReviewInput) => Promise<AppPromptMutationResult>;
   updateAppRuntime: (appId: string, locale?: string) => Promise<InstallAppResult>;
   updateCodexDefaults: (input: UpdateCodexDefaultsInput) => Promise<Settings>;
+  validateArchiveEntries: (archivePath: string) => Promise<void>;
   validateAppPrompt: (input: AppPromptReviewInput) => Promise<AppPromptValidationResult>;
+  zipDirectory: (sourceDir: string, zipPath: string) => Promise<void>;
 }
 
+const MAX_APP_ERROR_LOG_BYTES = 512 * 1024;
+const MAX_APP_ERROR_LOG_LINES = 80;
+const MAX_APP_ERROR_LOG_LINE_CHARS = 8_000;
+
+const truncateLogLine = (line: string): string => {
+  if (line.length <= MAX_APP_ERROR_LOG_LINE_CHARS) {
+    return line;
+  }
+  return `${line.slice(0, MAX_APP_ERROR_LOG_LINE_CHARS)}...[truncated ${line.length - MAX_APP_ERROR_LOG_LINE_CHARS} chars]`;
+};
+
+const readRecentAppInstallLogLines = async (input: {
+  fs: typeof fs;
+  getInstallLogPath: () => string;
+  appId: string;
+}): Promise<{ source: 'install.log'; bytesRead: number; truncatedFromStart: boolean; lines: string[] } | null> => {
+  const logPath = input.getInstallLogPath();
+  let handle: fs.FileHandle | null = null;
+  try {
+    const stats = await input.fs.stat(logPath);
+    const bytesToRead = Math.min(stats.size, MAX_APP_ERROR_LOG_BYTES);
+    const start = Math.max(0, stats.size - bytesToRead);
+    const buffer = Buffer.alloc(bytesToRead);
+    handle = await input.fs.open(logPath, 'r');
+    const { bytesRead } = await handle.read(buffer, 0, bytesToRead, start);
+    const rawLines = buffer
+      .subarray(0, bytesRead)
+      .toString('utf8')
+      .split(/\r?\n/)
+      .filter((line) => line.trim().length > 0);
+    const candidateLines = start > 0 ? rawLines.slice(1) : rawLines;
+    const lines: string[] = [];
+    for (let index = candidateLines.length - 1; index >= 0 && lines.length < MAX_APP_ERROR_LOG_LINES; index -= 1) {
+      const line = candidateLines[index];
+      try {
+        const parsed = JSON.parse(line) as { appId?: unknown };
+        if (parsed.appId === input.appId) {
+          lines.push(truncateLogLine(line));
+        }
+      } catch {
+        // Ignore partial or non-JSON log lines; install.log is best-effort diagnostics.
+      }
+    }
+    if (lines.length === 0) {
+      return null;
+    }
+    return {
+      source: 'install.log',
+      bytesRead,
+      truncatedFromStart: start > 0,
+      lines: lines.reverse(),
+    };
+  } catch {
+    return null;
+  } finally {
+    await handle?.close().catch(() => undefined);
+  }
+};
+
+const SOCIAL_UPLOAD_EXCLUDED_NAMES = new Set([
+  '.git',
+  '.DS_Store',
+  'node_modules',
+  '.venv',
+  'dist',
+  'build',
+  '.vite',
+  '.pytest_cache',
+  '.ruff_cache',
+  '__pycache__',
+  'coverage',
+]);
+
+const shouldSkipSocialUploadPath = (sourcePath: string, root: string, pathModule: typeof path): boolean => {
+  const relative = pathModule.relative(root, sourcePath);
+  const parts = relative.split(pathModule.sep).filter(Boolean);
+  if (parts.some((part) => SOCIAL_UPLOAD_EXCLUDED_NAMES.has(part))) return true;
+  if (parts.includes('data') && /\.(sqlite|sqlite-|db|backup)/i.test(pathModule.basename(sourcePath))) return true;
+  if (/\.env(\.|$)/i.test(pathModule.basename(sourcePath))) return true;
+  return false;
+};
+
+const enrichAppErrorReportWithInstallLog = async (input: {
+  fs: typeof fs;
+  getInstallLogPath: () => string;
+  input: DesktopErrorReportPreview;
+}): Promise<DesktopErrorReportPreview> => {
+  if (input.input.source !== 'app' || !input.input.appId || input.input.sensitiveDetails?.appInstallLogExcerpt) {
+    return input.input;
+  }
+  const appInstallLogExcerpt = await readRecentAppInstallLogLines({
+    fs: input.fs,
+    getInstallLogPath: input.getInstallLogPath,
+    appId: input.input.appId,
+  });
+  if (!appInstallLogExcerpt) {
+    return input.input;
+  }
+  return {
+    ...input.input,
+    sensitiveDetails: {
+      ...(input.input.sensitiveDetails ?? {}),
+      appInstallLogExcerpt,
+    },
+  };
+};
+
+export const __testMainHandlersInternals = {
+  enrichAppErrorReportWithInstallLog,
+  readRecentAppInstallLogLines,
+};
+
 export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
-  const { state, APP_CLAUDE_MODEL_OPTIONS, APP_CODEX_MODEL_OPTIONS, BetterSqlite3, BrowserWindow, CODEX_USAGE_DASHBOARD_URL, IPC_CHANNELS, app, appendInstallLog, buildAppSecretsState, buildCodexPromptWithAppContext, buildForgerToolsContextForApp, buildForgerToolsContextForFreeChat, canUseCloudDataSync, chatOrchestrator, cloudDeviceManager, connectClaudeAuth, connectCodexAuth, createLocalAppFromSkeleton, createRemoteAppBackup, decryptCloudMessage, decryptCloudMessages, dialog, disconnectCodexAuth, ensureCatalogStatuses, failureDiagnostic, forgerBackendClient, forwardCloudSocialEvent, fs, getAppDetails, getBackupsManager, getClaudeAuthStatus, getCloudIdentityStore, getCodexAuthStatus, getDesktopUpdater, getFileLibrary, getMemoryStore, getOfficialToolsService, getPrivateDataRoot, getRuntimeStatus, getLocalNetworkShareStatus, getRemoteNetworkShareStatus, getSecretsStore, installAppRuntime, installWelcome, ipcMain, listAppPrompts, listCatalogFromBackend, mainWindow, normalizeManifestAgentDefaults, openInstalledApp, startLocalNetworkShare, stopLocalNetworkShare, startRemoteNetworkShare, stopRemoteNetworkShare, openOrFocusFriendChatWindow, path, publicForgerAccount, registry, reinstallClaude, reinstallCodex, resolveAppIdForWebContents, resolveInstalledAgents, resolveInstalledAppSecrets, resolveInstalledManifest, resolveSelectedAppDisplayName, restoreAppPrompt, restoreAppUserVersionRuntime, restoreRemoteAppBackup, sanitizeRendererChatTrace, sendEncryptedCloudMessage, serializeErrorForInstallLog, setAppAutoSyncSetting, shell, signAppFolderGrant, stopInstalledApp, switchForgerAccountSession, toAppSummary, uninstallAppRuntime, updateAgentDefaults, updateAgentToolApproval, updateAppPrompt, updateAppRuntime, updateCodexDefaults, validateAppPrompt } = deps;
+  const { state, APP_CLAUDE_MODEL_OPTIONS, APP_CODEX_MODEL_OPTIONS, BetterSqlite3, BrowserWindow, CODEX_USAGE_DASHBOARD_URL, IPC_CHANNELS, app, appAgentConversationManager, appendInstallLog, buildAppSecretsState, buildCodexPromptWithAppContext, buildForgerToolsContextForApp, buildForgerToolsContextForFreeChat, canUseCloudDataSync, chatOrchestrator, cloudDeviceManager, connectClaudeAuth, connectCodexAuth, createLocalAppFromSkeleton, createRemoteAppBackup, decryptCloudMessage, decryptCloudMessages, dialog, disconnectCodexAuth, ensureCatalogStatuses, failureDiagnostic, forgerBackendClient, forwardCloudSocialEvent, fs, getAppDetails, getBackupsManager, getClaudeAuthStatus, getCloudIdentityStore, getCodexAuthStatus, getCodexHome, getDesktopUpdater, getFileLibrary, getForgerHomeRoot, getForgerMetadataRoot, getInstallLogPath, getMemoryStore, getOfficialToolsService, getPrivateAppsRoot, getPrivateDataRoot, getRuntimeStatus, getLocalNetworkShareStatus, getRemoteNetworkShareStatus, getSecretsStore, installAppRuntime, installWelcome, ipcMain, listAppPrompts, listCatalogFromBackend, mainWindow, normalizeManifestAgentDefaults, openInstalledApp, startLocalNetworkShare, stopLocalNetworkShare, startRemoteNetworkShare, stopRemoteNetworkShare, openOrFocusFriendChatWindow, path, publicForgerAccount, registry, reinstallClaude, reinstallCodex, resolveAppIdForWebContents, resolveInstalledAgents, resolveInstalledAppSecrets, resolveInstalledManifest, resolveSelectedAppDisplayName, restoreAppPrompt, restoreAppUserVersionRuntime, restoreRemoteAppBackup, sanitizeRendererChatTrace, sendEncryptedCloudMessage, serializeErrorForInstallLog, setAppAutoSyncSetting, shell, signAppFolderGrant, stopInstalledApp, switchForgerAccountSession, toAppSummary, uninstallAppRuntime, updateAgentDefaults, updateAgentToolApproval, updateAppPrompt, updateAppRuntime, updateCodexDefaults, validateArchiveEntries, validateAppPrompt, zipDirectory } = deps;
   const localNetworkShareStatusFor = getLocalNetworkShareStatus ?? (() => undefined);
   const remoteNetworkShareStatusFor = getRemoteNetworkShareStatus ?? (() => undefined);
   const localNetworkSharePayloadFor = (appId: string) => {
@@ -595,6 +715,90 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
   ipcMain.handle(IPC_CHANNELS.listFriends, async () => {
     return forgerBackendClient ? await forgerBackendClient.listFriends() : [];
   });
+  ipcMain.handle(IPC_CHANNELS.listMySocialApps, async () => {
+    return forgerBackendClient ? await forgerBackendClient.listMySocialApps() : { apps: [] };
+  });
+  ipcMain.handle(IPC_CHANNELS.uploadSocialApp, async (_event, input: SocialUserAppUploadInput) => {
+    if (!forgerBackendClient) {
+      return { success: false, userMessage: 'Inicia sesion en Forger Cloud para subir apps a Social.', technicalCode: 'backend_client_missing' };
+    }
+    const record = registry.apps[input.appId];
+    if (!record?.installDir || !record.privateLocal) {
+      return { success: false, userMessage: 'Solo puedes subir a Social apps creadas por ti.', technicalCode: 'social_upload_not_private_local' };
+    }
+    const manifest = await resolveInstalledManifest(record.installDir);
+    const uploadRoot = path.join(os.tmpdir(), `forger-social-upload-${input.appId}-${Date.now()}`);
+    const stageDir = path.join(uploadRoot, input.appId);
+    const zipPath = path.join(os.tmpdir(), `forger-social-upload-${input.appId}-${Date.now()}.zip`);
+    try {
+      await fs.rm(uploadRoot, { recursive: true, force: true });
+      await fs.rm(zipPath, { force: true });
+      await fs.mkdir(stageDir, { recursive: true });
+      await fs.cp(record.installDir, stageDir, {
+        recursive: true,
+        filter: (sourcePath) => !shouldSkipSocialUploadPath(sourcePath, record.installDir, path),
+      });
+      await zipDirectory(uploadRoot, zipPath);
+      await validateArchiveEntries(zipPath);
+      const appEntry = await forgerBackendClient.uploadSocialApp({
+        zipPath,
+        name: record.name,
+        slug: input.appId,
+        description: record.description,
+        shortDescription: record.description,
+        category: manifest && typeof (manifest.catalog as { category?: unknown } | null)?.category === 'string'
+          ? (manifest.catalog as { category: string }).category
+          : 'productivity',
+        visibility: input.visibility,
+      });
+      const share = await forgerBackendClient.createSocialAppShare(appEntry.id).catch(() => undefined);
+      return { success: true, app: appEntry, share, userMessage: 'App subida a Social.' };
+    } catch (error) {
+      const diagnostic = failureDiagnostic(error, 'social_upload_failed');
+      return { success: false, userMessage: 'No pudimos subir la app a Social.', ...diagnostic };
+    } finally {
+      await fs.rm(uploadRoot, { recursive: true, force: true }).catch(() => undefined);
+      await fs.rm(zipPath, { force: true }).catch(() => undefined);
+    }
+  });
+  ipcMain.handle(IPC_CHANNELS.createSocialAppShare, async (_event, userAppId: number) => {
+    if (!forgerBackendClient) throw new Error('backend_client_missing');
+    return await forgerBackendClient.createSocialAppShare(userAppId);
+  });
+  ipcMain.handle(IPC_CHANNELS.resolveSocialCode, async (_event, code: string) => {
+    if (!forgerBackendClient) throw new Error('backend_client_missing');
+    return await forgerBackendClient.resolveSocialCode(code);
+  });
+  ipcMain.handle(IPC_CHANNELS.installSocialApp, async (_event, input: { versionId: number; shareCode?: string; trustDecision?: 'not_reviewed' | 'reviewed' | 'skipped_review' }) => {
+    if (!forgerBackendClient) {
+      return { success: false, userMessage: 'Inicia sesion en Forger Cloud para instalar apps de Social.', technicalCode: 'backend_client_missing' };
+    }
+    try {
+      const download = await forgerBackendClient.requestSocialAppDownload({
+        versionId: input.versionId,
+        shareCode: input.shareCode,
+        trustDecision: input.trustDecision,
+        platform: process.platform === 'darwin' ? (process.arch === 'arm64' ? 'darwin_arm64' : 'darwin_x64') : process.platform === 'win32' ? 'win32_x64' : 'linux_x64',
+        deviceIdentifier: os.hostname(),
+      });
+      const response = await fetch(download.downloadUrl, { method: 'GET', headers: { Accept: 'application/zip' } });
+      if (!response.ok) throw new Error(`social_download_failed_${response.status}`);
+      const buffer = Buffer.from(await response.arrayBuffer());
+      const checksum = createHash('sha256').update(buffer).digest('hex');
+      if (download.version.checksumSha256 && checksum !== download.version.checksumSha256) {
+        throw new Error('social_app_zip_checksum_mismatch');
+      }
+      const quarantineDir = path.join(os.tmpdir(), `forger-social-quarantine-${download.app.slug}-${Date.now()}`);
+      const quarantineZip = path.join(quarantineDir, `${download.app.slug}.zip`);
+      await fs.mkdir(quarantineDir, { recursive: true });
+      await fs.writeFile(quarantineZip, buffer);
+      await validateArchiveEntries(quarantineZip);
+      return { success: true, userMessage: 'App Social descargada y verificada. La instalacion final requiere confirmacion.', download };
+    } catch (error) {
+      const diagnostic = failureDiagnostic(error, 'social_install_failed');
+      return { success: false, userMessage: 'No pudimos verificar esta app de Social.', ...diagnostic };
+    }
+  });
   ipcMain.handle(IPC_CHANNELS.searchFriends, async (_event, username: string) => {
     return forgerBackendClient ? await forgerBackendClient.searchFriends(username) : [];
   });
@@ -664,16 +868,39 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
       : { success: false, userMessage: 'No pudimos enviar la métrica de uso.', technicalCode: 'backend_client_missing' };
   });
   ipcMain.handle(IPC_CHANNELS.submitDesktopErrorReport, async (_event, input: DesktopErrorReportPreview) => {
-    const report: DesktopErrorReportPreview = {
+    const report = await enrichAppErrorReportWithInstallLog({
+      fs,
+      getInstallLogPath,
+      input: {
       ...input,
       desktopVersion: input.desktopVersion || app.getVersion(),
       platform: process.platform,
       arch: process.arch,
       occurredAt: input.occurredAt || new Date().toISOString(),
-    };
+      },
+    });
     return forgerBackendClient
       ? await forgerBackendClient.submitDesktopErrorReport(report)
       : { success: false, userMessage: 'No pudimos enviar el reporte.', technicalCode: 'backend_client_missing' };
+  });
+  ipcMain.handle(IPC_CHANNELS.prepareConversationDiagnosticReport, async (_event, input: PrepareConversationDiagnosticReportInput) => {
+    return await buildConversationDiagnosticReport({
+      appVersion: app.getVersion(),
+      platform: process.platform,
+      getUserDataPath: () => app.getPath('userData'),
+      getForgerHomeRoot,
+      getPrivateAppsRoot,
+      getPrivateDataRoot,
+      getForgerMetadataRoot,
+      getCodexHome,
+      getInstalledAppVersion: (appId) => registry.apps[appId]?.version,
+      getConversationManager: () => appAgentConversationManager,
+    }, input);
+  });
+  ipcMain.handle(IPC_CHANNELS.submitConversationDiagnosticReport, async (_event, input: ConversationDiagnosticReportPreview) => {
+    return forgerBackendClient
+      ? await forgerBackendClient.submitConversationDiagnosticReport(input)
+      : { success: false, userMessage: 'No pudimos enviar el reporte de conversación.', technicalCode: 'backend_client_missing' };
   });
   ipcMain.handle(IPC_CHANNELS.openExternalUrl, async (_event, targetUrl: string) => {
     try {
@@ -957,35 +1184,14 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
     return await getOfficialToolsService().callFromApp(appId, input);
   });
 
-  ipcMain.handle(IPC_CHANNELS.appMessagesSend, async (event, input: CloudSendMessageInput) => {
-    const appId = resolveAppIdForWebContents(event.sender.id);
-    if (!appId) {
-      throw new Error('app_window_not_authorized');
-    }
-    const record = registry.apps[appId];
-    const manifest = record?.installDir ? await resolveInstalledManifest(record.installDir) : null;
-    if (manifest?.cloudMessaging?.enabled !== true) {
-      throw new Error('app_cloud_messaging_not_declared');
-    }
-    return await sendEncryptedCloudMessage({
-      ...input,
-      delivery: input.delivery ?? manifest.cloudMessaging.defaultDelivery ?? 'persistent',
-      source: 'app',
-      sourceAppId: appId,
-      sourceAppName: record?.name ?? appId,
-    });
-  });
-
-  ipcMain.handle(IPC_CHANNELS.appMessagesList, async (event, friendUserId: number) => {
-    const appId = resolveAppIdForWebContents(event.sender.id);
-    if (!appId) {
-      throw new Error('app_window_not_authorized');
-    }
-    const record = registry.apps[appId];
-    const manifest = record?.installDir ? await resolveInstalledManifest(record.installDir) : null;
-    if (manifest?.cloudMessaging?.enabled !== true) {
-      throw new Error('app_cloud_messaging_not_declared');
-    }
-    return forgerBackendClient ? await decryptCloudMessages(await forgerBackendClient.listCloudMessages(friendUserId)) : [];
+  registerAppCloudMessagingIpcHandlers({
+    IPC_CHANNELS,
+    decryptCloudMessages,
+    forgerBackendClient,
+    ipcMain,
+    registry,
+    resolveAppIdForWebContents,
+    resolveInstalledManifest,
+    sendEncryptedCloudMessage,
   });
 };

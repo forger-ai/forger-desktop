@@ -37,12 +37,13 @@ export {
   agentRuntimeEquals,
 } from './agent-runtime-registry';
 export type { ForgerAccountLoginInput, ForgerAccountProfileInput, ForgerAccountRegisterInput, ForgerAccountSession, ForgerAccountUser, SubscriptionTier, CloudDeviceAppSummary, CloudDeviceSummary, CloudDevicesState } from './types/account';
-export type { AppAgentPromptSet, AppAgentPromptTemplate, AppAgentPromptVariable, AppAgentPromptVariableType, AppAgent, AppPromptMutationResult, AppPromptRestoreInput, AppPromptReviewInput, AppPromptReviewItem, AppPromptReviewKind, AppPromptSettingSource, AppPromptTemplate, AppPromptTemplateArgument, AppPromptTemplateArgumentType, AppPromptValidationResult } from './types/prompts';
+export type { AppAgentPromptSet, AppAgentPromptTemplate, AppAgentPromptVariable, AppAgentPromptVariableType, AppAgent, AppPromptMutationResult, AppPromptRestoreInput, AppPromptReviewInput, AppPromptReviewItem, AppPromptReviewKind, AppPromptSettingSource, AppPromptTemplate, AppPromptTemplateArgument, AppPromptTemplateArgumentType, AppPromptTestInput, AppPromptTestResult, AppPromptValidationResult } from './types/prompts';
 export type { AppCapability, AppCategory, AppStatus, AppSummary, CatalogPublicationStatus, VersionChangelog } from './types/catalog';
 export type { CatalogApp } from './types/catalog-app';
 export type { AppRatingSummary, SubmitAppRatingInput, SubmitProductFeedbackInput } from './types/feedback';
 export type { SubmitUsageEventInput, SubmitUsageEventResult, UsageEventName } from './types/usage-events';
-export type { CloudAppMessagePermissionDecision, CloudFriendUser, CloudFriendship, CloudIdentityState, CloudMessage, CloudMessageDeliveryMode, CloudMessageEnvelope, CloudMessageSource, CloudMessageStatus, CloudSendMessageInput, CloudSocialEvent, FriendshipStatus, FriendChatWindowOpenResult } from './types/social';
+export type { ConversationDiagnosticMessage, ConversationDiagnosticReportPreview, ConversationDiagnosticSource, PrepareConversationDiagnosticReportInput, SubmitConversationDiagnosticReportResult } from './types/diagnostics';
+export type { CloudAppMessagePermissionDecision, CloudFriendUser, CloudFriendship, CloudIdentityState, CloudMessage, CloudMessageDeliveryMode, CloudMessageEnvelope, CloudMessageSource, CloudMessageStatus, CloudSendMessageInput, CloudSocialEvent, FriendshipStatus, FriendChatWindowOpenResult, SocialUserApp, SocialUserAppDownload, SocialUserAppList, SocialUserAppShare, SocialUserAppUploadInput, SocialUserAppVersion, SocialUserProfile, SocialUserAppReviewState, SocialUserAppStatus, SocialUserAppVisibility } from './types/social';
 export type { BasicActionResult, FailureDiagnosticFields } from './types/base';
 export type { MemoryCreateInput, MemoryEntry, MemoryKind, MemoryListInput, MemoryScope, MemorySource, MemoryUpdateInput, Settings, UpdateAgentDefaultsInput, UpdateCodexDefaultsInput } from './types/settings';
 export type { DesktopUpdateAsset, DesktopUpdateMetadata, DesktopUpdateReleaseNotes, DesktopUpdateState, DesktopUpdateStatus } from './types/updates';

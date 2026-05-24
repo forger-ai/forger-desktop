@@ -99,6 +99,21 @@ const forgerSkillDefinitions: ForgerSkillDefinition[] = [
   },
   {
     group: 'forger',
+    id: 'forger-app-shell-layout',
+    description: 'Build flexible app shells where navigation stays visible and only main content scrolls.',
+  },
+  {
+    group: 'forger',
+    id: 'forger-mui-component-patterns',
+    description: 'Choose MUI Core and MUI X Community components for common app UI without Pro dependencies.',
+  },
+  {
+    group: 'forger',
+    id: 'forger-mui-date-pickers',
+    description: 'Use MUI X Community date and time pickers correctly without native date inputs or Pro features.',
+  },
+  {
+    group: 'forger',
     id: 'forger-mui-consistency',
     description: 'Visual consistency and accessibility in MUI.',
   },
@@ -106,6 +121,11 @@ const forgerSkillDefinitions: ForgerSkillDefinition[] = [
     group: 'forger',
     id: 'forger-installed-app-change',
     description: 'Protocol for changing installed Forger apps safely.',
+  },
+  {
+    group: 'forger',
+    id: 'forger-social-app-review',
+    description: 'Review Social app packages before installing code created by another person.',
   },
   {
     group: 'forger',

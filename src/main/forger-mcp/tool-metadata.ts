@@ -83,6 +83,37 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
     };
   }
 
+  if (toolId === 'forger_test_app_prompt') {
+    return {
+      type: 'object',
+      properties: {
+        appId: {
+          type: 'string',
+          description: 'ID de la app instalada.',
+        },
+        kind: {
+          type: 'string',
+          enum: ['promptTemplate', 'agent', 'agentPrompt'],
+        },
+        id: {
+          type: 'string',
+          description: 'ID del prompt declarado por la app. Para agentPrompt usa agentId:initial, agentId:resume o agentId:steer.',
+        },
+        prompt: {
+          type: 'string',
+          description: 'Texto candidato opcional. Si se omite, se prueba el prompt actual.',
+        },
+        variables: {
+          type: 'object',
+          description: 'Variables de prueba para renderizar el prompt.',
+          additionalProperties: true,
+        },
+      },
+      required: ['appId', 'kind', 'id'],
+      additionalProperties: false,
+    };
+  }
+
   if (toolId === 'forger_update_app_prompt') {
     return {
       type: 'object',

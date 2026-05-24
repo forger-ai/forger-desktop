@@ -95,6 +95,7 @@ const createDeps = async (overrides = {}) => {
         renameFile: async () => ({}),
         stageFileForChat: async () => ({}),
       }),
+      getInstallLogPath: () => '/tmp/forger-install.log',
       getMemoryStore: () => ({
         create: async () => ({}),
         delete: async () => ({}),

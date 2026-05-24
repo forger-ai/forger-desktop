@@ -5,6 +5,7 @@ import AttachFileRounded from '@mui/icons-material/AttachFileRounded';
 import CloseRounded from '@mui/icons-material/CloseRounded';
 import DonutLargeRounded from '@mui/icons-material/DonutLargeRounded';
 import HistoryRounded from '@mui/icons-material/HistoryRounded';
+import BugReportRounded from '@mui/icons-material/BugReportRounded';
 import StopCircleRounded from '@mui/icons-material/StopCircleRounded';
 import {
   Box,
@@ -93,6 +94,7 @@ interface ChatViewProps {
   onOpenConversation: (conversationId: string) => void;
   onDeleteConversation: (conversationId: string) => void;
   onStartNewConversation: () => void;
+  onNotifyForger?: () => void;
   messages: ChatMessage[];
   inputValue: string;
   onInputChange: (value: string) => void;
@@ -148,6 +150,7 @@ export function ChatView({
   onOpenConversation,
   onDeleteConversation,
   onStartNewConversation,
+  onNotifyForger,
   messages,
   inputValue,
   onInputChange,
@@ -466,7 +469,7 @@ export function ChatView({
         gap: 2,
       }}
     >
-      <Box sx={{ display: 'flex', justifyContent: 'flex-start' }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <Tooltip title={t.sections.chat.showHistoryTooltip}>
           <span>
             <IconButton
@@ -478,6 +481,21 @@ export function ChatView({
             </IconButton>
           </span>
         </Tooltip>
+        {activeConversationId && onNotifyForger ? (
+          <Tooltip title={t.sections.chat.notifyForgerTooltip}>
+            <span>
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<BugReportRounded fontSize="small" />}
+                onClick={onNotifyForger}
+                sx={{ minHeight: 32, px: 1.25 }}
+              >
+                {t.sections.chat.notifyForger}
+              </Button>
+            </span>
+          </Tooltip>
+        ) : null}
         <Drawer
           anchor="left"
           open={historyOpen}

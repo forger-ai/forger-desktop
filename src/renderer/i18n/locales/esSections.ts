@@ -41,6 +41,8 @@ export const esSections = {
       stopSuccess: 'Respuesta detenida.',
       stopFailed: 'No pude detener la respuesta.',
       newConversation: 'Nueva conversación',
+      notifyForger: 'Notify',
+      notifyForgerTooltip: 'Compartir esta conversación sanitizada con soporte de Forger',
       showHistoryTooltip: 'Mostrar historial',
       historyTitle: 'Historial de conversaciones',
       deleteConversationTooltip: 'Eliminar conversación',
@@ -240,6 +242,10 @@ export const esSections = {
         forger_list_app_prompts: {
           name: 'Listar prompts de app',
           description: 'Revisa los prompts declarados por una app instalada y sus cambios locales.',
+        },
+        forger_test_app_prompt: {
+          name: 'Probar prompt de app',
+          description: 'Valida y renderiza un prompt declarado sin guardarlo ni ejecutarlo.',
         },
         forger_update_app_prompt: {
           name: 'Editar prompt de app',

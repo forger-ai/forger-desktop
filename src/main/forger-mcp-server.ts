@@ -10,6 +10,8 @@ import type {
   AppPromptRestoreInput,
   AppPromptReviewInput,
   AppPromptReviewItem,
+  AppPromptTestInput,
+  AppPromptTestResult,
   CatalogApp,
   OpenAppResult,
   RuntimeStatus,
@@ -73,6 +75,7 @@ interface ForgerMcpServerOptions {
   refreshAppView: (appId: string) => Promise<{ success: boolean; userMessage?: string; technicalCode?: string }>;
   updateApp: (appId: string, locale?: string) => Promise<InstallAppResult>;
   listAppPrompts: (appId: string) => Promise<AppPromptReviewItem[]>;
+  testAppPrompt: (input: AppPromptTestInput) => Promise<AppPromptTestResult>;
   updateAppPrompt: (input: AppPromptReviewInput) => Promise<AppPromptMutationResult>;
   restoreAppPrompt: (input: AppPromptRestoreInput) => Promise<AppPromptMutationResult>;
   memoryList: (input: MemoryListInput, access: MemoryAccessInput) => Promise<MemoryEntry[]>;
@@ -572,6 +575,25 @@ export class ForgerMcpServer {
       return withToolAuthorization(result, approval);
     }
 
+    if (toolId === 'forger_test_app_prompt') {
+      const appId = getToolAppId(session, args);
+      const kind = parsePromptReviewKind(args.kind);
+      if (!kind) {
+        const result = { success: false, valid: false, errors: [copy.invalidPromptKind], technicalCode: 'app_prompt_kind_invalid' };
+        await this.options.appendInstallLog('agent_tool:call_result', { appId, runId: session.runId, toolId, result });
+        return withToolAuthorization(result, approval);
+      }
+      const result = await this.options.testAppPrompt({
+        appId,
+        kind,
+        id: String(args.id ?? ''),
+        ...(typeof args.prompt === 'string' ? { prompt: args.prompt } : {}),
+        ...(isPlainRecord(args.variables) ? { variables: args.variables } : {}),
+      });
+      await this.options.appendInstallLog('agent_tool:call_result', { appId, runId: session.runId, toolId, result });
+      return withToolAuthorization(result, approval);
+    }
+
     if (isMemoryTool(toolId)) {
       try {
         if (toolId === 'memory_list') {
@@ -736,6 +758,9 @@ const parsePromptReviewKind = (value: unknown): 'promptTemplate' | 'agent' | 'ag
   }
   return null;
 };
+
+const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value && typeof value === 'object' && !Array.isArray(value));
 
 const parsePromptRuntimeOverride = (
   args: Record<string, unknown>,

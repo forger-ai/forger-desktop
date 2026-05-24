@@ -8,6 +8,7 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const { createManifestSupportController } = require('../../dist-electron/main/apps/manifest-support.js');
 const { renderManifestAgentPrompt } = require('../../dist-electron/main/manifest-agent-prompts.js');
+const { PromptOverridesStore } = require('../../dist-electron/main/prompt-overrides.js');
 
 const tmpRoot = async (name) => await fs.mkdtemp(path.join(os.tmpdir(), `forger-${name}-`));
 
@@ -610,6 +611,138 @@ test('manifest support builds app secret state and prompt override fallback resp
   assert.equal(validation.missingVariables.length, 0);
   assert.equal((await controller.updateAppPrompt({ appId: 'secrets', promptId: 'summary', prompt: 'Hi' })).success, false);
   assert.equal((await controller.restoreAppPrompt({ appId: 'secrets', promptId: 'summary' })).success, false);
+});
+
+test('manifest support tests app prompts with declared variables and render samples', async (t) => {
+  const root = await tmpRoot('manifest-support-prompt-test');
+  t.after(async () => {
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  const installDir = path.join(root, 'app');
+  await fs.mkdir(installDir, { recursive: true });
+  await fs.writeFile(path.join(installDir, 'manifest.json'), JSON.stringify({
+    promptTemplates: [{
+      id: 'summary',
+      title: 'Summary',
+      prompt: 'Summarize {{topic}}',
+      arguments: [{ name: 'topic', type: 'string', required: true }],
+    }],
+    agents: [{
+      id: 'advisor',
+      title: 'Advisor',
+      prompts: {
+        initial: {
+          body: 'Open {{safePath}}\nTitle {{title}}\nNotes {{notes}}\nPayload {{payload}}',
+          variables: {
+            safePath: { type: 'path', required: true },
+            title: { type: 'string', required: true },
+            notes: { type: 'text', required: true },
+            payload: { type: 'json', required: true },
+          },
+        },
+      },
+    }],
+  }), 'utf8');
+
+  const { controller } = createController({
+    promptOverridesStore: new PromptOverridesStore(path.join(root, 'prompt-overrides.json')),
+    registry: {
+      apps: {
+        prompts: { appId: 'prompts', name: 'Prompts App', installDir, version: '1.0.0', status: 'installed' },
+      },
+    },
+  });
+
+  const validAgent = await controller.testAppPrompt({
+    appId: 'prompts',
+    kind: 'agentPrompt',
+    id: 'advisor:initial',
+    variables: {
+      safePath: 'data/input.csv',
+      title: 'Monthly close',
+      notes: 'Line one\nLine two',
+      payload: { z: 1, a: true },
+    },
+  });
+  assert.equal(validAgent.success, true);
+  assert.match(validAgent.renderedPrompt, /Title Monthly close/);
+  assert.match(validAgent.renderedPrompt, /"a": true/);
+  assert.deepEqual(validAgent.declaredVariables, ['notes', 'payload', 'safePath', 'title']);
+
+  const hashVariable = await controller.testAppPrompt({
+    appId: 'prompts',
+    kind: 'agentPrompt',
+    id: 'advisor:initial',
+    prompt: 'Games {{#game_ids}}',
+    variables: { game_ids: [1, 2] },
+  });
+  assert.equal(hashVariable.success, false);
+  assert.equal(hashVariable.technicalCode, 'app_prompt_invalid');
+  assert.deepEqual(hashVariable.extraVariables, ['#game_ids']);
+
+  const missingVariable = await controller.testAppPrompt({
+    appId: 'prompts',
+    kind: 'agentPrompt',
+    id: 'advisor:initial',
+    variables: {
+      safePath: 'data/input.csv',
+      title: 'Monthly close',
+      payload: {},
+    },
+  });
+  assert.equal(missingVariable.technicalCode, 'agent_prompt_variable_required');
+  assert.match(missingVariable.errors[0], /notes/);
+
+  const extraVariable = await controller.testAppPrompt({
+    appId: 'prompts',
+    kind: 'agentPrompt',
+    id: 'advisor:initial',
+    variables: {
+      safePath: 'data/input.csv',
+      title: 'Monthly close',
+      notes: 'notes',
+      payload: {},
+      extra: 'nope',
+    },
+  });
+  assert.equal(extraVariable.technicalCode, 'agent_prompt_variable_not_declared');
+
+  const wrongType = await controller.testAppPrompt({
+    appId: 'prompts',
+    kind: 'agentPrompt',
+    id: 'advisor:initial',
+    variables: {
+      safePath: 'data/input.csv',
+      title: 'Bad\nTitle',
+      notes: 'notes',
+      payload: {},
+    },
+  });
+  assert.equal(wrongType.technicalCode, 'agent_prompt_variable_multiline_string');
+
+  const unsafePath = await controller.testAppPrompt({
+    appId: 'prompts',
+    kind: 'agentPrompt',
+    id: 'advisor:initial',
+    variables: {
+      safePath: '../secret.csv',
+      title: 'Monthly close',
+      notes: 'notes',
+      payload: {},
+    },
+  });
+  assert.equal(unsafePath.technicalCode, 'agent_prompt_variable_path_outside_app');
+
+  const promptTemplateDrift = await controller.testAppPrompt({
+    appId: 'prompts',
+    kind: 'promptTemplate',
+    id: 'summary',
+    prompt: 'Summarize {{#game_ids}}',
+    variables: { game_ids: '1,2' },
+  });
+  assert.equal(promptTemplateDrift.success, false);
+  assert.equal(promptTemplateDrift.technicalCode, 'app_prompt_invalid');
+  assert.deepEqual(promptTemplateDrift.extraVariables, ['#game_ids']);
 });
 
 test('manifest support handles remote backup safety, checksum, signatures, and cleanup branches', async (t) => {

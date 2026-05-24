@@ -12,5 +12,10 @@ description: Use this before changing installed app code so scope, validation, c
 - Prefer documented backend checks. For Python/uv apps, use a temporary writable `UV_CACHE_DIR` when the default cache is blocked.
 - If network is unavailable and a local `.venv` exists, use the existing environment for focused pytest or ruff checks and report the validation as constrained.
 - When coverage tooling blocks a fast local check for unrelated coverage, use a no-coverage functional test command and state the coverage gap plainly.
+- Restart after structural app edits: when an applied change can leave Vite HMR, backend reload, or the running service graph in an intermediate state, call the official `forger_restart_app` tool before reporting completion.
+- Use `forger_restart_app` after changes to file structure, imports, aliases, frontend entrypoints such as `frontend/src/App.tsx`, `vite.config`, `tsconfig`, `package.json`, dependencies, build tooling, FastAPI/backend code, models, migrations, database setup, manifest services/environment, or service startup scripts.
+- If the app showed a Vite overlay, "Failed to resolve import", backend reload, stale route, missing module, or broken runtime state during the change, finish validation and then call `forger_restart_app` even if the files now look correct.
+- Do not use `forger_refresh_app_view` as the recovery step after app edits. The app view already pseudo-reloads through Vite/HMR; the useful recovery action is restarting the installed app with `forger_restart_app`.
+- Treat `forger_restart_app` as stopping and reopening the installed app, including its local services. After calling it, check that the app opens again and that runtime status or visible state no longer shows the previous error.
 - Before finishing, clean or exclude generated artifacts such as `dist`, `node_modules`, `.vite`, `.venv`, pytest/ruff caches, `__pycache__`, coverage files, local database/runtime data, and TypeScript build info.
 - The final user message should describe visible changes and testable flows. Do not expose Git, paths, branches, commits, or commands unless the person asked for technical details.

@@ -1276,6 +1276,9 @@ test('normalizeInstalledAgentContext writes app runtime skills while ignoring sk
   assert.equal(generated.includes('forger-frontend-structure'), false);
   assert.equal(generated.includes('forger-react-ui'), false);
   assert.equal(generated.includes('forger-app-design-guidelines'), false);
+  assert.equal(generated.includes('forger-app-shell-layout'), false);
+  assert.equal(generated.includes('forger-mui-component-patterns'), false);
+  assert.equal(generated.includes('forger-mui-date-pickers'), false);
   assert.equal(generated.includes('forger-mui-consistency'), false);
   assert.ok(generated.includes('forger-app-mcp-data-tools'));
   assert.ok(generated.includes('inside'));
