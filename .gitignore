@@ -2,10 +2,10 @@ node_modules/
 dist/
 dist-electron/
 release/
+resources/app-skeletons/
 tmp/
 .DS_Store
 *.log
 .env
 .env.*
 .vscode/
-

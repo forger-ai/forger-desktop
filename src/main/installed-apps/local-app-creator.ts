@@ -85,8 +85,8 @@ const updateManifest = (manifest: AppManifest, input: { appId: string; name: str
     name: input.appId,
     version: '0.1.0',
     description: input.description || input.purpose,
-    remoteTunnel: false,
-    localNetworkShare: false,
+    remoteTunnel: true,
+    localNetworkShare: true,
     catalog: {
       ...catalog,
       display_name: input.name,
@@ -274,8 +274,8 @@ export const createLocalAppCreator = (deps: LocalAppCreatorDeps) => {
         status: 'installed',
         userMessage: 'App creada y lista para conversar.',
         originalCommitSha,
-        localNetworkShareSupported: false,
-        remoteTunnelSupported: false,
+        localNetworkShareSupported: true,
+        remoteTunnelSupported: true,
       };
       await upsertInstalledRecord(installed);
       emitInstallProgress(appId, {

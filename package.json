@@ -1,6 +1,6 @@
 {
   "name": "forger-desktop",
-  "version": "0.2.13",
+  "version": "0.2.14",
   "private": true,
   "description": "Desktop launcher for Forger",
   "author": "Forger",
@@ -13,7 +13,8 @@
     "dev:renderer": "vite",
     "dev:electron:watch": "tsc -p tsconfig.electron.json --watch --preserveWatchOutput",
     "dev:electron": "wait-on tcp:127.0.0.1:5173 dist-electron/main/index.js dist-electron/preload/index.js && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .",
-    "build": "npm run build:renderer && npm run build:electron",
+    "prepare:app-skeleton": "node ./scripts/prepare-app-skeleton-resource.mjs",
+    "build": "npm run prepare:app-skeleton && npm run build:renderer && npm run build:electron",
     "build:renderer": "vite build",
     "clean:electron": "node ./scripts/clean-electron-build.mjs",
     "build:electron": "npm run clean:electron && tsc -p tsconfig.electron.json",
@@ -112,11 +113,15 @@
         "filter": [
           "**/*",
           "!**/.git/**",
+          "!**/.gitmodules",
+          "!**/.idea/**",
           "!**/node_modules/**",
           "!**/.venv/**",
           "!**/dist/**",
           "!**/build/**",
           "!**/coverage/**",
+          "!**/__pycache__/**",
+          "!**/.DS_Store",
           "!**/.pytest_cache/**",
           "!**/.ruff_cache/**"
         ]

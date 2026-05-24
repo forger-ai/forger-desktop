@@ -7,7 +7,7 @@ description: Write and review Forger app manifests using the current manifest co
 - A manifest is an internal Forger platform contract. It describes how Forger installs, runs, prompts, grants tools to, and operates an app. It is not the list of visible app features.
 - Current non-deprecated manifest sections include `name`, `version`, `description`, `changelog`, `stack`, `catalog`, `services`, `mcp`, `tools`, `appSecrets`, `promptTemplates`, `agents`, `scripts`, `skills`, `cloudMessaging`, `agentRuntime`, `remoteTunnel`, and `localNetworkShare`.
 - Do not add `catalog.capabilities` to new manifests. Use separate manifest sections for tools, secrets, app agents, prompt templates, scripts, skills, messaging, runtime, remote tunnel, and local network sharing.
-- `localNetworkShare` and `remoteTunnel` are top-level manifest flags.
+- `localNetworkShare` and `remoteTunnel` are top-level manifest flags. New apps created from Forger default both flags to `true` so Desktop can provide local network sharing and remote tunnel sessions.
 
 ## Full Manifest JSON Contract
 Use this shape as the current authoring contract. Remove fields that do not apply instead of leaving fake capabilities.
@@ -198,8 +198,8 @@ Use this shape as the current authoring contract. Remove fields that do not appl
     "enabled": false,
     "defaultDelivery": "persistent"
   },
-  "localNetworkShare": false,
-  "remoteTunnel": false
+  "localNetworkShare": true,
+  "remoteTunnel": true
 }
 ```
 
@@ -214,4 +214,5 @@ Use this shape as the current authoring contract. Remove fields that do not appl
 - `appSecrets` are declarations only. They never store secret values. Never put secret values in manifests, prompts, logs, memory, generated files, test fixtures, screenshots, or final messages.
 - `scripts` and `skills` are internal agent tools, not visible app features.
 - `agentRuntime.networkAccess` controls whether app agent runs can use network access by default. Keep it `false` unless the app has a concrete need.
+- Keep `localNetworkShare` and `remoteTunnel` as top-level runtime flags. Do not move them into `catalog.capabilities` or visible feature lists.
 - For relational app data, prefer explicit SQLite/SQLModel tables and typed columns. Do not add JSON columns unless the data is genuinely schemaless and the reason is documented.

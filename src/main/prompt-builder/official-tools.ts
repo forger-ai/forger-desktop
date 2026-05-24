@@ -119,6 +119,16 @@ const forgerSkillDefinitions: ForgerSkillDefinition[] = [
   },
   {
     group: 'forger',
+    id: 'forger-mobile-responsive-frontend',
+    description: 'Build React/MUI app frontends that work well on mobile and desktop.',
+  },
+  {
+    group: 'forger',
+    id: 'forger-remote-tunnel-wiring',
+    description: 'Use Forger remote tunnel and local network manifest flags and frontend modules correctly.',
+  },
+  {
+    group: 'forger',
     id: 'forger-react-ui',
     description: 'React UI best practices for non-technical users.',
   },

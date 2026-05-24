@@ -105,8 +105,8 @@ test('local app creator copies the skeleton, scrubs git metadata, writes manifes
   assert.equal(manifest.catalog.display_name, 'Mi App de Clientes');
   assert.match(await fs.readFile(path.join(installDir, 'frontend', 'index.html'), 'utf8'), /<title>Mi App de Clientes<\/title>/);
   assert.equal(manifest.catalog.capabilities, undefined);
-  assert.equal(manifest.localNetworkShare, false);
-  assert.equal(manifest.remoteTunnel, false);
+  assert.equal(manifest.localNetworkShare, true);
+  assert.equal(manifest.remoteTunnel, true);
   assert.deepEqual(manifest.tools, { required: [], optional: [] });
   assert.deepEqual(manifest.appSecrets, []);
   assert.deepEqual(manifest.promptTemplates, []);
@@ -115,8 +115,8 @@ test('local app creator copies the skeleton, scrubs git metadata, writes manifes
   assert.equal(registry.apps['mi-app-de-clientes'].status, 'installed');
   assert.equal(registry.apps['mi-app-de-clientes'].privateLocal, true);
   assert.equal(registry.apps['mi-app-de-clientes'].originalCommitSha, 'initial-sha');
-  assert.equal(registry.apps['mi-app-de-clientes'].localNetworkShareSupported, false);
-  assert.equal(registry.apps['mi-app-de-clientes'].remoteTunnelSupported, false);
+  assert.equal(registry.apps['mi-app-de-clientes'].localNetworkShareSupported, true);
+  assert.equal(registry.apps['mi-app-de-clientes'].remoteTunnelSupported, true);
   assert.ok(calls.some(([name]) => name === 'gitInit'));
   assert.ok(calls.some(([name]) => name === 'userBranch'));
   assert.ok(calls.some(([name]) => name === 'installDeps'));

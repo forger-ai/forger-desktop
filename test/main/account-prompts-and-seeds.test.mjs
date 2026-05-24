@@ -325,6 +325,8 @@ test('official tool skill templates and seed data keep expected Desktop defaults
     'forger-python-backend',
     'forger-fastapi-contracts',
     'forger-frontend-structure',
+    'forger-mobile-responsive-frontend',
+    'forger-remote-tunnel-wiring',
     'forger-react-ui',
   ]);
   assert.ok(templates.every((template) => template.body.startsWith('---\nname:')));

@@ -9,6 +9,7 @@ export default tseslint.config(
       'dist/**',
       'dist-electron/**',
       'release/**',
+      'resources/app-skeletons/**',
       'node_modules/**',
       'coverage/**',
     ],
