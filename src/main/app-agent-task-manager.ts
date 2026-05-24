@@ -412,6 +412,9 @@ export class AppAgentTaskManager {
       task.updatedAt = new Date().toISOString();
       task.resultText = parsed || taskMessage(locale, 'completed');
       this.addProgress(task, taskMessage(locale, 'finished'));
+      await this.cleanupTaskInputs(task).catch(() => undefined);
+      await fs.rm(claudeMcpConfigPath ?? '', { force: true }).catch(() => undefined);
+      claudeMcpConfigPath = null;
       await this.persist(task);
       this.emit(task);
     } finally {

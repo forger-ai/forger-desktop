@@ -74,6 +74,10 @@ export function RendererAppDialogs({ controller }: RendererAppDialogsProps) {
     remoteTunnelReadyDialog,
     closeRemoteTunnelReadyDialog,
     openRemoteTunnelPortal,
+    socialUploadDialog,
+    closeSocialUploadDialog,
+    setSocialUploadVisibility,
+    submitSocialUploadDialog,
     errorReportDialog,
     closeErrorReportDialog,
     copyErrorReportDetails,
@@ -189,6 +193,42 @@ export function RendererAppDialogs({ controller }: RendererAppDialogsProps) {
         onRefresh={refreshClaudeAuthStatus}
         onReinstall={handleReinstallClaude}
       />
+
+      <Dialog open={socialUploadDialog.open} onClose={closeSocialUploadDialog} maxWidth="xs" fullWidth>
+        <DialogTitle>
+          {t.locale === 'es' ? 'Subir a Social' : 'Upload to Social'}
+        </DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ pt: 1 }}>
+            <Typography color="text.secondary">
+              {t.locale === 'es'
+                ? 'Elige quien puede ver esta app compartida.'
+                : 'Choose who can see this shared app.'}
+            </Typography>
+            <Select
+              fullWidth
+              value={socialUploadDialog.visibility}
+              onChange={(event) => setSocialUploadVisibility(event.target.value)}
+            >
+              <MenuItem value="private">
+                {t.locale === 'es' ? 'Privada: solo con link' : 'Private: link only'}
+              </MenuItem>
+              <MenuItem value="friends">
+                {t.locale === 'es' ? 'Amigos' : 'Friends'}
+              </MenuItem>
+              <MenuItem value="public">
+                {t.locale === 'es' ? 'Publica' : 'Public'}
+              </MenuItem>
+            </Select>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeSocialUploadDialog}>{t.actions.close}</Button>
+          <Button variant="contained" onClick={() => void submitSocialUploadDialog()}>
+            {t.locale === 'es' ? 'Subir' : 'Upload'}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <Dialog open={agentProviderConfigOpen} onClose={() => setAgentProviderConfigOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle>Conectar agente</DialogTitle>
