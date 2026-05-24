@@ -52,6 +52,10 @@ export interface CatalogVersionPayload {
   changelog?: unknown;
   capabilities?: unknown;
   permissions?: unknown;
+  localNetworkShare?: unknown;
+  local_network_share?: unknown;
+  remoteTunnel?: unknown;
+  remote_tunnel?: unknown;
   agents?: unknown;
   prompt_templates?: unknown;
   promptTemplates?: unknown;
@@ -94,6 +98,10 @@ export const mapCatalogItem = (
     downloadUrl: includeDirectDownloadUrl ? latestVersion?.download_url ?? undefined : undefined,
     changelog: normalizeChangelog(latestVersion?.changelog, latestVersion?.version),
     capabilities: normalizeAppCapabilities(latestVersion?.capabilities ?? latestVersion?.permissions),
+    localNetworkShareSupported: latestVersion?.localNetworkShare === true
+      || latestVersion?.local_network_share === true,
+    remoteTunnelSupported: latestVersion?.remoteTunnel === true
+      || latestVersion?.remote_tunnel === true,
     tools: normalizeCatalogTools(latestVersion?.tools ?? appEntry.tools),
     agents: normalizeCatalogAgents(latestVersion?.agents ?? appEntry.agents),
     promptTemplates: normalizeCatalogPromptTemplates(

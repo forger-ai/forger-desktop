@@ -3,10 +3,13 @@ import type {
   AppCodexConversationRun,
   AppCodexConversationRunStatus,
   AppCodexConversationMessage,
+  AppAgentRunSummary,
+  AppAgentThreadSummary,
   AgentRuntime,
   CodexReasoningEffort,
 } from '../../shared/types';
 import { getSharedCopy } from '../../shared/i18n';
+import { renderPromptFile } from '../prompt-builder';
 
 export interface InternalConversationShape extends AppCodexConversation {
   threadId?: string | null;
@@ -14,80 +17,26 @@ export interface InternalConversationShape extends AppCodexConversation {
   metadata?: Record<string, string | number | boolean | null>;
 }
 
-interface RuntimePromptEnvelope {
-  runtimeContract?: string;
-  interfaceObjective?: string;
-  turnPayload: string;
-}
-
 const MAX_CONTEXT_CHARS = 40_000;
 const DEFAULT_MODEL = 'gpt-5.4';
 const DEFAULT_REASONING: CodexReasoningEffort = 'medium';
 
-export const buildAppAgentPrompt = (message: string, context: string | undefined, initialPrompt?: string): string => {
-  const trimmedContext = (context ?? '').trim();
-  const promptEnvelope = parseRuntimePromptEnvelope(trimmedContext);
-  const parts: string[] = [];
-  const trimmedInitialPrompt = initialPrompt?.trim();
-  if (trimmedInitialPrompt) {
-    parts.push(trimmedInitialPrompt, '');
-  }
-  if (promptEnvelope.runtimeContract) {
-    parts.push(
-      'Runtime contract:',
-      promptEnvelope.runtimeContract,
-      '',
-      'Interface objective:',
-      promptEnvelope.interfaceObjective || 'Follow the current app interface objective from the turn payload.',
-      '',
-      'Turn payload:',
-      promptEnvelope.turnPayload || '{}',
-      '',
-      'Message:',
-      message.trim(),
-    );
-    return parts.join('\n');
-  }
-  const legacyContext = trimmedContext.slice(0, MAX_CONTEXT_CHARS);
-  if (!legacyContext) {
-    parts.push(message.trim());
-    return parts.join('\n');
-  }
-  parts.push(
-    'Contexto actual de la app:',
-    legacyContext,
-    '',
-    'Mensaje del usuario:',
-    message.trim(),
-    '',
-    'Usa las herramientas MCP de la app cuando necesites modificar su estado. Responde breve para mostrar el resultado dentro de la app.',
-  );
-  return parts.join('\n');
-};
+export const buildManifestAgentStartPrompt = (manifestPrompt: string): string =>
+  renderPromptFile('agent-threads/start.md', { manifestPrompt: manifestPrompt.trim() });
 
-const parseRuntimePromptEnvelope = (context: string): RuntimePromptEnvelope => {
-  if (!context) {
-    return { turnPayload: '' };
-  }
-  try {
-    const parsed = JSON.parse(context) as unknown;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return { turnPayload: context.slice(0, MAX_CONTEXT_CHARS) };
-    }
-    const payload = { ...(parsed as Record<string, unknown>) };
-    const runtimeContract = typeof payload.runtime_contract === 'string' ? payload.runtime_contract.trim() : '';
-    const interfaceObjective = typeof payload.interface_objective === 'string' ? payload.interface_objective.trim() : '';
-    delete payload.runtime_contract;
-    delete payload.interface_objective;
-    return {
-      runtimeContract,
-      interfaceObjective,
-      turnPayload: JSON.stringify(payload, null, 2).slice(0, MAX_CONTEXT_CHARS),
-    };
-  } catch {
-    return { turnPayload: context.slice(0, MAX_CONTEXT_CHARS) };
-  }
-};
+export const buildManifestAgentResumePrompt = (manifestPrompt: string): string =>
+  renderPromptFile('agent-threads/resume.md', { manifestPrompt: manifestPrompt.trim() });
+
+export const buildManifestAgentSteerPrompt = (manifestPrompt: string): string =>
+  renderPromptFile('agent-threads/steer.md', { manifestPrompt: manifestPrompt.trim() });
+
+export const buildManifestAgentRecoveryPrompt = (
+  manifestPrompt: string,
+  chatHistory: string,
+): string => renderPromptFile('agent-threads/recovery.md', {
+  manifestPrompt: manifestPrompt.trim(),
+  chatHistory: chatHistory.trim().slice(-MAX_CONTEXT_CHARS),
+});
 
 export const buildConversationRecoveryContext = (
   conversation: { messages: AppCodexConversationMessage[] },
@@ -101,12 +50,7 @@ export const buildConversationRecoveryContext = (
     .map((message) => `${message.role}: ${message.text.trim()}`)
     .join('\n\n')
     .slice(-MAX_CONTEXT_CHARS);
-  return [
-    'Historial persistido de este Desktop thread:',
-    transcript,
-    '',
-    'Continúa en el mismo Desktop thread usando este historial como contexto.',
-  ].join('\n');
+  return transcript;
 };
 
 export const toConversation = (conversation: InternalConversationShape): AppCodexConversation => ({
@@ -128,6 +72,80 @@ export const toRun = (run: AppCodexConversationRun): AppCodexConversationRun => 
   ...(run.progressLog ? { progressLog: run.progressLog } : {}),
   ...(run.permissionRequest ? { permissionRequest: run.permissionRequest } : {}),
 });
+
+export const toAppAgentThreadSummary = (conversation: AppCodexConversation | null): AppAgentThreadSummary | null => {
+  if (!conversation) {
+    return null;
+  }
+  return {
+    desktop_thread_id: conversation.conversationId,
+    title: conversation.title,
+    status: conversation.activeRun?.status ?? 'idle',
+    ...(conversation.activeRun ? { active_run: toAppAgentRunSummary(conversation.conversationId, conversation.activeRun, conversation.messages) ?? undefined } : {}),
+    messages: conversation.messages.map((message) => ({
+      id: message.messageId,
+      role: message.role,
+      content: message.text,
+      created_at: message.createdAt,
+    })),
+    ...(conversation.activeRun?.progressLog ? { progressLog: conversation.activeRun.progressLog } : {}),
+  };
+};
+
+export const toAppAgentRunSummary = (
+  desktopThreadId: string,
+  run: AppCodexConversationRun | undefined,
+  messages: AppCodexConversationMessage[] = [],
+): AppAgentRunSummary | null => {
+  if (!run) {
+    return null;
+  }
+  const resultText = latestAssistantTextForRun(messages, run.runId);
+  return {
+    desktop_thread_id: desktopThreadId,
+    desktop_run_id: run.runId,
+    status: run.status,
+    ...(run.error ? { error: run.error } : {}),
+    ...(resultText ? { resultText } : {}),
+    ...(run.progressLog ? { progressLog: run.progressLog } : {}),
+  };
+};
+
+export const toAppAgentRunSummaryForId = (
+  conversation: AppCodexConversation | null,
+  desktopThreadId: string,
+  desktopRunId: string,
+): AppAgentRunSummary | null => {
+  if (!conversation) {
+    return null;
+  }
+  if (conversation.activeRun?.runId === desktopRunId) {
+    return toAppAgentRunSummary(desktopThreadId, conversation.activeRun, conversation.messages);
+  }
+  const resultText = latestAssistantTextForRun(conversation.messages, desktopRunId);
+  if (!resultText) {
+    return null;
+  }
+  return {
+    desktop_thread_id: desktopThreadId,
+    desktop_run_id: desktopRunId,
+    status: 'completed',
+    resultText,
+  };
+};
+
+export const latestAssistantTextForRun = (
+  messages: AppCodexConversationMessage[],
+  runId: string,
+): string | null => {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role === 'assistant' && message.runId === runId && message.text.trim()) {
+      return message.text;
+    }
+  }
+  return null;
+};
 
 export const isTerminalRunStatus = (status: AppCodexConversationRunStatus): boolean =>
   status === 'completed' || status === 'failed' || status === 'canceled';

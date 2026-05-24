@@ -15,18 +15,24 @@ const {
   buildGlobalForgerAgentsMarkdown,
   FORGER_AGENT_CONTRACT_MARKER,
   FORGER_AGENT_CONTRACT_VERSION,
-} = require('../../dist-electron/main/prompts/forger-base.js');
+} = require('../../dist-electron/main/prompt-builder/forger-base.js');
 const {
   buildForgerAppAgentsMarkdown,
-} = require('../../dist-electron/main/prompts/apps-base.js');
+} = require('../../dist-electron/main/prompt-builder/apps-base.js');
 const {
   buildCodexPromptForFreeChat,
   buildCodexPromptWithAppContext,
-} = require('../../dist-electron/main/prompts/user-message.js');
+} = require('../../dist-electron/main/prompt-builder/user-message.js');
 const {
   buildForgerOfficialToolSkillTemplates,
   buildForgerOfficialToolsPromptSection,
-} = require('../../dist-electron/main/prompts/official-tools.js');
+} = require('../../dist-electron/main/prompt-builder/official-tools.js');
+const {
+  promptTemplateRoots,
+  renderPromptFile,
+  renderTemplate,
+  resolvePromptTemplatePath,
+} = require('../../dist-electron/main/prompt-builder/index.js');
 const {
   catalogAppsSeed,
   installedAppsSeed,
@@ -103,6 +109,11 @@ test('Forger prompt builders include contract, language, files, official tools, 
   const appPrompt = buildCodexPromptWithAppContext({
     appId: 'finance-os',
     displayName: 'Finance OS',
+    appRoot: '/Users/test/Forger/apps/finance-os',
+    runRoot: '/Users/test/Forger/apps/finance-os/frontend',
+    appStack: 'backend python/fastapi/uv; frontend typescript/react/vite/mui',
+    runtime: 'provider codex, model gpt-5.4',
+    networkAccess: false,
     userPrompt: ' Revisar presupuesto ',
     userLanguage: 'es',
     officialToolsContext: officialTools,
@@ -116,9 +127,41 @@ test('Forger prompt builders include contract, language, files, official tools, 
     }],
   });
   assert.match(appPrompt, /SELECTED APP: \/finance-os/);
+  assert.match(appPrompt, /APP_ROOT: \/Users\/test\/Forger\/apps\/finance-os/);
+  assert.match(appPrompt, /RUN_ROOT: \/Users\/test\/Forger\/apps\/finance-os\/frontend/);
+  assert.match(appPrompt, /APP_STACK: backend python\/fastapi\/uv; frontend typescript\/react\/vite\/mui/);
+  assert.match(appPrompt, /RUNTIME: provider codex, model gpt-5\.4/);
+  assert.match(appPrompt, /NETWORK ACCESS: disabled/);
+  assert.match(appPrompt, /use APP_ROOT for versioning checks/);
   assert.match(appPrompt, new RegExp(`FORGER CONTRACT: ${FORGER_AGENT_CONTRACT_VERSION}`));
   assert.match(appPrompt, /Size: 1.5 KB/);
   assert.match(appPrompt, /USER MESSAGE:\nRevisar presupuesto/);
+  const appResumePrompt = buildCodexPromptWithAppContext({
+    turnKind: 'resume',
+    appId: 'finance-os',
+    displayName: 'Finance OS',
+    appRoot: '/Users/test/Forger/apps/finance-os',
+    runRoot: '/Users/test/Forger/apps/finance-os/frontend',
+    appStack: 'backend python/fastapi/uv; frontend typescript/react/vite/mui',
+    runtime: 'provider codex, model gpt-5.4',
+    networkAccess: false,
+    userPrompt: ' Continuar ',
+    userLanguage: 'es',
+    officialToolsContext: officialTools,
+    sharedFilesRootName: 'shared',
+    sharedFiles: [{
+      name: 'budget.csv',
+      relativePath: 'chat/budget.csv',
+      sizeBytes: 1536,
+      modifiedAt: '2026-05-21T00:00:00.000Z',
+      source: 'attached',
+    }],
+  });
+  assert.doesNotMatch(appResumePrompt, /SELECTED APP/);
+  assert.doesNotMatch(appResumePrompt, /APP_ROOT/);
+  assert.doesNotMatch(appResumePrompt, /Gmail status/);
+  assert.match(appResumePrompt, /SHARED FILES IN THIS MESSAGE:[\s\S]*budget\.csv/);
+  assert.match(appResumePrompt, /USER MESSAGE:\nContinuar/);
   assert.match(buildCodexPromptWithAppContext({
     appId: 'recipes',
     displayName: 'Recipes',
@@ -150,8 +193,28 @@ test('Forger prompt builders include contract, language, files, official tools, 
     sharedFiles: [],
   });
   assert.match(freePrompt, /FORGER CHAT MODE: free chat/);
+  assert.match(freePrompt, /# What Is Forger\?/);
   assert.match(freePrompt, /USER LANGUAGE: not configured/);
   assert.match(freePrompt, /No shared files/);
+  const freeResumePrompt = buildCodexPromptForFreeChat({
+    turnKind: 'resume',
+    userPrompt: 'Sigue',
+    userLanguage: 'en',
+    officialToolsContext: 'Gmail status: connected.',
+    sharedFilesRootName: 'shared',
+    sharedFiles: [{
+      name: 'large.csv',
+      relativePath: 'attached/large.csv',
+      sizeBytes: 1024 * 1024 * 2,
+      modifiedAt: '2026-05-21T00:00:00.000Z',
+      source: 'attached',
+    }],
+  });
+  assert.doesNotMatch(freeResumePrompt, /FORGER CHAT MODE/);
+  assert.doesNotMatch(freeResumePrompt, /# What Is Forger\?/);
+  assert.doesNotMatch(freeResumePrompt, /Gmail status/);
+  assert.match(freeResumePrompt, /SHARED FILES IN THIS MESSAGE:[\s\S]*large\.csv/);
+  assert.match(freeResumePrompt, /USER MESSAGE:\nSigue/);
   assert.match(buildCodexPromptForFreeChat({
     userPrompt: 'Leer archivo',
     userLanguage: 'en',
@@ -190,32 +253,120 @@ test('Forger prompt builders include contract, language, files, official tools, 
   });
   assert.match(appAgents, /Backend: language Python, framework FastAPI/);
   assert.match(appAgents, /Frontend: language TypeScript, framework React/);
-  assert.match(appAgents, /This app declares MCP tools/);
+  assert.match(appAgents, /This app declares structured app tools/);
   assert.match(appAgents, /import: internal agent tool/);
+  assert.match(appAgents, /This app may be installed and operated through Forger/);
+  assert.match(appAgents, /fallback context file used when the app does not ship its own app-owned `AGENTS\.md`/);
+  assert.match(appAgents, /Do not infer visible capabilities only from scripts/);
+  assert.match(appAgents, /Shared files are task inputs only/);
+  assert.match(appAgents, /Prefer structured app tools when they exist/);
+  assert.match(appAgents, /Keep secret values out of prompts/);
+  assert.doesNotMatch(appAgents, /## Response Language/);
+  assert.doesNotMatch(appAgents, /You are the Forger agent/);
+  assert.doesNotMatch(appAgents, /Use simple language for the person writing to Forger/);
   assert.match(buildForgerAppAgentsMarkdown('frontend-only', {
     stack: {
       backend: {},
       frontend: {},
     },
   }), /Backend: undefined[\s\S]*Frontend: undefined/);
-  assert.match(buildForgerAppAgentsMarkdown('empty-app', null), /No app MCP tools[\s\S]*No scripts declared[\s\S]*- Undefined/);
+  assert.match(buildForgerAppAgentsMarkdown('empty-app', null), /No structured app tools[\s\S]*No scripts declared[\s\S]*- Undefined/);
 
   const globalAgents = buildGlobalForgerAgentsMarkdown();
   assert.match(globalAgents, new RegExp(FORGER_AGENT_CONTRACT_MARKER));
-  assert.match(globalAgents, /Do not use external files/);
+  assert.match(globalAgents, /You are an agent inside Forger/);
+  assert.match(globalAgents, /In this folder lives the Forger home/);
+  assert.match(globalAgents, /Forger helps people download approved apps, create their own apps/);
+  assert.match(globalAgents, /Forger home is the person's private local workspace/);
+  assert.match(globalAgents, /## Response Language/);
+  assert.match(globalAgents, /## Strict Domain/);
+  assert.match(globalAgents, /## Shared Files/);
+  assert.match(globalAgents, /## Source of Truth/);
+  assert.match(globalAgents, /Treat the person as non-technical by default/);
+  assert.match(globalAgents, /Use product words: app, screen, button, data, file, saved version, flow, result/);
+  assert.match(globalAgents, /## Request Playbooks[\s\S]*## How To Speak With The Person/);
+  assert.match(globalAgents, /### Building a New App[\s\S]*1\. Clarify the goal[\s\S]*2\. Shape the first useful version[\s\S]*3\. Offer two or three product directions/);
+  assert.match(globalAgents, /### Modifying an App[\s\S]*1\. Identify what should feel different[\s\S]*3\. Work on one visible improvement[\s\S]*4\. Save the result as a new version/);
+  assert.match(globalAgents, /### Answering a Simple Question[\s\S]*1\. Identify the selected app[\s\S]*3\. Give a direct answer from verified app information/);
+  assert.match(globalAgents, /### Working With App Data[\s\S]*1\. Identify which app and which data[\s\S]*3\. Prefer a safe preview[\s\S]*5\. Explain what was reviewed, loaded, changed, skipped, or left untouched/);
+  assert.match(globalAgents, /### Resolving an App Update Conflict[\s\S]*1\. Protect the person's current app[\s\S]*4\. When something cannot be kept cleanly[\s\S]*6\. Finish by explaining what was kept/);
+  assert.match(globalAgents, /### Solving a Problem[\s\S]*1\. Identify the affected app[\s\S]*2\. Understand what the person expected[\s\S]*6\. Finish by explaining what changed/);
+  assert.match(globalAgents, /Never save, reveal, or repeat secrets/);
+  assert.doesNotMatch(globalAgents, /Gmail manifest declaration example/);
+  assert.doesNotMatch(globalAgents, /backend owns persistence, validation, import\/export rules/);
+  assert.doesNotMatch(globalAgents, /Do not add JSON columns/);
+  assert.doesNotMatch(globalAgents, /Treat `APP_ROOT` from the message prompt/);
+  assert.throws(() => renderPromptFile('agents-md/global-forger.md', {
+    forgerContractMarker: FORGER_AGENT_CONTRACT_MARKER,
+  }), /prompt_template_variable_missing:forgerPartial/);
 });
 
 test('official tool skill templates and seed data keep expected Desktop defaults', () => {
   const templates = buildForgerOfficialToolSkillTemplates();
   assert.deepEqual(templates.map((template) => template.id), [
+    'forger-context',
+    'forger-app-agents-authoring',
+    'forger-app-mcp-data-tools',
     'forger-official-tools',
     'forger-gmail',
     'forger-permissions',
+    'forger-manifest-authoring',
+    'forger-desktop-runtime-bridge',
+    'forger-automations',
+    'forger-secrets',
+    'forger-agents',
+    'forger-tools',
+    'forger-tasks',
+    'forger-app-design-guidelines',
+    'forger-mui-consistency',
+    'forger-installed-app-change',
+    'forger-python-backend',
+    'forger-fastapi-contracts',
+    'forger-frontend-structure',
+    'forger-react-ui',
   ]);
   assert.ok(templates.every((template) => template.body.startsWith('---\nname:')));
+  const manifestSkill = templates.find((template) => template.id === 'forger-manifest-authoring');
+  assert.ok(manifestSkill);
+  assert.match(manifestSkill.body, /## Full Manifest JSON Contract/);
+  assert.match(manifestSkill.body, /"appSecrets": \[/);
+  assert.match(manifestSkill.body, /"promptTemplates": \[/);
+  assert.match(manifestSkill.body, /"agents": \[/);
+  assert.match(manifestSkill.body, /promptTemplates[\s\S]*agents[\s\S]*tools/);
+  assert.match(manifestSkill.body, /gmail\.connection\.status/);
+  assert.match(manifestSkill.body, /Do not add `catalog\.capabilities`/);
+  assert.match(templates.find((template) => template.id === 'forger-agents')?.body ?? '', /^---\nname: forger-agents/m);
+  assert.match(templates.find((template) => template.id === 'forger-tasks')?.body ?? '', /^---\nname: forger-tasks/m);
+  assert.match(templates.find((template) => template.id === 'forger-tools')?.body ?? '', /^---\nname: forger-tools/m);
+  const bridgeSkill = templates.find((template) => template.id === 'forger-desktop-runtime-bridge');
+  assert.ok(bridgeSkill);
+  assert.match(bridgeSkill.body, /commons\/backend\/forger_desktop\.py/);
+  assert.match(bridgeSkill.body, /start_agent_task/);
+  assert.match(bridgeSkill.body, /create_agent_thread/);
+  assert.match(bridgeSkill.body, /Finance OS is the reference pattern/);
   assert.equal(installedAppsSeed.length, 2);
   assert.equal(catalogAppsSeed.some((app) => app.id === 'finance-os'), true);
   assert.equal(settingsSeed.safeMode, true);
   assert.equal(settingsSeed.defaultAgentProvider, 'auto');
   assert.equal(settingsSeed.agentDefaults.codex.model, settingsSeed.codexDefaults.model);
+});
+
+test('prompt builder renders markdown templates strictly and exposes package roots', () => {
+  assert.equal(renderTemplate('Hello {{name}}', { name: 'Forger' }), 'Hello Forger');
+  assert.equal(renderTemplate('Line 1\n{{body}}', { body: 'Line 2\nLine 3' }), 'Line 1\nLine 2\nLine 3');
+  assert.equal(renderTemplate('Optional: {{empty}}', { empty: '' }), 'Optional:');
+  assert.throws(() => renderTemplate('Hello {{name}}', {}), /prompt_template_variable_missing:name/);
+  assert.throws(() => renderTemplate('Hello {{outer}}', { outer: '{{inner}}' }), /prompt_template_unresolved:inner/);
+  assert.match(resolvePromptTemplatePath('chat/app-chat-start.md'), /app-chat-start\.md$/);
+  assert.ok(promptTemplateRoots().some((entry) => entry.includes('prompt-builder')));
+  const automationPrompt = renderPromptFile('automations/global-automation.md', {
+    automationName: 'Daily review',
+    forgerPartial: renderPromptFile('partials/forger.md', {}),
+    appLines: '- Finance OS (id: finance-os)',
+    userInstruction: 'Summarize pending work.',
+  });
+  assert.match(automationPrompt, /# Forger Global Automation/);
+  assert.match(automationPrompt, /# What Is Forger\?/);
+  assert.match(automationPrompt, /## Included Apps/);
+  assert.match(automationPrompt, /## User Instruction/);
 });

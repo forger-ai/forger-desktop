@@ -787,7 +787,7 @@ export const classifyForgerTask = (prompt: string): ForgerTaskType => {
 };
 
 export const buildFunctionalOperationSummary = (assistantText: string): string => {
-  const compact = assistantText.replace(/\s+/g, ' ').trim();
+  const compact = stripInternalVersioningClaims(assistantText).replace(/\s+/g, ' ').trim();
   if (!compact) {
     return 'Se guardo una nueva version de la app.';
   }
@@ -795,12 +795,25 @@ export const buildFunctionalOperationSummary = (assistantText: string): string =
 };
 
 export const buildAutoAppliedUserMessage = (assistantText: string): string => {
-  const compact = assistantText.trim();
+  const compact = stripInternalVersioningClaims(assistantText).trim();
   const suffix = 'Version guardada. Puedes probarla ahora; si no quedo como esperabas, puedo ajustarla o volver a la version anterior.';
   if (!compact) {
     return suffix;
   }
   return `${compact}\n\n${suffix}`;
+};
+
+export const stripInternalVersioningClaims = (assistantText: string): string => {
+  const paragraphs = assistantText
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean);
+  const versioningTerm = /\b(git|commit|commits|version|versi[oó]n|versiones|punto de retorno|rollback|index\.lock|lock|almac[eé]n|branch|rama)\b/i;
+  const saveClaim = /\b(guardad[ao]s?|saved|save|guardar|guarde|guardo|commit(?:ted)?|versionad[ao])\b/i;
+  const failureClaim = /\b(no pude|no pudo|no pudimos|could not|cannot|can't|failed|fall[oó]|bloquead[ao]|blocked|permiso|permission|lock)\b/i;
+  return paragraphs
+    .filter((paragraph) => !(versioningTerm.test(paragraph) && (saveClaim.test(paragraph) || failureClaim.test(paragraph))))
+    .join('\n\n');
 };
 
 export const applyPreviewChanges = async (

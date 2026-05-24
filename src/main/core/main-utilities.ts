@@ -520,10 +520,12 @@ const toAppSummary = (record: InstalledAppRecord): AppSummary => {
   const latestVersion = catalog?.latestVersion;
   const updateAvailable = isVersionNewer(latestVersion, record.version);
   const base = {
-    capabilities: catalog?.capabilities,
     changelog: catalog?.changelog,
     iconUrl: catalog?.iconUrl,
     beta: catalog?.beta,
+    privateLocal: record.privateLocal,
+    localNetworkShareSupported: record.localNetworkShareSupported ?? catalog?.localNetworkShareSupported,
+    remoteTunnelSupported: record.remoteTunnelSupported ?? catalog?.remoteTunnelSupported,
     ...localNetworkSharePayloadFor(record.appId),
     ...remoteNetworkSharePayloadFor(record.appId),
   };

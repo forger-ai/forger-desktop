@@ -25,8 +25,8 @@ import {
   preparePersistentIsolatedCodexHome,
 } from './codex-run-isolation';
 import {
-  buildAppAgentPrompt,
   buildConversationRecoveryContext,
+  buildManifestAgentRecoveryPrompt,
   extensionForMimeType,
   isMissingProviderThread,
   isTerminalRunStatus,
@@ -460,6 +460,9 @@ export class AppAgentConversationManager {
     let forgerMcpSession: { url: string; token: string } | null = null;
     try {
       const runRoot = this.resolveRunRoot(appRoot, input.workspacePath);
+      if (!(await existsDirectory(runRoot))) {
+        throw new Error('agent_run_workspace_missing');
+      }
       const command = runtime.provider === 'codex'
         ? await resolveCodexCommand(codexCliPath as string, await this.options.getCodexPathEntries(conversation.appId))
         : { command: claudeCliPath as string, prefixArgs: [], pathEntries: await this.options.getCodexPathEntries(conversation.appId) };
@@ -482,15 +485,12 @@ export class AppAgentConversationManager {
       const mcpArgs = buildMcpArgs(mcpServers);
       const model = runtime.model;
       const reasoningEffort = runtime.provider === 'codex' ? runtime.effort as CodexReasoningEffort : DEFAULT_REASONING;
-      const initialPrompt = await this.resolveInitialPrompt(conversation);
       const recoveryContext = !conversation.threadId && conversation.messages.length > 1
         ? buildConversationRecoveryContext(conversation, run.runId)
         : '';
-      const memoryContext = !conversation.threadId
-        ? await (this.options.buildMemoryContext?.(conversation.appId) ?? Promise.resolve(''))
-        : '';
-      const forgerToolsContext = await (this.options.buildForgerToolsContext?.(conversation.appId) ?? Promise.resolve(''));
-      const prompt = buildAppAgentPrompt(input.message, input.context, [initialPrompt, recoveryContext, memoryContext, forgerToolsContext].filter(Boolean).join('\n\n'));
+      const prompt = recoveryContext
+        ? buildManifestAgentRecoveryPrompt(input.message, recoveryContext)
+        : input.message.trim();
       const attachmentPaths = await this.prepareAttachments(conversation.appId, run, input);
       const imageArgs = attachmentPaths.flatMap((filePath) => ['--image', filePath]);
       const claudeMcpConfigPath = runtime.provider === 'claude'
@@ -592,9 +592,6 @@ export class AppAgentConversationManager {
         if (allowResumeRecovery && conversation.threadId && isMissingProviderThread(result.stdout, result.stderr)) {
           const lostThreadId = conversation.threadId;
           conversation.threadId = null;
-          if (conversation.metadata) {
-            conversation.metadata.initialPromptApplied = false;
-          }
           run.progressLog = [
             ...(run.progressLog ?? []),
             `Provider thread ${lostThreadId} is unavailable. Starting a fresh provider thread for this Vibe conversation.`,
@@ -707,7 +704,9 @@ export class AppAgentConversationManager {
     if (!requested) {
       return appRoot;
     }
-    const resolved = path.resolve(requested);
+    const resolved = path.isAbsolute(requested)
+      ? path.resolve(requested)
+      : path.resolve(appRoot, requested);
     const relative = path.relative(appRoot, resolved);
     if (relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative))) {
       return resolved;
@@ -770,33 +769,6 @@ export class AppAgentConversationManager {
     if (!(await this.options.hasCodexConversation(appId))) {
       throw new Error('app_codex_conversation_not_declared');
     }
-  }
-
-  private async resolveInitialPrompt(conversation: InternalConversation): Promise<string | undefined> {
-    const metadata = conversation.metadata;
-    if (!metadata || metadata.initialPromptApplied === true) {
-      return undefined;
-    }
-    const customInitialPrompt = typeof metadata.initialPrompt === 'string' ? metadata.initialPrompt.trim() : '';
-    if (customInitialPrompt) {
-      metadata.initialPromptApplied = true;
-      conversation.updatedAt = new Date().toISOString();
-      await this.persistApp(conversation.appId);
-      return customInitialPrompt;
-    }
-    const agentId = typeof metadata.agentId === 'string' ? metadata.agentId.trim() : '';
-    if (!agentId) {
-      return undefined;
-    }
-    const agent = (await this.options.resolveAgents(conversation.appId)).find((entry) => entry.id === agentId);
-    const initialPrompt = agent?.initialPrompt.trim();
-    if (!initialPrompt) {
-      return undefined;
-    }
-    metadata.initialPromptApplied = true;
-    conversation.updatedAt = new Date().toISOString();
-    await this.persistApp(conversation.appId);
-    return initialPrompt;
   }
 
   private async resolveAgentRuntime(conversation: InternalConversation): Promise<{

@@ -244,6 +244,7 @@ export interface AppAgentRunSummary {
   desktop_run_id: string;
   status: string;
   error?: string;
+  resultText?: string;
   progressLog?: string[];
 }
 

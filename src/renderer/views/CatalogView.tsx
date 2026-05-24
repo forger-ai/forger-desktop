@@ -132,6 +132,7 @@ export function CatalogView({
             const isInstalling = app.status === 'installing';
             const hasError = app.status === 'error';
             const isConflict = app.status === 'conflict';
+            const isPrivateLocal = app.privateLocal === true;
             const isEarlyAccess = app.catalogStatus === 'coming';
             const isBeta = app.catalogStatus === 'beta' || Boolean(app.beta);
             const hasDownloadableVersion = Boolean(app.downloadUrl || app.latestVersionId);
@@ -156,10 +157,10 @@ export function CatalogView({
                 : undefined;
             const canShareLocalNetwork = earlyAccessEnabled
               && primaryAction === 'open'
-              && app.capabilities?.some((capability) => capability.id === 'local_network_share');
+              && app.localNetworkShareSupported === true;
             const canShareRemoteNetwork = earlyAccessEnabled
               && primaryAction === 'open'
-              && app.capabilities?.some((capability) => capability.id === 'remote_tunnel_share');
+              && app.remoteTunnelSupported === true;
             const canStopRemoteNetwork = earlyAccessEnabled
               && Boolean(app.remoteNetworkShare?.active)
               && app.remoteNetworkShare?.state !== 'closed'
@@ -191,8 +192,8 @@ export function CatalogView({
                 iconUrl={app.iconUrl}
                 categoryLabel={getCategoryLabel(app.category)}
                 description={isEarlyAccess ? `${meta.description} ${t.beta.earlyAccessCardBody}` : meta.description}
-                beta={isBeta || isEarlyAccess}
-                betaLabel={isEarlyAccess ? t.beta.earlyAccessBadge : 'Beta'}
+                beta={isPrivateLocal || isBeta || isEarlyAccess}
+                betaLabel={isPrivateLocal ? t.beta.privateLocalBadge : isEarlyAccess ? t.beta.earlyAccessBadge : 'Beta'}
                 averageRating={app.averageRating}
                 ratingsCount={app.ratingsCount}
                 onboardingTarget={app.id === 'finance-os' ? 'finance-os-card' : undefined}

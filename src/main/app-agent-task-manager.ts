@@ -268,7 +268,7 @@ export class AppAgentTaskManager {
       const imageArgs = preparedArguments.files
         .filter((file) => file.mimeType?.toLowerCase().startsWith('image/'))
         .flatMap((file) => ['--image', file.path]);
-      const renderedPrompt = renderPrompt(template.prompt, preparedArguments);
+      const renderedPrompt = renderPrompt(template.prompt, preparedArguments, locale);
       const memoryContext = await (this.options.buildMemoryContext?.(task.appId) ?? Promise.resolve(''));
       const forgerToolsContext = await (this.options.buildForgerToolsContext?.(task.appId) ?? Promise.resolve(''));
       const promptContext = [memoryContext, forgerToolsContext].filter((section) => section.trim()).join('\n\n');

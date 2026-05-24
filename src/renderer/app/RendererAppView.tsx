@@ -11,14 +11,15 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material';
-import type { ReactNode } from 'react';
-import type { ClaudeEffort, CodexReasoningEffort } from '@shared/types';
+import { useMemo, type ReactNode } from 'react';
+import type { CatalogApp, ClaudeEffort, CodexReasoningEffort } from '@shared/types';
 import { AppShell } from '@renderer/components/AppShell';
 import { AppView } from '@renderer/views/AppView';
 import { AutomationsView } from '@renderer/views/AutomationsView';
 import { BackupsView } from '@renderer/views/BackupsView';
 import { CatalogView } from '@renderer/views/CatalogView';
 import { ChatView } from '@renderer/views/ChatView';
+import { CreateView } from '@renderer/views/CreateView';
 import { DataView } from '@renderer/views/DataView';
 import { DevicesView } from '@renderer/views/DevicesView';
 import { FeedbackView } from '@renderer/views/FeedbackView';
@@ -85,6 +86,8 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     handleResolveConflict,
     openAppDetails,
     handleDeleteApp,
+    handleCreateLocalApp,
+    createLocalAppBusy,
     installProgressByApp,
     catalogApps,
     refreshApps,
@@ -230,6 +233,18 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     claudeConfigOpen,
     agentProviderConfigOpen,
   } = controller;
+  const catalogViewApps = useMemo<CatalogApp[]>(() => {
+    const catalogAppIds = new Set(catalogApps.map((app: CatalogApp) => app.id));
+    const privateLocalApps = installedApps
+      .filter((app: CatalogApp) => !catalogAppIds.has(app.id))
+      .map((app: CatalogApp) => ({
+        ...app,
+        privateLocal: true,
+        catalogStatus: 'draft' as const,
+      }));
+
+    return [...catalogApps, ...privateLocalApps];
+  }, [catalogApps, installedApps]);
 
   const tour = useForgerTour({
     currentView,
@@ -426,7 +441,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
         >
         {currentView === 'catalog' ? (
           <CatalogView
-            apps={catalogApps}
+            apps={catalogViewApps}
             openingAppIds={openingAppIds}
             filter={catalogFilter}
             onFilterChange={setCatalogFilter}
@@ -545,6 +560,14 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             onOpenApp={(appId) => void handleOpen(appId)}
             onStopRun={handleStopChatRun}
             onRespondPermission={handleRespondPermission}
+          />
+        ) : null}
+
+        {currentView === 'create' ? (
+          <CreateView
+            t={t}
+            busy={createLocalAppBusy}
+            onCreate={handleCreateLocalApp}
           />
         ) : null}
 

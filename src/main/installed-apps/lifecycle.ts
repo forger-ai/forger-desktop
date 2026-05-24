@@ -416,6 +416,7 @@ const installAppRuntime = async (appId: string, localeInput?: string): Promise<I
     await extractArchive(download.zipPath, installDir);
     await flattenSingleTopLevelDirectory(installDir);
     await clearMacQuarantine(installDir);
+    const installedManifest = await resolveInstalledManifest(installDir);
     await normalizeInstalledAgentContext(installDir, appId);
     await ensureGlobalAgentsContext(getForgerHomeRoot());
     await ensureAppGitRepository(installDir);
@@ -457,6 +458,8 @@ const installAppRuntime = async (appId: string, localeInput?: string): Promise<I
       userMessage: copy.install.installedReady,
       originalCommitSha,
       installedAt: initialRecord.installedAt,
+      localNetworkShareSupported: installedManifest?.localNetworkShare === true || catalogApp.localNetworkShareSupported === true,
+      remoteTunnelSupported: installedManifest?.remoteTunnel === true || catalogApp.remoteTunnelSupported === true,
     };
     await upsertInstalledRecord(installed);
 

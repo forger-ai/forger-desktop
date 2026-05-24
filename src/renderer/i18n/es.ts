@@ -9,6 +9,7 @@ export const es = {
     apps: 'Apps',
     catalog: 'Apps',
     chat: 'Chat',
+    create: 'Create',
     feedback: 'Feedback',
     recommendations: 'Feedback',
     automations: 'Automatizaciones',
@@ -271,6 +272,7 @@ export const es = {
     configureSecrets: 'Conectar credenciales',
     secretsInstallRequired: 'Instala la app para conectar credenciales.',
     deleteConfirm: (appName: string) => `Eliminar ${appName} borrará la app y sus datos locales de este equipo. Esta acción no se puede deshacer. ¿Quieres continuar?`,
+    deletePrivateLocalConfirm: (appName: string) => `Tú creaste ${appName}. Al desinstalarla se borrará la app y todo tu progreso local de este equipo. No podrás recuperarlo. ¿Seguro que quieres continuar?`,
     reviewsTitle: 'Reviews',
     ratingSummary: (average: number, count: number) => `${average.toFixed(1)}/5 (${count.toLocaleString()} reviews)`,
     noRatings: 'Sin reviews todavía',
@@ -349,6 +351,7 @@ export const es = {
   },
   beta: {
     earlyAccessBadge: 'Acceso anticipado',
+    privateLocalBadge: 'Tuya',
     earlyAccessCardBody: 'Pruébala antes de tiempo y deja una reseña para ayudarnos a mejorar.',
     enableEarlyAccessAction: 'Activar Early Access',
     comingSoonAction: 'Próximamente',

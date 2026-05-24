@@ -20,10 +20,13 @@ export interface AppSummary {
   capabilities?: AppCapability[];
   userMessage?: string;
   catalogStatus?: CatalogPublicationStatus;
+  privateLocal?: boolean;
   tools?: {
     required?: AppToolDeclaration[];
     optional?: AppToolDeclaration[];
   };
+  localNetworkShareSupported?: boolean;
+  remoteTunnelSupported?: boolean;
   localNetworkShare?: import('./runtime').LocalNetworkShareStatus;
   remoteNetworkShare?: import('./runtime').RemoteNetworkShareStatus;
 }

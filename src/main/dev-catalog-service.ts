@@ -43,7 +43,10 @@ const COMMONS_OVERLAY_FILES = [
   ['commons/backend/cors.py', 'backend/src/app/cors.py'],
   ['commons/backend/forger_desktop.py', 'backend/src/app/forger_desktop.py'],
   ['commons/backend/mcp_runtime.py', 'backend/src/app/mcp_runtime.py'],
+  ['commons/backend/remote_tunnel.py', 'backend/src/app/remote_tunnel.py'],
   ['commons/frontend/client.ts', 'frontend/src/api/client.ts'],
+  ['commons/frontend/forgerBrand.ts', 'frontend/src/api/forgerBrand.ts'],
+  ['commons/frontend/remoteTunnel.ts', 'frontend/src/api/remoteTunnel.ts'],
 ] as const;
 
 const isRecord = (value: unknown): value is JsonObject => {
@@ -158,16 +161,6 @@ const getRuntimeStack = (manifest: JsonObject): string => {
   return asString(catalog.runtime_stack, DEFAULT_RUNTIME_STACK);
 };
 
-const getCapabilities = (catalog: JsonObject): unknown[] => {
-  if (Array.isArray(catalog.capabilities)) {
-    return catalog.capabilities;
-  }
-  if (Array.isArray(catalog.permissions)) {
-    return catalog.permissions;
-  }
-  return [];
-};
-
 const getCatalogStatus = (app: LocalApp, catalog: JsonObject): string => {
   return asString(catalog.status, app.sourceSlug === 'finance-os' ? 'beta' : 'coming');
 };
@@ -220,7 +213,8 @@ const toCatalogEntry = async (app: LocalApp, baseUrl: string): Promise<JsonObjec
       supported_platforms: Array.isArray(catalog.supported_platforms)
         ? catalog.supported_platforms
         : ['darwin_arm64', 'darwin_x64'],
-      capabilities: getCapabilities(catalog),
+      localNetworkShare: app.manifest.localNetworkShare === true,
+      remoteTunnel: app.manifest.remoteTunnel === true,
       agents: optionalArray(app.manifest.agents),
       prompt_templates: optionalArray(app.manifest.promptTemplates),
       tools: optionalRecord(app.manifest.tools),

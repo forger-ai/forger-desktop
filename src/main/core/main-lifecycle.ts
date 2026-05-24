@@ -199,6 +199,7 @@ interface MainLifecycleDeps {
   openOrFocusAppWindow: (appId: string, appName: string, frontendUrl: string) => Promise<void>;
   registerForgerCloudOAuth: SyncFn;
   registerIpcHandlers: () => void;
+  renderManifestAgentPrompt: SyncFn<string>;
   resolveClaudeCli: () => Promise<{ path: string; source: string } | null>;
   resolveCodexCliPath: (root: string) => Promise<string | null>;
   resolveInstalledAgents: AsyncFn;
@@ -310,6 +311,7 @@ export const registerMainLifecycle = (deps: unknown) => {
     openOrFocusAppWindow,
     registerForgerCloudOAuth,
     registerIpcHandlers,
+    renderManifestAgentPrompt,
     resolveClaudeCli,
     resolveCodexCliPath,
     resolveInstalledAgents,
@@ -791,6 +793,8 @@ export const registerMainLifecycle = (deps: unknown) => {
         claude,
       };
     },
+    renderManifestAgentPrompt,
+    resolveInstalledAgents,
     appendInstallLog,
     serializeErrorForInstallLog,
   });

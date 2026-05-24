@@ -98,7 +98,7 @@ test('app preload exposes only the forgerApp bridge with nested function leaves'
   assert.equal(typeof windowListeners.get('unhandledrejection'), 'function');
 });
 
-test('app preload forwards representative IPC invokes with original arguments and locale decoration', async () => {
+test('app preload rejects representative forgerApp calls with removed bridge guidance', async () => {
   const { api, invokeCalls, sendCalls } = await loadAppPreloadApi({
     href: 'https://finance.local/accounts?forgerLocale=en-US',
     invokeImpl(channel, ...args) {
@@ -109,52 +109,14 @@ test('app preload forwards representative IPC invokes with original arguments an
     },
   });
 
-  const context = await api.getContext();
-  await api.getAiSubscriptionStatus();
-  await api.selectExternalFolder();
-  await api.tools.getStatus('gmail');
-  await api.tools.call({ toolId: 'gmail', input: { q: 'from:bank' } });
-  await api.messages.sendMessage({ friendUserId: 7, body: 'hola' });
-  await api.messages.listMessages(7);
-  await api.agentRuns.getAgentRun('thread-1', 'run-1');
-  await api.agentRuns.steerAgentThreadRun({ threadId: 'thread-1', runId: 'run-1', message: 'continue' });
-  await api.agents.start({ agentId: 'analyst', input: { question: 'review' } });
-  await api.agents.stop({ threadId: 'thread-2', runId: 'run-2' });
-  await api.startAgentTask({ prompt: 'analyze' });
-  await api.approveAgentTaskPermission('run-3', 'permission-1', 'allow');
-  await api.createAgentConversation({ appId: 'finance-os' });
-  await api.sendAgentConversationMessage({ conversationId: 'conversation-1', message: 'hello' });
-  await api.approveAgentConversationPermission('conversation-1', 'run-4', 'permission-2', 'deny');
-  await api.createCodexConversation({ appId: 'recipes' });
-  await api.sendCodexConversationMessage({ conversationId: 'conversation-2', message: 'codex hello' });
-
-  assert.deepEqual(context, { agents: [{ id: 'analyst' }], locale: 'en-US' });
-  assert.deepEqual(invokeCalls, [
-    ['forger:app:get-context'],
-    ['forger:app:ai-subscription-status'],
-    ['forger:app:select-external-folder'],
-    ['forger:app:tools:get-status', 'gmail'],
-    ['forger:app:tools:call', { toolId: 'gmail', input: { q: 'from:bank' } }],
-    ['forger:app:messages:send', { friendUserId: 7, body: 'hola' }],
-    ['forger:app:messages:list', 7],
-    ['forger:app:agent-thread-run:get', 'thread-1', 'run-1'],
-    ['forger:app:agent-thread-run:steer', { threadId: 'thread-1', runId: 'run-1', message: 'continue' }],
-    ['forger:app:agents:start', { agentId: 'analyst', input: { question: 'review' } }],
-    ['forger:app:agents:stop', { threadId: 'thread-2', runId: 'run-2' }],
-    ['forger:app:agent-task:start', { prompt: 'analyze' }],
-    ['forger:app:agent-task:approve-permission', 'run-3', 'permission-1', 'allow'],
-    ['forger:app:agent-conversation:create', { appId: 'finance-os', locale: 'en-US' }],
-    [
-      'forger:app:agent-conversation:send-message',
-      { conversationId: 'conversation-1', message: 'hello', locale: 'en-US' },
-    ],
-    ['forger:app:agent-conversation:approve-permission', 'conversation-1', 'run-4', 'permission-2', 'deny'],
-    ['forger:app:agent-conversation:create', { appId: 'recipes', locale: 'en-US' }],
-    [
-      'forger:app:agent-conversation:send-message',
-      { conversationId: 'conversation-2', message: 'codex hello', locale: 'en-US' },
-    ],
-  ]);
+  await assert.rejects(api.getContext(), /forgerApp bridge has been removed/);
+  await assert.rejects(api.getAiSubscriptionStatus(), /forgerApp bridge has been removed/);
+  await assert.rejects(api.tools.getStatus('gmail'), /forgerApp bridge has been removed/);
+  await assert.rejects(api.agentRuns.getAgentRun('thread-1', 'run-1'), /forgerApp bridge has been removed/);
+  await assert.rejects(api.agents.start({ agentId: 'analyst', variables: { question: 'review' } }), /forgerApp bridge has been removed/);
+  await assert.rejects(api.startAgentTask({ templateId: 'analyze' }), /forgerApp bridge has been removed/);
+  await assert.rejects(api.createAgentConversation({ appId: 'finance-os' }), /forgerApp bridge has been removed/);
+  assert.deepEqual(invokeCalls, []);
   assert.deepEqual(sendCalls, []);
 });
 
@@ -176,7 +138,7 @@ test('app preload forwards every nested command or subscription leaf through the
           unsubscribe();
         } else {
           invokeLeaves.push(nextPath);
-          await entry({ id: 'input' }, 'run-id', 'permission-id', 'allow');
+          await assert.rejects(entry({ id: 'input' }, 'run-id', 'permission-id', 'allow'), /forgerApp bridge has been removed/);
         }
         continue;
       }
@@ -188,81 +150,47 @@ test('app preload forwards every nested command or subscription leaf through the
 
   assert.ok(invokeLeaves.length >= 35, 'expected broad app command coverage');
   assert.ok(subscriptionLeaves.length >= 7, 'expected broad app subscription coverage');
-  assert.equal(invokeCalls.length, invokeLeaves.length);
-  assert.equal(removedListeners.length, subscriptionLeaves.length);
+  assert.equal(invokeCalls.length, 0);
+  assert.equal(removedListeners.length, 0);
   for (const channel of [
     'forger:app:messages:event',
     'forger:app:agent-thread:event',
-    'forger:app:agent-task:updated',
-    'forger:app:agent-conversation:event',
   ]) {
     assert.equal(listeners.has(channel), false, `${channel} should be unsubscribed`);
   }
 });
 
-test('app preload event subscriptions unwrap payloads and unsubscribe the exact listener', async () => {
+test('app preload event subscriptions are inert after forgerApp bridge removal', async () => {
   const { api, listeners, removedListeners } = await loadAppPreloadApi();
   const received = [];
 
   const unsubscribeMessage = api.messages.onMessage((payload) => received.push(['message', payload]));
-  const messageListener = listeners.get('forger:app:messages:event');
-  messageListener({ sender: 'main' }, { id: 1, body: 'hello' });
   unsubscribeMessage();
 
   const unsubscribeAgentRun = api.agentRuns.onAgentThreadEvent((payload) => received.push(['agent-run', payload]));
-  const agentRunListener = listeners.get('forger:app:agent-thread:event');
-  agentRunListener({ sender: 'main' }, { type: 'run.updated', runId: 'run-1' });
   unsubscribeAgentRun();
 
   const unsubscribeAgent = api.agents.onEvent((payload) => received.push(['agent', payload]));
-  const agentListener = listeners.get('forger:app:agent-thread:event');
-  agentListener({ sender: 'main' }, { type: 'agent.updated', runId: 'run-2' });
   unsubscribeAgent();
 
   const unsubscribeTask = api.onAgentTaskUpdated((payload) => received.push(['task', payload]));
-  const taskListener = listeners.get('forger:app:agent-task:updated');
-  taskListener({ sender: 'main' }, { type: 'task.updated', runId: 'run-3' });
   unsubscribeTask();
 
   const unsubscribeConversation = api.onAgentConversationEvent((payload) => received.push(['conversation', payload]));
-  const conversationListener = listeners.get('forger:app:agent-conversation:event');
-  conversationListener({ sender: 'main' }, { type: 'conversation.updated', conversationId: 'conversation-1' });
   unsubscribeConversation();
 
   const unsubscribeCodexTask = api.onCodexTaskUpdated((payload) => received.push(['codex-task', payload]));
-  const codexTaskListener = listeners.get('forger:app:agent-task:updated');
-  codexTaskListener({ sender: 'main' }, { type: 'codex-task.updated', runId: 'run-4' });
   unsubscribeCodexTask();
 
   const unsubscribeCodexConversation = api.onCodexConversationEvent((payload) =>
     received.push(['codex-conversation', payload]),
   );
-  const codexConversationListener = listeners.get('forger:app:agent-conversation:event');
-  codexConversationListener({ sender: 'main' }, { type: 'codex-conversation.updated', conversationId: 'conversation-2' });
   unsubscribeCodexConversation();
 
-  assert.deepEqual(received, [
-    ['message', { id: 1, body: 'hello' }],
-    ['agent-run', { type: 'run.updated', runId: 'run-1' }],
-    ['agent', { type: 'agent.updated', runId: 'run-2' }],
-    ['task', { type: 'task.updated', runId: 'run-3' }],
-    ['conversation', { type: 'conversation.updated', conversationId: 'conversation-1' }],
-    ['codex-task', { type: 'codex-task.updated', runId: 'run-4' }],
-    ['codex-conversation', { type: 'codex-conversation.updated', conversationId: 'conversation-2' }],
-  ]);
-  assert.deepEqual(removedListeners, [
-    ['forger:app:messages:event', messageListener],
-    ['forger:app:agent-thread:event', agentRunListener],
-    ['forger:app:agent-thread:event', agentListener],
-    ['forger:app:agent-task:updated', taskListener],
-    ['forger:app:agent-conversation:event', conversationListener],
-    ['forger:app:agent-task:updated', codexTaskListener],
-    ['forger:app:agent-conversation:event', codexConversationListener],
-  ]);
+  assert.deepEqual(received, []);
+  assert.deepEqual(removedListeners, []);
   assert.equal(listeners.has('forger:app:messages:event'), false);
   assert.equal(listeners.has('forger:app:agent-thread:event'), false);
-  assert.equal(listeners.has('forger:app:agent-task:updated'), false);
-  assert.equal(listeners.has('forger:app:agent-conversation:event'), false);
 });
 
 test('app preload reports renderer failures with location context without throwing into the app', async () => {
@@ -370,7 +298,7 @@ test('app preload reports fallback renderer failures when browser context or rej
   assert.equal(invokeCalls[2][1].sensitiveDetails.reason, '');
 });
 
-test('app preload falls back to locale-only context when the app-context invoke fails', async () => {
+test('app preload rejects context after bridge removal even when locale is present', async () => {
   const { api, invokeCalls } = await loadAppPreloadApi({
     href: 'https://finance.local/?forgerLocale=es-CL',
     invokeImpl(channel, ...args) {
@@ -381,13 +309,11 @@ test('app preload falls back to locale-only context when the app-context invoke 
     },
   });
 
-  await assert.doesNotReject(async () => {
-    assert.deepEqual(await api.getContext(), { locale: 'es-CL' });
-  });
-  assert.deepEqual(invokeCalls, [['forger:app:get-context']]);
+  await assert.rejects(api.getContext(), /forgerApp bridge has been removed/);
+  assert.deepEqual(invokeCalls, []);
 });
 
-test('app preload omits malformed context payloads and locale when none is present', async () => {
+test('app preload rejects context and conversations after bridge removal', async () => {
   const { api, invokeCalls } = await loadAppPreloadApi({
     href: 'https://finance.local/accounts',
     invokeImpl(channel, ...args) {
@@ -398,19 +324,18 @@ test('app preload omits malformed context payloads and locale when none is prese
     },
   });
 
-  assert.deepEqual(await api.getContext(), { locale: undefined });
-  await api.createAgentConversation();
-  await api.sendAgentConversationMessage({ conversationId: 'conversation-1', message: 'hello' });
-  await api.createCodexConversation();
-  await api.sendCodexConversationMessage({ conversationId: 'conversation-2', message: 'codex hello' });
-
-  assert.deepEqual(invokeCalls, [
-    ['forger:app:get-context'],
-    ['forger:app:agent-conversation:create', { locale: undefined }],
-    ['forger:app:agent-conversation:send-message', { conversationId: 'conversation-1', message: 'hello', locale: undefined }],
-    ['forger:app:agent-conversation:create', { locale: undefined }],
-    ['forger:app:agent-conversation:send-message', { conversationId: 'conversation-2', message: 'codex hello', locale: undefined }],
-  ]);
+  await assert.rejects(api.getContext(), /forgerApp bridge has been removed/);
+  await assert.rejects(api.createAgentConversation(), /forgerApp bridge has been removed/);
+  await assert.rejects(
+    api.sendAgentConversationMessage({ conversationId: 'conversation-1', message: 'hello' }),
+    /forgerApp bridge has been removed/,
+  );
+  await assert.rejects(api.createCodexConversation(), /forgerApp bridge has been removed/);
+  await assert.rejects(
+    api.sendCodexConversationMessage({ conversationId: 'conversation-2', message: 'codex hello' }),
+    /forgerApp bridge has been removed/,
+  );
+  assert.deepEqual(invokeCalls, []);
 });
 
 test('app preload permission overlay forwards approval decisions and removes itself', async () => {

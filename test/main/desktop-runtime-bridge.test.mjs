@@ -63,10 +63,12 @@ const createBridge = async (options = {}) => {
     },
   };
   const bridge = new DesktopRuntimeBridge({
-    getInstalledApp: options.getInstalledApp ?? ((appId) => (appId === APP_ID ? { id: appId } : null)),
+    getInstalledApp: options.getInstalledApp ?? ((appId) => (appId === APP_ID ? { id: appId, installDir: '/tmp/finance-os' } : null)),
     getConversationManager: options.getConversationManager ?? (() => null),
     getTaskManager: options.getTaskManager ?? (() => taskManager),
     getTaskStatus: options.getTaskStatus ?? (async () => ({ connected: true, codex: true, claude: false })),
+    resolveInstalledAgents: options.resolveInstalledAgents ?? (async () => [{ id: 'analyst', title: 'Analyst', prompts: {} }]),
+    renderManifestAgentPrompt: options.renderManifestAgentPrompt ?? (({ kind, variables }) => `${kind}:${variables?.topic ?? 'default'}`),
     appendInstallLog: async (event, payload) => options.logs?.push([event, payload]),
     serializeErrorForInstallLog: (error) => ({ message: error instanceof Error ? error.message : String(error) }),
     maxBodyBytes: options.maxBodyBytes ?? 1024,
@@ -381,7 +383,7 @@ test('desktop runtime task endpoints reject oversized payloads', async () => {
   }
 });
 
-test('desktop runtime bridge serves conversation thread routes and normalizes runtime options', async () => {
+test('desktop runtime bridge serves manifest-first conversation thread routes and normalizes runtime options', async () => {
   const calls = [];
   const manager = {
     async create(appId, input) {
@@ -400,63 +402,81 @@ test('desktop runtime bridge serves conversation thread routes and normalizes ru
       calls.push(['cancel', appId, threadId, runId]);
       return { success: true };
     },
+    async getMetadata() {
+      return { manifestAgentId: 'analyst' };
+    },
+    async steerRun(appId, threadId, runId, input) {
+      calls.push(['steerRun', appId, threadId, runId, input]);
+      return { accepted: true, mode: 'queued_for_next_run' };
+    },
   };
   const harness = await createBridge({ getConversationManager: () => manager });
   try {
-    const createPath = `/v1/apps/${APP_ID}/agent-threads`;
+    const createPath = `/v1/apps/${APP_ID}/agents/analyst/start`;
     const created = await request(harness.bridge, createPath, {
       method: 'POST',
       body: {
         title: 'Budget review',
-        manifestAgentId: 'analyst',
-        initialPrompt: ' Review May ',
+        variables: { topic: 'May' },
         metadata: { source: 'test' },
       },
     });
     assert.equal(created.response.status, 200);
     assert.equal(created.payload.desktop_thread_id, 'thread-1');
-    assert.equal(calls[0][2].metadata.initialPrompt, 'Review May');
+    assert.equal(calls[0][2].metadata.promptApi, 'manifest-http');
     assert.equal(calls[0][2].metadata.manifestAgentId, 'analyst');
+    assert.equal(calls[1][2].message, 'initial:May');
 
-    const runPath = `/v1/apps/${APP_ID}/agent-threads/thread-1`;
+    const runPath = `/v1/apps/${APP_ID}/agent-threads/thread-1/resume`;
     const run = await request(harness.bridge, runPath, {
       method: 'POST',
       body: {
-        message: 'Continue',
-        context: 'statement context',
+        variables: { topic: 'June' },
         workspacePath: '/tmp/workspace',
         runtime: { provider: 'claude', model: 'auto', effort: 'high' },
       },
     });
     assert.equal(run.response.status, 200);
     assert.equal(run.payload.desktop_run_id, 'run-9');
-    assert.equal(calls[1][2].provider, 'claude');
-    assert.equal(calls[1][2].model, undefined);
-    assert.equal(calls[1][2].effort, 'high');
+    assert.equal(calls[2][2].message, 'resume:June');
+    assert.equal(calls[2][2].provider, 'claude');
+    assert.equal(calls[2][2].model, undefined);
+    assert.equal(calls[2][2].effort, 'high');
 
     await request(harness.bridge, runPath, {
       method: 'POST',
       body: {
-        message: 'Use explicit model',
+        variables: { topic: 'July' },
         runtime: { provider: 'codex', model: 'gpt-5.3-codex', effort: 'default' },
       },
     });
-    assert.equal(calls[2][2].provider, 'codex');
-    assert.equal(calls[2][2].model, 'gpt-5.3-codex');
-    assert.equal(calls[2][2].effort, undefined);
+    assert.equal(calls[3][2].message, 'resume:July');
+    assert.equal(calls[3][2].provider, 'codex');
+    assert.equal(calls[3][2].model, 'gpt-5.3-codex');
+    assert.equal(calls[3][2].effort, undefined);
 
     await request(harness.bridge, runPath, {
       method: 'POST',
       body: {
-        message: 'Use desktop defaults',
+        variables: { topic: 'August' },
         runtime: { provider: 'unknown', model: 'auto', effort: 'default' },
       },
     });
-    assert.equal(calls[3][2].provider, undefined);
-    assert.equal(calls[3][2].model, undefined);
-    assert.equal(calls[3][2].effort, undefined);
+    assert.equal(calls[4][2].message, 'resume:August');
+    assert.equal(calls[4][2].provider, undefined);
+    assert.equal(calls[4][2].model, undefined);
+    assert.equal(calls[4][2].effort, undefined);
 
-    const thread = await request(harness.bridge, runPath);
+    const steer = await request(harness.bridge, `/v1/apps/${APP_ID}/agent-threads/thread-1/runs/run-9/steer`, {
+      method: 'POST',
+      body: { variables: { topic: 'steer' } },
+    });
+    assert.equal(steer.response.status, 200);
+    assert.deepEqual(steer.payload, { accepted: true, mode: 'queued_for_next_run' });
+    assert.equal(calls[5][0], 'steerRun');
+    assert.equal(calls[5][4].message, 'steer:steer');
+
+    const thread = await request(harness.bridge, `/v1/apps/${APP_ID}/agent-threads/thread-1`);
     assert.equal(thread.response.status, 200);
     assert.equal(thread.payload.active_run.desktop_run_id, 'run-9');
 
@@ -479,6 +499,88 @@ test('desktop runtime bridge serves conversation thread routes and normalizes ru
   }
 });
 
+test('desktop runtime bridge includes active and historical conversation run result text', async () => {
+  const resultConversation = {
+    conversationId: 'thread-results',
+    appId: APP_ID,
+    title: 'Result review',
+    messages: [
+      {
+        messageId: 'msg-user',
+        role: 'user',
+        text: 'Start',
+        runId: 'run-active',
+        createdAt: '2026-05-17T00:00:00.000Z',
+      },
+      {
+        messageId: 'msg-old-user',
+        role: 'user',
+        text: 'Old request',
+        runId: 'run-old',
+        createdAt: '2026-05-17T00:00:01.000Z',
+      },
+      {
+        messageId: 'msg-unrelated',
+        role: 'assistant',
+        text: 'Ignore me',
+        runId: 'other-run',
+        createdAt: '2026-05-17T00:00:02.000Z',
+      },
+      {
+        messageId: 'msg-old',
+        role: 'assistant',
+        text: 'Historical result',
+        runId: 'run-old',
+        createdAt: '2026-05-17T00:00:03.000Z',
+      },
+      {
+        messageId: 'msg-active',
+        role: 'assistant',
+        text: 'Active result',
+        runId: 'run-active',
+        createdAt: '2026-05-17T00:00:04.000Z',
+      },
+    ],
+    activeRun: {
+      runId: 'run-active',
+      status: 'completed',
+      progressLog: ['done'],
+    },
+  };
+  const harness = await createBridge({
+    getConversationManager: () => ({
+      create: async () => resultConversation,
+      sendMessage: async () => resultConversation,
+      get: async (_appId, threadId) => (threadId === resultConversation.conversationId ? resultConversation : null),
+      cancel: async () => ({ success: true }),
+    }),
+  });
+  try {
+    const thread = await request(harness.bridge, `/v1/apps/${APP_ID}/agent-threads/thread-results`);
+    assert.equal(thread.response.status, 200);
+    assert.equal(thread.payload.active_run.resultText, 'Active result');
+
+    const active = await request(harness.bridge, `/v1/apps/${APP_ID}/agent-threads/thread-results/runs/run-active`);
+    assert.equal(active.response.status, 200);
+    assert.equal(active.payload.resultText, 'Active result');
+
+    const historical = await request(harness.bridge, `/v1/apps/${APP_ID}/agent-threads/thread-results/runs/run-old`);
+    assert.equal(historical.response.status, 200);
+    assert.deepEqual(historical.payload, {
+      desktop_thread_id: 'thread-results',
+      desktop_run_id: 'run-old',
+      status: 'completed',
+      resultText: 'Historical result',
+    });
+
+    const missingRun = await request(harness.bridge, `/v1/apps/${APP_ID}/agent-threads/thread-results/runs/missing`);
+    assert.equal(missingRun.response.status, 200);
+    assert.equal(missingRun.payload, null);
+  } finally {
+    await harness.stop();
+  }
+});
+
 test('desktop runtime bridge rejects invalid conversation thread requests', async () => {
   const harness = await createBridge({
     getConversationManager: () => ({
@@ -494,8 +596,8 @@ test('desktop runtime bridge rejects invalid conversation thread requests', asyn
       method: 'POST',
       body: { initialPrompt: '   ' },
     });
-    assert.equal(missingPrompt.response.status, 400);
-    assert.equal(missingPrompt.payload.error, 'agent_thread_initial_prompt_required');
+    assert.equal(missingPrompt.response.status, 410);
+    assert.match(missingPrompt.payload.error, /forgerApp bridge has been removed/);
 
     const wrongAppPath = '/v1/apps/other-app/agent-threads';
     const wrongAppBody = JSON.stringify({ initialPrompt: 'hello' });
@@ -518,13 +620,14 @@ test('desktop runtime bridge handles queued conversation runs and unsupported co
       sendMessage: async () => ({ ...conversation, activeRun: undefined }),
       get: async () => conversation,
       cancel: async () => ({ success: false }),
+      getMetadata: async () => ({ manifestAgentId: 'analyst' }),
     }),
   });
   try {
-    const runPath = `/v1/apps/${APP_ID}/agent-threads/thread-1`;
+    const runPath = `/v1/apps/${APP_ID}/agent-threads/thread-1/resume`;
     const queued = await request(harness.bridge, runPath, {
       method: 'POST',
-      body: { message: 'Queue this' },
+      body: { variables: { topic: 'Queue this' } },
     });
     assert.equal(queued.response.status, 200);
     assert.deepEqual(queued.payload, {
@@ -541,7 +644,7 @@ test('desktop runtime bridge handles queued conversation runs and unsupported co
   }
 });
 
-test('desktop runtime bridge reports unavailable conversation manager for thread routes', async () => {
+test('desktop runtime bridge reports removed freeform thread routes before manager availability', async () => {
   const harness = await createBridge();
   try {
     const path = `/v1/apps/${APP_ID}/agent-threads`;
@@ -549,8 +652,8 @@ test('desktop runtime bridge reports unavailable conversation manager for thread
       method: 'POST',
       body: { initialPrompt: 'hello' },
     });
-    assert.equal(response.status, 503);
-    assert.equal(payload.error, 'desktop_runtime_agent_manager_unavailable');
+    assert.equal(response.status, 410);
+    assert.match(payload.error, /forgerApp bridge has been removed/);
   } finally {
     await harness.stop();
   }

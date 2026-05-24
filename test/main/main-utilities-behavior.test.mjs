@@ -356,10 +356,12 @@ test('main utility summarizes updates and closes friend chat windows without tou
     updateAvailable: true,
     status: 'running',
     userMessage: 'En ejecucion',
-    capabilities: undefined,
     changelog: undefined,
     iconUrl: undefined,
     beta: undefined,
+    privateLocal: undefined,
+    localNetworkShareSupported: undefined,
+    remoteTunnelSupported: undefined,
   });
   assert.deepEqual(controller.toAppSummary({
     appId: 'recipes',
@@ -379,10 +381,12 @@ test('main utility summarizes updates and closes friend chat windows without tou
     updateAvailable: false,
     status: 'installed',
     userMessage: 'Ready',
-    capabilities: undefined,
     changelog: undefined,
     iconUrl: undefined,
     beta: undefined,
+    privateLocal: undefined,
+    localNetworkShareSupported: undefined,
+    remoteTunnelSupported: undefined,
   });
   assert.deepEqual(controller.toAppSummary({
     appId: 'journal',
@@ -402,10 +406,12 @@ test('main utility summarizes updates and closes friend chat windows without tou
     updateAvailable: false,
     status: 'installed',
     userMessage: 'Ready',
-    capabilities: undefined,
     changelog: undefined,
     iconUrl: undefined,
     beta: undefined,
+    privateLocal: undefined,
+    localNetworkShareSupported: undefined,
+    remoteTunnelSupported: undefined,
   });
   assert.deepEqual(controller.toAppSummary({
     appId: 'notes',
@@ -425,10 +431,12 @@ test('main utility summarizes updates and closes friend chat windows without tou
     updateAvailable: false,
     status: 'running',
     userMessage: 'En ejecucion',
-    capabilities: undefined,
     changelog: undefined,
     iconUrl: undefined,
     beta: undefined,
+    privateLocal: undefined,
+    localNetworkShareSupported: undefined,
+    remoteTunnelSupported: undefined,
   });
 
   friendChatWindows.set(1, { isDestroyed: () => false, close: () => closed.push(1) });

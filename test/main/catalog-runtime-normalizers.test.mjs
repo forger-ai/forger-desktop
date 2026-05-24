@@ -123,3 +123,37 @@ test('catalog normalizer drops malformed ratings, tools, prompt variables, and u
   assert.deepEqual(app.promptTemplates.map((template) => [template.id, template.reasoningEffort]), [['quick', 'xhigh']]);
   assert.deepEqual(app.changelog, { version: '2.0.0', summary: 'Updated', changes: ['ok'] });
 });
+
+test('catalog normalizer maps platform share flags without making UI depend on capabilities', () => {
+  const app = mapCatalog({
+    slug: 'mobile-ready',
+    name: 'Mobile Ready',
+    category: 'productivity',
+    latest_version: {
+      version: '1.0.0',
+      localNetworkShare: true,
+      remote_tunnel: true,
+      capabilities: [
+        { id: 'local_network_share', title: 'legacy local' },
+        { id: 'remote_tunnel_share', title: 'legacy remote' },
+      ],
+    },
+  });
+
+  assert.equal(app.localNetworkShareSupported, true);
+  assert.equal(app.remoteTunnelSupported, true);
+  assert.deepEqual(app.capabilities.map((capability) => capability.id), ['local_network_share', 'remote_tunnel_share']);
+
+  const legacyOnly = mapCatalog({
+    slug: 'legacy',
+    name: 'Legacy',
+    category: 'productivity',
+    latest_version: {
+      version: '1.0.0',
+      permissions: ['local_network_share', 'remote_tunnel_share'],
+    },
+  });
+  assert.equal(legacyOnly.localNetworkShareSupported, false);
+  assert.equal(legacyOnly.remoteTunnelSupported, false);
+  assert.deepEqual(legacyOnly.capabilities.map((capability) => capability.id), ['local_network_share', 'remote_tunnel_share']);
+});

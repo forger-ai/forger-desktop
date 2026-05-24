@@ -4,25 +4,44 @@ import type { AddressInfo, Socket } from 'node:net';
 import { WebSocket, WebSocketServer } from 'ws';
 
 import type {
-  AppAgentThreadCreateInput,
-  AppAgentThreadRunStartInput,
-  AppCodexConversation,
+  AppAgent,
+  AppAgentRuntimeInput,
   AppCodexConversationEvent,
   AppCodexConversationSendMessageInput,
   AppCodexTaskStartInput,
+  AppManifestAgentResumeInput,
+  AppManifestAgentStartInput,
+  AppManifestAgentSteerInput,
   AgentProvider,
 } from '../shared/types';
 import type { AppAgentTaskManager } from './app-agent-task-manager';
 import type { AppAgentConversationManager } from './app-agent-conversation-manager';
+import {
+  buildManifestAgentResumePrompt,
+  buildManifestAgentStartPrompt,
+  buildManifestAgentSteerPrompt,
+  toAppAgentRunSummary,
+  toAppAgentRunSummaryForId,
+  toAppAgentThreadSummary,
+} from './app-agent/conversation-helpers';
+import type { ManifestAgentPromptKind } from './manifest-agent-prompts';
+import { REMOVED_FORGER_APP_BRIDGE_MESSAGE } from './ipc/agent-handlers';
 
 const MAX_BODY_BYTES = 96 * 1024 * 1024;
 const SIGNATURE_WINDOW_MS = 5 * 60 * 1000;
 
 export interface DesktopRuntimeBridgeOptions {
-  getInstalledApp: (appId: string) => unknown;
+  getInstalledApp: (appId: string) => { installDir?: string } | undefined;
   getConversationManager: () => AppAgentConversationManager | null;
   getTaskManager?: () => AppAgentTaskManager | null;
   getTaskStatus?: (appId: string) => Promise<Record<string, unknown>>;
+  renderManifestAgentPrompt: (input: {
+    agent: AppAgent;
+    kind: ManifestAgentPromptKind;
+    variables?: Record<string, unknown>;
+    appRoot: string;
+  }) => string;
+  resolveInstalledAgents: (appId: string) => Promise<AppAgent[]>;
   appendInstallLog: (event: string, payload?: Record<string, unknown>) => Promise<void>;
   serializeErrorForInstallLog: (error: unknown) => Record<string, unknown>;
   maxBodyBytes?: number;
@@ -240,10 +259,102 @@ export class DesktopRuntimeBridge {
       throw new BridgeError(404, 'desktop_runtime_route_not_found');
     }
 
+    const removedFreeformThreadMatch = pathname.match(/^\/v1\/apps\/([^/]+)\/agent-threads(?:\/([^/]+))?$/);
+    if (method === 'POST' && removedFreeformThreadMatch) {
+      if (decodeURIComponent(removedFreeformThreadMatch[1]) !== appId) {
+        throw new BridgeError(404, 'desktop_runtime_route_not_found');
+      }
+      throw new BridgeError(410, REMOVED_FORGER_APP_BRIDGE_MESSAGE);
+    }
+
     const manager = this.options.getConversationManager();
     if (!manager) {
       throw new BridgeError(503, 'desktop_runtime_agent_manager_unavailable');
     }
+
+    const agentStartMatch = pathname.match(/^\/v1\/apps\/([^/]+)\/agents\/([^/]+)\/start$/);
+    if (agentStartMatch) {
+      if (decodeURIComponent(agentStartMatch[1]) !== appId) {
+        throw new BridgeError(403, 'desktop_runtime_app_forbidden');
+      }
+      if (method !== 'POST') {
+        throw new BridgeError(404, 'desktop_runtime_route_not_found');
+      }
+      const agentId = decodeURIComponent(agentStartMatch[2]).trim();
+      if (!agentId) {
+        throw new BridgeError(400, 'manifest_agent_required');
+      }
+      const body = parseJsonBody(bodyText) as unknown as Omit<AppManifestAgentStartInput, 'agentId'>;
+      const prompt = await this.renderManifestAgentPrompt(appId, agentId, 'initial', body.variables);
+      const conversation = await manager.create(appId, {
+        title: body.title,
+        agentId,
+        metadata: {
+          ...(body.metadata ?? {}),
+          agentId,
+          manifestAgentId: agentId,
+          promptApi: 'manifest-http',
+          initialPromptApplied: true,
+        },
+      });
+      const started = await manager.sendMessage(appId, {
+        conversationId: conversation.conversationId,
+        message: buildManifestAgentStartPrompt(prompt),
+        workspacePath: typeof body.workspacePath === 'string' ? body.workspacePath : undefined,
+        ...normalizeRuntime(body.runtime),
+      });
+      const summary = toAppAgentThreadSummary(started);
+      if (!summary) {
+        throw new BridgeError(500, 'manifest_agent_thread_start_failed');
+      }
+      return { ...summary, manifest_agent_id: agentId };
+    }
+
+    const resumeMatch = pathname.match(/^\/v1\/apps\/([^/]+)\/agent-threads\/([^/]+)\/resume$/);
+    if (resumeMatch) {
+      if (decodeURIComponent(resumeMatch[1]) !== appId) {
+        throw new BridgeError(403, 'desktop_runtime_app_forbidden');
+      }
+      if (method !== 'POST') {
+        throw new BridgeError(404, 'desktop_runtime_route_not_found');
+      }
+      const threadId = decodeURIComponent(resumeMatch[2]);
+      const body = parseJsonBody(bodyText) as unknown as AppManifestAgentResumeInput;
+      const agentId = await this.manifestAgentIdForThread(manager, appId, threadId);
+      const prompt = await this.renderManifestAgentPrompt(appId, agentId, 'resume', body.variables);
+      const conversation = await manager.sendMessage(appId, {
+        conversationId: threadId,
+        message: buildManifestAgentResumePrompt(prompt),
+        workspacePath: typeof body.workspacePath === 'string' ? body.workspacePath : undefined,
+        ...normalizeRuntime(body.runtime),
+      });
+      return toAppAgentRunSummary(threadId, conversation.activeRun, conversation.messages) ?? {
+        desktop_thread_id: threadId,
+        desktop_run_id: '',
+        status: 'queued',
+      };
+    }
+
+    const steerMatch = pathname.match(/^\/v1\/apps\/([^/]+)\/agent-threads\/([^/]+)\/runs\/([^/]+)\/steer$/);
+    if (steerMatch) {
+      if (decodeURIComponent(steerMatch[1]) !== appId) {
+        throw new BridgeError(403, 'desktop_runtime_app_forbidden');
+      }
+      if (method !== 'POST') {
+        throw new BridgeError(404, 'desktop_runtime_route_not_found');
+      }
+      const threadId = decodeURIComponent(steerMatch[2]);
+      const runId = decodeURIComponent(steerMatch[3]);
+      const body = parseJsonBody(bodyText) as unknown as AppManifestAgentSteerInput;
+      const agentId = await this.manifestAgentIdForThread(manager, appId, threadId);
+      const prompt = await this.renderManifestAgentPrompt(appId, agentId, 'steer', body.variables);
+      return await manager.steerRun(appId, threadId, runId, {
+        message: buildManifestAgentSteerPrompt(prompt),
+        workspacePath: typeof body.workspacePath === 'string' ? body.workspacePath : undefined,
+        ...normalizeRuntime(body.runtime),
+      });
+    }
+
     const match = pathname.match(/^\/v1\/apps\/([^/]+)\/agent-threads(?:\/([^/]+))?(?:\/runs(?:\/([^/]+))?)?(?:\/cancel)?$/);
     if (!match || decodeURIComponent(match[1]) !== appId) {
       throw new BridgeError(404, 'desktop_runtime_route_not_found');
@@ -251,49 +362,22 @@ export class DesktopRuntimeBridge {
     const threadId = match[2] ? decodeURIComponent(match[2]) : '';
     const runId = match[3] ? decodeURIComponent(match[3]) : '';
     const isCancel = pathname.endsWith('/cancel');
-    const body = parseJsonBody(bodyText);
 
     if (method === 'POST' && !threadId && !runId) {
-      const input = body as unknown as AppAgentThreadCreateInput;
-      const initialPrompt = typeof input.initialPrompt === 'string' ? input.initialPrompt.trim() : '';
-      if (!initialPrompt) throw new BridgeError(400, 'agent_thread_initial_prompt_required');
-      const conversation = await manager.create(appId, {
-        title: input.title,
-        agentId: input.manifestAgentId,
-        metadata: {
-          ...(input.metadata ?? {}),
-          agentId: input.manifestAgentId ?? '',
-          manifestAgentId: input.manifestAgentId ?? '',
-          initialPrompt,
-        },
-      });
-      return conversationToThreadSummary(conversation);
+      throw new BridgeError(410, REMOVED_FORGER_APP_BRIDGE_MESSAGE);
     }
 
     if (method === 'POST' && threadId && !runId && !isCancel) {
-      const input = body as unknown as AppAgentThreadRunStartInput;
-      const conversation = await manager.sendMessage(appId, {
-        conversationId: threadId,
-        message: String(input.message ?? ''),
-        context: typeof input.context === 'string' ? input.context : undefined,
-        workspacePath: typeof input.workspacePath === 'string' ? input.workspacePath : undefined,
-        ...normalizeRuntime(input.runtime),
-      });
-      return conversationToRunSummary(threadId, conversation.activeRun) ?? {
-        desktop_thread_id: threadId,
-        desktop_run_id: '',
-        status: 'queued',
-      };
+      throw new BridgeError(410, REMOVED_FORGER_APP_BRIDGE_MESSAGE);
     }
 
     if (method === 'GET' && threadId && !runId) {
-      return conversationToThreadSummary(await manager.get(appId, threadId));
+      return toAppAgentThreadSummary(await manager.get(appId, threadId));
     }
 
     if (method === 'GET' && threadId && runId) {
       const conversation = await manager.get(appId, threadId);
-      const run = conversation?.activeRun?.runId === runId ? conversation.activeRun : undefined;
-      return conversationToRunSummary(threadId, run) ?? null;
+      return toAppAgentRunSummaryForId(conversation, threadId, runId);
     }
 
     if (method === 'POST' && threadId && runId && isCancel) {
@@ -301,6 +385,46 @@ export class DesktopRuntimeBridge {
     }
 
     throw new BridgeError(404, 'desktop_runtime_route_not_found');
+  }
+
+  private async renderManifestAgentPrompt(
+    appId: string,
+    agentId: string,
+    kind: ManifestAgentPromptKind,
+    variables: Record<string, unknown> | undefined,
+  ): Promise<string> {
+    const record = this.options.getInstalledApp(appId);
+    const appRoot = record?.installDir;
+    if (!appRoot) {
+      throw new BridgeError(404, 'app_not_installed');
+    }
+    const agent = (await this.options.resolveInstalledAgents(appId)).find((item) => item.id === agentId);
+    if (!agent) {
+      throw new BridgeError(404, 'manifest_agent_not_found');
+    }
+    return this.options.renderManifestAgentPrompt({
+      agent,
+      kind,
+      variables,
+      appRoot,
+    });
+  }
+
+  private async manifestAgentIdForThread(
+    manager: AppAgentConversationManager,
+    appId: string,
+    threadId: string,
+  ): Promise<string> {
+    const metadata = await manager.getMetadata(appId, threadId);
+    const agentId = typeof metadata?.manifestAgentId === 'string' && metadata.manifestAgentId.trim()
+      ? metadata.manifestAgentId.trim()
+      : typeof metadata?.agentId === 'string' && metadata.agentId.trim()
+        ? metadata.agentId.trim()
+        : '';
+    if (!agentId) {
+      throw new BridgeError(400, 'manifest_agent_thread_agent_missing');
+    }
+    return agentId;
   }
 
   private signedSystemEvent(appId: string, type: string): Record<string, unknown> {
@@ -320,8 +444,8 @@ export class DesktopRuntimeBridge {
     const threadId = event.conversation.conversationId;
     const runId = event.run?.runId ?? '';
     const payload = {
-      conversation: conversationToThreadSummary(event.conversation),
-      ...(event.run ? { run: conversationToRunSummary(threadId, event.run) } : {}),
+      conversation: toAppAgentThreadSummary(event.conversation),
+      ...(event.run ? { run: toAppAgentRunSummary(threadId, event.run, event.conversation.messages) } : {}),
       ...(event.message ? {
         message: {
           id: event.message.messageId,
@@ -421,7 +545,7 @@ const safeEqual = (left: string, right: string): boolean => {
   return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
 };
 
-const normalizeRuntime = (runtime: AppAgentThreadRunStartInput['runtime']): Partial<AppCodexConversationSendMessageInput> => {
+const normalizeRuntime = (runtime: AppAgentRuntimeInput | undefined): Partial<AppCodexConversationSendMessageInput> => {
   const provider = runtime?.provider === 'codex' || runtime?.provider === 'claude'
     ? runtime.provider as AgentProvider
     : undefined;
@@ -455,35 +579,4 @@ const sortJson = (value: unknown): unknown => {
     );
   }
   return value;
-};
-
-const conversationToThreadSummary = (conversation: AppCodexConversation | null) => {
-  if (!conversation) return null;
-  return {
-    desktop_thread_id: conversation.conversationId,
-    title: conversation.title,
-    status: conversation.activeRun?.status ?? 'idle',
-    ...(conversation.activeRun ? { active_run: conversationToRunSummary(conversation.conversationId, conversation.activeRun) ?? undefined } : {}),
-    messages: conversation.messages.map((message) => ({
-      id: message.messageId,
-      role: message.role,
-      content: message.text,
-      created_at: message.createdAt,
-    })),
-    ...(conversation.activeRun?.progressLog ? { progressLog: conversation.activeRun.progressLog } : {}),
-  };
-};
-
-const conversationToRunSummary = (
-  desktopThreadId: string,
-  run: AppCodexConversation['activeRun'] | undefined,
-) => {
-  if (!run) return null;
-  return {
-    desktop_thread_id: desktopThreadId,
-    desktop_run_id: run.runId,
-    status: run.status,
-    ...(run.error ? { error: run.error } : {}),
-    ...(run.progressLog ? { progressLog: run.progressLog } : {}),
-  };
 };

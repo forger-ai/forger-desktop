@@ -3,7 +3,7 @@ import type path from 'node:path';
 import type * as Electron from 'electron';
 import { BrowserWindow, type IpcMain } from 'electron';
 import { AGENT_TOOL_PACKAGES } from '../core/agent-tool-packages';
-import { buildCodexPromptForFreeChat } from '../prompts/user-message';
+import { buildCodexPromptForFreeChat } from '../prompt-builder/user-message';
 import type { AppAgentConversationManager } from '../app-agent-conversation-manager';
 import type { AppAgentTaskManager } from '../app-agent-task-manager';
 import type { AutomationManager } from '../automation-manager';
@@ -50,6 +50,8 @@ import type {
   CloudSyncSettings,
   ConfigureOfficialToolInput,
   ConnectAppSecretInput,
+  CreateLocalAppInput,
+  CreateLocalAppResult,
   CreateRemoteAppBackupInput,
   CreateRemoteAppBackupResult,
   CreateUserSecretInput,
@@ -123,7 +125,7 @@ interface MainProcessIpcDeps {
   appendInstallLog: (event: string, payload?: Record<string, unknown>) => Promise<void>;
   automationManager: AutomationManager | null;
   buildAppSecretsState: (appId: string) => Promise<AppSecretsState>;
-  buildCodexPromptWithAppContext: (params: Parameters<typeof import('../prompts/user-message').buildCodexPromptWithAppContext>[0]) => string;
+  buildCodexPromptWithAppContext: (params: Parameters<typeof import('../prompt-builder/user-message').buildCodexPromptWithAppContext>[0]) => string;
   buildForgerToolsContextForApp: (appId: string) => Promise<string>;
   buildForgerToolsContextForFreeChat: () => Promise<string>;
   canUseCloudDataSync: () => boolean;
@@ -157,6 +159,7 @@ interface MainProcessIpcDeps {
   getRemoteNetworkShareStatus?: (appId: string) => RuntimeStatus['remoteNetworkShare'];
   getSecretsStore: () => SecretsStore;
   installAppRuntime: (appId: string, locale?: string) => Promise<InstallAppResult>;
+  createLocalAppFromSkeleton: (input: CreateLocalAppInput, locale?: string) => Promise<CreateLocalAppResult>;
   installWelcome: (appId: string, userLanguage?: string) => Promise<InstallWelcomeResult>;
   ipcMain: IpcMain;
   listAppPrompts: (appId: string) => Promise<AppPromptReviewItem[]>;
@@ -202,7 +205,7 @@ interface MainProcessIpcDeps {
 }
 
 export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
-  const { state, APP_CLAUDE_MODEL_OPTIONS, APP_CODEX_MODEL_OPTIONS, BetterSqlite3, BrowserWindow, CODEX_USAGE_DASHBOARD_URL, IPC_CHANNELS, app, appendInstallLog, buildAppSecretsState, buildCodexPromptWithAppContext, buildForgerToolsContextForApp, buildForgerToolsContextForFreeChat, canUseCloudDataSync, chatOrchestrator, cloudDeviceManager, connectClaudeAuth, connectCodexAuth, createRemoteAppBackup, decryptCloudMessage, decryptCloudMessages, dialog, disconnectCodexAuth, ensureCatalogStatuses, failureDiagnostic, forgerBackendClient, forwardCloudSocialEvent, fs, getAppDetails, getBackupsManager, getClaudeAuthStatus, getCloudIdentityStore, getCodexAuthStatus, getDesktopUpdater, getFileLibrary, getMemoryStore, getOfficialToolsService, getPrivateDataRoot, getRuntimeStatus, getLocalNetworkShareStatus, getRemoteNetworkShareStatus, getSecretsStore, installAppRuntime, installWelcome, ipcMain, listAppPrompts, listCatalogFromBackend, mainWindow, normalizeManifestAgentDefaults, openInstalledApp, startLocalNetworkShare, stopLocalNetworkShare, startRemoteNetworkShare, stopRemoteNetworkShare, openOrFocusFriendChatWindow, path, publicForgerAccount, registry, reinstallClaude, reinstallCodex, resolveAppIdForWebContents, resolveInstalledAgents, resolveInstalledAppSecrets, resolveInstalledManifest, resolveSelectedAppDisplayName, restoreAppPrompt, restoreAppUserVersionRuntime, restoreRemoteAppBackup, sanitizeRendererChatTrace, sendEncryptedCloudMessage, serializeErrorForInstallLog, setAppAutoSyncSetting, shell, signAppFolderGrant, stopInstalledApp, switchForgerAccountSession, toAppSummary, uninstallAppRuntime, updateAgentDefaults, updateAgentToolApproval, updateAppPrompt, updateAppRuntime, updateCodexDefaults, validateAppPrompt } = deps;
+  const { state, APP_CLAUDE_MODEL_OPTIONS, APP_CODEX_MODEL_OPTIONS, BetterSqlite3, BrowserWindow, CODEX_USAGE_DASHBOARD_URL, IPC_CHANNELS, app, appendInstallLog, buildAppSecretsState, buildCodexPromptWithAppContext, buildForgerToolsContextForApp, buildForgerToolsContextForFreeChat, canUseCloudDataSync, chatOrchestrator, cloudDeviceManager, connectClaudeAuth, connectCodexAuth, createLocalAppFromSkeleton, createRemoteAppBackup, decryptCloudMessage, decryptCloudMessages, dialog, disconnectCodexAuth, ensureCatalogStatuses, failureDiagnostic, forgerBackendClient, forwardCloudSocialEvent, fs, getAppDetails, getBackupsManager, getClaudeAuthStatus, getCloudIdentityStore, getCodexAuthStatus, getDesktopUpdater, getFileLibrary, getMemoryStore, getOfficialToolsService, getPrivateDataRoot, getRuntimeStatus, getLocalNetworkShareStatus, getRemoteNetworkShareStatus, getSecretsStore, installAppRuntime, installWelcome, ipcMain, listAppPrompts, listCatalogFromBackend, mainWindow, normalizeManifestAgentDefaults, openInstalledApp, startLocalNetworkShare, stopLocalNetworkShare, startRemoteNetworkShare, stopRemoteNetworkShare, openOrFocusFriendChatWindow, path, publicForgerAccount, registry, reinstallClaude, reinstallCodex, resolveAppIdForWebContents, resolveInstalledAgents, resolveInstalledAppSecrets, resolveInstalledManifest, resolveSelectedAppDisplayName, restoreAppPrompt, restoreAppUserVersionRuntime, restoreRemoteAppBackup, sanitizeRendererChatTrace, sendEncryptedCloudMessage, serializeErrorForInstallLog, setAppAutoSyncSetting, shell, signAppFolderGrant, stopInstalledApp, switchForgerAccountSession, toAppSummary, uninstallAppRuntime, updateAgentDefaults, updateAgentToolApproval, updateAppPrompt, updateAppRuntime, updateCodexDefaults, validateAppPrompt } = deps;
   const localNetworkShareStatusFor = getLocalNetworkShareStatus ?? (() => undefined);
   const remoteNetworkShareStatusFor = getRemoteNetworkShareStatus ?? (() => undefined);
   const localNetworkSharePayloadFor = (appId: string) => {
@@ -219,6 +222,33 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
     return normalizedRelative === '' || (!normalizedRelative.startsWith('..') && !path.isAbsolute(relative));
   };
   const toPosixRelativePath = (value: string): string => value.replace(/\\/g, '/');
+  const installedAppPromptContext = async (appId: string, input?: Pick<ChatStartRunInput, 'provider' | 'model' | 'reasoningEffort' | 'effort'>) => {
+    const record = registry.apps[appId];
+    const appRoot = record?.installDir;
+    const manifest = appRoot ? await resolveInstalledManifest(appRoot).catch(() => null) : null;
+    const backend = manifest?.stack?.backend;
+    const frontend = manifest?.stack?.frontend;
+    const stackParts = [
+      backend?.language || backend?.framework || backend?.package_manager
+        ? `backend ${[backend?.language, backend?.framework, backend?.package_manager].filter(Boolean).join('/')}`
+        : '',
+      frontend?.language || frontend?.framework || frontend?.bundler || frontend?.ui
+        ? `frontend ${[frontend?.language, frontend?.framework, frontend?.bundler, frontend?.ui].filter(Boolean).join('/')}`
+        : '',
+    ].filter(Boolean);
+    const runtimeParts = [
+      input?.provider ? `provider ${input.provider}` : '',
+      input?.model ? `model ${input.model}` : '',
+      input?.reasoningEffort ? `reasoning ${input.reasoningEffort}` : '',
+      input?.effort ? `effort ${input.effort}` : '',
+    ].filter(Boolean);
+    return {
+      appRoot,
+      runRoot: appRoot,
+      appStack: stackParts.join('; ') || undefined,
+      runtime: runtimeParts.join(', ') || undefined,
+    };
+  };
   ipcMain.handle(IPC_CHANNELS.listInstalledApps, async () => {
     return Object.values(registry.apps).map(toAppSummary);
   });
@@ -234,6 +264,10 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
 
   ipcMain.handle(IPC_CHANNELS.installApp, async (_event, appId: string, locale?: string) => {
     return await installAppRuntime(appId, locale);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.createLocalApp, async (_event, input: CreateLocalAppInput, locale?: string) => {
+    return await createLocalAppFromSkeleton(input, locale);
   });
 
   ipcMain.handle(IPC_CHANNELS.updateApp, async (_event, appId: string, locale?: string) => {
@@ -374,9 +408,11 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
         technicalCode: 'chat_orchestrator_unavailable',
       };
     }
+    const promptContext = await installedAppPromptContext(appId);
     const prompt = buildCodexPromptWithAppContext({
       appId,
       displayName: resolveSelectedAppDisplayName(appId),
+      ...promptContext,
       userLanguage: 'not configured',
       officialToolsContext: await buildForgerToolsContextForApp(appId),
       userPrompt:
@@ -713,10 +749,13 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
       modifiedAt: fileRef.modifiedAt ?? '',
       source: fileRef.source ?? 'mentioned',
     }));
+    const promptContext = input.appId ? await installedAppPromptContext(input.appId, input) : null;
     const enrichedPrompt = input.appId
       ? buildCodexPromptWithAppContext({
+          turnKind: 'start',
           appId: input.appId,
           displayName: resolveSelectedAppDisplayName(input.appId),
+          ...promptContext,
           userPrompt: input.prompt,
           userLanguage: input.userLanguage,
           officialToolsContext: await buildForgerToolsContextForApp(input.appId),
@@ -724,9 +763,30 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
           sharedFiles: sharedPromptFiles,
         })
       : buildCodexPromptForFreeChat({
+          turnKind: 'start',
           userPrompt: input.prompt,
           userLanguage: input.userLanguage,
           officialToolsContext: await buildForgerToolsContextForFreeChat(),
+          sharedFilesRootName: path.basename(getPrivateDataRoot()),
+          sharedFiles: sharedPromptFiles,
+        });
+    const resumePrompt = input.appId
+      ? buildCodexPromptWithAppContext({
+          turnKind: 'resume',
+          appId: input.appId,
+          displayName: resolveSelectedAppDisplayName(input.appId),
+          ...(promptContext ?? {}),
+          userPrompt: input.prompt,
+          userLanguage: input.userLanguage,
+          officialToolsContext: '',
+          sharedFilesRootName: path.basename(getPrivateDataRoot()),
+          sharedFiles: sharedPromptFiles,
+        })
+      : buildCodexPromptForFreeChat({
+          turnKind: 'resume',
+          userPrompt: input.prompt,
+          userLanguage: input.userLanguage,
+          officialToolsContext: '',
           sharedFilesRootName: path.basename(getPrivateDataRoot()),
           sharedFiles: sharedPromptFiles,
         });
@@ -734,6 +794,7 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
       ...input,
       appId: input.appId ?? null,
       prompt: enrichedPrompt,
+      resumePrompt,
       sharedFiles,
     });
   });

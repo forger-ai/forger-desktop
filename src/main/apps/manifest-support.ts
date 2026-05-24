@@ -12,7 +12,7 @@ import type { PromptOverridesStore } from '../prompt-overrides';
 import { buildPromptBases, promptOverrideErrorResult } from '../prompt-overrides';
 import { appSecretEnvName } from '../secrets-store';
 import type { SecretsStore } from '../secrets-store';
-import { buildForgerOfficialToolsPromptSection } from '../prompts/official-tools';
+import { buildForgerOfficialToolsPromptSection } from '../prompt-builder/official-tools';
 import type { ManifestAgentPromptKind } from '../manifest-agent-prompts';
 import type {
   AgentDefaults,
@@ -59,6 +59,8 @@ interface ManifestSupportDeps {
   state: ManifestSupportState;
   forgerBackendClient: ForgerBackendClient | null;
   forgerAccount: { authenticated?: boolean; token?: string | null };
+  getForgerBackendClient?: () => ForgerBackendClient | null;
+  getForgerAccount?: () => { authenticated?: boolean; token?: string | null };
   registry: AppRegistry;
   catalogApps: CatalogApp[];
   runningApps: Map<string, RunningAppProcess>;
@@ -143,6 +145,8 @@ export const createManifestSupportController = (deps: ManifestSupportDeps) => {
     renderManifestAgentPrompt,
     withAgentDefaults,
   } = deps;
+  const getCurrentForgerAccount = () => deps.getForgerAccount?.() ?? forgerAccount;
+  const getCurrentForgerBackendClient = () => deps.getForgerBackendClient?.() ?? forgerBackendClient;
 const normalizeToken = (value: string | undefined): string => {
   if (!value) {
     return '';
@@ -173,7 +177,7 @@ const resolveInstalledManifest = async (installDir: string): Promise<AppManifest
 };
 
 const manifestAllowsAgentNetworkAccess = (manifest: AppManifest | null): boolean =>
-  manifest?.agentRuntime?.networkAccess === true;
+  manifest?.agentRuntime?.networkAccess !== false;
 
 const normalizeAgentProvider = (value: unknown): AgentProvider | undefined =>
   value === 'codex' || value === 'claude' ? value : undefined;
@@ -211,24 +215,27 @@ const getOfficialToolsService = (): OfficialToolsService => {
       openExternalUrl: async (url) => {
         await shell.openExternal(url);
       },
-      isForgerAccountAuthenticated: () => Boolean(forgerAccount.token),
+      isForgerAccountAuthenticated: () => Boolean(getCurrentForgerAccount().token),
       getGmailOAuthClientId: async () => {
-        if (!forgerAccount.token || !forgerBackendClient) {
+        const client = getCurrentForgerBackendClient();
+        if (!getCurrentForgerAccount().token || !client) {
           throw new Error('forger_account_required');
         }
-        return await forgerBackendClient.getGmailOAuthClientId();
+        return await client.getGmailOAuthClientId();
       },
       exchangeGmailOAuthCode: async (input) => {
-        if (!forgerAccount.token || !forgerBackendClient) {
+        const client = getCurrentForgerBackendClient();
+        if (!getCurrentForgerAccount().token || !client) {
           throw new Error('forger_account_required');
         }
-        return await forgerBackendClient.exchangeGmailOAuthCode(input);
+        return await client.exchangeGmailOAuthCode(input);
       },
       refreshGmailOAuthAccessToken: async (input) => {
-        if (!forgerAccount.token || !forgerBackendClient) {
+        const client = getCurrentForgerBackendClient();
+        if (!getCurrentForgerAccount().token || !client) {
           throw new Error('forger_account_required');
         }
-        return await forgerBackendClient.refreshGmailOAuthAccessToken(input);
+        return await client.refreshGmailOAuthAccessToken(input);
       },
       appendLog: appendInstallLog,
       getAppToolDeclarations: resolveAppToolDeclarations,

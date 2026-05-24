@@ -34,6 +34,8 @@ const createController = (overrides = {}) => {
     state: overrides.state ?? { secretsStore: null, officialToolsService: null, memoryStore: null, backupsManager: null },
     forgerBackendClient: overrides.forgerBackendClient ?? null,
     forgerAccount: overrides.forgerAccount ?? { authenticated: false, token: null },
+    getForgerBackendClient: overrides.getForgerBackendClient,
+    getForgerAccount: overrides.getForgerAccount,
     registry,
     catalogApps: overrides.catalogApps ?? [],
     runningApps: overrides.runningApps ?? new Map(),
@@ -503,8 +505,13 @@ test('manifest support handles invalid manifests and legacy codex conversation f
   }), 'utf8');
   await fs.writeFile(path.join(invalidDir, 'manifest.json'), '{not json', 'utf8');
   const arrayDir = path.join(root, 'array');
+  const networkDisabledDir = path.join(root, 'network-disabled');
   await fs.mkdir(arrayDir, { recursive: true });
+  await fs.mkdir(networkDisabledDir, { recursive: true });
   await fs.writeFile(path.join(arrayDir, 'manifest.json'), JSON.stringify([{ agentRuntime: { networkAccess: true } }]), 'utf8');
+  await fs.writeFile(path.join(networkDisabledDir, 'manifest.json'), JSON.stringify({
+    agentRuntime: { networkAccess: false },
+  }), 'utf8');
 
   const { controller } = createController({
     registry: {
@@ -512,14 +519,16 @@ test('manifest support handles invalid manifests and legacy codex conversation f
         legacy: { appId: 'legacy', name: 'Legacy', installDir: validDir, version: '1.0.0', status: 'installed' },
         broken: { appId: 'broken', name: 'Broken', installDir: invalidDir, version: '1.0.0', status: 'installed' },
         array: { appId: 'array', name: 'Array', installDir: arrayDir, version: '1.0.0', status: 'installed' },
+        disabled: { appId: 'disabled', name: 'Disabled', installDir: networkDisabledDir, version: '1.0.0', status: 'installed' },
       },
     },
   });
 
   assert.equal(await controller.resolveInstalledManifest(invalidDir), null);
   assert.equal(await controller.resolveInstalledManifest(arrayDir), null);
-  assert.equal(await controller.appAllowsAgentNetworkAccess('broken'), false);
-  assert.equal(await controller.appAllowsAgentNetworkAccess('array'), false);
+  assert.equal(await controller.appAllowsAgentNetworkAccess('broken'), true);
+  assert.equal(await controller.appAllowsAgentNetworkAccess('array'), true);
+  assert.equal(await controller.appAllowsAgentNetworkAccess('disabled'), false);
   assert.deepEqual(await controller.resolveInstalledPromptTemplates('broken'), []);
   assert.equal(await controller.hasInstalledCodexConversation('legacy'), true);
 
@@ -875,4 +884,23 @@ test('manifest support lazy services build memory/tool contexts, prompt successe
   }).controller;
   unauthenticatedController.getOfficialToolsService();
   await assert.rejects(serviceInstances.at(-1).options.exchangeGmailOAuthCode({ code: 'code-2' }), /forger_account_required/);
+
+  let liveAccount = { authenticated: false, token: null };
+  let liveBackendClient = null;
+  const liveController = createController({
+    OfficialToolsService: FakeOfficialToolsService,
+    getForgerAccount: () => liveAccount,
+    getForgerBackendClient: () => liveBackendClient,
+  }).controller;
+  liveController.getOfficialToolsService();
+  const liveOptions = serviceInstances.at(-1).options;
+  assert.equal(liveOptions.isForgerAccountAuthenticated(), false);
+  liveAccount = { authenticated: true, token: 'late-token' };
+  liveBackendClient = {
+    getGmailOAuthClientId: async () => 'late-gmail-client-id',
+    exchangeGmailOAuthCode: async () => ({ refreshToken: 'late-refresh' }),
+    refreshGmailOAuthAccessToken: async () => ({ accessToken: 'late-access' }),
+  };
+  assert.equal(liveOptions.isForgerAccountAuthenticated(), true);
+  assert.equal(await liveOptions.getGmailOAuthClientId(), 'late-gmail-client-id');
 });

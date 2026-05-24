@@ -145,38 +145,31 @@ test('app-agent task and conversation handlers return safe fallbacks when contex
   );
 });
 
-test('agent thread creation validates authorization, manager availability, and initial prompt', async () => {
+test('legacy agent thread IPC rejects removed freeform prompt operations', async () => {
   await assert.rejects(
     createDeps().handlers.get(IPC_CHANNELS.appAgentThreadCreate)(eventForWebContents(1), { initialPrompt: 'hello' }),
-    /app_agent_thread_unavailable/,
+    /forgerApp bridge has been removed/,
   );
-
-  const withAppNoManager = createDeps({ resolveAppIdForWebContents: () => 'finance-os' });
   await assert.rejects(
-    withAppNoManager.handlers.get(IPC_CHANNELS.appAgentThreadCreate)(eventForWebContents(1), { initialPrompt: 'hello' }),
-    /app_agent_thread_unavailable/,
-  );
-
-  const withManager = createDeps({
-    appAgentConversationManager: { create: async () => ({ conversationId: 'thread-1', title: 'T', messages: [] }) },
-    resolveAppIdForWebContents: () => 'finance-os',
-  });
-  await assert.rejects(
-    withManager.handlers.get(IPC_CHANNELS.appAgentThreadCreate)(eventForWebContents(1), { initialPrompt: '   ' }),
-    /agent_thread_initial_prompt_required/,
-  );
-});
-
-test('agent thread IPC returns safe unavailable fallbacks and queued run summaries', async () => {
-  const unavailable = createDeps();
-
-  await assert.rejects(
-    unavailable.handlers.get(IPC_CHANNELS.appAgentThreadRunStart)(eventForWebContents(1), {
+    createDeps().handlers.get(IPC_CHANNELS.appAgentThreadRunStart)(eventForWebContents(1), {
       desktopThreadId: 'thread-1',
       message: 'hello',
     }),
-    /app_agent_thread_unavailable/,
+    /forgerApp bridge has been removed/,
   );
+  await assert.rejects(
+    createDeps().handlers.get(IPC_CHANNELS.appAgentThreadRunSteer)(eventForWebContents(1), {
+      desktopThreadId: 'thread-1',
+      desktopRunId: 'run-1',
+      message: 'steer',
+    }),
+    /forgerApp bridge has been removed/,
+  );
+});
+
+test('agent thread IPC returns safe unavailable fallbacks for read and cancel operations', async () => {
+  const unavailable = createDeps();
+
   assert.equal(await unavailable.handlers.get(IPC_CHANNELS.appAgentThreadGet)(eventForWebContents(1), 'thread-1'), null);
   assert.equal(
     await unavailable.handlers.get(IPC_CHANNELS.appAgentThreadRunGet)(eventForWebContents(1), 'thread-1', 'run-1'),
@@ -188,14 +181,6 @@ test('agent thread IPC returns safe unavailable fallbacks and queued run summari
       desktopRunId: 'run-1',
     }),
     { success: false },
-  );
-  await assert.rejects(
-    unavailable.handlers.get(IPC_CHANNELS.appAgentThreadRunSteer)(eventForWebContents(1), {
-      desktopThreadId: 'thread-1',
-      desktopRunId: 'run-1',
-      message: 'steer',
-    }),
-    /app_agent_thread_unavailable/,
   );
   await assert.rejects(
     unavailable.handlers.get(IPC_CHANNELS.appManifestAgentStart)(eventForWebContents(1), { agentId: 'advisor' }),
@@ -211,22 +196,24 @@ test('agent thread IPC returns safe unavailable fallbacks and queued run summari
           messages: [],
           activeRun: { runId: 'run-1', status: 'running', error: 'provider_error' },
         }
+      : threadId === 'thread-completed'
+        ? {
+            conversationId: 'thread-completed',
+            title: 'Completed',
+            messages: [
+              { messageId: 'msg-user', role: 'user', text: 'question', runId: 'run-2', createdAt: '2026-01-01T00:00:00.000Z' },
+              { messageId: 'msg-other', role: 'assistant', text: 'ignore', runId: 'other-run', createdAt: '2026-01-01T00:00:01.000Z' },
+              { messageId: 'msg-answer', role: 'assistant', text: 'completed answer', runId: 'run-2', createdAt: '2026-01-01T00:00:02.000Z' },
+            ],
+            activeRun: { runId: 'run-2', status: 'completed' },
+          }
       : null,
-    sendMessage: async () => ({ conversationId: 'thread-queued', title: 'Queued', messages: [] }),
-    steerRun: async () => ({ accepted: true }),
   };
   const available = createDeps({
     appAgentConversationManager: manager,
     resolveAppIdForWebContents: () => 'finance-os',
   });
 
-  assert.deepEqual(
-    await available.handlers.get(IPC_CHANNELS.appAgentThreadRunStart)(eventForWebContents(1), {
-      desktopThreadId: 'thread-queued',
-      message: 'hello',
-    }),
-    { desktop_thread_id: 'thread-queued', desktop_run_id: '', status: 'queued' },
-  );
   assert.deepEqual(await available.handlers.get(IPC_CHANNELS.appAgentThreadGet)(eventForWebContents(1), 'thread-with-run'), {
     desktop_thread_id: 'thread-with-run',
     title: 'Running',
@@ -239,10 +226,26 @@ test('agent thread IPC returns safe unavailable fallbacks and queued run summari
     },
     messages: [],
   });
+  assert.deepEqual(await available.handlers.get(IPC_CHANNELS.appAgentThreadGet)(eventForWebContents(1), 'thread-completed'), {
+    desktop_thread_id: 'thread-completed',
+    title: 'Completed',
+    status: 'completed',
+    active_run: {
+      desktop_thread_id: 'thread-completed',
+      desktop_run_id: 'run-2',
+      status: 'completed',
+      resultText: 'completed answer',
+    },
+    messages: [
+      { id: 'msg-user', role: 'user', content: 'question', created_at: '2026-01-01T00:00:00.000Z' },
+      { id: 'msg-other', role: 'assistant', content: 'ignore', created_at: '2026-01-01T00:00:01.000Z' },
+      { id: 'msg-answer', role: 'assistant', content: 'completed answer', created_at: '2026-01-01T00:00:02.000Z' },
+    ],
+  });
   assert.equal(await available.handlers.get(IPC_CHANNELS.appAgentThreadGet)(eventForWebContents(1), 'missing'), null);
 });
 
-test('agent thread IPC delegates run lifecycle with normalized runtime inputs and public summaries', async () => {
+test('agent thread IPC delegates read and cancel lifecycle with public summaries', async () => {
   const calls = [];
   const conversation = {
     conversationId: 'thread-1',
@@ -253,6 +256,23 @@ test('agent thread IPC delegates run lifecycle with normalized runtime inputs an
   };
   const runningConversation = {
     ...conversation,
+    messages: [
+      ...conversation.messages,
+      {
+        messageId: 'msg-old-user',
+        role: 'user',
+        text: 'old request',
+        runId: 'run-old',
+        createdAt: '2026-01-01T00:00:03.000Z',
+      },
+      {
+        messageId: 'msg-old',
+        role: 'assistant',
+        text: 'old result',
+        runId: 'run-old',
+        createdAt: '2026-01-01T00:00:04.000Z',
+      },
+    ],
     activeRun: {
       runId: 'run-1',
       status: 'running',
@@ -262,14 +282,6 @@ test('agent thread IPC delegates run lifecycle with normalized runtime inputs an
     },
   };
   const manager = {
-    create: async (appId, input) => {
-      calls.push(['create', appId, input]);
-      return conversation;
-    },
-    sendMessage: async (appId, input) => {
-      calls.push(['sendMessage', appId, input]);
-      return runningConversation;
-    },
     get: async (appId, threadId) => {
       calls.push(['get', appId, threadId]);
       return threadId === 'thread-1' ? runningConversation : null;
@@ -278,10 +290,6 @@ test('agent thread IPC delegates run lifecycle with normalized runtime inputs an
       calls.push(['cancel', appId, threadId, runId]);
       return { success: true };
     },
-    steerRun: async (appId, threadId, runId, input) => {
-      calls.push(['steerRun', appId, threadId, runId, input]);
-      return { accepted: true, mode: 'queued_for_next_run' };
-    },
   };
   const { handlers } = createDeps({
     appAgentConversationManager: manager,
@@ -289,60 +297,6 @@ test('agent thread IPC delegates run lifecycle with normalized runtime inputs an
     resolveAppIdForWebContents: () => 'finance-os',
   });
 
-  const created = await handlers.get(IPC_CHANNELS.appAgentThreadCreate)(eventForWebContents(7), {
-    initialPrompt: '  Start with context  ',
-    manifestAgentId: 'advisor',
-    metadata: { keep: 'yes' },
-    title: 'Desk review',
-  });
-  assert.deepEqual(created, {
-    desktop_thread_id: 'thread-1',
-    title: 'Desk review',
-    status: 'idle',
-    messages: [
-      {
-        id: 'msg-1',
-        role: 'user',
-        content: 'hello',
-        created_at: '2026-01-01T00:00:00.000Z',
-      },
-    ],
-  });
-  assert.deepEqual(calls[0], ['create', 'finance-os', {
-    title: 'Desk review',
-    agentId: 'advisor',
-    metadata: {
-      keep: 'yes',
-      agentId: 'advisor',
-      manifestAgentId: 'advisor',
-      initialPrompt: 'Start with context',
-    },
-  }]);
-
-  assert.deepEqual(
-    await handlers.get(IPC_CHANNELS.appAgentThreadRunStart)(eventForWebContents(7), {
-      desktopThreadId: 'thread-1',
-      message: '  continue  ',
-      context: '{"task":"review"}',
-      workspacePath: '/tmp/app',
-      runtime: { provider: 'codex', model: 'gpt-test', effort: 'high' },
-    }),
-    {
-      desktop_thread_id: 'thread-1',
-      desktop_run_id: 'run-1',
-      status: 'running',
-      progressLog: ['working'],
-    },
-  );
-  assert.deepEqual(calls[1], ['sendMessage', 'finance-os', {
-    conversationId: 'thread-1',
-    message: '  continue  ',
-    context: '{"task":"review"}',
-    workspacePath: '/tmp/app',
-    provider: 'codex',
-    model: 'gpt-test',
-    effort: 'codex:high',
-  }]);
   assert.deepEqual(
     await handlers.get(IPC_CHANNELS.appAgentThreadRunGet)(eventForWebContents(7), 'thread-1', 'run-1'),
     {
@@ -350,6 +304,15 @@ test('agent thread IPC delegates run lifecycle with normalized runtime inputs an
       desktop_run_id: 'run-1',
       status: 'running',
       progressLog: ['working'],
+    },
+  );
+  assert.deepEqual(
+    await handlers.get(IPC_CHANNELS.appAgentThreadRunGet)(eventForWebContents(7), 'thread-1', 'run-old'),
+    {
+      desktop_thread_id: 'thread-1',
+      desktop_run_id: 'run-old',
+      status: 'completed',
+      resultText: 'old result',
     },
   );
   assert.equal(
@@ -363,21 +326,6 @@ test('agent thread IPC delegates run lifecycle with normalized runtime inputs an
     }),
     { success: true },
   );
-  assert.deepEqual(
-    await handlers.get(IPC_CHANNELS.appAgentThreadRunSteer)(eventForWebContents(7), {
-      desktopThreadId: 'thread-1',
-      desktopRunId: 'run-1',
-      message: 'next',
-      runtime: { provider: 'codex', model: 'auto', effort: 'default' },
-    }),
-    { accepted: true, mode: 'queued_for_next_run' },
-  );
-  assert.deepEqual(calls.at(-1), ['steerRun', 'finance-os', 'thread-1', 'run-1', {
-    message: 'next',
-    context: undefined,
-    workspacePath: undefined,
-    provider: 'codex',
-  }]);
 });
 
 test('manifest-agent IPC renders declared prompts, resumes by stored agent metadata, and stops active runs', async () => {

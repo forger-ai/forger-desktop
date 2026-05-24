@@ -30,6 +30,25 @@ export interface InstallAppResult extends FailureDiagnosticFields {
   progress?: number;
 }
 
+export interface CreateLocalAppInput {
+  name: string;
+  description: string;
+  purpose: string;
+  lookAndFeel?: string;
+}
+
+export interface CreateLocalAppResult extends FailureDiagnosticFields {
+  success: boolean;
+  userMessage: string;
+  app?: {
+    appId: string;
+    name: string;
+    description: string;
+    purpose: string;
+    lookAndFeel?: string;
+  };
+}
+
 export type AppBackupReason = 'manual' | 'update' | 'pre_restore';
 export type RemoteBackupType = 'backup' | 'sync_snapshot';
 export type RemoteBackupSource = 'manual' | 'auto_sync';

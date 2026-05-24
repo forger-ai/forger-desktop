@@ -22,6 +22,7 @@ import {
   runAgentCommand,
   type CodexMcpServerConfig,
 } from './automation/agent-command-runner';
+import { renderPromptFile } from './prompt-builder';
 
 interface AutomationManagerOptions {
   forgerHomeRoot: string;
@@ -383,27 +384,19 @@ export class AutomationManager {
         ? selected.map((appEntry) =>
             [
               `- ${appEntry.name ?? appEntry.id} (id: ${appEntry.id})`,
-              `  Estado: ${appEntry.status}`,
-              `  Descripcion: ${appEntry.description ?? ''}`,
-              `  Workspace relativo: ${path.posix.join('apps', appEntry.id)}`,
+              `  Status: ${appEntry.status}`,
+              `  Description: ${appEntry.description ?? ''}`,
+              `  Relative workspace: ${path.posix.join('apps', appEntry.id)}`,
             ].join('\n'),
           )
-        : ['- No hay apps incluidas.'];
+        : ['- No included apps.'];
 
-    return [
-      'AUTOMATIZACION GLOBAL DE FORGER',
-      `Nombre: ${automation.name}`,
-      '',
-      'Estas automatizaciones son globales de Forger, no pertenecen a una app especifica.',
-      'Las apps incluidas son contexto sugerido inicial. La instruccion del usuario manda y puede referenciar otras apps si lo indica explicitamente.',
-      'Trabaja dentro del home privado de Forger y respeta los AGENTS.md existentes antes de afirmar o cambiar capacidades.',
-      '',
-      'APPS INCLUIDAS:',
-      ...appLines,
-      '',
-      'INSTRUCCION DEL USUARIO:',
-      automation.prompt,
-    ].join('\n');
+    return renderPromptFile('automations/global-automation.md', {
+      automationName: automation.name,
+      forgerPartial: renderPromptFile('partials/forger.md', {}),
+      appLines: appLines.join('\n'),
+      userInstruction: automation.prompt,
+    });
   }
 
   private async createRunRecord(
