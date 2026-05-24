@@ -50,11 +50,13 @@ export function ChatMessagesPanel({
       sx={{
         flex: 1,
         minHeight: 0,
+        minWidth: 0,
+        overflowX: 'hidden',
         overflowY: 'auto',
         py: 1,
       }}
     >
-      <Stack spacing={2}>
+      <Stack spacing={2} sx={{ minWidth: 0 }}>
         {!hasMessages ? (
           <Stack alignItems="center" justifyContent="center" sx={{ pt: 6 }} spacing={1}>
             <Typography variant="h4" textAlign="center">
@@ -84,7 +86,7 @@ export function ChatMessagesPanel({
           ))
         )}
         {isSending ? (
-          <Stack direction="row" spacing={1.25} alignItems="flex-start">
+          <Stack direction="row" spacing={1.25} alignItems="flex-start" sx={{ minWidth: 0, maxWidth: '100%', overflowX: 'hidden' }}>
             <Avatar
               src={assistantAvatarSrc}
               sx={{
@@ -96,15 +98,15 @@ export function ChatMessagesPanel({
                 '& img': { objectFit: 'contain' },
               }}
             />
-            <Box sx={{ maxWidth: '78%', color: 'text.secondary' }}>
+            <Box sx={{ maxWidth: '78%', minWidth: 0, color: 'text.secondary', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
               <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
                 <CircularProgress size={14} />
                 <Typography variant="caption">{t.sections.chat.codexThinking}</Typography>
               </Stack>
               {progressLines.length > 0 ? (
-                <Box component="ul" sx={{ m: 0, pl: 2 }}>
+                <Box component="ul" sx={{ m: 0, pl: 2, minWidth: 0, maxWidth: '100%' }}>
                   {progressLines.slice(-6).map((line, idx) => (
-                    <Typography component="li" variant="caption" key={`${idx}-${line}`}>
+                    <Typography component="li" variant="caption" key={`${idx}-${line}`} sx={{ overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
                       {line}
                     </Typography>
                   ))}
@@ -144,6 +146,7 @@ function ChatMessageRow({
       direction="row"
       spacing={1.25}
       justifyContent={message.role === 'user' ? 'flex-end' : 'flex-start'}
+      sx={{ minWidth: 0, maxWidth: '100%', overflowX: 'hidden' }}
     >
       {message.role === 'assistant' ? (
         <Avatar
@@ -161,6 +164,7 @@ function ChatMessageRow({
       <Box
         sx={{
           maxWidth: message.role === 'user' ? '72%' : '78%',
+          minWidth: 0,
           px: message.role === 'user' ? 1.6 : 0,
           py: message.role === 'user' ? 1.2 : 0,
           borderRadius: message.role === 'user' ? 1 : 0,
@@ -169,10 +173,12 @@ function ChatMessageRow({
             message.role === 'user'
               ? theme.palette.primary.contrastText
               : theme.palette.text.primary,
+          overflowWrap: 'anywhere',
+          wordBreak: 'break-word',
         }}
       >
         {message.role === 'assistant' ? (
-          <Stack spacing={1}>
+          <Stack spacing={1} sx={{ minWidth: 0 }}>
             <MarkdownMessage content={message.content} />
             {message.action?.type === 'open-app' ? (
               <OpenAppActionButton action={message.action} openingAppIds={openingAppIds} t={t} onOpenApp={onOpenApp} />
@@ -187,8 +193,8 @@ function ChatMessageRow({
             ) : null}
           </Stack>
         ) : (
-          <Stack spacing={0.85}>
-            <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
+          <Stack spacing={0.85} sx={{ minWidth: 0 }}>
+            <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
               {message.content}
             </Typography>
             {message.files?.length ? <UserMessageFiles files={message.files} /> : null}
@@ -220,7 +226,7 @@ function OpenAppActionButton({
       disabled={isOpening}
       aria-busy={isOpening}
       onClick={() => onOpenApp(action.appId)}
-      sx={{ alignSelf: 'flex-start' }}
+      sx={{ alignSelf: 'flex-start', maxWidth: '100%', whiteSpace: 'normal', overflowWrap: 'anywhere' }}
     >
       {isOpening ? t.actions.opening : action.label}
     </Button>
@@ -250,6 +256,8 @@ function PermissionActionCard({
       sx={{
         p: 1.5,
         borderRadius: 1,
+        minWidth: 0,
+        maxWidth: '100%',
         bgcolor: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.04)' : 'background.paper',
       }}
     >
@@ -266,9 +274,14 @@ function PermissionActionCard({
                   : t.sections.chat.permissionBadge
             }
           />
-          <Chip size="small" variant="outlined" label={action.request.resource} />
+          <Chip
+            size="small"
+            variant="outlined"
+            label={action.request.resource}
+            sx={{ maxWidth: '100%', '& .MuiChip-label': { overflow: 'hidden', textOverflow: 'ellipsis' } }}
+          />
         </Stack>
-        <Typography variant="body2" color="text.secondary">
+        <Typography variant="body2" color="text.secondary" sx={{ overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
           {action.request.reason}
         </Typography>
         {isPending ? (
