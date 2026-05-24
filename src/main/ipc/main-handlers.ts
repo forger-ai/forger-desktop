@@ -151,6 +151,7 @@ interface MainProcessIpcDeps {
   getCodexAuthStatus: () => Promise<{ authenticated: boolean }>;
   getDesktopUpdater: () => DesktopUpdater;
   getFileLibrary: () => FileLibrary;
+  getInstallLogPath: () => string;
   getMemoryStore: () => MemoryStore;
   getOfficialToolsService: () => OfficialToolsService;
   getPrivateDataRoot: () => string;
@@ -204,8 +205,97 @@ interface MainProcessIpcDeps {
   validateAppPrompt: (input: AppPromptReviewInput) => Promise<AppPromptValidationResult>;
 }
 
+const MAX_APP_ERROR_LOG_BYTES = 512 * 1024;
+const MAX_APP_ERROR_LOG_LINES = 80;
+const MAX_APP_ERROR_LOG_LINE_CHARS = 8_000;
+
+const truncateLogLine = (line: string): string => {
+  if (line.length <= MAX_APP_ERROR_LOG_LINE_CHARS) {
+    return line;
+  }
+  return `${line.slice(0, MAX_APP_ERROR_LOG_LINE_CHARS)}...[truncated ${line.length - MAX_APP_ERROR_LOG_LINE_CHARS} chars]`;
+};
+
+const readRecentAppInstallLogLines = async (input: {
+  fs: typeof fs;
+  getInstallLogPath: () => string;
+  appId: string;
+}): Promise<{ source: 'install.log'; bytesRead: number; truncatedFromStart: boolean; lines: string[] } | null> => {
+  const logPath = input.getInstallLogPath();
+  let handle: fs.FileHandle | null = null;
+  try {
+    const stats = await input.fs.stat(logPath);
+    const bytesToRead = Math.min(stats.size, MAX_APP_ERROR_LOG_BYTES);
+    const start = Math.max(0, stats.size - bytesToRead);
+    const buffer = Buffer.alloc(bytesToRead);
+    handle = await input.fs.open(logPath, 'r');
+    const { bytesRead } = await handle.read(buffer, 0, bytesToRead, start);
+    const rawLines = buffer
+      .subarray(0, bytesRead)
+      .toString('utf8')
+      .split(/\r?\n/)
+      .filter((line) => line.trim().length > 0);
+    const candidateLines = start > 0 ? rawLines.slice(1) : rawLines;
+    const lines: string[] = [];
+    for (let index = candidateLines.length - 1; index >= 0 && lines.length < MAX_APP_ERROR_LOG_LINES; index -= 1) {
+      const line = candidateLines[index];
+      try {
+        const parsed = JSON.parse(line) as { appId?: unknown };
+        if (parsed.appId === input.appId) {
+          lines.push(truncateLogLine(line));
+        }
+      } catch {
+        // Ignore partial or non-JSON log lines; install.log is best-effort diagnostics.
+      }
+    }
+    if (lines.length === 0) {
+      return null;
+    }
+    return {
+      source: 'install.log',
+      bytesRead,
+      truncatedFromStart: start > 0,
+      lines: lines.reverse(),
+    };
+  } catch {
+    return null;
+  } finally {
+    await handle?.close().catch(() => undefined);
+  }
+};
+
+const enrichAppErrorReportWithInstallLog = async (input: {
+  fs: typeof fs;
+  getInstallLogPath: () => string;
+  input: DesktopErrorReportPreview;
+}): Promise<DesktopErrorReportPreview> => {
+  if (input.input.source !== 'app' || !input.input.appId || input.input.sensitiveDetails?.appInstallLogExcerpt) {
+    return input.input;
+  }
+  const appInstallLogExcerpt = await readRecentAppInstallLogLines({
+    fs: input.fs,
+    getInstallLogPath: input.getInstallLogPath,
+    appId: input.input.appId,
+  });
+  if (!appInstallLogExcerpt) {
+    return input.input;
+  }
+  return {
+    ...input.input,
+    sensitiveDetails: {
+      ...(input.input.sensitiveDetails ?? {}),
+      appInstallLogExcerpt,
+    },
+  };
+};
+
+export const __testMainHandlersInternals = {
+  enrichAppErrorReportWithInstallLog,
+  readRecentAppInstallLogLines,
+};
+
 export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
-  const { state, APP_CLAUDE_MODEL_OPTIONS, APP_CODEX_MODEL_OPTIONS, BetterSqlite3, BrowserWindow, CODEX_USAGE_DASHBOARD_URL, IPC_CHANNELS, app, appendInstallLog, buildAppSecretsState, buildCodexPromptWithAppContext, buildForgerToolsContextForApp, buildForgerToolsContextForFreeChat, canUseCloudDataSync, chatOrchestrator, cloudDeviceManager, connectClaudeAuth, connectCodexAuth, createLocalAppFromSkeleton, createRemoteAppBackup, decryptCloudMessage, decryptCloudMessages, dialog, disconnectCodexAuth, ensureCatalogStatuses, failureDiagnostic, forgerBackendClient, forwardCloudSocialEvent, fs, getAppDetails, getBackupsManager, getClaudeAuthStatus, getCloudIdentityStore, getCodexAuthStatus, getDesktopUpdater, getFileLibrary, getMemoryStore, getOfficialToolsService, getPrivateDataRoot, getRuntimeStatus, getLocalNetworkShareStatus, getRemoteNetworkShareStatus, getSecretsStore, installAppRuntime, installWelcome, ipcMain, listAppPrompts, listCatalogFromBackend, mainWindow, normalizeManifestAgentDefaults, openInstalledApp, startLocalNetworkShare, stopLocalNetworkShare, startRemoteNetworkShare, stopRemoteNetworkShare, openOrFocusFriendChatWindow, path, publicForgerAccount, registry, reinstallClaude, reinstallCodex, resolveAppIdForWebContents, resolveInstalledAgents, resolveInstalledAppSecrets, resolveInstalledManifest, resolveSelectedAppDisplayName, restoreAppPrompt, restoreAppUserVersionRuntime, restoreRemoteAppBackup, sanitizeRendererChatTrace, sendEncryptedCloudMessage, serializeErrorForInstallLog, setAppAutoSyncSetting, shell, signAppFolderGrant, stopInstalledApp, switchForgerAccountSession, toAppSummary, uninstallAppRuntime, updateAgentDefaults, updateAgentToolApproval, updateAppPrompt, updateAppRuntime, updateCodexDefaults, validateAppPrompt } = deps;
+  const { state, APP_CLAUDE_MODEL_OPTIONS, APP_CODEX_MODEL_OPTIONS, BetterSqlite3, BrowserWindow, CODEX_USAGE_DASHBOARD_URL, IPC_CHANNELS, app, appendInstallLog, buildAppSecretsState, buildCodexPromptWithAppContext, buildForgerToolsContextForApp, buildForgerToolsContextForFreeChat, canUseCloudDataSync, chatOrchestrator, cloudDeviceManager, connectClaudeAuth, connectCodexAuth, createLocalAppFromSkeleton, createRemoteAppBackup, decryptCloudMessage, decryptCloudMessages, dialog, disconnectCodexAuth, ensureCatalogStatuses, failureDiagnostic, forgerBackendClient, forwardCloudSocialEvent, fs, getAppDetails, getBackupsManager, getClaudeAuthStatus, getCloudIdentityStore, getCodexAuthStatus, getDesktopUpdater, getFileLibrary, getInstallLogPath, getMemoryStore, getOfficialToolsService, getPrivateDataRoot, getRuntimeStatus, getLocalNetworkShareStatus, getRemoteNetworkShareStatus, getSecretsStore, installAppRuntime, installWelcome, ipcMain, listAppPrompts, listCatalogFromBackend, mainWindow, normalizeManifestAgentDefaults, openInstalledApp, startLocalNetworkShare, stopLocalNetworkShare, startRemoteNetworkShare, stopRemoteNetworkShare, openOrFocusFriendChatWindow, path, publicForgerAccount, registry, reinstallClaude, reinstallCodex, resolveAppIdForWebContents, resolveInstalledAgents, resolveInstalledAppSecrets, resolveInstalledManifest, resolveSelectedAppDisplayName, restoreAppPrompt, restoreAppUserVersionRuntime, restoreRemoteAppBackup, sanitizeRendererChatTrace, sendEncryptedCloudMessage, serializeErrorForInstallLog, setAppAutoSyncSetting, shell, signAppFolderGrant, stopInstalledApp, switchForgerAccountSession, toAppSummary, uninstallAppRuntime, updateAgentDefaults, updateAgentToolApproval, updateAppPrompt, updateAppRuntime, updateCodexDefaults, validateAppPrompt } = deps;
   const localNetworkShareStatusFor = getLocalNetworkShareStatus ?? (() => undefined);
   const remoteNetworkShareStatusFor = getRemoteNetworkShareStatus ?? (() => undefined);
   const localNetworkSharePayloadFor = (appId: string) => {
@@ -664,13 +754,17 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
       : { success: false, userMessage: 'No pudimos enviar la métrica de uso.', technicalCode: 'backend_client_missing' };
   });
   ipcMain.handle(IPC_CHANNELS.submitDesktopErrorReport, async (_event, input: DesktopErrorReportPreview) => {
-    const report: DesktopErrorReportPreview = {
+    const report = await enrichAppErrorReportWithInstallLog({
+      fs,
+      getInstallLogPath,
+      input: {
       ...input,
       desktopVersion: input.desktopVersion || app.getVersion(),
       platform: process.platform,
       arch: process.arch,
       occurredAt: input.occurredAt || new Date().toISOString(),
-    };
+      },
+    });
     return forgerBackendClient
       ? await forgerBackendClient.submitDesktopErrorReport(report)
       : { success: false, userMessage: 'No pudimos enviar el reporte.', technicalCode: 'backend_client_missing' };

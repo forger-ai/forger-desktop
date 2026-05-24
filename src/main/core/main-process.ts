@@ -1058,7 +1058,7 @@ const getMainProcessIpcDeps = () => ({
   getCloudIdentityStore,
   getCodexAuthStatus,
   getDesktopUpdater,
-  getFileLibrary,
+  getFileLibrary, getInstallLogPath,
   getMemoryStore,
   getOfficialToolsService,
   getPrivateDataRoot,
