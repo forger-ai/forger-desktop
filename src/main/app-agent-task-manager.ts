@@ -263,6 +263,7 @@ export class AppAgentTaskManager {
     let forgerMcpSession: { url: string; token: string } | null = null;
     const temporaryCodexHomes: string[] = [];
     let claudeMcpConfigPath: string | null = null;
+    let appMcpsReleased = false;
     try {
       const preparedArguments = await this.preparePromptArguments(task, template, input);
       const imageArgs = preparedArguments.files
@@ -415,13 +416,23 @@ export class AppAgentTaskManager {
       await this.cleanupTaskInputs(task).catch(() => undefined);
       await fs.rm(claudeMcpConfigPath ?? '', { force: true }).catch(() => undefined);
       claudeMcpConfigPath = null;
+      if (forgerMcpSession) {
+        this.options.releaseForgerMcpSession?.(forgerMcpSession.token);
+        forgerMcpSession = null;
+      }
+      this.options.releaseAppMcps?.(task.runId);
+      appMcpsReleased = true;
+      await Promise.all(temporaryCodexHomes.map((dirPath) => removeIsolatedCodexHome(dirPath)));
+      temporaryCodexHomes.splice(0);
       await this.persist(task);
       this.emit(task);
     } finally {
       if (forgerMcpSession) {
         this.options.releaseForgerMcpSession?.(forgerMcpSession.token);
       }
-      this.options.releaseAppMcps?.(task.runId);
+      if (!appMcpsReleased) {
+        this.options.releaseAppMcps?.(task.runId);
+      }
       await this.cleanupTaskInputs(task).catch(() => undefined);
       await fs.rm(claudeMcpConfigPath ?? '', { force: true }).catch(() => undefined);
       await Promise.all(temporaryCodexHomes.map((dirPath) => removeIsolatedCodexHome(dirPath)));
