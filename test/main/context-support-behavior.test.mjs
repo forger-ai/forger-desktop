@@ -164,6 +164,23 @@ test('context support normalizes installed app templates without stack-dependent
     'forger-app-mcp-data-tools',
     'forger-app-official-tools',
   ]);
+  const stackSkillsRoot = path.join(root, 'stack-skills');
+  await controller.writeStackSkills(stackSkillsRoot, {
+    backend: { language: ' Python ', framework: ' FastAPI ' },
+  }, true, ['gmail.read_thread']);
+  assert.match(
+    await fs.readFile(path.join(stackSkillsRoot, 'forger-app-official-tools', 'SKILL.md'), 'utf8'),
+    /`gmail\.read_thread`/,
+  );
+
+  assert.deepEqual(controller.buildInstalledAppContextSkillTemplates([
+    'gmail.search_messages',
+  ]).map((template) => template.id), [
+    'forger-context',
+    'forger-app-agents-authoring',
+    'forger-app-mcp-data-tools',
+    'forger-app-official-tools',
+  ]);
 
   await controller.normalizeInstalledAgentContext(appDir, 'stack');
   assert.deepEqual(await fs.readdir(path.join(appDir, '.agents', 'skills')), [
@@ -179,6 +196,24 @@ test('context support normalizes installed app templates without stack-dependent
   const agentsSkill = await fs.readFile(path.join(appDir, '.agents', 'skills', 'forger-app-agents-authoring', 'SKILL.md'), 'utf8');
   assert.match(agentsSkill, /current app facts/);
   assert.match(agentsSkill, /turn-specific tone/);
+
+  const edgeToolsDir = path.join(root, 'edge-tools-app');
+  await fs.mkdir(edgeToolsDir, { recursive: true });
+  await fs.writeFile(path.join(edgeToolsDir, 'manifest.json'), JSON.stringify({
+    tools: {
+      required: [
+        null,
+        [],
+        { actions: 'not-array' },
+        { actions: [false, ' gmail.search_messages ', ''] },
+      ],
+    },
+  }), 'utf8');
+  await controller.normalizeInstalledAgentContext(edgeToolsDir, 'edge-tools');
+  assert.match(
+    await fs.readFile(path.join(edgeToolsDir, '.agents', 'skills', 'forger-app-official-tools', 'SKILL.md'), 'utf8'),
+    /`gmail\.search_messages`/,
+  );
 });
 
 test('context support serializes lifecycle locks after failures and releases lock state', async () => {
