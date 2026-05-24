@@ -32,6 +32,11 @@ const createClient = (root, fetchImpl, token = undefined) => {
     platform: () => 'darwin_arm64',
     desktopVersion: () => '0.1.test',
     reportingLogPath: () => join(root, 'reporting.log'),
+    reportSanitizerRoots: () => [
+      { alias: 'FORGER_HOME/', path: '/Users/felipe/Forger' },
+      { alias: 'FORGER_APPS/', path: '/Users/felipe/Forger/apps' },
+      { alias: 'FORGER_DATA/', path: '/Users/felipe/Forger/data' },
+    ],
   });
   return {
     client,
@@ -212,6 +217,76 @@ test('submitDesktopErrorReport logs failed report submissions without stack deta
     assert.equal(entry.httpStatus, 500);
     assert.equal(entry.requestId, 'req-report');
     assert.equal(JSON.stringify(entry).includes('private stack'), false);
+  } finally {
+    harness.restore();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('submitDesktopErrorReport sanitizes report payload before sending', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'forger-error-sanitize-test-'));
+  let requestBody;
+  const harness = createClient(root, async (_url, init) => {
+    requestBody = JSON.parse(init.body);
+    return jsonResponse(201, { id: 1, status: 'open' });
+  });
+
+  try {
+    const result = await harness.client.submitDesktopErrorReport({
+      source: 'agent',
+      operation: 'chat.start-run',
+      message: 'Failed at /Users/felipe/Desktop/random.pdf',
+      technicalCode: 'chat_start_run_failed',
+      occurredAt: '2026-05-17T00:00:00.000Z',
+      details: { path: '/Users/felipe/Forger/data/import.csv' },
+      sensitiveDetails: { stack: 'Bearer sk-private-token\nat /Users/felipe/Desktop/random.pdf' },
+    });
+
+    assert.equal(result.success, true);
+    const text = JSON.stringify(requestBody);
+    assert.equal(text.includes('/Users/felipe/Desktop'), false);
+    assert.equal(text.includes('sk-private-token'), false);
+    assert.equal(requestBody.details.path, 'FORGER_DATA/import.csv');
+  } finally {
+    harness.restore();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('submitConversationDiagnosticReport posts sanitized thread payload with auth token', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'forger-conversation-report-test-'));
+  let requestUrl;
+  let requestInit;
+  const harness = createClient(root, async (url, init) => {
+    requestUrl = url;
+    requestInit = init;
+    return jsonResponse(201, { id: 42, status: 'open' }, { 'x-request-id': 'req-conv' });
+  }, 'cloud-token');
+
+  try {
+    const result = await harness.client.submitConversationDiagnosticReport({
+      source: 'desktop_chat',
+      appId: 'finance-os',
+      conversationId: 'conversation-1',
+      runId: 'run-1',
+      provider: 'codex',
+      desktopVersion: '0.1.test',
+      platform: 'darwin',
+      occurredAt: '2026-05-17T00:00:00.000Z',
+      payload: {
+        rawRunLog: { text: 'Bearer sk-private-token at /Users/felipe/Desktop/random.pdf' },
+        conversation: { messages: [{ role: 'user', content: '/Users/felipe/Forger/apps/finance-os/file.py' }] },
+      },
+    });
+
+    assert.equal(result.success, true);
+    assert.equal(requestUrl, 'https://platform.test/api/v1/conversation_diagnostic_reports');
+    assert.equal(requestInit.headers.Authorization, 'Bearer cloud-token');
+    const body = JSON.parse(requestInit.body);
+    const text = JSON.stringify(body);
+    assert.equal(text.includes('/Users/felipe/Desktop'), false);
+    assert.equal(text.includes('sk-private-token'), false);
+    assert.equal(text.includes('FORGER_APPS/finance-os'), true);
   } finally {
     harness.restore();
     await rm(root, { recursive: true, force: true });

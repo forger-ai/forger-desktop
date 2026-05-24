@@ -334,6 +334,7 @@ test('official tool skill templates and seed data keep expected Desktop defaults
     'forger-mui-date-pickers',
     'forger-mui-consistency',
     'forger-installed-app-change',
+    'forger-social-app-review',
     'forger-python-backend',
     'forger-fastapi-contracts',
     'forger-frontend-structure',
@@ -390,6 +391,18 @@ test('official tool skill templates and seed data keep expected Desktop defaults
   assert.ok(officialToolsSkill);
   assert.match(officialToolsSkill.body, /forger_open_app/);
   assert.match(officialToolsSkill.body, /Do not manually start app services/);
+  const installedAppChangeSkill = templates.find((template) => template.id === 'forger-installed-app-change');
+  assert.ok(installedAppChangeSkill);
+  assert.match(installedAppChangeSkill.body, /Restart after structural app edits/);
+  assert.match(installedAppChangeSkill.body, /forger_restart_app/);
+  assert.match(installedAppChangeSkill.body, /frontend\/src\/App\.tsx/);
+  assert.match(installedAppChangeSkill.body, /vite\.config/);
+  assert.match(installedAppChangeSkill.body, /package\.json/);
+  assert.match(installedAppChangeSkill.body, /FastAPI\/backend code/);
+  assert.match(installedAppChangeSkill.body, /manifest services\/environment/);
+  assert.match(installedAppChangeSkill.body, /Failed to resolve import/);
+  assert.match(installedAppChangeSkill.body, /stopping and reopening the installed app, including its local services/);
+  assert.match(installedAppChangeSkill.body, /Do not use `forger_refresh_app_view` as the recovery step after app edits/);
   const localizationSkill = templates.find((template) => template.id === 'forger-localization');
   assert.ok(localizationSkill);
   assert.match(localizationSkill.body, /\/api\/forger\/context/);

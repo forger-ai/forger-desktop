@@ -23,6 +23,7 @@ interface CatalogViewProps {
   onStartLocalNetworkShare: (appId: string) => void;
   onStartRemoteNetworkShare: (appId: string) => void;
   onStopRemoteNetworkShare: (appId: string) => void;
+  onUploadSocial: (appId: string) => void;
   onRefresh: () => void;
   t: AppDictionary;
   earlyAccessEnabled: boolean;
@@ -57,6 +58,7 @@ export function CatalogView({
   onStartLocalNetworkShare,
   onStartRemoteNetworkShare,
   onStopRemoteNetworkShare,
+  onUploadSocial,
   onRefresh,
   t,
   earlyAccessEnabled,
@@ -206,6 +208,7 @@ export function CatalogView({
                   ...(canShareLocalNetwork ? [{ label: t.localNetwork.menuAction, onClick: () => onStartLocalNetworkShare(app.id) }] : []),
                   ...(canShareRemoteNetwork ? [{ label: t.remoteNetwork.menuAction, onClick: () => onStartRemoteNetworkShare(app.id) }] : []),
                   ...(canStopRemoteNetwork ? [{ label: t.remoteNetwork.stop, onClick: () => onStopRemoteNetworkShare(app.id) }] : []),
+                  ...(isPrivateLocal ? [{ label: t.locale === 'es' ? 'Subir a Social' : 'Upload to Social', onClick: () => onUploadSocial(app.id) }] : []),
                 ]}
                 installProgress={installProgress}
                 onPrimaryAction={() => {

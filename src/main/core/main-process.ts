@@ -7,15 +7,6 @@ import path from 'node:path';
 import net from 'node:net';
 import http from 'node:http';
 import yauzl from 'yauzl';
-
-// better-sqlite3 is optional — gracefully unavailable if not installed / rebuilt
-let BetterSqlite3: (typeof import('better-sqlite3')) | null = null;
-try {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  BetterSqlite3 = require('better-sqlite3') as typeof import('better-sqlite3');
-} catch {
-  // package not yet installed or not rebuilt for this Electron version
-}
 import { settingsSeed } from '../../shared/mock-data';
 import { IPC_CHANNELS } from '../../shared/ipc';
 import { getSharedCopy, installProgressByPhase } from '../../shared/i18n';
@@ -39,18 +30,10 @@ import { DesktopRuntimeBridge } from '../desktop-runtime-bridge';
 import { DesktopErrorReporter } from '../error-reporting';
 import { FileLibrary } from '../file-library';
 import { buildMacTerminalLoginScript, buildMacTerminalScriptLaunchCommand } from '../auth-login-scripts';
-import {
-  buildCodexAuthEnvironment,
-  classifyCodexAuthOutput,
-  extractAllowedCodexAuthUrls,
-} from '../codex-auth-helpers';
+import { buildCodexAuthEnvironment, classifyCodexAuthOutput, extractAllowedCodexAuthUrls } from '../codex-auth-helpers';
 import { ForgerMcpServer } from '../forger-mcp-server';
 import { MemoryStore } from '../memory-store';
-import {
-  PromptOverridesStore,
-  buildPromptBases,
-  promptOverrideErrorResult,
-} from '../prompt-overrides';
+import { PromptOverridesStore, buildPromptBases, promptOverrideErrorResult } from '../prompt-overrides';
 import { OfficialToolsService, normalizeAppToolDeclarations } from '../official-tools-service';
 import { ForgerAccountStore, publicForgerAccount, type StoredForgerAccount } from '../forger-account-store';
 import { ForgerBackendClient } from '../forger-backend-client';
@@ -80,13 +63,9 @@ import { createMainUtilitiesController } from './main-utilities';
 import { createLocalNetworkShareController } from './local-network-share-service';
 import { RemoteNetworkShareManager } from '../remote-network-share-manager';
 import { createRuntimeInstallController } from '../runtime/runtime-install';
+import { loadOptionalBetterSqlite } from '../runtime/optional-better-sqlite';
 import { createWindowBootstrapController } from './window-bootstrap';
-import {
-  AGENT_TOOL_DEFINITIONS,
-  AGENT_TOOL_IDS,
-  AGENT_TOOL_PACKAGES,
-  createInitialAgentToolSettings,
-} from './agent-tool-packages';
+import { AGENT_TOOL_DEFINITIONS, AGENT_TOOL_IDS, AGENT_TOOL_PACKAGES, createInitialAgentToolSettings } from './agent-tool-packages';
 import { registerMainLifecycle } from './main-lifecycle';
 import type {
   AppManifest,
@@ -98,19 +77,11 @@ import type {
   RunningAppProcess,
   StackSkillTemplate,
 } from './main-process-types';
-import {
-  FORGER_AGENT_CONTRACT_MARKER,
-  FORGER_AGENT_CONTRACT_MARKER_PREFIX,
-  FORGER_AGENT_CONTRACT_VERSION,
-  buildGlobalForgerAgentsMarkdown,
-} from '../prompt-builder/forger-base';
+import { FORGER_AGENT_CONTRACT_MARKER, FORGER_AGENT_CONTRACT_MARKER_PREFIX, FORGER_AGENT_CONTRACT_VERSION, buildGlobalForgerAgentsMarkdown } from '../prompt-builder/forger-base';
 import { buildFailureDiagnostic } from '../../shared/error-diagnostics';
 import { buildForgerAppAgentsMarkdown } from '../prompt-builder/apps-base';
 import { buildCodexPromptForFreeChat, buildCodexPromptWithAppContext } from '../prompt-builder/user-message';
-import {
-  buildForgerOfficialToolSkillTemplates,
-  buildForgerOfficialToolsPromptSection,
-} from '../prompt-builder/official-tools';
+import { buildForgerOfficialToolSkillTemplates, buildForgerOfficialToolsPromptSection } from '../prompt-builder/official-tools';
 import { SecretsStore, appSecretEnvName, isSecretsVaultUnavailableError } from '../secrets-store';
 import type {
   AgentToolSettings,
@@ -151,6 +122,8 @@ import type {
   AppPromptRestoreInput,
   AppPromptReviewInput,
   AppPromptReviewItem,
+  AppPromptTestInput,
+  AppPromptTestResult,
   AppPromptTemplate,
   AppPromptValidationResult,
   AppSecretConnection,
@@ -224,6 +197,8 @@ import type {
   SetAppToolGrantInput,
   UpdateUserSecretInput,
 } from '../../shared/types';
+
+const BetterSqlite3 = loadOptionalBetterSqlite();
 
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 configureDesktopUserDataPath({ app, isDev, path });
@@ -496,6 +471,7 @@ const hasInstalledCodexConversation = async (appId: string): Promise<boolean> =>
 const resolveInstalledPromptBases = async (appId: string) => await getManifestSupportController().resolveInstalledPromptBases(appId);
 const listAppPrompts = async (appId: string): Promise<AppPromptReviewItem[]> => await getManifestSupportController().listAppPrompts(appId);
 const validateAppPrompt = async (input: AppPromptReviewInput): Promise<AppPromptValidationResult> => await getManifestSupportController().validateAppPrompt(input);
+const testAppPrompt = async (input: AppPromptTestInput): Promise<AppPromptTestResult> => await getManifestSupportController().testAppPrompt(input);
 const updateAppPrompt = async (input: AppPromptReviewInput): Promise<AppPromptMutationResult> => await getManifestSupportController().updateAppPrompt(input);
 const restoreAppPrompt = async (input: AppPromptRestoreInput): Promise<AppPromptMutationResult> => await getManifestSupportController().restoreAppPrompt(input);
 const getManifestAppSecretsValidationError = (manifest: AppManifest | null): string | null => getManifestSupportController().getManifestAppSecretsValidationError(manifest);
@@ -1057,10 +1033,15 @@ const getMainProcessIpcDeps = () => ({
   getClaudeAuthStatus,
   getCloudIdentityStore,
   getCodexAuthStatus,
+  getCodexHome,
   getDesktopUpdater,
-  getFileLibrary, getInstallLogPath,
+  getFileLibrary,
+  getForgerHomeRoot,
+  getForgerMetadataRoot,
+  getInstallLogPath,
   getMemoryStore,
   getOfficialToolsService,
+  getPrivateAppsRoot,
   getPrivateDataRoot,
   getRuntimeStatus,
   getLocalNetworkShareStatus,
@@ -1108,6 +1089,7 @@ const getMainProcessIpcDeps = () => ({
   signAppFolderGrant,
   stopInstalledApp,
   switchForgerAccountSession,
+  testAppPrompt,
   toAppSummary,
   uninstallAppRuntime,
   updateAgentDefaults,
@@ -1115,7 +1097,9 @@ const getMainProcessIpcDeps = () => ({
   updateAppPrompt,
   updateAppRuntime,
   updateCodexDefaults,
+  validateArchiveEntries,
   validateAppPrompt,
+  zipDirectory,
 });
 const windowBootstrapState = { get mainWindow() { return mainWindow; }, set mainWindow(value) { mainWindow = value; }, get pendingDeepLink() { return pendingDeepLink; }, set pendingDeepLink(value) { pendingDeepLink = value; } };
 const createWindowBootstrapDeps = () => ({
@@ -1195,6 +1179,6 @@ registerMainLifecycle({
   registerIpcHandlers, resolveClaudeCli, resolveCodexCliPath, resolveInstalledAgents, resolveInstalledManifest,
   resolveInstalledPromptTemplates, restoreAppPrompt, restartInstalledApp, runningApps, serializeErrorForInstallLog,
   shell, splitManifestCommand, startDevCatalogService, state: mainLifecycleState, stopInstalledApp,
-  switchForgerAccountSession, terminateProcess, toAppSummary, toCatalogStatus, translateManifestEnvironment,
+  switchForgerAccountSession, terminateProcess, testAppPrompt, toAppSummary, toCatalogStatus, translateManifestEnvironment,
   truncateForInstallLog, updateAppPrompt, updateAppRuntime, upsertInstalledRecord, waitForHttpOk,
 });

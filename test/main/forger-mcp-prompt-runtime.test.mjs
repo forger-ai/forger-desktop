@@ -15,6 +15,14 @@ const createServer = async (overrides = {}) => {
     category: 'app',
     risk: 'medio',
     defaultRequiresApproval: false,
+  }, {
+    id: 'forger_test_app_prompt',
+    packageId: 'forger',
+    name: 'Probar prompt de app',
+    description: 'Valida un prompt local.',
+    category: 'consulta',
+    risk: 'bajo',
+    defaultRequiresApproval: false,
   }];
   const server = new ForgerMcpServer({
     getAppVersion: () => '0.1.test',
@@ -32,6 +40,7 @@ const createServer = async (overrides = {}) => {
     refreshAppView: async () => ({ success: true }),
     updateApp: async () => ({ success: true }),
     listAppPrompts: async () => [],
+    testAppPrompt: async () => ({ success: true, valid: true, errors: [], declaredVariables: [], usedVariables: [], missingVariables: [], extraVariables: [] }),
     updateAppPrompt: async () => ({ success: true, userMessage: 'Prompt actualizado.' }),
     restoreAppPrompt: async () => ({ success: true }),
     memoryList: async () => [],
@@ -61,6 +70,15 @@ test('forger_update_app_prompt schema accepts agentPrompt and runtime overrides'
   assert.deepEqual(schema.properties.runtime.oneOf[1].properties.effort.enum, ['low', 'medium', 'high', 'xhigh', 'max']);
   assert.equal(schema.properties.model.type, 'string');
   assert.deepEqual(schema.properties.reasoningEffort.enum, ['none', 'low', 'medium', 'high', 'xhigh']);
+});
+
+test('forger_test_app_prompt schema accepts prompt candidates and variables', () => {
+  const schema = getMcpToolInputSchema('forger_test_app_prompt');
+  assert.deepEqual(schema.required, ['appId', 'kind', 'id']);
+  assert.deepEqual(schema.properties.kind.enum, ['promptTemplate', 'agent', 'agentPrompt']);
+  assert.equal(schema.properties.prompt.type, 'string');
+  assert.equal(schema.properties.variables.type, 'object');
+  assert.equal(schema.additionalProperties, false);
 });
 
 test('forger_update_app_prompt forwards agentPrompt runtime arguments', async () => {
@@ -106,6 +124,66 @@ test('forger_update_app_prompt forwards agentPrompt runtime arguments', async ()
       prompt: 'Review {{item}}.',
       runtime: { provider: 'claude', model: 'sonnet', effort: 'high' },
     });
+  } finally {
+    harness.stop();
+  }
+});
+
+test('forger_test_app_prompt forwards prompt candidates without saving', async () => {
+  let capturedInput;
+  const harness = await createServer({
+    testAppPrompt: async (input) => {
+      capturedInput = input;
+      return {
+        success: false,
+        valid: false,
+        technicalCode: 'agent_prompt_placeholder_not_declared',
+        errors: ['bad variable'],
+        declaredVariables: ['game_ids'],
+        usedVariables: ['#game_ids'],
+        missingVariables: [],
+        extraVariables: ['#game_ids'],
+      };
+    },
+  });
+  const session = harness.server.createSession('run-1', 'finance-os');
+  try {
+    const response = await fetch(session.url, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${session.token}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: {
+          name: 'forger_test_app_prompt',
+          arguments: {
+            appId: 'finance-os',
+            kind: 'agentPrompt',
+            id: 'advisor:initial',
+            prompt: 'Review {{#game_ids}}.',
+            variables: { game_ids: [1, 2] },
+          },
+        },
+      }),
+    });
+    const payload = await response.json();
+    const result = JSON.parse(payload.result.content[0].text);
+
+    assert.equal(response.status, 200);
+    assert.equal(payload.result.isError, true);
+    assert.deepEqual(capturedInput, {
+      appId: 'finance-os',
+      kind: 'agentPrompt',
+      id: 'advisor:initial',
+      prompt: 'Review {{#game_ids}}.',
+      variables: { game_ids: [1, 2] },
+    });
+    assert.equal(result.success, false);
+    assert.equal(result.technicalCode, 'agent_prompt_placeholder_not_declared');
   } finally {
     harness.stop();
   }

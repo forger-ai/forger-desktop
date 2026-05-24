@@ -1,7 +1,7 @@
 import type { Dispatch, SetStateAction } from 'react';
 import type { CloudFriendship } from '@shared/types';
 
-export type SocialTab = 'friends' | 'requests' | 'add';
+export type SocialTab = 'friends' | 'requests' | 'apps' | 'add';
 
 export const LAST_SOCIAL_TAB_KEY = 'forger.social.last-tab';
 
@@ -67,7 +67,7 @@ export const readLastSessionTab = (): SocialTab | null => {
   }
 
   const value = window.sessionStorage.getItem(LAST_SOCIAL_TAB_KEY);
-  return value === 'requests' || value === 'add' ? value : 'friends';
+  return value === 'requests' || value === 'apps' || value === 'add' ? value : 'friends';
 };
 
 export const setTimedFeedback = (

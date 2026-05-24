@@ -4,6 +4,7 @@ import type { Server } from 'node:http';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 
 import type { DesktopErrorReporter } from '../error-reporting';
+import { reportSanitizerRoots } from '../conversation-diagnostics';
 import type { StoredForgerAccount } from '../forger-account-store';
 import type {
   AgentRuntime,
@@ -220,6 +221,7 @@ interface MainLifecycleDeps {
   toCatalogStatus: SyncFn;
   translateManifestEnvironment: SyncFn;
   truncateForInstallLog: (value: string) => string;
+  testAppPrompt: AsyncFn;
   updateAppPrompt: AsyncFn;
   updateAppRuntime: AsyncFn;
   upsertInstalledRecord: (record: InstalledAppRecord) => Promise<void>;
@@ -333,6 +335,7 @@ export const registerMainLifecycle = (deps: unknown) => {
     toCatalogStatus,
     translateManifestEnvironment,
     truncateForInstallLog,
+    testAppPrompt,
     updateAppPrompt,
     updateAppRuntime,
     upsertInstalledRecord,
@@ -370,6 +373,14 @@ export const registerMainLifecycle = (deps: unknown) => {
     mapBackendCategory,
     toCatalogStatus,
     getUserMessage: (slug: string) => state.registry.apps[slug]?.userMessage,
+    reportSanitizerRoots: () => reportSanitizerRoots({
+      getUserDataPath: () => app.getPath('userData'),
+      getForgerHomeRoot,
+      getPrivateAppsRoot,
+      getPrivateDataRoot,
+      getForgerMetadataRoot,
+      getCodexHome,
+    }),
   });
   registerForgerCloudOAuth({
     ipcMain,
@@ -456,6 +467,7 @@ export const registerMainLifecycle = (deps: unknown) => {
     },
     updateApp: updateAppRuntime,
     listAppPrompts,
+    testAppPrompt,
     updateAppPrompt,
     restoreAppPrompt,
     memoryList: async (input: unknown, access: unknown) => await getMemoryStore().list(input, access),

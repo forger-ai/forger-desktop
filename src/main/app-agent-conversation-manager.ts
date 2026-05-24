@@ -46,6 +46,7 @@ import {
   runCommandCapture,
 } from './app-agent/process';
 import type { CodexMcpServerConfig } from './app-agent/types';
+import { appendRunLog, getRunLogPath } from './chat/progress-errors';
 
 interface AppAgentConversationManagerOptions {
   privateAppsRoot: string;
@@ -83,6 +84,7 @@ interface InternalRun extends AppCodexConversationRun {
   locale: Locale;
   child?: ChildProcessWithoutNullStreams;
   attachmentPaths?: string[];
+  runLogPath?: string;
 }
 
 interface PendingPermission {
@@ -161,6 +163,34 @@ export class AppAgentConversationManager {
     return normalizeMetadata(conversation.metadata);
   }
 
+  public async getDiagnosticSnapshot(appId: string, conversationId: string, runId?: string): Promise<Record<string, unknown> | null> {
+    await this.assertEnabled(appId);
+    await this.load();
+    const conversation = this.conversations.get(conversationId);
+    if (!conversation || conversation.appId !== appId) {
+      return null;
+    }
+    const targetRunId = runId || conversation.activeRun?.runId;
+    const run = targetRunId ? this.runs.get(targetRunId) : undefined;
+    const rawRunLog = targetRunId ? await readTail(run?.runLogPath ?? getRunLogPath(this.options.metadataRoot, targetRunId)) : null;
+    return {
+      conversation: {
+        conversationId: conversation.conversationId,
+        appId: conversation.appId,
+        title: conversation.title,
+        createdAt: conversation.createdAt,
+        updatedAt: conversation.updatedAt,
+        threadId: conversation.threadId ?? null,
+        runtime: conversation.runtime ?? null,
+        metadata: conversation.metadata ?? {},
+        messages: conversation.messages,
+        activeRun: conversation.activeRun ?? null,
+      },
+      requestedRunId: targetRunId ?? null,
+      rawRunLog,
+    };
+  }
+
   public async sendMessage(
     appId: string,
     input: AppCodexConversationSendMessageInput,
@@ -197,6 +227,7 @@ export class AppAgentConversationManager {
       createdAt: now,
       updatedAt: now,
       progressLog: [],
+      runLogPath: getRunLogPath(this.options.metadataRoot, runId),
     };
     conversation.messages.push(userMessage);
     conversation.activeRun = run;
@@ -577,8 +608,14 @@ export class AppAgentConversationManager {
           onChild: (child) => {
             run.child = child;
           },
-          onStdout: (text) => this.handleOutput(conversation, run, text),
-          onStderr: (text) => this.handleOutput(conversation, run, text),
+          onStdout: (text) => {
+            void appendRunLog(run.runLogPath ?? getRunLogPath(this.options.metadataRoot, run.runId), 'stdout', text);
+            this.handleOutput(conversation, run, text);
+          },
+          onStderr: (text) => {
+            void appendRunLog(run.runLogPath ?? getRunLogPath(this.options.metadataRoot, run.runId), 'stderr', text);
+            this.handleOutput(conversation, run, text);
+          },
           stdinText: runtime.provider === 'codex' ? prompt : undefined,
         }).finally(async () => {
           await fs.rm(claudeMcpConfigPath ?? '', { force: true }).catch(() => undefined);
@@ -878,3 +915,24 @@ export class AppAgentConversationManager {
     await fs.rm(this.conversationRuntimeRoot(appId, conversationId), { recursive: true, force: true }).catch(() => undefined);
   }
 }
+
+const readTail = async (filePath: string, maxBytes = 180_000): Promise<Record<string, unknown> | null> => {
+  const handle = await fs.open(filePath, 'r').catch(() => null);
+  if (!handle) {
+    return null;
+  }
+  try {
+    const stat = await handle.stat();
+    const start = Math.max(0, stat.size - maxBytes);
+    const buffer = Buffer.alloc(stat.size - start);
+    await handle.read(buffer, 0, buffer.length, start);
+    return {
+      path: filePath,
+      bytesRead: buffer.length,
+      truncatedFromStart: start > 0,
+      text: buffer.toString('utf8'),
+    };
+  } finally {
+    await handle.close().catch(() => undefined);
+  }
+};

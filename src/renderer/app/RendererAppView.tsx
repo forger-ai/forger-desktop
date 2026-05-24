@@ -87,6 +87,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     openAppDetails,
     handleDeleteApp,
     handleCreateLocalApp,
+    handleUploadSocial,
     createLocalAppBusy,
     installProgressByApp,
     catalogApps,
@@ -154,6 +155,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     setAgentProviderConfigOpen,
     handleStopChatRun,
     handleRespondPermission,
+    prepareConversationDiagnosticReport,
     automations,
     selectedAutomationId,
     automationRuns,
@@ -453,6 +455,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             onStartLocalNetworkShare={handleStartLocalNetworkShare}
             onStartRemoteNetworkShare={handleStartRemoteNetworkShare}
             onStopRemoteNetworkShare={handleStopRemoteNetworkShare}
+            onUploadSocial={(appId) => void handleUploadSocial(appId)}
             onRefresh={() => {
               void refreshApps().catch(() => {
                 setBannerSeverity('error');
@@ -516,6 +519,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             onOpenConversation={handleOpenConversation}
             onDeleteConversation={handleDeleteConversation}
             onStartNewConversation={handleStartNewConversation}
+            onNotifyForger={() => void prepareConversationDiagnosticReport()}
             inputValue={chatInput}
             onInputChange={setChatInput}
             onSend={() => void handleSendMessage()}

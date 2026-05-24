@@ -13,7 +13,14 @@ import { buildPromptBases, promptOverrideErrorResult } from '../prompt-overrides
 import { appSecretEnvName } from '../secrets-store';
 import type { SecretsStore } from '../secrets-store';
 import { buildForgerOfficialToolsPromptSection } from '../prompt-builder/official-tools';
-import type { ManifestAgentPromptKind } from '../manifest-agent-prompts';
+import { renderManifestAgentPrompt, type ManifestAgentPromptKind } from '../manifest-agent-prompts';
+import {
+  promptTestErrorMessage,
+  promptTestFailure,
+  promptTestSuccess,
+  promptTestTechnicalCode,
+  renderPromptTemplateForTest,
+} from './prompt-test-results';
 import type {
   AgentDefaults,
   AgentProvider,
@@ -28,6 +35,8 @@ import type {
   AppPromptRestoreInput,
   AppPromptReviewInput,
   AppPromptReviewItem,
+  AppPromptTestInput,
+  AppPromptTestResult,
   AppPromptTemplate,
   AppPromptValidationResult,
   AppSecretConnection,
@@ -865,6 +874,120 @@ const validateAppPrompt = async (input: AppPromptReviewInput): Promise<AppPrompt
   }
 };
 
+const testAppPrompt = async (input: AppPromptTestInput): Promise<AppPromptTestResult> => {
+  try {
+    const record = registry.apps[input.appId];
+    if (!record?.installDir) {
+      return promptTestFailure('app_prompt_not_found', ['No encontramos esa app instalada.']);
+    }
+    const kind = parsePromptReviewKind(input.kind);
+    if (!kind) {
+      return promptTestFailure('app_prompt_kind_invalid', ['El tipo de prompt no es valido.']);
+    }
+
+    const manifest = await resolveInstalledManifest(record.installDir);
+    const bases = buildPromptBases(normalizeManifestPromptTemplates(manifest), normalizeManifestAgents(manifest), getCodexDefaults());
+    const base = bases.find((candidate) => candidate.kind === kind && candidate.id === input.id);
+    if (!base) {
+      return promptTestFailure('app_prompt_not_found', ['No encontramos ese prompt en la app instalada.']);
+    }
+
+    const reviewItems = await getPromptOverridesStore().list(input.appId, bases);
+    const reviewItem = reviewItems.find((candidate) => candidate.kind === kind && candidate.id === input.id);
+    const prompt = typeof input.prompt === 'string' ? input.prompt : reviewItem?.prompt ?? base.prompt;
+    const variables = isRecord(input.variables) ? input.variables : {};
+    const declaredVariables = declaredPromptVariables(base);
+    const usedVariables = sortedPromptVariables(prompt);
+    const structuralValidation = await getPromptOverridesStore().validate(input.appId, bases, {
+      appId: input.appId,
+      kind,
+      id: input.id,
+      prompt,
+    });
+    const structuralErrors = [...structuralValidation.errors];
+    const undeclaredVariables = declaredVariables.length > 0
+      ? usedVariables.filter((variable) => !declaredVariables.includes(variable))
+      : [];
+    if (undeclaredVariables.length > 0) {
+      structuralErrors.push(`El prompt usa variables no declaradas: ${undeclaredVariables.join(', ')}.`);
+    }
+    if (structuralErrors.length > 0) {
+      return promptTestFailure('app_prompt_invalid', structuralErrors, {
+        declaredVariables,
+        usedVariables,
+        missingVariables: structuralValidation.missingVariables,
+        extraVariables: [...new Set([...structuralValidation.extraVariables, ...undeclaredVariables])].sort(),
+      });
+    }
+
+    if (kind === 'agentPrompt') {
+      const promptKind = base.promptKind as ManifestAgentPromptKind | undefined;
+      if (!base.agentId || !promptKind) {
+        return promptTestFailure('app_prompt_not_found', ['No encontramos ese prompt de agente en la app instalada.'], {
+          declaredVariables,
+          usedVariables,
+        });
+      }
+      const agents = await resolveInstalledAgents(input.appId);
+      const agent = agents.find((candidate) => candidate.id === base.agentId);
+      const template = agent?.prompts?.[promptKind];
+      if (!agent || !template) {
+        return promptTestFailure('app_prompt_not_found', ['No encontramos ese prompt de agente en la app instalada.'], {
+          declaredVariables,
+          usedVariables,
+        });
+      }
+      try {
+        const renderedPrompt = renderManifestAgentPrompt({
+          agent: {
+            ...agent,
+            prompts: {
+              ...agent.prompts,
+              [promptKind]: {
+                ...template,
+                body: prompt,
+              },
+            },
+          },
+          kind: promptKind,
+          variables,
+          appRoot: record.installDir,
+        });
+        return promptTestSuccess(renderedPrompt, { declaredVariables, usedVariables });
+      } catch (error) {
+        return promptTestFailure(promptTestTechnicalCode(error), [promptTestErrorMessage(error)], {
+          declaredVariables,
+          usedVariables,
+        });
+      }
+    }
+
+    if (kind === 'promptTemplate') {
+      const renderValidation = validatePromptTemplateRender(base, prompt, variables, input.variables !== undefined);
+      if (renderValidation.errors.length > 0) {
+        return promptTestFailure('app_prompt_invalid', renderValidation.errors, {
+          declaredVariables,
+          usedVariables,
+          missingVariables: renderValidation.missingVariables,
+          extraVariables: renderValidation.extraVariables,
+        });
+      }
+      return promptTestSuccess(renderPromptTemplateForTest(prompt, variables), {
+        declaredVariables,
+        usedVariables,
+      });
+    }
+
+    return promptTestSuccess(prompt, {
+      declaredVariables,
+      usedVariables,
+    });
+  } catch (error) {
+    const technicalCode = promptTestTechnicalCode(error);
+    return promptTestFailure(technicalCode, [promptTestErrorMessage(error)], {});
+  }
+};
+
 const updateAppPrompt = async (input: AppPromptReviewInput): Promise<AppPromptMutationResult> => {
   try {
     const bases = await resolveInstalledPromptBases(input.appId);
@@ -891,6 +1014,72 @@ const restoreAppPrompt = async (input: AppPromptRestoreInput): Promise<AppPrompt
   } catch (error) {
     return promptOverrideErrorResult(error);
   }
+};
+
+type PromptTestBase = ReturnType<typeof buildPromptBases>[number];
+
+const PROMPT_VARIABLE_PATTERN = /{{\s*([^{}]+?)\s*}}/g;
+
+const parsePromptReviewKind = (value: unknown): AppPromptReviewInput['kind'] | null =>
+  value === 'promptTemplate' || value === 'agent' || value === 'agentPrompt' ? value : null;
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value && typeof value === 'object' && !Array.isArray(value));
+
+const sortedPromptVariables = (prompt: string): string[] =>
+  [...new Set([...prompt.matchAll(PROMPT_VARIABLE_PATTERN)].map((match) => match[1].trim()))].sort();
+
+const declaredPromptVariables = (base: PromptTestBase): string[] => {
+  if (base.kind === 'agentPrompt' && base.declaredVariables) {
+    return Object.keys(base.declaredVariables).sort();
+  }
+  if (base.kind === 'promptTemplate' && base.arguments) {
+    return base.arguments.map((argument) => argument.name).sort();
+  }
+  return sortedPromptVariables(base.prompt);
+};
+
+const validatePromptTemplateRender = (
+  base: PromptTestBase,
+  prompt: string,
+  variables: Record<string, unknown>,
+  validateProvidedVariables: boolean,
+): { errors: string[]; missingVariables: string[]; extraVariables: string[] } => {
+  const declaredVariables = declaredPromptVariables(base);
+  const usedVariables = sortedPromptVariables(prompt);
+  const errors: string[] = [];
+  const undeclaredVariables = usedVariables.filter((variable) => !declaredVariables.includes(variable));
+  if (undeclaredVariables.length > 0) {
+    errors.push(`El prompt usa argumentos no declarados por el manifest: ${undeclaredVariables.join(', ')}.`);
+  }
+  if (!validateProvidedVariables) {
+    return { errors, missingVariables: [], extraVariables: undeclaredVariables };
+  }
+
+  const providedVariables = Object.keys(variables).sort();
+  const missingVariables = usedVariables.filter((variable) => !(variable in variables));
+  const extraVariables = providedVariables.filter((variable) => !declaredVariables.includes(variable));
+  if (missingVariables.length > 0) {
+    errors.push(`Faltan variables de prueba para renderizar: ${missingVariables.join(', ')}.`);
+  }
+  if (extraVariables.length > 0) {
+    errors.push(`Las variables de prueba no estan declaradas por el manifest: ${extraVariables.join(', ')}.`);
+  }
+
+  for (const argument of base.arguments ?? []) {
+    if (argument.required && !(argument.name in variables)) {
+      errors.push(`Falta el argumento requerido: ${argument.name}.`);
+    }
+    if (argument.type === 'string' && argument.name in variables && typeof variables[argument.name] !== 'string') {
+      errors.push(`El argumento ${argument.name} debe ser texto.`);
+    }
+  }
+
+  return {
+    errors,
+    missingVariables: [...new Set(missingVariables)].sort(),
+    extraVariables: [...new Set([...extraVariables, ...undeclaredVariables])].sort(),
+  };
 };
 
 const getManifestAppSecretsValidationError = (manifest: AppManifest | null): string | null => {
@@ -968,5 +1157,5 @@ const formatProcessOutputForInstallLog = (value: string, secretValues: string[])
     ? '[salida omitida porque la app recibio secretos]'
     : value;
 
-  return { normalizeToken, ensurePathInside, toPosixRelativePath, resolveInstalledManifest, manifestAllowsAgentNetworkAccess, appAllowsAgentNetworkAccess, anyAppAllowsAgentNetworkAccess, getSecretsStore, getOfficialToolsService, getMemoryStore, buildMemoryContextForApps, buildMemoryContextForApp, buildForgerToolsContextForApp, buildForgerToolsContextForFreeChat, getBackupsManager, createRemoteAppBackup, restoreRemoteAppBackup, syncAppToCloudIfEnabled, isReservedAppSecretEnvName, normalizeAppSecretDeclaration, normalizeManifestAppSecrets, resolveAppToolDeclarations, normalizeManifestPromptTemplates, normalizeManifestAgents, normalizeManifestAgentKind, normalizeManifestAgentPrompts, normalizeManifestAgentPromptTemplate, normalizeManifestAgentPromptVariables, isAppAgentPromptVariableType, normalizeManifestReasoningEffort, normalizeManifestAgentDefaults, normalizeManifestRuntime, normalizePromptTemplateArguments, resolveInstalledPromptTemplates, resolveInstalledAgents, hasInstalledCodexConversation, resolveInstalledPromptBases, listAppPrompts, validateAppPrompt, updateAppPrompt, restoreAppPrompt, getManifestAppSecretsValidationError, resolveInstalledAppSecrets, buildAppSecretsState, formatProcessOutputForInstallLog };
+  return { normalizeToken, ensurePathInside, toPosixRelativePath, resolveInstalledManifest, manifestAllowsAgentNetworkAccess, appAllowsAgentNetworkAccess, anyAppAllowsAgentNetworkAccess, getSecretsStore, getOfficialToolsService, getMemoryStore, buildMemoryContextForApps, buildMemoryContextForApp, buildForgerToolsContextForApp, buildForgerToolsContextForFreeChat, getBackupsManager, createRemoteAppBackup, restoreRemoteAppBackup, syncAppToCloudIfEnabled, isReservedAppSecretEnvName, normalizeAppSecretDeclaration, normalizeManifestAppSecrets, resolveAppToolDeclarations, normalizeManifestPromptTemplates, normalizeManifestAgents, normalizeManifestAgentKind, normalizeManifestAgentPrompts, normalizeManifestAgentPromptTemplate, normalizeManifestAgentPromptVariables, isAppAgentPromptVariableType, normalizeManifestReasoningEffort, normalizeManifestAgentDefaults, normalizeManifestRuntime, normalizePromptTemplateArguments, resolveInstalledPromptTemplates, resolveInstalledAgents, hasInstalledCodexConversation, resolveInstalledPromptBases, listAppPrompts, validateAppPrompt, testAppPrompt, updateAppPrompt, restoreAppPrompt, getManifestAppSecretsValidationError, resolveInstalledAppSecrets, buildAppSecretsState, formatProcessOutputForInstallLog };
 };

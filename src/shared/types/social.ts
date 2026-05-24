@@ -90,3 +90,89 @@ export interface CloudIdentityState {
   createdAt: string;
   updatedAt: string;
 }
+
+export type SocialUserAppVisibility = 'public' | 'friends' | 'private' | 'restricted';
+export type SocialUserAppStatus = 'published' | 'suspended' | 'deleted';
+export type SocialUserAppReviewState = 'not_reviewed' | 'reviewed' | 'skipped_review';
+
+export interface SocialUserProfile {
+  id: number;
+  username: string;
+  firstName?: string;
+  lastInitial?: string;
+  socialBio?: string;
+}
+
+export interface SocialUserAppVersion {
+  id: number;
+  version: string;
+  runtimeStack: string;
+  supportedPlatforms: string[];
+  capabilities: string[];
+  tools?: Record<string, unknown>;
+  agents?: unknown[];
+  promptTemplates?: unknown[];
+  checksumSha256: string;
+  fileSizeBytes: number;
+  zipEntryCount?: number;
+  expandedSizeBytes?: number;
+  publishedAt?: string;
+}
+
+export interface SocialUserApp {
+  id: number;
+  slug: string;
+  name: string;
+  shortDescription?: string;
+  description?: string;
+  category?: string;
+  visibility: SocialUserAppVisibility;
+  status: SocialUserAppStatus;
+  owner: SocialUserProfile;
+  averageReviewScore?: number;
+  reviewsCount?: number;
+  commentsCount?: number;
+  latestVersion?: SocialUserAppVersion;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface SocialUserAppList {
+  usage?: {
+    appCount: number;
+    appCountLimit: number;
+    versionSizeLimitBytes: number;
+  };
+  apps: SocialUserApp[];
+}
+
+export interface SocialUserAppShare {
+  id: number;
+  code: string;
+  scope: string;
+  expiresAt?: string;
+  maxUses?: number;
+  deepLink: string;
+}
+
+export interface SocialUserAppDownload {
+  downloadUrl: string;
+  app: {
+    id: number;
+    slug: string;
+    name: string;
+    ownerUsername: string;
+  };
+  version: SocialUserAppVersion;
+  install: {
+    id: number;
+    installedAt: string;
+    source: string;
+    trustDecision: SocialUserAppReviewState;
+  };
+}
+
+export interface SocialUserAppUploadInput {
+  appId: string;
+  visibility: Exclude<SocialUserAppVisibility, 'restricted'>;
+}

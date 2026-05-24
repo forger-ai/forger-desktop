@@ -52,6 +52,15 @@ export const AGENT_TOOL_PACKAGES: AgentToolPackageDefinition[] = [
         defaultRequiresApproval: false,
       },
       {
+        id: 'forger_test_app_prompt',
+        packageId: FORGER_TOOL_PACKAGE_ID,
+        name: 'Probar prompt de app',
+        description: 'Valida y renderiza un prompt declarado por una app instalada sin guardarlo ni ejecutarlo.',
+        category: 'consulta',
+        risk: 'bajo',
+        defaultRequiresApproval: false,
+      },
+      {
         id: 'forger_update_app_prompt',
         packageId: FORGER_TOOL_PACKAGE_ID,
         name: 'Editar prompt de app',

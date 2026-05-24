@@ -124,6 +124,11 @@ const forgerSkillDefinitions: ForgerSkillDefinition[] = [
   },
   {
     group: 'forger',
+    id: 'forger-social-app-review',
+    description: 'Review Social app packages before installing code created by another person.',
+  },
+  {
+    group: 'forger',
     id: 'forger-python-backend',
     description: 'Best practices for Python backends in Forger.',
   },

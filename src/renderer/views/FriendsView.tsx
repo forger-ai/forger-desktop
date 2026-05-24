@@ -35,6 +35,7 @@ import type {
   CloudSocialEvent,
   ForgerAccountSession,
   FriendChatWindowOpenResult,
+  SocialUserApp,
 } from '@shared/types';
 import {
   LAST_SOCIAL_TAB_KEY,
@@ -73,6 +74,20 @@ const formatUsernameAvailableDate = (value?: string) => {
   return date.toLocaleDateString('es-CL', { dateStyle: 'medium' });
 };
 
+const formatBytes = (value?: number) => {
+  if (!value || value <= 0) {
+    return '-';
+  }
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let size = value;
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+  return `${size.toLocaleString(undefined, { maximumFractionDigits: unitIndex === 0 ? 0 : 1 })} ${units[unitIndex]}`;
+};
+
 export function FriendsView({ account, accountBusy = false, onOpenFriendChat, onNotify, onUpdateUsername, variant = 'floating' }: FriendsViewProps) {
   const theme = useTheme();
   const launcherRef = useRef<HTMLButtonElement | null>(null);
@@ -102,6 +117,9 @@ export function FriendsView({ account, accountBusy = false, onOpenFriendChat, on
   const [editingUsername, setEditingUsername] = useState(false);
   const [profileUsername, setProfileUsername] = useState(account.user?.username ?? '');
   const [profileUsernameError, setProfileUsernameError] = useState<string | null>(null);
+  const [socialApps, setSocialApps] = useState<SocialUserApp[]>([]);
+  const [socialAppsLoading, setSocialAppsLoading] = useState(false);
+  const [socialAppsError, setSocialAppsError] = useState<string | null>(null);
 
   const accountUserId = account.user?.id;
   const accepted = useMemo(
@@ -192,6 +210,9 @@ export function FriendsView({ account, accountBusy = false, onOpenFriendChat, on
     setFriendRequestSendingId(null);
     setAddFriendError(null);
     setAddFriendFeedback(null);
+    setSocialApps([]);
+    setSocialAppsLoading(false);
+    setSocialAppsError(null);
   }, []);
 
   useEffect(() => {
@@ -231,6 +252,23 @@ export function FriendsView({ account, accountBusy = false, onOpenFriendChat, on
     }
   }, [account.authenticated, account.user?.confirmed, accountUserId, hasLoadedOnce, resetSocialState]);
 
+  const loadSocialApps = useCallback(async () => {
+    if (!account.authenticated || !account.user?.confirmed) {
+      setSocialApps([]);
+      return;
+    }
+    setSocialAppsLoading(true);
+    setSocialAppsError(null);
+    try {
+      const payload = await window.forger.listMySocialApps();
+      setSocialApps(payload.apps);
+    } catch (err) {
+      setSocialAppsError(err instanceof Error ? err.message : 'No pudimos cargar apps Social.');
+    } finally {
+      setSocialAppsLoading(false);
+    }
+  }, [account.authenticated, account.user?.confirmed]);
+
   useEffect(() => {
     if (!open) {
       return undefined;
@@ -249,12 +287,15 @@ export function FriendsView({ account, accountBusy = false, onOpenFriendChat, on
   useEffect(() => {
     if (account.authenticated && account.user?.confirmed) {
       void loadFriends({ silent: hasLoadedOnce });
+      if (activeTab === 'apps') {
+        void loadSocialApps();
+      }
       return undefined;
     }
 
     resetSocialState();
     return undefined;
-  }, [account.authenticated, account.user?.confirmed, accountUserId, hasLoadedOnce, loadFriends, resetSocialState]);
+  }, [account.authenticated, account.user?.confirmed, accountUserId, activeTab, hasLoadedOnce, loadFriends, loadSocialApps, resetSocialState]);
 
   useEffect(() => {
     if (!account.authenticated || !account.user?.confirmed) {
@@ -457,14 +498,19 @@ export function FriendsView({ account, accountBusy = false, onOpenFriendChat, on
       ? 'Tus conversaciones disponibles'
       : activeTab === 'requests'
         ? 'Gestiona solicitudes pendientes'
+        : activeTab === 'apps'
+          ? 'Apps que compartes desde Forger'
         : 'Busca por username y envía una solicitud';
 
   const launcherBusy = loading && !hasLoadedOnce;
   const isFriendsTabLoading = loading && accepted.length === 0;
   const isRequestsTabLoading = loading && pendingIncoming.length === 0 && pendingOutgoing.length === 0;
+  const isSocialAppsTabLoading = socialAppsLoading && socialApps.length === 0;
   const tabErrorMessage = activeTab === 'friends'
     ? error ?? 'No pudimos cargar tus amigos.'
-    : error ?? 'No pudimos cargar tus solicitudes.';
+    : activeTab === 'requests'
+      ? error ?? 'No pudimos cargar tus solicitudes.'
+    : socialAppsError ?? 'No pudimos cargar tus apps de Social.';
 
   return (
     <Box sx={topbar ? { position: 'relative' } : { position: 'fixed', right: 24, bottom: 24, zIndex: theme.zIndex.modal - 1 }}>
@@ -542,6 +588,7 @@ export function FriendsView({ account, accountBusy = false, onOpenFriendChat, on
                         label="Solicitudes"
                         sx={{ minHeight: 44 }}
                       />
+                      <Tab value="apps" label="Apps" sx={{ minHeight: 44 }} />
                       <Tab value="add" label="Agregar" sx={{ minHeight: 44 }} />
                     </Tabs>
 
@@ -554,16 +601,16 @@ export function FriendsView({ account, accountBusy = false, onOpenFriendChat, on
                         </Alert>
                       ) : null}
 
-                      {account.authenticated && account.user?.confirmed && error ? (
+                      {account.authenticated && account.user?.confirmed && (activeTab === 'apps' ? socialAppsError : error) ? (
                         <Stack spacing={1.5}>
                           <Alert severity="error">{tabErrorMessage}</Alert>
-                          <Button variant="outlined" onClick={() => void loadFriends()}>
+                          <Button variant="outlined" onClick={() => activeTab === 'apps' ? void loadSocialApps() : void loadFriends()}>
                             Reintentar
                           </Button>
                         </Stack>
                       ) : null}
 
-                      {account.authenticated && account.user?.confirmed && !error ? (
+                      {account.authenticated && account.user?.confirmed && !(activeTab === 'apps' ? socialAppsError : error) ? (
                         activeTab === 'friends' ? (
                           <Stack spacing={1}>
                             {isFriendsTabLoading ? (
@@ -850,6 +897,63 @@ export function FriendsView({ account, accountBusy = false, onOpenFriendChat, on
                                   );
                                 })}
                               </Stack>
+                            ) : null}
+                          </Stack>
+                        ) : activeTab === 'apps' ? (
+                          <Stack spacing={1.25}>
+                            {isSocialAppsTabLoading ? (
+                              <Stack spacing={1}>
+                                {[0, 1].map((item) => (
+                                  <Paper key={item} variant="outlined" sx={{ p: 1.5, borderRadius: 1 }}>
+                                    <Stack spacing={0.75}>
+                                      <Box sx={{ width: '52%', height: 10, borderRadius: 999, bgcolor: alpha(theme.palette.text.primary, 0.08) }} />
+                                      <Box sx={{ width: '78%', height: 9, borderRadius: 999, bgcolor: alpha(theme.palette.text.primary, 0.05) }} />
+                                    </Stack>
+                                  </Paper>
+                                ))}
+                              </Stack>
+                            ) : null}
+
+                            {!isSocialAppsTabLoading && socialApps.length === 0 ? (
+                              <Paper variant="outlined" sx={{ p: 2, borderRadius: 1, textAlign: 'center' }}>
+                                <Typography variant="body1" sx={{ fontWeight: 600 }}>
+                                  No has subido apps a Social
+                                </Typography>
+                                <Typography variant="body2" color="text.secondary">
+                                  Usa Subir a Social desde una app tuya para crear un código compartible.
+                                </Typography>
+                              </Paper>
+                            ) : null}
+
+                            {!isSocialAppsTabLoading && socialApps.length > 0 ? (
+                              <List disablePadding sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                                {socialApps.map((app) => (
+                                  <Paper key={app.id} variant="outlined" sx={{ p: 1.5, borderRadius: 1 }}>
+                                    <Stack spacing={1}>
+                                      <Stack direction="row" spacing={1} alignItems="flex-start">
+                                        <Avatar sx={{ width: 40, height: 40 }}>
+                                          {app.name.slice(0, 1).toUpperCase()}
+                                        </Avatar>
+                                        <Stack spacing={0.4} sx={{ flex: 1, minWidth: 0 }}>
+                                          <Stack direction="row" spacing={0.75} alignItems="center" useFlexGap flexWrap="wrap">
+                                            <Typography variant="body1" sx={{ fontWeight: 700 }} noWrap>
+                                              {app.name}
+                                            </Typography>
+                                            <Chip size="small" label="Tuya" color="primary" variant="outlined" />
+                                            <Chip size="small" label={app.visibility === 'public' ? 'Publica' : app.visibility === 'friends' ? 'Amigos' : 'Privada'} variant="outlined" />
+                                          </Stack>
+                                          <Typography variant="body2" color="text.secondary" noWrap>
+                                            {app.shortDescription || app.description || 'App compartida desde Forger Social'}
+                                          </Typography>
+                                          <Typography variant="caption" color="text.secondary" noWrap>
+                                            Version {app.latestVersion?.version ?? '-'} · {formatBytes(app.latestVersion?.fileSizeBytes)} · {app.latestVersion?.checksumSha256 ? `SHA-256 ${app.latestVersion.checksumSha256.slice(0, 12)}` : 'Sin checksum visible'}
+                                          </Typography>
+                                        </Stack>
+                                      </Stack>
+                                    </Stack>
+                                  </Paper>
+                                ))}
+                              </List>
                             ) : null}
                           </Stack>
                         ) : (

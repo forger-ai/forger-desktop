@@ -114,6 +114,26 @@ export interface AppPromptReviewInput {
   effort?: AgentEffort | null;
 }
 
+export interface AppPromptTestInput {
+  appId: string;
+  kind: AppPromptReviewKind;
+  id: string;
+  prompt?: string;
+  variables?: Record<string, unknown>;
+}
+
+export interface AppPromptTestResult {
+  success: boolean;
+  valid: boolean;
+  errors: string[];
+  technicalCode?: string;
+  renderedPrompt?: string;
+  declaredVariables: string[];
+  usedVariables: string[];
+  missingVariables: string[];
+  extraVariables: string[];
+}
+
 export interface AppPromptRestoreInput {
   appId: string;
   kind: AppPromptReviewKind;

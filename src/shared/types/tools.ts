@@ -5,6 +5,7 @@ export type AgentToolId =
   | 'forger_list_installed_apps'
   | 'forger_check_updates'
   | 'forger_list_app_prompts'
+  | 'forger_test_app_prompt'
   | 'forger_update_app_prompt'
   | 'forger_restore_app_prompt'
   | 'memory_list'

@@ -32,6 +32,28 @@ test('parseForgerUrl rejects non-Forger URLs and preserves unknown Forger links'
   });
 });
 
+test('parseForgerUrl returns Social app and profile deep links', () => {
+  assert.deepEqual(parseForgerUrl('forger://social/app?code=%20ABC123%20'), {
+    kind: 'social-app',
+    code: 'ABC123',
+    id: null,
+    raw: 'forger://social/app?code=%20ABC123%20',
+  });
+
+  assert.deepEqual(parseForgerUrl('forger://social/app?id=42'), {
+    kind: 'social-app',
+    code: null,
+    id: '42',
+    raw: 'forger://social/app?id=42',
+  });
+
+  assert.deepEqual(parseForgerUrl('forger://social/profile?username=%40ana'), {
+    kind: 'social-profile',
+    username: 'ana',
+    raw: 'forger://social/profile?username=%40ana',
+  });
+});
+
 test('extractDeepLinkFromArgv returns the first valid Forger link candidate', () => {
   assert.equal(extractDeepLinkFromArgv(['node', '.', 'https://example.com']), null);
   assert.equal(extractDeepLinkFromArgv(['node', '.', 42, 'forger://chat?app=finance-os']).app, 'finance-os');

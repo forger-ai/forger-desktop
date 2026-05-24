@@ -10,9 +10,10 @@ import type { AppSecretsState, UserSecretSummary, CreateUserSecretInput, UpdateU
 import type { Settings, UpdateCodexDefaultsInput, UpdateAgentDefaultsInput, MemoryListInput, MemoryEntry, MemoryCreateInput, MemoryUpdateInput } from './settings';
 import type { DesktopUpdateState } from './updates';
 import type { ForgerAccountSession, ForgerAccountRegisterInput, ForgerAccountLoginInput, ForgerAccountProfileInput, CloudDevicesState } from './account';
-import type { FriendChatWindowOpenResult, CloudFriendship, CloudFriendUser, CloudMessage, CloudSendMessageInput, CloudAppMessagePermissionDecision, CloudSocialEvent, CloudIdentityState } from './social';
+import type { FriendChatWindowOpenResult, CloudFriendship, CloudFriendUser, CloudMessage, CloudSendMessageInput, CloudAppMessagePermissionDecision, CloudSocialEvent, CloudIdentityState, SocialUserApp, SocialUserAppDownload, SocialUserAppList, SocialUserAppShare, SocialUserAppUploadInput } from './social';
 import type { AppRatingSummary, SubmitAppRatingInput, SubmitProductFeedbackInput } from './feedback';
 import type { SubmitUsageEventInput, SubmitUsageEventResult } from './usage-events';
+import type { ConversationDiagnosticReportPreview, PrepareConversationDiagnosticReportInput, SubmitConversationDiagnosticReportResult } from './diagnostics';
 import type { FailureDiagnosticFields } from './base';
 import type { CodexAuthStatus, ClaudeAuthStatus, DesktopErrorReportPreview } from './auth';
 import type { AgentToolPackageDefinition, AgentToolSettings, UpdateAgentToolApprovalInput, OfficialToolsState, ToolMutationResult, ConfigureOfficialToolInput, AppToolsInstallGate, SetAppToolGrantInput } from './tools';
@@ -80,6 +81,11 @@ export interface ForgerDesktopApi {
   getCloudDevices: () => Promise<CloudDevicesState>;
   generateDevicePairingCode: () => Promise<CloudDevicesState & { success: boolean }>;
   listFriends: () => Promise<CloudFriendship[]>;
+  listMySocialApps: () => Promise<SocialUserAppList>;
+  uploadSocialApp: (input: SocialUserAppUploadInput) => Promise<{ success: boolean; app?: SocialUserApp; share?: SocialUserAppShare; userMessage?: string; technicalCode?: string }>;
+  createSocialAppShare: (userAppId: number) => Promise<SocialUserAppShare>;
+  resolveSocialCode: (code: string) => Promise<{ app: SocialUserApp; share?: Record<string, unknown> }>;
+  installSocialApp: (input: { versionId: number; shareCode?: string; trustDecision?: 'not_reviewed' | 'reviewed' | 'skipped_review' }) => Promise<{ success: boolean; userMessage?: string; download?: SocialUserAppDownload; technicalCode?: string }>;
   searchFriends: (username: string) => Promise<CloudFriendUser[]>;
   sendFriendRequest: (username: string) => Promise<CloudFriendship>;
   acceptFriendRequest: (id: number) => Promise<CloudFriendship>;
@@ -107,6 +113,8 @@ export interface ForgerDesktopApi {
   connectClaudeAuth: () => Promise<{ success: boolean; userMessage: string; status?: ClaudeAuthStatus } & FailureDiagnosticFields>;
   reinstallClaude: () => Promise<{ success: boolean; userMessage: string; status?: ClaudeAuthStatus } & FailureDiagnosticFields>;
   submitDesktopErrorReport: (input: DesktopErrorReportPreview) => Promise<{ success: boolean; userMessage: string; technicalCode?: string }>;
+  prepareConversationDiagnosticReport: (input: PrepareConversationDiagnosticReportInput) => Promise<ConversationDiagnosticReportPreview>;
+  submitConversationDiagnosticReport: (input: ConversationDiagnosticReportPreview) => Promise<SubmitConversationDiagnosticReportResult>;
   onDesktopErrorReportRequested: (listener: (event: DesktopErrorReportPreview) => void) => () => void;
   listAgentTools: () => Promise<AgentToolPackageDefinition[]>;
   getAgentToolSettings: () => Promise<AgentToolSettings>;
@@ -175,6 +183,17 @@ export type ForgerDeepLink =
       /** Composer text to prefill, when provided by the URL. */
       prompt: string | null;
       /** The raw URL, for logging / debugging. */
+      raw: string;
+    }
+  | {
+      kind: 'social-app';
+      code: string | null;
+      id: string | null;
+      raw: string;
+    }
+  | {
+      kind: 'social-profile';
+      username: string | null;
       raw: string;
     }
   | {
