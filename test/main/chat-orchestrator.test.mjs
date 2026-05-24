@@ -1423,6 +1423,7 @@ test('chat external permissions resolve, audit duplicates, and cancellation clea
       risk: 'low',
       reason: 'Should be rejected.',
     }), false);
+    await new Promise((resolve) => setTimeout(resolve, 300));
   } finally {
     await harness.cleanup();
   }
