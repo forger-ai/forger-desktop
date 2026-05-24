@@ -28,6 +28,8 @@ const {
   buildForgerOfficialToolsPromptSection,
 } = require('../../dist-electron/main/prompt-builder/official-tools.js');
 const {
+  bulletList,
+  optionalSection,
   promptTemplateRoots,
   renderPromptFile,
   renderTemplate,
@@ -349,6 +351,56 @@ test('official tool skill templates and seed data keep expected Desktop defaults
   assert.equal(settingsSeed.safeMode, true);
   assert.equal(settingsSeed.defaultAgentProvider, 'auto');
   assert.equal(settingsSeed.agentDefaults.codex.model, settingsSeed.codexDefaults.model);
+});
+
+test('prompt template helpers resolve configured roots and validate paths', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forger-prompt-roots-'));
+  const envRoot = path.join(root, 'env-prompts');
+  const resourcesRoot = path.join(root, 'resources');
+  const previousEnvRoot = process.env.FORGER_DESKTOP_PROMPTS_ROOT;
+  const previousResourcesPath = process.resourcesPath;
+  try {
+    await fs.mkdir(path.join(envRoot, 'custom'), { recursive: true });
+    await fs.mkdir(path.join(resourcesRoot, 'prompt-builder', 'prompts', 'resource'), { recursive: true });
+    await fs.writeFile(path.join(envRoot, 'custom', 'hello.md'), 'Hello {{ name }}\r\n', 'utf8');
+    await fs.writeFile(path.join(resourcesRoot, 'prompt-builder', 'prompts', 'resource', 'fallback.md'), 'Resource {{value}}', 'utf8');
+
+    process.env.FORGER_DESKTOP_PROMPTS_ROOT = envRoot;
+    Object.defineProperty(process, 'resourcesPath', {
+      configurable: true,
+      value: resourcesRoot,
+    });
+
+    assert.ok(promptTemplateRoots().includes(envRoot));
+    assert.ok(promptTemplateRoots().includes(path.join(resourcesRoot, 'prompt-builder', 'prompts')));
+    assert.equal(resolvePromptTemplatePath('/custom/hello.md'), path.join(envRoot, 'custom', 'hello.md'));
+    assert.equal(renderPromptFile('custom/hello.md', { name: 'Forger' }), 'Hello Forger');
+    assert.equal(renderPromptFile('resource/fallback.md', { value: 42 }), 'Resource 42');
+    assert.equal(renderTemplate('A\r\n{{x}}\n', { x: null }, { trim: false }), 'A\n\n');
+    assert.equal(optionalSection('  body  ', 'prefix:'), 'prefix:body');
+    assert.equal(optionalSection('   ', 'prefix:'), '');
+    assert.equal(bulletList(['- one'], '- empty'), '- one');
+    assert.equal(bulletList([], '- empty'), '- empty');
+    assert.throws(() => resolvePromptTemplatePath('../secret.md'), /prompt_template_path_invalid/);
+    assert.throws(() => resolvePromptTemplatePath('missing.md'), /prompt_template_not_found/);
+    assert.throws(() => renderTemplate('{{ required }}', { required: 'yes', 'required:other': true }), /prompt_template_required_unused/);
+    assert.throws(() => renderTemplate('{{ missing }}', {}), /prompt_template_variable_missing:missing/);
+  } finally {
+    if (previousEnvRoot === undefined) {
+      delete process.env.FORGER_DESKTOP_PROMPTS_ROOT;
+    } else {
+      process.env.FORGER_DESKTOP_PROMPTS_ROOT = previousEnvRoot;
+    }
+    if (previousResourcesPath === undefined) {
+      delete process.resourcesPath;
+    } else {
+      Object.defineProperty(process, 'resourcesPath', {
+        configurable: true,
+        value: previousResourcesPath,
+      });
+    }
+    await fs.rm(root, { recursive: true, force: true });
+  }
 });
 
 test('prompt builder renders markdown templates strictly and exposes package roots', () => {

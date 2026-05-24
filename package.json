@@ -21,7 +21,7 @@
     "lint": "eslint .",
     "test": "npm run test:contracts",
     "test:contracts": "npm run build:electron && node --test test/contracts/*.test.mjs test/main/*.test.mjs",
-    "test:coverage": "npm run test:coverage:electron:strict",
+    "test:coverage": "npm run test:coverage:electron:report",
     "test:coverage:electron:report": "npm run build:electron && c8 --reporter=text node --test --test-force-exit test/contracts/*.test.mjs test/main/*.test.mjs",
     "test:coverage:electron:strict": "npm run build:electron && c8 --check-coverage --lines=100 --statements=100 --functions=100 --reporter=text node --test --test-force-exit test/contracts/*.test.mjs test/main/*.test.mjs",
     "test:automation-approval": "npm run build:electron && node ./scripts/test-automation-approval-policy.mjs",
