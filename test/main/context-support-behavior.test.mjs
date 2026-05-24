@@ -46,6 +46,7 @@ test('context support writes global AGENTS and official tool skills into metadat
   assert.ok(skillDirs.includes('forger-gmail'));
   assert.ok(skillDirs.includes('forger-manifest-authoring'));
   assert.ok(skillDirs.includes('forger-desktop-runtime-bridge'));
+  assert.ok(skillDirs.includes('forger-localization'));
   assert.ok(skillDirs.includes('forger-app-design-guidelines'));
   assert.ok(skillDirs.includes('forger-installed-app-change'));
   assert.ok(skillDirs.includes('forger-python-backend'));

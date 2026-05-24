@@ -793,6 +793,13 @@ export const registerMainLifecycle = (deps: unknown) => {
         claude,
       };
     },
+    getAppContext: (appId: string) => {
+      const running = runningApps.get(appId);
+      return {
+        locale: running?.locale ?? 'es',
+        rawLocale: running?.rawLocale ?? null,
+      };
+    },
     renderManifestAgentPrompt,
     resolveInstalledAgents,
     appendInstallLog,

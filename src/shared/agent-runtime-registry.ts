@@ -227,6 +227,59 @@ export const runtimeFromDefaults = (defaults: AgentDefaults = DEFAULT_AGENT_DEFA
   effort: defaults.codex.reasoningEffort,
 });
 
+export interface DefaultAgentRuntimeInput {
+  codexAuthenticated?: boolean;
+  claudeAuthenticated?: boolean;
+  defaultProvider?: AgentProviderPreference;
+  defaults?: AgentDefaults;
+  providerConnections?: Partial<Record<AgentProvider, string | undefined>>;
+}
+
+export const chooseDefaultAgentProvider = ({
+  codexAuthenticated,
+  claudeAuthenticated,
+  defaultProvider = DEFAULT_AGENT_PROVIDER,
+  providerConnections = {},
+}: DefaultAgentRuntimeInput = {}): AgentProvider => {
+  const connected: AgentProvider[] = [
+    ...(codexAuthenticated ? ['codex' as const] : []),
+    ...(claudeAuthenticated ? ['claude' as const] : []),
+  ];
+  const preferred = normalizeAgentProviderPreference(defaultProvider);
+  if (connected.length === 0) {
+    return preferred === 'auto' ? 'codex' : preferred;
+  }
+  if (connected.length === 1) {
+    return connected[0];
+  }
+  if (preferred !== 'auto' && connected.includes(preferred)) {
+    return preferred;
+  }
+  const sorted = connected
+    .map((provider) => ({ provider, connectedAt: providerConnections[provider] }))
+    .filter((entry): entry is { provider: AgentProvider; connectedAt: string } => Boolean(entry.connectedAt))
+    .sort((left, right) => Date.parse(left.connectedAt) - Date.parse(right.connectedAt));
+  return sorted[0]?.provider ?? 'codex';
+};
+
+export const runtimeFromDefaultsForProvider = (
+  provider: AgentProvider,
+  defaults: AgentDefaults = DEFAULT_AGENT_DEFAULTS,
+): AgentRuntime => provider === 'claude'
+  ? {
+      provider,
+      model: normalizeClaudeModel(defaults.claude.model, DEFAULT_CLAUDE_MODEL),
+      effort: normalizeClaudeEffort(defaults.claude.effort, DEFAULT_CLAUDE_EFFORT),
+    }
+  : {
+      provider,
+      model: normalizeCodexModel(defaults.codex.model, DEFAULT_CODEX_MODEL),
+      effort: normalizeCodexReasoningEffort(defaults.codex.reasoningEffort, DEFAULT_CODEX_REASONING_EFFORT),
+    };
+
+export const runtimeFromUserDefaults = (input: DefaultAgentRuntimeInput = {}): AgentRuntime =>
+  runtimeFromDefaultsForProvider(chooseDefaultAgentProvider(input), input.defaults ?? DEFAULT_AGENT_DEFAULTS);
+
 export const agentRuntimeEquals = (left?: AgentRuntime | null, right?: AgentRuntime | null): boolean =>
   Boolean(left && right && left.provider === right.provider && left.model === right.model && left.effort === right.effort);
 

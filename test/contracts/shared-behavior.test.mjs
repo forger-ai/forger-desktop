@@ -331,6 +331,53 @@ test('agent runtime registry normalizes providers, defaults, fallbacks, and runt
     model: 'gpt-5.2',
     effort: 'none',
   });
+  assert.deepEqual(runtimeRegistry.runtimeFromUserDefaults({
+    codexAuthenticated: true,
+    claudeAuthenticated: true,
+    defaultProvider: 'claude',
+    defaults: {
+      codex: { model: 'gpt-5.3-codex', reasoningEffort: 'low' },
+      claude: { model: 'opus', effort: 'max' },
+    },
+    providerConnections: {
+      codex: '2026-05-20T00:00:00.000Z',
+      claude: '2026-05-21T00:00:00.000Z',
+    },
+  }), {
+    provider: 'claude',
+    model: 'opus',
+    effort: 'max',
+  });
+  assert.deepEqual(runtimeRegistry.runtimeFromUserDefaults({
+    codexAuthenticated: true,
+    claudeAuthenticated: true,
+    defaultProvider: 'auto',
+    defaults: {
+      codex: { model: 'gpt-5.3-codex', reasoningEffort: 'low' },
+      claude: { model: 'sonnet', effort: 'high' },
+    },
+    providerConnections: {
+      codex: '2026-05-21T00:00:00.000Z',
+      claude: '2026-05-20T00:00:00.000Z',
+    },
+  }), {
+    provider: 'claude',
+    model: 'sonnet',
+    effort: 'high',
+  });
+  assert.deepEqual(runtimeRegistry.runtimeFromUserDefaults({
+    codexAuthenticated: false,
+    claudeAuthenticated: true,
+    defaultProvider: 'codex',
+    defaults: {
+      codex: { model: 'gpt-5.3-codex', reasoningEffort: 'low' },
+      claude: { model: 'opus', effort: 'max' },
+    },
+  }), {
+    provider: 'claude',
+    model: 'opus',
+    effort: 'max',
+  });
   assert.equal(runtimeRegistry.resolveRuntimeSource(undefined, { provider: 'codex', model: 'gpt-5.5' }), 'override');
   assert.equal(runtimeRegistry.resolveRuntimeSource({ provider: 'claude', model: 'sonnet' }, undefined), 'manifest');
   assert.equal(runtimeRegistry.resolveRuntimeSource(undefined, undefined), 'global');

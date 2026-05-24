@@ -2,6 +2,7 @@ import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import type http from 'node:http';
 
 import type { AppBackupSummary, AppCategory, AppStatus, VersionChangelog } from '../../shared/types';
+import type { Locale } from '../../shared/i18n';
 
 export interface InstalledAppRecord {
   appId: string;
@@ -50,6 +51,8 @@ export interface RunningAppProcess {
   frontendUrl: string;
   rawFrontendUrl: string;
   proxyServer: http.Server;
+  locale?: Locale;
+  rawLocale?: string | null;
 }
 
 export interface AppManifestService {

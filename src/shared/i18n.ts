@@ -95,6 +95,9 @@ export const sharedCopy = {
       undoFailed: 'No pudimos deshacer el cambio.',
       updateConflictTitle: 'Actualización combinada',
       autoUpdateNoChanges: 'Revisé la app y no encontré cambios que guardar. Si quieres, dime qué ajustar visualmente o qué flujo esperas cambiar.',
+      progress: {
+        editingFiles: 'Codex está editando archivos de la app.',
+      },
       failures: {
         authMissing: 'Primero conecta Codex en Ajustes para usar Chat con cambios reales.',
         appNotInstalled: 'La app objetivo no está instalada en tu workspace privado.',
@@ -250,6 +253,9 @@ export const sharedCopy = {
       undoFailed: 'Could not undo the change.',
       updateConflictTitle: 'Update combined',
       autoUpdateNoChanges: 'I reviewed the app and did not find changes to save. Tell me what visual detail or flow you want adjusted.',
+      progress: {
+        editingFiles: 'Codex is editing app files.',
+      },
       failures: {
         authMissing: 'Connect Codex in Settings first to use Chat with real changes.',
         appNotInstalled: 'The target app is not installed in your private workspace.',

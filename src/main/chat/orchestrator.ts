@@ -35,7 +35,6 @@ import {
   applyPreviewChanges,
   buildAutoAppliedUserMessage,
   buildFunctionalOperationSummary,
-  classifyForgerTask,
   createChatError,
   ensureGitRepository,
   ensureUserModifiedBranch,
@@ -105,6 +104,7 @@ interface InternalChatRun extends ChatRun {
   provider: AgentProvider;
   effort: AgentEffort;
   taskType: ForgerTaskType;
+  startedWithUpdateConflict: boolean;
   locale: Locale;
   conversationHistory: ChatHistoryMessage[];
   child?: ChildProcessWithoutNullStreams;
@@ -124,6 +124,9 @@ interface AppThreadState {
   toolEvents: number;
   lastRunAt: string;
 }
+
+const hasUnmergedGitStatus = (status: string[]): boolean =>
+  status.some((line) => /^(AA|DD|DU|UD|UA|AU|UU)\s/.test(line));
 
 export class ChatOrchestrator {
   private readonly runs = new Map<string, InternalChatRun>();
@@ -163,8 +166,8 @@ export class ChatOrchestrator {
     const now = new Date().toISOString();
 
     const sharedRoots = await this.resolveSharedRoots(input.sharedFiles ?? []);
-    const taskType = isFreeChat ? 'resolver_dudas' : classifyForgerTask(input.prompt);
-    const baseHead = taskType === 'actualizar_aplicacion' ? await getGitHead(appRoot) : null;
+    const taskType: ForgerTaskType = 'chat';
+    const baseHead = null;
     const locale = normalizeLocale(input.userLanguage);
     const runtime = await this.options.getAgentRuntime({
       provider: input.provider,
@@ -198,6 +201,7 @@ export class ChatOrchestrator {
       provider: runtime.provider,
       effort: runtime.effort,
       taskType,
+      startedWithUpdateConflict: false,
       locale,
       conversationId: typeof input.conversationId === 'string' ? input.conversationId : undefined,
       conversationHistory: normalizeChatHistory(input.conversationHistory),
@@ -507,12 +511,14 @@ export class ChatOrchestrator {
       const codexPathEntries = await this.options.getCodexPathEntries(run.appId);
       const codexEnvironment = await this.options.getCodexEnvironment(run.appId);
       const networkAccess = await (this.options.getAgentNetworkAccess?.(run.appId) ?? Promise.resolve(false));
-      if (run.taskType === 'actualizar_aplicacion') {
+      if (run.appId !== 'forger') {
         await ensureGitRepository(run.appRoot);
-        await ensureUserModifiedBranch(run.appRoot);
-        run.baseHead = await getGitHead(run.appRoot);
-      } else if (run.taskType === 'resolver_conflicto_actualizacion') {
-        await ensureGitRepository(run.appRoot);
+        const statusBeforeRun = await getGitStatus(run.appRoot);
+        run.startedWithUpdateConflict = hasUnmergedGitStatus(statusBeforeRun);
+        if (!run.startedWithUpdateConflict) {
+          await ensureUserModifiedBranch(run.appRoot);
+          run.baseHead = await getGitHead(run.appRoot);
+        }
       }
 
       if (run.status === 'canceled') {
@@ -586,7 +592,7 @@ export class ChatOrchestrator {
             return;
           }
           void appendRunLog(run.runLogPath, stream, text);
-          const steps = toProgressMessages(stream, text);
+          const steps = toProgressMessages(stream, text, run.locale);
           if (steps.length > 0) {
             run.progressLog = [...(run.progressLog ?? []), ...steps].slice(-40);
             run.updatedAt = new Date().toISOString();
@@ -652,10 +658,15 @@ export class ChatOrchestrator {
         assistantReply.usageDelta,
         assistantReply.toolEvents,
       );
-      if (run.taskType === 'resolver_conflicto_actualizacion') {
+      let auditType = 'chat_reply';
+      const finalStatus = run.appId === 'forger' ? [] : await getGitStatus(run.appRoot);
+      const hasUnmergedFiles = hasUnmergedGitStatus(finalStatus);
+      if (run.startedWithUpdateConflict || hasUnmergedFiles) {
         await this.finalizeUpdateConflictResolution(run, assistantReply.assistantText);
-      } else if (run.taskType === 'actualizar_aplicacion') {
+        auditType = 'update_conflict_resolved';
+      } else if (finalStatus.length > 0) {
         await this.finalizeAutoAppliedUpdate(run, assistantReply.assistantText);
+        auditType = 'chat_update_auto_applied';
       } else {
         run.status = 'preview_ready';
         run.updatedAt = new Date().toISOString();
@@ -664,12 +675,7 @@ export class ChatOrchestrator {
       }
 
       await this.auditLogger.log({
-        type:
-          run.taskType === 'resolver_conflicto_actualizacion'
-            ? 'update_conflict_resolved'
-            : run.taskType === 'actualizar_aplicacion'
-              ? 'chat_update_auto_applied'
-              : 'chat_reply',
+        type: auditType,
         runId: run.runId,
         appId: run.appId,
         replyLength: assistantReply.assistantText.length,
@@ -751,7 +757,7 @@ export class ChatOrchestrator {
 
   private async finalizeUpdateConflictResolution(run: InternalChatRun, assistantText: string): Promise<void> {
     const status = await getGitStatus(run.appRoot);
-    const hasUnmerged = status.some((line) => /^(AA|DD|DU|UD|UA|AU|UU)\s/.test(line));
+    const hasUnmerged = hasUnmergedGitStatus(status);
     if (hasUnmerged) {
       throw createChatError('conflict', 'merge_conflicts_remain');
     }

@@ -64,6 +64,11 @@ const forgerSkillDefinitions: ForgerSkillDefinition[] = [
   },
   {
     group: 'forger',
+    id: 'forger-localization',
+    description: 'Use Forger locale context correctly and keep visible app copy localizable.',
+  },
+  {
+    group: 'forger',
     id: 'forger-automations',
     description: 'Understand scheduled Forger automations for repetitive app-aware agent work.',
   },

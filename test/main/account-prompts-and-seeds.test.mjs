@@ -314,6 +314,7 @@ test('official tool skill templates and seed data keep expected Desktop defaults
     'forger-permissions',
     'forger-manifest-authoring',
     'forger-desktop-runtime-bridge',
+    'forger-localization',
     'forger-automations',
     'forger-secrets',
     'forger-agents',
@@ -348,6 +349,10 @@ test('official tool skill templates and seed data keep expected Desktop defaults
   assert.match(bridgeSkill.body, /start_agent_task/);
   assert.match(bridgeSkill.body, /create_agent_thread/);
   assert.match(bridgeSkill.body, /Finance OS is the reference pattern/);
+  const localizationSkill = templates.find((template) => template.id === 'forger-localization');
+  assert.ok(localizationSkill);
+  assert.match(localizationSkill.body, /\/api\/forger\/context/);
+  assert.match(localizationSkill.body, /window\.forgerApp/);
   assert.equal(installedAppsSeed.length, 2);
   assert.equal(catalogAppsSeed.some((app) => app.id === 'finance-os'), true);
   assert.equal(settingsSeed.safeMode, true);

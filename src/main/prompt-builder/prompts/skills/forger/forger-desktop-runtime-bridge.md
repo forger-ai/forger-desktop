@@ -8,6 +8,7 @@ description: Call Forger Desktop prompt templates and manifest agents from a loc
 - Keep the frontend browser-safe. The frontend must call the app backend over normal HTTP routes; it must not call Desktop directly, use Electron APIs, read Desktop secrets, or depend on `window.forgerApp`.
 - The app backend owns validation, size limits, file preprocessing, argument shaping, error mapping, and calls to `forger_desktop.py`.
 - Forger Desktop injects `FORGER_DESKTOP_RUNTIME_URL`, `FORGER_DESKTOP_RUNTIME_APP_ID`, and `FORGER_DESKTOP_RUNTIME_SECRET` into app services. Do not hard-code or expose those values.
+- App locale/context also travels through this signed HTTP bridge. For stack apps, expose it to the frontend through the app backend route `GET /api/forger/context` and the shared locale module; do not revive `window.forgerApp`.
 - Treat this bridge as an internal app mechanism. Explain visible progress and results, not runtime URLs, signatures, routes, or secrets.
 
 ## Prompt Template Tasks

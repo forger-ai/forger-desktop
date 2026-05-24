@@ -52,6 +52,7 @@ export const isMissingProviderThreadError = (error: unknown): boolean => {
 export const toProgressMessages = (
   stream: 'stdout' | 'stderr' | 'meta',
   text: string,
+  locale?: string,
 ): string[] => {
   if (stream === 'meta') {
     return [];
@@ -77,6 +78,14 @@ export const toProgressMessages = (
     }
 
     const type = typeof entry.type === 'string' ? entry.type : '';
+    if (type === 'item.started' && entry.item && typeof entry.item === 'object') {
+      const item = entry.item as Record<string, unknown>;
+      const itemType = typeof item.type === 'string' ? item.type : '';
+      const command = typeof item.command === 'string' ? item.command : '';
+      if (itemType === 'command_execution' && looksLikeFileEditCommand(command)) {
+        mapped.push(getSharedCopy(locale).chat.progress.editingFiles);
+      }
+    }
     if (type === 'item.completed' && entry.item && typeof entry.item === 'object') {
       const item = entry.item as Record<string, unknown>;
       const itemType = typeof item.type === 'string' ? item.type : '';
@@ -94,6 +103,22 @@ export const toProgressMessages = (
   }
 
   return mapped.slice(-6);
+};
+
+const looksLikeFileEditCommand = (command: string): boolean => {
+  const compact = command.replace(/\s+/g, ' ').trim();
+  return [
+    /\bapply_patch\b/i,
+    /\bcat\s+(?:>|<<)/i,
+    /\btee\b/i,
+    /\bpython(?:3)?\b.*(?:write|Path\(|open\(|mkdir|makedirs)/i,
+    /\bnode\b.*(?:writeFile|mkdirSync)/i,
+    /\bsed\s+-i\b/i,
+    /\bperl\s+-pi\b/i,
+    /\bmkdir\s+-p\b/i,
+    /\btouch\b/i,
+    /\b(?:cp|mv|rm)\s+/i,
+  ].some((pattern) => pattern.test(compact));
 };
 
 export const getRunLogPath = (privateAppsRoot: string, runId: string): string => {

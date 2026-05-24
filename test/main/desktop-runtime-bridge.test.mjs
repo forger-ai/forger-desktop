@@ -67,6 +67,7 @@ const createBridge = async (options = {}) => {
     getConversationManager: options.getConversationManager ?? (() => null),
     getTaskManager: options.getTaskManager ?? (() => taskManager),
     getTaskStatus: options.getTaskStatus ?? (async () => ({ connected: true, codex: true, claude: false })),
+    getAppContext: options.getAppContext ?? (() => ({ locale: 'en', rawLocale: 'en-US' })),
     resolveInstalledAgents: options.resolveInstalledAgents ?? (async () => [{ id: 'analyst', title: 'Analyst', prompts: {} }]),
     renderManifestAgentPrompt: options.renderManifestAgentPrompt ?? (({ kind, variables }) => `${kind}:${variables?.topic ?? 'default'}`),
     appendInstallLog: async (event, payload) => options.logs?.push([event, payload]),
@@ -186,6 +187,41 @@ test('desktop runtime task status reports unavailable without a task manager', a
     const { response, payload } = await request(harness.bridge, `/v1/apps/${APP_ID}/agent-tasks/status`);
     assert.equal(response.status, 200);
     assert.deepEqual(payload, { available: false, appId: APP_ID, connected: false });
+  } finally {
+    await harness.stop();
+  }
+});
+
+test('desktop runtime app context reports signed locale and rejects unsupported methods', async () => {
+  const harness = await createBridge();
+  try {
+    const path = `/v1/apps/${APP_ID}/context`;
+    const { response, payload } = await request(harness.bridge, path);
+    assert.equal(response.status, 200);
+    assert.deepEqual(payload, { locale: 'en', rawLocale: 'en-US' });
+
+    const wrongMethod = await request(harness.bridge, path, { method: 'POST', body: {} });
+    assert.equal(wrongMethod.response.status, 404);
+    assert.equal(wrongMethod.payload.error, 'desktop_runtime_route_not_found');
+  } finally {
+    await harness.stop();
+  }
+});
+
+test('desktop runtime app context normalizes missing locale fallback and app mismatch', async () => {
+  const harness = await createBridge({ getAppContext: () => ({ locale: 'fr-CA', rawLocale: '' }) });
+  try {
+    const path = `/v1/apps/${APP_ID}/context`;
+    const { payload } = await request(harness.bridge, path);
+    assert.deepEqual(payload, { locale: 'es', rawLocale: 'fr-CA' });
+
+    const mismatchPath = '/v1/apps/other-app/context';
+    harness.bridge.secrets.set('other-app', SECRET);
+    const mismatch = await request(harness.bridge, mismatchPath, {
+      headers: sign({ method: 'GET', path: mismatchPath, appId: APP_ID }),
+    });
+    assert.equal(mismatch.response.status, 403);
+    assert.equal(mismatch.payload.error, 'desktop_runtime_app_forbidden');
   } finally {
     await harness.stop();
   }

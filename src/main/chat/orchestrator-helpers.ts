@@ -17,6 +17,8 @@ export interface CodexMcpServerConfig {
 const getMcpApprovalMode = (server: CodexMcpServerConfig): 'auto' | 'approve' =>
   server.name === 'forger' ? 'auto' : 'approve';
 
+const CODEX_ATTEMPT_INACTIVITY_TIMEOUT_MS = 30 * 60 * 1000;
+
 interface PluginManifestV1 {
   id: string;
   version: string;
@@ -40,11 +42,7 @@ export interface ChatHistoryMessage {
 }
 
 export type ForgerTaskType =
-  | 'resolver_dudas'
-  | 'trabajar_datos'
-  | 'interactuar_con_aplicacion'
-  | 'actualizar_aplicacion'
-  | 'resolver_conflicto_actualizacion';
+  | 'chat';
 
 interface CommandResult {
   code: number;
@@ -288,7 +286,7 @@ export class SandboxRunner {
           ['exec', ...modelArgs, ...networkArgs, ...mcpArgs, ...commonArgs, params.prompt],
         ];
 
-    const attemptInactivityTimeoutMs = Math.max(45_000, Math.floor(params.timeoutMs / attempts.length));
+    const attemptInactivityTimeoutMs = CODEX_ATTEMPT_INACTIVITY_TIMEOUT_MS;
     let lastResult: CommandResult | null = null;
     let lastErrorMessage = '';
     const codexCommand = await this.resolveCodexCommand(params);
@@ -376,9 +374,12 @@ export class SandboxRunner {
       [lastResult?.stdout, lastErrorMessage].filter(Boolean).join('\n'),
       lastResult?.stderr ?? '',
     );
+    const timeoutFailure = /\btimed out(?:\s+due to inactivity)?\s+after\b|codex_timeout_after_/i.test(message);
     (error as Error & { chatCode?: ChatErrorCode }).chatCode = authFailure === 'codex_auth_expired'
       ? 'auth_missing'
-      : 'capability_unavailable';
+      : timeoutFailure
+        ? 'timeout'
+        : 'capability_unavailable';
     (error as Error & { parsedRun?: CodexRunResult }).parsedRun = {
       assistantText: parsed.assistantText,
       threadId: parsed.threadId,
@@ -763,27 +764,6 @@ const extractUserMessage = (prompt: string): string => {
     return prompt.trim();
   }
   return prompt.slice(markerMatch.index + markerMatch.marker.length).trim();
-};
-
-export const classifyForgerTask = (prompt: string): ForgerTaskType => {
-  const message = extractUserMessage(prompt).toLowerCase();
-  if (/\b(conflicto|conflict|merge)\b/.test(message) && /\b(actualizacion|actualización|update)\b/.test(message)) {
-    return 'resolver_conflicto_actualizacion';
-  }
-  if (
-    /\b(cambia|cambiar|modifica|modificar|actualiza|actualizar|agrega|agregar|anade|añade|quitar|quita|elimina|arregla|corrige|personaliza|ajusta|mejora|guarda|guardar|boton|botón|pantalla|vista|flujo|formulario|layout|diseno|diseño)\b/.test(
-      message,
-    )
-  ) {
-    return 'actualizar_aplicacion';
-  }
-  if (/\b(carga|cargar|importa|importar|datos|csv|excel|archivo|tabla|filas|registros|categorias|categorías)\b/.test(message)) {
-    return 'trabajar_datos';
-  }
-  if (/\b(abre|abrir|ejecuta|ejecutar|revisa en la app|usa la app|haz click|aprieta|navega)\b/.test(message)) {
-    return 'interactuar_con_aplicacion';
-  }
-  return 'resolver_dudas';
 };
 
 export const buildFunctionalOperationSummary = (assistantText: string): string => {

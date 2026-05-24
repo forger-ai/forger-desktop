@@ -11,7 +11,6 @@ const { ChatOrchestrator } = require('../../dist-electron/main/chat/orchestrator
 const {
   buildAutoAppliedUserMessage,
   buildFunctionalOperationSummary,
-  classifyForgerTask,
   ensureGitRepository,
   ensureUserModifiedBranch,
   applyPreviewChanges,
@@ -221,6 +220,7 @@ const assertPublicSerializableRun = (run) => {
     'reasoningEffort',
     'effort',
     'taskType',
+    'startedWithUpdateConflict',
     'locale',
     'conversationHistory',
   ]) {
@@ -436,6 +436,18 @@ test('chat helper functions normalize history, progress, stale errors, and publi
   assert.match(progress[1], /^Second/);
   assert.ok(progress[1].endsWith('...'));
   assert.deepEqual(toProgressMessages('meta', progress[0]), []);
+  assert.deepEqual(toProgressMessages('stdout', JSON.stringify({
+    type: 'item.started',
+    item: { type: 'command_execution', command: 'mkdir -p frontend/src/features/chessos' },
+  }), 'es'), ['Codex está editando archivos de la app.']);
+  assert.deepEqual(toProgressMessages('stdout', JSON.stringify({
+    type: 'item.started',
+    item: { type: 'command_execution', command: 'cat frontend/src/App.tsx' },
+  }), 'en'), []);
+  assert.deepEqual(toProgressMessages('stdout', JSON.stringify({
+    type: 'item.started',
+    item: { type: 'command_execution', command: "python - <<'PY'\nfrom pathlib import Path\nPath('x').write_text('y')\nPY" },
+  }), 'en'), ['Codex is editing app files.']);
 
   const internalRun = {
     runId: 'run-1',
@@ -819,14 +831,18 @@ test('chat error helpers normalize codes and localized failure messages', () => 
   assert.match(mapFailureMessage('capability_unavailable', 'provider failed without command keyword', '/tmp/run.log', 'en'), /provider failed/i);
 });
 
-test('chat helper text classifiers and summaries stay functional and bounded', () => {
-  assert.equal(classifyForgerTask('MENSAJE USUARIO: resuelve conflicto de actualización'), 'resolver_conflicto_actualizacion');
-  assert.equal(classifyForgerTask('USER MESSAGE: resolve merge update'), 'resolver_conflicto_actualizacion');
-  assert.equal(classifyForgerTask('Please improve the dashboard layout'), 'actualizar_aplicacion');
-  assert.equal(classifyForgerTask('Carga este CSV con categorias'), 'trabajar_datos');
-  assert.equal(classifyForgerTask('Abre la app, haz click y navega'), 'interactuar_con_aplicacion');
-  assert.equal(classifyForgerTask('Cambia el botón principal'), 'actualizar_aplicacion');
-  assert.equal(classifyForgerTask('Que hace esta app?'), 'resolver_dudas');
+test('chat helper text summaries stay functional and app chat prompt hides internal routing labels', async () => {
+  const appChatPrompt = await readFile(join(process.cwd(), 'src/main/prompt-builder/prompts/chat/app-chat-start.md'), 'utf8');
+  for (const internalLabel of [
+    'resolver_dudas',
+    'trabajar_datos',
+    'interactuar_con_aplicacion',
+    'actualizar_aplicacion',
+    'resolver_conflicto_actualizacion',
+  ]) {
+    assert.equal(appChatPrompt.includes(internalLabel), false, internalLabel);
+  }
+  assert.match(appChatPrompt, /Do not mention internal request types/);
   assert.equal(buildFunctionalOperationSummary(''), 'Se guardo una nueva version de la app.');
   assert.equal(buildFunctionalOperationSummary('Short summary'), 'Short summary');
   assert.equal(buildFunctionalOperationSummary('A'.repeat(200)).length, 180);
@@ -1252,6 +1268,10 @@ if (prompt.includes('disallowed mcp')) {
   console.log(JSON.stringify({ type: 'item.completed', item: { type: 'mcp_tool_call', server: 'gmail' } }));
   process.exit(0);
 }
+if (prompt.includes('timeout failure')) {
+  console.error('/tmp/codex timed out due to inactivity after 75000ms');
+  process.exit(1);
+}
 console.log(JSON.stringify({ type: 'thread.started', thread_id: 'partial-thread' }));
 console.log(JSON.stringify({ type: 'item.completed', item: { type: 'tool_call' } }));
 console.error('401 Unauthorized Failed to refresh token');
@@ -1351,6 +1371,23 @@ process.exit(2);
       return true;
     });
     assert.ok(outputEvents.some(([stream, text]) => stream === 'meta' && /Intento 5\/5/.test(text)));
+
+    await assert.rejects(() => runner.runCodex({
+      codexCliPath: fakeCodex,
+      pathEntries: [],
+      environment: {},
+      workingDir: root,
+      prompt: 'timeout failure',
+      model: 'gpt-test',
+      reasoningEffort: 'medium',
+      timeoutMs: 5_000,
+      onChild: () => undefined,
+      codexHome,
+    }), (error) => {
+      assert.equal(error.chatCode, 'timeout');
+      assert.match(error.message, /timed out due to inactivity/);
+      return true;
+    });
 
     const missingEvents = [];
     await assert.rejects(() => runner.runCodex({
@@ -1679,7 +1716,7 @@ test('chat orchestrator reports Codex auth and CLI setup failures before provide
   }
 });
 
-test('chat orchestrator dispatches update task finalizers from provider runs', async () => {
+test('chat orchestrator saves app versions only when provider runs change files', async () => {
   const harness = await createHarness();
   const appId = 'finance-os';
   const appRoot = join(harness.privateAppsRoot, appId);
@@ -1695,20 +1732,27 @@ test('chat orchestrator dispatches update task finalizers from provider runs', a
       conversationHistory: [{ role: 'user', content: 'Please improve the dashboard layout' }],
     });
     const updateRun = await waitForRun(harness.events, update.runId);
-    assert.equal(updateRun.status, 'applied');
+    assert.equal(updateRun.status, 'preview_ready');
 
-    await writeFile(join(appRoot, 'conflict.txt'), 'resolved\n', 'utf8');
-    await gitCommit(appRoot, 'seed conflict fixture');
-    await writeFile(join(appRoot, 'conflict.txt'), 'resolved by agent\n', 'utf8');
-    const conflict = await harness.orchestrator.startRun({
+    harness.orchestrator.sandboxRunner = {
+      async runCodex() {
+        await writeFile(join(appRoot, 'app.txt'), 'after\n', 'utf8');
+        return { assistantText: 'Changed the visible dashboard.', threadId: 'changed-thread', toolEvents: 0 };
+      },
+      async runClaude() {
+        throw new Error('not_used');
+      },
+    };
+    const changed = await harness.orchestrator.startRun({
       appId,
-      prompt: 'resuelve conflicto de actualización',
+      prompt: 'Please improve the dashboard layout',
       threadId: null,
-      conversationId: 'conversation-conflict-dispatch',
-      conversationHistory: [{ role: 'user', content: 'resuelve conflicto de actualización' }],
+      conversationId: 'conversation-auto-update-changed-files',
+      conversationHistory: [{ role: 'user', content: 'Please improve the dashboard layout' }],
     });
-    const conflictRun = await waitForRun(harness.events, conflict.runId);
-    assert.equal(conflictRun.status, 'applied');
+    const changedRun = await waitForRun(harness.events, changed.runId);
+    assert.equal(changedRun.status, 'applied');
+    assert.match(changedRun.userMessage, /Version guardada/);
   } finally {
     await harness.cleanup();
   }

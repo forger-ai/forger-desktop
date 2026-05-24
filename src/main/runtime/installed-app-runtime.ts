@@ -24,6 +24,7 @@ import type {
   RuntimeStatus,
   StopAppResult,
 } from '../../shared/types';
+import { normalizeLocale } from '../../shared/i18n';
 
 interface RuntimeDeps {
   FORGER_PROTOCOL: string;
@@ -283,6 +284,14 @@ const openOrFocusAppWindow = async (
   frontendUrl: string,
   locale?: string,
 ): Promise<void> => {
+  const rawRuntimeLocale = locale?.trim() || null;
+  if (rawRuntimeLocale) {
+    const running = runningApps.get(appId);
+    if (running) {
+      running.locale = normalizeLocale(rawRuntimeLocale);
+      running.rawLocale = rawRuntimeLocale;
+    }
+  }
   const localizedFrontendUrl = withAppLocale(frontendUrl, locale);
   const existing = appWindows.get(appId);
   if (existing && !existing.isDestroyed()) {
@@ -618,6 +627,8 @@ const openInstalledAppUnlocked = async (
   locale?: string,
   options: { openWindow?: boolean } = {},
 ): Promise<OpenAppResult> => {
+  const runtimeLocale = normalizeLocale(locale);
+  const rawRuntimeLocale = locale?.trim() || null;
   const shouldOpenWindow = options.openWindow !== false;
   const record = registry.apps[appId];
   if (!record || !record.installDir) {
@@ -871,6 +882,8 @@ const openInstalledAppUnlocked = async (
     frontendUrl,
     rawFrontendUrl,
     proxyServer: proxy.server,
+    locale: runtimeLocale,
+    rawLocale: rawRuntimeLocale,
   });
 
   try {

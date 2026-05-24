@@ -26,6 +26,7 @@ import {
 } from './app-agent/conversation-helpers';
 import type { ManifestAgentPromptKind } from './manifest-agent-prompts';
 import { REMOVED_FORGER_APP_BRIDGE_MESSAGE } from './ipc/agent-handlers';
+import { normalizeLocale } from '../shared/i18n';
 
 const MAX_BODY_BYTES = 96 * 1024 * 1024;
 const SIGNATURE_WINDOW_MS = 5 * 60 * 1000;
@@ -35,6 +36,7 @@ export interface DesktopRuntimeBridgeOptions {
   getConversationManager: () => AppAgentConversationManager | null;
   getTaskManager?: () => AppAgentTaskManager | null;
   getTaskStatus?: (appId: string) => Promise<Record<string, unknown>>;
+  getAppContext?: (appId: string) => { locale?: string | null; rawLocale?: string | null } | undefined;
   renderManifestAgentPrompt: (input: {
     agent: AppAgent;
     kind: ManifestAgentPromptKind;
@@ -218,6 +220,17 @@ export class DesktopRuntimeBridge {
   }
 
   private async route(appId: string, method: string, pathname: string, bodyText: string): Promise<unknown> {
+    const contextMatch = pathname.match(/^\/v1\/apps\/([^/]+)\/context$/);
+    if (contextMatch) {
+      if (decodeURIComponent(contextMatch[1]) !== appId) {
+        throw new BridgeError(403, 'desktop_runtime_app_forbidden');
+      }
+      if (method !== 'GET') {
+        throw new BridgeError(404, 'desktop_runtime_route_not_found');
+      }
+      return this.appContext(appId);
+    }
+
     const taskStatusMatch = pathname.match(/^\/v1\/apps\/([^/]+)\/agent-tasks\/status$/);
     if (taskStatusMatch) {
       if (decodeURIComponent(taskStatusMatch[1]) !== appId) {
@@ -385,6 +398,19 @@ export class DesktopRuntimeBridge {
     }
 
     throw new BridgeError(404, 'desktop_runtime_route_not_found');
+  }
+
+  private appContext(appId: string): { locale: 'es' | 'en'; rawLocale: string | null } {
+    const context = this.options.getAppContext?.(appId);
+    const rawLocale = typeof context?.rawLocale === 'string' && context.rawLocale.trim()
+      ? context.rawLocale.trim()
+      : typeof context?.locale === 'string' && context.locale.trim()
+        ? context.locale.trim()
+        : null;
+    return {
+      locale: normalizeLocale(context?.locale ?? rawLocale),
+      rawLocale,
+    };
   }
 
   private async renderManifestAgentPrompt(
