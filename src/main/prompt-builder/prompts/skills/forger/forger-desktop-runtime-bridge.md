@@ -26,9 +26,11 @@ description: Call Forger Desktop prompt templates and manifest agents from a loc
 
 ## Manifest Agent Threads
 - Use manifest agent threads for resumable coworkers declared in `manifest.agents`, such as advisors, reviewers, or orchestrators that continue across messages.
-- From the backend, import `create_agent_thread`, `start_agent_run`, `get_agent_thread`, `get_agent_run`, `cancel_agent_run`, and optionally `wait_for_run` from `app.forger_desktop`.
-- Create a thread with `create_agent_thread(title=..., manifest_agent_id="<manifest-agent-id>", initial_prompt=..., metadata=..., workspace_path=...)`.
-- Start work in that thread with `start_agent_run(desktop_thread_id=thread_id, message=..., context=..., workspace_path=...)`.
+- From the backend, import `start_manifest_agent_thread`, `resume_manifest_agent_thread`, `steer_manifest_agent_run`, `get_agent_thread`, `get_agent_run`, `cancel_agent_run`, and optionally `wait_for_run` from `app.forger_desktop`.
+- Start a manifest agent thread with `start_manifest_agent_thread(agent_id="<manifest-agent-id>", title=..., variables={...}, metadata=..., workspace_path=...)`. The `variables` object must match that agent's `prompts.initial.variables` declaration.
+- Resume a manifest agent thread with `resume_manifest_agent_thread(desktop_thread_id=thread_id, variables={...}, workspace_path=...)`. The `variables` object must match that agent's `prompts.resume.variables` declaration.
+- Steer an active manifest agent run with `steer_manifest_agent_run(desktop_thread_id=thread_id, desktop_run_id=run_id, variables={...}, workspace_path=...)`. The `variables` object must match that agent's `prompts.steer.variables` declaration.
+- Do not start new agent work with the removed freeform endpoints `POST /agent-threads` or `POST /agent-threads/{thread_id}/runs`. Those endpoints return a removed-bridge error in current Desktop builds.
 - Poll with `get_agent_run(thread_id, run_id)` and cancel with `cancel_agent_run(thread_id, run_id)`.
 - Store Desktop thread ids and run ids in app tables only when the app needs resumable visible state. Use explicit relational columns, not JSON blobs, unless the metadata is genuinely schemaless.
 - Keep app-owned data and app validations in the app backend. Desktop agent runs should call app MCP tools or app APIs to perform structured data changes instead of bypassing validations.
