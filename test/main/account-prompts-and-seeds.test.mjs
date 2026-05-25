@@ -383,7 +383,9 @@ test('official tool skill templates and seed data keep expected Desktop defaults
   assert.ok(bridgeSkill);
   assert.match(bridgeSkill.body, /commons\/backend\/forger_desktop\.py/);
   assert.match(bridgeSkill.body, /start_agent_task/);
-  assert.match(bridgeSkill.body, /create_agent_thread/);
+  assert.match(bridgeSkill.body, /start_manifest_agent_thread/);
+  assert.match(bridgeSkill.body, /resume_manifest_agent_thread/);
+  assert.match(bridgeSkill.body, /removed freeform endpoints/);
   assert.match(bridgeSkill.body, /Finance OS is the reference pattern/);
   assert.match(bridgeSkill.body, /Opening, launching, starting, running, or bringing up an installed app means using Forger Desktop app controls/);
   assert.match(bridgeSkill.body, /forger_get_app_runtime_status/);
