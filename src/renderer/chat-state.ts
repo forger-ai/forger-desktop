@@ -1,5 +1,9 @@
 import type { ChatMessage } from '@renderer/views/ChatView';
-import { normalizePersistedActiveChatRun, type PersistedActiveChatRun } from '@shared/chat-run-state';
+import {
+  normalizePersistedActiveChatRun,
+  normalizePersistedActiveChatRuns,
+  type PersistedActiveChatRun,
+} from '@shared/chat-run-state';
 import type { AgentEffort, AgentProvider } from '@shared/types';
 
 export const CHAT_STORAGE_KEY = 'forger-chat-conversations-v1';
@@ -23,14 +27,15 @@ export interface PersistedChatState {
   conversations: ChatConversation[];
   activeConversationByApp: Record<string, string>;
   lastActiveConversationId: string | null;
-  activeRun: PersistedActiveChatRun | null;
+  activeRuns: PersistedActiveChatRun[];
+  activeRun?: PersistedActiveChatRun | null;
 }
 
 const emptyPersistedChatState = (): PersistedChatState => ({
   conversations: [],
   activeConversationByApp: {},
   lastActiveConversationId: null,
-  activeRun: null,
+  activeRuns: [],
 });
 
 const migrateLegacyConversationRuntime = (conversation: ChatConversation): ChatConversation => {
@@ -62,6 +67,8 @@ export const readPersistedChatState = (): PersistedChatState => {
 
   try {
     const parsed = JSON.parse(raw) as Partial<PersistedChatState>;
+    const activeRuns = normalizePersistedActiveChatRuns(parsed.activeRuns);
+    const legacyActiveRun = normalizePersistedActiveChatRun(parsed.activeRun);
     return {
       conversations: Array.isArray(parsed.conversations)
         ? parsed.conversations.map(migrateLegacyConversationRuntime)
@@ -72,7 +79,7 @@ export const readPersistedChatState = (): PersistedChatState => {
           : {},
       lastActiveConversationId:
         typeof parsed.lastActiveConversationId === 'string' ? parsed.lastActiveConversationId : null,
-      activeRun: normalizePersistedActiveChatRun(parsed.activeRun),
+      activeRuns: activeRuns.length > 0 ? activeRuns : legacyActiveRun ? [legacyActiveRun] : [],
     };
   } catch {
     return emptyPersistedChatState();

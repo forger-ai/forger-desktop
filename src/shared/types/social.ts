@@ -93,6 +93,7 @@ export interface CloudIdentityState {
 
 export type SocialUserAppVisibility = 'public' | 'friends' | 'private' | 'restricted';
 export type SocialUserAppStatus = 'published' | 'suspended' | 'deleted';
+export type SocialUserAppUploadAttemptStatus = 'pending_upload' | 'uploaded' | 'analyzing' | 'failed' | 'published';
 export type SocialUserAppReviewState = 'not_reviewed' | 'reviewed' | 'skipped_review';
 
 export interface SocialUserProfile {
@@ -133,8 +134,30 @@ export interface SocialUserApp {
   reviewsCount?: number;
   commentsCount?: number;
   latestVersion?: SocialUserAppVersion;
+  uploadStatus?: SocialUserAppUploadAttemptStatus;
+  activeUploadAttempt?: SocialUserAppUploadAttempt;
   createdAt?: string;
   updatedAt?: string;
+}
+
+export interface SocialUserAppUploadAttempt {
+  id: number;
+  userAppId?: number;
+  slug: string;
+  status: SocialUserAppUploadAttemptStatus;
+  errorCode?: string;
+  checksumSha256?: string;
+  byteSize?: number;
+  zipEntryCount?: number;
+  expandedSizeBytes?: number;
+  manifestDigest?: string;
+  publishedVersion?: string;
+  analysisStartedAt?: string;
+  analysisFinishedAt?: string;
+  publishedAt?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  app?: SocialUserApp;
 }
 
 export interface SocialUserAppList {

@@ -67,6 +67,7 @@ export const enSections = {
       codexThinking: 'The agent is thinking...',
       newConversationTitle: 'New conversation',
       sendInProgress: 'I am still processing your previous message. Wait for the response or cancel that request.',
+      appRunInProgress: 'This app is already being worked on. You can keep using other apps or wait for the current response to finish.',
       sendFailed: (detail: string) => `I could not send your message to the agent. ${detail}`,
     },
     create: {

@@ -130,7 +130,8 @@ const hasUnmergedGitStatus = (status: string[]): boolean =>
 
 export class ChatOrchestrator {
   private readonly runs = new Map<string, InternalChatRun>();
-  private workspaceLockRunId: string | null = null;
+  private readonly activeRunIdsByConversation = new Map<string, string>();
+  private readonly activeRunIdsByApp = new Map<string, string>();
   private readonly pendingPermissions = new Map<string, PendingPermission>();
   private readonly completedPermissions = new Map<string, 'allow' | 'deny'>();
   private readonly threadsByApp = new Map<string, AppThreadState>();
@@ -152,14 +153,23 @@ export class ChatOrchestrator {
       throw new Error('invalid_chat_start_input');
     }
 
-    if (this.workspaceLockRunId) {
-      const error = new Error('another_run_in_progress');
+    const appId = input.appId?.trim() || 'forger';
+    const isFreeChat = appId === 'forger';
+    const conversationId = typeof input.conversationId === 'string' && input.conversationId.trim().length > 0
+      ? input.conversationId.trim()
+      : undefined;
+    const conversationLockKey = conversationId ? this.conversationLockKey(appId, conversationId) : null;
+    if (conversationLockKey && this.activeRunIdsByConversation.has(conversationLockKey)) {
+      const error = new Error('conversation_run_in_progress');
+      (error as Error & { chatCode?: ChatErrorCode }).chatCode = 'conflict';
+      throw error;
+    }
+    if (!isFreeChat && this.activeRunIdsByApp.has(appId)) {
+      const error = new Error('app_run_in_progress');
       (error as Error & { chatCode?: ChatErrorCode }).chatCode = 'conflict';
       throw error;
     }
 
-    const appId = input.appId?.trim() || 'forger';
-    const isFreeChat = appId === 'forger';
     const appRoot = isFreeChat ? this.options.forgerHomeRoot : path.join(this.options.privateAppsRoot, appId);
     const stagingDir = path.join(this.options.metadataRoot, 'staging', randomUUID());
     const runId = randomUUID();
@@ -203,12 +213,17 @@ export class ChatOrchestrator {
       taskType,
       startedWithUpdateConflict: false,
       locale,
-      conversationId: typeof input.conversationId === 'string' ? input.conversationId : undefined,
+      conversationId,
       conversationHistory: normalizeChatHistory(input.conversationHistory),
     };
 
     this.runs.set(runId, run);
-    this.workspaceLockRunId = runId;
+    if (conversationLockKey) {
+      this.activeRunIdsByConversation.set(conversationLockKey, runId);
+    }
+    if (!isFreeChat) {
+      this.activeRunIdsByApp.set(appId, runId);
+    }
     this.emitRun(run);
 
     void this.executeRun(runId);
@@ -243,9 +258,7 @@ export class ChatOrchestrator {
       }
     }
 
-    if (this.workspaceLockRunId === run.runId) {
-      this.workspaceLockRunId = null;
-    }
+    this.releaseRunLocks(run);
     return { success: true };
   }
 
@@ -708,9 +721,7 @@ export class ChatOrchestrator {
         this.options.releaseForgerMcpSession?.(forgerMcpSession.token);
       }
       this.options.releaseAppMcps?.(run.runId);
-      if (this.workspaceLockRunId === run.runId) {
-        this.workspaceLockRunId = null;
-      }
+      this.releaseRunLocks(run);
     }
   }
 
@@ -854,6 +865,22 @@ export class ChatOrchestrator {
     const publicRun = toPublicChatRun(run);
     void this.options.trace?.('chat_run_emit', buildChatRunTracePayload(publicRun));
     this.options.onRunUpdated({ run: publicRun });
+  }
+
+  private conversationLockKey(appId: string, conversationId: string): string {
+    return `${appId}:${conversationId}`;
+  }
+
+  private releaseRunLocks(run: InternalChatRun): void {
+    if (run.conversationId) {
+      const key = this.conversationLockKey(run.appId, run.conversationId);
+      if (this.activeRunIdsByConversation.get(key) === run.runId) {
+        this.activeRunIdsByConversation.delete(key);
+      }
+    }
+    if (run.appId !== 'forger' && this.activeRunIdsByApp.get(run.appId) === run.runId) {
+      this.activeRunIdsByApp.delete(run.appId);
+    }
   }
 
   private async resolveSharedRoots(sharedFiles: Array<{ path: string }>): Promise<string[]> {

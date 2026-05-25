@@ -1,6 +1,6 @@
 import { Box, type AlertColor } from '@mui/material';
 import type { ReactNode } from 'react';
-import type { AppSummary, CloudFriendship, DesktopUpdateState, ForgerAccountSession, FriendChatWindowOpenResult } from '@shared/types';
+import type { AppSummary, BackgroundTask, CloudFriendship, DesktopUpdateState, ForgerAccountSession, FriendChatWindowOpenResult } from '@shared/types';
 import type { AppDictionary } from '@renderer/i18n';
 import { Sidebar, type View } from './Sidebar';
 import { Topbar } from './Topbar';
@@ -23,6 +23,13 @@ interface AppShellProps {
   onSocialNotify: (message: string, severity?: AlertColor) => void;
   onUpdateUsername: (username: string) => Promise<boolean>;
   onLogout: () => void;
+  backgroundTasks: BackgroundTask[];
+  backgroundTasksOpen: boolean;
+  activeBackgroundTaskCount: number;
+  onOpenBackgroundTasks: () => void;
+  onCloseBackgroundTasks: () => void;
+  onOpenBackgroundTaskHistory: () => void;
+  onOpenBackgroundTask: (taskId: string) => void;
   desktopUpdateState: DesktopUpdateState;
   advancedMode: boolean;
   children: ReactNode;
@@ -46,6 +53,13 @@ export function AppShell({
   onSocialNotify,
   onUpdateUsername,
   onLogout,
+  backgroundTasks,
+  backgroundTasksOpen,
+  activeBackgroundTaskCount,
+  onOpenBackgroundTasks,
+  onCloseBackgroundTasks,
+  onOpenBackgroundTaskHistory,
+  onOpenBackgroundTask,
   desktopUpdateState,
   advancedMode,
   children,
@@ -80,6 +94,13 @@ export function AppShell({
           onSocialNotify={onSocialNotify}
           onUpdateUsername={onUpdateUsername}
           onLogout={onLogout}
+          backgroundTasks={backgroundTasks}
+          backgroundTasksOpen={backgroundTasksOpen}
+          activeBackgroundTaskCount={activeBackgroundTaskCount}
+          onOpenBackgroundTasks={onOpenBackgroundTasks}
+          onCloseBackgroundTasks={onCloseBackgroundTasks}
+          onOpenBackgroundTaskHistory={onOpenBackgroundTaskHistory}
+          onOpenBackgroundTask={onOpenBackgroundTask}
         />
         <Box sx={{ p: 3, flex: 1, minHeight: 0, overflowY: 'auto', WebkitAppRegion: 'no-drag' }}>{children}</Box>
       </Box>

@@ -16,6 +16,7 @@ import { AppAgentConversationManager } from '../app-agent-conversation-manager';
 import { renderManifestAgentPrompt, type ManifestAgentPromptKind } from '../manifest-agent-prompts';
 import { AppMcpManager } from '../app-mcp-manager';
 import { AutomationManager } from '../automation-manager';
+import { BackgroundTaskStore } from '../background-task-store';
 import {
   extractDeepLinkFromArgv,
   focusWindow as focusDeepLinkWindow,
@@ -137,6 +138,7 @@ import type {
   AgentRuntimeRecommendations,
   AgentRuntimeRequest,
   AutomationUpsertInput,
+  BackgroundTask,
   BasicActionResult,
   CatalogApp,
   ChatApplyRunInput,
@@ -267,6 +269,7 @@ let officialToolsService: OfficialToolsService | null = null;
 let desktopUpdater: DesktopUpdater | null = null;
 let desktopErrorReporter: DesktopErrorReporter | null = null;
 let automationManager: AutomationManager | null = null;
+let backgroundTaskStore: BackgroundTaskStore | null = null;
 let appMcpManager: AppMcpManager | null = null;
 let backupsManager: BackupsManager | null = null;
 let memoryStore: MemoryStore | null = null;
@@ -376,6 +379,7 @@ const buildChatRunIpcTracePayload = (run: ChatRun): Record<string, unknown> => g
 const sanitizeRendererChatTrace = (input: RendererChatTraceEvent): Record<string, unknown> => getMainUtilitiesController().sanitizeRendererChatTrace(input);
 const emitChatRunUpdated = (payload: ChatRunEvent): void => getMainUtilitiesController().emitChatRunUpdated(payload);
 const emitAutomationUpdated = (payload: { automation: unknown; run?: unknown }): void => getMainUtilitiesController().emitAutomationUpdated(payload);
+const emitBackgroundTaskUpdated = (payload: { task: BackgroundTask }): void => getMainUtilitiesController().emitBackgroundTaskUpdated(payload);
 const emitDesktopUpdateProgress = (payload: DesktopUpdateState): void => getMainUtilitiesController().emitDesktopUpdateProgress(payload);
 const emitForgerAccountUpdated = (payload: ReturnType<typeof publicForgerAccount> & { success?: boolean; userMessage?: string; technicalCode?: string }): void => getMainUtilitiesController().emitForgerAccountUpdated(payload);
 const closeFriendChatWindows = (): void => getMainUtilitiesController().closeFriendChatWindows();
@@ -442,6 +446,14 @@ const anyAppAllowsAgentNetworkAccess = async (appIds: string[]): Promise<boolean
 const getSecretsStore = (): SecretsStore => getManifestSupportController().getSecretsStore();
 const getOfficialToolsService = (): OfficialToolsService => getManifestSupportController().getOfficialToolsService();
 const getMemoryStore = (): MemoryStore => getManifestSupportController().getMemoryStore();
+const getBackgroundTaskStore = (): BackgroundTaskStore => {
+  if (!backgroundTaskStore) {
+    backgroundTaskStore = new BackgroundTaskStore(getForgerMetadataRoot(), {
+      onUpdated: (task) => emitBackgroundTaskUpdated({ task }),
+    });
+  }
+  return backgroundTaskStore;
+};
 const buildMemoryContextForApps = async (appIds: string[]): Promise<string> => await getManifestSupportController().buildMemoryContextForApps(appIds);
 const buildMemoryContextForApp = async (appId: string): Promise<string> => await getManifestSupportController().buildMemoryContextForApp(appId);
 const buildForgerToolsContextForApp = async (appId: string): Promise<string> => await getManifestSupportController().buildForgerToolsContextForApp(appId);
@@ -1030,6 +1042,7 @@ const getMainProcessIpcDeps = () => ({
   getAppDetails,
   getAppRuntimeStatus: getRuntimeStatus,
   getBackupsManager,
+  getBackgroundTaskStore,
   getClaudeAuthStatus,
   getCloudIdentityStore,
   getCodexAuthStatus,
@@ -1176,7 +1189,7 @@ registerMainLifecycle({
   handleCloudSocialEvent, hasInstalledCodexConversation, ipcMain, listAppPrompts, listCatalogFromBackend,
   loadAgentToolSettings, loadCloudSyncSettings, loadRegistry, loadSettings, mapBackendCategory, normalizeNodeRuntimeVersion,
   openInstalledApp, startLocalNetworkShare, stopLocalNetworkShare, startRemoteNetworkShare, stopRemoteNetworkShare, stopRemoteNetworkShareSession, openOrFocusAppWindow, registerForgerCloudOAuth,
-  registerIpcHandlers, resolveClaudeCli, resolveCodexCliPath, resolveInstalledAgents, resolveInstalledManifest,
+  registerIpcHandlers, renderManifestAgentPrompt, resolveClaudeCli, resolveCodexCliPath, resolveInstalledAgents, resolveInstalledManifest,
   resolveInstalledPromptTemplates, restoreAppPrompt, restartInstalledApp, runningApps, serializeErrorForInstallLog,
   shell, splitManifestCommand, startDevCatalogService, state: mainLifecycleState, stopInstalledApp,
   switchForgerAccountSession, terminateProcess, testAppPrompt, toAppSummary, toCatalogStatus, translateManifestEnvironment,

@@ -952,7 +952,7 @@ process.exit(0);
   }
 });
 
-test('chat orchestrator rejects invalid starts, serializes the workspace lock, and handles missing runs', async () => {
+test('chat orchestrator rejects invalid starts, scopes active run locks, and handles missing runs', async () => {
   const harness = await createHarness();
   try {
     await assert.rejects(() => harness.orchestrator.startRun({
@@ -974,18 +974,49 @@ test('chat orchestrator rejects invalid starts, serializes the workspace lock, a
       conversationId: 'conversation-lock',
       conversationHistory: [{ role: 'user', content: 'slow cancel' }],
     });
-    await assert.rejects(() => harness.orchestrator.startRun({
-      prompt: 'second while locked',
+    const secondConversation = await harness.orchestrator.startRun({
+      prompt: 'slow cancel',
       threadId: null,
       conversationId: 'conversation-lock-2',
-    }), (error) => error.chatCode === 'conflict' && /another_run_in_progress/.test(error.message));
+      conversationHistory: [{ role: 'user', content: 'slow cancel' }],
+    });
+    await assert.rejects(() => harness.orchestrator.startRun({
+      prompt: 'second while same conversation locked',
+      threadId: null,
+      conversationId: 'conversation-lock',
+    }), (error) => error.chatCode === 'conflict' && /conversation_run_in_progress/.test(error.message));
     harness.orchestrator.appendExternalProgress(first.runId, '  Manual progress  ');
     harness.orchestrator.appendExternalProgress(first.runId, '   ');
     harness.orchestrator.appendExternalProgress('missing-run', 'ignored');
     assert.equal(harness.orchestrator.getRun({ runId: first.runId }).progressLog.at(-1), 'Manual progress');
     assert.equal(harness.orchestrator.cancelRun({ runId: first.runId }).success, true);
+    assert.equal(harness.orchestrator.cancelRun({ runId: secondConversation.runId }).success, true);
     harness.orchestrator.appendExternalProgress(first.runId, 'after cancel ignored');
     assert.equal(harness.orchestrator.getRun({ runId: first.runId }).progressLog.includes('after cancel ignored'), false);
+    await mkdir(join(harness.privateAppsRoot, 'finance-os'), { recursive: true });
+    await mkdir(join(harness.privateAppsRoot, 'recipes'), { recursive: true });
+    const finance = await harness.orchestrator.startRun({
+      appId: 'finance-os',
+      prompt: 'slow cancel',
+      threadId: null,
+      conversationId: 'finance-conversation-lock',
+      conversationHistory: [{ role: 'user', content: 'slow cancel' }],
+    });
+    await assert.rejects(() => harness.orchestrator.startRun({
+      appId: 'finance-os',
+      prompt: 'same app while locked',
+      threadId: null,
+      conversationId: 'finance-conversation-lock-2',
+    }), (error) => error.chatCode === 'conflict' && /app_run_in_progress/.test(error.message));
+    const recipes = await harness.orchestrator.startRun({
+      appId: 'recipes',
+      prompt: 'slow cancel',
+      threadId: null,
+      conversationId: 'recipes-conversation-lock',
+      conversationHistory: [{ role: 'user', content: 'slow cancel' }],
+    });
+    assert.equal(harness.orchestrator.cancelRun({ runId: finance.runId }).success, true);
+    assert.equal(harness.orchestrator.cancelRun({ runId: recipes.runId }).success, true);
     const failedRun = {
       ...harness.orchestrator.getRun({ runId: first.runId }),
       runId: 'failed-progress-run',

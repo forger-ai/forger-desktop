@@ -23,9 +23,11 @@ import {
 } from '@mui/material';
 import { useEffect, useState, type MouseEvent } from 'react';
 import type { AppSummary, CloudFriendship, ForgerAccountSession, FriendChatWindowOpenResult, WindowControlState } from '@shared/types';
+import type { BackgroundTask } from '@shared/types';
 import type { AppDictionary } from '@renderer/i18n';
 import type { View } from './Sidebar';
 import { FriendsView } from '../views/FriendsView';
+import { BackgroundTasksDrawer } from './BackgroundTasksDrawer';
 
 interface TopbarProps {
   currentView: View;
@@ -44,6 +46,13 @@ interface TopbarProps {
   onSocialNotify: (message: string, severity?: AlertColor) => void;
   onUpdateUsername: (username: string) => Promise<boolean>;
   onLogout: () => void;
+  backgroundTasks: BackgroundTask[];
+  backgroundTasksOpen: boolean;
+  activeBackgroundTaskCount: number;
+  onOpenBackgroundTasks: () => void;
+  onCloseBackgroundTasks: () => void;
+  onOpenBackgroundTaskHistory: () => void;
+  onOpenBackgroundTask: (taskId: string) => void;
 }
 
 const initialsFromName = (name: string) =>
@@ -211,6 +220,13 @@ export function Topbar({
   onSocialNotify,
   onUpdateUsername,
   onLogout,
+  backgroundTasks,
+  backgroundTasksOpen,
+  activeBackgroundTaskCount,
+  onOpenBackgroundTasks,
+  onCloseBackgroundTasks,
+  onOpenBackgroundTaskHistory,
+  onOpenBackgroundTask,
 }: TopbarProps) {
   const theme = useTheme();
   const [accountAnchorEl, setAccountAnchorEl] = useState<HTMLElement | null>(null);
@@ -280,6 +296,16 @@ export function Topbar({
         </Box>
 
         <Stack direction="row" alignItems="center" spacing={1} sx={{ WebkitAppRegion: 'no-drag', flexShrink: 0 }}>
+          <BackgroundTasksDrawer
+            t={t}
+            tasks={backgroundTasks}
+            open={backgroundTasksOpen}
+            activeCount={activeBackgroundTaskCount}
+            onOpen={onOpenBackgroundTasks}
+            onClose={onCloseBackgroundTasks}
+            onOpenHistory={onOpenBackgroundTaskHistory}
+            onOpenTask={onOpenBackgroundTask}
+          />
           <Box data-onboarding-target="social-actions">
             <FriendsView
               variant="topbar"

@@ -65,6 +65,7 @@ const IPC_CHANNELS = {
   uploadSocialApp: 'forger:social:apps:upload',
   createSocialAppShare: 'forger:social:apps:create-share',
   resolveSocialCode: 'forger:social:code:resolve',
+  resolveSocialApp: 'forger:social:app:resolve',
   installSocialApp: 'forger:social:apps:install',
   searchFriends: 'forger:friends:search',
   sendFriendRequest: 'forger:friends:request',
@@ -145,6 +146,10 @@ const IPC_CHANNELS = {
   automationsListRuns: 'forger:automations:list-runs',
   automationsGetRunTranscript: 'forger:automations:get-run-transcript',
   automationUpdated: 'forger:automations:updated',
+  backgroundTasksList: 'forger:background-tasks:list',
+  backgroundTaskGet: 'forger:background-tasks:get',
+  backgroundTasksUpsert: 'forger:background-tasks:upsert',
+  backgroundTaskUpdated: 'forger:background-tasks:updated',
   windowMinimize: 'forger:window:minimize',
   windowToggleMaximize: 'forger:window:toggle-maximize',
   windowClose: 'forger:window:close',
@@ -250,6 +255,7 @@ const api: ForgerDesktopApi = {
   uploadSocialApp: (input) => ipcRenderer.invoke(IPC_CHANNELS.uploadSocialApp, input),
   createSocialAppShare: (userAppId) => ipcRenderer.invoke(IPC_CHANNELS.createSocialAppShare, userAppId),
   resolveSocialCode: (code) => ipcRenderer.invoke(IPC_CHANNELS.resolveSocialCode, code),
+  resolveSocialApp: (id) => ipcRenderer.invoke(IPC_CHANNELS.resolveSocialApp, id),
   installSocialApp: (input) => ipcRenderer.invoke(IPC_CHANNELS.installSocialApp, input),
   searchFriends: (username) => ipcRenderer.invoke(IPC_CHANNELS.searchFriends, username),
   sendFriendRequest: (username) => ipcRenderer.invoke(IPC_CHANNELS.sendFriendRequest, username),
@@ -358,6 +364,18 @@ const api: ForgerDesktopApi = {
     ipcRenderer.on(IPC_CHANNELS.automationUpdated, wrapped);
     return () => {
       ipcRenderer.removeListener(IPC_CHANNELS.automationUpdated, wrapped);
+    };
+  },
+  backgroundTasksList: () => ipcRenderer.invoke(IPC_CHANNELS.backgroundTasksList),
+  backgroundTaskGet: (id) => ipcRenderer.invoke(IPC_CHANNELS.backgroundTaskGet, id),
+  backgroundTasksUpsert: (input) => ipcRenderer.invoke(IPC_CHANNELS.backgroundTasksUpsert, input),
+  onBackgroundTaskUpdated: (listener) => {
+    const wrapped = (_event: unknown, payload: Parameters<typeof listener>[0]) => {
+      listener(payload);
+    };
+    ipcRenderer.on(IPC_CHANNELS.backgroundTaskUpdated, wrapped);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.backgroundTaskUpdated, wrapped);
     };
   },
   minimizeWindow: () => ipcRenderer.invoke(IPC_CHANNELS.windowMinimize),

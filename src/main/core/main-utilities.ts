@@ -439,6 +439,15 @@ const emitAutomationUpdated = (payload: { automation: unknown; run?: unknown }):
   mainWindow.webContents.send(IPC_CHANNELS.automationUpdated, payload);
 };
 
+const emitBackgroundTaskUpdated = (payload: { task: unknown }): void => {
+  const mainWindow = getMainWindow();
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return;
+  }
+
+  mainWindow.webContents.send(IPC_CHANNELS.backgroundTaskUpdated, payload);
+};
+
 const emitDesktopUpdateProgress = (payload: DesktopUpdateState): void => {
   const mainWindow = getMainWindow();
   if (!mainWindow || mainWindow.isDestroyed()) {
@@ -614,5 +623,5 @@ const toCatalogStatus = (slug: string): AppStatus => {
   return runningApps.has(slug) ? 'running' : installed.status;
 };
 
-  return { CommandFailedError, truncateForInstallLog, serializeErrorForInstallLog, encodeBase64Url, signAppFolderGrant, resolveAppIdForWebContents, appendInstallLog, isAgentToolId, normalizeAgentToolSettings, loadAgentToolSettings, saveAgentToolSettings, updateAgentToolApproval, getBundledResourcesRoot, stripArchiveExtension, runtimePlatformTokens, findRuntimeArchive, findRuntimeChecksumFile, runtimeError, failureDiagnostic, emitInstallProgress, emitRuntimeStatus, buildChatRunIpcTracePayload, sanitizeRendererChatTrace, emitChatRunUpdated, emitAutomationUpdated, emitDesktopUpdateProgress, emitForgerAccountUpdated, closeFriendChatWindows, switchForgerAccountSession, clearForgerAccountSession, getDesktopUpdater, toAppSummary, parseVersionParts, isVersionNewer, mapBackendCategory, toCatalogStatus };
+  return { CommandFailedError, truncateForInstallLog, serializeErrorForInstallLog, encodeBase64Url, signAppFolderGrant, resolveAppIdForWebContents, appendInstallLog, isAgentToolId, normalizeAgentToolSettings, loadAgentToolSettings, saveAgentToolSettings, updateAgentToolApproval, getBundledResourcesRoot, stripArchiveExtension, runtimePlatformTokens, findRuntimeArchive, findRuntimeChecksumFile, runtimeError, failureDiagnostic, emitInstallProgress, emitRuntimeStatus, buildChatRunIpcTracePayload, sanitizeRendererChatTrace, emitChatRunUpdated, emitAutomationUpdated, emitBackgroundTaskUpdated, emitDesktopUpdateProgress, emitForgerAccountUpdated, closeFriendChatWindows, switchForgerAccountSession, clearForgerAccountSession, getDesktopUpdater, toAppSummary, parseVersionParts, isVersionNewer, mapBackendCategory, toCatalogStatus };
 };

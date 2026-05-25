@@ -12,11 +12,12 @@ import {
   Typography,
 } from '@mui/material';
 import { useMemo, type ReactNode } from 'react';
-import type { CatalogApp, ClaudeEffort, CodexReasoningEffort } from '@shared/types';
+import type { BackgroundTask, CatalogApp, ClaudeEffort, CodexReasoningEffort } from '@shared/types';
 import { AppShell } from '@renderer/components/AppShell';
 import { AppView } from '@renderer/views/AppView';
 import { AutomationsView } from '@renderer/views/AutomationsView';
 import { BackupsView } from '@renderer/views/BackupsView';
+import { BackgroundTaskDetailView, BackgroundTasksListView, viewLabel } from '@renderer/views/BackgroundTasksView';
 import { CatalogView } from '@renderer/views/CatalogView';
 import { ChatView } from '@renderer/views/ChatView';
 import { CreateView } from '@renderer/views/CreateView';
@@ -64,6 +65,16 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     setCloudModalOpen,
     forgerAccountBusy,
     handleOpenFriendChat,
+    backgroundTasks,
+    backgroundTasksDrawerOpen,
+    activeBackgroundTaskCount,
+    openBackgroundTaskHistory,
+    openBackgroundTaskDetail,
+    backFromBackgroundTaskHistory,
+    backFromBackgroundTaskDetail,
+    setBackgroundTasksDrawerOpen,
+    backgroundTasksBackView,
+    selectedBackgroundTaskId,
     setBannerSeverity,
     setBannerMessage,
     handleForgerLogout,
@@ -146,7 +157,6 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     selectedClaudeEffort,
     setSelectedClaudeEffort,
     chatBotPictureSrc,
-    chatRunActive,
     activeConversationRunActive,
     activeConversationRunId,
     activeConversationProgressLines,
@@ -438,6 +448,13 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
           }}
           onUpdateUsername={handleForgerUsernameUpdate}
           onLogout={() => void handleForgerLogout()}
+          backgroundTasks={backgroundTasks}
+          backgroundTasksOpen={backgroundTasksDrawerOpen}
+          activeBackgroundTaskCount={activeBackgroundTaskCount}
+          onOpenBackgroundTasks={() => setBackgroundTasksDrawerOpen(true)}
+          onCloseBackgroundTasks={() => setBackgroundTasksDrawerOpen(false)}
+          onOpenBackgroundTaskHistory={openBackgroundTaskHistory}
+          onOpenBackgroundTask={openBackgroundTaskDetail}
           desktopUpdateState={desktopUpdateState}
           advancedMode={advancedMode}
         >
@@ -554,7 +571,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             onSelectClaudeEffort={setSelectedClaudeEffort}
             onOpenCodexUsageDashboard={() => void getDesktopApi().openCodexUsageDashboard()}
             assistantAvatarSrc={chatBotPictureSrc}
-            isSending={chatRunActive}
+            isSending={activeConversationRunActive}
             isResponding={activeConversationRunActive}
             canStopRun={Boolean(activeConversationRunId)}
             progressLines={activeConversationProgressLines}
@@ -602,6 +619,24 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             onSelectAutomation={handleSelectAutomation}
             onSelectRun={(runId) => void handleSelectAutomationRun(runId)}
           />)
+        ) : null}
+
+        {currentView === 'backgroundTasks' ? (
+          <BackgroundTasksListView
+            t={t}
+            tasks={backgroundTasks}
+            backLabel={viewLabel(t, backgroundTasksBackView)}
+            onBack={backFromBackgroundTaskHistory}
+            onOpenTask={openBackgroundTaskDetail}
+          />
+        ) : null}
+
+        {currentView === 'backgroundTaskDetail' ? (
+          <BackgroundTaskDetailView
+            t={t}
+            task={backgroundTasks.find((task: BackgroundTask) => task.id === selectedBackgroundTaskId) ?? null}
+            onBack={backFromBackgroundTaskDetail}
+          />
         ) : null}
 
         {currentView === 'files' ? (

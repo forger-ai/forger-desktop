@@ -43,7 +43,9 @@ export type View =
   | 'secrets'
   | 'tools'
   | 'settings'
-  | 'app';
+  | 'app'
+  | 'backgroundTasks'
+  | 'backgroundTaskDetail';
 const isMacOs = navigator.platform.toLowerCase().includes('mac');
 
 interface SidebarProps {
@@ -119,6 +121,8 @@ export function Sidebar({ currentView, onNavigate, t, desktopUpdateState, advanc
     tools: t.nav.tools,
     settings: t.nav.settings,
     app: t.nav.catalog,
+    backgroundTasks: t.backgroundTasks.title,
+    backgroundTaskDetail: t.backgroundTasks.title,
   };
   const showUpdateBanner = desktopUpdateState.status === 'available' || desktopUpdateState.status === 'ready';
   const mainNav = advancedMode

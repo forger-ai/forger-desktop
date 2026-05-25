@@ -67,6 +67,7 @@ export const esSections = {
       codexThinking: 'El agente está pensando...',
       newConversationTitle: 'Conversación nueva',
       sendInProgress: 'Todavía estoy procesando tu mensaje anterior. Espera la respuesta o cancela esa solicitud.',
+      appRunInProgress: 'Esta app ya tiene un agente trabajando. Puedes seguir usando otras apps o esperar a que termine la respuesta actual.',
       sendFailed: (detail: string) => `No pude enviar tu mensaje al agente. ${detail}`,
     },
     create: {

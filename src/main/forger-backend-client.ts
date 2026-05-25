@@ -23,6 +23,7 @@ import type {
   SocialUserAppDownload,
   SocialUserAppList,
   SocialUserAppShare,
+  SocialUserAppUploadAttempt,
   CloudAppMessagePermissionDecision,
   RemoteAppBackupSummary,
   RemoteBackupsState,
@@ -33,6 +34,7 @@ import type {
 } from '../shared/types';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import type { ReportSanitizerRoot } from '../shared/report-sanitizer';
 import type { StoredForgerAccount } from './forger-account-store';
 import type { RemoteFrontendAsset } from './remote-frontend-packager';
@@ -68,7 +70,8 @@ import {
   submitConversationDiagnosticReport,
   submitDesktopErrorReport,
 } from './forger-backend/report-submissions';
-import { toSocialUserApp, toSocialVersion } from './forger-backend/social-normalizers';
+import { getBackendJson, patchBackendJson, postBackendJson } from './forger-backend/json-request';
+import { toSocialUserApp, toSocialUserAppUploadAttempt, toSocialVersion } from './forger-backend/social-normalizers';
 
 interface ClientOptions {
   backendBaseUrl: string;
@@ -106,6 +109,12 @@ interface GoogleLoginSessionInput {
   code: string;
   codeVerifier: string;
   redirectUri: string;
+}
+
+interface SocialDirectUploadResponse { signed_blob_id?: string; direct_upload?: { url?: string; headers?: Record<string, string> } }
+
+interface SocialUploadConfirmResponse {
+  upload_attempt?: unknown;
 }
 
 export class ForgerBackendClient {
@@ -454,7 +463,7 @@ export class ForgerBackendClient {
   }
 
   async createRemoteTunnelSession(input: { deviceId: number; appId: string }): Promise<Record<string, unknown>> {
-    const payload = await this.postJson('/api/v1/me/remote_tunnel_sessions', {
+    const payload = await postBackendJson(this.options, '/api/v1/me/remote_tunnel_sessions', {
       device_id: input.deviceId,
       app_id: input.appId,
     }, 'remote_tunnel_create_failed');
@@ -496,7 +505,7 @@ export class ForgerBackendClient {
     connectionCount?: number;
     lastError?: string;
   }): Promise<void> {
-    await this.patchJson(`/api/v1/me/remote_tunnel_sessions/${input.sessionId}/report`, {
+    await patchBackendJson(this.options, `/api/v1/me/remote_tunnel_sessions/${input.sessionId}/report`, {
       status: input.status,
       tunnel_url: input.tunnelUrl,
       connection_count: input.connectionCount,
@@ -505,22 +514,22 @@ export class ForgerBackendClient {
   }
 
   async closeRemoteTunnelSession(sessionId: number): Promise<void> {
-    await this.postJson(`/api/v1/me/remote_tunnel_sessions/${sessionId}/close`, {}, 'remote_tunnel_close_failed').catch(() => undefined);
+    await postBackendJson(this.options, `/api/v1/me/remote_tunnel_sessions/${sessionId}/close`, {}, 'remote_tunnel_close_failed').catch(() => undefined);
   }
 
   async listFriends(): Promise<CloudFriendship[]> {
-    const payload = await this.getJson('/api/v1/me/friends', 'friends_list_failed');
+    const payload = await getBackendJson(this.options, '/api/v1/me/friends', 'friends_list_failed');
     return Array.isArray(payload) ? payload.map((entry) => normalizeFriendship(entry)).filter(Boolean) as CloudFriendship[] : [];
   }
 
   async searchFriends(username: string): Promise<CloudFriendUser[]> {
     const query = new URLSearchParams({ username });
-    const payload = await this.getJson(`/api/v1/me/friends/search?${query.toString()}`, 'friends_search_failed');
+    const payload = await getBackendJson(this.options, `/api/v1/me/friends/search?${query.toString()}`, 'friends_search_failed');
     return Array.isArray(payload) ? payload.map((entry) => normalizeCloudUser(entry)).filter(Boolean) as CloudFriendUser[] : [];
   }
 
   async sendFriendRequest(username: string): Promise<CloudFriendship> {
-    const payload = await this.postJson('/api/v1/me/friend_requests', { username }, 'friend_request_create_failed');
+    const payload = await postBackendJson(this.options, '/api/v1/me/friend_requests', { username }, 'friend_request_create_failed');
     const friendship = normalizeFriendship(payload);
     if (!friendship) {
       throw backendError('No pudimos enviar la solicitud.', 'friend_request_response_invalid');
@@ -541,7 +550,7 @@ export class ForgerBackendClient {
   }
 
   async markFriendChatRead(friendUserId: number): Promise<CloudFriendship> {
-    const payload = await this.patchJson(`/api/v1/me/friends/${encodeURIComponent(String(friendUserId))}/read_receipt`, {}, 'friend_read_receipt_failed');
+    const payload = await patchBackendJson(this.options, `/api/v1/me/friends/${encodeURIComponent(String(friendUserId))}/read_receipt`, {}, 'friend_read_receipt_failed');
     const friendship = normalizeFriendship(payload);
     if (!friendship) {
       throw backendError('No pudimos actualizar la lectura del chat.', 'friend_read_receipt_response_invalid');
@@ -551,12 +560,12 @@ export class ForgerBackendClient {
 
   async listCloudMessages(friendUserId: number): Promise<CloudMessage[]> {
     const query = new URLSearchParams({ friend_user_id: String(friendUserId) });
-    const payload = await this.getJson(`/api/v1/me/cloud_messages?${query.toString()}`, 'cloud_messages_list_failed');
+    const payload = await getBackendJson(this.options, `/api/v1/me/cloud_messages?${query.toString()}`, 'cloud_messages_list_failed');
     return Array.isArray(payload) ? payload.map((entry) => normalizeCloudMessage(entry)).filter(Boolean) as CloudMessage[] : [];
   }
 
   async sendCloudMessage(input: CloudSendMessageInput & { envelopes: CloudMessageEnvelope[]; clientMessageId?: string }): Promise<CloudMessage> {
-    const payload = await this.postJson('/api/v1/me/cloud_messages', {
+    const payload = await postBackendJson(this.options, '/api/v1/me/cloud_messages', {
       recipient_username: input.recipientUsername,
       recipient_user_id: input.recipientUserId,
       delivery_mode: input.delivery ?? 'persistent',
@@ -581,7 +590,7 @@ export class ForgerBackendClient {
   }
 
   async decideAppMessagePermission(cloudMessageId: number, decision: CloudAppMessagePermissionDecision): Promise<CloudMessage> {
-    const payload = await this.patchJson('/api/v1/me/app_message_permission', {
+    const payload = await patchBackendJson(this.options, '/api/v1/me/app_message_permission', {
       cloud_message_id: cloudMessageId,
       decision,
     }, 'app_message_permission_failed');
@@ -593,7 +602,7 @@ export class ForgerBackendClient {
   }
 
   async listMySocialApps(): Promise<SocialUserAppList> {
-    const payload = await this.getJson('/api/v1/me/user_apps', 'social_user_apps_list_failed') as Record<string, unknown>;
+    const payload = await getBackendJson(this.options, '/api/v1/me/user_apps', 'social_user_apps_list_failed') as Record<string, unknown>;
     const usage = payload.usage && typeof payload.usage === 'object'
       ? payload.usage as Record<string, unknown>
       : {};
@@ -615,33 +624,128 @@ export class ForgerBackendClient {
     shortDescription?: string;
     category?: string;
     visibility: 'public' | 'friends' | 'private';
+    onProgress?: (message: string) => void | Promise<void>;
   }): Promise<SocialUserApp> {
     const buffer = await fs.readFile(input.zipPath);
-    const form = new FormData();
-    form.set('visibility', input.visibility);
-    if (input.name) form.set('name', input.name);
-    if (input.slug) form.set('slug', input.slug);
-    if (input.description) form.set('description', input.description);
-    if (input.shortDescription) form.set('short_description', input.shortDescription);
-    if (input.category) form.set('category', input.category);
-    form.set('archive', new Blob([buffer], { type: 'application/zip' }), path.basename(input.zipPath));
+    await input.onProgress?.('Autorizando subida directa');
+    const checksum = createHash('md5').update(buffer).digest('base64');
+    const checksumSha256 = createHash('sha256').update(buffer).digest('hex');
+    const directUpload = await this.createSocialAppDirectUpload({
+      filename: path.basename(input.zipPath),
+      byte_size: buffer.byteLength,
+      checksum,
+      checksum_sha256: checksumSha256,
+      content_type: 'application/zip',
+    });
+    const uploadUrl = directUpload.direct_upload?.url;
+    const signedBlobId = directUpload.signed_blob_id;
+    if (!uploadUrl || !signedBlobId) {
+      throw backendError('Forger Cloud no preparo la subida directa.', 'social_user_app_direct_upload_response_invalid');
+    }
+    await input.onProgress?.('Subiendo archivo a Social');
+    const storageResponse = await fetch(uploadUrl, {
+      method: 'PUT',
+      headers: directUpload.direct_upload?.headers ?? {},
+      body: buffer,
+    });
+    if (!storageResponse.ok) {
+      throw backendError('No pudimos subir el archivo de la app a Social.', `social_user_app_storage_upload_failed_${storageResponse.status}`);
+    }
+    await input.onProgress?.('Analizando app');
 
     const response = await fetch(`${this.options.backendBaseUrl}/api/v1/me/user_apps`, {
       method: 'POST',
-      headers: buildBackendHeaders(this.options.token()),
-      body: form,
+      headers: { ...buildBackendHeaders(this.options.token()), 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        visibility: input.visibility,
+        name: input.name,
+        slug: input.slug,
+        description: input.description,
+        short_description: input.shortDescription,
+        category: input.category,
+        signed_blob_id: signedBlobId,
+        checksum_sha256: checksumSha256,
+      }),
     });
     const payload = await this.readJson<unknown>(response);
     if (!response.ok) {
-      throw backendError('No pudimos subir la app a Social.', `social_user_app_upload_failed_${response.status}`);
+      const message = payload && typeof payload === 'object'
+        ? String(
+            (payload as { user_message?: unknown }).user_message
+            ?? (payload as { userMessage?: unknown }).userMessage
+            ?? (payload as { error?: unknown }).error
+            ?? 'No pudimos subir la app a Social.',
+          )
+        : 'No pudimos subir la app a Social.';
+      const technicalCode = payload && typeof payload === 'object' && typeof (payload as { technical_code?: unknown }).technical_code === 'string'
+        ? (payload as { technical_code: string }).technical_code
+        : payload && typeof payload === 'object' && typeof (payload as { error?: unknown }).error === 'string'
+          ? (payload as { error: string }).error
+          : `social_user_app_upload_failed_${response.status}`;
+      throw backendError(message, technicalCode);
     }
-    const app = toSocialUserApp(payload);
-    if (!app) throw backendError('Forger Cloud devolvio una app Social invalida.', 'social_user_app_response_invalid');
-    return app;
+    const attemptPayload = payload && typeof payload === 'object' ? (payload as SocialUploadConfirmResponse).upload_attempt : undefined;
+    const attempt = toSocialUserAppUploadAttempt(attemptPayload);
+    if (!attempt) throw backendError('Forger Cloud no preparo el analisis de la app.', 'social_user_app_upload_attempt_invalid');
+    return await this.pollSocialAppUploadAttempt(attempt.id, input.onProgress);
+  }
+
+  private async pollSocialAppUploadAttempt(
+    attemptId: number,
+    onProgress?: (message: string) => void | Promise<void>,
+  ): Promise<SocialUserApp> {
+    const deadline = Date.now() + 15 * 60 * 1000;
+    let lastStatus: string | undefined;
+    while (Date.now() < deadline) {
+      const attempt = await this.getSocialAppUploadAttempt(attemptId);
+      if (attempt.status !== lastStatus) {
+        lastStatus = attempt.status;
+        if (attempt.status === 'uploaded' || attempt.status === 'analyzing') {
+          await onProgress?.('Analizando app');
+        }
+      }
+      if (attempt.status === 'published' && attempt.app) {
+        await onProgress?.('App publicada');
+        return attempt.app;
+      }
+      if (attempt.status === 'failed') {
+        throw backendError(attempt.errorCode ?? 'No pudimos analizar la app.', attempt.errorCode ?? 'social_user_app_analysis_failed');
+      }
+      await new Promise((resolve) => setTimeout(resolve, 2500));
+    }
+    throw backendError('El analisis de la app sigue pendiente.', 'social_user_app_analysis_timeout');
+  }
+
+  private async getSocialAppUploadAttempt(attemptId: number): Promise<SocialUserAppUploadAttempt> {
+    const payload = await getBackendJson(this.options, `/api/v1/me/user_app_upload_attempts/${encodeURIComponent(String(attemptId))}`, 'social_user_app_upload_attempt_failed');
+    const attempt = toSocialUserAppUploadAttempt(payload);
+    if (!attempt) {
+      throw backendError('Forger Cloud devolvio un estado de subida invalido.', 'social_user_app_upload_attempt_response_invalid');
+    }
+    return attempt;
+  }
+
+  private async createSocialAppDirectUpload(body: Record<string, unknown>): Promise<SocialDirectUploadResponse> {
+    const response = await fetch(`${this.options.backendBaseUrl}/api/v1/me/user_apps/direct_uploads`, {
+      method: 'POST',
+      headers: { ...buildBackendHeaders(this.options.token()), 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const payload = await this.readJson<unknown>(response);
+    if (!response.ok) {
+      const message = payload && typeof payload === 'object'
+        ? String((payload as { error?: unknown }).error ?? 'No pudimos preparar la subida a Social.')
+        : 'No pudimos preparar la subida a Social.';
+      const technicalCode = payload && typeof payload === 'object' && typeof (payload as { error?: unknown }).error === 'string'
+        ? (payload as { error: string }).error
+        : `social_user_app_direct_upload_failed_${response.status}`;
+      throw backendError(message, technicalCode);
+    }
+    return payload && typeof payload === 'object' ? payload as SocialDirectUploadResponse : {};
   }
 
   async createSocialAppShare(userAppId: number): Promise<SocialUserAppShare> {
-    const payload = await this.postJson(`/api/v1/me/user_apps/${userAppId}/shares`, { scope: 'private_link' }, 'social_user_app_share_failed') as Record<string, unknown>;
+    const payload = await postBackendJson(this.options, `/api/v1/me/user_apps/${userAppId}/shares`, { scope: 'private_link' }, 'social_user_app_share_failed') as Record<string, unknown>;
     return {
       id: Number(payload.id),
       code: typeof payload.code === 'string' ? payload.code : '',
@@ -653,20 +757,31 @@ export class ForgerBackendClient {
   }
 
   async resolveSocialCode(code: string): Promise<{ app: SocialUserApp; share?: Record<string, unknown> }> {
-    const payload = await this.getJson(`/api/v1/social/codes/${encodeURIComponent(code)}`, 'social_code_resolve_failed') as Record<string, unknown>;
+    const payload = await getBackendJson(this.options, `/api/v1/social/codes/${encodeURIComponent(code)}`, 'social_code_resolve_failed') as Record<string, unknown>;
     const app = toSocialUserApp(payload.app);
     if (!app) throw backendError('No pudimos abrir esta app Social.', 'social_code_app_invalid');
     return { app, share: payload.share && typeof payload.share === 'object' ? payload.share as Record<string, unknown> : undefined };
   }
 
+  async resolveSocialApp(id: number): Promise<{ app: SocialUserApp }> {
+    const payload = await getBackendJson(this.options, `/api/v1/social/apps/by_id/${encodeURIComponent(String(id))}`, 'social_app_resolve_failed') as Record<string, unknown>;
+    const app = toSocialUserApp(payload);
+    if (!app) throw backendError('No pudimos abrir esta app Social.', 'social_app_invalid');
+    return { app };
+  }
+
   async requestSocialAppDownload(input: {
-    versionId: number;
+    appId?: number;
+    appSlug?: string;
     shareCode?: string;
     platform: string;
     deviceIdentifier: string;
     trustDecision?: 'not_reviewed' | 'reviewed' | 'skipped_review';
   }): Promise<SocialUserAppDownload> {
-    const payload = await this.postJson(`/api/v1/social/user_app_versions/${input.versionId}/download`, {
+    const endpoint = typeof input.appId === 'number'
+      ? `/api/v1/social/apps/by_id/${encodeURIComponent(String(input.appId))}/download`
+      : `/api/v1/social/apps/${encodeURIComponent(input.appSlug ?? '')}/download`;
+    const payload = await postBackendJson(this.options, endpoint, {
       share_code: input.shareCode,
       platform: input.platform,
       device_identifier: input.deviceIdentifier,
@@ -705,7 +820,7 @@ export class ForgerBackendClient {
   }
 
   private async friendRequestAction(id: number, action: 'accept' | 'decline' | 'cancel'): Promise<CloudFriendship> {
-    const payload = await this.postJson(`/api/v1/me/friend_requests/${id}/${action}`, {}, `friend_request_${action}_failed`);
+    const payload = await postBackendJson(this.options, `/api/v1/me/friend_requests/${id}/${action}`, {}, `friend_request_${action}_failed`);
     const friendship = normalizeFriendship(payload);
     if (!friendship) {
       throw backendError('No pudimos actualizar la solicitud.', `friend_request_${action}_response_invalid`);
@@ -1076,44 +1191,6 @@ export class ForgerBackendClient {
     } catch {
       return null;
     }
-  }
-
-  private async getJson(pathname: string, code: string): Promise<unknown> {
-    const response = await fetch(`${this.options.backendBaseUrl}${pathname}`, {
-      method: 'GET',
-      headers: buildBackendHeaders(this.options.token()),
-    });
-    const payload = await this.readJson<unknown>(response);
-    if (!response.ok) {
-      throw backendError('Forger Cloud session is no longer valid.', `${code}_${response.status}`);
-    }
-    return payload;
-  }
-
-  private async postJson(pathname: string, body: Record<string, unknown>, code: string): Promise<unknown> {
-    const response = await fetch(`${this.options.backendBaseUrl}${pathname}`, {
-      method: 'POST',
-      headers: { ...buildBackendHeaders(this.options.token()), 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    const payload = await this.readJson<unknown>(response);
-    if (!response.ok) {
-      throw backendError('No pudimos completar la accion en Forger Cloud.', `${code}_${response.status}`);
-    }
-    return payload;
-  }
-
-  private async patchJson(pathname: string, body: Record<string, unknown>, code: string): Promise<unknown> {
-    const response = await fetch(`${this.options.backendBaseUrl}${pathname}`, {
-      method: 'PATCH',
-      headers: { ...buildBackendHeaders(this.options.token()), 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    const payload = await this.readJson<unknown>(response);
-    if (!response.ok) {
-      throw backendError('No pudimos completar la accion en Forger Cloud.', `${code}_${response.status}`);
-    }
-    return payload;
   }
 
   private parseAccount(payload: unknown, token?: string): StoredForgerAccount {

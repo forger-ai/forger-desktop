@@ -38,12 +38,7 @@ export type ForgerDeepLink =
   | {
       kind: 'social-app';
       code: string | null;
-      id: string | null;
-      raw: string;
-    }
-  | {
-      kind: 'social-profile';
-      username: string | null;
+      id: number | null;
       raw: string;
     }
   | {
@@ -81,17 +76,16 @@ export const parseForgerUrl = (rawUrl: string): ForgerDeepLink | null => {
   if (path === 'social') {
     const action = parsed.pathname.replace(/^\/+/, '').toLowerCase();
     if (action === 'app') {
+      const code = parsed.searchParams.get('code')?.trim();
+      const idRaw = parsed.searchParams.get('id')?.trim();
+      const id = idRaw && /^\d+$/.test(idRaw) ? Number(idRaw) : null;
+      if (!code && !id) {
+        return { kind: 'unknown', raw: rawUrl };
+      }
       return {
         kind: 'social-app',
-        code: parsed.searchParams.get('code')?.trim() || null,
-        id: parsed.searchParams.get('id')?.trim() || null,
-        raw: rawUrl,
-      };
-    }
-    if (action === 'profile') {
-      return {
-        kind: 'social-profile',
-        username: parsed.searchParams.get('username')?.trim().replace(/^@/, '') || null,
+        code: code || null,
+        id,
         raw: rawUrl,
       };
     }

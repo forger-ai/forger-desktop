@@ -9,6 +9,7 @@ import { buildCodexPromptForFreeChat } from '../prompt-builder/user-message';
 import type { AppAgentConversationManager } from '../app-agent-conversation-manager';
 import type { AppAgentTaskManager } from '../app-agent-task-manager';
 import type { AutomationManager } from '../automation-manager';
+import type { BackgroundTaskStore } from '../background-task-store';
 import type { BackupsManager } from '../backups-manager';
 import type { ChatOrchestrator } from '../chat/orchestrator';
 import type { CloudDeviceManager } from '../cloud-device-manager';
@@ -24,6 +25,8 @@ import type { SecretsStore } from '../secrets-store';
 import { buildConversationDiagnosticReport } from '../conversation-diagnostics';
 import type { IPC_CHANNELS as IpcChannels } from '../../shared/ipc';
 import { registerAppCloudMessagingIpcHandlers } from './app-cloud-messaging-handlers';
+import { registerAppRuntimeIpcHandlers } from './app-runtime-handlers';
+import { registerFileLibraryIpcHandlers } from './file-library-handlers';
 import { RENDERER_CHAT_TRACE_EVENTS } from './renderer-chat-trace-events';
 import type {
   AgentDefaults,
@@ -39,8 +42,8 @@ import type {
   AppSecretDeclaration,
   AppSecretsState,
   AppToolsInstallGate,
+  BackgroundTaskUpsertInput,
   BasicActionResult,
-  CallOfficialToolInput,
   CatalogApp,
   ChatApplyRunInput,
   ChatApprovePermissionInput,
@@ -64,16 +67,6 @@ import type {
   DesktopErrorReportPreview,
   ConversationDiagnosticReportPreview,
   DisconnectAppSecretInput,
-  FilesCreateCategoryInput,
-  FilesDeleteCategoryInput,
-  FilesDeleteInput,
-  FilesDiscardStagedForChatInput,
-  FilesImportInput,
-  FilesListInput,
-  FilesMoveInput,
-  FilesRenameCategoryInput,
-  FilesRenameInput,
-  FilesStageForChatInput,
   ForgerAccountLoginInput,
   ForgerAccountProfileInput,
   ForgerAccountRegisterInput,
@@ -147,6 +140,7 @@ interface MainProcessIpcDeps {
   fs: typeof fs;
   getAppDetails: (appId: string) => Promise<unknown>;
   getBackupsManager: () => BackupsManager;
+  getBackgroundTaskStore: () => BackgroundTaskStore;
   getClaudeAuthStatus: () => Promise<unknown>;
   getCloudIdentityStore: () => CloudIdentityStore;
   getCodexAuthStatus: () => Promise<{ authenticated: boolean }>;
@@ -325,7 +319,7 @@ export const __testMainHandlersInternals = {
 };
 
 export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
-  const { state, APP_CLAUDE_MODEL_OPTIONS, APP_CODEX_MODEL_OPTIONS, BetterSqlite3, BrowserWindow, CODEX_USAGE_DASHBOARD_URL, IPC_CHANNELS, app, appAgentConversationManager, appendInstallLog, buildAppSecretsState, buildCodexPromptWithAppContext, buildForgerToolsContextForApp, buildForgerToolsContextForFreeChat, canUseCloudDataSync, chatOrchestrator, cloudDeviceManager, connectClaudeAuth, connectCodexAuth, createLocalAppFromSkeleton, createRemoteAppBackup, decryptCloudMessage, decryptCloudMessages, dialog, disconnectCodexAuth, ensureCatalogStatuses, failureDiagnostic, forgerBackendClient, forwardCloudSocialEvent, fs, getAppDetails, getBackupsManager, getClaudeAuthStatus, getCloudIdentityStore, getCodexAuthStatus, getCodexHome, getDesktopUpdater, getFileLibrary, getForgerHomeRoot, getForgerMetadataRoot, getInstallLogPath, getMemoryStore, getOfficialToolsService, getPrivateAppsRoot, getPrivateDataRoot, getRuntimeStatus, getLocalNetworkShareStatus, getRemoteNetworkShareStatus, getSecretsStore, installAppRuntime, installWelcome, ipcMain, listAppPrompts, listCatalogFromBackend, mainWindow, normalizeManifestAgentDefaults, openInstalledApp, startLocalNetworkShare, stopLocalNetworkShare, startRemoteNetworkShare, stopRemoteNetworkShare, openOrFocusFriendChatWindow, path, publicForgerAccount, registry, reinstallClaude, reinstallCodex, resolveAppIdForWebContents, resolveInstalledAgents, resolveInstalledAppSecrets, resolveInstalledManifest, resolveSelectedAppDisplayName, restoreAppPrompt, restoreAppUserVersionRuntime, restoreRemoteAppBackup, sanitizeRendererChatTrace, sendEncryptedCloudMessage, serializeErrorForInstallLog, setAppAutoSyncSetting, shell, signAppFolderGrant, stopInstalledApp, switchForgerAccountSession, toAppSummary, uninstallAppRuntime, updateAgentDefaults, updateAgentToolApproval, updateAppPrompt, updateAppRuntime, updateCodexDefaults, validateArchiveEntries, validateAppPrompt, zipDirectory } = deps;
+  const { state, APP_CLAUDE_MODEL_OPTIONS, APP_CODEX_MODEL_OPTIONS, BetterSqlite3, BrowserWindow, CODEX_USAGE_DASHBOARD_URL, IPC_CHANNELS, app, appAgentConversationManager, appendInstallLog, buildAppSecretsState, buildCodexPromptWithAppContext, buildForgerToolsContextForApp, buildForgerToolsContextForFreeChat, canUseCloudDataSync, chatOrchestrator, cloudDeviceManager, connectClaudeAuth, connectCodexAuth, createLocalAppFromSkeleton, createRemoteAppBackup, decryptCloudMessage, decryptCloudMessages, dialog, disconnectCodexAuth, ensureCatalogStatuses, failureDiagnostic, forgerBackendClient, forwardCloudSocialEvent, fs, getAppDetails, getBackupsManager, getBackgroundTaskStore, getClaudeAuthStatus, getCloudIdentityStore, getCodexAuthStatus, getCodexHome, getDesktopUpdater, getFileLibrary, getForgerHomeRoot, getForgerMetadataRoot, getInstallLogPath, getMemoryStore, getOfficialToolsService, getPrivateAppsRoot, getPrivateDataRoot, getRuntimeStatus, getLocalNetworkShareStatus, getRemoteNetworkShareStatus, getSecretsStore, installAppRuntime, installWelcome, ipcMain, listAppPrompts, listCatalogFromBackend, mainWindow, normalizeManifestAgentDefaults, openInstalledApp, startLocalNetworkShare, stopLocalNetworkShare, startRemoteNetworkShare, stopRemoteNetworkShare, openOrFocusFriendChatWindow, path, publicForgerAccount, registry, reinstallClaude, reinstallCodex, resolveAppIdForWebContents, resolveInstalledAgents, resolveInstalledAppSecrets, resolveInstalledManifest, resolveSelectedAppDisplayName, restoreAppPrompt, restoreAppUserVersionRuntime, restoreRemoteAppBackup, sanitizeRendererChatTrace, sendEncryptedCloudMessage, serializeErrorForInstallLog, setAppAutoSyncSetting, shell, signAppFolderGrant, stopInstalledApp, switchForgerAccountSession, toAppSummary, uninstallAppRuntime, updateAgentDefaults, updateAgentToolApproval, updateAppPrompt, updateAppRuntime, updateCodexDefaults, validateArchiveEntries, validateAppPrompt, zipDirectory } = deps;
   const localNetworkShareStatusFor = getLocalNetworkShareStatus ?? (() => undefined);
   const remoteNetworkShareStatusFor = getRemoteNetworkShareStatus ?? (() => undefined);
   const localNetworkSharePayloadFor = (appId: string) => {
@@ -666,6 +660,15 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
   ipcMain.handle(IPC_CHANNELS.memoryDelete, async (_event, id: string) => {
     return await getMemoryStore().delete(id, { caller: 'settings' });
   });
+  ipcMain.handle(IPC_CHANNELS.backgroundTasksList, async () => {
+    return await getBackgroundTaskStore().list();
+  });
+  ipcMain.handle(IPC_CHANNELS.backgroundTaskGet, async (_event, id: string) => {
+    return await getBackgroundTaskStore().get(id);
+  });
+  ipcMain.handle(IPC_CHANNELS.backgroundTasksUpsert, async (_event, input: BackgroundTaskUpsertInput) => {
+    return await getBackgroundTaskStore().upsert(input);
+  });
   ipcMain.handle(IPC_CHANNELS.getDesktopUpdateState, async () => getDesktopUpdater().getState());
   ipcMain.handle(IPC_CHANNELS.checkDesktopUpdates, async () => await getDesktopUpdater().check());
   ipcMain.handle(IPC_CHANNELS.downloadDesktopUpdate, async () => await getDesktopUpdater().download());
@@ -719,11 +722,50 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
     return forgerBackendClient ? await forgerBackendClient.listMySocialApps() : { apps: [] };
   });
   ipcMain.handle(IPC_CHANNELS.uploadSocialApp, async (_event, input: SocialUserAppUploadInput) => {
+    const startedAt = new Date().toISOString();
+    const taskId = `social-upload:${input.appId}:${Date.now()}`;
+    const record = registry.apps[input.appId];
+    const appName = record?.name ?? input.appId;
+    const taskStore = getBackgroundTaskStore();
+    await taskStore.upsert({
+      id: taskId,
+      source: 'social-upload',
+      title: `Subiendo ${appName} a Social`,
+      status: 'queued',
+      app: { id: input.appId, name: appName },
+      relatedEntity: { kind: 'social-upload', id: input.appId },
+      statusUpdates: [{ message: 'Preparando app', status: 'queued', createdAt: startedAt }],
+      createdAt: startedAt,
+      updatedAt: startedAt,
+    });
     if (!forgerBackendClient) {
+      await taskStore.upsert({
+        id: taskId,
+        source: 'social-upload',
+        title: `Subiendo ${appName} a Social`,
+        status: 'failed',
+        result: {
+          status: 'error',
+          message: 'Inicia sesion en Forger Cloud para subir apps a Social.',
+          technicalCode: 'backend_client_missing',
+        },
+        completedAt: new Date().toISOString(),
+      });
       return { success: false, userMessage: 'Inicia sesion en Forger Cloud para subir apps a Social.', technicalCode: 'backend_client_missing' };
     }
-    const record = registry.apps[input.appId];
     if (!record?.installDir || !record.privateLocal) {
+      await taskStore.upsert({
+        id: taskId,
+        source: 'social-upload',
+        title: `Subiendo ${appName} a Social`,
+        status: 'failed',
+        result: {
+          status: 'error',
+          message: 'Solo puedes subir a Social apps creadas por ti.',
+          technicalCode: 'social_upload_not_private_local',
+        },
+        completedAt: new Date().toISOString(),
+      });
       return { success: false, userMessage: 'Solo puedes subir a Social apps creadas por ti.', technicalCode: 'social_upload_not_private_local' };
     }
     const manifest = await resolveInstalledManifest(record.installDir);
@@ -731,6 +773,7 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
     const stageDir = path.join(uploadRoot, input.appId);
     const zipPath = path.join(os.tmpdir(), `forger-social-upload-${input.appId}-${Date.now()}.zip`);
     try {
+      await taskStore.appendStatusUpdate(taskId, { message: 'Preparando app', status: 'running' });
       await fs.rm(uploadRoot, { recursive: true, force: true });
       await fs.rm(zipPath, { force: true });
       await fs.mkdir(stageDir, { recursive: true });
@@ -738,8 +781,10 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
         recursive: true,
         filter: (sourcePath) => !shouldSkipSocialUploadPath(sourcePath, record.installDir, path),
       });
+      await taskStore.appendStatusUpdate(taskId, { message: 'Comprimiendo app', status: 'running' });
       await zipDirectory(uploadRoot, zipPath);
       await validateArchiveEntries(zipPath);
+      await taskStore.appendStatusUpdate(taskId, { message: 'Subiendo a Social', status: 'running' });
       const appEntry = await forgerBackendClient.uploadSocialApp({
         zipPath,
         name: record.name,
@@ -750,11 +795,38 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
           ? (manifest.catalog as { category: string }).category
           : 'productivity',
         visibility: input.visibility,
+        onProgress: async (message) => {
+          await taskStore.appendStatusUpdate(taskId, { message, status: 'running' });
+        },
       });
+      await taskStore.appendStatusUpdate(taskId, { message: 'Creando link para compartir', status: 'running' });
       const share = await forgerBackendClient.createSocialAppShare(appEntry.id).catch(() => undefined);
+      const message = share?.deepLink ? `App subida a Social. ${share.deepLink}` : 'App subida a Social.';
+      await taskStore.upsert({
+        id: taskId,
+        source: 'social-upload',
+        title: `Subiendo ${appName} a Social`,
+        status: 'succeeded',
+        result: { status: 'success', message, details: { userAppId: appEntry.id, deepLink: share?.deepLink } },
+        relatedEntity: { kind: 'social-upload', id: input.appId, secondaryId: String(appEntry.id) },
+        completedAt: new Date().toISOString(),
+      });
       return { success: true, app: appEntry, share, userMessage: 'App subida a Social.' };
     } catch (error) {
       const diagnostic = failureDiagnostic(error, 'social_upload_failed');
+      await taskStore.upsert({
+        id: taskId,
+        source: 'social-upload',
+        title: `Subiendo ${appName} a Social`,
+        status: 'failed',
+        result: {
+          status: 'error',
+          message: 'No pudimos subir la app a Social.',
+          technicalCode: typeof diagnostic.technicalCode === 'string' ? diagnostic.technicalCode : 'social_upload_failed',
+          details: typeof diagnostic.details === 'object' && diagnostic.details ? diagnostic.details as Record<string, unknown> : undefined,
+        },
+        completedAt: new Date().toISOString(),
+      });
       return { success: false, userMessage: 'No pudimos subir la app a Social.', ...diagnostic };
     } finally {
       await fs.rm(uploadRoot, { recursive: true, force: true }).catch(() => undefined);
@@ -769,13 +841,18 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
     if (!forgerBackendClient) throw new Error('backend_client_missing');
     return await forgerBackendClient.resolveSocialCode(code);
   });
-  ipcMain.handle(IPC_CHANNELS.installSocialApp, async (_event, input: { versionId: number; shareCode?: string; trustDecision?: 'not_reviewed' | 'reviewed' | 'skipped_review' }) => {
+  ipcMain.handle(IPC_CHANNELS.resolveSocialApp, async (_event, id: number) => {
+    if (!forgerBackendClient) throw new Error('backend_client_missing');
+    return await forgerBackendClient.resolveSocialApp(id);
+  });
+  ipcMain.handle(IPC_CHANNELS.installSocialApp, async (_event, input: { appId?: number; appSlug?: string; shareCode?: string; trustDecision?: 'not_reviewed' | 'reviewed' | 'skipped_review' }) => {
     if (!forgerBackendClient) {
       return { success: false, userMessage: 'Inicia sesion en Forger Cloud para instalar apps de Social.', technicalCode: 'backend_client_missing' };
     }
     try {
       const download = await forgerBackendClient.requestSocialAppDownload({
-        versionId: input.versionId,
+        appId: input.appId,
+        appSlug: input.appSlug,
         shareCode: input.shareCode,
         trustDecision: input.trustDecision,
         platform: process.platform === 'darwin' ? (process.arch === 'arm64' ? 'darwin_arm64' : 'darwin_x64') : process.platform === 'win32' ? 'win32_x64' : 'linux_x64',
@@ -1066,122 +1143,30 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
     return { success: true };
   });
 
-  ipcMain.handle(IPC_CHANNELS.filesPickForChat, async () => {
-    const options: Electron.OpenDialogOptions = {
-      properties: ['openFile', 'multiSelections'],
-    };
-    const result = mainWindow && !mainWindow.isDestroyed()
-      ? await dialog.showOpenDialog(mainWindow, options)
-      : await dialog.showOpenDialog(options);
-    if (result.canceled) {
-      return [];
-    }
-    return await getFileLibrary().pickFileInfo(result.filePaths);
-  });
-  ipcMain.handle(IPC_CHANNELS.filesStageForChat, async (_event, input: FilesStageForChatInput) => {
-    return await getFileLibrary().stageFileForChat(input);
-  });
-  ipcMain.handle(IPC_CHANNELS.filesDiscardStagedForChat, async (_event, input: FilesDiscardStagedForChatInput) => {
-    return await getFileLibrary().discardStagedFilesForChat(input);
-  });
-  ipcMain.handle(IPC_CHANNELS.filesList, async (_event, input?: FilesListInput) => {
-    return await getFileLibrary().list(input ?? {});
-  });
-  ipcMain.handle(IPC_CHANNELS.filesListCategories, async () => {
-    return await getFileLibrary().listCategories();
-  });
-  ipcMain.handle(IPC_CHANNELS.filesCreateCategory, async (_event, input: FilesCreateCategoryInput) => {
-    return await getFileLibrary().createCategory(input);
-  });
-  ipcMain.handle(IPC_CHANNELS.filesRenameCategory, async (_event, input: FilesRenameCategoryInput) => {
-    return await getFileLibrary().renameCategory(input);
-  });
-  ipcMain.handle(IPC_CHANNELS.filesDeleteCategory, async (_event, input: FilesDeleteCategoryInput) => {
-    return await getFileLibrary().deleteCategory(input);
-  });
-  ipcMain.handle(IPC_CHANNELS.filesImport, async (_event, input: FilesImportInput) => {
-    return await getFileLibrary().importFiles(input);
-  });
-  ipcMain.handle(IPC_CHANNELS.filesMove, async (_event, input: FilesMoveInput) => {
-    return await getFileLibrary().moveFiles(input);
-  });
-  ipcMain.handle(IPC_CHANNELS.filesRename, async (_event, input: FilesRenameInput) => {
-    return await getFileLibrary().renameFile(input);
-  });
-  ipcMain.handle(IPC_CHANNELS.filesDelete, async (_event, input: FilesDeleteInput) => {
-    return await getFileLibrary().deleteFiles(input);
+  registerFileLibraryIpcHandlers({
+    IPC_CHANNELS,
+    dialog,
+    getFileLibrary,
+    ipcMain,
+    mainWindow,
   });
 
-  ipcMain.handle(IPC_CHANNELS.appSelectExternalFolder, async (event): Promise<AppExternalFolderSelection> => {
-    const appId = resolveAppIdForWebContents(event.sender.id);
-    if (!appId) {
-      throw new Error('app_window_not_authorized');
-    }
-
-    const ownerWindow = BrowserWindow.fromWebContents(event.sender);
-    const options: Electron.OpenDialogOptions = {
-      properties: ['openDirectory'],
-    };
-    const result = ownerWindow && !ownerWindow.isDestroyed()
-      ? await dialog.showOpenDialog(ownerWindow, options)
-      : await dialog.showOpenDialog(options);
-    if (result.canceled || result.filePaths.length === 0) {
-      return { canceled: true };
-    }
-
-    const selectedPath = await fs.realpath(result.filePaths[0]);
-    return signAppFolderGrant(appId, selectedPath);
-  });
-
-  ipcMain.handle(IPC_CHANNELS.appAiSubscriptionStatus, async (event) => {
-    const appId = resolveAppIdForWebContents(event.sender.id);
-    if (!appId) {
-      throw new Error('app_window_not_authorized');
-    }
-    const status = await getCodexAuthStatus();
-    return { connected: status.authenticated };
-  });
-
-  ipcMain.handle(IPC_CHANNELS.appGetContext, async (event) => {
-    const appId = resolveAppIdForWebContents(event.sender.id);
-    if (!appId) {
-      return {};
-    }
-    const record = registry.apps[appId];
-    const manifest = record?.installDir ? await resolveInstalledManifest(record.installDir) : null;
-    return {
-      agents: await resolveInstalledAgents(appId),
-      agentDefaults: normalizeManifestAgentDefaults(manifest),
-      agentModelOptions: {
-        codex: APP_CODEX_MODEL_OPTIONS,
-        claude: APP_CLAUDE_MODEL_OPTIONS,
-      },
-    };
-  });
-
-  ipcMain.handle(IPC_CHANNELS.appToolsListAvailable, async (event) => {
-    const appId = resolveAppIdForWebContents(event.sender.id);
-    if (!appId) {
-      throw new Error('app_window_not_authorized');
-    }
-    return await getOfficialToolsService().listToolsForApp(appId);
-  });
-
-  ipcMain.handle(IPC_CHANNELS.appToolsGetStatus, async (event, toolId: string) => {
-    const appId = resolveAppIdForWebContents(event.sender.id);
-    if (!appId) {
-      throw new Error('app_window_not_authorized');
-    }
-    const available = await getOfficialToolsService().listToolsForApp(appId);
-    return available.find((tool) => tool.id === toolId) ?? null;
-  });
-
-  ipcMain.handle(IPC_CHANNELS.appToolsCall, async (event, input: CallOfficialToolInput) => {
-    const appId = resolveAppIdForWebContents(event.sender.id);
-    if (!appId) {
-      throw new Error('app_window_not_authorized');
-    }
-    return await getOfficialToolsService().callFromApp(appId, input);
+  registerAppRuntimeIpcHandlers({
+    APP_CLAUDE_MODEL_OPTIONS,
+    APP_CODEX_MODEL_OPTIONS,
+    BrowserWindow,
+    IPC_CHANNELS,
+    dialog,
+    fs,
+    getCodexAuthStatus,
+    getOfficialToolsService,
+    ipcMain,
+    normalizeManifestAgentDefaults,
+    registry,
+    resolveAppIdForWebContents,
+    resolveInstalledAgents,
+    resolveInstalledManifest,
+    signAppFolderGrant,
   });
 
   registerAppCloudMessagingIpcHandlers({

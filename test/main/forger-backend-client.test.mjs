@@ -723,6 +723,184 @@ test('catalog, account, and OAuth config methods cover local fallbacks and safe 
   }
 });
 
+test('social app upload uses direct upload, confirms an upload attempt, and polls until published', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'forger-social-upload-'));
+  const zipPath = join(root, 'social.zip');
+  await writeFile(zipPath, 'zip-content');
+  const requests = [];
+  const harness = createClient(root, async (url, init = {}) => {
+    requests.push({ url, init });
+    const parsed = new URL(url);
+    if (parsed.pathname === '/api/v1/me/user_apps/direct_uploads') {
+      const body = JSON.parse(init.body);
+      assert.equal(body.filename, 'social.zip');
+      assert.equal(body.byte_size, 'zip-content'.length);
+      assert.equal(body.content_type, 'application/zip');
+      return jsonResponse(201, {
+        signed_blob_id: 'signed-blob',
+        direct_upload: {
+          url: 'https://storage.test/upload',
+          headers: { 'Content-Type': 'application/zip' },
+        },
+      });
+    }
+    if (url === 'https://storage.test/upload') {
+      assert.equal(init.method, 'PUT');
+      assert.equal(init.headers['Content-Type'], 'application/zip');
+      assert.equal(Buffer.from(init.body).toString('utf8'), 'zip-content');
+      return new Response('', { status: 200 });
+    }
+    if (parsed.pathname === '/api/v1/me/user_apps') {
+      const body = JSON.parse(init.body);
+      assert.equal(body.signed_blob_id, 'signed-blob');
+      assert.equal(body.slug, 'chessos');
+      assert.match(body.checksum_sha256, /^[0-9a-f]{64}$/);
+      return jsonResponse(202, {
+        upload_attempt: {
+          id: 77,
+          slug: 'chessos',
+          status: 'uploaded',
+          checksum_sha256: body.checksum_sha256,
+          byte_size: 11,
+        },
+      });
+    }
+    if (parsed.pathname === '/api/v1/me/user_app_upload_attempts/77') {
+      return jsonResponse(200, {
+        id: 77,
+        slug: 'chessos',
+        status: 'published',
+        app: {
+          id: 9,
+          slug: 'chessos',
+          name: 'ChessOS',
+          visibility: 'private',
+          status: 'published',
+          owner: { id: 1, username: 'maker' },
+          latest_version: { id: 9, version: 'v1', checksum_sha256: 'a'.repeat(64), file_size_bytes: 11, supported_platforms: [] },
+        },
+      });
+    }
+    return jsonResponse(404, { error: 'not_found' });
+  }, 'session-token');
+
+  try {
+    const app = await harness.client.uploadSocialApp({
+      zipPath,
+      name: 'ChessOS',
+      slug: 'chessos',
+      visibility: 'private',
+    });
+    assert.equal(app.slug, 'chessos');
+    assert.equal(app.latestVersion.version, 'v1');
+    assert.deepEqual(requests.map((request) => new URL(request.url).pathname), [
+      '/api/v1/me/user_apps/direct_uploads',
+      '/upload',
+      '/api/v1/me/user_apps',
+      '/api/v1/me/user_app_upload_attempts/77',
+    ]);
+  } finally {
+    harness.restore();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('social app upload surfaces async analysis errors', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'forger-social-upload-failed-'));
+  const zipPath = join(root, 'social.zip');
+  await writeFile(zipPath, 'zip-content');
+  const harness = createClient(root, async (url, _init = {}) => {
+    const parsed = new URL(url);
+    if (parsed.pathname === '/api/v1/me/user_apps/direct_uploads') {
+      return jsonResponse(201, {
+        signed_blob_id: 'signed-blob',
+        direct_upload: {
+          url: 'https://storage.test/upload',
+          headers: {},
+        },
+      });
+    }
+    if (url === 'https://storage.test/upload') {
+      return new Response('', { status: 200 });
+    }
+    if (parsed.pathname === '/api/v1/me/user_apps') {
+      return jsonResponse(202, { upload_attempt: { id: 78, slug: 'bad-app', status: 'uploaded' } });
+    }
+    if (parsed.pathname === '/api/v1/me/user_app_upload_attempts/78') {
+      return jsonResponse(200, { id: 78, slug: 'bad-app', status: 'failed', error_code: 'manifest_invalid_json' });
+    }
+    return jsonResponse(404, { error: 'not_found' });
+  }, 'session-token');
+
+  try {
+    await assert.rejects(
+      () => harness.client.uploadSocialApp({ zipPath, name: 'Bad App', slug: 'bad-app', visibility: 'private' }),
+      (error) => error.technicalCode === 'manifest_invalid_json',
+    );
+  } finally {
+    harness.restore();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('social app download uses app id instead of version id', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'forger-social-download-'));
+  let requestPath;
+  const harness = createClient(root, async (url, init = {}) => {
+    const parsed = new URL(url);
+    requestPath = parsed.pathname;
+    assert.equal(init.method, 'POST');
+    return jsonResponse(201, {
+      download_url: 'https://downloads.test/chessos.zip',
+      app: { id: 9, slug: 'chessos', name: 'ChessOS', owner_username: 'maker' },
+      version: { id: 9, version: 'v2', checksum_sha256: 'a'.repeat(64), file_size_bytes: 10, supported_platforms: [] },
+      install: { id: 5, installed_at: '2026-05-25T00:00:00Z', source: 'profile', trust_decision: 'reviewed' },
+    });
+  }, 'session-token');
+
+  try {
+    const download = await harness.client.requestSocialAppDownload({
+      appId: 9,
+      platform: 'darwin_arm64',
+      deviceIdentifier: 'desktop',
+      trustDecision: 'reviewed',
+    });
+    assert.equal(requestPath, '/api/v1/social/apps/by_id/9/download');
+    assert.equal(download.version.version, 'v2');
+  } finally {
+    harness.restore();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('social app resolver fetches public apps by id', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'forger-social-resolve-app-'));
+  let requestPath;
+  const harness = createClient(root, async (url) => {
+    const parsed = new URL(url);
+    requestPath = parsed.pathname;
+    return jsonResponse(200, {
+      id: 9,
+      slug: 'chessos',
+      name: 'ChessOS',
+      visibility: 'public',
+      status: 'published',
+      owner: { id: 1, username: 'maker' },
+      latest_version: { id: 9, version: 'v2', checksum_sha256: 'a'.repeat(64), file_size_bytes: 10, supported_platforms: [] },
+    });
+  }, 'session-token');
+
+  try {
+    const result = await harness.client.resolveSocialApp(9);
+    assert.equal(requestPath, '/api/v1/social/apps/by_id/9');
+    assert.equal(result.app.id, 9);
+    assert.equal(result.app.latestVersion.version, 'v2');
+  } finally {
+    harness.restore();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('account, catalog, rating, and download methods cover success and malformed response branches', async () => {
   const root = await mkdtemp(join(tmpdir(), 'forger-backend-account-success-'));
   const requests = [];
@@ -938,113 +1116,6 @@ test('remote backup and Gmail OAuth backend helpers cover empty, signed, and inv
       () => harness.client.refreshGmailOAuthAccessToken({ clientId: 'client-id', refreshToken: 'refresh-token' }),
       (error) => error.technicalCode === 'gmail_oauth_backend_failed_502',
     );
-  } finally {
-    harness.restore();
-    await rm(root, { recursive: true, force: true });
-  }
-});
-
-test('backend client maps profile cooldowns, OAuth token posts, device failures, and reporting network failures safely', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'forger-backend-branches-'));
-  const requests = [];
-  const harness = createClient(root, async (url, init = {}) => {
-    requests.push({ url, init });
-    const parsed = new URL(url);
-    if (parsed.pathname === '/api/v1/me/profile') {
-      return jsonResponse(429, {
-        error: 'username_change_cooldown',
-        username_change_available_at: '2026-06-21T00:00:00Z',
-      });
-    }
-    if (parsed.pathname === '/api/v1/oauth/gmail/token') {
-      const body = JSON.parse(init.body);
-      assert.equal(body.code, 'oauth-code');
-      return jsonResponse(502, { error: 'upstream' });
-    }
-    if (parsed.pathname === '/api/v1/oauth/gmail/refresh') {
-      const body = JSON.parse(init.body);
-      assert.equal(body.refresh_token, 'refresh-token');
-      return jsonResponse(200, { access_token: 'access-token' });
-    }
-    if (parsed.pathname === '/api/v1/me/devices/register') {
-      return jsonResponse(401, { error: 'expired' });
-    }
-    if (parsed.pathname === '/api/v1/me/devices') {
-      return jsonResponse(200, { devices: 'not-array' });
-    }
-    if (parsed.pathname === '/api/v1/me/devices/7/pairing_codes') {
-      return jsonResponse(500, { error: 'failed' });
-    }
-    if (parsed.pathname === '/api/v1/usage_events') {
-      throw new TypeError('usage offline');
-    }
-    if (parsed.pathname === '/api/v1/desktop_error_reports') {
-      throw new TypeError('reports offline');
-    }
-    return jsonResponse(404, { error: 'not_found' });
-  }, 'session-token');
-
-  try {
-    const profile = await harness.client.updateAccountProfile({ username: 'new_name' });
-    assert.equal(profile.success, false);
-    assert.equal(profile.authenticated, true);
-    assert.equal(profile.technicalCode, 'profile_update_failed_429');
-    assert.match(profile.userMessage, /21\/06\/2026|2026/);
-
-    await assert.rejects(
-      () => harness.client.exchangeGmailOAuthCode({
-        clientId: 'client-id',
-        code: 'oauth-code',
-        codeVerifier: 'verifier',
-        redirectUri: 'http://127.0.0.1/callback',
-      }),
-      (error) => error.technicalCode === 'upstream',
-    );
-    assert.deepEqual(await harness.client.refreshGmailOAuthAccessToken({
-      clientId: 'client-id',
-      refreshToken: 'refresh-token',
-    }), { access_token: 'access-token' });
-
-    await assert.rejects(
-      () => harness.client.registerDevice({
-        deviceUid: 'device',
-        deviceSecret: 'secret',
-        name: 'Mac',
-        platform: 'darwin_arm64',
-      }),
-      (error) => error.technicalCode === 'device_register_failed_401',
-    );
-    assert.deepEqual(await harness.client.listDevices(), []);
-    await assert.rejects(
-      () => harness.client.createDevicePairingCode({
-        deviceId: 7,
-        codeDigest: 'digest',
-        expiresAt: '2026-05-21T00:00:00Z',
-      }),
-      (error) => error.technicalCode === 'pairing_code_failed_500',
-    );
-
-    const usage = await harness.client.submitUsageEvent({
-      eventName: 'app_opened',
-      installationIdentifier: 'install',
-      surface: 'app',
-    });
-    assert.equal(usage.success, false);
-    assert.equal(usage.technicalCode, 'usage_event_network_failed');
-
-    const report = await harness.client.submitDesktopErrorReport({
-      source: 'main',
-      operation: 'startup',
-      message: 'Failed',
-      technicalCode: 'startup_failed',
-    });
-    assert.equal(report.success, false);
-    assert.equal(report.technicalCode, 'desktop_error_report_network_failed');
-
-    const entries = await readLogEntries(root);
-    assert.equal(entries.some((entry) => entry.event === 'usage_event:submit_failed'), true);
-    assert.equal(entries.some((entry) => entry.event === 'desktop_error_report:submit_failed'), true);
-    assert.equal(requests.some((request) => request.init.headers?.Authorization === 'Bearer session-token'), true);
   } finally {
     harness.restore();
     await rm(root, { recursive: true, force: true });

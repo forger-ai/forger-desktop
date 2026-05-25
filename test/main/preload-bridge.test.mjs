@@ -65,6 +65,7 @@ test('preload forwards representative commands to the expected IPC channels with
   await api.openExternalUrl('https://forger.ai/help');
   await api.dbQueryTable('finance-os', 'transactions', 25);
   await api.automationsGetRunTranscript('run-99');
+  await api.backgroundTaskGet('task-99');
   await api.toggleMaximizeWindow();
 
   assert.deepEqual(invokeCalls, [
@@ -77,6 +78,7 @@ test('preload forwards representative commands to the expected IPC channels with
     ['forger:open-external-url', 'https://forger.ai/help'],
     ['forger:db:query-table', 'finance-os', 'transactions', 25],
     ['forger:automations:get-run-transcript', 'run-99'],
+    ['forger:background-tasks:get', 'task-99'],
     ['forger:window:toggle-maximize'],
   ]);
 });
@@ -117,24 +119,28 @@ test('preload event subscriptions unwrap payloads and unsubscribe the exact regi
   const unsubscribeWindow = api.onWindowStateChanged((payload) => received.push(['window', payload]));
   const unsubscribeDeepLink = api.onDeepLink((payload) => received.push(['deep-link', payload]));
   const unsubscribeAutomation = api.onAutomationUpdated((payload) => received.push(['automation', payload]));
+  const unsubscribeBackgroundTask = api.onBackgroundTaskUpdated((payload) => received.push(['background-task', payload]));
   const unsubscribeErrorReport = api.onDesktopErrorReportRequested((payload) => received.push(['error-report', payload]));
 
   const chatListener = listeners.get('forger:chat:run-updated');
   const windowListener = listeners.get('forger:window:state-changed');
   const deepLinkListener = listeners.get('forger:deep-link');
   const automationListener = listeners.get('forger:automations:updated');
+  const backgroundTaskListener = listeners.get('forger:background-tasks:updated');
   const errorReportListener = listeners.get('forger:error-report:requested');
 
   chatListener({ sender: 'main' }, { run: { runId: 'run-1' } });
   windowListener({ sender: 'main' }, { isMaximized: true, isFullScreen: false, usesCustomFrame: true });
   deepLinkListener({ sender: 'main' }, { kind: 'chat', app: 'finance-os', prompt: 'hola' });
   automationListener({ sender: 'main' }, { automation: { id: 'automation-1' } });
+  backgroundTaskListener({ sender: 'main' }, { task: { id: 'task-1', status: 'running' } });
   errorReportListener({ sender: 'main' }, { technicalCode: 'boom', userMessage: 'Something happened' });
 
   unsubscribeChat();
   unsubscribeWindow();
   unsubscribeDeepLink();
   unsubscribeAutomation();
+  unsubscribeBackgroundTask();
   unsubscribeErrorReport();
 
   assert.deepEqual(received, [
@@ -142,6 +148,7 @@ test('preload event subscriptions unwrap payloads and unsubscribe the exact regi
     ['window', { isMaximized: true, isFullScreen: false, usesCustomFrame: true }],
     ['deep-link', { kind: 'chat', app: 'finance-os', prompt: 'hola' }],
     ['automation', { automation: { id: 'automation-1' } }],
+    ['background-task', { task: { id: 'task-1', status: 'running' } }],
     ['error-report', { technicalCode: 'boom', userMessage: 'Something happened' }],
   ]);
   assert.deepEqual(removedListeners, [
@@ -149,12 +156,14 @@ test('preload event subscriptions unwrap payloads and unsubscribe the exact regi
     ['forger:window:state-changed', windowListener],
     ['forger:deep-link', deepLinkListener],
     ['forger:automations:updated', automationListener],
+    ['forger:background-tasks:updated', backgroundTaskListener],
     ['forger:error-report:requested', errorReportListener],
   ]);
   assert.equal(listeners.has('forger:chat:run-updated'), false);
   assert.equal(listeners.has('forger:window:state-changed'), false);
   assert.equal(listeners.has('forger:deep-link'), false);
   assert.equal(listeners.has('forger:automations:updated'), false);
+  assert.equal(listeners.has('forger:background-tasks:updated'), false);
   assert.equal(listeners.has('forger:error-report:requested'), false);
 });
 

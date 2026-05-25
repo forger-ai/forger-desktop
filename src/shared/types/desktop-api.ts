@@ -19,6 +19,7 @@ import type { CodexAuthStatus, ClaudeAuthStatus, DesktopErrorReportPreview } fro
 import type { AgentToolPackageDefinition, AgentToolSettings, UpdateAgentToolApprovalInput, OfficialToolsState, ToolMutationResult, ConfigureOfficialToolInput, AppToolsInstallGate, SetAppToolGrantInput } from './tools';
 import type { PickedChatFile, FilesStageForChatInput, FilesDiscardStagedForChatInput, FilesActionResult, FilesListInput, ForgerFileRecord, ForgerFileCategory, FilesCreateCategoryInput, FilesRenameCategoryInput, FilesDeleteCategoryInput, FilesImportInput, FilesMoveInput, FilesRenameInput, FilesDeleteInput, DbListTablesResponse, DbQueryTableResponse } from './data';
 import type { Automation, AutomationRun, AutomationRunSummary, AutomationUpsertInput, WindowControlState } from './automations';
+import type { BackgroundTask, BackgroundTaskEvent, BackgroundTaskUpsertInput } from './background-tasks';
 
 export interface ForgerDesktopApi {
   listInstalledApps: () => Promise<AppSummary[]>;
@@ -85,7 +86,8 @@ export interface ForgerDesktopApi {
   uploadSocialApp: (input: SocialUserAppUploadInput) => Promise<{ success: boolean; app?: SocialUserApp; share?: SocialUserAppShare; userMessage?: string; technicalCode?: string }>;
   createSocialAppShare: (userAppId: number) => Promise<SocialUserAppShare>;
   resolveSocialCode: (code: string) => Promise<{ app: SocialUserApp; share?: Record<string, unknown> }>;
-  installSocialApp: (input: { versionId: number; shareCode?: string; trustDecision?: 'not_reviewed' | 'reviewed' | 'skipped_review' }) => Promise<{ success: boolean; userMessage?: string; download?: SocialUserAppDownload; technicalCode?: string }>;
+  resolveSocialApp: (id: number) => Promise<{ app: SocialUserApp }>;
+  installSocialApp: (input: { appId?: number; appSlug?: string; shareCode?: string; trustDecision?: 'not_reviewed' | 'reviewed' | 'skipped_review' }) => Promise<{ success: boolean; userMessage?: string; download?: SocialUserAppDownload; technicalCode?: string }>;
   searchFriends: (username: string) => Promise<CloudFriendUser[]>;
   sendFriendRequest: (username: string) => Promise<CloudFriendship>;
   acceptFriendRequest: (id: number) => Promise<CloudFriendship>;
@@ -162,6 +164,10 @@ export interface ForgerDesktopApi {
   automationsListRuns: (automationId: string) => Promise<AutomationRunSummary[]>;
   automationsGetRunTranscript: (runId: string) => Promise<AutomationRun | null>;
   onAutomationUpdated: (listener: (event: { automation: Automation; run?: AutomationRunSummary }) => void) => () => void;
+  backgroundTasksList: () => Promise<BackgroundTask[]>;
+  backgroundTaskGet: (id: string) => Promise<BackgroundTask | null>;
+  backgroundTasksUpsert: (input: BackgroundTaskUpsertInput) => Promise<BackgroundTask>;
+  onBackgroundTaskUpdated: (listener: (event: BackgroundTaskEvent) => void) => () => void;
   minimizeWindow: () => Promise<void>;
   toggleMaximizeWindow: () => Promise<WindowControlState>;
   closeWindow: () => Promise<void>;
@@ -188,12 +194,7 @@ export type ForgerDeepLink =
   | {
       kind: 'social-app';
       code: string | null;
-      id: string | null;
-      raw: string;
-    }
-  | {
-      kind: 'social-profile';
-      username: string | null;
+      id: number | null;
       raw: string;
     }
   | {

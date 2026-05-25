@@ -53,6 +53,24 @@ export const normalizePersistedActiveChatRun = (value: unknown): PersistedActive
   return { runId, conversationId, appId };
 };
 
+export const normalizePersistedActiveChatRuns = (value: unknown): PersistedActiveChatRun[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const seen = new Set<string>();
+  const runs: PersistedActiveChatRun[] = [];
+  for (const item of value) {
+    const run = normalizePersistedActiveChatRun(item);
+    if (!run || seen.has(run.conversationId)) {
+      continue;
+    }
+    seen.add(run.conversationId);
+    runs.push(run);
+  }
+  return runs;
+};
+
 export const activeRunFromChatRun = (
   run: Pick<ChatRun, 'runId' | 'appId' | 'conversationId' | 'status'>,
 ): PersistedActiveChatRun | null => {

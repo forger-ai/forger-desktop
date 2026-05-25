@@ -32,7 +32,7 @@ test('parseForgerUrl rejects non-Forger URLs and preserves unknown Forger links'
   });
 });
 
-test('parseForgerUrl returns Social app and profile deep links', () => {
+test('parseForgerUrl returns Social app deep links with codes or public ids', () => {
   assert.deepEqual(parseForgerUrl('forger://social/app?code=%20ABC123%20'), {
     kind: 'social-app',
     code: 'ABC123',
@@ -43,13 +43,12 @@ test('parseForgerUrl returns Social app and profile deep links', () => {
   assert.deepEqual(parseForgerUrl('forger://social/app?id=42'), {
     kind: 'social-app',
     code: null,
-    id: '42',
+    id: 42,
     raw: 'forger://social/app?id=42',
   });
 
   assert.deepEqual(parseForgerUrl('forger://social/profile?username=%40ana'), {
-    kind: 'social-profile',
-    username: 'ana',
+    kind: 'unknown',
     raw: 'forger://social/profile?username=%40ana',
   });
 });
