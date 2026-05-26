@@ -1,6 +1,5 @@
 import type fs from 'node:fs/promises';
 import type path from 'node:path';
-import { createHash } from 'node:crypto';
 import os from 'node:os';
 import type * as Electron from 'electron';
 import { BrowserWindow, type IpcMain } from 'electron';
@@ -159,6 +158,7 @@ interface MainProcessIpcDeps {
   getRemoteNetworkShareStatus?: (appId: string) => RuntimeStatus['remoteNetworkShare'];
   getSecretsStore: () => SecretsStore;
   installAppRuntime: (appId: string, locale?: string) => Promise<InstallAppResult>;
+  installSocialAppRuntime: (input: { appId?: number; appSlug?: string; shareCode?: string; trustDecision?: 'not_reviewed' | 'reviewed' | 'skipped_review' }, locale?: string) => Promise<InstallAppResult & { appId?: string }>;
   createLocalAppFromSkeleton: (input: CreateLocalAppInput, locale?: string) => Promise<CreateLocalAppResult>;
   installWelcome: (appId: string, userLanguage?: string) => Promise<InstallWelcomeResult>;
   ipcMain: IpcMain;
@@ -319,7 +319,7 @@ export const __testMainHandlersInternals = {
 };
 
 export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
-  const { state, APP_CLAUDE_MODEL_OPTIONS, APP_CODEX_MODEL_OPTIONS, BetterSqlite3, BrowserWindow, CODEX_USAGE_DASHBOARD_URL, IPC_CHANNELS, app, appAgentConversationManager, appendInstallLog, buildAppSecretsState, buildCodexPromptWithAppContext, buildForgerToolsContextForApp, buildForgerToolsContextForFreeChat, canUseCloudDataSync, chatOrchestrator, cloudDeviceManager, connectClaudeAuth, connectCodexAuth, createLocalAppFromSkeleton, createRemoteAppBackup, decryptCloudMessage, decryptCloudMessages, dialog, disconnectCodexAuth, ensureCatalogStatuses, failureDiagnostic, forgerBackendClient, forwardCloudSocialEvent, fs, getAppDetails, getBackupsManager, getBackgroundTaskStore, getClaudeAuthStatus, getCloudIdentityStore, getCodexAuthStatus, getCodexHome, getDesktopUpdater, getFileLibrary, getForgerHomeRoot, getForgerMetadataRoot, getInstallLogPath, getMemoryStore, getOfficialToolsService, getPrivateAppsRoot, getPrivateDataRoot, getRuntimeStatus, getLocalNetworkShareStatus, getRemoteNetworkShareStatus, getSecretsStore, installAppRuntime, installWelcome, ipcMain, listAppPrompts, listCatalogFromBackend, mainWindow, normalizeManifestAgentDefaults, openInstalledApp, startLocalNetworkShare, stopLocalNetworkShare, startRemoteNetworkShare, stopRemoteNetworkShare, openOrFocusFriendChatWindow, path, publicForgerAccount, registry, reinstallClaude, reinstallCodex, resolveAppIdForWebContents, resolveInstalledAgents, resolveInstalledAppSecrets, resolveInstalledManifest, resolveSelectedAppDisplayName, restoreAppPrompt, restoreAppUserVersionRuntime, restoreRemoteAppBackup, sanitizeRendererChatTrace, sendEncryptedCloudMessage, serializeErrorForInstallLog, setAppAutoSyncSetting, shell, signAppFolderGrant, stopInstalledApp, switchForgerAccountSession, toAppSummary, uninstallAppRuntime, updateAgentDefaults, updateAgentToolApproval, updateAppPrompt, updateAppRuntime, updateCodexDefaults, validateArchiveEntries, validateAppPrompt, zipDirectory } = deps;
+  const { state, APP_CLAUDE_MODEL_OPTIONS, APP_CODEX_MODEL_OPTIONS, BetterSqlite3, BrowserWindow, CODEX_USAGE_DASHBOARD_URL, IPC_CHANNELS, app, appAgentConversationManager, appendInstallLog, buildAppSecretsState, buildCodexPromptWithAppContext, buildForgerToolsContextForApp, buildForgerToolsContextForFreeChat, canUseCloudDataSync, chatOrchestrator, cloudDeviceManager, connectClaudeAuth, connectCodexAuth, createLocalAppFromSkeleton, createRemoteAppBackup, decryptCloudMessage, decryptCloudMessages, dialog, disconnectCodexAuth, ensureCatalogStatuses, failureDiagnostic, forgerBackendClient, forwardCloudSocialEvent, fs, getAppDetails, getBackupsManager, getBackgroundTaskStore, getClaudeAuthStatus, getCloudIdentityStore, getCodexAuthStatus, getCodexHome, getDesktopUpdater, getFileLibrary, getForgerHomeRoot, getForgerMetadataRoot, getInstallLogPath, getMemoryStore, getOfficialToolsService, getPrivateAppsRoot, getPrivateDataRoot, getRuntimeStatus, getLocalNetworkShareStatus, getRemoteNetworkShareStatus, getSecretsStore, installAppRuntime, installSocialAppRuntime, installWelcome, ipcMain, listAppPrompts, listCatalogFromBackend, mainWindow, normalizeManifestAgentDefaults, openInstalledApp, startLocalNetworkShare, stopLocalNetworkShare, startRemoteNetworkShare, stopRemoteNetworkShare, openOrFocusFriendChatWindow, path, publicForgerAccount, registry, reinstallClaude, reinstallCodex, resolveAppIdForWebContents, resolveInstalledAgents, resolveInstalledAppSecrets, resolveInstalledManifest, resolveSelectedAppDisplayName, restoreAppPrompt, restoreAppUserVersionRuntime, restoreRemoteAppBackup, sanitizeRendererChatTrace, sendEncryptedCloudMessage, serializeErrorForInstallLog, setAppAutoSyncSetting, shell, signAppFolderGrant, stopInstalledApp, switchForgerAccountSession, toAppSummary, uninstallAppRuntime, updateAgentDefaults, updateAgentToolApproval, updateAppPrompt, updateAppRuntime, updateCodexDefaults, validateArchiveEntries, validateAppPrompt, zipDirectory } = deps;
   const localNetworkShareStatusFor = getLocalNetworkShareStatus ?? (() => undefined);
   const remoteNetworkShareStatusFor = getRemoteNetworkShareStatus ?? (() => undefined);
   const localNetworkSharePayloadFor = (appId: string) => {
@@ -845,36 +845,8 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
     if (!forgerBackendClient) throw new Error('backend_client_missing');
     return await forgerBackendClient.resolveSocialApp(id);
   });
-  ipcMain.handle(IPC_CHANNELS.installSocialApp, async (_event, input: { appId?: number; appSlug?: string; shareCode?: string; trustDecision?: 'not_reviewed' | 'reviewed' | 'skipped_review' }) => {
-    if (!forgerBackendClient) {
-      return { success: false, userMessage: 'Inicia sesion en Forger Cloud para instalar apps de Social.', technicalCode: 'backend_client_missing' };
-    }
-    try {
-      const download = await forgerBackendClient.requestSocialAppDownload({
-        appId: input.appId,
-        appSlug: input.appSlug,
-        shareCode: input.shareCode,
-        trustDecision: input.trustDecision,
-        platform: process.platform === 'darwin' ? (process.arch === 'arm64' ? 'darwin_arm64' : 'darwin_x64') : process.platform === 'win32' ? 'win32_x64' : 'linux_x64',
-        deviceIdentifier: os.hostname(),
-      });
-      const response = await fetch(download.downloadUrl, { method: 'GET', headers: { Accept: 'application/zip' } });
-      if (!response.ok) throw new Error(`social_download_failed_${response.status}`);
-      const buffer = Buffer.from(await response.arrayBuffer());
-      const checksum = createHash('sha256').update(buffer).digest('hex');
-      if (download.version.checksumSha256 && checksum !== download.version.checksumSha256) {
-        throw new Error('social_app_zip_checksum_mismatch');
-      }
-      const quarantineDir = path.join(os.tmpdir(), `forger-social-quarantine-${download.app.slug}-${Date.now()}`);
-      const quarantineZip = path.join(quarantineDir, `${download.app.slug}.zip`);
-      await fs.mkdir(quarantineDir, { recursive: true });
-      await fs.writeFile(quarantineZip, buffer);
-      await validateArchiveEntries(quarantineZip);
-      return { success: true, userMessage: 'App Social descargada y verificada. La instalacion final requiere confirmacion.', download };
-    } catch (error) {
-      const diagnostic = failureDiagnostic(error, 'social_install_failed');
-      return { success: false, userMessage: 'No pudimos verificar esta app de Social.', ...diagnostic };
-    }
+  ipcMain.handle(IPC_CHANNELS.installSocialApp, async (_event, input: { appId?: number; appSlug?: string; shareCode?: string; trustDecision?: 'not_reviewed' | 'reviewed' | 'skipped_review' }, locale?: string) => {
+    return await installSocialAppRuntime(input, locale);
   });
   ipcMain.handle(IPC_CHANNELS.searchFriends, async (_event, username: string) => {
     return forgerBackendClient ? await forgerBackendClient.searchFriends(username) : [];

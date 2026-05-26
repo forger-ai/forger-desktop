@@ -792,6 +792,7 @@ const getVenvExecutables = (backendDir: string): { python: string; pip: string }
 const installBackendDependenciesWithUv = async (pythonPath: string, backendDir: string, appId: string): Promise<void> => await getInstalledAppLifecycleController().installBackendDependenciesWithUv(pythonPath, backendDir, appId);
 const ensureBackendPythonEnvironment = async (pythonPath: string, backendDir: string, appId: string, reason: string): Promise<void> => await getInstalledAppLifecycleController().ensureBackendPythonEnvironment(pythonPath, backendDir, appId, reason);
 const installAppRuntime = async (appId: string, localeInput?: string): Promise<InstallAppResult> => await getInstalledAppLifecycleController().installAppRuntime(appId, localeInput);
+const installSocialAppRuntime = async (input: { appId?: number; appSlug?: string; shareCode?: string; trustDecision?: 'not_reviewed' | 'reviewed' | 'skipped_review' }, localeInput?: string): Promise<InstallAppResult & { appId?: string }> => await getInstalledAppLifecycleController().installSocialAppRuntime(input, localeInput);
 const localAppCreator = createLocalAppCreator({ DEFAULT_NODE_VERSION, DEFAULT_PYTHON_VERSION, appendInstallLog, app, emitInstallProgress, failureDiagnostic, fs, getPrivateAppsRoot, installAppDependencies, normalizeInstalledAgentContext, path, registry, serializeErrorForInstallLog, upsertInstalledRecord, ensureAppGitRepository, ensureUserModifiedBranch, getOriginalCommitSha });
 const createLocalAppFromSkeleton = async (input: CreateLocalAppInput, localeInput?: string): Promise<CreateLocalAppResult> => await localAppCreator.createLocalAppFromSkeleton(input, localeInput);
 const updateAppRuntime = async (appId: string, localeInput?: string): Promise<InstallAppResult> => await getInstalledAppLifecycleController().updateAppRuntime(appId, localeInput);
@@ -1062,6 +1063,7 @@ const getMainProcessIpcDeps = () => ({
   getSecretsStore,
   getWindowState,
   installAppRuntime,
+  installSocialAppRuntime,
   installWelcome,
   ipcMain,
   listAppPrompts,

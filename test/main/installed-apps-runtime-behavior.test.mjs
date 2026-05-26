@@ -416,6 +416,66 @@ test('installAppRuntime installs into a temp private app root and prepares local
   assert.ok(!registry.apps['demo-app'].installDir.includes(`${os.homedir()}${path.sep}Forger`));
 });
 
+test('installSocialAppRuntime requests a signed Social download and installs under a stable local id', async (t) => {
+  const originalFetch = globalThis.fetch;
+  const { root, registry, calls, controller } = await makeLifecycleHarness({
+    catalogApps: [],
+    forgerBackendClient: {
+      resolveSocialCode: async (code) => {
+        calls.push(['resolveSocialCode', code]);
+        return {
+          app: {
+            id: 44,
+            slug: 'shared-ledger',
+            name: 'Shared Ledger',
+            visibility: 'private',
+            status: 'published',
+            owner: { id: 3, username: 'Ana.User' },
+          },
+        };
+      },
+      requestSocialAppDownload: async (input) => {
+        calls.push(['socialDownload', input.appId, input.shareCode, input.platform]);
+        return {
+          downloadUrl: 'https://social.test/app.zip',
+          app: { id: 44, slug: 'shared-ledger', name: 'Shared Ledger', ownerUsername: 'Ana.User' },
+          version: {
+            id: 8,
+            version: '2.1.0',
+            runtimeStack: 'vite-fastapi-sqlite',
+            supportedPlatforms: ['darwin_arm64'],
+            capabilities: ['local_business_data'],
+            checksumSha256: '',
+            fileSizeBytes: 12,
+          },
+          install: { id: 77, installedAt: new Date().toISOString(), source: 'code', trustDecision: 'not_reviewed' },
+        };
+      },
+    },
+  });
+  t.after(async () => {
+    globalThis.fetch = originalFetch;
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  globalThis.fetch = async () => new Response(Buffer.from('fake zip'), { status: 200 });
+
+  const result = await controller.installSocialAppRuntime({ shareCode: 'ABCD' });
+
+  assert.equal(result.success, true);
+  assert.equal(result.appId, 'social-ana-user-shared-ledger');
+  assert.equal(registry.apps['social-ana-user-shared-ledger'].status, 'installed');
+  assert.deepEqual(registry.apps['social-ana-user-shared-ledger'].socialSource, {
+    userAppId: 44,
+    slug: 'shared-ledger',
+    ownerUsername: 'Ana.User',
+    installId: 77,
+  });
+  assert.ok(calls.some((call) => call[0] === 'resolveSocialCode' && call[1] === 'ABCD'));
+  assert.ok(calls.some((call) => call[0] === 'socialDownload' && call[1] === 44));
+  assert.ok(calls.some((call) => call[0] === 'socialDownload' && call[2] === 'ABCD'));
+  assert.ok(calls.some((call) => call[0] === 'frontendDeps' && call[4] === 'social-ana-user-shared-ledger'));
+});
+
 test('updateAppRuntime returns explicit guard results before touching installed app files', async (t) => {
   const missingApp = await makeLifecycleHarness();
   t.after(async () => {
@@ -1275,11 +1335,15 @@ test('normalizeInstalledAgentContext writes app runtime skills while ignoring sk
   assert.equal(generated.includes('forger-fastapi-contracts'), false);
   assert.equal(generated.includes('forger-frontend-structure'), false);
   assert.equal(generated.includes('forger-react-ui'), false);
-  assert.equal(generated.includes('forger-app-design-guidelines'), false);
+  assert.equal(generated.includes('forger-frontend-product-patterns'), false);
   assert.equal(generated.includes('forger-app-shell-layout'), false);
+  assert.equal(generated.includes('forger-mui-design-patterns'), false);
   assert.equal(generated.includes('forger-mui-component-patterns'), false);
   assert.equal(generated.includes('forger-mui-date-pickers'), false);
   assert.equal(generated.includes('forger-mui-consistency'), false);
+  assert.equal(generated.includes('forger-tailwind-design-patterns'), false);
+  assert.equal(generated.includes('forger-tailwind-shadcn-patterns'), false);
+  assert.equal(generated.includes('forger-tailwind-responsive-frontend'), false);
   assert.ok(generated.includes('forger-app-mcp-data-tools'));
   assert.ok(generated.includes('inside'));
   assert.equal(generated.includes('outside-skill'), false);
