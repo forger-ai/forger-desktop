@@ -124,6 +124,7 @@ const createDeps = async (overrides = {}) => {
         updateUserSecret: async () => ({}),
       }),
       installAppRuntime: async () => ({ success: true }),
+      installSocialAppRuntime: async () => ({ success: true }),
       installWelcome: async () => ({ success: true }),
       ipcMain,
       listAppPrompts: async () => [],
@@ -1136,6 +1137,7 @@ test('main IPC delegates app lifecycle, prompt, secret, official-tool, and file-
     getOfficialToolsService: () => officialTools,
     getRuntimeStatus: (appId) => ({ appId, status: 'running' }),
     installAppRuntime: async (appId, locale) => ({ op: 'install', appId, locale }),
+    installSocialAppRuntime: async (input, locale) => ({ op: 'installSocial', input, locale }),
     installWelcome: async (appId, userLanguage) => ({ op: 'welcome', appId, userLanguage }),
     listAppPrompts: async (appId) => [{ appId, id: 'summary' }],
     openInstalledApp: async (appId, locale) => ({ op: 'open', appId, locale }),
@@ -1153,6 +1155,7 @@ test('main IPC delegates app lifecycle, prompt, secret, official-tool, and file-
   });
 
   assert.deepEqual(await handlers.get(IPC_CHANNELS.installApp)(null, 'finance-os', 'es'), { op: 'install', appId: 'finance-os', locale: 'es' });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.installSocialApp)(null, { appId: 9 }, 'es'), { op: 'installSocial', input: { appId: 9 }, locale: 'es' });
   assert.deepEqual(await handlers.get(IPC_CHANNELS.updateApp)(null, 'finance-os', 'es'), { op: 'update', appId: 'finance-os', locale: 'es' });
   assert.deepEqual(await handlers.get(IPC_CHANNELS.uninstallApp)(null, 'finance-os'), { op: 'uninstall', appId: 'finance-os' });
   assert.deepEqual(await handlers.get(IPC_CHANNELS.openApp)(null, 'finance-os', 'es'), { op: 'open', appId: 'finance-os', locale: 'es' });
@@ -1163,7 +1166,6 @@ test('main IPC delegates app lifecycle, prompt, secret, official-tool, and file-
   assert.deepEqual(await handlers.get(IPC_CHANNELS.getAppSecrets)(null, 'finance-os'), { appId: 'finance-os', appSecrets: [] });
   assert.deepEqual(await handlers.get(IPC_CHANNELS.setAppAutoSync)(null, 'finance-os', true), { appId: 'finance-os', autoSync: true });
   assert.deepEqual(await handlers.get(IPC_CHANNELS.restoreAppUserVersion)(null, 'finance-os'), { op: 'restoreUserVersion', appId: 'finance-os' });
-
   assert.deepEqual(await handlers.get(IPC_CHANNELS.listAppPrompts)(null, 'finance-os'), [{ appId: 'finance-os', id: 'summary' }]);
   assert.deepEqual(await handlers.get(IPC_CHANNELS.validateAppPrompt)(null, { appId: 'finance-os' }), { op: 'validatePrompt', input: { appId: 'finance-os' } });
   assert.deepEqual(await handlers.get(IPC_CHANNELS.updateAppPrompt)(null, { appId: 'finance-os' }), { op: 'updatePrompt', input: { appId: 'finance-os' } });

@@ -3,6 +3,7 @@ import type { CatalogApp } from './catalog-app';
 import type { AgentEffort, AgentProvider, CodexReasoningEffort } from './agent-runtime';
 import type { AppAgent, AppPromptReviewItem, AppPromptTemplate } from './prompts';
 import type { FailureDiagnosticFields } from './base';
+import type { SocialUserApp } from './social';
 
 export type ChatRunStatus =
   | 'queued'
@@ -113,6 +114,11 @@ export interface AppDetails {
   agents?: AppAgent[];
   promptReviews?: AppPromptReviewItem[];
   codexConversation?: { enabled: boolean };
+  social?: {
+    app: SocialUserApp;
+    shareCode?: string;
+    localAppId: string;
+  };
 }
 
 export interface AppUpdateConflictInfo {

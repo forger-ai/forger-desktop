@@ -87,7 +87,7 @@ export interface ForgerDesktopApi {
   createSocialAppShare: (userAppId: number) => Promise<SocialUserAppShare>;
   resolveSocialCode: (code: string) => Promise<{ app: SocialUserApp; share?: Record<string, unknown> }>;
   resolveSocialApp: (id: number) => Promise<{ app: SocialUserApp }>;
-  installSocialApp: (input: { appId?: number; appSlug?: string; shareCode?: string; trustDecision?: 'not_reviewed' | 'reviewed' | 'skipped_review' }) => Promise<{ success: boolean; userMessage?: string; download?: SocialUserAppDownload; technicalCode?: string }>;
+  installSocialApp: (input: { appId?: number; appSlug?: string; shareCode?: string; trustDecision?: 'not_reviewed' | 'reviewed' | 'skipped_review' }, locale?: string) => Promise<InstallAppResult & { appId?: string; download?: SocialUserAppDownload }>;
   searchFriends: (username: string) => Promise<CloudFriendUser[]>;
   sendFriendRequest: (username: string) => Promise<CloudFriendship>;
   acceptFriendRequest: (id: number) => Promise<CloudFriendship>;

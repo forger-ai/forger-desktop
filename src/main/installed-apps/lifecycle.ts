@@ -32,6 +32,13 @@ import type {
   StopAppResult,
 } from '../../shared/types';
 
+interface SocialInstallInput {
+  appId?: number;
+  appSlug?: string;
+  shareCode?: string;
+  trustDecision?: 'not_reviewed' | 'reviewed' | 'skipped_review';
+}
+
 interface CommandCaptureResult {
   code?: number | null;
   stdout: string;
@@ -191,6 +198,12 @@ const getVenvExecutables = (backendDir: string): { python: string; pip: string }
     python: path.join(backendDir, '.venv', 'bin', 'python'),
     pip: path.join(backendDir, '.venv', 'bin', 'pip'),
   };
+};
+
+const socialLocalAppId = (ownerUsername: string, slug: string): string => {
+  const safeOwner = ownerUsername.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '') || 'user';
+  const safeSlug = slug.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '') || 'app';
+  return `social-${safeOwner}-${safeSlug}`.slice(0, 96);
 };
 
 const installBackendDependenciesWithUv = async (
@@ -514,6 +527,65 @@ const installAppRuntime = async (appId: string, localeInput?: string): Promise<I
       success: false,
       phase: 'failed',
       userMessage: copy.install.failed,
+      progress: installProgressByPhase.failed,
+      ...diagnostic,
+    };
+  }
+};
+
+const installSocialAppRuntime = async (input: SocialInstallInput, localeInput?: string): Promise<InstallAppResult & { appId?: string }> => {
+  const copy = getSharedCopy(localeInput);
+  if (!forgerBackendClient) {
+    return runtimeError('Inicia sesion en Forger Cloud para instalar apps de Social.', 'backend_client_missing');
+  }
+
+  try {
+    const resolvedFromCode = !input.appId && !input.appSlug && input.shareCode
+      ? await forgerBackendClient.resolveSocialCode(input.shareCode)
+      : null;
+    const download = await forgerBackendClient.requestSocialAppDownload({
+      appId: input.appId ?? resolvedFromCode?.app.id,
+      appSlug: input.appSlug,
+      shareCode: input.shareCode,
+      trustDecision: input.trustDecision,
+      platform: resolvePlatformAlias(),
+      deviceIdentifier: os.hostname(),
+    });
+    const localAppId = socialLocalAppId(download.app.ownerUsername, download.app.slug);
+    const socialCatalogApp: CatalogApp = {
+      id: localAppId,
+      name: download.app.name || download.app.slug,
+      description: `App compartida por @${download.app.ownerUsername} en Forger Social.`,
+      category: 'productividad',
+      status: registry.apps[localAppId]?.status ?? 'not_installed',
+      latestVersion: download.version.version,
+      version: registry.apps[localAppId]?.version,
+      downloadUrl: download.downloadUrl,
+      checksumSha256: download.version.checksumSha256,
+      capabilities: download.version.capabilities.map((id) => ({ id })),
+      agents: download.version.agents as AppAgent[] | undefined,
+      promptTemplates: download.version.promptTemplates as AppPromptTemplate[] | undefined,
+    };
+    catalogApps = [socialCatalogApp, ...catalogApps.filter((entry) => entry.id !== localAppId)];
+    const result = await installAppRuntime(localAppId, localeInput);
+    if (result.success && registry.apps[localAppId]) {
+      await upsertInstalledRecord({
+        ...registry.apps[localAppId],
+        socialSource: {
+          userAppId: download.app.id,
+          slug: download.app.slug,
+          ownerUsername: download.app.ownerUsername,
+          installId: download.install.id,
+        },
+      });
+    }
+    return { ...result, appId: localAppId, userMessage: result.success ? copy.install.completed : result.userMessage };
+  } catch (error) {
+    const diagnostic = failureDiagnostic(error, 'social_install_failed');
+    return {
+      success: false,
+      phase: 'failed',
+      userMessage: 'No pudimos instalar esta app de Social.',
       progress: installProgressByPhase.failed,
       ...diagnostic,
     };
@@ -1078,5 +1150,5 @@ const installWelcome = async (appId: string, userLanguage?: string): Promise<{
   }
 };
 
-  return { fetchDownloadBundle, getVenvExecutables, installBackendDependenciesWithUv, ensureBackendPythonEnvironment, installAppRuntime, updateAppRuntime, restoreAppUserVersionRuntime, readOperationSummaries, readLocalChangeSummaries, getAppDetails, uninstallAppRuntime, installWelcome };
+  return { fetchDownloadBundle, getVenvExecutables, installBackendDependenciesWithUv, ensureBackendPythonEnvironment, installAppRuntime, installSocialAppRuntime, updateAppRuntime, restoreAppUserVersionRuntime, readOperationSummaries, readLocalChangeSummaries, getAppDetails, uninstallAppRuntime, installWelcome };
 };

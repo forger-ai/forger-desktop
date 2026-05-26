@@ -18,6 +18,12 @@ export interface InstalledAppRecord {
   originalCommitSha?: string;
   installedAt?: string;
   privateLocal?: boolean;
+  socialSource?: {
+    userAppId: number;
+    slug: string;
+    ownerUsername: string;
+    installId?: number;
+  };
   localNetworkShareSupported?: boolean;
   remoteTunnelSupported?: boolean;
   pendingUpdate?: {

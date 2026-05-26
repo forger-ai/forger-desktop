@@ -59,6 +59,7 @@ import type {
   SharedFileRef,
   SubmitAppRatingInput,
   SubmitProductFeedbackInput,
+  SocialUserApp,
   UpdateAgentDefaultsInput,
   UserSecretSummary,
 } from '@shared/types';
@@ -146,6 +147,36 @@ open: boolean; report: ConversationDiagnosticReportPreview | null; busy: boolean
 interface RemoteTunnelReadyDialogState {
 open: boolean; appName: string; portalUrl: string; sessionId?: string; }
 type SocialUploadVisibility = 'private' | 'friends' | 'public';
+const socialLocalAppId = (ownerUsername: string, slug: string) => {
+  const safeOwner = ownerUsername.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '') || 'user';
+  const safeSlug = slug.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '') || 'app';
+  return `social-${safeOwner}-${safeSlug}`.slice(0, 96);
+};
+const socialAppDetails = (app: SocialUserApp, shareCode?: string): AppDetails => {
+  const localAppId = socialLocalAppId(app.owner.username, app.slug);
+  return {
+    app: {
+      id: localAppId,
+      name: app.name,
+      description: app.description ?? app.shortDescription ?? 'App compartida desde Forger Social',
+      category: 'productividad',
+      status: 'not_installed',
+      latestVersion: app.latestVersion?.version,
+      version: app.latestVersion?.version,
+      capabilities: app.latestVersion?.capabilities.map((id) => ({ id })),
+      averageRating: app.averageReviewScore,
+      ratingsCount: app.reviewsCount,
+    },
+    installed: false,
+    status: 'not_installed',
+    version: app.latestVersion?.version,
+    latestVersion: app.latestVersion?.version,
+    operations: [],
+    promptTemplates: app.latestVersion?.promptTemplates as AppPromptTemplate[] | undefined,
+    agents: app.latestVersion?.agents as AppAgent[] | undefined,
+    social: { app, shareCode, localAppId },
+  };
+};
 interface SocialUploadDialogState {
 open: boolean; appId: string | null; visibility: SocialUploadVisibility; }
 interface SocialChatWindowRoute {
@@ -256,7 +287,7 @@ clearActiveRunState(activeRunToHydrate.runId); }).catch(() => clearActiveRunStat
 const targetRunId = run?.id ?? selectedAutomationRun?.id ?? runs[0]?.id; if (!targetRunId) { setSelectedAutomationRun(null); return; }
 void desktopApi.automationsGetRunTranscript(targetRunId).then(setSelectedAutomationRun); }); }
 }); const unsubscribeBackgroundTask = desktopApi.onBackgroundTaskUpdated(({ task }) => { mergeBackgroundTask(task); }); const unsubscribeDesktopUpdate = desktopApi.onDesktopUpdateProgress((state) => { setDesktopUpdateState(state); }); const unsubscribeForgerAccount = desktopApi.onForgerAccountUpdated((account) => { setForgerAccount(account); setForgerAccountMessage(account.userMessage ?? null); }); const unsubscribeErrorReport = desktopApi.onDesktopErrorReportRequested((report) => { setErrorReportDialog({ open: true, report, busy: false }); }); const unsubscribeDeepLink = desktopApi.onDeepLink((link) => {
-if (link.kind === 'social-app') { setCurrentView('friends'); setBannerSeverity('info'); setBannerMessage(link.code ? 'Abriendo invitacion de Social. Revisa la app antes de instalarla.' : 'Abriendo app publica de Social.'); const openSocialApp = link.code ? desktopApi.resolveSocialCode(link.code) : link.id ? desktopApi.resolveSocialApp(link.id) : Promise.reject(new Error('social_app_link_invalid')); void openSocialApp.catch(() => { setBannerSeverity('error'); setBannerMessage('No pudimos abrir esta app de Social.'); }); return; }
+	if (link.kind === 'social-app') { setBannerSeverity('info'); setBannerMessage(link.code ? 'Abriendo invitacion de Social. Revisa la app antes de instalarla.' : 'Abriendo app publica de Social.'); const openSocialApp = link.code ? desktopApi.resolveSocialCode(link.code) : link.id ? desktopApi.resolveSocialApp(link.id) : Promise.reject(new Error('social_app_link_invalid')); void openSocialApp.then((payload) => { const details = socialAppDetails(payload.app, link.code ?? undefined); setAppDetailsBackView('catalog'); setSelectedAppDetailsId(details.social?.localAppId ?? details.app.id); setSelectedAppDetails(details); setAppSecretsState(null); setCurrentView('app'); }).catch(() => { setBannerSeverity('error'); setBannerMessage('No pudimos abrir esta app de Social.'); }); return; }
 if (link.kind !== 'chat') return; const requestedName = link.app?.trim() || null; let targetAppId: string | null = null; if (requestedName) { const exact = installedAppsRef.current.find((entry) => entry.id === requestedName); const devVariant = installedAppsRef.current.find( (entry) => entry.id === `${requestedName}-dev`, ); targetAppId = exact?.id ?? devVariant?.id ?? null; if (!targetAppId) { console.warn('[deep-link] unknown app, falling back to free chat:', requestedName); }
 }
 if (targetAppId) { setSelectedAppId(targetAppId); } else { setSelectedAppId(null); }
@@ -272,9 +303,9 @@ setSelectedDataAppId(installedOnly[0].id); }, [currentView, selectedDataAppId, i
 void refreshFiles(fileFilters); }, [currentView, fileFilters]); useEffect(() => { if (currentView !== 'backups') { return; }
 void refreshBackups().catch(() => { setBannerSeverity('error'); setBannerMessage(t.sections.backups.loadError); }); }, [currentView, installedApps]); useEffect(() => { if (currentView !== 'secrets') { return; }
 void refreshUserSecrets().catch(() => { setBannerSeverity('error'); setBannerMessage('No pudimos cargar tus secretos.'); }); }, [currentView]); useEffect(() => { if (currentView !== 'chat') { return; }
-void refreshFiles({ sortBy: 'uploadedAt', sortDirection: 'desc' }); }, [currentView]); useEffect(() => { if (currentView !== 'app' || !selectedAppDetailsId) { return; }
+void refreshFiles({ sortBy: 'uploadedAt', sortDirection: 'desc' }); }, [currentView]); useEffect(() => { if (currentView !== 'app' || !selectedAppDetailsId || selectedAppDetails?.social?.localAppId === selectedAppDetailsId) { return; }
 const desktopApi = getDesktopApi(); void desktopApi.getAppDetails(selectedAppDetailsId).then((details) => { setSelectedAppDetails(details); if (details?.installed) { void refreshAppSecrets(selectedAppDetailsId).catch(() => { setBannerSeverity('error'); setBannerMessage('No pudimos cargar los secretos de esta app.'); }); } else { setAppSecretsState(null); }
-}); }, [currentView, selectedAppDetailsId, installedApps, catalogApps]); useEffect(() => { if (typeof window !== 'undefined') { window.localStorage.setItem(THEME_STORAGE_KEY, themePreference); }
+}); }, [currentView, selectedAppDetailsId, selectedAppDetails?.social?.localAppId, installedApps, catalogApps]); useEffect(() => { if (typeof window !== 'undefined') { window.localStorage.setItem(THEME_STORAGE_KEY, themePreference); }
 }, [themePreference]); useEffect(() => { if (typeof window !== 'undefined') { window.localStorage.setItem(LANGUAGE_STORAGE_KEY, languagePreference); }
 }, [languagePreference]); useEffect(() => { if (typeof window !== 'undefined') { window.localStorage.setItem(EARLY_ACCESS_STORAGE_KEY, String(earlyAccessEnabled)); }
 }, [earlyAccessEnabled]); useEffect(() => { if (typeof window !== 'undefined') { window.localStorage.setItem(ADVANCED_MODE_STORAGE_KEY, String(advancedMode)); }
@@ -353,7 +384,8 @@ setCurrentView('chat'); }
 } else { submitUsageEvent({ eventName: 'app_install_failed', surface: 'catalog', locale: t.locale, stringParameters: { app_id: appId, phase: result.phase ?? 'unknown', technical_code: result.technicalCode ?? 'install_failed' } }); setBannerSeverity('error'); setBannerMessage(result.userMessage); requestErrorReportFromResult('app', 'install', result, { appId, appVersion: installedApps.find((appEntry) => appEntry.id === appId)?.version, }); }
 } catch (error) { submitUsageEvent({ eventName: 'app_install_failed', surface: 'catalog', locale: t.locale, stringParameters: { app_id: appId, phase: 'exception', technical_code: 'install_unhandled_error' } }); setBannerSeverity('error'); setBannerMessage(t.settings.authErrorFallback); requestErrorReport({ source: 'app', operation: 'install', message: error instanceof Error ? error.message : t.settings.authErrorFallback, technicalCode: 'install_unhandled_error', appId, sensitiveDetails: { stack: error instanceof Error ? error.stack : undefined }, }); }
 };
-const handleInstall = async (appId: string) => { try { const gate = await getDesktopApi().getAppToolsInstallGate(appId, activeLocale); if (gate) { setPendingInstallGate(gate); return; }
+const handleInstall = async (appId: string) => { const social = selectedAppDetails?.social?.localAppId === appId ? selectedAppDetails.social : undefined; if (social) { submitUsageEvent({ eventName: 'app_install_started', surface: 'social', locale: t.locale, stringParameters: { app_id: appId } }); const result = await getDesktopApi().installSocialApp({ appId: social.shareCode ? undefined : social.app.id, shareCode: social.shareCode, trustDecision: 'not_reviewed' }, activeLocale); await refreshApps(); setBannerSeverity(result.success ? 'success' : 'error'); setBannerMessage(result.userMessage); if (result.success && result.appId) { submitUsageEvent({ eventName: 'app_install_succeeded', surface: 'social', locale: t.locale, stringParameters: { app_id: result.appId } }); setSelectedAppDetails(await getDesktopApi().getAppDetails(result.appId)); setSelectedAppDetailsId(result.appId); setSelectedAppId(result.appId); } else if (!result.success) { requestErrorReportFromResult('app', 'social-install', result, { appId }); } return; }
+try { const gate = await getDesktopApi().getAppToolsInstallGate(appId, activeLocale); if (gate) { setPendingInstallGate(gate); return; }
 } catch { }
 await performInstall(appId); };
 const startCreatedAppConversation = async (app: { appId: string; name: string; description: string; purpose: string; lookAndFeel?: string }) => {
