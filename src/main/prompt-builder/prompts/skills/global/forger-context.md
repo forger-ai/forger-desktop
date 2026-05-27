@@ -1,6 +1,6 @@
 ---
 name: forger-context
-description: Understand Forger as the local app environment around installed apps.
+description: Use when working inside Forger home, installed apps, private app workspaces, shared files, app operations, local app context, or non-technical Forger user workflows.
 ---
 
 - Forger is a local app that helps people install approved apps, create their own apps, and work with those apps through an agentic coding tool.

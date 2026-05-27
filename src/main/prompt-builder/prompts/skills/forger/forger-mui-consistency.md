@@ -1,9 +1,9 @@
 ---
 name: forger-mui-consistency
-description: Use consistent MUI patterns only for Desktop UI or apps whose manifest stack.frontend.ui is MUI.
+description: Use when reviewing or polishing MUI Desktop or MUI app UI for visual consistency, accessibility, shell layout, tables, charts, navigation, focus states, and interaction patterns.
 ---
 
-- This skill applies only to Forger Desktop or to apps whose manifest declares a MUI frontend. Do not use it for Tailwind, shadcn/ui, Radix, Headless UI, or plain CSS app frontends.
+- Apply these rules only to Forger Desktop or apps whose manifest declares a MUI frontend. Do not use them for Tailwind, shadcn/ui, Radix, Headless UI, or plain CSS app frontends.
 - Reuse MUI components before creating ad hoc variants.
 - For shell-level navigation, prefer MUI `AppBar`, `Drawer`, `NavigationRail`-style layouts, `BottomNavigation`, `Tabs`, `List`, and `Toolbar` patterns over custom clickable containers.
 - Keep fixed shell regions outside the content scroller and make the MUI `Box`, `Stack`, or `Grid` that owns main content use `minHeight: 0` and `overflow: auto` when it is the scroll container.

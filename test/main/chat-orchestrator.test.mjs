@@ -402,11 +402,50 @@ test('canceling a chat run kills the provider process and keeps the run canceled
     assert.equal(canceledRun.status, 'canceled');
 
     await new Promise((resolve) => setTimeout(resolve, 300));
+    const finalRun = harness.orchestrator.getRun({ runId: started.runId });
     const statuses = harness.events
       .filter((entry) => entry.runId === started.runId)
       .map((entry) => entry.status);
     assert.equal(statuses.includes('preview_ready'), false);
-    assert.equal(harness.orchestrator.getRun({ runId: started.runId })?.status, 'canceled');
+    assert.equal(finalRun?.status, 'canceled');
+    assert.ok(finalRun?.errorCode === undefined || finalRun.errorCode === 'canceled');
+    assert.equal(finalRun?.userMessage, undefined);
+    assert.doesNotMatch(finalRun?.userMessage ?? '', /I could not run Codex CLI|codex_exec_failed|Run failed/i);
+  } finally {
+    await harness.cleanup();
+  }
+});
+
+test('chat cancellation does not turn a killed provider error into a Codex CLI failure message', async () => {
+  const harness = await createHarness();
+  try {
+    harness.orchestrator.sandboxRunner = {
+      async runCodex() {
+        const [runId] = harness.orchestrator.runs.keys();
+        await harness.orchestrator.cancelRun({ runId });
+        throw new Error('codex_exec_failed');
+      },
+      async runClaude() {
+        throw new Error('not_used');
+      },
+    };
+
+    const started = await harness.orchestrator.startRun({
+      prompt: 'cancel then provider error',
+      threadId: null,
+      conversationId: 'conversation-canceled-provider-error',
+      conversationHistory: [{ role: 'user', content: 'cancel then provider error' }],
+    });
+
+    const finalRun = await waitFor(() => {
+      const run = harness.orchestrator.getRun({ runId: started.runId });
+      return run?.errorCode === 'canceled' ? run : null;
+    }, 'canceled provider error handling');
+
+    assert.equal(finalRun.status, 'canceled');
+    assert.equal(finalRun.errorCode, 'canceled');
+    assert.equal(finalRun.userMessage, undefined);
+    assert.doesNotMatch(finalRun.userMessage ?? '', /I could not run Codex CLI|codex_exec_failed|Run failed/i);
   } finally {
     await harness.cleanup();
   }

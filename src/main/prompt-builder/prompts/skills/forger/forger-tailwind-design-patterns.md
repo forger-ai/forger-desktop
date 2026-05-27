@@ -1,9 +1,9 @@
 ---
 name: forger-tailwind-design-patterns
-description: Maintain coherent Tailwind design systems for Forger apps using semantic tokens, responsive layout, and shadcn/Radix-compatible styling.
+description: Use when changing Tailwind app styling, semantic tokens, CSS variables, palettes, spacing, radii, shadows, layout utilities, dark mode, or shadcn/Radix-compatible visual patterns.
 ---
 
-- Use this skill for Forger Vite React apps whose frontend uses Tailwind CSS, shadcn/ui copied components, and Radix primitives.
+- Apply these rules to Forger Vite React apps whose frontend uses Tailwind CSS, shadcn/ui copied components, and Radix primitives.
 - Do not use MUI component APIs, `sx`, Emotion themes, or MUI breakpoint helpers in Tailwind/shadcn apps.
 - Inspect the app's Tailwind version before changing tokens or config. Tailwind v4 uses CSS-first `@theme`; Tailwind v3 usually uses `tailwind.config.*`.
 - Keep design tokens in one explicit location such as `frontend/src/styles/globals.css`, `frontend/src/design-system`, or the app's existing equivalent.

@@ -35,6 +35,7 @@ jobs:
           cache: npm
 
       - run: npm ci
+      - run: npm rebuild electron
       - run: node scripts/validate-release-tag.mjs
       - run: npm run test:coverage
 
@@ -70,6 +71,7 @@ jobs:
           cache: npm
 
       - run: npm ci
+      - run: npm rebuild electron
       - run: npm run typecheck
       - run: npm run ${{ matrix.script }}
         env:

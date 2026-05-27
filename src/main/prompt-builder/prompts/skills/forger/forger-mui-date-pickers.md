@@ -1,11 +1,11 @@
 ---
 name: forger-mui-date-pickers
-description: Use this only for date and time inputs in Desktop UI or apps whose manifest stack.frontend.ui is MUI.
+description: Use when implementing date, time, date-time, calendar, schedule, due-date, reporting-period, or temporal filter inputs in Desktop or MUI apps with MUI X Community pickers.
 ---
 
 ## Package Boundary
 
-- This skill applies only to Forger Desktop or to apps whose manifest declares a MUI frontend. Do not use it for Tailwind, shadcn/ui, Radix, Headless UI, or plain CSS app frontends.
+- Apply these rules only to Forger Desktop or apps whose manifest declares a MUI frontend. Do not use them for Tailwind, shadcn/ui, Radix, Headless UI, or plain CSS app frontends.
 - Use MUI X Community Date and Time Pickers from `@mui/x-date-pickers`.
 - Do not use MUI X Pro or Premium date picker features unless the app explicitly has a paid license and the user asks for them.
 - Before using pickers, verify the app has `@mui/x-date-pickers` and the required date adapter dependency.

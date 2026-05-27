@@ -24,6 +24,7 @@ const {
   buildCodexPromptWithAppContext,
 } = require('../../dist-electron/main/prompt-builder/user-message.js');
 const {
+  buildInstalledAppSkillTemplates,
   buildForgerOfficialToolSkillTemplates,
   buildForgerOfficialToolsPromptSection,
 } = require('../../dist-electron/main/prompt-builder/official-tools.js');
@@ -40,6 +41,26 @@ const {
   installedAppsSeed,
   settingsSeed,
 } = require('../../dist-electron/shared/mock-data.js');
+
+const readSkillFiles = async () => {
+  const skillsRoot = path.resolve('src/main/prompt-builder/prompts/skills');
+  const entries = [];
+  for (const group of ['global', 'forger', 'apps']) {
+    const groupRoot = path.join(skillsRoot, group);
+    const filenames = (await fs.readdir(groupRoot)).filter((entry) => entry.endsWith('.md')).sort();
+    for (const filename of filenames) {
+      const body = await fs.readFile(path.join(groupRoot, filename), 'utf8');
+      const frontmatter = body.match(/^---\n([\s\S]*?)\n---/);
+      assert.ok(frontmatter, `${filename} has frontmatter`);
+      const name = frontmatter[1].match(/^name:\s*(.*)$/m)?.[1];
+      const description = frontmatter[1].match(/^description:\s*(.*)$/m)?.[1];
+      assert.ok(name, `${filename} has a name`);
+      assert.ok(description, `${filename} has a description`);
+      entries.push({ group, filename, name, description, body });
+    }
+  }
+  return entries;
+};
 
 test('Forger account store normalizes persisted user sessions and clears local account files', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forger-account-store-'));
@@ -296,6 +317,7 @@ test('Forger prompt builders include contract, language, files, official tools, 
   assert.match(globalAgents, /Use product words: app, screen, button, data, file, saved version, flow, result/);
   assert.match(globalAgents, /## Request Playbooks[\s\S]*## How To Speak With The Person/);
   assert.match(globalAgents, /### Building a New App[\s\S]*1\. Clarify the goal[\s\S]*2\. Shape the first useful version[\s\S]*3\. Offer two or three product directions/);
+  assert.match(globalAgents, /### Building a New App[\s\S]*use `forger-localization` before drafting labels, navigation, empty states, loading states, error states, success states/);
   assert.match(globalAgents, /### Modifying an App[\s\S]*1\. Identify what should feel different[\s\S]*3\. Work on one visible improvement[\s\S]*4\. Save the result as a new version/);
   assert.match(globalAgents, /### Answering a Simple Question[\s\S]*1\. Identify the selected app[\s\S]*3\. Give a direct answer from verified app information/);
   assert.match(globalAgents, /### Working With App Data[\s\S]*1\. Identify which app and which data[\s\S]*3\. Prefer a safe preview[\s\S]*5\. Explain what was reviewed, loaded, changed, skipped, or left untouched/);
@@ -311,44 +333,65 @@ test('Forger prompt builders include contract, language, files, official tools, 
   }), /prompt_template_variable_missing:forgerPartial/);
 });
 
-test('official tool skill templates and seed data keep expected Desktop defaults', () => {
+test('official tool skill templates and seed data keep expected Desktop defaults', async () => {
   const templates = buildForgerOfficialToolSkillTemplates();
   assert.deepEqual(templates.map((template) => template.id), [
-    'forger-context',
     'forger-app-agents-authoring',
     'forger-app-mcp-data-tools',
-    'forger-official-tools',
-    'forger-gmail',
-    'forger-permissions',
-    'forger-manifest-authoring',
-    'forger-desktop-runtime-bridge',
-    'forger-localization',
-    'forger-automations',
-    'forger-secrets',
+    'forger-context',
     'forger-agents',
-    'forger-tools',
-    'forger-tasks',
-    'forger-frontend-product-patterns',
-    'forger-web-interface-review',
     'forger-app-shell-layout',
-    'forger-mui-design-patterns',
-    'forger-mui-component-patterns',
-    'forger-mui-date-pickers',
-    'forger-mui-consistency',
-    'forger-tailwind-design-patterns',
-    'forger-tailwind-shadcn-patterns',
-    'forger-tailwind-responsive-frontend',
-    'forger-tanstack-query-patterns',
-    'forger-installed-app-change',
-    'forger-social-app-review',
-    'forger-python-backend',
+    'forger-automations',
+    'forger-desktop-runtime-bridge',
     'forger-fastapi-contracts',
+    'forger-frontend-product-patterns',
     'forger-frontend-structure',
+    'forger-gmail',
+    'forger-installed-app-change',
+    'forger-localization',
+    'forger-manifest-authoring',
     'forger-mobile-responsive-frontend',
-    'forger-remote-tunnel-wiring',
+    'forger-mui-component-patterns',
+    'forger-mui-consistency',
+    'forger-mui-date-pickers',
+    'forger-mui-design-patterns',
+    'forger-official-tools',
+    'forger-permissions',
+    'forger-python-backend',
     'forger-react-ui',
+    'forger-remote-tunnel-wiring',
+    'forger-secrets',
+    'forger-social-app-review',
+    'forger-tailwind-design-patterns',
+    'forger-tailwind-responsive-frontend',
+    'forger-tailwind-shadcn-patterns',
+    'forger-tanstack-query-patterns',
+    'forger-tasks',
+    'forger-tools',
+    'forger-web-interface-review',
   ]);
   assert.ok(templates.every((template) => template.body.startsWith('---\nname:')));
+  const skillFiles = await readSkillFiles();
+  const workspaceSkillFiles = skillFiles.filter((entry) => entry.group === 'global' || entry.group === 'forger');
+  assert.deepEqual(
+    templates.map((template) => template.id),
+    workspaceSkillFiles.map((entry) => entry.name),
+  );
+  for (const template of templates) {
+    const file = workspaceSkillFiles.find((entry) => entry.name === template.id);
+    assert.ok(file);
+    assert.equal(template.description, file.description);
+  }
+  assert.deepEqual(buildInstalledAppSkillTemplates(['gmail.search_messages']).map((template) => template.id), [
+    'forger-app-agents-authoring',
+    'forger-app-mcp-data-tools',
+    'forger-context',
+    'forger-app-official-tools',
+  ]);
+  const appOfficialSkill = buildInstalledAppSkillTemplates(['gmail.search_messages']).find((template) => template.id === 'forger-app-official-tools');
+  assert.ok(appOfficialSkill);
+  assert.equal(appOfficialSkill.description, 'Use when an installed app wants to call official Forger tools; limit tool calls to manifest-granted actions such as Gmail search, read, attachment download, or send.');
+  assert.match(appOfficialSkill.body, /`gmail\.search_messages`/);
   const manifestSkill = templates.find((template) => template.id === 'forger-manifest-authoring');
   assert.ok(manifestSkill);
   assert.match(manifestSkill.body, /## Full Manifest JSON Contract/);
@@ -371,19 +414,33 @@ test('official tool skill templates and seed data keep expected Desktop defaults
   assert.match(appShellSkill.body, /fixed bottom navigation/);
   const productPatternsSkill = templates.find((template) => template.id === 'forger-frontend-product-patterns');
   assert.ok(productPatternsSkill);
+  assert.equal(productPatternsSkill.description, 'Use when creating or changing Forger app dashboards, CRUD screens, forms, data views, assistant task surfaces, multi-step workflows, or screen structure before choosing stack-specific UI skills.');
   assert.match(productPatternsSkill.body, /Do not overload dashboards/);
   assert.match(productPatternsSkill.body, /Use pills and badges sparingly/);
   assert.match(productPatternsSkill.body, /agent threads, promptTemplate tasks/);
+  assert.match(productPatternsSkill.body, /Inspect the real app before selecting implementation guidance/);
+  assert.match(productPatternsSkill.body, /forger-frontend-structure/);
+  assert.match(productPatternsSkill.body, /forger-react-ui/);
+  assert.match(productPatternsSkill.body, /forger-app-shell-layout/);
+  assert.match(productPatternsSkill.body, /forger-localization/);
+  assert.match(productPatternsSkill.body, /forger-tailwind-design-patterns/);
+  assert.match(productPatternsSkill.body, /forger-tailwind-shadcn-patterns/);
+  assert.match(productPatternsSkill.body, /forger-tailwind-responsive-frontend/);
+  assert.match(productPatternsSkill.body, /forger-mui-design-patterns/);
+  assert.match(productPatternsSkill.body, /forger-mui-component-patterns/);
+  assert.match(productPatternsSkill.body, /forger-mui-date-pickers/);
+  assert.match(productPatternsSkill.body, /forger-mui-consistency/);
+  assert.match(productPatternsSkill.body, /forger-mobile-responsive-frontend/);
   const webInterfaceReviewSkill = templates.find((template) => template.id === 'forger-web-interface-review');
   assert.ok(webInterfaceReviewSkill);
   assert.match(webInterfaceReviewSkill.body, /Do not fetch remote guideline documents/);
   assert.match(webInterfaceReviewSkill.body, /not a public marketing website/);
   const muiDesignSkill = templates.find((template) => template.id === 'forger-mui-design-patterns');
   assert.ok(muiDesignSkill);
-  assert.match(muiDesignSkill.body, /only to Forger Desktop or to installed apps whose manifest declares a MUI frontend/);
+  assert.match(muiDesignSkill.body, /Apply these rules only to Forger Desktop or installed apps whose manifest declares a MUI frontend/);
   const muiComponentSkill = templates.find((template) => template.id === 'forger-mui-component-patterns');
   assert.ok(muiComponentSkill);
-  assert.match(muiComponentSkill.body, /only to Forger Desktop or to apps whose manifest declares a MUI frontend/);
+  assert.match(muiComponentSkill.body, /Apply these rules only to Forger Desktop or apps whose manifest declares a MUI frontend/);
   assert.match(muiComponentSkill.body, /MUI X Community packages/);
   assert.match(muiComponentSkill.body, /Do not use MUI X Pro or Premium/);
   assert.match(muiComponentSkill.body, /Use MUI X Community `DataGrid`/);
@@ -393,7 +450,7 @@ test('official tool skill templates and seed data keep expected Desktop defaults
   assert.match(muiComponentSkill.body, /Use `Card` for content and actions about one subject/);
   const muiDatePickerSkill = templates.find((template) => template.id === 'forger-mui-date-pickers');
   assert.ok(muiDatePickerSkill);
-  assert.match(muiDatePickerSkill.body, /only to Forger Desktop or to apps whose manifest declares a MUI frontend/);
+  assert.match(muiDatePickerSkill.body, /Apply these rules only to Forger Desktop or apps whose manifest declares a MUI frontend/);
   assert.match(muiDatePickerSkill.body, /Use MUI X Community Date and Time Pickers/);
   assert.match(muiDatePickerSkill.body, /Wrap picker usage in `LocalizationProvider`/);
   assert.match(muiDatePickerSkill.body, /Do not use `TextField type="date"`/);
@@ -404,8 +461,14 @@ test('official tool skill templates and seed data keep expected Desktop defaults
   assert.match(tailwindDesignSkill.body, /Do not use MUI component APIs/);
   const tailwindShadcnSkill = templates.find((template) => template.id === 'forger-tailwind-shadcn-patterns');
   assert.ok(tailwindShadcnSkill);
+  assert.equal(tailwindShadcnSkill.description, 'Use when building Tailwind/shadcn app UI controls, forms, dialogs, selects, comboboxes, popovers, dropdowns, tabs, tooltips, sheets, accordions, toasts, copied components, or Radix primitives; inspect existing components and install shadcn/Radix before hand-rolling interactive behavior.');
+  assert.match(tailwindShadcnSkill.body, /## Component Selection Loop/);
+  assert.match(tailwindShadcnSkill.body, /Identify the needed behavior before writing JSX/);
+  assert.match(tailwindShadcnSkill.body, /add the matching shadcn component through the app package manager and shadcn CLI or registry/);
+  assert.match(tailwindShadcnSkill.body, /Keep direct `@radix-ui\/\*` imports inside reusable `frontend\/src\/components\/ui\/\*` primitives/);
+  assert.match(tailwindShadcnSkill.body, /Avoid native `<select>`, custom `div` menus, ad hoc popovers, manual focus traps, and hand-rolled keyboard behavior/);
   assert.match(tailwindShadcnSkill.body, /shadcn\/ui components are copied app code/);
-  assert.match(tailwindShadcnSkill.body, /Do not add Headless UI to the baseline app/);
+  assert.match(tailwindShadcnSkill.body, /Do not add Headless UI or another headless component system/);
   const tailwindResponsiveSkill = templates.find((template) => template.id === 'forger-tailwind-responsive-frontend');
   assert.ok(tailwindResponsiveSkill);
   assert.match(tailwindResponsiveSkill.body, /Tailwind\/shadcn Forger app/);
@@ -442,6 +505,10 @@ test('official tool skill templates and seed data keep expected Desktop defaults
   assert.match(installedAppChangeSkill.body, /Do not use `forger_refresh_app_view` as the recovery step after app edits/);
   const localizationSkill = templates.find((template) => template.id === 'forger-localization');
   assert.ok(localizationSkill);
+  assert.equal(localizationSkill.description, 'Use when writing or changing user-facing app text, localization, language detection, assistant copy, prompt copy, labels, navigation, validation, empty/loading/error/success states, or messages.');
+  assert.match(localizationSkill.body, /description: Use when writing or changing user-facing app text/);
+  assert.match(localizationSkill.body, /User-facing text includes localized UI copy/);
+  assert.match(localizationSkill.body, /empty states, loading states, error states, success states/);
   assert.match(localizationSkill.body, /\/api\/forger\/context/);
   assert.match(localizationSkill.body, /window\.forgerApp/);
   assert.equal(installedAppsSeed.length, 2);
@@ -449,6 +516,26 @@ test('official tool skill templates and seed data keep expected Desktop defaults
   assert.equal(settingsSeed.safeMode, true);
   assert.equal(settingsSeed.defaultAgentProvider, 'auto');
   assert.equal(settingsSeed.agentDefaults.codex.model, settingsSeed.codexDefaults.model);
+});
+
+test('create app prompts do not inline official localization skill selection', async () => {
+  const enSections = await fs.readFile(path.resolve('src/renderer/i18n/locales/enSections.ts'), 'utf8');
+  const esSections = await fs.readFile(path.resolve('src/renderer/i18n/locales/esSections.ts'), 'utf8');
+
+  assert.doesNotMatch(enSections, /Use forger-localization any time you write user-facing app text/);
+  assert.doesNotMatch(esSections, /Usa forger-localization cada vez que escribas texto visible para la app/);
+});
+
+test('prompt-builder skills keep loading triggers in frontmatter descriptions', async () => {
+  const skillFiles = await readSkillFiles();
+  for (const skill of skillFiles) {
+    const bodyWithoutFrontmatter = skill.body.replace(/^---\n[\s\S]*?\n---\n?/, '');
+    assert.doesNotMatch(
+      bodyWithoutFrontmatter,
+      /Use this skill when|Use this skill before|This skill applies only/,
+      `${skill.group}/${skill.filename} should not keep generic loading triggers in the body`,
+    );
+  }
 });
 
 test('prompt template helpers resolve configured roots and validate paths', async () => {

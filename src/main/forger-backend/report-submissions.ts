@@ -1,4 +1,5 @@
 import type {
+  ConversationDiagnosticFileSummary,
   ConversationDiagnosticReportPreview,
   DesktopErrorReportPreview,
   SubmitConversationDiagnosticReportResult,
@@ -14,6 +15,10 @@ interface ReportSubmissionOptions {
   token?: string;
   roots: ReportSanitizerRoot[];
   appendReportingLog: AppendReportingLog;
+}
+
+export interface ConversationDiagnosticAttachmentUpload extends ConversationDiagnosticFileSummary {
+  text: string;
 }
 
 export const submitDesktopErrorReport = async (
@@ -90,6 +95,7 @@ export const submitDesktopErrorReport = async (
 export const submitConversationDiagnosticReport = async (
   options: ReportSubmissionOptions,
   input: ConversationDiagnosticReportPreview,
+  attachments: ConversationDiagnosticAttachmentUpload[] = [],
 ): Promise<SubmitConversationDiagnosticReportResult> => {
   const report = sanitizeReportPayload(input, { roots: options.roots });
   const logBase = {
@@ -105,26 +111,11 @@ export const submitConversationDiagnosticReport = async (
     platform: report.platform,
   };
   try {
+    const body = buildConversationDiagnosticBody(report, attachments, options.token);
     const response = await fetch(`${options.backendBaseUrl}/api/v1/conversation_diagnostic_reports`, {
       method: 'POST',
-      headers: {
-        ...buildBackendHeaders(options.token),
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        source: report.source,
-        app_id: report.appId,
-        conversation_id: report.conversationId,
-        run_id: report.runId,
-        title: report.title,
-        description: report.description,
-        provider: report.provider,
-        technical_code: report.technicalCode,
-        desktop_version: report.desktopVersion,
-        platform: report.platform,
-        occurred_at: report.occurredAt,
-        payload: report.payload,
-      }),
+      headers: body.headers,
+      body: body.body,
     });
     const requestId = responseRequestId(response);
     if (!response.ok) {
@@ -155,4 +146,54 @@ export const submitConversationDiagnosticReport = async (
     });
     return { success: false, userMessage: 'No pudimos enviar el reporte de conversación.', technicalCode };
   }
+};
+
+const buildConversationDiagnosticBody = (
+  report: ConversationDiagnosticReportPreview,
+  attachments: ConversationDiagnosticAttachmentUpload[],
+  token?: string,
+): { headers: HeadersInit; body: BodyInit } => {
+  const payload = {
+    source: report.source,
+    app_id: report.appId,
+    conversation_id: report.conversationId,
+    run_id: report.runId,
+    title: report.title,
+    description: report.description,
+    provider: report.provider,
+    technical_code: report.technicalCode,
+    desktop_version: report.desktopVersion,
+    platform: report.platform,
+    occurred_at: report.occurredAt,
+    payload: report.payload,
+  };
+  const headers = buildBackendHeaders(token);
+  if (attachments.length === 0) {
+    return {
+      headers: {
+        ...headers,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    };
+  }
+
+  const formData = new FormData();
+  for (const [key, value] of Object.entries(payload)) {
+    if (value === undefined) {
+      continue;
+    }
+    formData.append(key, key === 'payload' ? JSON.stringify(value) : String(value));
+  }
+  for (const attachment of attachments) {
+    formData.append(
+      'diagnostic_files[]',
+      new Blob([attachment.text], { type: attachment.contentType }),
+      attachment.filename,
+    );
+  }
+  return {
+    headers,
+    body: formData,
+  };
 };

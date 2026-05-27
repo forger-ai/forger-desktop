@@ -1,9 +1,8 @@
 ---
 name: forger-remote-tunnel-wiring
-description: Use Forger remote tunnel and local network manifest flags and frontend modules correctly.
+description: Use when changing remoteTunnel or localNetworkShare manifest flags, frontend API clients, entrypoints, uploads, downloads, browser-only flows, or local-vs-remote app access.
 ---
 
-- Use this skill before changing app manifests, API clients, app entrypoints, uploads, downloads, or browser-only flows that need to work through Forger local network sharing or remote tunnel sessions.
 - New apps created from Forger must keep these top-level manifest flags enabled:
 
 ```json

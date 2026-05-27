@@ -1,9 +1,8 @@
 ---
 name: forger-frontend-structure
-description: Keep Forger React frontends organized with feature-first folders and small reusable components.
+description: Use when creating, reorganizing, or refactoring Forger React frontend files, feature-first folders, App.tsx root wiring, shared components, API modules, hooks, or helpers.
 ---
 
-- Use this skill before creating or reorganizing frontend code for vite-fastapi-sqlite React apps.
 - Prefer this structure: `frontend/src/app`, `frontend/src/features/<area>`, `frontend/src/components`, `frontend/src/api`, `frontend/src/lib`, `frontend/src/i18n`, and a stack-appropriate `frontend/src/styles`, `frontend/src/design-system`, or `frontend/src/theme`.
 - Keep `app/` for root wiring, providers, app shell composition, routing or view selection, and cross-feature state orchestration.
 - Keep `features/<area>/` for domain screens, feature-specific components, feature hooks, and feature helpers.

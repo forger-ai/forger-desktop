@@ -402,7 +402,15 @@ test('task helpers validate arguments, render prompts, and parse progress states
     files: [{ argumentName: 'doc', name: '{{file}}.csv', path: '/tmp/{{file}}.csv', mimeType: 'text/csv' }],
   }, 'en'), /doc\.\{ \{file\} \}\.csv: \/tmp\/\{ \{file\} \}\.csv/);
   assert.equal(progressFromTaskOutput(JSON.stringify({ type: 'turn.started' }), 'en'), 'The assistant is working on the document.');
-  assert.equal(progressFromTaskOutput(JSON.stringify({ type: 'item.started', item: { type: 'mcp_tool_call' } }), 'en'), 'Using internal Finance OS tools.');
+  assert.equal(progressFromTaskOutput(JSON.stringify({ type: 'item.started', item: { type: 'mcp_tool_call' } }), 'en'), 'Using internal tools.');
+  assert.equal(progressFromTaskOutput(JSON.stringify({
+    type: 'item.started',
+    item: { type: 'mcp_tool_call', server: 'mcp_app_finance_os__', name: 'list_movements' },
+  }), 'es'), 'Llamando herramienta MCP: mcp_app_finance_os__.list_movements.');
+  assert.equal(progressFromTaskOutput(JSON.stringify({
+    type: 'item.completed',
+    item: { type: 'mcp_tool_call', name: 'import_movements' },
+  }), 'en'), 'Calling MCP tool: import_movements.');
   assert.equal(progressFromTaskOutput(JSON.stringify({
     type: 'item.started',
     item: { type: 'command_execution', command: 'python scripts/list_categories.py' },
@@ -426,11 +434,11 @@ test('task helpers validate arguments, render prompts, and parse progress states
   assert.equal(progressFromTaskOutput(JSON.stringify({
     type: 'item.completed',
     item: { type: 'command_execution', command: 'cat AGENTS.md', exit_code: 0 },
-  }), 'en'), 'Reviewing the internal Finance OS instructions.');
+  }), 'en'), 'Reviewing the app internal instructions.');
   assert.equal(progressFromTaskOutput(JSON.stringify({
     type: 'item.completed',
     item: { type: 'command_execution', command: 'python scripts/custom.py', exit_code: 0 },
-  }), 'en'), 'Using internal Finance OS tools.');
+  }), 'en'), 'Using internal tools.');
   assert.equal(progressFromTaskOutput(JSON.stringify({
     type: 'item.completed',
     item: { type: 'command_execution', exit_code: 0 },

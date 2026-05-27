@@ -35,6 +35,7 @@ jobs:
           cache: npm
 
       - run: npm ci
+      - run: npm rebuild electron
       - run: npm run lint
       - run: npm run typecheck
       - run: npm run test:coverage

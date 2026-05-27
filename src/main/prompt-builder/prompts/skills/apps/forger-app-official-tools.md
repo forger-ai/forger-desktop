@@ -1,6 +1,6 @@
 ---
 name: forger-app-official-tools
-description: Use only official Forger tool actions granted to this installed app.
+description: Use when an installed app wants to call official Forger tools; limit tool calls to manifest-granted actions such as Gmail search, read, attachment download, or send.
 ---
 
 - Official Forger tools are optional app integrations granted through Forger.

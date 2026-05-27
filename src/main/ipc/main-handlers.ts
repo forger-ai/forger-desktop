@@ -1,6 +1,7 @@
 import type fs from 'node:fs/promises';
 import type path from 'node:path';
 import os from 'node:os';
+import { randomUUID } from 'node:crypto';
 import type * as Electron from 'electron';
 import { BrowserWindow, type IpcMain } from 'electron';
 import { AGENT_TOOL_PACKAGES } from '../core/agent-tool-packages';
@@ -21,7 +22,12 @@ import type { StoredForgerAccount } from '../forger-account-store';
 import type { MemoryStore } from '../memory-store';
 import type { OfficialToolsService } from '../official-tools-service';
 import type { SecretsStore } from '../secrets-store';
-import { buildConversationDiagnosticReport } from '../conversation-diagnostics';
+import {
+  buildConversationDiagnosticAttachments,
+  buildConversationDiagnosticReport,
+  summarizeConversationDiagnosticAttachments,
+  type ConversationDiagnosticAttachmentUpload,
+} from '../conversation-diagnostics';
 import type { IPC_CHANNELS as IpcChannels } from '../../shared/ipc';
 import { registerAppCloudMessagingIpcHandlers } from './app-cloud-messaging-handlers';
 import { registerAppRuntimeIpcHandlers } from './app-runtime-handlers';
@@ -94,6 +100,8 @@ import type {
   UpdateUserSecretInput,
 } from '../../shared/types';
 import type { AppManifest, AppRegistry, InstalledAppRecord } from '../core/main-process-types';
+
+const conversationDiagnosticAttachmentCache = new Map<string, ConversationDiagnosticAttachmentUpload[]>();
 
 interface MainIpcState {
   agentToolSettings: AgentToolSettings;
@@ -933,7 +941,7 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
       : { success: false, userMessage: 'No pudimos enviar el reporte.', technicalCode: 'backend_client_missing' };
   });
   ipcMain.handle(IPC_CHANNELS.prepareConversationDiagnosticReport, async (_event, input: PrepareConversationDiagnosticReportInput) => {
-    return await buildConversationDiagnosticReport({
+    const options = {
       appVersion: app.getVersion(),
       platform: process.platform,
       getUserDataPath: () => app.getPath('userData'),
@@ -942,14 +950,41 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
       getPrivateDataRoot,
       getForgerMetadataRoot,
       getCodexHome,
-      getInstalledAppVersion: (appId) => registry.apps[appId]?.version,
+      getInstalledAppVersion: (appId: string) => registry.apps[appId]?.version,
       getConversationManager: () => appAgentConversationManager,
-    }, input);
+    };
+    const report = await buildConversationDiagnosticReport(options, input);
+    const attachments = await buildConversationDiagnosticAttachments(options, input);
+    if (attachments.length === 0) {
+      return report;
+    }
+    const diagnosticAttachmentToken = randomUUID();
+    const diagnosticFiles = summarizeConversationDiagnosticAttachments(attachments);
+    conversationDiagnosticAttachmentCache.set(diagnosticAttachmentToken, attachments);
+    return {
+      ...report,
+      diagnosticAttachmentToken,
+      diagnosticFiles,
+      payload: {
+        ...report.payload,
+        diagnosticFiles,
+      },
+    };
   });
   ipcMain.handle(IPC_CHANNELS.submitConversationDiagnosticReport, async (_event, input: ConversationDiagnosticReportPreview) => {
-    return forgerBackendClient
-      ? await forgerBackendClient.submitConversationDiagnosticReport(input)
-      : { success: false, userMessage: 'No pudimos enviar el reporte de conversación.', technicalCode: 'backend_client_missing' };
+    if (!forgerBackendClient) {
+      return { success: false, userMessage: 'No pudimos enviar el reporte de conversación.', technicalCode: 'backend_client_missing' };
+    }
+    const attachments = input.diagnosticAttachmentToken
+      ? conversationDiagnosticAttachmentCache.get(input.diagnosticAttachmentToken) ?? []
+      : [];
+    try {
+      return await forgerBackendClient.submitConversationDiagnosticReport(input, attachments);
+    } finally {
+      if (input.diagnosticAttachmentToken) {
+        conversationDiagnosticAttachmentCache.delete(input.diagnosticAttachmentToken);
+      }
+    }
   });
   ipcMain.handle(IPC_CHANNELS.openExternalUrl, async (_event, targetUrl: string) => {
     try {

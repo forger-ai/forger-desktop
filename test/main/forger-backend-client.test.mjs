@@ -295,6 +295,54 @@ test('submitConversationDiagnosticReport posts sanitized thread payload with aut
   }
 });
 
+test('submitConversationDiagnosticReport uploads sanitized diagnostic files as multipart attachments', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'forger-conversation-report-upload-test-'));
+  let requestInit;
+  const harness = createClient(root, async (_url, init) => {
+    requestInit = init;
+    return jsonResponse(201, { id: 43, status: 'open' }, { 'x-request-id': 'req-conv-upload' });
+  }, 'cloud-token');
+
+  try {
+    const result = await harness.client.submitConversationDiagnosticReport({
+      source: 'desktop_chat',
+      appId: 'finance-os',
+      conversationId: 'conversation-1',
+      provider: 'codex',
+      desktopVersion: '0.1.test',
+      platform: 'darwin',
+      occurredAt: '2026-05-17T00:00:00.000Z',
+      payload: {
+        conversation: { messages: [{ role: 'user', content: 'debug upload' }] },
+        diagnosticFiles: [{ kind: 'codex_session_jsonl', filename: 'codex-session-thread-1.jsonl' }],
+      },
+    }, [{
+      kind: 'codex_session_jsonl',
+      filename: 'codex-session-thread-1.jsonl',
+      contentType: 'application/x-ndjson',
+      originalByteSize: 91,
+      sanitizedByteSize: 64,
+      text: '{"type":"session_meta","payload":{"id":"thread-1"}}\n',
+    }]);
+
+    assert.equal(result.success, true);
+    assert.equal(requestInit.headers.Authorization, 'Bearer cloud-token');
+    assert.equal(requestInit.headers['Content-Type'], undefined);
+    assert.equal(requestInit.body instanceof FormData, true);
+    assert.equal(requestInit.body.get('source'), 'desktop_chat');
+    assert.equal(requestInit.body.get('conversation_id'), 'conversation-1');
+    assert.equal(JSON.parse(requestInit.body.get('payload')).diagnosticFiles[0].filename, 'codex-session-thread-1.jsonl');
+    const files = requestInit.body.getAll('diagnostic_files[]');
+    assert.equal(files.length, 1);
+    assert.equal(files[0].name, 'codex-session-thread-1.jsonl');
+    assert.equal(files[0].type, 'application/x-ndjson');
+    assert.equal(await files[0].text(), '{"type":"session_meta","payload":{"id":"thread-1"}}\n');
+  } finally {
+    harness.restore();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('remote tunnel session client creates, uploads, reports, closes, and hides best-effort failures', async () => {
   const root = await mkdtemp(join(tmpdir(), 'forger-remote-tunnel-client-test-'));
   const requests = [];

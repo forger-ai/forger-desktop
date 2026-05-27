@@ -1,6 +1,6 @@
 ---
 name: forger-secrets
-description: Understand app secrets, used when people need to share personal credentials with an app through safe environment variables.
+description: Use when an app needs credentials, tokens, API keys, private configuration, appSecrets manifest declarations, runtime environment injection, missing-secret handling, or secret safety.
 ---
 
 - App secrets let a person connect credentials, tokens, keys, or private configuration to one installed app.

@@ -1,6 +1,6 @@
 ---
 name: forger-automations
-description: Understand Forger automations, a cron-job-like feature where Codex can be invoked periodically alongside apps, secrets, and tools.
+description: Use when explaining, designing, or writing scheduled Forger automations for recurring checks, summaries, maintenance, follow-ups, app-aware work, secrets, or tools.
 ---
 
 - Automations run scheduled agent work for repetitive checks, summaries, maintenance, and follow-ups.

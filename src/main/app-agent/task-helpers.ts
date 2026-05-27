@@ -53,8 +53,8 @@ const taskMessages: Record<TaskLocale, Record<TaskMessageKey, string>> = {
     validatingData: 'Validando que los datos queden consistentes.',
     confirmingMovements: 'Confirmando los movimientos cargados.',
     readingDocument: 'Leyendo el contenido del documento.',
-    reviewingInstructions: 'Revisando las instrucciones internas de Finance OS.',
-    usingTools: 'Usando herramientas internas de Finance OS.',
+    reviewingInstructions: 'Revisando las instrucciones internas de la app.',
+    usingTools: 'Usando herramientas internas.',
   },
   en: {
     preparing: 'The assistant is preparing the analysis.',
@@ -67,8 +67,8 @@ const taskMessages: Record<TaskLocale, Record<TaskMessageKey, string>> = {
     validatingData: 'Validating that the data is consistent.',
     confirmingMovements: 'Confirming the loaded movements.',
     readingDocument: 'Reading the document contents.',
-    reviewingInstructions: 'Reviewing the internal Finance OS instructions.',
-    usingTools: 'Using internal Finance OS tools.',
+    reviewingInstructions: 'Reviewing the app internal instructions.',
+    usingTools: 'Using internal tools.',
   },
 };
 
@@ -264,6 +264,9 @@ export const progressFromCodexOutput = (text: string, locale: TaskLocale): strin
       }
       if (parsed.type === 'item.completed' && parsed.item && typeof parsed.item === 'object') {
         const item = parsed.item as Record<string, unknown>;
+        if (item.type === 'mcp_tool_call') {
+          return progressFromMcpToolCall(item, locale);
+        }
         if (item.type === 'command_execution') {
           return progressFromCommandExecution(item, locale);
         }
@@ -273,6 +276,9 @@ export const progressFromCodexOutput = (text: string, locale: TaskLocale): strin
       }
       if (parsed.type === 'item.started' && parsed.item && typeof parsed.item === 'object') {
         const item = parsed.item as Record<string, unknown>;
+        if (item.type === 'mcp_tool_call') {
+          return progressFromMcpToolCall(item, locale);
+        }
         if (String(item.type ?? '').includes('tool')) {
           return taskMessage(locale, 'usingTools');
         }
@@ -285,6 +291,26 @@ export const progressFromCodexOutput = (text: string, locale: TaskLocale): strin
     }
   }
   return null;
+};
+
+const progressFromMcpToolCall = (item: Record<string, unknown>, locale: TaskLocale): string => {
+  const server = normalizedToolIdentifier(item.server);
+  const name = normalizedToolIdentifier(item.name ?? item.tool_name ?? item.toolName);
+  const tool = server && name ? `${server}.${name}` : server || name;
+  if (!tool) {
+    return taskMessage(locale, 'usingTools');
+  }
+  return locale === 'en' ? `Calling MCP tool: ${tool}.` : `Llamando herramienta MCP: ${tool}.`;
+};
+
+const normalizedToolIdentifier = (value: unknown): string => {
+  if (typeof value !== 'string') {
+    return '';
+  }
+  return value
+    .replace(/[\u0000-\u001f\u007f]/g, '')
+    .replace(/\s+/g, '')
+    .slice(0, 120);
 };
 
 const progressFromAgentMessage = (item: Record<string, unknown>): string | null => {

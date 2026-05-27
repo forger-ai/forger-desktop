@@ -1,4 +1,6 @@
-import { renderPromptFile } from './index';
+import fs from 'node:fs';
+import path from 'node:path';
+import { promptTemplateRoots, renderPromptFile } from './index';
 
 export interface ForgerOfficialToolsPromptInput {
   gmailReady: boolean;
@@ -14,186 +16,59 @@ export interface ForgerSkillTemplate {
 
 type SkillGroup = 'global' | 'forger' | 'apps';
 
-interface ForgerSkillDefinition extends Omit<ForgerSkillTemplate, 'body'> {
-  group: SkillGroup;
+interface SkillFrontmatter {
+  name: string;
+  description: string;
 }
 
-const globalSkillDefinitions: ForgerSkillDefinition[] = [
-  {
-    group: 'global',
-    id: 'forger-context',
-    description: 'Understand Forger as the local app environment around installed apps.',
-  },
-  {
-    group: 'global',
-    id: 'forger-app-agents-authoring',
-    description: 'Write app-owned AGENTS.md files from current app facts.',
-  },
-  {
-    group: 'global',
-    id: 'forger-app-mcp-data-tools',
-    description: 'Prefer app MCP tools for structured app data operations.',
-  },
-];
+const parseSkillFrontmatter = (source: string, relativePath: string): SkillFrontmatter => {
+  const match = source.match(/^---\n([\s\S]*?)\n---/);
+  if (!match) {
+    throw new Error(`skill_frontmatter_missing:${relativePath}`);
+  }
+  const fields = new Map<string, string>();
+  for (const line of match[1].split('\n')) {
+    const field = line.match(/^([a-zA-Z0-9_-]+):\s*(.*)$/);
+    if (field) {
+      fields.set(field[1], field[2].trim());
+    }
+  }
+  const name = fields.get('name');
+  const description = fields.get('description');
+  if (!name || !description) {
+    throw new Error(`skill_frontmatter_invalid:${relativePath}`);
+  }
+  return { name, description };
+};
 
-const forgerSkillDefinitions: ForgerSkillDefinition[] = [
-  {
-    group: 'forger',
-    id: 'forger-official-tools',
-    description: 'Use official Forger MCP tools without falling back to Codex-local connectors.',
-  },
-  {
-    group: 'forger',
-    id: 'forger-gmail',
-    description: 'Use Gmail only through the official Forger MCP tools.',
-  },
-  {
-    group: 'forger',
-    id: 'forger-permissions',
-    description: 'Respect Forger permission prompts for sensitive tools.',
-  },
-  {
-    group: 'forger',
-    id: 'forger-manifest-authoring',
-    description: 'Write and review Forger app manifests using the current manifest contract.',
-  },
-  {
-    group: 'forger',
-    id: 'forger-desktop-runtime-bridge',
-    description: 'Call Forger Desktop prompt templates and manifest agents from a local app backend.',
-  },
-  {
-    group: 'forger',
-    id: 'forger-localization',
-    description: 'Use Forger locale context correctly and keep visible app copy localizable.',
-  },
-  {
-    group: 'forger',
-    id: 'forger-automations',
-    description: 'Understand scheduled Forger automations for repetitive app-aware agent work.',
-  },
-  {
-    group: 'forger',
-    id: 'forger-secrets',
-    description: 'Understand app secrets for safe credential sharing through app runtime environments.',
-  },
-  {
-    group: 'forger',
-    id: 'forger-agents',
-    description: 'Understand app agents for conversational work invoked by apps.',
-  },
-  {
-    group: 'forger',
-    id: 'forger-tools',
-    description: 'Understand Forger-approved tools and app tool grants.',
-  },
-  {
-    group: 'forger',
-    id: 'forger-tasks',
-    description: 'Understand one-shot app tasks powered by prompt templates.',
-  },
-  {
-    group: 'forger',
-    id: 'forger-frontend-product-patterns',
-    description: 'Frontend product patterns that apply across Forger app UI stacks.',
-  },
-  {
-    group: 'forger',
-    id: 'forger-web-interface-review',
-    description: 'Review Forger app interfaces for product clarity and local-app fit.',
-  },
-  {
-    group: 'forger',
-    id: 'forger-app-shell-layout',
-    description: 'Build flexible app shells where navigation stays visible and only main content scrolls.',
-  },
-  {
-    group: 'forger',
-    id: 'forger-mui-design-patterns',
-    description: 'MUI-only UI design guardrails for Desktop or apps whose manifest frontend.ui is MUI.',
-  },
-  {
-    group: 'forger',
-    id: 'forger-mui-component-patterns',
-    description: 'Choose MUI Core and MUI X Community components only for Desktop or MUI apps.',
-  },
-  {
-    group: 'forger',
-    id: 'forger-mui-date-pickers',
-    description: 'Use MUI X Community date and time pickers correctly in Desktop or MUI apps.',
-  },
-  {
-    group: 'forger',
-    id: 'forger-mui-consistency',
-    description: 'Visual consistency and accessibility in Desktop or MUI apps.',
-  },
-  {
-    group: 'forger',
-    id: 'forger-tailwind-design-patterns',
-    description: 'Tailwind CSS design patterns for Forger apps using Tailwind/shadcn/Radix.',
-  },
-  {
-    group: 'forger',
-    id: 'forger-tailwind-shadcn-patterns',
-    description: 'Use shadcn/ui copied components and Radix primitives for accessible Tailwind app UI.',
-  },
-  {
-    group: 'forger',
-    id: 'forger-tailwind-responsive-frontend',
-    description: 'Build Tailwind/shadcn Forger app frontends that work well on mobile and desktop.',
-  },
-  {
-    group: 'forger',
-    id: 'forger-tanstack-query-patterns',
-    description: 'Use TanStack Query for Forger app server state and cache refresh.',
-  },
-  {
-    group: 'forger',
-    id: 'forger-installed-app-change',
-    description: 'Protocol for changing installed Forger apps safely.',
-  },
-  {
-    group: 'forger',
-    id: 'forger-social-app-review',
-    description: 'Review Social app packages before installing code created by another person.',
-  },
-  {
-    group: 'forger',
-    id: 'forger-python-backend',
-    description: 'Best practices for Python backends in Forger.',
-  },
-  {
-    group: 'forger',
-    id: 'forger-fastapi-contracts',
-    description: 'Guidance for contracts and safety in FastAPI endpoints.',
-  },
-  {
-    group: 'forger',
-    id: 'forger-frontend-structure',
-    description: 'Feature-first frontend structure for Forger React apps.',
-  },
-  {
-    group: 'forger',
-    id: 'forger-mobile-responsive-frontend',
-    description: 'Build Forger app frontends that work well on mobile and desktop.',
-  },
-  {
-    group: 'forger',
-    id: 'forger-remote-tunnel-wiring',
-    description: 'Use Forger remote tunnel and local network manifest flags and frontend modules correctly.',
-  },
-  {
-    group: 'forger',
-    id: 'forger-react-ui',
-    description: 'React UI best practices for non-technical users.',
-  },
-];
+const resolveSkillGroupDirectory = (group: SkillGroup): string => {
+  for (const root of promptTemplateRoots()) {
+    const candidate = path.join(root, 'skills', group);
+    if (fs.existsSync(candidate) && fs.statSync(candidate).isDirectory()) {
+      return candidate;
+    }
+  }
+  throw new Error(`skill_group_not_found:${group}`);
+};
 
-const renderSkillDefinition = (template: ForgerSkillDefinition): ForgerSkillTemplate => ({
-  id: template.id,
-  description: template.description,
-  body: renderPromptFile(`skills/${template.group}/${template.id}.md`, {}),
-});
+const listSkillFiles = (group: SkillGroup): string[] =>
+  fs.readdirSync(resolveSkillGroupDirectory(group))
+    .filter((entry) => entry.endsWith('.md'))
+    .sort((left, right) => left.localeCompare(right));
+
+const buildSkillTemplateFromFile = (group: SkillGroup, filename: string, variables: Record<string, string> = {}): ForgerSkillTemplate => {
+  const relativePath = `skills/${group}/${filename}`;
+  const source = fs.readFileSync(path.join(resolveSkillGroupDirectory(group), filename), 'utf8');
+  const frontmatter = parseSkillFrontmatter(source, relativePath);
+  return {
+    id: frontmatter.name,
+    description: frontmatter.description,
+    body: renderPromptFile(relativePath, variables),
+  };
+};
+
+const buildSkillTemplatesForGroup = (group: SkillGroup): ForgerSkillTemplate[] =>
+  listSkillFiles(group).map((filename) => buildSkillTemplateFromFile(group, filename));
 
 export const buildForgerOfficialToolsPromptSection = (input: ForgerOfficialToolsPromptInput): string => {
   const allowedActions = input.allowedActions ?? [];
@@ -217,11 +92,11 @@ export const buildForgerOfficialToolsPromptSection = (input: ForgerOfficialTools
 };
 
 export const buildGlobalSkillTemplates = (): ForgerSkillTemplate[] =>
-  globalSkillDefinitions.map(renderSkillDefinition);
+  buildSkillTemplatesForGroup('global');
 
 export const buildForgerWorkspaceSkillTemplates = (): ForgerSkillTemplate[] => [
   ...buildGlobalSkillTemplates(),
-  ...forgerSkillDefinitions.map(renderSkillDefinition),
+  ...buildSkillTemplatesForGroup('forger'),
 ];
 
 export const buildInstalledAppSkillTemplates = (allowedOfficialToolActions: string[] = []): ForgerSkillTemplate[] => [
@@ -232,9 +107,7 @@ export const buildInstalledAppSkillTemplates = (allowedOfficialToolActions: stri
 export const buildAppBaseSkillTemplates = buildInstalledAppSkillTemplates;
 
 export const buildAppOfficialToolsSkillTemplate = (allowedOfficialToolActions: string[] = []): ForgerSkillTemplate => ({
-  id: 'forger-app-official-tools',
-  description: 'Use only official Forger tool actions granted to this installed app.',
-  body: renderPromptFile('skills/apps/forger-app-official-tools.md', {
+  ...buildSkillTemplateFromFile('apps', 'forger-app-official-tools.md', {
     actionsLine: allowedOfficialToolActions.length > 0
       ? `Available official tool actions for this app: ${allowedOfficialToolActions.map((action) => `\`${action}\``).join(', ')}.`
       : 'This app has not declared any official Forger tool actions.',

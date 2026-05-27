@@ -1,9 +1,9 @@
 ---
 name: forger-tailwind-responsive-frontend
-description: Build Tailwind/shadcn Forger app frontends that work well on mobile and desktop.
+description: Use when making Tailwind/shadcn app screens responsive on mobile and desktop, including navigation, dashboards, forms, tables, dialogs, lists, cards, repeated items, and touch targets.
 ---
 
-- Use this skill before creating or changing visible screens, navigation, dashboards, forms, tables, modals, or repeated item layouts in a Tailwind/shadcn Forger app.
+- Apply these rules only to Tailwind/shadcn Forger apps. Use `forger-mobile-responsive-frontend` for stack-agnostic responsive guidance.
 - Forger apps can be opened from Desktop, a desktop browser, a phone on the local network, or a phone through a remote tunnel. Keep the same workflow usable in all of those contexts.
 - Before coding, define the mobile behavior for primary actions, navigation, lists or tables, forms, validation, empty/loading/error/success states, and destructive confirmations.
 - Use Tailwind responsive variants and stable container constraints. Keep touch targets at least 44 px tall on mobile.

@@ -1,6 +1,6 @@
 ---
 name: forger-app-mcp-data-tools
-description: Prefer app MCP tools when app data needs to be read, exposed, created, edited, deleted, imported, or validated.
+description: Use when app data needs to be read, exposed, created, edited, deleted, imported, validated, or reviewed; prefer app MCP tools before scripts, direct database edits, or ad hoc endpoints.
 ---
 
 - Review the app `AGENTS.md` and `manifest.json` before using tools.

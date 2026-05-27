@@ -1,9 +1,8 @@
 ---
 name: forger-react-ui
-description: Build maintainable React interfaces for Forger apps with clear flows, composition, state ownership, and Vite-compatible performance.
+description: Use when building or refactoring React components, feature UI, hooks, state ownership, component composition, render performance, prop APIs, or Vite-compatible frontend behavior.
 ---
 
-- Use this skill when creating reusable React components, refactoring feature UI, reducing prop complexity, or reviewing render behavior in a Forger app.
 - Follow the `forger-frontend-structure` skill when creating or refactoring frontend files.
 - Keep components predictable and easy to extend. Prefer composition over boolean prop proliferation; if a component gains many `isX`, `showY`, or `mode` props, split it into explicit variants or compose smaller parts.
 - Use compound components when several child parts need shared state and a predictable API. Keep the provider as the only place that knows the state implementation.

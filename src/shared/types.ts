@@ -42,7 +42,14 @@ export type { AppCapability, AppCategory, AppStatus, AppSummary, CatalogPublicat
 export type { CatalogApp } from './types/catalog-app';
 export type { AppRatingSummary, SubmitAppRatingInput, SubmitProductFeedbackInput } from './types/feedback';
 export type { SubmitUsageEventInput, SubmitUsageEventResult, UsageEventName } from './types/usage-events';
-export type { ConversationDiagnosticMessage, ConversationDiagnosticReportPreview, ConversationDiagnosticSource, PrepareConversationDiagnosticReportInput, SubmitConversationDiagnosticReportResult } from './types/diagnostics';
+export type {
+  ConversationDiagnosticFileSummary,
+  ConversationDiagnosticMessage,
+  ConversationDiagnosticReportPreview,
+  ConversationDiagnosticSource,
+  PrepareConversationDiagnosticReportInput,
+  SubmitConversationDiagnosticReportResult,
+} from './types/diagnostics';
 export type { CloudAppMessagePermissionDecision, CloudFriendUser, CloudFriendship, CloudIdentityState, CloudMessage, CloudMessageDeliveryMode, CloudMessageEnvelope, CloudMessageSource, CloudMessageStatus, CloudSendMessageInput, CloudSocialEvent, FriendshipStatus, FriendChatWindowOpenResult, SocialUserApp, SocialUserAppDownload, SocialUserAppList, SocialUserAppShare, SocialUserAppUploadAttempt, SocialUserAppUploadAttemptStatus, SocialUserAppUploadInput, SocialUserAppVersion, SocialUserProfile, SocialUserAppReviewState, SocialUserAppStatus, SocialUserAppVisibility } from './types/social';
 export type { BasicActionResult, FailureDiagnosticFields } from './types/base';
 export type { MemoryCreateInput, MemoryEntry, MemoryKind, MemoryListInput, MemoryScope, MemorySource, MemoryUpdateInput, Settings, UpdateAgentDefaultsInput, UpdateCodexDefaultsInput } from './types/settings';

@@ -1,9 +1,8 @@
 ---
 name: forger-manifest-authoring
-description: Write and review Forger app manifests using the current manifest contract.
+description: Use when creating, editing, validating, or reviewing app manifest.json fields for stack, services, tools, appSecrets, promptTemplates, agents, scripts, skills, tunnel, or catalog metadata.
 ---
 
-- Use this skill before creating or editing an app `manifest.json`.
 - A manifest is an internal Forger platform contract. It describes how Forger installs, runs, prompts, grants tools to, and operates an app. It is not the list of visible app features.
 - Current non-deprecated manifest sections include `name`, `version`, `description`, `changelog`, `stack`, `catalog`, `services`, `mcp`, `tools`, `appSecrets`, `promptTemplates`, `agents`, `scripts`, `skills`, `cloudMessaging`, `agentRuntime`, `remoteTunnel`, and `localNetworkShare`.
 - Do not add `catalog.capabilities` to new manifests. Use separate manifest sections for tools, secrets, app agents, prompt templates, scripts, skills, messaging, runtime, remote tunnel, and local network sharing.
