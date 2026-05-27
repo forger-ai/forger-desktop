@@ -596,6 +596,16 @@ export const registerMainLifecycle = (deps: unknown) => {
       ensureCatalogStatuses();
     },
     onRunUpdated: (event: RunEventLike) => {
+      const target = event.run.appId ? appWindows.get(event.run.appId) : null;
+      if (target && !target.isDestroyed()) {
+        void appendInstallLog('chat_run:app_window_state', {
+          appId: event.run.appId,
+          runId: event.run.runId,
+          conversationId: 'conversationId' in event.run ? event.run.conversationId : undefined,
+          status: event.run.status,
+          url: typeof target.webContents?.getURL === 'function' ? target.webContents.getURL() : null,
+        });
+      }
       if (event.run.status === 'failed') {
         state.desktopErrorReporter?.reportChatRunFailure({
           appId: event.run.appId,
@@ -752,6 +762,19 @@ export const registerMainLifecycle = (deps: unknown) => {
       state.desktopRuntimeBridge?.publishAgentEvent(event);
       const target = appWindows.get(event.conversation.appId);
       if (target && !target.isDestroyed()) {
+        const targetUrl = typeof target.webContents?.getURL === 'function' ? target.webContents.getURL() : null;
+        void appendInstallLog('app_agent_conversation:app_window_event', {
+          appId: event.conversation.appId,
+          conversationId: event.conversation.conversationId,
+          runId: event.run?.runId,
+          type: event.type,
+          url: targetUrl,
+          channels: [
+            IPC_CHANNELS.appAgentConversationEvent,
+            IPC_CHANNELS.appCodexConversationEvent,
+            ...(event.type === 'run.message.completed' ? [] : [IPC_CHANNELS.appAgentThreadEvent]),
+          ],
+        });
         target.webContents.send(IPC_CHANNELS.appAgentConversationEvent, event);
         target.webContents.send(IPC_CHANNELS.appCodexConversationEvent, event);
         if (event.type === 'run.message.completed') {

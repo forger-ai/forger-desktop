@@ -11,7 +11,7 @@ export interface RemoteEnvelope {
 
 export class RemoteSessionCrypto {
   private readonly ecdh = createECDH('prime256v1');
-  private sharedKey: Buffer | null = null;
+  private readonly sharedKeys = new Map<string, Buffer>();
   private currentKeyId = '';
 
   constructor() {
@@ -36,18 +36,26 @@ export class RemoteSessionCrypto {
   }
 
   encrypt(sessionId: string, payload: unknown): RemoteEnvelope {
-    if (!this.sharedKey) {
+    if (!this.currentKeyId) {
+      throw new Error('remote_session_key_missing');
+    }
+    return this.encryptForKey(sessionId, this.currentKeyId, payload);
+  }
+
+  encryptForKey(sessionId: string, keyId: string, payload: unknown): RemoteEnvelope {
+    const sharedKey = this.sharedKeys.get(keyId);
+    if (!sharedKey) {
       throw new Error('remote_session_key_missing');
     }
     const nonce = randomBytes(12);
     const timestamp = new Date().toISOString();
-    const cipher = createCipheriv('aes-256-gcm', this.sharedKey, nonce);
-    cipher.setAAD(aad(sessionId, this.currentKeyId, timestamp));
+    const cipher = createCipheriv('aes-256-gcm', sharedKey, nonce);
+    cipher.setAAD(aad(sessionId, keyId, timestamp));
     const encrypted = Buffer.concat([cipher.update(JSON.stringify(payload), 'utf8'), cipher.final()]);
     const tag = cipher.getAuthTag();
     return {
       sessionId,
-      keyId: this.currentKeyId,
+      keyId,
       nonce: nonce.toString('base64'),
       timestamp,
       ciphertext: Buffer.concat([encrypted, tag]).toString('base64'),
@@ -55,16 +63,19 @@ export class RemoteSessionCrypto {
   }
 
   private keyFor(envelope: RemoteEnvelope): Buffer {
-    if (this.sharedKey && this.currentKeyId === envelope.keyId) {
-      return this.sharedKey;
+    const existing = this.sharedKeys.get(envelope.keyId);
+    if (existing) {
+      this.currentKeyId = envelope.keyId;
+      return existing;
     }
     if (!envelope.browserPublicKeyJwk) {
       throw new Error('remote_browser_key_missing');
     }
     const secret = this.ecdh.computeSecret(jwkToPublicKey(envelope.browserPublicKeyJwk));
-    this.sharedKey = createHash('sha256').update(secret).digest();
+    const sharedKey = createHash('sha256').update(secret).digest();
+    this.sharedKeys.set(envelope.keyId, sharedKey);
     this.currentKeyId = envelope.keyId;
-    return this.sharedKey;
+    return sharedKey;
   }
 }
 

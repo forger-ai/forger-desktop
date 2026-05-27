@@ -94,8 +94,13 @@ const forgerSkillDefinitions: ForgerSkillDefinition[] = [
   },
   {
     group: 'forger',
-    id: 'forger-app-design-guidelines',
-    description: 'Material-grounded UI design guardrails for Forger React/MUI apps.',
+    id: 'forger-frontend-product-patterns',
+    description: 'Frontend product patterns that apply across Forger app UI stacks.',
+  },
+  {
+    group: 'forger',
+    id: 'forger-web-interface-review',
+    description: 'Review Forger app interfaces for product clarity and local-app fit.',
   },
   {
     group: 'forger',
@@ -104,18 +109,43 @@ const forgerSkillDefinitions: ForgerSkillDefinition[] = [
   },
   {
     group: 'forger',
+    id: 'forger-mui-design-patterns',
+    description: 'MUI-only UI design guardrails for Desktop or apps whose manifest frontend.ui is MUI.',
+  },
+  {
+    group: 'forger',
     id: 'forger-mui-component-patterns',
-    description: 'Choose MUI Core and MUI X Community components for common app UI without Pro dependencies.',
+    description: 'Choose MUI Core and MUI X Community components only for Desktop or MUI apps.',
   },
   {
     group: 'forger',
     id: 'forger-mui-date-pickers',
-    description: 'Use MUI X Community date and time pickers correctly without native date inputs or Pro features.',
+    description: 'Use MUI X Community date and time pickers correctly in Desktop or MUI apps.',
   },
   {
     group: 'forger',
     id: 'forger-mui-consistency',
-    description: 'Visual consistency and accessibility in MUI.',
+    description: 'Visual consistency and accessibility in Desktop or MUI apps.',
+  },
+  {
+    group: 'forger',
+    id: 'forger-tailwind-design-patterns',
+    description: 'Tailwind CSS design patterns for Forger apps using Tailwind/shadcn/Radix.',
+  },
+  {
+    group: 'forger',
+    id: 'forger-tailwind-shadcn-patterns',
+    description: 'Use shadcn/ui copied components and Radix primitives for accessible Tailwind app UI.',
+  },
+  {
+    group: 'forger',
+    id: 'forger-tailwind-responsive-frontend',
+    description: 'Build Tailwind/shadcn Forger app frontends that work well on mobile and desktop.',
+  },
+  {
+    group: 'forger',
+    id: 'forger-tanstack-query-patterns',
+    description: 'Use TanStack Query for Forger app server state and cache refresh.',
   },
   {
     group: 'forger',
@@ -145,7 +175,7 @@ const forgerSkillDefinitions: ForgerSkillDefinition[] = [
   {
     group: 'forger',
     id: 'forger-mobile-responsive-frontend',
-    description: 'Build React/MUI app frontends that work well on mobile and desktop.',
+    description: 'Build Forger app frontends that work well on mobile and desktop.',
   },
   {
     group: 'forger',

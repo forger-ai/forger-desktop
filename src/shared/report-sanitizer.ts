@@ -12,7 +12,7 @@ export interface ReportSanitizerOptions {
 const DEFAULT_MAX_STRING_LENGTH = 80_000;
 const REDACTED = '[REDACTED]';
 const REDACTED_PATH = '[REDACTED_PATH]';
-const SENSITIVE_KEY_PATTERN = /(?:secret|token|authorization|bearer|api[_-]?key|password|passwd|credential|private[_-]?key|client[_-]?secret|refresh[_-]?token|access[_-]?token|mcp[_-]?token|cookie|session)/i;
+const SENSITIVE_KEY_PATTERN = /(?:secret|token|authorization|bearer|api[_-]?key|password|passwd|credential|private[_-]?key|client[_-]?secret|refresh[_-]?token|access[_-]?token|mcp[_-]?token|cookie)/i;
 const BEARER_PATTERN = /\bBearer\s+[A-Za-z0-9._~+/=-]{12,}/gi;
 const TOKEN_ASSIGNMENT_PATTERN = /\b([A-Za-z][A-Za-z0-9_-]*(?:TOKEN|Token|token|SECRET|Secret|secret|KEY|Key|key|PASSWORD|Password|password))=([^\s"'`]{8,})/g;
 const EMAIL_PATTERN = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;

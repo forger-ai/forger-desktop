@@ -8,6 +8,7 @@ import test from 'node:test';
 import { createRequire } from 'node:module';
 import Module from 'node:module';
 import { EventEmitter } from 'node:events';
+import { WebSocket, WebSocketServer } from 'ws';
 
 import { clearDistModule } from './electron-test-helpers.mjs';
 
@@ -76,6 +77,17 @@ const requestText = (url, options = {}, body = '') => new Promise((resolve, reje
   });
   request.on('error', reject);
   request.end(body);
+});
+
+const connectWebSocket = (url) => new Promise((resolve, reject) => {
+  const socket = new WebSocket(url);
+  socket.once('open', () => resolve(socket));
+  socket.once('error', reject);
+});
+
+const nextWebSocketMessage = (socket) => new Promise((resolve, reject) => {
+  socket.once('message', (message) => resolve(message));
+  socket.once('error', reject);
 });
 
 const withMockedPackager = (buildRemoteFrontend, callback) => {
@@ -148,6 +160,43 @@ const createBackendServer = async () => {
     calls,
     backendUrl: `http://127.0.0.1:${port}`,
     close: () => new Promise((resolve) => server.close(resolve)),
+  };
+};
+
+const createRealtimeBackendServer = async () => {
+  const calls = [];
+  const server = http.createServer((request, response) => {
+    response.setHeader('content-type', 'application/json');
+    response.end(JSON.stringify({ ok: true, url: request.url }));
+  });
+  const websocketServer = new WebSocketServer({ noServer: true });
+  server.on('upgrade', (request, socket, head) => {
+    calls.push({ url: request.url, headers: request.headers });
+    if (request.url !== '/api/realtime/ws') {
+      socket.destroy();
+      return;
+    }
+    websocketServer.handleUpgrade(request, socket, head, (client) => {
+      client.on('message', (raw) => {
+        const message = JSON.parse(Buffer.from(raw).toString('utf8'));
+        client.send(JSON.stringify({
+          event_id: 'event-1',
+          channel: message.channel,
+          type: `${message.action}.confirmed`,
+          payload: { remote: request.headers['x-forger-remote-tunnel'] },
+          created_at: new Date(0).toISOString(),
+        }));
+      });
+    });
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+  return {
+    calls,
+    backendUrl: `http://127.0.0.1:${port}`,
+    close: () => new Promise((resolve) => {
+      websocketServer.close(() => server.close(resolve));
+    }),
   };
 };
 
@@ -530,6 +579,50 @@ test('RemoteNetworkShareManager starts, proxies encrypted RPC, rejects replays, 
       assert.equal((await manager.stopBySession('Session_ABC123')).status.state, 'closed');
       assert.equal((await manager.stop('finance-os')).status.state, 'inactive');
       await manager.stopAll();
+    },
+  );
+  await backend.close();
+});
+
+test('RemoteNetworkShareManager proxies encrypted realtime websocket frames only on the remote ws path', async () => {
+  const backend = await createRealtimeBackendServer();
+  await withMockedPackager(
+    async () => ({ assets: [{ path: 'index.html', data: Buffer.from('<html></html>'), type: 'text/html' }], hash: 'hash' }),
+    async ({ RemoteNetworkShareManager }) => {
+      const context = createManagerOptions();
+      context.runningApps.set('finance-os', { backendUrl: backend.backendUrl });
+      const manager = new RemoteNetworkShareManager(context.options);
+      const started = await manager.start('finance-os');
+      const browser = makeBrowserCrypto(context.uploads[0].desktopPublicKeyJwk);
+
+      await assert.rejects(
+        () => connectWebSocket(`${started.status.tunnelUrl.replace('http:', 'ws:')}/not-realtime`),
+        /Unexpected server response: 404/,
+      );
+
+      const socket = await connectWebSocket(`${started.status.tunnelUrl.replace('http:', 'ws:')}/__forger_remote_ws`);
+      socket.send(JSON.stringify(browser.encrypt('Session_ABC123', {
+        action: 'subscribe',
+        channel: 'status',
+      })));
+      const encrypted = JSON.parse(Buffer.from(await nextWebSocketMessage(socket)).toString('utf8'));
+      assert.deepEqual(browser.decrypt(encrypted), {
+        event_id: 'event-1',
+        channel: 'status',
+        type: 'subscribe.confirmed',
+        payload: { remote: 'true' },
+        created_at: new Date(0).toISOString(),
+      });
+      assert.equal(backend.calls[0].url, '/api/realtime/ws');
+      assert.equal(backend.calls[0].headers['x-forger-remote-tunnel'], 'true');
+      assert.equal(manager.status('finance-os').connectionCount, 1);
+
+      socket.send(JSON.stringify(browser.encrypt('wrong-session', {
+        action: 'subscribe',
+        channel: 'status',
+      })));
+      await new Promise((resolve) => socket.once('close', resolve));
+      await manager.stop('finance-os');
     },
   );
   await backend.close();

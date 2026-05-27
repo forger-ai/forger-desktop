@@ -269,6 +269,7 @@ test('submitConversationDiagnosticReport posts sanitized thread payload with aut
       appId: 'finance-os',
       conversationId: 'conversation-1',
       runId: 'run-1',
+      description: 'Please inspect the provider session details.',
       provider: 'codex',
       desktopVersion: '0.1.test',
       platform: 'darwin',
@@ -284,6 +285,7 @@ test('submitConversationDiagnosticReport posts sanitized thread payload with aut
     assert.equal(requestInit.headers.Authorization, 'Bearer cloud-token');
     const body = JSON.parse(requestInit.body);
     const text = JSON.stringify(body);
+    assert.equal(body.description, 'Please inspect the provider session details.');
     assert.equal(text.includes('/Users/felipe/Desktop'), false);
     assert.equal(text.includes('sk-private-token'), false);
     assert.equal(text.includes('FORGER_APPS/finance-os'), true);
