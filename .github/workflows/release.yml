@@ -36,9 +36,9 @@ jobs:
 
       - run: npm ci
       - run: |
-          rm -rf node_modules/electron/dist node_modules/electron/path.txt
-          force_no_cache=true node node_modules/electron/install.js
+          node scripts/ensure-electron-installed.mjs
           node -e "require('electron'); console.log('electron ready')"
+        shell: bash
       - run: node scripts/validate-release-tag.mjs
       - run: npm run test:coverage
 
@@ -75,9 +75,9 @@ jobs:
 
       - run: npm ci
       - run: |
-          rm -rf node_modules/electron/dist node_modules/electron/path.txt
-          force_no_cache=true node node_modules/electron/install.js
+          node scripts/ensure-electron-installed.mjs
           node -e "require('electron'); console.log('electron ready')"
+        shell: bash
       - run: npm run typecheck
       - run: npm run ${{ matrix.script }}
         env:
