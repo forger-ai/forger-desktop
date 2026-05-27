@@ -45,8 +45,10 @@ const COMMONS_OVERLAY_FILES = [
   ['commons/backend/mcp_runtime.py', 'backend/src/app/mcp_runtime.py'],
   ['commons/backend/remote_tunnel.py', 'backend/src/app/remote_tunnel.py'],
   ['commons/frontend/client.ts', 'frontend/src/api/client.ts'],
+  ['commons/frontend/query.ts', 'frontend/src/api/query.ts'],
   ['commons/frontend/forgerBrand.ts', 'frontend/src/api/forgerBrand.ts'],
   ['commons/frontend/remoteTunnel.ts', 'frontend/src/api/remoteTunnel.ts'],
+  ['commons/frontend/realtime.ts', 'frontend/src/api/realtime.ts'],
 ] as const;
 
 const isRecord = (value: unknown): value is JsonObject => {

@@ -100,6 +100,7 @@ export const submitConversationDiagnosticReport = async (
     runId: report.runId,
     provider: report.provider,
     technicalCode: report.technicalCode,
+    hasDescription: Boolean(report.description),
     desktopVersion: report.desktopVersion,
     platform: report.platform,
   };
@@ -116,6 +117,7 @@ export const submitConversationDiagnosticReport = async (
         conversation_id: report.conversationId,
         run_id: report.runId,
         title: report.title,
+        description: report.description,
         provider: report.provider,
         technical_code: report.technicalCode,
         desktop_version: report.desktopVersion,

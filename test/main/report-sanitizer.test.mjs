@@ -20,6 +20,13 @@ test('report sanitizer aliases Forger roots and redacts unknown personal paths a
       token: 'abc123456789',
       nested: { apiKey: 'secret-value' },
     },
+    payload: {
+      providerSession: {
+        transcript: {
+          text: '{"thread_id":"thread-1","path":"/Users/felipe/Forger/apps/finance-os/app.py","env":"MCP_TOKEN=secret-token-value","private":"/Users/felipe/Documents/bank.csv"}',
+        },
+      },
+    },
   }, {
     roots: [
       { alias: 'FORGER_HOME/', path: '/Users/felipe/Forger' },
@@ -35,6 +42,9 @@ test('report sanitizer aliases Forger roots and redacts unknown personal paths a
   assert.equal(text.includes('/Users/felipe/Desktop'), false);
   assert.equal(text.includes('C:\\Users\\Felipe\\Desktop'), false);
   assert.equal(text.includes('sk-private-token-value'), false);
+  assert.equal(text.includes('secret-token-value'), false);
+  assert.equal(text.includes('/Users/felipe/Documents'), false);
   assert.equal(text.includes('felipe@example.com'), false);
+  assert.match(sanitized.payload.providerSession.transcript.text, /FORGER_APPS\/finance-os/);
   assert.equal(sanitized.sensitiveDetails.token, '[REDACTED]');
 });

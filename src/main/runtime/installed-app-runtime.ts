@@ -295,7 +295,20 @@ const openOrFocusAppWindow = async (
   const localizedFrontendUrl = withAppLocale(frontendUrl, locale);
   const existing = appWindows.get(appId);
   if (existing && !existing.isDestroyed()) {
-    if (existing.webContents.getURL() !== localizedFrontendUrl) {
+    const currentUrl = existing.webContents.getURL();
+    const shouldLoadUrl = currentUrl !== localizedFrontendUrl;
+    await appendInstallLog('app_window:existing_open_or_focus', {
+      appId,
+      currentUrl,
+      targetUrl: localizedFrontendUrl,
+      shouldLoadUrl,
+    });
+    if (shouldLoadUrl) {
+      await appendInstallLog('app_window:existing_load_url', {
+        appId,
+        fromUrl: currentUrl,
+        toUrl: localizedFrontendUrl,
+      });
       await existing.loadURL(localizedFrontendUrl).catch(() => {
         // keep current URL if reload fails
       });

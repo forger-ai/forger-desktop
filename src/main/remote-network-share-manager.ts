@@ -1,5 +1,7 @@
 import http, { type IncomingMessage, type ServerResponse } from 'node:http';
 import path from 'node:path';
+import type { Duplex } from 'node:stream';
+import { WebSocket, WebSocketServer } from 'ws';
 
 import type { RemoteNetworkShareResult, RemoteNetworkShareStatus } from '../shared/types';
 import type { AppManifest, RunningAppProcess, RuntimeBinarySet } from './core/main-process-types';
@@ -9,12 +11,16 @@ import { buildRemoteFrontend } from './remote-frontend-packager';
 import { listenLocal, LocalTunnelProvider, type RemoteTunnel, type RemoteTunnelProvider } from './remote-tunnel-provider';
 
 const REMOTE_RPC_PATH = '/__forger_remote_rpc';
-const BLOCKED_PREFIXES = ['/mcp', '/__forger_internal', '/__forger_remote_rpc'];
+const REMOTE_WS_PATH = '/__forger_remote_ws';
+const REALTIME_WS_PATH = '/api/realtime/ws';
+const BLOCKED_PREFIXES = ['/mcp', '/__forger_internal', '/__forger_remote_rpc', '/__forger_remote_ws'];
 const MAX_BODY_BYTES = 64 * 1024 * 1024;
+const MAX_WS_FRAME_BYTES = 1024 * 1024;
 
 interface ShareState {
   appId: string;
   server: http.Server;
+  websocketServer: WebSocketServer;
   sessionRowId: number;
   sessionId: string;
   tunnel: RemoteTunnel;
@@ -22,6 +28,7 @@ interface ShareState {
   status: RemoteNetworkShareStatus;
   seenNonces: Set<string>;
   connectionKeyIds: Set<string>;
+  remoteSockets: Set<WebSocket>;
 }
 
 export interface RemoteNetworkShareManagerOptions {
@@ -103,6 +110,7 @@ export class RemoteNetworkShareManager {
     let sessionRowId: number | undefined;
     let sessionId = '';
     let server: http.Server | undefined;
+    let websocketServer: WebSocketServer | undefined;
     let tunnel: RemoteTunnel | undefined;
     try {
       await this.options.appendInstallLog('remote_network_share:create_session:start', { appId });
@@ -114,8 +122,12 @@ export class RemoteNetworkShareManager {
         throw new Error('remote_tunnel_session_payload_invalid');
       }
       const crypto = new RemoteSessionCrypto();
+      websocketServer = new WebSocketServer({ noServer: true, maxPayload: MAX_WS_FRAME_BYTES });
       server = http.createServer((request, response) => {
         void this.handleRpc(appId, crypto, request, response);
+      });
+      server.on('upgrade', (request, socket, head) => {
+        void this.handleRealtimeUpgrade(appId, crypto, websocketServer!, request, socket, head);
       });
       await this.options.appendInstallLog('remote_network_share:local_rpc:start', { appId, sessionId });
       const port = await listenLocal(server);
@@ -157,7 +169,19 @@ export class RemoteNetworkShareManager {
         connectionCount: 0,
         connections: [],
       };
-      const state: ShareState = { appId, server, sessionRowId, sessionId, tunnel, crypto, status, seenNonces: new Set(), connectionKeyIds: new Set() };
+      const state: ShareState = {
+        appId,
+        server,
+        websocketServer,
+        sessionRowId,
+        sessionId,
+        tunnel,
+        crypto,
+        status,
+        seenNonces: new Set(),
+        connectionKeyIds: new Set(),
+        remoteSockets: new Set(),
+      };
       this.pendingStatuses.delete(appId);
       this.shares.set(appId, state);
       this.emit(state);
@@ -167,6 +191,7 @@ export class RemoteNetworkShareManager {
       const technicalCode = error instanceof Error ? error.message : 'remote_tunnel_start_failed';
       await Promise.allSettled([
         tunnel?.close() ?? Promise.resolve(),
+        closeWebSocketServer(websocketServer),
         closeServerIfListening(server),
         sessionRowId
           ? client.reportRemoteTunnelSession({ sessionId: sessionRowId, status: 'error', lastError: technicalCode })
@@ -200,6 +225,7 @@ export class RemoteNetworkShareManager {
     this.pendingStatuses.delete(appId);
     await Promise.allSettled([
       state.tunnel.close(),
+      closeWebSocketServer(state.websocketServer, state.remoteSockets),
       new Promise<void>((resolve) => state.server.close(() => resolve())),
       this.options.backendClient()?.closeRemoteTunnelSession(state.sessionRowId) ?? Promise.resolve(),
     ]);
@@ -314,6 +340,123 @@ export class RemoteNetworkShareManager {
     }
   }
 
+  private async handleRealtimeUpgrade(
+    appId: string,
+    crypto: RemoteSessionCrypto,
+    websocketServer: WebSocketServer,
+    request: IncomingMessage,
+    socket: Duplex,
+    head: Buffer,
+  ): Promise<void> {
+    const state = this.shares.get(appId);
+    const pathName = new URL(request.url ?? '/', 'http://127.0.0.1').pathname;
+    if (!state || pathName !== REMOTE_WS_PATH) {
+      socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+    const running = this.options.runningApps.get(appId);
+    if (!running) {
+      socket.write('HTTP/1.1 503 Service Unavailable\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+    websocketServer.handleUpgrade(request, socket, head, (remoteSocket) => {
+      state.remoteSockets.add(remoteSocket);
+      this.attachRealtimeSocket(state, running.backendUrl, crypto, remoteSocket);
+    });
+  }
+
+  private attachRealtimeSocket(
+    state: ShareState,
+    backendUrl: string,
+    crypto: RemoteSessionCrypto,
+    remoteSocket: WebSocket,
+  ): void {
+    const backendSocket = new WebSocket(realtimeBackendUrl(backendUrl), {
+      headers: remoteTunnelHeaders(state.sessionId),
+      maxPayload: MAX_WS_FRAME_BYTES,
+    });
+    const pending: string[] = [];
+    let browserKeyId = '';
+
+    const closeBoth = (): void => {
+      state.remoteSockets.delete(remoteSocket);
+      if (remoteSocket.readyState === WebSocket.OPEN || remoteSocket.readyState === WebSocket.CONNECTING) {
+        remoteSocket.close();
+      }
+      if (backendSocket.readyState === WebSocket.OPEN || backendSocket.readyState === WebSocket.CONNECTING) {
+        backendSocket.close();
+      }
+    };
+
+    backendSocket.on('open', () => {
+      for (const raw of pending.splice(0)) {
+        backendSocket.send(raw);
+      }
+    });
+    backendSocket.on('message', (raw) => {
+      if (!browserKeyId || remoteSocket.readyState !== WebSocket.OPEN) {
+        return;
+      }
+      try {
+        const payload = JSON.parse(Buffer.from(raw as Buffer).toString('utf8')) as unknown;
+        remoteSocket.send(JSON.stringify(crypto.encryptForKey(state.sessionId, browserKeyId, payload)));
+      } catch (error) {
+        void this.options.appendInstallLog('remote_network_share:ws_backend_failed', {
+          appId: state.appId,
+          sessionId: state.sessionId,
+          error: error instanceof Error ? error.message : 'remote_ws_backend_failed',
+        });
+        closeBoth();
+      }
+    });
+    backendSocket.on('error', (error) => {
+      void this.options.appendInstallLog('remote_network_share:ws_backend_error', {
+        appId: state.appId,
+        sessionId: state.sessionId,
+        error: error instanceof Error ? error.message : 'remote_ws_backend_error',
+      });
+      closeBoth();
+    });
+    backendSocket.on('close', closeBoth);
+
+    remoteSocket.on('message', (raw) => {
+      try {
+        const envelope = JSON.parse(Buffer.from(raw as Buffer).toString('utf8')) as RemoteEnvelope;
+        if (envelope.sessionId !== state.sessionId) {
+          throw new Error('remote_ws_session_mismatch');
+        }
+        if (state.seenNonces.has(envelope.nonce)) {
+          throw new Error('remote_ws_replay');
+        }
+        state.seenNonces.add(envelope.nonce);
+        const payload = crypto.decrypt<unknown>(envelope);
+        browserKeyId = envelope.keyId;
+        state.connectionKeyIds.add(envelope.keyId);
+        state.status = { ...state.status, state: 'connected', connectionCount: state.connectionKeyIds.size };
+        this.emit(state);
+        const serialized = JSON.stringify(payload);
+        if (backendSocket.readyState === WebSocket.OPEN) {
+          backendSocket.send(serialized);
+        } else if (backendSocket.readyState === WebSocket.CONNECTING) {
+          pending.push(serialized);
+        } else {
+          throw new Error('remote_ws_backend_not_connected');
+        }
+      } catch (error) {
+        void this.options.appendInstallLog('remote_network_share:ws_failed', {
+          appId: state.appId,
+          sessionId: state.sessionId,
+          error: error instanceof Error ? error.message : 'remote_ws_failed',
+        });
+        closeBoth();
+      }
+    });
+    remoteSocket.on('error', closeBoth);
+    remoteSocket.on('close', closeBoth);
+  }
+
   private frontendDir(appId: string, manifest: AppManifest): string {
     const frontend = manifest.services?.find((service) => service.name === 'frontend');
     return path.resolve(this.options.installDirForApp(appId) ?? process.cwd(), frontend?.context ?? './frontend');
@@ -355,6 +498,30 @@ const closeServerIfListening = async (server?: http.Server): Promise<void> => {
   }
   await new Promise<void>((resolve) => server.close(() => resolve()));
 };
+
+const closeWebSocketServer = async (
+  server?: WebSocketServer,
+  sockets?: Set<WebSocket>,
+): Promise<void> => {
+  for (const socket of sockets ?? []) {
+    socket.close();
+  }
+  if (!server) {
+    return;
+  }
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+};
+
+const realtimeBackendUrl = (backendUrl: string): string => {
+  const url = new URL(REALTIME_WS_PATH, backendUrl);
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+  return url.toString();
+};
+
+const remoteTunnelHeaders = (sessionId: string): Record<string, string> => ({
+  'x-forger-remote-tunnel': 'true',
+  'x-forger-remote-session-id': sessionId,
+});
 
 const isBlocked = (requestPath: string): boolean => {
   const normalized = requestPath.toLowerCase();

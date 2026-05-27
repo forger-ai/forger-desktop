@@ -83,6 +83,7 @@ export function RendererAppDialogs({ controller }: RendererAppDialogsProps) {
     copyErrorReportDetails,
     submitErrorReport,
     conversationDiagnosticDialog,
+    setConversationDiagnosticDescription,
     closeConversationDiagnosticDialog,
     copyConversationDiagnosticReport,
     submitConversationDiagnosticReport,
@@ -463,6 +464,16 @@ export function RendererAppDialogs({ controller }: RendererAppDialogsProps) {
         <DialogContent>
           <Stack spacing={2} sx={{ pt: 0.5 }}>
             <Typography color="text.secondary">{t.settings.conversationReportBody}</Typography>
+            <TextField
+              fullWidth
+              multiline
+              minRows={3}
+              label={t.settings.conversationReportDescriptionLabel}
+              placeholder={t.settings.conversationReportDescriptionPlaceholder}
+              value={conversationDiagnosticDialog.description}
+              onChange={(event) => setConversationDiagnosticDescription(event.target.value)}
+              disabled={conversationDiagnosticDialog.busy}
+            />
             {conversationDiagnosticDialog.report ? (
               <TextField
                 fullWidth
@@ -470,7 +481,10 @@ export function RendererAppDialogs({ controller }: RendererAppDialogsProps) {
                 minRows={10}
                 maxRows={16}
                 label={t.settings.conversationReportDetailsLabel}
-                value={JSON.stringify(conversationDiagnosticDialog.report, null, 2)}
+                value={JSON.stringify({
+                  ...conversationDiagnosticDialog.report,
+                  description: conversationDiagnosticDialog.description.trim() || undefined,
+                }, null, 2)}
                 InputProps={{ readOnly: true }}
               />
             ) : null}

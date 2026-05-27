@@ -16,6 +16,7 @@ export interface PrepareConversationDiagnosticReportInput {
   conversationId: string;
   runId?: string;
   title?: string;
+  description?: string;
   provider?: AgentProvider;
   technicalCode?: string;
   conversation?: {
@@ -33,6 +34,7 @@ export interface ConversationDiagnosticReportPreview {
   conversationId: string;
   runId?: string;
   title?: string;
+  description?: string;
   provider?: AgentProvider;
   technicalCode?: string;
   desktopVersion?: string;

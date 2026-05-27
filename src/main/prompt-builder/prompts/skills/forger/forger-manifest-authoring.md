@@ -40,7 +40,7 @@ Use this shape as the current authoring contract. Remove fields that do not appl
       "language": "TypeScript",
       "framework": "React",
       "bundler": "Vite",
-      "ui": "MUI"
+      "ui": "tailwind-shadcn-radix"
     }
   },
   "services": [
