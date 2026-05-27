@@ -1,9 +1,8 @@
 ---
 name: forger-desktop-runtime-bridge
-description: Call Forger Desktop prompt templates and manifest agents from a local app backend.
+description: Use when an app backend or UI starts, polls, cancels, waits for, resumes, or displays Forger Desktop promptTemplate tasks or manifest agent threads.
 ---
 
-- Use this skill when an app UI needs to start, poll, cancel, or resume Forger assistant work from inside the app.
 - The current `vite-fastapi-sqlite` stack provides the backend helper in `commons/backend/forger_desktop.py`.
 - Keep the frontend browser-safe. The frontend must call the app backend over normal HTTP routes; it must not call Desktop directly, use Electron APIs, read Desktop secrets, or depend on `window.forgerApp`.
 - The app backend owns validation, size limits, file preprocessing, argument shaping, error mapping, and calls to `forger_desktop.py`.

@@ -1,9 +1,8 @@
 ---
 name: forger-web-interface-review
-description: Review Forger app interfaces for product clarity, layout quality, responsive behavior, and local-app fit without relying on live remote guideline fetches.
+description: Use when reviewing Forger app dashboards, CRUD flows, forms, data views, assistant task surfaces, mobile/desktop layouts, visual clarity, copy, empty states, and action feedback.
 ---
 
-- Use this skill when reviewing a Forger app UI, dashboard, CRUD flow, form, data view, assistant task surface, or mobile/desktop layout before or after implementation.
 - Do not fetch remote guideline documents during normal Forger app work. Use this stable Forger-owned checklist.
 - Review the app as a local private tool, not a public marketing website. Ignore SEO, landing-page conversion, public navigation, Vercel deployment, analytics, and SaaS signup assumptions unless the app explicitly needs them.
 - Start from the user's workflow: what they are trying to load, review, create, edit, delete, import, export, approve, or ask the app assistant to do.

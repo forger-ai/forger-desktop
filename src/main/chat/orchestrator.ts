@@ -699,8 +699,25 @@ export class ChatOrchestrator {
         toolEvents: assistantReply.toolEvents,
       });
     } catch (error) {
+      if (run.status === 'canceled') {
+        run.updatedAt = new Date().toISOString();
+        run.errorCode = 'canceled';
+        run.userMessage = undefined;
+        this.emitRun(run);
+        await appendRunLog(run.runLogPath, 'meta', 'Run canceled by user.');
+
+        await this.auditLogger.log({
+          type: 'run_canceled',
+          runId: run.runId,
+          appId: run.appId,
+          runLogPath: run.runLogPath,
+          threadId: this.threadsByApp.get(run.appId)?.threadId ?? null,
+        });
+        return;
+      }
+
       const detail = normalizeErrorCode(error);
-      run.status = run.status === 'canceled' ? 'canceled' : 'failed';
+      run.status = 'failed';
       run.updatedAt = new Date().toISOString();
       run.errorCode = detail.code;
       run.userMessage = mapFailureMessage(detail.code, detail.message, run.runLogPath, run.locale);

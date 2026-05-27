@@ -1,9 +1,8 @@
 ---
 name: forger-tanstack-query-patterns
-description: Use TanStack Query for Forger app server state, cache invalidation, mutations, and local/remote data refresh.
+description: Use when adding or changing Forger React app data fetching, TanStack Query keys, mutations, optimistic updates, invalidation, polling, task status refresh, or server-state cache behavior.
 ---
 
-- Use this skill when adding or changing data fetching, query keys, mutations, optimistic updates, background refresh, or cache invalidation in a Forger React app.
 - Treat TanStack Query as the client-side server-state layer. Do not use it for local form draft state, purely visual UI state, or data that belongs in backend persistence.
 - Keep API contracts in `frontend/src/api` or the app's existing API module. UI components should call feature hooks, not raw `fetch` scattered across screens.
 - Use array query keys only. Include every variable that changes the request result, including IDs, filters, search terms, date ranges, locale-sensitive values, and pagination state.

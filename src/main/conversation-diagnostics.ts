@@ -2,6 +2,7 @@ import os from 'node:os';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type {
+  ConversationDiagnosticFileSummary,
   ConversationDiagnosticReportPreview,
   PrepareConversationDiagnosticReportInput,
 } from '../shared/types';
@@ -9,6 +10,14 @@ import { sanitizeReportPayload, type ReportSanitizerRoot } from '../shared/repor
 import type { AppAgentConversationManager } from './app-agent-conversation-manager';
 import { getRunLogPath } from './chat/progress-errors';
 import { sanitizeId } from './app-agent/conversation-helpers';
+
+const CODEX_SESSION_TRANSCRIPT_TAIL_BYTES = 220_000;
+const CODEX_SESSION_MATCH_HEAD_BYTES = 64_000;
+const DIAGNOSTIC_ATTACHMENT_MAX_CHARS = Number.MAX_SAFE_INTEGER;
+
+export interface ConversationDiagnosticAttachmentUpload extends ConversationDiagnosticFileSummary {
+  text: string;
+}
 
 interface BuildConversationDiagnosticOptions {
   appVersion: string;
@@ -84,7 +93,7 @@ const buildDesktopChatPayload = async (
       title: input.title,
       messages: [],
     },
-    rawRunLog: runLog,
+    rawRunLog: summarizeTextArtifact(runLog),
     providerSession,
   };
 };
@@ -145,7 +154,7 @@ const buildProviderSession = async (input: {
       threadId,
       runId,
       source: transcript ? 'codex_session_jsonl' : 'codex_session_not_found',
-      transcript,
+      transcript: summarizeTextArtifact(transcript),
     };
   }
   if (provider === 'claude') {
@@ -153,8 +162,8 @@ const buildProviderSession = async (input: {
       provider,
       threadId,
       runId,
-      source: input.runLog ? 'run_log_tail' : 'run_log_not_found',
-      transcript: input.runLog ?? null,
+      source: input.runLog ? 'run_log' : 'run_log_not_found',
+      transcript: summarizeTextArtifact(input.runLog),
     };
   }
   return {
@@ -162,29 +171,108 @@ const buildProviderSession = async (input: {
     threadId,
     runId,
     source: 'provider_unknown',
-    transcript: input.runLog ?? null,
+    transcript: summarizeTextArtifact(input.runLog),
   };
 };
+
+export const buildConversationDiagnosticAttachments = async (
+  options: BuildConversationDiagnosticOptions,
+  input: PrepareConversationDiagnosticReportInput,
+): Promise<ConversationDiagnosticAttachmentUpload[]> => {
+  const appId = input.appId || input.conversation?.appId;
+  const roots = reportSanitizerRoots(options, appId);
+  const attachments: ConversationDiagnosticAttachmentUpload[] = [];
+  if (input.runId) {
+    const runLogPath = getRunLogPath(options.getForgerMetadataRoot(), input.runId);
+    const runLog = await buildAttachmentFromFile({
+      filePath: runLogPath,
+      kind: input.provider === 'claude' ? 'claude_run_log' : 'run_log',
+      filename: safeDiagnosticFilename(`run-log-${input.runId}.log`),
+      contentType: 'text/plain',
+      roots,
+    });
+    if (runLog) {
+      attachments.push(runLog);
+    }
+  }
+
+  if (input.provider === 'codex') {
+    const codexHome = input.source === 'app_agent_conversation'
+      ? appAgentConversationCodexHome(options.getForgerMetadataRoot(), input.appId ?? appId ?? 'forger', input.conversationId)
+      : conversationCodexHome(
+        options.getForgerMetadataRoot(),
+        input.conversation?.appId ?? input.appId ?? 'forger',
+        input.conversationId,
+      );
+    const codexFilePath = await findCodexSessionFile([
+      codexHome,
+      options.getCodexHome(),
+    ], [input.conversation?.threadId, input.runId].filter(Boolean) as string[]);
+    if (codexFilePath) {
+      const codexSession = await buildAttachmentFromFile({
+        filePath: codexFilePath,
+        kind: 'codex_session_jsonl',
+        filename: safeDiagnosticFilename(`codex-session-${input.conversation?.threadId ?? input.runId ?? 'conversation'}.jsonl`),
+        contentType: 'application/x-ndjson',
+        roots,
+      });
+      if (codexSession) {
+        attachments.push(codexSession);
+      }
+    }
+  }
+
+  return attachments;
+};
+
+export const summarizeConversationDiagnosticAttachments = (
+  attachments: ConversationDiagnosticAttachmentUpload[],
+): ConversationDiagnosticFileSummary[] =>
+  attachments.map(({ text: _text, ...summary }) => summary);
 
 const findCodexSessionTranscript = async (
   roots: string[],
   needles: string[],
 ): Promise<Record<string, unknown> | null> => {
+  const filePath = await findCodexSessionFile(roots, needles);
+  if (!filePath) {
+    return null;
+  }
+  const transcript = await readTail(filePath, CODEX_SESSION_TRANSCRIPT_TAIL_BYTES);
+  const text = typeof transcript?.text === 'string' ? transcript.text : '';
+  const matchedFromPathOrTail = matchNeedles(needles, [filePath, text]);
+  const matched = matchedFromPathOrTail.length > 0
+    ? matchedFromPathOrTail
+    : matchNeedles(needles, [await readHeadText(filePath, CODEX_SESSION_MATCH_HEAD_BYTES)]);
+  return {
+    ...transcript,
+    matched,
+  };
+};
+
+const findCodexSessionFile = async (
+  roots: string[],
+  needles: string[],
+): Promise<string | null> => {
   for (const root of roots) {
     const files = await listJsonlFiles(path.join(root, 'sessions'));
     for (const filePath of files) {
-      const transcript = await readTail(filePath, 220_000);
+      const transcript = await readTail(filePath, CODEX_SESSION_TRANSCRIPT_TAIL_BYTES);
       const text = typeof transcript?.text === 'string' ? transcript.text : '';
-      if (needles.length === 0 || needles.some((needle) => text.includes(needle))) {
-        return {
-          ...transcript,
-          matched: needles.filter((needle) => text.includes(needle)),
-        };
+      const matchedFromPathOrTail = matchNeedles(needles, [filePath, text]);
+      const matched = matchedFromPathOrTail.length > 0
+        ? matchedFromPathOrTail
+        : matchNeedles(needles, [await readHeadText(filePath, CODEX_SESSION_MATCH_HEAD_BYTES)]);
+      if (needles.length === 0 || matched.length > 0) {
+        return filePath;
       }
     }
   }
   return null;
 };
+
+const matchNeedles = (needles: string[], haystacks: string[]): string[] =>
+  needles.filter((needle) => haystacks.some((haystack) => haystack.includes(needle)));
 
 const listJsonlFiles = async (root: string, depth = 0): Promise<string[]> => {
   if (depth > 8) {
@@ -227,3 +315,55 @@ const readTail = async (filePath: string, maxBytes = 180_000): Promise<Record<st
     await handle.close().catch(() => undefined);
   }
 };
+
+const readHeadText = async (filePath: string, maxBytes: number): Promise<string> => {
+  const handle = await fs.open(filePath, 'r').catch(() => null);
+  if (!handle) {
+    return '';
+  }
+  try {
+    const stat = await handle.stat();
+    const bytesToRead = Math.min(stat.size, maxBytes);
+    const buffer = Buffer.alloc(bytesToRead);
+    await handle.read(buffer, 0, buffer.length, 0);
+    return buffer.toString('utf8');
+  } finally {
+    await handle.close().catch(() => undefined);
+  }
+};
+
+const summarizeTextArtifact = (artifact: Record<string, unknown> | null | undefined): Record<string, unknown> | null => {
+  if (!artifact) {
+    return null;
+  }
+  const { text: _text, home: _home, ...summary } = artifact;
+  return summary;
+};
+
+const buildAttachmentFromFile = async (input: {
+  filePath: string;
+  kind: ConversationDiagnosticAttachmentUpload['kind'];
+  filename: string;
+  contentType: string;
+  roots: ReportSanitizerRoot[];
+}): Promise<ConversationDiagnosticAttachmentUpload | null> => {
+  const raw = await fs.readFile(input.filePath, 'utf8').catch(() => null);
+  if (raw === null) {
+    return null;
+  }
+  const text = sanitizeReportPayload(raw, {
+    roots: input.roots,
+    maxStringLength: DIAGNOSTIC_ATTACHMENT_MAX_CHARS,
+  });
+  return {
+    kind: input.kind,
+    filename: input.filename,
+    contentType: input.contentType,
+    originalByteSize: Buffer.byteLength(raw, 'utf8'),
+    sanitizedByteSize: Buffer.byteLength(text, 'utf8'),
+    text,
+  };
+};
+
+const safeDiagnosticFilename = (value: string): string =>
+  value.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 160) || 'diagnostic-file.txt';

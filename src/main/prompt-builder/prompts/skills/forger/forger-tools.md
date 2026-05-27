@@ -1,6 +1,6 @@
 ---
 name: forger-tools
-description: Understand Forger-approved tools, including official MCP tools that apps can request through manifest grants.
+description: Use when designing, reviewing, or explaining Forger-approved tools, official MCP tool grants, app-owned structured tools, Gmail grants, or manifest tool declarations.
 ---
 
 - Forger tools are approved platform capabilities that apps can request, such as Gmail.

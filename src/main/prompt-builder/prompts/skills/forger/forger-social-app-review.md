@@ -1,6 +1,6 @@
 ---
 name: forger-social-app-review
-description: Review a Social app package before the user installs code created by another person.
+description: Use when reviewing a Forger Social app package or ZIP before installation, including untrusted code, manifests, services, scripts, dependencies, network use, filesystem access, and secrets.
 ---
 
 - Treat every Social app ZIP as untrusted code until Forger has verified checksum, archive entries, and user consent.

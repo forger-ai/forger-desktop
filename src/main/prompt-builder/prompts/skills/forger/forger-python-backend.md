@@ -1,6 +1,6 @@
 ---
 name: forger-python-backend
-description: Use small, safe Python backend changes focused on validation, persistence integrity, and local Forger app constraints.
+description: Use when changing Python backend code for local Forger apps, including validation, services, persistence, SQLModel or SQLite logic, migrations, scripts, and safe local data handling.
 ---
 
 - Keep domain validations before persisting data. Validate required fields, ranges, ownership, duplicates, state transitions, and destructive operations before writing to SQLite.

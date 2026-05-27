@@ -67,6 +67,17 @@ test('app skeleton resource preparation accepts an existing checked-out resource
   assert.equal(await fs.readFile(path.join(targetRoot, 'manifest.json'), 'utf8'), '{"name":"checked-out"}\n');
 });
 
+test('checked-in app skeleton resource relies on global Forger localization skill', async () => {
+  const resourceRoot = path.resolve('resources', 'app-skeletons', 'vite-fastapi-sqlite');
+  const manifest = JSON.parse(await fs.readFile(path.join(resourceRoot, 'manifest.json'), 'utf8'));
+
+  assert.deepEqual(manifest.skills, ['./skills/stack-database-extension']);
+  await assert.rejects(
+    fs.stat(path.join(resourceRoot, 'skills', 'forger-locale-module')),
+    /ENOENT/,
+  );
+});
+
 test('app skeleton resource preparation fails before packaging when no skeleton is available', async (t) => {
   const desktopRoot = await makeRoot();
   t.after(async () => {

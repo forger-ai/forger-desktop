@@ -1,6 +1,6 @@
 ---
 name: forger-tasks
-description: Understand Forger app tasks, which let apps invoke an agentic coding tool for one-shot non-conversational work.
+description: Use when designing, reviewing, or explaining app promptTemplates and one-shot tasks for imports, reviews, conversions, classifications, summaries, or bounded non-conversational work.
 ---
 
 - Tasks are app-declared one-shot jobs with a bounded input form and one clear result.

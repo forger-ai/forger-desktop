@@ -41,8 +41,27 @@ test('conversation diagnostics include description and sanitized raw provider se
       'utf8',
     );
 
-    const { buildConversationDiagnosticReport } = distRequire('main/conversation-diagnostics.js');
+    const {
+      buildConversationDiagnosticAttachments,
+      buildConversationDiagnosticReport,
+    } = distRequire('main/conversation-diagnostics.js');
     const report = await buildConversationDiagnosticReport(makeOptions(root), {
+      source: 'desktop_chat',
+      appId: 'finance-os',
+      conversationId: 'conversation-1',
+      runId: 'run-1',
+      title: 'Import bug',
+      description: 'State reset after sending chat.',
+      provider: 'codex',
+      conversation: {
+        appId: 'finance-os',
+        title: 'Import bug',
+        threadId: 'thread-1',
+        runtime: { provider: 'codex', model: 'gpt-test' },
+        messages: [{ id: 'm1', role: 'user', content: 'Please inspect this.' }],
+      },
+    });
+    const attachments = await buildConversationDiagnosticAttachments(makeOptions(root), {
       source: 'desktop_chat',
       appId: 'finance-os',
       conversationId: 'conversation-1',
@@ -63,9 +82,54 @@ test('conversation diagnostics include description and sanitized raw provider se
     assert.equal(report.description, 'State reset after sending chat.');
     assert.equal(report.payload.providerSession.source, 'codex_session_jsonl');
     assert.deepEqual(report.payload.providerSession.transcript.matched, ['thread-1']);
+    assert.equal(report.payload.providerSession.transcript.text, undefined);
     assert.equal(text.includes('secret-token-value'), false);
     assert.equal(text.includes('/Users/felipe/Desktop'), false);
-    assert.equal(text.includes('FORGER_APPS/finance-os'), true);
+    assert.equal(attachments.length, 1);
+    assert.equal(attachments[0].kind, 'codex_session_jsonl');
+    assert.equal(attachments[0].text.includes('secret-token-value'), false);
+    assert.equal(attachments[0].text.includes('/Users/felipe/Desktop'), false);
+    assert.equal(attachments[0].text.includes('FORGER_APPS/finance-os'), true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('conversation diagnostics match large Codex sessions from the session header', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'forger-conversation-diagnostic-large-'));
+  try {
+    const metadataRoot = path.join(root, 'Forger', '.forger');
+    const sessionDir = path.join(metadataRoot, 'chat-conversations-runtime', 'finance-os', 'conversation-1', 'codex-home', 'sessions', '2026', '05', '26');
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(
+      path.join(sessionDir, 'rollout-large.jsonl'),
+      [
+        JSON.stringify({ type: 'session_meta', payload: { id: 'thread-1' } }),
+        'x'.repeat(260_000),
+        JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'latest tail only' } }),
+      ].join('\n'),
+      'utf8',
+    );
+
+    const { buildConversationDiagnosticReport } = distRequire('main/conversation-diagnostics.js');
+    const report = await buildConversationDiagnosticReport(makeOptions(root), {
+      source: 'desktop_chat',
+      appId: 'finance-os',
+      conversationId: 'conversation-1',
+      provider: 'codex',
+      conversation: {
+        appId: 'finance-os',
+        title: 'Import bug',
+        threadId: 'thread-1',
+        runtime: { provider: 'codex', model: 'gpt-test' },
+        messages: [],
+      },
+    });
+
+    assert.equal(report.payload.providerSession.source, 'codex_session_jsonl');
+    assert.deepEqual(report.payload.providerSession.transcript.matched, ['thread-1']);
+    assert.equal(report.payload.providerSession.transcript.truncatedFromStart, true);
+    assert.equal(report.payload.providerSession.transcript.text, undefined);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -102,8 +166,9 @@ test('app-agent conversation diagnostics attach Claude run log as provider sessi
     });
 
     assert.equal(report.payload.providerSession.provider, 'claude');
-    assert.equal(report.payload.providerSession.source, 'run_log_tail');
+    assert.equal(report.payload.providerSession.source, 'run_log');
     assert.equal(report.payload.providerSession.threadId, 'claude-session-1');
+    assert.equal(report.payload.providerSession.transcript.text, undefined);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

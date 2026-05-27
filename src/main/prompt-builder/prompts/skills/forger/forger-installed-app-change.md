@@ -1,6 +1,6 @@
 ---
 name: forger-installed-app-change
-description: Use this before changing installed app code so scope, validation, cleanup, and saved-version handling stay consistent.
+description: Use when changing installed app code, frontend, backend, package files, manifests, services, or imports so scope, validation, restart, cleanup, and saved-version handling stay consistent.
 ---
 
 - Treat `APP_ROOT` from the message prompt as the selected app install directory and repository root.

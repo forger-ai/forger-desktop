@@ -1,11 +1,11 @@
 ---
 name: forger-mui-component-patterns
-description: Use this only when choosing MUI components for Desktop UI or apps whose manifest stack.frontend.ui is MUI.
+description: Use when choosing MUI Core or MUI X Community components for Desktop or MUI apps, including forms, dialogs, menus, tabs, tables, DataGrid, charts, cards, panels, and pickers.
 ---
 
 ## Package Boundaries
 
-- This skill applies only to Forger Desktop or to apps whose manifest declares a MUI frontend. Do not use it for Tailwind, shadcn/ui, Radix, Headless UI, or plain CSS app frontends.
+- Apply these rules only to Forger Desktop or apps whose manifest declares a MUI frontend. Do not use them for Tailwind, shadcn/ui, Radix, Headless UI, or plain CSS app frontends.
 - Use Material UI Core components from `@mui/material` for common UI: forms, buttons, cards, paper surfaces, dialogs, tabs, lists, menus, snackbars, accordions, and layout primitives.
 - Use MUI X Community packages for advanced free components when the app needs them: `@mui/x-data-grid`, `@mui/x-charts`, and `@mui/x-date-pickers`.
 - Do not use MUI X Pro or Premium packages, imports, examples, or features unless the app explicitly has a paid license and the user asks for them.

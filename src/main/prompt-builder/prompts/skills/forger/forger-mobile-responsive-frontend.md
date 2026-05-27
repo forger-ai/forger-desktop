@@ -1,9 +1,8 @@
 ---
 name: forger-mobile-responsive-frontend
-description: Build Forger app frontends that work well on mobile and desktop across supported UI stacks.
+description: Use when making any Forger app frontend work on mobile and desktop across UI stacks, including navigation, dashboards, forms, tables, modals, lists, repeated items, and remote-session controls.
 ---
 
-- Use this skill before creating or changing visible screens, navigation, dashboards, forms, tables, modals, or repeated item layouts in a Forger app.
 - Forger apps can be opened from Desktop, a desktop browser, a phone on the local network, or a phone through a remote tunnel. Keep the same workflow usable in all of those contexts.
 - Before coding, define the mobile behavior for primary actions, navigation, lists or tables, forms, validation, empty/loading/error/success states, and destructive confirmations.
 - Use the app's existing UI stack and design system. Do not add a new styling framework unless the requested change is explicitly a stack migration.

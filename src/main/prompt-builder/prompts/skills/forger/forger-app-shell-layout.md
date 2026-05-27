@@ -1,6 +1,6 @@
 ---
 name: forger-app-shell-layout
-description: Use this when creating or changing a Forger app shell, primary navigation, top bars, or page-level scrolling behavior in any frontend UI stack.
+description: Use when building app shells, primary navigation, sidebars, rails, top bars, bottom nav, drawers, or page-level scrolling behavior in any Forger frontend stack.
 ---
 
 ## Goal

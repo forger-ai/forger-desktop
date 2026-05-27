@@ -1,9 +1,9 @@
 ---
 name: forger-localization
-description: Use Forger locale context correctly and keep visible app copy localizable.
+description: Use when writing or changing user-facing app text, localization, language detection, assistant copy, prompt copy, labels, navigation, validation, empty/loading/error/success states, or messages.
 ---
 
-- Use this skill when creating or changing app language detection, localized UI copy, user-facing messages, assistant copy, or locale passed into app backend routes.
+- User-facing text includes localized UI copy, user-facing messages, assistant copy, prompt copy, validation messages, empty states, loading states, error states, success states, labels, navigation, and locale passed into app backend routes.
 - For `vite-fastapi-sqlite` apps, use the shared locale helpers from `frontend/src/api/locale.ts`.
 - The app frontend must call its own backend route `GET /api/forger/context` for Forger locale context. It must not call Desktop directly, read Desktop runtime secrets, or depend on `window.forgerApp`.
 - The app backend owns the Desktop bridge call through `app.forger_context` and `app.forger_desktop`.

@@ -1,9 +1,8 @@
 ---
 name: forger-fastapi-contracts
-description: Build and change FastAPI routes in Forger apps while preserving typed contracts, local data safety, and frontend compatibility.
+description: Use when adding or changing FastAPI routes, Pydantic request/response models, uploads, dependency injection, structured errors, HTTP contracts, or route tests in Forger apps.
 ---
 
-- Use this skill when adding or changing FastAPI routes, request/response models, dependency injection, file uploads, error handling, or route tests in a Forger app backend.
 - Keep FastAPI as the local app service layer. Desktop owns app startup, ports, runtime environment, and installed-app lifecycle.
 - Use the app's existing dependency manager and stack conventions, usually `uv` in `vite-fastapi-sqlite` apps. Do not replace service startup with ad hoc `pip install` or manual `fastapi dev` instructions.
 - Define typed Pydantic request and response models for route boundaries. Do not return raw database models directly to the frontend.

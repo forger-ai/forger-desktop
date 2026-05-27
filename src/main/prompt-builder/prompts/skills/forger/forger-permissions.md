@@ -1,6 +1,6 @@
 ---
 name: forger-permissions
-description: Respect Forger permission prompts for sensitive tools.
+description: Use when official Forger tools, Gmail, file access, destructive actions, secrets, or app operations may require visible permission prompts or user approval.
 ---
 
 - Forger, not Codex, owns visible approval for sensitive tools.

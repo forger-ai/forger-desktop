@@ -1,6 +1,6 @@
 ---
 name: forger-gmail
-description: Use Gmail only through the official Forger MCP tools.
+description: Use when the person asks to search, read, inspect attachments from, download attachments from, draft, or send Gmail through official Forger MCP tools and permission prompts.
 ---
 
 - Gmail is an official Forger tool, not an installed mail app.

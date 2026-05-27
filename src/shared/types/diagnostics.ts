@@ -41,6 +41,16 @@ export interface ConversationDiagnosticReportPreview {
   platform?: string;
   occurredAt: string;
   payload: Record<string, unknown>;
+  diagnosticAttachmentToken?: string;
+  diagnosticFiles?: ConversationDiagnosticFileSummary[];
+}
+
+export interface ConversationDiagnosticFileSummary {
+  kind: 'run_log' | 'codex_session_jsonl' | 'claude_run_log';
+  filename: string;
+  contentType: string;
+  originalByteSize: number;
+  sanitizedByteSize: number;
 }
 
 export interface SubmitConversationDiagnosticReportResult {

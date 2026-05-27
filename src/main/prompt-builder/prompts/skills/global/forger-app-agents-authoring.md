@@ -1,9 +1,8 @@
 ---
 name: forger-app-agents-authoring
-description: Write app-owned AGENTS.md files from current app facts.
+description: Use when creating or updating app-owned AGENTS.md files from verified UI, manifest, scripts, tools, models, services, routes, skills, limits, and current capabilities.
 ---
 
-- Use this skill before creating or updating an app-owned `AGENTS.md`.
 - Start from current app facts: real UI, manifest, scripts, tools, models, services, routes, and existing skills.
 - Describe current capabilities only. Do not present planned or imagined features as available.
 - Keep the file app-specific. Avoid a generic Forger introduction unless the app is distributed as a Forger app and that fact matters to the app contract.

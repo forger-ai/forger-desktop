@@ -1,9 +1,9 @@
 ---
 name: forger-mui-design-patterns
-description: Use this only for Desktop UI or Forger apps whose manifest stack.frontend.ui is MUI.
+description: Use when designing or changing Desktop UI or MUI app layouts, surfaces, density, navigation, forms, cards, dialogs, tables, charts, theme use, or Material Design patterns.
 ---
 
-- This skill applies only to Forger Desktop or to installed apps whose manifest declares a MUI frontend. Do not use it for Tailwind, shadcn/ui, Radix, Headless UI, or plain CSS app frontends.
+- Apply these rules only to Forger Desktop or installed apps whose manifest declares a MUI frontend. Do not use them for Tailwind, shadcn/ui, Radix, Headless UI, or plain CSS app frontends.
 - Treat Material Design as the usability baseline, not as a forced visual theme. Adapt color, tone, density, imagery, shape, and personality to the look and feel requested by the person while preserving Material interaction clarity.
 - Use clear hierarchy, spacing, typography, color roles, surface separation, accessibility, and state feedback so the interface is easy to scan and operate.
 - Use the `forger-frontend-product-patterns` skill for product-level flow, CRUD, state, and task feedback decisions before choosing MUI components.

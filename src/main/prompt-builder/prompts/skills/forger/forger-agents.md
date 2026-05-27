@@ -1,6 +1,6 @@
 ---
 name: forger-agents
-description: Understand Forger app agents, which let apps invoke an agentic coding tool for conversational work.
+description: Use when designing, reviewing, or explaining app-declared conversational agents for advisors, reviewers, orchestrators, specialists, resume flows, or multi-turn app work.
 ---
 
 - App agents are app-declared coworkers that can hold a conversation, resume prior context, and keep working with the person over multiple turns.

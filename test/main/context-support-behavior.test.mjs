@@ -171,9 +171,9 @@ test('context support normalizes installed app templates without stack-dependent
     backend: { language: ' Python ', framework: ' FastAPI ' },
     frontend: { framework: ' React ', ui: ' MUI ' },
   }, true, ['gmail.search_messages']).map((template) => template.id), [
-    'forger-context',
     'forger-app-agents-authoring',
     'forger-app-mcp-data-tools',
+    'forger-context',
     'forger-app-official-tools',
   ]);
   const stackSkillsRoot = path.join(root, 'stack-skills');
@@ -188,9 +188,9 @@ test('context support normalizes installed app templates without stack-dependent
   assert.deepEqual(controller.buildInstalledAppContextSkillTemplates([
     'gmail.search_messages',
   ]).map((template) => template.id), [
-    'forger-context',
     'forger-app-agents-authoring',
     'forger-app-mcp-data-tools',
+    'forger-context',
     'forger-app-official-tools',
   ]);
 
