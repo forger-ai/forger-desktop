@@ -2018,7 +2018,10 @@ test('runtime install returns ready runtimes without extracting and normalizes n
   assert.equal(runtime.node, path.join(target, 'bin', 'node'));
   assert.equal(runtime.npm, path.join(target, 'bin', 'npm'));
   assert.deepEqual(calls[0], ['quarantine', target]);
-  assert.equal(calls.some((call) => call[0] === 'run' && call[2][0] === 'install'), true);
+  const npmInstall = calls.find((call) => call[0] === 'run' && call[2][0] === 'install');
+  assert.ok(npmInstall);
+  assert.deepEqual(npmInstall[2], ['install', '--package-lock=false']);
+  assert.equal(npmInstall[2].some((arg) => arg.includes('production') || arg.includes('omit')), false);
 });
 
 test('runtime install installs full app dependencies with progress messages and package-lock npm mode', async (t) => {
@@ -2089,7 +2092,9 @@ test('runtime install installs full app dependencies with progress messages and 
     path.join(installDir, 'backend'),
     'demo-app',
   ]);
-  assert.equal(calls.some((call) => call[0] === 'run' && call[2][0] === 'ci' && call[3].log.label === 'npm ci'), true);
+  const npmCi = calls.find((call) => call[0] === 'run' && call[2][0] === 'ci' && call[3].log.label === 'npm ci');
+  assert.ok(npmCi);
+  assert.deepEqual(npmCi[2], ['ci']);
 });
 
 test('runtime install rejects unsupported platforms and missing archives before touching user data', async (t) => {
@@ -2299,6 +2304,7 @@ const makeInstalledRuntimeHarness = (overrides = {}) => {
     formatProcessOutputForInstallLog: (text) => text,
     friendChatWindows: new Map(),
     fs,
+    getBackendPathEntries: async () => ['/tmp/developer-bin'],
     getInstallLogPath: () => '/tmp/install.log',
     getManifestAppSecretsValidationError: () => null,
     getSecretsStore: () => ({ resolveAppEnv: async () => ({ env: {}, missingRequired: [], secretValues: [] }) }),

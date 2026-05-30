@@ -10,6 +10,7 @@ description: Use when creating or changing Forger app dashboards, CRUD screens, 
 - Prefer dedicated views for each primary feature or data model. A useful default is dashboard plus feature views, with each feature owning its list, create action, edit flow, delete action, details, empty state, and error state.
 - Do not overload dashboards with every form, table, badge, and action. Dashboards summarize and route; feature views let the person do the work.
 - Use pills and badges sparingly for compact status, category, priority, count, or permission labels. Do not turn every attribute into a pill; use rows, sections, labels, tables, or detail panels when the information needs comparison or reading.
+- A minimalist request means fewer visual containers, fewer labels-as-pills, and clearer hierarchy through spacing, typography, rows, and sections.
 - Keep primary actions visible, consistent, and close to the object they affect. Destructive actions need clear confirmation and a recovery path when the data is important.
 - Show explicit loading, empty, error, success, saving, disabled, and stale-data states. Long-running work needs progress or step feedback, not a frozen button.
 - When changing views, revalidate or reload data when the underlying feature can change outside the current screen, after mutations, or after assistant work completes. Preserve local draft form state unless the user intentionally leaves or resets it.

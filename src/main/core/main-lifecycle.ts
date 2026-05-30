@@ -138,7 +138,6 @@ interface MainLifecycleDeps {
   ChatOrchestrator: ServiceConstructor<ChatOrchestratorService>;
   CloudDeviceManager: ServiceConstructor<LifecycleService>;
   CloudIdentityStore: ServiceConstructor<LifecycleService>;
-  DEFAULT_NODE_VERSION: string;
   DesktopRuntimeBridge: ServiceConstructor<LifecycleService>;
   DevCatalogService: ServiceConstructor<LifecycleService>;
   FORGER_AGENT_CONTRACT_VERSION: string;
@@ -174,7 +173,7 @@ interface MainLifecycleDeps {
   ensureSqliteDatabaseParent: AsyncFn<void>;
   flushPendingDeepLink: () => void;
   fs: typeof fs;
-  getAppLocalToolPathEntries: (record: InstalledAppRecord) => Promise<string[]>;
+  getAgentPathEntries: (appId?: string) => Promise<string[]>;
   getBackupsRoot: () => string;
   getClaudeAuthStatus: () => Promise<ClaudeAuthStatus>;
   getCloudDeviceAccountStorageKey: () => string | undefined;
@@ -211,7 +210,6 @@ interface MainLifecycleDeps {
   loadRegistry: () => Promise<void>;
   loadSettings: () => Promise<void>;
   mapBackendCategory: SyncFn;
-  normalizeNodeRuntimeVersion: (version?: string | null) => string;
   openInstalledApp: AsyncFn;
   startLocalNetworkShare: AsyncFn;
   stopLocalNetworkShare: AsyncFn;
@@ -260,7 +258,6 @@ export const registerMainLifecycle = (deps: unknown) => {
     ChatOrchestrator,
     CloudDeviceManager,
     CloudIdentityStore,
-    DEFAULT_NODE_VERSION,
     DesktopRuntimeBridge,
     DevCatalogService,
     FORGER_AGENT_CONTRACT_VERSION,
@@ -296,7 +293,7 @@ export const registerMainLifecycle = (deps: unknown) => {
     ensureSqliteDatabaseParent,
     flushPendingDeepLink,
     fs,
-    getAppLocalToolPathEntries,
+    getAgentPathEntries,
     getBackupsRoot,
     getClaudeAuthStatus,
     getCloudDeviceAccountStorageKey,
@@ -331,7 +328,6 @@ export const registerMainLifecycle = (deps: unknown) => {
     loadRegistry,
     loadSettings,
     mapBackendCategory,
-    normalizeNodeRuntimeVersion,
     openInstalledApp,
     openOrFocusAppWindow,
     registerForgerCloudOAuth,
@@ -532,6 +528,7 @@ export const registerMainLifecycle = (deps: unknown) => {
     ensureSqliteDatabaseParent,
     getDesktopRuntimeEnvironment: (appId: string) => state.desktopRuntimeBridge?.environmentForApp(appId) ?? {},
     getRuntimePathEntries,
+    getPathEntries: getAgentPathEntries,
     waitForHttpOk,
     terminateProcess,
     appendInstallLog,
@@ -555,33 +552,7 @@ export const registerMainLifecycle = (deps: unknown) => {
     agentContractVersion: FORGER_AGENT_CONTRACT_VERSION,
     getCodexCliPath: async () => await resolveCodexCliPath(getCodexRoot()),
     getClaudeCliPath: async () => (await resolveClaudeCli())?.path ?? null,
-    getCodexPathEntries: async (appId?: string) => {
-      const pathEntries = new Set<string>();
-      const record = appId ? state.registry.apps[appId] : undefined;
-      if (record) {
-        for (const entry of await getAppLocalToolPathEntries(record)) {
-          pathEntries.add(entry);
-        }
-      }
-
-      const codexNodeRuntime = await ensureRuntimeInstalled('node', DEFAULT_NODE_VERSION);
-      for (const entry of getRuntimePathEntries(codexNodeRuntime)) {
-        pathEntries.add(entry);
-      }
-
-      if (record) {
-        const appNodeRuntime = await ensureRuntimeInstalled('node', normalizeNodeRuntimeVersion(record.requiredNodeVersion));
-        const appPythonRuntime = await ensureRuntimeInstalled('python', record.requiredPythonVersion);
-        for (const entry of getRuntimePathEntries(appNodeRuntime)) {
-          pathEntries.add(entry);
-        }
-        for (const entry of getRuntimePathEntries(appPythonRuntime)) {
-          pathEntries.add(entry);
-        }
-      }
-
-      return [...pathEntries];
-    },
+    getCodexPathEntries: async (appId?: string) => await getAgentPathEntries(appId),
     getCodexEnvironment: async (appId?: string) => {
       const record = appId ? state.registry.apps[appId] : undefined;
       const appPythonRuntime = record
@@ -655,33 +626,7 @@ export const registerMainLifecycle = (deps: unknown) => {
     getAgentRuntime: chooseAgentRuntime,
     getCodexCliPath: async () => await resolveCodexCliPath(getCodexRoot()),
     getClaudeCliPath: async () => (await resolveClaudeCli())?.path ?? null,
-    getCodexPathEntries: async (appId?: string) => {
-      const pathEntries = new Set<string>();
-      const record = appId ? state.registry.apps[appId] : undefined;
-      if (record) {
-        for (const entry of await getAppLocalToolPathEntries(record)) {
-          pathEntries.add(entry);
-        }
-      }
-
-      const codexNodeRuntime = await ensureRuntimeInstalled('node', DEFAULT_NODE_VERSION);
-      for (const entry of getRuntimePathEntries(codexNodeRuntime)) {
-        pathEntries.add(entry);
-      }
-
-      if (record) {
-        const appNodeRuntime = await ensureRuntimeInstalled('node', normalizeNodeRuntimeVersion(record.requiredNodeVersion));
-        const appPythonRuntime = await ensureRuntimeInstalled('python', record.requiredPythonVersion);
-        for (const entry of getRuntimePathEntries(appNodeRuntime)) {
-          pathEntries.add(entry);
-        }
-        for (const entry of getRuntimePathEntries(appPythonRuntime)) {
-          pathEntries.add(entry);
-        }
-      }
-
-      return [...pathEntries];
-    },
+    getCodexPathEntries: async (appId?: string) => await getAgentPathEntries(appId),
     getCodexEnvironment: async (appId?: string) => {
       const record = appId ? state.registry.apps[appId] : undefined;
       const appPythonRuntime = record
@@ -729,33 +674,7 @@ export const registerMainLifecycle = (deps: unknown) => {
     getAgentRuntime: chooseAgentRuntime,
     getCodexCliPath: async () => await resolveCodexCliPath(getCodexRoot()),
     getClaudeCliPath: async () => (await resolveClaudeCli())?.path ?? null,
-    getCodexPathEntries: async (appId?: string) => {
-      const pathEntries = new Set<string>();
-      const record = appId ? state.registry.apps[appId] : undefined;
-      if (record) {
-        for (const entry of await getAppLocalToolPathEntries(record)) {
-          pathEntries.add(entry);
-        }
-      }
-
-      const codexNodeRuntime = await ensureRuntimeInstalled('node', DEFAULT_NODE_VERSION);
-      for (const entry of getRuntimePathEntries(codexNodeRuntime)) {
-        pathEntries.add(entry);
-      }
-
-      if (record) {
-        const appNodeRuntime = await ensureRuntimeInstalled('node', normalizeNodeRuntimeVersion(record.requiredNodeVersion));
-        const appPythonRuntime = await ensureRuntimeInstalled('python', record.requiredPythonVersion);
-        for (const entry of getRuntimePathEntries(appNodeRuntime)) {
-          pathEntries.add(entry);
-        }
-        for (const entry of getRuntimePathEntries(appPythonRuntime)) {
-          pathEntries.add(entry);
-        }
-      }
-
-      return [...pathEntries];
-    },
+    getCodexPathEntries: async (appId?: string) => await getAgentPathEntries(appId),
     getCodexEnvironment: async (appId?: string) => {
       const record = appId ? state.registry.apps[appId] : undefined;
       const appPythonRuntime = record
@@ -880,10 +799,7 @@ export const registerMainLifecycle = (deps: unknown) => {
     getInstalledApps: () => Object.values(state.registry.apps).map(toAppSummary),
     getCodexCliPath: async () => await resolveCodexCliPath(getCodexRoot()),
     getClaudeCliPath: async () => (await resolveClaudeCli())?.path ?? null,
-    getCodexPathEntries: async () => {
-      const nodeRuntime = await ensureRuntimeInstalled('node', DEFAULT_NODE_VERSION);
-      return getRuntimePathEntries(nodeRuntime);
-    },
+    getCodexPathEntries: async () => await getAgentPathEntries(),
     getAgentNetworkAccess: anyAppAllowsAgentNetworkAccess,
     getCodexAuthenticated: async () => {
       const status = await getCodexAuthStatus();
@@ -924,10 +840,7 @@ export const registerMainLifecycle = (deps: unknown) => {
       return status.authenticated;
     },
     getCodexCliPath: async () => await resolveCodexCliPath(getCodexRoot()),
-    getCodexPathEntries: async () => {
-      const nodeRuntime = await ensureRuntimeInstalled('node', DEFAULT_NODE_VERSION);
-      return getRuntimePathEntries(nodeRuntime);
-    },
+    getCodexPathEntries: async () => await getAgentPathEntries(),
     createForgerMcpSession: (runId: string) =>
       state.forgerMcpServer?.createSession(runId, 'forger', {
         caller: 'automation',

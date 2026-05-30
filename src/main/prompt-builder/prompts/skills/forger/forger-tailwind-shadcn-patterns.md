@@ -35,6 +35,8 @@ description: Use when building Tailwind/shadcn app UI controls, forms, dialogs, 
 - For forms, use semantic labels, helper text, validation messages, disabled states, loading states, and submit feedback. Do not rely on placeholder text as the only label.
 - Dialog, sheet, drawer, and alert-dialog surfaces need a title. Use a visually hidden title only when the visual design already has an equivalent heading.
 - Keep Card composition explicit when the card has structured content: header/title/description/content/footer. Do not dump unrelated content into one generic card body.
+- Badge is for compact status, category, priority, count, or permission labels. Card is for one repeated item, one focused summary, or one isolated decision surface.
+- Plain rows, headings, sections, tables, and description lists are the default for readable information. Card inside Card needs an existing local pattern or a real nested object hierarchy.
 - Use Badge, Alert, Separator, Skeleton, Empty, and toast primitives instead of custom decorative `div` markup when those primitives already fit.
 - Icons inside buttons should be predictable and consistently sized by the component. Use the app's chosen icon library, usually `lucide-react`, unless local config says otherwise.
 - Never overwrite copied components, presets, CSS variables, or config without an explicit decision and a saved app version.

@@ -7,7 +7,7 @@ import type { AppDetails, ChatRunStatus, ChatRun, ChatRunEvent, ChatStartRunInpu
 import type { AppPromptMutationResult, AppPromptRestoreInput, AppPromptReviewInput, AppPromptReviewItem, AppPromptValidationResult } from './prompts';
 import type { InstallWelcomeResult } from './chat';
 import type { AppSecretsState, UserSecretSummary, CreateUserSecretInput, UpdateUserSecretInput, DeleteUserSecretInput, ConnectAppSecretInput, DisconnectAppSecretInput, SecretMutationResult } from './secrets';
-import type { Settings, UpdateCodexDefaultsInput, UpdateAgentDefaultsInput, MemoryListInput, MemoryEntry, MemoryCreateInput, MemoryUpdateInput } from './settings';
+import type { DeveloperPathState, Settings, UpdateAppDeveloperSettingsInput, UpdateCodexDefaultsInput, UpdateDeveloperModeInput, UpdateAgentDefaultsInput, MemoryListInput, MemoryEntry, MemoryCreateInput, MemoryUpdateInput } from './settings';
 import type { DesktopUpdateState } from './updates';
 import type { ForgerAccountSession, ForgerAccountRegisterInput, ForgerAccountLoginInput, ForgerAccountProfileInput, CloudDevicesState } from './account';
 import type { FriendChatWindowOpenResult, CloudFriendship, CloudFriendUser, CloudMessage, CloudSendMessageInput, CloudAppMessagePermissionDecision, CloudSocialEvent, CloudIdentityState, SocialUserApp, SocialUserAppDownload, SocialUserAppList, SocialUserAppShare, SocialUserAppUploadInput } from './social';
@@ -67,6 +67,9 @@ export interface ForgerDesktopApi {
   getSettings: () => Promise<Settings>;
   updateCodexDefaults: (input: UpdateCodexDefaultsInput) => Promise<Settings>;
   updateAgentDefaults: (input: UpdateAgentDefaultsInput) => Promise<Settings>;
+  updateDeveloperMode: (input: UpdateDeveloperModeInput) => Promise<Settings>;
+  updateAppDeveloperSettings: (input: UpdateAppDeveloperSettingsInput) => Promise<DeveloperPathState>;
+  getDeveloperPathState: (appId?: string) => Promise<DeveloperPathState>;
   getDesktopUpdateState: () => Promise<DesktopUpdateState>;
   checkDesktopUpdates: () => Promise<DesktopUpdateState>;
   downloadDesktopUpdate: () => Promise<DesktopUpdateState>;

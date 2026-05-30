@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import {
   Box,
@@ -61,7 +61,9 @@ import type {
   AgentProvider,
   CloudIdentityState,
   Settings,
+  DeveloperPathState,
   UpdateAgentDefaultsInput,
+  UpdateDeveloperModeInput,
 } from '@shared/types';
 import type { AppDictionary, Locale } from '@renderer/i18n';
 import type { ThemePreference } from '@renderer/theme/appTheme';
@@ -92,6 +94,8 @@ interface SettingsViewProps {
   defaultChatPermissionMode: Settings['defaultChatPermissionMode'];
   agentDefaults: Settings['agentDefaults'];
   onAgentDefaultsChange: (input: UpdateAgentDefaultsInput) => void;
+  developerMode: Settings['developerMode'];
+  onDeveloperModeChange: (input: UpdateDeveloperModeInput) => Promise<void>;
   onOpenCodexConfig: () => void;
   onReinstallCodex: () => void;
   onOpenClaudeConfig: () => void;
@@ -142,6 +146,31 @@ const EMPTY_MEMORY_FORM: MemoryFormState = {
 
 const MEMORY_KINDS: MemoryKind[] = ['preference', 'profile', 'workflow', 'constraint', 'fact'];
 const MEMORY_STATUSES: MemoryStatus[] = ['active', 'candidate', 'archived'];
+const COMMON_DEVELOPER_PATHS = ['/opt/homebrew/bin', '/usr/local/bin'];
+
+const PathPreview = ({ title, entries }: { title: string; entries: string[] }) => (
+  <Stack spacing={0.5}>
+    <Typography variant="caption" color="text.secondary">{title}</Typography>
+    <Box
+      component="pre"
+      sx={{
+        m: 0,
+        p: 1,
+        border: '1px solid',
+        borderColor: 'divider',
+        bgcolor: 'background.default',
+        maxHeight: 120,
+        overflow: 'auto',
+        whiteSpace: 'pre-wrap',
+        wordBreak: 'break-word',
+        fontFamily: 'monospace',
+        fontSize: 12,
+      }}
+    >
+      {entries.length > 0 ? entries.join('\n') : '-'}
+    </Box>
+  </Stack>
+);
 
 export function SettingsView({
   codexAuthBusy,
@@ -167,6 +196,8 @@ export function SettingsView({
   defaultChatPermissionMode,
   agentDefaults,
   onAgentDefaultsChange,
+  developerMode,
+  onDeveloperModeChange,
   onOpenCodexConfig,
   onReinstallCodex,
   onOpenClaudeConfig,
@@ -196,6 +227,10 @@ export function SettingsView({
   const [memoryDialogOpen, setMemoryDialogOpen] = useState(false);
   const [revealedSecretKey, setRevealedSecretKey] = useState('');
   const [memoryForm, setMemoryForm] = useState<MemoryFormState>(EMPTY_MEMORY_FORM);
+  const [developerPathDraft, setDeveloperPathDraft] = useState(developerMode.pathEntries.join('\n'));
+  const [developerPathState, setDeveloperPathState] = useState<DeveloperPathState | null>(null);
+  const [developerBusy, setDeveloperBusy] = useState(false);
+  const [developerError, setDeveloperError] = useState('');
   const canDownload = desktopUpdateState.status === 'available' && Boolean(desktopUpdateState.asset);
   const canInstall = desktopUpdateState.status === 'ready' && Boolean(desktopUpdateState.downloadedPath);
   const progressPercent =
@@ -203,6 +238,38 @@ export function SettingsView({
       ? Math.round(desktopUpdateState.progress * 100)
       : undefined;
   const statusLabel = t.settings.desktopUpdateStatuses[desktopUpdateState.status];
+  useEffect(() => {
+    setDeveloperPathDraft(developerMode.pathEntries.join('\n'));
+  }, [developerMode.pathEntries]);
+  useEffect(() => {
+    let cancelled = false;
+    void window.forger.getDeveloperPathState().then((state) => {
+      if (!cancelled) {
+        setDeveloperPathState(state);
+      }
+    }).catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [developerMode]);
+  const saveDeveloperMode = async (input: UpdateDeveloperModeInput) => {
+    setDeveloperBusy(true);
+    setDeveloperError('');
+    try {
+      await onDeveloperModeChange(input);
+      setDeveloperPathState(await window.forger.getDeveloperPathState());
+    } catch (error) {
+      setDeveloperError(error instanceof Error ? error.message : t.settings.developerPathSaveError);
+    } finally {
+      setDeveloperBusy(false);
+    }
+  };
+  const addDeveloperPathDraft = (entry: string) => {
+    const current = developerPathDraft.split('\n').map((value) => value.trim()).filter(Boolean);
+    if (!current.includes(entry)) {
+      setDeveloperPathDraft([...current, entry].join('\n'));
+    }
+  };
   const appNames = useMemo(
     () => new Map(installedApps.map((appEntry) => [appEntry.id, appEntry.name])),
     [installedApps],
@@ -340,6 +407,72 @@ export function SettingsView({
             <Button size="small" variant="outlined" onClick={onResetOnboarding} sx={{ alignSelf: 'flex-start' }}>
               {t.settings.resetOnboarding}
             </Button>
+          </Stack>
+        </CardContent>
+      </Card>
+      <Card sx={{ order: 5 }}>
+        <CardContent>
+          <Stack spacing={1.5}>
+            <Stack spacing={0.5}>
+              <Typography variant="h6">{t.settings.developerModeTitle}</Typography>
+              <Typography variant="body2" color="text.secondary">{t.settings.developerModeDescription}</Typography>
+            </Stack>
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={developerMode.enabled}
+                  onChange={(event) => void saveDeveloperMode({ enabled: event.target.checked })}
+                  disabled={developerBusy}
+                />
+              }
+              label={t.settings.developerModeToggle}
+            />
+            {developerMode.enabled ? (
+              <>
+                <TextField
+                  label={t.settings.developerPathEntriesLabel}
+                  value={developerPathDraft}
+                  onChange={(event) => setDeveloperPathDraft(event.target.value)}
+                  fullWidth
+                  multiline
+                  minRows={4}
+                  helperText={t.settings.developerPathEntriesHelp}
+                  inputProps={{ spellCheck: false }}
+                  sx={{ '& textarea': { fontFamily: 'monospace', fontSize: 13 } }}
+                />
+                <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+                  {COMMON_DEVELOPER_PATHS.map((entry) => (
+                    <Button
+                      key={entry}
+                      size="small"
+                      variant="outlined"
+                      onClick={() => addDeveloperPathDraft(entry)}
+                      disabled={developerBusy || developerPathDraft.split('\n').map((value) => value.trim()).includes(entry)}
+                    >
+                      {t.settings.developerQuickAddPath(entry)}
+                    </Button>
+                  ))}
+                </Stack>
+                {developerError ? <Typography color="error.main" variant="body2">{developerError}</Typography> : null}
+                <Button
+                  variant="outlined"
+                  disabled={developerBusy}
+                  onClick={() => void saveDeveloperMode({ pathEntries: developerPathDraft.split('\n') })}
+                  sx={{ alignSelf: 'flex-start' }}
+                >
+                  {t.settings.developerPathSave}
+                </Button>
+                {developerPathState ? (
+                  <Stack spacing={1}>
+                    <Typography variant="subtitle2">{t.settings.developerEffectivePathTitle}</Typography>
+                    <PathPreview title={t.settings.developerRuntimePathTitle} entries={developerPathState.runtimePathEntries} />
+                    <PathPreview title={t.settings.developerGlobalPathTitle} entries={developerPathState.globalPathEntries} />
+                    <PathPreview title={t.settings.developerSystemPathTitle} entries={developerPathState.systemPathEntries} />
+                    <PathPreview title={t.settings.developerEffectivePathTitle} entries={developerPathState.effectivePathEntries} />
+                  </Stack>
+                ) : null}
+              </>
+            ) : null}
           </Stack>
         </CardContent>
       </Card>

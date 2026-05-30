@@ -12,6 +12,7 @@ const settingsSeed = () => ({
   userEmail: '',
   plan: 'Free',
   safeMode: true,
+  developerMode: { enabled: false, pathEntries: [] },
   defaultAgentProvider: 'auto',
   defaultChatPermissionMode: 'safe',
   codexDefaults: { model: 'gpt-5.4', reasoningEffort: 'medium' },

@@ -888,11 +888,11 @@ const parseQuestionToolInput = (args: Record<string, unknown>): { chatId: string
       const optionId = cleanString(rawOption.id);
       const label = cleanString(rawOption.label);
       const description = cleanString(rawOption.description);
-      if (!optionId || !label || optionIds.has(optionId)) {
+      if (!optionId || !label || !description || optionIds.has(optionId)) {
         return null;
       }
       optionIds.add(optionId);
-      options.push({ id: optionId, label, ...(description ? { description } : {}) });
+      options.push({ id: optionId, label, description });
     }
     questions.push({ id, question, options });
   }

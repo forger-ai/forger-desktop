@@ -1,4 +1,5 @@
-import { Button, CircularProgress, Stack, TextField, Typography } from '@mui/material';
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
+import { Box, Button, CircularProgress, Stack, TextField, Tooltip, Typography } from '@mui/material';
 import { useState } from 'react';
 import type { AppDictionary } from '@renderer/i18n';
 import type { ChatMessage, ChatQuestionResponse } from '../ChatView';
@@ -31,11 +32,14 @@ export function QuestionComposer({
   const currentQuestion = questions[Math.min(currentQuestionIndex, questions.length - 1)];
   const currentAnswer = answersByQuestionId[currentQuestion.id] ?? { mode: null, freeText: '' };
   const currentFreeText = currentAnswer.freeText;
-  const hasCurrentFreeText = currentFreeText.trim().length > 0;
-  const canAdvance = !isResponding && (
-    (currentAnswer.mode === 'options' && Boolean(currentAnswer.optionId))
-    || (currentAnswer.mode === 'freeText' && hasCurrentFreeText)
+  const hasAnswer = (answer?: QuestionDraftAnswer) => Boolean(
+    answer && (
+      (answer.mode === 'options' && Boolean(answer.optionId))
+      || (answer.mode === 'freeText' && answer.freeText.trim().length > 0)
+    ),
   );
+  const canAdvance = !isResponding && hasAnswer(currentAnswer);
+  const canSubmit = !isResponding && questions.every((question) => hasAnswer(answersByQuestionId[question.id]));
   const isLastQuestion = currentQuestionIndex === questions.length - 1;
 
   const selectOption = (questionId: string, optionId: string) => {
@@ -84,7 +88,10 @@ export function QuestionComposer({
   });
 
   const advance = () => {
-    if (!canAdvance) {
+    if (isLastQuestion && !canSubmit) {
+      return;
+    }
+    if (!isLastQuestion && !canAdvance) {
       return;
     }
     if (!isLastQuestion) {
@@ -94,6 +101,13 @@ export function QuestionComposer({
     onRespondQuestion(action.runId, action.request, {
       answers: buildAnswers(),
     });
+  };
+
+  const previous = () => {
+    if (isResponding) {
+      return;
+    }
+    setCurrentQuestionIndex((current) => Math.max(0, current - 1));
   };
 
   return (
@@ -120,7 +134,21 @@ export function QuestionComposer({
                 onClick={() => selectOption(currentQuestion.id, option.id)}
                 sx={{ justifyContent: 'flex-start', whiteSpace: 'normal', textAlign: 'left' }}
               >
-                {option.label}
+                <Box component="span" sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1, width: '100%' }}>
+                  <Box component="span" sx={{ overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
+                    {option.label}
+                  </Box>
+                  <Tooltip title={option.description}>
+                    <Box
+                      component="span"
+                      aria-label={option.description}
+                      onClick={(event) => event.stopPropagation()}
+                      sx={{ display: 'inline-flex', flex: '0 0 auto', p: 0.25 }}
+                    >
+                      <InfoOutlinedIcon fontSize="inherit" />
+                    </Box>
+                  </Tooltip>
+                </Box>
               </Button>
             );
           })}
@@ -136,16 +164,25 @@ export function QuestionComposer({
         disabled={isResponding}
         placeholder={t.sections.chat.questionFreeTextPlaceholder}
       />
-      <Button
-        variant="contained"
-        size="small"
-        disabled={!canAdvance}
-        startIcon={isResponding ? <CircularProgress size={14} color="inherit" /> : undefined}
-        onClick={advance}
-        sx={{ alignSelf: 'flex-start' }}
-      >
-        {isLastQuestion ? t.sections.chat.questionSubmit : t.sections.chat.questionNext}
-      </Button>
+      <Stack direction="row" spacing={1}>
+        <Button
+          variant="text"
+          size="small"
+          disabled={isResponding || currentQuestionIndex === 0}
+          onClick={previous}
+        >
+          {t.sections.chat.questionPrevious}
+        </Button>
+        <Button
+          variant="contained"
+          size="small"
+          disabled={isLastQuestion ? !canSubmit : !canAdvance}
+          startIcon={isResponding ? <CircularProgress size={14} color="inherit" /> : undefined}
+          onClick={advance}
+        >
+          {isLastQuestion ? t.sections.chat.questionSubmit : t.sections.chat.questionNext}
+        </Button>
+      </Stack>
     </Stack>
   );
 }

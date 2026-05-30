@@ -4,6 +4,7 @@ export interface Settings {
   userEmail: string;
   plan: string;
   safeMode: boolean;
+  developerMode: DeveloperModeSettings;
   codexDefaults: {
     model: string;
     reasoningEffort: CodexReasoningEffort;
@@ -12,6 +13,30 @@ export interface Settings {
   defaultChatPermissionMode: AgentPermissionMode;
   agentDefaults: AgentDefaults;
   providerConnections: Partial<Record<AgentProvider, string>>;
+}
+
+export interface DeveloperModeSettings {
+  enabled: boolean;
+  pathEntries: string[];
+}
+
+export interface UpdateDeveloperModeInput {
+  enabled?: boolean;
+  pathEntries?: string[];
+}
+
+export interface UpdateAppDeveloperSettingsInput {
+  appId: string;
+  pathEntries: string[];
+}
+
+export interface DeveloperPathState {
+  enabled: boolean;
+  globalPathEntries: string[];
+  appPathEntries: string[];
+  runtimePathEntries: string[];
+  systemPathEntries: string[];
+  effectivePathEntries: string[];
 }
 
 export interface UpdateCodexDefaultsInput {

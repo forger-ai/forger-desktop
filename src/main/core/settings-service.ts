@@ -17,7 +17,9 @@ import type {
   Settings,
   UpdateAgentDefaultsInput,
   UpdateCodexDefaultsInput,
+  UpdateDeveloperModeInput,
 } from '../../shared/types';
+import { normalizeDeveloperPathEntries, validateDeveloperPathEntries } from '../runtime/developer-paths';
 
 interface SettingsServiceState {
   promptOverridesStore: PromptOverridesStore | null;
@@ -112,6 +114,10 @@ const normalizeSettings = (input?: Partial<Settings>): Settings => {
     userEmail: typeof input?.userEmail === 'string' ? input.userEmail : defaults.userEmail,
     plan: typeof input?.plan === 'string' ? input.plan : defaults.plan,
     safeMode: typeof input?.safeMode === 'boolean' ? input.safeMode : defaults.safeMode,
+    developerMode: {
+      enabled: input?.developerMode?.enabled === true,
+      pathEntries: normalizeDeveloperPathEntries(input?.developerMode?.pathEntries, path),
+    },
     defaultAgentProvider: normalizeDefaultAgentProvider(input?.defaultAgentProvider),
     defaultChatPermissionMode: normalizeAgentPermissionMode(input?.defaultChatPermissionMode ?? defaults.defaultChatPermissionMode),
     codexDefaults: {
@@ -220,6 +226,22 @@ const updateAgentDefaults = async (input: UpdateAgentDefaultsInput): Promise<Set
         model: typeof input.model === 'string' ? input.model : current.agentDefaults.claude.model,
         effort: normalizeClaudeEffort(input.effort, current.agentDefaults.claude.effort),
       },
+    },
+  });
+  await saveSettings();
+  return state.settings;
+};
+
+const updateDeveloperMode = async (input: UpdateDeveloperModeInput): Promise<Settings> => {
+  const current = normalizeSettings(state.settings);
+  const pathEntries = input.pathEntries === undefined
+    ? current.developerMode.pathEntries
+    : await validateDeveloperPathEntries(input.pathEntries, { fs, path });
+  state.settings = normalizeSettings({
+    ...current,
+    developerMode: {
+      enabled: input.enabled === undefined ? current.developerMode.enabled : input.enabled === true,
+      pathEntries,
     },
   });
   await saveSettings();
@@ -345,5 +367,5 @@ const mergeRuntimeRecommendations = (
   },
 });
 
-  return { getPromptOverridesStore, normalizeCodexReasoningEffort, normalizeClaudeEffort, normalizeAgentProvider, normalizeDefaultAgentProvider, normalizeSettings, loadSettings, saveSettings, getCodexDefaults, updateCodexDefaults, updateAgentDefaults, markProviderConnected, chooseAgentRuntime, chooseConnectedProvider, withAgentDefaults };
+  return { getPromptOverridesStore, normalizeCodexReasoningEffort, normalizeClaudeEffort, normalizeAgentProvider, normalizeDefaultAgentProvider, normalizeSettings, loadSettings, saveSettings, getCodexDefaults, updateCodexDefaults, updateAgentDefaults, updateDeveloperMode, markProviderConnected, chooseAgentRuntime, chooseConnectedProvider, withAgentDefaults };
 };

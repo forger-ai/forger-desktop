@@ -50,7 +50,7 @@ export interface PermissionRequest {
 export interface ChatQuestionOption {
   id: string;
   label: string;
-  description?: string;
+  description: string;
 }
 
 export interface ChatQuestion {

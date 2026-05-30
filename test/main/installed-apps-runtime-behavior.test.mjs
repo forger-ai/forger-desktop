@@ -301,6 +301,25 @@ test('installAppRuntime records failed installs when a downloaded ZIP checksum d
   assert.ok(calls.some((call) => call[0] === 'catalogStatuses'));
 });
 
+test('installBackendDependenciesWithUv includes app dev dependencies for editable installs', async (t) => {
+  const { root, calls, controller } = await makeLifecycleHarness();
+  t.after(async () => {
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  const backendDir = path.join(root, 'backend');
+  await fs.mkdir(backendDir, { recursive: true });
+  await fs.writeFile(path.join(backendDir, 'uv.lock'), '', 'utf8');
+
+  await controller.installBackendDependenciesWithUv('/runtime/python', backendDir, 'demo-app');
+
+  const uvSync = calls.find((call) => call[0] === 'run' && call[1] === '/runtime/python' && call[2].includes('uv sync'));
+  assert.ok(uvSync);
+  assert.match(uvSync[2], /--no-install-project/);
+  assert.match(uvSync[2], /--extra dev/);
+  assert.match(uvSync[2], /--frozen/);
+  assert.doesNotMatch(uvSync[2], /--no-dev/);
+});
+
 test('ensureBackendPythonEnvironment accepts usable venvs and repairs missing ones under one lock', async (t) => {
   const ready = await makeLifecycleHarness();
   t.after(async () => {
@@ -1235,6 +1254,7 @@ const makeRuntimeHarness = () => {
     formatProcessOutputForInstallLog: (text) => text,
     friendChatWindows: new Map(),
     fs,
+    getBackendPathEntries: async () => ['/tmp/developer-bin'],
     getInstallLogPath: () => '/tmp/install.log',
     getManifestAppSecretsValidationError: () => null,
     getSecretsStore: () => ({ resolveAppEnv: async () => ({ env: {}, missingRequired: [], secretValues: [] }) }),

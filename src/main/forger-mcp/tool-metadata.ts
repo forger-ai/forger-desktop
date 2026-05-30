@@ -150,9 +150,12 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
                   properties: {
                     id: { type: 'string' },
                     label: { type: 'string' },
-                    description: { type: 'string' },
+                    description: {
+                      type: 'string',
+                      description: 'Detalle user-facing de lo que implica elegir esta respuesta.',
+                    },
                   },
-                  required: ['id', 'label'],
+                  required: ['id', 'label', 'description'],
                   additionalProperties: false,
                 },
               },

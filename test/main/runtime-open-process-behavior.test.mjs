@@ -208,6 +208,7 @@ const makeRuntimeHarness = async ({ root, spawnImpl, electronOverrides = {} } = 
     formatProcessOutputForInstallLog: (text, secrets) => secrets.reduce((next, secret) => next.split(secret).join('[secret]'), text),
     friendChatWindows: new Map(),
     fs,
+    getBackendPathEntries: async () => [path.join(harnessRoot, 'developer-bin')],
     getInstallLogPath: () => path.join(harnessRoot, 'install.log'),
     getManifestAppSecretsValidationError: () => null,
     getSecretsStore: () => ({
@@ -298,6 +299,7 @@ test('openInstalledApp resolves FastAPI imports, merges PYTHONPATH, logs process
     assert.equal(spawned[0].options.env.OPENAI_API_KEY, 'secret-value');
     assert.equal(spawned[0].options.env.FORGER_TASK_PORT, '49152');
     assert.equal(spawned[0].options.env.FORGER_APP_GRANT_SECRET, 'grant-secret');
+    assert.equal(spawned[0].options.env.PATH.split(path.delimiter)[0], path.join(root, 'developer-bin'));
     assert.equal(spawned[1].command, path.join(root, 'runtime', 'node', 'bin', 'npm'));
     assert.equal(spawned[1].options.cwd, path.join(harness.installDir, 'web'));
     assert.match(spawned[1].options.env.VITE_API_BASE_URL, /\/__forger_api$/);

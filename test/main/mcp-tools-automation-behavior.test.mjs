@@ -306,6 +306,10 @@ test('MCP tool schemas expose strict Gmail contracts and safe annotations', () =
   assert.deepEqual(getMcpToolInputSchema('forger_create_app').required, ['name', 'description', 'purpose', 'agentPrompt']);
   assert.deepEqual(getMcpToolInputSchema('forger_ask_question').required, ['chatId', 'questions']);
   assert.equal(getMcpToolInputSchema('forger_ask_question').properties.questions.maxItems, 5);
+  assert.deepEqual(
+    getMcpToolInputSchema('forger_ask_question').properties.questions.items.properties.options.items.required,
+    ['id', 'label', 'description'],
+  );
   assert.deepEqual(getMcpToolInputSchema('forger_restore_app_prompt').required, ['appId', 'kind', 'id']);
   assert.deepEqual(getMcpToolInputSchema('forger_test_app_prompt').required, ['appId', 'kind', 'id']);
   assert.equal(getMcpToolInputSchema('forger_test_app_prompt').properties.variables.type, 'object');
@@ -1168,6 +1172,28 @@ test('Forger MCP question tool validates input and rejects duplicate active ques
     assert.equal(invalid.success, false);
     assert.equal(invalid.technicalCode, 'question_input_invalid');
 
+    const missingDescription = parseToolTextResult(await (await callMcp(session, {
+      jsonrpc: '2.0',
+      id: 4,
+      method: 'tools/call',
+      params: {
+        name: 'forger_ask_question',
+        arguments: {
+          chatId: 'chat-1',
+          questions: [{
+            id: 'missing-description',
+            question: 'Que alcance quieres?',
+            options: [
+              { id: 'small', label: 'Simple' },
+              { id: 'complete', label: 'Completo', description: 'Incluye flujo principal y ajustes.' },
+            ],
+          }],
+        },
+      },
+    })).json());
+    assert.equal(missingDescription.success, false);
+    assert.equal(missingDescription.technicalCode, 'question_input_invalid');
+
     const created = parseToolTextResult(await (await callMcp(session, {
       jsonrpc: '2.0',
       id: 2,
@@ -1180,7 +1206,7 @@ test('Forger MCP question tool validates input and rejects duplicate active ques
             id: 'scope',
             question: 'Que alcance quieres?',
             options: [
-              { id: 'small', label: 'Simple' },
+              { id: 'small', label: 'Simple', description: 'Aplica solo el flujo principal solicitado.' },
               { id: 'complete', label: 'Completo', description: 'Incluye flujo principal y ajustes.' },
             ],
           }],
@@ -1189,6 +1215,7 @@ test('Forger MCP question tool validates input and rejects duplicate active ques
     })).json());
     assert.equal(created.success, true);
     assert.equal(created.questionRequest.chatId, 'chat-1');
+    assert.equal(created.questionRequest.questions[0].options[0].description, 'Aplica solo el flujo principal solicitado.');
     assert.equal(created.questionRequest.questions[0].options[1].description, 'Incluye flujo principal y ajustes.');
 
     const duplicate = parseToolTextResult(await (await callMcp(session, {
@@ -1203,8 +1230,8 @@ test('Forger MCP question tool validates input and rejects duplicate active ques
             id: 'again',
             question: 'Otra pregunta?',
             options: [
-              { id: 'yes', label: 'Si' },
-              { id: 'no', label: 'No' },
+              { id: 'yes', label: 'Si', description: 'Continua con el alcance propuesto.' },
+              { id: 'no', label: 'No', description: 'Mantiene la conversación detenida hasta aclarar el alcance.' },
             ],
           }],
         },

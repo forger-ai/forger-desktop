@@ -59,6 +59,8 @@ import { createSettingsServiceController } from './settings-service';
 import { configureDesktopUserDataPath, createPathConfigController } from './path-config';
 import { createMainUtilitiesController } from './main-utilities';
 import { createLocalNetworkShareController } from './local-network-share-service';
+import { createDeveloperPathService } from './developer-path-service';
+import { APP_CLAUDE_MODEL_OPTIONS, APP_CODEX_MODEL_OPTIONS, BUILT_IN_CLAUDE_EFFORT, BUILT_IN_CLAUDE_MODEL, BUILT_IN_CODEX_MODEL, BUILT_IN_CODEX_REASONING, BUNDLED_GIT_VERSION, CLAUDE_CODE_VERSION, CODEX_CLI_VERSION, CODEX_USAGE_DASHBOARD_URL, DEFAULT_NODE_VERSION, DEFAULT_PYTHON_VERSION } from './agent-runtime-defaults';
 import { RemoteNetworkShareManager } from '../remote-network-share-manager';
 import { createRuntimeInstallController } from '../runtime/runtime-install';
 import { loadOptionalBetterSqlite } from '../runtime/optional-better-sqlite';
@@ -193,40 +195,16 @@ import type {
   UpdateAgentDefaultsInput,
   UpdateAgentToolApprovalInput,
   UpdateCodexDefaultsInput,
+  UpdateDeveloperModeInput,
   SetAppToolGrantInput,
   UpdateUserSecretInput,
 } from '../../shared/types';
 
 const BetterSqlite3 = loadOptionalBetterSqlite();
-
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 configureDesktopUserDataPath({ app, isDev, path });
 const backendBaseUrl = process.env.FORGER_BACKEND_URL ?? (isDev ? 'http://127.0.0.1:3300' : 'https://platform.forger.cloud');
 let localCatalogJsonUrl: string | undefined;
-const DEFAULT_NODE_VERSION = '22';
-const DEFAULT_PYTHON_VERSION = '3.12';
-const BUNDLED_GIT_VERSION = '2.54.0';
-const CODEX_CLI_VERSION = '0.135.0';
-const CLAUDE_CODE_VERSION = '2.1.158';
-const CODEX_USAGE_DASHBOARD_URL = 'https://chatgpt.com/codex/settings/usage';
-const BUILT_IN_CODEX_MODEL = 'gpt-5.4';
-const BUILT_IN_CODEX_REASONING: CodexReasoningEffort = 'medium';
-const BUILT_IN_CLAUDE_MODEL = 'sonnet';
-const BUILT_IN_CLAUDE_EFFORT: ClaudeEffort = 'medium';
-const APP_CODEX_MODEL_OPTIONS = [
-  { displayModelName: '5.4', realModelName: 'gpt-5.4', defaultReasoningEffort: 'medium' as const },
-  { displayModelName: '5.3 Codex', realModelName: 'gpt-5.3-codex', defaultReasoningEffort: 'low' as const },
-  { displayModelName: '5.3 Spark', realModelName: 'gpt-5.3-codex-spark', defaultReasoningEffort: 'high' as const },
-  { displayModelName: '5.4 Mini', realModelName: 'gpt-5.4-mini', defaultReasoningEffort: 'medium' as const }, { displayModelName: '5.5', realModelName: 'gpt-5.5', defaultReasoningEffort: 'medium' as const },
-];
-const APP_CLAUDE_MODEL_OPTIONS = [
-  { displayModelName: 'Opus 4.8', realModelName: 'claude-opus-4-8', defaultEffort: 'high' as const },
-  { displayModelName: 'Opus 4.7', realModelName: 'claude-opus-4-7', defaultEffort: 'xhigh' as const },
-  { displayModelName: 'Opus 4.6', realModelName: 'claude-opus-4-6', defaultEffort: 'high' as const },
-  { displayModelName: 'Opus 4.5', realModelName: 'claude-opus-4-5-20251101', defaultEffort: 'high' as const },
-  { displayModelName: 'Sonnet 4.6', realModelName: 'claude-sonnet-4-6', defaultEffort: 'high' as const },
-  { displayModelName: 'Sonnet 4.5', realModelName: 'claude-sonnet-4-5-20250929', defaultEffort: 'medium' as const }, { displayModelName: 'Haiku 4.5', realModelName: 'claude-haiku-4-5-20251001', defaultEffort: 'low' as const },
-];
 const CODEX_MODEL_VALUES = new Set(APP_CODEX_MODEL_OPTIONS.map((option) => option.realModelName));
 const CODEX_REASONING_VALUES = new Set<CodexReasoningEffort>(['none', 'low', 'medium', 'high', 'xhigh']);
 const CLAUDE_MODEL_VALUES = new Set(APP_CLAUDE_MODEL_OPTIONS.map((option) => option.realModelName));
@@ -344,6 +322,7 @@ const saveSettings = async (): Promise<void> => await getSettingsServiceControll
 const getCodexDefaults = (): Settings['codexDefaults'] => getSettingsServiceController().getCodexDefaults();
 const updateCodexDefaults = async (input: UpdateCodexDefaultsInput): Promise<Settings> => await getSettingsServiceController().updateCodexDefaults(input);
 const updateAgentDefaults = async (input: UpdateAgentDefaultsInput): Promise<Settings> => await getSettingsServiceController().updateAgentDefaults(input);
+const updateDeveloperMode = async (input: UpdateDeveloperModeInput): Promise<Settings> => await getSettingsServiceController().updateDeveloperMode(input);
 const markProviderConnected = async (provider: AgentProvider): Promise<void> => await getSettingsServiceController().markProviderConnected(provider);
 const chooseAgentRuntime = async (requested?: AgentRuntimeRequest): Promise<AgentRuntime> => await getSettingsServiceController().chooseAgentRuntime(requested);
 const chooseConnectedProvider = async (): Promise<AgentProvider> => await getSettingsServiceController().chooseConnectedProvider();
@@ -701,6 +680,23 @@ const getAgentAuthController = () => createAgentAuthController(createAgentAuthDe
 const getRuntimePathEntries = (runtime: RuntimeBinarySet): string[] => getAgentAuthController().getRuntimePathEntries(runtime);
 const existsDirectory = async (dir: string): Promise<boolean> => await getAgentAuthController().existsDirectory(dir);
 const getAppLocalToolPathEntries = async (record: InstalledAppRecord): Promise<string[]> => await getAgentAuthController().getAppLocalToolPathEntries(record);
+const getDeveloperPathService = () => createDeveloperPathService({
+  defaultNodeVersion: DEFAULT_NODE_VERSION,
+  ensureRuntimeInstalled,
+  fs,
+  getAppLocalToolPathEntries,
+  getRuntimePathEntries,
+  normalizeNodeRuntimeVersion,
+  normalizeSettings,
+  path,
+  registry,
+  settings: () => settings,
+  systemPath: () => process.env.PATH,
+  upsertInstalledRecord,
+});
+const getAgentPathEntries = async (appId?: string): Promise<string[]> => await getDeveloperPathService().getAgentPathEntries(appId);
+const getDeveloperPathState = async (appId?: string) => await getDeveloperPathService().getDeveloperPathState(appId);
+const updateAppDeveloperSettings = async (input: Parameters<ReturnType<typeof createDeveloperPathService>['updateAppDeveloperSettings']>[0]) => await getDeveloperPathService().updateAppDeveloperSettings(input);
 const getCodexToolEnvironment = async (appId?: string, pythonRuntime?: RuntimeBinarySet): Promise<Record<string, string>> => await getAgentAuthController().getCodexToolEnvironment(appId, pythonRuntime);
 const resolveCodexCliPath = async (baseDir: string): Promise<string | null> => await getAgentAuthController().resolveCodexCliPath(baseDir);
 const getInstalledCodexCliVersion = async (baseDir: string): Promise<string | null> => await getAgentAuthController().getInstalledCodexCliVersion(baseDir);
@@ -821,6 +817,7 @@ const createInstalledAppRuntimeDeps = () => ({
   formatProcessOutputForInstallLog,
   friendChatWindows,
   fs,
+  getBackendPathEntries: getAgentPathEntries,
   getInstallLogPath,
   getLocalNetworkShareStatus,
   getManifestAppSecretsValidationError,
@@ -1048,6 +1045,7 @@ const getMainProcessIpcDeps = () => ({
   getCloudIdentityStore,
   getCodexAuthStatus,
   getCodexHome,
+  getDeveloperPathState,
   getDesktopUpdater,
   getFileLibrary,
   getForgerHomeRoot,
@@ -1109,6 +1107,8 @@ const getMainProcessIpcDeps = () => ({
   uninstallAppRuntime,
   updateAgentDefaults,
   updateAgentToolApproval,
+  updateAppDeveloperSettings,
+  updateDeveloperMode,
   updateAppPrompt,
   updateAppRuntime,
   updateCodexDefaults,
@@ -1177,20 +1177,20 @@ const mainLifecycleState = {
 
 registerMainLifecycle({
   AGENT_TOOL_DEFINITIONS, AppAgentConversationManager, AppAgentTaskManager, AppMcpManager, AutomationManager,
-  BrowserWindow, ChatOrchestrator, CloudDeviceManager, CloudIdentityStore, DEFAULT_NODE_VERSION, DesktopRuntimeBridge,
+  BrowserWindow, ChatOrchestrator, CloudDeviceManager, CloudIdentityStore, DesktopRuntimeBridge,
   DevCatalogService, FORGER_AGENT_CONTRACT_VERSION, FileLibrary, ForgerAccountStore, ForgerBackendClient,
   ForgerMcpServer, IPC_CHANNELS, MemoryMaintenanceManager, MemoryStore, SecretsStore, anyAppAllowsAgentNetworkAccess, app,
   appAllowsAgentNetworkAccess, appWindows, appendInstallLog, backendBaseUrl, buildForgerToolsContextForApp,
   buildMemoryContextForApp, buildMemoryContextForApps, chooseAgentRuntime, clearForgerAccountSession, closeServer,
   createLocalAppFromSkeleton, createWindow, emitAutomationUpdated, emitChatRunUpdated, ensureBackendPythonEnvironment, ensureCatalogStatuses,
   ensureGlobalAgentsContext, ensurePathInside, ensureRuntimeInstalled, ensureSqliteDatabaseParent, flushPendingDeepLink,
-  fs, getAppLocalToolPathEntries, getBackupsRoot, getClaudeAuthStatus, getCloudDeviceAccountStorageKey,
+  fs, getAgentPathEntries, getBackupsRoot, getClaudeAuthStatus, getCloudDeviceAccountStorageKey,
   getCloudDevicePath, getCloudIdentityPath, getCloudIdentityStore, getCodexAuthStatus, getCodexHome, getCodexRoot,
   getCodexToolEnvironment, getForgerAccountPath, getForgerHomeRoot, getForgerMetadataRoot, getFreePort,
   getLegacyForgerMetadataRoot, getMemoryStore, getOfficialToolsService, getPrivateAppsRoot, getPrivateDataRoot,
   getRuntimesRoot, getRuntimePathEntries, getRuntimeStatus, getLocalNetworkShareStatus, getRemoteNetworkShareStatus, getTempRoot, getVenvExecutables,
   handleCloudSocialEvent, hasInstalledCodexConversation, ipcMain, listAppPrompts, listCatalogFromBackend,
-  loadAgentToolSettings, loadCloudSyncSettings, loadRegistry, loadSettings, mapBackendCategory, normalizeNodeRuntimeVersion,
+  loadAgentToolSettings, loadCloudSyncSettings, loadRegistry, loadSettings, mapBackendCategory,
   openInstalledApp, startLocalNetworkShare, stopLocalNetworkShare, startRemoteNetworkShare, stopRemoteNetworkShare, stopRemoteNetworkShareSession, openOrFocusAppWindow, registerForgerCloudOAuth,
   registerIpcHandlers, renderManifestAgentPrompt, resolveClaudeCli, resolveCodexCliPath, resolveInstalledAgents, resolveInstalledManifest,
   resolveInstalledPromptTemplates, restoreAppPrompt, restartInstalledApp, runningApps, serializeErrorForInstallLog,

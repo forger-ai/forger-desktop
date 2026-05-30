@@ -75,6 +75,7 @@ interface AppMcpManagerOptions {
   ensureSqliteDatabaseParent: (environment: Record<string, string>) => Promise<void>;
   getDesktopRuntimeEnvironment?: (appId: string) => Record<string, string>;
   getRuntimePathEntries: (runtime: RuntimeBinarySet) => string[];
+  getPathEntries?: (appId: string) => Promise<string[]>;
   waitForHttpOk: (url: string, timeoutMs: number) => Promise<void>;
   terminateProcess: (child: ChildProcessWithoutNullStreams) => Promise<void>;
   appendInstallLog: (event: string, payload?: Record<string, unknown>) => Promise<void>;
@@ -198,6 +199,9 @@ export class AppMcpManager {
       const token = randomBytes(32).toString('hex');
       const config = this.buildProcessConfig(mcp, record, venv.python, port, token);
       await this.options.ensureSqliteDatabaseParent(config.environment);
+      const pathEntries = this.options.getPathEntries
+        ? await this.options.getPathEntries(record.appId)
+        : [path.dirname(venv.python), ...this.options.getRuntimePathEntries(pythonRuntime)];
       await this.options.appendInstallLog('app_mcp:start', {
         appId: record.appId,
         command: config.command,
@@ -213,8 +217,7 @@ export class AppMcpManager {
           ...process.env,
           ...config.environment,
           PATH: [
-            path.dirname(venv.python),
-            ...this.options.getRuntimePathEntries(pythonRuntime),
+            ...pathEntries,
             process.env.PATH ?? '',
           ].filter(Boolean).join(path.delimiter),
         },
