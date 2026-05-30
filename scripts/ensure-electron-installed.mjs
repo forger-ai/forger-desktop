@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { downloadArtifact } from '@electron/get';
-import extract from 'extract-zip';
+import childProcess from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -34,7 +34,7 @@ try {
     platform,
     version,
   });
-  await extract(zipPath, { dir: distPath });
+  extractElectronZip(zipPath, distPath);
 
   const typeDefinitions = path.join(distPath, 'electron.d.ts');
   if (fs.existsSync(typeDefinitions)) {
@@ -65,6 +65,24 @@ function isInstalled() {
 
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+}
+
+function extractElectronZip(zipPath, targetDir) {
+  fs.mkdirSync(targetDir, { recursive: true });
+
+  if (process.platform === 'win32') {
+    childProcess.execFileSync('powershell', [
+      '-NoProfile',
+      '-NonInteractive',
+      '-Command',
+      'Expand-Archive -LiteralPath $args[0] -DestinationPath $args[1] -Force',
+      zipPath,
+      targetDir,
+    ], { stdio: 'inherit' });
+    return;
+  }
+
+  childProcess.execFileSync('unzip', ['-q', zipPath, '-d', targetDir], { stdio: 'inherit' });
 }
 
 function getPlatformPath(targetPlatform) {
