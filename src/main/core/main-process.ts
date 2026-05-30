@@ -1182,7 +1182,7 @@ registerMainLifecycle({
   ForgerMcpServer, IPC_CHANNELS, MemoryMaintenanceManager, MemoryStore, SecretsStore, anyAppAllowsAgentNetworkAccess, app,
   appAllowsAgentNetworkAccess, appWindows, appendInstallLog, backendBaseUrl, buildForgerToolsContextForApp,
   buildMemoryContextForApp, buildMemoryContextForApps, chooseAgentRuntime, clearForgerAccountSession, closeServer,
-  createWindow, emitAutomationUpdated, emitChatRunUpdated, ensureBackendPythonEnvironment, ensureCatalogStatuses,
+  createLocalAppFromSkeleton, createWindow, emitAutomationUpdated, emitChatRunUpdated, ensureBackendPythonEnvironment, ensureCatalogStatuses,
   ensureGlobalAgentsContext, ensurePathInside, ensureRuntimeInstalled, ensureSqliteDatabaseParent, flushPendingDeepLink,
   fs, getAppLocalToolPathEntries, getBackupsRoot, getClaudeAuthStatus, getCloudDeviceAccountStorageKey,
   getCloudDevicePath, getCloudIdentityPath, getCloudIdentityStore, getCodexAuthStatus, getCodexHome, getCodexRoot,
