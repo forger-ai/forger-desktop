@@ -160,6 +160,10 @@ test('Forger prompt builders include contract, language, files, official tools, 
   assert.match(appPrompt, /FORGER CHAT MODE: edit_app/);
   assert.match(appPrompt, /Always use Plan Mode before programming/);
   assert.match(appPrompt, /forger_ask_question/);
+  assert.match(appPrompt, /functional scope, user intent, desired behavior/);
+  assert.match(appPrompt, /Do not use it for low-impact design preferences/);
+  assert.match(appPrompt, /affected flow/);
+  assert.match(appPrompt, /smallest visible change/);
   assert.match(appPrompt, /use APP_ROOT for versioning checks/);
   assert.match(appPrompt, /Opening or starting an installed app means opening it through Forger Desktop/);
   assert.match(appPrompt, /Use Forger MCP app tools to open the app and to check runtime status/);
@@ -356,6 +360,9 @@ test('Forger prompt builders include contract, language, files, official tools, 
   assert.match(globalAgents, /## Request Playbooks[\s\S]*## How To Speak With The Person/);
   assert.match(globalAgents, /### Building a New App[\s\S]*1\. Clarify the goal[\s\S]*2\. Shape the first useful version[\s\S]*3\. Offer two or three product directions/);
   assert.match(globalAgents, /### Building a New App[\s\S]*use `forger-localization` before drafting labels, navigation, empty states, loading states, error states, success states/);
+  assert.match(globalAgents, /### Asking Clarifying Questions[\s\S]*use `forger_ask_question` when it is available/);
+  assert.match(globalAgents, /### Asking Clarifying Questions[\s\S]*creates the visual question interface/);
+  assert.match(globalAgents, /### Asking Clarifying Questions[\s\S]*Do not write a menu, checklist, or numbered list of question options/);
   assert.match(globalAgents, /### Modifying an App[\s\S]*1\. Identify what should feel different[\s\S]*3\. Work on one visible improvement[\s\S]*4\. Save the result as a new version/);
   assert.match(globalAgents, /### Answering a Simple Question[\s\S]*1\. Identify the selected app[\s\S]*3\. Give a direct answer from verified app information/);
   assert.match(globalAgents, /### Working With App Data[\s\S]*1\. Identify which app and which data[\s\S]*3\. Prefer a safe preview[\s\S]*5\. Explain what was reviewed, loaded, changed, skipped, or left untouched/);
@@ -459,6 +466,7 @@ test('official tool skill templates and seed data keep expected Desktop defaults
   assert.equal(productPatternsSkill.description, 'Use when creating or changing Forger app dashboards, CRUD screens, forms, data views, assistant task surfaces, multi-step workflows, or screen structure before choosing stack-specific UI skills.');
   assert.match(productPatternsSkill.body, /Do not overload dashboards/);
   assert.match(productPatternsSkill.body, /Use pills and badges sparingly/);
+  assert.match(productPatternsSkill.body, /minimalist request means fewer visual containers/);
   assert.match(productPatternsSkill.body, /agent threads, promptTemplate tasks/);
   assert.match(productPatternsSkill.body, /Inspect the real app before selecting implementation guidance/);
   assert.match(productPatternsSkill.body, /forger-frontend-structure/);
@@ -501,6 +509,7 @@ test('official tool skill templates and seed data keep expected Desktop defaults
   assert.ok(tailwindDesignSkill);
   assert.match(tailwindDesignSkill.body, /Tailwind CSS, shadcn\/ui copied components, and Radix primitives/);
   assert.match(tailwindDesignSkill.body, /Do not use MUI component APIs/);
+  assert.match(tailwindDesignSkill.body, /Minimal or operational screens use unframed page sections/);
   const tailwindShadcnSkill = templates.find((template) => template.id === 'forger-tailwind-shadcn-patterns');
   assert.ok(tailwindShadcnSkill);
   assert.equal(tailwindShadcnSkill.description, 'Use when building Tailwind/shadcn app UI controls, forms, dialogs, selects, comboboxes, popovers, dropdowns, tabs, tooltips, sheets, accordions, toasts, copied components, or Radix primitives; inspect existing components and install shadcn/Radix before hand-rolling interactive behavior.');
@@ -511,6 +520,9 @@ test('official tool skill templates and seed data keep expected Desktop defaults
   assert.match(tailwindShadcnSkill.body, /Avoid native `<select>`, custom `div` menus, ad hoc popovers, manual focus traps, and hand-rolled keyboard behavior/);
   assert.match(tailwindShadcnSkill.body, /shadcn\/ui components are copied app code/);
   assert.match(tailwindShadcnSkill.body, /Do not add Headless UI or another headless component system/);
+  assert.match(tailwindShadcnSkill.body, /Badge is for compact status/);
+  assert.match(tailwindShadcnSkill.body, /Plain rows, headings, sections, tables, and description lists/);
+  assert.match(tailwindShadcnSkill.body, /Card inside Card/);
   const tailwindResponsiveSkill = templates.find((template) => template.id === 'forger-tailwind-responsive-frontend');
   assert.ok(tailwindResponsiveSkill);
   assert.match(tailwindResponsiveSkill.body, /Tailwind\/shadcn Forger app/);

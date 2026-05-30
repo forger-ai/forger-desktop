@@ -228,6 +228,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     chatBotPicture,
     setChatBotPicture,
     handleAgentDefaultsChange,
+    handleDeveloperModeChange,
     setCodexConfigOpen,
     handleReinstallCodex,
     setClaudeConfigOpen,
@@ -599,6 +600,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             claudeModelOptions={CLAUDE_MODEL_OPTIONS}
             claudeEffortOptions={CLAUDE_EFFORT_OPTIONS}
             codexDefaults={settings.codexDefaults}
+            developerMode={settings.developerMode}
             onBack={() => setCurrentView(appDetailsBackView)}
             onInstall={(appId) => void handleInstall(appId)}
             onUpdate={(appId) => void handleUpdate(appId)}
@@ -850,6 +852,8 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             defaultChatPermissionMode={settings.defaultChatPermissionMode}
             agentDefaults={settings.agentDefaults}
             onAgentDefaultsChange={(input) => void handleAgentDefaultsChange(input)}
+            developerMode={settings.developerMode}
+            onDeveloperModeChange={handleDeveloperModeChange}
             onOpenCodexConfig={() => setCodexConfigOpen(true)}
             onReinstallCodex={() => void handleReinstallCodex()}
             onOpenClaudeConfig={() => setClaudeConfigOpen(true)}

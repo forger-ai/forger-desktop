@@ -237,6 +237,28 @@ const createLifecycleHarness = (overrides = {}) => {
       ...fs,
       mkdir: async (targetPath, options) => calls.mkdirs.push({ targetPath, options }),
     },
+    getAgentPathEntries: async (appId) => {
+      const pathEntries = new Set();
+      const record = appId ? state.registry.apps[appId] : undefined;
+      const codexNodeRuntime = await deps.ensureRuntimeInstalled('node', deps.DEFAULT_NODE_VERSION);
+      for (const entry of deps.getRuntimePathEntries(codexNodeRuntime)) {
+        pathEntries.add(entry);
+      }
+      if (record) {
+        for (const entry of await deps.getAppLocalToolPathEntries(record)) {
+          pathEntries.add(entry);
+        }
+        const appNodeRuntime = await deps.ensureRuntimeInstalled('node', deps.normalizeNodeRuntimeVersion(record.requiredNodeVersion));
+        const appPythonRuntime = await deps.ensureRuntimeInstalled('python', record.requiredPythonVersion);
+        for (const entry of deps.getRuntimePathEntries(appNodeRuntime)) {
+          pathEntries.add(entry);
+        }
+        for (const entry of deps.getRuntimePathEntries(appPythonRuntime)) {
+          pathEntries.add(entry);
+        }
+      }
+      return [...pathEntries];
+    },
     getAppLocalToolPathEntries: async () => ['/app-tools/bin'],
     getBackupsRoot: () => '/forger/backups',
     getClaudeAuthStatus: async () => {
@@ -478,8 +500,8 @@ test('main lifecycle service callbacks preserve fallbacks, permissions, and upda
   assert.deepEqual(reloads, ['reload']);
 
   assert.deepEqual(await state.appAgentTaskManager.options.getCodexPathEntries('finance-os'), [
-    '/app-tools/bin',
     '/node/22/bin/path',
+    '/app-tools/bin',
     '/node/20/bin/path',
     '/python/3.11/bin/path',
   ]);
@@ -487,8 +509,8 @@ test('main lifecycle service callbacks preserve fallbacks, permissions, and upda
   assert.equal(state.appMcpManager.options.getInstalledApp('finance-os'), state.registry.apps['finance-os']);
   assert.deepEqual(state.appMcpManager.options.getDesktopRuntimeEnvironment('finance-os'), { APP_ID: 'finance-os' });
   assert.deepEqual(await state.chatOrchestrator.options.getCodexPathEntries('finance-os'), [
-    '/app-tools/bin',
     '/node/22/bin/path',
+    '/app-tools/bin',
     '/node/20/bin/path',
     '/python/3.11/bin/path',
   ]);
@@ -1096,8 +1118,8 @@ test('main lifecycle app-agent conversation callbacks cover runtime paths, envir
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.deepEqual(await state.appAgentConversationManager.options.getCodexPathEntries('finance-os'), [
-    '/app-tools/bin',
     '/node/22/bin/path',
+    '/app-tools/bin',
     '/node/20.2.0/bin/path',
     '/python/3.12/bin/path',
   ]);

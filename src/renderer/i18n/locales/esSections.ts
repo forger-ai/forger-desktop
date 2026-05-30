@@ -111,6 +111,7 @@ export const esSections = {
       questionBadge: 'Pregunta',
       questionAnswered: 'Respondido',
       questionFreeTextPlaceholder: 'Otra cosa',
+      questionPrevious: 'Anterior',
       questionNext: 'Siguiente',
       questionSubmit: 'Responder',
       agentThinking: 'Forger está pensando...',

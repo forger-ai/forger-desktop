@@ -17,6 +17,7 @@ export interface InstalledAppRecord {
   requiredPythonVersion: string;
   originalCommitSha?: string;
   installedAt?: string;
+  developerPathEntries?: string[];
   privateLocal?: boolean;
   socialSource?: {
     userAppId: number;

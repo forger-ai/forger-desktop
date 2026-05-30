@@ -45,6 +45,7 @@ interface RuntimeDeps {
   friendChatWindows: Map<number, BrowserWindow>;
   fs: typeof fs;
   getInstallLogPath: () => string;
+  getBackendPathEntries: (appId: string) => Promise<string[]>;
   getLocalNetworkShareStatus?: (appId: string) => RuntimeStatus['localNetworkShare'];
   getManifestAppSecretsValidationError: (manifest: AppManifest | null) => string | null;
   getSecretsStore: () => {
@@ -81,7 +82,7 @@ interface RuntimeDeps {
 }
 
 export const createInstalledAppRuntimeController = (deps: RuntimeDeps) => {
-const { net, http, runCommand, app, registry, upsertInstalledRecord, ensureCatalogStatuses, appWindows, appAgentTaskManager, appAgentConversationManager, stoppingApps, runningApps, path, isDev, FORGER_PROTOCOL, parseForgerUrl, dispatchDeepLink, shell, friendChatWindows, wait, resolveInstalledManifest, getLocalNetworkShareStatus, getManifestAppSecretsValidationError, normalizeManifestAppSecrets, getSecretsStore, isSecretsVaultUnavailableError, normalizeNodeRuntimeVersion, appendInstallLog, getInstallLogPath, ensureRuntimeInstalled, ensureBackendPythonEnvironment, getVenvExecutables, requiresWindowsShell, desktopRuntimeBridge, appFolderGrantSecret, truncateForInstallLog, formatProcessOutputForInstallLog, serializeErrorForInstallLog, failureDiagnostic, emitRuntimeStatus, stopLocalNetworkShare, stopRemoteNetworkShare, syncAppToCloudIfEnabled, withAppLifecycleLock, fs } = deps;
+const { net, http, runCommand, app, registry, upsertInstalledRecord, ensureCatalogStatuses, appWindows, appAgentTaskManager, appAgentConversationManager, stoppingApps, runningApps, path, isDev, FORGER_PROTOCOL, parseForgerUrl, dispatchDeepLink, shell, friendChatWindows, wait, resolveInstalledManifest, getLocalNetworkShareStatus, getManifestAppSecretsValidationError, normalizeManifestAppSecrets, getSecretsStore, isSecretsVaultUnavailableError, normalizeNodeRuntimeVersion, appendInstallLog, getInstallLogPath, getBackendPathEntries, ensureRuntimeInstalled, ensureBackendPythonEnvironment, getVenvExecutables, requiresWindowsShell, desktopRuntimeBridge, appFolderGrantSecret, truncateForInstallLog, formatProcessOutputForInstallLog, serializeErrorForInstallLog, failureDiagnostic, emitRuntimeStatus, stopLocalNetworkShare, stopRemoteNetworkShare, syncAppToCloudIfEnabled, withAppLifecycleLock, fs } = deps;
 const localNetworkShareStatusFor = getLocalNetworkShareStatus ?? (() => undefined);
 const localNetworkSharePayloadFor = (appId: string) => {
   const status = localNetworkShareStatusFor(appId);
@@ -743,6 +744,8 @@ const openInstalledAppUnlocked = async (
   const frontendArgs = ['run', 'dev', '--', '--host', '127.0.0.1', '--port', String(frontendPort)];
   const backendHealthcheckPath = normalizeHealthcheckPath(backendService?.healthcheck);
   await ensureSqliteDatabaseParent(backendConfig.environment);
+  const backendPathEntries = await getBackendPathEntries(appId);
+  const backendPath = [...backendPathEntries, process.env.PATH ?? ''].filter(Boolean).join(path.delimiter);
 
   await appendInstallLog('open:spawn', {
     appId,
@@ -775,6 +778,7 @@ const openInstalledAppUnlocked = async (
         ...backendConfig.environment,
         ...(desktopRuntimeBridge?.environmentForApp(appId) ?? {}),
         ...resolvedSecrets.env,
+        PATH: backendPath,
         CORS_ORIGINS: `${frontendUrl},${rawFrontendUrl},http://127.0.0.1:${frontendPort}`,
         FORGER_APP_ID: appId,
         FORGER_APP_GRANT_SECRET: appFolderGrantSecret,

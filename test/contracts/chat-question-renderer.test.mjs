@@ -53,8 +53,13 @@ test('question actions replace the composer and answer through the chat start-ru
   assert.match(questionComposerSource, /questionFreeTextPlaceholder/);
   assert.match(questionComposerSource, /\{currentQuestionIndex \+ 1\}\/\{questions\.length\}/);
   assert.match(questionComposerSource, /setCurrentQuestionIndex\(\(current\) => current \+ 1\)/);
+  assert.match(questionComposerSource, /setCurrentQuestionIndex\(\(current\) => Math\.max\(0, current - 1\)\)/);
+  assert.match(questionComposerSource, /questionPrevious/);
   assert.match(questionComposerSource, /questionNext/);
   assert.match(questionComposerSource, /fullWidth/);
+  assert.match(questionComposerSource, /questions\.every\(\(question\) => hasAnswer\(answersByQuestionId\[question\.id\]\)\)/);
+  assert.match(questionComposerSource, /Tooltip title=\{option\.description\}/);
+  assert.match(questionComposerSource, /InfoOutlinedIcon/);
   assert.doesNotMatch(questionComposerSource, /setFreeText\(''\)/);
   assert.match(questionComposerSource, /mode: 'options'/);
   assert.match(questionComposerSource, /mode === 'freeText'/);
@@ -67,6 +72,7 @@ test('question actions replace the composer and answer through the chat start-ru
   assert.match(controllerSource, /chatId:\s*request\.chatId/);
   assert.match(controllerSource, /questionRequestId:\s*request\.requestId/);
   assert.match(controllerSource, /answers:\s*response\.answers\.map/);
+  assert.match(controllerSource, /description: answer\.description/);
   assert.match(controllerSource, /freeText:\s*response\.freeText\?\.trim\(\)\s*\|\|\s*''/);
   assert.match(controllerSource, /getDesktopApi\(\)\.chatStartRun\(\{/);
 });

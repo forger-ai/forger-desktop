@@ -111,6 +111,7 @@ export const enSections = {
       questionBadge: 'Question',
       questionAnswered: 'Answered',
       questionFreeTextPlaceholder: 'Something else',
+      questionPrevious: 'Previous',
       questionNext: 'Next',
       questionSubmit: 'Answer',
       agentThinking: 'Forger is thinking...',

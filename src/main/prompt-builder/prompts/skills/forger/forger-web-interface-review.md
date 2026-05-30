@@ -12,6 +12,7 @@ description: Use when reviewing Forger app dashboards, CRUD flows, forms, data v
 - Verify long labels, realistic records, empty values, validation messages, loading placeholders, error copy, and success states without overlap.
 - Check mobile and desktop separately. On mobile, navigation, actions, tables/lists, forms, and remote-session controls must remain usable.
 - Dense operational screens should remain scannable: restrained headings, predictable spacing, consistent controls, and no decorative card nesting.
+- Flag Badge or Card use when it decorates ordinary text, duplicates a label, hides comparison, or creates Card-in-Card structure without a real nested object.
 - Visible copy should be functional, localized when the app has i18n, and free of implementation terms unless the user asks for technical detail.
 - Confirm frontend/backend ownership: the frontend renders state and intent; validation, persistence, privileged Forger access, imports, scripts, and secrets stay in backend or app contracts.
 - Findings should be actionable and tied to a visible screen or flow. Prefer "Move delete confirmation into the item row flow" over vague design critique.

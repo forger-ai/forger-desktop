@@ -52,6 +52,10 @@ export const settingsSeed: Settings = {
   userEmail: '',
   plan: 'Free',
   safeMode: true,
+  developerMode: {
+    enabled: false,
+    pathEntries: [],
+  },
   codexDefaults: {
     model: DEFAULT_CODEX_MODEL,
     reasoningEffort: DEFAULT_CODEX_REASONING_EFFORT,

@@ -13,6 +13,7 @@ description: Use when changing Tailwind app styling, semantic tokens, CSS variab
 - Use Tailwind utilities for layout, spacing, responsive behavior, state styles, and token references. Extract repeated class sets into small reusable components when repeated patterns become hard to scan.
 - Use `cn()` for conditional class composition. Keep class strings readable and focused on layout or state rather than ad hoc restyling of primitives.
 - Prefer shallow page structure: full-width app sections and unframed layouts for page organization, cards for repeated items or focused summaries, and dialogs for interruptive decisions.
+- Minimal or operational screens use unframed page sections, restrained borders, existing density, and clear hierarchy through spacing and typography. Cards do not define the whole page structure unless the screen is a repeated-item grid or a focused summary surface.
 - Define stable dimensions with responsive constraints for boards, grids, toolbars, counters, tiles, and repeated controls so loading, hover, and long text do not shift the layout.
 - Dark mode is allowed only when tokens, backgrounds, borders, charts, forms, loading states, focus states, and contrast are handled as a complete mode. Do not sprinkle `dark:` classes as patches.
 - Keep touch targets at least 44 px on mobile and use focus-visible rings for keyboard users.

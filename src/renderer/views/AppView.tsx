@@ -35,6 +35,7 @@ import type {
   ClaudeModelOption,
   CodexModelOption,
   CodexReasoningEffort,
+  DeveloperPathState,
   ForgerAccountSession,
   InstallAppResult,
   Settings,
@@ -60,6 +61,7 @@ interface AppViewProps {
   claudeModelOptions: ClaudeModelOption[];
   claudeEffortOptions: { label: string; value: ClaudeEffort }[];
   codexDefaults: Settings['codexDefaults'];
+  developerMode: Settings['developerMode'];
   onBack: () => void;
   onInstall: (appId: string) => void;
   onUpdate: (appId: string) => void;
@@ -83,7 +85,7 @@ const initialsFromName = (name: string) =>
     .map((part) => part[0]?.toUpperCase() ?? '')
     .join('');
 
-type AppViewTab = 'general' | 'prompts' | 'reviews' | 'history' | 'updates' | 'secrets';
+type AppViewTab = 'general' | 'prompts' | 'reviews' | 'history' | 'updates' | 'secrets' | 'developer';
 
 const promptReviewKey = (kind: string, id: string) => `${kind}:${id}`;
 
@@ -106,6 +108,30 @@ const DetailRow = ({ label, value }: { label: string; value: string }) => (
   </Stack>
 );
 
+const PathPreview = ({ title, entries }: { title: string; entries: string[] }) => (
+  <Stack spacing={0.5}>
+    <Typography variant="caption" color="text.secondary">{title}</Typography>
+    <Box
+      component="pre"
+      sx={{
+        m: 0,
+        p: 1,
+        border: '1px solid',
+        borderColor: 'divider',
+        bgcolor: 'background.default',
+        maxHeight: 140,
+        overflow: 'auto',
+        whiteSpace: 'pre-wrap',
+        wordBreak: 'break-word',
+        fontFamily: 'monospace',
+        fontSize: 12,
+      }}
+    >
+      {entries.length > 0 ? entries.join('\n') : '-'}
+    </Box>
+  </Stack>
+);
+
 export function AppView({
   details,
   openingAppIds,
@@ -121,6 +147,7 @@ export function AppView({
   claudeModelOptions,
   claudeEffortOptions,
   codexDefaults,
+  developerMode,
   onBack,
   onInstall,
   onUpdate,
@@ -154,6 +181,10 @@ export function AppView({
   const [reviewBusy, setReviewBusy] = useState(false);
   const [reviewEditorOpen, setReviewEditorOpen] = useState(false);
   const [promptPreview, setPromptPreview] = useState<PromptPreview>(null);
+  const [developerPathState, setDeveloperPathState] = useState<DeveloperPathState | null>(null);
+  const [developerPathDraft, setDeveloperPathDraft] = useState('');
+  const [developerBusy, setDeveloperBusy] = useState(false);
+  const [developerError, setDeveloperError] = useState('');
 
   useEffect(() => {
     setRatingScore(currentUserRating?.score ?? 5);
@@ -204,6 +235,24 @@ export function AppView({
     }, 250);
     return () => window.clearTimeout(handle);
   }, [details, selectedPrompt, promptDraft, t.appView.promptErrorFallback]);
+
+  useEffect(() => {
+    if (!details?.installed || !developerMode.enabled) {
+      setDeveloperPathState(null);
+      setDeveloperPathDraft('');
+      return undefined;
+    }
+    let cancelled = false;
+    void window.forger.getDeveloperPathState(details.app.id).then((state) => {
+      if (!cancelled) {
+        setDeveloperPathState(state);
+        setDeveloperPathDraft(state.appPathEntries.join('\n'));
+      }
+    }).catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [details?.app.id, details?.installed, developerMode.enabled]);
 
   if (!details) {
     return (
@@ -863,6 +912,61 @@ export function AppView({
     </Stack>
   );
 
+  const saveAppDeveloperPaths = async () => {
+    setDeveloperBusy(true);
+    setDeveloperError('');
+    try {
+      const state = await window.forger.updateAppDeveloperSettings({
+        appId,
+        pathEntries: developerPathDraft.split('\n'),
+      });
+      setDeveloperPathState(state);
+      setDeveloperPathDraft(state.appPathEntries.join('\n'));
+    } catch (error) {
+      setDeveloperError(error instanceof Error ? error.message : t.settings.developerPathSaveError);
+    } finally {
+      setDeveloperBusy(false);
+    }
+  };
+
+  const developerContent = (
+    <Stack spacing={1.5}>
+      <Stack spacing={0.5}>
+        <Typography variant="h5">{t.settings.developerModeTitle}</Typography>
+        <Typography color="text.secondary">{t.settings.developerModeDescription}</Typography>
+      </Stack>
+      <TextField
+        label={t.settings.developerAppPathTitle}
+        value={developerPathDraft}
+        onChange={(event) => setDeveloperPathDraft(event.target.value)}
+        fullWidth
+        multiline
+        minRows={4}
+        helperText={t.settings.developerPathEntriesHelp}
+        inputProps={{ spellCheck: false }}
+        sx={{ '& textarea': { fontFamily: 'monospace', fontSize: 13 } }}
+      />
+      {developerError ? <Typography color="error.main" variant="body2">{developerError}</Typography> : null}
+      <Button
+        variant="outlined"
+        disabled={developerBusy}
+        onClick={() => void saveAppDeveloperPaths()}
+        sx={{ alignSelf: 'flex-start' }}
+      >
+        {t.settings.developerPathSave}
+      </Button>
+      {developerPathState ? (
+        <Stack spacing={1}>
+          <PathPreview title={t.settings.developerRuntimePathTitle} entries={developerPathState.runtimePathEntries} />
+          <PathPreview title={t.settings.developerGlobalPathTitle} entries={developerPathState.globalPathEntries} />
+          <PathPreview title={t.settings.developerAppPathTitle} entries={developerPathState.appPathEntries} />
+          <PathPreview title={t.settings.developerSystemPathTitle} entries={developerPathState.systemPathEntries} />
+          <PathPreview title={t.settings.developerEffectivePathTitle} entries={developerPathState.effectivePathEntries} />
+        </Stack>
+      ) : null}
+    </Stack>
+  );
+
   return (
     <Stack spacing={3}>
       <Button startIcon={<ArrowBackRounded />} onClick={onBack} sx={{ alignSelf: 'flex-start' }}>
@@ -943,6 +1047,7 @@ export function AppView({
           <Tab value="history" label={t.appView.tabs.history} />
           <Tab value="updates" label={t.appView.tabs.updates} />
           <Tab value="secrets" label={t.appView.tabs.secrets} />
+          {developerMode.enabled && details.installed ? <Tab value="developer" label={t.settings.developerModeTitle} /> : null}
         </Tabs>
       </Box>
 
@@ -954,6 +1059,7 @@ export function AppView({
       {activeTab === 'history' ? historyContent : null}
       {activeTab === 'updates' ? updatesContent : null}
       {activeTab === 'secrets' ? secretsContent : null}
+      {activeTab === 'developer' && developerMode.enabled && details.installed ? developerContent : null}
       <PromptPreviewDialog preview={promptPreview} t={t} onClose={() => setPromptPreview(null)} />
     </Stack>
   );

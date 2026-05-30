@@ -221,7 +221,7 @@ const installBackendDependenciesWithUv = async (
   });
 
   const lockPath = path.join(backendDir, 'uv.lock');
-  const uvArgs = ['-m', 'uv', 'sync', '--no-install-project', '--no-dev'];
+  const uvArgs = ['-m', 'uv', 'sync', '--no-install-project', '--extra', 'dev'];
 
   try {
     await fs.access(lockPath);
