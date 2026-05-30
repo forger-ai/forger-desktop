@@ -25,31 +25,31 @@ if (isInstalled()) {
 fs.rmSync(distPath, { force: true, recursive: true });
 fs.rmSync(path.join(electronRoot, 'path.txt'), { force: true });
 
-downloadArtifact({
-  artifactName: 'electron',
-  arch,
-  checksums: readJson(path.join(electronRoot, 'checksums.json')),
-  force: true,
-  platform,
-  version,
-})
-  .then((zipPath) => extract(zipPath, { dir: distPath }))
-  .then(() => {
-    const typeDefinitions = path.join(distPath, 'electron.d.ts');
-    if (fs.existsSync(typeDefinitions)) {
-      fs.renameSync(typeDefinitions, path.join(electronRoot, 'electron.d.ts'));
-    }
-
-    fs.writeFileSync(path.join(electronRoot, 'path.txt'), platformPath);
-    if (!isInstalled()) {
-      throw new Error(`Electron ${version} did not install for ${platform}-${arch}`);
-    }
-    console.log(`electron ${version} installed for ${platform}-${arch}`);
-  })
-  .catch((error) => {
-    console.error(error);
-    process.exit(1);
+try {
+  const zipPath = await downloadArtifact({
+    artifactName: 'electron',
+    arch,
+    checksums: readJson(path.join(electronRoot, 'checksums.json')),
+    force: true,
+    platform,
+    version,
   });
+  await extract(zipPath, { dir: distPath });
+
+  const typeDefinitions = path.join(distPath, 'electron.d.ts');
+  if (fs.existsSync(typeDefinitions)) {
+    fs.renameSync(typeDefinitions, path.join(electronRoot, 'electron.d.ts'));
+  }
+
+  fs.writeFileSync(path.join(electronRoot, 'path.txt'), platformPath);
+  if (!isInstalled()) {
+    throw new Error(`Electron ${version} did not install for ${platform}-${arch}`);
+  }
+  console.log(`electron ${version} installed for ${platform}-${arch}`);
+} catch (error) {
+  console.error(error);
+  process.exit(1);
+}
 
 function isInstalled() {
   try {
