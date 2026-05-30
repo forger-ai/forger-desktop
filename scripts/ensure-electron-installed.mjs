@@ -71,11 +71,20 @@ function extractElectronZip(zipPath, targetDir) {
   fs.mkdirSync(targetDir, { recursive: true });
 
   if (process.platform === 'win32') {
-    childProcess.execFileSync('tar', ['-xf', zipPath, '-C', targetDir], { stdio: 'inherit' });
+    childProcess.execFileSync('powershell', [
+      '-NoProfile',
+      '-NonInteractive',
+      '-Command',
+      `Expand-Archive -LiteralPath '${escapePowerShellString(zipPath)}' -DestinationPath '${escapePowerShellString(targetDir)}' -Force`,
+    ], { stdio: 'inherit' });
     return;
   }
 
   childProcess.execFileSync('unzip', ['-q', zipPath, '-d', targetDir], { stdio: 'inherit' });
+}
+
+function escapePowerShellString(value) {
+  return value.replaceAll("'", "''");
 }
 
 function getPlatformPath(targetPlatform) {
