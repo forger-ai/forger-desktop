@@ -100,6 +100,7 @@ test('manifest support normalizes prompt templates, agents, variables, runtime, 
         acceptedFileTypes: ['text/csv', '', 42],
         model: ' gpt-template ',
         reasoningEffort: 'high',
+        permissionMode: 'unsafe',
         runtime: { provider: 'codex', model: ' gpt-runtime ', effort: 'low' },
         runtimeRecommendations: {
           codex: { defaultModel: 'gpt-recommended', defaultEffort: 'medium' },
@@ -128,7 +129,7 @@ test('manifest support normalizes prompt templates, agents, variables, runtime, 
               bad: { type: 'date' },
               'bad space': { type: 'text' },
             },
-            runtime: { provider: 'claude', model: ' sonnet ', effort: 'max' },
+            runtime: { provider: 'claude', model: ' sonnet ', effort: 'max', permissionMode: 'unsafe' },
           },
           steer: { body: ' Steer ', variables: { topic: { type: 'text', required: false } } },
         },
@@ -164,7 +165,7 @@ test('manifest support normalizes prompt templates, agents, variables, runtime, 
       acceptedFileTypes: ['text/csv'],
       model: 'gpt-template',
       reasoningEffort: 'high',
-      runtime: { provider: 'codex', model: 'gpt-runtime', effort: 'low' },
+      runtime: { provider: 'codex', model: 'gpt-runtime', effort: 'low', permissionMode: 'unsafe' },
       runtimeRecommendations: {
         codex: { model: 'gpt-recommended', reasoningEffort: 'medium' },
         claude: { model: 'claude-recommended', effort: 'high' },
@@ -183,7 +184,7 @@ test('manifest support normalizes prompt templates, agents, variables, runtime, 
         initial: {
           body: 'Open {{file}}',
           variables: { file: { type: 'path', required: true } },
-          runtime: { provider: 'claude', model: 'sonnet', effort: 'max' },
+          runtime: { provider: 'claude', model: 'sonnet', effort: 'max', permissionMode: 'unsafe' },
         },
         steer: {
           body: 'Steer',
@@ -216,6 +217,12 @@ test('manifest support covers runtime defaults, prompt variable, and secret edge
     provider: 'claude',
     model: 'sonnet',
     effort: 'medium',
+  });
+  assert.deepEqual(controller.normalizeManifestRuntime({ provider: 'claude', model: ' sonnet ', permissionMode: 'unsafe' }), {
+    provider: 'claude',
+    model: 'sonnet',
+    effort: 'medium',
+    permissionMode: 'unsafe',
   });
   assert.deepEqual(controller.normalizeManifestRuntime({ provider: 'codex', model: ' gpt-5 ', effort: 'not-real' }), {
     provider: 'codex',

@@ -24,6 +24,11 @@ import type {
   MemoryListInput,
   MemoryUpdateInput,
   AgentRuntime,
+  ChatCreatedAppRequest,
+  ChatQuestion,
+  ChatQuestionRequest,
+  CreateLocalAppInput,
+  CreateLocalAppResult,
 } from '../shared/types';
 import { buildFailureDiagnostic } from '../shared/error-diagnostics';
 import { getSharedCopy } from '../shared/i18n';
@@ -68,6 +73,12 @@ interface ForgerMcpServerOptions {
   listCatalog: () => Promise<CatalogApp[]>;
   listInstalledApps: () => AppSummary[];
   checkUpdates: () => Promise<AppSummary[]>;
+  createLocalApp: (input: CreateLocalAppInput, locale?: string) => Promise<CreateLocalAppResult>;
+  recordCreatedApp?: (runId: string, createdApp: ChatCreatedAppRequest) => void;
+  registerQuestion: (
+    runId: string,
+    input: { chatId: string; questions: ChatQuestion[] },
+  ) => Promise<ChatQuestionRequest>;
   getRuntimeStatus: (appId: string) => RuntimeStatus;
   openApp: (appId: string) => Promise<OpenAppResult>;
   stopApp: (appId: string) => Promise<StopAppResult>;
@@ -121,7 +132,20 @@ interface MemoryAccessInput {
   caller: AgentMcpSession['caller'];
   appId?: string;
   appIds?: string[];
+  runId?: string;
 }
+
+const INTERNAL_MCP_TOOL_DEFINITIONS: AgentToolDefinition[] = [
+  {
+    id: 'forger_ask_question',
+    packageId: 'forger:internal',
+    name: 'Hacer preguntas',
+    description: 'Registra preguntas estructuradas para que la persona responda antes de continuar.',
+    category: 'consulta',
+    risk: 'bajo',
+    defaultRequiresApproval: false,
+  },
+];
 
 export class ForgerMcpServer {
   private readonly sessions = new Map<string, AgentMcpSession>();
@@ -362,7 +386,7 @@ export class ForgerMcpServer {
     const allowedOfficialActions = session.caller === 'app-agent'
       ? await this.options.listOfficialToolActionIdsForApp(session.appId)
       : null;
-    const tools = this.options.getToolDefinitions().filter((tool) => {
+    const tools = this.getAllToolDefinitions().filter((tool) => {
       if (!isOfficialTool(tool.id)) {
         return true;
       }
@@ -389,7 +413,14 @@ export class ForgerMcpServer {
   }
 
   private isAgentToolId(value: unknown): value is AgentToolId {
-    return typeof value === 'string' && this.options.getToolDefinitions().some((tool) => tool.id === value);
+    return typeof value === 'string' && this.getAllToolDefinitions().some((tool) => tool.id === value);
+  }
+
+  private getAllToolDefinitions(): AgentToolDefinition[] {
+    return [
+      ...this.options.getToolDefinitions(),
+      ...INTERNAL_MCP_TOOL_DEFINITIONS,
+    ];
   }
 
   private async ensureToolApproval(
@@ -397,12 +428,12 @@ export class ForgerMcpServer {
     tool: AgentToolDefinition,
   ): Promise<ToolApprovalResult> {
     const copy = getSharedCopy(session.locale).agentTools;
-    if (isMemoryTool(tool.id)) {
+    if (isMemoryTool(tool.id) || isInternalMcpTool(tool.id)) {
       return {
         approved: true,
         required: false,
         status: 'not_required',
-        userMessage: copy.memoryApprovalNotRequired,
+        userMessage: isMemoryTool(tool.id) ? copy.memoryApprovalNotRequired : copy.approvalNotRequired,
       };
     }
     if (session.caller === 'automation') {
@@ -490,7 +521,7 @@ export class ForgerMcpServer {
     args: Record<string, unknown>,
   ): Promise<unknown> {
     const copy = getSharedCopy(session.locale).agentTools;
-    const tool = this.options.getToolDefinitions().find((candidate) => candidate.id === toolId);
+    const tool = this.getAllToolDefinitions().find((candidate) => candidate.id === toolId);
     if (!tool) {
       await this.options.appendInstallLog('agent_tool:not_found', {
         appId: session.appId,
@@ -565,6 +596,62 @@ export class ForgerMcpServer {
       const result = { success: true, updates };
       await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
       return withToolAuthorization(result, approval);
+    }
+
+    if (toolId === 'forger_create_app') {
+      const input = parseCreateLocalAppToolInput(args);
+      if (!input) {
+        const result = {
+          success: false,
+          userMessage: 'Completa nombre, descripcion, proposito y prompt detallado para crear la app.',
+          technicalCode: 'create_app_input_invalid',
+        };
+        await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
+        return withToolAuthorization(result, approval);
+      }
+      const result = await this.options.createLocalApp(input, session.locale);
+      if (result.success && result.app?.appId) {
+        this.options.recordCreatedApp?.(session.runId, {
+          appId: result.app.appId,
+          name: result.app.name,
+          description: result.app.description,
+          purpose: result.app.purpose,
+          agentPrompt: input.agentPrompt,
+          ...(result.app.lookAndFeel ? { lookAndFeel: result.app.lookAndFeel } : {}),
+        });
+      }
+      await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
+      return withToolAuthorization(result, approval);
+    }
+
+    if (toolId === 'forger_ask_question') {
+      const input = parseQuestionToolInput(args);
+      if (!input) {
+        const result = {
+          success: false,
+          userMessage: 'La pregunta necesita un chat y entre una y cinco preguntas con dos o tres opciones.',
+          technicalCode: 'question_input_invalid',
+        };
+        await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
+        return result;
+      }
+      try {
+        const questionRequest = await this.options.registerQuestion(session.runId, input);
+        const result = { success: true, questionRequest };
+        await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
+        return result;
+      } catch (error) {
+        const code = error instanceof Error ? error.message : 'question_register_failed';
+        const result = {
+          success: false,
+          userMessage: code === 'active_question_exists'
+            ? 'Este chat ya tiene una pregunta pendiente.'
+            : 'No pudimos registrar la pregunta para este chat.',
+          technicalCode: code,
+        };
+        await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
+        return result;
+      }
     }
 
     if (toolId === 'forger_list_app_prompts') {
@@ -752,6 +839,66 @@ const isMemoryTool = (toolId: AgentToolId): boolean => toolId.startsWith('memory
 
 const isOfficialTool = (toolId: AgentToolId): boolean => toolId.startsWith('gmail.');
 
+const isInternalMcpTool = (toolId: AgentToolId): boolean => toolId === 'forger_ask_question';
+
+const cleanString = (value: unknown): string => typeof value === 'string' ? value.trim() : '';
+
+const parseCreateLocalAppToolInput = (args: Record<string, unknown>): Required<Pick<CreateLocalAppInput, 'name' | 'description' | 'purpose' | 'agentPrompt'>> & Pick<CreateLocalAppInput, 'lookAndFeel'> | null => {
+  const name = cleanString(args.name);
+  const description = cleanString(args.description);
+  const purpose = cleanString(args.purpose);
+  const agentPrompt = cleanString(args.agentPrompt);
+  const lookAndFeel = cleanString(args.lookAndFeel);
+  if (!name || !description || !purpose || !agentPrompt) {
+    return null;
+  }
+  return {
+    name,
+    description,
+    purpose,
+    agentPrompt,
+    ...(lookAndFeel ? { lookAndFeel } : {}),
+  };
+};
+
+const parseQuestionToolInput = (args: Record<string, unknown>): { chatId: string; questions: ChatQuestion[] } | null => {
+  const chatId = cleanString(args.chatId);
+  if (!chatId || !Array.isArray(args.questions) || args.questions.length < 1 || args.questions.length > 5) {
+    return null;
+  }
+
+  const questionIds = new Set<string>();
+  const questions: ChatQuestion[] = [];
+  for (const rawQuestion of args.questions) {
+    if (!isPlainRecord(rawQuestion)) {
+      return null;
+    }
+    const id = cleanString(rawQuestion.id);
+    const question = cleanString(rawQuestion.question);
+    if (!id || !question || questionIds.has(id) || !Array.isArray(rawQuestion.options) || rawQuestion.options.length < 2 || rawQuestion.options.length > 3) {
+      return null;
+    }
+    questionIds.add(id);
+    const optionIds = new Set<string>();
+    const options = [];
+    for (const rawOption of rawQuestion.options) {
+      if (!isPlainRecord(rawOption)) {
+        return null;
+      }
+      const optionId = cleanString(rawOption.id);
+      const label = cleanString(rawOption.label);
+      const description = cleanString(rawOption.description);
+      if (!optionId || !label || optionIds.has(optionId)) {
+        return null;
+      }
+      optionIds.add(optionId);
+      options.push({ id: optionId, label, ...(description ? { description } : {}) });
+    }
+    questions.push({ id, question, options });
+  }
+  return { chatId, questions };
+};
+
 const parsePromptReviewKind = (value: unknown): 'promptTemplate' | 'agent' | 'agentPrompt' | null => {
   if (value === 'promptTemplate' || value === 'agent' || value === 'agentPrompt') {
     return value;
@@ -810,6 +957,7 @@ const memoryAccess = (session: AgentMcpSession): MemoryAccessInput => ({
   caller: session.caller,
   appId: session.appId === 'forger' ? undefined : session.appId,
   appIds: session.appIds,
+  runId: session.runId,
 });
 
 const memoryErrorMessage = (error: unknown, locale?: string): string => {

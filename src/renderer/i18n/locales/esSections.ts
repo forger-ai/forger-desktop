@@ -1,8 +1,14 @@
 export const esSections = {
-    catalog: {
+    apps: {
       title: 'Apps',
-      subtitle: 'Abre apps instaladas o agrega apps personales listas para adaptar a tu forma de trabajar.',
-      empty: 'No hay apps visibles con los filtros actuales.',
+      subtitle: 'Tus apps instaladas aparecen aquí.',
+      empty: 'No tienes apps instaladas todavía.',
+      openCatalog: 'Ver catálogo',
+    },
+    catalog: {
+      title: 'Catálogo',
+      subtitle: 'Explora apps curadas por Forger disponibles para instalar.',
+      empty: 'No hay apps visibles en el catálogo con los filtros actuales.',
       refresh: 'Recargar apps',
       filtersLabel: 'Explorar por categoría',
       statusFilterLabel: 'Filtrar por: Estado',
@@ -25,10 +31,45 @@ export const esSections = {
       providerSelectorLabel: 'Proveedor del agente',
       modelSelectorLabel: 'Modelo',
       effortSelectorLabel: 'Nivel de thinking',
+      permissionSelectorLabel: 'Permisos de ejecución',
+      permissionNormalLabel: 'Permisos normales',
+      permissionElevatedLabel: 'Permisos elevados',
+      permissionNormalTooltip: 'Permisos normales para esta ejecución',
+      permissionElevatedTooltip: 'Permisos elevados activos para esta ejecución',
       lockedRuntimeTooltip: 'Esta conversación ya empezó con esta configuración de agente. Inicia una conversación nueva para cambiarla.',
       autoProviderLabel: (provider: string) => `Auto: ${provider}`,
       activeAppLabel: 'Conversando con:',
       inactiveApp: 'Chat libre',
+      modeLabel: 'Modo:',
+      modeLockedTooltip: 'Inicia una conversación nueva para cambiar esto.',
+      modeSelector: {
+        title: '¿Qué quieres hacer?',
+        subtitle: 'Elige cómo quieres usar esta conversación.',
+        label: 'Acción',
+        pendingChip: 'Elige una acción',
+        appLabel: 'App instalada',
+        appPlaceholder: 'Elige una app instalada',
+        noInstalledApps: 'No tienes apps instaladas todavía.',
+        chips: {
+          create_app: 'Creando app',
+          edit_app: (appName: string) => `Modificando: ${appName}`,
+          free_chat: 'Solo chatear',
+        },
+        options: {
+          create_app: {
+            title: 'Crear una app',
+            description: 'Describe lo que quieres construir.',
+          },
+          edit_app: {
+            title: 'Cambiar una app existente',
+            description: 'Elige una app instalada y pide cambios.',
+          },
+          free_chat: {
+            title: 'Solo chatear',
+            description: 'Conversa libremente con el agente.',
+          },
+        },
+      },
       inputPlaceholder: 'Puedes mencionar archivos cargados anteriormente usando @...',
       attachFiles: 'Adjuntar archivos',
       attachedFiles: 'Archivos por cargar',
@@ -64,6 +105,12 @@ export const esSections = {
       permissionDenied: 'Rechazado',
       permissionApprove: 'Aprobar',
       permissionDeny: 'Rechazar',
+      questionPrompt: 'Forger necesita un poco más de detalle para continuar.',
+      questionBadge: 'Pregunta',
+      questionAnswered: 'Respondido',
+      questionFreeTextPlaceholder: 'Otra cosa',
+      questionNext: 'Siguiente',
+      questionSubmit: 'Responder',
       codexThinking: 'El agente está pensando...',
       newConversationTitle: 'Conversación nueva',
       sendInProgress: 'Todavía estoy procesando tu mensaje anterior. Espera la respuesta o cancela esa solicitud.',
@@ -120,7 +167,7 @@ export const esSections = {
       userMessage: (name: string, description: string, purpose: string, lookAndFeel?: string) =>
         `Crear una app local privada llamada "${name}".\n\nDescripcion: ${description}\n\nQue hace:\n${purpose}${lookAndFeel ? `\n\nDecisiones de diseño:\n${lookAndFeel}` : ''}`,
       injectedPrompt: (name: string, description: string, purpose: string, lookAndFeel?: string) =>
-        `Crea y aclara una app local privada de Forger.\n\nNombre de la app: ${name}\nDescripcion corta: ${description}\nQue hace la app:\n${purpose}\n\nDireccion visual seleccionada:\n${lookAndFeel ?? 'No se eligio una direccion visual explicita. Propone 2 o 3 direcciones antes de definir la interfaz.'}\n\nRequisitos de la primera respuesta:\n- No repitas el prompt del usuario de vuelta palabra por palabra.\n- Haz una bajada de producto concisa y no tecnica.\n- Confirma alcance funcional, datos centrales, pantallas principales, flujo movil, riesgos, preguntas abiertas y criterios de aceptacion.\n- Valida la direccion visual elegida y explica como la paleta debe afectar la interfaz.\n- Recomienda dashboard + vistas por feature como estructura por defecto. Cada modelo o area principal debe tener su propia vista con listado, accion clara para crear, accion de eliminar y CRUD basico cuando corresponda.\n- Presenta esa estructura como recomendacion fuerte, pero ofrece explicitamente al usuario elegir otra estructura de pantallas o flujo.\n- No implementes todavia.\n\nRequisitos para la implementacion posterior:\n- Usa forger-frontend-product-patterns antes de crear o cambiar pantallas, y luego forger-tailwind-design-patterns, forger-tailwind-shadcn-patterns y forger-tailwind-responsive-frontend.\n- Sigue la convencion frontend feature-first: frontend/src/app para wiring raiz, frontend/src/features/<area> para pantallas de dominio y codigo local, frontend/src/components para UI compartida, frontend/src/components/ui para primitivas copiadas estilo shadcn, frontend/src/api para contratos backend, frontend/src/lib para helpers puros, frontend/src/i18n para copy y frontend/src/styles o frontend/src/design-system para tokens y diseno global. Mantén App.tsx delgado. No uses MUI en apps nuevas desde este skeleton salvo que el usuario pida explicitamente una migracion a MUI.\n- Las apps nuevas creadas desde Forger ya declaran localNetworkShare y remoteTunnel en true. Usa forger-remote-tunnel-wiring antes de cambiar flags de acceso en manifest, clientes API, uploads, downloads o wiring del entrypoint. No crees un tunel independiente.\n- promptTemplates deben usar id, title, description, arguments y prompt. Agents deben usar id, title, kind, description y initialPrompt o prompts.initial.body. Prefiere agents.prompts.initial/resume/steer con variables declaradas. Usa runtimeRecommendations solo cuando sea util: codex usa model y reasoningEffort; claude usa model y effort.\n- Gmail es la unica herramienta oficial de Forger hoy. Si hace falta, declarala en manifest.tools con objetos y solo las acciones necesarias: gmail.connection.status, gmail.search_messages, gmail.read_thread, gmail.read_attachment, gmail.send_email. No agregues OAuth de Gmail a appSecrets.\n- Guarda cada cambio aplicado como una version interna antes de terminar, y habla de versiones guardadas en vez de Git salvo que el usuario pida detalles tecnicos.`,
+        `Crea y aclara una app local privada de Forger.\n\nNombre de la app: ${name}\nDescripcion corta: ${description}\nQue hace la app:\n${purpose}\n\nDireccion visual seleccionada:\n${lookAndFeel ?? 'No se eligio una direccion visual explicita. Propone 2 o 3 direcciones antes de definir la interfaz.'}\n\nRequisitos de la primera respuesta:\n- No repitas el prompt del usuario de vuelta palabra por palabra.\n- Haz una bajada de producto concisa y no tecnica.\n- Confirma alcance funcional, datos centrales, pantallas principales, flujo movil, riesgos, preguntas abiertas y criterios de aceptacion.\n- Valida la direccion visual elegida y explica como la paleta debe afectar la interfaz.\n- Recomienda dashboard + vistas por feature como estructura por defecto. Cada modelo o area principal debe tener su propia vista con listado, accion clara para crear, accion de eliminar y CRUD basico cuando corresponda.\n- Presenta esa estructura como recomendacion fuerte, pero ofrece explicitamente al usuario elegir otra estructura de pantallas o flujo.\n- No implementes todavia.\n\nRequisitos para la implementacion posterior:\n- Usa forger-frontend-product-patterns antes de crear o cambiar pantallas, y luego forger-tailwind-design-patterns, forger-tailwind-shadcn-patterns y forger-tailwind-responsive-frontend.\n- Sigue la convencion frontend feature-first: frontend/src/app para wiring raiz, frontend/src/features/<area> para pantallas de dominio y codigo local, frontend/src/components para UI compartida, frontend/src/components/ui para primitivas copiadas estilo shadcn, frontend/src/api para contratos backend, frontend/src/lib para helpers puros, frontend/src/i18n para copy y frontend/src/styles o frontend/src/design-system para tokens y diseno global. Mantén App.tsx delgado. No uses MUI en apps nuevas desde este skeleton salvo que el usuario pida explicitamente una migracion a MUI.\n- Las apps nuevas creadas desde Forger ya declaran localNetworkShare y remoteTunnel en true. Usa forger-remote-tunnel-wiring antes de cambiar flags de acceso en manifest, clientes API, uploads, downloads o wiring del entrypoint. No crees un tunel independiente.\n- promptTemplates deben usar id, title, description, arguments y prompt. Agents deben usar id, title, kind, description y initialPrompt o prompts.initial.body. Prefiere agents.prompts.initial/resume/steer con variables declaradas. Usa runtimeRecommendations solo cuando sea util: codex usa model y reasoningEffort; claude usa modelos versionados y effort, recomendando claude-sonnet-4-6 por defecto. Declara permissionMode: "safe" salvo que exista una necesidad concreta de permisos elevados.\n- Gmail es la unica herramienta oficial de Forger hoy. Si hace falta, declarala en manifest.tools con objetos y solo las acciones necesarias: gmail.connection.status, gmail.search_messages, gmail.read_thread, gmail.read_attachment, gmail.send_email. No agregues OAuth de Gmail a appSecrets.\n- Guarda cada cambio aplicado como una version interna antes de terminar, y habla de versiones guardadas en vez de Git salvo que el usuario pida detalles tecnicos.`,
     },
     settings: {
       title: 'Configuración',

@@ -14,6 +14,8 @@ import {
 import { useMemo, type ReactNode } from 'react';
 import type { BackgroundTask, CatalogApp, ClaudeEffort, CodexReasoningEffort } from '@shared/types';
 import { AppShell } from '@renderer/components/AppShell';
+import { AppCard } from '@renderer/components/AppCard';
+import { AppsGrid } from '@renderer/components/AppsGrid';
 import { AppView } from '@renderer/views/AppView';
 import { AutomationsView } from '@renderer/views/AutomationsView';
 import { BackupsView } from '@renderer/views/BackupsView';
@@ -57,11 +59,10 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     setCurrentView,
     t,
     installedApps,
-    selectedAppId,
     selectedDataAppId,
     setSelectedDataAppId,
     getAppMeta,
-    handleSelectChatApp,
+    chatModeLabel,
     setCloudModalOpen,
     forgerAccountBusy,
     handleOpenFriendChat,
@@ -156,6 +157,8 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     setSelectedClaudeModel,
     selectedClaudeEffort,
     setSelectedClaudeEffort,
+    selectedChatPermissionMode,
+    setSelectedChatPermissionMode,
     chatBotPictureSrc,
     activeConversationRunActive,
     activeConversationRunId,
@@ -165,6 +168,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     setAgentProviderConfigOpen,
     handleStopChatRun,
     handleRespondPermission,
+    handleRespondQuestion,
     prepareConversationDiagnosticReport,
     automations,
     selectedAutomationId,
@@ -245,18 +249,17 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     claudeConfigOpen,
     agentProviderConfigOpen,
   } = controller;
-  const catalogViewApps = useMemo<CatalogApp[]>(() => {
-    const catalogAppIds = new Set(catalogApps.map((app: CatalogApp) => app.id));
-    const privateLocalApps = installedApps
-      .filter((app: CatalogApp) => !catalogAppIds.has(app.id))
-      .map((app: CatalogApp) => ({
-        ...app,
-        privateLocal: true,
-        catalogStatus: 'draft' as const,
-      }));
-
-    return [...catalogApps, ...privateLocalApps];
-  }, [catalogApps, installedApps]);
+  const installedViewApps = useMemo<CatalogApp[]>(
+    () =>
+      installedApps.filter((app: CatalogApp) =>
+        app.status === 'installed' ||
+        app.status === 'running' ||
+        app.status === 'error' ||
+        app.status === 'conflict' ||
+        app.status === 'installing'
+      ),
+    [installedApps],
+  );
 
   const tour = useForgerTour({
     currentView,
@@ -408,6 +411,91 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     </Stack>
   );
 
+  const renderInstalledAppsView = () => (
+    <Stack spacing={2.5}>
+      <Stack spacing={0.5}>
+        <Typography variant="h4">{t.sections.apps.title}</Typography>
+        <Typography color="text.secondary">{t.sections.apps.subtitle}</Typography>
+      </Stack>
+      {installedViewApps.length === 0 ? (
+        <Stack spacing={1.5} alignItems="flex-start">
+          <Typography color="text.secondary">{t.sections.apps.empty}</Typography>
+          <Button variant="outlined" onClick={() => setCurrentView('catalog')}>
+            {t.sections.apps.openCatalog}
+          </Button>
+        </Stack>
+      ) : (
+        <AppsGrid>
+          {installedViewApps.map((app: CatalogApp) => {
+            const meta = getAppMeta(app.id);
+            const installProgress = installProgressByApp[app.id];
+            const isInstalling = app.status === 'installing';
+            const isConflict = app.status === 'conflict';
+            const hasError = app.status === 'error';
+            const isOpening = app.status !== 'running' && openingAppIds.has(app.id);
+            const primaryAction = isConflict ? 'update' : hasError ? 'retry' : app.status === 'running' ? 'stop' : 'open';
+            const primaryActionLabel = isConflict
+              ? t.actions.resolveWithForger
+              : hasError
+                ? t.actions.retry
+                : app.status === 'running'
+                  ? t.actions.stop
+                  : isInstalling
+                    ? t.actions.installing
+                    : isOpening
+                      ? t.actions.opening
+                      : t.actions.open;
+
+            return (
+              <AppCard
+                key={app.id}
+                appName={meta.name}
+                iconUrl={app.iconUrl}
+                categoryLabel={getCategoryLabel(app.category)}
+                description={meta.description}
+                statusIndicatorLabel={app.status === 'running' ? t.actions.running : undefined}
+                primaryAction={primaryAction}
+                primaryActionLabel={primaryActionLabel}
+                primaryDisabled={isInstalling}
+                primaryLoading={isOpening}
+                installProgress={installProgress}
+                secondaryActionLabel={isConflict ? t.actions.restoreUserVersion : app.updateAvailable ? t.actions.update : undefined}
+                onSecondaryAction={
+                  isConflict
+                    ? () => void handleRestoreUserVersion(app.id)
+                    : app.updateAvailable
+                      ? () => void handleUpdate(app.id)
+                      : undefined
+                }
+                tertiaryActionLabel={!isInstalling ? t.actions.uninstall : undefined}
+                onTertiaryAction={!isInstalling ? () => void handleDeleteApp(app.id) : undefined}
+                onCardClick={() => void openAppDetails(app.id, 'apps')}
+                onPrimaryAction={() => {
+                  if (isInstalling) {
+                    return;
+                  }
+                  if (isConflict) {
+                    void handleResolveConflict(app.id);
+                    return;
+                  }
+                  if (hasError) {
+                    handleRetry(app.id);
+                    return;
+                  }
+                  if (app.status === 'running') {
+                    handleStop(app.id);
+                    return;
+                  }
+                  void handleOpen(app.id);
+                }}
+              />
+            );
+          })}
+        </AppsGrid>
+      )}
+    </Stack>
+  );
+
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
@@ -431,12 +519,10 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             }
           }}
           t={t}
-          chatApps={installedApps}
-          selectedChatAppId={selectedAppId}
+          chatModeLabel={chatModeLabel}
           dataApps={installedApps.filter((a: any) => a.status === 'installed' || a.status === 'running')}
           selectedDataAppId={selectedDataAppId}
           getAppMeta={getAppMeta}
-          onSelectChatApp={handleSelectChatApp}
           onSelectDataApp={setSelectedDataAppId}
           onOpenCloudModal={() => setCloudModalOpen(true)}
           account={forgerAccount}
@@ -458,9 +544,11 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
           desktopUpdateState={desktopUpdateState}
           advancedMode={advancedMode}
         >
+        {currentView === 'apps' ? renderInstalledAppsView() : null}
+
         {currentView === 'catalog' ? (
           <CatalogView
-            apps={catalogViewApps}
+            apps={catalogApps}
             openingAppIds={openingAppIds}
             filter={catalogFilter}
             onFilterChange={setCatalogFilter}
@@ -532,6 +620,10 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             messages={chatMessages}
             conversationTitle={t.sections.chat.introTitle}
             activeConversationId={activeConversationId}
+            chatMode={activeConversation?.mode}
+            targetAppId={activeConversation?.targetAppId}
+            installedApps={installedViewApps}
+            getAppMeta={getAppMeta}
             historyItems={chatHistoryItems}
             onOpenConversation={handleOpenConversation}
             onDeleteConversation={handleDeleteConversation}
@@ -539,7 +631,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             onNotifyForger={() => void prepareConversationDiagnosticReport()}
             inputValue={chatInput}
             onInputChange={setChatInput}
-            onSend={() => void handleSendMessage()}
+            onSend={(modeOverride) => void handleSendMessage(undefined, modeOverride)}
             pendingFiles={pendingChatFiles}
             mentionedFiles={mentionedChatFiles}
             availableFiles={forgerFiles}
@@ -569,6 +661,8 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             claudeEffortOptions={CLAUDE_EFFORT_OPTIONS}
             selectedClaudeEffort={activeConversation?.runtime?.provider === 'claude' ? activeConversation.runtime.effort as ClaudeEffort : selectedClaudeEffort}
             onSelectClaudeEffort={setSelectedClaudeEffort}
+            selectedPermissionMode={selectedChatPermissionMode}
+            onSelectPermissionMode={setSelectedChatPermissionMode}
             onOpenCodexUsageDashboard={() => void getDesktopApi().openCodexUsageDashboard()}
             assistantAvatarSrc={chatBotPictureSrc}
             isSending={activeConversationRunActive}
@@ -581,6 +675,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             onOpenApp={(appId) => void handleOpen(appId)}
             onStopRun={handleStopChatRun}
             onRespondPermission={handleRespondPermission}
+            onRespondQuestion={handleRespondQuestion}
           />
         ) : null}
 
@@ -749,6 +844,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             claudeModelOptions={CLAUDE_MODEL_OPTIONS}
             claudeEffortOptions={CLAUDE_EFFORT_OPTIONS}
             defaultAgentProvider={settings.defaultAgentProvider}
+            defaultChatPermissionMode={settings.defaultChatPermissionMode}
             agentDefaults={settings.agentDefaults}
             onAgentDefaultsChange={(input) => void handleAgentDefaultsChange(input)}
             onOpenCodexConfig={() => setCodexConfigOpen(true)}

@@ -14,6 +14,7 @@ import {
   CircularProgress,
   Divider,
   Drawer,
+  FormControl,
   IconButton,
   List,
   ListItem,
@@ -30,6 +31,10 @@ import {
 import type { AppDictionary } from '@renderer/i18n';
 import type {
   AgentProvider,
+  AgentPermissionMode,
+  AppSummary,
+  ChatMode,
+  ChatQuestionRequest,
   ClaudeEffort,
   CodexModelOption,
   CodexReasoningEffort,
@@ -39,10 +44,11 @@ import type {
   PermissionRequest,
   PickedChatFile,
 } from '@shared/types';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
 import { compactCategoryLabel, compactFileName } from './chat-view-helpers';
 import { ChatMessagesPanel } from './chat/ChatMessagesPanel';
+import { QuestionComposer, type QuestionAction } from './chat/QuestionComposer';
 
 export interface ChatMessage {
   id: string;
@@ -65,7 +71,25 @@ export interface ChatMessage {
     runId: string;
     request: PermissionRequest;
     status?: 'pending' | 'approved' | 'denied';
+  } | {
+    type: 'question';
+    runId: string;
+    request: ChatQuestionRequest;
+    status?: 'pending' | 'answered';
   };
+}
+
+export interface ChatQuestionAnswer {
+  questionId: string;
+  question: string;
+  optionId: string;
+  label: string;
+  description?: string;
+}
+
+export interface ChatQuestionResponse {
+  answers: ChatQuestionAnswer[];
+  freeText?: string;
 }
 
 export interface ConversationHistoryItem {
@@ -95,10 +119,14 @@ interface ChatViewProps {
   onDeleteConversation: (conversationId: string) => void;
   onStartNewConversation: () => void;
   onNotifyForger?: () => void;
+  chatMode?: ChatMode;
+  targetAppId?: string | null;
+  installedApps: AppSummary[];
+  getAppMeta: (appId: string) => { name: string; description: string };
   messages: ChatMessage[];
   inputValue: string;
   onInputChange: (value: string) => void;
-  onSend: () => void;
+  onSend: (modeOverride?: { mode: ChatMode; targetAppId?: string | null }) => void;
   pendingFiles: PickedChatFile[];
   mentionedFiles: ForgerFileRecord[];
   availableFiles: ForgerFileRecord[];
@@ -128,6 +156,8 @@ interface ChatViewProps {
   claudeEffortOptions: { label: string; value: ClaudeEffort }[];
   selectedClaudeEffort: ClaudeEffort;
   onSelectClaudeEffort: (effort: ClaudeEffort) => void;
+  selectedPermissionMode: AgentPermissionMode;
+  onSelectPermissionMode: (mode: AgentPermissionMode) => void;
   onOpenCodexUsageDashboard: () => void;
   assistantAvatarSrc: string;
   isSending: boolean;
@@ -140,6 +170,7 @@ interface ChatViewProps {
   onOpenApp: (appId: string) => void;
   onStopRun: () => Promise<void>;
   onRespondPermission: (runId: string, requestId: string, decision: 'allow' | 'deny') => Promise<void>;
+  onRespondQuestion: (runId: string, request: ChatQuestionRequest, response: ChatQuestionResponse) => Promise<void>;
 }
 
 export function ChatView({
@@ -151,6 +182,10 @@ export function ChatView({
   onDeleteConversation,
   onStartNewConversation,
   onNotifyForger,
+  chatMode,
+  targetAppId,
+  installedApps,
+  getAppMeta,
   messages,
   inputValue,
   onInputChange,
@@ -184,6 +219,8 @@ export function ChatView({
   claudeEffortOptions,
   selectedClaudeEffort,
   onSelectClaudeEffort,
+  selectedPermissionMode,
+  onSelectPermissionMode,
   onOpenCodexUsageDashboard,
   assistantAvatarSrc,
   isSending,
@@ -196,23 +233,50 @@ export function ChatView({
   onOpenApp,
   onStopRun,
   onRespondPermission,
+  onRespondQuestion,
 }: ChatViewProps) {
   const theme = useTheme();
   const [historyOpen, setHistoryOpen] = useState(false);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionMenuPosition, setMentionMenuPosition] = useState<{ left: number; bottom: number } | null>(null);
   const [respondingPermissionIds, setRespondingPermissionIds] = useState<Set<string>>(new Set());
+  const [respondingQuestionRequestIds, setRespondingQuestionRequestIds] = useState<Set<string>>(new Set());
   const [stopBusy, setStopBusy] = useState(false);
+  const [runtimeMenuOpen, setRuntimeMenuOpen] = useState(false);
+  const [draftMode, setDraftMode] = useState<ChatMode>('create_app');
+  const [draftTargetAppId, setDraftTargetAppId] = useState('');
   const inputRef = useRef<HTMLDivElement | null>(null);
   const composerAnchorRef = useRef<HTMLDivElement | null>(null);
   const messagesScrollRef = useRef<HTMLDivElement | null>(null);
   const shouldAutoScrollRef = useRef(true);
   const effectiveProvider = selectedProvider === 'auto' ? resolvedProviderForAuto : selectedProvider;
+  const activeQuestionAction = useMemo(
+    () => [...messages].reverse().find((message) => (
+      message.role === 'assistant'
+      && message.action?.type === 'question'
+      && (message.action.status ?? 'pending') === 'pending'
+    ))?.action as QuestionAction | undefined,
+    [messages],
+  );
   const matchingFiles = mentionQuery === null
     ? []
     : availableFiles
         .filter((file) => file.name.toLowerCase().includes(mentionQuery.toLowerCase()))
         .slice(0, 8);
+  const modeOptions = t.sections.chat.modeSelector.options;
+  const canStartMode = draftMode !== 'edit_app' || Boolean(draftTargetAppId);
+  const pendingModeOverride = chatMode ? undefined : { mode: draftMode, targetAppId: draftMode === 'edit_app' ? draftTargetAppId : null };
+  const canSendCurrentMode = Boolean(chatMode) || canStartMode;
+  const runtimeMenuHandlers = { onOpen: () => setRuntimeMenuOpen(true), onClose: () => setRuntimeMenuOpen(false) };
+  const activeModelOptions = effectiveProvider === 'claude' ? claudeModelOptions : modelOptions;
+  const activeModelValue = effectiveProvider === 'claude' ? selectedClaudeModel : selectedModel;
+  const activeEffortOptions = effectiveProvider === 'claude' ? claudeEffortOptions : reasoningOptions;
+  const activeEffortValue = effectiveProvider === 'claude' ? selectedClaudeEffort : selectedReasoningEffort;
+
+  useEffect(() => {
+    setDraftMode('create_app');
+    setDraftTargetAppId(targetAppId ?? '');
+  }, [activeConversationId, targetAppId]);
 
   const respondToPermission = (runId: string, requestId: string, decision: 'allow' | 'deny') => {
     const key = `${runId}:${requestId}`;
@@ -221,6 +285,20 @@ export function ChatView({
     }
     setRespondingPermissionIds((current) => new Set(current).add(key));
     void onRespondPermission(runId, requestId, decision);
+  };
+
+  const respondToQuestion = (runId: string, request: ChatQuestionRequest, response: ChatQuestionResponse) => {
+    if (respondingQuestionRequestIds.has(request.requestId)) {
+      return;
+    }
+    setRespondingQuestionRequestIds((current) => new Set(current).add(request.requestId));
+    void onRespondQuestion(runId, request, response).finally(() => {
+      setRespondingQuestionRequestIds((current) => {
+        const next = new Set(current);
+        next.delete(request.requestId);
+        return next;
+      });
+    });
   };
 
   const handleStopRun = async () => {
@@ -233,6 +311,13 @@ export function ChatView({
     } finally {
       setStopBusy(false);
     }
+  };
+
+  const sendComposerMessage = () => {
+    if (!canSendCurrentMode) {
+      return;
+    }
+    onSend(pendingModeOverride);
   };
 
   const serializeComposerText = () => {
@@ -414,14 +499,14 @@ export function ChatView({
   } as const;
 
   useEffect(() => {
-    if (!codexConfigured || isSending) {
+    if (!codexConfigured) {
       return;
     }
     const timer = window.setTimeout(() => {
       inputRef.current?.focus();
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [activeConversationId, codexConfigured, isSending]);
+  }, [activeConversationId, codexConfigured]);
 
   useEffect(() => {
     const root = inputRef.current;
@@ -554,24 +639,119 @@ export function ChatView({
         </Drawer>
       </Box>
 
-      <ChatMessagesPanel
-        messages={messages}
-        conversationTitle={conversationTitle}
-        codexConfigured={codexConfigured}
-        assistantAvatarSrc={assistantAvatarSrc}
-        isSending={isResponding}
-        progressLines={progressLines}
-        openingAppIds={openingAppIds}
-        respondingPermissionIds={respondingPermissionIds}
-        scrollRef={messagesScrollRef}
-        t={t}
-        onConfigureCodex={onConfigureCodex}
-        onOpenApp={onOpenApp}
-        onRespondPermission={respondToPermission}
-        onAutoScrollChange={(shouldAutoScroll) => {
-          shouldAutoScrollRef.current = shouldAutoScroll;
-        }}
-      />
+      {!chatMode ? (
+        <Box
+          sx={{
+            flex: 1,
+            minHeight: 0,
+            display: 'grid',
+            placeItems: 'center',
+            px: 2,
+          }}
+        >
+          <Box
+            sx={{
+              width: 'min(560px, 100%)',
+            }}
+          >
+            <Stack spacing={2.25}>
+              <Stack spacing={0.5} textAlign="center">
+                <Typography variant="h5">{t.sections.chat.modeSelector.title}</Typography>
+                <Typography variant="body2" color="text.secondary">
+                  {t.sections.chat.modeSelector.subtitle}
+                </Typography>
+              </Stack>
+
+              <FormControl fullWidth>
+                <Select
+                  labelId="chat-mode-select-label"
+                  inputProps={{ 'aria-label': t.sections.chat.modeSelector.label }}
+                  value={draftMode}
+                  onChange={(event) => setDraftMode(event.target.value as ChatMode)}
+                  renderValue={(value) => modeOptions[value as ChatMode].title}
+                >
+                  {(['create_app', 'edit_app', 'free_chat'] as ChatMode[]).map((mode) => (
+                    <MenuItem key={mode} value={mode}>
+                      <Stack spacing={0.25}>
+                        <Typography variant="body2" fontWeight={700}>
+                          {modeOptions[mode].title}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          {modeOptions[mode].description}
+                        </Typography>
+                      </Stack>
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+
+              {draftMode === 'edit_app' ? (
+                installedApps.length > 0 ? (
+                  <FormControl fullWidth>
+                    <Typography
+                      id="chat-target-app-select-label"
+                      variant="caption"
+                      color="text.secondary"
+                      sx={{ mb: 0.75, fontWeight: 600 }}
+                    >
+                      {t.sections.chat.modeSelector.appLabel}
+                    </Typography>
+                    <Select
+                      labelId="chat-target-app-select-label"
+                      inputProps={{ 'aria-label': t.sections.chat.modeSelector.appLabel }}
+                      value={draftTargetAppId}
+                      onChange={(event) => setDraftTargetAppId(event.target.value)}
+                      displayEmpty
+                      renderValue={(value) => {
+                        if (!value) {
+                          return <Typography color="text.secondary">{t.sections.chat.modeSelector.appPlaceholder}</Typography>;
+                        }
+                        return getAppMeta(value).name;
+                      }}
+                    >
+                      {installedApps.map((app) => (
+                        <MenuItem key={app.id} value={app.id}>
+                          <Stack spacing={0.25}>
+                            <Typography variant="body2">{getAppMeta(app.id).name}</Typography>
+                            <Typography variant="caption" color="text.secondary">
+                              {app.status === 'running' ? t.actions.running : t.actions.installed}
+                            </Typography>
+                          </Stack>
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                ) : (
+                  <Stack spacing={1.25} alignItems="flex-start">
+                    <Typography variant="body2" color="text.secondary">
+                      {t.sections.chat.modeSelector.noInstalledApps}
+                    </Typography>
+                  </Stack>
+                )
+              ) : null}
+            </Stack>
+          </Box>
+        </Box>
+      ) : (
+        <ChatMessagesPanel
+          messages={messages}
+          conversationTitle={conversationTitle}
+          codexConfigured={codexConfigured}
+          assistantAvatarSrc={assistantAvatarSrc}
+          isSending={isResponding}
+          progressLines={progressLines}
+          openingAppIds={openingAppIds}
+          respondingPermissionIds={respondingPermissionIds}
+          scrollRef={messagesScrollRef}
+          t={t}
+          onConfigureCodex={onConfigureCodex}
+          onOpenApp={onOpenApp}
+          onRespondPermission={respondToPermission}
+          onAutoScrollChange={(shouldAutoScroll) => {
+            shouldAutoScrollRef.current = shouldAutoScroll;
+          }}
+        />
+      )}
 
       <Stack spacing={1}>
         <Box ref={composerAnchorRef} sx={{ position: 'relative' }}>
@@ -586,131 +766,140 @@ export function ChatView({
               borderColor: theme.palette.divider,
             }}
           >
-            <Box
-              onClick={() => inputRef.current?.focus()}
-              sx={{
-                minHeight: 92,
-                borderRadius: 1.5,
-                px: 0.4,
-                py: 0.25,
-                cursor: 'text',
-              }}
-            >
-              {pendingFiles.length > 0 ? (
-                <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" sx={{ mb: 0.5 }}>
-                  {pendingFiles.map((file) => (
-                    <Chip
-                      key={file.sourcePath}
-                      label={compactFileName(file.name)}
-                      size="small"
-                      onDelete={() => onRemovePendingFile(file.sourcePath)}
-                      deleteIcon={<CloseRounded />}
-                      sx={{
-                        height: 24,
-                        maxWidth: 188,
-                        borderRadius: 1.25,
-                        fontSize: 12,
-                        '& .MuiChip-label': {
-                          pl: 1,
-                          pr: 0.25,
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                        },
-                        '& .MuiChip-deleteIcon': { fontSize: 16 },
-                      }}
-                    />
-                  ))}
-                </Stack>
-              ) : null}
-
-              <Box
-                component="div"
-                ref={inputRef}
-                contentEditable={!isSending && codexConfigured}
-                suppressContentEditableWarning
-                role="textbox"
-                aria-label={t.sections.chat.inputPlaceholder}
-                data-placeholder={t.sections.chat.inputPlaceholder}
-                onInput={syncComposerText}
-                onPaste={handlePaste}
-                onClick={(event) => {
-                  const removeTarget = (event.target as HTMLElement).closest<HTMLElement>('[data-file-chip-remove]');
-                  const chip = removeTarget?.closest<HTMLElement>('[data-file-chip-id]');
-                  const fileId = chip?.dataset.fileChipId;
-                  if (chip && fileId) {
-                    chip.remove();
-                    onRemoveMentionedFile(fileId);
-                    syncComposerText();
-                  }
-                }}
-                onKeyDown={(event) => {
-                  if (isSending || !codexConfigured) {
-                    return;
-                  }
-                  if (event.key === 'Enter' && !event.shiftKey) {
-                    event.preventDefault();
-                    if (serializeComposerText().trim() || pendingFiles.length > 0 || mentionedFiles.length > 0) {
-                      onSend();
-                    }
-                  }
-                }}
-                sx={{
-                  width: '100%',
-                  minHeight: 56,
-                  maxHeight: 140,
-                  overflowY: 'auto',
-                  border: 0,
-                  outline: 0,
-                  bgcolor: 'transparent',
-                  color: 'text.primary',
-                  font: 'inherit',
-                  fontSize: theme.typography.body1.fontSize,
-                  lineHeight: 1.45,
-                  p: 0.35,
-                  whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-word',
-                  '&:empty::before': {
-                    content: 'attr(data-placeholder)',
-                    color: theme.palette.text.disabled,
-                    pointerEvents: 'none',
-                  },
-                  '& .forger-inline-file-chip': {
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    maxWidth: 190,
-                    height: 24,
-                    mx: 0.25,
-                    px: 0.75,
-                    borderRadius: 1.25,
-                    bgcolor: 'rgba(124,58,237,0.16)',
-                    border: `1px solid ${theme.palette.secondary.main}`,
-                    color: theme.palette.secondary.main,
-                    fontSize: 12,
-                    fontWeight: 600,
-                    lineHeight: 1,
-                    verticalAlign: 'baseline',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  },
-                  '& .forger-inline-file-chip-remove': {
-                    ml: 0.5,
-                    color: theme.palette.text.secondary,
-                    cursor: 'pointer',
-                    fontSize: 13,
-                    lineHeight: '14px',
-                    height: 14,
-                    width: 14,
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    alignSelf: 'center',
-                  },
-                }}
+            {activeQuestionAction ? (
+              <QuestionComposer
+                action={activeQuestionAction}
+                isResponding={respondingQuestionRequestIds.has(activeQuestionAction.request.requestId)}
+                t={t}
+                onRespondQuestion={respondToQuestion}
               />
-            </Box>
+            ) : (
+              <>
+                <Box
+                  onClick={() => inputRef.current?.focus()}
+                  sx={{
+                    minHeight: 92,
+                    borderRadius: 1.5,
+                    px: 0.4,
+                    py: 0.25,
+                    cursor: 'text',
+                  }}
+                >
+                  {pendingFiles.length > 0 ? (
+                    <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" sx={{ mb: 0.5 }}>
+                      {pendingFiles.map((file) => (
+                        <Chip
+                          key={file.sourcePath}
+                          label={compactFileName(file.name)}
+                          size="small"
+                          onDelete={() => onRemovePendingFile(file.sourcePath)}
+                          deleteIcon={<CloseRounded />}
+                          sx={{
+                            height: 24,
+                            maxWidth: 188,
+                            borderRadius: 1.25,
+                            fontSize: 12,
+                            '& .MuiChip-label': {
+                              pl: 1,
+                              pr: 0.25,
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                            },
+                            '& .MuiChip-deleteIcon': { fontSize: 16 },
+                          }}
+                        />
+                      ))}
+                    </Stack>
+                  ) : null}
 
-            <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1}>
+                  <Box
+                    component="div"
+                    ref={inputRef}
+                    contentEditable={codexConfigured}
+                    suppressContentEditableWarning
+                    role="textbox"
+                    aria-label={t.sections.chat.inputPlaceholder}
+                    data-placeholder={t.sections.chat.inputPlaceholder}
+                    onInput={syncComposerText}
+                    onPaste={handlePaste}
+                    onClick={(event) => {
+                      const removeTarget = (event.target as HTMLElement).closest<HTMLElement>('[data-file-chip-remove]');
+                      const chip = removeTarget?.closest<HTMLElement>('[data-file-chip-id]');
+                      const fileId = chip?.dataset.fileChipId;
+                      if (chip && fileId) {
+                        chip.remove();
+                        onRemoveMentionedFile(fileId);
+                        syncComposerText();
+                      }
+                    }}
+                    onKeyDown={(event) => {
+                      if (!codexConfigured) {
+                        return;
+                      }
+                      if (event.key === 'Enter' && !event.shiftKey) {
+                        event.preventDefault();
+                        if (!isSending && canSendCurrentMode && (serializeComposerText().trim() || pendingFiles.length > 0 || mentionedFiles.length > 0)) {
+                          sendComposerMessage();
+                        }
+                      }
+                    }}
+                    sx={{
+                      width: '100%',
+                      minHeight: 56,
+                      maxHeight: 140,
+                      overflowY: 'auto',
+                      border: 0,
+                      outline: 0,
+                      bgcolor: 'transparent',
+                      color: 'text.primary',
+                      font: 'inherit',
+                      fontSize: theme.typography.body1.fontSize,
+                      lineHeight: 1.45,
+                      p: 0.35,
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word',
+                      '&:empty::before': {
+                        content: 'attr(data-placeholder)',
+                        color: theme.palette.text.disabled,
+                        pointerEvents: 'none',
+                      },
+                      '& .forger-inline-file-chip': {
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        maxWidth: 190,
+                        height: 24,
+                        mx: 0.25,
+                        px: 0.75,
+                        borderRadius: 1.25,
+                        bgcolor: 'rgba(124,58,237,0.16)',
+                        border: `1px solid ${theme.palette.secondary.main}`,
+                        color: theme.palette.secondary.main,
+                        fontSize: 12,
+                        fontWeight: 600,
+                        lineHeight: 1,
+                        verticalAlign: 'baseline',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      },
+                      '& .forger-inline-file-chip-remove': {
+                        ml: 0.5,
+                        color: theme.palette.text.secondary,
+                        cursor: 'pointer',
+                        fontSize: 13,
+                        lineHeight: '14px',
+                        height: 14,
+                        width: 14,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        alignSelf: 'center',
+                      },
+                    }}
+                  />
+                </Box>
+
+                <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1}>
               <Stack direction="row" spacing={0.75} alignItems="center" sx={{ minWidth: 0 }}>
                 <Tooltip title={t.sections.chat.attachFiles}>
                   <span>
@@ -759,12 +948,13 @@ export function ChatView({
                     </IconButton>
                   </span>
                 </Tooltip>
-                <Tooltip title={providerLocked ? t.sections.chat.lockedRuntimeTooltip : t.sections.chat.providerSelectorLabel}>
+                <Tooltip title={runtimeMenuOpen ? '' : providerLocked ? t.sections.chat.lockedRuntimeTooltip : t.sections.chat.providerSelectorLabel}>
                   <span>
                     <Select
                       size="small"
                       value={selectedProvider}
                       onChange={(event) => onSelectProvider(event.target.value as AgentProvider | 'auto')}
+                      {...runtimeMenuHandlers}
                       disabled={providerLocked || isSending}
                       MenuProps={compactSelectMenuProps}
                       inputProps={{ 'aria-label': t.sections.chat.providerSelectorLabel }}
@@ -785,25 +975,55 @@ export function ChatView({
                     </Select>
                   </span>
                 </Tooltip>
-                <Tooltip title={providerLocked ? t.sections.chat.lockedRuntimeTooltip : t.sections.chat.modelSelectorLabel}>
+                <Tooltip title={runtimeMenuOpen ? '' : selectedPermissionMode === 'unsafe' ? t.sections.chat.permissionElevatedTooltip : t.sections.chat.permissionNormalTooltip}>
                   <span>
                     <Select
                       size="small"
-                      value={selectedModel}
-                      onChange={(event) => onSelectModel(event.target.value)}
-                      disabled={effectiveProvider !== 'codex' || providerLocked || isSending}
+                      value={selectedPermissionMode}
+                      onChange={(event) => onSelectPermissionMode(event.target.value as AgentPermissionMode)}
+                      {...runtimeMenuHandlers}
+                      disabled={isSending}
+                      MenuProps={compactSelectMenuProps}
+                      inputProps={{ 'aria-label': t.sections.chat.permissionSelectorLabel }}
+                      sx={{
+                        height: 28,
+                        minWidth: 132,
+                        fontSize: 12,
+                        borderRadius: 1.25,
+                        '& .MuiSelect-select': { py: 0.35, pl: 1, pr: '26px !important' },
+                      }}
+                    >
+                      <MenuItem value="safe">{t.sections.chat.permissionNormalLabel}</MenuItem>
+                      <MenuItem value="unsafe">{t.sections.chat.permissionElevatedLabel}</MenuItem>
+                    </Select>
+                  </span>
+                </Tooltip>
+                <Tooltip title={runtimeMenuOpen ? '' : providerLocked ? t.sections.chat.lockedRuntimeTooltip : t.sections.chat.modelSelectorLabel}>
+                  <span>
+                    <Select
+                      size="small"
+                      value={activeModelValue}
+                      onChange={(event) => {
+                        const model = event.target.value;
+                        if (effectiveProvider === 'claude') {
+                          onSelectClaudeModel(model);
+                          return;
+                        }
+                        onSelectModel(model);
+                      }}
+                      {...runtimeMenuHandlers}
+                      disabled={providerLocked || isSending}
                       MenuProps={compactSelectMenuProps}
                       inputProps={{ 'aria-label': t.sections.chat.modelSelectorLabel }}
                       sx={{
                         height: 28,
-                        minWidth: 104,
+                        minWidth: 112,
                         fontSize: 12,
                         borderRadius: 1.25,
                         '& .MuiSelect-select': { py: 0.35, pl: 1, pr: '26px !important' },
-                        display: effectiveProvider === 'codex' ? 'inline-flex' : 'none',
                       }}
                     >
-                      {modelOptions.map((option) => (
+                      {activeModelOptions.map((option) => (
                         <MenuItem key={option.realModelName} value={option.realModelName}>
                           {option.displayModelName}
                         </MenuItem>
@@ -811,13 +1031,21 @@ export function ChatView({
                     </Select>
                   </span>
                 </Tooltip>
-                <Tooltip title={providerLocked ? t.sections.chat.lockedRuntimeTooltip : t.sections.chat.effortSelectorLabel}>
+                <Tooltip title={runtimeMenuOpen ? '' : providerLocked ? t.sections.chat.lockedRuntimeTooltip : t.sections.chat.effortSelectorLabel}>
                   <span>
                     <Select
                       size="small"
-                      value={selectedReasoningEffort}
-                      onChange={(event) => onSelectReasoningEffort(event.target.value as CodexReasoningEffort)}
-                      disabled={effectiveProvider !== 'codex' || providerLocked || isSending}
+                      value={activeEffortValue}
+                      onChange={(event) => {
+                        const effort = event.target.value;
+                        if (effectiveProvider === 'claude') {
+                          onSelectClaudeEffort(effort as ClaudeEffort);
+                          return;
+                        }
+                        onSelectReasoningEffort(effort as CodexReasoningEffort);
+                      }}
+                      {...runtimeMenuHandlers}
+                      disabled={providerLocked || isSending}
                       MenuProps={compactSelectMenuProps}
                       inputProps={{ 'aria-label': t.sections.chat.effortSelectorLabel }}
                       sx={{
@@ -826,62 +1054,9 @@ export function ChatView({
                         fontSize: 12,
                         borderRadius: 1.25,
                         '& .MuiSelect-select': { py: 0.35, pl: 1, pr: '26px !important' },
-                        display: effectiveProvider === 'codex' ? 'inline-flex' : 'none',
                       }}
                     >
-                      {reasoningOptions.map((option) => (
-                        <MenuItem key={option.value} value={option.value}>
-                          {option.label}
-                        </MenuItem>
-                      ))}
-                    </Select>
-                  </span>
-                </Tooltip>
-                <Tooltip title={providerLocked ? t.sections.chat.lockedRuntimeTooltip : t.sections.chat.modelSelectorLabel}>
-                  <span>
-                    <Select
-                      size="small"
-                      value={selectedClaudeModel}
-                      onChange={(event) => onSelectClaudeModel(event.target.value)}
-                      disabled={effectiveProvider !== 'claude' || providerLocked || isSending}
-                      MenuProps={compactSelectMenuProps}
-                      inputProps={{ 'aria-label': t.sections.chat.modelSelectorLabel }}
-                      sx={{
-                        height: 28,
-                        minWidth: 90,
-                        fontSize: 12,
-                        borderRadius: 1.25,
-                        '& .MuiSelect-select': { py: 0.35, pl: 1, pr: '26px !important' },
-                        display: effectiveProvider === 'claude' ? 'inline-flex' : 'none',
-                      }}
-                    >
-                      {claudeModelOptions.map((option) => (
-                        <MenuItem key={option.realModelName} value={option.realModelName}>
-                          {option.displayModelName}
-                        </MenuItem>
-                      ))}
-                    </Select>
-                  </span>
-                </Tooltip>
-                <Tooltip title={providerLocked ? t.sections.chat.lockedRuntimeTooltip : t.sections.chat.effortSelectorLabel}>
-                  <span>
-                    <Select
-                      size="small"
-                      value={selectedClaudeEffort}
-                      onChange={(event) => onSelectClaudeEffort(event.target.value as ClaudeEffort)}
-                      disabled={effectiveProvider !== 'claude' || providerLocked || isSending}
-                      MenuProps={compactSelectMenuProps}
-                      inputProps={{ 'aria-label': t.sections.chat.effortSelectorLabel }}
-                      sx={{
-                        height: 28,
-                        minWidth: 82,
-                        fontSize: 12,
-                        borderRadius: 1.25,
-                        '& .MuiSelect-select': { py: 0.35, pl: 1, pr: '26px !important' },
-                        display: effectiveProvider === 'claude' ? 'inline-flex' : 'none',
-                      }}
-                    >
-                      {claudeEffortOptions.map((option) => (
+                      {activeEffortOptions.map((option) => (
                         <MenuItem key={option.value} value={option.value}>
                           {option.label}
                         </MenuItem>
@@ -891,9 +1066,11 @@ export function ChatView({
                 </Tooltip>
               </Stack>
             </Stack>
+              </>
+            )}
           </Paper>
 
-          {mentionQuery !== null ? (
+          {!activeQuestionAction && mentionQuery !== null ? (
             <Paper
               elevation={8}
               sx={{
@@ -956,16 +1133,18 @@ export function ChatView({
                 {t.sections.chat.stopResponse}
               </Button>
             ) : null}
-            <Button
-              variant="contained"
-              size="small"
-              endIcon={isResponding ? <CircularProgress size={14} color="inherit" /> : <SendRounded fontSize="small" />}
-              onClick={onSend}
-              disabled={isSending || !codexConfigured || (!inputValue.trim() && pendingFiles.length === 0 && mentionedFiles.length === 0)}
-              sx={{ minHeight: 32, px: 1.5 }}
-            >
-              {t.sections.chat.send}
-            </Button>
+            {!activeQuestionAction ? (
+              <Button
+                variant="contained"
+                size="small"
+                endIcon={isResponding ? <CircularProgress size={14} color="inherit" /> : <SendRounded fontSize="small" />}
+                onClick={sendComposerMessage}
+                disabled={isSending || !codexConfigured || !canSendCurrentMode || (!inputValue.trim() && pendingFiles.length === 0 && mentionedFiles.length === 0)}
+                sx={{ minHeight: 32, px: 1.5 }}
+              >
+                {t.sections.chat.send}
+              </Button>
+            ) : null}
           </Stack>
         </Stack>
       </Stack>

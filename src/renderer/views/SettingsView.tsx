@@ -54,6 +54,7 @@ import type {
   MemoryEntry,
   MemoryKind,
   MemoryScope,
+  MemoryStatus,
   MemoryUpdateInput,
   CodexModelOption,
   CodexReasoningEffort,
@@ -88,6 +89,7 @@ interface SettingsViewProps {
   claudeModelOptions: Array<{ displayModelName: string; realModelName: string }>;
   claudeEffortOptions: { label: string; value: ClaudeEffort }[];
   defaultAgentProvider: Settings['defaultAgentProvider'];
+  defaultChatPermissionMode: Settings['defaultChatPermissionMode'];
   agentDefaults: Settings['agentDefaults'];
   onAgentDefaultsChange: (input: UpdateAgentDefaultsInput) => void;
   onOpenCodexConfig: () => void;
@@ -122,17 +124,24 @@ interface MemoryFormState {
   scope: MemoryScope;
   appId: string;
   kind: MemoryKind;
-  text: string;
+  title: string;
+  body: string;
+  readWhen: string;
+  status: MemoryStatus;
 }
 
 const EMPTY_MEMORY_FORM: MemoryFormState = {
   scope: 'global',
   appId: '',
   kind: 'preference',
-  text: '',
+  title: '',
+  body: '',
+  readWhen: '',
+  status: 'active',
 };
 
 const MEMORY_KINDS: MemoryKind[] = ['preference', 'profile', 'workflow', 'constraint', 'fact'];
+const MEMORY_STATUSES: MemoryStatus[] = ['active', 'candidate', 'archived'];
 
 export function SettingsView({
   codexAuthBusy,
@@ -155,6 +164,7 @@ export function SettingsView({
   claudeModelOptions,
   claudeEffortOptions,
   defaultAgentProvider,
+  defaultChatPermissionMode,
   agentDefaults,
   onAgentDefaultsChange,
   onOpenCodexConfig,
@@ -207,7 +217,7 @@ export function SettingsView({
     return [...groups.entries()];
   }, [memories]);
   const memoryFormAppRequired = memoryForm.scope === 'app' && !memoryForm.appId;
-  const memoryFormInvalid = !memoryForm.text.trim() || memoryFormAppRequired;
+  const memoryFormInvalid = !memoryForm.body.trim() || memoryFormAppRequired;
   const advancedLinks: Array<{ view: View; label: string; description: string; icon: ReactNode }> = [
     { view: 'tools', label: t.nav.tools, description: t.settings.advancedSurfaces.tools, icon: <ConstructionRounded /> },
     { view: 'files', label: t.nav.files, description: t.settings.advancedSurfaces.files, icon: <InsertDriveFileRounded /> },
@@ -225,7 +235,10 @@ export function SettingsView({
       scope: memoryForm.scope,
       appId: memoryForm.scope === 'app' ? memoryForm.appId : undefined,
       kind: memoryForm.kind,
-      text: memoryForm.text,
+      title: memoryForm.title,
+      body: memoryForm.body,
+      readWhen: memoryForm.readWhen,
+      status: memoryForm.status,
     };
     if (memoryForm.id) {
       onUpdateMemory({ id: memoryForm.id, ...payload });
@@ -240,7 +253,10 @@ export function SettingsView({
       scope: entry.scope,
       appId: entry.appId ?? '',
       kind: entry.kind,
-      text: entry.text,
+      title: entry.title,
+      body: entry.body,
+      readWhen: entry.readWhen,
+      status: entry.status,
     });
     setMemoryDialogOpen(true);
   };
@@ -492,16 +508,16 @@ export function SettingsView({
             <Divider />
             <Stack spacing={1}>
               <Stack spacing={0.25}>
-                <Typography variant="subtitle2">Defaults de agentes</Typography>
+                <Typography variant="subtitle2">{t.settings.agentDefaultsTitle}</Typography>
                 <Typography variant="body2" color="text.secondary">
-                  Elige el proveedor por defecto y los modelos que se usan al crear nuevos chats, prompts o automatizaciones sin override.
+                  {t.settings.agentDefaultsDescription}
                 </Typography>
               </Stack>
               <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
                 <FormControl size="small" fullWidth>
-                  <InputLabel>Proveedor</InputLabel>
+                  <InputLabel>{t.settings.agentDefaultProvider}</InputLabel>
                   <Select
-                    label="Proveedor"
+                    label={t.settings.agentDefaultProvider}
                     value={defaultAgentProvider}
                     onChange={(event) =>
                       onAgentDefaultsChange({
@@ -514,6 +530,22 @@ export function SettingsView({
                         {option.label}
                       </MenuItem>
                     ))}
+                  </Select>
+                </FormControl>
+                <FormControl size="small" fullWidth>
+                  <InputLabel>{t.settings.agentDefaultChatPermissions}</InputLabel>
+                  <Select
+                    label={t.settings.agentDefaultChatPermissions}
+                    value={defaultChatPermissionMode}
+                    onChange={(event) =>
+                      onAgentDefaultsChange({
+                        defaultProvider: defaultAgentProvider,
+                        defaultChatPermissionMode: event.target.value as Settings['defaultChatPermissionMode'],
+                      })
+                    }
+                  >
+                    <MenuItem value="safe">{t.sections.chat.permissionNormalLabel}</MenuItem>
+                    <MenuItem value="unsafe">{t.sections.chat.permissionElevatedLabel}</MenuItem>
                   </Select>
                 </FormControl>
                 <FormControl size="small" fullWidth>
@@ -870,11 +902,42 @@ export function SettingsView({
                         ))}
                       </Select>
                     </FormControl>
+                    <FormControl fullWidth size="small">
+                      <InputLabel>{t.settings.memoryStatus}</InputLabel>
+                      <Select
+                        label={t.settings.memoryStatus}
+                        value={memoryForm.status}
+                        onChange={(event) => setMemoryForm((current) => ({
+                          ...current,
+                          status: event.target.value as MemoryStatus,
+                        }))}
+                      >
+                        {MEMORY_STATUSES.map((status) => (
+                          <MenuItem value={status} key={status}>{t.settings.memoryStatuses[status]}</MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
                   </Stack>
                   <TextField
-                    label={t.settings.memoryText}
-                    value={memoryForm.text}
-                    onChange={(event) => setMemoryForm((current) => ({ ...current, text: event.target.value }))}
+                    label={t.settings.memoryTitleLabel}
+                    value={memoryForm.title}
+                    onChange={(event) => setMemoryForm((current) => ({ ...current, title: event.target.value }))}
+                    fullWidth
+                    size="small"
+                  />
+                  <TextField
+                    label={t.settings.memoryReadWhen}
+                    helperText={t.settings.memoryReadWhenHelp}
+                    value={memoryForm.readWhen}
+                    onChange={(event) => setMemoryForm((current) => ({ ...current, readWhen: event.target.value }))}
+                    multiline
+                    minRows={2}
+                    fullWidth
+                  />
+                  <TextField
+                    label={t.settings.memoryBody}
+                    value={memoryForm.body}
+                    onChange={(event) => setMemoryForm((current) => ({ ...current, body: event.target.value }))}
                     multiline
                     minRows={3}
                     fullWidth
@@ -956,13 +1019,29 @@ function MemoryGroup({
             sx={{ p: 1.25 }}
           >
             <Stack spacing={0.5}>
-              <Stack direction="row" spacing={1} alignItems="center">
+              <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
                 <Chip size="small" label={t.settings.memoryKinds[entry.kind]} />
+                <Chip size="small" variant="outlined" label={t.settings.memoryStatuses[entry.status]} />
+                {!entry.readWhen.trim() ? <Chip size="small" color="primary" variant="outlined" label={t.settings.memoryAlwaysInjected} /> : null}
                 <Typography variant="caption" color="text.secondary">
                   {new Date(entry.updatedAt).toLocaleString()}
                 </Typography>
               </Stack>
-              <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>{entry.text}</Typography>
+              <Typography variant="subtitle2">{entry.title}</Typography>
+              <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: 'pre-wrap' }}>
+                {entry.readWhen.trim() ? t.settings.memoryReadWhenValue(entry.readWhen) : t.settings.memoryReadWhenAlways}
+              </Typography>
+              <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>{entry.body}</Typography>
+              {entry.usage?.[0] ? (
+                <Typography variant="caption" color="text.secondary">
+                  {t.settings.memoryLastUsed(new Date(entry.usage[0].createdAt).toLocaleString())}
+                </Typography>
+              ) : null}
+              {entry.evidence?.[0] ? (
+                <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: 'pre-wrap' }}>
+                  {t.settings.memoryEvidence(entry.evidence[0].excerpt)}
+                </Typography>
+              ) : null}
             </Stack>
             <Stack direction="row" spacing={0.5}>
               <Tooltip title={t.settings.memoryEdit}>

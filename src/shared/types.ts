@@ -1,6 +1,6 @@
 import type { ForgerAppApi } from './types/app-api';
 
-export type { AgentDefaults, AgentEffort, AgentModelOptions, AgentProvider, AgentRuntime, AgentRuntimeRecommendations, AgentRuntimeRequest, ClaudeEffort, ClaudeModelOption, CodexModelOption, CodexReasoningEffort } from './types/agent-runtime';
+export type { AgentDefaults, AgentEffort, AgentModelOptions, AgentPermissionMode, AgentProvider, AgentRuntime, AgentRuntimeRecommendations, AgentRuntimeRequest, ClaudeEffort, ClaudeModelOption, CodexModelOption, CodexReasoningEffort } from './types/agent-runtime';
 export {
   AGENT_MODEL_OPTIONS,
   AGENT_PROVIDER_OPTIONS,
@@ -9,6 +9,7 @@ export {
   CODEX_MODEL_OPTIONS,
   CODEX_REASONING_OPTIONS,
   DEFAULT_AGENT_DEFAULTS,
+  DEFAULT_AGENT_PERMISSION_MODE,
   DEFAULT_AGENT_PROVIDER,
   DEFAULT_CLAUDE_EFFORT,
   DEFAULT_CLAUDE_MODEL,
@@ -21,12 +22,14 @@ export {
   getDefaultClaudeEffort,
   getDefaultCodexReasoningEffort,
   isAgentProvider,
+  isAgentPermissionMode,
   isAgentProviderPreference,
   isClaudeEffort,
   isClaudeModel,
   isCodexModel,
   isCodexReasoningEffort,
   normalizeAgentProviderPreference,
+  normalizeAgentPermissionMode,
   normalizeAgentRuntime,
   normalizeClaudeEffort,
   normalizeClaudeModel,
@@ -52,14 +55,14 @@ export type {
 } from './types/diagnostics';
 export type { CloudAppMessagePermissionDecision, CloudFriendUser, CloudFriendship, CloudIdentityState, CloudMessage, CloudMessageDeliveryMode, CloudMessageEnvelope, CloudMessageSource, CloudMessageStatus, CloudSendMessageInput, CloudSocialEvent, FriendshipStatus, FriendChatWindowOpenResult, SocialUserApp, SocialUserAppDownload, SocialUserAppList, SocialUserAppShare, SocialUserAppUploadAttempt, SocialUserAppUploadAttemptStatus, SocialUserAppUploadInput, SocialUserAppVersion, SocialUserProfile, SocialUserAppReviewState, SocialUserAppStatus, SocialUserAppVisibility } from './types/social';
 export type { BasicActionResult, FailureDiagnosticFields } from './types/base';
-export type { MemoryCreateInput, MemoryEntry, MemoryKind, MemoryListInput, MemoryScope, MemorySource, MemoryUpdateInput, Settings, UpdateAgentDefaultsInput, UpdateCodexDefaultsInput } from './types/settings';
+export type { MemoryCreateInput, MemoryEntry, MemoryEvidence, MemoryKind, MemoryListInput, MemoryRevision, MemoryScope, MemorySource, MemoryStatus, MemoryUpdateInput, MemoryUsageEvent, Settings, UpdateAgentDefaultsInput, UpdateCodexDefaultsInput } from './types/settings';
 export type { DesktopUpdateAsset, DesktopUpdateMetadata, DesktopUpdateReleaseNotes, DesktopUpdateState, DesktopUpdateStatus } from './types/updates';
-export type { ClaudeAuthStatus, CodexAuthStatus, DesktopErrorReportInput, DesktopErrorReportPreview } from './types/auth';
+export type { ClaudeAuthStatus, CodexAuthStatus, DesktopErrorReportFileSummary, DesktopErrorReportInput, DesktopErrorReportPreview } from './types/auth';
 export type { AppAiSubscriptionStatus, CreateLocalAppInput, CreateLocalAppResult, InstallAppResult, InstallPhase, LocalNetworkShareResult, LocalNetworkShareStatus, MockActionResult, OpenAppResult, RemoteNetworkConnectionSummary, RemoteNetworkShareResult, RemoteNetworkShareState, RemoteNetworkShareStatus, RuntimeStatus, StopAppResult } from './types/runtime';
 export type { AppBackupFileSummary, AppBackupReason, AppBackupSummary, CloudSyncSettings, CreateAppBackupInput, CreateAppBackupResult, CreateRemoteAppBackupInput, CreateRemoteAppBackupResult, DeleteAppBackupInput, RemoteAppBackupSummary, RemoteBackupSource, RemoteBackupType, RemoteBackupsState, RemoteBackupsUsage, RestoreAppBackupInput, RestoreRemoteAppBackupInput } from './types/backups';
 export type { AppSecretConnection, AppSecretDeclaration, AppSecretsState, ConnectAppSecretInput, CreateUserSecretInput, DeleteUserSecretInput, DisconnectAppSecretInput, SecretMutationResult, UpdateUserSecretInput, UserSecretSummary } from './types/secrets';
 export type { AgentToolApprovalSettings, AgentToolCategory, AgentToolDefinition, AgentToolId, AgentToolPackageDefinition, AgentToolRisk, AgentToolSettings, AppToolDeclaration, AppToolRequirementState, AppToolsInstallGate, CallOfficialToolInput, CallOfficialToolResult, ConfigureOfficialToolInput, InstalledOfficialToolRecord, OfficialToolActionDefinition, OfficialToolDefinition, OfficialToolInstallState, OfficialToolRisk, OfficialToolRuntime, OfficialToolsState, OfficialToolSecretDefinition, OfficialToolSummary, SetAppToolGrantInput, ToolMutationResult, UpdateAgentToolApprovalInput } from './types/tools';
-export type { AppDetails, AppLocalChangeSummary, AppOperationSummary, AppUpdateConflictInfo, ChatApplyResult, ChatApplyRunInput, ChatApprovePermissionInput, ChatCancelRunInput, ChatErrorCode, ChatGetRunInput, ChatRun, ChatRunEvent, ChatRunStatus, ChatStartRunInput, ChatUndoInput, ChatUndoResult, InstallWelcomeResult, PermissionRequest, PreviewDiffFile, PreviewModel, RendererChatTraceEvent, RendererChatTraceEventName, SharedFileRef } from './types/chat';
+export type { AppDetails, AppLocalChangeSummary, AppOperationSummary, AppUpdateConflictInfo, ChatApplyResult, ChatApplyRunInput, ChatApprovePermissionInput, ChatCancelRunInput, ChatCreatedAppRequest, ChatErrorCode, ChatGetRunInput, ChatMode, ChatQuestion, ChatQuestionOption, ChatQuestionRequest, ChatRun, ChatRunEvent, ChatRunStatus, ChatStartRunInput, ChatUndoInput, ChatUndoResult, InstallWelcomeResult, PermissionRequest, PreviewDiffFile, PreviewModel, RendererChatTraceEvent, RendererChatTraceEventName, SharedFileRef } from './types/chat';
 export type { AppExternalFolderCanceled, AppExternalFolderGrant, AppExternalFolderSelection, DbListTablesError, DbListTablesResponse, DbListTablesResult, DbQueryTableError, DbQueryTableResponse, DbQueryTableResult, FilesActionResult, FilesCreateCategoryInput, FilesDeleteCategoryInput, FilesDeleteInput, FilesDiscardStagedForChatInput, FilesImportInput, FilesListInput, FilesMoveInput, FilesRenameCategoryInput, FilesRenameInput, FilesStageForChatInput, ForgerFileCategory, ForgerFileRecord, PickedChatFile } from './types/data';
 export type { AppAgentPromptVariables, AppAgentRunEventType, AppAgentRunSummary, AppAgentRuntimeInput, AppAgentThreadCreateInput, AppAgentThreadEvent, AppAgentThreadRunControlInput, AppAgentThreadRunStartInput, AppAgentThreadRunSteerInput, AppAgentThreadSteerResult, AppAgentThreadSummary, AppCodexConversation, AppCodexConversationAttachment, AppCodexConversationCreateInput, AppCodexConversationEvent, AppCodexConversationMessage, AppCodexConversationRole, AppCodexConversationRun, AppCodexConversationRunStatus, AppCodexConversationSendMessageInput, AppCodexTaskArgumentValue, AppCodexTaskAttachment, AppCodexTaskEvent, AppCodexTaskFileArgument, AppCodexTaskStartInput, AppCodexTaskStatus, AppCodexTaskStringArgument, AppCodexTaskSummary, AppManifestAgentResumeInput, AppManifestAgentStartInput, AppManifestAgentSteerInput, AppManifestAgentStopInput } from './types/app-agents';
 export type { ForgerAppApi } from './types/app-api';

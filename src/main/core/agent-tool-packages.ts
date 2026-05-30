@@ -43,6 +43,15 @@ export const AGENT_TOOL_PACKAGES: AgentToolPackageDefinition[] = [
         defaultRequiresApproval: false,
       },
       {
+        id: 'forger_create_app',
+        packageId: FORGER_TOOL_PACKAGE_ID,
+        name: 'Crear app',
+        description: 'Crea una nueva app local desde una especificacion conversada con la persona.',
+        category: 'app',
+        risk: 'medio',
+        defaultRequiresApproval: false,
+      },
+      {
         id: 'forger_list_app_prompts',
         packageId: FORGER_TOOL_PACKAGE_ID,
         name: 'Listar prompts de app',
@@ -77,42 +86,6 @@ export const AGENT_TOOL_PACKAGES: AgentToolPackageDefinition[] = [
         category: 'app',
         risk: 'medio',
         defaultRequiresApproval: true,
-      },
-      {
-        id: 'memory_list',
-        packageId: FORGER_TOOL_PACKAGE_ID,
-        name: 'Consultar memoria',
-        description: 'Consulta preferencias y notas guardadas en la memoria local de Forger.',
-        category: 'memoria',
-        risk: 'bajo',
-        defaultRequiresApproval: false,
-      },
-      {
-        id: 'memory_create',
-        packageId: FORGER_TOOL_PACKAGE_ID,
-        name: 'Guardar memoria',
-        description: 'Guarda una preferencia o nota util en la memoria local de Forger.',
-        category: 'memoria',
-        risk: 'bajo',
-        defaultRequiresApproval: false,
-      },
-      {
-        id: 'memory_update',
-        packageId: FORGER_TOOL_PACKAGE_ID,
-        name: 'Actualizar memoria',
-        description: 'Actualiza una preferencia o nota guardada en la memoria local de Forger.',
-        category: 'memoria',
-        risk: 'bajo',
-        defaultRequiresApproval: false,
-      },
-      {
-        id: 'memory_delete',
-        packageId: FORGER_TOOL_PACKAGE_ID,
-        name: 'Eliminar memoria',
-        description: 'Elimina una preferencia o nota guardada en la memoria local de Forger.',
-        category: 'memoria',
-        risk: 'bajo',
-        defaultRequiresApproval: false,
       },
       {
         id: 'forger_get_app_runtime_status',
@@ -225,7 +198,49 @@ export const AGENT_TOOL_PACKAGES: AgentToolPackageDefinition[] = [
   },
 ];
 
-export const AGENT_TOOL_DEFINITIONS: AgentToolDefinition[] = AGENT_TOOL_PACKAGES.flatMap((toolPackage) => toolPackage.tools);
+const MEMORY_TOOL_DEFINITIONS: AgentToolDefinition[] = [
+  {
+    id: 'memory_list',
+    packageId: 'platform:memory',
+    name: 'Consultar memoria',
+    description: 'Consulta preferencias y notas guardadas en la memoria local de Forger.',
+    category: 'memoria',
+    risk: 'bajo',
+    defaultRequiresApproval: false,
+  },
+  {
+    id: 'memory_create',
+    packageId: 'platform:memory',
+    name: 'Guardar memoria',
+    description: 'Guarda una preferencia o nota util en la memoria local de Forger.',
+    category: 'memoria',
+    risk: 'bajo',
+    defaultRequiresApproval: false,
+  },
+  {
+    id: 'memory_update',
+    packageId: 'platform:memory',
+    name: 'Actualizar memoria',
+    description: 'Actualiza una preferencia o nota guardada en la memoria local de Forger.',
+    category: 'memoria',
+    risk: 'bajo',
+    defaultRequiresApproval: false,
+  },
+  {
+    id: 'memory_delete',
+    packageId: 'platform:memory',
+    name: 'Eliminar memoria',
+    description: 'Elimina una preferencia o nota guardada en la memoria local de Forger.',
+    category: 'memoria',
+    risk: 'bajo',
+    defaultRequiresApproval: false,
+  },
+];
+
+export const AGENT_TOOL_DEFINITIONS: AgentToolDefinition[] = [
+  ...AGENT_TOOL_PACKAGES.flatMap((toolPackage) => toolPackage.tools),
+  ...MEMORY_TOOL_DEFINITIONS,
+];
 
 export const AGENT_TOOL_IDS = new Set<AgentToolId>(AGENT_TOOL_DEFINITIONS.map((tool) => tool.id));
 

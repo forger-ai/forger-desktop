@@ -91,6 +91,14 @@ export function RendererAppDialogs({ controller }: RendererAppDialogsProps) {
     setBannerMessage,
     bannerSeverity,
   } = controller;
+  const errorReportPreview = errorReportDialog.report
+    ? { ...errorReportDialog.report, diagnosticAttachmentToken: undefined }
+    : null;
+  const conversationReportPreview = conversationDiagnosticDialog.report
+    ? { ...conversationDiagnosticDialog.report, diagnosticAttachmentToken: undefined }
+    : null;
+  const fileLabel = (file: { filename: string; sanitizedByteSize: number }) =>
+    t.settings.reportFileItem(file.filename, file.sanitizedByteSize);
 
   return (
     <>
@@ -421,14 +429,25 @@ export function RendererAppDialogs({ controller }: RendererAppDialogsProps) {
         <DialogContent>
           <Stack spacing={2} sx={{ pt: 0.5 }}>
             <Typography color="text.secondary">{t.settings.errorReportBody}</Typography>
-            {errorReportDialog.report ? (
+            <Alert severity="info">{t.settings.errorReportRetention}</Alert>
+            {errorReportDialog.report?.diagnosticFiles?.length ? (
+              <Stack spacing={0.75}>
+                <Typography variant="subtitle2">{t.settings.reportFilesLabel}</Typography>
+                {errorReportDialog.report.diagnosticFiles.map((file: any) => (
+                  <Typography key={`${file.kind}:${file.filename}`} variant="body2" color="text.secondary">
+                    {fileLabel(file)}
+                  </Typography>
+                ))}
+              </Stack>
+            ) : null}
+            {errorReportPreview ? (
               <TextField
                 fullWidth
                 multiline
                 minRows={8}
                 maxRows={14}
                 label={t.settings.errorReportDetailsLabel}
-                value={JSON.stringify(errorReportDialog.report, null, 2)}
+                value={JSON.stringify(errorReportPreview, null, 2)}
                 InputProps={{ readOnly: true }}
               />
             ) : null}
@@ -464,6 +483,7 @@ export function RendererAppDialogs({ controller }: RendererAppDialogsProps) {
         <DialogContent>
           <Stack spacing={2} sx={{ pt: 0.5 }}>
             <Typography color="text.secondary">{t.settings.conversationReportBody}</Typography>
+            <Alert severity="info">{t.settings.conversationReportRetention}</Alert>
             <TextField
               fullWidth
               multiline
@@ -474,7 +494,17 @@ export function RendererAppDialogs({ controller }: RendererAppDialogsProps) {
               onChange={(event) => setConversationDiagnosticDescription(event.target.value)}
               disabled={conversationDiagnosticDialog.busy}
             />
-            {conversationDiagnosticDialog.report ? (
+            {conversationDiagnosticDialog.report?.diagnosticFiles?.length ? (
+              <Stack spacing={0.75}>
+                <Typography variant="subtitle2">{t.settings.reportFilesLabel}</Typography>
+                {conversationDiagnosticDialog.report.diagnosticFiles.map((file: any) => (
+                  <Typography key={`${file.kind}:${file.filename}`} variant="body2" color="text.secondary">
+                    {fileLabel(file)}
+                  </Typography>
+                ))}
+              </Stack>
+            ) : null}
+            {conversationReportPreview ? (
               <TextField
                 fullWidth
                 multiline
@@ -482,7 +512,7 @@ export function RendererAppDialogs({ controller }: RendererAppDialogsProps) {
                 maxRows={16}
                 label={t.settings.conversationReportDetailsLabel}
                 value={JSON.stringify({
-                  ...conversationDiagnosticDialog.report,
+                  ...conversationReportPreview,
                   description: conversationDiagnosticDialog.description.trim() || undefined,
                 }, null, 2)}
                 InputProps={{ readOnly: true }}

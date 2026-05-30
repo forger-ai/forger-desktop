@@ -4,6 +4,8 @@ export type AgentToolId =
   | 'forger_list_catalog'
   | 'forger_list_installed_apps'
   | 'forger_check_updates'
+  | 'forger_create_app'
+  | 'forger_ask_question'
   | 'forger_list_app_prompts'
   | 'forger_test_app_prompt'
   | 'forger_update_app_prompt'
@@ -46,7 +48,7 @@ export interface AgentToolPackageDefinition {
   tools: AgentToolDefinition[];
 }
 
-export type AgentToolApprovalSettings = Record<AgentToolId, boolean>;
+export type AgentToolApprovalSettings = Partial<Record<AgentToolId, boolean>>;
 
 export interface AgentToolSettings {
   approvals: AgentToolApprovalSettings;

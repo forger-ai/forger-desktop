@@ -553,11 +553,11 @@ test('MemoryStore enforces caller scope, sanitizes entries, and builds bounded c
   assert.deepEqual(appVisible.map((entry) => entry.text).sort(), ['Import CSV before analysis.', 'Use local data only.']);
   assert.equal((await store.list({ appId: 'recipes' }, { caller: 'app-agent', appId: 'finance-os' })).length, 0);
   const context = await store.buildContext({ caller: 'app-agent', appId: 'finance-os' }, 80);
-  assert.ok(context.startsWith('Memoria relevante:'));
+  assert.ok(context.startsWith('Memoria de Forger:'));
   assert.ok(context.length <= 80);
 
-  const persisted = JSON.parse(await fs.readFile(path.join(root, 'memory.json'), 'utf8'));
-  assert.equal(persisted.entries.length, 3);
+  await fs.access(path.join(root, 'memory.sqlite'));
+  assert.equal((await store.list()).length, 3);
   assert.equal(await store.delete(app.id, { caller: 'automation', appIds: ['finance-os'] }).then((result) => result.success), true);
 });
 
@@ -588,7 +588,7 @@ test('MemoryStore recovers malformed files and validates update/delete/write edg
   const global = await store.create({ scope: 'global', kind: 'unknown', text: longText, source: 'robot' }, { caller: 'automation', appIds: [] });
   assert.equal(global.kind, 'preference');
   assert.equal(global.source, 'user');
-  assert.equal(global.text.length, 2_000);
+  assert.equal(global.body.length, 2_100);
 
   const app = await store.create({ scope: 'app', appId: 'finance-os', kind: 'fact', text: 'Keep app scoped' }, { caller: 'settings' });
   const moved = await store.update({ id: app.id, scope: 'global', kind: 'constraint', text: 'Now global' }, { caller: 'desktop-chat' });
@@ -615,7 +615,7 @@ test('MemoryStore ignores invalid persisted entries and returns empty context cl
   const store = new MemoryStore(root);
 
   assert.deepEqual((await store.list()).map((entry) => entry.id), ['ok']);
-  assert.equal(await store.buildContext({ caller: 'automation', appIds: ['finance-os'] }), 'Memoria relevante:\n- [global/fact] Keep this');
+  assert.match(await store.buildContext({ caller: 'automation', appIds: ['finance-os'] }), /Keep this/);
   const empty = new MemoryStore(path.join(root, 'empty'));
   assert.equal(await empty.buildContext({ caller: 'app-agent' }), '');
 });

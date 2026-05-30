@@ -11,10 +11,12 @@ import {
   Button,
   Chip,
   CircularProgress,
+  FormControlLabel,
   LinearProgress,
   MenuItem,
   Rating,
   Stack,
+  Switch,
   Tab,
   Tabs,
   TextField,
@@ -338,6 +340,7 @@ export function AppView({
         promptRuntimeDraft.provider !== selectedPromptRuntimeFallback.provider
         || promptRuntimeDraft.model !== selectedPromptRuntimeFallback.model
         || promptRuntimeDraft.effort !== selectedPromptRuntimeFallback.effort
+        || (promptRuntimeDraft.permissionMode ?? 'safe') !== (selectedPromptRuntimeFallback.permissionMode ?? 'safe')
       ),
   );
   const selectedPromptRuntimeSource = selectedPrompt?.runtimeSource === 'override'
@@ -469,7 +472,7 @@ export function AppView({
                     const nextEffort = provider === 'claude'
                       ? (claudeModelOptions[0]?.defaultEffort ?? 'medium')
                       : (modelOptions[0]?.defaultReasoningEffort ?? 'medium');
-                    setPromptRuntimeDraft({ provider, model: nextModel, effort: nextEffort });
+                    setPromptRuntimeDraft((current) => ({ provider, model: nextModel, effort: nextEffort, permissionMode: current.permissionMode }));
                   }}
                   helperText={runtimeEdited ? t.appView.promptSettingCustom : selectedPromptRuntimeSource}
                   fullWidth
@@ -511,6 +514,18 @@ export function AppView({
                   ))}
                 </TextField>
               </Box>
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={(promptRuntimeDraft.permissionMode ?? 'safe') === 'unsafe'}
+                    onChange={(event) => setPromptRuntimeDraft((current) => ({
+                      ...current,
+                      permissionMode: event.target.checked ? 'unsafe' : 'safe',
+                    }))}
+                  />
+                }
+                label={t.appView.promptPermissionLabel}
+              />
               {promptErrors.length > 0 ? (
                 <Box sx={{ border: '1px solid', borderColor: 'error.main', p: 1.25 }}>
                   <Stack component="ul" sx={{ m: 0, pl: 2 }}>

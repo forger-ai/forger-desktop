@@ -135,6 +135,7 @@ export const registerAgentIpcHandlers = (deps: AgentIpcDeps): void => {
       ...(provider ? { provider } : {}),
       ...(model ? { model } : {}),
       ...(normalizedEffort ? { effort: normalizedEffort } : {}),
+      ...(runtime?.permissionMode === 'unsafe' ? { permissionMode: 'unsafe' as const } : {}),
     };
   };
 

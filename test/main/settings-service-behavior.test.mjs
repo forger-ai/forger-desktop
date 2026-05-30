@@ -13,6 +13,7 @@ const settingsSeed = () => ({
   plan: 'Free',
   safeMode: true,
   defaultAgentProvider: 'auto',
+  defaultChatPermissionMode: 'safe',
   codexDefaults: { model: 'gpt-5.4', reasoningEffort: 'medium' },
   agentDefaults: {
     codex: { model: 'gpt-5.4', reasoningEffort: 'medium' },
@@ -70,6 +71,7 @@ test('SettingsService normalizes persisted settings, preserves safe fields, and 
       plan: 'Pro',
       safeMode: false,
       defaultAgentProvider: 'invalid',
+      defaultChatPermissionMode: 'unsafe',
       codexDefaults: { model: 'custom-codex', reasoningEffort: 'invalid' },
       agentDefaults: {
         codex: { model: 'agent-codex', reasoningEffort: 'high' },
@@ -89,6 +91,7 @@ test('SettingsService normalizes persisted settings, preserves safe fields, and 
     assert.equal(harness.state.settings.plan, 'Pro');
     assert.equal(harness.state.settings.safeMode, false);
     assert.equal(harness.state.settings.defaultAgentProvider, 'auto');
+    assert.equal(harness.state.settings.defaultChatPermissionMode, 'unsafe');
     assert.deepEqual(harness.state.settings.codexDefaults, { model: 'custom-codex', reasoningEffort: 'medium' });
     assert.deepEqual(harness.state.settings.agentDefaults.codex, { model: 'agent-codex', reasoningEffort: 'high' });
     assert.deepEqual(harness.state.settings.agentDefaults.claude, { model: 'opus', effort: 'max' });
@@ -113,6 +116,8 @@ test('SettingsService updates defaults and normalizes invalid provider/model inp
 
     const providerOnly = await harness.controller.updateAgentDefaults({ defaultProvider: 'claude', provider: 'bad' });
     assert.equal(providerOnly.defaultAgentProvider, 'claude');
+    const permissionOnly = await harness.controller.updateAgentDefaults({ defaultChatPermissionMode: 'unsafe' });
+    assert.equal(permissionOnly.defaultChatPermissionMode, 'unsafe');
 
     const codex = await harness.controller.updateAgentDefaults({
       defaultProvider: 'auto',

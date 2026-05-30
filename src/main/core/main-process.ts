@@ -33,6 +33,7 @@ import { FileLibrary } from '../file-library';
 import { buildMacTerminalLoginScript, buildMacTerminalScriptLaunchCommand } from '../auth-login-scripts';
 import { buildCodexAuthEnvironment, classifyCodexAuthOutput, extractAllowedCodexAuthUrls } from '../codex-auth-helpers';
 import { ForgerMcpServer } from '../forger-mcp-server';
+import { MemoryMaintenanceManager } from '../memory-maintenance-manager';
 import { MemoryStore } from '../memory-store';
 import { PromptOverridesStore, buildPromptBases, promptOverrideErrorResult } from '../prompt-overrides';
 import { OfficialToolsService, normalizeAppToolDeclarations } from '../official-tools-service';
@@ -42,11 +43,7 @@ import { registerForgerCloudOAuth } from '../forger-cloud-oauth';
 import { CloudDeviceManager } from '../cloud-device-manager';
 import { CloudIdentityStore, type EncryptedCloudText } from '../cloud-identity-store';
 import { BackupsManager } from '../backups-manager';
-import {
-  createWindowStateEventRegistrar,
-  createWindowStateReader,
-  registerWindowIpcHandlers,
-} from '../ipc/window';
+import { createWindowStateEventRegistrar, createWindowStateReader, registerWindowIpcHandlers } from '../ipc/window';
 import { registerAgentIpcHandlers } from '../ipc/agent-handlers';
 import { registerMainIpcHandlers } from '../ipc/main-handlers';
 import { createInstalledAppRuntimeController } from '../runtime/installed-app-runtime';
@@ -209,8 +206,8 @@ let localCatalogJsonUrl: string | undefined;
 const DEFAULT_NODE_VERSION = '22';
 const DEFAULT_PYTHON_VERSION = '3.12';
 const BUNDLED_GIT_VERSION = '2.54.0';
-const CODEX_CLI_VERSION = '0.129.0';
-const CLAUDE_CODE_VERSION = 'latest';
+const CODEX_CLI_VERSION = '0.135.0';
+const CLAUDE_CODE_VERSION = '2.1.158';
 const CODEX_USAGE_DASHBOARD_URL = 'https://chatgpt.com/codex/settings/usage';
 const BUILT_IN_CODEX_MODEL = 'gpt-5.4';
 const BUILT_IN_CODEX_REASONING: CodexReasoningEffort = 'medium';
@@ -220,13 +217,15 @@ const APP_CODEX_MODEL_OPTIONS = [
   { displayModelName: '5.4', realModelName: 'gpt-5.4', defaultReasoningEffort: 'medium' as const },
   { displayModelName: '5.3 Codex', realModelName: 'gpt-5.3-codex', defaultReasoningEffort: 'low' as const },
   { displayModelName: '5.3 Spark', realModelName: 'gpt-5.3-codex-spark', defaultReasoningEffort: 'high' as const },
-  { displayModelName: '5.4 Mini', realModelName: 'gpt-5.4-mini', defaultReasoningEffort: 'medium' as const },
-  { displayModelName: '5.5', realModelName: 'gpt-5.5', defaultReasoningEffort: 'medium' as const },
+  { displayModelName: '5.4 Mini', realModelName: 'gpt-5.4-mini', defaultReasoningEffort: 'medium' as const }, { displayModelName: '5.5', realModelName: 'gpt-5.5', defaultReasoningEffort: 'medium' as const },
 ];
 const APP_CLAUDE_MODEL_OPTIONS = [
-  { displayModelName: 'Sonnet latest', realModelName: 'sonnet', defaultEffort: 'medium' as const },
-  { displayModelName: 'Opus latest', realModelName: 'opus', defaultEffort: 'high' as const },
-  { displayModelName: 'Haiku latest', realModelName: 'haiku', defaultEffort: 'low' as const },
+  { displayModelName: 'Opus 4.8', realModelName: 'claude-opus-4-8', defaultEffort: 'high' as const },
+  { displayModelName: 'Opus 4.7', realModelName: 'claude-opus-4-7', defaultEffort: 'xhigh' as const },
+  { displayModelName: 'Opus 4.6', realModelName: 'claude-opus-4-6', defaultEffort: 'high' as const },
+  { displayModelName: 'Opus 4.5', realModelName: 'claude-opus-4-5-20251101', defaultEffort: 'high' as const },
+  { displayModelName: 'Sonnet 4.6', realModelName: 'claude-sonnet-4-6', defaultEffort: 'high' as const },
+  { displayModelName: 'Sonnet 4.5', realModelName: 'claude-sonnet-4-5-20250929', defaultEffort: 'medium' as const }, { displayModelName: 'Haiku 4.5', realModelName: 'claude-haiku-4-5-20251001', defaultEffort: 'low' as const },
 ];
 const CODEX_MODEL_VALUES = new Set(APP_CODEX_MODEL_OPTIONS.map((option) => option.realModelName));
 const CODEX_REASONING_VALUES = new Set<CodexReasoningEffort>(['none', 'low', 'medium', 'high', 'xhigh']);
@@ -273,6 +272,7 @@ let backgroundTaskStore: BackgroundTaskStore | null = null;
 let appMcpManager: AppMcpManager | null = null;
 let backupsManager: BackupsManager | null = null;
 let memoryStore: MemoryStore | null = null;
+let memoryMaintenanceManager: MemoryMaintenanceManager | null = null;
 let desktopRuntimeBridge: DesktopRuntimeBridge | null = null;
 
 desktopErrorReporter = new DesktopErrorReporter({
@@ -1167,6 +1167,7 @@ const mainLifecycleState = {
   get appMcpManager() { return appMcpManager; }, set appMcpManager(value) { appMcpManager = value; },
   get backupsManager() { return backupsManager; }, set backupsManager(value) { backupsManager = value; },
   get memoryStore() { return memoryStore; }, set memoryStore(value) { memoryStore = value; },
+  get memoryMaintenanceManager() { return memoryMaintenanceManager; }, set memoryMaintenanceManager(value) { memoryMaintenanceManager = value; },
   get desktopRuntimeBridge() { return desktopRuntimeBridge; }, set desktopRuntimeBridge(value) { desktopRuntimeBridge = value; },
   get localNetworkShareManager() { return localNetworkShareController.manager; }, set localNetworkShareManager(value) { localNetworkShareController.manager = value; },
   get remoteNetworkShareManager() { return remoteNetworkShareManager; },
@@ -1178,7 +1179,7 @@ registerMainLifecycle({
   AGENT_TOOL_DEFINITIONS, AppAgentConversationManager, AppAgentTaskManager, AppMcpManager, AutomationManager,
   BrowserWindow, ChatOrchestrator, CloudDeviceManager, CloudIdentityStore, DEFAULT_NODE_VERSION, DesktopRuntimeBridge,
   DevCatalogService, FORGER_AGENT_CONTRACT_VERSION, FileLibrary, ForgerAccountStore, ForgerBackendClient,
-  ForgerMcpServer, IPC_CHANNELS, MemoryStore, SecretsStore, anyAppAllowsAgentNetworkAccess, app,
+  ForgerMcpServer, IPC_CHANNELS, MemoryMaintenanceManager, MemoryStore, SecretsStore, anyAppAllowsAgentNetworkAccess, app,
   appAllowsAgentNetworkAccess, appWindows, appendInstallLog, backendBaseUrl, buildForgerToolsContextForApp,
   buildMemoryContextForApp, buildMemoryContextForApps, chooseAgentRuntime, clearForgerAccountSession, closeServer,
   createWindow, emitAutomationUpdated, emitChatRunUpdated, ensureBackendPythonEnvironment, ensureCatalogStatuses,

@@ -35,6 +35,7 @@ export interface CreateLocalAppInput {
   description: string;
   purpose: string;
   lookAndFeel?: string;
+  agentPrompt?: string;
 }
 
 export interface CreateLocalAppResult extends FailureDiagnosticFields {
@@ -45,6 +46,7 @@ export interface CreateLocalAppResult extends FailureDiagnosticFields {
     name: string;
     description: string;
     purpose: string;
+    agentPrompt?: string;
     lookAndFeel?: string;
   };
 }

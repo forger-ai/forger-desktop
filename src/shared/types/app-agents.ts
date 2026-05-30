@@ -1,4 +1,4 @@
-import type { AgentEffort, AgentProvider, CodexReasoningEffort } from './agent-runtime';
+import type { AgentEffort, AgentPermissionMode, AgentProvider, CodexReasoningEffort } from './agent-runtime';
 import type { PermissionRequest } from './chat';
 
 export type AppCodexTaskStatus =
@@ -159,6 +159,7 @@ export interface AppAgentRuntimeInput {
   provider?: string;
   model?: string;
   effort?: AgentEffort | 'default';
+  permissionMode?: AgentPermissionMode;
   modelParams?: Record<string, unknown>;
 }
 

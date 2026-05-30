@@ -21,6 +21,7 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
         scope: { type: 'string', enum: ['global', 'app'] },
         appId: { type: 'string' },
         kind: { type: 'string', enum: ['preference', 'profile', 'workflow', 'constraint', 'fact'] },
+        status: { type: 'string', enum: ['active', 'candidate', 'archived'] },
       },
       additionalProperties: false,
     };
@@ -32,9 +33,14 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
         scope: { type: 'string', enum: ['global', 'app'] },
         appId: { type: 'string' },
         kind: { type: 'string', enum: ['preference', 'profile', 'workflow', 'constraint', 'fact'] },
-        text: { type: 'string' },
+        title: { type: 'string' },
+        body: { type: 'string' },
+        text: { type: 'string', description: 'Legacy alias for body.' },
+        read_when: { type: 'string', description: 'When this memory should be read. Empty means always inject the memory body.' },
+        status: { type: 'string', enum: ['active', 'candidate', 'archived'] },
+        evidence: { type: 'string' },
       },
-      required: ['scope', 'kind', 'text'],
+      required: ['scope', 'kind'],
       additionalProperties: false,
     };
   }
@@ -46,7 +52,12 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
         scope: { type: 'string', enum: ['global', 'app'] },
         appId: { type: 'string' },
         kind: { type: 'string', enum: ['preference', 'profile', 'workflow', 'constraint', 'fact'] },
+        title: { type: 'string' },
+        body: { type: 'string' },
         text: { type: 'string' },
+        read_when: { type: 'string', description: 'When this memory should be read. Empty means always inject the memory body.' },
+        status: { type: 'string', enum: ['active', 'candidate', 'archived'] },
+        evidence: { type: 'string' },
       },
       required: ['id'],
       additionalProperties: false,
@@ -79,6 +90,79 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
         },
       },
       required: ['appId'],
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'forger_create_app') {
+    return {
+      type: 'object',
+      properties: {
+        name: {
+          type: 'string',
+          description: 'Nombre visible de la app que se creara.',
+        },
+        description: {
+          type: 'string',
+          description: 'Descripcion breve y visible de la app.',
+        },
+        purpose: {
+          type: 'string',
+          description: 'Que debe ayudar a hacer la app y cual es el resultado esperado para la persona.',
+        },
+        lookAndFeel: {
+          type: 'string',
+          description: 'Direccion visual y de experiencia elegida o recomendada.',
+        },
+        agentPrompt: {
+          type: 'string',
+          description: 'Prompt interno extremadamente detallado para iniciar la conversacion de construccion de la app creada.',
+        },
+      },
+      required: ['name', 'description', 'purpose', 'agentPrompt'],
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'forger_ask_question') {
+    return {
+      type: 'object',
+      properties: {
+        chatId: {
+          type: 'string',
+          description: 'ID del chat/conversacion donde quedara activa la pregunta.',
+        },
+        questions: {
+          type: 'array',
+          minItems: 1,
+          maxItems: 5,
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'string' },
+              question: { type: 'string' },
+              options: {
+                type: 'array',
+                minItems: 2,
+                maxItems: 3,
+                items: {
+                  type: 'object',
+                  properties: {
+                    id: { type: 'string' },
+                    label: { type: 'string' },
+                    description: { type: 'string' },
+                  },
+                  required: ['id', 'label'],
+                  additionalProperties: false,
+                },
+              },
+            },
+            required: ['id', 'question', 'options'],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ['chatId', 'questions'],
       additionalProperties: false,
     };
   }

@@ -1,0 +1,41 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import test from 'node:test';
+
+const readSource = (relativePath) => fs.readFile(path.resolve(relativePath), 'utf8');
+
+test('chat state migrates legacy conversations into locked chat modes', async () => {
+  const source = await readSource('src/renderer/chat-state.ts');
+  const sharedSource = await readSource('src/shared/types/chat.ts');
+
+  assert.match(sharedSource, /export type ChatMode = 'create_app' \| 'edit_app' \| 'free_chat'/);
+  assert.match(source, /mode\?: ChatMode/);
+  assert.match(source, /conversation\.appId === 'forger' \? 'free_chat' : 'edit_app'/);
+  assert.match(source, /mode === 'edit_app' \? \(conversation\.targetAppId \?\? conversation\.appId\) : null/);
+});
+
+test('renderer starts on Chat and binds the mode selector before starting runs', async () => {
+  const source = await readSource('src/renderer/app/RendererAppController.tsx');
+  const viewSource = await readSource('src/renderer/views/ChatView.tsx');
+
+  assert.match(source, /useState<View>\('chat'\)/);
+  assert.match(source, /modeOverride\?: \{ mode: ChatMode; targetAppId\?: string \| null \}/);
+  assert.match(source, /conversationForPrompt/);
+  assert.match(source, /chatMode: activeChatMode/);
+  assert.match(source, /targetAppId: activeTargetAppId/);
+  assert.match(source, /chatMode, targetAppId: chatMode === 'edit_app' \? chatScopeId : null/);
+  assert.match(viewSource, /pendingModeOverride/);
+  assert.match(viewSource, /sendComposerMessage/);
+});
+
+test('renderer separates installed Apps from curated Catalog in navigation and content', async () => {
+  const sidebarSource = await readSource('src/renderer/components/Sidebar.tsx');
+  const viewSource = await readSource('src/renderer/app/RendererAppView.tsx');
+
+  assert.match(sidebarSource, /id: 'chat'[\s\S]*id: 'apps'[\s\S]*id: 'catalog'/);
+  assert.match(viewSource, /const installedViewApps = useMemo<CatalogApp\[]>/);
+  assert.match(viewSource, /currentView === 'apps' \? renderInstalledAppsView\(\) : null/);
+  assert.match(viewSource, /<CatalogView\s+apps=\{catalogApps\}/);
+  assert.match(viewSource, /onSend=\{\(modeOverride\) => void handleSendMessage\(undefined, modeOverride\)\}/);
+});

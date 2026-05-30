@@ -85,6 +85,15 @@ const defaultMcpToolDefinitions = [
     defaultRequiresApproval: false,
   },
   {
+    id: 'forger_create_app',
+    packageId: 'forger',
+    name: 'Crear app',
+    description: 'Crea una app.',
+    category: 'app',
+    risk: 'medio',
+    defaultRequiresApproval: false,
+  },
+  {
     id: 'forger_get_app_runtime_status',
     packageId: 'forger',
     name: 'Estado',
@@ -234,6 +243,14 @@ const createForgerMcpHarness = async (overrides = {}) => {
     listCatalog: async () => [{ id: 'finance-os', name: 'Finance OS' }],
     listInstalledApps: () => [{ id: 'finance-os', name: 'Finance OS', status: 'installed', description: 'Finanzas' }],
     checkUpdates: async () => [{ id: 'finance-os', name: 'Finance OS', status: 'update_available', description: 'Finanzas' }],
+    createLocalApp: async (input, locale) => ({ success: true, userMessage: 'Creada.', app: { appId: 'created-app', ...input }, locale }),
+    recordCreatedApp: overrides.recordCreatedApp ?? (() => undefined),
+    registerQuestion: overrides.registerQuestion ?? (async (_runId, input) => ({
+      requestId: 'question-request-1',
+      chatId: input.chatId,
+      questions: input.questions,
+      createdAt: '2026-01-01T00:00:00.000Z',
+    })),
     getRuntimeStatus: (appId) => ({ status: appId === 'finance-os' ? 'running' : 'stopped' }),
     openApp: async (appId) => ({ success: true, appId }),
     stopApp: async (appId) => ({ success: true, appId }),
@@ -281,10 +298,14 @@ const callMcp = async (session, body, token = session.token) => await fetch(sess
 
 test('MCP tool schemas expose strict Gmail contracts and safe annotations', () => {
   assert.equal(getMcpToolInputSchema('memory_list').additionalProperties, false);
-  assert.deepEqual(getMcpToolInputSchema('memory_create').required, ['scope', 'kind', 'text']);
+  assert.deepEqual(getMcpToolInputSchema('memory_create').required, ['scope', 'kind']);
+  assert.equal(getMcpToolInputSchema('memory_create').properties.read_when.type, 'string');
   assert.deepEqual(getMcpToolInputSchema('memory_update').required, ['id']);
   assert.deepEqual(getMcpToolInputSchema('memory_delete').required, ['id']);
   assert.deepEqual(getMcpToolInputSchema('forger_open_app').required, ['appId']);
+  assert.deepEqual(getMcpToolInputSchema('forger_create_app').required, ['name', 'description', 'purpose', 'agentPrompt']);
+  assert.deepEqual(getMcpToolInputSchema('forger_ask_question').required, ['chatId', 'questions']);
+  assert.equal(getMcpToolInputSchema('forger_ask_question').properties.questions.maxItems, 5);
   assert.deepEqual(getMcpToolInputSchema('forger_restore_app_prompt').required, ['appId', 'kind', 'id']);
   assert.deepEqual(getMcpToolInputSchema('forger_test_app_prompt').required, ['appId', 'kind', 'id']);
   assert.equal(getMcpToolInputSchema('forger_test_app_prompt').properties.variables.type, 'object');
@@ -769,7 +790,7 @@ test('Forger MCP app-agent sessions filter Gmail tools and return validation fai
     });
     const listPayload = await listResponse.json();
     const names = listPayload.result.tools.map((tool) => tool.name).sort();
-    assert.deepEqual(names, ['forger_list_installed_apps', 'gmail.search_messages']);
+    assert.deepEqual(names, ['forger_ask_question', 'forger_list_installed_apps', 'gmail.search_messages']);
 
     const deniedResponse = await fetch(session.url, {
       method: 'POST',
@@ -974,6 +995,21 @@ test('Forger MCP tools cover approvals, memory failures, app operations, and pro
       method: 'tools/call',
       params: { name: 'forger_check_updates', arguments: {} },
     })).json());
+    const createdApp = parseToolTextResult(await (await callMcp(automationSession, {
+      jsonrpc: '2.0',
+      id: 19,
+      method: 'tools/call',
+      params: {
+        name: 'forger_create_app',
+        arguments: {
+          name: 'Planner',
+          description: 'Organiza prioridades.',
+          purpose: 'Ayuda a planificar la semana.',
+          lookAndFeel: 'Claro y enfocado.',
+          agentPrompt: 'Build a detailed weekly planning app with localized copy and a focused first workflow.',
+        },
+      },
+    })).json());
     const status = parseToolTextResult(await (await callMcp(automationSession, {
       jsonrpc: '2.0',
       id: 7,
@@ -1022,6 +1058,8 @@ test('Forger MCP tools cover approvals, memory failures, app operations, and pro
     assert.equal(catalog.apps.length, 1);
     assert.equal(installed.apps.length, 1);
     assert.equal(updates.updates.length, 1);
+    assert.equal(createdApp.success, true);
+    assert.equal(createdApp.app.agentPrompt.includes('weekly planning'), true);
     assert.equal(status.status.status, 'running');
     assert.equal(opened.appId, 'finance-os');
     assert.equal(refreshed.userMessage, 'Vista refrescada.');
@@ -1083,6 +1121,97 @@ test('Forger MCP tools cover approvals, memory failures, app operations, and pro
     assert.equal(memoryFailed.success, false);
     assert.equal(memoryFailed.technicalCode, 'memory_error');
     assert.equal(harness.logs.some((entry) => entry.payload?.reason === 'automation_non_interactive'), true);
+  } finally {
+    harness.stop();
+  }
+});
+
+test('Forger MCP question tool validates input and rejects duplicate active questions', async () => {
+  let activeQuestion = null;
+  const harness = await createForgerMcpHarness({
+    registerQuestion: async (_runId, input) => {
+      if (activeQuestion) {
+        throw new Error('active_question_exists');
+      }
+      activeQuestion = {
+        requestId: 'question-request-1',
+        chatId: input.chatId,
+        questions: input.questions,
+        createdAt: '2026-01-01T00:00:00.000Z',
+      };
+      return activeQuestion;
+    },
+  });
+  const session = harness.server.createSession('run-question', 'forger', { caller: 'free-chat', appIds: ['finance-os'] });
+  try {
+    const invalid = parseToolTextResult(await (await callMcp(session, {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/call',
+      params: {
+        name: 'forger_ask_question',
+        arguments: {
+          chatId: 'chat-1',
+          questions: [{
+            id: 'q1',
+            question: 'Que prefieres?',
+            options: [
+              { id: 'a', label: 'A' },
+              { id: 'b', label: 'B' },
+              { id: 'c', label: 'C' },
+              { id: 'd', label: 'D' },
+            ],
+          }],
+        },
+      },
+    })).json());
+    assert.equal(invalid.success, false);
+    assert.equal(invalid.technicalCode, 'question_input_invalid');
+
+    const created = parseToolTextResult(await (await callMcp(session, {
+      jsonrpc: '2.0',
+      id: 2,
+      method: 'tools/call',
+      params: {
+        name: 'forger_ask_question',
+        arguments: {
+          chatId: 'chat-1',
+          questions: [{
+            id: 'scope',
+            question: 'Que alcance quieres?',
+            options: [
+              { id: 'small', label: 'Simple' },
+              { id: 'complete', label: 'Completo', description: 'Incluye flujo principal y ajustes.' },
+            ],
+          }],
+        },
+      },
+    })).json());
+    assert.equal(created.success, true);
+    assert.equal(created.questionRequest.chatId, 'chat-1');
+    assert.equal(created.questionRequest.questions[0].options[1].description, 'Incluye flujo principal y ajustes.');
+
+    const duplicate = parseToolTextResult(await (await callMcp(session, {
+      jsonrpc: '2.0',
+      id: 3,
+      method: 'tools/call',
+      params: {
+        name: 'forger_ask_question',
+        arguments: {
+          chatId: 'chat-1',
+          questions: [{
+            id: 'again',
+            question: 'Otra pregunta?',
+            options: [
+              { id: 'yes', label: 'Si' },
+              { id: 'no', label: 'No' },
+            ],
+          }],
+        },
+      },
+    })).json());
+    assert.equal(duplicate.success, false);
+    assert.equal(duplicate.technicalCode, 'active_question_exists');
   } finally {
     harness.stop();
   }
@@ -1167,6 +1296,7 @@ test('Forger MCP tools exercise approved app runtime calls, memory access, and u
       caller: 'free-chat',
       appId: undefined,
       appIds: ['finance-os', 'recipes'],
+      runId: 'run-6',
     });
 
     const listed = parseToolTextResult(await (await callMcp(freeChatSession, {

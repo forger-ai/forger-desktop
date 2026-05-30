@@ -3,13 +3,13 @@ import AutoAwesomeRounded from '@mui/icons-material/AutoAwesomeRounded';
 import BackupRounded from '@mui/icons-material/BackupRounded';
 import EventRepeatRounded from '@mui/icons-material/EventRepeatRounded';
 import ConstructionRounded from '@mui/icons-material/ConstructionRounded';
-import AddBoxRounded from '@mui/icons-material/AddBoxRounded';
 import DevicesRounded from '@mui/icons-material/DevicesRounded';
 import InsertDriveFileRounded from '@mui/icons-material/InsertDriveFileRounded';
 import TableChartRounded from '@mui/icons-material/TableChartRounded';
 import FeedbackRounded from '@mui/icons-material/FeedbackRounded';
 import SettingsRounded from '@mui/icons-material/SettingsRounded';
 import VpnKeyRounded from '@mui/icons-material/VpnKeyRounded';
+import StorefrontRounded from '@mui/icons-material/StorefrontRounded';
 import {
   alpha,
   Box,
@@ -30,6 +30,7 @@ import iconDark from '@renderer/assets/icon-dark.svg';
 import iconLight from '@renderer/assets/icon-light.svg';
 
 export type View =
+  | 'apps'
   | 'catalog'
   | 'chat'
   | 'create'
@@ -57,9 +58,9 @@ interface SidebarProps {
 }
 
 const defaultNav = [
-  { id: 'catalog' as const, icon: <AppsRounded /> },
   { id: 'chat' as const, icon: <AutoAwesomeRounded /> },
-  { id: 'create' as const, icon: <AddBoxRounded /> },
+  { id: 'apps' as const, icon: <AppsRounded /> },
+  { id: 'catalog' as const, icon: <StorefrontRounded /> },
   { id: 'feedback' as const, icon: <FeedbackRounded /> },
 ];
 
@@ -107,7 +108,8 @@ export function Sidebar({ currentView, onNavigate, t, desktopUpdateState, advanc
   }, []);
 
   const labels: Record<View, string> = {
-    catalog: t.nav.apps,
+    apps: t.nav.apps,
+    catalog: t.nav.catalog,
     chat: t.nav.chat,
     create: t.nav.create,
     feedback: t.nav.feedback,

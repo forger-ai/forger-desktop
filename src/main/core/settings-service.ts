@@ -5,6 +5,7 @@ import type path from 'node:path';
 import type { PromptOverridesStore } from '../prompt-overrides';
 import type {
   AgentDefaults,
+  AgentPermissionMode,
   AgentProvider,
   AgentRuntime,
   AgentRuntimeRecommendations,
@@ -68,6 +69,9 @@ const normalizeAgentProvider = (value: unknown): AgentProvider | undefined =>
 const normalizeDefaultAgentProvider = (value: unknown): AgentProvider | 'auto' =>
   value === 'codex' || value === 'claude' || value === 'auto' ? value : 'auto';
 
+const normalizeAgentPermissionMode = (value: unknown): AgentPermissionMode =>
+  value === 'unsafe' ? 'unsafe' : 'safe';
+
 const normalizeSettings = (input?: Partial<Settings>): Settings => {
   const defaults = structuredClone(settingsSeed);
   const rawCodexDefaults =
@@ -109,6 +113,7 @@ const normalizeSettings = (input?: Partial<Settings>): Settings => {
     plan: typeof input?.plan === 'string' ? input.plan : defaults.plan,
     safeMode: typeof input?.safeMode === 'boolean' ? input.safeMode : defaults.safeMode,
     defaultAgentProvider: normalizeDefaultAgentProvider(input?.defaultAgentProvider),
+    defaultChatPermissionMode: normalizeAgentPermissionMode(input?.defaultChatPermissionMode ?? defaults.defaultChatPermissionMode),
     codexDefaults: {
       model: codexModel,
       reasoningEffort: codexReasoningEffort,
@@ -176,9 +181,12 @@ const updateAgentDefaults = async (input: UpdateAgentDefaultsInput): Promise<Set
   const defaultAgentProvider = input.defaultProvider === undefined
     ? current.defaultAgentProvider
     : normalizeDefaultAgentProvider(input.defaultProvider);
+  const defaultChatPermissionMode = input.defaultChatPermissionMode === undefined
+    ? current.defaultChatPermissionMode
+    : normalizeAgentPermissionMode(input.defaultChatPermissionMode);
   const provider = normalizeAgentProvider(input.provider);
   if (!provider) {
-    state.settings = normalizeSettings({ ...current, defaultAgentProvider });
+    state.settings = normalizeSettings({ ...current, defaultAgentProvider, defaultChatPermissionMode });
     await saveSettings();
     return state.settings;
   }
@@ -186,6 +194,7 @@ const updateAgentDefaults = async (input: UpdateAgentDefaultsInput): Promise<Set
     state.settings = normalizeSettings({
       ...current,
       defaultAgentProvider,
+      defaultChatPermissionMode,
       codexDefaults: {
         model: input.model ?? current.agentDefaults.codex.model,
         reasoningEffort: normalizeCodexReasoningEffort(input.effort, current.agentDefaults.codex.reasoningEffort),
@@ -204,6 +213,7 @@ const updateAgentDefaults = async (input: UpdateAgentDefaultsInput): Promise<Set
   state.settings = normalizeSettings({
     ...current,
     defaultAgentProvider,
+    defaultChatPermissionMode,
     agentDefaults: {
       ...current.agentDefaults,
       claude: {

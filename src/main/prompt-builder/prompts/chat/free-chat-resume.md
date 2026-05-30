@@ -1,3 +1,5 @@
+{{chatModeInstructions}}
+
 SHARED FILES IN THIS MESSAGE:
 {{sharedFiles}}
 

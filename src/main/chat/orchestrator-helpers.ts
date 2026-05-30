@@ -2,9 +2,10 @@ import { createHash, randomUUID } from 'node:crypto';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import type { ChatErrorCode, ClaudeEffort, CodexReasoningEffort, PreviewDiffFile } from '../../shared/types';
+import type { AgentPermissionMode, ChatErrorCode, ClaudeEffort, CodexReasoningEffort, PreviewDiffFile } from '../../shared/types';
 import { assertAllowedMcpServers, codexWorkspaceNetworkConfigArgs, createIsolatedCodexHome, DisallowedMcpServerError, removeIsolatedCodexHome } from '../codex-run-isolation';
 import { classifyCodexAuthOutput } from '../codex-auth-helpers';
+import { claudePermissionArgs, codexUnsafeArgs, codexWorkspaceArgs } from '../agent-permission-mode';
 
 export interface CodexMcpServerConfig {
   name: string;
@@ -197,6 +198,7 @@ export class SandboxRunner {
     prompt: string;
     model: string;
     reasoningEffort: CodexReasoningEffort;
+    permissionMode?: AgentPermissionMode;
     networkAccess?: boolean;
     timeoutMs: number;
     onChild: (child: ChildProcessWithoutNullStreams) => void;
@@ -249,7 +251,8 @@ export class SandboxRunner {
             ...reasoningArgs,
             ...networkArgs,
             ...mcpArgs,
-            '--full-auto',
+            ...codexUnsafeArgs(params.permissionMode),
+            ...codexWorkspaceArgs(params.permissionMode),
             '--skip-git-repo-check',
             params.threadId,
             params.prompt,
@@ -279,9 +282,9 @@ export class SandboxRunner {
           ['exec', 'resume', ...modelArgs, ...mcpArgs, '--skip-git-repo-check', params.threadId, params.prompt],
         ]
       : [
-          ['exec', '--json', ...modelArgs, ...reasoningArgs, ...networkArgs, ...mcpArgs, '--full-auto', '--sandbox', 'workspace-write', ...commonArgs, params.prompt],
-          ['exec', '--json', ...modelArgs, ...reasoningArgs, ...networkArgs, ...mcpArgs, '--sandbox', 'workspace-write', ...commonArgs, params.prompt],
-          ['exec', '--json', ...modelArgs, ...networkArgs, ...mcpArgs, '--sandbox', 'workspace-write', ...commonArgs, params.prompt],
+          ['exec', '--json', ...modelArgs, ...reasoningArgs, ...networkArgs, ...mcpArgs, ...codexUnsafeArgs(params.permissionMode), ...codexWorkspaceArgs(params.permissionMode), ...commonArgs, params.prompt],
+          ['exec', '--json', ...modelArgs, ...reasoningArgs, ...networkArgs, ...mcpArgs, ...codexUnsafeArgs(params.permissionMode), ...codexWorkspaceArgs(params.permissionMode), ...commonArgs, params.prompt],
+          ['exec', '--json', ...modelArgs, ...networkArgs, ...mcpArgs, ...codexUnsafeArgs(params.permissionMode), ...codexWorkspaceArgs(params.permissionMode), ...commonArgs, params.prompt],
           ['exec', '--json', ...modelArgs, ...networkArgs, ...mcpArgs, ...commonArgs, params.prompt],
           ['exec', ...modelArgs, ...networkArgs, ...mcpArgs, ...commonArgs, params.prompt],
         ];
@@ -399,6 +402,7 @@ export class SandboxRunner {
     prompt: string;
     model: string;
     effort: ClaudeEffort;
+    permissionMode?: AgentPermissionMode;
     timeoutMs: number;
     onChild: (child: ChildProcessWithoutNullStreams) => void;
     onOutput?: (stream: 'stdout' | 'stderr' | 'meta', text: string) => void;
@@ -417,8 +421,7 @@ export class SandboxRunner {
       params.model,
       '--effort',
       params.effort,
-      '--permission-mode',
-      'bypassPermissions',
+      ...claudePermissionArgs(params.permissionMode),
       ...(mcpServers.length > 0 ? ['--mcp-config', mcpConfigPath] : []),
       ...(params.threadId ? ['--resume', params.threadId] : []),
     ];

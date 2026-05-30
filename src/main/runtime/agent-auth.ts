@@ -584,6 +584,16 @@ const resolveManagedClaudeCliPath = async (baseDir: string): Promise<string | nu
   return null;
 };
 
+const getInstalledClaudeCliVersion = async (baseDir: string): Promise<string | null> => {
+  const packageJsonPath = path.join(baseDir, 'node_modules', '@anthropic-ai', 'claude-code', 'package.json');
+  try {
+    const parsed = JSON.parse(await fs.readFile(packageJsonPath, 'utf8')) as { version?: unknown };
+    return typeof parsed.version === 'string' ? parsed.version : null;
+  } catch {
+    return null;
+  }
+};
+
 const resolveSystemClaudeCliPath = async (): Promise<string | null> => {
   try {
     const result = await runCommandCapture(
@@ -615,8 +625,15 @@ const resolveClaudeCli = async (): Promise<{ path: string; source: 'managed' | '
 
 const ensureClaudeCliInstalled = async (): Promise<string> => {
   const existing = await resolveManagedClaudeCliPath(getClaudeRoot());
-  if (existing) {
+  const installedVersion = existing ? await getInstalledClaudeCliVersion(getClaudeRoot()) : null;
+  if (existing && installedVersion === CLAUDE_CODE_VERSION) {
     return existing;
+  }
+  if (existing && installedVersion !== CLAUDE_CODE_VERSION) {
+    await appendInstallLog('claude_auth:version_mismatch', {
+      installedVersion,
+      expectedVersion: CLAUDE_CODE_VERSION,
+    });
   }
   const claudeRoot = getClaudeRoot();
   await fs.mkdir(claudeRoot, { recursive: true });

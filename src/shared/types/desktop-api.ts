@@ -114,6 +114,7 @@ export interface ForgerDesktopApi {
   getClaudeAuthStatus: () => Promise<ClaudeAuthStatus>;
   connectClaudeAuth: () => Promise<{ success: boolean; userMessage: string; status?: ClaudeAuthStatus } & FailureDiagnosticFields>;
   reinstallClaude: () => Promise<{ success: boolean; userMessage: string; status?: ClaudeAuthStatus } & FailureDiagnosticFields>;
+  prepareDesktopErrorReport: (input: DesktopErrorReportPreview) => Promise<DesktopErrorReportPreview>;
   submitDesktopErrorReport: (input: DesktopErrorReportPreview) => Promise<{ success: boolean; userMessage: string; technicalCode?: string }>;
   prepareConversationDiagnosticReport: (input: PrepareConversationDiagnosticReportInput) => Promise<ConversationDiagnosticReportPreview>;
   submitConversationDiagnosticReport: (input: ConversationDiagnosticReportPreview) => Promise<SubmitConversationDiagnosticReportResult>;

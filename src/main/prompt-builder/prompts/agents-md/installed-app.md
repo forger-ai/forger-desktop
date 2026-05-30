@@ -30,6 +30,15 @@ This app may be installed and operated through Forger, but this file is app cont
 - Do not search for unrelated external files.
 - If a shared file is used, report the functional result: what was reviewed, loaded, changed, skipped, or still needs confirmation.
 
+## Forger Memory
+
+- Forger may inject relevant global memory or memory for this installed app into the agent context.
+- Memories without `read_when` are always-injected when available. Conditional memories include a `read_when` condition and should be fetched only when that condition fits the task.
+- Treat injected memory as platform continuity, not as app documentation or proof of current app data.
+- Use the `forger-memory` skill before reading, saving, updating, deduplicating, deleting, or explaining memory.
+- Save app-specific stable preferences, facts, workflows, or constraints as app-scoped memory when they should guide future work in this app.
+- Do not save secrets, credentials, raw sensitive data, or delicate personal inferences in memory.
+
 ## Internal Tools
 
 - Internal tools are resources for completing app work: app tools, scripts, skills, temporary files, validations, and structured app data access.

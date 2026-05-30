@@ -218,7 +218,7 @@ test('agent runtime registry normalizes providers, defaults, fallbacks, and runt
   assert.equal(runtimeRegistry.normalizeRuntimeEffort('codex', 'bad', 'not-a-codex-effort'), 'medium');
   assert.equal(runtimeRegistry.normalizeAgentProviderPreference('bad'), 'auto');
   assert.equal(runtimeRegistry.normalizeCodexReasoningEffort('bad'), 'medium');
-  assert.equal(runtimeRegistry.normalizeClaudeModel('bad'), 'sonnet');
+  assert.equal(runtimeRegistry.normalizeClaudeModel('bad'), 'claude-sonnet-4-6');
   assert.equal(runtimeRegistry.normalizeClaudeEffort('bad'), 'medium');
   assert.equal(runtimeRegistry.getDefaultCodexReasoningEffort('gpt-5.3-codex-spark'), 'high');
   assert.equal(runtimeRegistry.getDefaultClaudeEffort('opusplan'), 'high');
@@ -227,12 +227,15 @@ test('agent runtime registry normalizes providers, defaults, fallbacks, and runt
   assert.equal(runtimeRegistry.isAgentProvider('codex'), true);
   assert.equal(runtimeRegistry.isAgentProvider('bad'), false);
   assert.equal(runtimeRegistry.isAgentProviderPreference('auto'), true);
+  assert.equal(runtimeRegistry.normalizeAgentPermissionMode('unsafe'), 'unsafe');
+  assert.equal(runtimeRegistry.normalizeAgentPermissionMode('bad'), 'safe');
   assert.equal(runtimeRegistry.isCodexModel('gpt-5.4'), true);
   assert.equal(runtimeRegistry.isCodexModel('bad'), false);
   assert.equal(runtimeRegistry.isCodexReasoningEffort('low'), true);
   assert.equal(runtimeRegistry.isClaudeModel('sonnet'), true);
   assert.equal(runtimeRegistry.isClaudeEffort('max'), true);
-  assert.equal(runtimeRegistry.getAgentModelOptions('claude')[0].realModelName, 'default');
+  assert.equal(runtimeRegistry.getAgentModelOptions('claude')[0].realModelName, 'claude-opus-4-8');
+  assert.equal(runtimeRegistry.getDefaultClaudeEffort('claude-opus-4-8'), 'high');
   assert.equal(runtimeRegistry.getAgentModelOptions('codex')[0].realModelName, 'gpt-5.5');
   assert.equal(runtimeRegistry.legacyCodexRuntime(), undefined);
   assert.equal(runtimeRegistry.legacyCodexRuntime({}), undefined);
@@ -314,6 +317,7 @@ test('agent runtime registry normalizes providers, defaults, fallbacks, and runt
     provider: 'claude',
     model: 'haiku',
     effort: 'medium',
+    permissionMode: 'safe',
   });
   assert.deepEqual(runtimeRegistry.resolveAgentRuntime({ provider: 'codex', model: 'bad', effort: 'bad' }, {
     codex: { model: 'gpt-5.5', reasoningEffort: 'low' },
@@ -322,6 +326,7 @@ test('agent runtime registry normalizes providers, defaults, fallbacks, and runt
     provider: 'codex',
     model: 'gpt-5.5',
     effort: 'medium',
+    permissionMode: 'safe',
   });
   assert.deepEqual(runtimeRegistry.runtimeFromDefaults({
     codex: { model: 'gpt-5.2', reasoningEffort: 'none' },

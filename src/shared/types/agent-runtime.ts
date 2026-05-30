@@ -9,11 +9,13 @@ export interface CodexAuthStatus {
 export type AgentProvider = 'codex' | 'claude';
 export type ClaudeEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 export type AgentEffort = CodexReasoningEffort | ClaudeEffort;
+export type AgentPermissionMode = 'safe' | 'unsafe';
 
 export interface AgentRuntime {
   provider: AgentProvider;
   model: string;
   effort: AgentEffort;
+  permissionMode?: AgentPermissionMode;
 }
 
 export interface AgentDefaults {
@@ -64,6 +66,26 @@ export interface DesktopErrorReportPreview extends DesktopErrorReportInput {
   platform?: string;
   arch?: string;
   occurredAt: string;
+  diagnosticAttachmentToken?: string;
+  diagnosticFiles?: DesktopErrorReportFileSummary[];
+}
+
+export interface DesktopErrorReportFileSummary {
+  kind:
+    | 'install_log'
+    | 'runtime_status'
+    | 'app_mcp_log'
+    | 'agent_run'
+    | 'provider_session'
+    | 'renderer_stack'
+    | 'main_stack'
+    | 'automation_transcript';
+  filename: string;
+  contentType: string;
+  originalByteSize: number;
+  sanitizedByteSize: number;
+  lineCount?: number;
+  truncated?: boolean;
 }
 
 export interface AppAiSubscriptionStatus {

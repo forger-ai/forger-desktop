@@ -157,6 +157,9 @@ test('Forger prompt builders include contract, language, files, official tools, 
   assert.match(appPrompt, /APP_STACK: backend python\/fastapi\/uv; frontend typescript\/react\/vite\/mui/);
   assert.match(appPrompt, /RUNTIME: provider codex, model gpt-5\.4/);
   assert.match(appPrompt, /NETWORK ACCESS: disabled/);
+  assert.match(appPrompt, /FORGER CHAT MODE: edit_app/);
+  assert.match(appPrompt, /Always use Plan Mode before programming/);
+  assert.match(appPrompt, /forger_ask_question/);
   assert.match(appPrompt, /use APP_ROOT for versioning checks/);
   assert.match(appPrompt, /Opening or starting an installed app means opening it through Forger Desktop/);
   assert.match(appPrompt, /Use Forger MCP app tools to open the app and to check runtime status/);
@@ -187,6 +190,8 @@ test('Forger prompt builders include contract, language, files, official tools, 
   assert.doesNotMatch(appResumePrompt, /SELECTED APP/);
   assert.doesNotMatch(appResumePrompt, /APP_ROOT/);
   assert.doesNotMatch(appResumePrompt, /Gmail status/);
+  assert.match(appResumePrompt, /FORGER CHAT MODE: edit_app/);
+  assert.match(appResumePrompt, /Propose a concise implementation plan before programming/);
   assert.match(appResumePrompt, /opening or starting an installed app means opening it through Forger Desktop/i);
   assert.match(appResumePrompt, /Use Forger MCP app tools to open the app and to check runtime status/);
   assert.match(appResumePrompt, /SHARED FILES IN THIS MESSAGE:[\s\S]*budget\.csv/);
@@ -221,7 +226,9 @@ test('Forger prompt builders include contract, language, files, official tools, 
     sharedFilesRootName: 'shared',
     sharedFiles: [],
   });
-  assert.match(freePrompt, /FORGER CHAT MODE: free chat/);
+  assert.match(freePrompt, /FORGER CHAT MODE: free_chat/);
+  assert.match(freePrompt, /free-form conversation with the agent/);
+  assert.match(freePrompt, /Do not silently turn open-ended brainstorming into app creation or app editing/);
   assert.match(freePrompt, /# What Is Forger\?/);
   assert.match(freePrompt, /USER LANGUAGE: not configured/);
   assert.match(freePrompt, /No shared files/);
@@ -239,11 +246,36 @@ test('Forger prompt builders include contract, language, files, official tools, 
       source: 'attached',
     }],
   });
-  assert.doesNotMatch(freeResumePrompt, /FORGER CHAT MODE/);
+  assert.match(freeResumePrompt, /FORGER CHAT MODE: free_chat/);
+  assert.match(freeResumePrompt, /free-form conversation with the agent/);
   assert.doesNotMatch(freeResumePrompt, /# What Is Forger\?/);
   assert.doesNotMatch(freeResumePrompt, /Gmail status/);
   assert.match(freeResumePrompt, /SHARED FILES IN THIS MESSAGE:[\s\S]*large\.csv/);
   assert.match(freeResumePrompt, /USER MESSAGE:\nSigue/);
+  const createPrompt = buildCodexPromptForFreeChat({
+    chatMode: 'create_app',
+    userPrompt: 'Create a recipe planner',
+    userLanguage: 'en',
+    officialToolsContext: '',
+    sharedFilesRootName: 'shared',
+    sharedFiles: [],
+  });
+  assert.match(createPrompt, /FORGER CHAT MODE: create_app/);
+  assert.match(createPrompt, /Prefer `forger_ask_question`/);
+  assert.match(createPrompt, /Call `forger_create_app` only after the intent is clear enough/);
+  assert.match(createPrompt, /Internally break the idea into product goals, user stories, data model/);
+  const createResumePrompt = buildCodexPromptForFreeChat({
+    turnKind: 'resume',
+    chatMode: 'create_app',
+    userPrompt: 'The main user is a home cook',
+    userLanguage: 'en',
+    officialToolsContext: '',
+    sharedFilesRootName: 'shared',
+    sharedFiles: [],
+  });
+  assert.match(createResumePrompt, /FORGER CHAT MODE: create_app/);
+  assert.match(createResumePrompt, /pre-creation clarification/);
+  assert.match(createResumePrompt, /USER MESSAGE:\nThe main user is a home cook/);
   assert.match(buildCodexPromptForFreeChat({
     userPrompt: 'Leer archivo',
     userLanguage: 'en',
@@ -288,6 +320,8 @@ test('Forger prompt builders include contract, language, files, official tools, 
   assert.match(appAgents, /fallback context file used when the app does not ship its own app-owned `AGENTS\.md`/);
   assert.match(appAgents, /Do not infer visible capabilities only from scripts/);
   assert.match(appAgents, /Shared files are task inputs only/);
+  assert.match(appAgents, /Forger may inject relevant global memory or memory for this installed app/);
+  assert.match(appAgents, /Use the `forger-memory` skill before reading, saving, updating, deduplicating, deleting, or explaining memory/);
   assert.match(appAgents, /Prefer structured app tools when they exist/);
   assert.match(appAgents, /When the person asks to open, launch, start, run, or bring up the app, use Forger Desktop app controls/);
   assert.match(appAgents, /Do not start app services manually with Python, uvicorn, npm, Vite, FastAPI, or localhost commands/);
@@ -313,6 +347,10 @@ test('Forger prompt builders include contract, language, files, official tools, 
   assert.match(globalAgents, /## Strict Domain/);
   assert.match(globalAgents, /## Shared Files/);
   assert.match(globalAgents, /## Source of Truth/);
+  assert.match(globalAgents, /## Memory/);
+  assert.match(globalAgents, /Forger memory is platform context/);
+  assert.match(globalAgents, /Memories without `read_when` are always-injected/);
+  assert.match(globalAgents, /Use `forger-memory` before reading, saving, updating, deduplicating, deleting, or explaining memory/);
   assert.match(globalAgents, /Treat the person as non-technical by default/);
   assert.match(globalAgents, /Use product words: app, screen, button, data, file, saved version, flow, result/);
   assert.match(globalAgents, /## Request Playbooks[\s\S]*## How To Speak With The Person/);
@@ -350,6 +388,7 @@ test('official tool skill templates and seed data keep expected Desktop defaults
     'forger-installed-app-change',
     'forger-localization',
     'forger-manifest-authoring',
+    'forger-memory',
     'forger-mobile-responsive-frontend',
     'forger-mui-component-patterns',
     'forger-mui-consistency',
@@ -399,6 +438,9 @@ test('official tool skill templates and seed data keep expected Desktop defaults
   assert.match(manifestSkill.body, /"promptTemplates": \[/);
   assert.match(manifestSkill.body, /"agents": \[/);
   assert.match(manifestSkill.body, /promptTemplates[\s\S]*agents[\s\S]*tools/);
+  assert.match(manifestSkill.body, /"permissionMode": "safe"/);
+  assert.match(manifestSkill.body, /claude-sonnet-4-6/);
+  assert.match(manifestSkill.body, /Do not use legacy Claude Code aliases/);
   assert.match(manifestSkill.body, /gmail\.connection\.status/);
   assert.match(manifestSkill.body, /Do not add `catalog\.capabilities`/);
   assert.match(templates.find((template) => template.id === 'forger-agents')?.body ?? '', /^---\nname: forger-agents/m);
@@ -489,8 +531,22 @@ test('official tool skill templates and seed data keep expected Desktop defaults
   assert.match(bridgeSkill.body, /forger_get_app_runtime_status/);
   const officialToolsSkill = templates.find((template) => template.id === 'forger-official-tools');
   assert.ok(officialToolsSkill);
+  assert.doesNotMatch(officialToolsSkill.description, /memory/);
   assert.match(officialToolsSkill.body, /forger_open_app/);
   assert.match(officialToolsSkill.body, /Do not manually start app services/);
+  const memorySkill = templates.find((template) => template.id === 'forger-memory');
+  assert.ok(memorySkill);
+  assert.equal(memorySkill.description, 'Use when reading, saving, updating, deduplicating, deleting, or explaining Forger platform memory, including injected memories, app-scoped memory, global preferences, privacy, and safe user-facing language.');
+  assert.match(memorySkill.body, /## read_when/);
+  assert.match(memorySkill.body, /Memory is a Forger platform layer/);
+  assert.match(memorySkill.body, /not an installed app feature, app manifest grant, or optional official tool/);
+  assert.match(memorySkill.body, /Memories without `read_when` are always-injected/);
+  assert.match(memorySkill.body, /Memories with `read_when` are registered in context by title and condition/);
+  assert.match(memorySkill.body, /Treat injected memories as already available context/);
+  assert.match(memorySkill.body, /Read existing memory before saving/);
+  assert.match(memorySkill.body, /Prefer `memory_update`/);
+  assert.match(memorySkill.body, /Never save secrets, credentials, tokens, private keys/);
+  assert.match(memorySkill.body, /I updated what Forger remembers/);
   const installedAppChangeSkill = templates.find((template) => template.id === 'forger-installed-app-change');
   assert.ok(installedAppChangeSkill);
   assert.match(installedAppChangeSkill.body, /Restart after structural app edits/);

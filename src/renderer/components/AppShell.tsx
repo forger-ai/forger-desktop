@@ -9,12 +9,10 @@ interface AppShellProps {
   currentView: View;
   onNavigate: (view: View) => void;
   t: AppDictionary;
-  chatApps: AppSummary[];
-  selectedChatAppId: string | null;
+  chatModeLabel?: string | null;
   dataApps: AppSummary[];
   selectedDataAppId: string | null;
   getAppMeta: (appId: string) => { name: string; description: string };
-  onSelectChatApp: (appId: string | null) => void;
   onSelectDataApp: (appId: string | null) => void;
   onOpenCloudModal: () => void;
   account: ForgerAccountSession;
@@ -39,12 +37,10 @@ export function AppShell({
   currentView,
   onNavigate,
   t,
-  chatApps,
-  selectedChatAppId,
+  chatModeLabel,
   dataApps,
   selectedDataAppId,
   getAppMeta,
-  onSelectChatApp,
   onSelectDataApp,
   onOpenCloudModal,
   account,
@@ -80,12 +76,10 @@ export function AppShell({
         <Topbar
           currentView={currentView}
           t={t}
-          chatApps={chatApps}
-          selectedChatAppId={selectedChatAppId}
+          chatModeLabel={chatModeLabel}
           dataApps={dataApps}
           selectedDataAppId={selectedDataAppId}
           getAppMeta={getAppMeta}
-          onSelectChatApp={onSelectChatApp}
           onSelectDataApp={onSelectDataApp}
           onOpenCloudModal={onOpenCloudModal}
           account={account}

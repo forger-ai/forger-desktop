@@ -1,8 +1,14 @@
 export const enSections = {
-    catalog: {
+    apps: {
       title: 'Apps',
-      subtitle: 'Open installed apps or add personal apps ready to adapt to your way of working.',
-      empty: 'No apps are visible with the current filters.',
+      subtitle: 'Your installed apps appear here.',
+      empty: 'You do not have installed apps yet.',
+      openCatalog: 'View catalog',
+    },
+    catalog: {
+      title: 'Catalog',
+      subtitle: 'Explore curated Forger apps available to install.',
+      empty: 'No catalog apps are visible with the current filters.',
       refresh: 'Refresh apps',
       filtersLabel: 'Browse by category',
       statusFilterLabel: 'Filter by: Status',
@@ -25,10 +31,45 @@ export const enSections = {
       providerSelectorLabel: 'Agent provider',
       modelSelectorLabel: 'Model',
       effortSelectorLabel: 'Thinking effort',
+      permissionSelectorLabel: 'Run permissions',
+      permissionNormalLabel: 'Normal permissions',
+      permissionElevatedLabel: 'Elevated permissions',
+      permissionNormalTooltip: 'Normal permissions for this run',
+      permissionElevatedTooltip: 'Elevated permissions active for this run',
       lockedRuntimeTooltip: 'This conversation already started with this agent setup. Start a new conversation to change it.',
       autoProviderLabel: (provider: string) => `Auto: ${provider}`,
       activeAppLabel: 'Chatting with:',
       inactiveApp: 'Free chat',
+      modeLabel: 'Mode:',
+      modeLockedTooltip: 'Start a new conversation to change this.',
+      modeSelector: {
+        title: 'What do you want to do?',
+        subtitle: 'Choose how you want to use this conversation.',
+        label: 'Action',
+        pendingChip: 'Choose an action',
+        appLabel: 'Installed app',
+        appPlaceholder: 'Choose an installed app',
+        noInstalledApps: 'You do not have installed apps yet.',
+        chips: {
+          create_app: 'Creating app',
+          edit_app: (appName: string) => `Modifying: ${appName}`,
+          free_chat: 'Just chat',
+        },
+        options: {
+          create_app: {
+            title: 'Create an app',
+            description: 'Describe what you want to build.',
+          },
+          edit_app: {
+            title: 'Change an existing app',
+            description: 'Choose an installed app and request changes.',
+          },
+          free_chat: {
+            title: 'Just chat',
+            description: 'Talk freely with the agent.',
+          },
+        },
+      },
       inputPlaceholder: 'Mention previously uploaded files with @...',
       attachFiles: 'Attach files',
       attachedFiles: 'Files to upload',
@@ -64,6 +105,12 @@ export const enSections = {
       permissionDenied: 'Denied',
       permissionApprove: 'Approve',
       permissionDeny: 'Deny',
+      questionPrompt: 'Forger needs a bit more detail to continue.',
+      questionBadge: 'Question',
+      questionAnswered: 'Answered',
+      questionFreeTextPlaceholder: 'Something else',
+      questionNext: 'Next',
+      questionSubmit: 'Answer',
       codexThinking: 'The agent is thinking...',
       newConversationTitle: 'New conversation',
       sendInProgress: 'I am still processing your previous message. Wait for the response or cancel that request.',
@@ -120,7 +167,7 @@ export const enSections = {
       userMessage: (name: string, description: string, purpose: string, lookAndFeel?: string) =>
         `Create a private local app called "${name}".\n\nDescription: ${description}\n\nWhat it does:\n${purpose}${lookAndFeel ? `\n\nDesign choices:\n${lookAndFeel}` : ''}`,
       injectedPrompt: (name: string, description: string, purpose: string, lookAndFeel?: string) =>
-        `Create and clarify a private local Forger app.\n\nApp name: ${name}\nShort description: ${description}\nWhat the app does:\n${purpose}\n\nSelected visual direction:\n${lookAndFeel ?? 'No explicit visual direction was selected. Propose 2 or 3 directions before defining the interface.'}\n\nFirst response requirements:\n- Do not repeat the user's prompt back verbatim.\n- Give a concise, non-technical product breakdown.\n- Confirm the functional scope, core data, main screens, mobile flow, risks, open questions, and acceptance criteria.\n- Validate the selected visual direction and explain how the palette will shape the interface.\n- Recommend dashboard plus feature views as the default structure. Each primary model or domain area should have its own view with a list, clear create action, delete action, and basic CRUD where appropriate.\n- Present that structure as a strong recommendation, while explicitly offering the user the option to choose a different screen structure or workflow.\n- Do not implement yet.\n\nImplementation requirements for the later build:\n- Use forger-frontend-product-patterns before creating or changing app screens, then use forger-tailwind-design-patterns, forger-tailwind-shadcn-patterns, and forger-tailwind-responsive-frontend.\n- Follow the feature-first frontend convention: frontend/src/app for root wiring, frontend/src/features/<area> for domain screens and feature-local code, frontend/src/components for shared UI, frontend/src/components/ui for copied shadcn-style primitives, frontend/src/api for backend contracts, frontend/src/lib for pure helpers, frontend/src/i18n for copy, and frontend/src/styles or frontend/src/design-system for tokens and global design setup. Keep App.tsx thin. Do not use MUI in new apps from this skeleton unless the user explicitly asks for a MUI migration.\n- New apps created from Forger already declare localNetworkShare and remoteTunnel as true. Use forger-remote-tunnel-wiring before changing manifest access flags, API clients, uploads, downloads, or entrypoint wiring. Do not create an independent tunnel.\n- promptTemplates must use id, title, description, arguments, and prompt. Agents must use id, title, kind, description, and initialPrompt or prompts.initial.body. Prefer agents.prompts.initial/resume/steer with declared variables. Use runtimeRecommendations only when useful: codex uses model and reasoningEffort; claude uses model and effort.\n- Gmail is the only official Forger tool today. If needed, declare it in manifest.tools with object entries and only the needed actions: gmail.connection.status, gmail.search_messages, gmail.read_thread, gmail.read_attachment, gmail.send_email. Do not add Gmail OAuth to appSecrets.\n- Save each applied app change as an internal version before finishing, and talk about saved versions instead of Git unless the user asks for technical details.`,
+        `Create and clarify a private local Forger app.\n\nApp name: ${name}\nShort description: ${description}\nWhat the app does:\n${purpose}\n\nSelected visual direction:\n${lookAndFeel ?? 'No explicit visual direction was selected. Propose 2 or 3 directions before defining the interface.'}\n\nFirst response requirements:\n- Do not repeat the user's prompt back verbatim.\n- Give a concise, non-technical product breakdown.\n- Confirm the functional scope, core data, main screens, mobile flow, risks, open questions, and acceptance criteria.\n- Validate the selected visual direction and explain how the palette will shape the interface.\n- Recommend dashboard plus feature views as the default structure. Each primary model or domain area should have its own view with a list, clear create action, delete action, and basic CRUD where appropriate.\n- Present that structure as a strong recommendation, while explicitly offering the user the option to choose a different screen structure or workflow.\n- Do not implement yet.\n\nImplementation requirements for the later build:\n- Use forger-frontend-product-patterns before creating or changing app screens, then use forger-tailwind-design-patterns, forger-tailwind-shadcn-patterns, and forger-tailwind-responsive-frontend.\n- Follow the feature-first frontend convention: frontend/src/app for root wiring, frontend/src/features/<area> for domain screens and feature-local code, frontend/src/components for shared UI, frontend/src/components/ui for copied shadcn-style primitives, frontend/src/api for backend contracts, frontend/src/lib for pure helpers, frontend/src/i18n for copy, and frontend/src/styles or frontend/src/design-system for tokens and global design setup. Keep App.tsx thin. Do not use MUI in new apps from this skeleton unless the user explicitly asks for a MUI migration.\n- New apps created from Forger already declare localNetworkShare and remoteTunnel as true. Use forger-remote-tunnel-wiring before changing manifest access flags, API clients, uploads, downloads, or entrypoint wiring. Do not create an independent tunnel.\n- promptTemplates must use id, title, description, arguments, and prompt. Agents must use id, title, kind, description, and initialPrompt or prompts.initial.body. Prefer agents.prompts.initial/resume/steer with declared variables. Use runtimeRecommendations only when useful: codex uses model and reasoningEffort; claude uses versioned models and effort, recommending claude-sonnet-4-6 by default. Declare permissionMode: "safe" unless there is a concrete need for elevated permissions.\n- Gmail is the only official Forger tool today. If needed, declare it in manifest.tools with object entries and only the needed actions: gmail.connection.status, gmail.search_messages, gmail.read_thread, gmail.read_attachment, gmail.send_email. Do not add Gmail OAuth to appSecrets.\n- Save each applied app change as an internal version before finishing, and talk about saved versions instead of Git unless the user asks for technical details.`,
     },
     settings: {
       title: 'Settings',

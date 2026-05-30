@@ -15,6 +15,11 @@ const REDACTED_PATH = '[REDACTED_PATH]';
 const SENSITIVE_KEY_PATTERN = /(?:secret|token|authorization|bearer|api[_-]?key|password|passwd|credential|private[_-]?key|client[_-]?secret|refresh[_-]?token|access[_-]?token|mcp[_-]?token|cookie)/i;
 const BEARER_PATTERN = /\bBearer\s+[A-Za-z0-9._~+/=-]{12,}/gi;
 const TOKEN_ASSIGNMENT_PATTERN = /\b([A-Za-z][A-Za-z0-9_-]*(?:TOKEN|Token|token|SECRET|Secret|secret|KEY|Key|key|PASSWORD|Password|password))=([^\s"'`]{8,})/g;
+const JSON_SECRET_PROPERTY_PATTERN = /(["'](?:secret|token|authorization|bearer|api[_-]?key|password|passwd|credential|private[_-]?key|client[_-]?secret|refresh[_-]?token|access[_-]?token|mcp[_-]?token|cookie)["']\s*:\s*)["'][^"']+["']/gi;
+const COOKIE_PATTERN = /\b(Cookie|Set-Cookie)\s*:\s*[^\r\n]+/gi;
+const PRIVATE_KEY_PATTERN = /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g;
+const URL_CREDENTIALS_PATTERN = /\b([a-z][a-z0-9+.-]*:\/\/)([^:@/\s]+):([^@/\s]+)@/gi;
+const URL_QUERY_SECRET_PATTERN = /([?&](?:access_token|refresh_token|token|api_key|apikey|key|secret|password|code|client_secret)=)[^&#\s]+/gi;
 const EMAIL_PATTERN = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
 const MAC_HOME_PATTERN = /\/Users\/[^/\s"'`]+(?!\/Forger(?:-dev)?(?:\/|$))/g;
 const LINUX_HOME_PATTERN = /\/home\/[^/\s"'`]+(?!\/Forger(?:-dev)?(?:\/|$))/g;
@@ -70,8 +75,13 @@ const sanitizeString = (value: string, options: ReturnType<typeof normalizeOptio
     }
   }
   output = output
+    .replace(PRIVATE_KEY_PATTERN, REDACTED)
     .replace(BEARER_PATTERN, `Bearer ${REDACTED}`)
     .replace(TOKEN_ASSIGNMENT_PATTERN, `$1=${REDACTED}`)
+    .replace(JSON_SECRET_PROPERTY_PATTERN, `$1"${REDACTED}"`)
+    .replace(COOKIE_PATTERN, `$1: ${REDACTED}`)
+    .replace(URL_CREDENTIALS_PATTERN, `$1${REDACTED}:${REDACTED}@`)
+    .replace(URL_QUERY_SECRET_PATTERN, `$1${REDACTED}`)
     .replace(EMAIL_PATTERN, REDACTED)
     .replace(MAC_HOME_PATTERN, REDACTED_PATH)
     .replace(LINUX_HOME_PATTERN, REDACTED_PATH)

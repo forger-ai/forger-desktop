@@ -32,4 +32,24 @@ export interface DesktopErrorReportPreview extends DesktopErrorReportInput {
   platform?: string;
   arch?: string;
   occurredAt: string;
+  diagnosticAttachmentToken?: string;
+  diagnosticFiles?: DesktopErrorReportFileSummary[];
+}
+
+export interface DesktopErrorReportFileSummary {
+  kind:
+    | 'install_log'
+    | 'runtime_status'
+    | 'app_mcp_log'
+    | 'agent_run'
+    | 'provider_session'
+    | 'renderer_stack'
+    | 'main_stack'
+    | 'automation_transcript';
+  filename: string;
+  contentType: string;
+  originalByteSize: number;
+  sanitizedByteSize: number;
+  lineCount?: number;
+  truncated?: boolean;
 }

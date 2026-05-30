@@ -545,7 +545,11 @@ const normalizeManifestPromptTemplates = (manifest: AppManifest | null): AppProm
       : undefined;
     const model = typeof candidate.model === 'string' && candidate.model.trim() ? candidate.model.trim() : undefined;
     const reasoningEffort = normalizeManifestReasoningEffort(candidate.reasoningEffort);
-    const runtime = normalizeManifestRuntime((candidate as Record<string, unknown>).runtime);
+    const runtime = withManifestPermissionMode(
+      normalizeManifestRuntime((candidate as Record<string, unknown>).runtime),
+      normalizeManifestPermissionMode((candidate as Record<string, unknown>).permissionMode),
+      { model, reasoningEffort },
+    );
     const runtimeRecommendations = normalizeManifestRuntimeRecommendations(
       (candidate as Record<string, unknown>).runtimeRecommendations,
       { model, reasoningEffort },
@@ -593,7 +597,11 @@ const normalizeManifestAgents = (manifest: AppManifest | null): AppAgent[] => {
           : undefined;
       const model = typeof candidate.model === 'string' && candidate.model.trim() ? candidate.model.trim() : undefined;
       const reasoningEffort = normalizeManifestReasoningEffort(candidate.reasoningEffort);
-      const runtime = normalizeManifestRuntime((candidate as Record<string, unknown>).runtime);
+      const runtime = withManifestPermissionMode(
+        normalizeManifestRuntime((candidate as Record<string, unknown>).runtime),
+        normalizeManifestPermissionMode((candidate as Record<string, unknown>).permissionMode),
+        { model, reasoningEffort },
+      );
       const runtimeRecommendations = normalizeManifestRuntimeRecommendations(
         (candidate as Record<string, unknown>).runtimeRecommendations,
         { model, reasoningEffort },
@@ -671,7 +679,10 @@ const normalizeManifestAgentPromptTemplate = (value: unknown): AppAgentPromptTem
     return undefined;
   }
   const variables = normalizeManifestAgentPromptVariables(raw.variables);
-  const runtime = normalizeManifestRuntime(raw.runtime);
+  const runtime = withManifestPermissionMode(
+    normalizeManifestRuntime(raw.runtime),
+    normalizeManifestPermissionMode(raw.permissionMode),
+  );
   const runtimeRecommendations = normalizeManifestRuntimeRecommendations(raw.runtimeRecommendations);
   return {
     body,
@@ -708,6 +719,9 @@ const isAppAgentPromptVariableType = (value: unknown): value is AppAgentPromptVa
 
 const normalizeManifestReasoningEffort = (value: unknown): CodexReasoningEffort | undefined =>
   CODEX_REASONING_VALUES.has(value as CodexReasoningEffort) ? value as CodexReasoningEffort : undefined;
+
+const normalizeManifestPermissionMode = (value: unknown): 'safe' | 'unsafe' | undefined =>
+  value === 'safe' || value === 'unsafe' ? value : undefined;
 
 const normalizeManifestAgentDefaults = (manifest: AppManifest | null): AgentDefaults => {
   const base = normalizeSettings(settings).agentDefaults;
@@ -772,10 +786,30 @@ const normalizeManifestRuntime = (value: unknown): AgentRuntime | undefined => {
   const effort = provider === 'claude'
     ? normalizeClaudeEffort(record.effort, BUILT_IN_CLAUDE_EFFORT)
     : normalizeCodexReasoningEffort(record.effort, BUILT_IN_CODEX_REASONING);
+  const permissionMode = record.permissionMode === 'unsafe' ? 'unsafe' : record.permissionMode === 'safe' ? 'safe' : undefined;
   if (!provider || !model) {
     return undefined;
   }
-  return { provider, model, effort };
+  return { provider, model, effort, ...(permissionMode ? { permissionMode } : {}) };
+};
+
+const withManifestPermissionMode = (
+  runtime: AgentRuntime | undefined,
+  permissionMode: 'safe' | 'unsafe' | undefined,
+  fallback?: { model?: string; reasoningEffort?: CodexReasoningEffort },
+): AgentRuntime | undefined => {
+  if (runtime) {
+    return permissionMode ? { ...runtime, permissionMode } : runtime;
+  }
+  if (!permissionMode) {
+    return undefined;
+  }
+  return {
+    provider: 'codex',
+    model: fallback?.model ?? getCodexDefaults().model,
+    effort: fallback?.reasoningEffort ?? getCodexDefaults().reasoningEffort,
+    permissionMode,
+  };
 };
 
 const normalizePromptTemplateArguments = (input: unknown): NonNullable<AppPromptTemplate['arguments']> => {

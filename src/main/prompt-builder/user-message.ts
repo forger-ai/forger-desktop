@@ -10,6 +10,16 @@ export interface PromptSharedFile {
 }
 
 export type ChatPromptTurnKind = 'start' | 'resume';
+export type ChatPromptMode = 'create_app' | 'edit_app' | 'free_chat';
+
+const CHAT_MODE_PARTIALS: Record<ChatPromptMode, string> = {
+  create_app: 'partials/chat-modes/create-app.md',
+  edit_app: 'partials/chat-modes/edit-app.md',
+  free_chat: 'partials/chat-modes/free-chat.md',
+};
+
+const renderChatModePartial = (mode: ChatPromptMode): string =>
+  renderPromptFile(CHAT_MODE_PARTIALS[mode], {});
 
 const formatBytes = (value: number): string => {
   if (!Number.isFinite(value) || value <= 0) {
@@ -39,6 +49,7 @@ export const buildCodexPromptWithAppContext = (params: {
   officialToolsContext?: string;
   sharedFiles: PromptSharedFile[];
   sharedFilesRootName: string;
+  chatMode?: ChatPromptMode;
 }): string => {
   const userLanguage = params.userLanguage?.trim() || 'not configured';
   const filesSection =
@@ -55,8 +66,10 @@ export const buildCodexPromptWithAppContext = (params: {
         );
 
   const turnKind = params.turnKind ?? 'start';
+  const chatMode = params.chatMode ?? 'edit_app';
   const templatePath = turnKind === 'resume' ? 'chat/app-chat-resume.md' : 'chat/app-chat-start.md';
   const commonVariables = {
+    chatModeInstructions: renderChatModePartial(chatMode),
     sharedFiles: filesSection.join('\n'),
     userPrompt: params.userPrompt.trim(),
   };
@@ -87,6 +100,7 @@ export const buildCodexPromptForFreeChat = (params: {
   officialToolsContext?: string;
   sharedFiles: PromptSharedFile[];
   sharedFilesRootName: string;
+  chatMode?: ChatPromptMode;
 }): string => {
   const userLanguage = params.userLanguage?.trim() || 'not configured';
   const filesSection =
@@ -103,8 +117,10 @@ export const buildCodexPromptForFreeChat = (params: {
         );
 
   const turnKind = params.turnKind ?? 'start';
+  const chatMode = params.chatMode ?? 'free_chat';
   const templatePath = turnKind === 'resume' ? 'chat/free-chat-resume.md' : 'chat/free-chat-start.md';
   const commonVariables = {
+    chatModeInstructions: renderChatModePartial(chatMode),
     sharedFiles: filesSection.join('\n'),
     userPrompt: params.userPrompt.trim(),
   };

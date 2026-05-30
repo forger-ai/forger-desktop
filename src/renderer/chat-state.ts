@@ -4,13 +4,16 @@ import {
   normalizePersistedActiveChatRuns,
   type PersistedActiveChatRun,
 } from '@shared/chat-run-state';
-import type { AgentEffort, AgentProvider } from '@shared/types';
+import type { AgentEffort, AgentProvider, ChatMode } from '@shared/types';
 
 export const CHAT_STORAGE_KEY = 'forger-chat-conversations-v1';
+export type { ChatMode };
 
 export interface ChatConversation {
   id: string;
   appId: string;
+  mode?: ChatMode;
+  targetAppId?: string | null;
   title: string;
   threadId: string | null;
   runtime?: {
@@ -29,6 +32,7 @@ export interface PersistedChatState {
   lastActiveConversationId: string | null;
   activeRuns: PersistedActiveChatRun[];
   activeRun?: PersistedActiveChatRun | null;
+  draftInputByConversationId?: Record<string, string>;
 }
 
 const emptyPersistedChatState = (): PersistedChatState => ({
@@ -36,17 +40,29 @@ const emptyPersistedChatState = (): PersistedChatState => ({
   activeConversationByApp: {},
   lastActiveConversationId: null,
   activeRuns: [],
+  draftInputByConversationId: {},
 });
 
-const migrateLegacyConversationRuntime = (conversation: ChatConversation): ChatConversation => {
-  if (conversation.runtime) {
-    return conversation;
+const normalizeChatMode = (value: unknown): ChatMode | undefined =>
+  value === 'create_app' || value === 'edit_app' || value === 'free_chat' ? value : undefined;
+
+const migrateLegacyConversation = (conversation: ChatConversation): ChatConversation => {
+  const mode = normalizeChatMode(conversation.mode) ?? (conversation.appId === 'forger' ? 'free_chat' : 'edit_app');
+  const targetAppId = mode === 'edit_app' ? (conversation.targetAppId ?? conversation.appId) : null;
+  const normalizedConversation: ChatConversation = {
+    ...conversation,
+    mode,
+    targetAppId,
+  };
+
+  if (normalizedConversation.runtime) {
+    return normalizedConversation;
   }
-  if (!conversation.threadId && conversation.messages.length === 0) {
-    return conversation;
+  if (!normalizedConversation.threadId && normalizedConversation.messages.length === 0) {
+    return normalizedConversation;
   }
   return {
-    ...conversation,
+    ...normalizedConversation,
     runtime: {
       provider: 'codex',
       model: 'gpt-5.4',
@@ -71,7 +87,7 @@ export const readPersistedChatState = (): PersistedChatState => {
     const legacyActiveRun = normalizePersistedActiveChatRun(parsed.activeRun);
     return {
       conversations: Array.isArray(parsed.conversations)
-        ? parsed.conversations.map(migrateLegacyConversationRuntime)
+        ? parsed.conversations.map(migrateLegacyConversation)
         : [],
       activeConversationByApp:
         parsed.activeConversationByApp && typeof parsed.activeConversationByApp === 'object'
@@ -80,6 +96,10 @@ export const readPersistedChatState = (): PersistedChatState => {
       lastActiveConversationId:
         typeof parsed.lastActiveConversationId === 'string' ? parsed.lastActiveConversationId : null,
       activeRuns: activeRuns.length > 0 ? activeRuns : legacyActiveRun ? [legacyActiveRun] : [],
+      draftInputByConversationId:
+        parsed.draftInputByConversationId && typeof parsed.draftInputByConversationId === 'object'
+          ? Object.fromEntries(Object.entries(parsed.draftInputByConversationId).filter(([, value]) => typeof value === 'string'))
+          : {},
     };
   } catch {
     return emptyPersistedChatState();

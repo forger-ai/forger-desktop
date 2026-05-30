@@ -8,6 +8,7 @@ This repository implements the Forger desktop application. Desktop is the main e
 - Installs apps from the catalog and runs them in a private user workspace.
 - Prepares agent context for installed apps.
 - Orchestrates chat tasks over installed apps.
+- Maintains platform memory that can be injected into Forger chat, app agents, and automations when relevant.
 - Maintains local versioning of installed apps when the user asks for functional updates.
 
 ## Security Rules
@@ -29,6 +30,17 @@ This repository implements the Forger desktop application. Desktop is the main e
 ## Agent Playbooks
 
 The agent internally classifies each user request before acting. If a message contains tasks from different categories, work on one per turn and briefly explain which one is handled first.
+
+## Platform Memory
+
+- Memory is a Desktop platform layer, not an app manifest capability and not an optional official tool.
+- Desktop may inject relevant global or app-scoped memories into prompts before the current user message.
+- Treat injected memories as context that can guide defaults, wording, and workflow choices; verify current app state before making factual claims.
+- Save memory only for durable preferences, stable profile details, recurring workflow choices, constraints, and useful facts that should help future Forger work.
+- Do not save secrets, credentials, tokens, private keys, raw sensitive documents, medical or legal inferences, or delicate personal inferences.
+- Before creating a memory, fetch existing relevant memory and update or skip duplicates when the new information matches, corrects, or narrows an existing entry.
+- Store app-specific information as app-scoped memory. Store cross-Forger preferences and facts as global memory when the current memory access allows a global write.
+- When talking to the person, say Forger can remember, update, or forget the preference or fact. Do not describe storage files, tool names, schemas, or prompt injection unless technical detail is requested.
 
 ### resolver_dudas
 

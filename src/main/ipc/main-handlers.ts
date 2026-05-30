@@ -25,9 +25,14 @@ import type { SecretsStore } from '../secrets-store';
 import {
   buildConversationDiagnosticAttachments,
   buildConversationDiagnosticReport,
+  reportSanitizerRoots,
   summarizeConversationDiagnosticAttachments,
   type ConversationDiagnosticAttachmentUpload,
 } from '../conversation-diagnostics';
+import {
+  prepareDesktopErrorReport,
+  type DesktopErrorReportAttachmentUpload,
+} from '../desktop-error-report-artifacts';
 import type { IPC_CHANNELS as IpcChannels } from '../../shared/ipc';
 import { registerAppCloudMessagingIpcHandlers } from './app-cloud-messaging-handlers';
 import { registerAppRuntimeIpcHandlers } from './app-runtime-handlers';
@@ -102,6 +107,7 @@ import type {
 import type { AppManifest, AppRegistry, InstalledAppRecord } from '../core/main-process-types';
 
 const conversationDiagnosticAttachmentCache = new Map<string, ConversationDiagnosticAttachmentUpload[]>();
+const desktopErrorReportAttachmentCache = new Map<string, DesktopErrorReportAttachmentUpload[]>();
 
 interface MainIpcState {
   agentToolSettings: AgentToolSettings;
@@ -214,65 +220,6 @@ interface MainProcessIpcDeps {
   zipDirectory: (sourceDir: string, zipPath: string) => Promise<void>;
 }
 
-const MAX_APP_ERROR_LOG_BYTES = 512 * 1024;
-const MAX_APP_ERROR_LOG_LINES = 80;
-const MAX_APP_ERROR_LOG_LINE_CHARS = 8_000;
-
-const truncateLogLine = (line: string): string => {
-  if (line.length <= MAX_APP_ERROR_LOG_LINE_CHARS) {
-    return line;
-  }
-  return `${line.slice(0, MAX_APP_ERROR_LOG_LINE_CHARS)}...[truncated ${line.length - MAX_APP_ERROR_LOG_LINE_CHARS} chars]`;
-};
-
-const readRecentAppInstallLogLines = async (input: {
-  fs: typeof fs;
-  getInstallLogPath: () => string;
-  appId: string;
-}): Promise<{ source: 'install.log'; bytesRead: number; truncatedFromStart: boolean; lines: string[] } | null> => {
-  const logPath = input.getInstallLogPath();
-  let handle: fs.FileHandle | null = null;
-  try {
-    const stats = await input.fs.stat(logPath);
-    const bytesToRead = Math.min(stats.size, MAX_APP_ERROR_LOG_BYTES);
-    const start = Math.max(0, stats.size - bytesToRead);
-    const buffer = Buffer.alloc(bytesToRead);
-    handle = await input.fs.open(logPath, 'r');
-    const { bytesRead } = await handle.read(buffer, 0, bytesToRead, start);
-    const rawLines = buffer
-      .subarray(0, bytesRead)
-      .toString('utf8')
-      .split(/\r?\n/)
-      .filter((line) => line.trim().length > 0);
-    const candidateLines = start > 0 ? rawLines.slice(1) : rawLines;
-    const lines: string[] = [];
-    for (let index = candidateLines.length - 1; index >= 0 && lines.length < MAX_APP_ERROR_LOG_LINES; index -= 1) {
-      const line = candidateLines[index];
-      try {
-        const parsed = JSON.parse(line) as { appId?: unknown };
-        if (parsed.appId === input.appId) {
-          lines.push(truncateLogLine(line));
-        }
-      } catch {
-        // Ignore partial or non-JSON log lines; install.log is best-effort diagnostics.
-      }
-    }
-    if (lines.length === 0) {
-      return null;
-    }
-    return {
-      source: 'install.log',
-      bytesRead,
-      truncatedFromStart: start > 0,
-      lines: lines.reverse(),
-    };
-  } catch {
-    return null;
-  } finally {
-    await handle?.close().catch(() => undefined);
-  }
-};
-
 const SOCIAL_UPLOAD_EXCLUDED_NAMES = new Set([
   '.git',
   '.DS_Store',
@@ -296,38 +243,30 @@ const shouldSkipSocialUploadPath = (sourcePath: string, root: string, pathModule
   return false;
 };
 
-const enrichAppErrorReportWithInstallLog = async (input: {
-  fs: typeof fs;
-  getInstallLogPath: () => string;
-  input: DesktopErrorReportPreview;
-}): Promise<DesktopErrorReportPreview> => {
-  if (input.input.source !== 'app' || !input.input.appId || input.input.sensitiveDetails?.appInstallLogExcerpt) {
-    return input.input;
-  }
-  const appInstallLogExcerpt = await readRecentAppInstallLogLines({
-    fs: input.fs,
-    getInstallLogPath: input.getInstallLogPath,
-    appId: input.input.appId,
-  });
-  if (!appInstallLogExcerpt) {
-    return input.input;
-  }
-  return {
-    ...input.input,
-    sensitiveDetails: {
-      ...(input.input.sensitiveDetails ?? {}),
-      appInstallLogExcerpt,
-    },
-  };
-};
-
 export const __testMainHandlersInternals = {
-  enrichAppErrorReportWithInstallLog,
-  readRecentAppInstallLogLines,
 };
 
 export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
   const { state, APP_CLAUDE_MODEL_OPTIONS, APP_CODEX_MODEL_OPTIONS, BetterSqlite3, BrowserWindow, CODEX_USAGE_DASHBOARD_URL, IPC_CHANNELS, app, appAgentConversationManager, appendInstallLog, buildAppSecretsState, buildCodexPromptWithAppContext, buildForgerToolsContextForApp, buildForgerToolsContextForFreeChat, canUseCloudDataSync, chatOrchestrator, cloudDeviceManager, connectClaudeAuth, connectCodexAuth, createLocalAppFromSkeleton, createRemoteAppBackup, decryptCloudMessage, decryptCloudMessages, dialog, disconnectCodexAuth, ensureCatalogStatuses, failureDiagnostic, forgerBackendClient, forwardCloudSocialEvent, fs, getAppDetails, getBackupsManager, getBackgroundTaskStore, getClaudeAuthStatus, getCloudIdentityStore, getCodexAuthStatus, getCodexHome, getDesktopUpdater, getFileLibrary, getForgerHomeRoot, getForgerMetadataRoot, getInstallLogPath, getMemoryStore, getOfficialToolsService, getPrivateAppsRoot, getPrivateDataRoot, getRuntimeStatus, getLocalNetworkShareStatus, getRemoteNetworkShareStatus, getSecretsStore, installAppRuntime, installSocialAppRuntime, installWelcome, ipcMain, listAppPrompts, listCatalogFromBackend, mainWindow, normalizeManifestAgentDefaults, openInstalledApp, startLocalNetworkShare, stopLocalNetworkShare, startRemoteNetworkShare, stopRemoteNetworkShare, openOrFocusFriendChatWindow, path, publicForgerAccount, registry, reinstallClaude, reinstallCodex, resolveAppIdForWebContents, resolveInstalledAgents, resolveInstalledAppSecrets, resolveInstalledManifest, resolveSelectedAppDisplayName, restoreAppPrompt, restoreAppUserVersionRuntime, restoreRemoteAppBackup, sanitizeRendererChatTrace, sendEncryptedCloudMessage, serializeErrorForInstallLog, setAppAutoSyncSetting, shell, signAppFolderGrant, stopInstalledApp, switchForgerAccountSession, toAppSummary, uninstallAppRuntime, updateAgentDefaults, updateAgentToolApproval, updateAppPrompt, updateAppRuntime, updateCodexDefaults, validateArchiveEntries, validateAppPrompt, zipDirectory } = deps;
+  const resolveReportRoot = (reader: () => string): string | undefined => {
+    try {
+      return typeof reader === 'function' ? reader() : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  const desktopErrorReportRoots = (appId?: string) => {
+    const privateAppsRoot = resolveReportRoot(getPrivateAppsRoot);
+    return [
+      { alias: 'FORGER_HOME/', path: resolveReportRoot(getForgerHomeRoot) },
+      { alias: 'FORGER_APPS/', path: privateAppsRoot },
+      ...(appId && privateAppsRoot ? [{ alias: `FORGER_APPS/${appId}/`, path: path.join(privateAppsRoot, appId) }] : []),
+      { alias: 'FORGER_DATA/', path: resolveReportRoot(getPrivateDataRoot) },
+      { alias: 'FORGER_METADATA/', path: resolveReportRoot(getForgerMetadataRoot) },
+      { alias: 'DESKTOP_USER_DATA/', path: app?.getPath ? resolveReportRoot(() => app.getPath('userData')) : undefined },
+      { alias: 'CODEX_HOME/', path: resolveReportRoot(getCodexHome) },
+    ];
+  };
   const localNetworkShareStatusFor = getLocalNetworkShareStatus ?? (() => undefined);
   const remoteNetworkShareStatusFor = getRemoteNetworkShareStatus ?? (() => undefined);
   const localNetworkSharePayloadFor = (appId: string) => {
@@ -924,21 +863,49 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
       ? await forgerBackendClient.submitUsageEvent(eventInput)
       : { success: false, userMessage: 'No pudimos enviar la métrica de uso.', technicalCode: 'backend_client_missing' };
   });
-  ipcMain.handle(IPC_CHANNELS.submitDesktopErrorReport, async (_event, input: DesktopErrorReportPreview) => {
-    const report = await enrichAppErrorReportWithInstallLog({
+  ipcMain.handle(IPC_CHANNELS.prepareDesktopErrorReport, async (_event, input: DesktopErrorReportPreview) => {
+    const roots = desktopErrorReportRoots(input.appId);
+    const { report, attachments } = await prepareDesktopErrorReport({
       fs,
-      getInstallLogPath,
-      input: {
-      ...input,
-      desktopVersion: input.desktopVersion || app.getVersion(),
+      appVersion: app.getVersion(),
       platform: process.platform,
       arch: process.arch,
-      occurredAt: input.occurredAt || new Date().toISOString(),
-      },
-    });
-    return forgerBackendClient
-      ? await forgerBackendClient.submitDesktopErrorReport(report)
-      : { success: false, userMessage: 'No pudimos enviar el reporte.', technicalCode: 'backend_client_missing' };
+      getInstallLogPath,
+      roots,
+    }, input);
+    if (attachments.length === 0) {
+      return report;
+    }
+    const diagnosticAttachmentToken = randomUUID();
+    desktopErrorReportAttachmentCache.set(diagnosticAttachmentToken, attachments);
+    return {
+      ...report,
+      diagnosticAttachmentToken,
+    };
+  });
+  ipcMain.handle(IPC_CHANNELS.submitDesktopErrorReport, async (_event, input: DesktopErrorReportPreview) => {
+    const roots = desktopErrorReportRoots(input.appId);
+    const cachedAttachments = input.diagnosticAttachmentToken
+      ? desktopErrorReportAttachmentCache.get(input.diagnosticAttachmentToken) ?? []
+      : [];
+    const { report, attachments: preparedAttachments } = await prepareDesktopErrorReport({
+      fs,
+      appVersion: app.getVersion(),
+      platform: process.platform,
+      arch: process.arch,
+      getInstallLogPath,
+      roots,
+    }, input);
+    const attachments = cachedAttachments.length > 0 ? cachedAttachments : preparedAttachments;
+    try {
+      return forgerBackendClient
+        ? await forgerBackendClient.submitDesktopErrorReport(report, attachments)
+        : { success: false, userMessage: 'No pudimos enviar el reporte.', technicalCode: 'backend_client_missing' };
+    } finally {
+      if (input.diagnosticAttachmentToken) {
+        desktopErrorReportAttachmentCache.delete(input.diagnosticAttachmentToken);
+      }
+    }
   });
   ipcMain.handle(IPC_CHANNELS.prepareConversationDiagnosticReport, async (_event, input: PrepareConversationDiagnosticReportInput) => {
     const options = {
@@ -1068,6 +1035,7 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
           displayName: resolveSelectedAppDisplayName(input.appId),
           ...promptContext,
           userPrompt: input.prompt,
+          chatMode: input.chatMode,
           userLanguage: input.userLanguage,
           officialToolsContext: await buildForgerToolsContextForApp(input.appId),
           sharedFilesRootName: path.basename(getPrivateDataRoot()),
@@ -1076,6 +1044,7 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
       : buildCodexPromptForFreeChat({
           turnKind: 'start',
           userPrompt: input.prompt,
+          chatMode: input.chatMode,
           userLanguage: input.userLanguage,
           officialToolsContext: await buildForgerToolsContextForFreeChat(),
           sharedFilesRootName: path.basename(getPrivateDataRoot()),
@@ -1088,6 +1057,7 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
           displayName: resolveSelectedAppDisplayName(input.appId),
           ...(promptContext ?? {}),
           userPrompt: input.prompt,
+          chatMode: input.chatMode,
           userLanguage: input.userLanguage,
           officialToolsContext: '',
           sharedFilesRootName: path.basename(getPrivateDataRoot()),
@@ -1096,6 +1066,7 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
       : buildCodexPromptForFreeChat({
           turnKind: 'resume',
           userPrompt: input.prompt,
+          chatMode: input.chatMode,
           userLanguage: input.userLanguage,
           officialToolsContext: '',
           sharedFilesRootName: path.basename(getPrivateDataRoot()),

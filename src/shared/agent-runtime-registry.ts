@@ -1,6 +1,7 @@
 import type {
   AgentDefaults,
   AgentEffort,
+  AgentPermissionMode,
   AgentProvider,
   AgentRuntime,
   ClaudeEffort,
@@ -11,6 +12,7 @@ import type {
 
 export type AgentProviderPreference = AgentProvider | 'auto';
 export type AgentRuntimeSource = 'override' | 'manifest' | 'global';
+export const DEFAULT_AGENT_PERMISSION_MODE: AgentPermissionMode = 'safe';
 
 export interface LegacyCodexRuntimeInput {
   model?: unknown;
@@ -20,11 +22,12 @@ export interface LegacyCodexRuntimeInput {
 
 export interface NormalizeAgentRuntimeFallback extends LegacyCodexRuntimeInput {
   provider?: unknown;
+  permissionMode?: unknown;
 }
 
 export const DEFAULT_CODEX_MODEL = 'gpt-5.4';
 export const DEFAULT_CODEX_REASONING_EFFORT: CodexReasoningEffort = 'medium';
-export const DEFAULT_CLAUDE_MODEL = 'sonnet';
+export const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-4-6';
 export const DEFAULT_CLAUDE_EFFORT: ClaudeEffort = 'medium';
 export const DEFAULT_AGENT_PROVIDER: AgentProviderPreference = 'auto';
 
@@ -46,14 +49,24 @@ export const CODEX_REASONING_OPTIONS: Array<{ label: string; value: CodexReasoni
 ];
 
 export const CLAUDE_MODEL_OPTIONS: ClaudeModelOption[] = [
-  { displayModelName: 'default', realModelName: 'default', defaultEffort: 'medium' },
-  { displayModelName: 'best', realModelName: 'best', defaultEffort: 'high' },
-  { displayModelName: 'sonnet', realModelName: 'sonnet', defaultEffort: 'medium' },
-  { displayModelName: 'opus', realModelName: 'opus', defaultEffort: 'high' },
-  { displayModelName: 'haiku', realModelName: 'haiku', defaultEffort: 'low' },
-  { displayModelName: 'sonnet[1m]', realModelName: 'sonnet[1m]', defaultEffort: 'high' },
-  { displayModelName: 'opus[1m]', realModelName: 'opus[1m]', defaultEffort: 'high' },
-  { displayModelName: 'opusplan', realModelName: 'opusplan', defaultEffort: 'high' },
+  { displayModelName: 'Opus 4.8', realModelName: 'claude-opus-4-8', defaultEffort: 'high' },
+  { displayModelName: 'Opus 4.7', realModelName: 'claude-opus-4-7', defaultEffort: 'xhigh' },
+  { displayModelName: 'Opus 4.6', realModelName: 'claude-opus-4-6', defaultEffort: 'high' },
+  { displayModelName: 'Opus 4.5', realModelName: 'claude-opus-4-5-20251101', defaultEffort: 'high' },
+  { displayModelName: 'Sonnet 4.6', realModelName: 'claude-sonnet-4-6', defaultEffort: 'high' },
+  { displayModelName: 'Sonnet 4.5', realModelName: 'claude-sonnet-4-5-20250929', defaultEffort: 'medium' },
+  { displayModelName: 'Haiku 4.5', realModelName: 'claude-haiku-4-5-20251001', defaultEffort: 'low' },
+];
+
+const CLAUDE_LEGACY_MODEL_OPTIONS: ClaudeModelOption[] = [
+  { displayModelName: 'Default', realModelName: 'default', defaultEffort: 'medium' },
+  { displayModelName: 'Best', realModelName: 'best', defaultEffort: 'high' },
+  { displayModelName: 'Sonnet', realModelName: 'sonnet', defaultEffort: 'medium' },
+  { displayModelName: 'Opus', realModelName: 'opus', defaultEffort: 'high' },
+  { displayModelName: 'Haiku', realModelName: 'haiku', defaultEffort: 'low' },
+  { displayModelName: 'Sonnet 1M', realModelName: 'sonnet[1m]', defaultEffort: 'high' },
+  { displayModelName: 'Opus 1M', realModelName: 'opus[1m]', defaultEffort: 'high' },
+  { displayModelName: 'Opus Plan', realModelName: 'opusplan', defaultEffort: 'high' },
 ];
 
 export const CLAUDE_EFFORT_OPTIONS: Array<{ label: string; value: ClaudeEffort }> = [
@@ -88,7 +101,8 @@ export const DEFAULT_AGENT_DEFAULTS: AgentDefaults = {
 
 const CODEX_MODELS = new Set(CODEX_MODEL_OPTIONS.map((option) => option.realModelName));
 const CODEX_EFFORTS = new Set(CODEX_REASONING_OPTIONS.map((option) => option.value));
-const CLAUDE_MODELS = new Set(CLAUDE_MODEL_OPTIONS.map((option) => option.realModelName));
+const CLAUDE_MODEL_LOOKUP_OPTIONS = [...CLAUDE_MODEL_OPTIONS, ...CLAUDE_LEGACY_MODEL_OPTIONS];
+const CLAUDE_MODELS = new Set(CLAUDE_MODEL_LOOKUP_OPTIONS.map((option) => option.realModelName));
 const CLAUDE_EFFORTS = new Set(CLAUDE_EFFORT_OPTIONS.map((option) => option.value));
 
 export const getDefaultAgentDefaults = (): AgentDefaults => ({
@@ -106,7 +120,7 @@ export const getCodexModelOption = (model: unknown): CodexModelOption | undefine
 
 export const getClaudeModelOption = (model: unknown): ClaudeModelOption | undefined => {
   const normalized = normalizeString(model);
-  return CLAUDE_MODEL_OPTIONS.find((option) => option.realModelName === normalized);
+  return CLAUDE_MODEL_LOOKUP_OPTIONS.find((option) => option.realModelName === normalized);
 };
 
 export const getDefaultCodexReasoningEffort = (model: unknown): CodexReasoningEffort =>
@@ -117,6 +131,14 @@ export const getDefaultClaudeEffort = (model: unknown): ClaudeEffort =>
 
 export const isAgentProvider = (value: unknown): value is AgentProvider =>
   value === 'codex' || value === 'claude';
+
+export const isAgentPermissionMode = (value: unknown): value is AgentPermissionMode =>
+  value === 'safe' || value === 'unsafe';
+
+export const normalizeAgentPermissionMode = (
+  value: unknown,
+  fallback: AgentPermissionMode = DEFAULT_AGENT_PERMISSION_MODE,
+): AgentPermissionMode => isAgentPermissionMode(value) ? value : fallback;
 
 export const isAgentProviderPreference = (value: unknown): value is AgentProviderPreference =>
   isAgentProvider(value) || value === 'auto';
@@ -178,12 +200,15 @@ export const normalizeAgentRuntime = (
   if (!provider || !model) {
     return legacyCodexRuntime(fallback);
   }
+  const rawPermissionMode = record?.permissionMode ?? fallback?.permissionMode;
+  const permissionMode = isAgentPermissionMode(rawPermissionMode) ? rawPermissionMode : undefined;
   if (provider === 'claude') {
     const normalizedModel = normalizeClaudeModel(model, model);
     return {
       provider,
       model: normalizedModel,
       effort: normalizeClaudeEffort(record?.effort ?? fallback?.effort ?? fallback?.reasoningEffort, getDefaultClaudeEffort(normalizedModel)),
+      ...(permissionMode ? { permissionMode } : {}),
     };
   }
   const normalizedModel = normalizeCodexModel(model, model);
@@ -191,6 +216,7 @@ export const normalizeAgentRuntime = (
     provider,
     model: normalizedModel,
     effort: normalizeCodexReasoningEffort(record?.effort ?? fallback?.effort ?? fallback?.reasoningEffort, getDefaultCodexReasoningEffort(normalizedModel)),
+    ...(permissionMode ? { permissionMode } : {}),
   };
 };
 
@@ -205,6 +231,7 @@ export const resolveAgentRuntime = (
       provider: 'claude',
       model: normalizeClaudeModel(normalized.model, defaults.claude.model),
       effort: normalizeClaudeEffort(normalized.effort, defaults.claude.effort),
+      permissionMode: normalizeAgentPermissionMode(normalized.permissionMode),
     };
   }
   if (normalized?.provider === 'codex') {
@@ -212,6 +239,7 @@ export const resolveAgentRuntime = (
       provider: 'codex',
       model: normalizeCodexModel(normalized.model, defaults.codex.model),
       effort: normalizeCodexReasoningEffort(normalized.effort, defaults.codex.reasoningEffort),
+      permissionMode: normalizeAgentPermissionMode(normalized.permissionMode),
     };
   }
   return {
@@ -281,7 +309,14 @@ export const runtimeFromUserDefaults = (input: DefaultAgentRuntimeInput = {}): A
   runtimeFromDefaultsForProvider(chooseDefaultAgentProvider(input), input.defaults ?? DEFAULT_AGENT_DEFAULTS);
 
 export const agentRuntimeEquals = (left?: AgentRuntime | null, right?: AgentRuntime | null): boolean =>
-  Boolean(left && right && left.provider === right.provider && left.model === right.model && left.effort === right.effort);
+  Boolean(
+    left
+    && right
+    && left.provider === right.provider
+    && left.model === right.model
+    && left.effort === right.effort
+    && normalizeAgentPermissionMode(left.permissionMode) === normalizeAgentPermissionMode(right.permissionMode),
+  );
 
 export const resolveRuntimeSource = (manifestRuntime: unknown, overrideRuntime: unknown): AgentRuntimeSource => {
   if (normalizeAgentRuntime(overrideRuntime)) {

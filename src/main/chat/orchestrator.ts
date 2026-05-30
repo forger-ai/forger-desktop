@@ -6,8 +6,11 @@ import type {
   ChatApplyResult,
   ChatApprovePermissionInput,
   ChatCancelRunInput,
+  ChatCreatedAppRequest,
   ChatErrorCode,
   ChatGetRunInput,
+  ChatQuestion,
+  ChatQuestionRequest,
   ChatRun,
   ChatRunEvent,
   ChatRunStatus,
@@ -134,6 +137,7 @@ export class ChatOrchestrator {
   private readonly activeRunIdsByApp = new Map<string, string>();
   private readonly pendingPermissions = new Map<string, PendingPermission>();
   private readonly completedPermissions = new Map<string, 'allow' | 'deny'>();
+  private readonly activeQuestionRequestsByChat = new Map<string, ChatQuestionRequest>();
   private readonly threadsByApp = new Map<string, AppThreadState>();
   private readonly auditLogger: AuditLogger;
   private readonly pluginRuntime: PluginRuntime;
@@ -158,6 +162,7 @@ export class ChatOrchestrator {
     const conversationId = typeof input.conversationId === 'string' && input.conversationId.trim().length > 0
       ? input.conversationId.trim()
       : undefined;
+    this.clearActiveQuestionFromPrompt(conversationId, input.prompt);
     const conversationLockKey = conversationId ? this.conversationLockKey(appId, conversationId) : null;
     if (conversationLockKey && this.activeRunIdsByConversation.has(conversationLockKey)) {
       const error = new Error('conversation_run_in_progress');
@@ -183,6 +188,7 @@ export class ChatOrchestrator {
       provider: input.provider,
       model: input.model,
       effort: input.effort ?? input.reasoningEffort,
+      permissionMode: input.permissionMode,
     });
 
     const run: InternalChatRun = {
@@ -200,6 +206,7 @@ export class ChatOrchestrator {
       createdAt: now,
       updatedAt: now,
       dangerMode: Boolean(input.dangerMode),
+      permissionMode: runtime.permissionMode ?? 'safe',
       stagingDir,
       appRoot,
       baseHead,
@@ -260,6 +267,44 @@ export class ChatOrchestrator {
 
     this.releaseRunLocks(run);
     return { success: true };
+  }
+
+  public recordCreatedAppFromMcp(runId: string, createdApp: ChatCreatedAppRequest): void {
+    const run = this.runs.get(runId);
+    if (!run) {
+      return;
+    }
+    run.createdApp = createdApp;
+    run.updatedAt = new Date().toISOString();
+    this.emitRun(run);
+  }
+
+  public async registerQuestionFromMcp(
+    runId: string,
+    input: { chatId: string; questions: ChatQuestion[] },
+  ): Promise<ChatQuestionRequest> {
+    const run = this.runs.get(runId);
+    if (!run) {
+      throw new Error('chat_run_not_found');
+    }
+    const chatId = input.chatId.trim();
+    if (!chatId || run.conversationId !== chatId) {
+      throw new Error('question_chat_mismatch');
+    }
+    if (this.activeQuestionRequestsByChat.has(chatId)) {
+      throw new Error('active_question_exists');
+    }
+    const questionRequest: ChatQuestionRequest = {
+      requestId: randomUUID(),
+      chatId,
+      questions: input.questions,
+      createdAt: new Date().toISOString(),
+    };
+    this.activeQuestionRequestsByChat.set(chatId, questionRequest);
+    run.questionRequest = questionRequest;
+    run.updatedAt = new Date().toISOString();
+    this.emitRun(run);
+    return questionRequest;
   }
 
   public approvePermission(input: ChatApprovePermissionInput): { success: boolean } {
@@ -567,9 +612,7 @@ export class ChatOrchestrator {
         ? undefined
         : run.threadId ?? this.threadsByApp.get(run.appId)?.threadId;
       const buildPrompt = async (includeRecoveryContext: boolean): Promise<string> => {
-        const memoryContext = !resolvedThreadId
-          ? await (this.options.buildMemoryContext?.([run.appId]) ?? Promise.resolve(''))
-          : '';
+        const memoryContext = await (this.options.buildMemoryContext?.([run.appId]) ?? Promise.resolve(''));
         const recoveryContext = includeRecoveryContext ? buildChatRecoveryContext(run.conversationHistory) : '';
         const turnPrompt = resolvedThreadId ? (run.resumePrompt ?? run.prompt) : run.prompt;
         return [memoryContext, recoveryContext, turnPrompt].filter(Boolean).join('\n\n');
@@ -625,11 +668,13 @@ export class ChatOrchestrator {
               ...commonRunOptions,
               claudeCliPath: claudeCliPath as string,
               effort: run.effort as ClaudeEffort,
+              permissionMode: run.permissionMode,
             })
           : await this.sandboxRunner.runCodex({
               ...commonRunOptions,
               codexCliPath: codexCliPath as string,
               reasoningEffort: run.reasoningEffort,
+              permissionMode: run.permissionMode,
               codexHome: persistentCodexHome,
             });
       };
@@ -781,6 +826,16 @@ export class ChatOrchestrator {
       commitSha,
       changedFiles: status.length,
     });
+  }
+
+  private clearActiveQuestionFromPrompt(conversationId: string | undefined, prompt: string): void {
+    if (!conversationId || !this.activeQuestionRequestsByChat.has(conversationId)) {
+      return;
+    }
+    if (!/\bFORGER_QUESTION_RESPONSE\b/.test(prompt)) {
+      return;
+    }
+    this.activeQuestionRequestsByChat.delete(conversationId);
   }
 
   private async finalizeUpdateConflictResolution(run: InternalChatRun, assistantText: string): Promise<void> {

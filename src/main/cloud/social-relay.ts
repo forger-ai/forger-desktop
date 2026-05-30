@@ -111,9 +111,20 @@ const resolveClaudeCli = async (): Promise<{ path: string; source: 'managed' | '
   return system ? { path: system, source: 'system' } : null;
 };
 
+const getInstalledClaudeCliVersion = async (baseDir: string): Promise<string | null> => {
+  const packageJsonPath = path.join(baseDir, 'node_modules', '@anthropic-ai', 'claude-code', 'package.json');
+  try {
+    const parsed = JSON.parse(await fs.readFile(packageJsonPath, 'utf8')) as { version?: unknown };
+    return typeof parsed.version === 'string' ? parsed.version : null;
+  } catch {
+    return null;
+  }
+};
+
 const ensureClaudeCliInstalled = async (): Promise<string> => {
   const existing = await resolveManagedClaudeCliPath(getClaudeRoot());
-  if (existing) {
+  const installedVersion = existing ? await getInstalledClaudeCliVersion(getClaudeRoot()) : null;
+  if (existing && installedVersion === CLAUDE_CODE_VERSION) {
     return existing;
   }
   const claudeRoot = getClaudeRoot();

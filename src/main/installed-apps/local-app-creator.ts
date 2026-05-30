@@ -212,6 +212,7 @@ export const createLocalAppCreator = (deps: LocalAppCreatorDeps) => {
     const description = cleanText(rawInput.description);
     const purpose = cleanText(rawInput.purpose);
     const lookAndFeel = cleanText(rawInput.lookAndFeel);
+    const agentPrompt = cleanText(rawInput.agentPrompt);
     if (!name || !description || !purpose) {
       return {
         success: false,
@@ -288,7 +289,7 @@ export const createLocalAppCreator = (deps: LocalAppCreatorDeps) => {
       return {
         success: true,
         userMessage: 'App creada y lista para conversar.',
-        app: { appId, name, description, purpose, ...(lookAndFeel ? { lookAndFeel } : {}) },
+        app: { appId, name, description, purpose, ...(agentPrompt ? { agentPrompt } : {}), ...(lookAndFeel ? { lookAndFeel } : {}) },
       };
     } catch (error) {
       const diagnostic = failureDiagnostic(error, 'local_app_create_failed');

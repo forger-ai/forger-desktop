@@ -1,6 +1,6 @@
 import type { AppStatus, AppSummary, VersionChangelog } from './catalog';
 import type { CatalogApp } from './catalog-app';
-import type { AgentEffort, AgentProvider, CodexReasoningEffort } from './agent-runtime';
+import type { AgentEffort, AgentPermissionMode, AgentProvider, CodexReasoningEffort } from './agent-runtime';
 import type { AppAgent, AppPromptReviewItem, AppPromptTemplate } from './prompts';
 import type { FailureDiagnosticFields } from './base';
 import type { SocialUserApp } from './social';
@@ -47,6 +47,36 @@ export interface PermissionRequest {
   resource: string;
 }
 
+export interface ChatQuestionOption {
+  id: string;
+  label: string;
+  description?: string;
+}
+
+export interface ChatQuestion {
+  id: string;
+  question: string;
+  options: ChatQuestionOption[];
+}
+
+export interface ChatQuestionRequest {
+  requestId: string;
+  chatId: string;
+  questions: ChatQuestion[];
+  createdAt: string;
+}
+
+export type ChatMode = 'create_app' | 'edit_app' | 'free_chat';
+
+export interface ChatCreatedAppRequest {
+  appId: string;
+  name: string;
+  description: string;
+  purpose: string;
+  agentPrompt: string;
+  lookAndFeel?: string;
+}
+
 export interface PreviewDiffFile {
   path: string;
   changeType: 'added' | 'modified' | 'deleted';
@@ -71,6 +101,7 @@ export interface ChatRun {
   createdAt: string;
   updatedAt: string;
   dangerMode: boolean;
+  permissionMode: AgentPermissionMode;
   permissionRequest?: PermissionRequest;
   preview?: PreviewModel;
   errorCode?: ChatErrorCode;
@@ -79,6 +110,8 @@ export interface ChatRun {
   operationId?: string;
   commitSha?: string;
   conversationId?: string;
+  questionRequest?: ChatQuestionRequest;
+  createdApp?: ChatCreatedAppRequest;
 }
 
 export interface AppOperationSummary {
@@ -160,6 +193,8 @@ export interface RendererChatTraceEvent {
 
 export interface ChatStartRunInput {
   appId?: string | null;
+  chatMode?: ChatMode;
+  targetAppId?: string | null;
   prompt: string;
   resumePrompt?: string;
   threadId?: string | null;
@@ -174,6 +209,7 @@ export interface ChatStartRunInput {
   reasoningEffort?: CodexReasoningEffort;
   effort?: AgentEffort;
   dangerMode?: boolean;
+  permissionMode?: AgentPermissionMode;
   conversationId?: string;
 }
 

@@ -683,7 +683,13 @@ test('agent auth reuses existing provider package roots during install fallbacks
     await fs.rm(deferredExisting.root, { recursive: true, force: true });
   });
   await fs.mkdir(path.join(deferredExisting.root, 'claude-root', 'node_modules', '.bin'), { recursive: true });
+  await fs.mkdir(path.join(deferredExisting.root, 'claude-root', 'node_modules', '@anthropic-ai', 'claude-code'), { recursive: true });
   await fs.writeFile(path.join(deferredExisting.root, 'claude-root', 'node_modules', '.bin', 'claude'), '', 'utf8');
+  await fs.writeFile(
+    path.join(deferredExisting.root, 'claude-root', 'node_modules', '@anthropic-ai', 'claude-code', 'package.json'),
+    JSON.stringify({ version: '1.0.0' }),
+    'utf8',
+  );
 
   const deferredResult = await withPlatform('linux', async () => await deferredExisting.controller.connectClaudeAuth());
 

@@ -50,6 +50,7 @@ import {
   type TaskLocale,
 } from './app-agent/task-helpers';
 import type { CodexMcpServerConfig, CommandResult } from './app-agent/types';
+import { claudePermissionArgs, codexUnsafeArgs, codexWorkspaceArgs } from './agent-permission-mode';
 
 interface AppAgentTaskManagerOptions {
   privateAppsRoot: string;
@@ -311,8 +312,7 @@ export class AppAgentTaskManager {
             model,
             '--effort',
             runtime.effort as ClaudeEffort,
-            '--permission-mode',
-            'bypassPermissions',
+            ...claudePermissionArgs(runtime.permissionMode),
             ...(claudeMcpConfigPath ? ['--mcp-config', claudeMcpConfigPath] : []),
             ...imageArgs,
           ]
@@ -326,9 +326,8 @@ export class AppAgentTaskManager {
             '--config',
             `reasoning_effort="${reasoningEffort}"`,
             ...codexWorkspaceNetworkConfigArgs(networkAccess),
-            '--full-auto',
-            '--sandbox',
-            'workspace-write',
+            ...codexUnsafeArgs(runtime.permissionMode),
+            ...codexWorkspaceArgs(runtime.permissionMode),
             '--skip-git-repo-check',
             ...mcpArgs,
             '-C',

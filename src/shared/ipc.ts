@@ -89,6 +89,7 @@ export const IPC_CHANNELS = {
   getClaudeAuthStatus: 'forger:get-claude-auth-status',
   connectClaudeAuth: 'forger:connect-claude-auth',
   reinstallClaude: 'forger:reinstall-claude',
+  prepareDesktopErrorReport: 'forger:error-report:prepare',
   submitDesktopErrorReport: 'forger:error-report:submit',
   prepareConversationDiagnosticReport: 'forger:conversation-diagnostic:prepare',
   submitConversationDiagnosticReport: 'forger:conversation-diagnostic:submit',

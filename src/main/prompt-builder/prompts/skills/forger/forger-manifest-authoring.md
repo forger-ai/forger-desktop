@@ -124,14 +124,15 @@ Use this shape as the current authoring contract. Remove fields that do not appl
         }
       ],
       "prompt": "Review the provided sourceFile and use notes when provided.",
+      "permissionMode": "safe",
       "runtimeRecommendations": {
         "codex": {
           "model": "gpt-5.4",
           "reasoningEffort": "medium"
         },
         "claude": {
-          "model": "claude-sonnet-4-5",
-          "effort": "medium"
+          "model": "claude-sonnet-4-6",
+          "effort": "high"
         }
       }
     }
@@ -177,10 +178,11 @@ Use this shape as the current authoring contract. Remove fields that do not appl
           "reasoningEffort": "medium"
         },
         "claude": {
-          "model": "claude-sonnet-4-5",
-          "effort": "medium"
+          "model": "claude-sonnet-4-6",
+          "effort": "high"
         }
-      }
+      },
+      "permissionMode": "safe"
     }
   ],
   "scripts": {
@@ -207,6 +209,10 @@ Use this shape as the current authoring contract. Remove fields that do not appl
 - `agents` are resumable conversational coworkers. Prefer `prompts.initial.body`, with optional `prompts.resume.body` and `prompts.steer.body`; do not use legacy `name` or top-level `prompt`.
 - Prompt variables for agents live under each prompt as `variables`; variable types are `text`, `string`, `json`, or `path`.
 - In real manifest prompt bodies, refer to declared variables with the app prompt syntax expected by that surface. This skill template avoids literal double-brace examples because Desktop renders this file as a strict Markdown template.
+- Recommended Claude models for new manifests are versioned ids: `claude-opus-4-8`, `claude-opus-4-7`, `claude-opus-4-6`, `claude-opus-4-5-20251101`, `claude-sonnet-4-6`, `claude-sonnet-4-5-20250929`, and `claude-haiku-4-5-20251001`. Prefer `claude-sonnet-4-6` unless the task clearly needs Opus or Haiku.
+- Do not use legacy Claude Code aliases such as `best`, `default`, `opus`, `sonnet`, `haiku`, `opus[1m]`, `sonnet[1m]`, or `opusplan` in new manifests. They remain readable for compatibility only.
+- `permissionMode` controls provider filesystem permissions for a prompt template or agent. Use `"safe"` by default. Use `"unsafe"` only when that specific task or agent needs broad filesystem access, and make sure the user can see and edit that choice in Forger.
+- `permissionMode` may be declared directly on `promptTemplates[]` or `agents[]`, or inside an explicit `runtime` block when the manifest uses one.
 - `tools` declares official Forger tools only. Today the official tool is Gmail, with actions `gmail.connection.status`, `gmail.search_messages`, `gmail.read_thread`, `gmail.read_attachment`, and `gmail.send_email`.
 - Put Gmail in `tools.required` only when the app cannot perform its core purpose without Gmail. Otherwise put it in `tools.optional`.
 - Do not declare Gmail OAuth credentials in `appSecrets`; Forger Tools owns Gmail OAuth connection and token storage.

@@ -66,7 +66,7 @@ import {
   type RemoteBackupsResponse,
   usernameCooldownMessage,
 } from './forger-backend/client-helpers';
-import { type ConversationDiagnosticAttachmentUpload, submitConversationDiagnosticReport, submitDesktopErrorReport } from './forger-backend/report-submissions';
+import { type ConversationDiagnosticAttachmentUpload, type DesktopErrorReportAttachmentUpload, submitConversationDiagnosticReport, submitDesktopErrorReport } from './forger-backend/report-submissions';
 import { getBackendJson, patchBackendJson, postBackendJson } from './forger-backend/json-request';
 import { toSocialUserApp, toSocialUserAppUploadAttempt, toSocialVersion } from './forger-backend/social-normalizers';
 
@@ -1000,8 +1000,9 @@ export class ForgerBackendClient {
 
   async submitDesktopErrorReport(
     input: DesktopErrorReportPreview,
+    attachments?: DesktopErrorReportAttachmentUpload[],
   ): Promise<{ success: boolean; userMessage: string; technicalCode?: string }> {
-    return submitDesktopErrorReport(this.reportSubmissionOptions(), input);
+    return submitDesktopErrorReport(this.reportSubmissionOptions(), input, attachments);
   }
 
   async submitConversationDiagnosticReport(

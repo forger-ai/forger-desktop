@@ -47,6 +47,7 @@ import {
 } from './app-agent/process';
 import type { CodexMcpServerConfig } from './app-agent/types';
 import { appendRunLog, getRunLogPath } from './chat/progress-errors';
+import { claudePermissionArgs, codexUnsafeArgs, codexWorkspaceArgs } from './agent-permission-mode';
 
 interface AppAgentConversationManagerOptions {
   privateAppsRoot: string;
@@ -453,6 +454,7 @@ export class AppAgentConversationManager {
             provider: input.provider ?? agentRuntime.runtime?.provider,
             model: input.model ?? agentRuntime.runtime?.model,
             effort: input.effort ?? input.reasoningEffort ?? agentRuntime.runtime?.effort,
+            permissionMode: agentRuntime.runtime?.permissionMode,
           }
         : agentRuntime.runtime ?? {
             recommendations: agentRuntime.runtimeRecommendations,
@@ -538,8 +540,7 @@ export class AppAgentConversationManager {
             model,
             '--effort',
             runtime.effort as ClaudeEffort,
-            '--permission-mode',
-            'bypassPermissions',
+            ...claudePermissionArgs(runtime.permissionMode),
             ...(claudeMcpConfigPath ? ['--mcp-config', claudeMcpConfigPath] : []),
             ...(conversation.threadId ? ['--resume', conversation.threadId] : []),
             ...imageArgs,
@@ -555,6 +556,7 @@ export class AppAgentConversationManager {
             '--config',
             `reasoning_effort="${reasoningEffort}"`,
             ...codexWorkspaceNetworkConfigArgs(networkAccess),
+            ...codexUnsafeArgs(runtime.permissionMode),
             ...mcpArgs,
             '--skip-git-repo-check',
             ...imageArgs,
@@ -572,9 +574,8 @@ export class AppAgentConversationManager {
             '--config',
             `reasoning_effort="${reasoningEffort}"`,
             ...codexWorkspaceNetworkConfigArgs(networkAccess),
-            '--full-auto',
-            '--sandbox',
-            'workspace-write',
+            ...codexUnsafeArgs(runtime.permissionMode),
+            ...codexWorkspaceArgs(runtime.permissionMode),
             '--skip-git-repo-check',
             ...mcpArgs,
             '-C',

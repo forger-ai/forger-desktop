@@ -1,6 +1,7 @@
 import type {
   ConversationDiagnosticFileSummary,
   ConversationDiagnosticReportPreview,
+  DesktopErrorReportFileSummary,
   DesktopErrorReportPreview,
   SubmitConversationDiagnosticReportResult,
 } from '../../shared/types';
@@ -21,9 +22,14 @@ export interface ConversationDiagnosticAttachmentUpload extends ConversationDiag
   text: string;
 }
 
+export interface DesktopErrorReportAttachmentUpload extends DesktopErrorReportFileSummary {
+  text: string;
+}
+
 export const submitDesktopErrorReport = async (
   options: ReportSubmissionOptions,
   input: DesktopErrorReportPreview,
+  attachments: DesktopErrorReportAttachmentUpload[] = [],
 ): Promise<{ success: boolean; userMessage: string; technicalCode?: string }> => {
   const report = sanitizeReportPayload(normalizeErrorReportDiagnostic(input), { roots: options.roots });
   const logBase = {
@@ -36,27 +42,14 @@ export const submitDesktopErrorReport = async (
     desktopVersion: report.desktopVersion,
     platform: report.platform,
     arch: report.arch,
+    diagnosticFileCount: attachments.length || report.diagnosticFiles?.length || 0,
   };
   try {
+    const body = buildDesktopErrorReportBody(report, attachments, options.roots);
     const response = await fetch(`${options.backendBaseUrl}/api/v1/desktop_error_reports`, {
       method: 'POST',
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        source: report.source,
-        operation: report.operation,
-        message: report.message,
-        technical_code: report.technicalCode,
-        desktop_version: report.desktopVersion,
-        platform: report.platform,
-        arch: report.arch,
-        app_id: report.appId,
-        app_version: report.appVersion,
-        details: report.details ?? {},
-        sensitive_details: report.sensitiveDetails ?? {},
-      }),
+      headers: body.headers,
+      body: body.body,
     });
     const requestId = responseRequestId(response);
 
@@ -90,6 +83,64 @@ export const submitDesktopErrorReport = async (
     });
     return { success: false, userMessage: 'No pudimos enviar el reporte.', technicalCode };
   }
+};
+
+const buildDesktopErrorReportBody = (
+  report: DesktopErrorReportPreview,
+  attachments: DesktopErrorReportAttachmentUpload[],
+  roots: ReportSanitizerRoot[],
+): { headers: HeadersInit; body: BodyInit } => {
+  const diagnosticFiles = attachments.length > 0
+    ? attachments.map(({ text: _text, ...summary }) => summary)
+    : report.diagnosticFiles;
+  const payload = {
+    source: report.source,
+    operation: report.operation,
+    message: report.message,
+    technical_code: report.technicalCode,
+    desktop_version: report.desktopVersion,
+    platform: report.platform,
+    arch: report.arch,
+    app_id: report.appId,
+    app_version: report.appVersion,
+    details: {
+      ...(report.details ?? {}),
+      ...(diagnosticFiles && diagnosticFiles.length > 0 ? { diagnosticFiles } : {}),
+    },
+    sensitive_details: report.sensitiveDetails ?? {},
+  };
+  if (attachments.length === 0) {
+    return {
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    };
+  }
+
+  const formData = new FormData();
+  for (const [key, value] of Object.entries(payload)) {
+    if (value === undefined) {
+      continue;
+    }
+    formData.append(key, key === 'details' || key === 'sensitive_details' ? JSON.stringify(value) : String(value));
+  }
+  for (const attachment of attachments) {
+    const text = sanitizeReportPayload(attachment.text, {
+      roots,
+      maxStringLength: Number.MAX_SAFE_INTEGER,
+    });
+    formData.append(
+      'diagnostic_files[]',
+      new Blob([text], { type: attachment.contentType }),
+      attachment.filename,
+    );
+  }
+  return {
+    headers: { Accept: 'application/json' },
+    body: formData,
+  };
 };
 
 export const submitConversationDiagnosticReport = async (

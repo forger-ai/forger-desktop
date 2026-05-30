@@ -1,6 +1,7 @@
 import type { AppSummary, CatalogApp, Settings } from './types';
 import {
   DEFAULT_AGENT_PROVIDER,
+  DEFAULT_AGENT_PERMISSION_MODE,
   DEFAULT_CODEX_MODEL,
   DEFAULT_CODEX_REASONING_EFFORT,
   getDefaultAgentDefaults,
@@ -56,6 +57,7 @@ export const settingsSeed: Settings = {
     reasoningEffort: DEFAULT_CODEX_REASONING_EFFORT,
   },
   defaultAgentProvider: DEFAULT_AGENT_PROVIDER,
+  defaultChatPermissionMode: DEFAULT_AGENT_PERMISSION_MODE,
   agentDefaults: getDefaultAgentDefaults(),
   providerConnections: {},
 };

@@ -511,6 +511,7 @@ test('chat helper functions normalize history, progress, stale errors, and publi
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:01.000Z',
     dangerMode: undefined,
+    permissionMode: undefined,
     permissionRequest: undefined,
     preview: undefined,
     errorCode: undefined,
@@ -519,6 +520,8 @@ test('chat helper functions normalize history, progress, stale errors, and publi
     operationId: undefined,
     commitSha: undefined,
     conversationId: 'conversation-1',
+    questionRequest: undefined,
+    createdApp: undefined,
   });
   assert.deepEqual(buildChatRunTracePayload(internalRun), {
     runId: 'run-1',
@@ -530,6 +533,9 @@ test('chat helper functions normalize history, progress, stale errors, and publi
     userMessageLength: 6,
     progressCount: 1,
     hasPermissionRequest: false,
+    permissionMode: undefined,
+    hasQuestionRequest: false,
+    hasCreatedApp: false,
     hasPreview: false,
   });
   assert.deepEqual(buildChatRunTracePayload({
@@ -552,6 +558,9 @@ test('chat helper functions normalize history, progress, stale errors, and publi
     userMessageLength: 3,
     progressCount: 0,
     hasPermissionRequest: true,
+    permissionMode: undefined,
+    hasQuestionRequest: false,
+    hasCreatedApp: false,
     hasPreview: true,
   });
   assert.deepEqual(normalizeChatHistory(null), []);

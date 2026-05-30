@@ -16,8 +16,13 @@ import type {
   AppSummary,
   BasicActionResult,
   CatalogApp,
+  ChatCreatedAppRequest,
+  ChatQuestion,
+  ChatQuestionRequest,
   CodexAuthStatus,
   ClaudeAuthStatus,
+  CreateLocalAppInput,
+  CreateLocalAppResult,
   RuntimeStatus,
 } from '../../shared/types';
 import type {
@@ -74,6 +79,19 @@ interface LifecycleService {
   publishAgentEvent: (event: ConversationEventLike) => void;
 }
 
+interface MemoryMaintenanceService {
+  initialize: () => Promise<void>;
+  dispose: () => void;
+}
+
+interface ChatOrchestratorService extends LifecycleService {
+  recordCreatedAppFromMcp: (runId: string, createdApp: ChatCreatedAppRequest) => void;
+  registerQuestionFromMcp: (
+    runId: string,
+    input: { chatId: string; questions: ChatQuestion[] },
+  ) => Promise<ChatQuestionRequest>;
+}
+
 type ServiceWithLoad<T> = Omit<LifecycleService, 'load'> & { load: () => Promise<T> };
 
 interface MainLifecycleState {
@@ -83,7 +101,7 @@ interface MainLifecycleState {
   appMcpManager: LifecycleService | null;
   automationManager: LifecycleService | null;
   catalogApps: CatalogApp[];
-  chatOrchestrator: LifecycleService | null;
+  chatOrchestrator: ChatOrchestratorService | null;
   cloudDeviceManager: LifecycleService | null;
   cloudIdentityStore: LifecycleService | null;
   desktopErrorReporter: DesktopErrorReporter | null;
@@ -98,6 +116,7 @@ interface MainLifecycleState {
   localNetworkShareManager: { stopAll?: () => Promise<void> } | null;
   remoteNetworkShareManager: { stopAll?: () => Promise<void> } | null;
   mainWindow: BrowserWindow | null;
+  memoryMaintenanceManager: MemoryMaintenanceService | null;
   memoryStore: LifecycleService | null;
   officialToolsService: (LifecycleService & {
     listAgentActionIdsForApp: (appId: string) => Promise<string[]>;
@@ -116,7 +135,7 @@ interface MainLifecycleDeps {
   AppMcpManager: ServiceConstructor<LifecycleService>;
   AutomationManager: ServiceConstructor<LifecycleService>;
   BrowserWindow: typeof BrowserWindow;
-  ChatOrchestrator: ServiceConstructor<LifecycleService>;
+  ChatOrchestrator: ServiceConstructor<ChatOrchestratorService>;
   CloudDeviceManager: ServiceConstructor<LifecycleService>;
   CloudIdentityStore: ServiceConstructor<LifecycleService>;
   DEFAULT_NODE_VERSION: string;
@@ -128,6 +147,7 @@ interface MainLifecycleDeps {
   ForgerBackendClient: ServiceConstructor<LifecycleService>;
   ForgerMcpServer: ServiceConstructor<LifecycleService>;
   IPC_CHANNELS: Record<string, string>;
+  MemoryMaintenanceManager: ServiceConstructor<MemoryMaintenanceService>;
   MemoryStore: ServiceConstructor<LifecycleService>;
   SecretsStore: ServiceConstructor<LifecycleService>;
   anyAppAllowsAgentNetworkAccess: AsyncFn<boolean>;
@@ -142,6 +162,7 @@ interface MainLifecycleDeps {
   chooseAgentRuntime: (request?: AgentRuntimeRequest) => Promise<AgentRuntime>;
   clearForgerAccountSession: (technicalCode: string) => Promise<void>;
   closeServer: (server: Server) => Promise<void>;
+  createLocalAppFromSkeleton: (input: CreateLocalAppInput, locale?: string) => Promise<CreateLocalAppResult>;
   createWindow: () => Promise<void>;
   emitAutomationUpdated: (payload: { automation: unknown; run?: unknown }) => void;
   emitChatRunUpdated: (event: RunEventLike) => void;
@@ -248,6 +269,7 @@ export const registerMainLifecycle = (deps: unknown) => {
     ForgerBackendClient,
     ForgerMcpServer,
     IPC_CHANNELS,
+    MemoryMaintenanceManager,
     MemoryStore,
     SecretsStore,
     anyAppAllowsAgentNetworkAccess,
@@ -262,6 +284,7 @@ export const registerMainLifecycle = (deps: unknown) => {
     chooseAgentRuntime,
     clearForgerAccountSession,
     closeServer,
+    createLocalAppFromSkeleton,
     createWindow,
     emitAutomationUpdated,
     emitChatRunUpdated,
@@ -446,6 +469,14 @@ export const registerMainLifecycle = (deps: unknown) => {
       return Object.values(state.registry.apps)
         .map((record) => toAppSummary(record))
         .filter((summary) => summary.updateAvailable);
+    },
+    createLocalApp: createLocalAppFromSkeleton,
+    recordCreatedApp: (runId: string, createdApp: ChatCreatedAppRequest) => state.chatOrchestrator?.recordCreatedAppFromMcp(runId, createdApp),
+    registerQuestion: async (runId: string, input: { chatId: string; questions: ChatQuestion[] }) => {
+      if (!state.chatOrchestrator) {
+        throw new Error('chat_orchestrator_unavailable');
+      }
+      return await state.chatOrchestrator.registerQuestionFromMcp(runId, input);
     },
     getRuntimeStatus,
     openApp: openInstalledApp,
@@ -884,6 +915,30 @@ export const registerMainLifecycle = (deps: unknown) => {
     },
   });
   await state.automationManager.initialize();
+  state.memoryMaintenanceManager = new MemoryMaintenanceManager({
+    forgerHomeRoot: getForgerHomeRoot(),
+    codexHome: getCodexHome(),
+    getAgentRuntime: chooseAgentRuntime,
+    getCodexAuthenticated: async () => {
+      const status = await getCodexAuthStatus();
+      return status.authenticated;
+    },
+    getCodexCliPath: async () => await resolveCodexCliPath(getCodexRoot()),
+    getCodexPathEntries: async () => {
+      const nodeRuntime = await ensureRuntimeInstalled('node', DEFAULT_NODE_VERSION);
+      return getRuntimePathEntries(nodeRuntime);
+    },
+    createForgerMcpSession: (runId: string) =>
+      state.forgerMcpServer?.createSession(runId, 'forger', {
+        caller: 'automation',
+        appIds: Object.keys(state.registry.apps),
+      }) ?? null,
+    releaseForgerMcpSession: (token: string) => state.forgerMcpServer?.releaseSession(token),
+    buildMemoryContext: async () => await buildMemoryContextForApps(Object.keys(state.registry.apps)),
+    getMemoryStore,
+    appendInstallLog,
+  });
+  await state.memoryMaintenanceManager.initialize();
 
   registerIpcHandlers();
   ensureCatalogStatuses();
@@ -903,6 +958,7 @@ export const registerMainLifecycle = (deps: unknown) => {
 });
 
 app.on('before-quit', () => {
+  state.memoryMaintenanceManager?.dispose();
   state.automationManager?.dispose();
   state.appMcpManager?.dispose();
   void state.localNetworkShareManager?.stopAll?.();

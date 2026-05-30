@@ -198,6 +198,7 @@ const createLifecycleHarness = (overrides = {}) => {
       appCodexTaskUpdated: 'app-codex-task-updated',
       loginForgerAccountWithGoogle: 'login-google',
     },
+    MemoryMaintenanceManager: createServiceClass('MemoryMaintenanceManager', calls),
     MemoryStore: createServiceClass('MemoryStore', calls),
     SecretsStore: createServiceClass('SecretsStore', calls),
     anyAppAllowsAgentNetworkAccess: async () => false,

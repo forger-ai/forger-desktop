@@ -7,4 +7,5 @@ description: Use when designing, reviewing, or explaining app promptTemplates an
 - Use them for imports, reviews, conversions, classifications, summaries, and other work that should finish without an ongoing conversation.
 - Use an app agent instead when the work needs back-and-forth discussion, steering, or resume.
 - Use `forger-manifest-authoring` when writing the exact `manifest.json` shape for task prompt templates.
+- Choose `permissionMode` consciously for each prompt template. Use `"safe"` unless that task has a concrete need for elevated filesystem access.
 - Keep task output product-facing: what was reviewed, produced, changed, rejected, or needs confirmation.

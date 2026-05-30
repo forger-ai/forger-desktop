@@ -10,6 +10,7 @@ import {
   Avatar,
   Box,
   Button,
+  Chip,
   Divider,
   IconButton,
   Menu,
@@ -32,12 +33,10 @@ import { BackgroundTasksDrawer } from './BackgroundTasksDrawer';
 interface TopbarProps {
   currentView: View;
   t: AppDictionary;
-  chatApps: AppSummary[];
-  selectedChatAppId: string | null;
+  chatModeLabel?: string | null;
   dataApps: AppSummary[];
   selectedDataAppId: string | null;
   getAppMeta: (appId: string) => { name: string; description: string };
-  onSelectChatApp: (appId: string | null) => void;
   onSelectDataApp: (appId: string | null) => void;
   onOpenCloudModal: () => void;
   account: ForgerAccountSession;
@@ -206,12 +205,10 @@ const WindowControls = ({ t }: { t: AppDictionary }) => {
 export function Topbar({
   currentView,
   t,
-  chatApps,
-  selectedChatAppId,
+  chatModeLabel,
   dataApps,
   selectedDataAppId,
   getAppMeta,
-  onSelectChatApp,
   onSelectDataApp,
   onOpenCloudModal,
   account,
@@ -267,15 +264,11 @@ export function Topbar({
           {currentView === 'chat' ? (
             <Stack direction="row" spacing={1.25} alignItems="center">
               <Typography variant="body2" color="text.secondary">
-                {t.sections.chat.activeAppLabel}
+                {t.sections.chat.modeLabel}
               </Typography>
-              <AppSelect
-                apps={chatApps}
-                selectedAppId={selectedChatAppId}
-                inactiveLabel={t.sections.chat.inactiveApp}
-                onSelect={onSelectChatApp}
-                getAppMeta={getAppMeta}
-              />
+              <Tooltip title={t.sections.chat.modeLockedTooltip}>
+                <Chip size="small" variant="outlined" label={chatModeLabel ?? t.sections.chat.modeSelector.pendingChip} />
+              </Tooltip>
             </Stack>
           ) : null}
 

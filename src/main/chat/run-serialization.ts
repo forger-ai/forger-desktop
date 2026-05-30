@@ -9,6 +9,7 @@ export const toPublicChatRun = (run: ChatRun): ChatRun => ({
   createdAt: run.createdAt,
   updatedAt: run.updatedAt,
   dangerMode: run.dangerMode,
+  permissionMode: run.permissionMode,
   permissionRequest: run.permissionRequest,
   preview: run.preview,
   errorCode: run.errorCode,
@@ -17,6 +18,8 @@ export const toPublicChatRun = (run: ChatRun): ChatRun => ({
   operationId: run.operationId,
   commitSha: run.commitSha,
   conversationId: run.conversationId,
+  questionRequest: run.questionRequest,
+  createdApp: run.createdApp,
 });
 
 export const buildChatRunTracePayload = (run: ChatRun): Record<string, unknown> => ({
@@ -29,5 +32,8 @@ export const buildChatRunTracePayload = (run: ChatRun): Record<string, unknown> 
   userMessageLength: typeof run.userMessage === 'string' ? run.userMessage.length : 0,
   progressCount: run.progressLog?.length ?? 0,
   hasPermissionRequest: Boolean(run.permissionRequest),
+  permissionMode: run.permissionMode,
+  hasQuestionRequest: Boolean(run.questionRequest),
+  hasCreatedApp: Boolean(run.createdApp),
   hasPreview: Boolean(run.preview),
 });
