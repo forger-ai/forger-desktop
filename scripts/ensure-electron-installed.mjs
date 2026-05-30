@@ -71,14 +71,7 @@ function extractElectronZip(zipPath, targetDir) {
   fs.mkdirSync(targetDir, { recursive: true });
 
   if (process.platform === 'win32') {
-    childProcess.execFileSync('powershell', [
-      '-NoProfile',
-      '-NonInteractive',
-      '-Command',
-      'Expand-Archive -LiteralPath $args[0] -DestinationPath $args[1] -Force',
-      zipPath,
-      targetDir,
-    ], { stdio: 'inherit' });
+    childProcess.execFileSync('tar', ['-xf', zipPath, '-C', targetDir], { stdio: 'inherit' });
     return;
   }
 
