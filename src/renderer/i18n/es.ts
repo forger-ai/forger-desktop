@@ -426,8 +426,8 @@ export const es = {
         body: 'Agrega amigos hoy. Pronto, Forger Cloud te permitirá abrir tus apps desde el teléfono, compartir mejoras desde tu perfil público y publicar nuevas apps para otros usuarios.',
       },
       finance: {
-        title: 'Parte con Finance OS',
-        body: 'Instala Finance OS y ábrela para probar la primera app beta.',
+        title: 'Empieza creando una app',
+        body: 'Crea tu primera app local o instala Finance OS desde el catálogo si quieres probar la app beta.',
       },
     },
     advanced: {
