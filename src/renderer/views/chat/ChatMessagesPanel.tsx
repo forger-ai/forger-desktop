@@ -7,7 +7,7 @@ import { MarkdownMessage } from './MarkdownMessage';
 interface ChatMessagesPanelProps {
   messages: ChatMessage[];
   conversationTitle: string;
-  codexConfigured: boolean;
+  intelligenceProviderConfigured: boolean;
   assistantAvatarSrc: string;
   isSending: boolean;
   progressLines: string[];
@@ -15,7 +15,7 @@ interface ChatMessagesPanelProps {
   respondingPermissionIds: Set<string>;
   scrollRef: React.RefObject<HTMLDivElement | null>;
   t: AppDictionary;
-  onConfigureCodex: () => void;
+  onConfigureIntelligenceProvider: () => void;
   onOpenApp: (appId: string) => void;
   onRespondPermission: (runId: string, requestId: string, decision: 'allow' | 'deny') => void;
   onAutoScrollChange: (shouldAutoScroll: boolean) => void;
@@ -24,7 +24,7 @@ interface ChatMessagesPanelProps {
 export function ChatMessagesPanel({
   messages,
   conversationTitle,
-  codexConfigured,
+  intelligenceProviderConfigured,
   assistantAvatarSrc,
   isSending,
   progressLines,
@@ -32,7 +32,7 @@ export function ChatMessagesPanel({
   respondingPermissionIds,
   scrollRef,
   t,
-  onConfigureCodex,
+  onConfigureIntelligenceProvider,
   onOpenApp,
   onRespondPermission,
   onAutoScrollChange,
@@ -63,11 +63,11 @@ export function ChatMessagesPanel({
               {conversationTitle}
             </Typography>
             <Typography color="text.secondary" textAlign="center" sx={{ maxWidth: 480 }}>
-              {codexConfigured ? t.sections.chat.introBody : t.sections.chat.codexMissingBody}
+              {intelligenceProviderConfigured ? t.sections.chat.introBody : t.sections.chat.intelligenceProviderMissingBody}
             </Typography>
-            {!codexConfigured ? (
-              <Button variant="contained" onClick={onConfigureCodex}>
-                {t.sections.chat.configureCodex}
+            {!intelligenceProviderConfigured ? (
+              <Button variant="contained" onClick={onConfigureIntelligenceProvider}>
+                {t.sections.chat.configureIntelligenceProvider}
               </Button>
             ) : null}
           </Stack>
@@ -101,7 +101,7 @@ export function ChatMessagesPanel({
             <Box sx={{ maxWidth: '78%', minWidth: 0, color: 'text.secondary', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
               <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
                 <CircularProgress size={14} />
-                <Typography variant="caption">{t.sections.chat.codexThinking}</Typography>
+                <Typography variant="caption">{t.sections.chat.agentThinking}</Typography>
               </Stack>
               {progressLines.length > 0 ? (
                 <Box component="ul" sx={{ m: 0, pl: 2, minWidth: 0, maxWidth: '100%' }}>

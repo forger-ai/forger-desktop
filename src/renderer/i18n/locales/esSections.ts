@@ -24,10 +24,11 @@ export const esSections = {
       introTitle: 'Forger es tu mejor asistente.',
       introBody:
         'Pregunta cómo se usan, analiza y modifica los datos que almacenas en ellas, e incluso pide modificaciones para que se adapten a ti.',
-      codexMissingBody:
-        'Configura un agente para conversar con tus apps y pedir cambios. No es obligatorio para abrir apps instaladas.',
-      configureCodex: 'Configurar agente',
+      intelligenceProviderMissingBody:
+        'Conecta ChatGPT/Codex o Claude para conversar con Forger, pedir cambios y usar agentes. No es obligatorio para abrir apps instaladas.',
+      configureIntelligenceProvider: 'Conectar proveedor',
       quotaOpenDashboard: 'Ver uso y créditos',
+      quotaCodexRequired: 'El panel de uso es específico de Codex. Conecta ChatGPT/Codex para verlo.',
       providerSelectorLabel: 'Proveedor del agente',
       modelSelectorLabel: 'Modelo',
       effortSelectorLabel: 'Nivel de thinking',
@@ -71,6 +72,7 @@ export const esSections = {
         },
       },
       inputPlaceholder: 'Puedes mencionar archivos cargados anteriormente usando @...',
+      inputProviderMissingPlaceholder: 'Conecta ChatGPT/Codex o Claude para escribirle a Forger.',
       attachFiles: 'Adjuntar archivos',
       attachedFiles: 'Archivos por cargar',
       mentionedFiles: 'Archivos mencionados',
@@ -111,7 +113,7 @@ export const esSections = {
       questionFreeTextPlaceholder: 'Otra cosa',
       questionNext: 'Siguiente',
       questionSubmit: 'Responder',
-      codexThinking: 'El agente está pensando...',
+      agentThinking: 'Forger está pensando...',
       newConversationTitle: 'Conversación nueva',
       sendInProgress: 'Todavía estoy procesando tu mensaje anterior. Espera la respuesta o cancela esa solicitud.',
       appRunInProgress: 'Esta app ya tiene un agente trabajando. Puedes seguir usando otras apps o esperar a que termine la respuesta actual.',

@@ -164,8 +164,9 @@ interface ChatViewProps {
   isResponding: boolean;
   canStopRun: boolean;
   progressLines: string[];
-  codexConfigured: boolean;
-  onConfigureCodex: () => void;
+  intelligenceProviderConfigured: boolean;
+  codexProviderConfigured: boolean;
+  onConfigureIntelligenceProvider: () => void;
   openingAppIds: Set<string>;
   onOpenApp: (appId: string) => void;
   onStopRun: () => Promise<void>;
@@ -227,8 +228,9 @@ export function ChatView({
   isResponding,
   canStopRun,
   progressLines,
-  codexConfigured,
-  onConfigureCodex,
+  intelligenceProviderConfigured,
+  codexProviderConfigured,
+  onConfigureIntelligenceProvider,
   openingAppIds,
   onOpenApp,
   onStopRun,
@@ -499,14 +501,14 @@ export function ChatView({
   } as const;
 
   useEffect(() => {
-    if (!codexConfigured) {
+    if (!intelligenceProviderConfigured) {
       return;
     }
     const timer = window.setTimeout(() => {
       inputRef.current?.focus();
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [activeConversationId, codexConfigured]);
+  }, [activeConversationId, intelligenceProviderConfigured]);
 
   useEffect(() => {
     const root = inputRef.current;
@@ -736,7 +738,7 @@ export function ChatView({
         <ChatMessagesPanel
           messages={messages}
           conversationTitle={conversationTitle}
-          codexConfigured={codexConfigured}
+          intelligenceProviderConfigured={intelligenceProviderConfigured}
           assistantAvatarSrc={assistantAvatarSrc}
           isSending={isResponding}
           progressLines={progressLines}
@@ -744,7 +746,7 @@ export function ChatView({
           respondingPermissionIds={respondingPermissionIds}
           scrollRef={messagesScrollRef}
           t={t}
-          onConfigureCodex={onConfigureCodex}
+          onConfigureIntelligenceProvider={onConfigureIntelligenceProvider}
           onOpenApp={onOpenApp}
           onRespondPermission={respondToPermission}
           onAutoScrollChange={(shouldAutoScroll) => {
@@ -815,11 +817,11 @@ export function ChatView({
                   <Box
                     component="div"
                     ref={inputRef}
-                    contentEditable={codexConfigured}
+                    contentEditable={intelligenceProviderConfigured}
                     suppressContentEditableWarning
                     role="textbox"
-                    aria-label={t.sections.chat.inputPlaceholder}
-                    data-placeholder={t.sections.chat.inputPlaceholder}
+                    aria-label={intelligenceProviderConfigured ? t.sections.chat.inputPlaceholder : t.sections.chat.inputProviderMissingPlaceholder}
+                    data-placeholder={intelligenceProviderConfigured ? t.sections.chat.inputPlaceholder : t.sections.chat.inputProviderMissingPlaceholder}
                     onInput={syncComposerText}
                     onPaste={handlePaste}
                     onClick={(event) => {
@@ -833,7 +835,7 @@ export function ChatView({
                       }
                     }}
                     onKeyDown={(event) => {
-                      if (!codexConfigured) {
+                      if (!intelligenceProviderConfigured) {
                         return;
                       }
                       if (event.key === 'Enter' && !event.shiftKey) {
@@ -903,7 +905,7 @@ export function ChatView({
               <Stack direction="row" spacing={0.75} alignItems="center" sx={{ minWidth: 0 }}>
                 <Tooltip title={t.sections.chat.attachFiles}>
                   <span>
-                    <IconButton size="small" onClick={onPickFiles} disabled={isSending || !codexConfigured}>
+                    <IconButton size="small" onClick={onPickFiles} disabled={isSending || !intelligenceProviderConfigured}>
                       <AttachFileRounded fontSize="small" />
                     </IconButton>
                   </span>
@@ -932,7 +934,7 @@ export function ChatView({
                       ))}
                     </Select>
                     <Tooltip title={t.sections.files.createCategory}>
-                      <IconButton size="small" onClick={onCreateUploadCategory} disabled={isSending || !codexConfigured}>
+                      <IconButton size="small" onClick={onCreateUploadCategory} disabled={isSending || !intelligenceProviderConfigured}>
                         <AddRounded fontSize="small" />
                       </IconButton>
                     </Tooltip>
@@ -941,9 +943,9 @@ export function ChatView({
               </Stack>
 
               <Stack direction="row" spacing={0.75} alignItems="center">
-                <Tooltip title={t.sections.chat.quotaOpenDashboard}>
+                <Tooltip title={codexProviderConfigured ? t.sections.chat.quotaOpenDashboard : t.sections.chat.quotaCodexRequired}>
                   <span>
-                    <IconButton size="small" onClick={onOpenCodexUsageDashboard} disabled={!codexConfigured}>
+                    <IconButton size="small" onClick={onOpenCodexUsageDashboard} disabled={!codexProviderConfigured}>
                       <DonutLargeRounded fontSize="small" />
                     </IconButton>
                   </span>
@@ -1139,7 +1141,7 @@ export function ChatView({
                 size="small"
                 endIcon={isResponding ? <CircularProgress size={14} color="inherit" /> : <SendRounded fontSize="small" />}
                 onClick={sendComposerMessage}
-                disabled={isSending || !codexConfigured || !canSendCurrentMode || (!inputValue.trim() && pendingFiles.length === 0 && mentionedFiles.length === 0)}
+                disabled={isSending || !intelligenceProviderConfigured || !canSendCurrentMode || (!inputValue.trim() && pendingFiles.length === 0 && mentionedFiles.length === 0)}
                 sx={{ minHeight: 32, px: 1.5 }}
               >
                 {t.sections.chat.send}

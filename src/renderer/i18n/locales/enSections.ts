@@ -24,10 +24,11 @@ export const enSections = {
       introTitle: 'Forger is your best assistant.',
       introBody:
         'Ask how each app works, analyze and edit the data you store in them, and even request app changes so they fit you better.',
-      codexMissingBody:
-        'Configure an agent to chat with your apps and request changes. This is not required to open installed apps.',
-      configureCodex: 'Configure agent',
+      intelligenceProviderMissingBody:
+        'Connect ChatGPT/Codex or Claude to chat with Forger, request changes, and run agents. This is not required to open installed apps.',
+      configureIntelligenceProvider: 'Connect provider',
       quotaOpenDashboard: 'View usage and credits',
+      quotaCodexRequired: 'The usage dashboard is specific to Codex. Connect ChatGPT/Codex to view it.',
       providerSelectorLabel: 'Agent provider',
       modelSelectorLabel: 'Model',
       effortSelectorLabel: 'Thinking effort',
@@ -71,6 +72,7 @@ export const enSections = {
         },
       },
       inputPlaceholder: 'Mention previously uploaded files with @...',
+      inputProviderMissingPlaceholder: 'Connect ChatGPT/Codex or Claude to chat with Forger.',
       attachFiles: 'Attach files',
       attachedFiles: 'Files to upload',
       mentionedFiles: 'Mentioned files',
@@ -111,7 +113,7 @@ export const enSections = {
       questionFreeTextPlaceholder: 'Something else',
       questionNext: 'Next',
       questionSubmit: 'Answer',
-      codexThinking: 'The agent is thinking...',
+      agentThinking: 'Forger is thinking...',
       newConversationTitle: 'New conversation',
       sendInProgress: 'I am still processing your previous message. Wait for the response or cancel that request.',
       appRunInProgress: 'This app is already being worked on. You can keep using other apps or wait for the current response to finish.',

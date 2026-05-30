@@ -273,6 +273,8 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     claudeAuthStatus,
     blocked: Boolean(codexConfigOpen || claudeConfigOpen || agentProviderConfigOpen || cloudModalOpen || pendingInstallGate),
   });
+  const intelligenceProviderConfigured = codexAuthStatus.authenticated || claudeAuthStatus.authenticated;
+  const codexProviderConfigured = codexAuthStatus.authenticated;
 
   const openCodexSetup = () => {
     controller.setAgentProviderConfigOpen(false);
@@ -669,8 +671,9 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             isResponding={activeConversationRunActive}
             canStopRun={Boolean(activeConversationRunId)}
             progressLines={activeConversationProgressLines}
-            codexConfigured={codexAuthStatus.authenticated || claudeAuthStatus.authenticated}
-            onConfigureCodex={() => setAgentProviderConfigOpen(true)}
+            intelligenceProviderConfigured={intelligenceProviderConfigured}
+            codexProviderConfigured={codexProviderConfigured}
+            onConfigureIntelligenceProvider={() => setAgentProviderConfigOpen(true)}
             openingAppIds={openingAppIds}
             onOpenApp={(appId) => void handleOpen(appId)}
             onStopRun={handleStopChatRun}

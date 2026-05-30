@@ -460,7 +460,7 @@ export function SettingsView({
               <Stack spacing={0.5}>
                 <Typography variant="h6">Claude Code</Typography>
                 <Typography variant="body2" color="text.secondary">
-                  Conecta Claude Code para usar agentes desde Forger.
+                  {t.settings.claudeDescription}
                 </Typography>
               </Stack>
               <Chip
@@ -476,7 +476,7 @@ export function SettingsView({
                 disabled={claudeAuthBusy}
                 onClick={onOpenClaudeConfig}
               >
-                {claudeAuthStatus.authenticated ? t.settings.codexConfiguredAction : 'Conectar Claude'}
+                {claudeAuthStatus.authenticated ? t.settings.claudeConfiguredAction : t.settings.claudeConnectAction}
               </Button>
               <Button
                 variant="outlined"
@@ -486,7 +486,7 @@ export function SettingsView({
                 disabled={claudeAuthBusy}
                 onClick={onReinstallClaude}
               >
-                Instalar/Reinstalar Claude
+                {t.settings.claudeReinstallAction}
               </Button>
             </Stack>
             <Typography variant="caption" color="text.secondary">

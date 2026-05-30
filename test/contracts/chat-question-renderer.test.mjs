@@ -14,8 +14,30 @@ test('chat composer keeps per-conversation drafts and stays editable while a run
   assert.match(controllerSource, /chatDraftsByConversation/);
   assert.match(controllerSource, /activeChatDraftKey\s*=\s*activeConversationId\s*\?\?\s*selectedAppId\s*\?\?\s*FREE_CHAT_APP_ID/);
   assert.match(controllerSource, /setChatDraft\(targetConversationId as string,\s*''\)/);
-  assert.match(viewSource, /contentEditable=\{codexConfigured\}/);
+  assert.match(viewSource, /contentEditable=\{intelligenceProviderConfigured\}/);
+  assert.doesNotMatch(viewSource, /codexConfigured/);
+  assert.match(viewSource, /inputProviderMissingPlaceholder/);
+  assert.match(viewSource, /quotaCodexRequired/);
   assert.match(viewSource, /!isSending\s*&&\s*canSendCurrentMode\s*&&\s*\(serializeComposerText\(\)\.trim\(\)/);
+});
+
+test('chat readiness is based on any configured intelligence provider', async () => {
+  const controllerSource = await readSource('src/renderer/app/RendererAppView.tsx');
+  const panelSource = await readSource('src/renderer/views/chat/ChatMessagesPanel.tsx');
+  const esSectionsSource = await readSource('src/renderer/i18n/locales/esSections.ts');
+  const enSectionsSource = await readSource('src/renderer/i18n/locales/enSections.ts');
+
+  assert.match(controllerSource, /const intelligenceProviderConfigured = codexAuthStatus\.authenticated \|\| claudeAuthStatus\.authenticated/);
+  assert.match(controllerSource, /const codexProviderConfigured = codexAuthStatus\.authenticated/);
+  assert.match(controllerSource, /intelligenceProviderConfigured=\{intelligenceProviderConfigured\}/);
+  assert.match(controllerSource, /codexProviderConfigured=\{codexProviderConfigured\}/);
+  assert.match(panelSource, /intelligenceProviderMissingBody/);
+  assert.match(panelSource, /configureIntelligenceProvider/);
+  assert.match(panelSource, /agentThinking/);
+  assert.match(esSectionsSource, /Conecta ChatGPT\/Codex o Claude para conversar con Forger/);
+  assert.match(esSectionsSource, /Conectar proveedor/);
+  assert.match(enSectionsSource, /Connect ChatGPT\/Codex or Claude to chat with Forger/);
+  assert.match(enSectionsSource, /Connect provider/);
 });
 
 test('question actions replace the composer and answer through the chat start-run path with an envelope prompt', async () => {
