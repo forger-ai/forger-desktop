@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import AddRounded from '@mui/icons-material/AddRounded';
 import ArrowBackRounded from '@mui/icons-material/ArrowBackRounded';
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
 import ForumRounded from '@mui/icons-material/ForumRounded';
@@ -11,9 +12,12 @@ import {
   Avatar,
   Box,
   Button,
-  Chip,
   CircularProgress,
   Divider,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   List,
   ListItemButton,
   Paper,
@@ -41,12 +45,6 @@ const formatForumDate = (value?: string) => {
 const forumAuthorLabel = (author: ForumPost['author']) =>
   author.firstName || `@${author.username}`;
 
-const statusLabel = (status: ForumPost['status']) => {
-  if (status === 'hidden') return 'Oculto';
-  if (status === 'deleted') return 'Eliminado';
-  return 'Visible';
-};
-
 const placeholderBody = (status: ForumPost['status'], kind: 'post' | 'comment') => {
   if (status === 'hidden') return kind === 'post' ? 'Post oculto por moderación.' : 'Comentario oculto por moderación.';
   if (status === 'deleted') return kind === 'post' ? 'Post eliminado.' : 'Comentario eliminado.';
@@ -59,6 +57,7 @@ export function ForumPanel({ active, onNotify }: ForumPanelProps) {
   const [posts, setPosts] = useState<ForumPost[]>([]);
   const [selectedPost, setSelectedPost] = useState<ForumPost | null>(null);
   const [postBody, setPostBody] = useState('');
+  const [createPostOpen, setCreatePostOpen] = useState(false);
   const [commentBody, setCommentBody] = useState('');
   const [replyTargetId, setReplyTargetId] = useState<number | null>(null);
   const [replyBody, setReplyBody] = useState('');
@@ -128,6 +127,7 @@ export function ForumPanel({ active, onNotify }: ForumPanelProps) {
       setPosts((current) => [post, ...current]);
       setSelectedPost(await window.forger.getForumPost(post.id));
       setPostBody('');
+      setCreatePostOpen(false);
       onNotify?.('Post publicado.', 'success');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No pudimos publicar el post.');
@@ -196,6 +196,11 @@ export function ForumPanel({ active, onNotify }: ForumPanelProps) {
       const next = action === 'delete'
         ? await window.forger.deleteForumPost(selectedPost.id)
         : await window.forger.moderateForumPost(selectedPost.id, action);
+      if (action === 'delete') {
+        setSelectedPost(null);
+        setPosts((current) => current.filter((post) => post.id !== selectedPost.id));
+        return;
+      }
       setSelectedPost({ ...selectedPost, ...next });
       setPosts((current) => current.map((post) => (post.id === next.id ? { ...post, ...next } : post)));
     } catch (err) {
@@ -241,7 +246,6 @@ export function ForumPanel({ active, onNotify }: ForumPanelProps) {
             <Stack direction="row" spacing={1} alignItems="center" useFlexGap flexWrap="wrap">
               <Typography variant="body2" sx={{ fontWeight: 700 }}>{forumAuthorLabel(comment.author)}</Typography>
               <Typography variant="caption" color="text.secondary">@{comment.author.username}</Typography>
-              <Chip size="small" label={statusLabel(comment.status)} variant="outlined" />
               <Typography variant="caption" color="text.secondary">{formatForumDate(comment.createdAt)}</Typography>
             </Stack>
             <Typography variant="body2" color={comment.body ? 'text.primary' : 'text.secondary'} sx={{ whiteSpace: 'pre-wrap' }}>
@@ -352,7 +356,6 @@ export function ForumPanel({ active, onNotify }: ForumPanelProps) {
               <Avatar sx={{ width: 32, height: 32 }}>{forumAuthorLabel(selectedPost.author).slice(0, 1).toUpperCase()}</Avatar>
               <Typography variant="body1" sx={{ fontWeight: 700 }}>{forumAuthorLabel(selectedPost.author)}</Typography>
               <Typography variant="caption" color="text.secondary">@{selectedPost.author.username}</Typography>
-              <Chip size="small" label={statusLabel(selectedPost.status)} variant="outlined" />
             </Stack>
             <Typography variant="caption" color="text.secondary">{formatForumDate(selectedPost.createdAt)}</Typography>
             <Typography variant="body2" color={selectedPost.body ? 'text.primary' : 'text.secondary'} sx={{ whiteSpace: 'pre-wrap' }}>
@@ -413,23 +416,11 @@ export function ForumPanel({ active, onNotify }: ForumPanelProps) {
   return (
     <Stack spacing={1.25}>
       {error ? <Alert severity="error">{error}</Alert> : null}
-      <Box component="form" onSubmit={handleCreatePost}>
-        <Stack spacing={1}>
-          <TextField
-            size="small"
-            multiline
-            minRows={3}
-            value={postBody}
-            onChange={(event) => setPostBody(event.target.value)}
-            placeholder="Publicar en el foro"
-            inputProps={{ maxLength: 8000 }}
-            disabled={busy}
-          />
-          <Button type="submit" variant="contained" size="small" startIcon={<SendRounded />} disabled={!postBody.trim() || busy} sx={{ alignSelf: 'flex-end' }}>
-            Publicar
-          </Button>
-        </Stack>
-      </Box>
+      <Stack direction="row" justifyContent="flex-end">
+        <Button variant="contained" size="small" startIcon={<AddRounded />} onClick={() => setCreatePostOpen(true)}>
+          Crear post
+        </Button>
+      </Stack>
       <Divider />
       {posts.length === 0 ? (
         <Paper variant="outlined" sx={{ p: 2, borderRadius: 1, textAlign: 'center' }}>
@@ -446,7 +437,6 @@ export function ForumPanel({ active, onNotify }: ForumPanelProps) {
                     <Avatar sx={{ width: 32, height: 32 }}>{forumAuthorLabel(post.author).slice(0, 1).toUpperCase()}</Avatar>
                     <Typography variant="body1" sx={{ fontWeight: 700 }} noWrap>{forumAuthorLabel(post.author)}</Typography>
                     <Typography variant="caption" color="text.secondary">@{post.author.username}</Typography>
-                    <Chip size="small" label={statusLabel(post.status)} variant="outlined" />
                   </Stack>
                   <Typography variant="body2" color={post.body ? 'text.primary' : 'text.secondary'} sx={{ whiteSpace: 'pre-wrap' }}>
                     {post.body ?? placeholderBody(post.status, 'post')}
@@ -460,6 +450,31 @@ export function ForumPanel({ active, onNotify }: ForumPanelProps) {
           ))}
         </List>
       )}
+      <Dialog open={createPostOpen} onClose={() => !busy && setCreatePostOpen(false)} maxWidth="sm" fullWidth>
+        <Box component="form" onSubmit={handleCreatePost}>
+          <DialogTitle>Crear post</DialogTitle>
+          <DialogContent>
+            <TextField
+              autoFocus
+              fullWidth
+              multiline
+              minRows={5}
+              value={postBody}
+              onChange={(event) => setPostBody(event.target.value)}
+              placeholder="Publicar en el foro"
+              inputProps={{ maxLength: 8000 }}
+              disabled={busy}
+              sx={{ mt: 1 }}
+            />
+          </DialogContent>
+          <DialogActions>
+            <Button disabled={busy} onClick={() => { setCreatePostOpen(false); setPostBody(''); }}>Cancelar</Button>
+            <Button type="submit" variant="contained" startIcon={<SendRounded />} disabled={!postBody.trim() || busy}>
+              Publicar
+            </Button>
+          </DialogActions>
+        </Box>
+      </Dialog>
     </Stack>
   );
 }

@@ -695,10 +695,10 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
         ) : null}
 
         {currentView === 'friends' ? (
-          <Box sx={{ px: { xs: 2, md: 3 }, py: 3, maxWidth: 860 }}>
+          <Box sx={{ px: { xs: 2, md: 3 }, py: 3, width: '100%' }}>
             <Stack spacing={2}>
               <Stack spacing={0.5}>
-                <Typography variant="h4" sx={{ fontWeight: 800 }}>Social</Typography>
+                <Typography variant="h4" sx={{ fontWeight: 800 }}>Foro</Typography>
                 <Typography color="text.secondary">
                   Foro de la comunidad y conversaciones públicas opt-in.
                 </Typography>
