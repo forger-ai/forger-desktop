@@ -29,6 +29,7 @@ import {
   useTheme,
 } from '@mui/material';
 import type { AppDictionary } from '@renderer/i18n';
+import { useMacTrafficLightSpacing } from '@renderer/hooks/useMacTrafficLightSpacing';
 import type {
   AgentProvider,
   AgentPermissionMode,
@@ -239,6 +240,7 @@ export function ChatView({
 }: ChatViewProps) {
   const theme = useTheme();
   const [historyOpen, setHistoryOpen] = useState(false);
+  const shouldReserveMacTrafficLightSpace = useMacTrafficLightSpacing();
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionMenuPosition, setMentionMenuPosition] = useState<{ left: number; bottom: number } | null>(null);
   const [respondingPermissionIds, setRespondingPermissionIds] = useState<Set<string>>(new Set());
@@ -589,7 +591,7 @@ export function ChatView({
           onClose={() => setHistoryOpen(false)}
           PaperProps={{ sx: { width: 360 } }}
         >
-          <Box sx={{ p: 2 }}>
+          <Box sx={{ px: 2, pt: shouldReserveMacTrafficLightSpace ? 6 : 2, pb: 2 }}>
             <Typography variant="h6">{t.sections.chat.historyTitle}</Typography>
           </Box>
           <Divider />

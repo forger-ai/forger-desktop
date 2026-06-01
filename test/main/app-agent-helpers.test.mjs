@@ -401,7 +401,7 @@ test('task helpers validate arguments, render prompts, and parse progress states
     variables: { doc: '/tmp/{{file}}.csv' },
     files: [{ argumentName: 'doc', name: '{{file}}.csv', path: '/tmp/{{file}}.csv', mimeType: 'text/csv' }],
   }, 'en'), /doc\.\{ \{file\} \}\.csv: \/tmp\/\{ \{file\} \}\.csv/);
-  assert.equal(progressFromTaskOutput(JSON.stringify({ type: 'turn.started' }), 'en'), 'The assistant is working on the document.');
+  assert.equal(progressFromTaskOutput(JSON.stringify({ type: 'turn.started' }), 'en'), 'The assistant is working on the task.');
   assert.equal(progressFromTaskOutput(JSON.stringify({ type: 'item.started', item: { type: 'mcp_tool_call' } }), 'en'), 'Using internal tools.');
   assert.equal(progressFromTaskOutput(JSON.stringify({
     type: 'item.started',

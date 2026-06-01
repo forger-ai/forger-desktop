@@ -44,7 +44,7 @@ export const normalizeTaskLocale = (value: unknown): TaskLocale => {
 const taskMessages: Record<TaskLocale, Record<TaskMessageKey, string>> = {
   es: {
     preparing: 'El asistente está preparando el análisis.',
-    working: 'El asistente está trabajando en el documento.',
+    working: 'El asistente está trabajando en la tarea.',
     completed: 'El asistente completó la tarea.',
     finished: 'El asistente terminó la tarea.',
     technicalLimit: 'El asistente encontró una limitación técnica y está probando otra estrategia.',
@@ -58,7 +58,7 @@ const taskMessages: Record<TaskLocale, Record<TaskMessageKey, string>> = {
   },
   en: {
     preparing: 'The assistant is preparing the analysis.',
-    working: 'The assistant is working on the document.',
+    working: 'The assistant is working on the task.',
     completed: 'The assistant completed the task.',
     finished: 'The assistant finished the task.',
     technicalLimit: 'The assistant found a technical limitation and is trying another approach.',
