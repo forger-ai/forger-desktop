@@ -1,3 +1,4 @@
+/* eslint-disable max-lines */
 import type fs from 'node:fs/promises';
 import type path from 'node:path';
 import os from 'node:os';
@@ -64,7 +65,7 @@ import type {
   CloudAppMessagePermissionDecision,
   CloudFriendship,
   CloudMessage,
-  CloudSendMessageInput,
+  CloudSendAppShareInput, CloudSendMessageInput,
   CloudSyncSettings,
   ConfigureOfficialToolInput,
   ConnectAppSecretInput,
@@ -204,7 +205,7 @@ interface MainProcessIpcDeps {
   restoreAppUserVersionRuntime: (appId: string) => Promise<BasicActionResult>;
   restoreRemoteAppBackup: (remoteBackupId: number) => Promise<BasicActionResult>;
   sanitizeRendererChatTrace: (input: RendererChatTraceEvent) => Record<string, unknown>;
-  sendEncryptedCloudMessage: (input: CloudSendMessageInput) => Promise<CloudMessage>;
+  sendEncryptedCloudMessage: (input: CloudSendMessageInput) => Promise<CloudMessage>; sendEncryptedCloudAppShareMessage: (input: CloudSendAppShareInput) => Promise<CloudMessage>;
   serializeErrorForInstallLog: (error: unknown) => Record<string, unknown>;
   setAppAutoSyncSetting: (appId: string, autoSync: boolean) => Promise<CloudSyncSettings>;
   shell: typeof Electron.shell;
@@ -253,7 +254,7 @@ export const __testMainHandlersInternals = {
 };
 
 export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
-  const { state, APP_CLAUDE_MODEL_OPTIONS, APP_CODEX_MODEL_OPTIONS, BetterSqlite3, BrowserWindow, CODEX_USAGE_DASHBOARD_URL, IPC_CHANNELS, app, appAgentConversationManager, appendInstallLog, buildAppSecretsState, buildCodexPromptWithAppContext, buildForgerToolsContextForApp, buildForgerToolsContextForFreeChat, canUseCloudDataSync, chatOrchestrator, cloudDeviceManager, connectClaudeAuth, connectCodexAuth, createLocalAppFromSkeleton, createRemoteAppBackup, decryptCloudMessage, decryptCloudMessages, dialog, disconnectCodexAuth, ensureCatalogStatuses, failureDiagnostic, forgerBackendClient, forwardCloudSocialEvent, fs, getAppDetails, getBackupsManager, getBackgroundTaskStore, getClaudeAuthStatus, getCloudIdentityStore, getCodexAuthStatus, getCodexHome, getDesktopUpdater, getDeveloperPathState, getFileLibrary, getForgerHomeRoot, getForgerMetadataRoot, getInstallLogPath, getMemoryStore, getOfficialToolsService, getPrivateAppsRoot, getPrivateDataRoot, getRuntimeStatus, getLocalNetworkShareStatus, getRemoteNetworkShareStatus, getSecretsStore, installAppRuntime, installSocialAppRuntime, installWelcome, ipcMain, listAppPrompts, listCatalogFromBackend, mainWindow, normalizeManifestAgentDefaults, openInstalledApp, startLocalNetworkShare, stopLocalNetworkShare, startRemoteNetworkShare, stopRemoteNetworkShare, openOrFocusFriendChatWindow, path, publicForgerAccount, registry, reinstallClaude, reinstallCodex, resolveAppIdForWebContents, resolveInstalledAgents, resolveInstalledAppSecrets, resolveInstalledManifest, resolveSelectedAppDisplayName, restoreAppPrompt, restoreAppUserVersionRuntime, restoreRemoteAppBackup, sanitizeRendererChatTrace, sendEncryptedCloudMessage, serializeErrorForInstallLog, setAppAutoSyncSetting, shell, signAppFolderGrant, stopInstalledApp, switchForgerAccountSession, toAppSummary, uninstallAppRuntime, updateAgentDefaults, updateAgentToolApproval, updateAppDeveloperSettings, updateDeveloperMode, updateAppPrompt, updateAppRuntime, updateCodexDefaults, validateArchiveEntries, validateAppPrompt, zipDirectory } = deps;
+  const { state, APP_CLAUDE_MODEL_OPTIONS, APP_CODEX_MODEL_OPTIONS, BetterSqlite3, BrowserWindow, CODEX_USAGE_DASHBOARD_URL, IPC_CHANNELS, app, appAgentConversationManager, appendInstallLog, buildAppSecretsState, buildCodexPromptWithAppContext, buildForgerToolsContextForApp, buildForgerToolsContextForFreeChat, canUseCloudDataSync, chatOrchestrator, cloudDeviceManager, connectClaudeAuth, connectCodexAuth, createLocalAppFromSkeleton, createRemoteAppBackup, decryptCloudMessage, decryptCloudMessages, dialog, disconnectCodexAuth, ensureCatalogStatuses, failureDiagnostic, forgerBackendClient, forwardCloudSocialEvent, fs, getAppDetails, getBackupsManager, getBackgroundTaskStore, getClaudeAuthStatus, getCloudIdentityStore, getCodexAuthStatus, getCodexHome, getDesktopUpdater, getDeveloperPathState, getFileLibrary, getForgerHomeRoot, getForgerMetadataRoot, getInstallLogPath, getMemoryStore, getOfficialToolsService, getPrivateAppsRoot, getPrivateDataRoot, getRuntimeStatus, getLocalNetworkShareStatus, getRemoteNetworkShareStatus, getSecretsStore, installAppRuntime, installSocialAppRuntime, installWelcome, ipcMain, listAppPrompts, listCatalogFromBackend, mainWindow, normalizeManifestAgentDefaults, openInstalledApp, startLocalNetworkShare, stopLocalNetworkShare, startRemoteNetworkShare, stopRemoteNetworkShare, openOrFocusFriendChatWindow, path, publicForgerAccount, registry, reinstallClaude, reinstallCodex, resolveAppIdForWebContents, resolveInstalledAgents, resolveInstalledAppSecrets, resolveInstalledManifest, resolveSelectedAppDisplayName, restoreAppPrompt, restoreAppUserVersionRuntime, restoreRemoteAppBackup, sanitizeRendererChatTrace, sendEncryptedCloudMessage, sendEncryptedCloudAppShareMessage, serializeErrorForInstallLog, setAppAutoSyncSetting, shell, signAppFolderGrant, stopInstalledApp, switchForgerAccountSession, toAppSummary, uninstallAppRuntime, updateAgentDefaults, updateAgentToolApproval, updateAppDeveloperSettings, updateDeveloperMode, updateAppPrompt, updateAppRuntime, updateCodexDefaults, validateArchiveEntries, validateAppPrompt, zipDirectory } = deps;
   const resolveReportRoot = (reader: () => string): string | undefined => {
     try {
       return typeof reader === 'function' ? reader() : undefined;
@@ -844,9 +845,56 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
   ipcMain.handle(IPC_CHANNELS.sendCloudMessage, async (_event, input: CloudSendMessageInput) => {
     return await sendEncryptedCloudMessage(input);
   });
+  ipcMain.handle(IPC_CHANNELS.sendCloudAppShareMessage, async (_event, input: CloudSendAppShareInput) => {
+    return await sendEncryptedCloudAppShareMessage(input);
+  });
   ipcMain.handle(IPC_CHANNELS.decideAppMessagePermission, async (_event, cloudMessageId: number, decision: CloudAppMessagePermissionDecision) => {
     if (!forgerBackendClient) throw new Error('backend_client_missing');
     return await decryptCloudMessage(await forgerBackendClient.decideAppMessagePermission(cloudMessageId, decision));
+  });
+  ipcMain.handle(IPC_CHANNELS.getForumParticipation, async () => {
+    if (!forgerBackendClient) throw new Error('backend_client_missing');
+    return await forgerBackendClient.getForumParticipation();
+  });
+  ipcMain.handle(IPC_CHANNELS.updateForumParticipation, async (_event, action: 'mark_prompt_shown' | 'opt_in' | 'opt_out') => {
+    if (!forgerBackendClient) throw new Error('backend_client_missing');
+    return await forgerBackendClient.updateForumParticipation(action);
+  });
+  ipcMain.handle(IPC_CHANNELS.listForumPosts, async (_event, limit?: number) => {
+    if (!forgerBackendClient) throw new Error('backend_client_missing');
+    return await forgerBackendClient.listForumPosts(limit);
+  });
+  ipcMain.handle(IPC_CHANNELS.getForumPost, async (_event, id: number) => {
+    if (!forgerBackendClient) throw new Error('backend_client_missing');
+    return await forgerBackendClient.getForumPost(id);
+  });
+  ipcMain.handle(IPC_CHANNELS.createForumPost, async (_event, body: string) => {
+    if (!forgerBackendClient) throw new Error('backend_client_missing');
+    return await forgerBackendClient.createForumPost(body);
+  });
+  ipcMain.handle(IPC_CHANNELS.createForumComment, async (_event, postId: number, body: string) => {
+    if (!forgerBackendClient) throw new Error('backend_client_missing');
+    return await forgerBackendClient.createForumComment(postId, body);
+  });
+  ipcMain.handle(IPC_CHANNELS.replyForumComment, async (_event, commentId: number, body: string) => {
+    if (!forgerBackendClient) throw new Error('backend_client_missing');
+    return await forgerBackendClient.replyForumComment(commentId, body);
+  });
+  ipcMain.handle(IPC_CHANNELS.deleteForumPost, async (_event, id: number) => {
+    if (!forgerBackendClient) throw new Error('backend_client_missing');
+    return await forgerBackendClient.deleteForumPost(id);
+  });
+  ipcMain.handle(IPC_CHANNELS.deleteForumComment, async (_event, id: number) => {
+    if (!forgerBackendClient) throw new Error('backend_client_missing');
+    return await forgerBackendClient.deleteForumComment(id);
+  });
+  ipcMain.handle(IPC_CHANNELS.moderateForumPost, async (_event, id: number, action: 'hide' | 'unhide', reason?: string) => {
+    if (!forgerBackendClient) throw new Error('backend_client_missing');
+    return await forgerBackendClient.moderateForumPost(id, action, reason);
+  });
+  ipcMain.handle(IPC_CHANNELS.moderateForumComment, async (_event, id: number, action: 'hide' | 'unhide', reason?: string) => {
+    if (!forgerBackendClient) throw new Error('backend_client_missing');
+    return await forgerBackendClient.moderateForumComment(id, action, reason);
   });
   ipcMain.handle(IPC_CHANNELS.getCloudIdentity, async () => await getCloudIdentityStore().getSummary());
   ipcMain.handle(IPC_CHANNELS.revealCloudSecretKey, async () => await getCloudIdentityStore().revealSecretKey());

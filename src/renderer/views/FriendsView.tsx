@@ -4,6 +4,7 @@ import CloseRounded from '@mui/icons-material/CloseRounded';
 import PersonAddDisabledRounded from '@mui/icons-material/PersonAddDisabledRounded';
 import PersonAddRounded from '@mui/icons-material/PersonAddRounded';
 import SearchRounded from '@mui/icons-material/SearchRounded';
+import ShareRounded from '@mui/icons-material/ShareRounded';
 import {
   Alert,
   Avatar,
@@ -13,12 +14,18 @@ import {
   Chip,
   CircularProgress,
   ClickAwayListener,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   Divider,
   Grow,
   List,
   ListItemButton,
+  MenuItem,
   Paper,
   Popper,
+  Select,
   Stack,
   Tab,
   Tabs,
@@ -51,6 +58,7 @@ import {
 } from './friends/socialViewHelpers';
 import { SocialLauncherButton } from './friends/SocialLauncherButton';
 import { SocialPanelHeader } from './friends/SocialPanelHeader';
+import { ForumPanel } from './friends/ForumPanel';
 
 interface FriendsViewProps {
   account: ForgerAccountSession;
@@ -120,6 +128,10 @@ export function FriendsView({ account, accountBusy = false, onOpenFriendChat, on
   const [socialApps, setSocialApps] = useState<SocialUserApp[]>([]);
   const [socialAppsLoading, setSocialAppsLoading] = useState(false);
   const [socialAppsError, setSocialAppsError] = useState<string | null>(null);
+  const [shareAppDialog, setShareAppDialog] = useState<{ open: boolean; app: SocialUserApp | null }>({ open: false, app: null });
+  const [shareRecipientId, setShareRecipientId] = useState('');
+  const [sharingAppId, setSharingAppId] = useState<number | null>(null);
+  const [shareAppError, setShareAppError] = useState<string | null>(null);
 
   const accountUserId = account.user?.id;
   const accepted = useMemo(
@@ -213,6 +225,10 @@ export function FriendsView({ account, accountBusy = false, onOpenFriendChat, on
     setSocialApps([]);
     setSocialAppsLoading(false);
     setSocialAppsError(null);
+    setShareAppDialog({ open: false, app: null });
+    setShareRecipientId('');
+    setSharingAppId(null);
+    setShareAppError(null);
   }, []);
 
   useEffect(() => {
@@ -397,6 +413,51 @@ export function FriendsView({ account, accountBusy = false, onOpenFriendChat, on
     }
   };
 
+  const openShareAppDialog = (app: SocialUserApp) => {
+    setShareAppDialog({ open: true, app });
+    setShareRecipientId((current) => current || String(accepted[0]?.friend.id ?? ''));
+    setShareAppError(null);
+  };
+
+  const closeShareAppDialog = () => {
+    if (sharingAppId !== null) {
+      return;
+    }
+    setShareAppDialog({ open: false, app: null });
+    setShareAppError(null);
+  };
+
+  const handleShareAppWithFriend = async () => {
+    const app = shareAppDialog.app;
+    const recipientUserId = Number(shareRecipientId);
+    if (!app || !Number.isFinite(recipientUserId) || sharingAppId !== null) {
+      return;
+    }
+
+    setSharingAppId(app.id);
+    setShareAppError(null);
+    try {
+      await window.forger.sendCloudAppShareMessage({
+        recipientUserId,
+        userAppId: app.id,
+      });
+      const friend = accepted.find((entry) => entry.friend.id === recipientUserId)?.friend;
+      const label = friend
+        ? `${app.name} enviada a @${friend.username}.`
+        : `${app.name} enviada.`;
+      onNotify?.(label, 'success');
+      setShareAppDialog({ open: false, app: null });
+      setShareRecipientId('');
+      void loadFriends({ silent: true });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'No pudimos compartir esta app.';
+      setShareAppError(message);
+      onNotify?.(message, 'error');
+    } finally {
+      setSharingAppId(null);
+    }
+  };
+
   const runRequestAction = async (
     friendshipId: number,
     action: () => Promise<CloudFriendship>,
@@ -500,12 +561,19 @@ export function FriendsView({ account, accountBusy = false, onOpenFriendChat, on
         ? 'Gestiona solicitudes pendientes'
         : activeTab === 'apps'
           ? 'Apps que compartes desde Forger'
-        : 'Busca por username y envía una solicitud';
+          : activeTab === 'forum'
+            ? 'Conversaciones públicas opt-in'
+            : 'Busca por username y envía una solicitud';
 
   const launcherBusy = loading && !hasLoadedOnce;
   const isFriendsTabLoading = loading && accepted.length === 0;
   const isRequestsTabLoading = loading && pendingIncoming.length === 0 && pendingOutgoing.length === 0;
   const isSocialAppsTabLoading = socialAppsLoading && socialApps.length === 0;
+  const hasPanelError = activeTab === 'apps'
+    ? Boolean(socialAppsError)
+    : activeTab === 'forum'
+      ? false
+      : Boolean(error);
   const tabErrorMessage = activeTab === 'friends'
     ? error ?? 'No pudimos cargar tus amigos.'
     : activeTab === 'requests'
@@ -579,7 +647,9 @@ export function FriendsView({ account, accountBusy = false, onOpenFriendChat, on
                     <Tabs
                       value={activeTab}
                       onChange={handleTabChange}
-                      variant="fullWidth"
+                      variant="scrollable"
+                      scrollButtons="auto"
+                      allowScrollButtonsMobile
                       sx={{ px: 1.2, minHeight: 44 }}
                     >
                       <Tab value="friends" label="Amigos" sx={{ minHeight: 44 }} />
@@ -589,6 +659,7 @@ export function FriendsView({ account, accountBusy = false, onOpenFriendChat, on
                         sx={{ minHeight: 44 }}
                       />
                       <Tab value="apps" label="Apps" sx={{ minHeight: 44 }} />
+                      <Tab value="forum" label="Foro" sx={{ minHeight: 44 }} />
                       <Tab value="add" label="Agregar" sx={{ minHeight: 44 }} />
                     </Tabs>
 
@@ -601,7 +672,7 @@ export function FriendsView({ account, accountBusy = false, onOpenFriendChat, on
                         </Alert>
                       ) : null}
 
-                      {account.authenticated && account.user?.confirmed && (activeTab === 'apps' ? socialAppsError : error) ? (
+                      {account.authenticated && account.user?.confirmed && hasPanelError ? (
                         <Stack spacing={1.5}>
                           <Alert severity="error">{tabErrorMessage}</Alert>
                           <Button variant="outlined" onClick={() => activeTab === 'apps' ? void loadSocialApps() : void loadFriends()}>
@@ -610,7 +681,7 @@ export function FriendsView({ account, accountBusy = false, onOpenFriendChat, on
                         </Stack>
                       ) : null}
 
-                      {account.authenticated && account.user?.confirmed && !(activeTab === 'apps' ? socialAppsError : error) ? (
+                      {account.authenticated && account.user?.confirmed && !hasPanelError ? (
                         activeTab === 'friends' ? (
                           <Stack spacing={1}>
                             {isFriendsTabLoading ? (
@@ -950,12 +1021,25 @@ export function FriendsView({ account, accountBusy = false, onOpenFriendChat, on
                                           </Typography>
                                         </Stack>
                                       </Stack>
+                                      <Stack direction="row" spacing={1} justifyContent="flex-end">
+                                        <Button
+                                          size="small"
+                                          variant="outlined"
+                                          startIcon={sharingAppId === app.id ? <CircularProgress color="inherit" size={14} /> : <ShareRounded />}
+                                          disabled={accepted.length === 0 || sharingAppId !== null || app.status !== 'published'}
+                                          onClick={() => openShareAppDialog(app)}
+                                        >
+                                          Enviar a amigo
+                                        </Button>
+                                      </Stack>
                                     </Stack>
                                   </Paper>
                                 ))}
                               </List>
                             ) : null}
                           </Stack>
+                        ) : activeTab === 'forum' ? (
+                          <ForumPanel active={open && activeTab === 'forum'} onNotify={onNotify} />
                         ) : (
                           <Stack spacing={1.25}>
                             <Box component="form" onSubmit={handleSearchFriends}>
@@ -1057,6 +1141,45 @@ export function FriendsView({ account, accountBusy = false, onOpenFriendChat, on
               </Grow>
             )}
           </Popper>
+          <Dialog open={shareAppDialog.open} onClose={closeShareAppDialog} maxWidth="xs" fullWidth>
+            <DialogTitle>Enviar app por chat</DialogTitle>
+            <DialogContent>
+              <Stack spacing={2} sx={{ pt: 1 }}>
+                {shareAppDialog.app ? (
+                  <Typography color="text.secondary">
+                    {shareAppDialog.app.name}
+                  </Typography>
+                ) : null}
+                {shareAppError ? <Alert severity="error">{shareAppError}</Alert> : null}
+                {accepted.length === 0 ? (
+                  <Alert severity="info">Necesitas un amigo aceptado para enviar una app por chat.</Alert>
+                ) : (
+                  <Select
+                    fullWidth
+                    value={shareRecipientId}
+                    onChange={(event) => setShareRecipientId(String(event.target.value))}
+                    disabled={sharingAppId !== null}
+                  >
+                    {accepted.map((entry) => (
+                      <MenuItem key={entry.friend.id} value={String(entry.friend.id)}>
+                        {friendLabel(entry)} (@{entry.friend.username})
+                      </MenuItem>
+                    ))}
+                  </Select>
+                )}
+              </Stack>
+            </DialogContent>
+            <DialogActions>
+              <Button disabled={sharingAppId !== null} onClick={closeShareAppDialog}>Cancelar</Button>
+              <Button
+                variant="contained"
+                disabled={sharingAppId !== null || !shareRecipientId || accepted.length === 0}
+                onClick={() => void handleShareAppWithFriend()}
+              >
+                {sharingAppId !== null ? 'Enviando...' : 'Enviar'}
+              </Button>
+            </DialogActions>
+          </Dialog>
         </Box>
       </ClickAwayListener>
     </Box>

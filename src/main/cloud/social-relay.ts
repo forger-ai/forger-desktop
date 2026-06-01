@@ -12,6 +12,7 @@ import type {
   CloudFriendUser,
   CloudMessage,
   CloudMessageEnvelope,
+  CloudSendAppShareInput,
   CloudSendMessageInput,
   CloudSocialEvent,
   FriendChatWindowOpenResult,
@@ -274,6 +275,30 @@ const sendEncryptedCloudMessage = async (input: CloudSendMessageInput): Promise<
   return { ...(await decryptCloudMessage(message)), plaintext: input.text };
 };
 
+const sendEncryptedCloudAppShareMessage = async (input: CloudSendAppShareInput): Promise<CloudMessage> => {
+  if (!forgerBackendClient) {
+    throw new Error('backend_client_missing');
+  }
+  const normalizedUsername = input.recipientUsername?.replace(/^@/, '');
+  const recipientUsername = normalizedUsername
+    ?? (await forgerBackendClient.listFriends()).find((entry) => entry.friend.id === input.recipientUserId)?.friend.username;
+  const friend = recipientUsername
+    ? (await forgerBackendClient.searchFriends(recipientUsername)).find((entry) =>
+      input.recipientUserId ? entry.id === input.recipientUserId : entry.username === recipientUsername)
+    : undefined;
+  if (!friend) {
+    throw new Error('recipient_not_found');
+  }
+  const plaintext = 'Te comparti una app de Forger.';
+  const message = await forgerBackendClient.sendCloudAppShareMessage({
+    ...input,
+    recipientUserId: input.recipientUserId ?? friend.id,
+    envelopes: await buildEncryptedEnvelopes(friend, plaintext),
+    clientMessageId: `${Date.now()}-${randomBytes(8).toString('hex')}`,
+  });
+  return { ...(await decryptCloudMessage(message)), plaintext };
+};
+
 const isCloudSocialEvent = (event: unknown): event is CloudSocialEvent => {
   if (!event || typeof event !== 'object') {
     return false;
@@ -360,5 +385,5 @@ const handleCloudSocialEvent = async (event: unknown): Promise<void> => {
   forwardCloudSocialEvent(eventForRenderer);
 };
 
-  return { findSqliteFile, resolveManagedClaudeCliPath, resolveSystemClaudeCliPath, resolveClaudeCli, ensureClaudeCliInstalled, resolveAppDbPath, getCloudIdentityStore, decryptCloudMessage, decryptCloudMessages, wait, buildEncryptedEnvelopes, sendEncryptedCloudMessage, isCloudSocialEvent, prepareCloudSocialEvent, isUnreadIncomingCloudMessage, showIncomingCloudMessageNotification, forwardCloudSocialEvent, handleCloudSocialEvent };
+  return { findSqliteFile, resolveManagedClaudeCliPath, resolveSystemClaudeCliPath, resolveClaudeCli, ensureClaudeCliInstalled, resolveAppDbPath, getCloudIdentityStore, decryptCloudMessage, decryptCloudMessages, wait, buildEncryptedEnvelopes, sendEncryptedCloudMessage, sendEncryptedCloudAppShareMessage, isCloudSocialEvent, prepareCloudSocialEvent, isUnreadIncomingCloudMessage, showIncomingCloudMessageNotification, forwardCloudSocialEvent, handleCloudSocialEvent };
 };

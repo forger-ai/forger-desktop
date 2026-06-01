@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import AppsRounded from '@mui/icons-material/AppsRounded';
+import LinkOffRounded from '@mui/icons-material/LinkOffRounded';
 import SendRounded from '@mui/icons-material/SendRounded';
+import ShareRounded from '@mui/icons-material/ShareRounded';
 import {
   Alert,
   Avatar,
@@ -7,16 +10,22 @@ import {
   Button,
   Chip,
   CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   Divider,
   IconButton,
+  MenuItem,
   Paper,
+  Select,
   Stack,
   TextField,
   Typography,
   alpha,
   useTheme,
 } from '@mui/material';
-import type { CloudMessage, CloudSocialEvent, ForgerAccountSession } from '@shared/types';
+import type { CloudMessage, CloudSocialEvent, ForgerAccountSession, SocialUserApp } from '@shared/types';
 
 interface FriendChatWindowViewProps {
   account: ForgerAccountSession;
@@ -61,6 +70,31 @@ const mergeMessage = (messages: CloudMessage[], message: CloudMessage) => {
   return sortMessages(next);
 };
 
+const appShareState = (message: CloudMessage) => {
+  if (message.type !== 'CloudAppShareMessage') {
+    return null;
+  }
+  const revoked = Boolean(message.appShare.share?.revokedAt);
+  if (revoked) {
+    return { label: 'Link revocado', color: 'warning' as const };
+  }
+  if (!message.appShare.app.available) {
+    return { label: 'No disponible', color: 'default' as const };
+  }
+  return { label: 'Disponible', color: 'success' as const };
+};
+
+const appShareInstallInput = (message: CloudMessage) => {
+  if (message.type !== 'CloudAppShareMessage' || !message.appShare.app.available || message.appShare.share?.revokedAt) {
+    return null;
+  }
+  if (message.appShare.shareKind === 'public_app') {
+    return { appId: message.appShare.userAppId };
+  }
+  const shareCode = message.appShare.share?.code;
+  return shareCode ? { shareCode } : null;
+};
+
 export function FriendChatWindowView({
   account,
   friendUserId,
@@ -75,6 +109,15 @@ export function FriendChatWindowView({
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
+  const [shareDialogOpen, setShareDialogOpen] = useState(false);
+  const [shareApps, setShareApps] = useState<SocialUserApp[]>([]);
+  const [shareAppsLoading, setShareAppsLoading] = useState(false);
+  const [shareError, setShareError] = useState<string | null>(null);
+  const [selectedShareAppId, setSelectedShareAppId] = useState('');
+  const [sharingApp, setSharingApp] = useState(false);
+  const [installingShareKeys, setInstallingShareKeys] = useState<Set<string>>(new Set());
+  const [appShareInstallFeedback, setAppShareInstallFeedback] = useState<Record<string, string>>({});
+  const [appShareInstallErrors, setAppShareInstallErrors] = useState<Record<string, string>>({});
 
   const loadMessages = useCallback(async () => {
     if (!account.authenticated || !account.user?.confirmed) {
@@ -187,6 +230,93 @@ export function FriendChatWindowView({
     }
   };
 
+  const openShareDialog = async () => {
+    if (shareAppsLoading || sharingApp) {
+      return;
+    }
+
+    setShareDialogOpen(true);
+    setShareError(null);
+    setShareAppsLoading(true);
+    try {
+      const payload = await window.forger.listMySocialApps();
+      setShareApps(payload.apps);
+      setSelectedShareAppId((current) => current || String(payload.apps[0]?.id ?? ''));
+    } catch (err) {
+      setShareError(err instanceof Error ? err.message : 'No pudimos cargar tus apps compartidas.');
+    } finally {
+      setShareAppsLoading(false);
+    }
+  };
+
+  const handleShareApp = async () => {
+    const userAppId = Number(selectedShareAppId);
+    if (!Number.isFinite(userAppId) || sharingApp) {
+      return;
+    }
+
+    setSharingApp(true);
+    setShareError(null);
+    try {
+      const sent = await window.forger.sendCloudAppShareMessage({
+        recipientUserId: friendUserId,
+        userAppId,
+      });
+      setMessages((current) => mergeMessage(current, sent));
+      setShareDialogOpen(false);
+    } catch (err) {
+      setShareError(err instanceof Error ? err.message : 'No pudimos compartir esta app.');
+    } finally {
+      setSharingApp(false);
+    }
+  };
+
+  const handleInstallAppShare = async (message: CloudMessage) => {
+    const input = appShareInstallInput(message);
+    const key = messageIdentity(message) ?? (message.type === 'CloudAppShareMessage' ? `app-share:${message.appShare.id}` : null);
+    if (!input || !key || installingShareKeys.has(key)) {
+      return;
+    }
+
+    setInstallingShareKeys((current) => new Set(current).add(key));
+    setAppShareInstallErrors((current) => {
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
+    setAppShareInstallFeedback((current) => {
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
+
+    try {
+      const result = await window.forger.installSocialApp(input, navigator.language);
+      if (result.success) {
+        setAppShareInstallFeedback((current) => ({
+          ...current,
+          [key]: result.userMessage || 'App instalada.',
+        }));
+        return;
+      }
+      setAppShareInstallErrors((current) => ({
+        ...current,
+        [key]: result.userMessage || 'No pudimos instalar esta app.',
+      }));
+    } catch (err) {
+      setAppShareInstallErrors((current) => ({
+        ...current,
+        [key]: err instanceof Error ? err.message : 'No pudimos instalar esta app.',
+      }));
+    } finally {
+      setInstallingShareKeys((current) => {
+        const next = new Set(current);
+        next.delete(key);
+        return next;
+      });
+    }
+  };
+
   const sortedMessages = useMemo(() => sortMessages(messages), [messages]);
 
   return (
@@ -220,6 +350,15 @@ export function FriendChatWindowView({
             @{friendUsername}
           </Typography>
         </Stack>
+        <Button
+          variant="outlined"
+          size="small"
+          startIcon={shareAppsLoading ? <CircularProgress size={14} color="inherit" /> : <ShareRounded />}
+          disabled={!account.authenticated || !account.user?.confirmed || shareAppsLoading || sharingApp}
+          onClick={() => void openShareDialog()}
+        >
+          Compartir app
+        </Button>
         <Chip size="small" label="Social" variant="outlined" />
       </Stack>
 
@@ -270,6 +409,10 @@ export function FriendChatWindowView({
               const outgoing = message.sender.id === account.user?.id;
               const key = message.id ?? `${message.clientMessageId ?? 'message'}-${index}`;
               const body = message.plaintext?.trim();
+              const shareState = appShareState(message);
+              const shareInstallInput = appShareInstallInput(message);
+              const shareActionKey = messageIdentity(message) ?? (message.type === 'CloudAppShareMessage' ? `app-share:${message.appShare.id}` : null);
+              const installingShare = Boolean(shareActionKey && installingShareKeys.has(shareActionKey));
 
               return (
                 <Stack key={key} alignItems={outgoing ? 'flex-end' : 'flex-start'}>
@@ -277,38 +420,112 @@ export function FriendChatWindowView({
                     elevation={0}
                     sx={{
                       maxWidth: '84%',
-                      px: 1.5,
-                      py: 1.1,
+                      width: message.type === 'CloudAppShareMessage' ? 'min(360px, 84%)' : 'auto',
+                      px: message.type === 'CloudAppShareMessage' ? 0 : 1.5,
+                      py: message.type === 'CloudAppShareMessage' ? 0 : 1.1,
                       borderRadius: 2.5,
-                      bgcolor: outgoing ? theme.palette.primary.main : alpha(theme.palette.background.paper, 0.96),
-                      color: outgoing ? theme.palette.primary.contrastText : theme.palette.text.primary,
+                      bgcolor: message.type === 'CloudAppShareMessage'
+                        ? alpha(theme.palette.background.paper, 0.98)
+                        : outgoing
+                          ? theme.palette.primary.main
+                          : alpha(theme.palette.background.paper, 0.96),
+                      color: message.type === 'CloudAppShareMessage'
+                        ? theme.palette.text.primary
+                        : outgoing
+                          ? theme.palette.primary.contrastText
+                          : theme.palette.text.primary,
                       border: `1px solid ${
-                        outgoing ? alpha(theme.palette.primary.dark, 0.35) : alpha(theme.palette.divider, 0.8)
+                        message.type === 'CloudAppShareMessage'
+                          ? alpha(theme.palette.primary.main, 0.28)
+                          : outgoing
+                            ? alpha(theme.palette.primary.dark, 0.35)
+                            : alpha(theme.palette.divider, 0.8)
                       }`,
+                      overflow: 'hidden',
                     }}
                   >
-                    <Typography
-                      variant="body2"
-                      sx={{
-                        whiteSpace: 'pre-wrap',
-                        wordBreak: 'break-word',
-                        color: body
-                          ? 'inherit'
-                          : outgoing
-                            ? alpha(theme.palette.primary.contrastText, 0.78)
-                            : theme.palette.text.secondary,
-                        fontStyle: body ? 'normal' : 'italic',
-                      }}
-                    >
-                      {body ?? 'No se pudo desencriptar este mensaje en este dispositivo.'}
-                    </Typography>
+                    {message.type === 'CloudAppShareMessage' ? (
+                      <Stack spacing={1.1} sx={{ p: 1.4 }}>
+                        <Stack direction="row" spacing={1} alignItems="flex-start">
+                          <Avatar
+                            variant="rounded"
+                            sx={{
+                              width: 38,
+                              height: 38,
+                              bgcolor: alpha(theme.palette.primary.main, 0.12),
+                              color: theme.palette.primary.main,
+                            }}
+                          >
+                            {shareState?.label === 'Link revocado' ? <LinkOffRounded /> : <AppsRounded />}
+                          </Avatar>
+                          <Stack spacing={0.35} sx={{ minWidth: 0, flex: 1 }}>
+                            <Typography variant="subtitle2" sx={{ fontWeight: 800 }} noWrap>
+                              {message.appShare.appNameSnapshot}
+                            </Typography>
+                            <Typography variant="caption" color="text.secondary" noWrap>
+                              @{message.appShare.appOwnerUsernameSnapshot}
+                            </Typography>
+                          </Stack>
+                          {shareState ? (
+                            <Chip size="small" label={shareState.label} color={shareState.color} variant="outlined" />
+                          ) : null}
+                        </Stack>
+                        <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
+                          <Chip size="small" label={message.appShare.shareKind === 'public_app' ? 'Pública' : message.appShare.shareKind === 'friends_link' ? 'Amigos' : 'Privada'} />
+                          <Chip size="small" label={`/${message.appShare.appSlugSnapshot}`} variant="outlined" />
+                        </Stack>
+                        {body ? (
+                          <Typography variant="body2" color="text.secondary" sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                            {body}
+                          </Typography>
+                        ) : null}
+                        {shareActionKey && appShareInstallFeedback[shareActionKey] ? (
+                          <Alert severity="success" sx={{ py: 0.25 }}>
+                            {appShareInstallFeedback[shareActionKey]}
+                          </Alert>
+                        ) : null}
+                        {shareActionKey && appShareInstallErrors[shareActionKey] ? (
+                          <Alert severity="error" sx={{ py: 0.25 }}>
+                            {appShareInstallErrors[shareActionKey]}
+                          </Alert>
+                        ) : null}
+                        <Button
+                          size="small"
+                          variant="contained"
+                          disabled={!shareInstallInput || installingShare}
+                          onClick={() => void handleInstallAppShare(message)}
+                        >
+                          {installingShare ? 'Instalando...' : 'Instalar'}
+                        </Button>
+                      </Stack>
+                    ) : (
+                      <Typography
+                        variant="body2"
+                        sx={{
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-word',
+                          color: body
+                            ? 'inherit'
+                            : outgoing
+                              ? alpha(theme.palette.primary.contrastText, 0.78)
+                              : theme.palette.text.secondary,
+                          fontStyle: body ? 'normal' : 'italic',
+                        }}
+                      >
+                        {body ?? 'No se pudo desencriptar este mensaje en este dispositivo.'}
+                      </Typography>
+                    )}
                     <Typography
                       variant="caption"
                       sx={{
-                        mt: 0.75,
+                        mt: message.type === 'CloudAppShareMessage' ? 0 : 0.75,
                         display: 'block',
+                        px: message.type === 'CloudAppShareMessage' ? 1.4 : 0,
+                        pb: message.type === 'CloudAppShareMessage' ? 1.1 : 0,
                         color: outgoing
-                          ? alpha(theme.palette.primary.contrastText, 0.8)
+                          ? message.type === 'CloudAppShareMessage'
+                            ? theme.palette.text.secondary
+                            : alpha(theme.palette.primary.contrastText, 0.8)
                           : theme.palette.text.secondary,
                       }}
                     >
@@ -358,6 +575,46 @@ export function FriendChatWindowView({
           <SendRounded />
         </IconButton>
       </Stack>
+
+      <Dialog open={shareDialogOpen} onClose={() => !sharingApp && setShareDialogOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Compartir app con @{friendUsername}</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ pt: 1 }}>
+            {shareError ? <Alert severity="error">{shareError}</Alert> : null}
+            {shareAppsLoading ? (
+              <Stack direction="row" spacing={1} alignItems="center">
+                <CircularProgress size={18} />
+                <Typography color="text.secondary">Cargando tus apps compartidas.</Typography>
+              </Stack>
+            ) : shareApps.length === 0 ? (
+              <Alert severity="info">Sube una app a Social antes de compartirla por chat.</Alert>
+            ) : (
+              <Select
+                fullWidth
+                value={selectedShareAppId}
+                onChange={(event) => setSelectedShareAppId(String(event.target.value))}
+                disabled={sharingApp}
+              >
+                {shareApps.map((app) => (
+                  <MenuItem key={app.id} value={String(app.id)}>
+                    {app.name}
+                  </MenuItem>
+                ))}
+              </Select>
+            )}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button disabled={sharingApp} onClick={() => setShareDialogOpen(false)}>Cancelar</Button>
+          <Button
+            variant="contained"
+            disabled={sharingApp || shareAppsLoading || !selectedShareAppId || shareApps.length === 0}
+            onClick={() => void handleShareApp()}
+          >
+            {sharingApp ? 'Compartiendo...' : 'Enviar'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }

@@ -37,6 +37,142 @@ const jsonResponse = (status, body, headers = {}) => new Response(JSON.stringify
   },
 });
 
+test('forum participation backend client reads one-time prompt state and opt-in action', async () => {
+  const requests = [];
+  const harness = createClient(async (url, init = {}) => {
+    requests.push({ url, init });
+    const parsed = new URL(url);
+    if (parsed.pathname === '/api/v1/me/forum/participation' && (!init.method || init.method === 'GET')) {
+      return jsonResponse(200, {
+        status: 'opted_out',
+        first_prompt_shown_at: null,
+        is_moderator: false,
+      });
+    }
+    if (parsed.pathname === '/api/v1/me/forum/participation' && init.method === 'PATCH') {
+      return jsonResponse(200, {
+        status: 'opted_in',
+        first_prompt_shown_at: '2026-06-01T10:00:00Z',
+        opted_in_at: '2026-06-01T10:00:00Z',
+        is_moderator: true,
+      });
+    }
+    return jsonResponse(404, { error: 'not_found' });
+  }, 'session-token');
+
+  try {
+    const initial = await harness.client.getForumParticipation();
+    assert.equal(initial.status, 'opted_out');
+    assert.equal(initial.firstPromptShownAt, undefined);
+    assert.equal(initial.isModerator, false);
+
+    const updated = await harness.client.updateForumParticipation('opt_in');
+    assert.equal(updated.status, 'opted_in');
+    assert.equal(updated.firstPromptShownAt, '2026-06-01T10:00:00Z');
+    assert.equal(updated.optedInAt, '2026-06-01T10:00:00Z');
+    assert.equal(updated.isModerator, true);
+
+    assert.equal(requests[0].url, 'https://platform.test/api/v1/me/forum/participation');
+    assert.equal(requests[1].init.method, 'PATCH');
+    assert.deepEqual(JSON.parse(requests[1].init.body), { forum_action: 'opt_in' });
+    assert.equal(requests.every((request) => request.init.headers.Authorization === 'Bearer session-token'), true);
+  } finally {
+    harness.restore();
+  }
+});
+
+test('forum backend client normalizes posts, comments, replies and moderation calls', async () => {
+  const requests = [];
+  const postPayload = {
+    id: 7,
+    status: 'visible',
+    body: 'Hello forum.',
+    author: { id: 2, username: 'alice', first_name: 'Alice', last_initial: 'A' },
+    comments_count: 1,
+    can_delete: true,
+    can_moderate: true,
+    created_at: '2026-06-01T10:00:00Z',
+    updated_at: '2026-06-01T10:01:00Z',
+  };
+  const commentPayload = {
+    id: 9,
+    forum_post_id: 7,
+    parent_id: null,
+    depth: 0,
+    status: 'hidden',
+    body: null,
+    author: { id: 3, username: 'bob' },
+    hidden_at: '2026-06-01T10:05:00Z',
+    hidden_reason: null,
+    can_delete: false,
+    can_moderate: true,
+    created_at: '2026-06-01T10:04:00Z',
+    replies: [{
+      id: 10,
+      forum_post_id: 7,
+      parent_id: 9,
+      depth: 1,
+      status: 'visible',
+      body: 'Nested reply.',
+      author: { id: 4, username: 'carol' },
+      can_delete: true,
+      can_moderate: true,
+      created_at: '2026-06-01T10:06:00Z',
+      replies: [],
+    }],
+  };
+  const harness = createClient(async (url, init = {}) => {
+    requests.push({ url, init });
+    const parsed = new URL(url);
+    if (parsed.pathname === '/api/v1/me/forum/posts' && (!init.method || init.method === 'GET')) {
+      assert.equal(parsed.searchParams.get('per_page'), '50');
+      return jsonResponse(200, { items: [postPayload], meta: { page: 1, per_page: 50 } });
+    }
+    if (parsed.pathname === '/api/v1/me/forum/posts/7' && (!init.method || init.method === 'GET')) {
+      return jsonResponse(200, { ...postPayload, comments: [commentPayload] });
+    }
+    if (parsed.pathname === '/api/v1/me/forum/posts' && init.method === 'POST') {
+      return jsonResponse(201, { ...postPayload, id: 8, body: JSON.parse(init.body).body });
+    }
+    if (parsed.pathname === '/api/v1/me/forum/posts/7/comments' && init.method === 'POST') {
+      return jsonResponse(201, { ...commentPayload, status: 'visible', body: JSON.parse(init.body).body, replies: [] });
+    }
+    if (parsed.pathname === '/api/v1/me/forum/comments/9/replies' && init.method === 'POST') {
+      return jsonResponse(201, { ...commentPayload, id: 11, parent_id: 9, depth: 1, status: 'visible', body: JSON.parse(init.body).body, replies: [] });
+    }
+    if (parsed.pathname === '/api/v1/me/forum/posts/7/hide' && init.method === 'POST') {
+      return jsonResponse(200, { ...postPayload, status: 'hidden', body: null });
+    }
+    if (parsed.pathname === '/api/v1/me/forum/comments/9/unhide' && init.method === 'POST') {
+      return jsonResponse(200, { ...commentPayload, status: 'visible', body: 'Restored.', replies: [] });
+    }
+    if (parsed.pathname === '/api/v1/me/forum/comments/9' && init.method === 'DELETE') {
+      return jsonResponse(200, { ...commentPayload, status: 'deleted', body: 'Deleted.', replies: [] });
+    }
+    return jsonResponse(404, { error: 'not_found' });
+  }, 'session-token');
+
+  try {
+    const posts = await harness.client.listForumPosts(50);
+    assert.equal(posts[0].commentsCount, 1);
+    assert.equal(posts[0].author.firstName, 'Alice');
+
+    const post = await harness.client.getForumPost(7);
+    assert.equal(post.comments[0].body, undefined);
+    assert.equal(post.comments[0].replies[0].body, 'Nested reply.');
+
+    assert.equal((await harness.client.createForumPost('New post')).body, 'New post');
+    assert.equal((await harness.client.createForumComment(7, 'Comment')).body, 'Comment');
+    assert.equal((await harness.client.replyForumComment(9, 'Reply')).parentId, 9);
+    assert.equal((await harness.client.moderateForumPost(7, 'hide')).status, 'hidden');
+    assert.equal((await harness.client.moderateForumComment(9, 'unhide')).status, 'visible');
+    assert.equal((await harness.client.deleteForumComment(9)).status, 'deleted');
+    assert.equal(requests.every((request) => request.init.headers.Authorization === 'Bearer session-token'), true);
+  } finally {
+    harness.restore();
+  }
+});
+
 const createClient = (fetchImpl, token = 'token-1', overrides = {}) => {
   const previousFetch = globalThis.fetch;
   globalThis.fetch = fetchImpl;
@@ -1418,6 +1554,40 @@ test('cloud friendship and message normalizers reject malformed social relay pay
     recipient: { id: 2, username: 'recipient' },
     envelopes: null,
   }).envelopes, []);
+  const appShareMessage = normalizeCloudMessage({
+    id: '44',
+    type: 'CloudAppShareMessage',
+    sender: { id: 1, username: 'sender' },
+    recipient: { id: 2, username: 'recipient' },
+    metadata: { ignored: true },
+    app_share: {
+      id: '55',
+      user_app_id: '66',
+      user_app_share_id: null,
+      share_kind: 'public_app',
+      app_visibility_at_send: 'public',
+      app_name_snapshot: 'Shared App',
+      app_slug_snapshot: 'shared-app',
+      app_owner_username_snapshot: 'sender',
+      app: {
+        id: '66',
+        status: 'published',
+        visibility: 'public',
+        available: true,
+      },
+      share: null,
+    },
+  });
+  assert.equal(appShareMessage.type, 'CloudAppShareMessage');
+  assert.equal(appShareMessage.appShare.userAppId, 66);
+  assert.equal(appShareMessage.appShare.shareKind, 'public_app');
+  assert.equal(appShareMessage.appShare.app.available, true);
+  assert.equal(appShareMessage.appShare.share, undefined);
+  assert.equal(normalizeCloudMessage({
+    type: 'CloudAppShareMessage',
+    sender: { id: 1, username: 'sender' },
+    recipient: { id: 2, username: 'recipient' },
+  }), undefined);
 });
 
 test('cloud social client methods encode requests and normalize response payloads', async () => {
@@ -1467,6 +1637,43 @@ test('cloud social client methods encode requests and normalize response payload
         metadata: { kind: 'handoff' },
       });
     }
+    if (parsed.pathname === '/api/v1/me/cloud_messages/app_share') {
+      return jsonResponse(201, {
+        id: '12',
+        type: 'CloudAppShareMessage',
+        sender: { id: 1, username: 'me' },
+        recipient: { id: 4, username: 'friend' },
+        delivery_mode: 'persistent',
+        source: 'user',
+        status: 'stored',
+        metadata: {},
+        envelopes: [],
+        app_share: {
+          id: '13',
+          user_app_id: '21',
+          user_app_share_id: '34',
+          share_kind: 'friends_link',
+          app_visibility_at_send: 'friends',
+          app_name_snapshot: 'Shared App',
+          app_slug_snapshot: 'shared-app',
+          app_owner_username_snapshot: 'me',
+          app: {
+            id: '21',
+            status: 'published',
+            visibility: 'friends',
+            available: true,
+          },
+          share: {
+            id: '34',
+            scope: 'private_link',
+            code: 'SHARE-CODE',
+            deep_link: 'forger://social/app?code=SHARE-CODE',
+            revoked_at: '2026-05-21T00:03:00Z',
+            used_count: 2,
+          },
+        },
+      });
+    }
     if (parsed.pathname === '/api/v1/me/app_message_permission') {
       return jsonResponse(200, {
         id: '11',
@@ -1512,6 +1719,23 @@ test('cloud social client methods encode requests and normalize response payload
     assert.equal(message.envelopes[0].cloudDeviceId, undefined);
     assert.equal(message.envelopes[0].deviceUid, 'device-4');
 
+    const appShareMessage = await harness.client.sendCloudAppShareMessage({
+      recipientUserId: 4,
+      userAppId: 21,
+      clientMessageId: 'share-client-1',
+      envelopes: [{
+        recipientUserId: 4,
+        cloudDeviceId: 10,
+        deviceUid: 'device-4',
+        keyFingerprint: 'fingerprint',
+        ciphertext: 'share-ciphertext',
+        metadata: { alg: 'v1' },
+      }],
+    });
+    assert.equal(appShareMessage.type, 'CloudAppShareMessage');
+    assert.equal(appShareMessage.appShare.shareKind, 'friends_link');
+    assert.equal(appShareMessage.appShare.share.revokedAt, '2026-05-21T00:03:00Z');
+
     const decision = await harness.client.decideAppMessagePermission(11, 'allow_once');
     assert.equal(decision.status, 'stored');
 
@@ -1534,6 +1758,19 @@ test('cloud social client methods encode requests and normalize response payload
       }],
     });
     assert.deepEqual(JSON.parse(requests[4].init.body), {
+      recipient_user_id: 4,
+      user_app_id: 21,
+      client_message_id: 'share-client-1',
+      envelopes: [{
+        recipient_user_id: 4,
+        cloud_device_id: 10,
+        device_uid: 'device-4',
+        key_fingerprint: 'fingerprint',
+        ciphertext: 'share-ciphertext',
+        metadata: { alg: 'v1' },
+      }],
+    });
+    assert.deepEqual(JSON.parse(requests[5].init.body), {
       cloud_message_id: 11,
       decision: 'allow_once',
     });

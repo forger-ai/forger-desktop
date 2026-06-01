@@ -7,6 +7,7 @@ import DevicesRounded from '@mui/icons-material/DevicesRounded';
 import InsertDriveFileRounded from '@mui/icons-material/InsertDriveFileRounded';
 import TableChartRounded from '@mui/icons-material/TableChartRounded';
 import FeedbackRounded from '@mui/icons-material/FeedbackRounded';
+import PeopleRounded from '@mui/icons-material/PeopleRounded';
 import SettingsRounded from '@mui/icons-material/SettingsRounded';
 import VpnKeyRounded from '@mui/icons-material/VpnKeyRounded';
 import StorefrontRounded from '@mui/icons-material/StorefrontRounded';
@@ -55,12 +56,14 @@ interface SidebarProps {
   t: AppDictionary;
   desktopUpdateState: DesktopUpdateState;
   advancedMode: boolean;
+  showForumNav: boolean;
 }
 
 const defaultNav = [
   { id: 'chat' as const, icon: <AutoAwesomeRounded /> },
   { id: 'apps' as const, icon: <AppsRounded /> },
   { id: 'catalog' as const, icon: <StorefrontRounded /> },
+  { id: 'friends' as const, icon: <PeopleRounded /> },
   { id: 'feedback' as const, icon: <FeedbackRounded /> },
 ];
 
@@ -74,7 +77,7 @@ const advancedNav = [
   { id: 'tools' as const, icon: <ConstructionRounded /> },
 ];
 
-export function Sidebar({ currentView, onNavigate, t, desktopUpdateState, advancedMode }: SidebarProps) {
+export function Sidebar({ currentView, onNavigate, t, desktopUpdateState, advancedMode, showForumNav }: SidebarProps) {
   const theme = useTheme();
   const [windowState, setWindowState] = useState<WindowControlState | null>(null);
   const shouldReserveMacTrafficLightSpace =
@@ -113,7 +116,7 @@ export function Sidebar({ currentView, onNavigate, t, desktopUpdateState, advanc
     chat: t.nav.chat,
     create: t.nav.create,
     feedback: t.nav.feedback,
-    friends: 'Friends',
+    friends: 'Foro',
     automations: t.nav.automations,
     files: t.nav.files,
     backups: t.nav.backups,
@@ -128,8 +131,8 @@ export function Sidebar({ currentView, onNavigate, t, desktopUpdateState, advanc
   };
   const showUpdateBanner = desktopUpdateState.status === 'available' || desktopUpdateState.status === 'ready';
   const mainNav = advancedMode
-    ? [defaultNav[0], defaultNav[1], defaultNav[2], ...advancedNav]
-    : defaultNav;
+    ? [defaultNav[0], defaultNav[1], defaultNav[2], ...(showForumNav ? [defaultNav[3]] : []), ...advancedNav]
+    : [defaultNav[0], defaultNav[1], defaultNav[2], ...(showForumNav ? [defaultNav[3]] : []), defaultNav[4]];
 
   return (
     <Box

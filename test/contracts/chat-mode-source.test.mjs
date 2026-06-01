@@ -34,8 +34,23 @@ test('renderer separates installed Apps from curated Catalog in navigation and c
   const viewSource = await readSource('src/renderer/app/RendererAppView.tsx');
 
   assert.match(sidebarSource, /id: 'chat'[\s\S]*id: 'apps'[\s\S]*id: 'catalog'/);
+  assert.match(sidebarSource, /id: 'friends'/);
+  assert.match(sidebarSource, /showForumNav \? \[defaultNav\[3\]\] : \[\]/);
   assert.match(viewSource, /const installedViewApps = useMemo<CatalogApp\[]>/);
   assert.match(viewSource, /currentView === 'apps' \? renderInstalledAppsView\(\) : null/);
   assert.match(viewSource, /<CatalogView\s+apps=\{catalogApps\}/);
+  assert.match(viewSource, /currentView === 'friends'[\s\S]*<ForumPanel/);
+  assert.match(viewSource, /showForumNav=\{forumParticipation\.status === 'opted_in'\}/);
   assert.match(viewSource, /onSend=\{\(modeOverride\) => void handleSendMessage\(undefined, modeOverride\)\}/);
+});
+
+test('friend chat app share cards install through structured app share data', async () => {
+  const source = await readSource('src/renderer/views/FriendChatWindowView.tsx');
+
+  assert.match(source, /const appShareInstallInput = \(message: CloudMessage\) =>/);
+  assert.match(source, /message\.appShare\.shareKind === 'public_app'[\s\S]*appId: message\.appShare\.userAppId/);
+  assert.match(source, /const shareCode = message\.appShare\.share\?\.code;[\s\S]*shareCode \? \{ shareCode \} : null/);
+  assert.match(source, /message\.appShare\.share\?\.revokedAt/);
+  assert.match(source, /!message\.appShare\.app\.available/);
+  assert.match(source, /window\.forger\.installSocialApp\(input, navigator\.language\)/);
 });

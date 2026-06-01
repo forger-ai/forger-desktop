@@ -147,7 +147,7 @@ const createDeps = async (overrides = {}) => {
       restoreAppUserVersionRuntime: async () => ({ success: true }),
       restoreRemoteAppBackup: async () => ({ success: true }),
       sanitizeRendererChatTrace: (input) => ({ traceEvent: input.event }),
-      sendEncryptedCloudMessage: async (input) => input,
+      sendEncryptedCloudMessage: async (input) => input, sendEncryptedCloudAppShareMessage: async (input) => input,
       serializeErrorForInstallLog: (error) => ({ message: error instanceof Error ? error.message : String(error) }),
       setAppAutoSyncSetting: async () => ({}),
       shell: electronMock.shell,

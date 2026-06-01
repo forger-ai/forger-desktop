@@ -30,6 +30,7 @@ interface AppShellProps {
   onOpenBackgroundTask: (taskId: string) => void;
   desktopUpdateState: DesktopUpdateState;
   advancedMode: boolean;
+  showForumNav: boolean;
   children: ReactNode;
 }
 
@@ -58,6 +59,7 @@ export function AppShell({
   onOpenBackgroundTask,
   desktopUpdateState,
   advancedMode,
+  showForumNav,
   children,
 }: AppShellProps) {
   return (
@@ -68,6 +70,7 @@ export function AppShell({
         t={t}
         desktopUpdateState={desktopUpdateState}
         advancedMode={advancedMode}
+        showForumNav={showForumNav}
       />
       <Box
         component="main"

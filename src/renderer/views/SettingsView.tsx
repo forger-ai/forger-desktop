@@ -1,3 +1,4 @@
+/* eslint-disable max-lines */
 import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import {
@@ -36,6 +37,7 @@ import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
 import DevicesRounded from '@mui/icons-material/DevicesRounded';
 import EditRounded from '@mui/icons-material/EditRounded';
 import EventRepeatRounded from '@mui/icons-material/EventRepeatRounded';
+import ForumRounded from '@mui/icons-material/ForumRounded';
 import InsertDriveFileRounded from '@mui/icons-material/InsertDriveFileRounded';
 import MemoryRounded from '@mui/icons-material/MemoryRounded';
 import SystemUpdateAltRounded from '@mui/icons-material/SystemUpdateAltRounded';
@@ -60,6 +62,7 @@ import type {
   CodexReasoningEffort,
   AgentProvider,
   CloudIdentityState,
+  ForumParticipationState,
   Settings,
   DeveloperPathState,
   UpdateAgentDefaultsInput,
@@ -116,6 +119,9 @@ interface SettingsViewProps {
   earlyAccessEnabled: boolean;
   advancedMode: boolean;
   usageAnalyticsEnabled: boolean;
+  forumParticipation: ForumParticipationState;
+  forumParticipationBusy: boolean;
+  onEnterForum: () => void;
   onEarlyAccessChange: (enabled: boolean) => void;
   onAdvancedModeChange: (enabled: boolean) => void;
   onUsageAnalyticsChange: (enabled: boolean) => void;
@@ -218,6 +224,9 @@ export function SettingsView({
   earlyAccessEnabled,
   advancedMode,
   usageAnalyticsEnabled,
+  forumParticipation,
+  forumParticipationBusy,
+  onEnterForum,
   onEarlyAccessChange,
   onAdvancedModeChange,
   onUsageAnalyticsChange,
@@ -494,6 +503,32 @@ export function SettingsView({
                 label={t.settings.usageAnalyticsToggle}
               />
             </Tooltip>
+          </Stack>
+        </CardContent>
+      </Card>
+      <Card sx={{ order: 4 }}>
+        <CardContent>
+          <Stack spacing={1.25}>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }}>
+              <Stack spacing={0.5}>
+                <Typography variant="h6">{t.settings.forumTitle}</Typography>
+                <Typography variant="body2" color="text.secondary">{t.settings.forumDescription}</Typography>
+              </Stack>
+              <Chip
+                size="small"
+                color={forumParticipation.status === 'opted_in' ? 'success' : forumParticipation.status === 'suspended' ? 'warning' : 'default'}
+                label={t.settings.forumStatuses[forumParticipation.status]}
+              />
+            </Stack>
+            <Button
+              variant="contained"
+              startIcon={<ForumRounded />}
+              disabled={forumParticipationBusy || forumParticipation.status === 'opted_in' || forumParticipation.status === 'suspended'}
+              onClick={onEnterForum}
+              sx={{ alignSelf: 'flex-start' }}
+            >
+              {forumParticipation.status === 'opted_in' ? t.settings.forumEnteredAction : t.settings.forumEnterAction}
+            </Button>
           </Stack>
         </CardContent>
       </Card>

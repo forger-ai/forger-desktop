@@ -1,9 +1,13 @@
 import type {
+  CloudAppShareKind,
+  CloudAppShareMessageDetail,
   CloudDeviceSummary,
   CloudFriendship,
   CloudFriendUser,
   CloudMessage,
   CloudMessageEnvelope,
+  SocialUserAppStatus,
+  SocialUserAppVisibility,
 } from '../../shared/types';
 
 export const normalizeCloudDevice = (value: unknown): CloudDeviceSummary | undefined => {
@@ -123,12 +127,16 @@ export const normalizeCloudMessage = (value: unknown): CloudMessage | undefined 
   const envelopes = Array.isArray(record.envelopes)
     ? record.envelopes.map((entry) => normalizeCloudMessageEnvelope(entry)).filter(Boolean) as CloudMessageEnvelope[]
     : [];
-  return {
+  const type = record.type === 'CloudAppShareMessage' ? 'CloudAppShareMessage' : 'CloudTextMessage';
+  const deliveryMode: CloudMessage['deliveryMode'] = record.delivery_mode === 'ephemeral' ? 'ephemeral' : 'persistent';
+  const source: CloudMessage['source'] = record.source === 'app' ? 'app' : 'user';
+  const base = {
     id: typeof record.id === 'number' ? record.id : Number.isFinite(Number(record.id)) ? Number(record.id) : undefined,
+    type,
     sender,
     recipient,
-    deliveryMode: record.delivery_mode === 'ephemeral' ? 'ephemeral' : 'persistent',
-    source: record.source === 'app' ? 'app' : 'user',
+    deliveryMode,
+    source,
     sourceAppId: typeof record.source_app_id === 'string' ? record.source_app_id : undefined,
     sourceAppName: typeof record.source_app_name === 'string' ? record.source_app_name : undefined,
     status: normalizeCloudMessageStatus(record.status),
@@ -138,6 +146,93 @@ export const normalizeCloudMessage = (value: unknown): CloudMessage | undefined 
     deliveredAt: typeof record.delivered_at === 'string' ? record.delivered_at : undefined,
     createdAt: typeof record.created_at === 'string' ? record.created_at : new Date().toISOString(),
     updatedAt: typeof record.updated_at === 'string' ? record.updated_at : undefined,
+  };
+  if (type === 'CloudAppShareMessage') {
+    const appShare = normalizeCloudAppShareMessageDetail(record.app_share);
+    if (!appShare) {
+      return undefined;
+    }
+    return { ...base, type, appShare };
+  }
+  return { ...base, type };
+};
+
+const normalizeCloudAppShareMessageDetail = (value: unknown): CloudAppShareMessageDetail | undefined => {
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const id = Number(record.id);
+  const userAppId = Number(record.user_app_id);
+  const shareKind = normalizeCloudAppShareKind(record.share_kind);
+  const app = normalizeCloudAppShareApp(record.app);
+  const appNameSnapshot = typeof record.app_name_snapshot === 'string' ? record.app_name_snapshot : '';
+  const appSlugSnapshot = typeof record.app_slug_snapshot === 'string' ? record.app_slug_snapshot : '';
+  const appOwnerUsernameSnapshot = typeof record.app_owner_username_snapshot === 'string' ? record.app_owner_username_snapshot : '';
+  if (!Number.isFinite(id) || !Number.isFinite(userAppId) || !shareKind || !app || !appNameSnapshot || !appSlugSnapshot || !appOwnerUsernameSnapshot) {
+    return undefined;
+  }
+  const userAppShareId = Number(record.user_app_share_id);
+  const share = normalizeCloudAppShareLink(record.share);
+  return {
+    id,
+    userAppId,
+    userAppShareId: Number.isFinite(userAppShareId) ? userAppShareId : undefined,
+    shareKind,
+    appVisibilityAtSend: normalizeSocialUserAppVisibility(record.app_visibility_at_send),
+    appNameSnapshot,
+    appSlugSnapshot,
+    appOwnerUsernameSnapshot,
+    app,
+    share,
+  };
+};
+
+const normalizeCloudAppShareKind = (value: unknown): CloudAppShareKind | undefined =>
+  value === 'public_app' || value === 'friends_link' || value === 'friend_link' ? value : undefined;
+
+const normalizeSocialUserAppVisibility = (value: unknown): SocialUserAppVisibility =>
+  value === 'public' || value === 'friends' || value === 'private' || value === 'restricted' ? value : 'restricted';
+
+const normalizeSocialUserAppStatus = (value: unknown): SocialUserAppStatus =>
+  value === 'published' || value === 'suspended' || value === 'deleted' ? value : 'deleted';
+
+const normalizeCloudAppShareApp = (value: unknown): CloudAppShareMessageDetail['app'] | undefined => {
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const id = Number(record.id);
+  if (!Number.isFinite(id)) {
+    return undefined;
+  }
+  return {
+    id,
+    status: normalizeSocialUserAppStatus(record.status),
+    visibility: normalizeSocialUserAppVisibility(record.visibility),
+    available: Boolean(record.available),
+  };
+};
+
+const normalizeCloudAppShareLink = (value: unknown): CloudAppShareMessageDetail['share'] | undefined => {
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const id = Number(record.id);
+  if (!Number.isFinite(id)) {
+    return undefined;
+  }
+  const maxUses = Number(record.max_uses);
+  return {
+    id,
+    scope: typeof record.scope === 'string' ? record.scope : '',
+    code: typeof record.code === 'string' ? record.code : undefined,
+    deepLink: typeof record.deep_link === 'string' ? record.deep_link : undefined,
+    revokedAt: typeof record.revoked_at === 'string' ? record.revoked_at : undefined,
+    expiresAt: typeof record.expires_at === 'string' ? record.expires_at : undefined,
+    maxUses: Number.isFinite(maxUses) ? maxUses : undefined,
+    usedCount: Number.isFinite(Number(record.used_count)) ? Number(record.used_count) : 0,
   };
 };
 

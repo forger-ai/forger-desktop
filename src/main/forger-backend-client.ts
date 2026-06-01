@@ -1,3 +1,4 @@
+/* eslint-disable max-lines */
 import type {
   AppCategory,
   AppRatingSummary,
@@ -16,8 +17,13 @@ import type {
   CloudDeviceSummary,
   CloudFriendship,
   CloudFriendUser,
+  ForumComment,
+  ForumParticipationState,
+  ForumPost,
+  ForumUserProfile,
   CloudMessage,
   CloudMessageEnvelope,
+  CloudSendAppShareInput,
   CloudSendMessageInput,
   SocialUserApp,
   SocialUserAppDownload,
@@ -67,7 +73,7 @@ import {
   usernameCooldownMessage,
 } from './forger-backend/client-helpers';
 import { type ConversationDiagnosticAttachmentUpload, type DesktopErrorReportAttachmentUpload, submitConversationDiagnosticReport, submitDesktopErrorReport } from './forger-backend/report-submissions';
-import { getBackendJson, patchBackendJson, postBackendJson } from './forger-backend/json-request';
+import { deleteBackendJson, getBackendJson, patchBackendJson, postBackendJson } from './forger-backend/json-request';
 import { toSocialUserApp, toSocialUserAppUploadAttempt, toSocialVersion } from './forger-backend/social-normalizers';
 
 interface ClientOptions {
@@ -113,6 +119,85 @@ interface SocialDirectUploadResponse { signed_blob_id?: string; direct_upload?: 
 interface SocialUploadConfirmResponse {
   upload_attempt?: unknown;
 }
+
+const normalizeForumParticipation = (payload: unknown): ForumParticipationState => {
+  const source = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {};
+  const status = source.status === 'opted_in' || source.status === 'suspended' ? source.status : 'opted_out';
+  return {
+    status,
+    firstPromptShownAt: typeof source.first_prompt_shown_at === 'string' ? source.first_prompt_shown_at : undefined,
+    optedInAt: typeof source.opted_in_at === 'string' ? source.opted_in_at : undefined,
+    optedOutAt: typeof source.opted_out_at === 'string' ? source.opted_out_at : undefined,
+    suspendedAt: typeof source.suspended_at === 'string' ? source.suspended_at : undefined,
+    suspensionReason: typeof source.suspension_reason === 'string' ? source.suspension_reason : undefined,
+    isModerator: source.is_moderator === true,
+  };
+};
+
+const normalizeForumUser = (payload: unknown): ForumUserProfile => {
+  const source = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {};
+  return {
+    id: Number(source.id ?? 0),
+    username: typeof source.username === 'string' ? source.username : '',
+    firstName: typeof source.first_name === 'string' ? source.first_name : undefined,
+    lastInitial: typeof source.last_initial === 'string' ? source.last_initial : undefined,
+  };
+};
+
+const normalizeForumComment = (payload: unknown): ForumComment | null => {
+  if (!payload || typeof payload !== 'object') return null;
+  const source = payload as Record<string, unknown>;
+  const status = source.status === 'hidden' || source.status === 'deleted' ? source.status : 'visible';
+  return {
+    id: Number(source.id ?? 0),
+    forumPostId: Number(source.forum_post_id ?? 0),
+    parentId: typeof source.parent_id === 'number' ? source.parent_id : undefined,
+    depth: Number(source.depth ?? 0),
+    status,
+    body: typeof source.body === 'string' ? source.body : undefined,
+    author: normalizeForumUser(source.author),
+    hiddenAt: typeof source.hidden_at === 'string' ? source.hidden_at : undefined,
+    hiddenReason: typeof source.hidden_reason === 'string' ? source.hidden_reason : undefined,
+    deletedAt: typeof source.deleted_at === 'string' ? source.deleted_at : undefined,
+    canDelete: source.can_delete === true,
+    canModerate: source.can_moderate === true,
+    createdAt: typeof source.created_at === 'string' ? source.created_at : new Date(0).toISOString(),
+    updatedAt: typeof source.updated_at === 'string' ? source.updated_at : undefined,
+    editedAt: typeof source.edited_at === 'string' ? source.edited_at : undefined,
+    replies: Array.isArray(source.replies) ? source.replies.map(normalizeForumComment).filter(Boolean) as ForumComment[] : [],
+  };
+};
+
+const normalizeForumPost = (payload: unknown): ForumPost | null => {
+  if (!payload || typeof payload !== 'object') return null;
+  const source = payload as Record<string, unknown>;
+  const status = source.status === 'hidden' || source.status === 'deleted' ? source.status : 'visible';
+  return {
+    id: Number(source.id ?? 0),
+    status,
+    body: typeof source.body === 'string' ? source.body : undefined,
+    author: normalizeForumUser(source.author),
+    commentsCount: Number(source.comments_count ?? 0),
+    hiddenAt: typeof source.hidden_at === 'string' ? source.hidden_at : undefined,
+    hiddenReason: typeof source.hidden_reason === 'string' ? source.hidden_reason : undefined,
+    deletedAt: typeof source.deleted_at === 'string' ? source.deleted_at : undefined,
+    canDelete: source.can_delete === true,
+    canModerate: source.can_moderate === true,
+    createdAt: typeof source.created_at === 'string' ? source.created_at : new Date(0).toISOString(),
+    updatedAt: typeof source.updated_at === 'string' ? source.updated_at : undefined,
+    editedAt: typeof source.edited_at === 'string' ? source.edited_at : undefined,
+    comments: Array.isArray(source.comments) ? source.comments.map(normalizeForumComment).filter(Boolean) as ForumComment[] : undefined,
+  };
+};
+
+const forumItems = (payload: unknown): unknown[] => {
+  if (Array.isArray(payload)) return payload;
+  if (payload && typeof payload === 'object') {
+    const source = payload as Record<string, unknown>;
+    return Array.isArray(source.items) ? source.items : [];
+  }
+  return [];
+};
 
 export class ForgerBackendClient {
   constructor(private readonly options: ClientOptions) {}
@@ -586,6 +671,28 @@ export class ForgerBackendClient {
     return message;
   }
 
+  async sendCloudAppShareMessage(input: CloudSendAppShareInput & { envelopes: CloudMessageEnvelope[]; clientMessageId?: string }): Promise<CloudMessage> {
+    const payload = await postBackendJson(this.options, '/api/v1/me/cloud_messages/app_share', {
+      recipient_username: input.recipientUsername,
+      recipient_user_id: input.recipientUserId,
+      user_app_id: input.userAppId,
+      client_message_id: input.clientMessageId,
+      envelopes: input.envelopes.map((envelope) => ({
+        recipient_user_id: envelope.recipientUserId,
+        cloud_device_id: envelope.cloudDeviceId,
+        device_uid: envelope.deviceUid,
+        key_fingerprint: envelope.keyFingerprint,
+        ciphertext: envelope.ciphertext,
+        metadata: envelope.metadata,
+      })),
+    }, 'cloud_app_share_message_send_failed');
+    const message = normalizeCloudMessage(payload);
+    if (!message) {
+      throw backendError('No pudimos compartir esta app.', 'cloud_app_share_message_response_invalid');
+    }
+    return message;
+  }
+
   async decideAppMessagePermission(cloudMessageId: number, decision: CloudAppMessagePermissionDecision): Promise<CloudMessage> {
     const payload = await patchBackendJson(this.options, '/api/v1/me/app_message_permission', {
       cloud_message_id: cloudMessageId,
@@ -596,6 +703,80 @@ export class ForgerBackendClient {
       throw backendError('No pudimos actualizar el permiso.', 'app_message_permission_response_invalid');
     }
     return message;
+  }
+
+  async getForumParticipation(): Promise<ForumParticipationState> {
+    const payload = await getBackendJson(this.options, '/api/v1/me/forum/participation', 'forum_participation_get_failed');
+    return normalizeForumParticipation(payload);
+  }
+
+  async updateForumParticipation(action: 'mark_prompt_shown' | 'opt_in' | 'opt_out'): Promise<ForumParticipationState> {
+    const payload = await patchBackendJson(this.options, '/api/v1/me/forum/participation', {
+      forum_action: action,
+    }, 'forum_participation_update_failed');
+    return normalizeForumParticipation(payload);
+  }
+
+  async listForumPosts(limit = 25): Promise<ForumPost[]> {
+    const safeLimit = Math.min(100, Math.max(1, Math.round(limit)));
+    const payload = await getBackendJson(this.options, `/api/v1/me/forum/posts?per_page=${safeLimit}`, 'forum_posts_list_failed');
+    return forumItems(payload).map(normalizeForumPost).filter(Boolean) as ForumPost[];
+  }
+
+  async getForumPost(id: number): Promise<ForumPost> {
+    const payload = await getBackendJson(this.options, `/api/v1/me/forum/posts/${id}`, 'forum_post_get_failed');
+    const post = normalizeForumPost(payload);
+    if (!post) throw backendError('No pudimos cargar el post.', 'forum_post_response_invalid');
+    return post;
+  }
+
+  async createForumPost(body: string): Promise<ForumPost> {
+    const payload = await postBackendJson(this.options, '/api/v1/me/forum/posts', { body }, 'forum_post_create_failed');
+    const post = normalizeForumPost(payload);
+    if (!post) throw backendError('No pudimos crear el post.', 'forum_post_create_response_invalid');
+    return post;
+  }
+
+  async createForumComment(postId: number, body: string): Promise<ForumComment> {
+    const payload = await postBackendJson(this.options, `/api/v1/me/forum/posts/${postId}/comments`, { body }, 'forum_comment_create_failed');
+    const comment = normalizeForumComment(payload);
+    if (!comment) throw backendError('No pudimos comentar el post.', 'forum_comment_create_response_invalid');
+    return comment;
+  }
+
+  async replyForumComment(commentId: number, body: string): Promise<ForumComment> {
+    const payload = await postBackendJson(this.options, `/api/v1/me/forum/comments/${commentId}/replies`, { body }, 'forum_reply_create_failed');
+    const comment = normalizeForumComment(payload);
+    if (!comment) throw backendError('No pudimos responder el comentario.', 'forum_reply_create_response_invalid');
+    return comment;
+  }
+
+  async deleteForumPost(id: number): Promise<ForumPost> {
+    const payload = await deleteBackendJson(this.options, `/api/v1/me/forum/posts/${id}`, 'forum_post_delete_failed');
+    const post = normalizeForumPost(payload);
+    if (!post) throw backendError('No pudimos borrar el post.', 'forum_post_delete_response_invalid');
+    return post;
+  }
+
+  async deleteForumComment(id: number): Promise<ForumComment> {
+    const payload = await deleteBackendJson(this.options, `/api/v1/me/forum/comments/${id}`, 'forum_comment_delete_failed');
+    const comment = normalizeForumComment(payload);
+    if (!comment) throw backendError('No pudimos borrar el comentario.', 'forum_comment_delete_response_invalid');
+    return comment;
+  }
+
+  async moderateForumPost(id: number, action: 'hide' | 'unhide', reason?: string): Promise<ForumPost> {
+    const payload = await postBackendJson(this.options, `/api/v1/me/forum/posts/${id}/${action}`, { reason }, 'forum_post_moderation_failed');
+    const post = normalizeForumPost(payload);
+    if (!post) throw backendError('No pudimos moderar el post.', 'forum_post_moderation_response_invalid');
+    return post;
+  }
+
+  async moderateForumComment(id: number, action: 'hide' | 'unhide', reason?: string): Promise<ForumComment> {
+    const payload = await postBackendJson(this.options, `/api/v1/me/forum/comments/${id}/${action}`, { reason }, 'forum_comment_moderation_failed');
+    const comment = normalizeForumComment(payload);
+    if (!comment) throw backendError('No pudimos moderar el comentario.', 'forum_comment_moderation_response_invalid');
+    return comment;
   }
 
   async listMySocialApps(): Promise<SocialUserAppList> {

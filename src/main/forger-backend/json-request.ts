@@ -61,3 +61,19 @@ export const patchBackendJson = (
   body: Record<string, unknown>,
   code: string,
 ): Promise<unknown> => requestJson(options, 'PATCH', pathname, code, body);
+
+export const deleteBackendJson = async (
+  options: BackendJsonRequestOptions,
+  pathname: string,
+  code: string,
+): Promise<unknown> => {
+  const response = await fetch(`${options.backendBaseUrl}${pathname}`, {
+    method: 'DELETE',
+    headers: buildBackendHeaders(options.token()),
+  });
+  const payload = await readJson(response);
+  if (!response.ok) {
+    throw backendError('No pudimos completar la accion en Forger Cloud.', `${code}_${response.status}`);
+  }
+  return payload;
+};
