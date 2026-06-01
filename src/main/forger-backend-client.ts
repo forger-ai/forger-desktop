@@ -190,6 +190,15 @@ const normalizeForumPost = (payload: unknown): ForumPost | null => {
   };
 };
 
+const forumItems = (payload: unknown): unknown[] => {
+  if (Array.isArray(payload)) return payload;
+  if (payload && typeof payload === 'object') {
+    const source = payload as Record<string, unknown>;
+    return Array.isArray(source.items) ? source.items : [];
+  }
+  return [];
+};
+
 export class ForgerBackendClient {
   constructor(private readonly options: ClientOptions) {}
 
@@ -710,8 +719,8 @@ export class ForgerBackendClient {
 
   async listForumPosts(limit = 25): Promise<ForumPost[]> {
     const safeLimit = Math.min(100, Math.max(1, Math.round(limit)));
-    const payload = await getBackendJson(this.options, `/api/v1/me/forum/posts?limit=${safeLimit}`, 'forum_posts_list_failed');
-    return Array.isArray(payload) ? payload.map(normalizeForumPost).filter(Boolean) as ForumPost[] : [];
+    const payload = await getBackendJson(this.options, `/api/v1/me/forum/posts?per_page=${safeLimit}`, 'forum_posts_list_failed');
+    return forumItems(payload).map(normalizeForumPost).filter(Boolean) as ForumPost[];
   }
 
   async getForumPost(id: number): Promise<ForumPost> {

@@ -125,8 +125,8 @@ test('forum backend client normalizes posts, comments, replies and moderation ca
     requests.push({ url, init });
     const parsed = new URL(url);
     if (parsed.pathname === '/api/v1/me/forum/posts' && (!init.method || init.method === 'GET')) {
-      assert.equal(parsed.searchParams.get('limit'), '50');
-      return jsonResponse(200, [postPayload]);
+      assert.equal(parsed.searchParams.get('per_page'), '50');
+      return jsonResponse(200, { items: [postPayload], meta: { page: 1, per_page: 50 } });
     }
     if (parsed.pathname === '/api/v1/me/forum/posts/7' && (!init.method || init.method === 'GET')) {
       return jsonResponse(200, { ...postPayload, comments: [commentPayload] });
