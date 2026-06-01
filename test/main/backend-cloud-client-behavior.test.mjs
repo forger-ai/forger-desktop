@@ -81,6 +81,98 @@ test('forum participation backend client reads one-time prompt state and opt-in 
   }
 });
 
+test('forum backend client normalizes posts, comments, replies and moderation calls', async () => {
+  const requests = [];
+  const postPayload = {
+    id: 7,
+    status: 'visible',
+    body: 'Hello forum.',
+    author: { id: 2, username: 'alice', first_name: 'Alice', last_initial: 'A' },
+    comments_count: 1,
+    can_delete: true,
+    can_moderate: true,
+    created_at: '2026-06-01T10:00:00Z',
+    updated_at: '2026-06-01T10:01:00Z',
+  };
+  const commentPayload = {
+    id: 9,
+    forum_post_id: 7,
+    parent_id: null,
+    depth: 0,
+    status: 'hidden',
+    body: null,
+    author: { id: 3, username: 'bob' },
+    hidden_at: '2026-06-01T10:05:00Z',
+    hidden_reason: null,
+    can_delete: false,
+    can_moderate: true,
+    created_at: '2026-06-01T10:04:00Z',
+    replies: [{
+      id: 10,
+      forum_post_id: 7,
+      parent_id: 9,
+      depth: 1,
+      status: 'visible',
+      body: 'Nested reply.',
+      author: { id: 4, username: 'carol' },
+      can_delete: true,
+      can_moderate: true,
+      created_at: '2026-06-01T10:06:00Z',
+      replies: [],
+    }],
+  };
+  const harness = createClient(async (url, init = {}) => {
+    requests.push({ url, init });
+    const parsed = new URL(url);
+    if (parsed.pathname === '/api/v1/me/forum/posts' && (!init.method || init.method === 'GET')) {
+      assert.equal(parsed.searchParams.get('limit'), '50');
+      return jsonResponse(200, [postPayload]);
+    }
+    if (parsed.pathname === '/api/v1/me/forum/posts/7' && (!init.method || init.method === 'GET')) {
+      return jsonResponse(200, { ...postPayload, comments: [commentPayload] });
+    }
+    if (parsed.pathname === '/api/v1/me/forum/posts' && init.method === 'POST') {
+      return jsonResponse(201, { ...postPayload, id: 8, body: JSON.parse(init.body).body });
+    }
+    if (parsed.pathname === '/api/v1/me/forum/posts/7/comments' && init.method === 'POST') {
+      return jsonResponse(201, { ...commentPayload, status: 'visible', body: JSON.parse(init.body).body, replies: [] });
+    }
+    if (parsed.pathname === '/api/v1/me/forum/comments/9/replies' && init.method === 'POST') {
+      return jsonResponse(201, { ...commentPayload, id: 11, parent_id: 9, depth: 1, status: 'visible', body: JSON.parse(init.body).body, replies: [] });
+    }
+    if (parsed.pathname === '/api/v1/me/forum/posts/7/hide' && init.method === 'POST') {
+      return jsonResponse(200, { ...postPayload, status: 'hidden', body: null });
+    }
+    if (parsed.pathname === '/api/v1/me/forum/comments/9/unhide' && init.method === 'POST') {
+      return jsonResponse(200, { ...commentPayload, status: 'visible', body: 'Restored.', replies: [] });
+    }
+    if (parsed.pathname === '/api/v1/me/forum/comments/9' && init.method === 'DELETE') {
+      return jsonResponse(200, { ...commentPayload, status: 'deleted', body: 'Deleted.', replies: [] });
+    }
+    return jsonResponse(404, { error: 'not_found' });
+  }, 'session-token');
+
+  try {
+    const posts = await harness.client.listForumPosts(50);
+    assert.equal(posts[0].commentsCount, 1);
+    assert.equal(posts[0].author.firstName, 'Alice');
+
+    const post = await harness.client.getForumPost(7);
+    assert.equal(post.comments[0].body, undefined);
+    assert.equal(post.comments[0].replies[0].body, 'Nested reply.');
+
+    assert.equal((await harness.client.createForumPost('New post')).body, 'New post');
+    assert.equal((await harness.client.createForumComment(7, 'Comment')).body, 'Comment');
+    assert.equal((await harness.client.replyForumComment(9, 'Reply')).parentId, 9);
+    assert.equal((await harness.client.moderateForumPost(7, 'hide')).status, 'hidden');
+    assert.equal((await harness.client.moderateForumComment(9, 'unhide')).status, 'visible');
+    assert.equal((await harness.client.deleteForumComment(9)).status, 'deleted');
+    assert.equal(requests.every((request) => request.init.headers.Authorization === 'Bearer session-token'), true);
+  } finally {
+    harness.restore();
+  }
+});
+
 const createClient = (fetchImpl, token = 'token-1', overrides = {}) => {
   const previousFetch = globalThis.fetch;
   globalThis.fetch = fetchImpl;

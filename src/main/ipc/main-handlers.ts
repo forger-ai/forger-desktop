@@ -1,3 +1,4 @@
+/* eslint-disable max-lines */
 import type fs from 'node:fs/promises';
 import type path from 'node:path';
 import os from 'node:os';
@@ -858,6 +859,42 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
   ipcMain.handle(IPC_CHANNELS.updateForumParticipation, async (_event, action: 'mark_prompt_shown' | 'opt_in' | 'opt_out') => {
     if (!forgerBackendClient) throw new Error('backend_client_missing');
     return await forgerBackendClient.updateForumParticipation(action);
+  });
+  ipcMain.handle(IPC_CHANNELS.listForumPosts, async (_event, limit?: number) => {
+    if (!forgerBackendClient) throw new Error('backend_client_missing');
+    return await forgerBackendClient.listForumPosts(limit);
+  });
+  ipcMain.handle(IPC_CHANNELS.getForumPost, async (_event, id: number) => {
+    if (!forgerBackendClient) throw new Error('backend_client_missing');
+    return await forgerBackendClient.getForumPost(id);
+  });
+  ipcMain.handle(IPC_CHANNELS.createForumPost, async (_event, body: string) => {
+    if (!forgerBackendClient) throw new Error('backend_client_missing');
+    return await forgerBackendClient.createForumPost(body);
+  });
+  ipcMain.handle(IPC_CHANNELS.createForumComment, async (_event, postId: number, body: string) => {
+    if (!forgerBackendClient) throw new Error('backend_client_missing');
+    return await forgerBackendClient.createForumComment(postId, body);
+  });
+  ipcMain.handle(IPC_CHANNELS.replyForumComment, async (_event, commentId: number, body: string) => {
+    if (!forgerBackendClient) throw new Error('backend_client_missing');
+    return await forgerBackendClient.replyForumComment(commentId, body);
+  });
+  ipcMain.handle(IPC_CHANNELS.deleteForumPost, async (_event, id: number) => {
+    if (!forgerBackendClient) throw new Error('backend_client_missing');
+    return await forgerBackendClient.deleteForumPost(id);
+  });
+  ipcMain.handle(IPC_CHANNELS.deleteForumComment, async (_event, id: number) => {
+    if (!forgerBackendClient) throw new Error('backend_client_missing');
+    return await forgerBackendClient.deleteForumComment(id);
+  });
+  ipcMain.handle(IPC_CHANNELS.moderateForumPost, async (_event, id: number, action: 'hide' | 'unhide', reason?: string) => {
+    if (!forgerBackendClient) throw new Error('backend_client_missing');
+    return await forgerBackendClient.moderateForumPost(id, action, reason);
+  });
+  ipcMain.handle(IPC_CHANNELS.moderateForumComment, async (_event, id: number, action: 'hide' | 'unhide', reason?: string) => {
+    if (!forgerBackendClient) throw new Error('backend_client_missing');
+    return await forgerBackendClient.moderateForumComment(id, action, reason);
   });
   ipcMain.handle(IPC_CHANNELS.getCloudIdentity, async () => await getCloudIdentityStore().getSummary());
   ipcMain.handle(IPC_CHANNELS.revealCloudSecretKey, async () => await getCloudIdentityStore().revealSecretKey());

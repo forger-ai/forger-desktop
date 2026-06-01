@@ -155,6 +155,42 @@ export interface ForumParticipationState {
   isModerator: boolean;
 }
 
+export type ForumContentStatus = 'visible' | 'hidden' | 'deleted';
+
+export interface ForumUserProfile {
+  id: number;
+  username: string;
+  firstName?: string;
+  lastInitial?: string;
+}
+
+interface ForumContentBase {
+  id: number;
+  status: ForumContentStatus;
+  body?: string;
+  author: ForumUserProfile;
+  hiddenAt?: string;
+  hiddenReason?: string;
+  deletedAt?: string;
+  canDelete: boolean;
+  canModerate: boolean;
+  createdAt: string;
+  updatedAt?: string;
+  editedAt?: string;
+}
+
+export interface ForumComment extends ForumContentBase {
+  forumPostId: number;
+  parentId?: number;
+  depth: number;
+  replies: ForumComment[];
+}
+
+export interface ForumPost extends ForumContentBase {
+  commentsCount: number;
+  comments?: ForumComment[];
+}
+
 export interface SocialUserProfile {
   id: number;
   username: string;

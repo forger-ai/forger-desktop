@@ -58,6 +58,7 @@ import {
 } from './friends/socialViewHelpers';
 import { SocialLauncherButton } from './friends/SocialLauncherButton';
 import { SocialPanelHeader } from './friends/SocialPanelHeader';
+import { ForumPanel } from './friends/ForumPanel';
 
 interface FriendsViewProps {
   account: ForgerAccountSession;
@@ -560,12 +561,19 @@ export function FriendsView({ account, accountBusy = false, onOpenFriendChat, on
         ? 'Gestiona solicitudes pendientes'
         : activeTab === 'apps'
           ? 'Apps que compartes desde Forger'
-        : 'Busca por username y envía una solicitud';
+          : activeTab === 'forum'
+            ? 'Conversaciones públicas opt-in'
+            : 'Busca por username y envía una solicitud';
 
   const launcherBusy = loading && !hasLoadedOnce;
   const isFriendsTabLoading = loading && accepted.length === 0;
   const isRequestsTabLoading = loading && pendingIncoming.length === 0 && pendingOutgoing.length === 0;
   const isSocialAppsTabLoading = socialAppsLoading && socialApps.length === 0;
+  const hasPanelError = activeTab === 'apps'
+    ? Boolean(socialAppsError)
+    : activeTab === 'forum'
+      ? false
+      : Boolean(error);
   const tabErrorMessage = activeTab === 'friends'
     ? error ?? 'No pudimos cargar tus amigos.'
     : activeTab === 'requests'
@@ -639,7 +647,9 @@ export function FriendsView({ account, accountBusy = false, onOpenFriendChat, on
                     <Tabs
                       value={activeTab}
                       onChange={handleTabChange}
-                      variant="fullWidth"
+                      variant="scrollable"
+                      scrollButtons="auto"
+                      allowScrollButtonsMobile
                       sx={{ px: 1.2, minHeight: 44 }}
                     >
                       <Tab value="friends" label="Amigos" sx={{ minHeight: 44 }} />
@@ -649,6 +659,7 @@ export function FriendsView({ account, accountBusy = false, onOpenFriendChat, on
                         sx={{ minHeight: 44 }}
                       />
                       <Tab value="apps" label="Apps" sx={{ minHeight: 44 }} />
+                      <Tab value="forum" label="Foro" sx={{ minHeight: 44 }} />
                       <Tab value="add" label="Agregar" sx={{ minHeight: 44 }} />
                     </Tabs>
 
@@ -661,7 +672,7 @@ export function FriendsView({ account, accountBusy = false, onOpenFriendChat, on
                         </Alert>
                       ) : null}
 
-                      {account.authenticated && account.user?.confirmed && (activeTab === 'apps' ? socialAppsError : error) ? (
+                      {account.authenticated && account.user?.confirmed && hasPanelError ? (
                         <Stack spacing={1.5}>
                           <Alert severity="error">{tabErrorMessage}</Alert>
                           <Button variant="outlined" onClick={() => activeTab === 'apps' ? void loadSocialApps() : void loadFriends()}>
@@ -670,7 +681,7 @@ export function FriendsView({ account, accountBusy = false, onOpenFriendChat, on
                         </Stack>
                       ) : null}
 
-                      {account.authenticated && account.user?.confirmed && !(activeTab === 'apps' ? socialAppsError : error) ? (
+                      {account.authenticated && account.user?.confirmed && !hasPanelError ? (
                         activeTab === 'friends' ? (
                           <Stack spacing={1}>
                             {isFriendsTabLoading ? (
@@ -1027,6 +1038,8 @@ export function FriendsView({ account, accountBusy = false, onOpenFriendChat, on
                               </List>
                             ) : null}
                           </Stack>
+                        ) : activeTab === 'forum' ? (
+                          <ForumPanel active={open && activeTab === 'forum'} onNotify={onNotify} />
                         ) : (
                           <Stack spacing={1.25}>
                             <Box component="form" onSubmit={handleSearchFriends}>
