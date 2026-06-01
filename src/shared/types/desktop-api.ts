@@ -10,7 +10,7 @@ import type { AppSecretsState, UserSecretSummary, CreateUserSecretInput, UpdateU
 import type { DeveloperPathState, Settings, UpdateAppDeveloperSettingsInput, UpdateCodexDefaultsInput, UpdateDeveloperModeInput, UpdateAgentDefaultsInput, MemoryListInput, MemoryEntry, MemoryCreateInput, MemoryUpdateInput } from './settings';
 import type { DesktopUpdateState } from './updates';
 import type { ForgerAccountSession, ForgerAccountRegisterInput, ForgerAccountLoginInput, ForgerAccountProfileInput, CloudDevicesState } from './account';
-import type { FriendChatWindowOpenResult, CloudFriendship, CloudFriendUser, CloudMessage, CloudSendAppShareInput, CloudSendMessageInput, CloudAppMessagePermissionDecision, CloudSocialEvent, CloudIdentityState, SocialUserApp, SocialUserAppDownload, SocialUserAppList, SocialUserAppShare, SocialUserAppUploadInput } from './social';
+import type { FriendChatWindowOpenResult, CloudFriendship, CloudFriendUser, CloudMessage, CloudSendAppShareInput, CloudSendMessageInput, CloudAppMessagePermissionDecision, CloudSocialEvent, CloudIdentityState, ForumParticipationState, SocialUserApp, SocialUserAppDownload, SocialUserAppList, SocialUserAppShare, SocialUserAppUploadInput } from './social';
 import type { AppRatingSummary, SubmitAppRatingInput, SubmitProductFeedbackInput } from './feedback';
 import type { SubmitUsageEventInput, SubmitUsageEventResult } from './usage-events';
 import type { ConversationDiagnosticReportPreview, PrepareConversationDiagnosticReportInput, SubmitConversationDiagnosticReportResult } from './diagnostics';
@@ -102,6 +102,8 @@ export interface ForgerDesktopApi {
   sendCloudMessage: (input: CloudSendMessageInput) => Promise<CloudMessage>;
   sendCloudAppShareMessage: (input: CloudSendAppShareInput) => Promise<CloudMessage>;
   decideAppMessagePermission: (cloudMessageId: number, decision: CloudAppMessagePermissionDecision) => Promise<CloudMessage>;
+  getForumParticipation: () => Promise<ForumParticipationState>;
+  updateForumParticipation: (action: 'mark_prompt_shown' | 'opt_in' | 'opt_out') => Promise<ForumParticipationState>;
   onCloudFriendshipEvent: (listener: (event: CloudSocialEvent) => void) => () => void;
   getCloudIdentity: () => Promise<CloudIdentityState>;
   revealCloudSecretKey: () => Promise<string>;

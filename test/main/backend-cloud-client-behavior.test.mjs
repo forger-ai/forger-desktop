@@ -37,6 +37,50 @@ const jsonResponse = (status, body, headers = {}) => new Response(JSON.stringify
   },
 });
 
+test('forum participation backend client reads one-time prompt state and opt-in action', async () => {
+  const requests = [];
+  const harness = createClient(async (url, init = {}) => {
+    requests.push({ url, init });
+    const parsed = new URL(url);
+    if (parsed.pathname === '/api/v1/me/forum/participation' && (!init.method || init.method === 'GET')) {
+      return jsonResponse(200, {
+        status: 'opted_out',
+        first_prompt_shown_at: null,
+        is_moderator: false,
+      });
+    }
+    if (parsed.pathname === '/api/v1/me/forum/participation' && init.method === 'PATCH') {
+      return jsonResponse(200, {
+        status: 'opted_in',
+        first_prompt_shown_at: '2026-06-01T10:00:00Z',
+        opted_in_at: '2026-06-01T10:00:00Z',
+        is_moderator: true,
+      });
+    }
+    return jsonResponse(404, { error: 'not_found' });
+  }, 'session-token');
+
+  try {
+    const initial = await harness.client.getForumParticipation();
+    assert.equal(initial.status, 'opted_out');
+    assert.equal(initial.firstPromptShownAt, undefined);
+    assert.equal(initial.isModerator, false);
+
+    const updated = await harness.client.updateForumParticipation('opt_in');
+    assert.equal(updated.status, 'opted_in');
+    assert.equal(updated.firstPromptShownAt, '2026-06-01T10:00:00Z');
+    assert.equal(updated.optedInAt, '2026-06-01T10:00:00Z');
+    assert.equal(updated.isModerator, true);
+
+    assert.equal(requests[0].url, 'https://platform.test/api/v1/me/forum/participation');
+    assert.equal(requests[1].init.method, 'PATCH');
+    assert.deepEqual(JSON.parse(requests[1].init.body), { forum_action: 'opt_in' });
+    assert.equal(requests.every((request) => request.init.headers.Authorization === 'Bearer session-token'), true);
+  } finally {
+    harness.restore();
+  }
+});
+
 const createClient = (fetchImpl, token = 'token-1', overrides = {}) => {
   const previousFetch = globalThis.fetch;
   globalThis.fetch = fetchImpl;

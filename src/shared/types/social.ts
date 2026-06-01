@@ -143,6 +143,17 @@ export type SocialUserAppVisibility = 'public' | 'friends' | 'private' | 'restri
 export type SocialUserAppStatus = 'published' | 'suspended' | 'deleted';
 export type SocialUserAppUploadAttemptStatus = 'pending_upload' | 'uploaded' | 'analyzing' | 'failed' | 'published';
 export type SocialUserAppReviewState = 'not_reviewed' | 'reviewed' | 'skipped_review';
+export type ForumParticipationStatus = 'opted_out' | 'opted_in' | 'suspended';
+
+export interface ForumParticipationState {
+  status: ForumParticipationStatus;
+  firstPromptShownAt?: string;
+  optedInAt?: string;
+  optedOutAt?: string;
+  suspendedAt?: string;
+  suspensionReason?: string;
+  isModerator: boolean;
+}
 
 export interface SocialUserProfile {
   id: number;

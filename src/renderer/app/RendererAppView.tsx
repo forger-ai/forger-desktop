@@ -3,6 +3,10 @@ import {
   Button,
   Chip,
   CssBaseline,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   FormControlLabel,
   Link,
   Stack,
@@ -122,6 +126,11 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     handleSubmitFeedback,
     usageAnalyticsEnabled,
     handleUsageAnalyticsChange,
+    forumParticipation,
+    forumPromptOpen,
+    forumParticipationBusy,
+    handleDismissForumPrompt,
+    handleEnterForum,
     handleUpdateAppPrompt,
     handleRestoreAppPrompt,
     chatMessages,
@@ -876,6 +885,9 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             earlyAccessEnabled={earlyAccessEnabled}
             advancedMode={advancedMode}
             usageAnalyticsEnabled={usageAnalyticsEnabled}
+            forumParticipation={forumParticipation}
+            forumParticipationBusy={forumParticipationBusy}
+            onEnterForum={handleEnterForum}
             onEarlyAccessChange={setEarlyAccessEnabled}
             onAdvancedModeChange={setAdvancedMode}
             onUsageAnalyticsChange={handleUsageAnalyticsChange}
@@ -900,6 +912,22 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
       />
 
       <RendererAppDialogs controller={controller} />
+      <Dialog open={forumPromptOpen} onClose={() => void handleDismissForumPrompt()} maxWidth="xs" fullWidth>
+        <DialogTitle>{t.settings.forumPromptTitle}</DialogTitle>
+        <DialogContent>
+          <Stack spacing={1}>
+            <Typography color="text.secondary">{t.settings.forumPromptBody}</Typography>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => void handleDismissForumPrompt()} disabled={forumParticipationBusy}>
+            {t.settings.forumPromptLater}
+          </Button>
+          <Button variant="contained" onClick={() => void handleEnterForum()} disabled={forumParticipationBusy}>
+            {t.settings.forumPromptEnter}
+          </Button>
+        </DialogActions>
+      </Dialog>
       <LocalNetworkShareDialog
         appName={localNetworkShareStatus ? getAppMeta(localNetworkShareStatus.appId).name : ''}
         open={localNetworkShareDialogOpen}

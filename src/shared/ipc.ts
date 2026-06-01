@@ -76,6 +76,8 @@ export const IPC_CHANNELS = {
   sendCloudMessage: 'forger:cloud-messages:send',
   sendCloudAppShareMessage: 'forger:cloud-messages:app-share',
   decideAppMessagePermission: 'forger:cloud-messages:permission',
+  getForumParticipation: 'forger:forum:participation:get',
+  updateForumParticipation: 'forger:forum:participation:update',
   openFriendChatWindow: 'forger:friends:open-chat-window',
   cloudFriendshipEvent: 'forger:cloud-friendship:event',
   getCloudIdentity: 'forger:cloud-identity:get',

@@ -80,6 +80,8 @@ const IPC_CHANNELS = {
   sendCloudMessage: 'forger:cloud-messages:send',
   sendCloudAppShareMessage: 'forger:cloud-messages:app-share',
   decideAppMessagePermission: 'forger:cloud-messages:permission',
+  getForumParticipation: 'forger:forum:participation:get',
+  updateForumParticipation: 'forger:forum:participation:update',
   openFriendChatWindow: 'forger:friends:open-chat-window',
   cloudFriendshipEvent: 'forger:cloud-friendship:event',
   getCloudIdentity: 'forger:cloud-identity:get',
@@ -277,6 +279,8 @@ const api: ForgerDesktopApi = {
   sendCloudAppShareMessage: (input) => ipcRenderer.invoke(IPC_CHANNELS.sendCloudAppShareMessage, input),
   decideAppMessagePermission: (cloudMessageId, decision) =>
     ipcRenderer.invoke(IPC_CHANNELS.decideAppMessagePermission, cloudMessageId, decision),
+  getForumParticipation: () => ipcRenderer.invoke(IPC_CHANNELS.getForumParticipation),
+  updateForumParticipation: (action) => ipcRenderer.invoke(IPC_CHANNELS.updateForumParticipation, action),
   onCloudFriendshipEvent: (listener) => {
     const wrapped = (_event: unknown, payload: Parameters<typeof listener>[0]) => {
       listener(payload);

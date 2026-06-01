@@ -17,6 +17,7 @@ import type {
   CloudDeviceSummary,
   CloudFriendship,
   CloudFriendUser,
+  ForumParticipationState,
   CloudMessage,
   CloudMessageEnvelope,
   CloudSendAppShareInput,
@@ -115,6 +116,20 @@ interface SocialDirectUploadResponse { signed_blob_id?: string; direct_upload?: 
 interface SocialUploadConfirmResponse {
   upload_attempt?: unknown;
 }
+
+const normalizeForumParticipation = (payload: unknown): ForumParticipationState => {
+  const source = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {};
+  const status = source.status === 'opted_in' || source.status === 'suspended' ? source.status : 'opted_out';
+  return {
+    status,
+    firstPromptShownAt: typeof source.first_prompt_shown_at === 'string' ? source.first_prompt_shown_at : undefined,
+    optedInAt: typeof source.opted_in_at === 'string' ? source.opted_in_at : undefined,
+    optedOutAt: typeof source.opted_out_at === 'string' ? source.opted_out_at : undefined,
+    suspendedAt: typeof source.suspended_at === 'string' ? source.suspended_at : undefined,
+    suspensionReason: typeof source.suspension_reason === 'string' ? source.suspension_reason : undefined,
+    isModerator: source.is_moderator === true,
+  };
+};
 
 export class ForgerBackendClient {
   constructor(private readonly options: ClientOptions) {}
@@ -620,6 +635,18 @@ export class ForgerBackendClient {
       throw backendError('No pudimos actualizar el permiso.', 'app_message_permission_response_invalid');
     }
     return message;
+  }
+
+  async getForumParticipation(): Promise<ForumParticipationState> {
+    const payload = await getBackendJson(this.options, '/api/v1/me/forum/participation', 'forum_participation_get_failed');
+    return normalizeForumParticipation(payload);
+  }
+
+  async updateForumParticipation(action: 'mark_prompt_shown' | 'opt_in' | 'opt_out'): Promise<ForumParticipationState> {
+    const payload = await patchBackendJson(this.options, '/api/v1/me/forum/participation', {
+      forum_action: action,
+    }, 'forum_participation_update_failed');
+    return normalizeForumParticipation(payload);
   }
 
   async listMySocialApps(): Promise<SocialUserAppList> {

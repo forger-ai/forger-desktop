@@ -851,6 +851,14 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
     if (!forgerBackendClient) throw new Error('backend_client_missing');
     return await decryptCloudMessage(await forgerBackendClient.decideAppMessagePermission(cloudMessageId, decision));
   });
+  ipcMain.handle(IPC_CHANNELS.getForumParticipation, async () => {
+    if (!forgerBackendClient) throw new Error('backend_client_missing');
+    return await forgerBackendClient.getForumParticipation();
+  });
+  ipcMain.handle(IPC_CHANNELS.updateForumParticipation, async (_event, action: 'mark_prompt_shown' | 'opt_in' | 'opt_out') => {
+    if (!forgerBackendClient) throw new Error('backend_client_missing');
+    return await forgerBackendClient.updateForumParticipation(action);
+  });
   ipcMain.handle(IPC_CHANNELS.getCloudIdentity, async () => await getCloudIdentityStore().getSummary());
   ipcMain.handle(IPC_CHANNELS.revealCloudSecretKey, async () => await getCloudIdentityStore().revealSecretKey());
   ipcMain.handle(IPC_CHANNELS.regenerateCloudSecretKey, async () => {
