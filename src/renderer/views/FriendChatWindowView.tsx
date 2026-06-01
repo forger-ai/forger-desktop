@@ -84,6 +84,17 @@ const appShareState = (message: CloudMessage) => {
   return { label: 'Disponible', color: 'success' as const };
 };
 
+const appShareInstallInput = (message: CloudMessage) => {
+  if (message.type !== 'CloudAppShareMessage' || !message.appShare.app.available || message.appShare.share?.revokedAt) {
+    return null;
+  }
+  if (message.appShare.shareKind === 'public_app') {
+    return { appId: message.appShare.userAppId };
+  }
+  const shareCode = message.appShare.share?.code;
+  return shareCode ? { shareCode } : null;
+};
+
 export function FriendChatWindowView({
   account,
   friendUserId,
@@ -104,6 +115,9 @@ export function FriendChatWindowView({
   const [shareError, setShareError] = useState<string | null>(null);
   const [selectedShareAppId, setSelectedShareAppId] = useState('');
   const [sharingApp, setSharingApp] = useState(false);
+  const [installingShareKeys, setInstallingShareKeys] = useState<Set<string>>(new Set());
+  const [appShareInstallFeedback, setAppShareInstallFeedback] = useState<Record<string, string>>({});
+  const [appShareInstallErrors, setAppShareInstallErrors] = useState<Record<string, string>>({});
 
   const loadMessages = useCallback(async () => {
     if (!account.authenticated || !account.user?.confirmed) {
@@ -257,6 +271,52 @@ export function FriendChatWindowView({
     }
   };
 
+  const handleInstallAppShare = async (message: CloudMessage) => {
+    const input = appShareInstallInput(message);
+    const key = messageIdentity(message) ?? (message.type === 'CloudAppShareMessage' ? `app-share:${message.appShare.id}` : null);
+    if (!input || !key || installingShareKeys.has(key)) {
+      return;
+    }
+
+    setInstallingShareKeys((current) => new Set(current).add(key));
+    setAppShareInstallErrors((current) => {
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
+    setAppShareInstallFeedback((current) => {
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
+
+    try {
+      const result = await window.forger.installSocialApp(input, navigator.language);
+      if (result.success) {
+        setAppShareInstallFeedback((current) => ({
+          ...current,
+          [key]: result.userMessage || 'App instalada.',
+        }));
+        return;
+      }
+      setAppShareInstallErrors((current) => ({
+        ...current,
+        [key]: result.userMessage || 'No pudimos instalar esta app.',
+      }));
+    } catch (err) {
+      setAppShareInstallErrors((current) => ({
+        ...current,
+        [key]: err instanceof Error ? err.message : 'No pudimos instalar esta app.',
+      }));
+    } finally {
+      setInstallingShareKeys((current) => {
+        const next = new Set(current);
+        next.delete(key);
+        return next;
+      });
+    }
+  };
+
   const sortedMessages = useMemo(() => sortMessages(messages), [messages]);
 
   return (
@@ -350,6 +410,9 @@ export function FriendChatWindowView({
               const key = message.id ?? `${message.clientMessageId ?? 'message'}-${index}`;
               const body = message.plaintext?.trim();
               const shareState = appShareState(message);
+              const shareInstallInput = appShareInstallInput(message);
+              const shareActionKey = messageIdentity(message) ?? (message.type === 'CloudAppShareMessage' ? `app-share:${message.appShare.id}` : null);
+              const installingShare = Boolean(shareActionKey && installingShareKeys.has(shareActionKey));
 
               return (
                 <Stack key={key} alignItems={outgoing ? 'flex-end' : 'flex-start'}>
@@ -416,6 +479,24 @@ export function FriendChatWindowView({
                             {body}
                           </Typography>
                         ) : null}
+                        {shareActionKey && appShareInstallFeedback[shareActionKey] ? (
+                          <Alert severity="success" sx={{ py: 0.25 }}>
+                            {appShareInstallFeedback[shareActionKey]}
+                          </Alert>
+                        ) : null}
+                        {shareActionKey && appShareInstallErrors[shareActionKey] ? (
+                          <Alert severity="error" sx={{ py: 0.25 }}>
+                            {appShareInstallErrors[shareActionKey]}
+                          </Alert>
+                        ) : null}
+                        <Button
+                          size="small"
+                          variant="contained"
+                          disabled={!shareInstallInput || installingShare}
+                          onClick={() => void handleInstallAppShare(message)}
+                        >
+                          {installingShare ? 'Instalando...' : 'Instalar'}
+                        </Button>
                       </Stack>
                     ) : (
                       <Typography
