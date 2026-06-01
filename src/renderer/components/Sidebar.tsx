@@ -56,6 +56,7 @@ interface SidebarProps {
   t: AppDictionary;
   desktopUpdateState: DesktopUpdateState;
   advancedMode: boolean;
+  showForumNav: boolean;
 }
 
 const defaultNav = [
@@ -76,7 +77,7 @@ const advancedNav = [
   { id: 'tools' as const, icon: <ConstructionRounded /> },
 ];
 
-export function Sidebar({ currentView, onNavigate, t, desktopUpdateState, advancedMode }: SidebarProps) {
+export function Sidebar({ currentView, onNavigate, t, desktopUpdateState, advancedMode, showForumNav }: SidebarProps) {
   const theme = useTheme();
   const [windowState, setWindowState] = useState<WindowControlState | null>(null);
   const shouldReserveMacTrafficLightSpace =
@@ -130,8 +131,8 @@ export function Sidebar({ currentView, onNavigate, t, desktopUpdateState, advanc
   };
   const showUpdateBanner = desktopUpdateState.status === 'available' || desktopUpdateState.status === 'ready';
   const mainNav = advancedMode
-    ? [defaultNav[0], defaultNav[1], defaultNav[2], ...advancedNav]
-    : defaultNav;
+    ? [defaultNav[0], defaultNav[1], defaultNav[2], ...(showForumNav ? [defaultNav[3]] : []), ...advancedNav]
+    : [defaultNav[0], defaultNav[1], defaultNav[2], ...(showForumNav ? [defaultNav[3]] : []), defaultNav[4]];
 
   return (
     <Box

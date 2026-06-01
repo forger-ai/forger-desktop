@@ -556,6 +556,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
           onOpenBackgroundTask={openBackgroundTaskDetail}
           desktopUpdateState={desktopUpdateState}
           advancedMode={advancedMode}
+          showForumNav={forumParticipation.status === 'opted_in'}
         >
         {currentView === 'apps' ? renderInstalledAppsView() : null}
 
