@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import AppsRounded from '@mui/icons-material/AppsRounded';
 import LinkOffRounded from '@mui/icons-material/LinkOffRounded';
 import SendRounded from '@mui/icons-material/SendRounded';
+import ShareRounded from '@mui/icons-material/ShareRounded';
 import {
   Alert,
   Avatar,
@@ -9,16 +10,22 @@ import {
   Button,
   Chip,
   CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   Divider,
   IconButton,
+  MenuItem,
   Paper,
+  Select,
   Stack,
   TextField,
   Typography,
   alpha,
   useTheme,
 } from '@mui/material';
-import type { CloudMessage, CloudSocialEvent, ForgerAccountSession } from '@shared/types';
+import type { CloudMessage, CloudSocialEvent, ForgerAccountSession, SocialUserApp } from '@shared/types';
 
 interface FriendChatWindowViewProps {
   account: ForgerAccountSession;
@@ -91,6 +98,12 @@ export function FriendChatWindowView({
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
+  const [shareDialogOpen, setShareDialogOpen] = useState(false);
+  const [shareApps, setShareApps] = useState<SocialUserApp[]>([]);
+  const [shareAppsLoading, setShareAppsLoading] = useState(false);
+  const [shareError, setShareError] = useState<string | null>(null);
+  const [selectedShareAppId, setSelectedShareAppId] = useState('');
+  const [sharingApp, setSharingApp] = useState(false);
 
   const loadMessages = useCallback(async () => {
     if (!account.authenticated || !account.user?.confirmed) {
@@ -203,6 +216,47 @@ export function FriendChatWindowView({
     }
   };
 
+  const openShareDialog = async () => {
+    if (shareAppsLoading || sharingApp) {
+      return;
+    }
+
+    setShareDialogOpen(true);
+    setShareError(null);
+    setShareAppsLoading(true);
+    try {
+      const payload = await window.forger.listMySocialApps();
+      setShareApps(payload.apps);
+      setSelectedShareAppId((current) => current || String(payload.apps[0]?.id ?? ''));
+    } catch (err) {
+      setShareError(err instanceof Error ? err.message : 'No pudimos cargar tus apps compartidas.');
+    } finally {
+      setShareAppsLoading(false);
+    }
+  };
+
+  const handleShareApp = async () => {
+    const userAppId = Number(selectedShareAppId);
+    if (!Number.isFinite(userAppId) || sharingApp) {
+      return;
+    }
+
+    setSharingApp(true);
+    setShareError(null);
+    try {
+      const sent = await window.forger.sendCloudAppShareMessage({
+        recipientUserId: friendUserId,
+        userAppId,
+      });
+      setMessages((current) => mergeMessage(current, sent));
+      setShareDialogOpen(false);
+    } catch (err) {
+      setShareError(err instanceof Error ? err.message : 'No pudimos compartir esta app.');
+    } finally {
+      setSharingApp(false);
+    }
+  };
+
   const sortedMessages = useMemo(() => sortMessages(messages), [messages]);
 
   return (
@@ -236,6 +290,15 @@ export function FriendChatWindowView({
             @{friendUsername}
           </Typography>
         </Stack>
+        <Button
+          variant="outlined"
+          size="small"
+          startIcon={shareAppsLoading ? <CircularProgress size={14} color="inherit" /> : <ShareRounded />}
+          disabled={!account.authenticated || !account.user?.confirmed || shareAppsLoading || sharingApp}
+          onClick={() => void openShareDialog()}
+        >
+          Compartir app
+        </Button>
         <Chip size="small" label="Social" variant="outlined" />
       </Stack>
 
@@ -431,6 +494,46 @@ export function FriendChatWindowView({
           <SendRounded />
         </IconButton>
       </Stack>
+
+      <Dialog open={shareDialogOpen} onClose={() => !sharingApp && setShareDialogOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Compartir app con @{friendUsername}</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ pt: 1 }}>
+            {shareError ? <Alert severity="error">{shareError}</Alert> : null}
+            {shareAppsLoading ? (
+              <Stack direction="row" spacing={1} alignItems="center">
+                <CircularProgress size={18} />
+                <Typography color="text.secondary">Cargando tus apps compartidas.</Typography>
+              </Stack>
+            ) : shareApps.length === 0 ? (
+              <Alert severity="info">Sube una app a Social antes de compartirla por chat.</Alert>
+            ) : (
+              <Select
+                fullWidth
+                value={selectedShareAppId}
+                onChange={(event) => setSelectedShareAppId(String(event.target.value))}
+                disabled={sharingApp}
+              >
+                {shareApps.map((app) => (
+                  <MenuItem key={app.id} value={String(app.id)}>
+                    {app.name}
+                  </MenuItem>
+                ))}
+              </Select>
+            )}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button disabled={sharingApp} onClick={() => setShareDialogOpen(false)}>Cancelar</Button>
+          <Button
+            variant="contained"
+            disabled={sharingApp || shareAppsLoading || !selectedShareAppId || shareApps.length === 0}
+            onClick={() => void handleShareApp()}
+          >
+            {sharingApp ? 'Compartiendo...' : 'Enviar'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }
