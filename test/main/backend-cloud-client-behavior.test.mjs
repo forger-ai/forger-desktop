@@ -1418,6 +1418,40 @@ test('cloud friendship and message normalizers reject malformed social relay pay
     recipient: { id: 2, username: 'recipient' },
     envelopes: null,
   }).envelopes, []);
+  const appShareMessage = normalizeCloudMessage({
+    id: '44',
+    type: 'CloudAppShareMessage',
+    sender: { id: 1, username: 'sender' },
+    recipient: { id: 2, username: 'recipient' },
+    metadata: { ignored: true },
+    app_share: {
+      id: '55',
+      user_app_id: '66',
+      user_app_share_id: null,
+      share_kind: 'public_app',
+      app_visibility_at_send: 'public',
+      app_name_snapshot: 'Shared App',
+      app_slug_snapshot: 'shared-app',
+      app_owner_username_snapshot: 'sender',
+      app: {
+        id: '66',
+        status: 'published',
+        visibility: 'public',
+        available: true,
+      },
+      share: null,
+    },
+  });
+  assert.equal(appShareMessage.type, 'CloudAppShareMessage');
+  assert.equal(appShareMessage.appShare.userAppId, 66);
+  assert.equal(appShareMessage.appShare.shareKind, 'public_app');
+  assert.equal(appShareMessage.appShare.app.available, true);
+  assert.equal(appShareMessage.appShare.share, undefined);
+  assert.equal(normalizeCloudMessage({
+    type: 'CloudAppShareMessage',
+    sender: { id: 1, username: 'sender' },
+    recipient: { id: 2, username: 'recipient' },
+  }), undefined);
 });
 
 test('cloud social client methods encode requests and normalize response payloads', async () => {
@@ -1467,6 +1501,43 @@ test('cloud social client methods encode requests and normalize response payload
         metadata: { kind: 'handoff' },
       });
     }
+    if (parsed.pathname === '/api/v1/me/cloud_messages/app_share') {
+      return jsonResponse(201, {
+        id: '12',
+        type: 'CloudAppShareMessage',
+        sender: { id: 1, username: 'me' },
+        recipient: { id: 4, username: 'friend' },
+        delivery_mode: 'persistent',
+        source: 'user',
+        status: 'stored',
+        metadata: {},
+        envelopes: [],
+        app_share: {
+          id: '13',
+          user_app_id: '21',
+          user_app_share_id: '34',
+          share_kind: 'friends_link',
+          app_visibility_at_send: 'friends',
+          app_name_snapshot: 'Shared App',
+          app_slug_snapshot: 'shared-app',
+          app_owner_username_snapshot: 'me',
+          app: {
+            id: '21',
+            status: 'published',
+            visibility: 'friends',
+            available: true,
+          },
+          share: {
+            id: '34',
+            scope: 'private_link',
+            code: 'SHARE-CODE',
+            deep_link: 'forger://social/app?code=SHARE-CODE',
+            revoked_at: '2026-05-21T00:03:00Z',
+            used_count: 2,
+          },
+        },
+      });
+    }
     if (parsed.pathname === '/api/v1/me/app_message_permission') {
       return jsonResponse(200, {
         id: '11',
@@ -1512,6 +1583,23 @@ test('cloud social client methods encode requests and normalize response payload
     assert.equal(message.envelopes[0].cloudDeviceId, undefined);
     assert.equal(message.envelopes[0].deviceUid, 'device-4');
 
+    const appShareMessage = await harness.client.sendCloudAppShareMessage({
+      recipientUserId: 4,
+      userAppId: 21,
+      clientMessageId: 'share-client-1',
+      envelopes: [{
+        recipientUserId: 4,
+        cloudDeviceId: 10,
+        deviceUid: 'device-4',
+        keyFingerprint: 'fingerprint',
+        ciphertext: 'share-ciphertext',
+        metadata: { alg: 'v1' },
+      }],
+    });
+    assert.equal(appShareMessage.type, 'CloudAppShareMessage');
+    assert.equal(appShareMessage.appShare.shareKind, 'friends_link');
+    assert.equal(appShareMessage.appShare.share.revokedAt, '2026-05-21T00:03:00Z');
+
     const decision = await harness.client.decideAppMessagePermission(11, 'allow_once');
     assert.equal(decision.status, 'stored');
 
@@ -1534,6 +1622,19 @@ test('cloud social client methods encode requests and normalize response payload
       }],
     });
     assert.deepEqual(JSON.parse(requests[4].init.body), {
+      recipient_user_id: 4,
+      user_app_id: 21,
+      client_message_id: 'share-client-1',
+      envelopes: [{
+        recipient_user_id: 4,
+        cloud_device_id: 10,
+        device_uid: 'device-4',
+        key_fingerprint: 'fingerprint',
+        ciphertext: 'share-ciphertext',
+        metadata: { alg: 'v1' },
+      }],
+    });
+    assert.deepEqual(JSON.parse(requests[5].init.body), {
       cloud_message_id: 11,
       decision: 'allow_once',
     });

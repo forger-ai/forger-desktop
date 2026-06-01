@@ -1,3 +1,4 @@
+/* eslint-disable max-lines */
 import type {
   AppCategory,
   AppRatingSummary,
@@ -18,6 +19,7 @@ import type {
   CloudFriendUser,
   CloudMessage,
   CloudMessageEnvelope,
+  CloudSendAppShareInput,
   CloudSendMessageInput,
   SocialUserApp,
   SocialUserAppDownload,
@@ -582,6 +584,28 @@ export class ForgerBackendClient {
     const message = normalizeCloudMessage(payload);
     if (!message) {
       throw backendError('No pudimos enviar el mensaje.', 'cloud_message_response_invalid');
+    }
+    return message;
+  }
+
+  async sendCloudAppShareMessage(input: CloudSendAppShareInput & { envelopes: CloudMessageEnvelope[]; clientMessageId?: string }): Promise<CloudMessage> {
+    const payload = await postBackendJson(this.options, '/api/v1/me/cloud_messages/app_share', {
+      recipient_username: input.recipientUsername,
+      recipient_user_id: input.recipientUserId,
+      user_app_id: input.userAppId,
+      client_message_id: input.clientMessageId,
+      envelopes: input.envelopes.map((envelope) => ({
+        recipient_user_id: envelope.recipientUserId,
+        cloud_device_id: envelope.cloudDeviceId,
+        device_uid: envelope.deviceUid,
+        key_fingerprint: envelope.keyFingerprint,
+        ciphertext: envelope.ciphertext,
+        metadata: envelope.metadata,
+      })),
+    }, 'cloud_app_share_message_send_failed');
+    const message = normalizeCloudMessage(payload);
+    if (!message) {
+      throw backendError('No pudimos compartir esta app.', 'cloud_app_share_message_response_invalid');
     }
     return message;
   }

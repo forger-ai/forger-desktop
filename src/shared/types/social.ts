@@ -33,6 +33,8 @@ export type CloudMessageDeliveryMode = 'persistent' | 'ephemeral';
 export type CloudMessageSource = 'user' | 'app';
 export type CloudMessageStatus = 'stored' | 'delivered' | 'not_delivered' | 'pending_permission' | 'blocked';
 export type CloudAppMessagePermissionDecision = 'allow_once' | 'allow_always' | 'decline_once' | 'decline_always';
+export type CloudMessageType = 'CloudTextMessage' | 'CloudAppShareMessage';
+export type CloudAppShareKind = 'public_app' | 'friends_link' | 'friend_link';
 
 export interface CloudMessageEnvelope {
   id?: number;
@@ -45,8 +47,36 @@ export interface CloudMessageEnvelope {
   readAt?: string;
 }
 
-export interface CloudMessage {
+export interface CloudAppShareMessageDetail {
+  id: number;
+  userAppId: number;
+  userAppShareId?: number;
+  shareKind: CloudAppShareKind;
+  appVisibilityAtSend: SocialUserAppVisibility;
+  appNameSnapshot: string;
+  appSlugSnapshot: string;
+  appOwnerUsernameSnapshot: string;
+  app: {
+    id: number;
+    status: SocialUserAppStatus;
+    visibility: SocialUserAppVisibility;
+    available: boolean;
+  };
+  share?: {
+    id: number;
+    scope: string;
+    code?: string;
+    deepLink?: string;
+    revokedAt?: string;
+    expiresAt?: string;
+    maxUses?: number;
+    usedCount: number;
+  };
+}
+
+interface CloudMessageBase {
   id?: number;
+  type: CloudMessageType;
   sender: CloudFriendUser;
   recipient: CloudFriendUser;
   deliveryMode: CloudMessageDeliveryMode;
@@ -63,6 +93,18 @@ export interface CloudMessage {
   updatedAt?: string;
 }
 
+export interface CloudTextMessage extends CloudMessageBase {
+  type: 'CloudTextMessage';
+  appShare?: undefined;
+}
+
+export interface CloudAppShareMessage extends CloudMessageBase {
+  type: 'CloudAppShareMessage';
+  appShare: CloudAppShareMessageDetail;
+}
+
+export type CloudMessage = CloudTextMessage | CloudAppShareMessage;
+
 export type CloudSocialEvent =
   | { type: 'friendship_changed'; friendship: CloudFriendship }
   | { type: 'cloud_message'; message: CloudMessage; unread?: boolean }
@@ -76,6 +118,12 @@ export interface CloudSendMessageInput {
   source?: CloudMessageSource;
   sourceAppId?: string;
   sourceAppName?: string;
+}
+
+export interface CloudSendAppShareInput {
+  recipientUsername?: string;
+  recipientUserId?: number;
+  userAppId: number;
 }
 
 export interface FriendChatWindowOpenResult {

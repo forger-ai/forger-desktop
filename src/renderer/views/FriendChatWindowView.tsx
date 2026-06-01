@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import AppsRounded from '@mui/icons-material/AppsRounded';
+import LinkOffRounded from '@mui/icons-material/LinkOffRounded';
 import SendRounded from '@mui/icons-material/SendRounded';
 import {
   Alert,
@@ -59,6 +61,20 @@ const mergeMessage = (messages: CloudMessage[], message: CloudMessage) => {
   const next = messages.filter((entry) => messageIdentity(entry) !== identity);
   next.push(message);
   return sortMessages(next);
+};
+
+const appShareState = (message: CloudMessage) => {
+  if (message.type !== 'CloudAppShareMessage') {
+    return null;
+  }
+  const revoked = Boolean(message.appShare.share?.revokedAt);
+  if (revoked) {
+    return { label: 'Link revocado', color: 'warning' as const };
+  }
+  if (!message.appShare.app.available) {
+    return { label: 'No disponible', color: 'default' as const };
+  }
+  return { label: 'Disponible', color: 'success' as const };
 };
 
 export function FriendChatWindowView({
@@ -270,6 +286,7 @@ export function FriendChatWindowView({
               const outgoing = message.sender.id === account.user?.id;
               const key = message.id ?? `${message.clientMessageId ?? 'message'}-${index}`;
               const body = message.plaintext?.trim();
+              const shareState = appShareState(message);
 
               return (
                 <Stack key={key} alignItems={outgoing ? 'flex-end' : 'flex-start'}>
@@ -277,38 +294,94 @@ export function FriendChatWindowView({
                     elevation={0}
                     sx={{
                       maxWidth: '84%',
-                      px: 1.5,
-                      py: 1.1,
+                      width: message.type === 'CloudAppShareMessage' ? 'min(360px, 84%)' : 'auto',
+                      px: message.type === 'CloudAppShareMessage' ? 0 : 1.5,
+                      py: message.type === 'CloudAppShareMessage' ? 0 : 1.1,
                       borderRadius: 2.5,
-                      bgcolor: outgoing ? theme.palette.primary.main : alpha(theme.palette.background.paper, 0.96),
-                      color: outgoing ? theme.palette.primary.contrastText : theme.palette.text.primary,
+                      bgcolor: message.type === 'CloudAppShareMessage'
+                        ? alpha(theme.palette.background.paper, 0.98)
+                        : outgoing
+                          ? theme.palette.primary.main
+                          : alpha(theme.palette.background.paper, 0.96),
+                      color: message.type === 'CloudAppShareMessage'
+                        ? theme.palette.text.primary
+                        : outgoing
+                          ? theme.palette.primary.contrastText
+                          : theme.palette.text.primary,
                       border: `1px solid ${
-                        outgoing ? alpha(theme.palette.primary.dark, 0.35) : alpha(theme.palette.divider, 0.8)
+                        message.type === 'CloudAppShareMessage'
+                          ? alpha(theme.palette.primary.main, 0.28)
+                          : outgoing
+                            ? alpha(theme.palette.primary.dark, 0.35)
+                            : alpha(theme.palette.divider, 0.8)
                       }`,
+                      overflow: 'hidden',
                     }}
                   >
-                    <Typography
-                      variant="body2"
-                      sx={{
-                        whiteSpace: 'pre-wrap',
-                        wordBreak: 'break-word',
-                        color: body
-                          ? 'inherit'
-                          : outgoing
-                            ? alpha(theme.palette.primary.contrastText, 0.78)
-                            : theme.palette.text.secondary,
-                        fontStyle: body ? 'normal' : 'italic',
-                      }}
-                    >
-                      {body ?? 'No se pudo desencriptar este mensaje en este dispositivo.'}
-                    </Typography>
+                    {message.type === 'CloudAppShareMessage' ? (
+                      <Stack spacing={1.1} sx={{ p: 1.4 }}>
+                        <Stack direction="row" spacing={1} alignItems="flex-start">
+                          <Avatar
+                            variant="rounded"
+                            sx={{
+                              width: 38,
+                              height: 38,
+                              bgcolor: alpha(theme.palette.primary.main, 0.12),
+                              color: theme.palette.primary.main,
+                            }}
+                          >
+                            {shareState?.label === 'Link revocado' ? <LinkOffRounded /> : <AppsRounded />}
+                          </Avatar>
+                          <Stack spacing={0.35} sx={{ minWidth: 0, flex: 1 }}>
+                            <Typography variant="subtitle2" sx={{ fontWeight: 800 }} noWrap>
+                              {message.appShare.appNameSnapshot}
+                            </Typography>
+                            <Typography variant="caption" color="text.secondary" noWrap>
+                              @{message.appShare.appOwnerUsernameSnapshot}
+                            </Typography>
+                          </Stack>
+                          {shareState ? (
+                            <Chip size="small" label={shareState.label} color={shareState.color} variant="outlined" />
+                          ) : null}
+                        </Stack>
+                        <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
+                          <Chip size="small" label={message.appShare.shareKind === 'public_app' ? 'Pública' : message.appShare.shareKind === 'friends_link' ? 'Amigos' : 'Privada'} />
+                          <Chip size="small" label={`/${message.appShare.appSlugSnapshot}`} variant="outlined" />
+                        </Stack>
+                        {body ? (
+                          <Typography variant="body2" color="text.secondary" sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                            {body}
+                          </Typography>
+                        ) : null}
+                      </Stack>
+                    ) : (
+                      <Typography
+                        variant="body2"
+                        sx={{
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-word',
+                          color: body
+                            ? 'inherit'
+                            : outgoing
+                              ? alpha(theme.palette.primary.contrastText, 0.78)
+                              : theme.palette.text.secondary,
+                          fontStyle: body ? 'normal' : 'italic',
+                        }}
+                      >
+                        {body ?? 'No se pudo desencriptar este mensaje en este dispositivo.'}
+                      </Typography>
+                    )}
                     <Typography
                       variant="caption"
                       sx={{
-                        mt: 0.75,
+                        mt: message.type === 'CloudAppShareMessage' ? 0 : 0.75,
                         display: 'block',
+                        px: message.type === 'CloudAppShareMessage' ? 1.4 : 0,
+                        pb: message.type === 'CloudAppShareMessage' ? 1.1 : 0,
                         color: outgoing
-                          ? alpha(theme.palette.primary.contrastText, 0.8)
+                          ? message.type === 'CloudAppShareMessage'
+                            ? theme.palette.text.secondary
+                            : alpha(theme.palette.primary.contrastText, 0.8)
                           : theme.palette.text.secondary,
                       }}
                     >

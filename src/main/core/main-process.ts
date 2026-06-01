@@ -94,7 +94,7 @@ import type {
   CloudSyncSettings,
   CloudMessage,
   CloudMessageEnvelope,
-  CloudSendMessageInput,
+  CloudSendAppShareInput, CloudSendMessageInput,
   CloudSocialEvent,
   CloudAppMessagePermissionDecision,
   CreateRemoteAppBackupInput,
@@ -974,7 +974,7 @@ const decryptCloudMessage = async (message: CloudMessage): Promise<CloudMessage>
 const decryptCloudMessages = async (messages: CloudMessage[]): Promise<CloudMessage[]> => await getCloudSocialRelayController().decryptCloudMessages(messages);
 const wait = async (milliseconds: number): Promise<void> => await getCloudSocialRelayController().wait(milliseconds);
 const buildEncryptedEnvelopes = async (recipientUserId: number, text: string): Promise<CloudMessageEnvelope[]> => await (getCloudSocialRelayController().buildEncryptedEnvelopes as (...args: unknown[]) => Promise<CloudMessageEnvelope[]>)(recipientUserId, text);
-const sendEncryptedCloudMessage = async (input: CloudSendMessageInput): Promise<CloudMessage> => await getCloudSocialRelayController().sendEncryptedCloudMessage(input);
+const sendEncryptedCloudMessage = async (input: CloudSendMessageInput): Promise<CloudMessage> => await getCloudSocialRelayController().sendEncryptedCloudMessage(input); const sendEncryptedCloudAppShareMessage = async (input: CloudSendAppShareInput): Promise<CloudMessage> => await getCloudSocialRelayController().sendEncryptedCloudAppShareMessage(input);
 const isCloudSocialEvent = (event: unknown): event is CloudSocialEvent => getCloudSocialRelayController().isCloudSocialEvent(event);
 const prepareCloudSocialEvent = async (event: unknown): Promise<CloudSocialEvent | null> => await getCloudSocialRelayController().prepareCloudSocialEvent(event);
 const isUnreadIncomingCloudMessage = (event: CloudSocialEvent): boolean => getCloudSocialRelayController().isUnreadIncomingCloudMessage(event);
@@ -1094,7 +1094,7 @@ const getMainProcessIpcDeps = () => ({
   restoreAppUserVersionRuntime,
   restoreRemoteAppBackup,
   sanitizeRendererChatTrace,
-  sendEncryptedCloudMessage,
+  sendEncryptedCloudMessage, sendEncryptedCloudAppShareMessage,
   serializeErrorForInstallLog,
   setAppAutoSyncSetting,
   settings,
