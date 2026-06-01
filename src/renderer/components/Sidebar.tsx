@@ -7,6 +7,7 @@ import DevicesRounded from '@mui/icons-material/DevicesRounded';
 import InsertDriveFileRounded from '@mui/icons-material/InsertDriveFileRounded';
 import TableChartRounded from '@mui/icons-material/TableChartRounded';
 import FeedbackRounded from '@mui/icons-material/FeedbackRounded';
+import PeopleRounded from '@mui/icons-material/PeopleRounded';
 import SettingsRounded from '@mui/icons-material/SettingsRounded';
 import VpnKeyRounded from '@mui/icons-material/VpnKeyRounded';
 import StorefrontRounded from '@mui/icons-material/StorefrontRounded';
@@ -61,6 +62,7 @@ const defaultNav = [
   { id: 'chat' as const, icon: <AutoAwesomeRounded /> },
   { id: 'apps' as const, icon: <AppsRounded /> },
   { id: 'catalog' as const, icon: <StorefrontRounded /> },
+  { id: 'friends' as const, icon: <PeopleRounded /> },
   { id: 'feedback' as const, icon: <FeedbackRounded /> },
 ];
 
@@ -113,7 +115,7 @@ export function Sidebar({ currentView, onNavigate, t, desktopUpdateState, advanc
     chat: t.nav.chat,
     create: t.nav.create,
     feedback: t.nav.feedback,
-    friends: 'Friends',
+    friends: 'Social',
     automations: t.nav.automations,
     files: t.nav.files,
     backups: t.nav.backups,

@@ -32,6 +32,7 @@ import { DevicesView } from '@renderer/views/DevicesView';
 import { FeedbackView } from '@renderer/views/FeedbackView';
 import { FilesView } from '@renderer/views/FilesView';
 import { FriendChatWindowView } from '@renderer/views/FriendChatWindowView';
+import { ForumPanel } from '@renderer/views/friends/ForumPanel';
 import { SettingsView } from '@renderer/views/SettingsView';
 import { SecretsView } from '@renderer/views/SecretsView';
 import { ToolsView } from '@renderer/views/ToolsView';
@@ -691,6 +692,37 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             onRespondPermission={handleRespondPermission}
             onRespondQuestion={handleRespondQuestion}
           />
+        ) : null}
+
+        {currentView === 'friends' ? (
+          <Box sx={{ px: { xs: 2, md: 3 }, py: 3, maxWidth: 860 }}>
+            <Stack spacing={2}>
+              <Stack spacing={0.5}>
+                <Typography variant="h4" sx={{ fontWeight: 800 }}>Social</Typography>
+                <Typography color="text.secondary">
+                  Foro de la comunidad y conversaciones públicas opt-in.
+                </Typography>
+              </Stack>
+              {forgerAccount.authenticated && forgerAccount.user?.confirmed ? (
+                <ForumPanel
+                  active={currentView === 'friends'}
+                  onNotify={(message, severity = 'info') => {
+                    setBannerSeverity(severity);
+                    setBannerMessage(message);
+                  }}
+                />
+              ) : (
+                <Stack spacing={1.5} sx={{ maxWidth: 520 }}>
+                  <Typography color="text.secondary">
+                    Inicia sesión en Forger Cloud para entrar al foro.
+                  </Typography>
+                  <Button variant="contained" onClick={() => setCloudModalOpen(true)} sx={{ alignSelf: 'flex-start' }}>
+                    Iniciar sesión
+                  </Button>
+                </Stack>
+              )}
+            </Stack>
+          </Box>
         ) : null}
 
         {currentView === 'create' ? (

@@ -34,9 +34,11 @@ test('renderer separates installed Apps from curated Catalog in navigation and c
   const viewSource = await readSource('src/renderer/app/RendererAppView.tsx');
 
   assert.match(sidebarSource, /id: 'chat'[\s\S]*id: 'apps'[\s\S]*id: 'catalog'/);
+  assert.match(sidebarSource, /id: 'friends'/);
   assert.match(viewSource, /const installedViewApps = useMemo<CatalogApp\[]>/);
   assert.match(viewSource, /currentView === 'apps' \? renderInstalledAppsView\(\) : null/);
   assert.match(viewSource, /<CatalogView\s+apps=\{catalogApps\}/);
+  assert.match(viewSource, /currentView === 'friends'[\s\S]*<ForumPanel/);
   assert.match(viewSource, /onSend=\{\(modeOverride\) => void handleSendMessage\(undefined, modeOverride\)\}/);
 });
 
