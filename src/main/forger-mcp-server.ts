@@ -77,7 +77,7 @@ interface ForgerMcpServerOptions {
   recordCreatedApp?: (runId: string, createdApp: ChatCreatedAppRequest) => void;
   registerQuestion: (
     runId: string,
-    input: { chatId: string; questions: ChatQuestion[] },
+    input: { questions: ChatQuestion[] },
   ) => Promise<ChatQuestionRequest>;
   getRuntimeStatus: (appId: string) => RuntimeStatus;
   openApp: (appId: string) => Promise<OpenAppResult>;
@@ -603,7 +603,7 @@ export class ForgerMcpServer {
       if (!input) {
         const result = {
           success: false,
-          userMessage: 'Completa nombre, descripcion, proposito y prompt detallado para crear la app.',
+          userMessage: 'Completa nombre, descripcion y proposito para crear la app.',
           technicalCode: 'create_app_input_invalid',
         };
         await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
@@ -616,7 +616,6 @@ export class ForgerMcpServer {
           name: result.app.name,
           description: result.app.description,
           purpose: result.app.purpose,
-          agentPrompt: input.agentPrompt,
           ...(result.app.lookAndFeel ? { lookAndFeel: result.app.lookAndFeel } : {}),
         });
       }
@@ -629,7 +628,7 @@ export class ForgerMcpServer {
       if (!input) {
         const result = {
           success: false,
-          userMessage: 'La pregunta necesita un chat y entre una y cinco preguntas con dos o tres opciones.',
+          userMessage: 'La pregunta necesita entre una y cinco preguntas con dos o tres opciones.',
           technicalCode: 'question_input_invalid',
         };
         await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
@@ -843,27 +842,24 @@ const isInternalMcpTool = (toolId: AgentToolId): boolean => toolId === 'forger_a
 
 const cleanString = (value: unknown): string => typeof value === 'string' ? value.trim() : '';
 
-const parseCreateLocalAppToolInput = (args: Record<string, unknown>): Required<Pick<CreateLocalAppInput, 'name' | 'description' | 'purpose' | 'agentPrompt'>> & Pick<CreateLocalAppInput, 'lookAndFeel'> | null => {
+const parseCreateLocalAppToolInput = (args: Record<string, unknown>): Required<Pick<CreateLocalAppInput, 'name' | 'description' | 'purpose'>> & Pick<CreateLocalAppInput, 'lookAndFeel'> | null => {
   const name = cleanString(args.name);
   const description = cleanString(args.description);
   const purpose = cleanString(args.purpose);
-  const agentPrompt = cleanString(args.agentPrompt);
   const lookAndFeel = cleanString(args.lookAndFeel);
-  if (!name || !description || !purpose || !agentPrompt) {
+  if (!name || !description || !purpose) {
     return null;
   }
   return {
     name,
     description,
     purpose,
-    agentPrompt,
     ...(lookAndFeel ? { lookAndFeel } : {}),
   };
 };
 
-const parseQuestionToolInput = (args: Record<string, unknown>): { chatId: string; questions: ChatQuestion[] } | null => {
-  const chatId = cleanString(args.chatId);
-  if (!chatId || !Array.isArray(args.questions) || args.questions.length < 1 || args.questions.length > 5) {
+const parseQuestionToolInput = (args: Record<string, unknown>): { questions: ChatQuestion[] } | null => {
+  if (!Array.isArray(args.questions) || args.questions.length < 1 || args.questions.length > 5) {
     return null;
   }
 
@@ -896,7 +892,7 @@ const parseQuestionToolInput = (args: Record<string, unknown>): { chatId: string
     }
     questions.push({ id, question, options });
   }
-  return { chatId, questions };
+  return { questions };
 };
 
 const parsePromptReviewKind = (value: unknown): 'promptTemplate' | 'agent' | 'agentPrompt' | null => {

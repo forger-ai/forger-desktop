@@ -73,7 +73,6 @@ export interface ChatCreatedAppRequest {
   name: string;
   description: string;
   purpose: string;
-  agentPrompt: string;
   lookAndFeel?: string;
 }
 

@@ -361,6 +361,57 @@ test('ensureBackendPythonEnvironment accepts usable venvs and repairs missing on
   assert.ok(repairing.calls.some((call) => call[0] === 'log' && call[1] === 'backend_python_env:repair_ready'));
 });
 
+test('ensureBackendPythonEnvironment smoke checks native Python dependencies', async (t) => {
+  const harness = await makeLifecycleHarness();
+  t.after(async () => {
+    await fs.rm(harness.root, { recursive: true, force: true });
+  });
+  const backendDir = path.join(harness.root, 'apps', 'demo-app', 'backend');
+  const python = path.join(backendDir, '.venv', 'bin', 'python');
+  await fs.mkdir(path.dirname(python), { recursive: true });
+  await fs.writeFile(python, '', 'utf8');
+
+  await harness.controller.ensureBackendPythonEnvironment('/runtime/python', backendDir, 'demo-app', 'open');
+
+  const smokeCheck = harness.calls.find((call) => call[0] === 'capture' && call[1] === python);
+  assert.ok(smokeCheck);
+  assert.match(smokeCheck[2], /import fastapi, pydantic_core, sqlmodel, uvicorn/);
+});
+
+test('ensureBackendPythonEnvironment repairs venvs with failed native dependency imports', async (t) => {
+  let smokeChecks = 0;
+  const harness = await makeLifecycleHarness({
+    runCommandCapture: async (command, args, options) => {
+      harness.calls.push(['capture', command, args.join(' '), options.cwd]);
+      smokeChecks += 1;
+      return smokeChecks === 1
+        ? { code: 67, stdout: '', stderr: 'ImportError: pydantic_core rejected' }
+        : { code: 0, stdout: '', stderr: '' };
+    },
+    runCommand: async (command, args, options) => {
+      harness.calls.push(['run', command, args.join(' '), options.cwd]);
+      if (args[1] === 'uv') {
+        const python = path.join(options.cwd, '.venv', 'bin', 'python');
+        await fs.mkdir(path.dirname(python), { recursive: true });
+        await fs.writeFile(python, '', 'utf8');
+      }
+    },
+  });
+  t.after(async () => {
+    await fs.rm(harness.root, { recursive: true, force: true });
+  });
+  const backendDir = path.join(harness.root, 'apps', 'demo-app', 'backend');
+  const python = path.join(backendDir, '.venv', 'bin', 'python');
+  await fs.mkdir(path.dirname(python), { recursive: true });
+  await fs.writeFile(python, '', 'utf8');
+
+  await harness.controller.ensureBackendPythonEnvironment('/runtime/python', backendDir, 'demo-app', 'open');
+
+  assert.equal(smokeChecks, 2);
+  assert.ok(harness.calls.some((call) => call[0] === 'log' && call[1] === 'backend_python_env:repair_start'));
+  assert.ok(harness.calls.some((call) => call[0] === 'log' && call[1] === 'backend_python_env:repair_ready'));
+});
+
 test('ensureBackendPythonEnvironment logs failed venv checks and failed repairs', async (t) => {
   const failing = await makeLifecycleHarness({
     runCommandCapture: async () => {

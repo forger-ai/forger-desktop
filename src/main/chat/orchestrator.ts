@@ -281,15 +281,15 @@ export class ChatOrchestrator {
 
   public async registerQuestionFromMcp(
     runId: string,
-    input: { chatId: string; questions: ChatQuestion[] },
+    input: { questions: ChatQuestion[] },
   ): Promise<ChatQuestionRequest> {
     const run = this.runs.get(runId);
     if (!run) {
       throw new Error('chat_run_not_found');
     }
-    const chatId = input.chatId.trim();
-    if (!chatId || run.conversationId !== chatId) {
-      throw new Error('question_chat_mismatch');
+    const chatId = run.conversationId?.trim();
+    if (!chatId) {
+      throw new Error('question_chat_unavailable');
     }
     if (this.activeQuestionRequestsByChat.has(chatId)) {
       throw new Error('active_question_exists');

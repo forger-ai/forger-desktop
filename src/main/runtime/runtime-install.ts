@@ -34,9 +34,79 @@ interface RuntimeInstallDeps {
 export const createRuntimeInstallController = (deps: RuntimeInstallDeps) => {
   const { fs, path, runtimeLocks, getBundledResourcesRoot, getTempRoot, getRuntimesRoot, resolvePlatformAlias, normalizeVersionForFolder, normalizeNodeRuntimeVersion, findRuntimeArchive, findRuntimeChecksumFile, hashFileSha256, extractArchive, clearMacQuarantine, runCommand, installBackendDependenciesWithUv } = deps;
 const RUNTIME_PLATFORM_ALIASES = new Set(['darwin_arm64', 'win32_x64']);
+const PYTHON_DARWIN_RUNTIME_REVISION = 'python-darwin-disable-library-validation-2026-06-02';
+
+interface RuntimeReadyMetadata {
+  installedAt: string;
+  desktopVersion: string;
+  runtimeRevision?: string | null;
+  archiveSha256?: string | null;
+}
+
 const fileExists = async (filePath: string): Promise<boolean> => {
   const stat = await fs.stat(filePath).catch(() => null);
   return Boolean(stat?.isFile());
+};
+
+const desktopVersion = (): string => {
+  const appWithVersion = deps.app as Electron.App & { getVersion?: () => string };
+  return typeof appWithVersion.getVersion === 'function' ? appWithVersion.getVersion() : 'unknown';
+};
+
+const runtimeRevisionFor = (type: 'node' | 'python', platformAlias: string): string | null =>
+  type === 'python' && platformAlias === 'darwin_arm64' ? PYTHON_DARWIN_RUNTIME_REVISION : null;
+
+const runtimeRequiresCurrentReadyMetadata = (type: 'node' | 'python', platformAlias: string): boolean =>
+  runtimeRevisionFor(type, platformAlias) !== null;
+
+const readRuntimeReadyMetadata = async (readyPath: string): Promise<RuntimeReadyMetadata | null> => {
+  try {
+    const raw = await fs.readFile(readyPath, 'utf8');
+    const parsed = JSON.parse(raw) as Partial<RuntimeReadyMetadata>;
+    if (!parsed || typeof parsed !== 'object' || typeof parsed.installedAt !== 'string') {
+      return null;
+    }
+    return {
+      installedAt: parsed.installedAt,
+      desktopVersion: typeof parsed.desktopVersion === 'string' ? parsed.desktopVersion : 'unknown',
+      runtimeRevision: typeof parsed.runtimeRevision === 'string' ? parsed.runtimeRevision : null,
+      archiveSha256: typeof parsed.archiveSha256 === 'string' ? parsed.archiveSha256 : null,
+    };
+  } catch {
+    return null;
+  }
+};
+
+const isRuntimeReadyMetadataCurrent = (
+  metadata: RuntimeReadyMetadata | null,
+  type: 'node' | 'python',
+  platformAlias: string,
+  archiveSha256: string,
+): boolean => {
+  const runtimeRevision = runtimeRevisionFor(type, platformAlias);
+  if (!runtimeRevision) {
+    return true;
+  }
+  return Boolean(
+    metadata &&
+    metadata.runtimeRevision === runtimeRevision &&
+    metadata.archiveSha256 === archiveSha256,
+  );
+};
+
+const writeRuntimeReadyMetadata = async (
+  readyPath: string,
+  type: 'node' | 'python',
+  platformAlias: string,
+  archiveSha256: string,
+): Promise<void> => {
+  const metadata: RuntimeReadyMetadata = {
+    installedAt: new Date().toISOString(),
+    desktopVersion: desktopVersion(),
+    runtimeRevision: runtimeRevisionFor(type, platformAlias),
+    archiveSha256,
+  };
+  await fs.writeFile(readyPath, `${JSON.stringify(metadata, null, 2)}\n`, 'utf8');
 };
 
 const installFrontendDependenciesWithNpm = async (
@@ -196,52 +266,79 @@ const ensureRuntimeInstalled = async (
     const targetRoot = path.join(getRuntimesRoot(), type, version, platformAlias);
     const readyPath = path.join(targetRoot, '.ready');
 
-    try {
-      await fs.access(readyPath);
-      await clearMacQuarantine(targetRoot);
-      return await resolveRuntimeExecutables(targetRoot, type);
-    } catch {
-      // continue with extraction
-    }
-
     const resourcesRoot = getBundledResourcesRoot();
     const runtimeVersionDir = path.join(resourcesRoot, type, version);
-    const runtimeArchive = await findRuntimeArchive(runtimeVersionDir, platformAlias);
+    let runtimeArchive: string | null = null;
+    let runtimeArchiveSha256 = '';
 
-    if (!runtimeArchive) {
-      throw new Error(`runtime_archive_missing_${type}_${version}_${platformAlias}`);
-    }
+    const resolveRuntimeArchive = async (): Promise<string> => {
+      if (runtimeArchive) {
+        return runtimeArchive;
+      }
+      runtimeArchive = await findRuntimeArchive(runtimeVersionDir, platformAlias);
 
-    try {
-      const runtimeChecksumFile = await findRuntimeChecksumFile(runtimeVersionDir, runtimeArchive, platformAlias);
-      if (runtimeChecksumFile) {
-        const checksumRaw = await fs.readFile(runtimeChecksumFile, 'utf8');
-        const expected = checksumRaw.trim().split(/\s+/)[0];
-        if (expected) {
-          const current = await hashFileSha256(runtimeArchive);
-          if (current !== expected) {
-            throw new Error(`runtime_checksum_mismatch_${type}_${version}_${platformAlias}`);
+      if (!runtimeArchive) {
+        throw new Error(`runtime_archive_missing_${type}_${version}_${platformAlias}`);
+      }
+
+      try {
+        const runtimeChecksumFile = await findRuntimeChecksumFile(runtimeVersionDir, runtimeArchive, platformAlias);
+        if (runtimeChecksumFile) {
+          const checksumRaw = await fs.readFile(runtimeChecksumFile, 'utf8');
+          const expected = checksumRaw.trim().split(/\s+/)[0];
+          if (expected) {
+            const current = await hashFileSha256(runtimeArchive);
+            if (current !== expected) {
+              throw new Error(`runtime_checksum_mismatch_${type}_${version}_${platformAlias}`);
+            }
+            runtimeArchiveSha256 = expected;
           }
         }
+      } catch (error) {
+        if (error instanceof Error && error.message.startsWith('runtime_checksum_mismatch')) {
+          throw error;
+        }
+        // Missing checksum file is tolerated in dev mode.
       }
+
+      if (!runtimeArchiveSha256) {
+        runtimeArchiveSha256 = await hashFileSha256(runtimeArchive);
+      }
+      return runtimeArchive;
+    };
+
+    try {
+      await fs.access(readyPath);
+      if (runtimeRequiresCurrentReadyMetadata(type, platformAlias)) {
+        await resolveRuntimeArchive();
+        const readyMetadata = await readRuntimeReadyMetadata(readyPath);
+        if (!isRuntimeReadyMetadataCurrent(readyMetadata, type, platformAlias, runtimeArchiveSha256)) {
+          await fs.rm(targetRoot, { recursive: true, force: true });
+          throw new Error('runtime_ready_metadata_stale');
+        }
+      }
+      await clearMacQuarantine(targetRoot);
+      return await resolveRuntimeExecutables(targetRoot, type);
     } catch (error) {
       if (error instanceof Error && error.message.startsWith('runtime_checksum_mismatch')) {
         throw error;
       }
-      // Missing checksum file is tolerated in dev mode.
+      // continue with extraction
     }
+
+    const archiveToExtract = await resolveRuntimeArchive();
 
     const tempDir = path.join(getTempRoot(), `${type}-${version}-${platformAlias}-${Date.now()}`);
     await fs.mkdir(path.dirname(targetRoot), { recursive: true });
     await fs.rm(tempDir, { recursive: true, force: true });
-    await extractArchive(runtimeArchive, tempDir);
+    await extractArchive(archiveToExtract, tempDir);
     await flattenSingleTopLevelDirectory(tempDir);
 
     await fs.rm(targetRoot, { recursive: true, force: true });
     await fs.mkdir(path.dirname(targetRoot), { recursive: true });
     await fs.rename(tempDir, targetRoot);
-    await fs.writeFile(readyPath, new Date().toISOString(), 'utf8');
     await clearMacQuarantine(targetRoot);
+    await writeRuntimeReadyMetadata(readyPath, type, platformAlias, runtimeArchiveSha256);
 
     return await resolveRuntimeExecutables(targetRoot, type);
   })();
