@@ -445,8 +445,19 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             const isInstalling = app.status === 'installing';
             const isConflict = app.status === 'conflict';
             const hasError = app.status === 'error';
+            const isPrivateLocal = app.privateLocal === true;
+            const isEarlyAccess = app.catalogStatus === 'coming';
+            const isBeta = app.catalogStatus === 'beta' || Boolean(app.beta);
             const isOpening = app.status !== 'running' && openingAppIds.has(app.id);
             const primaryAction = isConflict ? 'update' : hasError ? 'retry' : app.status === 'running' ? 'stop' : 'open';
+            const canUseAppActionMenu = !isInstalling && !isConflict && !hasError;
+            const canShareLocalNetwork = canUseAppActionMenu && app.localNetworkShareSupported === true;
+            const canShareRemoteNetwork = canUseAppActionMenu && app.remoteTunnelSupported === true;
+            const canStopRemoteNetwork = canUseAppActionMenu
+              && Boolean(app.remoteNetworkShare?.active)
+              && app.remoteNetworkShare?.state !== 'closed'
+              && app.remoteNetworkShare?.state !== 'inactive';
+            const canUploadSocial = canUseAppActionMenu && isPrivateLocal;
             const primaryActionLabel = isConflict
               ? t.actions.resolveWithForger
               : hasError
@@ -466,11 +477,19 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
                 iconUrl={app.iconUrl}
                 categoryLabel={getCategoryLabel(app.category)}
                 description={meta.description}
+                beta={isPrivateLocal || isBeta || isEarlyAccess}
+                betaLabel={isPrivateLocal ? t.beta.privateLocalBadge : isEarlyAccess ? t.beta.earlyAccessBadge : 'Beta'}
                 statusIndicatorLabel={app.status === 'running' ? t.actions.running : undefined}
                 primaryAction={primaryAction}
                 primaryActionLabel={primaryActionLabel}
                 primaryDisabled={isInstalling}
                 primaryLoading={isOpening}
+                primaryMenuActions={[
+                  ...(canShareLocalNetwork ? [{ label: t.localNetwork.menuAction, onClick: () => handleStartLocalNetworkShare(app.id) }] : []),
+                  ...(canShareRemoteNetwork ? [{ label: t.remoteNetwork.menuAction, onClick: () => handleStartRemoteNetworkShare(app.id) }] : []),
+                  ...(canStopRemoteNetwork ? [{ label: t.remoteNetwork.stop, onClick: () => handleStopRemoteNetworkShare(app.id) }] : []),
+                  ...(canUploadSocial ? [{ label: t.locale === 'es' ? 'Subir a Social' : 'Upload to Social', onClick: () => void handleUploadSocial(app.id) }] : []),
+                ]}
                 installProgress={installProgress}
                 secondaryActionLabel={isConflict ? t.actions.restoreUserVersion : app.updateAvailable ? t.actions.update : undefined}
                 onSecondaryAction={
@@ -619,6 +638,10 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             onStop={(appId) => void handleStop(appId)}
             onRestoreUserVersion={(appId) => void handleRestoreUserVersion(appId)}
             onResolveConflict={(appId) => void handleResolveConflict(appId)}
+            onStartLocalNetworkShare={handleStartLocalNetworkShare}
+            onStartRemoteNetworkShare={handleStartRemoteNetworkShare}
+            onStopRemoteNetworkShare={handleStopRemoteNetworkShare}
+            onUploadSocial={(appId) => void handleUploadSocial(appId)}
             onConnectSecret={handleConnectSecret}
             onDisconnectSecret={handleDisconnectSecret}
             onDelete={(appId) => void handleDeleteApp(appId)}

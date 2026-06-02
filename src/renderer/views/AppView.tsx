@@ -69,6 +69,10 @@ interface AppViewProps {
   onStop: (appId: string) => void;
   onRestoreUserVersion: (appId: string) => void;
   onResolveConflict: (appId: string) => void;
+  onStartLocalNetworkShare: (appId: string) => void;
+  onStartRemoteNetworkShare: (appId: string) => void;
+  onStopRemoteNetworkShare: (appId: string) => void;
+  onUploadSocial: (appId: string) => void;
   onConnectSecret: (appSecretName: string, userSecretId: string) => Promise<void>;
   onDisconnectSecret: (appSecretName: string) => Promise<void>;
   onDelete: (appId: string) => void;
@@ -155,6 +159,10 @@ export function AppView({
   onStop,
   onRestoreUserVersion,
   onResolveConflict,
+  onStartLocalNetworkShare,
+  onStartRemoteNetworkShare,
+  onStopRemoteNetworkShare,
+  onUploadSocial,
   onConnectSecret,
   onDisconnectSecret,
   onDelete,
@@ -295,6 +303,10 @@ export function AppView({
       onRestoreUserVersion={onRestoreUserVersion}
       onResolveConflict={onResolveConflict}
       onDelete={onDelete}
+      onStartLocalNetworkShare={onStartLocalNetworkShare}
+      onStartRemoteNetworkShare={onStartRemoteNetworkShare}
+      onStopRemoteNetworkShare={onStopRemoteNetworkShare}
+      onUploadSocial={onUploadSocial}
     />
   );
 
