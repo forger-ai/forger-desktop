@@ -303,6 +303,19 @@ const signMacRuntimeArchives = async () => {
 
       const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'forger-runtime-signing-'));
       await run('tar', ['-xzf', archive, '-C', workDir]);
+      const pythonRuntimeArchive = archive.startsWith(path.join(rootDir, 'resources', 'runtimes', 'python') + path.sep);
+      const pythonEntitlementsPath = path.join(workDir, 'python-runtime-entitlements.plist');
+      if (pythonRuntimeArchive) {
+        await fs.writeFile(pythonEntitlementsPath, `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+</dict>
+</plist>
+`, 'utf8');
+      }
 
       const files = (await capture('find', [workDir, '-type', 'f'])).split('\n').filter(Boolean);
       for (const filePath of files) {
@@ -311,16 +324,21 @@ const signMacRuntimeArchives = async () => {
           continue;
         }
 
-        await run('codesign', [
+        const fileName = path.basename(filePath);
+        const isPythonExecutable = pythonRuntimeArchive && /^python(?:3(?:\.\d+)?)?$/.test(fileName);
+        const codesignArgs = [
           '--force',
           '--timestamp',
           '--options',
           'runtime',
+          ...(isPythonExecutable ? ['--entitlements', pythonEntitlementsPath] : []),
           '--sign',
           identity,
           filePath,
-        ]);
+        ];
+        await run('codesign', codesignArgs);
       }
+      await fs.rm(pythonEntitlementsPath, { force: true });
 
       await run('tar', ['-czf', archive, '-C', workDir, '.']);
       await writeChecksum(archive);

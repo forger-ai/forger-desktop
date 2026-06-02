@@ -71,6 +71,8 @@ test('question actions replace the composer and answer through the chat start-ru
   assert.match(controllerSource, /type:\s*'forger\.question_response'/);
   assert.match(controllerSource, /chatId:\s*request\.chatId/);
   assert.match(controllerSource, /questionRequestId:\s*request\.requestId/);
+  assert.match(controllerSource, /const targetConversationId = request\.chatId/);
+  assert.doesNotMatch(controllerSource, /request\.chatId[\s\S]{0,120}activeConversationIdRef\.current/);
   assert.match(controllerSource, /answers:\s*response\.answers\.map/);
   assert.match(controllerSource, /description: answer\.description/);
   assert.match(controllerSource, /freeText:\s*response\.freeText\?\.trim\(\)\s*\|\|\s*''/);

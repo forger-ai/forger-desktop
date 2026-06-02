@@ -267,6 +267,8 @@ test('Forger prompt builders include contract, language, files, official tools, 
   assert.match(createPrompt, /FORGER CHAT MODE: create_app/);
   assert.match(createPrompt, /Prefer `forger_ask_question`/);
   assert.match(createPrompt, /Call `forger_create_app` only after the intent is clear enough/);
+  assert.match(createPrompt, /Propose a concrete color palette/);
+  assert.match(createPrompt, /keep working in this same chat/);
   assert.match(createPrompt, /Internally break the idea into product goals, user stories, data model/);
   const createResumePrompt = buildCodexPromptForFreeChat({
     turnKind: 'resume',

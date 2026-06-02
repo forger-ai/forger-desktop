@@ -17,6 +17,12 @@ const { createRuntimeInstallController } = require('../../dist-electron/main/run
 const { createInstalledAppRuntimeController } = require('../../dist-electron/main/runtime/installed-app-runtime.js');
 
 const tmpRoot = async (name) => await fs.mkdtemp(path.join(os.tmpdir(), `forger-${name}-`));
+const pythonDarwinReadyMetadata = (archiveSha256 = 'python-archive-sha') => JSON.stringify({
+  installedAt: '2026-06-02T00:00:00.000Z',
+  desktopVersion: '0.0.0-test',
+  runtimeRevision: 'python-darwin-disable-library-validation-2026-06-02',
+  archiveSha256,
+});
 
 const waitForCondition = async (predicate, timeoutMs = 10_000) => {
   const started = Date.now();
@@ -2024,9 +2030,164 @@ test('runtime install returns ready runtimes without extracting and normalizes n
   assert.equal(npmInstall[2].some((arg) => arg.includes('production') || arg.includes('omit')), false);
 });
 
+test('runtime install refreshes legacy Python runtimes on macOS', async (t) => {
+  const root = await tmpRoot('runtime-install-python-legacy');
+  const calls = [];
+  const target = path.join(root, 'runtimes', 'python', '3.12.0', 'darwin_arm64');
+  const archivePath = path.join(root, 'resources', 'python', '3.12.0', 'python.tgz');
+  t.after(async () => {
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  await fs.mkdir(path.join(target, 'bin'), { recursive: true });
+  await fs.mkdir(path.dirname(archivePath), { recursive: true });
+  await fs.writeFile(path.join(target, '.ready'), 'ready', 'utf8');
+  await fs.writeFile(path.join(target, 'bin', 'python3'), 'old', 'utf8');
+  await fs.writeFile(archivePath, 'archive', 'utf8');
+
+  const controller = createRuntimeInstallController({
+    DEFAULT_NODE_VERSION: '22.1.0',
+    DEFAULT_PYTHON_VERSION: '3.12.0',
+    app: { getPath: () => root, getVersion: () => '0.2.35' },
+    clearMacQuarantine: async (targetPath) => calls.push(['quarantine', targetPath]),
+    extractArchive: async (_archive, destination) => {
+      calls.push(['extract', destination]);
+      await fs.mkdir(path.join(destination, 'python-runtime', 'bin'), { recursive: true });
+      await fs.writeFile(path.join(destination, 'python-runtime', 'bin', 'python3'), 'new', 'utf8');
+    },
+    findRuntimeArchive: async () => archivePath,
+    findRuntimeChecksumFile: async () => null,
+    fs,
+    getBundledResourcesRoot: () => path.join(root, 'resources'),
+    getRuntimesRoot: () => path.join(root, 'runtimes'),
+    getTempRoot: () => path.join(root, 'tmp'),
+    hashFileSha256: async () => 'new-python-sha',
+    installBackendDependenciesWithUv: async () => undefined,
+    normalizeNodeRuntimeVersion: (value) => value,
+    normalizeVersionForFolder: (value) => value,
+    path,
+    resolvePlatformAlias: () => 'darwin_arm64',
+    runCommand: async () => undefined,
+    runtimeLocks: new Map(),
+  });
+
+  const runtime = await controller.ensureRuntimeInstalled('python', '3.12.0');
+  const ready = JSON.parse(await fs.readFile(path.join(target, '.ready'), 'utf8'));
+
+  assert.equal(runtime.python, path.join(target, 'bin', 'python3'));
+  assert.equal(await fs.readFile(runtime.python, 'utf8'), 'new');
+  assert.equal(calls.filter((call) => call[0] === 'extract').length, 1);
+  assert.equal(ready.desktopVersion, '0.2.35');
+  assert.equal(ready.runtimeRevision, 'python-darwin-disable-library-validation-2026-06-02');
+  assert.equal(ready.archiveSha256, 'new-python-sha');
+});
+
+test('runtime install reuses current Python runtime metadata on macOS', async (t) => {
+  const root = await tmpRoot('runtime-install-python-current');
+  const calls = [];
+  const target = path.join(root, 'runtimes', 'python', '3.12.0', 'darwin_arm64');
+  const archivePath = path.join(root, 'resources', 'python', '3.12.0', 'python.tgz');
+  t.after(async () => {
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  await fs.mkdir(path.join(target, 'bin'), { recursive: true });
+  await fs.mkdir(path.dirname(archivePath), { recursive: true });
+  await fs.writeFile(path.join(target, '.ready'), pythonDarwinReadyMetadata('current-sha'), 'utf8');
+  await fs.writeFile(path.join(target, 'bin', 'python3'), 'current', 'utf8');
+  await fs.writeFile(archivePath, 'archive', 'utf8');
+
+  const controller = createRuntimeInstallController({
+    DEFAULT_NODE_VERSION: '22.1.0',
+    DEFAULT_PYTHON_VERSION: '3.12.0',
+    app: { getPath: () => root, getVersion: () => '0.2.35' },
+    clearMacQuarantine: async (targetPath) => calls.push(['quarantine', targetPath]),
+    extractArchive: async () => {
+      throw new Error('extract_should_not_run');
+    },
+    findRuntimeArchive: async () => archivePath,
+    findRuntimeChecksumFile: async () => null,
+    fs,
+    getBundledResourcesRoot: () => path.join(root, 'resources'),
+    getRuntimesRoot: () => path.join(root, 'runtimes'),
+    getTempRoot: () => path.join(root, 'tmp'),
+    hashFileSha256: async () => 'current-sha',
+    installBackendDependenciesWithUv: async () => undefined,
+    normalizeNodeRuntimeVersion: (value) => value,
+    normalizeVersionForFolder: (value) => value,
+    path,
+    resolvePlatformAlias: () => 'darwin_arm64',
+    runCommand: async () => undefined,
+    runtimeLocks: new Map(),
+  });
+
+  const runtime = await controller.ensureRuntimeInstalled('python', '3.12.0');
+
+  assert.equal(runtime.python, path.join(target, 'bin', 'python3'));
+  assert.deepEqual(calls, [['quarantine', target]]);
+});
+
+test('runtime install refreshes stale Python runtime metadata on macOS', async (t) => {
+  const scenarios = [
+    {
+      name: 'revision',
+      metadata: { ...JSON.parse(pythonDarwinReadyMetadata('stale-sha')), runtimeRevision: 'old-revision' },
+    },
+    {
+      name: 'archive-sha',
+      metadata: JSON.parse(pythonDarwinReadyMetadata('old-sha')),
+    },
+  ];
+
+  for (const scenario of scenarios) {
+    const root = await tmpRoot(`runtime-install-python-stale-${scenario.name}`);
+    const calls = [];
+    const target = path.join(root, 'runtimes', 'python', '3.12.0', 'darwin_arm64');
+    const archivePath = path.join(root, 'resources', 'python', '3.12.0', 'python.tgz');
+    t.after(async () => {
+      await fs.rm(root, { recursive: true, force: true });
+    });
+    await fs.mkdir(path.join(target, 'bin'), { recursive: true });
+    await fs.mkdir(path.dirname(archivePath), { recursive: true });
+    await fs.writeFile(path.join(target, '.ready'), `${JSON.stringify(scenario.metadata)}\n`, 'utf8');
+    await fs.writeFile(path.join(target, 'bin', 'python3'), 'old', 'utf8');
+    await fs.writeFile(archivePath, 'archive', 'utf8');
+
+    const controller = createRuntimeInstallController({
+      DEFAULT_NODE_VERSION: '22.1.0',
+      DEFAULT_PYTHON_VERSION: '3.12.0',
+      app: { getPath: () => root, getVersion: () => '0.2.35' },
+      clearMacQuarantine: async (targetPath) => calls.push(['quarantine', targetPath]),
+      extractArchive: async (_archive, destination) => {
+        calls.push(['extract', destination]);
+        await fs.mkdir(path.join(destination, 'python-runtime', 'bin'), { recursive: true });
+        await fs.writeFile(path.join(destination, 'python-runtime', 'bin', 'python3'), 'new', 'utf8');
+      },
+      findRuntimeArchive: async () => archivePath,
+      findRuntimeChecksumFile: async () => null,
+      fs,
+      getBundledResourcesRoot: () => path.join(root, 'resources'),
+      getRuntimesRoot: () => path.join(root, 'runtimes'),
+      getTempRoot: () => path.join(root, 'tmp'),
+      hashFileSha256: async () => 'stale-sha',
+      installBackendDependenciesWithUv: async () => undefined,
+      normalizeNodeRuntimeVersion: (value) => value,
+      normalizeVersionForFolder: (value) => value,
+      path,
+      resolvePlatformAlias: () => 'darwin_arm64',
+      runCommand: async () => undefined,
+      runtimeLocks: new Map(),
+    });
+
+    await controller.ensureRuntimeInstalled('python', '3.12.0');
+
+    assert.equal(calls.filter((call) => call[0] === 'extract').length, 1);
+    assert.equal(await fs.readFile(path.join(target, 'bin', 'python3'), 'utf8'), 'new');
+  }
+});
+
 test('runtime install installs full app dependencies with progress messages and package-lock npm mode', async (t) => {
   const root = await tmpRoot('runtime-install-app-deps');
   const calls = [];
+  const pythonArchivePath = path.join(root, 'resources', 'python', '3.12.0', 'python.tgz');
   t.after(async () => {
     await fs.rm(root, { recursive: true, force: true });
   });
@@ -2034,8 +2195,10 @@ test('runtime install installs full app dependencies with progress messages and 
   const pythonTarget = path.join(root, 'runtimes', 'python', '3.12.0', 'darwin_arm64');
   await fs.mkdir(path.join(nodeTarget, 'bin'), { recursive: true });
   await fs.mkdir(path.join(pythonTarget, 'bin'), { recursive: true });
+  await fs.mkdir(path.dirname(pythonArchivePath), { recursive: true });
+  await fs.writeFile(pythonArchivePath, 'python archive', 'utf8');
   await fs.writeFile(path.join(nodeTarget, '.ready'), 'ready', 'utf8');
-  await fs.writeFile(path.join(pythonTarget, '.ready'), 'ready', 'utf8');
+  await fs.writeFile(path.join(pythonTarget, '.ready'), pythonDarwinReadyMetadata(), 'utf8');
   await fs.writeFile(path.join(nodeTarget, 'bin', 'node'), '', 'utf8');
   await fs.writeFile(path.join(nodeTarget, 'bin', 'npm'), '', 'utf8');
   await fs.writeFile(path.join(pythonTarget, 'bin', 'python3'), '', 'utf8');
@@ -2051,13 +2214,13 @@ test('runtime install installs full app dependencies with progress messages and 
     extractArchive: async () => {
       throw new Error('extract_should_not_run');
     },
-    findRuntimeArchive: async () => null,
+    findRuntimeArchive: async (baseDir) => baseDir.includes(path.join('python', '3.12.0')) ? pythonArchivePath : null,
     findRuntimeChecksumFile: async () => null,
     fs,
     getBundledResourcesRoot: () => path.join(root, 'resources'),
     getRuntimesRoot: () => path.join(root, 'runtimes'),
     getTempRoot: () => path.join(root, 'tmp'),
-    hashFileSha256: async () => '',
+    hashFileSha256: async () => 'python-archive-sha',
     installBackendDependenciesWithUv: async (pythonPath, backendDir, appId) => calls.push(['uv', pythonPath, backendDir, appId]),
     normalizeNodeRuntimeVersion: (value) => value,
     normalizeVersionForFolder: (value) => value,

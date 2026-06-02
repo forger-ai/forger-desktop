@@ -263,7 +263,7 @@ const isBackendPythonEnvironmentUsable = async (
       venv.python,
       [
         '-c',
-        'import importlib.util, sys; sys.exit(0 if importlib.util.find_spec("uvicorn") else 42)',
+        'import fastapi, pydantic_core, sqlmodel, uvicorn',
       ],
       {
         cwd: backendDir,
@@ -273,7 +273,7 @@ const isBackendPythonEnvironmentUsable = async (
     );
     return {
       usable: result.code === 0,
-      detail: result.code === 0 ? undefined : `venv_uvicorn_missing_${result.code ?? 'signal'}`,
+      detail: result.code === 0 ? undefined : `venv_import_smoke_failed_${result.code ?? 'signal'}`,
       stdout: result.stdout,
       stderr: result.stderr,
     };

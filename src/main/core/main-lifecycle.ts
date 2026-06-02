@@ -88,7 +88,7 @@ interface ChatOrchestratorService extends LifecycleService {
   recordCreatedAppFromMcp: (runId: string, createdApp: ChatCreatedAppRequest) => void;
   registerQuestionFromMcp: (
     runId: string,
-    input: { chatId: string; questions: ChatQuestion[] },
+    input: { questions: ChatQuestion[] },
   ) => Promise<ChatQuestionRequest>;
 }
 
@@ -468,7 +468,7 @@ export const registerMainLifecycle = (deps: unknown) => {
     },
     createLocalApp: createLocalAppFromSkeleton,
     recordCreatedApp: (runId: string, createdApp: ChatCreatedAppRequest) => state.chatOrchestrator?.recordCreatedAppFromMcp(runId, createdApp),
-    registerQuestion: async (runId: string, input: { chatId: string; questions: ChatQuestion[] }) => {
+    registerQuestion: async (runId: string, input: { questions: ChatQuestion[] }) => {
       if (!state.chatOrchestrator) {
         throw new Error('chat_orchestrator_unavailable');
       }

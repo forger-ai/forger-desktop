@@ -245,9 +245,9 @@ const createForgerMcpHarness = async (overrides = {}) => {
     checkUpdates: async () => [{ id: 'finance-os', name: 'Finance OS', status: 'update_available', description: 'Finanzas' }],
     createLocalApp: async (input, locale) => ({ success: true, userMessage: 'Creada.', app: { appId: 'created-app', ...input }, locale }),
     recordCreatedApp: overrides.recordCreatedApp ?? (() => undefined),
-    registerQuestion: overrides.registerQuestion ?? (async (_runId, input) => ({
+    registerQuestion: overrides.registerQuestion ?? (async (runId, input) => ({
       requestId: 'question-request-1',
-      chatId: input.chatId,
+      chatId: `${runId}-chat`,
       questions: input.questions,
       createdAt: '2026-01-01T00:00:00.000Z',
     })),
@@ -303,8 +303,10 @@ test('MCP tool schemas expose strict Gmail contracts and safe annotations', () =
   assert.deepEqual(getMcpToolInputSchema('memory_update').required, ['id']);
   assert.deepEqual(getMcpToolInputSchema('memory_delete').required, ['id']);
   assert.deepEqual(getMcpToolInputSchema('forger_open_app').required, ['appId']);
-  assert.deepEqual(getMcpToolInputSchema('forger_create_app').required, ['name', 'description', 'purpose', 'agentPrompt']);
-  assert.deepEqual(getMcpToolInputSchema('forger_ask_question').required, ['chatId', 'questions']);
+  assert.deepEqual(getMcpToolInputSchema('forger_create_app').required, ['name', 'description', 'purpose']);
+  assert.equal(getMcpToolInputSchema('forger_create_app').properties.agentPrompt, undefined);
+  assert.deepEqual(getMcpToolInputSchema('forger_ask_question').required, ['questions']);
+  assert.equal(getMcpToolInputSchema('forger_ask_question').properties.chatId, undefined);
   assert.equal(getMcpToolInputSchema('forger_ask_question').properties.questions.maxItems, 5);
   assert.deepEqual(
     getMcpToolInputSchema('forger_ask_question').properties.questions.items.properties.options.items.required,
@@ -1010,7 +1012,6 @@ test('Forger MCP tools cover approvals, memory failures, app operations, and pro
           description: 'Organiza prioridades.',
           purpose: 'Ayuda a planificar la semana.',
           lookAndFeel: 'Claro y enfocado.',
-          agentPrompt: 'Build a detailed weekly planning app with localized copy and a focused first workflow.',
         },
       },
     })).json());
@@ -1063,7 +1064,8 @@ test('Forger MCP tools cover approvals, memory failures, app operations, and pro
     assert.equal(installed.apps.length, 1);
     assert.equal(updates.updates.length, 1);
     assert.equal(createdApp.success, true);
-    assert.equal(createdApp.app.agentPrompt.includes('weekly planning'), true);
+    assert.equal(createdApp.app.appId, 'created-app');
+    assert.equal(createdApp.app.agentPrompt, undefined);
     assert.equal(status.status.status, 'running');
     assert.equal(opened.appId, 'finance-os');
     assert.equal(refreshed.userMessage, 'Vista refrescada.');
@@ -1133,13 +1135,13 @@ test('Forger MCP tools cover approvals, memory failures, app operations, and pro
 test('Forger MCP question tool validates input and rejects duplicate active questions', async () => {
   let activeQuestion = null;
   const harness = await createForgerMcpHarness({
-    registerQuestion: async (_runId, input) => {
+    registerQuestion: async (runId, input) => {
       if (activeQuestion) {
         throw new Error('active_question_exists');
       }
       activeQuestion = {
         requestId: 'question-request-1',
-        chatId: input.chatId,
+        chatId: `${runId}-chat`,
         questions: input.questions,
         createdAt: '2026-01-01T00:00:00.000Z',
       };
@@ -1155,7 +1157,6 @@ test('Forger MCP question tool validates input and rejects duplicate active ques
       params: {
         name: 'forger_ask_question',
         arguments: {
-          chatId: 'chat-1',
           questions: [{
             id: 'q1',
             question: 'Que prefieres?',
@@ -1179,7 +1180,6 @@ test('Forger MCP question tool validates input and rejects duplicate active ques
       params: {
         name: 'forger_ask_question',
         arguments: {
-          chatId: 'chat-1',
           questions: [{
             id: 'missing-description',
             question: 'Que alcance quieres?',
@@ -1201,7 +1201,6 @@ test('Forger MCP question tool validates input and rejects duplicate active ques
       params: {
         name: 'forger_ask_question',
         arguments: {
-          chatId: 'chat-1',
           questions: [{
             id: 'scope',
             question: 'Que alcance quieres?',
@@ -1214,7 +1213,7 @@ test('Forger MCP question tool validates input and rejects duplicate active ques
       },
     })).json());
     assert.equal(created.success, true);
-    assert.equal(created.questionRequest.chatId, 'chat-1');
+    assert.equal(created.questionRequest.chatId, 'run-question-chat');
     assert.equal(created.questionRequest.questions[0].options[0].description, 'Aplica solo el flujo principal solicitado.');
     assert.equal(created.questionRequest.questions[0].options[1].description, 'Incluye flujo principal y ajustes.');
 
@@ -1225,7 +1224,6 @@ test('Forger MCP question tool validates input and rejects duplicate active ques
       params: {
         name: 'forger_ask_question',
         arguments: {
-          chatId: 'chat-1',
           questions: [{
             id: 'again',
             question: 'Otra pregunta?',

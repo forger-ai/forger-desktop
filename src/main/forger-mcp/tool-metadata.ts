@@ -114,12 +114,8 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
           type: 'string',
           description: 'Direccion visual y de experiencia elegida o recomendada.',
         },
-        agentPrompt: {
-          type: 'string',
-          description: 'Prompt interno extremadamente detallado para iniciar la conversacion de construccion de la app creada.',
-        },
       },
-      required: ['name', 'description', 'purpose', 'agentPrompt'],
+      required: ['name', 'description', 'purpose'],
       additionalProperties: false,
     };
   }
@@ -128,10 +124,6 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
     return {
       type: 'object',
       properties: {
-        chatId: {
-          type: 'string',
-          description: 'ID del chat/conversacion donde quedara activa la pregunta.',
-        },
         questions: {
           type: 'array',
           minItems: 1,
@@ -165,7 +157,7 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
           },
         },
       },
-      required: ['chatId', 'questions'],
+      required: ['questions'],
       additionalProperties: false,
     };
   }

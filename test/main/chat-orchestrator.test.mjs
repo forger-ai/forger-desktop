@@ -1080,6 +1080,43 @@ test('chat orchestrator rejects invalid starts, scopes active run locks, and han
   }
 });
 
+test('chat orchestrator derives MCP question chat id from the active run', async () => {
+  const harness = await createHarness();
+  try {
+    const started = await harness.orchestrator.startRun({
+      prompt: 'Ask a clarifying question.',
+      threadId: null,
+      conversationId: 'conversation-question',
+      conversationHistory: [{ role: 'user', content: 'Ask a clarifying question.' }],
+    });
+    const questions = [{
+      id: 'scope',
+      question: 'Que alcance quieres?',
+      options: [
+        { id: 'small', label: 'Simple', description: 'Aplica solo el flujo principal solicitado.' },
+        { id: 'complete', label: 'Completo', description: 'Incluye flujo principal y ajustes.' },
+      ],
+    }];
+
+    const questionRequest = await harness.orchestrator.registerQuestionFromMcp(started.runId, { questions });
+    assert.equal(questionRequest.chatId, 'conversation-question');
+    assert.deepEqual(questionRequest.questions, questions);
+    assert.equal(harness.orchestrator.getRun({ runId: started.runId }).questionRequest.chatId, 'conversation-question');
+
+    const unavailable = await harness.orchestrator.startRun({
+      prompt: 'Ask without a conversation.',
+      threadId: null,
+      conversationHistory: [{ role: 'user', content: 'Ask without a conversation.' }],
+    });
+    await assert.rejects(
+      () => harness.orchestrator.registerQuestionFromMcp(unavailable.runId, { questions }),
+      /question_chat_unavailable/,
+    );
+  } finally {
+    await harness.cleanup();
+  }
+});
+
 test('chat orchestrator persists, updates, and clears provider thread state defensively', async () => {
   const harness = await createHarness();
   try {

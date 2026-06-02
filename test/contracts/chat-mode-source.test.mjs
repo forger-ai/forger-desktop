@@ -29,6 +29,13 @@ test('renderer starts on Chat and binds the mode selector before starting runs',
   assert.match(viewSource, /sendComposerMessage/);
 });
 
+test('renderer keeps MCP-created apps in the current chat flow', async () => {
+  const source = await readSource('src/renderer/app/RendererAppController.tsx');
+
+  assert.match(source, /if \(run\.createdApp\) \{ void refreshApps\(\); \}/);
+  assert.doesNotMatch(source, /run\.createdApp[\s\S]{0,120}startCreatedAppConversation/);
+});
+
 test('renderer separates installed Apps from curated Catalog in navigation and content', async () => {
   const sidebarSource = await readSource('src/renderer/components/Sidebar.tsx');
   const viewSource = await readSource('src/renderer/app/RendererAppView.tsx');
