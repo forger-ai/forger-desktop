@@ -157,14 +157,11 @@ export function CatalogView({
               : app.status === 'running'
                 ? 'running'
                 : undefined;
-            const canShareLocalNetwork = earlyAccessEnabled
-              && primaryAction === 'open'
+            const canShareLocalNetwork = primaryAction === 'open'
               && app.localNetworkShareSupported === true;
-            const canShareRemoteNetwork = earlyAccessEnabled
-              && primaryAction === 'open'
+            const canShareRemoteNetwork = primaryAction === 'open'
               && app.remoteTunnelSupported === true;
-            const canStopRemoteNetwork = earlyAccessEnabled
-              && Boolean(app.remoteNetworkShare?.active)
+            const canStopRemoteNetwork = Boolean(app.remoteNetworkShare?.active)
               && app.remoteNetworkShare?.state !== 'closed'
               && app.remoteNetworkShare?.state !== 'inactive';
             const primaryActionLabel = hasError && !isPrivateLocal
