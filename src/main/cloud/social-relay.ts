@@ -7,10 +7,12 @@ import { IPC_CHANNELS } from '../../shared/ipc';
 import type { CloudDeviceManager } from '../cloud-device-manager';
 import type { CloudIdentityStore, EncryptedCloudText } from '../cloud-identity-store';
 import type { ForgerBackendClient } from '../forger-backend-client';
+import { SocialMessageStore, type StoredSocialMessage } from './social-message-store';
 import type { AppRegistry, RuntimeBinarySet } from '../core/main-process-types';
 import type {
   CloudFriendUser,
   CloudMessage,
+  CloudMessageDelivery,
   CloudMessageEnvelope,
   CloudSendAppShareInput,
   CloudSendMessageInput,
@@ -20,6 +22,7 @@ import type {
 import type { StoredForgerAccount } from '../forger-account-store';
 
 interface CloudSocialRelayDeps {
+  BetterSqlite3: typeof import('better-sqlite3') | null;
   CLAUDE_CODE_VERSION: string;
   DEFAULT_NODE_VERSION: string;
   CloudIdentityStore: typeof CloudIdentityStore;
@@ -36,6 +39,7 @@ interface CloudSocialRelayDeps {
   fs: typeof fs;
   getClaudeRoot: () => string;
   getCloudIdentityPath: () => string;
+  getSocialMessagesPath: () => string;
   getRuntimePathEntries: (runtime: RuntimeBinarySet) => string[];
   mainWindow: Electron.BrowserWindow | null;
   openOrFocusFriendChatWindowForFriend: (friend: CloudFriendUser) => Promise<FriendChatWindowOpenResult>;
@@ -47,7 +51,8 @@ interface CloudSocialRelayDeps {
 
 export const createCloudSocialRelayController = (deps: CloudSocialRelayDeps) => {
   let { cloudIdentityStore } = deps;
-  const { CLAUDE_CODE_VERSION, DEFAULT_NODE_VERSION, CloudIdentityStore, app, appWindows, canRunCommand, cloudDeviceManager, ensureRuntimeInstalled, existsFile, forgerAccount, forgerBackendClient, friendChatWindows, fs, getClaudeRoot, getCloudIdentityPath, getRuntimePathEntries, mainWindow, openOrFocusFriendChatWindowForFriend, path, registry, runCommand, runCommandCapture } = deps;
+  let socialMessageStore: SocialMessageStore | null = null;
+  const { BetterSqlite3, CLAUDE_CODE_VERSION, DEFAULT_NODE_VERSION, CloudIdentityStore, app, appWindows, canRunCommand, cloudDeviceManager, ensureRuntimeInstalled, existsFile, forgerAccount, forgerBackendClient, friendChatWindows, fs, getClaudeRoot, getCloudIdentityPath, getSocialMessagesPath, getRuntimePathEntries, mainWindow, openOrFocusFriendChatWindowForFriend, path, registry, runCommand, runCommandCapture } = deps;
 
 const findSqliteFile = async (searchDir: string): Promise<string | null> => {
   const extensions = ['.db', '.sqlite', '.sqlite3'];
@@ -201,18 +206,36 @@ const getCloudIdentityStore = (): CloudIdentityStore => {
   return cloudIdentityStore;
 };
 
+const getSocialMessageStore = (): SocialMessageStore => {
+  if (!socialMessageStore) {
+    socialMessageStore = new SocialMessageStore({
+      BetterSqlite3,
+      filePath: getSocialMessagesPath(),
+      accountStorageKey: () => forgerAccount.user?.id ? `user-${forgerAccount.user.id}` : undefined,
+      currentUserId: () => forgerAccount.user?.id,
+    });
+  }
+  return socialMessageStore;
+};
+
 const decryptCloudMessage = async (message: CloudMessage): Promise<CloudMessage> => {
-  const envelope = message.envelopes.find((entry) => Boolean(entry.ciphertext));
-  if (!envelope) {
+  const envelopes = message.envelopes.filter((entry) => Boolean(entry.ciphertext));
+  if (envelopes.length === 0) {
     return message;
   }
-  try {
-    const payload = JSON.parse(envelope.ciphertext) as EncryptedCloudText;
-    const plaintext = await getCloudIdentityStore().decrypt(payload);
-    return { ...message, plaintext };
-  } catch {
-    return message;
+  const identity = await getCloudIdentityStore().getPublicRegistration();
+  const preferred = envelopes.find((entry) => entry.keyFingerprint && entry.keyFingerprint === identity.keyFingerprint);
+  const candidates = preferred ? [preferred, ...envelopes.filter((entry) => entry !== preferred)] : envelopes;
+  for (const envelope of candidates) {
+    try {
+      const payload = JSON.parse(envelope.ciphertext) as EncryptedCloudText;
+      const plaintext = await getCloudIdentityStore().decrypt(payload);
+      return { ...message, plaintext };
+    } catch {
+      // Try the next envelope; messages may contain envelopes for other devices.
+    }
   }
+  return message;
 };
 
 const decryptCloudMessages = async (messages: CloudMessage[]): Promise<CloudMessage[]> =>
@@ -220,6 +243,85 @@ const decryptCloudMessages = async (messages: CloudMessage[]): Promise<CloudMess
 
 const wait = async (milliseconds: number): Promise<void> =>
   await new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+const currentUserPayload = (): CloudFriendUser => ({
+  id: forgerAccount.user?.id ?? 0,
+  username: forgerAccount.user?.username ?? 'me',
+  firstName: forgerAccount.user?.firstName,
+  lastName: forgerAccount.user?.lastName,
+});
+
+const cloudMessageFromDelivery = async (delivery: CloudMessageDelivery): Promise<CloudMessage> => {
+  let plaintext: string | undefined;
+  try {
+    const payload = JSON.parse(delivery.ciphertext) as EncryptedCloudText;
+    plaintext = await getCloudIdentityStore().decrypt(payload);
+  } catch {
+    plaintext = undefined;
+  }
+  const base = {
+    sender: delivery.sender,
+    recipient: delivery.recipient,
+    deliveryMode: delivery.deliveryMode,
+    source: delivery.source,
+    sourceAppId: delivery.sourceAppId,
+    sourceAppName: delivery.sourceAppName,
+    status: 'stored' as const,
+    clientMessageId: delivery.clientMessageId,
+    metadata: delivery.metadata,
+    envelopes: [{
+      id: delivery.id,
+      cloudDeviceId: delivery.targetCloudDeviceId,
+      deviceUid: delivery.deviceUid,
+      keyFingerprint: delivery.keyFingerprint,
+      ciphertext: delivery.ciphertext,
+    }],
+    plaintext,
+    createdAt: delivery.createdAt,
+    updatedAt: delivery.createdAt,
+  };
+  if (delivery.messageType === 'CloudAppShareMessage' && delivery.appShare) {
+    return { ...base, type: 'CloudAppShareMessage', appShare: delivery.appShare };
+  }
+  return { ...base, type: 'CloudTextMessage' };
+};
+
+const processPendingCloudMessageDeliveries = async (): Promise<StoredSocialMessage[]> => {
+  if (!forgerBackendClient || !cloudDeviceManager) {
+    return [];
+  }
+  const currentDevice = (await cloudDeviceManager.getState()).currentDevice;
+  if (!currentDevice?.id) {
+    return [];
+  }
+  const deliveries = await forgerBackendClient.listCloudMessageDeliveries(currentDevice.id);
+  const stored: StoredSocialMessage[] = [];
+  const ackIds: number[] = [];
+  for (const delivery of deliveries) {
+    const message = await cloudMessageFromDelivery(delivery);
+    stored.push(await getSocialMessageStore().upsertMessage(message));
+    ackIds.push(delivery.id);
+  }
+  if (ackIds.length > 0) {
+    await forgerBackendClient.ackCloudMessageDeliveries(currentDevice.id, ackIds);
+  }
+  return stored;
+};
+
+const listLocalCloudMessages = async (friendUserId: number): Promise<CloudMessage[]> => {
+  if (forgerBackendClient) {
+    try {
+      const legacy = await decryptCloudMessages(await forgerBackendClient.listCloudMessages(friendUserId));
+      for (const message of legacy) {
+        await getSocialMessageStore().upsertMessage(message);
+      }
+    } catch {
+      // Local history remains usable while legacy import is unavailable.
+    }
+  }
+  await processPendingCloudMessageDeliveries().catch(() => []);
+  return await getSocialMessageStore().listMessages(friendUserId);
+};
 
 const buildEncryptedEnvelopes = async (
   friend: { devices?: Array<{ id: number; deviceUid: string; publicKey?: string; keyFingerprint?: string }> },
@@ -252,6 +354,41 @@ const buildEncryptedEnvelopes = async (
   return [...recipientEnvelopes, ...senderEnvelope];
 };
 
+const buildEncryptedDeliveries = async (
+  recipient: CloudFriendUser,
+  text: string,
+): Promise<Array<{ targetUserId: number; cloudDeviceId: number; deviceUid?: string; keyFingerprint?: string; ciphertext: string }>> => {
+  const currentUserId = forgerAccount.user?.id;
+  if (!currentUserId) {
+    throw new Error('forger_account_missing');
+  }
+  const ownDevices = forgerBackendClient ? await forgerBackendClient.listDevices() : [];
+  const devices = [
+    ...(recipient.devices ?? []).map((device) => ({ ...device, targetUserId: recipient.id })),
+    ...ownDevices.map((device) => ({ ...device, targetUserId: currentUserId })),
+  ].filter((device) => device.publicKey);
+  const uniqueDevices = Array.from(new Map(devices.map((device) => [device.id, device])).values());
+  if (uniqueDevices.length === 0) {
+    throw Object.assign(
+      new Error('No pudimos enviar el mensaje porque no hay dispositivos con clave cloud activa.'),
+      { technicalCode: 'cloud_delivery_key_missing' },
+    );
+  }
+  if (uniqueDevices.length > 20) {
+    throw Object.assign(
+      new Error('No pudimos enviar el mensaje porque hay demasiados dispositivos asociados a esta conversación.'),
+      { technicalCode: 'cloud_delivery_too_many_devices' },
+    );
+  }
+  return uniqueDevices.map((device) => ({
+    targetUserId: device.targetUserId,
+    cloudDeviceId: device.id,
+    deviceUid: device.deviceUid,
+    keyFingerprint: device.keyFingerprint,
+    ciphertext: JSON.stringify(getCloudIdentityStore().encryptFor(device.publicKey as string, text, device.keyFingerprint)),
+  }));
+};
+
 const sendEncryptedCloudMessage = async (input: CloudSendMessageInput): Promise<CloudMessage> => {
   if (!forgerBackendClient) {
     throw new Error('backend_client_missing');
@@ -266,13 +403,43 @@ const sendEncryptedCloudMessage = async (input: CloudSendMessageInput): Promise<
   if (!friend) {
     throw new Error('recipient_not_found');
   }
-  const message = await forgerBackendClient.sendCloudMessage({
-    ...input,
-    recipientUserId: input.recipientUserId ?? friend.id,
-    envelopes: await buildEncryptedEnvelopes(friend, input.text),
-    clientMessageId: `${Date.now()}-${randomBytes(8).toString('hex')}`,
-  });
-  return { ...(await decryptCloudMessage(message)), plaintext: input.text };
+  const clientMessageId = input.clientMessageId ?? `${Date.now()}-${randomBytes(8).toString('hex')}`;
+  const localMessage: CloudMessage = {
+    type: 'CloudTextMessage',
+    sender: currentUserPayload(),
+    recipient: friend,
+    deliveryMode: input.delivery ?? 'persistent',
+    source: input.source ?? 'user',
+    sourceAppId: input.sourceAppId,
+    sourceAppName: input.sourceAppName,
+    status: 'stored',
+    clientMessageId,
+    metadata: {},
+    envelopes: [],
+    plaintext: input.text,
+    createdAt: new Date().toISOString(),
+  };
+  await getSocialMessageStore().upsertMessage(localMessage, 'pending');
+  try {
+    const deliveries = await forgerBackendClient.sendCloudMessageDeliveries({
+      ...input,
+      recipientUserId: input.recipientUserId ?? friend.id,
+      deliveries: await buildEncryptedDeliveries(friend, input.text),
+      clientMessageId,
+    });
+    await getSocialMessageStore().markState(clientMessageId, 'sent');
+    const currentDeviceId = (await cloudDeviceManager?.getState())?.currentDevice?.id;
+    const currentDeviceDeliveryIds = deliveries
+      .filter((delivery) => currentDeviceId && delivery.targetCloudDeviceId === currentDeviceId)
+      .map((delivery) => delivery.id);
+    if (currentDeviceId && currentDeviceDeliveryIds.length > 0) {
+      await forgerBackendClient.ackCloudMessageDeliveries(currentDeviceId, currentDeviceDeliveryIds);
+    }
+    return { ...localMessage, localState: 'sent' };
+  } catch (error) {
+    await getSocialMessageStore().markState(clientMessageId, 'failed').catch(() => undefined);
+    throw error;
+  }
 };
 
 const sendEncryptedCloudAppShareMessage = async (input: CloudSendAppShareInput): Promise<CloudMessage> => {
@@ -289,14 +456,25 @@ const sendEncryptedCloudAppShareMessage = async (input: CloudSendAppShareInput):
   if (!friend) {
     throw new Error('recipient_not_found');
   }
-  const plaintext = 'Te comparti una app de Forger.';
-  const message = await forgerBackendClient.sendCloudAppShareMessage({
+  const clientMessageId = input.clientMessageId ?? `${Date.now()}-${randomBytes(8).toString('hex')}`;
+  const deliveries = await forgerBackendClient.sendCloudAppShareDeliveries({
     ...input,
     recipientUserId: input.recipientUserId ?? friend.id,
-    envelopes: await buildEncryptedEnvelopes(friend, plaintext),
-    clientMessageId: `${Date.now()}-${randomBytes(8).toString('hex')}`,
+    deliveries: await buildEncryptedDeliveries(friend, 'app_share'),
+    clientMessageId,
   });
-  return { ...(await decryptCloudMessage(message)), plaintext };
+  const currentDeviceId = (await cloudDeviceManager?.getState())?.currentDevice?.id;
+  const currentDelivery = deliveries.find((delivery) => currentDeviceId && delivery.targetCloudDeviceId === currentDeviceId)
+    ?? deliveries.find((delivery) => delivery.appShare);
+  if (!currentDelivery) {
+    throw new Error('cloud_app_share_delivery_missing');
+  }
+  const message = await cloudMessageFromDelivery(currentDelivery);
+  await getSocialMessageStore().upsertMessage(message, 'sent');
+  if (currentDeviceId && currentDelivery.targetCloudDeviceId === currentDeviceId) {
+    await forgerBackendClient.ackCloudMessageDeliveries(currentDeviceId, [currentDelivery.id]);
+  }
+  return { ...message, localState: 'sent' };
 };
 
 const isCloudSocialEvent = (event: unknown): event is CloudSocialEvent => {
@@ -304,7 +482,8 @@ const isCloudSocialEvent = (event: unknown): event is CloudSocialEvent => {
     return false;
   }
   const type = (event as { type?: unknown }).type;
-  return type === 'friendship_changed' || type === 'cloud_message' || type === 'ephemeral_cloud_message';
+  return type === 'friendship_changed' || type === 'cloud_message' || type === 'ephemeral_cloud_message'
+    || type === 'cloud_message_delivery';
 };
 
 const prepareCloudSocialEvent = async (event: unknown): Promise<CloudSocialEvent | null> => {
@@ -317,7 +496,21 @@ const prepareCloudSocialEvent = async (event: unknown): Promise<CloudSocialEvent
   }
   if (event.type === 'cloud_message' || event.type === 'ephemeral_cloud_message') {
     const message = forgerBackendClient?.normalizeCloudMessagePayload(event.message);
-    return message ? { type: event.type, message: await decryptCloudMessage(message) } : null;
+    if (!message) return null;
+    const decrypted = await decryptCloudMessage(message);
+    await getSocialMessageStore().upsertMessage(decrypted);
+    return { type: event.type, message: decrypted };
+  }
+  if (event.type === 'cloud_message_delivery') {
+    const delivery = forgerBackendClient?.normalizeCloudMessageDeliveryPayload(event.delivery);
+    if (!delivery) return null;
+    const message = await cloudMessageFromDelivery(delivery);
+    const stored = await getSocialMessageStore().upsertMessage(message);
+    const currentDeviceId = (await cloudDeviceManager?.getState())?.currentDevice?.id;
+    if (currentDeviceId) {
+      await forgerBackendClient?.ackCloudMessageDeliveries(currentDeviceId, [delivery.id]).catch(() => undefined);
+    }
+    return { type: 'cloud_message', message: stored };
   }
   return null;
 };
@@ -374,6 +567,16 @@ const forwardCloudSocialEvent = (event: CloudSocialEvent): void => {
 };
 
 const handleCloudSocialEvent = async (event: unknown): Promise<void> => {
+  if (event && typeof event === 'object' && (event as { type?: unknown }).type === 'heartbeat_ack') {
+    const storedMessages = await processPendingCloudMessageDeliveries().catch(() => []);
+    for (const message of storedMessages) {
+      const cloudEvent: CloudSocialEvent = { type: 'cloud_message', message };
+      const eventForRenderer = { ...cloudEvent, unread: isUnreadIncomingCloudMessage(cloudEvent) };
+      showIncomingCloudMessageNotification(eventForRenderer);
+      forwardCloudSocialEvent(eventForRenderer);
+    }
+    return;
+  }
   const prepared = await prepareCloudSocialEvent(event);
   if (!prepared) {
     return;
@@ -385,5 +588,5 @@ const handleCloudSocialEvent = async (event: unknown): Promise<void> => {
   forwardCloudSocialEvent(eventForRenderer);
 };
 
-  return { findSqliteFile, resolveManagedClaudeCliPath, resolveSystemClaudeCliPath, resolveClaudeCli, ensureClaudeCliInstalled, resolveAppDbPath, getCloudIdentityStore, decryptCloudMessage, decryptCloudMessages, wait, buildEncryptedEnvelopes, sendEncryptedCloudMessage, sendEncryptedCloudAppShareMessage, isCloudSocialEvent, prepareCloudSocialEvent, isUnreadIncomingCloudMessage, showIncomingCloudMessageNotification, forwardCloudSocialEvent, handleCloudSocialEvent };
+  return { findSqliteFile, resolveManagedClaudeCliPath, resolveSystemClaudeCliPath, resolveClaudeCli, ensureClaudeCliInstalled, resolveAppDbPath, getCloudIdentityStore, getSocialMessageStore, decryptCloudMessage, decryptCloudMessages, wait, buildEncryptedEnvelopes, buildEncryptedDeliveries, listLocalCloudMessages, processPendingCloudMessageDeliveries, sendEncryptedCloudMessage, sendEncryptedCloudAppShareMessage, isCloudSocialEvent, prepareCloudSocialEvent, isUnreadIncomingCloudMessage, showIncomingCloudMessageNotification, forwardCloudSocialEvent, handleCloudSocialEvent };
 };

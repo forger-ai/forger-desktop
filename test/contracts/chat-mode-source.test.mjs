@@ -46,8 +46,8 @@ test('renderer separates installed Apps from curated Catalog in navigation and c
   assert.match(viewSource, /const installedViewApps = useMemo<CatalogApp\[]>/);
   assert.match(viewSource, /currentView === 'apps' \? renderInstalledAppsView\(\) : null/);
   assert.match(viewSource, /<CatalogView\s+apps=\{catalogApps\}/);
-  assert.match(viewSource, /currentView === 'friends'[\s\S]*<ForumPanel/);
-  assert.match(viewSource, /showForumNav=\{forumParticipation\.status === 'opted_in'\}/);
+  assert.match(viewSource, /currentView === 'friends'[\s\S]*<SocialView/);
+  assert.match(viewSource, /initialProfileUsername=\{socialProfileUsername\}/);
   assert.match(viewSource, /onSend=\{\(modeOverride\) => void handleSendMessage\(undefined, modeOverride\)\}/);
 });
 

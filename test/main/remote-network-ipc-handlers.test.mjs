@@ -27,6 +27,7 @@ test('main IPC delegates remote network share handlers', async () => {
     createRemoteAppBackup: async () => ({}),
     decryptCloudMessage: async (message) => message,
     decryptCloudMessages: async (messages) => messages,
+    listLocalCloudMessages: async () => [],
     dialog: { showOpenDialog: async () => ({ canceled: true, filePaths: [] }) },
     disconnectCodexAuth: async () => ({}),
     ensureCatalogStatuses: () => undefined,

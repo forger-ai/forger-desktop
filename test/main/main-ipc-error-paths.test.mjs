@@ -51,6 +51,7 @@ const createDeps = async (overrides = {}) => {
       createRemoteAppBackup: async () => ({ success: true }),
       decryptCloudMessage: async (message) => message,
       decryptCloudMessages: async (messages) => messages,
+      listLocalCloudMessages: async () => [],
       desktopErrorReporter: null,
       dialog: electronMock.dialog,
       disconnectCodexAuth: async () => ({ success: true }),
@@ -428,11 +429,11 @@ test('main IPC app message list enforces manifest opt-in and decrypts backend me
     /app_cloud_messaging_not_declared/,
   );
 
-  const decryptCalls = [];
+  const listCalls = [];
   const enabled = await createDeps({
-    decryptCloudMessages: async (messages) => {
-      decryptCalls.push(messages);
-      return messages.map((message) => ({ ...message, decrypted: true }));
+    listLocalCloudMessages: async (friendUserId) => {
+      listCalls.push(friendUserId);
+      return [{ id: 9, friendUserId, decrypted: true }];
     },
     forgerBackendClient: {
       listCloudMessages: async (friendUserId) => [{ id: 9, friendUserId }],
@@ -448,7 +449,7 @@ test('main IPC app message list enforces manifest opt-in and decrypts backend me
   assert.deepEqual(await enabled.handlers.get(IPC_CHANNELS.appMessagesList)(eventForWebContents(), 3), [
     { id: 9, friendUserId: 3, decrypted: true },
   ]);
-  assert.deepEqual(decryptCalls, [[{ id: 9, friendUserId: 3 }]]);
+  assert.deepEqual(listCalls, [3]);
 });
 
 test('main IPC chat handlers use safe fallbacks and sanitize shared files before starting a run', async () => {
@@ -832,6 +833,7 @@ test('main IPC delegates cloud account, social, telemetry, auth, and browser suc
     connectCodexAuth: async () => ({ success: true, provider: 'codex' }),
     decryptCloudMessage: async (message) => ({ ...message, decrypted: true }),
     decryptCloudMessages: async (messages) => messages.map((message) => ({ ...message, decrypted: true })),
+    listLocalCloudMessages: async (friendUserId) => [{ id: 4, friendUserId, body: 'hello', decrypted: true }],
     disconnectCodexAuth: async () => ({ success: true, disconnected: true }),
     forgerBackendClient: {
       acceptFriendRequest: async (id) => ({ id, status: 'accepted' }),
@@ -1180,10 +1182,7 @@ test('main IPC delegates app lifecycle, prompt, secret, official-tool, and file-
   assert.deepEqual(await handlers.get(IPC_CHANNELS.configureOfficialTool)(null, { toolId: 'gmail' }), { op: 'configure', input: { toolId: 'gmail' } });
   assert.deepEqual(await handlers.get(IPC_CHANNELS.deactivateOfficialTool)(null, 'gmail', 'es'), { op: 'deactivate', toolId: 'gmail', options: { locale: 'es' } });
   assert.deepEqual(await handlers.get(IPC_CHANNELS.getAppToolsInstallGate)(null, 'finance-os', 'es'), { appId: 'finance-os', locale: 'es' });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.setAppToolGrant)(null, { appId: 'finance-os', toolId: 'gmail' }, 'es'), {
-    input: { appId: 'finance-os', toolId: 'gmail' },
-    locale: 'es',
-  });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.setAppToolGrant)(null, { appId: 'finance-os', toolId: 'gmail' }, 'es'), { input: { appId: 'finance-os', toolId: 'gmail' }, locale: 'es' });
 
   assert.deepEqual(await handlers.get(IPC_CHANNELS.filesStageForChat)(null, { fileId: 'file-1' }), { op: 'stage', input: { fileId: 'file-1' } });
   assert.deepEqual(await handlers.get(IPC_CHANNELS.filesDiscardStagedForChat)(null, { fileId: 'file-1' }), { op: 'discard', input: { fileId: 'file-1' } });

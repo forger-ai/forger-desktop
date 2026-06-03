@@ -70,6 +70,7 @@ interface ManifestSupportDeps {
   forgerAccount: { authenticated?: boolean; token?: string | null };
   getForgerBackendClient?: () => ForgerBackendClient | null;
   getForgerAccount?: () => { authenticated?: boolean; token?: string | null };
+  getRegistry?: () => AppRegistry;
   registry: AppRegistry;
   catalogApps: CatalogApp[];
   runningApps: Map<string, RunningAppProcess>;
@@ -156,6 +157,7 @@ export const createManifestSupportController = (deps: ManifestSupportDeps) => {
   } = deps;
   const getCurrentForgerAccount = () => deps.getForgerAccount?.() ?? forgerAccount;
   const getCurrentForgerBackendClient = () => deps.getForgerBackendClient?.() ?? forgerBackendClient;
+  const getCurrentRegistry = (): AppRegistry => deps.getRegistry?.() ?? registry;
 const normalizeToken = (value: string | undefined): string => {
   if (!value) {
     return '';
@@ -192,7 +194,7 @@ const normalizeAgentProvider = (value: unknown): AgentProvider | undefined =>
   value === 'codex' || value === 'claude' ? value : undefined;
 
 const appAllowsAgentNetworkAccess = async (appId: string): Promise<boolean> => {
-  const record = registry.apps[appId];
+  const record = getCurrentRegistry().apps[appId];
   if (!record?.installDir) {
     return false;
   }
@@ -298,14 +300,14 @@ const getBackupsManager = (): BackupsManager => {
   if (!state.backupsManager) {
     state.backupsManager = new BackupsManager({
       backupsRoot: getBackupsRoot(),
-      listInstalledApps: () => Object.values(registry.apps).map((record) => ({
+      listInstalledApps: () => Object.values(getCurrentRegistry().apps).map((record) => ({
         appId: record.appId,
         name: record.name,
         version: record.version,
         installDir: record.installDir,
       })),
       getInstalledApp: (appId) => {
-        const record = registry.apps[appId];
+        const record = getCurrentRegistry().apps[appId];
         return record
           ? {
               appId: record.appId,
@@ -493,7 +495,7 @@ const resolveAppToolDeclarations = async (
   agents: AppAgent[];
   promptTemplates: AppPromptTemplate[];
 } | null> => {
-  const record = registry.apps[appId];
+  const record = getCurrentRegistry().apps[appId];
   if (record?.installDir) {
     const manifest = await resolveInstalledManifest(record.installDir);
     const declarations = normalizeAppToolDeclarations(manifest?.tools);
@@ -853,7 +855,7 @@ const normalizePromptTemplateArguments = (input: unknown): NonNullable<AppPrompt
 };
 
 const resolveInstalledPromptTemplates = async (appId: string): Promise<AppPromptTemplate[]> => {
-  const record = registry.apps[appId];
+  const record = getCurrentRegistry().apps[appId];
   if (!record?.installDir) {
     return [];
   }
@@ -865,7 +867,7 @@ const resolveInstalledPromptTemplates = async (appId: string): Promise<AppPrompt
 };
 
 const resolveInstalledAgents = async (appId: string): Promise<AppAgent[]> => {
-  const record = registry.apps[appId];
+  const record = getCurrentRegistry().apps[appId];
   if (!record?.installDir) {
     return [];
   }
@@ -880,7 +882,7 @@ const hasInstalledCodexConversation = async (appId: string): Promise<boolean> =>
   (await resolveInstalledAgents(appId)).length > 0;
 
 const resolveInstalledPromptBases = async (appId: string) => {
-  const record = registry.apps[appId];
+  const record = getCurrentRegistry().apps[appId];
   if (!record?.installDir) {
     return [];
   }
@@ -910,7 +912,7 @@ const validateAppPrompt = async (input: AppPromptReviewInput): Promise<AppPrompt
 
 const testAppPrompt = async (input: AppPromptTestInput): Promise<AppPromptTestResult> => {
   try {
-    const record = registry.apps[input.appId];
+    const record = getCurrentRegistry().apps[input.appId];
     if (!record?.installDir) {
       return promptTestFailure('app_prompt_not_found', ['No encontramos esa app instalada.']);
     }
@@ -1151,7 +1153,7 @@ const getManifestAppSecretsValidationError = (manifest: AppManifest | null): str
 };
 
 const resolveInstalledAppSecrets = async (appId: string): Promise<AppSecretDeclaration[]> => {
-  const record = registry.apps[appId];
+  const record = getCurrentRegistry().apps[appId];
   if (!record?.installDir) {
     return [];
   }
@@ -1160,7 +1162,7 @@ const resolveInstalledAppSecrets = async (appId: string): Promise<AppSecretDecla
 };
 
 const buildAppSecretsState = async (appId: string): Promise<AppSecretsState> => {
-  const record = registry.apps[appId];
+  const record = getCurrentRegistry().apps[appId];
   const declarations = await resolveInstalledAppSecrets(appId);
   const store = getSecretsStore();
   const userSecrets = await store.listUserSecrets();

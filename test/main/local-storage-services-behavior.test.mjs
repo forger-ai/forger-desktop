@@ -932,6 +932,7 @@ test('OfficialToolsService persists app grants and keeps unavailable Gmail actio
   const secretsStore = new SecretsStore(root);
   const declarations = normalizeAppToolDeclarations({
     required: [
+      { toolId: 'gmail-missing-reason', actions: ['gmail.send_email'] },
       { toolId: 'gmail', reason: 'Necesita leer correo', actions: ['gmail.search_messages', 'gmail.connection.status', '', 7] },
       { toolId: 'gmail', reason: 'Duplicado ignorado', actions: ['gmail.send_email'] },
     ],
@@ -1040,10 +1041,12 @@ test('OfficialToolsService persists app grants and keeps unavailable Gmail actio
     toolId: 'gmail',
     actionId: 'gmail.send_email',
   })).technicalCode, 'app_tool_action_not_declared');
-  assert.equal((await service.callFromApp('unknown-app', {
+  const missingDeclarations = await service.callFromApp('unknown-app', {
     toolId: 'gmail',
     actionId: 'gmail.connection.status',
-  })).technicalCode, 'app_tools_not_declared');
+  });
+  assert.equal(missingDeclarations.technicalCode, 'app_tools_not_declared');
+  assert.match(missingDeclarations.userMessage, /motivo visible/);
   assert.equal((await service.callFromAgent({
     toolId: 'gmail',
     actionId: 'gmail.search_messages',

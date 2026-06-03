@@ -65,6 +65,7 @@ import type {
   CloudAppMessagePermissionDecision,
   CloudFriendship,
   CloudMessage,
+  CloudSocialEvent,
   CloudSendAppShareInput, CloudSendMessageInput,
   CloudSyncSettings,
   ConfigureOfficialToolInput,
@@ -147,13 +148,14 @@ interface MainProcessIpcDeps {
   createRemoteAppBackup: (input: CreateRemoteAppBackupInput) => Promise<CreateRemoteAppBackupResult>;
   decryptCloudMessage: (message: CloudMessage) => Promise<CloudMessage>;
   decryptCloudMessages: (messages: CloudMessage[]) => Promise<CloudMessage[]>;
+  listLocalCloudMessages: (friendUserId: number) => Promise<CloudMessage[]>;
   desktopErrorReporter: DesktopErrorReporter | null;
   dialog: typeof Electron.dialog;
   disconnectCodexAuth: () => Promise<unknown>;
   ensureCatalogStatuses: () => void;
   failureDiagnostic: (error: unknown, fallbackCode: string) => Record<string, unknown>;
   forgerBackendClient: ForgerBackendClient | null;
-  forwardCloudSocialEvent: (event: { type: 'friendship_changed'; friendship: CloudFriendship }) => void;
+  forwardCloudSocialEvent: (event: CloudSocialEvent) => void;
   fs: typeof fs;
   getAppDetails: (appId: string) => Promise<unknown>;
   getBackupsManager: () => BackupsManager;
@@ -254,7 +256,7 @@ export const __testMainHandlersInternals = {
 };
 
 export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
-  const { state, APP_CLAUDE_MODEL_OPTIONS, APP_CODEX_MODEL_OPTIONS, BetterSqlite3, BrowserWindow, CODEX_USAGE_DASHBOARD_URL, IPC_CHANNELS, app, appAgentConversationManager, appendInstallLog, buildAppSecretsState, buildCodexPromptWithAppContext, buildForgerToolsContextForApp, buildForgerToolsContextForFreeChat, canUseCloudDataSync, chatOrchestrator, cloudDeviceManager, connectClaudeAuth, connectCodexAuth, createLocalAppFromSkeleton, createRemoteAppBackup, decryptCloudMessage, decryptCloudMessages, dialog, disconnectCodexAuth, ensureCatalogStatuses, failureDiagnostic, forgerBackendClient, forwardCloudSocialEvent, fs, getAppDetails, getBackupsManager, getBackgroundTaskStore, getClaudeAuthStatus, getCloudIdentityStore, getCodexAuthStatus, getCodexHome, getDesktopUpdater, getDeveloperPathState, getFileLibrary, getForgerHomeRoot, getForgerMetadataRoot, getInstallLogPath, getMemoryStore, getOfficialToolsService, getPrivateAppsRoot, getPrivateDataRoot, getRuntimeStatus, getLocalNetworkShareStatus, getRemoteNetworkShareStatus, getSecretsStore, installAppRuntime, installSocialAppRuntime, installWelcome, ipcMain, listAppPrompts, listCatalogFromBackend, mainWindow, normalizeManifestAgentDefaults, openInstalledApp, startLocalNetworkShare, stopLocalNetworkShare, startRemoteNetworkShare, stopRemoteNetworkShare, openOrFocusFriendChatWindow, path, publicForgerAccount, registry, reinstallClaude, reinstallCodex, resolveAppIdForWebContents, resolveInstalledAgents, resolveInstalledAppSecrets, resolveInstalledManifest, resolveSelectedAppDisplayName, restoreAppPrompt, restoreAppUserVersionRuntime, restoreRemoteAppBackup, sanitizeRendererChatTrace, sendEncryptedCloudMessage, sendEncryptedCloudAppShareMessage, serializeErrorForInstallLog, setAppAutoSyncSetting, shell, signAppFolderGrant, stopInstalledApp, switchForgerAccountSession, toAppSummary, uninstallAppRuntime, updateAgentDefaults, updateAgentToolApproval, updateAppDeveloperSettings, updateDeveloperMode, updateAppPrompt, updateAppRuntime, updateCodexDefaults, validateArchiveEntries, validateAppPrompt, zipDirectory } = deps;
+  const { state, APP_CLAUDE_MODEL_OPTIONS, APP_CODEX_MODEL_OPTIONS, BetterSqlite3, BrowserWindow, CODEX_USAGE_DASHBOARD_URL, IPC_CHANNELS, app, appAgentConversationManager, appendInstallLog, buildAppSecretsState, buildCodexPromptWithAppContext, buildForgerToolsContextForApp, buildForgerToolsContextForFreeChat, canUseCloudDataSync, chatOrchestrator, cloudDeviceManager, connectClaudeAuth, connectCodexAuth, createLocalAppFromSkeleton, createRemoteAppBackup, decryptCloudMessage, decryptCloudMessages, listLocalCloudMessages, dialog, disconnectCodexAuth, ensureCatalogStatuses, failureDiagnostic, forgerBackendClient, forwardCloudSocialEvent, fs, getAppDetails, getBackupsManager, getBackgroundTaskStore, getClaudeAuthStatus, getCloudIdentityStore, getCodexAuthStatus, getCodexHome, getDesktopUpdater, getDeveloperPathState, getFileLibrary, getForgerHomeRoot, getForgerMetadataRoot, getInstallLogPath, getMemoryStore, getOfficialToolsService, getPrivateAppsRoot, getPrivateDataRoot, getRuntimeStatus, getLocalNetworkShareStatus, getRemoteNetworkShareStatus, getSecretsStore, installAppRuntime, installSocialAppRuntime, installWelcome, ipcMain, listAppPrompts, listCatalogFromBackend, mainWindow, normalizeManifestAgentDefaults, openInstalledApp, startLocalNetworkShare, stopLocalNetworkShare, startRemoteNetworkShare, stopRemoteNetworkShare, openOrFocusFriendChatWindow, path, publicForgerAccount, registry, reinstallClaude, reinstallCodex, resolveAppIdForWebContents, resolveInstalledAgents, resolveInstalledAppSecrets, resolveInstalledManifest, resolveSelectedAppDisplayName, restoreAppPrompt, restoreAppUserVersionRuntime, restoreRemoteAppBackup, sanitizeRendererChatTrace, sendEncryptedCloudMessage, sendEncryptedCloudAppShareMessage, serializeErrorForInstallLog, setAppAutoSyncSetting, shell, signAppFolderGrant, stopInstalledApp, switchForgerAccountSession, toAppSummary, uninstallAppRuntime, updateAgentDefaults, updateAgentToolApproval, updateAppDeveloperSettings, updateDeveloperMode, updateAppPrompt, updateAppRuntime, updateCodexDefaults, validateArchiveEntries, validateAppPrompt, zipDirectory } = deps;
   const resolveReportRoot = (reader: () => string): string | undefined => {
     try {
       return typeof reader === 'function' ? reader() : undefined;
@@ -808,6 +810,10 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
     if (!forgerBackendClient) throw new Error('backend_client_missing');
     return await forgerBackendClient.resolveSocialApp(id);
   });
+  ipcMain.handle(IPC_CHANNELS.getSocialProfile, async (_event, username: string) => {
+    if (!forgerBackendClient) throw new Error('backend_client_missing');
+    return await forgerBackendClient.getSocialProfile(username);
+  });
   ipcMain.handle(IPC_CHANNELS.installSocialApp, async (_event, input: { appId?: number; appSlug?: string; shareCode?: string; trustDecision?: 'not_reviewed' | 'reviewed' | 'skipped_review' }, locale?: string) => {
     return await installSocialAppRuntime(input, locale);
   });
@@ -840,7 +846,7 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
     return await openOrFocusFriendChatWindow(friendship);
   });
   ipcMain.handle(IPC_CHANNELS.listCloudMessages, async (_event, friendUserId: number) => {
-    return forgerBackendClient ? await decryptCloudMessages(await forgerBackendClient.listCloudMessages(friendUserId)) : [];
+    return await listLocalCloudMessages(friendUserId);
   });
   ipcMain.handle(IPC_CHANNELS.sendCloudMessage, async (_event, input: CloudSendMessageInput) => {
     return await sendEncryptedCloudMessage(input);
@@ -1212,8 +1218,7 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
 
   registerAppCloudMessagingIpcHandlers({
     IPC_CHANNELS,
-    decryptCloudMessages,
-    forgerBackendClient,
+    listLocalCloudMessages,
     ipcMain,
     registry,
     resolveAppIdForWebContents,

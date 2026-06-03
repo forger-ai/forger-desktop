@@ -42,6 +42,11 @@ export type ForgerDeepLink =
       raw: string;
     }
   | {
+      kind: 'social-profile';
+      username: string;
+      raw: string;
+    }
+  | {
       kind: 'unknown';
       raw: string;
     };
@@ -86,6 +91,17 @@ export const parseForgerUrl = (rawUrl: string): ForgerDeepLink | null => {
         kind: 'social-app',
         code: code || null,
         id,
+        raw: rawUrl,
+      };
+    }
+    if (action === 'profile') {
+      const username = parsed.searchParams.get('username')?.trim();
+      if (!username) {
+        return { kind: 'unknown', raw: rawUrl };
+      }
+      return {
+        kind: 'social-profile',
+        username,
         raw: rawUrl,
       };
     }

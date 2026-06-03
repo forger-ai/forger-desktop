@@ -6,6 +6,7 @@ export interface AppRatingSummary {
   createdAt?: string;
   updatedAt?: string;
   user?: {
+    username?: string;
     firstName?: string;
     lastInitial?: string | null;
   };

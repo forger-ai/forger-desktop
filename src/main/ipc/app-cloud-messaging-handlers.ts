@@ -1,13 +1,11 @@
 import type { IpcMain } from 'electron';
 import type { IPC_CHANNELS as IpcChannels } from '../../shared/ipc';
 import type { CloudMessage, CloudSendMessageInput } from '../../shared/types';
-import type { ForgerBackendClient } from '../forger-backend-client';
 import type { AppManifest, AppRegistry } from '../core/main-process-types';
 
 interface AppCloudMessagingIpcDeps {
   IPC_CHANNELS: typeof IpcChannels;
-  decryptCloudMessages: (messages: CloudMessage[]) => Promise<CloudMessage[]>;
-  forgerBackendClient: ForgerBackendClient | null;
+  listLocalCloudMessages: (friendUserId: number) => Promise<CloudMessage[]>;
   ipcMain: IpcMain;
   registry: AppRegistry;
   resolveAppIdForWebContents: (webContentsId: number) => string | null;
@@ -17,8 +15,7 @@ interface AppCloudMessagingIpcDeps {
 
 export const registerAppCloudMessagingIpcHandlers = ({
   IPC_CHANNELS,
-  decryptCloudMessages,
-  forgerBackendClient,
+  listLocalCloudMessages,
   ipcMain,
   registry,
   resolveAppIdForWebContents,
@@ -54,6 +51,6 @@ export const registerAppCloudMessagingIpcHandlers = ({
     if (manifest?.cloudMessaging?.enabled !== true) {
       throw new Error('app_cloud_messaging_not_declared');
     }
-    return forgerBackendClient ? await decryptCloudMessages(await forgerBackendClient.listCloudMessages(friendUserId)) : [];
+    return await listLocalCloudMessages(friendUserId);
   });
 };

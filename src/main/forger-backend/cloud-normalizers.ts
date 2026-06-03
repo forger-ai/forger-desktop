@@ -5,6 +5,7 @@ import type {
   CloudFriendship,
   CloudFriendUser,
   CloudMessage,
+  CloudMessageDelivery,
   CloudMessageEnvelope,
   SocialUserAppStatus,
   SocialUserAppVisibility,
@@ -155,6 +156,46 @@ export const normalizeCloudMessage = (value: unknown): CloudMessage | undefined 
     return { ...base, type, appShare };
   }
   return { ...base, type };
+};
+
+export const normalizeCloudMessageDelivery = (value: unknown): CloudMessageDelivery | undefined => {
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const id = Number(record.id);
+  const sender = normalizeCloudUser(record.sender);
+  const recipient = normalizeCloudUser(record.recipient);
+  const targetUserId = Number(record.target_user_id);
+  const targetCloudDeviceId = Number(record.target_cloud_device_id);
+  const clientMessageId = typeof record.client_message_id === 'string' ? record.client_message_id : '';
+  if (!Number.isFinite(id) || !sender || !recipient || !Number.isFinite(targetUserId)
+    || !Number.isFinite(targetCloudDeviceId) || !clientMessageId) {
+    return undefined;
+  }
+  const appShare = normalizeCloudAppShareMessageDetail(record.app_share);
+  return {
+    id,
+    sender,
+    recipient,
+    targetUserId,
+    targetCloudDeviceId,
+    friendshipId: Number.isFinite(Number(record.friendship_id)) ? Number(record.friendship_id) : undefined,
+    clientMessageId,
+    messageType: record.message_type === 'CloudAppShareMessage' ? 'CloudAppShareMessage' : 'CloudTextMessage',
+    deliveryMode: record.delivery_mode === 'ephemeral' ? 'ephemeral' : 'persistent',
+    source: record.source === 'app' ? 'app' : 'user',
+    sourceAppId: typeof record.source_app_id === 'string' ? record.source_app_id : undefined,
+    sourceAppName: typeof record.source_app_name === 'string' ? record.source_app_name : undefined,
+    deviceUid: typeof record.device_uid === 'string' ? record.device_uid : undefined,
+    keyFingerprint: typeof record.key_fingerprint === 'string' ? record.key_fingerprint : undefined,
+    ciphertext: typeof record.ciphertext === 'string' ? record.ciphertext : '',
+    metadata: record.metadata && typeof record.metadata === 'object' && !Array.isArray(record.metadata) ? record.metadata as Record<string, unknown> : {},
+    appShare,
+    expiresAt: typeof record.expires_at === 'string' ? record.expires_at : new Date(0).toISOString(),
+    createdAt: typeof record.created_at === 'string' ? record.created_at : new Date().toISOString(),
+    ackedAt: typeof record.acked_at === 'string' ? record.acked_at : undefined,
+  };
 };
 
 const normalizeCloudAppShareMessageDetail = (value: unknown): CloudAppShareMessageDetail | undefined => {

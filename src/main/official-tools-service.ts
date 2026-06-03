@@ -100,6 +100,10 @@ const buildToolUnavailableResult = (
   return { success: false, userMessage: copy.notReady, technicalCode: 'tool_not_configured' };
 };
 
+const appToolDeclarationsMissingMessage = 'La app no tiene acceso configurado a herramientas oficiales. La declaracion de herramientas debe incluir un motivo visible y las acciones necesarias.';
+const appToolNotDeclaredMessage = 'La app no tiene acceso configurado a esta herramienta oficial. Revisa que la declaracion incluya toolId, reason y actions.';
+const appToolActionNotDeclaredMessage = 'La app no tiene acceso configurado a esta accion oficial. Revisa que la declaracion incluya la accion necesaria.';
+
 const localizeOfficialToolDefinition = (
   entry: OfficialToolDefinition,
   locale?: string,
@@ -344,19 +348,19 @@ export class OfficialToolsService {
     await this.load();
     const declarations = await this.options.getAppToolDeclarations(appId);
     if (!declarations) {
-      return { success: false, userMessage: 'La app no esta autorizada para usar herramientas.', technicalCode: 'app_tools_not_declared' };
+      return { success: false, userMessage: appToolDeclarationsMissingMessage, technicalCode: 'app_tools_not_declared' };
     }
     const required = declarations.required.find((item) => item.toolId === input.toolId);
     const optional = declarations.optional.find((item) => item.toolId === input.toolId);
     if (!required && !optional) {
-      return { success: false, userMessage: 'La app no declaro esta herramienta.', technicalCode: 'app_tool_not_declared' };
+      return { success: false, userMessage: appToolNotDeclaredMessage, technicalCode: 'app_tool_not_declared' };
     }
     if (optional && this.registry.appGrants[appId]?.[input.toolId] !== true) {
       return { success: false, userMessage: 'La app no tiene permiso para usar esta herramienta.', technicalCode: 'app_tool_permission_denied' };
     }
     const declaration = required ?? optional;
     if (!declaration?.actions.includes(input.actionId)) {
-      return { success: false, userMessage: 'La app no declaro esta accion.', technicalCode: 'app_tool_action_not_declared' };
+      return { success: false, userMessage: appToolActionNotDeclaredMessage, technicalCode: 'app_tool_action_not_declared' };
     }
     const tool = await this.getTool(input.toolId);
     if (!tool || !this.canExecuteTool(tool, input)) {
@@ -378,23 +382,23 @@ export class OfficialToolsService {
     await this.load();
     if (options?.requireAppGrant) {
       if (!options.appId) {
-        return { success: false, userMessage: 'La app no esta autorizada para usar herramientas.', technicalCode: 'app_tools_not_declared' };
+        return { success: false, userMessage: appToolDeclarationsMissingMessage, technicalCode: 'app_tools_not_declared' };
       }
       const declarations = await this.options.getAppToolDeclarations(options.appId);
       if (!declarations) {
-        return { success: false, userMessage: 'La app no esta autorizada para usar herramientas.', technicalCode: 'app_tools_not_declared' };
+        return { success: false, userMessage: appToolDeclarationsMissingMessage, technicalCode: 'app_tools_not_declared' };
       }
       const required = declarations.required.find((item) => item.toolId === input.toolId);
       const optional = declarations.optional.find((item) => item.toolId === input.toolId);
       if (!required && !optional) {
-        return { success: false, userMessage: 'La app no declaro esta herramienta.', technicalCode: 'app_tool_not_declared' };
+        return { success: false, userMessage: appToolNotDeclaredMessage, technicalCode: 'app_tool_not_declared' };
       }
       if (optional && this.registry.appGrants[options.appId]?.[input.toolId] !== true) {
         return { success: false, userMessage: 'La app no tiene permiso para usar esta herramienta.', technicalCode: 'app_tool_permission_denied' };
       }
       const declaration = required ?? optional;
       if (!declaration?.actions.includes(input.actionId)) {
-        return { success: false, userMessage: 'La app no declaro esta accion.', technicalCode: 'app_tool_action_not_declared' };
+        return { success: false, userMessage: appToolActionNotDeclaredMessage, technicalCode: 'app_tool_action_not_declared' };
       }
     }
     const tool = await this.getTool(input.toolId);

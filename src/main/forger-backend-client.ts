@@ -22,6 +22,7 @@ import type {
   ForumPost,
   ForumUserProfile,
   CloudMessage,
+  CloudMessageDelivery,
   CloudMessageEnvelope,
   CloudSendAppShareInput,
   CloudSendMessageInput,
@@ -29,6 +30,7 @@ import type {
   SocialUserAppDownload,
   SocialUserAppList,
   SocialUserAppShare,
+  SocialUserProfileDetail,
   SocialUserAppUploadAttempt,
   CloudAppMessagePermissionDecision,
   RemoteAppBackupSummary,
@@ -52,6 +54,7 @@ import {
 } from './forger-backend/catalog-normalizers';
 import {
   normalizeCloudDevice,
+  normalizeCloudMessageDelivery,
   normalizeCloudMessage,
   normalizeCloudUser,
   normalizeFriendship,
@@ -74,7 +77,7 @@ import {
 } from './forger-backend/client-helpers';
 import { type ConversationDiagnosticAttachmentUpload, type DesktopErrorReportAttachmentUpload, submitConversationDiagnosticReport, submitDesktopErrorReport } from './forger-backend/report-submissions';
 import { deleteBackendJson, getBackendJson, patchBackendJson, postBackendJson } from './forger-backend/json-request';
-import { toSocialUserApp, toSocialUserAppUploadAttempt, toSocialVersion } from './forger-backend/social-normalizers';
+import { toSocialUserApp, toSocialUserAppUploadAttempt, toSocialUserProfileDetail, toSocialVersion } from './forger-backend/social-normalizers';
 
 interface ClientOptions {
   backendBaseUrl: string;
@@ -693,6 +696,81 @@ export class ForgerBackendClient {
     return message;
   }
 
+  async listCloudMessageDeliveries(deviceId: number): Promise<CloudMessageDelivery[]> {
+    const query = new URLSearchParams({ device_id: String(deviceId) });
+    const payload = await getBackendJson(this.options, `/api/v1/me/cloud_message_deliveries?${query.toString()}`, 'cloud_message_deliveries_list_failed');
+    return Array.isArray(payload)
+      ? payload.map((entry) => normalizeCloudMessageDelivery(entry)).filter(Boolean) as CloudMessageDelivery[]
+      : [];
+  }
+
+  async sendCloudMessageDeliveries(input: CloudSendMessageInput & {
+    deliveries: Array<{
+      targetUserId: number;
+      cloudDeviceId: number;
+      deviceUid?: string;
+      keyFingerprint?: string;
+      ciphertext: string;
+    }>;
+    clientMessageId: string;
+  }): Promise<CloudMessageDelivery[]> {
+    const payload = await postBackendJson(this.options, '/api/v1/me/cloud_message_deliveries', {
+      recipient_username: input.recipientUsername,
+      recipient_user_id: input.recipientUserId,
+      source: input.source ?? 'user',
+      source_app_id: input.sourceAppId,
+      source_app_name: input.sourceAppName,
+      client_message_id: input.clientMessageId,
+      deliveries: input.deliveries.map((delivery) => ({
+        target_user_id: delivery.targetUserId,
+        cloud_device_id: delivery.cloudDeviceId,
+        device_uid: delivery.deviceUid,
+        key_fingerprint: delivery.keyFingerprint,
+        ciphertext: delivery.ciphertext,
+      })),
+    }, 'cloud_message_delivery_send_failed');
+    const entries = payload && typeof payload === 'object' && Array.isArray((payload as { deliveries?: unknown }).deliveries)
+      ? (payload as { deliveries: unknown[] }).deliveries
+      : [];
+    return entries.map((entry) => normalizeCloudMessageDelivery(entry)).filter(Boolean) as CloudMessageDelivery[];
+  }
+
+  async sendCloudAppShareDeliveries(input: CloudSendAppShareInput & {
+    deliveries: Array<{
+      targetUserId: number;
+      cloudDeviceId: number;
+      deviceUid?: string;
+      keyFingerprint?: string;
+      ciphertext: string;
+    }>;
+    clientMessageId: string;
+  }): Promise<CloudMessageDelivery[]> {
+    const payload = await postBackendJson(this.options, '/api/v1/me/cloud_message_deliveries/app_share', {
+      recipient_username: input.recipientUsername,
+      recipient_user_id: input.recipientUserId,
+      user_app_id: input.userAppId,
+      client_message_id: input.clientMessageId,
+      deliveries: input.deliveries.map((delivery) => ({
+        target_user_id: delivery.targetUserId,
+        cloud_device_id: delivery.cloudDeviceId,
+        device_uid: delivery.deviceUid,
+        key_fingerprint: delivery.keyFingerprint,
+        ciphertext: delivery.ciphertext,
+      })),
+    }, 'cloud_app_share_delivery_send_failed');
+    const entries = payload && typeof payload === 'object' && Array.isArray((payload as { deliveries?: unknown }).deliveries)
+      ? (payload as { deliveries: unknown[] }).deliveries
+      : [];
+    return entries.map((entry) => normalizeCloudMessageDelivery(entry)).filter(Boolean) as CloudMessageDelivery[];
+  }
+
+  async ackCloudMessageDeliveries(deviceId: number, deliveryIds: number[]): Promise<void> {
+    await postBackendJson(this.options, '/api/v1/me/cloud_message_deliveries/ack', {
+      device_id: deviceId,
+      delivery_ids: deliveryIds,
+    }, 'cloud_message_delivery_ack_failed');
+  }
+
   async decideAppMessagePermission(cloudMessageId: number, decision: CloudAppMessagePermissionDecision): Promise<CloudMessage> {
     const payload = await patchBackendJson(this.options, '/api/v1/me/app_message_permission', {
       cloud_message_id: cloudMessageId,
@@ -948,6 +1026,17 @@ export class ForgerBackendClient {
     return { app };
   }
 
+  async getSocialProfile(username: string): Promise<SocialUserProfileDetail> {
+    const normalizedUsername = username.trim();
+    if (!normalizedUsername) {
+      throw backendError('No pudimos abrir este perfil Social.', 'social_profile_username_missing');
+    }
+    const payload = await getBackendJson(this.options, `/api/v1/social/profiles/${encodeURIComponent(normalizedUsername)}`, 'social_profile_get_failed');
+    const profile = toSocialUserProfileDetail(payload);
+    if (!profile) throw backendError('No pudimos abrir este perfil Social.', 'social_profile_invalid');
+    return profile;
+  }
+
   async requestSocialAppDownload(input: {
     appId?: number;
     appSlug?: string;
@@ -991,6 +1080,10 @@ export class ForgerBackendClient {
 
   normalizeCloudMessagePayload(value: unknown): CloudMessage | undefined {
     return normalizeCloudMessage(value);
+  }
+
+  normalizeCloudMessageDeliveryPayload(value: unknown): CloudMessageDelivery | undefined {
+    return normalizeCloudMessageDelivery(value);
   }
 
   normalizeFriendshipPayload(value: unknown): CloudFriendship | undefined {

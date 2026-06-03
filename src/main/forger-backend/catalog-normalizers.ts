@@ -140,6 +140,7 @@ export const normalizeRating = (value: unknown): AppRatingSummary | undefined =>
     updatedAt: typeof record.updated_at === 'string' ? record.updated_at : undefined,
     user: user
       ? {
+          username: typeof user.username === 'string' ? user.username : undefined,
           firstName: typeof user.first_name === 'string' ? user.first_name : undefined,
           lastInitial: typeof user.last_initial === 'string' ? user.last_initial : null,
         }

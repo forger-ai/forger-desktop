@@ -44,8 +44,79 @@ class FakeNotification {
   }
 }
 
+class FakeBetterSqlite3 {
+  static databases = new Map();
+
+  constructor(filename) {
+    this.filename = filename;
+    if (!FakeBetterSqlite3.databases.has(filename)) {
+      FakeBetterSqlite3.databases.set(filename, []);
+    }
+    this.rows = FakeBetterSqlite3.databases.get(filename);
+  }
+
+  exec() {}
+
+  prepare(sql) {
+    if (/SELECT \* FROM social_messages/i.test(sql)) {
+      return {
+        all: (friendUserId) => this.rows
+          .filter((row) => row.friend_user_id === friendUserId)
+          .sort((left, right) => left.created_at.localeCompare(right.created_at) || left.id - right.id),
+      };
+    }
+    if (/INSERT INTO social_messages/i.test(sql)) {
+      return {
+        run: (params) => {
+          const existing = this.rows.find((row) => row.message_key === params.messageKey);
+          const next = {
+            id: existing?.id ?? this.rows.length + 1,
+            message_key: params.messageKey,
+            client_message_id: params.clientMessageId,
+            cloud_message_id: params.cloudMessageId,
+            friend_user_id: params.friendUserId,
+            type: params.type,
+            sender_json: params.senderJson,
+            recipient_json: params.recipientJson,
+            delivery_mode: params.deliveryMode,
+            source: params.source,
+            source_app_id: params.sourceAppId,
+            source_app_name: params.sourceAppName,
+            status: params.status,
+            local_state: params.localState,
+            metadata_json: params.metadataJson,
+            app_share_json: params.appShareJson,
+            plaintext: params.plaintext ?? existing?.plaintext,
+            created_at: params.createdAt,
+            updated_at: params.updatedAt,
+          };
+          if (existing) {
+            Object.assign(existing, next);
+          } else {
+            this.rows.push(next);
+          }
+        },
+      };
+    }
+    if (/UPDATE social_messages/i.test(sql)) {
+      return {
+        run: (localState, updatedAt, clientMessageId) => {
+          for (const row of this.rows) {
+            if (row.client_message_id === clientMessageId) {
+              row.local_state = localState;
+              row.updated_at = updatedAt;
+            }
+          }
+        },
+      };
+    }
+    return { all: () => [], run: () => undefined };
+  }
+}
+
 const createSocialDeps = (overrides = {}) => {
   const sentToWindows = [];
+  const socialMessagesPath = path.join(os.tmpdir(), `social-${Math.random().toString(16).slice(2)}.sqlite`);
   const makeWindow = (focused = false) => ({
     webContents: {
       send: (channel, payload) => sentToWindows.push({ channel, payload }),
@@ -55,6 +126,7 @@ const createSocialDeps = (overrides = {}) => {
   });
   const openedFriends = [];
   const deps = {
+    BetterSqlite3: FakeBetterSqlite3,
     CLAUDE_CODE_VERSION: '1.0.0',
     DEFAULT_NODE_VERSION: '22.0.0',
     CloudIdentityStore: class {},
@@ -77,6 +149,7 @@ const createSocialDeps = (overrides = {}) => {
       }),
     },
     cloudIdentityStore: {
+      getPublicRegistration: async () => ({ keyFingerprint: 'sender-fingerprint', publicKey: 'sender-public' }),
       encryptFor: (publicKey, text, keyFingerprint) => ({
         algorithm: 'rsa-oaep-sha256+aes-256-gcm',
         publicKey,
@@ -91,6 +164,15 @@ const createSocialDeps = (overrides = {}) => {
     forgerAccount: { authenticated: true, user: { id: 1, username: 'me', email: 'me@example.com' } },
     forgerBackendClient: {
       listFriends: async () => [{ friend: { id: 2, username: 'friend' } }],
+      listDevices: async () => [{
+        id: 5,
+        deviceUid: 'sender-device',
+        publicKey: 'sender-public',
+        keyFingerprint: 'sender-fingerprint',
+      }],
+      listCloudMessages: async () => [],
+      listCloudMessageDeliveries: async () => [],
+      ackCloudMessageDeliveries: async () => undefined,
       searchFriends: async () => [{
         id: 2,
         username: 'friend',
@@ -105,13 +187,58 @@ const createSocialDeps = (overrides = {}) => {
         createdAt: '2026-05-21T00:00:00Z',
         updatedAt: '2026-05-21T00:00:00Z',
       }),
+      sendCloudMessageDeliveries: async (input) => {
+        deps.sentDeliveries = input.deliveries;
+        return input.deliveries.map((delivery, index) => ({
+        id: 100 + index,
+        sender: { id: 1, username: 'me' },
+        recipient: { id: input.recipientUserId, username: 'friend' },
+        targetUserId: delivery.targetUserId,
+        targetCloudDeviceId: delivery.cloudDeviceId,
+        clientMessageId: input.clientMessageId,
+        messageType: 'CloudTextMessage',
+        deliveryMode: 'persistent',
+        source: input.source ?? 'user',
+        ciphertext: delivery.ciphertext,
+        metadata: {},
+        createdAt: '2026-05-21T00:00:00Z',
+        expiresAt: '2026-06-20T00:00:00Z',
+        }));
+      },
+      sendCloudAppShareDeliveries: async (input) => input.deliveries.map((delivery, index) => ({
+        id: 200 + index,
+        sender: { id: 1, username: 'me' },
+        recipient: { id: input.recipientUserId, username: 'friend' },
+        targetUserId: delivery.targetUserId,
+        targetCloudDeviceId: delivery.cloudDeviceId,
+        clientMessageId: input.clientMessageId,
+        messageType: 'CloudAppShareMessage',
+        deliveryMode: 'persistent',
+        source: 'user',
+        ciphertext: delivery.ciphertext,
+        metadata: {},
+        appShare: {
+          id: 1,
+          userAppId: input.userAppId,
+          shareKind: 'public_app',
+          appVisibilityAtSend: 'public',
+          appNameSnapshot: 'App',
+          appSlugSnapshot: 'app',
+          appOwnerUsernameSnapshot: 'me',
+          app: { id: input.userAppId, status: 'published', visibility: 'public', available: true },
+        },
+        createdAt: '2026-05-21T00:00:00Z',
+        expiresAt: '2026-06-20T00:00:00Z',
+      })),
       normalizeFriendshipPayload: (friendship) => ({ id: Number(friendship.id), friend: { id: 2, username: 'friend' } }),
       normalizeCloudMessagePayload: (message) => message,
+      normalizeCloudMessageDeliveryPayload: (delivery) => delivery,
     },
     friendChatWindows: new Map(),
     fs,
     getClaudeRoot: () => os.tmpdir(),
     getCloudIdentityPath: () => path.join(os.tmpdir(), 'identity.json'),
+    getSocialMessagesPath: () => socialMessagesPath,
     getCodexAuthStatus: async () => ({ authenticated: true }),
     getRuntimePathEntries: () => [],
     getRuntimeStatus: () => ({ status: 'running' }),
@@ -284,6 +411,10 @@ test('cloud social relay covers Claude fallback and recipient key edge cases', a
     const lazyIdentity = createCloudSocialRelayController(createSocialDeps({
       cloudIdentityStore: null,
       CloudIdentityStore: class {
+        async getPublicRegistration() {
+          return { keyFingerprint: 'fingerprint-7', publicKey: 'public-7' };
+        }
+
         encryptFor(publicKey, text, keyFingerprint) {
           return { publicKey, text, keyFingerprint };
         }
@@ -325,12 +456,13 @@ test('cloud social relay covers Claude fallback and recipient key edge cases', a
     const missingRecipientKey = createCloudSocialRelayController(createSocialDeps({
       forgerBackendClient: {
         listFriends: async () => [],
+        listDevices: async () => [],
         searchFriends: async () => [{ id: 2, username: 'friend', devices: [{ id: 8, deviceUid: 'friend-device' }] }],
       },
     }).deps);
     await assert.rejects(
       () => missingRecipientKey.sendEncryptedCloudMessage({ recipientUsername: 'friend', text: 'Hola' }),
-      (error) => error.technicalCode === 'recipient_cloud_key_missing',
+      (error) => error.technicalCode === 'cloud_delivery_key_missing',
     );
     await assert.rejects(
       () => createCloudSocialRelayController(createSocialDeps({ forgerBackendClient: null }).deps)
@@ -341,6 +473,7 @@ test('cloud social relay covers Claude fallback and recipient key edge cases', a
       () => createCloudSocialRelayController(createSocialDeps({
         forgerBackendClient: {
           listFriends: async () => [],
+          listDevices: async () => [],
           searchFriends: async () => [],
         },
       }).deps).sendEncryptedCloudMessage({ recipientUserId: 404, text: 'Hola' }),
@@ -358,7 +491,7 @@ test('cloud social relay encrypts message envelopes, decrypts events, and notifi
     const controller = createCloudSocialRelayController(deps);
 
     const sent = await controller.sendEncryptedCloudMessage({ recipientUsername: '@friend', text: 'Hola' });
-    const outgoingEnvelopePayloads = sent.envelopes.map((envelope) => JSON.parse(envelope.ciphertext));
+    const outgoingEnvelopePayloads = deps.sentDeliveries.map((delivery) => JSON.parse(delivery.ciphertext));
     assert.equal(sent.plaintext, 'Hola');
     assert.deepEqual(outgoingEnvelopePayloads.map((payload) => payload.publicKey).sort(), ['friend-public', 'sender-public']);
 

@@ -1,9 +1,15 @@
-import { Box, useTheme } from '@mui/material';
+import { alpha, Box, useTheme } from '@mui/material';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
 export function MarkdownMessage({ content }: { content: string }) {
   const theme = useTheme();
+  const codeBackground = theme.palette.mode === 'dark'
+    ? alpha(theme.palette.common.white, 0.08)
+    : theme.palette.action.hover;
+  const preBackground = theme.palette.mode === 'dark'
+    ? alpha(theme.palette.common.white, 0.06)
+    : theme.palette.background.default;
 
   return (
     <Box
@@ -43,7 +49,8 @@ export function MarkdownMessage({ content }: { content: string }) {
         },
         '& code': {
           fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-          bgcolor: 'rgba(148,163,184,0.18)',
+          bgcolor: codeBackground,
+          color: 'text.primary',
           px: 0.5,
           py: 0.15,
           borderRadius: 1,
@@ -53,7 +60,7 @@ export function MarkdownMessage({ content }: { content: string }) {
           wordBreak: 'break-word',
         },
         '& pre': {
-          bgcolor: 'rgba(15,23,42,0.6)',
+          bgcolor: preBackground,
           border: `1px solid ${theme.palette.divider}`,
           borderRadius: 2,
           p: 1.25,

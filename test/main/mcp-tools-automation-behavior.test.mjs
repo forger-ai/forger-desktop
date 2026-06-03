@@ -362,6 +362,7 @@ test('official tool declarations dedupe entries and app grants gate optional too
   const root = await mkdtemp(join(tmpdir(), 'forger-tools-service-'));
   const declarations = normalizeAppToolDeclarations({
     required: [
+      { toolId: 'gmail-missing-reason', actions: ['gmail.send_email'] },
       { toolId: 'gmail', reason: 'Necesita leer correo', actions: ['gmail.search_messages', ''] },
       { toolId: 'gmail', reason: 'Duplicado', actions: ['gmail.send_email'] },
       { toolId: '', reason: 'bad', actions: ['gmail.search_messages'] },
@@ -703,6 +704,7 @@ test('official tools validate unavailable, undeclared, optional, and malformed r
       actionId: 'gmail.search_messages',
     });
     assert.equal(undeclaredTool.technicalCode, 'app_tool_not_declared');
+    assert.match(undeclaredTool.userMessage, /toolId, reason y actions/);
 
     await service.activate('gmail');
     const undeclaredAppAction = await service.callFromApp('finance-os', {
@@ -710,6 +712,7 @@ test('official tools validate unavailable, undeclared, optional, and malformed r
       actionId: 'gmail.send_email',
     });
     assert.equal(undeclaredAppAction.technicalCode, 'app_tool_action_not_declared');
+    assert.match(undeclaredAppAction.userMessage, /accion necesaria/);
 
     const optionalAgentDenied = await service.validateAgentCall({
       toolId: 'gmail',

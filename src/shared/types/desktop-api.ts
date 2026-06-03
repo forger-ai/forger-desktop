@@ -10,7 +10,7 @@ import type { AppSecretsState, UserSecretSummary, CreateUserSecretInput, UpdateU
 import type { DeveloperPathState, Settings, UpdateAppDeveloperSettingsInput, UpdateCodexDefaultsInput, UpdateDeveloperModeInput, UpdateAgentDefaultsInput, MemoryListInput, MemoryEntry, MemoryCreateInput, MemoryUpdateInput } from './settings';
 import type { DesktopUpdateState } from './updates';
 import type { ForgerAccountSession, ForgerAccountRegisterInput, ForgerAccountLoginInput, ForgerAccountProfileInput, CloudDevicesState } from './account';
-import type { FriendChatWindowOpenResult, CloudFriendship, CloudFriendUser, CloudMessage, CloudSendAppShareInput, CloudSendMessageInput, CloudAppMessagePermissionDecision, CloudSocialEvent, CloudIdentityState, ForumComment, ForumParticipationState, ForumPost, SocialUserApp, SocialUserAppDownload, SocialUserAppList, SocialUserAppShare, SocialUserAppUploadInput } from './social';
+import type { FriendChatWindowOpenResult, CloudFriendship, CloudFriendUser, CloudMessage, CloudSendAppShareInput, CloudSendMessageInput, CloudAppMessagePermissionDecision, CloudSocialEvent, CloudIdentityState, ForumComment, ForumParticipationState, ForumPost, SocialUserApp, SocialUserAppDownload, SocialUserAppList, SocialUserAppShare, SocialUserAppUploadInput, SocialUserProfileDetail } from './social';
 import type { AppRatingSummary, SubmitAppRatingInput, SubmitProductFeedbackInput } from './feedback';
 import type { SubmitUsageEventInput, SubmitUsageEventResult } from './usage-events';
 import type { ConversationDiagnosticReportPreview, PrepareConversationDiagnosticReportInput, SubmitConversationDiagnosticReportResult } from './diagnostics';
@@ -90,6 +90,7 @@ export interface ForgerDesktopApi {
   createSocialAppShare: (userAppId: number) => Promise<SocialUserAppShare>;
   resolveSocialCode: (code: string) => Promise<{ app: SocialUserApp; share?: Record<string, unknown> }>;
   resolveSocialApp: (id: number) => Promise<{ app: SocialUserApp }>;
+  getSocialProfile: (username: string) => Promise<SocialUserProfileDetail>;
   installSocialApp: (input: { appId?: number; appSlug?: string; shareCode?: string; trustDecision?: 'not_reviewed' | 'reviewed' | 'skipped_review' }, locale?: string) => Promise<InstallAppResult & { appId?: string; download?: SocialUserAppDownload }>;
   searchFriends: (username: string) => Promise<CloudFriendUser[]>;
   sendFriendRequest: (username: string) => Promise<CloudFriendship>;
@@ -211,6 +212,11 @@ export type ForgerDeepLink =
       kind: 'social-app';
       code: string | null;
       id: number | null;
+      raw: string;
+    }
+  | {
+      kind: 'social-profile';
+      username: string;
       raw: string;
     }
   | {

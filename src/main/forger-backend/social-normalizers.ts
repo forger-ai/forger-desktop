@@ -1,6 +1,6 @@
-import type { SocialUserApp, SocialUserAppUploadAttempt, SocialUserAppUploadAttemptStatus } from '../../shared/types';
+import type { SocialUserApp, SocialUserAppAccessReason, SocialUserAppUploadAttempt, SocialUserAppUploadAttemptStatus, SocialUserProfile, SocialUserProfileDetail } from '../../shared/types';
 
-export const toSocialProfile = (record: Record<string, unknown>) => ({
+export const toSocialProfile = (record: Record<string, unknown>): SocialUserProfile => ({
   id: Number(record.id),
   username: typeof record.username === 'string' ? record.username : '',
   firstName: typeof record.first_name === 'string' ? record.first_name : undefined,
@@ -50,6 +50,7 @@ export const toSocialUserApp = (record: unknown): SocialUserApp | undefined => {
     category: typeof item.category === 'string' ? item.category : undefined,
     visibility: item.visibility === 'public' || item.visibility === 'friends' || item.visibility === 'private' ? item.visibility : 'restricted',
     status: item.status === 'suspended' || item.status === 'deleted' ? item.status : 'published',
+    accessReason: socialAccessReason(item.access_reason),
     owner,
     averageReviewScore: typeof item.average_review_score === 'number' ? item.average_review_score : undefined,
     reviewsCount: Number(item.reviews_count ?? 0),
@@ -59,6 +60,30 @@ export const toSocialUserApp = (record: unknown): SocialUserApp | undefined => {
     activeUploadAttempt,
     createdAt: typeof item.created_at === 'string' ? item.created_at : undefined,
     updatedAt: typeof item.updated_at === 'string' ? item.updated_at : undefined,
+  };
+};
+
+const socialAccessReason = (value: unknown): SocialUserAppAccessReason | undefined => {
+  if (value === 'public' || value === 'friends' || value === 'direct_share') {
+    return value;
+  }
+  return undefined;
+};
+
+export const toSocialUserProfileDetail = (payload: unknown): SocialUserProfileDetail | undefined => {
+  if (!payload || typeof payload !== 'object') {
+    return undefined;
+  }
+  const source = payload as Record<string, unknown>;
+  const profileSource = source.profile && typeof source.profile === 'object'
+    ? source.profile as Record<string, unknown>
+    : undefined;
+  if (!profileSource || !Number.isFinite(Number(profileSource.id))) {
+    return undefined;
+  }
+  return {
+    profile: toSocialProfile(profileSource),
+    apps: Array.isArray(source.apps) ? source.apps.map(toSocialUserApp).filter(Boolean) as SocialUserApp[] : [],
   };
 };
 

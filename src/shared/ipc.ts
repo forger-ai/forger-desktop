@@ -65,6 +65,7 @@ export const IPC_CHANNELS = {
   createSocialAppShare: 'forger:social:apps:create-share',
   resolveSocialCode: 'forger:social:code:resolve',
   resolveSocialApp: 'forger:social:app:resolve',
+  getSocialProfile: 'forger:social:profile:get',
   installSocialApp: 'forger:social:apps:install',
   searchFriends: 'forger:friends:search',
   sendFriendRequest: 'forger:friends:request',

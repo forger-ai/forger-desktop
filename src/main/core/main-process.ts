@@ -67,16 +67,7 @@ import { loadOptionalBetterSqlite } from '../runtime/optional-better-sqlite';
 import { createWindowBootstrapController } from './window-bootstrap';
 import { AGENT_TOOL_DEFINITIONS, AGENT_TOOL_IDS, AGENT_TOOL_PACKAGES, createInitialAgentToolSettings } from './agent-tool-packages';
 import { registerMainLifecycle } from './main-lifecycle';
-import type {
-  AppManifest,
-  AppManifestService,
-  AppManifestStack,
-  AppRegistry,
-  InstalledAppRecord,
-  RuntimeBinarySet,
-  RunningAppProcess,
-  StackSkillTemplate,
-} from './main-process-types';
+import type { AppManifest, AppManifestService, AppManifestStack, AppRegistry, InstalledAppRecord, RuntimeBinarySet, RunningAppProcess, StackSkillTemplate } from './main-process-types';
 import { FORGER_AGENT_CONTRACT_MARKER, FORGER_AGENT_CONTRACT_MARKER_PREFIX, FORGER_AGENT_CONTRACT_VERSION, buildGlobalForgerAgentsMarkdown } from '../prompt-builder/forger-base';
 import { buildFailureDiagnostic } from '../../shared/error-diagnostics';
 import { buildForgerAppAgentsMarkdown } from '../prompt-builder/apps-base';
@@ -287,6 +278,7 @@ const getPromptOverridesPath = (): string => getPathConfigController().getPrompt
 const getForgerAccountPath = (): string => getPathConfigController().getForgerAccountPath();
 const getCloudDevicePath = (): string => getPathConfigController().getCloudDevicePath();
 const getCloudIdentityPath = (): string => getPathConfigController().getCloudIdentityPath();
+const getSocialMessagesPath = (): string => getPathConfigController().getSocialMessagesPath();
 const getCloudSyncSettingsPath = (): string => getPathConfigController().getCloudSyncSettingsPath();
 const getCloudDeviceAccountStorageKey = (): string | undefined => getPathConfigController().getCloudDeviceAccountStorageKey();
 
@@ -391,6 +383,7 @@ const createManifestSupportDeps = () => ({
   forgerBackendClient,
   getForgerAccount: () => forgerAccount,
   getForgerBackendClient: () => forgerBackendClient,
+  getRegistry: () => registry,
   fs,
   getBackupsRoot,
   getCloudIdentityStore,
@@ -932,6 +925,7 @@ async function stopRemoteNetworkShareSession(sessionId: string): ReturnType<type
 
 const createCloudSocialRelayDeps = () => ({
   CLAUDE_CODE_VERSION,
+  BetterSqlite3,
   CloudIdentityStore,
   DEFAULT_NODE_VERSION,
   app,
@@ -949,6 +943,7 @@ const createCloudSocialRelayDeps = () => ({
   fs,
   getClaudeRoot,
   getCloudIdentityPath,
+  getSocialMessagesPath,
   getCodexAuthStatus,
   getRuntimePathEntries,
   getRuntimeStatus,
@@ -972,6 +967,7 @@ const resolveAppDbPath = async (appId: string): Promise<string | null> => await 
 const getCloudIdentityStore = (): CloudIdentityStore => getCloudSocialRelayController().getCloudIdentityStore();
 const decryptCloudMessage = async (message: CloudMessage): Promise<CloudMessage> => await getCloudSocialRelayController().decryptCloudMessage(message);
 const decryptCloudMessages = async (messages: CloudMessage[]): Promise<CloudMessage[]> => await getCloudSocialRelayController().decryptCloudMessages(messages);
+const listLocalCloudMessages = async (friendUserId: number): Promise<CloudMessage[]> => await getCloudSocialRelayController().listLocalCloudMessages(friendUserId);
 const wait = async (milliseconds: number): Promise<void> => await getCloudSocialRelayController().wait(milliseconds);
 const buildEncryptedEnvelopes = async (recipientUserId: number, text: string): Promise<CloudMessageEnvelope[]> => await (getCloudSocialRelayController().buildEncryptedEnvelopes as (...args: unknown[]) => Promise<CloudMessageEnvelope[]>)(recipientUserId, text);
 const sendEncryptedCloudMessage = async (input: CloudSendMessageInput): Promise<CloudMessage> => await getCloudSocialRelayController().sendEncryptedCloudMessage(input); const sendEncryptedCloudAppShareMessage = async (input: CloudSendAppShareInput): Promise<CloudMessage> => await getCloudSocialRelayController().sendEncryptedCloudAppShareMessage(input);
@@ -1028,6 +1024,7 @@ const getMainProcessIpcDeps = () => ({
   createRemoteAppBackup,
   decryptCloudMessage,
   decryptCloudMessages,
+  listLocalCloudMessages,
   desktopErrorReporter,
   dialog,
   disconnectCodexAuth,
@@ -1180,21 +1177,20 @@ registerMainLifecycle({
   BrowserWindow, ChatOrchestrator, CloudDeviceManager, CloudIdentityStore, DesktopRuntimeBridge,
   DevCatalogService, FORGER_AGENT_CONTRACT_VERSION, FileLibrary, ForgerAccountStore, ForgerBackendClient,
   ForgerMcpServer, IPC_CHANNELS, MemoryMaintenanceManager, MemoryStore, SecretsStore, anyAppAllowsAgentNetworkAccess, app,
-  appAllowsAgentNetworkAccess, appWindows, appendInstallLog, backendBaseUrl, buildForgerToolsContextForApp,
-  buildMemoryContextForApp, buildMemoryContextForApps, chooseAgentRuntime, clearForgerAccountSession, closeServer,
-  createLocalAppFromSkeleton, createWindow, emitAutomationUpdated, emitChatRunUpdated, ensureBackendPythonEnvironment, ensureCatalogStatuses,
-  ensureGlobalAgentsContext, ensurePathInside, ensureRuntimeInstalled, ensureSqliteDatabaseParent, flushPendingDeepLink,
-  fs, getAgentPathEntries, getBackupsRoot, getClaudeAuthStatus, getCloudDeviceAccountStorageKey,
-  getCloudDevicePath, getCloudIdentityPath, getCloudIdentityStore, getCodexAuthStatus, getCodexHome, getCodexRoot,
-  getCodexToolEnvironment, getForgerAccountPath, getForgerHomeRoot, getForgerMetadataRoot, getFreePort,
-  getLegacyForgerMetadataRoot, getMemoryStore, getOfficialToolsService, getPrivateAppsRoot, getPrivateDataRoot,
-  getRuntimesRoot, getRuntimePathEntries, getRuntimeStatus, getLocalNetworkShareStatus, getRemoteNetworkShareStatus, getTempRoot, getVenvExecutables,
-  handleCloudSocialEvent, hasInstalledCodexConversation, ipcMain, listAppPrompts, listCatalogFromBackend,
-  loadAgentToolSettings, loadCloudSyncSettings, loadRegistry, loadSettings, mapBackendCategory,
-  openInstalledApp, startLocalNetworkShare, stopLocalNetworkShare, startRemoteNetworkShare, stopRemoteNetworkShare, stopRemoteNetworkShareSession, openOrFocusAppWindow, registerForgerCloudOAuth,
+  appAllowsAgentNetworkAccess, appWindows, appendInstallLog, backendBaseUrl, buildForgerToolsContextForApp, buildMemoryContextForApp,
+  buildMemoryContextForApps, chooseAgentRuntime, clearForgerAccountSession, closeServer, createLocalAppFromSkeleton, createWindow,
+  emitAutomationUpdated, emitChatRunUpdated, ensureBackendPythonEnvironment, ensureCatalogStatuses, ensureGlobalAgentsContext,
+  ensurePathInside, ensureRuntimeInstalled, ensureSqliteDatabaseParent, flushPendingDeepLink, fs, getAgentPathEntries, getBackupsRoot,
+  getClaudeAuthStatus, getCloudDeviceAccountStorageKey, getCloudDevicePath, getCloudIdentityPath, getCloudIdentityStore, getSocialMessagesPath,
+  getCodexAuthStatus, getCodexHome, getCodexRoot, getCodexToolEnvironment, getForgerAccountPath, getForgerHomeRoot, getForgerMetadataRoot,
+  getFreePort, getLegacyForgerMetadataRoot, getMemoryStore, getOfficialToolsService, getPrivateAppsRoot, getPrivateDataRoot, getRuntimesRoot,
+  getRuntimePathEntries, getRuntimeStatus, getLocalNetworkShareStatus, getRemoteNetworkShareStatus, getTempRoot, getVenvExecutables,
+  handleCloudSocialEvent, hasInstalledCodexConversation, ipcMain, listAppPrompts, listCatalogFromBackend, loadAgentToolSettings,
+  loadCloudSyncSettings, loadRegistry, loadSettings, mapBackendCategory, openInstalledApp, startLocalNetworkShare, stopLocalNetworkShare,
+  startRemoteNetworkShare, stopRemoteNetworkShare, stopRemoteNetworkShareSession, openOrFocusAppWindow, registerForgerCloudOAuth,
   registerIpcHandlers, renderManifestAgentPrompt, resolveClaudeCli, resolveCodexCliPath, resolveInstalledAgents, resolveInstalledManifest,
-  resolveInstalledPromptTemplates, restoreAppPrompt, restartInstalledApp, runningApps, serializeErrorForInstallLog,
-  shell, splitManifestCommand, startDevCatalogService, state: mainLifecycleState, stopInstalledApp,
-  switchForgerAccountSession, terminateProcess, testAppPrompt, toAppSummary, toCatalogStatus, translateManifestEnvironment,
-  truncateForInstallLog, updateAppPrompt, updateAppRuntime, upsertInstalledRecord, waitForHttpOk,
+  resolveInstalledPromptTemplates, restoreAppPrompt, restartInstalledApp, runningApps, serializeErrorForInstallLog, shell,
+  splitManifestCommand, startDevCatalogService, state: mainLifecycleState, stopInstalledApp, switchForgerAccountSession, terminateProcess,
+  testAppPrompt, toAppSummary, toCatalogStatus, translateManifestEnvironment, truncateForInstallLog, updateAppPrompt, updateAppRuntime,
+  upsertInstalledRecord, waitForHttpOk,
 });

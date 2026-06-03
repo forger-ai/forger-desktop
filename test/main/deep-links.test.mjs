@@ -48,7 +48,8 @@ test('parseForgerUrl returns Social app deep links with codes or public ids', ()
   });
 
   assert.deepEqual(parseForgerUrl('forger://social/profile?username=%40ana'), {
-    kind: 'unknown',
+    kind: 'social-profile',
+    username: '@ana',
     raw: 'forger://social/profile?username=%40ana',
   });
 });

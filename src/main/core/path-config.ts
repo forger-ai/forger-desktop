@@ -87,6 +87,7 @@ export const createPathConfigController = (deps: PathConfigDeps) => {
   const getForgerAccountPath = () => path.join(getForgerMetadataRoot(), 'account.json');
   const getCloudDevicePath = () => path.join(getForgerMetadataRoot(), 'cloud-device.json');
   const getCloudIdentityPath = () => path.join(getForgerMetadataRoot(), 'cloud-identity.json');
+  const getSocialMessagesPath = () => path.join(getForgerMetadataRoot(), 'social-messages.sqlite');
   const getCloudSyncSettingsPath = () => path.join(getForgerMetadataRoot(), 'cloud-sync.json');
   const getCloudDeviceAccountStorageKey = () => forgerAccount.user?.id ? `user-${forgerAccount.user.id}` : undefined;
 
@@ -115,6 +116,7 @@ export const createPathConfigController = (deps: PathConfigDeps) => {
     getForgerAccountPath,
     getCloudDevicePath,
     getCloudIdentityPath,
+    getSocialMessagesPath,
     getCloudSyncSettingsPath,
     getCloudDeviceAccountStorageKey,
   };
