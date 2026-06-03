@@ -3,6 +3,7 @@ import CropSquareRounded from '@mui/icons-material/CropSquareRounded';
 import FilterNoneRounded from '@mui/icons-material/FilterNoneRounded';
 import KeyboardArrowDownRounded from '@mui/icons-material/KeyboardArrowDownRounded';
 import LogoutRounded from '@mui/icons-material/LogoutRounded';
+import PeopleRounded from '@mui/icons-material/PeopleRounded';
 import MinimizeRounded from '@mui/icons-material/MinimizeRounded';
 import PersonRounded from '@mui/icons-material/PersonRounded';
 import {
@@ -20,15 +21,14 @@ import {
   Tooltip,
   Typography,
   useTheme,
-  type AlertColor,
 } from '@mui/material';
 import { useEffect, useState, type MouseEvent } from 'react';
-import type { AppSummary, CloudFriendship, ForgerAccountSession, FriendChatWindowOpenResult, WindowControlState } from '@shared/types';
+import type { AppSummary, ForgerAccountSession, WindowControlState } from '@shared/types';
 import type { BackgroundTask } from '@shared/types';
 import type { AppDictionary } from '@renderer/i18n';
 import type { View } from './Sidebar';
-import { FriendsView } from '../views/FriendsView';
 import { BackgroundTasksDrawer } from './BackgroundTasksDrawer';
+import { LAST_SOCIAL_TAB_KEY, type SocialTab } from '@renderer/views/friends/socialViewHelpers';
 
 interface TopbarProps {
   currentView: View;
@@ -41,9 +41,7 @@ interface TopbarProps {
   onOpenCloudModal: () => void;
   account: ForgerAccountSession;
   accountBusy: boolean;
-  onOpenFriendChat: (friendship: CloudFriendship) => Promise<FriendChatWindowOpenResult> | FriendChatWindowOpenResult;
-  onSocialNotify: (message: string, severity?: AlertColor) => void;
-  onUpdateUsername: (username: string) => Promise<boolean>;
+  onOpenSocialTab: (tab: SocialTab) => void;
   onLogout: () => void;
   backgroundTasks: BackgroundTask[];
   backgroundTasksOpen: boolean;
@@ -213,9 +211,7 @@ export function Topbar({
   onOpenCloudModal,
   account,
   accountBusy,
-  onOpenFriendChat,
-  onSocialNotify,
-  onUpdateUsername,
+  onOpenSocialTab,
   onLogout,
   backgroundTasks,
   backgroundTasksOpen,
@@ -227,7 +223,9 @@ export function Topbar({
 }: TopbarProps) {
   const theme = useTheme();
   const [accountAnchorEl, setAccountAnchorEl] = useState<HTMLElement | null>(null);
+  const [socialAnchorEl, setSocialAnchorEl] = useState<HTMLElement | null>(null);
   const accountMenuOpen = Boolean(accountAnchorEl);
+  const socialMenuOpen = Boolean(socialAnchorEl);
   const accountUser = account.authenticated ? account.user : null;
   const accountName = accountUser?.firstName?.trim() || accountUser?.email.split('@')[0] || '';
 
@@ -243,6 +241,12 @@ export function Topbar({
   const handleLogout = () => {
     setAccountAnchorEl(null);
     onLogout();
+  };
+
+  const handleOpenSocialTab = (tab: SocialTab) => {
+    window.sessionStorage.setItem(LAST_SOCIAL_TAB_KEY, tab);
+    setSocialAnchorEl(null);
+    onOpenSocialTab(tab);
   };
 
   return (
@@ -300,14 +304,57 @@ export function Topbar({
             onOpenTask={onOpenBackgroundTask}
           />
           <Box data-onboarding-target="social-actions">
-            <FriendsView
-              variant="topbar"
-              account={account}
-              accountBusy={accountBusy}
-              onOpenFriendChat={onOpenFriendChat}
-              onNotify={onSocialNotify}
-              onUpdateUsername={onUpdateUsername}
-            />
+            <Tooltip title="Social">
+              <IconButton
+                size="small"
+                aria-label="Social"
+                aria-controls={socialMenuOpen ? 'forger-social-menu' : undefined}
+                aria-haspopup="menu"
+                aria-expanded={socialMenuOpen ? 'true' : undefined}
+                onClick={(event) => setSocialAnchorEl(event.currentTarget)}
+                sx={{
+                  width: 34,
+                  height: 34,
+                  borderRadius: 1,
+                  color: 'text.secondary',
+                  border: '1px solid',
+                  borderColor: socialMenuOpen ? 'primary.main' : 'divider',
+                  bgcolor: socialMenuOpen ? alpha(theme.palette.primary.main, 0.08) : 'transparent',
+                }}
+              >
+                <PeopleRounded fontSize="small" />
+              </IconButton>
+            </Tooltip>
+            <Menu
+              id="forger-social-menu"
+              anchorEl={socialAnchorEl}
+              open={socialMenuOpen}
+              onClose={() => setSocialAnchorEl(null)}
+              anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+              transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+              slotProps={{
+                paper: {
+                  sx: {
+                    mt: 1,
+                    width: 220,
+                    borderRadius: 1,
+                    border: '1px solid',
+                    borderColor: 'divider',
+                    boxShadow: theme.shadows[8],
+                  },
+                },
+              }}
+            >
+              <Box sx={{ px: 2, pt: 1.5, pb: 1 }}>
+                <Typography variant="subtitle2" fontWeight={800}>Social</Typography>
+                <Typography variant="caption" color="text.secondary">Abrir vista completa</Typography>
+              </Box>
+              <Divider />
+              <MenuItem onClick={() => handleOpenSocialTab('friends')}>Amigos</MenuItem>
+              <MenuItem onClick={() => handleOpenSocialTab('forum')}>Foro</MenuItem>
+              <MenuItem onClick={() => handleOpenSocialTab('apps')}>Mis apps</MenuItem>
+              <MenuItem onClick={() => handleOpenSocialTab('profile')}>Perfil</MenuItem>
+            </Menu>
           </Box>
           <IconButton
             data-onboarding-target="account-actions"

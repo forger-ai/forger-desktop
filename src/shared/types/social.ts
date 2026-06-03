@@ -47,6 +47,8 @@ export interface CloudMessageEnvelope {
   readAt?: string;
 }
 
+export type CloudMessageLocalState = 'pending' | 'sent' | 'failed' | 'received';
+
 export interface CloudAppShareMessageDetail {
   id: number;
   userAppId: number;
@@ -88,6 +90,7 @@ interface CloudMessageBase {
   metadata: Record<string, unknown>;
   envelopes: CloudMessageEnvelope[];
   plaintext?: string;
+  localState?: CloudMessageLocalState;
   deliveredAt?: string;
   createdAt: string;
   updatedAt?: string;
@@ -108,11 +111,36 @@ export type CloudMessage = CloudTextMessage | CloudAppShareMessage;
 export type CloudSocialEvent =
   | { type: 'friendship_changed'; friendship: CloudFriendship }
   | { type: 'cloud_message'; message: CloudMessage; unread?: boolean }
-  | { type: 'ephemeral_cloud_message'; message: CloudMessage; unread?: boolean };
+  | { type: 'ephemeral_cloud_message'; message: CloudMessage; unread?: boolean }
+  | { type: 'cloud_message_delivery'; delivery: CloudMessageDelivery; unread?: boolean };
+
+export interface CloudMessageDelivery {
+  id: number;
+  sender: CloudFriendUser;
+  recipient: CloudFriendUser;
+  targetUserId: number;
+  targetCloudDeviceId: number;
+  friendshipId?: number;
+  clientMessageId: string;
+  messageType: CloudMessageType;
+  deliveryMode: CloudMessageDeliveryMode;
+  source: CloudMessageSource;
+  sourceAppId?: string;
+  sourceAppName?: string;
+  deviceUid?: string;
+  keyFingerprint?: string;
+  ciphertext: string;
+  metadata: Record<string, unknown>;
+  appShare?: CloudAppShareMessageDetail;
+  expiresAt: string;
+  createdAt: string;
+  ackedAt?: string;
+}
 
 export interface CloudSendMessageInput {
   recipientUsername?: string;
   recipientUserId?: number;
+  clientMessageId?: string;
   text: string;
   delivery?: CloudMessageDeliveryMode;
   source?: CloudMessageSource;
@@ -123,6 +151,7 @@ export interface CloudSendMessageInput {
 export interface CloudSendAppShareInput {
   recipientUsername?: string;
   recipientUserId?: number;
+  clientMessageId?: string;
   userAppId: number;
 }
 
@@ -143,6 +172,7 @@ export type SocialUserAppVisibility = 'public' | 'friends' | 'private' | 'restri
 export type SocialUserAppStatus = 'published' | 'suspended' | 'deleted';
 export type SocialUserAppUploadAttemptStatus = 'pending_upload' | 'uploaded' | 'analyzing' | 'failed' | 'published';
 export type SocialUserAppReviewState = 'not_reviewed' | 'reviewed' | 'skipped_review';
+export type SocialUserAppAccessReason = 'public' | 'friends' | 'direct_share';
 export type ForumParticipationStatus = 'opted_out' | 'opted_in' | 'suspended';
 
 export interface ForumParticipationState {
@@ -199,6 +229,11 @@ export interface SocialUserProfile {
   socialBio?: string;
 }
 
+export interface SocialUserProfileDetail {
+  profile: SocialUserProfile;
+  apps: SocialUserApp[];
+}
+
 export interface SocialUserAppVersion {
   id: number;
   version: string;
@@ -224,6 +259,7 @@ export interface SocialUserApp {
   category?: string;
   visibility: SocialUserAppVisibility;
   status: SocialUserAppStatus;
+  accessReason?: SocialUserAppAccessReason;
   owner: SocialUserProfile;
   averageReviewScore?: number;
   reviewsCount?: number;

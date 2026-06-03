@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import AppsRounded from '@mui/icons-material/AppsRounded';
+import CheckRounded from '@mui/icons-material/CheckRounded';
+import ErrorOutlineRounded from '@mui/icons-material/ErrorOutlineRounded';
 import LinkOffRounded from '@mui/icons-material/LinkOffRounded';
 import SendRounded from '@mui/icons-material/SendRounded';
 import ShareRounded from '@mui/icons-material/ShareRounded';
@@ -68,6 +70,13 @@ const mergeMessage = (messages: CloudMessage[], message: CloudMessage) => {
   const next = messages.filter((entry) => messageIdentity(entry) !== identity);
   next.push(message);
   return sortMessages(next);
+};
+
+const createClientMessageId = () => {
+  const bytes = new Uint8Array(8);
+  globalThis.crypto?.getRandomValues?.(bytes);
+  const suffix = Array.from(bytes).map((byte) => byte.toString(16).padStart(2, '0')).join('');
+  return `${Date.now()}-${suffix || Math.random().toString(16).slice(2)}`;
 };
 
 const appShareState = (message: CloudMessage) => {
@@ -214,16 +223,44 @@ export function FriendChatWindowView({
 
     setSending(true);
     setError(null);
+    const clientMessageId = createClientMessageId();
+    const optimistic: CloudMessage = {
+      type: 'CloudTextMessage',
+      sender: {
+        id: account.user?.id ?? 0,
+        username: account.user?.username ?? 'me',
+        firstName: account.user?.firstName,
+        lastName: account.user?.lastName,
+      },
+      recipient: {
+        id: friendUserId,
+        username: friendUsername,
+        firstName: friendDisplayName,
+      },
+      deliveryMode: 'persistent',
+      source: 'user',
+      status: 'stored',
+      clientMessageId,
+      metadata: {},
+      envelopes: [],
+      plaintext: text,
+      localState: 'pending',
+      createdAt: new Date().toISOString(),
+    };
+    setMessages((current) => mergeMessage(current, optimistic));
+    setDraft('');
     try {
       const sent = await window.forger.sendCloudMessage({
         recipientUserId: friendUserId,
+        clientMessageId,
         text,
         delivery: 'persistent',
         source: 'user',
       });
       setMessages((current) => mergeMessage(current, sent));
-      setDraft('');
     } catch (err) {
+      setMessages((current) => mergeMessage(current, { ...optimistic, localState: 'failed' }));
+      setDraft((current) => current || text);
       setError(err instanceof Error ? err.message : 'No pudimos enviar el mensaje.');
     } finally {
       setSending(false);
@@ -409,6 +446,7 @@ export function FriendChatWindowView({
               const outgoing = message.sender.id === account.user?.id;
               const key = message.id ?? `${message.clientMessageId ?? 'message'}-${index}`;
               const body = message.plaintext?.trim();
+              const localState = message.localState;
               const shareState = appShareState(message);
               const shareInstallInput = appShareInstallInput(message);
               const shareActionKey = messageIdentity(message) ?? (message.type === 'CloudAppShareMessage' ? `app-share:${message.appShare.id}` : null);
@@ -529,7 +567,12 @@ export function FriendChatWindowView({
                           : theme.palette.text.secondary,
                       }}
                     >
-                      {formatMessageTime(message.createdAt)}
+                      <Stack direction="row" spacing={0.5} alignItems="center" component="span">
+                        <span>{formatMessageTime(message.createdAt)}</span>
+                        {outgoing && localState === 'pending' ? <CircularProgress size={12} color="inherit" /> : null}
+                        {outgoing && localState === 'sent' ? <CheckRounded sx={{ fontSize: 14 }} /> : null}
+                        {outgoing && localState === 'failed' ? <ErrorOutlineRounded sx={{ fontSize: 14 }} /> : null}
+                      </Stack>
                     </Typography>
                   </Paper>
                 </Stack>

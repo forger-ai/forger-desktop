@@ -214,6 +214,7 @@ Use this shape as the current authoring contract. Remove fields that do not appl
 - `permissionMode` controls provider filesystem permissions for a prompt template or agent. Use `"safe"` by default. Use `"unsafe"` only when that specific task or agent needs broad filesystem access, and make sure the user can see and edit that choice in Forger.
 - `permissionMode` may be declared directly on `promptTemplates[]` or `agents[]`, or inside an explicit `runtime` block when the manifest uses one.
 - `tools` declares official Forger tools only. Today the official tool is Gmail, with actions `gmail.connection.status`, `gmail.search_messages`, `gmail.read_thread`, `gmail.read_attachment`, and `gmail.send_email`.
+- Every entry in `tools.required[]` and `tools.optional[]` must include `toolId`, `reason`, and `actions`. `reason` is required, not decorative; it must explain the user-visible reason this app needs that official tool access.
 - Put Gmail in `tools.required` only when the app cannot perform its core purpose without Gmail. Otherwise put it in `tools.optional`.
 - Do not declare Gmail OAuth credentials in `appSecrets`; Forger Tools owns Gmail OAuth connection and token storage.
 - `appSecrets` are declarations only. They never store secret values. Never put secret values in manifests, prompts, logs, memory, generated files, test fixtures, screenshots, or final messages.

@@ -8,6 +8,7 @@ import PlaylistAddCheckRounded from '@mui/icons-material/PlaylistAddCheckRounded
 import ScienceRounded from '@mui/icons-material/ScienceRounded';
 import VisibilityRounded from '@mui/icons-material/VisibilityRounded';
 import {
+  alpha,
   Box,
   Button,
   Card,
@@ -133,6 +134,12 @@ const statusColor = (status: AutomationRunSummary['status']): 'default' | 'succe
 
 function MarkdownRunOutput({ content }: { content: string }) {
   const theme = useTheme();
+  const codeBackground = theme.palette.mode === 'dark'
+    ? alpha(theme.palette.common.white, 0.08)
+    : theme.palette.action.hover;
+  const preBackground = theme.palette.mode === 'dark'
+    ? alpha(theme.palette.common.white, 0.06)
+    : theme.palette.background.default;
 
   return (
     <Box
@@ -146,11 +153,28 @@ function MarkdownRunOutput({ content }: { content: string }) {
         '& strong': { fontWeight: 700 },
         '& code': {
           fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-          bgcolor: 'rgba(148,163,184,0.18)',
+          bgcolor: codeBackground,
+          color: 'text.primary',
           px: 0.5,
           py: 0.15,
           borderRadius: 0.75,
           fontSize: '0.9em',
+        },
+        '& pre': {
+          bgcolor: preBackground,
+          border: `1px solid ${theme.palette.divider}`,
+          borderRadius: 1,
+          p: 1.25,
+          maxWidth: '100%',
+          overflowX: 'auto',
+          overflowY: 'hidden',
+          my: 1,
+        },
+        '& pre code': {
+          bgcolor: 'transparent',
+          p: 0,
+          borderRadius: 0,
+          whiteSpace: 'pre',
         },
       }}
     >

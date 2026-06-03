@@ -451,6 +451,8 @@ test('official tool skill templates and seed data keep expected Desktop defaults
   assert.match(manifestSkill.body, /claude-sonnet-4-6/);
   assert.match(manifestSkill.body, /Do not use legacy Claude Code aliases/);
   assert.match(manifestSkill.body, /gmail\.connection\.status/);
+  assert.match(manifestSkill.body, /Every entry in `tools\.required\[\]` and `tools\.optional\[\]` must include `toolId`, `reason`, and `actions`/);
+  assert.match(manifestSkill.body, /`reason` is required, not decorative/);
   assert.match(manifestSkill.body, /Do not add `catalog\.capabilities`/);
   assert.match(templates.find((template) => template.id === 'forger-agents')?.body ?? '', /^---\nname: forger-agents/m);
   assert.match(templates.find((template) => template.id === 'forger-tasks')?.body ?? '', /^---\nname: forger-tasks/m);

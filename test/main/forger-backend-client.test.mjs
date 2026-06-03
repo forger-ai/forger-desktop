@@ -661,17 +661,7 @@ test('remote backup cloud calls normalize lists, upload archives, download files
       archivePath,
       backupType: 'backup',
       source: 'manual',
-      localBackup: {
-        backupId: 'local-1',
-        appId: 'finance-os',
-        appName: 'Finance OS',
-        appVersion: '1.0.0',
-        createdAt: '2026-05-21T00:00:00Z',
-        reason: 'manual',
-        fileCount: 1,
-        totalBytes: 9,
-        files: ['db.sqlite'],
-      },
+      localBackup: { backupId: 'local-1', appId: 'finance-os', appName: 'Finance OS', appVersion: '1.0.0', createdAt: '2026-05-21T00:00:00Z', reason: 'manual', fileCount: 1, totalBytes: 9, files: ['db.sqlite'] },
     });
     assert.equal(uploaded.success, true);
     assert.equal(uploaded.remoteBackup.id, 102);
@@ -951,6 +941,44 @@ test('social app resolver fetches public apps by id', async () => {
   }
 });
 
+test('social profile resolver fetches profile apps by username', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'forger-social-profile-'));
+  let requestPath;
+  const harness = createClient(root, async (url) => {
+    const parsed = new URL(url);
+    requestPath = parsed.pathname;
+    return jsonResponse(200, {
+      profile: { id: 1, username: 'maker', first_name: 'Ada', last_initial: 'L', social_bio: 'Builds apps' },
+      apps: [
+        {
+          id: 9,
+          slug: 'chessos',
+          name: 'ChessOS',
+          visibility: 'private',
+          status: 'published',
+          access_reason: 'direct_share',
+          owner: { id: 1, username: 'maker' },
+          latest_version: { id: 9, version: 'v2', checksum_sha256: 'a'.repeat(64), file_size_bytes: 10, supported_platforms: [] },
+        },
+      ],
+    });
+  }, 'session-token');
+
+  try {
+    const result = await harness.client.getSocialProfile('@maker');
+    assert.equal(requestPath, '/api/v1/social/profiles/%40maker');
+    assert.equal(result.profile.username, 'maker');
+    assert.equal(result.profile.firstName, 'Ada');
+    assert.equal(result.apps[0].slug, 'chessos');
+    assert.equal(result.apps[0].visibility, 'private');
+    assert.equal(result.apps[0].accessReason, 'direct_share');
+    assert.equal(result.apps[0].latestVersion.version, 'v2');
+  } finally {
+    harness.restore();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('account, catalog, rating, and download methods cover success and malformed response branches', async () => {
   const root = await mkdtemp(join(tmpdir(), 'forger-backend-account-success-'));
   const requests = [];
@@ -1153,19 +1181,8 @@ test('remote backup and Gmail OAuth backend helpers cover empty, signed, and inv
 
     await assert.rejects(() => harness.client.downloadRemoteBackup(404, join(root, 'missing.zip')), /remote_backup_download_failed_404/);
     assert.deepEqual(await harness.client.deleteRemoteBackup(6), { success: true, userMessage: 'Respaldo cloud eliminado.' });
-    await assert.rejects(
-      () => harness.client.exchangeGmailOAuthCode({
-        clientId: 'client-id',
-        code: 'code',
-        codeVerifier: 'verifier',
-        redirectUri: 'http://127.0.0.1/callback',
-      }),
-      (error) => error.technicalCode === 'gmail_oauth_backend_response_invalid',
-    );
-    await assert.rejects(
-      () => harness.client.refreshGmailOAuthAccessToken({ clientId: 'client-id', refreshToken: 'refresh-token' }),
-      (error) => error.technicalCode === 'gmail_oauth_backend_failed_502',
-    );
+    await assert.rejects(() => harness.client.exchangeGmailOAuthCode({ clientId: 'client-id', code: 'code', codeVerifier: 'verifier', redirectUri: 'http://127.0.0.1/callback' }), (error) => error.technicalCode === 'gmail_oauth_backend_response_invalid');
+    await assert.rejects(() => harness.client.refreshGmailOAuthAccessToken({ clientId: 'client-id', refreshToken: 'refresh-token' }), (error) => error.technicalCode === 'gmail_oauth_backend_failed_502');
   } finally {
     harness.restore();
     await rm(root, { recursive: true, force: true });

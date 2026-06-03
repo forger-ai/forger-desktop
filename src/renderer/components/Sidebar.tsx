@@ -116,7 +116,7 @@ export function Sidebar({ currentView, onNavigate, t, desktopUpdateState, advanc
     chat: t.nav.chat,
     create: t.nav.create,
     feedback: t.nav.feedback,
-    friends: 'Foro',
+    friends: 'Social',
     automations: t.nav.automations,
     files: t.nav.files,
     backups: t.nav.backups,

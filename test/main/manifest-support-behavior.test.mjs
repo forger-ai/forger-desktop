@@ -37,6 +37,7 @@ const createController = (overrides = {}) => {
     forgerAccount: overrides.forgerAccount ?? { authenticated: false, token: null },
     getForgerBackendClient: overrides.getForgerBackendClient,
     getForgerAccount: overrides.getForgerAccount,
+    getRegistry: overrides.getRegistry,
     registry,
     catalogApps: overrides.catalogApps ?? [],
     runningApps: overrides.runningApps ?? new Map(),
@@ -497,6 +498,72 @@ test('manifest support resolves installed manifests before catalog declarations 
 
   const templates = await controller.resolveInstalledPromptTemplates('finance-os');
   assert.equal(templates[0].model, 'gpt-manifest');
+});
+
+test('manifest support resolves official tool declarations from the current registry snapshot', async (t) => {
+  const root = await tmpRoot('manifest-support-dynamic-registry');
+  t.after(async () => {
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  const installDir = path.join(root, 'apps', 'crm-pyme');
+  await fs.mkdir(installDir, { recursive: true });
+  await fs.writeFile(path.join(installDir, 'manifest.json'), JSON.stringify({
+    tools: {
+      required: [{
+        toolId: 'gmail',
+        reason: 'Search Gmail for lead emails',
+        actions: ['gmail.connection.status', 'gmail.search_messages', 'gmail.read_thread'],
+      }],
+      optional: [],
+    },
+  }), 'utf8');
+
+  let currentRegistry = { apps: {} };
+  class FakeOfficialToolsService {
+    constructor(options) {
+      this.options = options;
+    }
+
+    async list() {
+      return { tools: [] };
+    }
+
+    async listAgentActionIdsForApp(appId) {
+      const declarations = await this.options.getAppToolDeclarations(appId);
+      const actions = new Set();
+      for (const declaration of declarations?.required ?? []) {
+        for (const action of declaration.actions) {
+          actions.add(action);
+        }
+      }
+      return actions;
+    }
+  }
+
+  const { controller } = createController({
+    registry: { apps: {} },
+    getRegistry: () => currentRegistry,
+    OfficialToolsService: FakeOfficialToolsService,
+  });
+  const service = controller.getOfficialToolsService();
+
+  currentRegistry = {
+    apps: {
+      'social-kupa-crm-pyme': {
+        appId: 'social-kupa-crm-pyme',
+        name: 'CRM PYME',
+        installDir,
+        version: 'v1',
+        status: 'installed',
+      },
+    },
+  };
+
+  assert.deepEqual([...await service.listAgentActionIdsForApp('social-kupa-crm-pyme')], [
+    'gmail.connection.status',
+    'gmail.search_messages',
+    'gmail.read_thread',
+  ]);
 });
 
 test('manifest support handles invalid manifests and legacy codex conversation fallback', async (t) => {

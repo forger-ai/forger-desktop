@@ -1,6 +1,6 @@
-import { Box, type AlertColor } from '@mui/material';
+import { Box } from '@mui/material';
 import type { ReactNode } from 'react';
-import type { AppSummary, BackgroundTask, CloudFriendship, DesktopUpdateState, ForgerAccountSession, FriendChatWindowOpenResult } from '@shared/types';
+import type { AppSummary, BackgroundTask, DesktopUpdateState, ForgerAccountSession } from '@shared/types';
 import type { AppDictionary } from '@renderer/i18n';
 import { Sidebar, type View } from './Sidebar';
 import { Topbar } from './Topbar';
@@ -17,9 +17,6 @@ interface AppShellProps {
   onOpenCloudModal: () => void;
   account: ForgerAccountSession;
   accountBusy: boolean;
-  onOpenFriendChat: (friendship: CloudFriendship) => Promise<FriendChatWindowOpenResult> | FriendChatWindowOpenResult;
-  onSocialNotify: (message: string, severity?: AlertColor) => void;
-  onUpdateUsername: (username: string) => Promise<boolean>;
   onLogout: () => void;
   backgroundTasks: BackgroundTask[];
   backgroundTasksOpen: boolean;
@@ -46,9 +43,6 @@ export function AppShell({
   onOpenCloudModal,
   account,
   accountBusy,
-  onOpenFriendChat,
-  onSocialNotify,
-  onUpdateUsername,
   onLogout,
   backgroundTasks,
   backgroundTasksOpen,
@@ -87,9 +81,7 @@ export function AppShell({
           onOpenCloudModal={onOpenCloudModal}
           account={account}
           accountBusy={accountBusy}
-          onOpenFriendChat={onOpenFriendChat}
-          onSocialNotify={onSocialNotify}
-          onUpdateUsername={onUpdateUsername}
+          onOpenSocialTab={() => onNavigate('friends')}
           onLogout={onLogout}
           backgroundTasks={backgroundTasks}
           backgroundTasksOpen={backgroundTasksOpen}

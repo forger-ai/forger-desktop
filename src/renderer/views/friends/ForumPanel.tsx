@@ -33,6 +33,7 @@ import type { ForumComment, ForumParticipationState, ForumPost } from '@shared/t
 interface ForumPanelProps {
   active: boolean;
   onNotify?: (message: string, severity?: AlertColor) => void;
+  onOpenProfile?: (username: string) => void;
 }
 
 const formatForumDate = (value?: string) => {
@@ -51,7 +52,7 @@ const placeholderBody = (status: ForumPost['status'], kind: 'post' | 'comment') 
   return '';
 };
 
-export function ForumPanel({ active, onNotify }: ForumPanelProps) {
+export function ForumPanel({ active, onNotify, onOpenProfile }: ForumPanelProps) {
   const theme = useTheme();
   const [participation, setParticipation] = useState<ForumParticipationState | null>(null);
   const [posts, setPosts] = useState<ForumPost[]>([]);
@@ -247,6 +248,11 @@ export function ForumPanel({ active, onNotify }: ForumPanelProps) {
               <Typography variant="body2" sx={{ fontWeight: 700 }}>{forumAuthorLabel(comment.author)}</Typography>
               <Typography variant="caption" color="text.secondary">@{comment.author.username}</Typography>
               <Typography variant="caption" color="text.secondary">{formatForumDate(comment.createdAt)}</Typography>
+              {onOpenProfile ? (
+                <Button size="small" onClick={() => onOpenProfile(comment.author.username)}>
+                  Ver perfil
+                </Button>
+              ) : null}
             </Stack>
             <Typography variant="body2" color={comment.body ? 'text.primary' : 'text.secondary'} sx={{ whiteSpace: 'pre-wrap' }}>
               {body}
@@ -356,6 +362,11 @@ export function ForumPanel({ active, onNotify }: ForumPanelProps) {
               <Avatar sx={{ width: 32, height: 32 }}>{forumAuthorLabel(selectedPost.author).slice(0, 1).toUpperCase()}</Avatar>
               <Typography variant="body1" sx={{ fontWeight: 700 }}>{forumAuthorLabel(selectedPost.author)}</Typography>
               <Typography variant="caption" color="text.secondary">@{selectedPost.author.username}</Typography>
+              {onOpenProfile ? (
+                <Button size="small" onClick={() => onOpenProfile(selectedPost.author.username)}>
+                  Ver perfil
+                </Button>
+              ) : null}
             </Stack>
             <Typography variant="caption" color="text.secondary">{formatForumDate(selectedPost.createdAt)}</Typography>
             <Typography variant="body2" color={selectedPost.body ? 'text.primary' : 'text.secondary'} sx={{ whiteSpace: 'pre-wrap' }}>
@@ -437,6 +448,17 @@ export function ForumPanel({ active, onNotify }: ForumPanelProps) {
                     <Avatar sx={{ width: 32, height: 32 }}>{forumAuthorLabel(post.author).slice(0, 1).toUpperCase()}</Avatar>
                     <Typography variant="body1" sx={{ fontWeight: 700 }} noWrap>{forumAuthorLabel(post.author)}</Typography>
                     <Typography variant="caption" color="text.secondary">@{post.author.username}</Typography>
+                    {onOpenProfile ? (
+                      <Button
+                        size="small"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onOpenProfile(post.author.username);
+                        }}
+                      >
+                        Ver perfil
+                      </Button>
+                    ) : null}
                   </Stack>
                   <Typography variant="body2" color={post.body ? 'text.primary' : 'text.secondary'} sx={{ whiteSpace: 'pre-wrap' }}>
                     {post.body ?? placeholderBody(post.status, 'post')}

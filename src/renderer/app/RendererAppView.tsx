@@ -32,7 +32,7 @@ import { DevicesView } from '@renderer/views/DevicesView';
 import { FeedbackView } from '@renderer/views/FeedbackView';
 import { FilesView } from '@renderer/views/FilesView';
 import { FriendChatWindowView } from '@renderer/views/FriendChatWindowView';
-import { ForumPanel } from '@renderer/views/friends/ForumPanel';
+import { SocialView } from '@renderer/views/SocialView';
 import { SettingsView } from '@renderer/views/SettingsView';
 import { SecretsView } from '@renderer/views/SecretsView';
 import { ToolsView } from '@renderer/views/ToolsView';
@@ -59,6 +59,8 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     resetOnboarding,
     theme,
     socialChatWindowRoute,
+    socialProfileUsername,
+    setSocialProfileUsername,
     forgerAccount,
     currentView,
     setCurrentView,
@@ -71,6 +73,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     setCloudModalOpen,
     forgerAccountBusy,
     handleOpenFriendChat,
+    handleOpenSocialApp,
     backgroundTasks,
     backgroundTasksDrawerOpen,
     activeBackgroundTaskCount,
@@ -559,12 +562,6 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
           onOpenCloudModal={() => setCloudModalOpen(true)}
           account={forgerAccount}
           accountBusy={forgerAccountBusy}
-          onOpenFriendChat={(friendship) => handleOpenFriendChat(friendship)}
-          onSocialNotify={(message, severity = 'info') => {
-            setBannerSeverity(severity);
-            setBannerMessage(message);
-          }}
-          onUpdateUsername={handleForgerUsernameUpdate}
           onLogout={() => void handleForgerLogout()}
           backgroundTasks={backgroundTasks}
           backgroundTasksOpen={backgroundTasksDrawerOpen}
@@ -575,7 +572,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
           onOpenBackgroundTask={openBackgroundTaskDetail}
           desktopUpdateState={desktopUpdateState}
           advancedMode={advancedMode}
-          showForumNav={forumParticipation.status === 'opted_in'}
+          showForumNav
         >
         {currentView === 'apps' ? renderInstalledAppsView() : null}
 
@@ -646,6 +643,13 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             onDisconnectSecret={handleDisconnectSecret}
             onDelete={(appId) => void handleDeleteApp(appId)}
             onOpenAccount={() => setCloudModalOpen(true)}
+            onOpenProfile={(username) => {
+              const normalized = username.trim().replace(/^@/, '');
+              if (!normalized) return;
+              window.sessionStorage.setItem('forger.social.last-tab', 'profile');
+              setSocialProfileUsername(normalized);
+              setCurrentView('friends');
+            }}
             onSubmitRating={handleSubmitRating}
             onUpdatePrompt={handleUpdateAppPrompt}
             onRestorePrompt={handleRestoreAppPrompt}
@@ -719,34 +723,20 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
         ) : null}
 
         {currentView === 'friends' ? (
-          <Box sx={{ px: { xs: 2, md: 3 }, py: 3, width: '100%' }}>
-            <Stack spacing={2}>
-              <Stack spacing={0.5}>
-                <Typography variant="h4" sx={{ fontWeight: 800 }}>Foro</Typography>
-                <Typography color="text.secondary">
-                  Foro de la comunidad y conversaciones públicas opt-in.
-                </Typography>
-              </Stack>
-              {forgerAccount.authenticated && forgerAccount.user?.confirmed ? (
-                <ForumPanel
-                  active={currentView === 'friends'}
-                  onNotify={(message, severity = 'info') => {
-                    setBannerSeverity(severity);
-                    setBannerMessage(message);
-                  }}
-                />
-              ) : (
-                <Stack spacing={1.5} sx={{ maxWidth: 520 }}>
-                  <Typography color="text.secondary">
-                    Inicia sesión en Forger Cloud para entrar al foro.
-                  </Typography>
-                  <Button variant="contained" onClick={() => setCloudModalOpen(true)} sx={{ alignSelf: 'flex-start' }}>
-                    Iniciar sesión
-                  </Button>
-                </Stack>
-              )}
-            </Stack>
-          </Box>
+          <SocialView
+            account={forgerAccount}
+            accountBusy={forgerAccountBusy}
+            initialProfileUsername={socialProfileUsername}
+            onInitialProfileUsernameConsumed={() => setSocialProfileUsername(null)}
+            onOpenFriendChat={(friendship) => handleOpenFriendChat(friendship)}
+            onOpenCloudModal={() => setCloudModalOpen(true)}
+            onOpenSocialApp={handleOpenSocialApp}
+            onNotify={(message, severity = 'info') => {
+              setBannerSeverity(severity);
+              setBannerMessage(message);
+            }}
+            onUpdateUsername={handleForgerUsernameUpdate}
+          />
         ) : null}
 
         {currentView === 'create' ? (

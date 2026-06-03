@@ -77,6 +77,7 @@ interface AppViewProps {
   onDisconnectSecret: (appSecretName: string) => Promise<void>;
   onDelete: (appId: string) => void;
   onOpenAccount: () => void;
+  onOpenProfile?: (username: string) => void;
   onSubmitRating: (input: SubmitAppRatingInput) => Promise<{ success: boolean }>;
   onUpdatePrompt: (input: AppPromptReviewInput) => Promise<AppPromptMutationResult>;
   onRestorePrompt: (input: AppPromptRestoreInput) => Promise<AppPromptMutationResult>;
@@ -167,6 +168,7 @@ export function AppView({
   onDisconnectSecret,
   onDelete,
   onOpenAccount,
+  onOpenProfile,
   onSubmitRating,
   onUpdatePrompt,
   onRestorePrompt,
@@ -906,6 +908,11 @@ export function AppView({
                 <Stack direction="row" spacing={1} alignItems="center" useFlexGap flexWrap="wrap">
                   <Rating value={rating.score} readOnly size="small" />
                   <Typography fontWeight={700}>{rating.user?.firstName ?? t.appView.reviewUserFallback}</Typography>
+                  {rating.user?.username && onOpenProfile ? (
+                    <Button size="small" onClick={() => onOpenProfile(rating.user!.username!)}>
+                      Ver perfil
+                    </Button>
+                  ) : null}
                 </Stack>
                 {rating.comment ? <Typography color="text.secondary">{rating.comment}</Typography> : null}
                 {rating.forgerResponse ? (
