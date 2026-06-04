@@ -1403,6 +1403,7 @@ test('normalizeInstalledAgentContext writes app runtime skills while ignoring sk
   assert.ok(generated.includes('forger-app-official-tools'));
   assert.equal(generated.includes('forger-installed-app-change'), false);
   assert.equal(generated.includes('forger-python-backend'), false);
+  assert.equal(generated.includes('forger-frontend-patterns'), false);
   assert.equal(generated.includes('forger-fastapi-contracts'), false);
   assert.equal(generated.includes('forger-frontend-structure'), false);
   assert.equal(generated.includes('forger-react-ui'), false);
