@@ -1031,7 +1031,20 @@ export class ForgerBackendClient {
     if (!normalizedUsername) {
       throw backendError('No pudimos abrir este perfil Social.', 'social_profile_username_missing');
     }
-    const payload = await getBackendJson(this.options, `/api/v1/social/profiles/${encodeURIComponent(normalizedUsername)}`, 'social_profile_get_failed');
+    const response = await fetch(`${this.options.backendBaseUrl}/api/v1/social/profiles/${encodeURIComponent(normalizedUsername)}`, {
+      method: 'GET',
+      headers: buildBackendHeaders(this.options.token()),
+    });
+    const payload = await this.readJson<unknown>(response);
+    if (!response.ok) {
+      if (response.status === 404) {
+        throw backendError(`No encontramos el perfil @${normalizedUsername.replace(/^@/, '')}.`, 'social_profile_not_found');
+      }
+      if (response.status === 401 || response.status === 403) {
+        throw backendError('Forger Cloud session is no longer valid.', `social_profile_get_failed_${response.status}`);
+      }
+      throw backendError('No pudimos abrir este perfil Social.', `social_profile_get_failed_${response.status}`);
+    }
     const profile = toSocialUserProfileDetail(payload);
     if (!profile) throw backendError('No pudimos abrir este perfil Social.', 'social_profile_invalid');
     return profile;

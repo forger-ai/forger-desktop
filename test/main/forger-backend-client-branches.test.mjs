@@ -149,3 +149,28 @@ test('backend client maps profile cooldowns, OAuth token posts, device failures,
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test('social profile resolver maps missing usernames to a profile-specific message', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'forger-social-profile-missing-'));
+  let requestPath;
+  const harness = createClient(root, async (url) => {
+    const parsed = new URL(url);
+    requestPath = parsed.pathname;
+    return jsonResponse(404, { error: 'not_found' });
+  }, 'session-token');
+
+  try {
+    await assert.rejects(
+      () => harness.client.getSocialProfile('missing_user'),
+      (error) => {
+        assert.equal(error.message, 'No encontramos el perfil @missing_user.');
+        assert.equal(error.technicalCode, 'social_profile_not_found');
+        return true;
+      },
+    );
+    assert.equal(requestPath, '/api/v1/social/profiles/missing_user');
+  } finally {
+    harness.restore();
+    await rm(root, { recursive: true, force: true });
+  }
+});

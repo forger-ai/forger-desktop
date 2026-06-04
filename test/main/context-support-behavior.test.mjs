@@ -47,24 +47,18 @@ test('context support writes global AGENTS and official tool skills into metadat
   assert.ok(skillDirs.includes('forger-manifest-authoring'));
   assert.ok(skillDirs.includes('forger-desktop-runtime-bridge'));
   assert.ok(skillDirs.includes('forger-localization'));
-  assert.ok(skillDirs.includes('forger-frontend-product-patterns'));
-  assert.ok(skillDirs.includes('forger-web-interface-review'));
-  assert.ok(skillDirs.includes('forger-app-shell-layout'));
-  assert.ok(skillDirs.includes('forger-mui-design-patterns'));
-  assert.ok(skillDirs.includes('forger-mui-component-patterns'));
-  assert.ok(skillDirs.includes('forger-mui-date-pickers'));
-  assert.ok(skillDirs.includes('forger-tailwind-design-patterns'));
-  assert.ok(skillDirs.includes('forger-tailwind-shadcn-patterns'));
-  assert.ok(skillDirs.includes('forger-tailwind-responsive-frontend'));
+  assert.ok(skillDirs.includes('forger-frontend-patterns'));
   assert.ok(skillDirs.includes('forger-tanstack-query-patterns'));
   assert.ok(skillDirs.includes('forger-installed-app-change'));
   assert.ok(skillDirs.includes('forger-memory'));
   assert.ok(skillDirs.includes('forger-python-backend'));
   assert.ok(skillDirs.includes('forger-fastapi-contracts'));
-  assert.ok(skillDirs.includes('forger-frontend-structure'));
-  assert.ok(skillDirs.includes('forger-mobile-responsive-frontend'));
   assert.ok(skillDirs.includes('forger-remote-tunnel-wiring'));
-  assert.ok(skillDirs.includes('forger-react-ui'));
+  assert.equal(skillDirs.includes('forger-frontend-product-patterns'), false);
+  assert.equal(skillDirs.includes('forger-web-interface-review'), false);
+  assert.equal(skillDirs.includes('forger-app-shell-layout'), false);
+  assert.equal(skillDirs.includes('forger-tailwind-shadcn-patterns'), false);
+  assert.equal(skillDirs.includes('forger-mui-design-patterns'), false);
 });
 
 test('context support preserves user AGENTS files and upgrades older Forger contract markers', async (t) => {

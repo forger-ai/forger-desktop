@@ -387,36 +387,24 @@ test('official tool skill templates and seed data keep expected Desktop defaults
     'forger-app-mcp-data-tools',
     'forger-context',
     'forger-agents',
-    'forger-app-shell-layout',
     'forger-automations',
     'forger-desktop-runtime-bridge',
     'forger-fastapi-contracts',
-    'forger-frontend-product-patterns',
-    'forger-frontend-structure',
+    'forger-frontend-patterns',
     'forger-gmail',
     'forger-installed-app-change',
     'forger-localization',
     'forger-manifest-authoring',
     'forger-memory',
-    'forger-mobile-responsive-frontend',
-    'forger-mui-component-patterns',
-    'forger-mui-consistency',
-    'forger-mui-date-pickers',
-    'forger-mui-design-patterns',
     'forger-official-tools',
     'forger-permissions',
     'forger-python-backend',
-    'forger-react-ui',
     'forger-remote-tunnel-wiring',
     'forger-secrets',
     'forger-social-app-review',
-    'forger-tailwind-design-patterns',
-    'forger-tailwind-responsive-frontend',
-    'forger-tailwind-shadcn-patterns',
     'forger-tanstack-query-patterns',
     'forger-tasks',
     'forger-tools',
-    'forger-web-interface-review',
   ]);
   assert.ok(templates.every((template) => template.body.startsWith('---\nname:')));
   const skillFiles = await readSkillFiles();
@@ -457,83 +445,34 @@ test('official tool skill templates and seed data keep expected Desktop defaults
   assert.match(templates.find((template) => template.id === 'forger-agents')?.body ?? '', /^---\nname: forger-agents/m);
   assert.match(templates.find((template) => template.id === 'forger-tasks')?.body ?? '', /^---\nname: forger-tasks/m);
   assert.match(templates.find((template) => template.id === 'forger-tools')?.body ?? '', /^---\nname: forger-tools/m);
-  const appShellSkill = templates.find((template) => template.id === 'forger-app-shell-layout');
-  assert.ok(appShellSkill);
-  assert.match(appShellSkill.body, /only the main content region scrolls/);
-  assert.match(appShellSkill.body, /Rail-style destinations remain visible/);
-  assert.match(appShellSkill.body, /Tailwind responsive variants/);
-  assert.match(appShellSkill.body, /MUI breakpoints and `useMediaQuery`/);
-  assert.match(appShellSkill.body, /If a top bar uses fixed positioning/);
-  assert.match(appShellSkill.body, /fixed bottom navigation/);
-  const productPatternsSkill = templates.find((template) => template.id === 'forger-frontend-product-patterns');
-  assert.ok(productPatternsSkill);
-  assert.equal(productPatternsSkill.description, 'Use when creating or changing Forger app dashboards, CRUD screens, forms, data views, assistant task surfaces, multi-step workflows, or screen structure before choosing stack-specific UI skills.');
-  assert.match(productPatternsSkill.body, /Do not overload dashboards/);
-  assert.match(productPatternsSkill.body, /Use pills and badges sparingly/);
-  assert.match(productPatternsSkill.body, /minimalist request means fewer visual containers/);
-  assert.match(productPatternsSkill.body, /agent threads, promptTemplate tasks/);
-  assert.match(productPatternsSkill.body, /Inspect the real app before selecting implementation guidance/);
-  assert.match(productPatternsSkill.body, /forger-frontend-structure/);
-  assert.match(productPatternsSkill.body, /forger-react-ui/);
-  assert.match(productPatternsSkill.body, /forger-app-shell-layout/);
-  assert.match(productPatternsSkill.body, /forger-localization/);
-  assert.match(productPatternsSkill.body, /forger-tailwind-design-patterns/);
-  assert.match(productPatternsSkill.body, /forger-tailwind-shadcn-patterns/);
-  assert.match(productPatternsSkill.body, /forger-tailwind-responsive-frontend/);
-  assert.match(productPatternsSkill.body, /forger-mui-design-patterns/);
-  assert.match(productPatternsSkill.body, /forger-mui-component-patterns/);
-  assert.match(productPatternsSkill.body, /forger-mui-date-pickers/);
-  assert.match(productPatternsSkill.body, /forger-mui-consistency/);
-  assert.match(productPatternsSkill.body, /forger-mobile-responsive-frontend/);
-  const webInterfaceReviewSkill = templates.find((template) => template.id === 'forger-web-interface-review');
-  assert.ok(webInterfaceReviewSkill);
-  assert.match(webInterfaceReviewSkill.body, /Do not fetch remote guideline documents/);
-  assert.match(webInterfaceReviewSkill.body, /not a public marketing website/);
-  const muiDesignSkill = templates.find((template) => template.id === 'forger-mui-design-patterns');
-  assert.ok(muiDesignSkill);
-  assert.match(muiDesignSkill.body, /Apply these rules only to Forger Desktop or installed apps whose manifest declares a MUI frontend/);
-  const muiComponentSkill = templates.find((template) => template.id === 'forger-mui-component-patterns');
-  assert.ok(muiComponentSkill);
-  assert.match(muiComponentSkill.body, /Apply these rules only to Forger Desktop or apps whose manifest declares a MUI frontend/);
-  assert.match(muiComponentSkill.body, /MUI X Community packages/);
-  assert.match(muiComponentSkill.body, /Do not use MUI X Pro or Premium/);
-  assert.match(muiComponentSkill.body, /Use MUI X Community `DataGrid`/);
-  assert.match(muiComponentSkill.body, /Use MUI X Community Charts/);
-  assert.match(muiComponentSkill.body, /Use `DatePicker`/);
-  assert.match(muiComponentSkill.body, /Do not use `TextField type="date"`/);
-  assert.match(muiComponentSkill.body, /Use `Card` for content and actions about one subject/);
-  const muiDatePickerSkill = templates.find((template) => template.id === 'forger-mui-date-pickers');
-  assert.ok(muiDatePickerSkill);
-  assert.match(muiDatePickerSkill.body, /Apply these rules only to Forger Desktop or apps whose manifest declares a MUI frontend/);
-  assert.match(muiDatePickerSkill.body, /Use MUI X Community Date and Time Pickers/);
-  assert.match(muiDatePickerSkill.body, /Wrap picker usage in `LocalizationProvider`/);
-  assert.match(muiDatePickerSkill.body, /Do not use `TextField type="date"`/);
-  assert.match(muiDatePickerSkill.body, /Stored values remain stable across reloads/);
-  const tailwindDesignSkill = templates.find((template) => template.id === 'forger-tailwind-design-patterns');
-  assert.ok(tailwindDesignSkill);
-  assert.match(tailwindDesignSkill.body, /Tailwind CSS, shadcn\/ui copied components, and Radix primitives/);
-  assert.match(tailwindDesignSkill.body, /Do not use MUI component APIs/);
-  assert.match(tailwindDesignSkill.body, /Minimal or operational screens use unframed page sections/);
-  const tailwindShadcnSkill = templates.find((template) => template.id === 'forger-tailwind-shadcn-patterns');
-  assert.ok(tailwindShadcnSkill);
-  assert.equal(tailwindShadcnSkill.description, 'Use when building Tailwind/shadcn app UI controls, forms, dialogs, selects, comboboxes, popovers, dropdowns, tabs, tooltips, sheets, accordions, toasts, copied components, or Radix primitives; inspect existing components and install shadcn/Radix before hand-rolling interactive behavior.');
-  assert.match(tailwindShadcnSkill.body, /## Component Selection Loop/);
-  assert.match(tailwindShadcnSkill.body, /Identify the needed behavior before writing JSX/);
-  assert.match(tailwindShadcnSkill.body, /add the matching shadcn component through the app package manager and shadcn CLI or registry/);
-  assert.match(tailwindShadcnSkill.body, /Keep direct `@radix-ui\/\*` imports inside reusable `frontend\/src\/components\/ui\/\*` primitives/);
-  assert.match(tailwindShadcnSkill.body, /Avoid native `<select>`, custom `div` menus, ad hoc popovers, manual focus traps, and hand-rolled keyboard behavior/);
-  assert.match(tailwindShadcnSkill.body, /shadcn\/ui components are copied app code/);
-  assert.match(tailwindShadcnSkill.body, /Do not add Headless UI or another headless component system/);
-  assert.match(tailwindShadcnSkill.body, /Badge is for compact status/);
-  assert.match(tailwindShadcnSkill.body, /Plain rows, headings, sections, tables, and description lists/);
-  assert.match(tailwindShadcnSkill.body, /Card inside Card/);
-  const tailwindResponsiveSkill = templates.find((template) => template.id === 'forger-tailwind-responsive-frontend');
-  assert.ok(tailwindResponsiveSkill);
-  assert.match(tailwindResponsiveSkill.body, /Tailwind\/shadcn Forger app/);
-  assert.match(tailwindResponsiveSkill.body, /mobile width around 390 px/);
+  const frontendPatternsSkill = templates.find((template) => template.id === 'forger-frontend-patterns');
+  assert.ok(frontendPatternsSkill);
+  assert.equal(frontendPatternsSkill.description, 'Use when creating or changing Forger app frontend UI, including screen structure, routed views, Tailwind/shadcn components, responsive behavior, forms, lists, dashboards, visual style, motion, and final UI review.');
+  assert.match(frontendPatternsSkill.body, /Tailwind CSS, shadcn\/ui copied components, and Radix primitives by default/);
+  assert.match(frontendPatternsSkill.body, /Read the Room Before Anything Else/);
+  assert.match(frontendPatternsSkill.body, /TanStack Router for new routed Forger apps/);
+  assert.match(frontendPatternsSkill.body, /list the existing components available/);
+  assert.match(frontendPatternsSkill.body, /Prefer existing shadcn primitives and local wrappers/);
+  assert.match(frontendPatternsSkill.body, /Pills and badges are for compact status/);
+  assert.match(frontendPatternsSkill.body, /Do not put cards inside cards/);
+  assert.match(frontendPatternsSkill.body, /Mobile responsive is required/);
+  assert.match(frontendPatternsSkill.body, /Use motion for view transitions/);
+  assert.match(frontendPatternsSkill.body, /Check that no generic AI-default visual pattern/);
+  assert.equal(templates.some((template) => template.id === 'forger-app-shell-layout'), false);
+  assert.equal(templates.some((template) => template.id === 'forger-frontend-product-patterns'), false);
+  assert.equal(templates.some((template) => template.id === 'forger-frontend-structure'), false);
+  assert.equal(templates.some((template) => template.id === 'forger-react-ui'), false);
+  assert.equal(templates.some((template) => template.id.startsWith('forger-mui-')), false);
+  assert.equal(templates.some((template) => template.id.startsWith('forger-tailwind-')), false);
+  assert.equal(templates.some((template) => template.id === 'forger-mobile-responsive-frontend'), false);
+  assert.equal(templates.some((template) => template.id === 'forger-web-interface-review'), false);
   const tanstackQuerySkill = templates.find((template) => template.id === 'forger-tanstack-query-patterns');
   assert.ok(tanstackQuerySkill);
+  assert.equal(tanstackQuerySkill.description, 'Use when adding or changing Forger React app server state, API reads, mutations, MCP write refresh, assistant task refresh, query keys, invalidation, polling, or cache behavior.');
   assert.match(tanstackQuerySkill.body, /TanStack Query as the client-side server-state layer/);
+  assert.match(tanstackQuerySkill.body, /MCP tools, assistant tasks, imports, exports, backend jobs, or scripts write app data/);
+  assert.match(tanstackQuerySkill.body, /realtime\/websocket support/);
+  assert.match(tanstackQuerySkill.body, /Do not rely on a full app reload/);
   assert.match(tanstackQuerySkill.body, /Do not apply SSR, SSG, dehydration/);
   const bridgeSkill = templates.find((template) => template.id === 'forger-desktop-runtime-bridge');
   assert.ok(bridgeSkill);
