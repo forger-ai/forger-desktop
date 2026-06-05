@@ -938,6 +938,7 @@ test('OfficialToolsService persists app grants and keeps unavailable Gmail actio
     ],
     optional: [
       { toolId: 'gmail', reason: 'Puede enviar correo', actions: ['gmail.send_email'] },
+      { toolId: 'whatsapp', reason: 'Puede avisar por WhatsApp', actions: ['whatsapp.list_chats', 'whatsapp.send_message'] },
       { toolId: '', reason: 'Sin herramienta', actions: ['gmail.send_email'] },
       { toolId: 'gmail', reason: '', actions: ['gmail.send_email'] },
     ],
@@ -1017,6 +1018,10 @@ test('OfficialToolsService persists app grants and keeps unavailable Gmail actio
   const activated = await service.activate('gmail', 'en');
   assert.equal(activated.success, true);
   assert.equal(activated.tool.status, 'installed');
+  const activatedWhatsapp = await service.activate('whatsapp', 'en');
+  assert.equal(activatedWhatsapp.success, true);
+  assert.equal(activatedWhatsapp.tool.status, 'configured');
+  assert.equal((await service.list('en')).tools.some((tool) => tool.id === 'whatsapp'), true);
 
   const requiredGate = await service.getInstallGate('finance-os', 'en');
   assert.equal(requiredGate.required[0].available, true);
@@ -1027,10 +1032,13 @@ test('OfficialToolsService persists app grants and keeps unavailable Gmail actio
 
   const optionalBeforeGrant = await service.getInstallGate('mailer');
   assert.equal(optionalBeforeGrant.optional[0].granted, false);
+  assert.equal(optionalBeforeGrant.optional[1].declaration.toolId, 'whatsapp');
   assert.deepEqual(await service.listToolsForApp('mailer'), []);
   await service.setAppToolGrant({ appId: 'mailer', toolId: 'gmail', granted: true });
+  await service.setAppToolGrant({ appId: 'mailer', toolId: 'whatsapp', granted: true });
   assert.equal((await service.getInstallGate('mailer')).optional[0].granted, true);
-  assert.deepEqual((await service.listToolsForApp('mailer')).map((tool) => tool.id), ['gmail']);
+  assert.deepEqual((await service.listToolsForApp('mailer')).map((tool) => tool.id).sort(), ['gmail', 'whatsapp']);
+  assert.deepEqual([...await service.listAgentActionIdsForApp('mailer')].sort(), ['gmail.send_email', 'whatsapp.list_chats', 'whatsapp.send_message']);
 
   const status = await service.callFromApp('finance-os', {
     toolId: 'gmail',
@@ -1056,6 +1064,11 @@ test('OfficialToolsService persists app grants and keeps unavailable Gmail actio
     toolId: 'gmail',
     actionId: 'gmail.send_email',
   })).technicalCode, 'tool_not_configured');
+  assert.equal((await service.callFromApp('mailer', {
+    toolId: 'whatsapp',
+    actionId: 'whatsapp.send_message',
+    input: { chatId: '569123@s.whatsapp.net', text: 'Hola' },
+  })).technicalCode, 'whatsapp_chat_not_observed');
 
   const configured = await service.configure({ toolId: 'gmail', locale: 'es' });
   assert.equal(configured.success, false);
@@ -1069,6 +1082,8 @@ test('OfficialToolsService persists app grants and keeps unavailable Gmail actio
 
   const deactivated = await service.deactivate('gmail', { keepSecrets: true });
   assert.equal(deactivated.success, true);
+  const deactivatedWhatsapp = await service.deactivate('whatsapp', { keepSecrets: true });
+  assert.equal(deactivatedWhatsapp.success, true);
   const registry = JSON.parse(await fs.readFile(path.join(root, 'official-tools.json'), 'utf8'));
   assert.deepEqual(registry.appGrants.mailer, {});
 });

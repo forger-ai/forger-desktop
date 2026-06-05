@@ -49,6 +49,7 @@ import type {
   CodexReasoningEffort,
   CreateRemoteAppBackupInput,
   CreateRemoteAppBackupResult,
+  OfficialToolRuntimeEvent,
   Settings,
 } from '../../shared/types';
 import type { AppManifest, AppRegistry, RunningAppProcess } from '../core/main-process-types';
@@ -99,6 +100,7 @@ interface ManifestSupportDeps {
   validateArchiveEntries: (archivePath: string) => Promise<void>;
   extractArchive: (archivePath: string, destination: string) => Promise<void>;
   appendInstallLog: (event: string, payload?: Record<string, unknown>) => Promise<void>;
+  emitOfficialToolEvent?: (event: OfficialToolRuntimeEvent) => void;
   canUseCloudDataSync: () => boolean;
   renderManifestAgentPrompt: (input: {
     agent: AppAgent;
@@ -151,6 +153,7 @@ export const createManifestSupportController = (deps: ManifestSupportDeps) => {
     validateArchiveEntries,
     extractArchive,
     appendInstallLog,
+    emitOfficialToolEvent,
     canUseCloudDataSync,
     renderManifestAgentPrompt,
     withAgentDefaults,
@@ -249,6 +252,7 @@ const getOfficialToolsService = (): OfficialToolsService => {
         return await client.refreshGmailOAuthAccessToken(input);
       },
       appendLog: appendInstallLog,
+      emitEvent: emitOfficialToolEvent,
       getAppToolDeclarations: resolveAppToolDeclarations,
     });
   }
@@ -273,11 +277,12 @@ const buildMemoryContextForApp = async (appId: string): Promise<string> => {
 const buildForgerToolsContextForApp = async (appId: string): Promise<string> => {
   const state = await getOfficialToolsService().list().catch(() => null);
   const gmail = state?.tools.find((tool) => tool.id === 'gmail');
-  const gmailReady = gmail?.status === 'configured';
+  const whatsapp = state?.tools.find((tool) => tool.id === 'whatsapp');
   const allowedActions = await getOfficialToolsService().listAgentActionIdsForApp(appId).catch(() => new Set<string>());
   return buildForgerOfficialToolsPromptSection({
     mode: 'app-agent',
-    gmailReady,
+    gmailReady: gmail?.status === 'configured',
+    whatsappReady: whatsapp?.status === 'configured',
     allowedActions: [...allowedActions],
   });
 };
@@ -285,14 +290,15 @@ const buildForgerToolsContextForApp = async (appId: string): Promise<string> => 
 const buildForgerToolsContextForFreeChat = async (): Promise<string> => {
   const state = await getOfficialToolsService().list().catch(() => null);
   const gmail = state?.tools.find((tool) => tool.id === 'gmail');
-  const gmailReady = gmail?.status === 'configured';
-  const gmailActions = AGENT_TOOL_DEFINITIONS
+  const whatsapp = state?.tools.find((tool) => tool.id === 'whatsapp');
+  const officialActions = AGENT_TOOL_DEFINITIONS
     .map((tool) => tool.id)
-    .filter((toolId) => toolId.startsWith('gmail.'));
+    .filter((toolId) => toolId.startsWith('gmail.') || toolId.startsWith('whatsapp.'));
   return buildForgerOfficialToolsPromptSection({
     mode: 'free-chat',
-    gmailReady,
-    allowedActions: gmailActions,
+    gmailReady: gmail?.status === 'configured',
+    whatsappReady: whatsapp?.status === 'configured',
+    allowedActions: officialActions,
   });
 };
 

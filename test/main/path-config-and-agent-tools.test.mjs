@@ -133,5 +133,10 @@ test('agent tool package definitions are unique and initialize approval defaults
   assert.equal(settings.approvals.forger_open_app, true);
   assert.equal(settings.approvals.forger_list_catalog, false);
   assert.equal(settings.approvals.forger_create_app, false);
+  assert.equal(settings.approvals['whatsapp.connection.status'], false);
+  assert.equal(settings.approvals['whatsapp.list_chats'], false);
+  assert.equal(settings.approvals['whatsapp.read_messages'], true);
+  assert.equal(settings.approvals['whatsapp.download_attachment'], true);
+  assert.equal(settings.approvals['whatsapp.send_message'], true);
   assert.equal(Object.hasOwn(settings.approvals, 'forger_ask_question'), false);
 });

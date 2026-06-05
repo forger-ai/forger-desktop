@@ -6,6 +6,8 @@ import type {
   RemoteBackupsUsage,
   RemoteBackupSource,
   RemoteBackupType,
+  CloudStorageUsage,
+  SubscriptionTier,
 } from '../../shared/types';
 import { normalizeForgerAccountUser, type StoredForgerAccount } from '../forger-account-store';
 
@@ -36,6 +38,10 @@ export interface RemoteBackupsResponse {
     backup_count?: number | string | null;
     backup_count_limit?: number | string | null;
   } | null;
+}
+
+export interface CloudStorageResponse {
+  storage?: unknown;
 }
 
 export const backendError = (message: string, technicalCode: string): Error & { technicalCode: string } =>
@@ -159,6 +165,44 @@ export const normalizeRemoteBackup = (value: unknown): RemoteAppBackupSummary | 
 const normalizeRemoteBackupNumber = (value: unknown): number => {
   const numberValue = Number(value ?? 0);
   return Number.isFinite(numberValue) && numberValue >= 0 ? numberValue : 0;
+};
+
+const normalizeSubscriptionTier = (value: unknown): SubscriptionTier =>
+  value === 'demo' || value === 'pro' ? value : 'free';
+
+export const emptyCloudStorageUsage = (): CloudStorageUsage => ({
+  usedBytes: 0,
+  limitBytes: 0,
+  remainingBytes: 0,
+  plan: 'free',
+  breakdown: {
+    backupsBytes: 0,
+    uploadedAppsBytes: 0,
+    pendingUserAppUploadsBytes: 0,
+    otherBytes: 0,
+  },
+});
+
+export const normalizeCloudStorageUsage = (value: unknown): CloudStorageUsage => {
+  if (!value || typeof value !== 'object') {
+    return emptyCloudStorageUsage();
+  }
+  const record = value as Record<string, unknown>;
+  const breakdown = record.breakdown && typeof record.breakdown === 'object'
+    ? record.breakdown as Record<string, unknown>
+    : {};
+  return {
+    usedBytes: normalizeRemoteBackupNumber(record.used_bytes),
+    limitBytes: normalizeRemoteBackupNumber(record.limit_bytes),
+    remainingBytes: normalizeRemoteBackupNumber(record.remaining_bytes),
+    plan: normalizeSubscriptionTier(record.plan),
+    breakdown: {
+      backupsBytes: normalizeRemoteBackupNumber(breakdown.backups_bytes),
+      uploadedAppsBytes: normalizeRemoteBackupNumber(breakdown.uploaded_apps_bytes),
+      pendingUserAppUploadsBytes: normalizeRemoteBackupNumber(breakdown.pending_user_app_uploads_bytes),
+      otherBytes: normalizeRemoteBackupNumber(breakdown.other_bytes),
+    },
+  };
 };
 
 export const normalizeRemoteBackupsUsage = (value: unknown): RemoteBackupsUsage => {

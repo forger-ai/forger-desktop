@@ -1,6 +1,6 @@
 import { Box } from '@mui/material';
 import type { ReactNode } from 'react';
-import type { AppSummary, BackgroundTask, DesktopUpdateState, ForgerAccountSession } from '@shared/types';
+import type { AppSummary, BackgroundTask, CloudStorageUsage, DesktopUpdateState, ForgerAccountSession } from '@shared/types';
 import type { AppDictionary } from '@renderer/i18n';
 import { Sidebar, type View } from './Sidebar';
 import { Topbar } from './Topbar';
@@ -17,6 +17,9 @@ interface AppShellProps {
   onOpenCloudModal: () => void;
   account: ForgerAccountSession;
   accountBusy: boolean;
+  cloudStorageUsage: CloudStorageUsage | null;
+  cloudStorageBusy: boolean;
+  onOpenStorageSettings: () => void;
   onLogout: () => void;
   backgroundTasks: BackgroundTask[];
   backgroundTasksOpen: boolean;
@@ -43,6 +46,9 @@ export function AppShell({
   onOpenCloudModal,
   account,
   accountBusy,
+  cloudStorageUsage,
+  cloudStorageBusy,
+  onOpenStorageSettings,
   onLogout,
   backgroundTasks,
   backgroundTasksOpen,
@@ -81,6 +87,9 @@ export function AppShell({
           onOpenCloudModal={onOpenCloudModal}
           account={account}
           accountBusy={accountBusy}
+          cloudStorageUsage={cloudStorageUsage}
+          cloudStorageBusy={cloudStorageBusy}
+          onOpenStorageSettings={onOpenStorageSettings}
           onOpenSocialTab={() => onNavigate('friends')}
           onLogout={onLogout}
           backgroundTasks={backgroundTasks}

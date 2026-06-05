@@ -1,4 +1,3 @@
-/* eslint-disable max-lines */
 import type fs from 'node:fs/promises';
 import type path from 'node:path';
 import os from 'node:os';
@@ -34,6 +33,7 @@ import {
   prepareDesktopErrorReport,
   type DesktopErrorReportAttachmentUpload,
 } from '../desktop-error-report-artifacts';
+import { appendDesktopLog, type DesktopLogLevel } from '../desktop-logger';
 import type { IPC_CHANNELS as IpcChannels } from '../../shared/ipc';
 import { registerAppCloudMessagingIpcHandlers } from './app-cloud-messaging-handlers';
 import { registerAppRuntimeIpcHandlers } from './app-runtime-handlers';
@@ -69,6 +69,7 @@ import type {
   CloudSendAppShareInput, CloudSendMessageInput,
   CloudSyncSettings,
   ConfigureOfficialToolInput,
+  CallOfficialToolInput,
   ConnectAppSecretInput,
   CreateLocalAppInput,
   CreateLocalAppResult,
@@ -252,6 +253,12 @@ const shouldSkipSocialUploadPath = (sourcePath: string, root: string, pathModule
   return false;
 };
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+
+const isDesktopLogLevel = (value: unknown): value is DesktopLogLevel =>
+  value === 'debug' || value === 'info' || value === 'warn' || value === 'error';
+
 export const __testMainHandlersInternals = {
 };
 
@@ -275,6 +282,12 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
       { alias: 'DESKTOP_USER_DATA/', path: app?.getPath ? resolveReportRoot(() => app.getPath('userData')) : undefined },
       { alias: 'CODEX_HOME/', path: resolveReportRoot(getCodexHome) },
     ];
+  };
+  const getDesktopLogPath = (): string => {
+    if (typeof getForgerMetadataRoot === 'function') {
+      return path.join(getForgerMetadataRoot(), 'logs', 'forger-desktop.jsonl');
+    }
+    return path.join(path.dirname(getInstallLogPath()), 'forger-desktop.jsonl');
   };
   const localNetworkShareStatusFor = getLocalNetworkShareStatus ?? (() => undefined);
   const remoteNetworkShareStatusFor = getRemoteNetworkShareStatus ?? (() => undefined);
@@ -672,6 +685,9 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
     state.catalogApps = await listCatalogFromBackend();
     return { ...account, success: true };
   });
+  ipcMain.handle(IPC_CHANNELS.getCloudStorageUsage, async () => {
+    return forgerBackendClient ? await forgerBackendClient.getCloudStorageUsage() : null;
+  });
   ipcMain.handle(IPC_CHANNELS.getCloudDevices, async () => {
     return cloudDeviceManager ? await cloudDeviceManager.getState() : { devices: [], connected: false };
   });
@@ -940,6 +956,7 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
       platform: process.platform,
       arch: process.arch,
       getInstallLogPath,
+      getDesktopLogPath,
       roots,
     }, input);
     if (attachments.length === 0) {
@@ -963,6 +980,7 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
       platform: process.platform,
       arch: process.arch,
       getInstallLogPath,
+      getDesktopLogPath,
       roots,
     }, input);
     const attachments = cachedAttachments.length > 0 ? cachedAttachments : preparedAttachments;
@@ -1022,6 +1040,20 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
       }
     }
   });
+  ipcMain.handle(IPC_CHANNELS.desktopLog, async (_event, input: unknown) => {
+    if (!isRecord(input) || typeof input.event !== 'string' || !input.event.trim()) {
+      return { success: false };
+    }
+    await appendDesktopLog({
+      metadataRoot: typeof getForgerMetadataRoot === 'function' ? getForgerMetadataRoot() : path.dirname(getInstallLogPath()),
+      level: isDesktopLogLevel(input.level) ? input.level : 'info',
+      service: 'desktop-renderer',
+      event: input.event.trim(),
+      ...(typeof input.message === 'string' ? { message: input.message } : {}),
+      ...(isRecord(input.context) ? { context: input.context } : {}),
+    });
+    return { success: true };
+  });
   ipcMain.handle(IPC_CHANNELS.openExternalUrl, async (_event, targetUrl: string) => {
     try {
       const parsed = new URL(targetUrl);
@@ -1062,6 +1094,9 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
   });
   ipcMain.handle(IPC_CHANNELS.configureOfficialTool, async (_event, input: ConfigureOfficialToolInput) => {
     return await getOfficialToolsService().configure(input);
+  });
+  ipcMain.handle(IPC_CHANNELS.callOfficialTool, async (_event, input: CallOfficialToolInput) => {
+    return await getOfficialToolsService().callFromAgent(input);
   });
   ipcMain.handle(IPC_CHANNELS.deactivateOfficialTool, async (_event, toolId: string, locale?: string) => {
     return await getOfficialToolsService().deactivate(toolId, { locale });

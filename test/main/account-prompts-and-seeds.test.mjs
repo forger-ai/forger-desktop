@@ -115,16 +115,21 @@ test('Forger prompt builders include contract, language, files, official tools, 
   const officialTools = buildForgerOfficialToolsPromptSection({
     mode: 'free-chat',
     gmailReady: true,
-    allowedActions: ['gmail.search_messages', 'gmail.send_email'],
+    whatsappReady: true,
+    allowedActions: ['gmail.search_messages', 'gmail.send_email', 'whatsapp.list_chats', 'whatsapp.send_message'],
   });
   assert.match(officialTools, /Gmail status: connected and ready/);
+  assert.match(officialTools, /WhatsApp status: connected or active locally/);
   assert.match(officialTools, /`gmail.search_messages`/);
+  assert.match(officialTools, /`whatsapp.list_chats`/);
+  assert.match(officialTools, /unofficial local WhatsApp Web integration/);
+  assert.match(officialTools, /Use only chat IDs and message references returned by WhatsApp reads or listings/);
   assert.match(officialTools, /opening, launching, starting, running, or bringing up the app means using Forger app tools/);
   assert.match(officialTools, /Use the app runtime status tool/);
   assert.match(buildForgerOfficialToolsPromptSection({
     mode: 'free-chat',
     gmailReady: false,
-  }), /Free chat can inspect official tool availability[\s\S]*Gmail must be activated/);
+  }), /Free chat can inspect official tool availability[\s\S]*WhatsApp must be activated[\s\S]*Gmail must be activated/);
   assert.match(buildForgerOfficialToolsPromptSection({
     mode: 'app-agent',
     gmailReady: false,
@@ -398,6 +403,7 @@ test('official tool skill templates and seed data keep expected Desktop defaults
     'forger-memory',
     'forger-official-tools',
     'forger-permissions',
+    'forger-product-docs',
     'forger-python-backend',
     'forger-remote-tunnel-wiring',
     'forger-secrets',
@@ -405,6 +411,7 @@ test('official tool skill templates and seed data keep expected Desktop defaults
     'forger-tanstack-query-patterns',
     'forger-tasks',
     'forger-tools',
+    'forger-whatsapp',
   ]);
   assert.ok(templates.every((template) => template.body.startsWith('---\nname:')));
   const skillFiles = await readSkillFiles();
@@ -424,15 +431,17 @@ test('official tool skill templates and seed data keep expected Desktop defaults
     'forger-context',
     'forger-app-official-tools',
   ]);
-  const appOfficialSkill = buildInstalledAppSkillTemplates(['gmail.search_messages']).find((template) => template.id === 'forger-app-official-tools');
+  const appOfficialSkill = buildInstalledAppSkillTemplates(['gmail.search_messages', 'whatsapp.list_chats']).find((template) => template.id === 'forger-app-official-tools');
   assert.ok(appOfficialSkill);
-  assert.equal(appOfficialSkill.description, 'Use when an installed app wants to call official Forger tools; limit tool calls to manifest-granted actions such as Gmail search, read, attachment download, or send.');
+  assert.equal(appOfficialSkill.description, 'Use when an installed app wants to call official Forger tools; limit tool calls to manifest-granted actions such as Gmail or WhatsApp read, inspect, download, or send actions.');
   assert.match(appOfficialSkill.body, /`gmail\.search_messages`/);
+  assert.match(appOfficialSkill.body, /`whatsapp\.list_chats`/);
   const manifestSkill = templates.find((template) => template.id === 'forger-manifest-authoring');
   assert.ok(manifestSkill);
   assert.match(manifestSkill.body, /## Full Manifest JSON Contract/);
   assert.match(manifestSkill.body, /"appSecrets": \[/);
   assert.match(manifestSkill.body, /"promptTemplates": \[/);
+  assert.match(manifestSkill.body, /whatsapp\.send_message/);
   assert.match(manifestSkill.body, /"agents": \[/);
   assert.match(manifestSkill.body, /promptTemplates[\s\S]*agents[\s\S]*tools/);
   assert.match(manifestSkill.body, /"permissionMode": "safe"/);
@@ -522,6 +531,12 @@ test('official tool skill templates and seed data keep expected Desktop defaults
   assert.match(localizationSkill.body, /empty states, loading states, error states, success states/);
   assert.match(localizationSkill.body, /\/api\/forger\/context/);
   assert.match(localizationSkill.body, /window\.forgerApp/);
+  const productDocsSkill = templates.find((template) => template.id === 'forger-product-docs');
+  assert.ok(productDocsSkill);
+  assert.match(productDocsSkill.body, /Forger Documentation \/ Documentación de Forger is high-level product documentation/);
+  assert.match(productDocsSkill.body, /what Forger is, how Forger works, which capabilities exist/);
+  assert.match(productDocsSkill.body, /Do not use this documentation as the guide for creating an app, writing code, designing manifests, implementing MCP servers, changing app data, modifying installed apps/);
+  assert.match(productDocsSkill.body, /verify the current state before answering/);
   assert.equal(installedAppsSeed.length, 2);
   assert.equal(catalogAppsSeed.some((app) => app.id === 'finance-os'), true);
   assert.equal(settingsSeed.safeMode, true);

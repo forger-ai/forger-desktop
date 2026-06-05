@@ -296,7 +296,7 @@ const callMcp = async (session, body, token = session.token) => await fetch(sess
   body: typeof body === 'string' ? body : JSON.stringify(body),
 });
 
-test('MCP tool schemas expose strict Gmail contracts and safe annotations', () => {
+test('MCP tool schemas expose strict official tool contracts and safe annotations', () => {
   assert.equal(getMcpToolInputSchema('memory_list').additionalProperties, false);
   assert.deepEqual(getMcpToolInputSchema('memory_create').required, ['scope', 'kind']);
   assert.equal(getMcpToolInputSchema('memory_create').properties.read_when.type, 'string');
@@ -332,6 +332,29 @@ test('MCP tool schemas expose strict Gmail contracts and safe annotations', () =
   const readAttachmentSchema = getMcpToolInputSchema('gmail.read_attachment');
   assert.deepEqual(readAttachmentSchema.required, ['messageId']);
   assert.equal(readAttachmentSchema.properties.attachmentId.type, 'string');
+
+  const whatsappPairingSchema = getMcpToolInputSchema('whatsapp.start_pairing');
+  assert.deepEqual(whatsappPairingSchema.required, ['method']);
+  assert.deepEqual(whatsappPairingSchema.properties.method.enum, ['qr', 'pairing_code']);
+
+  const whatsappListSchema = getMcpToolInputSchema('whatsapp.list_chats');
+  assert.deepEqual(whatsappListSchema.properties.chatType.enum, ['direct', 'group', 'channel']);
+  assert.equal(whatsappListSchema.properties.query.type, 'string');
+
+  const whatsappReadSchema = getMcpToolInputSchema('whatsapp.read_messages');
+  assert.deepEqual(whatsappReadSchema.required, ['chatId']);
+  assert.equal(whatsappReadSchema.additionalProperties, false);
+
+  const whatsappDownloadAttachmentSchema = getMcpToolInputSchema('whatsapp.download_attachment');
+  assert.deepEqual(whatsappDownloadAttachmentSchema.required, ['attachmentId']);
+  assert.equal(whatsappDownloadAttachmentSchema.properties.attachmentId.type, 'string');
+
+  const whatsappSendSchema = getMcpToolInputSchema('whatsapp.send_message');
+  assert.deepEqual(whatsappSendSchema.required, ['chatId', 'text']);
+  assert.equal(whatsappSendSchema.properties.replyToMessageRef.type, 'string');
+
+  const whatsappDetailsSchema = getMcpToolInputSchema('whatsapp.get_chat_details');
+  assert.deepEqual(whatsappDetailsSchema.required, ['chatId']);
 
   assert.deepEqual(getMcpToolAnnotations({
     id: 'memory_list',
@@ -746,6 +769,24 @@ test('Forger MCP app-agent sessions filter Gmail tools and return validation fai
       defaultRequiresApproval: false,
     },
     {
+      id: 'whatsapp.list_chats',
+      packageId: 'whatsapp',
+      name: 'Listar WhatsApp',
+      description: 'Lista chats de WhatsApp.',
+      category: 'consulta',
+      risk: 'bajo',
+      defaultRequiresApproval: false,
+    },
+    {
+      id: 'whatsapp.send_message',
+      packageId: 'whatsapp',
+      name: 'Enviar WhatsApp',
+      description: 'Envia mensajes de WhatsApp.',
+      category: 'app',
+      risk: 'alto',
+      defaultRequiresApproval: false,
+    },
+    {
       id: 'forger_list_installed_apps',
       packageId: 'forger',
       name: 'Apps',
@@ -777,13 +818,13 @@ test('Forger MCP app-agent sessions filter Gmail tools and return validation fai
     memoryCreate: async () => ({}),
     memoryUpdate: async () => ({}),
     memoryDelete: async () => ({ success: true }),
-    listOfficialToolActionIdsForApp: async () => new Set(['gmail.search_messages']),
+    listOfficialToolActionIdsForApp: async () => new Set(['gmail.search_messages', 'whatsapp.list_chats']),
     validateOfficialTool: async (input) => (
-      input.actionId === 'gmail.send_email'
+      input.actionId === 'gmail.send_email' || input.actionId === 'whatsapp.send_message'
         ? { success: false, userMessage: 'Sin permiso.', technicalCode: 'app_tool_permission_denied' }
         : null
     ),
-    callOfficialTool: async (input) => ({ success: true, data: { actionId: input.actionId } }),
+    callOfficialTool: async (input) => ({ success: true, data: { toolId: input.toolId, actionId: input.actionId } }),
   });
   await server.start();
   const session = server.createSession('run-1', 'finance-os', { caller: 'app-agent', appIds: ['finance-os'] });
@@ -799,7 +840,7 @@ test('Forger MCP app-agent sessions filter Gmail tools and return validation fai
     });
     const listPayload = await listResponse.json();
     const names = listPayload.result.tools.map((tool) => tool.name).sort();
-    assert.deepEqual(names, ['forger_ask_question', 'forger_list_installed_apps', 'gmail.search_messages']);
+    assert.deepEqual(names, ['forger_ask_question', 'forger_list_installed_apps', 'gmail.search_messages', 'whatsapp.list_chats']);
 
     const deniedResponse = await fetch(session.url, {
       method: 'POST',
@@ -822,6 +863,22 @@ test('Forger MCP app-agent sessions filter Gmail tools and return validation fai
       technicalCode: 'app_tool_permission_denied',
     });
 
+    const deniedWhatsappResponse = await fetch(session.url, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${session.token}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 4,
+        method: 'tools/call',
+        params: { name: 'whatsapp.send_message', arguments: { chatId: '569123@s.whatsapp.net', text: 'Hola' } },
+      }),
+    });
+    const deniedWhatsappPayload = await deniedWhatsappResponse.json();
+    assert.equal(deniedWhatsappPayload.result.isError, true);
+
     const allowedResponse = await fetch(session.url, {
       method: 'POST',
       headers: {
@@ -830,7 +887,7 @@ test('Forger MCP app-agent sessions filter Gmail tools and return validation fai
       },
       body: JSON.stringify({
         jsonrpc: '2.0',
-        id: 3,
+        id: 5,
         method: 'tools/call',
         params: { name: 'gmail.search_messages', arguments: { query: 'from:bank' } },
       }),
@@ -839,7 +896,27 @@ test('Forger MCP app-agent sessions filter Gmail tools and return validation fai
     assert.equal(allowedPayload.result.isError, false);
     assert.deepEqual(parseToolTextResult(allowedPayload), {
       success: true,
-      data: { actionId: 'gmail.search_messages' },
+      data: { toolId: 'gmail', actionId: 'gmail.search_messages' },
+    });
+
+    const allowedWhatsappResponse = await fetch(session.url, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${session.token}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 6,
+        method: 'tools/call',
+        params: { name: 'whatsapp.list_chats', arguments: { chatType: 'group' } },
+      }),
+    });
+    const allowedWhatsappPayload = await allowedWhatsappResponse.json();
+    assert.equal(allowedWhatsappPayload.result.isError, false);
+    assert.deepEqual(parseToolTextResult(allowedWhatsappPayload), {
+      success: true,
+      data: { toolId: 'whatsapp', actionId: 'whatsapp.list_chats' },
     });
     assert.equal(logs.some((entry) => entry.event === 'agent_tool:mcp_tools_list_built'), true);
   } finally {
@@ -2347,9 +2424,10 @@ test('automation manager maps missing provider setup to user-facing run failures
     assert.match(claudeAuthRuns[0].userMessage, /Claude Code no tiene una sesion activa/);
   } finally {
     codex.dispose();
+    codexAuth.dispose();
     claude.dispose();
     claudeAuth.dispose();
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
   }
 });
 

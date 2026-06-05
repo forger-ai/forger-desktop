@@ -119,6 +119,7 @@ interface MainLifecycleState {
   memoryMaintenanceManager: MemoryMaintenanceService | null;
   memoryStore: LifecycleService | null;
   officialToolsService: (LifecycleService & {
+    startActiveTools: () => Promise<void>;
     listAgentActionIdsForApp: (appId: string) => Promise<string[]>;
     validateAgentCall: (input: unknown, access: { appId: string; requireAppGrant: boolean }) => Promise<unknown>;
     callFromAgent: (input: unknown, access: { appId: string; requireAppGrant: boolean }) => Promise<unknown>;
@@ -376,6 +377,11 @@ export const registerMainLifecycle = (deps: unknown) => {
   state.secretsStore = new SecretsStore(app.getPath('userData'));
   state.officialToolsService = getOfficialToolsService();
   await state.officialToolsService.load();
+  if (typeof state.officialToolsService.startActiveTools === 'function') {
+    await state.officialToolsService.startActiveTools().catch((error: unknown) => {
+      void appendInstallLog('official_tools:start_active_failed', serializeErrorForInstallLog(error));
+    });
+  }
   await loadAgentToolSettings();
   state.forgerAccountStore = new ForgerAccountStore(getForgerAccountPath());
   state.forgerAccount = await state.forgerAccountStore.load();

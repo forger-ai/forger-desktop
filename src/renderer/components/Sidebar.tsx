@@ -5,6 +5,7 @@ import EventRepeatRounded from '@mui/icons-material/EventRepeatRounded';
 import ConstructionRounded from '@mui/icons-material/ConstructionRounded';
 import DevicesRounded from '@mui/icons-material/DevicesRounded';
 import InsertDriveFileRounded from '@mui/icons-material/InsertDriveFileRounded';
+import MenuBookRounded from '@mui/icons-material/MenuBookRounded';
 import TableChartRounded from '@mui/icons-material/TableChartRounded';
 import FeedbackRounded from '@mui/icons-material/FeedbackRounded';
 import PeopleRounded from '@mui/icons-material/PeopleRounded';
@@ -44,6 +45,7 @@ export type View =
   | 'datos'
   | 'secrets'
   | 'tools'
+  | 'docs'
   | 'settings'
   | 'app'
   | 'backgroundTasks'
@@ -63,6 +65,7 @@ const defaultNav = [
   { id: 'chat' as const, icon: <AutoAwesomeRounded /> },
   { id: 'apps' as const, icon: <AppsRounded /> },
   { id: 'catalog' as const, icon: <StorefrontRounded /> },
+  { id: 'docs' as const, icon: <MenuBookRounded /> },
   { id: 'friends' as const, icon: <PeopleRounded /> },
   { id: 'feedback' as const, icon: <FeedbackRounded /> },
 ];
@@ -124,6 +127,7 @@ export function Sidebar({ currentView, onNavigate, t, desktopUpdateState, advanc
     datos: t.nav.datos,
     secrets: t.nav.secrets,
     tools: t.nav.tools,
+    docs: t.nav.docs,
     settings: t.nav.settings,
     app: t.nav.catalog,
     backgroundTasks: t.backgroundTasks.title,
@@ -131,8 +135,8 @@ export function Sidebar({ currentView, onNavigate, t, desktopUpdateState, advanc
   };
   const showUpdateBanner = desktopUpdateState.status === 'available' || desktopUpdateState.status === 'ready';
   const mainNav = advancedMode
-    ? [defaultNav[0], defaultNav[1], defaultNav[2], ...(showForumNav ? [defaultNav[3]] : []), ...advancedNav]
-    : [defaultNav[0], defaultNav[1], defaultNav[2], ...(showForumNav ? [defaultNav[3]] : []), defaultNav[4]];
+    ? [defaultNav[0], defaultNav[1], defaultNav[2], defaultNav[3], ...(showForumNav ? [defaultNav[4]] : []), defaultNav[5], ...advancedNav]
+    : [defaultNav[0], defaultNav[1], defaultNav[2], defaultNav[3], ...(showForumNav ? [defaultNav[4]] : []), defaultNav[5]];
 
   return (
     <Box

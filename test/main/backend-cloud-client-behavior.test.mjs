@@ -13,6 +13,7 @@ const {
   buildBackendHeaders,
   defaultReportingLogPath,
   googleLoginErrorMessage,
+  normalizeCloudStorageUsage,
   normalizeRemoteBackup,
   normalizeRemoteBackupsUsage,
   normalizeRuntimePlatform,
@@ -348,6 +349,48 @@ test('remote backup helpers reject malformed summaries and clamp invalid usage n
     backupCount: 0,
     backupCountLimit: 0,
   });
+});
+
+test('cloud storage usage helper normalizes quota payloads and clamps malformed numbers', () => {
+  assert.deepEqual(normalizeCloudStorageUsage(null), {
+    usedBytes: 0,
+    limitBytes: 0,
+    remainingBytes: 0,
+    plan: 'free',
+    breakdown: {
+      backupsBytes: 0,
+      uploadedAppsBytes: 0,
+      pendingUserAppUploadsBytes: 0,
+      otherBytes: 0,
+    },
+  });
+
+  assert.deepEqual(normalizeCloudStorageUsage({
+    used_bytes: '2048',
+    limit_bytes: 3221225472,
+    remaining_bytes: -10,
+    plan: 'unknown',
+    breakdown: {
+      backups_bytes: '1024',
+      uploaded_apps_bytes: 512,
+      pending_user_app_uploads_bytes: 'bad',
+      other_bytes: 256,
+    },
+  }), {
+    usedBytes: 2048,
+    limitBytes: 3221225472,
+    remainingBytes: 0,
+    plan: 'free',
+    breakdown: {
+      backupsBytes: 1024,
+      uploadedAppsBytes: 512,
+      pendingUserAppUploadsBytes: 0,
+      otherBytes: 256,
+    },
+  });
+
+  assert.equal(normalizeCloudStorageUsage({ plan: 'pro' }).plan, 'pro');
+  assert.equal(normalizeCloudStorageUsage({ plan: 'demo' }).plan, 'demo');
 });
 
 test('cloud normalizers reject malformed top-level and nested cloud records', () => {

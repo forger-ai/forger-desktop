@@ -7,6 +7,7 @@ import type path from 'node:path';
 import type { DesktopUpdater } from '../desktop-updater';
 import type { DesktopErrorReporter } from '../error-reporting';
 import type { ForgerAccountStore, StoredForgerAccount, publicForgerAccount } from '../forger-account-store';
+import { appendDesktopLog, type DesktopLogService } from '../desktop-logger';
 import type { AGENT_TOOL_DEFINITIONS, AGENT_TOOL_IDS } from './agent-tool-packages';
 import type { IPC_CHANNELS } from '../../shared/ipc';
 import type {
@@ -61,6 +62,7 @@ interface MainUtilitiesDeps {
   friendChatWindows: Map<number, BrowserWindow>;
   fs: typeof fs;
   getAgentToolSettingsPath: () => string;
+  getForgerMetadataRoot: () => string;
   getInstallLogPath: () => string;
   installProgressByPhase: Record<InstallAppResult['phase'], number>;
   isDev: boolean;
@@ -107,7 +109,7 @@ export const __testMainUtilitiesInternals = {
 };
 
 export const createMainUtilitiesController = (deps: MainUtilitiesDeps) => {
-const { Buffer, Date, app, path, fs, createHmac, appFolderGrantSecret, APP_FOLDER_GRANT_TTL_MS, appWindows, friendChatWindows, getInstallLogPath, isDev, AGENT_TOOL_IDS, AGENT_TOOL_DEFINITIONS, getAgentToolSettingsPath, getLocalNetworkShareStatus, getRemoteNetworkShareStatus, getMainWindow, IPC_CHANNELS, DesktopUpdater, desktopErrorReporter, forgerAccountStore, cloudDeviceManager, publicForgerAccount, state, registry, runningApps, buildFailureDiagnostic, installProgressByPhase } = deps;
+const { Buffer, Date, app, path, fs, createHmac, appFolderGrantSecret, APP_FOLDER_GRANT_TTL_MS, appWindows, friendChatWindows, getForgerMetadataRoot, getInstallLogPath, isDev, AGENT_TOOL_IDS, AGENT_TOOL_DEFINITIONS, getAgentToolSettingsPath, getLocalNetworkShareStatus, getRemoteNetworkShareStatus, getMainWindow, IPC_CHANNELS, DesktopUpdater, desktopErrorReporter, forgerAccountStore, cloudDeviceManager, publicForgerAccount, state, registry, runningApps, buildFailureDiagnostic, installProgressByPhase } = deps;
 registerProcessErrorHandlers(desktopErrorReporter);
 const localNetworkShareStatusFor = getLocalNetworkShareStatus ?? (() => undefined);
 const remoteNetworkShareStatusFor = getRemoteNetworkShareStatus ?? (() => undefined);
@@ -169,6 +171,28 @@ const serializeErrorForInstallLog = (error: unknown): Record<string, unknown> =>
   };
 };
 
+const serviceForLogEvent = (event: string): DesktopLogService => {
+  if (event.includes('whatsapp')) {
+    return 'tool:whatsapp';
+  }
+  if (event.includes('official_tool') || event.includes('official_tools')) {
+    return 'official-tools';
+  }
+  if (event.includes('mcp')) {
+    return 'mcp';
+  }
+  if (event.includes('app_agent') || event.includes('chat_run')) {
+    return 'agent-runtime';
+  }
+  if (event.includes('installed_app') || event.includes('install') || event.includes('runtime')) {
+    return 'installed-app';
+  }
+  if (event.includes('backend') || event.includes('cloud')) {
+    return 'backend-client';
+  }
+  return 'desktop-main';
+};
+
 const encodeBase64Url = (value: string): string => Buffer.from(value, 'utf8').toString('base64url');
 
 const signAppFolderGrant = (appId: string, folderPath: string): AppExternalFolderSelection => {
@@ -215,6 +239,13 @@ const appendInstallLog = async (event: string, payload: Record<string, unknown> 
   } catch (error) {
     console.warn('Failed to write Forger install log', error);
   }
+  await appendDesktopLog({
+    metadataRoot: getForgerMetadataRoot(),
+    level: event.includes('failed') || event.includes('error') ? 'error' : 'info',
+    service: serviceForLogEvent(event),
+    event,
+    context: payload,
+  });
 };
 
 const isAgentToolId = (value: unknown): value is AgentToolId =>

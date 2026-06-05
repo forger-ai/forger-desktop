@@ -13,17 +13,20 @@ import {
   Typography,
   useTheme,
 } from '@mui/material';
+import ExtensionRounded from '@mui/icons-material/ExtensionRounded';
 import type {
   AgentToolDefinition,
   AgentToolPackageDefinition,
   AgentToolSettings,
+  OfficialToolRuntimeEvent,
   OfficialToolSummary,
 } from '@shared/types';
 import type { AppDictionary } from '@renderer/i18n';
-import { FORGER_PACKAGE_ID, GMAIL_PACKAGE_ID, GMAIL_TOOL_ID } from './tools/constants';
+import { FORGER_PACKAGE_ID, GMAIL_PACKAGE_ID, GMAIL_TOOL_ID, officialToolPackageId } from './tools/constants';
 import { ForgerToolDetail } from './tools/ForgerToolDetail';
 import { ForgerToolIcon, GmailIcon } from './tools/ToolIcons';
 import { GmailToolDetail } from './tools/GmailToolDetail';
+import { OfficialToolDetail } from './tools/OfficialToolDetail';
 import { ToolRow } from './tools/ToolRow';
 import { localizedPackageCopy } from './tools/tool-helpers';
 
@@ -41,10 +44,13 @@ interface ToolsViewProps {
   onApprovalChange: (toolId: AgentToolDefinition['id'], requiresApproval: boolean) => void;
   onActivateOfficialTool: (toolId: string) => void;
   onConfigureOfficialTool: (toolId: string) => void;
+  onStartWhatsAppPairing: (method: 'qr' | 'pairing_code', phoneNumber?: string) => Promise<import('@shared/types').CallOfficialToolResult>;
+  onGetWhatsAppStatus: () => Promise<import('@shared/types').CallOfficialToolResult>;
+  onOfficialToolEvent: (listener: (event: OfficialToolRuntimeEvent) => void) => () => void;
   onDeactivateOfficialTool: (toolId: string) => void;
 }
 
-export type SelectedTool = 'forger' | 'gmail' | null;
+export type SelectedTool = string | null;
 
 export function ToolsView({
   packages,
@@ -59,6 +65,9 @@ export function ToolsView({
   onSelectedToolChange,
   onApprovalChange,
   onConfigureOfficialTool,
+  onStartWhatsAppPairing,
+  onGetWhatsAppStatus,
+  onOfficialToolEvent,
   onDeactivateOfficialTool,
 }: ToolsViewProps) {
   const theme = useTheme();
@@ -94,6 +103,10 @@ export function ToolsView({
     () => officialTools.find((tool) => tool.id === GMAIL_TOOL_ID) ?? null,
     [officialTools],
   );
+  const officialToolById = useMemo(
+    () => new Map(officialTools.map((tool) => [tool.id, tool])),
+    [officialTools],
+  );
 
   const forgerCopy = forgerPackage
     ? localizedPackageCopy(t, forgerPackage)
@@ -105,15 +118,15 @@ export function ToolsView({
   const visibleRows = useMemo(
     () => [
       {
-        id: 'forger' as const,
+        id: FORGER_PACKAGE_ID,
         searchText: `${forgerCopy.name} ${forgerCopy.description}`,
       },
-      {
-        id: 'gmail' as const,
-        searchText: `Gmail ${gmailDescription}`,
-      },
+      ...officialTools.map((tool) => ({
+        id: tool.id,
+        searchText: `${tool.name} ${tool.description}`,
+      })),
     ].filter((row) => !normalizedQuery || row.searchText.toLowerCase().includes(normalizedQuery)),
-    [forgerCopy.description, forgerCopy.name, gmailDescription, normalizedQuery],
+    [forgerCopy.description, forgerCopy.name, normalizedQuery, officialTools],
   );
 
   if (selectedTool === 'forger') {
@@ -153,6 +166,29 @@ export function ToolsView({
         />
         {gmailAccountHelpDialog}
       </>
+    );
+  }
+
+  const selectedOfficialTool = selectedTool ? officialToolById.get(selectedTool) ?? null : null;
+  if (selectedOfficialTool) {
+    const selectedOfficialPackage = packages.find((toolPackage) => toolPackage.id === officialToolPackageId(selectedOfficialTool.id)) ?? null;
+    return (
+      <OfficialToolDetail
+        tool={selectedOfficialTool}
+        toolPackage={selectedOfficialPackage}
+        settings={settings}
+        busyToolId={busyToolId}
+        busyOfficialToolId={busyOfficialToolId}
+        errorMessage={errorMessage}
+        t={t}
+        onBack={() => onSelectedToolChange(null)}
+        onConnect={() => onConfigureOfficialTool(selectedOfficialTool.id)}
+        onDisconnect={() => onDeactivateOfficialTool(selectedOfficialTool.id)}
+        onStartWhatsAppPairing={selectedOfficialTool.id === 'whatsapp' ? onStartWhatsAppPairing : undefined}
+        onGetWhatsAppStatus={selectedOfficialTool.id === 'whatsapp' ? onGetWhatsAppStatus : undefined}
+        onOfficialToolEvent={selectedOfficialTool.id === 'whatsapp' ? onOfficialToolEvent : undefined}
+        onApprovalChange={onApprovalChange}
+      />
     );
   }
 
@@ -202,7 +238,7 @@ export function ToolsView({
           />
         ) : null}
 
-        {visibleRows.some((row) => row.id === 'gmail') ? (
+        {visibleRows.some((row) => row.id === GMAIL_TOOL_ID) ? (
           <ToolRow
             icon={<GmailIcon />}
             title="Gmail"
@@ -219,6 +255,28 @@ export function ToolsView({
             onClick={() => onSelectedToolChange('gmail')}
           />
         ) : null}
+
+        {officialTools.filter((tool) => tool.id !== GMAIL_TOOL_ID && visibleRows.some((row) => row.id === tool.id)).map((tool) => {
+          const toolPackage = packages.find((candidate) => candidate.id === officialToolPackageId(tool.id));
+          return (
+            <ToolRow
+              key={tool.id}
+              icon={<ExtensionRounded color="primary" sx={{ width: 44, height: 44, flexShrink: 0 }} />}
+              title={tool.name}
+              description={tool.description}
+              meta={t.sections.tools.packageToolCount(toolPackage?.tools.length ?? tool.actions.length)}
+              pill={(
+                <Chip
+                  size="small"
+                  color={tool.configured ? 'success' : 'default'}
+                  label={tool.configured ? t.sections.tools.active : t.sections.tools.inactive}
+                />
+              )}
+              onboardingTarget={`tool-row-${tool.id}`}
+              onClick={() => onSelectedToolChange(tool.id)}
+            />
+          );
+        })}
 
         {visibleRows.length === 0 ? (
           <Paper variant="outlined" sx={{ p: 2, borderRadius: 1 }}>

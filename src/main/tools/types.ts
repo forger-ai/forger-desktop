@@ -2,6 +2,7 @@ import type {
   CallOfficialToolInput,
   CallOfficialToolResult,
   OfficialToolDefinition,
+  OfficialToolRuntimeEvent,
   ToolMutationResult,
 } from '../../shared/types';
 import type { SecretsStore } from '../secrets-store';
@@ -33,10 +34,14 @@ export interface InternalToolContext {
     refreshToken: string;
   }) => Promise<InternalOAuthTokenResponse>;
   appendLog?: (event: string, payload?: Record<string, unknown>) => Promise<void>;
+  emitEvent?: (event: OfficialToolRuntimeEvent) => void;
 }
 
 export interface InternalToolModule {
   definition: OfficialToolDefinition;
   configure: (context: InternalToolContext) => Promise<ToolMutationResult>;
   execute: (input: CallOfficialToolInput, context: InternalToolContext) => Promise<CallOfficialToolResult>;
+  start?: (context: InternalToolContext) => Promise<void>;
+  stop?: (context: InternalToolContext) => Promise<void>;
+  deactivate?: (context: InternalToolContext) => Promise<void>;
 }

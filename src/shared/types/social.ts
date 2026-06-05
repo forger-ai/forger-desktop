@@ -1,3 +1,5 @@
+import type { CloudStorageUsage } from './cloud-storage';
+
 export type FriendshipStatus = 'pending' | 'accepted' | 'declined' | 'canceled';
 
 export interface CloudFriendUser {
@@ -296,6 +298,7 @@ export interface SocialUserAppList {
     appCount: number;
     appCountLimit: number;
     versionSizeLimitBytes: number;
+    storage?: CloudStorageUsage;
   };
   apps: SocialUserApp[];
 }

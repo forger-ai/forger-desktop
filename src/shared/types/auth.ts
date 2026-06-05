@@ -39,6 +39,7 @@ export interface DesktopErrorReportPreview extends DesktopErrorReportInput {
 export interface DesktopErrorReportFileSummary {
   kind:
     | 'install_log'
+    | 'desktop_log'
     | 'runtime_status'
     | 'app_mcp_log'
     | 'agent_run'
