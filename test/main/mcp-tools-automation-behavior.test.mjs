@@ -439,7 +439,7 @@ test('official tool declarations dedupe entries and app grants gate optional too
     });
     assert.deepEqual(status, { success: true, data: { connected: false } });
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
   }
 });
 
@@ -502,7 +502,7 @@ test('official tools configure Gmail through OAuth callback and clean grants on 
     const registry = JSON.parse(await readFile(join(root, 'official-tools.json'), 'utf8'));
     assert.deepEqual(registry.appGrants['finance-os'], {});
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
   }
 });
 
@@ -575,7 +575,7 @@ test('official tools enforce app declarations before configured tool execution',
     }, { appId: 'finance-os', requireAppGrant: true });
     assert.equal(undeclaredAction.technicalCode, 'app_tool_action_not_declared');
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
   }
 });
 
@@ -665,7 +665,7 @@ test('official tools preserve registry fallbacks, error status, required gates, 
     const registry = JSON.parse(await readFile(join(root, 'official-tools.json'), 'utf8'));
     assert.deepEqual(registry.appGrants['optional-app'], {});
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
   }
 });
 
@@ -743,7 +743,7 @@ test('official tools validate unavailable, undeclared, optional, and malformed r
     }, { appId: 'mailer', requireAppGrant: true });
     assert.equal(optionalAgentDenied.technicalCode, 'app_tool_permission_denied');
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
   }
 });
 
@@ -1644,7 +1644,7 @@ test('app MCP manager ignores unsupported manifests and reports unsafe context s
     assert.equal(logs.some((entry) => entry.event === 'app_mcp:start_failed'), true);
   } finally {
     manager.dispose();
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
   }
 });
 
@@ -1708,7 +1708,7 @@ test('automation command helpers parse assistant messages and resolve Windows cm
     withPlatform('win32', async () => await resolveCodexCommand(codexCmd, [join(root, 'empty-bin')])),
     /codex_js_entrypoint_missing/,
   );
-  await rm(root, { recursive: true, force: true });
+  await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
 });
 
 test('automation command runner executes isolated Codex commands with MCP args and streams assistant messages', async () => {
@@ -1789,7 +1789,7 @@ test('automation command runner executes isolated Codex commands with MCP args a
     assert.match(transcript, /\[stdout\].*Primero/);
     assert.match(transcript, /\[stderr\] diagnostic line/);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
   }
 });
 
@@ -1843,7 +1843,7 @@ test('automation command runner writes transient Claude MCP config and removes i
     assert.ok(capture.args.includes('--permission-mode'));
     await assert.rejects(access(capture.configPath));
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
   }
 });
 
@@ -1872,7 +1872,7 @@ test('automation command runner records spawn errors and cleans transient Codex 
     const transcript = await readFile(transcriptPath, 'utf8');
     assert.match(transcript, /missing-codex exec/);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
   }
 });
 
@@ -1980,7 +1980,7 @@ test('automation command runner records failed exits and timeout kills in transc
       globalThis.setTimeout = originalSetTimeoutForKillFailure;
     }
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
   }
 });
 
@@ -2045,7 +2045,7 @@ test('automation manager records failed runs without invoking live credentials o
     assert.equal(updates.some((event) => event.run?.status === 'failed'), true);
   } finally {
     manager.dispose();
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
   }
 });
 
@@ -2146,7 +2146,7 @@ test('automation manager handles lifecycle validation, corrupted storage, and ov
     assert.deepEqual(manager.list(), []);
   } finally {
     manager.dispose();
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
   }
 });
 
@@ -2233,7 +2233,7 @@ test('automation manager records successful Codex runs with memory context and r
     assert.equal(updates.some((event) => event.run?.status === 'succeeded'), true);
   } finally {
     manager.dispose();
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
   }
 });
 
@@ -2296,7 +2296,7 @@ test('automation manager normalizes stored entries, trims app ids, and ignores m
     assert.equal(updates.length, 0);
   } finally {
     manager.dispose();
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
   }
 });
 
@@ -2469,7 +2469,7 @@ test('automation manager rejects run ids that escape run storage', async () => {
     await assert.rejects(manager.listRuns(automation.id), /automation_run_path_outside_storage/);
   } finally {
     manager.dispose();
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
   }
 });
 
@@ -2525,7 +2525,7 @@ test('automation manager maps Codex timeout exits to the timeout user message', 
     assert.equal(runs[0].userMessage, 'La automatizacion se detuvo porque tardo demasiado en responder.');
   } finally {
     manager.dispose();
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
   }
 });
 
@@ -2606,7 +2606,7 @@ test('automation manager runs due stored schedules and keeps enabled automations
     assert.equal(updates.some((event) => event.automation.running === false && event.run?.status === 'succeeded'), true);
   } finally {
     manager.dispose();
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
   }
 });
 
