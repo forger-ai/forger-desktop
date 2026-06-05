@@ -2424,9 +2424,10 @@ test('automation manager maps missing provider setup to user-facing run failures
     assert.match(claudeAuthRuns[0].userMessage, /Claude Code no tiene una sesion activa/);
   } finally {
     codex.dispose();
+    codexAuth.dispose();
     claude.dispose();
     claudeAuth.dispose();
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
   }
 });
 
