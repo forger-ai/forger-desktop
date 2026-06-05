@@ -1,6 +1,6 @@
 ---
 name: forger-official-tools
-description: Use when operating Forger-owned MCP tools for apps, prompts, installed app lifecycle, Gmail, or official platform actions without Codex-local connector fallbacks.
+description: Use when operating Forger-owned MCP tools for apps, prompts, installed app lifecycle, Gmail, WhatsApp, or official platform actions without Codex-local connector fallbacks.
 ---
 
 - Official tools live on the `forger` MCP server.

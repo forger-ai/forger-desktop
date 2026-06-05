@@ -173,6 +173,7 @@ import type {
   MemoryListInput,
   MemoryUpdateInput,
   OpenAppResult,
+  OfficialToolRuntimeEvent,
   RemoteAppBackupSummary,
   RendererChatTraceEvent,
   RuntimeStatus,
@@ -326,7 +327,7 @@ let forgerMcpServer: ForgerMcpServer | null = null;
 
 const mainUtilitiesState = { get agentToolSettings() { return agentToolSettings; }, set agentToolSettings(value) { agentToolSettings = value; }, get catalogApps() { return catalogApps; }, set catalogApps(value) { catalogApps = value; }, get desktopUpdater() { return desktopUpdater; }, set desktopUpdater(value) { desktopUpdater = value; }, get forgerAccount() { return forgerAccount; }, set forgerAccount(value) { forgerAccount = value; }, get settings() { return settings; }, set settings(value) { settings = value; } };
 const getMainWindow = (): BrowserWindow | null => mainWindow;
-const createMainUtilitiesDeps = () => ({ AGENT_TOOL_DEFINITIONS, AGENT_TOOL_IDS, APP_FOLDER_GRANT_TTL_MS, Buffer, Date, DesktopUpdater, IPC_CHANNELS, app, appFolderGrantSecret, appWindows, buildFailureDiagnostic, cloudDeviceManager, createHmac, desktopErrorReporter, forgerAccountStore, friendChatWindows, fs, getAgentToolSettingsPath, getInstallLogPath, installProgressByPhase, isDev, getLocalNetworkShareStatus, getRemoteNetworkShareStatus, getMainWindow, path, publicForgerAccount, registry, runningApps, state: mainUtilitiesState });
+const createMainUtilitiesDeps = () => ({ AGENT_TOOL_DEFINITIONS, AGENT_TOOL_IDS, APP_FOLDER_GRANT_TTL_MS, Buffer, Date, DesktopUpdater, IPC_CHANNELS, app, appFolderGrantSecret, appWindows, buildFailureDiagnostic, cloudDeviceManager, createHmac, desktopErrorReporter, forgerAccountStore, friendChatWindows, fs, getAgentToolSettingsPath, getForgerMetadataRoot, getInstallLogPath, installProgressByPhase, isDev, getLocalNetworkShareStatus, getRemoteNetworkShareStatus, getMainWindow, path, publicForgerAccount, registry, runningApps, state: mainUtilitiesState });
 const getMainUtilitiesController = () => createMainUtilitiesController(createMainUtilitiesDeps());
 const CommandFailedError = getMainUtilitiesController().CommandFailedError;
 const truncateForInstallLog = (value: string): string => getMainUtilitiesController().truncateForInstallLog(value);
@@ -346,6 +347,12 @@ const failureDiagnostic = (error: unknown, fallbackCode: string): FailureDiagnos
   getMainUtilitiesController().failureDiagnostic(error, fallbackCode) as FailureDiagnosticFields;
 const emitInstallProgress = (appId: string, payload: InstallAppResult): void => getMainUtilitiesController().emitInstallProgress(appId, payload);
 const emitRuntimeStatus = (payload: RuntimeStatus): void => getMainUtilitiesController().emitRuntimeStatus(payload);
+const emitOfficialToolEvent = (payload: OfficialToolRuntimeEvent): void => {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return;
+  }
+  mainWindow.webContents.send(IPC_CHANNELS.officialToolEvent, payload);
+};
 const buildChatRunIpcTracePayload = (run: ChatRun): Record<string, unknown> => getMainUtilitiesController().buildChatRunIpcTracePayload(run);
 const sanitizeRendererChatTrace = (input: RendererChatTraceEvent): Record<string, unknown> => getMainUtilitiesController().sanitizeRendererChatTrace(input);
 const emitChatRunUpdated = (payload: ChatRunEvent): void => getMainUtilitiesController().emitChatRunUpdated(payload);
@@ -379,6 +386,7 @@ const createManifestSupportDeps = () => ({
   catalogApps,
   cloudSyncSettings,
   extractArchive,
+  emitOfficialToolEvent,
   forgerAccount,
   forgerBackendClient,
   getForgerAccount: () => forgerAccount,

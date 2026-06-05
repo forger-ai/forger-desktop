@@ -680,6 +680,72 @@ test('remote backup cloud calls normalize lists, upload archives, download files
   }
 });
 
+test('cloud storage endpoint returns normalized quota usage and keeps failures non-blocking', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'forger-cloud-storage-test-'));
+  const requests = [];
+  const harness = createClient(root, async (url, init = {}) => {
+    requests.push({ url, init });
+    const parsed = new URL(url);
+    if (parsed.pathname === '/api/v1/me/cloud_storage' && (!init.method || init.method === 'GET')) {
+      return jsonResponse(200, {
+        storage: {
+          used_bytes: '3072',
+          limit_bytes: '10737418240',
+          remaining_bytes: '10737415168',
+          plan: 'demo',
+          breakdown: {
+            backups_bytes: '1024',
+            uploaded_apps_bytes: '1536',
+            pending_user_app_uploads_bytes: '256',
+            other_bytes: '256',
+          },
+        },
+      });
+    }
+    return jsonResponse(404, { error: 'not_found' });
+  }, 'session-token');
+
+  try {
+    const usage = await harness.client.getCloudStorageUsage();
+
+    assert.equal(requests[0].url, 'https://platform.test/api/v1/me/cloud_storage');
+    assert.equal(requests[0].init.headers.Authorization, 'Bearer session-token');
+    assert.deepEqual(usage, {
+      usedBytes: 3072,
+      limitBytes: 10737418240,
+      remainingBytes: 10737415168,
+      plan: 'demo',
+      breakdown: {
+        backupsBytes: 1024,
+        uploadedAppsBytes: 1536,
+        pendingUserAppUploadsBytes: 256,
+        otherBytes: 256,
+      },
+    });
+  } finally {
+    harness.restore();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('cloud storage endpoint returns null on unavailable backend or malformed response', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'forger-cloud-storage-failure-test-'));
+  const harness = createClient(root, async (url) => {
+    const parsed = new URL(url);
+    if (parsed.pathname === '/api/v1/me/cloud_storage') {
+      return jsonResponse(500, { error: 'offline' });
+    }
+    return jsonResponse(404, { error: 'not_found' });
+  }, 'session-token');
+
+  try {
+    assert.equal(await harness.client.getCloudStorageUsage(), null);
+  } finally {
+    harness.restore();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('catalog, account, and OAuth config methods cover local fallbacks and safe failures', async () => {
   const root = await mkdtemp(join(tmpdir(), 'forger-backend-fallbacks-'));
   const requests = [];

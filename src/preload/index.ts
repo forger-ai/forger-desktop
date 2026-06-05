@@ -61,6 +61,7 @@ const IPC_CHANNELS = {
   updateForgerAccountProfile: 'forger:account:update-profile',
   logoutForgerAccount: 'forger:account:logout',
   forgerAccountUpdated: 'forger:account:updated',
+  getCloudStorageUsage: 'forger:cloud-storage:get',
   getCloudDevices: 'forger:cloud-devices:get',
   generateDevicePairingCode: 'forger:cloud-devices:pairing-code',
   listFriends: 'forger:friends:list',
@@ -114,6 +115,7 @@ const IPC_CHANNELS = {
   prepareConversationDiagnosticReport: 'forger:conversation-diagnostic:prepare',
   submitConversationDiagnosticReport: 'forger:conversation-diagnostic:submit',
   desktopErrorReportRequested: 'forger:error-report:requested',
+  desktopLog: 'forger:desktop-log',
   listAgentTools: 'forger:agent-tools:list',
   getAgentToolSettings: 'forger:agent-tools:get-settings',
   updateAgentToolApproval: 'forger:agent-tools:update-approval',
@@ -121,7 +123,9 @@ const IPC_CHANNELS = {
   refreshOfficialTools: 'forger:official-tools:refresh',
   activateOfficialTool: 'forger:official-tools:activate',
   configureOfficialTool: 'forger:official-tools:configure',
+  callOfficialTool: 'forger:official-tools:call',
   deactivateOfficialTool: 'forger:official-tools:deactivate',
+  officialToolEvent: 'forger:official-tools:event',
   getAppToolsInstallGate: 'forger:app-tools:install-gate',
   setAppToolGrant: 'forger:app-tools:set-grant',
   memoryList: 'forger:memory:list',
@@ -259,6 +263,7 @@ const api: ForgerDesktopApi = {
   loginForgerAccountWithGoogle: () => ipcRenderer.invoke(IPC_CHANNELS.loginForgerAccountWithGoogle),
   updateForgerAccountProfile: (input) => ipcRenderer.invoke(IPC_CHANNELS.updateForgerAccountProfile, input),
   logoutForgerAccount: () => ipcRenderer.invoke(IPC_CHANNELS.logoutForgerAccount),
+  getCloudStorageUsage: () => ipcRenderer.invoke(IPC_CHANNELS.getCloudStorageUsage),
   onForgerAccountUpdated: (listener) => {
     const wrapped = (_event: unknown, payload: Parameters<typeof listener>[0]) => {
       listener(payload);
@@ -329,6 +334,7 @@ const api: ForgerDesktopApi = {
   submitDesktopErrorReport: (input) => ipcRenderer.invoke(IPC_CHANNELS.submitDesktopErrorReport, input),
   prepareConversationDiagnosticReport: (input) => ipcRenderer.invoke(IPC_CHANNELS.prepareConversationDiagnosticReport, input),
   submitConversationDiagnosticReport: (input) => ipcRenderer.invoke(IPC_CHANNELS.submitConversationDiagnosticReport, input),
+  desktopLog: (input) => ipcRenderer.invoke(IPC_CHANNELS.desktopLog, input),
   onDesktopErrorReportRequested: (listener) => {
     const wrapped = (_event: unknown, payload: Parameters<typeof listener>[0]) => {
       listener(payload);
@@ -345,7 +351,17 @@ const api: ForgerDesktopApi = {
   refreshOfficialTools: (locale) => ipcRenderer.invoke(IPC_CHANNELS.refreshOfficialTools, locale),
   activateOfficialTool: (toolId, locale) => ipcRenderer.invoke(IPC_CHANNELS.activateOfficialTool, toolId, locale),
   configureOfficialTool: (input) => ipcRenderer.invoke(IPC_CHANNELS.configureOfficialTool, input),
+  callOfficialTool: (input) => ipcRenderer.invoke(IPC_CHANNELS.callOfficialTool, input),
   deactivateOfficialTool: (toolId, locale) => ipcRenderer.invoke(IPC_CHANNELS.deactivateOfficialTool, toolId, locale),
+  onOfficialToolEvent: (listener) => {
+    const wrapped = (_event: unknown, payload: Parameters<typeof listener>[0]) => {
+      listener(payload);
+    };
+    ipcRenderer.on(IPC_CHANNELS.officialToolEvent, wrapped);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.officialToolEvent, wrapped);
+    };
+  },
   getAppToolsInstallGate: (appId, locale) => ipcRenderer.invoke(IPC_CHANNELS.getAppToolsInstallGate, appId, locale),
   setAppToolGrant: (input, locale) => ipcRenderer.invoke(IPC_CHANNELS.setAppToolGrant, input, locale),
   memoryList: (input) => ipcRenderer.invoke(IPC_CHANNELS.memoryList, input ?? {}),

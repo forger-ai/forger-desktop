@@ -24,7 +24,14 @@ export type AgentToolId =
   | 'gmail.search_messages'
   | 'gmail.read_thread'
   | 'gmail.read_attachment'
-  | 'gmail.send_email';
+  | 'gmail.send_email'
+  | 'whatsapp.connection.status'
+  | 'whatsapp.start_pairing'
+  | 'whatsapp.list_chats'
+  | 'whatsapp.read_messages'
+  | 'whatsapp.download_attachment'
+  | 'whatsapp.send_message'
+  | 'whatsapp.get_chat_details';
 
 export type AgentToolCategory = 'consulta' | 'app' | 'actualizacion' | 'vista' | 'memoria';
 
@@ -117,6 +124,44 @@ export interface OfficialToolSummary extends OfficialToolDefinition {
 
 export interface OfficialToolsState {
   tools: OfficialToolSummary[];
+}
+
+export type OfficialToolRuntimePhase =
+  | 'starting'
+  | 'connecting'
+  | 'qr_available'
+  | 'pairing_code_ready'
+  | 'connected'
+  | 'history_sync'
+  | 'messages_ingested'
+  | 'chats_ingested'
+  | 'contacts_ingested'
+  | 'sync_ready'
+  | 'disconnected'
+  | 'reconnecting'
+  | 'stopped'
+  | 'reset'
+  | 'error';
+
+export interface OfficialToolRuntimeEvent {
+  toolId: string;
+  phase: OfficialToolRuntimePhase;
+  timestamp: string;
+  message?: string;
+  reason?: string;
+  counts?: {
+    messages?: number;
+    chats?: number;
+    contacts?: number;
+    attachments?: number;
+  };
+  status?: {
+    connected?: boolean;
+    configured?: boolean;
+    qrAvailable?: boolean;
+    needsReconnect?: boolean;
+    lastDisconnectReason?: string;
+  };
 }
 
 export interface ToolMutationResult {

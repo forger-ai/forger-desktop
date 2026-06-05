@@ -10,6 +10,7 @@ import type {
   ConfigureOfficialToolInput,
   InstalledOfficialToolRecord,
   OfficialToolDefinition,
+  OfficialToolRuntimeEvent,
   OfficialToolSummary,
   OfficialToolsState,
   SetAppToolGrantInput,
@@ -45,6 +46,7 @@ interface OfficialToolsServiceOptions {
     refreshToken: string;
   }) => Promise<InternalOAuthTokenResponse>;
   appendLog?: (event: string, payload?: Record<string, unknown>) => Promise<void>;
+  emitEvent?: (event: OfficialToolRuntimeEvent) => void;
   getAppToolDeclarations: (appId: string) => Promise<{
     appName: string;
     required: AppToolDeclaration[];
@@ -79,14 +81,14 @@ const buildToolUnavailableResult = (
   if (tool.status === 'available') {
     return {
       success: false,
-      userMessage: surface === 'agent' ? copy.gmailUnavailableForAgent : copy.gmailUnavailableForApp,
+      userMessage: surface === 'agent' ? copy.unavailableForAgent(tool.name) : copy.unavailableForApp(tool.name),
       technicalCode: 'tool_not_active',
     };
   }
   if (tool.status === 'installed') {
     return {
       success: false,
-      userMessage: surface === 'agent' ? copy.gmailNotConfiguredForAgent : copy.gmailNotConfiguredForApp,
+      userMessage: surface === 'agent' ? copy.notConfiguredForAgent(tool.name) : copy.notConfiguredForApp(tool.name),
       technicalCode: 'tool_not_configured',
     };
   }
@@ -189,6 +191,7 @@ export class OfficialToolsService {
       exchangeGmailOAuthCode: this.options.exchangeGmailOAuthCode,
       refreshGmailOAuthAccessToken: this.options.refreshGmailOAuthAccessToken,
       appendLog: this.options.appendLog,
+      emitEvent: this.options.emitEvent,
     };
   }
 
@@ -198,6 +201,25 @@ export class OfficialToolsService {
     }
     this.registry = await this.readRegistry();
     this.loaded = true;
+  }
+
+  async startActiveTools(locale?: string): Promise<void> {
+    await this.load();
+    await Promise.all(Object.keys(this.registry.installed).map(async (toolId) => {
+      const toolModule = this.modulesById.get(toolId);
+      if (!toolModule?.start) {
+        return;
+      }
+      try {
+        await toolModule.start(this.getContext(locale));
+      } catch (error) {
+        await this.options.appendLog?.('official_tools:start_failed', {
+          toolId,
+          message: error instanceof Error ? error.message : 'unknown_error',
+          ...(error instanceof Error && error.stack ? { stack: error.stack } : {}),
+        });
+      }
+    }));
   }
 
   async refresh(locale?: string): Promise<OfficialToolsState> {
@@ -271,6 +293,7 @@ export class OfficialToolsService {
     for (const grants of Object.values(this.registry.appGrants)) {
       delete grants[toolId];
     }
+    await toolModule.deactivate?.(this.getContext(options?.locale));
     if (!options?.keepSecrets) {
       await this.options.secretsStore.deleteToolSecrets(toolId).catch(() => undefined);
     }

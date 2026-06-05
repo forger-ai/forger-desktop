@@ -541,8 +541,9 @@ export class ForgerMcpServer {
     });
 
     if (isOfficialTool(toolId)) {
+      const officialToolId = getOfficialToolIdForAction(toolId);
       const validation = await this.options.validateOfficialTool(
-        { toolId: 'gmail', actionId: toolId, input: args },
+        { toolId: officialToolId, actionId: toolId, input: args },
         { caller: session.caller, appId: session.appId },
       );
       if (validation) {
@@ -734,8 +735,9 @@ export class ForgerMcpServer {
     }
 
     if (isOfficialTool(toolId)) {
+      const officialToolId = getOfficialToolIdForAction(toolId);
       const result = await this.options.callOfficialTool(
-        { toolId: 'gmail', actionId: toolId, input: args },
+        { toolId: officialToolId, actionId: toolId, input: args },
         { caller: session.caller, appId: session.appId },
       );
       await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
@@ -836,7 +838,22 @@ export class ForgerMcpServer {
 
 const isMemoryTool = (toolId: AgentToolId): boolean => toolId.startsWith('memory_');
 
-const isOfficialTool = (toolId: AgentToolId): boolean => toolId.startsWith('gmail.');
+const OFFICIAL_TOOL_ACTION_PREFIXES: Record<string, string> = {
+  'gmail.': 'gmail',
+  'whatsapp.': 'whatsapp',
+};
+
+const isOfficialTool = (toolId: AgentToolId): boolean =>
+  Object.keys(OFFICIAL_TOOL_ACTION_PREFIXES).some((prefix) => toolId.startsWith(prefix));
+
+const getOfficialToolIdForAction = (toolId: AgentToolId): string => {
+  for (const [prefix, officialToolId] of Object.entries(OFFICIAL_TOOL_ACTION_PREFIXES)) {
+    if (toolId.startsWith(prefix)) {
+      return officialToolId;
+    }
+  }
+  return toolId;
+};
 
 const isInternalMcpTool = (toolId: AgentToolId): boolean => toolId === 'forger_ask_question';
 

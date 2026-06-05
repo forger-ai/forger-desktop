@@ -68,6 +68,7 @@ const createController = (overrides = {}) => {
     friendChatWindows,
     fs,
     getAgentToolSettingsPath: () => '/tmp/forger-agent-tools.json',
+    getForgerMetadataRoot: () => '/tmp/forger-metadata',
     getInstallLogPath: () => '/tmp/forger-install.log',
     getMainWindow: () => mainWindow,
     installProgressByPhase,

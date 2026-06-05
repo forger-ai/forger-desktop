@@ -10,6 +10,7 @@ test('usage analytics declares Desktop install and ChatGPT connection events', a
 
   assert.match(source, /'forger_installed'/);
   assert.match(source, /'chatgpt_connected'/);
+  assert.match(source, /'local_app_created'/);
 });
 
 test('forger_installed is privacy-safe and recorded once per local installation', async () => {
@@ -32,4 +33,15 @@ test('chatgpt_connected is emitted only after successful authenticated ChatGPT c
   assert.match(analyticsSource, /eventName: 'chatgpt_connected'/);
   assert.doesNotMatch(analyticsSource, /chatgpt_connected[\s\S]{0,220}stringParameters/);
   assert.doesNotMatch(analyticsSource, /chatgpt_connected[\s\S]{0,220}intParameters/);
+});
+
+test('local_app_created is emitted from created app chat updates without app content', async () => {
+  const controllerSource = await readFile(path.join(root, 'src/renderer/app/RendererAppController.tsx'), 'utf8');
+
+  assert.match(controllerSource, /createdAppUsageEventsRef/);
+  assert.match(controllerSource, /run\.createdApp/);
+  assert.match(controllerSource, /eventName: 'local_app_created'/);
+  assert.match(controllerSource, /surface: 'chat'/);
+  assert.doesNotMatch(controllerSource, /local_app_created[\s\S]{0,220}stringParameters/);
+  assert.doesNotMatch(controllerSource, /local_app_created[\s\S]{0,220}intParameters/);
 });

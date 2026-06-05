@@ -24,6 +24,7 @@ import type {
   CloudMessage,
   CloudMessageDelivery,
   CloudMessageEnvelope,
+  CloudStorageUsage,
   CloudSendAppShareInput,
   CloudSendMessageInput,
   SocialUserApp,
@@ -65,6 +66,7 @@ import {
   defaultReportingLogPath,
   emptyRemoteBackupsState,
   googleLoginErrorMessage,
+  normalizeCloudStorageUsage,
   normalizeRemoteBackup,
   normalizeRemoteBackupsUsage,
   normalizeRuntimePlatform,
@@ -73,6 +75,7 @@ import {
   responseRequestId,
   safeValidationKeys,
   type RemoteBackupsResponse,
+  type CloudStorageResponse,
   usernameCooldownMessage,
 } from './forger-backend/client-helpers';
 import { type ConversationDiagnosticAttachmentUpload, type DesktopErrorReportAttachmentUpload, submitConversationDiagnosticReport, submitDesktopErrorReport } from './forger-backend/report-submissions';
@@ -867,6 +870,7 @@ export class ForgerBackendClient {
         appCount: Number(usage.app_count ?? 0),
         appCountLimit: Number(usage.app_count_limit ?? 0),
         versionSizeLimitBytes: Number(usage.version_size_limit_bytes ?? 0),
+        storage: normalizeCloudStorageUsage(usage.storage),
       },
       apps: Array.isArray(payload.apps) ? payload.apps.map(toSocialUserApp).filter(Boolean) as SocialUserApp[] : [],
     };
@@ -1327,6 +1331,18 @@ export class ForgerBackendClient {
       backups: backups.map((entry) => normalizeRemoteBackup(entry)).filter((entry): entry is RemoteAppBackupSummary => Boolean(entry)),
       usage: normalizeRemoteBackupsUsage(record.usage),
     };
+  }
+
+  async getCloudStorageUsage(): Promise<CloudStorageUsage | null> {
+    const response = await fetch(`${this.options.backendBaseUrl}/api/v1/me/cloud_storage`, {
+      method: 'GET',
+      headers: buildBackendHeaders(this.options.token()),
+    });
+    const payload = await this.readJson<CloudStorageResponse>(response);
+    if (!response.ok || !payload || typeof payload !== 'object') {
+      return null;
+    }
+    return normalizeCloudStorageUsage(payload.storage);
   }
 
   async createRemoteBackup(input: {

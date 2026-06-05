@@ -29,11 +29,12 @@ interface PrepareDesktopErrorReportOptions {
   platform: NodeJS.Platform;
   arch: string;
   getInstallLogPath: () => string;
+  getDesktopLogPath?: () => string;
   roots: ReportSanitizerRoot[];
 }
 
 interface AppInstallLogExcerpt {
-  source: 'install.log';
+  source: 'install.log' | 'forger-desktop.jsonl';
   bytesRead: number;
   truncatedFromStart: boolean;
   lines: string[];
@@ -65,10 +66,25 @@ export const prepareDesktopErrorReport = async (
 };
 
 export const buildDesktopErrorReportAttachments = async (
-  options: Pick<PrepareDesktopErrorReportOptions, 'fs' | 'getInstallLogPath' | 'roots'>,
+  options: Pick<PrepareDesktopErrorReportOptions, 'fs' | 'getInstallLogPath' | 'getDesktopLogPath' | 'roots'>,
   input: DesktopErrorReportPreview,
 ): Promise<DesktopErrorReportAttachmentUpload[]> => {
   const attachments: DesktopErrorReportAttachmentUpload[] = [];
+  const desktopLogExcerpt = options.getDesktopLogPath
+    ? await readRecentLogLines({
+      fs: options.fs,
+      logPath: options.getDesktopLogPath(),
+      source: 'forger-desktop.jsonl',
+    })
+    : null;
+  if (desktopLogExcerpt) {
+    attachments.push(buildLogAttachment({
+      excerpt: desktopLogExcerpt,
+      roots: options.roots,
+      kind: 'desktop_log',
+      filename: 'forger-desktop.jsonl',
+    }));
+  }
   const promotedInstallLog = appInstallLogExcerptFromSensitiveDetails(input.sensitiveDetails);
   const appInstallLogExcerpt = promotedInstallLog
     ?? (input.source === 'app' && input.appId
@@ -86,6 +102,29 @@ export const buildDesktopErrorReportAttachments = async (
   }
   attachments.push(...promotedArtifactAttachments(input.sensitiveDetails, options.roots));
   return attachments;
+};
+
+const readRecentLogLines = async (input: {
+  fs: FsPromises;
+  logPath: string;
+  source: AppInstallLogExcerpt['source'];
+}): Promise<AppInstallLogExcerpt | null> => {
+  let handle: fs.FileHandle | null = null;
+  try {
+    const stats = await input.fs.stat(input.logPath);
+    const bytesToRead = Math.min(stats.size, MAX_APP_ERROR_LOG_BYTES);
+    const start = Math.max(0, stats.size - bytesToRead);
+    const buffer = Buffer.alloc(bytesToRead);
+    handle = await input.fs.open(input.logPath, 'r');
+    const { bytesRead } = await handle.read(buffer, 0, bytesToRead, start);
+    const rawLines = buffer.subarray(0, bytesRead).toString('utf8').split(/\r?\n/).filter((line) => line.trim().length > 0);
+    const lines = (start > 0 ? rawLines.slice(1) : rawLines).slice(-MAX_APP_ERROR_LOG_LINES).map(truncateLogLine);
+    return lines.length > 0 ? { source: input.source, bytesRead, truncatedFromStart: start > 0, lines } : null;
+  } catch {
+    return null;
+  } finally {
+    await handle?.close().catch(() => undefined);
+  }
 };
 
 export const summarizeDesktopErrorReportAttachments = (
@@ -145,14 +184,28 @@ const buildAppInstallLogAttachment = (input: {
   excerpt: AppInstallLogExcerpt;
   roots: ReportSanitizerRoot[];
 }): DesktopErrorReportAttachmentUpload => {
+  return buildLogAttachment({
+    excerpt: input.excerpt,
+    roots: input.roots,
+    kind: 'install_log',
+    filename: 'install-log.jsonl',
+  });
+};
+
+const buildLogAttachment = (input: {
+  excerpt: AppInstallLogExcerpt;
+  roots: ReportSanitizerRoot[];
+  kind: DesktopErrorReportFileSummary['kind'];
+  filename: string;
+}): DesktopErrorReportAttachmentUpload => {
   const raw = `${input.excerpt.lines.join('\n')}\n`;
   const text = sanitizeReportPayload(raw, {
     roots: input.roots,
     maxStringLength: DIAGNOSTIC_ATTACHMENT_MAX_CHARS,
   });
   return {
-    kind: 'install_log',
-    filename: 'install-log.jsonl',
+    kind: input.kind,
+    filename: input.filename,
     contentType: 'application/x-ndjson',
     originalByteSize: Buffer.byteLength(raw, 'utf8'),
     sanitizedByteSize: Buffer.byteLength(text, 'utf8'),

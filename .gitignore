@@ -3,6 +3,8 @@ dist/
 dist-electron/
 release/
 resources/app-skeletons/
+src/renderer/docs/forger-docs.generated.ts
+.forger-docs/
 tmp/
 .DS_Store
 *.log

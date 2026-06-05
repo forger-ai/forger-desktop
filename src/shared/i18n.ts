@@ -80,10 +80,15 @@ export const sharedCopy = {
       gmailConnected: 'Gmail conectado.',
       gmailConnectFailed: 'No pudimos conectar Gmail.',
       gmailForgerAccountRequired: 'Para conectar Gmail, inicia sesión en Forger Cloud. Forger Cloud permite completar la autenticación segura con Google sin exponer el secreto OAuth en tu desktop.',
+      whatsappActivated: 'WhatsApp activado. Conecta la cuenta desde el chat con QR o codigo de vinculacion.',
       gmailUnavailableForAgent: 'Gmail está desactivada. Pídele al usuario activar y conectar Gmail en la vista Tools de Forger antes de leer o enviar correos.',
       gmailUnavailableForApp: 'Gmail está desactivada. Activa y conecta Gmail en la vista Tools de Forger antes de usarla desde esta app.',
       gmailNotConfiguredForAgent: 'Gmail está activada, pero todavía no está conectada. Pídele al usuario conectar Gmail en la vista Tools de Forger.',
       gmailNotConfiguredForApp: 'Gmail está activada, pero todavía no está conectada. Conecta Gmail en la vista Tools de Forger.',
+      unavailableForAgent: (toolName: string) => `${toolName} esta desactivada. Pidele al usuario activarla en la vista Tools de Forger antes de usarla.`,
+      unavailableForApp: (toolName: string) => `${toolName} esta desactivada. Activa la herramienta en la vista Tools de Forger antes de usarla desde esta app.`,
+      notConfiguredForAgent: (toolName: string) => `${toolName} esta activada, pero todavia no esta conectada. Pidele al usuario conectarla en la vista Tools de Forger.`,
+      notConfiguredForApp: (toolName: string) => `${toolName} esta activada, pero todavia no esta conectada. Conectala en la vista Tools de Forger.`,
       configurationError: (toolName: string, error?: string) => `${toolName} tiene un error de configuración${error ? `: ${error}` : '.'}`,
       notReady: 'La herramienta no está lista para usarse.',
     },
@@ -190,6 +195,47 @@ export const sharedCopy = {
         },
         changelog: ['Base inicial para conexión OAuth y acciones Gmail.'],
       },
+      whatsapp: {
+        name: 'WhatsApp (no oficial)',
+        description: 'Lee y envia mensajes de WhatsApp usando una conexion local no oficial basada en WhatsApp Web. Puede necesitar reconexion.',
+        secrets: {
+          whatsapp_auth_state: {
+            label: 'Conexion local de WhatsApp',
+            usage: 'La sesion de WhatsApp se guarda localmente en el workspace privado de Forger.',
+          },
+        },
+        actions: {
+          'whatsapp.connection.status': {
+            name: 'Estado de conexion',
+            description: 'Revisa si WhatsApp esta conectado o necesita reconexion.',
+          },
+          'whatsapp.start_pairing': {
+            name: 'Conectar WhatsApp',
+            description: 'Genera un QR o codigo para vincular WhatsApp como dispositivo local.',
+          },
+          'whatsapp.list_chats': {
+            name: 'Listar chats',
+            description: 'Lista chats de WhatsApp ya observados por Forger.',
+          },
+          'whatsapp.read_messages': {
+            name: 'Leer mensajes',
+            description: 'Lee mensajes guardados de un chat observado.',
+          },
+          'whatsapp.download_attachment': {
+            name: 'Descargar adjunto',
+            description: 'Descarga bajo demanda un archivo de WhatsApp previamente observado.',
+          },
+          'whatsapp.send_message': {
+            name: 'Enviar mensaje',
+            description: 'Envia un mensaje a un chat de WhatsApp previamente observado.',
+          },
+          'whatsapp.get_chat_details': {
+            name: 'Ver detalle de chat',
+            description: 'Obtiene detalles disponibles de un numero, grupo o canal de WhatsApp.',
+          },
+        },
+        changelog: ['Base experimental no oficial con Baileys para conexion local, lectura y envio controlado.'],
+      },
     },
   },
   en: {
@@ -238,10 +284,15 @@ export const sharedCopy = {
       gmailConnected: 'Gmail connected.',
       gmailConnectFailed: 'Could not connect Gmail.',
       gmailForgerAccountRequired: 'To connect Gmail, sign in to Forger Cloud. Forger Cloud lets Forger complete secure Google authentication without exposing the OAuth secret on your desktop.',
+      whatsappActivated: 'WhatsApp activated. Connect the account from chat with a QR or pairing code.',
       gmailUnavailableForAgent: 'Gmail is inactive. Ask the user to activate and connect Gmail in Forger Tools before reading or sending mail.',
       gmailUnavailableForApp: 'Gmail is inactive. Activate and connect Gmail in Forger Tools before using it from this app.',
       gmailNotConfiguredForAgent: 'Gmail is active, but it is not connected yet. Ask the user to connect Gmail in Forger Tools.',
       gmailNotConfiguredForApp: 'Gmail is active, but it is not connected yet. Connect Gmail in Forger Tools.',
+      unavailableForAgent: (toolName: string) => `${toolName} is inactive. Ask the user to activate it in Forger Tools before using it.`,
+      unavailableForApp: (toolName: string) => `${toolName} is inactive. Activate it in Forger Tools before using it from this app.`,
+      notConfiguredForAgent: (toolName: string) => `${toolName} is active, but it is not connected yet. Ask the user to connect it in Forger Tools.`,
+      notConfiguredForApp: (toolName: string) => `${toolName} is active, but it is not connected yet. Connect it in Forger Tools.`,
       configurationError: (toolName: string, error?: string) => `${toolName} has a configuration error${error ? `: ${error}` : '.'}`,
       notReady: 'The tool is not ready to use.',
     },
@@ -347,6 +398,47 @@ export const sharedCopy = {
           },
         },
         changelog: ['Initial base for Gmail OAuth connection and actions.'],
+      },
+      whatsapp: {
+        name: 'WhatsApp (unofficial)',
+        description: 'Reads and sends WhatsApp messages with an unofficial local WhatsApp Web connection. It may need reconnection.',
+        secrets: {
+          whatsapp_auth_state: {
+            label: 'Local WhatsApp connection',
+            usage: 'The WhatsApp session is stored locally in the private Forger workspace.',
+          },
+        },
+        actions: {
+          'whatsapp.connection.status': {
+            name: 'Connection status',
+            description: 'Checks whether WhatsApp is connected or needs reconnection.',
+          },
+          'whatsapp.start_pairing': {
+            name: 'Connect WhatsApp',
+            description: 'Generates a QR or code to link WhatsApp as a local device.',
+          },
+          'whatsapp.list_chats': {
+            name: 'List chats',
+            description: 'Lists WhatsApp chats already observed by Forger.',
+          },
+          'whatsapp.read_messages': {
+            name: 'Read messages',
+            description: 'Reads saved messages from an observed chat.',
+          },
+          'whatsapp.download_attachment': {
+            name: 'Download attachment',
+            description: 'Downloads a previously observed WhatsApp file on demand.',
+          },
+          'whatsapp.send_message': {
+            name: 'Send message',
+            description: 'Sends a message to a previously observed WhatsApp chat.',
+          },
+          'whatsapp.get_chat_details': {
+            name: 'Chat details',
+            description: 'Gets available details for a WhatsApp number, group, or channel.',
+          },
+        },
+        changelog: ['Experimental unofficial Baileys base for local connection, reading, and controlled sending.'],
       },
     },
   },

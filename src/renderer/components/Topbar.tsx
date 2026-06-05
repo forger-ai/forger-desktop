@@ -6,6 +6,7 @@ import LogoutRounded from '@mui/icons-material/LogoutRounded';
 import PeopleRounded from '@mui/icons-material/PeopleRounded';
 import MinimizeRounded from '@mui/icons-material/MinimizeRounded';
 import PersonRounded from '@mui/icons-material/PersonRounded';
+import StorageRounded from '@mui/icons-material/StorageRounded';
 import {
   alpha,
   Avatar,
@@ -14,6 +15,7 @@ import {
   Chip,
   Divider,
   IconButton,
+  LinearProgress,
   Menu,
   MenuItem,
   Select,
@@ -23,7 +25,7 @@ import {
   useTheme,
 } from '@mui/material';
 import { useEffect, useState, type MouseEvent } from 'react';
-import type { AppSummary, ForgerAccountSession, WindowControlState } from '@shared/types';
+import type { AppSummary, CloudStorageUsage, ForgerAccountSession, WindowControlState } from '@shared/types';
 import type { BackgroundTask } from '@shared/types';
 import type { AppDictionary } from '@renderer/i18n';
 import type { View } from './Sidebar';
@@ -41,6 +43,9 @@ interface TopbarProps {
   onOpenCloudModal: () => void;
   account: ForgerAccountSession;
   accountBusy: boolean;
+  cloudStorageUsage: CloudStorageUsage | null;
+  cloudStorageBusy: boolean;
+  onOpenStorageSettings: () => void;
   onOpenSocialTab: (tab: SocialTab) => void;
   onLogout: () => void;
   backgroundTasks: BackgroundTask[];
@@ -58,6 +63,17 @@ const initialsFromName = (name: string) =>
     .slice(0, 2)
     .map((part) => part[0]?.toUpperCase() ?? '')
     .join('');
+
+const formatStorageBytes = (bytes: number, locale: string) => {
+  const units = [
+    { value: 1024 ** 3, label: 'GB' },
+    { value: 1024 ** 2, label: 'MB' },
+    { value: 1024, label: 'KB' },
+  ];
+  const unit = units.find((entry) => bytes >= entry.value) ?? units[1];
+  const value = bytes / unit.value;
+  return `${new Intl.NumberFormat(locale, { maximumFractionDigits: value >= 10 ? 0 : 1 }).format(value)} ${unit.label}`;
+};
 
 const AppSelect = ({
   apps,
@@ -211,6 +227,9 @@ export function Topbar({
   onOpenCloudModal,
   account,
   accountBusy,
+  cloudStorageUsage,
+  cloudStorageBusy,
+  onOpenStorageSettings,
   onOpenSocialTab,
   onLogout,
   backgroundTasks,
@@ -228,6 +247,10 @@ export function Topbar({
   const socialMenuOpen = Boolean(socialAnchorEl);
   const accountUser = account.authenticated ? account.user : null;
   const accountName = accountUser?.firstName?.trim() || accountUser?.email.split('@')[0] || '';
+  const storagePercent = cloudStorageUsage && cloudStorageUsage.limitBytes > 0
+    ? Math.min(100, Math.round((cloudStorageUsage.usedBytes / cloudStorageUsage.limitBytes) * 100))
+    : 0;
+  const storageColor = storagePercent >= 95 ? 'error' : storagePercent >= 80 ? 'warning' : 'primary';
 
   const handleAccountClick = (event: MouseEvent<HTMLElement>) => {
     if (accountUser) {
@@ -241,6 +264,11 @@ export function Topbar({
   const handleLogout = () => {
     setAccountAnchorEl(null);
     onLogout();
+  };
+
+  const handleOpenStorageSettings = () => {
+    setAccountAnchorEl(null);
+    onOpenStorageSettings();
   };
 
   const handleOpenSocialTab = (tab: SocialTab) => {
@@ -397,6 +425,53 @@ export function Topbar({
               <Typography variant="body2" color="text.secondary" noWrap>
                 {accountUser?.email}
               </Typography>
+            </Box>
+            <Divider />
+            <Box sx={{ px: 2, py: 1.25 }}>
+              <Stack spacing={0.75}>
+                <Stack direction="row" justifyContent="space-between" spacing={1}>
+                  <Typography variant="subtitle2">{t.settings.storageCloudTitle}</Typography>
+                  {cloudStorageUsage ? (
+                    <Chip size="small" label={t.settings.storagePlanLabel(cloudStorageUsage.plan)} sx={{ height: 22 }} />
+                  ) : null}
+                </Stack>
+                {cloudStorageUsage ? (
+                  <>
+                    <Typography variant="body2" color="text.secondary">
+                      {t.settings.storageUsedOfLimit(
+                        formatStorageBytes(cloudStorageUsage.usedBytes, t.locale),
+                        formatStorageBytes(cloudStorageUsage.limitBytes, t.locale),
+                      )}
+                    </Typography>
+                    <LinearProgress
+                      variant="determinate"
+                      value={storagePercent}
+                      color={storageColor}
+                      sx={{ height: 6, borderRadius: 1 }}
+                    />
+                    <Typography variant="caption" color="text.secondary">
+                      {t.settings.storageMenuBreakdown(
+                        formatStorageBytes(cloudStorageUsage.breakdown.backupsBytes, t.locale),
+                        formatStorageBytes(cloudStorageUsage.breakdown.uploadedAppsBytes + cloudStorageUsage.breakdown.pendingUserAppUploadsBytes, t.locale),
+                        formatStorageBytes(cloudStorageUsage.breakdown.otherBytes, t.locale),
+                      )}
+                    </Typography>
+                  </>
+                ) : (
+                  <Typography variant="body2" color="text.secondary">
+                    {cloudStorageBusy ? t.settings.storageLoading : t.settings.storageUnavailable}
+                  </Typography>
+                )}
+                <Button
+                  size="small"
+                  color="inherit"
+                  startIcon={<StorageRounded />}
+                  onClick={handleOpenStorageSettings}
+                  sx={{ justifyContent: 'flex-start', alignSelf: 'flex-start', px: 0.5 }}
+                >
+                  {t.settings.storageManage}
+                </Button>
+              </Stack>
             </Box>
             <Divider />
             <Box sx={{ px: 1, py: 1 }}>

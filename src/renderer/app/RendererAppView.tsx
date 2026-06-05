@@ -29,6 +29,7 @@ import { ChatView } from '@renderer/views/ChatView';
 import { CreateView } from '@renderer/views/CreateView';
 import { DataView } from '@renderer/views/DataView';
 import { DevicesView } from '@renderer/views/DevicesView';
+import { DocsView } from '@renderer/views/DocsView';
 import { FeedbackView } from '@renderer/views/FeedbackView';
 import { FilesView } from '@renderer/views/FilesView';
 import { FriendChatWindowView } from '@renderer/views/FriendChatWindowView';
@@ -230,6 +231,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     setSelectedToolsTool,
     handleAgentToolApprovalChange,
     runOfficialToolAction,
+    refreshOfficialTools,
     activeLocale,
     codexAuthBusy,
     claudeAuthBusy,
@@ -246,6 +248,9 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     handleReinstallCodex,
     setClaudeConfigOpen,
     handleReinstallClaude,
+    cloudStorageUsage,
+    cloudStorageBusy,
+    refreshCloudStorageUsage,
     desktopUpdateBusy,
     runDesktopUpdateAction,
     memories,
@@ -562,6 +567,9 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
           onOpenCloudModal={() => setCloudModalOpen(true)}
           account={forgerAccount}
           accountBusy={forgerAccountBusy}
+          cloudStorageUsage={cloudStorageUsage}
+          cloudStorageBusy={cloudStorageBusy}
+          onOpenStorageSettings={() => setCurrentView('settings')}
           onLogout={() => void handleForgerLogout()}
           backgroundTasks={backgroundTasks}
           backgroundTasksOpen={backgroundTasksDrawerOpen}
@@ -756,6 +764,13 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
           />
         ) : null}
 
+        {currentView === 'docs' ? (
+          <DocsView
+            locale={activeLocale}
+            onOpenExternalUrl={(url) => void getDesktopApi().openExternalUrl(url)}
+          />
+        ) : null}
+
         {currentView === 'automations' ? (
           renderAdvancedView('automations', <AutomationsView
             t={t}
@@ -876,6 +891,25 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             onConfigureOfficialTool={(toolId) =>
               void runOfficialToolAction(toolId, () => getDesktopApi().configureOfficialTool({ toolId, locale: activeLocale }))
             }
+            onStartWhatsAppPairing={async (method, phoneNumber) => {
+              await getDesktopApi().configureOfficialTool({ toolId: 'whatsapp', locale: activeLocale });
+              const result = await getDesktopApi().callOfficialTool({
+                toolId: 'whatsapp',
+                actionId: 'whatsapp.start_pairing',
+                input: {
+                  method,
+                  ...(phoneNumber ? { phoneNumber } : {}),
+                },
+              });
+              await refreshOfficialTools();
+              return result;
+            }}
+            onGetWhatsAppStatus={async () => getDesktopApi().callOfficialTool({
+              toolId: 'whatsapp',
+              actionId: 'whatsapp.connection.status',
+              input: {},
+            })}
+            onOfficialToolEvent={(listener) => getDesktopApi().onOfficialToolEvent(listener)}
             onDeactivateOfficialTool={(toolId) =>
               void runOfficialToolAction(toolId, () => getDesktopApi().deactivateOfficialTool(toolId, activeLocale))
             }
@@ -915,6 +949,9 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             onReinstallClaude={() => void handleReinstallClaude()}
             desktopUpdateState={desktopUpdateState}
             desktopUpdateBusy={desktopUpdateBusy}
+            cloudStorageUsage={cloudStorageUsage}
+            cloudStorageBusy={cloudStorageBusy}
+            onRefreshCloudStorage={() => void refreshCloudStorageUsage()}
             onCheckDesktopUpdates={() => void runDesktopUpdateAction(() => getDesktopApi().checkDesktopUpdates())}
             onDownloadDesktopUpdate={() => void runDesktopUpdateAction(() => getDesktopApi().downloadDesktopUpdate())}
             onInstallDesktopUpdate={() => void runDesktopUpdateAction(() => getDesktopApi().installDesktopUpdate())}

@@ -9,6 +9,7 @@ export default tseslint.config(
       'dist/**',
       'dist-electron/**',
       'release/**',
+      '.forger-docs/**',
       'resources/app-skeletons/**',
       'node_modules/**',
       'coverage/**',
@@ -48,7 +49,7 @@ export default tseslint.config(
       ],
       'no-empty': ['error', { allowEmptyCatch: true }],
       'no-control-regex': 'off',
-      'max-lines': ['error', { max: 1200, skipBlankLines: false, skipComments: false }],
+      'max-lines': ['error', { max: 1300, skipBlankLines: false, skipComments: false }],
     },
   },
   {

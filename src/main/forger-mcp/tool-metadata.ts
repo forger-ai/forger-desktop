@@ -333,6 +333,79 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
     };
   }
 
+  if (toolId === 'whatsapp.start_pairing') {
+    return {
+      type: 'object',
+      properties: {
+        method: { type: 'string', enum: ['qr', 'pairing_code'] },
+        phoneNumber: { type: 'string' },
+      },
+      required: ['method'],
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'whatsapp.list_chats') {
+    return {
+      type: 'object',
+      properties: {
+        chatType: { type: 'string', enum: ['direct', 'group', 'channel'] },
+        query: { type: 'string' },
+        limit: { type: 'number' },
+        cursor: { type: 'string' },
+      },
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'whatsapp.read_messages') {
+    return {
+      type: 'object',
+      properties: {
+        chatId: { type: 'string' },
+        limit: { type: 'number' },
+        beforeMessageRef: { type: 'string' },
+      },
+      required: ['chatId'],
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'whatsapp.download_attachment') {
+    return {
+      type: 'object',
+      properties: {
+        attachmentId: { type: 'string' },
+      },
+      required: ['attachmentId'],
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'whatsapp.send_message') {
+    return {
+      type: 'object',
+      properties: {
+        chatId: { type: 'string' },
+        text: { type: 'string' },
+        replyToMessageRef: { type: 'string' },
+      },
+      required: ['chatId', 'text'],
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'whatsapp.get_chat_details') {
+    return {
+      type: 'object',
+      properties: {
+        chatId: { type: 'string' },
+      },
+      required: ['chatId'],
+      additionalProperties: false,
+    };
+  }
+
   return {
     type: 'object',
     properties: {},

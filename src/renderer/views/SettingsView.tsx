@@ -8,10 +8,6 @@ import {
   CardActionArea,
   CardContent,
   Chip,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
   Divider,
   FormControl,
   FormControlLabel,
@@ -30,6 +26,7 @@ import {
   Typography,
 } from '@mui/material';
 import AddRounded from '@mui/icons-material/AddRounded';
+import ArrowBackRounded from '@mui/icons-material/ArrowBackRounded';
 import BackupRounded from '@mui/icons-material/BackupRounded';
 import ConstructionRounded from '@mui/icons-material/ConstructionRounded';
 import ContentCopyRounded from '@mui/icons-material/ContentCopyRounded';
@@ -37,13 +34,18 @@ import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
 import DevicesRounded from '@mui/icons-material/DevicesRounded';
 import EditRounded from '@mui/icons-material/EditRounded';
 import EventRepeatRounded from '@mui/icons-material/EventRepeatRounded';
-import ForumRounded from '@mui/icons-material/ForumRounded';
 import InsertDriveFileRounded from '@mui/icons-material/InsertDriveFileRounded';
+import KeyboardArrowRightRounded from '@mui/icons-material/KeyboardArrowRightRounded';
 import MemoryRounded from '@mui/icons-material/MemoryRounded';
+import PaletteRounded from '@mui/icons-material/PaletteRounded';
+import PrivacyTipRounded from '@mui/icons-material/PrivacyTipRounded';
+import PsychologyRounded from '@mui/icons-material/PsychologyRounded';
 import SystemUpdateAltRounded from '@mui/icons-material/SystemUpdateAltRounded';
 import DownloadRounded from '@mui/icons-material/DownloadRounded';
 import LaunchRounded from '@mui/icons-material/LaunchRounded';
 import RestartAltRounded from '@mui/icons-material/RestartAltRounded';
+import RefreshRounded from '@mui/icons-material/RefreshRounded';
+import StorageRounded from '@mui/icons-material/StorageRounded';
 import TableChartRounded from '@mui/icons-material/TableChartRounded';
 import VpnKeyRounded from '@mui/icons-material/VpnKeyRounded';
 import type {
@@ -62,6 +64,7 @@ import type {
   CodexReasoningEffort,
   AgentProvider,
   CloudIdentityState,
+  CloudStorageUsage,
   ForumParticipationState,
   Settings,
   DeveloperPathState,
@@ -105,6 +108,9 @@ interface SettingsViewProps {
   onReinstallClaude: () => void;
   desktopUpdateState: DesktopUpdateState;
   desktopUpdateBusy: boolean;
+  cloudStorageUsage: CloudStorageUsage | null;
+  cloudStorageBusy: boolean;
+  onRefreshCloudStorage: () => void;
   onCheckDesktopUpdates: () => void;
   onDownloadDesktopUpdate: () => void;
   onInstallDesktopUpdate: () => void;
@@ -153,6 +159,26 @@ const EMPTY_MEMORY_FORM: MemoryFormState = {
 const MEMORY_KINDS: MemoryKind[] = ['preference', 'profile', 'workflow', 'constraint', 'fact'];
 const MEMORY_STATUSES: MemoryStatus[] = ['active', 'candidate', 'archived'];
 const COMMON_DEVELOPER_PATHS = ['/opt/homebrew/bin', '/usr/local/bin'];
+type SettingsSubview = 'main' | 'llmProvider' | 'privacySecurity' | 'appearance' | 'storage' | 'developerMode' | 'memory';
+
+const formatStorageBytes = (bytes: number, locale: string) => {
+  const units = [
+    { value: 1024 ** 3, label: 'GB' },
+    { value: 1024 ** 2, label: 'MB' },
+    { value: 1024, label: 'KB' },
+  ];
+  const unit = units.find((entry) => bytes >= entry.value) ?? units[1];
+  const value = bytes / unit.value;
+  return `${new Intl.NumberFormat(locale, { maximumFractionDigits: value >= 10 ? 0 : 1 }).format(value)} ${unit.label}`;
+};
+
+interface SettingsRowItem {
+  key: string;
+  label: string;
+  description: string;
+  icon: ReactNode;
+  onClick: () => void;
+}
 
 const PathPreview = ({ title, entries }: { title: string; entries: string[] }) => (
   <Stack spacing={0.5}>
@@ -175,6 +201,47 @@ const PathPreview = ({ title, entries }: { title: string; entries: string[] }) =
     >
       {entries.length > 0 ? entries.join('\n') : '-'}
     </Box>
+  </Stack>
+);
+
+const SettingsList = ({ children }: { children: ReactNode }) => (
+  <Stack spacing={0} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1, overflow: 'hidden' }} divider={<Divider />}>
+    {children}
+  </Stack>
+);
+
+const SettingsRow = ({ item }: { item: SettingsRowItem }) => (
+  <CardActionArea onClick={item.onClick}>
+    <Stack direction="row" spacing={1.5} alignItems="center" sx={{ px: 1.5, py: 1.25, minHeight: 72 }}>
+      <Box sx={{ color: 'primary.main', display: 'grid', placeItems: 'center' }}>{item.icon}</Box>
+      <Box sx={{ minWidth: 0, flex: 1 }}>
+        <Typography variant="subtitle2">{item.label}</Typography>
+        <Typography variant="body2" color="text.secondary">{item.description}</Typography>
+      </Box>
+      <KeyboardArrowRightRounded color="action" />
+    </Stack>
+  </CardActionArea>
+);
+
+const SettingsSubviewHeader = ({
+  title,
+  description,
+  backLabel,
+  onBack,
+}: {
+  title: string;
+  description?: string;
+  backLabel: string;
+  onBack: () => void;
+}) => (
+  <Stack spacing={1.5}>
+    <Button startIcon={<ArrowBackRounded />} variant="text" onClick={onBack} sx={{ alignSelf: 'flex-start' }}>
+      {backLabel}
+    </Button>
+    <Stack spacing={0.5}>
+      <Typography variant="h4">{title}</Typography>
+      {description ? <Typography color="text.secondary">{description}</Typography> : null}
+    </Stack>
   </Stack>
 );
 
@@ -210,6 +277,9 @@ export function SettingsView({
   onReinstallClaude,
   desktopUpdateState,
   desktopUpdateBusy,
+  cloudStorageUsage,
+  cloudStorageBusy,
+  onRefreshCloudStorage,
   onCheckDesktopUpdates,
   onDownloadDesktopUpdate,
   onInstallDesktopUpdate,
@@ -224,16 +294,13 @@ export function SettingsView({
   earlyAccessEnabled,
   advancedMode,
   usageAnalyticsEnabled,
-  forumParticipation,
-  forumParticipationBusy,
-  onEnterForum,
   onEarlyAccessChange,
   onAdvancedModeChange,
   onUsageAnalyticsChange,
   onNavigate,
   onResetOnboarding,
 }: SettingsViewProps) {
-  const [memoryDialogOpen, setMemoryDialogOpen] = useState(false);
+  const [settingsSubview, setSettingsSubview] = useState<SettingsSubview>('main');
   const [revealedSecretKey, setRevealedSecretKey] = useState('');
   const [memoryForm, setMemoryForm] = useState<MemoryFormState>(EMPTY_MEMORY_FORM);
   const [developerPathDraft, setDeveloperPathDraft] = useState(developerMode.pathEntries.join('\n'));
@@ -334,162 +401,550 @@ export function SettingsView({
       readWhen: entry.readWhen,
       status: entry.status,
     });
-    setMemoryDialogOpen(true);
   };
 
-  return (
-    <Stack spacing={2}>
-      <Stack spacing={0.5}>
-        <Typography variant="h4">{t.sections.settings.title}</Typography>
-        <Typography color="text.secondary">{t.sections.settings.subtitle}</Typography>
-      </Stack>
-      <Card
-        variant="outlined"
-        sx={{
-          order: 0,
-          borderColor: 'warning.main',
-          bgcolor: 'warning.main',
-          color: 'warning.contrastText',
-          '& .MuiChip-root': {
-            bgcolor: 'rgba(0, 0, 0, 0.18)',
-            color: 'inherit',
-          },
-        }}
-      >
-        <CardContent>
-          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }}>
-            <Stack spacing={0.5}>
-              <Typography variant="h6">{t.settings.openBetaTitle}</Typography>
-              <Typography variant="body2" sx={{ opacity: 0.9 }}>{t.settings.openBetaDescription}</Typography>
-            </Stack>
-            <Chip label="Open Beta" size="small" />
+  const renderBetaDisclaimer = () => (
+    <Card
+      variant="outlined"
+      sx={{
+        borderColor: 'warning.main',
+        bgcolor: 'warning.main',
+        color: 'warning.contrastText',
+        '& .MuiChip-root': {
+          bgcolor: 'rgba(0, 0, 0, 0.18)',
+          color: 'inherit',
+        },
+      }}
+    >
+      <CardContent>
+        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }}>
+          <Stack spacing={0.5}>
+            <Typography variant="h6">{t.settings.openBetaTitle}</Typography>
+            <Typography variant="body2" sx={{ opacity: 0.9 }}>{t.settings.openBetaDescription}</Typography>
           </Stack>
-        </CardContent>
-      </Card>
-      <Card sx={{ order: 5 }}>
-        <CardContent>
-          <Stack spacing={1.5}>
+          <Chip label="Open Beta" size="small" />
+        </Stack>
+      </CardContent>
+    </Card>
+  );
+
+  const renderDesktopUpdates = () => (
+    <Card>
+      <CardContent>
+        <Stack spacing={1.5}>
+          <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" spacing={1.5}>
             <Stack spacing={0.5}>
-              <Typography variant="h6">{t.settings.betaTitle}</Typography>
-              <Typography variant="body2" color="text.secondary">{t.settings.betaDescription}</Typography>
+              <Typography variant="h6">{t.settings.desktopUpdatesTitle}</Typography>
+              <Typography variant="body2" color="text.secondary">{t.settings.desktopUpdatesDescription}</Typography>
             </Stack>
-            <Stack spacing={1}>
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={earlyAccessEnabled}
-                    onChange={(event) => onEarlyAccessChange(event.target.checked)}
-                  />
-                }
-                label={t.settings.earlyAccessToggle}
-              />
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={advancedMode}
-                    onChange={(event) => onAdvancedModeChange(event.target.checked)}
-                  />
-                }
-                label={t.settings.advancedModeToggle}
-              />
-            </Stack>
-            <Stack spacing={1}>
-              <Typography variant="subtitle2">{t.settings.advancedSurfacesTitle}</Typography>
-              <Stack spacing={1}>
-                {advancedLinks.map((item) => (
-                  <Card key={item.view} variant="outlined" sx={{ borderRadius: 1 }}>
-                    <CardActionArea onClick={() => onNavigate(item.view)}>
-                      <CardContent sx={{ py: 1.25, '&:last-child': { pb: 1.25 } }}>
-                        <Stack direction="row" spacing={1.5} alignItems="center">
-                          <Box sx={{ color: 'primary.main', display: 'grid', placeItems: 'center' }}>{item.icon}</Box>
-                          <Box sx={{ minWidth: 0 }}>
-                            <Typography variant="subtitle2">{item.label}</Typography>
-                            <Typography variant="body2" color="text.secondary">{item.description}</Typography>
-                          </Box>
-                        </Stack>
-                      </CardContent>
-                    </CardActionArea>
-                  </Card>
-                ))}
-              </Stack>
-            </Stack>
-            <Button size="small" variant="outlined" onClick={onResetOnboarding} sx={{ alignSelf: 'flex-start' }}>
-              {t.settings.resetOnboarding}
-            </Button>
-          </Stack>
-        </CardContent>
-      </Card>
-      <Card sx={{ order: 5 }}>
-        <CardContent>
-          <Stack spacing={1.5}>
-            <Stack spacing={0.5}>
-              <Typography variant="h6">{t.settings.developerModeTitle}</Typography>
-              <Typography variant="body2" color="text.secondary">{t.settings.developerModeDescription}</Typography>
-            </Stack>
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={developerMode.enabled}
-                  onChange={(event) => void saveDeveloperMode({ enabled: event.target.checked })}
-                  disabled={developerBusy}
-                />
+            <Chip
+              size="small"
+              color={
+                desktopUpdateState.status === 'available' || desktopUpdateState.status === 'ready'
+                  ? 'warning'
+                  : desktopUpdateState.status === 'error' || desktopUpdateState.status === 'unsupported'
+                    ? 'error'
+                    : desktopUpdateState.status === 'up_to_date'
+                      ? 'success'
+                      : 'default'
               }
-              label={t.settings.developerModeToggle}
+              label={statusLabel}
             />
-            {developerMode.enabled ? (
-              <>
-                <TextField
-                  label={t.settings.developerPathEntriesLabel}
-                  value={developerPathDraft}
-                  onChange={(event) => setDeveloperPathDraft(event.target.value)}
-                  fullWidth
-                  multiline
-                  minRows={4}
-                  helperText={t.settings.developerPathEntriesHelp}
-                  inputProps={{ spellCheck: false }}
-                  sx={{ '& textarea': { fontFamily: 'monospace', fontSize: 13 } }}
-                />
-                <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
-                  {COMMON_DEVELOPER_PATHS.map((entry) => (
-                    <Button
-                      key={entry}
-                      size="small"
-                      variant="outlined"
-                      onClick={() => addDeveloperPathDraft(entry)}
-                      disabled={developerBusy || developerPathDraft.split('\n').map((value) => value.trim()).includes(entry)}
-                    >
-                      {t.settings.developerQuickAddPath(entry)}
-                    </Button>
+          </Stack>
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+            <Typography variant="body2">
+              {t.settings.desktopCurrentVersion}: <strong>{desktopUpdateState.currentVersion}</strong>
+            </Typography>
+            <Typography variant="body2">
+              {t.settings.desktopAvailableVersion}: <strong>{desktopUpdateState.availableVersion ?? '-'}</strong>
+            </Typography>
+          </Stack>
+          {desktopUpdateState.releaseNotes ? (
+            <Stack spacing={0.75}>
+              <Typography variant="subtitle2">
+                {desktopUpdateState.releaseNotes.summary ?? t.settings.desktopReleaseNotes}
+              </Typography>
+              {desktopUpdateState.releaseNotes.changes.length > 0 ? (
+                <Stack component="ul" sx={{ m: 0, pl: 2 }}>
+                  {desktopUpdateState.releaseNotes.changes.map((change) => (
+                    <Typography component="li" variant="body2" color="text.secondary" key={change}>
+                      {change}
+                    </Typography>
                   ))}
                 </Stack>
-                {developerError ? <Typography color="error.main" variant="body2">{developerError}</Typography> : null}
-                <Button
-                  variant="outlined"
-                  disabled={developerBusy}
-                  onClick={() => void saveDeveloperMode({ pathEntries: developerPathDraft.split('\n') })}
-                  sx={{ alignSelf: 'flex-start' }}
-                >
-                  {t.settings.developerPathSave}
-                </Button>
-                {developerPathState ? (
-                  <Stack spacing={1}>
-                    <Typography variant="subtitle2">{t.settings.developerEffectivePathTitle}</Typography>
-                    <PathPreview title={t.settings.developerRuntimePathTitle} entries={developerPathState.runtimePathEntries} />
-                    <PathPreview title={t.settings.developerGlobalPathTitle} entries={developerPathState.globalPathEntries} />
-                    <PathPreview title={t.settings.developerSystemPathTitle} entries={developerPathState.systemPathEntries} />
-                    <PathPreview title={t.settings.developerEffectivePathTitle} entries={developerPathState.effectivePathEntries} />
-                  </Stack>
-                ) : null}
-              </>
-            ) : null}
+              ) : (
+                <Typography variant="body2" color="text.secondary">{t.appView.updateNoChangelog}</Typography>
+              )}
+            </Stack>
+          ) : null}
+          {desktopUpdateState.status === 'downloading' ? (
+            <Stack spacing={0.5}>
+              <LinearProgress variant={progressPercent === undefined ? 'indeterminate' : 'determinate'} value={progressPercent} />
+              <Typography variant="caption" color="text.secondary">
+                {progressPercent === undefined ? t.settings.desktopDownloading : t.settings.desktopDownloadProgress(progressPercent)}
+              </Typography>
+            </Stack>
+          ) : null}
+          {desktopUpdateState.userMessage ? (
+            <Typography
+              variant="body2"
+              color={desktopUpdateState.status === 'error' || desktopUpdateState.status === 'unsupported' ? 'error.main' : 'text.secondary'}
+            >
+              {desktopUpdateState.userMessage}
+            </Typography>
+          ) : null}
+          <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+            <Button
+              variant="outlined"
+              size="small"
+              startIcon={<SystemUpdateAltRounded />}
+              disabled={desktopUpdateBusy}
+              onClick={onCheckDesktopUpdates}
+            >
+              {t.settings.desktopCheckUpdates}
+            </Button>
+            <Button
+              variant="contained"
+              size="small"
+              startIcon={<DownloadRounded />}
+              disabled={desktopUpdateBusy || !canDownload}
+              onClick={onDownloadDesktopUpdate}
+            >
+              {t.settings.desktopDownloadUpdate}
+            </Button>
+            <Button
+              variant="contained"
+              color="warning"
+              size="small"
+              startIcon={<LaunchRounded />}
+              disabled={desktopUpdateBusy || !canInstall}
+              onClick={onInstallDesktopUpdate}
+            >
+              {t.settings.desktopInstallUpdate}
+            </Button>
           </Stack>
-        </CardContent>
-      </Card>
-      <Card sx={{ order: 4 }}>
-        <CardContent>
+        </Stack>
+      </CardContent>
+    </Card>
+  );
+
+  const renderBetaControls = () => (
+    <Card>
+      <CardContent>
+        <Stack spacing={1.5}>
+          <Stack spacing={0.5}>
+            <Typography variant="h6">{t.settings.betaTitle}</Typography>
+            <Typography variant="body2" color="text.secondary">{t.settings.betaDescription}</Typography>
+          </Stack>
+          <Stack spacing={0.5}>
+            <FormControlLabel
+              control={<Switch checked={advancedMode} onChange={(event) => onAdvancedModeChange(event.target.checked)} />}
+              label={t.settings.advancedModeToggle}
+            />
+            <FormControlLabel
+              control={<Switch checked={earlyAccessEnabled} onChange={(event) => onEarlyAccessChange(event.target.checked)} />}
+              label={t.settings.earlyAccessToggle}
+            />
+          </Stack>
+          <Button size="small" variant="outlined" onClick={onResetOnboarding} sx={{ alignSelf: 'flex-start' }}>
+            {t.settings.resetOnboarding}
+          </Button>
+        </Stack>
+      </CardContent>
+    </Card>
+  );
+
+  const renderStorage = () => {
+    const storagePercent = cloudStorageUsage && cloudStorageUsage.limitBytes > 0
+      ? Math.min(100, Math.round((cloudStorageUsage.usedBytes / cloudStorageUsage.limitBytes) * 100))
+      : 0;
+    const storageColor = storagePercent >= 95 ? 'error' : storagePercent >= 80 ? 'warning' : 'primary';
+    const uploadedAppsBytes = cloudStorageUsage
+      ? cloudStorageUsage.breakdown.uploadedAppsBytes + cloudStorageUsage.breakdown.pendingUserAppUploadsBytes
+      : 0;
+    const rows = cloudStorageUsage ? [
+      {
+        key: 'backups',
+        label: t.settings.storageBreakdownBackups,
+        description: t.settings.storageBreakdownBackupsDescription,
+        bytes: cloudStorageUsage.breakdown.backupsBytes,
+      },
+      {
+        key: 'uploadedApps',
+        label: t.settings.storageBreakdownUploadedApps,
+        description: t.settings.storageBreakdownUploadedAppsDescription,
+        bytes: uploadedAppsBytes,
+      },
+      {
+        key: 'other',
+        label: t.settings.storageBreakdownOther,
+        description: t.settings.storageBreakdownOtherDescription,
+        bytes: cloudStorageUsage.breakdown.otherBytes,
+      },
+    ] : [];
+
+    return (
+      <Stack spacing={2}>
+        <Card>
+          <CardContent>
+            <Stack spacing={1.5}>
+              <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" spacing={1.5}>
+                <Stack spacing={0.5}>
+                  <Typography variant="h6">{t.settings.storageCloudTitle}</Typography>
+                  <Typography variant="body2" color="text.secondary">{t.settings.storageDescription}</Typography>
+                </Stack>
+                {cloudStorageUsage ? <Chip size="small" label={t.settings.storagePlanLabel(cloudStorageUsage.plan)} /> : null}
+              </Stack>
+              {cloudStorageUsage ? (
+                <>
+                  <Typography variant="h5">
+                    {t.settings.storageUsedOfLimit(
+                      formatStorageBytes(cloudStorageUsage.usedBytes, t.locale),
+                      formatStorageBytes(cloudStorageUsage.limitBytes, t.locale),
+                    )}
+                  </Typography>
+                  <LinearProgress variant="determinate" value={storagePercent} color={storageColor} sx={{ height: 8, borderRadius: 1 }} />
+                  <Typography variant="body2" color="text.secondary">
+                    {t.settings.storageRemaining(formatStorageBytes(cloudStorageUsage.remainingBytes, t.locale))}
+                  </Typography>
+                  {storagePercent >= 100 ? (
+                    <Typography variant="body2" color="error.main">{t.settings.storageLimitReached}</Typography>
+                  ) : null}
+                </>
+              ) : (
+                <Typography variant="body2" color="text.secondary">
+                  {cloudStorageBusy ? t.settings.storageLoading : t.settings.storageUnavailable}
+                </Typography>
+              )}
+              <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+                <Button size="small" variant="outlined" startIcon={<RefreshRounded />} disabled={cloudStorageBusy} onClick={onRefreshCloudStorage}>
+                  {t.settings.storageRefresh}
+                </Button>
+                <Button size="small" variant="outlined" startIcon={<BackupRounded />} onClick={() => onNavigate('backups')}>
+                  {t.settings.storageManageBackups}
+                </Button>
+                <Button size="small" variant="outlined" onClick={() => onNavigate('friends')}>
+                  {t.settings.storageManageUploadedApps}
+                </Button>
+              </Stack>
+            </Stack>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent>
+            <Stack spacing={1.5}>
+              <Typography variant="h6">{t.settings.storageBreakdownTitle}</Typography>
+              {cloudStorageUsage ? rows.map((row) => (
+                <Stack key={row.key} direction={{ xs: 'column', sm: 'row' }} spacing={1.5} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }}>
+                  <Stack spacing={0.25}>
+                    <Typography variant="subtitle2">{row.label}</Typography>
+                    <Typography variant="body2" color="text.secondary">{row.description}</Typography>
+                  </Stack>
+                  <Typography variant="subtitle2">{formatStorageBytes(row.bytes, t.locale)}</Typography>
+                </Stack>
+              )) : (
+                <Typography variant="body2" color="text.secondary">{t.settings.storageUnavailable}</Typography>
+              )}
+            </Stack>
+          </CardContent>
+        </Card>
+        <Card variant="outlined">
+          <CardContent>
+            <Typography variant="body2" color="text.secondary">{t.settings.storageDiagnosticsExcluded}</Typography>
+          </CardContent>
+        </Card>
+      </Stack>
+    );
+  };
+
+  const renderLlmProvider = () => (
+    <Card>
+      <CardContent>
+        <Stack spacing={1.5}>
+          <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
+            <Stack spacing={0.5}>
+              <Typography variant="h6">{t.settings.codexTitle}</Typography>
+              <Typography variant="body2" color="text.secondary">{t.settings.codexDescription}</Typography>
+            </Stack>
+            <Chip
+              size="small"
+              color={codexAuthStatus.installed && codexAuthStatus.authenticated ? 'success' : 'default'}
+              label={codexAuthStatus.authenticated ? t.settings.codexConnected : t.settings.codexDisconnected}
+            />
+          </Stack>
+          <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+            <Button
+              variant={codexAuthStatus.authenticated ? 'outlined' : 'contained'}
+              size="small"
+              disabled={codexAuthBusy}
+              onClick={onOpenCodexConfig}
+            >
+              {codexAuthStatus.authenticated ? t.settings.codexConfiguredAction : t.settings.codexConnectAction}
+            </Button>
+            <Button
+              variant="outlined"
+              color="warning"
+              size="small"
+              startIcon={<RestartAltRounded />}
+              disabled={codexAuthBusy}
+              onClick={onReinstallCodex}
+            >
+              {t.settings.codexReinstallAction}
+            </Button>
+          </Stack>
+          <Typography variant="caption" color="text.secondary">
+            {t.settings.codexReinstallHint}
+          </Typography>
+          <Divider />
+          <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
+            <Stack spacing={0.5}>
+              <Typography variant="h6">{t.settings.claudeCodeTitle}</Typography>
+              <Typography variant="body2" color="text.secondary">{t.settings.claudeDescription}</Typography>
+            </Stack>
+            <Chip
+              size="small"
+              color={claudeAuthStatus.installed && claudeAuthStatus.authenticated ? 'success' : 'default'}
+              label={claudeAuthStatus.authenticated ? t.settings.codexConnected : t.settings.codexDisconnected}
+            />
+          </Stack>
+          <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+            <Button
+              variant={claudeAuthStatus.authenticated ? 'outlined' : 'contained'}
+              size="small"
+              disabled={claudeAuthBusy}
+              onClick={onOpenClaudeConfig}
+            >
+              {claudeAuthStatus.authenticated ? t.settings.claudeConfiguredAction : t.settings.claudeConnectAction}
+            </Button>
+            <Button
+              variant="outlined"
+              color="warning"
+              size="small"
+              startIcon={<RestartAltRounded />}
+              disabled={claudeAuthBusy}
+              onClick={onReinstallClaude}
+            >
+              {t.settings.claudeReinstallAction}
+            </Button>
+          </Stack>
+          <Typography variant="caption" color="text.secondary">
+            {t.settings.claudeLocalSessionHint}
+          </Typography>
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+            <Chip
+              size="small"
+              label={
+                claudeAuthStatus.source === 'managed'
+                  ? t.settings.claudeSourceManaged
+                  : claudeAuthStatus.source === 'system'
+                    ? t.settings.claudeSourceSystem
+                    : t.settings.claudeSourceMissing
+              }
+            />
+            {claudeAuthStatus.version ? <Chip size="small" label={t.settings.versionLabel(claudeAuthStatus.version)} /> : null}
+          </Stack>
+          <Divider />
+          <Stack spacing={1}>
+            <Stack spacing={0.25}>
+              <Typography variant="subtitle2">{t.settings.agentDefaultsTitle}</Typography>
+              <Typography variant="body2" color="text.secondary">
+                {t.settings.agentDefaultsDescription}
+              </Typography>
+            </Stack>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+              <FormControl size="small" fullWidth>
+                <InputLabel>{t.settings.agentDefaultProvider}</InputLabel>
+                <Select
+                  label={t.settings.agentDefaultProvider}
+                  value={defaultAgentProvider}
+                  onChange={(event) =>
+                    onAgentDefaultsChange({
+                      defaultProvider: event.target.value as AgentProvider | 'auto',
+                    })
+                  }
+                >
+                  {providerOptions.map((option) => (
+                    <MenuItem value={option.value} key={option.value}>
+                      {option.label}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <FormControl size="small" fullWidth>
+                <InputLabel>{t.settings.agentDefaultChatPermissions}</InputLabel>
+                <Select
+                  label={t.settings.agentDefaultChatPermissions}
+                  value={defaultChatPermissionMode}
+                  onChange={(event) =>
+                    onAgentDefaultsChange({
+                      defaultProvider: defaultAgentProvider,
+                      defaultChatPermissionMode: event.target.value as Settings['defaultChatPermissionMode'],
+                    })
+                  }
+                >
+                  <MenuItem value="safe">{t.sections.chat.permissionNormalLabel}</MenuItem>
+                  <MenuItem value="unsafe">{t.sections.chat.permissionElevatedLabel}</MenuItem>
+                </Select>
+              </FormControl>
+              <FormControl size="small" fullWidth>
+                <InputLabel>{t.settings.codexModelLabel}</InputLabel>
+                <Select
+                  label={t.settings.codexModelLabel}
+                  value={agentDefaults.codex.model}
+                  onChange={(event) =>
+                    onAgentDefaultsChange({
+                      defaultProvider: defaultAgentProvider,
+                      provider: 'codex',
+                      model: event.target.value,
+                      effort: agentDefaults.codex.reasoningEffort,
+                    })
+                  }
+                >
+                  {modelOptions.map((option) => (
+                    <MenuItem value={option.realModelName} key={option.realModelName}>
+                      {option.displayModelName}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <FormControl size="small" fullWidth>
+                <InputLabel>{t.settings.codexReasoningLabel}</InputLabel>
+                <Select
+                  label={t.settings.codexReasoningLabel}
+                  value={agentDefaults.codex.reasoningEffort}
+                  onChange={(event) =>
+                    onAgentDefaultsChange({
+                      defaultProvider: defaultAgentProvider,
+                      provider: 'codex',
+                      model: agentDefaults.codex.model,
+                      effort: event.target.value as CodexReasoningEffort,
+                    })
+                  }
+                >
+                  {reasoningOptions.map((option) => (
+                    <MenuItem value={option.value} key={option.value}>
+                      {option.label}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Stack>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+              <FormControl size="small" fullWidth>
+                <InputLabel>{t.settings.claudeModelLabel}</InputLabel>
+                <Select
+                  label={t.settings.claudeModelLabel}
+                  value={agentDefaults.claude.model}
+                  onChange={(event) =>
+                    onAgentDefaultsChange({
+                      defaultProvider: defaultAgentProvider,
+                      provider: 'claude',
+                      model: event.target.value,
+                      effort: agentDefaults.claude.effort,
+                    })
+                  }
+                >
+                  {claudeModelOptions.map((option) => (
+                    <MenuItem value={option.realModelName} key={option.realModelName}>
+                      {option.displayModelName}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <FormControl size="small" fullWidth>
+                <InputLabel>{t.settings.claudeEffortLabel}</InputLabel>
+                <Select
+                  label={t.settings.claudeEffortLabel}
+                  value={agentDefaults.claude.effort}
+                  onChange={(event) =>
+                    onAgentDefaultsChange({
+                      defaultProvider: defaultAgentProvider,
+                      provider: 'claude',
+                      model: agentDefaults.claude.model,
+                      effort: event.target.value as ClaudeEffort,
+                    })
+                  }
+                >
+                  {claudeEffortOptions.map((option) => (
+                    <MenuItem value={option.value} key={option.value}>
+                      {option.label}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Stack>
+          </Stack>
+          <Stack spacing={0.35} sx={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>
+            <Typography variant="caption" color="text.secondary">
+              {t.settings.codexCliPathLabel}: {codexAuthStatus.codexCliPath ?? '-'}
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              {t.settings.codexHomeLabel}: {codexAuthStatus.codexHome || '-'}
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              {t.settings.codexAuthFileLabel}: {codexAuthStatus.authFilePath || '-'}
+            </Typography>
+          </Stack>
+        </Stack>
+      </CardContent>
+    </Card>
+  );
+
+  const renderPrivacySecurity = () => (
+    <Card>
+      <CardContent>
+        <Stack spacing={1.5}>
+          <Stack spacing={0.5}>
+            <Typography variant="h6">{t.settings.secretKeyTitle}</Typography>
+            <Typography variant="body2" color="text.secondary">{t.settings.secretKeyDescription}</Typography>
+          </Stack>
+          <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} alignItems="center">
+            <TextField
+              size="small"
+              type={revealedSecretKey ? 'text' : 'password'}
+              value={revealedSecretKey || cloudIdentity?.secretKeyPreview || ''}
+              label={t.settings.secretKeyLabel}
+              fullWidth
+              InputProps={{ readOnly: true }}
+            />
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={() => {
+                void onRevealCloudSecretKey().then((value) => setRevealedSecretKey(value));
+              }}
+            >
+              {t.settings.secretKeyReveal}
+            </Button>
+            <Button
+              variant="outlined"
+              size="small"
+              startIcon={<ContentCopyRounded />}
+              onClick={() => {
+                const value = revealedSecretKey || cloudIdentity?.secretKeyPreview || '';
+                void navigator.clipboard.writeText(value);
+              }}
+            >
+              {t.settings.secretKeyCopy}
+            </Button>
+            <Button
+              variant="outlined"
+              color="warning"
+              size="small"
+              onClick={() => {
+                if (window.confirm(t.settings.secretKeyRegenerateConfirm)) {
+                  setRevealedSecretKey('');
+                  onRegenerateCloudSecretKey();
+                }
+              }}
+            >
+              {t.settings.secretKeyRegenerate}
+            </Button>
+          </Stack>
+          <Divider />
           <Stack spacing={1.25}>
             <Stack spacing={0.5}>
-              <Typography variant="h6">{t.settings.privacy}</Typography>
+              <Typography variant="h6">{t.settings.usageAnalyticsTitle}</Typography>
               <Typography variant="body2" color="text.secondary">{t.settings.usageAnalyticsDescription}</Typography>
             </Stack>
             <Tooltip title={t.settings.usageAnalyticsHelp} placement="top">
@@ -504,655 +959,397 @@ export function SettingsView({
               />
             </Tooltip>
           </Stack>
-        </CardContent>
-      </Card>
-      <Card sx={{ order: 4 }}>
-        <CardContent>
-          <Stack spacing={1.25}>
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }}>
-              <Stack spacing={0.5}>
-                <Typography variant="h6">{t.settings.forumTitle}</Typography>
-                <Typography variant="body2" color="text.secondary">{t.settings.forumDescription}</Typography>
-              </Stack>
-              <Chip
-                size="small"
-                color={forumParticipation.status === 'opted_in' ? 'success' : forumParticipation.status === 'suspended' ? 'warning' : 'default'}
-                label={t.settings.forumStatuses[forumParticipation.status]}
-              />
-            </Stack>
-            <Button
-              variant="contained"
-              startIcon={<ForumRounded />}
-              disabled={forumParticipationBusy || forumParticipation.status === 'opted_in' || forumParticipation.status === 'suspended'}
-              onClick={onEnterForum}
-              sx={{ alignSelf: 'flex-start' }}
-            >
-              {forumParticipation.status === 'opted_in' ? t.settings.forumEnteredAction : t.settings.forumEnterAction}
-            </Button>
-          </Stack>
-        </CardContent>
-      </Card>
-      <Card sx={{ order: 2 }}>
-        <CardContent>
-          <Stack spacing={1.5}>
-            <Stack direction="row" justifyContent="space-between" alignItems="flex-start" sx={{ order: 20 }}>
-              <Stack spacing={0.5} sx={{ flex: 1 }}>
-                <Typography variant="h6">Llave secreta / Secret key</Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Protege mensajes cifrados y puede firmar respaldos cloud.
-                </Typography>
-              </Stack>
-            </Stack>
-            <Stack direction={{ xs: 'column', md: 'row' }} spacing={1} alignItems="center" sx={{ order: 21 }}>
-              <TextField
-                size="small"
-                type={revealedSecretKey ? 'text' : 'password'}
-                value={revealedSecretKey || cloudIdentity?.secretKeyPreview || ''}
-                label="Secret key"
-                fullWidth
-                InputProps={{ readOnly: true }}
-              />
-              <Button
-                variant="outlined"
-                size="small"
-                onClick={() => {
-                  void onRevealCloudSecretKey().then((value) => setRevealedSecretKey(value));
-                }}
-              >
-                Reveal
-              </Button>
-              <Button
-                variant="outlined"
-                size="small"
-                startIcon={<ContentCopyRounded />}
-                onClick={() => {
-                  const value = revealedSecretKey || cloudIdentity?.secretKeyPreview || '';
-                  void navigator.clipboard.writeText(value);
-                }}
-              >
-                Copy
-              </Button>
-              <Button
-                variant="outlined"
-                color="warning"
-                size="small"
-                onClick={() => {
-                  if (window.confirm('Regenerar esta llave puede invalidar respaldos cloud cifrados o mensajes antiguos.')) {
-                    setRevealedSecretKey('');
-                    onRegenerateCloudSecretKey();
-                  }
-                }}
-              >
-                Regenerate
-              </Button>
-            </Stack>
-            <Divider sx={{ order: 22 }} />
-            <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
-              <Stack spacing={0.5}>
-                <Typography variant="h6">{t.settings.codexTitle}</Typography>
-                <Typography variant="body2" color="text.secondary">{t.settings.codexDescription}</Typography>
-              </Stack>
-              <Stack direction="row" spacing={0.5} alignItems="center">
-                <Chip
-                  size="small"
-                  color={codexAuthStatus.installed && codexAuthStatus.authenticated ? 'success' : 'default'}
-                  label={codexAuthStatus.authenticated ? t.settings.codexConnected : t.settings.codexDisconnected}
-                />
-              </Stack>
-            </Stack>
-            <Stack direction="row" spacing={1}>
-              <Button
-                variant={codexAuthStatus.authenticated ? 'outlined' : 'contained'}
-                size="small"
-                disabled={codexAuthBusy}
-                onClick={onOpenCodexConfig}
-              >
-                {codexAuthStatus.authenticated ? t.settings.codexConfiguredAction : t.settings.codexConnectAction}
-              </Button>
-              <Button
-                variant="outlined"
-                color="warning"
-                size="small"
-                startIcon={<RestartAltRounded />}
-                disabled={codexAuthBusy}
-                onClick={onReinstallCodex}
-              >
-                {t.settings.codexReinstallAction}
-              </Button>
-            </Stack>
-            <Typography variant="caption" color="text.secondary">
-              {t.settings.codexReinstallHint}
-            </Typography>
-            <Divider />
-            <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
-              <Stack spacing={0.5}>
-                <Typography variant="h6">Claude Code</Typography>
-                <Typography variant="body2" color="text.secondary">
-                  {t.settings.claudeDescription}
-                </Typography>
-              </Stack>
-              <Chip
-                size="small"
-                color={claudeAuthStatus.installed && claudeAuthStatus.authenticated ? 'success' : 'default'}
-                label={claudeAuthStatus.authenticated ? t.settings.codexConnected : t.settings.codexDisconnected}
-              />
-            </Stack>
-            <Stack direction="row" spacing={1}>
-              <Button
-                variant={claudeAuthStatus.authenticated ? 'outlined' : 'contained'}
-                size="small"
-                disabled={claudeAuthBusy}
-                onClick={onOpenClaudeConfig}
-              >
-                {claudeAuthStatus.authenticated ? t.settings.claudeConfiguredAction : t.settings.claudeConnectAction}
-              </Button>
-              <Button
-                variant="outlined"
-                color="warning"
-                size="small"
-                startIcon={<RestartAltRounded />}
-                disabled={claudeAuthBusy}
-                onClick={onReinstallClaude}
-              >
-                {t.settings.claudeReinstallAction}
-              </Button>
-            </Stack>
-            <Typography variant="caption" color="text.secondary">
-              Claude Code puede usar una sesion local del sistema, especialmente en macOS Keychain.
-            </Typography>
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
-              <Chip
-                size="small"
-                label={
-                  claudeAuthStatus.source === 'managed'
-                    ? 'Instalacion administrada por Forger'
-                    : claudeAuthStatus.source === 'system'
-                      ? 'Instalacion existente en este equipo'
-                      : 'Claude Code no instalado'
-                }
-              />
-              {claudeAuthStatus.version ? <Chip size="small" label={`Version ${claudeAuthStatus.version}`} /> : null}
-            </Stack>
-            <Divider />
-            <Stack spacing={1}>
-              <Stack spacing={0.25}>
-                <Typography variant="subtitle2">{t.settings.agentDefaultsTitle}</Typography>
-                <Typography variant="body2" color="text.secondary">
-                  {t.settings.agentDefaultsDescription}
-                </Typography>
-              </Stack>
-              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
-                <FormControl size="small" fullWidth>
-                  <InputLabel>{t.settings.agentDefaultProvider}</InputLabel>
-                  <Select
-                    label={t.settings.agentDefaultProvider}
-                    value={defaultAgentProvider}
-                    onChange={(event) =>
-                      onAgentDefaultsChange({
-                        defaultProvider: event.target.value as AgentProvider | 'auto',
-                      })
-                    }
-                  >
-                    {providerOptions.map((option) => (
-                      <MenuItem value={option.value} key={option.value}>
-                        {option.label}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-                <FormControl size="small" fullWidth>
-                  <InputLabel>{t.settings.agentDefaultChatPermissions}</InputLabel>
-                  <Select
-                    label={t.settings.agentDefaultChatPermissions}
-                    value={defaultChatPermissionMode}
-                    onChange={(event) =>
-                      onAgentDefaultsChange({
-                        defaultProvider: defaultAgentProvider,
-                        defaultChatPermissionMode: event.target.value as Settings['defaultChatPermissionMode'],
-                      })
-                    }
-                  >
-                    <MenuItem value="safe">{t.sections.chat.permissionNormalLabel}</MenuItem>
-                    <MenuItem value="unsafe">{t.sections.chat.permissionElevatedLabel}</MenuItem>
-                  </Select>
-                </FormControl>
-                <FormControl size="small" fullWidth>
-                  <InputLabel>Modelo Codex</InputLabel>
-                  <Select
-                    label="Modelo Codex"
-                    value={agentDefaults.codex.model}
-                    onChange={(event) =>
-                      onAgentDefaultsChange({
-                        defaultProvider: defaultAgentProvider,
-                        provider: 'codex',
-                        model: event.target.value,
-                        effort: agentDefaults.codex.reasoningEffort,
-                      })
-                    }
-                  >
-                    {modelOptions.map((option) => (
-                      <MenuItem value={option.realModelName} key={option.realModelName}>
-                        {option.displayModelName}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-                <FormControl size="small" fullWidth>
-                  <InputLabel>Razonamiento Codex</InputLabel>
-                  <Select
-                    label="Razonamiento Codex"
-                    value={agentDefaults.codex.reasoningEffort}
-                    onChange={(event) =>
-                      onAgentDefaultsChange({
-                        defaultProvider: defaultAgentProvider,
-                        provider: 'codex',
-                        model: agentDefaults.codex.model,
-                        effort: event.target.value as CodexReasoningEffort,
-                      })
-                    }
-                  >
-                    {reasoningOptions.map((option) => (
-                      <MenuItem value={option.value} key={option.value}>
-                        {option.label}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              </Stack>
-              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
-                <FormControl size="small" fullWidth>
-                  <InputLabel>Modelo Claude</InputLabel>
-                  <Select
-                    label="Modelo Claude"
-                    value={agentDefaults.claude.model}
-                    onChange={(event) =>
-                      onAgentDefaultsChange({
-                        defaultProvider: defaultAgentProvider,
-                        provider: 'claude',
-                        model: event.target.value,
-                        effort: agentDefaults.claude.effort,
-                      })
-                    }
-                  >
-                    {claudeModelOptions.map((option) => (
-                      <MenuItem value={option.realModelName} key={option.realModelName}>
-                        {option.displayModelName}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-                <FormControl size="small" fullWidth>
-                  <InputLabel>Esfuerzo Claude</InputLabel>
-                  <Select
-                    label="Esfuerzo Claude"
-                    value={agentDefaults.claude.effort}
-                    onChange={(event) =>
-                      onAgentDefaultsChange({
-                        defaultProvider: defaultAgentProvider,
-                        provider: 'claude',
-                        model: agentDefaults.claude.model,
-                        effort: event.target.value as ClaudeEffort,
-                      })
-                    }
-                  >
-                    {claudeEffortOptions.map((option) => (
-                      <MenuItem value={option.value} key={option.value}>
-                        {option.label}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              </Stack>
-            </Stack>
-            <Stack spacing={0.35} sx={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>
-              <Typography variant="caption" color="text.secondary">
-                {t.settings.codexCliPathLabel}: {codexAuthStatus.codexCliPath ?? '-'}
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                {t.settings.codexHomeLabel}: {codexAuthStatus.codexHome || '-'}
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                {t.settings.codexAuthFileLabel}: {codexAuthStatus.authFilePath || '-'}
-              </Typography>
-            </Stack>
-          </Stack>
-        </CardContent>
-      </Card>
+        </Stack>
+      </CardContent>
+    </Card>
+  );
 
-      <Card sx={{ order: 6 }}>
-        <CardContent>
-          <Stack spacing={1.5}>
-            <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" spacing={1.5}>
-              <Stack spacing={0.5}>
-                <Typography variant="h6">{t.settings.memoryTitle}</Typography>
-                <Typography variant="body2" color="text.secondary">{t.settings.memoryDescription}</Typography>
-              </Stack>
-              <Chip size="small" icon={<MemoryRounded />} label={t.settings.memoryCount(memories.length)} />
-            </Stack>
-            <Stack direction="row">
-              <Button
-                variant="outlined"
-                size="small"
-                startIcon={<MemoryRounded />}
-                onClick={() => setMemoryDialogOpen(true)}
-              >
-                {t.settings.memoryViewAction}
-              </Button>
-            </Stack>
-          </Stack>
-        </CardContent>
-      </Card>
-
-      <Card sx={{ order: 1 }}>
-        <CardContent>
-          <Stack spacing={1.5}>
-            <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" spacing={1.5}>
-              <Stack spacing={0.5}>
-                <Typography variant="h6">{t.settings.desktopUpdatesTitle}</Typography>
-                <Typography variant="body2" color="text.secondary">{t.settings.desktopUpdatesDescription}</Typography>
-              </Stack>
-              <Chip
-                size="small"
-                color={
-                  desktopUpdateState.status === 'available' || desktopUpdateState.status === 'ready'
-                    ? 'warning'
-                    : desktopUpdateState.status === 'error' || desktopUpdateState.status === 'unsupported'
-                      ? 'error'
-                      : desktopUpdateState.status === 'up_to_date'
-                        ? 'success'
-                        : 'default'
-                }
-                label={statusLabel}
-              />
-            </Stack>
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-              <Typography variant="body2">
-                {t.settings.desktopCurrentVersion}: <strong>{desktopUpdateState.currentVersion}</strong>
-              </Typography>
-              <Typography variant="body2">
-                {t.settings.desktopAvailableVersion}: <strong>{desktopUpdateState.availableVersion ?? '-'}</strong>
-              </Typography>
-            </Stack>
-            {desktopUpdateState.releaseNotes ? (
-              <Stack spacing={0.75}>
-                <Typography variant="subtitle2">
-                  {desktopUpdateState.releaseNotes.summary ?? t.settings.desktopReleaseNotes}
-                </Typography>
-                {desktopUpdateState.releaseNotes.changes.length > 0 ? (
-                  <Stack component="ul" sx={{ m: 0, pl: 2 }}>
-                    {desktopUpdateState.releaseNotes.changes.map((change) => (
-                      <Typography component="li" variant="body2" color="text.secondary" key={change}>
-                        {change}
-                      </Typography>
-                    ))}
-                  </Stack>
-                ) : (
-                  <Typography variant="body2" color="text.secondary">{t.appView.updateNoChangelog}</Typography>
-                )}
-              </Stack>
-            ) : null}
-            {desktopUpdateState.status === 'downloading' ? (
-              <Stack spacing={0.5}>
-                <LinearProgress variant={progressPercent === undefined ? 'indeterminate' : 'determinate'} value={progressPercent} />
-                <Typography variant="caption" color="text.secondary">
-                  {progressPercent === undefined ? t.settings.desktopDownloading : t.settings.desktopDownloadProgress(progressPercent)}
-                </Typography>
-              </Stack>
-            ) : null}
-            {desktopUpdateState.userMessage ? (
-              <Typography
-                variant="body2"
-                color={desktopUpdateState.status === 'error' || desktopUpdateState.status === 'unsupported' ? 'error.main' : 'text.secondary'}
-              >
-                {desktopUpdateState.userMessage}
-              </Typography>
-            ) : null}
-            <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
-              <Button
-                variant="outlined"
-                size="small"
-                startIcon={<SystemUpdateAltRounded />}
-                disabled={desktopUpdateBusy}
-                onClick={onCheckDesktopUpdates}
-              >
-                {t.settings.desktopCheckUpdates}
-              </Button>
-              <Button
-                variant="contained"
-                size="small"
-                startIcon={<DownloadRounded />}
-                disabled={desktopUpdateBusy || !canDownload}
-                onClick={onDownloadDesktopUpdate}
-              >
-                {t.settings.desktopDownloadUpdate}
-              </Button>
-              <Button
-                variant="contained"
-                color="warning"
-                size="small"
-                startIcon={<LaunchRounded />}
-                disabled={desktopUpdateBusy || !canInstall}
-                onClick={onInstallDesktopUpdate}
-              >
-                {t.settings.desktopInstallUpdate}
-              </Button>
-            </Stack>
-          </Stack>
-        </CardContent>
-      </Card>
-
-      <Card sx={{ order: 3 }}>
-        <CardContent>
-          <Stack spacing={1.5}>
-            <Typography variant="h6">{t.settings.appearance}</Typography>
-            <Typography color="text.secondary">{t.settings.appearanceDescription}</Typography>
-            <Stack spacing={1}>
-              <Typography variant="subtitle2">{t.settings.language}</Typography>
-              <ToggleButtonGroup
-                exclusive
-                value={languagePreference}
-                onChange={(_event, nextValue: LanguagePreference | null) => {
-                  if (nextValue) {
-                    onLanguageChange(nextValue);
-                  }
-                }}
-              >
-                <ToggleButton value="system">{t.settings.languageSystem(t.settings.languageNames[systemLocale])}</ToggleButton>
-                <ToggleButton value="es">{t.settings.languageNames.es}</ToggleButton>
-                <ToggleButton value="en">{t.settings.languageNames.en}</ToggleButton>
-              </ToggleButtonGroup>
-              <Typography variant="caption" color="text.secondary">
-                {t.settings.activeLanguage(t.settings.languageNames[activeLocale])}
-              </Typography>
-            </Stack>
+  const renderAppearance = () => (
+    <Card>
+      <CardContent>
+        <Stack spacing={1.5}>
+          <Stack spacing={1}>
+            <Typography variant="subtitle2">{t.settings.language}</Typography>
             <ToggleButtonGroup
               exclusive
-              value={themePreference}
-              onChange={(_event, nextValue: ThemePreference | null) => {
+              value={languagePreference}
+              onChange={(_event, nextValue: LanguagePreference | null) => {
                 if (nextValue) {
-                  onThemeChange(nextValue);
+                  onLanguageChange(nextValue);
                 }
               }}
             >
-              <ToggleButton value="light">{t.settings.themeLight}</ToggleButton>
-              <ToggleButton value="dark">{t.settings.themeDark}</ToggleButton>
-              <ToggleButton value="system">{t.settings.themeSystem}</ToggleButton>
+              <ToggleButton value="system">{t.settings.languageSystem(t.settings.languageNames[systemLocale])}</ToggleButton>
+              <ToggleButton value="es">{t.settings.languageNames.es}</ToggleButton>
+              <ToggleButton value="en">{t.settings.languageNames.en}</ToggleButton>
             </ToggleButtonGroup>
-            <Stack spacing={1}>
-              <Typography variant="subtitle2">{t.settings.chatBotPicture}</Typography>
-              <ToggleButtonGroup
-                exclusive
-                value={chatBotPicture}
-                onChange={(_event, nextValue: ChatBotPicture | null) => {
-                  if (nextValue) {
-                    onChatBotPictureChange(nextValue);
-                  }
-                }}
-              >
-                {chatBotPictureOptions.map((option) => (
-                  <ToggleButton key={option.value} value={option.value} sx={{ gap: 1, px: 1.25 }}>
-                    <Avatar
-                      src={option.src}
-                      alt={option.label}
-                      sx={{
-                        width: 30,
-                        height: 30,
-                        bgcolor: '#fff',
-                        p: 0.05,
-                        pb: 0,
-                        border: '1px solid',
-                        borderColor: 'divider',
-                        '& img': { objectFit: 'contain' },
-                      }}
-                    />
-                    {option.label}
-                  </ToggleButton>
+            <Typography variant="caption" color="text.secondary">
+              {t.settings.activeLanguage(t.settings.languageNames[activeLocale])}
+            </Typography>
+          </Stack>
+          <ToggleButtonGroup
+            exclusive
+            value={themePreference}
+            onChange={(_event, nextValue: ThemePreference | null) => {
+              if (nextValue) {
+                onThemeChange(nextValue);
+              }
+            }}
+          >
+            <ToggleButton value="light">{t.settings.themeLight}</ToggleButton>
+            <ToggleButton value="dark">{t.settings.themeDark}</ToggleButton>
+            <ToggleButton value="system">{t.settings.themeSystem}</ToggleButton>
+          </ToggleButtonGroup>
+          <Stack spacing={1}>
+            <Typography variant="subtitle2">{t.settings.chatBotPicture}</Typography>
+            <ToggleButtonGroup
+              exclusive
+              value={chatBotPicture}
+              onChange={(_event, nextValue: ChatBotPicture | null) => {
+                if (nextValue) {
+                  onChatBotPictureChange(nextValue);
+                }
+              }}
+            >
+              {chatBotPictureOptions.map((option) => (
+                <ToggleButton key={option.value} value={option.value} sx={{ gap: 1, px: 1.25 }}>
+                  <Avatar
+                    src={option.src}
+                    alt={option.label}
+                    sx={{
+                      width: 30,
+                      height: 30,
+                      bgcolor: '#fff',
+                      p: 0.05,
+                      pb: 0,
+                      border: '1px solid',
+                      borderColor: 'divider',
+                      '& img': { objectFit: 'contain' },
+                    }}
+                  />
+                  {option.label}
+                </ToggleButton>
+              ))}
+            </ToggleButtonGroup>
+          </Stack>
+        </Stack>
+      </CardContent>
+    </Card>
+  );
+
+  const renderDeveloperMode = () => (
+    <Card>
+      <CardContent>
+        <Stack spacing={1.5}>
+          <FormControlLabel
+            control={
+              <Switch
+                checked={developerMode.enabled}
+                onChange={(event) => void saveDeveloperMode({ enabled: event.target.checked })}
+                disabled={developerBusy}
+              />
+            }
+            label={t.settings.developerModeToggle}
+          />
+          {developerMode.enabled ? (
+            <>
+              <TextField
+                label={t.settings.developerPathEntriesLabel}
+                value={developerPathDraft}
+                onChange={(event) => setDeveloperPathDraft(event.target.value)}
+                fullWidth
+                multiline
+                minRows={4}
+                helperText={t.settings.developerPathEntriesHelp}
+                inputProps={{ spellCheck: false }}
+                sx={{ '& textarea': { fontFamily: 'monospace', fontSize: 13 } }}
+              />
+              <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+                {COMMON_DEVELOPER_PATHS.map((entry) => (
+                  <Button
+                    key={entry}
+                    size="small"
+                    variant="outlined"
+                    onClick={() => addDeveloperPathDraft(entry)}
+                    disabled={developerBusy || developerPathDraft.split('\n').map((value) => value.trim()).includes(entry)}
+                  >
+                    {t.settings.developerQuickAddPath(entry)}
+                  </Button>
                 ))}
-              </ToggleButtonGroup>
+              </Stack>
+              {developerError ? <Typography color="error.main" variant="body2">{developerError}</Typography> : null}
+              <Button
+                variant="outlined"
+                disabled={developerBusy}
+                onClick={() => void saveDeveloperMode({ pathEntries: developerPathDraft.split('\n') })}
+                sx={{ alignSelf: 'flex-start' }}
+              >
+                {t.settings.developerPathSave}
+              </Button>
+              {developerPathState ? (
+                <Stack spacing={1}>
+                  <Typography variant="subtitle2">{t.settings.developerEffectivePathTitle}</Typography>
+                  <PathPreview title={t.settings.developerRuntimePathTitle} entries={developerPathState.runtimePathEntries} />
+                  <PathPreview title={t.settings.developerGlobalPathTitle} entries={developerPathState.globalPathEntries} />
+                  <PathPreview title={t.settings.developerSystemPathTitle} entries={developerPathState.systemPathEntries} />
+                  <PathPreview title={t.settings.developerEffectivePathTitle} entries={developerPathState.effectivePathEntries} />
+                </Stack>
+              ) : null}
+            </>
+          ) : null}
+        </Stack>
+      </CardContent>
+    </Card>
+  );
+
+  const renderMemory = () => (
+    <Stack spacing={2}>
+      <Card>
+        <CardContent>
+          <Stack spacing={1.5}>
+            <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" spacing={1.5}>
+              <Typography variant="subtitle1">
+                {memoryForm.id ? t.settings.memoryEdit : t.settings.memoryNew}
+              </Typography>
+              <Chip size="small" icon={<MemoryRounded />} label={t.settings.memoryCount(memories.length)} />
+            </Stack>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
+              <FormControl fullWidth size="small">
+                <InputLabel>{t.settings.memoryScope}</InputLabel>
+                <Select
+                  label={t.settings.memoryScope}
+                  value={memoryForm.scope}
+                  onChange={(event) => setMemoryForm((current) => ({
+                    ...current,
+                    scope: event.target.value as MemoryScope,
+                    appId: event.target.value === 'global' ? '' : current.appId,
+                  }))}
+                >
+                  <MenuItem value="global">{t.settings.memoryScopeGlobal}</MenuItem>
+                  <MenuItem value="app">{t.settings.memoryScopeApp}</MenuItem>
+                </Select>
+              </FormControl>
+              <FormControl fullWidth size="small" disabled={memoryForm.scope !== 'app'}>
+                <InputLabel>{t.settings.memoryApp}</InputLabel>
+                <Select
+                  label={t.settings.memoryApp}
+                  value={memoryForm.appId}
+                  onChange={(event) => setMemoryForm((current) => ({
+                    ...current,
+                    appId: event.target.value,
+                  }))}
+                >
+                  {installedApps.map((appEntry) => (
+                    <MenuItem value={appEntry.id} key={appEntry.id}>{appEntry.name}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <FormControl fullWidth size="small">
+                <InputLabel>{t.settings.memoryKind}</InputLabel>
+                <Select
+                  label={t.settings.memoryKind}
+                  value={memoryForm.kind}
+                  onChange={(event) => setMemoryForm((current) => ({
+                    ...current,
+                    kind: event.target.value as MemoryKind,
+                  }))}
+                >
+                  {MEMORY_KINDS.map((kind) => (
+                    <MenuItem value={kind} key={kind}>{t.settings.memoryKinds[kind]}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <FormControl fullWidth size="small">
+                <InputLabel>{t.settings.memoryStatus}</InputLabel>
+                <Select
+                  label={t.settings.memoryStatus}
+                  value={memoryForm.status}
+                  onChange={(event) => setMemoryForm((current) => ({
+                    ...current,
+                    status: event.target.value as MemoryStatus,
+                  }))}
+                >
+                  {MEMORY_STATUSES.map((status) => (
+                    <MenuItem value={status} key={status}>{t.settings.memoryStatuses[status]}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Stack>
+            <TextField
+              label={t.settings.memoryTitleLabel}
+              value={memoryForm.title}
+              onChange={(event) => setMemoryForm((current) => ({ ...current, title: event.target.value }))}
+              fullWidth
+              size="small"
+            />
+            <TextField
+              label={t.settings.memoryReadWhen}
+              helperText={t.settings.memoryReadWhenHelp}
+              value={memoryForm.readWhen}
+              onChange={(event) => setMemoryForm((current) => ({ ...current, readWhen: event.target.value }))}
+              multiline
+              minRows={2}
+              fullWidth
+            />
+            <TextField
+              label={t.settings.memoryBody}
+              value={memoryForm.body}
+              onChange={(event) => setMemoryForm((current) => ({ ...current, body: event.target.value }))}
+              multiline
+              minRows={3}
+              fullWidth
+            />
+            <Stack direction="row" spacing={1} justifyContent="flex-end">
+              <Button size="small" onClick={resetMemoryForm}>{t.settings.memoryCancel}</Button>
+              <Button
+                size="small"
+                variant="contained"
+                startIcon={<AddRounded />}
+                disabled={memoryFormInvalid}
+                onClick={submitMemoryForm}
+              >
+                {t.settings.memorySave}
+              </Button>
             </Stack>
           </Stack>
         </CardContent>
       </Card>
+      <MemoryGroup title={t.settings.memoryGlobalGroup} memories={globalMemories} t={t} onEdit={editMemory} onDelete={onDeleteMemory} />
+      {appMemoryGroups.map(([appId, entries]) => (
+        <MemoryGroup
+          key={appId}
+          title={t.settings.memoryAppGroup(appNames.get(appId) ?? appId)}
+          memories={entries}
+          t={t}
+          onEdit={editMemory}
+          onDelete={onDeleteMemory}
+        />
+      ))}
+      {memories.length === 0 ? (
+        <Typography variant="body2" color="text.secondary">{t.settings.memoryEmpty}</Typography>
+      ) : null}
+    </Stack>
+  );
 
-      <Dialog open={memoryDialogOpen} onClose={() => setMemoryDialogOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle>{t.settings.memoryDialogTitle}</DialogTitle>
-        <DialogContent>
-          <Stack spacing={2} sx={{ pt: 1 }}>
-            <Card variant="outlined">
-              <CardContent>
-                <Stack spacing={1.5}>
-                  <Typography variant="subtitle1">
-                    {memoryForm.id ? t.settings.memoryEdit : t.settings.memoryNew}
-                  </Typography>
-                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
-                    <FormControl fullWidth size="small">
-                      <InputLabel>{t.settings.memoryScope}</InputLabel>
-                      <Select
-                        label={t.settings.memoryScope}
-                        value={memoryForm.scope}
-                        onChange={(event) => setMemoryForm((current) => ({
-                          ...current,
-                          scope: event.target.value as MemoryScope,
-                          appId: event.target.value === 'global' ? '' : current.appId,
-                        }))}
-                      >
-                        <MenuItem value="global">{t.settings.memoryScopeGlobal}</MenuItem>
-                        <MenuItem value="app">{t.settings.memoryScopeApp}</MenuItem>
-                      </Select>
-                    </FormControl>
-                    <FormControl fullWidth size="small" disabled={memoryForm.scope !== 'app'}>
-                      <InputLabel>{t.settings.memoryApp}</InputLabel>
-                      <Select
-                        label={t.settings.memoryApp}
-                        value={memoryForm.appId}
-                        onChange={(event) => setMemoryForm((current) => ({
-                          ...current,
-                          appId: event.target.value,
-                        }))}
-                      >
-                        {installedApps.map((appEntry) => (
-                          <MenuItem value={appEntry.id} key={appEntry.id}>{appEntry.name}</MenuItem>
-                        ))}
-                      </Select>
-                    </FormControl>
-                    <FormControl fullWidth size="small">
-                      <InputLabel>{t.settings.memoryKind}</InputLabel>
-                      <Select
-                        label={t.settings.memoryKind}
-                        value={memoryForm.kind}
-                        onChange={(event) => setMemoryForm((current) => ({
-                          ...current,
-                          kind: event.target.value as MemoryKind,
-                        }))}
-                      >
-                        {MEMORY_KINDS.map((kind) => (
-                          <MenuItem value={kind} key={kind}>{t.settings.memoryKinds[kind]}</MenuItem>
-                        ))}
-                      </Select>
-                    </FormControl>
-                    <FormControl fullWidth size="small">
-                      <InputLabel>{t.settings.memoryStatus}</InputLabel>
-                      <Select
-                        label={t.settings.memoryStatus}
-                        value={memoryForm.status}
-                        onChange={(event) => setMemoryForm((current) => ({
-                          ...current,
-                          status: event.target.value as MemoryStatus,
-                        }))}
-                      >
-                        {MEMORY_STATUSES.map((status) => (
-                          <MenuItem value={status} key={status}>{t.settings.memoryStatuses[status]}</MenuItem>
-                        ))}
-                      </Select>
-                    </FormControl>
-                  </Stack>
-                  <TextField
-                    label={t.settings.memoryTitleLabel}
-                    value={memoryForm.title}
-                    onChange={(event) => setMemoryForm((current) => ({ ...current, title: event.target.value }))}
-                    fullWidth
-                    size="small"
-                  />
-                  <TextField
-                    label={t.settings.memoryReadWhen}
-                    helperText={t.settings.memoryReadWhenHelp}
-                    value={memoryForm.readWhen}
-                    onChange={(event) => setMemoryForm((current) => ({ ...current, readWhen: event.target.value }))}
-                    multiline
-                    minRows={2}
-                    fullWidth
-                  />
-                  <TextField
-                    label={t.settings.memoryBody}
-                    value={memoryForm.body}
-                    onChange={(event) => setMemoryForm((current) => ({ ...current, body: event.target.value }))}
-                    multiline
-                    minRows={3}
-                    fullWidth
-                  />
-                  <Stack direction="row" spacing={1} justifyContent="flex-end">
-                    <Button size="small" onClick={resetMemoryForm}>{t.settings.memoryCancel}</Button>
-                    <Button
-                      size="small"
-                      variant="contained"
-                      startIcon={<AddRounded />}
-                      disabled={memoryFormInvalid}
-                      onClick={submitMemoryForm}
-                    >
-                      {t.settings.memorySave}
-                    </Button>
-                  </Stack>
-                </Stack>
-              </CardContent>
-            </Card>
+  const localRows: SettingsRowItem[] = [
+    {
+      key: 'llmProvider',
+      label: t.settings.llmProviderTitle,
+      description: t.settings.settingsRows.llmProvider,
+      icon: <PsychologyRounded />,
+      onClick: () => setSettingsSubview('llmProvider'),
+    },
+    {
+      key: 'privacySecurity',
+      label: t.settings.privacy,
+      description: t.settings.settingsRows.privacySecurity,
+      icon: <PrivacyTipRounded />,
+      onClick: () => setSettingsSubview('privacySecurity'),
+    },
+    {
+      key: 'appearance',
+      label: t.settings.appearance,
+      description: t.settings.settingsRows.appearance,
+      icon: <PaletteRounded />,
+      onClick: () => setSettingsSubview('appearance'),
+    },
+    {
+      key: 'storage',
+      label: t.settings.storageTitle,
+      description: t.settings.settingsRows.storage,
+      icon: <StorageRounded />,
+      onClick: () => setSettingsSubview('storage'),
+    },
+  ];
+  const systemRows: SettingsRowItem[] = [
+    {
+      key: 'developerMode',
+      label: t.settings.developerModeTitle,
+      description: t.settings.settingsRows.developerMode,
+      icon: <ConstructionRounded />,
+      onClick: () => setSettingsSubview('developerMode'),
+    },
+    {
+      key: 'memory',
+      label: t.settings.memoryTitle,
+      description: t.settings.settingsRows.memory,
+      icon: <MemoryRounded />,
+      onClick: () => setSettingsSubview('memory'),
+    },
+  ];
 
-            <MemoryGroup
-              title={t.settings.memoryGlobalGroup}
-              memories={globalMemories}
-              t={t}
-              onEdit={editMemory}
-              onDelete={onDeleteMemory}
-            />
-            {appMemoryGroups.map(([appId, entries]) => (
-              <MemoryGroup
-                key={appId}
-                title={t.settings.memoryAppGroup(appNames.get(appId) ?? appId)}
-                memories={entries}
-                t={t}
-                onEdit={editMemory}
-                onDelete={onDeleteMemory}
-              />
-            ))}
-            {memories.length === 0 ? (
-              <Typography variant="body2" color="text.secondary">{t.settings.memoryEmpty}</Typography>
-            ) : null}
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setMemoryDialogOpen(false)}>{t.settings.memoryClose}</Button>
-        </DialogActions>
-      </Dialog>
+  const subviewContent: Record<Exclude<SettingsSubview, 'main'>, { title: string; description?: string; content: ReactNode }> = {
+    llmProvider: {
+      title: t.settings.llmProviderTitle,
+      description: t.settings.llmProviderDescription,
+      content: renderLlmProvider(),
+    },
+    privacySecurity: {
+      title: t.settings.privacy,
+      description: t.settings.privacyDescription,
+      content: renderPrivacySecurity(),
+    },
+    appearance: {
+      title: t.settings.appearance,
+      description: t.settings.appearanceDescription,
+      content: renderAppearance(),
+    },
+    storage: {
+      title: t.settings.storageTitle,
+      description: t.settings.storageDescription,
+      content: renderStorage(),
+    },
+    developerMode: {
+      title: t.settings.developerModeTitle,
+      description: t.settings.developerModeDescription,
+      content: renderDeveloperMode(),
+    },
+    memory: {
+      title: t.settings.memoryTitle,
+      description: t.settings.memoryDescription,
+      content: renderMemory(),
+    },
+  };
 
+  if (settingsSubview !== 'main') {
+    const subview = subviewContent[settingsSubview];
+    return (
+      <Stack spacing={2}>
+        <SettingsSubviewHeader
+          title={subview.title}
+          description={subview.description}
+          backLabel={t.settings.backToSettings}
+          onBack={() => setSettingsSubview('main')}
+        />
+        {subview.content}
+      </Stack>
+    );
+  }
+
+  return (
+    <Stack spacing={2}>
+      <Stack spacing={0.5}>
+        <Typography variant="h4">{t.sections.settings.title}</Typography>
+        <Typography color="text.secondary">{t.sections.settings.subtitle}</Typography>
+      </Stack>
+      {renderBetaDisclaimer()}
+      {renderDesktopUpdates()}
+      {renderBetaControls()}
+      <Card>
+        <SettingsList>
+          {localRows.map((item) => <SettingsRow item={item} key={item.key} />)}
+        </SettingsList>
+      </Card>
+      <Card>
+        <SettingsList>
+          {advancedLinks.map((item) => <SettingsRow item={{ ...item, key: item.view, onClick: () => onNavigate(item.view) }} key={item.view} />)}
+        </SettingsList>
+      </Card>
+      <Card>
+        <SettingsList>
+          {systemRows.map((item) => <SettingsRow item={item} key={item.key} />)}
+        </SettingsList>
+      </Card>
     </Stack>
   );
 }

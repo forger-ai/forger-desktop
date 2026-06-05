@@ -4,6 +4,7 @@ import { promptTemplateRoots, renderPromptFile } from './index';
 
 export interface ForgerOfficialToolsPromptInput {
   gmailReady: boolean;
+  whatsappReady?: boolean;
   allowedActions?: string[];
   mode: 'free-chat' | 'app-agent';
 }
@@ -84,10 +85,14 @@ export const buildForgerOfficialToolsPromptSection = (input: ForgerOfficialTools
   return renderPromptFile('partials/official-tools.md', {
     availabilityLine,
     gmailStatus: input.gmailReady ? 'connected and ready' : 'not connected or not active',
+    whatsappStatus: input.whatsappReady ? 'connected or active locally' : 'not connected or not active',
     actionsLine,
     gmailInstruction: input.gmailReady
       ? 'When the request is to search, read, download attachments from, or send Gmail, call the matching `gmail.*` tool through the `forger` MCP server and wait for the Forger permission result.'
       : 'If Gmail is requested and unavailable, explain that Gmail must be activated and connected in Forger Tools before Forger can read or send mail.',
+    whatsappInstruction: input.whatsappReady
+      ? 'When the request is to read, inspect, or send WhatsApp messages, call the matching `whatsapp.*` tool through the `forger` MCP server. Use only chat IDs and message references returned by WhatsApp reads or listings.'
+      : 'If WhatsApp is requested and unavailable, explain that WhatsApp must be activated and connected in Forger Tools before Forger can read or send messages.',
   });
 };
 

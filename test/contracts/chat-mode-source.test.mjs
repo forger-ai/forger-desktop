@@ -32,20 +32,33 @@ test('renderer starts on Chat and binds the mode selector before starting runs',
 test('renderer keeps MCP-created apps in the current chat flow', async () => {
   const source = await readSource('src/renderer/app/RendererAppController.tsx');
 
-  assert.match(source, /if \(run\.createdApp\) \{ void refreshApps\(\); \}/);
+  assert.match(source, /if \(run\.createdApp\) \{[\s\S]*eventName: 'local_app_created'[\s\S]*void refreshApps\(\); \}/);
   assert.doesNotMatch(source, /run\.createdApp[\s\S]{0,120}startCreatedAppConversation/);
+});
+
+test('product docs stay as a skill, not a chat-mode injection', async () => {
+  const freeChatStart = await readSource('src/main/prompt-builder/prompts/chat/free-chat-start.md');
+  const createMode = await readSource('src/main/prompt-builder/prompts/partials/chat-modes/create-app.md');
+  const editMode = await readSource('src/main/prompt-builder/prompts/partials/chat-modes/edit-app.md');
+  const userMessageBuilder = await readSource('src/main/prompt-builder/user-message.ts');
+
+  assert.doesNotMatch(freeChatStart, /forger-product-docs|Forger Documentation|Documentación de Forger/);
+  assert.doesNotMatch(createMode, /forger-product-docs|Forger Documentation|Documentación de Forger/);
+  assert.doesNotMatch(editMode, /forger-product-docs|Forger Documentation|Documentación de Forger/);
+  assert.doesNotMatch(userMessageBuilder, /forger-product-docs|productDocs|Forger Documentation|Documentación de Forger/);
 });
 
 test('renderer separates installed Apps from curated Catalog in navigation and content', async () => {
   const sidebarSource = await readSource('src/renderer/components/Sidebar.tsx');
   const viewSource = await readSource('src/renderer/app/RendererAppView.tsx');
 
-  assert.match(sidebarSource, /id: 'chat'[\s\S]*id: 'apps'[\s\S]*id: 'catalog'/);
+  assert.match(sidebarSource, /id: 'chat'[\s\S]*id: 'apps'[\s\S]*id: 'catalog'[\s\S]*id: 'docs'/);
   assert.match(sidebarSource, /id: 'friends'/);
-  assert.match(sidebarSource, /showForumNav \? \[defaultNav\[3\]\] : \[\]/);
+  assert.match(sidebarSource, /showForumNav \? \[defaultNav\[4\]\] : \[\]/);
   assert.match(viewSource, /const installedViewApps = useMemo<CatalogApp\[]>/);
   assert.match(viewSource, /currentView === 'apps' \? renderInstalledAppsView\(\) : null/);
   assert.match(viewSource, /<CatalogView\s+apps=\{catalogApps\}/);
+  assert.match(viewSource, /currentView === 'docs'[\s\S]*<DocsView/);
   assert.match(viewSource, /currentView === 'friends'[\s\S]*<SocialView/);
   assert.match(viewSource, /initialProfileUsername=\{socialProfileUsername\}/);
   assert.match(viewSource, /onSend=\{\(modeOverride\) => void handleSendMessage\(undefined, modeOverride\)\}/);

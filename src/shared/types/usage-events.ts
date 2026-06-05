@@ -15,6 +15,7 @@ export type UsageEventName =
   | 'app_install_succeeded'
   | 'app_install_failed'
   | 'app_opened'
+  | 'local_app_created'
   | 'chat_started'
   | 'chatgpt_connected'
   | 'feedback_opened'
