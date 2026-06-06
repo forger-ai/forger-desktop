@@ -143,7 +143,6 @@ test('Forger prompt builders include contract, language, files, official tools, 
     runRoot: '/Users/test/Forger/apps/finance-os/frontend',
     appStack: 'backend python/fastapi/uv; frontend typescript/react/vite/mui',
     runtime: 'provider codex, model gpt-5.4',
-    networkAccess: false,
     userPrompt: ' Revisar presupuesto ',
     userLanguage: 'es',
     officialToolsContext: officialTools,
@@ -161,7 +160,7 @@ test('Forger prompt builders include contract, language, files, official tools, 
   assert.match(appPrompt, /RUN_ROOT: \/Users\/test\/Forger\/apps\/finance-os\/frontend/);
   assert.match(appPrompt, /APP_STACK: backend python\/fastapi\/uv; frontend typescript\/react\/vite\/mui/);
   assert.match(appPrompt, /RUNTIME: provider codex, model gpt-5\.4/);
-  assert.match(appPrompt, /NETWORK ACCESS: disabled/);
+  assert.doesNotMatch(appPrompt, /NETWORK ACCESS/);
   assert.match(appPrompt, /FORGER CHAT MODE: edit_app/);
   assert.match(appPrompt, /Always use Plan Mode before programming/);
   assert.match(appPrompt, /forger_ask_question/);
@@ -183,7 +182,6 @@ test('Forger prompt builders include contract, language, files, official tools, 
     runRoot: '/Users/test/Forger/apps/finance-os/frontend',
     appStack: 'backend python/fastapi/uv; frontend typescript/react/vite/mui',
     runtime: 'provider codex, model gpt-5.4',
-    networkAccess: false,
     userPrompt: ' Continuar ',
     userLanguage: 'es',
     officialToolsContext: officialTools,
@@ -203,6 +201,7 @@ test('Forger prompt builders include contract, language, files, official tools, 
   assert.match(appResumePrompt, /Propose a concise implementation plan before programming/);
   assert.match(appResumePrompt, /opening or starting an installed app means opening it through Forger Desktop/i);
   assert.match(appResumePrompt, /Use Forger MCP app tools to open the app and to check runtime status/);
+  assert.doesNotMatch(appResumePrompt, /NETWORK ACCESS/);
   assert.match(appResumePrompt, /SHARED FILES IN THIS MESSAGE:[\s\S]*budget\.csv/);
   assert.match(appResumePrompt, /USER MESSAGE:\nContinuar/);
   assert.match(buildCodexPromptWithAppContext({
@@ -240,6 +239,7 @@ test('Forger prompt builders include contract, language, files, official tools, 
   assert.match(freePrompt, /Do not silently turn open-ended brainstorming into app creation or app editing/);
   assert.match(freePrompt, /# What Is Forger\?/);
   assert.match(freePrompt, /USER LANGUAGE: not configured/);
+  assert.doesNotMatch(freePrompt, /NETWORK ACCESS/);
   assert.match(freePrompt, /No shared files/);
   const freeResumePrompt = buildCodexPromptForFreeChat({
     turnKind: 'resume',
@@ -259,6 +259,7 @@ test('Forger prompt builders include contract, language, files, official tools, 
   assert.match(freeResumePrompt, /free-form conversation with the agent/);
   assert.doesNotMatch(freeResumePrompt, /# What Is Forger\?/);
   assert.doesNotMatch(freeResumePrompt, /Gmail status/);
+  assert.doesNotMatch(freeResumePrompt, /NETWORK ACCESS/);
   assert.match(freeResumePrompt, /SHARED FILES IN THIS MESSAGE:[\s\S]*large\.csv/);
   assert.match(freeResumePrompt, /USER MESSAGE:\nSigue/);
   const createPrompt = buildCodexPromptForFreeChat({
@@ -360,12 +361,17 @@ test('Forger prompt builders include contract, language, files, official tools, 
   assert.match(globalAgents, /## Source of Truth/);
   assert.match(globalAgents, /## Memory/);
   assert.match(globalAgents, /Forger memory is platform context/);
+  assert.match(globalAgents, /Desktop also injects a dynamic memory registry before prompts/);
+  assert.match(globalAgents, /registry lists memory titles and `read_when` conditions/);
   assert.match(globalAgents, /Memories without `read_when` are always-injected/);
+  assert.match(globalAgents, /when you need an id for update or delete/);
   assert.match(globalAgents, /Use `forger-memory` before reading, saving, updating, deduplicating, deleting, or explaining memory/);
+  assert.doesNotMatch(globalAgents, /memoryRegistry/);
   assert.match(globalAgents, /Treat the person as non-technical by default/);
   assert.match(globalAgents, /Use product words: app, screen, button, data, file, saved version, flow, result/);
   assert.match(globalAgents, /## Request Playbooks[\s\S]*## How To Speak With The Person/);
-  assert.match(globalAgents, /### Building a New App[\s\S]*1\. Clarify the goal[\s\S]*2\. Shape the first useful version[\s\S]*3\. Offer two or three product directions/);
+  assert.match(globalAgents, /### Building a New App[\s\S]*1\. Clarify the goal[\s\S]*2\. Shape the first minimum useful version[\s\S]*Remember your step by step plans using the memory/);
+  assert.match(globalAgents, /### Building a New App[\s\S]*When creating or modifying a newly created app always scan your memory[\s\S]*Offer two or three product directions/);
   assert.match(globalAgents, /### Building a New App[\s\S]*use `forger-localization` before drafting labels, navigation, empty states, loading states, error states, success states/);
   assert.match(globalAgents, /### Asking Clarifying Questions[\s\S]*use `forger_ask_question` when it is available/);
   assert.match(globalAgents, /### Asking Clarifying Questions[\s\S]*creates the visual question interface/);
@@ -391,10 +397,9 @@ test('official tool skill templates and seed data keep expected Desktop defaults
     'forger-app-agents-authoring',
     'forger-app-mcp-data-tools',
     'forger-context',
-    'forger-agents',
     'forger-automations',
-    'forger-desktop-runtime-bridge',
-    'forger-fastapi-contracts',
+    'forger-dev-backend-development',
+    'forger-dev-in-app-agents',
     'forger-frontend-patterns',
     'forger-gmail',
     'forger-installed-app-change',
@@ -404,12 +409,9 @@ test('official tool skill templates and seed data keep expected Desktop defaults
     'forger-official-tools',
     'forger-permissions',
     'forger-product-docs',
-    'forger-python-backend',
     'forger-remote-tunnel-wiring',
     'forger-secrets',
     'forger-social-app-review',
-    'forger-tanstack-query-patterns',
-    'forger-tasks',
     'forger-tools',
     'forger-whatsapp',
   ]);
@@ -451,13 +453,41 @@ test('official tool skill templates and seed data keep expected Desktop defaults
   assert.match(manifestSkill.body, /Every entry in `tools\.required\[\]` and `tools\.optional\[\]` must include `toolId`, `reason`, and `actions`/);
   assert.match(manifestSkill.body, /`reason` is required, not decorative/);
   assert.match(manifestSkill.body, /Do not add `catalog\.capabilities`/);
-  assert.match(templates.find((template) => template.id === 'forger-agents')?.body ?? '', /^---\nname: forger-agents/m);
-  assert.match(templates.find((template) => template.id === 'forger-tasks')?.body ?? '', /^---\nname: forger-tasks/m);
+  assert.equal(templates.some((template) => template.id === 'forger-agents'), false);
+  assert.equal(templates.some((template) => template.id === 'forger-tasks'), false);
+  assert.equal(templates.some((template) => template.id === 'forger-desktop-runtime-bridge'), false);
+  assert.equal(templates.some((template) => template.id === 'forger-fastapi-contracts'), false);
+  assert.equal(templates.some((template) => template.id === 'forger-python-backend'), false);
+  assert.equal(templates.some((template) => template.id === 'forger-tanstack-query-patterns'), false);
+  const inAppAgentsSkill = templates.find((template) => template.id === 'forger-dev-in-app-agents');
+  assert.ok(inAppAgentsSkill);
+  assert.equal(inAppAgentsSkill.description, 'Use when designing, implementing, reviewing, or explaining in-app AI flows, including manifest agent threads, promptTemplate tasks, Desktop runtime bridge calls, resumable conversations, progress UI, polling, cancellation, and app-visible results.');
+  assert.match(inAppAgentsSkill.body, /App agents are app-declared conversational coworkers/);
+  assert.match(inAppAgentsSkill.body, /Prompt template tasks are app-declared one-shot jobs/);
+  assert.match(inAppAgentsSkill.body, /commons\/backend\/forger_desktop\.py/);
+  assert.match(inAppAgentsSkill.body, /start_agent_task/);
+  assert.match(inAppAgentsSkill.body, /start_manifest_agent_thread/);
+  assert.match(inAppAgentsSkill.body, /resume_manifest_agent_thread/);
+  assert.match(inAppAgentsSkill.body, /removed freeform endpoints/);
+  assert.match(inAppAgentsSkill.body, /MCP writes, assistant task completion, and agent-generated changes should trigger an app-visible refresh/);
+  assert.match(inAppAgentsSkill.body, /forger_get_app_runtime_status/);
+  const backendDevelopmentSkill = templates.find((template) => template.id === 'forger-dev-backend-development');
+  assert.ok(backendDevelopmentSkill);
+  assert.equal(backendDevelopmentSkill.description, 'Use when creating or changing Forger app backend behavior, including FastAPI routes, SQLModel or SQLite persistence, migrations, validation, local data safety, API contracts, TanStack Query server-state refresh, MCP write refresh, polling, realtime updates, and backend tests.');
+  assert.match(backendDevelopmentSkill.body, /FastAPI as the local app service layer/);
+  assert.match(backendDevelopmentSkill.body, /typed Pydantic request and response models/);
+  assert.match(backendDevelopmentSkill.body, /explicit SQLModel\/SQLite columns and relationships/);
+  assert.match(backendDevelopmentSkill.body, /Migrations must preserve existing user data/);
+  assert.match(backendDevelopmentSkill.body, /TanStack Query as the client-side server-state layer/);
+  assert.match(backendDevelopmentSkill.body, /MCP tools, assistant tasks, imports, exports, backend jobs, or scripts write app data/);
+  assert.match(backendDevelopmentSkill.body, /realtime or websocket support/);
+  assert.match(backendDevelopmentSkill.body, /Do not rely on a full app reload/);
   assert.match(templates.find((template) => template.id === 'forger-tools')?.body ?? '', /^---\nname: forger-tools/m);
   const frontendPatternsSkill = templates.find((template) => template.id === 'forger-frontend-patterns');
   assert.ok(frontendPatternsSkill);
-  assert.equal(frontendPatternsSkill.description, 'Use when creating or changing Forger app frontend UI, including screen structure, routed views, Tailwind/shadcn components, responsive behavior, forms, lists, dashboards, visual style, motion, and final UI review.');
+  assert.equal(frontendPatternsSkill.description, 'Use when creating or changing Forger app frontend code, UX, routed views, forms, responsive layouts, visual systems, Tailwind/shadcn components, interaction states, motion, accessibility, and final UI review.');
   assert.match(frontendPatternsSkill.body, /Tailwind CSS, shadcn\/ui copied components, and Radix primitives by default/);
+  assert.match(frontendPatternsSkill.body, /Keep `forger-dev-backend-development` separate/);
   assert.match(frontendPatternsSkill.body, /Read the Room Before Anything Else/);
   assert.match(frontendPatternsSkill.body, /TanStack Router for new routed Forger apps/);
   assert.match(frontendPatternsSkill.body, /list the existing components available/);
@@ -475,29 +505,19 @@ test('official tool skill templates and seed data keep expected Desktop defaults
   assert.equal(templates.some((template) => template.id.startsWith('forger-tailwind-')), false);
   assert.equal(templates.some((template) => template.id === 'forger-mobile-responsive-frontend'), false);
   assert.equal(templates.some((template) => template.id === 'forger-web-interface-review'), false);
-  const tanstackQuerySkill = templates.find((template) => template.id === 'forger-tanstack-query-patterns');
-  assert.ok(tanstackQuerySkill);
-  assert.equal(tanstackQuerySkill.description, 'Use when adding or changing Forger React app server state, API reads, mutations, MCP write refresh, assistant task refresh, query keys, invalidation, polling, or cache behavior.');
-  assert.match(tanstackQuerySkill.body, /TanStack Query as the client-side server-state layer/);
-  assert.match(tanstackQuerySkill.body, /MCP tools, assistant tasks, imports, exports, backend jobs, or scripts write app data/);
-  assert.match(tanstackQuerySkill.body, /realtime\/websocket support/);
-  assert.match(tanstackQuerySkill.body, /Do not rely on a full app reload/);
-  assert.match(tanstackQuerySkill.body, /Do not apply SSR, SSG, dehydration/);
-  const bridgeSkill = templates.find((template) => template.id === 'forger-desktop-runtime-bridge');
-  assert.ok(bridgeSkill);
-  assert.match(bridgeSkill.body, /commons\/backend\/forger_desktop\.py/);
-  assert.match(bridgeSkill.body, /start_agent_task/);
-  assert.match(bridgeSkill.body, /start_manifest_agent_thread/);
-  assert.match(bridgeSkill.body, /resume_manifest_agent_thread/);
-  assert.match(bridgeSkill.body, /removed freeform endpoints/);
-  assert.match(bridgeSkill.body, /Finance OS is the reference pattern/);
-  assert.match(bridgeSkill.body, /Opening, launching, starting, running, or bringing up an installed app means using Forger Desktop app controls/);
-  assert.match(bridgeSkill.body, /forger_get_app_runtime_status/);
   const officialToolsSkill = templates.find((template) => template.id === 'forger-official-tools');
   assert.ok(officialToolsSkill);
   assert.doesNotMatch(officialToolsSkill.description, /memory/);
   assert.match(officialToolsSkill.body, /forger_open_app/);
   assert.match(officialToolsSkill.body, /Do not manually start app services/);
+  const toolsSkill = templates.find((template) => template.id === 'forger-tools');
+  assert.ok(toolsSkill);
+  assert.match(toolsSkill.body, /Manifest `tools\.required\[\]` means the app cannot perform its core purpose/);
+  assert.match(toolsSkill.body, /Manifest `tools\.optional\[\]` means the app can work without the tool/);
+  assert.match(toolsSkill.body, /App agents may call official Forger tools only when the selected app context and grants allow/);
+  assert.match(toolsSkill.body, /Agent-facing grant requests go through Forger MCP/);
+  assert.match(toolsSkill.body, /UI grant toggles are for the person to allow or deny optional app access/);
+  assert.match(toolsSkill.body, /A granted app may still need visible approval for sensitive actions/);
   const memorySkill = templates.find((template) => template.id === 'forger-memory');
   assert.ok(memorySkill);
   assert.equal(memorySkill.description, 'Use when reading, saving, updating, deduplicating, deleting, or explaining Forger platform memory, including injected memories, app-scoped memory, global preferences, privacy, and safe user-facing language.');
@@ -541,6 +561,7 @@ test('official tool skill templates and seed data keep expected Desktop defaults
   assert.equal(catalogAppsSeed.some((app) => app.id === 'finance-os'), true);
   assert.equal(settingsSeed.safeMode, true);
   assert.equal(settingsSeed.defaultAgentProvider, 'auto');
+  assert.equal(settingsSeed.defaultChatNetworkAccess, true);
   assert.equal(settingsSeed.agentDefaults.codex.model, settingsSeed.codexDefaults.model);
 });
 

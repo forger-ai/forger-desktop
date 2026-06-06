@@ -11,6 +11,7 @@ export interface Settings {
   };
   defaultAgentProvider: AgentProvider | 'auto';
   defaultChatPermissionMode: AgentPermissionMode;
+  defaultChatNetworkAccess: boolean;
   agentDefaults: AgentDefaults;
   providerConnections: Partial<Record<AgentProvider, string>>;
 }
@@ -47,6 +48,7 @@ export interface UpdateCodexDefaultsInput {
 export interface UpdateAgentDefaultsInput {
   defaultProvider?: AgentProvider | 'auto';
   defaultChatPermissionMode?: AgentPermissionMode;
+  defaultChatNetworkAccess?: boolean;
   provider?: AgentProvider;
   model?: string;
   effort?: AgentEffort;

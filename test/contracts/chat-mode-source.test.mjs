@@ -50,11 +50,14 @@ test('product docs stay as a skill, not a chat-mode injection', async () => {
 
 test('renderer separates installed Apps from curated Catalog in navigation and content', async () => {
   const sidebarSource = await readSource('src/renderer/components/Sidebar.tsx');
+  const settingsSource = await readSource('src/renderer/views/SettingsView.tsx');
   const viewSource = await readSource('src/renderer/app/RendererAppView.tsx');
 
-  assert.match(sidebarSource, /id: 'chat'[\s\S]*id: 'apps'[\s\S]*id: 'catalog'[\s\S]*id: 'docs'/);
+  assert.match(sidebarSource, /id: 'chat'[\s\S]*id: 'apps'[\s\S]*id: 'catalog'/);
+  assert.doesNotMatch(sidebarSource, /id: 'docs' as const, icon:/);
   assert.match(sidebarSource, /id: 'friends'/);
-  assert.match(sidebarSource, /showForumNav \? \[defaultNav\[4\]\] : \[\]/);
+  assert.match(sidebarSource, /showForumNav \? \[defaultNav\[3\]\] : \[\]/);
+  assert.match(settingsSource, /view: 'docs'[\s\S]*t\.settings\.advancedSurfaces\.docs/);
   assert.match(viewSource, /const installedViewApps = useMemo<CatalogApp\[]>/);
   assert.match(viewSource, /currentView === 'apps' \? renderInstalledAppsView\(\) : null/);
   assert.match(viewSource, /<CatalogView\s+apps=\{catalogApps\}/);

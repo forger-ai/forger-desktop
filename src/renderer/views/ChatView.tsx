@@ -158,6 +158,8 @@ interface ChatViewProps {
   onSelectClaudeEffort: (effort: ClaudeEffort) => void;
   selectedPermissionMode: AgentPermissionMode;
   onSelectPermissionMode: (mode: AgentPermissionMode) => void;
+  selectedNetworkAccess: boolean;
+  onSelectNetworkAccess: (networkAccess: boolean) => void;
   onOpenCodexUsageDashboard: () => void;
   assistantAvatarSrc: string;
   isSending: boolean;
@@ -222,6 +224,8 @@ export function ChatView({
   onSelectClaudeEffort,
   selectedPermissionMode,
   onSelectPermissionMode,
+  selectedNetworkAccess,
+  onSelectNetworkAccess,
   onOpenCodexUsageDashboard,
   assistantAvatarSrc,
   isSending,
@@ -997,6 +1001,29 @@ export function ChatView({
                     >
                       <MenuItem value="safe">{t.sections.chat.permissionNormalLabel}</MenuItem>
                       <MenuItem value="unsafe">{t.sections.chat.permissionElevatedLabel}</MenuItem>
+                    </Select>
+                  </span>
+                </Tooltip>
+                <Tooltip title={runtimeMenuOpen ? '' : selectedNetworkAccess ? t.sections.chat.networkEnabledTooltip : t.sections.chat.networkDisabledTooltip}>
+                  <span>
+                    <Select
+                      size="small"
+                      value={selectedNetworkAccess ? 'enabled' : 'disabled'}
+                      onChange={(event) => onSelectNetworkAccess(event.target.value === 'enabled')}
+                      {...runtimeMenuHandlers}
+                      disabled={isSending}
+                      MenuProps={compactSelectMenuProps}
+                      inputProps={{ 'aria-label': t.sections.chat.networkSelectorLabel }}
+                      sx={{
+                        height: 28,
+                        minWidth: 104,
+                        fontSize: 12,
+                        borderRadius: 1.25,
+                        '& .MuiSelect-select': { py: 0.35, pl: 1, pr: '26px !important' },
+                      }}
+                    >
+                      <MenuItem value="enabled">{t.sections.chat.networkEnabledLabel}</MenuItem>
+                      <MenuItem value="disabled">{t.sections.chat.networkDisabledLabel}</MenuItem>
                     </Select>
                   </span>
                 </Tooltip>

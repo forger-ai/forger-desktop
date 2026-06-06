@@ -1,12 +1,12 @@
 ---
 name: forger-frontend-patterns
-description: Use when creating or changing Forger app frontend UI, including screen structure, routed views, Tailwind/shadcn components, responsive behavior, forms, lists, dashboards, visual style, motion, and final UI review.
+description: Use when creating or changing Forger app frontend code, UX, routed views, forms, responsive layouts, visual systems, Tailwind/shadcn components, interaction states, motion, accessibility, and final UI review.
 ---
 
 ## Frontend Default
 
 - Forger app frontends use Tailwind CSS, shadcn/ui copied components, and Radix primitives by default.
-- Apply these rules before creating or changing any app UI. Keep `forger-tanstack-query-patterns` separate for server-state reads, mutations, MCP writes, realtime refresh, and cache behavior.
+- Apply these rules before creating or changing any app UI. Keep `forger-dev-backend-development` separate for FastAPI route contracts, server-state reads, mutations, MCP writes, realtime refresh, polling, migrations, and cache behavior.
 - Use feature-first structure: `frontend/src/app` for shell, router, providers, and root wiring; `frontend/src/features/<area>` for domain views and feature-local components; `frontend/src/components` for shared app components; `frontend/src/components/ui` for shadcn primitives; `frontend/src/api` for backend contracts; `frontend/src/lib` for pure helpers; `frontend/src/i18n` for visible copy; `frontend/src/styles` or `frontend/src/design-system` for tokens.
 - Keep `App.tsx` thin. Visual components render state and intent; backend persistence, validation, privileged Forger access, imports, scripts, MCP tools, and secrets stay in backend routes, app contracts, or API modules.
 

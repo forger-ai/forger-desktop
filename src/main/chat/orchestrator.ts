@@ -82,7 +82,7 @@ interface ChatOrchestratorOptions {
   getClaudeCliPath: () => Promise<string | null>;
   getCodexPathEntries: (appId?: string) => Promise<string[]>;
   getCodexEnvironment: (appId?: string) => Promise<Record<string, string>>;
-  getAgentNetworkAccess?: (appId: string) => Promise<boolean>;
+  getChatNetworkAccessDefault?: () => Promise<boolean> | boolean;
   getCodexAuthenticated: () => Promise<boolean>;
   getClaudeAuthenticated: () => Promise<boolean>;
   createForgerMcpSession?: (runId: string, appId: string, locale?: string) => { url: string; token: string } | null;
@@ -106,6 +106,7 @@ interface InternalChatRun extends ChatRun {
   reasoningEffort: CodexReasoningEffort;
   provider: AgentProvider;
   effort: AgentEffort;
+  networkAccess: boolean;
   taskType: ForgerTaskType;
   startedWithUpdateConflict: boolean;
   locale: Locale;
@@ -184,6 +185,9 @@ export class ChatOrchestrator {
     const taskType: ForgerTaskType = 'chat';
     const baseHead = null;
     const locale = normalizeLocale(input.userLanguage);
+    const networkAccess = typeof input.networkAccess === 'boolean'
+      ? input.networkAccess
+      : await (this.options.getChatNetworkAccessDefault?.() ?? Promise.resolve(true));
     const runtime = await this.options.getAgentRuntime({
       provider: input.provider,
       model: input.model,
@@ -217,6 +221,7 @@ export class ChatOrchestrator {
       reasoningEffort: runtime.provider === 'codex' ? runtime.effort as CodexReasoningEffort : 'medium',
       provider: runtime.provider,
       effort: runtime.effort,
+      networkAccess,
       taskType,
       startedWithUpdateConflict: false,
       locale,
@@ -568,7 +573,7 @@ export class ChatOrchestrator {
       }
       const codexPathEntries = await this.options.getCodexPathEntries(run.appId);
       const codexEnvironment = await this.options.getCodexEnvironment(run.appId);
-      const networkAccess = await (this.options.getAgentNetworkAccess?.(run.appId) ?? Promise.resolve(false));
+      const networkAccess = run.networkAccess;
       if (run.appId !== 'forger') {
         await ensureGitRepository(run.appRoot);
         const statusBeforeRun = await getGitStatus(run.appRoot);

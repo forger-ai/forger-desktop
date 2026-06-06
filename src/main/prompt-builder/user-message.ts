@@ -43,7 +43,6 @@ export const buildCodexPromptWithAppContext = (params: {
   runRoot?: string;
   appStack?: string;
   runtime?: string;
-  networkAccess?: boolean;
   userPrompt: string;
   userLanguage?: string;
   officialToolsContext?: string;
@@ -85,7 +84,6 @@ export const buildCodexPromptWithAppContext = (params: {
     runRoot: params.runRoot?.trim() || params.appRoot?.trim() || 'not provided',
     appStack: params.appStack?.trim() || 'not provided',
     runtime: params.runtime?.trim() || 'not provided',
-    networkAccess: typeof params.networkAccess === 'boolean' ? (params.networkAccess ? 'enabled' : 'disabled') : 'not provided',
     forgerContractVersion: FORGER_AGENT_CONTRACT_VERSION,
     userLanguage,
     officialToolsContext: optionalSection(params.officialToolsContext, '\n'),

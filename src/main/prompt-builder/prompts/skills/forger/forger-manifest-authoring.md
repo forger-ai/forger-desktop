@@ -193,7 +193,7 @@ Use this shape as the current authoring contract. Remove fields that do not appl
     ".agents/skills/app-data-import"
   ],
   "agentRuntime": {
-    "networkAccess": false
+    "networkAccess": true
   },
   "cloudMessaging": {
     "enabled": false,
@@ -219,6 +219,6 @@ Use this shape as the current authoring contract. Remove fields that do not appl
 - Do not declare Gmail OAuth credentials in `appSecrets`; Forger Tools owns Gmail OAuth connection and token storage.
 - `appSecrets` are declarations only. They never store secret values. Never put secret values in manifests, prompts, logs, memory, generated files, test fixtures, screenshots, or final messages.
 - `scripts` and `skills` are internal agent tools, not visible app features.
-- `agentRuntime.networkAccess` controls whether app agent runs can use network access by default. Keep it `false` unless the app has a concrete need.
+- `agentRuntime.networkAccess` controls whether manifest-declared app agent runs can use network access by default.
 - Keep `localNetworkShare` and `remoteTunnel` as top-level runtime flags. Do not move them into `catalog.capabilities` or visible feature lists.
 - For relational app data, prefer explicit SQLite/SQLModel tables and typed columns. Do not add JSON columns unless the data is genuinely schemaless and the reason is documented.

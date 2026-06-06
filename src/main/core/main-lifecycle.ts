@@ -11,6 +11,8 @@ import type {
   AgentRuntimeRequest,
   AgentToolDefinition,
   AgentToolSettings,
+  AppToolGrantRequestPreview,
+  AppToolGrantRequestResult,
   AppCodexConversationEvent,
   AppCodexTaskEvent,
   AppSummary,
@@ -24,6 +26,7 @@ import type {
   CreateLocalAppInput,
   CreateLocalAppResult,
   RuntimeStatus,
+  SetAppToolGrantInput,
 } from '../../shared/types';
 import type {
   AppRegistry,
@@ -121,6 +124,11 @@ interface MainLifecycleState {
   officialToolsService: (LifecycleService & {
     startActiveTools: () => Promise<void>;
     listAgentActionIdsForApp: (appId: string) => Promise<string[]>;
+    previewOptionalAppToolGrant: (
+      input: Pick<SetAppToolGrantInput, 'appId' | 'toolId'>,
+      locale?: string,
+    ) => Promise<AppToolGrantRequestPreview>;
+    setOptionalAppToolGrant: (input: SetAppToolGrantInput, locale?: string) => Promise<AppToolGrantRequestResult>;
     validateAgentCall: (input: unknown, access: { appId: string; requireAppGrant: boolean }) => Promise<unknown>;
     callFromAgent: (input: unknown, access: { appId: string; requireAppGrant: boolean }) => Promise<unknown>;
   }) | null;
@@ -185,6 +193,7 @@ interface MainLifecycleDeps {
   getCodexHome: () => string;
   getCodexRoot: () => string;
   getCodexToolEnvironment: (appId?: string, runtime?: RuntimeBinarySet) => Promise<Record<string, string>>;
+  getDesktopChatNetworkAccessDefault: () => boolean;
   getForgerAccountPath: () => string;
   getForgerHomeRoot: () => string;
   getForgerMetadataRoot: () => string;
@@ -305,6 +314,7 @@ export const registerMainLifecycle = (deps: unknown) => {
     getCodexHome,
     getCodexRoot,
     getCodexToolEnvironment,
+    getDesktopChatNetworkAccessDefault,
     getForgerAccountPath,
     getForgerHomeRoot,
     getForgerMetadataRoot,
@@ -503,6 +513,8 @@ export const registerMainLifecycle = (deps: unknown) => {
     testAppPrompt,
     updateAppPrompt,
     restoreAppPrompt,
+    previewAppToolGrant: async (input: unknown, locale?: string) => await getOfficialToolsService().previewOptionalAppToolGrant(input as { appId: string; toolId: string }, locale),
+    setAppToolGrant: async (input: unknown, locale?: string) => await getOfficialToolsService().setOptionalAppToolGrant(input as { appId: string; toolId: string; granted: boolean }, locale),
     memoryList: async (input: unknown, access: unknown) => await getMemoryStore().list(input, access),
     memoryCreate: async (input: unknown, access: unknown) => await getMemoryStore().create(input, access),
     memoryUpdate: async (input: unknown, access: unknown) => await getMemoryStore().update(input, access),
@@ -566,7 +578,7 @@ export const registerMainLifecycle = (deps: unknown) => {
         : undefined;
       return await getCodexToolEnvironment(appId, appPythonRuntime);
     },
-    getAgentNetworkAccess: appAllowsAgentNetworkAccess,
+    getChatNetworkAccessDefault: getDesktopChatNetworkAccessDefault,
     getCodexAuthenticated: async () => {
       const status = await getCodexAuthStatus();
       return status.authenticated;

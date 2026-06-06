@@ -62,6 +62,7 @@ export const settingsSeed: Settings = {
   },
   defaultAgentProvider: DEFAULT_AGENT_PROVIDER,
   defaultChatPermissionMode: DEFAULT_AGENT_PERMISSION_MODE,
+  defaultChatNetworkAccess: true,
   agentDefaults: getDefaultAgentDefaults(),
   providerConnections: {},
 };

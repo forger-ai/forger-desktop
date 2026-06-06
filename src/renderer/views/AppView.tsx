@@ -6,6 +6,7 @@ import SaveRounded from '@mui/icons-material/SaveRounded';
 import StarRounded from '@mui/icons-material/StarRounded';
 import WarningAmberRounded from '@mui/icons-material/WarningAmberRounded';
 import {
+  Alert,
   Avatar,
   Box,
   Button,
@@ -24,6 +25,7 @@ import {
 } from '@mui/material';
 import type {
   AppDetails,
+  AppToolsInstallGate,
   AppPromptMutationResult,
   AppPromptRestoreInput,
   AppPromptReviewInput,
@@ -50,6 +52,8 @@ interface AppViewProps {
   details: AppDetails | null;
   openingAppIds: Set<string>;
   installProgress?: InstallAppResult;
+  appToolsInstallGate: AppToolsInstallGate | null;
+  appToolGrantBusyId: string | null;
   t: AppDictionary;
   categoryLabel: string;
   appSecretsState: AppSecretsState | null;
@@ -77,6 +81,8 @@ interface AppViewProps {
   onDisconnectSecret: (appSecretName: string) => Promise<void>;
   onDelete: (appId: string) => void;
   onOpenAccount: () => void;
+  onSetAppToolGrant: (toolId: string, granted: boolean) => void;
+  onOpenTools: () => void;
   onOpenProfile?: (username: string) => void;
   onSubmitRating: (input: SubmitAppRatingInput) => Promise<{ success: boolean }>;
   onUpdatePrompt: (input: AppPromptReviewInput) => Promise<AppPromptMutationResult>;
@@ -141,6 +147,8 @@ export function AppView({
   details,
   openingAppIds,
   installProgress,
+  appToolsInstallGate,
+  appToolGrantBusyId,
   t,
   categoryLabel,
   appSecretsState,
@@ -168,6 +176,8 @@ export function AppView({
   onDisconnectSecret,
   onDelete,
   onOpenAccount,
+  onSetAppToolGrant,
+  onOpenTools,
   onOpenProfile,
   onSubmitRating,
   onUpdatePrompt,
@@ -290,6 +300,120 @@ export function AppView({
   const agents = details.agents ?? [];
   const promptReviews = details.promptReviews ?? [];
   const localChanges = details.localChanges ?? [];
+  const appToolRequirements = appToolsInstallGate
+    ? [...appToolsInstallGate.required, ...appToolsInstallGate.optional]
+    : [];
+  const appHasOfficialToolDeclarations = appToolRequirements.length > 0;
+  const appToolWarningCount = appToolRequirements.filter((item) => item.granted && !(item.available && item.configured)).length;
+  const appToolActionNames = (item: AppToolsInstallGate['required'][number]) => {
+    const actionNamesById = new Map((item.tool?.actions ?? []).map((action) => [action.id, action.name]));
+    return item.declaration.actions
+      .map((actionId) => actionNamesById.get(actionId))
+      .filter((label): label is string => Boolean(label));
+  };
+  const appToolStatusLabel = (item: AppToolsInstallGate['required'][number]) => {
+    if (item.available && item.configured) {
+      return t.appView.toolConfigured;
+    }
+    if (item.available) {
+      return t.appView.toolNeedsConfiguration;
+    }
+    return t.appView.toolUnavailable;
+  };
+  const appToolStatusColor = (item: AppToolsInstallGate['required'][number]) => (
+    item.available && item.configured
+      ? { color: 'success.main', borderColor: 'success.main', bgcolor: 'rgba(46, 125, 50, 0.12)' }
+      : { color: 'warning.main', borderColor: 'warning.main', bgcolor: 'rgba(237, 108, 2, 0.12)' }
+  );
+  const renderAppToolRequirement = (item: AppToolsInstallGate['required'][number]) => {
+    const configured = item.available && item.configured;
+    const toolName = item.tool?.name ?? item.declaration.toolId;
+    const actionNames = appToolActionNames(item);
+    const warning = item.required && !configured
+      ? t.appView.toolRequiredUnconfiguredWarning(toolName)
+      : item.granted && !configured
+        ? t.appView.toolGrantedUnconfiguredWarning(toolName)
+        : null;
+    return (
+      <Box
+        key={`${item.required ? 'required' : 'optional'}-${item.declaration.toolId}`}
+        sx={{ border: '1px solid', borderColor: warning ? 'warning.main' : 'divider', bgcolor: 'background.paper', p: 1.5 }}
+      >
+        <Stack spacing={1}>
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.25} alignItems={{ xs: 'stretch', sm: 'flex-start' }} justifyContent="space-between">
+            <Stack spacing={0.75} sx={{ minWidth: 0 }}>
+              <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap" useFlexGap>
+                <Typography fontWeight={700}>{toolName}</Typography>
+                <Chip size="small" label={item.required ? t.installGate.requiredTool : t.installGate.optionalTool} />
+                <Chip size="small" variant="outlined" label={appToolStatusLabel(item)} sx={appToolStatusColor(item)} />
+                <Chip
+                  size="small"
+                  variant={item.granted ? 'filled' : 'outlined'}
+                  color={item.granted ? 'primary' : 'default'}
+                  label={item.required ? t.appView.toolGrantRequired : item.granted ? t.appView.toolGranted : t.appView.toolNotGranted}
+                />
+              </Stack>
+              <Typography variant="body2" color="text.secondary">
+                {item.declaration.reason}
+              </Typography>
+            </Stack>
+            {!item.required ? (
+              <FormControlLabel
+                sx={{ m: 0, alignSelf: { xs: 'flex-start', sm: 'center' } }}
+                control={(
+                  <Switch
+                    checked={item.granted}
+                    disabled={appToolGrantBusyId === item.declaration.toolId}
+                    onChange={(event) => onSetAppToolGrant(item.declaration.toolId, event.target.checked)}
+                  />
+                )}
+                label={t.appView.toolGrantOptional}
+              />
+            ) : null}
+          </Stack>
+          {actionNames.length > 0 ? (
+            <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap" useFlexGap>
+              <Typography variant="caption" color="text.secondary">{t.appView.toolActionsLabel}</Typography>
+              {actionNames.map((actionName) => (
+                <Chip key={actionName} size="small" variant="outlined" label={actionName} />
+              ))}
+            </Stack>
+          ) : null}
+          {warning ? (
+            <Alert severity="warning" sx={{ py: 0.5 }}>
+              {warning}
+            </Alert>
+          ) : null}
+        </Stack>
+      </Box>
+    );
+  };
+  const appToolsContent = details.installed ? (
+    <Stack spacing={1.5}>
+      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} justifyContent="space-between" alignItems={{ xs: 'stretch', sm: 'center' }}>
+        <Stack spacing={0.5}>
+          <Typography variant="h5">{t.appView.officialToolsTitle}</Typography>
+          <Typography color="text.secondary">{t.appView.officialToolsBody}</Typography>
+        </Stack>
+        <Button variant="outlined" onClick={onOpenTools}>
+          {t.appView.openTools}
+        </Button>
+      </Stack>
+      {appToolWarningCount > 0 ? (
+        <Alert severity="warning">
+          {t.appView.toolsWarningSummary(appToolWarningCount)}
+        </Alert>
+      ) : null}
+      {appHasOfficialToolDeclarations ? (
+        <Stack spacing={1}>
+          {appToolsInstallGate?.required.map(renderAppToolRequirement)}
+          {appToolsInstallGate?.optional.map(renderAppToolRequirement)}
+        </Stack>
+      ) : (
+        <Typography color="text.secondary">{t.appView.officialToolsEmpty}</Typography>
+      )}
+    </Stack>
+  ) : null;
 
   const actions = (
     <AppViewActions
@@ -673,6 +797,7 @@ export function AppView({
           {details.app.description}
         </Typography>
       </Stack>
+      {appToolsContent}
       {promptTemplates.length > 0 ? (
         <Stack spacing={1.5}>
           <Typography variant="h5">{t.appView.promptTemplatesTitle}</Typography>

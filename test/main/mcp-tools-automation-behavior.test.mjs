@@ -94,6 +94,15 @@ const defaultMcpToolDefinitions = [
     defaultRequiresApproval: false,
   },
   {
+    id: 'forger_request_app_tool_grant',
+    packageId: 'forger',
+    name: 'Permitir herramienta opcional',
+    description: 'Permite una herramienta oficial opcional declarada.',
+    category: 'app',
+    risk: 'medio',
+    defaultRequiresApproval: false,
+  },
+  {
     id: 'forger_get_app_runtime_status',
     packageId: 'forger',
     name: 'Estado',
@@ -264,6 +273,18 @@ const createForgerMcpHarness = async (overrides = {}) => {
     testAppPrompt: async (input) => ({ success: true, valid: true, input, errors: [], declaredVariables: [], usedVariables: [], missingVariables: [], extraVariables: [] }),
     updateAppPrompt: async (input) => ({ success: true, input }),
     restoreAppPrompt: async (input) => ({ success: true, input }),
+    previewAppToolGrant: overrides.previewAppToolGrant ?? (async (input) => ({
+      success: false,
+      appId: input.appId,
+      userMessage: 'Sin declaracion.',
+      technicalCode: 'app_tools_not_declared',
+    })),
+    setAppToolGrant: overrides.setAppToolGrant ?? (async (input) => ({
+      success: true,
+      appId: input.appId,
+      userMessage: 'Grant actualizado.',
+      gate: null,
+    })),
     memoryList: async () => [{ id: 'mem-1', scope: 'app', kind: 'fact', text: 'Dato' }],
     memoryCreate: async (input, access) => ({ id: 'mem-new', scope: input.scope, kind: input.kind, text: input.text, access }),
     memoryUpdate: async (input) => ({ id: input.id, scope: 'app', kind: 'fact', text: input.text ?? 'Updated' }),
@@ -305,6 +326,7 @@ test('MCP tool schemas expose strict official tool contracts and safe annotation
   assert.deepEqual(getMcpToolInputSchema('forger_open_app').required, ['appId']);
   assert.deepEqual(getMcpToolInputSchema('forger_create_app').required, ['name', 'description', 'purpose']);
   assert.equal(getMcpToolInputSchema('forger_create_app').properties.agentPrompt, undefined);
+  assert.deepEqual(getMcpToolInputSchema('forger_request_app_tool_grant').required, ['appId', 'toolId']);
   assert.deepEqual(getMcpToolInputSchema('forger_ask_question').required, ['questions']);
   assert.equal(getMcpToolInputSchema('forger_ask_question').properties.chatId, undefined);
   assert.equal(getMcpToolInputSchema('forger_ask_question').properties.questions.maxItems, 5);
@@ -381,6 +403,148 @@ test('MCP tool schemas expose strict official tool contracts and safe annotation
   });
 });
 
+test('Forger MCP optional app tool grant asks permission and persists approved grants with warning', async () => {
+  let permissionRequest;
+  let persistedGrant;
+  const preview = {
+    success: true,
+    appId: 'calendar-entries',
+    appName: 'Calendario de entradas',
+    declaration: {
+      toolId: 'gmail',
+      reason: 'Leer entradas enviadas por correo.',
+      actions: ['gmail.search_messages', 'gmail.read_thread'],
+    },
+    tool: {
+      id: 'gmail',
+      name: 'Gmail',
+      description: 'Herramienta oficial de Gmail.',
+      version: '1.0.0',
+      runtime: 'builtin',
+      actions: [],
+      secrets: [],
+      official: true,
+      status: 'installed',
+      configured: false,
+    },
+    alreadyGranted: false,
+    warning: 'Gmail esta activa pero todavia no esta configurada.',
+    userMessage: 'Gmail esta activa pero todavia no esta configurada.',
+  };
+  const harness = await createForgerMcpHarness({
+    requestPermission: async (_runId, request) => {
+      permissionRequest = request;
+      return true;
+    },
+    previewAppToolGrant: async (input) => ({ ...preview, appId: input.appId }),
+    setAppToolGrant: async (input) => {
+      persistedGrant = input;
+      return {
+        ...preview,
+        appId: input.appId,
+        userMessage: 'Gmail quedo permitido para Calendario de entradas.',
+        gate: { appId: input.appId, appName: preview.appName, required: [], optional: [], agents: [], promptTemplates: [], canInstall: true },
+      };
+    },
+  });
+
+  try {
+    const session = harness.server.createSession('run-grant', 'forger', { caller: 'free-chat', locale: 'es' });
+    const response = await callMcp(session, {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/call',
+      params: {
+        name: 'forger_request_app_tool_grant',
+        arguments: {
+          appId: 'calendar-entries',
+          toolId: 'gmail',
+          reason: 'Buscar correos de entradas.',
+        },
+      },
+    });
+    const payload = await response.json();
+    const result = parseToolTextResult(payload);
+
+    assert.equal(payload.result.isError, false);
+    assert.equal(permissionRequest.pluginId, 'forger-app-tools');
+    assert.equal(permissionRequest.permission, 'optional_tool:calendar-entries:gmail');
+    assert.match(permissionRequest.resource, /Forger quiere activar esta herramienta opcional en esta aplicación/);
+    assert.match(permissionRequest.reason, /permitir \/ no/);
+    assert.deepEqual(persistedGrant, { appId: 'calendar-entries', toolId: 'gmail', granted: true });
+    assert.equal(result.success, true);
+    assert.equal(result.warning, preview.warning);
+    assert.equal(result.authorization.status, 'approved');
+  } finally {
+    harness.stop();
+  }
+});
+
+test('Forger MCP optional app tool grant rejects undeclared tools and user denial without persisting', async () => {
+  let persistedCount = 0;
+  const undeclaredHarness = await createForgerMcpHarness({
+    previewAppToolGrant: async (input) => ({
+      success: false,
+      appId: input.appId,
+      userMessage: 'No declarada.',
+      technicalCode: 'app_tool_not_declared',
+    }),
+    setAppToolGrant: async () => {
+      persistedCount += 1;
+      return { success: true, appId: 'calendar-entries', userMessage: 'Persistida.' };
+    },
+  });
+  try {
+    const session = undeclaredHarness.server.createSession('run-undeclared', 'forger', { caller: 'free-chat', locale: 'es' });
+    const response = await callMcp(session, {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/call',
+      params: { name: 'forger_request_app_tool_grant', arguments: { appId: 'calendar-entries', toolId: 'gmail' } },
+    });
+    const result = parseToolTextResult(await response.json());
+    assert.equal(result.success, false);
+    assert.equal(result.technicalCode, 'app_tool_not_declared');
+    assert.equal(persistedCount, 0);
+  } finally {
+    undeclaredHarness.stop();
+  }
+
+  const deniedHarness = await createForgerMcpHarness({
+    requestPermission: async () => false,
+    previewAppToolGrant: async (input) => ({
+      success: true,
+      appId: input.appId,
+      appName: 'Calendario de entradas',
+      declaration: { toolId: 'gmail', reason: 'Leer correo.', actions: ['gmail.search_messages'] },
+      tool: { id: 'gmail', name: 'Gmail', description: 'Gmail.', version: '1.0.0', runtime: 'builtin', actions: [], secrets: [], official: true, status: 'configured', configured: true },
+      alreadyGranted: false,
+      userMessage: 'Lista.',
+    }),
+    setAppToolGrant: async () => {
+      persistedCount += 1;
+      return { success: true, appId: 'calendar-entries', userMessage: 'Persistida.' };
+    },
+  });
+  try {
+    const session = deniedHarness.server.createSession('run-denied', 'forger', { caller: 'free-chat', locale: 'es' });
+    const response = await callMcp(session, {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/call',
+      params: { name: 'forger_request_app_tool_grant', arguments: { appId: 'calendar-entries', toolId: 'gmail' } },
+    });
+    const payload = await response.json();
+    const result = parseToolTextResult(payload);
+    assert.equal(payload.result.isError, true);
+    assert.equal(result.success, false);
+    assert.equal(result.technicalCode, 'app_tool_grant_rejected');
+    assert.equal(persistedCount, 0);
+  } finally {
+    deniedHarness.stop();
+  }
+});
+
 test('official tool declarations dedupe entries and app grants gate optional tools', async () => {
   const root = await mkdtemp(join(tmpdir(), 'forger-tools-service-'));
   const declarations = normalizeAppToolDeclarations({
@@ -427,6 +591,20 @@ test('official tool declarations dedupe entries and app grants gate optional too
     let gate = await service.getInstallGate('finance-os');
     assert.equal(gate.optional[0].granted, false);
     assert.equal(gate.canInstall, true);
+
+    const missingGrant = await service.previewOptionalAppToolGrant({ appId: 'finance-os', toolId: 'whatsapp' });
+    assert.equal(missingGrant.success, false);
+    assert.equal(missingGrant.technicalCode, 'app_tool_not_declared');
+
+    const grantPreview = await service.previewOptionalAppToolGrant({ appId: 'finance-os', toolId: 'gmail' });
+    assert.equal(grantPreview.success, true);
+    assert.equal(grantPreview.alreadyGranted, false);
+    assert.match(grantPreview.warning, /todavia no esta configurada/);
+
+    const grantResult = await service.setOptionalAppToolGrant({ appId: 'finance-os', toolId: 'gmail', granted: true });
+    assert.equal(grantResult.success, true);
+    assert.equal(grantResult.gate.optional[0].granted, true);
+    assert.match(grantResult.warning, /todavia no esta configurada/);
 
     gate = await service.setAppToolGrant({ appId: 'finance-os', toolId: 'gmail', granted: true });
     assert.equal(gate.optional[0].granted, true);
@@ -812,8 +990,21 @@ test('Forger MCP app-agent sessions filter Gmail tools and return validation fai
     refreshAppView: async () => ({ success: true }),
     updateApp: async () => ({ success: true }),
     listAppPrompts: async () => [],
+    testAppPrompt: async () => ({ success: true, valid: true, errors: [], declaredVariables: [], usedVariables: [], missingVariables: [], extraVariables: [] }),
     updateAppPrompt: async () => ({ success: true }),
     restoreAppPrompt: async () => ({ success: true }),
+    previewAppToolGrant: async (input) => ({
+      success: false,
+      appId: input.appId,
+      userMessage: 'Sin declaracion.',
+      technicalCode: 'app_tools_not_declared',
+    }),
+    setAppToolGrant: async (input) => ({
+      success: true,
+      appId: input.appId,
+      userMessage: 'Grant actualizado.',
+      gate: null,
+    }),
     memoryList: async () => [],
     memoryCreate: async () => ({}),
     memoryUpdate: async () => ({}),
@@ -943,8 +1134,21 @@ test('Forger MCP server handles auth, JSON-RPC lifecycle, session release, and H
     refreshAppView: async () => ({ success: true }),
     updateApp: async () => ({ success: true }),
     listAppPrompts: async () => [],
+    testAppPrompt: async () => ({ success: true, valid: true, errors: [], declaredVariables: [], usedVariables: [], missingVariables: [], extraVariables: [] }),
     updateAppPrompt: async () => ({ success: true }),
     restoreAppPrompt: async () => ({ success: true }),
+    previewAppToolGrant: async (input) => ({
+      success: false,
+      appId: input.appId,
+      userMessage: 'Sin declaracion.',
+      technicalCode: 'app_tools_not_declared',
+    }),
+    setAppToolGrant: async (input) => ({
+      success: true,
+      appId: input.appId,
+      userMessage: 'Grant actualizado.',
+      gate: null,
+    }),
     memoryList: async () => [],
     memoryCreate: async () => ({}),
     memoryUpdate: async () => ({}),

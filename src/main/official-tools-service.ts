@@ -4,6 +4,8 @@ import type {
   AppAgent,
   AppPromptTemplate,
   AppToolDeclaration,
+  AppToolGrantRequestPreview,
+  AppToolGrantRequestResult,
   AppToolsInstallGate,
   CallOfficialToolInput,
   CallOfficialToolResult,
@@ -104,6 +106,7 @@ const buildToolUnavailableResult = (
 
 const appToolDeclarationsMissingMessage = 'La app no tiene acceso configurado a herramientas oficiales. La declaracion de herramientas debe incluir un motivo visible y las acciones necesarias.';
 const appToolNotDeclaredMessage = 'La app no tiene acceso configurado a esta herramienta oficial. Revisa que la declaracion incluya toolId, reason y actions.';
+const appToolNotOptionalMessage = 'Esta herramienta no se puede activar como opcional porque la app no la declaro en tools.optional.';
 const appToolActionNotDeclaredMessage = 'La app no tiene acceso configurado a esta accion oficial. Revisa que la declaracion incluya la accion necesaria.';
 
 const localizeOfficialToolDefinition = (
@@ -330,6 +333,85 @@ export class OfficialToolsService {
     return this.getInstallGate(input.appId, locale);
   }
 
+  async previewOptionalAppToolGrant(
+    input: Pick<SetAppToolGrantInput, 'appId' | 'toolId'>,
+    locale?: string,
+  ): Promise<AppToolGrantRequestPreview> {
+    await this.load();
+    const appId = input.appId.trim();
+    const toolId = input.toolId.trim();
+    const declarations = await this.options.getAppToolDeclarations(appId);
+    if (!declarations) {
+      return {
+        success: false,
+        appId,
+        userMessage: appToolDeclarationsMissingMessage,
+        technicalCode: 'app_tools_not_declared',
+      };
+    }
+    const required = declarations.required.find((item) => item.toolId === toolId);
+    const optional = declarations.optional.find((item) => item.toolId === toolId);
+    if (required && !optional) {
+      return {
+        success: false,
+        appId,
+        appName: declarations.appName,
+        declaration: required,
+        userMessage: appToolNotOptionalMessage,
+        technicalCode: 'app_tool_not_optional',
+      };
+    }
+    if (!optional) {
+      return {
+        success: false,
+        appId,
+        appName: declarations.appName,
+        userMessage: appToolNotDeclaredMessage,
+        technicalCode: 'app_tool_not_declared',
+      };
+    }
+    const tool = await this.getTool(toolId, locale);
+    if (!tool) {
+      return {
+        success: false,
+        appId,
+        appName: declarations.appName,
+        declaration: optional,
+        userMessage: getSharedCopy(locale).tools.unavailable,
+        technicalCode: 'tool_not_found',
+      };
+    }
+    const warning = this.getGrantWarning(tool, locale);
+    return {
+      success: true,
+      appId,
+      appName: declarations.appName,
+      declaration: optional,
+      tool,
+      alreadyGranted: this.registry.appGrants[appId]?.[toolId] === true,
+      ...(warning ? { warning } : {}),
+      userMessage: warning
+        ? warning
+        : this.getGrantCopy(locale).ready(tool.name, declarations.appName),
+    };
+  }
+
+  async setOptionalAppToolGrant(input: SetAppToolGrantInput, locale?: string): Promise<AppToolGrantRequestResult> {
+    const preview = await this.previewOptionalAppToolGrant(input, locale);
+    if (!preview.success) {
+      return preview;
+    }
+    const gate = await this.setAppToolGrant(input, locale);
+    const copy = this.getGrantCopy(locale);
+    return {
+      ...preview,
+      gate,
+      userMessage: input.granted
+        ? copy.granted(preview.tool?.name ?? input.toolId, preview.appName ?? input.appId)
+        : copy.revoked(preview.tool?.name ?? input.toolId, preview.appName ?? input.appId),
+    };
+  }
+
   async listToolsForApp(appId: string): Promise<OfficialToolSummary[]> {
     await this.load();
     const declarations = await this.options.getAppToolDeclarations(appId);
@@ -458,6 +540,41 @@ export class OfficialToolsService {
 
   private canExecuteTool(tool: OfficialToolSummary, input: CallOfficialToolInput): boolean {
     return this.isToolUsable(tool) || (input.actionId.endsWith('.connection.status') && tool.status !== 'available');
+  }
+
+  private getGrantWarning(tool: OfficialToolSummary, locale?: string): string | undefined {
+    const copy = this.getGrantCopy(locale);
+    if (tool.status === 'available') {
+      return copy.inactive(tool.name);
+    }
+    if (tool.status === 'installed') {
+      return copy.unconfigured(tool.name);
+    }
+    if (tool.status === 'error') {
+      return copy.error(tool.name, tool.error);
+    }
+    return undefined;
+  }
+
+  private getGrantCopy(locale?: string) {
+    const isEnglish = locale?.toLowerCase().startsWith('en');
+    return isEnglish
+      ? {
+        ready: (toolName: string, appName: string) => `${toolName} can be allowed for ${appName}.`,
+        granted: (toolName: string, appName: string) => `${toolName} is allowed for ${appName}.`,
+        revoked: (toolName: string, appName: string) => `${toolName} is no longer allowed for ${appName}.`,
+        inactive: (toolName: string) => `${toolName} is not active yet. The grant can be saved, but the app cannot use it until the tool is activated and configured.`,
+        unconfigured: (toolName: string) => `${toolName} is active but not configured yet. The grant can be saved, but the app cannot use it until configuration is complete.`,
+        error: (toolName: string, detail?: string) => `${toolName} has a configuration error. The grant can be saved, but the app cannot use it until the error is fixed.${detail ? ` Detail: ${detail}` : ''}`,
+      }
+      : {
+        ready: (toolName: string, appName: string) => `${toolName} se puede permitir para ${appName}.`,
+        granted: (toolName: string, appName: string) => `${toolName} quedo permitido para ${appName}.`,
+        revoked: (toolName: string, appName: string) => `${toolName} dejo de estar permitido para ${appName}.`,
+        inactive: (toolName: string) => `${toolName} todavia no esta activa. El permiso se puede guardar, pero la app no podra usarla hasta activarla y configurarla.`,
+        unconfigured: (toolName: string) => `${toolName} esta activa pero todavia no esta configurada. El permiso se puede guardar, pero la app no podra usarla hasta completar la configuracion.`,
+        error: (toolName: string, detail?: string) => `${toolName} tiene un error de configuracion. El permiso se puede guardar, pero la app no podra usarla hasta corregirlo.${detail ? ` Detalle: ${detail}` : ''}`,
+      };
   }
 
   private async toSummary(entry: OfficialToolDefinition, locale?: string): Promise<OfficialToolSummary> {

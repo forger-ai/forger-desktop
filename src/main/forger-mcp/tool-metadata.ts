@@ -120,6 +120,28 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
     };
   }
 
+  if (toolId === 'forger_request_app_tool_grant') {
+    return {
+      type: 'object',
+      properties: {
+        appId: {
+          type: 'string',
+          description: 'ID de la app instalada que declaro la herramienta en tools.optional.',
+        },
+        toolId: {
+          type: 'string',
+          description: 'ID de la herramienta oficial opcional declarada por la app, por ejemplo gmail.',
+        },
+        reason: {
+          type: 'string',
+          description: 'Motivo funcional y visible para explicar por que la app necesita activar esta herramienta.',
+        },
+      },
+      required: ['appId', 'toolId'],
+      additionalProperties: false,
+    };
+  }
+
   if (toolId === 'forger_ask_question') {
     return {
       type: 'object',
