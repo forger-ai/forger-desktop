@@ -1131,6 +1131,7 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
       modifiedAt: fileRef.modifiedAt ?? '',
       source: fileRef.source ?? 'mentioned',
     }));
+    const networkAccess = (input.networkAccess ?? state.settings.defaultChatNetworkAccess) !== false;
     const promptContext = input.appId ? await installedAppPromptContext(input.appId, input) : null;
     const enrichedPrompt = input.appId
       ? buildCodexPromptWithAppContext({
@@ -1181,6 +1182,7 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
       appId: input.appId ?? null,
       prompt: enrichedPrompt,
       resumePrompt,
+      networkAccess,
       sharedFiles,
     });
   });

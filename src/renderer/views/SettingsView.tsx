@@ -37,6 +37,7 @@ import EventRepeatRounded from '@mui/icons-material/EventRepeatRounded';
 import InsertDriveFileRounded from '@mui/icons-material/InsertDriveFileRounded';
 import KeyboardArrowRightRounded from '@mui/icons-material/KeyboardArrowRightRounded';
 import MemoryRounded from '@mui/icons-material/MemoryRounded';
+import MenuBookRounded from '@mui/icons-material/MenuBookRounded';
 import PaletteRounded from '@mui/icons-material/PaletteRounded';
 import PrivacyTipRounded from '@mui/icons-material/PrivacyTipRounded';
 import PsychologyRounded from '@mui/icons-material/PsychologyRounded';
@@ -98,6 +99,7 @@ interface SettingsViewProps {
   claudeEffortOptions: { label: string; value: ClaudeEffort }[];
   defaultAgentProvider: Settings['defaultAgentProvider'];
   defaultChatPermissionMode: Settings['defaultChatPermissionMode'];
+  defaultChatNetworkAccess: Settings['defaultChatNetworkAccess'];
   agentDefaults: Settings['agentDefaults'];
   onAgentDefaultsChange: (input: UpdateAgentDefaultsInput) => void;
   developerMode: Settings['developerMode'];
@@ -267,6 +269,7 @@ export function SettingsView({
   claudeEffortOptions,
   defaultAgentProvider,
   defaultChatPermissionMode,
+  defaultChatNetworkAccess,
   agentDefaults,
   onAgentDefaultsChange,
   developerMode,
@@ -369,6 +372,7 @@ export function SettingsView({
     { view: 'datos', label: t.nav.datos, description: t.settings.advancedSurfaces.datos, icon: <TableChartRounded /> },
     { view: 'secrets', label: t.nav.secrets, description: t.settings.advancedSurfaces.secrets, icon: <VpnKeyRounded /> },
     { view: 'automations', label: t.nav.automations, description: t.settings.advancedSurfaces.automations, icon: <EventRepeatRounded /> },
+    { view: 'docs', label: t.nav.docs, description: t.settings.advancedSurfaces.docs, icon: <MenuBookRounded /> },
   ];
 
   const resetMemoryForm = () => setMemoryForm(EMPTY_MEMORY_FORM);
@@ -784,6 +788,22 @@ export function SettingsView({
                 >
                   <MenuItem value="safe">{t.sections.chat.permissionNormalLabel}</MenuItem>
                   <MenuItem value="unsafe">{t.sections.chat.permissionElevatedLabel}</MenuItem>
+                </Select>
+              </FormControl>
+              <FormControl size="small" fullWidth>
+                <InputLabel>{t.settings.agentDefaultChatNetwork}</InputLabel>
+                <Select
+                  label={t.settings.agentDefaultChatNetwork}
+                  value={defaultChatNetworkAccess ? 'enabled' : 'disabled'}
+                  onChange={(event) =>
+                    onAgentDefaultsChange({
+                      defaultProvider: defaultAgentProvider,
+                      defaultChatNetworkAccess: event.target.value === 'enabled',
+                    })
+                  }
+                >
+                  <MenuItem value="enabled">{t.sections.chat.networkEnabledLabel}</MenuItem>
+                  <MenuItem value="disabled">{t.sections.chat.networkDisabledLabel}</MenuItem>
                 </Select>
               </FormControl>
               <FormControl size="small" fullWidth>

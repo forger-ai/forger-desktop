@@ -1,8 +1,9 @@
 ---
 name: forger-whatsapp
-description: Use when the person asks to connect, list, read, inspect, or send WhatsApp messages through Forger-owned unofficial WhatsApp tools.
+description: Use when the person asks to connect, list, read, inspect, or send WhatsApp messages.
 ---
 
+- There is a Forger-owned unofficial WhatsApp tool. It lives inside the Forger MCP server.
 - Use only these MCP actions on the `forger` server: `whatsapp.connection.status`, `whatsapp.start_pairing`, `whatsapp.list_chats`, `whatsapp.read_messages`, `whatsapp.download_attachment`, `whatsapp.send_message`, and `whatsapp.get_chat_details`.
 - WhatsApp support is unofficial and based on a local WhatsApp Web connection. It can need reconnection and must not be described as guaranteed or enterprise-grade.
 - Use `whatsapp.start_pairing` only when the person wants to connect WhatsApp. Return the QR or pairing code as the user-facing connection step.

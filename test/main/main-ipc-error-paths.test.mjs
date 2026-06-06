@@ -510,9 +510,23 @@ test('main IPC chat handlers use safe fallbacks and sanitize shared files before
     { runId: 'run-1', status: 'running' },
   );
   assert.equal(starts.length, 1);
+  assert.equal(starts[0].networkAccess, true);
   assert.deepEqual(starts[0].sharedFiles.map((file) => file.path), ['/tmp/forger-data/ok.csv']);
   assert.match(starts[0].prompt, /ok\.csv/);
+  assert.doesNotMatch(starts[0].prompt, /networkAccess|NETWORK ACCESS/);
   assert.doesNotMatch(starts[0].prompt, /blocked\.txt/);
+  assert.deepEqual(
+    await handlers.get(IPC_CHANNELS.chatStartRun)(null, {
+      prompt: 'free chat without internet',
+      networkAccess: false,
+      sharedFiles: [],
+    }),
+    { runId: 'run-1', status: 'running' },
+  );
+  assert.equal(starts.length, 2);
+  assert.equal(starts[1].appId, null);
+  assert.equal(starts[1].networkAccess, false);
+  assert.doesNotMatch(starts[1].prompt, /NETWORK ACCESS/);
   assert.deepEqual(await handlers.get(IPC_CHANNELS.chatGetRun)(null, { runId: 'run-1' }), { runId: 'run-1' });
   assert.deepEqual(await handlers.get(IPC_CHANNELS.chatCancelRun)(null, { runId: 'run-1' }), { success: true });
   assert.deepEqual(await handlers.get(IPC_CHANNELS.chatApprovePermission)(null, { runId: 'run-1' }), { success: true });

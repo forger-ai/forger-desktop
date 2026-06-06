@@ -15,6 +15,7 @@ const settingsSeed = () => ({
   developerMode: { enabled: false, pathEntries: [] },
   defaultAgentProvider: 'auto',
   defaultChatPermissionMode: 'safe',
+  defaultChatNetworkAccess: true,
   codexDefaults: { model: 'gpt-5.4', reasoningEffort: 'medium' },
   agentDefaults: {
     codex: { model: 'gpt-5.4', reasoningEffort: 'medium' },
@@ -73,6 +74,7 @@ test('SettingsService normalizes persisted settings, preserves safe fields, and 
       safeMode: false,
       defaultAgentProvider: 'invalid',
       defaultChatPermissionMode: 'unsafe',
+      defaultChatNetworkAccess: false,
       codexDefaults: { model: 'custom-codex', reasoningEffort: 'invalid' },
       agentDefaults: {
         codex: { model: 'agent-codex', reasoningEffort: 'high' },
@@ -93,6 +95,7 @@ test('SettingsService normalizes persisted settings, preserves safe fields, and 
     assert.equal(harness.state.settings.safeMode, false);
     assert.equal(harness.state.settings.defaultAgentProvider, 'auto');
     assert.equal(harness.state.settings.defaultChatPermissionMode, 'unsafe');
+    assert.equal(harness.state.settings.defaultChatNetworkAccess, false);
     assert.deepEqual(harness.state.settings.codexDefaults, { model: 'custom-codex', reasoningEffort: 'medium' });
     assert.deepEqual(harness.state.settings.agentDefaults.codex, { model: 'agent-codex', reasoningEffort: 'high' });
     assert.deepEqual(harness.state.settings.agentDefaults.claude, { model: 'opus', effort: 'max' });
@@ -119,6 +122,9 @@ test('SettingsService updates defaults and normalizes invalid provider/model inp
     assert.equal(providerOnly.defaultAgentProvider, 'claude');
     const permissionOnly = await harness.controller.updateAgentDefaults({ defaultChatPermissionMode: 'unsafe' });
     assert.equal(permissionOnly.defaultChatPermissionMode, 'unsafe');
+    const networkOnly = await harness.controller.updateAgentDefaults({ defaultChatNetworkAccess: false });
+    assert.equal(networkOnly.defaultChatNetworkAccess, false);
+    assert.equal(JSON.parse(await fs.readFile(harness.settingsPath, 'utf8')).defaultChatNetworkAccess, false);
 
     const codex = await harness.controller.updateAgentDefaults({
       defaultProvider: 'auto',

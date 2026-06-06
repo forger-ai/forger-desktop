@@ -52,6 +52,15 @@ export const AGENT_TOOL_PACKAGES: AgentToolPackageDefinition[] = [
         defaultRequiresApproval: false,
       },
       {
+        id: 'forger_request_app_tool_grant',
+        packageId: FORGER_TOOL_PACKAGE_ID,
+        name: 'Permitir herramienta opcional',
+        description: 'Solicita a la persona activar para una app una herramienta oficial opcional ya declarada en su manifest.',
+        category: 'app',
+        risk: 'medio',
+        defaultRequiresApproval: false,
+      },
+      {
         id: 'forger_list_app_prompts',
         packageId: FORGER_TOOL_PACKAGE_ID,
         name: 'Listar prompts de app',

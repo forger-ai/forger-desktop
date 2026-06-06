@@ -219,6 +219,7 @@ const assertPublicSerializableRun = (run) => {
     'provider',
     'reasoningEffort',
     'effort',
+    'networkAccess',
     'taskType',
     'startedWithUpdateConflict',
     'locale',
@@ -1694,7 +1695,7 @@ test('chat runs wire MCP sessions, app MCPs, network access, and release callbac
       toolTimeoutSec: 12,
     })),
     releaseAppMcps: (runId) => releasedRunIds.push(runId),
-    getAgentNetworkAccess: async () => true,
+    getChatNetworkAccessDefault: async () => true,
     trace: async (event, payload) => traces.push([event, payload]),
   });
   const appId = 'finance-os';
@@ -1725,6 +1726,37 @@ test('chat runs wire MCP sessions, app MCPs, network access, and release callbac
     assert.ok(call.args.includes('mcp_servers.forger.default_tools_approval_mode="auto"'));
     assert.ok(call.args.includes('mcp_servers.finance-os.default_tools_approval_mode="approve"'));
     assert.ok(call.args.includes('mcp_servers.finance-os.tool_timeout_sec=12'));
+  } finally {
+    await harness.cleanup();
+  }
+});
+
+test('chat orchestrator resolves network access from desktop chat input or default, not manifest callbacks', async () => {
+  const harness = await createHarness({
+    getChatNetworkAccessDefault: async () => false,
+  });
+  try {
+    const explicit = await harness.orchestrator.startRun({
+      prompt: 'explicit network',
+      threadId: null,
+      networkAccess: true,
+      conversationId: 'conversation-explicit-network',
+      conversationHistory: [{ role: 'user', content: 'explicit network' }],
+    });
+    await waitForRun(harness.events, explicit.runId);
+    const [explicitCall] = await readFakeCalls(harness.metadataRoot, 'forger', 'conversation-explicit-network');
+    assert.ok(explicitCall.args.includes('--config'));
+    assert.ok(explicitCall.args.includes('sandbox_workspace_write.network_access=true'));
+
+    const defaulted = await harness.orchestrator.startRun({
+      prompt: 'default network',
+      threadId: null,
+      conversationId: 'conversation-default-network',
+      conversationHistory: [{ role: 'user', content: 'default network' }],
+    });
+    await waitForRun(harness.events, defaulted.runId);
+    const [defaultCall] = await readFakeCalls(harness.metadataRoot, 'forger', 'conversation-default-network');
+    assert.equal(defaultCall.args.includes('sandbox_workspace_write.network_access=true'), false);
   } finally {
     await harness.cleanup();
   }

@@ -121,6 +121,9 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     earlyAccessEnabled,
     selectedAppDetails,
     selectedAppDetailsId,
+    selectedAppToolGate,
+    selectedAppToolGrantBusyId,
+    handleAppDetailsToolGrant,
     appSecretsState,
     secretsBusy,
     settings,
@@ -173,6 +176,8 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     setSelectedClaudeEffort,
     selectedChatPermissionMode,
     setSelectedChatPermissionMode,
+    selectedChatNetworkAccess,
+    setSelectedChatNetworkAccess,
     chatBotPictureSrc,
     activeConversationRunActive,
     activeConversationRunId,
@@ -624,6 +629,8 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             details={selectedAppDetails}
             openingAppIds={openingAppIds}
             installProgress={selectedAppDetailsId ? installProgressByApp[selectedAppDetailsId] : undefined}
+            appToolsInstallGate={selectedAppToolGate}
+            appToolGrantBusyId={selectedAppToolGrantBusyId}
             t={t}
             categoryLabel={selectedAppDetails ? getCategoryLabel(selectedAppDetails.app.category) : ''}
             appSecretsState={appSecretsState}
@@ -651,6 +658,8 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             onDisconnectSecret={handleDisconnectSecret}
             onDelete={(appId) => void handleDeleteApp(appId)}
             onOpenAccount={() => setCloudModalOpen(true)}
+            onSetAppToolGrant={(toolId, granted) => void handleAppDetailsToolGrant(toolId, granted)}
+            onOpenTools={() => setCurrentView('tools')}
             onOpenProfile={(username) => {
               const normalized = username.trim().replace(/^@/, '');
               if (!normalized) return;
@@ -713,6 +722,8 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             onSelectClaudeEffort={setSelectedClaudeEffort}
             selectedPermissionMode={selectedChatPermissionMode}
             onSelectPermissionMode={setSelectedChatPermissionMode}
+            selectedNetworkAccess={selectedChatNetworkAccess}
+            onSelectNetworkAccess={setSelectedChatNetworkAccess}
             onOpenCodexUsageDashboard={() => void getDesktopApi().openCodexUsageDashboard()}
             assistantAvatarSrc={chatBotPictureSrc}
             isSending={activeConversationRunActive}
@@ -939,6 +950,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             claudeEffortOptions={CLAUDE_EFFORT_OPTIONS}
             defaultAgentProvider={settings.defaultAgentProvider}
             defaultChatPermissionMode={settings.defaultChatPermissionMode}
+            defaultChatNetworkAccess={settings.defaultChatNetworkAccess}
             agentDefaults={settings.agentDefaults}
             onAgentDefaultsChange={(input) => void handleAgentDefaultsChange(input)}
             developerMode={settings.developerMode}

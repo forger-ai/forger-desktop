@@ -74,6 +74,9 @@ const normalizeDefaultAgentProvider = (value: unknown): AgentProvider | 'auto' =
 const normalizeAgentPermissionMode = (value: unknown): AgentPermissionMode =>
   value === 'unsafe' ? 'unsafe' : 'safe';
 
+const normalizeChatNetworkAccess = (value: unknown, fallback = true): boolean =>
+  typeof value === 'boolean' ? value : fallback;
+
 const normalizeSettings = (input?: Partial<Settings>): Settings => {
   const defaults = structuredClone(settingsSeed);
   const rawCodexDefaults =
@@ -120,6 +123,7 @@ const normalizeSettings = (input?: Partial<Settings>): Settings => {
     },
     defaultAgentProvider: normalizeDefaultAgentProvider(input?.defaultAgentProvider),
     defaultChatPermissionMode: normalizeAgentPermissionMode(input?.defaultChatPermissionMode ?? defaults.defaultChatPermissionMode),
+    defaultChatNetworkAccess: normalizeChatNetworkAccess(input?.defaultChatNetworkAccess, defaults.defaultChatNetworkAccess),
     codexDefaults: {
       model: codexModel,
       reasoningEffort: codexReasoningEffort,
@@ -190,9 +194,12 @@ const updateAgentDefaults = async (input: UpdateAgentDefaultsInput): Promise<Set
   const defaultChatPermissionMode = input.defaultChatPermissionMode === undefined
     ? current.defaultChatPermissionMode
     : normalizeAgentPermissionMode(input.defaultChatPermissionMode);
+  const defaultChatNetworkAccess = input.defaultChatNetworkAccess === undefined
+    ? current.defaultChatNetworkAccess
+    : normalizeChatNetworkAccess(input.defaultChatNetworkAccess, current.defaultChatNetworkAccess);
   const provider = normalizeAgentProvider(input.provider);
   if (!provider) {
-    state.settings = normalizeSettings({ ...current, defaultAgentProvider, defaultChatPermissionMode });
+    state.settings = normalizeSettings({ ...current, defaultAgentProvider, defaultChatPermissionMode, defaultChatNetworkAccess });
     await saveSettings();
     return state.settings;
   }
@@ -201,6 +208,7 @@ const updateAgentDefaults = async (input: UpdateAgentDefaultsInput): Promise<Set
       ...current,
       defaultAgentProvider,
       defaultChatPermissionMode,
+      defaultChatNetworkAccess,
       codexDefaults: {
         model: input.model ?? current.agentDefaults.codex.model,
         reasoningEffort: normalizeCodexReasoningEffort(input.effort, current.agentDefaults.codex.reasoningEffort),
@@ -220,6 +228,7 @@ const updateAgentDefaults = async (input: UpdateAgentDefaultsInput): Promise<Set
     ...current,
     defaultAgentProvider,
     defaultChatPermissionMode,
+    defaultChatNetworkAccess,
     agentDefaults: {
       ...current.agentDefaults,
       claude: {

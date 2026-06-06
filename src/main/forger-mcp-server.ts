@@ -12,6 +12,8 @@ import type {
   AppPromptReviewItem,
   AppPromptTestInput,
   AppPromptTestResult,
+  AppToolGrantRequestPreview,
+  AppToolGrantRequestResult,
   CatalogApp,
   OpenAppResult,
   RuntimeStatus,
@@ -29,6 +31,7 @@ import type {
   ChatQuestionRequest,
   CreateLocalAppInput,
   CreateLocalAppResult,
+  SetAppToolGrantInput,
 } from '../shared/types';
 import { buildFailureDiagnostic } from '../shared/error-diagnostics';
 import { getSharedCopy } from '../shared/i18n';
@@ -89,6 +92,11 @@ interface ForgerMcpServerOptions {
   testAppPrompt: (input: AppPromptTestInput) => Promise<AppPromptTestResult>;
   updateAppPrompt: (input: AppPromptReviewInput) => Promise<AppPromptMutationResult>;
   restoreAppPrompt: (input: AppPromptRestoreInput) => Promise<AppPromptMutationResult>;
+  previewAppToolGrant: (
+    input: Pick<SetAppToolGrantInput, 'appId' | 'toolId'>,
+    locale?: string,
+  ) => Promise<AppToolGrantRequestPreview>;
+  setAppToolGrant: (input: SetAppToolGrantInput, locale?: string) => Promise<AppToolGrantRequestResult>;
   memoryList: (input: MemoryListInput, access: MemoryAccessInput) => Promise<MemoryEntry[]>;
   memoryCreate: (input: MemoryCreateInput, access: MemoryAccessInput) => Promise<MemoryEntry>;
   memoryUpdate: (input: MemoryUpdateInput, access: MemoryAccessInput) => Promise<MemoryEntry>;
@@ -515,6 +523,104 @@ export class ForgerMcpServer {
     };
   }
 
+  private async executeAppToolGrantRequest(
+    session: AgentMcpSession,
+    args: Record<string, unknown>,
+  ): Promise<AppToolGrantRequestResult & { authorization?: { required: boolean; status: string; userMessage: string } }> {
+    const input = parseAppToolGrantRequestInput(args);
+    if (!input) {
+      return {
+        success: false,
+        appId: getToolAppId(session, args),
+        userMessage: getAppToolGrantMcpCopy(session.locale).invalidInput,
+        technicalCode: 'app_tool_grant_input_invalid',
+      };
+    }
+    const preview = await this.options.previewAppToolGrant(input, session.locale);
+    if (!preview.success) {
+      return preview;
+    }
+    if (preview.alreadyGranted) {
+      return {
+        ...preview,
+        gate: null,
+        authorization: {
+          required: false,
+          status: 'not_required',
+          userMessage: getAppToolGrantMcpCopy(session.locale).alreadyGranted,
+        },
+      };
+    }
+
+    const copy = getAppToolGrantMcpCopy(session.locale);
+    const displayReason = cleanString(args.reason) || preview.declaration?.reason || preview.tool?.description || '';
+    const warning = preview.warning ? ` ${preview.warning}` : '';
+    const requestPermission = this.options.requestPermission(session.runId, {
+      pluginId: 'forger-app-tools',
+      permission: `optional_tool:${input.appId}:${input.toolId}`,
+      reason: `${copy.requestBody(preview.appName ?? input.appId, preview.tool?.name ?? input.toolId, displayReason)}${warning}`,
+      risk: 'medium',
+      resource: copy.requestTitle(preview.tool?.name ?? input.toolId),
+    });
+    if (!requestPermission) {
+      return {
+        ...preview,
+        success: false,
+        userMessage: copy.approvalUnavailable,
+        technicalCode: 'permission_unavailable',
+        authorization: {
+          required: true,
+          status: 'unavailable',
+          userMessage: copy.approvalUnavailable,
+        },
+      };
+    }
+    await this.options.appendInstallLog('agent_tool:app_tool_grant_requested', {
+      appId: input.appId,
+      runId: session.runId,
+      toolId: input.toolId,
+      toolName: preview.tool?.name,
+      warning: preview.warning ?? null,
+    });
+    this.emitToolProgress(session, 'forger_request_app_tool_grant', copy.waiting(preview.tool?.name ?? input.toolId));
+    const approved = await requestPermission;
+    if (!approved) {
+      await this.options.appendInstallLog('agent_tool:app_tool_grant_resolved', {
+        appId: input.appId,
+        runId: session.runId,
+        toolId: input.toolId,
+        approved,
+      });
+      return {
+        ...preview,
+        success: false,
+        userMessage: approved === null ? copy.approvalUnavailable : copy.rejected,
+        technicalCode: approved === null ? 'permission_unavailable' : 'app_tool_grant_rejected',
+        authorization: {
+          required: true,
+          status: approved === null ? 'unavailable' : 'denied',
+          userMessage: approved === null ? copy.approvalUnavailable : copy.rejected,
+        },
+      };
+    }
+    const result = await this.options.setAppToolGrant({ ...input, granted: true }, session.locale);
+    await this.options.appendInstallLog('agent_tool:app_tool_grant_resolved', {
+      appId: input.appId,
+      runId: session.runId,
+      toolId: input.toolId,
+      approved: true,
+      warning: result.warning ?? null,
+    });
+    return {
+      ...result,
+      authorization: {
+        required: true,
+        status: 'approved',
+        userMessage: copy.approved,
+      },
+    };
+  }
+
   private async executeAgentTool(
     session: AgentMcpSession,
     toolId: AgentToolId,
@@ -550,6 +656,12 @@ export class ForgerMcpServer {
         await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result: validation });
         return validation;
       }
+    }
+
+    if (toolId === 'forger_request_app_tool_grant') {
+      const result = await this.executeAppToolGrantRequest(session, args);
+      await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
+      return result;
     }
 
     const approval = await this.ensureToolApproval(session, tool);
@@ -858,6 +970,44 @@ const getOfficialToolIdForAction = (toolId: AgentToolId): string => {
 const isInternalMcpTool = (toolId: AgentToolId): boolean => toolId === 'forger_ask_question';
 
 const cleanString = (value: unknown): string => typeof value === 'string' ? value.trim() : '';
+
+const parseAppToolGrantRequestInput = (
+  args: Record<string, unknown>,
+): Pick<SetAppToolGrantInput, 'appId' | 'toolId'> | null => {
+  const appId = cleanString(args.appId);
+  const toolId = cleanString(args.toolId);
+  if (!appId || !toolId) {
+    return null;
+  }
+  return { appId, toolId };
+};
+
+const getAppToolGrantMcpCopy = (locale?: string) => {
+  const isEnglish = locale?.toLowerCase().startsWith('en');
+  return isEnglish
+    ? {
+      invalidInput: 'Choose the installed app and optional official tool to allow.',
+      alreadyGranted: 'This optional tool is already allowed for the app.',
+      requestTitle: (toolName: string) => `Forger wants to activate this optional tool in this app: ${toolName}`,
+      requestBody: (appName: string, toolName: string, reason: string) =>
+        `Forger quiere activar esta herramienta opcional en esta aplicación: permitir / no. App: ${appName}. Tool: ${toolName}.${reason ? ` Reason: ${reason}.` : ''}`,
+      waiting: (toolName: string) => `Waiting for permission to activate ${toolName} for this app...`,
+      approved: 'The optional tool was allowed for this app.',
+      rejected: 'The optional tool was not allowed for this app.',
+      approvalUnavailable: 'Could not show the optional tool approval prompt.',
+    }
+    : {
+      invalidInput: 'Elige la app instalada y la herramienta oficial opcional que quieres permitir.',
+      alreadyGranted: 'Esta herramienta opcional ya esta permitida para la app.',
+      requestTitle: (toolName: string) => `Forger quiere activar esta herramienta opcional en esta aplicación: ${toolName}`,
+      requestBody: (appName: string, toolName: string, reason: string) =>
+        `Forger quiere activar esta herramienta opcional en esta aplicación: permitir / no. App: ${appName}. Herramienta: ${toolName}.${reason ? ` Motivo: ${reason}.` : ''}`,
+      waiting: (toolName: string) => `Esperando permiso para activar ${toolName} en esta app...`,
+      approved: 'La herramienta opcional quedo permitida para esta app.',
+      rejected: 'La herramienta opcional no fue permitida para esta app.',
+      approvalUnavailable: 'No se pudo mostrar la aprobacion de herramienta opcional.',
+    };
+};
 
 const parseCreateLocalAppToolInput = (args: Record<string, unknown>): Required<Pick<CreateLocalAppInput, 'name' | 'description' | 'purpose'>> & Pick<CreateLocalAppInput, 'lookAndFeel'> | null => {
   const name = cleanString(args.name);

@@ -153,6 +153,7 @@ const createLifecycleHarness = (overrides = {}) => {
     pendingDeepLink: null,
     registry: { apps: {} },
     secretsStore: null,
+    settings: { defaultChatNetworkAccess: true },
   };
 
   const GenericService = createServiceClass('GenericService', calls);
@@ -272,6 +273,7 @@ const createLifecycleHarness = (overrides = {}) => {
     getCodexHome: () => '/codex-home',
     getCodexRoot: () => '/codex-root',
     getCodexToolEnvironment: async () => ({}),
+    getDesktopChatNetworkAccessDefault: () => state.settings.defaultChatNetworkAccess !== false,
     getForgerAccountPath: () => '/forger/.forger/account.json',
     getForgerHomeRoot: () => '/forger',
     getForgerMetadataRoot: () => '/forger/.forger',
@@ -395,6 +397,11 @@ test('main lifecycle initializes services, wires task status through provider-ag
   assert.deepEqual(await state.chatOrchestrator.options.getCodexPathEntries(), ['/runtime/bin']);
   assert.equal(await state.chatOrchestrator.options.getCodexCliPath(), null);
   assert.equal(await state.chatOrchestrator.options.getClaudeCliPath(), null);
+  assert.equal(await state.chatOrchestrator.options.getChatNetworkAccessDefault(), true);
+  state.settings.defaultChatNetworkAccess = false;
+  assert.equal(await state.chatOrchestrator.options.getChatNetworkAccessDefault(), false);
+  assert.equal(state.chatOrchestrator.options.getAgentNetworkAccess, undefined);
+  assert.equal(await state.appAgentTaskManager.options.getAgentNetworkAccess('forger'), false);
 });
 
 test('main lifecycle service callbacks preserve fallbacks, permissions, and update side effects', async () => {

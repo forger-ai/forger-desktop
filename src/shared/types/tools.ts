@@ -5,6 +5,7 @@ export type AgentToolId =
   | 'forger_list_installed_apps'
   | 'forger_check_updates'
   | 'forger_create_app'
+  | 'forger_request_app_tool_grant'
   | 'forger_ask_question'
   | 'forger_list_app_prompts'
   | 'forger_test_app_prompt'
@@ -218,4 +219,20 @@ export interface SetAppToolGrantInput {
   appId: string;
   toolId: string;
   granted: boolean;
+}
+
+export interface AppToolGrantRequestPreview {
+  success: boolean;
+  userMessage: string;
+  technicalCode?: string;
+  appId: string;
+  appName?: string;
+  declaration?: AppToolDeclaration;
+  tool?: OfficialToolSummary;
+  alreadyGranted?: boolean;
+  warning?: string;
+}
+
+export interface AppToolGrantRequestResult extends AppToolGrantRequestPreview {
+  gate?: AppToolsInstallGate | null;
 }

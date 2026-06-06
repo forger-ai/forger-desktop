@@ -43,6 +43,18 @@ const createServer = async (overrides = {}) => {
     testAppPrompt: async () => ({ success: true, valid: true, errors: [], declaredVariables: [], usedVariables: [], missingVariables: [], extraVariables: [] }),
     updateAppPrompt: async () => ({ success: true, userMessage: 'Prompt actualizado.' }),
     restoreAppPrompt: async () => ({ success: true }),
+    previewAppToolGrant: async (input) => ({
+      success: false,
+      appId: input.appId,
+      userMessage: 'Sin declaracion.',
+      technicalCode: 'app_tools_not_declared',
+    }),
+    setAppToolGrant: async (input) => ({
+      success: true,
+      appId: input.appId,
+      userMessage: 'Grant actualizado.',
+      gate: null,
+    }),
     memoryList: async () => [],
     memoryCreate: async () => ({}),
     memoryUpdate: async () => ({}),

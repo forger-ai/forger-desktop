@@ -4,7 +4,6 @@ APP_ROOT: {{appRoot}}
 RUN_ROOT: {{runRoot}}
 APP_STACK: {{appStack}}
 RUNTIME: {{runtime}}
-NETWORK ACCESS: {{networkAccess}}
 FORGER CONTRACT: {{forgerContractVersion}}
 USER LANGUAGE: {{userLanguage}}
 

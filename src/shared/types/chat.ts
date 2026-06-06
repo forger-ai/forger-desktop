@@ -209,6 +209,7 @@ export interface ChatStartRunInput {
   effort?: AgentEffort;
   dangerMode?: boolean;
   permissionMode?: AgentPermissionMode;
+  networkAccess?: boolean;
   conversationId?: string;
 }
 
