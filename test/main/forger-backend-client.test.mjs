@@ -1,3 +1,4 @@
+/* eslint-disable max-lines */
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
