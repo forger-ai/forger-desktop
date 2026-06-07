@@ -1,3 +1,5 @@
+import type { AppConnectMode, AppExecutionMode, AppExecutionPhase } from './catalog';
+
 export interface ForgerAccountUser {
   id: number;
   email: string;
@@ -45,12 +47,18 @@ export interface CloudDeviceAppSummary {
   name: string;
   status: string;
   version?: string;
+  localNetworkShareSupported?: boolean;
+  remoteTunnelSupported?: boolean;
+  executionPhase?: AppExecutionPhase;
+  executionMode?: AppExecutionMode | null;
+  connectMode?: AppConnectMode | null;
 }
 
 export interface CloudDeviceSummary {
   id: number;
   deviceUid: string;
   name: string;
+  kind?: 'desktop' | 'mobile';
   platform?: string;
   publicKey?: string;
   keyFingerprint?: string;
@@ -60,10 +68,24 @@ export interface CloudDeviceSummary {
   installedApps: CloudDeviceAppSummary[];
 }
 
+export interface MobilePairingRequestSummary {
+  id: number;
+  mobileDeviceId: number;
+  desktopDeviceId: number;
+  status: 'pending' | 'accepted' | 'rejected' | 'confirmed' | 'expired';
+  code?: string;
+  codeExpiresAt?: string;
+  expiresAt: string;
+  mobileDevice: CloudDeviceSummary;
+  desktopDevice: CloudDeviceSummary;
+}
+
 export interface CloudDevicesState {
   currentDevice?: CloudDeviceSummary;
   devices: CloudDeviceSummary[];
+  pairingRequests?: MobilePairingRequestSummary[];
   connected: boolean;
+  registrationRequired?: boolean;
   pairingCode?: string;
   pairingExpiresAt?: string;
   userMessage?: string;

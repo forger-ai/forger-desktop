@@ -39,10 +39,12 @@ export {
   runtimeFromDefaults,
   agentRuntimeEquals,
 } from './agent-runtime-registry';
-export type { ForgerAccountLoginInput, ForgerAccountProfileInput, ForgerAccountRegisterInput, ForgerAccountSession, ForgerAccountUser, SubscriptionTier, CloudDeviceAppSummary, CloudDeviceSummary, CloudDevicesState } from './types/account';
+export type { ForgerAccountLoginInput, ForgerAccountProfileInput, ForgerAccountRegisterInput, ForgerAccountSession, ForgerAccountUser, SubscriptionTier, CloudDeviceAppSummary, CloudDeviceSummary, CloudDevicesState, MobilePairingRequestSummary } from './types/account';
 export type { CloudStorageBreakdown, CloudStorageUsage } from './types/cloud-storage';
 export type { AppAgentPromptSet, AppAgentPromptTemplate, AppAgentPromptVariable, AppAgentPromptVariableType, AppAgent, AppPromptMutationResult, AppPromptRestoreInput, AppPromptReviewInput, AppPromptReviewItem, AppPromptReviewKind, AppPromptSettingSource, AppPromptTemplate, AppPromptTemplateArgument, AppPromptTemplateArgumentType, AppPromptTestInput, AppPromptTestResult, AppPromptValidationResult } from './types/prompts';
-export type { AppCapability, AppCategory, AppStatus, AppSummary, CatalogPublicationStatus, VersionChangelog } from './types/catalog';
+export type { AppCapability, AppCategory, AppConnectMode, AppExecutionMode, AppExecutionPhase, AppStatus, AppSummary, CatalogPublicationStatus, VersionChangelog } from './types/catalog';
+export { deriveAppExecutionState, withAppExecutionState } from './app-execution-state';
+export type { AppExecutionState } from './app-execution-state';
 export type { CatalogApp } from './types/catalog-app';
 export type { AppRatingSummary, SubmitAppRatingInput, SubmitProductFeedbackInput } from './types/feedback';
 export type { SubmitUsageEventInput, SubmitUsageEventResult, UsageEventName } from './types/usage-events';

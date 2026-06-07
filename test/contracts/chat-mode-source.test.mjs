@@ -48,6 +48,17 @@ test('product docs stay as a skill, not a chat-mode injection', async () => {
   assert.doesNotMatch(userMessageBuilder, /forger-product-docs|productDocs|Forger Documentation|Documentación de Forger/);
 });
 
+test('create app mode tells agents to inspect local and online shadcn components after creation', async () => {
+  const createMode = await readSource('src/main/prompt-builder/prompts/partials/chat-modes/create-app.md');
+
+  assert.match(createMode, /After `forger_create_app` succeeds, treat the created app as `APP_ROOT`/);
+  assert.match(createMode, /inventory local shadcn components and query the online shadcn registry/);
+  assert.match(createMode, /shadcn@latest -- list @shadcn --limit 200 --cwd \./);
+  assert.match(createMode, /shadcn@latest -- search @shadcn --query "date" --limit 50 --cwd \./);
+  assert.match(createMode, /shadcn@latest -- add <component> --cwd \./);
+  assert.match(createMode, /Do not assume the local workspace is the complete component catalog/);
+});
+
 test('renderer separates installed Apps from curated Catalog in navigation and content', async () => {
   const sidebarSource = await readSource('src/renderer/components/Sidebar.tsx');
   const settingsSource = await readSource('src/renderer/views/SettingsView.tsx');

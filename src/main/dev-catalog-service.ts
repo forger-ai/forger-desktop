@@ -146,6 +146,17 @@ const readLocalApps = async (): Promise<LocalApp[]> => {
   const apps: LocalApp[] = [];
   for (const appDir of parseLocalAppPaths()) {
     const manifestPath = path.join(appDir, 'manifest.json');
+    try {
+      const manifestStat = await fsp.stat(manifestPath);
+      if (!manifestStat.isFile()) {
+        continue;
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        continue;
+      }
+      throw error;
+    }
     const manifest = JSON.parse(await fsp.readFile(manifestPath, 'utf8')) as JsonObject;
     const sourceSlug = asString(manifest.name, path.basename(appDir));
     apps.push({

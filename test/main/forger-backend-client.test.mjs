@@ -428,6 +428,169 @@ test('remote tunnel session client creates, uploads, reports, closes, and hides 
   }
 });
 
+test('remote session request client reports mobile-visible Desktop preparation state', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'forger-remote-session-request-client-test-'));
+  const requests = [];
+  const harness = createClient(root, async (url, init) => {
+    requests.push({ url, init });
+    return jsonResponse(200, { success: true });
+  }, 'session-token');
+
+  try {
+    await harness.client.reportRemoteSessionRequest({
+      requestId: 'request-1',
+      appId: 'finance-os',
+      status: 'ready',
+      remoteStatus: {
+        active: true,
+        appId: 'finance-os',
+        state: 'waiting_for_session',
+        sessionId: 'session-public-token',
+        portalUrl: '/portal/tunnels/7',
+        frontendUrl: '/remote-assets/session-public-token/',
+        tunnelUrl: 'https://finance.loca.lt',
+        connectionCount: 0,
+        connections: [],
+      },
+      portalUrl: '/portal/tunnels/7',
+      frontendUrl: '/remote-assets/session-public-token/',
+    });
+
+    assert.equal(requests[0].url, 'https://platform.test/api/v1/me/remote_session_requests/request-1/report');
+    assert.equal(requests[0].init.method, 'PATCH');
+    assert.equal(requests[0].init.headers.Authorization, 'Bearer session-token');
+    assert.deepEqual(JSON.parse(requests[0].init.body), {
+      app_id: 'finance-os',
+      status: 'ready',
+      remote_status: {
+        active: true,
+        appId: 'finance-os',
+        state: 'waiting_for_session',
+        sessionId: 'session-public-token',
+        portalUrl: '/portal/tunnels/7',
+        frontendUrl: '/remote-assets/session-public-token/',
+        tunnelUrl: 'https://finance.loca.lt',
+        connectionCount: 0,
+        connections: [],
+      },
+      portal_url: '/portal/tunnels/7',
+      frontend_url: '/remote-assets/session-public-token/',
+    });
+  } finally {
+    harness.restore();
+    await rm(root, { recursive: true, force: true });
+  }
+
+  const failingReport = createClient(root, async () => jsonResponse(404, { error: 'not_found' }), 'session-token');
+  try {
+    await failingReport.client.reportRemoteSessionRequest({
+      requestId: 'request-2',
+      appId: 'finance-os',
+      status: 'error',
+      technicalCode: 'remote_tunnel_not_supported',
+    });
+  } finally {
+    failingReport.restore();
+  }
+});
+
+test('app access request client reports local network and remote tunnel status', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'forger-app-access-request-client-test-'));
+  const requests = [];
+  const harness = createClient(root, async (url, init) => {
+    requests.push({ url, init });
+    return jsonResponse(200, { success: true });
+  }, 'session-token');
+
+  try {
+    await harness.client.reportAppAccessRequest({
+      requestId: '101',
+      appId: 'finance-os',
+      status: 'ready',
+      accessStatus: {
+        active: true,
+        appId: 'finance-os',
+        url: 'http://192.168.1.10:5000',
+        connectUrl: 'http://192.168.1.10:5000/connect/token',
+      },
+    });
+    await harness.client.reportAppAccessRequest({
+      requestId: '102',
+      appId: 'finance-os',
+      status: 'ready',
+      accessStatus: {
+        active: true,
+        appId: 'finance-os',
+        state: 'waiting_for_session',
+        sessionId: 'session-public-token',
+        frontendUrl: '/remote-assets/session-public-token/',
+      },
+    });
+
+    assert.equal(requests[0].url, 'https://platform.test/api/v1/me/app_access_requests/101/report');
+    assert.equal(requests[0].init.method, 'PATCH');
+    assert.deepEqual(JSON.parse(requests[0].init.body), {
+      app_id: 'finance-os',
+      status: 'ready',
+      url: 'http://192.168.1.10:5000',
+      connect_url: 'http://192.168.1.10:5000/connect/token',
+    });
+    assert.deepEqual(JSON.parse(requests[1].init.body), {
+      app_id: 'finance-os',
+      status: 'ready',
+      remote_status: {
+        active: true,
+        appId: 'finance-os',
+        state: 'waiting_for_session',
+        sessionId: 'session-public-token',
+        frontendUrl: '/remote-assets/session-public-token/',
+      },
+      remote_session_id: 'session-public-token',
+    });
+  } finally {
+    harness.restore();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('app control request client reports stop status', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'forger-app-control-request-client-test-'));
+  const requests = [];
+  const harness = createClient(root, async (url, init) => {
+    requests.push({ url, init });
+    return jsonResponse(200, { success: true });
+  }, 'session-token');
+
+  try {
+    await harness.client.reportAppControlRequest({
+      requestId: '201',
+      appId: 'finance-os',
+      status: 'done',
+    });
+    await harness.client.reportAppControlRequest({
+      requestId: '202',
+      appId: 'finance-os',
+      status: 'error',
+      technicalCode: 'stop_failed',
+    });
+
+    assert.equal(requests[0].url, 'https://platform.test/api/v1/me/app_control_requests/201/report');
+    assert.equal(requests[0].init.method, 'PATCH');
+    assert.deepEqual(JSON.parse(requests[0].init.body), {
+      app_id: 'finance-os',
+      status: 'done',
+    });
+    assert.deepEqual(JSON.parse(requests[1].init.body), {
+      app_id: 'finance-os',
+      status: 'error',
+      technical_code: 'stop_failed',
+    });
+  } finally {
+    harness.restore();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('submitUsageEvent sends allowlisted parameters without user content fields', async () => {
   const root = await mkdtemp(join(tmpdir(), 'forger-usage-test-'));
   let requestBody;

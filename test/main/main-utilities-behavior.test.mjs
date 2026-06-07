@@ -363,6 +363,9 @@ test('main utility summarizes updates and closes friend chat windows without tou
     privateLocal: undefined,
     localNetworkShareSupported: undefined,
     remoteTunnelSupported: undefined,
+    executionPhase: 'running',
+    executionMode: 'forger',
+    connectMode: null,
   });
   assert.deepEqual(controller.toAppSummary({
     appId: 'recipes',
@@ -388,6 +391,9 @@ test('main utility summarizes updates and closes friend chat windows without tou
     privateLocal: undefined,
     localNetworkShareSupported: undefined,
     remoteTunnelSupported: undefined,
+    executionPhase: 'stopped',
+    executionMode: null,
+    connectMode: null,
   });
   assert.deepEqual(controller.toAppSummary({
     appId: 'journal',
@@ -413,6 +419,9 @@ test('main utility summarizes updates and closes friend chat windows without tou
     privateLocal: undefined,
     localNetworkShareSupported: undefined,
     remoteTunnelSupported: undefined,
+    executionPhase: 'stopped',
+    executionMode: null,
+    connectMode: null,
   });
   assert.deepEqual(controller.toAppSummary({
     appId: 'notes',
@@ -438,6 +447,9 @@ test('main utility summarizes updates and closes friend chat windows without tou
     privateLocal: undefined,
     localNetworkShareSupported: undefined,
     remoteTunnelSupported: undefined,
+    executionPhase: 'running',
+    executionMode: 'forger',
+    connectMode: null,
   });
 
   friendChatWindows.set(1, { isDestroyed: () => false, close: () => closed.push(1) });
@@ -445,6 +457,46 @@ test('main utility summarizes updates and closes friend chat windows without tou
   controller.closeFriendChatWindows();
   assert.deepEqual(closed, [1]);
   assert.equal(friendChatWindows.size, 0);
+});
+
+test('main utility enriches app summaries with shared execution state for share modes', () => {
+  const { controller } = createController({
+    getLocalNetworkShareStatus: (appId) => appId === 'finance-os'
+      ? { active: true, appId, url: 'http://192.168.1.20:5173' }
+      : undefined,
+    getRemoteNetworkShareStatus: (appId) => appId === 'recipes'
+      ? { active: true, appId, state: 'waiting_for_session', portalUrl: 'https://cloud.test/portal' }
+      : undefined,
+  });
+
+  assert.equal(controller.toAppSummary({
+    appId: 'finance-os',
+    name: 'Finance OS',
+    description: 'Money',
+    category: 'finanzas',
+    status: 'installed',
+    version: '1.0.0',
+  }).executionMode, 'local_network');
+  assert.equal(controller.toAppSummary({
+    appId: 'finance-os',
+    name: 'Finance OS',
+    description: 'Money',
+    category: 'finanzas',
+    status: 'installed',
+    version: '1.0.0',
+  }).connectMode, 'local_network');
+
+  const remote = controller.toAppSummary({
+    appId: 'recipes',
+    name: 'Recipes',
+    description: 'Food',
+    category: 'hogar',
+    status: 'installed',
+    version: '1.0.0',
+  });
+  assert.equal(remote.executionPhase, 'running');
+  assert.equal(remote.executionMode, 'remote_tunnel');
+  assert.equal(remote.connectMode, 'remote_tunnel');
 });
 
 test('main utility logs install diagnostics and serializes command failures with truncation', async () => {

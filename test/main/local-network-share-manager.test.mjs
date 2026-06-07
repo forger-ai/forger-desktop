@@ -70,6 +70,7 @@ test('LocalNetworkShareManager protects LAN proxy with one-time token and revoca
   const alreadyStarted = await manager.start('finance-os');
   assert.equal(alreadyStarted.success, true);
   assert.equal(alreadyStarted.status.connectUrl, started.status.connectUrl);
+  assert.equal(events.filter(([event]) => event === 'local_network_share:started').length, 1);
 
   const connectPath = new URL(started.status.connectUrl).pathname;
   const localPort = new URL(started.status.url).port;

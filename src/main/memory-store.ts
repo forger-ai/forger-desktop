@@ -93,6 +93,8 @@ interface MemoryRevisionRow {
   created_at: string;
 }
 
+type EmitWarning = typeof process.emitWarning;
+
 const MAX_TITLE_LENGTH = 120;
 const MAX_BODY_LENGTH = 4_000;
 const MAX_READ_WHEN_LENGTH = 1_000;
@@ -105,6 +107,44 @@ const VALID_KINDS = new Set<MemoryKind>([
   'fact',
 ]);
 const VALID_STATUSES = new Set<MemoryStatus>(['active', 'candidate', 'archived']);
+const NODE_SQLITE_EXPERIMENTAL_WARNING = 'SQLite is an experimental feature and might change at any time';
+let warnedAboutSqliteFallback = false;
+
+const warnAboutSqliteFallback = (error?: unknown): void => {
+  if (warnedAboutSqliteFallback) {
+    return;
+  }
+  warnedAboutSqliteFallback = true;
+  const message = error instanceof Error ? error.message : typeof error === 'string' ? error : null;
+  console.warn(
+    [
+      '[Forger memory] better-sqlite3 could not be loaded; falling back to node:sqlite.',
+      'For Desktop development/runtime, rebuild native Electron modules with: npx electron-rebuild -f -w better-sqlite3.',
+      message ? `Load error: ${message}` : null,
+    ]
+      .filter(Boolean)
+      .join(' '),
+  );
+};
+
+const requireNodeSqlite = (): { DatabaseSync?: new (filename: string) => SqliteDatabase } => {
+  const originalEmitWarning: EmitWarning = process.emitWarning;
+  const emitWarning = originalEmitWarning as unknown as (warning: string | Error, ...args: unknown[]) => void;
+  process.emitWarning = ((warning: string | Error, ...args: unknown[]) => {
+    const warningMessage = typeof warning === 'string' ? warning : warning.message;
+    const warningType = typeof args[0] === 'string' ? args[0] : undefined;
+    if (warningMessage === NODE_SQLITE_EXPERIMENTAL_WARNING && warningType === 'ExperimentalWarning') {
+      return;
+    }
+    return emitWarning(warning, ...args);
+  }) as EmitWarning;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return require('node:sqlite') as { DatabaseSync?: new (filename: string) => SqliteDatabase };
+  } finally {
+    process.emitWarning = originalEmitWarning;
+  }
+};
 
 export class MemoryStore {
   private db: SqliteDatabase | null = null;
@@ -334,13 +374,15 @@ export class MemoryStore {
     if (BetterSqlite3) {
       try {
         return new BetterSqlite3(this.sqlitePath()) as SqliteDatabase;
-      } catch {
+      } catch (error) {
         // Host-node tests can run with Electron-rebuilt native modules; fall through to node:sqlite.
+        warnAboutSqliteFallback(error);
       }
+    } else {
+      warnAboutSqliteFallback();
     }
     try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const nodeSqlite = require('node:sqlite') as { DatabaseSync?: new (filename: string) => SqliteDatabase };
+      const nodeSqlite = requireNodeSqlite();
       return nodeSqlite.DatabaseSync ? new nodeSqlite.DatabaseSync(this.sqlitePath()) : null;
     } catch {
       return null;

@@ -90,6 +90,9 @@ const nextWebSocketMessage = (socket) => new Promise((resolve, reject) => {
   socket.once('error', reject);
 });
 
+const sensitiveHandshakeUrl = 'https://platform.test/remote-assets/Session_ABC123/handshake?mobile_grant_token=grant-secret&token=query-secret#fragment-secret';
+const sensitiveFrontendUrl = '/remote-assets/Session_ABC123/?mobile_grant_token=frontend-secret#frontend-fragment';
+
 const withMockedPackager = (buildRemoteFrontend, callback) => {
   const modulePath = clearDistModule('main/remote-frontend-packager.js');
   const previous = require.cache[modulePath];
@@ -211,13 +214,13 @@ const createManagerOptions = (overrides = {}) => {
     createRemoteTunnelSession: async () => ({
       id: 7,
       session_id: 'Session_ABC123',
-      handshake_url: 'https://platform.test/remote-assets/Session_ABC123/handshake',
+      handshake_url: sensitiveHandshakeUrl,
       portal_url: '/portal/tunnels/7',
-      frontend_url: '/remote-assets/Session_ABC123/',
+      frontend_url: sensitiveFrontendUrl,
     }),
     uploadRemoteTunnelFrontend: async (input) => {
       uploads.push(input);
-      return { portal_url: '/portal/tunnels/7', frontend_url: '/remote-assets/Session_ABC123/' };
+      return { portal_url: '/portal/tunnels/7', frontend_url: sensitiveFrontendUrl };
     },
     reportRemoteTunnelSession: async (input) => {
       reports.push(input);
@@ -511,6 +514,7 @@ test('RemoteNetworkShareManager starts, proxies encrypted RPC, rejects replays, 
     async (input) => {
       assert.equal(input.nodePath, process.execPath);
       assert.equal(input.npmPath, process.execPath);
+      assert.equal(input.handshakeUrl, sensitiveHandshakeUrl);
       return { assets: [{ path: 'index.html', data: Buffer.from('<html></html>'), type: 'text/html' }], hash: 'hash' };
     },
     async ({ RemoteNetworkShareManager }) => {
@@ -524,7 +528,39 @@ test('RemoteNetworkShareManager starts, proxies encrypted RPC, rejects replays, 
       assert.equal(started.status.state, 'waiting_for_session');
       assert.equal(context.uploads.length, 1);
       assert.equal(context.uploads[0].frontendHash, 'hash');
-      assert.equal((await manager.start('finance-os')).status.state, 'waiting_for_session');
+      const createReadyLog = context.logs.find((entry) => entry.event === 'remote_network_share:create_session:ready');
+      assert.deepEqual(createReadyLog.payload.handshakeUrl, {
+        present: true,
+        shape: 'absolute',
+        origin: 'https://platform.test',
+        path: '/remote-assets/Session_.../handshake',
+        hasQuery: true,
+        hasFragment: true,
+      });
+      assert.equal(createReadyLog.payload.backendBaseUrlOrigin, 'https://platform.test');
+      assert.equal(createReadyLog.payload.sessionIdPrefix, 'Session_...');
+      const uploadReadyLog = context.logs.find((entry) => entry.event === 'remote_network_share:upload:ready');
+      assert.deepEqual(uploadReadyLog.payload.frontendUrl, {
+        present: true,
+        shape: 'relative',
+        path: '/remote-assets/Session_.../',
+        hasQuery: true,
+        hasFragment: true,
+      });
+      const serializedLogs = JSON.stringify(context.logs);
+      assert.doesNotMatch(serializedLogs, /Session_ABC123/);
+      assert.doesNotMatch(serializedLogs, /mobile_grant_token/);
+      assert.doesNotMatch(serializedLogs, /grant-secret/);
+      assert.doesNotMatch(serializedLogs, /query-secret/);
+      assert.doesNotMatch(serializedLogs, /fragment-secret/);
+      assert.doesNotMatch(serializedLogs, /frontend-secret/);
+      assert.doesNotMatch(serializedLogs, /frontend-fragment/);
+      assert.doesNotMatch(serializedLogs, /desktopPublicKeyJwk|desktop_public_key_jwk|private_key|privateKey/i);
+      const reused = await manager.start('finance-os');
+      assert.equal(reused.status.state, 'waiting_for_session');
+      assert.equal(reused.status.sessionId, started.status.sessionId);
+      assert.equal(context.uploads.length, 1);
+      assert.equal(context.logs.filter((entry) => entry.event === 'remote_network_share:tunnel:ready').length, 1);
 
       const options = await requestText(`${started.status.tunnelUrl}/__forger_remote_rpc`, {
         method: 'OPTIONS',
@@ -532,6 +568,7 @@ test('RemoteNetworkShareManager starts, proxies encrypted RPC, rejects replays, 
       });
       assert.equal(options.status, 204);
       assert.equal(options.headers['access-control-allow-origin'], 'https://remote-assets.test');
+      assert.match(options.headers['access-control-allow-headers'], /bypass-tunnel-reminder/);
       const notFound = await requestText(`${started.status.tunnelUrl}/not-rpc`, { method: 'GET' });
       assert.equal(notFound.status, 404);
 

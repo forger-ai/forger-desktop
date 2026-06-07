@@ -10,6 +10,7 @@ import type { ForgerAccountStore, StoredForgerAccount, publicForgerAccount } fro
 import { appendDesktopLog, type DesktopLogService } from '../desktop-logger';
 import type { AGENT_TOOL_DEFINITIONS, AGENT_TOOL_IDS } from './agent-tool-packages';
 import type { IPC_CHANNELS } from '../../shared/ipc';
+import { withAppExecutionState } from '../../shared/app-execution-state';
 import type {
   AgentToolApprovalSettings,
   AgentToolId,
@@ -570,7 +571,7 @@ const toAppSummary = (record: InstalledAppRecord): AppSummary => {
     ...remoteNetworkSharePayloadFor(record.appId),
   };
   if (running) {
-    return {
+    return withAppExecutionState({
       ...base,
       id: record.appId,
       name: catalog?.name ?? record.name,
@@ -581,10 +582,10 @@ const toAppSummary = (record: InstalledAppRecord): AppSummary => {
       updateAvailable,
       status: 'running',
       userMessage: 'En ejecucion',
-    };
+    });
   }
 
-  return {
+  return withAppExecutionState({
     ...base,
     id: record.appId,
     name: catalog?.name ?? record.name,
@@ -595,7 +596,7 @@ const toAppSummary = (record: InstalledAppRecord): AppSummary => {
     updateAvailable,
     status: record.status,
     userMessage: record.userMessage,
-  };
+  });
 };
 
 const parseVersionParts = (value?: string): number[] | null => {

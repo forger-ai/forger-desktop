@@ -197,6 +197,57 @@ test('registry store keeps dev records when the current app root is dev', async 
   assert.deepEqual(Object.keys(state.registry.apps), ['dev']);
 });
 
+test('registry store reconciles app network access flags from installed manifests', async (t) => {
+  const root = await tmpRoot('registry-access-flags');
+  t.after(async () => {
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  const { controller, registryPath, state } = createController(root);
+  const financeDir = path.join(root, 'apps', 'finance-os');
+  const legacyDir = path.join(root, 'apps', 'legacy');
+  await fs.mkdir(financeDir, { recursive: true });
+  await fs.mkdir(legacyDir, { recursive: true });
+  await fs.writeFile(path.join(financeDir, 'manifest.json'), JSON.stringify({
+    name: 'Finance OS',
+    localNetworkShare: true,
+    remoteTunnel: true,
+  }), 'utf8');
+  await fs.writeFile(path.join(legacyDir, 'manifest.json'), JSON.stringify({
+    name: 'Legacy',
+  }), 'utf8');
+  await fs.writeFile(registryPath, JSON.stringify({
+    apps: {
+      'finance-os': {
+        appId: 'finance-os',
+        status: 'installed',
+        installDir: financeDir,
+        localNetworkShareSupported: false,
+        remoteTunnelSupported: false,
+      },
+      legacy: {
+        appId: 'legacy',
+        status: 'installed',
+        installDir: legacyDir,
+        localNetworkShareSupported: true,
+        remoteTunnelSupported: true,
+      },
+    },
+  }), 'utf8');
+
+  await controller.loadRegistry();
+
+  assert.equal(state.registry.apps['finance-os'].localNetworkShareSupported, true);
+  assert.equal(state.registry.apps['finance-os'].remoteTunnelSupported, true);
+  assert.equal(state.registry.apps.legacy.localNetworkShareSupported, false);
+  assert.equal(state.registry.apps.legacy.remoteTunnelSupported, false);
+
+  const saved = JSON.parse(await fs.readFile(registryPath, 'utf8'));
+  assert.equal(saved.apps['finance-os'].localNetworkShareSupported, true);
+  assert.equal(saved.apps['finance-os'].remoteTunnelSupported, true);
+  assert.equal(saved.apps.legacy.localNetworkShareSupported, false);
+  assert.equal(saved.apps.legacy.remoteTunnelSupported, false);
+});
+
 test('registry store saves atomically, backs up the previous valid registry, and emits status', async (t) => {
   const root = await tmpRoot('registry-save');
   t.after(async () => {

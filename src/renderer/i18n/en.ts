@@ -88,6 +88,14 @@ export const en = {
     comingSoon: 'Coming soon',
     askForgerHelp: 'Ask Forger for help',
   },
+  appExecution: {
+    startingForger: 'Starting in Forger',
+    startingLocalNetwork: 'Starting on local network',
+    startingRemoteTunnel: 'Starting remote access',
+    runningForger: 'Running in Forger',
+    runningLocalNetwork: 'Running on local network',
+    runningRemoteTunnel: 'Running with remote access',
+  },
   localNetwork: {
     menuAction: 'Local network',
     activeBadge: 'Local network active',

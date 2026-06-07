@@ -691,10 +691,25 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
   ipcMain.handle(IPC_CHANNELS.getCloudDevices, async () => {
     return cloudDeviceManager ? await cloudDeviceManager.getState() : { devices: [], connected: false };
   });
+  ipcMain.handle(IPC_CHANNELS.registerCloudDevice, async (_event, input: { name?: string }) => {
+    return cloudDeviceManager
+      ? await cloudDeviceManager.registerCloudDevice({ name: input?.name ?? '' })
+      : { devices: [], connected: false, success: false, userMessage: 'No pudimos registrar este equipo.', technicalCode: 'cloud_device_manager_missing' };
+  });
   ipcMain.handle(IPC_CHANNELS.generateDevicePairingCode, async () => {
     return cloudDeviceManager
       ? await cloudDeviceManager.generatePairingCode()
       : { devices: [], connected: false, success: false, userMessage: 'No pudimos preparar este equipo.', technicalCode: 'cloud_device_manager_missing' };
+  });
+  ipcMain.handle(IPC_CHANNELS.acceptMobilePairingRequest, async (_event, requestId: number) => {
+    return cloudDeviceManager
+      ? await cloudDeviceManager.acceptMobilePairingRequest(requestId)
+      : { devices: [], connected: false, success: false, userMessage: 'No pudimos aceptar la solicitud.', technicalCode: 'cloud_device_manager_missing' };
+  });
+  ipcMain.handle(IPC_CHANNELS.rejectMobilePairingRequest, async (_event, requestId: number) => {
+    return cloudDeviceManager
+      ? await cloudDeviceManager.rejectMobilePairingRequest(requestId)
+      : { devices: [], connected: false, success: false, userMessage: 'No pudimos rechazar la solicitud.', technicalCode: 'cloud_device_manager_missing' };
   });
   ipcMain.handle(IPC_CHANNELS.listFriends, async () => {
     return forgerBackendClient ? await forgerBackendClient.listFriends() : [];

@@ -1518,7 +1518,7 @@ test('DevCatalogService serves local app catalog metadata from FORGER_LOCAL_APPS
   await execFileAsync('git', ['add', 'manifest.json', '.version.dev'], { cwd: appDir });
   await execFileAsync('git', ['commit', '-m', 'seed dev catalog fixture'], { cwd: appDir });
   await fs.writeFile(path.join(appDir, 'local-change.txt'), 'dirty', 'utf8');
-  process.env.FORGER_LOCAL_APPS = appDir;
+  process.env.FORGER_LOCAL_APPS = `${path.join(root, 'missing-app')},${appDir}`;
   const service = new DevCatalogService();
 
   const health = mockResponse();

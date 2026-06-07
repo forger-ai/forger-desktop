@@ -97,6 +97,7 @@ test('CloudDeviceManager registers per-account devices, encrypts secrets, and re
           id: 7,
           deviceUid: backendCalls[0][1].deviceUid,
           name: 'Work Mac',
+          kind: 'desktop',
           platform: 'darwin_arm64',
           paired: true,
           online: true,
@@ -116,14 +117,24 @@ test('CloudDeviceManager registers per-account devices, encrypts secrets, and re
       backendClient: () => backendClient,
       token: () => 'session-token',
       getCloudIdentity: async () => ({ publicKey: 'public', keyFingerprint: 'fingerprint' }),
-      getInstalledApps: () => [{ id: 'finance-os', name: 'Finance OS', status: 'running', version: '1.2.3' }],
+      getInstalledApps: () => [{
+        id: 'finance-os',
+        name: 'Finance OS',
+        status: 'running',
+        version: '1.2.3',
+        localNetworkShareSupported: true,
+        remoteTunnelSupported: true,
+        executionPhase: 'running',
+        executionMode: 'forger',
+        connectMode: null,
+      }],
       handleFriendshipEvent: async (event) => {
         friendshipEvents.push(event);
       },
     });
 
     try {
-      await manager.start();
+      await manager.registerCloudDevice({ name: 'Device' });
       const socket = FakeWebSocket.instances[0];
       assert.ok(socket.url.startsWith('wss://cloud.test/cable?'));
       assert.ok(socket.url.includes('token=session-token'));
@@ -141,7 +152,18 @@ test('CloudDeviceManager registers per-account devices, encrypts secrets, and re
       assert.match(state.pairingCode, /^[A-Z0-9]{8}$/);
       assert.deepEqual(friendshipEvents, [{ type: 'friendship_changed', friendship: { id: 1 } }]);
       assert.equal(backendCalls.find(([kind]) => kind === 'pairing')[1].deviceId, 7);
-      assert.ok(socketActions(socket).some((message) => message.action === 'heartbeat' && message.installed_apps[0].id === 'finance-os'));
+      assert.ok(socketActions(socket).some((message) =>
+        message.action === 'heartbeat' &&
+        message.installed_apps[0].id === 'finance-os' &&
+        message.installed_apps[0].localNetworkShareSupported === true &&
+        message.installed_apps[0].remoteTunnelSupported === true &&
+        message.installed_apps[0].executionPhase === 'running' &&
+        message.installed_apps[0].executionMode === 'forger' &&
+        message.installed_apps[0].connectMode === null &&
+        message.runtime_statuses['finance-os'].executionPhase === 'running' &&
+        message.runtime_statuses['finance-os'].executionMode === 'forger' &&
+        message.runtime_statuses['finance-os'].connectMode === null,
+      ));
     } finally {
       manager.stop();
     }
@@ -149,6 +171,308 @@ test('CloudDeviceManager registers per-account devices, encrypts secrets, and re
     const stored = JSON.parse(await fs.readFile(storedPath, 'utf8'));
     assert.equal(stored.encrypted, true);
     assert.ok(Buffer.from(stored.deviceSecret, 'base64').toString('utf8').startsWith('sealed:'));
+  });
+});
+
+test('CloudDeviceManager handles mobile remote session requests over DeviceChannel and reports visible status', async (t) => {
+  const root = await tmpRoot('cloud-device-remote-session');
+  const originalWebSocket = globalThis.WebSocket;
+  t.after(async () => {
+    globalThis.WebSocket = originalWebSocket;
+    FakeWebSocket.instances = [];
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  await withMockedElectron({ safeStorage: createSafeStorage() }, async (require) => {
+    clearDistModule('main/cloud-device-manager.js');
+    globalThis.WebSocket = FakeWebSocket;
+    const { CloudDeviceManager } = require('../../dist-electron/main/cloud-device-manager.js');
+    const reports = [];
+    const requested = [];
+    const socialEvents = [];
+    const backendClient = {
+      async registerDevice(input) {
+        return {
+          id: 71,
+          deviceUid: input.deviceUid,
+          name: 'Device',
+          platform: 'darwin_arm64',
+          paired: true,
+          online: true,
+          installedApps: [],
+        };
+      },
+      async listDevices() {
+        return [{ id: 71, deviceUid: 'uid', name: 'Device', kind: 'desktop', platform: 'darwin_arm64', paired: true, online: true, installedApps: [] }];
+      },
+      async reportRemoteSessionRequest(input) {
+        reports.push(input);
+      },
+    };
+    const manager = new CloudDeviceManager({
+      filePath: path.join(root, 'cloud-device.json'),
+      accountStorageKey: () => 'person@example.com',
+      backendBaseUrl: 'https://cloud.test',
+      backendClient: () => backendClient,
+      token: () => 'session-token',
+      getCloudIdentity: async () => ({ publicKey: 'public', keyFingerprint: 'fingerprint' }),
+      getInstalledApps: () => [],
+      handleFriendshipEvent: async (event) => socialEvents.push(event),
+      handleRemoteSessionRequest: async (request) => {
+        requested.push(request);
+        return {
+          success: true,
+          status: {
+            active: true,
+            appId: request.appId,
+            state: 'waiting_for_session',
+            sessionId: 'session-public-token',
+            portalUrl: '/portal/tunnels/7',
+            frontendUrl: '/remote-assets/session-public-token/',
+            connectionCount: 0,
+          },
+        };
+      },
+    });
+
+    await manager.registerCloudDevice({ name: 'Device' });
+    const socket = FakeWebSocket.instances[0];
+    socket.emit('open');
+    socket.emit('message', {
+      data: JSON.stringify({
+        message: {
+          type: 'remote_session_requested',
+          request_id: 'request-1',
+          app_id: 'finance-os',
+          requested_by_device_id: 91,
+        },
+      }),
+    });
+    await waitFor(() => reports.length === 2);
+
+    assert.deepEqual(requested, [{ requestId: 'request-1', appId: 'finance-os', requestedByDeviceId: 91 }]);
+    assert.deepEqual(reports.map((report) => report.status), ['preparing', 'ready']);
+    assert.equal(reports[0].requestId, 'request-1');
+    assert.equal(reports[0].appId, 'finance-os');
+    assert.equal(reports[1].remoteStatus.state, 'waiting_for_session');
+    assert.equal(reports[1].portalUrl, '/portal/tunnels/7');
+    assert.deepEqual(socialEvents, []);
+
+    manager.options.handleRemoteSessionRequest = async (request) => {
+      requested.push(request);
+      return {
+        success: false,
+        technicalCode: 'remote_tunnel_not_supported',
+        status: { active: false, appId: request.appId, state: 'error', technicalCode: 'remote_tunnel_not_supported' },
+      };
+    };
+    socket.emit('message', {
+      data: JSON.stringify({ message: { type: 'remote_session_requested', request_id: 'request-2', app_id: 'finance-os' } }),
+    });
+    await waitFor(() => reports.length === 4);
+    assert.equal(reports[2].status, 'preparing');
+    assert.equal(reports[3].status, 'error');
+    assert.equal(reports[3].technicalCode, 'remote_tunnel_not_supported');
+
+    socket.emit('message', {
+      data: JSON.stringify({ message: { type: 'remote_session_requested', request_id: 'request-3', app_id: '/__forger_internal' } }),
+    });
+    await waitFor(() => reports.length === 5);
+    assert.equal(reports[4].status, 'error');
+    assert.equal(reports[4].technicalCode, 'remote_session_request_invalid');
+    assert.equal(requested.length, 2);
+    manager.stop();
+  });
+});
+
+test('CloudDeviceManager handles mobile app access requests for local network and remote tunnel', async (t) => {
+  const root = await tmpRoot('cloud-device-app-access');
+  const originalWebSocket = globalThis.WebSocket;
+  t.after(async () => {
+    globalThis.WebSocket = originalWebSocket;
+    FakeWebSocket.instances = [];
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  await withMockedElectron({ safeStorage: createSafeStorage() }, async (require) => {
+    clearDistModule('main/cloud-device-manager.js');
+    globalThis.WebSocket = FakeWebSocket;
+    const { CloudDeviceManager } = require('../../dist-electron/main/cloud-device-manager.js');
+    const reports = [];
+    const requested = [];
+    const backendClient = {
+      async registerDevice(input) {
+        return {
+          id: 71,
+          deviceUid: input.deviceUid,
+          name: 'Device',
+          platform: 'darwin_arm64',
+          paired: true,
+          online: true,
+          installedApps: [],
+        };
+      },
+      async listDevices() {
+        return [{ id: 71, deviceUid: 'uid', name: 'Device', kind: 'desktop', platform: 'darwin_arm64', paired: true, online: true, installedApps: [] }];
+      },
+      async reportAppAccessRequest(input) {
+        reports.push(input);
+      },
+    };
+    const manager = new CloudDeviceManager({
+      filePath: path.join(root, 'cloud-device.json'),
+      accountStorageKey: () => 'person@example.com',
+      backendBaseUrl: 'https://cloud.test',
+      backendClient: () => backendClient,
+      token: () => 'session-token',
+      getCloudIdentity: async () => ({ publicKey: 'public', keyFingerprint: 'fingerprint' }),
+      getInstalledApps: () => [],
+      handleAppAccessRequest: async (request) => {
+        requested.push(request);
+        if (request.mode === 'local_network') {
+          return {
+            success: true,
+            userMessage: 'Red local activa.',
+            status: {
+              active: true,
+              appId: request.appId,
+              url: 'http://192.168.1.10:5000',
+              connectUrl: 'http://192.168.1.10:5000/connect/token',
+            },
+          };
+        }
+        return {
+          success: true,
+          status: {
+            active: true,
+            appId: request.appId,
+            state: 'waiting_for_session',
+            sessionId: 'session-public-token',
+            frontendUrl: '/remote-assets/session-public-token/',
+          },
+        };
+      },
+    });
+
+    await manager.registerCloudDevice({ name: 'Device' });
+    const socket = FakeWebSocket.instances[0];
+    socket.emit('open');
+    socket.emit('message', {
+      data: JSON.stringify({
+        message: {
+          type: 'app_access_requested',
+          request_id: 101,
+          mode: 'local_network',
+          app_id: 'finance-os',
+          requested_by_device_id: 91,
+        },
+      }),
+    });
+    await waitFor(() => reports.length === 2);
+    socket.emit('message', {
+      data: JSON.stringify({
+        message: {
+          type: 'app_access_requested',
+          request_id: 102,
+          mode: 'remote_tunnel',
+          app_id: 'finance-os',
+        },
+      }),
+    });
+    await waitFor(() => reports.length === 4);
+
+    assert.deepEqual(requested.map((request) => request.mode), ['local_network', 'remote_tunnel']);
+    assert.deepEqual(reports.map((report) => report.status), ['preparing', 'ready', 'preparing', 'ready']);
+    assert.equal(reports[1].accessStatus.connectUrl, 'http://192.168.1.10:5000/connect/token');
+    assert.equal(reports[3].accessStatus.sessionId, 'session-public-token');
+    manager.stop();
+  });
+});
+
+test('CloudDeviceManager handles mobile app control requests for app stop', async (t) => {
+  const root = await tmpRoot('cloud-device-app-control');
+  const originalWebSocket = globalThis.WebSocket;
+  t.after(async () => {
+    globalThis.WebSocket = originalWebSocket;
+    FakeWebSocket.instances = [];
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  await withMockedElectron({ safeStorage: createSafeStorage() }, async (require) => {
+    clearDistModule('main/cloud-device-manager.js');
+    globalThis.WebSocket = FakeWebSocket;
+    const { CloudDeviceManager } = require('../../dist-electron/main/cloud-device-manager.js');
+    const reports = [];
+    const requested = [];
+    const backendClient = {
+      async registerDevice(input) {
+        return {
+          id: 72,
+          deviceUid: input.deviceUid,
+          name: 'Device',
+          platform: 'darwin_arm64',
+          paired: true,
+          online: true,
+          installedApps: [],
+        };
+      },
+      async listDevices() {
+        return [{ id: 72, deviceUid: 'uid', name: 'Device', kind: 'desktop', platform: 'darwin_arm64', paired: true, online: true, installedApps: [] }];
+      },
+      async reportAppControlRequest(input) {
+        reports.push(input);
+      },
+    };
+    const manager = new CloudDeviceManager({
+      filePath: path.join(root, 'cloud-device.json'),
+      accountStorageKey: () => 'person@example.com',
+      backendBaseUrl: 'https://cloud.test',
+      backendClient: () => backendClient,
+      token: () => 'session-token',
+      getCloudIdentity: async () => ({ publicKey: 'public', keyFingerprint: 'fingerprint' }),
+      getInstalledApps: () => [],
+      handleAppControlRequest: async (request) => {
+        requested.push(request);
+        return { success: true, userMessage: 'stopped' };
+      },
+    });
+
+    await manager.registerCloudDevice({ name: 'Device' });
+    const socket = FakeWebSocket.instances[0];
+    socket.emit('open');
+    socket.emit('message', {
+      data: JSON.stringify({
+        message: {
+          type: 'app_control_requested',
+          request_id: 201,
+          action: 'stop_app',
+          app_id: 'finance-os',
+          requested_by_device_id: 91,
+        },
+      }),
+    });
+    await waitFor(() => reports.length === 2);
+    socket.emit('message', {
+      data: JSON.stringify({
+        message: {
+          type: 'app_control_requested',
+          request_id: 202,
+          action: 'bad_action',
+          app_id: 'finance-os',
+        },
+      }),
+    });
+    await waitFor(() => reports.length === 3);
+
+    assert.deepEqual(requested, [{
+      requestId: '201',
+      appId: 'finance-os',
+      action: 'stop_app',
+      requestedByDeviceId: 91,
+    }]);
+    assert.deepEqual(reports.map((report) => report.status), ['preparing', 'done', 'error']);
+    assert.equal(reports[2].technicalCode, 'app_control_request_invalid');
+    manager.stop();
   });
 });
 
@@ -181,7 +505,7 @@ test('CloudDeviceManager tolerates malformed socket frames, subscription rejecti
         };
       },
       async listDevices() {
-        return [{ id: 9, deviceUid: 'uid', name: 'Device', platform: 'darwin_arm64', paired: true, online: true, installedApps: [] }];
+        return [{ id: 9, deviceUid: 'uid', name: 'Device', kind: 'desktop', platform: 'darwin_arm64', paired: true, online: true, installedApps: [] }];
       },
       async createDevicePairingCode() {
         throw new Error('pairing_denied');
@@ -199,7 +523,7 @@ test('CloudDeviceManager tolerates malformed socket frames, subscription rejecti
       onAuthenticationInvalid: async (code) => invalidAuthCodes.push(code),
     });
 
-    await manager.start();
+    await manager.registerCloudDevice({ name: 'Device' });
     const socket = FakeWebSocket.instances[0];
     assert.ok(socket.url.startsWith('ws://cloud.test/cable?'));
     socket.emit('open');
@@ -220,13 +544,13 @@ test('CloudDeviceManager tolerates malformed socket frames, subscription rejecti
     await waitFor(() => socket.closed);
     assert.equal((await manager.getState()).connected, false);
 
-	    await manager.start();
-	    const staleSocket = FakeWebSocket.instances.at(-1);
-	    manager.stop();
-	    staleSocket.emit('open');
-	    staleSocket.emit('message', { data: JSON.stringify({ type: 'ping' }) });
-	    manager.sendHeartbeat('stale-identifier');
-	    assert.equal(staleSocket.closed, true);
+      await manager.registerCloudDevice({ name: 'Device' });
+      const staleSocket = FakeWebSocket.instances.at(-1);
+      manager.stop();
+      staleSocket.emit('open');
+      staleSocket.emit('message', { data: JSON.stringify({ type: 'ping' }) });
+      manager.sendHeartbeat('stale-identifier');
+      assert.equal(staleSocket.closed, true);
 
     const authError = new Error('devices_register_failed_401');
     const authManager = new CloudDeviceManager({
@@ -243,7 +567,7 @@ test('CloudDeviceManager tolerates malformed socket frames, subscription rejecti
       getInstalledApps: () => [],
       onAuthenticationInvalid: async (code) => invalidAuthCodes.push(code),
     });
-    await authManager.start();
+    await authManager.registerCloudDevice({ name: 'Device' });
     assert.equal((await authManager.getState()).technicalCode, 'devices_register_failed_401');
     assert.ok(invalidAuthCodes.includes('devices_register_failed_401'));
   });
@@ -275,7 +599,7 @@ test('CloudDeviceManager reconnects when an open socket stops receiving cloud ac
         };
       },
       async listDevices() {
-        return [{ id: 11, deviceUid: 'uid', name: 'Device', platform: 'darwin_arm64', paired: true, online: true, installedApps: [] }];
+        return [{ id: 11, deviceUid: 'uid', name: 'Device', kind: 'desktop', platform: 'darwin_arm64', paired: true, online: true, installedApps: [] }];
       },
     };
     const manager = new CloudDeviceManager({
@@ -292,7 +616,7 @@ test('CloudDeviceManager reconnects when an open socket stops receiving cloud ac
     });
 
     try {
-      await manager.start();
+      await manager.registerCloudDevice({ name: 'Device' });
       const socket = FakeWebSocket.instances[0];
       socket.emit('open');
       socket.emit('message', {
@@ -351,7 +675,7 @@ test('CloudDeviceManager socket monitor handles stale generations and closed soc
         };
       },
       async listDevices() {
-        return [{ id: 17, deviceUid: 'uid', name: 'Device', platform: 'darwin_arm64', paired: true, online: true, installedApps: [] }];
+        return [{ id: 17, deviceUid: 'uid', name: 'Device', kind: 'desktop', platform: 'darwin_arm64', paired: true, online: true, installedApps: [] }];
       },
     };
     const manager = new CloudDeviceManager({
@@ -365,7 +689,7 @@ test('CloudDeviceManager socket monitor handles stale generations and closed soc
       reconnectDelayMs: 100_000,
     });
 
-    await manager.start();
+    await manager.registerCloudDevice({ name: 'Device' });
     const socket = FakeWebSocket.instances[0];
     socket.emit('open');
     const monitorCallback = intervalCallbacks[0];
@@ -386,31 +710,31 @@ test('CloudDeviceManager socket monitor handles stale generations and closed soc
     manager.ensureSocketHealth(999);
 
     intervalCallbacks.length = 0;
-    await manager.start();
+    await manager.registerCloudDevice({ name: 'Device' });
     const healthSocket = FakeWebSocket.instances.at(-1);
     healthSocket.emit('open');
     healthSocket.readyState = 0;
-    await manager.start();
+    await manager.registerCloudDevice({ name: 'Device' });
     assert.equal(healthSocket.closed, true);
     manager.stop();
 
     intervalCallbacks.length = 0;
-    await manager.start();
+    await manager.registerCloudDevice({ name: 'Device' });
     const staleHealthSocket = FakeWebSocket.instances.at(-1);
     staleHealthSocket.emit('open');
     manager.lastSocketActivityAt = Date.now() - 100;
     manager.options.socketStaleAfterMs = 1;
-    await manager.start();
+    await manager.registerCloudDevice({ name: 'Device' });
     assert.equal(staleHealthSocket.closed, true);
     manager.stop();
 
     intervalCallbacks.length = 0;
-    await manager.start();
+    await manager.registerCloudDevice({ name: 'Device' });
     const staleGenerationSocket = FakeWebSocket.instances.at(-1);
     staleGenerationSocket.emit('open');
     staleGenerationSocket.emit('open');
     const staleGenerationMonitorCallback = intervalCallbacks[0];
-    await manager.start();
+    await manager.registerCloudDevice({ name: 'Device' });
     staleGenerationSocket.emit('error');
     staleGenerationMonitorCallback();
     manager.stop();
@@ -469,9 +793,10 @@ test('CloudDeviceManager supports unauthenticated idle state and plaintext devic
     assert.equal(idleState.connected, false);
     assert.deepEqual(idleState.devices, []);
     assert.equal(idleState.currentDevice, undefined);
+    assert.equal(idleState.registrationRequired, false);
 
     token = 'session-token';
-    await manager.start();
+    await manager.registerCloudDevice({ name: 'Device' });
     const stored = JSON.parse(await fs.readFile(filePath, 'utf8'));
     assert.equal(stored.encrypted, undefined);
     assert.equal(typeof stored.deviceSecret, 'string');
@@ -522,8 +847,8 @@ test('CloudDeviceManager reloads encrypted stored devices and resets state when 
         },
         async listDevices() {
           return [
-            { id: 31, deviceUid: 'stored-device', name: 'Stored Mac', platform: 'darwin_arm64', paired: true, online: true, installedApps: [] },
-            { id: 32, deviceUid: 'new-device', name: 'Other Mac', platform: 'darwin_arm64', paired: true, online: true, installedApps: [] },
+            { id: 31, deviceUid: 'stored-device', name: 'Stored Mac', kind: 'desktop', platform: 'darwin_arm64', paired: true, online: true, installedApps: [] },
+            { id: 32, deviceUid: 'new-device', name: 'Other Mac', kind: 'desktop', platform: 'darwin_arm64', paired: true, online: true, installedApps: [] },
           ];
         },
         async createDevicePairingCode() {},
@@ -533,27 +858,31 @@ test('CloudDeviceManager reloads encrypted stored devices and resets state when 
       getInstalledApps: () => [],
     });
 
-    await manager.start();
+    await manager.registerCloudDevice({ name: 'Device' });
     assert.equal(registeredInputs[0].deviceUid, 'stored-device');
     assert.equal(registeredInputs[0].deviceSecret, 'stored-secret');
     assert.equal((await manager.getState()).currentDevice.id, 31);
 
     account = 'other@example.com';
     const switched = await manager.getState();
-    assert.equal(switched.currentDevice.id, 32);
+    assert.equal(switched.currentDevice, undefined);
+    assert.equal(switched.registrationRequired, true);
+    await manager.registerCloudDevice({ name: 'Device' });
+    assert.equal((await manager.getState()).currentDevice.id, 32);
     assert.equal(registeredInputs.at(-1).deviceSecret.length, 64);
     assert.equal(FakeWebSocket.instances.at(-2).closed, true);
 
-    await manager.start();
+    await manager.registerCloudDevice({ name: 'Device' });
     const socketBeforeStartSwitch = FakeWebSocket.instances.at(-1);
     account = 'third@example.com';
-    await manager.start();
+    await manager.registerCloudDevice({ name: 'Device' });
     assert.equal(socketBeforeStartSwitch.closed, true);
 
     const socketBeforePairingSwitch = FakeWebSocket.instances.at(-1);
     account = 'fourth@example.com';
     const pairedAfterSwitch = await manager.generatePairingCode();
-    assert.equal(pairedAfterSwitch.success, true);
+    assert.equal(pairedAfterSwitch.success, false);
+    assert.equal(pairedAfterSwitch.technicalCode, 'cloud_device_not_registered');
     assert.equal(socketBeforePairingSwitch.closed, true);
     manager.stop();
   });
@@ -585,7 +914,7 @@ test('CloudDeviceManager covers backend absence, fallback errors, optional pairi
       getCloudIdentity: async () => ({ publicKey: 'public', keyFingerprint: 'fingerprint' }),
       getInstalledApps: () => [],
     });
-    await missingClient.start();
+    await missingClient.registerCloudDevice({ name: 'Device' });
     missingClientToken = undefined;
     assert.equal((await missingClient.getState()).technicalCode, 'backend_client_missing');
 
@@ -603,9 +932,9 @@ test('CloudDeviceManager covers backend absence, fallback errors, optional pairi
       getCloudIdentity: async () => ({ publicKey: 'public', keyFingerprint: 'fingerprint' }),
       getInstalledApps: () => [],
     });
-    await thrownString.start();
+    await thrownString.registerCloudDevice({ name: 'Device' });
     thrownStringToken = undefined;
-    assert.equal((await thrownString.getState()).technicalCode, 'cloud_device_start_failed');
+    assert.equal((await thrownString.getState()).technicalCode, 'cloud_device_register_failed');
 
     let nonStringCodeToken = 'session-token';
     const nonStringCodeError = new Error('non_string_code');
@@ -623,7 +952,7 @@ test('CloudDeviceManager covers backend absence, fallback errors, optional pairi
       getCloudIdentity: async () => ({ publicKey: 'public', keyFingerprint: 'fingerprint' }),
       getInstalledApps: () => [],
     });
-    await nonStringCode.start();
+    await nonStringCode.registerCloudDevice({ name: 'Device' });
     nonStringCodeToken = undefined;
     assert.equal((await nonStringCode.getState()).technicalCode, 'non_string_code');
 
@@ -656,7 +985,7 @@ test('CloudDeviceManager covers backend absence, fallback errors, optional pairi
       getCloudIdentity: async () => ({ publicKey: 'public', keyFingerprint: 'fingerprint' }),
       getInstalledApps: () => [],
     });
-    await missingListClient.start();
+    await missingListClient.registerCloudDevice({ name: 'Device' });
     missingListToken = undefined;
     assert.equal((await missingListClient.getState()).currentDevice.id, 42);
 
@@ -687,7 +1016,7 @@ test('CloudDeviceManager covers backend absence, fallback errors, optional pairi
       getInstalledApps: () => [],
     });
 
-    await reconnecting.start();
+    await reconnecting.registerCloudDevice({ name: 'Device' });
     const socket = FakeWebSocket.instances.at(-1);
     socket.emit('open');
     socket.emit('message', {
@@ -732,7 +1061,7 @@ test('CloudDeviceManager covers backend absence, fallback errors, optional pairi
       getCloudIdentity: async () => ({ publicKey: 'public', keyFingerprint: 'fingerprint' }),
       getInstalledApps: () => [],
     });
-    await staleDuringRegister.start();
+    await staleDuringRegister.registerCloudDevice({ name: 'Device' });
     assert.equal(FakeWebSocket.instances.length, staleRegisterSocketCount);
 
     let staleDuringRefresh;
@@ -762,7 +1091,7 @@ test('CloudDeviceManager covers backend absence, fallback errors, optional pairi
       getCloudIdentity: async () => ({ publicKey: 'public', keyFingerprint: 'fingerprint' }),
       getInstalledApps: () => [],
     });
-    await staleDuringRefresh.start();
+    await staleDuringRefresh.registerCloudDevice({ name: 'Device' });
     assert.equal(FakeWebSocket.instances.length, staleRefreshSocketCount);
   });
 });

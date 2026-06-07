@@ -107,6 +107,54 @@ const normalizeRegistryRuntimeVersions = (input: AppRegistry): { registry: AppRe
   return { registry: { apps }, changed };
 };
 
+const readManifestAccessFlags = async (installDir: string): Promise<{
+  localNetworkShareSupported: boolean;
+  remoteTunnelSupported: boolean;
+} | null> => {
+  try {
+    const raw = await fs.readFile(path.join(installDir, 'manifest.json'), 'utf8');
+    const manifest = JSON.parse(raw) as unknown;
+    if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) {
+      return null;
+    }
+    const record = manifest as { localNetworkShare?: unknown; remoteTunnel?: unknown };
+    return {
+      localNetworkShareSupported: record.localNetworkShare === true,
+      remoteTunnelSupported: record.remoteTunnel === true,
+    };
+  } catch {
+    return null;
+  }
+};
+
+const reconcileRegistryAccessFlags = async (input: AppRegistry): Promise<{ registry: AppRegistry; changed: boolean }> => {
+  let changed = false;
+  const apps = Object.fromEntries(await Promise.all(
+    Object.entries(input.apps).map(async ([appId, record]) => {
+      if (typeof record.installDir !== 'string' || !record.installDir.trim()) {
+        return [appId, record] as const;
+      }
+      const flags = await readManifestAccessFlags(record.installDir);
+      if (!flags) {
+        return [appId, record] as const;
+      }
+      if (
+        record.localNetworkShareSupported === flags.localNetworkShareSupported &&
+        record.remoteTunnelSupported === flags.remoteTunnelSupported
+      ) {
+        return [appId, record] as const;
+      }
+      changed = true;
+      return [appId, {
+        ...record,
+        localNetworkShareSupported: flags.localNetworkShareSupported,
+        remoteTunnelSupported: flags.remoteTunnelSupported,
+      }] as const;
+    }),
+  ));
+  return { registry: { apps }, changed };
+};
+
 const isPathInside = (candidate: string, root: string): boolean => {
   const relativePath = path.relative(path.resolve(root), path.resolve(candidate));
   return relativePath === '' || (!relativePath.startsWith('..') && !path.isAbsolute(relativePath));
@@ -156,9 +204,10 @@ const loadRegistry = async (): Promise<void> => {
     if (loadedRegistry) {
       const normalized = normalizeRegistryRuntimeVersions(loadedRegistry);
       const filtered = filterRegistryForCurrentEnvironment(normalized.registry);
-      registry = filtered.registry;
+      const reconciled = await reconcileRegistryAccessFlags(filtered.registry);
+      registry = reconciled.registry;
       setRegistry?.(registry);
-      if (normalized.changed || filtered.changed) {
+      if (normalized.changed || filtered.changed || reconciled.changed) {
         await saveRegistry();
       }
       return;
@@ -273,5 +322,5 @@ const ensureCatalogStatuses = (): void => {
   setCatalogApps?.(catalogApps);
 };
 
-  return { startDevCatalogService, parseRegistry, normalizeInstalledAppRecord, normalizeRegistryRuntimeVersions, filterRegistryForCurrentEnvironment, loadRegistryFile, syncDirectory, loadRegistry, saveRegistry, loadCloudSyncSettings, saveCloudSyncSettings, setAppAutoSyncSetting, canUseCloudDataSync, upsertInstalledRecord, removeInstalledRecord, ensureCatalogStatuses };
+  return { startDevCatalogService, parseRegistry, normalizeInstalledAppRecord, normalizeRegistryRuntimeVersions, reconcileRegistryAccessFlags, filterRegistryForCurrentEnvironment, loadRegistryFile, syncDirectory, loadRegistry, saveRegistry, loadCloudSyncSettings, saveCloudSyncSettings, setAppAutoSyncSetting, canUseCloudDataSync, upsertInstalledRecord, removeInstalledRecord, ensureCatalogStatuses };
 };

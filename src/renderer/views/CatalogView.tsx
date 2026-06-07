@@ -3,6 +3,7 @@ import type { AppCategory, CatalogApp, InstallAppResult } from '@shared/types';
 import type { AppDictionary } from '@renderer/i18n';
 import { AppCard } from '@renderer/components/AppCard';
 import { AppsGrid } from '@renderer/components/AppsGrid';
+import { appExecutionTooltip } from '@renderer/app-execution-labels';
 
 interface CatalogViewProps {
   apps: CatalogApp[];
@@ -143,20 +144,9 @@ export function CatalogView({
             const remoteNetworkState = app.remoteNetworkShare?.state;
             const remoteNetworkPreparing = remoteNetworkState === 'preparing';
             const isOpening = (primaryAction === 'open' && openingAppIds.has(app.id)) || remoteNetworkPreparing;
-            const localNetworkRunning = Boolean(app.localNetworkShare?.connectedAt || app.localNetworkShare?.active);
-            const statusIndicatorLabel = remoteNetworkState === 'preparing'
-              ? t.remoteNetwork.preparingBadge
-              : remoteNetworkState === 'waiting_for_session'
-                ? t.remoteNetwork.waitingBadge
-              : remoteNetworkState === 'connected'
-                ? t.remoteNetwork.connectedBadge
-              : remoteNetworkState === 'error'
-                ? t.remoteNetwork.errorBadge
-              : localNetworkRunning
-              ? t.localNetwork.runningTooltip
-              : app.status === 'running'
-                ? 'running'
-                : undefined;
+            const statusIndicatorLabel = appExecutionTooltip(app, t, {
+              startingInForger: primaryAction === 'open' && openingAppIds.has(app.id),
+            });
             const canShareLocalNetwork = primaryAction === 'open'
               && app.localNetworkShareSupported === true;
             const canShareRemoteNetwork = primaryAction === 'open'

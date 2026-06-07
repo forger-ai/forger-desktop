@@ -2,6 +2,7 @@ import type {
   CloudAppShareKind,
   CloudAppShareMessageDetail,
   CloudDeviceSummary,
+  MobilePairingRequestSummary,
   CloudFriendship,
   CloudFriendUser,
   CloudMessage,
@@ -31,11 +32,22 @@ export const normalizeCloudDevice = (value: unknown): CloudDeviceSummary | undef
         if (!appId) {
           return undefined;
         }
-        return {
+        const normalized = {
           id: appId,
           name: typeof app.name === 'string' ? app.name : appId,
           status: typeof app.status === 'string' ? app.status : 'installed',
           version: typeof app.version === 'string' ? app.version : undefined,
+          localNetworkShareSupported: app.local_network_share_supported === true || app.localNetworkShareSupported === true,
+          remoteTunnelSupported: app.remote_tunnel_supported === true || app.remoteTunnelSupported === true,
+        };
+        const executionPhase = normalizeExecutionPhase(app.execution_phase ?? app.executionPhase);
+        const executionMode = normalizeExecutionMode(app.execution_mode ?? app.executionMode);
+        const connectMode = normalizeConnectMode(app.connect_mode ?? app.connectMode);
+        return {
+          ...normalized,
+          ...(executionPhase !== undefined ? { executionPhase } : {}),
+          ...(executionMode !== undefined ? { executionMode } : {}),
+          ...(connectMode !== undefined ? { connectMode } : {}),
         };
       })
       .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
@@ -44,6 +56,7 @@ export const normalizeCloudDevice = (value: unknown): CloudDeviceSummary | undef
     id,
     deviceUid: typeof record.device_uid === 'string' ? record.device_uid : '',
     name: typeof record.name === 'string' ? record.name : 'Forger Desktop',
+    kind: record.kind === 'mobile' || record.device_kind === 'mobile' ? 'mobile' : 'desktop',
     platform: typeof record.platform === 'string' ? record.platform : undefined,
     publicKey: typeof record.public_key === 'string' ? record.public_key : undefined,
     keyFingerprint: typeof record.key_fingerprint === 'string' ? record.key_fingerprint : undefined,
@@ -51,6 +64,53 @@ export const normalizeCloudDevice = (value: unknown): CloudDeviceSummary | undef
     online: Boolean(record.online),
     lastSeenAt: typeof record.last_seen_at === 'string' ? record.last_seen_at : undefined,
     installedApps: apps,
+  };
+};
+
+const normalizeExecutionPhase = (value: unknown): CloudDeviceSummary['installedApps'][number]['executionPhase'] =>
+  value === 'stopped' || value === 'starting' || value === 'running' || value === 'error'
+    ? value
+    : undefined;
+
+const normalizeExecutionMode = (value: unknown): CloudDeviceSummary['installedApps'][number]['executionMode'] =>
+  value === 'forger' || value === 'local_network' || value === 'remote_tunnel'
+    ? value
+    : value === null
+      ? null
+      : undefined;
+
+const normalizeConnectMode = (value: unknown): CloudDeviceSummary['installedApps'][number]['connectMode'] =>
+  value === 'local_network' || value === 'remote_tunnel'
+    ? value
+    : value === null
+      ? null
+      : undefined;
+
+export const normalizeMobilePairingRequest = (value: unknown): MobilePairingRequestSummary | undefined => {
+  if (!value || typeof value !== 'object') return undefined;
+  const record = value as Record<string, unknown>;
+  const id = Number(record.id);
+  const mobileDeviceId = Number(record.mobile_device_id);
+  const desktopDeviceId = Number(record.desktop_device_id);
+  const mobileDevice = normalizeCloudDevice(record.mobile_device);
+  const desktopDevice = normalizeCloudDevice(record.desktop_device);
+  const status = typeof record.status === 'string' && ['pending', 'accepted', 'rejected', 'confirmed', 'expired'].includes(record.status)
+    ? record.status as MobilePairingRequestSummary['status']
+    : 'pending';
+  const expiresAt = typeof record.expires_at === 'string' ? record.expires_at : '';
+  if (!Number.isFinite(id) || !Number.isFinite(mobileDeviceId) || !Number.isFinite(desktopDeviceId) || !mobileDevice || !desktopDevice || !expiresAt) {
+    return undefined;
+  }
+  return {
+    id,
+    mobileDeviceId,
+    desktopDeviceId,
+    status,
+    code: typeof record.code === 'string' ? record.code : undefined,
+    codeExpiresAt: typeof record.code_expires_at === 'string' ? record.code_expires_at : undefined,
+    expiresAt,
+    mobileDevice,
+    desktopDevice,
   };
 };
 

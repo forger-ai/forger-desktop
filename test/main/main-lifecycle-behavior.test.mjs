@@ -325,6 +325,10 @@ const createLifecycleHarness = (overrides = {}) => {
     },
     splitManifestCommand: () => [],
     startDevCatalogService: async () => undefined,
+    startRemoteNetworkShare: async (appId) => {
+      calls.terminated.push(['remote-request', appId]);
+      return { success: true, status: { active: true, appId, state: 'waiting_for_session' } };
+    },
     state,
     stopInstalledApp: async () => ({}),
     stopRemoteNetworkShareSession: async (sessionId) => {
@@ -383,6 +387,12 @@ test('main lifecycle initializes services, wires task status through provider-ag
   assert.equal(state.cloudDeviceManager.options.token(), 'token-1');
   assert.deepEqual(state.cloudDeviceManager.options.getCloudIdentity(), {});
   assert.deepEqual(state.cloudDeviceManager.options.getInstalledApps(), [state.registry.apps['finance-os']]);
+  const remoteRequestResult = await state.cloudDeviceManager.options.handleRemoteSessionRequest({
+    requestId: 'request-1',
+    appId: 'finance-os',
+  });
+  assert.equal(remoteRequestResult.success, true);
+  assert.deepEqual(calls.terminated.at(-1), ['remote-request', 'finance-os']);
   await state.cloudDeviceManager.options.handleFriendshipEvent({ type: 'noop' });
   await state.cloudDeviceManager.options.handleFriendshipEvent({ type: 'remote_tunnel_close', session_id: 'session-1' });
   await state.cloudDeviceManager.options.onAuthenticationInvalid('cloud_session_expired');

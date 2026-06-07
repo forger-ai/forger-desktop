@@ -85,7 +85,10 @@ export interface ForgerDesktopApi {
   onForgerAccountUpdated: (listener: (event: ForgerAccountSession & { userMessage?: string; technicalCode?: string }) => void) => () => void;
   getCloudStorageUsage: () => Promise<CloudStorageUsage | null>;
   getCloudDevices: () => Promise<CloudDevicesState>;
+  registerCloudDevice: (input: { name: string }) => Promise<CloudDevicesState & { success: boolean }>;
   generateDevicePairingCode: () => Promise<CloudDevicesState & { success: boolean }>;
+  acceptMobilePairingRequest: (requestId: number) => Promise<CloudDevicesState & { success: boolean }>;
+  rejectMobilePairingRequest: (requestId: number) => Promise<CloudDevicesState & { success: boolean }>;
   listFriends: () => Promise<CloudFriendship[]>;
   listMySocialApps: () => Promise<SocialUserAppList>;
   uploadSocialApp: (input: SocialUserAppUploadInput) => Promise<{ success: boolean; app?: SocialUserApp; share?: SocialUserAppShare; userMessage?: string; technicalCode?: string }>;

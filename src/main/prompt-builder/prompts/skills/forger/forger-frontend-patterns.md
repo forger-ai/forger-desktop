@@ -13,10 +13,12 @@ description: Use when creating or changing Forger app frontend code, UX, routed 
 ## Design Read
 
 - Before designing, read the app purpose, audience, workflow, existing app state, visual direction, data density, privacy boundary, and mobile expectation.
-- TasteSkill-inspired short rules: "Read the Room Before Anything Else"; "Anti-Default Discipline"; "The audience picks the aesthetic, not your taste."
-- State the design read internally before coding: app kind, audience, workflow mood, density, and visual language.
-- Do not default to generic AI-purple gradients, decorative card grids, centered hero layouts, glass everywhere, identical feature cards, or status dots on every row.
-- Choose visual dials deliberately: design variance, motion intensity, and visual density. Operational apps usually need higher density, clearer hierarchy, and fewer decorative surfaces than marketing pages.
+- Infer the app kind, target person, daily workflow, privacy sensitivity, expected data density, mobile use, and visual direction before choosing layout, color, components, or motion.
+- Choose the aesthetic from the job the app does and the person using it. A private operations app, a personal tracker, a review workflow, and a social sharing surface should not all get the same layout rhythm or visual polish.
+- State the design read internally before coding: app kind, audience, workflow mood, density, visual language, and which defaults you are intentionally avoiding.
+- Do not default to generic AI-purple gradients, decorative card grids, centered hero layouts, glass everywhere, identical feature rows, repeated eyebrows, badges for every attribute, or status dots on every row.
+- Choose visual dials deliberately: design variance, motion intensity, and visual density. Operational apps usually need higher density, clearer hierarchy, visible workflow state, and fewer decorative surfaces than marketing pages.
+- Lock consistency early: one radius logic, one accent logic, one density level, one icon family, one hierarchy system, and complete loading, empty, error, success, saving, disabled, and stale states.
 
 ## Routes And Screen Structure
 
@@ -30,18 +32,21 @@ description: Use when creating or changing Forger app frontend code, UX, routed 
 
 ## Component-First shadcn
 
-- Before writing custom JSX, list the existing components available in `frontend/src/components/ui`, `components.json`, package dependencies, and local shared components.
-- Prefer existing shadcn primitives and local wrappers. Use and modify copied shadcn components as the normal pattern.
-- If a needed primitive is missing, add the matching shadcn component through the app package manager and shadcn CLI or registry, then review the copied code before using it.
+- Before writing custom JSX, identify the behavior needed: form field, date input, time input, select, combobox, dialog, sheet, drawer, dropdown, popover, tabs, tooltip, accordion, command menu, toast, table, badge, alert, skeleton, empty state, card, separator, or navigation control.
+- First list local components already implemented in `frontend/src/components/ui`, `components.json`, `frontend/package.json`, lockfile, local shared components, and existing `@radix-ui/*` dependencies.
+- Then list components available from the online shadcn registry, because a new or local app workspace may not have every useful component copied yet: `cd "$APP_ROOT/frontend" && npm exec --yes shadcn@latest -- list @shadcn --limit 200 --cwd .`.
+- Search the registry for the concrete need before deciding it is unavailable: `cd "$APP_ROOT/frontend" && npm exec --yes shadcn@latest -- search @shadcn --query "date" --limit 50 --cwd .`. Use targeted queries such as `date`, `time`, `calendar`, `dialog`, `popover`, `select`, `combobox`, `form`, `table`, or `command`.
+- Prefer existing app primitives from `@/components/ui/*` first; if the primitive is missing but exists in the registry, install or copy it with `cd "$APP_ROOT/frontend" && npm exec --yes shadcn@latest -- add <component> --cwd .`, then review the copied code before using it.
 - Keep direct `@radix-ui/*` imports inside reusable `frontend/src/components/ui/*` primitives. Feature views import local wrappers from `@/components/ui/*`.
-- Do not hand-roll selects, menus, dialogs, popovers, drawers, focus traps, keyboard navigation, toasts, tooltips, or date inputs when shadcn/Radix covers the behavior.
-- Only create custom UI when local components and shadcn/Radix cannot cover the concrete behavior. Prefer composition over new primitives.
+- Forms must prefer shadcn/Radix for complex controls. For date and time fields, check `calendar`, `popover`, `input`, `select`, `form`, `dialog`, `sheet`, `command`, and related dependencies such as `react-day-picker` before building a custom control.
+- Do not hand-roll selects, menus, dialogs, popovers, drawers, focus traps, keyboard navigation, toasts, tooltips, date inputs, time inputs, or calendars when local components or online shadcn/Radix components cover the behavior.
+- Only create custom UI when local primitives and the online shadcn/Radix registry cannot cover the concrete need. Prefer composition over new primitives and keep custom behavior narrow.
 
 ## Anti-Overload Rules
 
 - Pills and badges are for compact status, category, priority, count, or permission labels. Do not turn ordinary attributes into pills.
 - Do not use decorative status dots, repeated colored indicators, or badge clusters unless each indicator communicates real semantic state.
-- Cards are for repeated items, focused summaries, isolated tools, or one coherent decision surface. TasteSkill-inspired rule: "Use cards ONLY when elevation communicates real hierarchy."
+- Cards are for repeated items, focused summaries, isolated tools, or one coherent decision surface. If a surface does not need separation as a real unit of work, decision, summary, or repeated item, use rows, sections, tables, dividers, labels, headings, spacing, or split panes instead.
 - Do not put cards inside cards. If hierarchy is unclear, use headings, sections, spacing, dividers, tabs, accordions, description lists, tables, or split panes.
 - Do not use Card, Sheet, Dialog, or framed surfaces as generic padding containers for whole pages.
 - Use plain rows, sections, tables, description lists, and grouped forms for readable operational data. Dense views should stay scannable, not decorative.
@@ -68,6 +73,7 @@ description: Use when creating or changing Forger app frontend code, UX, routed 
 - Review the app as a private local tool, not a public marketing site. Ignore SEO, signup funnels, public analytics, remote stock imagery, and SaaS landing-page assumptions unless the app explicitly needs them.
 - Check that navigation remains visible while long content scrolls.
 - Check that dashboards route to work views instead of becoming the whole app.
-- Check that shadcn components were listed and reused before custom controls were created.
+- Check that local shadcn components and the online shadcn registry were listed before custom controls were created.
+- Check that forms, date inputs, time inputs, dialogs, selects, popovers, and calendars use shadcn/Radix components when available locally or online.
 - Check that visible copy is localized when the app has i18n and avoids implementation terms unless the person asks for technical detail.
 - Check that no generic AI-default visual pattern, unnecessary pill, nested card, hidden primary action, stale data state, or mobile overlap remains.

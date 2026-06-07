@@ -356,7 +356,11 @@ export const registerMainLifecycle = (deps: unknown) => {
     shell,
     splitManifestCommand,
     startDevCatalogService,
+    startLocalNetworkShare,
+    startRemoteNetworkShare,
     state,
+    stopLocalNetworkShare,
+    stopRemoteNetworkShare,
     stopRemoteNetworkShareSession,
     stopInstalledApp,
     switchForgerAccountSession,
@@ -439,6 +443,53 @@ export const registerMainLifecycle = (deps: unknown) => {
     token: () => state.forgerAccount.token,
     getCloudIdentity: () => getCloudIdentityStore().getPublicRegistration(),
     getInstalledApps: () => Object.values(state.registry.apps).map(toAppSummary),
+    handleRemoteSessionRequest: async (request: { appId: string; requestId: string }) => {
+      await appendInstallLog('remote_network_share:cloud_request', {
+        appId: request.appId,
+        requestId: request.requestId,
+      });
+      return await startRemoteNetworkShare(request.appId);
+    },
+    handleAppAccessRequest: async (request: { appId: string; requestId: string; mode: string }) => {
+      await appendInstallLog('app_access:cloud_request', {
+        appId: request.appId,
+        requestId: request.requestId,
+        mode: request.mode,
+      });
+      if (request.mode === 'local_network') {
+        return await startLocalNetworkShare(request.appId);
+      }
+      return await startRemoteNetworkShare(request.appId);
+    },
+    handleAppControlRequest: async (request: { appId: string; requestId: string; action: string }) => {
+      await appendInstallLog('app_control:cloud_request', {
+        appId: request.appId,
+        requestId: request.requestId,
+        action: request.action,
+      });
+      if (request.action !== 'stop_app') {
+        return {
+          success: false,
+          userMessage: 'Accion no soportada.',
+          technicalCode: 'app_control_action_unsupported',
+        };
+      }
+      await stopLocalNetworkShare(request.appId).catch((error) => {
+        void appendInstallLog('app_control:local_network_stop_failed', {
+          appId: request.appId,
+          requestId: request.requestId,
+          error: serializeErrorForInstallLog(error),
+        });
+      });
+      await stopRemoteNetworkShare(request.appId).catch((error) => {
+        void appendInstallLog('app_control:remote_network_stop_failed', {
+          appId: request.appId,
+          requestId: request.requestId,
+          error: serializeErrorForInstallLog(error),
+        });
+      });
+      return await stopInstalledApp(request.appId);
+    },
     handleFriendshipEvent: async (event: unknown) => {
       if (isRemoteTunnelCloseEvent(event)) {
         await stopRemoteNetworkShareSession(event.session_id).catch((error) => {

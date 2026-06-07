@@ -1,6 +1,9 @@
 import type { AppToolDeclaration } from './tools';
 
 export type AppStatus = 'not_installed' | 'installing' | 'installed' | 'running' | 'error' | 'conflict';
+export type AppExecutionPhase = 'stopped' | 'starting' | 'running' | 'error';
+export type AppExecutionMode = 'forger' | 'local_network' | 'remote_tunnel';
+export type AppConnectMode = Extract<AppExecutionMode, 'local_network' | 'remote_tunnel'>;
 export type CatalogPublicationStatus = 'draft' | 'coming' | 'beta' | 'production';
 
 export type AppCategory = 'finanzas' | 'hogar' | 'salud' | 'productividad' | 'developer_tools';
@@ -29,6 +32,9 @@ export interface AppSummary {
   remoteTunnelSupported?: boolean;
   localNetworkShare?: import('./runtime').LocalNetworkShareStatus;
   remoteNetworkShare?: import('./runtime').RemoteNetworkShareStatus;
+  executionPhase?: AppExecutionPhase;
+  executionMode?: AppExecutionMode | null;
+  connectMode?: AppConnectMode | null;
 }
 
 export interface VersionChangelog {

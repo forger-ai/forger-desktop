@@ -113,7 +113,10 @@ export class RemoteNetworkShareManager {
     let websocketServer: WebSocketServer | undefined;
     let tunnel: RemoteTunnel | undefined;
     try {
-      await this.options.appendInstallLog('remote_network_share:create_session:start', { appId });
+      await this.options.appendInstallLog('remote_network_share:create_session:start', {
+        appId,
+        backendBaseUrlOrigin: sanitizeUrlOrigin(this.options.backendBaseUrl),
+      });
       const created = await client.createRemoteTunnelSession({ deviceId, appId });
       sessionRowId = Number(created.id);
       sessionId = String(created.session_id || '');
@@ -121,6 +124,13 @@ export class RemoteNetworkShareManager {
       if (!Number.isFinite(sessionRowId) || !sessionId || !handshakeUrl) {
         throw new Error('remote_tunnel_session_payload_invalid');
       }
+      const sessionIdPrefix = sanitizeSessionIdPrefix(sessionId);
+      await this.options.appendInstallLog('remote_network_share:create_session:ready', {
+        appId,
+        sessionIdPrefix,
+        backendBaseUrlOrigin: sanitizeUrlOrigin(this.options.backendBaseUrl),
+        handshakeUrl: sanitizeUrlDiagnostic(handshakeUrl, { sessionId }),
+      });
       const crypto = new RemoteSessionCrypto();
       websocketServer = new WebSocketServer({ noServer: true, maxPayload: MAX_WS_FRAME_BYTES });
       server = http.createServer((request, response) => {
@@ -129,18 +139,28 @@ export class RemoteNetworkShareManager {
       server.on('upgrade', (request, socket, head) => {
         void this.handleRealtimeUpgrade(appId, crypto, websocketServer!, request, socket, head);
       });
-      await this.options.appendInstallLog('remote_network_share:local_rpc:start', { appId, sessionId });
+      await this.options.appendInstallLog('remote_network_share:local_rpc:start', { appId, sessionIdPrefix });
       const port = await listenLocal(server);
-      await this.options.appendInstallLog('remote_network_share:tunnel:start', { appId, sessionId, port });
+      await this.options.appendInstallLog('remote_network_share:tunnel:start', { appId, sessionIdPrefix, port });
       tunnel = await this.provider.open({ port, appId, sessionId });
-      await this.options.appendInstallLog('remote_network_share:tunnel:ready', { appId, sessionId, tunnelUrl: tunnel.url });
+      await this.options.appendInstallLog('remote_network_share:tunnel:ready', {
+        appId,
+        sessionIdPrefix,
+        tunnelUrl: sanitizeUrlDiagnostic(tunnel.url, { sessionId }),
+      });
       const frontendDir = this.frontendDir(appId, manifest);
       const nodeVersion = this.options.normalizeNodeRuntimeVersion(this.options.requiredNodeVersionForApp(appId));
       const nodeRuntime = await this.options.ensureRuntimeInstalled('node', nodeVersion);
       if (!nodeRuntime.node || !nodeRuntime.npm) {
         throw new Error('remote_tunnel_node_runtime_missing');
       }
-      await this.options.appendInstallLog('remote_network_share:frontend_build:start', { appId, sessionId, frontendDir, nodeVersion, npmPath: nodeRuntime.npm });
+      await this.options.appendInstallLog('remote_network_share:frontend_build:start', {
+        appId,
+        sessionIdPrefix,
+        nodeVersion,
+        backendBaseUrlOrigin: sanitizeUrlOrigin(this.options.backendBaseUrl),
+        handshakeUrl: sanitizeUrlDiagnostic(handshakeUrl, { sessionId }),
+      });
       const { assets, hash } = await buildRemoteFrontend({
         frontendDir,
         sessionId,
@@ -148,8 +168,18 @@ export class RemoteNetworkShareManager {
         nodePath: nodeRuntime.node,
         npmPath: nodeRuntime.npm,
       });
-      await this.options.appendInstallLog('remote_network_share:frontend_build:ready', { appId, sessionId, assetCount: assets.length, hash });
-      await this.options.appendInstallLog('remote_network_share:upload:start', { appId, sessionId, assetCount: assets.length });
+      await this.options.appendInstallLog('remote_network_share:frontend_build:ready', {
+        appId,
+        sessionIdPrefix,
+        assetCount: assets.length,
+        frontendHashPresent: Boolean(hash),
+      });
+      await this.options.appendInstallLog('remote_network_share:upload:start', {
+        appId,
+        sessionIdPrefix,
+        assetCount: assets.length,
+        tunnelUrl: sanitizeUrlDiagnostic(tunnel.url, { sessionId }),
+      });
       const uploaded = await client.uploadRemoteTunnelFrontend({
         sessionId: sessionRowId,
         assets,
@@ -157,14 +187,19 @@ export class RemoteNetworkShareManager {
         tunnelUrl: tunnel.url,
         desktopPublicKeyJwk: crypto.desktopPublicKeyJwk(),
       });
-      await this.options.appendInstallLog('remote_network_share:upload:ready', { appId, sessionId });
+      const uploadedFrontendUrl = String(uploaded.frontend_url || created.frontend_url || '');
+      await this.options.appendInstallLog('remote_network_share:upload:ready', {
+        appId,
+        sessionIdPrefix,
+        frontendUrl: sanitizeUrlDiagnostic(uploadedFrontendUrl, { sessionId }),
+      });
       const status: RemoteNetworkShareStatus = {
         active: true,
         appId,
         state: 'waiting_for_session',
         sessionId,
         portalUrl: String(uploaded.portal_url || created.portal_url || ''),
-        frontendUrl: String(uploaded.frontend_url || created.frontend_url || ''),
+        frontendUrl: uploadedFrontendUrl,
         tunnelUrl: tunnel.url,
         connectionCount: 0,
         connections: [],
@@ -185,7 +220,12 @@ export class RemoteNetworkShareManager {
       this.pendingStatuses.delete(appId);
       this.shares.set(appId, state);
       this.emit(state);
-      await this.options.appendInstallLog('remote_network_share:started', { appId, sessionId, tunnelUrl: tunnel.url });
+      await this.options.appendInstallLog('remote_network_share:started', {
+        appId,
+        sessionIdPrefix,
+        tunnelUrl: sanitizeUrlDiagnostic(tunnel.url, { sessionId }),
+        frontendUrl: sanitizeUrlDiagnostic(status.frontendUrl, { sessionId }),
+      });
       return { success: true, status };
     } catch (error) {
       const technicalCode = error instanceof Error ? error.message : 'remote_tunnel_start_failed';
@@ -209,7 +249,11 @@ export class RemoteNetworkShareManager {
       };
       this.pendingStatuses.set(appId, status);
       this.options.emitRuntimeStatus(appId, status);
-      await this.options.appendInstallLog('remote_network_share:start_failed', { appId, sessionId, technicalCode });
+      await this.options.appendInstallLog('remote_network_share:start_failed', {
+        appId,
+        sessionIdPrefix: sanitizeSessionIdPrefix(sessionId),
+        technicalCode,
+      });
       return { success: false, technicalCode, status };
     }
 
@@ -231,7 +275,10 @@ export class RemoteNetworkShareManager {
     ]);
     const status: RemoteNetworkShareStatus = { active: false, appId, state: 'closed' };
     this.options.emitRuntimeStatus(appId, status);
-    await this.options.appendInstallLog('remote_network_share:stopped', { appId, sessionId: state.sessionId });
+    await this.options.appendInstallLog('remote_network_share:stopped', {
+      appId,
+      sessionIdPrefix: sanitizeSessionIdPrefix(state.sessionId),
+    });
     return { success: true, status };
   }
 
@@ -304,9 +351,9 @@ export class RemoteNetworkShareManager {
       const responseBody = Buffer.from(await proxied.arrayBuffer());
       await this.options.appendInstallLog('remote_network_share:rpc', {
         appId,
-        sessionId: state.sessionId,
+        sessionIdPrefix: sanitizeSessionIdPrefix(state.sessionId),
         method: payload.method,
-        path: payload.path,
+        path: sanitizeUrlDiagnostic(payload.path),
         status: proxied.status,
         durationMs: Date.now() - startedAt,
         requestBytes,
@@ -326,9 +373,9 @@ export class RemoteNetworkShareManager {
       const technicalCode = error instanceof Error ? error.message : 'remote_rpc_failed';
       await this.options.appendInstallLog('remote_network_share:rpc_failed', {
         appId,
-        sessionId: state.sessionId,
+        sessionIdPrefix: sanitizeSessionIdPrefix(state.sessionId),
         method: payloadMethod,
-        path: payloadPath,
+        path: sanitizeUrlDiagnostic(payloadPath),
         technicalCode,
         durationMs: Date.now() - startedAt,
         requestBytes,
@@ -405,7 +452,7 @@ export class RemoteNetworkShareManager {
       } catch (error) {
         void this.options.appendInstallLog('remote_network_share:ws_backend_failed', {
           appId: state.appId,
-          sessionId: state.sessionId,
+          sessionIdPrefix: sanitizeSessionIdPrefix(state.sessionId),
           error: error instanceof Error ? error.message : 'remote_ws_backend_failed',
         });
         closeBoth();
@@ -414,7 +461,7 @@ export class RemoteNetworkShareManager {
     backendSocket.on('error', (error) => {
       void this.options.appendInstallLog('remote_network_share:ws_backend_error', {
         appId: state.appId,
-        sessionId: state.sessionId,
+        sessionIdPrefix: sanitizeSessionIdPrefix(state.sessionId),
         error: error instanceof Error ? error.message : 'remote_ws_backend_error',
       });
       closeBoth();
@@ -447,7 +494,7 @@ export class RemoteNetworkShareManager {
       } catch (error) {
         void this.options.appendInstallLog('remote_network_share:ws_failed', {
           appId: state.appId,
-          sessionId: state.sessionId,
+          sessionIdPrefix: sanitizeSessionIdPrefix(state.sessionId),
           error: error instanceof Error ? error.message : 'remote_ws_failed',
         });
         closeBoth();
@@ -532,7 +579,68 @@ const setRemoteRpcCorsHeaders = (request: IncomingMessage, response: ServerRespo
   const origin = request.headers.origin;
   response.setHeader('access-control-allow-origin', typeof origin === 'string' && origin ? origin : '*');
   response.setHeader('access-control-allow-methods', 'POST, OPTIONS');
-  response.setHeader('access-control-allow-headers', 'accept, content-type');
+  response.setHeader('access-control-allow-headers', 'accept, bypass-tunnel-reminder, content-type');
   response.setHeader('access-control-max-age', '600');
   response.setHeader('vary', 'Origin');
+};
+
+const sanitizeUrlOrigin = (value: unknown): string | null => {
+  const diagnostic = sanitizeUrlDiagnostic(value);
+  return typeof diagnostic.origin === 'string' ? diagnostic.origin : null;
+};
+
+const sanitizeUrlDiagnostic = (value: unknown, options: { sessionId?: string } = {}): Record<string, unknown> => {
+  const raw = typeof value === 'string' ? value.trim() : '';
+  if (!raw) {
+    return { present: false, shape: 'empty' };
+  }
+  try {
+    return serializeUrlDiagnostic(new URL(raw), 'absolute', options);
+  } catch {
+    // Continue below and try relative URL parsing without preserving the raw input.
+  }
+  try {
+    return serializeUrlDiagnostic(new URL(raw, 'forger://relative'), 'relative', options);
+  } catch {
+    return { present: true, shape: 'invalid' };
+  }
+};
+
+const serializeUrlDiagnostic = (
+  url: URL,
+  shape: 'absolute' | 'relative',
+  options: { sessionId?: string },
+): Record<string, unknown> => {
+  const sessionPrefix = sanitizeSessionIdPrefix(options.sessionId);
+  return {
+    present: true,
+    shape,
+    ...(shape === 'absolute' ? { origin: redactSessionId(url.origin, options.sessionId, sessionPrefix) } : {}),
+    path: redactSessionId(url.pathname || '/', options.sessionId, sessionPrefix),
+    hasQuery: Boolean(url.search),
+    hasFragment: Boolean(url.hash),
+  };
+};
+
+const sanitizeSessionIdPrefix = (sessionId: unknown): string | null => {
+  const value = typeof sessionId === 'string' ? sessionId.trim() : '';
+  if (!value) {
+    return null;
+  }
+  if (value.length <= 8) {
+    return `${value.slice(0, Math.max(1, Math.ceil(value.length / 2)))}...`;
+  }
+  return `${value.slice(0, 8)}...`;
+};
+
+const redactSessionId = (value: string, sessionId: unknown, replacement: string | null): string => {
+  const rawSessionId = typeof sessionId === 'string' ? sessionId.trim() : '';
+  if (!rawSessionId || !replacement) {
+    return value;
+  }
+  return [
+    rawSessionId,
+    encodeURIComponent(rawSessionId),
+    rawSessionId.toLowerCase().replace(/[^a-z0-9]/g, ''),
+  ].reduce((current, sensitive) => sensitive ? current.split(sensitive).join(replacement) : current, value);
 };

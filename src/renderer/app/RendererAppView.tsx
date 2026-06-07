@@ -47,6 +47,7 @@ import {
 } from '@renderer/preferences';
 import { TourOverlay } from '@renderer/tour/TourOverlay';
 import { useForgerTour } from '@renderer/tour/useForgerTour';
+import { appExecutionTooltip } from '@renderer/app-execution-labels';
 import { RendererAppDialogs } from './RendererAppDialogs';
 import { LocalNetworkShareDialog } from '@renderer/components/LocalNetworkShareDialog';
 
@@ -492,7 +493,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
                 description={meta.description}
                 beta={isPrivateLocal || isBeta || isEarlyAccess}
                 betaLabel={isPrivateLocal ? t.beta.privateLocalBadge : isEarlyAccess ? t.beta.earlyAccessBadge : 'Beta'}
-                statusIndicatorLabel={app.status === 'running' ? t.actions.running : undefined}
+                statusIndicatorLabel={appExecutionTooltip(app, t, { startingInForger: isOpening })}
                 primaryAction={primaryAction}
                 primaryActionLabel={primaryActionLabel}
                 primaryDisabled={isInstalling}

@@ -5,12 +5,19 @@ import {
   Button,
   Chip,
   CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   Divider,
   Paper,
   Stack,
+  TextField,
   Typography,
 } from '@mui/material';
-import QrCode2Rounded from '@mui/icons-material/QrCode2Rounded';
+import CheckRounded from '@mui/icons-material/CheckRounded';
+import CloudUploadRounded from '@mui/icons-material/CloudUploadRounded';
+import CloseRounded from '@mui/icons-material/CloseRounded';
 import RefreshRounded from '@mui/icons-material/RefreshRounded';
 import { alpha, useTheme } from '@mui/material/styles';
 import type { CloudDevicesState, ForgerAccountSession } from '@shared/types';
@@ -30,6 +37,8 @@ export function DevicesView({ account, t }: DevicesViewProps) {
   const theme = useTheme();
   const [state, setState] = useState<CloudDevicesState>(emptyState);
   const [busy, setBusy] = useState(false);
+  const [registerOpen, setRegisterOpen] = useState(false);
+  const [deviceName, setDeviceName] = useState('');
 
   const refresh = async () => {
     setBusy(true);
@@ -44,10 +53,29 @@ export function DevicesView({ account, t }: DevicesViewProps) {
     void refresh();
   }, []);
 
-  const generateCode = async () => {
+  const registerDevice = async () => {
     setBusy(true);
     try {
-      setState(await window.forger.generateDevicePairingCode());
+      setState(await window.forger.registerCloudDevice({ name: deviceName }));
+      setRegisterOpen(false);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const acceptPairing = async (requestId: number) => {
+    setBusy(true);
+    try {
+      setState(await window.forger.acceptMobilePairingRequest(requestId));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const rejectPairing = async (requestId: number) => {
+    setBusy(true);
+    try {
+      setState(await window.forger.rejectMobilePairingRequest(requestId));
     } finally {
       setBusy(false);
     }
@@ -61,6 +89,7 @@ export function DevicesView({ account, t }: DevicesViewProps) {
   const pairedDevices = currentDevice
     ? state.devices.filter((device) => device.id !== currentDevice.id)
     : state.devices;
+  const pairingRequests = state.pairingRequests ?? [];
 
   if (!account.authenticated) {
     return (
@@ -99,39 +128,67 @@ export function DevicesView({ account, t }: DevicesViewProps) {
             <Chip color={currentDeviceOnline ? 'success' : 'default'} label={currentDeviceOnline ? t.sections.devices.online : t.sections.devices.offline} />
           </Stack>
 
-          <Divider />
-
-          <Stack direction={{ xs: 'column', sm: 'row' }} alignItems={{ sm: 'center' }} justifyContent="space-between" gap={2}>
-            <Box>
-              <Typography fontWeight={700}>{t.sections.devices.pairingCode}</Typography>
-              <Typography color="text.secondary">{t.sections.devices.pairingCodeBody}</Typography>
-            </Box>
-            <Button variant="contained" startIcon={busy ? <CircularProgress size={16} color="inherit" /> : <QrCode2Rounded />} onClick={() => void generateCode()} disabled={busy}>
-              {t.sections.devices.generateCode}
-            </Button>
-          </Stack>
-
-          {state.pairingCode ? (
-            <Box
-              sx={{
-                display: 'inline-flex',
-                alignSelf: 'flex-start',
-                px: 2,
-                py: 1.2,
-                borderRadius: 1.5,
-                bgcolor: alpha(theme.palette.primary.main, theme.palette.mode === 'dark' ? 0.16 : 0.08),
-                border: `1px solid ${alpha(theme.palette.primary.main, theme.palette.mode === 'dark' ? 0.34 : 0.2)}`,
-                color: theme.palette.mode === 'dark' ? theme.palette.primary.light : theme.palette.primary.dark,
-                letterSpacing: '0.16em',
-                fontSize: 28,
-                fontWeight: 800,
-              }}
-            >
-              {state.pairingCode}
-            </Box>
+          {!currentDevice ? (
+            <>
+              <Divider />
+              <Stack direction={{ xs: 'column', sm: 'row' }} alignItems={{ sm: 'center' }} justifyContent="space-between" gap={2}>
+                <Box>
+                  <Typography fontWeight={700}>Register this device in Cloud</Typography>
+                  <Typography color="text.secondary">Name this desktop before mobile devices can request access.</Typography>
+                </Box>
+                <Button variant="contained" startIcon={busy ? <CircularProgress size={16} color="inherit" /> : <CloudUploadRounded />} onClick={() => setRegisterOpen(true)} disabled={busy}>
+                  Register device
+                </Button>
+              </Stack>
+            </>
           ) : null}
         </Stack>
       </Paper>
+
+      {currentDevice ? (
+        <Stack spacing={1.5}>
+          <Typography variant="h6">Mobile access requests</Typography>
+          {pairingRequests.map((request) => (
+            <Paper key={request.id} variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+              <Stack spacing={2}>
+                <Stack direction="row" justifyContent="space-between" gap={2}>
+                  <Box>
+                    <Typography fontWeight={700}>{request.mobileDevice.name}</Typography>
+                    <Typography color="text.secondary">{request.mobileDevice.platform ?? 'Mobile'} · {request.status}</Typography>
+                  </Box>
+                  <Chip size="small" color={request.status === 'pending' ? 'warning' : request.status === 'accepted' ? 'success' : 'default'} label={request.status} />
+                </Stack>
+                {request.code ? (
+                  <Box
+                    sx={{
+                      display: 'inline-flex',
+                      alignSelf: 'flex-start',
+                      px: 2,
+                      py: 1.2,
+                      borderRadius: 1.5,
+                      bgcolor: alpha(theme.palette.primary.main, theme.palette.mode === 'dark' ? 0.16 : 0.08),
+                      border: `1px solid ${alpha(theme.palette.primary.main, theme.palette.mode === 'dark' ? 0.34 : 0.2)}`,
+                      color: theme.palette.mode === 'dark' ? theme.palette.primary.light : theme.palette.primary.dark,
+                      letterSpacing: '0.16em',
+                      fontSize: 28,
+                      fontWeight: 800,
+                    }}
+                  >
+                    {request.code}
+                  </Box>
+                ) : null}
+                {request.status === 'pending' ? (
+                  <Stack direction="row" gap={1}>
+                    <Button variant="contained" startIcon={<CheckRounded />} disabled={busy} onClick={() => void acceptPairing(request.id)}>Authorize</Button>
+                    <Button variant="outlined" startIcon={<CloseRounded />} disabled={busy} onClick={() => void rejectPairing(request.id)}>Reject</Button>
+                  </Stack>
+                ) : null}
+              </Stack>
+            </Paper>
+          ))}
+          {pairingRequests.length === 0 ? <Typography color="text.secondary">No mobile devices are waiting for access.</Typography> : null}
+        </Stack>
+      ) : null}
 
       <Stack spacing={1.5}>
         <Typography variant="h6">{t.sections.devices.pairedDevices}</Typography>
@@ -148,6 +205,27 @@ export function DevicesView({ account, t }: DevicesViewProps) {
         ))}
         {pairedDevices.length === 0 ? <Typography color="text.secondary">{t.sections.devices.noPairedDevices}</Typography> : null}
       </Stack>
+
+      <Dialog open={registerOpen} onClose={() => setRegisterOpen(false)} fullWidth maxWidth="xs">
+        <DialogTitle>Register this device in Cloud</DialogTitle>
+        <DialogContent>
+          <TextField
+            autoFocus
+            fullWidth
+            label="Device name"
+            margin="dense"
+            placeholder="Forger Desktop"
+            value={deviceName}
+            onChange={(event) => setDeviceName(event.target.value)}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setRegisterOpen(false)} disabled={busy}>Cancel</Button>
+          <Button variant="contained" onClick={() => void registerDevice()} disabled={busy}>
+            Register
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Stack>
   );
 }

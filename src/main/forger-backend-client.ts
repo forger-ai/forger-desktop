@@ -15,6 +15,7 @@ import type {
   DesktopErrorReportPreview,
   SubmitConversationDiagnosticReportResult,
   CloudDeviceSummary,
+  MobilePairingRequestSummary,
   CloudFriendship,
   CloudFriendUser,
   ForumComment,
@@ -36,6 +37,8 @@ import type {
   CloudAppMessagePermissionDecision,
   RemoteAppBackupSummary,
   RemoteBackupsState,
+  RemoteNetworkShareStatus,
+  LocalNetworkShareStatus,
   SubmitProductFeedbackInput,
   SubmitAppRatingInput,
   SubmitUsageEventInput,
@@ -55,6 +58,7 @@ import {
 } from './forger-backend/catalog-normalizers';
 import {
   normalizeCloudDevice,
+  normalizeMobilePairingRequest,
   normalizeCloudMessageDelivery,
   normalizeCloudMessage,
   normalizeCloudUser,
@@ -493,6 +497,7 @@ export class ForgerBackendClient {
     deviceSecret: string;
     name: string;
     platform: string;
+    deviceKind?: 'desktop' | 'mobile';
     publicKey?: string;
     keyFingerprint?: string;
   }): Promise<CloudDeviceSummary & { registered: boolean }> {
@@ -507,6 +512,7 @@ export class ForgerBackendClient {
         device_secret: input.deviceSecret,
         name: input.name,
         platform: input.platform,
+        device_kind: input.deviceKind ?? 'desktop',
         public_key: input.publicKey,
         key_fingerprint: input.keyFingerprint,
       }),
@@ -548,6 +554,52 @@ export class ForgerBackendClient {
     if (!response.ok) {
       throw backendError('Forger Cloud session is no longer valid.', `pairing_code_failed_${response.status}`);
     }
+  }
+
+  async listMobilePairingRequests(): Promise<MobilePairingRequestSummary[]> {
+    const response = await fetch(`${this.options.backendBaseUrl}/api/v1/me/mobile_pairing_requests`, {
+      method: 'GET',
+      headers: buildBackendHeaders(this.options.token()),
+    });
+    if (!response.ok) {
+      throw backendError('Forger Cloud session is no longer valid.', `mobile_pairing_requests_failed_${response.status}`);
+    }
+    const payload = await this.readJson<unknown>(response);
+    return Array.isArray(payload)
+      ? payload.map((entry) => normalizeMobilePairingRequest(entry)).filter((entry): entry is MobilePairingRequestSummary => Boolean(entry))
+      : [];
+  }
+
+  async acceptMobilePairingRequest(requestId: number): Promise<MobilePairingRequestSummary> {
+    const response = await fetch(`${this.options.backendBaseUrl}/api/v1/me/mobile_pairing_requests/${requestId}/accept`, {
+      method: 'POST',
+      headers: buildBackendHeaders(this.options.token()),
+    });
+    if (!response.ok) {
+      throw backendError('Forger Cloud session is no longer valid.', `mobile_pairing_accept_failed_${response.status}`);
+    }
+    const payload = await this.readJson<unknown>(response);
+    const request = normalizeMobilePairingRequest(payload);
+    if (!request) {
+      throw backendError('Forger Cloud response was invalid.', 'mobile_pairing_accept_payload_invalid');
+    }
+    return request;
+  }
+
+  async rejectMobilePairingRequest(requestId: number): Promise<MobilePairingRequestSummary> {
+    const response = await fetch(`${this.options.backendBaseUrl}/api/v1/me/mobile_pairing_requests/${requestId}/reject`, {
+      method: 'POST',
+      headers: buildBackendHeaders(this.options.token()),
+    });
+    if (!response.ok) {
+      throw backendError('Forger Cloud session is no longer valid.', `mobile_pairing_reject_failed_${response.status}`);
+    }
+    const payload = await this.readJson<unknown>(response);
+    const request = normalizeMobilePairingRequest(payload);
+    if (!request) {
+      throw backendError('Forger Cloud response was invalid.', 'mobile_pairing_reject_payload_invalid');
+    }
+    return request;
   }
 
   async createRemoteTunnelSession(input: { deviceId: number; appId: string }): Promise<Record<string, unknown>> {
@@ -603,6 +655,58 @@ export class ForgerBackendClient {
 
   async closeRemoteTunnelSession(sessionId: number): Promise<void> {
     await postBackendJson(this.options, `/api/v1/me/remote_tunnel_sessions/${sessionId}/close`, {}, 'remote_tunnel_close_failed').catch(() => undefined);
+  }
+
+  async reportRemoteSessionRequest(input: {
+    requestId: string;
+    appId: string;
+    status: string;
+    remoteStatus?: RemoteNetworkShareStatus;
+    portalUrl?: string;
+    frontendUrl?: string;
+    technicalCode?: string;
+  }): Promise<void> {
+    await patchBackendJson(this.options, `/api/v1/me/remote_session_requests/${encodeURIComponent(input.requestId)}/report`, {
+      app_id: input.appId,
+      status: input.status,
+      remote_status: input.remoteStatus,
+      portal_url: input.portalUrl,
+      frontend_url: input.frontendUrl,
+      technical_code: input.technicalCode,
+    }, 'remote_session_request_report_failed').catch(() => undefined);
+  }
+
+  async reportAppAccessRequest(input: {
+    requestId: string;
+    appId: string;
+    status: string;
+    accessStatus?: LocalNetworkShareStatus | RemoteNetworkShareStatus;
+    technicalCode?: string;
+  }): Promise<void> {
+    const localStatus = input.accessStatus && 'url' in input.accessStatus ? input.accessStatus : undefined;
+    const remoteStatus = input.accessStatus && 'state' in input.accessStatus ? input.accessStatus : undefined;
+    await patchBackendJson(this.options, `/api/v1/me/app_access_requests/${encodeURIComponent(input.requestId)}/report`, {
+      app_id: input.appId,
+      status: input.status,
+      remote_status: remoteStatus,
+      remote_session_id: remoteStatus?.sessionId,
+      url: localStatus?.url,
+      connect_url: localStatus?.connectUrl,
+      technical_code: input.technicalCode,
+    }, 'app_access_request_report_failed').catch(() => undefined);
+  }
+
+  async reportAppControlRequest(input: {
+    requestId: string;
+    appId: string;
+    status: string;
+    technicalCode?: string;
+  }): Promise<void> {
+    await patchBackendJson(this.options, `/api/v1/me/app_control_requests/${encodeURIComponent(input.requestId)}/report`, {
+      app_id: input.appId,
+      status: input.status,
+      technical_code: input.technicalCode,
+    }, 'app_control_request_report_failed').catch(() => undefined);
   }
 
   async listFriends(): Promise<CloudFriendship[]> {
