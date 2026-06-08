@@ -424,6 +424,22 @@ export const registerMainLifecycle = (deps: unknown) => {
   registerForgerCloudOAuth({
     ipcMain,
     channel: IPC_CHANNELS.loginForgerAccountWithGoogle,
+    provider: 'google',
+    backendClient: () => state.forgerBackendClient,
+    saveAccount: switchForgerAccountSession,
+    openExternalUrl: async (url: string) => {
+      await shell.openExternal(url);
+    },
+    appendLog: appendInstallLog,
+    refreshCatalog: async () => {
+      state.catalogApps = await listCatalogFromBackend();
+      ensureCatalogStatuses();
+    },
+  });
+  registerForgerCloudOAuth({
+    ipcMain,
+    channel: IPC_CHANNELS.loginForgerAccountWithApple,
+    provider: 'apple',
     backendClient: () => state.forgerBackendClient,
     saveAccount: switchForgerAccountSession,
     openExternalUrl: async (url: string) => {

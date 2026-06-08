@@ -36,6 +36,7 @@ export function RendererAppDialogs({ controller }: RendererAppDialogsProps) {
     forgerAccountMessage,
     handleForgerLogin,
     handleForgerGoogleLogin,
+    handleForgerAppleLogin,
     handleForgerRegister,
     handleForgerUsernameUpdate,
     handleForgerLogout,
@@ -177,6 +178,7 @@ export function RendererAppDialogs({ controller }: RendererAppDialogsProps) {
         onClose={() => setCloudModalOpen(false)}
         onLogin={handleForgerLogin}
         onGoogleLogin={handleForgerGoogleLogin}
+        onAppleLogin={handleForgerAppleLogin}
         onRegister={handleForgerRegister}
         onUpdateUsername={handleForgerUsernameUpdate}
         onLogout={handleForgerLogout}

@@ -249,6 +249,23 @@ export const googleLoginErrorMessage = (payload: unknown): string => {
   return 'No pudimos iniciar sesion con Google.';
 };
 
+export const appleLoginErrorMessage = (payload: unknown): string => {
+  const error = payload && typeof payload === 'object' ? (payload as Record<string, unknown>).error : undefined;
+  if (error === 'apple_login_server_not_configured') {
+    return 'Apple login no esta configurado en Forger Cloud.';
+  }
+  if (error === 'apple_login_email_unverified') {
+    return 'Apple no confirmo este correo.';
+  }
+  if (error === 'apple_login_account_conflict') {
+    return 'Este correo ya esta vinculado a otra cuenta de Apple.';
+  }
+  if (error === 'access_denied') {
+    return 'Apple cancelo el inicio de sesion.';
+  }
+  return 'No pudimos iniciar sesion con Apple.';
+};
+
 export const usernameCooldownMessage = (availableAt?: string): string => {
   if (!availableAt) {
     return 'Podras cambiar tu username cuando se cumplan 30 dias desde el ultimo cambio.';

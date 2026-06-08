@@ -54,6 +54,7 @@ export const IPC_CHANNELS = {
   registerForgerAccount: 'forger:account:register',
   loginForgerAccount: 'forger:account:login',
   loginForgerAccountWithGoogle: 'forger:account:login-google',
+  loginForgerAccountWithApple: 'forger:account:login-apple',
   updateForgerAccountProfile: 'forger:account:update-profile',
   logoutForgerAccount: 'forger:account:logout',
   forgerAccountUpdated: 'forger:account:updated',

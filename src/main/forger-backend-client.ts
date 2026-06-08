@@ -70,6 +70,7 @@ import {
   defaultReportingLogPath,
   emptyRemoteBackupsState,
   googleLoginErrorMessage,
+  appleLoginErrorMessage,
   normalizeCloudStorageUsage,
   normalizeRemoteBackup,
   normalizeRemoteBackupsUsage,
@@ -122,6 +123,18 @@ interface GoogleLoginSessionInput {
   code: string;
   codeVerifier: string;
   redirectUri: string;
+}
+
+interface AppleLoginSessionInput {
+  clientId: string;
+  code: string;
+  nonce?: string;
+  redirectUri: string;
+}
+
+interface AppleLoginOAuthConfig {
+  clientId: string;
+  redirectUri?: string;
 }
 
 interface SocialDirectUploadResponse { signed_blob_id?: string; direct_upload?: { url?: string; headers?: Record<string, string> } }
@@ -461,6 +474,29 @@ export class ForgerBackendClient {
     return clientId;
   }
 
+  async getAppleLoginOAuthClientId(): Promise<string> {
+    return (await this.getAppleLoginOAuthConfig()).clientId;
+  }
+
+  async getAppleLoginOAuthConfig(): Promise<AppleLoginOAuthConfig> {
+    const response = await fetch(`${this.options.backendBaseUrl}/api/v1/oauth/apple/config`, {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json',
+      },
+    });
+    const payload = await this.readJson<Record<string, unknown>>(response);
+    if (!response.ok) {
+      throw backendError('Apple login no esta configurado en Forger Cloud.', `apple_login_config_failed_${response.status}`);
+    }
+    const clientId = typeof payload?.client_id === 'string' ? payload.client_id.trim() : '';
+    if (!clientId) {
+      throw backendError('Apple login no esta configurado en Forger Cloud.', 'apple_login_client_missing');
+    }
+    const redirectUri = typeof payload?.redirect_uri === 'string' ? payload.redirect_uri.trim() : undefined;
+    return { clientId, redirectUri };
+  }
+
   async createGoogleLoginSession(
     input: GoogleLoginSessionInput,
   ): Promise<StoredForgerAccount & { success: boolean; userMessage?: string; technicalCode?: string }> {
@@ -486,6 +522,37 @@ export class ForgerBackendClient {
         authenticated: false,
         userMessage: googleLoginErrorMessage(payload),
         technicalCode: `google_login_failed_${response.status}`,
+      };
+    }
+
+    return { ...this.parseAccount(payload, token), success: true, userMessage: 'Sesion iniciada.' };
+  }
+
+  async createAppleLoginSession(
+    input: AppleLoginSessionInput,
+  ): Promise<StoredForgerAccount & { success: boolean; userMessage?: string; technicalCode?: string }> {
+    const response = await fetch(`${this.options.backendBaseUrl}/api/v1/oauth/apple/session`, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        client_id: input.clientId,
+        code: input.code,
+        nonce: input.nonce,
+        redirect_uri: input.redirectUri,
+      }),
+    });
+    const payload = await this.readJson<Record<string, unknown>>(response);
+    const token = payload && typeof payload.token === 'string' ? payload.token : undefined;
+
+    if (!response.ok || !token) {
+      return {
+        success: false,
+        authenticated: false,
+        userMessage: appleLoginErrorMessage(payload),
+        technicalCode: `apple_login_failed_${response.status}`,
       };
     }
 

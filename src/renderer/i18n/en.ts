@@ -190,6 +190,7 @@ export const en = {
     registerTab: 'Register',
     login: 'Sign in',
     googleLogin: 'Continue with Google',
+    appleLogin: 'Continue with Apple',
     or: 'or',
     loginSuccess: 'Signed in successfully.',
     register: 'Create account',

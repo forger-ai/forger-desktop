@@ -80,6 +80,7 @@ export interface ForgerDesktopApi {
   registerForgerAccount: (input: ForgerAccountRegisterInput) => Promise<ForgerAccountSession & { success: boolean; userMessage?: string; technicalCode?: string }>;
   loginForgerAccount: (input: ForgerAccountLoginInput) => Promise<ForgerAccountSession & { success: boolean; userMessage?: string; technicalCode?: string }>;
   loginForgerAccountWithGoogle: () => Promise<ForgerAccountSession & { success: boolean; userMessage?: string; technicalCode?: string }>;
+  loginForgerAccountWithApple: () => Promise<ForgerAccountSession & { success: boolean; userMessage?: string; technicalCode?: string }>;
   updateForgerAccountProfile: (input: ForgerAccountProfileInput) => Promise<ForgerAccountSession & { success: boolean; userMessage?: string; technicalCode?: string }>;
   logoutForgerAccount: () => Promise<ForgerAccountSession & { success: boolean }>;
   onForgerAccountUpdated: (listener: (event: ForgerAccountSession & { userMessage?: string; technicalCode?: string }) => void) => () => void;

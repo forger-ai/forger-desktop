@@ -3,6 +3,7 @@ import LoginRounded from '@mui/icons-material/LoginRounded';
 import LogoutRounded from '@mui/icons-material/LogoutRounded';
 import PersonAddAltRounded from '@mui/icons-material/PersonAddAltRounded';
 import GoogleIcon from '@mui/icons-material/Google';
+import AppleIcon from '@mui/icons-material/Apple';
 import EditRounded from '@mui/icons-material/EditRounded';
 import SaveRounded from '@mui/icons-material/SaveRounded';
 import RateReviewRounded from '@mui/icons-material/RateReviewRounded';
@@ -47,6 +48,7 @@ interface ForgerCloudModalProps {
   onClose: () => void;
   onLogin: (email: string, password: string) => Promise<void>;
   onGoogleLogin: () => Promise<void>;
+  onAppleLogin: () => Promise<void>;
   onRegister: (input: ForgerAccountRegisterInput) => Promise<boolean>;
   onUpdateUsername: (username: string) => Promise<boolean>;
   onLogout: () => Promise<void>;
@@ -109,6 +111,7 @@ export function ForgerCloudModal({
   onClose,
   onLogin,
   onGoogleLogin,
+  onAppleLogin,
   onRegister,
   onUpdateUsername,
   onLogout,
@@ -366,6 +369,9 @@ export function ForgerCloudModal({
                     <Button variant="outlined" size="large" onClick={() => void onGoogleLogin()} startIcon={<GoogleIcon />} disabled={busy} sx={{ minWidth: 260 }}>
                       {t.cloud.googleLogin}
                     </Button>
+                    <Button variant="outlined" size="large" onClick={() => void onAppleLogin()} startIcon={<AppleIcon />} disabled={busy} sx={{ minWidth: 260 }}>
+                      {t.cloud.appleLogin}
+                    </Button>
                     <Divider flexItem>{t.cloud.or}</Divider>
                     <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.25} justifyContent="center" sx={{ width: '100%' }}>
                       <Button variant="contained" size="large" onClick={() => setMode('login')} startIcon={<LoginRounded />}>
@@ -393,6 +399,9 @@ export function ForgerCloudModal({
                   </Button>
                   <Button variant="outlined" startIcon={<GoogleIcon />} onClick={() => void onGoogleLogin()} disabled={busy} fullWidth>
                     {t.cloud.googleLogin}
+                  </Button>
+                  <Button variant="outlined" startIcon={<AppleIcon />} onClick={() => void onAppleLogin()} disabled={busy} fullWidth>
+                    {t.cloud.appleLogin}
                   </Button>
                   <Divider flexItem>{t.cloud.noAccount}</Divider>
                   <Button variant="text" onClick={() => setMode('register')}>
@@ -469,6 +478,9 @@ export function ForgerCloudModal({
                   </Button>
                   <Button variant="outlined" startIcon={<GoogleIcon />} onClick={() => void onGoogleLogin()} disabled={busy} fullWidth>
                     {t.cloud.googleLogin}
+                  </Button>
+                  <Button variant="outlined" startIcon={<AppleIcon />} onClick={() => void onAppleLogin()} disabled={busy} fullWidth>
+                    {t.cloud.appleLogin}
                   </Button>
                   <Divider>{t.cloud.hasAccount}</Divider>
                   <Button variant="text" onClick={() => setMode('login')}>

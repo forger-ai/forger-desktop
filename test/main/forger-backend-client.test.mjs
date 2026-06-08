@@ -738,6 +738,72 @@ test('createGoogleLoginSession maps backend Google login failures to a safe resu
   }
 });
 
+test('getAppleLoginOAuthClientId reads the public Apple login config', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'forger-apple-login-test-'));
+  const harness = createClient(root, async (url) => {
+    assert.equal(url, 'https://platform.test/api/v1/oauth/apple/config');
+    return jsonResponse(200, {
+      client_id: 'cloud.forger.signin',
+      redirect_uri: 'https://platform.test/api/v1/oauth/apple/callback',
+    });
+  });
+
+  try {
+    const clientId = await harness.client.getAppleLoginOAuthClientId();
+    assert.equal(clientId, 'cloud.forger.signin');
+    assert.deepEqual(await harness.client.getAppleLoginOAuthConfig(), {
+      clientId: 'cloud.forger.signin',
+      redirectUri: 'https://platform.test/api/v1/oauth/apple/callback',
+    });
+  } finally {
+    harness.restore();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('createAppleLoginSession returns the existing Forger account session shape', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'forger-apple-login-test-'));
+  let requestBody;
+  const harness = createClient(root, async (url, init) => {
+    assert.equal(url, 'https://platform.test/api/v1/oauth/apple/session');
+    requestBody = JSON.parse(init.body);
+    return jsonResponse(201, {
+      authenticated: true,
+      token: 'forger-token',
+      user: {
+        id: 7,
+        email: 'user@example.com',
+        username: 'user',
+        confirmed: true,
+        subscription_tier: 'free',
+      },
+    });
+  });
+
+  try {
+    const result = await harness.client.createAppleLoginSession({
+      clientId: 'client-id',
+      code: 'code',
+      nonce: 'nonce',
+      redirectUri: 'http://127.0.0.1:1234/oauth/apple/callback',
+    });
+
+    assert.equal(result.success, true);
+    assert.equal(result.authenticated, true);
+    assert.equal(result.token, 'forger-token');
+    assert.equal(result.user.email, 'user@example.com');
+    assert.deepEqual(requestBody, {
+      client_id: 'client-id',
+      code: 'code',
+      nonce: 'nonce',
+      redirect_uri: 'http://127.0.0.1:1234/oauth/apple/callback',
+    });
+  } finally {
+    harness.restore();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('remote backup cloud calls normalize lists, upload archives, download files, and map delete failures', async () => {
   const root = await mkdtemp(join(tmpdir(), 'forger-remote-backups-test-'));
   const archivePath = join(root, 'backup.zip');
