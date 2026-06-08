@@ -2245,7 +2245,8 @@ test('automation manager records failed runs without invoking live credentials o
     assert.equal(runs[0].userMessage, 'No se pudo ejecutar porque Codex no tiene una sesion activa.');
     const transcript = await manager.getRunTranscript(runs[0].id);
     assert.match(transcript.transcript, /Run failed: codex_auth_missing/);
-    assert.deepEqual(released, [`app:${runs[0].id}`]);
+    assert.equal(released.length, 1);
+    assert.equal(released[0], `app:${runs[0].id}`);
     assert.equal(updates.some((event) => event.run?.status === 'failed'), true);
   } finally {
     manager.dispose();
