@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 import { createRequire } from 'node:module';
 
@@ -29,6 +31,27 @@ const withProcessPlatform = (platform, callback) => {
       Object.defineProperty(process, 'platform', descriptor);
     }
   }
+};
+
+const waitForMainLifecycle = async (predicate = () => true) => {
+  for (let index = 0; index < 100; index += 1) {
+    if (index > 0 && await predicate()) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  if (!await predicate()) {
+    throw new Error('main_lifecycle_wait_timeout');
+  }
+};
+
+const readDesktopLogEvents = async (metadataRoot) => {
+  const raw = await fs.readFile(path.join(metadataRoot, 'logs', 'forger-desktop.jsonl'), 'utf8');
+  return raw
+    .trim()
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
 };
 
 const createServiceClass = (name, calls, extraFactory = () => ({})) => class TestLifecycleService {
@@ -100,6 +123,38 @@ const createServiceClass = (name, calls, extraFactory = () => ({})) => class Tes
   publishAgentEvent() {}
 };
 
+const createStartupBrowserWindowClass = (calls) => class StartupBrowserWindowDouble {
+  static getAllWindows() {
+    return [];
+  }
+
+  constructor(options) {
+    this.options = options;
+    this.destroyed = false;
+    this.executedScripts = [];
+    this.loadUrls = [];
+    this.webContents = {
+      executeJavaScript: async (script) => {
+        this.executedScripts.push(script);
+      },
+    };
+    calls.startupWindows.push(this);
+  }
+
+  async loadURL(url) {
+    this.loadUrls.push(url);
+  }
+
+  close() {
+    this.destroyed = true;
+    calls.closedStartupWindows.push(this);
+  }
+
+  isDestroyed() {
+    return this.destroyed;
+  }
+};
+
 const createLifecycleHarness = (overrides = {}) => {
   const ready = createDeferred();
   const calls = {
@@ -114,6 +169,8 @@ const createLifecycleHarness = (overrides = {}) => {
     oauthOptions: null,
     quitCalls: 0,
     started: [],
+    startupWindows: [],
+    closedStartupWindows: [],
     stopped: [],
     terminated: [],
   };
@@ -177,9 +234,7 @@ const createLifecycleHarness = (overrides = {}) => {
     AppAgentTaskManager: createServiceClass('AppAgentTaskManager', calls),
     AppMcpManager: createServiceClass('AppMcpManager', calls),
     AutomationManager: createServiceClass('AutomationManager', calls),
-    BrowserWindow: {
-      getAllWindows: () => [],
-    },
+    BrowserWindow: createStartupBrowserWindowClass(calls),
     ChatOrchestrator: createServiceClass('ChatOrchestrator', calls),
     CloudDeviceManager: createServiceClass('CloudDeviceManager', calls),
     CloudIdentityStore: createServiceClass('CloudIdentityStore', calls),
@@ -204,6 +259,7 @@ const createLifecycleHarness = (overrides = {}) => {
     SecretsStore: createServiceClass('SecretsStore', calls),
     anyAppAllowsAgentNetworkAccess: async () => false,
     app: {
+      getLocale: () => 'es-CL',
       getPath: (name) => `/user-data/${name}`,
       getVersion: () => '0.0.0-test',
       on: (event, listener) => appListeners.set(event, listener),
@@ -359,7 +415,7 @@ test('main lifecycle initializes services, wires task status through provider-ag
   registerMainLifecycle(deps);
   ready.resolve();
   await ready.promise;
-  await new Promise((resolve) => setImmediate(resolve));
+  await waitForMainLifecycle(() => calls.createdWindows === 1);
 
   assert.equal(calls.oauthRegistered, true);
   assert.equal(calls.createdWindows, 1);
@@ -414,13 +470,86 @@ test('main lifecycle initializes services, wires task status through provider-ag
   assert.equal(await state.appAgentTaskManager.options.getAgentNetworkAccess('forger'), false);
 });
 
+test('main lifecycle writes startup logs for services before the initial window opens', async () => {
+  const metadataRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'forger-startup-logs-'));
+  const { calls, deps, ready } = createLifecycleHarness({
+    getForgerMetadataRoot: () => metadataRoot,
+  });
+
+  registerMainLifecycle(deps);
+  ready.resolve();
+  await ready.promise;
+  await waitForMainLifecycle(async () => {
+    try {
+      const events = await readDesktopLogEvents(metadataRoot);
+      return events.some((entry) => entry.event === 'startup:main_window:create:success');
+    } catch {
+      return false;
+    }
+  });
+
+  const events = await readDesktopLogEvents(metadataRoot);
+  const names = events.map((entry) => entry.event);
+  assert.ok(names.includes('startup:ready'));
+  assert.ok(names.includes('startup:official_tools:load:success'));
+  assert.ok(names.includes('startup:cloud_device_manager:start:success'));
+  assert.ok(names.includes('startup:forger_mcp_server:start:success'));
+  assert.ok(names.includes('startup:desktop_runtime_bridge:start:success'));
+  assert.ok(names.includes('startup:automation_manager:initialize:success'));
+  assert.ok(names.includes('startup:memory_maintenance_manager:initialize:success'));
+  assert.ok(names.includes('startup:main_window:create:success'));
+  assert.equal(calls.createdWindows, 1);
+  assert.equal(
+    events.every((entry) => entry.service === 'desktop-main' && typeof entry.timestamp === 'string'),
+    true,
+  );
+  assert.equal(
+    events
+      .filter((entry) => entry.event.endsWith(':success') && entry.event !== 'startup:ready')
+      .every((entry) => Number.isInteger(entry.context?.durationMs)),
+    true,
+  );
+});
+
+test('main lifecycle logs the failing startup step when boot fails before the window', async () => {
+  const metadataRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'forger-startup-failure-'));
+  const { calls, deps, ready } = createLifecycleHarness({
+    getForgerMetadataRoot: () => metadataRoot,
+    loadSettings: async () => {
+      throw new Error('settings_unreadable');
+    },
+  });
+
+  registerMainLifecycle(deps);
+  ready.resolve();
+  await ready.promise;
+  await waitForMainLifecycle(async () => {
+    try {
+      const events = await readDesktopLogEvents(metadataRoot);
+      return events.some((entry) => entry.event === 'startup:failed:error');
+    } catch {
+      return false;
+    }
+  });
+
+  const events = await readDesktopLogEvents(metadataRoot);
+  const failedStep = events.find((entry) => entry.event === 'startup:settings:load:failed');
+  assert.equal(failedStep?.level, 'error');
+  assert.equal(failedStep?.error?.message, 'settings_unreadable');
+  assert.ok(events.some((entry) => entry.event === 'startup:failed:error'));
+  assert.equal(calls.startupWindows.length, 1);
+  assert.equal(calls.closedStartupWindows.length, 0);
+  assert.match(calls.startupWindows[0].executedScripts.join('\n'), /Forger no pudo terminar de iniciar/);
+  assert.equal(calls.createdWindows, 0);
+});
+
 test('main lifecycle service callbacks preserve fallbacks, permissions, and update side effects', async () => {
   const openedWindows = [];
   const runtimeRequests = [];
   const runtimeEntries = [];
   const emittedRuns = [];
   const reports = [];
-  const { deps, ready, state } = createLifecycleHarness({
+  const { calls, deps, ready, state } = createLifecycleHarness({
     emitChatRunUpdated: (event) => emittedRuns.push(event),
     ensureRuntimeInstalled: async (type, version) => {
       runtimeRequests.push([type, version]);
@@ -456,7 +585,7 @@ test('main lifecycle service callbacks preserve fallbacks, permissions, and upda
   registerMainLifecycle(deps);
   ready.resolve();
   await ready.promise;
-  await new Promise((resolve) => setImmediate(resolve));
+  await waitForMainLifecycle(() => calls.createdWindows === 1);
 
   const permissionCalls = [];
   state.appAgentTaskManager.requestPermission = async () => {
@@ -641,7 +770,7 @@ test('main lifecycle shutdown disposes managers, stops bridges, terminates runni
   registerMainLifecycle(deps);
   ready.resolve();
   await ready.promise;
-  await new Promise((resolve) => setImmediate(resolve));
+  await waitForMainLifecycle(() => calls.createdWindows === 1);
 
   state.devCatalogService = { stop: () => calls.stopped.push('DevCatalogService') };
   appListeners.get('before-quit')();
@@ -679,7 +808,7 @@ test('main lifecycle tolerates missing optional cleanup callback', async () => {
   registerMainLifecycle(deps);
   ready.resolve();
   await ready.promise;
-  await new Promise((resolve) => setImmediate(resolve));
+  await waitForMainLifecycle(() => calls.createdWindows === 1);
 
   assert.equal(calls.appendLogs.some((entry) => entry.event === 'files:chat_staging_cleanup_failed'), false);
 });
@@ -699,7 +828,7 @@ test('main lifecycle wires pending deep-link flush after the first window load',
   registerMainLifecycle(deps);
   ready.resolve();
   await ready.promise;
-  await new Promise((resolve) => setImmediate(resolve));
+  await waitForMainLifecycle(() => onceCalls.length === 1);
 
   assert.equal(onceCalls.length, 1);
   assert.equal(onceCalls[0][0], 'did-finish-load');
@@ -726,7 +855,7 @@ test('main lifecycle forwards manager events only to live app windows and recrea
   registerMainLifecycle(deps);
   ready.resolve();
   await ready.promise;
-  await new Promise((resolve) => setImmediate(resolve));
+  await waitForMainLifecycle(() => typeof appListeners.get('activate') === 'function');
 
   const sends = [];
   const liveWindow = {
@@ -927,7 +1056,7 @@ test('main lifecycle service option callbacks cover catalog, memory, tools, MCP 
   const officialCalls = [];
   const memoryCalls = [];
   const progress = [];
-  const { deps, ready, state } = createLifecycleHarness({
+  const { calls, deps, ready, state } = createLifecycleHarness({
     emitAutomationUpdated: (event) => emittedAutomation.push(event),
     emitChatRunUpdated: (event) => emittedRuns.push(event),
     getMemoryStore: () => ({
@@ -988,7 +1117,7 @@ test('main lifecycle service option callbacks cover catalog, memory, tools, MCP 
   registerMainLifecycle(deps);
   ready.resolve();
   await ready.promise;
-  await new Promise((resolve) => setImmediate(resolve));
+  await waitForMainLifecycle(() => calls.createdWindows === 1);
 
   state.chatOrchestrator.appendExternalProgress = (runId, message) => progress.push([runId, message]);
   assert.deepEqual(await state.forgerMcpServer.options.listCatalog(), catalog);
@@ -1132,7 +1261,7 @@ test('main lifecycle app-agent conversation callbacks cover runtime paths, envir
   registerMainLifecycle(deps);
   ready.resolve();
   await ready.promise;
-  await new Promise((resolve) => setImmediate(resolve));
+  await waitForMainLifecycle(() => state.appAgentConversationManager !== null);
 
   assert.deepEqual(await state.appAgentConversationManager.options.getCodexPathEntries('finance-os'), [
     '/node/22/bin/path',

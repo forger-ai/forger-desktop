@@ -3,6 +3,7 @@ import type fs from 'node:fs/promises';
 import type { Server } from 'node:http';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 
+import { appendDesktopLog } from '../desktop-logger';
 import type { DesktopErrorReporter } from '../error-reporting';
 import { reportSanitizerRoots } from '../conversation-diagnostics';
 import type { StoredForgerAccount } from '../forger-account-store';
@@ -34,6 +35,10 @@ import type {
   RuntimeBinarySet,
   RunningAppProcess,
 } from './main-process-types';
+import {
+  createStartupLoadingController,
+  createStartupLogger,
+} from './startup-loading';
 
 type ServiceConstructor<T> = new (...args: unknown[]) => T;
 type AsyncFn<T = unknown> = (...args: unknown[]) => Promise<T>;
@@ -377,34 +382,71 @@ export const registerMainLifecycle = (deps: unknown) => {
   } = deps as MainLifecycleDeps;
 
   app.whenReady().then(async () => {
-  await fs.mkdir(getTempRoot(), { recursive: true });
-  await fs.mkdir(getRuntimesRoot(), { recursive: true });
-  await fs.mkdir(getForgerHomeRoot(), { recursive: true });
-  await fs.mkdir(getForgerMetadataRoot(), { recursive: true });
-  await fs.mkdir(getPrivateAppsRoot(), { recursive: true });
-  await fs.mkdir(getPrivateDataRoot(), { recursive: true });
-  await fs.mkdir(getBackupsRoot(), { recursive: true });
-  await ensureGlobalAgentsContext(getForgerHomeRoot());
-  await fs.mkdir(getCodexRoot(), { recursive: true });
-  await fs.mkdir(getCodexHome(), { recursive: true });
-  await loadSettings();
-  state.secretsStore = new SecretsStore(app.getPath('userData'));
-  state.officialToolsService = getOfficialToolsService();
-  await state.officialToolsService.load();
-  if (typeof state.officialToolsService.startActiveTools === 'function') {
-    await state.officialToolsService.startActiveTools().catch((error: unknown) => {
-      void appendInstallLog('official_tools:start_active_failed', serializeErrorForInstallLog(error));
-    });
+  const startupLoading = createStartupLoadingController(BrowserWindow, typeof app.getLocale === 'function' ? app.getLocale() : undefined);
+  const startupLogger = createStartupLogger(getForgerMetadataRoot, startupLoading.update);
+  await startupLogger.event('startup:ready', {
+    version: app.getVersion(),
+    platform: process.platform,
+    arch: process.arch,
+  });
+  const ensureDirectory = async (name: string, getPath: () => string): Promise<void> => {
+    await startupLogger.step('startup:directory', async () => {
+      await fs.mkdir(getPath(), { recursive: true });
+    }, { name, path: getPath() });
+  };
+
+  await ensureDirectory('temp', getTempRoot);
+  await ensureDirectory('runtimes', getRuntimesRoot);
+  await ensureDirectory('forgerHome', getForgerHomeRoot);
+  await ensureDirectory('metadata', getForgerMetadataRoot);
+  await ensureDirectory('privateApps', getPrivateAppsRoot);
+  await ensureDirectory('privateData', getPrivateDataRoot);
+  await ensureDirectory('backups', getBackupsRoot);
+  await startupLogger.step('startup:global_agents_context', async () => {
+    await ensureGlobalAgentsContext(getForgerHomeRoot());
+  });
+  await ensureDirectory('codexRoot', getCodexRoot);
+  await ensureDirectory('codexHome', getCodexHome);
+  await startupLogger.step('startup:settings:load', loadSettings);
+  await startupLogger.step('startup:secrets_store:create', () => {
+    state.secretsStore = new SecretsStore(app.getPath('userData'));
+  });
+  await startupLogger.step('startup:official_tools:create', () => {
+    state.officialToolsService = getOfficialToolsService();
+  });
+  await startupLogger.step('startup:official_tools:load', async () => {
+    await state.officialToolsService?.load();
+  });
+  if (typeof state.officialToolsService?.startActiveTools === 'function') {
+    await startupLogger.step('startup:official_tools:start_active', async () => {
+      await state.officialToolsService?.startActiveTools().catch((error: unknown) => {
+        void appendInstallLog('official_tools:start_active_failed', serializeErrorForInstallLog(error));
+        throw error;
+      });
+    }).catch(() => undefined);
   }
-  await loadAgentToolSettings();
-  state.forgerAccountStore = new ForgerAccountStore(getForgerAccountPath());
-  state.forgerAccount = await state.forgerAccountStore.load();
-  state.cloudIdentityStore = new CloudIdentityStore(getCloudIdentityPath());
-  await state.cloudIdentityStore.getSummary().catch(() => undefined);
-  await loadCloudSyncSettings();
-  state.memoryStore = new MemoryStore(getForgerMetadataRoot());
-  await loadRegistry();
-  await startDevCatalogService();
+  await startupLogger.step('startup:agent_tool_settings:load', loadAgentToolSettings);
+  await startupLogger.step('startup:forger_account_store:create', () => {
+    state.forgerAccountStore = new ForgerAccountStore(getForgerAccountPath());
+  });
+  await startupLogger.step('startup:forger_account_store:load', async () => {
+    state.forgerAccount = await state.forgerAccountStore!.load();
+  });
+  await startupLogger.step('startup:cloud_identity_store:create', () => {
+    state.cloudIdentityStore = new CloudIdentityStore(getCloudIdentityPath());
+  });
+  await startupLogger.step('startup:cloud_identity_store:summary', async () => {
+    await state.cloudIdentityStore?.getSummary().catch((error: unknown) => {
+      throw error;
+    });
+  }).catch(() => undefined);
+  await startupLogger.step('startup:cloud_sync_settings:load', loadCloudSyncSettings);
+  await startupLogger.step('startup:memory_store:create', () => {
+    state.memoryStore = new MemoryStore(getForgerMetadataRoot());
+  });
+  await startupLogger.step('startup:registry:load', loadRegistry);
+  await startupLogger.step('startup:dev_catalog:start', startDevCatalogService);
+  await startupLogger.step('startup:backend_client:create', () => {
   state.forgerBackendClient = new ForgerBackendClient({
     backendBaseUrl,
     localCatalogJsonUrl: () => state.localCatalogJsonUrl,
@@ -421,6 +463,8 @@ export const registerMainLifecycle = (deps: unknown) => {
       getCodexHome,
     }),
   });
+  });
+  await startupLogger.step('startup:oauth:google:register', () => {
   registerForgerCloudOAuth({
     ipcMain,
     channel: IPC_CHANNELS.loginForgerAccountWithGoogle,
@@ -436,6 +480,8 @@ export const registerMainLifecycle = (deps: unknown) => {
       ensureCatalogStatuses();
     },
   });
+  });
+  await startupLogger.step('startup:oauth:apple:register', () => {
   registerForgerCloudOAuth({
     ipcMain,
     channel: IPC_CHANNELS.loginForgerAccountWithApple,
@@ -451,6 +497,8 @@ export const registerMainLifecycle = (deps: unknown) => {
       ensureCatalogStatuses();
     },
   });
+  });
+  await startupLogger.step('startup:cloud_device_manager:create', () => {
   state.cloudDeviceManager = new CloudDeviceManager({
     filePath: getCloudDevicePath(),
     accountStorageKey: getCloudDeviceAccountStorageKey,
@@ -519,7 +567,11 @@ export const registerMainLifecycle = (deps: unknown) => {
     },
     onAuthenticationInvalid: clearForgerAccountSession,
   });
-  await state.cloudDeviceManager.start();
+  });
+  await startupLogger.step('startup:cloud_device_manager:start', async () => {
+    await state.cloudDeviceManager?.start();
+  });
+  await startupLogger.step('startup:forger_mcp_server:create', () => {
   state.forgerMcpServer = new ForgerMcpServer({
     getAppVersion: () => app.getVersion(),
     getToolDefinitions: () => AGENT_TOOL_DEFINITIONS,
@@ -599,7 +651,11 @@ export const registerMainLifecycle = (deps: unknown) => {
     onToolFailure: (input: ForgerMcpToolFailure) => state.desktopErrorReporter?.reportForgerMcpToolFailure(input),
     onHttpFailure: (input: ForgerMcpHttpFailure) => state.desktopErrorReporter?.reportForgerMcpHttpFailure(input),
   });
-  await state.forgerMcpServer.start();
+  });
+  await startupLogger.step('startup:forger_mcp_server:start', async () => {
+    await state.forgerMcpServer?.start();
+  });
+  await startupLogger.step('startup:app_mcp_manager:create', () => {
   state.appMcpManager = new AppMcpManager({
     getInstalledApp: (appId: string) => state.registry.apps[appId],
     resolveInstalledManifest,
@@ -621,12 +677,19 @@ export const registerMainLifecycle = (deps: unknown) => {
     serializeErrorForInstallLog,
     onMcpStartFailed: (input: { appId: string; runId: string; error: unknown }) => state.desktopErrorReporter?.reportAppMcpStartFailure(input),
   });
-  state.fileLibrary = new FileLibrary(getPrivateDataRoot(), getForgerMetadataRoot());
-  await state.fileLibrary.cleanupStagedFilesForChat?.().catch((error: unknown) => {
-    void appendInstallLog('files:chat_staging_cleanup_failed', {
-      error: serializeErrorForInstallLog(error),
-    });
   });
+  await startupLogger.step('startup:file_library:create', () => {
+    state.fileLibrary = new FileLibrary(getPrivateDataRoot(), getForgerMetadataRoot());
+  });
+  await startupLogger.step('startup:file_library:cleanup_chat_staging', async () => {
+    await state.fileLibrary?.cleanupStagedFilesForChat?.().catch((error: unknown) => {
+      void appendInstallLog('files:chat_staging_cleanup_failed', {
+        error: serializeErrorForInstallLog(error),
+      });
+      throw error;
+    });
+  }).catch(() => undefined);
+  await startupLogger.step('startup:chat_orchestrator:create', () => {
   state.chatOrchestrator = new ChatOrchestrator({
     forgerHomeRoot: getForgerHomeRoot(),
     privateAppsRoot: getPrivateAppsRoot(),
@@ -704,6 +767,8 @@ export const registerMainLifecycle = (deps: unknown) => {
       emitChatRunUpdated(event);
     },
   });
+  });
+  await startupLogger.step('startup:app_agent_task_manager:create', () => {
   state.appAgentTaskManager = new AppAgentTaskManager({
     privateAppsRoot: getPrivateAppsRoot(),
     metadataRoot: getForgerMetadataRoot(),
@@ -752,6 +817,8 @@ export const registerMainLifecycle = (deps: unknown) => {
       }
     },
   });
+  });
+  await startupLogger.step('startup:app_agent_conversation_manager:create', () => {
   state.appAgentConversationManager = new AppAgentConversationManager({
     privateAppsRoot: getPrivateAppsRoot(),
     metadataRoot: getForgerMetadataRoot(),
@@ -846,6 +913,8 @@ export const registerMainLifecycle = (deps: unknown) => {
       }
     },
   });
+  });
+  await startupLogger.step('startup:desktop_runtime_bridge:create', () => {
   state.desktopRuntimeBridge = new DesktopRuntimeBridge({
     getInstalledApp: (appId: string) => state.registry.apps[appId],
     getConversationManager: () => state.appAgentConversationManager,
@@ -875,7 +944,11 @@ export const registerMainLifecycle = (deps: unknown) => {
     appendInstallLog,
     serializeErrorForInstallLog,
   });
-  await state.desktopRuntimeBridge.start();
+  });
+  await startupLogger.step('startup:desktop_runtime_bridge:start', async () => {
+    await state.desktopRuntimeBridge?.start();
+  });
+  await startupLogger.step('startup:automation_manager:create', () => {
   state.automationManager = new AutomationManager({
     forgerHomeRoot: getForgerHomeRoot(),
     metadataRoot: getForgerMetadataRoot(),
@@ -915,7 +988,11 @@ export const registerMainLifecycle = (deps: unknown) => {
       emitAutomationUpdated(event as { automation: unknown; run?: unknown });
     },
   });
-  await state.automationManager.initialize();
+  });
+  await startupLogger.step('startup:automation_manager:initialize', async () => {
+    await state.automationManager?.initialize();
+  });
+  await startupLogger.step('startup:memory_maintenance_manager:create', () => {
   state.memoryMaintenanceManager = new MemoryMaintenanceManager({
     forgerHomeRoot: getForgerHomeRoot(),
     codexHome: getCodexHome(),
@@ -936,11 +1013,15 @@ export const registerMainLifecycle = (deps: unknown) => {
     getMemoryStore,
     appendInstallLog,
   });
-  await state.memoryMaintenanceManager.initialize();
+  });
+  await startupLogger.step('startup:memory_maintenance_manager:initialize', async () => {
+    await state.memoryMaintenanceManager?.initialize();
+  });
 
-  registerIpcHandlers();
-  ensureCatalogStatuses();
-  await createWindow();
+  await startupLogger.step('startup:ipc_handlers:register', registerIpcHandlers);
+  await startupLogger.step('startup:catalog_statuses:ensure', ensureCatalogStatuses);
+  await startupLogger.step('startup:main_window:create', createWindow);
+  startupLoading.close();
 
   // Deliver any deep-link captured before the renderer existed (cold
   // boot from `process.argv` or an `open-url` fired during startup).
@@ -950,9 +1031,25 @@ export const registerMainLifecycle = (deps: unknown) => {
 
   app.on('activate', async () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      await createWindow();
+      await startupLogger.step('startup:main_window:create_on_activate', createWindow);
     }
   });
+}).catch((error: unknown) => {
+  const startupLogger = createStartupLogger(getForgerMetadataRoot);
+  void startupLogger.event('startup:failed', {
+    version: app.getVersion(),
+    platform: process.platform,
+    arch: process.arch,
+  }).then(() => appendDesktopLog({
+    metadataRoot: getForgerMetadataRoot(),
+    level: 'error',
+    service: 'desktop-main',
+    event: 'startup:failed:error',
+    error,
+  }));
+  if (process.env.NODE_ENV === 'development') {
+    console.error('Forger Desktop startup failed', error);
+  }
 });
 
 app.on('before-quit', () => {
