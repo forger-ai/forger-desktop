@@ -50,7 +50,7 @@ const readSkillFiles = async () => {
     const filenames = (await fs.readdir(groupRoot)).filter((entry) => entry.endsWith('.md')).sort();
     for (const filename of filenames) {
       const body = await fs.readFile(path.join(groupRoot, filename), 'utf8');
-      const frontmatter = body.match(/^---\n([\s\S]*?)\n---/);
+      const frontmatter = body.match(/^---\r?\n([\s\S]*?)\r?\n---/);
       assert.ok(frontmatter, `${filename} has frontmatter`);
       const name = frontmatter[1].match(/^name:\s*(.*)$/m)?.[1];
       const description = frontmatter[1].match(/^description:\s*(.*)$/m)?.[1];
@@ -581,12 +581,46 @@ test('create app prompts do not inline official localization skill selection', a
 test('prompt-builder skills keep loading triggers in frontmatter descriptions', async () => {
   const skillFiles = await readSkillFiles();
   for (const skill of skillFiles) {
-    const bodyWithoutFrontmatter = skill.body.replace(/^---\n[\s\S]*?\n---\n?/, '');
+    const bodyWithoutFrontmatter = skill.body.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '');
     assert.doesNotMatch(
       bodyWithoutFrontmatter,
       /Use this skill when|Use this skill before|This skill applies only/,
       `${skill.group}/${skill.filename} should not keep generic loading triggers in the body`,
     );
+  }
+});
+
+test('prompt-builder skill frontmatter accepts Windows CRLF line endings', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forger-skill-crlf-'));
+  const previousEnvRoot = process.env.FORGER_DESKTOP_PROMPTS_ROOT;
+  try {
+    await fs.mkdir(path.join(root, 'skills', 'global'), { recursive: true });
+    await fs.writeFile(
+      path.join(root, 'skills', 'global', 'crlf-skill.md'),
+      [
+        '---',
+        'name: crlf-skill',
+        'description: Use when verifying Windows packaged skill markdown.',
+        '---',
+        '',
+        'Body with CRLF frontmatter.',
+      ].join('\r\n'),
+      'utf8',
+    );
+
+    process.env.FORGER_DESKTOP_PROMPTS_ROOT = root;
+
+    assert.deepEqual(buildInstalledAppSkillTemplates().map((template) => template.id), [
+      'crlf-skill',
+      'forger-app-official-tools',
+    ]);
+  } finally {
+    if (previousEnvRoot === undefined) {
+      delete process.env.FORGER_DESKTOP_PROMPTS_ROOT;
+    } else {
+      process.env.FORGER_DESKTOP_PROMPTS_ROOT = previousEnvRoot;
+    }
+    await fs.rm(root, { recursive: true, force: true });
   }
 });
 
