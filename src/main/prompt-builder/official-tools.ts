@@ -23,12 +23,12 @@ interface SkillFrontmatter {
 }
 
 const parseSkillFrontmatter = (source: string, relativePath: string): SkillFrontmatter => {
-  const match = source.match(/^---\n([\s\S]*?)\n---/);
+  const match = source.match(/^---\r?\n([\s\S]*?)\r?\n---/);
   if (!match) {
     throw new Error(`skill_frontmatter_missing:${relativePath}`);
   }
   const fields = new Map<string, string>();
-  for (const line of match[1].split('\n')) {
+  for (const line of match[1].split(/\r?\n/)) {
     const field = line.match(/^([a-zA-Z0-9_-]+):\s*(.*)$/);
     if (field) {
       fields.set(field[1], field[2].trim());
