@@ -111,6 +111,50 @@ export const makeConversationId = () =>
     ? crypto.randomUUID()
     : `conv-${Date.now()}`;
 
+export const appendChatMessageOnce = (
+  conversation: ChatConversation,
+  message: ChatMessage,
+  updatedAt = new Date().toISOString(),
+): ChatConversation => {
+  if (conversation.messages.some((existingMessage) => existingMessage.id === message.id)) {
+    return conversation;
+  }
+
+  return {
+    ...conversation,
+    updatedAt,
+    messages: [...conversation.messages, message],
+  };
+};
+
+export const appendChatMessageToConversationOnce = (
+  conversations: ChatConversation[],
+  conversationId: string,
+  message: ChatMessage,
+  options: {
+    threadId?: string | null;
+    updatedAt?: string;
+  } = {},
+): ChatConversation[] =>
+  conversations.map((conversation) => {
+    if (conversation.id !== conversationId) {
+      return conversation;
+    }
+
+    const nextConversation = appendChatMessageOnce(conversation, message, options.updatedAt);
+    if (nextConversation === conversation && !options.threadId) {
+      return conversation;
+    }
+
+    return {
+      ...nextConversation,
+      threadId:
+        typeof options.threadId === 'string' && options.threadId.trim().length > 0
+          ? options.threadId
+          : nextConversation.threadId,
+    };
+  });
+
 export const summarizeConversationTitle = (prompt: string, fallback = 'New conversation'): string => {
   const compact = prompt.replace(/\s+/g, ' ').trim();
   if (!compact) {

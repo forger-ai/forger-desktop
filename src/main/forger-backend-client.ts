@@ -15,6 +15,7 @@ import type {
   DesktopErrorReportPreview,
   SubmitConversationDiagnosticReportResult,
   CloudDeviceSummary,
+  MobileDesktopAuthorizationSummary,
   MobilePairingRequestSummary,
   CloudFriendship,
   CloudFriendUser,
@@ -38,6 +39,7 @@ import type {
   RemoteAppBackupSummary,
   RemoteBackupsState,
   RemoteNetworkShareStatus,
+  RemoteAgentSessionStatus,
   LocalNetworkShareStatus,
   SubmitProductFeedbackInput,
   SubmitAppRatingInput,
@@ -58,6 +60,7 @@ import {
 } from './forger-backend/catalog-normalizers';
 import {
   normalizeCloudDevice,
+  normalizeMobileDesktopAuthorization,
   normalizeMobilePairingRequest,
   normalizeCloudMessageDelivery,
   normalizeCloudMessage,
@@ -117,6 +120,22 @@ interface GmailOAuthTokenResponse {
   error?: string;
   error_description?: string;
 }
+
+const sanitizeRemoteAgentStatus = (status: RemoteAgentSessionStatus | undefined): Record<string, unknown> | undefined => {
+  if (!status) {
+    return undefined;
+  }
+  return {
+    active: status.active,
+    agent_id: status.agentId,
+    state: status.state,
+    session_id: status.sessionId,
+    tunnel_url: status.tunnelUrl,
+    authorization_token: status.authorizationToken,
+    allowed_paths: status.allowedPaths,
+    technical_code: status.technicalCode,
+  };
+};
 
 interface GoogleLoginSessionInput {
   clientId: string;
@@ -637,6 +656,30 @@ export class ForgerBackendClient {
       : [];
   }
 
+  async listMobileDesktopAuthorizations(): Promise<MobileDesktopAuthorizationSummary[]> {
+    const response = await fetch(`${this.options.backendBaseUrl}/api/v1/me/mobile_desktop_authorizations`, {
+      method: 'GET',
+      headers: buildBackendHeaders(this.options.token()),
+    });
+    if (!response.ok) {
+      throw backendError('Forger Cloud session is no longer valid.', `mobile_desktop_authorizations_failed_${response.status}`);
+    }
+    const payload = await this.readJson<unknown>(response);
+    return Array.isArray(payload)
+      ? payload.map((entry) => normalizeMobileDesktopAuthorization(entry)).filter((entry): entry is MobileDesktopAuthorizationSummary => Boolean(entry))
+      : [];
+  }
+
+  async revokeMobileDesktopAuthorization(authorizationId: number): Promise<void> {
+    const response = await fetch(`${this.options.backendBaseUrl}/api/v1/me/mobile_desktop_authorizations/${authorizationId}`, {
+      method: 'DELETE',
+      headers: buildBackendHeaders(this.options.token()),
+    });
+    if (!response.ok) {
+      throw backendError('Forger Cloud session is no longer valid.', `mobile_desktop_authorization_revoke_failed_${response.status}`);
+    }
+  }
+
   async acceptMobilePairingRequest(requestId: number): Promise<MobilePairingRequestSummary> {
     const response = await fetch(`${this.options.backendBaseUrl}/api/v1/me/mobile_pairing_requests/${requestId}/accept`, {
       method: 'POST',
@@ -667,6 +710,16 @@ export class ForgerBackendClient {
       throw backendError('Forger Cloud response was invalid.', 'mobile_pairing_reject_payload_invalid');
     }
     return request;
+  }
+
+  async deleteMobilePairingRequest(requestId: number): Promise<void> {
+    const response = await fetch(`${this.options.backendBaseUrl}/api/v1/me/mobile_pairing_requests/${requestId}`, {
+      method: 'DELETE',
+      headers: buildBackendHeaders(this.options.token()),
+    });
+    if (!response.ok) {
+      throw backendError('Forger Cloud session is no longer valid.', `mobile_pairing_delete_failed_${response.status}`);
+    }
   }
 
   async createRemoteTunnelSession(input: { deviceId: number; appId: string }): Promise<Record<string, unknown>> {
@@ -761,6 +814,21 @@ export class ForgerBackendClient {
       connect_url: localStatus?.connectUrl,
       technical_code: input.technicalCode,
     }, 'app_access_request_report_failed').catch(() => undefined);
+  }
+
+  async reportAgentAccessRequest(input: {
+    requestId: string;
+    agentId: string;
+    status: string;
+    agentStatus?: RemoteAgentSessionStatus;
+    technicalCode?: string;
+  }): Promise<void> {
+    await patchBackendJson(this.options, `/api/v1/me/agent_access_requests/${encodeURIComponent(input.requestId)}/report`, {
+      agent_id: input.agentId,
+      status: input.status,
+      agent_status: sanitizeRemoteAgentStatus(input.agentStatus),
+      technical_code: input.technicalCode,
+    }, 'agent_access_request_report_failed');
   }
 
   async reportAppControlRequest(input: {

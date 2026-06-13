@@ -4,156 +4,17 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { createRequire } from 'node:module';
+import {
+  createDeferred,
+  createServiceClass,
+  createStartupBrowserWindowClass,
+  readDesktopLogEvents,
+  waitForMainLifecycle,
+  withProcessPlatform,
+} from './main-lifecycle-test-helpers.mjs';
 
 const require = createRequire(import.meta.url);
 const { registerMainLifecycle } = require('../../dist-electron/main/core/main-lifecycle.js');
-
-const createDeferred = () => {
-  let resolve;
-  let reject;
-  const promise = new Promise((promiseResolve, promiseReject) => {
-    resolve = promiseResolve;
-    reject = promiseReject;
-  });
-  return { promise, resolve, reject };
-};
-
-const withProcessPlatform = (platform, callback) => {
-  const descriptor = Object.getOwnPropertyDescriptor(process, 'platform');
-  Object.defineProperty(process, 'platform', {
-    configurable: true,
-    value: platform,
-  });
-  try {
-    return callback();
-  } finally {
-    if (descriptor) {
-      Object.defineProperty(process, 'platform', descriptor);
-    }
-  }
-};
-
-const waitForMainLifecycle = async (predicate = () => true) => {
-  for (let index = 0; index < 100; index += 1) {
-    if (index > 0 && await predicate()) {
-      return;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-  if (!await predicate()) {
-    throw new Error('main_lifecycle_wait_timeout');
-  }
-};
-
-const readDesktopLogEvents = async (metadataRoot) => {
-  const raw = await fs.readFile(path.join(metadataRoot, 'logs', 'forger-desktop.jsonl'), 'utf8');
-  return raw
-    .trim()
-    .split('\n')
-    .filter(Boolean)
-    .map((line) => JSON.parse(line));
-};
-
-const createServiceClass = (name, calls, extraFactory = () => ({})) => class TestLifecycleService {
-  constructor(options = {}) {
-    this.name = name;
-    this.options = options;
-    this.started = false;
-    calls.constructed.push({ name, options, service: this });
-    Object.assign(this, extraFactory(options, this));
-  }
-
-  async start() {
-    this.started = true;
-    calls.started.push(name);
-  }
-
-  async stop() {
-    this.started = false;
-    calls.stopped.push(name);
-  }
-
-  dispose() {
-    calls.disposed.push(name);
-  }
-
-  async initialize() {
-    calls.initialized.push(name);
-  }
-
-  async load() {
-    calls.loaded.push(name);
-    return {};
-  }
-
-  async getSummary() {
-    return {};
-  }
-
-  getPublicRegistration() {
-    return {};
-  }
-
-  async requestPermission() {
-    return null;
-  }
-
-  async requestExternalPermission() {
-    return null;
-  }
-
-  createSession() {
-    return 'session-token';
-  }
-
-  releaseSession() {}
-
-  async listenMcps() {
-    return [];
-  }
-
-  releaseMcps() {}
-
-  appendExternalProgress() {}
-
-  environmentForApp() {
-    return {};
-  }
-
-  publishAgentEvent() {}
-};
-
-const createStartupBrowserWindowClass = (calls) => class StartupBrowserWindowDouble {
-  static getAllWindows() {
-    return [];
-  }
-
-  constructor(options) {
-    this.options = options;
-    this.destroyed = false;
-    this.executedScripts = [];
-    this.loadUrls = [];
-    this.webContents = {
-      executeJavaScript: async (script) => {
-        this.executedScripts.push(script);
-      },
-    };
-    calls.startupWindows.push(this);
-  }
-
-  async loadURL(url) {
-    this.loadUrls.push(url);
-  }
-
-  close() {
-    this.destroyed = true;
-    calls.closedStartupWindows.push(this);
-  }
-
-  isDestroyed() {
-    return this.destroyed;
-  }
-};
 
 const createLifecycleHarness = (overrides = {}) => {
   const ready = createDeferred();
@@ -204,6 +65,7 @@ const createLifecycleHarness = (overrides = {}) => {
     forgerBackendClient: null,
     forgerMcpServer: null,
     localCatalogJsonUrl: undefined,
+    remoteAgentSessionService: null,
     mainWindow: null,
     memoryStore: null,
     officialToolsService: null,
@@ -341,6 +203,7 @@ const createLifecycleHarness = (overrides = {}) => {
       list: async () => [],
       update: async () => ({}),
     }),
+    getPersonalAgentHeartbeat: async () => ({ supported: true, count: 1, ids: ['agent-1'], agents: [{ id: 'agent-1', name: 'Research partner' }] }),
     getOfficialToolsService: () => new OfficialToolsService(),
     getPrivateAppsRoot: () => '/forger/apps',
     getPrivateDataRoot: () => '/forger/data',
@@ -385,6 +248,9 @@ const createLifecycleHarness = (overrides = {}) => {
       calls.terminated.push(['remote-request', appId]);
       return { success: true, status: { active: true, appId, state: 'waiting_for_session' } };
     },
+    startRemoteAgentSession: async (agentId, options) => (calls.terminated.push(['remote-agent', agentId, options]), { success: true, status: { active: true, agentId, state: 'ready', sessionId: 'agent-session-1' } }),
+    stopRemoteAgentSession: async (agentId) => (calls.terminated.push(['remote-agent-stop', agentId]), { success: true, status: { active: false, agentId, state: 'closed', sessionId: 'agent-session-1' } }),
+    stopRemoteAgentSessionSession: async (sessionId) => (calls.terminated.push(['remote-agent-session-stop', sessionId]), { success: true, status: { active: false, agentId: 'agent-1', state: 'closed', sessionId } }),
     state,
     stopInstalledApp: async () => ({}),
     stopRemoteNetworkShareSession: async (sessionId) => {
@@ -443,14 +309,19 @@ test('main lifecycle initializes services, wires task status through provider-ag
   assert.equal(state.cloudDeviceManager.options.token(), 'token-1');
   assert.deepEqual(state.cloudDeviceManager.options.getCloudIdentity(), {});
   assert.deepEqual(state.cloudDeviceManager.options.getInstalledApps(), [state.registry.apps['finance-os']]);
-  const remoteRequestResult = await state.cloudDeviceManager.options.handleRemoteSessionRequest({
-    requestId: 'request-1',
-    appId: 'finance-os',
-  });
+  assert.deepEqual(await state.cloudDeviceManager.options.getPersonalAgentHeartbeat(), { supported: true, count: 1, ids: ['agent-1'], agents: [{ id: 'agent-1', name: 'Research partner' }] });
+  const remoteRequestResult = await state.cloudDeviceManager.options.handleRemoteSessionRequest({ requestId: 'request-1', appId: 'finance-os' });
   assert.equal(remoteRequestResult.success, true);
   assert.deepEqual(calls.terminated.at(-1), ['remote-request', 'finance-os']);
+  const agentAccessResult = await state.cloudDeviceManager.options.handleAgentAccessRequest({ requestId: 'agent-request-1', agentId: 'agent-1' });
+  assert.equal(agentAccessResult.success, true);
+  assert.deepEqual(calls.terminated.at(-1), ['remote-agent', 'agent-1', { requestId: 'agent-request-1', requesterMobileDevice: undefined }]);
+  const agentDisconnectResult = await state.cloudDeviceManager.options.handleAgentAccessDisconnect({ requestId: 'agent-request-2', sessionId: 'agent-session-1' });
+  assert.equal(agentDisconnectResult.success, true);
+  assert.deepEqual(calls.terminated.at(-1), ['remote-agent-session-stop', 'agent-session-1']);
   await state.cloudDeviceManager.options.handleFriendshipEvent({ type: 'noop' });
   await state.cloudDeviceManager.options.handleFriendshipEvent({ type: 'remote_tunnel_close', session_id: 'session-1' });
+  await state.cloudDeviceManager.options.handleFriendshipEvent({ type: 'remote_agent_session_close', session_id: 'agent-session-1' });
   await state.cloudDeviceManager.options.onAuthenticationInvalid('cloud_session_expired');
 
   const taskStatus = await state.desktopRuntimeBridge.options.getTaskStatus();
@@ -774,6 +645,7 @@ test('main lifecycle shutdown disposes managers, stops bridges, terminates runni
 
   state.devCatalogService = { stop: () => calls.stopped.push('DevCatalogService') };
   appListeners.get('before-quit')();
+  await waitForMainLifecycle(() => calls.stopped.includes('CloudDeviceManager'));
   assert.ok(calls.disposed.includes('AutomationManager'));
   assert.ok(calls.disposed.includes('AppMcpManager'));
   assert.ok(calls.stopped.includes('DesktopRuntimeBridge'));
@@ -790,6 +662,51 @@ test('main lifecycle shutdown disposes managers, stops bridges, terminates runni
 
   withProcessPlatform('linux', () => appListeners.get('window-all-closed')());
   assert.equal(calls.quitCalls, 1);
+});
+
+test('main lifecycle waits for remote agent shutdown reports before stopping cloud device manager on quit', async () => {
+  const { appListeners, calls, deps, ready, state } = createLifecycleHarness();
+  const shutdownOrder = [];
+  let releaseRemoteAgents;
+  const remoteAgentsStopped = new Promise((resolve) => {
+    releaseRemoteAgents = resolve;
+  });
+
+  registerMainLifecycle(deps);
+  ready.resolve();
+  await ready.promise;
+  await waitForMainLifecycle(() => calls.createdWindows === 1);
+
+  state.remoteAgentSessionService = {
+    stopAll: async () => {
+      shutdownOrder.push('remote-agents:start');
+      await remoteAgentsStopped;
+      shutdownOrder.push('remote-agents:done');
+    },
+  };
+  state.cloudDeviceManager = {
+    stop: () => shutdownOrder.push('cloud-device:stop'),
+  };
+  state.desktopRuntimeBridge = {
+    stop: () => shutdownOrder.push('runtime-bridge:stop'),
+  };
+
+  let prevented = false;
+  appListeners.get('before-quit')({ preventDefault: () => { prevented = true; } });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(prevented, true);
+  assert.deepEqual(shutdownOrder, ['remote-agents:start']);
+  assert.equal(calls.quitCalls, 0);
+
+  releaseRemoteAgents();
+  await waitForMainLifecycle(() => calls.quitCalls === 1);
+  assert.deepEqual(shutdownOrder, [
+    'remote-agents:start',
+    'remote-agents:done',
+    'runtime-bridge:stop',
+    'cloud-device:stop',
+  ]);
 });
 
 test('main lifecycle tolerates missing optional cleanup callback', async () => {
@@ -832,8 +749,30 @@ test('main lifecycle wires pending deep-link flush after the first window load',
 
   assert.equal(onceCalls.length, 1);
   assert.equal(onceCalls[0][0], 'did-finish-load');
+  assert.equal(state.pendingDeepLinkFlushScheduled, true);
   onceCalls[0][1]();
+  assert.equal(state.pendingDeepLinkFlushScheduled, false);
   assert.deepEqual(onceCalls.at(-1), ['flushed']);
+});
+
+test('main lifecycle does not add duplicate pending deep-link load listeners', async () => {
+  const onceCalls = [];
+  const { deps, ready, state } = createLifecycleHarness({
+    flushPendingDeepLink: () => onceCalls.push(['flushed']),
+  });
+  state.mainWindow = {
+    webContents: {
+      once: (event, listener) => onceCalls.push([event, listener]),
+    },
+  };
+  state.pendingDeepLink = { type: 'app', appId: 'finance-os' };
+  state.pendingDeepLinkFlushScheduled = true;
+
+  registerMainLifecycle(deps);
+  ready.resolve();
+  await ready.promise;
+
+  assert.deepEqual(onceCalls, []);
 });
 
 test('main lifecycle forwards manager events only to live app windows and recreates windows on activate', async () => {

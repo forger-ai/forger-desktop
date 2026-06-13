@@ -35,6 +35,9 @@ import { buildCodexAuthEnvironment, classifyCodexAuthOutput, extractAllowedCodex
 import { ForgerMcpServer } from '../forger-mcp-server';
 import { MemoryMaintenanceManager } from '../memory-maintenance-manager';
 import { MemoryStore } from '../memory-store';
+import { AgentConversationManager } from '../personal-agents/agent-conversation-manager';
+import { AgentStore } from '../personal-agents/agent-store';
+import { RemoteAgentSessionService } from '../personal-agents/remote-session-service';
 import { PromptOverridesStore, buildPromptBases, promptOverrideErrorResult } from '../prompt-overrides';
 import { OfficialToolsService, normalizeAppToolDeclarations } from '../official-tools-service';
 import { ForgerAccountStore, publicForgerAccount, type StoredForgerAccount } from '../forger-account-store';
@@ -62,6 +65,8 @@ import { createLocalNetworkShareController } from './local-network-share-service
 import { createDeveloperPathService } from './developer-path-service';
 import { APP_CLAUDE_MODEL_OPTIONS, APP_CODEX_MODEL_OPTIONS, BUILT_IN_CLAUDE_EFFORT, BUILT_IN_CLAUDE_MODEL, BUILT_IN_CODEX_MODEL, BUILT_IN_CODEX_REASONING, BUNDLED_GIT_VERSION, CLAUDE_CODE_VERSION, CODEX_CLI_VERSION, CODEX_USAGE_DASHBOARD_URL, DEFAULT_NODE_VERSION, DEFAULT_PYTHON_VERSION } from './agent-runtime-defaults';
 import { RemoteNetworkShareManager } from '../remote-network-share-manager';
+import { RemoteActivityStore } from '../remote-activity-store';
+import { LlmRunsStore } from '../llm-runs-store';
 import { createRuntimeInstallController } from '../runtime/runtime-install';
 import { loadOptionalBetterSqlite } from '../runtime/optional-better-sqlite';
 import { createWindowBootstrapController } from './window-bootstrap';
@@ -75,121 +80,29 @@ import { buildCodexPromptForFreeChat, buildCodexPromptWithAppContext } from '../
 import { buildForgerOfficialToolSkillTemplates, buildForgerOfficialToolsPromptSection } from '../prompt-builder/official-tools';
 import { SecretsStore, appSecretEnvName, isSecretsVaultUnavailableError } from '../secrets-store';
 import type {
-  AgentToolSettings,
-  AppToolDeclaration,
-  AppToolsInstallGate,
-  AppCategory,
-  AppDetails,
-  CloudFriendship,
-  CloudFriendUser,
-  CloudSyncSettings,
-  CloudMessage,
-  CloudMessageEnvelope,
-  CloudSendAppShareInput, CloudSendMessageInput,
-  CloudSocialEvent,
-  CloudAppMessagePermissionDecision,
-  CreateRemoteAppBackupInput,
-  CreateRemoteAppBackupResult,
-  AppExternalFolderSelection,
-  AppAgent,
-  AppAgentRuntimeInput,
-  AppAgentThreadCreateInput,
-  AppAgentPromptSet,
-  AppAgentPromptTemplate,
-  AppAgentPromptVariable,
-  AppAgentPromptVariableType,
-  AppAgentThreadRunControlInput,
-  AppAgentThreadRunStartInput,
-  AppAgentThreadRunSteerInput,
-  AppManifestAgentResumeInput,
-  AppManifestAgentStartInput,
-  AppManifestAgentSteerInput,
-  AppManifestAgentStopInput,
-  AppCodexTaskStartInput,
-  AppCodexConversationCreateInput,
-  AppCodexConversationSendMessageInput,
-  AppLocalChangeSummary,
-  AppPromptMutationResult,
-  AppPromptRestoreInput,
-  AppPromptReviewInput,
-  AppPromptReviewItem,
-  AppPromptTestInput,
-  AppPromptTestResult,
-  AppPromptTemplate,
-  AppPromptValidationResult,
-  AppSecretConnection,
-  AppSecretDeclaration,
-  AppSecretsState,
-  AppStatus,
-  AppOperationSummary,
-  AppSummary,
-  AgentProvider,
-  AgentRuntime,
-  AgentRuntimeRecommendations,
-  AgentRuntimeRequest,
-  AutomationUpsertInput,
-  BackgroundTask,
-  BasicActionResult,
-  CatalogApp,
-  ChatApplyRunInput,
-  ChatApprovePermissionInput,
-  ChatCancelRunInput,
-  ChatGetRunInput,
-  ChatRun,
-  ChatRunEvent,
-  ChatStartRunInput,
-  ChatUndoInput,
-  CallOfficialToolInput,
-  ConfigureOfficialToolInput,
-  ClaudeAuthStatus,
-  ClaudeEffort,
-  CodexAuthStatus,
-  CodexReasoningEffort,
-  DesktopErrorReportPreview,
-  ConnectAppSecretInput,
-  CreateLocalAppInput,
-  CreateLocalAppResult,
-  CreateUserSecretInput,
-  DeleteUserSecretInput,
-  DesktopUpdateState,
-  DisconnectAppSecretInput,
-  FailureDiagnosticFields,
-  FilesCreateCategoryInput,
-  FilesDeleteCategoryInput,
-  FilesDeleteInput,
-  FilesDiscardStagedForChatInput,
-  FilesImportInput,
-  FilesListInput,
-  FilesMoveInput,
-  FilesRenameCategoryInput,
-  FilesRenameInput,
-  FilesStageForChatInput,
-  FriendChatWindowOpenResult,
-  ForgerAccountLoginInput,
-  ForgerAccountProfileInput,
-  ForgerAccountRegisterInput,
-  InstallAppResult,
-  MemoryCreateInput,
-  MemoryListInput,
-  MemoryUpdateInput,
-  OpenAppResult,
-  OfficialToolRuntimeEvent,
-  RemoteAppBackupSummary,
-  RendererChatTraceEvent,
-  RuntimeStatus,
-  AgentDefaults,
-  Settings,
-  SharedFileRef,
-  SubmitAppRatingInput,
-  SubmitProductFeedbackInput,
-  SubmitUsageEventInput,
-  StopAppResult,
-  UpdateAgentDefaultsInput,
-  UpdateAgentToolApprovalInput,
-  UpdateCodexDefaultsInput,
-  UpdateDeveloperModeInput,
-  SetAppToolGrantInput,
-  UpdateUserSecretInput,
+  AgentDefaults, AgentProvider, AgentRuntime, AgentRuntimeRecommendations, AgentRuntimeRequest, AgentToolSettings,
+  AppAgent, AppAgentPromptSet, AppAgentPromptTemplate, AppAgentPromptVariable, AppAgentPromptVariableType,
+  AppAgentRuntimeInput, AppAgentThreadCreateInput, AppAgentThreadRunControlInput, AppAgentThreadRunStartInput,
+  AppAgentThreadRunSteerInput, AppCategory, AppCodexConversationCreateInput, AppCodexConversationSendMessageInput,
+  AppCodexTaskStartInput, AppDetails, AppExternalFolderSelection, AppLocalChangeSummary, AppManifestAgentResumeInput,
+  AppManifestAgentStartInput, AppManifestAgentSteerInput, AppManifestAgentStopInput, AppOperationSummary,
+  AppPromptMutationResult, AppPromptRestoreInput, AppPromptReviewInput, AppPromptReviewItem, AppPromptTemplate,
+  AppPromptTestInput, AppPromptTestResult, AppPromptValidationResult, AppSecretConnection, AppSecretDeclaration,
+  AppSecretsState, AppStatus, AppSummary, AppToolDeclaration, AppToolsInstallGate, AutomationUpsertInput,
+  BackgroundTask, BasicActionResult, CallOfficialToolInput, CatalogApp, ChatApplyRunInput, ChatApprovePermissionInput,
+  ChatCancelRunInput, ChatGetRunInput, ChatRun, ChatRunEvent, ChatStartRunInput, ChatUndoInput, ClaudeAuthStatus,
+  ClaudeEffort, CloudAppMessagePermissionDecision, CloudFriendUser, CloudFriendship, CloudMessage, CloudMessageEnvelope,
+  CloudSendAppShareInput, CloudSendMessageInput, CloudSocialEvent, CloudSyncSettings, CodexAuthStatus,
+  CodexReasoningEffort, ConfigureOfficialToolInput, ConnectAppSecretInput, CreateLocalAppInput, CreateLocalAppResult,
+  CreateRemoteAppBackupInput, CreateRemoteAppBackupResult, CreateUserSecretInput, DeleteUserSecretInput,
+  DesktopErrorReportPreview, DesktopUpdateState, DisconnectAppSecretInput, FailureDiagnosticFields, FilesCreateCategoryInput,
+  FilesDeleteCategoryInput, FilesDeleteInput, FilesDiscardStagedForChatInput, FilesImportInput, FilesListInput,
+  FilesMoveInput, FilesRenameCategoryInput, FilesRenameInput, FilesStageForChatInput, ForgerAccountLoginInput,
+  ForgerAccountProfileInput, ForgerAccountRegisterInput, FriendChatWindowOpenResult, InstallAppResult, MemoryCreateInput,
+  MemoryListInput, MemoryUpdateInput, OfficialToolRuntimeEvent, OpenAppResult, RemoteAppBackupSummary,
+  RendererChatTraceEvent, RuntimeStatus, SetAppToolGrantInput, Settings, SharedFileRef, StopAppResult,
+  SubmitAppRatingInput, SubmitProductFeedbackInput, SubmitUsageEventInput, UpdateAgentDefaultsInput,
+  UpdateAgentToolApprovalInput, UpdateCodexDefaultsInput, UpdateDeveloperModeInput, UpdateUserSecretInput,
 } from '../../shared/types';
 
 const BetterSqlite3 = loadOptionalBetterSqlite();
@@ -211,7 +124,10 @@ const registerWindowStateEvents = createWindowStateEventRegistrar(getWindowState
 const RUNTIME_PLATFORM_ALIASES = new Set(['darwin_arm64', 'win32_x64']);
 
 let mainWindow: BrowserWindow | null = null;
+const remoteActivityStore = new RemoteActivityStore({ getMainWindow: () => mainWindow });
+const llmRunsStore = new LlmRunsStore({ getMainWindow: () => mainWindow });
 let pendingDeepLink: ForgerDeepLink | null = null;
+let pendingDeepLinkFlushScheduled = false;
 let catalogApps: CatalogApp[] = [];
 let settings: Settings = structuredClone(settingsSeed);
 let registry: AppRegistry = { apps: {} };
@@ -242,6 +158,9 @@ let backgroundTaskStore: BackgroundTaskStore | null = null;
 let appMcpManager: AppMcpManager | null = null;
 let backupsManager: BackupsManager | null = null;
 let memoryStore: MemoryStore | null = null;
+let personalAgentStore: AgentStore | null = null;
+let personalAgentConversationManager: AgentConversationManager | null = null;
+let remoteAgentSessionService: RemoteAgentSessionService | null = null;
 let memoryMaintenanceManager: MemoryMaintenanceManager | null = null;
 let desktopRuntimeBridge: DesktopRuntimeBridge | null = null;
 
@@ -426,6 +345,97 @@ const anyAppAllowsAgentNetworkAccess = async (appIds: string[]): Promise<boolean
 const getSecretsStore = (): SecretsStore => getManifestSupportController().getSecretsStore();
 const getOfficialToolsService = (): OfficialToolsService => getManifestSupportController().getOfficialToolsService();
 const getMemoryStore = (): MemoryStore => getManifestSupportController().getMemoryStore();
+const getPersonalAgentStore = (): AgentStore => {
+  if (!personalAgentStore) {
+    personalAgentStore = new AgentStore({
+      metadataRoot: getForgerMetadataRoot(),
+      forgerHomeRoot: getForgerHomeRoot(),
+    });
+  }
+  return personalAgentStore;
+};
+const getPersonalAgentConversationManager = (): AgentConversationManager => {
+  if (!personalAgentConversationManager) {
+    personalAgentConversationManager = new AgentConversationManager({
+      store: getPersonalAgentStore(),
+      metadataRoot: getForgerMetadataRoot(),
+      codexHome: getCodexHome(),
+      getAgentRuntime: chooseAgentRuntime,
+      getCodexCliPath: async () => await resolveCodexCliPath(getCodexRoot()),
+      getClaudeCliPath: async () => (await resolveClaudeCli())?.path ?? null,
+      getCodexPathEntries: async () => await getAgentPathEntries(),
+      getCodexEnvironment: async () => await getCodexToolEnvironment(),
+      getCodexAuthenticated: async () => (await getCodexAuthStatus()).authenticated,
+      getClaudeAuthenticated: async () => (await getClaudeAuthStatus()).authenticated,
+      createForgerMcpSession: (runId, agent) =>
+        forgerMcpServer?.createSession(runId, 'forger', {
+          caller: 'personal-agent',
+          appIds: agent.appIds,
+          officialToolActionIds: agent.toolIds,
+        }) ?? null,
+      releaseForgerMcpSession: (token) => forgerMcpServer?.releaseSession(token),
+      listenAppMcps: async (appIds, runId) => {
+        const installedAppIds = appIds.filter((appId) => Boolean(registry.apps[appId]));
+        return await (appMcpManager?.listenMcps(installedAppIds, runId) ?? Promise.resolve([]));
+      },
+      releaseAppMcps: (runId) => {
+        appMcpManager?.releaseMcps(runId);
+      },
+      onConversationEvent: (event) => {
+        void (async () => {
+          const agent = await getPersonalAgentStore().getAgent(event.conversation.agentId).catch(() => null);
+          llmRunsStore.recordPersonalAgentConversationEvent(event, { agentName: agent?.name });
+        })();
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send(IPC_CHANNELS.personalAgentConversationEvent, event);
+        }
+      },
+    });
+  }
+  return personalAgentConversationManager;
+};
+const getRemoteAgentSessionService = (): RemoteAgentSessionService => {
+  if (!remoteAgentSessionService) {
+    remoteAgentSessionService = new RemoteAgentSessionService({
+      store: getPersonalAgentStore(),
+      conversationManager: getPersonalAgentConversationManager(),
+      appendInstallLog,
+      onStatusChanged: ({ agentId, agentName, status, requesterMobileDevice }) => {
+        remoteActivityStore.recordAgentStatus({ agentId, agentName, status, requesterMobileDevice });
+      },
+      onSessionClosed: async ({ agentId, requestIds, status }) => {
+        await Promise.all(requestIds.map(async (requestId) => {
+          try {
+            await forgerBackendClient?.reportAgentAccessRequest({
+              requestId,
+              agentId,
+              status: 'closed',
+              agentStatus: status,
+              technicalCode: 'desktop_session_closed',
+            });
+            await appendInstallLog('agent_access:cloud_report_success', {
+              requestId,
+              agentId,
+              status: 'closed',
+            });
+          } catch (error) {
+            await appendInstallLog('agent_access:cloud_report_failed', {
+              requestId,
+              agentId,
+              status: 'closed',
+              technicalCode: error instanceof Error ? error.message : 'agent_access_request_report_failed',
+            });
+          }
+        }));
+      },
+    });
+  }
+  return remoteAgentSessionService;
+};
+const getPersonalAgentHeartbeat = async () => ({
+  ...(await getPersonalAgentStore().getHeartbeatSummary()),
+  activeSessionRequestIds: remoteAgentSessionService?.activeSessionRequestIds() ?? [],
+});
 const getBackgroundTaskStore = (): BackgroundTaskStore => {
   if (!backgroundTaskStore) {
     backgroundTaskStore = new BackgroundTaskStore(getForgerMetadataRoot(), {
@@ -869,6 +879,20 @@ const openInstalledApp = async (appId: string, locale?: string): Promise<OpenApp
 const stopInstalledApp = async (appId: string): Promise<StopAppResult> => await getInstalledAppRuntimeController().stopInstalledApp(appId);
 const restartInstalledApp = async (appId: string, options: { onProgress?: (message: string) => void } = {}): Promise<OpenAppResult> => await getInstalledAppRuntimeController().restartInstalledApp(appId, options);
 const getRuntimeStatus = (appId: string): RuntimeStatus => getInstalledAppRuntimeController().getRuntimeStatus(appId);
+const appActivityName = (appId: string): string => registry.apps[appId]?.name ?? appId;
+const recordRemoteCloudActivity = (event: { kind: 'app' | 'agent'; targetId: string; targetName?: string; state: 'preparing' | 'active' | 'error' | 'closed'; requesterMobileDevice?: { id: number; name: string; platform?: string }; technicalCode?: string }): void => {
+  remoteActivityStore.recordRequest({
+    id: `${event.kind}:${event.targetId}`,
+    kind: event.kind,
+    targetId: event.targetId,
+    targetName: event.targetName ?? (event.kind === 'app' ? appActivityName(event.targetId) : event.targetId),
+    state: event.state,
+    ...(event.requesterMobileDevice ? { requesterMobileDevice: event.requesterMobileDevice } : {}),
+    ...(event.technicalCode ? { lastError: event.technicalCode } : {}),
+  });
+};
+const getRemoteActivitySnapshot = () => remoteActivityStore.snapshot();
+const getLlmRunsSnapshot = () => llmRunsStore.snapshot();
 
 const localNetworkShareController = createLocalNetworkShareController({
   runningApps,
@@ -897,6 +921,13 @@ const remoteNetworkShareManager = new RemoteNetworkShareManager({
   requiredNodeVersionForApp: (appId: string) => registry.apps[appId]?.requiredNodeVersion,
   appendInstallLog,
   emitRuntimeStatus: (appId, remoteNetworkShare) => emitRuntimeStatus({ ...getRuntimeStatus(appId), remoteNetworkShare }),
+  onStatusChanged: (status) => {
+    remoteActivityStore.recordAppStatus({
+      appId: status.appId,
+      appName: appActivityName(status.appId),
+      status,
+    });
+  },
 });
 
 function getLocalNetworkShareStatus(appId: string): ReturnType<typeof localNetworkShareController.getStatus> {
@@ -929,6 +960,18 @@ async function stopRemoteNetworkShare(appId: string): ReturnType<typeof remoteNe
 
 async function stopRemoteNetworkShareSession(sessionId: string): ReturnType<typeof remoteNetworkShareManager.stopBySession> {
   return await remoteNetworkShareManager.stopBySession(sessionId);
+}
+
+async function startRemoteAgentSession(agentId: string, options?: Parameters<RemoteAgentSessionService['start']>[1]): ReturnType<RemoteAgentSessionService['start']> {
+  return await getRemoteAgentSessionService().start(agentId, options);
+}
+
+async function stopRemoteAgentSession(agentId: string): ReturnType<RemoteAgentSessionService['stop']> {
+  return await getRemoteAgentSessionService().stop(agentId);
+}
+
+async function stopRemoteAgentSessionSession(sessionId: string): ReturnType<RemoteAgentSessionService['stopBySession']> {
+  return await getRemoteAgentSessionService().stopBySession(sessionId);
 }
 
 const createCloudSocialRelayDeps = () => ({
@@ -1057,12 +1100,16 @@ const getMainProcessIpcDeps = () => ({
   getForgerMetadataRoot,
   getInstallLogPath,
   getMemoryStore,
+  getPersonalAgentStore,
+  getPersonalAgentConversationManager,
   getOfficialToolsService,
   getPrivateAppsRoot,
   getPrivateDataRoot,
   getRuntimeStatus,
   getLocalNetworkShareStatus,
   getRemoteNetworkShareStatus,
+  getRemoteActivitySnapshot,
+  getLlmRunsSnapshot,
   getSecretsStore,
   getWindowState,
   installAppRuntime,
@@ -1121,7 +1168,11 @@ const getMainProcessIpcDeps = () => ({
   validateAppPrompt,
   zipDirectory,
 });
-const windowBootstrapState = { get mainWindow() { return mainWindow; }, set mainWindow(value) { mainWindow = value; }, get pendingDeepLink() { return pendingDeepLink; }, set pendingDeepLink(value) { pendingDeepLink = value; } };
+const windowBootstrapState = {
+  get mainWindow() { return mainWindow; }, set mainWindow(value) { mainWindow = value; },
+  get pendingDeepLink() { return pendingDeepLink; }, set pendingDeepLink(value) { pendingDeepLink = value; },
+  get pendingDeepLinkFlushScheduled() { return pendingDeepLinkFlushScheduled; }, set pendingDeepLinkFlushScheduled(value) { pendingDeepLinkFlushScheduled = value; },
+};
 const createWindowBootstrapDeps = () => ({
   BrowserWindow,
   IPC_CHANNELS,
@@ -1154,6 +1205,7 @@ const mainLifecycleState = {
   get devCatalogService() { return devCatalogService; }, set devCatalogService(value) { devCatalogService = value; },
   get mainWindow() { return mainWindow; }, set mainWindow(value) { mainWindow = value; },
   get pendingDeepLink() { return pendingDeepLink; }, set pendingDeepLink(value) { pendingDeepLink = value; },
+  get pendingDeepLinkFlushScheduled() { return pendingDeepLinkFlushScheduled; }, set pendingDeepLinkFlushScheduled(value) { pendingDeepLinkFlushScheduled = value; },
   get catalogApps() { return catalogApps; }, set catalogApps(value) { catalogApps = value; },
   get registry() { return registry; }, set registry(value) { registry = value; },
   get forgerAccount() { return forgerAccount; }, set forgerAccount(value) { forgerAccount = value; },
@@ -1164,6 +1216,7 @@ const mainLifecycleState = {
   get chatOrchestrator() { return chatOrchestrator; }, set chatOrchestrator(value) { chatOrchestrator = value; },
   get appAgentTaskManager() { return appAgentTaskManager; }, set appAgentTaskManager(value) { appAgentTaskManager = value; },
   get appAgentConversationManager() { return appAgentConversationManager; }, set appAgentConversationManager(value) { appAgentConversationManager = value; },
+  get llmRunsStore() { return llmRunsStore; },
   get fileLibrary() { return fileLibrary; }, set fileLibrary(value) { fileLibrary = value; },
   get secretsStore() { return secretsStore; }, set secretsStore(value) { secretsStore = value; },
   get officialToolsService() { return officialToolsService; }, set officialToolsService(value) { officialToolsService = value; },
@@ -1176,6 +1229,7 @@ const mainLifecycleState = {
   get desktopRuntimeBridge() { return desktopRuntimeBridge; }, set desktopRuntimeBridge(value) { desktopRuntimeBridge = value; },
   get localNetworkShareManager() { return localNetworkShareController.manager; }, set localNetworkShareManager(value) { localNetworkShareController.manager = value; },
   get remoteNetworkShareManager() { return remoteNetworkShareManager; },
+  get remoteAgentSessionService() { return remoteAgentSessionService; }, set remoteAgentSessionService(value) { remoteAgentSessionService = value; },
   get forgerMcpServer() { return forgerMcpServer; }, set forgerMcpServer(value) { forgerMcpServer = value; },
   get agentToolSettings() { return agentToolSettings; }, set agentToolSettings(value) { agentToolSettings = value; },
 };
@@ -1193,9 +1247,9 @@ registerMainLifecycle({
   getCodexAuthStatus, getCodexHome, getCodexRoot, getCodexToolEnvironment, getDesktopChatNetworkAccessDefault: () => settings.defaultChatNetworkAccess !== false, getForgerAccountPath, getForgerHomeRoot, getForgerMetadataRoot,
   getFreePort, getLegacyForgerMetadataRoot, getMemoryStore, getOfficialToolsService, getPrivateAppsRoot, getPrivateDataRoot, getRuntimesRoot,
   getRuntimePathEntries, getRuntimeStatus, getLocalNetworkShareStatus, getRemoteNetworkShareStatus, getTempRoot, getVenvExecutables,
-  handleCloudSocialEvent, hasInstalledCodexConversation, ipcMain, listAppPrompts, listCatalogFromBackend, loadAgentToolSettings,
-  loadCloudSyncSettings, loadRegistry, loadSettings, mapBackendCategory, openInstalledApp, startLocalNetworkShare, stopLocalNetworkShare,
-  startRemoteNetworkShare, stopRemoteNetworkShare, stopRemoteNetworkShareSession, openOrFocusAppWindow, registerForgerCloudOAuth,
+  getPersonalAgentHeartbeat, handleCloudSocialEvent, hasInstalledCodexConversation, ipcMain, listAppPrompts, listCatalogFromBackend, loadAgentToolSettings,
+  loadCloudSyncSettings, loadRegistry, loadSettings, llmRunsStore, mapBackendCategory, openInstalledApp, recordRemoteCloudActivity, startLocalNetworkShare, stopLocalNetworkShare,
+  startRemoteNetworkShare, stopRemoteNetworkShare, stopRemoteNetworkShareSession, startRemoteAgentSession, stopRemoteAgentSession, stopRemoteAgentSessionSession, openOrFocusAppWindow, registerForgerCloudOAuth,
   registerIpcHandlers, renderManifestAgentPrompt, resolveClaudeCli, resolveCodexCliPath, resolveInstalledAgents, resolveInstalledManifest,
   resolveInstalledPromptTemplates, restoreAppPrompt, restartInstalledApp, runningApps, serializeErrorForInstallLog, shell,
   splitManifestCommand, startDevCatalogService, state: mainLifecycleState, stopInstalledApp, switchForgerAccountSession, terminateProcess,

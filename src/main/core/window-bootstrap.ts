@@ -17,6 +17,7 @@ import type { WindowControlState } from '../../shared/types';
 interface WindowBootstrapState {
   mainWindow: BrowserWindow | null;
   pendingDeepLink: ForgerDeepLink | null;
+  pendingDeepLinkFlushScheduled: boolean;
 }
 
 interface WindowBootstrapDeps {
@@ -68,6 +69,7 @@ const createWindow = async (): Promise<void> => {
       sandbox: true,
     },
   });
+  state.pendingDeepLinkFlushScheduled = false;
   registerWindowStateEvents(state.mainWindow);
   state.mainWindow.webContents.on('render-process-gone', (_event, details) => {
     desktopErrorReporter?.reportRendererProcessGone(details);
@@ -98,16 +100,24 @@ const dispatchDeepLink = (link: ForgerDeepLink): void => {
   if (!state.mainWindow || state.mainWindow.webContents.isLoading()) {
     state.pendingDeepLink = link;
     if (state.mainWindow) {
-      // Window exists but content still loading — flush once the load
-      // completes. Reusing `did-finish-load` over `dom-ready` because
-      // the renderer needs its IPC subscriptions registered, which
-      // happens during script execution.
-      state.mainWindow.webContents.once('did-finish-load', flushPendingDeepLink);
+      schedulePendingDeepLinkFlush();
     }
     return;
   }
   focusDeepLinkWindow(state.mainWindow);
   state.mainWindow.webContents.send(IPC_CHANNELS.deepLink, link);
+};
+
+const schedulePendingDeepLinkFlush = (): void => {
+  if (!state.mainWindow || state.pendingDeepLinkFlushScheduled) return;
+  state.pendingDeepLinkFlushScheduled = true;
+  // Window exists but content still loading. Reusing `did-finish-load`
+  // over `dom-ready` because the renderer needs its IPC subscriptions
+  // registered, which happens during script execution.
+  state.mainWindow.webContents.once('did-finish-load', () => {
+    state.pendingDeepLinkFlushScheduled = false;
+    flushPendingDeepLink();
+  });
 };
 
 const flushPendingDeepLink = (): void => {

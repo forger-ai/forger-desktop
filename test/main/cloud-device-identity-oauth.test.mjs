@@ -16,6 +16,11 @@ const createSafeStorage = () => ({
   decryptString: (buffer) => buffer.toString('utf8').replace(/^sealed:/, ''),
 });
 
+const clearCloudDeviceModules = () => {
+  clearDistModule('main/cloud-device-storage.js');
+  clearDistModule('main/cloud-device-manager.js');
+};
+
 const waitFor = async (predicate) => {
   for (let attempt = 0; attempt < 20; attempt += 1) {
     if (predicate()) {
@@ -72,7 +77,7 @@ test('CloudDeviceManager registers per-account devices, encrypts secrets, and re
   });
 
   await withMockedElectron({ safeStorage: createSafeStorage() }, async (require) => {
-    clearDistModule('main/cloud-device-manager.js');
+    clearCloudDeviceModules();
     globalThis.WebSocket = FakeWebSocket;
     const { CloudDeviceManager } = require('../../dist-electron/main/cloud-device-manager.js');
     const backendCalls = [];
@@ -129,6 +134,16 @@ test('CloudDeviceManager registers per-account devices, encrypts secrets, and re
         executionMode: 'forger',
         connectMode: null,
       }],
+      getPersonalAgentHeartbeat: async () => ({
+        supported: true,
+        count: 2,
+        ids: ['agent-1', '../unsafe-agent'],
+        agents: [
+          { id: 'agent-1', name: 'Research partner', description: 'Reviews planning notes.' },
+          { id: '../unsafe-agent', name: 'Unsafe' },
+        ],
+        activeSessionRequestIds: ['12', '../bad-request', '12'],
+      }),
       handleFriendshipEvent: async (event) => {
         friendshipEvents.push(event);
       },
@@ -163,7 +178,22 @@ test('CloudDeviceManager registers per-account devices, encrypts secrets, and re
         message.installed_apps[0].connectMode === null &&
         message.runtime_statuses['finance-os'].executionPhase === 'running' &&
         message.runtime_statuses['finance-os'].executionMode === 'forger' &&
-        message.runtime_statuses['finance-os'].connectMode === null,
+        message.runtime_statuses['finance-os'].connectMode === null &&
+        message.agent_access_supported === true &&
+        message.agent_count === 1 &&
+        message.agent_ids.length === 1 &&
+        message.agent_ids[0] === 'agent-1' &&
+        message.personal_agents_supported === true &&
+        message.personal_agent_count === 1 &&
+        message.personal_agent_ids.length === 1 &&
+        message.personal_agent_ids[0] === 'agent-1' &&
+        message.active_agent_access_request_ids.length === 1 &&
+        message.active_agent_access_request_ids[0] === '12' &&
+        message.agent_session_reconciliation === true &&
+        message.personal_agent_sessions.active_request_ids[0] === '12' &&
+        message.personal_agents.ids[0] === 'agent-1' &&
+        message.personal_agents.agents[0].name === 'Research partner' &&
+        message.personal_agents.agents[0].description === 'Reviews planning notes.',
       ));
     } finally {
       manager.stop();
@@ -185,7 +215,7 @@ test('CloudDeviceManager handles mobile remote session requests over DeviceChann
   });
 
   await withMockedElectron({ safeStorage: createSafeStorage() }, async (require) => {
-    clearDistModule('main/cloud-device-manager.js');
+    clearCloudDeviceModules();
     globalThis.WebSocket = FakeWebSocket;
     const { CloudDeviceManager } = require('../../dist-electron/main/cloud-device-manager.js');
     const reports = [];
@@ -296,7 +326,7 @@ test('CloudDeviceManager handles mobile app access requests for local network an
   });
 
   await withMockedElectron({ safeStorage: createSafeStorage() }, async (require) => {
-    clearDistModule('main/cloud-device-manager.js');
+    clearCloudDeviceModules();
     globalThis.WebSocket = FakeWebSocket;
     const { CloudDeviceManager } = require('../../dist-electron/main/cloud-device-manager.js');
     const reports = [];
@@ -390,6 +420,242 @@ test('CloudDeviceManager handles mobile app access requests for local network an
   });
 });
 
+test('CloudDeviceManager handles personal agent access requests over DeviceChannel', async (t) => {
+  const root = await tmpRoot('cloud-device-agent-access');
+  const originalWebSocket = globalThis.WebSocket;
+  t.after(async () => {
+    globalThis.WebSocket = originalWebSocket;
+    FakeWebSocket.instances = [];
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  await withMockedElectron({ safeStorage: createSafeStorage() }, async (require) => {
+    clearCloudDeviceModules();
+    globalThis.WebSocket = FakeWebSocket;
+    const { CloudDeviceManager } = require('../../dist-electron/main/cloud-device-manager.js');
+    const reports = [];
+    const requested = [];
+    const disconnected = [];
+    const remoteActivities = [];
+    const backendClient = {
+      async registerDevice(input) {
+        return {
+          id: 73,
+          deviceUid: input.deviceUid,
+          name: 'Device',
+          platform: 'darwin_arm64',
+          paired: true,
+          online: true,
+          installedApps: [],
+        };
+      },
+      async listDevices() {
+        return [
+          { id: 73, deviceUid: 'uid', name: 'Device', kind: 'desktop', platform: 'darwin_arm64', paired: true, online: true, installedApps: [] },
+          { id: 91, deviceUid: 'phone', name: 'Felipe iPhone', kind: 'mobile', platform: 'ios', paired: true, online: true, installedApps: [] },
+        ];
+      },
+      async reportAgentAccessRequest(input) {
+        reports.push(input);
+      },
+    };
+    const manager = new CloudDeviceManager({
+      filePath: path.join(root, 'cloud-device.json'),
+      accountStorageKey: () => 'person@example.com',
+      backendBaseUrl: 'https://cloud.test',
+      backendClient: () => backendClient,
+      token: () => 'session-token',
+      getCloudIdentity: async () => ({ publicKey: 'public', keyFingerprint: 'fingerprint' }),
+      getInstalledApps: () => [],
+      onRemoteActivity: (event) => {
+        remoteActivities.push(event);
+      },
+      handleAgentAccessRequest: async (request) => {
+        requested.push(request);
+        return {
+          success: true,
+          status: {
+            active: true,
+            agentId: request.agentId,
+            state: 'ready',
+            sessionId: 'agent-session-1',
+            localUrl: 'http://127.0.0.1:4567',
+            tunnelUrl: 'https://agent-session.example.test',
+            authorizationToken: 'scoped-session-token',
+            allowedPaths: ['/health', '/conversations/start', '/messages/send', '/conversations/:id'],
+          },
+        };
+      },
+      handleAgentAccessDisconnect: async (request) => {
+        disconnected.push(request);
+        return {
+          success: true,
+          status: {
+            active: false,
+            agentId: request.agentId ?? 'agent-1',
+            state: 'closed',
+            sessionId: request.sessionId,
+          },
+        };
+      },
+    });
+
+    await manager.registerCloudDevice({ name: 'Device' });
+    const socket = FakeWebSocket.instances[0];
+    socket.emit('open');
+    socket.emit('message', {
+      data: JSON.stringify({
+        message: {
+          type: 'desktop_agent_access_requested',
+          request_id: 301,
+          agent_id: 'agent-1',
+          agent_name: 'Research partner',
+          requested_by_device_id: 91,
+          requested_by_device_name: 'Felipe iPhone',
+        },
+      }),
+    });
+    await waitFor(() => reports.length === 2);
+    socket.emit('message', {
+      data: JSON.stringify({
+        message: {
+          type: 'agent_access_requested',
+          request_id: 302,
+          agent_id: '/unsafe',
+        },
+      }),
+    });
+    await waitFor(() => reports.length === 3);
+
+    assert.deepEqual(requested, [{ requestId: '301', agentId: 'agent-1', agentName: 'Research partner', requestedByDeviceId: 91, requestedByDeviceName: 'Felipe iPhone' }]);
+    assert.deepEqual(reports.map((report) => report.status), ['preparing', 'ready', 'error']);
+    assert.deepEqual(remoteActivities.map((event) => ({
+      kind: event.kind,
+      targetId: event.targetId,
+      targetName: event.targetName,
+      state: event.state,
+      requester: event.requesterMobileDevice?.name,
+    })).slice(0, 2), [
+      { kind: 'agent', targetId: 'agent-1', targetName: 'Research partner', state: 'preparing', requester: 'Felipe iPhone' },
+      { kind: 'agent', targetId: 'agent-1', targetName: 'Research partner', state: 'active', requester: 'Felipe iPhone' },
+    ]);
+    assert.equal(reports[1].agentStatus.sessionId, 'agent-session-1');
+    assert.equal(reports[1].agentStatus.localUrl, undefined);
+    assert.equal(reports[1].agentStatus.tunnelUrl, 'https://agent-session.example.test');
+    assert.equal(reports[1].agentStatus.authorizationToken, 'scoped-session-token');
+    assert.deepEqual(reports[1].agentStatus.allowedPaths, ['/health', '/conversations/start', '/messages/send', '/conversations/:id']);
+    assert.equal(reports[2].technicalCode, 'agent_access_request_invalid');
+    socket.emit('message', {
+      data: JSON.stringify({
+        message: {
+          type: 'personal_agent_access_requested',
+          action: 'disconnect',
+          request_id: 303,
+          agent_id: 'agent-1',
+          session_id: 'agent-session-1',
+        },
+      }),
+    });
+    await waitFor(() => reports.length === 4);
+    assert.deepEqual(disconnected, [{ requestId: '303', agentId: 'agent-1', sessionId: 'agent-session-1' }]);
+    assert.equal(reports[3].status, 'closed');
+    assert.equal(reports[3].agentStatus.state, 'closed');
+    manager.stop();
+  });
+});
+
+test('CloudDeviceManager logs agent access report failures without blocking tunnel startup', async (t) => {
+  const root = await tmpRoot('cloud-device-agent-report-failure');
+  const originalWebSocket = globalThis.WebSocket;
+  t.after(async () => {
+    globalThis.WebSocket = originalWebSocket;
+    FakeWebSocket.instances = [];
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  await withMockedElectron({ safeStorage: createSafeStorage() }, async (require) => {
+    clearCloudDeviceModules();
+    globalThis.WebSocket = FakeWebSocket;
+    const { CloudDeviceManager } = require('../../dist-electron/main/cloud-device-manager.js');
+    const requested = [];
+    const logs = [];
+    const backendClient = {
+      async registerDevice(input) {
+        return {
+          id: 73,
+          deviceUid: input.deviceUid,
+          name: 'Device',
+          platform: 'darwin_arm64',
+          paired: true,
+          online: true,
+          installedApps: [],
+        };
+      },
+      async listDevices() {
+        return [
+          { id: 73, deviceUid: 'uid', name: 'Device', kind: 'desktop', platform: 'darwin_arm64', paired: true, online: true, installedApps: [] },
+        ];
+      },
+      async reportAgentAccessRequest(input) {
+        const error = new Error(`report_failed_${input.status}`);
+        error.technicalCode = `agent_access_request_report_failed_${input.status}`;
+        throw error;
+      },
+    };
+    const manager = new CloudDeviceManager({
+      filePath: path.join(root, 'cloud-device.json'),
+      accountStorageKey: () => 'person@example.com',
+      backendBaseUrl: 'https://cloud.test',
+      backendClient: () => backendClient,
+      token: () => 'session-token',
+      getCloudIdentity: async () => ({ publicKey: 'public', keyFingerprint: 'fingerprint' }),
+      getInstalledApps: () => [],
+      appendInstallLog: async (event, payload) => {
+        logs.push({ event, payload });
+      },
+      handleAgentAccessRequest: async (request) => {
+        requested.push(request);
+        return {
+          success: true,
+          status: {
+            active: true,
+            agentId: request.agentId,
+            state: 'ready',
+            sessionId: 'agent-session-1',
+            tunnelUrl: 'https://agent-session.example.test',
+            authorizationToken: 'scoped-session-token',
+            allowedPaths: ['/health'],
+          },
+        };
+      },
+    });
+
+    await manager.registerCloudDevice({ name: 'Device' });
+    const socket = FakeWebSocket.instances[0];
+    socket.emit('open');
+    socket.emit('message', {
+      data: JSON.stringify({
+        message: {
+          type: 'desktop_agent_access_requested',
+          request_id: 401,
+          agent_id: 'agent-1',
+        },
+      }),
+    });
+    await waitFor(() => requested.length === 1 && logs.some((entry) => entry.event === 'agent_access:cloud_report_failed' && entry.payload?.status === 'ready'));
+
+    assert.deepEqual(requested, [{ requestId: '401', agentId: 'agent-1' }]);
+    assert.deepEqual(logs
+      .filter((entry) => entry.event === 'agent_access:cloud_report_failed')
+      .map((entry) => [entry.payload.requestId, entry.payload.status, entry.payload.technicalCode]), [
+      ['401', 'preparing', 'agent_access_request_report_failed_preparing'],
+      ['401', 'ready', 'agent_access_request_report_failed_ready'],
+    ]);
+    assert.equal(logs.some((entry) => JSON.stringify(entry).includes('scoped-session-token')), false);
+    manager.stop();
+  });
+});
+
 test('CloudDeviceManager handles mobile app control requests for app stop', async (t) => {
   const root = await tmpRoot('cloud-device-app-control');
   const originalWebSocket = globalThis.WebSocket;
@@ -400,7 +666,7 @@ test('CloudDeviceManager handles mobile app control requests for app stop', asyn
   });
 
   await withMockedElectron({ safeStorage: createSafeStorage() }, async (require) => {
-    clearDistModule('main/cloud-device-manager.js');
+    clearCloudDeviceModules();
     globalThis.WebSocket = FakeWebSocket;
     const { CloudDeviceManager } = require('../../dist-electron/main/cloud-device-manager.js');
     const reports = [];
@@ -487,7 +753,7 @@ test('CloudDeviceManager tolerates malformed socket frames, subscription rejecti
   });
 
   await withMockedElectron({ safeStorage: createSafeStorage() }, async (require) => {
-    clearDistModule('main/cloud-device-manager.js');
+    clearCloudDeviceModules();
     globalThis.WebSocket = FakeWebSocket;
     const { CloudDeviceManager } = require('../../dist-electron/main/cloud-device-manager.js');
     let token = 'session-token';
@@ -584,7 +850,7 @@ test('CloudDeviceManager reconnects when an open socket stops receiving cloud ac
   });
 
   await withMockedElectron({ safeStorage: createSafeStorage() }, async (require) => {
-    clearDistModule('main/cloud-device-manager.js');
+    clearCloudDeviceModules();
     globalThis.WebSocket = FakeWebSocket;
     const { CloudDeviceManager } = require('../../dist-electron/main/cloud-device-manager.js');
     const backendClient = {
@@ -652,7 +918,7 @@ test('CloudDeviceManager socket monitor handles stale generations and closed soc
   });
 
   await withMockedElectron({ safeStorage: createSafeStorage() }, async (require) => {
-    clearDistModule('main/cloud-device-manager.js');
+    clearCloudDeviceModules();
     const intervalCallbacks = [];
     globalThis.WebSocket = FakeWebSocket;
     globalThis.setInterval = (callback) => {
@@ -758,7 +1024,7 @@ test('CloudDeviceManager supports unauthenticated idle state and plaintext devic
       decryptString: (buffer) => buffer.toString('utf8'),
     },
   }, async (require) => {
-    clearDistModule('main/cloud-device-manager.js');
+    clearCloudDeviceModules();
     globalThis.WebSocket = FakeWebSocket;
     const { CloudDeviceManager } = require('../../dist-electron/main/cloud-device-manager.js');
     let token;
@@ -816,7 +1082,7 @@ test('CloudDeviceManager reloads encrypted stored devices and resets state when 
   });
 
   await withMockedElectron({ safeStorage: createSafeStorage() }, async (require) => {
-    clearDistModule('main/cloud-device-manager.js');
+    clearCloudDeviceModules();
     globalThis.WebSocket = FakeWebSocket;
     const { CloudDeviceManager } = require('../../dist-electron/main/cloud-device-manager.js');
     const filePath = path.join(root, 'cloud-device.json');
@@ -901,7 +1167,7 @@ test('CloudDeviceManager covers backend absence, fallback errors, optional pairi
   });
 
   await withMockedElectron({ safeStorage: createSafeStorage() }, async (require) => {
-    clearDistModule('main/cloud-device-manager.js');
+    clearCloudDeviceModules();
     globalThis.WebSocket = FakeWebSocket;
     const { CloudDeviceManager } = require('../../dist-electron/main/cloud-device-manager.js');
 
@@ -990,6 +1256,30 @@ test('CloudDeviceManager covers backend absence, fallback errors, optional pairi
     missingListToken = undefined;
     assert.equal((await missingListClient.getState()).currentDevice.id, 42);
 
+    let mobileAuthorizations = [{
+      id: 77,
+      mobileDeviceId: 12,
+      desktopDeviceId: 41,
+      active: true,
+      mobileDevice: {
+        id: 12,
+        deviceUid: 'mobile-12',
+        name: 'Felipe iPhone',
+        kind: 'mobile',
+        paired: true,
+        online: false,
+        installedApps: [],
+      },
+      desktopDevice: {
+        id: 41,
+        deviceUid: 'desktop-41',
+        name: 'Device',
+        kind: 'desktop',
+        paired: true,
+        online: true,
+        installedApps: [],
+      },
+    }];
     const backendClient = {
       async registerDevice(input) {
         return {
@@ -1005,6 +1295,12 @@ test('CloudDeviceManager covers backend absence, fallback errors, optional pairi
       async listDevices() {
         return [];
       },
+      async listMobileDesktopAuthorizations() {
+        return mobileAuthorizations;
+      },
+      async revokeMobileDesktopAuthorization(authorizationId) {
+        mobileAuthorizations = mobileAuthorizations.filter((authorization) => authorization.id !== authorizationId);
+      },
       async createDevicePairingCode() {},
     };
     const reconnecting = new CloudDeviceManager({
@@ -1018,6 +1314,10 @@ test('CloudDeviceManager covers backend absence, fallback errors, optional pairi
     });
 
     await reconnecting.registerCloudDevice({ name: 'Device' });
+    assert.equal((await reconnecting.getState()).mobileDesktopAuthorizations.length, 1);
+    const unlinked = await reconnecting.unlinkMobileDeviceFromDesktop(77);
+    assert.equal(unlinked.success, true);
+    assert.equal(unlinked.mobileDesktopAuthorizations.length, 0);
     const socket = FakeWebSocket.instances.at(-1);
     socket.emit('open');
     socket.emit('message', {

@@ -80,10 +80,21 @@ export interface MobilePairingRequestSummary {
   desktopDevice: CloudDeviceSummary;
 }
 
+export interface MobileDesktopAuthorizationSummary {
+  id: number;
+  mobileDeviceId: number;
+  desktopDeviceId: number;
+  active: boolean;
+  revokedAt?: string;
+  mobileDevice: CloudDeviceSummary;
+  desktopDevice: CloudDeviceSummary;
+}
+
 export interface CloudDevicesState {
   currentDevice?: CloudDeviceSummary;
   devices: CloudDeviceSummary[];
   pairingRequests?: MobilePairingRequestSummary[];
+  mobileDesktopAuthorizations?: MobileDesktopAuthorizationSummary[];
   connected: boolean;
   registrationRequired?: boolean;
   pairingCode?: string;

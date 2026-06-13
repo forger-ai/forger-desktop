@@ -41,6 +41,7 @@ export interface RemoteNetworkShareManagerOptions {
   getCurrentDeviceId: () => Promise<number | undefined>;
   appendInstallLog: (event: string, payload?: Record<string, unknown>) => Promise<void>;
   emitRuntimeStatus: (appId: string, remoteNetworkShare: RemoteNetworkShareStatus) => void;
+  onStatusChanged?: (status: RemoteNetworkShareStatus) => void;
   ensureRuntimeInstalled: (type: 'node' | 'python', version: string) => Promise<RuntimeBinarySet>;
   normalizeNodeRuntimeVersion: (value?: string | null) => string;
   requiredNodeVersionForApp: (appId: string) => string | undefined;
@@ -106,6 +107,7 @@ export class RemoteNetworkShareManager {
     };
     this.pendingStatuses.set(appId, preparingStatus);
     this.options.emitRuntimeStatus(appId, preparingStatus);
+    this.options.onStatusChanged?.(preparingStatus);
 
     let sessionRowId: number | undefined;
     let sessionId = '';
@@ -249,6 +251,7 @@ export class RemoteNetworkShareManager {
       };
       this.pendingStatuses.set(appId, status);
       this.options.emitRuntimeStatus(appId, status);
+      this.options.onStatusChanged?.(status);
       await this.options.appendInstallLog('remote_network_share:start_failed', {
         appId,
         sessionIdPrefix: sanitizeSessionIdPrefix(sessionId),
@@ -275,6 +278,7 @@ export class RemoteNetworkShareManager {
     ]);
     const status: RemoteNetworkShareStatus = { active: false, appId, state: 'closed' };
     this.options.emitRuntimeStatus(appId, status);
+    this.options.onStatusChanged?.(status);
     await this.options.appendInstallLog('remote_network_share:stopped', {
       appId,
       sessionIdPrefix: sanitizeSessionIdPrefix(state.sessionId),
@@ -511,6 +515,7 @@ export class RemoteNetworkShareManager {
 
   private emit(state: ShareState): void {
     this.options.emitRuntimeStatus(state.appId, state.status);
+    this.options.onStatusChanged?.(state.status);
     void this.options.backendClient()?.reportRemoteTunnelSession({
       sessionId: state.sessionRowId,
       status: state.status.state,

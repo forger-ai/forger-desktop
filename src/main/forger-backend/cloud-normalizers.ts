@@ -2,6 +2,7 @@ import type {
   CloudAppShareKind,
   CloudAppShareMessageDetail,
   CloudDeviceSummary,
+  MobileDesktopAuthorizationSummary,
   MobilePairingRequestSummary,
   CloudFriendship,
   CloudFriendUser,
@@ -109,6 +110,28 @@ export const normalizeMobilePairingRequest = (value: unknown): MobilePairingRequ
     code: typeof record.code === 'string' ? record.code : undefined,
     codeExpiresAt: typeof record.code_expires_at === 'string' ? record.code_expires_at : undefined,
     expiresAt,
+    mobileDevice,
+    desktopDevice,
+  };
+};
+
+export const normalizeMobileDesktopAuthorization = (value: unknown): MobileDesktopAuthorizationSummary | undefined => {
+  if (!value || typeof value !== 'object') return undefined;
+  const record = value as Record<string, unknown>;
+  const id = Number(record.id);
+  const mobileDeviceId = Number(record.mobile_device_id);
+  const desktopDeviceId = Number(record.desktop_device_id);
+  const mobileDevice = normalizeCloudDevice(record.mobile_device);
+  const desktopDevice = normalizeCloudDevice(record.desktop_device);
+  if (!Number.isFinite(id) || !Number.isFinite(mobileDeviceId) || !Number.isFinite(desktopDeviceId) || !mobileDevice || !desktopDevice) {
+    return undefined;
+  }
+  return {
+    id,
+    mobileDeviceId,
+    desktopDeviceId,
+    active: record.active !== false,
+    revokedAt: typeof record.revoked_at === 'string' ? record.revoked_at : undefined,
     mobileDevice,
     desktopDevice,
   };

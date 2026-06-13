@@ -5,6 +5,7 @@ import EventRepeatRounded from '@mui/icons-material/EventRepeatRounded';
 import ConstructionRounded from '@mui/icons-material/ConstructionRounded';
 import DevicesRounded from '@mui/icons-material/DevicesRounded';
 import InsertDriveFileRounded from '@mui/icons-material/InsertDriveFileRounded';
+import SmartToyRounded from '@mui/icons-material/SmartToyRounded';
 import TableChartRounded from '@mui/icons-material/TableChartRounded';
 import FeedbackRounded from '@mui/icons-material/FeedbackRounded';
 import PeopleRounded from '@mui/icons-material/PeopleRounded';
@@ -34,6 +35,7 @@ export type View =
   | 'apps'
   | 'catalog'
   | 'chat'
+  | 'agents'
   | 'create'
   | 'feedback'
   | 'friends'
@@ -62,6 +64,7 @@ interface SidebarProps {
 
 const defaultNav = [
   { id: 'chat' as const, icon: <AutoAwesomeRounded /> },
+  { id: 'agents' as const, icon: <SmartToyRounded /> },
   { id: 'apps' as const, icon: <AppsRounded /> },
   { id: 'catalog' as const, icon: <StorefrontRounded /> },
   { id: 'friends' as const, icon: <PeopleRounded /> },
@@ -115,6 +118,7 @@ export function Sidebar({ currentView, onNavigate, t, desktopUpdateState, advanc
     apps: t.nav.apps,
     catalog: t.nav.catalog,
     chat: t.nav.chat,
+    agents: t.nav.agents,
     create: t.nav.create,
     feedback: t.nav.feedback,
     friends: 'Social',
@@ -132,9 +136,10 @@ export function Sidebar({ currentView, onNavigate, t, desktopUpdateState, advanc
     backgroundTaskDetail: t.backgroundTasks.title,
   };
   const showUpdateBanner = desktopUpdateState.status === 'available' || desktopUpdateState.status === 'ready';
+  const defaultNavItems = defaultNav.filter((item) => item.id !== 'friends' || showForumNav);
   const mainNav = advancedMode
-    ? [defaultNav[0], defaultNav[1], defaultNav[2], ...(showForumNav ? [defaultNav[3]] : []), defaultNav[4], ...advancedNav]
-    : [defaultNav[0], defaultNav[1], defaultNav[2], ...(showForumNav ? [defaultNav[3]] : []), defaultNav[4]];
+    ? [...defaultNavItems, ...advancedNav]
+    : defaultNavItems;
 
   return (
     <Box

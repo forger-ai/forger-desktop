@@ -45,8 +45,9 @@ export interface ForgerMcpSessionRef {
 interface AgentMcpSession {
   runId: string;
   appId: string;
-  caller: 'desktop-chat' | 'app-agent' | 'automation' | 'free-chat';
+  caller: 'desktop-chat' | 'app-agent' | 'automation' | 'free-chat' | 'personal-agent';
   appIds: string[];
+  officialToolActionIds: string[];
   locale?: string;
   token: string;
   createdAt: string;
@@ -55,6 +56,7 @@ interface AgentMcpSession {
 export interface ForgerMcpSessionAccess {
   caller: AgentMcpSession['caller'];
   appIds?: string[];
+  officialToolActionIds?: string[];
   locale?: string;
 }
 
@@ -222,6 +224,7 @@ export class ForgerMcpServer {
       appId,
       caller: access?.caller ?? 'desktop-chat',
       appIds: access?.appIds ?? (appId === 'forger' ? [] : [appId]),
+      officialToolActionIds: access?.officialToolActionIds ?? [],
       locale: access?.locale,
       token,
       createdAt: new Date().toISOString(),
@@ -393,7 +396,9 @@ export class ForgerMcpServer {
   private async getMcpTools(session: AgentMcpSession): Promise<ForgerMcpTool[]> {
     const allowedOfficialActions = session.caller === 'app-agent'
       ? await this.options.listOfficialToolActionIdsForApp(session.appId)
-      : null;
+      : session.caller === 'personal-agent'
+        ? new Set(session.officialToolActionIds)
+        : null;
     const tools = this.getAllToolDefinitions().filter((tool) => {
       if (!isOfficialTool(tool.id)) {
         return true;
@@ -536,6 +541,14 @@ export class ForgerMcpServer {
         technicalCode: 'app_tool_grant_input_invalid',
       };
     }
+    if (session.caller === 'personal-agent' && !session.appIds.includes(input.appId)) {
+      return {
+        success: false,
+        appId: input.appId,
+        userMessage: getSharedCopy(session.locale).tools.unavailable,
+        technicalCode: 'personal_agent_app_not_granted',
+      };
+    }
     const preview = await this.options.previewAppToolGrant(input, session.locale);
     if (!preview.success) {
       return preview;
@@ -647,6 +660,15 @@ export class ForgerMcpServer {
     });
 
     if (isOfficialTool(toolId)) {
+      if (session.caller === 'personal-agent' && !session.officialToolActionIds.includes(toolId)) {
+        const result = {
+          success: false,
+          userMessage: getSharedCopy(session.locale).tools.unavailable,
+          technicalCode: 'personal_agent_tool_not_granted',
+        };
+        await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
+        return result;
+      }
       const officialToolId = getOfficialToolIdForAction(toolId);
       const validation = await this.options.validateOfficialTool(
         { toolId: officialToolId, actionId: toolId, input: args },
@@ -857,6 +879,15 @@ export class ForgerMcpServer {
     }
 
     const appId = getToolAppId(session, args);
+    if (session.caller === 'personal-agent' && isAppScopedTool(toolId) && !session.appIds.includes(appId)) {
+      const result = {
+        success: false,
+        userMessage: getSharedCopy(session.locale).tools.unavailable,
+        technicalCode: 'personal_agent_app_not_granted',
+      };
+      await this.options.appendInstallLog('agent_tool:call_result', { appId, runId: session.runId, toolId, result });
+      return withToolAuthorization(result, approval);
+    }
 
     if (toolId === 'forger_get_app_runtime_status') {
       const result = { success: true, status: this.options.getRuntimeStatus(appId) };
@@ -968,6 +999,22 @@ const getOfficialToolIdForAction = (toolId: AgentToolId): string => {
 };
 
 const isInternalMcpTool = (toolId: AgentToolId): boolean => toolId === 'forger_ask_question';
+
+const APP_SCOPED_TOOLS = new Set<AgentToolId>([
+  'forger_request_app_tool_grant',
+  'forger_list_app_prompts',
+  'forger_test_app_prompt',
+  'forger_update_app_prompt',
+  'forger_restore_app_prompt',
+  'forger_get_app_runtime_status',
+  'forger_open_app',
+  'forger_stop_app',
+  'forger_restart_app',
+  'forger_refresh_app_view',
+  'forger_update_app',
+]);
+
+const isAppScopedTool = (toolId: AgentToolId): boolean => APP_SCOPED_TOOLS.has(toolId);
 
 const cleanString = (value: unknown): string => typeof value === 'string' ? value.trim() : '';
 

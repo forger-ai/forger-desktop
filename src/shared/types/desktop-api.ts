@@ -21,6 +21,9 @@ import type { AgentToolPackageDefinition, AgentToolSettings, UpdateAgentToolAppr
 import type { PickedChatFile, FilesStageForChatInput, FilesDiscardStagedForChatInput, FilesActionResult, FilesListInput, ForgerFileRecord, ForgerFileCategory, FilesCreateCategoryInput, FilesRenameCategoryInput, FilesDeleteCategoryInput, FilesImportInput, FilesMoveInput, FilesRenameInput, FilesDeleteInput, DbListTablesResponse, DbQueryTableResponse } from './data';
 import type { Automation, AutomationRun, AutomationRunSummary, AutomationUpsertInput, WindowControlState } from './automations';
 import type { BackgroundTask, BackgroundTaskEvent, BackgroundTaskUpsertInput } from './background-tasks';
+import type { LlmRunsSnapshot } from './llm-runs';
+import type { PersonalAgent, PersonalAgentConversation, PersonalAgentConversationEvent, PersonalAgentConversationGetInput, PersonalAgentConversationsListInput, PersonalAgentConversationStartInput, PersonalAgentCreateInput, PersonalAgentDeleteInput, PersonalAgentGrantOptions, PersonalAgentMessageSendInput, PersonalAgentUpdatePermissionsInput, PersonalAgentWorkspaceEntry, PersonalAgentWorkspaceFile, PersonalAgentWorkspaceFileReadInput, PersonalAgentWorkspaceFileWriteInput, PersonalAgentWorkspaceListInput } from './personal-agents';
+import type { RemoteActivitySnapshot } from './remote-activity';
 
 export interface ForgerDesktopApi {
   listInstalledApps: () => Promise<AppSummary[]>;
@@ -56,6 +59,8 @@ export interface ForgerDesktopApi {
   startRemoteNetworkShare: (appId: string) => Promise<RemoteNetworkShareResult>;
   stopRemoteNetworkShare: (appId: string) => Promise<RemoteNetworkShareResult>;
   getRemoteNetworkShareStatus: (appId: string) => Promise<RemoteNetworkShareStatus>;
+  getRemoteActivity: () => Promise<RemoteActivitySnapshot>;
+  onRemoteActivityChanged: (listener: (event: RemoteActivitySnapshot) => void) => () => void;
   getAppSecrets: (appId: string) => Promise<AppSecretsState>;
   listUserSecrets: () => Promise<UserSecretSummary[]>;
   createUserSecret: (input: CreateUserSecretInput) => Promise<SecretMutationResult>;
@@ -87,9 +92,11 @@ export interface ForgerDesktopApi {
   getCloudStorageUsage: () => Promise<CloudStorageUsage | null>;
   getCloudDevices: () => Promise<CloudDevicesState>;
   registerCloudDevice: (input: { name: string }) => Promise<CloudDevicesState & { success: boolean }>;
+  unlinkMobileDeviceFromDesktop: (authorizationId: number) => Promise<CloudDevicesState & { success: boolean }>;
   generateDevicePairingCode: () => Promise<CloudDevicesState & { success: boolean }>;
   acceptMobilePairingRequest: (requestId: number) => Promise<CloudDevicesState & { success: boolean }>;
   rejectMobilePairingRequest: (requestId: number) => Promise<CloudDevicesState & { success: boolean }>;
+  deleteMobilePairingRequest: (requestId: number) => Promise<CloudDevicesState & { success: boolean }>;
   listFriends: () => Promise<CloudFriendship[]>;
   listMySocialApps: () => Promise<SocialUserAppList>;
   uploadSocialApp: (input: SocialUserAppUploadInput) => Promise<{ success: boolean; app?: SocialUserApp; share?: SocialUserAppShare; userMessage?: string; technicalCode?: string }>;
@@ -158,6 +165,21 @@ export interface ForgerDesktopApi {
   memoryCreate: (input: MemoryCreateInput) => Promise<MemoryEntry>;
   memoryUpdate: (input: MemoryUpdateInput) => Promise<MemoryEntry>;
   memoryDelete: (id: string) => Promise<{ success: boolean }>;
+  getLlmRunsSnapshot: () => Promise<LlmRunsSnapshot>;
+  onLlmRunsSnapshotChanged: (listener: (snapshot: LlmRunsSnapshot) => void) => () => void;
+  personalAgentsList: () => Promise<PersonalAgent[]>;
+  personalAgentsCreate: (input: PersonalAgentCreateInput) => Promise<PersonalAgent>;
+  personalAgentGrantOptionsList: () => Promise<PersonalAgentGrantOptions>;
+  personalAgentUpdatePermissions: (input: PersonalAgentUpdatePermissionsInput) => Promise<PersonalAgent>;
+  personalAgentsDelete: (input: PersonalAgentDeleteInput) => Promise<{ success: boolean }>;
+  personalAgentConversationsList: (input: PersonalAgentConversationsListInput) => Promise<PersonalAgentConversation[]>;
+  personalAgentWorkspaceList: (input: PersonalAgentWorkspaceListInput) => Promise<PersonalAgentWorkspaceEntry[]>;
+  personalAgentWorkspaceFileRead: (input: PersonalAgentWorkspaceFileReadInput) => Promise<PersonalAgentWorkspaceFile>;
+  personalAgentWorkspaceFileWrite: (input: PersonalAgentWorkspaceFileWriteInput) => Promise<PersonalAgentWorkspaceFile>;
+  personalAgentStartConversation: (input: PersonalAgentConversationStartInput) => Promise<PersonalAgentConversation>;
+  personalAgentSendMessage: (input: PersonalAgentMessageSendInput) => Promise<PersonalAgentConversation>;
+  personalAgentGetConversation: (input: PersonalAgentConversationGetInput) => Promise<PersonalAgentConversation | null>;
+  onPersonalAgentConversationEvent: (listener: (event: PersonalAgentConversationEvent) => void) => () => void;
   chatStartRun: (input: ChatStartRunInput) => Promise<{ runId: string; status: ChatRunStatus }>;
   chatGetRun: (input: ChatGetRunInput) => Promise<ChatRun | null>;
   chatCancelRun: (input: ChatCancelRunInput) => Promise<{ success: boolean }>;

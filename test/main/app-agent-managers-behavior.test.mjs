@@ -6,7 +6,7 @@ import Module from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 
 const require = createRequire(import.meta.url);
 
@@ -1300,19 +1300,35 @@ test('conversation manager executes a codex run with scoped workspace, MCP sessi
           () => events.find((event) => event.type === 'run.failed' && event.run.runId === failed.activeRun.runId),
           'conversation_outside_workspace_failed',
         );
-          assert.equal(failedEvent.run.error, 'agent_run_workspace_outside_app');
+        assert.equal(failedEvent.run.error, 'agent_run_workspace_outside_app');
 
-          const missingWorkspaceConversation = await manager.create('finance-os', { title: 'Missing workspace' });
-          const missingWorkspace = await manager.sendMessage('finance-os', {
-            conversationId: missingWorkspaceConversation.conversationId,
-            message: 'Try missing workspace',
-            workspacePath: path.join(appRoot, 'missing-workspace'),
-          });
-          const missingWorkspaceFailed = await waitFor(
-            () => events.find((event) => event.type === 'run.failed' && event.run.runId === missingWorkspace.activeRun.runId),
-            'conversation_missing_workspace_failed',
-          );
-          assert.equal(missingWorkspaceFailed.run.error, 'agent_run_workspace_missing');
+        const outsideRoot = path.join(roots.root, 'outside-realpath');
+        const symlinkWorkspace = path.join(appRoot, 'linked-outside');
+        await mkdir(outsideRoot, { recursive: true });
+        await symlink(outsideRoot, symlinkWorkspace);
+        const symlinkConversation = await manager.create('finance-os', { title: 'Symlink escape' });
+        const symlinkRun = await manager.sendMessage('finance-os', {
+          conversationId: symlinkConversation.conversationId,
+          message: 'Try symlink',
+          workspacePath: symlinkWorkspace,
+        });
+        const symlinkFailed = await waitFor(
+          () => events.find((event) => event.type === 'run.failed' && event.run.runId === symlinkRun.activeRun.runId),
+          'conversation_symlink_workspace_failed',
+        );
+        assert.equal(symlinkFailed.run.error, 'agent_run_workspace_outside_app');
+
+        const missingWorkspaceConversation = await manager.create('finance-os', { title: 'Missing workspace' });
+        const missingWorkspace = await manager.sendMessage('finance-os', {
+          conversationId: missingWorkspaceConversation.conversationId,
+          message: 'Try missing workspace',
+          workspacePath: path.join(appRoot, 'missing-workspace'),
+        });
+        const missingWorkspaceFailed = await waitFor(
+          () => events.find((event) => event.type === 'run.failed' && event.run.runId === missingWorkspace.activeRun.runId),
+          'conversation_missing_workspace_failed',
+        );
+        assert.equal(missingWorkspaceFailed.run.error, 'agent_run_workspace_missing');
 
           const oversizedConversation = await manager.create('finance-os', { title: 'Oversized attachment' });
           const oversized = await manager.sendMessage('finance-os', {

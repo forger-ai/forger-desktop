@@ -52,6 +52,10 @@ type RunEventLike = {
 };
 type TaskEventLike = AppCodexTaskEvent;
 type ConversationEventLike = AppCodexConversationEvent;
+type LlmRunsService = {
+  recordAppAgentConversationEvent: (event: ConversationEventLike, context?: { appName?: string }) => unknown;
+  recordAppPromptTaskEvent: (event: TaskEventLike, context?: { appName?: string }) => unknown;
+};
 type AutomationEventLike = {
   automation: { id: string; selectedAppIds: string[] };
   run?: { id: string; status?: string; error?: unknown; userMessage?: string };
@@ -59,6 +63,7 @@ type AutomationEventLike = {
 type ForgerMcpToolFailure = { appId: string; runId: string; toolName?: unknown; error: unknown };
 type ForgerMcpHttpFailure = { error: unknown; appId?: string; runId?: string };
 type RemoteTunnelCloseEvent = { type: 'remote_tunnel_close'; session_id: string };
+type RemoteAgentSessionCloseEvent = { type: string; agent_id?: string; agentId?: string; session_id?: string; sessionId?: string };
 
 const isRemoteTunnelCloseEvent = (event: unknown): event is RemoteTunnelCloseEvent =>
   Boolean(
@@ -66,6 +71,19 @@ const isRemoteTunnelCloseEvent = (event: unknown): event is RemoteTunnelCloseEve
       && typeof event === 'object'
       && (event as { type?: unknown }).type === 'remote_tunnel_close'
       && typeof (event as { session_id?: unknown }).session_id === 'string',
+  );
+
+const isRemoteAgentSessionCloseEvent = (event: unknown): event is RemoteAgentSessionCloseEvent =>
+  Boolean(
+    event
+      && typeof event === 'object'
+      && ['agent_access_disconnect_requested', 'remote_agent_session_close', 'personal_agent_session_close'].includes(String((event as { type?: unknown }).type))
+      && (
+        typeof (event as { agent_id?: unknown }).agent_id === 'string'
+        || typeof (event as { agentId?: unknown }).agentId === 'string'
+        || typeof (event as { session_id?: unknown }).session_id === 'string'
+        || typeof (event as { sessionId?: unknown }).sessionId === 'string'
+      ),
   );
 
 interface LifecycleService {
@@ -122,7 +140,9 @@ interface MainLifecycleState {
   forgerMcpServer: LifecycleService | null;
   localCatalogJsonUrl: string | undefined;
   localNetworkShareManager: { stopAll?: () => Promise<void> } | null;
+  llmRunsStore?: LlmRunsService;
   remoteNetworkShareManager: { stopAll?: () => Promise<void> } | null;
+  remoteAgentSessionService: { stopAll?: () => Promise<void> } | null;
   mainWindow: BrowserWindow | null;
   memoryMaintenanceManager: MemoryMaintenanceService | null;
   memoryStore: LifecycleService | null;
@@ -138,6 +158,7 @@ interface MainLifecycleState {
     callFromAgent: (input: unknown, access: { appId: string; requireAppGrant: boolean }) => Promise<unknown>;
   }) | null;
   pendingDeepLink: unknown;
+  pendingDeepLinkFlushScheduled: boolean;
   registry: AppRegistry;
   secretsStore: LifecycleService | null;
 }
@@ -205,6 +226,7 @@ interface MainLifecycleDeps {
   getFreePort: () => Promise<number>;
   getLegacyForgerMetadataRoot: () => string;
   getMemoryStore: () => { list: AsyncFn; create: AsyncFn; update: AsyncFn; delete: AsyncFn };
+  getPersonalAgentHeartbeat: AsyncFn;
   getOfficialToolsService: () => NonNullable<MainLifecycleState['officialToolsService']>;
   getPrivateAppsRoot: () => string;
   getPrivateDataRoot: () => string;
@@ -224,6 +246,7 @@ interface MainLifecycleDeps {
   loadCloudSyncSettings: () => Promise<void>;
   loadRegistry: () => Promise<void>;
   loadSettings: () => Promise<void>;
+  llmRunsStore?: LlmRunsService;
   mapBackendCategory: SyncFn;
   openInstalledApp: AsyncFn;
   startLocalNetworkShare: AsyncFn;
@@ -231,6 +254,9 @@ interface MainLifecycleDeps {
   startRemoteNetworkShare: AsyncFn;
   stopRemoteNetworkShare: AsyncFn;
   stopRemoteNetworkShareSession: (sessionId: string) => Promise<unknown>;
+  startRemoteAgentSession: AsyncFn;
+  stopRemoteAgentSession: (agentId: string) => Promise<unknown>;
+  stopRemoteAgentSessionSession: (sessionId: string) => Promise<unknown>;
   openOrFocusAppWindow: (appId: string, appName: string, frontendUrl: string) => Promise<void>;
   registerForgerCloudOAuth: SyncFn;
   registerIpcHandlers: () => void;
@@ -326,6 +352,7 @@ export const registerMainLifecycle = (deps: unknown) => {
     getFreePort,
     getLegacyForgerMetadataRoot,
     getMemoryStore,
+    getPersonalAgentHeartbeat,
     getOfficialToolsService,
     getPrivateAppsRoot,
     getPrivateDataRoot,
@@ -343,6 +370,7 @@ export const registerMainLifecycle = (deps: unknown) => {
     loadCloudSyncSettings,
     loadRegistry,
     loadSettings,
+    llmRunsStore,
     mapBackendCategory,
     openInstalledApp,
     openOrFocusAppWindow,
@@ -367,6 +395,9 @@ export const registerMainLifecycle = (deps: unknown) => {
     stopLocalNetworkShare,
     stopRemoteNetworkShare,
     stopRemoteNetworkShareSession,
+    startRemoteAgentSession,
+    stopRemoteAgentSession,
+    stopRemoteAgentSessionSession,
     stopInstalledApp,
     switchForgerAccountSession,
     terminateProcess,
@@ -507,6 +538,8 @@ export const registerMainLifecycle = (deps: unknown) => {
     token: () => state.forgerAccount.token,
     getCloudIdentity: () => getCloudIdentityStore().getPublicRegistration(),
     getInstalledApps: () => Object.values(state.registry.apps).map(toAppSummary),
+    getPersonalAgentHeartbeat,
+    appendInstallLog,
     handleRemoteSessionRequest: async (request: { appId: string; requestId: string }) => {
       await appendInstallLog('remote_network_share:cloud_request', {
         appId: request.appId,
@@ -524,6 +557,32 @@ export const registerMainLifecycle = (deps: unknown) => {
         return await startLocalNetworkShare(request.appId);
       }
       return await startRemoteNetworkShare(request.appId);
+    },
+    handleAgentAccessRequest: async (request: { agentId: string; agentName?: string; requestId: string; requestedByDeviceId?: number; requestedByDeviceName?: string }) => {
+      await appendInstallLog('agent_access:cloud_request', {
+        agentId: request.agentId,
+        requestId: request.requestId,
+      });
+      return await startRemoteAgentSession(request.agentId, {
+        requestId: request.requestId,
+        requesterMobileDevice: request.requestedByDeviceId && request.requestedByDeviceName
+          ? { id: request.requestedByDeviceId, name: request.requestedByDeviceName }
+          : undefined,
+      });
+    },
+    handleAgentAccessDisconnect: async (request: { agentId?: string; sessionId?: string; requestId?: string }) => {
+      await appendInstallLog('agent_access:cloud_disconnect', {
+        agentId: request.agentId,
+        sessionId: request.sessionId,
+        requestId: request.requestId,
+      });
+      if (request.sessionId) {
+        return await stopRemoteAgentSessionSession(request.sessionId);
+      }
+      if (request.agentId) {
+        return await stopRemoteAgentSession(request.agentId);
+      }
+      return undefined;
     },
     handleAppControlRequest: async (request: { appId: string; requestId: string; action: string }) => {
       await appendInstallLog('app_control:cloud_request', {
@@ -559,6 +618,22 @@ export const registerMainLifecycle = (deps: unknown) => {
         await stopRemoteNetworkShareSession(event.session_id).catch((error) => {
           void appendInstallLog('remote_network_share:cloud_close_failed', {
             sessionId: event.session_id,
+            error: serializeErrorForInstallLog(error),
+          });
+        });
+      }
+      if (isRemoteAgentSessionCloseEvent(event)) {
+        const sessionId = event.session_id ?? event.sessionId;
+        const agentId = event.agent_id ?? event.agentId;
+        const close = sessionId
+          ? stopRemoteAgentSessionSession(sessionId)
+          : agentId
+            ? stopRemoteAgentSession(agentId)
+            : Promise.resolve(undefined);
+        await close.catch((error) => {
+          void appendInstallLog('agent_access:cloud_disconnect_failed', {
+            agentId,
+            sessionId,
             error: serializeErrorForInstallLog(error),
           });
         });
@@ -809,6 +884,9 @@ export const registerMainLifecycle = (deps: unknown) => {
       return Boolean(target && !target.isDestroyed());
     },
     onTaskUpdated: (event: TaskEventLike) => {
+      llmRunsStore?.recordAppPromptTaskEvent(event, {
+        appName: state.registry.apps[event.task.appId]?.name,
+      });
       state.desktopErrorReporter?.reportAppCodexTaskEvent(event);
       const target = appWindows.get(event.task.appId);
       if (target && !target.isDestroyed()) {
@@ -860,6 +938,9 @@ export const registerMainLifecycle = (deps: unknown) => {
       return Boolean(target && !target.isDestroyed());
     },
     onConversationEvent: (event: ConversationEventLike) => {
+      llmRunsStore?.recordAppAgentConversationEvent(event, {
+        appName: state.registry.apps[event.conversation.appId]?.name,
+      });
       state.desktopErrorReporter?.reportAppCodexConversationEvent(event);
       state.desktopRuntimeBridge?.publishAgentEvent(event);
       const target = appWindows.get(event.conversation.appId);
@@ -1023,11 +1104,18 @@ export const registerMainLifecycle = (deps: unknown) => {
   await startupLogger.step('startup:main_window:create', createWindow);
   startupLoading.close();
 
+  const schedulePendingDeepLinkFlush = (): void => {
+    if (!state.mainWindow || !state.pendingDeepLink || state.pendingDeepLinkFlushScheduled) return;
+    state.pendingDeepLinkFlushScheduled = true;
+    state.mainWindow.webContents.once('did-finish-load', () => {
+      state.pendingDeepLinkFlushScheduled = false;
+      flushPendingDeepLink();
+    });
+  };
+
   // Deliver any deep-link captured before the renderer existed (cold
   // boot from `process.argv` or an `open-url` fired during startup).
-  if (state.mainWindow && state.pendingDeepLink) {
-    state.mainWindow.webContents.once('did-finish-load', flushPendingDeepLink);
-  }
+  schedulePendingDeepLinkFlush();
 
   app.on('activate', async () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -1052,23 +1140,41 @@ export const registerMainLifecycle = (deps: unknown) => {
   }
 });
 
-app.on('before-quit', () => {
+let gracefulShutdownStarted = false;
+const performGracefulShutdown = async (): Promise<void> => {
   state.memoryMaintenanceManager?.dispose();
   state.automationManager?.dispose();
   state.appMcpManager?.dispose();
-  void state.localNetworkShareManager?.stopAll?.();
-  void state.remoteNetworkShareManager?.stopAll?.();
-  void state.desktopRuntimeBridge?.stop();
+  await Promise.allSettled([
+    state.localNetworkShareManager?.stopAll?.() ?? Promise.resolve(),
+    state.remoteNetworkShareManager?.stopAll?.() ?? Promise.resolve(),
+    state.remoteAgentSessionService?.stopAll?.() ?? Promise.resolve(),
+  ]);
+  await Promise.resolve(state.desktopRuntimeBridge?.stop());
   state.desktopRuntimeBridge = null;
   state.cloudDeviceManager?.stop();
   state.devCatalogService?.stop?.();
   state.forgerMcpServer?.stop();
   state.forgerMcpServer = null;
-  for (const running of runningApps.values()) {
-    void terminateProcess(running.backend);
-    void terminateProcess(running.frontend);
-    void closeServer(running.proxyServer);
+  await Promise.allSettled([...runningApps.values()].flatMap((running) => [
+    terminateProcess(running.backend),
+    terminateProcess(running.frontend),
+    closeServer(running.proxyServer),
+  ]));
+};
+
+app.on('before-quit', (event) => {
+  if (gracefulShutdownStarted) {
+    return;
   }
+  gracefulShutdownStarted = true;
+  const shouldResumeQuit = typeof event?.preventDefault === 'function';
+  event?.preventDefault?.();
+  void performGracefulShutdown().finally(() => {
+    if (shouldResumeQuit) {
+      app.quit();
+    }
+  });
 });
 
 app.on('window-all-closed', () => {
