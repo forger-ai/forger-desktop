@@ -492,7 +492,7 @@ export class AppAgentConversationManager {
     let mcpServers: CodexMcpServerConfig[] = [];
     let forgerMcpSession: { url: string; token: string } | null = null;
     try {
-      const runRoot = this.resolveRunRoot(appRoot, input.workspacePath);
+      const runRoot = await this.resolveRunRoot(appRoot, input.workspacePath);
       if (!(await existsDirectory(runRoot))) {
         throw new Error('agent_run_workspace_missing');
       }
@@ -737,7 +737,8 @@ export class AppAgentConversationManager {
     run.attachmentPaths = [];
   }
 
-  private resolveRunRoot(appRoot: string, workspacePath: string | undefined): string {
+  private async resolveRunRoot(appRoot: string, workspacePath: string | undefined): Promise<string> {
+    const realAppRoot = await fs.realpath(appRoot);
     const requested = typeof workspacePath === 'string' ? workspacePath.trim() : '';
     if (!requested) {
       return appRoot;
@@ -745,7 +746,15 @@ export class AppAgentConversationManager {
     const resolved = path.isAbsolute(requested)
       ? path.resolve(requested)
       : path.resolve(appRoot, requested);
-    const relative = path.relative(appRoot, resolved);
+    const requestedRelative = path.relative(appRoot, resolved);
+    if (requestedRelative !== '' && (requestedRelative.startsWith('..') || path.isAbsolute(requestedRelative))) {
+      throw new Error('agent_run_workspace_outside_app');
+    }
+    const realResolved = await fs.realpath(resolved).catch(() => null);
+    if (!realResolved) {
+      throw new Error('agent_run_workspace_missing');
+    }
+    const relative = path.relative(realAppRoot, realResolved);
     if (relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative))) {
       return resolved;
     }

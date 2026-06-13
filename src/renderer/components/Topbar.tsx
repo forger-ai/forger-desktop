@@ -1,5 +1,6 @@
 import CloseRounded from '@mui/icons-material/CloseRounded';
 import CropSquareRounded from '@mui/icons-material/CropSquareRounded';
+import DeviceHubRounded from '@mui/icons-material/DeviceHubRounded';
 import FilterNoneRounded from '@mui/icons-material/FilterNoneRounded';
 import KeyboardArrowDownRounded from '@mui/icons-material/KeyboardArrowDownRounded';
 import LogoutRounded from '@mui/icons-material/LogoutRounded';
@@ -7,6 +8,7 @@ import PeopleRounded from '@mui/icons-material/PeopleRounded';
 import MinimizeRounded from '@mui/icons-material/MinimizeRounded';
 import PersonRounded from '@mui/icons-material/PersonRounded';
 import StorageRounded from '@mui/icons-material/StorageRounded';
+import StopCircleRounded from '@mui/icons-material/StopCircleRounded';
 import {
   alpha,
   Avatar,
@@ -27,9 +29,11 @@ import {
 import { useEffect, useState, type MouseEvent } from 'react';
 import type { AppSummary, CloudStorageUsage, ForgerAccountSession, WindowControlState } from '@shared/types';
 import type { BackgroundTask } from '@shared/types';
+import type { RemoteActivityItem, RemoteActivitySnapshot } from '@shared/types';
 import type { AppDictionary } from '@renderer/i18n';
 import type { View } from './Sidebar';
 import { BackgroundTasksDrawer } from './BackgroundTasksDrawer';
+import { LlmRunsDrawer } from './LlmRunsDrawer';
 import { LAST_SOCIAL_TAB_KEY, type SocialTab } from '@renderer/views/friends/socialViewHelpers';
 
 interface TopbarProps {
@@ -74,6 +78,14 @@ const formatStorageBytes = (bytes: number, locale: string) => {
   const value = bytes / unit.value;
   return `${new Intl.NumberFormat(locale, { maximumFractionDigits: value >= 10 ? 0 : 1 }).format(value)} ${unit.label}`;
 };
+
+const emptyRemoteActivity = (): RemoteActivitySnapshot => ({
+  activities: [],
+  activeCount: 0,
+  preparingCount: 0,
+  errorCount: 0,
+  updatedAt: new Date(0).toISOString(),
+});
 
 const AppSelect = ({
   apps,
@@ -243,14 +255,35 @@ export function Topbar({
   const theme = useTheme();
   const [accountAnchorEl, setAccountAnchorEl] = useState<HTMLElement | null>(null);
   const [socialAnchorEl, setSocialAnchorEl] = useState<HTMLElement | null>(null);
+  const [remoteActivityAnchorEl, setRemoteActivityAnchorEl] = useState<HTMLElement | null>(null);
+  const [remoteActivity, setRemoteActivity] = useState<RemoteActivitySnapshot>(() => emptyRemoteActivity());
+  const [stoppingRemoteActivityIds, setStoppingRemoteActivityIds] = useState<Set<string>>(() => new Set());
   const accountMenuOpen = Boolean(accountAnchorEl);
   const socialMenuOpen = Boolean(socialAnchorEl);
+  const remoteActivityOpen = Boolean(remoteActivityAnchorEl);
   const accountUser = account.authenticated ? account.user : null;
   const accountName = accountUser?.firstName?.trim() || accountUser?.email.split('@')[0] || '';
   const storagePercent = cloudStorageUsage && cloudStorageUsage.limitBytes > 0
     ? Math.min(100, Math.round((cloudStorageUsage.usedBytes / cloudStorageUsage.limitBytes) * 100))
     : 0;
   const storageColor = storagePercent >= 95 ? 'error' : storagePercent >= 80 ? 'warning' : 'primary';
+  const remoteActivityCount = remoteActivity.activeCount + remoteActivity.preparingCount + remoteActivity.errorCount;
+
+  useEffect(() => {
+    let mounted = true;
+    void window.forger.getRemoteActivity()
+      .then((snapshot) => {
+        if (mounted) setRemoteActivity(snapshot);
+      })
+      .catch(() => undefined);
+    const unsubscribe = window.forger.onRemoteActivityChanged((snapshot) => {
+      setRemoteActivity(snapshot);
+    });
+    return () => {
+      mounted = false;
+      unsubscribe();
+    };
+  }, []);
 
   const handleAccountClick = (event: MouseEvent<HTMLElement>) => {
     if (accountUser) {
@@ -275,6 +308,37 @@ export function Topbar({
     window.sessionStorage.setItem(LAST_SOCIAL_TAB_KEY, tab);
     setSocialAnchorEl(null);
     onOpenSocialTab(tab);
+  };
+
+  const handleRemoteActivityClick = (event: MouseEvent<HTMLElement>) => {
+    setRemoteActivityAnchorEl(event.currentTarget);
+  };
+
+  const refreshRemoteActivity = async () => {
+    const snapshot = await window.forger.getRemoteActivity();
+    setRemoteActivity(snapshot);
+    return snapshot;
+  };
+
+  const canStopRemoteActivity = (activity: RemoteActivityItem) =>
+    activity.kind === 'app' && activity.state !== 'closed';
+
+  const handleStopRemoteActivity = async (activity: RemoteActivityItem) => {
+    if (!canStopRemoteActivity(activity) || stoppingRemoteActivityIds.has(activity.id)) {
+      return;
+    }
+
+    setStoppingRemoteActivityIds((current) => new Set(current).add(activity.id));
+    try {
+      await window.forger.stopRemoteNetworkShare(activity.targetId);
+      await refreshRemoteActivity().catch(() => undefined);
+    } finally {
+      setStoppingRemoteActivityIds((current) => {
+        const next = new Set(current);
+        next.delete(activity.id);
+        return next;
+      });
+    }
   };
 
   return (
@@ -321,6 +385,91 @@ export function Topbar({
         </Box>
 
         <Stack direction="row" alignItems="center" spacing={1} sx={{ WebkitAppRegion: 'no-drag', flexShrink: 0 }}>
+          <Tooltip title={t.remoteActivity.open}>
+            <IconButton
+              size="small"
+              aria-label={t.remoteActivity.open}
+              onClick={handleRemoteActivityClick}
+              sx={{
+                width: 34,
+                height: 34,
+                color: remoteActivity.errorCount > 0 ? 'error.main' : remoteActivityCount > 0 ? 'primary.main' : 'text.secondary',
+                bgcolor: remoteActivityCount > 0 ? alpha(theme.palette.primary.main, 0.09) : 'transparent',
+              }}
+            >
+              <DeviceHubRounded sx={{ fontSize: 19 }} />
+            </IconButton>
+          </Tooltip>
+          <Menu
+            anchorEl={remoteActivityAnchorEl}
+            open={remoteActivityOpen}
+            onClose={() => setRemoteActivityAnchorEl(null)}
+            PaperProps={{ sx: { mt: 1, minWidth: 320, maxWidth: 380, borderRadius: 2 } }}
+          >
+            <Box sx={{ px: 2, py: 1.5 }}>
+              <Stack spacing={0.5}>
+                <Typography variant="subtitle2">{t.remoteActivity.title}</Typography>
+                <Typography variant="caption" color="text.secondary">
+                  {t.remoteActivity.activeSummary(remoteActivity.activeCount, remoteActivity.preparingCount)}
+                </Typography>
+              </Stack>
+            </Box>
+            <Divider />
+            {remoteActivity.activities.length === 0 ? (
+              <Box sx={{ px: 2, py: 2 }}>
+                <Typography variant="body2" color="text.secondary">{t.remoteActivity.empty}</Typography>
+              </Box>
+            ) : remoteActivity.activities.map((activity) => (
+              <MenuItem key={activity.id} disableRipple sx={{ alignItems: 'stretch', whiteSpace: 'normal', py: 1.25 }}>
+                <Stack spacing={0.75} sx={{ width: '100%' }}>
+                  <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between">
+                    <Stack direction="row" spacing={1} alignItems="center" sx={{ minWidth: 0 }}>
+                      <Typography variant="body2" fontWeight={700} noWrap>
+                        {activity.targetName}
+                      </Typography>
+                      <Chip
+                        size="small"
+                        label={activity.kind === 'agent' ? t.remoteActivity.agent : t.remoteActivity.app}
+                        sx={{ height: 20 }}
+                      />
+                    </Stack>
+                    <Chip
+                      size="small"
+                      color={activity.state === 'error' ? 'error' : activity.state === 'active' ? 'success' : 'warning'}
+                      label={t.remoteActivity.states[activity.state]}
+                      sx={{ height: 22, flexShrink: 0 }}
+                    />
+                  </Stack>
+                  {activity.requesterMobileDevice ? (
+                    <Typography variant="caption" color="text.secondary">
+                      {t.remoteActivity.mobileRequested(activity.requesterMobileDevice.name)}
+                    </Typography>
+                  ) : null}
+                  {activity.lastError ? (
+                    <Typography variant="caption" color="error.main">
+                      {activity.lastError}
+                    </Typography>
+                  ) : null}
+                  {canStopRemoteActivity(activity) ? (
+                    <Button
+                      size="small"
+                      color="warning"
+                      variant="outlined"
+                      startIcon={<StopCircleRounded fontSize="small" />}
+                      disabled={stoppingRemoteActivityIds.has(activity.id)}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void handleStopRemoteActivity(activity);
+                      }}
+                      sx={{ alignSelf: 'flex-start' }}
+                    >
+                      {stoppingRemoteActivityIds.has(activity.id) ? t.remoteActivity.stopping : t.remoteActivity.stop}
+                    </Button>
+                  ) : null}
+                </Stack>
+              </MenuItem>
+            ))}
+          </Menu>
           <BackgroundTasksDrawer
             t={t}
             tasks={backgroundTasks}
@@ -331,6 +480,7 @@ export function Topbar({
             onOpenHistory={onOpenBackgroundTaskHistory}
             onOpenTask={onOpenBackgroundTask}
           />
+          <LlmRunsDrawer t={t} />
           <Box data-onboarding-target="social-actions">
             <Tooltip title="Social">
               <IconButton

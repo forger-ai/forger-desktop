@@ -104,6 +104,80 @@ test('updateAccountProfile sends username with the current Forger token and pars
   }
 });
 
+test('mobile desktop authorization client lists and revokes mobile links', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'forger-mobile-auth-test-'));
+  const requests = [];
+  const harness = createClient(root, async (url, init) => {
+    requests.push({ url, init });
+    if (init.method === 'DELETE') {
+      return jsonResponse(200, { success: true });
+    }
+    return jsonResponse(200, [
+      {
+        id: 9,
+        mobile_device_id: 12,
+        desktop_device_id: 7,
+        active: true,
+        mobile_device: {
+          id: 12,
+          device_uid: 'mobile-12',
+          name: 'Felipe iPhone',
+          device_kind: 'mobile',
+          platform: 'ios',
+          paired: true,
+          online: false,
+        },
+        desktop_device: {
+          id: 7,
+          device_uid: 'desktop-7',
+          name: 'Studio Mac',
+          device_kind: 'desktop',
+          paired: true,
+          online: true,
+        },
+      },
+    ]);
+  }, 'session-token');
+
+  try {
+    const authorizations = await harness.client.listMobileDesktopAuthorizations();
+    await harness.client.revokeMobileDesktopAuthorization(9);
+
+    assert.equal(authorizations.length, 1);
+    assert.equal(authorizations[0].mobileDevice.name, 'Felipe iPhone');
+    assert.equal(authorizations[0].desktopDeviceId, 7);
+    assert.equal(requests[0].url, 'https://platform.test/api/v1/me/mobile_desktop_authorizations');
+    assert.equal(requests[0].init.headers.Authorization, 'Bearer session-token');
+    assert.equal(requests[1].url, 'https://platform.test/api/v1/me/mobile_desktop_authorizations/9');
+    assert.equal(requests[1].init.method, 'DELETE');
+  } finally {
+    harness.restore();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('mobile pairing request client deletes terminal requests', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'forger-mobile-pairing-delete-test-'));
+  let requestUrl;
+  let requestInit;
+  const harness = createClient(root, async (url, init) => {
+    requestUrl = url;
+    requestInit = init;
+    return jsonResponse(200, { success: true });
+  }, 'session-token');
+
+  try {
+    await harness.client.deleteMobilePairingRequest(22);
+
+    assert.equal(requestUrl, 'https://platform.test/api/v1/me/mobile_pairing_requests/22');
+    assert.equal(requestInit.method, 'DELETE');
+    assert.equal(requestInit.headers.Authorization, 'Bearer session-token');
+  } finally {
+    harness.restore();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('submitProductFeedback normalizes platform in main and logs successful attempts without the body', async () => {
   const root = await mkdtemp(join(tmpdir(), 'forger-feedback-test-'));
   let requestBody;
@@ -548,6 +622,76 @@ test('app access request client reports local network and remote tunnel status',
       },
       remote_session_id: 'session-public-token',
     });
+  } finally {
+    harness.restore();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('agent access request client reports sanitized personal agent lifecycle status', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'forger-agent-access-request-client-test-'));
+  const requests = [];
+  const harness = createClient(root, async (url, init) => {
+    requests.push({ url, init });
+    return jsonResponse(200, { success: true });
+  }, 'session-token');
+
+  try {
+    await harness.client.reportAgentAccessRequest({
+      requestId: '301',
+      agentId: 'agent-1',
+      status: 'ready',
+      agentStatus: {
+        active: true,
+        agentId: 'agent-1',
+        state: 'ready',
+        sessionId: 'agent-session-1',
+        localUrl: 'http://127.0.0.1:4567',
+        tunnelUrl: 'https://agent-session.example.test',
+        authorizationToken: 'scoped-session-token',
+        allowedPaths: ['/health', '/conversations/start', '/messages/send', '/conversations/:id'],
+      },
+    });
+
+    assert.equal(requests[0].url, 'https://platform.test/api/v1/me/agent_access_requests/301/report');
+    assert.equal(requests[0].init.method, 'PATCH');
+    assert.equal(requests[0].init.headers.Authorization, 'Bearer session-token');
+    assert.deepEqual(JSON.parse(requests[0].init.body), {
+      agent_id: 'agent-1',
+      status: 'ready',
+      agent_status: {
+        active: true,
+        agent_id: 'agent-1',
+        state: 'ready',
+        session_id: 'agent-session-1',
+        tunnel_url: 'https://agent-session.example.test',
+        authorization_token: 'scoped-session-token',
+        allowed_paths: ['/health', '/conversations/start', '/messages/send', '/conversations/:id'],
+      },
+    });
+    assert.equal(requests[0].init.body.includes('127.0.0.1'), false);
+  } finally {
+    harness.restore();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('agent access request client surfaces report failures to the caller', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'forger-agent-access-request-client-failure-test-'));
+  const harness = createClient(root, async () => jsonResponse(422, { error: 'invalid_status' }), 'session-token');
+
+  try {
+    let thrown;
+    try {
+      await harness.client.reportAgentAccessRequest({
+        requestId: '301',
+        agentId: 'agent-1',
+        status: 'ready',
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    assert.equal(thrown?.technicalCode, 'agent_access_request_report_failed_422');
   } finally {
     harness.restore();
     await rm(root, { recursive: true, force: true });

@@ -1,5 +1,5 @@
-import { contextBridge, ipcRenderer } from 'electron';
-import type { ForgerDesktopApi } from '../shared/types';
+import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
+import type { ForgerDesktopApi, PersonalAgentConversationEvent } from '../shared/types';
 
 // En modo sandbox de Electron, el preload no debe depender de imports locales en runtime.
 const IPC_CHANNELS = {
@@ -36,6 +36,8 @@ const IPC_CHANNELS = {
   startRemoteNetworkShare: 'forger:remote-network-share:start',
   stopRemoteNetworkShare: 'forger:remote-network-share:stop',
   getRemoteNetworkShareStatus: 'forger:remote-network-share:get-status',
+  getRemoteActivity: 'forger:remote-activity:get',
+  remoteActivityChanged: 'forger:remote-activity:changed',
   getAppSecrets: 'forger:get-app-secrets',
   listUserSecrets: 'forger:list-user-secrets',
   createUserSecret: 'forger:create-user-secret',
@@ -65,9 +67,11 @@ const IPC_CHANNELS = {
   getCloudStorageUsage: 'forger:cloud-storage:get',
   getCloudDevices: 'forger:cloud-devices:get',
   registerCloudDevice: 'forger:cloud-devices:register',
+  unlinkMobileDeviceFromDesktop: 'forger:cloud-devices:unlink-mobile',
   generateDevicePairingCode: 'forger:cloud-devices:pairing-code',
   acceptMobilePairingRequest: 'forger:cloud-devices:pairing-accept',
   rejectMobilePairingRequest: 'forger:cloud-devices:pairing-reject',
+  deleteMobilePairingRequest: 'forger:cloud-devices:pairing-delete',
   listFriends: 'forger:friends:list',
   listMySocialApps: 'forger:social:apps:list-mine',
   uploadSocialApp: 'forger:social:apps:upload',
@@ -136,6 +140,21 @@ const IPC_CHANNELS = {
   memoryCreate: 'forger:memory:create',
   memoryUpdate: 'forger:memory:update',
   memoryDelete: 'forger:memory:delete',
+  llmRunsSnapshotGet: 'forger:llm-runs:snapshot:get',
+  llmRunsSnapshotChanged: 'forger:llm-runs:snapshot:changed',
+  personalAgentsList: 'forger:personal-agents:list',
+  personalAgentsCreate: 'forger:personal-agents:create',
+  personalAgentGrantOptionsList: 'forger:personal-agents:grant-options:list',
+  personalAgentUpdatePermissions: 'forger:personal-agents:permissions:update',
+  personalAgentsDelete: 'forger:personal-agents:delete',
+  personalAgentConversationsList: 'forger:personal-agents:conversations:list',
+  personalAgentWorkspaceList: 'forger:personal-agents:workspace:list',
+  personalAgentWorkspaceFileRead: 'forger:personal-agents:workspace:file:read',
+  personalAgentWorkspaceFileWrite: 'forger:personal-agents:workspace:file:write',
+  personalAgentStartConversation: 'forger:personal-agents:conversation:start',
+  personalAgentSendMessage: 'forger:personal-agents:conversation:send',
+  personalAgentGetConversation: 'forger:personal-agents:conversation:get',
+  personalAgentConversationEvent: 'forger:personal-agents:conversation:event',
   chatStartRun: 'forger:chat:start-run',
   chatGetRun: 'forger:chat:get-run',
   chatCancelRun: 'forger:chat:cancel-run',
@@ -217,6 +236,16 @@ const api: ForgerDesktopApi = {
   startRemoteNetworkShare: (appId) => ipcRenderer.invoke(IPC_CHANNELS.startRemoteNetworkShare, appId),
   stopRemoteNetworkShare: (appId) => ipcRenderer.invoke(IPC_CHANNELS.stopRemoteNetworkShare, appId),
   getRemoteNetworkShareStatus: (appId) => ipcRenderer.invoke(IPC_CHANNELS.getRemoteNetworkShareStatus, appId),
+  getRemoteActivity: () => ipcRenderer.invoke(IPC_CHANNELS.getRemoteActivity),
+  onRemoteActivityChanged: (listener) => {
+    const wrapped = (_event: unknown, payload: Parameters<typeof listener>[0]) => {
+      listener(payload);
+    };
+    ipcRenderer.on(IPC_CHANNELS.remoteActivityChanged, wrapped);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.remoteActivityChanged, wrapped);
+    };
+  },
   getAppSecrets: (appId) => ipcRenderer.invoke(IPC_CHANNELS.getAppSecrets, appId),
   listUserSecrets: () => ipcRenderer.invoke(IPC_CHANNELS.listUserSecrets),
   createUserSecret: (input) => ipcRenderer.invoke(IPC_CHANNELS.createUserSecret, input),
@@ -280,9 +309,11 @@ const api: ForgerDesktopApi = {
   },
   getCloudDevices: () => ipcRenderer.invoke(IPC_CHANNELS.getCloudDevices),
   registerCloudDevice: (input) => ipcRenderer.invoke(IPC_CHANNELS.registerCloudDevice, input),
+  unlinkMobileDeviceFromDesktop: (authorizationId) => ipcRenderer.invoke(IPC_CHANNELS.unlinkMobileDeviceFromDesktop, authorizationId),
   generateDevicePairingCode: () => ipcRenderer.invoke(IPC_CHANNELS.generateDevicePairingCode),
   acceptMobilePairingRequest: (requestId) => ipcRenderer.invoke(IPC_CHANNELS.acceptMobilePairingRequest, requestId),
   rejectMobilePairingRequest: (requestId) => ipcRenderer.invoke(IPC_CHANNELS.rejectMobilePairingRequest, requestId),
+  deleteMobilePairingRequest: (requestId) => ipcRenderer.invoke(IPC_CHANNELS.deleteMobilePairingRequest, requestId),
   listFriends: () => ipcRenderer.invoke(IPC_CHANNELS.listFriends),
   listMySocialApps: () => ipcRenderer.invoke(IPC_CHANNELS.listMySocialApps),
   uploadSocialApp: (input) => ipcRenderer.invoke(IPC_CHANNELS.uploadSocialApp, input),
@@ -376,6 +407,33 @@ const api: ForgerDesktopApi = {
   memoryCreate: (input) => ipcRenderer.invoke(IPC_CHANNELS.memoryCreate, input),
   memoryUpdate: (input) => ipcRenderer.invoke(IPC_CHANNELS.memoryUpdate, input),
   memoryDelete: (id) => ipcRenderer.invoke(IPC_CHANNELS.memoryDelete, id),
+  getLlmRunsSnapshot: () => ipcRenderer.invoke(IPC_CHANNELS.llmRunsSnapshotGet),
+  onLlmRunsSnapshotChanged: (listener) => {
+    const wrapped = (_event: IpcRendererEvent, payload: Parameters<typeof listener>[0]) => listener(payload);
+    ipcRenderer.on(IPC_CHANNELS.llmRunsSnapshotChanged, wrapped);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.llmRunsSnapshotChanged, wrapped);
+    };
+  },
+  personalAgentsList: () => ipcRenderer.invoke(IPC_CHANNELS.personalAgentsList),
+  personalAgentsCreate: (input) => ipcRenderer.invoke(IPC_CHANNELS.personalAgentsCreate, input),
+  personalAgentGrantOptionsList: () => ipcRenderer.invoke(IPC_CHANNELS.personalAgentGrantOptionsList),
+  personalAgentUpdatePermissions: (input) => ipcRenderer.invoke(IPC_CHANNELS.personalAgentUpdatePermissions, input),
+  personalAgentsDelete: (input) => ipcRenderer.invoke(IPC_CHANNELS.personalAgentsDelete, input),
+  personalAgentConversationsList: (input) => ipcRenderer.invoke(IPC_CHANNELS.personalAgentConversationsList, input),
+  personalAgentWorkspaceList: (input) => ipcRenderer.invoke(IPC_CHANNELS.personalAgentWorkspaceList, input),
+  personalAgentWorkspaceFileRead: (input) => ipcRenderer.invoke(IPC_CHANNELS.personalAgentWorkspaceFileRead, input),
+  personalAgentWorkspaceFileWrite: (input) => ipcRenderer.invoke(IPC_CHANNELS.personalAgentWorkspaceFileWrite, input),
+  personalAgentStartConversation: (input) => ipcRenderer.invoke(IPC_CHANNELS.personalAgentStartConversation, input),
+  personalAgentSendMessage: (input) => ipcRenderer.invoke(IPC_CHANNELS.personalAgentSendMessage, input),
+  personalAgentGetConversation: (input) => ipcRenderer.invoke(IPC_CHANNELS.personalAgentGetConversation, input),
+  onPersonalAgentConversationEvent: (listener) => {
+    const wrapped = (_event: IpcRendererEvent, payload: PersonalAgentConversationEvent) => listener(payload);
+    ipcRenderer.on(IPC_CHANNELS.personalAgentConversationEvent, wrapped);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.personalAgentConversationEvent, wrapped);
+    };
+  },
   chatStartRun: (input) => ipcRenderer.invoke(IPC_CHANNELS.chatStartRun, input),
   chatGetRun: (input) => ipcRenderer.invoke(IPC_CHANNELS.chatGetRun, input),
   chatCancelRun: (input) => ipcRenderer.invoke(IPC_CHANNELS.chatCancelRun, input),

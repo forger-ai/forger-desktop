@@ -67,7 +67,7 @@ test('renderer separates installed Apps from curated Catalog in navigation and c
   assert.match(sidebarSource, /id: 'chat'[\s\S]*id: 'apps'[\s\S]*id: 'catalog'/);
   assert.doesNotMatch(sidebarSource, /id: 'docs' as const, icon:/);
   assert.match(sidebarSource, /id: 'friends'/);
-  assert.match(sidebarSource, /showForumNav \? \[defaultNav\[3\]\] : \[\]/);
+  assert.match(sidebarSource, /defaultNav\.filter\(\(item\) => item\.id !== 'friends' \|\| showForumNav\)/);
   assert.match(settingsSource, /view: 'docs'[\s\S]*t\.settings\.advancedSurfaces\.docs/);
   assert.match(viewSource, /const installedViewApps = useMemo<CatalogApp\[]>/);
   assert.match(viewSource, /currentView === 'apps' \? renderInstalledAppsView\(\) : null/);

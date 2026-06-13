@@ -21,6 +21,7 @@ import { AppShell } from '@renderer/components/AppShell';
 import { AppCard } from '@renderer/components/AppCard';
 import { AppsGrid } from '@renderer/components/AppsGrid';
 import { AppView } from '@renderer/views/AppView';
+import { AgentsView } from '@renderer/views/AgentsView';
 import { AutomationsView } from '@renderer/views/AutomationsView';
 import { BackupsView } from '@renderer/views/BackupsView';
 import { BackgroundTaskDetailView, BackgroundTasksListView, viewLabel } from '@renderer/views/BackgroundTasksView';
@@ -589,6 +590,10 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
           showForumNav
         >
         {currentView === 'apps' ? renderInstalledAppsView() : null}
+
+        {currentView === 'agents' ? (
+          <AgentsView t={t} intelligenceProviderConfigured={intelligenceProviderConfigured} />
+        ) : null}
 
         {currentView === 'catalog' ? (
           <CatalogView

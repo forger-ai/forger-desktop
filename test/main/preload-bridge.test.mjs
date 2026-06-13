@@ -62,6 +62,7 @@ test('preload forwards representative commands to the expected IPC channels with
   await api.chatCancelRun({ appId: 'forger', runId: 'run-1' });
   await api.filesStageForChat({ appId: 'finance-os', files: [{ path: '/tmp/input.pdf' }] });
   await api.memoryList();
+  await api.getLlmRunsSnapshot();
   await api.openExternalUrl('https://forger.ai/help');
   await api.dbQueryTable('finance-os', 'transactions', 25);
   await api.automationsGetRunTranscript('run-99');
@@ -75,6 +76,7 @@ test('preload forwards representative commands to the expected IPC channels with
     ['forger:chat:cancel-run', { appId: 'forger', runId: 'run-1' }],
     ['forger:files:stage-for-chat', { appId: 'finance-os', files: [{ path: '/tmp/input.pdf' }] }],
     ['forger:memory:list', {}],
+    ['forger:llm-runs:snapshot:get'],
     ['forger:open-external-url', 'https://forger.ai/help'],
     ['forger:db:query-table', 'finance-os', 'transactions', 25],
     ['forger:automations:get-run-transcript', 'run-99'],
@@ -116,6 +118,8 @@ test('preload event subscriptions unwrap payloads and unsubscribe the exact regi
   const received = [];
 
   const unsubscribeChat = api.onChatRunUpdated((payload) => received.push(['chat', payload]));
+  const unsubscribeLlmRuns = api.onLlmRunsSnapshotChanged((payload) => received.push(['llm-runs', payload]));
+  const unsubscribePersonalAgent = api.onPersonalAgentConversationEvent((payload) => received.push(['personal-agent', payload]));
   const unsubscribeWindow = api.onWindowStateChanged((payload) => received.push(['window', payload]));
   const unsubscribeDeepLink = api.onDeepLink((payload) => received.push(['deep-link', payload]));
   const unsubscribeAutomation = api.onAutomationUpdated((payload) => received.push(['automation', payload]));
@@ -123,6 +127,8 @@ test('preload event subscriptions unwrap payloads and unsubscribe the exact regi
   const unsubscribeErrorReport = api.onDesktopErrorReportRequested((payload) => received.push(['error-report', payload]));
 
   const chatListener = listeners.get('forger:chat:run-updated');
+  const llmRunsListener = listeners.get('forger:llm-runs:snapshot:changed');
+  const personalAgentListener = listeners.get('forger:personal-agents:conversation:event');
   const windowListener = listeners.get('forger:window:state-changed');
   const deepLinkListener = listeners.get('forger:deep-link');
   const automationListener = listeners.get('forger:automations:updated');
@@ -130,6 +136,8 @@ test('preload event subscriptions unwrap payloads and unsubscribe the exact regi
   const errorReportListener = listeners.get('forger:error-report:requested');
 
   chatListener({ sender: 'main' }, { run: { runId: 'run-1' } });
+  llmRunsListener({ sender: 'main' }, { items: [{ id: 'llm-1' }], activeCount: 1 });
+  personalAgentListener({ sender: 'main' }, { type: 'run.progress', run: { id: 'run-2' } });
   windowListener({ sender: 'main' }, { isMaximized: true, isFullScreen: false, usesCustomFrame: true });
   deepLinkListener({ sender: 'main' }, { kind: 'chat', app: 'finance-os', prompt: 'hola' });
   automationListener({ sender: 'main' }, { automation: { id: 'automation-1' } });
@@ -137,6 +145,8 @@ test('preload event subscriptions unwrap payloads and unsubscribe the exact regi
   errorReportListener({ sender: 'main' }, { technicalCode: 'boom', userMessage: 'Something happened' });
 
   unsubscribeChat();
+  unsubscribeLlmRuns();
+  unsubscribePersonalAgent();
   unsubscribeWindow();
   unsubscribeDeepLink();
   unsubscribeAutomation();
@@ -145,6 +155,8 @@ test('preload event subscriptions unwrap payloads and unsubscribe the exact regi
 
   assert.deepEqual(received, [
     ['chat', { run: { runId: 'run-1' } }],
+    ['llm-runs', { items: [{ id: 'llm-1' }], activeCount: 1 }],
+    ['personal-agent', { type: 'run.progress', run: { id: 'run-2' } }],
     ['window', { isMaximized: true, isFullScreen: false, usesCustomFrame: true }],
     ['deep-link', { kind: 'chat', app: 'finance-os', prompt: 'hola' }],
     ['automation', { automation: { id: 'automation-1' } }],
@@ -153,6 +165,8 @@ test('preload event subscriptions unwrap payloads and unsubscribe the exact regi
   ]);
   assert.deepEqual(removedListeners, [
     ['forger:chat:run-updated', chatListener],
+    ['forger:llm-runs:snapshot:changed', llmRunsListener],
+    ['forger:personal-agents:conversation:event', personalAgentListener],
     ['forger:window:state-changed', windowListener],
     ['forger:deep-link', deepLinkListener],
     ['forger:automations:updated', automationListener],
@@ -160,6 +174,8 @@ test('preload event subscriptions unwrap payloads and unsubscribe the exact regi
     ['forger:error-report:requested', errorReportListener],
   ]);
   assert.equal(listeners.has('forger:chat:run-updated'), false);
+  assert.equal(listeners.has('forger:llm-runs:snapshot:changed'), false);
+  assert.equal(listeners.has('forger:personal-agents:conversation:event'), false);
   assert.equal(listeners.has('forger:window:state-changed'), false);
   assert.equal(listeners.has('forger:deep-link'), false);
   assert.equal(listeners.has('forger:automations:updated'), false);

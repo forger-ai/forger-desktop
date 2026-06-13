@@ -74,6 +74,7 @@ export function RendererAppDialogs({ controller }: RendererAppDialogsProps) {
     fileCategories,
     remoteTunnelReadyDialog,
     closeRemoteTunnelReadyDialog,
+    stopReadyRemoteTunnel,
     openRemoteTunnelPortal,
     socialUploadDialog,
     closeSocialUploadDialog,
@@ -415,6 +416,9 @@ export function RendererAppDialogs({ controller }: RendererAppDialogsProps) {
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2.5 }}>
           <Button onClick={closeRemoteTunnelReadyDialog}>{t.actions.close}</Button>
+          <Button color="warning" onClick={() => void stopReadyRemoteTunnel()}>
+            {t.remoteNetwork.stop}
+          </Button>
           <Button variant="contained" onClick={() => void openRemoteTunnelPortal()}>
             {t.remoteNetwork.openPortal}
           </Button>

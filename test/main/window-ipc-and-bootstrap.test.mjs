@@ -330,14 +330,18 @@ test('window bootstrap defers deep-links while loading and flushes them after lo
   const app = createElectronAppMock();
   const sent = [];
   const onceListeners = new Map();
+  const onceCalls = [];
   const mainWindow = {
     webContents: {
       isLoading: () => true,
-      once: (event, listener) => onceListeners.set(event, listener),
+      once: (event, listener) => {
+        onceCalls.push([event, listener]);
+        onceListeners.set(event, listener);
+      },
       send: (channel, payload) => sent.push([channel, payload]),
     },
   };
-  const state = { mainWindow, pendingDeepLink: null };
+  const state = { mainWindow, pendingDeepLink: null, pendingDeepLinkFlushScheduled: false };
   const focusCalls = [];
   const { IPC_CHANNELS } = await import('../../dist-electron/shared/ipc.js');
   const { createWindowBootstrapController } = await withMockedElectron(
@@ -371,18 +375,22 @@ test('window bootstrap defers deep-links while loading and flushes them after lo
   });
 
   const link = { kind: 'chat', app: 'finance-os', prompt: 'load', raw: 'forger://chat?app=finance-os&prompt=load' };
+  const latestLink = { kind: 'chat', app: 'finance-os', prompt: 'latest', raw: 'forger://chat?app=finance-os&prompt=latest' };
   controller.dispatchDeepLink(link);
+  controller.dispatchDeepLink(latestLink);
 
-  assert.equal(state.pendingDeepLink, link);
+  assert.equal(state.pendingDeepLink, latestLink);
   assert.equal(sent.length, 0);
+  assert.equal(onceCalls.length, 1);
   assert.equal(typeof onceListeners.get('did-finish-load'), 'function');
 
   mainWindow.webContents.isLoading = () => false;
   onceListeners.get('did-finish-load')();
 
   assert.equal(state.pendingDeepLink, null);
+  assert.equal(state.pendingDeepLinkFlushScheduled, false);
   assert.deepEqual(focusCalls, [mainWindow]);
-  assert.deepEqual(sent, [[IPC_CHANNELS.deepLink, link]]);
+  assert.deepEqual(sent, [[IPC_CHANNELS.deepLink, latestLink]]);
 });
 
 test('window bootstrap handles single-instance, open-url, and pending deep-link fallbacks', async () => {
