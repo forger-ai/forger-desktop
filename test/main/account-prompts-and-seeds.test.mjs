@@ -412,6 +412,8 @@ test('official tool skill templates and seed data keep expected Desktop defaults
     'forger-remote-tunnel-wiring',
     'forger-secrets',
     'forger-social-app-review',
+    'forger-speech-to-text',
+    'forger-text-to-speech',
     'forger-tools',
     'forger-whatsapp',
   ]);
@@ -453,6 +455,20 @@ test('official tool skill templates and seed data keep expected Desktop defaults
   assert.match(manifestSkill.body, /Every entry in `tools\.required\[\]` and `tools\.optional\[\]` must include `toolId`, `reason`, and `actions`/);
   assert.match(manifestSkill.body, /`reason` is required, not decorative/);
   assert.match(manifestSkill.body, /Do not add `catalog\.capabilities`/);
+  assert.match(manifestSkill.body, /platformCapabilities\.speechToText[\s\S]*authorized realtime transcription workflow/);
+  assert.match(manifestSkill.body, /platformCapabilities\.textToSpeech[\s\S]*explicit text, model, and voice/);
+  const speechSkill = templates.find((template) => template.id === 'forger-speech-to-text');
+  assert.ok(speechSkill);
+  assert.match(speechSkill.body, /forger_speech_to_text_status/);
+  assert.match(speechSkill.body, /realtime/);
+  assert.match(speechSkill.body, /files explicitly shared/);
+  assert.match(speechSkill.body, /not permission to capture audio on your own/);
+  const ttsSkill = templates.find((template) => template.id === 'forger-text-to-speech');
+  assert.ok(ttsSkill);
+  assert.match(ttsSkill.body, /forger_text_to_speech_voices/);
+  assert.match(ttsSkill.body, /text`, `model`, and `voice`/);
+  assert.match(ttsSkill.body, /voice defines the language and locale/);
+  assert.match(ttsSkill.body, /Do not rely on hidden defaults/);
   assert.equal(templates.some((template) => template.id === 'forger-agents'), false);
   assert.equal(templates.some((template) => template.id === 'forger-tasks'), false);
   assert.equal(templates.some((template) => template.id === 'forger-desktop-runtime-bridge'), false);

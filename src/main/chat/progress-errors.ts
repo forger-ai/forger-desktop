@@ -121,8 +121,8 @@ const looksLikeFileEditCommand = (command: string): boolean => {
   ].some((pattern) => pattern.test(compact));
 };
 
-export const getRunLogPath = (privateAppsRoot: string, runId: string): string => {
-  return path.join(privateAppsRoot, '.forger', 'runs', `${runId}.log`);
+export const getRunLogPath = (metadataRoot: string, runId: string): string => {
+  return path.join(metadataRoot, 'runs', `${runId}.log`);
 };
 
 export const appendRunLog = async (

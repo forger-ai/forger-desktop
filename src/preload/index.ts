@@ -46,6 +46,45 @@ const IPC_CHANNELS = {
   connectAppSecret: 'forger:connect-app-secret',
   disconnectAppSecret: 'forger:disconnect-app-secret',
   getSettings: 'forger:get-settings',
+  speechToTextGetState: 'forger:speech-to-text:get-state',
+  speechToTextInstall: 'forger:speech-to-text:install',
+  speechToTextStart: 'forger:speech-to-text:start',
+  speechToTextStop: 'forger:speech-to-text:stop',
+  speechToTextUpdateConfig: 'forger:speech-to-text:update-config',
+  speechToTextPickAudio: 'forger:speech-to-text:pick-audio',
+  speechToTextProcess: 'forger:speech-to-text:process',
+  speechToTextProcessUpload: 'forger:speech-to-text:process-upload',
+  speechToTextCreateRealtimeSession: 'forger:speech-to-text:create-realtime-session',
+  liveVoiceInputGetState: 'forger:live-voice-input:get-state',
+  liveVoiceInputUpdateConfig: 'forger:live-voice-input:update-config',
+  liveVoiceInputUpdateDevices: 'forger:live-voice-input:update-devices',
+  liveVoiceInputCreateSession: 'forger:live-voice-input:create-session',
+  liveVoiceInputStop: 'forger:live-voice-input:stop',
+  liveVoiceInputWakeDetected: 'forger:live-voice-input:wake-detected',
+  liveVoiceInputWakeReady: 'forger:live-voice-input:wake-ready',
+  liveVoiceInputWakeUnavailable: 'forger:live-voice-input:wake-unavailable',
+  liveVoiceInputChanged: 'forger:live-voice-input:changed',
+  liveVoiceInputForgerWake: 'forger:live-voice-input:forger-wake',
+  wakeWordGetState: 'forger:wake-word:get-state',
+  wakeWordInstall: 'forger:wake-word:install',
+  wakeWordStart: 'forger:wake-word:start',
+  wakeWordStop: 'forger:wake-word:stop',
+  wakeWordUpdateConfig: 'forger:wake-word:update-config',
+  wakeWordCreateSession: 'forger:wake-word:create-session',
+  wakeWordRecordReady: 'forger:wake-word:record-ready',
+  wakeWordRecordUnavailable: 'forger:wake-word:record-unavailable',
+  wakeWordRecordDetected: 'forger:wake-word:record-detected',
+  wakeWordRecordDiagnostic: 'forger:wake-word:record-diagnostic',
+  wakeWordChanged: 'forger:wake-word:changed',
+  wakeWordDetected: 'forger:wake-word:detected',
+  audioRuntimeBrokerRequest: 'forger:audio-runtime-broker:request',
+  audioRuntimeBrokerResponse: 'forger:audio-runtime-broker:response',
+  textToSpeechGetState: 'forger:text-to-speech:get-state',
+  textToSpeechInstall: 'forger:text-to-speech:install',
+  textToSpeechStart: 'forger:text-to-speech:start',
+  textToSpeechStop: 'forger:text-to-speech:stop',
+  textToSpeechUpdateConfig: 'forger:text-to-speech:update-config',
+  textToSpeechSynthesize: 'forger:text-to-speech:synthesize',
   updateCodexDefaults: 'forger:update-codex-defaults',
   updateAgentDefaults: 'forger:update-agent-defaults',
   updateDeveloperMode: 'forger:update-developer-mode',
@@ -272,6 +311,85 @@ const api: ForgerDesktopApi = {
     };
   },
   getSettings: () => ipcRenderer.invoke(IPC_CHANNELS.getSettings),
+  speechToTextGetState: () => ipcRenderer.invoke(IPC_CHANNELS.speechToTextGetState),
+  speechToTextInstall: () => ipcRenderer.invoke(IPC_CHANNELS.speechToTextInstall),
+  speechToTextStart: () => ipcRenderer.invoke(IPC_CHANNELS.speechToTextStart),
+  speechToTextStop: () => ipcRenderer.invoke(IPC_CHANNELS.speechToTextStop),
+  speechToTextUpdateConfig: (input) => ipcRenderer.invoke(IPC_CHANNELS.speechToTextUpdateConfig, input),
+  speechToTextPickAudio: () => ipcRenderer.invoke(IPC_CHANNELS.speechToTextPickAudio),
+  speechToTextProcess: (input) => ipcRenderer.invoke(IPC_CHANNELS.speechToTextProcess, input),
+  speechToTextProcessUpload: (input) => ipcRenderer.invoke(IPC_CHANNELS.speechToTextProcessUpload, input),
+  speechToTextCreateRealtimeSession: () => ipcRenderer.invoke(IPC_CHANNELS.speechToTextCreateRealtimeSession),
+  liveVoiceInputGetState: () => ipcRenderer.invoke(IPC_CHANNELS.liveVoiceInputGetState),
+  liveVoiceInputUpdateConfig: (input) => ipcRenderer.invoke(IPC_CHANNELS.liveVoiceInputUpdateConfig, input),
+  liveVoiceInputUpdateDevices: (input) => ipcRenderer.invoke(IPC_CHANNELS.liveVoiceInputUpdateDevices, input),
+  liveVoiceInputCreateSession: (input) => ipcRenderer.invoke(IPC_CHANNELS.liveVoiceInputCreateSession, input),
+  liveVoiceInputStop: (input) => ipcRenderer.invoke(IPC_CHANNELS.liveVoiceInputStop, input ?? {}),
+  liveVoiceInputWakeDetected: (input) => ipcRenderer.invoke(IPC_CHANNELS.liveVoiceInputWakeDetected, input),
+  liveVoiceInputWakeReady: (input) => ipcRenderer.invoke(IPC_CHANNELS.liveVoiceInputWakeReady, input),
+  liveVoiceInputWakeUnavailable: (input) => ipcRenderer.invoke(IPC_CHANNELS.liveVoiceInputWakeUnavailable, input),
+  onLiveVoiceInputChanged: (listener) => {
+    const wrapped = (_event: unknown, payload: Parameters<typeof listener>[0]) => {
+      listener(payload);
+    };
+    ipcRenderer.on(IPC_CHANNELS.liveVoiceInputChanged, wrapped);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.liveVoiceInputChanged, wrapped);
+    };
+  },
+  onLiveVoiceInputForgerWake: (listener) => {
+    const wrapped = (_event: unknown, payload: Parameters<typeof listener>[0]) => {
+      listener(payload);
+    };
+    ipcRenderer.on(IPC_CHANNELS.liveVoiceInputForgerWake, wrapped);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.liveVoiceInputForgerWake, wrapped);
+    };
+  },
+  wakeWordGetState: () => ipcRenderer.invoke(IPC_CHANNELS.wakeWordGetState),
+  wakeWordInstall: () => ipcRenderer.invoke(IPC_CHANNELS.wakeWordInstall),
+  wakeWordStart: () => ipcRenderer.invoke(IPC_CHANNELS.wakeWordStart),
+  wakeWordStop: () => ipcRenderer.invoke(IPC_CHANNELS.wakeWordStop),
+  wakeWordUpdateConfig: (input) => ipcRenderer.invoke(IPC_CHANNELS.wakeWordUpdateConfig, input),
+  wakeWordCreateSession: () => ipcRenderer.invoke(IPC_CHANNELS.wakeWordCreateSession),
+  wakeWordRecordReady: (input) => ipcRenderer.invoke(IPC_CHANNELS.wakeWordRecordReady, input),
+  wakeWordRecordUnavailable: (input) => ipcRenderer.invoke(IPC_CHANNELS.wakeWordRecordUnavailable, input),
+  wakeWordRecordDetected: (input) => ipcRenderer.invoke(IPC_CHANNELS.wakeWordRecordDetected, input),
+  wakeWordRecordDiagnostic: (input) => ipcRenderer.invoke(IPC_CHANNELS.wakeWordRecordDiagnostic, input),
+  onWakeWordChanged: (listener) => {
+    const wrapped = (_event: unknown, payload: Parameters<typeof listener>[0]) => {
+      listener(payload);
+    };
+    ipcRenderer.on(IPC_CHANNELS.wakeWordChanged, wrapped);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.wakeWordChanged, wrapped);
+    };
+  },
+  onWakeWordDetected: (listener) => {
+    const wrapped = (_event: unknown, payload: Parameters<typeof listener>[0]) => {
+      listener(payload);
+    };
+    ipcRenderer.on(IPC_CHANNELS.wakeWordDetected, wrapped);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.wakeWordDetected, wrapped);
+    };
+  },
+  onAudioRuntimeBrokerRequest: (listener) => {
+    const wrapped = (_event: unknown, payload: Parameters<typeof listener>[0]) => {
+      listener(payload);
+    };
+    ipcRenderer.on(IPC_CHANNELS.audioRuntimeBrokerRequest, wrapped);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.audioRuntimeBrokerRequest, wrapped);
+    };
+  },
+  audioRuntimeBrokerRespond: (response) => ipcRenderer.invoke(IPC_CHANNELS.audioRuntimeBrokerResponse, response),
+  textToSpeechGetState: () => ipcRenderer.invoke(IPC_CHANNELS.textToSpeechGetState),
+  textToSpeechInstall: () => ipcRenderer.invoke(IPC_CHANNELS.textToSpeechInstall),
+  textToSpeechStart: () => ipcRenderer.invoke(IPC_CHANNELS.textToSpeechStart),
+  textToSpeechStop: () => ipcRenderer.invoke(IPC_CHANNELS.textToSpeechStop),
+  textToSpeechUpdateConfig: (input) => ipcRenderer.invoke(IPC_CHANNELS.textToSpeechUpdateConfig, input),
+  textToSpeechSynthesize: (input) => ipcRenderer.invoke(IPC_CHANNELS.textToSpeechSynthesize, input),
   updateCodexDefaults: (input) => ipcRenderer.invoke(IPC_CHANNELS.updateCodexDefaults, input),
   updateAgentDefaults: (input) => ipcRenderer.invoke(IPC_CHANNELS.updateAgentDefaults, input),
   updateDeveloperMode: (input) => ipcRenderer.invoke(IPC_CHANNELS.updateDeveloperMode, input),

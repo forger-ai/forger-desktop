@@ -82,6 +82,7 @@ interface ChatOrchestratorOptions {
   getClaudeCliPath: () => Promise<string | null>;
   getCodexPathEntries: (appId?: string) => Promise<string[]>;
   getCodexEnvironment: (appId?: string) => Promise<Record<string, string>>;
+  ensureGitAvailable?: () => Promise<void>;
   getChatNetworkAccessDefault?: () => Promise<boolean> | boolean;
   getCodexAuthenticated: () => Promise<boolean>;
   getClaudeAuthenticated: () => Promise<boolean>;
@@ -549,6 +550,14 @@ export class ChatOrchestrator {
     }
     let forgerMcpSession: { url: string; token: string } | null = null;
     let appMcpServers: CodexMcpServerConfig[] = [];
+    let gitPrepared = false;
+    const ensureGitReady = async (): Promise<void> => {
+      if (gitPrepared) {
+        return;
+      }
+      gitPrepared = true;
+      await this.options.ensureGitAvailable?.();
+    };
 
     try {
       if (!(await existsDirectory(run.appRoot))) {
@@ -561,6 +570,9 @@ export class ChatOrchestrator {
         }
       } else if (!(await this.options.getCodexAuthenticated())) {
         throw createChatError('auth_missing', 'Codex authentication missing');
+      }
+      if (run.provider === 'codex') {
+        await ensureGitReady();
       }
 
       const codexCliPath = run.provider === 'codex' ? await this.options.getCodexCliPath() : null;
@@ -575,6 +587,7 @@ export class ChatOrchestrator {
       const codexEnvironment = await this.options.getCodexEnvironment(run.appId);
       const networkAccess = run.networkAccess;
       if (run.appId !== 'forger') {
+        await ensureGitReady();
         await ensureGitRepository(run.appRoot);
         const statusBeforeRun = await getGitStatus(run.appRoot);
         run.startedWithUpdateConflict = hasUnmergedGitStatus(statusBeforeRun);

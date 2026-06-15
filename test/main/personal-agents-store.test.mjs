@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { access, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
+import { access, chmod, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -249,6 +249,56 @@ test('personal agent first run preserves localized start message and records pro
   assert.equal(failed.messages[0].content, 'Iniciar conversación.');
   assert.equal(failed.activeRun.error, 'codex_auth_missing');
   assert.equal(await readFile(path.join(workspaceRoot, 'AGENTS.md'), 'utf8'), agentsMdBefore);
+});
+
+test('personal agent Codex runs prepare Git and write logs under metadata root', async () => {
+  const metadataRoot = await mkdtemp(path.join(tmpdir(), 'forger-personal-agent-git-meta-'));
+  const forgerHomeRoot = await mkdtemp(path.join(tmpdir(), 'forger-personal-agent-git-home-'));
+  const fakeCodexCli = path.join(metadataRoot, 'fake-codex.cjs');
+  await writeFile(fakeCodexCli, [
+    '#!/usr/bin/env node',
+    'console.log(JSON.stringify({ type: "thread.started", thread_id: "personal-thread" }));',
+    'console.log(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "Prepared Git." } }));',
+  ].join('\n'), 'utf8');
+  await chmod(fakeCodexCli, 0o755);
+
+  const store = new AgentStore({ metadataRoot, forgerHomeRoot });
+  let ensureGitCalls = 0;
+  const manager = new AgentConversationManager({
+    store,
+    metadataRoot,
+    codexHome: path.join(metadataRoot, 'codex-home'),
+    getAgentRuntime: async () => ({
+      provider: 'codex',
+      model: 'gpt-5.4',
+      effort: 'medium',
+      permissionMode: 'safe',
+      networkAccess: false,
+    }),
+    getCodexCliPath: async () => fakeCodexCli,
+    getCodexPathEntries: async () => [],
+    getCodexEnvironment: async () => ({}),
+    getCodexAuthenticated: async () => true,
+    ensureGitAvailable: async () => {
+      ensureGitCalls += 1;
+    },
+  });
+  const agent = await store.createAgent({ name: 'Git agent', purpose: 'Test Git preparation.' });
+  const conversation = await manager.startConversation({
+    agentId: agent.id,
+    title: 'Git prep',
+    initialMessage: 'Run Codex.',
+  });
+  const completed = await waitForConversation(manager, conversation.id, (item) =>
+    item.activeRun?.status === 'completed' && item.messages.some((message) => message.content === 'Prepared Git.'));
+
+  assert.equal(ensureGitCalls, 1);
+  const runLog = await readFile(path.join(metadataRoot, 'personal-agents', 'runs', `${completed.activeRun.id}.log`), 'utf8');
+  assert.match(runLog, /Prepared Git/);
+  await assert.rejects(
+    access(path.join(metadataRoot, 'personal-agents', '.forger', 'runs', `${completed.activeRun.id}.log`)),
+    /ENOENT/,
+  );
 });
 
 test('personal agent conversation manager starts a real run, persists progress, and blocks overlapping sends', async () => {

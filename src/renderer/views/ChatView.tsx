@@ -779,6 +779,18 @@ export function ChatView({
                 t={t}
                 onRespondQuestion={respondToQuestion}
               />
+            ) : !intelligenceProviderConfigured ? (
+              <Stack spacing={1.25} alignItems="flex-start" sx={{ minHeight: 92, px: 0.75, py: 0.75 }}>
+                <Stack spacing={0.35}>
+                  <Typography variant="subtitle2">{t.sections.chat.inputProviderMissingTitle}</Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 560 }}>
+                    {t.sections.chat.inputProviderMissingBody}
+                  </Typography>
+                </Stack>
+                <Button variant="contained" size="small" onClick={onConfigureIntelligenceProvider}>
+                  {t.sections.chat.inputProviderMissingAction}
+                </Button>
+              </Stack>
             ) : (
               <>
                 <Box
@@ -1099,7 +1111,7 @@ export function ChatView({
             )}
           </Paper>
 
-          {!activeQuestionAction && mentionQuery !== null ? (
+          {!activeQuestionAction && intelligenceProviderConfigured && mentionQuery !== null ? (
             <Paper
               elevation={8}
               sx={{
@@ -1162,7 +1174,7 @@ export function ChatView({
                 {t.sections.chat.stopResponse}
               </Button>
             ) : null}
-            {!activeQuestionAction ? (
+            {!activeQuestionAction && intelligenceProviderConfigured ? (
               <Button
                 variant="contained"
                 size="small"

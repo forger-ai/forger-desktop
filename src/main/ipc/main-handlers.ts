@@ -1,3 +1,4 @@
+/* eslint-disable max-lines */
 import type fs from 'node:fs/promises';
 import type path from 'node:path';
 import os from 'node:os';
@@ -40,7 +41,9 @@ import { registerAppCloudMessagingIpcHandlers } from './app-cloud-messaging-hand
 import { registerAppRuntimeIpcHandlers } from './app-runtime-handlers';
 import { registerChatIpcHandlers } from './chat-handlers';
 import { registerFileLibraryIpcHandlers } from './file-library-handlers';
+import { registerLiveVoiceInputIpcHandlers } from './live-voice-input-handlers';
 import { registerPersonalAgentIpcHandlers } from './personal-agent-handlers';
+import { registerWakeWordIpcHandlers } from './wake-word-handlers';
 import type {
   AgentDefaults,
   AgentToolPackageDefinition,
@@ -96,6 +99,13 @@ import type {
   RuntimeStatus,
   SetAppToolGrantInput,
   Settings,
+  SpeechToTextConfigInput,
+  SpeechToTextProcessInput,
+  SpeechToTextUploadInput,
+  TextToSpeechConfigInput,
+  TextToSpeechSynthesizeInput,
+  WakeWordConfigInput,
+  WakeWordRuntime,
   StopAppResult,
   SocialUserAppUploadInput,
   SubmitAppRatingInput,
@@ -173,6 +183,47 @@ interface MainProcessIpcDeps {
   getPersonalAgentStore: () => AgentStore;
   getPersonalAgentConversationManager: () => AgentConversationManager;
   getOfficialToolsService: () => OfficialToolsService;
+  getSpeechToTextService: () => {
+    getState: () => Promise<unknown>;
+    install: () => Promise<unknown>;
+    start: () => Promise<unknown>;
+    stop: () => void;
+    allowUserSelectedPath: (path: string) => Promise<void>;
+    updateConfig: (input: SpeechToTextConfigInput) => Promise<unknown>;
+    process: (input: SpeechToTextProcessInput, access?: Record<string, unknown>) => Promise<unknown>;
+    processUpload: (input: SpeechToTextUploadInput) => Promise<unknown>;
+    createRealtimeSession: () => Promise<unknown>;
+  };
+  getLiveVoiceInputService: () => {
+    getState: () => Promise<unknown>;
+    updateConfig: (input: unknown) => Promise<unknown>;
+    updateDevices: (input: unknown) => Promise<unknown>;
+    createSession: (input: unknown) => Promise<unknown>;
+    stop: (input?: unknown) => Promise<unknown>;
+    recordWakeDetected: (input: unknown) => Promise<unknown>;
+    recordWakeReady: (input: unknown) => Promise<unknown>;
+    recordWakeUnavailable: (input: unknown) => Promise<unknown>;
+  };
+  getWakeWordService: () => {
+    getState: () => Promise<unknown>;
+    install: () => Promise<unknown>;
+    start: () => Promise<unknown>;
+    stop: () => void;
+    updateConfig: (input: WakeWordConfigInput) => Promise<unknown>;
+    createSession: () => Promise<unknown>;
+    recordReady: (input: Partial<WakeWordRuntime>) => Promise<unknown>;
+    recordUnavailable: (input: Partial<WakeWordRuntime>) => Promise<unknown>;
+    recordDetected: (input: { deviceId?: string; modelId?: string; confidence?: number }) => Promise<unknown>;
+    recordDiagnostic: (input: unknown) => Promise<unknown>;
+  };
+  getTextToSpeechService: () => {
+    getState: () => Promise<unknown>;
+    install: () => Promise<unknown>;
+    start: () => Promise<unknown>;
+    stop: () => void;
+    updateConfig: (input: TextToSpeechConfigInput) => Promise<unknown>;
+    synthesize: (input: TextToSpeechSynthesizeInput) => Promise<unknown>;
+  };
   getPrivateAppsRoot: () => string;
   getPrivateDataRoot: () => string;
   getRuntimeStatus: (appId: string) => RuntimeStatus;
@@ -266,7 +317,7 @@ export const __testMainHandlersInternals = {
 };
 
 export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
-  const { state, APP_CLAUDE_MODEL_OPTIONS, APP_CODEX_MODEL_OPTIONS, BetterSqlite3, BrowserWindow, CODEX_USAGE_DASHBOARD_URL, IPC_CHANNELS, app, appAgentConversationManager, appendInstallLog, buildAppSecretsState, buildCodexPromptWithAppContext, buildForgerToolsContextForApp, buildForgerToolsContextForFreeChat, canUseCloudDataSync, chatOrchestrator, cloudDeviceManager, connectClaudeAuth, connectCodexAuth, createLocalAppFromSkeleton, createRemoteAppBackup, decryptCloudMessage, decryptCloudMessages, listLocalCloudMessages, dialog, disconnectCodexAuth, ensureCatalogStatuses, failureDiagnostic, forgerBackendClient, forwardCloudSocialEvent, fs, getAppDetails, getBackupsManager, getBackgroundTaskStore, getClaudeAuthStatus, getCloudIdentityStore, getCodexAuthStatus, getCodexHome, getDesktopUpdater, getDeveloperPathState, getFileLibrary, getForgerHomeRoot, getForgerMetadataRoot, getInstallLogPath, getMemoryStore, getPersonalAgentStore, getPersonalAgentConversationManager, getOfficialToolsService, getPrivateAppsRoot, getPrivateDataRoot, getRuntimeStatus, getLocalNetworkShareStatus, getRemoteNetworkShareStatus, getRemoteActivitySnapshot, getLlmRunsSnapshot, getSecretsStore, installAppRuntime, installSocialAppRuntime, installWelcome, ipcMain, listAppPrompts, listCatalogFromBackend, mainWindow, normalizeManifestAgentDefaults, openInstalledApp, startLocalNetworkShare, stopLocalNetworkShare, startRemoteNetworkShare, stopRemoteNetworkShare, openOrFocusFriendChatWindow, path, publicForgerAccount, registry, reinstallClaude, reinstallCodex, resolveAppIdForWebContents, resolveInstalledAgents, resolveInstalledAppSecrets, resolveInstalledManifest, resolveSelectedAppDisplayName, restoreAppPrompt, restoreAppUserVersionRuntime, restoreRemoteAppBackup, sanitizeRendererChatTrace, sendEncryptedCloudMessage, sendEncryptedCloudAppShareMessage, serializeErrorForInstallLog, setAppAutoSyncSetting, shell, signAppFolderGrant, stopInstalledApp, switchForgerAccountSession, toAppSummary, uninstallAppRuntime, updateAgentDefaults, updateAgentToolApproval, updateAppDeveloperSettings, updateDeveloperMode, updateAppPrompt, updateAppRuntime, updateCodexDefaults, validateArchiveEntries, validateAppPrompt, zipDirectory } = deps;
+  const { state, APP_CLAUDE_MODEL_OPTIONS, APP_CODEX_MODEL_OPTIONS, BetterSqlite3, BrowserWindow, CODEX_USAGE_DASHBOARD_URL, IPC_CHANNELS, app, appAgentConversationManager, appendInstallLog, buildAppSecretsState, buildCodexPromptWithAppContext, buildForgerToolsContextForApp, buildForgerToolsContextForFreeChat, canUseCloudDataSync, chatOrchestrator, cloudDeviceManager, connectClaudeAuth, connectCodexAuth, createLocalAppFromSkeleton, createRemoteAppBackup, decryptCloudMessage, decryptCloudMessages, listLocalCloudMessages, dialog, disconnectCodexAuth, ensureCatalogStatuses, failureDiagnostic, forgerBackendClient, forwardCloudSocialEvent, fs, getAppDetails, getBackupsManager, getBackgroundTaskStore, getClaudeAuthStatus, getCloudIdentityStore, getCodexAuthStatus, getCodexHome, getDesktopUpdater, getDeveloperPathState, getFileLibrary, getForgerHomeRoot, getForgerMetadataRoot, getInstallLogPath, getMemoryStore, getPersonalAgentStore, getPersonalAgentConversationManager, getOfficialToolsService, getSpeechToTextService, getLiveVoiceInputService, getWakeWordService, getTextToSpeechService, getPrivateAppsRoot, getPrivateDataRoot, getRuntimeStatus, getLocalNetworkShareStatus, getRemoteNetworkShareStatus, getRemoteActivitySnapshot, getLlmRunsSnapshot, getSecretsStore, installAppRuntime, installSocialAppRuntime, installWelcome, ipcMain, listAppPrompts, listCatalogFromBackend, mainWindow, normalizeManifestAgentDefaults, openInstalledApp, startLocalNetworkShare, stopLocalNetworkShare, startRemoteNetworkShare, stopRemoteNetworkShare, openOrFocusFriendChatWindow, path, publicForgerAccount, registry, reinstallClaude, reinstallCodex, resolveAppIdForWebContents, resolveInstalledAgents, resolveInstalledAppSecrets, resolveInstalledManifest, resolveSelectedAppDisplayName, restoreAppPrompt, restoreAppUserVersionRuntime, restoreRemoteAppBackup, sanitizeRendererChatTrace, sendEncryptedCloudMessage, sendEncryptedCloudAppShareMessage, serializeErrorForInstallLog, setAppAutoSyncSetting, shell, signAppFolderGrant, stopInstalledApp, switchForgerAccountSession, toAppSummary, uninstallAppRuntime, updateAgentDefaults, updateAgentToolApproval, updateAppDeveloperSettings, updateDeveloperMode, updateAppPrompt, updateAppRuntime, updateCodexDefaults, validateArchiveEntries, validateAppPrompt, zipDirectory } = deps;
   const resolveReportRoot = (reader: () => string): string | undefined => {
     try {
       return typeof reader === 'function' ? reader() : undefined;
@@ -623,6 +674,54 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
   });
 
   ipcMain.handle(IPC_CHANNELS.getSettings, async () => state.settings);
+  ipcMain.handle(IPC_CHANNELS.speechToTextGetState, async () => await getSpeechToTextService().getState());
+  ipcMain.handle(IPC_CHANNELS.speechToTextInstall, async () => await getSpeechToTextService().install());
+  ipcMain.handle(IPC_CHANNELS.speechToTextStart, async () => await getSpeechToTextService().start());
+  ipcMain.handle(IPC_CHANNELS.speechToTextStop, async () => {
+    getSpeechToTextService().stop();
+    return await getSpeechToTextService().getState();
+  });
+  ipcMain.handle(IPC_CHANNELS.speechToTextUpdateConfig, async (_event, input: SpeechToTextConfigInput) => {
+    return await getSpeechToTextService().updateConfig(input);
+  });
+  ipcMain.handle(IPC_CHANNELS.speechToTextPickAudio, async () => {
+    const result = await dialog.showOpenDialog({
+      properties: ['openFile'],
+      filters: [
+        { name: 'Audio', extensions: ['mp3', 'mp4', 'm4a', 'wav', 'webm', 'ogg', 'flac', 'aac'] },
+        { name: 'All files', extensions: ['*'] },
+      ],
+    });
+    const selectedPath = result.filePaths[0];
+    if (!result.canceled && selectedPath) {
+      await getSpeechToTextService().allowUserSelectedPath(selectedPath);
+    }
+    return { canceled: result.canceled, path: selectedPath };
+  });
+  ipcMain.handle(IPC_CHANNELS.speechToTextProcess, async (_event, input: SpeechToTextProcessInput) => {
+    return await getSpeechToTextService().process(input, { extraAllowedRoots: [getPrivateDataRoot()] });
+  });
+  ipcMain.handle(IPC_CHANNELS.speechToTextProcessUpload, async (_event, input: SpeechToTextUploadInput) => {
+    return await getSpeechToTextService().processUpload(input);
+  });
+  ipcMain.handle(IPC_CHANNELS.speechToTextCreateRealtimeSession, async () => {
+    return await getSpeechToTextService().createRealtimeSession();
+  });
+  registerLiveVoiceInputIpcHandlers({ IPC_CHANNELS, ipcMain, mainWindow, getLiveVoiceInputService });
+  registerWakeWordIpcHandlers({ IPC_CHANNELS, ipcMain, mainWindow, getWakeWordService });
+  ipcMain.handle(IPC_CHANNELS.textToSpeechGetState, async () => await getTextToSpeechService().getState());
+  ipcMain.handle(IPC_CHANNELS.textToSpeechInstall, async () => await getTextToSpeechService().install());
+  ipcMain.handle(IPC_CHANNELS.textToSpeechStart, async () => await getTextToSpeechService().start());
+  ipcMain.handle(IPC_CHANNELS.textToSpeechStop, async () => {
+    getTextToSpeechService().stop();
+    return await getTextToSpeechService().getState();
+  });
+  ipcMain.handle(IPC_CHANNELS.textToSpeechUpdateConfig, async (_event, input: TextToSpeechConfigInput) => {
+    return await getTextToSpeechService().updateConfig(input);
+  });
+  ipcMain.handle(IPC_CHANNELS.textToSpeechSynthesize, async (_event, input: TextToSpeechSynthesizeInput) => {
+    return await getTextToSpeechService().synthesize(input);
+  });
   ipcMain.handle(IPC_CHANNELS.updateCodexDefaults, async (_event, input: UpdateCodexDefaultsInput) => {
     return await updateCodexDefaults(input);
   });

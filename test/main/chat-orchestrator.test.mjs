@@ -288,6 +288,28 @@ test('chat uses a persistent Codex home so the second message can resume', async
   }
 });
 
+test('chat prepares Git before Codex runs', async () => {
+  let ensureGitCalls = 0;
+  const harness = await createHarness({
+    ensureGitAvailable: async () => {
+      ensureGitCalls += 1;
+    },
+  });
+  try {
+    const started = await harness.orchestrator.startRun({
+      prompt: 'START prepare git',
+      threadId: null,
+      conversationId: 'conversation-prepare-git',
+      conversationHistory: [{ role: 'user', content: 'prepare git' }],
+    });
+    const finalRun = await waitForRun(harness.events, started.runId);
+    assert.equal(finalRun.status, 'preview_ready');
+    assert.equal(ensureGitCalls, 1);
+  } finally {
+    await harness.cleanup();
+  }
+});
+
 test('chat run sandbox includes only existing shared file roots', async () => {
   const harness = await createHarness();
   const sharedDir = join(harness.root, 'shared-inputs');
@@ -576,13 +598,13 @@ test('chat helper functions normalize history, progress, stale errors, and publi
   assert.deepEqual(toProgressMessages('stdout', '   '), []);
 });
 
-test('chat run logs use the private app run directory and preserve existing newlines', async () => {
+test('chat run logs use the metadata run directory and preserve existing newlines', async () => {
   const root = await mkdtemp(join(tmpdir(), 'forger-chat-run-log-'));
   const originalMkdir = fsPromises.mkdir;
   const originalAppendFile = fsPromises.appendFile;
   try {
     const runLogPath = getRunLogPath(root, 'run-1');
-    assert.equal(runLogPath, join(root, '.forger', 'runs', 'run-1.log'));
+    assert.equal(runLogPath, join(root, 'runs', 'run-1.log'));
 
     await appendRunLog(runLogPath, 'meta', 'first line\n');
     await appendRunLog(runLogPath, 'stdout', 'second line');

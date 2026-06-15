@@ -4,8 +4,8 @@ description: Use when creating, editing, validating, or reviewing app manifest.j
 ---
 
 - A manifest is an internal Forger platform contract. It describes how Forger installs, runs, prompts, grants tools to, and operates an app. It is not the list of visible app features.
-- Current non-deprecated manifest sections include `name`, `version`, `description`, `changelog`, `stack`, `catalog`, `services`, `mcp`, `tools`, `appSecrets`, `promptTemplates`, `agents`, `scripts`, `skills`, `cloudMessaging`, `agentRuntime`, `remoteTunnel`, and `localNetworkShare`.
-- Do not add `catalog.capabilities` to new manifests. Use separate manifest sections for tools, secrets, app agents, prompt templates, scripts, skills, messaging, runtime, remote tunnel, and local network sharing.
+- Current non-deprecated manifest sections include `name`, `version`, `description`, `changelog`, `stack`, `catalog`, `platformCapabilities`, `services`, `mcp`, `tools`, `appSecrets`, `promptTemplates`, `agents`, `scripts`, `skills`, `cloudMessaging`, `agentRuntime`, `remoteTunnel`, and `localNetworkShare`.
+- Treat `catalog.capabilities` as decorative catalog copy only. Do not add `catalog.capabilities` for runtime behavior, permissions, service access, tools, secrets, app agents, prompt templates, scripts, skills, messaging, remote tunnel, local network sharing, Speech to text, or Text to speech.
 - `localNetworkShare` and `remoteTunnel` are top-level manifest flags. New apps created from Forger default both flags to `true` so Desktop can provide local network sharing and remote tunnel sessions.
 
 ## Full Manifest JSON Contract
@@ -27,6 +27,20 @@ Use this shape as the current authoring contract. Remove fields that do not appl
     "category": "productividad",
     "status": "production",
     "icon": "assets/icon.png"
+  },
+  "platformCapabilities": {
+    "speechToText": {
+      "required": false,
+      "reason": "Lets this app transcribe audio files selected by the person through Forger's local Speech to text service."
+    },
+    "textToSpeech": {
+      "required": false,
+      "reason": "Lets this app synthesize spoken audio from text through Forger's local Text to speech service."
+    },
+    "audioInput": {
+      "required": false,
+      "reason": "Lets this app access live microphone or system audio input for a visible recording or monitoring workflow."
+    }
   },
   "stack": {
     "backend": {
@@ -220,5 +234,8 @@ Use this shape as the current authoring contract. Remove fields that do not appl
 - `appSecrets` are declarations only. They never store secret values. Never put secret values in manifests, prompts, logs, memory, generated files, test fixtures, screenshots, or final messages.
 - `scripts` and `skills` are internal agent tools, not visible app features.
 - `agentRuntime.networkAccess` controls whether manifest-declared app agent runs can use network access by default.
+- `platformCapabilities.speechToText` is the runtime declaration for Forger's local Speech to text service. Use it only when the app has a real audio file transcription, translation, or authorized realtime transcription workflow. File transcription can request a non-default faster-whisper model when the app needs higher quality; realtime transcript workflows use Desktop's active Speech to text model.
+- `platformCapabilities.audioInput` is the runtime declaration for visible raw live microphone or system audio access. Use it only when the app has a real raw recording, live monitoring, or audio-processing workflow. It declares permission and user-facing intent; it does not provide a Desktop raw-audio bridge endpoint. Do not use `speechToText` as a substitute for raw audio access.
+- `platformCapabilities.textToSpeech` is the runtime declaration for Forger's local Text to speech service. Use it only when the app has a real local voice synthesis workflow where calls provide explicit text, model, and voice. Apps can use the signed Desktop runtime bridge `/audio/say` endpoint for ephemeral playback after listing output devices. `reason` must describe the user-visible workflow enabled by that local service.
 - Keep `localNetworkShare` and `remoteTunnel` as top-level runtime flags. Do not move them into `catalog.capabilities` or visible feature lists.
 - For relational app data, prefer explicit SQLite/SQLModel tables and typed columns. Do not add JSON columns unless the data is genuinely schemaless and the reason is documented.

@@ -243,11 +243,11 @@ export function RendererAppDialogs({ controller }: RendererAppDialogsProps) {
       </Dialog>
 
       <Dialog open={agentProviderConfigOpen} onClose={() => setAgentProviderConfigOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Conectar agente</DialogTitle>
+        <DialogTitle>{t.agentProvider.title}</DialogTitle>
         <DialogContent>
           <Stack spacing={2}>
             <Typography color="text.secondary">
-              Para conversar con tus apps o pedir cambios, conecta una cuenta de ChatGPT/Codex o Claude Code.
+              {t.agentProvider.body}
             </Typography>
             <Alert severity="warning">
               {t.agentProvider.quotaDisclaimer}
@@ -266,7 +266,7 @@ export function RendererAppDialogs({ controller }: RendererAppDialogsProps) {
               setClaudeConfigOpen(true);
             }}
           >
-            Conectar Claude
+            {t.agentProvider.claudeAction}
           </Button>
           <Button
             variant="contained"
@@ -275,7 +275,7 @@ export function RendererAppDialogs({ controller }: RendererAppDialogsProps) {
               setCodexConfigOpen(true);
             }}
           >
-            Conectar ChatGPT
+            {t.agentProvider.codexAction}
           </Button>
         </DialogActions>
       </Dialog>

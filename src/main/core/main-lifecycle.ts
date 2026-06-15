@@ -1,3 +1,4 @@
+/* eslint-disable max-lines */
 import type { App, BrowserWindow, IpcMain, Shell } from 'electron';
 import type fs from 'node:fs/promises';
 import type { Server } from 'node:http';
@@ -7,6 +8,9 @@ import { appendDesktopLog } from '../desktop-logger';
 import type { DesktopErrorReporter } from '../error-reporting';
 import { reportSanitizerRoots } from '../conversation-diagnostics';
 import type { StoredForgerAccount } from '../forger-account-store';
+import type { SpeechToTextServiceManager } from '../speech-to-text-service';
+import type { TextToSpeechServiceManager } from '../text-to-speech-service';
+import type { WakeWordServiceManager } from '../wake-word-service';
 import type {
   AgentRuntime,
   AgentRuntimeRequest,
@@ -28,8 +32,10 @@ import type {
   CreateLocalAppResult,
   RuntimeStatus,
   SetAppToolGrantInput,
+  AudioRuntimeDevices,
 } from '../../shared/types';
 import type {
+  AppManifest,
   AppRegistry,
   InstalledAppRecord,
   RuntimeBinarySet,
@@ -39,6 +45,7 @@ import {
   createStartupLoadingController,
   createStartupLogger,
 } from './startup-loading';
+import { appAllowsAudioInput, appAllowsSpeechToText, appAllowsTextToSpeech } from '../../shared/platform-capabilities';
 
 type ServiceConstructor<T> = new (...args: unknown[]) => T;
 type AsyncFn<T = unknown> = (...args: unknown[]) => Promise<T>;
@@ -157,6 +164,9 @@ interface MainLifecycleState {
     validateAgentCall: (input: unknown, access: { appId: string; requireAppGrant: boolean }) => Promise<unknown>;
     callFromAgent: (input: unknown, access: { appId: string; requireAppGrant: boolean }) => Promise<unknown>;
   }) | null;
+  speechToTextService: SpeechToTextServiceManager | null;
+  textToSpeechService: TextToSpeechServiceManager | null;
+  wakeWordService: WakeWordServiceManager | null;
   pendingDeepLink: unknown;
   pendingDeepLinkFlushScheduled: boolean;
   registry: AppRegistry;
@@ -203,6 +213,7 @@ interface MainLifecycleDeps {
   ensureBackendPythonEnvironment: AsyncFn<void>;
   ensureCatalogStatuses: () => void;
   ensureGlobalAgentsContext: (root: string) => Promise<void>;
+  ensureGitAvailable: () => Promise<void>;
   ensurePathInside: SyncFn<boolean>;
   ensureRuntimeInstalled: (type: 'node' | 'python', version: string) => Promise<RuntimeBinarySet>;
   ensureSqliteDatabaseParent: AsyncFn<void>;
@@ -228,6 +239,18 @@ interface MainLifecycleDeps {
   getMemoryStore: () => { list: AsyncFn; create: AsyncFn; update: AsyncFn; delete: AsyncFn };
   getPersonalAgentHeartbeat: AsyncFn;
   getOfficialToolsService: () => NonNullable<MainLifecycleState['officialToolsService']>;
+  getSpeechToTextService: () => NonNullable<MainLifecycleState['speechToTextService']>;
+  getTextToSpeechService: () => NonNullable<MainLifecycleState['textToSpeechService']>;
+  getWakeWordService: () => NonNullable<MainLifecycleState['wakeWordService']>;
+  getLiveVoiceInputService: () => {
+    createSession: AsyncFn;
+    stop: AsyncFn;
+    updateDevices: AsyncFn;
+  };
+  getAudioDevices: () => Promise<AudioRuntimeDevices>;
+  playTextToSpeechAudio: (input: { playbackId: string; audioDataBase64: string; mimeType: string; outputDeviceId?: string }) => Promise<{ success: boolean; durationSeconds?: number; error?: string }>;
+  cancelTextToSpeechPlayback: (playbackId: string) => Promise<void>;
+  deleteTextToSpeechAudio: (audioPath: string) => Promise<void>;
   getPrivateAppsRoot: () => string;
   getPrivateDataRoot: () => string;
   getRuntimesRoot: () => string;
@@ -264,7 +287,7 @@ interface MainLifecycleDeps {
   resolveClaudeCli: () => Promise<{ path: string; source: string } | null>;
   resolveCodexCliPath: (root: string) => Promise<string | null>;
   resolveInstalledAgents: AsyncFn;
-  resolveInstalledManifest: AsyncFn;
+  resolveInstalledManifest: AsyncFn<AppManifest | null>;
   resolveInstalledPromptTemplates: AsyncFn;
   restoreAppPrompt: AsyncFn;
   restartInstalledApp: AsyncFn;
@@ -329,6 +352,7 @@ export const registerMainLifecycle = (deps: unknown) => {
     ensureBackendPythonEnvironment,
     ensureCatalogStatuses,
     ensureGlobalAgentsContext,
+    ensureGitAvailable,
     ensurePathInside,
     ensureRuntimeInstalled,
     ensureSqliteDatabaseParent,
@@ -354,6 +378,14 @@ export const registerMainLifecycle = (deps: unknown) => {
     getMemoryStore,
     getPersonalAgentHeartbeat,
     getOfficialToolsService,
+    getSpeechToTextService,
+    getTextToSpeechService,
+    getWakeWordService,
+    getLiveVoiceInputService,
+    getAudioDevices,
+    playTextToSpeechAudio,
+    cancelTextToSpeechPlayback,
+    deleteTextToSpeechAudio,
     getPrivateAppsRoot,
     getPrivateDataRoot,
     getRuntimesRoot,
@@ -456,6 +488,27 @@ export const registerMainLifecycle = (deps: unknown) => {
       });
     }).catch(() => undefined);
   }
+  await startupLogger.step('startup:speech_to_text:start_configured', async () => {
+    state.speechToTextService = getSpeechToTextService();
+    await state.speechToTextService.startIfConfigured().catch((error: unknown) => {
+      void appendInstallLog('speech_to_text:start_configured_failed', serializeErrorForInstallLog(error));
+      throw error;
+    });
+  }).catch(() => undefined);
+  await startupLogger.step('startup:text_to_speech:start_configured', async () => {
+    state.textToSpeechService = getTextToSpeechService();
+    await state.textToSpeechService.startIfConfigured().catch((error: unknown) => {
+      void appendInstallLog('text_to_speech:start_configured_failed', serializeErrorForInstallLog(error));
+      throw error;
+    });
+  }).catch(() => undefined);
+  await startupLogger.step('startup:wake_word:start_configured', async () => {
+    state.wakeWordService = getWakeWordService();
+    await state.wakeWordService.startIfConfigured().catch((error: unknown) => {
+      void appendInstallLog('wake_word:start_configured_failed', serializeErrorForInstallLog(error));
+      throw error;
+    });
+  }).catch(() => undefined);
   await startupLogger.step('startup:agent_tool_settings:load', loadAgentToolSettings);
   await startupLogger.step('startup:forger_account_store:create', () => {
     state.forgerAccountStore = new ForgerAccountStore(getForgerAccountPath());
@@ -722,6 +775,25 @@ export const registerMainLifecycle = (deps: unknown) => {
       appId: access.appId,
       requireAppGrant: access.caller === 'app-agent',
     }),
+    getSpeechToTextState: async () => await getSpeechToTextService().getState(),
+    getTextToSpeechState: async () => await getTextToSpeechService().getState(),
+    synthesizeTextToSpeech: async (input: unknown, access: ToolAccess) => {
+      const record = state.registry.apps[access.appId];
+      const manifest = record?.installDir ? await resolveInstalledManifest(record.installDir) : null;
+      if (access.caller === 'app-agent' && !appAllowsTextToSpeech(manifest?.platformCapabilities)) {
+        return { success: false, userMessage: 'Text to speech is not available for this app.', technicalCode: 'text_to_speech_capability_required' };
+      }
+      return await getTextToSpeechService().synthesize(input as { text: string; model: string; voice: string; speed?: number; format?: 'wav' | 'mp3' | 'opus' });
+    },
+    processSpeechToText: async (input: unknown, access: ToolAccess) => {
+      const record = state.registry.apps[access.appId];
+      const manifest = record?.installDir ? await resolveInstalledManifest(record.installDir) : null;
+      return await getSpeechToTextService().process(input as { path: string; task?: 'transcribe' | 'translate'; language?: string; model?: string }, {
+        appId: access.appId,
+        appInstallDir: record?.installDir,
+        appAllowsSpeechToText: access.caller === 'app-agent' ? appAllowsSpeechToText(manifest?.platformCapabilities) : false,
+      });
+    },
     onToolProgress: (input: { runId: string; message: string }) => state.chatOrchestrator?.appendExternalProgress(input.runId, input.message),
     onToolFailure: (input: ForgerMcpToolFailure) => state.desktopErrorReporter?.reportForgerMcpToolFailure(input),
     onHttpFailure: (input: ForgerMcpHttpFailure) => state.desktopErrorReporter?.reportForgerMcpHttpFailure(input),
@@ -776,6 +848,7 @@ export const registerMainLifecycle = (deps: unknown) => {
     getCodexCliPath: async () => await resolveCodexCliPath(getCodexRoot()),
     getClaudeCliPath: async () => (await resolveClaudeCli())?.path ?? null,
     getCodexPathEntries: async (appId?: string) => await getAgentPathEntries(appId),
+    ensureGitAvailable,
     getCodexEnvironment: async (appId?: string) => {
       const record = appId ? state.registry.apps[appId] : undefined;
       const appPythonRuntime = record
@@ -852,6 +925,7 @@ export const registerMainLifecycle = (deps: unknown) => {
     getCodexCliPath: async () => await resolveCodexCliPath(getCodexRoot()),
     getClaudeCliPath: async () => (await resolveClaudeCli())?.path ?? null,
     getCodexPathEntries: async (appId?: string) => await getAgentPathEntries(appId),
+    ensureGitAvailable,
     getCodexEnvironment: async (appId?: string) => {
       const record = appId ? state.registry.apps[appId] : undefined;
       const appPythonRuntime = record
@@ -905,6 +979,7 @@ export const registerMainLifecycle = (deps: unknown) => {
     getCodexCliPath: async () => await resolveCodexCliPath(getCodexRoot()),
     getClaudeCliPath: async () => (await resolveClaudeCli())?.path ?? null,
     getCodexPathEntries: async (appId?: string) => await getAgentPathEntries(appId),
+    ensureGitAvailable,
     getCodexEnvironment: async (appId?: string) => {
       const record = appId ? state.registry.apps[appId] : undefined;
       const appPythonRuntime = record
@@ -1020,6 +1095,56 @@ export const registerMainLifecycle = (deps: unknown) => {
         rawLocale: running?.rawLocale ?? null,
       };
     },
+    getAppPlatformCapabilities: async (appId: string) => {
+      const record = state.registry.apps[appId];
+      const manifest = record?.installDir ? await resolveInstalledManifest(record.installDir) : null;
+      return {
+        speechToText: appAllowsSpeechToText(manifest?.platformCapabilities),
+        audioInput: appAllowsAudioInput(manifest?.platformCapabilities),
+        textToSpeech: appAllowsTextToSpeech(manifest?.platformCapabilities),
+      };
+    },
+    getAudioDevices,
+    updateAudioInputDevices: async (devices: AudioRuntimeDevices) => {
+      await getLiveVoiceInputService().updateDevices({
+        devices: devices.inputDevices.map((device) => ({
+          id: device.id,
+          label: device.label,
+          kind: device.kind,
+          groupId: device.groupId,
+          default: device.default,
+          supported: device.supported,
+          requiresDisplayCapture: device.requiresDisplayCapture,
+        })),
+      });
+    },
+    createLiveVoiceSession: async (appId: string, input: { consumerKind: 'app_transcript'; deviceId?: string; task?: 'transcribe' | 'translate'; language?: string }) => {
+      return await getLiveVoiceInputService().createSession({
+        deviceId: input.deviceId,
+        consumerKind: input.consumerKind,
+        label: `${appId} transcript`,
+        targetType: 'app_agent',
+        targetId: appId,
+        task: input.task,
+        language: input.language,
+      });
+    },
+    stopLiveVoiceSession: async (_appId: string, input: { consumerId: string }) => {
+      return await getLiveVoiceInputService().stop({ consumerId: input.consumerId, targetId: _appId });
+    },
+    processSpeechToText: async (appId: string, input: { path: string; task?: 'transcribe' | 'translate'; language?: string; model?: string }) => {
+      const record = state.registry.apps[appId];
+      const manifest = record?.installDir ? await resolveInstalledManifest(record.installDir) : null;
+      return await getSpeechToTextService().process(input, {
+        appId,
+        appInstallDir: record?.installDir,
+        appAllowsSpeechToText: appAllowsSpeechToText(manifest?.platformCapabilities),
+      });
+    },
+    synthesizeTextToSpeech: async (input: { text: string; model: string; voice: string; speed?: number; format?: 'wav' | 'mp3' | 'opus' }) => await getTextToSpeechService().synthesize(input),
+    playTextToSpeechAudio,
+    cancelTextToSpeechPlayback,
+    deleteTextToSpeechAudio,
     renderManifestAgentPrompt,
     resolveInstalledAgents,
     appendInstallLog,
@@ -1156,6 +1281,12 @@ const performGracefulShutdown = async (): Promise<void> => {
   state.devCatalogService?.stop?.();
   state.forgerMcpServer?.stop();
   state.forgerMcpServer = null;
+  state.speechToTextService?.stop();
+  state.speechToTextService = null;
+  state.textToSpeechService?.stop();
+  state.textToSpeechService = null;
+  state.wakeWordService?.stop();
+  state.wakeWordService = null;
   await Promise.allSettled([...runningApps.values()].flatMap((running) => [
     terminateProcess(running.backend),
     terminateProcess(running.frontend),

@@ -61,6 +61,7 @@ interface AppAgentTaskManagerOptions {
   getClaudeCliPath: () => Promise<string | null>;
   getCodexPathEntries: (appId?: string) => Promise<string[]>;
   getCodexEnvironment: (appId?: string) => Promise<Record<string, string>>;
+  ensureGitAvailable?: () => Promise<void>;
   getAgentNetworkAccess?: (appId: string) => Promise<boolean>;
   getCodexAuthenticated: () => Promise<boolean>;
   getClaudeAuthenticated: () => Promise<boolean>;
@@ -245,6 +246,9 @@ export class AppAgentTaskManager {
       }
     } else if (!(await this.options.getCodexAuthenticated())) {
       throw new Error('codex_auth_missing');
+    }
+    if (runtime.provider === 'codex') {
+      await this.options.ensureGitAvailable?.();
     }
     const codexCliPath = runtime.provider === 'codex' ? await this.options.getCodexCliPath() : null;
     const claudeCliPath = runtime.provider === 'claude' ? await this.options.getClaudeCliPath() : null;

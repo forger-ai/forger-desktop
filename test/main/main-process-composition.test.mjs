@@ -71,7 +71,7 @@ test('main-process composes lifecycle wiring with mocked Electron without launch
     },
   );
 
-  assert.equal(whenReadyCalls, 1);
+  assert.equal(whenReadyCalls, 2);
   assert.deepEqual(
     appListeners.map(([event]) => event),
     ['before-quit', 'window-all-closed'],

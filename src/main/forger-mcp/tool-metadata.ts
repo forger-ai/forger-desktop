@@ -94,6 +94,75 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
     };
   }
 
+  if (toolId === 'forger_speech_to_text_status') {
+    return {
+      type: 'object',
+      properties: {},
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'forger_text_to_speech_status' || toolId === 'forger_text_to_speech_voices') {
+    return {
+      type: 'object',
+      properties: {},
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'forger_transcribe_audio' || toolId === 'forger_translate_audio') {
+    return {
+      type: 'object',
+      properties: {
+        path: {
+          type: 'string',
+          description: 'Ruta del archivo de audio compartido o autorizado por Forger.',
+        },
+        language: {
+          type: 'string',
+          description: 'Codigo de idioma opcional cuando se conoce.',
+        },
+        model: {
+          type: 'string',
+          enum: ['tiny', 'base', 'small', 'medium', 'large-v3'],
+          description: 'Modelo faster-whisper opcional para transcripcion de archivo. Omitir para usar el modelo activo de Forger.',
+        },
+      },
+      required: ['path'],
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'forger_synthesize_speech') {
+    return {
+      type: 'object',
+      properties: {
+        text: {
+          type: 'string',
+          description: 'Texto que se convertira en audio.',
+        },
+        model: {
+          type: 'string',
+          description: 'Modelo local de TTS, por ejemplo kokoro.',
+        },
+        voice: {
+          type: 'string',
+          description: 'Voz cargada para el modelo solicitado.',
+        },
+        speed: {
+          type: 'number',
+          description: 'Velocidad opcional de habla.',
+        },
+        format: {
+          type: 'string',
+          enum: ['wav', 'mp3', 'opus'],
+        },
+      },
+      required: ['text', 'model', 'voice'],
+      additionalProperties: false,
+    };
+  }
+
   if (toolId === 'forger_create_app') {
     return {
       type: 'object',
@@ -436,6 +505,14 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
 };
 
 export const getMcpToolAnnotations = (tool: AgentToolDefinition): McpToolAnnotations => {
+  if (tool.id === 'forger_transcribe_audio' || tool.id === 'forger_translate_audio' || tool.id === 'forger_synthesize_speech') {
+    return {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: false,
+    };
+  }
   if (tool.category === 'consulta' || tool.category === 'memoria') {
     return {
       readOnlyHint: tool.category === 'consulta' || tool.id === 'memory_list',

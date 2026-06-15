@@ -1,6 +1,6 @@
 {
   "name": "forger-desktop",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "description": "Desktop launcher for Forger",
   "author": "Forger",
@@ -107,6 +107,20 @@
         "to": "prompt-builder/prompts",
         "filter": [
           "**/*.md"
+        ]
+      },
+      {
+        "from": "resources/speech-to-text",
+        "to": "speech-to-text",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "resources/text-to-speech",
+        "to": "text-to-speech",
+        "filter": [
+          "**/*"
         ]
       },
       {

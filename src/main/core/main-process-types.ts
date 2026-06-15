@@ -113,6 +113,20 @@ export interface AppManifest {
   skills?: string[];
   appSecrets?: unknown;
   tools?: unknown;
+  platformCapabilities?: {
+    speechToText?: boolean | {
+      required?: boolean;
+      reason?: string;
+    };
+    textToSpeech?: boolean | {
+      required?: boolean;
+      reason?: string;
+    };
+    audioInput?: boolean | {
+      required?: boolean;
+      reason?: string;
+    };
+  };
   agentRuntime?: {
     networkAccess?: boolean;
   };

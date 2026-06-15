@@ -15,8 +15,8 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material';
-import { useMemo, type ReactNode } from 'react';
-import type { BackgroundTask, CatalogApp, ClaudeEffort, CodexReasoningEffort } from '@shared/types';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import type { AudioRuntimeBrokerRequest, AudioRuntimeDevices, BackgroundTask, CatalogApp, ClaudeEffort, CodexReasoningEffort, WakeWordState } from '@shared/types';
 import { AppShell } from '@renderer/components/AppShell';
 import { AppCard } from '@renderer/components/AppCard';
 import { AppsGrid } from '@renderer/components/AppsGrid';
@@ -51,12 +51,110 @@ import { useForgerTour } from '@renderer/tour/useForgerTour';
 import { appExecutionTooltip } from '@renderer/app-execution-labels';
 import { RendererAppDialogs } from './RendererAppDialogs';
 import { LocalNetworkShareDialog } from '@renderer/components/LocalNetworkShareDialog';
+import { WakeWordClientRunner } from '@renderer/services/WakeWordClientRunner';
 
 interface RendererAppViewProps {
   controller: Record<string, any>;
 }
 
+const platformSupportsSystemAudioCapture = (): boolean =>
+  typeof navigator !== 'undefined' && /Mac|Win|Linux/.test(navigator.platform);
+
+const enumerateAudioRuntimeDevices = async (): Promise<AudioRuntimeDevices> => {
+  if (!navigator.mediaDevices?.enumerateDevices) {
+    return { inputDevices: [], outputDevices: [] };
+  }
+  let devices = await navigator.mediaDevices.enumerateDevices();
+  if (devices.some((device) => (device.kind === 'audioinput' || device.kind === 'audiooutput') && !device.label)) {
+    const probe = await navigator.mediaDevices.getUserMedia({ audio: true }).catch(() => null);
+    probe?.getTracks().forEach((track) => track.stop());
+    devices = await navigator.mediaDevices.enumerateDevices();
+  }
+  const inputDevices = devices
+    .filter((device) => device.kind === 'audioinput')
+    .map((device, index) => ({
+      id: device.deviceId || `audioinput-${index}`,
+      label: device.label || (index === 0 ? 'Default microphone' : `Microphone ${index + 1}`),
+      kind: 'microphone' as const,
+      ...(device.groupId ? { groupId: device.groupId } : {}),
+      default: index === 0 || device.deviceId === 'default',
+      supported: true,
+    }));
+  const systemAudioDevices = platformSupportsSystemAudioCapture()
+    ? [{
+      id: 'system-audio:default',
+      label: 'System audio',
+      kind: 'system_audio' as const,
+      default: inputDevices.length === 0,
+      supported: true,
+      requiresDisplayCapture: true,
+    }]
+    : [];
+  const outputDevices = devices
+    .filter((device) => device.kind === 'audiooutput')
+    .map((device, index) => ({
+      id: device.deviceId || `audiooutput-${index}`,
+      label: device.label || (index === 0 ? 'Default speaker' : `Speaker ${index + 1}`),
+      kind: 'speaker' as const,
+      ...(device.groupId ? { groupId: device.groupId } : {}),
+      default: index === 0 || device.deviceId === 'default',
+      supported: true,
+    }));
+  return {
+    inputDevices: [...inputDevices, ...systemAudioDevices],
+    outputDevices: outputDevices.length > 0 ? outputDevices : [{
+      id: 'default',
+      label: 'Default speaker',
+      kind: 'speaker',
+      default: true,
+      supported: true,
+    }],
+  };
+};
+
+const decodeAudioDataUrl = (audioDataBase64: string, mimeType: string): string => {
+  const raw = atob(audioDataBase64);
+  const bytes = new Uint8Array(raw.length);
+  for (let index = 0; index < raw.length; index += 1) {
+    bytes[index] = raw.charCodeAt(index);
+  }
+  return URL.createObjectURL(new Blob([bytes], { type: mimeType || 'audio/wav' }));
+};
+
+const playRuntimeAudio = async (
+  activePlaybacks: Map<string, HTMLAudioElement>,
+  input: Extract<AudioRuntimeBrokerRequest, { type: 'play_audio' }>,
+): Promise<{ success: boolean; durationSeconds?: number; error?: string }> => {
+  const objectUrl = decodeAudioDataUrl(input.audioDataBase64, input.mimeType);
+  const audio = new Audio(objectUrl);
+  activePlaybacks.set(input.playbackId, audio);
+  try {
+    if (input.outputDeviceId && input.outputDeviceId !== 'default' && 'setSinkId' in audio) {
+      await (audio as HTMLAudioElement & { setSinkId: (sinkId: string) => Promise<void> }).setSinkId(input.outputDeviceId).catch(() => undefined);
+    }
+    await new Promise<void>((resolve, reject) => {
+      audio.onended = () => resolve();
+      audio.onerror = () => reject(new Error('audio_playback_failed'));
+      void audio.play().catch(reject);
+    });
+    return {
+      success: true,
+      ...(Number.isFinite(audio.duration) ? { durationSeconds: audio.duration } : {}),
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'audio_playback_failed',
+    };
+  } finally {
+    activePlaybacks.delete(input.playbackId);
+    URL.revokeObjectURL(objectUrl);
+  }
+};
+
 export function RendererAppView({ controller }: RendererAppViewProps) {
+  const audioRuntimePlaybacksRef = useRef<Map<string, HTMLAudioElement>>(new Map());
+  const [settingsInitialSubview, setSettingsInitialSubview] = useState<'main' | 'llmProvider' | 'storage' | 'wakeWord' | null>(null);
   const {
     getDesktopApi,
     resetOnboarding,
@@ -149,6 +247,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     handleOpenConversation,
     handleDeleteConversation,
     handleStartNewConversation,
+    handleOpenFreeChatFromWake,
     chatInput,
     setChatInput,
     handleSendMessage,
@@ -186,7 +285,6 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     activeConversationProgressLines,
     codexAuthStatus,
     claudeAuthStatus,
-    setAgentProviderConfigOpen,
     handleStopChatRun,
     handleRespondPermission,
     handleRespondQuestion,
@@ -275,6 +373,42 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     claudeConfigOpen,
     agentProviderConfigOpen,
   } = controller;
+
+  useEffect(() => {
+    const api = getDesktopApi();
+    return api.onAudioRuntimeBrokerRequest((request: AudioRuntimeBrokerRequest) => {
+      void (async () => {
+        try {
+          if (request.type === 'list_devices') {
+            await api.audioRuntimeBrokerRespond({ requestId: request.requestId, success: true, result: await enumerateAudioRuntimeDevices() });
+            return;
+          }
+          if (request.type === 'play_audio') {
+            await api.audioRuntimeBrokerRespond({
+              requestId: request.requestId,
+              success: true,
+              result: await playRuntimeAudio(audioRuntimePlaybacksRef.current, request),
+            });
+            return;
+          }
+          if (request.type === 'cancel_playback') {
+            const audio = audioRuntimePlaybacksRef.current.get(request.playbackId);
+            if (audio) {
+              audio.pause();
+              audioRuntimePlaybacksRef.current.delete(request.playbackId);
+            }
+            await api.audioRuntimeBrokerRespond({ requestId: request.requestId, success: true, result: { success: true } });
+          }
+        } catch (error) {
+          await api.audioRuntimeBrokerRespond({
+            requestId: request.requestId,
+            success: false,
+            error: error instanceof Error ? error.message : 'audio_runtime_broker_failed',
+          }).catch(() => undefined);
+        }
+      })();
+    });
+  }, [getDesktopApi]);
   const installedViewApps = useMemo<CatalogApp[]>(
     () =>
       installedApps.filter((app: CatalogApp) =>
@@ -302,6 +436,44 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
   const intelligenceProviderConfigured = codexAuthStatus.authenticated || claudeAuthStatus.authenticated;
   const codexProviderConfigured = codexAuthStatus.authenticated;
 
+  useEffect(() => {
+    const unsubscribe = getDesktopApi().onWakeWordDetected(() => {
+      setCurrentView('chat');
+      handleOpenFreeChatFromWake();
+      setBannerSeverity('info');
+      setBannerMessage(t.settings.wakeWordActivated);
+    });
+    return unsubscribe;
+  }, [getDesktopApi, handleOpenFreeChatFromWake, setBannerMessage, setBannerSeverity, setCurrentView, t.settings.wakeWordActivated]);
+
+  useEffect(() => {
+    const api = getDesktopApi();
+    const runner = new WakeWordClientRunner(api);
+    const refresh = () => void api.wakeWordGetState()
+      .then((state: WakeWordState) => runner.ensure(state))
+      .catch((error: unknown) => {
+        void api.wakeWordGetState()
+          .then((state: WakeWordState) => {
+            if (!state.config.enabled) return;
+            const technicalCode = error instanceof Error && error.message ? error.message : 'wake_stream_failed';
+            return api.wakeWordRecordUnavailable({
+              modelId: state.config.modelId,
+              technicalCode,
+            });
+          })
+          .catch(() => undefined);
+        runner.stop('refresh_failed');
+      });
+    refresh();
+    const unsubscribe = api.onWakeWordChanged(() => refresh());
+    const timer = window.setInterval(refresh, 2000);
+    return () => {
+      unsubscribe();
+      window.clearInterval(timer);
+      runner.dispose();
+    };
+  }, [getDesktopApi]);
+
   const openCodexSetup = () => {
     controller.setAgentProviderConfigOpen(false);
     setCodexConfigOpen(true);
@@ -309,6 +481,10 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
   const openClaudeSetup = () => {
     controller.setAgentProviderConfigOpen(false);
     setClaudeConfigOpen(true);
+  };
+  const openLlmProviderSettings = () => {
+    setSettingsInitialSubview('llmProvider');
+    setCurrentView('settings');
   };
 
   const renderAgentProviderCards = () => (
@@ -576,7 +752,10 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
           accountBusy={forgerAccountBusy}
           cloudStorageUsage={cloudStorageUsage}
           cloudStorageBusy={cloudStorageBusy}
-          onOpenStorageSettings={() => setCurrentView('settings')}
+          onOpenStorageSettings={() => {
+            setSettingsInitialSubview('storage');
+            setCurrentView('settings');
+          }}
           onLogout={() => void handleForgerLogout()}
           backgroundTasks={backgroundTasks}
           backgroundTasksOpen={backgroundTasksDrawerOpen}
@@ -738,7 +917,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             progressLines={activeConversationProgressLines}
             intelligenceProviderConfigured={intelligenceProviderConfigured}
             codexProviderConfigured={codexProviderConfigured}
-            onConfigureIntelligenceProvider={() => setAgentProviderConfigOpen(true)}
+            onConfigureIntelligenceProvider={openLlmProviderSettings}
             openingAppIds={openingAppIds}
             onOpenApp={(appId) => void handleOpen(appId)}
             onStopRun={handleStopChatRun}
@@ -935,6 +1114,8 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
 
         {currentView === 'settings' ? (
           <SettingsView
+            initialSubview={settingsInitialSubview ?? undefined}
+            onInitialSubviewConsumed={() => setSettingsInitialSubview(null)}
             codexAuthBusy={codexAuthBusy}
             claudeAuthBusy={claudeAuthBusy}
             codexAuthStatus={codexAuthStatus}

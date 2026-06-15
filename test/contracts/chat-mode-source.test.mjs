@@ -63,6 +63,8 @@ test('renderer separates installed Apps from curated Catalog in navigation and c
   const sidebarSource = await readSource('src/renderer/components/Sidebar.tsx');
   const settingsSource = await readSource('src/renderer/views/SettingsView.tsx');
   const viewSource = await readSource('src/renderer/app/RendererAppView.tsx');
+  const englishSource = await readSource('src/renderer/i18n/en.ts');
+  const spanishSource = await readSource('src/renderer/i18n/es.ts');
 
   assert.match(sidebarSource, /id: 'chat'[\s\S]*id: 'apps'[\s\S]*id: 'catalog'/);
   assert.doesNotMatch(sidebarSource, /id: 'docs' as const, icon:/);
@@ -74,6 +76,16 @@ test('renderer separates installed Apps from curated Catalog in navigation and c
   assert.match(viewSource, /<CatalogView\s+apps=\{catalogApps\}/);
   assert.match(viewSource, /currentView === 'docs'[\s\S]*<DocsView/);
   assert.match(viewSource, /currentView === 'friends'[\s\S]*<SocialView/);
+  assert.match(viewSource, /settingsInitialSubview/);
+  assert.match(viewSource, /openLlmProviderSettings/);
+  assert.match(viewSource, /initialSubview=\{settingsInitialSubview \?\? undefined\}/);
+  assert.match(settingsSource, /initialSubview\?: SettingsSubview/);
+  assert.match(settingsSource, /setSettingsSubview\(initialSubview\)/);
+  assert.match(settingsSource, /llmProviderHowItWorksTitle/);
+  assert.match(settingsSource, /llmProviderHowItWorksLocal/);
+  assert.match(settingsSource, /agentDefaultModelsTitle/);
+  assert.match(englishSource, /Forger uses local agent tools/);
+  assert.match(spanishSource, /Forger usa herramientas locales de agente/);
   assert.match(viewSource, /initialProfileUsername=\{socialProfileUsername\}/);
   assert.match(viewSource, /onSend=\{\(modeOverride\) => void handleSendMessage\(undefined, modeOverride\)\}/);
 });

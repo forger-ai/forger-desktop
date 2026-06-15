@@ -1,4 +1,5 @@
-import { app, BrowserWindow, dialog, ipcMain, Notification, shell, type IpcMainInvokeEvent } from 'electron';
+/* eslint-disable max-lines */
+import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, Notification, session, shell, type IpcMainInvokeEvent } from 'electron';
 import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import fs from 'node:fs/promises';
@@ -40,6 +41,11 @@ import { AgentStore } from '../personal-agents/agent-store';
 import { RemoteAgentSessionService } from '../personal-agents/remote-session-service';
 import { PromptOverridesStore, buildPromptBases, promptOverrideErrorResult } from '../prompt-overrides';
 import { OfficialToolsService, normalizeAppToolDeclarations } from '../official-tools-service';
+import { AudioRuntimeBroker } from '../audio-runtime-broker';
+import { SpeechToTextServiceManager } from '../speech-to-text-service';
+import { TextToSpeechServiceManager } from '../text-to-speech-service';
+import { LiveVoiceInputServiceManager } from '../live-voice-input-service';
+import { WakeWordServiceManager } from '../wake-word-service';
 import { ForgerAccountStore, publicForgerAccount, type StoredForgerAccount } from '../forger-account-store';
 import { ForgerBackendClient } from '../forger-backend-client';
 import { registerForgerCloudOAuth } from '../forger-cloud-oauth';
@@ -75,6 +81,7 @@ import { registerMainLifecycle } from './main-lifecycle';
 import type { AppManifest, AppManifestService, AppManifestStack, AppRegistry, InstalledAppRecord, RuntimeBinarySet, RunningAppProcess, StackSkillTemplate } from './main-process-types';
 import { FORGER_AGENT_CONTRACT_MARKER, FORGER_AGENT_CONTRACT_MARKER_PREFIX, FORGER_AGENT_CONTRACT_VERSION, buildGlobalForgerAgentsMarkdown } from '../prompt-builder/forger-base';
 import { buildFailureDiagnostic } from '../../shared/error-diagnostics';
+import { appAllowsAudioInput, appAllowsSpeechToText, appAllowsTextToSpeech } from '../../shared/platform-capabilities';
 import { buildForgerAppAgentsMarkdown } from '../prompt-builder/apps-base';
 import { buildCodexPromptForFreeChat, buildCodexPromptWithAppContext } from '../prompt-builder/user-message';
 import { buildForgerOfficialToolSkillTemplates, buildForgerOfficialToolsPromptSection } from '../prompt-builder/official-tools';
@@ -139,6 +146,18 @@ let forgerBackendClient: ForgerBackendClient | null = null;
 const cloudSyncSettings: CloudSyncSettings = { appSync: {} };
 const runningApps = new Map<string, RunningAppProcess>();
 const appWindows = new Map<string, BrowserWindow>();
+
+app.whenReady().then(() => {
+  session.defaultSession.setDisplayMediaRequestHandler((_request, callback) => {
+    desktopCapturer.getSources({ types: ['screen'] })
+      .then((sources) => {
+        callback({ video: sources[0], audio: 'loopback' });
+      })
+      .catch(() => {
+        callback({});
+      });
+  });
+}).catch(() => undefined);
 const friendChatWindows = new Map<number, BrowserWindow>();
 const stoppingApps = new Set<string>();
 const appLifecycleLocks = new Map<string, Promise<unknown>>();
@@ -151,6 +170,11 @@ let appAgentConversationManager: AppAgentConversationManager | null = null;
 let fileLibrary: FileLibrary | null = null;
 let secretsStore: SecretsStore | null = null;
 let officialToolsService: OfficialToolsService | null = null;
+let audioRuntimeBroker: AudioRuntimeBroker | null = null;
+let speechToTextService: SpeechToTextServiceManager | null = null;
+let textToSpeechService: TextToSpeechServiceManager | null = null;
+let liveVoiceInputService: LiveVoiceInputServiceManager | null = null;
+let wakeWordService: WakeWordServiceManager | null = null;
 let desktopUpdater: DesktopUpdater | null = null;
 let desktopErrorReporter: DesktopErrorReporter | null = null;
 let automationManager: AutomationManager | null = null;
@@ -254,6 +278,16 @@ const serializeErrorForInstallLog = (error: unknown): Record<string, unknown> =>
 const signAppFolderGrant = (appId: string, folderPath: string): AppExternalFolderSelection => getMainUtilitiesController().signAppFolderGrant(appId, folderPath);
 const resolveAppIdForWebContents = (webContentsId: number): string | null => getMainUtilitiesController().resolveAppIdForWebContents(webContentsId);
 const appendInstallLog = async (event: string, payload: Record<string, unknown> = {}): Promise<void> => await getMainUtilitiesController().appendInstallLog(event, payload);
+const getAudioRuntimeBroker = (): AudioRuntimeBroker => {
+  audioRuntimeBroker ??= new AudioRuntimeBroker({
+    IPC_CHANNELS,
+    appendInstallLog,
+    getMainWindow,
+    ipcMain,
+  });
+  audioRuntimeBroker.registerIpcHandlers();
+  return audioRuntimeBroker;
+};
 const loadAgentToolSettings = async (): Promise<void> => await getMainUtilitiesController().loadAgentToolSettings();
 const updateAgentToolApproval = async (input: UpdateAgentToolApprovalInput): Promise<AgentToolSettings> => await getMainUtilitiesController().updateAgentToolApproval(input);
 const getBundledResourcesRoot = (): string => getMainUtilitiesController().getBundledResourcesRoot();
@@ -344,6 +378,77 @@ const appAllowsAgentNetworkAccess = async (appId: string): Promise<boolean> => a
 const anyAppAllowsAgentNetworkAccess = async (appIds: string[]): Promise<boolean> => await getManifestSupportController().anyAppAllowsAgentNetworkAccess(appIds);
 const getSecretsStore = (): SecretsStore => getManifestSupportController().getSecretsStore();
 const getOfficialToolsService = (): OfficialToolsService => getManifestSupportController().getOfficialToolsService();
+const getSpeechToTextServiceSourcePath = (): string =>
+  app.isPackaged
+    ? path.join(process.resourcesPath, 'speech-to-text', 'server.py')
+    : path.join(app.getAppPath(), 'resources', 'speech-to-text', 'server.py');
+const getSpeechToTextService = (): SpeechToTextServiceManager => {
+  speechToTextService ??= new SpeechToTextServiceManager({
+    appendInstallLog,
+    ensureRuntimeInstalled,
+    fs,
+    getFreePort,
+    getMetadataRoot: getForgerMetadataRoot,
+    getPrivateAppsRoot,
+    getPrivateDataRoot,
+    getServiceSourcePath: getSpeechToTextServiceSourcePath,
+    path,
+    runCommand,
+  });
+  return speechToTextService;
+};
+const getLiveVoiceInputService = (): LiveVoiceInputServiceManager => {
+  liveVoiceInputService ??= new LiveVoiceInputServiceManager({
+    appendInstallLog,
+    fs,
+    getMetadataRoot: getForgerMetadataRoot,
+    getSpeechToTextState: async () => await getSpeechToTextService().getState(),
+    createSpeechRealtimeSession: async () => await getSpeechToTextService().createRealtimeSession(),
+    onForgerWakeDetected: (event) => {
+      mainWindow?.webContents.send(IPC_CHANNELS.liveVoiceInputForgerWake, event);
+    },
+    path,
+  });
+  return liveVoiceInputService;
+};
+const getWakeWordServiceSourcePath = (): string =>
+  app.isPackaged
+    ? path.join(process.resourcesPath, 'wake-word', 'server.py')
+    : path.join(app.getAppPath(), 'resources', 'wake-word', 'server.py');
+const getWakeWordService = (): WakeWordServiceManager => {
+  wakeWordService ??= new WakeWordServiceManager({
+    appendInstallLog,
+    ensureRuntimeInstalled,
+    fs,
+    getFreePort,
+    getMetadataRoot: getForgerMetadataRoot,
+    getServiceSourcePath: getWakeWordServiceSourcePath,
+    onWakeDetected: (event) => {
+      mainWindow?.webContents.send(IPC_CHANNELS.wakeWordDetected, event);
+    },
+    path,
+    runCommand,
+  });
+  return wakeWordService;
+};
+const getTextToSpeechServiceSourcePath = (): string =>
+  app.isPackaged
+    ? path.join(process.resourcesPath, 'text-to-speech', 'server.py')
+    : path.join(app.getAppPath(), 'resources', 'text-to-speech', 'server.py');
+const getTextToSpeechService = (): TextToSpeechServiceManager => {
+  textToSpeechService ??= new TextToSpeechServiceManager({
+    appendInstallLog,
+    ensureRuntimeInstalled,
+    fs,
+    getFreePort,
+    getMetadataRoot: getForgerMetadataRoot,
+    getPrivateDataRoot,
+    getServiceSourcePath: getTextToSpeechServiceSourcePath,
+    path,
+    runCommand,
+  });
+  return textToSpeechService;
+};
 const getMemoryStore = (): MemoryStore => getManifestSupportController().getMemoryStore();
 const getPersonalAgentStore = (): AgentStore => {
   if (!personalAgentStore) {
@@ -364,6 +469,7 @@ const getPersonalAgentConversationManager = (): AgentConversationManager => {
       getCodexCliPath: async () => await resolveCodexCliPath(getCodexRoot()),
       getClaudeCliPath: async () => (await resolveClaudeCli())?.path ?? null,
       getCodexPathEntries: async () => await getAgentPathEntries(),
+      ensureGitAvailable,
       getCodexEnvironment: async () => await getCodexToolEnvironment(),
       getCodexAuthenticated: async () => (await getCodexAuthStatus()).authenticated,
       getClaudeAuthenticated: async () => (await getClaudeAuthStatus()).authenticated,
@@ -819,6 +925,14 @@ const createInstalledAppRuntimeDeps = () => ({
   appWindows,
   appendInstallLog,
   desktopRuntimeBridge,
+  getSpeechToTextEnvironment: (manifest: AppManifest | null) => {
+    return getSpeechToTextService().environmentForApp(appAllowsSpeechToText(manifest?.platformCapabilities));
+  },
+  getTextToSpeechEnvironment: (manifest: AppManifest | null) => {
+    return getTextToSpeechService().environmentForApp(appAllowsTextToSpeech(manifest?.platformCapabilities));
+  },
+  getAudioInputEnvironment: (manifest: AppManifest | null): Record<string, string> =>
+    appAllowsAudioInput(manifest?.platformCapabilities) ? { FORGER_AUDIO_INPUT_ENABLED: '1' } : {},
   dispatchDeepLink,
   emitRuntimeStatus,
   ensureBackendPythonEnvironment,
@@ -1103,6 +1217,10 @@ const getMainProcessIpcDeps = () => ({
   getPersonalAgentStore,
   getPersonalAgentConversationManager,
   getOfficialToolsService,
+  getSpeechToTextService,
+  getLiveVoiceInputService,
+  getWakeWordService,
+  getTextToSpeechService,
   getPrivateAppsRoot,
   getPrivateDataRoot,
   getRuntimeStatus,
@@ -1220,6 +1338,9 @@ const mainLifecycleState = {
   get fileLibrary() { return fileLibrary; }, set fileLibrary(value) { fileLibrary = value; },
   get secretsStore() { return secretsStore; }, set secretsStore(value) { secretsStore = value; },
   get officialToolsService() { return officialToolsService; }, set officialToolsService(value) { officialToolsService = value; },
+  get speechToTextService() { return speechToTextService; }, set speechToTextService(value) { speechToTextService = value; },
+  get textToSpeechService() { return textToSpeechService; }, set textToSpeechService(value) { textToSpeechService = value; },
+  get wakeWordService() { return wakeWordService; }, set wakeWordService(value) { wakeWordService = value; },
   get desktopErrorReporter() { return desktopErrorReporter; }, set desktopErrorReporter(value) { desktopErrorReporter = value; },
   get automationManager() { return automationManager; }, set automationManager(value) { automationManager = value; },
   get appMcpManager() { return appMcpManager; }, set appMcpManager(value) { appMcpManager = value; },
@@ -1242,10 +1363,19 @@ registerMainLifecycle({
   appAllowsAgentNetworkAccess, appWindows, appendInstallLog, backendBaseUrl, buildForgerToolsContextForApp, buildMemoryContextForApp,
   buildMemoryContextForApps, chooseAgentRuntime, clearForgerAccountSession, closeServer, createLocalAppFromSkeleton, createWindow,
   emitAutomationUpdated, emitChatRunUpdated, ensureBackendPythonEnvironment, ensureCatalogStatuses, ensureGlobalAgentsContext,
-  ensurePathInside, ensureRuntimeInstalled, ensureSqliteDatabaseParent, flushPendingDeepLink, fs, getAgentPathEntries, getBackupsRoot,
+  ensureGitAvailable, ensurePathInside, ensureRuntimeInstalled, ensureSqliteDatabaseParent, flushPendingDeepLink, fs, getAgentPathEntries, getBackupsRoot,
   getClaudeAuthStatus, getCloudDeviceAccountStorageKey, getCloudDevicePath, getCloudIdentityPath, getCloudIdentityStore, getSocialMessagesPath,
   getCodexAuthStatus, getCodexHome, getCodexRoot, getCodexToolEnvironment, getDesktopChatNetworkAccessDefault: () => settings.defaultChatNetworkAccess !== false, getForgerAccountPath, getForgerHomeRoot, getForgerMetadataRoot,
-  getFreePort, getLegacyForgerMetadataRoot, getMemoryStore, getOfficialToolsService, getPrivateAppsRoot, getPrivateDataRoot, getRuntimesRoot,
+  getFreePort, getLegacyForgerMetadataRoot, getMemoryStore, getOfficialToolsService, getSpeechToTextService, getTextToSpeechService, getLiveVoiceInputService, getWakeWordService,
+  getAudioDevices: async () => await getAudioRuntimeBroker().listDevices(),
+  playTextToSpeechAudio: async (input: { playbackId: string; audioDataBase64: string; mimeType: string; outputDeviceId?: string }) => await getAudioRuntimeBroker().playAudio(input),
+  cancelTextToSpeechPlayback: async (playbackId: string) => await getAudioRuntimeBroker().cancelPlayback(playbackId),
+  deleteTextToSpeechAudio: async (audioPath: string) => {
+    await fs.unlink(audioPath).catch((error: unknown) => {
+      if ((error as { code?: string })?.code !== 'ENOENT') throw error;
+    });
+  },
+  getPrivateAppsRoot, getPrivateDataRoot, getRuntimesRoot,
   getRuntimePathEntries, getRuntimeStatus, getLocalNetworkShareStatus, getRemoteNetworkShareStatus, getTempRoot, getVenvExecutables,
   getPersonalAgentHeartbeat, handleCloudSocialEvent, hasInstalledCodexConversation, ipcMain, listAppPrompts, listCatalogFromBackend, loadAgentToolSettings,
   loadCloudSyncSettings, loadRegistry, loadSettings, llmRunsStore, mapBackendCategory, openInstalledApp, recordRemoteCloudActivity, startLocalNetworkShare, stopLocalNetworkShare,

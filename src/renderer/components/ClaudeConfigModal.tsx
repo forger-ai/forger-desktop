@@ -40,19 +40,19 @@ export function ClaudeConfigModal({
   onReinstall,
 }: ClaudeConfigModalProps) {
   const sourceLabel = status.source === 'managed'
-    ? 'Instalacion administrada por Forger'
+    ? t.settings.claudeSourceManaged
     : status.source === 'system'
-      ? 'Instalacion existente en este equipo'
-      : 'Claude Code no instalado';
+      ? t.settings.claudeSourceSystem
+      : t.settings.claudeSourceMissing;
   const connectionDetail = status.authenticated
-    ? 'Claude Code informa una sesion activa.'
+    ? t.settings.claudeConnectionActive
     : status.installed
-      ? 'Claude Code esta instalado, pero no informa una sesion activa.'
-      : 'Forger puede instalar Claude Code localmente antes de conectar la cuenta.';
+      ? t.settings.claudeConnectionMissingSession
+      : t.settings.claudeConnectionInstallAvailable;
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
-      <DialogTitle>Configurar Claude Code</DialogTitle>
+      <DialogTitle>{t.settings.claudeConfigTitle}</DialogTitle>
       <DialogContent>
         <Stack spacing={2}>
           <Stack direction="row" spacing={1} alignItems="center">
@@ -61,7 +61,7 @@ export function ClaudeConfigModal({
           </Stack>
           {status.authenticated ? (
             <Alert severity="success" icon={<CheckCircleRounded />}>
-              Claude Code esta listo para usarse desde Forger.
+              {t.settings.claudeReady}
             </Alert>
           ) : busy ? (
             <Alert severity="info">
@@ -72,7 +72,7 @@ export function ClaudeConfigModal({
             </Alert>
           ) : null}
           <Typography color="text.secondary">
-            Si Claude Code ya esta instalado en este equipo, Forger lo detecta y lo puede usar. Si no existe, Forger instala una copia local con su runtime de Node.
+            {t.settings.claudeInstallDescription}
           </Typography>
           <Alert severity="warning">
             <Typography variant="body2">{t.agentProvider.claudeQuotaDisclaimer}</Typography>
@@ -82,18 +82,18 @@ export function ClaudeConfigModal({
               {connectionDetail}
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              Version detectada: {status.version?.replace(/\s*\(Claude Code\)\s*/i, '') || 'sin detectar'}
+              {t.settings.claudeDetectedVersion(status.version?.replace(/\s*\(Claude Code\)\s*/i, '') || t.settings.claudeVersionMissing)}
             </Typography>
           </Stack>
         </Stack>
       </DialogContent>
       <DialogActions>
-        <Button onClick={onClose}>Cerrar</Button>
+        <Button onClick={onClose}>{t.actions.close}</Button>
         <Button variant="outlined" startIcon={<RefreshRounded />} disabled={busy} onClick={() => void onRefresh()}>
-          Actualizar
+          {t.agentProvider.refresh}
         </Button>
         <Button variant="outlined" color="warning" startIcon={<RestartAltRounded />} disabled={busy} onClick={() => void onReinstall()}>
-          Instalar/Reinstalar
+          {t.settings.claudeReinstallAction}
         </Button>
         {!status.authenticated ? (
           <Button
@@ -102,7 +102,7 @@ export function ClaudeConfigModal({
             disabled={busy}
             onClick={() => void onConnect()}
           >
-            Conectar Claude
+            {t.settings.claudeConnectAction}
           </Button>
         ) : null}
       </DialogActions>

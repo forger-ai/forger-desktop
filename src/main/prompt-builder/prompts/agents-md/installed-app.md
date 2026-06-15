@@ -44,6 +44,7 @@ This app may be installed and operated through Forger, but this file is app cont
 - Internal tools are resources for completing app work: app tools, scripts, skills, temporary files, validations, and structured app data access.
 - Internal tools are not automatically visible app features.
 - Prefer structured app tools when they exist because they usually preserve app validation and app language.
+- Forger Speech to text and Text to speech are separate local platform services with separate skills. Use `forger-speech-to-text` for transcription or translation and `forger-text-to-speech` for local voice synthesis.
 - Use scripts only when the app documents them or when no safer structured tool exists.
 - Do not ask the person to run commands, know paths, prepare internal formats, or understand implementation details unless they ask for technical detail.
 

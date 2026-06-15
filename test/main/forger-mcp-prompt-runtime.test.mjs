@@ -62,6 +62,10 @@ const createServer = async (overrides = {}) => {
     listOfficialToolActionIdsForApp: async () => new Set(),
     validateOfficialTool: async () => null,
     callOfficialTool: async () => ({ success: true }),
+    getSpeechToTextState: async () => ({ status: 'not_installed', installed: false, running: false }),
+    processSpeechToText: async () => ({ success: true }),
+    getTextToSpeechState: async () => ({ status: 'not_installed', installed: false, running: false, models: [], voices: [], queue: [] }),
+    synthesizeTextToSpeech: async () => ({ success: true }),
     ...overrides,
   });
   await server.start();
@@ -91,6 +95,46 @@ test('forger_test_app_prompt schema accepts prompt candidates and variables', ()
   assert.equal(schema.properties.prompt.type, 'string');
   assert.equal(schema.properties.variables.type, 'object');
   assert.equal(schema.additionalProperties, false);
+});
+
+test('speech-to-text MCP schemas expose status and authorized audio paths', () => {
+  const statusSchema = getMcpToolInputSchema('forger_speech_to_text_status');
+  assert.deepEqual(statusSchema, {
+    type: 'object',
+    properties: {},
+    additionalProperties: false,
+  });
+
+  const transcribeSchema = getMcpToolInputSchema('forger_transcribe_audio');
+  assert.deepEqual(transcribeSchema.required, ['path']);
+  assert.equal(transcribeSchema.properties.path.type, 'string');
+  assert.deepEqual(transcribeSchema.properties.model.enum, ['tiny', 'base', 'small', 'medium', 'large-v3']);
+  assert.equal(transcribeSchema.additionalProperties, false);
+
+  const translateSchema = getMcpToolInputSchema('forger_translate_audio');
+  assert.deepEqual(translateSchema.required, ['path']);
+  assert.equal(translateSchema.properties.language.type, 'string');
+  assert.deepEqual(translateSchema.properties.model.enum, ['tiny', 'base', 'small', 'medium', 'large-v3']);
+});
+
+test('text-to-speech MCP schemas expose status voices and explicit synthesize parameters', () => {
+  assert.deepEqual(getMcpToolInputSchema('forger_text_to_speech_status'), {
+    type: 'object',
+    properties: {},
+    additionalProperties: false,
+  });
+  assert.deepEqual(getMcpToolInputSchema('forger_text_to_speech_voices'), {
+    type: 'object',
+    properties: {},
+    additionalProperties: false,
+  });
+  const synthesizeSchema = getMcpToolInputSchema('forger_synthesize_speech');
+  assert.deepEqual(synthesizeSchema.required, ['text', 'model', 'voice']);
+  assert.equal(synthesizeSchema.properties.text.type, 'string');
+  assert.equal(synthesizeSchema.properties.model.type, 'string');
+  assert.equal(synthesizeSchema.properties.voice.type, 'string');
+  assert.deepEqual(synthesizeSchema.properties.format.enum, ['wav', 'mp3', 'opus']);
+  assert.equal(synthesizeSchema.additionalProperties, false);
 });
 
 test('forger_update_app_prompt forwards agentPrompt runtime arguments', async () => {

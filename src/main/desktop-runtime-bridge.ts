@@ -13,6 +13,12 @@ import type {
   AppManifestAgentStartInput,
   AppManifestAgentSteerInput,
   AgentProvider,
+  AudioPlaybackSummary,
+  AudioRuntimeDevices,
+  LiveVoiceInputSession,
+  SpeechToTextProcessResult,
+  SpeechToTextTask,
+  TextToSpeechSynthesizeResult,
 } from '../shared/types';
 import type { AppAgentTaskManager } from './app-agent-task-manager';
 import type { AppAgentConversationManager } from './app-agent-conversation-manager';
@@ -31,6 +37,26 @@ import { normalizeLocale } from '../shared/i18n';
 const MAX_BODY_BYTES = 96 * 1024 * 1024;
 const SIGNATURE_WINDOW_MS = 5 * 60 * 1000;
 
+type AudioFileTranscriptionJobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'canceled';
+
+interface AudioFileTranscriptionJob {
+  jobId: string;
+  appId: string;
+  status: AudioFileTranscriptionJobStatus;
+  path: string;
+  task: SpeechToTextTask;
+  model?: string;
+  language?: string;
+  text?: string;
+  durationSeconds?: number;
+  technicalCode?: string;
+  userMessage?: string;
+  reportable?: boolean;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
+}
+
 export interface DesktopRuntimeBridgeOptions {
   getInstalledApp: (appId: string) => { installDir?: string } | undefined;
   getConversationManager: () => AppAgentConversationManager | null;
@@ -44,6 +70,41 @@ export interface DesktopRuntimeBridgeOptions {
     appRoot: string;
   }) => string;
   resolveInstalledAgents: (appId: string) => Promise<AppAgent[]>;
+  getAppPlatformCapabilities?: (appId: string) => Promise<{
+    speechToText: boolean;
+    audioInput: boolean;
+    textToSpeech: boolean;
+  }>;
+  getAudioDevices?: () => Promise<AudioRuntimeDevices>;
+  updateAudioInputDevices?: (input: AudioRuntimeDevices) => Promise<void>;
+  createLiveVoiceSession?: (appId: string, input: {
+    consumerKind: 'app_transcript';
+    deviceId?: string;
+    task?: 'transcribe' | 'translate';
+    language?: string;
+  }) => Promise<LiveVoiceInputSession>;
+  stopLiveVoiceSession?: (appId: string, input: { consumerId: string }) => Promise<unknown>;
+  processSpeechToText?: (appId: string, input: {
+    path: string;
+    task?: 'transcribe' | 'translate';
+    language?: string;
+    model?: string;
+  }) => Promise<SpeechToTextProcessResult>;
+  synthesizeTextToSpeech?: (input: {
+    text: string;
+    model: string;
+    voice: string;
+    speed?: number;
+    format?: 'wav' | 'mp3' | 'opus';
+  }) => Promise<TextToSpeechSynthesizeResult>;
+  playTextToSpeechAudio?: (input: {
+    playbackId: string;
+    audioDataBase64: string;
+    mimeType: string;
+    outputDeviceId?: string;
+  }) => Promise<{ success: boolean; durationSeconds?: number; error?: string }>;
+  cancelTextToSpeechPlayback?: (playbackId: string) => Promise<void>;
+  deleteTextToSpeechAudio?: (audioPath: string) => Promise<void>;
   appendInstallLog: (event: string, payload?: Record<string, unknown>) => Promise<void>;
   serializeErrorForInstallLog: (error: unknown) => Record<string, unknown>;
   maxBodyBytes?: number;
@@ -55,10 +116,16 @@ export class DesktopRuntimeBridge {
   private url: string | null = null;
   private readonly secrets: Map<string, string>;
   private readonly eventClients: Map<string, Set<WebSocket>>;
+  private readonly runtimeEventClients: Map<string, Set<WebSocket>>;
+  private readonly playbacks: Map<string, AudioPlaybackSummary>;
+  private readonly audioFileTranscriptionJobs: Map<string, AudioFileTranscriptionJob>;
 
   public constructor(private readonly options: DesktopRuntimeBridgeOptions) {
     this.secrets = new Map<string, string>();
     this.eventClients = new Map<string, Set<WebSocket>>();
+    this.runtimeEventClients = new Map<string, Set<WebSocket>>();
+    this.playbacks = new Map<string, AudioPlaybackSummary>();
+    this.audioFileTranscriptionJobs = new Map<string, AudioFileTranscriptionJob>();
   }
 
   public async start(): Promise<void> {
@@ -93,7 +160,13 @@ export class DesktopRuntimeBridge {
         client.close();
       }
     }
+    for (const clients of this.runtimeEventClients.values()) {
+      for (const client of clients) {
+        client.close();
+      }
+    }
     this.eventClients.clear();
+    this.runtimeEventClients.clear();
     this.secrets.clear();
     eventServer?.close();
     if (!server) return;
@@ -131,6 +204,17 @@ export class DesktopRuntimeBridge {
     }
   }
 
+  public publishRuntimeEvent(appId: string, type: string, payload: Record<string, unknown>): void {
+    const clients = this.runtimeEventClients.get(appId);
+    if (!clients || clients.size === 0) return;
+    const raw = JSON.stringify(this.signedSystemEvent(appId, type, payload));
+    for (const client of clients) {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(raw);
+      }
+    }
+  }
+
   private async handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
     try {
       const method = request.method ?? 'GET';
@@ -155,7 +239,7 @@ export class DesktopRuntimeBridge {
     try {
       const method = request.method ?? 'GET';
       const url = new URL(request.url ?? '/', 'http://127.0.0.1');
-      const match = url.pathname.match(/^\/v1\/apps\/([^/]+)\/agent-events$/);
+      const match = url.pathname.match(/^\/v1\/apps\/([^/]+)\/(agent-events|runtime-events)$/);
       if (!match) {
         socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
         socket.destroy();
@@ -166,13 +250,14 @@ export class DesktopRuntimeBridge {
         throw new BridgeError(403, 'desktop_runtime_app_forbidden');
       }
       this.eventServer?.handleUpgrade(request, socket, head, (client: WebSocket) => {
-        const clients = this.eventClients.get(appId) ?? new Set<WebSocket>();
+        const clientsByApp = match[2] === 'runtime-events' ? this.runtimeEventClients : this.eventClients;
+        const clients = clientsByApp.get(appId) ?? new Set<WebSocket>();
         clients.add(client);
-        this.eventClients.set(appId, clients);
+        clientsByApp.set(appId, clients);
         client.on('close', () => {
           clients.delete(client);
           if (clients.size === 0) {
-            this.eventClients.delete(appId);
+            clientsByApp.delete(appId);
           }
         });
         client.send(JSON.stringify(this.signedSystemEvent(appId, 'desktop_runtime.connected')));
@@ -220,6 +305,9 @@ export class DesktopRuntimeBridge {
   }
 
   private async route(appId: string, method: string, pathname: string, bodyText: string): Promise<unknown> {
+    const audioResult = await this.routeAudio(appId, method, pathname, bodyText);
+    if (audioResult.handled) return audioResult.result;
+
     const contextMatch = pathname.match(/^\/v1\/apps\/([^/]+)\/context$/);
     if (contextMatch) {
       if (decodeURIComponent(contextMatch[1]) !== appId) {
@@ -400,6 +488,473 @@ export class DesktopRuntimeBridge {
     throw new BridgeError(404, 'desktop_runtime_route_not_found');
   }
 
+  private async routeAudio(appId: string, method: string, pathname: string, bodyText: string): Promise<{ handled: boolean; result?: unknown }> {
+    const match = pathname.match(/^\/v1\/apps\/([^/]+)\/audio(?:\/(.*))?$/);
+    if (!match) return { handled: false };
+    if (decodeURIComponent(match[1]) !== appId) {
+      throw new BridgeError(403, 'desktop_runtime_app_forbidden');
+    }
+    const suffix = match[2] ?? '';
+
+    if (suffix === 'devices' || suffix === 'input-devices' || suffix === 'output-devices') {
+      if (method !== 'GET') throw new BridgeError(404, 'desktop_runtime_route_not_found');
+      const devices = await this.getAudioDevices();
+      if (suffix === 'input-devices') return { handled: true, result: { inputDevices: devices.inputDevices } };
+      if (suffix === 'output-devices') return { handled: true, result: { outputDevices: devices.outputDevices } };
+      return { handled: true, result: devices };
+    }
+
+    if (suffix === 'transcriptions') {
+      if (method !== 'POST') throw new BridgeError(404, 'desktop_runtime_route_not_found');
+      await this.assertAudioCapability(appId, 'speechToText');
+      const body = parseJsonBody(bodyText);
+      const session = await this.createAudioLiveSession(appId, 'app_transcript', body);
+      return { handled: true, result: session };
+    }
+
+    const transcriptionStopMatch = suffix.match(/^transcriptions\/([^/]+)$/);
+    if (transcriptionStopMatch) {
+      if (method !== 'DELETE') throw new BridgeError(404, 'desktop_runtime_route_not_found');
+      await this.assertAudioCapability(appId, 'speechToText');
+      const consumerId = cleanString(decodeURIComponent(transcriptionStopMatch[1]));
+      if (!consumerId) {
+        throw new BridgeError(400, 'live_voice_consumer_required');
+      }
+      return { handled: true, result: await this.stopAudioLiveSession(appId, consumerId) };
+    }
+
+    if (suffix === 'file-transcriptions') {
+      if (method !== 'POST') throw new BridgeError(404, 'desktop_runtime_route_not_found');
+      await this.assertAudioCapability(appId, 'speechToText');
+      const body = parseJsonBody(bodyText);
+      return { handled: true, result: await this.processAudioFileTranscription(appId, body) };
+    }
+
+    const fileTranscriptionJobMatch = suffix.match(/^file-transcription-jobs(?:\/([^/]+))?(?:\/cancel)?$/);
+    if (fileTranscriptionJobMatch) {
+      await this.assertAudioCapability(appId, 'speechToText');
+      const jobId = fileTranscriptionJobMatch[1] ? decodeURIComponent(fileTranscriptionJobMatch[1]) : '';
+      const isCancel = suffix.endsWith('/cancel');
+      if (method === 'POST' && !jobId && !isCancel) {
+        const body = parseJsonBody(bodyText);
+        return { handled: true, result: this.enqueueAudioFileTranscriptionJob(appId, body) };
+      }
+      if (method === 'GET' && jobId && !isCancel) {
+        return { handled: true, result: this.audioFileTranscriptionJobForApp(appId, jobId) };
+      }
+      if (method === 'POST' && jobId && isCancel) {
+        return { handled: true, result: this.cancelAudioFileTranscriptionJob(appId, jobId) };
+      }
+      throw new BridgeError(404, 'desktop_runtime_route_not_found');
+    }
+
+    if (suffix === 'synthesis') {
+      if (method !== 'POST') throw new BridgeError(404, 'desktop_runtime_route_not_found');
+      await this.assertAudioCapability(appId, 'textToSpeech');
+      const body = parseJsonBody(bodyText);
+      return { handled: true, result: await this.synthesizeSpeechForApp(body) };
+    }
+
+    if (suffix === 'say') {
+      if (method !== 'POST') throw new BridgeError(404, 'desktop_runtime_route_not_found');
+      await this.assertAudioCapability(appId, 'textToSpeech');
+      const body = parseJsonBody(bodyText);
+      return { handled: true, result: await this.enqueueSpeechPlayback(appId, body) };
+    }
+
+    const playbackMatch = suffix.match(/^playbacks\/([^/]+)(?:\/cancel)?$/);
+    if (playbackMatch) {
+      const playbackId = decodeURIComponent(playbackMatch[1]);
+      const isCancel = suffix.endsWith('/cancel');
+      if (method === 'GET' && !isCancel) {
+        return { handled: true, result: this.playbackForApp(appId, playbackId) };
+      }
+      if (method === 'POST' && isCancel) {
+        return { handled: true, result: await this.cancelPlayback(appId, playbackId) };
+      }
+    }
+
+    throw new BridgeError(404, 'desktop_runtime_route_not_found');
+  }
+
+  private async getAudioDevices(): Promise<AudioRuntimeDevices> {
+    if (!this.options.getAudioDevices) {
+      throw new BridgeError(503, 'desktop_runtime_audio_unavailable');
+    }
+    const devices = await this.options.getAudioDevices();
+    await this.options.updateAudioInputDevices?.(devices);
+    return devices;
+  }
+
+  private async assertAudioCapability(appId: string, capability: 'speechToText' | 'audioInput' | 'textToSpeech'): Promise<void> {
+    const capabilities = await this.options.getAppPlatformCapabilities?.(appId);
+    if (!capabilities?.[capability]) {
+      throw new BridgeError(403, `desktop_runtime_${capability}_capability_required`);
+    }
+  }
+
+  private async createAudioLiveSession(
+    appId: string,
+    consumerKind: 'app_transcript',
+    body: Record<string, unknown>,
+  ): Promise<LiveVoiceInputSession> {
+    if (!this.options.createLiveVoiceSession) {
+      throw new BridgeError(503, 'desktop_runtime_audio_unavailable');
+    }
+    const deviceId = cleanString(body.deviceId);
+    const task = body.task === 'translate' ? 'translate' : body.task === 'transcribe' ? 'transcribe' : undefined;
+    const language = cleanString(body.language);
+    return await this.options.createLiveVoiceSession(appId, {
+      consumerKind,
+      ...(deviceId ? { deviceId } : {}),
+      ...(task ? { task } : {}),
+      ...(language ? { language } : {}),
+    });
+  }
+
+  private async stopAudioLiveSession(appId: string, consumerId: string): Promise<unknown> {
+    if (!this.options.stopLiveVoiceSession) {
+      throw new BridgeError(503, 'desktop_runtime_audio_unavailable');
+    }
+    return await this.options.stopLiveVoiceSession(appId, { consumerId });
+  }
+
+  private async processAudioFileTranscription(appId: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (!this.options.processSpeechToText) {
+      throw new BridgeError(503, 'desktop_runtime_audio_unavailable');
+    }
+    const path = cleanString(body.path);
+    if (!path) {
+      throw new BridgeError(400, 'speech_to_text_path_required');
+    }
+    const task: SpeechToTextTask = body.task === 'translate' ? 'translate' : 'transcribe';
+    const language = cleanString(body.language);
+    const model = cleanString(body.model);
+    const result = await this.options.processSpeechToText(appId, {
+      path,
+      task,
+      ...(language ? { language } : {}),
+      ...(model ? { model } : {}),
+    });
+    return {
+      success: result.success === true,
+      task,
+      ...(typeof result.text === 'string' ? { text: result.text } : {}),
+      ...(typeof result.language === 'string' ? { language: result.language } : {}),
+      ...(typeof result.durationSeconds === 'number' ? { durationSeconds: result.durationSeconds } : {}),
+      ...(typeof result.job?.model === 'string' ? { model: result.job.model } : model ? { model } : {}),
+      ...(typeof result.userMessage === 'string' ? { userMessage: result.userMessage } : {}),
+      ...(typeof result.technicalCode === 'string' ? { technicalCode: result.technicalCode } : {}),
+      ...(result.reportable === true ? { reportable: true } : {}),
+    };
+  }
+
+  private enqueueAudioFileTranscriptionJob(appId: string, body: Record<string, unknown>): Record<string, unknown> {
+    const path = cleanString(body.path);
+    if (!path) {
+      throw new BridgeError(400, 'speech_to_text_path_required');
+    }
+    const task: SpeechToTextTask = body.task === 'translate' ? 'translate' : 'transcribe';
+    const language = cleanString(body.language);
+    const model = cleanString(body.model);
+    const now = new Date().toISOString();
+    const job: AudioFileTranscriptionJob = {
+      jobId: randomBytes(16).toString('hex'),
+      appId,
+      status: 'queued',
+      path,
+      task,
+      ...(language ? { language } : {}),
+      ...(model ? { model } : {}),
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.audioFileTranscriptionJobs.set(job.jobId, job);
+    this.publishAudioFileTranscriptionJobEvent(job, 'desktop.audio.fileTranscription.queued');
+    void this.runAudioFileTranscriptionJob(job.jobId);
+    return this.publicAudioFileTranscriptionJob(job);
+  }
+
+  private async runAudioFileTranscriptionJob(jobId: string): Promise<void> {
+    const queued = this.audioFileTranscriptionJobs.get(jobId);
+    if (!queued || queued.status === 'canceled') return;
+    this.updateAudioFileTranscriptionJob(jobId, { status: 'running' });
+    const running = this.audioFileTranscriptionJobs.get(jobId);
+    if (running) {
+      this.publishAudioFileTranscriptionJobEvent(running, 'desktop.audio.fileTranscription.running');
+    }
+    try {
+      const result = await this.processAudioFileTranscription(queued.appId, {
+        path: queued.path,
+        task: queued.task,
+        ...(queued.language ? { language: queued.language } : {}),
+        ...(queued.model ? { model: queued.model } : {}),
+      });
+      if (this.audioFileTranscriptionJobs.get(jobId)?.status === 'canceled') return;
+      const status = result.success === true ? 'completed' : 'failed';
+      const completedAt = new Date().toISOString();
+      this.updateAudioFileTranscriptionJob(jobId, {
+        status,
+        completedAt,
+        ...(typeof result.text === 'string' ? { text: result.text } : {}),
+        ...(typeof result.language === 'string' ? { language: result.language } : {}),
+        ...(typeof result.durationSeconds === 'number' ? { durationSeconds: result.durationSeconds } : {}),
+        ...(typeof result.model === 'string' ? { model: result.model } : {}),
+        ...(typeof result.technicalCode === 'string' ? { technicalCode: result.technicalCode } : {}),
+        ...(typeof result.userMessage === 'string' ? { userMessage: result.userMessage } : {}),
+        ...(result.reportable === true ? { reportable: true } : {}),
+      });
+      const job = this.audioFileTranscriptionJobs.get(jobId);
+      if (job) {
+        this.publishAudioFileTranscriptionJobEvent(job, status === 'completed'
+          ? 'desktop.audio.fileTranscription.completed'
+          : 'desktop.audio.fileTranscription.failed');
+      }
+    } catch (error) {
+      if (this.audioFileTranscriptionJobs.get(jobId)?.status === 'canceled') return;
+      this.updateAudioFileTranscriptionJob(jobId, {
+        status: 'failed',
+        completedAt: new Date().toISOString(),
+        technicalCode: error instanceof Error ? error.message : 'speech_to_text_failed',
+        userMessage: 'Audio transcription failed.',
+      });
+      const job = this.audioFileTranscriptionJobs.get(jobId);
+      if (job) {
+        this.publishAudioFileTranscriptionJobEvent(job, 'desktop.audio.fileTranscription.failed');
+      }
+    }
+  }
+
+  private audioFileTranscriptionJobForApp(appId: string, jobId: string): Record<string, unknown> {
+    const job = this.audioFileTranscriptionJobs.get(jobId);
+    if (!job || job.appId !== appId) {
+      throw new BridgeError(404, 'audio_file_transcription_job_not_found');
+    }
+    return this.publicAudioFileTranscriptionJob(job);
+  }
+
+  private cancelAudioFileTranscriptionJob(appId: string, jobId: string): Record<string, unknown> {
+    const job = this.audioFileTranscriptionJobs.get(jobId);
+    if (!job || job.appId !== appId) {
+      throw new BridgeError(404, 'audio_file_transcription_job_not_found');
+    }
+    if (job.status !== 'completed' && job.status !== 'failed' && job.status !== 'canceled') {
+      this.updateAudioFileTranscriptionJob(jobId, {
+        status: 'canceled',
+        completedAt: new Date().toISOString(),
+        userMessage: 'Audio transcription canceled.',
+      });
+    }
+    return this.publicAudioFileTranscriptionJob(this.audioFileTranscriptionJobs.get(jobId) ?? job);
+  }
+
+  private updateAudioFileTranscriptionJob(jobId: string, patch: Partial<AudioFileTranscriptionJob>): void {
+    const current = this.audioFileTranscriptionJobs.get(jobId);
+    if (!current) return;
+    this.audioFileTranscriptionJobs.set(jobId, {
+      ...current,
+      ...patch,
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  private publishAudioFileTranscriptionJobEvent(job: AudioFileTranscriptionJob, type: string): void {
+    this.publishRuntimeEvent(job.appId, type, {
+      job: this.publicAudioFileTranscriptionJob(job),
+    });
+  }
+
+  private publicAudioFileTranscriptionJob(job: AudioFileTranscriptionJob): Record<string, unknown> {
+    return {
+      jobId: job.jobId,
+      status: job.status,
+      task: job.task,
+      ...(job.model ? { model: job.model } : {}),
+      ...(job.language ? { language: job.language } : {}),
+      ...(typeof job.text === 'string' ? { text: job.text } : {}),
+      ...(typeof job.durationSeconds === 'number' ? { durationSeconds: job.durationSeconds } : {}),
+      ...(job.technicalCode ? { technicalCode: job.technicalCode } : {}),
+      ...(job.userMessage ? { userMessage: job.userMessage } : {}),
+      ...(job.reportable === true ? { reportable: true } : {}),
+      createdAt: job.createdAt,
+      updatedAt: job.updatedAt,
+      ...(job.completedAt ? { completedAt: job.completedAt } : {}),
+    };
+  }
+
+  private async synthesizeSpeechForApp(body: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (!this.options.synthesizeTextToSpeech) {
+      throw new BridgeError(503, 'desktop_runtime_audio_unavailable');
+    }
+    const text = cleanString(body.text);
+    const model = cleanString(body.model);
+    const voice = cleanString(body.voice);
+    if (!text || !model || !voice) {
+      throw new BridgeError(400, 'text_to_speech_arguments_required');
+    }
+    const speed = typeof body.speed === 'number' ? body.speed : undefined;
+    const format = body.format === 'mp3' || body.format === 'opus' ? body.format : 'wav';
+    const result = await this.options.synthesizeTextToSpeech({
+      text,
+      model,
+      voice,
+      ...(typeof speed === 'number' ? { speed } : {}),
+      format,
+    });
+    return {
+      success: result.success === true,
+      model: result.model ?? model,
+      voice: result.voice ?? voice,
+      format: result.format ?? format,
+      ...(typeof result.audioDataBase64 === 'string' ? { audioDataBase64: result.audioDataBase64 } : {}),
+      ...(typeof result.mimeType === 'string' ? { mimeType: result.mimeType } : {}),
+      ...(typeof result.durationSeconds === 'number' ? { durationSeconds: result.durationSeconds } : {}),
+      ...(typeof result.language === 'string' ? { language: result.language } : {}),
+      ...(typeof result.locale === 'string' ? { locale: result.locale } : {}),
+      ...(typeof result.userMessage === 'string' ? { userMessage: result.userMessage } : {}),
+      ...(typeof result.technicalCode === 'string' ? { technicalCode: result.technicalCode } : {}),
+      ...(result.reportable === true ? { reportable: true } : {}),
+    };
+  }
+
+  private async enqueueSpeechPlayback(appId: string, body: Record<string, unknown>): Promise<{ success: true; playbackId: string; status: 'queued' }> {
+    const text = cleanString(body.text);
+    const model = cleanString(body.model);
+    const voice = cleanString(body.voice);
+    const outputDeviceId = cleanString(body.outputDeviceId);
+    if (!text || !model || !voice) {
+      throw new BridgeError(400, 'text_to_speech_arguments_required');
+    }
+    if (outputDeviceId) {
+      const devices = await this.getAudioDevices();
+      if (!devices.outputDevices.some((device) => device.id === outputDeviceId)) {
+        throw new BridgeError(400, 'audio_output_device_not_found');
+      }
+    }
+    const now = new Date().toISOString();
+    const playbackId = randomBytes(16).toString('hex');
+    const playback: AudioPlaybackSummary = {
+      playbackId,
+      appId,
+      status: 'queued',
+      textLength: text.length,
+      model,
+      voice,
+      ...(outputDeviceId ? { outputDeviceId } : {}),
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.playbacks.set(playbackId, playback);
+    void this.runSpeechPlayback(playbackId, { text, model, voice, outputDeviceId, speed: typeof body.speed === 'number' ? body.speed : undefined });
+    return { success: true, playbackId, status: 'queued' };
+  }
+
+  private async runSpeechPlayback(
+    playbackId: string,
+    input: { text: string; model: string; voice: string; outputDeviceId?: string; speed?: number },
+  ): Promise<void> {
+    const playback = this.playbacks.get(playbackId);
+    if (!playback || playback.status === 'canceled') return;
+    this.updatePlayback(playbackId, { status: 'running' });
+    let audioPath = '';
+    try {
+      if (!this.options.synthesizeTextToSpeech || !this.options.playTextToSpeechAudio) {
+        throw new Error('desktop_runtime_audio_unavailable');
+      }
+      const synthesized = await this.options.synthesizeTextToSpeech({
+        text: input.text,
+        model: input.model,
+        voice: input.voice,
+        ...(typeof input.speed === 'number' ? { speed: input.speed } : {}),
+        format: 'wav',
+      });
+      audioPath = cleanString(synthesized.audioPath);
+      if (this.playbacks.get(playbackId)?.status === 'canceled') return;
+      if (!synthesized.success || !synthesized.audioDataBase64) {
+        this.updatePlayback(playbackId, {
+          status: 'failed',
+          userMessage: synthesized.userMessage ?? 'Text to speech failed.',
+          technicalCode: synthesized.technicalCode ?? 'text_to_speech_failed',
+        });
+        return;
+      }
+      const played = await this.options.playTextToSpeechAudio({
+        playbackId,
+        audioDataBase64: synthesized.audioDataBase64,
+        mimeType: synthesized.mimeType ?? 'audio/wav',
+        ...(input.outputDeviceId ? { outputDeviceId: input.outputDeviceId } : {}),
+      });
+      if (this.playbacks.get(playbackId)?.status === 'canceled') return;
+      if (played.success) {
+        this.updatePlayback(playbackId, {
+          status: 'completed',
+          durationSeconds: played.durationSeconds ?? synthesized.durationSeconds,
+          userMessage: 'Speech played.',
+        });
+      } else {
+        this.updatePlayback(playbackId, {
+          status: 'failed',
+          technicalCode: played.error ?? 'text_to_speech_playback_failed',
+          userMessage: 'Speech playback failed.',
+        });
+      }
+    } catch (error) {
+      if (this.playbacks.get(playbackId)?.status !== 'canceled') {
+        this.updatePlayback(playbackId, {
+          status: 'failed',
+          technicalCode: error instanceof Error ? error.message : 'text_to_speech_playback_failed',
+          userMessage: 'Speech playback failed.',
+        });
+      }
+    } finally {
+      if (audioPath) {
+        await this.options.deleteTextToSpeechAudio?.(audioPath).catch((error: unknown) => {
+          void this.options.appendInstallLog('desktop_runtime_audio:ephemeral_cleanup_failed', {
+            playbackId,
+            error: this.options.serializeErrorForInstallLog(error),
+          });
+        });
+      }
+      this.trimPlaybacks();
+    }
+  }
+
+  private playbackForApp(appId: string, playbackId: string): AudioPlaybackSummary {
+    const playback = this.playbacks.get(playbackId);
+    if (!playback || playback.appId !== appId) {
+      throw new BridgeError(404, 'audio_playback_not_found');
+    }
+    return playback;
+  }
+
+  private async cancelPlayback(appId: string, playbackId: string): Promise<AudioPlaybackSummary> {
+    const playback = this.playbackForApp(appId, playbackId);
+    if (playback.status !== 'completed' && playback.status !== 'failed' && playback.status !== 'canceled') {
+      this.updatePlayback(playbackId, { status: 'canceled', userMessage: 'Speech playback canceled.' });
+      await this.options.cancelTextToSpeechPlayback?.(playbackId);
+    }
+    return this.playbackForApp(appId, playbackId);
+  }
+
+  private updatePlayback(playbackId: string, patch: Partial<AudioPlaybackSummary>): void {
+    const current = this.playbacks.get(playbackId);
+    if (!current) return;
+    this.playbacks.set(playbackId, {
+      ...current,
+      ...patch,
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  private trimPlaybacks(): void {
+    const entries = [...this.playbacks.values()].sort((left, right) => left.updatedAt.localeCompare(right.updatedAt));
+    for (const playback of entries.slice(0, Math.max(0, entries.length - 100))) {
+      if (playback.status === 'completed' || playback.status === 'failed' || playback.status === 'canceled') {
+        this.playbacks.delete(playback.playbackId);
+      }
+    }
+  }
+
   private appContext(appId: string): { locale: 'es' | 'en'; rawLocale: string | null } {
     const context = this.options.getAppContext?.(appId);
     const rawLocale = typeof context?.rawLocale === 'string' && context.rawLocale.trim()
@@ -453,7 +1008,7 @@ export class DesktopRuntimeBridge {
     return agentId;
   }
 
-  private signedSystemEvent(appId: string, type: string): Record<string, unknown> {
+  private signedSystemEvent(appId: string, type: string, payload: Record<string, unknown> = {}): Record<string, unknown> {
     return this.signEnvelope(appId, {
       event_id: randomBytes(16).toString('hex'),
       app_id: appId,
@@ -462,7 +1017,7 @@ export class DesktopRuntimeBridge {
       run_id: '',
       status: 'connected',
       created_at: new Date().toISOString(),
-      payload: {},
+      payload,
     });
   }
 
@@ -564,6 +1119,8 @@ const header = (request: IncomingMessage, name: string): string =>
   typeof request.headers[name] === 'string' ? request.headers[name] : '';
 
 const sha256 = (value: string): string => createHash('sha256').update(value).digest('hex');
+
+const cleanString = (value: unknown): string => typeof value === 'string' ? value.trim() : '';
 
 const safeEqual = (left: string, right: string): boolean => {
   const leftBuffer = Buffer.from(left);

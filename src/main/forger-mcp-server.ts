@@ -1,3 +1,4 @@
+/* eslint-disable max-lines */
 import { randomBytes } from 'node:crypto';
 import * as http from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -32,6 +33,11 @@ import type {
   CreateLocalAppInput,
   CreateLocalAppResult,
   SetAppToolGrantInput,
+  SpeechToTextProcessResult,
+  SpeechToTextState,
+  TextToSpeechState,
+  TextToSpeechSynthesizeInput,
+  TextToSpeechSynthesizeResult,
 } from '../shared/types';
 import { buildFailureDiagnostic } from '../shared/error-diagnostics';
 import { getSharedCopy } from '../shared/i18n';
@@ -112,6 +118,16 @@ interface ForgerMcpServerOptions {
     input: CallOfficialToolInput,
     access: { caller: AgentMcpSession['caller']; appId: string },
   ) => Promise<CallOfficialToolResult>;
+  getSpeechToTextState: () => Promise<SpeechToTextState>;
+  getTextToSpeechState: () => Promise<TextToSpeechState>;
+  synthesizeTextToSpeech: (
+    input: TextToSpeechSynthesizeInput,
+    access: { caller: AgentMcpSession['caller']; appId: string },
+  ) => Promise<TextToSpeechSynthesizeResult>;
+  processSpeechToText: (
+    input: { path: string; task: 'transcribe' | 'translate'; language?: string; model?: string },
+    access: { caller: AgentMcpSession['caller']; appId: string },
+  ) => Promise<SpeechToTextProcessResult>;
   onToolProgress?: (input: { appId: string; runId: string; toolName?: unknown; message: string }) => void;
   onToolFailure?: (input: { appId: string; runId: string; toolName?: unknown; error: unknown }) => void;
   onHttpFailure?: (input: { appId?: string; runId?: string; error: unknown }) => void;
@@ -872,6 +888,65 @@ export class ForgerMcpServer {
       const officialToolId = getOfficialToolIdForAction(toolId);
       const result = await this.options.callOfficialTool(
         { toolId: officialToolId, actionId: toolId, input: args },
+        { caller: session.caller, appId: session.appId },
+      );
+      await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
+      return withToolAuthorization(result, approval);
+    }
+
+    if (toolId === 'forger_speech_to_text_status') {
+      const result = { success: true, state: await this.options.getSpeechToTextState() };
+      await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
+      return withToolAuthorization(result, approval);
+    }
+
+    if (toolId === 'forger_text_to_speech_status') {
+      const result = { success: true, state: await this.options.getTextToSpeechState() };
+      await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
+      return withToolAuthorization(result, approval);
+    }
+
+    if (toolId === 'forger_text_to_speech_voices') {
+      const state = await this.options.getTextToSpeechState();
+      const result = { success: true, models: state.models, voices: state.voices };
+      await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
+      return withToolAuthorization(result, approval);
+    }
+
+    if (toolId === 'forger_synthesize_speech') {
+      const text = cleanString(args.text);
+      const model = cleanString(args.model);
+      const voice = cleanString(args.voice);
+      if (!text || !model || !voice) {
+        const result = { success: false, userMessage: 'Text, model, and voice are required.', technicalCode: 'text_to_speech_arguments_required' };
+        await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
+        return withToolAuthorization(result, approval);
+      }
+      const result = await this.options.synthesizeTextToSpeech({
+        text,
+        model,
+        voice,
+        ...(typeof args.speed === 'number' ? { speed: args.speed } : {}),
+        ...(args.format === 'wav' || args.format === 'mp3' || args.format === 'opus' ? { format: args.format } : {}),
+      }, { caller: session.caller, appId: session.appId });
+      await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
+      return withToolAuthorization(result, approval);
+    }
+
+    if (toolId === 'forger_transcribe_audio' || toolId === 'forger_translate_audio') {
+      const audioPath = cleanString(args.path);
+      if (!audioPath) {
+        const result = { success: false, userMessage: 'Audio path is required.', technicalCode: 'speech_audio_path_required' };
+        await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
+        return withToolAuthorization(result, approval);
+      }
+      const result = await this.options.processSpeechToText(
+        {
+          path: audioPath,
+          task: toolId === 'forger_translate_audio' ? 'translate' : 'transcribe',
+          ...(typeof args.language === 'string' && args.language.trim() ? { language: args.language.trim() } : {}),
+          ...(typeof args.model === 'string' && args.model.trim() ? { model: args.model.trim() } : {}),
+        },
         { caller: session.caller, appId: session.appId },
       );
       await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });

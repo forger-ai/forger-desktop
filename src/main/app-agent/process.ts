@@ -1,4 +1,4 @@
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { CommandCaptureOptions, CommandResult, ResolvedCodexCommand } from './types';
@@ -84,6 +84,39 @@ export const killProcessTree = (child: ChildProcessWithoutNullStreams | undefine
     }
   } catch {
     child.kill('SIGKILL');
+  }
+};
+
+export const killServiceProcessesForMetadataRoot = (
+  serviceSourcePath: string,
+  metadataRoot: string,
+): void => {
+  if (process.platform === 'win32') {
+    return;
+  }
+  const result = spawnSync('ps', ['-axo', 'pid=,command='], { encoding: 'utf8' });
+  if (result.error || !result.stdout) {
+    return;
+  }
+  const currentPid = process.pid;
+  for (const line of result.stdout.split('\n')) {
+    const match = line.trimStart().match(/^(\d+)\s+(.+)$/);
+    if (!match) {
+      continue;
+    }
+    const pid = Number(match[1]);
+    const command = match[2] ?? '';
+    if (!Number.isFinite(pid) || pid === currentPid) {
+      continue;
+    }
+    if (!command.includes(serviceSourcePath) || !command.includes('--metadata-root') || !command.includes(metadataRoot)) {
+      continue;
+    }
+    try {
+      process.kill(pid, 'SIGTERM');
+    } catch {
+      // Process may have already exited.
+    }
   }
 };
 

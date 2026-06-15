@@ -5,6 +5,7 @@ import type http from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type net from 'node:net';
 import type path from 'node:path';
+import type { Duplex } from 'node:stream';
 
 import type {
   AppManifest,
@@ -35,6 +36,9 @@ interface RuntimeDeps {
   appWindows: Map<string, BrowserWindow>;
   appendInstallLog: (event: string, payload: Record<string, unknown>) => Promise<void>;
   desktopRuntimeBridge: { environmentForApp: (appId: string) => Record<string, string> } | null;
+  getSpeechToTextEnvironment?: (manifest: AppManifest | null) => Record<string, string>;
+  getTextToSpeechEnvironment?: (manifest: AppManifest | null) => Record<string, string>;
+  getAudioInputEnvironment?: (manifest: AppManifest | null) => Record<string, string>;
   dispatchDeepLink: (link: ForgerDeepLink) => void;
   emitRuntimeStatus: (payload: RuntimeStatus) => void;
   ensureBackendPythonEnvironment: (pythonPath: string, backendDir: string, appId: string, reason: string) => Promise<void>;
@@ -82,7 +86,7 @@ interface RuntimeDeps {
 }
 
 export const createInstalledAppRuntimeController = (deps: RuntimeDeps) => {
-const { net, http, runCommand, app, registry, upsertInstalledRecord, ensureCatalogStatuses, appWindows, appAgentTaskManager, appAgentConversationManager, stoppingApps, runningApps, path, isDev, FORGER_PROTOCOL, parseForgerUrl, dispatchDeepLink, shell, friendChatWindows, wait, resolveInstalledManifest, getLocalNetworkShareStatus, getManifestAppSecretsValidationError, normalizeManifestAppSecrets, getSecretsStore, isSecretsVaultUnavailableError, normalizeNodeRuntimeVersion, appendInstallLog, getInstallLogPath, getBackendPathEntries, ensureRuntimeInstalled, ensureBackendPythonEnvironment, getVenvExecutables, requiresWindowsShell, desktopRuntimeBridge, appFolderGrantSecret, truncateForInstallLog, formatProcessOutputForInstallLog, serializeErrorForInstallLog, failureDiagnostic, emitRuntimeStatus, stopLocalNetworkShare, stopRemoteNetworkShare, syncAppToCloudIfEnabled, withAppLifecycleLock, fs } = deps;
+const { net, http, runCommand, app, registry, upsertInstalledRecord, ensureCatalogStatuses, appWindows, appAgentTaskManager, appAgentConversationManager, stoppingApps, runningApps, path, isDev, FORGER_PROTOCOL, parseForgerUrl, dispatchDeepLink, shell, friendChatWindows, wait, resolveInstalledManifest, getLocalNetworkShareStatus, getManifestAppSecretsValidationError, normalizeManifestAppSecrets, getSecretsStore, isSecretsVaultUnavailableError, normalizeNodeRuntimeVersion, appendInstallLog, getInstallLogPath, getBackendPathEntries, ensureRuntimeInstalled, ensureBackendPythonEnvironment, getVenvExecutables, requiresWindowsShell, desktopRuntimeBridge, getSpeechToTextEnvironment, getTextToSpeechEnvironment, getAudioInputEnvironment, appFolderGrantSecret, truncateForInstallLog, formatProcessOutputForInstallLog, serializeErrorForInstallLog, failureDiagnostic, emitRuntimeStatus, stopLocalNetworkShare, stopRemoteNetworkShare, syncAppToCloudIfEnabled, withAppLifecycleLock, fs } = deps;
 const localNetworkShareStatusFor = getLocalNetworkShareStatus ?? (() => undefined);
 const localNetworkSharePayloadFor = (appId: string) => {
   const status = localNetworkShareStatusFor(appId);
@@ -125,6 +129,9 @@ const getFreePort = async (): Promise<number> => {
   });
 };
 
+const hasPathPrefix = (pathname: string, prefix: string): boolean =>
+  pathname === prefix || pathname.startsWith(`${prefix}/`);
+
 const proxyHttpRequest = async (
   targetBaseUrl: string,
   incoming: IncomingMessage,
@@ -132,7 +139,7 @@ const proxyHttpRequest = async (
   pathPrefix = '',
 ): Promise<void> => {
   const targetUrl = new URL(incoming.url ?? '/', targetBaseUrl);
-  if (pathPrefix && targetUrl.pathname.startsWith(pathPrefix)) {
+  if (pathPrefix && hasPathPrefix(targetUrl.pathname, pathPrefix)) {
     targetUrl.pathname = targetUrl.pathname.slice(pathPrefix.length) || '/';
   }
   const body = await new Promise<Buffer>((resolve, reject) => {
@@ -153,6 +160,69 @@ const proxyHttpRequest = async (
     }
   }
   outgoing.end(Buffer.from(await response.arrayBuffer()));
+};
+
+const proxyWebSocketUpgrade = (
+  targetBaseUrl: string,
+  incoming: IncomingMessage,
+  socket: Duplex,
+  head: Buffer,
+  pathPrefix: string,
+): void => {
+  const incomingUrl = new URL(incoming.url ?? '/', 'http://127.0.0.1');
+  if (!hasPathPrefix(incomingUrl.pathname, pathPrefix)) {
+    socket.write('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n');
+    socket.destroy();
+    return;
+  }
+
+  const targetUrl = new URL(incoming.url ?? '/', targetBaseUrl);
+  targetUrl.pathname = targetUrl.pathname.slice(pathPrefix.length) || '/';
+  const targetPort = Number(targetUrl.port || (targetUrl.protocol === 'https:' ? 443 : 80));
+  const targetSocket = net.connect(targetPort, targetUrl.hostname);
+  let settled = false;
+
+  const closeBoth = () => {
+    socket.destroy();
+    targetSocket.destroy();
+  };
+
+  targetSocket.on('connect', () => {
+    settled = true;
+    targetSocket.write(formatUpgradeRequest(incoming, targetUrl));
+    if (head.length > 0) {
+      targetSocket.write(head);
+    }
+    socket.pipe(targetSocket);
+    targetSocket.pipe(socket);
+  });
+  targetSocket.on('error', () => {
+    if (!settled) {
+      socket.write('HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n');
+    }
+    closeBoth();
+  });
+  socket.on('error', closeBoth);
+};
+
+const formatUpgradeRequest = (incoming: IncomingMessage, targetUrl: URL): string => {
+  const pathAndSearch = `${targetUrl.pathname}${targetUrl.search}`;
+  const lines = [`${incoming.method ?? 'GET'} ${pathAndSearch} HTTP/${incoming.httpVersion}`];
+  let hasHost = false;
+  for (let index = 0; index < incoming.rawHeaders.length; index += 2) {
+    const name = incoming.rawHeaders[index];
+    const value = incoming.rawHeaders[index + 1] ?? '';
+    if (name.toLowerCase() === 'host') {
+      lines.push(`Host: ${targetUrl.host}`);
+      hasHost = true;
+      continue;
+    }
+    lines.push(`${name}: ${value}`);
+  }
+  if (!hasHost) {
+    lines.push(`Host: ${targetUrl.host}`);
+  }
+  return `${lines.join('\r\n')}\r\n\r\n`;
 };
 
 const filterProxyRequestHeaders = (headers: IncomingMessage['headers']): Record<string, string> => {
@@ -176,12 +246,16 @@ const createLocalAppProxy = async (
 ): Promise<{ server: http.Server; url: string }> => {
   const server = http.createServer((request, response) => {
     const requestUrl = new URL(request.url ?? '/', 'http://127.0.0.1');
-    const target = requestUrl.pathname.startsWith('/__forger_api') ? backendUrl : rawFrontendUrl;
-    const prefix = requestUrl.pathname.startsWith('/__forger_api') ? '/__forger_api' : '';
+    const isApiRequest = hasPathPrefix(requestUrl.pathname, '/__forger_api');
+    const target = isApiRequest ? backendUrl : rawFrontendUrl;
+    const prefix = isApiRequest ? '/__forger_api' : '';
     void proxyHttpRequest(target, request, response, prefix).catch(() => {
       response.statusCode = 502;
       response.end('Forger app proxy failed.');
     });
+  });
+  server.on('upgrade', (request, socket, head) => {
+    proxyWebSocketUpgrade(backendUrl, request, socket, head, '/__forger_api');
   });
   const port = await new Promise<number>((resolve, reject) => {
     server.listen(0, '127.0.0.1', () => {
@@ -777,6 +851,9 @@ const openInstalledAppUnlocked = async (
         ...process.env,
         ...backendConfig.environment,
         ...(desktopRuntimeBridge?.environmentForApp(appId) ?? {}),
+        ...(getSpeechToTextEnvironment?.(manifest) ?? {}),
+        ...(getTextToSpeechEnvironment?.(manifest) ?? {}),
+        ...(getAudioInputEnvironment?.(manifest) ?? {}),
         ...resolvedSecrets.env,
         PATH: backendPath,
         CORS_ORIGINS: `${frontendUrl},${rawFrontendUrl},http://127.0.0.1:${frontendPort}`,
@@ -1112,5 +1189,5 @@ const getRuntimeStatus = (appId: string): RuntimeStatus => {
   };
 };
 
-  return { waitForHttpOk, getFreePort, fetchBodyFromBuffer, closeServer, terminateProcess, closeAppWindow, loadDesktopWindow, openOrFocusAppWindow, openOrFocusFriendChatWindowForFriend, openOrFocusFriendChatWindow, findManifestService, splitManifestCommand, translateManifestEnvironment, ensureSqliteDatabaseParent, openInstalledAppUnlocked, openInstalledApp, stopInstalledApp, restartInstalledApp, getRuntimeStatus };
+  return { waitForHttpOk, getFreePort, fetchBodyFromBuffer, createLocalAppProxy, closeServer, terminateProcess, closeAppWindow, loadDesktopWindow, openOrFocusAppWindow, openOrFocusFriendChatWindowForFriend, openOrFocusFriendChatWindow, findManifestService, splitManifestCommand, translateManifestEnvironment, ensureSqliteDatabaseParent, openInstalledAppUnlocked, openInstalledApp, stopInstalledApp, restartInstalledApp, getRuntimeStatus };
 };

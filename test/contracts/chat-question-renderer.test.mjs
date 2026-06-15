@@ -17,6 +17,9 @@ test('chat composer keeps per-conversation drafts and stays editable while a run
   assert.match(viewSource, /contentEditable=\{intelligenceProviderConfigured\}/);
   assert.doesNotMatch(viewSource, /codexConfigured/);
   assert.match(viewSource, /inputProviderMissingPlaceholder/);
+  assert.match(viewSource, /inputProviderMissingTitle/);
+  assert.match(viewSource, /inputProviderMissingAction/);
+  assert.match(viewSource, /onConfigureIntelligenceProvider/);
   assert.match(viewSource, /quotaCodexRequired/);
   assert.match(viewSource, /!isSending\s*&&\s*canSendCurrentMode\s*&&\s*\(serializeComposerText\(\)\.trim\(\)/);
 });
@@ -34,6 +37,10 @@ test('chat readiness is based on any configured intelligence provider', async ()
   assert.match(panelSource, /intelligenceProviderMissingBody/);
   assert.match(panelSource, /configureIntelligenceProvider/);
   assert.match(panelSource, /agentThinking/);
+  assert.match(esSectionsSource, /Conecta una cuenta de IA para chatear/);
+  assert.match(esSectionsSource, /Conectar IA/);
+  assert.match(enSectionsSource, /Connect an AI account to chat/);
+  assert.match(enSectionsSource, /Connect AI/);
   assert.match(esSectionsSource, /Conecta ChatGPT\/Codex o Claude para conversar con Forger/);
   assert.match(esSectionsSource, /Conectar proveedor/);
   assert.match(enSectionsSource, /Connect ChatGPT\/Codex or Claude to chat with Forger/);

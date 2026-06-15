@@ -97,3 +97,87 @@ test('legacy Codex IPC channels continue to alias the app-agent channels', () =>
     assert.match(currentChannel, /^forger:app:agent-/);
   }
 });
+
+test('wake word IPC channels keep stable public names and avoid raw audio channels', () => {
+  assert.deepEqual(
+    {
+      wakeWordGetState: IPC_CHANNELS.wakeWordGetState,
+      wakeWordInstall: IPC_CHANNELS.wakeWordInstall,
+      wakeWordStart: IPC_CHANNELS.wakeWordStart,
+      wakeWordStop: IPC_CHANNELS.wakeWordStop,
+      wakeWordUpdateConfig: IPC_CHANNELS.wakeWordUpdateConfig,
+      wakeWordCreateSession: IPC_CHANNELS.wakeWordCreateSession,
+      wakeWordRecordReady: IPC_CHANNELS.wakeWordRecordReady,
+      wakeWordRecordUnavailable: IPC_CHANNELS.wakeWordRecordUnavailable,
+      wakeWordRecordDetected: IPC_CHANNELS.wakeWordRecordDetected,
+      wakeWordRecordDiagnostic: IPC_CHANNELS.wakeWordRecordDiagnostic,
+      wakeWordChanged: IPC_CHANNELS.wakeWordChanged,
+      wakeWordDetected: IPC_CHANNELS.wakeWordDetected,
+    },
+    {
+      wakeWordGetState: 'forger:wake-word:get-state',
+      wakeWordInstall: 'forger:wake-word:install',
+      wakeWordStart: 'forger:wake-word:start',
+      wakeWordStop: 'forger:wake-word:stop',
+      wakeWordUpdateConfig: 'forger:wake-word:update-config',
+      wakeWordCreateSession: 'forger:wake-word:create-session',
+      wakeWordRecordReady: 'forger:wake-word:record-ready',
+      wakeWordRecordUnavailable: 'forger:wake-word:record-unavailable',
+      wakeWordRecordDetected: 'forger:wake-word:record-detected',
+      wakeWordRecordDiagnostic: 'forger:wake-word:record-diagnostic',
+      wakeWordChanged: 'forger:wake-word:changed',
+      wakeWordDetected: 'forger:wake-word:detected',
+    },
+  );
+
+  for (const channel of Object.values(IPC_CHANNELS)) {
+    assert.doesNotMatch(channel, /wake-word:.*(audio|chunk|buffer|pcm|raw)/i);
+  }
+});
+
+test('live voice input IPC channels keep stable public names and avoid raw audio channels', () => {
+  assert.deepEqual(
+    {
+      liveVoiceInputGetState: IPC_CHANNELS.liveVoiceInputGetState,
+      liveVoiceInputUpdateConfig: IPC_CHANNELS.liveVoiceInputUpdateConfig,
+      liveVoiceInputUpdateDevices: IPC_CHANNELS.liveVoiceInputUpdateDevices,
+      liveVoiceInputCreateSession: IPC_CHANNELS.liveVoiceInputCreateSession,
+      liveVoiceInputStop: IPC_CHANNELS.liveVoiceInputStop,
+      liveVoiceInputWakeDetected: IPC_CHANNELS.liveVoiceInputWakeDetected,
+      liveVoiceInputWakeReady: IPC_CHANNELS.liveVoiceInputWakeReady,
+      liveVoiceInputWakeUnavailable: IPC_CHANNELS.liveVoiceInputWakeUnavailable,
+      liveVoiceInputChanged: IPC_CHANNELS.liveVoiceInputChanged,
+      liveVoiceInputForgerWake: IPC_CHANNELS.liveVoiceInputForgerWake,
+    },
+    {
+      liveVoiceInputGetState: 'forger:live-voice-input:get-state',
+      liveVoiceInputUpdateConfig: 'forger:live-voice-input:update-config',
+      liveVoiceInputUpdateDevices: 'forger:live-voice-input:update-devices',
+      liveVoiceInputCreateSession: 'forger:live-voice-input:create-session',
+      liveVoiceInputStop: 'forger:live-voice-input:stop',
+      liveVoiceInputWakeDetected: 'forger:live-voice-input:wake-detected',
+      liveVoiceInputWakeReady: 'forger:live-voice-input:wake-ready',
+      liveVoiceInputWakeUnavailable: 'forger:live-voice-input:wake-unavailable',
+      liveVoiceInputChanged: 'forger:live-voice-input:changed',
+      liveVoiceInputForgerWake: 'forger:live-voice-input:forger-wake',
+    },
+  );
+
+  for (const channel of Object.values(IPC_CHANNELS)) {
+    assert.doesNotMatch(channel, /live-voice-input:.*(audio|chunk|buffer|pcm|raw)/i);
+    assert.doesNotMatch(channel, /microphone:.*(data|chunk|buffer|pcm|raw)/i);
+  }
+});
+
+test('audio runtime broker IPC channels stay internal and stable', () => {
+  assert.deepEqual(
+    {
+      audioRuntimeBrokerRequest: IPC_CHANNELS.audioRuntimeBrokerRequest,
+      audioRuntimeBrokerResponse: IPC_CHANNELS.audioRuntimeBrokerResponse,
+    },
+    {
+      audioRuntimeBrokerRequest: 'forger:audio-runtime-broker:request',
+      audioRuntimeBrokerResponse: 'forger:audio-runtime-broker:response',
+    },
+  );
+});

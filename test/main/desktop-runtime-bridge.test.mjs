@@ -1,3 +1,4 @@
+/* eslint-disable max-lines */
 import assert from 'node:assert/strict';
 import { createHash, createHmac } from 'node:crypto';
 import { EventEmitter } from 'node:events';
@@ -37,6 +38,16 @@ const request = async (bridge, path, { method = 'GET', body, rawBody: explicitRa
   return { response, payload };
 };
 
+const waitFor = async (predicate, timeoutMs = 1000) => {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const value = await predicate();
+    if (value) return value;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  return null;
+};
+
 const createBridge = async (options = {}) => {
   const tasks = new Map();
   const taskManager = {
@@ -68,6 +79,60 @@ const createBridge = async (options = {}) => {
     getTaskManager: options.getTaskManager ?? (() => taskManager),
     getTaskStatus: options.getTaskStatus ?? (async () => ({ connected: true, codex: true, claude: false })),
     getAppContext: options.getAppContext ?? (() => ({ locale: 'en', rawLocale: 'en-US' })),
+    getAppPlatformCapabilities: options.getAppPlatformCapabilities ?? (async () => ({
+      speechToText: true,
+      audioInput: true,
+      textToSpeech: true,
+    })),
+    getAudioDevices: options.getAudioDevices ?? (async () => ({
+      inputDevices: [
+        { id: 'default', label: 'Default microphone', kind: 'microphone', default: true, supported: true },
+        { id: 'system-audio:default', label: 'System audio', kind: 'system_audio', default: false, supported: true, requiresDisplayCapture: true },
+      ],
+      outputDevices: [
+        { id: 'default', label: 'Default speaker', kind: 'speaker', default: true, supported: true },
+        { id: 'speaker-2', label: 'External speaker', kind: 'speaker', default: false, supported: true },
+      ],
+    })),
+    updateAudioInputDevices: options.updateAudioInputDevices ?? (async () => undefined),
+    createLiveVoiceSession: options.createLiveVoiceSession ?? (async (_appId, input) => ({
+      sessionId: 'session-1',
+      deviceId: input.deviceId ?? 'default',
+      consumerId: 'transcript-1',
+      url: 'ws://127.0.0.1:1234/v1/realtime/transcribe',
+      token: 'token',
+      sampleRate: 16000,
+      format: 'pcm_s16le',
+      mode: 'transcript',
+    })),
+    stopLiveVoiceSession: options.stopLiveVoiceSession ?? (async (_appId, input) => ({ success: true, consumerId: input.consumerId })),
+    processSpeechToText: options.processSpeechToText ?? (async (_appId, input) => ({
+      success: true,
+      text: input.task === 'translate' ? 'hello translated' : 'hello transcribed',
+      language: input.language ?? 'en',
+      durationSeconds: 1.2,
+      userMessage: 'Audio transcribed.',
+      job: {
+        id: 'job-1',
+        path: input.path,
+        task: input.task ?? 'transcribe',
+        status: 'completed',
+        createdAt: '2026-05-17T00:00:00.000Z',
+        updatedAt: '2026-05-17T00:00:00.000Z',
+        model: input.model ?? 'base',
+        text: 'hello transcribed',
+      },
+    })),
+    synthesizeTextToSpeech: options.synthesizeTextToSpeech ?? (async () => ({
+      success: true,
+      audioPath: '/tmp/forger-tts.wav',
+      audioDataBase64: Buffer.from('RIFF').toString('base64'),
+      mimeType: 'audio/wav',
+      durationSeconds: 0.1,
+    })),
+    playTextToSpeechAudio: options.playTextToSpeechAudio ?? (async () => ({ success: true, durationSeconds: 0.1 })),
+    cancelTextToSpeechPlayback: options.cancelTextToSpeechPlayback ?? (async () => undefined),
+    deleteTextToSpeechAudio: options.deleteTextToSpeechAudio ?? (async () => undefined),
     resolveInstalledAgents: options.resolveInstalledAgents ?? (async () => [{ id: 'analyst', title: 'Analyst', prompts: {} }]),
     renderManifestAgentPrompt: options.renderManifestAgentPrompt ?? (({ kind, variables }) => `${kind}:${variables?.topic ?? 'default'}`),
     appendInstallLog: async (event, payload) => options.logs?.push([event, payload]),
@@ -222,6 +287,414 @@ test('desktop runtime app context normalizes missing locale fallback and app mis
     });
     assert.equal(mismatch.response.status, 403);
     assert.equal(mismatch.payload.error, 'desktop_runtime_app_forbidden');
+  } finally {
+    await harness.stop();
+  }
+});
+
+test('desktop runtime audio device routes return signed input and output devices', async () => {
+  const updates = [];
+  const harness = await createBridge({
+    updateAudioInputDevices: async (devices) => updates.push(devices),
+  });
+  try {
+    const path = `/v1/apps/${APP_ID}/audio/devices`;
+    const { response, payload } = await request(harness.bridge, path);
+    assert.equal(response.status, 200);
+    assert.equal(payload.inputDevices[0].id, 'default');
+    assert.equal(payload.inputDevices[1].kind, 'system_audio');
+    assert.equal(payload.inputDevices[1].requiresDisplayCapture, true);
+    assert.equal(payload.outputDevices[1].id, 'speaker-2');
+    assert.equal(payload.inputDevices[0].audioDataBase64, undefined);
+    assert.equal(payload.outputDevices[0].audioPath, undefined);
+    assert.equal(updates.length, 1);
+
+    const inputOnly = await request(harness.bridge, `/v1/apps/${APP_ID}/audio/input-devices`);
+    assert.deepEqual(Object.keys(inputOnly.payload), ['inputDevices']);
+    const outputOnly = await request(harness.bridge, `/v1/apps/${APP_ID}/audio/output-devices`);
+    assert.deepEqual(Object.keys(outputOnly.payload), ['outputDevices']);
+
+    const wrongMethod = await request(harness.bridge, path, { method: 'POST', body: {} });
+    assert.equal(wrongMethod.response.status, 404);
+    assert.equal(wrongMethod.payload.error, 'desktop_runtime_route_not_found');
+  } finally {
+    await harness.stop();
+  }
+});
+
+test('desktop runtime audio routes keep capability gates independent', async () => {
+  const calls = [];
+  const harness = await createBridge({
+    getAppPlatformCapabilities: async () => ({
+      speechToText: true,
+      audioInput: false,
+      textToSpeech: false,
+    }),
+    createLiveVoiceSession: async (_appId, input) => {
+      calls.push(input);
+      return {
+        sessionId: 'session-1',
+        deviceId: input.deviceId ?? 'default',
+        consumerId: 'consumer-1',
+        url: 'ws://127.0.0.1:1234/v1/realtime/transcribe',
+        token: 'token',
+        sampleRate: 16000,
+        format: 'pcm_s16le',
+        mode: 'transcript',
+      };
+    },
+  });
+  try {
+    const transcript = await request(harness.bridge, `/v1/apps/${APP_ID}/audio/transcriptions`, {
+      method: 'POST',
+      body: { deviceId: 'default', task: 'translate', language: 'en' },
+    });
+    assert.equal(transcript.response.status, 200);
+    assert.equal(transcript.payload.mode, 'transcript');
+    assert.equal(calls[0].consumerKind, 'app_transcript');
+    assert.equal(calls[0].task, 'translate');
+    assert.equal(calls[0].language, 'en');
+
+    const raw = await request(harness.bridge, `/v1/apps/${APP_ID}/audio/raw-streams`, {
+      method: 'POST',
+      body: { deviceId: 'default' },
+    });
+    assert.equal(raw.response.status, 404);
+    assert.equal(raw.payload.error, 'desktop_runtime_route_not_found');
+
+    const say = await request(harness.bridge, `/v1/apps/${APP_ID}/audio/say`, {
+      method: 'POST',
+      body: { text: 'hello', model: 'kokoro', voice: 'af_heart' },
+    });
+    assert.equal(say.response.status, 403);
+    assert.equal(say.payload.error, 'desktop_runtime_textToSpeech_capability_required');
+  } finally {
+    await harness.stop();
+  }
+});
+
+test('desktop runtime live transcription sessions can be stopped by consumer id', async () => {
+  const stops = [];
+  const harness = await createBridge({
+    stopLiveVoiceSession: async (appId, input) => {
+      stops.push({ appId, input });
+      return { success: true, consumerId: input.consumerId };
+    },
+  });
+  try {
+    const result = await request(harness.bridge, `/v1/apps/${APP_ID}/audio/transcriptions/transcript-1`, {
+      method: 'DELETE',
+    });
+
+    assert.equal(result.response.status, 200);
+    assert.deepEqual(result.payload, { success: true, consumerId: 'transcript-1' });
+    assert.deepEqual(stops, [{ appId: APP_ID, input: { consumerId: 'transcript-1' } }]);
+
+    const wrongMethod = await request(harness.bridge, `/v1/apps/${APP_ID}/audio/transcriptions/transcript-1`, {
+      method: 'POST',
+      body: {},
+    });
+    assert.equal(wrongMethod.response.status, 404);
+    assert.equal(wrongMethod.payload.error, 'desktop_runtime_route_not_found');
+  } finally {
+    await harness.stop();
+  }
+});
+
+test('desktop runtime live transcription stop requires speech capability', async () => {
+  const harness = await createBridge({
+    getAppPlatformCapabilities: async () => ({
+      speechToText: false,
+      audioInput: true,
+      textToSpeech: true,
+    }),
+  });
+  try {
+    const result = await request(harness.bridge, `/v1/apps/${APP_ID}/audio/transcriptions/transcript-1`, {
+      method: 'DELETE',
+    });
+
+    assert.equal(result.response.status, 403);
+    assert.equal(result.payload.error, 'desktop_runtime_speechToText_capability_required');
+  } finally {
+    await harness.stop();
+  }
+});
+
+test('desktop runtime audio file transcription route delegates through speech service without leaking paths', async () => {
+  const calls = [];
+  const harness = await createBridge({
+    processSpeechToText: async (appId, input) => {
+      calls.push({ appId, input });
+      return {
+        success: true,
+        text: 'hola mundo',
+        language: 'es',
+        durationSeconds: 2.5,
+        userMessage: 'Audio transcribed.',
+        job: {
+          id: 'job-1',
+          path: input.path,
+          task: input.task ?? 'transcribe',
+          status: 'completed',
+          createdAt: '2026-05-17T00:00:00.000Z',
+          updatedAt: '2026-05-17T00:00:00.000Z',
+          model: input.model ?? 'base',
+        },
+      };
+    },
+  });
+  try {
+    const result = await request(harness.bridge, `/v1/apps/${APP_ID}/audio/file-transcriptions`, {
+      method: 'POST',
+      body: { path: '/tmp/finance-os/audio.webm', task: 'translate', language: 'es', model: 'small' },
+    });
+    assert.equal(result.response.status, 200);
+    assert.deepEqual(calls, [{
+      appId: APP_ID,
+      input: { path: '/tmp/finance-os/audio.webm', task: 'translate', language: 'es', model: 'small' },
+    }]);
+    assert.equal(result.payload.success, true);
+    assert.equal(result.payload.text, 'hola mundo');
+    assert.equal(result.payload.task, 'translate');
+    assert.equal(result.payload.language, 'es');
+    assert.equal(result.payload.model, 'small');
+    assert.equal(result.payload.path, undefined);
+
+    const wrongMethod = await request(harness.bridge, `/v1/apps/${APP_ID}/audio/file-transcriptions`);
+    assert.equal(wrongMethod.response.status, 404);
+    assert.equal(wrongMethod.payload.error, 'desktop_runtime_route_not_found');
+
+    const missingPath = await request(harness.bridge, `/v1/apps/${APP_ID}/audio/file-transcriptions`, {
+      method: 'POST',
+      body: { task: 'transcribe' },
+    });
+    assert.equal(missingPath.response.status, 400);
+    assert.equal(missingPath.payload.error, 'speech_to_text_path_required');
+  } finally {
+    await harness.stop();
+  }
+});
+
+test('desktop runtime async audio file transcription jobs publish runtime updates without leaking paths', async () => {
+  const calls = [];
+  const harness = await createBridge({
+    processSpeechToText: async (appId, input) => {
+      calls.push({ appId, input });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      return {
+        success: true,
+        text: 'hola async',
+        language: input.language ?? 'es',
+        durationSeconds: 3,
+        userMessage: 'Audio transcribed.',
+        job: {
+          id: 'job-1',
+          path: input.path,
+          task: input.task ?? 'transcribe',
+          status: 'completed',
+          model: input.model ?? 'large-v3',
+        },
+      };
+    },
+  });
+  const eventsPath = `/v1/apps/${APP_ID}/runtime-events`;
+  const client = new WebSocket(`${harness.bridge.url.replace('http:', 'ws:')}${eventsPath}`, {
+    headers: sign({ method: 'GET', path: eventsPath }),
+  });
+  try {
+    const connected = await websocketMessage(client);
+    assert.equal(connected.type, 'desktop_runtime.connected');
+    const events = [];
+    client.on('message', (raw) => events.push(JSON.parse(raw.toString())));
+
+    const created = await request(harness.bridge, `/v1/apps/${APP_ID}/audio/file-transcription-jobs`, {
+      method: 'POST',
+      body: { path: '/tmp/finance-os/audio.webm', task: 'translate', language: 'es', model: 'large-v3' },
+    });
+    assert.equal(created.response.status, 200);
+    assert.equal(created.payload.status, 'queued');
+    assert.equal(created.payload.task, 'translate');
+    assert.equal(created.payload.model, 'large-v3');
+    assert.equal(created.payload.path, undefined);
+
+    const completed = await waitFor(() => events.find((event) => event.type === 'desktop.audio.fileTranscription.completed'), 1000);
+    assert.ok(completed);
+    const queued = events.find((event) => event.type === 'desktop.audio.fileTranscription.queued');
+    assert.ok(queued);
+    assert.equal(queued.type, 'desktop.audio.fileTranscription.queued');
+    assert.equal(queued.payload.job.jobId, created.payload.jobId);
+    assert.equal(queued.payload.job.path, undefined);
+
+    const running = events.find((event) => event.type === 'desktop.audio.fileTranscription.running');
+    assert.ok(running);
+    assert.equal(running.type, 'desktop.audio.fileTranscription.running');
+
+    assert.equal(completed.type, 'desktop.audio.fileTranscription.completed');
+    assert.equal(completed.payload.job.text, 'hola async');
+    assert.equal(completed.payload.job.status, 'completed');
+    assert.equal(completed.payload.job.path, undefined);
+
+    const fetched = await request(harness.bridge, `/v1/apps/${APP_ID}/audio/file-transcription-jobs/${created.payload.jobId}`);
+    assert.equal(fetched.response.status, 200);
+    assert.equal(fetched.payload.status, 'completed');
+    assert.equal(fetched.payload.text, 'hola async');
+    assert.equal(fetched.payload.path, undefined);
+    assert.deepEqual(calls, [{
+      appId: APP_ID,
+      input: { path: '/tmp/finance-os/audio.webm', task: 'translate', language: 'es', model: 'large-v3' },
+    }]);
+  } finally {
+    client.close();
+    await harness.stop();
+  }
+});
+
+test('desktop runtime audio file transcription requires speech capability', async () => {
+  const harness = await createBridge({
+    getAppPlatformCapabilities: async () => ({
+      speechToText: false,
+      audioInput: true,
+      textToSpeech: true,
+    }),
+  });
+  try {
+    const result = await request(harness.bridge, `/v1/apps/${APP_ID}/audio/file-transcriptions`, {
+      method: 'POST',
+      body: { path: '/tmp/audio.wav' },
+    });
+    assert.equal(result.response.status, 403);
+    assert.equal(result.payload.error, 'desktop_runtime_speechToText_capability_required');
+  } finally {
+    await harness.stop();
+  }
+});
+
+test('desktop runtime audio synthesis route returns audio bytes without internal path', async () => {
+  const calls = [];
+  const harness = await createBridge({
+    synthesizeTextToSpeech: async (input) => {
+      calls.push(input);
+      return {
+        success: true,
+        audioPath: '/tmp/generated.wav',
+        audioDataBase64: Buffer.from('wav-data').toString('base64'),
+        mimeType: 'audio/wav',
+        model: input.model,
+        voice: input.voice,
+        format: input.format,
+        durationSeconds: 0.4,
+      };
+    },
+  });
+  try {
+    const result = await request(harness.bridge, `/v1/apps/${APP_ID}/audio/synthesis`, {
+      method: 'POST',
+      body: { text: 'hello', model: 'kokoro', voice: 'af_heart', speed: 1.1, format: 'mp3' },
+    });
+    assert.equal(result.response.status, 200);
+    assert.deepEqual(calls, [{ text: 'hello', model: 'kokoro', voice: 'af_heart', speed: 1.1, format: 'mp3' }]);
+    assert.equal(result.payload.success, true);
+    assert.equal(result.payload.audioDataBase64, Buffer.from('wav-data').toString('base64'));
+    assert.equal(result.payload.mimeType, 'audio/wav');
+    assert.equal(result.payload.audioPath, undefined);
+
+    const missingArgs = await request(harness.bridge, `/v1/apps/${APP_ID}/audio/synthesis`, {
+      method: 'POST',
+      body: { text: 'hello', model: 'kokoro' },
+    });
+    assert.equal(missingArgs.response.status, 400);
+    assert.equal(missingArgs.payload.error, 'text_to_speech_arguments_required');
+  } finally {
+    await harness.stop();
+  }
+});
+
+test('desktop runtime audio synthesis requires text to speech capability', async () => {
+  const harness = await createBridge({
+    getAppPlatformCapabilities: async () => ({
+      speechToText: true,
+      audioInput: true,
+      textToSpeech: false,
+    }),
+  });
+  try {
+    const result = await request(harness.bridge, `/v1/apps/${APP_ID}/audio/synthesis`, {
+      method: 'POST',
+      body: { text: 'hello', model: 'kokoro', voice: 'af_heart' },
+    });
+    assert.equal(result.response.status, 403);
+    assert.equal(result.payload.error, 'desktop_runtime_textToSpeech_capability_required');
+  } finally {
+    await harness.stop();
+  }
+});
+
+test('desktop runtime /say queues playback, tracks status, and cleans ephemeral audio', async () => {
+  const synthCalls = [];
+  const playCalls = [];
+  const deleted = [];
+  const harness = await createBridge({
+    synthesizeTextToSpeech: async (input) => {
+      synthCalls.push(input);
+      return {
+        success: true,
+        audioPath: '/tmp/generated.wav',
+        audioDataBase64: Buffer.from('wav-data').toString('base64'),
+        mimeType: 'audio/wav',
+        durationSeconds: 0.2,
+      };
+    },
+    playTextToSpeechAudio: async (input) => {
+      playCalls.push(input);
+      return { success: true, durationSeconds: 0.2 };
+    },
+    deleteTextToSpeechAudio: async (audioPath) => {
+      deleted.push(audioPath);
+    },
+  });
+  try {
+    const say = await request(harness.bridge, `/v1/apps/${APP_ID}/audio/say`, {
+      method: 'POST',
+      body: { text: 'hello', model: 'kokoro', voice: 'af_heart', speed: 1.1, outputDeviceId: 'speaker-2' },
+    });
+    assert.equal(say.response.status, 200);
+    assert.equal(say.payload.success, true);
+    assert.equal(say.payload.status, 'queued');
+    assert.equal(typeof say.payload.playbackId, 'string');
+    assert.equal(say.payload.audioPath, undefined);
+    assert.equal(say.payload.audioDataBase64, undefined);
+    assert.deepEqual(synthCalls[0], { text: 'hello', model: 'kokoro', voice: 'af_heart', speed: 1.1, format: 'wav' });
+    assert.equal(playCalls[0].outputDeviceId, 'speaker-2');
+
+    const completed = await waitFor(async () => {
+      const result = await request(harness.bridge, `/v1/apps/${APP_ID}/audio/playbacks/${say.payload.playbackId}`);
+      return result.payload.status === 'completed' ? result : null;
+    });
+    assert.ok(completed);
+    assert.equal(completed.payload.durationSeconds, 0.2);
+    assert.deepEqual(deleted, ['/tmp/generated.wav']);
+  } finally {
+    await harness.stop();
+  }
+});
+
+test('desktop runtime /say validates arguments and output devices', async () => {
+  const harness = await createBridge();
+  try {
+    const missing = await request(harness.bridge, `/v1/apps/${APP_ID}/audio/say`, {
+      method: 'POST',
+      body: { text: 'hello', model: 'kokoro' },
+    });
+    assert.equal(missing.response.status, 400);
+    assert.equal(missing.payload.error, 'text_to_speech_arguments_required');
+
+    const invalidDevice = await request(harness.bridge, `/v1/apps/${APP_ID}/audio/say`, {
+      method: 'POST',
+      body: { text: 'hello', model: 'kokoro', voice: 'af_heart', outputDeviceId: 'missing-speaker' },
+    });
+    assert.equal(invalidDevice.response.status, 400);
+    assert.equal(invalidDevice.payload.error, 'audio_output_device_not_found');
   } finally {
     await harness.stop();
   }

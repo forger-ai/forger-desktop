@@ -34,6 +34,7 @@ interface AgentConversationManagerOptions {
   getClaudeCliPath?: () => Promise<string | null>;
   getCodexPathEntries?: () => Promise<string[]>;
   getCodexEnvironment?: () => Promise<Record<string, string>>;
+  ensureGitAvailable?: () => Promise<void>;
   getCodexAuthenticated?: () => Promise<boolean>;
   getClaudeAuthenticated?: () => Promise<boolean>;
   createForgerMcpSession?: (runId: string, agent: PersonalAgent) => { url: string; token: string } | null;
@@ -235,6 +236,9 @@ export class AgentConversationManager {
       }
     } else if (!(await (this.options.getCodexAuthenticated?.() ?? Promise.resolve(false)))) {
       throw new Error('codex_auth_missing');
+    }
+    if (runtime.provider === 'codex') {
+      await this.options.ensureGitAvailable?.();
     }
     const codexCliPath = runtime.provider === 'codex' ? await (this.options.getCodexCliPath?.() ?? Promise.resolve(null)) : null;
     const claudeCliPath = runtime.provider === 'claude' ? await (this.options.getClaudeCliPath?.() ?? Promise.resolve(null)) : null;

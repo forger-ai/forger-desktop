@@ -85,6 +85,22 @@ test('preload forwards representative commands to the expected IPC channels with
   ]);
 });
 
+test('preload exposes audio runtime broker request and response channels', async () => {
+  const { api, invokeCalls, listeners, removedListeners } = await loadPreloadApi();
+  const received = [];
+
+  const unsubscribe = api.onAudioRuntimeBrokerRequest((payload) => received.push(payload));
+  const listener = listeners.get('forger:audio-runtime-broker:request');
+  assert.equal(typeof listener, 'function');
+  listener({ sender: 'main' }, { requestId: 'request-1', type: 'list_devices' });
+  assert.deepEqual(received, [{ requestId: 'request-1', type: 'list_devices' }]);
+  unsubscribe();
+  assert.equal(removedListeners.at(-1)?.[0], 'forger:audio-runtime-broker:request');
+
+  await api.audioRuntimeBrokerRespond({ requestId: 'request-1', success: true, result: { ok: true } });
+  assert.deepEqual(invokeCalls.at(-1), ['forger:audio-runtime-broker:response', { requestId: 'request-1', success: true, result: { ok: true } }]);
+});
+
 test('preload forwards every exposed command or event subscription through the bridge', async () => {
   const { api, invokeCalls, listeners, removedListeners } = await loadPreloadApi();
   const listener = () => undefined;
