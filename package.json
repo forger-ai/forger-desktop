@@ -195,6 +195,7 @@
     "linux": {
       "category": "Utility",
       "icon": "build/icon.png",
+      "maintainer": "Forger <hello@forger.cloud>",
       "target": [
         {
           "target": "deb",

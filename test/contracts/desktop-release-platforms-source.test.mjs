@@ -20,6 +20,7 @@ test('desktop release config builds stable macOS/Windows artifacts and experimen
   assert.deepEqual(pkg.build.mac.target[0].arch, ['arm64', 'x64']);
   assert.deepEqual(pkg.build.win.target[0].arch, ['x64']);
   assert.deepEqual(pkg.build.linux.target[0].arch, ['x64']);
+  assert.match(pkg.build.linux.maintainer, /@/);
   assert.equal(pkg.build.dmg.artifactName, 'forger-desktop-macos-${arch}.${ext}');
   assert.equal(pkg.build.nsis.artifactName, 'forger-desktop-windows-x64.${ext}');
   assert.equal(pkg.build.deb.artifactName, 'forger-desktop-linux-x64.${ext}');
