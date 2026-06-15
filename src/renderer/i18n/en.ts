@@ -771,8 +771,6 @@ export const en = {
     speechModel: 'Model',
     speechModelAvailable: 'available',
     speechModelInstalled: 'installed',
-    speechMaxDuration: 'Max duration (seconds)',
-    speechMaxSize: 'Max size (MB)',
     speechConcurrency: 'Simultaneous jobs',
     speechRealtimeSessions: 'Realtime sockets',
     speechAutoStart: 'Start when Forger opens',

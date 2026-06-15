@@ -1123,6 +1123,7 @@ export class ForgerBackendClient {
     shortDescription?: string;
     category?: string;
     visibility: 'public' | 'friends' | 'private';
+    remixSourceUserAppId?: number;
     onProgress?: (message: string) => void | Promise<void>;
   }): Promise<SocialUserApp> {
     const buffer = await fs.readFile(input.zipPath);
@@ -1162,6 +1163,7 @@ export class ForgerBackendClient {
         description: input.description,
         short_description: input.shortDescription,
         category: input.category,
+        remix_source_user_app_id: input.remixSourceUserAppId,
         signed_blob_id: signedBlobId,
         checksum_sha256: checksumSha256,
       }),

@@ -565,6 +565,7 @@ const toAppSummary = (record: InstalledAppRecord): AppSummary => {
     iconUrl: catalog?.iconUrl,
     beta: catalog?.beta,
     privateLocal: record.privateLocal,
+    socialSource: record.socialSource,
     localNetworkShareSupported: record.localNetworkShareSupported ?? catalog?.localNetworkShareSupported,
     remoteTunnelSupported: record.remoteTunnelSupported ?? catalog?.remoteTunnelSupported,
     ...localNetworkSharePayloadFor(record.appId),

@@ -52,6 +52,8 @@ export const toSocialUserApp = (record: unknown): SocialUserApp | undefined => {
     status: item.status === 'suspended' || item.status === 'deleted' ? item.status : 'published',
     accessReason: socialAccessReason(item.access_reason),
     owner,
+    remixed: item.remixed === true,
+    remixSource: toRemixSource(item.remix_source),
     averageReviewScore: typeof item.average_review_score === 'number' ? item.average_review_score : undefined,
     reviewsCount: Number(item.reviews_count ?? 0),
     commentsCount: Number(item.comments_count ?? 0),
@@ -60,6 +62,23 @@ export const toSocialUserApp = (record: unknown): SocialUserApp | undefined => {
     activeUploadAttempt,
     createdAt: typeof item.created_at === 'string' ? item.created_at : undefined,
     updatedAt: typeof item.updated_at === 'string' ? item.updated_at : undefined,
+  };
+};
+
+const toRemixSource = (value: unknown): SocialUserApp['remixSource'] | undefined => {
+  if (!value || typeof value !== 'object') return undefined;
+  const source = value as Record<string, unknown>;
+  const id = Number(source.id);
+  if (!Number.isFinite(id)) return undefined;
+  return {
+    id,
+    slug: typeof source.slug === 'string' ? source.slug : '',
+    name: typeof source.name === 'string' ? source.name : '',
+    ownerUsername: typeof source.owner_username === 'string'
+      ? source.owner_username
+      : typeof source.ownerUsername === 'string'
+        ? source.ownerUsername
+        : '',
   };
 };
 

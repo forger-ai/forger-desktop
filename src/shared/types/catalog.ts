@@ -26,6 +26,12 @@ export interface AppSummary {
   lastErrorOperation?: AppLastErrorOperation;
   catalogStatus?: CatalogPublicationStatus;
   privateLocal?: boolean;
+  socialSource?: {
+    userAppId: number;
+    slug: string;
+    ownerUsername: string;
+    installId?: number;
+  };
   tools?: {
     required?: AppToolDeclaration[];
     optional?: AppToolDeclaration[];

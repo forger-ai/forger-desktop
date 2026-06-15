@@ -638,6 +638,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             const isConflict = app.status === 'conflict';
             const hasError = app.status === 'error';
             const isPrivateLocal = app.privateLocal === true;
+            const isSocialInstalled = Boolean(app.socialSource);
             const canOpenError = isOpenableError(app);
             const canRetryInstallError = isRetryableInstallError(app);
             const canRecoverUpdateError = isUpdateError(app);
@@ -652,7 +653,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
               && Boolean(app.remoteNetworkShare?.active)
               && app.remoteNetworkShare?.state !== 'closed'
               && app.remoteNetworkShare?.state !== 'inactive';
-            const canUploadSocial = canUseAppActionMenu && isPrivateLocal;
+            const canUploadSocial = canUseAppActionMenu && (isPrivateLocal || isSocialInstalled);
             const primaryActionLabel = isConflict
               ? t.actions.resolveWithForger
               : canRetryInstallError

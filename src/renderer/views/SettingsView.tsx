@@ -172,8 +172,6 @@ interface MemoryFormState {
 
 interface SpeechConfigDraft {
   model: string;
-  maxDurationSeconds: string;
-  maxFileSizeMb: string;
   maxConcurrentJobs: string;
   maxRealtimeSessions: string;
   autoStart: boolean;
@@ -197,7 +195,7 @@ interface TextToSpeechConfigDraft {
   defaultVoice: string;
 }
 
-type SpeechNumberDraftKey = 'maxDurationSeconds' | 'maxFileSizeMb' | 'maxConcurrentJobs' | 'maxRealtimeSessions';
+type SpeechNumberDraftKey = 'maxConcurrentJobs' | 'maxRealtimeSessions';
 type WakeWordNumberDraftKey = 'threshold' | 'patience' | 'cooldownMs';
 type TextToSpeechNumberDraftKey = 'maxTextCharacters' | 'maxConcurrentJobs';
 
@@ -218,8 +216,6 @@ type SettingsSubview = 'main' | 'llmProvider' | 'privacySecurity' | 'appearance'
 
 const speechConfigToDraft = (config: SpeechToTextState['config']): SpeechConfigDraft => ({
   model: config.model,
-  maxDurationSeconds: String(config.maxDurationSeconds),
-  maxFileSizeMb: String(config.maxFileSizeMb),
   maxConcurrentJobs: String(config.maxConcurrentJobs),
   maxRealtimeSessions: String(config.maxRealtimeSessions),
   autoStart: config.autoStart,
@@ -733,8 +729,6 @@ export function SettingsView({
     setSpeechConfigDraft((current) => ({
       ...(current ?? (speechState ? speechConfigToDraft(speechState.config) : {
         model: 'base',
-        maxDurationSeconds: '',
-        maxFileSizeMb: '',
         maxConcurrentJobs: '',
         maxRealtimeSessions: '',
         autoStart: false,
@@ -754,8 +748,6 @@ export function SettingsView({
     if (!speechConfigDraft) return;
     void runSpeechAction(() => window.forger.speechToTextUpdateConfig({
       model: speechConfigDraft.model,
-      maxDurationSeconds: parseSpeechDraftNumber(speechConfigDraft.maxDurationSeconds),
-      maxFileSizeMb: parseSpeechDraftNumber(speechConfigDraft.maxFileSizeMb),
       maxConcurrentJobs: parseSpeechDraftNumber(speechConfigDraft.maxConcurrentJobs),
       maxRealtimeSessions: parseSpeechDraftNumber(speechConfigDraft.maxRealtimeSessions),
       autoStart: speechConfigDraft.autoStart,
@@ -1268,20 +1260,6 @@ export function SettingsView({
                     ))}
                   </Select>
                 </FormControl>
-                <EditableNumberField
-                  label={t.settings.speechMaxDuration}
-                  value={draft?.maxDurationSeconds ?? ''}
-                  onChange={(value) => updateSpeechDraft({ maxDurationSeconds: value })}
-                  onCommit={() => commitSpeechNumber('maxDurationSeconds')}
-                  disabled={configLocked}
-                />
-                <EditableNumberField
-                  label={t.settings.speechMaxSize}
-                  value={draft?.maxFileSizeMb ?? ''}
-                  onChange={(value) => updateSpeechDraft({ maxFileSizeMb: value })}
-                  onCommit={() => commitSpeechNumber('maxFileSizeMb')}
-                  disabled={configLocked}
-                />
                 <EditableNumberField
                   label={t.settings.speechConcurrency}
                   value={draft?.maxConcurrentJobs ?? ''}

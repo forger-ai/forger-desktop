@@ -57,8 +57,6 @@ test('SpeechToTextServiceManager reports defaults before install and writes inst
     assert.equal(initial.modelWorkers[0].pinned, true);
     assert.deepEqual(initial.config, {
       model: 'base',
-      maxDurationSeconds: 900,
-      maxFileSizeMb: 100,
       maxConcurrentJobs: 1,
       maxRealtimeSessions: 3,
       autoStart: false,
@@ -331,11 +329,11 @@ test('SpeechToTextServiceManager returns reportable JSON when server rejects pro
           success: false,
           service: 'speech_to_text',
           operation: 'transcribe',
-          technicalCode: 'audio_file_too_large',
-          userMessage: 'Audio file is too large.',
-          reportable: false,
+          technicalCode: 'speech_decode_failed',
+          userMessage: 'Speech to text failed.',
+          reportable: true,
           details: { sizeBytes: 123, path: '/Users/private/audio.wav' },
-        }, { status: 413 });
+        }, { status: 500 });
       }
       return Response.json({});
     };
@@ -344,8 +342,8 @@ test('SpeechToTextServiceManager returns reportable JSON when server rejects pro
     assert.equal(result.success, false);
     assert.equal(result.service, 'speech_to_text');
     assert.equal(result.operation, 'transcribe');
-    assert.equal(result.technicalCode, 'audio_file_too_large');
-    assert.equal(result.reportable, false);
+    assert.equal(result.technicalCode, 'speech_decode_failed');
+    assert.equal(result.reportable, true);
     assert.deepEqual(result.details, { sizeBytes: 123 });
   } finally {
     globalThis.fetch = originalFetch;

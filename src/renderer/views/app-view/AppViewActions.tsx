@@ -62,7 +62,7 @@ export function AppViewActions({
     && Boolean(details.app.remoteNetworkShare?.active)
     && details.app.remoteNetworkShare?.state !== 'closed'
     && details.app.remoteNetworkShare?.state !== 'inactive';
-  const canUploadSocial = canUseAppActionMenu && details.app.privateLocal === true;
+  const canUploadSocial = canUseAppActionMenu && (details.app.privateLocal === true || Boolean(details.app.socialSource));
   const appMenuActions = [
     ...(canShareLocalNetwork ? [{ label: t.localNetwork.menuAction, onClick: () => onStartLocalNetworkShare(appId) }] : []),
     ...(canShareRemoteNetwork ? [{ label: t.remoteNetwork.menuAction, onClick: () => onStartRemoteNetworkShare(appId) }] : []),

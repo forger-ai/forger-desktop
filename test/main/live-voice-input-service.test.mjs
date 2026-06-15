@@ -18,8 +18,6 @@ const createHarness = async ({ sttInstalled = true, sttRunning = true } = {}) =>
     status: sttRunning ? 'running' : sttInstalled ? 'installed' : 'not_installed',
     config: {
       model: 'base',
-      maxDurationSeconds: 900,
-      maxFileSizeMb: 100,
       maxConcurrentJobs: 1,
       maxRealtimeSessions: 3,
       autoStart: false,

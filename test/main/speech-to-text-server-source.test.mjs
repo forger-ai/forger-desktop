@@ -17,4 +17,8 @@ test('speech to text realtime server uses real VAD, a separate worker process, a
   assert.match(source, /realtime_transcribe_job_completed/);
   assert.match(source, /realtimeQueueDepth/);
   assert.match(source, /lastRealtimeFactor/);
+  assert.doesNotMatch(source, /audio_file_too_large/);
+  assert.doesNotMatch(source, /audio_duration_too_long/);
+  assert.doesNotMatch(source, /max_file_size_mb/);
+  assert.doesNotMatch(source, /max_duration_seconds/);
 });

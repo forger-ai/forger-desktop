@@ -336,6 +336,15 @@ const shouldSkipSocialUploadPath = (sourcePath: string, root: string, pathModule
   return false;
 };
 
+const slugifySocialUpload = (value: string): string =>
+  value
+    .normalize('NFKD')
+    .replace(/[^\w\s-]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    || 'social-app';
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 
@@ -877,7 +886,8 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
     const startedAt = new Date().toISOString();
     const taskId = `social-upload:${input.appId}:${Date.now()}`;
     const record = registry.apps[input.appId];
-    const appName = record?.name ?? input.appId;
+    const isRemixUpload = Boolean(record?.socialSource);
+    const appName = input.name?.trim() || record?.name || input.appId;
     const taskStore = getBackgroundTaskStore();
     await taskStore.upsert({
       id: taskId,
@@ -905,7 +915,7 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
       });
       return { success: false, userMessage: 'Inicia sesion en Forger Cloud para subir apps a Social.', technicalCode: 'backend_client_missing' };
     }
-    if (!record?.installDir || !record.privateLocal) {
+    if (!record?.installDir || (!record.privateLocal && !record.socialSource)) {
       await taskStore.upsert({
         id: taskId,
         source: 'social-upload',
@@ -913,12 +923,12 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
         status: 'failed',
         result: {
           status: 'error',
-          message: 'Solo puedes subir a Social apps creadas por ti.',
-          technicalCode: 'social_upload_not_private_local',
+          message: 'Solo puedes subir a Social apps tuyas o remixes de apps compartidas.',
+          technicalCode: 'social_upload_not_owned_or_remixable',
         },
         completedAt: new Date().toISOString(),
       });
-      return { success: false, userMessage: 'Solo puedes subir a Social apps creadas por ti.', technicalCode: 'social_upload_not_private_local' };
+      return { success: false, userMessage: 'Solo puedes subir a Social apps tuyas o remixes de apps compartidas.', technicalCode: 'social_upload_not_owned_or_remixable' };
     }
     const manifest = await resolveInstalledManifest(record.installDir);
     const uploadRoot = path.join(os.tmpdir(), `forger-social-upload-${input.appId}-${Date.now()}`);
@@ -939,14 +949,15 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
       await taskStore.appendStatusUpdate(taskId, { message: 'Subiendo a Social', status: 'running' });
       const appEntry = await forgerBackendClient.uploadSocialApp({
         zipPath,
-        name: record.name,
-        slug: input.appId,
+        name: appName,
+        slug: input.slug?.trim() || (isRemixUpload ? slugifySocialUpload(appName) : input.appId),
         description: record.description,
         shortDescription: record.description,
         category: manifest && typeof (manifest.catalog as { category?: unknown } | null)?.category === 'string'
           ? (manifest.catalog as { category: string }).category
           : 'productivity',
         visibility: input.visibility,
+        remixSourceUserAppId: record.socialSource?.userAppId,
         onProgress: async (message) => {
           await taskStore.appendStatusUpdate(taskId, { message, status: 'running' });
         },

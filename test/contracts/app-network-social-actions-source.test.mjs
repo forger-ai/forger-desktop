@@ -24,7 +24,8 @@ test('installed Apps cards expose network and Social actions in the primary menu
   assert.match(source, /const canShareRemoteNetwork = canUseAppActionMenu && app\.remoteTunnelSupported === true;/);
   assert.match(source, /const canStopRemoteNetwork = canUseAppActionMenu[\s\S]*Boolean\(app\.remoteNetworkShare\?\.active\)/);
   assert.match(source, /const isPrivateLocal = app\.privateLocal === true;/);
-  assert.match(source, /const canUploadSocial = canUseAppActionMenu && isPrivateLocal;/);
+  assert.match(source, /const isSocialInstalled = Boolean\(app\.socialSource\);/);
+  assert.match(source, /const canUploadSocial = canUseAppActionMenu && \(isPrivateLocal \|\| isSocialInstalled\);/);
   assert.match(source, /beta=\{isPrivateLocal \|\| isBeta \|\| isEarlyAccess\}/);
   assert.match(source, /betaLabel=\{isPrivateLocal \? t\.beta\.privateLocalBadge : isEarlyAccess \? t\.beta\.earlyAccessBadge : 'Beta'\}/);
   assert.match(source, /primaryMenuActions=\{\[[\s\S]*t\.localNetwork\.menuAction[\s\S]*handleStartLocalNetworkShare\(app\.id\)[\s\S]*t\.remoteNetwork\.menuAction[\s\S]*handleStartRemoteNetworkShare\(app\.id\)[\s\S]*t\.remoteNetwork\.stop[\s\S]*handleStopRemoteNetworkShare\(app\.id\)[\s\S]*Subir a Social[\s\S]*handleUploadSocial\(app\.id\)/);
@@ -44,9 +45,17 @@ test('app detail view receives and renders network and Social action menu items'
   assert.match(actionsSource, /const canShareLocalNetwork = canUseAppActionMenu && details\.app\.localNetworkShareSupported === true;/);
   assert.match(actionsSource, /const canShareRemoteNetwork = canUseAppActionMenu && details\.app\.remoteTunnelSupported === true;/);
   assert.match(actionsSource, /const canStopRemoteNetwork = canUseAppActionMenu[\s\S]*Boolean\(details\.app\.remoteNetworkShare\?\.active\)/);
-  assert.match(actionsSource, /const canUploadSocial = canUseAppActionMenu && details\.app\.privateLocal === true;/);
+  assert.match(actionsSource, /const canUploadSocial = canUseAppActionMenu && \(details\.app\.privateLocal === true \|\| Boolean\(details\.app\.socialSource\)\);/);
   assert.match(actionsSource, /const appMenuActions = \[[\s\S]*t\.localNetwork\.menuAction[\s\S]*onStartLocalNetworkShare\(appId\)[\s\S]*t\.remoteNetwork\.menuAction[\s\S]*onStartRemoteNetworkShare\(appId\)[\s\S]*t\.remoteNetwork\.stop[\s\S]*onStopRemoteNetworkShare\(appId\)[\s\S]*Subir a Social[\s\S]*onUploadSocial\(appId\)/);
   assert.match(actionsSource, /<ButtonGroup variant="contained"[\s\S]*aria-haspopup="menu"[\s\S]*<Menu/);
 
   assert.match(rendererSource, /<AppView[\s\S]*onStartLocalNetworkShare=\{handleStartLocalNetworkShare\}[\s\S]*onStartRemoteNetworkShare=\{handleStartRemoteNetworkShare\}[\s\S]*onStopRemoteNetworkShare=\{handleStopRemoteNetworkShare\}[\s\S]*onUploadSocial=\{\(appId\) => void handleUploadSocial\(appId\)\}/);
+});
+
+test('Social upload IPC accepts installed Social apps as remix sources', async () => {
+  const source = await readSource('src/main/ipc/main-handlers.ts');
+
+  assert.match(source, /!\(record\.privateLocal && !record\.socialSource\)|\(!record\.privateLocal && !record\.socialSource\)/);
+  assert.match(source, /remixSourceUserAppId: record\.socialSource\?\.userAppId/);
+  assert.match(source, /slug: input\.slug\?\.trim\(\) \|\| \(isRemixUpload \? slugifySocialUpload\(appName\) : input\.appId\)/);
 });

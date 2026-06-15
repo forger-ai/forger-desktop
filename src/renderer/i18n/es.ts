@@ -771,8 +771,6 @@ export const es = {
     speechModel: 'Modelo',
     speechModelAvailable: 'disponible',
     speechModelInstalled: 'instalado',
-    speechMaxDuration: 'Duración máxima (segundos)',
-    speechMaxSize: 'Tamaño máximo (MB)',
     speechConcurrency: 'Trabajos simultáneos',
     speechRealtimeSessions: 'Sockets realtime',
     speechAutoStart: 'Iniciar al abrir Forger',

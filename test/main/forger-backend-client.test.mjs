@@ -1234,6 +1234,7 @@ test('social app upload uses direct upload, confirms an upload attempt, and poll
       const body = JSON.parse(init.body);
       assert.equal(body.signed_blob_id, 'signed-blob');
       assert.equal(body.slug, 'chessos');
+      assert.equal(body.remix_source_user_app_id, 42);
       assert.match(body.checksum_sha256, /^[0-9a-f]{64}$/);
       return jsonResponse(202, {
         upload_attempt: {
@@ -1256,6 +1257,8 @@ test('social app upload uses direct upload, confirms an upload attempt, and poll
           name: 'ChessOS',
           visibility: 'private',
           status: 'published',
+          remixed: true,
+          remix_source: { id: 42, slug: 'original-chess', name: 'Original Chess', owner_username: 'ana' },
           owner: { id: 1, username: 'maker' },
           latest_version: { id: 9, version: 'v1', checksum_sha256: 'a'.repeat(64), file_size_bytes: 11, supported_platforms: [] },
         },
@@ -1270,8 +1273,11 @@ test('social app upload uses direct upload, confirms an upload attempt, and poll
       name: 'ChessOS',
       slug: 'chessos',
       visibility: 'private',
+      remixSourceUserAppId: 42,
     });
     assert.equal(app.slug, 'chessos');
+    assert.equal(app.remixed, true);
+    assert.deepEqual(app.remixSource, { id: 42, slug: 'original-chess', name: 'Original Chess', ownerUsername: 'ana' });
     assert.equal(app.latestVersion.version, 'v1');
     assert.deepEqual(requests.map((request) => new URL(request.url).pathname), [
       '/api/v1/me/user_apps/direct_uploads',
