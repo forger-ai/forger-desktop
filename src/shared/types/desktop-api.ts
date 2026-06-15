@@ -30,6 +30,8 @@ import type { LlmRunsSnapshot } from './llm-runs';
 import type { PersonalAgent, PersonalAgentConversation, PersonalAgentConversationEvent, PersonalAgentConversationGetInput, PersonalAgentConversationsListInput, PersonalAgentConversationStartInput, PersonalAgentCreateInput, PersonalAgentDeleteInput, PersonalAgentGrantOptions, PersonalAgentMessageSendInput, PersonalAgentUpdatePermissionsInput, PersonalAgentWorkspaceEntry, PersonalAgentWorkspaceFile, PersonalAgentWorkspaceFileReadInput, PersonalAgentWorkspaceFileWriteInput, PersonalAgentWorkspaceListInput } from './personal-agents';
 import type { RemoteActivitySnapshot } from './remote-activity';
 
+export type MicrophonePermissionStatus = 'not-determined' | 'granted' | 'denied' | 'restricted' | 'unknown' | 'unsupported';
+
 export interface ForgerDesktopApi {
   listInstalledApps: () => Promise<AppSummary[]>;
   listCatalogApps: () => Promise<CatalogApp[]>;
@@ -85,6 +87,8 @@ export interface ForgerDesktopApi {
   speechToTextProcess: (input: SpeechToTextProcessInput) => Promise<SpeechToTextProcessResult>;
   speechToTextProcessUpload: (input: SpeechToTextUploadInput) => Promise<SpeechToTextProcessResult>;
   speechToTextCreateRealtimeSession: () => Promise<SpeechToTextRealtimeSession>;
+  microphonePermissionStatus: () => Promise<MicrophonePermissionStatus>;
+  microphonePermissionRequest: () => Promise<MicrophonePermissionStatus>;
   liveVoiceInputGetState: () => Promise<LiveVoiceInputState>;
   liveVoiceInputUpdateConfig: (input: LiveVoiceInputConfigInput) => Promise<LiveVoiceInputState>;
   liveVoiceInputUpdateDevices: (input: LiveVoiceInputDeviceListInput) => Promise<LiveVoiceInputState>;

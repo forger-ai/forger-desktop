@@ -139,10 +139,10 @@ export class LocalNetworkShareManager {
         state.connectedAt = new Date().toISOString();
         this.options.onConnected?.(this.toStatus(state));
         await this.options.appendInstallLog('local_network_share:connected', { appId: state.appId, connectedAt: state.connectedAt });
-        response.statusCode = 200;
-        response.setHeader('content-type', 'text/html; charset=utf-8');
+        response.statusCode = 302;
         response.setHeader('set-cookie', `${COOKIE_NAME}=${sessionToken}; HttpOnly; SameSite=Lax; Path=/`);
-        response.end(successHtml(state.url));
+        response.setHeader('location', '/');
+        response.end();
         return;
       }
 
@@ -335,26 +335,3 @@ const safeEqual = (left: string, right: string): boolean => {
   const rightBuffer = Buffer.from(right);
   return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
 };
-
-const successHtml = (appUrl: string): string => `<!doctype html>
-<html lang="es">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Forger</title>
-  <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; min-height: 100vh; display: grid; place-items: center; background: #f6f7f9; color: #1f2328; }
-    main { width: min(420px, calc(100vw - 32px)); background: white; border: 1px solid #d0d7de; border-radius: 12px; padding: 24px; box-shadow: 0 12px 30px rgba(31, 35, 40, 0.08); }
-    h1 { font-size: 22px; margin: 0 0 8px; }
-    p { margin: 0 0 18px; color: #59636e; line-height: 1.45; }
-    a { display: inline-block; border-radius: 8px; padding: 10px 14px; background: #1f6feb; color: white; text-decoration: none; font-weight: 700; }
-  </style>
-</head>
-<body>
-  <main>
-    <h1>Te conectaste exitosamente</h1>
-    <p>Puedes cerrar esta ventana o abrir Finance OS en este dispositivo mientras Red local siga activa.</p>
-    <a href="${appUrl}">Abrir Finance OS</a>
-  </main>
-</body>
-</html>`;

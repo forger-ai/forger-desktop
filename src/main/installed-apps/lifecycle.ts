@@ -362,6 +362,7 @@ const installAppRuntime = async (appId: string, localeInput?: string): Promise<I
     requiredPythonVersion: DEFAULT_PYTHON_VERSION,
     status: 'installing',
     userMessage: copy.install.preparing,
+    lastErrorOperation: undefined,
     installedAt: new Date().toISOString(),
   };
 
@@ -393,6 +394,7 @@ const installAppRuntime = async (appId: string, localeInput?: string): Promise<I
         ...current,
         status: 'installing',
         userMessage,
+        lastErrorOperation: undefined,
       });
     }
   };
@@ -469,6 +471,7 @@ const installAppRuntime = async (appId: string, localeInput?: string): Promise<I
       requiredPythonVersion: pythonVersion,
       status: 'installed',
       userMessage: copy.install.installedReady,
+      lastErrorOperation: undefined,
       originalCommitSha,
       installedAt: initialRecord.installedAt,
       localNetworkShareSupported: installedManifest?.localNetworkShare === true || catalogApp.localNetworkShareSupported === true,
@@ -510,6 +513,7 @@ const installAppRuntime = async (appId: string, localeInput?: string): Promise<I
         ...current,
         status: 'error',
         userMessage: copy.install.failedStored,
+        lastErrorOperation: 'install',
       });
     }
 
@@ -625,6 +629,7 @@ const updateAppRuntime = async (appId: string, localeInput?: string): Promise<In
         ...current,
         status: phase === 'conflict' ? 'conflict' : 'installing',
         userMessage,
+        lastErrorOperation: undefined,
       });
     }
     await appendInstallLog('update:progress', { appId, phase, userMessage });
@@ -640,6 +645,7 @@ const updateAppRuntime = async (appId: string, localeInput?: string): Promise<In
       ...current,
       status: 'installed',
       userMessage,
+      lastErrorOperation: undefined,
     });
     await appendInstallLog('update:blocked', { appId, detail: technicalCode, userMessage });
     ensureCatalogStatuses();
@@ -699,6 +705,7 @@ const updateAppRuntime = async (appId: string, localeInput?: string): Promise<In
       ...record,
       status: 'installing',
       userMessage: copy.update.merging,
+      lastErrorOperation: undefined,
       pendingUpdate: {
         fromVersion: record.version,
         targetVersion: download.version,
@@ -766,6 +773,7 @@ const updateAppRuntime = async (appId: string, localeInput?: string): Promise<In
       requiredPythonVersion: pythonVersion,
       status: 'installed',
       userMessage: copy.update.installedReady,
+      lastErrorOperation: undefined,
       pendingUpdate: undefined,
     });
     await fs.rm(stageDir, { recursive: true, force: true }).catch(() => undefined);
@@ -796,6 +804,7 @@ const updateAppRuntime = async (appId: string, localeInput?: string): Promise<In
       ...record,
       status: 'error',
       userMessage: copy.update.failedStored,
+      lastErrorOperation: 'update',
     });
     ensureCatalogStatuses();
     emitInstallProgress(appId, {
@@ -836,6 +845,7 @@ const restoreAppUserVersionRuntime = async (appId: string): Promise<BasicActionR
       version: record.pendingUpdate.fromVersion,
       status: 'installed',
       userMessage: 'Restauramos tu version anterior.',
+      lastErrorOperation: undefined,
       pendingUpdate: undefined,
     });
     ensureCatalogStatuses();

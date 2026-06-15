@@ -81,8 +81,8 @@ test('LocalNetworkShareManager protects LAN proxy with one-time token and revoca
   assert.equal(wrongCookie.status, 401);
 
   const connected = await fetch(`${localBaseUrl}${connectPath}`, { redirect: 'manual' });
-  assert.equal(connected.status, 200);
-  assert.match(await connected.text(), /Te conectaste exitosamente/);
+  assert.equal(connected.status, 302);
+  assert.equal(connected.headers.get('location'), '/');
   const cookie = connected.headers.get('set-cookie');
   assert.match(cookie ?? '', /forger_lan_share=/);
   assert.equal(manager.status('finance-os').connectUrl, undefined);

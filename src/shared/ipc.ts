@@ -51,6 +51,8 @@ export const IPC_CHANNELS = {
   speechToTextProcess: 'forger:speech-to-text:process',
   speechToTextProcessUpload: 'forger:speech-to-text:process-upload',
   speechToTextCreateRealtimeSession: 'forger:speech-to-text:create-realtime-session',
+  microphonePermissionStatus: 'forger:microphone-permission:status',
+  microphonePermissionRequest: 'forger:microphone-permission:request',
   wakeWordGetState: 'forger:wake-word:get-state',
   wakeWordInstall: 'forger:wake-word:install',
   wakeWordStart: 'forger:wake-word:start',

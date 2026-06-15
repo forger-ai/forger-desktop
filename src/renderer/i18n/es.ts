@@ -771,8 +771,6 @@ export const es = {
     speechModel: 'Modelo',
     speechModelAvailable: 'disponible',
     speechModelInstalled: 'instalado',
-    speechMaxDuration: 'Duración máxima (segundos)',
-    speechMaxSize: 'Tamaño máximo (MB)',
     speechConcurrency: 'Trabajos simultáneos',
     speechRealtimeSessions: 'Sockets realtime',
     speechAutoStart: 'Iniciar al abrir Forger',
@@ -793,6 +791,8 @@ export const es = {
     speechProcessedTitle: 'Archivos procesados',
     speechEmptyProcessed: 'Todavía no hay archivos procesados.',
     speechGenericError: 'Speech to text falló.',
+    speechMicrophonePermissionDenied: 'El permiso de micrófono está bloqueado para Forger. Permítelo en Privacidad de macOS y vuelve a abrir Forger.',
+    speechMicrophoneEmptyRecording: 'Forger recibió permiso de micrófono, pero la grabación no tuvo audio. Revisa el dispositivo de entrada y la privacidad de micrófono en macOS.',
     speechStatuses: {
       not_installed: 'No instalado',
       installed: 'Instalado',

@@ -565,6 +565,7 @@ const toAppSummary = (record: InstalledAppRecord): AppSummary => {
     iconUrl: catalog?.iconUrl,
     beta: catalog?.beta,
     privateLocal: record.privateLocal,
+    socialSource: record.socialSource,
     localNetworkShareSupported: record.localNetworkShareSupported ?? catalog?.localNetworkShareSupported,
     remoteTunnelSupported: record.remoteTunnelSupported ?? catalog?.remoteTunnelSupported,
     ...localNetworkSharePayloadFor(record.appId),
@@ -582,6 +583,7 @@ const toAppSummary = (record: InstalledAppRecord): AppSummary => {
       updateAvailable,
       status: 'running',
       userMessage: 'En ejecucion',
+      lastErrorOperation: undefined,
     });
   }
 
@@ -596,6 +598,7 @@ const toAppSummary = (record: InstalledAppRecord): AppSummary => {
     updateAvailable,
     status: record.status,
     userMessage: record.userMessage,
+    lastErrorOperation: record.lastErrorOperation,
   });
 };
 

@@ -7,6 +7,7 @@ import SystemUpdateAltRounded from '@mui/icons-material/SystemUpdateAltRounded';
 import { Button, ButtonGroup, CircularProgress, Menu, MenuItem, Stack, Tooltip } from '@mui/material';
 import type { AppDetails, InstallAppResult } from '@shared/types';
 import type { AppDictionary } from '@renderer/i18n';
+import { isOpenableError, isRetryableInstallError, isUpdateError } from '@renderer/app-error-actions';
 import { useState } from 'react';
 
 interface AppViewActionsProps {
@@ -49,16 +50,19 @@ export function AppViewActions({
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
   const isRunning = details.status === 'running';
   const hasError = details.status === 'error';
+  const canOpenError = isOpenableError(details.app);
+  const canRetryInstallError = isRetryableInstallError(details.app);
+  const canRecoverUpdateError = isUpdateError(details.app);
   const hasConflict = details.status === 'conflict';
   const isInstalling = details.status === 'installing' || Boolean(installProgress);
-  const canUseAppActionMenu = details.installed && !isInstalling && !hasConflict && !hasError;
+  const canUseAppActionMenu = details.installed && !isInstalling && !hasConflict && (!hasError || canOpenError);
   const canShareLocalNetwork = canUseAppActionMenu && details.app.localNetworkShareSupported === true;
   const canShareRemoteNetwork = canUseAppActionMenu && details.app.remoteTunnelSupported === true;
   const canStopRemoteNetwork = canUseAppActionMenu
     && Boolean(details.app.remoteNetworkShare?.active)
     && details.app.remoteNetworkShare?.state !== 'closed'
     && details.app.remoteNetworkShare?.state !== 'inactive';
-  const canUploadSocial = canUseAppActionMenu && details.app.privateLocal === true;
+  const canUploadSocial = canUseAppActionMenu && (details.app.privateLocal === true || Boolean(details.app.socialSource));
   const appMenuActions = [
     ...(canShareLocalNetwork ? [{ label: t.localNetwork.menuAction, onClick: () => onStartLocalNetworkShare(appId) }] : []),
     ...(canShareRemoteNetwork ? [{ label: t.remoteNetwork.menuAction, onClick: () => onStartRemoteNetworkShare(appId) }] : []),
@@ -98,6 +102,14 @@ export function AppViewActions({
             {t.actions.restoreUserVersion}
           </Button>
         </>
+      ) : canRecoverUpdateError ? (
+        <Button variant="contained" startIcon={<SystemUpdateAltRounded />} onClick={() => onUpdate(appId)}>
+          {t.actions.update}
+        </Button>
+      ) : canRetryInstallError ? (
+        <Button variant="contained" startIcon={<DownloadRounded />} onClick={() => onInstall(appId)}>
+          {t.actions.retry}
+        </Button>
       ) : isRunning ? (
         appMenuEnabled ? (
           <>

@@ -4,6 +4,7 @@ import type { AppDictionary } from '@renderer/i18n';
 import { AppCard } from '@renderer/components/AppCard';
 import { AppsGrid } from '@renderer/components/AppsGrid';
 import { appExecutionTooltip } from '@renderer/app-execution-labels';
+import { isOpenableError, isRetryableInstallError, isUpdateError } from '@renderer/app-error-actions';
 
 interface CatalogViewProps {
   apps: CatalogApp[];
@@ -132,15 +133,17 @@ export function CatalogView({
             const meta = getAppMeta(app.id);
             const installProgress = installProgressByApp[app.id];
             const isPrivateLocal = app.privateLocal === true;
-            const isInstalled = app.status === 'installed' || app.status === 'running' || app.status === 'conflict' || (isPrivateLocal && app.status === 'error');
             const isInstalling = app.status === 'installing';
-            const hasError = app.status === 'error';
+            const canOpenError = isOpenableError(app);
+            const canRetryInstallError = isRetryableInstallError(app);
+            const canRecoverUpdateError = isUpdateError(app);
+            const isInstalled = app.status === 'installed' || app.status === 'running' || app.status === 'conflict' || canOpenError || (isPrivateLocal && app.status === 'error');
             const isConflict = app.status === 'conflict';
             const isEarlyAccess = app.catalogStatus === 'coming';
             const isBeta = app.catalogStatus === 'beta' || Boolean(app.beta);
             const hasDownloadableVersion = Boolean(app.downloadUrl || app.latestVersionId);
             const canInstallEarlyAccess = !isEarlyAccess || (earlyAccessEnabled && hasDownloadableVersion);
-            const primaryAction = isConflict ? 'update' : hasError && !isPrivateLocal ? 'retry' : isInstalled ? (app.status === 'running' ? 'stop' : 'open') : 'install';
+            const primaryAction = isConflict ? 'update' : canRecoverUpdateError ? 'update' : canRetryInstallError ? 'retry' : isInstalled ? (app.status === 'running' ? 'stop' : 'open') : 'install';
             const remoteNetworkState = app.remoteNetworkShare?.state;
             const remoteNetworkPreparing = remoteNetworkState === 'preparing';
             const isOpening = (primaryAction === 'open' && openingAppIds.has(app.id)) || remoteNetworkPreparing;
@@ -154,8 +157,10 @@ export function CatalogView({
             const canStopRemoteNetwork = Boolean(app.remoteNetworkShare?.active)
               && app.remoteNetworkShare?.state !== 'closed'
               && app.remoteNetworkShare?.state !== 'inactive';
-            const primaryActionLabel = hasError && !isPrivateLocal
+            const primaryActionLabel = canRetryInstallError
               ? t.actions.retry
+              : canRecoverUpdateError
+                ? t.actions.update
               : remoteNetworkPreparing
                 ? t.remoteNetwork.preparingAction
               : app.status === 'running'
@@ -189,7 +194,7 @@ export function CatalogView({
                 statusIndicatorLabel={statusIndicatorLabel}
                 primaryAction={primaryAction}
                 primaryActionLabel={primaryActionLabel}
-                primaryDisabled={isInstalling || (!isInstalled && !canInstallEarlyAccess)}
+                primaryDisabled={isInstalling || (!isInstalled && !canRetryInstallError && !canRecoverUpdateError && !canInstallEarlyAccess)}
                 primaryLoading={isOpening}
                 primaryMenuActions={[
                   ...(canShareLocalNetwork ? [{ label: t.localNetwork.menuAction, onClick: () => onStartLocalNetworkShare(app.id) }] : []),
@@ -206,7 +211,11 @@ export function CatalogView({
                     onResolveConflict(app.id);
                     return;
                   }
-                  if (hasError && !isPrivateLocal) {
+                  if (canRecoverUpdateError) {
+                    onUpdate(app.id);
+                    return;
+                  }
+                  if (canRetryInstallError) {
                     onRetry(app.id);
                     return;
                   }

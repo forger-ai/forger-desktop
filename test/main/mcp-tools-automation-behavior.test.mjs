@@ -2790,15 +2790,23 @@ test('automation manager runs due stored schedules and keeps enabled automations
 
     let runs = [];
     let [scheduled] = manager.list();
+    let captureReady = false;
     for (let attempt = 0; attempt < 50; attempt += 1) {
       runs = await manager.listRuns('scheduled');
       [scheduled] = manager.list();
-      if (runs[0]?.status === 'succeeded' && scheduled.running === false) {
+      try {
+        await access(capturePath);
+        captureReady = true;
+      } catch {
+        captureReady = false;
+      }
+      if (runs[0]?.status === 'succeeded' && scheduled.running === false && captureReady) {
         break;
       }
       await wait(20);
     }
 
+    assert.equal(captureReady, true);
     const capture = JSON.parse(await readFile(capturePath, 'utf8'));
     assert.equal(runs[0].trigger, 'scheduled');
     assert.equal(runs[0].status, 'succeeded');

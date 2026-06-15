@@ -7,8 +7,6 @@ export type SpeechToTextModelWorkerStatus = 'stopped' | 'starting' | 'ready' | '
 
 export interface SpeechToTextConfig {
   model: string;
-  maxDurationSeconds: number;
-  maxFileSizeMb: number;
   maxConcurrentJobs: number;
   maxRealtimeSessions: number;
   autoStart: boolean;
@@ -100,8 +98,6 @@ export interface SpeechToTextModelWorker {
 
 export interface SpeechToTextConfigInput {
   model?: string;
-  maxDurationSeconds?: number;
-  maxFileSizeMb?: number;
   maxConcurrentJobs?: number;
   maxRealtimeSessions?: number;
   autoStart?: boolean;

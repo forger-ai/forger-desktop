@@ -4,6 +4,7 @@ export type AppStatus = 'not_installed' | 'installing' | 'installed' | 'running'
 export type AppExecutionPhase = 'stopped' | 'starting' | 'running' | 'error';
 export type AppExecutionMode = 'forger' | 'local_network' | 'remote_tunnel';
 export type AppConnectMode = Extract<AppExecutionMode, 'local_network' | 'remote_tunnel'>;
+export type AppLastErrorOperation = 'install' | 'open' | 'runtime' | 'update';
 export type CatalogPublicationStatus = 'draft' | 'coming' | 'beta' | 'production';
 
 export type AppCategory = 'finanzas' | 'hogar' | 'salud' | 'productividad' | 'developer_tools';
@@ -22,8 +23,15 @@ export interface AppSummary {
   changelog?: VersionChangelog;
   capabilities?: AppCapability[];
   userMessage?: string;
+  lastErrorOperation?: AppLastErrorOperation;
   catalogStatus?: CatalogPublicationStatus;
   privateLocal?: boolean;
+  socialSource?: {
+    userAppId: number;
+    slug: string;
+    ownerUsername: string;
+    installId?: number;
+  };
   tools?: {
     required?: AppToolDeclaration[];
     optional?: AppToolDeclaration[];

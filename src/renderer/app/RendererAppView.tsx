@@ -20,6 +20,7 @@ import type { AudioRuntimeBrokerRequest, AudioRuntimeDevices, BackgroundTask, Ca
 import { AppShell } from '@renderer/components/AppShell';
 import { AppCard } from '@renderer/components/AppCard';
 import { AppsGrid } from '@renderer/components/AppsGrid';
+import { isOpenableError, isRetryableInstallError, isUpdateError } from '@renderer/app-error-actions';
 import { AppView } from '@renderer/views/AppView';
 import { AgentsView } from '@renderer/views/AgentsView';
 import { AutomationsView } from '@renderer/views/AutomationsView';
@@ -637,22 +638,28 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             const isConflict = app.status === 'conflict';
             const hasError = app.status === 'error';
             const isPrivateLocal = app.privateLocal === true;
+            const isSocialInstalled = Boolean(app.socialSource);
+            const canOpenError = isOpenableError(app);
+            const canRetryInstallError = isRetryableInstallError(app);
+            const canRecoverUpdateError = isUpdateError(app);
             const isEarlyAccess = app.catalogStatus === 'coming';
             const isBeta = app.catalogStatus === 'beta' || Boolean(app.beta);
             const isOpening = app.status !== 'running' && openingAppIds.has(app.id);
-            const primaryAction = isConflict ? 'update' : hasError ? 'retry' : app.status === 'running' ? 'stop' : 'open';
-            const canUseAppActionMenu = !isInstalling && !isConflict && !hasError;
+            const primaryAction = isConflict ? 'update' : canRecoverUpdateError ? 'update' : canRetryInstallError ? 'retry' : app.status === 'running' ? 'stop' : 'open';
+            const canUseAppActionMenu = !isInstalling && !isConflict && (!hasError || canOpenError);
             const canShareLocalNetwork = canUseAppActionMenu && app.localNetworkShareSupported === true;
             const canShareRemoteNetwork = canUseAppActionMenu && app.remoteTunnelSupported === true;
             const canStopRemoteNetwork = canUseAppActionMenu
               && Boolean(app.remoteNetworkShare?.active)
               && app.remoteNetworkShare?.state !== 'closed'
               && app.remoteNetworkShare?.state !== 'inactive';
-            const canUploadSocial = canUseAppActionMenu && isPrivateLocal;
+            const canUploadSocial = canUseAppActionMenu && (isPrivateLocal || isSocialInstalled);
             const primaryActionLabel = isConflict
               ? t.actions.resolveWithForger
-              : hasError
+              : canRetryInstallError
                 ? t.actions.retry
+                : canRecoverUpdateError
+                  ? t.actions.update
                 : app.status === 'running'
                   ? t.actions.stop
                   : isInstalling
@@ -701,7 +708,11 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
                     void handleResolveConflict(app.id);
                     return;
                   }
-                  if (hasError) {
+                  if (canRecoverUpdateError) {
+                    void handleUpdate(app.id);
+                    return;
+                  }
+                  if (canRetryInstallError) {
                     handleRetry(app.id);
                     return;
                   }

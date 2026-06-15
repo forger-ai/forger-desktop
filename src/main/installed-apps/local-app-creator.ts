@@ -233,6 +233,7 @@ export const createLocalAppCreator = (deps: LocalAppCreatorDeps) => {
       installDir,
       status: 'installing',
       userMessage: 'Creando app local...',
+      lastErrorOperation: undefined,
       requiredNodeVersion: DEFAULT_NODE_VERSION,
       requiredPythonVersion: DEFAULT_PYTHON_VERSION,
       installedAt: new Date().toISOString(),
@@ -246,7 +247,7 @@ export const createLocalAppCreator = (deps: LocalAppCreatorDeps) => {
       emitInstallProgress(appId, { success: true, phase, userMessage });
       const current = registry.apps[appId];
       if (current) {
-        await upsertInstalledRecord({ ...current, status: 'installing', userMessage });
+        await upsertInstalledRecord({ ...current, status: 'installing', userMessage, lastErrorOperation: undefined });
       }
     };
 
@@ -274,6 +275,7 @@ export const createLocalAppCreator = (deps: LocalAppCreatorDeps) => {
         ...initialRecord,
         status: 'installed',
         userMessage: 'App creada y lista para conversar.',
+        lastErrorOperation: undefined,
         originalCommitSha,
         localNetworkShareSupported: true,
         remoteTunnelSupported: true,
@@ -302,6 +304,7 @@ export const createLocalAppCreator = (deps: LocalAppCreatorDeps) => {
         ...initialRecord,
         status: 'error',
         userMessage: 'No pudimos crear la app local.',
+        lastErrorOperation: 'install',
       });
       return {
         success: false,

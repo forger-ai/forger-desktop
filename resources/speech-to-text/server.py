@@ -24,12 +24,10 @@ class ProcessRequest(BaseModel):
 
 
 class RuntimeState:
-    def __init__(self, metadata_root: Path, token: str, model_name: str, max_file_size_mb: int, max_duration_seconds: int, max_concurrent_jobs: int, max_realtime_sessions: int, log_path: Path | None = None):
+    def __init__(self, metadata_root: Path, token: str, model_name: str, max_concurrent_jobs: int, max_realtime_sessions: int, log_path: Path | None = None):
         self.metadata_root = metadata_root
         self.token = token
         self.model_name = model_name
-        self.max_file_size_mb = max_file_size_mb
-        self.max_duration_seconds = max_duration_seconds
         self.jobs: list[dict[str, Any]] = []
         self.processed_files: list[dict[str, Any]] = self._read_processed_files()
         self.semaphore = asyncio.Semaphore(max(1, max_concurrent_jobs))
@@ -419,8 +417,6 @@ def make_app(state: RuntimeState) -> FastAPI:
         if not audio_path.exists() or not audio_path.is_file():
             raise HTTPException(status_code=400, detail=error_payload("speech_to_text", task, "audio_file_missing", "Audio file is missing.", False))
         size_bytes = audio_path.stat().st_size
-        if size_bytes > state.max_file_size_mb * 1024 * 1024:
-            raise HTTPException(status_code=413, detail=error_payload("speech_to_text", task, "audio_file_too_large", "Audio file is too large.", False, {"sizeBytes": size_bytes}))
 
         job = {
             "id": str(uuid.uuid4()),
@@ -448,8 +444,6 @@ def make_app(state: RuntimeState) -> FastAPI:
                 text = " ".join(segment.text.strip() for segment in segments).strip()
                 duration = float(getattr(info, "duration", 0) or 0)
                 language = str(getattr(info, "language", "") or "")
-                if duration > state.max_duration_seconds:
-                    raise RuntimeError("audio_duration_too_long")
                 job.update({
                     "status": "completed",
                     "updatedAt": now_iso(),
@@ -666,8 +660,6 @@ def main() -> None:
     parser.add_argument("--metadata-root", required=True)
     parser.add_argument("--log-path")
     parser.add_argument("--model", default="base")
-    parser.add_argument("--max-file-size-mb", type=int, default=100)
-    parser.add_argument("--max-duration-seconds", type=int, default=900)
     parser.add_argument("--max-concurrent-jobs", type=int, default=1)
     parser.add_argument("--max-realtime-sessions", type=int, default=3)
     parser.add_argument("--parent-pid", type=int)
@@ -683,8 +675,6 @@ def main() -> None:
         metadata_root=metadata_root,
         token=args.token,
         model_name=args.model,
-        max_file_size_mb=args.max_file_size_mb,
-        max_duration_seconds=args.max_duration_seconds,
         max_concurrent_jobs=args.max_concurrent_jobs,
         max_realtime_sessions=args.max_realtime_sessions,
         log_path=Path(args.log_path) if args.log_path else metadata_root / "logs" / "server.jsonl",

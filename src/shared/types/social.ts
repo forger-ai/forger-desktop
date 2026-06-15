@@ -263,6 +263,13 @@ export interface SocialUserApp {
   status: SocialUserAppStatus;
   accessReason?: SocialUserAppAccessReason;
   owner: SocialUserProfile;
+  remixed?: boolean;
+  remixSource?: {
+    id: number;
+    slug: string;
+    name: string;
+    ownerUsername: string;
+  };
   averageReviewScore?: number;
   reviewsCount?: number;
   commentsCount?: number;
@@ -332,4 +339,7 @@ export interface SocialUserAppDownload {
 export interface SocialUserAppUploadInput {
   appId: string;
   visibility: Exclude<SocialUserAppVisibility, 'restricted'>;
+  name?: string;
+  slug?: string;
+  remixSourceUserAppId?: number;
 }

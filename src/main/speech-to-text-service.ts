@@ -24,8 +24,6 @@ import { killProcessTree, killServiceProcessesForMetadataRoot } from './app-agen
 
 const DEFAULT_CONFIG: SpeechToTextConfig = {
   model: 'base',
-  maxDurationSeconds: 900,
-  maxFileSizeMb: 100,
   maxConcurrentJobs: 1,
   maxRealtimeSessions: 3,
   autoStart: false,
@@ -89,8 +87,6 @@ interface SpeechInstallState {
 
 const normalizeConfig = (input?: SpeechToTextConfigInput | null): SpeechToTextConfig => ({
   model: typeof input?.model === 'string' && input.model.trim() ? input.model.trim() : DEFAULT_CONFIG.model,
-  maxDurationSeconds: Number.isFinite(input?.maxDurationSeconds) ? Math.max(1, Math.floor(Number(input?.maxDurationSeconds))) : DEFAULT_CONFIG.maxDurationSeconds,
-  maxFileSizeMb: Number.isFinite(input?.maxFileSizeMb) ? Math.max(1, Math.floor(Number(input?.maxFileSizeMb))) : DEFAULT_CONFIG.maxFileSizeMb,
   maxConcurrentJobs: Number.isFinite(input?.maxConcurrentJobs) ? Math.max(1, Math.min(8, Math.floor(Number(input?.maxConcurrentJobs)))) : DEFAULT_CONFIG.maxConcurrentJobs,
   maxRealtimeSessions: Number.isFinite(input?.maxRealtimeSessions) ? Math.max(1, Math.min(16, Math.floor(Number(input?.maxRealtimeSessions)))) : DEFAULT_CONFIG.maxRealtimeSessions,
   autoStart: input?.autoStart === true,
@@ -219,8 +215,6 @@ export class SpeechToTextServiceManager {
       '--metadata-root', root,
       '--log-path', this.serviceLogPath(),
       '--model', this.config.model,
-      '--max-file-size-mb', String(this.config.maxFileSizeMb),
-      '--max-duration-seconds', String(this.config.maxDurationSeconds),
       '--max-concurrent-jobs', String(this.config.maxConcurrentJobs),
       '--max-realtime-sessions', String(this.config.maxRealtimeSessions),
       '--parent-pid', String(process.pid),
@@ -535,8 +529,6 @@ export class SpeechToTextServiceManager {
 
   private requiresRestart(previous: SpeechToTextConfig, next: SpeechToTextConfig): boolean {
     return previous.model !== next.model
-      || previous.maxDurationSeconds !== next.maxDurationSeconds
-      || previous.maxFileSizeMb !== next.maxFileSizeMb
       || previous.maxConcurrentJobs !== next.maxConcurrentJobs
       || previous.maxRealtimeSessions !== next.maxRealtimeSessions;
   }
@@ -612,8 +604,6 @@ export class SpeechToTextServiceManager {
       '--metadata-root', root,
       '--log-path', this.modelWorkerLogPath(worker.model),
       '--model', worker.model,
-      '--max-file-size-mb', String(this.config.maxFileSizeMb),
-      '--max-duration-seconds', String(this.config.maxDurationSeconds),
       '--max-concurrent-jobs', String(this.config.maxConcurrentJobs),
       '--max-realtime-sessions', '1',
       '--parent-pid', String(process.pid),

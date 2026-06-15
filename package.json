@@ -1,6 +1,6 @@
 {
   "name": "forger-desktop",
-  "version": "0.3.1",
+  "version": "0.3.3",
   "private": true,
   "description": "Desktop launcher for Forger",
   "author": "Forger",
@@ -153,6 +153,10 @@
       "gatekeeperAssess": false,
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.inherit.plist",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Forger uses the microphone only when you start voice recording or live transcription.",
+        "NSAudioCaptureUsageDescription": "Forger captures audio only when you start a visible recording, live transcription, or system audio workflow."
+      },
       "notarize": false,
       "target": [
         {

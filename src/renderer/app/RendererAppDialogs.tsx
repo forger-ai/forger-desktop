@@ -79,6 +79,7 @@ export function RendererAppDialogs({ controller }: RendererAppDialogsProps) {
     socialUploadDialog,
     closeSocialUploadDialog,
     setSocialUploadVisibility,
+    setSocialUploadName,
     submitSocialUploadDialog,
     errorReportDialog,
     closeErrorReportDialog,
@@ -214,9 +215,21 @@ export function RendererAppDialogs({ controller }: RendererAppDialogsProps) {
           <Stack spacing={2} sx={{ pt: 1 }}>
             <Typography color="text.secondary">
               {t.locale === 'es'
-                ? 'Elige quien puede ver esta app compartida.'
-                : 'Choose who can see this shared app.'}
+                ? socialUploadDialog.isRemix
+                  ? 'Esta app quedara como un remix tuyo en Social.'
+                  : 'Elige quien puede ver esta app compartida.'
+                : socialUploadDialog.isRemix
+                  ? 'This app will become your own remix on Social.'
+                  : 'Choose who can see this shared app.'}
             </Typography>
+            {socialUploadDialog.isRemix ? (
+              <TextField
+                label={t.locale === 'es' ? 'Nombre de la app' : 'App name'}
+                value={socialUploadDialog.name}
+                onChange={(event) => setSocialUploadName(event.target.value)}
+                fullWidth
+              />
+            ) : null}
             <Select
               fullWidth
               value={socialUploadDialog.visibility}

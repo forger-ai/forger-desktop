@@ -16,6 +16,7 @@ import type {
 } from '../core/main-process-types';
 import type { ForgerDeepLink } from '../deep-links';
 import type {
+  AppLastErrorOperation,
   AppSecretDeclaration,
   AppStatus,
   CloudFriendship,
@@ -308,6 +309,7 @@ const markAppRuntimeStatus = async (
   appId: string,
   status: Exclude<AppStatus, 'not_installed'>,
   userMessage: string,
+  lastErrorOperation?: AppLastErrorOperation,
 ): Promise<void> => {
   const current = registry.apps[appId];
   if (!current) {
@@ -319,6 +321,7 @@ const markAppRuntimeStatus = async (
     ...current,
     status: nextStatus,
     userMessage,
+    lastErrorOperation: status === 'error' ? lastErrorOperation : undefined,
   });
   ensureCatalogStatuses();
 };
@@ -942,7 +945,7 @@ const openInstalledAppUnlocked = async (
       stoppingApps.delete(appId);
     }
 
-    await markAppRuntimeStatus(appId, 'error', 'La app se detuvo por un error. Inicia de nuevo.');
+    await markAppRuntimeStatus(appId, 'error', 'La app se detuvo por un error. Inicia de nuevo.', 'runtime');
     emitRuntimeStatus({
       appId,
       status: 'error',
@@ -1024,7 +1027,7 @@ const openInstalledAppUnlocked = async (
     await closeServer(proxy.server).catch(() => undefined);
     runningApps.delete(appId);
     closeAppWindow(appId);
-    await markAppRuntimeStatus(appId, 'error', 'No pudimos iniciar la app. Reintenta.');
+    await markAppRuntimeStatus(appId, 'error', 'No pudimos iniciar la app. Reintenta.', 'open');
 
     return {
       success: false,

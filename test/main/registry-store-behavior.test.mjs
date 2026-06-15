@@ -101,8 +101,42 @@ test('registry store parses only object registries and normalizes runtime versio
   assert.equal(normalized.changed, true);
   assert.equal(normalized.registry.apps.demo.requiredNodeVersion, '20');
   assert.equal(normalized.registry.apps.demo.requiredPythonVersion, '3.11');
+  assert.equal(normalized.registry.apps.demo.lastErrorOperation, undefined);
   assert.equal(normalized.registry.apps.defaults.requiredNodeVersion, '22');
   assert.equal(normalized.registry.apps.defaults.requiredPythonVersion, '3.12');
+
+  const errorOrigin = controller.normalizeRegistryRuntimeVersions({
+    apps: {
+      openError: {
+        appId: 'openError',
+        status: 'error',
+        lastErrorOperation: 'open',
+      },
+      staleInstalled: {
+        appId: 'staleInstalled',
+        status: 'installed',
+        lastErrorOperation: 'runtime',
+      },
+      legacyInstalledError: {
+        appId: 'legacyInstalledError',
+        status: 'error',
+        installDir: path.join(root, 'apps', 'legacyInstalledError'),
+        lastErrorOperation: 'launch',
+      },
+      legacyInstallError: {
+        appId: 'legacyInstallError',
+        status: 'error',
+        installDir: '',
+        lastErrorOperation: 'launch',
+      },
+    },
+  });
+
+  assert.equal(errorOrigin.changed, true);
+  assert.equal(errorOrigin.registry.apps.openError.lastErrorOperation, 'open');
+  assert.equal(errorOrigin.registry.apps.staleInstalled.lastErrorOperation, undefined);
+  assert.equal(errorOrigin.registry.apps.legacyInstalledError.lastErrorOperation, 'open');
+  assert.equal(errorOrigin.registry.apps.legacyInstallError.lastErrorOperation, 'install');
 
   assert.equal(controller.normalizeRegistryRuntimeVersions({
     apps: {
