@@ -4,7 +4,7 @@ import type path from 'node:path';
 import type { DevCatalogService } from '../dev-catalog-service';
 import type { StoredForgerAccount } from '../forger-account-store';
 import type { AppRegistry, InstalledAppRecord, RunningAppProcess } from '../core/main-process-types';
-import type { CatalogApp, CloudSyncSettings, RuntimeStatus, Settings } from '../../shared/types';
+import type { AppLastErrorOperation, CatalogApp, CloudSyncSettings, RuntimeStatus, Settings } from '../../shared/types';
 
 interface RegistryStoreDeps {
   DEFAULT_NODE_VERSION: string;
@@ -78,15 +78,26 @@ const parseRegistry = (raw: string): AppRegistry | null => {
   return { apps: parsed.apps as Record<string, InstalledAppRecord> };
 };
 
+const isAppLastErrorOperation = (value: unknown): value is AppLastErrorOperation =>
+  value === 'install' || value === 'open' || value === 'runtime' || value === 'update';
+
 const normalizeInstalledAppRecord = (record: InstalledAppRecord): InstalledAppRecord => {
   const pythonVersion =
     typeof record.requiredPythonVersion === 'string' && record.requiredPythonVersion.trim()
       ? normalizeVersionForFolder(record.requiredPythonVersion.trim())
       : DEFAULT_PYTHON_VERSION;
+  const inferredLastErrorOperation = record.status === 'error'
+    ? isAppLastErrorOperation(record.lastErrorOperation)
+      ? record.lastErrorOperation
+      : typeof record.installDir === 'string' && record.installDir.trim()
+        ? 'open'
+        : 'install'
+    : undefined;
   return {
     ...record,
     requiredNodeVersion: normalizeNodeRuntimeVersion(record.requiredNodeVersion),
     requiredPythonVersion: pythonVersion,
+    lastErrorOperation: inferredLastErrorOperation,
   };
 };
 
@@ -97,7 +108,8 @@ const normalizeRegistryRuntimeVersions = (input: AppRegistry): { registry: AppRe
       const normalized = normalizeInstalledAppRecord(record);
       if (
         normalized.requiredNodeVersion !== record.requiredNodeVersion ||
-        normalized.requiredPythonVersion !== record.requiredPythonVersion
+        normalized.requiredPythonVersion !== record.requiredPythonVersion ||
+        normalized.lastErrorOperation !== record.lastErrorOperation
       ) {
         changed = true;
       }
@@ -313,6 +325,7 @@ const ensureCatalogStatuses = (): void => {
       ...appEntry,
       status: installed ? (running ? 'running' : installed.status) : 'not_installed',
       userMessage: installed?.userMessage,
+      lastErrorOperation: installed?.lastErrorOperation,
       version: installed?.version ?? appEntry.version,
       latestVersion: appEntry.latestVersion,
       iconUrl: appEntry.iconUrl,

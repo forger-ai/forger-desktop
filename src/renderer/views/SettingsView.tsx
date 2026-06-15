@@ -872,15 +872,67 @@ export function SettingsView({
 
   const startSpeechRecording = async () => {
     setSpeechError('');
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    const recorder = new MediaRecorder(stream);
+    let permissionStatus = await window.forger.microphonePermissionStatus().catch(() => 'unsupported');
+    if (permissionStatus === 'not-determined') {
+      permissionStatus = await window.forger.microphonePermissionRequest().catch(() => 'unknown');
+    }
+    if (permissionStatus === 'denied' || permissionStatus === 'restricted') {
+      setSpeechError(t.settings.speechMicrophonePermissionDenied);
+      return;
+    }
+
+    let stream: MediaStream | null = null;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (error) {
+      stream?.getTracks().forEach((track) => track.stop());
+      throw error;
+    }
+    const mediaStream = stream;
+
+    const audioTracks = mediaStream.getAudioTracks();
+    if (audioTracks.length === 0) {
+      mediaStream.getTracks().forEach((track) => track.stop());
+      await window.forger.desktopLog({
+        level: 'warn',
+        event: 'settings:speech:microphone_recording_empty_stream',
+        context: { permissionStatus, audioTrackCount: 0 },
+      }).catch(() => undefined);
+      setSpeechError(t.settings.speechMicrophoneEmptyRecording);
+      return;
+    }
+
+    const recorder = new MediaRecorder(mediaStream);
     speechChunksRef.current = [];
     recorder.ondataavailable = (event) => {
       if (event.data.size > 0) speechChunksRef.current.push(event.data);
     };
     recorder.onstop = () => {
-      stream.getTracks().forEach((track) => track.stop());
+      const stoppedTracks = mediaStream.getTracks().map((track) => ({
+        kind: track.kind,
+        readyState: track.readyState,
+        muted: track.muted,
+      }));
+      mediaStream.getTracks().forEach((track) => track.stop());
       const blob = new Blob(speechChunksRef.current, { type: recorder.mimeType || 'audio/webm' });
+      const diagnostics = {
+        permissionStatus,
+        audioTrackCount: audioTracks.length,
+        recorderMimeType: recorder.mimeType,
+        chunkCount: speechChunksRef.current.length,
+        blobSize: blob.size,
+        tracks: stoppedTracks,
+      };
+      void window.forger.desktopLog({
+        level: blob.size > 512 ? 'info' : 'warn',
+        event: blob.size > 512 ? 'settings:speech:microphone_recording_ready' : 'settings:speech:microphone_recording_empty',
+        context: diagnostics,
+      }).catch(() => undefined);
+      if (speechChunksRef.current.length === 0 || blob.size <= 512) {
+        speechChunksRef.current = [];
+        setSpeechError(t.settings.speechMicrophoneEmptyRecording);
+        return;
+      }
       void blob.arrayBuffer().then((data) => runSpeechAction(() => window.forger.speechToTextProcessUpload({
         filename: 'microphone-recording.webm',
         mimeType: blob.type,

@@ -12,10 +12,14 @@ const createBrowserWindowDouble = (calls) => class BrowserWindowDouble {
     this.options = options;
     this.destroyed = false;
     this.executedScripts = [];
+    this.listeners = new Map();
     this.loadUrls = [];
     this.webContents = {
       executeJavaScript: async (script) => {
         this.executedScripts.push(script);
+      },
+      once: (event, listener) => {
+        this.listeners.set(event, listener);
       },
     };
     calls.windows.push(this);
@@ -33,6 +37,10 @@ const createBrowserWindowDouble = (calls) => class BrowserWindowDouble {
   isDestroyed() {
     return this.destroyed;
   }
+
+  emit(event) {
+    this.listeners.get(event)?.();
+  }
 };
 
 test('startup loading window renders once, updates progress in-place, and closes safely', () => {
@@ -43,11 +51,8 @@ test('startup loading window renders once, updates progress in-place, and closes
   controller.update({ event: 'startup:settings:load', status: 'active' });
   controller.update({ event: 'startup:forger_mcp_server:start', status: 'success' });
   controller.update({ event: 'startup:main_window:create', status: 'success' });
-  controller.close();
-  controller.close();
 
   assert.equal(calls.windows.length, 1);
-  assert.equal(calls.closed.length, 1);
   const [window] = calls.windows;
   assert.equal(window.options.title, 'Iniciando Forger');
   assert.equal(window.options.webPreferences.nodeIntegration, false);
@@ -55,11 +60,21 @@ test('startup loading window renders once, updates progress in-place, and closes
   assert.equal(window.options.webPreferences.sandbox, true);
   assert.equal(window.loadUrls.length, 1);
   assert.match(decodeDataHtml(window.loadUrls[0]), /Iniciando Forger/);
+  assert.equal(window.executedScripts.length, 0);
+
+  window.emit('did-finish-load');
+  assert.equal(window.executedScripts.length, 1);
+  controller.update({ event: 'startup:catalog_statuses:ensure', status: 'success' });
+  assert.equal(window.executedScripts.length, 2);
 
   const updates = window.executedScripts.join('\n');
-  assert.match(updates, /Cargando configuracion/);
   assert.match(updates, /Iniciando herramientas de Forger/);
   assert.match(updates, /Abriendo Forger/);
+  assert.match(updates, /Actualizando estado de apps/);
+
+  controller.close();
+  controller.close();
+  assert.equal(calls.closed.length, 1);
 });
 
 test('startup loading window keeps the failure state visible', () => {
@@ -72,5 +87,7 @@ test('startup loading window keeps the failure state visible', () => {
   const [window] = calls.windows;
   assert.equal(calls.closed.length, 0);
   assert.match(decodeDataHtml(window.loadUrls[0]), /Starting Forger/);
+  assert.equal(window.executedScripts.length, 0);
+  window.emit('did-finish-load');
   assert.match(window.executedScripts.join('\n'), /Forger could not finish starting/);
 });

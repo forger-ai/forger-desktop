@@ -44,7 +44,7 @@ export { appAllowsAudioInput, appAllowsSpeechToText, appAllowsTextToSpeech, norm
 export type { ForgerAccountLoginInput, ForgerAccountProfileInput, ForgerAccountRegisterInput, ForgerAccountSession, ForgerAccountUser, SubscriptionTier, CloudDeviceAppSummary, CloudDeviceSummary, CloudDevicesState, MobileDesktopAuthorizationSummary, MobilePairingRequestSummary } from './types/account';
 export type { CloudStorageBreakdown, CloudStorageUsage } from './types/cloud-storage';
 export type { AppAgentPromptSet, AppAgentPromptTemplate, AppAgentPromptVariable, AppAgentPromptVariableType, AppAgent, AppPromptMutationResult, AppPromptRestoreInput, AppPromptReviewInput, AppPromptReviewItem, AppPromptReviewKind, AppPromptSettingSource, AppPromptTemplate, AppPromptTemplateArgument, AppPromptTemplateArgumentType, AppPromptTestInput, AppPromptTestResult, AppPromptValidationResult } from './types/prompts';
-export type { AppCapability, AppCategory, AppConnectMode, AppExecutionMode, AppExecutionPhase, AppStatus, AppSummary, CatalogPublicationStatus, VersionChangelog } from './types/catalog';
+export type { AppCapability, AppCategory, AppConnectMode, AppExecutionMode, AppExecutionPhase, AppLastErrorOperation, AppStatus, AppSummary, CatalogPublicationStatus, VersionChangelog } from './types/catalog';
 export { deriveAppExecutionState, withAppExecutionState } from './app-execution-state';
 export type { AppExecutionState } from './app-execution-state';
 export type { CatalogApp } from './types/catalog-app';

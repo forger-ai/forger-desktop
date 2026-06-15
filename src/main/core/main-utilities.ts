@@ -582,6 +582,7 @@ const toAppSummary = (record: InstalledAppRecord): AppSummary => {
       updateAvailable,
       status: 'running',
       userMessage: 'En ejecucion',
+      lastErrorOperation: undefined,
     });
   }
 
@@ -596,6 +597,7 @@ const toAppSummary = (record: InstalledAppRecord): AppSummary => {
     updateAvailable,
     status: record.status,
     userMessage: record.userMessage,
+    lastErrorOperation: record.lastErrorOperation,
   });
 };
 

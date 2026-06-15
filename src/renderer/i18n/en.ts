@@ -793,6 +793,8 @@ export const en = {
     speechProcessedTitle: 'Processed files',
     speechEmptyProcessed: 'No processed files yet.',
     speechGenericError: 'Speech to text failed.',
+    speechMicrophonePermissionDenied: 'Microphone permission is blocked for Forger. Allow it in macOS Privacy settings and reopen Forger.',
+    speechMicrophoneEmptyRecording: 'Forger received microphone permission, but the recording had no audio. Check the selected input device and macOS microphone privacy settings.',
     speechStatuses: {
       not_installed: 'Not installed',
       installed: 'Installed',

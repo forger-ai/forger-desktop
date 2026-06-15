@@ -218,6 +218,8 @@ export const createStartupLoadingController = (
       sandbox: true,
     },
   });
+  let documentReady = false;
+  let pendingProgressScript: string | null = null;
 
   const renderDocument = (): void => {
     if (typeof window.isDestroyed === 'function' && window.isDestroyed()) {
@@ -263,6 +265,22 @@ export const createStartupLoadingController = (
     void window.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`).catch(() => undefined);
   };
 
+  const executeProgressScript = (script: string): void => {
+    if (typeof window.isDestroyed === 'function' && window.isDestroyed()) {
+      return;
+    }
+    void window.webContents?.executeJavaScript?.(script, true).catch(() => undefined);
+  };
+
+  const markDocumentReady = (): void => {
+    documentReady = true;
+    const script = pendingProgressScript;
+    pendingProgressScript = null;
+    if (script) {
+      executeProgressScript(script);
+    }
+  };
+
   const renderProgress = (currentLabel = copy.ready, failed = false): void => {
     if (typeof window.isDestroyed === 'function' && window.isDestroyed()) {
       return;
@@ -288,9 +306,18 @@ export const createStartupLoadingController = (
         }));
       })();
     `;
-    void window.webContents?.executeJavaScript?.(script, true).catch(() => undefined);
+    if (!documentReady) {
+      pendingProgressScript = script;
+      return;
+    }
+    executeProgressScript(script);
   };
 
+  if (typeof window.webContents?.once === 'function') {
+    window.webContents.once('did-finish-load', markDocumentReady);
+  } else {
+    markDocumentReady();
+  }
   renderDocument();
 
   return {

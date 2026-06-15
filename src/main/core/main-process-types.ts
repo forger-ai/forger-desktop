@@ -1,7 +1,7 @@
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import type http from 'node:http';
 
-import type { AppBackupSummary, AppCategory, AppStatus, VersionChangelog } from '../../shared/types';
+import type { AppBackupSummary, AppCategory, AppLastErrorOperation, AppStatus, VersionChangelog } from '../../shared/types';
 import type { Locale } from '../../shared/i18n';
 
 export interface InstalledAppRecord {
@@ -13,6 +13,7 @@ export interface InstalledAppRecord {
   installDir: string;
   status: Exclude<AppStatus, 'not_installed' | 'running'>;
   userMessage?: string;
+  lastErrorOperation?: AppLastErrorOperation;
   requiredNodeVersion: string;
   requiredPythonVersion: string;
   originalCommitSha?: string;

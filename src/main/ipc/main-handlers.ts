@@ -4,7 +4,7 @@ import type path from 'node:path';
 import os from 'node:os';
 import { randomUUID } from 'node:crypto';
 import type * as Electron from 'electron';
-import { BrowserWindow, type IpcMain } from 'electron';
+import { BrowserWindow, systemPreferences, type IpcMain } from 'electron';
 import { AGENT_TOOL_PACKAGES } from '../core/agent-tool-packages';
 import type { AppAgentConversationManager } from '../app-agent-conversation-manager';
 import type { AppAgentTaskManager } from '../app-agent-task-manager';
@@ -37,6 +37,7 @@ import {
 } from '../desktop-error-report-artifacts';
 import { appendDesktopLog, type DesktopLogLevel } from '../desktop-logger';
 import type { IPC_CHANNELS as IpcChannels } from '../../shared/ipc';
+import type { MicrophonePermissionStatus } from '../../shared/types/desktop-api';
 import { registerAppCloudMessagingIpcHandlers } from './app-cloud-messaging-handlers';
 import { registerAppRuntimeIpcHandlers } from './app-runtime-handlers';
 import { registerChatIpcHandlers } from './chat-handlers';
@@ -123,6 +124,34 @@ import type { AppManifest, AppRegistry, InstalledAppRecord } from '../core/main-
 
 const conversationDiagnosticAttachmentCache = new Map<string, ConversationDiagnosticAttachmentUpload[]>();
 const desktopErrorReportAttachmentCache = new Map<string, DesktopErrorReportAttachmentUpload[]>();
+
+const normalizeMicrophonePermissionStatus = (value: unknown): MicrophonePermissionStatus => {
+  if (
+    value === 'not-determined' ||
+    value === 'granted' ||
+    value === 'denied' ||
+    value === 'restricted' ||
+    value === 'unknown'
+  ) {
+    return value;
+  }
+  return 'unknown';
+};
+
+const getMicrophonePermissionStatus = (): MicrophonePermissionStatus => {
+  if (process.platform !== 'darwin' || typeof systemPreferences.getMediaAccessStatus !== 'function') {
+    return 'unsupported';
+  }
+  return normalizeMicrophonePermissionStatus(systemPreferences.getMediaAccessStatus('microphone'));
+};
+
+const requestMicrophonePermission = async (): Promise<MicrophonePermissionStatus> => {
+  if (process.platform !== 'darwin' || typeof systemPreferences.askForMediaAccess !== 'function') {
+    return getMicrophonePermissionStatus();
+  }
+  const granted = await systemPreferences.askForMediaAccess('microphone');
+  return granted ? 'granted' : getMicrophonePermissionStatus();
+};
 
 interface MainIpcState {
   agentToolSettings: AgentToolSettings;
@@ -706,6 +735,12 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
   });
   ipcMain.handle(IPC_CHANNELS.speechToTextCreateRealtimeSession, async () => {
     return await getSpeechToTextService().createRealtimeSession();
+  });
+  ipcMain.handle(IPC_CHANNELS.microphonePermissionStatus, async () => {
+    return getMicrophonePermissionStatus();
+  });
+  ipcMain.handle(IPC_CHANNELS.microphonePermissionRequest, async () => {
+    return await requestMicrophonePermission();
   });
   registerLiveVoiceInputIpcHandlers({ IPC_CHANNELS, ipcMain, mainWindow, getLiveVoiceInputService });
   registerWakeWordIpcHandlers({ IPC_CHANNELS, ipcMain, mainWindow, getWakeWordService });
