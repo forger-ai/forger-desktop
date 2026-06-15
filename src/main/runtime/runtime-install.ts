@@ -33,7 +33,7 @@ interface RuntimeInstallDeps {
 
 export const createRuntimeInstallController = (deps: RuntimeInstallDeps) => {
   const { fs, path, runtimeLocks, getBundledResourcesRoot, getTempRoot, getRuntimesRoot, resolvePlatformAlias, normalizeVersionForFolder, normalizeNodeRuntimeVersion, findRuntimeArchive, findRuntimeChecksumFile, hashFileSha256, extractArchive, clearMacQuarantine, runCommand, installBackendDependenciesWithUv } = deps;
-const RUNTIME_PLATFORM_ALIASES = new Set(['darwin_arm64', 'win32_x64']);
+const RUNTIME_PLATFORM_ALIASES = new Set(['darwin_arm64', 'darwin_x64', 'linux_x64', 'win32_x64']);
 const PYTHON_DARWIN_RUNTIME_REVISION = 'python-darwin-disable-library-validation-2026-06-02';
 
 interface RuntimeReadyMetadata {

@@ -74,7 +74,7 @@ export function AppCard({
   tertiaryActionLabel,
   onTertiaryAction,
   beta = false,
-  betaLabel = 'Beta',
+  betaLabel = 'Experimental release',
   averageRating,
   ratingsCount = 0,
   onCardClick,

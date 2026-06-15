@@ -10,7 +10,7 @@ import type {
 } from '../shared/types';
 
 const DEFAULT_METADATA_URL = 'https://forger-ai.github.io/desktop-versions/latest.json',
-  SUPPORTED_INSTALLER_KINDS = new Set(['dmg', 'nsis']);
+  SUPPORTED_INSTALLER_KINDS = new Set(['dmg', 'nsis', 'deb', 'appimage']);
 
 interface DesktopUpdaterOptions {
   currentVersion: string;
@@ -102,6 +102,9 @@ const validateAsset = (value: unknown): DesktopUpdateAsset | null => {
   if (typeof value.size === 'number' && Number.isFinite(value.size) && value.size > 0) {
     asset.size = value.size;
   }
+  if (value.experimental === true) {
+    asset.experimental = true;
+  }
   return asset;
 };
 
@@ -138,7 +141,13 @@ const validateMetadata = (value: unknown): DesktopUpdateMetadata => {
 
 const getInstallerFilename = (asset: DesktopUpdateAsset, version: string): string => {
   const basename = path.basename(new URL(asset.url).pathname);
-  const fallbackExtension = asset.kind === 'dmg' ? 'dmg' : 'exe';
+  const extensionByKind: Record<string, string> = {
+    dmg: 'dmg',
+    nsis: 'exe',
+    deb: 'deb',
+    appimage: 'AppImage',
+  };
+  const fallbackExtension = extensionByKind[asset.kind.toLowerCase()] ?? 'bin';
   const safeBasename = basename && !basename.includes('..') ? basename : `forger-desktop-${version}.${fallbackExtension}`;
   return safeBasename.endsWith(`.${fallbackExtension}`) ? safeBasename : `${safeBasename}.${fallbackExtension}`;
 };
@@ -204,7 +213,7 @@ export class DesktopUpdater {
         (candidate) =>
           candidate.platform === process.platform &&
           candidate.arch === process.arch &&
-          SUPPORTED_INSTALLER_KINDS.has(candidate.kind),
+          SUPPORTED_INSTALLER_KINDS.has(candidate.kind.toLowerCase()),
       );
       if (!asset) {
         return this.setState({

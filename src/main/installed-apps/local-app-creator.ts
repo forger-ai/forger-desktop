@@ -93,7 +93,7 @@ const updateManifest = (manifest: AppManifest, input: { appId: string; name: str
       short_description: input.description,
       description: input.purpose,
       category: 'productividad',
-      supported_platforms: ['darwin_arm64', 'darwin_x64', 'win32_x64'],
+      supported_platforms: ['darwin_arm64', 'darwin_x64', 'linux_x64', 'win32_x64'],
       status: 'draft',
     },
     tools: { required: [], optional: [] },

@@ -608,7 +608,19 @@ test('main utility discovers runtime archives and checksum files by platform tok
     assert.equal(path.basename(fallbackArchive), 'single-runtime.zip');
     assert.equal(await controller.findRuntimeArchive(ambiguousRoot, 'linux_x64'), null);
     assert.equal(await controller.findRuntimeArchive(emptyRoot, 'linux_x64'), null);
-    assert.deepEqual(controller.runtimePlatformTokens('linux_x64'), ['linux_x64', 'linux-x64']);
+    assert.deepEqual(controller.runtimePlatformTokens('linux_x64'), [
+      'linux_x64',
+      'linux-x64',
+      'x86_64-unknown-linux-gnu',
+      'x86_64-unknown-linux-musl',
+      'x64-linux',
+    ]);
+    assert.deepEqual(controller.runtimePlatformTokens('darwin_x64'), [
+      'darwin_x64',
+      'darwin-x64',
+      'x64-apple-darwin',
+      'x86_64-apple-darwin',
+    ]);
     assert.deepEqual(controller.runtimePlatformTokens('win32_x64').includes('windows-x64'), true);
     assert.deepEqual(controller.runtimePlatformTokens('darwin_arm64').includes('aarch64-apple-darwin'), true);
     assert.equal(controller.stripArchiveExtension('runtime.tar.gz'), 'runtime');

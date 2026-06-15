@@ -676,7 +676,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
                 categoryLabel={getCategoryLabel(app.category)}
                 description={meta.description}
                 beta={isPrivateLocal || isBeta || isEarlyAccess}
-                betaLabel={isPrivateLocal ? t.beta.privateLocalBadge : isEarlyAccess ? t.beta.earlyAccessBadge : 'Beta'}
+                betaLabel={isPrivateLocal ? t.beta.privateLocalBadge : isEarlyAccess ? t.beta.earlyAccessBadge : t.beta.appBadge}
                 statusIndicatorLabel={appExecutionTooltip(app, t, { startingInForger: isOpening })}
                 primaryAction={primaryAction}
                 primaryActionLabel={primaryActionLabel}

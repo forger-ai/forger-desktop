@@ -345,7 +345,7 @@ const resolveGitExecutableInRoot = async (root: string): Promise<string | null> 
 
 const ensureBundledGitAvailable = async (): Promise<boolean> => {
   const platformAlias = resolvePlatformAlias();
-  if (platformAlias !== 'win32_x64' && platformAlias !== 'darwin_arm64') {
+  if (!['darwin_arm64', 'darwin_x64', 'linux_x64', 'win32_x64'].includes(platformAlias)) {
     return false;
   }
 

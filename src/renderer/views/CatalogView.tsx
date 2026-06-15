@@ -187,7 +187,7 @@ export function CatalogView({
                 categoryLabel={getCategoryLabel(app.category)}
                 description={isEarlyAccess ? `${meta.description} ${t.beta.earlyAccessCardBody}` : meta.description}
                 beta={isPrivateLocal || isBeta || isEarlyAccess}
-                betaLabel={isPrivateLocal ? t.beta.privateLocalBadge : isEarlyAccess ? t.beta.earlyAccessBadge : 'Beta'}
+                betaLabel={isPrivateLocal ? t.beta.privateLocalBadge : isEarlyAccess ? t.beta.earlyAccessBadge : t.beta.appBadge}
                 averageRating={app.averageRating}
                 ratingsCount={app.ratingsCount}
                 onboardingTarget={app.id === 'finance-os' ? 'finance-os-card' : undefined}

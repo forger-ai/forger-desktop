@@ -558,6 +558,7 @@ export const en = {
     },
   },
   beta: {
+    appBadge: 'Experimental release',
     earlyAccessBadge: 'Early Access',
     privateLocalBadge: 'Yours',
     earlyAccessCardBody: 'Try it ahead of time and leave a review to help us improve it.',
@@ -603,8 +604,8 @@ export const en = {
         body: 'Forger can work with ChatGPT/Codex or Claude. You can connect one now, or skip this and connect it the first time you use Chat.',
       },
       feedback: {
-        title: 'Open beta',
-        body: 'Forger is in open beta. If you find a problem, error, or confusing flow, your feedback helps us improve it.',
+        title: 'Experimental release',
+        body: 'Forger is an experimental release. If you find a problem, error, or confusing flow, your feedback helps us improve it.',
       },
       cloud: {
         title: 'Forger Cloud is optional',
@@ -612,7 +613,7 @@ export const en = {
       },
       finance: {
         title: 'Start creating an app',
-        body: 'Create your first local app, or install Finance OS from the catalog if you want to try the beta app.',
+        body: 'Create your first local app, or install Finance OS from the catalog if you want to try the experimental app.',
       },
     },
     advanced: {
@@ -740,9 +741,9 @@ export const en = {
     agentDefaultChatPermissions: 'Chat permissions',
     agentDefaultChatNetwork: 'Chat internet',
     codexDefaultThinking: 'Default thinking',
-    openBetaTitle: 'Forger is in Open Beta',
-    openBetaDescription: 'Forger Desktop is still in Open Beta. Finance OS is the main beta app today; early access apps may be incomplete, fail, or change quickly while we collect feedback.',
-    betaTitle: 'Beta',
+    openBetaTitle: 'Forger is an experimental release',
+    openBetaDescription: 'Forger Desktop is available as an experimental release. Finance OS is the main experimental app today; early access apps may be incomplete, fail, or change quickly while we collect feedback.',
+    betaTitle: 'Experimental release',
     betaDescription: 'Control which surfaces appear in navigation and when early access apps can be installed.',
     earlyAccessToggle: 'Early Access',
     advancedModeToggle: 'Advanced Mode',
@@ -1030,7 +1031,7 @@ export const en = {
       archived: 'Archived',
     },
     sidebarUpdateAvailable: (version?: string) => version ? `Forger ${version} available` : 'Update available',
-    sidebarBetaThanks: 'Thanks for joining the beta',
+    sidebarBetaThanks: 'Thanks for trying the experimental release',
     errorReportTitle: 'Oops, something went wrong',
     errorReportBody:
       'Here are the details that help us understand the issue. This report is anonymous.',

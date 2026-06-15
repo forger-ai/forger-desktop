@@ -317,6 +317,17 @@ const runtimePlatformTokens = (platformAlias: string): string[] => {
     tokens.add('darwin-arm64');
     tokens.add('aarch64-apple-darwin');
   }
+  if (platformAlias === 'darwin_x64') {
+    tokens.add('darwin-x64');
+    tokens.add('x64-apple-darwin');
+    tokens.add('x86_64-apple-darwin');
+  }
+  if (platformAlias === 'linux_x64') {
+    tokens.add('linux-x64');
+    tokens.add('x86_64-unknown-linux-gnu');
+    tokens.add('x86_64-unknown-linux-musl');
+    tokens.add('x64-linux');
+  }
   if (platformAlias === 'win32_x64') {
     tokens.add('win-x64');
     tokens.add('x86_64-pc-windows-msvc');

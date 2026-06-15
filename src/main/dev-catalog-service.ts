@@ -225,7 +225,7 @@ const toCatalogEntry = async (app: LocalApp, baseUrl: string): Promise<JsonObjec
       required_node_version: asString(frontend.node_version),
       supported_platforms: Array.isArray(catalog.supported_platforms)
         ? catalog.supported_platforms
-        : ['darwin_arm64', 'darwin_x64'],
+        : ['darwin_arm64', 'darwin_x64', 'linux_x64', 'win32_x64'],
       localNetworkShare: app.manifest.localNetworkShare === true,
       remoteTunnel: app.manifest.remoteTunnel === true,
       agents: optionalArray(app.manifest.agents),

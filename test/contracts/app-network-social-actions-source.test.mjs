@@ -15,6 +15,7 @@ test('catalog network share actions are not gated by early access', async () => 
   assert.doesNotMatch(source, /const canShareLocalNetwork = earlyAccessEnabled/);
   assert.doesNotMatch(source, /const canShareRemoteNetwork = earlyAccessEnabled/);
   assert.doesNotMatch(source, /const canStopRemoteNetwork = earlyAccessEnabled/);
+  assert.match(source, /betaLabel=\{isPrivateLocal \? t\.beta\.privateLocalBadge : isEarlyAccess \? t\.beta\.earlyAccessBadge : t\.beta\.appBadge\}/);
 });
 
 test('installed Apps cards expose network and Social actions in the primary menu', async () => {
@@ -27,7 +28,7 @@ test('installed Apps cards expose network and Social actions in the primary menu
   assert.match(source, /const isSocialInstalled = Boolean\(app\.socialSource\);/);
   assert.match(source, /const canUploadSocial = canUseAppActionMenu && \(isPrivateLocal \|\| isSocialInstalled\);/);
   assert.match(source, /beta=\{isPrivateLocal \|\| isBeta \|\| isEarlyAccess\}/);
-  assert.match(source, /betaLabel=\{isPrivateLocal \? t\.beta\.privateLocalBadge : isEarlyAccess \? t\.beta\.earlyAccessBadge : 'Beta'\}/);
+  assert.match(source, /betaLabel=\{isPrivateLocal \? t\.beta\.privateLocalBadge : isEarlyAccess \? t\.beta\.earlyAccessBadge : t\.beta\.appBadge\}/);
   assert.match(source, /primaryMenuActions=\{\[[\s\S]*t\.localNetwork\.menuAction[\s\S]*handleStartLocalNetworkShare\(app\.id\)[\s\S]*t\.remoteNetwork\.menuAction[\s\S]*handleStartRemoteNetworkShare\(app\.id\)[\s\S]*t\.remoteNetwork\.stop[\s\S]*handleStopRemoteNetworkShare\(app\.id\)[\s\S]*Subir a Social[\s\S]*handleUploadSocial\(app\.id\)/);
 });
 

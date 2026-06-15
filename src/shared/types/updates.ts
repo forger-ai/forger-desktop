@@ -20,6 +20,7 @@ export interface DesktopUpdateAsset {
   url: string;
   sha256?: string;
   size?: number;
+  experimental?: boolean;
 }
 
 export interface DesktopUpdateMetadata {

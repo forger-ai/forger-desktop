@@ -2260,7 +2260,7 @@ test('runtime install installs full app dependencies with progress messages and 
   assert.deepEqual(npmCi[2], ['ci']);
 });
 
-test('runtime install rejects unsupported platforms and missing archives before touching user data', async (t) => {
+test('runtime install supports experimental x64 aliases but keeps unsupported architectures blocked', async (t) => {
   const root = await tmpRoot('runtime-install-failure');
   const archiveLookups = [];
   t.after(async () => {
@@ -2292,14 +2292,22 @@ test('runtime install rejects unsupported platforms and missing archives before 
   });
 
   await assert.rejects(
+    makeController('win32_arm64').ensureRuntimeInstalled('node', '22.0.0'),
+    /unsupported_platform_win32_arm64/,
+  );
+  await assert.rejects(
     makeController('linux_x64').ensureRuntimeInstalled('node', '22.0.0'),
-    /unsupported_platform_linux_x64/,
+    /runtime_archive_missing_node_22.0.0_linux_x64/,
+  );
+  await assert.rejects(
+    makeController('darwin_x64').ensureRuntimeInstalled('python', '3.12.0'),
+    /runtime_archive_missing_python_3.12.0_darwin_x64/,
   );
   await assert.rejects(
     makeController('darwin_arm64').ensureRuntimeInstalled('python', '3.12.0'),
     /runtime_archive_missing_python_3.12.0_darwin_arm64/,
   );
-  assert.equal(archiveLookups.length, 1);
+  assert.equal(archiveLookups.length, 3);
 });
 
 test('runtime install extracts checked archives once and resolves flattened Python executables', async (t) => {
