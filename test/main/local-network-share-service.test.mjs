@@ -56,8 +56,16 @@ test('local network share controller creates the manager lazily and emits share 
 
   const connectPath = new URL(started.status.connectUrl).pathname;
   const localPort = new URL(started.status.url).port;
-  const connected = await fetch(`http://127.0.0.1:${localPort}${connectPath}`);
-  assert.equal(connected.status, 200);
+  const connected = await fetch(`http://127.0.0.1:${localPort}${connectPath}`, { redirect: 'manual' });
+  assert.equal(connected.status, 302);
+  assert.equal(connected.headers.get('location'), '/');
+  const sessionCookie = connected.headers.get('set-cookie')?.split(';')[0];
+  assert.match(sessionCookie ?? '', /^forger_lan_share=/);
+  const home = await fetch(`http://127.0.0.1:${localPort}/`, {
+    headers: { cookie: sessionCookie },
+  });
+  assert.equal(home.status, 200);
+  assert.equal(await home.text(), 'ok');
   assert.ok(emitted.at(-1).localNetworkShare.connectedAt);
 
   const stopped = await controller.stop('finance-os');
