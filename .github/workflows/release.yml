@@ -59,10 +59,17 @@ jobs:
         include:
           - os: macos-latest
             script: release:ci:mac
-            artifact: forger-desktop-macos-arm64.dmg
+            artifacts: |
+              forger-desktop-macos-arm64.dmg
+              forger-desktop-macos-x64.dmg
+          - os: ubuntu-latest
+            script: dist:linux
+            artifacts: |
+              forger-desktop-linux-x64.deb
           - os: windows-latest
             script: dist:win
-            artifact: forger-desktop-windows-x64.exe
+            artifacts: |
+              forger-desktop-windows-x64.exe
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
@@ -101,23 +108,33 @@ jobs:
 
       - name: Check artifact exists
         shell: bash
-        run: test -f "release/${{ matrix.artifact }}"
+        env:
+          ARTIFACTS: ${{ matrix.artifacts }}
+        run: |
+          while IFS= read -r artifact; do
+            [ -z "$artifact" ] && continue
+            test -f "release/$artifact"
+          done <<< "$ARTIFACTS"
 
       - name: Write checksum
         shell: bash
+        env:
+          ARTIFACTS: ${{ matrix.artifacts }}
         run: |
-          if command -v shasum >/dev/null 2>&1; then
-            shasum -a 256 "release/${{ matrix.artifact }}" > "release/${{ matrix.artifact }}.sha256"
-          else
-            certutil -hashfile "release/${{ matrix.artifact }}" SHA256 | awk 'NR==2 {print $1 "  release/${{ matrix.artifact }}"}' > "release/${{ matrix.artifact }}.sha256"
-          fi
+          while IFS= read -r artifact; do
+            [ -z "$artifact" ] && continue
+            if command -v shasum >/dev/null 2>&1; then
+              shasum -a 256 "release/$artifact" > "release/$artifact.sha256"
+            else
+              certutil -hashfile "release/$artifact" SHA256 | awk -v file="release/$artifact" 'NR==2 {print $1 "  " file}' > "release/$artifact.sha256"
+            fi
+          done <<< "$ARTIFACTS"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
+          name: ${{ matrix.os }}-desktop-artifacts
           path: |
-            release/${{ matrix.artifact }}
-            release/${{ matrix.artifact }}.sha256
+            release/forger-desktop-*
           if-no-files-found: error
 
   publish:

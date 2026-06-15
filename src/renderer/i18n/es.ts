@@ -558,10 +558,11 @@ export const es = {
     },
   },
   beta: {
+    appBadge: 'Release experimental',
     earlyAccessBadge: 'Acceso anticipado',
     privateLocalBadge: 'Tuya',
     earlyAccessCardBody: 'Pruébala antes de tiempo y deja una reseña para ayudarnos a mejorar.',
-    enableEarlyAccessAction: 'Activar Early Access',
+    enableEarlyAccessAction: 'Activar acceso anticipado',
     comingSoonAction: 'Próximamente',
     earlyAccessRequired: 'Activa Acceso anticipado en Configuración para instalar apps en fase de pruebas.',
     downloadMissing: 'Esta app de acceso anticipado todavía no tiene descarga disponible.',
@@ -603,8 +604,8 @@ export const es = {
         body: 'Forger puede trabajar con ChatGPT/Codex o Claude. Puedes conectar uno ahora o saltarlo y conectarlo la primera vez que uses Chat.',
       },
       feedback: {
-        title: 'Open beta',
-        body: 'Forger está en open beta. Si tienes un problema, error o algo confuso, tu feedback nos ayuda a mejorarlo.',
+        title: 'Release experimental',
+        body: 'Forger está en release experimental. Si tienes un problema, error o algo confuso, tu feedback nos ayuda a mejorarlo.',
       },
       cloud: {
         title: 'Forger Cloud es opcional',
@@ -612,7 +613,7 @@ export const es = {
       },
       finance: {
         title: 'Empieza creando una app',
-        body: 'Crea tu primera app local o instala Finance OS desde el catálogo si quieres probar la app beta.',
+        body: 'Crea tu primera app local o instala Finance OS desde el catálogo si quieres probar la app experimental.',
       },
     },
     advanced: {
@@ -740,9 +741,9 @@ export const es = {
     agentDefaultChatNetwork: 'Internet chat',
     codexDefaultModel: 'Modelo default',
     codexDefaultThinking: 'Thinking default',
-    openBetaTitle: 'Forger está en Open Beta',
-    openBetaDescription: 'Forger Desktop todavía está en Open Beta. Finance OS es la app beta principal hoy; las apps de acceso anticipado pueden estar incompletas, fallar o cambiar rápido mientras recopilamos feedback.',
-    betaTitle: 'Beta',
+    openBetaTitle: 'Forger está en release experimental',
+    openBetaDescription: 'Forger Desktop está disponible como release experimental. Finance OS es la app experimental principal hoy; las apps de acceso anticipado pueden estar incompletas, fallar o cambiar rápido mientras recopilamos feedback.',
+    betaTitle: 'Release experimental',
     betaDescription: 'Controla qué superficies aparecen en navegación y cuándo puedes instalar apps de acceso anticipado.',
     earlyAccessToggle: 'Acceso anticipado',
     advancedModeToggle: 'Modo avanzado',
@@ -1030,7 +1031,7 @@ export const es = {
       archived: 'Archivada',
     },
     sidebarUpdateAvailable: (version?: string) => version ? `Forger ${version} disponible` : 'Actualización disponible',
-    sidebarBetaThanks: 'Gracias por participar en la beta',
+    sidebarBetaThanks: 'Gracias por probar la release experimental',
     errorReportTitle: 'Oops, parece que ha habido un error',
     errorReportBody:
       'Aquí se muestra el detalle que nos ayuda a entender el problema. Este reporte es anónimo.',

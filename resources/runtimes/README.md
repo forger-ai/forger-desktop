@@ -14,7 +14,11 @@ Forger expects embedded runtime archives in this tree.
 Supported platform aliases for this release:
 
 - `darwin_arm64` (also matches filenames containing `darwin-arm64` or `aarch64-apple-darwin`)
+- `darwin_x64` (also matches filenames containing `darwin-x64` or `x86_64-apple-darwin`)
+- `linux_x64` (also matches filenames containing `linux-x64` or `x86_64-unknown-linux-gnu`)
 - `win32_x64` (also matches filenames containing `win-x64` or `x86_64-pc-windows-msvc`)
+
+Bundled Git is included where a reviewed portable binary is available. macOS Intel and Linux x64 releases fall back to Git on `PATH` or the platform package manager when a bundled Git archive is not present.
 
 The runtime archive should extract to a folder containing:
 

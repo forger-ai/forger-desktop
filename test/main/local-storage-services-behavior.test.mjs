@@ -1136,6 +1136,85 @@ test('DesktopUpdater checks metadata, downloads to userData cache, validates che
   assert.ok(states.includes('downloading'));
 });
 
+test('DesktopUpdater accepts Linux x64 deb and AppImage update assets', async (t) => {
+  const root = await tmpRoot('desktop-updater-linux');
+  const originalFetch = globalThis.fetch;
+  const platformDescriptor = Object.getOwnPropertyDescriptor(process, 'platform');
+  const archDescriptor = Object.getOwnPropertyDescriptor(process, 'arch');
+  t.after(async () => {
+    globalThis.fetch = originalFetch;
+    Object.defineProperty(process, 'platform', platformDescriptor);
+    Object.defineProperty(process, 'arch', archDescriptor);
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  Object.defineProperty(process, 'platform', { configurable: true, value: 'linux' });
+  Object.defineProperty(process, 'arch', { configurable: true, value: 'x64' });
+
+  const installer = Buffer.from('appimage-bytes');
+  globalThis.fetch = async (url) => {
+    if (String(url).endsWith('/latest.json')) {
+      return Response.json({
+        schemaVersion: 1,
+        version: '9.9.9',
+        publishedAt: '2026-05-21T00:00:00Z',
+        assets: [{
+          platform: 'linux',
+          arch: 'x64',
+          kind: 'AppImage',
+          url: 'https://github.com/forger-ai/desktop/releases/download/v9.9.9/forger-desktop-linux-x64.AppImage',
+        }],
+      });
+    }
+    return new Response(installer, { status: 200 });
+  };
+
+  const updater = new DesktopUpdater({
+    currentVersion: '0.1.0',
+    metadataUrl: 'https://example.invalid/latest.json',
+    userDataPath: root,
+  });
+
+  const available = await updater.check();
+  const ready = await updater.download();
+
+  assert.equal(available.status, 'available');
+  assert.equal(available.asset.kind, 'AppImage');
+  assert.equal(ready.status, 'ready');
+  assert.equal(path.basename(ready.downloadedPath), 'forger-desktop-linux-x64.AppImage');
+
+  globalThis.fetch = async (url) => {
+    if (String(url).endsWith('/latest.json')) {
+      return Response.json({
+        schemaVersion: 1,
+        version: '10.0.0',
+        publishedAt: '2026-05-22T00:00:00Z',
+        assets: [{
+          platform: 'linux',
+          arch: 'x64',
+          kind: 'deb',
+          url: 'https://github.com/forger-ai/desktop/releases/download/v10.0.0/forger-desktop-linux-x64.deb',
+          experimental: true,
+        }],
+      });
+    }
+    return new Response(installer, { status: 200 });
+  };
+
+  const debUpdater = new DesktopUpdater({
+    currentVersion: '0.1.0',
+    metadataUrl: 'https://example.invalid/latest.json',
+    userDataPath: root,
+  });
+  const debAvailable = await debUpdater.check();
+  const debReady = await debUpdater.download();
+
+  assert.equal(debAvailable.status, 'available');
+  assert.equal(debAvailable.asset.kind, 'deb');
+  assert.equal(debAvailable.asset.experimental, true);
+  assert.equal(debReady.status, 'ready');
+  assert.equal(path.basename(debReady.downloadedPath), 'forger-desktop-linux-x64.deb');
+});
+
 test('DesktopUpdater reports up-to-date, unsupported, checksum, download, and install error states without network side effects', async (t) => {
   const root = await tmpRoot('desktop-updater-errors');
   const originalFetch = globalThis.fetch;

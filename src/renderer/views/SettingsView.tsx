@@ -962,7 +962,7 @@ export function SettingsView({
             <Typography variant="h6">{t.settings.openBetaTitle}</Typography>
             <Typography variant="body2" sx={{ opacity: 0.9 }}>{t.settings.openBetaDescription}</Typography>
           </Stack>
-          <Chip label="Open Beta" size="small" />
+          <Chip label={t.beta.appBadge} size="small" />
         </Stack>
       </CardContent>
     </Card>

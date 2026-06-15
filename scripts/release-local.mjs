@@ -12,8 +12,16 @@ const rootDir = path.resolve(__dirname, '..');
 const releaseDir = path.join(rootDir, 'release');
 
 const artifactNames = {
-  mac: 'forger-desktop-macos-arm64.dmg',
-  win: 'forger-desktop-windows-x64.exe',
+  mac: [
+    'forger-desktop-macos-arm64.dmg',
+    'forger-desktop-macos-x64.dmg',
+  ],
+  linux: [
+    'forger-desktop-linux-x64.deb',
+  ],
+  win: [
+    'forger-desktop-windows-x64.exe',
+  ],
 };
 
 const parseArgs = () => {
@@ -116,6 +124,10 @@ const getCurrentPlatform = () => {
     return 'win';
   }
 
+  if (process.platform === 'linux') {
+    return 'linux';
+  }
+
   throw new Error(`Unsupported local release platform: ${process.platform}`);
 };
 
@@ -125,10 +137,10 @@ const getPlatforms = (platform) => {
   }
 
   if (platform === 'all') {
-    return ['mac', 'win'];
+    return ['mac', 'linux', 'win'];
   }
 
-  if (platform === 'mac' || platform === 'win') {
+  if (platform === 'mac' || platform === 'linux' || platform === 'win') {
     return [platform];
   }
 
@@ -480,6 +492,11 @@ const buildPlatform = async (platform) => {
     return;
   }
 
+  if (platform === 'linux') {
+    await run('npm', ['run', 'dist:linux']);
+    return;
+  }
+
   throw new Error(`Unsupported platform: ${platform}`);
 };
 
@@ -542,21 +559,23 @@ const main = async () => {
     const uploadFiles = [];
 
     for (const platform of platforms) {
-      const artifactPath = path.join(releaseDir, artifactNames[platform]);
+      for (const artifactName of artifactNames[platform]) {
+        const artifactPath = path.join(releaseDir, artifactName);
 
-      if (!(await exists(artifactPath))) {
-        throw new Error(`Expected artifact does not exist: ${artifactPath}`);
-      }
-
-      if (platform === 'mac') {
-        await signMacDmg(artifactPath);
-        if (!options.skipNotarize) {
-          await notarizeMacArtifact(artifactPath, options.waitNotarize);
+        if (!(await exists(artifactPath))) {
+          throw new Error(`Expected artifact does not exist: ${artifactPath}`);
         }
-      }
 
-      const checksumPath = await writeChecksum(artifactPath);
-      uploadFiles.push(artifactPath, checksumPath);
+        if (platform === 'mac') {
+          await signMacDmg(artifactPath);
+          if (!options.skipNotarize) {
+            await notarizeMacArtifact(artifactPath, options.waitNotarize);
+          }
+        }
+
+        const checksumPath = await writeChecksum(artifactPath);
+        uploadFiles.push(artifactPath, checksumPath);
+      }
     }
 
     if (options.skipPublish) {

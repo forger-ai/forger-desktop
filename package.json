@@ -1,6 +1,6 @@
 {
   "name": "forger-desktop",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "private": true,
   "description": "Desktop launcher for Forger",
   "author": "Forger",
@@ -28,13 +28,15 @@
     "test:coverage:electron:strict": "npm run build:electron && c8 --check-coverage --lines=100 --statements=100 --functions=100 --reporter=text node --test --test-force-exit test/contracts/*.test.mjs test/main/*.test.mjs",
     "test:automation-approval": "npm run build:electron && node ./scripts/test-automation-approval-policy.mjs",
     "test:app-agent-runtime-contract": "npm run build:electron && node ./scripts/test-app-agent-runtime-contract.mjs",
-    "dist:mac": "npm run build && electron-builder --mac dmg --arm64 --publish never",
+    "dist:mac": "npm run build && electron-builder --mac dmg --arm64 --x64 --publish never",
     "release:ci:mac": "node ./scripts/release-local.mjs --platform=mac --wait-notarize --skip-publish",
     "dist:win": "npm run build && electron-builder --win nsis --x64 --publish never",
+    "dist:linux": "npm run build && electron-builder --linux deb --x64 --publish never",
     "release:local": "node ./scripts/release-local.mjs",
     "release:local:mac": "node ./scripts/release-local.mjs --platform=mac",
     "release:local:mac:wait": "node ./scripts/release-local.mjs --platform=mac --wait-notarize",
     "release:local:win": "node ./scripts/release-local.mjs --platform=win",
+    "release:local:linux": "node ./scripts/release-local.mjs --platform=linux",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -162,13 +164,14 @@
         {
           "target": "dmg",
           "arch": [
-            "arm64"
+            "arm64",
+            "x64"
           ]
         }
       ]
     },
     "dmg": {
-      "artifactName": "forger-desktop-macos-arm64.${ext}"
+      "artifactName": "forger-desktop-macos-${arch}.${ext}"
     },
     "win": {
       "icon": "build/icon.ico",
@@ -188,6 +191,21 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true
+    },
+    "linux": {
+      "category": "Utility",
+      "icon": "build/icon.png",
+      "target": [
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "deb": {
+      "artifactName": "forger-desktop-linux-x64.${ext}"
     }
   }
 }

@@ -128,7 +128,7 @@ const useCustomWindowFrame = process.platform === 'win32';
 const getWindowState = createWindowStateReader(useCustomWindowFrame);
 const registerWindowStateEvents = createWindowStateEventRegistrar(getWindowState);
 
-const RUNTIME_PLATFORM_ALIASES = new Set(['darwin_arm64', 'win32_x64']);
+const RUNTIME_PLATFORM_ALIASES = new Set(['darwin_arm64', 'darwin_x64', 'linux_x64', 'win32_x64']);
 
 let mainWindow: BrowserWindow | null = null;
 const remoteActivityStore = new RemoteActivityStore({ getMainWindow: () => mainWindow });
