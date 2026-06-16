@@ -7,10 +7,10 @@ This documents the local macOS release flow verified on 2026-05-08.
 The local macOS release uses `release-local.mjs` as the single signing and notarization path:
 
 ```sh
-cd /Users/felipepezoa/Projects/forger-workspace/desktop
+cd /path/to/forger-workspace/desktop
 
-CSC_LINK=/Users/felipepezoa/Forger/signing/forger-developer-id.p12 \
-CSC_KEY_PASSWORD="$(tr -d '\r\n' < /Users/felipepezoa/Forger/signing/forger-developer-id.p12.password)" \
+CSC_LINK=/path/to/signing/forger-developer-id.p12 \
+CSC_KEY_PASSWORD="$(tr -d '\r\n' < /path/to/signing/forger-developer-id.p12.password)" \
 npm run release:local:mac:wait -- --allow-dirty --tag=forger-desktop/vX.Y.Z
 ```
 

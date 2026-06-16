@@ -22,8 +22,8 @@ const createClient = (root, fetchImpl) => {
     desktopVersion: () => '0.1.test',
     reportingLogPath: () => join(root, 'reporting.log'),
     reportSanitizerRoots: () => [
-      { alias: 'FORGER_APPS/', path: '/Users/felipe/Forger/apps' },
-      { alias: 'FORGER_APPS/finance-os/', path: '/Users/felipe/Forger/apps/finance-os' },
+      { alias: 'FORGER_APPS/', path: '/Users/example-user/Forger/apps' },
+      { alias: 'FORGER_APPS/finance-os/', path: '/Users/example-user/Forger/apps/finance-os' },
     ],
   });
   return {
@@ -51,7 +51,7 @@ test('submitDesktopErrorReport uploads sanitized diagnostic files as multipart a
     const result = await harness.client.submitDesktopErrorReport({
       source: 'app',
       operation: 'open',
-      message: 'Failed at /Users/felipe/Desktop/random.pdf',
+      message: 'Failed at /Users/example-user/Desktop/random.pdf',
       technicalCode: 'open_failed',
       appId: 'finance-os',
       occurredAt: '2026-05-17T00:00:00.000Z',
@@ -68,7 +68,7 @@ test('submitDesktopErrorReport uploads sanitized diagnostic files as multipart a
       contentType: 'application/x-ndjson',
       originalByteSize: 120,
       sanitizedByteSize: 80,
-      text: '{"appId":"finance-os","text":"Bearer sk-private-token-value at /Users/felipe/Forger/apps/finance-os/app.py"}\n',
+      text: '{"appId":"finance-os","text":"Bearer sk-private-token-value at /Users/example-user/Forger/apps/finance-os/app.py"}\n',
     }]);
 
     assert.equal(result.success, true);

@@ -930,13 +930,13 @@ test('git command controller wraps Windows cmd shims with quoted paths', async (
       return child;
     },
   });
-  const npmCommand = 'C:\\Users\\Name With Space\\AppData\\Roaming\\forger-desktop\\runtimes\\node\\22\\win32_x64\\npm.cmd';
+  const npmCommand = 'C:\\Forger Test\\runtime root\\runtimes\\node\\22\\win32_x64\\npm.cmd';
   await withPlatform('win32', async () => {
     await controller.runCommand(
       npmCommand,
       ['install', '--no-audit', '--no-fund', '@anthropic-ai/claude-code@2.1.158'],
       {
-        cwd: 'C:\\Users\\Name With Space\\AppData\\Roaming\\forger-desktop\\claude-code-cli',
+        cwd: 'C:\\Forger Test\\runtime root\\claude-code-cli',
         log: { phase: 'claude_auth', label: 'install claude code cli' },
       },
     );
@@ -945,8 +945,9 @@ test('git command controller wraps Windows cmd shims with quoted paths', async (
   const spawnCall = calls.find((call) => call[0] === 'spawn');
   assert.equal(spawnCall[1].toLowerCase().endsWith('cmd.exe'), true);
   assert.deepEqual(spawnCall[2].slice(0, 3), ['/d', '/s', '/c']);
-  assert.match(spawnCall[2][3], /^"C:\\Users\\Name With Space\\AppData\\Roaming\\forger-desktop\\runtimes\\node\\22\\win32_x64\\npm\.cmd" "install"/);
-  assert.match(spawnCall[2][3], /"@anthropic-ai\/claude-code@2\.1\.158"$/);
+  assert.match(spawnCall[2][3], /^""C:\\Forger Test\\runtime root\\runtimes\\node\\22\\win32_x64\\npm\.cmd" "install"/);
+  assert.match(spawnCall[2][3], /"@anthropic-ai\/claude-code@2\.1\.158""$/);
+  assert.equal(spawnCall[2][3].includes('\\"'), false);
   assert.equal(spawnCall[4], false);
   assert.equal(calls.some((call) => call[0] === 'log' && call[1] === 'command:start' && call[2].shellStrategy === 'cmd-wrapper'), true);
 });

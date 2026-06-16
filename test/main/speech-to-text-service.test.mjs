@@ -332,7 +332,7 @@ test('SpeechToTextServiceManager returns reportable JSON when server rejects pro
           technicalCode: 'speech_decode_failed',
           userMessage: 'Speech to text failed.',
           reportable: true,
-          details: { sizeBytes: 123, path: '/Users/private/audio.wav' },
+          details: { sizeBytes: 123, path: '/Users/example-private/audio.wav' },
         }, { status: 500 });
       }
       return Response.json({});
