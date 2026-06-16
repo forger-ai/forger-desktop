@@ -1064,18 +1064,19 @@ test('app MCP manager starts one server per app, reuses listeners, releases it, 
         assert.deepEqual(findManifestMcp({ mcp: { command: 'python server.py' } }), { command: 'python server.py' });
 
         let failRuntime = false;
+        const manifest = {
+          mcp: {
+            command: 'python -m app.mcp',
+            healthcheck: 'ready',
+            environment: { PYTHONPATH: 'src' },
+            toolTimeoutSec: 42,
+          },
+        };
         const manager = new AppMcpManager({
           getInstalledApp: (appId) => appId === 'finance-os'
             ? { appId, installDir: path.join(roots.appsRoot, appId), requiredPythonVersion: '3.12' }
             : null,
-          resolveInstalledManifest: async () => ({
-            mcp: {
-              command: 'python -m app.mcp',
-              healthcheck: 'ready',
-              environment: { PYTHONPATH: 'src' },
-              toolTimeoutSec: 42,
-            },
-          }),
+          resolveInstalledManifest: async () => manifest,
           ensureRuntimeInstalled: async () => {
             if (failRuntime) {
               throw new Error('runtime unavailable');
@@ -1145,6 +1146,14 @@ test('app MCP manager starts one server per app, reuses listeners, releases it, 
           assert.equal(logs.some((entry) => entry.event === 'app_mcp:stop'), true);
           manager.releaseMcps('run-3');
           await waitFor(() => terminations.length === 2, 'mcp_restarted_termination');
+
+          manifest.mcp.command = 'uv run python -m app.mcp_server';
+          const uvConfig = await manager.listenMcps(['finance-os'], 'run-uv');
+          assert.equal(uvConfig.length, 1);
+          assert.equal(children.at(-1).command, path.join(roots.appsRoot, 'finance-os', 'backend', '.venv', 'bin', 'python'));
+          assert.deepEqual(children.at(-1).args, ['-m', 'uv', 'run', 'python', '-m', 'app.mcp_server']);
+          manager.releaseMcps('run-uv');
+          await waitFor(() => terminations.length === 3, 'mcp_uv_termination');
 
           failRuntime = true;
           assert.deepEqual(await manager.listenMcps(['finance-os'], 'run-fail'), []);
@@ -2292,6 +2301,25 @@ test('app MCP manager handles stale listeners, stop timers, shutdown reuse, and 
         assert.deepEqual(terminations, [children[0].child]);
         assert.equal(startFailures.length, 1);
         assert.equal(logs.some((entry) => entry.event === 'app_mcp:start_failed'), true);
+
+        manager.releaseMcps('run-health-fail');
+        logs.length = 0;
+        startFailures.length = 0;
+        terminations.length = 0;
+        let rejectHealth;
+        manager.options.waitForHttpOk = async () => await new Promise((_, reject) => {
+          rejectHealth = reject;
+        });
+        const spawnFailure = manager.listenMcps(['finance-os'], 'run-spawn-fail');
+        await waitFor(() => children.length === 2, 'spawn_failure_child');
+        const spawnError = Object.assign(new Error('spawn uv ENOENT'), { code: 'ENOENT' });
+        children[1].child.emit('error', spawnError);
+        assert.deepEqual(await spawnFailure, []);
+        assert.equal(startFailures.length, 1);
+        assert.equal(startFailures[0].error, spawnError);
+        assert.equal(logs.some((entry) => entry.event === 'app_mcp:start_failed' && entry.payload.error.message === 'spawn uv ENOENT'), true);
+        assert.deepEqual(terminations, []);
+        rejectHealth(new Error('should not leak'));
         manager.dispose();
       },
     );
