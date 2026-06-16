@@ -223,6 +223,20 @@ export class AppMcpManager {
         },
         stdio: 'pipe',
       });
+      let processStartErrorListener: ((error: Error) => void) | undefined;
+      const processStartError = new Promise<never>((_, reject) => {
+        processStartErrorListener = (error: Error) => {
+          if (this.states.get(record.appId) === state && state.process === child) {
+            state.process = undefined;
+            state.url = undefined;
+            state.token = undefined;
+            state.tokenEnvVar = undefined;
+            state.status = 'down';
+          }
+          reject(error);
+        };
+        child.once('error', processStartErrorListener);
+      });
       child.stdout.on('data', (chunk) => {
         void this.options.appendInstallLog('app_mcp:stdout', {
           appId: record.appId,
@@ -251,7 +265,16 @@ export class AppMcpManager {
       state.token = token;
       state.tokenEnvVar = config.tokenEnvVar;
       state.toolTimeoutSec = config.toolTimeoutSec;
-      await this.options.waitForHttpOk(config.healthUrl, 30_000);
+      try {
+        await Promise.race([
+          this.options.waitForHttpOk(config.healthUrl, 30_000),
+          processStartError,
+        ]);
+      } finally {
+        if (processStartErrorListener) {
+          child.off('error', processStartErrorListener);
+        }
+      }
       if (state.generation !== generation || state.listeners.size === 0) {
         await this.options.terminateProcess(child);
         state.status = 'down';
@@ -306,8 +329,12 @@ export class AppMcpManager {
       throw new Error('app_mcp_context_outside_app');
     }
     const commandToken = rawArgs[0];
-    const command = commandToken === 'python' || commandToken === 'python3' ? python : commandToken;
-    const args = rawArgs.slice(1);
+    const command = commandToken === 'python' || commandToken === 'python3' || commandToken === 'uv'
+      ? python
+      : commandToken;
+    const args = commandToken === 'uv'
+      ? ['-m', 'uv', ...rawArgs.slice(1)]
+      : rawArgs.slice(1);
     const healthcheck = normalizeHealthcheckPath(mcp.healthcheck);
     const url = `http://127.0.0.1:${port}/mcp`;
     const tokenEnvVar = safeMcpTokenEnvVar(record.appId);
