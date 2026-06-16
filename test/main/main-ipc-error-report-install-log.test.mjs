@@ -15,8 +15,8 @@ const makeOptions = (logPath) => ({
   arch: 'arm64',
   getInstallLogPath: () => logPath,
   roots: [
-    { alias: 'FORGER_HOME/', path: '/Users/felipe/Forger' },
-    { alias: 'FORGER_APPS/', path: '/Users/felipe/Forger/apps' },
+    { alias: 'FORGER_HOME/', path: '/Users/example-user/Forger' },
+    { alias: 'FORGER_APPS/', path: '/Users/example-user/Forger/apps' },
   ],
 });
 
@@ -31,7 +31,7 @@ test('app error report preparation attaches recent matching install log as a san
         timestamp: '2026-05-24T10:00:02.000Z',
         event: 'open:backend:stderr',
         appId: 'demo-app',
-        text: 'db failed at /Users/felipe/Desktop/private.csv OPENAI_API_KEY=secret-token-value',
+        text: 'db failed at /Users/example-user/Desktop/private.csv OPENAI_API_KEY=secret-token-value',
       }),
       JSON.stringify({ timestamp: '2026-05-24T10:00:03.000Z', event: 'open:failed', appId: 'demo-app', detail: 'open_failed' }),
       '',
@@ -68,11 +68,11 @@ test('app error report preparation promotes layered diagnostics into sanitized a
     technicalCode: 'agent_run_failed',
     occurredAt: '2026-05-24T10:00:04.000Z',
     sensitiveDetails: {
-      runtimeStatus: { backend: 'failed', path: '/Users/felipe/Forger/apps/demo-app/backend' },
+      runtimeStatus: { backend: 'failed', path: '/Users/example-user/Forger/apps/demo-app/backend' },
       agentRunLog: [
-        { type: 'stderr', text: 'failed at /Users/felipe/Desktop/private.csv', token: 'secret-token-value' },
+        { type: 'stderr', text: 'failed at /Users/example-user/Desktop/private.csv', token: 'secret-token-value' },
       ],
-      rendererStack: 'Error: boom\n    at /Users/felipe/Desktop/app.ts:1:1',
+      rendererStack: 'Error: boom\n    at /Users/example-user/Desktop/app.ts:1:1',
     },
   });
 

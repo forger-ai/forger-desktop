@@ -34,9 +34,9 @@ const createClient = (root, fetchImpl, token = undefined) => {
     desktopVersion: () => '0.1.test',
     reportingLogPath: () => join(root, 'reporting.log'),
     reportSanitizerRoots: () => [
-      { alias: 'FORGER_HOME/', path: '/Users/felipe/Forger' },
-      { alias: 'FORGER_APPS/', path: '/Users/felipe/Forger/apps' },
-      { alias: 'FORGER_DATA/', path: '/Users/felipe/Forger/data' },
+      { alias: 'FORGER_HOME/', path: '/Users/example-user/Forger' },
+      { alias: 'FORGER_APPS/', path: '/Users/example-user/Forger/apps' },
+      { alias: 'FORGER_DATA/', path: '/Users/example-user/Forger/data' },
     ],
   });
   return {
@@ -346,16 +346,16 @@ test('submitDesktopErrorReport sanitizes report payload before sending', async (
     const result = await harness.client.submitDesktopErrorReport({
       source: 'agent',
       operation: 'chat.start-run',
-      message: 'Failed at /Users/felipe/Desktop/random.pdf',
+      message: 'Failed at /Users/example-user/Desktop/random.pdf',
       technicalCode: 'chat_start_run_failed',
       occurredAt: '2026-05-17T00:00:00.000Z',
-      details: { path: '/Users/felipe/Forger/data/import.csv' },
-      sensitiveDetails: { stack: 'Bearer sk-private-token\nat /Users/felipe/Desktop/random.pdf' },
+      details: { path: '/Users/example-user/Forger/data/import.csv' },
+      sensitiveDetails: { stack: 'Bearer sk-private-token\nat /Users/example-user/Desktop/random.pdf' },
     });
 
     assert.equal(result.success, true);
     const text = JSON.stringify(requestBody);
-    assert.equal(text.includes('/Users/felipe/Desktop'), false);
+    assert.equal(text.includes('/Users/example-user/Desktop'), false);
     assert.equal(text.includes('sk-private-token'), false);
     assert.equal(requestBody.details.path, 'FORGER_DATA/import.csv');
   } finally {
@@ -386,8 +386,8 @@ test('submitConversationDiagnosticReport posts sanitized thread payload with aut
       platform: 'darwin',
       occurredAt: '2026-05-17T00:00:00.000Z',
       payload: {
-        rawRunLog: { text: 'Bearer sk-private-token at /Users/felipe/Desktop/random.pdf' },
-        conversation: { messages: [{ role: 'user', content: '/Users/felipe/Forger/apps/finance-os/file.py' }] },
+        rawRunLog: { text: 'Bearer sk-private-token at /Users/example-user/Desktop/random.pdf' },
+        conversation: { messages: [{ role: 'user', content: '/Users/example-user/Forger/apps/finance-os/file.py' }] },
       },
     });
 
@@ -397,7 +397,7 @@ test('submitConversationDiagnosticReport posts sanitized thread payload with aut
     const body = JSON.parse(requestInit.body);
     const text = JSON.stringify(body);
     assert.equal(body.description, 'Please inspect the provider session details.');
-    assert.equal(text.includes('/Users/felipe/Desktop'), false);
+    assert.equal(text.includes('/Users/example-user/Desktop'), false);
     assert.equal(text.includes('sk-private-token'), false);
     assert.equal(text.includes('FORGER_APPS/finance-os'), true);
   } finally {

@@ -36,7 +36,7 @@ test('conversation diagnostics include description and sanitized raw provider se
       path.join(sessionDir, 'rollout.jsonl'),
       [
         JSON.stringify({ type: 'thread.started', thread_id: 'thread-1', cwd: path.join(root, 'Forger', 'apps', 'finance-os') }),
-        JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'OPENAI_API_KEY=secret-token-value /Users/felipe/Desktop/private.csv' } }),
+        JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'OPENAI_API_KEY=secret-token-value /Users/example-user/Desktop/private.csv' } }),
       ].join('\n'),
       'utf8',
     );
@@ -84,11 +84,11 @@ test('conversation diagnostics include description and sanitized raw provider se
     assert.deepEqual(report.payload.providerSession.transcript.matched, ['thread-1']);
     assert.equal(report.payload.providerSession.transcript.text, undefined);
     assert.equal(text.includes('secret-token-value'), false);
-    assert.equal(text.includes('/Users/felipe/Desktop'), false);
+    assert.equal(text.includes('/Users/example-user/Desktop'), false);
     assert.equal(attachments.length, 1);
     assert.equal(attachments[0].kind, 'codex_session_jsonl');
     assert.equal(attachments[0].text.includes('secret-token-value'), false);
-    assert.equal(attachments[0].text.includes('/Users/felipe/Desktop'), false);
+    assert.equal(attachments[0].text.includes('/Users/example-user/Desktop'), false);
     assert.equal(attachments[0].text.includes('FORGER_APPS/finance-os'), true);
   } finally {
     await rm(root, { recursive: true, force: true });

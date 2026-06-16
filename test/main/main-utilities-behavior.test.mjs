@@ -676,7 +676,7 @@ test('main utility reports runtime errors, catalog statuses, account switches, a
 
   const runtimeError = controller.runtimeError('No runtime', 'missing_runtime', 'installing');
   const diagnostic = controller.failureDiagnostic(new Error('bad'), 'fallback');
-  const flattenError = new Error("EPERM: operation not permitted, rename 'C:\\Users\\fight\\Forger\\apps\\finance-os\\finance-os\\frontend' -> 'C:\\Users\\fight\\Forger\\apps\\finance-os\\frontend'");
+  const flattenError = new Error("EPERM: operation not permitted, rename 'C:\\Users\\ExampleUser\\Forger\\apps\\finance-os\\finance-os\\frontend' -> 'C:\\Users\\ExampleUser\\Forger\\apps\\finance-os\\frontend'");
   flattenError.stack = `${flattenError.name}: ${flattenError.message}\n    at moveFlattenChild (runtime-install.js:1:1)\n    at flattenSingleTopLevelDirectory (runtime-install.js:2:1)`;
   const flattenDiagnostic = buildFailureDiagnostic({ error: flattenError, fallbackCode: 'install_failed_unknown' });
   const trace = controller.buildChatRunIpcTracePayload({

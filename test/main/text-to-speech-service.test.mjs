@@ -145,7 +145,7 @@ test('TextToSpeechServiceManager returns reportable JSON when synthesize server 
           technicalCode: 'kokoro_pipeline_load_failed',
           userMessage: 'Text to speech failed.',
           reportable: true,
-          details: { model: 'kokoro', voice: 'af_heart', textLength: 5, audioPath: '/Users/private/nope.wav' },
+          details: { model: 'kokoro', voice: 'af_heart', textLength: 5, audioPath: '/Users/example-private/nope.wav' },
         }, { status: 500 });
       }
       return Response.json({});

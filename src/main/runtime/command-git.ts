@@ -102,7 +102,7 @@ const quoteWindowsShellValue = (value: string): string =>
   `"${value.replace(/(["^&|<>%])/g, '^$1')}"`;
 
 const buildWindowsShellCommand = (command: string, args: string[]): { command: string; args: string[]; shell: boolean; shellStrategy: string } => {
-  const shellCommand = [quoteWindowsShellValue(command), ...args.map(quoteWindowsShellValue)].join(' ');
+  const shellCommand = `"${[quoteWindowsShellValue(command), ...args.map(quoteWindowsShellValue)].join(' ')}"`;
   return {
     command: process.env.ComSpec || 'cmd.exe',
     args: ['/d', '/s', '/c', shellCommand],
