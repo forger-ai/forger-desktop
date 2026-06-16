@@ -67,6 +67,7 @@ test('preload forwards representative commands to the expected IPC channels with
   await api.dbQueryTable('finance-os', 'transactions', 25);
   await api.automationsGetRunTranscript('run-99');
   await api.backgroundTaskGet('task-99');
+  await api.updateSocialAppVisibility(42, 'friends');
   await api.toggleMaximizeWindow();
 
   assert.deepEqual(invokeCalls, [
@@ -81,6 +82,7 @@ test('preload forwards representative commands to the expected IPC channels with
     ['forger:db:query-table', 'finance-os', 'transactions', 25],
     ['forger:automations:get-run-transcript', 'run-99'],
     ['forger:background-tasks:get', 'task-99'],
+    ['forger:social:apps:update-visibility', 42, 'friends'],
     ['forger:window:toggle-maximize'],
   ]);
 });

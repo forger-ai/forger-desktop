@@ -9,6 +9,7 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const { IPC_CHANNELS } = require('../../dist-electron/shared/ipc.js');
+const { buildFailureDiagnostic } = require('../../dist-electron/shared/error-diagnostics.js');
 const { AGENT_TOOL_DEFINITIONS, AGENT_TOOL_IDS } = require('../../dist-electron/main/core/agent-tool-packages.js');
 const { createMainUtilitiesController, __testMainUtilitiesInternals } = require('../../dist-electron/main/core/main-utilities.js');
 
@@ -675,6 +676,9 @@ test('main utility reports runtime errors, catalog statuses, account switches, a
 
   const runtimeError = controller.runtimeError('No runtime', 'missing_runtime', 'installing');
   const diagnostic = controller.failureDiagnostic(new Error('bad'), 'fallback');
+  const flattenError = new Error("EPERM: operation not permitted, rename 'C:\\Users\\fight\\Forger\\apps\\finance-os\\finance-os\\frontend' -> 'C:\\Users\\fight\\Forger\\apps\\finance-os\\frontend'");
+  flattenError.stack = `${flattenError.name}: ${flattenError.message}\n    at moveFlattenChild (runtime-install.js:1:1)\n    at flattenSingleTopLevelDirectory (runtime-install.js:2:1)`;
+  const flattenDiagnostic = buildFailureDiagnostic({ error: flattenError, fallbackCode: 'install_failed_unknown' });
   const trace = controller.buildChatRunIpcTracePayload({
     runId: 'run-1',
     appId: 'demo-app',
@@ -709,6 +713,12 @@ test('main utility reports runtime errors, catalog statuses, account switches, a
 
   assert.equal(runtimeError.progress, 80);
   assert.equal(diagnostic.technicalCode, 'bad');
+  assert.equal(flattenDiagnostic.technicalCode, 'install_extract_flatten_failed');
+  assert.equal(flattenDiagnostic.details.classifier, 'install_extract_flatten_failed');
+  assert.equal(flattenDiagnostic.details.operation, 'flatten');
+  assert.equal(flattenDiagnostic.details.errorCode, 'EPERM');
+  assert.equal(flattenDiagnostic.details.sourceName, 'frontend');
+  assert.equal(flattenDiagnostic.details.targetName, 'frontend');
   assert.deepEqual(trace, {
     runId: 'run-1',
     appId: 'demo-app',

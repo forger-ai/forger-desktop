@@ -919,6 +919,38 @@ test('git command controller captures stdout/stderr, logs command lifecycle, and
   assert.equal(calls.some((call) => call[0] === 'log' && call[1] === 'command:exit' && call[2].code === 7), true);
 });
 
+test('git command controller wraps Windows cmd shims with quoted paths', async () => {
+  const calls = [];
+  const { controller } = makeCommandGitHarness({
+    appendInstallLog: async (event, payload = {}) => calls.push(['log', event, payload]),
+    spawn: (command, args, options) => {
+      calls.push(['spawn', command, args, options.cwd, options.shell]);
+      const child = new FakeChildProcess();
+      queueMicrotask(() => child.emit('exit', 0, null));
+      return child;
+    },
+  });
+  const npmCommand = 'C:\\Users\\Name With Space\\AppData\\Roaming\\forger-desktop\\runtimes\\node\\22\\win32_x64\\npm.cmd';
+  await withPlatform('win32', async () => {
+    await controller.runCommand(
+      npmCommand,
+      ['install', '--no-audit', '--no-fund', '@anthropic-ai/claude-code@2.1.158'],
+      {
+        cwd: 'C:\\Users\\Name With Space\\AppData\\Roaming\\forger-desktop\\claude-code-cli',
+        log: { phase: 'claude_auth', label: 'install claude code cli' },
+      },
+    );
+  });
+
+  const spawnCall = calls.find((call) => call[0] === 'spawn');
+  assert.equal(spawnCall[1].toLowerCase().endsWith('cmd.exe'), true);
+  assert.deepEqual(spawnCall[2].slice(0, 3), ['/d', '/s', '/c']);
+  assert.match(spawnCall[2][3], /^"C:\\Users\\Name With Space\\AppData\\Roaming\\forger-desktop\\runtimes\\node\\22\\win32_x64\\npm\.cmd" "install"/);
+  assert.match(spawnCall[2][3], /"@anthropic-ai\/claude-code@2\.1\.158"$/);
+  assert.equal(spawnCall[4], false);
+  assert.equal(calls.some((call) => call[0] === 'log' && call[1] === 'command:start' && call[2].shellStrategy === 'cmd-wrapper'), true);
+});
+
 test('git command controller handles spawn errors, captures timeouts, and selects archive commands', async (t) => {
   const root = await tmpRoot('command-git-command-edges');
   t.after(async () => {
@@ -2028,6 +2060,77 @@ test('runtime install returns ready runtimes without extracting and normalizes n
   assert.ok(npmInstall);
   assert.deepEqual(npmInstall[2], ['install', '--package-lock=false']);
   assert.equal(npmInstall[2].some((arg) => arg.includes('production') || arg.includes('omit')), false);
+});
+
+test('runtime flatten replaces stale children, retries blocked renames, and falls back to copy', async (t) => {
+  const root = await tmpRoot('runtime-flatten-robust');
+  const target = path.join(root, 'target');
+  const top = path.join(target, 'finance-os');
+  const calls = [];
+  const renameAttempts = new Map();
+  t.after(async () => {
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  await fs.mkdir(path.join(top, 'backend'), { recursive: true });
+  await fs.mkdir(path.join(top, 'frontend'), { recursive: true });
+  await fs.mkdir(path.join(target, 'backend'), { recursive: true });
+  await fs.writeFile(path.join(top, 'backend', 'server.py'), 'new-backend', 'utf8');
+  await fs.writeFile(path.join(top, 'frontend', 'package.json'), 'new-frontend', 'utf8');
+  await fs.writeFile(path.join(target, 'backend', 'stale.py'), 'stale', 'utf8');
+
+  const fsWithBlockedRename = {
+    ...fs,
+    rename: async (source, destination) => {
+      const name = path.basename(source);
+      const attempts = renameAttempts.get(name) ?? 0;
+      renameAttempts.set(name, attempts + 1);
+      if (name === 'backend' && attempts === 0) {
+        const error = new Error('EPERM: operation not permitted, rename');
+        error.code = 'EPERM';
+        throw error;
+      }
+      if (name === 'frontend') {
+        const error = new Error('EPERM: operation not permitted, rename');
+        error.code = 'EPERM';
+        throw error;
+      }
+      await fs.rename(source, destination);
+    },
+  };
+
+  const controller = createRuntimeInstallController({
+    DEFAULT_NODE_VERSION: '22.1.0',
+    DEFAULT_PYTHON_VERSION: '3.12.0',
+    appendInstallLog: async (event, payload = {}) => calls.push(['log', event, payload]),
+    app: { getPath: () => root, getVersion: () => '0.2.35' },
+    clearMacQuarantine: async () => undefined,
+    extractArchive: async () => undefined,
+    findRuntimeArchive: async () => null,
+    findRuntimeChecksumFile: async () => null,
+    fs: fsWithBlockedRename,
+    getBundledResourcesRoot: () => path.join(root, 'resources'),
+    getRuntimesRoot: () => path.join(root, 'runtimes'),
+    getTempRoot: () => path.join(root, 'tmp'),
+    hashFileSha256: async () => 'sha',
+    installBackendDependenciesWithUv: async () => undefined,
+    normalizeNodeRuntimeVersion: (value) => value,
+    normalizeVersionForFolder: (value) => value,
+    path,
+    resolvePlatformAlias: () => 'darwin_arm64',
+    runCommand: async () => undefined,
+    runtimeLocks: new Map(),
+  });
+
+  await controller.flattenSingleTopLevelDirectory(target);
+
+  assert.equal(await fs.readFile(path.join(target, 'backend', 'server.py'), 'utf8'), 'new-backend');
+  assert.equal(await fs.stat(path.join(target, 'backend', 'stale.py')).catch(() => null), null);
+  assert.equal(await fs.readFile(path.join(target, 'frontend', 'package.json'), 'utf8'), 'new-frontend');
+  assert.equal(await fs.stat(top).catch(() => null), null);
+  assert.equal(renameAttempts.get('backend'), 2);
+  assert.equal(renameAttempts.get('frontend'), 3);
+  assert.ok(calls.some((call) => call[1] === 'flatten:move_retry' && call[2].sourceName === 'backend'));
+  assert.ok(calls.some((call) => call[1] === 'flatten:move_fallback' && call[2].sourceName === 'frontend'));
 });
 
 test('runtime install refreshes legacy Python runtimes on macOS', async (t) => {

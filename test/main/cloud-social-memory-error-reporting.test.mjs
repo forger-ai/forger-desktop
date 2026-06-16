@@ -798,6 +798,22 @@ test('DesktopErrorReporter filters expected errors, dedupes repeated failures, a
       progressLog: [],
     },
   });
+  reporter.reportAppCodexTaskEvent({
+    task: {
+      appId: 'finance-os',
+      runId: 'run-3',
+      templateId: 'generate',
+      status: 'failed',
+      error: 'El texto enviado es demasiado largo para esta tarea (60001/60000 caracteres).',
+      errorDetails: {
+        technicalCode: 'app_prompt_string_too_long',
+        argumentName: 'idea',
+        maxLength: 60000,
+        actualLength: 60001,
+      },
+      progressLog: [],
+    },
+  });
 	  reporter.reportMainUnhandledRejection('boom');
 	  reporter.request({
 	    source: 'desktop',
@@ -805,16 +821,20 @@ test('DesktopErrorReporter filters expected errors, dedupes repeated failures, a
 	    message: 'Manual report without a technical code',
 	  });
 
-	  assert.equal(sent.length, 3);
+	  assert.equal(sent.length, 4);
 	  assert.equal(sent[0].channel, 'forger:error-report:requested');
 	  assert.equal(sent[0].payload.desktopVersion, '0.2.test');
 	  assert.equal(sent[0].payload.platform, 'darwin');
 	  assert.equal(sent[0].payload.appVersion, '1.2.3');
 	  assert.deepEqual(sent[0].payload.details.progressLog, ['step-2', 'step-3', 'step-4', 'step-5', 'step-6', 'step-7', 'step-8', 'step-9', 'step-10', 'step-11']);
-	  assert.equal(sent[1].payload.technicalCode, 'main_unhandled_rejection');
-	  assert.equal(sent[1].payload.sensitiveDetails.reason, 'boom');
-	  assert.equal(sent[2].payload.operation, 'manual-report');
-	  assert.equal(sent[2].payload.technicalCode, undefined);
+	  assert.equal(sent[1].payload.technicalCode, 'app_prompt_string_too_long');
+	  assert.equal(sent[1].payload.details.argumentName, 'idea');
+	  assert.equal(sent[1].payload.details.maxLength, 60000);
+	  assert.equal(sent[1].payload.details.actualLength, 60001);
+	  assert.equal(sent[2].payload.technicalCode, 'main_unhandled_rejection');
+	  assert.equal(sent[2].payload.sensitiveDetails.reason, 'boom');
+	  assert.equal(sent[3].payload.operation, 'manual-report');
+	  assert.equal(sent[3].payload.technicalCode, undefined);
 	});
 
 test('DesktopErrorReporter covers crash, MCP, automation, conversation, and window suppression paths', async (t) => {

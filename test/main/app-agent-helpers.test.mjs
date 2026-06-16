@@ -51,6 +51,7 @@ const {
   normalizeFileArgumentValue,
   normalizeStringArgument,
   normalizeTaskLocale,
+  AppPromptStringTooLongError,
   progressFromCodexOutput: progressFromTaskOutput,
   renderPrompt,
   sanitizeFilename,
@@ -365,7 +366,15 @@ test('task helpers validate arguments, render prompts, and parse progress states
   assert.equal(uniqueFilename('file.csv', used), 'file.csv');
   assert.equal(uniqueFilename('file.csv', used), 'file-2.csv');
   assert.equal(normalizeStringArgument({ name: 'amount', type: 'string', maxLength: 4 }, 123), '123');
-  assert.throws(() => normalizeStringArgument({ name: 'amount', type: 'string', maxLength: 2 }, '123'), /app_prompt_string_too_long:amount/);
+  assert.throws(
+    () => normalizeStringArgument({ name: 'amount', type: 'string', maxLength: 2 }, '123'),
+    (error) => error instanceof AppPromptStringTooLongError
+      && error.technicalCode === 'app_prompt_string_too_long'
+      && error.argumentName === 'amount'
+      && error.maxLength === 2
+      && error.actualLength === 3
+      && /demasiado largo/.test(error.userMessage),
+  );
   assert.deepEqual(normalizeFileArgumentValue({ name: 'doc', type: 'file', multiple: true }, [
     { type: 'file', dataBase64: Buffer.from('a').toString('base64'), name: 'a.txt' },
   ]), [

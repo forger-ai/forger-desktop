@@ -370,6 +370,8 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     pendingInstallGate,
     cloudModalOpen,
     handleForgerUsernameUpdate,
+    handleForgerProfileUpdate,
+    uploadSocialApp,
     codexConfigOpen,
     claudeConfigOpen,
     agentProviderConfigOpen,
@@ -941,16 +943,25 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
           <SocialView
             account={forgerAccount}
             accountBusy={forgerAccountBusy}
+            installedApps={installedApps}
             initialProfileUsername={socialProfileUsername}
             onInitialProfileUsernameConsumed={() => setSocialProfileUsername(null)}
             onOpenFriendChat={(friendship) => handleOpenFriendChat(friendship)}
             onOpenCloudModal={() => setCloudModalOpen(true)}
             onOpenSocialApp={handleOpenSocialApp}
+            onUploadSocial={(appId, visibility) => {
+              if (visibility) {
+                void uploadSocialApp(appId, visibility);
+              } else {
+                void handleUploadSocial(appId);
+              }
+            }}
             onNotify={(message, severity = 'info') => {
               setBannerSeverity(severity);
               setBannerMessage(message);
             }}
             onUpdateUsername={handleForgerUsernameUpdate}
+            onUpdateProfile={handleForgerProfileUpdate}
           />
         ) : null}
 

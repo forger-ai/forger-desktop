@@ -8,6 +8,7 @@ import type { RuntimeBinarySet } from '../core/main-process-types';
 interface RuntimeInstallDeps {
   DEFAULT_NODE_VERSION: string;
   DEFAULT_PYTHON_VERSION: string;
+  appendInstallLog?: (event: string, payload?: Record<string, unknown>) => Promise<void>;
   app: Electron.App;
   clearMacQuarantine: (targetPath: string) => Promise<void>;
   extractArchive: (archivePath: string, destination: string) => Promise<void>;
@@ -33,8 +34,10 @@ interface RuntimeInstallDeps {
 
 export const createRuntimeInstallController = (deps: RuntimeInstallDeps) => {
   const { fs, path, runtimeLocks, getBundledResourcesRoot, getTempRoot, getRuntimesRoot, resolvePlatformAlias, normalizeVersionForFolder, normalizeNodeRuntimeVersion, findRuntimeArchive, findRuntimeChecksumFile, hashFileSha256, extractArchive, clearMacQuarantine, runCommand, installBackendDependenciesWithUv } = deps;
+const appendFlattenLog = deps.appendInstallLog ?? (async () => undefined);
 const RUNTIME_PLATFORM_ALIASES = new Set(['darwin_arm64', 'darwin_x64', 'linux_x64', 'win32_x64']);
 const PYTHON_DARWIN_RUNTIME_REVISION = 'python-darwin-disable-library-validation-2026-06-02';
+const FLATTEN_RETRY_DELAYS_MS = [25, 100];
 
 interface RuntimeReadyMetadata {
   installedAt: string;
@@ -46,6 +49,56 @@ interface RuntimeReadyMetadata {
 const fileExists = async (filePath: string): Promise<boolean> => {
   const stat = await fs.stat(filePath).catch(() => null);
   return Boolean(stat?.isFile());
+};
+
+const wait = async (ms: number): Promise<void> => {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+};
+
+const errorCode = (error: unknown): string | undefined =>
+  error && typeof error === 'object' && typeof (error as { code?: unknown }).code === 'string'
+    ? (error as { code: string }).code
+    : undefined;
+
+const shouldRetryFlattenMove = (error: unknown): boolean =>
+  ['EPERM', 'EACCES', 'ENOTEMPTY'].includes(errorCode(error) ?? '');
+
+const flattenLogPayload = (
+  source: string,
+  target: string,
+  extra: Record<string, unknown> = {},
+): Record<string, unknown> => ({
+  operation: 'flatten',
+  sourceName: path.basename(source),
+  targetName: path.basename(target),
+  ...extra,
+});
+
+const moveFlattenChild = async (source: string, target: string): Promise<void> => {
+  await fs.rm(target, { recursive: true, force: true });
+
+  for (const delayMs of [0, ...FLATTEN_RETRY_DELAYS_MS]) {
+    if (delayMs > 0) {
+      await wait(delayMs);
+      await appendFlattenLog('flatten:move_retry', flattenLogPayload(source, target, { delayMs }));
+    }
+
+    try {
+      await fs.rename(source, target);
+      return;
+    } catch (error) {
+      if (!shouldRetryFlattenMove(error)) {
+        throw error;
+      }
+      if (delayMs === FLATTEN_RETRY_DELAYS_MS[FLATTEN_RETRY_DELAYS_MS.length - 1]) {
+        await appendFlattenLog('flatten:move_fallback', flattenLogPayload(source, target, { errorCode: errorCode(error) }));
+        await fs.rm(target, { recursive: true, force: true });
+        await fs.cp(source, target, { recursive: true });
+        await fs.rm(source, { recursive: true, force: true });
+        return;
+      }
+    }
+  }
 };
 
 const desktopVersion = (): string => {
@@ -157,17 +210,35 @@ const installAppDependencies = async (
 const flattenSingleTopLevelDirectory = async (targetDir: string): Promise<void> => {
   const entries = await fs.readdir(targetDir, { withFileTypes: true });
   const visibleEntries = entries.filter((entry) => !entry.name.startsWith('.'));
+  const visibleDirectories = visibleEntries.filter((entry) => entry.isDirectory());
 
-  if (visibleEntries.length !== 1 || !visibleEntries[0].isDirectory()) {
+  let topEntry: (typeof visibleDirectories)[number] | undefined;
+  let children: string[] = [];
+
+  for (const candidate of visibleDirectories) {
+    const candidateFolder = path.join(targetDir, candidate.name);
+    const candidateChildren = await fs.readdir(candidateFolder);
+    const candidateChildNames = new Set(candidateChildren);
+    const siblingEntries = visibleEntries.filter((entry) => entry.name !== candidate.name);
+    if (siblingEntries.every((entry) => candidateChildNames.has(entry.name))) {
+      topEntry = candidate;
+      children = candidateChildren;
+      break;
+    }
+  }
+
+  if (!topEntry) {
     return;
   }
 
-  const topFolder = path.join(targetDir, visibleEntries[0].name);
-  const children = await fs.readdir(topFolder);
+  const topFolder = path.join(targetDir, topEntry.name);
+
+  await appendFlattenLog('flatten:start', { operation: 'flatten', sourceName: topEntry.name, childCount: children.length });
   for (const child of children) {
-    await fs.rename(path.join(topFolder, child), path.join(targetDir, child));
+    await moveFlattenChild(path.join(topFolder, child), path.join(targetDir, child));
   }
   await fs.rm(topFolder, { recursive: true, force: true });
+  await appendFlattenLog('flatten:success', { operation: 'flatten', sourceName: topEntry.name, childCount: children.length });
 };
 
 const findExistingFile = async (baseDir: string, candidates: string[]): Promise<string | null> => {

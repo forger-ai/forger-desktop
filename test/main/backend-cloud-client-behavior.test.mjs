@@ -256,6 +256,7 @@ test('account payload parsing requires both a user and an available token', () =
       id: 3,
       email: 'person@example.com',
       username: 'person',
+      display_name: 'Person Public',
       confirmed: true,
       subscription_tier: 'free',
     },
@@ -267,6 +268,7 @@ test('account payload parsing requires both a user and an available token', () =
       id: 3,
       email: 'person@example.com',
       username: 'person',
+      display_name: 'Person Public',
       confirmed: true,
       subscription_tier: 'free',
     },
@@ -275,6 +277,7 @@ test('account payload parsing requires both a user and an available token', () =
   assert.equal(parsed.confirmationRequired, true);
   assert.equal(parsed.token, 'new-token');
   assert.equal(parsed.user.username, 'person');
+  assert.equal(parsed.user.displayName, 'Person Public');
 });
 
 test('remote backup helpers reject malformed summaries and clamp invalid usage numbers', () => {
@@ -1742,7 +1745,7 @@ test('cloud social client methods encode requests and normalize response payload
 
   try {
     const users = await harness.client.searchFriends('friend name');
-    assert.deepEqual(users, [{ id: 4, username: 'friend', firstName: undefined, lastName: undefined, online: undefined, devices: [] }]);
+    assert.deepEqual(users, [{ id: 4, username: 'friend', displayName: 'Friend', firstName: undefined, lastName: undefined, online: undefined, devices: [] }]);
 
     const friendship = await harness.client.sendFriendRequest('friend');
     assert.equal(friendship.id, 7);

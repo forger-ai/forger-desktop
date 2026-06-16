@@ -66,7 +66,7 @@ test('backend helper default reporting path covers macOS app support storage', a
   assert.match(logPath, /Library\/Application Support\/forger-desktop\/logs\/reporting\.log$/);
 });
 
-test('updateAccountProfile sends username with the current Forger token and parses the account payload', async () => {
+test('updateAccountProfile sends username and display name with the current Forger token and parses the account payload', async () => {
   const root = await mkdtemp(join(tmpdir(), 'forger-profile-test-'));
   let requestUrl;
   let requestInit;
@@ -79,6 +79,7 @@ test('updateAccountProfile sends username with the current Forger token and pars
         id: 7,
         email: 'felipe@example.com',
         username: 'felipe_cloud',
+        display_name: 'Felipe Cloud',
         confirmed: true,
         subscription_tier: 'free',
         username_changed_at: '2026-05-18T12:00:00Z',
@@ -88,16 +89,51 @@ test('updateAccountProfile sends username with the current Forger token and pars
   }, 'session-token');
 
   try {
-    const result = await harness.client.updateAccountProfile({ username: 'felipe_cloud' });
+    const result = await harness.client.updateAccountProfile({ username: 'felipe_cloud', displayName: 'Felipe Cloud' });
 
     assert.equal(requestUrl, 'https://platform.test/api/v1/me/profile');
     assert.equal(requestInit.method, 'PATCH');
     assert.equal(requestInit.headers.Authorization, 'Bearer session-token');
     assert.equal(JSON.parse(requestInit.body).username, 'felipe_cloud');
+    assert.equal(JSON.parse(requestInit.body).display_name, 'Felipe Cloud');
     assert.equal(result.success, true);
     assert.equal(result.user.username, 'felipe_cloud');
+    assert.equal(result.user.displayName, 'Felipe Cloud');
     assert.equal(result.user.usernameChangedAt, '2026-05-18T12:00:00Z');
     assert.equal(result.user.usernameChangeAvailableAt, '2026-06-17T12:00:00Z');
+  } finally {
+    harness.restore();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('updateSocialAppVisibility patches owned user app visibility and normalizes the app payload', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'forger-social-visibility-test-'));
+  let requestUrl;
+  let requestInit;
+  const harness = createClient(root, async (url, init) => {
+    requestUrl = url;
+    requestInit = init;
+    return jsonResponse(200, {
+      id: 42,
+      slug: 'focus-flow',
+      name: 'Focus Flow',
+      visibility: 'friends',
+      status: 'published',
+      owner: { id: 7, username: 'felipe_cloud', display_name: 'Felipe Cloud' },
+    });
+  }, 'session-token');
+
+  try {
+    const result = await harness.client.updateSocialAppVisibility(42, 'friends');
+
+    assert.equal(requestUrl, 'https://platform.test/api/v1/me/user_apps/42');
+    assert.equal(requestInit.method, 'PATCH');
+    assert.equal(requestInit.headers.Authorization, 'Bearer session-token');
+    assert.equal(JSON.parse(requestInit.body).visibility, 'friends');
+    assert.equal(result.id, 42);
+    assert.equal(result.visibility, 'friends');
+    assert.equal(result.owner.displayName, 'Felipe Cloud');
   } finally {
     harness.restore();
     await rm(root, { recursive: true, force: true });

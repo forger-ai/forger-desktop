@@ -134,7 +134,7 @@ Use this shape as the current authoring contract. Remove fields that do not appl
           "name": "notes",
           "type": "string",
           "required": false,
-          "maxLength": 2000
+          "maxLength": 60000
         }
       ],
       "prompt": "Review the provided sourceFile and use notes when provided.",
@@ -220,6 +220,7 @@ Use this shape as the current authoring contract. Remove fields that do not appl
 
 ## Authoring Rules
 - `promptTemplates` are one-shot tasks. Use them for bounded, form-backed work. Use `id`, `title`, `description`, `arguments`, and `prompt`; do not use legacy `name` or `inputs`.
+- Use `maxLength: 60000` for freeform text arguments such as `idea`, `description`, `instructions`, or long user notes. Keep small limits only for intentionally short fields such as titles, IDs, labels, dates, or category names.
 - `agents` are resumable conversational coworkers. Prefer `prompts.initial.body`, with optional `prompts.resume.body` and `prompts.steer.body`; do not use legacy `name` or top-level `prompt`.
 - Prompt variables for agents live under each prompt as `variables`; variable types are `text`, `string`, `json`, or `path`.
 - In real manifest prompt bodies, refer to declared variables with the app prompt syntax expected by that surface. This skill template avoids literal double-brace examples because Desktop renders this file as a strict Markdown template.

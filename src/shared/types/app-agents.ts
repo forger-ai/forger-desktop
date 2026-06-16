@@ -53,6 +53,12 @@ export interface AppCodexTaskSummary {
   updatedAt: string;
   resultText?: string;
   error?: string;
+  errorDetails?: {
+    technicalCode?: string;
+    argumentName?: string;
+    maxLength?: number;
+    actualLength?: number;
+  };
   progressLog?: string[];
   permissionRequest?: PermissionRequest;
 }

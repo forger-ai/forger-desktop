@@ -150,6 +150,7 @@ export const normalizeCloudUser = (value: unknown): CloudFriendUser | undefined 
   return {
     id,
     username,
+    displayName: typeof record.display_name === 'string' ? record.display_name : undefined,
     firstName: typeof record.first_name === 'string' ? record.first_name : undefined,
     lastName: typeof record.last_name === 'string' ? record.last_name : undefined,
     online: typeof record.online === 'boolean' ? record.online : undefined,

@@ -4,6 +4,7 @@ export interface ForgerAccountUser {
   id: number;
   email: string;
   username?: string;
+  displayName?: string;
   firstName?: string;
   lastName?: string;
   confirmed: boolean;
@@ -39,7 +40,8 @@ export interface ForgerAccountLoginInput {
 }
 
 export interface ForgerAccountProfileInput {
-  username: string;
+  username?: string;
+  displayName?: string;
 }
 
 export interface CloudDeviceAppSummary {

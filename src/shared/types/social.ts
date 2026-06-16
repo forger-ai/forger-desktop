@@ -5,6 +5,7 @@ export type FriendshipStatus = 'pending' | 'accepted' | 'declined' | 'canceled';
 export interface CloudFriendUser {
   id: number;
   username: string;
+  displayName?: string;
   firstName?: string;
   lastName?: string;
   online?: boolean;
@@ -192,6 +193,7 @@ export type ForumContentStatus = 'visible' | 'hidden' | 'deleted';
 export interface ForumUserProfile {
   id: number;
   username: string;
+  displayName?: string;
   firstName?: string;
   lastInitial?: string;
 }
@@ -226,6 +228,7 @@ export interface ForumPost extends ForumContentBase {
 export interface SocialUserProfile {
   id: number;
   username: string;
+  displayName?: string;
   firstName?: string;
   lastInitial?: string;
   socialBio?: string;
@@ -308,6 +311,15 @@ export interface SocialUserAppList {
     storage?: CloudStorageUsage;
   };
   apps: SocialUserApp[];
+}
+
+export interface SocialUserAppUpdateInput {
+  id: number;
+  visibility?: Exclude<SocialUserAppVisibility, 'restricted'>;
+  name?: string;
+  shortDescription?: string;
+  description?: string;
+  category?: string;
 }
 
 export interface SocialUserAppShare {

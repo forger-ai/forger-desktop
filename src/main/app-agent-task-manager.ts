@@ -45,6 +45,7 @@ import {
   uniqueFilename,
   validateAttachmentType,
   validateFileArgumentType,
+  AppPromptStringTooLongError,
   type PreparedFileArgument,
   type PreparedPromptArguments,
   type TaskLocale,
@@ -81,6 +82,24 @@ interface InternalTask extends AppCodexTaskSummary {
   transcriptPath: string;
   child?: ChildProcessWithoutNullStreams;
 }
+
+const taskFailureFromError = (error: unknown): Pick<AppCodexTaskSummary, 'error' | 'errorDetails'> => {
+  if (error instanceof AppPromptStringTooLongError) {
+    return {
+      error: error.userMessage,
+      errorDetails: {
+        technicalCode: error.technicalCode,
+        argumentName: error.argumentName,
+        maxLength: error.maxLength,
+        actualLength: error.actualLength,
+      },
+    };
+  }
+
+  return {
+    error: error instanceof Error ? error.message : 'app_codex_task_failed',
+  };
+};
 
 interface PendingPermission {
   runId: string;
@@ -131,7 +150,8 @@ export class AppAgentTaskManager {
     this.emit(task);
 
     void this.execute(task, template, input).catch((error) => {
-      void this.failTask(task, error instanceof Error ? error.message : 'app_codex_task_failed');
+      const failure = taskFailureFromError(error);
+      void this.failTask(task, failure.error ?? 'app_codex_task_failed', failure.errorDetails);
     });
 
     return toSummary(task);
@@ -442,7 +462,7 @@ export class AppAgentTaskManager {
     }
   }
 
-  private async failTask(task: InternalTask, message: string): Promise<void> {
+  private async failTask(task: InternalTask, message: string, errorDetails?: AppCodexTaskSummary['errorDetails']): Promise<void> {
     if (task.status === 'canceled') {
       return;
     }
@@ -451,6 +471,7 @@ export class AppAgentTaskManager {
     task.permissionRequest = undefined;
     task.updatedAt = new Date().toISOString();
     task.error = message;
+    task.errorDetails = errorDetails;
     await appendTranscript(task.transcriptPath, 'meta', `Run failed: ${message}`);
     await this.persist(task);
     this.emit(task);
@@ -628,6 +649,7 @@ const toSummary = (task: InternalTask): AppCodexTaskSummary => ({
   updatedAt: task.updatedAt,
   resultText: task.resultText,
   error: task.error,
+  errorDetails: task.errorDetails,
   progressLog: task.progressLog,
   permissionRequest: task.permissionRequest,
 });

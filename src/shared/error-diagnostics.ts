@@ -111,11 +111,42 @@ const classifyTechnicalCode = (
     };
   }
 
+  if (
+    /flattenSingleTopLevelDirectory|moveFlattenChild|flatten:move_fallback|operation['"]?:\s*['"]flatten/i.test(text)
+    && /\b(?:EPERM|EACCES|ENOTEMPTY|EEXIST)\b/.test(text)
+  ) {
+    return {
+      technicalCode: 'install_extract_flatten_failed',
+      details: {
+        classifier: 'install_extract_flatten_failed',
+        operation: 'flatten',
+        ...flattenRenameDetails(text),
+      },
+    };
+  }
+
   if (/\bENOTEMPTY\b/.test(text)) {
     return { technicalCode: 'filesystem_enotempty', details: { classifier: 'filesystem_enotempty' } };
   }
 
   return { technicalCode: isStableTechnicalCode(fallbackCode) ? fallbackCode : 'desktop_error' };
+};
+
+const flattenRenameDetails = (text: string): Record<string, unknown> => {
+  const match = text.match(/\b(?:rename|copyfile|cp)\s+'([^']+)'\s+->\s+'([^']+)'/i);
+  if (!match) {
+    return {};
+  }
+  return {
+    errorCode: text.match(/\b(EPERM|EACCES|ENOTEMPTY|EEXIST)\b/)?.[1],
+    sourceName: basenameLike(match[1]),
+    targetName: basenameLike(match[2]),
+  };
+};
+
+const basenameLike = (value: string): string => {
+  const parts = value.split(/[\\/]+/).filter(Boolean);
+  return parts.at(-1) ?? value;
 };
 
 const fallbackCodeForReport = (input: ErrorReportLike): string => {
