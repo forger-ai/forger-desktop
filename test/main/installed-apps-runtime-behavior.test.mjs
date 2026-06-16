@@ -546,6 +546,71 @@ test('installSocialAppRuntime requests a signed Social download and installs und
   assert.ok(calls.some((call) => call[0] === 'frontendDeps' && call[4] === 'social-ana-user-shared-ledger'));
 });
 
+test('installSocialAppRuntime updates an already installed shared app instead of reinstalling over it', async (t) => {
+  const originalFetch = globalThis.fetch;
+  const socialAppId = 'social-ana-user-shared-ledger';
+  const { root, registry, calls, controller } = await makeLifecycleHarness({
+    catalogApps: [],
+    forgerBackendClient: {
+      requestSocialAppDownload: async (input) => {
+        calls.push(['socialDownload', input.appId, input.shareCode, input.platform]);
+        return {
+          downloadUrl: 'https://social.test/app.zip',
+          app: { id: 44, slug: 'shared-ledger', name: 'Shared Ledger', ownerUsername: 'Ana.User' },
+          version: {
+            id: 9,
+            version: '2.1.0',
+            runtimeStack: 'vite-fastapi-sqlite',
+            supportedPlatforms: ['darwin_arm64'],
+            capabilities: ['local_business_data'],
+            checksumSha256: '',
+            fileSizeBytes: 12,
+          },
+          install: { id: 78, installedAt: new Date().toISOString(), source: 'profile', trustDecision: 'reviewed' },
+        };
+      },
+    },
+  });
+  t.after(async () => {
+    globalThis.fetch = originalFetch;
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  globalThis.fetch = async () => new Response(Buffer.from('fake zip'), { status: 200 });
+  const installDir = path.join(root, 'apps', socialAppId);
+  registry.apps[socialAppId] = {
+    appId: socialAppId,
+    name: 'Shared Ledger',
+    description: 'Shared app',
+    category: 'productividad',
+    version: '2.0.0',
+    installDir,
+    requiredNodeVersion: '22.0.0',
+    requiredPythonVersion: '3.12.0',
+    status: 'installed',
+    userMessage: 'Ready',
+    installedAt: new Date().toISOString(),
+    socialSource: { userAppId: 44, slug: 'shared-ledger', ownerUsername: 'Ana.User', installId: 77 },
+  };
+  await fs.mkdir(installDir, { recursive: true });
+  await fs.writeFile(path.join(installDir, 'manifest.json'), JSON.stringify({ services: [] }), 'utf8');
+
+  const result = await controller.installSocialAppRuntime({ appId: 44, trustDecision: 'reviewed' });
+
+  assert.equal(result.success, true);
+  assert.equal(result.appId, socialAppId);
+  assert.equal(result.userMessage, 'Actualización completada.');
+  assert.equal(registry.apps[socialAppId].version, '2.1.0');
+  assert.deepEqual(registry.apps[socialAppId].socialSource, {
+    userAppId: 44,
+    slug: 'shared-ledger',
+    ownerUsername: 'Ana.User',
+    installId: 78,
+  });
+  assert.ok(calls.some((call) => call[0] === 'syncRelease'));
+  assert.ok(calls.some((call) => call[0] === 'installAppDependencies' && call[1] === socialAppId));
+  assert.equal(calls.some((call) => call[0] === 'frontendDeps'), false);
+});
+
 test('updateAppRuntime returns explicit guard results before touching installed app files', async (t) => {
   const missingApp = await makeLifecycleHarness();
   t.after(async () => {
@@ -563,16 +628,6 @@ test('updateAppRuntime returns explicit guard results before touching installed 
   const missingCatalogResult = await missingCatalog.controller.updateAppRuntime('demo-app');
   assert.equal(missingCatalogResult.success, false);
   assert.equal(missingCatalogResult.technicalCode, 'catalog_app_missing');
-
-  const running = await makeLifecycleHarness();
-  t.after(async () => {
-    await fs.rm(running.root, { recursive: true, force: true });
-  });
-  await seedInstalledApp(running.root, running.registry);
-  running.deps.runningApps.set('demo-app', { appId: 'demo-app' });
-  const runningResult = await running.controller.updateAppRuntime('demo-app');
-  assert.equal(runningResult.success, false);
-  assert.equal(runningResult.technicalCode, 'app_running');
 
   const conflict = await makeLifecycleHarness();
   t.after(async () => {
@@ -592,6 +647,63 @@ test('updateAppRuntime returns explicit guard results before touching installed 
   assert.equal(latestResult.success, true);
   assert.equal(latestResult.phase, 'completed');
   assert.equal(latest.calls.some((call) => call[0] === 'backup'), false);
+});
+
+test('updateAppRuntime stops a running app before backup, download, and release sync', async (t) => {
+  const originalFetch = globalThis.fetch;
+  const { root, registry, calls, controller, deps } = await makeLifecycleHarness({
+    stopInstalledApp: async (appId) => {
+      calls.push(['stop', appId]);
+      deps.runningApps.delete(appId);
+      return { success: true, userMessage: `stopped ${appId}` };
+    },
+  });
+  t.after(async () => {
+    globalThis.fetch = originalFetch;
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  globalThis.fetch = async () => new Response(Buffer.from('fake zip'), { status: 200 });
+  await seedInstalledApp(root, registry);
+  deps.runningApps.set('demo-app', { appId: 'demo-app' });
+
+  const result = await controller.updateAppRuntime('demo-app');
+
+  assert.equal(result.success, true);
+  const stopIndex = calls.findIndex((call) => call[0] === 'stop');
+  const backupIndex = calls.findIndex((call) => call[0] === 'backup');
+  const syncIndex = calls.findIndex((call) => call[0] === 'syncRelease');
+  assert.ok(stopIndex >= 0);
+  assert.ok(backupIndex > stopIndex);
+  assert.ok(syncIndex > stopIndex);
+  assert.ok(calls.some((call) => call[0] === 'installProgress' && call[2] === 'checking_update'));
+});
+
+test('updateAppRuntime aborts without touching files when a running app cannot be stopped', async (t) => {
+  const originalFetch = globalThis.fetch;
+  const { root, registry, calls, controller, deps } = await makeLifecycleHarness({
+    stopInstalledApp: async (appId) => {
+      calls.push(['stop', appId]);
+      return { success: false, userMessage: 'No pudimos detener la app.', technicalCode: 'stop_failed' };
+    },
+  });
+  t.after(async () => {
+    globalThis.fetch = originalFetch;
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  globalThis.fetch = async () => {
+    throw new Error('fetch_should_not_run');
+  };
+  await seedInstalledApp(root, registry);
+  deps.runningApps.set('demo-app', { appId: 'demo-app' });
+
+  const result = await controller.updateAppRuntime('demo-app');
+
+  assert.equal(result.success, false);
+  assert.equal(result.technicalCode, 'stop_failed');
+  assert.equal(registry.apps['demo-app'].status, 'installed');
+  assert.equal(calls.some((call) => call[0] === 'backup'), false);
+  assert.equal(calls.some((call) => call[0] === 'validateArchive'), false);
+  assert.equal(calls.some((call) => call[0] === 'syncRelease'), false);
 });
 
 test('updateAppRuntime blocks dirty installed apps before backup, download, or merge work', async (t) => {

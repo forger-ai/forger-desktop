@@ -556,6 +556,12 @@ const installSocialAppRuntime = async (input: SocialInstallInput, localeInput?: 
       deviceIdentifier: os.hostname(),
     });
     const localAppId = socialLocalAppId(download.app.ownerUsername, download.app.slug);
+    const socialSource = {
+      userAppId: download.app.id,
+      slug: download.app.slug,
+      ownerUsername: download.app.ownerUsername,
+      installId: download.install.id,
+    };
     const socialCatalogApp: CatalogApp = {
       id: localAppId,
       name: download.app.name || download.app.slug,
@@ -571,19 +577,18 @@ const installSocialAppRuntime = async (input: SocialInstallInput, localeInput?: 
       promptTemplates: download.version.promptTemplates as AppPromptTemplate[] | undefined,
     };
     catalogApps = [socialCatalogApp, ...catalogApps.filter((entry) => entry.id !== localAppId)];
-    const result = await installAppRuntime(localAppId, localeInput);
+    const existingRecord = registry.apps[localAppId];
+    const updatingExistingInstall = Boolean(existingRecord?.installDir);
+    const result = updatingExistingInstall
+      ? await updateAppRuntime(localAppId, localeInput)
+      : await installAppRuntime(localAppId, localeInput);
     if (result.success && registry.apps[localAppId]) {
       await upsertInstalledRecord({
         ...registry.apps[localAppId],
-        socialSource: {
-          userAppId: download.app.id,
-          slug: download.app.slug,
-          ownerUsername: download.app.ownerUsername,
-          installId: download.install.id,
-        },
+        socialSource,
       });
     }
-    return { ...result, appId: localAppId, userMessage: result.success ? copy.install.completed : result.userMessage };
+    return { ...result, appId: localAppId, userMessage: result.success && !updatingExistingInstall ? copy.install.completed : result.userMessage };
   } catch (error) {
     const diagnostic = failureDiagnostic(error, 'social_install_failed');
     return {
@@ -605,9 +610,6 @@ const updateAppRuntime = async (appId: string, localeInput?: string): Promise<In
   }
   if (!catalogApp) {
     return runtimeError(copy.update.catalogMissing, 'catalog_app_missing');
-  }
-  if (runningApps.has(appId)) {
-    return runtimeError(copy.update.appRunning, 'app_running');
   }
   if (record.status === 'conflict') {
     return runtimeError(copy.update.conflictPending, 'app_update_conflict');
@@ -654,6 +656,22 @@ const updateAppRuntime = async (appId: string, localeInput?: string): Promise<In
 
   try {
     await publishProgress('checking_update', copy.update.checking);
+    if (runningApps.has(appId)) {
+      await publishProgress('checking_update', copy.update.stoppingApp);
+      await appendInstallLog('update:stop_running_app', { appId });
+      const stop = await stopInstalledApp(appId);
+      await appendInstallLog('update:stop_running_app_done', {
+        appId,
+        success: stop.success,
+        technicalCode: stop.technicalCode,
+      });
+      if (!stop.success) {
+        return await abortUpdateAndRestoreInstalled(
+          stop.userMessage || copy.update.stopFailed,
+          stop.technicalCode || 'update_stop_failed',
+        );
+      }
+    }
     await ensureAppGitRepository(record.installDir);
     await ensureUserModifiedBranch(record.installDir);
     const installedManifest = await resolveInstalledManifest(record.installDir);

@@ -186,6 +186,11 @@ export function AppViewActions({
           ) : null}
         </>
       )}
+      {isRunning && details.updateAvailable ? (
+        <Button variant="outlined" startIcon={<SystemUpdateAltRounded />} onClick={() => onUpdate(appId)}>
+          {t.actions.update}
+        </Button>
+      ) : null}
       {details.installed ? (
         <Button variant="outlined" color="error" startIcon={<DeleteOutlineRounded />} onClick={() => onDelete(appId)}>
           {t.actions.delete}
