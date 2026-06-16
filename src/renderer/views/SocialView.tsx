@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useMemo, useState, type SyntheticEvent } from 'react';
 import ChatRounded from '@mui/icons-material/ChatRounded';
+import ContentCopyRounded from '@mui/icons-material/ContentCopyRounded';
+import EditRounded from '@mui/icons-material/EditRounded';
 import OpenInNewRounded from '@mui/icons-material/OpenInNewRounded';
 import PersonAddRounded from '@mui/icons-material/PersonAddRounded';
 import RefreshRounded from '@mui/icons-material/RefreshRounded';
 import SearchRounded from '@mui/icons-material/SearchRounded';
+import UploadRounded from '@mui/icons-material/UploadRounded';
 import {
   Alert,
   Avatar,
@@ -12,9 +15,17 @@ import {
   Button,
   Chip,
   CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   Divider,
+  FormControl,
+  InputLabel,
   List,
+  MenuItem,
   Paper,
+  Select,
   Stack,
   Tab,
   Tabs,
@@ -25,11 +36,13 @@ import {
   type AlertColor,
 } from '@mui/material';
 import type {
+  AppSummary,
   CloudFriendship,
   CloudFriendUser,
   ForgerAccountSession,
   FriendChatWindowOpenResult,
   SocialUserApp,
+  SocialUserAppVisibility,
   SocialUserProfile,
   SocialUserProfileDetail,
 } from '@shared/types';
@@ -45,31 +58,34 @@ import {
   type SocialTab,
 } from './friends/socialViewHelpers';
 
-type FullSocialTab = 'friends' | 'forum' | 'apps' | 'profile';
+type FullSocialTab = 'friends' | 'forum' | 'profile' | 'search';
 
 interface SocialViewProps {
   account: ForgerAccountSession;
   accountBusy?: boolean;
   initialProfileUsername?: string | null;
+  installedApps?: AppSummary[];
   onInitialProfileUsernameConsumed?: () => void;
   onOpenFriendChat?: (friendship: CloudFriendship) => Promise<FriendChatWindowOpenResult> | FriendChatWindowOpenResult;
   onOpenCloudModal: () => void;
   onOpenSocialApp: (app: SocialUserApp) => void;
+  onUploadSocial?: (appId: string, visibility?: Exclude<SocialUserAppVisibility, 'restricted'>) => void;
   onNotify?: (message: string, severity?: AlertColor) => void;
   onUpdateUsername?: (username: string) => Promise<boolean>;
+  onUpdateProfile?: (input: { displayName?: string }) => Promise<boolean>;
 }
 
 const fullSocialTabs: Array<{ value: FullSocialTab; label: string }> = [
   { value: 'friends', label: 'Amigos' },
   { value: 'forum', label: 'Foro' },
-  { value: 'apps', label: 'Mis apps' },
-  { value: 'profile', label: 'Perfil' },
+  { value: 'profile', label: 'Mi perfil' },
+  { value: 'search', label: 'Buscar' },
 ];
 
 const readFullSocialTab = (): FullSocialTab => {
   if (typeof window === 'undefined') return 'friends';
   const value = window.sessionStorage.getItem(LAST_SOCIAL_TAB_KEY);
-  return value === 'forum' || value === 'apps' || value === 'profile' ? value : 'friends';
+  return value === 'forum' || value === 'profile' || value === 'search' ? value : 'friends';
 };
 
 const formatBytes = (value?: number) => {
@@ -85,10 +101,10 @@ const formatBytes = (value?: number) => {
 };
 
 const profileName = (profile: SocialUserProfile) =>
-  profile.firstName ? `${profile.firstName}${profile.lastInitial ? ` ${profile.lastInitial}.` : ''}` : `@${profile.username}`;
+  profile.displayName || (profile.firstName ? `${profile.firstName}${profile.lastInitial ? ` ${profile.lastInitial}.` : ''}` : `@${profile.username}`);
 
-const visibilityLabel = (app: SocialUserApp) => {
-  if (app.accessReason === 'direct_share') return 'Compartida contigo';
+const visibilityLabel = (app: SocialUserApp, isOwnedByAccount = false) => {
+  if (!isOwnedByAccount && app.accessReason === 'direct_share') return 'Compartida contigo';
   if (app.visibility === 'public') return 'Pública';
   if (app.visibility === 'friends') return 'Amigos';
   if (app.visibility === 'restricted') return 'Restringida';
@@ -99,57 +115,82 @@ const SocialAppCard = ({
   app,
   ownerLabel,
   onOpen,
+  accountUserId,
+  onVisibilityChange,
+  visibilityBusy,
 }: {
   app: SocialUserApp;
   ownerLabel?: string;
   onOpen: (app: SocialUserApp) => void;
-}) => (
-  <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 1 }}>
-    <Stack spacing={1.25}>
-      <Stack direction="row" spacing={1.25} alignItems="flex-start">
-        <Avatar sx={{ width: 42, height: 42 }}>{app.name.slice(0, 1).toUpperCase()}</Avatar>
-        <Stack spacing={0.5} sx={{ flex: 1, minWidth: 0 }}>
-          <Stack direction="row" spacing={0.75} alignItems="center" useFlexGap flexWrap="wrap">
-            <Typography variant="body1" sx={{ fontWeight: 700 }} noWrap>{app.name}</Typography>
-            <Chip size="small" label={visibilityLabel(app)} variant="outlined" />
-            {app.status !== 'published' ? <Chip size="small" label="No publicada" color="warning" variant="outlined" /> : null}
+  accountUserId?: number;
+  onVisibilityChange?: (app: SocialUserApp, visibility: Exclude<SocialUserAppVisibility, 'restricted'>) => void;
+  visibilityBusy?: boolean;
+}) => {
+  const isOwnedByAccount = accountUserId !== undefined && app.owner.id === accountUserId;
+  return (
+    <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 1 }}>
+      <Stack spacing={1.25}>
+        <Stack direction="row" spacing={1.25} alignItems="flex-start">
+          <Avatar sx={{ width: 42, height: 42 }}>{app.name.slice(0, 1).toUpperCase()}</Avatar>
+          <Stack spacing={0.5} sx={{ flex: 1, minWidth: 0 }}>
+            <Stack direction="row" spacing={0.75} alignItems="center" useFlexGap flexWrap="wrap">
+              <Typography variant="body1" sx={{ fontWeight: 700 }} noWrap>{app.name}</Typography>
+              <Chip size="small" label={visibilityLabel(app, isOwnedByAccount)} variant="outlined" />
+              {app.status !== 'published' ? <Chip size="small" label="No publicada" color="warning" variant="outlined" /> : null}
+            </Stack>
+            {ownerLabel ? (
+              <Typography variant="caption" color="text.secondary" noWrap>{ownerLabel}</Typography>
+            ) : null}
+            <Typography variant="body2" color="text.secondary" noWrap>
+              {app.shortDescription || app.description || 'App compartida desde Forger Social'}
+            </Typography>
+            <Typography variant="caption" color="text.secondary" noWrap>
+              Version {app.latestVersion?.version ?? '-'} · {formatBytes(app.latestVersion?.fileSizeBytes)}
+            </Typography>
           </Stack>
-          {ownerLabel ? (
-            <Typography variant="caption" color="text.secondary" noWrap>{ownerLabel}</Typography>
+        </Stack>
+        <Stack direction="row" spacing={1} justifyContent="flex-end">
+          {onVisibilityChange ? (
+            <Select
+              size="small"
+              value={app.visibility === 'restricted' ? 'private' : app.visibility}
+              disabled={visibilityBusy}
+              onChange={(event) => onVisibilityChange(app, event.target.value as Exclude<SocialUserAppVisibility, 'restricted'>)}
+              sx={{ minWidth: 128 }}
+            >
+              <MenuItem value="private">Privada</MenuItem>
+              <MenuItem value="friends">Amigos</MenuItem>
+              <MenuItem value="public">Pública</MenuItem>
+            </Select>
           ) : null}
-          <Typography variant="body2" color="text.secondary" noWrap>
-            {app.shortDescription || app.description || 'App compartida desde Forger Social'}
-          </Typography>
-          <Typography variant="caption" color="text.secondary" noWrap>
-            Version {app.latestVersion?.version ?? '-'} · {formatBytes(app.latestVersion?.fileSizeBytes)}
-          </Typography>
+          <Button
+            size="small"
+            variant="contained"
+            startIcon={<OpenInNewRounded />}
+            disabled={app.status !== 'published'}
+            onClick={() => onOpen(app)}
+          >
+            Abrir app
+          </Button>
         </Stack>
       </Stack>
-      <Stack direction="row" spacing={1} justifyContent="flex-end">
-        <Button
-          size="small"
-          variant="contained"
-          startIcon={<OpenInNewRounded />}
-          disabled={app.status !== 'published'}
-          onClick={() => onOpen(app)}
-        >
-          Abrir app
-        </Button>
-      </Stack>
-    </Stack>
-  </Paper>
-);
+    </Paper>
+  );
+};
 
 export function SocialView({
   account,
   accountBusy = false,
+  installedApps = [],
   initialProfileUsername,
   onInitialProfileUsernameConsumed,
   onOpenFriendChat,
   onOpenCloudModal,
   onOpenSocialApp,
+  onUploadSocial,
   onNotify,
   onUpdateUsername,
+  onUpdateProfile,
 }: SocialViewProps) {
   const theme = useTheme();
   const [activeTab, setActiveTab] = useState<FullSocialTab>(readFullSocialTab);
@@ -170,14 +211,27 @@ export function SocialView({
   const [activeProfileUsername, setActiveProfileUsername] = useState(account.user?.username ?? '');
   const [profile, setProfile] = useState<SocialUserProfile | null>(null);
   const [profileApps, setProfileApps] = useState<SocialUserApp[]>([]);
+  const [profileUrl, setProfileUrl] = useState('');
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileError, setProfileError] = useState<string | null>(null);
   const [profileUsernameBusy, setProfileUsernameBusy] = useState(false);
   const [profileUsernameError, setProfileUsernameError] = useState<string | null>(null);
+  const [profileEditOpen, setProfileEditOpen] = useState(false);
+  const [displayNameDraft, setDisplayNameDraft] = useState(account.user?.displayName ?? '');
+  const [profileInfoBusy, setProfileInfoBusy] = useState(false);
+  const [profileInfoError, setProfileInfoError] = useState<string | null>(null);
+  const [visibilityBusyId, setVisibilityBusyId] = useState<number | null>(null);
+  const [publishDialogOpen, setPublishDialogOpen] = useState(false);
+  const [publishAppId, setPublishAppId] = useState('');
+  const [publishVisibility, setPublishVisibility] = useState<Exclude<SocialUserAppVisibility, 'restricted'>>('private');
   const signedIn = account.authenticated && Boolean(account.user?.confirmed);
 
   const accountUserId = account.user?.id;
   const accountUsername = account.user?.username?.trim() ?? '';
+  const uploadCandidates = useMemo(
+    () => installedApps.filter((app) => Boolean(app.privateLocal) && app.status !== 'installing'),
+    [installedApps],
+  );
   const accepted = useMemo(() => sortFriends(friendships.filter((entry) => entry.status === 'accepted')), [friendships]);
   const pendingIncoming = useMemo(
     () => friendships.filter((entry) => entry.status === 'pending' && entry.addresseeId === accountUserId),
@@ -199,8 +253,8 @@ export function SocialView({
     if (!normalized) return;
     setActiveProfileUsername(normalized);
     setProfileUsernameDraft(normalized);
-    switchTab('profile');
-  }, [switchTab]);
+    switchTab(normalized === accountUsername ? 'profile' : 'search');
+  }, [accountUsername, switchTab]);
 
   const loadFriends = useCallback(async () => {
     if (!signedIn) return;
@@ -253,7 +307,8 @@ export function SocialView({
   useEffect(() => {
     setProfileUsernameDraft(accountUsername);
     setActiveProfileUsername((current) => current || accountUsername);
-  }, [accountUsername]);
+    setDisplayNameDraft(account.user?.displayName ?? '');
+  }, [account.user?.displayName, accountUsername]);
 
   useEffect(() => {
     if (!signedIn) {
@@ -265,12 +320,20 @@ export function SocialView({
   }, [signedIn, loadFriends]);
 
   useEffect(() => {
-    if (activeTab === 'apps') void loadMyApps();
+    if (activeTab === 'profile') void loadMyApps();
   }, [activeTab, loadMyApps]);
 
   useEffect(() => {
-    if (activeTab === 'profile') void loadProfile(activeProfileUsername || accountUsername);
+    if (activeTab === 'profile') void loadProfile(accountUsername);
+    if (activeTab === 'search') void loadProfile(activeProfileUsername);
   }, [accountUsername, activeProfileUsername, activeTab, loadProfile]);
+
+  useEffect(() => {
+    if (activeTab !== 'profile' || !accountUsername) return;
+    void window.forger.getSocialProfileUrl(accountUsername)
+      .then(setProfileUrl)
+      .catch(() => setProfileUrl(''));
+  }, [accountUsername, activeTab]);
 
   useEffect(() => {
     if (!initialProfileUsername) return;
@@ -356,6 +419,61 @@ export function SocialView({
     } finally {
       setProfileUsernameBusy(false);
     }
+  };
+
+  const handleProfileInfoSubmit = async (event?: SyntheticEvent) => {
+    event?.preventDefault();
+    if (!onUpdateProfile || profileInfoBusy) return;
+    setProfileInfoBusy(true);
+    setProfileInfoError(null);
+    try {
+      const success = await onUpdateProfile({ displayName: displayNameDraft });
+      if (!success) {
+        setProfileInfoError('No pudimos actualizar tu perfil.');
+        return;
+      }
+      setProfileEditOpen(false);
+      onNotify?.('Perfil actualizado.', 'success');
+      void loadProfile(accountUsername);
+    } catch (error) {
+      setProfileInfoError(error instanceof Error ? error.message : 'No pudimos actualizar tu perfil.');
+    } finally {
+      setProfileInfoBusy(false);
+    }
+  };
+
+  const handleVisibilityChange = async (app: SocialUserApp, visibility: Exclude<SocialUserAppVisibility, 'restricted'>) => {
+    if (visibilityBusyId !== null || app.visibility === visibility) return;
+    setVisibilityBusyId(app.id);
+    try {
+      const updated = await window.forger.updateSocialAppVisibility(app.id, visibility);
+      setMyApps((current) => current.map((entry) => entry.id === updated.id ? updated : entry));
+      setProfileApps((current) => current.map((entry) => entry.id === updated.id ? updated : entry));
+      onNotify?.('Visibilidad actualizada.', 'success');
+    } catch (error) {
+      onNotify?.(error instanceof Error ? error.message : 'No pudimos actualizar la visibilidad.', 'error');
+    } finally {
+      setVisibilityBusyId(null);
+    }
+  };
+
+  const handleOpenProfileInBrowser = async () => {
+    const url = profileUrl || (accountUsername ? await window.forger.getSocialProfileUrl(accountUsername) : '');
+    if (!url) return;
+    await window.forger.openExternalUrl(url);
+  };
+
+  const handleCopyProfileLink = async () => {
+    const url = profileUrl || (accountUsername ? await window.forger.getSocialProfileUrl(accountUsername) : '');
+    if (!url) return;
+    await navigator.clipboard.writeText(url);
+    onNotify?.('Link copiado.', 'success');
+  };
+
+  const handlePublishSubmit = () => {
+    if (!publishAppId || !onUploadSocial) return;
+    setPublishDialogOpen(false);
+    onUploadSocial(publishAppId, publishVisibility);
   };
 
   const renderSignedOut = () => (
@@ -506,34 +624,7 @@ export function SocialView({
     </Stack>
   );
 
-  const renderMyApps = () => (
-    <Stack spacing={1.25}>
-      <Stack direction="row" alignItems="center" justifyContent="space-between">
-        <Typography variant="h6">Mis apps en Social</Typography>
-        <Button size="small" startIcon={<RefreshRounded />} onClick={() => void loadMyApps()} disabled={myAppsLoading}>Actualizar</Button>
-      </Stack>
-      {myAppsError ? <Alert severity="error">{myAppsError}</Alert> : null}
-      {myAppsLoading && myApps.length === 0 ? (
-        <Stack alignItems="center" spacing={1.25} sx={{ py: 4 }}>
-          <CircularProgress size={24} />
-          <Typography variant="body2" color="text.secondary">Cargando apps...</Typography>
-        </Stack>
-      ) : null}
-      {!myAppsLoading && myApps.length === 0 ? (
-        <Paper variant="outlined" sx={{ p: 2, borderRadius: 1, textAlign: 'center' }}>
-          <Typography fontWeight={700}>No has subido apps a Social</Typography>
-          <Typography variant="body2" color="text.secondary">Usa Subir a Social desde una app tuya para publicarla o compartirla.</Typography>
-        </Paper>
-      ) : null}
-      {myApps.length > 0 ? (
-        <List disablePadding sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: 'repeat(2, minmax(0, 1fr))' }, gap: 1 }}>
-          {myApps.map((app) => <SocialAppCard key={app.id} app={app} ownerLabel="Tuya" onOpen={onOpenSocialApp} />)}
-        </List>
-      ) : null}
-    </Stack>
-  );
-
-  const renderProfile = () => (
+  const renderSearch = () => (
     <Stack spacing={2}>
       <Box component="form" onSubmit={handleProfileSearch}>
         <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
@@ -550,18 +641,8 @@ export function SocialView({
             sx={{ maxWidth: { sm: 360 } }}
           />
           <Button type="submit" variant="outlined" disabled={!profileUsernameDraft.trim()} startIcon={<SearchRounded />}>Ver perfil</Button>
-          {accountUsername && profileUsernameDraft.replace(/^@/, '') !== accountUsername && onUpdateUsername ? (
-            <Button
-              variant="text"
-              disabled={accountBusy || profileUsernameBusy || !profileUsernameDraft.trim()}
-              onClick={() => void handleUsernameSubmit()}
-            >
-              {profileUsernameBusy ? 'Guardando...' : 'Usar como mi username'}
-            </Button>
-          ) : null}
         </Stack>
       </Box>
-      {profileUsernameError ? <Alert severity="error">{profileUsernameError}</Alert> : null}
       {profileLoading ? (
         <Stack alignItems="center" spacing={1.25} sx={{ py: 5 }}>
           <CircularProgress size={24} />
@@ -571,7 +652,7 @@ export function SocialView({
       {!profileLoading && profileError ? (
         <Stack spacing={1.25}>
           <Alert severity="error">{profileError}</Alert>
-          <Button variant="outlined" onClick={() => void loadProfile(activeProfileUsername || accountUsername)} sx={{ alignSelf: 'flex-start' }}>
+          <Button variant="outlined" onClick={() => void loadProfile(activeProfileUsername)} sx={{ alignSelf: 'flex-start' }}>
             Reintentar
           </Button>
         </Stack>
@@ -613,13 +694,185 @@ export function SocialView({
             ) : (
               <List disablePadding sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: 'repeat(2, minmax(0, 1fr))' }, gap: 1 }}>
                 {profileApps.map((app) => (
-                  <SocialAppCard key={app.id} app={app} ownerLabel={`@${app.owner.username}`} onOpen={onOpenSocialApp} />
+                  <SocialAppCard key={app.id} app={app} ownerLabel={`@${app.owner.username}`} accountUserId={accountUserId} onOpen={onOpenSocialApp} />
                 ))}
               </List>
             )}
           </Stack>
         </Stack>
       ) : null}
+    </Stack>
+  );
+
+  const renderProfile = () => (
+    <Stack spacing={2}>
+      <Paper
+        variant="outlined"
+        sx={{
+          p: 2,
+          borderRadius: 1,
+          borderColor: alpha(theme.palette.primary.main, 0.28),
+          bgcolor: alpha(theme.palette.primary.main, theme.palette.mode === 'dark' ? 0.1 : 0.04),
+        }}
+      >
+        <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} alignItems={{ xs: 'flex-start', md: 'center' }}>
+          <Avatar sx={{ width: 60, height: 60, fontSize: 24 }}>
+            {(account.user?.displayName || account.user?.firstName || accountUsername || 'F').slice(0, 1).toUpperCase()}
+          </Avatar>
+          <Stack sx={{ minWidth: 0, flex: 1 }}>
+            <Typography variant="h5" fontWeight={800} noWrap>{account.user?.displayName || account.user?.firstName || `@${accountUsername}`}</Typography>
+            <Typography color="text.secondary" noWrap>@{accountUsername || 'sin-username'}</Typography>
+            {profileUrl ? <Typography variant="caption" color="text.secondary" noWrap>{profileUrl}</Typography> : null}
+          </Stack>
+          <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+            <Button size="small" variant="outlined" startIcon={<EditRounded />} onClick={() => setProfileEditOpen(true)}>Editar</Button>
+            <Button size="small" variant="outlined" startIcon={<OpenInNewRounded />} disabled={!accountUsername} onClick={() => void handleOpenProfileInBrowser()}>Abrir</Button>
+            <Button size="small" variant="outlined" startIcon={<ContentCopyRounded />} disabled={!accountUsername} onClick={() => void handleCopyProfileLink()}>Copiar link</Button>
+          </Stack>
+        </Stack>
+      </Paper>
+
+      {profileUsernameError ? <Alert severity="error">{profileUsernameError}</Alert> : null}
+      <Box component="form" onSubmit={handleUsernameSubmit}>
+        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+          <TextField
+            size="small"
+            label="Username"
+            value={profileUsernameDraft}
+            onChange={(event) => {
+              setProfileUsernameDraft(event.target.value);
+              setProfileUsernameError(null);
+            }}
+            placeholder="@username"
+            autoComplete="off"
+            sx={{ maxWidth: { sm: 360 } }}
+          />
+          <Button
+            type="submit"
+            variant="outlined"
+            disabled={accountBusy || profileUsernameBusy || !profileUsernameDraft.trim() || !onUpdateUsername}
+          >
+            {profileUsernameBusy ? 'Guardando...' : 'Guardar username'}
+          </Button>
+        </Stack>
+      </Box>
+
+      <Stack spacing={1}>
+        <Stack direction={{ xs: 'column', sm: 'row' }} alignItems={{ xs: 'stretch', sm: 'center' }} justifyContent="space-between" spacing={1}>
+          <Typography variant="h6">Apps publicadas</Typography>
+          <Stack direction="row" spacing={1} justifyContent="flex-end">
+            <Button size="small" startIcon={<RefreshRounded />} onClick={() => void loadMyApps()} disabled={myAppsLoading}>Actualizar</Button>
+            <Button
+              size="small"
+              variant="contained"
+              startIcon={<UploadRounded />}
+              disabled={!onUploadSocial || uploadCandidates.length === 0}
+              onClick={() => {
+                setPublishAppId(uploadCandidates[0]?.id ?? '');
+                setPublishDialogOpen(true);
+              }}
+            >
+              Subir app
+            </Button>
+          </Stack>
+        </Stack>
+        {myAppsError ? <Alert severity="error">{myAppsError}</Alert> : null}
+        {myAppsLoading && myApps.length === 0 ? (
+          <Stack alignItems="center" spacing={1.25} sx={{ py: 4 }}>
+            <CircularProgress size={24} />
+            <Typography variant="body2" color="text.secondary">Cargando apps...</Typography>
+          </Stack>
+        ) : null}
+        {!myAppsLoading && myApps.length === 0 ? (
+          <Paper variant="outlined" sx={{ p: 2, borderRadius: 1, textAlign: 'center' }}>
+            <Typography fontWeight={700}>No has subido apps a Social</Typography>
+            <Typography variant="body2" color="text.secondary">
+              {uploadCandidates.length > 0 ? 'Puedes subir una app instalada desde este perfil.' : 'Crea o instala una app propia para subirla a Social.'}
+            </Typography>
+          </Paper>
+        ) : null}
+        {myApps.length > 0 ? (
+          <List disablePadding sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: 'repeat(2, minmax(0, 1fr))' }, gap: 1 }}>
+            {myApps.map((app) => (
+              <SocialAppCard
+                key={app.id}
+                app={app}
+                ownerLabel="Tuya"
+                accountUserId={accountUserId}
+                onOpen={onOpenSocialApp}
+                onVisibilityChange={handleVisibilityChange}
+                visibilityBusy={visibilityBusyId === app.id}
+              />
+            ))}
+          </List>
+        ) : null}
+      </Stack>
+
+      <Dialog open={profileEditOpen} onClose={() => setProfileEditOpen(false)} maxWidth="xs" fullWidth>
+        <Box component="form" onSubmit={handleProfileInfoSubmit}>
+          <DialogTitle>Editar perfil</DialogTitle>
+          <DialogContent>
+            <Stack spacing={2} sx={{ pt: 1 }}>
+              <TextField
+                label="Nombre visible"
+                value={displayNameDraft}
+                onChange={(event) => {
+                  setDisplayNameDraft(event.target.value);
+                  setProfileInfoError(null);
+                }}
+                autoComplete="name"
+                inputProps={{ maxLength: 80 }}
+                fullWidth
+              />
+              {profileInfoError ? <Alert severity="error">{profileInfoError}</Alert> : null}
+            </Stack>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setProfileEditOpen(false)}>Cancelar</Button>
+            <Button type="submit" variant="contained" disabled={profileInfoBusy || !onUpdateProfile}>
+              {profileInfoBusy ? 'Guardando...' : 'Guardar'}
+            </Button>
+          </DialogActions>
+        </Box>
+      </Dialog>
+
+      <Dialog open={publishDialogOpen} onClose={() => setPublishDialogOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Subir app a Social</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ pt: 1 }}>
+            <FormControl fullWidth size="small">
+              <InputLabel id="social-profile-upload-app-label">App</InputLabel>
+              <Select
+                labelId="social-profile-upload-app-label"
+                label="App"
+                value={publishAppId}
+                onChange={(event) => setPublishAppId(event.target.value)}
+              >
+                {uploadCandidates.map((app) => (
+                  <MenuItem key={app.id} value={app.id}>{app.name ?? app.id}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <FormControl fullWidth size="small">
+              <InputLabel id="social-profile-upload-visibility-label">Visibilidad</InputLabel>
+              <Select
+                labelId="social-profile-upload-visibility-label"
+                label="Visibilidad"
+                value={publishVisibility}
+                onChange={(event) => setPublishVisibility(event.target.value as Exclude<SocialUserAppVisibility, 'restricted'>)}
+              >
+                <MenuItem value="private">Privada</MenuItem>
+                <MenuItem value="friends">Amigos</MenuItem>
+                <MenuItem value="public">Pública</MenuItem>
+              </Select>
+            </FormControl>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setPublishDialogOpen(false)}>Cancelar</Button>
+          <Button variant="contained" disabled={!publishAppId} onClick={handlePublishSubmit}>Subir</Button>
+        </DialogActions>
+      </Dialog>
     </Stack>
   );
 
@@ -644,8 +897,8 @@ export function SocialView({
           <Divider />
           {activeTab === 'friends' ? (signedIn ? renderFriends() : renderSignedOut()) : null}
           {activeTab === 'forum' ? (signedIn ? <ForumPanel active onNotify={onNotify} onOpenProfile={openProfile} /> : renderSignedOut()) : null}
-          {activeTab === 'apps' ? (signedIn ? renderMyApps() : renderSignedOut()) : null}
           {activeTab === 'profile' ? renderProfile() : null}
+          {activeTab === 'search' ? renderSearch() : null}
         </>
       )}
     </Stack>

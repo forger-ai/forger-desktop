@@ -33,6 +33,8 @@ import type {
   SocialUserAppDownload,
   SocialUserAppList,
   SocialUserAppShare,
+  SocialUserAppUpdateInput,
+  SocialUserAppVisibility,
   SocialUserProfileDetail,
   SocialUserAppUploadAttempt,
   CloudAppMessagePermissionDecision,
@@ -181,6 +183,7 @@ const normalizeForumUser = (payload: unknown): ForumUserProfile => {
   return {
     id: Number(source.id ?? 0),
     username: typeof source.username === 'string' ? source.username : '',
+    displayName: typeof source.display_name === 'string' ? source.display_name : undefined,
     firstName: typeof source.first_name === 'string' ? source.first_name : undefined,
     lastInitial: typeof source.last_initial === 'string' ? source.last_initial : undefined,
   };
@@ -411,6 +414,7 @@ export class ForgerBackendClient {
       },
       body: JSON.stringify({
         username: input.username,
+        display_name: input.displayName,
       }),
     });
     const payload = await this.readJson<Record<string, unknown>>(response);
@@ -432,7 +436,16 @@ export class ForgerBackendClient {
       };
     }
 
-    return { ...this.parseAccount(payload), success: true, userMessage: 'Username actualizado.' };
+    return {
+      ...this.parseAccount(payload),
+      success: true,
+      userMessage: input.displayName !== undefined && input.username === undefined ? 'Perfil actualizado.' : 'Username actualizado.',
+    };
+  }
+
+  socialProfileUrl(username: string): string {
+    const normalized = username.trim().replace(/^@/, '');
+    return `${this.options.backendBaseUrl.replace(/\/+$/, '')}/social/@${encodeURIComponent(normalized)}`;
   }
 
   async getGmailOAuthClientId(): Promise<string> {
@@ -1255,6 +1268,26 @@ export class ForgerBackendClient {
       maxUses: typeof payload.max_uses === 'number' ? payload.max_uses : undefined,
       deepLink: typeof payload.deep_link === 'string' ? payload.deep_link : '',
     };
+  }
+
+  async updateSocialApp(input: SocialUserAppUpdateInput): Promise<SocialUserApp> {
+    const payload = await patchBackendJson(this.options, `/api/v1/me/user_apps/${encodeURIComponent(String(input.id))}`, {
+      visibility: input.visibility,
+      name: input.name,
+      short_description: input.shortDescription,
+      description: input.description,
+      category: input.category,
+    }, 'social_user_app_update_failed');
+    const app = toSocialUserApp(payload);
+    if (!app) throw backendError('No pudimos actualizar esta app Social.', 'social_user_app_update_response_invalid');
+    return app;
+  }
+
+  async updateSocialAppVisibility(
+    userAppId: number,
+    visibility: Exclude<SocialUserAppVisibility, 'restricted'>,
+  ): Promise<SocialUserApp> {
+    return await this.updateSocialApp({ id: userAppId, visibility });
   }
 
   async resolveSocialCode(code: string): Promise<{ app: SocialUserApp; share?: Record<string, unknown> }> {

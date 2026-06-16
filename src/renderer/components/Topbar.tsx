@@ -530,8 +530,8 @@ export function Topbar({
               <Divider />
               <MenuItem onClick={() => handleOpenSocialTab('friends')}>Amigos</MenuItem>
               <MenuItem onClick={() => handleOpenSocialTab('forum')}>Foro</MenuItem>
-              <MenuItem onClick={() => handleOpenSocialTab('apps')}>Mis apps</MenuItem>
-              <MenuItem onClick={() => handleOpenSocialTab('profile')}>Perfil</MenuItem>
+              <MenuItem onClick={() => handleOpenSocialTab('profile')}>Mi perfil</MenuItem>
+              <MenuItem onClick={() => handleOpenSocialTab('search')}>Buscar</MenuItem>
             </Menu>
           </Box>
           <IconButton

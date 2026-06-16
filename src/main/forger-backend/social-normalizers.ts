@@ -3,6 +3,7 @@ import type { SocialUserApp, SocialUserAppAccessReason, SocialUserAppUploadAttem
 export const toSocialProfile = (record: Record<string, unknown>): SocialUserProfile => ({
   id: Number(record.id),
   username: typeof record.username === 'string' ? record.username : '',
+  displayName: typeof record.display_name === 'string' ? record.display_name : undefined,
   firstName: typeof record.first_name === 'string' ? record.first_name : undefined,
   lastInitial: typeof record.last_initial === 'string' ? record.last_initial : undefined,
   socialBio: typeof record.social_bio === 'string' ? record.social_bio : undefined,

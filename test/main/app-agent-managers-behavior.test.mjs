@@ -660,6 +660,22 @@ test('task manager covers validation, policy-denied permissions, terminal cancel
     );
     assert.notEqual(optionalFailed.task.error, 'app_prompt_argument_required:document');
 
+    const tooLong = await validationManager.start('finance-os', {
+      templateId: 'review',
+      arguments: { topic: 'this text is longer than twenty characters' },
+    });
+    const stringFailed = await waitFor(
+      () => validationEvents.find((event) => event.task.runId === tooLong.runId && event.task.status === 'failed'),
+      'task_string_too_long_failed',
+    );
+    assert.match(stringFailed.task.error, /demasiado largo/);
+    assert.deepEqual(stringFailed.task.errorDetails, {
+      technicalCode: 'app_prompt_string_too_long',
+      argumentName: 'topic',
+      maxLength: 20,
+      actualLength: 42,
+    });
+
     templates[0].arguments[1].maxBytes = 1;
     const tooLarge = await validationManager.start('finance-os', {
       templateId: 'review',

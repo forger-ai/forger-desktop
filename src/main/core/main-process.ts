@@ -727,7 +727,7 @@ const gitCommitAllExcept = async (cwd: string, message: string, excludedPaths: s
 const copyReleaseContentsForUpdate = async (sourceDir: string, targetDir: string, preservedPaths: string[]): Promise<void> => await getCommandGitController().copyReleaseContentsForUpdate(sourceDir, targetDir, preservedPaths);
 const syncReleaseIntoInstalledApp = async (sourceDir: string, targetDir: string, preservedPaths: string[]): Promise<void> => await getCommandGitController().syncReleaseIntoInstalledApp(sourceDir, targetDir, preservedPaths);
 
-const createRuntimeInstallDeps = () => ({ DEFAULT_NODE_VERSION, DEFAULT_PYTHON_VERSION, app, clearMacQuarantine, extractArchive, findRuntimeArchive, findRuntimeChecksumFile, fs, getBundledResourcesRoot, getRuntimesRoot, getTempRoot, hashFileSha256, installBackendDependenciesWithUv, normalizeNodeRuntimeVersion, normalizeVersionForFolder, path, resolvePlatformAlias, runCommand, runtimeLocks });
+const createRuntimeInstallDeps = () => ({ DEFAULT_NODE_VERSION, DEFAULT_PYTHON_VERSION, appendInstallLog, app, clearMacQuarantine, extractArchive, findRuntimeArchive, findRuntimeChecksumFile, fs, getBundledResourcesRoot, getRuntimesRoot, getTempRoot, hashFileSha256, installBackendDependenciesWithUv, normalizeNodeRuntimeVersion, normalizeVersionForFolder, path, resolvePlatformAlias, runCommand, runtimeLocks });
 const getRuntimeInstallController = () => createRuntimeInstallController(createRuntimeInstallDeps());
 const fileExists = async (filePath: string): Promise<boolean> => await getRuntimeInstallController().fileExists(filePath);
 const installFrontendDependenciesWithNpm = async (

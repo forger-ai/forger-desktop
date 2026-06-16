@@ -122,11 +122,14 @@ export class DesktopErrorReporter {
       return;
     }
     const record = this.options.getInstalledApp(event.task.appId);
+    const inputLimitDetails = event.task.errorDetails?.technicalCode === 'app_prompt_string_too_long'
+      ? event.task.errorDetails
+      : null;
     this.request({
       source: 'agent',
       operation: 'app.agent-task',
       message: event.task.error || 'App agent task failed.',
-      technicalCode: 'app_agent_task_failed',
+      technicalCode: inputLimitDetails ? 'app_prompt_string_too_long' : 'app_agent_task_failed',
       appId: event.task.appId,
       appVersion: record?.version,
       details: {
@@ -134,6 +137,13 @@ export class DesktopErrorReporter {
         templateId: event.task.templateId,
         status: event.task.status,
         progressLog: event.task.progressLog?.slice(-10),
+        ...(inputLimitDetails
+          ? {
+              argumentName: inputLimitDetails.argumentName,
+              maxLength: inputLimitDetails.maxLength,
+              actualLength: inputLimitDetails.actualLength,
+            }
+          : {}),
       },
     });
   }

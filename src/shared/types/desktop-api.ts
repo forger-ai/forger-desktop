@@ -16,7 +16,7 @@ import type { AudioRuntimeBrokerRequest, AudioRuntimeBrokerResponse } from './au
 import type { DesktopUpdateState } from './updates';
 import type { ForgerAccountSession, ForgerAccountRegisterInput, ForgerAccountLoginInput, ForgerAccountProfileInput, CloudDevicesState } from './account';
 import type { CloudStorageUsage } from './cloud-storage';
-import type { FriendChatWindowOpenResult, CloudFriendship, CloudFriendUser, CloudMessage, CloudSendAppShareInput, CloudSendMessageInput, CloudAppMessagePermissionDecision, CloudSocialEvent, CloudIdentityState, ForumComment, ForumParticipationState, ForumPost, SocialUserApp, SocialUserAppDownload, SocialUserAppList, SocialUserAppShare, SocialUserAppUploadInput, SocialUserProfileDetail } from './social';
+import type { FriendChatWindowOpenResult, CloudFriendship, CloudFriendUser, CloudMessage, CloudSendAppShareInput, CloudSendMessageInput, CloudAppMessagePermissionDecision, CloudSocialEvent, CloudIdentityState, ForumComment, ForumParticipationState, ForumPost, SocialUserApp, SocialUserAppDownload, SocialUserAppList, SocialUserAppShare, SocialUserAppUpdateInput, SocialUserAppUploadInput, SocialUserAppVisibility, SocialUserProfileDetail } from './social';
 import type { AppRatingSummary, SubmitAppRatingInput, SubmitProductFeedbackInput } from './feedback';
 import type { SubmitUsageEventInput, SubmitUsageEventResult } from './usage-events';
 import type { ConversationDiagnosticReportPreview, PrepareConversationDiagnosticReportInput, SubmitConversationDiagnosticReportResult } from './diagnostics';
@@ -148,10 +148,13 @@ export interface ForgerDesktopApi {
   listFriends: () => Promise<CloudFriendship[]>;
   listMySocialApps: () => Promise<SocialUserAppList>;
   uploadSocialApp: (input: SocialUserAppUploadInput) => Promise<{ success: boolean; app?: SocialUserApp; share?: SocialUserAppShare; userMessage?: string; technicalCode?: string }>;
+  updateSocialApp: (input: SocialUserAppUpdateInput) => Promise<SocialUserApp>;
+  updateSocialAppVisibility: (userAppId: number, visibility: Exclude<SocialUserAppVisibility, 'restricted'>) => Promise<SocialUserApp>;
   createSocialAppShare: (userAppId: number) => Promise<SocialUserAppShare>;
   resolveSocialCode: (code: string) => Promise<{ app: SocialUserApp; share?: Record<string, unknown> }>;
   resolveSocialApp: (id: number) => Promise<{ app: SocialUserApp }>;
   getSocialProfile: (username: string) => Promise<SocialUserProfileDetail>;
+  getSocialProfileUrl: (username: string) => Promise<string>;
   installSocialApp: (input: { appId?: number; appSlug?: string; shareCode?: string; trustDecision?: 'not_reviewed' | 'reviewed' | 'skipped_review' }, locale?: string) => Promise<InstallAppResult & { appId?: string; download?: SocialUserAppDownload }>;
   searchFriends: (username: string) => Promise<CloudFriendUser[]>;
   sendFriendRequest: (username: string) => Promise<CloudFriendship>;

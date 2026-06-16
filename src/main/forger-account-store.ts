@@ -16,7 +16,12 @@ export const normalizeForgerAccountUser = (value: unknown): ForgerAccountSession
     return undefined;
   }
 
-  return {
+  const displayName = typeof record.display_name === 'string'
+    ? record.display_name
+    : typeof record.displayName === 'string'
+      ? record.displayName
+      : undefined;
+  const user: ForgerAccountSession['user'] = {
     id,
     email,
     username: typeof record.username === 'string' ? record.username : undefined,
@@ -27,6 +32,10 @@ export const normalizeForgerAccountUser = (value: unknown): ForgerAccountSession
     usernameChangedAt: typeof record.username_changed_at === 'string' ? record.username_changed_at : typeof record.usernameChangedAt === 'string' ? record.usernameChangedAt : undefined,
     usernameChangeAvailableAt: typeof record.username_change_available_at === 'string' ? record.username_change_available_at : typeof record.usernameChangeAvailableAt === 'string' ? record.usernameChangeAvailableAt : undefined,
   };
+  if (displayName !== undefined) {
+    user.displayName = displayName;
+  }
+  return user;
 };
 
 const normalizeSubscriptionTier = (value: unknown): SubscriptionTier => {

@@ -108,7 +108,9 @@ import type {
   WakeWordConfigInput,
   WakeWordRuntime,
   StopAppResult,
+  SocialUserAppUpdateInput,
   SocialUserAppUploadInput,
+  SocialUserAppVisibility,
   SubmitAppRatingInput,
   SubmitProductFeedbackInput,
   SubmitUsageEventInput,
@@ -882,6 +884,14 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
   ipcMain.handle(IPC_CHANNELS.listMySocialApps, async () => {
     return forgerBackendClient ? await forgerBackendClient.listMySocialApps() : { apps: [] };
   });
+  ipcMain.handle(IPC_CHANNELS.updateSocialApp, async (_event, input: SocialUserAppUpdateInput) => {
+    if (!forgerBackendClient) throw new Error('backend_client_missing');
+    return await forgerBackendClient.updateSocialApp(input);
+  });
+  ipcMain.handle(IPC_CHANNELS.updateSocialAppVisibility, async (_event, userAppId: number, visibility: Exclude<SocialUserAppVisibility, 'restricted'>) => {
+    if (!forgerBackendClient) throw new Error('backend_client_missing');
+    return await forgerBackendClient.updateSocialAppVisibility(userAppId, visibility);
+  });
   ipcMain.handle(IPC_CHANNELS.uploadSocialApp, async (_event, input: SocialUserAppUploadInput) => {
     const startedAt = new Date().toISOString();
     const taskId = `social-upload:${input.appId}:${Date.now()}`;
@@ -1011,6 +1021,10 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
   ipcMain.handle(IPC_CHANNELS.getSocialProfile, async (_event, username: string) => {
     if (!forgerBackendClient) throw new Error('backend_client_missing');
     return await forgerBackendClient.getSocialProfile(username);
+  });
+  ipcMain.handle(IPC_CHANNELS.getSocialProfileUrl, async (_event, username: string) => {
+    if (!forgerBackendClient) throw new Error('backend_client_missing');
+    return forgerBackendClient.socialProfileUrl(username);
   });
   ipcMain.handle(IPC_CHANNELS.installSocialApp, async (_event, input: { appId?: number; appSlug?: string; shareCode?: string; trustDecision?: 'not_reviewed' | 'reviewed' | 'skipped_review' }, locale?: string) => {
     return await installSocialAppRuntime(input, locale);

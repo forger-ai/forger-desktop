@@ -20,6 +20,23 @@ export interface PreparedPromptArguments {
   files: PreparedFileArgument[];
 }
 
+export class AppPromptStringTooLongError extends Error {
+  public readonly technicalCode = 'app_prompt_string_too_long';
+  public readonly argumentName: string;
+  public readonly maxLength: number;
+  public readonly actualLength: number;
+  public readonly userMessage: string;
+
+  public constructor(argumentName: string, maxLength: number, actualLength: number) {
+    super(`app_prompt_string_too_long:${argumentName}`);
+    this.name = 'AppPromptStringTooLongError';
+    this.argumentName = argumentName;
+    this.maxLength = maxLength;
+    this.actualLength = actualLength;
+    this.userMessage = `El texto enviado es demasiado largo para esta tarea (${actualLength}/${maxLength} caracteres).`;
+  }
+}
+
 export type TaskLocale = 'es' | 'en';
 
 type TaskMessageKey =
@@ -179,7 +196,7 @@ export const normalizeStringArgument = (argument: AppPromptTemplateArgument, val
   }
   const normalized = String(text);
   if (argument.maxLength && normalized.length > argument.maxLength) {
-    throw new Error(`app_prompt_string_too_long:${argument.name}`);
+    throw new AppPromptStringTooLongError(argument.name, argument.maxLength, normalized.length);
   }
   return normalized;
 };

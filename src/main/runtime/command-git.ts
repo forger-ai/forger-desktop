@@ -84,12 +84,46 @@ const requiresWindowsShell = (command: string): boolean => {
   return process.platform === 'win32' && /\.(cmd|bat)$/i.test(command);
 };
 
+const FLATTEN_RETRY_DELAYS_MS = [25, 100];
+
+const wait = async (ms: number): Promise<void> => {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+};
+
+const errorCode = (error: unknown): string | undefined =>
+  error && typeof error === 'object' && typeof (error as { code?: unknown }).code === 'string'
+    ? (error as { code: string }).code
+    : undefined;
+
+const shouldRetryFlattenMove = (error: unknown): boolean =>
+  ['EPERM', 'EACCES', 'ENOTEMPTY'].includes(errorCode(error) ?? '');
+
+const quoteWindowsShellValue = (value: string): string =>
+  `"${value.replace(/(["^&|<>%])/g, '^$1')}"`;
+
+const buildWindowsShellCommand = (command: string, args: string[]): { command: string; args: string[]; shell: boolean; shellStrategy: string } => {
+  const shellCommand = [quoteWindowsShellValue(command), ...args.map(quoteWindowsShellValue)].join(' ');
+  return {
+    command: process.env.ComSpec || 'cmd.exe',
+    args: ['/d', '/s', '/c', shellCommand],
+    shell: false,
+    shellStrategy: 'cmd-wrapper',
+  };
+};
+
+const buildSpawnCommand = (command: string, args: string[]): { command: string; args: string[]; shell: boolean; shellStrategy?: string } => {
+  if (requiresWindowsShell(command)) {
+    return buildWindowsShellCommand(command, args);
+  }
+  return { command, args, shell: false };
+};
+
 const runCommand = async (
   command: string,
   args: string[],
   options: CommandRunOptions,
 ): Promise<void> => {
-  const useShell = requiresWindowsShell(command);
+  const spawnCommand = buildSpawnCommand(command, args);
 
   if (options.log) {
     await appendInstallLog('command:start', {
@@ -99,18 +133,19 @@ const runCommand = async (
       command,
       args,
       cwd: options.cwd,
-      shell: useShell,
+      shell: spawnCommand.shell,
+      ...(spawnCommand.shellStrategy ? { shellStrategy: spawnCommand.shellStrategy } : {}),
     });
   }
 
   await new Promise<void>((resolve, reject) => {
-    const child = spawn(command, args, {
+    const child = spawn(spawnCommand.command, spawnCommand.args, {
       cwd: options.cwd,
       env: {
         ...process.env,
         ...(options.env ?? {}),
       },
-      shell: useShell,
+      shell: spawnCommand.shell,
       stdio: 'pipe',
     });
 
@@ -133,7 +168,8 @@ const runCommand = async (
           command,
           args,
           cwd: options.cwd,
-          shell: useShell,
+          shell: spawnCommand.shell,
+          ...(spawnCommand.shellStrategy ? { shellStrategy: spawnCommand.shellStrategy } : {}),
           error: serializeErrorForInstallLog(error),
           stdout: truncateForInstallLog(stdout),
           stderr: truncateForInstallLog(stderr),
@@ -151,7 +187,8 @@ const runCommand = async (
           command,
           args,
           cwd: options.cwd,
-          shell: useShell,
+          shell: spawnCommand.shell,
+          ...(spawnCommand.shellStrategy ? { shellStrategy: spawnCommand.shellStrategy } : {}),
           code,
           signal,
           stdout: truncateForInstallLog(stdout),
@@ -174,16 +211,16 @@ const runCommandCapture = async (
   args: string[],
   options: CommandCaptureOptions,
 ): Promise<CommandCaptureResult> => {
-  const useShell = requiresWindowsShell(command);
+  const spawnCommand = buildSpawnCommand(command, args);
 
   return await new Promise<CommandCaptureResult>((resolve, reject) => {
-    const child = spawn(command, args, {
+    const child = spawn(spawnCommand.command, spawnCommand.args, {
       cwd: options.cwd,
       env: {
         ...process.env,
         ...(options.env ?? {}),
       },
-      shell: useShell,
+      shell: spawnCommand.shell,
       stdio: 'pipe',
     });
 
@@ -251,17 +288,60 @@ const existsFile = async (filePath: string): Promise<boolean> => {
 const flattenSingleTopLevelDirectory = async (targetDir: string): Promise<void> => {
   const entries = await fs.readdir(targetDir, { withFileTypes: true });
   const visibleEntries = entries.filter((entry) => !entry.name.startsWith('.'));
+  const visibleDirectories = visibleEntries.filter((entry) => entry.isDirectory());
 
-  if (visibleEntries.length !== 1 || !visibleEntries[0].isDirectory()) {
+  let topEntry: (typeof visibleDirectories)[number] | undefined;
+  let children: string[] = [];
+
+  for (const candidate of visibleDirectories) {
+    const candidateFolder = path.join(targetDir, candidate.name);
+    const candidateChildren = await fs.readdir(candidateFolder);
+    const candidateChildNames = new Set(candidateChildren);
+    const siblingEntries = visibleEntries.filter((entry) => entry.name !== candidate.name);
+    if (siblingEntries.every((entry) => candidateChildNames.has(entry.name))) {
+      topEntry = candidate;
+      children = candidateChildren;
+      break;
+    }
+  }
+
+  if (!topEntry) {
     return;
   }
 
-  const topFolder = path.join(targetDir, visibleEntries[0].name);
-  const children = await fs.readdir(topFolder);
+  const topFolder = path.join(targetDir, topEntry.name);
+
+  await appendInstallLog('flatten:start', { operation: 'flatten', sourceName: topEntry.name, childCount: children.length });
   for (const child of children) {
-    await fs.rename(path.join(topFolder, child), path.join(targetDir, child));
+    const source = path.join(topFolder, child);
+    const target = path.join(targetDir, child);
+    await fs.rm(target, { recursive: true, force: true });
+
+    for (const delayMs of [0, ...FLATTEN_RETRY_DELAYS_MS]) {
+      if (delayMs > 0) {
+        await wait(delayMs);
+        await appendInstallLog('flatten:move_retry', { operation: 'flatten', sourceName: child, targetName: child, delayMs });
+      }
+
+      try {
+        await fs.rename(source, target);
+        break;
+      } catch (error) {
+        if (!shouldRetryFlattenMove(error)) {
+          throw error;
+        }
+        if (delayMs === FLATTEN_RETRY_DELAYS_MS[FLATTEN_RETRY_DELAYS_MS.length - 1]) {
+          await appendInstallLog('flatten:move_fallback', { operation: 'flatten', sourceName: child, targetName: child, errorCode: errorCode(error) });
+          await fs.rm(target, { recursive: true, force: true });
+          await fs.cp(source, target, { recursive: true });
+          await fs.rm(source, { recursive: true, force: true });
+          break;
+        }
+      }
+    }
   }
   await fs.rm(topFolder, { recursive: true, force: true });
+  await appendInstallLog('flatten:success', { operation: 'flatten', sourceName: topEntry.name, childCount: children.length });
 };
 
 const appendProcessPathEntry = (entry: string): void => {
@@ -846,5 +926,5 @@ const syncReleaseIntoInstalledApp = async (
   await removeTrackedFilesMissingFromStage(stageDir, installDir, preservedPaths);
 };
 
-  return { hashFileSha256, requiresWindowsShell, runCommand, runCommandCapture, zipDirectory, canRunCommand, existsFile, appendProcessPathEntry, findGitExecutableOutsidePath, makeDiscoveredGitAvailable, configureBundledGitEnvironment, resolveGitExecutableInRoot, ensureBundledGitAvailable, ensureGitAvailable, ensureGitMainBranch, ensureForgerLocalGitExcludes, ensureAppGitRepository, ensureUserModifiedBranch, getGitStatusLines, getUserVisibleGitStatusLines, getGitHead, getOriginalCommitSha, clearMacQuarantine, extractArchive, listZipEntries, validateArchiveEntries, normalizeRelativeInstallPath, collectPersistentInstallPaths, gitCommitAllExcept, copyReleaseContentsForUpdate, syncReleaseIntoInstalledApp };
+  return { hashFileSha256, requiresWindowsShell, buildWindowsShellCommand, runCommand, runCommandCapture, zipDirectory, canRunCommand, existsFile, appendProcessPathEntry, findGitExecutableOutsidePath, makeDiscoveredGitAvailable, configureBundledGitEnvironment, resolveGitExecutableInRoot, ensureBundledGitAvailable, ensureGitAvailable, ensureGitMainBranch, ensureForgerLocalGitExcludes, ensureAppGitRepository, ensureUserModifiedBranch, getGitStatusLines, getUserVisibleGitStatusLines, getGitHead, getOriginalCommitSha, clearMacQuarantine, extractArchive, listZipEntries, validateArchiveEntries, normalizeRelativeInstallPath, collectPersistentInstallPaths, gitCommitAllExcept, copyReleaseContentsForUpdate, syncReleaseIntoInstalledApp };
 };
