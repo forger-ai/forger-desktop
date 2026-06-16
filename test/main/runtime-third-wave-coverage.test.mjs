@@ -68,6 +68,8 @@ const withEnv = async (patch, operation) => {
   }
 };
 
+const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 class FakeChildProcess extends EventEmitter {
   stdout = new EventEmitter();
   stderr = new EventEmitter();
@@ -179,6 +181,30 @@ test('agent auth handles missing Codex CLI and disconnect removes only the manag
   assert.equal(disconnect.success, true);
   assert.equal(await fs.stat(path.join(root, 'codex-home', 'auth.json')).catch(() => null), null);
   assert.equal(calls.some((call) => call[0] === 'capture'), false);
+});
+
+test('agent auth launches Linux Codex login with managed Node PATH', async (t) => {
+  const { root, calls, controller } = await makeAgentAuthHarness();
+  t.after(async () => {
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  await fs.mkdir(path.join(root, 'codex-root', 'node_modules', '.bin'), { recursive: true });
+  await fs.mkdir(path.join(root, 'codex-root', 'node_modules', '@openai', 'codex'), { recursive: true });
+  await fs.writeFile(path.join(root, 'codex-root', 'node_modules', '.bin', 'codex'), '', 'utf8');
+  await fs.writeFile(
+    path.join(root, 'codex-root', 'node_modules', '@openai', 'codex', 'package.json'),
+    JSON.stringify({ version: '0.99.0' }),
+    'utf8',
+  );
+
+  const result = await withPlatform('linux', async () => await controller.connectCodexAuth());
+
+  assert.equal(result.success, true);
+  const runCall = calls.find((call) => call[0] === 'run' && call[2].join(' ') === 'login');
+  assert.ok(runCall);
+  assert.equal(runCall[3].env.CODEX_HOME, path.join(root, 'codex-home'));
+  assert.match(runCall[3].env.PATH, new RegExp(`(^|${escapeRegExp(path.delimiter)})${escapeRegExp(root)}(${escapeRegExp(path.delimiter)}|$)`));
+  assert.match(runCall[3].env.PATH, new RegExp(escapeRegExp(path.join(root, 'codex-root', 'node_modules', '.bin'))));
 });
 
 test('agent auth surfaces managed Claude status and does not mark disconnected sessions connected', async (t) => {

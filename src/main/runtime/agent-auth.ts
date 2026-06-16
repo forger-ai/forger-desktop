@@ -492,11 +492,10 @@ const connectCodexAuth = async (): Promise<{ success: boolean; userMessage: stri
       };
     }
 
+    const env = await buildManagedCodexAuthEnvironment(codexCliPath, codexHome);
     await runCommand(codexCliPath, ['login'], {
       cwd: app.getPath('userData'),
-      env: {
-        CODEX_HOME: codexHome,
-      },
+      env,
       log: {
         phase: 'codex_auth',
         label: 'codex login',
