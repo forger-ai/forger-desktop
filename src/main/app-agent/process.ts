@@ -1,7 +1,8 @@
-import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { CommandCaptureOptions, CommandResult, ResolvedCodexCommand } from './types';
+import { spawnProcess } from '../runtime/process-spawn';
 
 export const runCommandCapture = async (
   command: string,
@@ -9,10 +10,9 @@ export const runCommandCapture = async (
   options: CommandCaptureOptions,
 ): Promise<CommandResult> =>
   await new Promise<CommandResult>((resolve, reject) => {
-    const child = spawn(command, args, {
+    const child = spawnProcess(command, args, {
       cwd: options.cwd,
       env: { ...process.env, ...(options.env ?? {}) },
-      shell: process.platform === 'win32' && /\.(cmd|bat)$/i.test(command),
       stdio: ['pipe', 'pipe', 'pipe'],
       detached: process.platform !== 'win32',
     });

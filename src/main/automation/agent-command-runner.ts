@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { AgentRuntime, ClaudeEffort } from '../../shared/types';
@@ -9,6 +9,7 @@ import {
   createIsolatedCodexHome,
   removeIsolatedCodexHome,
 } from '../codex-run-isolation';
+import { spawnProcess } from '../runtime/process-spawn';
 
 const AUTOMATION_TIMEOUT_MS = 300_000;
 
@@ -322,7 +323,7 @@ const runCommandCapture = async (
   },
 ): Promise<CommandResult> => {
   return await new Promise<CommandResult>((resolve, reject) => {
-    const child: ChildProcessWithoutNullStreams = spawn(command, args, {
+    const child: ChildProcessWithoutNullStreams = spawnProcess(command, args, {
       cwd: options.cwd,
       env: {
         ...process.env,

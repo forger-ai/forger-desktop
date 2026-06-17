@@ -19,7 +19,7 @@ interface ConfigureUserDataDeps {
   path: typeof path;
 }
 
-const PLATFORM_KEY_BY_RUNTIME: Record<NodeJS.Platform, string> = {
+const PLATFORM_KEY_BY_RUNTIME: Record<string, string> = {
   darwin: 'darwin',
   win32: 'win32',
   linux: 'linux',
@@ -31,6 +31,20 @@ const PLATFORM_KEY_BY_RUNTIME: Record<NodeJS.Platform, string> = {
   cygwin: 'win32',
   netbsd: 'linux',
   haiku: 'linux',
+};
+
+const SUPPORTED_RUNTIME_PLATFORM_ALIASES = new Set(['darwin_arm64', 'darwin_x64', 'linux_x64', 'win32_x64']);
+
+export const resolveRuntimePlatformAlias = (
+  platform: NodeJS.Platform = process.platform,
+  arch: NodeJS.Architecture = process.arch,
+): string => {
+  const platformPrefix = PLATFORM_KEY_BY_RUNTIME[platform] ?? platform;
+  const alias = `${platformPrefix}_${arch}`;
+  if (!SUPPORTED_RUNTIME_PLATFORM_ALIASES.has(alias)) {
+    throw new Error(`unsupported_platform_${platform}_${arch}`);
+  }
+  return alias;
 };
 
 export const getDesktopUserDataName = (isDev: boolean): string => (isDev ? 'forger-desktop-dev' : 'forger-desktop');
@@ -61,10 +75,7 @@ export const createPathConfigController = (deps: PathConfigDeps) => {
     return match ? match[0] : '22';
   };
 
-  const resolvePlatformAlias = (): string => {
-    const platformPrefix = PLATFORM_KEY_BY_RUNTIME[process.platform] ?? process.platform;
-    return `${platformPrefix}_${process.arch}`;
-  };
+  const resolvePlatformAlias = (): string => resolveRuntimePlatformAlias();
 
   const getRegistryPath = () => path.join(app.getPath('userData'), 'app_registry.json');
   const getRegistryBackupPath = () => `${getRegistryPath()}.bak`;

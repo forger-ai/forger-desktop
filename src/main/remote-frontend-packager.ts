@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { mergePathEntry, spawnProcess } from './runtime/process-spawn';
 
 export interface RemoteFrontendAsset {
   path: string;
@@ -18,13 +18,12 @@ export const buildRemoteFrontend = async (input: {
 }): Promise<{ assets: RemoteFrontendAsset[]; hash: string }> => {
   await run(input.npmPath, ['run', 'build', '--', '--base=./'], {
     cwd: input.frontendDir,
-    env: {
+    env: mergePathEntry({
       ...process.env,
       VITE_FORGER_REMOTE_TUNNEL: 'true',
       VITE_FORGER_REMOTE_SESSION_ID: input.sessionId,
       VITE_FORGER_CLOUD_HANDSHAKE_URL: input.handshakeUrl,
-      PATH: `${path.dirname(input.nodePath)}${path.delimiter}${process.env.PATH ?? ''}`,
-    },
+    }, path.dirname(input.nodePath), path.delimiter),
   }, 180_000);
   const distDir = path.join(input.frontendDir, 'dist');
   const assets = await readAssets(distDir);
@@ -63,7 +62,7 @@ const contentType = (filePath: string): string => {
 
 const run = async (command: string, args: string[], options: { cwd: string; env: NodeJS.ProcessEnv }, timeoutMs: number): Promise<void> =>
   await new Promise((resolve, reject) => {
-    const child = spawn(command, args, { cwd: options.cwd, env: options.env, stdio: 'pipe', shell: process.platform === 'win32' });
+    const child = spawnProcess(command, args, { cwd: options.cwd, env: options.env, stdio: 'pipe' });
     let stderr = '';
     let settled = false;
     const timer = setTimeout(() => {

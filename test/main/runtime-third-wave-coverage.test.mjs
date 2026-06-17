@@ -945,7 +945,7 @@ test('git command controller captures stdout/stderr, logs command lifecycle, and
   assert.equal(calls.some((call) => call[0] === 'log' && call[1] === 'command:exit' && call[2].code === 7), true);
 });
 
-test('git command controller wraps Windows cmd shims with quoted paths', async () => {
+test('git command controller keeps Windows cmd shims as command and args for safe spawn', async () => {
   const calls = [];
   const { controller } = makeCommandGitHarness({
     appendInstallLog: async (event, payload = {}) => calls.push(['log', event, payload]),
@@ -969,13 +969,10 @@ test('git command controller wraps Windows cmd shims with quoted paths', async (
   });
 
   const spawnCall = calls.find((call) => call[0] === 'spawn');
-  assert.equal(spawnCall[1].toLowerCase().endsWith('cmd.exe'), true);
-  assert.deepEqual(spawnCall[2].slice(0, 3), ['/d', '/s', '/c']);
-  assert.match(spawnCall[2][3], /^""C:\\Forger Test\\runtime root\\runtimes\\node\\22\\win32_x64\\npm\.cmd" "install"/);
-  assert.match(spawnCall[2][3], /"@anthropic-ai\/claude-code@2\.1\.158""$/);
-  assert.equal(spawnCall[2][3].includes('\\"'), false);
+  assert.equal(spawnCall[1], npmCommand);
+  assert.deepEqual(spawnCall[2], ['install', '--no-audit', '--no-fund', '@anthropic-ai/claude-code@2.1.158']);
   assert.equal(spawnCall[4], false);
-  assert.equal(calls.some((call) => call[0] === 'log' && call[1] === 'command:start' && call[2].shellStrategy === 'cmd-wrapper'), true);
+  assert.equal(calls.some((call) => call[0] === 'log' && call[1] === 'command:start' && 'shellStrategy' in call[2]), false);
 });
 
 test('git command controller handles spawn errors, captures timeouts, and selects archive commands', async (t) => {
@@ -1025,7 +1022,6 @@ test('git command controller handles spawn errors, captures timeouts, and select
     },
   });
   await withPlatform('win32', async () => {
-    assert.equal(archiveHarness.controller.requiresWindowsShell('npm.cmd'), true);
     await archiveHarness.controller.zipDirectory(path.join(root, 'src'), path.join(root, 'out.zip'));
   });
   await withPlatform('darwin', async () => {
@@ -2493,6 +2489,53 @@ test('runtime install extracts checked archives once and resolves flattened Pyth
   assert.equal(calls.some((call) => call[0] === 'quarantine'), true);
 });
 
+test('runtime install resolves Windows node archives by token into canonical platform root', async (t) => {
+  const root = await tmpRoot('runtime-install-windows-node');
+  const archivePath = path.join(root, 'resources', 'node', '22.0.0', 'node-x86_64-pc-windows-msvc.zip');
+  const calls = [];
+  t.after(async () => {
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  await fs.mkdir(path.dirname(archivePath), { recursive: true });
+  await fs.writeFile(archivePath, 'archive', 'utf8');
+  const controller = createRuntimeInstallController({
+    DEFAULT_NODE_VERSION: '22.0.0',
+    DEFAULT_PYTHON_VERSION: '3.12.0',
+    app: { getPath: () => root },
+    clearMacQuarantine: async () => undefined,
+    extractArchive: async (_archive, destination) => {
+      calls.push(['extract', destination]);
+      await fs.mkdir(destination, { recursive: true });
+      await fs.writeFile(path.join(destination, 'node.exe'), '', 'utf8');
+      await fs.writeFile(path.join(destination, 'npm.cmd'), '', 'utf8');
+    },
+    findRuntimeArchive: async (baseDir, alias) => {
+      calls.push(['archive', baseDir, alias]);
+      return archivePath;
+    },
+    findRuntimeChecksumFile: async () => null,
+    fs,
+    getBundledResourcesRoot: () => path.join(root, 'resources'),
+    getRuntimesRoot: () => path.join(root, 'runtimes'),
+    getTempRoot: () => path.join(root, 'tmp'),
+    hashFileSha256: async () => 'archive-sha',
+    installBackendDependenciesWithUv: async () => undefined,
+    normalizeNodeRuntimeVersion: (value) => value,
+    normalizeVersionForFolder: (value) => value,
+    path,
+    resolvePlatformAlias: () => 'win32_x64',
+    runCommand: async () => undefined,
+    runtimeLocks: new Map(),
+  });
+
+  const runtime = await controller.ensureRuntimeInstalled('node', '22.0.0');
+
+  assert.equal(runtime.rootDir, path.join(root, 'runtimes', 'node', '22.0.0', 'win32_x64'));
+  assert.equal(runtime.node, path.join(root, 'runtimes', 'node', '22.0.0', 'win32_x64', 'node.exe'));
+  assert.equal(runtime.npm, path.join(root, 'runtimes', 'node', '22.0.0', 'win32_x64', 'npm.cmd'));
+  assert.equal(calls.some((call) => call[0] === 'archive' && call[2] === 'win32_x64'), true);
+});
+
 test('runtime install rejects checksum mismatches and missing runtime executables', async (t) => {
   const root = await tmpRoot('runtime-install-mismatch');
   const archivePath = path.join(root, 'resources', 'node', '22.0.0', 'node.tgz');
@@ -2619,7 +2662,6 @@ const makeInstalledRuntimeHarness = (overrides = {}) => {
     parseForgerUrl: () => null,
     path,
     registry,
-    requiresWindowsShell: () => false,
     resolveInstalledManifest: async () => ({ services: [] }),
     runCommand: async (command, args) => calls.push(['run', command, args]),
     runningApps: new Map(),

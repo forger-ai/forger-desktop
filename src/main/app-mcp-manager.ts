@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import path from 'node:path';
+import { mergePathEntries, spawnProcess } from './runtime/process-spawn';
 
 export interface AppMcpInstalledAppRecord {
   appId: string;
@@ -211,16 +212,12 @@ export class AppMcpManager {
         healthUrl: config.healthUrl,
         pythonRuntime: pythonRuntime.rootDir,
       });
-      const child = spawn(config.command, config.args, {
+      const child = spawnProcess(config.command, config.args, {
         cwd: config.cwd,
-        env: {
+        env: mergePathEntries({
           ...process.env,
           ...config.environment,
-          PATH: [
-            ...pathEntries,
-            process.env.PATH ?? '',
-          ].filter(Boolean).join(path.delimiter),
-        },
+        }, pathEntries, path.delimiter),
         stdio: 'pipe',
       });
       let processStartErrorListener: ((error: Error) => void) | undefined;
