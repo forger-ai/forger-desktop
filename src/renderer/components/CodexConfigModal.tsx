@@ -27,7 +27,7 @@ import {
   Typography,
 } from '@mui/material';
 import type { AppDictionary } from '@renderer/i18n';
-import type { CodexAuthStatus } from '@shared/types';
+import type { CodexAuthStatus, CodexRateLimitBucket } from '@shared/types';
 
 interface CodexConfigModalProps {
   open: boolean;
@@ -49,6 +49,7 @@ export function CodexConfigModal({
   onRefresh,
 }: CodexConfigModalProps) {
   const [acceptedConditions, setAcceptedConditions] = useState(false);
+  const usageBucket = status.rateLimits?.primary ?? status.rateLimits?.buckets[0];
 
   useEffect(() => {
     if (!open) {
@@ -125,6 +126,9 @@ export function CodexConfigModal({
               />
             </>
           )}
+          {status.authenticated && usageBucket ? (
+            <CodexUsagePanel bucket={usageBucket} t={t} />
+          ) : null}
           <Accordion disableGutters>
             <AccordionSummary expandIcon={<ExpandMoreRounded />}>
               <Typography fontWeight={700}>{t.settings.technicalDetails}</Typography>
@@ -164,3 +168,32 @@ export function CodexConfigModal({
     </Dialog>
   );
 }
+
+const CodexUsagePanel = ({ bucket, t }: { bucket: CodexRateLimitBucket; t: AppDictionary }) => {
+  const usedPercent = Math.round(bucket.primary?.usedPercent ?? 0);
+  const remainingPercent = Math.round(bucket.primary?.remainingPercent ?? Math.max(0, 100 - usedPercent));
+  const resetLabel = bucket.primary?.resetsAt
+    ? t.settings.codexUsageReset(new Date(bucket.primary.resetsAt * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }))
+    : null;
+  const bucketName = bucket.limitName || bucket.limitId;
+  return (
+    <Alert severity={bucket.rateLimitReachedType ? 'warning' : usedPercent >= 90 ? 'warning' : 'info'}>
+      <Stack spacing={1}>
+        <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between">
+          <Typography fontWeight={700}>{t.settings.codexUsageTitle}</Typography>
+          {bucket.rateLimitReachedType ? <Chip size="small" color="warning" label={t.settings.codexUsageLimitReached} /> : null}
+        </Stack>
+        <LinearProgress variant="determinate" value={usedPercent} />
+        <Stack direction="row" spacing={1} flexWrap="wrap">
+          <Chip size="small" label={t.settings.codexUsageUsed(usedPercent)} />
+          <Chip size="small" label={t.settings.codexUsageRemaining(remainingPercent)} />
+          {bucket.primary?.windowDurationMins ? <Chip size="small" label={t.settings.codexUsageWindow(bucket.primary.windowDurationMins)} /> : null}
+          {resetLabel ? <Chip size="small" label={resetLabel} /> : null}
+        </Stack>
+        <Typography variant="caption" color="text.secondary">
+          {t.settings.codexUsageBucket(bucketName)}
+        </Typography>
+      </Stack>
+    </Alert>
+  );
+};

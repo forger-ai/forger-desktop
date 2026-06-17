@@ -29,6 +29,8 @@ export const enSections = {
       configureIntelligenceProvider: 'Connect provider',
       quotaOpenDashboard: 'View usage and credits',
       quotaCodexRequired: 'The usage dashboard is specific to Codex. Connect ChatGPT/Codex to view it.',
+      quotaLoading: 'Checking Codex usage...',
+      quotaUnavailable: 'I could not read Codex usage right now.',
       providerSelectorLabel: 'Agent provider',
       modelSelectorLabel: 'Model',
       effortSelectorLabel: 'Thinking effort',

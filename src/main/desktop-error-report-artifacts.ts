@@ -1,7 +1,9 @@
 import type fs from 'node:fs/promises';
+import path from 'node:path';
 import type { DesktopErrorReportFileSummary, DesktopErrorReportPreview } from '../shared/types';
 import { normalizeErrorReportDiagnostic } from '../shared/error-diagnostics';
 import { sanitizeReportPayload, type ReportSanitizerRoot } from '../shared/report-sanitizer';
+import { getRunLogPath } from './chat/progress-errors';
 
 const MAX_APP_ERROR_LOG_BYTES = 512 * 1024;
 const MAX_APP_ERROR_LOG_LINES = 80;
@@ -30,14 +32,20 @@ interface PrepareDesktopErrorReportOptions {
   arch: string;
   getInstallLogPath: () => string;
   getDesktopLogPath?: () => string;
+  getMetadataRoot?: () => string;
   roots: ReportSanitizerRoot[];
 }
 
 interface AppInstallLogExcerpt {
-  source: 'install.log' | 'forger-desktop.jsonl';
+  source: 'install.log' | 'forger-desktop.jsonl' | 'run.log';
   bytesRead: number;
   truncatedFromStart: boolean;
   lines: string[];
+}
+
+interface ChatRunLogExcerpt extends AppInstallLogExcerpt {
+  source: 'run.log';
+  runId: string;
 }
 
 export const prepareDesktopErrorReport = async (
@@ -66,7 +74,7 @@ export const prepareDesktopErrorReport = async (
 };
 
 export const buildDesktopErrorReportAttachments = async (
-  options: Pick<PrepareDesktopErrorReportOptions, 'fs' | 'getInstallLogPath' | 'getDesktopLogPath' | 'roots'>,
+  options: Pick<PrepareDesktopErrorReportOptions, 'fs' | 'getInstallLogPath' | 'getDesktopLogPath' | 'getMetadataRoot' | 'roots'>,
   input: DesktopErrorReportPreview,
 ): Promise<DesktopErrorReportAttachmentUpload[]> => {
   const attachments: DesktopErrorReportAttachmentUpload[] = [];
@@ -98,6 +106,20 @@ export const buildDesktopErrorReportAttachments = async (
     attachments.push(buildAppInstallLogAttachment({
       excerpt: appInstallLogExcerpt,
       roots: options.roots,
+    }));
+  }
+  const chatRunLogExcerpt = await readChatRunLogLines({
+    fs: options.fs,
+    getMetadataRoot: options.getMetadataRoot,
+    report: input,
+  });
+  if (chatRunLogExcerpt) {
+    attachments.push(buildLogAttachment({
+      excerpt: chatRunLogExcerpt,
+      roots: options.roots,
+      kind: 'run_log',
+      filename: `run-log-${safeFilenameSegment(chatRunLogExcerpt.runId)}.log`,
+      contentType: 'text/plain',
     }));
   }
   attachments.push(...promotedArtifactAttachments(input.sensitiveDetails, options.roots));
@@ -197,6 +219,7 @@ const buildLogAttachment = (input: {
   roots: ReportSanitizerRoot[];
   kind: DesktopErrorReportFileSummary['kind'];
   filename: string;
+  contentType?: string;
 }): DesktopErrorReportAttachmentUpload => {
   const raw = `${input.excerpt.lines.join('\n')}\n`;
   const text = sanitizeReportPayload(raw, {
@@ -206,13 +229,39 @@ const buildLogAttachment = (input: {
   return {
     kind: input.kind,
     filename: input.filename,
-    contentType: 'application/x-ndjson',
+    contentType: input.contentType ?? 'application/x-ndjson',
     originalByteSize: Buffer.byteLength(raw, 'utf8'),
     sanitizedByteSize: Buffer.byteLength(text, 'utf8'),
     lineCount: input.excerpt.lines.length,
     truncated: input.excerpt.truncatedFromStart,
     text,
   };
+};
+
+const readChatRunLogLines = async (input: {
+  fs: FsPromises;
+  getMetadataRoot?: () => string;
+  report: DesktopErrorReportPreview;
+}): Promise<ChatRunLogExcerpt | null> => {
+  if (input.report.operation !== 'desktop-chat.run' || !input.getMetadataRoot) {
+    return null;
+  }
+  const runId = typeof input.report.details?.runId === 'string' ? input.report.details.runId : null;
+  if (!runId) {
+    return null;
+  }
+  const safeRunId = safeFilenameSegment(runId);
+  const excerpt = await readRecentLogLines({
+    fs: input.fs,
+    logPath: getRunLogPath(input.getMetadataRoot(), safeRunId),
+    source: 'run.log',
+  });
+  return excerpt ? { ...excerpt, source: 'run.log', runId: safeRunId } : null;
+};
+
+const safeFilenameSegment = (value: string): string => {
+  const safe = path.basename(value.split(/[\\/]/).pop() ?? '').replace(/[^a-zA-Z0-9._-]/g, '_');
+  return safe || 'run';
 };
 
 const promotedArtifactAttachments = (

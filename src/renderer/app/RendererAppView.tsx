@@ -289,6 +289,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     handleStopChatRun,
     handleRespondPermission,
     handleRespondQuestion,
+    refreshCodexAuthStatus,
     prepareConversationDiagnosticReport,
     automations,
     selectedAutomationId,
@@ -923,6 +924,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             selectedNetworkAccess={selectedChatNetworkAccess}
             onSelectNetworkAccess={setSelectedChatNetworkAccess}
             onOpenCodexUsageDashboard={() => void getDesktopApi().openCodexUsageDashboard()}
+            onRefreshCodexUsage={refreshCodexAuthStatus}
             assistantAvatarSrc={chatBotPictureSrc}
             isSending={activeConversationRunActive}
             isResponding={activeConversationRunActive}
