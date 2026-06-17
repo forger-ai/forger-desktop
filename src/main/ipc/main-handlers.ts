@@ -1153,6 +1153,7 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
       arch: process.arch,
       getInstallLogPath,
       getDesktopLogPath,
+      getMetadataRoot: getForgerMetadataRoot,
       roots,
     }, input);
     if (attachments.length === 0) {
@@ -1177,6 +1178,7 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
       arch: process.arch,
       getInstallLogPath,
       getDesktopLogPath,
+      getMetadataRoot: getForgerMetadataRoot,
       roots,
     }, input);
     const attachments = cachedAttachments.length > 0 ? cachedAttachments : preparedAttachments;

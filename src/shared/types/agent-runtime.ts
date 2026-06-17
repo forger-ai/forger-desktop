@@ -4,6 +4,30 @@ export interface CodexAuthStatus {
   authFilePath: string;
   codexHome: string;
   codexCliPath?: string;
+  rateLimits?: CodexRateLimitsStatus;
+}
+
+export interface CodexRateLimitWindow {
+  usedPercent?: number;
+  remainingPercent?: number;
+  windowDurationMins?: number;
+  resetsAt?: number;
+}
+
+export interface CodexRateLimitBucket {
+  limitId: string;
+  limitName?: string | null;
+  planType?: string | null;
+  primary?: CodexRateLimitWindow;
+  secondary?: CodexRateLimitWindow | null;
+  rateLimitReachedType?: string | null;
+  credits?: Record<string, unknown> | null;
+}
+
+export interface CodexRateLimitsStatus {
+  primary?: CodexRateLimitBucket;
+  buckets: CodexRateLimitBucket[];
+  checkedAt: string;
 }
 
 export type AgentProvider = 'codex' | 'claude';
@@ -74,6 +98,7 @@ export interface DesktopErrorReportFileSummary {
   kind:
     | 'install_log'
     | 'desktop_log'
+    | 'run_log'
     | 'runtime_status'
     | 'app_mcp_log'
     | 'agent_run'

@@ -16,6 +16,7 @@ import {
   Drawer,
   FormControl,
   IconButton,
+  LinearProgress,
   List,
   ListItem,
   ListItemButton,
@@ -35,6 +36,8 @@ import type {
   AppSummary,
   ChatMode,
   ChatQuestionRequest,
+  CodexAuthStatus,
+  CodexRateLimitBucket,
   ClaudeEffort,
   CodexModelOption,
   CodexReasoningEffort,
@@ -110,6 +113,44 @@ const readFileAsBase64 = async (file: File): Promise<string> =>
     reader.readAsDataURL(file);
   });
 
+const CODEX_USAGE_TOOLTIP_CACHE_MS = 60_000;
+
+const CodexUsageTooltipContent = ({
+  bucket,
+  loading,
+  t,
+}: {
+  bucket: CodexRateLimitBucket;
+  loading: boolean;
+  t: AppDictionary;
+}) => {
+  const usedPercent = Math.round(bucket.primary?.usedPercent ?? 0);
+  const remainingPercent = Math.round(bucket.primary?.remainingPercent ?? Math.max(0, 100 - usedPercent));
+  const resetLabel = bucket.primary?.resetsAt
+    ? t.settings.codexUsageReset(new Date(bucket.primary.resetsAt * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }))
+    : null;
+  const bucketName = bucket.limitName || bucket.limitId;
+
+  return (
+    <Stack spacing={0.75} sx={{ minWidth: 220, py: 0.25 }}>
+      <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between">
+        <Typography variant="caption" fontWeight={700}>{t.settings.codexUsageTitle}</Typography>
+        {loading ? <CircularProgress color="inherit" size={12} /> : null}
+      </Stack>
+      <LinearProgress color={bucket.rateLimitReachedType || usedPercent >= 90 ? 'warning' : 'primary'} variant="determinate" value={usedPercent} />
+      <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
+        <Chip size="small" label={t.settings.codexUsageUsed(usedPercent)} />
+        <Chip size="small" label={t.settings.codexUsageRemaining(remainingPercent)} />
+        {bucket.primary?.windowDurationMins ? <Chip size="small" label={t.settings.codexUsageWindow(bucket.primary.windowDurationMins)} /> : null}
+        {resetLabel ? <Chip size="small" label={resetLabel} /> : null}
+      </Stack>
+      <Typography variant="caption" color="inherit">
+        {bucket.rateLimitReachedType ? t.settings.codexUsageLimitReached : t.settings.codexUsageBucket(bucketName)}
+      </Typography>
+    </Stack>
+  );
+};
+
 interface ChatViewProps {
   t: AppDictionary;
   conversationTitle: string;
@@ -161,6 +202,7 @@ interface ChatViewProps {
   selectedNetworkAccess: boolean;
   onSelectNetworkAccess: (networkAccess: boolean) => void;
   onOpenCodexUsageDashboard: () => void;
+  onRefreshCodexUsage: () => Promise<CodexAuthStatus>;
   assistantAvatarSrc: string;
   isSending: boolean;
   isResponding: boolean;
@@ -227,6 +269,7 @@ export function ChatView({
   selectedNetworkAccess,
   onSelectNetworkAccess,
   onOpenCodexUsageDashboard,
+  onRefreshCodexUsage,
   assistantAvatarSrc,
   isSending,
   isResponding,
@@ -249,12 +292,16 @@ export function ChatView({
   const [respondingQuestionRequestIds, setRespondingQuestionRequestIds] = useState<Set<string>>(new Set());
   const [stopBusy, setStopBusy] = useState(false);
   const [runtimeMenuOpen, setRuntimeMenuOpen] = useState(false);
+  const [codexUsageStatus, setCodexUsageStatus] = useState<CodexAuthStatus | null>(null);
+  const [codexUsageLoading, setCodexUsageLoading] = useState(false);
+  const [codexUsageError, setCodexUsageError] = useState(false);
   const [draftMode, setDraftMode] = useState<ChatMode>('create_app');
   const [draftTargetAppId, setDraftTargetAppId] = useState('');
   const inputRef = useRef<HTMLDivElement | null>(null);
   const composerAnchorRef = useRef<HTMLDivElement | null>(null);
   const messagesScrollRef = useRef<HTMLDivElement | null>(null);
   const shouldAutoScrollRef = useRef(true);
+  const codexUsageCheckedAtRef = useRef(0);
   const effectiveProvider = selectedProvider === 'auto' ? resolvedProviderForAuto : selectedProvider;
   const activeQuestionAction = useMemo(
     () => [...messages].reverse().find((message) => (
@@ -278,6 +325,41 @@ export function ChatView({
   const activeModelValue = effectiveProvider === 'claude' ? selectedClaudeModel : selectedModel;
   const activeEffortOptions = effectiveProvider === 'claude' ? claudeEffortOptions : reasoningOptions;
   const activeEffortValue = effectiveProvider === 'claude' ? selectedClaudeEffort : selectedReasoningEffort;
+  const codexUsageBucket = codexUsageStatus?.rateLimits?.primary ?? codexUsageStatus?.rateLimits?.buckets[0];
+  const refreshCodexUsageForTooltip = async () => {
+    if (!codexProviderConfigured || codexUsageLoading) {
+      return;
+    }
+    const hasFreshUsage = codexUsageBucket && Date.now() - codexUsageCheckedAtRef.current < CODEX_USAGE_TOOLTIP_CACHE_MS;
+    if (hasFreshUsage) {
+      return;
+    }
+    setCodexUsageLoading(true);
+    setCodexUsageError(false);
+    try {
+      const nextStatus = await onRefreshCodexUsage();
+      setCodexUsageStatus(nextStatus);
+      codexUsageCheckedAtRef.current = Date.now();
+    } catch {
+      setCodexUsageError(true);
+    } finally {
+      setCodexUsageLoading(false);
+    }
+  };
+  const codexUsageTooltipTitle = !codexProviderConfigured ? (
+    t.sections.chat.quotaCodexRequired
+  ) : codexUsageBucket ? (
+    <CodexUsageTooltipContent bucket={codexUsageBucket} loading={codexUsageLoading} t={t} />
+  ) : codexUsageLoading ? (
+    <Stack direction="row" spacing={1} alignItems="center">
+      <CircularProgress color="inherit" size={14} />
+      <Typography variant="caption">{t.sections.chat.quotaLoading}</Typography>
+    </Stack>
+  ) : codexUsageError ? (
+    <Typography variant="caption">{t.sections.chat.quotaUnavailable}</Typography>
+  ) : (
+    t.sections.chat.quotaOpenDashboard
+  );
 
   useEffect(() => {
     setDraftMode('create_app');
@@ -959,8 +1041,8 @@ export function ChatView({
               </Stack>
 
               <Stack direction="row" spacing={0.75} alignItems="center">
-                <Tooltip title={codexProviderConfigured ? t.sections.chat.quotaOpenDashboard : t.sections.chat.quotaCodexRequired}>
-                  <span>
+                <Tooltip title={codexUsageTooltipTitle}>
+                  <span onMouseEnter={() => void refreshCodexUsageForTooltip()} onFocus={() => void refreshCodexUsageForTooltip()}>
                     <IconButton size="small" onClick={onOpenCodexUsageDashboard} disabled={!codexProviderConfigured}>
                       <DonutLargeRounded fontSize="small" />
                     </IconButton>

@@ -11,6 +11,9 @@ import type {
 import type {
   ClaudeAuthStatus,
   CodexAuthStatus,
+  CodexRateLimitBucket,
+  CodexRateLimitsStatus,
+  CodexRateLimitWindow,
   FailureDiagnosticFields,
 } from '../../shared/types';
 import type { SpawnProcess } from './process-spawn';
@@ -19,6 +22,12 @@ interface CommandCaptureResult {
   code?: number | null;
   stdout: string;
   stderr: string;
+}
+
+interface JsonRpcResponse {
+  id?: unknown;
+  result?: unknown;
+  error?: { code?: unknown; message?: unknown };
 }
 
 interface AgentAuthDeps {
@@ -61,6 +70,7 @@ export const createAgentAuthController = (deps: AgentAuthDeps) => {
   const { path, fs, spawn, app, getCodexHome, getForgerMetadataRoot, registry, resolveInstalledManifest, findManifestService, translateManifestEnvironment, ensureRuntimeInstalled, DEFAULT_NODE_VERSION, getCodexRoot, CODEX_CLI_VERSION, runCommand, runCommandCapture, buildCodexAuthEnvironment, classifyCodexAuthOutput, extractAllowedCodexAuthUrls, appendInstallLog, getLogsRoot, getTempRoot, serializeErrorForInstallLog, shell, buildMacTerminalLoginScript, buildMacTerminalScriptLaunchCommand, failureDiagnostic, CLAUDE_CODE_VERSION, getClaudeRoot, canRunCommand, markProviderConnected, findExistingFile, truncateForInstallLog } = deps;
 const escapeWindowsBatchValue = (value: string): string => value.replace(/%/g, '%%').replace(/"/g, '""');
 const quotePowerShellSingle = (value: string): string => `'${value.replace(/'/g, "''")}'`;
+const CODEX_RATE_LIMITS_TIMEOUT_MS = 8_000;
 
 const getCodexAuthFilePath = (): string => path.join(getCodexHome(), 'auth.json');
 
@@ -239,6 +249,169 @@ const buildManagedCodexAuthEnvironment = async (
   });
 };
 
+const normalizePercent = (value: unknown): number | undefined => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return undefined;
+  }
+  return Math.max(0, Math.min(100, value));
+};
+
+const normalizeRateLimitWindow = (value: unknown): CodexRateLimitWindow | undefined => {
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const usedPercent = normalizePercent(record.usedPercent);
+  const windowDurationMins = typeof record.windowDurationMins === 'number' && Number.isFinite(record.windowDurationMins)
+    ? Math.max(0, record.windowDurationMins)
+    : undefined;
+  const resetsAt = typeof record.resetsAt === 'number' && Number.isFinite(record.resetsAt)
+    ? record.resetsAt
+    : undefined;
+  return {
+    ...(usedPercent !== undefined ? { usedPercent, remainingPercent: Math.max(0, 100 - usedPercent) } : {}),
+    ...(windowDurationMins !== undefined ? { windowDurationMins } : {}),
+    ...(resetsAt !== undefined ? { resetsAt } : {}),
+  };
+};
+
+const normalizeRateLimitBucket = (value: unknown): CodexRateLimitBucket | null => {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  const limitId = typeof record.limitId === 'string' && record.limitId.trim() ? record.limitId.trim() : null;
+  if (!limitId) {
+    return null;
+  }
+  const primary = normalizeRateLimitWindow(record.primary);
+  const secondary = normalizeRateLimitWindow(record.secondary);
+  return {
+    limitId,
+    limitName: typeof record.limitName === 'string' ? record.limitName : null,
+    planType: typeof record.planType === 'string' ? record.planType : null,
+    ...(primary ? { primary } : {}),
+    secondary: secondary ?? null,
+    rateLimitReachedType: typeof record.rateLimitReachedType === 'string' ? record.rateLimitReachedType : null,
+    credits: record.credits && typeof record.credits === 'object' ? record.credits as Record<string, unknown> : null,
+  };
+};
+
+const normalizeCodexRateLimits = (value: unknown): CodexRateLimitsStatus | undefined => {
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const primary = normalizeRateLimitBucket(record.rateLimits);
+  const bucketMap = record.rateLimitsByLimitId && typeof record.rateLimitsByLimitId === 'object'
+    ? Object.values(record.rateLimitsByLimitId as Record<string, unknown>)
+    : [];
+  const buckets = bucketMap
+    .map(normalizeRateLimitBucket)
+    .filter((bucket): bucket is CodexRateLimitBucket => Boolean(bucket));
+  const dedupedBuckets = new Map<string, CodexRateLimitBucket>();
+  for (const bucket of [primary, ...buckets]) {
+    if (bucket) {
+      dedupedBuckets.set(bucket.limitId, bucket);
+    }
+  }
+  const normalizedBuckets = [...dedupedBuckets.values()];
+  return primary || normalizedBuckets.length > 0
+    ? { ...(primary ? { primary } : {}), buckets: normalizedBuckets, checkedAt: new Date().toISOString() }
+    : undefined;
+};
+
+const readCodexAppServerRateLimits = async (
+  codexCliPath: string,
+  env: NodeJS.ProcessEnv,
+): Promise<CodexRateLimitsStatus | undefined> => {
+  return await new Promise<CodexRateLimitsStatus | undefined>((resolve, reject) => {
+    const child = spawn(codexCliPath, ['app-server', '--listen', 'stdio://'], {
+      cwd: app.getPath('userData'),
+      env,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      detached: false,
+    });
+    let stdoutBuffer = '';
+    let stderr = '';
+    let settled = false;
+    const timeout = setTimeout(() => {
+      finalizeReject(new Error('codex_rate_limits_timeout'));
+    }, CODEX_RATE_LIMITS_TIMEOUT_MS);
+
+    const cleanup = (): void => {
+      clearTimeout(timeout);
+      child.stdout.removeAllListeners('data');
+      child.stderr.removeAllListeners('data');
+      child.removeAllListeners('error');
+      child.removeAllListeners('exit');
+      child.kill();
+    };
+    const finalizeResolve = (value: CodexRateLimitsStatus | undefined): void => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(value);
+    };
+    const finalizeReject = (error: unknown): void => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(error);
+    };
+    const send = (payload: Record<string, unknown>): void => {
+      if (!child.stdin || child.stdin.destroyed) {
+        throw new Error('codex_app_server_stdin_unavailable');
+      }
+      child.stdin.write(`${JSON.stringify(payload)}\n`);
+    };
+    const handleResponse = (line: string): void => {
+      if (!line.trim()) return;
+      let parsed: JsonRpcResponse;
+      try {
+        parsed = JSON.parse(line) as JsonRpcResponse;
+      } catch {
+        return;
+      }
+      if (parsed.id !== 2) {
+        return;
+      }
+      if (parsed.error) {
+        finalizeReject(new Error(typeof parsed.error.message === 'string' ? parsed.error.message : 'codex_rate_limits_failed'));
+        return;
+      }
+      finalizeResolve(normalizeCodexRateLimits(parsed.result));
+    };
+
+    child.stdout.on('data', (chunk: Buffer | string) => {
+      stdoutBuffer += chunk.toString();
+      const lines = stdoutBuffer.split(/\r?\n/);
+      stdoutBuffer = lines.pop() ?? '';
+      for (const line of lines) {
+        handleResponse(line);
+      }
+    });
+    child.stderr.on('data', (chunk: Buffer | string) => {
+      stderr += chunk.toString();
+    });
+    child.on('error', finalizeReject);
+    child.on('exit', (code) => {
+      if (!settled) {
+        finalizeReject(new Error(`codex_app_server_exited_${code ?? 'unknown'}${stderr ? `: ${stderr.slice(0, 200)}` : ''}`));
+      }
+    });
+
+    try {
+      const appVersion = typeof app.getVersion === 'function' ? app.getVersion() : 'unknown';
+      send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { clientInfo: { name: 'forger-desktop', version: appVersion }, capabilities: {} } });
+      send({ jsonrpc: '2.0', method: 'initialized', params: {} });
+      send({ jsonrpc: '2.0', id: 2, method: 'account/rateLimits/read' });
+    } catch (error) {
+      finalizeReject(error);
+    }
+  });
+};
+
 const getCodexAuthStatus = async (): Promise<CodexAuthStatus> => {
   const authFilePath = getCodexAuthFilePath();
   const codexHome = getCodexHome();
@@ -283,6 +456,26 @@ const getCodexAuthStatus = async (): Promise<CodexAuthStatus> => {
     }
   }
 
+  let rateLimits: CodexRateLimitsStatus | undefined;
+  if (authenticated && codexCliPath) {
+    try {
+      const env = await buildManagedCodexAuthEnvironment(codexCliPath, codexHome);
+      rateLimits = await readCodexAppServerRateLimits(codexCliPath, env);
+      await appendInstallLog('codex_auth:rate_limits_checked', {
+        codexHome,
+        codexCliPath,
+        bucketCount: rateLimits?.buckets.length ?? 0,
+        primary: rateLimits?.primary,
+      });
+    } catch (error) {
+      await appendInstallLog('codex_auth:rate_limits_failed', {
+        codexHome,
+        codexCliPath,
+        error: serializeErrorForInstallLog(error),
+      });
+    }
+  }
+
   if (authenticated) {
     await markProviderConnected?.('codex');
   }
@@ -293,6 +486,7 @@ const getCodexAuthStatus = async (): Promise<CodexAuthStatus> => {
     authFilePath,
     codexHome,
     codexCliPath: codexCliPath ?? undefined,
+    rateLimits,
   };
 };
 

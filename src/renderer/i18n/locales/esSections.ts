@@ -29,6 +29,8 @@ export const esSections = {
       configureIntelligenceProvider: 'Conectar proveedor',
       quotaOpenDashboard: 'Ver uso y créditos',
       quotaCodexRequired: 'El panel de uso es específico de Codex. Conecta ChatGPT/Codex para verlo.',
+      quotaLoading: 'Consultando uso de Codex...',
+      quotaUnavailable: 'No pude leer el uso de Codex ahora.',
       providerSelectorLabel: 'Proveedor del agente',
       modelSelectorLabel: 'Modelo',
       effortSelectorLabel: 'Nivel de thinking',

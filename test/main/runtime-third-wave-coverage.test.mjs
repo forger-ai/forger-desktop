@@ -165,6 +165,62 @@ test('agent auth status reports installed authenticated Codex and marks provider
   assert.ok(calls.some((call) => call[0] === 'connected' && call[1] === 'codex'));
 });
 
+test('agent auth status reads Codex app-server rate limits when authenticated', async (t) => {
+  const appServerMessages = [];
+  const { root, calls, controller } = await makeAgentAuthHarness({
+    spawn: () => {
+      const child = new FakeChildProcess();
+      child.stdin = {
+        destroyed: false,
+        write: (text) => {
+          const message = JSON.parse(text);
+          appServerMessages.push(message);
+          if (message.method === 'account/rateLimits/read') {
+            queueMicrotask(() => {
+              child.stdout.emit('data', Buffer.from(`${JSON.stringify({
+                id: message.id,
+                result: {
+                  rateLimits: {
+                    limitId: 'codex',
+                    primary: { usedPercent: 87, windowDurationMins: 300, resetsAt: 1730947200 },
+                    rateLimitReachedType: null,
+                  },
+                  rateLimitsByLimitId: {
+                    codex: {
+                      limitId: 'codex',
+                      limitName: 'Codex',
+                      primary: { usedPercent: 87, windowDurationMins: 300, resetsAt: 1730947200 },
+                      rateLimitReachedType: null,
+                    },
+                  },
+                },
+              })}\n`));
+            });
+          }
+          return true;
+        },
+      };
+      return child;
+    },
+  });
+  t.after(async () => {
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  await fs.mkdir(path.join(root, 'codex-root', 'node_modules', '.bin'), { recursive: true });
+  await fs.mkdir(path.join(root, 'codex-home'), { recursive: true });
+  await fs.writeFile(path.join(root, 'codex-root', 'node_modules', '.bin', 'codex'), '', 'utf8');
+  await fs.writeFile(path.join(root, 'codex-home', 'auth.json'), '{}', 'utf8');
+
+  const status = await controller.getCodexAuthStatus();
+
+  assert.equal(status.authenticated, true);
+  assert.ok(appServerMessages.some((message) => message.method === 'account/rateLimits/read'));
+  assert.ok(calls.some((call) => call[0] === 'log' && call[1] === 'codex_auth:rate_limits_checked'));
+  assert.equal(status.rateLimits?.primary?.primary?.usedPercent, 87);
+  assert.equal(status.rateLimits?.primary?.primary?.remainingPercent, 13);
+  assert.equal(status.rateLimits?.buckets[0].limitId, 'codex');
+});
+
 test('agent auth handles missing Codex CLI and disconnect removes only the managed auth file', async (t) => {
   const { root, calls, controller } = await makeAgentAuthHarness();
   t.after(async () => {

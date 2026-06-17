@@ -20,6 +20,11 @@ const makeOptions = (logPath) => ({
   ],
 });
 
+const makeOptionsWithMetadataRoot = (logPath, metadataRoot) => ({
+  ...makeOptions(logPath),
+  getMetadataRoot: () => metadataRoot,
+});
+
 test('app error report preparation attaches recent matching install log as a sanitized file', async () => {
   const root = await fs.mkdtemp(path.join(tmpdir(), 'forger-app-error-log-'));
   const logPath = path.join(root, 'install.log');
@@ -86,6 +91,68 @@ test('app error report preparation promotes layered diagnostics into sanitized a
   assert.match(attachmentText, /FORGER_APPS\/demo-app\/backend/);
   assert.doesNotMatch(attachmentText, /\/Users\/felipe\/Desktop/);
   assert.doesNotMatch(attachmentText, /secret-token-value/);
+});
+
+test('chat run error report preparation attaches the run log when it exists', async () => {
+  const root = await fs.mkdtemp(path.join(tmpdir(), 'forger-chat-run-log-'));
+  const metadataRoot = path.join(root, 'metadata');
+  const runId = 'run-123';
+  const runLogPath = path.join(metadataRoot, 'runs', `${runId}.log`);
+  try {
+    await fs.mkdir(path.dirname(runLogPath), { recursive: true });
+    await fs.writeFile(runLogPath, [
+      '[2026-05-24T10:00:00.000Z] [stderr] Codex failed at /Users/example-user/Forger/apps/demo-app/backend',
+      '[2026-05-24T10:00:01.000Z] [meta] OPENAI_API_KEY=secret-token-value',
+      '',
+    ].join('\n'), 'utf8');
+
+    const { report, attachments } = await prepareDesktopErrorReport(
+      makeOptionsWithMetadataRoot(path.join(root, 'missing-install.log'), metadataRoot),
+      {
+        source: 'agent',
+        operation: 'desktop-chat.run',
+        message: 'Chat failed',
+        technicalCode: 'capability_unavailable',
+        appId: 'demo-app',
+        details: { runId },
+        occurredAt: '2026-05-24T10:00:04.000Z',
+      },
+    );
+
+    assert.equal(report.diagnosticFiles.length, 1);
+    assert.equal(report.diagnosticFiles[0].kind, 'run_log');
+    assert.equal(report.diagnosticFiles[0].filename, 'run-log-run-123.log');
+    assert.equal(attachments.length, 1);
+    assert.equal(attachments[0].contentType, 'text/plain');
+    assert.match(attachments[0].text, /Codex failed/);
+    assert.match(attachments[0].text, /FORGER_APPS\/demo-app\/backend/);
+    assert.doesNotMatch(attachments[0].text, /secret-token-value/);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('chat run error report preparation skips missing run logs', async () => {
+  const root = await fs.mkdtemp(path.join(tmpdir(), 'forger-chat-missing-run-log-'));
+  try {
+    const { report, attachments } = await prepareDesktopErrorReport(
+      makeOptionsWithMetadataRoot(path.join(root, 'missing-install.log'), path.join(root, 'metadata')),
+      {
+        source: 'agent',
+        operation: 'desktop-chat.run',
+        message: 'Chat failed',
+        technicalCode: 'capability_unavailable',
+        appId: 'demo-app',
+        details: { runId: 'missing-run' },
+        occurredAt: '2026-05-24T10:00:04.000Z',
+      },
+    );
+
+    assert.equal(report.diagnosticFiles, undefined);
+    assert.equal(attachments.length, 0);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
 });
 
 test('app error report preparation skips non-app reports', async () => {
