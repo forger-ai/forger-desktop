@@ -565,6 +565,7 @@ test('main utility discovers runtime archives and checksum files by platform tok
     await writeFile(path.join(zipRoot, 'node-linux_x64.zip.sha256'), 'sum', 'utf8');
     const windowsRoot = path.join(root, 'windows-runtimes');
     await fs.mkdir(windowsRoot, { recursive: true });
+    await writeFile(path.join(windowsRoot, 'node-v22.22.2-darwin-x64.tar.gz'), 'archive', 'utf8');
     await writeFile(path.join(windowsRoot, 'node-x86_64-pc-windows-msvc.zip'), 'archive', 'utf8');
     await writeFile(path.join(windowsRoot, 'node-x86_64-pc-windows-msvc.zip.sha256'), 'sum', 'utf8');
     const emptyRoot = path.join(root, 'empty-runtimes');

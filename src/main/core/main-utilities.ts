@@ -354,7 +354,10 @@ const findRuntimeArchive = async (
     }
 
     const tokens = runtimePlatformTokens(platformAlias);
-    const byToken = files.find((name) => tokens.some((token) => name.includes(token)));
+    const byToken = files.find((name) => {
+      const archiveBaseName = stripArchiveExtension(name);
+      return tokens.some((token) => archiveBaseName === token || archiveBaseName.endsWith(`-${token}`));
+    });
     if (byToken) {
       return path.join(baseDir, byToken);
     }
