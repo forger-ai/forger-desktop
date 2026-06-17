@@ -1,7 +1,7 @@
 /* eslint-disable max-lines */
 import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, Notification, session, shell, type IpcMainInvokeEvent } from 'electron';
 import { createHash, createHmac, randomBytes } from 'node:crypto';
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -74,6 +74,7 @@ import { RemoteNetworkShareManager } from '../remote-network-share-manager';
 import { RemoteActivityStore } from '../remote-activity-store';
 import { LlmRunsStore } from '../llm-runs-store';
 import { createRuntimeInstallController } from '../runtime/runtime-install';
+import { spawnProcess } from '../runtime/process-spawn';
 import { loadOptionalBetterSqlite } from '../runtime/optional-better-sqlite';
 import { createWindowBootstrapController } from './window-bootstrap';
 import { AGENT_TOOL_DEFINITIONS, AGENT_TOOL_IDS, AGENT_TOOL_PACKAGES, createInitialAgentToolSettings } from './agent-tool-packages';
@@ -693,7 +694,7 @@ const createCommandGitDeps = () => ({
   resolvePlatformAlias,
   runtimePlatformTokens,
   serializeErrorForInstallLog,
-  spawn,
+  spawn: spawnProcess,
   stripArchiveExtension,
   syncDirectory,
   truncateForInstallLog,
@@ -701,7 +702,6 @@ const createCommandGitDeps = () => ({
 });
 const getCommandGitController = () => createCommandGitController(createCommandGitDeps());
 const hashFileSha256 = async (filePath: string): Promise<string> => await getCommandGitController().hashFileSha256(filePath);
-const requiresWindowsShell = (command: string): boolean => getCommandGitController().requiresWindowsShell(command);
 const runCommand = async (command: string, args: string[], options: Record<string, unknown> & { cwd: string }): Promise<void> => await getCommandGitController().runCommand(command, args, options);
 const runCommandCapture = async (command: string, args: string[], options: Record<string, unknown> & { cwd: string }): Promise<{ stdout: string; stderr: string; code?: number | null }> => await getCommandGitController().runCommandCapture(command, args, options);
 const zipDirectory = async (sourceDir: string, zipPath: string): Promise<void> => await getCommandGitController().zipDirectory(sourceDir, zipPath);
@@ -789,7 +789,7 @@ const createAgentAuthDeps = () => ({
   runCommandCapture,
   serializeErrorForInstallLog,
   shell,
-  spawn,
+  spawn: spawnProcess,
   translateManifestEnvironment,
   truncateForInstallLog,
 });
@@ -957,7 +957,6 @@ const createInstalledAppRuntimeDeps = () => ({
   parseForgerUrl,
   path,
   registry,
-  requiresWindowsShell,
   resolveInstalledManifest,
   runCommand,
   runningApps,

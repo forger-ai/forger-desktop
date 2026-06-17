@@ -8,6 +8,7 @@ const {
   configureDesktopUserDataPath,
   createPathConfigController,
   getDesktopUserDataName,
+  resolveRuntimePlatformAlias,
 } = require('../../dist-electron/main/core/path-config.js');
 const {
   AGENT_TOOL_DEFINITIONS,
@@ -115,6 +116,15 @@ test('path config uses production home and omits account storage key without a c
     forgerAccount: { authenticated: true, user: { email: 'user@example.com' } },
   });
   assert.equal(accountWithoutId.getCloudDeviceAccountStorageKey(), undefined);
+});
+
+test('path config resolves supported runtime platform aliases explicitly', () => {
+  assert.equal(resolveRuntimePlatformAlias('win32', 'x64'), 'win32_x64');
+  assert.equal(resolveRuntimePlatformAlias('cygwin', 'x64'), 'win32_x64');
+  assert.equal(resolveRuntimePlatformAlias('darwin', 'arm64'), 'darwin_arm64');
+  assert.equal(resolveRuntimePlatformAlias('darwin', 'x64'), 'darwin_x64');
+  assert.equal(resolveRuntimePlatformAlias('linux', 'x64'), 'linux_x64');
+  assert.throws(() => resolveRuntimePlatformAlias('win32', 'arm64'), /unsupported_platform_win32_arm64/);
 });
 
 test('agent tool package definitions are unique and initialize approval defaults', () => {

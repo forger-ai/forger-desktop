@@ -1021,9 +1021,16 @@ const withMockedModuleLoad = async (mockForRequest, callback) => {
     if (mocked) {
       return mocked;
     }
+    if (request === 'cross-spawn') {
+      const childProcessMock = mockForRequest('node:child_process') ?? mockForRequest('child_process');
+      if (childProcessMock?.spawn) {
+        return childProcessMock.spawn;
+      }
+    }
     return originalLoad.apply(this, [request, parent, isMain]);
   };
   try {
+    delete require.cache[require.resolve('../../dist-electron/main/runtime/process-spawn.js')];
     return await callback();
   } finally {
     Module._load = originalLoad;

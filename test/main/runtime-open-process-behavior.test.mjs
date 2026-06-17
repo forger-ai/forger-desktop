@@ -106,10 +106,14 @@ const withRuntimeModule = async ({ spawnImpl, electronMock }, callback) => {
     if (request === 'node:child_process') {
       return { spawn: spawnImpl };
     }
+    if (request === 'cross-spawn') {
+      return spawnImpl;
+    }
     return originalLoad.apply(this, [request, parent, isMain]);
   };
 
   try {
+    clearDistModule('main/runtime/process-spawn.js');
     clearDistModule('main/runtime/installed-app-runtime.js');
     const runtime = require('../../dist-electron/main/runtime/installed-app-runtime.js');
     return await callback(runtime);
@@ -228,7 +232,6 @@ const makeRuntimeHarness = async ({ root, spawnImpl, electronOverrides = {} } = 
     parseForgerUrl: (url) => ({ kind: 'app', rawUrl: url }),
     path,
     registry,
-    requiresWindowsShell: () => false,
     resolveInstalledManifest: async (target) => JSON.parse(await fs.readFile(path.join(target, 'manifest.json'), 'utf8')),
     runCommand: async (command, args, options) => calls.push(['runCommand', command, args, options]),
     runningApps: new Map(),

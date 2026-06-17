@@ -2,10 +2,10 @@ import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import type { createHash as createHashFn } from 'node:crypto';
 import type fs from 'node:fs/promises';
 import type path from 'node:path';
-import type { spawn as spawnFn } from 'node:child_process';
 import type yauzl from 'yauzl';
 
 import type { AppManifest } from '../core/main-process-types';
+import type { SpawnProcess } from './process-spawn';
 
 interface CommandRunLog {
   appId?: string;
@@ -49,7 +49,7 @@ interface CommandGitDeps {
   resolvePlatformAlias: () => string;
   runtimePlatformTokens: (platformAlias: string) => string[];
   serializeErrorForInstallLog: (error: unknown) => Record<string, unknown>;
-  spawn: typeof spawnFn;
+  spawn: SpawnProcess;
   stripArchiveExtension: (archiveName: string) => string;
   syncDirectory: (directoryPath: string) => Promise<void>;
   truncateForInstallLog: (value: string) => string;
@@ -80,10 +80,6 @@ const hashFileSha256 = async (filePath: string): Promise<string> => {
   return createHash('sha256').update(content).digest('hex');
 };
 
-const requiresWindowsShell = (command: string): boolean => {
-  return process.platform === 'win32' && /\.(cmd|bat)$/i.test(command);
-};
-
 const FLATTEN_RETRY_DELAYS_MS = [25, 100];
 
 const wait = async (ms: number): Promise<void> => {
@@ -98,33 +94,11 @@ const errorCode = (error: unknown): string | undefined =>
 const shouldRetryFlattenMove = (error: unknown): boolean =>
   ['EPERM', 'EACCES', 'ENOTEMPTY'].includes(errorCode(error) ?? '');
 
-const quoteWindowsShellValue = (value: string): string =>
-  `"${value.replace(/(["^&|<>%])/g, '^$1')}"`;
-
-const buildWindowsShellCommand = (command: string, args: string[]): { command: string; args: string[]; shell: boolean; shellStrategy: string } => {
-  const shellCommand = `"${[quoteWindowsShellValue(command), ...args.map(quoteWindowsShellValue)].join(' ')}"`;
-  return {
-    command: process.env.ComSpec || 'cmd.exe',
-    args: ['/d', '/s', '/c', shellCommand],
-    shell: false,
-    shellStrategy: 'cmd-wrapper',
-  };
-};
-
-const buildSpawnCommand = (command: string, args: string[]): { command: string; args: string[]; shell: boolean; shellStrategy?: string } => {
-  if (requiresWindowsShell(command)) {
-    return buildWindowsShellCommand(command, args);
-  }
-  return { command, args, shell: false };
-};
-
 const runCommand = async (
   command: string,
   args: string[],
   options: CommandRunOptions,
 ): Promise<void> => {
-  const spawnCommand = buildSpawnCommand(command, args);
-
   if (options.log) {
     await appendInstallLog('command:start', {
       appId: options.log.appId,
@@ -133,19 +107,18 @@ const runCommand = async (
       command,
       args,
       cwd: options.cwd,
-      shell: spawnCommand.shell,
-      ...(spawnCommand.shellStrategy ? { shellStrategy: spawnCommand.shellStrategy } : {}),
+      shell: false,
     });
   }
 
   await new Promise<void>((resolve, reject) => {
-    const child = spawn(spawnCommand.command, spawnCommand.args, {
+    const child = spawn(command, args, {
       cwd: options.cwd,
       env: {
         ...process.env,
         ...(options.env ?? {}),
       },
-      shell: spawnCommand.shell,
+      shell: false,
       stdio: 'pipe',
     });
 
@@ -168,8 +141,7 @@ const runCommand = async (
           command,
           args,
           cwd: options.cwd,
-          shell: spawnCommand.shell,
-          ...(spawnCommand.shellStrategy ? { shellStrategy: spawnCommand.shellStrategy } : {}),
+          shell: false,
           error: serializeErrorForInstallLog(error),
           stdout: truncateForInstallLog(stdout),
           stderr: truncateForInstallLog(stderr),
@@ -187,8 +159,7 @@ const runCommand = async (
           command,
           args,
           cwd: options.cwd,
-          shell: spawnCommand.shell,
-          ...(spawnCommand.shellStrategy ? { shellStrategy: spawnCommand.shellStrategy } : {}),
+          shell: false,
           code,
           signal,
           stdout: truncateForInstallLog(stdout),
@@ -211,16 +182,14 @@ const runCommandCapture = async (
   args: string[],
   options: CommandCaptureOptions,
 ): Promise<CommandCaptureResult> => {
-  const spawnCommand = buildSpawnCommand(command, args);
-
   return await new Promise<CommandCaptureResult>((resolve, reject) => {
-    const child = spawn(spawnCommand.command, spawnCommand.args, {
+    const child = spawn(command, args, {
       cwd: options.cwd,
       env: {
         ...process.env,
         ...(options.env ?? {}),
       },
-      shell: spawnCommand.shell,
+      shell: false,
       stdio: 'pipe',
     });
 
@@ -926,5 +895,5 @@ const syncReleaseIntoInstalledApp = async (
   await removeTrackedFilesMissingFromStage(stageDir, installDir, preservedPaths);
 };
 
-  return { hashFileSha256, requiresWindowsShell, buildWindowsShellCommand, runCommand, runCommandCapture, zipDirectory, canRunCommand, existsFile, appendProcessPathEntry, findGitExecutableOutsidePath, makeDiscoveredGitAvailable, configureBundledGitEnvironment, resolveGitExecutableInRoot, ensureBundledGitAvailable, ensureGitAvailable, ensureGitMainBranch, ensureForgerLocalGitExcludes, ensureAppGitRepository, ensureUserModifiedBranch, getGitStatusLines, getUserVisibleGitStatusLines, getGitHead, getOriginalCommitSha, clearMacQuarantine, extractArchive, listZipEntries, validateArchiveEntries, normalizeRelativeInstallPath, collectPersistentInstallPaths, gitCommitAllExcept, copyReleaseContentsForUpdate, syncReleaseIntoInstalledApp };
+  return { hashFileSha256, runCommand, runCommandCapture, zipDirectory, canRunCommand, existsFile, appendProcessPathEntry, findGitExecutableOutsidePath, makeDiscoveredGitAvailable, configureBundledGitEnvironment, resolveGitExecutableInRoot, ensureBundledGitAvailable, ensureGitAvailable, ensureGitMainBranch, ensureForgerLocalGitExcludes, ensureAppGitRepository, ensureUserModifiedBranch, getGitStatusLines, getUserVisibleGitStatusLines, getGitHead, getOriginalCommitSha, clearMacQuarantine, extractArchive, listZipEntries, validateArchiveEntries, normalizeRelativeInstallPath, collectPersistentInstallPaths, gitCommitAllExcept, copyReleaseContentsForUpdate, syncReleaseIntoInstalledApp };
 };

@@ -1431,7 +1431,6 @@ const makeRuntimeHarness = () => {
     parseForgerUrl: () => null,
     path,
     registry,
-    requiresWindowsShell: () => false,
     resolveInstalledManifest: async () => ({}),
     runCommand: async (command, args) => calls.push(['run', command, args.join(' ')]),
     runningApps,

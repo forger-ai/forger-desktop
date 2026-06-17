@@ -563,6 +563,10 @@ test('main utility discovers runtime archives and checksum files by platform tok
     await fs.mkdir(zipRoot, { recursive: true });
     await writeFile(path.join(zipRoot, 'node-linux_x64.zip'), 'archive', 'utf8');
     await writeFile(path.join(zipRoot, 'node-linux_x64.zip.sha256'), 'sum', 'utf8');
+    const windowsRoot = path.join(root, 'windows-runtimes');
+    await fs.mkdir(windowsRoot, { recursive: true });
+    await writeFile(path.join(windowsRoot, 'node-x86_64-pc-windows-msvc.zip'), 'archive', 'utf8');
+    await writeFile(path.join(windowsRoot, 'node-x86_64-pc-windows-msvc.zip.sha256'), 'sum', 'utf8');
     const emptyRoot = path.join(root, 'empty-runtimes');
     await fs.mkdir(emptyRoot, { recursive: true });
     const fallbackRoot = path.join(root, 'fallback-runtimes');
@@ -577,6 +581,8 @@ test('main utility discovers runtime archives and checksum files by platform tok
     const checksum = await controller.findRuntimeChecksumFile(runtimeRoot, archive, 'darwin_arm64');
     const zipArchive = await controller.findRuntimeArchive(zipRoot, 'linux_x64');
     const zipChecksum = await controller.findRuntimeChecksumFile(zipRoot, zipArchive, 'linux_x64');
+    const windowsArchive = await controller.findRuntimeArchive(windowsRoot, 'win32_x64');
+    const windowsChecksum = await controller.findRuntimeChecksumFile(windowsRoot, windowsArchive, 'win32_x64');
     const fallbackArchive = await controller.findRuntimeArchive(fallbackRoot, 'linux_x64');
 
     assert.equal(controller.getBundledResourcesRoot(), runtimeRoot);
@@ -606,7 +612,9 @@ test('main utility discovers runtime archives and checksum files by platform tok
     assert.equal(path.basename(checksum), 'node-darwin-arm64.sha256');
     assert.equal(path.basename(zipArchive), 'node-linux_x64.zip');
     assert.equal(path.basename(zipChecksum), 'node-linux_x64.zip.sha256');
-    assert.equal(path.basename(fallbackArchive), 'single-runtime.zip');
+    assert.equal(path.basename(windowsArchive), 'node-x86_64-pc-windows-msvc.zip');
+    assert.equal(path.basename(windowsChecksum), 'node-x86_64-pc-windows-msvc.zip.sha256');
+    assert.equal(fallbackArchive, null);
     assert.equal(await controller.findRuntimeArchive(ambiguousRoot, 'linux_x64'), null);
     assert.equal(await controller.findRuntimeArchive(emptyRoot, 'linux_x64'), null);
     assert.deepEqual(controller.runtimePlatformTokens('linux_x64'), [
@@ -622,7 +630,14 @@ test('main utility discovers runtime archives and checksum files by platform tok
       'x64-apple-darwin',
       'x86_64-apple-darwin',
     ]);
-    assert.deepEqual(controller.runtimePlatformTokens('win32_x64').includes('windows-x64'), true);
+    assert.deepEqual(controller.runtimePlatformTokens('win32_x64'), [
+      'win32_x64',
+      'win32-x64',
+      'win-x64',
+      'x86_64-pc-windows-msvc',
+      'windows-x64',
+      '64-bit',
+    ]);
     assert.deepEqual(controller.runtimePlatformTokens('darwin_arm64').includes('aarch64-apple-darwin'), true);
     assert.equal(controller.stripArchiveExtension('runtime.tar.gz'), 'runtime');
     assert.equal(controller.stripArchiveExtension('runtime.tgz'), 'runtime');

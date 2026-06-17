@@ -1,4 +1,3 @@
-import type { spawn as spawnFn } from 'node:child_process';
 import type fs from 'node:fs/promises';
 import type path from 'node:path';
 
@@ -14,6 +13,7 @@ import type {
   CodexAuthStatus,
   FailureDiagnosticFields,
 } from '../../shared/types';
+import type { SpawnProcess } from './process-spawn';
 
 interface CommandCaptureResult {
   code?: number | null;
@@ -52,7 +52,7 @@ interface AgentAuthDeps {
   runCommandCapture: (command: string, args: string[], options: Record<string, unknown> & { cwd: string }) => Promise<CommandCaptureResult>;
   serializeErrorForInstallLog: (error: unknown) => { message?: unknown } & Record<string, unknown>;
   shell: Electron.Shell;
-  spawn: typeof spawnFn;
+  spawn: SpawnProcess;
   translateManifestEnvironment: (environment: Record<string, string>, backendDir: string) => Record<string, string>;
   truncateForInstallLog: (value: string) => string;
 }

@@ -356,9 +356,8 @@ test('buildRemoteFrontend runs a build, reads assets, and computes a stable hash
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forger-remote-build-'));
   const failing = await fs.mkdtemp(path.join(os.tmpdir(), 'forger-remote-build-fail-'));
   Module._load = function loadWithSpawnMock(request, parent, isMain) {
-    if (request === 'node:child_process') {
-      return {
-        spawn(command, args, options) {
+    if (request === 'cross-spawn') {
+      return function spawn(command, args, options) {
           assert.equal(command, '/runtime/npm');
           assert.deepEqual(args, ['run', 'build', '--', '--base=./']);
           assert.equal(options.env.VITE_FORGER_REMOTE_TUNNEL, 'true');
@@ -387,12 +386,12 @@ test('buildRemoteFrontend runs a build, reads assets, and computes a stable hash
             });
           }
           return child;
-        },
-      };
+        };
     }
     return originalLoad.apply(this, [request, parent, isMain]);
   };
   try {
+    clearDistModule('main/runtime/process-spawn.js');
     clearDistModule('main/remote-frontend-packager.js');
     const { buildRemoteFrontend } = require('../../dist-electron/main/remote-frontend-packager.js');
     const result = await buildRemoteFrontend({
@@ -430,9 +429,8 @@ test('buildRemoteFrontend times out long-running builds and ignores late child c
   const originalClearTimeout = globalThis.clearTimeout;
   let killedSignal;
   Module._load = function loadWithSpawnMock(request, parent, isMain) {
-    if (request === 'node:child_process') {
-      return {
-        spawn(command, args, options) {
+    if (request === 'cross-spawn') {
+      return function spawn(command, args, options) {
           assert.equal(command, '/runtime/npm');
           assert.equal(options.env.PATH.startsWith(`${path.dirname('/runtime/node')}${path.delimiter}`), true);
           const child = new EventEmitter();
@@ -442,14 +440,14 @@ test('buildRemoteFrontend times out long-running builds and ignores late child c
             child.emit('close', 1);
           };
           return child;
-        },
-      };
+        };
     }
     return originalLoad.apply(this, [request, parent, isMain]);
   };
   globalThis.setTimeout = (callback) => originalSetTimeout(callback, 0);
   globalThis.clearTimeout = (timer) => originalClearTimeout(timer);
   try {
+    clearDistModule('main/runtime/process-spawn.js');
     clearDistModule('main/remote-frontend-packager.js');
     const { buildRemoteFrontend } = require('../../dist-electron/main/remote-frontend-packager.js');
     await assert.rejects(
@@ -471,9 +469,8 @@ test('buildRemoteFrontend ignores timeout callbacks after successful builds', as
   const originalClearTimeout = globalThis.clearTimeout;
   let timeoutCallback;
   Module._load = function loadWithSpawnMock(request, parent, isMain) {
-    if (request === 'node:child_process') {
-      return {
-        spawn(command, args, options) {
+    if (request === 'cross-spawn') {
+      return function spawn(command, args, options) {
           assert.equal(command, '/runtime/npm');
           assert.equal(options.env.PATH.startsWith(`${path.dirname('/runtime/node')}${path.delimiter}`), true);
           const child = new EventEmitter();
@@ -481,8 +478,7 @@ test('buildRemoteFrontend ignores timeout callbacks after successful builds', as
           child.kill = () => undefined;
           originalSetTimeout(() => child.emit('close', 0), 0);
           return child;
-        },
-      };
+        };
     }
     return originalLoad.apply(this, [request, parent, isMain]);
   };
@@ -492,6 +488,7 @@ test('buildRemoteFrontend ignores timeout callbacks after successful builds', as
   };
   globalThis.clearTimeout = () => undefined;
   try {
+    clearDistModule('main/runtime/process-spawn.js');
     clearDistModule('main/remote-frontend-packager.js');
     const { buildRemoteFrontend } = require('../../dist-electron/main/remote-frontend-packager.js');
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forger-remote-build-late-timeout-'));

@@ -329,6 +329,7 @@ const runtimePlatformTokens = (platformAlias: string): string[] => {
     tokens.add('x64-linux');
   }
   if (platformAlias === 'win32_x64') {
+    tokens.add('win32-x64');
     tokens.add('win-x64');
     tokens.add('x86_64-pc-windows-msvc');
     tokens.add('windows-x64');
@@ -356,10 +357,6 @@ const findRuntimeArchive = async (
     const byToken = files.find((name) => tokens.some((token) => name.includes(token)));
     if (byToken) {
       return path.join(baseDir, byToken);
-    }
-
-    if (files.length === 1) {
-      return path.join(baseDir, files[0]);
     }
 
     return null;

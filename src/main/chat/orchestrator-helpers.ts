@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { spawnProcess } from '../runtime/process-spawn';
 import type { AgentPermissionMode, ChatErrorCode, ClaudeEffort, CodexReasoningEffort, PreviewDiffFile } from '../../shared/types';
 import { assertAllowedMcpServers, codexWorkspaceNetworkConfigArgs, createIsolatedCodexHome, DisallowedMcpServerError, removeIsolatedCodexHome } from '../codex-run-isolation';
 import { classifyCodexAuthOutput } from '../codex-auth-helpers';
@@ -28,10 +29,6 @@ interface PluginManifestV1 {
   signature: string;
   sha256: string;
 }
-
-const requiresWindowsShell = (command: string): boolean => {
-  return process.platform === 'win32' && /\.(cmd|bat)$/i.test(command);
-};
 
 export function sanitizeId(value: string): string {
   return value.replace(/[^a-zA-Z0-9._-]+/g, '-').slice(0, 120) || 'item';
@@ -478,14 +475,12 @@ export const runCommandCapture = async (
   },
 ): Promise<CommandResult> => {
   return await new Promise<CommandResult>((resolve, reject) => {
-    const useShell = requiresWindowsShell(command);
-    const child = spawn(command, args, {
+    const child = spawnProcess(command, args, {
       cwd: options.cwd,
       env: {
         ...process.env,
         ...(options.env ?? {}),
       },
-      shell: useShell,
       stdio: ['pipe', 'pipe', 'pipe'],
       detached: process.platform !== 'win32',
     });

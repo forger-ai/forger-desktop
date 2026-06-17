@@ -1,10 +1,10 @@
-import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import http, { type IncomingMessage, type ServerResponse } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
+import { spawnProcess } from './runtime/process-spawn';
 
 const DEV_CATALOG_HOST = '127.0.0.1';
 const DEV_CATALOG_PORT = 8765;
@@ -75,9 +75,8 @@ const runCommand = async (
   options: { cwd: string; timeoutMs?: number },
 ): Promise<{ stdout: string; stderr: string }> => {
   return await new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
+    const child = spawnProcess(command, args, {
       cwd: options.cwd,
-      shell: process.platform === 'win32' && /\.(cmd|bat)$/i.test(command),
       stdio: 'pipe',
     });
 

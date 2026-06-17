@@ -1,5 +1,5 @@
 import { BrowserWindow } from 'electron';
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import type fs from 'node:fs/promises';
 import type http from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -27,6 +27,7 @@ import type {
   StopAppResult,
 } from '../../shared/types';
 import { normalizeLocale } from '../../shared/i18n';
+import { mergePathEntry, spawnProcess } from './process-spawn';
 
 interface RuntimeDeps {
   FORGER_PROTOCOL: string;
@@ -70,7 +71,6 @@ interface RuntimeDeps {
   parseForgerUrl: (url: string) => ForgerDeepLink | null;
   path: typeof path;
   registry: AppRegistry;
-  requiresWindowsShell: (command: string) => boolean;
   resolveInstalledManifest: (installDir: string) => Promise<AppManifest | null>;
   runCommand: (command: string, args: string[], options: Record<string, unknown> & { cwd: string }) => Promise<void>;
   runningApps: Map<string, RunningAppProcess>;
@@ -87,7 +87,7 @@ interface RuntimeDeps {
 }
 
 export const createInstalledAppRuntimeController = (deps: RuntimeDeps) => {
-const { net, http, runCommand, app, registry, upsertInstalledRecord, ensureCatalogStatuses, appWindows, appAgentTaskManager, appAgentConversationManager, stoppingApps, runningApps, path, isDev, FORGER_PROTOCOL, parseForgerUrl, dispatchDeepLink, shell, friendChatWindows, wait, resolveInstalledManifest, getLocalNetworkShareStatus, getManifestAppSecretsValidationError, normalizeManifestAppSecrets, getSecretsStore, isSecretsVaultUnavailableError, normalizeNodeRuntimeVersion, appendInstallLog, getInstallLogPath, getBackendPathEntries, ensureRuntimeInstalled, ensureBackendPythonEnvironment, getVenvExecutables, requiresWindowsShell, desktopRuntimeBridge, getSpeechToTextEnvironment, getTextToSpeechEnvironment, getAudioInputEnvironment, appFolderGrantSecret, truncateForInstallLog, formatProcessOutputForInstallLog, serializeErrorForInstallLog, failureDiagnostic, emitRuntimeStatus, stopLocalNetworkShare, stopRemoteNetworkShare, syncAppToCloudIfEnabled, withAppLifecycleLock, fs } = deps;
+const { net, http, runCommand, app, registry, upsertInstalledRecord, ensureCatalogStatuses, appWindows, appAgentTaskManager, appAgentConversationManager, stoppingApps, runningApps, path, isDev, FORGER_PROTOCOL, parseForgerUrl, dispatchDeepLink, shell, friendChatWindows, wait, resolveInstalledManifest, getLocalNetworkShareStatus, getManifestAppSecretsValidationError, normalizeManifestAppSecrets, getSecretsStore, isSecretsVaultUnavailableError, normalizeNodeRuntimeVersion, appendInstallLog, getInstallLogPath, getBackendPathEntries, ensureRuntimeInstalled, ensureBackendPythonEnvironment, getVenvExecutables, desktopRuntimeBridge, getSpeechToTextEnvironment, getTextToSpeechEnvironment, getAudioInputEnvironment, appFolderGrantSecret, truncateForInstallLog, formatProcessOutputForInstallLog, serializeErrorForInstallLog, failureDiagnostic, emitRuntimeStatus, stopLocalNetworkShare, stopRemoteNetworkShare, syncAppToCloudIfEnabled, withAppLifecycleLock, fs } = deps;
 const localNetworkShareStatusFor = getLocalNetworkShareStatus ?? (() => undefined);
 const localNetworkSharePayloadFor = (appId: string) => {
   const status = localNetworkShareStatusFor(appId);
@@ -845,7 +845,7 @@ const openInstalledAppUnlocked = async (
     },
   });
 
-  const backend = spawn(
+  const backend = spawnProcess(
     backendConfig.command,
     backendConfig.args,
     {
@@ -867,16 +867,14 @@ const openInstalledAppUnlocked = async (
     },
   );
 
-  const frontend = spawn(nodeRuntime.npm as string, frontendArgs, {
+  const frontend = spawnProcess(nodeRuntime.npm as string, frontendArgs, {
     cwd: frontendService?.context ? path.resolve(path.join(record.installDir, frontendService.context)) : frontendDir,
-    env: {
+    env: mergePathEntry({
       ...process.env,
       ...(frontendService?.environment && typeof frontendService.environment === 'object' ? frontendService.environment : {}),
       ...resolvedSecrets.env,
       VITE_API_BASE_URL: `${frontendUrl}/__forger_api`,
-      PATH: `${path.dirname(nodeRuntime.node as string)}${path.delimiter}${process.env.PATH ?? ''}`,
-    },
-    shell: requiresWindowsShell(nodeRuntime.npm as string),
+    }, path.dirname(nodeRuntime.node as string), path.delimiter),
     stdio: 'pipe',
   });
 

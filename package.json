@@ -1,6 +1,6 @@
 {
   "name": "forger-desktop",
-  "version": "0.3.9",
+  "version": "0.3.10",
   "private": true,
   "description": "Desktop launcher for Forger",
   "author": "Forger",
@@ -50,6 +50,7 @@
     "@types/qrcode": "^1.5.6",
     "@whiskeysockets/baileys": "^7.0.0-rc13",
     "better-sqlite3": "^12.9.0",
+    "cross-spawn": "^7.0.6",
     "flag-icons": "^7.5.0",
     "i18n-iso-countries": "^7.14.0",
     "localtunnel": "^2.0.2",
