@@ -244,7 +244,23 @@ const installBackendDependenciesWithUv = async (
   });
 };
 
+const ensureManagedPythonUv = async (
+  pythonPath: string,
+  backendDir: string,
+  appId: string,
+): Promise<void> => {
+  await runCommand(pythonPath, ['-m', 'pip', 'install', '--upgrade', 'pip', 'uv'], {
+    cwd: backendDir,
+    log: {
+      appId,
+      phase: 'installing_backend',
+      label: 'install pip and uv',
+    },
+  });
+};
+
 const isBackendPythonEnvironmentUsable = async (
+  pythonPath: string,
   backendDir: string,
 ): Promise<{ usable: boolean; detail?: string; stdout?: string; stderr?: string }> => {
   const venv = getVenvExecutables(backendDir);
@@ -255,6 +271,32 @@ const isBackendPythonEnvironmentUsable = async (
       usable: false,
       detail: 'venv_python_missing',
       stderr: error instanceof Error ? error.message : String(error),
+    };
+  }
+
+  try {
+    const result = await runCommandCapture(
+      pythonPath,
+      ['-m', 'uv', '--version'],
+      {
+        cwd: backendDir,
+        env: { PYTHONNOUSERSITE: '1' },
+        timeoutMs: 15_000,
+      },
+    );
+    if (result.code !== 0) {
+      return {
+        usable: false,
+        detail: `managed_uv_missing_${result.code ?? 'signal'}`,
+        stdout: result.stdout,
+        stderr: result.stderr,
+      };
+    }
+  } catch (error) {
+    return {
+      usable: false,
+      detail: 'managed_uv_check_failed',
+      stderr: error instanceof Error ? error.stack ?? error.message : String(error),
     };
   }
 
@@ -300,7 +342,7 @@ const ensureBackendPythonEnvironment = async (
   }
 
   const task = (async () => {
-    const check = await isBackendPythonEnvironmentUsable(backendDir);
+    const check = await isBackendPythonEnvironmentUsable(pythonPath, backendDir);
     if (check.usable) {
       await appendInstallLog('backend_python_env:ready', { appId, reason, backendDir });
       return;
@@ -314,9 +356,13 @@ const ensureBackendPythonEnvironment = async (
       stdout: truncateForInstallLog(check.stdout ?? ''),
       stderr: truncateForInstallLog(check.stderr ?? ''),
     });
-    await fs.rm(path.join(backendDir, '.venv'), { recursive: true, force: true });
-    await installBackendDependenciesWithUv(pythonPath, backendDir, appId);
-    const repaired = await isBackendPythonEnvironmentUsable(backendDir);
+    if (check.detail?.startsWith('managed_uv_missing_') || check.detail === 'managed_uv_check_failed') {
+      await ensureManagedPythonUv(pythonPath, backendDir, appId);
+    } else {
+      await fs.rm(path.join(backendDir, '.venv'), { recursive: true, force: true });
+      await installBackendDependenciesWithUv(pythonPath, backendDir, appId);
+    }
+    const repaired = await isBackendPythonEnvironmentUsable(pythonPath, backendDir);
     if (!repaired.usable) {
       await appendInstallLog('backend_python_env:repair_failed', {
         appId,

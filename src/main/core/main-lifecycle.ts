@@ -874,7 +874,7 @@ export const registerMainLifecycle = (deps: unknown) => {
     releaseForgerMcpSession: (token: string) => state.forgerMcpServer?.releaseSession(token),
     buildMemoryContext: buildMemoryContextForApps,
     listenAppMcps: async (appIds: string[], runId: string) =>
-      await (state.appMcpManager?.listenMcps(appIds.length > 0 ? appIds : Object.keys(state.registry.apps), runId) ?? Promise.resolve([])),
+      await (state.appMcpManager?.listenMcps(appIds, runId) ?? Promise.resolve([])),
     releaseAppMcps: (runId: string) => {
       state.appMcpManager?.releaseMcps(runId);
     },

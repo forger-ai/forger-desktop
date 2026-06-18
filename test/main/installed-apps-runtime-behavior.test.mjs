@@ -361,6 +361,40 @@ test('ensureBackendPythonEnvironment accepts usable venvs and repairs missing on
   assert.ok(repairing.calls.some((call) => call[0] === 'log' && call[1] === 'backend_python_env:repair_ready'));
 });
 
+test('ensureBackendPythonEnvironment installs uv into the managed Python when the app venv is usable', async (t) => {
+  let managedUvInstalled = false;
+  const harness = await makeLifecycleHarness({
+    runCommand: async (command, args, options) => {
+      harness.calls.push(['run', command, args.join(' '), options.cwd]);
+      if (args.join(' ') === '-m pip install --upgrade pip uv') {
+        managedUvInstalled = true;
+      }
+    },
+    runCommandCapture: async (command, args, options) => {
+      harness.calls.push(['capture', command, args.join(' '), options.cwd]);
+      if (command === '/runtime/python' && args.join(' ') === '-m uv --version' && !managedUvInstalled) {
+        return { code: 1, stdout: '', stderr: 'No module named uv' };
+      }
+      return { code: 0, stdout: '', stderr: '' };
+    },
+  });
+  t.after(async () => {
+    await fs.rm(harness.root, { recursive: true, force: true });
+  });
+  const backendDir = path.join(harness.root, 'apps', 'demo-app', 'backend');
+  const venvPython = path.join(backendDir, '.venv', 'bin', 'python');
+  await fs.mkdir(path.dirname(venvPython), { recursive: true });
+  await fs.writeFile(venvPython, '', 'utf8');
+
+  await harness.controller.ensureBackendPythonEnvironment('/runtime/python', backendDir, 'demo-app', 'app_mcp_start');
+
+  assert.equal(managedUvInstalled, true);
+  assert.equal(harness.calls.filter((call) => call[0] === 'run').length, 1);
+  assert.ok(harness.calls.some((call) => call[0] === 'run' && call[2] === '-m pip install --upgrade pip uv'));
+  assert.equal(harness.calls.some((call) => call[0] === 'run' && call[2].includes('uv sync')), false);
+  assert.ok(harness.calls.some((call) => call[0] === 'log' && call[1] === 'backend_python_env:repair_ready'));
+});
+
 test('ensureBackendPythonEnvironment smoke checks native Python dependencies', async (t) => {
   const harness = await makeLifecycleHarness();
   t.after(async () => {
@@ -383,10 +417,13 @@ test('ensureBackendPythonEnvironment repairs venvs with failed native dependency
   const harness = await makeLifecycleHarness({
     runCommandCapture: async (command, args, options) => {
       harness.calls.push(['capture', command, args.join(' '), options.cwd]);
-      smokeChecks += 1;
-      return smokeChecks === 1
-        ? { code: 67, stdout: '', stderr: 'ImportError: pydantic_core rejected' }
-        : { code: 0, stdout: '', stderr: '' };
+      if (args.join(' ').includes('import fastapi, pydantic_core, sqlmodel, uvicorn')) {
+        smokeChecks += 1;
+        return smokeChecks === 1
+          ? { code: 67, stdout: '', stderr: 'ImportError: pydantic_core rejected' }
+          : { code: 0, stdout: '', stderr: '' };
+      }
+      return { code: 0, stdout: '', stderr: '' };
     },
     runCommand: async (command, args, options) => {
       harness.calls.push(['run', command, args.join(' '), options.cwd]);
