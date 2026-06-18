@@ -1123,8 +1123,8 @@ test('main lifecycle service option callbacks cover catalog, memory, tools, MCP 
 	  state.chatOrchestrator.options.releaseAppMcps('run-one-app');
 	  state.appAgentTaskManager.options.releaseAppMcps('task-one-app');
 	  state.appAgentConversationManager.options.releaseAppMcps('thread-one-app');
-	  assert.deepEqual(await state.chatOrchestrator.options.listenAppMcps([], 'run-all-apps'), ['finance-os', 'recipes']);
-	  assert.deepEqual(mcpListenCalls.at(-1), [['finance-os', 'recipes'], 'run-all-apps']);
+	  assert.deepEqual(await state.chatOrchestrator.options.listenAppMcps([], 'run-free-chat'), []);
+	  assert.deepEqual(mcpListenCalls.at(-1), [[], 'run-free-chat']);
 
 	  const taskManager = state.appAgentTaskManager;
 	  const conversationManager = state.appAgentConversationManager;

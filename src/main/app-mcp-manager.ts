@@ -198,7 +198,14 @@ export class AppMcpManager {
       const venv = this.options.getVenvExecutables(backendDir);
       const port = await this.options.getFreePort();
       const token = randomBytes(32).toString('hex');
-      const config = this.buildProcessConfig(mcp, record, venv.python, port, token);
+      const config = this.buildProcessConfig(
+        mcp,
+        record,
+        pythonRuntime.python as string,
+        venv.python,
+        port,
+        token,
+      );
       await this.options.ensureSqliteDatabaseParent(config.environment);
       const pathEntries = this.options.getPathEntries
         ? await this.options.getPathEntries(record.appId)
@@ -303,7 +310,8 @@ export class AppMcpManager {
   private buildProcessConfig(
     mcp: AppManifestMcp,
     record: AppMcpInstalledAppRecord,
-    python: string,
+    managedPython: string,
+    venvPython: string,
     port: number,
     token: string,
   ): {
@@ -326,9 +334,12 @@ export class AppMcpManager {
       throw new Error('app_mcp_context_outside_app');
     }
     const commandToken = rawArgs[0];
-    const command = commandToken === 'python' || commandToken === 'python3' || commandToken === 'uv'
-      ? python
-      : commandToken;
+    let command = commandToken;
+    if (commandToken === 'uv') {
+      command = managedPython;
+    } else if (commandToken === 'python' || commandToken === 'python3') {
+      command = venvPython;
+    }
     const args = commandToken === 'uv'
       ? ['-m', 'uv', ...rawArgs.slice(1)]
       : rawArgs.slice(1);
@@ -342,6 +353,12 @@ export class AppMcpManager {
       cwd,
       this.options.translateManifestEnvironment,
     );
+    const uvEnvironment: Record<string, string> = commandToken === 'uv'
+      ? {
+          UV_PROJECT_ENVIRONMENT: path.join(backendDir, '.venv'),
+          UV_PYTHON: managedPython,
+        }
+      : {};
     return {
       command,
       args,
@@ -350,6 +367,7 @@ export class AppMcpManager {
       healthUrl: `http://127.0.0.1:${port}${healthcheck}`,
       environment: {
         ...environment,
+        ...uvEnvironment,
         ...(this.options.getDesktopRuntimeEnvironment?.(record.appId) ?? {}),
         HOST: '127.0.0.1',
         PORT: String(port),
