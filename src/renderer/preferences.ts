@@ -6,6 +6,8 @@ import type { ThemePreference } from '@renderer/theme/appTheme';
 import type { AgentProvider, ClaudeEffort, CodexReasoningEffort } from '@shared/types';
 import {
   AGENT_PROVIDER_OPTIONS,
+  ANTIGRAVITY_EFFORT_OPTIONS,
+  ANTIGRAVITY_MODEL_OPTIONS,
   CLAUDE_EFFORT_OPTIONS,
   CLAUDE_MODEL_OPTIONS,
   CODEX_MODEL_OPTIONS,
@@ -41,6 +43,8 @@ export const CHAT_BOT_PICTURE_OPTIONS: Array<{ value: ChatBotPicture; label: str
 
 export {
   AGENT_PROVIDER_OPTIONS,
+  ANTIGRAVITY_EFFORT_OPTIONS,
+  ANTIGRAVITY_MODEL_OPTIONS,
   CLAUDE_EFFORT_OPTIONS,
   CLAUDE_MODEL_OPTIONS,
   CODEX_MODEL_OPTIONS,

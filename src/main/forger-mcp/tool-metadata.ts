@@ -4,6 +4,8 @@ import {
   CLAUDE_MODEL_OPTIONS,
   CODEX_MODEL_OPTIONS,
   CODEX_REASONING_OPTIONS,
+  LLM_PROVIDER_KEYS,
+  LLM_PROVIDER_REGISTRY,
 } from '../../shared/agent-runtime-registry';
 
 export interface McpToolAnnotations {
@@ -285,6 +287,19 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
   }
 
   if (toolId === 'forger_update_app_prompt') {
+    const runtimeProviderSchemas = LLM_PROVIDER_KEYS.map((provider) => {
+      const definition = LLM_PROVIDER_REGISTRY[provider];
+      return {
+        type: 'object',
+        properties: {
+          provider: { const: provider },
+          model: { type: 'string', enum: definition.modelOptions.map((option) => option.realModelName) },
+          effort: { type: 'string', enum: definition.effortOptions.map((option) => option.value) },
+        },
+        required: ['provider', 'model', 'effort'],
+        additionalProperties: false,
+      };
+    });
     return {
       type: 'object',
       properties: {
@@ -305,32 +320,11 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
           description: 'Nuevo texto plano del prompt. Debe conservar las variables {{...}} del original.',
         },
         runtime: {
-          oneOf: [
-            {
-              type: 'object',
-              properties: {
-                provider: { const: 'codex' },
-                model: { type: 'string', enum: CODEX_MODEL_OPTIONS.map((option) => option.realModelName) },
-                effort: { type: 'string', enum: CODEX_REASONING_OPTIONS.map((option) => option.value) },
-              },
-              required: ['provider', 'model', 'effort'],
-              additionalProperties: false,
-            },
-            {
-              type: 'object',
-              properties: {
-                provider: { const: 'claude' },
-                model: { type: 'string', enum: CLAUDE_MODEL_OPTIONS.map((option) => option.realModelName) },
-                effort: { type: 'string', enum: CLAUDE_EFFORT_OPTIONS.map((option) => option.value) },
-              },
-              required: ['provider', 'model', 'effort'],
-              additionalProperties: false,
-            },
-          ],
+          oneOf: runtimeProviderSchemas,
         },
-        provider: { type: 'string', enum: ['codex', 'claude'] },
-        model: { type: 'string', enum: [...CODEX_MODEL_OPTIONS, ...CLAUDE_MODEL_OPTIONS].map((option) => option.realModelName) },
-        effort: { type: 'string', enum: [...CODEX_REASONING_OPTIONS, ...CLAUDE_EFFORT_OPTIONS].map((option) => option.value) },
+        provider: { type: 'string', enum: [...LLM_PROVIDER_KEYS] },
+        model: { type: 'string', enum: LLM_PROVIDER_KEYS.flatMap((provider) => LLM_PROVIDER_REGISTRY[provider].modelOptions.map((option) => option.realModelName)) },
+        effort: { type: 'string', enum: LLM_PROVIDER_KEYS.flatMap((provider) => LLM_PROVIDER_REGISTRY[provider].effortOptions.map((option) => option.value)) },
         reasoningEffort: { type: 'string', enum: CODEX_REASONING_OPTIONS.map((option) => option.value) },
       },
       required: ['appId', 'kind', 'id', 'prompt'],

@@ -7,6 +7,28 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const { createSettingsServiceController } = require('../../dist-electron/main/core/settings-service.js');
+const { createAgentProviderRuntimeRegistry } = require('../../dist-electron/shared/agent-runtime-registry.js');
+
+const agentProviderRegistry = () => createAgentProviderRuntimeRegistry({
+  codex: {
+    defaultModel: 'gpt-5.4',
+    defaultReasoningEffort: 'medium',
+    modelValues: ['gpt-5.4', 'gpt-5.4-mini', 'gpt-5.5'],
+    reasoningEffortValues: ['none', 'low', 'medium', 'high', 'xhigh'],
+  },
+  claude: {
+    defaultModel: 'sonnet',
+    defaultEffort: 'medium',
+    modelValues: ['sonnet', 'opus', 'haiku'],
+    effortValues: ['low', 'medium', 'high', 'xhigh', 'max'],
+  },
+  antigravity: {
+    defaultModel: 'gemini-3.5-flash-medium',
+    defaultEffort: 'medium',
+    modelValues: ['gemini-3.5-flash-medium', 'gemini-3.5-flash-high'],
+    effortValues: ['low', 'medium', 'high'],
+  },
+});
 
 const createController = async (overrides = {}) => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'forger-settings-'));
@@ -18,9 +40,15 @@ const createController = async (overrides = {}) => {
       safeMode: false,
       defaultAgentProvider: 'auto',
       codexDefaults: { model: 'gpt-5.4-mini', reasoningEffort: 'high' },
+      llmProviderDefaults: {
+        codex: { model: 'gpt-5.4-mini', reasoningEffort: 'high' },
+        claude: { model: 'opus', effort: 'max' },
+        antigravity: { model: 'gemini-3.5-flash-high', effort: 'high' },
+      },
       agentDefaults: {
         codex: { model: 'gpt-5.4-mini', reasoningEffort: 'high' },
         claude: { model: 'opus', effort: 'max' },
+        antigravity: { model: 'gemini-3.5-flash-high', effort: 'high' },
       },
       providerConnections: {},
       ...overrides.settings,
@@ -28,14 +56,7 @@ const createController = async (overrides = {}) => {
     promptOverridesStore: null,
   };
   const controller = createSettingsServiceController({
-    BUILT_IN_CLAUDE_EFFORT: 'medium',
-    BUILT_IN_CLAUDE_MODEL: 'sonnet',
-    BUILT_IN_CODEX_MODEL: 'gpt-5.4',
-    BUILT_IN_CODEX_REASONING: 'medium',
-    CLAUDE_MODEL_VALUES: new Set(['sonnet', 'opus', 'haiku']),
-    CLAUDE_EFFORT_VALUES: new Set(['low', 'medium', 'high', 'xhigh', 'max']),
-    CODEX_MODEL_VALUES: new Set(['gpt-5.4', 'gpt-5.4-mini', 'gpt-5.5']),
-    CODEX_REASONING_VALUES: new Set(['none', 'low', 'medium', 'high', 'xhigh']),
+    agentProviderRegistry: agentProviderRegistry(),
     PromptOverridesStore: class {},
     fs: { mkdir, writeFile, readFile },
     getClaudeAuthStatus: async () => ({ authenticated: overrides.claudeAuthenticated ?? false }),

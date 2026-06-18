@@ -4,6 +4,7 @@ export interface MacTerminalLoginScriptInput {
   command: string[];
   env?: Record<string, string>;
   pathEntries?: string[];
+  cwd?: string;
 }
 
 export const shellQuote = (value: string): string => {
@@ -20,6 +21,7 @@ export const buildMacTerminalLoginScript = ({
   command,
   env = {},
   pathEntries = [],
+  cwd,
 }: MacTerminalLoginScriptInput): string => {
   const exitVariable = `FORGER_${providerName.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_LOGIN_EXIT`;
   const commandLine = command.map(shellQuote).join(' ');
@@ -33,6 +35,9 @@ export const buildMacTerminalLoginScript = ({
 
   if (pathEntries.length > 0) {
     lines.push(`export PATH=${shellQuote(pathEntries.join(':'))}:"$PATH"`);
+  }
+  if (cwd) {
+    lines.push(`cd ${shellQuote(cwd)}`);
   }
 
   lines.push(

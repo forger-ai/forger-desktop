@@ -66,6 +66,8 @@ import VpnKeyRounded from '@mui/icons-material/VpnKeyRounded';
 import VolumeUpRounded from '@mui/icons-material/VolumeUpRounded';
 import type {
   AppSummary,
+  AntigravityAuthStatus,
+  AntigravityEffort,
   ClaudeAuthStatus,
   ClaudeEffort,
   CodexAuthStatus,
@@ -96,14 +98,17 @@ import type { AppDictionary, Locale } from '@renderer/i18n';
 import type { ThemePreference } from '@renderer/theme/appTheme';
 import type { ChatBotPicture, LanguagePreference } from '@renderer/preferences';
 import type { View } from '@renderer/components/Sidebar';
+import { DEFAULT_AGENT_DEFAULTS } from '@shared/agent-runtime-registry';
 
 interface SettingsViewProps {
   initialSubview?: SettingsSubview;
   onInitialSubviewConsumed?: () => void;
   codexAuthBusy: boolean;
   claudeAuthBusy: boolean;
+  antigravityAuthBusy: boolean;
   codexAuthStatus: CodexAuthStatus;
   claudeAuthStatus: ClaudeAuthStatus;
+  antigravityAuthStatus: AntigravityAuthStatus;
   t: AppDictionary;
   themePreference: ThemePreference;
   onThemeChange: (theme: ThemePreference) => void;
@@ -119,6 +124,8 @@ interface SettingsViewProps {
   providerOptions: Array<{ label: string; value: AgentProvider | 'auto' }>;
   claudeModelOptions: Array<{ displayModelName: string; realModelName: string }>;
   claudeEffortOptions: { label: string; value: ClaudeEffort }[];
+  antigravityModelOptions: Array<{ displayModelName: string; realModelName: string }>;
+  antigravityEffortOptions: { label: string; value: AntigravityEffort }[];
   defaultAgentProvider: Settings['defaultAgentProvider'];
   defaultChatPermissionMode: Settings['defaultChatPermissionMode'];
   defaultChatNetworkAccess: Settings['defaultChatNetworkAccess'];
@@ -130,6 +137,17 @@ interface SettingsViewProps {
   onReinstallCodex: () => void;
   onOpenClaudeConfig: () => void;
   onReinstallClaude: () => void;
+  onOpenAntigravityConfig: () => void;
+  onReinstallAntigravity: () => void;
+  antigravityAuthConsoleOpen: boolean;
+  antigravityAuthLines: Array<{ id: string; stream: 'stdout' | 'stderr' | 'system'; text: string }>;
+  antigravityAuthUrl: string | null;
+  antigravityAuthCode: string;
+  onAntigravityAuthCodeChange: (value: string) => void;
+  onSubmitAntigravityAuthCode: () => void;
+  onCancelAntigravityAuthSession: () => void;
+  onCloseAntigravityAuthConsole: () => void;
+  onOpenAntigravityAuthUrl: () => void;
   desktopUpdateState: DesktopUpdateState;
   desktopUpdateBusy: boolean;
   cloudStorageUsage: CloudStorageUsage | null;
@@ -369,8 +387,10 @@ export function SettingsView({
   onInitialSubviewConsumed,
   codexAuthBusy,
   claudeAuthBusy,
+  antigravityAuthBusy,
   codexAuthStatus,
   claudeAuthStatus,
+  antigravityAuthStatus,
   t,
   themePreference,
   onThemeChange,
@@ -386,6 +406,8 @@ export function SettingsView({
   providerOptions,
   claudeModelOptions,
   claudeEffortOptions,
+  antigravityModelOptions,
+  antigravityEffortOptions,
   defaultAgentProvider,
   defaultChatPermissionMode,
   defaultChatNetworkAccess,
@@ -397,6 +419,17 @@ export function SettingsView({
   onReinstallCodex,
   onOpenClaudeConfig,
   onReinstallClaude,
+  onOpenAntigravityConfig,
+  onReinstallAntigravity,
+  antigravityAuthConsoleOpen,
+  antigravityAuthLines,
+  antigravityAuthUrl,
+  antigravityAuthCode,
+  onAntigravityAuthCodeChange,
+  onSubmitAntigravityAuthCode,
+  onCancelAntigravityAuthSession,
+  onCloseAntigravityAuthConsole,
+  onOpenAntigravityAuthUrl,
   desktopUpdateState,
   desktopUpdateBusy,
   cloudStorageUsage,
@@ -422,6 +455,12 @@ export function SettingsView({
   onNavigate,
   onResetOnboarding,
 }: SettingsViewProps) {
+  const safeAgentDefaults = {
+    codex: agentDefaults.codex ?? DEFAULT_AGENT_DEFAULTS.codex,
+    claude: agentDefaults.claude ?? DEFAULT_AGENT_DEFAULTS.claude,
+    antigravity: agentDefaults.antigravity ?? DEFAULT_AGENT_DEFAULTS.antigravity,
+  };
+
   const [settingsSubview, setSettingsSubview] = useState<SettingsSubview>('main');
   const [agentConnectionHelpOpen, setAgentConnectionHelpOpen] = useState(false);
   const [speechState, setSpeechState] = useState<SpeechToTextState | null>(null);
@@ -1721,6 +1760,11 @@ export function SettingsView({
       : claudeAuthStatus.source === 'system'
         ? t.settings.claudeSourceSystem
         : t.settings.claudeSourceMissing;
+    const antigravitySourceLabel = antigravityAuthStatus.source === 'managed'
+      ? t.settings.antigravitySourceManaged
+      : antigravityAuthStatus.source === 'system'
+        ? t.settings.antigravitySourceSystem
+        : t.settings.antigravitySourceMissing;
 
     return (
       <Stack spacing={2}>
@@ -1734,6 +1778,67 @@ export function SettingsView({
           </DialogContent>
           <DialogActions>
             <Button onClick={() => setAgentConnectionHelpOpen(false)}>{t.actions.close}</Button>
+          </DialogActions>
+        </Dialog>
+        <Dialog open={antigravityAuthConsoleOpen} onClose={antigravityAuthBusy ? undefined : onCloseAntigravityAuthConsole} maxWidth="md" fullWidth>
+          <DialogTitle>{t.settings.antigravityAuthDialogTitle}</DialogTitle>
+          <DialogContent>
+            <Stack spacing={1.5} sx={{ pt: 0.5 }}>
+              <Alert severity="info" variant="outlined">
+                {t.settings.antigravityAuthDialogDescription}
+              </Alert>
+              {antigravityAuthUrl ? (
+                <Button variant="outlined" startIcon={<LaunchRounded />} onClick={onOpenAntigravityAuthUrl} sx={{ alignSelf: 'flex-start' }}>
+                  {t.settings.antigravityAuthOpenGoogle}
+                </Button>
+              ) : (
+                <Typography variant="body2" color="text.secondary">{t.settings.antigravityAuthWaitingForUrl}</Typography>
+              )}
+              <Box
+                aria-label={t.settings.antigravityAuthConsoleLabel}
+                sx={{
+                  bgcolor: 'grey.950',
+                  color: 'grey.100',
+                  borderRadius: 1,
+                  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+                  fontSize: 12,
+                  lineHeight: 1.55,
+                  minHeight: 180,
+                  maxHeight: 280,
+                  overflow: 'auto',
+                  p: 1.5,
+                  whiteSpace: 'pre-wrap',
+                }}
+              >
+                {antigravityAuthLines.length > 0
+                  ? antigravityAuthLines.map((line) => (
+                    <Box component="span" key={line.id} sx={{ display: 'block', color: line.stream === 'stderr' ? 'warning.light' : line.stream === 'system' ? 'info.light' : 'inherit' }}>
+                      {line.text}
+                    </Box>
+                  ))
+                  : t.settings.antigravityAuthConsoleEmpty}
+              </Box>
+              <TextField
+                size="small"
+                fullWidth
+                label={t.settings.antigravityAuthCodeLabel}
+                placeholder={t.settings.antigravityAuthCodePlaceholder}
+                value={antigravityAuthCode}
+                onChange={(event) => onAntigravityAuthCodeChange(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    onSubmitAntigravityAuthCode();
+                  }
+                }}
+              />
+            </Stack>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={onCancelAntigravityAuthSession}>{antigravityAuthBusy ? t.settings.antigravityAuthCancel : t.settings.antigravityAuthClose}</Button>
+            <Button variant="contained" onClick={onSubmitAntigravityAuthCode} disabled={!antigravityAuthCode.trim() || !antigravityAuthBusy}>
+              {t.settings.antigravityAuthSubmitCode}
+            </Button>
           </DialogActions>
         </Dialog>
 
@@ -1839,6 +1944,51 @@ export function SettingsView({
               </Stack>
             </CardContent>
           </Card>
+
+          <Card sx={{ flex: 1 }}>
+            <CardContent>
+              <Stack spacing={1.5}>
+                <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
+                  <Stack spacing={0.5}>
+                    <Typography variant="h6">{t.settings.antigravityTitle}</Typography>
+                    <Typography variant="body2" color="text.secondary">{t.settings.antigravityDescription}</Typography>
+                  </Stack>
+                  <Chip
+                    size="small"
+                    color={antigravityAuthStatus.installed && antigravityAuthStatus.authenticated ? 'success' : 'default'}
+                    label={antigravityAuthStatus.authenticated ? t.settings.codexConnected : t.settings.codexDisconnected}
+                  />
+                </Stack>
+                <Alert severity="info" variant="outlined">
+                  <Typography variant="body2">{t.settings.antigravityProviderHelp}</Typography>
+                </Alert>
+                <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+                  <Button
+                    variant={antigravityAuthStatus.authenticated ? 'outlined' : 'contained'}
+                    size="small"
+                    disabled={antigravityAuthBusy}
+                    onClick={onOpenAntigravityConfig}
+                  >
+                    {antigravityAuthStatus.authenticated ? t.settings.antigravityConfiguredAction : t.settings.antigravityConnectAction}
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    color="warning"
+                    size="small"
+                    startIcon={<RestartAltRounded />}
+                    disabled={antigravityAuthBusy}
+                    onClick={onReinstallAntigravity}
+                  >
+                    {t.settings.antigravityReinstallAction}
+                  </Button>
+                </Stack>
+                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+                  <Chip size="small" label={antigravitySourceLabel} />
+                  {antigravityAuthStatus.version ? <Chip size="small" label={t.settings.versionLabel(antigravityAuthStatus.version)} /> : null}
+                </Stack>
+              </Stack>
+            </CardContent>
+          </Card>
         </Stack>
 
         <Card>
@@ -1922,13 +2072,13 @@ export function SettingsView({
                       <InputLabel>{t.settings.codexModelLabel}</InputLabel>
                       <Select
                         label={t.settings.codexModelLabel}
-                        value={agentDefaults.codex.model}
+                        value={safeAgentDefaults.codex.model}
                         onChange={(event) =>
                           onAgentDefaultsChange({
                             defaultProvider: defaultAgentProvider,
                             provider: 'codex',
                             model: event.target.value,
-                            effort: agentDefaults.codex.reasoningEffort,
+                            effort: safeAgentDefaults.codex.reasoningEffort,
                           })
                         }
                       >
@@ -1943,12 +2093,12 @@ export function SettingsView({
                       <InputLabel>{t.settings.codexReasoningLabel}</InputLabel>
                       <Select
                         label={t.settings.codexReasoningLabel}
-                        value={agentDefaults.codex.reasoningEffort}
+                        value={safeAgentDefaults.codex.reasoningEffort}
                         onChange={(event) =>
                           onAgentDefaultsChange({
                             defaultProvider: defaultAgentProvider,
                             provider: 'codex',
-                            model: agentDefaults.codex.model,
+                            model: safeAgentDefaults.codex.model,
                             effort: event.target.value as CodexReasoningEffort,
                           })
                         }
@@ -1972,13 +2122,13 @@ export function SettingsView({
                       <InputLabel>{t.settings.claudeModelLabel}</InputLabel>
                       <Select
                         label={t.settings.claudeModelLabel}
-                        value={agentDefaults.claude.model}
+                        value={safeAgentDefaults.claude.model}
                         onChange={(event) =>
                           onAgentDefaultsChange({
                             defaultProvider: defaultAgentProvider,
                             provider: 'claude',
                             model: event.target.value,
-                            effort: agentDefaults.claude.effort,
+                            effort: safeAgentDefaults.claude.effort,
                           })
                         }
                       >
@@ -1993,17 +2143,67 @@ export function SettingsView({
                       <InputLabel>{t.settings.claudeEffortLabel}</InputLabel>
                       <Select
                         label={t.settings.claudeEffortLabel}
-                        value={agentDefaults.claude.effort}
+                        value={safeAgentDefaults.claude.effort}
                         onChange={(event) =>
                           onAgentDefaultsChange({
                             defaultProvider: defaultAgentProvider,
                             provider: 'claude',
-                            model: agentDefaults.claude.model,
+                            model: safeAgentDefaults.claude.model,
                             effort: event.target.value as ClaudeEffort,
                           })
                         }
                       >
                         {claudeEffortOptions.map((option) => (
+                          <MenuItem value={option.value} key={option.value}>
+                            {option.label}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  </Stack>
+                </Box>
+                <Box sx={{ flex: 1, border: '1px solid', borderColor: 'divider', borderRadius: 1.5, p: 1.5 }}>
+                  <Stack spacing={1.25}>
+                    <Stack spacing={0.25}>
+                      <Typography variant="subtitle2">{t.settings.antigravityTitle}</Typography>
+                      <Typography variant="caption" color="text.secondary">{t.settings.antigravityModelHelp}</Typography>
+                    </Stack>
+                    <FormControl size="small" fullWidth>
+                      <InputLabel>{t.settings.antigravityModelLabel}</InputLabel>
+                      <Select
+                        label={t.settings.antigravityModelLabel}
+                        value={safeAgentDefaults.antigravity.model}
+                        onChange={(event) =>
+                          onAgentDefaultsChange({
+                            defaultProvider: defaultAgentProvider,
+                            provider: 'antigravity',
+                            model: event.target.value,
+                            effort: safeAgentDefaults.antigravity.effort,
+                          })
+                        }
+                      >
+                        {antigravityModelOptions.map((option) => (
+                          <MenuItem value={option.realModelName} key={option.realModelName}>
+                            {option.displayModelName}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                    <FormControl size="small" fullWidth>
+                      <InputLabel>{t.settings.antigravityEffortLabel}</InputLabel>
+                      <Select
+                        label={t.settings.antigravityEffortLabel}
+                        value={safeAgentDefaults.antigravity.effort}
+                        onChange={(event) =>
+                          onAgentDefaultsChange({
+                            defaultProvider: defaultAgentProvider,
+                            provider: 'antigravity',
+                            model: safeAgentDefaults.antigravity.model,
+                            effort: event.target.value as AntigravityEffort,
+                          })
+                        }
+                      >
+                        {antigravityEffortOptions.map((option) => (
                           <MenuItem value={option.value} key={option.value}>
                             {option.label}
                           </MenuItem>

@@ -7,9 +7,12 @@ import type {
   AgentDefaults,
   AgentPermissionMode,
   AgentProvider,
+  AgentProviderRuntimeRegistry,
   AgentRuntime,
   AgentRuntimeRecommendations,
   AgentRuntimeRequest,
+  AntigravityAuthStatus,
+  AntigravityEffort,
   ClaudeAuthStatus,
   ClaudeEffort,
   CodexAuthStatus,
@@ -19,6 +22,14 @@ import type {
   UpdateCodexDefaultsInput,
   UpdateDeveloperModeInput,
 } from '../../shared/types';
+import {
+  LLM_PROVIDER_KEYS,
+  normalizeAgentProviderEffort,
+  normalizeAgentProviderModel,
+  normalizeAgentProviderPreference,
+  normalizeAgentPermissionMode as normalizeSharedAgentPermissionMode,
+  normalizeProvider,
+} from '../../shared/agent-runtime-registry';
 import { normalizeDeveloperPathEntries, validateDeveloperPathEntries } from '../runtime/developer-paths';
 
 interface SettingsServiceState {
@@ -27,16 +38,10 @@ interface SettingsServiceState {
 }
 
 interface SettingsServiceDeps {
-  BUILT_IN_CLAUDE_EFFORT: ClaudeEffort;
-  BUILT_IN_CLAUDE_MODEL: string;
-  BUILT_IN_CODEX_MODEL: string;
-  BUILT_IN_CODEX_REASONING: CodexReasoningEffort;
-  CLAUDE_EFFORT_VALUES: ReadonlySet<ClaudeEffort>;
-  CLAUDE_MODEL_VALUES: ReadonlySet<string>;
-  CODEX_MODEL_VALUES: ReadonlySet<string>;
-  CODEX_REASONING_VALUES: ReadonlySet<CodexReasoningEffort>;
+  agentProviderRegistry: AgentProviderRuntimeRegistry;
   PromptOverridesStore: new (filePath: string) => PromptOverridesStore;
   fs: typeof fs;
+  getAntigravityAuthStatus?: () => Promise<AntigravityAuthStatus>;
   getClaudeAuthStatus: () => Promise<ClaudeAuthStatus>;
   getCodexAuthStatus: () => Promise<CodexAuthStatus>;
   getPromptOverridesPath: () => string;
@@ -47,32 +52,38 @@ interface SettingsServiceDeps {
 }
 
 export const createSettingsServiceController = (deps: SettingsServiceDeps) => {
-  const { state, PromptOverridesStore, getPromptOverridesPath, settingsSeed, fs, path, getSettingsPath, BUILT_IN_CODEX_MODEL, BUILT_IN_CODEX_REASONING, BUILT_IN_CLAUDE_MODEL, BUILT_IN_CLAUDE_EFFORT, CODEX_MODEL_VALUES, CODEX_REASONING_VALUES, CLAUDE_MODEL_VALUES, CLAUDE_EFFORT_VALUES, getCodexAuthStatus, getClaudeAuthStatus } = deps;
+  const { state, PromptOverridesStore, getPromptOverridesPath, settingsSeed, fs, path, getSettingsPath, agentProviderRegistry, getCodexAuthStatus, getClaudeAuthStatus, getAntigravityAuthStatus } = deps;
 const getPromptOverridesStore = (): PromptOverridesStore => {
   state.promptOverridesStore ??= new PromptOverridesStore(getPromptOverridesPath());
   return state.promptOverridesStore;
 };
 
 const normalizeCodexReasoningEffort = (value: unknown, fallback: CodexReasoningEffort): CodexReasoningEffort =>
-  CODEX_REASONING_VALUES.has(value as CodexReasoningEffort) ? value as CodexReasoningEffort : fallback;
+  normalizeAgentProviderEffort(agentProviderRegistry, 'codex', value, fallback);
 
 const normalizeClaudeEffort = (value: unknown, fallback: ClaudeEffort): ClaudeEffort =>
-  CLAUDE_EFFORT_VALUES.has(value as ClaudeEffort) ? value as ClaudeEffort : fallback;
+  normalizeAgentProviderEffort(agentProviderRegistry, 'claude', value, fallback);
+
+const normalizeAntigravityEffort = (value: unknown, fallback: AntigravityEffort): AntigravityEffort =>
+  normalizeAgentProviderEffort(agentProviderRegistry, 'antigravity', value, fallback);
 
 const normalizeCodexModel = (value: unknown, fallback: string): string =>
-  typeof value === 'string' && CODEX_MODEL_VALUES.has(value.trim()) ? value.trim() : fallback;
+  normalizeAgentProviderModel(agentProviderRegistry, 'codex', value, fallback);
 
 const normalizeClaudeModel = (value: unknown, fallback: string): string =>
-  typeof value === 'string' && CLAUDE_MODEL_VALUES.has(value.trim()) ? value.trim() : fallback;
+  normalizeAgentProviderModel(agentProviderRegistry, 'claude', value, fallback);
+
+const normalizeAntigravityModel = (value: unknown, fallback: string): string =>
+  normalizeAgentProviderModel(agentProviderRegistry, 'antigravity', value, fallback);
 
 const normalizeAgentProvider = (value: unknown): AgentProvider | undefined =>
-  value === 'codex' || value === 'claude' ? value : undefined;
+  normalizeProvider(value);
 
 const normalizeDefaultAgentProvider = (value: unknown): AgentProvider | 'auto' =>
-  value === 'codex' || value === 'claude' || value === 'auto' ? value : 'auto';
+  normalizeAgentProviderPreference(value);
 
 const normalizeAgentPermissionMode = (value: unknown): AgentPermissionMode =>
-  value === 'unsafe' ? 'unsafe' : 'safe';
+  normalizeSharedAgentPermissionMode(value);
 
 const normalizeChatNetworkAccess = (value: unknown, fallback = true): boolean =>
   typeof value === 'boolean' ? value : fallback;
@@ -87,32 +98,72 @@ const normalizeSettings = (input?: Partial<Settings>): Settings => {
     input?.agentDefaults && typeof input.agentDefaults === 'object'
       ? input.agentDefaults
       : undefined;
+  const rawLlmProviderDefaults =
+    input?.llmProviderDefaults && typeof input.llmProviderDefaults === 'object'
+      ? input.llmProviderDefaults
+      : rawAgentDefaults;
   const rawAgentCodexDefaults =
-    rawAgentDefaults?.codex && typeof rawAgentDefaults.codex === 'object'
-      ? rawAgentDefaults.codex
+    rawLlmProviderDefaults?.codex && typeof rawLlmProviderDefaults.codex === 'object'
+      ? rawLlmProviderDefaults.codex
       : rawCodexDefaults;
   const rawAgentClaudeDefaults =
-    rawAgentDefaults?.claude && typeof rawAgentDefaults.claude === 'object'
-      ? rawAgentDefaults.claude
+    rawLlmProviderDefaults?.claude && typeof rawLlmProviderDefaults.claude === 'object'
+      ? rawLlmProviderDefaults.claude
       : undefined;
+  const rawAgentAntigravityDefaults =
+    rawLlmProviderDefaults?.antigravity && typeof rawLlmProviderDefaults.antigravity === 'object'
+      ? rawLlmProviderDefaults.antigravity
+      : undefined;
+  const defaultCodexModel = agentProviderRegistry.codex.defaultModel;
+  const defaultCodexReasoningEffort = agentProviderRegistry.codex.defaultReasoningEffort;
+  const defaultClaudeModel = agentProviderRegistry.claude.defaultModel;
+  const defaultClaudeEffort = agentProviderRegistry.claude.defaultEffort;
+  const defaultAntigravityModel = agentProviderRegistry.antigravity.defaultModel;
+  const defaultAntigravityEffort = agentProviderRegistry.antigravity.defaultEffort;
   const codexModel =
     typeof rawCodexDefaults?.model === 'string' && rawCodexDefaults.model.trim()
       ? rawCodexDefaults.model.trim()
-      : BUILT_IN_CODEX_MODEL;
+      : defaultCodexModel;
   const codexReasoningEffort = normalizeCodexReasoningEffort(
     rawCodexDefaults?.reasoningEffort,
-    BUILT_IN_CODEX_REASONING,
+    defaultCodexReasoningEffort,
   );
   const providerConnections: Partial<Record<AgentProvider, string>> = {};
   const rawConnections = input?.providerConnections;
   if (rawConnections && typeof rawConnections === 'object') {
-    for (const provider of ['codex', 'claude'] as const) {
+    for (const provider of LLM_PROVIDER_KEYS) {
       const value = rawConnections[provider];
       if (typeof value === 'string' && value.trim()) {
         providerConnections[provider] = value;
       }
     }
   }
+  const llmProviderDefaults: AgentDefaults = {
+    codex: {
+      model:
+        typeof rawAgentCodexDefaults?.model === 'string' && rawAgentCodexDefaults.model.trim()
+          ? rawAgentCodexDefaults.model.trim()
+          : codexModel,
+      reasoningEffort: normalizeCodexReasoningEffort(
+        rawAgentCodexDefaults?.reasoningEffort,
+        codexReasoningEffort,
+      ),
+    },
+    claude: {
+      model:
+        typeof rawAgentClaudeDefaults?.model === 'string' && rawAgentClaudeDefaults.model.trim()
+          ? rawAgentClaudeDefaults.model.trim()
+          : defaultClaudeModel,
+      effort: normalizeClaudeEffort(rawAgentClaudeDefaults?.effort, defaultClaudeEffort),
+    },
+    antigravity: {
+      model:
+        typeof rawAgentAntigravityDefaults?.model === 'string' && rawAgentAntigravityDefaults.model.trim()
+          ? rawAgentAntigravityDefaults.model.trim()
+          : defaultAntigravityModel,
+      effort: normalizeAntigravityEffort(rawAgentAntigravityDefaults?.effort, defaultAntigravityEffort),
+    },
+  };
   return {
     userEmail: typeof input?.userEmail === 'string' ? input.userEmail : defaults.userEmail,
     plan: typeof input?.plan === 'string' ? input.plan : defaults.plan,
@@ -128,25 +179,8 @@ const normalizeSettings = (input?: Partial<Settings>): Settings => {
       model: codexModel,
       reasoningEffort: codexReasoningEffort,
     },
-    agentDefaults: {
-      codex: {
-        model:
-          typeof rawAgentCodexDefaults?.model === 'string' && rawAgentCodexDefaults.model.trim()
-            ? rawAgentCodexDefaults.model.trim()
-            : codexModel,
-        reasoningEffort: normalizeCodexReasoningEffort(
-          rawAgentCodexDefaults?.reasoningEffort,
-          codexReasoningEffort,
-        ),
-      },
-      claude: {
-        model:
-          typeof rawAgentClaudeDefaults?.model === 'string' && rawAgentClaudeDefaults.model.trim()
-            ? rawAgentClaudeDefaults.model.trim()
-            : BUILT_IN_CLAUDE_MODEL,
-        effort: normalizeClaudeEffort(rawAgentClaudeDefaults?.effort, BUILT_IN_CLAUDE_EFFORT),
-      },
-    },
+    llmProviderDefaults,
+    agentDefaults: llmProviderDefaults,
     providerConnections,
   };
 };
@@ -173,6 +207,13 @@ const updateCodexDefaults = async (input: UpdateCodexDefaultsInput): Promise<Set
     codexDefaults: {
       model: typeof input.model === 'string' ? input.model : '',
       reasoningEffort: input.reasoningEffort,
+    },
+    llmProviderDefaults: {
+      ...state.settings.llmProviderDefaults,
+      codex: {
+        model: typeof input.model === 'string' ? input.model : '',
+        reasoningEffort: input.reasoningEffort,
+      },
     },
     agentDefaults: {
       ...state.settings.agentDefaults,
@@ -213,6 +254,13 @@ const updateAgentDefaults = async (input: UpdateAgentDefaultsInput): Promise<Set
         model: input.model ?? current.agentDefaults.codex.model,
         reasoningEffort: normalizeCodexReasoningEffort(input.effort, current.agentDefaults.codex.reasoningEffort),
       },
+      llmProviderDefaults: {
+        ...current.llmProviderDefaults,
+        codex: {
+          model: input.model ?? current.agentDefaults.codex.model,
+          reasoningEffort: normalizeCodexReasoningEffort(input.effort, current.agentDefaults.codex.reasoningEffort),
+        },
+      },
       agentDefaults: {
         ...current.agentDefaults,
         codex: {
@@ -224,11 +272,42 @@ const updateAgentDefaults = async (input: UpdateAgentDefaultsInput): Promise<Set
     await saveSettings();
     return state.settings;
   }
+  if (provider === 'antigravity') {
+    state.settings = normalizeSettings({
+      ...current,
+      defaultAgentProvider,
+      defaultChatPermissionMode,
+      defaultChatNetworkAccess,
+      llmProviderDefaults: {
+        ...current.llmProviderDefaults,
+        antigravity: {
+          model: typeof input.model === 'string' ? input.model : current.agentDefaults.antigravity.model,
+          effort: normalizeAntigravityEffort(input.effort, current.agentDefaults.antigravity.effort),
+        },
+      },
+      agentDefaults: {
+        ...current.agentDefaults,
+        antigravity: {
+          model: typeof input.model === 'string' ? input.model : current.agentDefaults.antigravity.model,
+          effort: normalizeAntigravityEffort(input.effort, current.agentDefaults.antigravity.effort),
+        },
+      },
+    });
+    await saveSettings();
+    return state.settings;
+  }
   state.settings = normalizeSettings({
     ...current,
     defaultAgentProvider,
     defaultChatPermissionMode,
     defaultChatNetworkAccess,
+    llmProviderDefaults: {
+      ...current.llmProviderDefaults,
+      claude: {
+        model: typeof input.model === 'string' ? input.model : current.agentDefaults.claude.model,
+        effort: normalizeClaudeEffort(input.effort, current.agentDefaults.claude.effort),
+      },
+    },
     agentDefaults: {
       ...current.agentDefaults,
       claude: {
@@ -263,7 +342,7 @@ const markProviderConnected = async (provider: AgentProvider): Promise<void> => 
     state.settings = current;
     return;
   }
-  const isFirstConnectedProvider = !current.providerConnections.codex && !current.providerConnections.claude;
+  const isFirstConnectedProvider = LLM_PROVIDER_KEYS.every((key) => !current.providerConnections[key]);
   state.settings = normalizeSettings({
     ...current,
     defaultAgentProvider: isFirstConnectedProvider && current.defaultAgentProvider === 'auto'
@@ -284,43 +363,53 @@ const chooseAgentRuntime = async (requested?: AgentRuntimeRequest): Promise<Agen
     const recommended = requested?.recommendations?.claude;
     return {
       provider,
-      model: normalizeClaudeModel(requested?.model ?? recommended?.model, defaults.claude.model || BUILT_IN_CLAUDE_MODEL),
+      model: normalizeClaudeModel(requested?.model ?? recommended?.model, defaults.claude.model || agentProviderRegistry.claude.defaultModel),
       effort: normalizeClaudeEffort(requested?.effort ?? recommended?.effort, defaults.claude.effort),
+    };
+  }
+  if (provider === 'antigravity') {
+    const recommended = requested?.recommendations?.antigravity;
+    return {
+      provider,
+      model: normalizeAntigravityModel(requested?.model ?? recommended?.model, defaults.antigravity.model || agentProviderRegistry.antigravity.defaultModel),
+      effort: normalizeAntigravityEffort(requested?.effort ?? recommended?.effort, defaults.antigravity.effort),
     };
   }
   const recommended = requested?.recommendations?.codex;
   return {
     provider: 'codex',
-    model: normalizeCodexModel(requested?.model ?? recommended?.model, defaults.codex.model || BUILT_IN_CODEX_MODEL),
+    model: normalizeCodexModel(requested?.model ?? recommended?.model, defaults.codex.model || agentProviderRegistry.codex.defaultModel),
     effort: normalizeCodexReasoningEffort(requested?.effort ?? recommended?.reasoningEffort, defaults.codex.reasoningEffort),
   };
 };
 
 const chooseConnectedProvider = async (): Promise<AgentProvider> => {
-  const [codexStatus, claudeStatus] = await Promise.all([
-    getCodexAuthStatus().catch(() => null),
-    getClaudeAuthStatus().catch(() => null),
-  ]);
-  const connected: AgentProvider[] = [
-    ...(codexStatus?.authenticated ? ['codex' as const] : []),
-    ...(claudeStatus?.authenticated ? ['claude' as const] : []),
+  const normalized = normalizeSettings(state.settings);
+  const timestampOrder = LLM_PROVIDER_KEYS
+    .filter((provider) => Boolean(normalized.providerConnections[provider]))
+    .sort((left, right) => Date.parse(normalized.providerConnections[left] ?? '') - Date.parse(normalized.providerConnections[right] ?? ''));
+  const preferredOrder = normalized.defaultAgentProvider === 'auto'
+    ? timestampOrder
+    : [normalized.defaultAgentProvider, ...timestampOrder.filter((provider) => provider !== normalized.defaultAgentProvider)];
+  const orderedProviders = [
+    ...preferredOrder,
+    ...LLM_PROVIDER_KEYS.filter((provider) => !preferredOrder.includes(provider)),
   ];
-  if (connected.length === 0) {
-    return 'codex';
+  const isAuthenticated = async (provider: AgentProvider): Promise<boolean> => {
+    if (provider === 'codex') {
+      return Boolean((await getCodexAuthStatus().catch(() => null))?.authenticated);
+    }
+    if (provider === 'claude') {
+      return Boolean((await getClaudeAuthStatus().catch(() => null))?.authenticated);
+    }
+    return Boolean((await getAntigravityAuthStatus?.().catch(() => null))?.authenticated);
+  };
+  for (const provider of orderedProviders) {
+    if (await isAuthenticated(provider)) {
+      return provider;
+    }
   }
-  if (connected.length === 1) {
-    return connected[0];
-  }
-  const preferred = normalizeSettings(state.settings).defaultAgentProvider;
-  if (preferred !== 'auto' && connected.includes(preferred)) {
-    return preferred;
-  }
-  const connections = normalizeSettings(state.settings).providerConnections;
-  const sorted = connected
-    .map((provider) => ({ provider, connectedAt: connections[provider] }))
-    .filter((entry): entry is { provider: AgentProvider; connectedAt: string } => Boolean(entry.connectedAt))
-    .sort((left, right) => left.connectedAt.localeCompare(right.connectedAt));
-  return sorted[0]?.provider ?? 'codex';
+  return 'codex';
 };
 
 const withAgentDefaults = <T extends { model?: string; reasoningEffort?: CodexReasoningEffort; runtime?: AgentRuntime; runtimeRecommendations?: AgentRuntimeRecommendations }>(
@@ -342,8 +431,21 @@ const withAgentDefaults = <T extends { model?: string; reasoningEffort?: CodexRe
       reasoningEffort: recommendations.codex.reasoningEffort,
       runtime: {
         provider: 'claude',
-        model: normalizeClaudeModel(entry.runtime.model, recommendations.claude.model || defaults.claude.model || BUILT_IN_CLAUDE_MODEL),
+        model: normalizeClaudeModel(entry.runtime.model, recommendations.claude.model || defaults.claude.model || agentProviderRegistry.claude.defaultModel),
         effort: normalizeClaudeEffort(entry.runtime.effort, defaults.claude.effort),
+      },
+    };
+  }
+  if (entry.runtime?.provider === 'antigravity') {
+    return {
+      ...entry,
+      runtimeRecommendations: recommendations,
+      model: recommendations.codex.model,
+      reasoningEffort: recommendations.codex.reasoningEffort,
+      runtime: {
+        provider: 'antigravity',
+        model: normalizeAntigravityModel(entry.runtime.model, recommendations.antigravity.model || defaults.antigravity.model || agentProviderRegistry.antigravity.defaultModel),
+        effort: normalizeAntigravityEffort(entry.runtime.effort, defaults.antigravity.effort),
       },
     };
   }
@@ -363,16 +465,20 @@ const mergeRuntimeRecommendations = (
   codex: {
     model: normalizeCodexModel(
       recommendations?.codex?.model ?? legacyCodex?.model,
-      defaults.codex.model || BUILT_IN_CODEX_MODEL,
+      defaults.codex.model || agentProviderRegistry.codex.defaultModel,
     ),
     reasoningEffort: normalizeCodexReasoningEffort(
       recommendations?.codex?.reasoningEffort ?? legacyCodex?.reasoningEffort,
-      defaults.codex.reasoningEffort || BUILT_IN_CODEX_REASONING,
+      defaults.codex.reasoningEffort || agentProviderRegistry.codex.defaultReasoningEffort,
     ),
   },
   claude: {
-    model: normalizeClaudeModel(recommendations?.claude?.model, defaults.claude.model || BUILT_IN_CLAUDE_MODEL),
-    effort: normalizeClaudeEffort(recommendations?.claude?.effort, defaults.claude.effort || BUILT_IN_CLAUDE_EFFORT),
+    model: normalizeClaudeModel(recommendations?.claude?.model, defaults.claude.model || agentProviderRegistry.claude.defaultModel),
+    effort: normalizeClaudeEffort(recommendations?.claude?.effort, defaults.claude.effort || agentProviderRegistry.claude.defaultEffort),
+  },
+  antigravity: {
+    model: normalizeAntigravityModel(recommendations?.antigravity?.model, defaults.antigravity.model || agentProviderRegistry.antigravity.defaultModel),
+    effort: normalizeAntigravityEffort(recommendations?.antigravity?.effort, defaults.antigravity.effort || agentProviderRegistry.antigravity.defaultEffort),
   },
 });
 

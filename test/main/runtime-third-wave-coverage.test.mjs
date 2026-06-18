@@ -122,6 +122,7 @@ const makeAgentAuthHarness = async (overrides = {}) => {
     findManifestService: () => null,
     fs,
     getClaudeRoot: () => path.join(root, 'claude-root'),
+    getAntigravityRoot: () => path.join(root, 'antigravity-root'),
     getCodexHome: () => path.join(root, 'codex-home'),
     getCodexRoot: () => path.join(root, 'codex-root'),
     getForgerMetadataRoot: () => path.join(root, 'metadata'),
@@ -628,6 +629,109 @@ test('agent auth reports Claude connect failures with missing status fallback', 
   assert.equal(result.status?.installed, false);
   assert.equal(result.status?.source, 'missing');
   assert.ok(calls.some((call) => call[0] === 'log' && call[1] === 'claude_auth:failed'));
+});
+
+test('agent auth installs Antigravity under managed HOME and launches OAuth print mode on macOS', async (t) => {
+  const { root, calls, controller } = await makeAgentAuthHarness({
+    buildMacTerminalLoginScript: ({ providerName, logPath, command }) => {
+      calls.push(['script', providerName, logPath, command]);
+      return command.join(' ');
+    },
+    canRunCommand: async (command, args) => command.endsWith('agy') && args[0] === '--version',
+    runCommand: async (command, args, options) => {
+      calls.push(['run', command, args, options]);
+      if (command === 'bash') {
+        assert.equal(options.env.HOME, path.join(root, 'antigravity-root'));
+        assert.equal(options.env.XDG_CONFIG_HOME, path.join(root, 'antigravity-root', 'config'));
+        await fs.mkdir(path.join(root, 'antigravity-root', 'bin'), { recursive: true });
+        await fs.writeFile(path.join(root, 'antigravity-root', 'bin', 'agy'), '', 'utf8');
+      }
+    },
+    runCommandCapture: async (command, args) => {
+      calls.push(['capture', command, args]);
+      if (command === 'which') {
+        return { code: 1, stdout: '', stderr: 'missing' };
+      }
+      if (args[0] === '--version') {
+        return { code: 0, stdout: '1.0.9\n', stderr: '' };
+      }
+      return { code: 1, stdout: 'Authentication required.', stderr: '' };
+    },
+  });
+  t.after(async () => {
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  const result = await withPlatform('darwin', async () => await controller.connectAntigravityAuth());
+
+  assert.equal(result.success, true);
+  assert.equal(result.status?.installed, true);
+  assert.equal(result.status?.authenticated, false);
+  assert.equal(result.status?.source, 'managed');
+  const scriptCall = calls.find((call) => call[0] === 'script');
+  assert.ok(scriptCall);
+  assert.deepEqual(scriptCall[3], [
+    path.join(root, 'antigravity-root', 'bin', 'agy'),
+    '--print',
+    'Return the exact string OK and do not use tools.',
+    '--print-timeout',
+    '5m',
+  ]);
+  assert.ok(calls.some((call) => call[0] === 'run' && call[1] === '/usr/bin/osascript'));
+  assert.ok(calls.some((call) => call[0] === 'log' && call[1] === 'antigravity_auth:terminal_opened'));
+});
+
+test('agent auth Antigravity embedded session streams OAuth URL and writes pasted code', async (t) => {
+  const written = [];
+  let child;
+  const events = [];
+  const { root, calls, controller } = await makeAgentAuthHarness({
+    canRunCommand: async (command, args) => command.endsWith('agy') && args[0] === '--version',
+    runCommandCapture: async (command, args) => {
+      calls.push(['capture', command, args]);
+      if (args[0] === '--version') {
+        return { code: 0, stdout: '1.0.9\n', stderr: '' };
+      }
+      return { code: 1, stdout: '', stderr: 'missing' };
+    },
+    spawn: (command, args, options) => {
+      calls.push(['spawn', command, args, options]);
+      child = new FakeChildProcess();
+      child.stdin = {
+        destroyed: false,
+        write: (value) => written.push(value),
+      };
+      return child;
+    },
+  });
+  t.after(async () => {
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  await fs.mkdir(path.join(root, 'antigravity-root', 'bin'), { recursive: true });
+  await fs.writeFile(path.join(root, 'antigravity-root', 'bin', 'agy'), '', 'utf8');
+
+  const result = await controller.startAntigravityAuthSession((event) => events.push(event));
+
+  assert.equal(result.success, true);
+  assert.ok(result.sessionId);
+  const spawnCall = calls.find((call) => call[0] === 'spawn');
+  assert.ok(spawnCall);
+  assert.deepEqual(spawnCall[2], [
+    '--print',
+    'Return the exact string OK and do not use tools.',
+    '--print-timeout',
+    '5m',
+  ]);
+  assert.equal(spawnCall[3].cwd, path.join(root, 'tmp', 'antigravity-auth-login'));
+  assert.equal(spawnCall[3].shell, false);
+  assert.equal(spawnCall[3].stdio, 'pipe');
+  child.stdout.emit('data', 'Authentication required. https://accounts.google.com/o/oauth2/auth?client_id=forger&state=test\n');
+  assert.ok(events.some((event) => event.type === 'url' && event.url.includes('accounts.google.com/o/oauth2/auth')));
+  assert.deepEqual(await controller.writeAntigravityAuthSession(result.sessionId, 'abc123'), { success: true });
+  assert.deepEqual(written, ['abc123\n']);
+  child.emit('exit', 0);
+  await waitForCondition(() => events.some((event) => event.type === 'completed'));
+  assert.ok(calls.some((call) => call[0] === 'connected' && call[1] === 'antigravity'));
 });
 
 test('agent auth runs direct provider login on non-macOS platforms', async (t) => {

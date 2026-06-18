@@ -26,6 +26,7 @@ import type {
   AgentProvider,
   AgentRuntime,
   AgentRuntimeRecommendations,
+  AntigravityEffort,
   AppAgent,
   AppAgentPromptSet,
   AppAgentPromptTemplate,
@@ -52,6 +53,13 @@ import type {
   OfficialToolRuntimeEvent,
   Settings,
 } from '../../shared/types';
+import {
+  DEFAULT_ANTIGRAVITY_EFFORT,
+  DEFAULT_ANTIGRAVITY_MODEL,
+  isAgentProvider,
+  normalizeAntigravityEffort,
+  normalizeRuntimeEffort,
+} from '../../shared/agent-runtime-registry';
 import type { AppManifest, AppRegistry, RunningAppProcess } from '../core/main-process-types';
 
 interface ManifestSupportState {
@@ -194,7 +202,7 @@ const manifestAllowsAgentNetworkAccess = (manifest: AppManifest | null): boolean
   manifest?.agentRuntime?.networkAccess !== false;
 
 const normalizeAgentProvider = (value: unknown): AgentProvider | undefined =>
-  value === 'codex' || value === 'claude' ? value : undefined;
+  isAgentProvider(value) ? value : undefined;
 
 const appAllowsAgentNetworkAccess = async (appId: string): Promise<boolean> => {
   const record = getCurrentRegistry().apps[appId];
@@ -750,32 +758,49 @@ const normalizeManifestRuntimeRecommendations = (
   const claudeRaw = record.claude && typeof record.claude === 'object' && !Array.isArray(record.claude)
     ? record.claude as Record<string, unknown>
     : {};
+  const antigravityRaw = record.antigravity && typeof record.antigravity === 'object' && !Array.isArray(record.antigravity)
+    ? record.antigravity as Record<string, unknown>
+    : {};
   const codexModel =
     asNonEmptyString(codexRaw.model)
     ?? asNonEmptyString(codexRaw.defaultModel)
     ?? legacyCodex?.model
-    ?? fallback?.codex.model;
+    ?? fallback?.codex?.model;
   const codexEffort = normalizeManifestReasoningEffort(
     codexRaw.reasoningEffort ?? codexRaw.effort ?? codexRaw.defaultEffort ?? legacyCodex?.reasoningEffort,
-  ) ?? fallback?.codex.reasoningEffort;
+  ) ?? fallback?.codex?.reasoningEffort;
   const claudeModel =
     asNonEmptyString(claudeRaw.model)
     ?? asNonEmptyString(claudeRaw.defaultModel)
-    ?? fallback?.claude.model;
+    ?? fallback?.claude?.model;
   const claudeEffort = CLAUDE_EFFORT_VALUES.has((claudeRaw.effort ?? claudeRaw.defaultEffort) as ClaudeEffort)
     ? (claudeRaw.effort ?? claudeRaw.defaultEffort) as ClaudeEffort
-    : fallback?.claude.effort;
+    : fallback?.claude?.effort;
+  const antigravityModel =
+    asNonEmptyString(antigravityRaw.model)
+    ?? asNonEmptyString(antigravityRaw.defaultModel)
+    ?? fallback?.antigravity?.model;
+  const antigravityEffort = normalizeAntigravityEffort(
+    antigravityRaw.effort ?? antigravityRaw.defaultEffort,
+    fallback?.antigravity?.effort ?? DEFAULT_ANTIGRAVITY_EFFORT,
+  );
   const output: Partial<AgentDefaults> = {};
   if (codexModel || codexEffort) {
     output.codex = {
-      model: codexModel ?? fallback?.codex.model ?? getCodexDefaults().model,
-      reasoningEffort: codexEffort ?? fallback?.codex.reasoningEffort ?? getCodexDefaults().reasoningEffort,
+      model: codexModel ?? fallback?.codex?.model ?? getCodexDefaults().model,
+      reasoningEffort: codexEffort ?? fallback?.codex?.reasoningEffort ?? getCodexDefaults().reasoningEffort,
     };
   }
   if (claudeModel || claudeEffort) {
     output.claude = {
-      model: claudeModel ?? fallback?.claude.model ?? 'sonnet',
-      effort: claudeEffort ?? fallback?.claude.effort ?? 'medium',
+      model: claudeModel ?? fallback?.claude?.model ?? 'sonnet',
+      effort: claudeEffort ?? fallback?.claude?.effort ?? 'medium',
+    };
+  }
+  if (antigravityModel || antigravityRaw.effort || antigravityRaw.defaultEffort || fallback?.antigravity) {
+    output.antigravity = {
+      model: antigravityModel ?? fallback?.antigravity?.model ?? DEFAULT_ANTIGRAVITY_MODEL,
+      effort: antigravityEffort,
     };
   }
   return Object.keys(output).length > 0 ? output : undefined;
@@ -791,8 +816,8 @@ const normalizeManifestRuntime = (value: unknown): AgentRuntime | undefined => {
   const record = value as Record<string, unknown>;
   const provider = normalizeAgentProvider(record.provider);
   const model = typeof record.model === 'string' && record.model.trim() ? record.model.trim() : '';
-  const effort = provider === 'claude'
-    ? normalizeClaudeEffort(record.effort, BUILT_IN_CLAUDE_EFFORT)
+  const effort = provider
+    ? normalizeRuntimeEffort(provider, record.effort, provider === 'claude' ? BUILT_IN_CLAUDE_EFFORT : provider === 'antigravity' ? DEFAULT_ANTIGRAVITY_EFFORT : BUILT_IN_CODEX_REASONING)
     : normalizeCodexReasoningEffort(record.effort, BUILT_IN_CODEX_REASONING);
   const permissionMode = record.permissionMode === 'unsafe' ? 'unsafe' : record.permissionMode === 'safe' ? 'safe' : undefined;
   if (!provider || !model) {

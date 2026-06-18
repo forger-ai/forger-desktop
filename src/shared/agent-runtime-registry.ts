@@ -3,11 +3,15 @@ import type {
   AgentEffort,
   AgentPermissionMode,
   AgentProvider,
+  AgentProviderRuntimeRegistry,
   AgentRuntime,
+  AntigravityEffort,
+  AntigravityModelOption,
   ClaudeEffort,
   ClaudeModelOption,
   CodexModelOption,
   CodexReasoningEffort,
+  CreateAgentProviderRuntimeRegistryInput,
 } from './types/agent-runtime';
 
 export type AgentProviderPreference = AgentProvider | 'auto';
@@ -29,7 +33,10 @@ export const DEFAULT_CODEX_MODEL = 'gpt-5.4';
 export const DEFAULT_CODEX_REASONING_EFFORT: CodexReasoningEffort = 'medium';
 export const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-4-6';
 export const DEFAULT_CLAUDE_EFFORT: ClaudeEffort = 'medium';
+export const DEFAULT_ANTIGRAVITY_MODEL = 'gemini-3.5-flash-medium';
+export const DEFAULT_ANTIGRAVITY_EFFORT: AntigravityEffort = 'medium';
 export const DEFAULT_AGENT_PROVIDER: AgentProviderPreference = 'auto';
+export const LLM_PROVIDER_KEYS: AgentProvider[] = ['codex', 'claude', 'antigravity'];
 
 export const CODEX_MODEL_OPTIONS: CodexModelOption[] = [
   { displayModelName: '5.5', realModelName: 'gpt-5.5', defaultReasoningEffort: 'medium' },
@@ -77,15 +84,70 @@ export const CLAUDE_EFFORT_OPTIONS: Array<{ label: string; value: ClaudeEffort }
   { label: 'Max', value: 'max' },
 ];
 
+export const ANTIGRAVITY_MODEL_OPTIONS: AntigravityModelOption[] = [
+  { displayModelName: 'Gemini 3.5 Flash (Medium)', realModelName: 'gemini-3.5-flash-medium', defaultEffort: 'medium' },
+  { displayModelName: 'Gemini 3.5 Flash (High)', realModelName: 'gemini-3.5-flash-high', defaultEffort: 'high' },
+  { displayModelName: 'Gemini 3.5 Flash (Low)', realModelName: 'gemini-3.5-flash-low', defaultEffort: 'low' },
+  { displayModelName: 'Gemini 3.1 Pro (Low)', realModelName: 'gemini-3.1-pro-low', defaultEffort: 'low' },
+  { displayModelName: 'Gemini 3.1 Pro (High)', realModelName: 'gemini-3.1-pro-high', defaultEffort: 'high' },
+  { displayModelName: 'Claude Sonnet 4.6 (Thinking)', realModelName: 'claude-sonnet-4.6-thinking', defaultEffort: 'high' },
+  { displayModelName: 'Claude Opus 4.6 (Thinking)', realModelName: 'claude-opus-4.6-thinking', defaultEffort: 'high' },
+  { displayModelName: 'GPT-OSS 120B (Medium)', realModelName: 'gpt-oss-120b-medium', defaultEffort: 'medium' },
+];
+
+export const ANTIGRAVITY_EFFORT_OPTIONS: Array<{ label: string; value: AntigravityEffort }> = [
+  { label: 'Low', value: 'low' },
+  { label: 'Medium', value: 'medium' },
+  { label: 'High', value: 'high' },
+];
+
 export const AGENT_PROVIDER_OPTIONS: Array<{ label: string; value: AgentProviderPreference }> = [
   { label: 'Auto', value: 'auto' },
   { label: 'Codex', value: 'codex' },
   { label: 'Claude', value: 'claude' },
+  { label: 'Google Antigravity', value: 'antigravity' },
 ];
+
+export const LLM_PROVIDER_REGISTRY = {
+  codex: {
+    key: 'codex',
+    label: 'Codex',
+    defaultModel: DEFAULT_CODEX_MODEL,
+    defaultEffort: DEFAULT_CODEX_REASONING_EFFORT,
+    modelOptions: CODEX_MODEL_OPTIONS,
+    effortOptions: CODEX_REASONING_OPTIONS,
+    supportsMcp: true,
+    supportsConversations: true,
+    supportsSkills: false,
+  },
+  claude: {
+    key: 'claude',
+    label: 'Claude',
+    defaultModel: DEFAULT_CLAUDE_MODEL,
+    defaultEffort: DEFAULT_CLAUDE_EFFORT,
+    modelOptions: CLAUDE_MODEL_OPTIONS,
+    effortOptions: CLAUDE_EFFORT_OPTIONS,
+    supportsMcp: true,
+    supportsConversations: true,
+    supportsSkills: true,
+  },
+  antigravity: {
+    key: 'antigravity',
+    label: 'Google Antigravity',
+    defaultModel: DEFAULT_ANTIGRAVITY_MODEL,
+    defaultEffort: DEFAULT_ANTIGRAVITY_EFFORT,
+    modelOptions: ANTIGRAVITY_MODEL_OPTIONS,
+    effortOptions: ANTIGRAVITY_EFFORT_OPTIONS,
+    supportsMcp: true,
+    supportsConversations: true,
+    supportsSkills: true,
+  },
+} as const;
 
 export const AGENT_MODEL_OPTIONS = {
   codex: CODEX_MODEL_OPTIONS,
   claude: CLAUDE_MODEL_OPTIONS,
+  antigravity: ANTIGRAVITY_MODEL_OPTIONS,
 } as const;
 
 export const DEFAULT_AGENT_DEFAULTS: AgentDefaults = {
@@ -97,6 +159,10 @@ export const DEFAULT_AGENT_DEFAULTS: AgentDefaults = {
     model: DEFAULT_CLAUDE_MODEL,
     effort: DEFAULT_CLAUDE_EFFORT,
   },
+  antigravity: {
+    model: DEFAULT_ANTIGRAVITY_MODEL,
+    effort: DEFAULT_ANTIGRAVITY_EFFORT,
+  },
 };
 
 const CODEX_MODELS = new Set(CODEX_MODEL_OPTIONS.map((option) => option.realModelName));
@@ -104,14 +170,61 @@ const CODEX_EFFORTS = new Set(CODEX_REASONING_OPTIONS.map((option) => option.val
 const CLAUDE_MODEL_LOOKUP_OPTIONS = [...CLAUDE_MODEL_OPTIONS, ...CLAUDE_LEGACY_MODEL_OPTIONS];
 const CLAUDE_MODELS = new Set(CLAUDE_MODEL_LOOKUP_OPTIONS.map((option) => option.realModelName));
 const CLAUDE_EFFORTS = new Set(CLAUDE_EFFORT_OPTIONS.map((option) => option.value));
+const ANTIGRAVITY_MODELS = new Set(ANTIGRAVITY_MODEL_OPTIONS.map((option) => option.realModelName));
+const ANTIGRAVITY_EFFORTS = new Set(ANTIGRAVITY_EFFORT_OPTIONS.map((option) => option.value));
+
+export const createAgentProviderRuntimeRegistry = (
+  input: CreateAgentProviderRuntimeRegistryInput,
+): AgentProviderRuntimeRegistry => ({
+  codex: {
+    defaultModel: input.codex.defaultModel,
+    defaultReasoningEffort: input.codex.defaultReasoningEffort,
+    modelValues: new Set(input.codex.modelValues),
+    reasoningEffortValues: new Set(input.codex.reasoningEffortValues),
+  },
+  claude: {
+    defaultModel: input.claude.defaultModel,
+    defaultEffort: input.claude.defaultEffort,
+    modelValues: new Set(input.claude.modelValues),
+    effortValues: new Set(input.claude.effortValues),
+  },
+  antigravity: {
+    defaultModel: input.antigravity.defaultModel,
+    defaultEffort: input.antigravity.defaultEffort,
+    modelValues: new Set(input.antigravity.modelValues),
+    effortValues: new Set(input.antigravity.effortValues),
+  },
+});
+
+export const DEFAULT_AGENT_PROVIDER_RUNTIME_REGISTRY = createAgentProviderRuntimeRegistry({
+  codex: {
+    defaultModel: DEFAULT_CODEX_MODEL,
+    defaultReasoningEffort: DEFAULT_CODEX_REASONING_EFFORT,
+    modelValues: CODEX_MODELS,
+    reasoningEffortValues: CODEX_EFFORTS,
+  },
+  claude: {
+    defaultModel: DEFAULT_CLAUDE_MODEL,
+    defaultEffort: DEFAULT_CLAUDE_EFFORT,
+    modelValues: CLAUDE_MODELS,
+    effortValues: CLAUDE_EFFORTS,
+  },
+  antigravity: {
+    defaultModel: DEFAULT_ANTIGRAVITY_MODEL,
+    defaultEffort: DEFAULT_ANTIGRAVITY_EFFORT,
+    modelValues: ANTIGRAVITY_MODELS,
+    effortValues: ANTIGRAVITY_EFFORTS,
+  },
+});
 
 export const getDefaultAgentDefaults = (): AgentDefaults => ({
   codex: { ...DEFAULT_AGENT_DEFAULTS.codex },
   claude: { ...DEFAULT_AGENT_DEFAULTS.claude },
+  antigravity: { ...DEFAULT_AGENT_DEFAULTS.antigravity },
 });
 
-export const getAgentModelOptions = (provider: AgentProvider): CodexModelOption[] | ClaudeModelOption[] =>
-  provider === 'claude' ? CLAUDE_MODEL_OPTIONS : CODEX_MODEL_OPTIONS;
+export const getAgentModelOptions = (provider: AgentProvider): CodexModelOption[] | ClaudeModelOption[] | AntigravityModelOption[] =>
+  AGENT_MODEL_OPTIONS[provider];
 
 export const getCodexModelOption = (model: unknown): CodexModelOption | undefined => {
   const normalized = normalizeString(model);
@@ -129,8 +242,16 @@ export const getDefaultCodexReasoningEffort = (model: unknown): CodexReasoningEf
 export const getDefaultClaudeEffort = (model: unknown): ClaudeEffort =>
   getClaudeModelOption(model)?.defaultEffort ?? DEFAULT_CLAUDE_EFFORT;
 
+export const getAntigravityModelOption = (model: unknown): AntigravityModelOption | undefined => {
+  const normalized = normalizeString(model);
+  return ANTIGRAVITY_MODEL_OPTIONS.find((option) => option.realModelName === normalized);
+};
+
+export const getDefaultAntigravityEffort = (model: unknown): AntigravityEffort =>
+  getAntigravityModelOption(model)?.defaultEffort ?? DEFAULT_ANTIGRAVITY_EFFORT;
+
 export const isAgentProvider = (value: unknown): value is AgentProvider =>
-  value === 'codex' || value === 'claude';
+  LLM_PROVIDER_KEYS.includes(value as AgentProvider);
 
 export const isAgentPermissionMode = (value: unknown): value is AgentPermissionMode =>
   value === 'safe' || value === 'unsafe';
@@ -149,12 +270,81 @@ export const isCodexReasoningEffort = (value: unknown): value is CodexReasoningE
 export const isClaudeModel = (value: unknown): value is string => CLAUDE_MODELS.has(value as string);
 export const isClaudeEffort = (value: unknown): value is ClaudeEffort =>
   CLAUDE_EFFORTS.has(value as ClaudeEffort);
+export const isAntigravityModel = (value: unknown): value is string => ANTIGRAVITY_MODELS.has(value as string);
+export const isAntigravityEffort = (value: unknown): value is AntigravityEffort =>
+  ANTIGRAVITY_EFFORTS.has(value as AntigravityEffort);
 
 export const normalizeAgentProviderPreference = (value: unknown, fallback: AgentProviderPreference = DEFAULT_AGENT_PROVIDER): AgentProviderPreference =>
   isAgentProviderPreference(value) ? value : fallback;
 
 export const normalizeProvider = (value: unknown): AgentProvider | undefined =>
   isAgentProvider(value) ? value : undefined;
+
+export function normalizeAgentProviderModel(
+  registry: AgentProviderRuntimeRegistry,
+  provider: 'codex',
+  value: unknown,
+  fallback?: string,
+): string;
+export function normalizeAgentProviderModel(
+  registry: AgentProviderRuntimeRegistry,
+  provider: 'claude',
+  value: unknown,
+  fallback?: string,
+): string;
+export function normalizeAgentProviderModel(
+  registry: AgentProviderRuntimeRegistry,
+  provider: 'antigravity',
+  value: unknown,
+  fallback?: string,
+): string;
+export function normalizeAgentProviderModel(
+  registry: AgentProviderRuntimeRegistry,
+  provider: AgentProvider,
+  value: unknown,
+  fallback?: string,
+): string {
+  const normalized = normalizeString(value);
+  const definition = registry[provider];
+  const defaultModel = fallback ?? definition.defaultModel;
+  return normalized && definition.modelValues.has(normalized) ? normalized : defaultModel;
+}
+
+export function normalizeAgentProviderEffort(
+  registry: AgentProviderRuntimeRegistry,
+  provider: 'codex',
+  value: unknown,
+  fallback?: CodexReasoningEffort,
+): CodexReasoningEffort;
+export function normalizeAgentProviderEffort(
+  registry: AgentProviderRuntimeRegistry,
+  provider: 'claude',
+  value: unknown,
+  fallback?: ClaudeEffort,
+): ClaudeEffort;
+export function normalizeAgentProviderEffort(
+  registry: AgentProviderRuntimeRegistry,
+  provider: 'antigravity',
+  value: unknown,
+  fallback?: AntigravityEffort,
+): AntigravityEffort;
+export function normalizeAgentProviderEffort(
+  registry: AgentProviderRuntimeRegistry,
+  provider: AgentProvider,
+  value: unknown,
+  fallback?: AgentEffort,
+): AgentEffort {
+  if (provider === 'claude') {
+    const defaultEffort = isClaudeEffort(fallback) ? fallback : registry.claude.defaultEffort;
+    return registry.claude.effortValues.has(value as ClaudeEffort) ? value as ClaudeEffort : defaultEffort;
+  }
+  if (provider === 'antigravity') {
+    const defaultEffort = isAntigravityEffort(fallback) ? fallback : registry.antigravity.defaultEffort;
+    return registry.antigravity.effortValues.has(value as AntigravityEffort) ? value as AntigravityEffort : defaultEffort;
+  }
+  const defaultEffort = isCodexReasoningEffort(fallback) ? fallback : registry.codex.defaultReasoningEffort;
+  return registry.codex.reasoningEffortValues.has(value as CodexReasoningEffort) ? value as CodexReasoningEffort : defaultEffort;
+}
 
 export const normalizeCodexModel = (value: unknown, fallback = DEFAULT_CODEX_MODEL): string =>
   isCodexModel(value) ? value as string : fallback;
@@ -171,9 +361,17 @@ export const normalizeClaudeModel = (value: unknown, fallback = DEFAULT_CLAUDE_M
 export const normalizeClaudeEffort = (value: unknown, fallback: ClaudeEffort = DEFAULT_CLAUDE_EFFORT): ClaudeEffort =>
   isClaudeEffort(value) ? value as ClaudeEffort : fallback;
 
+export const normalizeAntigravityModel = (value: unknown, fallback = DEFAULT_ANTIGRAVITY_MODEL): string =>
+  isAntigravityModel(value) ? value as string : fallback;
+
+export const normalizeAntigravityEffort = (value: unknown, fallback: AntigravityEffort = DEFAULT_ANTIGRAVITY_EFFORT): AntigravityEffort =>
+  isAntigravityEffort(value) ? value as AntigravityEffort : fallback;
+
 export const normalizeRuntimeEffort = (provider: AgentProvider, value: unknown, fallback?: AgentEffort): AgentEffort =>
   provider === 'claude'
     ? normalizeClaudeEffort(value, fallback && isClaudeEffort(fallback) ? fallback : DEFAULT_CLAUDE_EFFORT)
+    : provider === 'antigravity'
+      ? normalizeAntigravityEffort(value, fallback && isAntigravityEffort(fallback) ? fallback : DEFAULT_ANTIGRAVITY_EFFORT)
     : normalizeCodexReasoningEffort(value, fallback && isCodexReasoningEffort(fallback) ? fallback : DEFAULT_CODEX_REASONING_EFFORT);
 
 export const legacyCodexRuntime = (input?: LegacyCodexRuntimeInput): AgentRuntime | undefined => {
@@ -211,6 +409,15 @@ export const normalizeAgentRuntime = (
       ...(permissionMode ? { permissionMode } : {}),
     };
   }
+  if (provider === 'antigravity') {
+    const normalizedModel = normalizeAntigravityModel(model, model);
+    return {
+      provider,
+      model: normalizedModel,
+      effort: normalizeAntigravityEffort(record?.effort ?? fallback?.effort ?? fallback?.reasoningEffort, getDefaultAntigravityEffort(normalizedModel)),
+      ...(permissionMode ? { permissionMode } : {}),
+    };
+  }
   const normalizedModel = normalizeCodexModel(model, model);
   return {
     provider,
@@ -242,6 +449,14 @@ export const resolveAgentRuntime = (
       permissionMode: normalizeAgentPermissionMode(normalized.permissionMode),
     };
   }
+  if (normalized?.provider === 'antigravity') {
+    return {
+      provider: 'antigravity',
+      model: normalizeAntigravityModel(normalized.model, defaults.antigravity.model),
+      effort: normalizeAntigravityEffort(normalized.effort, defaults.antigravity.effort),
+      permissionMode: normalizeAgentPermissionMode(normalized.permissionMode),
+    };
+  }
   return {
     provider: 'codex',
     model: defaults.codex.model,
@@ -258,6 +473,7 @@ export const runtimeFromDefaults = (defaults: AgentDefaults = DEFAULT_AGENT_DEFA
 export interface DefaultAgentRuntimeInput {
   codexAuthenticated?: boolean;
   claudeAuthenticated?: boolean;
+  antigravityAuthenticated?: boolean;
   defaultProvider?: AgentProviderPreference;
   defaults?: AgentDefaults;
   providerConnections?: Partial<Record<AgentProvider, string | undefined>>;
@@ -266,12 +482,14 @@ export interface DefaultAgentRuntimeInput {
 export const chooseDefaultAgentProvider = ({
   codexAuthenticated,
   claudeAuthenticated,
+  antigravityAuthenticated,
   defaultProvider = DEFAULT_AGENT_PROVIDER,
   providerConnections = {},
 }: DefaultAgentRuntimeInput = {}): AgentProvider => {
   const connected: AgentProvider[] = [
     ...(codexAuthenticated ? ['codex' as const] : []),
     ...(claudeAuthenticated ? ['claude' as const] : []),
+    ...(antigravityAuthenticated ? ['antigravity' as const] : []),
   ];
   const preferred = normalizeAgentProviderPreference(defaultProvider);
   if (connected.length === 0) {
@@ -293,17 +511,27 @@ export const chooseDefaultAgentProvider = ({
 export const runtimeFromDefaultsForProvider = (
   provider: AgentProvider,
   defaults: AgentDefaults = DEFAULT_AGENT_DEFAULTS,
-): AgentRuntime => provider === 'claude'
-  ? {
+): AgentRuntime => {
+  if (provider === 'claude') {
+    return {
       provider,
       model: normalizeClaudeModel(defaults.claude.model, DEFAULT_CLAUDE_MODEL),
       effort: normalizeClaudeEffort(defaults.claude.effort, DEFAULT_CLAUDE_EFFORT),
-    }
-  : {
-      provider,
-      model: normalizeCodexModel(defaults.codex.model, DEFAULT_CODEX_MODEL),
-      effort: normalizeCodexReasoningEffort(defaults.codex.reasoningEffort, DEFAULT_CODEX_REASONING_EFFORT),
     };
+  }
+  if (provider === 'antigravity') {
+    return {
+      provider,
+      model: normalizeAntigravityModel(defaults.antigravity.model, DEFAULT_ANTIGRAVITY_MODEL),
+      effort: normalizeAntigravityEffort(defaults.antigravity.effort, DEFAULT_ANTIGRAVITY_EFFORT),
+    };
+  }
+  return {
+    provider,
+    model: normalizeCodexModel(defaults.codex.model, DEFAULT_CODEX_MODEL),
+    effort: normalizeCodexReasoningEffort(defaults.codex.reasoningEffort, DEFAULT_CODEX_REASONING_EFFORT),
+  };
+};
 
 export const runtimeFromUserDefaults = (input: DefaultAgentRuntimeInput = {}): AgentRuntime =>
   runtimeFromDefaultsForProvider(chooseDefaultAgentProvider(input), input.defaults ?? DEFAULT_AGENT_DEFAULTS);

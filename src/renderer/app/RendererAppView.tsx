@@ -41,6 +41,8 @@ import { SecretsView } from '@renderer/views/SecretsView';
 import { ToolsView } from '@renderer/views/ToolsView';
 import {
   AGENT_PROVIDER_OPTIONS,
+  ANTIGRAVITY_EFFORT_OPTIONS,
+  ANTIGRAVITY_MODEL_OPTIONS,
   CHAT_BOT_PICTURE_OPTIONS,
   CLAUDE_EFFORT_OPTIONS,
   CLAUDE_MODEL_OPTIONS,
@@ -286,6 +288,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     activeConversationProgressLines,
     codexAuthStatus,
     claudeAuthStatus,
+    antigravityAuthStatus,
     handleStopChatRun,
     handleRespondPermission,
     handleRespondQuestion,
@@ -342,6 +345,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     activeLocale,
     codexAuthBusy,
     claudeAuthBusy,
+    antigravityAuthBusy,
     themePreference,
     setThemePreference,
     languagePreference,
@@ -355,6 +359,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     handleReinstallCodex,
     setClaudeConfigOpen,
     handleReinstallClaude,
+    handleReinstallAntigravity,
     cloudStorageUsage,
     cloudStorageBusy,
     refreshCloudStorageUsage,
@@ -435,9 +440,10 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     officialTools,
     codexAuthStatus,
     claudeAuthStatus,
+    antigravityAuthStatus,
     blocked: Boolean(codexConfigOpen || claudeConfigOpen || agentProviderConfigOpen || cloudModalOpen || pendingInstallGate),
   });
-  const intelligenceProviderConfigured = codexAuthStatus.authenticated || claudeAuthStatus.authenticated;
+  const intelligenceProviderConfigured = codexAuthStatus.authenticated || claudeAuthStatus.authenticated || antigravityAuthStatus.authenticated;
   const codexProviderConfigured = codexAuthStatus.authenticated;
 
   useEffect(() => {
@@ -1142,8 +1148,10 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             onInitialSubviewConsumed={() => setSettingsInitialSubview(null)}
             codexAuthBusy={codexAuthBusy}
             claudeAuthBusy={claudeAuthBusy}
+            antigravityAuthBusy={antigravityAuthBusy}
             codexAuthStatus={codexAuthStatus}
             claudeAuthStatus={claudeAuthStatus}
+            antigravityAuthStatus={antigravityAuthStatus}
             t={t}
             themePreference={themePreference}
             onThemeChange={setThemePreference}
@@ -1159,6 +1167,8 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             providerOptions={AGENT_PROVIDER_OPTIONS}
             claudeModelOptions={CLAUDE_MODEL_OPTIONS}
             claudeEffortOptions={CLAUDE_EFFORT_OPTIONS}
+            antigravityModelOptions={ANTIGRAVITY_MODEL_OPTIONS}
+            antigravityEffortOptions={ANTIGRAVITY_EFFORT_OPTIONS}
             defaultAgentProvider={settings.defaultAgentProvider}
             defaultChatPermissionMode={settings.defaultChatPermissionMode}
             defaultChatNetworkAccess={settings.defaultChatNetworkAccess}
@@ -1170,6 +1180,17 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             onReinstallCodex={() => void handleReinstallCodex()}
             onOpenClaudeConfig={() => setClaudeConfigOpen(true)}
             onReinstallClaude={() => void handleReinstallClaude()}
+            onOpenAntigravityConfig={() => void controller.handleConnectAntigravityAuth()}
+            onReinstallAntigravity={() => void handleReinstallAntigravity()}
+            antigravityAuthConsoleOpen={controller.antigravityAuthConsoleOpen}
+            antigravityAuthLines={controller.antigravityAuthLines}
+            antigravityAuthUrl={controller.antigravityAuthUrl}
+            antigravityAuthCode={controller.antigravityAuthCode}
+            onAntigravityAuthCodeChange={controller.setAntigravityAuthCode}
+            onSubmitAntigravityAuthCode={() => void controller.handleSubmitAntigravityAuthCode()}
+            onCancelAntigravityAuthSession={() => void controller.handleCancelAntigravityAuthSession()}
+            onCloseAntigravityAuthConsole={() => controller.setAntigravityAuthConsoleOpen(false)}
+            onOpenAntigravityAuthUrl={() => controller.handleOpenAntigravityAuthUrl()}
             desktopUpdateState={desktopUpdateState}
             desktopUpdateBusy={desktopUpdateBusy}
             cloudStorageUsage={cloudStorageUsage}

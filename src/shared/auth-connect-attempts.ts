@@ -1,4 +1,4 @@
-export type IntelligenceProviderAuth = 'codex' | 'claude';
+export type IntelligenceProviderAuth = 'codex' | 'claude' | 'antigravity';
 
 export interface AuthConnectAttempt {
   provider: IntelligenceProviderAuth;

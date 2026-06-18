@@ -93,6 +93,7 @@ export interface PersonalAgentConversation {
   status: PersonalAgentConversationStatus;
   createdAt: string;
   updatedAt: string;
+  providerThreadId?: string | null;
   messages: PersonalAgentMessage[];
   activeRun?: PersonalAgentRun;
 }

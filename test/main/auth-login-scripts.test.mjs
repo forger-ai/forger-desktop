@@ -30,6 +30,7 @@ test('macOS login script quotes env, PATH entries, and launch scripts safely', (
       CODEX_HOME: "/tmp/codex home's",
     },
     pathEntries: ['/opt/codex/bin', "/tmp/bin's"],
+    cwd: "/tmp/login cwd's",
   });
 
   assert.equal(shellQuote("a'b"), "'a'\\''b'");
@@ -37,6 +38,7 @@ test('macOS login script quotes env, PATH entries, and launch scripts safely', (
   assert.match(script, /export FORGER_LOGIN_LOG='\/tmp\/forger login'\\''s\.log'/);
   assert.match(script, /export CODEX_HOME='\/tmp\/codex home'\\''s'/);
   assert.match(script, /export PATH='\/opt\/codex\/bin:\/tmp\/bin'\\''s':"\$PATH"/);
+  assert.match(script, /cd '\/tmp\/login cwd'\\''s'/);
   assert.match(script, /FORGER_CODEX_CLI_LOGIN_EXIT=\$\?/);
   assert.match(script, /'\/opt\/Codex CLI\/codex'\\''s' 'login'/);
 });

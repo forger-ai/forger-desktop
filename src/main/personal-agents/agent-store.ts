@@ -39,6 +39,7 @@ interface ConversationRow {
   agent_id: string;
   title: string;
   status: string;
+  provider_thread_id?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -270,6 +271,18 @@ export class AgentStore {
       conversation.id,
     );
     this.requireDb().prepare('UPDATE personal_agents SET updated_at = ? WHERE id = ?').run(now, conversation.agentId);
+    return await this.requireConversation(conversation.id);
+  }
+
+  public async updateConversationProviderThread(input: { conversationId: string; providerThreadId: string | null }): Promise<PersonalAgentConversation> {
+    await this.load();
+    const conversation = await this.requireConversation(input.conversationId);
+    const now = new Date().toISOString();
+    this.requireDb().prepare('UPDATE personal_agent_conversations SET provider_thread_id = ?, updated_at = ? WHERE id = ?').run(
+      input.providerThreadId,
+      now,
+      conversation.id,
+    );
     return await this.requireConversation(conversation.id);
   }
 
@@ -681,6 +694,7 @@ export class AgentStore {
         agent_id TEXT NOT NULL REFERENCES personal_agents(id) ON DELETE CASCADE,
         title TEXT NOT NULL,
         status TEXT NOT NULL DEFAULT 'active',
+        provider_thread_id TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
@@ -732,6 +746,7 @@ export class AgentStore {
         created_at TEXT NOT NULL
       );
     `);
+    this.ensureColumn('personal_agent_conversations', 'provider_thread_id', 'TEXT');
     this.ensureColumn('personal_agent_messages', 'run_id', 'TEXT REFERENCES personal_agent_runs(id) ON DELETE SET NULL');
     this.ensureColumn('personal_agent_permissions', 'kind', "TEXT NOT NULL DEFAULT 'legacy'");
     this.ensureColumn('personal_agent_permissions', 'target_id', "TEXT NOT NULL DEFAULT ''");
@@ -830,6 +845,7 @@ export class AgentStore {
       status: normalizeConversationStatus(row.status),
       createdAt: row.created_at,
       updatedAt: row.updated_at,
+      ...(row.provider_thread_id ? { providerThreadId: row.provider_thread_id } : {}),
       messages: this.messagesForConversation(row.id),
       ...(activeRun ? { activeRun } : {}),
     };

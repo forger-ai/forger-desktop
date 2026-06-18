@@ -7,6 +7,28 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const { createSettingsServiceController } = require('../../dist-electron/main/core/settings-service.js');
+const { createAgentProviderRuntimeRegistry } = require('../../dist-electron/shared/agent-runtime-registry.js');
+
+const agentProviderRegistry = () => createAgentProviderRuntimeRegistry({
+  codex: {
+    defaultModel: 'gpt-5.4',
+    defaultReasoningEffort: 'medium',
+    modelValues: ['gpt-5.4', 'gpt-5.4-mini'],
+    reasoningEffortValues: ['none', 'low', 'medium', 'high'],
+  },
+  claude: {
+    defaultModel: 'sonnet',
+    defaultEffort: 'medium',
+    modelValues: ['sonnet', 'opus'],
+    effortValues: ['low', 'medium', 'high', 'max'],
+  },
+  antigravity: {
+    defaultModel: 'gemini-3.5-flash-medium',
+    defaultEffort: 'medium',
+    modelValues: ['gemini-3.5-flash-medium', 'gemini-3.5-flash-high'],
+    effortValues: ['low', 'medium', 'high'],
+  },
+});
 
 const settingsSeed = () => ({
   userEmail: '',
@@ -17,9 +39,15 @@ const settingsSeed = () => ({
   defaultChatPermissionMode: 'safe',
   defaultChatNetworkAccess: true,
   codexDefaults: { model: 'gpt-5.4', reasoningEffort: 'medium' },
+  llmProviderDefaults: {
+    codex: { model: 'gpt-5.4', reasoningEffort: 'medium' },
+    claude: { model: 'sonnet', effort: 'medium' },
+    antigravity: { model: 'gemini-3.5-flash-medium', effort: 'medium' },
+  },
   agentDefaults: {
     codex: { model: 'gpt-5.4', reasoningEffort: 'medium' },
     claude: { model: 'sonnet', effort: 'medium' },
+    antigravity: { model: 'gemini-3.5-flash-medium', effort: 'medium' },
   },
   providerConnections: {},
 });
@@ -34,20 +62,14 @@ const createHarness = async (overrides = {}) => {
     },
   };
   const controller = createSettingsServiceController({
-    BUILT_IN_CLAUDE_EFFORT: 'medium',
-    BUILT_IN_CLAUDE_MODEL: 'sonnet',
-    BUILT_IN_CODEX_MODEL: 'gpt-5.4',
-    BUILT_IN_CODEX_REASONING: 'medium',
-    CLAUDE_EFFORT_VALUES: new Set(['low', 'medium', 'high', 'max']),
-    CLAUDE_MODEL_VALUES: new Set(['sonnet', 'opus']),
-    CODEX_MODEL_VALUES: new Set(['gpt-5.4', 'gpt-5.4-mini']),
-    CODEX_REASONING_VALUES: new Set(['none', 'low', 'medium', 'high']),
+    agentProviderRegistry: agentProviderRegistry(),
     PromptOverridesStore: class PromptOverridesStore {
       constructor(filePath) {
         this.filePath = filePath;
       }
     },
     fs,
+    getAntigravityAuthStatus: overrides.getAntigravityAuthStatus,
     getClaudeAuthStatus: overrides.getClaudeAuthStatus ?? (async () => ({ authenticated: overrides.claudeAuthenticated ?? false })),
     getCodexAuthStatus: overrides.getCodexAuthStatus ?? (async () => ({ authenticated: overrides.codexAuthenticated ?? false })),
     getPromptOverridesPath: () => path.join(root, 'prompt-overrides.json'),
@@ -79,6 +101,7 @@ test('SettingsService normalizes persisted settings, preserves safe fields, and 
       agentDefaults: {
         codex: { model: 'agent-codex', reasoningEffort: 'high' },
         claude: { model: 'opus', effort: 'max' },
+        antigravity: { model: 'gemini-3.5-flash-high', effort: 'high' },
       },
       providerConnections: {
         codex: '2026-05-20T00:00:00.000Z',
@@ -99,6 +122,7 @@ test('SettingsService normalizes persisted settings, preserves safe fields, and 
     assert.deepEqual(harness.state.settings.codexDefaults, { model: 'custom-codex', reasoningEffort: 'medium' });
     assert.deepEqual(harness.state.settings.agentDefaults.codex, { model: 'agent-codex', reasoningEffort: 'high' });
     assert.deepEqual(harness.state.settings.agentDefaults.claude, { model: 'opus', effort: 'max' });
+    assert.deepEqual(harness.state.settings.agentDefaults.antigravity, { model: 'gemini-3.5-flash-high', effort: 'high' });
     assert.deepEqual(harness.state.settings.providerConnections, { codex: '2026-05-20T00:00:00.000Z' });
     assert.equal(harness.controller.getPromptOverridesStore(), store);
     assert.equal(store.filePath, path.join(harness.root, 'prompt-overrides.json'));
@@ -163,6 +187,13 @@ test('SettingsService updates defaults and normalizes invalid provider/model inp
       effort: 'bad',
     });
     assert.deepEqual(fallbackClaude.agentDefaults.claude, { model: 'opus', effort: 'max' });
+
+    const antigravity = await harness.controller.updateAgentDefaults({
+      provider: 'antigravity',
+      model: 'gemini-3.5-flash-high',
+      effort: 'high',
+    });
+    assert.deepEqual(antigravity.agentDefaults.antigravity, { model: 'gemini-3.5-flash-high', effort: 'high' });
   } finally {
     await harness.cleanup();
   }
@@ -201,9 +232,15 @@ test('SettingsService chooses connected providers by preference and connection a
         claude: '2026-05-20T00:00:00.000Z',
         codex: '2026-05-21T00:00:00.000Z',
       },
+      llmProviderDefaults: {
+        codex: { model: 'gpt-5.4-mini', reasoningEffort: 'high' },
+        claude: { model: 'opus', effort: 'max' },
+        antigravity: { model: 'gemini-3.5-flash-high', effort: 'high' },
+      },
       agentDefaults: {
         codex: { model: 'gpt-5.4-mini', reasoningEffort: 'high' },
         claude: { model: 'opus', effort: 'max' },
+        antigravity: { model: 'gemini-3.5-flash-high', effort: 'high' },
       },
     },
   });
@@ -218,6 +255,7 @@ test('SettingsService chooses connected providers by preference and connection a
       recommendations: {
         codex: { model: 'gpt-5.4', reasoningEffort: 'medium' },
         claude: { model: 'missing', effort: 'bad' },
+        antigravity: { model: 'gemini-3.5-flash-medium', effort: 'medium' },
       },
     }), {
       provider: 'claude',
@@ -236,6 +274,7 @@ test('SettingsService chooses connected providers by preference and connection a
       runtimeRecommendations: {
         codex: { model: 'gpt-5.4-mini', reasoningEffort: 'low' },
         claude: { model: 'opus', effort: 'max' },
+        antigravity: { model: 'gemini-3.5-flash-high', effort: 'high' },
       },
       runtime: { provider: 'claude', model: 'sonnet', effort: 'max' },
     });
@@ -253,10 +292,12 @@ test('SettingsService chooses connected providers by preference and connection a
       runtimeRecommendations: {
         codex: { model: 'bad-model', reasoningEffort: 'bad' },
         claude: { model: 'sonnet', effort: 'low' },
+        antigravity: { model: 'gemini-3.5-flash-medium', effort: 'low' },
       },
     }).runtimeRecommendations, {
       codex: { model: 'gpt-5.4-mini', reasoningEffort: 'high' },
       claude: { model: 'sonnet', effort: 'low' },
+      antigravity: { model: 'gemini-3.5-flash-medium', effort: 'low' },
     });
   } finally {
     await harness.cleanup();
@@ -286,6 +327,21 @@ test('SettingsService chooses provider fallbacks when auth or connection metadat
     assert.equal(await bothWithoutTimestamps.controller.chooseConnectedProvider(), 'codex');
   } finally {
     await bothWithoutTimestamps.cleanup();
+  }
+
+  let antigravityChecks = 0;
+  const codexFastPath = await createHarness({
+    codexAuthenticated: true,
+    getAntigravityAuthStatus: async () => {
+      antigravityChecks += 1;
+      throw new Error('antigravity_should_not_block_codex');
+    },
+  });
+  try {
+    assert.equal(await codexFastPath.controller.chooseConnectedProvider(), 'codex');
+    assert.equal(antigravityChecks, 0);
+  } finally {
+    await codexFastPath.cleanup();
   }
 });
 

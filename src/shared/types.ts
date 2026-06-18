@@ -1,9 +1,11 @@
 import type { ForgerAppApi } from './types/app-api';
 
-export type { AgentDefaults, AgentEffort, AgentModelOptions, AgentPermissionMode, AgentProvider, AgentRuntime, AgentRuntimeRecommendations, AgentRuntimeRequest, ClaudeEffort, ClaudeModelOption, CodexModelOption, CodexReasoningEffort } from './types/agent-runtime';
+export type { AgentDefaults, AgentEffort, AgentModelOptions, AgentPermissionMode, AgentProvider, AgentProviderRuntimeRegistry, AgentRuntime, AgentRuntimeRecommendations, AgentRuntimeRequest, AntigravityEffort, AntigravityModelOption, ClaudeEffort, ClaudeModelOption, CodexModelOption, CodexReasoningEffort, CreateAgentProviderRuntimeRegistryInput, LlmProviderKey } from './types/agent-runtime';
 export {
   AGENT_MODEL_OPTIONS,
   AGENT_PROVIDER_OPTIONS,
+  ANTIGRAVITY_EFFORT_OPTIONS,
+  ANTIGRAVITY_MODEL_OPTIONS,
   CLAUDE_EFFORT_OPTIONS,
   CLAUDE_MODEL_OPTIONS,
   CODEX_MODEL_OPTIONS,
@@ -11,16 +13,24 @@ export {
   DEFAULT_AGENT_DEFAULTS,
   DEFAULT_AGENT_PERMISSION_MODE,
   DEFAULT_AGENT_PROVIDER,
+  DEFAULT_ANTIGRAVITY_EFFORT,
+  DEFAULT_ANTIGRAVITY_MODEL,
   DEFAULT_CLAUDE_EFFORT,
   DEFAULT_CLAUDE_MODEL,
   DEFAULT_CODEX_MODEL,
   DEFAULT_CODEX_REASONING_EFFORT,
+  DEFAULT_AGENT_PROVIDER_RUNTIME_REGISTRY,
+  createAgentProviderRuntimeRegistry,
   getAgentModelOptions,
+  getAntigravityModelOption,
   getDefaultAgentDefaults,
   getClaudeModelOption,
   getCodexModelOption,
   getDefaultClaudeEffort,
+  getDefaultAntigravityEffort,
   getDefaultCodexReasoningEffort,
+  isAntigravityEffort,
+  isAntigravityModel,
   isAgentProvider,
   isAgentPermissionMode,
   isAgentProviderPreference,
@@ -29,8 +39,12 @@ export {
   isCodexModel,
   isCodexReasoningEffort,
   normalizeAgentProviderPreference,
+  normalizeAgentProviderEffort,
+  normalizeAgentProviderModel,
   normalizeAgentPermissionMode,
   normalizeAgentRuntime,
+  normalizeAntigravityEffort,
+  normalizeAntigravityModel,
   normalizeClaudeEffort,
   normalizeClaudeModel,
   normalizeCodexModel,
@@ -67,7 +81,7 @@ export type { WakeWordConfig, WakeWordConfigInput, WakeWordDetectionEvent, WakeW
 export type { LiveVoiceInputConfig, LiveVoiceInputConfigInput, LiveVoiceInputConsumer, LiveVoiceInputConsumerKind, LiveVoiceInputDevice, LiveVoiceInputDeviceListInput, LiveVoiceInputDeviceSession, LiveVoiceInputMutationResult, LiveVoiceInputServiceStatus, LiveVoiceInputSession, LiveVoiceInputSessionInput, LiveVoiceInputSourceKind, LiveVoiceInputState, LiveVoiceInputStopInput, LiveVoiceInputTargetType, LiveVoiceInputTranscriptEvent, LiveVoiceInputTranscriptTask, LiveVoiceInputWakeEvent, LiveVoiceInputWakeModel, LiveVoiceInputWakeRuntime, LiveVoiceInputWakeRuntimeState, LiveVoiceInputWakeTarget } from './types/live-voice-input';
 export type { AudioPlaybackStatus, AudioPlaybackSummary, AudioRuntimeBrokerRequest, AudioRuntimeBrokerResponse, AudioRuntimeDevices, AudioRuntimeInputDevice, AudioRuntimeInputDeviceKind, AudioRuntimeOutputDevice, AudioRuntimeOutputDeviceKind } from './types/audio-runtime';
 export type { DesktopUpdateAsset, DesktopUpdateMetadata, DesktopUpdateReleaseNotes, DesktopUpdateState, DesktopUpdateStatus } from './types/updates';
-export type { ClaudeAuthStatus, CodexAuthStatus, CodexRateLimitBucket, CodexRateLimitsStatus, CodexRateLimitWindow, DesktopErrorReportFileSummary, DesktopErrorReportInput, DesktopErrorReportPreview } from './types/auth';
+export type { AntigravityAuthSessionEvent, AntigravityAuthSessionEventType, AntigravityAuthSessionStartResult, AntigravityAuthStatus, ClaudeAuthStatus, CodexAuthStatus, CodexRateLimitBucket, CodexRateLimitsStatus, CodexRateLimitWindow, DesktopErrorReportFileSummary, DesktopErrorReportInput, DesktopErrorReportPreview } from './types/auth';
 export type { AppAiSubscriptionStatus, CreateLocalAppInput, CreateLocalAppResult, InstallAppResult, InstallPhase, LocalNetworkShareResult, LocalNetworkShareStatus, MockActionResult, OpenAppResult, RemoteNetworkConnectionSummary, RemoteNetworkShareResult, RemoteNetworkShareState, RemoteNetworkShareStatus, RuntimeStatus, StopAppResult } from './types/runtime';
 export type { RemoteActivityItem, RemoteActivityKind, RemoteActivityRequester, RemoteActivitySnapshot, RemoteActivityState, RemoteActivityTransport } from './types/remote-activity';
 export type { AppBackupFileSummary, AppBackupReason, AppBackupSummary, CloudSyncSettings, CreateAppBackupInput, CreateAppBackupResult, CreateRemoteAppBackupInput, CreateRemoteAppBackupResult, DeleteAppBackupInput, RemoteAppBackupSummary, RemoteBackupSource, RemoteBackupType, RemoteBackupsState, RemoteBackupsUsage, RestoreAppBackupInput, RestoreRemoteAppBackupInput } from './types/backups';

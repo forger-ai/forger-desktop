@@ -40,6 +40,38 @@ export interface ClaudeAuthStatus {
   userMessage?: string;
 }
 
+export interface AntigravityAuthStatus {
+  installed: boolean;
+  authenticated: boolean;
+  source: 'managed' | 'system' | 'missing';
+  antigravityCliPath?: string;
+  version?: string;
+  statusText?: string;
+  userMessage?: string;
+}
+
+export type AntigravityAuthSessionEventType = 'started' | 'output' | 'url' | 'completed' | 'failed' | 'canceled';
+
+export interface AntigravityAuthSessionEvent {
+  sessionId: string;
+  type: AntigravityAuthSessionEventType;
+  stream?: 'stdout' | 'stderr' | 'system';
+  text?: string;
+  url?: string;
+  exitCode?: number | null;
+  technicalCode?: string;
+  userMessage?: string;
+  status?: AntigravityAuthStatus;
+}
+
+export interface AntigravityAuthSessionStartResult {
+  success: boolean;
+  sessionId?: string;
+  userMessage: string;
+  status?: AntigravityAuthStatus;
+  technicalCode?: string;
+}
+
 export interface DesktopErrorReportInput {
   source: 'desktop' | 'renderer' | 'app' | 'agent' | 'codex' | 'automation' | 'update';
   operation?: string;

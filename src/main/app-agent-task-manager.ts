@@ -16,18 +16,13 @@ import type {
   PermissionRequest,
 } from '../shared/types';
 import {
-  assertAllowedMcpServers,
-  codexWorkspaceNetworkConfigArgs,
   createIsolatedCodexHome,
   removeIsolatedCodexHome,
 } from './codex-run-isolation';
-import { parseClaudeTaskJsonl, parseCodexTaskJsonl } from './app-agent/jsonl';
-import { buildMcpArgs, writeClaudeMcpConfig } from './app-agent/mcp';
 import {
   existsDirectory,
   isPathInside,
   killProcessTree,
-  resolveCodexCommand,
   runCommandCapture,
 } from './app-agent/process';
 import {
@@ -50,8 +45,10 @@ import {
   type PreparedPromptArguments,
   type TaskLocale,
 } from './app-agent/task-helpers';
-import type { CodexMcpServerConfig, CommandResult } from './app-agent/types';
-import { claudePermissionArgs, codexUnsafeArgs, codexWorkspaceArgs } from './agent-permission-mode';
+import type { LlmAppMcpServerConfig } from './app-agent/types';
+import { antigravityCliAdapter } from './llm-provider/adapters/antigravity-cli-adapter';
+import { claudeCliAdapter } from './llm-provider/adapters/claude-cli-adapter';
+import { codexCliAdapter, parseCodexJsonl } from './llm-provider/adapters/codex-cli-adapter';
 
 interface AppAgentTaskManagerOptions {
   privateAppsRoot: string;
@@ -60,18 +57,20 @@ interface AppAgentTaskManagerOptions {
   getAgentRuntime: (requested?: AgentRuntimeRequest) => Promise<AgentRuntime>;
   getCodexCliPath: () => Promise<string | null>;
   getClaudeCliPath: () => Promise<string | null>;
+  getAntigravityCliPath?: () => Promise<string | null>;
   getCodexPathEntries: (appId?: string) => Promise<string[]>;
   getCodexEnvironment: (appId?: string) => Promise<Record<string, string>>;
   ensureGitAvailable?: () => Promise<void>;
   getAgentNetworkAccess?: (appId: string) => Promise<boolean>;
   getCodexAuthenticated: () => Promise<boolean>;
   getClaudeAuthenticated: () => Promise<boolean>;
+  getAntigravityAuthenticated?: () => Promise<boolean>;
   resolvePromptTemplates: (appId: string) => Promise<AppPromptTemplate[]>;
   createForgerMcpSession?: (runId: string, appId: string) => { url: string; token: string } | null;
   releaseForgerMcpSession?: (token: string) => void;
   buildMemoryContext?: (appId: string) => Promise<string>;
   buildForgerToolsContext?: (appId: string) => Promise<string>;
-  listenAppMcps?: (appIds: string[], runId: string) => Promise<CodexMcpServerConfig[]>;
+  listenAppMcps?: (appIds: string[], runId: string) => Promise<LlmAppMcpServerConfig[]>;
   releaseAppMcps?: (runId: string) => void;
   canRequestPermission?: (appId: string) => boolean;
   onTaskUpdated: (event: AppCodexTaskEvent) => void;
@@ -260,7 +259,11 @@ export class AppAgentTaskManager {
       model: template.runtimeRecommendations ? undefined : template.model,
       effort: template.runtimeRecommendations ? undefined : template.reasoningEffort,
     });
-    if (runtime.provider === 'claude') {
+    if (runtime.provider === 'antigravity') {
+      if (!(await (this.options.getAntigravityAuthenticated?.() ?? Promise.resolve(false)))) {
+        throw new Error('antigravity_auth_missing');
+      }
+    } else if (runtime.provider === 'claude') {
       if (!(await this.options.getClaudeAuthenticated())) {
         throw new Error('claude_auth_missing');
       }
@@ -272,11 +275,15 @@ export class AppAgentTaskManager {
     }
     const codexCliPath = runtime.provider === 'codex' ? await this.options.getCodexCliPath() : null;
     const claudeCliPath = runtime.provider === 'claude' ? await this.options.getClaudeCliPath() : null;
+    const antigravityCliPath = runtime.provider === 'antigravity' ? await (this.options.getAntigravityCliPath?.() ?? Promise.resolve(null)) : null;
     if (runtime.provider === 'codex' && !codexCliPath) {
       throw new Error('codex_cli_missing');
     }
     if (runtime.provider === 'claude' && !claudeCliPath) {
       throw new Error('claude_cli_missing');
+    }
+    if (runtime.provider === 'antigravity' && !antigravityCliPath) {
+      throw new Error('antigravity_cli_missing');
     }
 
     task.status = 'running';
@@ -287,21 +294,18 @@ export class AppAgentTaskManager {
 
     let forgerMcpSession: { url: string; token: string } | null = null;
     const temporaryCodexHomes: string[] = [];
-    let claudeMcpConfigPath: string | null = null;
     let appMcpsReleased = false;
     try {
       const preparedArguments = await this.preparePromptArguments(task, template, input);
-      const imageArgs = preparedArguments.files
+      const imagePaths = preparedArguments.files
         .filter((file) => file.mimeType?.toLowerCase().startsWith('image/'))
-        .flatMap((file) => ['--image', file.path]);
+        .map((file) => file.path);
       const renderedPrompt = renderPrompt(template.prompt, preparedArguments, locale);
       const memoryContext = await (this.options.buildMemoryContext?.(task.appId) ?? Promise.resolve(''));
       const forgerToolsContext = await (this.options.buildForgerToolsContext?.(task.appId) ?? Promise.resolve(''));
       const promptContext = [memoryContext, forgerToolsContext].filter((section) => section.trim()).join('\n\n');
       const prompt = promptContext ? `${promptContext}\n\n${renderedPrompt}` : renderedPrompt;
-      const command = runtime.provider === 'codex'
-        ? await resolveCodexCommand(codexCliPath as string, await this.options.getCodexPathEntries(task.appId))
-        : { command: claudeCliPath as string, prefixArgs: [], pathEntries: await this.options.getCodexPathEntries(task.appId) };
+      const pathEntries = await this.options.getCodexPathEntries(task.appId);
       const environment = await this.options.getCodexEnvironment(task.appId);
       const networkAccess = await (this.options.getAgentNetworkAccess?.(task.appId) ?? Promise.resolve(false));
       const model = runtime.model || DEFAULT_MODEL;
@@ -320,75 +324,38 @@ export class AppAgentTaskManager {
           : []),
         ...appMcpServers,
       ];
-      const mcpArgs = buildMcpArgs(mcpServers);
-      const topLevelArgs = mcpServers.length > 0 ? ['--ask-for-approval', 'never'] : [];
-      claudeMcpConfigPath = runtime.provider === 'claude'
-        ? await writeClaudeMcpConfig(task.appRoot, mcpServers)
-        : null;
-      const args = runtime.provider === 'claude'
-        ? [
-            '-p',
-            prompt,
-            '--output-format',
-            'stream-json',
-            '--verbose',
-            '--model',
-            model,
-            '--effort',
-            runtime.effort as ClaudeEffort,
-            ...claudePermissionArgs(runtime.permissionMode),
-            ...(claudeMcpConfigPath ? ['--mcp-config', claudeMcpConfigPath] : []),
-            ...imageArgs,
-          ]
-        : [
-            ...command.prefixArgs,
-            ...topLevelArgs,
-            'exec',
-            '--json',
-            '--model',
-            model,
-            '--config',
-            `reasoning_effort="${reasoningEffort}"`,
-            ...codexWorkspaceNetworkConfigArgs(networkAccess),
-            ...codexUnsafeArgs(runtime.permissionMode),
-            ...codexWorkspaceArgs(runtime.permissionMode),
-            '--skip-git-repo-check',
-            ...mcpArgs,
-            '-C',
-            task.appRoot,
-            ...imageArgs,
-            '--',
-            '-',
-          ];
-      const baseEnv = {
-        FORGER_ALLOWED_ROOTS: task.appRoot,
-        ...Object.fromEntries(mcpServers.map((server) => [server.tokenEnvVar, server.token])),
-        ...environment,
-        PATH: [...command.pathEntries, process.env.PATH ?? ''].filter(Boolean).join(path.delimiter),
+      const providerCommand = runtime.provider === 'codex'
+        ? codexCliPath as string
+        : runtime.provider === 'claude'
+          ? claudeCliPath as string
+          : antigravityCliPath as string;
+      const onOutput = (stream: 'stdout' | 'stderr' | 'meta', text: string): void => {
+        void appendTranscript(task.transcriptPath, stream, text);
+        this.updateProgressFromOutput(task, text, locale);
       };
-      const runAgent = async (codexHome: string): Promise<CommandResult> =>
-        await runCommandCapture(command.command, args, {
-          cwd: task.appRoot,
-          env: {
-            ...baseEnv,
-            ...(runtime.provider === 'codex' ? { CODEX_HOME: codexHome } : {}),
-          },
+      const runCodexTask = async (codexHome: string) =>
+        await codexCliAdapter.runTask({
+          cliPath: codexCliPath as string,
+          pathEntries,
+          environment,
+          mcpServers,
+          workingDir: task.appRoot,
+          prompt,
+          model,
+          reasoningEffort,
+          permissionMode: runtime.permissionMode,
+          networkAccess,
           timeoutMs: CODEX_TASK_TIMEOUT_MS,
+          codexHome,
+          imagePaths,
           onChild: (child) => {
             task.child = child;
           },
-          onStdout: (text) => {
-            void appendTranscript(task.transcriptPath, 'stdout', text);
-            this.updateProgressFromOutput(task, text, locale);
-          },
-          onStderr: (text) => {
-            void appendTranscript(task.transcriptPath, 'stderr', text);
-            this.updateProgressFromOutput(task, text, locale);
-          },
-          stdinText: runtime.provider === 'codex' ? prompt : undefined,
+          onOutput,
+          runCommandCapture,
         });
 
-      await appendTranscript(task.transcriptPath, 'meta', `${runtime.provider} ${command.command}`);
+      await appendTranscript(task.transcriptPath, 'meta', `${runtime.provider} ${providerCommand}`);
       const isolatedCodexHome = runtime.provider === 'codex'
         ? await createIsolatedCodexHome(this.options.codexHome, {
             prefix: 'forger-task-codex-home',
@@ -399,16 +366,61 @@ export class AppAgentTaskManager {
       if (isolatedCodexHome) {
         temporaryCodexHomes.push(isolatedCodexHome);
       }
-      const allowedMcpServers = new Set(mcpServers.map((server) => server.name));
-      let result = await runAgent(isolatedCodexHome);
-      assertAllowedMcpServers(result.stdout, result.stderr, allowedMcpServers);
+      const antigravityResult = runtime.provider === 'antigravity'
+        ? await antigravityCliAdapter.run({
+            runId: task.runId,
+            cliPath: antigravityCliPath as string,
+            pathEntries: [path.dirname(antigravityCliPath as string), ...pathEntries],
+            environment,
+            mcpServers,
+            workingDir: task.appRoot,
+            configWorkspaceRoot: task.appRoot,
+            sharedRoots: [],
+            prompt,
+            model,
+            permissionMode: runtime.permissionMode,
+            timeoutMs: CODEX_TASK_TIMEOUT_MS,
+            timeoutMode: 'absolute',
+            onChild: (child) => {
+              task.child = child;
+            },
+            onOutput,
+            runCommandCapture,
+          })
+        : null;
+      const claudeResult = runtime.provider === 'claude'
+        ? await claudeCliAdapter.run({
+            cliPath: claudeCliPath as string,
+            pathEntries,
+            environment,
+            mcpServers,
+            workingDir: task.appRoot,
+            prompt,
+            model,
+            effort: runtime.effort as ClaudeEffort,
+            permissionMode: runtime.permissionMode,
+            timeoutMs: CODEX_TASK_TIMEOUT_MS,
+            imagePaths,
+            alwaysIncludeMcpConfig: true,
+            onChild: (child) => {
+              task.child = child;
+            },
+            onOutput,
+            runCommandCapture,
+          })
+        : null;
+      let result = runtime.provider === 'antigravity'
+        ? { code: 0, stdout: antigravityResult?.stdout ?? '', stderr: antigravityResult?.stderr ?? '', assistantText: antigravityResult?.assistantText ?? '' }
+        : runtime.provider === 'claude'
+          ? { code: 0, stdout: claudeResult?.stdout ?? '', stderr: claudeResult?.stderr ?? '', assistantText: claudeResult?.assistantText ?? '' }
+          : await runCodexTask(isolatedCodexHome);
       if ((task as AppCodexTaskSummary).status === 'canceled') {
         return;
       }
       if (runtime.provider === 'codex' && result.code !== 0 && isStaleCodexThreadError(result.stderr || result.stdout)) {
-          const recoveredText = parseCodexTaskJsonl(result.stdout, '');
+        const recoveredText = parseCodexJsonl(result.stdout, '').assistantText;
         if (recoveredText) {
-          result = { code: 0, stdout: result.stdout, stderr: result.stderr };
+          result = { ...result, code: 0 };
         } else {
           this.addProgress(task, taskMessage(locale, 'technicalLimit'));
           await this.persist(task);
@@ -420,25 +432,18 @@ export class AppAgentTaskManager {
           });
           temporaryCodexHomes.push(cleanCodexHome);
           await appendTranscript(task.transcriptPath, 'meta', 'Retrying Codex task with a clean temporary Codex home.');
-          result = await runAgent(cleanCodexHome);
-          assertAllowedMcpServers(result.stdout, result.stderr, allowedMcpServers);
+          result = await runCodexTask(cleanCodexHome);
           if ((task as AppCodexTaskSummary).status === 'canceled') return;
         }
       }
       if (result.code !== 0) {
         throw new Error((result.stderr || result.stdout || 'codex_exec_failed').trim());
       }
-
-      const parsed = runtime.provider === 'claude'
-        ? parseClaudeTaskJsonl(result.stdout, result.stderr)
-        : parseCodexTaskJsonl(result.stdout, result.stderr);
       task.status = 'completed';
       task.updatedAt = new Date().toISOString();
-      task.resultText = parsed || taskMessage(locale, 'completed');
+      task.resultText = result.assistantText || taskMessage(locale, 'completed');
       this.addProgress(task, taskMessage(locale, 'finished'));
       await this.cleanupTaskInputs(task).catch(() => undefined);
-      await fs.rm(claudeMcpConfigPath ?? '', { force: true }).catch(() => undefined);
-      claudeMcpConfigPath = null;
       if (forgerMcpSession) {
         this.options.releaseForgerMcpSession?.(forgerMcpSession.token);
         forgerMcpSession = null;
@@ -457,7 +462,6 @@ export class AppAgentTaskManager {
         this.options.releaseAppMcps?.(task.runId);
       }
       await this.cleanupTaskInputs(task).catch(() => undefined);
-      await fs.rm(claudeMcpConfigPath ?? '', { force: true }).catch(() => undefined);
       await Promise.all(temporaryCodexHomes.map((dirPath) => removeIsolatedCodexHome(dirPath)));
     }
   }

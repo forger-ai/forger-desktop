@@ -162,6 +162,13 @@ const IPC_CHANNELS = {
   getClaudeAuthStatus: 'forger:get-claude-auth-status',
   connectClaudeAuth: 'forger:connect-claude-auth',
   reinstallClaude: 'forger:reinstall-claude',
+  getAntigravityAuthStatus: 'forger:get-antigravity-auth-status',
+  connectAntigravityAuth: 'forger:connect-antigravity-auth',
+  startAntigravityAuthSession: 'forger:start-antigravity-auth-session',
+  writeAntigravityAuthSession: 'forger:write-antigravity-auth-session',
+  cancelAntigravityAuthSession: 'forger:cancel-antigravity-auth-session',
+  antigravityAuthSessionEvent: 'forger:antigravity-auth-session:event',
+  reinstallAntigravity: 'forger:reinstall-antigravity',
   prepareDesktopErrorReport: 'forger:error-report:prepare',
   submitDesktopErrorReport: 'forger:error-report:submit',
   prepareConversationDiagnosticReport: 'forger:conversation-diagnostic:prepare',
@@ -497,6 +504,21 @@ const api: ForgerDesktopApi = {
   getClaudeAuthStatus: () => ipcRenderer.invoke(IPC_CHANNELS.getClaudeAuthStatus),
   connectClaudeAuth: () => ipcRenderer.invoke(IPC_CHANNELS.connectClaudeAuth),
   reinstallClaude: () => ipcRenderer.invoke(IPC_CHANNELS.reinstallClaude),
+  getAntigravityAuthStatus: () => ipcRenderer.invoke(IPC_CHANNELS.getAntigravityAuthStatus),
+  connectAntigravityAuth: () => ipcRenderer.invoke(IPC_CHANNELS.connectAntigravityAuth),
+  startAntigravityAuthSession: () => ipcRenderer.invoke(IPC_CHANNELS.startAntigravityAuthSession),
+  writeAntigravityAuthSession: (input) => ipcRenderer.invoke(IPC_CHANNELS.writeAntigravityAuthSession, input),
+  cancelAntigravityAuthSession: (sessionId) => ipcRenderer.invoke(IPC_CHANNELS.cancelAntigravityAuthSession, sessionId),
+  onAntigravityAuthSessionEvent: (listener) => {
+    const wrapped = (_event: unknown, payload: Parameters<typeof listener>[0]) => {
+      listener(payload);
+    };
+    ipcRenderer.on(IPC_CHANNELS.antigravityAuthSessionEvent, wrapped);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.antigravityAuthSessionEvent, wrapped);
+    };
+  },
+  reinstallAntigravity: () => ipcRenderer.invoke(IPC_CHANNELS.reinstallAntigravity),
   prepareDesktopErrorReport: (input) => ipcRenderer.invoke(IPC_CHANNELS.prepareDesktopErrorReport, input),
   submitDesktopErrorReport: (input) => ipcRenderer.invoke(IPC_CHANNELS.submitDesktopErrorReport, input),
   prepareConversationDiagnosticReport: (input) => ipcRenderer.invoke(IPC_CHANNELS.prepareConversationDiagnosticReport, input),

@@ -1,5 +1,6 @@
 import type fs from 'node:fs/promises';
 import type path from 'node:path';
+import { randomUUID } from 'node:crypto';
 
 import type {
   AppManifest,
@@ -9,6 +10,9 @@ import type {
   RuntimeBinarySet,
 } from '../core/main-process-types';
 import type {
+  AntigravityAuthStatus,
+  AntigravityAuthSessionEvent,
+  AntigravityAuthSessionStartResult,
   ClaudeAuthStatus,
   CodexAuthStatus,
   CodexRateLimitBucket,
@@ -37,7 +41,7 @@ interface AgentAuthDeps {
   appendInstallLog: (event: string, payload?: Record<string, unknown>) => Promise<void>;
   app: Electron.App;
   buildCodexAuthEnvironment: (input: { codexHome: string; codexCliPath: string; nodePathEntries: string[] }) => NodeJS.ProcessEnv;
-  buildMacTerminalLoginScript: (input: { providerName: string; logPath: string; command: string[] }) => string;
+  buildMacTerminalLoginScript: (input: { providerName: string; logPath: string; command: string[]; cwd?: string }) => string;
   buildMacTerminalScriptLaunchCommand: (scriptPath: string) => string;
   canRunCommand: (command: string, args: string[]) => Promise<boolean>;
   classifyCodexAuthOutput: (stdout: string, stderr: string) => string | undefined;
@@ -48,12 +52,13 @@ interface AgentAuthDeps {
   findManifestService: (manifest: AppManifest | null, name: string, fallbackContext: string) => AppManifestService | null;
   fs: typeof fs;
   getClaudeRoot: () => string;
+  getAntigravityRoot: () => string;
   getCodexHome: () => string;
   getCodexRoot: () => string;
   getForgerMetadataRoot: () => string;
   getLogsRoot: () => string;
   getTempRoot: () => string;
-  markProviderConnected?: (provider: 'codex' | 'claude') => Promise<void> | void;
+  markProviderConnected?: (provider: 'codex' | 'claude' | 'antigravity') => Promise<void> | void;
   path: typeof path;
   registry: AppRegistry;
   resolveInstalledManifest: (installDir: string) => Promise<AppManifest | null>;
@@ -67,10 +72,11 @@ interface AgentAuthDeps {
 }
 
 export const createAgentAuthController = (deps: AgentAuthDeps) => {
-  const { path, fs, spawn, app, getCodexHome, getForgerMetadataRoot, registry, resolveInstalledManifest, findManifestService, translateManifestEnvironment, ensureRuntimeInstalled, DEFAULT_NODE_VERSION, getCodexRoot, CODEX_CLI_VERSION, runCommand, runCommandCapture, buildCodexAuthEnvironment, classifyCodexAuthOutput, extractAllowedCodexAuthUrls, appendInstallLog, getLogsRoot, getTempRoot, serializeErrorForInstallLog, shell, buildMacTerminalLoginScript, buildMacTerminalScriptLaunchCommand, failureDiagnostic, CLAUDE_CODE_VERSION, getClaudeRoot, canRunCommand, markProviderConnected, findExistingFile, truncateForInstallLog } = deps;
+  const { path, fs, spawn, app, getCodexHome, getForgerMetadataRoot, registry, resolveInstalledManifest, findManifestService, translateManifestEnvironment, ensureRuntimeInstalled, DEFAULT_NODE_VERSION, getCodexRoot, CODEX_CLI_VERSION, runCommand, runCommandCapture, buildCodexAuthEnvironment, classifyCodexAuthOutput, extractAllowedCodexAuthUrls, appendInstallLog, getLogsRoot, getTempRoot, serializeErrorForInstallLog, shell, buildMacTerminalLoginScript, buildMacTerminalScriptLaunchCommand, failureDiagnostic, CLAUDE_CODE_VERSION, getClaudeRoot, getAntigravityRoot, canRunCommand, markProviderConnected, findExistingFile, truncateForInstallLog } = deps;
 const escapeWindowsBatchValue = (value: string): string => value.replace(/%/g, '%%').replace(/"/g, '""');
 const quotePowerShellSingle = (value: string): string => `'${value.replace(/'/g, "''")}'`;
 const CODEX_RATE_LIMITS_TIMEOUT_MS = 8_000;
+const CODEX_AUTH_STATUS_RATE_LIMITS_TIMEOUT_MS = 1_500;
 
 const getCodexAuthFilePath = (): string => path.join(getCodexHome(), 'auth.json');
 
@@ -324,6 +330,7 @@ const normalizeCodexRateLimits = (value: unknown): CodexRateLimitsStatus | undef
 const readCodexAppServerRateLimits = async (
   codexCliPath: string,
   env: NodeJS.ProcessEnv,
+  timeoutMs = CODEX_RATE_LIMITS_TIMEOUT_MS,
 ): Promise<CodexRateLimitsStatus | undefined> => {
   return await new Promise<CodexRateLimitsStatus | undefined>((resolve, reject) => {
     const child = spawn(codexCliPath, ['app-server', '--listen', 'stdio://'], {
@@ -337,7 +344,7 @@ const readCodexAppServerRateLimits = async (
     let settled = false;
     const timeout = setTimeout(() => {
       finalizeReject(new Error('codex_rate_limits_timeout'));
-    }, CODEX_RATE_LIMITS_TIMEOUT_MS);
+    }, timeoutMs);
 
     const cleanup = (): void => {
       clearTimeout(timeout);
@@ -460,7 +467,7 @@ const getCodexAuthStatus = async (): Promise<CodexAuthStatus> => {
   if (authenticated && codexCliPath) {
     try {
       const env = await buildManagedCodexAuthEnvironment(codexCliPath, codexHome);
-      rateLimits = await readCodexAppServerRateLimits(codexCliPath, env);
+      rateLimits = await readCodexAppServerRateLimits(codexCliPath, env, CODEX_AUTH_STATUS_RATE_LIMITS_TIMEOUT_MS);
       await appendInstallLog('codex_auth:rate_limits_checked', {
         codexHome,
         codexCliPath,
@@ -1051,5 +1058,378 @@ const reinstallClaude = async (): Promise<{ success: boolean; userMessage: strin
   }
 };
 
-  return { getRuntimePathEntries, existsDirectory, getAppLocalToolPathEntries, getCodexToolEnvironment, resolveCodexCliPath, getInstalledCodexCliVersion, ensureCodexCliInstalled, buildManagedCodexAuthEnvironment, getCodexAuthStatus, connectCodexAuth, disconnectCodexAuth, reinstallCodex, getClaudeAuthStatus, connectClaudeAuth, reinstallClaude };
+const getAntigravityBinDir = (): string => path.join(getAntigravityRoot(), 'bin');
+const ANTIGRAVITY_AUTH_PROBE_PROMPT = 'Return the exact string OK and do not use tools.';
+const GOOGLE_OAUTH_URL_PATTERN = /https:\/\/accounts\.google\.com\/o\/oauth2\/auth[^\s<>"')]+/g;
+const activeAntigravityAuthSessions = new Map<string, { child: ReturnType<SpawnProcess>; completed: boolean }>();
+
+const getAntigravityStatePathCandidates = (): string[] => {
+  const home = app.getPath('home');
+  return [
+    path.join(home, '.gemini', 'antigravity', 'antigravity_state.pbtxt'),
+    path.join(home, '.gemini', 'antigravity-cli', 'installation_id'),
+    path.join(home, '.gemini', 'config', 'config.json'),
+  ];
+};
+
+const hasAntigravityLocalState = async (): Promise<boolean> => {
+  for (const candidate of getAntigravityStatePathCandidates()) {
+    try {
+      if ((await fs.stat(candidate)).isFile()) {
+        return true;
+      }
+    } catch {
+      // Keep status checks best-effort and non-blocking.
+    }
+  }
+  return false;
+};
+
+const getManagedAntigravityCliPath = (): string =>
+  process.platform === 'win32'
+    ? path.join(getAntigravityBinDir(), 'agy.exe')
+    : path.join(getAntigravityBinDir(), 'agy');
+
+const resolveManagedAntigravityCliPath = async (): Promise<string | null> => {
+  const candidate = getManagedAntigravityCliPath();
+  try {
+    await fs.access(candidate);
+    return candidate;
+  } catch {
+    return null;
+  }
+};
+
+const resolveSystemAntigravityCliPath = async (): Promise<string | null> => {
+  const command = process.platform === 'win32' ? 'where.exe' : 'which';
+  const result = await runCommandCapture(command, ['agy'], { cwd: app.getPath('userData'), timeoutMs: 5_000 }).catch(() => null);
+  const candidate = result?.stdout.split(/\r?\n/).map((line) => line.trim()).find(Boolean);
+  if (!candidate) {
+    return null;
+  }
+  return await canRunCommand(candidate, ['--version']) ? candidate : null;
+};
+
+const resolveAntigravityCli = async (): Promise<{ path: string; source: 'managed' | 'system' } | null> => {
+  const managed = await resolveManagedAntigravityCliPath();
+  if (managed) {
+    return { path: managed, source: 'managed' };
+  }
+  const system = await resolveSystemAntigravityCliPath();
+  return system ? { path: system, source: 'system' } : null;
+};
+
+const ensureAntigravityCliInstalled = async (): Promise<string> => {
+  const existing = await resolveManagedAntigravityCliPath();
+  if (existing) {
+    return existing;
+  }
+  if (process.platform === 'win32') {
+    throw new Error('antigravity_windows_managed_install_not_supported');
+  }
+  const root = getAntigravityRoot();
+  const binDir = getAntigravityBinDir();
+  const installerPath = path.join(root, 'install.sh');
+  await fs.mkdir(root, { recursive: true });
+  await fs.mkdir(binDir, { recursive: true });
+  await runCommand('curl', ['-fsSL', 'https://antigravity.google/cli/install.sh', '-o', installerPath], {
+    cwd: root,
+    log: {
+      phase: 'antigravity_auth',
+      label: 'download antigravity installer',
+    },
+  });
+  await runCommand('bash', [installerPath, '--dir', binDir], {
+    cwd: root,
+    env: {
+      HOME: root,
+      XDG_CONFIG_HOME: path.join(root, 'config'),
+    },
+    log: {
+      phase: 'antigravity_auth',
+      label: 'install antigravity cli',
+    },
+  });
+  const installed = await resolveManagedAntigravityCliPath();
+  if (!installed) {
+    throw new Error('antigravity_cli_install_failed');
+  }
+  return installed;
+};
+
+const getAntigravityAuthStatus = async (): Promise<AntigravityAuthStatus> => {
+  const resolved = await resolveAntigravityCli();
+  if (!resolved) {
+    return {
+      installed: false,
+      authenticated: false,
+      source: 'missing',
+      userMessage: 'Google Antigravity no esta instalado en este equipo.',
+    };
+  }
+  const versionResult = await runCommandCapture(resolved.path, ['--version'], { cwd: app.getPath('userData'), timeoutMs: 10_000 }).catch(() => null);
+  const authenticated = await hasAntigravityLocalState();
+  if (authenticated) {
+    await markProviderConnected?.('antigravity');
+  }
+  return {
+    installed: true,
+    authenticated,
+    source: resolved.source,
+    antigravityCliPath: resolved.path,
+    version: versionResult?.stdout.trim() || versionResult?.stderr.trim() || undefined,
+    statusText: authenticated
+      ? 'Local Antigravity state found. The agy CLI does not expose a non-interactive auth status command.'
+      : 'Antigravity CLI installed. Connect Google Antigravity to confirm a local session.',
+  };
+};
+
+const startAntigravityAuthSession = async (
+  onEvent: (event: AntigravityAuthSessionEvent) => void,
+): Promise<AntigravityAuthSessionStartResult & FailureDiagnosticFields> => {
+  try {
+    const currentStatus = await getAntigravityAuthStatus().catch(() => undefined);
+    if (currentStatus?.authenticated) {
+      return {
+        success: true,
+        userMessage: 'Google Antigravity ya está conectado en este equipo.',
+        status: currentStatus,
+      };
+    }
+    const resolved = await resolveAntigravityCli();
+    const cliPath = resolved?.path ?? await ensureAntigravityCliInstalled();
+    const source = resolved?.source ?? 'managed';
+    const sessionId = randomUUID();
+    const loginCwd = path.join(getTempRoot(), 'antigravity-auth-login');
+    await fs.mkdir(loginCwd, { recursive: true });
+    const child = spawn(cliPath, ['--print', ANTIGRAVITY_AUTH_PROBE_PROMPT, '--print-timeout', '5m'], {
+      cwd: loginCwd,
+      env: {
+        ...process.env,
+      },
+      shell: false,
+      stdio: 'pipe',
+    });
+    activeAntigravityAuthSessions.set(sessionId, { child, completed: false });
+    const emitOutput = (stream: 'stdout' | 'stderr', text: string): void => {
+      onEvent({ sessionId, type: 'output', stream, text });
+      for (const url of text.match(GOOGLE_OAUTH_URL_PATTERN) ?? []) {
+        onEvent({ sessionId, type: 'url', stream, url });
+      }
+    };
+    child.stdout?.on('data', (chunk: Buffer | string) => emitOutput('stdout', chunk.toString()));
+    child.stderr?.on('data', (chunk: Buffer | string) => emitOutput('stderr', chunk.toString()));
+    child.on('error', (error) => {
+      activeAntigravityAuthSessions.delete(sessionId);
+      const diagnostic = failureDiagnostic(error, 'antigravity_auth_session_failed');
+      onEvent({
+        sessionId,
+        type: 'failed',
+        stream: 'system',
+        text: error.message,
+        technicalCode: diagnostic.technicalCode,
+        userMessage: 'No pudimos iniciar la conexión con Google Antigravity.',
+      });
+    });
+    child.on('exit', (code) => {
+      const session = activeAntigravityAuthSessions.get(sessionId);
+      activeAntigravityAuthSessions.delete(sessionId);
+      if (session?.completed) {
+        return;
+      }
+      if (code === 0) {
+        const status: AntigravityAuthStatus = {
+          installed: true,
+          authenticated: true,
+          source,
+          antigravityCliPath: cliPath,
+          userMessage: 'Google Antigravity está conectado en este equipo.',
+        };
+        void markProviderConnected?.('antigravity');
+        onEvent({ sessionId, type: 'completed', stream: 'system', exitCode: code, status, userMessage: status.userMessage });
+        return;
+      }
+      onEvent({
+        sessionId,
+        type: 'failed',
+        stream: 'system',
+        exitCode: code,
+        technicalCode: 'antigravity_auth_session_failed',
+        userMessage: 'No pudimos completar la conexión con Google Antigravity.',
+      });
+    });
+    onEvent({ sessionId, type: 'started', stream: 'system', text: 'Google Antigravity connection started.' });
+    return {
+      success: true,
+      sessionId,
+      userMessage: 'Conexión de Google Antigravity iniciada.',
+      status: {
+        installed: true,
+        authenticated: false,
+        source,
+        antigravityCliPath: cliPath,
+      },
+    };
+  } catch (error) {
+    const diagnostic = failureDiagnostic(error, 'antigravity_auth_session_start_failed');
+    await appendInstallLog('antigravity_auth:session_start_failed', {
+      detail: diagnostic.technicalCode,
+      error: serializeErrorForInstallLog(error),
+    });
+    return {
+      success: false,
+      userMessage: 'No pudimos iniciar la conexión con Google Antigravity.',
+      ...diagnostic,
+      status: await getAntigravityAuthStatus().catch(() => undefined),
+    };
+  }
+};
+
+const writeAntigravityAuthSession = async (sessionId: string, input: string): Promise<{ success: boolean; userMessage?: string } & FailureDiagnosticFields> => {
+  const session = activeAntigravityAuthSessions.get(sessionId);
+  if (!session?.child.stdin || session.child.stdin.destroyed) {
+    return { success: false, userMessage: 'La sesión de conexión ya no está activa.', technicalCode: 'antigravity_auth_session_not_active' };
+  }
+  session.child.stdin.write(`${input}\n`);
+  return { success: true };
+};
+
+const cancelAntigravityAuthSession = async (sessionId: string): Promise<{ success: boolean; userMessage?: string } & FailureDiagnosticFields> => {
+  const session = activeAntigravityAuthSessions.get(sessionId);
+  if (!session) {
+    return { success: true };
+  }
+  session.completed = true;
+  activeAntigravityAuthSessions.delete(sessionId);
+  session.child.kill('SIGTERM');
+  return { success: true };
+};
+
+const connectAntigravityAuth = async (): Promise<{ success: boolean; userMessage: string; status?: AntigravityAuthStatus } & FailureDiagnosticFields> => {
+  try {
+    const resolved = await resolveAntigravityCli();
+    const cliPath = resolved?.path ?? await ensureAntigravityCliInstalled();
+    const source = resolved?.source ?? 'managed';
+    const currentStatus = await getAntigravityAuthStatus().catch(() => undefined);
+    if (currentStatus?.authenticated) {
+      return {
+        success: true,
+        userMessage: 'Google Antigravity ya está conectado en este equipo.',
+        status: currentStatus,
+      };
+    }
+    if (process.platform === 'darwin') {
+      const loginLogPath = path.join(getLogsRoot(), 'antigravity-login.log');
+      const loginScriptPath = path.join(getTempRoot(), 'antigravity-login.command');
+      const loginCwd = path.join(getTempRoot(), 'antigravity-auth-login');
+      await fs.mkdir(loginCwd, { recursive: true }).catch(() => undefined);
+      const loginScript = buildMacTerminalLoginScript({
+        providerName: 'Google Antigravity',
+        logPath: loginLogPath,
+        command: [cliPath, '--print', ANTIGRAVITY_AUTH_PROBE_PROMPT, '--print-timeout', '5m'],
+        cwd: loginCwd,
+      });
+      await fs.mkdir(path.dirname(loginLogPath), { recursive: true });
+      await fs.mkdir(path.dirname(loginScriptPath), { recursive: true });
+      await fs.writeFile(loginLogPath, [
+        `[${new Date().toISOString()}] Forger prepared Google Antigravity login.`,
+        `antigravityCliPath=${cliPath}`,
+        `loginScriptPath=${loginScriptPath}`,
+        '',
+      ].join('\n'), 'utf8');
+      await fs.writeFile(loginScriptPath, loginScript, 'utf8');
+      await fs.chmod(loginScriptPath, 0o700);
+      const terminalCommand = buildMacTerminalScriptLaunchCommand(loginScriptPath);
+      await runCommand(
+        '/usr/bin/osascript',
+        [
+          '-e',
+          'tell application "Terminal"',
+          '-e',
+          'activate',
+          '-e',
+          `do script ${JSON.stringify(terminalCommand)}`,
+          '-e',
+          'end tell',
+        ],
+        { cwd: app.getPath('userData') },
+      );
+      await appendInstallLog('antigravity_auth:terminal_opened', {
+        platform: process.platform,
+        cliPath,
+        loginScriptPath,
+        terminalCommand,
+        loginLogPath,
+      });
+      return {
+        success: true,
+        userMessage: 'Abrimos Terminal para completar la conexión local de Google Antigravity.',
+        status: {
+          installed: true,
+          authenticated: false,
+          source,
+          antigravityCliPath: cliPath,
+          userMessage: 'Completa el login de Google Antigravity en Terminal.',
+        },
+      };
+    }
+    const loginCwd = path.join(getTempRoot(), 'antigravity-auth-login');
+    await fs.mkdir(loginCwd, { recursive: true }).catch(() => undefined);
+    await runCommand(cliPath, ['--print', ANTIGRAVITY_AUTH_PROBE_PROMPT, '--print-timeout', '5m'], {
+      cwd: loginCwd,
+      log: {
+        phase: 'antigravity_auth',
+        label: 'antigravity login',
+      },
+    });
+    return {
+      success: true,
+      userMessage: 'Conexión de Google Antigravity iniciada.',
+      status: await getAntigravityAuthStatus().catch(() => ({
+        installed: true,
+        authenticated: false,
+        source,
+        antigravityCliPath: cliPath,
+      })),
+    };
+  } catch (error) {
+    const diagnostic = failureDiagnostic(error, 'antigravity_connect_failed');
+    await appendInstallLog('antigravity_auth:failed', {
+      detail: diagnostic.technicalCode,
+      error: serializeErrorForInstallLog(error),
+    });
+    return {
+      success: false,
+      userMessage: 'No pudimos iniciar la conexión con Google Antigravity.',
+      ...diagnostic,
+      status: await getAntigravityAuthStatus().catch(() => undefined),
+    };
+  }
+};
+
+const reinstallAntigravity = async (): Promise<{ success: boolean; userMessage: string; status?: AntigravityAuthStatus } & FailureDiagnosticFields> => {
+  try {
+    await fs.rm(getAntigravityRoot(), { recursive: true, force: true });
+    await ensureAntigravityCliInstalled();
+    return {
+      success: true,
+      userMessage: 'Google Antigravity fue instalado por Forger. Si no hay sesión activa, conecta Google Antigravity para usarlo.',
+      status: await getAntigravityAuthStatus().catch(() => undefined),
+    };
+  } catch (error) {
+    const diagnostic = failureDiagnostic(error, 'antigravity_reinstall_failed');
+    await appendInstallLog('antigravity_auth:reinstall_failed', {
+      detail: diagnostic.technicalCode,
+      error: serializeErrorForInstallLog(error),
+    });
+    return {
+      success: false,
+      userMessage: 'No pudimos instalar Google Antigravity.',
+      ...diagnostic,
+      status: await getAntigravityAuthStatus().catch(() => undefined),
+    };
+  }
+};
+
+  return { getRuntimePathEntries, existsDirectory, getAppLocalToolPathEntries, getCodexToolEnvironment, resolveCodexCliPath, getInstalledCodexCliVersion, ensureCodexCliInstalled, buildManagedCodexAuthEnvironment, getCodexAuthStatus, connectCodexAuth, disconnectCodexAuth, reinstallCodex, getClaudeAuthStatus, connectClaudeAuth, reinstallClaude, resolveAntigravityCli, ensureAntigravityCliInstalled, getAntigravityAuthStatus, connectAntigravityAuth, startAntigravityAuthSession, writeAntigravityAuthSession, cancelAntigravityAuthSession, reinstallAntigravity };
 };
