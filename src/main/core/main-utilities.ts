@@ -339,6 +339,14 @@ const runtimePlatformTokens = (platformAlias: string): string[] => {
   return Array.from(tokens);
 };
 
+const archiveBaseNameHasPlatformToken = (archiveBaseName: string, token: string): boolean => {
+  if (archiveBaseName === token || archiveBaseName.endsWith(`-${token}`)) {
+    return true;
+  }
+  const escapedToken = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(^|[-_.+])${escapedToken}($|[-_.+])`).test(archiveBaseName);
+};
+
 const findRuntimeArchive = async (
   baseDir: string,
   platformAlias: string,
@@ -356,7 +364,7 @@ const findRuntimeArchive = async (
     const tokens = runtimePlatformTokens(platformAlias);
     const byToken = files.find((name) => {
       const archiveBaseName = stripArchiveExtension(name);
-      return tokens.some((token) => archiveBaseName === token || archiveBaseName.endsWith(`-${token}`));
+      return tokens.some((token) => archiveBaseNameHasPlatformToken(archiveBaseName, token));
     });
     if (byToken) {
       return path.join(baseDir, byToken);

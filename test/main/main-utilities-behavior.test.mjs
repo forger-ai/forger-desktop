@@ -559,6 +559,22 @@ test('main utility discovers runtime archives and checksum files by platform tok
     await fs.mkdir(runtimeRoot, { recursive: true });
     await writeFile(path.join(runtimeRoot, 'node-darwin-arm64.tar.gz'), 'archive', 'utf8');
     await writeFile(path.join(runtimeRoot, 'node-darwin-arm64.sha256'), 'sum', 'utf8');
+    const pythonRoot = path.join(root, 'python-runtimes');
+    await fs.mkdir(pythonRoot, { recursive: true });
+    const pythonArchives = {
+      darwin_arm64: 'cpython-3.12.13+20260414-aarch64-apple-darwin-install_only_stripped.tar.gz',
+      darwin_x64: 'cpython-3.12.13+20260414-x86_64-apple-darwin-install_only_stripped.tar.gz',
+      linux_x64: 'cpython-3.12.13+20260414-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz',
+      win32_x64: 'cpython-3.12.13+20260414-x86_64-pc-windows-msvc-install_only_stripped.tar.gz',
+    };
+    for (const archiveName of Object.values(pythonArchives)) {
+      await writeFile(path.join(pythonRoot, archiveName), 'archive', 'utf8');
+    }
+    await writeFile(path.join(pythonRoot, `${pythonArchives.linux_x64}.sha256`), 'sum', 'utf8');
+    const gitRoot = path.join(root, 'git-runtimes');
+    await fs.mkdir(gitRoot, { recursive: true });
+    await writeFile(path.join(gitRoot, 'git-2.54.0-aarch64-apple-darwin.tar.gz'), 'archive', 'utf8');
+    await writeFile(path.join(gitRoot, 'MinGit-2.54.0-64-bit.zip'), 'archive', 'utf8');
     const zipRoot = path.join(root, 'zip-runtimes');
     await fs.mkdir(zipRoot, { recursive: true });
     await writeFile(path.join(zipRoot, 'node-linux_x64.zip'), 'archive', 'utf8');
@@ -580,6 +596,13 @@ test('main utility discovers runtime archives and checksum files by platform tok
 
     const archive = await controller.findRuntimeArchive(runtimeRoot, 'darwin_arm64');
     const checksum = await controller.findRuntimeChecksumFile(runtimeRoot, archive, 'darwin_arm64');
+    const pythonDarwinArmArchive = await controller.findRuntimeArchive(pythonRoot, 'darwin_arm64');
+    const pythonDarwinX64Archive = await controller.findRuntimeArchive(pythonRoot, 'darwin_x64');
+    const pythonLinuxArchive = await controller.findRuntimeArchive(pythonRoot, 'linux_x64');
+    const pythonLinuxChecksum = await controller.findRuntimeChecksumFile(pythonRoot, pythonLinuxArchive, 'linux_x64');
+    const pythonWindowsArchive = await controller.findRuntimeArchive(pythonRoot, 'win32_x64');
+    const gitDarwinArchive = await controller.findRuntimeArchive(gitRoot, 'darwin_arm64');
+    const gitWindowsArchive = await controller.findRuntimeArchive(gitRoot, 'win32_x64');
     const zipArchive = await controller.findRuntimeArchive(zipRoot, 'linux_x64');
     const zipChecksum = await controller.findRuntimeChecksumFile(zipRoot, zipArchive, 'linux_x64');
     const windowsArchive = await controller.findRuntimeArchive(windowsRoot, 'win32_x64');
@@ -611,6 +634,13 @@ test('main utility discovers runtime archives and checksum files by platform tok
     }
     assert.equal(path.basename(archive), 'node-darwin-arm64.tar.gz');
     assert.equal(path.basename(checksum), 'node-darwin-arm64.sha256');
+    assert.equal(path.basename(pythonDarwinArmArchive), pythonArchives.darwin_arm64);
+    assert.equal(path.basename(pythonDarwinX64Archive), pythonArchives.darwin_x64);
+    assert.equal(path.basename(pythonLinuxArchive), pythonArchives.linux_x64);
+    assert.equal(path.basename(pythonLinuxChecksum), `${pythonArchives.linux_x64}.sha256`);
+    assert.equal(path.basename(pythonWindowsArchive), pythonArchives.win32_x64);
+    assert.equal(path.basename(gitDarwinArchive), 'git-2.54.0-aarch64-apple-darwin.tar.gz');
+    assert.equal(path.basename(gitWindowsArchive), 'MinGit-2.54.0-64-bit.zip');
     assert.equal(path.basename(zipArchive), 'node-linux_x64.zip');
     assert.equal(path.basename(zipChecksum), 'node-linux_x64.zip.sha256');
     assert.equal(path.basename(windowsArchive), 'node-x86_64-pc-windows-msvc.zip');
