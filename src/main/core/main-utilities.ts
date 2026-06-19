@@ -213,6 +213,45 @@ const signAppFolderGrant = (appId: string, folderPath: string): AppExternalFolde
   };
 };
 
+const verifyAppFolderGrant = (appId: string, grantToken: string): { path: string; expiresAt: string } | null => {
+  const [payload, signature, extra] = grantToken.split('.');
+  if (!payload || !signature || extra !== undefined) {
+    return null;
+  }
+  const expectedSignature = createHmac('sha256', appFolderGrantSecret).update(payload).digest('base64url');
+  if (!safeStringEqual(signature, expectedSignature)) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as {
+      appId?: unknown;
+      path?: unknown;
+      exp?: unknown;
+    };
+    if (parsed.appId !== appId || typeof parsed.path !== 'string' || !parsed.path.trim()) {
+      return null;
+    }
+    const exp = typeof parsed.exp === 'number' && Number.isFinite(parsed.exp) ? parsed.exp : 0;
+    const expiresAtMs = exp * 1000;
+    if (expiresAtMs <= Date.now()) {
+      return null;
+    }
+    return {
+      path: parsed.path,
+      expiresAt: new Date(expiresAtMs).toISOString(),
+    };
+  } catch {
+    return null;
+  }
+};
+
+const safeStringEqual = (left: string, right: string): boolean => {
+  const leftBuffer = Buffer.from(left);
+  const rightBuffer = Buffer.from(right);
+  return leftBuffer.length === rightBuffer.length && leftBuffer.equals(rightBuffer);
+};
+
 const resolveAppIdForWebContents = (webContentsId: number): string | null => {
   for (const [appId, appWindow] of appWindows.entries()) {
     if (!appWindow.isDestroyed() && appWindow.webContents.id === webContentsId) {
@@ -677,5 +716,5 @@ const toCatalogStatus = (slug: string): AppStatus => {
   return runningApps.has(slug) ? 'running' : installed.status;
 };
 
-  return { CommandFailedError, truncateForInstallLog, serializeErrorForInstallLog, encodeBase64Url, signAppFolderGrant, resolveAppIdForWebContents, appendInstallLog, isAgentToolId, normalizeAgentToolSettings, loadAgentToolSettings, saveAgentToolSettings, updateAgentToolApproval, getBundledResourcesRoot, stripArchiveExtension, runtimePlatformTokens, findRuntimeArchive, findRuntimeChecksumFile, runtimeError, failureDiagnostic, emitInstallProgress, emitRuntimeStatus, buildChatRunIpcTracePayload, sanitizeRendererChatTrace, emitChatRunUpdated, emitAutomationUpdated, emitBackgroundTaskUpdated, emitDesktopUpdateProgress, emitForgerAccountUpdated, closeFriendChatWindows, switchForgerAccountSession, clearForgerAccountSession, getDesktopUpdater, toAppSummary, parseVersionParts, isVersionNewer, mapBackendCategory, toCatalogStatus };
+  return { CommandFailedError, truncateForInstallLog, serializeErrorForInstallLog, encodeBase64Url, signAppFolderGrant, verifyAppFolderGrant, resolveAppIdForWebContents, appendInstallLog, isAgentToolId, normalizeAgentToolSettings, loadAgentToolSettings, saveAgentToolSettings, updateAgentToolApproval, getBundledResourcesRoot, stripArchiveExtension, runtimePlatformTokens, findRuntimeArchive, findRuntimeChecksumFile, runtimeError, failureDiagnostic, emitInstallProgress, emitRuntimeStatus, buildChatRunIpcTracePayload, sanitizeRendererChatTrace, emitChatRunUpdated, emitAutomationUpdated, emitBackgroundTaskUpdated, emitDesktopUpdateProgress, emitForgerAccountUpdated, closeFriendChatWindows, switchForgerAccountSession, clearForgerAccountSession, getDesktopUpdater, toAppSummary, parseVersionParts, isVersionNewer, mapBackendCategory, toCatalogStatus };
 };

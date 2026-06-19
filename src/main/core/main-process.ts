@@ -302,6 +302,7 @@ const CommandFailedError = getMainUtilitiesController().CommandFailedError;
 const truncateForInstallLog = (value: string): string => getMainUtilitiesController().truncateForInstallLog(value);
 const serializeErrorForInstallLog = (error: unknown): Record<string, unknown> => getMainUtilitiesController().serializeErrorForInstallLog(error);
 const signAppFolderGrant = (appId: string, folderPath: string): AppExternalFolderSelection => getMainUtilitiesController().signAppFolderGrant(appId, folderPath);
+const verifyAppFolderGrant = (appId: string, grantToken: string): { path: string; expiresAt: string } | null => getMainUtilitiesController().verifyAppFolderGrant(appId, grantToken);
 const resolveAppIdForWebContents = (webContentsId: number): string | null => getMainUtilitiesController().resolveAppIdForWebContents(webContentsId);
 const appendInstallLog = async (event: string, payload: Record<string, unknown> = {}): Promise<void> => await getMainUtilitiesController().appendInstallLog(event, payload);
 const getAudioRuntimeBroker = (): AudioRuntimeBroker => {
@@ -1426,7 +1427,7 @@ registerMainLifecycle({
   loadCloudSyncSettings, loadRegistry, loadSettings, llmRunsStore, mapBackendCategory, openInstalledApp, recordRemoteCloudActivity, startLocalNetworkShare, stopLocalNetworkShare,
   startRemoteNetworkShare, stopRemoteNetworkShare, stopRemoteNetworkShareSession, startRemoteAgentSession, stopRemoteAgentSession, stopRemoteAgentSessionSession, openOrFocusAppWindow, registerForgerCloudOAuth,
   registerIpcHandlers, renderManifestAgentPrompt, resolveClaudeCli, resolveAntigravityCliPath, resolveCodexCliPath, resolveInstalledAgents, resolveInstalledManifest,
-  resolveInstalledPromptTemplates, restoreAppPrompt, restartInstalledApp, runningApps, serializeErrorForInstallLog, shell,
+  resolveAppFolderGrant: verifyAppFolderGrant, resolveInstalledPromptTemplates, restoreAppPrompt, restartInstalledApp, runningApps, serializeErrorForInstallLog, shell,
   splitManifestCommand, startDevCatalogService, state: mainLifecycleState, stopInstalledApp, switchForgerAccountSession, terminateProcess,
   testAppPrompt, toAppSummary, toCatalogStatus, translateManifestEnvironment, truncateForInstallLog, updateAppPrompt, updateAppRuntime,
   upsertInstalledRecord, waitForHttpOk,

@@ -127,6 +127,11 @@ export interface AppManifest {
       required?: boolean;
       reason?: string;
     };
+    workspaceFolders?: boolean | {
+      enabled?: boolean;
+      required?: boolean;
+      reason?: string;
+    };
   };
   agentRuntime?: {
     networkAccess?: boolean;

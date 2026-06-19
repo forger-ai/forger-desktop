@@ -13,6 +13,7 @@ import type {
   AppManifestAgentStartInput,
   AppManifestAgentSteerInput,
   AgentProvider,
+  AppAgentWorkspaceInput,
   AudioPlaybackSummary,
   AudioRuntimeDevices,
   LiveVoiceInputSession,
@@ -20,6 +21,7 @@ import type {
   SpeechToTextTask,
   TextToSpeechSynthesizeResult,
 } from '../shared/types';
+import type { AppFolderGrantPublic } from './app-folder-grants';
 import type { AppAgentTaskManager } from './app-agent-task-manager';
 import type { AppAgentConversationManager } from './app-agent-conversation-manager';
 import {
@@ -74,7 +76,11 @@ export interface DesktopRuntimeBridgeOptions {
     speechToText: boolean;
     audioInput: boolean;
     textToSpeech: boolean;
+    workspaceFolders?: boolean;
   }>;
+  requestFolderGrant?: (appId: string, grantToken: string) => Promise<AppFolderGrantPublic | null>;
+  listFolderGrants?: (appId: string) => Promise<AppFolderGrantPublic[]>;
+  revokeFolderGrant?: (appId: string, grantId: string) => Promise<{ revoked: boolean }>;
   getAudioDevices?: () => Promise<AudioRuntimeDevices>;
   updateAudioInputDevices?: (input: AudioRuntimeDevices) => Promise<void>;
   createLiveVoiceSession?: (appId: string, input: {
@@ -319,6 +325,45 @@ export class DesktopRuntimeBridge {
       return this.appContext(appId);
     }
 
+    const folderGrantRequestMatch = pathname.match(/^\/v1\/apps\/([^/]+)\/folder-grants\/request$/);
+    if (folderGrantRequestMatch) {
+      if (decodeURIComponent(folderGrantRequestMatch[1]) !== appId) {
+        throw new BridgeError(403, 'desktop_runtime_app_forbidden');
+      }
+      if (method !== 'POST') {
+        throw new BridgeError(404, 'desktop_runtime_route_not_found');
+      }
+      await this.assertWorkspaceFolderCapability(appId);
+      const body = parseJsonBody(bodyText);
+      const grantToken = cleanString(body.grantToken);
+      if (!grantToken) {
+        throw new BridgeError(400, 'desktop_runtime_folder_grant_token_required');
+      }
+      const grant = await (this.options.requestFolderGrant?.(appId, grantToken) ?? Promise.resolve(null));
+      if (!grant) {
+        throw new BridgeError(403, 'desktop_runtime_folder_grant_invalid');
+      }
+      return grant ? { canceled: false, ...grant } : { canceled: true };
+    }
+
+    const folderGrantsMatch = pathname.match(/^\/v1\/apps\/([^/]+)\/folder-grants(?:\/([^/]+))?(?:\/revoke)?$/);
+    if (folderGrantsMatch) {
+      if (decodeURIComponent(folderGrantsMatch[1]) !== appId) {
+        throw new BridgeError(403, 'desktop_runtime_app_forbidden');
+      }
+      const grantId = folderGrantsMatch[2] ? decodeURIComponent(folderGrantsMatch[2]) : '';
+      const isRevoke = pathname.endsWith('/revoke');
+      if (method === 'GET' && !grantId) {
+        await this.assertWorkspaceFolderCapability(appId);
+        return { grants: await (this.options.listFolderGrants?.(appId) ?? Promise.resolve([])) };
+      }
+      if (((method === 'DELETE' && !isRevoke) || (method === 'POST' && isRevoke)) && grantId) {
+        await this.assertWorkspaceFolderCapability(appId);
+        return await (this.options.revokeFolderGrant?.(appId, grantId) ?? Promise.resolve({ revoked: false }));
+      }
+      throw new BridgeError(404, 'desktop_runtime_route_not_found');
+    }
+
     const taskStatusMatch = pathname.match(/^\/v1\/apps\/([^/]+)\/agent-tasks\/status$/);
     if (taskStatusMatch) {
       if (decodeURIComponent(taskStatusMatch[1]) !== appId) {
@@ -402,6 +447,7 @@ export class DesktopRuntimeBridge {
         conversationId: conversation.conversationId,
         message: buildManifestAgentStartPrompt(prompt),
         workspacePath: typeof body.workspacePath === 'string' ? body.workspacePath : undefined,
+        workspace: normalizeWorkspace(body.workspace),
         ...normalizeRuntime(body.runtime),
       });
       const summary = toAppAgentThreadSummary(started);
@@ -427,6 +473,7 @@ export class DesktopRuntimeBridge {
         conversationId: threadId,
         message: buildManifestAgentResumePrompt(prompt),
         workspacePath: typeof body.workspacePath === 'string' ? body.workspacePath : undefined,
+        workspace: normalizeWorkspace(body.workspace),
         ...normalizeRuntime(body.runtime),
       });
       return toAppAgentRunSummary(threadId, conversation.activeRun, conversation.messages) ?? {
@@ -452,6 +499,7 @@ export class DesktopRuntimeBridge {
       return await manager.steerRun(appId, threadId, runId, {
         message: buildManifestAgentSteerPrompt(prompt),
         workspacePath: typeof body.workspacePath === 'string' ? body.workspacePath : undefined,
+        workspace: normalizeWorkspace(body.workspace),
         ...normalizeRuntime(body.runtime),
       });
     }
@@ -590,6 +638,16 @@ export class DesktopRuntimeBridge {
     const capabilities = await this.options.getAppPlatformCapabilities?.(appId);
     if (!capabilities?.[capability]) {
       throw new BridgeError(403, `desktop_runtime_${capability}_capability_required`);
+    }
+  }
+
+  private async assertWorkspaceFolderCapability(appId: string): Promise<void> {
+    const capabilities = await (this.options.getAppPlatformCapabilities?.(appId) ?? Promise.resolve(null));
+    if (!capabilities?.workspaceFolders) {
+      throw new BridgeError(403, 'desktop_runtime_workspace_folders_not_allowed');
+    }
+    if (!this.options.requestFolderGrant || !this.options.listFolderGrants || !this.options.revokeFolderGrant) {
+      throw new BridgeError(503, 'desktop_runtime_folder_grants_unavailable');
     }
   }
 
@@ -1129,15 +1187,37 @@ const safeEqual = (left: string, right: string): boolean => {
 };
 
 const normalizeRuntime = (runtime: AppAgentRuntimeInput | undefined): Partial<AppCodexConversationSendMessageInput> => {
-  const provider = runtime?.provider === 'codex' || runtime?.provider === 'claude'
+  const provider = runtime?.provider === 'codex' || runtime?.provider === 'claude' || runtime?.provider === 'antigravity'
     ? runtime.provider as AgentProvider
     : undefined;
   const model = typeof runtime?.model === 'string' && runtime.model !== 'auto' ? runtime.model : undefined;
   const effort = runtime?.effort && runtime.effort !== 'default' ? runtime.effort : undefined;
+  const workspace = normalizeWorkspace(runtime?.workspace);
   return {
     ...(provider ? { provider } : {}),
     ...(model ? { model } : {}),
     ...(effort ? { effort } : {}),
+    ...(workspace ? { workspace } : {}),
+  };
+};
+
+const normalizeWorkspace = (workspace: unknown): AppAgentWorkspaceInput | undefined => {
+  if (!workspace || typeof workspace !== 'object' || Array.isArray(workspace)) {
+    return undefined;
+  }
+  const raw = workspace as Record<string, unknown>;
+  const cwdGrantId = typeof raw.cwdGrantId === 'string' && raw.cwdGrantId.trim()
+    ? raw.cwdGrantId.trim()
+    : undefined;
+  const additionalFolderGrantIds = Array.isArray(raw.additionalFolderGrantIds)
+    ? [...new Set(raw.additionalFolderGrantIds.filter((value): value is string => typeof value === 'string' && value.trim().length > 0).map((value) => value.trim()))]
+    : [];
+  if (!cwdGrantId && additionalFolderGrantIds.length === 0) {
+    return undefined;
+  }
+  return {
+    ...(cwdGrantId ? { cwdGrantId } : {}),
+    ...(additionalFolderGrantIds.length > 0 ? { additionalFolderGrantIds } : {}),
   };
 };
 

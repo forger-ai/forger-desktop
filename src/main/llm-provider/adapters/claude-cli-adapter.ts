@@ -28,6 +28,7 @@ interface ClaudeBaseRunInput {
   mcpServers?: LlmMcpServerConfig[];
   workingDir: string;
   sharedRoots?: string[];
+  addDirs?: string[];
   prompt: string;
   model: string;
   effort: ClaudeEffort;
@@ -64,6 +65,7 @@ export class ClaudeCliAdapter {
       '--effort',
       input.effort,
       ...claudePermissionArgs(input.permissionMode),
+      ...(input.addDirs ?? []).flatMap((dir) => ['--add-dir', dir]),
       ...(mcpConfigPath ? ['--mcp-config', mcpConfigPath] : []),
       ...(input.threadId ? ['--resume', input.threadId] : []),
       ...(input.imagePaths ?? []).flatMap((filePath) => ['--image', filePath]),

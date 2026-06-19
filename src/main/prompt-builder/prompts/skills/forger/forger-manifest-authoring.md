@@ -40,6 +40,10 @@ Use this shape as the current authoring contract. Remove fields that do not appl
     "audioInput": {
       "required": false,
       "reason": "Lets this app access live microphone or system audio input for a visible recording or monitoring workflow."
+    },
+    "workspaceFolders": {
+      "required": false,
+      "reason": "Lets this app ask the person to grant selected folders for an explicit app workflow that needs to read or write files outside the app-private workspace."
     }
   },
   "stack": {
@@ -238,5 +242,8 @@ Use this shape as the current authoring contract. Remove fields that do not appl
 - `platformCapabilities.speechToText` is the runtime declaration for Forger's local Speech to text service. Use it only when the app has a real audio file transcription, translation, or authorized realtime transcription workflow. File transcription can request a non-default faster-whisper model when the app needs higher quality; realtime transcript workflows use Desktop's active Speech to text model.
 - `platformCapabilities.audioInput` is the runtime declaration for visible raw live microphone or system audio access. Use it only when the app has a real raw recording, live monitoring, or audio-processing workflow. It declares permission and user-facing intent; it does not provide a Desktop raw-audio bridge endpoint. Do not use `speechToText` as a substitute for raw audio access.
 - `platformCapabilities.textToSpeech` is the runtime declaration for Forger's local Text to speech service. Use it only when the app has a real local voice synthesis workflow where calls provide explicit text, model, and voice. Apps can use the signed Desktop runtime bridge `/audio/say` endpoint for ephemeral playback after listing output devices. `reason` must describe the user-visible workflow enabled by that local service.
+- `platformCapabilities.workspaceFolders` is the runtime declaration for folder-grant workflows. Use it only when the app has a visible feature that needs the person to grant one or more external folders. It does not grant access by itself, and it is not a provider filesystem setting, official tool, app secret, script, or catalog capability.
+- Folder grants are Forger-owned permissions. The app may request them only through Forger-controlled UI or runtime flows, must explain the user-visible reason, and must treat grant ids as handles to approved folders instead of asking agents, backends, or prompts to browse arbitrary local paths.
+- App agent and conversation runs that need granted folders should receive a `workspace` object with `cwdGrantId` for the selected working folder and `additionalFolderGrantIds` for extra approved folders. Apps may keep returned full paths in saved data, UI, and prompts so agents can understand the person's workspace, but raw paths are context only; Desktop authorizes and resolves access from grant ids.
 - Keep `localNetworkShare` and `remoteTunnel` as top-level runtime flags. Do not move them into `catalog.capabilities` or visible feature lists.
 - For relational app data, prefer explicit SQLite/SQLModel tables and typed columns. Do not add JSON columns unless the data is genuinely schemaless and the reason is documented.

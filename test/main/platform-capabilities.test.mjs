@@ -3,7 +3,7 @@ import test from 'node:test';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
-const { appAllowsAudioInput, appAllowsSpeechToText, appAllowsTextToSpeech, normalizePlatformCapabilities } = require('../../dist-electron/shared/platform-capabilities.js');
+const { appAllowsAudioInput, appAllowsSpeechToText, appAllowsTextToSpeech, appAllowsWorkspaceFolders, normalizePlatformCapabilities } = require('../../dist-electron/shared/platform-capabilities.js');
 const { normalizeAppCapabilities } = require('../../dist-electron/shared/capabilities.js');
 
 test('platformCapabilities grants speech-to-text runtime access separately from catalog capabilities', () => {
@@ -11,6 +11,8 @@ test('platformCapabilities grants speech-to-text runtime access separately from 
   assert.equal(appAllowsSpeechToText({ speechToText: true }), true);
   assert.equal(appAllowsTextToSpeech({ textToSpeech: true }), true);
   assert.equal(appAllowsAudioInput({ audioInput: true }), true);
+  assert.equal(appAllowsWorkspaceFolders({ workspaceFolders: true }), true);
+  assert.equal(appAllowsWorkspaceFolders({ workspaceFolders: { enabled: false, reason: 'Disabled.' } }), false);
   assert.equal(appAllowsAudioInput({ speechToText: true }), false);
   assert.equal(appAllowsSpeechToText({ speechToText: { required: true, reason: 'Transcribe calls.' } }), true);
   assert.equal(appAllowsTextToSpeech({ textToSpeech: { required: true, reason: 'Read aloud.' } }), true);
@@ -22,6 +24,9 @@ test('platformCapabilities grants speech-to-text runtime access separately from 
   });
   assert.deepEqual(normalizePlatformCapabilities({ audioInput: { required: true, reason: ' Capture raw audio. ' } }), {
     audioInput: { required: true, reason: 'Capture raw audio.' },
+  });
+  assert.deepEqual(normalizePlatformCapabilities({ workspaceFolders: { required: true, reason: ' Open project folders. ' } }), {
+    workspaceFolders: { required: true, reason: 'Open project folders.' },
   });
 
   const decorative = normalizeAppCapabilities([{ id: 'speech_to_text' }, { id: 'ai_assisted_imports' }]);

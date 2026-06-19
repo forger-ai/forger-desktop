@@ -36,6 +36,9 @@ description: Use when designing, implementing, reviewing, or explaining in-app A
 - Start a manifest agent thread with `start_manifest_agent_thread(agent_id="<manifest-agent-id>", title=..., variables={...}, metadata=..., workspace_path=...)`. The `variables` object must match that agent's `prompts.initial.variables` declaration.
 - Resume a manifest agent thread with `resume_manifest_agent_thread(desktop_thread_id=thread_id, variables={...}, workspace_path=...)`. The `variables` object must match that agent's `prompts.resume.variables` declaration.
 - Steer an active manifest agent run with `steer_manifest_agent_run(desktop_thread_id=thread_id, desktop_run_id=run_id, variables={...}, workspace_path=...)`. The `variables` object must match that agent's `prompts.steer.variables` declaration.
+- For grant-aware flows, pass a `workspace` object instead of raw folder paths: `workspace={ "cwdGrantId": "...", "additionalFolderGrantIds": ["..."] }`. `cwdGrantId` selects the approved working folder for the run. `additionalFolderGrantIds` lists other Forger-approved folders the run may reference.
+- `workspace_path` is legacy and constrained to app-private paths inside the installed app workspace. Use it only for app-owned subdirectories, never for arbitrary external folders, home directories, mounted drives, or paths supplied directly by a person.
+- External folder access belongs to Forger folder grants. The app backend should store and pass grant ids, validate that each grant belongs to the current app/workflow, and let Desktop resolve approved filesystem scope. The returned full paths may be stored or placed in prompts as user-visible context, but they are descriptive data only; the grant ids remain the permission handles.
 - Do not start new agent work with the removed freeform endpoints `POST /agent-threads` or `POST /agent-threads/{thread_id}/runs`. Those endpoints return a removed-bridge error in current Desktop builds.
 - Poll with `get_agent_run(thread_id, run_id)` and cancel with `cancel_agent_run(thread_id, run_id)`.
 - Store Desktop thread ids and run ids in app tables only when the app needs resumable visible state. Use explicit relational columns, not JSON blobs, unless the metadata is genuinely schemaless.
@@ -53,6 +56,7 @@ description: Use when designing, implementing, reviewing, or explaining in-app A
 ## Manifest And Permission Fit
 - Use `forger-manifest-authoring` when writing the exact `manifest.json` shape for agents or prompt templates.
 - Choose `permissionMode` consciously for each app agent and prompt template. Use `"safe"` unless that specific agent or task has a concrete need for elevated filesystem access.
+- `permissionMode` does not create folder grants. If an app agent or conversation flow needs external folders, the manifest must declare `platformCapabilities.workspaceFolders`, the user must grant folders through Forger, and the run should receive `workspace.cwdGrantId` plus any `workspace.additionalFolderGrantIds`.
 - Keep final product behavior clear: what the AI flow helps with, what inputs it expects, and what result it should produce.
 
 ## Implementation Checklist

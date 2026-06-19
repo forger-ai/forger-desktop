@@ -14,6 +14,7 @@ import type {
   AgentRuntime,
   AgentRuntimeRecommendations,
   AgentRuntimeRequest,
+  AppAgentWorkspaceInput,
   ClaudeEffort,
   CodexReasoningEffort,
   PermissionRequest,
@@ -42,6 +43,7 @@ import {
   runCommandCapture,
 } from './app-agent/process';
 import type { LlmAppMcpServerConfig } from './app-agent/types';
+import type { AppFolderGrantPublic } from './app-folder-grants';
 import { appendRunLog, getRunLogPath } from './chat/progress-errors';
 import { antigravityCliAdapter } from './llm-provider/adapters/antigravity-cli-adapter';
 import { claudeCliAdapter } from './llm-provider/adapters/claude-cli-adapter';
@@ -70,6 +72,7 @@ interface AppAgentConversationManagerOptions {
   buildForgerToolsContext?: (appId: string) => Promise<string>;
   listenAppMcps?: (appIds: string[], runId: string) => Promise<LlmAppMcpServerConfig[]>;
   releaseAppMcps?: (runId: string) => void;
+  resolveFolderGrant?: (appId: string, grantId: string) => Promise<AppFolderGrantPublic>;
   canRequestPermission?: (appId: string) => boolean;
   onConversationEvent: (event: AppCodexConversationEvent) => void;
 }
@@ -93,6 +96,11 @@ interface PendingPermission {
   runId: string;
   requestId: string;
   resolve: (decision: 'allow' | 'deny') => void;
+}
+
+interface ResolvedRunWorkspace {
+  runRoot: string;
+  additionalRoots: string[];
 }
 
 const DEFAULT_MODEL = 'gpt-5.4';
@@ -281,7 +289,7 @@ export class AppAgentConversationManager {
     appId: string,
     conversationId: string,
     runId: string,
-    input: Pick<AppCodexConversationSendMessageInput, 'message' | 'context' | 'workspacePath' | 'provider' | 'model' | 'effort' | 'reasoningEffort'>,
+    input: Pick<AppCodexConversationSendMessageInput, 'message' | 'context' | 'workspacePath' | 'workspace' | 'provider' | 'model' | 'effort' | 'reasoningEffort'>,
   ): Promise<AppAgentThreadSteerResult> {
     await this.assertEnabled(appId);
     await this.load();
@@ -307,6 +315,7 @@ export class AppAgentConversationManager {
       message: input.message,
       context: input.context,
       workspacePath: input.workspacePath,
+      workspace: input.workspace,
       provider: input.provider,
       model: input.model,
       effort: input.effort,
@@ -504,10 +513,6 @@ export class AppAgentConversationManager {
     let mcpServers: LlmAppMcpServerConfig[] = [];
     let forgerMcpSession: { url: string; token: string } | null = null;
     try {
-      const runRoot = await this.resolveRunRoot(appRoot, input.workspacePath);
-      if (!(await existsDirectory(runRoot))) {
-        throw new Error('agent_run_workspace_missing');
-      }
       const pathEntries = await this.options.getCodexPathEntries(conversation.appId);
       const environment = await this.options.getCodexEnvironment(conversation.appId);
       const networkAccess = await (this.options.getAgentNetworkAccess?.(conversation.appId) ?? Promise.resolve(false));
@@ -534,14 +539,21 @@ export class AppAgentConversationManager {
         ? buildManifestAgentRecoveryPrompt(input.message, recoveryContext)
         : input.message.trim();
       const attachmentPaths = await this.prepareAttachments(conversation.appId, run, input);
-      const antigravityRunRoot = runtime.provider === 'antigravity' ? appRoot : runRoot;
-      const antigravityAdditionalRoots = runtime.provider === 'antigravity' && runRoot !== appRoot ? [runRoot] : [];
+      const resolvedWorkspace = await this.resolveRunWorkspace(conversation.appId, appRoot, input.workspacePath, input.workspace);
+      const runRoot = resolvedWorkspace.runRoot;
+      const realAppRoot = await fs.realpath(appRoot);
+      const additionalRoots = Array.from(new Set([realAppRoot, ...resolvedWorkspace.additionalRoots].filter((root) => root !== runRoot)));
+      if (!(await existsDirectory(runRoot))) {
+        throw new Error('agent_run_workspace_missing');
+      }
+      const antigravityRunRoot = runRoot;
+      const antigravityAdditionalRoots = additionalRoots;
       const codexHome = runtime.provider === 'codex'
         ? await preparePersistentIsolatedCodexHome(
             this.options.codexHome,
             this.conversationCodexHome(conversation.appId, conversation.conversationId),
             {
-              trustedRoots: Array.from(new Set([appRoot, runRoot])),
+              trustedRoots: Array.from(new Set([runRoot, ...additionalRoots])),
               networkAccess,
             },
           )
@@ -559,7 +571,7 @@ export class AppAgentConversationManager {
             mcpServers,
             workingDir: antigravityRunRoot,
             configWorkspaceRoot: appRoot,
-            sharedRoots: Array.from(new Set([runRoot])),
+            sharedRoots: additionalRoots,
             prompt,
             model,
             effort: runtime.effort,
@@ -582,7 +594,8 @@ export class AppAgentConversationManager {
             environment,
             mcpServers,
             workingDir: runRoot,
-            sharedRoots: Array.from(new Set([appRoot])),
+            sharedRoots: additionalRoots,
+            addDirs: additionalRoots,
             prompt,
             model,
             effort: runtime.effort as ClaudeEffort,
@@ -605,7 +618,8 @@ export class AppAgentConversationManager {
             environment,
             mcpServers,
             workingDir: runRoot,
-            sharedRoots: Array.from(new Set([appRoot])),
+            sharedRoots: additionalRoots,
+            addDirs: additionalRoots,
             prompt,
             model,
             reasoningEffort,
@@ -738,6 +752,32 @@ export class AppAgentConversationManager {
     const parent = path.dirname(run.attachmentPaths[0]);
     await fs.rm(parent, { recursive: true, force: true });
     run.attachmentPaths = [];
+  }
+
+  private async resolveRunWorkspace(
+    appId: string,
+    appRoot: string,
+    workspacePath: string | undefined,
+    workspace: AppAgentWorkspaceInput | undefined,
+  ): Promise<ResolvedRunWorkspace> {
+    const cwdGrantId = workspace?.cwdGrantId?.trim();
+    const additionalGrantIds = [...new Set((workspace?.additionalFolderGrantIds ?? []).map((entry) => entry.trim()).filter(Boolean))];
+    if (!cwdGrantId && additionalGrantIds.length === 0) {
+      return { runRoot: await this.resolveRunRoot(appRoot, workspacePath), additionalRoots: [] };
+    }
+    if (!this.options.resolveFolderGrant) {
+      throw new Error('agent_run_folder_grants_unavailable');
+    }
+    const cwdGrant = cwdGrantId ? await this.options.resolveFolderGrant(appId, cwdGrantId) : null;
+    const additionalRoots: string[] = [];
+    for (const grantId of additionalGrantIds) {
+      const grant = await this.options.resolveFolderGrant(appId, grantId);
+      additionalRoots.push(grant.realPath);
+    }
+    return {
+      runRoot: cwdGrant?.realPath ?? await this.resolveRunRoot(appRoot, workspacePath),
+      additionalRoots,
+    };
   }
 
   private async resolveRunRoot(appRoot: string, workspacePath: string | undefined): Promise<string> {
