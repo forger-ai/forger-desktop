@@ -860,6 +860,182 @@ test('agent auth launches existing managed Antigravity OAuth print mode in a Win
   assert.ok(calls.some((call) => call[0] === 'log' && call[1] === 'antigravity_auth:terminal_opened'));
 });
 
+test('agent auth recognizes Antigravity Windows Credential Manager state', async (t) => {
+  const { root, calls, controller } = await makeAgentAuthHarness({
+    canRunCommand: async (command, args) => command.endsWith('agy.exe') && args[0] === '--version',
+    runCommandCapture: async (command, args) => {
+      calls.push(['capture', command, args]);
+      if (command === 'cmdkey.exe') {
+        return {
+          code: 0,
+          stdout: 'Target: LegacyGeneric:target=gemini:antigravity\r\nType: Generic\r\n',
+          stderr: '',
+        };
+      }
+      if (args[0] === '--version') {
+        return { code: 0, stdout: '1.0.9\n', stderr: '' };
+      }
+      return { code: 1, stdout: '', stderr: 'missing' };
+    },
+  });
+  t.after(async () => {
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  await fs.mkdir(path.join(root, 'antigravity-root', 'bin'), { recursive: true });
+  await fs.writeFile(path.join(root, 'antigravity-root', 'bin', 'agy.exe'), '', 'utf8');
+
+  const result = await withPlatform('win32', async () => await controller.getAntigravityAuthStatus());
+
+  assert.equal(result.authenticated, true);
+  assert.ok(calls.some((call) => call[0] === 'connected' && call[1] === 'antigravity'));
+  assert.ok(calls.some((call) =>
+    call[0] === 'log' &&
+    call[1] === 'antigravity_auth:windows_credential_checked' &&
+    call[2].found === true &&
+    call[2].matchedPattern === 'legacygeneric:target=gemini:antigravity',
+  ));
+});
+
+test('agent auth falls back to Antigravity local state file on Windows when Credential Manager has no match', async (t) => {
+  const { root, calls, controller } = await makeAgentAuthHarness({
+    canRunCommand: async (command, args) => command.endsWith('agy.exe') && args[0] === '--version',
+    runCommandCapture: async (command, args) => {
+      calls.push(['capture', command, args]);
+      if (command === 'cmdkey.exe') {
+        return { code: 0, stdout: 'Currently stored credentials:\r\nTarget: LegacyGeneric:target=unrelated\r\n', stderr: '' };
+      }
+      if (args[0] === '--version') {
+        return { code: 0, stdout: '1.0.9\n', stderr: '' };
+      }
+      return { code: 1, stdout: '', stderr: 'missing' };
+    },
+  });
+  t.after(async () => {
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  await fs.mkdir(path.join(root, 'antigravity-root', 'bin'), { recursive: true });
+  await fs.writeFile(path.join(root, 'antigravity-root', 'bin', 'agy.exe'), '', 'utf8');
+  await fs.mkdir(path.join(root, '.gemini', 'antigravity'), { recursive: true });
+  await fs.writeFile(path.join(root, '.gemini', 'antigravity', 'antigravity_state.pbtxt'), 'state', 'utf8');
+
+  const result = await withPlatform('win32', async () => await controller.getAntigravityAuthStatus());
+
+  assert.equal(result.authenticated, true);
+  assert.ok(calls.some((call) =>
+    call[0] === 'log' &&
+    call[1] === 'antigravity_auth:windows_credential_checked' &&
+    call[2].found === false,
+  ));
+});
+
+test('agent auth falls back to Antigravity local state file on Windows when cmdkey fails', async (t) => {
+  const { root, calls, controller } = await makeAgentAuthHarness({
+    canRunCommand: async (command, args) => command.endsWith('agy.exe') && args[0] === '--version',
+    runCommandCapture: async (command, args) => {
+      calls.push(['capture', command, args]);
+      if (command === 'cmdkey.exe') {
+        throw new Error('cmdkey_unavailable');
+      }
+      if (args[0] === '--version') {
+        return { code: 0, stdout: '1.0.9\n', stderr: '' };
+      }
+      return { code: 1, stdout: '', stderr: 'missing' };
+    },
+  });
+  t.after(async () => {
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  await fs.mkdir(path.join(root, 'antigravity-root', 'bin'), { recursive: true });
+  await fs.writeFile(path.join(root, 'antigravity-root', 'bin', 'agy.exe'), '', 'utf8');
+  await fs.mkdir(path.join(root, '.gemini', 'antigravity'), { recursive: true });
+  await fs.writeFile(path.join(root, '.gemini', 'antigravity', 'antigravity_state.pbtxt'), 'state', 'utf8');
+
+  const result = await withPlatform('win32', async () => await controller.getAntigravityAuthStatus());
+
+  assert.equal(result.authenticated, true);
+  assert.ok(calls.some((call) => call[0] === 'log' && call[1] === 'antigravity_auth:windows_credential_check_failed'));
+});
+
+test('agent auth falls back to Antigravity OAuth success logs before opening the Windows login console', async (t) => {
+  const spawns = [];
+  const { root, calls, controller } = await makeAgentAuthHarness({
+    canRunCommand: async (command, args) => command.endsWith('agy.exe') && args[0] === '--version',
+    runCommandCapture: async (command, args) => {
+      calls.push(['capture', command, args]);
+      if (command === 'cmdkey.exe') {
+        return { code: 0, stdout: 'Currently stored credentials:\r\nTarget: LegacyGeneric:target=unrelated\r\n', stderr: '' };
+      }
+      if (args[0] === '--version') {
+        return { code: 0, stdout: '1.0.9\n', stderr: '' };
+      }
+      return { code: 1, stdout: '', stderr: 'missing' };
+    },
+    spawn: (command, args, options) => {
+      const child = new FakeChildProcess();
+      spawns.push([command, args, options]);
+      return child;
+    },
+  });
+  t.after(async () => {
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  await fs.mkdir(path.join(root, 'antigravity-root', 'bin'), { recursive: true });
+  await fs.writeFile(path.join(root, 'antigravity-root', 'bin', 'agy.exe'), '', 'utf8');
+  await fs.mkdir(path.join(root, '.gemini', 'antigravity-cli', 'log'), { recursive: true });
+  await fs.writeFile(
+    path.join(root, '.gemini', 'antigravity-cli', 'log', 'cli-20260619_093703.log'),
+    [
+      'I0619 09:37:28.547166 browser.go:153] consumerOAuth: authentication completed successfully',
+      'I0619 09:37:28.829699 server_oauth.go:217] OAuth: authenticated successfully as test@example.com',
+    ].join('\n'),
+    'utf8',
+  );
+
+  const result = await withPlatform('win32', async () => await controller.connectAntigravityAuth());
+
+  assert.equal(result.success, true);
+  assert.equal(result.status?.authenticated, true);
+  assert.equal(spawns.length, 0);
+  assert.ok(calls.some((call) =>
+    call[0] === 'log' &&
+    call[1] === 'antigravity_auth:oauth_success_log_checked' &&
+    call[2].found === true &&
+    call[2].matchedPattern === 'oauth_authenticated_successfully',
+  ));
+});
+
+test('agent auth skips Antigravity Windows login console when Credential Manager already has a session', async (t) => {
+  const spawns = [];
+  const { root, controller } = await makeAgentAuthHarness({
+    canRunCommand: async (command, args) => command.endsWith('agy.exe') && args[0] === '--version',
+    runCommandCapture: async (command, args) => {
+      if (command === 'cmdkey.exe') {
+        return { code: 0, stdout: 'Target: gemini:antigravity\r\nType: Generic\r\n', stderr: '' };
+      }
+      if (args[0] === '--version') {
+        return { code: 0, stdout: '1.0.9\n', stderr: '' };
+      }
+      return { code: 1, stdout: '', stderr: 'missing' };
+    },
+    spawn: (command, args, options) => {
+      const child = new FakeChildProcess();
+      spawns.push([command, args, options]);
+      return child;
+    },
+  });
+  t.after(async () => {
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  await fs.mkdir(path.join(root, 'antigravity-root', 'bin'), { recursive: true });
+  await fs.writeFile(path.join(root, 'antigravity-root', 'bin', 'agy.exe'), '', 'utf8');
+
+  const result = await withPlatform('win32', async () => await controller.connectAntigravityAuth());
+
+  assert.equal(result.success, true);
+  assert.equal(result.status?.authenticated, true);
+  assert.equal(spawns.length, 0);
+});
+
 test('agent auth disconnects Antigravity in Forger without treating preserved local credentials as a failure', async (t) => {
   const { root, calls, controller } = await makeAgentAuthHarness({
     canRunCommand: async (command, args) => command.endsWith('agy') && args[0] === '--version',
