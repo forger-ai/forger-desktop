@@ -12,6 +12,8 @@ export interface Settings {
   defaultAgentProvider: AgentProvider | 'auto';
   defaultChatPermissionMode: AgentPermissionMode;
   defaultChatNetworkAccess: boolean;
+  llmProviderDefaults: AgentDefaults;
+  /** @deprecated Use llmProviderDefaults. */
   agentDefaults: AgentDefaults;
   providerConnections: Partial<Record<AgentProvider, string>>;
 }

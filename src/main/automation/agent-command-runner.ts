@@ -1,31 +1,25 @@
-import { randomUUID } from 'node:crypto';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { AgentRuntime, ClaudeEffort } from '../../shared/types';
 import {
-  assertAllowedMcpServers,
-  codexWorkspaceNetworkConfigArgs,
   createIsolatedCodexHome,
   removeIsolatedCodexHome,
 } from '../codex-run-isolation';
 import { spawnProcess } from '../runtime/process-spawn';
+import { antigravityCliAdapter } from '../llm-provider/adapters/antigravity-cli-adapter';
+import type { LlmCommandResult, LlmMcpServerConfig } from '../llm-provider/types';
+import { claudeCliAdapter } from '../llm-provider/adapters/claude-cli-adapter';
+import { codexCliAdapter } from '../llm-provider/adapters/codex-cli-adapter';
 
 const AUTOMATION_TIMEOUT_MS = 300_000;
 
-export interface CodexMcpServerConfig {
-  name: string;
-  url: string;
-  token: string;
-  tokenEnvVar: string;
-  toolTimeoutSec?: number;
-}
+export type LlmAutomationMcpServerConfig = LlmMcpServerConfig;
 
-interface CommandResult {
-  code: number;
-  stdout: string;
-  stderr: string;
-}
+/** @deprecated Use LlmAutomationMcpServerConfig. */
+export type CodexMcpServerConfig = LlmAutomationMcpServerConfig;
+
+export type LlmAutomationCommandResult = LlmCommandResult & { code: number };
 
 export const appendTranscript = async (
   transcriptPath: string,
@@ -123,81 +117,32 @@ export const resolveCodexCommand = async (
   codexCliPath: string,
   pathEntries: string[],
 ): Promise<{ command: string; prefixArgs: string[]; pathEntries: string[] }> => {
-  if (process.platform !== 'win32' || !/\.(cmd|bat)$/i.test(codexCliPath)) {
-    return {
-      command: codexCliPath,
-      prefixArgs: [],
-      pathEntries: [path.dirname(codexCliPath), ...pathEntries],
-    };
-  }
-
-  const nodePath = await findExecutableInPathEntries(pathEntries, ['node.exe', 'node']);
-  const nodeModulesRoot = path.resolve(path.dirname(codexCliPath), '..');
-  const codexEntrypoint = path.join(nodeModulesRoot, '@openai', 'codex', 'bin', 'codex.js');
-  if (!nodePath || !(await existsFile(codexEntrypoint))) {
-    throw new Error('codex_js_entrypoint_missing');
-  }
-
-  return {
-    command: nodePath,
-    prefixArgs: [codexEntrypoint],
-    pathEntries: [path.dirname(nodePath), path.dirname(codexCliPath), ...pathEntries],
-  };
+  return await codexCliAdapter.resolveCommand(codexCliPath, pathEntries);
 };
 
 export const runAgentCommand = async (
-  codexCommand: { command: string; prefixArgs: string[]; pathEntries: string[] },
+  providerCommand: { cliPath?: string; command?: string; prefixArgs?: string[]; pathEntries: string[] },
   options: {
     runtime: AgentRuntime;
     cwd: string;
     codexHome: string;
     prompt: string;
     transcriptPath: string;
-    mcpServers?: CodexMcpServerConfig[];
+    mcpServers?: LlmAutomationMcpServerConfig[];
     networkAccess?: boolean;
     onAssistantMessages?: (assistantMessages: string[]) => void;
   },
-): Promise<CommandResult> => {
+): Promise<LlmAutomationCommandResult> => {
   const mcpServers = options.mcpServers ?? [];
-  const topLevelArgs = mcpServers.length > 0 ? ['--ask-for-approval', 'never'] : [];
-  const claudeMcpConfigPath = options.runtime.provider === 'claude'
-    ? await writeClaudeMcpConfig(options.cwd, mcpServers)
-    : null;
-  const args = options.runtime.provider === 'claude'
-    ? [
-        '-p',
-        options.prompt,
-        '--output-format',
-        'stream-json',
-        '--verbose',
-        '--model',
-        options.runtime.model,
-        '--effort',
-        options.runtime.effort as ClaudeEffort,
-        '--permission-mode',
-        'bypassPermissions',
-        ...(claudeMcpConfigPath ? ['--mcp-config', claudeMcpConfigPath] : []),
-      ]
-    : [
-        ...codexCommand.prefixArgs,
-        ...topLevelArgs,
-        'exec',
-        '--json',
-        '--model',
-        options.runtime.model || 'gpt-5.3-codex',
-        '--config',
-        `reasoning_effort="${options.runtime.effort || 'low'}"`,
-        ...codexWorkspaceNetworkConfigArgs(options.networkAccess === true),
-        '--full-auto',
-        '--sandbox',
-        'workspace-write',
-        '--skip-git-repo-check',
-        ...buildMcpArgs(mcpServers),
-        '-C',
-        options.cwd,
-        options.prompt,
-      ];
-  await appendTranscript(options.transcriptPath, 'meta', `${codexCommand.command} ${args.slice(codexCommand.prefixArgs.length).join(' ')}`);
+  const providerCliPath = providerCommand.cliPath ?? providerCommand.command;
+  if (!providerCliPath) {
+    throw new Error('provider_cli_missing');
+  }
+  await appendTranscript(
+    options.transcriptPath,
+    'meta',
+    `${options.runtime.provider} ${providerCliPath}${options.runtime.provider === 'codex' ? ' exec' : ''} ${options.prompt}`,
+  );
   let stdoutSoFar = '';
   const isolatedCodexHome = options.runtime.provider === 'codex'
     ? await createIsolatedCodexHome(options.codexHome, {
@@ -206,110 +151,96 @@ export const runAgentCommand = async (
         networkAccess: options.networkAccess === true,
       })
     : '';
-  const allowedMcpServers = new Set(mcpServers.map((server) => server.name));
   try {
-    const result = await runCommandCapture(codexCommand.command, args, {
-      cwd: options.cwd,
-      env: {
-        ...(options.runtime.provider === 'codex' ? { CODEX_HOME: isolatedCodexHome } : {}),
-        FORGER_ALLOWED_ROOTS: options.cwd,
-        ...Object.fromEntries(mcpServers.map((server) => [server.tokenEnvVar, server.token])),
-        PATH: [...codexCommand.pathEntries, process.env.PATH ?? ''].filter(Boolean).join(path.delimiter),
-      },
-      timeoutMs: AUTOMATION_TIMEOUT_MS,
-      onStdout: (text) => {
-        stdoutSoFar += text;
-        options.onAssistantMessages?.(
-          options.runtime.provider === 'claude'
-            ? parseClaudeAssistantMessages(stdoutSoFar)
-            : parseCodexAssistantMessages(stdoutSoFar),
-        );
-        void appendTranscript(options.transcriptPath, 'stdout', text);
-      },
-      onStderr: (text) => void appendTranscript(options.transcriptPath, 'stderr', text),
-    });
-    assertAllowedMcpServers(result.stdout, result.stderr, allowedMcpServers);
+    const appendOutput = (stream: 'stdout' | 'stderr' | 'meta', text: string): void => {
+      void appendTranscript(options.transcriptPath, stream, text);
+    };
+    const antigravityResult = options.runtime.provider === 'antigravity'
+      ? await antigravityCliAdapter.run({
+          cliPath: providerCliPath,
+          pathEntries: [path.dirname(providerCliPath), ...providerCommand.pathEntries],
+          environment: {},
+          mcpServers,
+          workingDir: options.cwd,
+          configWorkspaceRoot: options.cwd,
+          prompt: options.prompt,
+          model: options.runtime.model,
+          effort: options.runtime.effort,
+          permissionMode: 'unsafe',
+          timeoutMs: AUTOMATION_TIMEOUT_MS,
+          timeoutMode: 'absolute',
+          onOutput: (stream, text) => {
+            if (stream === 'stdout') {
+              stdoutSoFar += text;
+              options.onAssistantMessages?.([stdoutSoFar.trim()].filter(Boolean));
+            }
+            appendOutput(stream, text);
+          },
+          runCommandCapture,
+        })
+      : null;
+    const claudeResult = options.runtime.provider === 'claude'
+      ? await claudeCliAdapter.run({
+          cliPath: providerCliPath,
+          pathEntries: providerCommand.pathEntries,
+          environment: {},
+          mcpServers,
+          workingDir: options.cwd,
+          prompt: options.prompt,
+          model: options.runtime.model,
+          effort: options.runtime.effort as ClaudeEffort,
+          permissionMode: 'unsafe',
+          timeoutMs: AUTOMATION_TIMEOUT_MS,
+          onOutput: (stream, text) => {
+            if (stream === 'stdout') {
+              stdoutSoFar += text;
+              options.onAssistantMessages?.(parseClaudeAssistantMessages(stdoutSoFar));
+            }
+            appendOutput(stream, text);
+          },
+          runCommandCapture,
+        })
+      : null;
+    const codexResult = options.runtime.provider === 'codex'
+      ? await codexCliAdapter.runAutomation({
+          cliPath: providerCliPath,
+          pathEntries: providerCommand.pathEntries,
+          environment: {},
+          mcpServers,
+          workingDir: options.cwd,
+          prompt: options.prompt,
+          model: options.runtime.model || 'gpt-5.3-codex',
+          reasoningEffort: options.runtime.effort || 'low',
+          networkAccess: options.networkAccess,
+          timeoutMs: AUTOMATION_TIMEOUT_MS,
+          codexHome: isolatedCodexHome,
+          resolvedCommand: providerCommand.command
+            ? {
+                command: providerCommand.command,
+                prefixArgs: providerCommand.prefixArgs ?? [],
+                pathEntries: providerCommand.pathEntries,
+              }
+            : undefined,
+          onOutput: (stream, text) => {
+            if (stream === 'stdout') {
+              stdoutSoFar += text;
+              options.onAssistantMessages?.(parseCodexAssistantMessages(stdoutSoFar));
+            }
+            appendOutput(stream, text);
+          },
+          runCommandCapture,
+        })
+      : null;
+    const result = options.runtime.provider === 'antigravity'
+      ? { code: 0, stdout: antigravityResult?.stdout ?? '', stderr: antigravityResult?.stderr ?? '' }
+      : options.runtime.provider === 'claude'
+        ? { code: claudeResult?.code ?? 1, stdout: claudeResult?.stdout ?? '', stderr: claudeResult?.stderr ?? '' }
+        : { code: codexResult?.code ?? 1, stdout: codexResult?.stdout ?? '', stderr: codexResult?.stderr ?? '' };
     return result;
   } finally {
     await removeIsolatedCodexHome(isolatedCodexHome);
-    await fs.rm(claudeMcpConfigPath ?? '', { force: true }).catch(() => undefined);
   }
 };
-
-const writeClaudeMcpConfig = async (
-  workingDir: string,
-  mcpServers: CodexMcpServerConfig[],
-): Promise<string> => {
-  const configPath = path.join(workingDir, '.forger', 'tmp', `claude-mcp-${randomUUID()}.json`);
-  const mcpServersConfig = Object.fromEntries(mcpServers.map((server) => [
-    server.name,
-    {
-      type: 'http',
-      url: server.url,
-      headers: {
-        Authorization: `Bearer \${${server.tokenEnvVar}}`,
-      },
-    },
-  ]));
-  await fs.mkdir(path.dirname(configPath), { recursive: true });
-  await fs.writeFile(configPath, JSON.stringify({ mcpServers: mcpServersConfig }, null, 2), 'utf8');
-  return configPath;
-};
-
-const existsFile = async (filePath: string): Promise<boolean> => {
-  try {
-    const stat = await fs.stat(filePath);
-    return stat.isFile();
-  } catch {
-    return false;
-  }
-};
-
-const findExecutableInPathEntries = async (
-  entries: string[],
-  executableNames: string[],
-): Promise<string | null> => {
-  for (const entry of entries) {
-    for (const executableName of executableNames) {
-      const candidate = path.join(entry, executableName);
-      if (await existsFile(candidate)) {
-        return candidate;
-      }
-    }
-  }
-  return null;
-};
-
-const buildMcpArgs = (mcpServers: CodexMcpServerConfig[]): string[] =>
-  mcpServers.flatMap((server) => [
-    '--config',
-    `mcp_servers.${server.name}.url=${JSON.stringify(server.url)}`,
-    '--config',
-    `mcp_servers.${server.name}.bearer_token_env_var=${JSON.stringify(server.tokenEnvVar)}`,
-    '--config',
-    `mcp_servers.${server.name}.enabled=true`,
-    '--config',
-    `mcp_servers.${server.name}.tool_timeout_sec=${server.toolTimeoutSec ?? 600}`,
-    '--config',
-    `mcp_servers.${server.name}.default_tools_approval_mode="${getMcpApprovalMode(server)}"`,
-    ...(server.name === 'forger'
-      ? [
-          '--config',
-          'apps.forger.enabled=true',
-          '--config',
-          'apps.forger.default_tools_enabled=true',
-          '--config',
-          'apps.forger.default_tools_approval_mode="auto"',
-          '--config',
-          'apps.forger.destructive_enabled=true',
-          '--config',
-          'apps.forger.open_world_enabled=true',
-        ]
-      : []),
-  ]);
-
-const getMcpApprovalMode = (server: CodexMcpServerConfig): 'auto' | 'approve' =>
-  server.name === 'forger' ? 'auto' : 'approve';
 
 const runCommandCapture = async (
   command: string,
@@ -321,8 +252,8 @@ const runCommandCapture = async (
     onStdout?: (text: string) => void;
     onStderr?: (text: string) => void;
   },
-): Promise<CommandResult> => {
-  return await new Promise<CommandResult>((resolve, reject) => {
+): Promise<LlmAutomationCommandResult> => {
+  return await new Promise<LlmAutomationCommandResult>((resolve, reject) => {
     const child: ChildProcessWithoutNullStreams = spawnProcess(command, args, {
       cwd: options.cwd,
       env: {

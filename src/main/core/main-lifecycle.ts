@@ -26,6 +26,7 @@ import type {
   ChatCreatedAppRequest,
   ChatQuestion,
   ChatQuestionRequest,
+  AntigravityAuthStatus,
   CodexAuthStatus,
   ClaudeAuthStatus,
   CreateLocalAppInput,
@@ -222,6 +223,7 @@ interface MainLifecycleDeps {
   getAgentPathEntries: (appId?: string) => Promise<string[]>;
   getBackupsRoot: () => string;
   getClaudeAuthStatus: () => Promise<ClaudeAuthStatus>;
+  getAntigravityAuthStatus?: () => Promise<AntigravityAuthStatus>;
   getCloudDeviceAccountStorageKey: () => string | undefined;
   getCloudDevicePath: () => string;
   getCloudIdentityPath: () => string;
@@ -285,6 +287,7 @@ interface MainLifecycleDeps {
   registerIpcHandlers: () => void;
   renderManifestAgentPrompt: SyncFn<string>;
   resolveClaudeCli: () => Promise<{ path: string; source: string } | null>;
+  resolveAntigravityCliPath?: () => Promise<string | null>;
   resolveCodexCliPath: (root: string) => Promise<string | null>;
   resolveInstalledAgents: AsyncFn;
   resolveInstalledManifest: AsyncFn<AppManifest | null>;
@@ -361,6 +364,7 @@ export const registerMainLifecycle = (deps: unknown) => {
     getAgentPathEntries,
     getBackupsRoot,
     getClaudeAuthStatus,
+    getAntigravityAuthStatus,
     getCloudDeviceAccountStorageKey,
     getCloudDevicePath,
     getCloudIdentityPath,
@@ -410,6 +414,7 @@ export const registerMainLifecycle = (deps: unknown) => {
     registerIpcHandlers,
     renderManifestAgentPrompt,
     resolveClaudeCli,
+    resolveAntigravityCliPath,
     resolveCodexCliPath,
     resolveInstalledAgents,
     resolveInstalledManifest,
@@ -847,6 +852,7 @@ export const registerMainLifecycle = (deps: unknown) => {
     agentContractVersion: FORGER_AGENT_CONTRACT_VERSION,
     getCodexCliPath: async () => await resolveCodexCliPath(getCodexRoot()),
     getClaudeCliPath: async () => (await resolveClaudeCli())?.path ?? null,
+    getAntigravityCliPath: async () => await (resolveAntigravityCliPath?.() ?? Promise.resolve(null)),
     getCodexPathEntries: async (appId?: string) => await getAgentPathEntries(appId),
     ensureGitAvailable,
     getCodexEnvironment: async (appId?: string) => {
@@ -863,6 +869,10 @@ export const registerMainLifecycle = (deps: unknown) => {
     },
     getClaudeAuthenticated: async () => {
       const status = await getClaudeAuthStatus();
+      return status.authenticated;
+    },
+    getAntigravityAuthenticated: async () => {
+      const status = await (getAntigravityAuthStatus?.() ?? Promise.resolve({ authenticated: false } as AntigravityAuthStatus));
       return status.authenticated;
     },
     createForgerMcpSession: (runId: string, appId: string, locale?: string) =>
@@ -924,6 +934,7 @@ export const registerMainLifecycle = (deps: unknown) => {
     getAgentRuntime: chooseAgentRuntime,
     getCodexCliPath: async () => await resolveCodexCliPath(getCodexRoot()),
     getClaudeCliPath: async () => (await resolveClaudeCli())?.path ?? null,
+    getAntigravityCliPath: async () => await (resolveAntigravityCliPath?.() ?? Promise.resolve(null)),
     getCodexPathEntries: async (appId?: string) => await getAgentPathEntries(appId),
     ensureGitAvailable,
     getCodexEnvironment: async (appId?: string) => {
@@ -940,6 +951,10 @@ export const registerMainLifecycle = (deps: unknown) => {
     },
     getClaudeAuthenticated: async () => {
       const status = await getClaudeAuthStatus();
+      return status.authenticated;
+    },
+    getAntigravityAuthenticated: async () => {
+      const status = await (getAntigravityAuthStatus?.() ?? Promise.resolve({ authenticated: false } as AntigravityAuthStatus));
       return status.authenticated;
     },
     resolvePromptTemplates: resolveInstalledPromptTemplates,
@@ -978,6 +993,7 @@ export const registerMainLifecycle = (deps: unknown) => {
     getAgentRuntime: chooseAgentRuntime,
     getCodexCliPath: async () => await resolveCodexCliPath(getCodexRoot()),
     getClaudeCliPath: async () => (await resolveClaudeCli())?.path ?? null,
+    getAntigravityCliPath: async () => await (resolveAntigravityCliPath?.() ?? Promise.resolve(null)),
     getCodexPathEntries: async (appId?: string) => await getAgentPathEntries(appId),
     ensureGitAvailable,
     getCodexEnvironment: async (appId?: string) => {
@@ -994,6 +1010,10 @@ export const registerMainLifecycle = (deps: unknown) => {
     },
     getClaudeAuthenticated: async () => {
       const status = await getClaudeAuthStatus();
+      return status.authenticated;
+    },
+    getAntigravityAuthenticated: async () => {
+      const status = await (getAntigravityAuthStatus?.() ?? Promise.resolve({ authenticated: false } as AntigravityAuthStatus));
       return status.authenticated;
     },
     hasCodexConversation: hasInstalledCodexConversation,
@@ -1076,16 +1096,19 @@ export const registerMainLifecycle = (deps: unknown) => {
     getConversationManager: () => state.appAgentConversationManager,
     getTaskManager: () => state.appAgentTaskManager,
     getTaskStatus: async () => {
-      const [codexStatus, claudeStatus] = await Promise.all([
+      const [codexStatus, claudeStatus, antigravityStatus] = await Promise.all([
         getCodexAuthStatus().catch(() => ({ authenticated: false })),
         getClaudeAuthStatus().catch(() => ({ authenticated: false })),
+        getAntigravityAuthStatus?.().catch(() => ({ authenticated: false })) ?? Promise.resolve({ authenticated: false }),
       ]);
       const codex = Boolean(codexStatus.authenticated);
       const claude = Boolean(claudeStatus.authenticated);
+      const antigravity = Boolean(antigravityStatus.authenticated);
       return {
-        connected: codex || claude,
+        connected: codex || claude || antigravity,
         codex,
         claude,
+        ...(getAntigravityAuthStatus ? { antigravity } : {}),
       };
     },
     getAppContext: (appId: string) => {
@@ -1163,6 +1186,7 @@ export const registerMainLifecycle = (deps: unknown) => {
     getInstalledApps: () => Object.values(state.registry.apps).map(toAppSummary),
     getCodexCliPath: async () => await resolveCodexCliPath(getCodexRoot()),
     getClaudeCliPath: async () => (await resolveClaudeCli())?.path ?? null,
+    getAntigravityCliPath: async () => await (resolveAntigravityCliPath?.() ?? Promise.resolve(null)),
     getCodexPathEntries: async () => await getAgentPathEntries(),
     getAgentNetworkAccess: anyAppAllowsAgentNetworkAccess,
     getCodexAuthenticated: async () => {
@@ -1171,6 +1195,10 @@ export const registerMainLifecycle = (deps: unknown) => {
     },
     getClaudeAuthenticated: async () => {
       const status = await getClaudeAuthStatus();
+      return status.authenticated;
+    },
+    getAntigravityAuthenticated: async () => {
+      const status = await (getAntigravityAuthStatus?.() ?? Promise.resolve({ authenticated: false } as AntigravityAuthStatus));
       return status.authenticated;
     },
     createForgerMcpSession: (runId: string, appId: string, appIds: string[]) =>

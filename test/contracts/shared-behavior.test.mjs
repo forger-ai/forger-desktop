@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 import { createRequire } from 'node:module';
 
@@ -21,6 +24,11 @@ const {
   normalizeLocale,
 } = require('../../dist-electron/shared/i18n.js');
 const runtimeRegistry = require('../../dist-electron/shared/agent-runtime-registry.js');
+const {
+  buildAntigravityArgs,
+  parseAntigravityOutput,
+  writeAntigravityMcpConfig,
+} = require('../../dist-electron/main/app-agent/mcp.js');
 
 test('capability normalization maps aliases, objects, casing, and unknown values safely', () => {
   assert.deepEqual(normalizeAppCapabilityIds([
@@ -234,9 +242,48 @@ test('agent runtime registry normalizes providers, defaults, fallbacks, and runt
   assert.equal(runtimeRegistry.isCodexReasoningEffort('low'), true);
   assert.equal(runtimeRegistry.isClaudeModel('sonnet'), true);
   assert.equal(runtimeRegistry.isClaudeEffort('max'), true);
+  const providerRegistry = runtimeRegistry.createAgentProviderRuntimeRegistry({
+    codex: {
+      defaultModel: 'codex-a',
+      defaultReasoningEffort: 'low',
+      modelValues: ['codex-a', 'codex-b'],
+      reasoningEffortValues: ['low', 'high'],
+    },
+    claude: {
+      defaultModel: 'claude-a',
+      defaultEffort: 'medium',
+      modelValues: ['claude-a', 'claude-b'],
+      effortValues: ['medium', 'max'],
+    },
+    antigravity: {
+      defaultModel: 'ag-a',
+      defaultEffort: 'medium',
+      modelValues: ['ag-a', 'ag-b'],
+      effortValues: ['low', 'medium', 'high'],
+    },
+  });
+  assert.equal(providerRegistry.codex.defaultModel, 'codex-a');
+  assert.equal(runtimeRegistry.normalizeAgentProviderModel(providerRegistry, 'codex', ' codex-b ', 'codex-a'), 'codex-b');
+  assert.equal(runtimeRegistry.normalizeAgentProviderModel(providerRegistry, 'claude', 'missing', 'claude-b'), 'claude-b');
+  assert.equal(runtimeRegistry.normalizeAgentProviderModel(providerRegistry, 'antigravity', 'ag-b', 'ag-a'), 'ag-b');
+  assert.equal(runtimeRegistry.normalizeAgentProviderEffort(providerRegistry, 'codex', 'high', 'low'), 'high');
+  assert.equal(runtimeRegistry.normalizeAgentProviderEffort(providerRegistry, 'claude', 'bad', 'max'), 'max');
+  assert.equal(runtimeRegistry.normalizeAgentProviderEffort(providerRegistry, 'antigravity', 'bad', 'low'), 'low');
+  assert.equal(runtimeRegistry.DEFAULT_AGENT_PROVIDER_RUNTIME_REGISTRY.codex.defaultModel, runtimeRegistry.DEFAULT_CODEX_MODEL);
   assert.equal(runtimeRegistry.getAgentModelOptions('claude')[0].realModelName, 'claude-opus-4-8');
   assert.equal(runtimeRegistry.getDefaultClaudeEffort('claude-opus-4-8'), 'high');
   assert.equal(runtimeRegistry.getAgentModelOptions('codex')[0].realModelName, 'gpt-5.5');
+  assert.deepEqual(runtimeRegistry.normalizeAntigravityModelAndEffort('gemini-3.5-flash-medium', undefined), {
+    model: 'gemini-3.5-flash',
+    effort: 'medium',
+  });
+  assert.deepEqual(runtimeRegistry.normalizeAntigravityModelAndEffort('gemini-3.1-pro', 'medium'), {
+    model: 'gemini-3.1-pro',
+    effort: 'high',
+  });
+  assert.deepEqual(runtimeRegistry.getAntigravitySupportedEfforts('gemini-3.1-pro'), ['low', 'high']);
+  assert.equal(runtimeRegistry.resolveAntigravityCliModel('gemini-3.5-flash', 'high'), 'gemini-3.5-flash-high');
+  assert.equal(runtimeRegistry.resolveAntigravityCliModel('gpt-oss-120b', 'high'), 'gpt-oss-120b-medium');
   assert.equal(runtimeRegistry.legacyCodexRuntime(), undefined);
   assert.equal(runtimeRegistry.legacyCodexRuntime({}), undefined);
   assert.deepEqual(runtimeRegistry.legacyCodexRuntime({ model: 'gpt-5.3-codex', effort: 'xhigh' }), {
@@ -399,4 +446,116 @@ test('agent runtime registry normalizes providers, defaults, fallbacks, and runt
   const defaultsCopy = runtimeRegistry.getDefaultAgentDefaults();
   defaultsCopy.codex.model = 'mutated';
   assert.equal(runtimeRegistry.DEFAULT_AGENT_DEFAULTS.codex.model, 'gpt-5.4');
+});
+
+test('antigravity CLI contract fixture captures real agy command semantics', async () => {
+  const fixture = await fs.readFile(new URL('../fixtures/antigravity-cli-contract.md', import.meta.url), 'utf8');
+  assert.match(fixture, /Observed version: `1\.0\.9`/);
+  assert.match(fixture, /--print\s+Run a single prompt non-interactively and print the response/);
+  assert.match(fixture, /-c\s+Short alias for --continue/);
+  assert.match(fixture, /Resume a conversation by ID: `agy --conversation <conversation-id>`/);
+  assert.match(fixture, /not standalone subcommands[\s\S]*`auth`/);
+});
+
+test('antigravity MCP helper writes workspace config and restores existing content', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forger-antigravity-mcp-'));
+  try {
+    const configPath = path.join(root, '.agents', 'mcp_config.json');
+    await fs.mkdir(path.dirname(configPath), { recursive: true });
+    await fs.writeFile(configPath, JSON.stringify({ mcpServers: { existing: { command: 'node' } } }, null, 2), 'utf8');
+
+    const handle = await writeAntigravityMcpConfig(root, [{
+      name: 'forger',
+      url: 'http://127.0.0.1:9988/mcp',
+      token: 'secret-token',
+      tokenEnvVar: 'FORGER_MCP_TOKEN',
+    }]);
+    assert.equal(handle.configPath, configPath);
+    const written = JSON.parse(await fs.readFile(configPath, 'utf8'));
+    assert.deepEqual(written.mcpServers.existing, { command: 'node' });
+    assert.deepEqual(written.mcpServers.forger, {
+      serverUrl: 'http://127.0.0.1:9988/mcp',
+      headers: { Authorization: 'Bearer secret-token' },
+    });
+
+    await handle.cleanup();
+    assert.deepEqual(JSON.parse(await fs.readFile(configPath, 'utf8')), {
+      mcpServers: { existing: { command: 'node' } },
+    });
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('antigravity MCP helper serializes config writes per workspace', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forger-antigravity-mcp-lock-'));
+  const configPath = path.join(root, '.agents', 'mcp_config.json');
+  try {
+    const first = await writeAntigravityMcpConfig(root, [{
+      name: 'first',
+      url: 'http://127.0.0.1:9001/mcp',
+      token: 'first-token',
+      tokenEnvVar: 'FIRST_TOKEN',
+    }]);
+    assert.ok(first);
+    const secondPromise = writeAntigravityMcpConfig(root, [{
+      name: 'second',
+      url: 'http://127.0.0.1:9002/mcp',
+      token: 'second-token',
+      tokenEnvVar: 'SECOND_TOKEN',
+    }]);
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.deepEqual(Object.keys(JSON.parse(await fs.readFile(configPath, 'utf8')).mcpServers), ['first']);
+
+    await first.cleanup();
+    const second = await secondPromise;
+    assert.ok(second);
+    assert.deepEqual(Object.keys(JSON.parse(await fs.readFile(configPath, 'utf8')).mcpServers), ['second']);
+
+    await second.cleanup();
+    await assert.rejects(() => fs.readFile(configPath, 'utf8'), /ENOENT/);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('antigravity runner args and parser follow agy print and conversation flags', () => {
+  assert.deepEqual(buildAntigravityArgs({
+    prompt: 'Review this app',
+    model: 'gemini-3.5-flash-high',
+    threadId: 'conv-123',
+    addDirs: ['/tmp/forger-app/subdir'],
+    logFile: '/tmp/forger-app/.forger/tmp/antigravity-run.log',
+    hasMcpServers: true,
+    permissionMode: 'safe',
+  }), [
+    '--log-file',
+    '/tmp/forger-app/.forger/tmp/antigravity-run.log',
+    '--model',
+    'gemini-3.5-flash-high',
+    '--conversation',
+    'conv-123',
+    '--add-dir',
+    '/tmp/forger-app/subdir',
+    '--dangerously-skip-permissions',
+    '--print',
+    'Review this app',
+    '--print-timeout',
+    '5m',
+  ]);
+  assert.deepEqual(parseAntigravityOutput('Conversation ID: conv-456\nDone.\n'), {
+    assistantText: 'Done.',
+    threadId: 'conv-456',
+    toolEvents: [],
+  });
+  assert.deepEqual(parseAntigravityOutput(
+    'Done.\n',
+    '',
+    'I0618 printmode.go:156] Print mode: conversation=5e0a064b-919d-4b65-bc3b-0a4eca4491f3, sending message\n',
+  ), {
+    assistantText: 'Done.',
+    threadId: '5e0a064b-919d-4b65-bc3b-0a4eca4491f3',
+    toolEvents: [],
+  });
 });

@@ -47,7 +47,6 @@ import InsertDriveFileRounded from '@mui/icons-material/InsertDriveFileRounded';
 import KeyboardArrowDownRounded from '@mui/icons-material/KeyboardArrowDownRounded';
 import KeyboardArrowRightRounded from '@mui/icons-material/KeyboardArrowRightRounded';
 import ExpandMoreRounded from '@mui/icons-material/ExpandMoreRounded';
-import HelpOutlineRounded from '@mui/icons-material/HelpOutlineRounded';
 import MemoryRounded from '@mui/icons-material/MemoryRounded';
 import MenuBookRounded from '@mui/icons-material/MenuBookRounded';
 import MicRounded from '@mui/icons-material/MicRounded';
@@ -60,12 +59,16 @@ import DownloadRounded from '@mui/icons-material/DownloadRounded';
 import LaunchRounded from '@mui/icons-material/LaunchRounded';
 import RestartAltRounded from '@mui/icons-material/RestartAltRounded';
 import RefreshRounded from '@mui/icons-material/RefreshRounded';
+import LogoutRounded from '@mui/icons-material/LogoutRounded';
 import StorageRounded from '@mui/icons-material/StorageRounded';
 import TableChartRounded from '@mui/icons-material/TableChartRounded';
 import VpnKeyRounded from '@mui/icons-material/VpnKeyRounded';
 import VolumeUpRounded from '@mui/icons-material/VolumeUpRounded';
 import type {
   AppSummary,
+  AntigravityAuthStatus,
+  AntigravityEffort,
+  AntigravityModelOption,
   ClaudeAuthStatus,
   ClaudeEffort,
   CodexAuthStatus,
@@ -96,14 +99,20 @@ import type { AppDictionary, Locale } from '@renderer/i18n';
 import type { ThemePreference } from '@renderer/theme/appTheme';
 import type { ChatBotPicture, LanguagePreference } from '@renderer/preferences';
 import type { View } from '@renderer/components/Sidebar';
+import { DEFAULT_AGENT_DEFAULTS, getAntigravitySupportedEfforts } from '@shared/agent-runtime-registry';
+import chatGptLogoUrl from '@renderer/assets/provider-logos/chatgpt.svg';
+import claudeLogoUrl from '@renderer/assets/provider-logos/claude.svg';
+import geminiLogoUrl from '@renderer/assets/provider-logos/gemini.svg';
 
 interface SettingsViewProps {
   initialSubview?: SettingsSubview;
   onInitialSubviewConsumed?: () => void;
   codexAuthBusy: boolean;
   claudeAuthBusy: boolean;
+  antigravityAuthBusy: boolean;
   codexAuthStatus: CodexAuthStatus;
   claudeAuthStatus: ClaudeAuthStatus;
+  antigravityAuthStatus: AntigravityAuthStatus;
   t: AppDictionary;
   themePreference: ThemePreference;
   onThemeChange: (theme: ThemePreference) => void;
@@ -119,6 +128,8 @@ interface SettingsViewProps {
   providerOptions: Array<{ label: string; value: AgentProvider | 'auto' }>;
   claudeModelOptions: Array<{ displayModelName: string; realModelName: string }>;
   claudeEffortOptions: { label: string; value: ClaudeEffort }[];
+  antigravityModelOptions: AntigravityModelOption[];
+  antigravityEffortOptions: { label: string; value: AntigravityEffort }[];
   defaultAgentProvider: Settings['defaultAgentProvider'];
   defaultChatPermissionMode: Settings['defaultChatPermissionMode'];
   defaultChatNetworkAccess: Settings['defaultChatNetworkAccess'];
@@ -127,9 +138,17 @@ interface SettingsViewProps {
   developerMode: Settings['developerMode'];
   onDeveloperModeChange: (input: UpdateDeveloperModeInput) => Promise<void>;
   onOpenCodexConfig: () => void;
+  onDisconnectCodex: () => void;
   onReinstallCodex: () => void;
   onOpenClaudeConfig: () => void;
+  onDisconnectClaude: () => void;
   onReinstallClaude: () => void;
+  onOpenAntigravityConfig: () => void;
+  onDisconnectAntigravity: () => void;
+  onReinstallAntigravity: () => void;
+  antigravityAuthConsoleOpen: boolean;
+  onCancelAntigravityAuthSession: () => void;
+  onCloseAntigravityAuthConsole: () => void;
   desktopUpdateState: DesktopUpdateState;
   desktopUpdateBusy: boolean;
   cloudStorageUsage: CloudStorageUsage | null;
@@ -369,8 +388,10 @@ export function SettingsView({
   onInitialSubviewConsumed,
   codexAuthBusy,
   claudeAuthBusy,
+  antigravityAuthBusy,
   codexAuthStatus,
   claudeAuthStatus,
+  antigravityAuthStatus,
   t,
   themePreference,
   onThemeChange,
@@ -386,6 +407,8 @@ export function SettingsView({
   providerOptions,
   claudeModelOptions,
   claudeEffortOptions,
+  antigravityModelOptions,
+  antigravityEffortOptions,
   defaultAgentProvider,
   defaultChatPermissionMode,
   defaultChatNetworkAccess,
@@ -394,9 +417,17 @@ export function SettingsView({
   developerMode,
   onDeveloperModeChange,
   onOpenCodexConfig,
+  onDisconnectCodex,
   onReinstallCodex,
   onOpenClaudeConfig,
+  onDisconnectClaude,
   onReinstallClaude,
+  onOpenAntigravityConfig,
+  onDisconnectAntigravity,
+  onReinstallAntigravity,
+  antigravityAuthConsoleOpen,
+  onCancelAntigravityAuthSession,
+  onCloseAntigravityAuthConsole,
   desktopUpdateState,
   desktopUpdateBusy,
   cloudStorageUsage,
@@ -422,8 +453,13 @@ export function SettingsView({
   onNavigate,
   onResetOnboarding,
 }: SettingsViewProps) {
+  const safeAgentDefaults = {
+    codex: agentDefaults.codex ?? DEFAULT_AGENT_DEFAULTS.codex,
+    claude: agentDefaults.claude ?? DEFAULT_AGENT_DEFAULTS.claude,
+    antigravity: agentDefaults.antigravity ?? DEFAULT_AGENT_DEFAULTS.antigravity,
+  };
+
   const [settingsSubview, setSettingsSubview] = useState<SettingsSubview>('main');
-  const [agentConnectionHelpOpen, setAgentConnectionHelpOpen] = useState(false);
   const [speechState, setSpeechState] = useState<SpeechToTextState | null>(null);
   const [speechConfigDraft, setSpeechConfigDraft] = useState<SpeechConfigDraft | null>(null);
   const [speechConfigDirty, setSpeechConfigDirty] = useState(false);
@@ -1716,132 +1752,346 @@ export function SettingsView({
   };
 
   const renderLlmProvider = () => {
-    const claudeSourceLabel = claudeAuthStatus.source === 'managed'
-      ? t.settings.claudeSourceManaged
-      : claudeAuthStatus.source === 'system'
-        ? t.settings.claudeSourceSystem
-        : t.settings.claudeSourceMissing;
+    type ProviderStatusKind = 'uninstalled' | 'unauthenticated' | 'authenticated';
+    type ProviderCard = {
+      provider: AgentProvider;
+      logo: string;
+      title: string;
+      subtitle: string;
+      body: string;
+      installed: boolean;
+      authenticated: boolean;
+      busy: boolean;
+      onInstall: () => void;
+      onSignIn: () => void;
+      onDisconnect: () => void;
+      modelLabel: string;
+      modelValue: string;
+      modelOptions: Array<{ displayModelName: string; realModelName: string }>;
+      onModelChange: (value: string) => void;
+      effortLabel: string;
+      effortValue: string;
+      effortOptions: Array<{ label: string; value: string }>;
+      onEffortChange: (value: string) => void;
+    };
 
-    return (
-      <Stack spacing={2}>
-        <Dialog open={agentConnectionHelpOpen} onClose={() => setAgentConnectionHelpOpen(false)} maxWidth="sm" fullWidth>
-          <DialogTitle>{t.settings.llmProviderHowItWorksTitle}</DialogTitle>
-          <DialogContent>
-            <Stack spacing={1.5} sx={{ pt: 0.5 }}>
-              <Typography color="text.secondary">{t.settings.llmProviderHowItWorksLocal}</Typography>
-              <Typography color="text.secondary">{t.settings.llmProviderHowItWorksData}</Typography>
-            </Stack>
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={() => setAgentConnectionHelpOpen(false)}>{t.actions.close}</Button>
-          </DialogActions>
-        </Dialog>
+    const providerStatus = (provider: Pick<ProviderCard, 'installed' | 'authenticated'>): ProviderStatusKind => {
+      if (!provider.installed) return 'uninstalled';
+      return provider.authenticated ? 'authenticated' : 'unauthenticated';
+    };
 
-        <Card>
-          <CardContent>
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems={{ xs: 'stretch', sm: 'flex-start' }} justifyContent="space-between">
-              <Stack spacing={0.5}>
-                <Typography variant="h5">{t.settings.llmProviderConnectionTitle}</Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 680 }}>
-                  {t.settings.llmProviderConnectionDescription}
-                </Typography>
+    const providerStatusText = (status: ProviderStatusKind): string => {
+      if (status === 'uninstalled') return t.settings.providerStatusUninstalled;
+      if (status === 'authenticated') return t.settings.providerStatusAuthenticated;
+      return t.settings.providerStatusUnauthenticated;
+    };
+
+    const providerStatusColor = (status: ProviderStatusKind): string => {
+      if (status === 'authenticated') return 'success.main';
+      if (status === 'unauthenticated') return 'warning.main';
+      return 'text.disabled';
+    };
+
+    const antigravitySupportedEfforts = getAntigravitySupportedEfforts(safeAgentDefaults.antigravity.model);
+    const antigravityEffortValue = antigravitySupportedEfforts.includes(safeAgentDefaults.antigravity.effort)
+      ? safeAgentDefaults.antigravity.effort
+      : antigravityModelOptions.find((option) => option.realModelName === safeAgentDefaults.antigravity.model)?.defaultEffort ?? antigravitySupportedEfforts[0] ?? 'medium';
+    const antigravityFilteredEffortOptions = antigravityEffortOptions.filter((option) => antigravitySupportedEfforts.includes(option.value));
+
+    const providerCards: ProviderCard[] = [
+      {
+        provider: 'codex',
+        logo: chatGptLogoUrl,
+        title: t.settings.codexTitle,
+        subtitle: t.settings.codexProviderSubtitle,
+        body: t.settings.codexProviderCardBody,
+        installed: codexAuthStatus.installed,
+        authenticated: codexAuthStatus.authenticated,
+        busy: codexAuthBusy,
+        onInstall: onReinstallCodex,
+        onSignIn: onOpenCodexConfig,
+        onDisconnect: onDisconnectCodex,
+        modelLabel: t.settings.providerDefaultModelLabel,
+        modelValue: safeAgentDefaults.codex.model,
+        modelOptions,
+        onModelChange: (value) =>
+          onAgentDefaultsChange({
+            defaultProvider: defaultAgentProvider,
+            provider: 'codex',
+            model: value,
+            effort: safeAgentDefaults.codex.reasoningEffort,
+          }),
+        effortLabel: t.settings.providerDefaultEffortLabel,
+        effortValue: safeAgentDefaults.codex.reasoningEffort,
+        effortOptions: reasoningOptions,
+        onEffortChange: (value) =>
+          onAgentDefaultsChange({
+            defaultProvider: defaultAgentProvider,
+            provider: 'codex',
+            model: safeAgentDefaults.codex.model,
+            effort: value as CodexReasoningEffort,
+          }),
+      },
+      {
+        provider: 'claude',
+        logo: claudeLogoUrl,
+        title: t.settings.claudeCodeTitle,
+        subtitle: t.settings.claudeProviderSubtitle,
+        body: t.settings.claudeProviderCardBody,
+        installed: claudeAuthStatus.installed,
+        authenticated: claudeAuthStatus.authenticated,
+        busy: claudeAuthBusy,
+        onInstall: onReinstallClaude,
+        onSignIn: onOpenClaudeConfig,
+        onDisconnect: onDisconnectClaude,
+        modelLabel: t.settings.providerDefaultModelLabel,
+        modelValue: safeAgentDefaults.claude.model,
+        modelOptions: claudeModelOptions,
+        onModelChange: (value) =>
+          onAgentDefaultsChange({
+            defaultProvider: defaultAgentProvider,
+            provider: 'claude',
+            model: value,
+            effort: safeAgentDefaults.claude.effort,
+          }),
+        effortLabel: t.settings.providerDefaultEffortLabel,
+        effortValue: safeAgentDefaults.claude.effort,
+        effortOptions: claudeEffortOptions,
+        onEffortChange: (value) =>
+          onAgentDefaultsChange({
+            defaultProvider: defaultAgentProvider,
+            provider: 'claude',
+            model: safeAgentDefaults.claude.model,
+            effort: value as ClaudeEffort,
+          }),
+      },
+      {
+        provider: 'antigravity',
+        logo: geminiLogoUrl,
+        title: t.settings.antigravityTitle,
+        subtitle: t.settings.antigravityProviderSubtitle,
+        body: t.settings.antigravityProviderCardBody,
+        installed: antigravityAuthStatus.installed,
+        authenticated: antigravityAuthStatus.authenticated,
+        busy: antigravityAuthBusy,
+        onInstall: onReinstallAntigravity,
+        onSignIn: onOpenAntigravityConfig,
+        onDisconnect: onDisconnectAntigravity,
+        modelLabel: t.settings.providerDefaultModelLabel,
+        modelValue: safeAgentDefaults.antigravity.model,
+        modelOptions: antigravityModelOptions,
+        onModelChange: (value) => {
+          const option = antigravityModelOptions.find((entry) => entry.realModelName === value);
+          const supportedEfforts = getAntigravitySupportedEfforts(value);
+          const nextEffort = supportedEfforts.includes(safeAgentDefaults.antigravity.effort)
+            ? safeAgentDefaults.antigravity.effort
+            : option?.defaultEffort ?? supportedEfforts[0] ?? 'medium';
+          onAgentDefaultsChange({
+            defaultProvider: defaultAgentProvider,
+            provider: 'antigravity',
+            model: value,
+            effort: nextEffort,
+          });
+        },
+        effortLabel: t.settings.providerDefaultEffortLabel,
+        effortValue: antigravityEffortValue,
+        effortOptions: antigravityFilteredEffortOptions,
+        onEffortChange: (value) =>
+          onAgentDefaultsChange({
+            defaultProvider: defaultAgentProvider,
+            provider: 'antigravity',
+            model: safeAgentDefaults.antigravity.model,
+            effort: value as AntigravityEffort,
+          }),
+      },
+    ];
+
+    const renderProviderCard = (provider: ProviderCard) => {
+      const status = providerStatus(provider);
+      const primaryActionLabel = status === 'uninstalled'
+        ? t.settings.providerInstallAction
+        : status === 'unauthenticated'
+          ? t.settings.providerSignInAction
+          : null;
+
+      return (
+        <Card
+          key={provider.provider}
+          sx={{
+            flex: 1,
+            minWidth: 0,
+            borderRadius: 2,
+            border: '1px solid',
+            borderColor: 'divider',
+            bgcolor: 'background.paper',
+            boxShadow: 'none',
+          }}
+        >
+          <CardContent sx={{ height: '100%', p: 2.25 }}>
+            <Stack spacing={2} sx={{ height: '100%', minHeight: 390 }}>
+              <Stack direction="row" spacing={1.5} alignItems="flex-start">
+                <Box
+                  sx={{
+                    width: 44,
+                    height: 44,
+                    borderRadius: 1.5,
+                    border: '1px solid',
+                    borderColor: 'divider',
+                    bgcolor: 'rgba(255,255,255,0.04)',
+                    display: 'grid',
+                    placeItems: 'center',
+                    flex: '0 0 auto',
+                  }}
+                >
+                  <Box component="img" src={provider.logo} alt="" sx={{ width: 26, height: 26, display: 'block' }} />
+                </Box>
+                <Stack spacing={0.25} sx={{ minWidth: 0, flex: 1 }}>
+                  <Typography variant="h6" sx={{ lineHeight: 1.15 }}>{provider.title}</Typography>
+                  <Typography variant="body2" color="text.secondary">{provider.subtitle}</Typography>
+                </Stack>
               </Stack>
-              <Button variant="outlined" size="small" startIcon={<HelpOutlineRounded />} onClick={() => setAgentConnectionHelpOpen(true)} sx={{ alignSelf: { xs: 'flex-start', sm: 'center' } }}>
-                {t.settings.llmProviderHowItWorksAction}
-              </Button>
+
+              <Typography variant="body2" color="text.secondary" sx={{ minHeight: 66 }}>
+                {provider.body}
+              </Typography>
+
+              <Stack direction="row" alignItems="center" spacing={1}>
+                <Box sx={{ width: 9, height: 9, borderRadius: '50%', bgcolor: providerStatusColor(status) }} />
+                <Typography variant="body2" fontWeight={700}>{providerStatusText(status)}</Typography>
+              </Stack>
+
+              <Box sx={{ minHeight: 132 }}>
+                {status === 'authenticated' ? (
+                  <Stack spacing={1.25}>
+                    <FormControl size="small" fullWidth>
+                      <InputLabel>{provider.modelLabel}</InputLabel>
+                      <Select
+                        label={provider.modelLabel}
+                        value={provider.modelValue}
+                        onChange={(event) => provider.onModelChange(event.target.value)}
+                      >
+                        {provider.modelOptions.map((option) => (
+                          <MenuItem value={option.realModelName} key={option.realModelName}>
+                            {option.displayModelName}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                    <FormControl size="small" fullWidth>
+                      <InputLabel>{provider.effortLabel}</InputLabel>
+                      <Select
+                        label={provider.effortLabel}
+                        value={provider.effortValue}
+                        disabled={provider.effortOptions.length <= 1}
+                        onChange={(event) => provider.onEffortChange(event.target.value)}
+                      >
+                        {provider.effortOptions.map((option) => (
+                          <MenuItem value={option.value} key={option.value}>
+                            {option.label}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  </Stack>
+                ) : (
+                  <Typography variant="body2" color="text.secondary">
+                    {status === 'uninstalled' ? t.settings.providerInstallHint : t.settings.providerSignInHint}
+                  </Typography>
+                )}
+              </Box>
+
+              <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mt: 'auto', minHeight: 36 }}>
+                {primaryActionLabel ? (
+                  <Button
+                    variant="contained"
+                    size="small"
+                    disabled={provider.busy}
+                    onClick={status === 'uninstalled' ? provider.onInstall : provider.onSignIn}
+                  >
+                    {primaryActionLabel}
+                  </Button>
+                ) : null}
+                {provider.installed ? (
+                  <Button
+                    variant="outlined"
+                    color="warning"
+                    size="small"
+                    startIcon={<RestartAltRounded />}
+                    disabled={provider.busy}
+                    onClick={provider.onInstall}
+                  >
+                    {t.settings.providerReinstallAction}
+                  </Button>
+                ) : null}
+                {provider.authenticated ? (
+                  <Button
+                    variant="outlined"
+                    color="error"
+                    size="small"
+                    startIcon={<LogoutRounded />}
+                    disabled={provider.busy}
+                    onClick={provider.onDisconnect}
+                  >
+                    {t.settings.providerDisconnectAction}
+                  </Button>
+                ) : null}
+              </Stack>
             </Stack>
           </CardContent>
         </Card>
+      );
+    };
 
-        <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
-          <Card sx={{ flex: 1 }}>
-            <CardContent>
+    return (
+      <Stack spacing={2}>
+        <Dialog open={antigravityAuthConsoleOpen} onClose={antigravityAuthBusy ? undefined : onCloseAntigravityAuthConsole} maxWidth="sm" fullWidth>
+          <DialogTitle>{t.settings.antigravityAuthDialogTitle}</DialogTitle>
+          <DialogContent>
+            <Stack spacing={2} sx={{ pt: 0.5 }}>
+              <Alert severity="info" variant="outlined">
+                {t.settings.antigravityAuthDialogDescription}
+              </Alert>
               <Stack spacing={1.5}>
-                <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
-                  <Stack spacing={0.5}>
-                    <Typography variant="h6">{t.settings.codexTitle}</Typography>
-                    <Typography variant="body2" color="text.secondary">{t.settings.codexDescription}</Typography>
+                {[t.settings.antigravityAuthStepTerminal, t.settings.antigravityAuthStepGoogle, t.settings.antigravityAuthStepCode].map((step, index) => (
+                  <Stack key={step} direction="row" spacing={1.5} alignItems="flex-start">
+                    <Box
+                      sx={{
+                        width: 26,
+                        height: 26,
+                        borderRadius: '50%',
+                        bgcolor: 'primary.main',
+                        color: 'primary.contrastText',
+                        display: 'grid',
+                        placeItems: 'center',
+                        fontSize: 13,
+                        fontWeight: 800,
+                        flex: '0 0 auto',
+                      }}
+                    >
+                      {index + 1}
+                    </Box>
+                    <Typography variant="body2" color="text.primary">{step}</Typography>
                   </Stack>
-                  <Chip
-                    size="small"
-                    color={codexAuthStatus.installed && codexAuthStatus.authenticated ? 'success' : 'default'}
-                    label={codexAuthStatus.authenticated ? t.settings.codexConnected : t.settings.codexDisconnected}
-                  />
-                </Stack>
-                <Alert severity="info" variant="outlined">
-                  <Typography variant="body2">{t.settings.codexProviderHelp}</Typography>
-                </Alert>
-                <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
-                  <Button
-                    variant={codexAuthStatus.authenticated ? 'outlined' : 'contained'}
-                    size="small"
-                    disabled={codexAuthBusy}
-                    onClick={onOpenCodexConfig}
-                  >
-                    {codexAuthStatus.authenticated ? t.settings.codexConfiguredAction : t.settings.codexConnectAction}
-                  </Button>
-                  <Button
-                    variant="outlined"
-                    color="warning"
-                    size="small"
-                    startIcon={<RestartAltRounded />}
-                    disabled={codexAuthBusy}
-                    onClick={onReinstallCodex}
-                  >
-                    {t.settings.codexReinstallAction}
-                  </Button>
-                </Stack>
+                ))}
               </Stack>
-            </CardContent>
-          </Card>
+              <Box>
+                <LinearProgress />
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+                  {t.settings.antigravityAuthPollingStatus}
+                </Typography>
+              </Box>
+            </Stack>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={onCancelAntigravityAuthSession}>{antigravityAuthBusy ? t.settings.antigravityAuthCancel : t.settings.antigravityAuthClose}</Button>
+          </DialogActions>
+        </Dialog>
 
-          <Card sx={{ flex: 1 }}>
-            <CardContent>
-              <Stack spacing={1.5}>
-                <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
-                  <Stack spacing={0.5}>
-                    <Typography variant="h6">{t.settings.claudeCodeTitle}</Typography>
-                    <Typography variant="body2" color="text.secondary">{t.settings.claudeDescription}</Typography>
-                  </Stack>
-                  <Chip
-                    size="small"
-                    color={claudeAuthStatus.installed && claudeAuthStatus.authenticated ? 'success' : 'default'}
-                    label={claudeAuthStatus.authenticated ? t.settings.codexConnected : t.settings.codexDisconnected}
-                  />
-                </Stack>
-                <Alert severity="info" variant="outlined">
-                  <Typography variant="body2">{t.settings.claudeProviderHelp}</Typography>
-                </Alert>
-                <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
-                  <Button
-                    variant={claudeAuthStatus.authenticated ? 'outlined' : 'contained'}
-                    size="small"
-                    disabled={claudeAuthBusy}
-                    onClick={onOpenClaudeConfig}
-                  >
-                    {claudeAuthStatus.authenticated ? t.settings.claudeConfiguredAction : t.settings.claudeConnectAction}
-                  </Button>
-                  <Button
-                    variant="outlined"
-                    color="warning"
-                    size="small"
-                    startIcon={<RestartAltRounded />}
-                    disabled={claudeAuthBusy}
-                    onClick={onReinstallClaude}
-                  >
-                    {t.settings.claudeReinstallAction}
-                  </Button>
-                </Stack>
-                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
-                  <Chip size="small" label={claudeSourceLabel} />
-                  {claudeAuthStatus.version ? <Chip size="small" label={t.settings.versionLabel(claudeAuthStatus.version)} /> : null}
-                </Stack>
-              </Stack>
-            </CardContent>
-          </Card>
+        <Stack direction={{ xs: 'column', lg: 'row' }} spacing={2} alignItems="stretch">
+          {providerCards.map(renderProviderCard)}
         </Stack>
 
-        <Card>
+        <Card sx={{ boxShadow: 'none', border: '1px solid', borderColor: 'divider', borderRadius: 2 }}>
           <CardContent>
             <Stack spacing={1.5}>
               <Stack spacing={0.35}>
@@ -1899,119 +2149,6 @@ export function SettingsView({
                     <MenuItem value="disabled">{t.sections.chat.networkDisabledLabel}</MenuItem>
                   </Select>
                 </FormControl>
-              </Stack>
-            </Stack>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent>
-            <Stack spacing={1.5}>
-              <Stack spacing={0.35}>
-                <Typography variant="h6">{t.settings.agentDefaultModelsTitle}</Typography>
-                <Typography variant="body2" color="text.secondary">{t.settings.agentDefaultModelsDescription}</Typography>
-              </Stack>
-              <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
-                <Box sx={{ flex: 1, border: '1px solid', borderColor: 'divider', borderRadius: 1.5, p: 1.5 }}>
-                  <Stack spacing={1.25}>
-                    <Stack spacing={0.25}>
-                      <Typography variant="subtitle2">{t.settings.codexTitle}</Typography>
-                      <Typography variant="caption" color="text.secondary">{t.settings.codexModelHelp}</Typography>
-                    </Stack>
-                    <FormControl size="small" fullWidth>
-                      <InputLabel>{t.settings.codexModelLabel}</InputLabel>
-                      <Select
-                        label={t.settings.codexModelLabel}
-                        value={agentDefaults.codex.model}
-                        onChange={(event) =>
-                          onAgentDefaultsChange({
-                            defaultProvider: defaultAgentProvider,
-                            provider: 'codex',
-                            model: event.target.value,
-                            effort: agentDefaults.codex.reasoningEffort,
-                          })
-                        }
-                      >
-                        {modelOptions.map((option) => (
-                          <MenuItem value={option.realModelName} key={option.realModelName}>
-                            {option.displayModelName}
-                          </MenuItem>
-                        ))}
-                      </Select>
-                    </FormControl>
-                    <FormControl size="small" fullWidth>
-                      <InputLabel>{t.settings.codexReasoningLabel}</InputLabel>
-                      <Select
-                        label={t.settings.codexReasoningLabel}
-                        value={agentDefaults.codex.reasoningEffort}
-                        onChange={(event) =>
-                          onAgentDefaultsChange({
-                            defaultProvider: defaultAgentProvider,
-                            provider: 'codex',
-                            model: agentDefaults.codex.model,
-                            effort: event.target.value as CodexReasoningEffort,
-                          })
-                        }
-                      >
-                        {reasoningOptions.map((option) => (
-                          <MenuItem value={option.value} key={option.value}>
-                            {option.label}
-                          </MenuItem>
-                        ))}
-                      </Select>
-                    </FormControl>
-                  </Stack>
-                </Box>
-                <Box sx={{ flex: 1, border: '1px solid', borderColor: 'divider', borderRadius: 1.5, p: 1.5 }}>
-                  <Stack spacing={1.25}>
-                    <Stack spacing={0.25}>
-                      <Typography variant="subtitle2">{t.settings.claudeCodeTitle}</Typography>
-                      <Typography variant="caption" color="text.secondary">{t.settings.claudeModelHelp}</Typography>
-                    </Stack>
-                    <FormControl size="small" fullWidth>
-                      <InputLabel>{t.settings.claudeModelLabel}</InputLabel>
-                      <Select
-                        label={t.settings.claudeModelLabel}
-                        value={agentDefaults.claude.model}
-                        onChange={(event) =>
-                          onAgentDefaultsChange({
-                            defaultProvider: defaultAgentProvider,
-                            provider: 'claude',
-                            model: event.target.value,
-                            effort: agentDefaults.claude.effort,
-                          })
-                        }
-                      >
-                        {claudeModelOptions.map((option) => (
-                          <MenuItem value={option.realModelName} key={option.realModelName}>
-                            {option.displayModelName}
-                          </MenuItem>
-                        ))}
-                      </Select>
-                    </FormControl>
-                    <FormControl size="small" fullWidth>
-                      <InputLabel>{t.settings.claudeEffortLabel}</InputLabel>
-                      <Select
-                        label={t.settings.claudeEffortLabel}
-                        value={agentDefaults.claude.effort}
-                        onChange={(event) =>
-                          onAgentDefaultsChange({
-                            defaultProvider: defaultAgentProvider,
-                            provider: 'claude',
-                            model: agentDefaults.claude.model,
-                            effort: event.target.value as ClaudeEffort,
-                          })
-                        }
-                      >
-                        {claudeEffortOptions.map((option) => (
-                          <MenuItem value={option.value} key={option.value}>
-                            {option.label}
-                          </MenuItem>
-                        ))}
-                      </Select>
-                    </FormControl>
-                  </Stack>
-                </Box>
               </Stack>
             </Stack>
           </CardContent>

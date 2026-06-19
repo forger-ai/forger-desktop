@@ -1,8 +1,6 @@
-import TerminalRounded from '@mui/icons-material/TerminalRounded';
 import RefreshRounded from '@mui/icons-material/RefreshRounded';
 import CheckCircleRounded from '@mui/icons-material/CheckCircleRounded';
 import ExpandMoreRounded from '@mui/icons-material/ExpandMoreRounded';
-import { useEffect, useState } from 'react';
 import {
   Accordion,
   AccordionDetails,
@@ -10,24 +8,18 @@ import {
   Alert,
   Box,
   Button,
-  Checkbox,
   Chip,
-  CircularProgress,
   Dialog,
   DialogActions,
   DialogContent,
   DialogTitle,
-  FormControlLabel,
   LinearProgress,
-  List,
-  ListItem,
-  ListItemIcon,
-  ListItemText,
   Stack,
   Typography,
 } from '@mui/material';
 import type { AppDictionary } from '@renderer/i18n';
 import type { CodexAuthStatus, CodexRateLimitBucket } from '@shared/types';
+import { LlmProviderConnectModal } from './LlmProviderConnectModal';
 
 interface CodexConfigModalProps {
   open: boolean;
@@ -37,6 +29,7 @@ interface CodexConfigModalProps {
   onClose: () => void;
   onConnect: () => Promise<void>;
   onRefresh: () => Promise<void>;
+  onOpenExternalUrl: (url: string) => void;
 }
 
 export function CodexConfigModal({
@@ -47,15 +40,34 @@ export function CodexConfigModal({
   onClose,
   onConnect,
   onRefresh,
+  onOpenExternalUrl,
 }: CodexConfigModalProps) {
-  const [acceptedConditions, setAcceptedConditions] = useState(false);
   const usageBucket = status.rateLimits?.primary ?? status.rateLimits?.buckets[0];
 
-  useEffect(() => {
-    if (!open) {
-      setAcceptedConditions(false);
-    }
-  }, [open]);
+  if (!status.authenticated) {
+    return (
+      <LlmProviderConnectModal
+        open={open}
+        provider="codex"
+        providerName={t.llmProviderConnect.providers.codex.name}
+        providerOwner={t.llmProviderConnect.providers.codex.owner}
+        authenticated={status.authenticated}
+        installed={status.installed}
+        busy={busy}
+        title={t.llmProviderConnect.providers.codex.title}
+        body={t.llmProviderConnect.providers.codex.body}
+        steps={t.llmProviderConnect.providers.codex.steps}
+        termsUrl="https://openai.com/policies/row-terms-of-use/"
+        privacyUrl="https://openai.com/policies/row-privacy-policy/"
+        connectLabel={t.settings.codexConnectAction}
+        t={t}
+        onClose={onClose}
+        onConnect={onConnect}
+        onRefresh={onRefresh}
+        onOpenExternalUrl={onOpenExternalUrl}
+      />
+    );
+  }
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
@@ -73,59 +85,12 @@ export function CodexConfigModal({
               </Typography>
             ) : null}
           </Stack>
-          {status.authenticated ? (
-            <Alert severity="success" icon={<CheckCircleRounded />}>
-              <Stack spacing={1}>
-                <Typography fontWeight={700}>{t.codexSetup.successTitle}</Typography>
-                <Typography variant="body2">{t.codexSetup.successBody}</Typography>
-              </Stack>
-            </Alert>
-          ) : busy ? (
-            <Alert severity="info">
-              <Stack spacing={1}>
-                <Typography variant="body2">{t.codexSetup.connecting}</Typography>
-                <LinearProgress />
-              </Stack>
-            </Alert>
-          ) : (
-            <>
-              <Typography color="text.secondary">{t.codexSetup.body}</Typography>
-              <Alert severity="warning">
-                <Typography variant="body2">{t.codexSetup.quotaDisclaimer}</Typography>
-              </Alert>
-              <List>
-                {t.codexSetup.steps.map((step, index) => (
-                  <ListItem key={step} disableGutters>
-                    <ListItemIcon>
-                      {index === 0 ? <TerminalRounded /> : index === 3 ? <RefreshRounded /> : <CheckCircleRounded />}
-                    </ListItemIcon>
-                    <ListItemText primary={step} />
-                  </ListItem>
-                ))}
-              </List>
-              <Accordion disableGutters>
-                <AccordionSummary expandIcon={<ExpandMoreRounded />}>
-                  <Typography fontWeight={700}>{t.codexSetup.conditionsTitle}</Typography>
-                </AccordionSummary>
-                <AccordionDetails>
-                  <Stack spacing={1.5}>
-                    <Alert severity="warning">
-                      <Typography variant="body2">{t.codexSetup.privacy}</Typography>
-                    </Alert>
-                  </Stack>
-                </AccordionDetails>
-              </Accordion>
-              <FormControlLabel
-                control={
-                  <Checkbox
-                    checked={acceptedConditions}
-                    onChange={(event) => setAcceptedConditions(event.target.checked)}
-                  />
-                }
-                label={t.codexSetup.conditionsCheckbox}
-              />
-            </>
-          )}
+          <Alert severity="success" icon={<CheckCircleRounded />}>
+            <Stack spacing={1}>
+              <Typography fontWeight={700}>{t.codexSetup.successTitle}</Typography>
+              <Typography variant="body2">{t.codexSetup.successBody}</Typography>
+            </Stack>
+          </Alert>
           {status.authenticated && usageBucket ? (
             <CodexUsagePanel bucket={usageBucket} t={t} />
           ) : null}
@@ -154,16 +119,6 @@ export function CodexConfigModal({
         <Button variant="outlined" startIcon={<RefreshRounded />} disabled={busy} onClick={() => void onRefresh()}>
           {t.settings.codexRefreshAction}
         </Button>
-        {!status.authenticated ? (
-          <Button
-            variant="contained"
-            startIcon={busy ? <CircularProgress color="inherit" size={16} /> : <TerminalRounded />}
-            disabled={busy || !acceptedConditions}
-            onClick={() => void onConnect()}
-          >
-            {t.settings.codexConnectAction}
-          </Button>
-        ) : null}
       </DialogActions>
     </Dialog>
   );

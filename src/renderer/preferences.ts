@@ -3,15 +3,19 @@ import chatFemaleIcon from '@renderer/assets/chat-female-icon.png';
 import chatMaleIcon from '@renderer/assets/chat-male-icon.png';
 import { defaultLocale, type Locale } from '@renderer/i18n';
 import type { ThemePreference } from '@renderer/theme/appTheme';
-import type { AgentProvider, ClaudeEffort, CodexReasoningEffort } from '@shared/types';
+import type { AgentProvider, AntigravityEffort, ClaudeEffort, CodexReasoningEffort } from '@shared/types';
 import {
   AGENT_PROVIDER_OPTIONS,
+  ANTIGRAVITY_EFFORT_OPTIONS,
+  ANTIGRAVITY_MODEL_OPTIONS,
   CLAUDE_EFFORT_OPTIONS,
   CLAUDE_MODEL_OPTIONS,
   CODEX_MODEL_OPTIONS,
   CODEX_REASONING_OPTIONS,
   getDefaultClaudeEffort,
+  getDefaultAntigravityEffort,
   getDefaultCodexReasoningEffort,
+  normalizeAntigravityModelAndEffort,
   isClaudeEffort,
   isClaudeModel,
   isCodexModel,
@@ -25,6 +29,8 @@ export const CODEX_REASONING_STORAGE_KEY = 'forger-codex-reasoning-effort-v1';
 export const CHAT_AGENT_PROVIDER_STORAGE_KEY = 'forger-chat-agent-provider-v1';
 export const CLAUDE_MODEL_STORAGE_KEY = 'forger-claude-model-v1';
 export const CLAUDE_EFFORT_STORAGE_KEY = 'forger-claude-effort-v1';
+export const ANTIGRAVITY_MODEL_STORAGE_KEY = 'forger-antigravity-model-v1';
+export const ANTIGRAVITY_EFFORT_STORAGE_KEY = 'forger-antigravity-effort-v1';
 export const CHAT_BOT_PICTURE_STORAGE_KEY = 'forger-chat-bot-picture-v1';
 export const STARTUP_UPDATE_CHECK_STORAGE_KEY = 'forger-desktop-startup-update-check-v1';
 
@@ -41,6 +47,8 @@ export const CHAT_BOT_PICTURE_OPTIONS: Array<{ value: ChatBotPicture; label: str
 
 export {
   AGENT_PROVIDER_OPTIONS,
+  ANTIGRAVITY_EFFORT_OPTIONS,
+  ANTIGRAVITY_MODEL_OPTIONS,
   CLAUDE_EFFORT_OPTIONS,
   CLAUDE_MODEL_OPTIONS,
   CODEX_MODEL_OPTIONS,
@@ -117,7 +125,7 @@ export const getStoredChatAgentProvider = (): AgentProvider | 'auto' => {
     return 'auto';
   }
   const stored = window.localStorage.getItem(CHAT_AGENT_PROVIDER_STORAGE_KEY);
-  return stored === 'codex' || stored === 'claude' || stored === 'auto' ? stored : 'auto';
+  return stored === 'codex' || stored === 'claude' || stored === 'antigravity' || stored === 'auto' ? stored : 'auto';
 };
 
 export const getStoredClaudeModel = (): string => {
@@ -138,6 +146,22 @@ export const getStoredClaudeEffort = (): ClaudeEffort => {
   return isClaudeEffort(stored)
     ? stored as ClaudeEffort
     : getDefaultClaudeEffort(CLAUDE_MODEL_OPTIONS[0].realModelName);
+};
+
+export const getStoredAntigravityModel = (): string => {
+  if (typeof window === 'undefined') {
+    return ANTIGRAVITY_MODEL_OPTIONS[0].realModelName;
+  }
+  const stored = window.localStorage.getItem(ANTIGRAVITY_MODEL_STORAGE_KEY);
+  return normalizeAntigravityModelAndEffort(stored, window.localStorage.getItem(ANTIGRAVITY_EFFORT_STORAGE_KEY), ANTIGRAVITY_MODEL_OPTIONS[0].realModelName).model;
+};
+
+export const getStoredAntigravityEffort = (): AntigravityEffort => {
+  if (typeof window === 'undefined') {
+    return getDefaultAntigravityEffort(ANTIGRAVITY_MODEL_OPTIONS[0].realModelName);
+  }
+  const stored = window.localStorage.getItem(ANTIGRAVITY_EFFORT_STORAGE_KEY);
+  return normalizeAntigravityModelAndEffort(window.localStorage.getItem(ANTIGRAVITY_MODEL_STORAGE_KEY), stored, ANTIGRAVITY_MODEL_OPTIONS[0].realModelName).effort;
 };
 
 export const getStoredChatBotPicture = (): ChatBotPicture => {

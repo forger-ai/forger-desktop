@@ -1,20 +1,17 @@
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
+import type { LlmCommandResult, LlmMcpServerConfig } from '../llm-provider/types';
 
-export interface CodexMcpServerConfig {
-  name: string;
-  url: string;
-  token: string;
-  tokenEnvVar: string;
-  toolTimeoutSec?: number;
-}
+export type LlmAppMcpServerConfig = LlmMcpServerConfig;
 
-export interface CommandResult {
-  code: number;
-  stdout: string;
-  stderr: string;
-}
+/** @deprecated Use LlmAppMcpServerConfig. */
+export type CodexMcpServerConfig = LlmAppMcpServerConfig;
 
-export interface CommandCaptureOptions {
+export type AppAgentCommandResult = LlmCommandResult & { code: number };
+
+/** @deprecated Use AppAgentCommandResult or LlmCommandResult. */
+export type CommandResult = AppAgentCommandResult;
+
+export interface LlmCommandCaptureOptions {
   cwd: string;
   env?: NodeJS.ProcessEnv;
   timeoutMs?: number;
@@ -24,8 +21,14 @@ export interface CommandCaptureOptions {
   onStderr?: (text: string) => void;
 }
 
-export interface ResolvedCodexCommand {
+/** @deprecated Use LlmCommandCaptureOptions. */
+export type CommandCaptureOptions = LlmCommandCaptureOptions;
+
+export interface ResolvedLlmCommand {
   command: string;
   prefixArgs: string[];
   pathEntries: string[];
 }
+
+/** @deprecated Use ResolvedLlmCommand. */
+export type ResolvedCodexCommand = ResolvedLlmCommand;

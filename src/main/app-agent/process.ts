@@ -1,15 +1,16 @@
 import { spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import type { CommandCaptureOptions, CommandResult, ResolvedCodexCommand } from './types';
+import type { AppAgentCommandResult, LlmCommandCaptureOptions, ResolvedLlmCommand } from './types';
 import { spawnProcess } from '../runtime/process-spawn';
+import { codexCliAdapter } from '../llm-provider/adapters/codex-cli-adapter';
 
 export const runCommandCapture = async (
   command: string,
   args: string[],
-  options: CommandCaptureOptions,
-): Promise<CommandResult> =>
-  await new Promise<CommandResult>((resolve, reject) => {
+  options: LlmCommandCaptureOptions,
+): Promise<AppAgentCommandResult> =>
+  await new Promise<AppAgentCommandResult>((resolve, reject) => {
     const child = spawnProcess(command, args, {
       cwd: options.cwd,
       env: { ...process.env, ...(options.env ?? {}) },
@@ -123,25 +124,8 @@ export const killServiceProcessesForMetadataRoot = (
 export const resolveCodexCommand = async (
   codexCliPath: string,
   pathEntries: string[],
-): Promise<ResolvedCodexCommand> => {
-  if (process.platform !== 'win32' || !/\.(cmd|bat)$/i.test(codexCliPath)) {
-    return {
-      command: codexCliPath,
-      prefixArgs: [],
-      pathEntries: [path.dirname(codexCliPath), ...pathEntries],
-    };
-  }
-  const nodePath = await findExecutableInPathEntries(pathEntries, ['node.exe', 'node']);
-  const codexEntrypoint = path.join(path.resolve(path.dirname(codexCliPath), '..'), '@openai', 'codex', 'bin', 'codex.js');
-  if (!nodePath || !(await existsFile(codexEntrypoint))) {
-    throw new Error('codex_js_entrypoint_missing');
-  }
-  return {
-    command: nodePath,
-    prefixArgs: [codexEntrypoint],
-    pathEntries: [path.dirname(nodePath), path.dirname(codexCliPath), ...pathEntries],
-  };
-};
+): Promise<ResolvedLlmCommand> =>
+  await codexCliAdapter.resolveCommand(codexCliPath, pathEntries);
 
 export const findExecutableInPathEntries = async (entries: string[], executableNames: string[]): Promise<string | null> => {
   for (const entry of entries) {

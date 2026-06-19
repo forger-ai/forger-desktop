@@ -21,7 +21,7 @@ import type { AppRatingSummary, SubmitAppRatingInput, SubmitProductFeedbackInput
 import type { SubmitUsageEventInput, SubmitUsageEventResult } from './usage-events';
 import type { ConversationDiagnosticReportPreview, PrepareConversationDiagnosticReportInput, SubmitConversationDiagnosticReportResult } from './diagnostics';
 import type { FailureDiagnosticFields } from './base';
-import type { CodexAuthStatus, ClaudeAuthStatus, DesktopErrorReportPreview } from './auth';
+import type { AntigravityAuthSessionEvent, AntigravityAuthSessionStartResult, AntigravityAuthStatus, CodexAuthStatus, ClaudeAuthStatus, DesktopErrorReportPreview } from './auth';
 import type { AgentToolPackageDefinition, AgentToolSettings, UpdateAgentToolApprovalInput, OfficialToolsState, ToolMutationResult, ConfigureOfficialToolInput, CallOfficialToolInput, CallOfficialToolResult, AppToolsInstallGate, SetAppToolGrantInput, OfficialToolRuntimeEvent } from './tools';
 import type { PickedChatFile, FilesStageForChatInput, FilesDiscardStagedForChatInput, FilesActionResult, FilesListInput, ForgerFileRecord, ForgerFileCategory, FilesCreateCategoryInput, FilesRenameCategoryInput, FilesDeleteCategoryInput, FilesImportInput, FilesMoveInput, FilesRenameInput, FilesDeleteInput, DbListTablesResponse, DbQueryTableResponse } from './data';
 import type { Automation, AutomationRun, AutomationRunSummary, AutomationUpsertInput, WindowControlState } from './automations';
@@ -193,7 +193,16 @@ export interface ForgerDesktopApi {
   reinstallCodex: () => Promise<{ success: boolean; userMessage: string; status?: CodexAuthStatus } & FailureDiagnosticFields>;
   getClaudeAuthStatus: () => Promise<ClaudeAuthStatus>;
   connectClaudeAuth: () => Promise<{ success: boolean; userMessage: string; status?: ClaudeAuthStatus } & FailureDiagnosticFields>;
+  disconnectClaudeAuth: () => Promise<{ success: boolean; userMessage: string; status?: ClaudeAuthStatus } & FailureDiagnosticFields>;
   reinstallClaude: () => Promise<{ success: boolean; userMessage: string; status?: ClaudeAuthStatus } & FailureDiagnosticFields>;
+  getAntigravityAuthStatus: () => Promise<AntigravityAuthStatus>;
+  connectAntigravityAuth: () => Promise<{ success: boolean; userMessage: string; status?: AntigravityAuthStatus } & FailureDiagnosticFields>;
+  startAntigravityAuthSession: () => Promise<AntigravityAuthSessionStartResult & FailureDiagnosticFields>;
+  writeAntigravityAuthSession: (input: { sessionId: string; input: string }) => Promise<{ success: boolean; userMessage?: string } & FailureDiagnosticFields>;
+  cancelAntigravityAuthSession: (sessionId: string) => Promise<{ success: boolean; userMessage?: string } & FailureDiagnosticFields>;
+  onAntigravityAuthSessionEvent: (listener: (event: AntigravityAuthSessionEvent) => void) => () => void;
+  disconnectAntigravityAuth: () => Promise<{ success: boolean; userMessage: string; status?: AntigravityAuthStatus } & FailureDiagnosticFields>;
+  reinstallAntigravity: () => Promise<{ success: boolean; userMessage: string; status?: AntigravityAuthStatus } & FailureDiagnosticFields>;
   prepareDesktopErrorReport: (input: DesktopErrorReportPreview) => Promise<DesktopErrorReportPreview>;
   submitDesktopErrorReport: (input: DesktopErrorReportPreview) => Promise<{ success: boolean; userMessage: string; technicalCode?: string }>;
   prepareConversationDiagnosticReport: (input: PrepareConversationDiagnosticReportInput) => Promise<ConversationDiagnosticReportPreview>;

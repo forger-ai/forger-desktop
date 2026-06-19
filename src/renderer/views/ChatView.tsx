@@ -38,9 +38,6 @@ import type {
   ChatQuestionRequest,
   CodexAuthStatus,
   CodexRateLimitBucket,
-  ClaudeEffort,
-  CodexModelOption,
-  CodexReasoningEffort,
   ForgerFileCategory,
   ForgerFileRecord,
   FilesStageForChatInput,
@@ -52,6 +49,7 @@ import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
 import { compactCategoryLabel, compactFileName } from './chat-view-helpers';
 import { ChatMessagesPanel } from './chat/ChatMessagesPanel';
 import { QuestionComposer, type QuestionAction } from './chat/QuestionComposer';
+import type { RuntimeProviderControls } from '@renderer/runtime-provider-controls';
 
 export interface ChatMessage {
   id: string;
@@ -185,18 +183,7 @@ interface ChatViewProps {
   resolvedProviderForAuto: AgentProvider;
   onSelectProvider: (provider: AgentProvider | 'auto') => void;
   providerLocked: boolean;
-  modelOptions: CodexModelOption[];
-  selectedModel: string;
-  onSelectModel: (model: string) => void;
-  reasoningOptions: { label: string; value: CodexReasoningEffort }[];
-  selectedReasoningEffort: CodexReasoningEffort;
-  onSelectReasoningEffort: (reasoningEffort: CodexReasoningEffort) => void;
-  claudeModelOptions: Array<{ displayModelName: string; realModelName: string }>;
-  selectedClaudeModel: string;
-  onSelectClaudeModel: (model: string) => void;
-  claudeEffortOptions: { label: string; value: ClaudeEffort }[];
-  selectedClaudeEffort: ClaudeEffort;
-  onSelectClaudeEffort: (effort: ClaudeEffort) => void;
+  runtimeProviderControls: RuntimeProviderControls;
   selectedPermissionMode: AgentPermissionMode;
   onSelectPermissionMode: (mode: AgentPermissionMode) => void;
   selectedNetworkAccess: boolean;
@@ -252,18 +239,7 @@ export function ChatView({
   resolvedProviderForAuto,
   onSelectProvider,
   providerLocked,
-  modelOptions,
-  selectedModel,
-  onSelectModel,
-  reasoningOptions,
-  selectedReasoningEffort,
-  onSelectReasoningEffort,
-  claudeModelOptions,
-  selectedClaudeModel,
-  onSelectClaudeModel,
-  claudeEffortOptions,
-  selectedClaudeEffort,
-  onSelectClaudeEffort,
+  runtimeProviderControls,
   selectedPermissionMode,
   onSelectPermissionMode,
   selectedNetworkAccess,
@@ -321,10 +297,11 @@ export function ChatView({
   const pendingModeOverride = chatMode ? undefined : { mode: draftMode, targetAppId: draftMode === 'edit_app' ? draftTargetAppId : null };
   const canSendCurrentMode = Boolean(chatMode) || canStartMode;
   const runtimeMenuHandlers = { onOpen: () => setRuntimeMenuOpen(true), onClose: () => setRuntimeMenuOpen(false) };
-  const activeModelOptions = effectiveProvider === 'claude' ? claudeModelOptions : modelOptions;
-  const activeModelValue = effectiveProvider === 'claude' ? selectedClaudeModel : selectedModel;
-  const activeEffortOptions = effectiveProvider === 'claude' ? claudeEffortOptions : reasoningOptions;
-  const activeEffortValue = effectiveProvider === 'claude' ? selectedClaudeEffort : selectedReasoningEffort;
+  const activeRuntimeControl = runtimeProviderControls[effectiveProvider];
+  const activeModelOptions = activeRuntimeControl.modelOptions;
+  const activeModelValue = activeRuntimeControl.selectedModel;
+  const activeEffortOptions = activeRuntimeControl.effortOptions;
+  const activeEffortValue = activeRuntimeControl.selectedEffort;
   const codexUsageBucket = codexUsageStatus?.rateLimits?.primary ?? codexUsageStatus?.rateLimits?.buckets[0];
   const refreshCodexUsageForTooltip = async () => {
     if (!codexProviderConfigured || codexUsageLoading) {
@@ -1128,14 +1105,10 @@ export function ChatView({
                       value={activeModelValue}
                       onChange={(event) => {
                         const model = event.target.value;
-                        if (effectiveProvider === 'claude') {
-                          onSelectClaudeModel(model);
-                          return;
-                        }
-                        onSelectModel(model);
+                        activeRuntimeControl.onSelectModel(model);
                       }}
                       {...runtimeMenuHandlers}
-                      disabled={providerLocked || isSending}
+                      disabled={providerLocked || isSending || activeModelOptions.length <= 1}
                       MenuProps={compactSelectMenuProps}
                       inputProps={{ 'aria-label': t.sections.chat.modelSelectorLabel }}
                       sx={{
@@ -1160,12 +1133,7 @@ export function ChatView({
                       size="small"
                       value={activeEffortValue}
                       onChange={(event) => {
-                        const effort = event.target.value;
-                        if (effectiveProvider === 'claude') {
-                          onSelectClaudeEffort(effort as ClaudeEffort);
-                          return;
-                        }
-                        onSelectReasoningEffort(effort as CodexReasoningEffort);
+                        activeRuntimeControl.onSelectEffort(event.target.value);
                       }}
                       {...runtimeMenuHandlers}
                       disabled={providerLocked || isSending}

@@ -1,25 +1,19 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawnProcess } from '../runtime/process-spawn';
-import type { AgentPermissionMode, ChatErrorCode, ClaudeEffort, CodexReasoningEffort, PreviewDiffFile } from '../../shared/types';
-import { assertAllowedMcpServers, codexWorkspaceNetworkConfigArgs, createIsolatedCodexHome, DisallowedMcpServerError, removeIsolatedCodexHome } from '../codex-run-isolation';
-import { classifyCodexAuthOutput } from '../codex-auth-helpers';
-import { claudePermissionArgs, codexUnsafeArgs, codexWorkspaceArgs } from '../agent-permission-mode';
+import type { AgentEffort, AgentPermissionMode, ChatErrorCode, ClaudeEffort, CodexReasoningEffort, PreviewDiffFile } from '../../shared/types';
+import { antigravityCliAdapter } from '../llm-provider/adapters/antigravity-cli-adapter';
+import { codexCliAdapter, type LlmTokenUsage } from '../llm-provider/adapters/codex-cli-adapter';
+import { claudeCliAdapter } from '../llm-provider/adapters/claude-cli-adapter';
+import type { LlmCommandResult, LlmMcpServerConfig as ProviderMcpServerConfig } from '../llm-provider/types';
 
-export interface CodexMcpServerConfig {
-  name: string;
-  url: string;
-  token: string;
-  tokenEnvVar: string;
-  toolTimeoutSec?: number;
-}
+export type LlmMcpServerConfig = ProviderMcpServerConfig;
+export type { LlmTokenUsage };
 
-const getMcpApprovalMode = (server: CodexMcpServerConfig): 'auto' | 'approve' =>
-  server.name === 'forger' ? 'auto' : 'approve';
-
-const CODEX_ATTEMPT_INACTIVITY_TIMEOUT_MS = 30 * 60 * 1000;
+/** @deprecated Use LlmMcpServerConfig. */
+export type CodexMcpServerConfig = LlmMcpServerConfig;
 
 interface PluginManifestV1 {
   id: string;
@@ -42,26 +36,20 @@ export interface ChatHistoryMessage {
 export type ForgerTaskType =
   | 'chat';
 
-interface CommandResult {
-  code: number;
-  stdout: string;
-  stderr: string;
-}
+type LlmChatCommandResult = LlmCommandResult & { code: number };
 
-export interface CodexUsage {
-  inputTokens: number;
-  cachedInputTokens: number;
-  outputTokens: number;
-  reasoningOutputTokens: number;
-  turns: number;
-}
+/** @deprecated Use LlmTokenUsage. */
+export type CodexUsage = LlmTokenUsage;
 
-export interface CodexRunResult {
+export interface LlmProviderRunResult {
   assistantText: string;
   threadId?: string;
-  usageDelta?: Partial<CodexUsage>;
+  usageDelta?: Partial<LlmTokenUsage>;
   toolEvents: number;
 }
+
+/** @deprecated Use LlmProviderRunResult. */
+export type CodexRunResult = LlmProviderRunResult;
 
 export class AuditLogger {
   public constructor(private readonly privateAppsRoot: string) {}
@@ -158,38 +146,18 @@ export class PluginRuntime {
 export class SandboxRunner {
   public constructor(private readonly codexHome: string) {}
 
-  private async resolveCodexCommand(params: {
+  public async resolveCodexCommand(params: {
     codexCliPath: string;
     pathEntries: string[];
   }): Promise<{ command: string; prefixArgs: string[]; pathEntries: string[] }> {
-    if (process.platform !== 'win32' || !/\.(cmd|bat)$/i.test(params.codexCliPath)) {
-      return {
-        command: params.codexCliPath,
-        prefixArgs: [],
-        pathEntries: [path.dirname(params.codexCliPath), ...params.pathEntries],
-      };
-    }
-
-    const nodePath = await findExecutableInPathEntries(params.pathEntries, ['node.exe', 'node']);
-    const nodeModulesRoot = path.resolve(path.dirname(params.codexCliPath), '..');
-    const codexEntrypoint = path.join(nodeModulesRoot, '@openai', 'codex', 'bin', 'codex.js');
-
-    if (!nodePath || !(await existsFile(codexEntrypoint))) {
-      throw new Error('codex_js_entrypoint_missing');
-    }
-
-    return {
-      command: nodePath,
-      prefixArgs: [codexEntrypoint],
-      pathEntries: [path.dirname(nodePath), path.dirname(params.codexCliPath), ...params.pathEntries],
-    };
+    return await codexCliAdapter.resolveCommand(params.codexCliPath, params.pathEntries);
   }
 
   public async runCodex(params: {
     codexCliPath: string;
     pathEntries: string[];
     environment: Record<string, string>;
-    mcpServers?: CodexMcpServerConfig[];
+    mcpServers?: LlmMcpServerConfig[];
     workingDir: string;
     sharedRoots?: string[];
     prompt: string;
@@ -202,198 +170,40 @@ export class SandboxRunner {
     onOutput?: (stream: 'stdout' | 'stderr' | 'meta', text: string) => void;
     threadId?: string;
     codexHome?: string;
-  }): Promise<CodexRunResult> {
-    const allowedRoots = [params.workingDir, ...(params.sharedRoots ?? [])].join(path.delimiter);
-
-    const modelArgs = ['--model', params.model];
-    const reasoningArgs = ['--config', `reasoning_effort="${params.reasoningEffort}"`];
-    const networkArgs = codexWorkspaceNetworkConfigArgs(params.networkAccess === true);
-    const mcpServers = params.mcpServers ?? [];
-    const mcpArgs = mcpServers.flatMap((server) => [
-          '--config',
-          `mcp_servers.${server.name}.url=${JSON.stringify(server.url)}`,
-          '--config',
-          `mcp_servers.${server.name}.bearer_token_env_var=${JSON.stringify(server.tokenEnvVar)}`,
-          '--config',
-          `mcp_servers.${server.name}.enabled=true`,
-          '--config',
-          `mcp_servers.${server.name}.tool_timeout_sec=${server.toolTimeoutSec ?? 600}`,
-          '--config',
-          `mcp_servers.${server.name}.default_tools_approval_mode="${getMcpApprovalMode(server)}"`,
-          ...(server.name === 'forger'
-            ? [
-          '--config',
-          'apps.forger.enabled=true',
-          '--config',
-          'apps.forger.default_tools_enabled=true',
-          '--config',
-          'apps.forger.default_tools_approval_mode="auto"',
-          '--config',
-          'apps.forger.destructive_enabled=true',
-          '--config',
-          'apps.forger.open_world_enabled=true',
-            ]
-            : []),
-        ]);
-    const commonArgs = ['--skip-git-repo-check', '-C', params.workingDir];
-    const topLevelArgs = mcpServers.length > 0 ? ['--ask-for-approval', 'never'] : [];
-
-    const attempts: string[][] = params.threadId
-      ? [
-          [
-            'exec',
-            'resume',
-            '--json',
-            ...modelArgs,
-            ...reasoningArgs,
-            ...networkArgs,
-            ...mcpArgs,
-            ...codexUnsafeArgs(params.permissionMode),
-            ...codexWorkspaceArgs(params.permissionMode),
-            '--skip-git-repo-check',
-            params.threadId,
-            params.prompt,
-          ],
-          [
-            'exec',
-            'resume',
-            '--json',
-            ...modelArgs,
-            ...reasoningArgs,
-            ...networkArgs,
-            ...mcpArgs,
-            '--skip-git-repo-check',
-            params.threadId,
-            params.prompt,
-          ],
-          [
-            'exec',
-            'resume',
-            '--json',
-            ...modelArgs,
-            ...mcpArgs,
-            '--skip-git-repo-check',
-            params.threadId,
-            params.prompt,
-          ],
-          ['exec', 'resume', ...modelArgs, ...mcpArgs, '--skip-git-repo-check', params.threadId, params.prompt],
-        ]
-      : [
-          ['exec', '--json', ...modelArgs, ...reasoningArgs, ...networkArgs, ...mcpArgs, ...codexUnsafeArgs(params.permissionMode), ...codexWorkspaceArgs(params.permissionMode), ...commonArgs, params.prompt],
-          ['exec', '--json', ...modelArgs, ...reasoningArgs, ...networkArgs, ...mcpArgs, ...codexUnsafeArgs(params.permissionMode), ...codexWorkspaceArgs(params.permissionMode), ...commonArgs, params.prompt],
-          ['exec', '--json', ...modelArgs, ...networkArgs, ...mcpArgs, ...codexUnsafeArgs(params.permissionMode), ...codexWorkspaceArgs(params.permissionMode), ...commonArgs, params.prompt],
-          ['exec', '--json', ...modelArgs, ...networkArgs, ...mcpArgs, ...commonArgs, params.prompt],
-          ['exec', ...modelArgs, ...networkArgs, ...mcpArgs, ...commonArgs, params.prompt],
-        ];
-
-    const attemptInactivityTimeoutMs = CODEX_ATTEMPT_INACTIVITY_TIMEOUT_MS;
-    let lastResult: CommandResult | null = null;
-    let lastErrorMessage = '';
-    const codexCommand = await this.resolveCodexCommand(params);
-    const isolatedCodexHome = params.codexHome ?? await createIsolatedCodexHome(this.codexHome, {
-      prefix: 'forger-chat-codex-home',
-      trustedRoots: [params.workingDir, ...(params.sharedRoots ?? [])],
-      networkAccess: params.networkAccess === true,
+  }): Promise<LlmProviderRunResult> {
+    const result = await codexCliAdapter.runChat({
+      cliPath: params.codexCliPath,
+      pathEntries: params.pathEntries,
+      environment: params.environment,
+      mcpServers: params.mcpServers,
+      workingDir: params.workingDir,
+      sharedRoots: params.sharedRoots,
+      prompt: params.prompt,
+      model: params.model,
+      reasoningEffort: params.reasoningEffort,
+      permissionMode: params.permissionMode,
+      networkAccess: params.networkAccess,
+      timeoutMs: params.timeoutMs,
+      onChild: params.onChild,
+      onOutput: params.onOutput,
+      threadId: params.threadId,
+      codexHome: params.codexHome,
+      rootCodexHome: this.codexHome,
+      runCommandCapture,
     });
-    const allowedMcpServers = new Set(mcpServers.map((server) => server.name));
-    try {
-      params.onOutput?.(
-        'meta',
-        [
-          `Codex isolated CODEX_HOME=${isolatedCodexHome}`,
-          `workingDir=${params.workingDir}`,
-          `allowedMcpServers=${mcpServers.map((server) => server.name).join(',') || '(none)'}`,
-          'askForApproval=never',
-          'mcpDefaultToolsApprovalMode=forger:auto app:approve',
-        ].join(' '),
-      );
-      for (const [index, args] of attempts.entries()) {
-        try {
-          const mode = args.includes('resume') ? 'resume' : 'new';
-          const json = args.includes('--json') ? 'json' : 'plain';
-          params.onOutput?.(
-            'meta',
-            `Intento ${index + 1}/${attempts.length} (${mode}, ${json}, model=${params.model})`,
-          );
-          const result = await runCommandCapture(
-            codexCommand.command,
-            [...codexCommand.prefixArgs, ...topLevelArgs, ...args],
-            {
-              cwd: params.workingDir,
-              env: {
-                CODEX_HOME: isolatedCodexHome,
-                FORGER_ALLOWED_ROOTS: allowedRoots,
-                ...Object.fromEntries(mcpServers.map((server) => [server.tokenEnvVar, server.token])),
-                ...params.environment,
-                PATH: [...codexCommand.pathEntries, process.env.PATH ?? ''].filter(Boolean).join(path.delimiter),
-              },
-              inactivityTimeoutMs: attemptInactivityTimeoutMs,
-              onChild: params.onChild,
-              onStdout: (text) => params.onOutput?.('stdout', text),
-              onStderr: (text) => params.onOutput?.('stderr', text),
-            },
-          );
-
-          assertAllowedMcpServers(result.stdout, result.stderr, allowedMcpServers);
-          lastResult = result;
-          if (result.code === 0) {
-            const parsed = parseCodexJsonl(result.stdout, result.stderr);
-            return {
-              assistantText: parsed.assistantText || 'Listo. ¿Qué te gustaría hacer ahora en esta app?',
-              threadId: parsed.threadId,
-              usageDelta: parsed.usageDelta,
-              toolEvents: parsed.toolEvents,
-            };
-          }
-          lastErrorMessage = (result.stderr || result.stdout || '').trim();
-        } catch (error) {
-          if (error instanceof DisallowedMcpServerError) {
-            throw error;
-          }
-          if (error instanceof Error) {
-            lastErrorMessage = error.message;
-            params.onOutput?.('meta', `Intento ${index + 1} falló: ${error.message}`);
-          }
-        }
-      }
-    } finally {
-      if (!params.codexHome) {
-        await removeIsolatedCodexHome(isolatedCodexHome);
-      }
-    }
-
-    const message = (
-      lastResult?.stderr ||
-      lastResult?.stdout ||
-      lastErrorMessage ||
-      'codex_exec_failed'
-    ).trim();
-    const parsed = parseCodexJsonl(lastResult?.stdout ?? '', lastResult?.stderr ?? '');
-    const error = new Error(message);
-    const authFailure = classifyCodexAuthOutput(
-      [lastResult?.stdout, lastErrorMessage].filter(Boolean).join('\n'),
-      lastResult?.stderr ?? '',
-    );
-    const timeoutFailure = /\btimed out(?:\s+due to inactivity)?\s+after\b|codex_timeout_after_/i.test(message);
-    (error as Error & { chatCode?: ChatErrorCode }).chatCode = authFailure === 'codex_auth_expired'
-      ? 'auth_missing'
-      : timeoutFailure
-        ? 'timeout'
-        : 'capability_unavailable';
-    (error as Error & { parsedRun?: CodexRunResult }).parsedRun = {
-      assistantText: parsed.assistantText,
-      threadId: parsed.threadId,
-      usageDelta: parsed.usageDelta,
-      toolEvents: parsed.toolEvents,
+    return {
+      assistantText: result.assistantText || 'Listo. ¿Qué te gustaría hacer ahora en esta app?',
+      threadId: result.threadId,
+      usageDelta: result.usageDelta,
+      toolEvents: result.toolEvents,
     };
-    throw error;
   }
 
   public async runClaude(params: {
     claudeCliPath: string;
     pathEntries: string[];
     environment: Record<string, string>;
-    mcpServers?: CodexMcpServerConfig[];
+    mcpServers?: LlmMcpServerConfig[];
     workingDir: string;
     sharedRoots?: string[];
     prompt: string;
@@ -404,60 +214,70 @@ export class SandboxRunner {
     onChild: (child: ChildProcessWithoutNullStreams) => void;
     onOutput?: (stream: 'stdout' | 'stderr' | 'meta', text: string) => void;
     threadId?: string;
-  }): Promise<CodexRunResult> {
-    const mcpServers = params.mcpServers ?? [];
-    const mcpConfigPath = await writeClaudeMcpConfig(params.workingDir, mcpServers);
-    const allowedMcpServers = new Set(mcpServers.map((server) => server.name));
-    const args = [
-      '-p',
-      params.prompt,
-      '--output-format',
-      'stream-json',
-      '--verbose',
-      '--model',
-      params.model,
-      '--effort',
-      params.effort,
-      ...claudePermissionArgs(params.permissionMode),
-      ...(mcpServers.length > 0 ? ['--mcp-config', mcpConfigPath] : []),
-      ...(params.threadId ? ['--resume', params.threadId] : []),
-    ];
-    params.onOutput?.(
-      'meta',
-      [
-        `Claude Code workingDir=${params.workingDir}`,
-        `allowedMcpServers=${mcpServers.map((server) => server.name).join(',') || '(none)'}`,
-        `model=${params.model}`,
-        `effort=${params.effort}`,
-      ].join(' '),
-    );
-    try {
-      const result = await runCommandCapture(params.claudeCliPath, args, {
-        cwd: params.workingDir,
-        env: {
-          FORGER_ALLOWED_ROOTS: [params.workingDir, ...(params.sharedRoots ?? [])].join(path.delimiter),
-          ...Object.fromEntries(mcpServers.map((server) => [server.tokenEnvVar, server.token])),
-          ...params.environment,
-          PATH: [path.dirname(params.claudeCliPath), ...params.pathEntries, process.env.PATH ?? ''].filter(Boolean).join(path.delimiter),
-        },
-        inactivityTimeoutMs: params.timeoutMs,
-        onChild: params.onChild,
-        onStdout: (text) => params.onOutput?.('stdout', text),
-        onStderr: (text) => params.onOutput?.('stderr', text),
-      });
-      assertAllowedMcpServers(result.stdout, result.stderr, allowedMcpServers);
-      if (result.code !== 0) {
-        throw new Error((result.stderr || result.stdout || 'claude_exec_failed').trim());
-      }
-      const parsed = parseClaudeJsonl(result.stdout, result.stderr);
-      return {
-        assistantText: parsed.assistantText || 'Listo. ¿Qué te gustaría hacer ahora en esta app?',
-        threadId: parsed.threadId ?? params.threadId,
-        toolEvents: parsed.toolEvents,
-      };
-    } finally {
-      await fs.rm(mcpConfigPath, { force: true }).catch(() => undefined);
-    }
+  }): Promise<LlmProviderRunResult> {
+    const result = await claudeCliAdapter.run({
+      cliPath: params.claudeCliPath,
+      pathEntries: params.pathEntries,
+      environment: params.environment,
+      mcpServers: params.mcpServers,
+      workingDir: params.workingDir,
+      sharedRoots: params.sharedRoots,
+      prompt: params.prompt,
+      model: params.model,
+      effort: params.effort,
+      permissionMode: params.permissionMode,
+      timeoutMs: params.timeoutMs,
+      onChild: params.onChild,
+      onOutput: params.onOutput,
+      threadId: params.threadId,
+      runCommandCapture,
+    });
+    return {
+      assistantText: result.assistantText || 'Listo. ¿Qué te gustaría hacer ahora en esta app?',
+      threadId: result.threadId,
+      toolEvents: result.toolEvents,
+    };
+  }
+
+  public async runAntigravity(params: {
+    antigravityCliPath: string;
+    pathEntries: string[];
+    environment: Record<string, string>;
+    mcpServers?: LlmMcpServerConfig[];
+    workingDir: string;
+    sharedRoots?: string[];
+    prompt: string;
+    model: string;
+    effort?: AgentEffort;
+    permissionMode?: AgentPermissionMode;
+    timeoutMs: number;
+    onChild: (child: ChildProcessWithoutNullStreams) => void;
+    onOutput?: (stream: 'stdout' | 'stderr' | 'meta', text: string) => void;
+    threadId?: string;
+  }): Promise<LlmProviderRunResult> {
+    const result = await antigravityCliAdapter.run({
+      cliPath: params.antigravityCliPath,
+      pathEntries: params.pathEntries,
+      environment: params.environment,
+      mcpServers: params.mcpServers,
+      workingDir: params.workingDir,
+      sharedRoots: params.sharedRoots,
+      prompt: params.prompt,
+      model: params.model,
+      effort: params.effort,
+      conversationId: params.threadId,
+      permissionMode: params.permissionMode,
+      timeoutMs: params.timeoutMs,
+      timeoutMode: 'inactivity',
+      onChild: params.onChild,
+      onOutput: params.onOutput,
+      runCommandCapture,
+    });
+    return {
+      assistantText: result.assistantText,
+      threadId: result.conversationId ?? undefined,
+      toolEvents: result.toolEvents,
+    };
   }
 }
 
@@ -473,8 +293,8 @@ export const runCommandCapture = async (
     onStdout?: (text: string) => void;
     onStderr?: (text: string) => void;
   },
-): Promise<CommandResult> => {
-  return await new Promise<CommandResult>((resolve, reject) => {
+): Promise<LlmChatCommandResult> => {
+  return await new Promise<LlmChatCommandResult>((resolve, reject) => {
     const child = spawnProcess(command, args, {
       cwd: options.cwd,
       env: {
@@ -493,7 +313,7 @@ export const runCommandCapture = async (
     let settled = false;
     let timeoutFired = false;
 
-    const finalizeResolve = (result: CommandResult): void => {
+    const finalizeResolve = (result: LlmChatCommandResult): void => {
       if (settled) {
         return;
       }
@@ -605,31 +425,6 @@ export const existsDirectory = async (dirPath: string): Promise<boolean> => {
   } catch {
     return false;
   }
-};
-
-const existsFile = async (filePath: string): Promise<boolean> => {
-  try {
-    const stat = await fs.stat(filePath);
-    return stat.isFile();
-  } catch {
-    return false;
-  }
-};
-
-const findExecutableInPathEntries = async (
-  entries: string[],
-  executableNames: string[],
-): Promise<string | null> => {
-  for (const entry of entries) {
-    for (const executableName of executableNames) {
-      const candidate = path.join(entry, executableName);
-      if (await existsFile(candidate)) {
-        return candidate;
-      }
-    }
-  }
-
-  return null;
 };
 
 export const ensureGitRepository = async (cwd: string): Promise<void> => {
@@ -814,181 +609,6 @@ export const applyPreviewChanges = async (
     await fs.mkdir(path.dirname(targetPath), { recursive: true });
     await fs.copyFile(sourcePath, targetPath);
   }
-};
-
-const parseCodexJsonl = (
-  stdout: string,
-  stderr: string,
-): {
-  assistantText: string;
-  threadId?: string;
-  usageDelta?: Partial<CodexUsage>;
-  toolEvents: number;
-} => {
-  const raw = stdout.trim() || stderr.trim();
-  if (!raw) {
-    return { assistantText: '', toolEvents: 0 };
-  }
-
-  const lines = raw
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean);
-
-  let threadId: string | undefined;
-  let assistantText = '';
-  let usageDelta: Partial<CodexUsage> | undefined;
-  let toolEvents = 0;
-
-  for (const line of lines) {
-    let entry: Record<string, unknown>;
-    try {
-      entry = JSON.parse(line) as Record<string, unknown>;
-    } catch {
-      if (!assistantText) {
-        assistantText = line;
-      } else {
-        assistantText += `\n${line}`;
-      }
-      continue;
-    }
-
-    const type = typeof entry.type === 'string' ? entry.type : '';
-    if (type === 'thread.started' && typeof entry.thread_id === 'string') {
-      threadId = entry.thread_id;
-      continue;
-    }
-
-    if (type === 'item.completed' && entry.item && typeof entry.item === 'object') {
-      const item = entry.item as Record<string, unknown>;
-      const itemType = typeof item.type === 'string' ? item.type : '';
-      if (itemType.includes('tool')) {
-        toolEvents += 1;
-      }
-      if (itemType === 'agent_message' && typeof item.text === 'string') {
-        assistantText = item.text;
-      }
-      continue;
-    }
-
-    if (type === 'turn.completed' && entry.usage && typeof entry.usage === 'object') {
-      const usage = entry.usage as Record<string, unknown>;
-      usageDelta = {
-        inputTokens: toNumber(usage.input_tokens),
-        cachedInputTokens: toNumber(usage.cached_input_tokens),
-        outputTokens: toNumber(usage.output_tokens),
-        reasoningOutputTokens: toNumber(usage.reasoning_output_tokens),
-        turns: 1,
-      };
-      continue;
-    }
-
-    if (type.includes('tool')) {
-      toolEvents += 1;
-    }
-  }
-
-  return {
-    assistantText: assistantText.trim(),
-    threadId,
-    usageDelta,
-    toolEvents,
-  };
-};
-
-const parseClaudeJsonl = (
-  stdout: string,
-  stderr: string,
-): {
-  assistantText: string;
-  threadId?: string;
-  toolEvents: number;
-} => {
-  const raw = stdout.trim() || stderr.trim();
-  if (!raw) {
-    return { assistantText: '', toolEvents: 0 };
-  }
-  const lines = raw.split('\n').map((line) => line.trim()).filter(Boolean);
-  let assistantText = '';
-  let threadId: string | undefined;
-  let toolEvents = 0;
-  for (const line of lines) {
-    let entry: Record<string, unknown>;
-    try {
-      entry = JSON.parse(line) as Record<string, unknown>;
-    } catch {
-      assistantText = [assistantText, line].filter(Boolean).join('\n');
-      continue;
-    }
-    const type = typeof entry.type === 'string' ? entry.type : '';
-    if (!threadId) {
-      const sessionId = entry.session_id ?? entry.sessionId ?? entry.conversation_id;
-      if (typeof sessionId === 'string' && sessionId.trim()) {
-        threadId = sessionId.trim();
-      }
-    }
-    if (type.includes('tool')) {
-      toolEvents += 1;
-    }
-    const text = extractClaudeText(entry);
-    if (text) {
-      assistantText = text;
-    }
-  }
-  return { assistantText: assistantText.trim(), threadId, toolEvents };
-};
-
-const extractClaudeText = (entry: Record<string, unknown>): string => {
-  if (typeof entry.result === 'string') {
-    return entry.result;
-  }
-  if (typeof entry.text === 'string') {
-    return entry.text;
-  }
-  const message = entry.message;
-  if (message && typeof message === 'object') {
-    const content = (message as Record<string, unknown>).content;
-    if (typeof content === 'string') {
-      return content;
-    }
-    if (Array.isArray(content)) {
-      return content
-        .map((item) => {
-          if (!item || typeof item !== 'object') {
-            return '';
-          }
-          const record = item as Record<string, unknown>;
-          return typeof record.text === 'string' ? record.text : '';
-        })
-        .filter(Boolean)
-        .join('\n');
-    }
-  }
-  return '';
-};
-
-const writeClaudeMcpConfig = async (
-  workingDir: string,
-  mcpServers: CodexMcpServerConfig[],
-): Promise<string> => {
-  const configPath = path.join(workingDir, '.forger', 'tmp', `claude-mcp-${randomUUID()}.json`);
-  const mcpServersConfig = Object.fromEntries(mcpServers.map((server) => [
-    server.name,
-    {
-      type: 'http',
-      url: server.url,
-      headers: {
-        Authorization: `Bearer \${${server.tokenEnvVar}}`,
-      },
-    },
-  ]));
-  await fs.mkdir(path.dirname(configPath), { recursive: true });
-  await fs.writeFile(configPath, JSON.stringify({ mcpServers: mcpServersConfig }, null, 2), 'utf8');
-  return configPath;
-};
-
-const toNumber = (value: unknown): number => {
-  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
 };
 
 export const createChatError = (code: ChatErrorCode, message: string): Error => {

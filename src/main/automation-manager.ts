@@ -18,9 +18,8 @@ import {
   appendTranscript,
   parseClaudeAssistantMessages,
   parseCodexAssistantMessages,
-  resolveCodexCommand,
   runAgentCommand,
-  type CodexMcpServerConfig,
+  type LlmAutomationMcpServerConfig,
 } from './automation/agent-command-runner';
 import { renderPromptFile } from './prompt-builder';
 
@@ -32,14 +31,16 @@ interface AutomationManagerOptions {
   getInstalledApps: () => AppSummary[];
   getCodexCliPath: () => Promise<string | null>;
   getClaudeCliPath: () => Promise<string | null>;
+  getAntigravityCliPath?: () => Promise<string | null>;
   getCodexPathEntries: () => Promise<string[]>;
   getAgentNetworkAccess?: (appIds: string[]) => Promise<boolean>;
   getCodexAuthenticated: () => Promise<boolean>;
   getClaudeAuthenticated: () => Promise<boolean>;
+  getAntigravityAuthenticated?: () => Promise<boolean>;
   createForgerMcpSession?: (runId: string, appId: string, appIds: string[]) => { url: string; token: string } | null;
   releaseForgerMcpSession?: (token: string) => void;
   buildMemoryContext?: (appIds: string[]) => Promise<string>;
-  listenAppMcps?: (appIds: string[], runId: string) => Promise<CodexMcpServerConfig[]>;
+  listenAppMcps?: (appIds: string[], runId: string) => Promise<LlmAutomationMcpServerConfig[]>;
   releaseAppMcps?: (runId: string) => void;
   onAutomationUpdated: (event: { automation: Automation; run?: AutomationRunSummary }) => void;
 }
@@ -241,7 +242,11 @@ export class AutomationManager {
     try {
       const automation = this.requireAutomation(automationId);
       const runtime = await this.options.getAgentRuntime();
-      if (runtime.provider === 'claude') {
+      if (runtime.provider === 'antigravity') {
+        if (!(await (this.options.getAntigravityAuthenticated?.() ?? Promise.resolve(false)))) {
+          throw new Error('antigravity_auth_missing');
+        }
+      } else if (runtime.provider === 'claude') {
         if (!(await this.options.getClaudeAuthenticated())) {
           throw new Error('claude_auth_missing');
         }
@@ -250,11 +255,15 @@ export class AutomationManager {
       }
       const codexCliPath = runtime.provider === 'codex' ? await this.options.getCodexCliPath() : null;
       const claudeCliPath = runtime.provider === 'claude' ? await this.options.getClaudeCliPath() : null;
+      const antigravityCliPath = runtime.provider === 'antigravity' ? await (this.options.getAntigravityCliPath?.() ?? Promise.resolve(null)) : null;
       if (runtime.provider === 'codex' && !codexCliPath) {
         throw new Error('codex_cli_missing');
       }
       if (runtime.provider === 'claude' && !claudeCliPath) {
         throw new Error('claude_cli_missing');
+      }
+      if (runtime.provider === 'antigravity' && !antigravityCliPath) {
+        throw new Error('antigravity_cli_missing');
       }
       const pathEntries = await this.options.getCodexPathEntries();
       const transcriptPath = this.runTranscriptPath(run.id);
@@ -267,16 +276,18 @@ export class AutomationManager {
       await this.writeRun(run);
       await this.updateLastRun(automationId, toRunSummary(run));
 
-      const command = runtime.provider === 'codex'
-        ? await resolveCodexCommand(codexCliPath as string, pathEntries)
-        : { command: claudeCliPath as string, prefixArgs: [], pathEntries };
+      const providerCliPath = runtime.provider === 'codex'
+        ? codexCliPath as string
+        : runtime.provider === 'antigravity'
+          ? antigravityCliPath as string
+          : claudeCliPath as string;
       const activeRunId = run.id;
       let latestUserMessage = run.userMessage ?? '';
       let userMessages = run.userMessages ?? [];
       forgerMcpSession = this.options.createForgerMcpSession?.(run.id, 'forger', automation.selectedAppIds) ?? null;
       const appMcpServers = await (this.options.listenAppMcps?.(automation.selectedAppIds, run.id) ?? Promise.resolve([]));
       const networkAccess = await (this.options.getAgentNetworkAccess?.(automation.selectedAppIds) ?? Promise.resolve(false));
-      const mcpServers: CodexMcpServerConfig[] = [
+      const mcpServers: LlmAutomationMcpServerConfig[] = [
         ...(forgerMcpSession
           ? [{
               name: 'forger',
@@ -290,7 +301,7 @@ export class AutomationManager {
       ];
       const memoryContext = await (this.options.buildMemoryContext?.(automation.selectedAppIds) ?? Promise.resolve(''));
       const prompt = memoryContext ? `${memoryContext}\n\n${this.buildPrompt(automation)}` : this.buildPrompt(automation);
-      const result = await runAgentCommand(command, {
+      const result = await runAgentCommand({ cliPath: providerCliPath, pathEntries }, {
         runtime,
         cwd: this.options.forgerHomeRoot,
         codexHome: this.options.codexHome,

@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import path from 'node:path';
 import { mergePathEntries, spawnProcess } from './runtime/process-spawn';
+import type { LlmMcpServerConfig } from './llm-provider/types';
 
 export interface AppMcpInstalledAppRecord {
   appId: string;
@@ -30,13 +31,10 @@ export interface RuntimeBinarySet {
   pip?: string;
 }
 
-export interface CodexMcpServerConfig {
-  name: string;
-  url: string;
-  token: string;
-  tokenEnvVar: string;
-  toolTimeoutSec?: number;
-}
+export type AppMcpServerConfig = LlmMcpServerConfig;
+
+/** @deprecated Use AppMcpServerConfig. */
+export type CodexMcpServerConfig = AppMcpServerConfig;
 
 type AppMcpStatus = 'down' | 'starting' | 'up' | 'shutting_down';
 
@@ -50,7 +48,7 @@ interface AppMcpState {
   token?: string;
   tokenEnvVar?: string;
   toolTimeoutSec?: number;
-  startPromise?: Promise<CodexMcpServerConfig | null>;
+  startPromise?: Promise<AppMcpServerConfig | null>;
   stopPromise?: Promise<void>;
   stopTimer?: NodeJS.Timeout;
 }
@@ -102,11 +100,11 @@ export class AppMcpManager {
 
   public constructor(private readonly options: AppMcpManagerOptions) {}
 
-  public async listenMcps(appIds: string[], runId: string): Promise<CodexMcpServerConfig[]> {
+  public async listenMcps(appIds: string[], runId: string): Promise<AppMcpServerConfig[]> {
     const configs = await Promise.all(
       Array.from(new Set(appIds)).map((appId) => this.listenOne(appId, runId)),
     );
-    return configs.filter((config): config is CodexMcpServerConfig => Boolean(config));
+    return configs.filter((config): config is AppMcpServerConfig => Boolean(config));
   }
 
   public releaseMcps(runId: string): void {
@@ -140,7 +138,7 @@ export class AppMcpManager {
     this.runListeners.clear();
   }
 
-  private async listenOne(appId: string, runId: string): Promise<CodexMcpServerConfig | null> {
+  private async listenOne(appId: string, runId: string): Promise<AppMcpServerConfig | null> {
     const record = this.options.getInstalledApp(appId);
     if (!record?.installDir) {
       return null;
@@ -182,7 +180,7 @@ export class AppMcpManager {
     mcp: AppManifestMcp,
     state: AppMcpState,
     runId: string,
-  ): Promise<CodexMcpServerConfig | null> {
+  ): Promise<AppMcpServerConfig | null> {
     const generation = state.generation + 1;
     state.generation = generation;
     state.status = 'starting';
@@ -436,7 +434,7 @@ export class AppMcpManager {
     return state;
   }
 
-  private toConfig(state: AppMcpState): CodexMcpServerConfig | null {
+  private toConfig(state: AppMcpState): AppMcpServerConfig | null {
     if (!state.url || !state.token || !state.tokenEnvVar) {
       return null;
     }

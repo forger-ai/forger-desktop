@@ -92,6 +92,7 @@ export const createPathConfigController = (deps: PathConfigDeps) => {
   const getCodexRoot = () => path.join(app.getPath('userData'), 'codex-cli');
   const getCodexHome = () => path.join(app.getPath('userData'), 'codex-home');
   const getClaudeRoot = () => path.join(app.getPath('userData'), 'claude-code-cli');
+  const getAntigravityRoot = () => path.join(app.getPath('userData'), 'antigravity-cli');
   const getAgentToolSettingsPath = () => path.join(getForgerMetadataRoot(), 'agent-tools.json');
   const getSettingsPath = () => path.join(getForgerMetadataRoot(), 'settings.json');
   const getPromptOverridesPath = () => path.join(getForgerMetadataRoot(), 'prompt-overrides.json');
@@ -121,6 +122,7 @@ export const createPathConfigController = (deps: PathConfigDeps) => {
     getCodexRoot,
     getCodexHome,
     getClaudeRoot,
+    getAntigravityRoot,
     getAgentToolSettingsPath,
     getSettingsPath,
     getPromptOverridesPath,

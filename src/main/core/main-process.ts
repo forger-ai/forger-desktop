@@ -82,6 +82,13 @@ import { registerMainLifecycle } from './main-lifecycle';
 import type { AppManifest, AppManifestService, AppManifestStack, AppRegistry, InstalledAppRecord, RuntimeBinarySet, RunningAppProcess, StackSkillTemplate } from './main-process-types';
 import { FORGER_AGENT_CONTRACT_MARKER, FORGER_AGENT_CONTRACT_MARKER_PREFIX, FORGER_AGENT_CONTRACT_VERSION, buildGlobalForgerAgentsMarkdown } from '../prompt-builder/forger-base';
 import { buildFailureDiagnostic } from '../../shared/error-diagnostics';
+import {
+  ANTIGRAVITY_EFFORT_OPTIONS,
+  ANTIGRAVITY_MODEL_OPTIONS,
+  DEFAULT_ANTIGRAVITY_EFFORT,
+  DEFAULT_ANTIGRAVITY_MODEL,
+  createAgentProviderRuntimeRegistry,
+} from '../../shared/agent-runtime-registry';
 import { appAllowsAudioInput, appAllowsSpeechToText, appAllowsTextToSpeech } from '../../shared/platform-capabilities';
 import { buildForgerAppAgentsMarkdown } from '../prompt-builder/apps-base';
 import { buildCodexPromptForFreeChat, buildCodexPromptWithAppContext } from '../prompt-builder/user-message';
@@ -99,7 +106,7 @@ import type {
   AppSecretsState, AppStatus, AppSummary, AppToolDeclaration, AppToolsInstallGate, AutomationUpsertInput,
   BackgroundTask, BasicActionResult, CallOfficialToolInput, CatalogApp, ChatApplyRunInput, ChatApprovePermissionInput,
   ChatCancelRunInput, ChatGetRunInput, ChatRun, ChatRunEvent, ChatStartRunInput, ChatUndoInput, ClaudeAuthStatus,
-  ClaudeEffort, CloudAppMessagePermissionDecision, CloudFriendUser, CloudFriendship, CloudMessage, CloudMessageEnvelope,
+  ClaudeEffort, AntigravityAuthSessionEvent, AntigravityAuthSessionStartResult, AntigravityAuthStatus, CloudAppMessagePermissionDecision, CloudFriendUser, CloudFriendship, CloudMessage, CloudMessageEnvelope,
   CloudSendAppShareInput, CloudSendMessageInput, CloudSocialEvent, CloudSyncSettings, CodexAuthStatus,
   CodexReasoningEffort, ConfigureOfficialToolInput, ConnectAppSecretInput, CreateLocalAppInput, CreateLocalAppResult,
   CreateRemoteAppBackupInput, CreateRemoteAppBackupResult, CreateUserSecretInput, DeleteUserSecretInput,
@@ -122,6 +129,28 @@ const CODEX_MODEL_VALUES = new Set(APP_CODEX_MODEL_OPTIONS.map((option) => optio
 const CODEX_REASONING_VALUES = new Set<CodexReasoningEffort>(['none', 'low', 'medium', 'high', 'xhigh']);
 const CLAUDE_MODEL_VALUES = new Set(APP_CLAUDE_MODEL_OPTIONS.map((option) => option.realModelName));
 const CLAUDE_EFFORT_VALUES = new Set<ClaudeEffort>(['low', 'medium', 'high', 'xhigh', 'max']);
+const ANTIGRAVITY_MODEL_VALUES = new Set(ANTIGRAVITY_MODEL_OPTIONS.map((option) => option.realModelName));
+const ANTIGRAVITY_EFFORT_VALUES = new Set(ANTIGRAVITY_EFFORT_OPTIONS.map((option) => option.value));
+const AGENT_PROVIDER_RUNTIME_REGISTRY = createAgentProviderRuntimeRegistry({
+  codex: {
+    defaultModel: BUILT_IN_CODEX_MODEL,
+    defaultReasoningEffort: BUILT_IN_CODEX_REASONING,
+    modelValues: CODEX_MODEL_VALUES,
+    reasoningEffortValues: CODEX_REASONING_VALUES,
+  },
+  claude: {
+    defaultModel: BUILT_IN_CLAUDE_MODEL,
+    defaultEffort: BUILT_IN_CLAUDE_EFFORT,
+    modelValues: CLAUDE_MODEL_VALUES,
+    effortValues: CLAUDE_EFFORT_VALUES,
+  },
+  antigravity: {
+    defaultModel: DEFAULT_ANTIGRAVITY_MODEL,
+    defaultEffort: DEFAULT_ANTIGRAVITY_EFFORT,
+    modelValues: ANTIGRAVITY_MODEL_VALUES,
+    effortValues: ANTIGRAVITY_EFFORT_VALUES,
+  },
+});
 let devCatalogService: DevCatalogService | null = null;
 const APP_FOLDER_GRANT_TTL_MS = 5 * 60 * 1000;
 const appFolderGrantSecret = randomBytes(32).toString('base64url');
@@ -217,6 +246,7 @@ const getLegacyForgerMetadataRoot = (): string => getPathConfigController().getL
 const getCodexRoot = (): string => getPathConfigController().getCodexRoot();
 const getCodexHome = (): string => getPathConfigController().getCodexHome();
 const getClaudeRoot = (): string => getPathConfigController().getClaudeRoot();
+const getAntigravityRoot = (): string => getPathConfigController().getAntigravityRoot();
 const getAgentToolSettingsPath = (): string => getPathConfigController().getAgentToolSettingsPath();
 const getSettingsPath = (): string => getPathConfigController().getSettingsPath();
 const getPromptOverridesPath = (): string => getPathConfigController().getPromptOverridesPath();
@@ -229,17 +259,11 @@ const getCloudDeviceAccountStorageKey = (): string | undefined => getPathConfigC
 
 const settingsServiceState = { get promptOverridesStore() { return promptOverridesStore; }, set promptOverridesStore(value) { promptOverridesStore = value; }, get settings() { return settings; }, set settings(value) { settings = value; } };
 const createSettingsServiceDeps = () => ({
-  BUILT_IN_CLAUDE_EFFORT,
-  BUILT_IN_CLAUDE_MODEL,
-  BUILT_IN_CODEX_MODEL,
-  BUILT_IN_CODEX_REASONING,
-  CLAUDE_MODEL_VALUES,
-  CLAUDE_EFFORT_VALUES,
-  CODEX_MODEL_VALUES,
-  CODEX_REASONING_VALUES,
+  agentProviderRegistry: AGENT_PROVIDER_RUNTIME_REGISTRY,
   PromptOverridesStore,
   fs,
   getClaudeAuthStatus,
+  getAntigravityAuthStatus,
   getCodexAuthStatus,
   path,
   getPromptOverridesPath,
@@ -261,6 +285,7 @@ const updateCodexDefaults = async (input: UpdateCodexDefaultsInput): Promise<Set
 const updateAgentDefaults = async (input: UpdateAgentDefaultsInput): Promise<Settings> => await getSettingsServiceController().updateAgentDefaults(input);
 const updateDeveloperMode = async (input: UpdateDeveloperModeInput): Promise<Settings> => await getSettingsServiceController().updateDeveloperMode(input);
 const markProviderConnected = async (provider: AgentProvider): Promise<void> => await getSettingsServiceController().markProviderConnected(provider);
+const markProviderDisconnected = async (provider: AgentProvider): Promise<void> => await getSettingsServiceController().markProviderDisconnected(provider);
 const chooseAgentRuntime = async (requested?: AgentRuntimeRequest): Promise<AgentRuntime> => await getSettingsServiceController().chooseAgentRuntime(requested);
 const chooseConnectedProvider = async (): Promise<AgentProvider> => await getSettingsServiceController().chooseConnectedProvider();
 const withAgentDefaults = <T extends { model?: string; reasoningEffort?: CodexReasoningEffort; runtime?: AgentRuntime; runtimeRecommendations?: AgentRuntimeRecommendations }>(input: T, defaults: AgentDefaults = normalizeSettings(settings).agentDefaults): T => getSettingsServiceController().withAgentDefaults(input, defaults);
@@ -469,11 +494,13 @@ const getPersonalAgentConversationManager = (): AgentConversationManager => {
       getAgentRuntime: chooseAgentRuntime,
       getCodexCliPath: async () => await resolveCodexCliPath(getCodexRoot()),
       getClaudeCliPath: async () => (await resolveClaudeCli())?.path ?? null,
+      getAntigravityCliPath: resolveAntigravityCliPath,
       getCodexPathEntries: async () => await getAgentPathEntries(),
       ensureGitAvailable,
       getCodexEnvironment: async () => await getCodexToolEnvironment(),
       getCodexAuthenticated: async () => (await getCodexAuthStatus()).authenticated,
       getClaudeAuthenticated: async () => (await getClaudeAuthStatus()).authenticated,
+      getAntigravityAuthenticated: async () => (await getAntigravityAuthStatus()).authenticated,
       createForgerMcpSession: (runId, agent) =>
         forgerMcpServer?.createSession(runId, 'forger', {
           caller: 'personal-agent',
@@ -776,12 +803,14 @@ const createAgentAuthDeps = () => ({
   findManifestService,
   fs,
   getClaudeRoot,
+  getAntigravityRoot,
   getCodexHome,
   getCodexRoot,
   getForgerMetadataRoot,
   getLogsRoot,
   getTempRoot,
   markProviderConnected,
+  markProviderDisconnected,
   path,
   registry,
   resolveInstalledManifest,
@@ -825,7 +854,16 @@ const disconnectCodexAuth = async (): Promise<{ success: boolean; userMessage: s
 const reinstallCodex = async (): Promise<{ success: boolean; userMessage: string; status?: CodexAuthStatus } & FailureDiagnosticFields> => await getAgentAuthController().reinstallCodex();
 const getClaudeAuthStatus = async (): Promise<ClaudeAuthStatus> => await getAgentAuthController().getClaudeAuthStatus();
 const connectClaudeAuth = async (): Promise<{ success: boolean; userMessage: string; status?: ClaudeAuthStatus } & FailureDiagnosticFields> => await getAgentAuthController().connectClaudeAuth();
+const disconnectClaudeAuth = async (): Promise<{ success: boolean; userMessage: string; status?: ClaudeAuthStatus } & FailureDiagnosticFields> => await getAgentAuthController().disconnectClaudeAuth();
 const reinstallClaude = async (): Promise<{ success: boolean; userMessage: string; status?: ClaudeAuthStatus } & FailureDiagnosticFields> => await getAgentAuthController().reinstallClaude();
+const getAntigravityAuthStatus = async (): Promise<AntigravityAuthStatus> => await getAgentAuthController().getAntigravityAuthStatus();
+const resolveAntigravityCliPath = async (): Promise<string | null> => (await getAgentAuthController().resolveAntigravityCli())?.path ?? null;
+const connectAntigravityAuth = async (): Promise<{ success: boolean; userMessage: string; status?: AntigravityAuthStatus } & FailureDiagnosticFields> => await getAgentAuthController().connectAntigravityAuth();
+const startAntigravityAuthSession = async (onEvent: (event: AntigravityAuthSessionEvent) => void): Promise<AntigravityAuthSessionStartResult & FailureDiagnosticFields> => await getAgentAuthController().startAntigravityAuthSession(onEvent);
+const writeAntigravityAuthSession = async (sessionId: string, input: string): Promise<{ success: boolean; userMessage?: string } & FailureDiagnosticFields> => await getAgentAuthController().writeAntigravityAuthSession(sessionId, input);
+const cancelAntigravityAuthSession = async (sessionId: string): Promise<{ success: boolean; userMessage?: string } & FailureDiagnosticFields> => await getAgentAuthController().cancelAntigravityAuthSession(sessionId);
+const disconnectAntigravityAuth = async (): Promise<{ success: boolean; userMessage: string; status?: AntigravityAuthStatus } & FailureDiagnosticFields> => await getAgentAuthController().disconnectAntigravityAuth();
+const reinstallAntigravity = async (): Promise<{ success: boolean; userMessage: string; status?: AntigravityAuthStatus } & FailureDiagnosticFields> => await getAgentAuthController().reinstallAntigravity();
 
 const createInstalledAppLifecycleDeps = () => ({
   DEFAULT_NODE_VERSION,
@@ -1183,6 +1221,12 @@ const getMainProcessIpcDeps = () => ({
   cloudDeviceManager,
   cloudSyncSettings,
   connectClaudeAuth,
+  disconnectClaudeAuth,
+  connectAntigravityAuth,
+  startAntigravityAuthSession,
+  writeAntigravityAuthSession,
+  cancelAntigravityAuthSession,
+  disconnectAntigravityAuth,
   connectCodexAuth,
   createLocalAppFromSkeleton,
   createRemoteAppBackup,
@@ -1203,6 +1247,7 @@ const getMainProcessIpcDeps = () => ({
   getBackupsManager,
   getBackgroundTaskStore,
   getClaudeAuthStatus,
+  getAntigravityAuthStatus,
   getCloudIdentityStore,
   getCodexAuthStatus,
   getCodexHome,
@@ -1251,6 +1296,7 @@ const getMainProcessIpcDeps = () => ({
   publicForgerAccount,
   registry,
   reinstallClaude,
+  reinstallAntigravity,
   reinstallCodex,
   renderManifestAgentPrompt,
   resolveAppDbPath,
@@ -1363,7 +1409,7 @@ registerMainLifecycle({
   buildMemoryContextForApps, chooseAgentRuntime, clearForgerAccountSession, closeServer, createLocalAppFromSkeleton, createWindow,
   emitAutomationUpdated, emitChatRunUpdated, ensureBackendPythonEnvironment, ensureCatalogStatuses, ensureGlobalAgentsContext,
   ensureGitAvailable, ensurePathInside, ensureRuntimeInstalled, ensureSqliteDatabaseParent, flushPendingDeepLink, fs, getAgentPathEntries, getBackupsRoot,
-  getClaudeAuthStatus, getCloudDeviceAccountStorageKey, getCloudDevicePath, getCloudIdentityPath, getCloudIdentityStore, getSocialMessagesPath,
+  getClaudeAuthStatus, getAntigravityAuthStatus, getCloudDeviceAccountStorageKey, getCloudDevicePath, getCloudIdentityPath, getCloudIdentityStore, getSocialMessagesPath,
   getCodexAuthStatus, getCodexHome, getCodexRoot, getCodexToolEnvironment, getDesktopChatNetworkAccessDefault: () => settings.defaultChatNetworkAccess !== false, getForgerAccountPath, getForgerHomeRoot, getForgerMetadataRoot,
   getFreePort, getLegacyForgerMetadataRoot, getMemoryStore, getOfficialToolsService, getSpeechToTextService, getTextToSpeechService, getLiveVoiceInputService, getWakeWordService,
   getAudioDevices: async () => await getAudioRuntimeBroker().listDevices(),
@@ -1379,7 +1425,7 @@ registerMainLifecycle({
   getPersonalAgentHeartbeat, handleCloudSocialEvent, hasInstalledCodexConversation, ipcMain, listAppPrompts, listCatalogFromBackend, loadAgentToolSettings,
   loadCloudSyncSettings, loadRegistry, loadSettings, llmRunsStore, mapBackendCategory, openInstalledApp, recordRemoteCloudActivity, startLocalNetworkShare, stopLocalNetworkShare,
   startRemoteNetworkShare, stopRemoteNetworkShare, stopRemoteNetworkShareSession, startRemoteAgentSession, stopRemoteAgentSession, stopRemoteAgentSessionSession, openOrFocusAppWindow, registerForgerCloudOAuth,
-  registerIpcHandlers, renderManifestAgentPrompt, resolveClaudeCli, resolveCodexCliPath, resolveInstalledAgents, resolveInstalledManifest,
+  registerIpcHandlers, renderManifestAgentPrompt, resolveClaudeCli, resolveAntigravityCliPath, resolveCodexCliPath, resolveInstalledAgents, resolveInstalledManifest,
   resolveInstalledPromptTemplates, restoreAppPrompt, restartInstalledApp, runningApps, serializeErrorForInstallLog, shell,
   splitManifestCommand, startDevCatalogService, state: mainLifecycleState, stopInstalledApp, switchForgerAccountSession, terminateProcess,
   testAppPrompt, toAppSummary, toCatalogStatus, translateManifestEnvironment, truncateForInstallLog, updateAppPrompt, updateAppRuntime,

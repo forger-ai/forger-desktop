@@ -3,7 +3,7 @@ import type { AppDictionary } from '@renderer/i18n';
 import type { View } from '@renderer/components/Sidebar';
 import type { SelectedTool as SelectedToolsTool } from '@renderer/views/ToolsView';
 import { GMAIL_TOOL_ID } from '@renderer/views/tools/constants';
-import type { ClaudeAuthStatus, CodexAuthStatus, OfficialToolSummary } from '@shared/types';
+import type { AntigravityAuthStatus, ClaudeAuthStatus, CodexAuthStatus, OfficialToolSummary } from '@shared/types';
 import {
   getUsageAnalyticsEnabled,
   recordLegalWelcomeDecision,
@@ -52,6 +52,7 @@ interface UseForgerTourInput {
   officialTools: OfficialToolSummary[];
   codexAuthStatus: CodexAuthStatus;
   claudeAuthStatus: ClaudeAuthStatus;
+  antigravityAuthStatus: AntigravityAuthStatus;
   blocked: boolean;
 }
 
@@ -65,6 +66,7 @@ export function useForgerTour({
   officialTools,
   codexAuthStatus,
   claudeAuthStatus,
+  antigravityAuthStatus,
   blocked,
 }: UseForgerTourInput) {
   const [globalDismissed, setGlobalDismissed] = useState(() => readStoredBoolean(GLOBAL_TOUR_STORAGE_KEY));
@@ -363,7 +365,7 @@ export function useForgerTour({
 
   const isAgentStep = activeStep?.id === 'agent';
   const isWelcomeStep = activeStep?.id === 'welcome';
-  const hasConnectedAgentProvider = codexAuthStatus.authenticated || claudeAuthStatus.authenticated;
+  const hasConnectedAgentProvider = codexAuthStatus.authenticated || claudeAuthStatus.authenticated || antigravityAuthStatus.authenticated;
   const primaryLabel = isWelcomeStep
     ? t.onboarding.startTour
     : isAgentStep && !hasConnectedAgentProvider

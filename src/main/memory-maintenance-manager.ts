@@ -2,9 +2,8 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import type { AgentRuntime, AgentRuntimeRequest } from '../shared/types';
 import {
-  resolveCodexCommand,
   runAgentCommand,
-  type CodexMcpServerConfig,
+  type LlmAutomationMcpServerConfig,
 } from './automation/agent-command-runner';
 
 interface MemoryMaintenanceManagerOptions {
@@ -73,7 +72,7 @@ export class MemoryMaintenanceManager {
         return;
       }
       session = this.options.createForgerMcpSession?.(runId) ?? null;
-      const mcpServers: CodexMcpServerConfig[] = session
+      const mcpServers: LlmAutomationMcpServerConfig[] = session
         ? [{
             name: 'forger',
             url: session.url,
@@ -82,9 +81,8 @@ export class MemoryMaintenanceManager {
             toolTimeoutSec: 600,
           }]
         : [];
-      const command = await resolveCodexCommand(codexCliPath, await this.options.getCodexPathEntries());
       const prompt = await this.buildPrompt();
-      const result = await runAgentCommand(command, {
+      const result = await runAgentCommand({ cliPath: codexCliPath, pathEntries: await this.options.getCodexPathEntries() }, {
         runtime,
         cwd: this.options.forgerHomeRoot,
         codexHome: this.options.codexHome,

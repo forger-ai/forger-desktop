@@ -30,9 +30,12 @@ export interface CodexRateLimitsStatus {
   checkedAt: string;
 }
 
-export type AgentProvider = 'codex' | 'claude';
+export type LlmProviderKey = 'codex' | 'claude' | 'antigravity';
+/** @deprecated Use LlmProviderKey. Kept for manifest and IPC compatibility during the provider migration. */
+export type AgentProvider = LlmProviderKey;
 export type ClaudeEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
-export type AgentEffort = CodexReasoningEffort | ClaudeEffort;
+export type AntigravityEffort = 'low' | 'medium' | 'high';
+export type AgentEffort = CodexReasoningEffort | ClaudeEffort | AntigravityEffort;
 export type AgentPermissionMode = 'safe' | 'unsafe';
 
 export interface AgentRuntime {
@@ -51,6 +54,10 @@ export interface AgentDefaults {
     model: string;
     effort: ClaudeEffort;
   };
+  antigravity: {
+    model: string;
+    effort: AntigravityEffort;
+  };
 }
 
 export type AgentRuntimeRecommendations = Partial<AgentDefaults>;
@@ -62,6 +69,49 @@ export interface AgentRuntimeRequest extends Partial<AgentRuntime> {
 export interface AgentModelOptions {
   codex: CodexModelOption[];
   claude: ClaudeModelOption[];
+  antigravity: AntigravityModelOption[];
+}
+
+export interface AgentProviderRuntimeRegistry {
+  codex: {
+    defaultModel: string;
+    defaultReasoningEffort: CodexReasoningEffort;
+    modelValues: ReadonlySet<string>;
+    reasoningEffortValues: ReadonlySet<CodexReasoningEffort>;
+  };
+  claude: {
+    defaultModel: string;
+    defaultEffort: ClaudeEffort;
+    modelValues: ReadonlySet<string>;
+    effortValues: ReadonlySet<ClaudeEffort>;
+  };
+  antigravity: {
+    defaultModel: string;
+    defaultEffort: AntigravityEffort;
+    modelValues: ReadonlySet<string>;
+    effortValues: ReadonlySet<AntigravityEffort>;
+  };
+}
+
+export interface CreateAgentProviderRuntimeRegistryInput {
+  codex: {
+    defaultModel: string;
+    defaultReasoningEffort: CodexReasoningEffort;
+    modelValues: Iterable<string>;
+    reasoningEffortValues: Iterable<CodexReasoningEffort>;
+  };
+  claude: {
+    defaultModel: string;
+    defaultEffort: ClaudeEffort;
+    modelValues: Iterable<string>;
+    effortValues: Iterable<ClaudeEffort>;
+  };
+  antigravity: {
+    defaultModel: string;
+    defaultEffort: AntigravityEffort;
+    modelValues: Iterable<string>;
+    effortValues: Iterable<AntigravityEffort>;
+  };
 }
 
 export interface ClaudeAuthStatus {
@@ -130,4 +180,11 @@ export interface ClaudeModelOption {
   displayModelName: string;
   realModelName: string;
   defaultEffort: ClaudeEffort;
+}
+
+export interface AntigravityModelOption {
+  displayModelName: string;
+  realModelName: string;
+  defaultEffort: AntigravityEffort;
+  cliModelByEffort: Partial<Record<AntigravityEffort, string>>;
 }

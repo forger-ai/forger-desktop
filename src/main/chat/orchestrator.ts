@@ -49,10 +49,10 @@ import {
   sanitizeId,
   summarizeOperationTitle,
   type ChatHistoryMessage,
-  type CodexMcpServerConfig,
-  type CodexRunResult,
-  type CodexUsage,
   type ForgerTaskType,
+  type LlmMcpServerConfig,
+  type LlmProviderRunResult,
+  type LlmTokenUsage,
 } from './orchestrator-helpers';
 import {
   appendRunLog,
@@ -80,16 +80,18 @@ interface ChatOrchestratorOptions {
   agentContractVersion: number;
   getCodexCliPath: () => Promise<string | null>;
   getClaudeCliPath: () => Promise<string | null>;
+  getAntigravityCliPath?: () => Promise<string | null>;
   getCodexPathEntries: (appId?: string) => Promise<string[]>;
   getCodexEnvironment: (appId?: string) => Promise<Record<string, string>>;
   ensureGitAvailable?: () => Promise<void>;
   getChatNetworkAccessDefault?: () => Promise<boolean> | boolean;
   getCodexAuthenticated: () => Promise<boolean>;
   getClaudeAuthenticated: () => Promise<boolean>;
+  getAntigravityAuthenticated?: () => Promise<boolean>;
   createForgerMcpSession?: (runId: string, appId: string, locale?: string) => { url: string; token: string } | null;
   releaseForgerMcpSession?: (token: string) => void;
   buildMemoryContext?: (appIds: string[]) => Promise<string>;
-  listenAppMcps?: (appIds: string[], runId: string) => Promise<CodexMcpServerConfig[]>;
+  listenAppMcps?: (appIds: string[], runId: string) => Promise<LlmMcpServerConfig[]>;
   releaseAppMcps?: (runId: string) => void;
   onUpdateConflictResolved?: (appId: string) => Promise<void>;
   trace?: (event: string, payload?: Record<string, unknown>) => void | Promise<void>;
@@ -125,7 +127,7 @@ interface AppThreadState {
   appId: string;
   threadId: string;
   contractVersion: number;
-  usage: CodexUsage;
+  usage: LlmTokenUsage;
   toolEvents: number;
   lastRunAt: string;
 }
@@ -549,7 +551,7 @@ export class ChatOrchestrator {
       return;
     }
     let forgerMcpSession: { url: string; token: string } | null = null;
-    let appMcpServers: CodexMcpServerConfig[] = [];
+    let appMcpServers: LlmMcpServerConfig[] = [];
     let gitPrepared = false;
     const ensureGitReady = async (): Promise<void> => {
       if (gitPrepared) {
@@ -564,7 +566,11 @@ export class ChatOrchestrator {
         throw createChatError('app_not_installed', 'Target app is not installed');
       }
 
-      if (run.provider === 'claude') {
+      if (run.provider === 'antigravity') {
+        if (!(await (this.options.getAntigravityAuthenticated?.() ?? Promise.resolve(false)))) {
+          throw createChatError('auth_missing', 'Google Antigravity authentication missing');
+        }
+      } else if (run.provider === 'claude') {
         if (!(await this.options.getClaudeAuthenticated())) {
           throw createChatError('auth_missing', 'Claude Code authentication missing');
         }
@@ -577,11 +583,15 @@ export class ChatOrchestrator {
 
       const codexCliPath = run.provider === 'codex' ? await this.options.getCodexCliPath() : null;
       const claudeCliPath = run.provider === 'claude' ? await this.options.getClaudeCliPath() : null;
+      const antigravityCliPath = run.provider === 'antigravity' ? await (this.options.getAntigravityCliPath?.() ?? Promise.resolve(null)) : null;
       if (run.provider === 'codex' && !codexCliPath) {
         throw createChatError('capability_unavailable', 'Codex CLI not installed');
       }
       if (run.provider === 'claude' && !claudeCliPath) {
         throw createChatError('capability_unavailable', 'Claude Code CLI not installed');
+      }
+      if (run.provider === 'antigravity' && !antigravityCliPath) {
+        throw createChatError('capability_unavailable', 'Google Antigravity CLI not installed');
       }
       const codexPathEntries = await this.options.getCodexPathEntries(run.appId);
       const codexEnvironment = await this.options.getCodexEnvironment(run.appId);
@@ -613,7 +623,7 @@ export class ChatOrchestrator {
       );
       forgerMcpSession = this.options.createForgerMcpSession?.(run.runId, run.appId, run.locale) ?? null;
       appMcpServers = await (this.options.listenAppMcps?.(run.appId === 'forger' ? [] : [run.appId], run.runId) ?? Promise.resolve([]));
-      const mcpServers: CodexMcpServerConfig[] = [
+      const mcpServers: LlmMcpServerConfig[] = [
         ...(forgerMcpSession
           ? [{
               name: 'forger',
@@ -675,12 +685,20 @@ export class ChatOrchestrator {
         },
       };
 
-      const runProvider = async (includeRecoveryContext: boolean): Promise<CodexRunResult> => {
+      const runProvider = async (includeRecoveryContext: boolean): Promise<LlmProviderRunResult> => {
         const commonRunOptions = {
           ...commonRunOptionsBase,
           prompt: await buildPrompt(includeRecoveryContext),
           threadId: resolvedThreadId,
         };
+        if (run.provider === 'antigravity') {
+          return await this.sandboxRunner.runAntigravity({
+            ...commonRunOptions,
+            antigravityCliPath: antigravityCliPath as string,
+            effort: run.effort,
+            permissionMode: run.permissionMode,
+          });
+        }
         return run.provider === 'claude'
           ? await this.sandboxRunner.runClaude({
               ...commonRunOptions,
@@ -697,7 +715,7 @@ export class ChatOrchestrator {
             });
       };
 
-      let assistantReply: CodexRunResult;
+      let assistantReply: LlmProviderRunResult;
       try {
         assistantReply = await runProvider(false);
       } catch (error) {
@@ -1051,7 +1069,7 @@ export class ChatOrchestrator {
   private updateThreadState(
     appId: string,
     threadId: string | undefined,
-    usageDelta: Partial<CodexUsage> | undefined,
+    usageDelta: Partial<LlmTokenUsage> | undefined,
     toolEvents: number,
   ): void {
     if (!threadId && !this.threadsByApp.has(appId)) {

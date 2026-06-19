@@ -141,9 +141,9 @@ test('personal agent runtime wires Forger and granted app MCP access', async () 
 
   assert.match(managerSource, /createForgerMcpSession/);
   assert.match(managerSource, /listenAppMcps\?\.\(input\.agent\.appIds, input\.run\.id\)/);
-  assert.match(managerSource, /buildMcpArgs\(mcpServers\)/);
-  assert.match(managerSource, /writeClaudeMcpConfig\(input\.workspaceRoot, mcpServers\)/);
-  assert.match(managerSource, /assertAllowedMcpServers\(result\.stdout, result\.stderr/);
+  assert.match(managerSource, /codexCliAdapter\.runConversation/);
+  assert.match(managerSource, /claudeCliAdapter\.run/);
+  assert.match(managerSource, /mcpServers,/);
   assert.match(mainProcessSource, /caller: 'personal-agent'/);
   assert.match(mainProcessSource, /officialToolActionIds: agent\.toolIds/);
   assert.match(mcpSource, /personal-agent/);
