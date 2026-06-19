@@ -34,13 +34,15 @@ test('LLM provider connection modal has shared localized provider content and of
   assert.match(dialogsSource, /https:\/\/transparency\.google\/intl\/en\/our-policies\/privacy-policy-terms-of-service/);
 });
 
-test('Antigravity sign in opens the shared connection modal before starting auth console', async () => {
+test('Antigravity sign in opens the shared connection modal before launching system Terminal login', async () => {
   const controllerSource = await readSource('src/renderer/app/RendererAppController.tsx');
   const viewSource = await readSource('src/renderer/app/RendererAppView.tsx');
   const dialogsSource = await readSource('src/renderer/app/RendererAppDialogs.tsx');
 
   assert.match(controllerSource, /antigravityConfigOpen/);
-  assert.match(controllerSource, /setAntigravityConfigOpen\(false\); setAntigravityAuthConsoleOpen\(true\)/);
+  assert.match(controllerSource, /getDesktopApi\(\)\.connectAntigravityAuth\(\)/);
+  assert.doesNotMatch(controllerSource, /getDesktopApi\(\)\.startAntigravityAuthSession\(\)/);
+  assert.match(controllerSource, /setAntigravityAuthConsoleOpen\(false\)/);
   assert.match(viewSource, /onOpenAntigravityConfig=\{\(\) => setAntigravityConfigOpen\(true\)\}/);
   assert.match(dialogsSource, /<LlmProviderConnectModal[\s\S]*provider="antigravity"[\s\S]*onConnect=\{handleConnectAntigravityAuth\}/);
 });
