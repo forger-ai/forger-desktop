@@ -1205,7 +1205,121 @@ const hasMacKeychainGenericPassword = async (service: string, account: string): 
   return result?.code === 0;
 };
 
+const ANTIGRAVITY_WINDOWS_CREDENTIAL_PATTERNS = [
+  'legacygeneric:target=gemini:antigravity',
+  'gemini:antigravity',
+  'antigravity',
+  'agy',
+];
+
+const findAntigravityWindowsCredentialPattern = (text: string): string | null => {
+  const normalized = text.toLowerCase();
+  return ANTIGRAVITY_WINDOWS_CREDENTIAL_PATTERNS.find((pattern) => normalized.includes(pattern)) ?? null;
+};
+
+const hasWindowsAntigravityCredential = async (): Promise<boolean> => {
+  if (process.platform !== 'win32') {
+    return false;
+  }
+  const result = await runCommandCapture('cmdkey.exe', ['/list'], {
+    cwd: app.getPath('userData'),
+    timeoutMs: 5_000,
+  }).catch((error) => {
+    void appendInstallLog('antigravity_auth:windows_credential_check_failed', {
+      detail: failureDiagnostic(error, 'antigravity_windows_credential_check_failed').technicalCode,
+      error: serializeErrorForInstallLog(error),
+    });
+    return null;
+  });
+  const output = result?.code === 0 ? `${result.stdout}\n${result.stderr}` : '';
+  const matchedPattern = findAntigravityWindowsCredentialPattern(output);
+  await appendInstallLog('antigravity_auth:windows_credential_checked', {
+    found: Boolean(matchedPattern),
+    matchedPattern: matchedPattern ?? undefined,
+  });
+  return Boolean(matchedPattern);
+};
+
+const ANTIGRAVITY_OAUTH_SUCCESS_PATTERNS = [
+  { name: 'oauth_authenticated_successfully', pattern: /OAuth:\s+authenticated successfully/i },
+  { name: 'consumer_oauth_authentication_completed', pattern: /consumerOAuth:\s+authentication completed successfully/i },
+  { name: 'consumer_oauth_authenticated_successfully', pattern: /consumerOAuth:\s+authenticated successfully/i },
+];
+const ANTIGRAVITY_LOG_TAIL_BYTES = 64 * 1024;
+const ANTIGRAVITY_MAX_LOG_FILES = 12;
+
+const readFileTail = async (filePath: string, maxBytes: number): Promise<string> => {
+  const handle = await fs.open(filePath, 'r');
+  try {
+    const stat = await handle.stat();
+    const length = Math.min(stat.size, maxBytes);
+    const buffer = Buffer.alloc(length);
+    await handle.read(buffer, 0, length, Math.max(0, stat.size - length));
+    return buffer.toString('utf8');
+  } finally {
+    await handle.close().catch(() => undefined);
+  }
+};
+
+const findAntigravityOAuthSuccessPattern = (text: string): string | null =>
+  ANTIGRAVITY_OAUTH_SUCCESS_PATTERNS.find((entry) => entry.pattern.test(text))?.name ?? null;
+
+const listRecentAntigravityLogFiles = async (directory: string): Promise<string[]> => {
+  const entries = await fs.readdir(directory, { withFileTypes: true }).catch(() => []);
+  const stats = await Promise.all(entries
+    .filter((entry) => entry.isFile() && /^cli-.*\.log$/i.test(entry.name))
+    .map(async (entry) => {
+      const filePath = path.join(directory, entry.name);
+      const stat = await fs.stat(filePath).catch(() => null);
+      return stat ? { filePath, mtimeMs: stat.mtimeMs } : null;
+    }));
+  return stats
+    .filter((entry): entry is { filePath: string; mtimeMs: number } => Boolean(entry))
+    .sort((left, right) => right.mtimeMs - left.mtimeMs)
+    .slice(0, ANTIGRAVITY_MAX_LOG_FILES)
+    .map((entry) => entry.filePath);
+};
+
+const hasAntigravityOAuthSuccessLog = async (): Promise<boolean> => {
+  const home = app.getPath('home');
+  const directories = [
+    path.join(home, '.gemini', 'antigravity-cli', 'log'),
+    path.join(home, '.gemini', 'antigravity', 'log'),
+  ];
+  let checkedFiles = 0;
+  for (const directory of directories) {
+    const files = await listRecentAntigravityLogFiles(directory);
+    for (const filePath of files) {
+      checkedFiles += 1;
+      try {
+        const matchedPattern = findAntigravityOAuthSuccessPattern(await readFileTail(filePath, ANTIGRAVITY_LOG_TAIL_BYTES));
+        if (matchedPattern) {
+          await appendInstallLog('antigravity_auth:oauth_success_log_checked', {
+            found: true,
+            checkedFiles,
+            matchedPattern,
+          });
+          return true;
+        }
+      } catch (error) {
+        await appendInstallLog('antigravity_auth:oauth_success_log_read_failed', {
+          detail: failureDiagnostic(error, 'antigravity_oauth_success_log_read_failed').technicalCode,
+          error: serializeErrorForInstallLog(error),
+        });
+      }
+    }
+  }
+  await appendInstallLog('antigravity_auth:oauth_success_log_checked', {
+    found: false,
+    checkedFiles,
+  });
+  return false;
+};
+
 const hasAntigravityLocalState = async (): Promise<boolean> => {
+  if (await hasWindowsAntigravityCredential()) {
+    return true;
+  }
   if (await hasMacKeychainGenericPassword('gemini', 'antigravity')) {
     return true;
   }
@@ -1221,6 +1335,9 @@ const hasAntigravityLocalState = async (): Promise<boolean> => {
     } catch {
       // Keep status checks best-effort and non-blocking.
     }
+  }
+  if (await hasAntigravityOAuthSuccessLog()) {
+    return true;
   }
   return false;
 };
