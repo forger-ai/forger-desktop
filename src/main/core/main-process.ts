@@ -285,6 +285,7 @@ const updateCodexDefaults = async (input: UpdateCodexDefaultsInput): Promise<Set
 const updateAgentDefaults = async (input: UpdateAgentDefaultsInput): Promise<Settings> => await getSettingsServiceController().updateAgentDefaults(input);
 const updateDeveloperMode = async (input: UpdateDeveloperModeInput): Promise<Settings> => await getSettingsServiceController().updateDeveloperMode(input);
 const markProviderConnected = async (provider: AgentProvider): Promise<void> => await getSettingsServiceController().markProviderConnected(provider);
+const markProviderDisconnected = async (provider: AgentProvider): Promise<void> => await getSettingsServiceController().markProviderDisconnected(provider);
 const chooseAgentRuntime = async (requested?: AgentRuntimeRequest): Promise<AgentRuntime> => await getSettingsServiceController().chooseAgentRuntime(requested);
 const chooseConnectedProvider = async (): Promise<AgentProvider> => await getSettingsServiceController().chooseConnectedProvider();
 const withAgentDefaults = <T extends { model?: string; reasoningEffort?: CodexReasoningEffort; runtime?: AgentRuntime; runtimeRecommendations?: AgentRuntimeRecommendations }>(input: T, defaults: AgentDefaults = normalizeSettings(settings).agentDefaults): T => getSettingsServiceController().withAgentDefaults(input, defaults);
@@ -809,6 +810,7 @@ const createAgentAuthDeps = () => ({
   getLogsRoot,
   getTempRoot,
   markProviderConnected,
+  markProviderDisconnected,
   path,
   registry,
   resolveInstalledManifest,
@@ -852,6 +854,7 @@ const disconnectCodexAuth = async (): Promise<{ success: boolean; userMessage: s
 const reinstallCodex = async (): Promise<{ success: boolean; userMessage: string; status?: CodexAuthStatus } & FailureDiagnosticFields> => await getAgentAuthController().reinstallCodex();
 const getClaudeAuthStatus = async (): Promise<ClaudeAuthStatus> => await getAgentAuthController().getClaudeAuthStatus();
 const connectClaudeAuth = async (): Promise<{ success: boolean; userMessage: string; status?: ClaudeAuthStatus } & FailureDiagnosticFields> => await getAgentAuthController().connectClaudeAuth();
+const disconnectClaudeAuth = async (): Promise<{ success: boolean; userMessage: string; status?: ClaudeAuthStatus } & FailureDiagnosticFields> => await getAgentAuthController().disconnectClaudeAuth();
 const reinstallClaude = async (): Promise<{ success: boolean; userMessage: string; status?: ClaudeAuthStatus } & FailureDiagnosticFields> => await getAgentAuthController().reinstallClaude();
 const getAntigravityAuthStatus = async (): Promise<AntigravityAuthStatus> => await getAgentAuthController().getAntigravityAuthStatus();
 const resolveAntigravityCliPath = async (): Promise<string | null> => (await getAgentAuthController().resolveAntigravityCli())?.path ?? null;
@@ -859,6 +862,7 @@ const connectAntigravityAuth = async (): Promise<{ success: boolean; userMessage
 const startAntigravityAuthSession = async (onEvent: (event: AntigravityAuthSessionEvent) => void): Promise<AntigravityAuthSessionStartResult & FailureDiagnosticFields> => await getAgentAuthController().startAntigravityAuthSession(onEvent);
 const writeAntigravityAuthSession = async (sessionId: string, input: string): Promise<{ success: boolean; userMessage?: string } & FailureDiagnosticFields> => await getAgentAuthController().writeAntigravityAuthSession(sessionId, input);
 const cancelAntigravityAuthSession = async (sessionId: string): Promise<{ success: boolean; userMessage?: string } & FailureDiagnosticFields> => await getAgentAuthController().cancelAntigravityAuthSession(sessionId);
+const disconnectAntigravityAuth = async (): Promise<{ success: boolean; userMessage: string; status?: AntigravityAuthStatus } & FailureDiagnosticFields> => await getAgentAuthController().disconnectAntigravityAuth();
 const reinstallAntigravity = async (): Promise<{ success: boolean; userMessage: string; status?: AntigravityAuthStatus } & FailureDiagnosticFields> => await getAgentAuthController().reinstallAntigravity();
 
 const createInstalledAppLifecycleDeps = () => ({
@@ -1217,10 +1221,12 @@ const getMainProcessIpcDeps = () => ({
   cloudDeviceManager,
   cloudSyncSettings,
   connectClaudeAuth,
+  disconnectClaudeAuth,
   connectAntigravityAuth,
   startAntigravityAuthSession,
   writeAntigravityAuthSession,
   cancelAntigravityAuthSession,
+  disconnectAntigravityAuth,
   connectCodexAuth,
   createLocalAppFromSkeleton,
   createRemoteAppBackup,

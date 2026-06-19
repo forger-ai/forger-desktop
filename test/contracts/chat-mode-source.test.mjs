@@ -81,9 +81,10 @@ test('renderer separates installed Apps from curated Catalog in navigation and c
   assert.match(viewSource, /initialSubview=\{settingsInitialSubview \?\? undefined\}/);
   assert.match(settingsSource, /initialSubview\?: SettingsSubview/);
   assert.match(settingsSource, /setSettingsSubview\(initialSubview\)/);
-  assert.match(settingsSource, /llmProviderHowItWorksTitle/);
-  assert.match(settingsSource, /llmProviderHowItWorksLocal/);
-  assert.match(settingsSource, /agentDefaultModelsTitle/);
+  assert.doesNotMatch(settingsSource, /llmProviderHowItWorksTitle/);
+  assert.match(settingsSource, /providerDefaultModelLabel/);
+  assert.match(settingsSource, /chatGptLogoUrl/);
+  assert.doesNotMatch(settingsSource, /agentDefaultModelsTitle/);
   assert.match(englishSource, /Forger uses local agent tools/);
   assert.match(spanishSource, /Forger usa herramientas locales de agente/);
   assert.match(viewSource, /initialProfileUsername=\{socialProfileUsername\}/);

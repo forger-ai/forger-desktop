@@ -33,10 +33,7 @@ import type {
   AppSecretsState,
   AgentProvider,
   AgentRuntime,
-  ClaudeEffort,
-  ClaudeModelOption,
-  CodexModelOption,
-  CodexReasoningEffort,
+  AntigravityEffort,
   DeveloperPathState,
   ForgerAccountSession,
   InstallAppResult,
@@ -47,6 +44,8 @@ import type { AppDictionary } from '@renderer/i18n';
 import { AppSecretsPanel } from '@renderer/components/AppSecretsDialog';
 import { AppViewActions } from './app-view/AppViewActions';
 import { PromptPreviewDialog, type PromptPreview } from './app-view/PromptPreviewDialog';
+import type { RuntimeProviderControls } from '@renderer/runtime-provider-controls';
+import { getAntigravitySupportedEfforts } from '@shared/agent-runtime-registry';
 
 interface AppViewProps {
   details: AppDetails | null;
@@ -60,10 +59,7 @@ interface AppViewProps {
   secretsBusy: boolean;
   account: ForgerAccountSession;
   providerOptions: Array<{ label: string; value: AgentProvider | 'auto' }>;
-  modelOptions: CodexModelOption[];
-  reasoningOptions: { label: string; value: CodexReasoningEffort }[];
-  claudeModelOptions: ClaudeModelOption[];
-  claudeEffortOptions: { label: string; value: ClaudeEffort }[];
+  runtimeProviderControls: RuntimeProviderControls;
   codexDefaults: Settings['codexDefaults'];
   developerMode: Settings['developerMode'];
   onBack: () => void;
@@ -155,10 +151,7 @@ export function AppView({
   secretsBusy,
   account,
   providerOptions,
-  modelOptions,
-  reasoningOptions,
-  claudeModelOptions,
-  claudeEffortOptions,
+  runtimeProviderControls,
   codexDefaults,
   developerMode,
   onBack,
@@ -535,8 +528,14 @@ export function AppView({
     : selectedPrompt?.runtimeSource === 'manifest'
       ? t.appView.promptSettingApp
       : t.appView.promptSettingGlobal;
-  const promptModelOptions = promptRuntimeDraft.provider === 'claude' ? claudeModelOptions : modelOptions;
-  const promptEffortOptions = promptRuntimeDraft.provider === 'claude' ? claudeEffortOptions : reasoningOptions;
+  const promptRuntimeControl = runtimeProviderControls[promptRuntimeDraft.provider];
+  const promptModelOptions = promptRuntimeControl.modelOptions;
+  const promptEffortOptions = promptRuntimeDraft.provider === 'antigravity'
+    ? promptRuntimeControl.effortOptions.filter((option) => getAntigravitySupportedEfforts(promptRuntimeDraft.model).includes(option.value as AntigravityEffort))
+    : promptRuntimeControl.effortOptions;
+  const promptEffortValue = promptEffortOptions.some((option) => option.value === promptRuntimeDraft.effort)
+    ? promptRuntimeDraft.effort
+    : promptModelOptions.find((option) => option.realModelName === promptRuntimeDraft.model)?.defaultEffort ?? promptEffortOptions[0]?.value ?? 'medium';
   const promptsContent = (
     <Stack spacing={1.5}>
       <Stack spacing={0.5}>
@@ -654,11 +653,9 @@ export function AppView({
                   value={promptRuntimeDraft.provider}
                   onChange={(event) => {
                     const provider = event.target.value as AgentProvider;
-                    const options = provider === 'claude' ? claudeModelOptions : modelOptions;
-                    const nextModel = options[0]?.realModelName ?? promptRuntimeDraft.model;
-                    const nextEffort = provider === 'claude'
-                      ? (claudeModelOptions[0]?.defaultEffort ?? 'medium')
-                      : (modelOptions[0]?.defaultReasoningEffort ?? 'medium');
+                    const controls = runtimeProviderControls[provider];
+                    const nextModel = controls.modelOptions[0]?.realModelName ?? promptRuntimeDraft.model;
+                    const nextEffort = controls.modelOptions[0]?.defaultEffort ?? controls.effortOptions[0]?.value ?? 'medium';
                     setPromptRuntimeDraft((current) => ({ provider, model: nextModel, effort: nextEffort, permissionMode: current.permissionMode }));
                   }}
                   helperText={runtimeEdited ? t.appView.promptSettingCustom : selectedPromptRuntimeSource}
@@ -675,7 +672,11 @@ export function AppView({
                   size="small"
                   label={t.appView.promptModelLabel}
                   value={promptRuntimeDraft.model}
-                  onChange={(event) => setPromptRuntimeDraft((current) => ({ ...current, model: event.target.value }))}
+                  onChange={(event) => {
+                    const model = event.target.value;
+                    const option = promptModelOptions.find((entry) => entry.realModelName === model);
+                    setPromptRuntimeDraft((current) => ({ ...current, model, effort: option?.defaultEffort ?? current.effort }));
+                  }}
                   helperText={t.appView.promptRuntimeHelper}
                   fullWidth
                 >
@@ -689,9 +690,10 @@ export function AppView({
                   select
                   size="small"
                   label={t.appView.promptThinkingLabel}
-                  value={promptRuntimeDraft.effort}
+                  value={promptEffortValue}
                   onChange={(event) => setPromptRuntimeDraft((current) => ({ ...current, effort: event.target.value as AgentRuntime['effort'] }))}
                   helperText={runtimeEdited ? t.appView.promptSettingCustom : selectedPromptRuntimeSource}
+                  disabled={promptEffortOptions.length <= 1}
                   fullWidth
                 >
                   {promptEffortOptions.map((option) => (

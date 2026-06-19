@@ -695,6 +695,7 @@ export class ChatOrchestrator {
           return await this.sandboxRunner.runAntigravity({
             ...commonRunOptions,
             antigravityCliPath: antigravityCliPath as string,
+            effort: run.effort,
             permissionMode: run.permissionMode,
           });
         }

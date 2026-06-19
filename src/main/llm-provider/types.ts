@@ -1,5 +1,5 @@
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
-import type { AgentPermissionMode, LlmProviderKey } from '../../shared/types';
+import type { AgentEffort, AgentPermissionMode, LlmProviderKey } from '../../shared/types';
 
 export interface LlmMcpServerConfig {
   name: string;
@@ -60,6 +60,7 @@ export interface LlmCliRunInput {
   sharedRoots?: string[];
   prompt: string;
   model?: string;
+  effort?: AgentEffort;
   conversationId?: string | null;
   addDirs?: string[];
   permissionMode?: AgentPermissionMode;

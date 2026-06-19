@@ -1,8 +1,5 @@
 import type { AgentToolDefinition, AgentToolId } from '../../shared/types';
 import {
-  CLAUDE_EFFORT_OPTIONS,
-  CLAUDE_MODEL_OPTIONS,
-  CODEX_MODEL_OPTIONS,
   CODEX_REASONING_OPTIONS,
   LLM_PROVIDER_KEYS,
   LLM_PROVIDER_REGISTRY,

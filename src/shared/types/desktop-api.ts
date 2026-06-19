@@ -193,6 +193,7 @@ export interface ForgerDesktopApi {
   reinstallCodex: () => Promise<{ success: boolean; userMessage: string; status?: CodexAuthStatus } & FailureDiagnosticFields>;
   getClaudeAuthStatus: () => Promise<ClaudeAuthStatus>;
   connectClaudeAuth: () => Promise<{ success: boolean; userMessage: string; status?: ClaudeAuthStatus } & FailureDiagnosticFields>;
+  disconnectClaudeAuth: () => Promise<{ success: boolean; userMessage: string; status?: ClaudeAuthStatus } & FailureDiagnosticFields>;
   reinstallClaude: () => Promise<{ success: boolean; userMessage: string; status?: ClaudeAuthStatus } & FailureDiagnosticFields>;
   getAntigravityAuthStatus: () => Promise<AntigravityAuthStatus>;
   connectAntigravityAuth: () => Promise<{ success: boolean; userMessage: string; status?: AntigravityAuthStatus } & FailureDiagnosticFields>;
@@ -200,6 +201,7 @@ export interface ForgerDesktopApi {
   writeAntigravityAuthSession: (input: { sessionId: string; input: string }) => Promise<{ success: boolean; userMessage?: string } & FailureDiagnosticFields>;
   cancelAntigravityAuthSession: (sessionId: string) => Promise<{ success: boolean; userMessage?: string } & FailureDiagnosticFields>;
   onAntigravityAuthSessionEvent: (listener: (event: AntigravityAuthSessionEvent) => void) => () => void;
+  disconnectAntigravityAuth: () => Promise<{ success: boolean; userMessage: string; status?: AntigravityAuthStatus } & FailureDiagnosticFields>;
   reinstallAntigravity: () => Promise<{ success: boolean; userMessage: string; status?: AntigravityAuthStatus } & FailureDiagnosticFields>;
   prepareDesktopErrorReport: (input: DesktopErrorReportPreview) => Promise<DesktopErrorReportPreview>;
   submitDesktopErrorReport: (input: DesktopErrorReportPreview) => Promise<{ success: boolean; userMessage: string; technicalCode?: string }>;

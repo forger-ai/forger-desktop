@@ -562,6 +562,7 @@ export class AppAgentConversationManager {
             sharedRoots: Array.from(new Set([runRoot])),
             prompt,
             model,
+            effort: runtime.effort,
             conversationId: conversation.threadId,
             addDirs: antigravityAdditionalRoots,
             permissionMode: runtime.permissionMode,

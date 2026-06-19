@@ -186,4 +186,5 @@ export interface AntigravityModelOption {
   displayModelName: string;
   realModelName: string;
   defaultEffort: AntigravityEffort;
+  cliModelByEffort: Partial<Record<AntigravityEffort, string>>;
 }

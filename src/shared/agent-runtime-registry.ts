@@ -33,7 +33,7 @@ export const DEFAULT_CODEX_MODEL = 'gpt-5.4';
 export const DEFAULT_CODEX_REASONING_EFFORT: CodexReasoningEffort = 'medium';
 export const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-4-6';
 export const DEFAULT_CLAUDE_EFFORT: ClaudeEffort = 'medium';
-export const DEFAULT_ANTIGRAVITY_MODEL = 'gemini-3.5-flash-medium';
+export const DEFAULT_ANTIGRAVITY_MODEL = 'gemini-3.5-flash';
 export const DEFAULT_ANTIGRAVITY_EFFORT: AntigravityEffort = 'medium';
 export const DEFAULT_AGENT_PROVIDER: AgentProviderPreference = 'auto';
 export const LLM_PROVIDER_KEYS: AgentProvider[] = ['codex', 'claude', 'antigravity'];
@@ -85,14 +85,49 @@ export const CLAUDE_EFFORT_OPTIONS: Array<{ label: string; value: ClaudeEffort }
 ];
 
 export const ANTIGRAVITY_MODEL_OPTIONS: AntigravityModelOption[] = [
-  { displayModelName: 'Gemini 3.5 Flash (Medium)', realModelName: 'gemini-3.5-flash-medium', defaultEffort: 'medium' },
-  { displayModelName: 'Gemini 3.5 Flash (High)', realModelName: 'gemini-3.5-flash-high', defaultEffort: 'high' },
-  { displayModelName: 'Gemini 3.5 Flash (Low)', realModelName: 'gemini-3.5-flash-low', defaultEffort: 'low' },
-  { displayModelName: 'Gemini 3.1 Pro (Low)', realModelName: 'gemini-3.1-pro-low', defaultEffort: 'low' },
-  { displayModelName: 'Gemini 3.1 Pro (High)', realModelName: 'gemini-3.1-pro-high', defaultEffort: 'high' },
-  { displayModelName: 'Claude Sonnet 4.6 (Thinking)', realModelName: 'claude-sonnet-4.6-thinking', defaultEffort: 'high' },
-  { displayModelName: 'Claude Opus 4.6 (Thinking)', realModelName: 'claude-opus-4.6-thinking', defaultEffort: 'high' },
-  { displayModelName: 'GPT-OSS 120B (Medium)', realModelName: 'gpt-oss-120b-medium', defaultEffort: 'medium' },
+  {
+    displayModelName: 'Gemini 3.5 Flash',
+    realModelName: 'gemini-3.5-flash',
+    defaultEffort: 'medium',
+    cliModelByEffort: {
+      low: 'gemini-3.5-flash-low',
+      medium: 'gemini-3.5-flash-medium',
+      high: 'gemini-3.5-flash-high',
+    },
+  },
+  {
+    displayModelName: 'Gemini 3.1 Pro',
+    realModelName: 'gemini-3.1-pro',
+    defaultEffort: 'high',
+    cliModelByEffort: {
+      low: 'gemini-3.1-pro-low',
+      high: 'gemini-3.1-pro-high',
+    },
+  },
+  {
+    displayModelName: 'Claude Sonnet 4.6 Thinking',
+    realModelName: 'claude-sonnet-4.6-thinking',
+    defaultEffort: 'high',
+    cliModelByEffort: {
+      high: 'claude-sonnet-4.6-thinking',
+    },
+  },
+  {
+    displayModelName: 'Claude Opus 4.6 Thinking',
+    realModelName: 'claude-opus-4.6-thinking',
+    defaultEffort: 'high',
+    cliModelByEffort: {
+      high: 'claude-opus-4.6-thinking',
+    },
+  },
+  {
+    displayModelName: 'GPT-OSS 120B',
+    realModelName: 'gpt-oss-120b',
+    defaultEffort: 'medium',
+    cliModelByEffort: {
+      medium: 'gpt-oss-120b-medium',
+    },
+  },
 ];
 
 export const ANTIGRAVITY_EFFORT_OPTIONS: Array<{ label: string; value: AntigravityEffort }> = [
@@ -170,6 +205,14 @@ const CODEX_EFFORTS = new Set(CODEX_REASONING_OPTIONS.map((option) => option.val
 const CLAUDE_MODEL_LOOKUP_OPTIONS = [...CLAUDE_MODEL_OPTIONS, ...CLAUDE_LEGACY_MODEL_OPTIONS];
 const CLAUDE_MODELS = new Set(CLAUDE_MODEL_LOOKUP_OPTIONS.map((option) => option.realModelName));
 const CLAUDE_EFFORTS = new Set(CLAUDE_EFFORT_OPTIONS.map((option) => option.value));
+const ANTIGRAVITY_LEGACY_MODEL_ALIASES = new Map<string, { model: string; effort: AntigravityEffort }>(
+  ANTIGRAVITY_MODEL_OPTIONS.flatMap((option) =>
+    Object.entries(option.cliModelByEffort).map(([effort, cliModel]) => [
+      cliModel,
+      { model: option.realModelName, effort: effort as AntigravityEffort },
+    ]),
+  ),
+);
 const ANTIGRAVITY_MODELS = new Set(ANTIGRAVITY_MODEL_OPTIONS.map((option) => option.realModelName));
 const ANTIGRAVITY_EFFORTS = new Set(ANTIGRAVITY_EFFORT_OPTIONS.map((option) => option.value));
 
@@ -247,8 +290,50 @@ export const getAntigravityModelOption = (model: unknown): AntigravityModelOptio
   return ANTIGRAVITY_MODEL_OPTIONS.find((option) => option.realModelName === normalized);
 };
 
+export const getAntigravityLegacyModelAlias = (model: unknown): { model: string; effort: AntigravityEffort } | undefined => {
+  const normalized = normalizeString(model);
+  return normalized ? ANTIGRAVITY_LEGACY_MODEL_ALIASES.get(normalized) : undefined;
+};
+
+export const getAntigravitySupportedEfforts = (model: unknown): AntigravityEffort[] => {
+  const option = getAntigravityModelOption(model);
+  return option
+    ? ANTIGRAVITY_EFFORT_OPTIONS.map((entry) => entry.value).filter((effort) => Boolean(option.cliModelByEffort[effort]))
+    : ANTIGRAVITY_EFFORT_OPTIONS.map((entry) => entry.value);
+};
+
 export const getDefaultAntigravityEffort = (model: unknown): AntigravityEffort =>
-  getAntigravityModelOption(model)?.defaultEffort ?? DEFAULT_ANTIGRAVITY_EFFORT;
+  getAntigravityModelOption(model)?.defaultEffort ?? getAntigravityLegacyModelAlias(model)?.effort ?? DEFAULT_ANTIGRAVITY_EFFORT;
+
+export const normalizeAntigravityModelAndEffort = (
+  model: unknown,
+  effort?: unknown,
+  fallbackModel = DEFAULT_ANTIGRAVITY_MODEL,
+  fallbackEffort: AntigravityEffort = DEFAULT_ANTIGRAVITY_EFFORT,
+): { model: string; effort: AntigravityEffort } => {
+  const legacyAlias = getAntigravityLegacyModelAlias(model);
+  const canonicalFallbackModel = normalizeAntigravityModel(fallbackModel, DEFAULT_ANTIGRAVITY_MODEL);
+  const canonicalModel = legacyAlias?.model ?? normalizeAntigravityModel(model, canonicalFallbackModel);
+  const option = getAntigravityModelOption(canonicalModel);
+  const preferredEffort = legacyAlias && effort === undefined ? legacyAlias.effort : effort;
+  const normalizedEffort = normalizeAntigravityEffort(
+    preferredEffort,
+    option?.defaultEffort ?? fallbackEffort,
+  );
+  const effortValue = option?.cliModelByEffort[normalizedEffort]
+    ? normalizedEffort
+    : option?.defaultEffort ?? fallbackEffort;
+  return {
+    model: canonicalModel,
+    effort: effortValue,
+  };
+};
+
+export const resolveAntigravityCliModel = (model: unknown, effort: unknown): string => {
+  const normalized = normalizeAntigravityModelAndEffort(model, effort);
+  const option = getAntigravityModelOption(normalized.model);
+  return option?.cliModelByEffort[normalized.effort] ?? normalized.model;
+};
 
 export const isAgentProvider = (value: unknown): value is AgentProvider =>
   LLM_PROVIDER_KEYS.includes(value as AgentProvider);
@@ -362,7 +447,7 @@ export const normalizeClaudeEffort = (value: unknown, fallback: ClaudeEffort = D
   isClaudeEffort(value) ? value as ClaudeEffort : fallback;
 
 export const normalizeAntigravityModel = (value: unknown, fallback = DEFAULT_ANTIGRAVITY_MODEL): string =>
-  isAntigravityModel(value) ? value as string : fallback;
+  isAntigravityModel(value) ? value as string : getAntigravityLegacyModelAlias(value)?.model ?? fallback;
 
 export const normalizeAntigravityEffort = (value: unknown, fallback: AntigravityEffort = DEFAULT_ANTIGRAVITY_EFFORT): AntigravityEffort =>
   isAntigravityEffort(value) ? value as AntigravityEffort : fallback;
@@ -410,11 +495,15 @@ export const normalizeAgentRuntime = (
     };
   }
   if (provider === 'antigravity') {
-    const normalizedModel = normalizeAntigravityModel(model, model);
+    const normalized = normalizeAntigravityModelAndEffort(
+      model,
+      record?.effort ?? fallback?.effort ?? fallback?.reasoningEffort,
+      model,
+    );
     return {
       provider,
-      model: normalizedModel,
-      effort: normalizeAntigravityEffort(record?.effort ?? fallback?.effort ?? fallback?.reasoningEffort, getDefaultAntigravityEffort(normalizedModel)),
+      model: normalized.model,
+      effort: normalized.effort,
       ...(permissionMode ? { permissionMode } : {}),
     };
   }
@@ -450,10 +539,16 @@ export const resolveAgentRuntime = (
     };
   }
   if (normalized?.provider === 'antigravity') {
+    const antigravity = normalizeAntigravityModelAndEffort(
+      normalized.model,
+      normalized.effort,
+      defaults.antigravity.model,
+      defaults.antigravity.effort,
+    );
     return {
       provider: 'antigravity',
-      model: normalizeAntigravityModel(normalized.model, defaults.antigravity.model),
-      effort: normalizeAntigravityEffort(normalized.effort, defaults.antigravity.effort),
+      model: antigravity.model,
+      effort: antigravity.effort,
       permissionMode: normalizeAgentPermissionMode(normalized.permissionMode),
     };
   }
@@ -520,10 +615,16 @@ export const runtimeFromDefaultsForProvider = (
     };
   }
   if (provider === 'antigravity') {
+    const antigravity = normalizeAntigravityModelAndEffort(
+      defaults.antigravity.model,
+      defaults.antigravity.effort,
+      DEFAULT_ANTIGRAVITY_MODEL,
+      DEFAULT_ANTIGRAVITY_EFFORT,
+    );
     return {
       provider,
-      model: normalizeAntigravityModel(defaults.antigravity.model, DEFAULT_ANTIGRAVITY_MODEL),
-      effort: normalizeAntigravityEffort(defaults.antigravity.effort, DEFAULT_ANTIGRAVITY_EFFORT),
+      model: antigravity.model,
+      effort: antigravity.effort,
     };
   }
   return {

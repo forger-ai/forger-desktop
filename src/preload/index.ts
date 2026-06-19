@@ -161,6 +161,7 @@ const IPC_CHANNELS = {
   reinstallCodex: 'forger:reinstall-codex',
   getClaudeAuthStatus: 'forger:get-claude-auth-status',
   connectClaudeAuth: 'forger:connect-claude-auth',
+  disconnectClaudeAuth: 'forger:disconnect-claude-auth',
   reinstallClaude: 'forger:reinstall-claude',
   getAntigravityAuthStatus: 'forger:get-antigravity-auth-status',
   connectAntigravityAuth: 'forger:connect-antigravity-auth',
@@ -168,6 +169,7 @@ const IPC_CHANNELS = {
   writeAntigravityAuthSession: 'forger:write-antigravity-auth-session',
   cancelAntigravityAuthSession: 'forger:cancel-antigravity-auth-session',
   antigravityAuthSessionEvent: 'forger:antigravity-auth-session:event',
+  disconnectAntigravityAuth: 'forger:disconnect-antigravity-auth',
   reinstallAntigravity: 'forger:reinstall-antigravity',
   prepareDesktopErrorReport: 'forger:error-report:prepare',
   submitDesktopErrorReport: 'forger:error-report:submit',
@@ -503,6 +505,7 @@ const api: ForgerDesktopApi = {
   reinstallCodex: () => ipcRenderer.invoke(IPC_CHANNELS.reinstallCodex),
   getClaudeAuthStatus: () => ipcRenderer.invoke(IPC_CHANNELS.getClaudeAuthStatus),
   connectClaudeAuth: () => ipcRenderer.invoke(IPC_CHANNELS.connectClaudeAuth),
+  disconnectClaudeAuth: () => ipcRenderer.invoke(IPC_CHANNELS.disconnectClaudeAuth),
   reinstallClaude: () => ipcRenderer.invoke(IPC_CHANNELS.reinstallClaude),
   getAntigravityAuthStatus: () => ipcRenderer.invoke(IPC_CHANNELS.getAntigravityAuthStatus),
   connectAntigravityAuth: () => ipcRenderer.invoke(IPC_CHANNELS.connectAntigravityAuth),
@@ -518,6 +521,7 @@ const api: ForgerDesktopApi = {
       ipcRenderer.removeListener(IPC_CHANNELS.antigravityAuthSessionEvent, wrapped);
     };
   },
+  disconnectAntigravityAuth: () => ipcRenderer.invoke(IPC_CHANNELS.disconnectAntigravityAuth),
   reinstallAntigravity: () => ipcRenderer.invoke(IPC_CHANNELS.reinstallAntigravity),
   prepareDesktopErrorReport: (input) => ipcRenderer.invoke(IPC_CHANNELS.prepareDesktopErrorReport, input),
   submitDesktopErrorReport: (input) => ipcRenderer.invoke(IPC_CHANNELS.submitDesktopErrorReport, input),

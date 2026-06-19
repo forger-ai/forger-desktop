@@ -273,6 +273,17 @@ test('agent runtime registry normalizes providers, defaults, fallbacks, and runt
   assert.equal(runtimeRegistry.getAgentModelOptions('claude')[0].realModelName, 'claude-opus-4-8');
   assert.equal(runtimeRegistry.getDefaultClaudeEffort('claude-opus-4-8'), 'high');
   assert.equal(runtimeRegistry.getAgentModelOptions('codex')[0].realModelName, 'gpt-5.5');
+  assert.deepEqual(runtimeRegistry.normalizeAntigravityModelAndEffort('gemini-3.5-flash-medium', undefined), {
+    model: 'gemini-3.5-flash',
+    effort: 'medium',
+  });
+  assert.deepEqual(runtimeRegistry.normalizeAntigravityModelAndEffort('gemini-3.1-pro', 'medium'), {
+    model: 'gemini-3.1-pro',
+    effort: 'high',
+  });
+  assert.deepEqual(runtimeRegistry.getAntigravitySupportedEfforts('gemini-3.1-pro'), ['low', 'high']);
+  assert.equal(runtimeRegistry.resolveAntigravityCliModel('gemini-3.5-flash', 'high'), 'gemini-3.5-flash-high');
+  assert.equal(runtimeRegistry.resolveAntigravityCliModel('gpt-oss-120b', 'high'), 'gpt-oss-120b-medium');
   assert.equal(runtimeRegistry.legacyCodexRuntime(), undefined);
   assert.equal(runtimeRegistry.legacyCodexRuntime({}), undefined);
   assert.deepEqual(runtimeRegistry.legacyCodexRuntime({ model: 'gpt-5.3-codex', effort: 'xhigh' }), {

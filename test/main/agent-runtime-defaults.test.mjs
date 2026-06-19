@@ -23,9 +23,9 @@ const agentProviderRegistry = () => createAgentProviderRuntimeRegistry({
     effortValues: ['low', 'medium', 'high', 'xhigh', 'max'],
   },
   antigravity: {
-    defaultModel: 'gemini-3.5-flash-medium',
+    defaultModel: 'gemini-3.5-flash',
     defaultEffort: 'medium',
-    modelValues: ['gemini-3.5-flash-medium', 'gemini-3.5-flash-high'],
+    modelValues: ['gemini-3.5-flash', 'gemini-3.1-pro'],
     effortValues: ['low', 'medium', 'high'],
   },
 });
@@ -43,12 +43,12 @@ const createController = async (overrides = {}) => {
       llmProviderDefaults: {
         codex: { model: 'gpt-5.4-mini', reasoningEffort: 'high' },
         claude: { model: 'opus', effort: 'max' },
-        antigravity: { model: 'gemini-3.5-flash-high', effort: 'high' },
+        antigravity: { model: 'gemini-3.5-flash', effort: 'high' },
       },
       agentDefaults: {
         codex: { model: 'gpt-5.4-mini', reasoningEffort: 'high' },
         claude: { model: 'opus', effort: 'max' },
-        antigravity: { model: 'gemini-3.5-flash-high', effort: 'high' },
+        antigravity: { model: 'gemini-3.5-flash', effort: 'high' },
       },
       providerConnections: {},
       ...overrides.settings,

@@ -15,6 +15,7 @@ import {
 import { CodexConfigModal } from '@renderer/components/CodexConfigModal';
 import { ClaudeConfigModal } from '@renderer/components/ClaudeConfigModal';
 import { ForgerCloudModal } from '@renderer/components/ForgerCloudModal';
+import { LlmProviderConnectModal } from '@renderer/components/LlmProviderConnectModal';
 
 interface RendererAppDialogsProps {
   controller: Record<string, any>;
@@ -22,6 +23,7 @@ interface RendererAppDialogsProps {
 
 export function RendererAppDialogs({ controller }: RendererAppDialogsProps) {
   const {
+    getDesktopApi,
     t,
     pendingInstallGate,
     pendingInstallBusy,
@@ -53,6 +55,13 @@ export function RendererAppDialogs({ controller }: RendererAppDialogsProps) {
     handleConnectClaudeAuth,
     refreshClaudeAuthStatus,
     handleReinstallClaude,
+    antigravityConfigOpen,
+    antigravityAuthStatus,
+    antigravityAuthBusy,
+    closeAntigravityConfig,
+    handleConnectAntigravityAuth,
+    refreshAntigravityAuthStatus,
+    handleReinstallAntigravity,
     agentProviderConfigOpen,
     setAgentProviderConfigOpen,
     setCodexConfigOpen,
@@ -194,6 +203,7 @@ export function RendererAppDialogs({ controller }: RendererAppDialogsProps) {
         onClose={closeCodexConfig}
         onConnect={handleConnectCodexAuth}
         onRefresh={refreshCodexAuthStatus}
+        onOpenExternalUrl={(url) => void getDesktopApi().openExternalUrl(url)}
       />
 
       <ClaudeConfigModal
@@ -205,6 +215,29 @@ export function RendererAppDialogs({ controller }: RendererAppDialogsProps) {
         onConnect={handleConnectClaudeAuth}
         onRefresh={refreshClaudeAuthStatus}
         onReinstall={handleReinstallClaude}
+        onOpenExternalUrl={(url) => void getDesktopApi().openExternalUrl(url)}
+      />
+
+      <LlmProviderConnectModal
+        open={antigravityConfigOpen}
+        provider="antigravity"
+        providerName={t.llmProviderConnect.providers.antigravity.name}
+        providerOwner={t.llmProviderConnect.providers.antigravity.owner}
+        authenticated={antigravityAuthStatus.authenticated}
+        installed={antigravityAuthStatus.installed}
+        busy={antigravityAuthBusy}
+        title={t.llmProviderConnect.providers.antigravity.title}
+        body={t.llmProviderConnect.providers.antigravity.body}
+        steps={t.llmProviderConnect.providers.antigravity.steps}
+        termsUrl="https://antigravity.google/terms"
+        privacyUrl="https://transparency.google/intl/en/our-policies/privacy-policy-terms-of-service"
+        connectLabel={t.settings.antigravityConnectAction}
+        t={t}
+        onClose={closeAntigravityConfig}
+        onConnect={handleConnectAntigravityAuth}
+        onRefresh={refreshAntigravityAuthStatus}
+        onReinstall={handleReinstallAntigravity}
+        onOpenExternalUrl={(url) => void getDesktopApi().openExternalUrl(url)}
       />
 
       <Dialog open={socialUploadDialog.open} onClose={closeSocialUploadDialog} maxWidth="xs" fullWidth>
@@ -280,6 +313,15 @@ export function RendererAppDialogs({ controller }: RendererAppDialogsProps) {
             }}
           >
             {t.agentProvider.claudeAction}
+          </Button>
+          <Button
+            variant="outlined"
+            onClick={() => {
+              setAgentProviderConfigOpen(false);
+              controller.setAntigravityConfigOpen(true);
+            }}
+          >
+            {t.settings.antigravityConnectAction}
           </Button>
           <Button
             variant="contained"

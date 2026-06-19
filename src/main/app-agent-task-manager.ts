@@ -378,6 +378,7 @@ export class AppAgentTaskManager {
             sharedRoots: [],
             prompt,
             model,
+            effort: runtime.effort,
             permissionMode: runtime.permissionMode,
             timeoutMs: CODEX_TASK_TIMEOUT_MS,
             timeoutMode: 'absolute',

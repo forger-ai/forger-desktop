@@ -1,4 +1,3 @@
-import TerminalRounded from '@mui/icons-material/TerminalRounded';
 import RefreshRounded from '@mui/icons-material/RefreshRounded';
 import CheckCircleRounded from '@mui/icons-material/CheckCircleRounded';
 import RestartAltRounded from '@mui/icons-material/RestartAltRounded';
@@ -6,7 +5,6 @@ import {
   Alert,
   Button,
   Chip,
-  CircularProgress,
   Dialog,
   DialogActions,
   DialogContent,
@@ -17,6 +15,7 @@ import {
 } from '@mui/material';
 import type { AppDictionary } from '@renderer/i18n';
 import type { ClaudeAuthStatus } from '@shared/types';
+import { LlmProviderConnectModal } from './LlmProviderConnectModal';
 
 interface ClaudeConfigModalProps {
   open: boolean;
@@ -27,6 +26,7 @@ interface ClaudeConfigModalProps {
   onConnect: () => Promise<void>;
   onRefresh: () => Promise<void>;
   onReinstall: () => Promise<void>;
+  onOpenExternalUrl: (url: string) => void;
 }
 
 export function ClaudeConfigModal({
@@ -38,6 +38,7 @@ export function ClaudeConfigModal({
   onConnect,
   onRefresh,
   onReinstall,
+  onOpenExternalUrl,
 }: ClaudeConfigModalProps) {
   const sourceLabel = status.source === 'managed'
     ? t.settings.claudeSourceManaged
@@ -49,6 +50,32 @@ export function ClaudeConfigModal({
     : status.installed
       ? t.settings.claudeConnectionMissingSession
       : t.settings.claudeConnectionInstallAvailable;
+
+  if (!status.authenticated) {
+    return (
+      <LlmProviderConnectModal
+        open={open}
+        provider="claude"
+        providerName={t.llmProviderConnect.providers.claude.name}
+        providerOwner={t.llmProviderConnect.providers.claude.owner}
+        authenticated={status.authenticated}
+        installed={status.installed}
+        busy={busy}
+        title={t.llmProviderConnect.providers.claude.title}
+        body={t.llmProviderConnect.providers.claude.body}
+        steps={t.llmProviderConnect.providers.claude.steps}
+        termsUrl="https://support.claude.com/en/collections/4078534-privacy-and-legal"
+        privacyUrl="https://privacy.claude.com/en/"
+        connectLabel={t.settings.claudeConnectAction}
+        t={t}
+        onClose={onClose}
+        onConnect={onConnect}
+        onRefresh={onRefresh}
+        onReinstall={onReinstall}
+        onOpenExternalUrl={onOpenExternalUrl}
+      />
+    );
+  }
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
@@ -95,16 +122,6 @@ export function ClaudeConfigModal({
         <Button variant="outlined" color="warning" startIcon={<RestartAltRounded />} disabled={busy} onClick={() => void onReinstall()}>
           {t.settings.claudeReinstallAction}
         </Button>
-        {!status.authenticated ? (
-          <Button
-            variant="contained"
-            startIcon={busy ? <CircularProgress color="inherit" size={16} /> : <TerminalRounded />}
-            disabled={busy}
-            onClick={() => void onConnect()}
-          >
-            {t.settings.claudeConnectAction}
-          </Button>
-        ) : null}
       </DialogActions>
     </Dialog>
   );

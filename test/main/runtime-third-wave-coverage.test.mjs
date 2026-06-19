@@ -631,7 +631,31 @@ test('agent auth reports Claude connect failures with missing status fallback', 
   assert.ok(calls.some((call) => call[0] === 'log' && call[1] === 'claude_auth:failed'));
 });
 
-test('agent auth installs Antigravity under managed HOME and launches OAuth print mode on macOS', async (t) => {
+test('agent auth requires manual Antigravity install when no trusted local CLI exists', async (t) => {
+  const { root, calls, controller } = await makeAgentAuthHarness({
+    canRunCommand: async (command, args) => command.endsWith('agy') && args[0] === '--version',
+    runCommand: async (command, args, options) => calls.push(['run', command, args, options]),
+    runCommandCapture: async (command, args) => {
+      calls.push(['capture', command, args]);
+      if (command === 'which') {
+        return { code: 1, stdout: '', stderr: 'missing' };
+      }
+      return { code: 1, stdout: '', stderr: 'missing' };
+    },
+  });
+  t.after(async () => {
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  const result = await withPlatform('darwin', async () => await controller.connectAntigravityAuth());
+
+  assert.equal(result.success, false);
+  assert.equal(result.technicalCode, 'antigravity_manual_install_required');
+  assert.equal(calls.some((call) => call[0] === 'run' && call[1] === 'curl'), false);
+  assert.equal(calls.some((call) => call[0] === 'run' && call[1] === 'bash'), false);
+});
+
+test('agent auth launches existing managed Antigravity OAuth print mode on macOS', async (t) => {
   const { root, calls, controller } = await makeAgentAuthHarness({
     buildMacTerminalLoginScript: ({ providerName, logPath, command }) => {
       calls.push(['script', providerName, logPath, command]);
@@ -640,12 +664,6 @@ test('agent auth installs Antigravity under managed HOME and launches OAuth prin
     canRunCommand: async (command, args) => command.endsWith('agy') && args[0] === '--version',
     runCommand: async (command, args, options) => {
       calls.push(['run', command, args, options]);
-      if (command === 'bash') {
-        assert.equal(options.env.HOME, path.join(root, 'antigravity-root'));
-        assert.equal(options.env.XDG_CONFIG_HOME, path.join(root, 'antigravity-root', 'config'));
-        await fs.mkdir(path.join(root, 'antigravity-root', 'bin'), { recursive: true });
-        await fs.writeFile(path.join(root, 'antigravity-root', 'bin', 'agy'), '', 'utf8');
-      }
     },
     runCommandCapture: async (command, args) => {
       calls.push(['capture', command, args]);
@@ -661,6 +679,8 @@ test('agent auth installs Antigravity under managed HOME and launches OAuth prin
   t.after(async () => {
     await fs.rm(root, { recursive: true, force: true });
   });
+  await fs.mkdir(path.join(root, 'antigravity-root', 'bin'), { recursive: true });
+  await fs.writeFile(path.join(root, 'antigravity-root', 'bin', 'agy'), '', 'utf8');
 
   const result = await withPlatform('darwin', async () => await controller.connectAntigravityAuth());
 
@@ -681,7 +701,7 @@ test('agent auth installs Antigravity under managed HOME and launches OAuth prin
   assert.ok(calls.some((call) => call[0] === 'log' && call[1] === 'antigravity_auth:terminal_opened'));
 });
 
-test('agent auth Antigravity embedded session streams OAuth URL and writes pasted code', async (t) => {
+test('agent auth Antigravity embedded session opens OAuth URL in main and redacts renderer output', async (t) => {
   const written = [];
   let child;
   const events = [];
@@ -726,7 +746,10 @@ test('agent auth Antigravity embedded session streams OAuth URL and writes paste
   assert.equal(spawnCall[3].shell, false);
   assert.equal(spawnCall[3].stdio, 'pipe');
   child.stdout.emit('data', 'Authentication required. https://accounts.google.com/o/oauth2/auth?client_id=forger&state=test\n');
-  assert.ok(events.some((event) => event.type === 'url' && event.url.includes('accounts.google.com/o/oauth2/auth')));
+  assert.ok(calls.some((call) => call[0] === 'openExternal' && call[1].includes('accounts.google.com/o/oauth2/auth')));
+  assert.equal(events.some((event) => event.type === 'url'), false);
+  assert.ok(events.some((event) => event.type === 'output' && event.text.includes('[redacted-google-oauth-url]')));
+  assert.equal(events.some((event) => event.text?.includes('accounts.google.com/o/oauth2/auth')), false);
   assert.deepEqual(await controller.writeAntigravityAuthSession(result.sessionId, 'abc123'), { success: true });
   assert.deepEqual(written, ['abc123\n']);
   child.emit('exit', 0);

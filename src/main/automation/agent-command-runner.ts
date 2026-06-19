@@ -165,6 +165,7 @@ export const runAgentCommand = async (
           configWorkspaceRoot: options.cwd,
           prompt: options.prompt,
           model: options.runtime.model,
+          effort: options.runtime.effort,
           permissionMode: 'unsafe',
           timeoutMs: AUTOMATION_TIMEOUT_MS,
           timeoutMode: 'absolute',

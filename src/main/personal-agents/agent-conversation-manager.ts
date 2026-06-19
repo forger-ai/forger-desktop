@@ -1,5 +1,4 @@
 import path from 'node:path';
-import fs from 'node:fs/promises';
 
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import type { AgentRuntime, AgentRuntimeRequest, ClaudeEffort, CodexReasoningEffort, PersonalAgent, PersonalAgentConversation, PersonalAgentConversationEvent, PersonalAgentConversationGetInput, PersonalAgentConversationStartInput, PersonalAgentMessageSendInput, PersonalAgentRun } from '../../shared/types';
@@ -304,6 +303,7 @@ export class AgentConversationManager {
           configWorkspaceRoot: input.workspaceRoot,
           prompt: input.prompt,
           model: runtime.model,
+          effort: runtime.effort,
           conversationId: input.conversation.providerThreadId,
           permissionMode: input.agent.permissionMode,
           timeoutMs: PERSONAL_AGENT_RUN_TIMEOUT_MS,

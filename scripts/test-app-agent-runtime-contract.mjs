@@ -5,7 +5,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const require = createRequire(import.meta.url);
-const { buildAppAgentPrompt } = require('../dist-electron/main/app-agent/conversation-helpers.js');
+const {
+  buildManifestAgentResumePrompt,
+  buildManifestAgentStartPrompt,
+  buildManifestAgentSteerPrompt,
+} = require('../dist-electron/main/app-agent/conversation-helpers.js');
 const { renderManifestAgentPrompt } = require('../dist-electron/main/manifest-agent-prompts.js');
 const {
   PromptOverridesStore,
@@ -114,85 +118,9 @@ assert.throws(
   /agent_prompt_variable_multiline_string:shortId/,
 );
 
-const interfaces = {
-  'free-chat-agent': 'Answer the user open question.',
-  'feature-intake-agent': 'Use create_plan_from_intake when the plan is ready.',
-  'plan-agent': 'Use get_plan_detail before updating plan steps.',
-  'review-agent': 'Reply with concrete findings and residual risk.',
-};
-
-const buildContext = ({ interfaceId, role, mainAgent }) => JSON.stringify({
-  runtime_contract: [
-    'chat_thread_id: chat-123',
-    `agent_id: ${mainAgent ? 'techlead' : 'ux'}`,
-    `role: ${role}`,
-    'main_agent: Tech Lead; agent_id=techlead',
-    `manifestAgentId: ${interfaceId}`,
-    'agents in chat:',
-    '- Tech Lead: main_agent; agent_id=techlead',
-    '- UX: participant; agent_id=ux',
-    'Visible app replies must use `respond_to_user`.',
-    mainAgent
-      ? 'You are the main agent. You may use the interface MCP mutation tools when appropriate.'
-      : 'You are a participant. Do not mutate Vibe state or plans. Use propagate=true only when another agent must react now.',
-  ].join('\n'),
-  interface_objective: interfaces[interfaceId],
-  chat_thread_id: 'chat-123',
-  agent_id: mainAgent ? 'techlead' : 'ux',
-  role,
-  main_agent: 'Tech Lead',
-  agents_in_chat: '- Tech Lead: main_agent; agent_id=techlead\n- UX: participant; agent_id=ux',
-  manifestAgentId: interfaceId,
-  trigger_type: 'user_message',
-  message_source: 'user',
-  relay_root_id: 'msg-123',
-  relay_depth: 0,
-}, null, 2);
-
-for (const [interfaceId, objective] of Object.entries(interfaces)) {
-  for (const participant of [
-    { role: 'main_agent', mainAgent: true },
-    { role: 'participant', mainAgent: false },
-  ]) {
-    const prompt = buildAppAgentPrompt(
-      interfaceId === 'plan-agent' ? 'actualiza el paso 2' : 'techlead crea el plan aca en vibe',
-      buildContext({ interfaceId, ...participant }),
-      'Long first-turn instructions.',
-    );
-    assert.match(prompt, /^Long first-turn instructions\.\n\nRuntime contract:/);
-    assert.match(prompt, /Interface objective:\n/);
-    assert.match(prompt, new RegExp(escapeRegExp(objective)));
-    assert.match(prompt, /Turn payload:\n/);
-    assert.match(prompt, /Message:\n/);
-    assert.doesNotMatch(prompt, /"runtime_contract"/);
-    assert.doesNotMatch(prompt, /"interface_objective"/);
-    assert.match(prompt, /Visible app replies must use `respond_to_user`\./);
-    if (participant.mainAgent) {
-      assert.match(prompt, /MCP mutation tools/);
-    } else {
-      assert.match(prompt, /Do not mutate Vibe state or plans/);
-      assert.match(prompt, /propagate=true/);
-    }
-  }
-}
-
-const resumePrompt = buildAppAgentPrompt(
-  'actualiza el paso 2',
-  buildContext({ interfaceId: 'plan-agent', role: 'main_agent', mainAgent: true }),
-);
-assert.match(resumePrompt, /^Runtime contract:/);
-assert.match(resumePrompt, /Use get_plan_detail before updating plan steps\./);
-assert.match(resumePrompt, /Message:\nactualiza el paso 2/);
-
-const featureIntakePrompt = buildAppAgentPrompt(
-  'techlead crea el plan aca en vibe',
-  buildContext({ interfaceId: 'feature-intake-agent', role: 'main_agent', mainAgent: true }),
-);
-assert.match(featureIntakePrompt, /create_plan_from_intake/);
-
-const legacyPrompt = buildAppAgentPrompt('hola', '{"plain":true}');
-assert.match(legacyPrompt, /^Contexto actual de la app:/);
-assert.match(legacyPrompt, /Mensaje del usuario:\nhola/);
+assert.equal(buildManifestAgentStartPrompt(`  ${renderedInitial}  `), renderedInitial);
+assert.equal(buildManifestAgentResumePrompt(`  ${renderedSteer}  `), renderedSteer);
+assert.equal(buildManifestAgentSteerPrompt(`  ${renderedSteer}  `), renderedSteer);
 
 const promptBases = buildPromptBases([], [
   {
@@ -304,8 +232,4 @@ try {
   assert.equal(calls[0].backendDir, join(mcpInstallDir, 'backend'));
 } finally {
   await rm(mcpInstallDir, { recursive: true, force: true });
-}
-
-function escapeRegExp(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }

@@ -7,6 +7,7 @@ import {
   readAntigravityLog,
   writeAntigravityMcpConfig,
 } from '../../app-agent/mcp';
+import { resolveAntigravityCliModel } from '../../../shared/agent-runtime-registry';
 import type { LlmCliRunInput, LlmRunResult } from '../types';
 
 export class AntigravityCliAdapter {
@@ -18,9 +19,10 @@ export class AntigravityCliAdapter {
     const mcpConfig = await writeAntigravityMcpConfig(configWorkspaceRoot, mcpServers);
     const logPath = await prepareAntigravityLogPath(configWorkspaceRoot, input.runId);
     const allowedMcpServers = new Set(mcpServers.map((server) => server.name));
+    const cliModel = input.model ? resolveAntigravityCliModel(input.model, input.effort) : undefined;
     const args = buildAntigravityArgs({
       prompt: input.prompt,
-      model: input.model,
+      model: cliModel,
       threadId: input.conversationId,
       addDirs: input.addDirs,
       logFile: logPath,
@@ -40,6 +42,8 @@ export class AntigravityCliAdapter {
       `mcpConfig=${mcpConfig?.configPath ?? '(none)'}`,
       `allowedMcpServers=${mcpServers.map((server) => server.name).join(',') || '(none)'}`,
       `model=${input.model ?? '(default)'}`,
+      `effort=${input.effort ?? '(default)'}`,
+      `cliModel=${cliModel ?? '(default)'}`,
     ].join(' '));
     input.onEvent?.({ type: 'started', provider: this.key, runId: input.runId });
 

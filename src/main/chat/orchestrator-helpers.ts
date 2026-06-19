@@ -3,7 +3,7 @@ import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawnProcess } from '../runtime/process-spawn';
-import type { AgentPermissionMode, ChatErrorCode, ClaudeEffort, CodexReasoningEffort, PreviewDiffFile } from '../../shared/types';
+import type { AgentEffort, AgentPermissionMode, ChatErrorCode, ClaudeEffort, CodexReasoningEffort, PreviewDiffFile } from '../../shared/types';
 import { antigravityCliAdapter } from '../llm-provider/adapters/antigravity-cli-adapter';
 import { codexCliAdapter, type LlmTokenUsage } from '../llm-provider/adapters/codex-cli-adapter';
 import { claudeCliAdapter } from '../llm-provider/adapters/claude-cli-adapter';
@@ -248,6 +248,7 @@ export class SandboxRunner {
     sharedRoots?: string[];
     prompt: string;
     model: string;
+    effort?: AgentEffort;
     permissionMode?: AgentPermissionMode;
     timeoutMs: number;
     onChild: (child: ChildProcessWithoutNullStreams) => void;
@@ -263,6 +264,7 @@ export class SandboxRunner {
       sharedRoots: params.sharedRoots,
       prompt: params.prompt,
       model: params.model,
+      effort: params.effort,
       conversationId: params.threadId,
       permissionMode: params.permissionMode,
       timeoutMs: params.timeoutMs,
@@ -423,31 +425,6 @@ export const existsDirectory = async (dirPath: string): Promise<boolean> => {
   } catch {
     return false;
   }
-};
-
-const existsFile = async (filePath: string): Promise<boolean> => {
-  try {
-    const stat = await fs.stat(filePath);
-    return stat.isFile();
-  } catch {
-    return false;
-  }
-};
-
-const findExecutableInPathEntries = async (
-  entries: string[],
-  executableNames: string[],
-): Promise<string | null> => {
-  for (const entry of entries) {
-    for (const executableName of executableNames) {
-      const candidate = path.join(entry, executableName);
-      if (await existsFile(candidate)) {
-        return candidate;
-      }
-    }
-  }
-
-  return null;
 };
 
 export const ensureGitRepository = async (cwd: string): Promise<void> => {

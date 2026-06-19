@@ -58,6 +58,7 @@ import {
   DEFAULT_ANTIGRAVITY_MODEL,
   isAgentProvider,
   normalizeAntigravityEffort,
+  normalizeAntigravityModelAndEffort,
   normalizeRuntimeEffort,
 } from '../../shared/agent-runtime-registry';
 import type { AppManifest, AppRegistry, RunningAppProcess } from '../core/main-process-types';
@@ -784,6 +785,12 @@ const normalizeManifestRuntimeRecommendations = (
     antigravityRaw.effort ?? antigravityRaw.defaultEffort,
     fallback?.antigravity?.effort ?? DEFAULT_ANTIGRAVITY_EFFORT,
   );
+  const antigravityDefaults = normalizeAntigravityModelAndEffort(
+    antigravityModel,
+    antigravityRaw.effort ?? antigravityRaw.defaultEffort,
+    fallback?.antigravity?.model ?? DEFAULT_ANTIGRAVITY_MODEL,
+    antigravityEffort,
+  );
   const output: Partial<AgentDefaults> = {};
   if (codexModel || codexEffort) {
     output.codex = {
@@ -799,8 +806,8 @@ const normalizeManifestRuntimeRecommendations = (
   }
   if (antigravityModel || antigravityRaw.effort || antigravityRaw.defaultEffort || fallback?.antigravity) {
     output.antigravity = {
-      model: antigravityModel ?? fallback?.antigravity?.model ?? DEFAULT_ANTIGRAVITY_MODEL,
-      effort: antigravityEffort,
+      model: antigravityDefaults.model,
+      effort: antigravityDefaults.effort,
     };
   }
   return Object.keys(output).length > 0 ? output : undefined;
@@ -822,6 +829,10 @@ const normalizeManifestRuntime = (value: unknown): AgentRuntime | undefined => {
   const permissionMode = record.permissionMode === 'unsafe' ? 'unsafe' : record.permissionMode === 'safe' ? 'safe' : undefined;
   if (!provider || !model) {
     return undefined;
+  }
+  if (provider === 'antigravity') {
+    const antigravity = normalizeAntigravityModelAndEffort(model, record.effort);
+    return { provider, model: antigravity.model, effort: antigravity.effort, ...(permissionMode ? { permissionMode } : {}) };
   }
   return { provider, model, effort, ...(permissionMode ? { permissionMode } : {}) };
 };

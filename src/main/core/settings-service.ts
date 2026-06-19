@@ -28,6 +28,7 @@ import {
   normalizeAgentProviderModel,
   normalizeAgentProviderPreference,
   normalizeAgentPermissionMode as normalizeSharedAgentPermissionMode,
+  normalizeAntigravityModelAndEffort,
   normalizeProvider,
 } from '../../shared/agent-runtime-registry';
 import { normalizeDeveloperPathEntries, validateDeveloperPathEntries } from '../runtime/developer-paths';
@@ -76,6 +77,19 @@ const normalizeClaudeModel = (value: unknown, fallback: string): string =>
 const normalizeAntigravityModel = (value: unknown, fallback: string): string =>
   normalizeAgentProviderModel(agentProviderRegistry, 'antigravity', value, fallback);
 
+const normalizeAntigravityDefaults = (
+  model: unknown,
+  effort: unknown,
+  fallbackModel: string,
+  fallbackEffort: AntigravityEffort,
+): { model: string; effort: AntigravityEffort } =>
+  normalizeAntigravityModelAndEffort(
+    model,
+    effort,
+    normalizeAntigravityModel(fallbackModel, agentProviderRegistry.antigravity.defaultModel),
+    normalizeAntigravityEffort(fallbackEffort, agentProviderRegistry.antigravity.defaultEffort),
+  );
+
 const normalizeAgentProvider = (value: unknown): AgentProvider | undefined =>
   normalizeProvider(value);
 
@@ -120,6 +134,12 @@ const normalizeSettings = (input?: Partial<Settings>): Settings => {
   const defaultClaudeEffort = agentProviderRegistry.claude.defaultEffort;
   const defaultAntigravityModel = agentProviderRegistry.antigravity.defaultModel;
   const defaultAntigravityEffort = agentProviderRegistry.antigravity.defaultEffort;
+  const antigravityDefaults = normalizeAntigravityDefaults(
+    rawAgentAntigravityDefaults?.model,
+    rawAgentAntigravityDefaults?.effort,
+    defaultAntigravityModel,
+    defaultAntigravityEffort,
+  );
   const codexModel =
     typeof rawCodexDefaults?.model === 'string' && rawCodexDefaults.model.trim()
       ? rawCodexDefaults.model.trim()
@@ -157,11 +177,8 @@ const normalizeSettings = (input?: Partial<Settings>): Settings => {
       effort: normalizeClaudeEffort(rawAgentClaudeDefaults?.effort, defaultClaudeEffort),
     },
     antigravity: {
-      model:
-        typeof rawAgentAntigravityDefaults?.model === 'string' && rawAgentAntigravityDefaults.model.trim()
-          ? rawAgentAntigravityDefaults.model.trim()
-          : defaultAntigravityModel,
-      effort: normalizeAntigravityEffort(rawAgentAntigravityDefaults?.effort, defaultAntigravityEffort),
+      model: antigravityDefaults.model,
+      effort: antigravityDefaults.effort,
     },
   };
   return {
@@ -273,6 +290,12 @@ const updateAgentDefaults = async (input: UpdateAgentDefaultsInput): Promise<Set
     return state.settings;
   }
   if (provider === 'antigravity') {
+    const antigravityDefaults = normalizeAntigravityDefaults(
+      input.model ?? current.agentDefaults.antigravity.model,
+      input.effort,
+      current.agentDefaults.antigravity.model,
+      current.agentDefaults.antigravity.effort,
+    );
     state.settings = normalizeSettings({
       ...current,
       defaultAgentProvider,
@@ -281,15 +304,15 @@ const updateAgentDefaults = async (input: UpdateAgentDefaultsInput): Promise<Set
       llmProviderDefaults: {
         ...current.llmProviderDefaults,
         antigravity: {
-          model: typeof input.model === 'string' ? input.model : current.agentDefaults.antigravity.model,
-          effort: normalizeAntigravityEffort(input.effort, current.agentDefaults.antigravity.effort),
+          model: antigravityDefaults.model,
+          effort: antigravityDefaults.effort,
         },
       },
       agentDefaults: {
         ...current.agentDefaults,
         antigravity: {
-          model: typeof input.model === 'string' ? input.model : current.agentDefaults.antigravity.model,
-          effort: normalizeAntigravityEffort(input.effort, current.agentDefaults.antigravity.effort),
+          model: antigravityDefaults.model,
+          effort: antigravityDefaults.effort,
         },
       },
     });
@@ -356,6 +379,22 @@ const markProviderConnected = async (provider: AgentProvider): Promise<void> => 
   await saveSettings();
 };
 
+const markProviderDisconnected = async (provider: AgentProvider): Promise<void> => {
+  const current = normalizeSettings(state.settings);
+  if (!current.providerConnections[provider]) {
+    state.settings = current;
+    return;
+  }
+  const providerConnections = { ...current.providerConnections };
+  delete providerConnections[provider];
+  state.settings = normalizeSettings({
+    ...current,
+    defaultAgentProvider: current.defaultAgentProvider === provider ? 'auto' : current.defaultAgentProvider,
+    providerConnections,
+  });
+  await saveSettings();
+};
+
 const chooseAgentRuntime = async (requested?: AgentRuntimeRequest): Promise<AgentRuntime> => {
   const provider = requested?.provider ?? await chooseConnectedProvider();
   const defaults = normalizeSettings(state.settings).agentDefaults;
@@ -369,10 +408,16 @@ const chooseAgentRuntime = async (requested?: AgentRuntimeRequest): Promise<Agen
   }
   if (provider === 'antigravity') {
     const recommended = requested?.recommendations?.antigravity;
+    const antigravityDefaults = normalizeAntigravityDefaults(
+      requested?.model ?? recommended?.model,
+      requested?.effort ?? recommended?.effort,
+      defaults.antigravity.model || agentProviderRegistry.antigravity.defaultModel,
+      defaults.antigravity.effort || agentProviderRegistry.antigravity.defaultEffort,
+    );
     return {
       provider,
-      model: normalizeAntigravityModel(requested?.model ?? recommended?.model, defaults.antigravity.model || agentProviderRegistry.antigravity.defaultModel),
-      effort: normalizeAntigravityEffort(requested?.effort ?? recommended?.effort, defaults.antigravity.effort),
+      model: antigravityDefaults.model,
+      effort: antigravityDefaults.effort,
     };
   }
   const recommended = requested?.recommendations?.codex;
@@ -437,6 +482,12 @@ const withAgentDefaults = <T extends { model?: string; reasoningEffort?: CodexRe
     };
   }
   if (entry.runtime?.provider === 'antigravity') {
+    const antigravityRuntime = normalizeAntigravityDefaults(
+      entry.runtime.model,
+      entry.runtime.effort,
+      recommendations.antigravity.model || defaults.antigravity.model || agentProviderRegistry.antigravity.defaultModel,
+      defaults.antigravity.effort || agentProviderRegistry.antigravity.defaultEffort,
+    );
     return {
       ...entry,
       runtimeRecommendations: recommendations,
@@ -444,8 +495,8 @@ const withAgentDefaults = <T extends { model?: string; reasoningEffort?: CodexRe
       reasoningEffort: recommendations.codex.reasoningEffort,
       runtime: {
         provider: 'antigravity',
-        model: normalizeAntigravityModel(entry.runtime.model, recommendations.antigravity.model || defaults.antigravity.model || agentProviderRegistry.antigravity.defaultModel),
-        effort: normalizeAntigravityEffort(entry.runtime.effort, defaults.antigravity.effort),
+        model: antigravityRuntime.model,
+        effort: antigravityRuntime.effort,
       },
     };
   }
@@ -461,26 +512,31 @@ const mergeRuntimeRecommendations = (
   defaults: AgentDefaults,
   recommendations?: AgentRuntimeRecommendations,
   legacyCodex?: { model?: string; reasoningEffort?: CodexReasoningEffort },
-): AgentDefaults => ({
-  codex: {
-    model: normalizeCodexModel(
-      recommendations?.codex?.model ?? legacyCodex?.model,
-      defaults.codex.model || agentProviderRegistry.codex.defaultModel,
-    ),
-    reasoningEffort: normalizeCodexReasoningEffort(
-      recommendations?.codex?.reasoningEffort ?? legacyCodex?.reasoningEffort,
-      defaults.codex.reasoningEffort || agentProviderRegistry.codex.defaultReasoningEffort,
-    ),
-  },
-  claude: {
-    model: normalizeClaudeModel(recommendations?.claude?.model, defaults.claude.model || agentProviderRegistry.claude.defaultModel),
-    effort: normalizeClaudeEffort(recommendations?.claude?.effort, defaults.claude.effort || agentProviderRegistry.claude.defaultEffort),
-  },
-  antigravity: {
-    model: normalizeAntigravityModel(recommendations?.antigravity?.model, defaults.antigravity.model || agentProviderRegistry.antigravity.defaultModel),
-    effort: normalizeAntigravityEffort(recommendations?.antigravity?.effort, defaults.antigravity.effort || agentProviderRegistry.antigravity.defaultEffort),
-  },
-});
+): AgentDefaults => {
+  const antigravity = normalizeAntigravityDefaults(
+    recommendations?.antigravity?.model,
+    recommendations?.antigravity?.effort,
+    defaults.antigravity.model || agentProviderRegistry.antigravity.defaultModel,
+    defaults.antigravity.effort || agentProviderRegistry.antigravity.defaultEffort,
+  );
+  return {
+    codex: {
+      model: normalizeCodexModel(
+        recommendations?.codex?.model ?? legacyCodex?.model,
+        defaults.codex.model || agentProviderRegistry.codex.defaultModel,
+      ),
+      reasoningEffort: normalizeCodexReasoningEffort(
+        recommendations?.codex?.reasoningEffort ?? legacyCodex?.reasoningEffort,
+        defaults.codex.reasoningEffort || agentProviderRegistry.codex.defaultReasoningEffort,
+      ),
+    },
+    claude: {
+      model: normalizeClaudeModel(recommendations?.claude?.model, defaults.claude.model || agentProviderRegistry.claude.defaultModel),
+      effort: normalizeClaudeEffort(recommendations?.claude?.effort, defaults.claude.effort || agentProviderRegistry.claude.defaultEffort),
+    },
+    antigravity,
+  };
+};
 
-  return { getPromptOverridesStore, normalizeCodexReasoningEffort, normalizeClaudeEffort, normalizeAgentProvider, normalizeDefaultAgentProvider, normalizeSettings, loadSettings, saveSettings, getCodexDefaults, updateCodexDefaults, updateAgentDefaults, updateDeveloperMode, markProviderConnected, chooseAgentRuntime, chooseConnectedProvider, withAgentDefaults };
+  return { getPromptOverridesStore, normalizeCodexReasoningEffort, normalizeClaudeEffort, normalizeAgentProvider, normalizeDefaultAgentProvider, normalizeSettings, loadSettings, saveSettings, getCodexDefaults, updateCodexDefaults, updateAgentDefaults, updateDeveloperMode, markProviderConnected, markProviderDisconnected, chooseAgentRuntime, chooseConnectedProvider, withAgentDefaults };
 };

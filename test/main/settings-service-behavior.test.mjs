@@ -23,9 +23,9 @@ const agentProviderRegistry = () => createAgentProviderRuntimeRegistry({
     effortValues: ['low', 'medium', 'high', 'max'],
   },
   antigravity: {
-    defaultModel: 'gemini-3.5-flash-medium',
+    defaultModel: 'gemini-3.5-flash',
     defaultEffort: 'medium',
-    modelValues: ['gemini-3.5-flash-medium', 'gemini-3.5-flash-high'],
+    modelValues: ['gemini-3.5-flash', 'gemini-3.1-pro'],
     effortValues: ['low', 'medium', 'high'],
   },
 });
@@ -42,12 +42,12 @@ const settingsSeed = () => ({
   llmProviderDefaults: {
     codex: { model: 'gpt-5.4', reasoningEffort: 'medium' },
     claude: { model: 'sonnet', effort: 'medium' },
-    antigravity: { model: 'gemini-3.5-flash-medium', effort: 'medium' },
+    antigravity: { model: 'gemini-3.5-flash', effort: 'medium' },
   },
   agentDefaults: {
     codex: { model: 'gpt-5.4', reasoningEffort: 'medium' },
     claude: { model: 'sonnet', effort: 'medium' },
-    antigravity: { model: 'gemini-3.5-flash-medium', effort: 'medium' },
+    antigravity: { model: 'gemini-3.5-flash', effort: 'medium' },
   },
   providerConnections: {},
 });
@@ -122,7 +122,7 @@ test('SettingsService normalizes persisted settings, preserves safe fields, and 
     assert.deepEqual(harness.state.settings.codexDefaults, { model: 'custom-codex', reasoningEffort: 'medium' });
     assert.deepEqual(harness.state.settings.agentDefaults.codex, { model: 'agent-codex', reasoningEffort: 'high' });
     assert.deepEqual(harness.state.settings.agentDefaults.claude, { model: 'opus', effort: 'max' });
-    assert.deepEqual(harness.state.settings.agentDefaults.antigravity, { model: 'gemini-3.5-flash-high', effort: 'high' });
+    assert.deepEqual(harness.state.settings.agentDefaults.antigravity, { model: 'gemini-3.5-flash', effort: 'high' });
     assert.deepEqual(harness.state.settings.providerConnections, { codex: '2026-05-20T00:00:00.000Z' });
     assert.equal(harness.controller.getPromptOverridesStore(), store);
     assert.equal(store.filePath, path.join(harness.root, 'prompt-overrides.json'));
@@ -190,10 +190,10 @@ test('SettingsService updates defaults and normalizes invalid provider/model inp
 
     const antigravity = await harness.controller.updateAgentDefaults({
       provider: 'antigravity',
-      model: 'gemini-3.5-flash-high',
+      model: 'gemini-3.5-flash',
       effort: 'high',
     });
-    assert.deepEqual(antigravity.agentDefaults.antigravity, { model: 'gemini-3.5-flash-high', effort: 'high' });
+    assert.deepEqual(antigravity.agentDefaults.antigravity, { model: 'gemini-3.5-flash', effort: 'high' });
   } finally {
     await harness.cleanup();
   }
@@ -235,12 +235,12 @@ test('SettingsService chooses connected providers by preference and connection a
       llmProviderDefaults: {
         codex: { model: 'gpt-5.4-mini', reasoningEffort: 'high' },
         claude: { model: 'opus', effort: 'max' },
-        antigravity: { model: 'gemini-3.5-flash-high', effort: 'high' },
+        antigravity: { model: 'gemini-3.5-flash', effort: 'high' },
       },
       agentDefaults: {
         codex: { model: 'gpt-5.4-mini', reasoningEffort: 'high' },
         claude: { model: 'opus', effort: 'max' },
-        antigravity: { model: 'gemini-3.5-flash-high', effort: 'high' },
+        antigravity: { model: 'gemini-3.5-flash', effort: 'high' },
       },
     },
   });
@@ -255,7 +255,7 @@ test('SettingsService chooses connected providers by preference and connection a
       recommendations: {
         codex: { model: 'gpt-5.4', reasoningEffort: 'medium' },
         claude: { model: 'missing', effort: 'bad' },
-        antigravity: { model: 'gemini-3.5-flash-medium', effort: 'medium' },
+        antigravity: { model: 'gemini-3.5-flash', effort: 'medium' },
       },
     }), {
       provider: 'claude',
@@ -274,7 +274,7 @@ test('SettingsService chooses connected providers by preference and connection a
       runtimeRecommendations: {
         codex: { model: 'gpt-5.4-mini', reasoningEffort: 'low' },
         claude: { model: 'opus', effort: 'max' },
-        antigravity: { model: 'gemini-3.5-flash-high', effort: 'high' },
+        antigravity: { model: 'gemini-3.5-flash', effort: 'medium' },
       },
       runtime: { provider: 'claude', model: 'sonnet', effort: 'max' },
     });
@@ -292,12 +292,12 @@ test('SettingsService chooses connected providers by preference and connection a
       runtimeRecommendations: {
         codex: { model: 'bad-model', reasoningEffort: 'bad' },
         claude: { model: 'sonnet', effort: 'low' },
-        antigravity: { model: 'gemini-3.5-flash-medium', effort: 'low' },
+        antigravity: { model: 'gemini-3.5-flash', effort: 'low' },
       },
     }).runtimeRecommendations, {
       codex: { model: 'gpt-5.4-mini', reasoningEffort: 'high' },
       claude: { model: 'sonnet', effort: 'low' },
-      antigravity: { model: 'gemini-3.5-flash-medium', effort: 'low' },
+      antigravity: { model: 'gemini-3.5-flash', effort: 'low' },
     });
   } finally {
     await harness.cleanup();

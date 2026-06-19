@@ -1,22 +1,6 @@
-import {
-  Box,
-  Button,
-  Chip,
-  CssBaseline,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
-  FormControlLabel,
-  Link,
-  Stack,
-  Switch,
-  ThemeProvider,
-  Tooltip,
-  Typography,
-} from '@mui/material';
+import { Box, Button, Chip, CssBaseline, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel, Link, Stack, Switch, ThemeProvider, Tooltip, Typography } from '@mui/material';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import type { AudioRuntimeBrokerRequest, AudioRuntimeDevices, BackgroundTask, CatalogApp, ClaudeEffort, CodexReasoningEffort, WakeWordState } from '@shared/types';
+import type { AgentEffort, AntigravityEffort, AudioRuntimeBrokerRequest, AudioRuntimeDevices, BackgroundTask, CatalogApp, ClaudeEffort, CodexReasoningEffort, WakeWordState } from '@shared/types';
 import { AppShell } from '@renderer/components/AppShell';
 import { AppCard } from '@renderer/components/AppCard';
 import { AppsGrid } from '@renderer/components/AppsGrid';
@@ -39,22 +23,15 @@ import { SocialView } from '@renderer/views/SocialView';
 import { SettingsView } from '@renderer/views/SettingsView';
 import { SecretsView } from '@renderer/views/SecretsView';
 import { ToolsView } from '@renderer/views/ToolsView';
-import {
-  AGENT_PROVIDER_OPTIONS,
-  ANTIGRAVITY_EFFORT_OPTIONS,
-  ANTIGRAVITY_MODEL_OPTIONS,
-  CHAT_BOT_PICTURE_OPTIONS,
-  CLAUDE_EFFORT_OPTIONS,
-  CLAUDE_MODEL_OPTIONS,
-  CODEX_MODEL_OPTIONS,
-  CODEX_REASONING_OPTIONS,
-} from '@renderer/preferences';
+import { AGENT_PROVIDER_OPTIONS, ANTIGRAVITY_EFFORT_OPTIONS, ANTIGRAVITY_MODEL_OPTIONS, CHAT_BOT_PICTURE_OPTIONS, CLAUDE_EFFORT_OPTIONS, CLAUDE_MODEL_OPTIONS, CODEX_MODEL_OPTIONS, CODEX_REASONING_OPTIONS } from '@renderer/preferences';
+import { getAntigravitySupportedEfforts } from '@shared/agent-runtime-registry';
 import { TourOverlay } from '@renderer/tour/TourOverlay';
 import { useForgerTour } from '@renderer/tour/useForgerTour';
 import { appExecutionTooltip } from '@renderer/app-execution-labels';
 import { RendererAppDialogs } from './RendererAppDialogs';
 import { LocalNetworkShareDialog } from '@renderer/components/LocalNetworkShareDialog';
 import { WakeWordClientRunner } from '@renderer/services/WakeWordClientRunner';
+import type { RuntimeProviderControls } from '@renderer/runtime-provider-controls';
 
 interface RendererAppViewProps {
   controller: Record<string, any>;
@@ -278,6 +255,10 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     setSelectedClaudeModel,
     selectedClaudeEffort,
     setSelectedClaudeEffort,
+    selectedAntigravityModel,
+    setSelectedAntigravityModel,
+    selectedAntigravityEffort,
+    setSelectedAntigravityEffort,
     selectedChatPermissionMode,
     setSelectedChatPermissionMode,
     selectedChatNetworkAccess,
@@ -359,7 +340,10 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     handleReinstallCodex,
     setClaudeConfigOpen,
     handleReinstallClaude,
+    handleDisconnectClaudeAuth,
+    setAntigravityConfigOpen,
     handleReinstallAntigravity,
+    handleDisconnectAntigravityAuth,
     cloudStorageUsage,
     cloudStorageBusy,
     refreshCloudStorageUsage,
@@ -382,6 +366,48 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     claudeConfigOpen,
     agentProviderConfigOpen,
   } = controller;
+
+  const selectedAntigravityRuntimeModel = activeConversation?.runtime?.provider === 'antigravity' ? activeConversation.runtime.model : selectedAntigravityModel;
+  const selectedAntigravityRuntimeEffort = activeConversation?.runtime?.provider === 'antigravity' ? activeConversation.runtime.effort as AgentEffort : selectedAntigravityEffort;
+  const antigravitySupportedEfforts = getAntigravitySupportedEfforts(selectedAntigravityRuntimeModel);
+  const antigravityEffortOptions = ANTIGRAVITY_EFFORT_OPTIONS.filter((option) => antigravitySupportedEfforts.includes(option.value));
+  const antigravityEffort = antigravitySupportedEfforts.includes(selectedAntigravityRuntimeEffort as AntigravityEffort)
+    ? selectedAntigravityRuntimeEffort
+    : ANTIGRAVITY_MODEL_OPTIONS.find((option) => option.realModelName === selectedAntigravityRuntimeModel)?.defaultEffort ?? antigravitySupportedEfforts[0] ?? 'medium';
+
+  const runtimeProviderControls: RuntimeProviderControls = {
+    codex: {
+      modelOptions: CODEX_MODEL_OPTIONS.map((option) => ({ ...option, defaultEffort: option.defaultReasoningEffort })),
+      selectedModel: activeConversation?.runtime?.provider === 'codex' ? activeConversation.runtime.model : selectedCodexModel,
+      onSelectModel: setSelectedCodexModel,
+      effortOptions: CODEX_REASONING_OPTIONS,
+      selectedEffort: activeConversation?.runtime?.provider === 'codex' ? activeConversation.runtime.effort as AgentEffort : selectedCodexReasoningEffort,
+      onSelectEffort: (effort) => setSelectedCodexReasoningEffort(effort as CodexReasoningEffort),
+    },
+    claude: {
+      modelOptions: CLAUDE_MODEL_OPTIONS,
+      selectedModel: activeConversation?.runtime?.provider === 'claude' ? activeConversation.runtime.model : selectedClaudeModel,
+      onSelectModel: setSelectedClaudeModel,
+      effortOptions: CLAUDE_EFFORT_OPTIONS,
+      selectedEffort: activeConversation?.runtime?.provider === 'claude' ? activeConversation.runtime.effort as AgentEffort : selectedClaudeEffort,
+      onSelectEffort: (effort) => setSelectedClaudeEffort(effort as ClaudeEffort),
+    },
+    antigravity: {
+      modelOptions: ANTIGRAVITY_MODEL_OPTIONS,
+      selectedModel: selectedAntigravityRuntimeModel,
+      onSelectModel: (model) => {
+        const supportedEfforts = getAntigravitySupportedEfforts(model);
+        const option = ANTIGRAVITY_MODEL_OPTIONS.find((entry) => entry.realModelName === model);
+        setSelectedAntigravityModel(model);
+        setSelectedAntigravityEffort(supportedEfforts.includes(selectedAntigravityRuntimeEffort as AntigravityEffort)
+          ? selectedAntigravityRuntimeEffort as AntigravityEffort
+          : option?.defaultEffort ?? supportedEfforts[0] ?? 'medium');
+      },
+      effortOptions: antigravityEffortOptions,
+      selectedEffort: antigravityEffort,
+      onSelectEffort: setSelectedAntigravityEffort,
+    },
+  };
 
   useEffect(() => {
     const api = getDesktopApi();
@@ -842,10 +868,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             secretsBusy={secretsBusy}
             account={forgerAccount}
             providerOptions={AGENT_PROVIDER_OPTIONS}
-            modelOptions={CODEX_MODEL_OPTIONS}
-            reasoningOptions={CODEX_REASONING_OPTIONS}
-            claudeModelOptions={CLAUDE_MODEL_OPTIONS}
-            claudeEffortOptions={CLAUDE_EFFORT_OPTIONS}
+            runtimeProviderControls={runtimeProviderControls}
             codexDefaults={settings.codexDefaults}
             developerMode={settings.developerMode}
             onBack={() => setCurrentView(appDetailsBackView)}
@@ -913,18 +936,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             resolvedProviderForAuto={resolvedChatProvider}
             onSelectProvider={setSelectedAgentProvider}
             providerLocked={Boolean(activeConversation?.runtime || activeConversation?.threadId || activeConversation?.messages.length)}
-            modelOptions={CODEX_MODEL_OPTIONS}
-            selectedModel={activeConversation?.runtime?.provider === 'codex' ? activeConversation.runtime.model : selectedCodexModel}
-            onSelectModel={setSelectedCodexModel}
-            reasoningOptions={CODEX_REASONING_OPTIONS}
-            selectedReasoningEffort={activeConversation?.runtime?.provider === 'codex' ? activeConversation.runtime.effort as CodexReasoningEffort : selectedCodexReasoningEffort}
-            onSelectReasoningEffort={setSelectedCodexReasoningEffort}
-            claudeModelOptions={CLAUDE_MODEL_OPTIONS}
-            selectedClaudeModel={activeConversation?.runtime?.provider === 'claude' ? activeConversation.runtime.model : selectedClaudeModel}
-            onSelectClaudeModel={setSelectedClaudeModel}
-            claudeEffortOptions={CLAUDE_EFFORT_OPTIONS}
-            selectedClaudeEffort={activeConversation?.runtime?.provider === 'claude' ? activeConversation.runtime.effort as ClaudeEffort : selectedClaudeEffort}
-            onSelectClaudeEffort={setSelectedClaudeEffort}
+            runtimeProviderControls={runtimeProviderControls}
             selectedPermissionMode={selectedChatPermissionMode}
             onSelectPermissionMode={setSelectedChatPermissionMode}
             selectedNetworkAccess={selectedChatNetworkAccess}
@@ -1177,20 +1189,17 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             developerMode={settings.developerMode}
             onDeveloperModeChange={handleDeveloperModeChange}
             onOpenCodexConfig={() => setCodexConfigOpen(true)}
+            onDisconnectCodex={() => void controller.handleDisconnectCodexAuth()}
             onReinstallCodex={() => void handleReinstallCodex()}
             onOpenClaudeConfig={() => setClaudeConfigOpen(true)}
+            onDisconnectClaude={() => void handleDisconnectClaudeAuth()}
             onReinstallClaude={() => void handleReinstallClaude()}
-            onOpenAntigravityConfig={() => void controller.handleConnectAntigravityAuth()}
+            onOpenAntigravityConfig={() => setAntigravityConfigOpen(true)}
+            onDisconnectAntigravity={() => void handleDisconnectAntigravityAuth()}
             onReinstallAntigravity={() => void handleReinstallAntigravity()}
             antigravityAuthConsoleOpen={controller.antigravityAuthConsoleOpen}
-            antigravityAuthLines={controller.antigravityAuthLines}
-            antigravityAuthUrl={controller.antigravityAuthUrl}
-            antigravityAuthCode={controller.antigravityAuthCode}
-            onAntigravityAuthCodeChange={controller.setAntigravityAuthCode}
-            onSubmitAntigravityAuthCode={() => void controller.handleSubmitAntigravityAuthCode()}
             onCancelAntigravityAuthSession={() => void controller.handleCancelAntigravityAuthSession()}
-            onCloseAntigravityAuthConsole={() => controller.setAntigravityAuthConsoleOpen(false)}
-            onOpenAntigravityAuthUrl={() => controller.handleOpenAntigravityAuthUrl()}
+            onCloseAntigravityAuthConsole={() => void controller.handleCancelAntigravityAuthSession()}
             desktopUpdateState={desktopUpdateState}
             desktopUpdateBusy={desktopUpdateBusy}
             cloudStorageUsage={cloudStorageUsage}
