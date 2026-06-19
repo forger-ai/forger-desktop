@@ -84,6 +84,9 @@ const createBridge = async (options = {}) => {
       audioInput: true,
       textToSpeech: true,
     })),
+    requestFolderGrant: options.requestFolderGrant,
+    listFolderGrants: options.listFolderGrants,
+    revokeFolderGrant: options.revokeFolderGrant,
     getAudioDevices: options.getAudioDevices ?? (async () => ({
       inputDevices: [
         { id: 'default', label: 'Default microphone', kind: 'microphone', default: true, supported: true },
@@ -289,6 +292,98 @@ test('desktop runtime app context normalizes missing locale fallback and app mis
     assert.equal(mismatch.payload.error, 'desktop_runtime_app_forbidden');
   } finally {
     await harness.stop();
+  }
+});
+
+test('desktop runtime folder grant endpoints require workspace capability and Desktop-signed selection tokens', async () => {
+  const grants = new Map();
+  const requestCalls = [];
+  const harness = await createBridge({
+    getAppPlatformCapabilities: async () => ({
+      speechToText: false,
+      audioInput: false,
+      textToSpeech: false,
+      workspaceFolders: true,
+    }),
+    requestFolderGrant: async (appId, grantToken) => {
+      requestCalls.push({ appId, grantToken });
+      if (grantToken !== 'valid-selection-token') return null;
+      const grant = {
+        grantId: 'grant-1',
+        path: '/Users/person/Documents/Budget',
+        realPath: '/Users/person/Documents/Budget',
+        name: 'Budget',
+        access: 'readWrite',
+        createdAt: '2026-05-17T00:00:00.000Z',
+      };
+      grants.set(grant.grantId, grant);
+      return grant;
+    },
+    listFolderGrants: async () => [...grants.values()],
+    revokeFolderGrant: async (_appId, grantId) => ({ revoked: grants.delete(grantId) }),
+  });
+  try {
+    const missingToken = await request(harness.bridge, `/v1/apps/${APP_ID}/folder-grants/request`, {
+      method: 'POST',
+      body: {},
+    });
+    assert.equal(missingToken.response.status, 400);
+    assert.equal(missingToken.payload.error, 'desktop_runtime_folder_grant_token_required');
+
+    const invalidToken = await request(harness.bridge, `/v1/apps/${APP_ID}/folder-grants/request`, {
+      method: 'POST',
+      body: { grantToken: 'invalid' },
+    });
+    assert.equal(invalidToken.response.status, 403);
+    assert.equal(invalidToken.payload.error, 'desktop_runtime_folder_grant_invalid');
+
+    const created = await request(harness.bridge, `/v1/apps/${APP_ID}/folder-grants/request`, {
+      method: 'POST',
+      body: { grantToken: 'valid-selection-token' },
+    });
+    assert.equal(created.response.status, 200);
+    assert.equal(created.payload.canceled, false);
+    assert.equal(created.payload.grantId, 'grant-1');
+    assert.deepEqual(requestCalls, [
+      { appId: APP_ID, grantToken: 'invalid' },
+      { appId: APP_ID, grantToken: 'valid-selection-token' },
+    ]);
+
+    const listed = await request(harness.bridge, `/v1/apps/${APP_ID}/folder-grants`);
+    assert.equal(listed.response.status, 200);
+    assert.equal(listed.payload.grants.length, 1);
+    assert.equal(listed.payload.grants[0].grantId, 'grant-1');
+
+    const revoked = await request(harness.bridge, `/v1/apps/${APP_ID}/folder-grants/grant-1/revoke`, {
+      method: 'POST',
+      body: {},
+    });
+    assert.equal(revoked.response.status, 200);
+    assert.deepEqual(revoked.payload, { revoked: true });
+
+    const afterRevoke = await request(harness.bridge, `/v1/apps/${APP_ID}/folder-grants`);
+    assert.deepEqual(afterRevoke.payload.grants, []);
+  } finally {
+    await harness.stop();
+  }
+
+  const denied = await createBridge({
+    getAppPlatformCapabilities: async () => ({
+      speechToText: false,
+      audioInput: false,
+      textToSpeech: false,
+      workspaceFolders: false,
+    }),
+    requestFolderGrant: async () => null,
+    listFolderGrants: async () => [],
+    revokeFolderGrant: async () => ({ revoked: false }),
+  });
+  try {
+    const result = await request(denied.bridge, `/v1/apps/${APP_ID}/folder-grants`);
+    assert.equal(result.response.status, 403);
+    assert.equal(result.payload.error, 'desktop_runtime_workspace_folders_not_allowed');
+  } finally {
+    await denied.stop();
   }
 });
 

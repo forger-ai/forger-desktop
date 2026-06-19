@@ -50,6 +50,7 @@ interface CodexBaseRunInput {
   mcpServers?: LlmMcpServerConfig[];
   workingDir: string;
   sharedRoots?: string[];
+  addDirs?: string[];
   prompt: string;
   model: string;
   reasoningEffort: CodexReasoningEffort;
@@ -191,6 +192,7 @@ export class CodexCliAdapter {
       ...codexWorkspaceArgs(input.permissionMode),
       '--skip-git-repo-check',
       ...buildCodexMcpArgs(mcpServers),
+      ...(input.addDirs ?? []).flatMap((dir) => ['--add-dir', dir]),
       '-C',
       input.workingDir,
       ...(input.imagePaths ?? []).flatMap((filePath) => ['--image', filePath]),
@@ -216,6 +218,7 @@ export class CodexCliAdapter {
       ...(input.threadId ? [] : codexWorkspaceArgs(input.permissionMode)),
       '--skip-git-repo-check',
       ...buildCodexMcpArgs(mcpServers),
+      ...(input.addDirs ?? []).flatMap((dir) => ['--add-dir', dir]),
     ];
     const args = input.threadId
       ? [

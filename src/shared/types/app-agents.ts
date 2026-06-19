@@ -118,11 +118,17 @@ export interface AppCodexConversationAttachment {
   dataBase64: string;
 }
 
+export interface AppAgentWorkspaceInput {
+  cwdGrantId?: string;
+  additionalFolderGrantIds?: string[];
+}
+
 export interface AppCodexConversationSendMessageInput {
   conversationId: string;
   message: string;
   context?: string;
   workspacePath?: string;
+  workspace?: AppAgentWorkspaceInput;
   provider?: AgentProvider;
   model?: string;
   reasoningEffort?: CodexReasoningEffort;
@@ -167,6 +173,7 @@ export interface AppAgentRuntimeInput {
   effort?: AgentEffort | 'default';
   permissionMode?: AgentPermissionMode;
   modelParams?: Record<string, unknown>;
+  workspace?: AppAgentWorkspaceInput;
 }
 
 export interface AppAgentThreadCreateInput {
@@ -175,6 +182,7 @@ export interface AppAgentThreadCreateInput {
   initialPrompt: string;
   runtime?: AppAgentRuntimeInput;
   workspacePath?: string;
+  workspace?: AppAgentWorkspaceInput;
   metadata?: Record<string, string | number | boolean | null>;
 }
 
@@ -186,6 +194,7 @@ export interface AppManifestAgentStartInput {
   variables?: AppAgentPromptVariables;
   runtime?: AppAgentRuntimeInput;
   workspacePath?: string;
+  workspace?: AppAgentWorkspaceInput;
   metadata?: Record<string, string | number | boolean | null>;
 }
 
@@ -194,6 +203,7 @@ export interface AppManifestAgentResumeInput {
   variables?: AppAgentPromptVariables;
   runtime?: AppAgentRuntimeInput;
   workspacePath?: string;
+  workspace?: AppAgentWorkspaceInput;
   metadata?: Record<string, string | number | boolean | null>;
 }
 
@@ -203,6 +213,7 @@ export interface AppManifestAgentSteerInput {
   variables?: AppAgentPromptVariables;
   runtime?: AppAgentRuntimeInput;
   workspacePath?: string;
+  workspace?: AppAgentWorkspaceInput;
 }
 
 export interface AppManifestAgentStopInput {
@@ -216,6 +227,7 @@ export interface AppAgentThreadRunStartInput {
   context?: string;
   runtime?: AppAgentRuntimeInput;
   workspacePath?: string;
+  workspace?: AppAgentWorkspaceInput;
   metadata?: Record<string, string | number | boolean | null>;
 }
 
@@ -229,6 +241,7 @@ export interface AppAgentThreadRunSteerInput extends AppAgentThreadRunControlInp
   context?: string;
   runtime?: AppAgentRuntimeInput;
   workspacePath?: string;
+  workspace?: AppAgentWorkspaceInput;
 }
 
 export interface AppAgentThreadSummary {

@@ -6,7 +6,7 @@ import Module from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 
 const require = createRequire(import.meta.url);
 
@@ -1789,6 +1789,86 @@ test('conversation manager executes a claude run with resume state and cleans MC
         assert.deepEqual(releasedMcps, [started.activeRun.runId]);
       },
     );
+  } finally {
+    await roots.cleanup();
+  }
+});
+
+test('conversation manager resolves workspace folder grants into provider cwd and shared roots', async () => {
+  const roots = await createTempDesktopRoots('forger-conversation-folder-grants-');
+  try {
+    const appRoot = path.join(roots.appsRoot, 'finance-os');
+    const grantedCwd = path.join(roots.root, 'external-cwd');
+    const additionalRoot = path.join(roots.root, 'extra-folder');
+    await mkdir(appRoot, { recursive: true });
+    await mkdir(grantedCwd, { recursive: true });
+    await mkdir(additionalRoot, { recursive: true });
+    const realAppRoot = await realpath(appRoot);
+    const realGrantedCwd = await realpath(grantedCwd);
+    const realAdditionalRoot = await realpath(additionalRoot);
+    const fakeCli = await createFakeAgentCli(roots.root);
+    const events = [];
+    const grants = {
+      cwd: {
+        grantId: 'cwd',
+        path: grantedCwd,
+        realPath: realGrantedCwd,
+        name: 'external-cwd',
+        access: 'readWrite',
+        createdAt: '2026-05-17T00:00:00.000Z',
+      },
+      extra: {
+        grantId: 'extra',
+        path: additionalRoot,
+        realPath: realAdditionalRoot,
+        name: 'extra-folder',
+        access: 'readWrite',
+        createdAt: '2026-05-17T00:00:00.000Z',
+      },
+    };
+    const { AppAgentConversationManager } = distRequire('main/app-agent-conversation-manager.js');
+    const manager = new AppAgentConversationManager({
+      privateAppsRoot: roots.appsRoot,
+      metadataRoot: roots.metadataRoot,
+      codexHome: roots.codexHome,
+      getAgentRuntime: async () => ({ provider: 'codex', model: 'gpt-test', effort: 'medium' }),
+      getCodexCliPath: async () => fakeCli,
+      getClaudeCliPath: async () => null,
+      getCodexPathEntries: async () => [path.dirname(fakeCli)],
+      getCodexEnvironment: async () => ({}),
+      getAgentNetworkAccess: async () => false,
+      getCodexAuthenticated: async () => true,
+      getClaudeAuthenticated: async () => false,
+      hasCodexConversation: async () => true,
+      resolveAgents: async () => [{ id: 'advisor', title: 'Advisor', initialPrompt: 'Help.' }],
+      resolveFolderGrant: async (_appId, grantId) => {
+        if (!grants[grantId]) throw new Error('folder_grant_not_found');
+        return grants[grantId];
+      },
+      onConversationEvent: (event) => events.push(event),
+    });
+
+    const conversation = await manager.create('finance-os', { agentId: 'advisor' });
+    const withRun = await manager.sendMessage('finance-os', {
+      conversationId: conversation.conversationId,
+      message: 'Use the granted workspace',
+      workspace: {
+        cwdGrantId: 'cwd',
+        additionalFolderGrantIds: ['extra', 'extra'],
+      },
+    });
+    await waitFor(
+      () => events.find((event) => event.type === 'run.completed' && event.run.runId === withRun.activeRun.runId),
+      'conversation_folder_grant_completed',
+    );
+
+    const [call] = await readAgentCalls(roots.root);
+    assert.equal(call.cwd, realGrantedCwd);
+    const allowedRoots = call.allowedRoots.split(path.delimiter);
+    assert.deepEqual(new Set(allowedRoots), new Set([realGrantedCwd, realAppRoot, realAdditionalRoot]));
+    assert.equal(call.args.includes('--add-dir'), true);
+    assert.equal(call.args.includes(realAppRoot), true);
+    assert.equal(call.args.includes(realAdditionalRoot), true);
   } finally {
     await roots.cleanup();
   }

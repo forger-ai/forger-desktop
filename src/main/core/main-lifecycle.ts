@@ -11,6 +11,7 @@ import type { StoredForgerAccount } from '../forger-account-store';
 import type { SpeechToTextServiceManager } from '../speech-to-text-service';
 import type { TextToSpeechServiceManager } from '../text-to-speech-service';
 import type { WakeWordServiceManager } from '../wake-word-service';
+import { AppFolderGrantStore } from '../app-folder-grants';
 import type {
   AgentRuntime,
   AgentRuntimeRequest,
@@ -46,7 +47,7 @@ import {
   createStartupLoadingController,
   createStartupLogger,
 } from './startup-loading';
-import { appAllowsAudioInput, appAllowsSpeechToText, appAllowsTextToSpeech } from '../../shared/platform-capabilities';
+import { appAllowsAudioInput, appAllowsSpeechToText, appAllowsTextToSpeech, appAllowsWorkspaceFolders } from '../../shared/platform-capabilities';
 
 type ServiceConstructor<T> = new (...args: unknown[]) => T;
 type AsyncFn<T = unknown> = (...args: unknown[]) => Promise<T>;
@@ -289,6 +290,7 @@ interface MainLifecycleDeps {
   resolveClaudeCli: () => Promise<{ path: string; source: string } | null>;
   resolveAntigravityCliPath?: () => Promise<string | null>;
   resolveCodexCliPath: (root: string) => Promise<string | null>;
+  resolveAppFolderGrant: (appId: string, grantToken: string) => { path: string; expiresAt: string } | null;
   resolveInstalledAgents: AsyncFn;
   resolveInstalledManifest: AsyncFn<AppManifest | null>;
   resolveInstalledPromptTemplates: AsyncFn;
@@ -416,6 +418,7 @@ export const registerMainLifecycle = (deps: unknown) => {
     resolveClaudeCli,
     resolveAntigravityCliPath,
     resolveCodexCliPath,
+    resolveAppFolderGrant,
     resolveInstalledAgents,
     resolveInstalledManifest,
     resolveInstalledPromptTemplates,
@@ -448,6 +451,8 @@ export const registerMainLifecycle = (deps: unknown) => {
     upsertInstalledRecord,
     waitForHttpOk,
   } = deps as MainLifecycleDeps;
+
+  const appFolderGrantStore = new AppFolderGrantStore(getForgerMetadataRoot());
 
   app.whenReady().then(async () => {
   const startupLoading = createStartupLoadingController(BrowserWindow, typeof app.getLocale === 'function' ? app.getLocale() : undefined);
@@ -1018,6 +1023,7 @@ export const registerMainLifecycle = (deps: unknown) => {
     },
     hasCodexConversation: hasInstalledCodexConversation,
     resolveAgents: resolveInstalledAgents,
+    resolveFolderGrant: async (appId: string, grantId: string) => await appFolderGrantStore.resolve(appId, grantId),
     createForgerMcpSession: (runId: string, appId: string, locale?: string) =>
       state.forgerMcpServer?.createSession(runId, appId, { caller: 'app-agent', appIds: [appId], locale }) ?? null,
     releaseForgerMcpSession: (token: string) => state.forgerMcpServer?.releaseSession(token),
@@ -1125,8 +1131,15 @@ export const registerMainLifecycle = (deps: unknown) => {
         speechToText: appAllowsSpeechToText(manifest?.platformCapabilities),
         audioInput: appAllowsAudioInput(manifest?.platformCapabilities),
         textToSpeech: appAllowsTextToSpeech(manifest?.platformCapabilities),
+        workspaceFolders: appAllowsWorkspaceFolders(manifest?.platformCapabilities),
       };
     },
+    requestFolderGrant: async (appId: string, grantToken: string) => {
+      const resolved = resolveAppFolderGrant(appId, grantToken);
+      return resolved ? await appFolderGrantStore.create(appId, resolved.path) : null;
+    },
+    listFolderGrants: async (appId: string) => await appFolderGrantStore.list(appId),
+    revokeFolderGrant: async (appId: string, grantId: string) => await appFolderGrantStore.revoke(appId, grantId),
     getAudioDevices,
     updateAudioInputDevices: async (devices: AudioRuntimeDevices) => {
       await getLiveVoiceInputService().updateDevices({

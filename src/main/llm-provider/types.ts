@@ -58,11 +58,11 @@ export interface LlmCliRunInput {
   workingDir: string;
   configWorkspaceRoot?: string;
   sharedRoots?: string[];
+  addDirs?: string[];
   prompt: string;
   model?: string;
   effort?: AgentEffort;
   conversationId?: string | null;
-  addDirs?: string[];
   permissionMode?: AgentPermissionMode;
   timeoutMs: number;
   timeoutMode?: 'absolute' | 'inactivity';

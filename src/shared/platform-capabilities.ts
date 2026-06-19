@@ -13,10 +13,16 @@ export interface PlatformAudioInputCapability {
   reason: string;
 }
 
+export interface PlatformWorkspaceFoldersCapability {
+  required: boolean;
+  reason: string;
+}
+
 export interface PlatformCapabilities {
   speechToText?: PlatformSpeechToTextCapability;
   textToSpeech?: PlatformTextToSpeechCapability;
   audioInput?: PlatformAudioInputCapability;
+  workspaceFolders?: PlatformWorkspaceFoldersCapability;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -29,6 +35,7 @@ export const normalizePlatformCapabilities = (value: unknown): PlatformCapabilit
   const speechToText = value.speechToText;
   const textToSpeech = value.textToSpeech;
   const audioInput = value.audioInput;
+  const workspaceFolders = value.workspaceFolders;
   const result: PlatformCapabilities = {};
   if (speechToText === true) {
     result.speechToText = { required: false, reason: '' };
@@ -54,6 +61,14 @@ export const normalizePlatformCapabilities = (value: unknown): PlatformCapabilit
       reason: typeof audioInput.reason === 'string' ? audioInput.reason.trim() : '',
     };
   }
+  if (workspaceFolders === true) {
+    result.workspaceFolders = { required: false, reason: '' };
+  } else if (isRecord(workspaceFolders) && workspaceFolders.enabled !== false) {
+    result.workspaceFolders = {
+      required: workspaceFolders.required === true,
+      reason: typeof workspaceFolders.reason === 'string' ? workspaceFolders.reason.trim() : '',
+    };
+  }
   return result;
 };
 
@@ -65,3 +80,6 @@ export const appAllowsTextToSpeech = (value: unknown): boolean =>
 
 export const appAllowsAudioInput = (value: unknown): boolean =>
   Boolean(normalizePlatformCapabilities(value).audioInput);
+
+export const appAllowsWorkspaceFolders = (value: unknown): boolean =>
+  Boolean(normalizePlatformCapabilities(value).workspaceFolders);

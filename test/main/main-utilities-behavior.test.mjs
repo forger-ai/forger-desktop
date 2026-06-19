@@ -312,6 +312,12 @@ test('main utility signs folder grants and resolves app ids from live app window
     path: '/shared/folder',
     exp: Math.floor(new Date(grant.expiresAt).getTime() / 1000),
   });
+  assert.deepEqual(controller.verifyAppFolderGrant('finance-os', grant.grantToken), {
+    path: '/shared/folder',
+    expiresAt: new Date(Math.floor(new Date(grant.expiresAt).getTime() / 1000) * 1000).toISOString(),
+  });
+  assert.equal(controller.verifyAppFolderGrant('recipes', grant.grantToken), null);
+  assert.equal(controller.verifyAppFolderGrant('finance-os', `${payload}.bad-signature`), null);
 });
 
 test('main utility summarizes updates and closes friend chat windows without touching destroyed windows', () => {
