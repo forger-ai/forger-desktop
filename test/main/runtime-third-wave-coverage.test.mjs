@@ -129,6 +129,7 @@ const makeAgentAuthHarness = async (overrides = {}) => {
     getLogsRoot: () => path.join(root, 'logs'),
     getTempRoot: () => path.join(root, 'tmp'),
     markProviderConnected: async (provider) => calls.push(['connected', provider]),
+    markProviderDisconnected: async (provider) => calls.push(['disconnected', provider]),
     path,
     registry,
     resolveInstalledManifest: async () => null,
@@ -818,6 +819,77 @@ test('agent auth launches existing managed Antigravity OAuth print mode on macOS
   ]);
   assert.ok(calls.some((call) => call[0] === 'run' && call[1] === '/usr/bin/osascript'));
   assert.ok(calls.some((call) => call[0] === 'log' && call[1] === 'antigravity_auth:terminal_opened'));
+});
+
+test('agent auth launches existing managed Antigravity OAuth print mode in a Windows console', async (t) => {
+  const spawns = [];
+  const { root, calls, controller } = await makeAgentAuthHarness({
+    canRunCommand: async (command, args) => command.endsWith('agy.exe') && args[0] === '--version',
+    runCommandCapture: async (command, args) => {
+      calls.push(['capture', command, args]);
+      if (args[0] === '--version') {
+        return { code: 0, stdout: '1.0.9\n', stderr: '' };
+      }
+      return { code: 1, stdout: '', stderr: 'missing' };
+    },
+    spawn: (command, args, options) => {
+      const child = new FakeChildProcess();
+      spawns.push([command, args, options]);
+      queueMicrotask(() => child.emit('exit', 0, null));
+      return child;
+    },
+  });
+  t.after(async () => {
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  await fs.mkdir(path.join(root, 'antigravity-root', 'bin'), { recursive: true });
+  await fs.writeFile(path.join(root, 'antigravity-root', 'bin', 'agy.exe'), '', 'utf8');
+
+  const result = await withPlatform('win32', async () => await controller.connectAntigravityAuth());
+
+  assert.equal(result.success, true);
+  assert.equal(result.status?.installed, true);
+  assert.equal(result.status?.authenticated, false);
+  assert.equal(result.status?.source, 'managed');
+  assert.equal(spawns[0][0], 'powershell.exe');
+  assert.match(spawns[0][1].at(-1), /Start-Process/);
+  assert.match(spawns[0][1].at(-1), /cmd\.exe/);
+  const loginScript = await fs.readFile(path.join(root, 'tmp', 'antigravity-login.cmd'), 'utf8');
+  assert.match(loginScript, /Forger Google Antigravity Login/);
+  assert.match(loginScript, /--print "Return the exact string OK and do not use tools\." --print-timeout 5m/);
+  assert.ok(calls.some((call) => call[0] === 'log' && call[1] === 'antigravity_auth:terminal_opened'));
+});
+
+test('agent auth disconnects Antigravity in Forger without treating preserved local credentials as a failure', async (t) => {
+  const { root, calls, controller } = await makeAgentAuthHarness({
+    canRunCommand: async (command, args) => command.endsWith('agy') && args[0] === '--version',
+    runCommandCapture: async (command, args) => {
+      calls.push(['capture', command, args]);
+      if (command === '/usr/bin/security') {
+        return { code: 1, stdout: '', stderr: 'missing' };
+      }
+      if (args[0] === '--version') {
+        return { code: 0, stdout: '1.0.9\n', stderr: '' };
+      }
+      return { code: 1, stdout: '', stderr: 'missing' };
+    },
+  });
+  t.after(async () => {
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  await fs.mkdir(path.join(root, 'antigravity-root', 'bin'), { recursive: true });
+  await fs.writeFile(path.join(root, 'antigravity-root', 'bin', 'agy'), '', 'utf8');
+  await fs.mkdir(path.join(root, '.gemini', 'antigravity'), { recursive: true });
+  await fs.writeFile(path.join(root, '.gemini', 'antigravity', 'antigravity_state.pbtxt'), 'state', 'utf8');
+
+  const result = await withPlatform('darwin', async () => await controller.disconnectAntigravityAuth());
+
+  assert.equal(result.success, true);
+  assert.equal(result.technicalCode, undefined);
+  assert.equal(result.status?.authenticated, true);
+  assert.match(result.userMessage, /Forger dejó de usar Google Antigravity/);
+  assert.ok(calls.some((call) => call[0] === 'disconnected' && call[1] === 'antigravity'));
+  assert.ok(calls.some((call) => call[0] === 'log' && call[1] === 'antigravity_auth:disconnected'));
 });
 
 test('agent auth Antigravity embedded session opens OAuth URL in main and redacts renderer output', async (t) => {

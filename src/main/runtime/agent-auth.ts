@@ -1146,6 +1146,54 @@ const openMacAntigravityLoginTerminal = async (input: {
   return { loginLogPath, loginScriptPath, terminalCommand };
 };
 
+const openWindowsAntigravityLoginTerminal = async (input: {
+  cliPath: string;
+  source: 'managed' | 'system';
+}): Promise<{ loginLogPath: string; loginScriptPath: string; launchCommand: string }> => {
+  const loginLogPath = path.join(getLogsRoot(), 'antigravity-login.log');
+  const loginScriptPath = path.join(getTempRoot(), 'antigravity-login.cmd');
+  const loginCwd = path.join(getTempRoot(), 'antigravity-auth-login');
+  await fs.mkdir(loginCwd, { recursive: true }).catch(() => undefined);
+  const loginScript = [
+    '@echo off',
+    'title Forger Google Antigravity Login',
+    `cd /d "${escapeWindowsBatchValue(loginCwd)}"`,
+    `"${escapeWindowsBatchValue(input.cliPath)}" --print "${escapeWindowsBatchValue(ANTIGRAVITY_AUTH_PROBE_PROMPT)}" --print-timeout 5m`,
+    'set "FORGER_ANTIGRAVITY_LOGIN_EXIT=%ERRORLEVEL%"',
+    'echo.',
+    'echo Google Antigravity login finished with exit code %FORGER_ANTIGRAVITY_LOGIN_EXIT%. You can close this window.',
+    'pause',
+  ].join('\r\n');
+  await fs.mkdir(path.dirname(loginLogPath), { recursive: true });
+  await fs.mkdir(path.dirname(loginScriptPath), { recursive: true });
+  await fs.writeFile(loginLogPath, [
+    `[${new Date().toISOString()}] Forger prepared Google Antigravity login.`,
+    `antigravityCliPath=${input.cliPath}`,
+    `source=${input.source}`,
+    `loginScriptPath=${loginScriptPath}`,
+    '',
+  ].join('\r\n'), 'utf8');
+  await fs.writeFile(loginScriptPath, `${loginScript}\r\n`, 'utf8');
+  const launchCommand = [
+    '$ErrorActionPreference = "Stop"',
+    `Start-Process -FilePath ${quotePowerShellSingle('cmd.exe')} -ArgumentList ${quotePowerShellSingle(`/d /k call "${loginScriptPath}"`)} -WorkingDirectory ${quotePowerShellSingle(app.getPath('userData'))}`,
+  ].join('; ');
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(
+      'powershell.exe',
+      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', launchCommand],
+      {
+        cwd: app.getPath('userData'),
+        stdio: 'ignore',
+        windowsHide: true,
+      },
+    );
+    child.once('error', reject);
+    child.once('exit', (code) => code === 0 ? resolve() : reject(new Error(`powershell Start-Process exited with code ${code ?? 'unknown'}`)));
+  });
+  return { loginLogPath, loginScriptPath, launchCommand };
+};
+
 const hasMacKeychainGenericPassword = async (service: string, account: string): Promise<boolean> => {
   if (process.platform !== 'darwin') {
     return false;
@@ -1655,6 +1703,27 @@ const connectAntigravityAuth = async (): Promise<{ success: boolean; userMessage
         },
       };
     }
+    if (process.platform === 'win32') {
+      const terminal = await openWindowsAntigravityLoginTerminal({ cliPath, source });
+      await appendInstallLog('antigravity_auth:terminal_opened', {
+        platform: process.platform,
+        cliPath,
+        loginScriptPath: terminal.loginScriptPath,
+        terminalCommand: terminal.launchCommand,
+        loginLogPath: terminal.loginLogPath,
+      });
+      return {
+        success: true,
+        userMessage: 'Abrimos una consola para completar la conexión local de Google Antigravity.',
+        status: {
+          installed: true,
+          authenticated: false,
+          source,
+          antigravityCliPath: cliPath,
+          userMessage: 'Completa el login de Google Antigravity en la consola.',
+        },
+      };
+    }
     const loginCwd = path.join(getTempRoot(), 'antigravity-auth-login');
     await fs.mkdir(loginCwd, { recursive: true }).catch(() => undefined);
     await runCommand(cliPath, ['--print', ANTIGRAVITY_AUTH_PROBE_PROMPT, '--print-timeout', '5m'], {
@@ -1727,12 +1796,11 @@ const disconnectAntigravityAuth = async (): Promise<{ success: boolean; userMess
       credentialScope: 'external_provider_state_preserved',
     });
     return {
-      success: !status?.authenticated,
+      success: true,
       userMessage: status?.authenticated
-        ? 'Google Antigravity sigue conectado en este equipo. Forger no borra credenciales locales del proveedor sin una confirmación explícita.'
+        ? 'Forger dejó de usar Google Antigravity, pero la sesión local de Google sigue guardada en este computador.'
         : 'Google Antigravity fue desconectado en este equipo.',
       status,
-      ...(status?.authenticated ? { technicalCode: 'antigravity_auth_still_authenticated' } : {}),
     };
   } catch (error) {
     const diagnostic = failureDiagnostic(error, 'antigravity_disconnect_failed');
