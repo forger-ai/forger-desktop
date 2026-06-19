@@ -50,8 +50,10 @@ const waitFor = async (predicate, timeoutMs = 1000) => {
 
 const createBridge = async (options = {}) => {
   const tasks = new Map();
+  const taskStarts = [];
   const taskManager = {
     async start(appId, input) {
+      taskStarts.push({ appId, input });
       const task = {
         runId: 'run-1',
         appId,
@@ -150,6 +152,7 @@ const createBridge = async (options = {}) => {
     bridge,
     taskManager,
     tasks,
+    taskStarts,
     stop: async () => {
       await bridge.stop();
     },
@@ -965,6 +968,35 @@ test('desktop runtime task endpoints start, get, and cancel tasks', async () => 
     });
     assert.equal(cancel.response.status, 200);
     assert.deepEqual(cancel.payload, { success: true });
+  } finally {
+    await harness.stop();
+  }
+});
+
+test('desktop runtime task endpoints normalize workspace input for task starts', async () => {
+  const harness = await createBridge();
+  try {
+    const start = await request(harness.bridge, `/v1/apps/${APP_ID}/agent-tasks`, {
+      method: 'POST',
+      body: {
+        templateId: 'recommend_budget',
+        workspacePath: 'reports/may',
+        workspace: {
+          cwdGrantId: '  grant-cwd  ',
+          additionalFolderGrantIds: [' grant-extra ', 'grant-extra', '', 7],
+        },
+      },
+    });
+    assert.equal(start.response.status, 200);
+    assert.equal(harness.taskStarts.length, 1);
+    assert.deepEqual(harness.taskStarts[0].input, {
+      templateId: 'recommend_budget',
+      workspacePath: 'reports/may',
+      workspace: {
+        cwdGrantId: 'grant-cwd',
+        additionalFolderGrantIds: ['grant-extra'],
+      },
+    });
   } finally {
     await harness.stop();
   }

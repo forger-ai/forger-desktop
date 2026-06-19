@@ -973,6 +973,7 @@ export const registerMainLifecycle = (deps: unknown) => {
     releaseAppMcps: (runId: string) => {
       state.appMcpManager?.releaseMcps(runId);
     },
+    resolveFolderGrant: async (appId: string, grantId: string) => await appFolderGrantStore.resolve(appId, grantId),
     canRequestPermission: (appId: string) => {
       const target = appWindows.get(appId);
       return Boolean(target && !target.isDestroyed());

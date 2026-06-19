@@ -8,7 +8,7 @@ description: Use when creating or changing Forger app backend behavior, includin
 - Use the app's existing dependency manager and stack conventions, usually `uv` in `vite-fastapi-sqlite` apps. Do not replace service startup with ad hoc `pip install` or manual `fastapi dev` instructions.
 - Keep domain validations before persisting data. Validate required fields, ranges, ownership, duplicates, state transitions, and destructive operations before writing to SQLite.
 - Keep persistence and file work inside the app-private workspace unless the user explicitly shared a file for the task.
-- Treat external folder access as a Forger-owned folder grant. For grant-aware workflows, persist and pass grant ids such as `cwdGrantId` and `additionalFolderGrantIds`. You may persist returned full paths for display and prompt context, but the backend must treat those paths as descriptive data and use grant ids for authorization.
+- Treat external folder access as a Forger-owned folder grant. For grant-aware workflows, persist and pass grant ids through task or agent `workspace` inputs such as `cwdGrantId` and `additionalFolderGrantIds`. If the backend needs to request a new grant for a concrete folder path, use the commons helpers that sign with Desktop-injected `FORGER_APP_GRANT_SECRET`; never expose that secret or hand-roll the grant token format in app code. You may persist returned full paths for display and prompt context, but the backend must treat those paths as descriptive data and use grant ids for authorization.
 - Secrets are declarations and runtime-injected values. Do not add credentials to manifests, logs, tests, prompt text, memory, or committed files.
 - Prefer clear, testable changes that are easy to revert.
 
@@ -20,7 +20,7 @@ description: Use when creating or changing Forger app backend behavior, includin
 - Keep HTTP semantics consistent: use the right method, status code, idempotency expectation, and error shape for the workflow.
 - Keep dependencies small and injectable: database sessions, current app context, file-library access, Desktop bridge helpers, and settings should be dependency-provided, not hidden globals.
 - File routes may only read app-private workspace files or files explicitly shared by the user. Do not browse arbitrary external filesystem paths.
-- Routes that work with folder grants must validate that the grant belongs to the current app, feature, or user-approved workflow before starting backend work or agent work. The backend should pass grant ids through the Desktop bridge `workspace` object, not turn them into broad path access.
+- Routes that work with folder grants must validate that the grant belongs to the current app, feature, or user-approved workflow before starting backend work, prompt-template tasks, or agent work. The backend should request grants through `request_folder_grant_for_path` or `request_folder_grant`, then pass grant ids through the Desktop bridge `workspace` object, not turn them into broad path access.
 - `workspace_path` remains a legacy app-private path selector. Accept it only when it resolves inside the installed app workspace and reject attempts to use it for external folders.
 - CORS and remote access behavior must respect Forger Desktop local-network and remote-tunnel ownership. Do not expose independent tunnels or public services from the app backend.
 - Use sync endpoints for sync work and async endpoints only when the implementation avoids blocking I/O. Do not run blocking database/file operations inside async code without the app's established pattern.

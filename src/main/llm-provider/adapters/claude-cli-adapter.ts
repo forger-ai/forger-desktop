@@ -27,6 +27,7 @@ interface ClaudeBaseRunInput {
   environment: Record<string, string>;
   mcpServers?: LlmMcpServerConfig[];
   workingDir: string;
+  configWorkspaceRoot?: string;
   sharedRoots?: string[];
   addDirs?: string[];
   prompt: string;
@@ -52,7 +53,7 @@ export class ClaudeCliAdapter {
   public async run(input: ClaudeBaseRunInput): Promise<ClaudeRunResult> {
     const mcpServers = input.mcpServers ?? [];
     const mcpConfigPath = input.alwaysIncludeMcpConfig || mcpServers.length > 0
-      ? await writeClaudeMcpConfig(input.workingDir, mcpServers)
+      ? await writeClaudeMcpConfig(input.configWorkspaceRoot ?? input.workingDir, mcpServers)
       : null;
     const args = [
       '-p',

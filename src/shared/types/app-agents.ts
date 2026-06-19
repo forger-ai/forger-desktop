@@ -42,6 +42,8 @@ export interface AppCodexTaskStartInput {
   arguments?: Record<string, AppCodexTaskArgumentValue>;
   variables?: Record<string, string | number | boolean | null>;
   attachments?: AppCodexTaskAttachment[];
+  workspacePath?: string;
+  workspace?: AppAgentWorkspaceInput;
 }
 
 export interface AppCodexTaskSummary {
