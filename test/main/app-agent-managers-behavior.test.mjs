@@ -1157,8 +1157,10 @@ test('app MCP manager starts one server per app, reuses listeners, releases it, 
           manifest.mcp.command = 'uv run python -m app.mcp_server';
           const uvConfig = await manager.listenMcps(['finance-os'], 'run-uv');
           assert.equal(uvConfig.length, 1);
-          assert.equal(children.at(-1).command, path.join(roots.appsRoot, 'finance-os', 'backend', '.venv', 'bin', 'python'));
+          assert.equal(children.at(-1).command, '/runtime/python');
           assert.deepEqual(children.at(-1).args, ['-m', 'uv', 'run', 'python', '-m', 'app.mcp_server']);
+          assert.equal(children.at(-1).options.env.UV_PROJECT_ENVIRONMENT, path.join(roots.appsRoot, 'finance-os', 'backend', '.venv'));
+          assert.equal(children.at(-1).options.env.UV_PYTHON, '/runtime/python');
           manager.releaseMcps('run-uv');
           await waitFor(() => terminations.length === 3, 'mcp_uv_termination');
 
