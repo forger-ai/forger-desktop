@@ -14,7 +14,7 @@ description: Use when designing, implementing, reviewing, or explaining in-app A
 - The current `vite-fastapi-sqlite` stack provides the backend helper in `commons/backend/forger_desktop.py`.
 - Keep the frontend browser-safe. The frontend calls the app backend over normal HTTP routes; it must not call Desktop directly, use Electron APIs, read Desktop secrets, or depend on `window.forgerApp`.
 - The app backend owns validation, size limits, file preprocessing, argument shaping, error mapping, and calls to `forger_desktop.py`.
-- Forger Desktop injects `FORGER_DESKTOP_RUNTIME_URL`, `FORGER_DESKTOP_RUNTIME_APP_ID`, and `FORGER_DESKTOP_RUNTIME_SECRET` into app services. Do not hard-code or expose those values.
+- Forger Desktop injects `FORGER_DESKTOP_RUNTIME_URL`, `FORGER_DESKTOP_RUNTIME_APP_ID`, and `FORGER_DESKTOP_RUNTIME_SECRET` into app services. For folder-grant request flows, Desktop also injects `FORGER_APP_GRANT_SECRET` so the app backend can sign short-lived folder grant tokens with the helper in `commons/backend/forger_desktop.py`. Do not hard-code, log, return to the frontend, or expose those values.
 - App locale/context also travels through this signed HTTP bridge. For stack apps, expose it to the frontend through the app backend route `GET /api/forger/context` and the shared locale module; do not revive `window.forgerApp`.
 - Treat this bridge as an internal app mechanism. Explain visible progress and results, not runtime URLs, signatures, routes, or secrets.
 - This bridge is not how an agent opens an app for the person. Opening, launching, starting, running, or bringing up an installed app means using Forger Desktop app controls through the Forger MCP app tools: use `forger_open_app` to open the app and `forger_get_app_runtime_status` to check whether Forger has it running when needed. Do not manually start Python, uvicorn, npm, Vite, FastAPI, or localhost services just so the person can access the app.
@@ -22,7 +22,7 @@ description: Use when designing, implementing, reviewing, or explaining in-app A
 ## Prompt Template Tasks
 - Backend routes should describe the visible app flow, not Desktop internals. Common route shapes include `/api/assistant/status`, `/api/assistant/tasks/<task-name>`, `/api/assistant/tasks/{run_id}`, and `/api/assistant/tasks/{run_id}/cancel`.
 - From the backend, import `get_agent_task_status`, `start_agent_task`, `get_agent_task`, `cancel_agent_task`, and optionally `wait_for_task` from `app.forger_desktop`.
-- Start a task with `start_agent_task(template_id="<manifest-template-id>", locale=locale, arguments=arguments)`.
+- Start a task with `start_agent_task(template_id="<manifest-template-id>", locale=locale, arguments=arguments)`. For grant-aware task flows, pass `workspace={ "cwdGrantId": "...", "additionalFolderGrantIds": ["..."] }`. To run from an app-owned subdirectory, pass `workspace_path="relative-or-app-private-path"`; do not use `workspace_path` for external folders.
 - `arguments` must match the prompt template argument names. Use typed objects such as `{ "type": "string", "value": "..." }` for text values and `{ "type": "file", "name": "...", "mimeType": "...", "dataBase64": "..." }` for file values when the app passes files through the backend.
 - Validate allowed template ids in the backend instead of trusting arbitrary frontend input.
 - Poll task state with `get_agent_task(run_id)` and expose only safe public fields to the frontend.
@@ -36,13 +36,21 @@ description: Use when designing, implementing, reviewing, or explaining in-app A
 - Start a manifest agent thread with `start_manifest_agent_thread(agent_id="<manifest-agent-id>", title=..., variables={...}, metadata=..., workspace_path=...)`. The `variables` object must match that agent's `prompts.initial.variables` declaration.
 - Resume a manifest agent thread with `resume_manifest_agent_thread(desktop_thread_id=thread_id, variables={...}, workspace_path=...)`. The `variables` object must match that agent's `prompts.resume.variables` declaration.
 - Steer an active manifest agent run with `steer_manifest_agent_run(desktop_thread_id=thread_id, desktop_run_id=run_id, variables={...}, workspace_path=...)`. The `variables` object must match that agent's `prompts.steer.variables` declaration.
-- For grant-aware flows, pass a `workspace` object instead of raw folder paths: `workspace={ "cwdGrantId": "...", "additionalFolderGrantIds": ["..."] }`. `cwdGrantId` selects the approved working folder for the run. `additionalFolderGrantIds` lists other Forger-approved folders the run may reference.
+- For grant-aware task and agent flows, pass a `workspace` object instead of raw folder paths: `workspace={ "cwdGrantId": "...", "additionalFolderGrantIds": ["..."] }`. `cwdGrantId` selects the approved working folder for the run. `additionalFolderGrantIds` lists other Forger-approved folders the run may reference.
 - `workspace_path` is legacy and constrained to app-private paths inside the installed app workspace. Use it only for app-owned subdirectories, never for arbitrary external folders, home directories, mounted drives, or paths supplied directly by a person.
-- External folder access belongs to Forger folder grants. The app backend should store and pass grant ids, validate that each grant belongs to the current app/workflow, and let Desktop resolve approved filesystem scope. The returned full paths may be stored or placed in prompts as user-visible context, but they are descriptive data only; the grant ids remain the permission handles.
+- External folder access belongs to Forger folder grants. When the app backend needs Desktop to ask the person for access to a concrete folder path, use `request_folder_grant_for_path(path=...)` or `create_folder_grant_token(path=...)` plus `request_folder_grant(grant_token=...)`; do not reimplement the token signature in app code. After approval, the backend should store and pass grant ids, validate that each grant belongs to the current app/workflow, and let Desktop resolve approved filesystem scope. The returned full paths may be stored or placed in prompts as user-visible context, but they are descriptive data only; the grant ids remain the permission handles.
 - Do not start new agent work with the removed freeform endpoints `POST /agent-threads` or `POST /agent-threads/{thread_id}/runs`. Those endpoints return a removed-bridge error in current Desktop builds.
 - Poll with `get_agent_run(thread_id, run_id)` and cancel with `cancel_agent_run(thread_id, run_id)`.
 - Store Desktop thread ids and run ids in app tables only when the app needs resumable visible state. Use explicit relational columns, not JSON blobs, unless the metadata is genuinely schemaless.
 - Keep app-owned data and app validations in the app backend. Desktop agent runs should call app MCP tools or app APIs to perform structured data changes instead of bypassing validations.
+
+## Folder Grant Flow
+- The manifest must declare `platformCapabilities.workspaceFolders` before an app asks Forger for external folder grants. The declaration is permission to ask, not permission to read or write a folder.
+- Backend routes that prepare an external-folder workflow should call `request_folder_grant_for_path(path=...)` when they already know the requested folder path, or `create_folder_grant_token(path=...)` plus `request_folder_grant(grant_token=...)` when they need to pass a short-lived signed token explicitly. Use `list_folder_grants()` to rediscover existing approvals and `revoke_folder_grant(grant_id=...)` when the visible workflow removes access.
+- After approval, store the grant id with the app workflow state. Store the returned full path only for display, saved context, or prompt wording. Do not treat a raw path as authority and do not let frontend input choose arbitrary Desktop filesystem scope.
+- To run a prompt-template task in an approved external folder, call `start_agent_task(..., workspace={ "cwdGrantId": grant_id, "additionalFolderGrantIds": extra_grant_ids })`.
+- To run or continue a manifest agent with the same approved scope, pass the same `workspace` object to `start_manifest_agent_thread`, `resume_manifest_agent_thread`, or `steer_manifest_agent_run`.
+- Use `workspace_path` only when the run should start inside an app-private subdirectory of the installed app workspace. If the person needs a folder outside the app workspace, request a folder grant and pass grant ids through `workspace`.
 
 ## App UI And Refresh
 - App agents and task agents should use the app's MCP tools or app APIs to interact with app data through app-owned validation.
@@ -56,7 +64,7 @@ description: Use when designing, implementing, reviewing, or explaining in-app A
 ## Manifest And Permission Fit
 - Use `forger-manifest-authoring` when writing the exact `manifest.json` shape for agents or prompt templates.
 - Choose `permissionMode` consciously for each app agent and prompt template. Use `"safe"` unless that specific agent or task has a concrete need for elevated filesystem access.
-- `permissionMode` does not create folder grants. If an app agent or conversation flow needs external folders, the manifest must declare `platformCapabilities.workspaceFolders`, the user must grant folders through Forger, and the run should receive `workspace.cwdGrantId` plus any `workspace.additionalFolderGrantIds`.
+- `permissionMode` does not create folder grants. If a prompt-template task, app agent, or conversation flow needs external folders, the manifest must declare `platformCapabilities.workspaceFolders`, the user must grant folders through Forger, and the run should receive `workspace.cwdGrantId` plus any `workspace.additionalFolderGrantIds`.
 - Keep final product behavior clear: what the AI flow helps with, what inputs it expects, and what result it should produce.
 
 ## Implementation Checklist

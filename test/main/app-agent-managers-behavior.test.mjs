@@ -1874,6 +1874,173 @@ test('conversation manager resolves workspace folder grants into provider cwd an
   }
 });
 
+test('task manager resolves app-private workspace paths and rejects invalid task workspaces', async () => {
+  const roots = await createTempDesktopRoots('forger-task-workspace-path-');
+  try {
+    const appRoot = path.join(roots.appsRoot, 'finance-os');
+    const workspacePath = path.join(appRoot, 'reports');
+    const outsidePath = path.join(roots.root, 'outside');
+    await mkdir(workspacePath, { recursive: true });
+    await mkdir(outsidePath, { recursive: true });
+    const symlinkWorkspace = path.join(appRoot, 'linked-outside');
+    await symlink(outsidePath, symlinkWorkspace);
+    const realWorkspace = await realpath(workspacePath);
+    const fakeCli = await createFakeAgentCli(roots.root);
+    const events = [];
+    const { AppAgentTaskManager } = distRequire('main/app-agent-task-manager.js');
+    const manager = new AppAgentTaskManager({
+      privateAppsRoot: roots.appsRoot,
+      metadataRoot: roots.metadataRoot,
+      codexHome: roots.codexHome,
+      getAgentRuntime: async () => ({ provider: 'codex', model: 'gpt-test', effort: 'medium' }),
+      getCodexCliPath: async () => fakeCli,
+      getClaudeCliPath: async () => null,
+      getCodexPathEntries: async () => [path.dirname(fakeCli)],
+      getCodexEnvironment: async () => ({}),
+      getAgentNetworkAccess: async () => false,
+      getCodexAuthenticated: async () => true,
+      getClaudeAuthenticated: async () => false,
+      resolvePromptTemplates: async () => [{
+        id: 'review',
+        title: 'Review',
+        prompt: 'Review {{topic}}',
+        arguments: [{ name: 'topic', type: 'string', required: true }],
+      }],
+      onTaskUpdated: (event) => events.push(event),
+    });
+
+    const task = await manager.start('finance-os', {
+      templateId: 'review',
+      arguments: { topic: 'cash flow' },
+      workspacePath,
+    });
+    await waitFor(
+      () => events.find((event) => event.task.runId === task.runId && event.task.status === 'completed'),
+      'task_workspace_path_completed',
+    );
+    const [call] = await readAgentCalls(roots.root);
+    assert.equal(call.cwd, realWorkspace);
+
+    const outsideTask = await manager.start('finance-os', {
+      templateId: 'review',
+      arguments: { topic: 'outside' },
+      workspacePath: outsidePath,
+    });
+    const outsideFailed = await waitFor(
+      () => events.find((event) => event.task.runId === outsideTask.runId && event.task.status === 'failed'),
+      'task_outside_workspace_failed',
+    );
+    assert.equal(outsideFailed.task.error, 'agent_run_workspace_outside_app');
+
+    const symlinkTask = await manager.start('finance-os', {
+      templateId: 'review',
+      arguments: { topic: 'symlink' },
+      workspacePath: symlinkWorkspace,
+    });
+    const symlinkFailed = await waitFor(
+      () => events.find((event) => event.task.runId === symlinkTask.runId && event.task.status === 'failed'),
+      'task_symlink_workspace_failed',
+    );
+    assert.equal(symlinkFailed.task.error, 'agent_run_workspace_outside_app');
+
+    const missingTask = await manager.start('finance-os', {
+      templateId: 'review',
+      arguments: { topic: 'missing' },
+      workspacePath: path.join(appRoot, 'missing-workspace'),
+    });
+    const missingFailed = await waitFor(
+      () => events.find((event) => event.task.runId === missingTask.runId && event.task.status === 'failed'),
+      'task_missing_workspace_failed',
+    );
+    assert.equal(missingFailed.task.error, 'agent_run_workspace_missing');
+  } finally {
+    await roots.cleanup();
+  }
+});
+
+test('task manager resolves workspace folder grants into provider cwd and shared roots', async () => {
+  const roots = await createTempDesktopRoots('forger-task-folder-grants-');
+  try {
+    const appRoot = path.join(roots.appsRoot, 'finance-os');
+    const grantedCwd = path.join(roots.root, 'external-cwd');
+    const additionalRoot = path.join(roots.root, 'extra-folder');
+    await mkdir(appRoot, { recursive: true });
+    await mkdir(grantedCwd, { recursive: true });
+    await mkdir(additionalRoot, { recursive: true });
+    const realAppRoot = await realpath(appRoot);
+    const realGrantedCwd = await realpath(grantedCwd);
+    const realAdditionalRoot = await realpath(additionalRoot);
+    const fakeCli = await createFakeAgentCli(roots.root);
+    const events = [];
+    const grants = {
+      cwd: {
+        grantId: 'cwd',
+        path: grantedCwd,
+        realPath: realGrantedCwd,
+        name: 'external-cwd',
+        access: 'readWrite',
+        createdAt: '2026-05-17T00:00:00.000Z',
+      },
+      extra: {
+        grantId: 'extra',
+        path: additionalRoot,
+        realPath: realAdditionalRoot,
+        name: 'extra-folder',
+        access: 'readWrite',
+        createdAt: '2026-05-17T00:00:00.000Z',
+      },
+    };
+    const { AppAgentTaskManager } = distRequire('main/app-agent-task-manager.js');
+    const manager = new AppAgentTaskManager({
+      privateAppsRoot: roots.appsRoot,
+      metadataRoot: roots.metadataRoot,
+      codexHome: roots.codexHome,
+      getAgentRuntime: async () => ({ provider: 'codex', model: 'gpt-test', effort: 'medium' }),
+      getCodexCliPath: async () => fakeCli,
+      getClaudeCliPath: async () => null,
+      getCodexPathEntries: async () => [path.dirname(fakeCli)],
+      getCodexEnvironment: async () => ({}),
+      getAgentNetworkAccess: async () => false,
+      getCodexAuthenticated: async () => true,
+      getClaudeAuthenticated: async () => false,
+      resolvePromptTemplates: async () => [{
+        id: 'review',
+        title: 'Review',
+        prompt: 'Review {{topic}}',
+        arguments: [{ name: 'topic', type: 'string', required: true }],
+      }],
+      resolveFolderGrant: async (_appId, grantId) => {
+        if (!grants[grantId]) throw new Error('folder_grant_not_found');
+        return grants[grantId];
+      },
+      onTaskUpdated: (event) => events.push(event),
+    });
+
+    const task = await manager.start('finance-os', {
+      templateId: 'review',
+      arguments: { topic: 'granted workspace' },
+      workspace: {
+        cwdGrantId: 'cwd',
+        additionalFolderGrantIds: ['extra', 'extra'],
+      },
+    });
+    await waitFor(
+      () => events.find((event) => event.task.runId === task.runId && event.task.status === 'completed'),
+      'task_folder_grant_completed',
+    );
+
+    const [call] = await readAgentCalls(roots.root);
+    assert.equal(call.cwd, realGrantedCwd);
+    const allowedRoots = call.allowedRoots.split(path.delimiter);
+    assert.deepEqual(new Set(allowedRoots), new Set([realGrantedCwd, realAppRoot, realAdditionalRoot]));
+    assert.equal(call.args.includes('--add-dir'), true);
+    assert.equal(call.args.includes(realAppRoot), true);
+    assert.equal(call.args.includes(realAdditionalRoot), true);
+  } finally {
+    await roots.cleanup();
+  }
+});
+
 test('conversation manager recovers a missing provider thread with a fresh codex run', async () => {
   const roots = await createTempDesktopRoots('forger-conversation-recovery-');
   try {

@@ -394,7 +394,7 @@ export class DesktopRuntimeBridge {
       const body = parseJsonBody(bodyText);
 
       if (method === 'POST' && !runId && !isCancel) {
-        return await taskManager.start(appId, body as unknown as AppCodexTaskStartInput);
+        return await taskManager.start(appId, normalizeTaskStartInput(body));
       }
       if (method === 'GET' && runId && !isCancel) {
         return taskManager.get(appId, runId);
@@ -1184,6 +1184,23 @@ const safeEqual = (left: string, right: string): boolean => {
   const leftBuffer = Buffer.from(left);
   const rightBuffer = Buffer.from(right);
   return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
+};
+
+const normalizeTaskStartInput = (body: Record<string, unknown>): AppCodexTaskStartInput => {
+  const workspace = normalizeWorkspace(body.workspace);
+  return {
+    templateId: typeof body.templateId === 'string' ? body.templateId : '',
+    ...(typeof body.locale === 'string' ? { locale: body.locale } : {}),
+    ...(body.arguments && typeof body.arguments === 'object' && !Array.isArray(body.arguments)
+      ? { arguments: body.arguments as AppCodexTaskStartInput['arguments'] }
+      : {}),
+    ...(body.variables && typeof body.variables === 'object' && !Array.isArray(body.variables)
+      ? { variables: body.variables as AppCodexTaskStartInput['variables'] }
+      : {}),
+    ...(Array.isArray(body.attachments) ? { attachments: body.attachments as AppCodexTaskStartInput['attachments'] } : {}),
+    ...(typeof body.workspacePath === 'string' ? { workspacePath: body.workspacePath } : {}),
+    ...(workspace ? { workspace } : {}),
+  };
 };
 
 const normalizeRuntime = (runtime: AppAgentRuntimeInput | undefined): Partial<AppCodexConversationSendMessageInput> => {

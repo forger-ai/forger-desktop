@@ -9,6 +9,7 @@ import type {
   AppCodexTaskSummary,
   AppPromptTemplate,
   AppPromptTemplateArgument,
+  AppAgentWorkspaceInput,
   AgentRuntime,
   AgentRuntimeRequest,
   ClaudeEffort,
@@ -46,6 +47,7 @@ import {
   type TaskLocale,
 } from './app-agent/task-helpers';
 import type { LlmAppMcpServerConfig } from './app-agent/types';
+import type { AppFolderGrantPublic } from './app-folder-grants';
 import { antigravityCliAdapter } from './llm-provider/adapters/antigravity-cli-adapter';
 import { claudeCliAdapter } from './llm-provider/adapters/claude-cli-adapter';
 import { codexCliAdapter, parseCodexJsonl } from './llm-provider/adapters/codex-cli-adapter';
@@ -72,6 +74,7 @@ interface AppAgentTaskManagerOptions {
   buildForgerToolsContext?: (appId: string) => Promise<string>;
   listenAppMcps?: (appIds: string[], runId: string) => Promise<LlmAppMcpServerConfig[]>;
   releaseAppMcps?: (runId: string) => void;
+  resolveFolderGrant?: (appId: string, grantId: string) => Promise<AppFolderGrantPublic>;
   canRequestPermission?: (appId: string) => boolean;
   onTaskUpdated: (event: AppCodexTaskEvent) => void;
 }
@@ -80,6 +83,11 @@ interface InternalTask extends AppCodexTaskSummary {
   appRoot: string;
   transcriptPath: string;
   child?: ChildProcessWithoutNullStreams;
+}
+
+interface ResolvedTaskWorkspace {
+  runRoot: string;
+  additionalRoots: string[];
 }
 
 const taskFailureFromError = (error: unknown): Pick<AppCodexTaskSummary, 'error' | 'errorDetails'> => {
@@ -308,6 +316,13 @@ export class AppAgentTaskManager {
       const pathEntries = await this.options.getCodexPathEntries(task.appId);
       const environment = await this.options.getCodexEnvironment(task.appId);
       const networkAccess = await (this.options.getAgentNetworkAccess?.(task.appId) ?? Promise.resolve(false));
+      const resolvedWorkspace = await this.resolveRunWorkspace(task.appId, task.appRoot, input.workspacePath, input.workspace);
+      const runRoot = resolvedWorkspace.runRoot;
+      const realAppRoot = await fs.realpath(task.appRoot);
+      const additionalRoots = Array.from(new Set([realAppRoot, ...resolvedWorkspace.additionalRoots].filter((root) => root !== runRoot)));
+      if (!(await existsDirectory(runRoot))) {
+        throw new Error('agent_run_workspace_missing');
+      }
       const model = runtime.model || DEFAULT_MODEL;
       const reasoningEffort = runtime.provider === 'codex' ? runtime.effort as CodexReasoningEffort : DEFAULT_REASONING;
       const appMcpServers = await (this.options.listenAppMcps?.([task.appId], task.runId) ?? Promise.resolve([]));
@@ -339,7 +354,9 @@ export class AppAgentTaskManager {
           pathEntries,
           environment,
           mcpServers,
-          workingDir: task.appRoot,
+          workingDir: runRoot,
+          sharedRoots: additionalRoots,
+          addDirs: additionalRoots,
           prompt,
           model,
           reasoningEffort,
@@ -359,7 +376,7 @@ export class AppAgentTaskManager {
       const isolatedCodexHome = runtime.provider === 'codex'
         ? await createIsolatedCodexHome(this.options.codexHome, {
             prefix: 'forger-task-codex-home',
-            trustedRoots: [task.appRoot],
+            trustedRoots: Array.from(new Set([runRoot, ...additionalRoots])),
             networkAccess,
           })
         : '';
@@ -373,12 +390,13 @@ export class AppAgentTaskManager {
             pathEntries: [path.dirname(antigravityCliPath as string), ...pathEntries],
             environment,
             mcpServers,
-            workingDir: task.appRoot,
+            workingDir: runRoot,
             configWorkspaceRoot: task.appRoot,
-            sharedRoots: [],
+            sharedRoots: additionalRoots,
             prompt,
             model,
             effort: runtime.effort,
+            addDirs: additionalRoots,
             permissionMode: runtime.permissionMode,
             timeoutMs: CODEX_TASK_TIMEOUT_MS,
             timeoutMode: 'absolute',
@@ -395,7 +413,10 @@ export class AppAgentTaskManager {
             pathEntries,
             environment,
             mcpServers,
-            workingDir: task.appRoot,
+            workingDir: runRoot,
+            configWorkspaceRoot: task.appRoot,
+            sharedRoots: additionalRoots,
+            addDirs: additionalRoots,
             prompt,
             model,
             effort: runtime.effort as ClaudeEffort,
@@ -428,7 +449,7 @@ export class AppAgentTaskManager {
           this.emit(task);
           const cleanCodexHome = await createIsolatedCodexHome(this.options.codexHome, {
             prefix: 'forger-task-codex-home',
-            trustedRoots: [task.appRoot],
+            trustedRoots: Array.from(new Set([runRoot, ...additionalRoots])),
             networkAccess,
           });
           temporaryCodexHomes.push(cleanCodexHome);
@@ -489,6 +510,56 @@ export class AppAgentTaskManager {
         pending.resolve(decision);
       }
     }
+  }
+
+  private async resolveRunWorkspace(
+    appId: string,
+    appRoot: string,
+    workspacePath: string | undefined,
+    workspace: AppAgentWorkspaceInput | undefined,
+  ): Promise<ResolvedTaskWorkspace> {
+    const cwdGrantId = workspace?.cwdGrantId?.trim();
+    const additionalGrantIds = [...new Set((workspace?.additionalFolderGrantIds ?? []).map((entry) => entry.trim()).filter(Boolean))];
+    if (!cwdGrantId && additionalGrantIds.length === 0) {
+      return { runRoot: await this.resolveRunRoot(appRoot, workspacePath), additionalRoots: [] };
+    }
+    if (!this.options.resolveFolderGrant) {
+      throw new Error('agent_run_folder_grants_unavailable');
+    }
+    const cwdGrant = cwdGrantId ? await this.options.resolveFolderGrant(appId, cwdGrantId) : null;
+    const additionalRoots: string[] = [];
+    for (const grantId of additionalGrantIds) {
+      const grant = await this.options.resolveFolderGrant(appId, grantId);
+      additionalRoots.push(grant.realPath);
+    }
+    return {
+      runRoot: cwdGrant?.realPath ?? await this.resolveRunRoot(appRoot, workspacePath),
+      additionalRoots,
+    };
+  }
+
+  private async resolveRunRoot(appRoot: string, workspacePath: string | undefined): Promise<string> {
+    const realAppRoot = await fs.realpath(appRoot);
+    const requested = typeof workspacePath === 'string' ? workspacePath.trim() : '';
+    if (!requested) {
+      return appRoot;
+    }
+    const resolved = path.isAbsolute(requested)
+      ? path.resolve(requested)
+      : path.resolve(appRoot, requested);
+    const requestedRelative = path.relative(appRoot, resolved);
+    if (requestedRelative !== '' && (requestedRelative.startsWith('..') || path.isAbsolute(requestedRelative))) {
+      throw new Error('agent_run_workspace_outside_app');
+    }
+    const realResolved = await fs.realpath(resolved).catch(() => null);
+    if (!realResolved) {
+      throw new Error('agent_run_workspace_missing');
+    }
+    const relative = path.relative(realAppRoot, realResolved);
+    if (relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative))) {
+      return resolved;
+    }
+    throw new Error('agent_run_workspace_outside_app');
   }
 
   private async preparePromptArguments(
