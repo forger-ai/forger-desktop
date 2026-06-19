@@ -1093,6 +1093,8 @@ const disconnectClaudeAuth = async (): Promise<{ success: boolean; userMessage: 
 };
 
 const getAntigravityBinDir = (): string => path.join(getAntigravityRoot(), 'bin');
+const ANTIGRAVITY_UNIX_INSTALLER_URL = 'https://antigravity.google/cli/install.sh';
+const ANTIGRAVITY_WINDOWS_INSTALLER_URL = 'https://antigravity.google/cli/install.ps1';
 const ANTIGRAVITY_AUTH_PROBE_PROMPT = 'Return the exact string OK and do not use tools.';
 const GOOGLE_OAUTH_URL_PATTERN = /https:\/\/accounts\.google\.com\/o\/oauth2\/auth[^\s<>"')]+/g;
 const activeAntigravityAuthSessions = new Map<string, { child: ReturnType<SpawnProcess>; completed: boolean }>();
@@ -1184,7 +1186,7 @@ const resolveManagedAntigravityCliPath = async (): Promise<string | null> => {
   const candidate = getManagedAntigravityCliPath();
   try {
     await fs.access(candidate);
-    return candidate;
+    return await canRunCommand(candidate, ['--version']) ? candidate : null;
   } catch {
     return null;
   }
@@ -1209,12 +1211,140 @@ const resolveAntigravityCli = async (): Promise<{ path: string; source: 'managed
   return system ? { path: system, source: 'system' } : null;
 };
 
+const getAntigravityInstaller = (): { url: string; id: 'windows' | 'unix'; path: string } => {
+  if (process.platform === 'win32') {
+    return {
+      url: ANTIGRAVITY_WINDOWS_INSTALLER_URL,
+      id: 'windows',
+      path: path.join(getTempRoot(), 'antigravity-install.ps1'),
+    };
+  }
+  if (process.platform === 'darwin' || process.platform === 'linux') {
+    return {
+      url: ANTIGRAVITY_UNIX_INSTALLER_URL,
+      id: 'unix',
+      path: path.join(getTempRoot(), 'antigravity-install.sh'),
+    };
+  }
+  throw new Error('antigravity_unsupported_platform');
+};
+
+const downloadAntigravityInstaller = async (installer: ReturnType<typeof getAntigravityInstaller>): Promise<void> => {
+  await fs.mkdir(path.dirname(installer.path), { recursive: true });
+  if (installer.id === 'windows') {
+    await runCommand(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-Command',
+        [
+          "$ProgressPreference = 'SilentlyContinue'",
+          `Invoke-WebRequest -Uri ${quotePowerShellSingle(installer.url)} -OutFile ${quotePowerShellSingle(installer.path)}`,
+        ].join('; '),
+      ],
+      {
+        cwd: app.getPath('userData'),
+        log: {
+          phase: 'antigravity_auth',
+          label: 'download antigravity installer',
+        },
+      },
+    );
+    return;
+  }
+
+  await runCommand(
+    'curl',
+    ['-fsSL', '-o', installer.path, installer.url],
+    {
+      cwd: app.getPath('userData'),
+      log: {
+        phase: 'antigravity_auth',
+        label: 'download antigravity installer',
+      },
+    },
+  );
+  await fs.chmod(installer.path, 0o700);
+};
+
+const runAntigravityInstaller = async (installer: ReturnType<typeof getAntigravityInstaller>): Promise<void> => {
+  const binDir = getAntigravityBinDir();
+  await fs.mkdir(binDir, { recursive: true });
+  if (installer.id === 'windows') {
+    await runCommand(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-File',
+        installer.path,
+        '-d',
+        binDir,
+      ],
+      {
+        cwd: app.getPath('userData'),
+        log: {
+          phase: 'antigravity_auth',
+          label: 'install antigravity cli',
+        },
+      },
+    );
+    return;
+  }
+
+  await runCommand(
+    'bash',
+    [installer.path, '--dir', binDir],
+    {
+      cwd: app.getPath('userData'),
+      log: {
+        phase: 'antigravity_auth',
+        label: 'install antigravity cli',
+      },
+    },
+  );
+};
+
 const ensureAntigravityCliInstalled = async (): Promise<string> => {
   const existing = await resolveManagedAntigravityCliPath();
   if (existing) {
     return existing;
   }
-  throw new Error('antigravity_manual_install_required');
+
+  const installer = getAntigravityInstaller();
+  await appendInstallLog('antigravity_auth:install_start', {
+    platform: process.platform,
+    installer: installer.id,
+    targetDir: getAntigravityBinDir(),
+  });
+  try {
+    await downloadAntigravityInstaller(installer);
+    await runAntigravityInstaller(installer);
+    const installed = await resolveManagedAntigravityCliPath();
+    if (!installed) {
+      throw new Error('antigravity_cli_install_failed');
+    }
+    await appendInstallLog('antigravity_auth:install_success', {
+      platform: process.platform,
+      installer: installer.id,
+      targetDir: getAntigravityBinDir(),
+      cliPath: installed,
+    });
+    return installed;
+  } catch (error) {
+    const diagnostic = failureDiagnostic(error, 'antigravity_cli_install_failed');
+    await appendInstallLog('antigravity_auth:install_failed', {
+      platform: process.platform,
+      installer: installer.id,
+      targetDir: getAntigravityBinDir(),
+      detail: diagnostic.technicalCode,
+      error: serializeErrorForInstallLog(error),
+    });
+    throw error;
+  }
 };
 
 const getAntigravityAuthStatus = async (): Promise<AntigravityAuthStatus> => {

@@ -631,10 +631,20 @@ test('agent auth reports Claude connect failures with missing status fallback', 
   assert.ok(calls.some((call) => call[0] === 'log' && call[1] === 'claude_auth:failed'));
 });
 
-test('agent auth requires manual Antigravity install when no trusted local CLI exists', async (t) => {
+test('agent auth installs managed Antigravity CLI on macOS when no trusted local CLI exists', async (t) => {
   const { root, calls, controller } = await makeAgentAuthHarness({
     canRunCommand: async (command, args) => command.endsWith('agy') && args[0] === '--version',
-    runCommand: async (command, args, options) => calls.push(['run', command, args, options]),
+    runCommand: async (command, args, options) => {
+      calls.push(['run', command, args, options]);
+      if (command === 'curl') {
+        await fs.mkdir(path.dirname(args[2]), { recursive: true });
+        await fs.writeFile(args[2], '#!/bin/bash\n', 'utf8');
+      }
+      if (command === 'bash') {
+        await fs.mkdir(args[2], { recursive: true });
+        await fs.writeFile(path.join(args[2], 'agy'), '', 'utf8');
+      }
+    },
     runCommandCapture: async (command, args) => {
       calls.push(['capture', command, args]);
       if (command === 'which') {
@@ -649,10 +659,119 @@ test('agent auth requires manual Antigravity install when no trusted local CLI e
 
   const result = await withPlatform('darwin', async () => await controller.connectAntigravityAuth());
 
-  assert.equal(result.success, false);
-  assert.equal(result.technicalCode, 'antigravity_manual_install_required');
-  assert.equal(calls.some((call) => call[0] === 'run' && call[1] === 'curl'), false);
-  assert.equal(calls.some((call) => call[0] === 'run' && call[1] === 'bash'), false);
+  assert.equal(result.success, true);
+  assert.equal(result.status?.installed, true);
+  assert.equal(result.status?.source, 'managed');
+  assert.equal(result.status?.antigravityCliPath, path.join(root, 'antigravity-root', 'bin', 'agy'));
+  const downloadCall = calls.find((call) => call[0] === 'run' && call[1] === 'curl');
+  assert.ok(downloadCall);
+  assert.deepEqual(downloadCall[2].slice(0, 3), ['-fsSL', '-o', path.join(root, 'tmp', 'antigravity-install.sh')]);
+  assert.equal(downloadCall[2][3], 'https://antigravity.google/cli/install.sh');
+  const installCall = calls.find((call) => call[0] === 'run' && call[1] === 'bash');
+  assert.ok(installCall);
+  assert.deepEqual(installCall[2], [
+    path.join(root, 'tmp', 'antigravity-install.sh'),
+    '--dir',
+    path.join(root, 'antigravity-root', 'bin'),
+  ]);
+  assert.ok(calls.some((call) => call[0] === 'log' && call[1] === 'antigravity_auth:install_start'));
+  assert.ok(calls.some((call) => call[0] === 'log' && call[1] === 'antigravity_auth:install_success'));
+});
+
+test('agent auth installs managed Antigravity CLI on Windows with the official PowerShell installer', async (t) => {
+  const { root, calls, controller } = await makeAgentAuthHarness({
+    canRunCommand: async (command, args) => command.endsWith('agy.exe') && args[0] === '--version',
+    runCommand: async (command, args, options) => {
+      calls.push(['run', command, args, options]);
+      if (command === 'powershell.exe' && args.includes('-Command')) {
+        const installerPath = path.join(root, 'tmp', 'antigravity-install.ps1');
+        await fs.mkdir(path.dirname(installerPath), { recursive: true });
+        await fs.writeFile(installerPath, 'installer', 'utf8');
+      }
+      if (command === 'powershell.exe' && args.includes('-File')) {
+        await fs.mkdir(args.at(-1), { recursive: true });
+        await fs.writeFile(path.join(args.at(-1), 'agy.exe'), '', 'utf8');
+      }
+    },
+    runCommandCapture: async (command, args) => {
+      calls.push(['capture', command, args]);
+      if (command === 'where.exe') {
+        return { code: 1, stdout: '', stderr: 'missing' };
+      }
+      return { code: 1, stdout: '', stderr: 'missing' };
+    },
+  });
+  t.after(async () => {
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  const result = await withPlatform('win32', async () => await controller.ensureAntigravityCliInstalled());
+
+  assert.equal(result, path.join(root, 'antigravity-root', 'bin', 'agy.exe'));
+  const downloadCall = calls.find((call) => call[0] === 'run' && call[1] === 'powershell.exe' && call[2].includes('-Command'));
+  assert.ok(downloadCall);
+  assert.match(downloadCall[2].at(-1), /Invoke-WebRequest/);
+  assert.match(downloadCall[2].at(-1), /https:\/\/antigravity\.google\/cli\/install\.ps1/);
+  assert.match(downloadCall[2].at(-1), /antigravity-install\.ps1/);
+  const installCall = calls.find((call) => call[0] === 'run' && call[1] === 'powershell.exe' && call[2].includes('-File'));
+  assert.ok(installCall);
+  assert.deepEqual(installCall[2], [
+    '-NoProfile',
+    '-ExecutionPolicy',
+    'Bypass',
+    '-File',
+    path.join(root, 'tmp', 'antigravity-install.ps1'),
+    '-d',
+    path.join(root, 'antigravity-root', 'bin'),
+  ]);
+});
+
+test('agent auth reports Antigravity installer failures and incomplete installs', async (t) => {
+  const failedInstall = await makeAgentAuthHarness({
+    runCommand: async (command, args, options) => {
+      failedInstall.calls.push(['run', command, args, options]);
+      if (command === 'curl') {
+        throw new Error('antigravity_download_failed');
+      }
+    },
+    runCommandCapture: async (command, args) => {
+      failedInstall.calls.push(['capture', command, args]);
+      return { code: 1, stdout: '', stderr: 'missing' };
+    },
+  });
+  t.after(async () => {
+    await fs.rm(failedInstall.root, { recursive: true, force: true });
+  });
+
+  const failedResult = await withPlatform('darwin', async () => await failedInstall.controller.reinstallAntigravity());
+
+  assert.equal(failedResult.success, false);
+  assert.equal(failedResult.technicalCode, 'antigravity_download_failed');
+  assert.equal(failedResult.status?.installed, false);
+  assert.ok(failedInstall.calls.some((call) => call[0] === 'log' && call[1] === 'antigravity_auth:install_failed'));
+  assert.ok(failedInstall.calls.some((call) => call[0] === 'log' && call[1] === 'antigravity_auth:reinstall_failed'));
+
+  const incomplete = await makeAgentAuthHarness({
+    runCommand: async (command, args, options) => {
+      incomplete.calls.push(['run', command, args, options]);
+      if (command === 'curl') {
+        await fs.mkdir(path.dirname(args[2]), { recursive: true });
+        await fs.writeFile(args[2], '#!/bin/bash\n', 'utf8');
+      }
+    },
+    runCommandCapture: async (command, args) => {
+      incomplete.calls.push(['capture', command, args]);
+      return { code: 1, stdout: '', stderr: 'missing' };
+    },
+  });
+  t.after(async () => {
+    await fs.rm(incomplete.root, { recursive: true, force: true });
+  });
+
+  await assert.rejects(
+    withPlatform('darwin', async () => await incomplete.controller.ensureAntigravityCliInstalled()),
+    /antigravity_cli_install_failed/,
+  );
 });
 
 test('agent auth launches existing managed Antigravity OAuth print mode on macOS', async (t) => {
