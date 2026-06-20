@@ -349,7 +349,7 @@ const createRemoteAppBackup = async (
     return { success: false, userMessage: 'Inicia sesion en Forger Cloud para usar esta funcionalidad.', technicalCode: 'cloud_account_required' };
   }
   if (!canUseCloudDataSync()) {
-    return { success: false, userMessage: 'Forger Cloud Sync requiere una cuenta demo o pro.', technicalCode: 'subscription_required' };
+    return { success: false, userMessage: 'Forger Cloud Sync requiere una cuenta de Forger Cloud activa.', technicalCode: 'subscription_required' };
   }
 
   const localBackup = await getBackupsManager().createBackup({ appId: input.appId, reason: 'manual' });
@@ -391,7 +391,7 @@ const restoreRemoteAppBackup = async (remoteBackupId: number): Promise<BasicActi
     return { success: false, userMessage: 'No pudimos conectar con Forger Cloud.', technicalCode: 'backend_client_missing' };
   }
   if (!canUseCloudDataSync()) {
-    return { success: false, userMessage: 'Forger Cloud Sync requiere una cuenta demo o pro.', technicalCode: 'subscription_required' };
+    return { success: false, userMessage: 'Forger Cloud Sync requiere una cuenta de Forger Cloud activa.', technicalCode: 'subscription_required' };
   }
 
   const remoteBackup = (await forgerBackendClient.listRemoteBackups()).backups.find((backup) => backup.id === remoteBackupId);

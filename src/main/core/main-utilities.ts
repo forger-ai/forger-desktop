@@ -30,6 +30,7 @@ import type {
   Settings,
   UpdateAgentToolApprovalInput,
 } from '../../shared/types';
+import { APP_CATEGORIES } from '../../shared/types/catalog';
 import type { AppRegistry, InstalledAppRecord, RunningAppProcess } from './main-process-types';
 
 interface MainUtilitiesState {
@@ -635,6 +636,7 @@ const toAppSummary = (record: InstalledAppRecord): AppSummary => {
       id: record.appId,
       name: catalog?.name ?? record.name,
       description: catalog?.description ?? record.description,
+      longDescription: catalog?.longDescription ?? record.longDescription ?? catalog?.description ?? record.description,
       category: catalog?.category ?? record.category,
       version: record.version,
       latestVersion,
@@ -650,6 +652,7 @@ const toAppSummary = (record: InstalledAppRecord): AppSummary => {
     id: record.appId,
     name: catalog?.name ?? record.name,
     description: catalog?.description ?? record.description,
+    longDescription: catalog?.longDescription ?? record.longDescription ?? catalog?.description ?? record.description,
     category: catalog?.category ?? record.category,
     version: record.version,
     latestVersion,
@@ -694,18 +697,9 @@ const isVersionNewer = (candidate?: string, current?: string): boolean => {
 };
 
 const mapBackendCategory = (backendCategory: string): AppCategory => {
-  switch (backendCategory) {
-    case 'finance':
-      return 'finanzas';
-    case 'home':
-      return 'hogar';
-    case 'health':
-      return 'salud';
-    case 'developer_tools':
-      return 'developer_tools';
-    default:
-      return 'productividad';
-  }
+  return APP_CATEGORIES.some((category) => category === backendCategory)
+    ? backendCategory as AppCategory
+    : 'productivity';
 };
 
 const toCatalogStatus = (slug: string): AppStatus => {

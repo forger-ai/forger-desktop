@@ -208,6 +208,36 @@ const syncDirectory = async (directoryPath: string): Promise<void> => {
   }
 };
 
+const wait = async (ms: number): Promise<void> => {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+};
+
+const errorCode = (error: unknown): string | undefined =>
+  error && typeof error === 'object' && typeof (error as { code?: unknown }).code === 'string'
+    ? (error as { code: string }).code
+    : undefined;
+
+const shouldRetryRegistryRename = (error: unknown): boolean =>
+  ['EPERM', 'EACCES'].includes(errorCode(error) ?? '');
+
+const renameRegistryFile = async (tempPath: string, registryPath: string): Promise<void> => {
+  const retryDelaysMs = [25, 100, 250];
+  for (const delayMs of [0, ...retryDelaysMs]) {
+    if (delayMs > 0) {
+      await wait(delayMs);
+    }
+
+    try {
+      await fs.rename(tempPath, registryPath);
+      return;
+    } catch (error) {
+      if (!shouldRetryRegistryRename(error) || delayMs === retryDelaysMs[retryDelaysMs.length - 1]) {
+        throw error;
+      }
+    }
+  }
+};
+
 const loadRegistry = async (): Promise<void> => {
   const registryPaths = [getRegistryPath(), getRegistryBackupPath()];
 
@@ -251,7 +281,7 @@ const saveRegistry = async (): Promise<void> => {
       await fs.copyFile(registryPath, backupPath);
     }
 
-    await fs.rename(tempPath, registryPath);
+    await renameRegistryFile(tempPath, registryPath);
     await syncDirectory(registryDir);
   } catch (error) {
     await tempHandle?.close().catch(() => undefined);
@@ -293,7 +323,7 @@ const setAppAutoSyncSetting = async (appId: string, autoSync: boolean): Promise<
 
 const canUseCloudDataSync = (): boolean => {
   const tier = forgerAccount.user?.subscriptionTier;
-  return Boolean(forgerAccount.authenticated && forgerAccount.token && (tier === 'demo' || tier === 'pro'));
+  return Boolean(forgerAccount.authenticated && forgerAccount.token && (tier === 'free' || tier === 'demo' || tier === 'pro'));
 };
 
 const upsertInstalledRecord = async (record: InstalledAppRecord): Promise<void> => {

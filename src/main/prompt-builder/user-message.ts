@@ -10,12 +10,13 @@ export interface PromptSharedFile {
 }
 
 export type ChatPromptTurnKind = 'start' | 'resume';
-export type ChatPromptMode = 'create_app' | 'edit_app' | 'free_chat';
+export type ChatPromptMode = 'create_app' | 'edit_app' | 'free_chat' | 'social_app_review';
 
 const CHAT_MODE_PARTIALS: Record<ChatPromptMode, string> = {
   create_app: 'partials/chat-modes/create-app.md',
   edit_app: 'partials/chat-modes/edit-app.md',
   free_chat: 'partials/chat-modes/free-chat.md',
+  social_app_review: 'partials/chat-modes/social-app-review.md',
 };
 
 const renderChatModePartial = (mode: ChatPromptMode): string =>

@@ -5,7 +5,7 @@ import type { AgentRuntime, AgentRuntimeRequest, ClaudeEffort, CodexReasoningEff
 import { preparePersistentIsolatedCodexHome } from '../codex-run-isolation';
 import { existsDirectory, runCommandCapture } from '../app-agent/process';
 import type { LlmAppMcpServerConfig } from '../app-agent/types';
-import { appendRunLog, getRunLogPath, toProgressMessages } from '../chat/progress-errors';
+import { appendRunLog, getRunLogPath, toProviderProgressMessages } from '../chat/progress-errors';
 import { buildPersonalAgentInitialWakePrompt } from '../prompt-builder/personal-agents';
 import type { AgentStore } from './agent-store';
 import { isTerminalRunStatus } from './agent-store';
@@ -290,7 +290,7 @@ export class AgentConversationManager {
         : '';
       const onOutput = (stream: 'stdout' | 'stderr' | 'meta', text: string): void => {
         void appendRunLog(runLogPath, stream, text);
-        this.handleProviderOutput(input, text);
+        this.handleProviderOutput(input, runtime.provider, stream, text);
       };
       const antigravityResult = runtime.provider === 'antigravity'
         ? await antigravityCliAdapter.run({
@@ -382,8 +382,13 @@ export class AgentConversationManager {
     }
   }
 
-  private handleProviderOutput(input: PersonalAgentRunnerInput, text: string): void {
-    for (const message of toProgressMessages('stdout', text)) {
+  private handleProviderOutput(
+    input: PersonalAgentRunnerInput,
+    provider: AgentRuntime['provider'],
+    stream: 'stdout' | 'stderr' | 'meta',
+    text: string,
+  ): void {
+    for (const message of toProviderProgressMessages(provider, stream, text)) {
       input.onProgress(message);
     }
   }

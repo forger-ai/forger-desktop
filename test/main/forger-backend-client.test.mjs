@@ -27,7 +27,7 @@ const createClient = (root, fetchImpl, token = undefined) => {
     backendBaseUrl: 'https://platform.test',
     localCatalogJsonUrl: () => undefined,
     token: () => token,
-    mapBackendCategory: () => 'productividad',
+    mapBackendCategory: () => 'productivity',
     toCatalogStatus: () => 'not_installed',
     getUserMessage: () => undefined,
     platform: () => 'darwin_arm64',
@@ -134,6 +134,90 @@ test('updateSocialAppVisibility patches owned user app visibility and normalizes
     assert.equal(result.id, 42);
     assert.equal(result.visibility, 'friends');
     assert.equal(result.owner.displayName, 'Felipe Cloud');
+  } finally {
+    harness.restore();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('deleteSocialApp calls the owned user app destroy endpoint', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'forger-social-delete-test-'));
+  let requestUrl;
+  let requestInit;
+  const harness = createClient(root, async (url, init) => {
+    requestUrl = url;
+    requestInit = init;
+    return jsonResponse(200, { success: true });
+  }, 'session-token');
+
+  try {
+    const result = await harness.client.deleteSocialApp(42);
+
+    assert.equal(requestUrl, 'https://platform.test/api/v1/me/user_apps/42');
+    assert.equal(requestInit.method, 'DELETE');
+    assert.equal(requestInit.headers.Authorization, 'Bearer session-token');
+    assert.deepEqual(result, { success: true, userMessage: 'Publicación retirada.' });
+  } finally {
+    harness.restore();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('submitAppRating routes Social app reviews by user app id and reports focused Social errors', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'forger-social-review-test-'));
+  const requests = [];
+  const harness = createClient(root, async (url, init = {}) => {
+    requests.push({ url, init });
+    const parsed = new URL(url);
+    if (parsed.pathname === '/api/v1/social/apps/by_id/42/reviews') {
+      return jsonResponse(200, { id: 9, score: 5, comment: 'Great Social app' });
+    }
+    if (parsed.pathname === '/api/v1/social/apps/by_id/404/reviews') {
+      return jsonResponse(404, { error: 'not_found' });
+    }
+    if (parsed.pathname === '/api/v1/social/apps/by_id/422/reviews') {
+      return jsonResponse(422, { error: 'validation_failed' });
+    }
+    if (parsed.pathname === '/api/v1/social/apps/by_id/403/reviews') {
+      return jsonResponse(403, { error: 'confirmation_required' });
+    }
+    return jsonResponse(404, { error: 'not_found' });
+  }, 'session-token');
+
+  try {
+    const rating = await harness.client.submitAppRating({
+      appId: 'social-maker-focus-flow',
+      socialUserAppId: 42,
+      score: 5,
+      comment: 'Great Social app',
+      locale: 'es',
+    });
+    assert.equal(rating.success, true);
+    assert.equal(rating.rating.score, 5);
+
+    const successRequest = requests[0];
+    assert.equal(new URL(successRequest.url).pathname, '/api/v1/social/apps/by_id/42/reviews');
+    assert.equal(successRequest.init.method, 'POST');
+    assert.equal(successRequest.init.headers.Authorization, 'Bearer session-token');
+    assert.deepEqual(JSON.parse(successRequest.init.body), {
+      score: 5,
+      comment: 'Great Social app',
+      locale: 'es',
+    });
+
+    const missing = await harness.client.submitAppRating({ appId: 'local-social', socialUserAppId: 404, score: 4 });
+    assert.equal(missing.success, false);
+    assert.equal(missing.technicalCode, 'social_app_review_app_not_found');
+    assert.match(missing.userMessage, /app Social/);
+
+    const invalid = await harness.client.submitAppRating({ appId: 'local-social', socialUserAppId: 422, score: 7 });
+    assert.equal(invalid.success, false);
+    assert.equal(invalid.technicalCode, 'social_app_review_invalid');
+    assert.match(invalid.userMessage, /rating/);
+
+    const unconfirmed = await harness.client.submitAppRating({ appId: 'local-social', socialUserAppId: 403, score: 4 });
+    assert.equal(unconfirmed.success, false);
+    assert.equal(unconfirmed.userMessage, 'Confirma tu correo para publicar una review.');
   } finally {
     harness.restore();
     await rm(root, { recursive: true, force: true });
@@ -1270,6 +1354,7 @@ test('social app upload uses direct upload, confirms an upload attempt, and poll
       const body = JSON.parse(init.body);
       assert.equal(body.signed_blob_id, 'signed-blob');
       assert.equal(body.slug, 'chessos');
+      assert.equal(body.category, 'learning');
       assert.equal(body.remix_source_user_app_id, 42);
       assert.match(body.checksum_sha256, /^[0-9a-f]{64}$/);
       return jsonResponse(202, {
@@ -1308,6 +1393,7 @@ test('social app upload uses direct upload, confirms an upload attempt, and poll
       zipPath,
       name: 'ChessOS',
       slug: 'chessos',
+      category: 'learning',
       visibility: 'private',
       remixSourceUserAppId: 42,
     });

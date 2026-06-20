@@ -114,6 +114,58 @@ const waitForHttpOk = async (url: string, timeoutMs: number): Promise<void> => {
   throw new Error(`startup_timeout_${url}`);
 };
 
+const STARTUP_OUTPUT_MAX_CHUNKS = 12;
+const STARTUP_OUTPUT_MAX_CHARS = 6000;
+
+const appendStartupOutput = (entries: string[], text: string): void => {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return;
+  }
+  entries.push(trimmed);
+  while (entries.length > STARTUP_OUTPUT_MAX_CHUNKS) {
+    entries.shift();
+  }
+};
+
+const compactStartupOutput = (entries: string[]): string | undefined => {
+  if (entries.length === 0) {
+    return undefined;
+  }
+  const output = entries.join('\n').trim();
+  return output.length > STARTUP_OUTPUT_MAX_CHARS
+    ? output.slice(output.length - STARTUP_OUTPUT_MAX_CHARS)
+    : output;
+};
+
+const startupOutputLooksLikeFailure = (output: string | undefined): boolean =>
+  Boolean(output && /\b(?:error|exception|traceback|failed|syntaxerror|modulenotfounderror|importerror|keyerror)\b/i.test(output));
+
+const buildStartupFailure = (input: {
+  fallbackDiagnostic: ReturnType<typeof failureDiagnostic>;
+  backendOutput?: string;
+  frontendOutput?: string;
+}): ReturnType<typeof failureDiagnostic> & { userMessage?: string } => {
+  const backendFailed = startupOutputLooksLikeFailure(input.backendOutput);
+  const frontendFailed = !backendFailed && startupOutputLooksLikeFailure(input.frontendOutput);
+  if (!backendFailed && !frontendFailed) {
+    return input.fallbackDiagnostic;
+  }
+
+  return {
+    ...input.fallbackDiagnostic,
+    technicalCode: backendFailed ? 'app_backend_startup_failed' : 'app_frontend_startup_failed',
+    details: {
+      ...input.fallbackDiagnostic.details,
+      ...(input.backendOutput ? { backendStartupOutput: input.backendOutput } : {}),
+      ...(input.frontendOutput ? { frontendStartupOutput: input.frontendOutput } : {}),
+    },
+    userMessage: backendFailed
+      ? 'La app no pudo iniciar porque el backend reporto un error al arrancar.'
+      : 'La app no pudo iniciar porque el frontend reporto un error al arrancar.',
+  };
+};
+
 const getFreePort = async (): Promise<number> => {
   return await new Promise<number>((resolve, reject) => {
     const server = net.createServer();
@@ -878,17 +930,24 @@ const openInstalledAppUnlocked = async (
     stdio: 'pipe',
   });
 
+  const backendStartupOutput: string[] = [];
+  const frontendStartupOutput: string[] = [];
+
   backend.stdout.on('data', (chunk) => {
+    const text = formatProcessOutputForInstallLog(chunk.toString(), resolvedSecrets.secretValues);
+    appendStartupOutput(backendStartupOutput, text);
     void appendInstallLog('open:backend:stdout', {
       appId,
-      text: truncateForInstallLog(formatProcessOutputForInstallLog(chunk.toString(), resolvedSecrets.secretValues)),
+      text: truncateForInstallLog(text),
     });
   });
 
   backend.stderr.on('data', (chunk) => {
+    const text = formatProcessOutputForInstallLog(chunk.toString(), resolvedSecrets.secretValues);
+    appendStartupOutput(backendStartupOutput, text);
     void appendInstallLog('open:backend:stderr', {
       appId,
-      text: truncateForInstallLog(formatProcessOutputForInstallLog(chunk.toString(), resolvedSecrets.secretValues)),
+      text: truncateForInstallLog(text),
     });
   });
 
@@ -900,16 +959,20 @@ const openInstalledAppUnlocked = async (
   });
 
   frontend.stdout.on('data', (chunk) => {
+    const text = formatProcessOutputForInstallLog(chunk.toString(), resolvedSecrets.secretValues);
+    appendStartupOutput(frontendStartupOutput, text);
     void appendInstallLog('open:frontend:stdout', {
       appId,
-      text: truncateForInstallLog(formatProcessOutputForInstallLog(chunk.toString(), resolvedSecrets.secretValues)),
+      text: truncateForInstallLog(text),
     });
   });
 
   frontend.stderr.on('data', (chunk) => {
+    const text = formatProcessOutputForInstallLog(chunk.toString(), resolvedSecrets.secretValues);
+    appendStartupOutput(frontendStartupOutput, text);
     void appendInstallLog('open:frontend:stderr', {
       appId,
-      text: truncateForInstallLog(formatProcessOutputForInstallLog(chunk.toString(), resolvedSecrets.secretValues)),
+      text: truncateForInstallLog(text),
     });
   });
 
@@ -1014,9 +1077,16 @@ const openInstalledAppUnlocked = async (
     };
   } catch (error) {
     const diagnostic = failureDiagnostic(error, 'open_failed');
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const startupDiagnostic = buildStartupFailure({
+      fallbackDiagnostic: diagnostic,
+      backendOutput: compactStartupOutput(backendStartupOutput),
+      frontendOutput: compactStartupOutput(frontendStartupOutput),
+    });
     await appendInstallLog('open:failed', {
       appId,
-      detail: diagnostic.technicalCode,
+      detail: startupDiagnostic.technicalCode,
+      startupOutput: startupDiagnostic.details,
       error: serializeErrorForInstallLog(error),
     });
 
@@ -1025,12 +1095,12 @@ const openInstalledAppUnlocked = async (
     await closeServer(proxy.server).catch(() => undefined);
     runningApps.delete(appId);
     closeAppWindow(appId);
-    await markAppRuntimeStatus(appId, 'error', 'No pudimos iniciar la app. Reintenta.', 'open');
+    await markAppRuntimeStatus(appId, 'error', startupDiagnostic.userMessage ?? 'No pudimos iniciar la app. Reintenta.', 'open');
 
     return {
       success: false,
-      userMessage: 'No pudimos iniciar la app. Reintenta.',
-      ...diagnostic,
+      userMessage: startupDiagnostic.userMessage ?? 'No pudimos iniciar la app. Reintenta.',
+      ...startupDiagnostic,
     };
   }
 };

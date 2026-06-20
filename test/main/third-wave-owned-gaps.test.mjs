@@ -138,7 +138,7 @@ const createBackendClient = (fetchImpl, reportingLogPath = () => undefined) => {
   const client = new ForgerBackendClient({
     backendBaseUrl: 'https://platform.test',
     token: () => 'token',
-    mapBackendCategory: () => 'productividad',
+    mapBackendCategory: () => 'productivity',
     toCatalogStatus: () => 'not_installed',
     getUserMessage: () => undefined,
     platform: () => 'darwin_arm64',

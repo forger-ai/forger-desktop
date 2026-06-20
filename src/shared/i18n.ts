@@ -110,6 +110,8 @@ export const sharedCopy = {
         appNotInstalled: 'La app objetivo no está instalada en tu workspace privado.',
         permissionDenied: 'No continuamos porque el permiso fue denegado.',
         timeout: 'La solicitud tardó demasiado y fue detenida.',
+        quotaExceeded: (providerName: string) =>
+          `${providerName || 'El proveedor'} alcanzó el límite de uso de tu cuenta. Ese límite depende de tu suscripción con ${providerName || 'el proveedor'}. Prueba más tarde o cambia de modelo/proveedor en Ajustes.`,
         sandboxViolation: 'Bloqueamos una acción fuera del workspace permitido.',
         dirtyWorktree: 'Antes de comenzar, al parecer hay cambios sin guardar en tu aplicación. ¿Quieres que guarde esa versión antes de continuar?',
         conflict: 'Detectamos un conflicto con el estado actual de la app.',
@@ -316,6 +318,8 @@ export const sharedCopy = {
         appNotInstalled: 'The target app is not installed in your private workspace.',
         permissionDenied: 'We did not continue because permission was denied.',
         timeout: 'The request took too long and was stopped.',
+        quotaExceeded: (providerName: string) =>
+          `${providerName || 'The provider'} reached your account usage limit. That limit depends on your subscription with ${providerName || 'the provider'}. Try again later or change the model/provider in Settings.`,
         sandboxViolation: 'An action outside the allowed workspace was blocked.',
         dirtyWorktree: 'Before starting, it looks like this app has unsaved changes. Do you want me to save that version before continuing?',
         conflict: 'We detected a conflict with the current app state.',

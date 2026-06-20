@@ -30,6 +30,7 @@ const EXPECTED_ERROR_CODES = new Set([
   'missing_secrets',
   'no_pending_update_conflict',
   'permission_denied',
+  'quota_exceeded',
   'required_app_secrets_missing',
   'secrets_encryption_unavailable',
   'secrets_vault_unavailable',

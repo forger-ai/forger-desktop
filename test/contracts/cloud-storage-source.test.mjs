@@ -51,3 +51,18 @@ test('settings exposes a localized storage layer with real management routes', a
     assert.match(spanishSource, new RegExp(`${key}:`));
   }
 });
+
+test('cloud backups are available to any signed-in cloud account tier', async () => {
+  const backupsSource = await readFile(path.join(root, 'src/renderer/views/BackupsView.tsx'), 'utf8');
+  const registryStoreSource = await readFile(path.join(root, 'src/main/installed-apps/registry-store.ts'), 'utf8');
+  const spanishSectionsSource = await readFile(path.join(root, 'src/renderer/i18n/locales/esSections.ts'), 'utf8');
+  const englishSectionsSource = await readFile(path.join(root, 'src/renderer/i18n/locales/enSections.ts'), 'utf8');
+
+  assert.match(backupsSource, /const cloudAllowed = Boolean\(account\.authenticated\)/);
+  assert.doesNotMatch(backupsSource, /subscriptionTier === 'demo'/);
+  assert.match(registryStoreSource, /tier === 'free'/);
+  assert.match(registryStoreSource, /tier === 'demo'/);
+  assert.match(registryStoreSource, /tier === 'pro'/);
+  assert.doesNotMatch(spanishSectionsSource, /demo o pro/);
+  assert.doesNotMatch(englishSectionsSource, /demo or pro/);
+});

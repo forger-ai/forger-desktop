@@ -3984,6 +3984,57 @@ test('installed app runtime reports open startup failures and cleans processes a
   assert.ok(runtime.calls.some((call) => call[0] === 'log' && call[1] === 'open:failed'));
 });
 
+test('installed app runtime returns backend startup output when healthcheck times out', async (t) => {
+  const root = await tmpRoot('installed-runtime-backend-startup-output');
+  const originalFetch = globalThis.fetch;
+  const originalDateNow = Date.now;
+  const scriptPath = path.join(root, 'bin', 'service.js');
+  const installDir = path.join(root, 'apps', 'demo-app');
+  let runtime;
+  t.after(async () => {
+    if (runtime?.deps.runningApps.has('demo-app')) {
+      await runtime.controller.stopInstalledApp('demo-app').catch(() => undefined);
+    }
+    globalThis.fetch = originalFetch;
+    Date.now = originalDateNow;
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  await makeExecutableNodeScript(scriptPath, `
+process.stderr.write('ERROR: Traceback (most recent call last):\\nKeyError: list[Payment]\\n');
+setInterval(() => {}, 1000);
+`);
+  await fs.mkdir(path.join(installDir, 'backend'), { recursive: true });
+  await fs.mkdir(path.join(installDir, 'frontend'), { recursive: true });
+
+  let fakeNow = 0;
+  Date.now = () => fakeNow;
+  globalThis.fetch = async () => {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    fakeNow = 61_000;
+    return new Response('not ready', { status: 503 });
+  };
+
+  runtime = makeInstalledRuntimeHarness({
+    ensureRuntimeInstalled: async () => ({ node: scriptPath, npm: scriptPath, python: scriptPath, pip: scriptPath }),
+    getVenvExecutables: () => ({ python: scriptPath, pip: scriptPath }),
+  });
+  runtime.registry.apps['demo-app'].installDir = installDir;
+
+  const result = await runtime.controller.openInstalledAppUnlocked('demo-app', undefined, { openWindow: false });
+
+  assert.equal(result.success, false);
+  assert.equal(result.technicalCode, 'app_backend_startup_failed');
+  assert.match(result.userMessage, /backend reporto un error/);
+  assert.match(result.details.backendStartupOutput, /KeyError: list\[Payment\]/);
+  assert.equal(runtime.deps.runningApps.has('demo-app'), false);
+  assert.equal(runtime.registry.apps['demo-app'].status, 'error');
+  assert.ok(runtime.calls.some((call) =>
+    call[0] === 'log' &&
+    call[1] === 'open:failed' &&
+    call[2].detail === 'app_backend_startup_failed'
+  ));
+});
+
 test('installed app runtime records process crashes and closes the proxy without user stop state', async (t) => {
   const root = await tmpRoot('installed-runtime-crash');
   const originalFetch = globalThis.fetch;

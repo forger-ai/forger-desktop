@@ -189,6 +189,9 @@ test('main IPC backup handlers convert manager failures into user-visible errors
       deleteBackup: async () => {
         throw new Error('delete_denied');
       },
+      deleteBackups: async () => {
+        throw new Error('delete_many_denied');
+      },
       listBackups: async () => [],
       restoreBackup: async () => {
         throw new Error('restore_denied');
@@ -213,6 +216,16 @@ test('main IPC backup handlers convert manager failures into user-visible errors
     },
   );
   assert.deepEqual(
+    await handlers.get(IPC_CHANNELS.deleteBackups)(null, { appId: 'finance-os', backupIds: ['b1', 'b2'] }),
+    {
+      success: false,
+      userMessage: 'No pudimos eliminar esos respaldos.',
+      deleted: [],
+      failed: [],
+      technicalCode: 'delete_many_denied',
+    },
+  );
+  assert.deepEqual(
     await handlers.get(IPC_CHANNELS.restoreBackup)(null, { appId: 'finance-os', backupId: 'b1' }),
     {
       success: false,
@@ -223,6 +236,7 @@ test('main IPC backup handlers convert manager failures into user-visible errors
   assert.deepEqual(logs.map((entry) => entry.event), [
     'backup:create_failed',
     'backup:delete_failed',
+    'backup:batch_delete_failed',
     'backup:restore_failed',
   ]);
 });
@@ -236,7 +250,7 @@ test('main IPC cloud and social handlers return explicit errors when backend ser
   });
   assert.deepEqual(await handlers.get(IPC_CHANNELS.deleteRemoteBackup)(null, 5), {
     success: false,
-    userMessage: 'Forger Cloud Sync requiere una cuenta demo o pro.',
+    userMessage: 'Forger Cloud Sync requiere una cuenta de Forger Cloud activa.',
     technicalCode: 'subscription_required',
   });
   await assert.rejects(handlers.get(IPC_CHANNELS.sendFriendRequest)(null, 'ada'), /backend_client_missing/);
@@ -1028,6 +1042,10 @@ test('main IPC covers conflict, backup, memory, secret, cloud-device, and free-c
         backupCalls.push(['delete', input]);
         return { success: true };
       },
+      deleteBackups: async (input) => {
+        backupCalls.push(['deleteMany', input]);
+        return { success: true, deleted: input.backupIds.map((backupId) => ({ appId: input.appId, backupId })), failed: [] };
+      },
       listBackups: async (appId) => {
         backupCalls.push(['list', appId]);
         return [{ backupId: 'b1', appId }];
@@ -1071,8 +1089,16 @@ test('main IPC covers conflict, backup, memory, secret, cloud-device, and free-c
     backupId: 'b-created',
   });
   assert.deepEqual(await handlers.get(IPC_CHANNELS.deleteBackup)(null, { appId: 'finance-os', backupId: 'b1' }), { success: true });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.deleteBackups)(null, { appId: 'finance-os', backupIds: ['b1', 'b2'] }), {
+    success: true,
+    deleted: [
+      { appId: 'finance-os', backupId: 'b1' },
+      { appId: 'finance-os', backupId: 'b2' },
+    ],
+    failed: [],
+  });
   assert.deepEqual(await handlers.get(IPC_CHANNELS.restoreBackup)(null, { appId: 'finance-os', backupId: 'b1' }), { success: true });
-  assert.deepEqual(backupCalls.map(([name]) => name), ['list', 'create', 'delete', 'restore']);
+  assert.deepEqual(backupCalls.map(([name]) => name), ['list', 'create', 'delete', 'deleteMany', 'restore']);
 
   const noChatConflict = await createDeps({
     registry: {

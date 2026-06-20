@@ -19,11 +19,17 @@ import type {
 const CODEX_REASONING_VALUES = new Set<CodexReasoningEffort>(['none', 'low', 'medium', 'high', 'xhigh']);
 
 export interface PublicCatalogResponseItem {
+  id?: number | string;
+  social_user_app_id?: number | string;
   slug: string;
   name: string;
   short_description?: string | null;
   description?: string | null;
+  long_description?: string | null;
   category: string;
+  owner?: {
+    username?: string | null;
+  };
   icon_url?: string | null;
   status?: string | null;
   agents?: unknown;
@@ -36,6 +42,7 @@ export interface PublicCatalogResponseItem {
 export interface CatalogResponseItem extends PublicCatalogResponseItem {
   short_description: string | null;
   description: string | null;
+  long_description?: string | null;
   average_rating?: number | string | null;
   ratings_count?: number | string | null;
   recent_ratings?: unknown[];
@@ -77,16 +84,23 @@ export const mapCatalogItem = (
   const latestVersion = appEntry.latest_version;
   const backendEntry = appEntry as CatalogResponseItem;
   const catalogStatus = normalizeCatalogPublicationStatus(appEntry.status);
+  const socialUserAppId = normalizeNumber(appEntry.social_user_app_id ?? appEntry.id);
+  const ownerUsername = typeof appEntry.owner?.username === 'string' ? appEntry.owner.username : undefined;
+  const localId = socialUserAppId && ownerUsername
+    ? socialLocalAppId(ownerUsername, appEntry.slug)
+    : appEntry.slug;
   const recentRatings = Array.isArray(backendEntry.recent_ratings)
     ? backendEntry.recent_ratings.map((rating) => normalizeRating(rating)).filter((rating): rating is AppRatingSummary => Boolean(rating))
     : [];
 
   return {
-    id: appEntry.slug,
+    id: localId,
     category: options.mapBackendCategory(appEntry.category),
-    status: options.toCatalogStatus(appEntry.slug),
+    status: options.toCatalogStatus(localId),
     name: appEntry.name,
+    shortDescription: appEntry.short_description ?? undefined,
     description: appEntry.short_description ?? appEntry.description ?? '',
+    longDescription: appEntry.long_description ?? appEntry.description ?? appEntry.short_description ?? '',
     iconUrl: absoluteBackendUrl(appEntry.icon_url, options.backendBaseUrl),
     catalogStatus,
     beta: catalogStatus === 'beta',
@@ -111,12 +125,20 @@ export const mapCatalogItem = (
         ?? appEntry.promptTemplates,
     ),
     version: latestVersion?.version,
-    userMessage: options.getUserMessage(appEntry.slug),
+    userMessage: options.getUserMessage(localId),
     averageRating: normalizeNumber(backendEntry.average_rating),
     ratingsCount: normalizeNumber(backendEntry.ratings_count),
     recentRatings,
     currentUserRating: normalizeRating(backendEntry.current_user_rating),
+    socialUserAppId,
+    socialOwnerUsername: ownerUsername,
   };
+};
+
+const socialLocalAppId = (ownerUsername: string, slug: string): string => {
+  const safeOwner = ownerUsername.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '') || 'user';
+  const safeSlug = slug.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '') || 'app';
+  return `social-${safeOwner}-${safeSlug}`.slice(0, 96);
 };
 
 export const normalizeRating = (value: unknown): AppRatingSummary | undefined => {

@@ -93,6 +93,19 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
     };
   }
 
+  if (toolId === 'forger_finish_social_app_install' || toolId === 'forger_delete_quarantined_social_app') {
+    return {
+      type: 'object',
+      properties: {
+        quarantineId: {
+          type: 'string',
+          description: 'ID local de la cuarentena activa. Si se omite, Forger usa el contexto del chat de revision.',
+        },
+      },
+      additionalProperties: false,
+    };
+  }
+
   if (toolId === 'forger_speech_to_text_status') {
     return {
       type: 'object',

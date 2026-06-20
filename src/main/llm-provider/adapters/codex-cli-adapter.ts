@@ -10,6 +10,7 @@ import {
 } from '../../codex-run-isolation';
 import { codexUnsafeArgs, codexWorkspaceArgs } from '../../agent-permission-mode';
 import { classifyCodexAuthOutput } from '../../codex-auth-helpers';
+import { detectProviderQuotaError } from '../provider-errors';
 import type {
   LlmCommandResult,
   LlmMcpServerConfig,
@@ -319,17 +320,21 @@ export class CodexCliAdapter {
   private buildChatError(lastResult: CodexCommandResult | null, lastErrorMessage: string): Error {
     const message = (lastResult?.stderr || lastResult?.stdout || lastErrorMessage || 'codex_exec_failed').trim();
     const parsed = parseCodexJsonl(lastResult?.stdout ?? '', lastResult?.stderr ?? '');
-    const error = new Error(message);
     const authFailure = classifyCodexAuthOutput(
       [lastResult?.stdout, lastErrorMessage].filter(Boolean).join('\n'),
       lastResult?.stderr ?? '',
     );
     const timeoutFailure = /\btimed out(?:\s+due to inactivity)?\s+after\b|codex_timeout_after_/i.test(message);
-    (error as Error & { chatCode?: ChatErrorCode }).chatCode = authFailure === 'codex_auth_expired'
+    const quotaFailure = detectProviderQuotaError('codex', lastResult?.stdout, lastResult?.stderr, lastErrorMessage, message);
+    const chatCode: ChatErrorCode = authFailure === 'codex_auth_expired'
       ? 'auth_missing'
       : timeoutFailure
         ? 'timeout'
-        : 'capability_unavailable';
+        : quotaFailure
+          ? 'quota_exceeded'
+          : 'capability_unavailable';
+    const error = new Error(chatCode === 'quota_exceeded' ? quotaFailure?.message ?? message : message);
+    (error as Error & { chatCode?: ChatErrorCode }).chatCode = chatCode;
     (error as Error & { parsedRun?: CodexParsedOutput }).parsedRun = parsed;
     throw error;
   }

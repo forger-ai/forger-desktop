@@ -7,14 +7,27 @@ export type AppConnectMode = Extract<AppExecutionMode, 'local_network' | 'remote
 export type AppLastErrorOperation = 'install' | 'open' | 'runtime' | 'update';
 export type CatalogPublicationStatus = 'draft' | 'coming' | 'beta' | 'production';
 
-export type AppCategory = 'finanzas' | 'hogar' | 'salud' | 'productividad' | 'developer_tools';
+export const APP_CATEGORIES = [
+  'productivity',
+  'finance',
+  'home',
+  'health',
+  'learning',
+  'utilities',
+  'lifestyle',
+  'developer_tools',
+] as const;
+
+export type AppCategory = typeof APP_CATEGORIES[number];
 
 export interface AppSummary {
   id: string;
   category: AppCategory;
   status: AppStatus;
   name?: string;
+  shortDescription?: string;
   description?: string;
+  longDescription?: string;
   version?: string;
   latestVersion?: string;
   updateAvailable?: boolean;
@@ -32,6 +45,8 @@ export interface AppSummary {
     ownerUsername: string;
     installId?: number;
   };
+  socialUserAppId?: number;
+  socialOwnerUsername?: string;
   tools?: {
     required?: AppToolDeclaration[];
     optional?: AppToolDeclaration[];

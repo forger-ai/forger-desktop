@@ -181,7 +181,7 @@ const createClient = (fetchImpl, token = 'token-1', overrides = {}) => {
     backendBaseUrl: 'https://platform.test',
     localCatalogJsonUrl: overrides.localCatalogJsonUrl ?? (() => undefined),
     token: () => token,
-    mapBackendCategory: () => 'productividad',
+    mapBackendCategory: () => 'productivity',
     toCatalogStatus: () => 'not_installed',
     getUserMessage: () => undefined,
     platform: () => 'darwin_arm64',
@@ -198,7 +198,7 @@ const createClient = (fetchImpl, token = 'token-1', overrides = {}) => {
 
 const mapCatalog = (entry, includeDirectDownloadUrl = true) => mapCatalogItem(entry, includeDirectDownloadUrl, {
   backendBaseUrl: 'https://platform.test',
-  mapBackendCategory: () => 'productividad',
+  mapBackendCategory: () => 'productivity',
   toCatalogStatus: () => 'not_installed',
   getUserMessage: (slug) => slug === 'finance-os' ? 'Instalada localmente' : undefined,
 });
@@ -233,7 +233,7 @@ test('backend helper errors and validation details stay safe for logs', () => {
   assert.equal(safeValidationKeys(null), undefined);
   assert.equal(safeValidationKeys({ errors: { 'unsafe key with spaces': ['drop'] } }), undefined);
   assert.equal(normalizeRuntimePlatform('linux', 'arm/v7'), 'linux_arm_v7');
-  assert.equal(remoteBackupErrorMessage(403, null), 'Forger Cloud Sync requiere una cuenta demo o pro.');
+  assert.equal(remoteBackupErrorMessage(403, null), 'Forger Cloud Sync requiere una cuenta de Forger Cloud activa.');
   assert.match(remoteBackupErrorMessage(422, { error: 'storage_limit_exceeded' }), /espacio/);
   assert.match(remoteBackupErrorMessage(422, { error: 'backup_count_limit_exceeded' }), /maximo/);
   assert.match(remoteBackupErrorMessage(500, { error: 'other' }), /No pudimos subir/);

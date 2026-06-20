@@ -2,8 +2,10 @@ import SendRounded from '@mui/icons-material/SendRounded';
 import AddCommentRounded from '@mui/icons-material/AddCommentRounded';
 import AddRounded from '@mui/icons-material/AddRounded';
 import AttachFileRounded from '@mui/icons-material/AttachFileRounded';
+import ChevronRightRounded from '@mui/icons-material/ChevronRightRounded';
 import CloseRounded from '@mui/icons-material/CloseRounded';
 import DonutLargeRounded from '@mui/icons-material/DonutLargeRounded';
+import ExpandMoreRounded from '@mui/icons-material/ExpandMoreRounded';
 import HistoryRounded from '@mui/icons-material/HistoryRounded';
 import BugReportRounded from '@mui/icons-material/BugReportRounded';
 import StopCircleRounded from '@mui/icons-material/StopCircleRounded';
@@ -12,6 +14,7 @@ import {
   Button,
   Chip,
   CircularProgress,
+  Collapse,
   Divider,
   Drawer,
   FormControl,
@@ -43,6 +46,7 @@ import type {
   FilesStageForChatInput,
   PermissionRequest,
   PickedChatFile,
+  WindowControlState,
 } from '@shared/types';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
@@ -98,7 +102,20 @@ export interface ConversationHistoryItem {
   title: string;
   threadId: string | null;
   updatedAt: string;
+  appId: string;
+  mode?: ChatMode;
+  targetAppId?: string | null;
 }
+
+interface ConversationHistoryGroup {
+  id: string;
+  label: string;
+  items: ConversationHistoryItem[];
+}
+
+const isMacOs = navigator.platform.toLowerCase().includes('mac');
+const HISTORY_INITIAL_LIMIT = 5;
+const HISTORY_LIMIT_STEP = 10;
 
 const readFileAsBase64 = async (file: File): Promise<string> =>
   await new Promise((resolve, reject) => {
@@ -112,6 +129,28 @@ const readFileAsBase64 = async (file: File): Promise<string> =>
   });
 
 const CODEX_USAGE_TOOLTIP_CACHE_MS = 60_000;
+
+const formatRelativeHistoryTime = (updatedAt: string, nowLabel: string) => {
+  const timestamp = Date.parse(updatedAt);
+  if (!Number.isFinite(timestamp)) {
+    return '';
+  }
+  const diffSeconds = Math.max(0, Math.round((Date.now() - timestamp) / 1000));
+  if (diffSeconds < 60) {
+    return nowLabel;
+  }
+
+  const units: Array<[string, number]> = [
+    ['y', 60 * 60 * 24 * 365],
+    ['mo', 60 * 60 * 24 * 30],
+    ['w', 60 * 60 * 24 * 7],
+    ['d', 60 * 60 * 24],
+    ['h', 60 * 60],
+    ['m', 60],
+  ];
+  const [unit, seconds] = units.find(([, unitSeconds]) => diffSeconds >= unitSeconds) ?? ['m', 60];
+  return `${Math.floor(diffSeconds / seconds)}${unit}`;
+};
 
 const CodexUsageTooltipContent = ({
   bucket,
@@ -200,6 +239,8 @@ interface ChatViewProps {
   onConfigureIntelligenceProvider: () => void;
   openingAppIds: Set<string>;
   onOpenApp: (appId: string) => void;
+  onInstallReviewedSocialApp?: () => void;
+  onDeleteReviewedSocialApp?: () => void;
   onStopRun: () => Promise<void>;
   onRespondPermission: (runId: string, requestId: string, decision: 'allow' | 'deny') => Promise<void>;
   onRespondQuestion: (runId: string, request: ChatQuestionRequest, response: ChatQuestionResponse) => Promise<void>;
@@ -256,12 +297,17 @@ export function ChatView({
   onConfigureIntelligenceProvider,
   openingAppIds,
   onOpenApp,
+  onInstallReviewedSocialApp,
+  onDeleteReviewedSocialApp,
   onStopRun,
   onRespondPermission,
   onRespondQuestion,
 }: ChatViewProps) {
   const theme = useTheme();
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [windowState, setWindowState] = useState<WindowControlState | null>(null);
+  const [collapsedHistoryGroups, setCollapsedHistoryGroups] = useState<Record<string, boolean>>({});
+  const [historyGroupLimits, setHistoryGroupLimits] = useState<Record<string, number>>({});
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionMenuPosition, setMentionMenuPosition] = useState<{ left: number; bottom: number } | null>(null);
   const [respondingPermissionIds, setRespondingPermissionIds] = useState<Set<string>>(new Set());
@@ -303,6 +349,60 @@ export function ChatView({
   const activeEffortOptions = activeRuntimeControl.effortOptions;
   const activeEffortValue = activeRuntimeControl.selectedEffort;
   const codexUsageBucket = codexUsageStatus?.rateLimits?.primary ?? codexUsageStatus?.rateLimits?.buckets[0];
+  const shouldReserveMacTrafficLightSpace = isMacOs && !windowState?.isFullScreen;
+  const historyGroups = useMemo<ConversationHistoryGroup[]>(() => {
+    const createAppItems: ConversationHistoryItem[] = [];
+    const reviewAppItems: ConversationHistoryItem[] = [];
+    const freeChatItems: ConversationHistoryItem[] = [];
+    const appGroups = new Map<string, ConversationHistoryGroup>();
+
+    historyItems.forEach((item) => {
+      if (item.mode === 'create_app') {
+        createAppItems.push(item);
+        return;
+      }
+      if (item.mode === 'social_app_review') {
+        reviewAppItems.push(item);
+        return;
+      }
+      if (item.mode === 'free_chat' || !item.mode) {
+        freeChatItems.push(item);
+        return;
+      }
+
+      const appId = item.targetAppId ?? item.appId;
+      const groupId = `app:${appId}`;
+      const existingGroup = appGroups.get(groupId);
+      if (existingGroup) {
+        existingGroup.items.push(item);
+        return;
+      }
+      appGroups.set(groupId, {
+        id: groupId,
+        label: getAppMeta(appId).name,
+        items: [item],
+      });
+    });
+
+    return [
+      createAppItems.length > 0
+        ? { id: 'create_app', label: t.sections.chat.historyGroups.createApps, items: createAppItems }
+        : null,
+      reviewAppItems.length > 0
+        ? { id: 'review_apps', label: t.sections.chat.historyGroups.reviewApps, items: reviewAppItems }
+        : null,
+      ...Array.from(appGroups.values()).sort((left, right) => left.label.localeCompare(right.label)),
+      freeChatItems.length > 0
+        ? { id: 'free_chat', label: t.sections.chat.historyGroups.freeChat, items: freeChatItems }
+        : null,
+    ].filter((group): group is ConversationHistoryGroup => Boolean(group));
+  }, [
+    getAppMeta,
+    historyItems,
+    t.sections.chat.historyGroups.createApps,
+    t.sections.chat.historyGroups.freeChat,
+    t.sections.chat.historyGroups.reviewApps,
+  ]);
   const refreshCodexUsageForTooltip = async () => {
     if (!codexProviderConfigured || codexUsageLoading) {
       return;
@@ -342,6 +442,33 @@ export function ChatView({
     setDraftMode('create_app');
     setDraftTargetAppId(targetAppId ?? '');
   }, [activeConversationId, targetAppId]);
+
+  useEffect(() => {
+    if (!isMacOs) {
+      return undefined;
+    }
+
+    let mounted = true;
+    const desktopApi = window.forger;
+
+    void desktopApi
+      .getWindowState()
+      .then((state) => {
+        if (mounted) {
+          setWindowState(state);
+        }
+      })
+      .catch(() => undefined);
+
+    const removeListener = desktopApi.onWindowStateChanged((state) => {
+      setWindowState(state);
+    });
+
+    return () => {
+      mounted = false;
+      removeListener();
+    };
+  }, []);
 
   const respondToPermission = (runId: string, requestId: string, decision: 'allow' | 'deny') => {
     const key = `${runId}:${requestId}`;
@@ -631,75 +758,196 @@ export function ChatView({
             </IconButton>
           </span>
         </Tooltip>
-        {activeConversationId && onNotifyForger ? (
-          <Tooltip title={t.sections.chat.notifyForgerTooltip}>
-            <span>
+        <Stack direction="row" spacing={1} alignItems="center">
+          {chatMode === 'social_app_review' ? (
+            <>
               <Button
                 size="small"
-                variant="outlined"
-                startIcon={<BugReportRounded fontSize="small" />}
-                onClick={onNotifyForger}
+                variant="contained"
+                startIcon={<AddRounded fontSize="small" />}
+                onClick={onInstallReviewedSocialApp}
                 sx={{ minHeight: 32, px: 1.25 }}
               >
-                {t.sections.chat.notifyForger}
+                {t.social.reviewInstallAction}
               </Button>
-            </span>
-          </Tooltip>
-        ) : null}
+              <Button
+                size="small"
+                color="error"
+                variant="outlined"
+                startIcon={<DeleteOutlineRounded fontSize="small" />}
+                onClick={onDeleteReviewedSocialApp}
+                sx={{ minHeight: 32, px: 1.25 }}
+              >
+                {t.social.reviewDeleteAction}
+              </Button>
+            </>
+          ) : null}
+          {activeConversationId && onNotifyForger ? (
+            <Tooltip title={t.sections.chat.notifyForgerTooltip}>
+              <span>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={<BugReportRounded fontSize="small" />}
+                  onClick={onNotifyForger}
+                  sx={{ minHeight: 32, px: 1.25 }}
+                >
+                  {t.sections.chat.notifyForger}
+                </Button>
+              </span>
+            </Tooltip>
+          ) : null}
+        </Stack>
         <Drawer
           anchor="left"
           open={historyOpen}
           onClose={() => setHistoryOpen(false)}
-          PaperProps={{ sx: { width: 360 } }}
+          PaperProps={{
+            sx: {
+              width: 360,
+              bgcolor: theme.palette.background.default,
+              borderRight: `1px solid ${theme.palette.divider}`,
+              WebkitAppRegion: 'no-drag',
+            },
+          }}
         >
-          <Box sx={{ p: 2 }}>
-            <Typography variant="h6">{t.sections.chat.historyTitle}</Typography>
-          </Box>
-          <Divider />
           {historyItems.length === 0 ? (
-            <Box sx={{ p: 2 }}>
+            <Box sx={{ px: 2, pb: 2, pt: shouldReserveMacTrafficLightSpace ? 6 : 2, WebkitAppRegion: 'no-drag' }}>
               <Typography variant="body2" color="text.secondary">
                 {t.sections.chat.noHistory}
               </Typography>
             </Box>
           ) : (
-            <List sx={{ py: 0 }}>
-              {historyItems.map((item) => (
-                <ListItem
-                  key={item.id}
-                  disablePadding
-                  secondaryAction={
-                    <Tooltip title={t.sections.chat.deleteConversationTooltip}>
-                      <span>
-                        <IconButton
-                          edge="end"
-                          size="small"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            onDeleteConversation(item.id);
-                          }}
+            <Box sx={{ px: 1.25, pb: 1.5, pt: shouldReserveMacTrafficLightSpace ? 5.25 : 1.25, WebkitAppRegion: 'no-drag' }}>
+              <List disablePadding sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
+                {historyGroups.map((group) => {
+                  const collapsed = collapsedHistoryGroups[group.id] === true;
+                  const visibleLimit = historyGroupLimits[group.id] ?? HISTORY_INITIAL_LIMIT;
+                  const visibleItems = group.items.slice(0, visibleLimit);
+                  const remainingItems = group.items.length - visibleItems.length;
+
+                  return (
+                    <Box key={group.id}>
+                      <ListItemButton
+                        onClick={() => {
+                          setCollapsedHistoryGroups((current) => ({
+                            ...current,
+                            [group.id]: current[group.id] !== true,
+                          }));
+                        }}
+                        sx={{
+                          minHeight: 32,
+                          borderRadius: 1,
+                          px: 0.75,
+                          py: 0.25,
+                          color: 'text.secondary',
+                        }}
+                      >
+                        <Box sx={{ width: 24, display: 'flex', alignItems: 'center', color: 'text.secondary' }}>
+                          {collapsed ? <ChevronRightRounded fontSize="small" /> : <ExpandMoreRounded fontSize="small" />}
+                        </Box>
+                        <Typography
+                          variant="body2"
+                          noWrap
+                          sx={{ flex: 1, minWidth: 0, fontWeight: 650, color: 'text.primary' }}
                         >
-                          <DeleteOutlineRounded fontSize="small" />
-                        </IconButton>
-                      </span>
-                    </Tooltip>
-                  }
-                >
-                  <ListItemButton
-                    selected={item.id === activeConversationId}
-                    onClick={() => {
-                      onOpenConversation(item.id);
-                      setHistoryOpen(false);
-                    }}
-                  >
-                    <ListItemText
-                      primary={item.title}
-                      secondary={new Date(item.updatedAt).toLocaleString()}
-                    />
-                  </ListItemButton>
-                </ListItem>
-              ))}
-            </List>
+                          {group.label}
+                        </Typography>
+                      </ListItemButton>
+                      <Collapse in={!collapsed} timeout="auto" unmountOnExit>
+                        <List disablePadding sx={{ pl: 3.25, pr: 0.5 }}>
+                          {visibleItems.map((item) => (
+                            <ListItem
+                              key={item.id}
+                              disablePadding
+                              secondaryAction={
+                                <Tooltip title={t.sections.chat.deleteConversationTooltip}>
+                                  <span>
+                                    <IconButton
+                                      edge="end"
+                                      size="small"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        onDeleteConversation(item.id);
+                                      }}
+                                      sx={{ color: 'text.secondary' }}
+                                    >
+                                      <DeleteOutlineRounded fontSize="small" />
+                                    </IconButton>
+                                  </span>
+                                </Tooltip>
+                              }
+                              sx={{
+                                '& .MuiListItemSecondaryAction-root': {
+                                  right: 0,
+                                },
+                              }}
+                            >
+                              <ListItemButton
+                                selected={item.id === activeConversationId}
+                                onClick={() => {
+                                  onOpenConversation(item.id);
+                                  setHistoryOpen(false);
+                                }}
+                                sx={{
+                                  minHeight: 34,
+                                  borderRadius: 1,
+                                  py: 0.25,
+                                  pl: 0.75,
+                                  pr: 5.75,
+                                  '&.Mui-selected': {
+                                    bgcolor: theme.palette.action.selected,
+                                  },
+                                }}
+                              >
+                                <ListItemText
+                                  primary={
+                                    <Stack direction="row" spacing={1} alignItems="center" sx={{ minWidth: 0 }}>
+                                      <Typography
+                                        variant="body2"
+                                        noWrap
+                                        sx={{ flex: 1, minWidth: 0, color: 'text.primary' }}
+                                      >
+                                        {item.title}
+                                      </Typography>
+                                      <Typography variant="body2" color="text.secondary" sx={{ flexShrink: 0 }}>
+                                        {formatRelativeHistoryTime(item.updatedAt, t.sections.chat.historyNow)}
+                                      </Typography>
+                                    </Stack>
+                                  }
+                                  sx={{ m: 0 }}
+                                />
+                              </ListItemButton>
+                            </ListItem>
+                          ))}
+                          {remainingItems > 0 ? (
+                            <ListItem disablePadding>
+                              <ListItemButton
+                                onClick={() => {
+                                  setHistoryGroupLimits((current) => ({
+                                    ...current,
+                                    [group.id]: visibleLimit + HISTORY_LIMIT_STEP,
+                                  }));
+                                }}
+                                sx={{
+                                  minHeight: 32,
+                                  borderRadius: 1,
+                                  px: 0.75,
+                                  py: 0.25,
+                                  color: 'text.secondary',
+                                }}
+                              >
+                                <Typography variant="body2">{t.sections.chat.showMoreHistory}</Typography>
+                              </ListItemButton>
+                            </ListItem>
+                          ) : null}
+                        </List>
+                      </Collapse>
+                    </Box>
+                  );
+                })}
+              </List>
+            </Box>
           )}
         </Drawer>
       </Box>
@@ -733,9 +981,9 @@ export function ChatView({
                   inputProps={{ 'aria-label': t.sections.chat.modeSelector.label }}
                   value={draftMode}
                   onChange={(event) => setDraftMode(event.target.value as ChatMode)}
-                  renderValue={(value) => modeOptions[value as ChatMode].title}
+                  renderValue={(value) => modeOptions[value as keyof typeof modeOptions].title}
                 >
-                  {(['create_app', 'edit_app', 'free_chat'] as ChatMode[]).map((mode) => (
+                  {(['create_app', 'edit_app', 'free_chat'] as Array<keyof typeof modeOptions>).map((mode) => (
                     <MenuItem key={mode} value={mode}>
                       <Stack spacing={0.25}>
                         <Typography variant="body2" fontWeight={700}>

@@ -28,6 +28,7 @@ interface AppCardProps {
   appName: string;
   iconUrl?: string;
   categoryLabel: string;
+  createdByLabel?: string;
   description: string;
   statusIndicatorLabel?: string;
   primaryActionLabel: string;
@@ -60,6 +61,7 @@ export function AppCard({
   appName,
   iconUrl,
   categoryLabel,
+  createdByLabel,
   description,
   statusIndicatorLabel,
   primaryActionLabel,
@@ -238,9 +240,16 @@ export function AppCard({
             <Typography variant="subtitle1" sx={{ mb: 0.25 }} noWrap>
               {appName}
             </Typography>
-            <Typography variant="caption" color="text.secondary">
-              {categoryLabel}
-            </Typography>
+            <Stack spacing={0.25}>
+              <Typography variant="caption" color="text.secondary">
+                {categoryLabel}
+              </Typography>
+              {createdByLabel ? (
+                <Typography variant="caption" color="text.secondary" noWrap>
+                  {createdByLabel}
+                </Typography>
+              ) : null}
+            </Stack>
           </Box>
         </Stack>
 

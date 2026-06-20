@@ -62,7 +62,7 @@ import {
   mapFailureMessage,
   normalizeChatHistory,
   normalizeErrorCode,
-  toProgressMessages,
+  toProviderProgressMessages,
 } from './progress-errors';
 import { OperationHistoryStore } from './operation-history';
 import {
@@ -85,6 +85,7 @@ interface ChatOrchestratorOptions {
   getCodexEnvironment: (appId?: string) => Promise<Record<string, string>>;
   ensureGitAvailable?: () => Promise<void>;
   getChatNetworkAccessDefault?: () => Promise<boolean> | boolean;
+  resolveChatAppRoot?: (appId: string, chatMode?: ChatStartRunInput['chatMode']) => Promise<string | null>;
   getCodexAuthenticated: () => Promise<boolean>;
   getClaudeAuthenticated: () => Promise<boolean>;
   getAntigravityAuthenticated?: () => Promise<boolean>;
@@ -179,7 +180,8 @@ export class ChatOrchestrator {
       throw error;
     }
 
-    const appRoot = isFreeChat ? this.options.forgerHomeRoot : path.join(this.options.privateAppsRoot, appId);
+    const resolvedAppRoot = isFreeChat ? null : await (this.options.resolveChatAppRoot?.(appId, input.chatMode) ?? Promise.resolve(null));
+    const appRoot = isFreeChat ? this.options.forgerHomeRoot : resolvedAppRoot ?? path.join(this.options.privateAppsRoot, appId);
     const stagingDir = path.join(this.options.metadataRoot, 'staging', randomUUID());
     const runId = randomUUID();
     const now = new Date().toISOString();
@@ -676,7 +678,7 @@ export class ChatOrchestrator {
             return;
           }
           void appendRunLog(run.runLogPath, stream, text);
-          const steps = toProgressMessages(stream, text, run.locale);
+          const steps = toProviderProgressMessages(run.provider, stream, text, run.locale);
           if (steps.length > 0) {
             run.progressLog = [...(run.progressLog ?? []), ...steps].slice(-40);
             run.updatedAt = new Date().toISOString();

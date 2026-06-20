@@ -48,6 +48,11 @@ export const toSocialUserApp = (record: unknown): SocialUserApp | undefined => {
     name: typeof item.name === 'string' ? item.name : '',
     shortDescription: typeof item.short_description === 'string' ? item.short_description : undefined,
     description: typeof item.description === 'string' ? item.description : undefined,
+    longDescription: typeof item.long_description === 'string'
+      ? item.long_description
+      : typeof item.description === 'string'
+        ? item.description
+        : undefined,
     category: typeof item.category === 'string' ? item.category : undefined,
     visibility: item.visibility === 'public' || item.visibility === 'friends' || item.visibility === 'private' ? item.visibility : 'restricted',
     status: item.status === 'suspended' || item.status === 'deleted' ? item.status : 'published',

@@ -323,6 +323,38 @@ test('registry store saves atomically, backs up the previous valid registry, and
   ]);
 });
 
+test('registry store retries transient registry rename permission errors', async (t) => {
+  const root = await tmpRoot('registry-rename-retry');
+  t.after(async () => {
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  let renameAttempts = 0;
+  const fakeFs = {
+    ...fs,
+    rename: async (source, target) => {
+      renameAttempts += 1;
+      if (renameAttempts < 3) {
+        const error = new Error('EPERM: operation not permitted, rename');
+        error.code = 'EPERM';
+        throw error;
+      }
+      await fs.rename(source, target);
+    },
+  };
+  const { controller, registryPath } = createController(root, { fs: fakeFs });
+
+  await controller.upsertInstalledRecord({
+    appId: 'retry',
+    name: 'Retry',
+    version: '1.0.0',
+    status: 'installed',
+  });
+
+  const saved = JSON.parse(await fs.readFile(registryPath, 'utf8'));
+  assert.equal(saved.apps.retry.status, 'installed');
+  assert.equal(renameAttempts, 3);
+});
+
 test('registry store loads from backup when primary is corrupt and persists normalized recovery state', async (t) => {
   const root = await tmpRoot('registry-corrupt');
   t.after(async () => {
@@ -386,6 +418,9 @@ test('registry store handles corrupted cloud sync settings, app auto-sync, cloud
   assert.deepEqual(state.cloudSyncSettings, { appSync: { demo: { autoSync: true } } });
   assert.deepEqual(JSON.parse(await fs.readFile(cloudSyncSettingsPath, 'utf8')), { appSync: { demo: { autoSync: true } } });
   assert.equal(controller.canUseCloudDataSync(), true);
+  assert.equal(createController(root, {
+    forgerAccount: { authenticated: true, token: 'token', user: { subscriptionTier: 'free' } },
+  }).controller.canUseCloudDataSync(), true);
 
   await controller.upsertInstalledRecord({
     appId: 'demo',

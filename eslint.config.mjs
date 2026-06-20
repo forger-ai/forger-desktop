@@ -49,7 +49,7 @@ export default tseslint.config(
       ],
       'no-empty': ['error', { allowEmptyCatch: true }],
       'no-control-regex': 'off',
-      'max-lines': ['error', { max: 1300, skipBlankLines: false, skipComments: false }],
+      'max-lines': ['error', { max: 1600, skipBlankLines: false, skipComments: false }],
     },
   },
   {

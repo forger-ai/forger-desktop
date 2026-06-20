@@ -32,7 +32,27 @@ const writeSkeleton = async (root) => {
       backend: { python_version: '3.12' },
       frontend: { node_version: '24' },
     },
-    services: [],
+    services: [
+      {
+        name: 'backend',
+        environment: {
+          DATABASE_URL: 'sqlite:///{app_data}/forger-app.sqlite',
+          CORS_ORIGINS: 'http://localhost:5173',
+        },
+      },
+      {
+        name: 'frontend',
+        environment: {
+          VITE_API_BASE_URL: 'http://localhost:8000',
+        },
+      },
+    ],
+    mcp: {
+      environment: {
+        DATABASE_URL: 'sqlite:///{app_data}/forger-app.sqlite',
+        PYTHONPATH: './src',
+      },
+    },
     tools: { required: ['legacy'], optional: ['legacy'] },
     cloudMessaging: { enabled: true },
   }, null, 2), 'utf8');
@@ -107,6 +127,11 @@ test('local app creator copies the skeleton, scrubs git metadata, writes manifes
   assert.equal(manifest.catalog.capabilities, undefined);
   assert.equal(manifest.localNetworkShare, true);
   assert.equal(manifest.remoteTunnel, true);
+  assert.equal(manifest.services[0].environment.DATABASE_URL, 'sqlite:///{app_data}/mi-app-de-clientes.sqlite');
+  assert.equal(manifest.services[0].environment.CORS_ORIGINS, 'http://localhost:5173');
+  assert.equal(manifest.services[1].environment.VITE_API_BASE_URL, 'http://localhost:8000');
+  assert.equal(manifest.mcp.environment.DATABASE_URL, 'sqlite:///{app_data}/mi-app-de-clientes.sqlite');
+  assert.equal(manifest.mcp.environment.PYTHONPATH, './src');
   assert.deepEqual(manifest.tools, { required: [], optional: [] });
   assert.deepEqual(manifest.appSecrets, []);
   assert.deepEqual(manifest.promptTemplates, []);

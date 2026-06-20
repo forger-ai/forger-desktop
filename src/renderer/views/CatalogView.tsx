@@ -1,5 +1,6 @@
-import { Button, Chip, MenuItem, Select, Stack, Typography } from '@mui/material';
-import type { AppCategory, CatalogApp, InstallAppResult } from '@shared/types';
+import { useState } from 'react';
+import { Alert, Button, Chip, Dialog, DialogActions, DialogContent, DialogTitle, LinearProgress, MenuItem, Select, Stack, Typography } from '@mui/material';
+import type { AppCategory, CatalogApp, InstallAppResult, SocialUserAppReviewState } from '@shared/types';
 import type { AppDictionary } from '@renderer/i18n';
 import { AppCard } from '@renderer/components/AppCard';
 import { AppsGrid } from '@renderer/components/AppsGrid';
@@ -13,7 +14,7 @@ interface CatalogViewProps {
   onFilterChange: (filter: 'all' | AppCategory) => void;
   statusFilter: 'all' | 'installed' | 'not_installed';
   onStatusFilterChange: (filter: 'all' | 'installed' | 'not_installed') => void;
-  onInstall: (appId: string) => void;
+  onInstall: (appId: string, trustDecision?: SocialUserAppReviewState) => void | Promise<void>;
   onUpdate: (appId: string) => void;
   onOpen: (appId: string) => void;
   onStop: (appId: string) => void;
@@ -34,7 +35,7 @@ interface CatalogViewProps {
   installProgressByApp: Record<string, InstallAppResult>;
 }
 
-const filters: Array<'all' | AppCategory> = ['all', 'finanzas', 'hogar', 'salud', 'productividad', 'developer_tools'];
+const filters: Array<'all' | AppCategory> = ['all', 'productivity', 'finance', 'home', 'health', 'learning', 'utilities', 'lifestyle', 'developer_tools'];
 
 const isInstalledLike = (app: CatalogApp) =>
   app.status === 'installed' || app.status === 'running' || app.status === 'error' || app.status === 'conflict' || app.status === 'installing';
@@ -80,6 +81,27 @@ export function CatalogView({
     .map((app, index) => ({ app, index }))
     .sort((left, right) => installedSortRank(left.app) - installedSortRank(right.app) || left.index - right.index)
     .map(({ app }) => app);
+  const [reviewDialogApp, setReviewDialogApp] = useState<CatalogApp | null>(null);
+  const [reviewDialogBusy, setReviewDialogBusy] = useState(false);
+  const closeReviewDialog = () => {
+    setReviewDialogBusy(false);
+    setReviewDialogApp(null);
+  };
+  const continueInstall = async (trustDecision: SocialUserAppReviewState) => {
+    if (!reviewDialogApp) return;
+    if (trustDecision !== 'reviewed') {
+      onInstall(reviewDialogApp.id, trustDecision);
+      closeReviewDialog();
+      return;
+    }
+    setReviewDialogBusy(true);
+    try {
+      await onInstall(reviewDialogApp.id, trustDecision);
+      closeReviewDialog();
+    } finally {
+      setReviewDialogBusy(false);
+    }
+  };
 
   return (
     <Stack spacing={2.5}>
@@ -87,6 +109,7 @@ export function CatalogView({
         <Typography variant="h4">{t.sections.catalog.title}</Typography>
         <Typography color="text.secondary">{t.sections.catalog.subtitle}</Typography>
       </Stack>
+      <Alert severity="warning">{t.sections.catalog.disclaimer}</Alert>
       <Stack spacing={1}>
         <Stack direction="row" spacing={1.25} alignItems="center">
           <Typography variant="body2" color="text.secondary">
@@ -144,6 +167,10 @@ export function CatalogView({
             const hasDownloadableVersion = Boolean(app.downloadUrl || app.latestVersionId);
             const canInstallEarlyAccess = !isEarlyAccess || (earlyAccessEnabled && hasDownloadableVersion);
             const primaryAction = isConflict ? 'update' : canRecoverUpdateError ? 'update' : canRetryInstallError ? 'retry' : isInstalled ? (app.status === 'running' ? 'stop' : 'open') : 'install';
+            const isSocialCatalogApp = typeof app.socialUserAppId === 'number';
+            const createdByLabel = app.socialOwnerUsername
+              ? t.sections.catalog.createdBy(app.socialOwnerUsername.startsWith('@') ? app.socialOwnerUsername : `@${app.socialOwnerUsername}`)
+              : undefined;
             const remoteNetworkState = app.remoteNetworkShare?.state;
             const remoteNetworkPreparing = remoteNetworkState === 'preparing';
             const isOpening = (primaryAction === 'open' && openingAppIds.has(app.id)) || remoteNetworkPreparing;
@@ -185,6 +212,7 @@ export function CatalogView({
                 appName={meta.name}
                 iconUrl={app.iconUrl}
                 categoryLabel={getCategoryLabel(app.category)}
+                createdByLabel={createdByLabel}
                 description={isEarlyAccess ? `${meta.description} ${t.beta.earlyAccessCardBody}` : meta.description}
                 beta={isPrivateLocal || isBeta || isEarlyAccess}
                 betaLabel={isPrivateLocal ? t.beta.privateLocalBadge : isEarlyAccess ? t.beta.earlyAccessBadge : t.beta.appBadge}
@@ -228,6 +256,10 @@ export function CatalogView({
                     return;
                   }
                   if (!isInstalled) {
+                    if (isSocialCatalogApp) {
+                      setReviewDialogApp(app);
+                      return;
+                    }
                     onInstall(app.id);
                   }
                 }}
@@ -247,6 +279,33 @@ export function CatalogView({
           })}
         </AppsGrid>
       )}
+      <Dialog open={Boolean(reviewDialogApp)} onClose={reviewDialogBusy ? undefined : closeReviewDialog} maxWidth="xs" fullWidth>
+        <DialogTitle>{t.social.reviewInstallTitle}</DialogTitle>
+        <DialogContent>
+          <Stack spacing={1.5}>
+            <Typography color="text.secondary">
+              {t.social.reviewInstallBody}
+            </Typography>
+            <Alert severity="warning">{t.sections.catalog.disclaimer}</Alert>
+            {reviewDialogBusy ? (
+              <Stack spacing={1}>
+                <LinearProgress />
+                <Typography variant="body2" color="text.secondary">
+                  {t.social.reviewPrepareProgress}
+                </Typography>
+              </Stack>
+            ) : null}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => void continueInstall('skipped_review')} disabled={reviewDialogBusy}>
+            {t.social.installWithoutReviewAction}
+          </Button>
+          <Button variant="contained" onClick={() => void continueInstall('reviewed')} disabled={reviewDialogBusy}>
+            {t.social.reviewWithAiAction}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Stack>
   );
 }

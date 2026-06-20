@@ -44,7 +44,7 @@ import {
 } from './app-agent/process';
 import type { LlmAppMcpServerConfig } from './app-agent/types';
 import type { AppFolderGrantPublic } from './app-folder-grants';
-import { appendRunLog, getRunLogPath } from './chat/progress-errors';
+import { appendRunLog, getRunLogPath, toProviderProgressMessages } from './chat/progress-errors';
 import { antigravityCliAdapter } from './llm-provider/adapters/antigravity-cli-adapter';
 import { claudeCliAdapter } from './llm-provider/adapters/claude-cli-adapter';
 import { codexCliAdapter } from './llm-provider/adapters/codex-cli-adapter';
@@ -560,7 +560,7 @@ export class AppAgentConversationManager {
         : '';
       const onOutput = (stream: 'stdout' | 'stderr' | 'meta', text: string): void => {
         void appendRunLog(run.runLogPath ?? getRunLogPath(this.options.metadataRoot, run.runId), stream, text);
-        this.handleOutput(conversation, run, text);
+        this.handleOutput(conversation, run, runtime.provider, stream, text);
       };
       const antigravityResult = runtime.provider === 'antigravity'
         ? await antigravityCliAdapter.run({
@@ -804,22 +804,32 @@ export class AppAgentConversationManager {
     throw new Error('agent_run_workspace_outside_app');
   }
 
-  private handleOutput(conversation: InternalConversation, run: InternalRun, text: string): void {
-    const progress = progressFromCodexOutput(text, run.locale);
-    if (!progress) {
+  private handleOutput(
+    conversation: InternalConversation,
+    run: InternalRun,
+    provider: AgentRuntime['provider'],
+    stream: 'stdout' | 'stderr' | 'meta',
+    text: string,
+  ): void {
+    const progressMessages = provider === 'antigravity'
+      ? toProviderProgressMessages(provider, stream, text, run.locale)
+      : [progressFromCodexOutput(text, run.locale)].filter((progress): progress is string => Boolean(progress));
+    if (progressMessages.length === 0) {
       return;
     }
-    run.progressLog = [...(run.progressLog ?? []), progress].slice(-40);
+    run.progressLog = [...(run.progressLog ?? []), ...progressMessages].slice(-40);
     run.updatedAt = new Date().toISOString();
     conversation.activeRun = toRun(run);
     conversation.updatedAt = run.updatedAt;
     void this.persistApp(conversation.appId);
-    this.options.onConversationEvent({
-      type: 'run.progress',
-      conversation: toConversation(conversation),
-      run: toRun(run),
-      progress,
-    });
+    for (const progress of progressMessages) {
+      this.options.onConversationEvent({
+        type: 'run.progress',
+        conversation: toConversation(conversation),
+        run: toRun(run),
+        progress,
+      });
+    }
   }
 
   private async failRun(runId: string, message: string): Promise<void> {

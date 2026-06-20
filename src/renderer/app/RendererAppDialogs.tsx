@@ -5,6 +5,8 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  FormControl,
+  InputLabel,
   MenuItem,
   Select,
   Snackbar,
@@ -85,9 +87,11 @@ export function RendererAppDialogs({ controller }: RendererAppDialogsProps) {
     closeRemoteTunnelReadyDialog,
     stopReadyRemoteTunnel,
     openRemoteTunnelPortal,
+    appCategoryOptions,
     socialUploadDialog,
     closeSocialUploadDialog,
     setSocialUploadVisibility,
+    setSocialUploadCategory,
     setSocialUploadName,
     submitSocialUploadDialog,
     errorReportDialog,
@@ -242,48 +246,54 @@ export function RendererAppDialogs({ controller }: RendererAppDialogsProps) {
 
       <Dialog open={socialUploadDialog.open} onClose={closeSocialUploadDialog} maxWidth="xs" fullWidth>
         <DialogTitle>
-          {t.locale === 'es' ? 'Subir a Social' : 'Upload to Social'}
+          {t.social.uploadTitle}
         </DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ pt: 1 }}>
             <Typography color="text.secondary">
-              {t.locale === 'es'
-                ? socialUploadDialog.isRemix
-                  ? 'Esta app quedara como un remix tuyo en Social.'
-                  : 'Elige quien puede ver esta app compartida.'
-                : socialUploadDialog.isRemix
-                  ? 'This app will become your own remix on Social.'
-                  : 'Choose who can see this shared app.'}
+              {socialUploadDialog.isRemix ? t.social.uploadRemixBody : t.social.uploadBody}
             </Typography>
             {socialUploadDialog.isRemix ? (
               <TextField
-                label={t.locale === 'es' ? 'Nombre de la app' : 'App name'}
+                label={t.social.uploadNameLabel}
                 value={socialUploadDialog.name}
                 onChange={(event) => setSocialUploadName(event.target.value)}
                 fullWidth
               />
             ) : null}
-            <Select
-              fullWidth
-              value={socialUploadDialog.visibility}
-              onChange={(event) => setSocialUploadVisibility(event.target.value)}
-            >
-              <MenuItem value="private">
-                {t.locale === 'es' ? 'Privada: solo con link' : 'Private: link only'}
-              </MenuItem>
-              <MenuItem value="friends">
-                {t.locale === 'es' ? 'Amigos' : 'Friends'}
-              </MenuItem>
-              <MenuItem value="public">
-                {t.locale === 'es' ? 'Publica' : 'Public'}
-              </MenuItem>
-            </Select>
+            <FormControl fullWidth size="small">
+              <InputLabel id="social-upload-category-label">{t.social.uploadCategoryLabel}</InputLabel>
+              <Select
+                labelId="social-upload-category-label"
+                label={t.social.uploadCategoryLabel}
+                value={socialUploadDialog.category}
+                onChange={(event) => setSocialUploadCategory(event.target.value)}
+              >
+                {appCategoryOptions.map((category: string) => (
+                  <MenuItem key={category} value={category}>{(t.appCategories as Record<string, string>)[category]}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <Typography variant="caption" color="text.secondary">{t.social.uploadCategoryHelp}</Typography>
+            <FormControl fullWidth size="small">
+              <InputLabel id="social-upload-visibility-label">{t.social.uploadVisibilityLabel}</InputLabel>
+              <Select
+                labelId="social-upload-visibility-label"
+                label={t.social.uploadVisibilityLabel}
+                value={socialUploadDialog.visibility}
+                onChange={(event) => setSocialUploadVisibility(event.target.value)}
+              >
+                <MenuItem value="private">{t.social.uploadVisibility.private}</MenuItem>
+                <MenuItem value="friends">{t.social.uploadVisibility.friends}</MenuItem>
+                <MenuItem value="public">{t.social.uploadVisibility.public}</MenuItem>
+              </Select>
+            </FormControl>
           </Stack>
         </DialogContent>
         <DialogActions>
           <Button onClick={closeSocialUploadDialog}>{t.actions.close}</Button>
           <Button variant="contained" onClick={() => void submitSocialUploadDialog()}>
-            {t.locale === 'es' ? 'Subir' : 'Upload'}
+            {t.social.uploadAction}
           </Button>
         </DialogActions>
       </Dialog>

@@ -48,6 +48,7 @@ import {
 } from './app-agent/task-helpers';
 import type { LlmAppMcpServerConfig } from './app-agent/types';
 import type { AppFolderGrantPublic } from './app-folder-grants';
+import { toProviderProgressMessages } from './chat/progress-errors';
 import { antigravityCliAdapter } from './llm-provider/adapters/antigravity-cli-adapter';
 import { claudeCliAdapter } from './llm-provider/adapters/claude-cli-adapter';
 import { codexCliAdapter, parseCodexJsonl } from './llm-provider/adapters/codex-cli-adapter';
@@ -346,7 +347,7 @@ export class AppAgentTaskManager {
           : antigravityCliPath as string;
       const onOutput = (stream: 'stdout' | 'stderr' | 'meta', text: string): void => {
         void appendTranscript(task.transcriptPath, stream, text);
-        this.updateProgressFromOutput(task, text, locale);
+        this.updateProgressFromOutput(task, runtime.provider, stream, text, locale);
       };
       const runCodexTask = async (codexHome: string) =>
         await codexCliAdapter.runTask({
@@ -686,12 +687,22 @@ export class AppAgentTaskManager {
     task.updatedAt = new Date().toISOString();
   }
 
-  private updateProgressFromOutput(task: InternalTask, text: string, locale: TaskLocale): void {
-    const message = progressFromCodexOutput(text, locale);
-    if (!message) {
+  private updateProgressFromOutput(
+    task: InternalTask,
+    provider: AgentRuntime['provider'],
+    stream: 'stdout' | 'stderr' | 'meta',
+    text: string,
+    locale: TaskLocale,
+  ): void {
+    const messages = provider === 'antigravity'
+      ? toProviderProgressMessages(provider, stream, text, locale)
+      : [progressFromCodexOutput(text, locale)].filter((progress): progress is string => Boolean(progress));
+    if (messages.length === 0) {
       return;
     }
-    this.addProgress(task, message);
+    for (const message of messages) {
+      this.addProgress(task, message);
+    }
     void this.persist(task);
     this.emit(task);
   }

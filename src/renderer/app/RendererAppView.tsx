@@ -1,4 +1,4 @@
-import { Box, Button, Chip, CssBaseline, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel, Link, Stack, Switch, ThemeProvider, Tooltip, Typography } from '@mui/material';
+import { Box, Button, Chip, CssBaseline, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel, LinearProgress, Link, Stack, Switch, ThemeProvider, Tooltip, Typography } from '@mui/material';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { AgentEffort, AntigravityEffort, AudioRuntimeBrokerRequest, AudioRuntimeDevices, BackgroundTask, CatalogApp, ClaudeEffort, CodexReasoningEffort, WakeWordState } from '@shared/types';
 import { AppShell } from '@renderer/components/AppShell';
@@ -273,6 +273,8 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     handleStopChatRun,
     handleRespondPermission,
     handleRespondQuestion,
+    handleFinishSocialReviewInstall,
+    handleDeleteSocialReview,
     refreshCodexAuthStatus,
     prepareConversationDiagnosticReport,
     automations,
@@ -302,6 +304,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     handleCreateBackup,
     handleSyncNow,
     handleDeleteBackup,
+    handleDeleteSelectedBackups,
     handleDeleteRemoteBackup,
     handleRestoreBackup,
     handleRestoreRemoteBackup,
@@ -362,6 +365,9 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     handleForgerUsernameUpdate,
     handleForgerProfileUpdate,
     uploadSocialApp,
+    socialInstallReviewDialog,
+    closeSocialInstallReviewDialog,
+    handleSocialInstallReviewDecision,
     codexConfigOpen,
     claudeConfigOpen,
     agentProviderConfigOpen,
@@ -956,12 +962,15 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             onStopRun={handleStopChatRun}
             onRespondPermission={handleRespondPermission}
             onRespondQuestion={handleRespondQuestion}
+            onInstallReviewedSocialApp={() => void handleFinishSocialReviewInstall()}
+            onDeleteReviewedSocialApp={() => void handleDeleteSocialReview()}
           />
         ) : null}
 
         {currentView === 'friends' ? (
           <SocialView
             account={forgerAccount}
+            t={t}
             accountBusy={forgerAccountBusy}
             installedApps={installedApps}
             initialProfileUsername={socialProfileUsername}
@@ -969,9 +978,9 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             onOpenFriendChat={(friendship) => handleOpenFriendChat(friendship)}
             onOpenCloudModal={() => setCloudModalOpen(true)}
             onOpenSocialApp={handleOpenSocialApp}
-            onUploadSocial={(appId, visibility) => {
+            onUploadSocial={(appId, visibility, category) => {
               if (visibility) {
-                void uploadSocialApp(appId, visibility);
+                void uploadSocialApp(appId, visibility, { category });
               } else {
                 void handleUploadSocial(appId);
               }
@@ -1076,6 +1085,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             onCreateBackup={(appId) => void handleCreateBackup(appId)}
             onSyncNow={(appId) => void handleSyncNow(appId)}
             onDeleteBackup={(backup) => void handleDeleteBackup(backup)}
+            onDeleteSelectedBackups={handleDeleteSelectedBackups}
             onDeleteRemoteBackup={(backup) => void handleDeleteRemoteBackup(backup)}
             onRestoreBackup={(backup) => void handleRestoreBackup(backup)}
             onRestoreRemoteBackup={(backup) => void handleRestoreRemoteBackup(backup)}
@@ -1248,6 +1258,35 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
       />
 
       <RendererAppDialogs controller={controller} />
+      <Dialog open={Boolean(socialInstallReviewDialog?.open)} onClose={socialInstallReviewDialog?.busy ? undefined : closeSocialInstallReviewDialog} maxWidth="xs" fullWidth>
+        <DialogTitle>{t.social.reviewInstallTitle}</DialogTitle>
+        <DialogContent>
+          <Stack spacing={1.5}>
+            <Typography fontWeight={700}>{socialInstallReviewDialog?.appName}</Typography>
+            <Typography color="text.secondary">{t.social.reviewInstallBody}</Typography>
+            <Typography variant="body2" color="warning.main">{t.sections.catalog.disclaimer}</Typography>
+            {socialInstallReviewDialog?.busy ? (
+              <Stack spacing={1}>
+                <LinearProgress />
+                <Typography variant="body2" color="text.secondary">
+                  {t.social.reviewPrepareProgress}
+                </Typography>
+              </Stack>
+            ) : null}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeSocialInstallReviewDialog} disabled={Boolean(socialInstallReviewDialog?.busy)}>
+            {t.actions.cancel}
+          </Button>
+          <Button onClick={() => void handleSocialInstallReviewDecision('skipped_review')} disabled={Boolean(socialInstallReviewDialog?.busy)}>
+            {t.social.installWithoutReviewAction}
+          </Button>
+          <Button variant="contained" onClick={() => void handleSocialInstallReviewDecision('reviewed')} disabled={Boolean(socialInstallReviewDialog?.busy)}>
+            {t.social.reviewWithAiAction}
+          </Button>
+        </DialogActions>
+      </Dialog>
       <Dialog open={forumPromptOpen} onClose={() => void handleDismissForumPrompt()} maxWidth="xs" fullWidth>
         <DialogTitle>{t.settings.forumPromptTitle}</DialogTitle>
         <DialogContent>
