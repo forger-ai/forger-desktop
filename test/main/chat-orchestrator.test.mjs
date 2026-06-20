@@ -34,6 +34,7 @@ const {
   mapFailureMessage,
   normalizeChatHistory,
   normalizeErrorCode,
+  toProviderProgressMessages,
   toProgressMessages,
 } = require('../../dist-electron/main/chat/progress-errors.js');
 const {
@@ -596,6 +597,23 @@ test('chat helper functions normalize history, progress, stale errors, and publi
     JSON.stringify({ type: 'item.started', item: { type: 'tool_call' } }),
   ].join('\n')), ['same']);
   assert.deepEqual(toProgressMessages('stdout', '   '), []);
+  assert.deepEqual(toProviderProgressMessages('codex', 'stdout', 'I will inspect the app.'), []);
+  assert.deepEqual(toProviderProgressMessages('antigravity', 'stdout', [
+    'Print mode: conversation=conv-123',
+    'I will inspect the app state first.',
+    'Calling MCP tool: forger_list_catalog',
+    'Conversation ID: conv-123',
+    'I am checking the relevant files.',
+  ].join('\n')), [
+    'I will inspect the app state first.',
+    'Calling MCP tool: forger_list_catalog',
+    'I am checking the relevant files.',
+  ]);
+  assert.deepEqual(toProviderProgressMessages('antigravity', 'stderr', [
+    'Authentication required.',
+    'Waiting for authentication...',
+    '- Updated `value` in the workspace.',
+  ].join('\n')), ['Updated value in the workspace.']);
 });
 
 test('chat run logs use the metadata run directory and preserve existing newlines', async () => {
@@ -894,6 +912,9 @@ test('chat error helpers normalize codes and localized failure messages', () => 
   assert.match(mapFailureMessage('auth_missing', undefined, undefined, 'en'), /connect Codex/i);
   assert.match(mapFailureMessage('permission_denied', undefined, undefined, 'en'), /permission/i);
   assert.match(mapFailureMessage('timeout', undefined, undefined, 'en'), /too long|long/i);
+  assert.match(mapFailureMessage('quota_exceeded', 'Codex quota exceeded', undefined, 'en'), /Codex reached your account usage limit/i);
+  assert.match(mapFailureMessage('quota_exceeded', 'Google Antigravity quota exceeded', undefined, 'es'), /Google Antigravity alcanzó el límite de uso/i);
+  assert.match(mapFailureMessage('quota_exceeded', undefined, undefined, 'en'), /The provider reached your account usage limit/i);
   assert.match(mapFailureMessage('sandbox_violation', undefined, undefined, 'en'), /workspace|access|files/i);
   assert.match(mapFailureMessage('dirty_worktree', undefined, undefined, 'en'), /saved|changes|clean/i);
   assert.match(mapFailureMessage('conflict', undefined, undefined, 'en'), /conflict|changed/i);
@@ -1411,6 +1432,10 @@ if (prompt.includes('timeout failure')) {
   console.error('/tmp/codex timed out due to inactivity after 75000ms');
   process.exit(1);
 }
+if (prompt.includes('quota failure')) {
+  console.error('Error: rate limit exceeded. Too Many Requests (429).');
+  process.exit(1);
+}
 console.log(JSON.stringify({ type: 'thread.started', thread_id: 'partial-thread' }));
 console.log(JSON.stringify({ type: 'item.completed', item: { type: 'tool_call' } }));
 console.error('401 Unauthorized Failed to refresh token');
@@ -1525,6 +1550,23 @@ process.exit(2);
     }), (error) => {
       assert.equal(error.chatCode, 'timeout');
       assert.match(error.message, /timed out due to inactivity/);
+      return true;
+    });
+
+    await assert.rejects(() => runner.runCodex({
+      codexCliPath: fakeCodex,
+      pathEntries: [],
+      environment: {},
+      workingDir: root,
+      prompt: 'quota failure',
+      model: 'gpt-test',
+      reasoningEffort: 'medium',
+      timeoutMs: 5_000,
+      onChild: () => undefined,
+      codexHome,
+    }), (error) => {
+      assert.equal(error.chatCode, 'quota_exceeded');
+      assert.match(error.message, /Codex quota exceeded/i);
       return true;
     });
 

@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import type { ChatErrorCode, ChatStartRunInput } from '../../shared/types';
+import type { AgentProvider, ChatErrorCode, ChatStartRunInput } from '../../shared/types';
 import { getSharedCopy } from '../../shared/i18n';
 import type { ChatHistoryMessage } from './orchestrator-helpers';
 
@@ -105,6 +105,66 @@ export const toProgressMessages = (
   return mapped.slice(-6);
 };
 
+export const toProviderProgressMessages = (
+  provider: AgentProvider,
+  stream: 'stdout' | 'stderr' | 'meta',
+  text: string,
+  locale?: string,
+): string[] => {
+  const jsonMessages = toProgressMessages(stream, text, locale);
+  if (jsonMessages.length > 0 || provider !== 'antigravity') {
+    return jsonMessages;
+  }
+  return toAntigravityPlainTextProgressMessages(stream, text);
+};
+
+const toAntigravityPlainTextProgressMessages = (
+  stream: 'stdout' | 'stderr' | 'meta',
+  text: string,
+): string[] => {
+  if (stream === 'meta') {
+    return [];
+  }
+
+  const mapped: string[] = [];
+  for (const line of text.split(/\r?\n/).map((entry) => entry.trim()).filter(Boolean)) {
+    if (isAntigravityProgressNoise(line)) {
+      continue;
+    }
+    const normalized = normalizeAntigravityProgressLine(line);
+    if (normalized && mapped[mapped.length - 1] !== normalized) {
+      mapped.push(normalized);
+    }
+  }
+  return mapped.slice(-6);
+};
+
+const normalizeAntigravityProgressLine = (line: string): string => {
+  const compact = stripMarkdown(line)
+    .replace(/\s+/g, ' ')
+    .trim();
+  return compact.length > 160 ? `${compact.slice(0, 157)}...` : compact;
+};
+
+const isAntigravityProgressNoise = (line: string): boolean => {
+  const compact = line.trim();
+  return [
+    /^$/,
+    /^Print mode:/i,
+    /^Created conversation\s+/i,
+    /^Streaming conversation\s+/i,
+    /^conversationID=/i,
+    /^(?:conversation|Conversation|CONVERSATION)[\s_-]*(?:id|ID)\s*[:=]/,
+    /^agy\s+(?:--conversation|-c)\s+/i,
+    /^Authentication required\./i,
+    /^Waiting for authentication/i,
+    /^Or, paste the authorization code/i,
+    /^MCP config/i,
+    /^Using config/i,
+    /^Log file:/i,
+  ].some((pattern) => pattern.test(compact));
+};
+
 const looksLikeFileEditCommand = (command: string): boolean => {
   const compact = command.replace(/\s+/g, ' ').trim();
   return [
@@ -120,6 +180,15 @@ const looksLikeFileEditCommand = (command: string): boolean => {
     /\b(?:cp|mv|rm)\s+/i,
   ].some((pattern) => pattern.test(compact));
 };
+
+const stripMarkdown = (text: string): string =>
+  text
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/!\[[^\]]*]\([^)]*\)/g, ' ')
+    .replace(/\[([^\]]+)]\([^)]*\)/g, '$1')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/^[\s>*-]+/gm, '');
 
 export const getRunLogPath = (metadataRoot: string, runId: string): string => {
   return path.join(metadataRoot, 'runs', `${runId}.log`);
@@ -177,6 +246,8 @@ export const mapFailureMessage = (code: ChatErrorCode, detail?: string, runLogPa
       return copy.permissionDenied;
     case 'timeout':
       return copy.timeout;
+    case 'quota_exceeded':
+      return copy.quotaExceeded(providerNameFromQuotaDetail(detail));
     case 'sandbox_violation':
       return copy.sandboxViolation;
     case 'dirty_worktree':
@@ -191,4 +262,10 @@ export const mapFailureMessage = (code: ChatErrorCode, detail?: string, runLogPa
       }
       return copy.codexRequestFailed(snippet ?? '', logHint);
   }
+};
+
+const providerNameFromQuotaDetail = (detail?: string): string => {
+  const compact = detail?.replace(/\s+/g, ' ').trim() ?? '';
+  const match = compact.match(/^(Google Antigravity|Codex|Claude(?: Code)?)\s+quota exceeded\b/i);
+  return match?.[1] ?? '';
 };

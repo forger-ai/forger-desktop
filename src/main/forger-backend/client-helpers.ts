@@ -221,7 +221,7 @@ export const normalizeRemoteBackupsUsage = (value: unknown): RemoteBackupsUsage 
 export const remoteBackupErrorMessage = (status: number, payload: unknown): string => {
   const error = payload && typeof payload === 'object' ? (payload as Record<string, unknown>).error : undefined;
   if (status === 403) {
-    return 'Forger Cloud Sync requiere una cuenta demo o pro.';
+    return 'Forger Cloud Sync requiere una cuenta de Forger Cloud activa.';
   }
   if (error === 'storage_limit_exceeded') {
     return 'Tu espacio de Forger Cloud esta lleno. Elimina respaldos cloud antes de subir otro.';

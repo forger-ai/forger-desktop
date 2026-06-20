@@ -37,6 +37,26 @@ export interface DeleteAppBackupInput {
   backupId: string;
 }
 
+export interface DeleteAppBackupBatchInput {
+  appId: string;
+  backupIds: string[];
+}
+
+export interface DeleteAppBackupBatchEntry {
+  appId: string;
+  backupId: string;
+}
+
+export interface DeleteAppBackupBatchFailure extends DeleteAppBackupBatchEntry {
+  userMessage: string;
+  technicalCode?: string;
+}
+
+export interface DeleteAppBackupBatchResult extends BasicActionResult {
+  deleted: DeleteAppBackupBatchEntry[];
+  failed: DeleteAppBackupBatchFailure[];
+}
+
 export interface RestoreAppBackupInput {
   appId: string;
   backupId: string;

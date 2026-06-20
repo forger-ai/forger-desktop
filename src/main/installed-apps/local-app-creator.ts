@@ -72,6 +72,41 @@ const escapeHtmlText = (value: string): string =>
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
 
+const rewriteSqliteDatabaseUrl = (value: string, appId: string): string =>
+  value.startsWith('sqlite:///')
+    ? value.replace(/\/[^/?#]+\.sqlite([?#].*)?$/, `/${appId}.sqlite$1`)
+    : value;
+
+const rewriteEnvironmentDatabaseUrl = (
+  environment: Record<string, string> | undefined,
+  appId: string,
+): Record<string, string> | undefined => {
+  if (!environment) {
+    return environment;
+  }
+  const next = { ...environment };
+  if (typeof next.DATABASE_URL === 'string') {
+    next.DATABASE_URL = rewriteSqliteDatabaseUrl(next.DATABASE_URL, appId);
+  }
+  return next;
+};
+
+const rewriteManifestDatabaseUrls = (manifest: AppManifest, appId: string): AppManifest => {
+  return {
+    ...manifest,
+    services: manifest.services?.map((service) => ({
+      ...service,
+      environment: rewriteEnvironmentDatabaseUrl(service.environment, appId),
+    })),
+    mcp: manifest.mcp
+      ? {
+          ...manifest.mcp,
+          environment: rewriteEnvironmentDatabaseUrl(manifest.mcp.environment, appId),
+        }
+      : manifest.mcp,
+  };
+};
+
 const updateManifest = (manifest: AppManifest, input: { appId: string; name: string; description: string; purpose: string }): AppManifest => {
   const rawCatalog = (manifest as Record<string, unknown>).catalog;
   const catalog = rawCatalog && typeof rawCatalog === 'object' && !Array.isArray(rawCatalog)
@@ -80,7 +115,7 @@ const updateManifest = (manifest: AppManifest, input: { appId: string; name: str
   delete catalog.capabilities;
   delete catalog.permissions;
 
-  return {
+  return rewriteManifestDatabaseUrls({
     ...manifest,
     name: input.appId,
     version: '0.1.0',
@@ -92,7 +127,7 @@ const updateManifest = (manifest: AppManifest, input: { appId: string; name: str
       display_name: input.name,
       short_description: input.description,
       description: input.purpose,
-      category: 'productividad',
+      category: 'productivity',
       supported_platforms: ['darwin_arm64', 'darwin_x64', 'linux_x64', 'win32_x64'],
       status: 'draft',
     },
@@ -101,7 +136,7 @@ const updateManifest = (manifest: AppManifest, input: { appId: string; name: str
     promptTemplates: [],
     agents: [],
     cloudMessaging: { enabled: false, defaultDelivery: 'persistent' },
-  };
+  }, input.appId);
 };
 
 export const createLocalAppCreator = (deps: LocalAppCreatorDeps) => {
@@ -226,7 +261,7 @@ export const createLocalAppCreator = (deps: LocalAppCreatorDeps) => {
     const installDir = path.join(getPrivateAppsRoot(), appId);
     const initialRecord: InstalledAppRecord = {
       appId,
-      category: 'productividad',
+      category: 'productivity',
       name,
       description,
       version: '0.1.0',

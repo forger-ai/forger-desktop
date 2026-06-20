@@ -177,6 +177,46 @@ test('BackupsManager lists, deletes, verifies checksums, and restores backup dir
   assert.equal(await fs.stat(backupDir).catch(() => null), null);
 });
 
+test('BackupsManager batch deletes selected safe backup ids and reports invalid or missing ids', async (t) => {
+  const root = await tmpRoot('backups-batch-delete');
+  t.after(async () => {
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  const installDir = path.join(root, 'apps', 'demo-app');
+  const backupsRoot = path.join(root, 'metadata', 'backups');
+  await fs.mkdir(path.join(installDir, 'backend', 'data'), { recursive: true });
+  await fs.writeFile(path.join(installDir, 'backend', 'data', 'app.sqlite3'), 'first-db', 'utf8');
+  const appRecord = { appId: 'demo-app', name: 'Demo App', version: '1.0.0', installDir };
+  const manager = new BackupsManager({
+    backupsRoot,
+    listInstalledApps: () => [appRecord],
+    getInstalledApp: (appId) => (appId === 'demo-app' ? appRecord : undefined),
+    isAppRunning: () => false,
+  });
+
+  const first = await manager.createBackup({ appId: 'demo-app', reason: 'manual' });
+  await new Promise((resolve) => setTimeout(resolve, 2));
+  await fs.writeFile(path.join(installDir, 'backend', 'data', 'app.sqlite3'), 'second-db', 'utf8');
+  const second = await manager.createBackup({ appId: 'demo-app', reason: 'manual' });
+  const firstDir = manager.backupDirectory('demo-app', first.backup.backupId);
+  const secondDir = manager.backupDirectory('demo-app', second.backup.backupId);
+
+  const deleted = await manager.deleteBackups({
+    appId: 'demo-app',
+    backupIds: [first.backup.backupId, '../bad', 'missing', second.backup.backupId],
+  });
+
+  assert.equal(deleted.success, false);
+  assert.equal(deleted.technicalCode, 'backup_batch_delete_partial');
+  assert.deepEqual(deleted.deleted.map((entry) => entry.backupId), [first.backup.backupId, second.backup.backupId]);
+  assert.deepEqual(deleted.failed.map((entry) => [entry.backupId, entry.technicalCode]), [
+    ['../bad', 'invalid_backup_id'],
+    ['missing', 'backup_not_found'],
+  ]);
+  assert.equal(await fs.stat(firstDir).catch(() => null), null);
+  assert.equal(await fs.stat(secondDir).catch(() => null), null);
+});
+
 test('BackupsManager rejects malformed metadata and collects docker-style sqlite paths without workspace access', async (t) => {
   const root = await tmpRoot('backups-malformed');
   t.after(async () => {

@@ -24,6 +24,7 @@ export type ChatErrorCode =
   | 'sandbox_violation'
   | 'permission_denied'
   | 'timeout'
+  | 'quota_exceeded'
   | 'canceled'
   | 'conflict'
   | 'capability_unavailable';
@@ -66,7 +67,7 @@ export interface ChatQuestionRequest {
   createdAt: string;
 }
 
-export type ChatMode = 'create_app' | 'edit_app' | 'free_chat';
+export type ChatMode = 'create_app' | 'edit_app' | 'free_chat' | 'social_app_review';
 
 export interface ChatCreatedAppRequest {
   appId: string;

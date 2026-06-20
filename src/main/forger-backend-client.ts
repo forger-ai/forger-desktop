@@ -29,6 +29,7 @@ import type {
   CloudStorageUsage,
   CloudSendAppShareInput,
   CloudSendMessageInput,
+  BasicActionResult,
   SocialUserApp,
   SocialUserAppDownload,
   SocialUserAppList,
@@ -1134,6 +1135,7 @@ export class ForgerBackendClient {
     slug?: string;
     description?: string;
     shortDescription?: string;
+    longDescription?: string;
     category?: string;
     visibility: 'public' | 'friends' | 'private';
     remixSourceUserAppId?: number;
@@ -1175,6 +1177,7 @@ export class ForgerBackendClient {
         slug: input.slug,
         description: input.description,
         short_description: input.shortDescription,
+        long_description: input.longDescription ?? input.description,
         category: input.category,
         remix_source_user_app_id: input.remixSourceUserAppId,
         signed_blob_id: signedBlobId,
@@ -1276,6 +1279,7 @@ export class ForgerBackendClient {
       name: input.name,
       short_description: input.shortDescription,
       description: input.description,
+      long_description: input.longDescription ?? input.description,
       category: input.category,
     }, 'social_user_app_update_failed');
     const app = toSocialUserApp(payload);
@@ -1288,6 +1292,13 @@ export class ForgerBackendClient {
     visibility: Exclude<SocialUserAppVisibility, 'restricted'>,
   ): Promise<SocialUserApp> {
     return await this.updateSocialApp({ id: userAppId, visibility });
+  }
+
+  async deleteSocialApp(userAppId: number): Promise<BasicActionResult> {
+    const payload = await deleteBackendJson(this.options, `/api/v1/me/user_apps/${encodeURIComponent(String(userAppId))}`, 'social_user_app_delete_failed');
+    const success = payload && typeof payload === 'object' && (payload as { success?: unknown }).success === true;
+    if (!success) throw backendError('No pudimos retirar la publicación.', 'social_user_app_delete_response_invalid');
+    return { success: true, userMessage: 'Publicación retirada.' };
   }
 
   async resolveSocialCode(code: string): Promise<{ app: SocialUserApp; share?: Record<string, unknown> }> {
@@ -1393,8 +1404,15 @@ export class ForgerBackendClient {
   async submitAppRating(
     input: SubmitAppRatingInput,
   ): Promise<{ success: boolean; rating?: AppRatingSummary; userMessage?: string; technicalCode?: string }> {
-    const response = await fetch(`${this.options.backendBaseUrl}/api/v1/catalog/apps/${encodeURIComponent(input.appId)}/rating`, {
-      method: 'PUT',
+    const socialUserAppId = typeof input.socialUserAppId === 'number' && Number.isFinite(input.socialUserAppId)
+      ? input.socialUserAppId
+      : undefined;
+    const isSocialReview = socialUserAppId !== undefined;
+    const path = isSocialReview
+      ? `/api/v1/social/apps/by_id/${encodeURIComponent(String(socialUserAppId))}/reviews`
+      : `/api/v1/catalog/apps/${encodeURIComponent(input.appId)}/rating`;
+    const response = await fetch(`${this.options.backendBaseUrl}${path}`, {
+      method: isSocialReview ? 'POST' : 'PUT',
       headers: {
         ...buildBackendHeaders(this.options.token()),
         'Content-Type': 'application/json',
@@ -1408,10 +1426,31 @@ export class ForgerBackendClient {
     const payload = await this.readJson<unknown>(response);
 
     if (!response.ok) {
+      if (response.status === 403) {
+        return {
+          success: false,
+          userMessage: 'Confirma tu correo para publicar una review.',
+          technicalCode: isSocialReview ? 'social_app_review_confirmation_required' : 'rating_failed_403',
+        };
+      }
+      if (isSocialReview && response.status === 404) {
+        return {
+          success: false,
+          userMessage: 'No encontramos esta app Social para publicar tu review.',
+          technicalCode: 'social_app_review_app_not_found',
+        };
+      }
+      if (isSocialReview && response.status === 422) {
+        return {
+          success: false,
+          userMessage: 'Revisa el rating o comentario antes de guardar la review.',
+          technicalCode: 'social_app_review_invalid',
+        };
+      }
       return {
         success: false,
-        userMessage: response.status === 403 ? 'Confirma tu correo para publicar una review.' : 'No pudimos guardar tu review.',
-        technicalCode: `rating_failed_${response.status}`,
+        userMessage: 'No pudimos guardar tu review.',
+        technicalCode: isSocialReview ? `social_app_review_failed_${response.status}` : `rating_failed_${response.status}`,
       };
     }
 

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type SyntheticEvent } from 'react';
 import ChatRounded from '@mui/icons-material/ChatRounded';
 import ContentCopyRounded from '@mui/icons-material/ContentCopyRounded';
+import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
 import EditRounded from '@mui/icons-material/EditRounded';
 import OpenInNewRounded from '@mui/icons-material/OpenInNewRounded';
 import PersonAddRounded from '@mui/icons-material/PersonAddRounded';
@@ -36,6 +37,7 @@ import {
   type AlertColor,
 } from '@mui/material';
 import type {
+  AppCategory,
   AppSummary,
   CloudFriendship,
   CloudFriendUser,
@@ -46,6 +48,8 @@ import type {
   SocialUserProfile,
   SocialUserProfileDetail,
 } from '@shared/types';
+import { APP_CATEGORIES } from '@shared/types/catalog';
+import type { AppDictionary } from '@renderer/i18n';
 import { ForumPanel } from './friends/ForumPanel';
 import {
   LAST_SOCIAL_TAB_KEY,
@@ -62,6 +66,7 @@ type FullSocialTab = 'friends' | 'forum' | 'profile' | 'search';
 
 interface SocialViewProps {
   account: ForgerAccountSession;
+  t: AppDictionary;
   accountBusy?: boolean;
   initialProfileUsername?: string | null;
   installedApps?: AppSummary[];
@@ -69,11 +74,14 @@ interface SocialViewProps {
   onOpenFriendChat?: (friendship: CloudFriendship) => Promise<FriendChatWindowOpenResult> | FriendChatWindowOpenResult;
   onOpenCloudModal: () => void;
   onOpenSocialApp: (app: SocialUserApp) => void;
-  onUploadSocial?: (appId: string, visibility?: Exclude<SocialUserAppVisibility, 'restricted'>) => void;
+  onUploadSocial?: (appId: string, visibility?: Exclude<SocialUserAppVisibility, 'restricted'>, category?: AppCategory) => void;
   onNotify?: (message: string, severity?: AlertColor) => void;
   onUpdateUsername?: (username: string) => Promise<boolean>;
   onUpdateProfile?: (input: { displayName?: string }) => Promise<boolean>;
 }
+
+const appCategoryOptions: AppCategory[] = [...APP_CATEGORIES];
+const editableVisibilityOptions: Array<Exclude<SocialUserAppVisibility, 'restricted'>> = ['private', 'friends', 'public'];
 
 const fullSocialTabs: Array<{ value: FullSocialTab; label: string }> = [
   { value: 'friends', label: 'Amigos' },
@@ -103,27 +111,33 @@ const formatBytes = (value?: number) => {
 const profileName = (profile: SocialUserProfile) =>
   profile.displayName || (profile.firstName ? `${profile.firstName}${profile.lastInitial ? ` ${profile.lastInitial}.` : ''}` : `@${profile.username}`);
 
-const visibilityLabel = (app: SocialUserApp, isOwnedByAccount = false) => {
-  if (!isOwnedByAccount && app.accessReason === 'direct_share') return 'Compartida contigo';
-  if (app.visibility === 'public') return 'Pública';
-  if (app.visibility === 'friends') return 'Amigos';
-  if (app.visibility === 'restricted') return 'Restringida';
-  return 'Privada';
+const isAppCategory = (value: string | undefined): value is AppCategory =>
+  appCategoryOptions.some((category) => category === value);
+
+const visibilityLabel = (app: SocialUserApp, t: AppDictionary, isOwnedByAccount = false) => {
+  if (!isOwnedByAccount && app.accessReason === 'direct_share') return t.social.visibility.directShare;
+  return t.social.visibility[app.visibility];
 };
 
 const SocialAppCard = ({
   app,
+  t,
   ownerLabel,
   onOpen,
   accountUserId,
   onVisibilityChange,
+  onEditInfo,
+  onDelete,
   visibilityBusy,
 }: {
   app: SocialUserApp;
+  t: AppDictionary;
   ownerLabel?: string;
   onOpen: (app: SocialUserApp) => void;
   accountUserId?: number;
   onVisibilityChange?: (app: SocialUserApp, visibility: Exclude<SocialUserAppVisibility, 'restricted'>) => void;
+  onEditInfo?: (app: SocialUserApp) => void;
+  onDelete?: (app: SocialUserApp) => void;
   visibilityBusy?: boolean;
 }) => {
   const isOwnedByAccount = accountUserId !== undefined && app.owner.id === accountUserId;
@@ -135,7 +149,7 @@ const SocialAppCard = ({
           <Stack spacing={0.5} sx={{ flex: 1, minWidth: 0 }}>
             <Stack direction="row" spacing={0.75} alignItems="center" useFlexGap flexWrap="wrap">
               <Typography variant="body1" sx={{ fontWeight: 700 }} noWrap>{app.name}</Typography>
-              <Chip size="small" label={visibilityLabel(app, isOwnedByAccount)} variant="outlined" />
+              <Chip size="small" label={visibilityLabel(app, t, isOwnedByAccount)} variant="outlined" />
               {app.status !== 'published' ? <Chip size="small" label="No publicada" color="warning" variant="outlined" /> : null}
             </Stack>
             {ownerLabel ? (
@@ -158,10 +172,32 @@ const SocialAppCard = ({
               onChange={(event) => onVisibilityChange(app, event.target.value as Exclude<SocialUserAppVisibility, 'restricted'>)}
               sx={{ minWidth: 128 }}
             >
-              <MenuItem value="private">Privada</MenuItem>
-              <MenuItem value="friends">Amigos</MenuItem>
-              <MenuItem value="public">Pública</MenuItem>
+              {editableVisibilityOptions.map((visibility) => (
+                <MenuItem key={visibility} value={visibility}>{t.social.visibility[visibility]}</MenuItem>
+              ))}
             </Select>
+          ) : null}
+          {onEditInfo ? (
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<EditRounded />}
+              onClick={() => onEditInfo(app)}
+            >
+              {t.social.editAppInfoAction}
+            </Button>
+          ) : null}
+          {onDelete ? (
+            <Button
+              size="small"
+              variant="outlined"
+              color="error"
+              startIcon={<DeleteOutlineRounded />}
+              disabled={app.status !== 'published'}
+              onClick={() => onDelete(app)}
+            >
+              {t.social.unpublishAction}
+            </Button>
           ) : null}
           <Button
             size="small"
@@ -180,6 +216,7 @@ const SocialAppCard = ({
 
 export function SocialView({
   account,
+  t,
   accountBusy = false,
   installedApps = [],
   initialProfileUsername,
@@ -221,9 +258,34 @@ export function SocialView({
   const [profileInfoBusy, setProfileInfoBusy] = useState(false);
   const [profileInfoError, setProfileInfoError] = useState<string | null>(null);
   const [visibilityBusyId, setVisibilityBusyId] = useState<number | null>(null);
+  const [deleteAppDialog, setDeleteAppDialog] = useState<{ app: SocialUserApp | null; busy: boolean; error: string | null }>({
+    app: null,
+    busy: false,
+    error: null,
+  });
   const [publishDialogOpen, setPublishDialogOpen] = useState(false);
   const [publishAppId, setPublishAppId] = useState('');
   const [publishVisibility, setPublishVisibility] = useState<Exclude<SocialUserAppVisibility, 'restricted'>>('private');
+  const [publishCategory, setPublishCategory] = useState<AppCategory>('productivity');
+  const [editAppDialog, setEditAppDialog] = useState<{
+    app: SocialUserApp | null;
+    name: string;
+    shortDescription: string;
+    description: string;
+    category: AppCategory | '';
+    visibility: Exclude<SocialUserAppVisibility, 'restricted'>;
+    busy: boolean;
+    error: string | null;
+  }>({
+    app: null,
+    name: '',
+    shortDescription: '',
+    description: '',
+    category: '',
+    visibility: 'private',
+    busy: false,
+    error: null,
+  });
   const signedIn = account.authenticated && Boolean(account.user?.confirmed);
 
   const accountUserId = account.user?.id;
@@ -457,6 +519,66 @@ export function SocialView({
     }
   };
 
+  const openEditAppInfoDialog = (app: SocialUserApp) => {
+    setEditAppDialog({
+      app,
+      name: app.name,
+      shortDescription: app.shortDescription ?? '',
+      description: app.longDescription ?? app.description ?? '',
+      category: isAppCategory(app.category) ? app.category : '',
+      visibility: app.visibility === 'restricted' ? 'private' : app.visibility,
+      busy: false,
+      error: null,
+    });
+  };
+
+  const closeEditAppInfoDialog = () => {
+    setEditAppDialog((current) => ({ ...current, app: null, busy: false, error: null }));
+  };
+
+  const handleEditAppInfoSubmit = async (event?: SyntheticEvent) => {
+    event?.preventDefault();
+    const app = editAppDialog.app;
+    if (!app || editAppDialog.busy) return;
+    setEditAppDialog((current) => ({ ...current, busy: true, error: null }));
+    try {
+      const updated = await window.forger.updateSocialApp({
+        id: app.id,
+        name: editAppDialog.name.trim(),
+        shortDescription: editAppDialog.shortDescription.trim(),
+        description: editAppDialog.description.trim(),
+        longDescription: editAppDialog.description.trim(),
+        category: editAppDialog.category || undefined,
+        visibility: editAppDialog.visibility,
+      });
+      setMyApps((current) => current.map((entry) => entry.id === updated.id ? updated : entry));
+      setProfileApps((current) => current.map((entry) => entry.id === updated.id ? updated : entry));
+      setEditAppDialog((current) => ({ ...current, app: null, busy: false, error: null }));
+      onNotify?.(t.social.editAppInfoSuccess, 'success');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : t.social.editAppInfoError;
+      setEditAppDialog((current) => ({ ...current, busy: false, error: message }));
+      onNotify?.(message, 'error');
+    }
+  };
+
+  const handleDeleteSocialApp = async () => {
+    const app = deleteAppDialog.app;
+    if (!app || deleteAppDialog.busy) return;
+    setDeleteAppDialog((current) => ({ ...current, busy: true, error: null }));
+    try {
+      await window.forger.deleteSocialApp(app.id);
+      setMyApps((current) => current.filter((entry) => entry.id !== app.id));
+      setProfileApps((current) => current.filter((entry) => entry.id !== app.id));
+      setDeleteAppDialog({ app: null, busy: false, error: null });
+      onNotify?.(t.social.unpublishSuccess, 'success');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : t.social.unpublishError;
+      setDeleteAppDialog((current) => ({ ...current, busy: false, error: message }));
+      onNotify?.(message, 'error');
+    }
+  };
+
   const handleOpenProfileInBrowser = async () => {
     const url = profileUrl || (accountUsername ? await window.forger.getSocialProfileUrl(accountUsername) : '');
     if (!url) return;
@@ -473,7 +595,7 @@ export function SocialView({
   const handlePublishSubmit = () => {
     if (!publishAppId || !onUploadSocial) return;
     setPublishDialogOpen(false);
-    onUploadSocial(publishAppId, publishVisibility);
+    onUploadSocial(publishAppId, publishVisibility, publishCategory);
   };
 
   const renderSignedOut = () => (
@@ -694,7 +816,7 @@ export function SocialView({
             ) : (
               <List disablePadding sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', lg: 'repeat(2, minmax(0, 1fr))' }, gap: 1 }}>
                 {profileApps.map((app) => (
-                  <SocialAppCard key={app.id} app={app} ownerLabel={`@${app.owner.username}`} accountUserId={accountUserId} onOpen={onOpenSocialApp} />
+                  <SocialAppCard key={app.id} app={app} t={t} ownerLabel={`@${app.owner.username}`} accountUserId={accountUserId} onOpen={onOpenSocialApp} />
                 ))}
               </List>
             )}
@@ -768,7 +890,9 @@ export function SocialView({
               startIcon={<UploadRounded />}
               disabled={!onUploadSocial || uploadCandidates.length === 0}
               onClick={() => {
-                setPublishAppId(uploadCandidates[0]?.id ?? '');
+                const firstCandidate = uploadCandidates[0];
+                setPublishAppId(firstCandidate?.id ?? '');
+                setPublishCategory(isAppCategory(firstCandidate?.category) ? firstCandidate.category : 'productivity');
                 setPublishDialogOpen(true);
               }}
             >
@@ -797,10 +921,13 @@ export function SocialView({
               <SocialAppCard
                 key={app.id}
                 app={app}
+                t={t}
                 ownerLabel="Tuya"
                 accountUserId={accountUserId}
                 onOpen={onOpenSocialApp}
                 onVisibilityChange={handleVisibilityChange}
+                onEditInfo={openEditAppInfoDialog}
+                onDelete={(app) => setDeleteAppDialog({ app, busy: false, error: null })}
                 visibilityBusy={visibilityBusyId === app.id}
               />
             ))}
@@ -836,17 +963,121 @@ export function SocialView({
         </Box>
       </Dialog>
 
+      <Dialog
+        open={Boolean(deleteAppDialog.app)}
+        onClose={() => {
+          if (!deleteAppDialog.busy) setDeleteAppDialog({ app: null, busy: false, error: null });
+        }}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>{t.social.unpublishTitle}</DialogTitle>
+        <DialogContent>
+          <Stack spacing={1.5} sx={{ pt: 1 }}>
+            <Typography color="text.secondary">
+              {deleteAppDialog.app ? t.social.unpublishBody(deleteAppDialog.app.name) : ''}
+            </Typography>
+            <Alert severity="warning">{t.social.unpublishWarning}</Alert>
+            {deleteAppDialog.error ? <Alert severity="error">{deleteAppDialog.error}</Alert> : null}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button disabled={deleteAppDialog.busy} onClick={() => setDeleteAppDialog({ app: null, busy: false, error: null })}>
+            {t.actions.cancel}
+          </Button>
+          <Button color="error" variant="contained" disabled={deleteAppDialog.busy} onClick={() => void handleDeleteSocialApp()}>
+            {deleteAppDialog.busy ? t.social.unpublishing : t.social.unpublishConfirmAction}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={Boolean(editAppDialog.app)} onClose={closeEditAppInfoDialog} maxWidth="sm" fullWidth>
+        <Box component="form" onSubmit={handleEditAppInfoSubmit}>
+          <DialogTitle>{t.social.editAppInfoTitle}</DialogTitle>
+          <DialogContent>
+            <Stack spacing={2} sx={{ pt: 1 }}>
+              <TextField
+                label={t.social.editAppNameLabel}
+                value={editAppDialog.name}
+                onChange={(event) => setEditAppDialog((current) => ({ ...current, name: event.target.value, error: null }))}
+                inputProps={{ maxLength: 120 }}
+                required
+                fullWidth
+              />
+              <TextField
+                label={t.social.editAppShortDescriptionLabel}
+                value={editAppDialog.shortDescription}
+                onChange={(event) => setEditAppDialog((current) => ({ ...current, shortDescription: event.target.value, error: null }))}
+                inputProps={{ maxLength: 180 }}
+                fullWidth
+              />
+              <TextField
+                label={t.social.editAppDescriptionLabel}
+                value={editAppDialog.description}
+                onChange={(event) => setEditAppDialog((current) => ({ ...current, description: event.target.value, error: null }))}
+                multiline
+                minRows={4}
+                fullWidth
+              />
+              <FormControl fullWidth size="small">
+                <InputLabel id="social-edit-app-category-label">{t.social.editAppCategoryLabel}</InputLabel>
+                <Select
+                  labelId="social-edit-app-category-label"
+                  label={t.social.editAppCategoryLabel}
+                  value={editAppDialog.category}
+                  onChange={(event) => setEditAppDialog((current) => ({ ...current, category: event.target.value as AppCategory | '', error: null }))}
+                >
+                  <MenuItem value="">{t.social.editAppCategoryEmpty}</MenuItem>
+                  {appCategoryOptions.map((category) => (
+                    <MenuItem key={category} value={category}>{t.appCategories[category]}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <FormControl fullWidth size="small">
+                <InputLabel id="social-edit-app-visibility-label">{t.social.editAppVisibilityLabel}</InputLabel>
+                <Select
+                  labelId="social-edit-app-visibility-label"
+                  label={t.social.editAppVisibilityLabel}
+                  value={editAppDialog.visibility}
+                  onChange={(event) => setEditAppDialog((current) => ({
+                    ...current,
+                    visibility: event.target.value as Exclude<SocialUserAppVisibility, 'restricted'>,
+                    error: null,
+                  }))}
+                >
+                  {editableVisibilityOptions.map((visibility) => (
+                    <MenuItem key={visibility} value={visibility}>{t.social.visibility[visibility]}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              {editAppDialog.error ? <Alert severity="error">{editAppDialog.error}</Alert> : null}
+            </Stack>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={closeEditAppInfoDialog}>{t.actions.cancel}</Button>
+            <Button type="submit" variant="contained" disabled={editAppDialog.busy || !editAppDialog.name.trim()}>
+              {editAppDialog.busy ? t.social.saving : t.actions.save}
+            </Button>
+          </DialogActions>
+        </Box>
+      </Dialog>
+
       <Dialog open={publishDialogOpen} onClose={() => setPublishDialogOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle>Subir app a Social</DialogTitle>
+        <DialogTitle>{t.social.uploadTitle}</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ pt: 1 }}>
             <FormControl fullWidth size="small">
-              <InputLabel id="social-profile-upload-app-label">App</InputLabel>
+              <InputLabel id="social-profile-upload-app-label">{t.social.uploadAppLabel}</InputLabel>
               <Select
                 labelId="social-profile-upload-app-label"
-                label="App"
+                label={t.social.uploadAppLabel}
                 value={publishAppId}
-                onChange={(event) => setPublishAppId(event.target.value)}
+                onChange={(event) => {
+                  const nextAppId = event.target.value;
+                  const app = uploadCandidates.find((candidate) => candidate.id === nextAppId);
+                  setPublishAppId(nextAppId);
+                  setPublishCategory(isAppCategory(app?.category) ? app.category : 'productivity');
+                }}
               >
                 {uploadCandidates.map((app) => (
                   <MenuItem key={app.id} value={app.id}>{app.name ?? app.id}</MenuItem>
@@ -854,23 +1085,37 @@ export function SocialView({
               </Select>
             </FormControl>
             <FormControl fullWidth size="small">
-              <InputLabel id="social-profile-upload-visibility-label">Visibilidad</InputLabel>
+              <InputLabel id="social-profile-upload-category-label">{t.social.uploadCategoryLabel}</InputLabel>
+              <Select
+                labelId="social-profile-upload-category-label"
+                label={t.social.uploadCategoryLabel}
+                value={publishCategory}
+                onChange={(event) => setPublishCategory(event.target.value as AppCategory)}
+              >
+                {appCategoryOptions.map((category) => (
+                  <MenuItem key={category} value={category}>{t.appCategories[category]}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <Typography variant="caption" color="text.secondary">{t.social.uploadCategoryHelp}</Typography>
+            <FormControl fullWidth size="small">
+              <InputLabel id="social-profile-upload-visibility-label">{t.social.uploadVisibilityLabel}</InputLabel>
               <Select
                 labelId="social-profile-upload-visibility-label"
-                label="Visibilidad"
+                label={t.social.uploadVisibilityLabel}
                 value={publishVisibility}
                 onChange={(event) => setPublishVisibility(event.target.value as Exclude<SocialUserAppVisibility, 'restricted'>)}
               >
-                <MenuItem value="private">Privada</MenuItem>
-                <MenuItem value="friends">Amigos</MenuItem>
-                <MenuItem value="public">Pública</MenuItem>
+                <MenuItem value="private">{t.social.uploadVisibility.private}</MenuItem>
+                <MenuItem value="friends">{t.social.uploadVisibility.friends}</MenuItem>
+                <MenuItem value="public">{t.social.uploadVisibility.public}</MenuItem>
               </Select>
             </FormControl>
           </Stack>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setPublishDialogOpen(false)}>Cancelar</Button>
-          <Button variant="contained" disabled={!publishAppId} onClick={handlePublishSubmit}>Subir</Button>
+          <Button onClick={() => setPublishDialogOpen(false)}>{t.actions.cancel}</Button>
+          <Button variant="contained" disabled={!publishAppId} onClick={handlePublishSubmit}>{t.social.uploadAction}</Button>
         </DialogActions>
       </Dialog>
     </Stack>

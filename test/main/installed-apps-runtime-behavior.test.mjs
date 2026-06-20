@@ -583,6 +583,63 @@ test('installSocialAppRuntime requests a signed Social download and installs und
   assert.ok(calls.some((call) => call[0] === 'frontendDeps' && call[4] === 'social-ana-user-shared-ledger'));
 });
 
+test('installSocialAppRuntime stages reviewed Social apps before dependency installation', async (t) => {
+  const originalFetch = globalThis.fetch;
+  const socialAppId = 'social-ana-user-shared-ledger';
+  const { root, calls, controller } = await makeLifecycleHarness({
+    catalogApps: [{
+      id: socialAppId,
+      socialUserAppId: 44,
+      socialOwnerUsername: 'Ana.User',
+      slug: 'shared-ledger',
+      name: 'Shared Ledger',
+      description: 'Shared app',
+      longDescription: 'Reviewed shared app',
+      category: 'productivity',
+      status: 'not_installed',
+      latestVersion: '2.1.0',
+    }],
+    forgerBackendClient: {
+      requestSocialAppDownload: async (input) => {
+        calls.push(['socialDownload', input.appId, input.trustDecision]);
+        return {
+          downloadUrl: 'https://social.test/app.zip',
+          app: { id: 44, slug: 'shared-ledger', name: 'Shared Ledger', ownerUsername: 'Ana.User' },
+          version: {
+            id: 9,
+            version: '2.1.0',
+            runtimeStack: 'vite-fastapi-sqlite',
+            supportedPlatforms: ['darwin_arm64'],
+            capabilities: ['local_business_data'],
+            checksumSha256: '',
+            fileSizeBytes: 12,
+          },
+          install: { id: 78, installedAt: new Date().toISOString(), source: 'profile', trustDecision: 'reviewed' },
+        };
+      },
+    },
+  });
+  t.after(async () => {
+    globalThis.fetch = originalFetch;
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  globalThis.fetch = async () => new Response(Buffer.from('fake zip'), { status: 200 });
+
+  const result = await controller.installSocialAppRuntime({ appId: 44, trustDecision: 'reviewed' });
+
+  assert.equal(result.success, true);
+  const reviewLogIndex = calls.findIndex((call) => call[0] === 'log' && call[1] === 'social_install:review_staging_start');
+  const firstBackendInstallIndex = calls.findIndex((call) => call[0] === 'frontendDeps' || call[0] === 'installAppDependencies');
+  assert.ok(reviewLogIndex >= 0);
+  assert.ok(firstBackendInstallIndex > reviewLogIndex);
+  assert.ok(calls.some((call) => call[0] === 'validateArchive' && String(call[1]).includes('social-ana-user-shared-ledger')));
+  assert.equal(calls.some((call) => call[0] === 'quarantine' && String(call[1]).includes('social-review')), false);
+  const socialDownloadTrustDecisions = calls
+    .filter((call) => call[0] === 'socialDownload')
+    .map((call) => call[2]);
+  assert.deepEqual(socialDownloadTrustDecisions, ['not_reviewed', 'reviewed']);
+});
+
 test('installSocialAppRuntime updates an already installed shared app instead of reinstalling over it', async (t) => {
   const originalFetch = globalThis.fetch;
   const socialAppId = 'social-ana-user-shared-ledger';
@@ -618,7 +675,7 @@ test('installSocialAppRuntime updates an already installed shared app instead of
     appId: socialAppId,
     name: 'Shared Ledger',
     description: 'Shared app',
-    category: 'productividad',
+    category: 'productivity',
     version: '2.0.0',
     installDir,
     requiredNodeVersion: '22.0.0',

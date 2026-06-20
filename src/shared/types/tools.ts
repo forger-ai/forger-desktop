@@ -27,6 +27,8 @@ export type AgentToolId =
   | 'forger_restart_app'
   | 'forger_refresh_app_view'
   | 'forger_update_app'
+  | 'forger_finish_social_app_install'
+  | 'forger_delete_quarantined_social_app'
   | 'gmail.connection.status'
   | 'gmail.search_messages'
   | 'gmail.read_thread'

@@ -29,6 +29,9 @@ const {
   parseAntigravityOutput,
   writeAntigravityMcpConfig,
 } = require('../../dist-electron/main/app-agent/mcp.js');
+const {
+  detectProviderQuotaError,
+} = require('../../dist-electron/main/llm-provider/provider-errors.js');
 
 test('capability normalization maps aliases, objects, casing, and unknown values safely', () => {
   assert.deepEqual(normalizeAppCapabilityIds([
@@ -557,5 +560,18 @@ test('antigravity runner args and parser follow agy print and conversation flags
     assistantText: 'Done.',
     threadId: '5e0a064b-919d-4b65-bc3b-0a4eca4491f3',
     toolEvents: [],
+  });
+  assert.deepEqual(detectProviderQuotaError(
+    'antigravity',
+    '',
+    '',
+    'RESOURCE_EXHAUSTED (code 429): Individual quota reached. Resets in 151h21m.',
+  ), {
+    chatCode: 'quota_exceeded',
+    message: 'Google Antigravity quota exceeded; resets 151h21m',
+  });
+  assert.deepEqual(detectProviderQuotaError('codex', '', 'Error: rate limit exceeded. Too Many Requests (429).'), {
+    chatCode: 'quota_exceeded',
+    message: 'Codex quota exceeded',
   });
 });

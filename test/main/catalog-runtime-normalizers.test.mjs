@@ -7,7 +7,7 @@ const { mapCatalogItem } = require('../../dist-electron/main/forger-backend/cata
 
 const mapCatalog = (entry) => mapCatalogItem(entry, true, {
   backendBaseUrl: 'https://platform.test',
-  mapBackendCategory: () => 'productividad',
+  mapBackendCategory: () => 'productivity',
   toCatalogStatus: () => 'not_installed',
   getUserMessage: () => undefined,
 });
@@ -58,6 +58,39 @@ test('catalog normalizer preserves manifest runtime declarations on agents and p
     codex: { model: 'gpt-5.4', reasoningEffort: 'medium' },
     claude: { model: 'sonnet', effort: 'medium' },
   });
+});
+
+test('catalog normalizer maps Social catalog payloads to stable local ids and long descriptions', () => {
+  const app = mapCatalog({
+    id: 42,
+    social_user_app_id: 42,
+    slug: 'shared-planner',
+    name: 'Shared Planner',
+    short_description: 'Plan together.',
+    description: 'Legacy planner copy.',
+    long_description: 'Long public planner description.',
+    category: 'productivity',
+    owner: { username: 'Ana.User' },
+    average_rating: '4.5',
+    ratings_count: 3,
+    latest_version: {
+      id: 42,
+      version: 'v1',
+      checksum_sha256: 'a'.repeat(64),
+      local_network_share: true,
+    },
+  });
+
+  assert.equal(app.id, 'social-ana-user-shared-planner');
+  assert.equal(app.socialUserAppId, 42);
+  assert.equal(app.socialOwnerUsername, 'Ana.User');
+  assert.equal(app.description, 'Plan together.');
+  assert.equal(app.shortDescription, 'Plan together.');
+  assert.equal(app.longDescription, 'Long public planner description.');
+  assert.equal(app.latestVersionId, 42);
+  assert.equal(app.localNetworkShareSupported, true);
+  assert.equal(app.averageRating, 4.5);
+  assert.equal(app.ratingsCount, 3);
 });
 
 test('catalog normalizer drops malformed ratings, tools, prompt variables, and unsafe URLs', () => {

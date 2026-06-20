@@ -9,10 +9,10 @@ test('chat state migrates legacy conversations into locked chat modes', async ()
   const source = await readSource('src/renderer/chat-state.ts');
   const sharedSource = await readSource('src/shared/types/chat.ts');
 
-  assert.match(sharedSource, /export type ChatMode = 'create_app' \| 'edit_app' \| 'free_chat'/);
+  assert.match(sharedSource, /export type ChatMode = 'create_app' \| 'edit_app' \| 'free_chat' \| 'social_app_review'/);
   assert.match(source, /mode\?: ChatMode/);
   assert.match(source, /conversation\.appId === 'forger' \? 'free_chat' : 'edit_app'/);
-  assert.match(source, /mode === 'edit_app' \? \(conversation\.targetAppId \?\? conversation\.appId\) : null/);
+  assert.match(source, /mode === 'edit_app' \|\| mode === 'social_app_review' \? \(conversation\.targetAppId \?\? conversation\.appId\) : null/);
 });
 
 test('renderer starts on Chat and binds the mode selector before starting runs', async () => {

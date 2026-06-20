@@ -8,6 +8,9 @@ import type {
   BasicActionResult,
   CreateAppBackupInput,
   CreateAppBackupResult,
+  DeleteAppBackupBatchInput,
+  DeleteAppBackupBatchResult,
+  DeleteAppBackupInput,
   RestoreAppBackupInput,
 } from '../shared/types';
 
@@ -254,7 +257,7 @@ export class BackupsManager {
     };
   }
 
-  async deleteBackup(input: { appId: string; backupId: string }): Promise<BasicActionResult> {
+  async deleteBackup(input: DeleteAppBackupInput): Promise<BasicActionResult> {
     const backupPath = this.resolveBackupPath(input.appId, input.backupId);
     if (!backupPath) {
       return {
@@ -276,6 +279,44 @@ export class BackupsManager {
     return {
       success: true,
       userMessage: 'Respaldo eliminado.',
+    };
+  }
+
+  async deleteBackups(input: DeleteAppBackupBatchInput): Promise<DeleteAppBackupBatchResult> {
+    const deleted: DeleteAppBackupBatchResult['deleted'] = [];
+    const failed: DeleteAppBackupBatchResult['failed'] = [];
+
+    for (const backupId of input.backupIds) {
+      const result = await this.deleteBackup({ appId: input.appId, backupId });
+      if (result.success) {
+        deleted.push({ appId: input.appId, backupId });
+      } else {
+        failed.push({
+          appId: input.appId,
+          backupId,
+          userMessage: result.userMessage,
+          technicalCode: result.technicalCode,
+        });
+      }
+    }
+
+    if (failed.length > 0) {
+      return {
+        success: false,
+        userMessage: deleted.length > 0
+          ? 'Eliminamos algunos respaldos, pero otros no se pudieron eliminar.'
+          : 'No pudimos eliminar los respaldos seleccionados.',
+        technicalCode: deleted.length > 0 ? 'backup_batch_delete_partial' : 'backup_batch_delete_failed',
+        deleted,
+        failed,
+      };
+    }
+
+    return {
+      success: true,
+      userMessage: deleted.length === 1 ? 'Respaldo eliminado.' : 'Respaldos eliminados.',
+      deleted,
+      failed,
     };
   }
 

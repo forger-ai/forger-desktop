@@ -289,6 +289,7 @@ export function AppView({
   const averageRating = 'averageRating' in details.app ? details.app.averageRating : undefined;
   const ratingsCount = 'ratingsCount' in details.app ? details.app.ratingsCount ?? 0 : 0;
   const recentRatings = 'recentRatings' in details.app ? details.app.recentRatings ?? [] : [];
+  const socialUserAppId = details.social?.app.id ?? details.app.socialSource?.userAppId ?? details.app.socialUserAppId;
   const promptTemplates = details.promptTemplates ?? [];
   const agents = details.agents ?? [];
   const promptReviews = details.promptReviews ?? [];
@@ -796,7 +797,7 @@ export function AppView({
       <Stack spacing={1}>
         <Typography variant="h5">{t.appView.generalTitle}</Typography>
         <Typography color="text.secondary" sx={{ maxWidth: 820 }}>
-          {details.app.description}
+          {details.app.longDescription ?? details.app.description}
         </Typography>
       </Stack>
       {appToolsContent}
@@ -997,7 +998,12 @@ export function AppView({
               disabled={reviewBusy}
               onClick={() => {
                 setReviewBusy(true);
-                void onSubmitRating({ appId, score: ratingScore, comment: ratingComment })
+                void onSubmitRating({
+                  appId,
+                  ...(socialUserAppId ? { socialUserAppId } : {}),
+                  score: ratingScore,
+                  comment: ratingComment,
+                })
                   .then((result) => {
                     if (result.success) {
                       setReviewEditorOpen(false);
@@ -1155,7 +1161,7 @@ export function AppView({
             </Typography>
           </Stack>
           <Typography color="text.secondary" sx={{ maxWidth: 760 }}>
-            {details.app.description}
+            {details.app.longDescription ?? details.app.description}
           </Typography>
           <Typography variant="body2" color="text.secondary">
             {details.installed

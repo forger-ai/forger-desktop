@@ -7,6 +7,7 @@ import {
   Alert,
   Box,
   Button,
+  Checkbox,
   Chip,
   FormControl,
   FormControlLabel,
@@ -28,7 +29,7 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type {
   AppBackupReason,
   AppBackupSummary,
@@ -52,6 +53,7 @@ interface BackupsViewProps {
   onCreateBackup: (appId: string) => void;
   onSyncNow: (appId: string) => void;
   onDeleteBackup: (backup: AppBackupSummary) => void;
+  onDeleteSelectedBackups: (backups: AppBackupSummary[]) => boolean | Promise<boolean>;
   onDeleteRemoteBackup: (backup: RemoteAppBackupSummary) => void;
   onRestoreBackup: (backup: AppBackupSummary) => void;
   onRestoreRemoteBackup: (backup: RemoteAppBackupSummary) => void;
@@ -85,6 +87,7 @@ export function BackupsView({
   onCreateBackup,
   onSyncNow,
   onDeleteBackup,
+  onDeleteSelectedBackups,
   onDeleteRemoteBackup,
   onRestoreBackup,
   onRestoreRemoteBackup,
@@ -98,6 +101,7 @@ export function BackupsView({
   const [localAppId, setLocalAppId] = useState(backupApps[0]?.id ?? '');
   const [cloudAppId, setCloudAppId] = useState(backupApps[0]?.id ?? '');
   const [activeTab, setActiveTab] = useState<'local' | 'cloud'>('local');
+  const [selectedLocalBackupKeys, setSelectedLocalBackupKeys] = useState<Set<string>>(() => new Set());
   const activeLocalAppId = backupApps.some((app) => app.id === localAppId)
     ? localAppId
     : backupApps[0]?.id || '';
@@ -106,24 +110,78 @@ export function BackupsView({
     : backupApps[0]?.id || '';
   const labels = t.sections.backups;
   const reasonLabels: Record<AppBackupReason, string> = labels.reasonLabels;
-  const subscriptionTier = account.user?.subscriptionTier ?? 'free';
-  const cloudAllowed = Boolean(account.authenticated && (subscriptionTier === 'demo' || subscriptionTier === 'pro'));
+  const cloudAllowed = Boolean(account.authenticated);
   const activeAutoSync = Boolean(activeCloudAppId && cloudSyncSettings.appSync[activeCloudAppId]?.autoSync);
   const usagePercent = remoteBackupsUsage.limitBytes > 0
     ? Math.min(100, (remoteBackupsUsage.usedBytes / remoteBackupsUsage.limitBytes) * 100)
     : 0;
   const localAppBackups = backups.filter((backup) => backup.appId === activeLocalAppId);
   const cloudAppBackups = remoteBackups.filter((backup) => backup.appId === activeCloudAppId);
+  const backupKey = (backup: AppBackupSummary) => `${backup.appId}:${backup.backupId}`;
+  const selectedLocalBackups = localAppBackups.filter((backup) => selectedLocalBackupKeys.has(backupKey(backup)));
+  const selectedLocalSize = selectedLocalBackups.reduce((sum, backup) => sum + backup.totalBytes, 0);
+  const selectedLocalCount = selectedLocalBackups.length;
+  const allLocalSelected = localAppBackups.length > 0 && selectedLocalCount === localAppBackups.length;
+  const someLocalSelected = selectedLocalCount > 0 && !allLocalSelected;
+  const oldAutomaticLocalBackups = useMemo(() => {
+    const automaticBackupsByApp = new Map<string, AppBackupSummary[]>();
+    for (const backup of localAppBackups) {
+      if (backup.reason !== 'update' && backup.reason !== 'pre_restore') {
+        continue;
+      }
+      const appBackups = automaticBackupsByApp.get(backup.appId) ?? [];
+      appBackups.push(backup);
+      automaticBackupsByApp.set(backup.appId, appBackups);
+    }
+
+    const oldAutomaticBackups: AppBackupSummary[] = [];
+    for (const appBackups of automaticBackupsByApp.values()) {
+      const sorted = [...appBackups].sort((a, b) => {
+        const aTime = new Date(a.createdAt).getTime();
+        const bTime = new Date(b.createdAt).getTime();
+        return (Number.isFinite(bTime) ? bTime : 0) - (Number.isFinite(aTime) ? aTime : 0);
+      });
+      oldAutomaticBackups.push(...sorted.slice(2));
+    }
+    return oldAutomaticBackups;
+  }, [localAppBackups]);
   const latestLocalBackup = localAppBackups[0];
   const latestCloudBackup = cloudAppBackups[0];
   const cloudApp = apps.find((app) => app.id === activeCloudAppId);
   const cloudAppRunning = cloudApp?.status === 'running';
+  useEffect(() => {
+    setSelectedLocalBackupKeys(new Set());
+  }, [activeLocalAppId]);
   const runCloudAction = (action: () => void) => {
     if (!cloudAllowed) {
       onRequireCloud();
       return;
     }
     action();
+  };
+  const setLocalSelection = (backupsToSelect: AppBackupSummary[]) => {
+    setSelectedLocalBackupKeys(new Set(backupsToSelect.map(backupKey)));
+  };
+  const toggleLocalBackup = (backup: AppBackupSummary, checked: boolean) => {
+    setSelectedLocalBackupKeys((current) => {
+      const next = new Set(current);
+      const key = backupKey(backup);
+      if (checked) {
+        next.add(key);
+      } else {
+        next.delete(key);
+      }
+      return next;
+    });
+  };
+  const selectOldAutomaticBackups = () => {
+    setLocalSelection(oldAutomaticLocalBackups);
+  };
+  const handleDeleteSelectedLocalBackups = async () => {
+    const deleted = await onDeleteSelectedBackups(selectedLocalBackups);
+    if (deleted) {
+      setLocalSelection([]);
+    }
   };
   const renderAppSelect = (value: string, onChange: (appId: string) => void) => (
     <FormControl size="small" sx={{ minWidth: 240 }}>
@@ -197,9 +255,58 @@ export function BackupsView({
             </Button>
           </Stack>
         </Stack>
+        <Stack
+          direction={{ xs: 'column', md: 'row' }}
+          spacing={1}
+          alignItems={{ xs: 'stretch', md: 'center' }}
+          justifyContent="space-between"
+          sx={{ px: 2, py: 1.25, borderBottom: '1px solid', borderColor: 'divider', bgcolor: 'action.hover' }}
+        >
+          <Typography variant="body2" color="text.secondary">
+            {labels.selectedLocalBackups(selectedLocalCount, formatBytes(selectedLocalSize))}
+          </Typography>
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+            <Button
+              size="small"
+              variant="outlined"
+              disabled={busy || oldAutomaticLocalBackups.length === 0}
+              onClick={selectOldAutomaticBackups}
+            >
+              {labels.selectOldAutomatic}
+            </Button>
+            <Button
+              size="small"
+              variant="outlined"
+              disabled={busy || selectedLocalCount === 0}
+              onClick={() => setLocalSelection([])}
+            >
+              {labels.clearSelection}
+            </Button>
+            <Button
+              size="small"
+              color="error"
+              variant="contained"
+              startIcon={<DeleteRounded />}
+              disabled={busy || selectedLocalCount === 0}
+              onClick={() => void handleDeleteSelectedLocalBackups()}
+            >
+              {labels.deleteSelected}
+            </Button>
+          </Stack>
+        </Stack>
         <Table size="small">
           <TableHead>
             <TableRow>
+              <TableCell padding="checkbox">
+                <Checkbox
+                  size="small"
+                  checked={allLocalSelected}
+                  indeterminate={someLocalSelected}
+                  disabled={busy || localAppBackups.length === 0}
+                  onChange={(event) => setLocalSelection(event.target.checked ? localAppBackups : [])}
+                  inputProps={{ 'aria-label': labels.selectAllLocalBackups }}
+                />
+              </TableCell>
               <TableCell>{labels.app}</TableCell>
               <TableCell>{labels.version}</TableCell>
               <TableCell>{labels.createdAt}</TableCell>
@@ -212,15 +319,25 @@ export function BackupsView({
           <TableBody>
             {localAppBackups.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7}>
+                <TableCell colSpan={8}>
                   <Typography color="text.secondary">{labels.empty}</Typography>
                 </TableCell>
               </TableRow>
             ) : localAppBackups.map((backup) => {
               const app = apps.find((candidate) => candidate.id === backup.appId);
               const isRunning = app?.status === 'running';
+              const key = backupKey(backup);
               return (
-                <TableRow key={`${backup.appId}:${backup.backupId}`} hover>
+                <TableRow key={key} hover selected={selectedLocalBackupKeys.has(key)}>
+                  <TableCell padding="checkbox">
+                    <Checkbox
+                      size="small"
+                      checked={selectedLocalBackupKeys.has(key)}
+                      disabled={busy}
+                      onChange={(event) => toggleLocalBackup(backup, event.target.checked)}
+                      inputProps={{ 'aria-label': labels.selectLocalBackup(backup.appName || app?.name || backup.appId) }}
+                    />
+                  </TableCell>
                   <TableCell>{backup.appName || app?.name || backup.appId}</TableCell>
                   <TableCell>{backup.appVersion || '-'}</TableCell>
                   <TableCell>{new Date(backup.createdAt).toLocaleString()}</TableCell>

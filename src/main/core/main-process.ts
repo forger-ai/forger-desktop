@@ -1,4 +1,3 @@
-/* eslint-disable max-lines */
 import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, Notification, session, shell, type IpcMainInvokeEvent } from 'electron';
 import { createHash, createHmac, randomBytes } from 'node:crypto';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
@@ -113,7 +112,7 @@ import type {
   DesktopErrorReportPreview, DesktopUpdateState, DisconnectAppSecretInput, FailureDiagnosticFields, FilesCreateCategoryInput,
   FilesDeleteCategoryInput, FilesDeleteInput, FilesDiscardStagedForChatInput, FilesImportInput, FilesListInput,
   FilesMoveInput, FilesRenameCategoryInput, FilesRenameInput, FilesStageForChatInput, ForgerAccountLoginInput,
-  ForgerAccountProfileInput, ForgerAccountRegisterInput, FriendChatWindowOpenResult, InstallAppResult, MemoryCreateInput,
+  ForgerAccountProfileInput, ForgerAccountRegisterInput, FriendChatWindowOpenResult, InstallAppResult, PrepareSocialAppReviewInput, MemoryCreateInput,
   MemoryListInput, MemoryUpdateInput, OfficialToolRuntimeEvent, OpenAppResult, RemoteAppBackupSummary,
   RendererChatTraceEvent, RuntimeStatus, SetAppToolGrantInput, Settings, SharedFileRef, StopAppResult,
   SubmitAppRatingInput, SubmitProductFeedbackInput, SubmitUsageEventInput, UpdateAgentDefaultsInput,
@@ -944,6 +943,10 @@ const getVenvExecutables = (backendDir: string): { python: string; pip: string }
 const installBackendDependenciesWithUv = async (pythonPath: string, backendDir: string, appId: string): Promise<void> => await getInstalledAppLifecycleController().installBackendDependenciesWithUv(pythonPath, backendDir, appId);
 const ensureBackendPythonEnvironment = async (pythonPath: string, backendDir: string, appId: string, reason: string): Promise<void> => await getInstalledAppLifecycleController().ensureBackendPythonEnvironment(pythonPath, backendDir, appId, reason);
 const installAppRuntime = async (appId: string, localeInput?: string): Promise<InstallAppResult> => await getInstalledAppLifecycleController().installAppRuntime(appId, localeInput);
+const prepareSocialAppReview = async (input: PrepareSocialAppReviewInput, localeInput?: string) => await getInstalledAppLifecycleController().prepareSocialAppReview(input, localeInput);
+const finishSocialAppInstall = async (input: { quarantineId: string }, localeInput?: string): Promise<InstallAppResult & { appId?: string }> => await getInstalledAppLifecycleController().finishSocialAppInstall(input, localeInput);
+const deleteQuarantinedSocialApp = async (input: { quarantineId: string }, localeInput?: string) => await getInstalledAppLifecycleController().deleteQuarantinedSocialApp(input, localeInput);
+const getSocialAppReviewPromptContext = async (appId: string) => await getInstalledAppLifecycleController().getSocialAppReviewPromptContext(appId);
 const installSocialAppRuntime = async (input: { appId?: number; appSlug?: string; shareCode?: string; trustDecision?: 'not_reviewed' | 'reviewed' | 'skipped_review' }, localeInput?: string): Promise<InstallAppResult & { appId?: string }> => await getInstalledAppLifecycleController().installSocialAppRuntime(input, localeInput);
 const localAppCreator = createLocalAppCreator({ DEFAULT_NODE_VERSION, DEFAULT_PYTHON_VERSION, appendInstallLog, app, emitInstallProgress, failureDiagnostic, fs, getPrivateAppsRoot, installAppDependencies, normalizeInstalledAgentContext, path, registry, serializeErrorForInstallLog, upsertInstalledRecord, ensureAppGitRepository, ensureUserModifiedBranch, getOriginalCommitSha });
 const createLocalAppFromSkeleton = async (input: CreateLocalAppInput, localeInput?: string): Promise<CreateLocalAppResult> => await localAppCreator.createLocalAppFromSkeleton(input, localeInput);
@@ -1276,6 +1279,7 @@ const getMainProcessIpcDeps = () => ({
   getSecretsStore,
   getWindowState,
   installAppRuntime,
+  prepareSocialAppReview,
   installSocialAppRuntime,
   installWelcome,
   ipcMain,
@@ -1408,10 +1412,12 @@ registerMainLifecycle({
   ForgerMcpServer, IPC_CHANNELS, MemoryMaintenanceManager, MemoryStore, SecretsStore, anyAppAllowsAgentNetworkAccess, app,
   appAllowsAgentNetworkAccess, appWindows, appendInstallLog, backendBaseUrl, buildForgerToolsContextForApp, buildMemoryContextForApp,
   buildMemoryContextForApps, chooseAgentRuntime, clearForgerAccountSession, closeServer, createLocalAppFromSkeleton, createWindow,
+  finishSocialAppInstall, deleteQuarantinedSocialApp,
   emitAutomationUpdated, emitChatRunUpdated, ensureBackendPythonEnvironment, ensureCatalogStatuses, ensureGlobalAgentsContext,
   ensureGitAvailable, ensurePathInside, ensureRuntimeInstalled, ensureSqliteDatabaseParent, flushPendingDeepLink, fs, getAgentPathEntries, getBackupsRoot,
   getClaudeAuthStatus, getAntigravityAuthStatus, getCloudDeviceAccountStorageKey, getCloudDevicePath, getCloudIdentityPath, getCloudIdentityStore, getSocialMessagesPath,
   getCodexAuthStatus, getCodexHome, getCodexRoot, getCodexToolEnvironment, getDesktopChatNetworkAccessDefault: () => settings.defaultChatNetworkAccess !== false, getForgerAccountPath, getForgerHomeRoot, getForgerMetadataRoot,
+  getSocialAppReviewPromptContext,
   getFreePort, getLegacyForgerMetadataRoot, getMemoryStore, getOfficialToolsService, getSpeechToTextService, getTextToSpeechService, getLiveVoiceInputService, getWakeWordService,
   getAudioDevices: async () => await getAudioRuntimeBroker().listDevices(),
   playTextToSpeechAudio: async (input: { playbackId: string; audioDataBase64: string; mimeType: string; outputDeviceId?: string }) => await getAudioRuntimeBroker().playAudio(input),

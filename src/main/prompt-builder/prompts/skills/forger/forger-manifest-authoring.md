@@ -24,7 +24,7 @@ Use this shape as the current authoring contract. Remove fields that do not appl
     }
   ],
   "catalog": {
-    "category": "productividad",
+    "category": "productivity",
     "status": "production",
     "icon": "assets/icon.png"
   },

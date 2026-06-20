@@ -1,4 +1,3 @@
-/* eslint-disable max-lines */
 import type { App, BrowserWindow, IpcMain, Shell } from 'electron';
 import type fs from 'node:fs/promises';
 import type { Server } from 'node:http';
@@ -209,6 +208,8 @@ interface MainLifecycleDeps {
   clearForgerAccountSession: (technicalCode: string) => Promise<void>;
   closeServer: (server: Server) => Promise<void>;
   createLocalAppFromSkeleton: (input: CreateLocalAppInput, locale?: string) => Promise<CreateLocalAppResult>;
+  finishSocialAppInstall: (input: { quarantineId: string }, locale?: string) => Promise<BasicActionResult & { appId?: string }>;
+  deleteQuarantinedSocialApp: (input: { quarantineId: string }, locale?: string) => Promise<BasicActionResult>;
   createWindow: () => Promise<void>;
   emitAutomationUpdated: (payload: { automation: unknown; run?: unknown }) => void;
   emitChatRunUpdated: (event: RunEventLike) => void;
@@ -237,6 +238,7 @@ interface MainLifecycleDeps {
   getForgerAccountPath: () => string;
   getForgerHomeRoot: () => string;
   getForgerMetadataRoot: () => string;
+  getSocialAppReviewPromptContext: (appId: string) => Promise<Record<string, unknown> | null>;
   getFreePort: () => Promise<number>;
   getLegacyForgerMetadataRoot: () => string;
   getMemoryStore: () => { list: AsyncFn; create: AsyncFn; update: AsyncFn; delete: AsyncFn };
@@ -351,6 +353,8 @@ export const registerMainLifecycle = (deps: unknown) => {
     clearForgerAccountSession,
     closeServer,
     createLocalAppFromSkeleton,
+    finishSocialAppInstall,
+    deleteQuarantinedSocialApp,
     createWindow,
     emitAutomationUpdated,
     emitChatRunUpdated,
@@ -379,6 +383,7 @@ export const registerMainLifecycle = (deps: unknown) => {
     getForgerAccountPath,
     getForgerHomeRoot,
     getForgerMetadataRoot,
+    getSocialAppReviewPromptContext,
     getFreePort,
     getLegacyForgerMetadataRoot,
     getMemoryStore,
@@ -740,6 +745,8 @@ export const registerMainLifecycle = (deps: unknown) => {
         .filter((summary) => summary.updateAvailable);
     },
     createLocalApp: createLocalAppFromSkeleton,
+    finishSocialAppInstall,
+    deleteQuarantinedSocialApp,
     recordCreatedApp: (runId: string, createdApp: ChatCreatedAppRequest) => state.chatOrchestrator?.recordCreatedAppFromMcp(runId, createdApp),
     registerQuestion: async (runId: string, input: { questions: ChatQuestion[] }) => {
       if (!state.chatOrchestrator) {
@@ -868,6 +875,13 @@ export const registerMainLifecycle = (deps: unknown) => {
       return await getCodexToolEnvironment(appId, appPythonRuntime);
     },
     getChatNetworkAccessDefault: getDesktopChatNetworkAccessDefault,
+    resolveChatAppRoot: async (appId: string, chatMode?: string) => {
+      if (chatMode !== 'social_app_review') {
+        return null;
+      }
+      const context = await getSocialAppReviewPromptContext(appId);
+      return typeof context?.appRoot === 'string' ? context.appRoot : null;
+    },
     getCodexAuthenticated: async () => {
       const status = await getCodexAuthStatus();
       return status.authenticated;

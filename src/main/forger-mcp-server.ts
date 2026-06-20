@@ -1,4 +1,3 @@
-/* eslint-disable max-lines */
 import { randomBytes } from 'node:crypto';
 import * as http from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -85,6 +84,8 @@ interface ForgerMcpServerOptions {
   listInstalledApps: () => AppSummary[];
   checkUpdates: () => Promise<AppSummary[]>;
   createLocalApp: (input: CreateLocalAppInput, locale?: string) => Promise<CreateLocalAppResult>;
+  finishSocialAppInstall: (input: { quarantineId: string }, locale?: string) => Promise<InstallAppResult & { appId?: string }>;
+  deleteQuarantinedSocialApp: (input: { quarantineId: string }, locale?: string) => Promise<{ success: boolean; userMessage: string; technicalCode?: string }>;
   recordCreatedApp?: (runId: string, createdApp: ChatCreatedAppRequest) => void;
   registerQuestion: (
     runId: string,
@@ -774,6 +775,24 @@ export class ForgerMcpServer {
       return withToolAuthorization(result, approval);
     }
 
+    if (toolId === 'forger_finish_social_app_install' || toolId === 'forger_delete_quarantined_social_app') {
+      const requestedQuarantineId = cleanString(args.quarantineId) || session.appId;
+      if (!session.appId.startsWith('review-') || requestedQuarantineId !== session.appId) {
+        const result = {
+          success: false,
+          userMessage: 'Esta herramienta solo esta disponible desde un chat de revision de app Social.',
+          technicalCode: 'social_app_review_context_required',
+        };
+        await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
+        return withToolAuthorization(result, approval);
+      }
+      const result = toolId === 'forger_finish_social_app_install'
+        ? await this.options.finishSocialAppInstall({ quarantineId: requestedQuarantineId }, session.locale)
+        : await this.options.deleteQuarantinedSocialApp({ quarantineId: requestedQuarantineId }, session.locale);
+      await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
+      return withToolAuthorization(result, approval);
+    }
+
     if (toolId === 'forger_ask_question') {
       const input = parseQuestionToolInput(args);
       if (!input) {
@@ -1087,6 +1106,8 @@ const APP_SCOPED_TOOLS = new Set<AgentToolId>([
   'forger_restart_app',
   'forger_refresh_app_view',
   'forger_update_app',
+  'forger_finish_social_app_install',
+  'forger_delete_quarantined_social_app',
 ]);
 
 const isAppScopedTool = (toolId: AgentToolId): boolean => APP_SCOPED_TOOLS.has(toolId);

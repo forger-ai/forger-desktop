@@ -1,4 +1,3 @@
-/* eslint-disable max-lines */
 import assert from 'node:assert/strict';
 import { createHash, createHmac } from 'node:crypto';
 import { EventEmitter } from 'node:events';

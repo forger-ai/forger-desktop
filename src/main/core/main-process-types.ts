@@ -8,6 +8,7 @@ export interface InstalledAppRecord {
   appId: string;
   name: string;
   description: string;
+  longDescription?: string;
   category: AppCategory;
   version: string;
   installDir: string;

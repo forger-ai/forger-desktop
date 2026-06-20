@@ -44,11 +44,11 @@ const emptyPersistedChatState = (): PersistedChatState => ({
 });
 
 const normalizeChatMode = (value: unknown): ChatMode | undefined =>
-  value === 'create_app' || value === 'edit_app' || value === 'free_chat' ? value : undefined;
+  value === 'create_app' || value === 'edit_app' || value === 'free_chat' || value === 'social_app_review' ? value : undefined;
 
 const migrateLegacyConversation = (conversation: ChatConversation): ChatConversation => {
   const mode = normalizeChatMode(conversation.mode) ?? (conversation.appId === 'forger' ? 'free_chat' : 'edit_app');
-  const targetAppId = mode === 'edit_app' ? (conversation.targetAppId ?? conversation.appId) : null;
+  const targetAppId = mode === 'edit_app' || mode === 'social_app_review' ? (conversation.targetAppId ?? conversation.appId) : null;
   const normalizedConversation: ChatConversation = {
     ...conversation,
     mode,

@@ -14,6 +14,7 @@ export interface AppRatingSummary {
 
 export interface SubmitAppRatingInput {
   appId: string;
+  socialUserAppId?: number;
   score: number;
   comment?: string;
   locale?: string;

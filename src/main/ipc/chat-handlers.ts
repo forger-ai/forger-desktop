@@ -28,6 +28,7 @@ interface ChatIpcHandlersDeps {
   fs: typeof fs;
   getPrivateDataRoot: () => string;
   installedAppPromptContext: (appId: string, input?: Pick<ChatStartRunInput, 'provider' | 'model' | 'reasoningEffort' | 'effort'>) => Promise<Record<string, unknown>>;
+  getSocialAppReviewPromptContext?: (appId: string) => Promise<Record<string, unknown> | null>;
   ipcMain: IpcMain;
   path: typeof path;
   resolveSelectedAppDisplayName: (appId: string) => string;
@@ -47,6 +48,7 @@ export const registerChatIpcHandlers = (deps: ChatIpcHandlersDeps): void => {
     fs,
     getPrivateDataRoot,
     installedAppPromptContext,
+    getSocialAppReviewPromptContext,
     ipcMain,
     path,
     resolveSelectedAppDisplayName,
@@ -79,7 +81,11 @@ export const registerChatIpcHandlers = (deps: ChatIpcHandlersDeps): void => {
       source: fileRef.source ?? 'mentioned',
     }));
     const networkAccess = (input.networkAccess ?? defaultChatNetworkAccess) !== false;
-    const promptContext = input.appId ? await installedAppPromptContext(input.appId, input) : null;
+    const promptContext = input.appId
+      ? input.chatMode === 'social_app_review'
+        ? await getSocialAppReviewPromptContext?.(input.appId) ?? await installedAppPromptContext(input.appId, input)
+        : await installedAppPromptContext(input.appId, input)
+      : null;
     const enrichedPrompt = input.appId
       ? buildCodexPromptWithAppContext({
           turnKind: 'start',

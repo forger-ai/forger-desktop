@@ -53,6 +53,13 @@ test('app detail view receives and renders network and Social action menu items'
   assert.match(rendererSource, /<AppView[\s\S]*onStartLocalNetworkShare=\{handleStartLocalNetworkShare\}[\s\S]*onStartRemoteNetworkShare=\{handleStartRemoteNetworkShare\}[\s\S]*onStopRemoteNetworkShare=\{handleStopRemoteNetworkShare\}[\s\S]*onUploadSocial=\{\(appId\) => void handleUploadSocial\(appId\)\}/);
 });
 
+test('app detail review form forwards Social user app ids when available', async () => {
+  const viewSource = await readSource('src/renderer/views/AppView.tsx');
+
+  assert.match(viewSource, /const socialUserAppId = details\.social\?\.app\.id \?\? details\.app\.socialSource\?\.userAppId \?\? details\.app\.socialUserAppId;/);
+  assert.match(viewSource, /onSubmitRating\(\{[\s\S]*appId,[\s\S]*\.\.\.\(socialUserAppId \? \{ socialUserAppId \} : \{\}\),[\s\S]*score: ratingScore,[\s\S]*comment: ratingComment,[\s\S]*\}\)/);
+});
+
 test('Social upload IPC accepts installed Social apps as remix sources', async () => {
   const source = await readSource('src/main/ipc/main-handlers.ts');
 

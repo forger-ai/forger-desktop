@@ -30,6 +30,8 @@ import type {
   OpenAppResult,
   RuntimeStatus,
   StopAppResult,
+  PrepareSocialAppReviewInput,
+  SocialAppQuarantineRecord,
 } from '../../shared/types';
 
 interface SocialInstallInput {
@@ -37,6 +39,13 @@ interface SocialInstallInput {
   appSlug?: string;
   shareCode?: string;
   trustDecision?: 'not_reviewed' | 'reviewed' | 'skipped_review';
+}
+
+interface SocialReviewPromptContext {
+  appRoot: string;
+  runRoot: string;
+  appStack: string;
+  runtime: string;
 }
 
 interface CommandCaptureResult {
@@ -154,6 +163,25 @@ const fetchDownloadBundle = async (
     expectedChecksum = payload.version.checksum_sha256 ?? expectedChecksum;
   }
 
+  if (downloadUrl.startsWith('file://')) {
+    const sourcePath = decodeURIComponent(new URL(downloadUrl).pathname);
+    const zipPath = path.join(getTempRoot(), `${appEntry.id}-${Date.now()}.zip`);
+    await fs.mkdir(path.dirname(zipPath), { recursive: true });
+    await fs.copyFile(sourcePath, zipPath);
+    if (expectedChecksum) {
+      const buffer = await fs.readFile(zipPath);
+      const actual = createHash('sha256').update(buffer).digest('hex');
+      if (actual !== expectedChecksum) {
+        throw new Error('app_zip_checksum_mismatch');
+      }
+    }
+    return {
+      zipPath,
+      version: resolvedVersion ?? '0.0.0',
+      checksumSha256: expectedChecksum ?? undefined,
+    };
+  }
+
   const zipResponse = await fetch(downloadUrl, {
     method: 'GET',
     headers: {
@@ -204,6 +232,37 @@ const socialLocalAppId = (ownerUsername: string, slug: string): string => {
   const safeOwner = ownerUsername.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '') || 'user';
   const safeSlug = slug.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '') || 'app';
   return `social-${safeOwner}-${safeSlug}`.slice(0, 96);
+};
+
+const socialQuarantineRoot = () => path.join(getForgerMetadataRoot(), 'social-app-quarantine');
+const socialQuarantineIndexPath = () => path.join(socialQuarantineRoot(), 'index.json');
+
+const readSocialQuarantines = async (): Promise<Record<string, SocialAppQuarantineRecord>> => {
+  const raw = await fs.readFile(socialQuarantineIndexPath(), 'utf8').catch(() => '{}');
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, SocialAppQuarantineRecord>
+      : {};
+  } catch {
+    return {};
+  }
+};
+
+const writeSocialQuarantines = async (records: Record<string, SocialAppQuarantineRecord>) => {
+  await fs.mkdir(socialQuarantineRoot(), { recursive: true });
+  await fs.writeFile(socialQuarantineIndexPath(), JSON.stringify(records, null, 2), 'utf8');
+};
+
+const upsertSocialQuarantine = async (record: SocialAppQuarantineRecord) => {
+  const records = await readSocialQuarantines();
+  records[record.quarantineId] = record;
+  await writeSocialQuarantines(records);
+};
+
+const getSocialQuarantine = async (quarantineId: string) => {
+  const records = await readSocialQuarantines();
+  return records[quarantineId];
 };
 
 const installBackendDependenciesWithUv = async (
@@ -402,6 +461,7 @@ const installAppRuntime = async (appId: string, localeInput?: string): Promise<I
     category: catalogApp.category,
     name: catalogApp.name ?? appId,
     description: catalogApp.description ?? '',
+    longDescription: catalogApp.longDescription,
     version: catalogApp.latestVersion ?? '0.0.0',
     installDir: '',
     requiredNodeVersion: DEFAULT_NODE_VERSION,
@@ -511,6 +571,7 @@ const installAppRuntime = async (appId: string, localeInput?: string): Promise<I
       category: catalogApp.category,
       name: catalogApp.name ?? appId,
       description: catalogApp.description ?? '',
+      longDescription: catalogApp.longDescription,
       version: download.version,
       installDir,
       requiredNodeVersion: nodeVersion,
@@ -583,10 +644,12 @@ const installAppRuntime = async (appId: string, localeInput?: string): Promise<I
   }
 };
 
-const installSocialAppRuntime = async (input: SocialInstallInput, localeInput?: string): Promise<InstallAppResult & { appId?: string }> => {
-  const copy = getSharedCopy(localeInput);
+const prepareSocialAppReview = async (
+  input: PrepareSocialAppReviewInput,
+  localeInput?: string,
+): Promise<{ success: boolean; quarantine?: SocialAppQuarantineRecord; userMessage: string; technicalCode?: string }> => {
   if (!forgerBackendClient) {
-    return runtimeError('Inicia sesion en Forger Cloud para instalar apps de Social.', 'backend_client_missing');
+    return { success: false, userMessage: 'Inicia sesion en Forger Cloud para revisar apps de Social.', technicalCode: 'backend_client_missing' };
   }
 
   try {
@@ -597,22 +660,115 @@ const installSocialAppRuntime = async (input: SocialInstallInput, localeInput?: 
       appId: input.appId ?? resolvedFromCode?.app.id,
       appSlug: input.appSlug,
       shareCode: input.shareCode,
-      trustDecision: input.trustDecision,
+      trustDecision: 'not_reviewed',
       platform: resolvePlatformAlias(),
       deviceIdentifier: os.hostname(),
     });
     const localAppId = socialLocalAppId(download.app.ownerUsername, download.app.slug);
-    const socialSource = {
+    const quarantineId = `review-${localAppId}-${Date.now()}`;
+    const quarantineDir = path.join(socialQuarantineRoot(), quarantineId);
+    const stagedDir = path.join(quarantineDir, 'staged');
+    const zipPath = path.join(quarantineDir, 'source.zip');
+    const catalogEntry = catalogApps.find((entry) => entry.socialUserAppId === download.app.id);
+    const catalogApp: CatalogApp = {
+      id: localAppId,
+      name: catalogEntry?.name ?? download.app.name ?? download.app.slug,
+      shortDescription: catalogEntry?.shortDescription,
+      description: catalogEntry?.description ?? `App compartida por @${download.app.ownerUsername} en Forger Social.`,
+      longDescription: catalogEntry?.longDescription,
+      category: catalogEntry?.category ?? 'productivity',
+      status: 'not_installed',
+      latestVersion: download.version.version,
+      downloadUrl: download.downloadUrl,
+      checksumSha256: download.version.checksumSha256,
+      capabilities: download.version.capabilities.map((id) => ({ id })),
+      agents: download.version.agents as AppAgent[] | undefined,
+      promptTemplates: download.version.promptTemplates as AppPromptTemplate[] | undefined,
+    };
+    const bundle = await fetchDownloadBundle(catalogApp);
+    await validateArchiveEntries(bundle.zipPath);
+    await fs.rm(quarantineDir, { recursive: true, force: true });
+    await fs.mkdir(stagedDir, { recursive: true });
+    await fs.copyFile(bundle.zipPath, zipPath);
+    await extractArchive(bundle.zipPath, stagedDir);
+    await flattenSingleTopLevelDirectory(stagedDir);
+    await resolveInstalledManifest(stagedDir);
+    await fs.rm(bundle.zipPath, { force: true }).catch(() => undefined);
+    const now = new Date().toISOString();
+    const quarantine: SocialAppQuarantineRecord = {
+      quarantineId,
       userAppId: download.app.id,
+      ...(input.appSlug ? { appSlug: input.appSlug } : {}),
+      ...(input.shareCode ? { shareCode: input.shareCode } : {}),
+      localAppId,
+      status: 'pending_review',
+      name: catalogApp.name ?? download.app.slug,
       slug: download.app.slug,
       ownerUsername: download.app.ownerUsername,
-      installId: download.install.id,
+      category: catalogApp.category,
+      shortDescription: catalogApp.shortDescription,
+      description: catalogApp.description,
+      longDescription: catalogApp.longDescription,
+      version: download.version.version,
+      checksumSha256: download.version.checksumSha256,
+      fileSizeBytes: download.version.fileSizeBytes,
+      zipPath,
+      stagedDir,
+      createdAt: now,
+      updatedAt: now,
     };
+    await upsertSocialQuarantine(quarantine);
+    await appendInstallLog('social_install:quarantine_prepared', {
+      quarantineId,
+      appId: localAppId,
+      userAppId: download.app.id,
+      stagedDir,
+      zipPath,
+    });
+    return {
+      success: true,
+      quarantine,
+      userMessage: localeInput === 'en' ? 'App downloaded for review.' : 'App descargada para revisión.',
+    };
+  } catch (error) {
+    const diagnostic = failureDiagnostic(error, 'social_app_review_prepare_failed');
+    return {
+      success: false,
+      userMessage: localeInput === 'en' ? 'We could not prepare this app for review.' : 'No pudimos preparar esta app para revisión.',
+      technicalCode: diagnostic.technicalCode,
+    };
+  }
+};
+
+const installSocialAppRuntime = async (input: SocialInstallInput, localeInput?: string): Promise<InstallAppResult & { appId?: string }> => {
+  const copy = getSharedCopy(localeInput);
+  if (!forgerBackendClient) {
+    return runtimeError('Inicia sesion en Forger Cloud para instalar apps de Social.', 'backend_client_missing');
+  }
+
+  try {
+    const existingSocialCatalogEntry = typeof input.appId === 'number'
+      ? catalogApps.find((entry) => entry.socialUserAppId === input.appId)
+      : undefined;
+    const resolvedFromCode = !input.appId && !input.appSlug && input.shareCode
+      ? await forgerBackendClient.resolveSocialCode(input.shareCode)
+      : null;
+    let download = await forgerBackendClient.requestSocialAppDownload({
+      appId: input.appId ?? resolvedFromCode?.app.id,
+      appSlug: input.appSlug,
+      shareCode: input.shareCode,
+      trustDecision: input.trustDecision === 'reviewed' ? 'not_reviewed' : input.trustDecision,
+      platform: resolvePlatformAlias(),
+      deviceIdentifier: os.hostname(),
+    });
+    const localAppId = socialLocalAppId(download.app.ownerUsername, download.app.slug);
     const socialCatalogApp: CatalogApp = {
       id: localAppId,
-      name: download.app.name || download.app.slug,
-      description: `App compartida por @${download.app.ownerUsername} en Forger Social.`,
-      category: 'productividad',
+      name: existingSocialCatalogEntry?.name ?? download.app.name ?? download.app.slug,
+      shortDescription: existingSocialCatalogEntry?.shortDescription,
+      description: existingSocialCatalogEntry?.description ?? `App compartida por @${download.app.ownerUsername} en Forger Social.`,
+      longDescription: existingSocialCatalogEntry?.longDescription,
+      category: existingSocialCatalogEntry?.category ?? 'productivity',
       status: registry.apps[localAppId]?.status ?? 'not_installed',
       latestVersion: download.version.version,
       version: registry.apps[localAppId]?.version,
@@ -621,6 +777,59 @@ const installSocialAppRuntime = async (input: SocialInstallInput, localeInput?: 
       capabilities: download.version.capabilities.map((id) => ({ id })),
       agents: download.version.agents as AppAgent[] | undefined,
       promptTemplates: download.version.promptTemplates as AppPromptTemplate[] | undefined,
+    };
+    if (input.trustDecision === 'reviewed') {
+      const reviewDir = path.join(getTempRoot(), `${localAppId}-social-review-${Date.now()}`);
+      const reviewDownload = await fetchDownloadBundle(socialCatalogApp);
+      try {
+        await appendInstallLog('social_install:review_staging_start', {
+          appId: localAppId,
+          userAppId: download.app.id,
+          ownerUsername: download.app.ownerUsername,
+          zipPath: reviewDownload.zipPath,
+          reviewDir,
+          skill: 'forger-social-app-review',
+        });
+        await validateArchiveEntries(reviewDownload.zipPath);
+        await fs.rm(reviewDir, { recursive: true, force: true });
+        await fs.mkdir(reviewDir, { recursive: true });
+        await extractArchive(reviewDownload.zipPath, reviewDir);
+        await flattenSingleTopLevelDirectory(reviewDir);
+        const reviewedManifest = await resolveInstalledManifest(reviewDir);
+        await appendInstallLog('social_install:review_staging_completed', {
+          appId: localAppId,
+          userAppId: download.app.id,
+          manifestName: reviewedManifest?.name,
+          services: reviewedManifest?.services?.length ?? 0,
+          scripts: Object.keys((reviewedManifest as { scripts?: Record<string, unknown> } | null)?.scripts ?? {}).length,
+        });
+        download = await forgerBackendClient.requestSocialAppDownload({
+          appId: input.appId ?? resolvedFromCode?.app.id,
+          appSlug: input.appSlug,
+          shareCode: input.shareCode,
+          trustDecision: 'reviewed',
+          platform: resolvePlatformAlias(),
+          deviceIdentifier: os.hostname(),
+        });
+        socialCatalogApp.latestVersion = download.version.version;
+        socialCatalogApp.downloadUrl = download.downloadUrl;
+        socialCatalogApp.checksumSha256 = download.version.checksumSha256;
+      } finally {
+        await fs.rm(reviewDir, { recursive: true, force: true }).catch(() => undefined);
+        await fs.rm(reviewDownload.zipPath, { force: true }).catch(() => undefined);
+      }
+    } else if (input.trustDecision === 'skipped_review') {
+      await appendInstallLog('social_install:review_skipped', {
+        appId: localAppId,
+        userAppId: download.app.id,
+        ownerUsername: download.app.ownerUsername,
+      });
+    }
+    const socialSource = {
+      userAppId: download.app.id,
+      slug: download.app.slug,
+      ownerUsername: download.app.ownerUsername,
+      installId: download.install.id,
     };
     catalogApps = [socialCatalogApp, ...catalogApps.filter((entry) => entry.id !== localAppId)];
     const existingRecord = registry.apps[localAppId];
@@ -645,6 +854,90 @@ const installSocialAppRuntime = async (input: SocialInstallInput, localeInput?: 
       ...diagnostic,
     };
   }
+};
+
+const deleteQuarantinedSocialApp = async (
+  input: { quarantineId: string },
+  localeInput?: string,
+): Promise<{ success: boolean; userMessage: string; technicalCode?: string }> => {
+  const quarantine = await getSocialQuarantine(input.quarantineId);
+  if (!quarantine) {
+    return { success: false, userMessage: localeInput === 'en' ? 'Review not found.' : 'No encontramos esta revisión.', technicalCode: 'social_quarantine_not_found' };
+  }
+  const records = await readSocialQuarantines();
+  records[input.quarantineId] = { ...quarantine, status: 'deleted', updatedAt: new Date().toISOString() };
+  await writeSocialQuarantines(records);
+  await fs.rm(path.dirname(quarantine.zipPath), { recursive: true, force: true }).catch(() => undefined);
+  await appendInstallLog('social_install:quarantine_deleted', { quarantineId: input.quarantineId, appId: quarantine.localAppId });
+  return { success: true, userMessage: localeInput === 'en' ? 'Review files deleted.' : 'Archivos de revisión eliminados.' };
+};
+
+const finishSocialAppInstall = async (
+  input: { quarantineId: string },
+  localeInput?: string,
+): Promise<InstallAppResult & { appId?: string }> => {
+  if (!forgerBackendClient) {
+    return runtimeError('Inicia sesion en Forger Cloud para instalar apps de Social.', 'backend_client_missing');
+  }
+  const quarantine = await getSocialQuarantine(input.quarantineId);
+  if (!quarantine || quarantine.status === 'deleted') {
+    return runtimeError(localeInput === 'en' ? 'Review not found.' : 'No encontramos esta revisión.', 'social_quarantine_not_found');
+  }
+  const download = await forgerBackendClient.requestSocialAppDownload({
+    appId: quarantine.userAppId,
+    appSlug: quarantine.appSlug,
+    shareCode: quarantine.shareCode,
+    trustDecision: 'reviewed',
+    platform: resolvePlatformAlias(),
+    deviceIdentifier: os.hostname(),
+  });
+  const socialCatalogApp: CatalogApp = {
+    id: quarantine.localAppId,
+    name: quarantine.name,
+    shortDescription: quarantine.shortDescription,
+    description: quarantine.description,
+    longDescription: quarantine.longDescription,
+    category: (quarantine.category as CatalogApp['category'] | undefined) ?? 'productivity',
+    status: registry.apps[quarantine.localAppId]?.status ?? 'not_installed',
+    latestVersion: download.version.version,
+    version: registry.apps[quarantine.localAppId]?.version,
+    downloadUrl: `file://${encodeURI(quarantine.zipPath)}`,
+    checksumSha256: quarantine.checksumSha256,
+    capabilities: download.version.capabilities.map((id) => ({ id })),
+    agents: download.version.agents as AppAgent[] | undefined,
+    promptTemplates: download.version.promptTemplates as AppPromptTemplate[] | undefined,
+  };
+  catalogApps = [socialCatalogApp, ...catalogApps.filter((entry) => entry.id !== quarantine.localAppId)];
+  const result = registry.apps[quarantine.localAppId]?.installDir
+    ? await updateAppRuntime(quarantine.localAppId, localeInput)
+    : await installAppRuntime(quarantine.localAppId, localeInput);
+  if (result.success && registry.apps[quarantine.localAppId]) {
+    await upsertInstalledRecord({
+      ...registry.apps[quarantine.localAppId],
+      socialSource: {
+        userAppId: download.app.id,
+        slug: download.app.slug,
+        ownerUsername: download.app.ownerUsername,
+        installId: download.install.id,
+      },
+    });
+    await upsertSocialQuarantine({ ...quarantine, status: 'approved', updatedAt: new Date().toISOString() });
+  }
+  return result.success ? { ...result, appId: quarantine.localAppId } : result;
+};
+
+const getSocialAppReviewPromptContext = async (appId: string): Promise<SocialReviewPromptContext | null> => {
+  const records = await readSocialQuarantines();
+  const quarantine = Object.values(records).find((entry) => entry.quarantineId === appId);
+  if (!quarantine || quarantine.status === 'deleted') {
+    return null;
+  }
+  return {
+    appRoot: quarantine.stagedDir,
+    runRoot: quarantine.stagedDir,
+    appStack: 'quarantined Social app package',
+    runtime: `social review ${quarantine.version}`,
+  };
 };
 
 const updateAppRuntime = async (appId: string, localeInput?: string): Promise<InstallAppResult> => {
@@ -1224,5 +1517,5 @@ const installWelcome = async (appId: string, userLanguage?: string): Promise<{
   }
 };
 
-  return { fetchDownloadBundle, getVenvExecutables, installBackendDependenciesWithUv, ensureBackendPythonEnvironment, installAppRuntime, installSocialAppRuntime, updateAppRuntime, restoreAppUserVersionRuntime, readOperationSummaries, readLocalChangeSummaries, getAppDetails, uninstallAppRuntime, installWelcome };
+  return { fetchDownloadBundle, getVenvExecutables, installBackendDependenciesWithUv, ensureBackendPythonEnvironment, installAppRuntime, prepareSocialAppReview, finishSocialAppInstall, deleteQuarantinedSocialApp, getSocialAppReviewPromptContext, installSocialAppRuntime, updateAppRuntime, restoreAppUserVersionRuntime, readOperationSummaries, readLocalChangeSummaries, getAppDetails, uninstallAppRuntime, installWelcome };
 };

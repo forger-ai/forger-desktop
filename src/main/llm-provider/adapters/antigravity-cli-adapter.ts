@@ -9,6 +9,7 @@ import {
 } from '../../app-agent/mcp';
 import { resolveAntigravityCliModel } from '../../../shared/agent-runtime-registry';
 import type { LlmCliRunInput, LlmRunResult } from '../types';
+import { createProviderQuotaError, detectProviderQuotaError } from '../provider-errors';
 
 export class AntigravityCliAdapter {
   public readonly key = 'antigravity' as const;
@@ -64,11 +65,16 @@ export class AntigravityCliAdapter {
         onStderr: (text) => emitOutput('stderr', text),
       });
       assertAllowedMcpServers(result.stdout, result.stderr, allowedMcpServers);
+      const logText = await readAntigravityLog(logPath);
+      const quotaError = detectProviderQuotaError(this.key, result.stdout, result.stderr, logText);
+      if (quotaError) {
+        throw createProviderQuotaError(quotaError);
+      }
       if (result.code !== 0) {
         throw new Error((result.stderr || result.stdout || 'antigravity_exec_failed').trim());
       }
 
-      const parsed = parseAntigravityOutput(result.stdout, result.stderr, await readAntigravityLog(logPath));
+      const parsed = parseAntigravityOutput(result.stdout, result.stderr, logText);
       if (parsed.threadId) {
         input.onEvent?.({ type: 'conversation', provider: this.key, runId: input.runId, id: parsed.threadId });
       }

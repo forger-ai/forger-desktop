@@ -15,7 +15,7 @@ const createClient = (root, fetchImpl) => {
     backendBaseUrl: 'https://platform.test',
     localCatalogJsonUrl: () => undefined,
     token: () => undefined,
-    mapBackendCategory: () => 'productividad',
+    mapBackendCategory: () => 'productivity',
     toCatalogStatus: () => 'not_installed',
     getUserMessage: () => undefined,
     platform: () => 'darwin_arm64',

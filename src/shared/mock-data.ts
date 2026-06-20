@@ -10,12 +10,12 @@ import {
 export const installedAppsSeed: AppSummary[] = [
   {
     id: 'finance-os',
-    category: 'finanzas',
+    category: 'finance',
     status: 'installed',
   },
   {
     id: 'recetario-personal',
-    category: 'hogar',
+    category: 'home',
     status: 'installed',
   },
 ];
@@ -23,27 +23,27 @@ export const installedAppsSeed: AppSummary[] = [
 export const catalogAppsSeed: CatalogApp[] = [
   {
     id: 'finance-os',
-    category: 'finanzas',
+    category: 'finance',
     status: 'installed',
   },
   {
     id: 'recetario-personal',
-    category: 'hogar',
+    category: 'home',
     status: 'installed',
   },
   {
     id: 'planificador-entrenamiento',
-    category: 'salud',
+    category: 'health',
     status: 'not_installed',
   },
   {
     id: 'agenda-focal',
-    category: 'productividad',
+    category: 'productivity',
     status: 'not_installed',
   },
   {
     id: 'hogar-en-calma',
-    category: 'hogar',
+    category: 'home',
     status: 'not_installed',
   },
 ];

@@ -329,8 +329,8 @@ test('main utility summarizes updates and closes friend chat windows without tou
     ]),
   });
   state.catalogApps = [
-    { id: 'finance-os', name: 'Finance OS', description: 'Money', category: 'finanzas', latestVersion: '0.2.0' },
-    { id: 'recipes', name: 'Recipes', description: 'Food', category: 'hogar', latestVersion: '0.1.0' },
+    { id: 'finance-os', name: 'Finance OS', description: 'Money', category: 'finance', latestVersion: '0.2.0' },
+    { id: 'recipes', name: 'Recipes', description: 'Food', category: 'home', latestVersion: '0.1.0' },
   ];
 
     assert.equal(controller.isVersionNewer('0.2.0', '0.1.9'), true);
@@ -350,7 +350,7 @@ test('main utility summarizes updates and closes friend chat windows without tou
     appId: 'finance-os',
     name: 'Old Finance',
     description: 'Old',
-    category: 'productividad',
+    category: 'productivity',
     status: 'installed',
     userMessage: 'Ready',
     version: '0.1.9',
@@ -358,7 +358,8 @@ test('main utility summarizes updates and closes friend chat windows without tou
     id: 'finance-os',
     name: 'Finance OS',
     description: 'Money',
-    category: 'finanzas',
+    longDescription: 'Money',
+    category: 'finance',
     version: '0.1.9',
     latestVersion: '0.2.0',
     updateAvailable: true,
@@ -388,7 +389,8 @@ test('main utility summarizes updates and closes friend chat windows without tou
     id: 'recipes',
     name: 'Recipes',
     description: 'Food',
-    category: 'hogar',
+    longDescription: 'Food',
+    category: 'home',
     version: '0.1.0',
     latestVersion: '0.1.0',
     updateAvailable: false,
@@ -410,7 +412,7 @@ test('main utility summarizes updates and closes friend chat windows without tou
     appId: 'journal',
     name: 'Journal',
     description: 'Daily notes',
-    category: 'productividad',
+    category: 'productivity',
     status: 'installed',
     userMessage: 'Ready',
     version: '0.1.0',
@@ -418,7 +420,8 @@ test('main utility summarizes updates and closes friend chat windows without tou
     id: 'journal',
     name: 'Journal',
     description: 'Daily notes',
-    category: 'productividad',
+    longDescription: 'Daily notes',
+    category: 'productivity',
     version: '0.1.0',
     latestVersion: undefined,
     updateAvailable: false,
@@ -440,7 +443,7 @@ test('main utility summarizes updates and closes friend chat windows without tou
     appId: 'notes',
     name: 'Local Notes',
     description: 'Private notes',
-    category: 'productividad',
+    category: 'productivity',
     status: 'installed',
     userMessage: 'Ready',
     version: '0.1.0',
@@ -448,7 +451,8 @@ test('main utility summarizes updates and closes friend chat windows without tou
     id: 'notes',
     name: 'Local Notes',
     description: 'Private notes',
-    category: 'productividad',
+    longDescription: 'Private notes',
+    category: 'productivity',
     version: '0.1.0',
     latestVersion: undefined,
     updateAvailable: false,
@@ -488,7 +492,7 @@ test('main utility enriches app summaries with shared execution state for share 
     appId: 'finance-os',
     name: 'Finance OS',
     description: 'Money',
-    category: 'finanzas',
+    category: 'finance',
     status: 'installed',
     version: '1.0.0',
   }).executionMode, 'local_network');
@@ -496,7 +500,7 @@ test('main utility enriches app summaries with shared execution state for share 
     appId: 'finance-os',
     name: 'Finance OS',
     description: 'Money',
-    category: 'finanzas',
+    category: 'finance',
     status: 'installed',
     version: '1.0.0',
   }).connectMode, 'local_network');
@@ -505,7 +509,7 @@ test('main utility enriches app summaries with shared execution state for share 
     appId: 'recipes',
     name: 'Recipes',
     description: 'Food',
-    category: 'hogar',
+    category: 'home',
     status: 'installed',
     version: '1.0.0',
   });
@@ -809,11 +813,11 @@ test('main utility reports runtime errors, catalog statuses, account switches, a
   assert.equal(controller.toCatalogStatus('finance-os'), 'running');
   assert.equal(controller.toCatalogStatus('recipes'), 'installed');
   assert.equal(controller.toCatalogStatus('missing'), 'not_installed');
-  assert.equal(controller.mapBackendCategory('finance'), 'finanzas');
-  assert.equal(controller.mapBackendCategory('home'), 'hogar');
-  assert.equal(controller.mapBackendCategory('health'), 'salud');
+  assert.equal(controller.mapBackendCategory('finance'), 'finance');
+  assert.equal(controller.mapBackendCategory('home'), 'home');
+  assert.equal(controller.mapBackendCategory('health'), 'health');
   assert.equal(controller.mapBackendCategory('developer_tools'), 'developer_tools');
-  assert.equal(controller.mapBackendCategory('unknown'), 'productividad');
+  assert.equal(controller.mapBackendCategory('unknown'), 'productivity');
   assert.equal(sent.at(-1)[0], IPC_CHANNELS.forgerAccountUpdated);
 });
 
