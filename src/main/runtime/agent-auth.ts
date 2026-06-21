@@ -79,6 +79,28 @@ const escapeWindowsBatchValue = (value: string): string => value.replace(/%/g, '
 const quotePowerShellSingle = (value: string): string => `'${value.replace(/'/g, "''")}'`;
 const CODEX_RATE_LIMITS_TIMEOUT_MS = 8_000;
 const CODEX_AUTH_STATUS_RATE_LIMITS_TIMEOUT_MS = 1_500;
+const PROVIDER_CLI_INSTALL_TIMEOUT_MS = 300_000;
+
+const isCommandTimeoutError = (error: unknown): boolean =>
+  Boolean(
+    error
+    && typeof error === 'object'
+    && (
+      (error as { name?: unknown }).name === 'CommandTimeoutError'
+      || (error as { message?: unknown }).message === 'command_timeout'
+    ),
+  );
+
+const providerInstallDiagnostic = (
+  error: unknown,
+  fallbackCode: string,
+  timeoutCode: string,
+): FailureDiagnosticFields => {
+  const diagnostic = failureDiagnostic(error, fallbackCode);
+  return isCommandTimeoutError(error)
+    ? { ...diagnostic, technicalCode: timeoutCode }
+    : diagnostic;
+};
 
 const getCodexAuthFilePath = (): string => path.join(getCodexHome(), 'auth.json');
 
@@ -226,14 +248,15 @@ const ensureCodexCliInstalled = async (): Promise<string> => {
     nodeRuntime.npm as string,
     ['install', '--no-audit', '--no-fund', `@openai/codex@${CODEX_CLI_VERSION}`],
     {
-    cwd: codexRoot,
-    env: {
-      PATH: `${path.dirname(nodeRuntime.node as string)}${path.delimiter}${process.env.PATH ?? ''}`,
-    },
-    log: {
-      phase: 'codex_auth',
-      label: 'install codex cli',
-    },
+      cwd: codexRoot,
+      env: {
+        PATH: `${path.dirname(nodeRuntime.node as string)}${path.delimiter}${process.env.PATH ?? ''}`,
+      },
+      log: {
+        phase: 'codex_auth',
+        label: 'install codex cli',
+      },
+      timeoutMs: PROVIDER_CLI_INSTALL_TIMEOUT_MS,
     },
   );
 
@@ -710,7 +733,7 @@ const connectCodexAuth = async (): Promise<{ success: boolean; userMessage: stri
       userMessage: 'Login de Codex iniciado.',
     };
   } catch (error) {
-    const diagnostic = failureDiagnostic(error, 'codex_connect_failed');
+    const diagnostic = providerInstallDiagnostic(error, 'codex_connect_failed', 'codex_cli_install_timeout');
     await appendInstallLog('codex_auth:failed', {
       detail: diagnostic.technicalCode,
       error: serializeErrorForInstallLog(error),
@@ -755,7 +778,7 @@ const reinstallCodex = async (): Promise<{ success: boolean; userMessage: string
       status,
     };
   } catch (error) {
-    const diagnostic = failureDiagnostic(error, 'codex_reinstall_failed');
+    const diagnostic = providerInstallDiagnostic(error, 'codex_reinstall_failed', 'codex_cli_install_timeout');
     await appendInstallLog('codex_auth:reinstall_failed', {
       detail: diagnostic.technicalCode,
       error: serializeErrorForInstallLog(error),
@@ -870,6 +893,7 @@ const ensureClaudeCliInstalled = async (): Promise<string> => {
         phase: 'claude_auth',
         label: 'install claude code cli',
       },
+      timeoutMs: PROVIDER_CLI_INSTALL_TIMEOUT_MS,
     },
   );
   const installed = await resolveManagedClaudeCliPath(claudeRoot);
@@ -1022,7 +1046,7 @@ const connectClaudeAuth = async (): Promise<{ success: boolean; userMessage: str
       status: await getClaudeAuthStatus().catch(() => undefined),
     };
   } catch (error) {
-    const diagnostic = failureDiagnostic(error, 'claude_connect_failed');
+    const diagnostic = providerInstallDiagnostic(error, 'claude_connect_failed', 'claude_cli_install_timeout');
     await appendInstallLog('claude_auth:failed', {
       detail: diagnostic.technicalCode,
       error: serializeErrorForInstallLog(error),
@@ -1047,7 +1071,7 @@ const reinstallClaude = async (): Promise<{ success: boolean; userMessage: strin
       status: await getClaudeAuthStatus().catch(() => undefined),
     };
   } catch (error) {
-    const diagnostic = failureDiagnostic(error, 'claude_reinstall_failed');
+    const diagnostic = providerInstallDiagnostic(error, 'claude_reinstall_failed', 'claude_cli_install_timeout');
     await appendInstallLog('claude_auth:reinstall_failed', {
       detail: diagnostic.technicalCode,
       error: serializeErrorForInstallLog(error),
@@ -1098,6 +1122,7 @@ const ANTIGRAVITY_WINDOWS_INSTALLER_URL = 'https://antigravity.google/cli/instal
 const ANTIGRAVITY_AUTH_PROBE_PROMPT = 'Return the exact string OK and do not use tools.';
 const GOOGLE_OAUTH_URL_PATTERN = /https:\/\/accounts\.google\.com\/o\/oauth2\/auth[^\s<>"')]+/g;
 const activeAntigravityAuthSessions = new Map<string, { child: ReturnType<SpawnProcess>; completed: boolean }>();
+let activeManagedAntigravityInstall: Promise<string> | null = null;
 const redactAntigravityAuthOutput = (text: string): string =>
   text.replace(GOOGLE_OAUTH_URL_PATTERN, '[redacted-google-oauth-url]');
 
@@ -1473,44 +1498,78 @@ const runAntigravityInstaller = async (installer: ReturnType<typeof getAntigravi
   );
 };
 
-const ensureAntigravityCliInstalled = async (): Promise<string> => {
-  const existing = await resolveManagedAntigravityCliPath();
-  if (existing) {
-    return existing;
+const installManagedAntigravityCli = async (input: { resetRoot?: boolean } = {}): Promise<string> => {
+  if (!input.resetRoot) {
+    const existing = await resolveManagedAntigravityCliPath();
+    if (existing) {
+      return existing;
+    }
   }
 
-  const installer = getAntigravityInstaller();
-  await appendInstallLog('antigravity_auth:install_start', {
-    platform: process.platform,
-    installer: installer.id,
-    targetDir: getAntigravityBinDir(),
-  });
-  try {
-    await downloadAntigravityInstaller(installer);
-    await runAntigravityInstaller(installer);
-    const installed = await resolveManagedAntigravityCliPath();
-    if (!installed) {
-      throw new Error('antigravity_cli_install_failed');
+  if (activeManagedAntigravityInstall) {
+    await appendInstallLog('antigravity_auth:install_reused', {
+      platform: process.platform,
+      resetRoot: Boolean(input.resetRoot),
+      targetDir: getAntigravityBinDir(),
+    });
+    return await activeManagedAntigravityInstall;
+  }
+
+  const installPromise = (async (): Promise<string> => {
+    if (input.resetRoot) {
+      await fs.rm(getAntigravityRoot(), { recursive: true, force: true });
     }
-    await appendInstallLog('antigravity_auth:install_success', {
+
+    const existing = await resolveManagedAntigravityCliPath();
+    if (existing) {
+      return existing;
+    }
+
+    const installer = getAntigravityInstaller();
+    await appendInstallLog('antigravity_auth:install_start', {
       platform: process.platform,
       installer: installer.id,
       targetDir: getAntigravityBinDir(),
-      cliPath: installed,
+      resetRoot: Boolean(input.resetRoot),
     });
-    return installed;
-  } catch (error) {
-    const diagnostic = failureDiagnostic(error, 'antigravity_cli_install_failed');
-    await appendInstallLog('antigravity_auth:install_failed', {
-      platform: process.platform,
-      installer: installer.id,
-      targetDir: getAntigravityBinDir(),
-      detail: diagnostic.technicalCode,
-      error: serializeErrorForInstallLog(error),
-    });
-    throw error;
+    try {
+      await downloadAntigravityInstaller(installer);
+      await runAntigravityInstaller(installer);
+      const installed = await resolveManagedAntigravityCliPath();
+      if (!installed) {
+        throw new Error('antigravity_cli_install_failed');
+      }
+      await appendInstallLog('antigravity_auth:install_success', {
+        platform: process.platform,
+        installer: installer.id,
+        targetDir: getAntigravityBinDir(),
+        cliPath: installed,
+      });
+      return installed;
+    } catch (error) {
+      const diagnostic = failureDiagnostic(error, 'antigravity_cli_install_failed');
+      await appendInstallLog('antigravity_auth:install_failed', {
+        platform: process.platform,
+        installer: installer.id,
+        targetDir: getAntigravityBinDir(),
+        detail: diagnostic.technicalCode,
+        error: serializeErrorForInstallLog(error),
+      });
+      throw error;
+    }
+  })();
+
+  activeManagedAntigravityInstall = installPromise;
+  try {
+    return await installPromise;
+  } finally {
+    if (activeManagedAntigravityInstall === installPromise) {
+      activeManagedAntigravityInstall = null;
+    }
   }
 };
+
+const ensureAntigravityCliInstalled = async (): Promise<string> => await installManagedAntigravityCli();
 
 const getAntigravityAuthStatus = async (): Promise<AntigravityAuthStatus> => {
   const resolved = await resolveAntigravityCli();
@@ -1877,8 +1936,7 @@ const connectAntigravityAuth = async (): Promise<{ success: boolean; userMessage
 
 const reinstallAntigravity = async (): Promise<{ success: boolean; userMessage: string; status?: AntigravityAuthStatus } & FailureDiagnosticFields> => {
   try {
-    await fs.rm(getAntigravityRoot(), { recursive: true, force: true });
-    await ensureAntigravityCliInstalled();
+    await installManagedAntigravityCli({ resetRoot: true });
     return {
       success: true,
       userMessage: 'Google Antigravity fue instalado por Forger. Si no hay sesión activa, conecta Google Antigravity para usarlo.',
