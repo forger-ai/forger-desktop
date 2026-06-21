@@ -17,6 +17,7 @@ interface CommandRunOptions {
   cwd: string;
   env?: NodeJS.ProcessEnv;
   log?: CommandRunLog;
+  timeoutMs?: number;
 }
 
 interface CommandCaptureOptions {
@@ -75,6 +76,21 @@ class CommandFailedError extends Error {
   }
 }
 
+class CommandTimeoutError extends Error {
+  constructor(
+    command: string,
+    args: string[],
+    cwd: string,
+    timeoutMs: number,
+    stdout: string,
+    stderr: string,
+  ) {
+    super('command_timeout');
+    this.name = 'CommandTimeoutError';
+    Object.assign(this, { command, args, cwd, timeoutMs, stdout, stderr });
+  }
+}
+
 const hashFileSha256 = async (filePath: string): Promise<string> => {
   const content = await fs.readFile(filePath);
   return createHash('sha256').update(content).digest('hex');
@@ -124,6 +140,36 @@ const runCommand = async (
 
     let stderr = '';
     let stdout = '';
+    let settled = false;
+    const timeoutMs = options.timeoutMs;
+    const timer = timeoutMs
+      ? setTimeout(() => {
+          if (settled) {
+            return;
+          }
+          settled = true;
+          child.kill('SIGTERM');
+          if (options.log) {
+            void appendInstallLog('command:timeout', {
+              appId: options.log.appId,
+              phase: options.log.phase,
+              label: options.log.label,
+              command,
+              args,
+              cwd: options.cwd,
+              shell: false,
+              timeoutMs,
+              stdout: truncateForInstallLog(stdout),
+              stderr: truncateForInstallLog(stderr),
+            });
+          }
+          reject(new CommandTimeoutError(command, args, options.cwd, timeoutMs, stdout, stderr));
+        }, timeoutMs)
+      : null;
+
+    const clearTimer = () => {
+      if (timer) clearTimeout(timer);
+    };
 
     child.stdout.on('data', (chunk: Buffer) => {
       stdout += chunk.toString();
@@ -133,6 +179,11 @@ const runCommand = async (
     });
 
     child.on('error', (error: Error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimer();
       if (options.log) {
         void appendInstallLog('command:error', {
           appId: options.log.appId,
@@ -151,6 +202,11 @@ const runCommand = async (
     });
 
     child.on('exit', (code: number | null, signal: NodeJS.Signals | null) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimer();
       if (options.log) {
         void appendInstallLog('command:exit', {
           appId: options.log.appId,
@@ -895,5 +951,5 @@ const syncReleaseIntoInstalledApp = async (
   await removeTrackedFilesMissingFromStage(stageDir, installDir, preservedPaths);
 };
 
-  return { hashFileSha256, runCommand, runCommandCapture, zipDirectory, canRunCommand, existsFile, appendProcessPathEntry, findGitExecutableOutsidePath, makeDiscoveredGitAvailable, configureBundledGitEnvironment, resolveGitExecutableInRoot, ensureBundledGitAvailable, ensureGitAvailable, ensureGitMainBranch, ensureForgerLocalGitExcludes, ensureAppGitRepository, ensureUserModifiedBranch, getGitStatusLines, getUserVisibleGitStatusLines, getGitHead, getOriginalCommitSha, clearMacQuarantine, extractArchive, listZipEntries, validateArchiveEntries, normalizeRelativeInstallPath, collectPersistentInstallPaths, gitCommitAllExcept, copyReleaseContentsForUpdate, syncReleaseIntoInstalledApp };
+  return { CommandTimeoutError, hashFileSha256, runCommand, runCommandCapture, zipDirectory, canRunCommand, existsFile, appendProcessPathEntry, findGitExecutableOutsidePath, makeDiscoveredGitAvailable, configureBundledGitEnvironment, resolveGitExecutableInRoot, ensureBundledGitAvailable, ensureGitAvailable, ensureGitMainBranch, ensureForgerLocalGitExcludes, ensureAppGitRepository, ensureUserModifiedBranch, getGitStatusLines, getUserVisibleGitStatusLines, getGitHead, getOriginalCommitSha, clearMacQuarantine, extractArchive, listZipEntries, validateArchiveEntries, normalizeRelativeInstallPath, collectPersistentInstallPaths, gitCommitAllExcept, copyReleaseContentsForUpdate, syncReleaseIntoInstalledApp };
 };

@@ -495,6 +495,7 @@ test('agent auth records late macOS Codex spawn errors after launch resolution',
 test('agent auth reinstalls Codex and reports fallback status when reinstall fails', async (t) => {
   const success = await makeAgentAuthHarness({
     runCommand: async (command, args, options) => {
+      success.calls.push(['run', command, args, options]);
       await fs.mkdir(path.join(options.cwd, 'node_modules', '.bin'), { recursive: true });
       await fs.mkdir(path.join(options.cwd, 'node_modules', '@openai', 'codex'), { recursive: true });
       await fs.writeFile(path.join(options.cwd, 'node_modules', '.bin', 'codex'), '', 'utf8');
@@ -519,6 +520,8 @@ test('agent auth reinstalls Codex and reports fallback status when reinstall fai
   assert.equal(reinstalled.success, true);
   assert.equal(reinstalled.status.installed, true);
   assert.equal(await fs.stat(path.join(success.root, 'codex-root', 'old')).catch(() => null), null);
+  const codexInstallCall = success.calls.find((call) => call[0] === 'run' && call[2]?.includes('@openai/codex@0.99.0'));
+  assert.equal(codexInstallCall?.[3]?.timeoutMs, 300_000);
 
   const failure = await makeAgentAuthHarness({
     runCommand: async () => {
@@ -541,6 +544,7 @@ test('agent auth installs Claude CLI when npm is available and rejects runtimes 
   const installed = await makeAgentAuthHarness({
     canRunCommand: async (command) => command.endsWith('claude'),
     runCommand: async (command, args, options) => {
+      installed.calls.push(['run', command, args, options]);
       await fs.mkdir(path.join(options.cwd, 'node_modules', '.bin'), { recursive: true });
       await fs.writeFile(path.join(options.cwd, 'node_modules', '.bin', 'claude'), '', 'utf8');
     },
@@ -558,6 +562,8 @@ test('agent auth installs Claude CLI when npm is available and rejects runtimes 
   assert.equal(result.status.installed, true);
   assert.equal(result.status.authenticated, true);
   assert.equal(installed.calls.some((call) => call[0] === 'connected' && call[1] === 'claude'), true);
+  const claudeInstallCall = installed.calls.find((call) => call[0] === 'run' && call[2]?.includes('@anthropic-ai/claude-code@1.0.0'));
+  assert.equal(claudeInstallCall?.[3]?.timeoutMs, 300_000);
 
   const missingNpm = await makeAgentAuthHarness({
     ensureRuntimeInstalled: async () => ({ node: path.join(os.tmpdir(), 'node-without-npm') }),
@@ -571,6 +577,46 @@ test('agent auth installs Claude CLI when npm is available and rejects runtimes 
   assert.equal(failed.success, false);
   assert.equal(failed.technicalCode, 'runtime_npm_executable_not_found');
   assert.equal(missingNpm.calls.some((call) => call[0] === 'log' && call[1] === 'claude_auth:reinstall_failed'), true);
+
+  const timeout = await makeAgentAuthHarness({
+    failureDiagnostic: (error, fallbackCode) => ({
+      technicalCode: error instanceof Error ? error.message : fallbackCode,
+      sensitiveDetails: error && typeof error === 'object'
+        ? {
+            command: error.command,
+            args: error.args,
+            cwd: error.cwd,
+            timeoutMs: error.timeoutMs,
+            stdout: error.stdout,
+            stderr: error.stderr,
+          }
+        : undefined,
+    }),
+    runCommand: async () => {
+      throw Object.assign(new Error('command_timeout'), {
+        name: 'CommandTimeoutError',
+        command: '/forger/node/npm',
+        args: ['install', '@anthropic-ai/claude-code@1.0.0'],
+        cwd: '/forger/claude-root',
+        timeoutMs: 300_000,
+        stdout: 'partial out',
+        stderr: 'partial err',
+      });
+    },
+  });
+  t.after(async () => {
+    await fs.rm(timeout.root, { recursive: true, force: true });
+  });
+
+  const timedOut = await timeout.controller.reinstallClaude();
+
+  assert.equal(timedOut.success, false);
+  assert.equal(timedOut.technicalCode, 'claude_cli_install_timeout');
+  assert.equal(timedOut.sensitiveDetails?.command, '/forger/node/npm');
+  assert.deepEqual(timedOut.sensitiveDetails?.args, ['install', '@anthropic-ai/claude-code@1.0.0']);
+  assert.equal(timedOut.sensitiveDetails?.timeoutMs, 300_000);
+  assert.equal(timedOut.sensitiveDetails?.stdout, 'partial out');
+  assert.equal(timedOut.sensitiveDetails?.stderr, 'partial err');
 });
 
 test('agent auth connects system Claude through Terminal and records authenticated status', async (t) => {
@@ -725,6 +771,78 @@ test('agent auth installs managed Antigravity CLI on Windows with the official P
     '-d',
     path.join(root, 'antigravity-root', 'bin'),
   ]);
+});
+
+test('agent auth reuses concurrent managed Antigravity installs and clears failed install locks', async (t) => {
+  let releaseInstall;
+  const installGate = new Promise((resolve) => {
+    releaseInstall = resolve;
+  });
+  let downloadCount = 0;
+  let installCount = 0;
+  const concurrent = await makeAgentAuthHarness({
+    canRunCommand: async (command, args) => command.endsWith('agy') && args[0] === '--version',
+    runCommand: async (command, args) => {
+      if (command === 'curl') {
+        downloadCount += 1;
+        await fs.mkdir(path.dirname(args[2]), { recursive: true });
+        await fs.writeFile(args[2], '#!/bin/bash\n', 'utf8');
+      }
+      if (command === 'bash') {
+        installCount += 1;
+        await installGate;
+        await fs.mkdir(args[2], { recursive: true });
+        await fs.writeFile(path.join(args[2], 'agy'), '', 'utf8');
+      }
+    },
+    runCommandCapture: async () => ({ code: 1, stdout: '', stderr: 'missing' }),
+  });
+  t.after(async () => {
+    await fs.rm(concurrent.root, { recursive: true, force: true });
+  });
+
+  const first = withPlatform('darwin', async () => await concurrent.controller.ensureAntigravityCliInstalled());
+  const second = withPlatform('darwin', async () => await concurrent.controller.ensureAntigravityCliInstalled());
+  releaseInstall();
+  const [firstResult, secondResult] = await Promise.all([first, second]);
+
+  assert.equal(firstResult, path.join(concurrent.root, 'antigravity-root', 'bin', 'agy'));
+  assert.equal(secondResult, firstResult);
+  assert.equal(downloadCount, 1);
+  assert.equal(installCount, 1);
+  assert.ok(concurrent.calls.some((call) => call[0] === 'log' && call[1] === 'antigravity_auth:install_reused'));
+
+  let attempts = 0;
+  const retry = await makeAgentAuthHarness({
+    canRunCommand: async (command, args) => command.endsWith('agy') && args[0] === '--version',
+    runCommand: async (command, args) => {
+      if (command === 'curl') {
+        await fs.mkdir(path.dirname(args[2]), { recursive: true });
+        await fs.writeFile(args[2], '#!/bin/bash\n', 'utf8');
+      }
+      if (command === 'bash') {
+        attempts += 1;
+        if (attempts === 1) {
+          throw new Error('antigravity_download_failed');
+        }
+        await fs.mkdir(args[2], { recursive: true });
+        await fs.writeFile(path.join(args[2], 'agy'), '', 'utf8');
+      }
+    },
+    runCommandCapture: async () => ({ code: 1, stdout: '', stderr: 'missing' }),
+  });
+  t.after(async () => {
+    await fs.rm(retry.root, { recursive: true, force: true });
+  });
+
+  await assert.rejects(
+    withPlatform('darwin', async () => await retry.controller.ensureAntigravityCliInstalled()),
+    /antigravity_download_failed/,
+  );
+  const retryResult = await withPlatform('darwin', async () => await retry.controller.ensureAntigravityCliInstalled());
+
+  assert.equal(retryResult, path.join(retry.root, 'antigravity-root', 'bin', 'agy'));
+  assert.equal(attempts, 2);
 });
 
 test('agent auth reports Antigravity installer failures and incomplete installs', async (t) => {
@@ -1561,6 +1679,40 @@ test('git command controller handles spawn errors, captures timeouts, and select
     timeoutHarness.controller.runCommandCapture('sleepy', [], { cwd: root, timeoutMs: 1 }),
     /command_timeout/,
   );
+
+  const runTimeoutCalls = [];
+  let timedOutChild;
+  const runTimeoutHarness = makeCommandGitHarness({
+    appendInstallLog: async (event, payload = {}) => runTimeoutCalls.push(['log', event, payload]),
+    spawn: () => {
+      timedOutChild = new FakeChildProcess();
+      queueMicrotask(() => {
+        timedOutChild.stdout.emit('data', Buffer.from('timeout out'));
+        timedOutChild.stderr.emit('data', Buffer.from('timeout err'));
+      });
+      return timedOutChild;
+    },
+  });
+  await assert.rejects(
+    runTimeoutHarness.controller.runCommand('sleepy', ['install'], {
+      cwd: root,
+      timeoutMs: 1,
+      log: { phase: 'provider_auth', label: 'install provider cli' },
+    }),
+    (error) => {
+      assert.equal(error.name, 'CommandTimeoutError');
+      assert.equal(error.message, 'command_timeout');
+      assert.equal(error.command, 'sleepy');
+      assert.deepEqual(error.args, ['install']);
+      assert.equal(error.cwd, root);
+      assert.equal(error.timeoutMs, 1);
+      assert.equal(error.stdout, 'timeout out');
+      assert.equal(error.stderr, 'timeout err');
+      return true;
+    },
+  );
+  assert.equal(timedOutChild.killed, true);
+  assert.ok(runTimeoutCalls.some((call) => call[0] === 'log' && call[1] === 'command:timeout' && call[2].timeoutMs === 1));
 
   const archiveCalls = [];
   const archiveHarness = makeCommandGitHarness({

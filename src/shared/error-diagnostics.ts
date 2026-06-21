@@ -103,6 +103,23 @@ const classifyTechnicalCode = (
     };
   }
 
+  if (/\bcommand_timeout\b|CommandTimeoutError/i.test(text)) {
+    return {
+      technicalCode: 'command_timeout',
+      details: { classifier: 'command_timeout' },
+    };
+  }
+
+  if (
+    /antigravity/i.test(text)
+    && /(?:being used by another process|utilizado en otro proceso|obtener acceso al archivo|Remove-Item)/i.test(text)
+  ) {
+    return {
+      technicalCode: 'antigravity_cli_install_concurrent_file_lock',
+      details: { classifier: 'antigravity_cli_install_concurrent_file_lock' },
+    };
+  }
+
   const commandMatch = text.match(/\bcommand_failed_([^:\s]+)(?::|\b)/i);
   if (commandMatch) {
     return {
@@ -188,6 +205,7 @@ const commandFailureSensitiveDetails = (error: unknown): Record<string, unknown>
     command: error.command,
     args: error.args,
     cwd: error.cwd,
+    timeoutMs: error.timeoutMs,
     stdout: error.stdout,
     stderr: error.stderr,
   });
