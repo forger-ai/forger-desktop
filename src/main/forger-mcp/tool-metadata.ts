@@ -428,6 +428,135 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
     };
   }
 
+  if (toolId === 'forger_chrome_extension.connection.status') {
+    return {
+      type: 'object',
+      properties: {},
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'forger_chrome_extension.open_dedicated_tab') {
+    return {
+      type: 'object',
+      properties: {
+        url: { type: 'string', description: 'Optional http or https URL to open in the dedicated Chrome tab.' },
+      },
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'forger_chrome_extension.get_current_url' || toolId === 'forger_chrome_extension.close_session') {
+    return {
+      type: 'object',
+      properties: {
+        sessionId: { type: 'string' },
+      },
+      required: ['sessionId'],
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'forger_chrome_extension.navigate') {
+    return {
+      type: 'object',
+      properties: {
+        sessionId: { type: 'string' },
+        url: { type: 'string', description: 'http or https URL.' },
+      },
+      required: ['sessionId', 'url'],
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'forger_chrome_extension.get_html') {
+    return {
+      type: 'object',
+      properties: {
+        sessionId: { type: 'string' },
+        selector: { type: 'string', description: 'Optional CSS selector. If omitted, returns the full page HTML.' },
+      },
+      required: ['sessionId'],
+      additionalProperties: false,
+    };
+  }
+
+  if (
+    toolId === 'forger_chrome_extension.click' ||
+    toolId === 'forger_chrome_extension.focus' ||
+    toolId === 'forger_chrome_extension.hover'
+  ) {
+    return {
+      type: 'object',
+      properties: {
+        sessionId: { type: 'string' },
+        selector: { type: 'string' },
+      },
+      required: ['sessionId', 'selector'],
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'forger_chrome_extension.input_text') {
+    return {
+      type: 'object',
+      properties: {
+        sessionId: { type: 'string' },
+        selector: { type: 'string' },
+        text: { type: 'string' },
+      },
+      required: ['sessionId', 'selector', 'text'],
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'forger_chrome_extension.submit_form') {
+    return {
+      type: 'object',
+      properties: {
+        sessionId: { type: 'string' },
+        selector: { type: 'string', description: 'CSS selector for the form or an element inside the form.' },
+        submitSelector: { type: 'string', description: 'Optional CSS selector for the submit button inside the form.' },
+      },
+      required: ['sessionId', 'selector'],
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'forger_chrome_extension.get_styles') {
+    return {
+      type: 'object',
+      properties: {
+        sessionId: { type: 'string' },
+        selector: { type: 'string' },
+        properties: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional CSS property names to inspect.',
+        },
+      },
+      required: ['sessionId', 'selector'],
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'forger_chrome_extension.set_styles') {
+    return {
+      type: 'object',
+      properties: {
+        sessionId: { type: 'string' },
+        selector: { type: 'string' },
+        styles: {
+          type: 'object',
+          additionalProperties: { type: 'string' },
+          description: 'Allowed CSS styles to apply, for example outline, outline-offset, background-color, box-shadow, border, color, opacity, or z-index.',
+        },
+      },
+      required: ['sessionId', 'selector', 'styles'],
+      additionalProperties: false,
+    };
+  }
+
   if (toolId === 'whatsapp.start_pairing') {
     return {
       type: 'object',

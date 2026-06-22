@@ -287,6 +287,17 @@ test('SettingsService chooses connected providers by preference and connection a
       model: 'gpt-5.4',
       effort: 'none',
     });
+    assert.equal(await harness.controller.chooseAgentRuntime({
+      provider: 'codex',
+      model: 'bad-model',
+      strict: true,
+    }).then(() => 'ok', (error) => error.message), 'agent_runtime_model_unsupported');
+    assert.equal(await harness.controller.chooseAgentRuntime({
+      provider: 'codex',
+      model: 'gpt-5.4',
+      effort: 'xhigh',
+      strict: true,
+    }).then(() => 'ok', (error) => error.message), 'agent_runtime_effort_unsupported');
     assert.deepEqual(harness.controller.withAgentDefaults({
       id: 'codex-agent',
       runtimeRecommendations: {

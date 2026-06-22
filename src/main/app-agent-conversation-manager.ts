@@ -54,6 +54,7 @@ interface AppAgentConversationManagerOptions {
   metadataRoot: string;
   codexHome: string;
   getAgentRuntime: (requested?: AgentRuntimeRequest) => Promise<AgentRuntime>;
+  appAllowsAgentRuntimeControl?: (appId: string) => Promise<boolean>;
   getCodexCliPath: () => Promise<string | null>;
   getClaudeCliPath: () => Promise<string | null>;
   getAntigravityCliPath?: () => Promise<string | null>;
@@ -107,6 +108,10 @@ const DEFAULT_MODEL = 'gpt-5.4';
 const DEFAULT_REASONING: CodexReasoningEffort = 'medium';
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 const CODEX_CONVERSATION_RUN_TIMEOUT_MS = 600_000;
+
+const hasRunRuntimeInput = (
+  input: Pick<AppCodexConversationSendMessageInput, 'provider' | 'model' | 'effort' | 'reasoningEffort'>,
+): boolean => Boolean(input.provider || input.model || input.effort || input.reasoningEffort);
 
 export class AppAgentConversationManager {
   private readonly conversations = new Map<string, InternalConversation>();
@@ -217,6 +222,10 @@ export class AppAgentConversationManager {
     const message = input.message.trim();
     if (!message) {
       throw new Error('codex_conversation_empty_message');
+    }
+    await this.assertRuntimeControlAllowed(appId, input);
+    if (hasRunRuntimeInput(input)) {
+      await this.resolveRunRuntime(conversation, input);
     }
 
     const now = new Date().toISOString();
@@ -456,22 +465,7 @@ export class AppAgentConversationManager {
     if (!(await existsDirectory(appRoot))) {
       throw new Error('app_not_installed');
     }
-    const agentRuntime = await this.resolveAgentRuntime(conversation);
-    const hasRunRuntimeInput = Boolean(input.provider || input.model || input.effort || input.reasoningEffort);
-    const runtime = await this.options.getAgentRuntime(
-      hasRunRuntimeInput
-        ? {
-            provider: input.provider ?? agentRuntime.runtime?.provider,
-            model: input.model ?? agentRuntime.runtime?.model,
-            effort: input.effort ?? input.reasoningEffort ?? agentRuntime.runtime?.effort,
-            permissionMode: agentRuntime.runtime?.permissionMode,
-          }
-        : agentRuntime.runtime ?? {
-            recommendations: agentRuntime.runtimeRecommendations,
-            model: agentRuntime.model,
-            effort: agentRuntime.reasoningEffort,
-          },
-    );
+    const runtime = await this.resolveRunRuntime(conversation, input);
     if (runtime.provider === 'antigravity') {
       if (!(await (this.options.getAntigravityAuthenticated?.() ?? Promise.resolve(false)))) {
         throw new Error('antigravity_auth_missing');
@@ -889,6 +883,39 @@ export class AppAgentConversationManager {
       ...(agent?.runtime ? { runtime: agent.runtime } : {}),
       ...(agent?.runtimeRecommendations ? { runtimeRecommendations: agent.runtimeRecommendations } : {}),
     };
+  }
+
+  private async assertRuntimeControlAllowed(
+    appId: string,
+    input: Pick<AppCodexConversationSendMessageInput, 'provider' | 'model' | 'effort' | 'reasoningEffort'>,
+  ): Promise<void> {
+    if (!hasRunRuntimeInput(input)) {
+      return;
+    }
+    if (!(await (this.options.appAllowsAgentRuntimeControl?.(appId) ?? Promise.resolve(false)))) {
+      throw new Error('desktop_runtime_agent_runtime_control_required');
+    }
+  }
+
+  private async resolveRunRuntime(
+    conversation: InternalConversation,
+    input: Pick<AppCodexConversationSendMessageInput, 'provider' | 'model' | 'effort' | 'reasoningEffort'>,
+  ): Promise<AgentRuntime> {
+    const agentRuntime = await this.resolveAgentRuntime(conversation);
+    if (hasRunRuntimeInput(input)) {
+      return await this.options.getAgentRuntime({
+        provider: input.provider ?? agentRuntime.runtime?.provider,
+        model: input.model ?? agentRuntime.runtime?.model,
+        effort: input.effort ?? input.reasoningEffort ?? agentRuntime.runtime?.effort,
+        permissionMode: agentRuntime.runtime?.permissionMode,
+        strict: true,
+      });
+    }
+    return await this.options.getAgentRuntime(agentRuntime.runtime ?? {
+      recommendations: agentRuntime.runtimeRecommendations,
+      model: agentRuntime.model,
+      effort: agentRuntime.reasoningEffort,
+    });
   }
 
   private async load(): Promise<void> {

@@ -1077,6 +1077,7 @@ const isMemoryTool = (toolId: AgentToolId): boolean => toolId.startsWith('memory
 
 const OFFICIAL_TOOL_ACTION_PREFIXES: Record<string, string> = {
   'gmail.': 'gmail',
+  'forger_chrome_extension.': 'forger_chrome_extension',
   'whatsapp.': 'whatsapp',
 };
 

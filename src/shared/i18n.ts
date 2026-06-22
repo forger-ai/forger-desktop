@@ -83,6 +83,9 @@ export const sharedCopy = {
       gmailConnectFailed: 'No pudimos conectar Gmail.',
       gmailForgerAccountRequired: 'Para conectar Gmail, inicia sesión en Forger Cloud. Forger Cloud permite completar la autenticación segura con Google sin exponer el secreto OAuth en tu desktop.',
       whatsappActivated: 'WhatsApp activado. Conecta la cuenta desde el chat con QR o codigo de vinculacion.',
+      chromeExtensionConnected: 'Forger Chrome Extension conectada.',
+      chromeExtensionWaiting: 'Forger Chrome Extension quedo preparada. Carga o abre la extension en Chrome para completar la conexion.',
+      chromeExtensionConfigureFailed: 'No pudimos preparar Forger Chrome Extension.',
       gmailUnavailableForAgent: 'Gmail está desactivada. Pídele al usuario activar y conectar Gmail en la vista Tools de Forger antes de leer o enviar correos.',
       gmailUnavailableForApp: 'Gmail está desactivada. Activa y conecta Gmail en la vista Tools de Forger antes de usarla desde esta app.',
       gmailNotConfiguredForAgent: 'Gmail está activada, pero todavía no está conectada. Pídele al usuario conectar Gmail en la vista Tools de Forger.',
@@ -240,6 +243,66 @@ export const sharedCopy = {
         },
         changelog: ['Base experimental no oficial con Baileys para conexion local, lectura y envio controlado.'],
       },
+      forger_chrome_extension: {
+        name: 'Forger Chrome Extension',
+        description: 'Opera una ventana dedicada de Chrome mediante la extension de Forger y un puente local.',
+        secrets: {},
+        actions: {
+          'forger_chrome_extension.connection.status': {
+            name: 'Estado de conexion',
+            description: 'Revisa si la extension de Chrome esta conectada.',
+          },
+          'forger_chrome_extension.open_dedicated_tab': {
+            name: 'Abrir pestaña dedicada',
+            description: 'Crea una ventana y pestaña de Chrome controlada por Forger.',
+          },
+          'forger_chrome_extension.get_current_url': {
+            name: 'Leer URL actual',
+            description: 'Lee la URL actual de una sesion dedicada de Chrome.',
+          },
+          'forger_chrome_extension.navigate': {
+            name: 'Navegar',
+            description: 'Navega una sesion dedicada de Chrome a una URL http o https.',
+          },
+          'forger_chrome_extension.get_html': {
+            name: 'Leer HTML',
+            description: 'Lee el HTML de la pagina completa o de un selector.',
+          },
+          'forger_chrome_extension.click': {
+            name: 'Click',
+            description: 'Hace click en un elemento encontrado por selector.',
+          },
+          'forger_chrome_extension.focus': {
+            name: 'Foco',
+            description: 'Enfoca un elemento encontrado por selector.',
+          },
+          'forger_chrome_extension.hover': {
+            name: 'Hover',
+            description: 'Dispara eventos de hover sobre un elemento encontrado por selector.',
+          },
+          'forger_chrome_extension.input_text': {
+            name: 'Escribir texto',
+            description: 'Escribe texto en un input o elemento editable encontrado por selector.',
+          },
+          'forger_chrome_extension.submit_form': {
+            name: 'Enviar formulario',
+            description: 'Envia el formulario asociado a un elemento encontrado por selector.',
+          },
+          'forger_chrome_extension.get_styles': {
+            name: 'Leer estilos',
+            description: 'Lee estilos CSS computados e inline de un elemento encontrado por selector.',
+          },
+          'forger_chrome_extension.set_styles': {
+            name: 'Destacar elemento',
+            description: 'Aplica estilos CSS permitidos para destacar un elemento visualmente.',
+          },
+          'forger_chrome_extension.close_session': {
+            name: 'Cerrar sesion',
+            description: 'Cierra una ventana dedicada de Chrome controlada por Forger.',
+          },
+        },
+        changelog: ['MVP dev para controlar una ventana dedicada de Chrome mediante extension local.'],
+      },
     },
   },
   en: {
@@ -291,6 +354,9 @@ export const sharedCopy = {
       gmailConnectFailed: 'Could not connect Gmail.',
       gmailForgerAccountRequired: 'To connect Gmail, sign in to Forger Cloud. Forger Cloud lets Forger complete secure Google authentication without exposing the OAuth secret on your desktop.',
       whatsappActivated: 'WhatsApp activated. Connect the account from chat with a QR or pairing code.',
+      chromeExtensionConnected: 'Forger Chrome Extension connected.',
+      chromeExtensionWaiting: 'Forger Chrome Extension is prepared. Load or open the Chrome extension to complete the connection.',
+      chromeExtensionConfigureFailed: 'Could not prepare Forger Chrome Extension.',
       gmailUnavailableForAgent: 'Gmail is inactive. Ask the user to activate and connect Gmail in Forger Tools before reading or sending mail.',
       gmailUnavailableForApp: 'Gmail is inactive. Activate and connect Gmail in Forger Tools before using it from this app.',
       gmailNotConfiguredForAgent: 'Gmail is active, but it is not connected yet. Ask the user to connect Gmail in Forger Tools.',
@@ -447,6 +513,66 @@ export const sharedCopy = {
           },
         },
         changelog: ['Experimental unofficial Baileys base for local connection, reading, and controlled sending.'],
+      },
+      forger_chrome_extension: {
+        name: 'Forger Chrome Extension',
+        description: 'Operates a dedicated Chrome window through the Forger extension and a local bridge.',
+        secrets: {},
+        actions: {
+          'forger_chrome_extension.connection.status': {
+            name: 'Connection status',
+            description: 'Checks whether the Chrome extension is connected.',
+          },
+          'forger_chrome_extension.open_dedicated_tab': {
+            name: 'Open dedicated tab',
+            description: 'Creates a Chrome window and tab controlled by Forger.',
+          },
+          'forger_chrome_extension.get_current_url': {
+            name: 'Read current URL',
+            description: 'Reads the current URL of a dedicated Chrome session.',
+          },
+          'forger_chrome_extension.navigate': {
+            name: 'Navigate',
+            description: 'Navigates a dedicated Chrome session to an http or https URL.',
+          },
+          'forger_chrome_extension.get_html': {
+            name: 'Read HTML',
+            description: 'Reads full page HTML or selector HTML.',
+          },
+          'forger_chrome_extension.click': {
+            name: 'Click',
+            description: 'Clicks an element matched by selector.',
+          },
+          'forger_chrome_extension.focus': {
+            name: 'Focus',
+            description: 'Focuses an element matched by selector.',
+          },
+          'forger_chrome_extension.hover': {
+            name: 'Hover',
+            description: 'Dispatches hover events for an element matched by selector.',
+          },
+          'forger_chrome_extension.input_text': {
+            name: 'Input text',
+            description: 'Writes text into an input or editable element matched by selector.',
+          },
+          'forger_chrome_extension.submit_form': {
+            name: 'Submit form',
+            description: 'Submits the form associated with an element matched by selector.',
+          },
+          'forger_chrome_extension.get_styles': {
+            name: 'Read styles',
+            description: 'Reads computed and inline CSS styles from an element matched by selector.',
+          },
+          'forger_chrome_extension.set_styles': {
+            name: 'Highlight element',
+            description: 'Applies allowed CSS styles to visually highlight an element.',
+          },
+          'forger_chrome_extension.close_session': {
+            name: 'Close session',
+            description: 'Closes a dedicated Chrome window controlled by Forger.',
+          },
+        },
+        changelog: ['Dev MVP for controlling a dedicated Chrome window through a local extension.'],
       },
     },
   },

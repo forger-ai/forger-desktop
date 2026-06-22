@@ -5,6 +5,7 @@ import { promptTemplateRoots, renderPromptFile } from './index';
 export interface ForgerOfficialToolsPromptInput {
   gmailReady: boolean;
   whatsappReady?: boolean;
+  chromeExtensionReady?: boolean;
   allowedActions?: string[];
   mode: 'free-chat' | 'app-agent';
 }
@@ -86,6 +87,7 @@ export const buildForgerOfficialToolsPromptSection = (input: ForgerOfficialTools
     availabilityLine,
     gmailStatus: input.gmailReady ? 'connected and ready' : 'not connected or not active',
     whatsappStatus: input.whatsappReady ? 'connected or active locally' : 'not connected or not active',
+    chromeExtensionStatus: input.chromeExtensionReady ? 'connected and ready' : 'not connected or not active',
     actionsLine,
     gmailInstruction: input.gmailReady
       ? 'When the request is to search, read, download attachments from, or send Gmail, call the matching `gmail.*` tool through the `forger` MCP server and wait for the Forger permission result.'
@@ -93,6 +95,9 @@ export const buildForgerOfficialToolsPromptSection = (input: ForgerOfficialTools
     whatsappInstruction: input.whatsappReady
       ? 'When the request is to read, inspect, or send WhatsApp messages, call the matching `whatsapp.*` tool through the `forger` MCP server. Use only chat IDs and message references returned by WhatsApp reads or listings.'
       : 'If WhatsApp is requested and unavailable, explain that WhatsApp must be activated and connected in Forger Tools before Forger can read or send messages.',
+    chromeExtensionInstruction: input.chromeExtensionReady
+      ? 'When the request needs a real browser session, call `forger_chrome_extension.open_dedicated_tab`, then use the returned session id for navigation, inspection, click, focus, hover, input, form submit, style inspection, visual highlighting, URL read, and close actions.'
+      : 'If Chrome browser control is requested and unavailable, first call `forger_chrome_extension.connection.status` when it is available; otherwise explain that the Forger Chrome Extension must be activated and connected in Forger Tools.',
   });
 };
 

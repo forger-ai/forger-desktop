@@ -16,7 +16,10 @@ import type {
   AppAgentWorkspaceInput,
   AudioPlaybackSummary,
   AudioRuntimeDevices,
+  CallOfficialToolInput,
+  CallOfficialToolResult,
   LiveVoiceInputSession,
+  OfficialToolSummary,
   SpeechToTextProcessResult,
   SpeechToTextTask,
   TextToSpeechSynthesizeResult,
@@ -35,6 +38,7 @@ import {
 import type { ManifestAgentPromptKind } from './manifest-agent-prompts';
 import { REMOVED_FORGER_APP_BRIDGE_MESSAGE } from './ipc/agent-handlers';
 import { normalizeLocale } from '../shared/i18n';
+import { AgentRuntimeRequestValidationError } from '../shared/agent-runtime-registry';
 
 const MAX_BODY_BYTES = 96 * 1024 * 1024;
 const SIGNATURE_WINDOW_MS = 5 * 60 * 1000;
@@ -77,10 +81,15 @@ export interface DesktopRuntimeBridgeOptions {
     audioInput: boolean;
     textToSpeech: boolean;
     workspaceFolders?: boolean;
+    agentRuntimeControl?: boolean;
   }>;
   requestFolderGrant?: (appId: string, grantToken: string) => Promise<AppFolderGrantPublic | null>;
   listFolderGrants?: (appId: string) => Promise<AppFolderGrantPublic[]>;
   revokeFolderGrant?: (appId: string, grantId: string) => Promise<{ revoked: boolean }>;
+  officialTools?: {
+    listToolsForApp: (appId: string) => Promise<OfficialToolSummary[]>;
+    callFromApp: (appId: string, input: CallOfficialToolInput) => Promise<CallOfficialToolResult>;
+  };
   getAudioDevices?: () => Promise<AudioRuntimeDevices>;
   updateAudioInputDevices?: (input: AudioRuntimeDevices) => Promise<void>;
   createLiveVoiceSession?: (appId: string, input: {
@@ -230,7 +239,11 @@ export class DesktopRuntimeBridge {
       const result = await this.route(appId, method, url.pathname, bodyText);
       writeJson(response, 200, result);
     } catch (error) {
-      const status = error instanceof BridgeError ? error.status : 500;
+      const status = error instanceof BridgeError
+        ? error.status
+        : error instanceof AgentRuntimeRequestValidationError
+          ? 400
+          : 500;
       await this.options.appendInstallLog('desktop_runtime_bridge:error', {
         status,
         error: this.options.serializeErrorForInstallLog(error),
@@ -314,6 +327,9 @@ export class DesktopRuntimeBridge {
     const audioResult = await this.routeAudio(appId, method, pathname, bodyText);
     if (audioResult.handled) return audioResult.result;
 
+    const toolsResult = await this.routeOfficialTools(appId, method, pathname, bodyText);
+    if (toolsResult.handled) return toolsResult.result;
+
     const contextMatch = pathname.match(/^\/v1\/apps\/([^/]+)\/context$/);
     if (contextMatch) {
       if (decodeURIComponent(contextMatch[1]) !== appId) {
@@ -394,6 +410,9 @@ export class DesktopRuntimeBridge {
       const body = parseJsonBody(bodyText);
 
       if (method === 'POST' && !runId && !isCancel) {
+        if (body.runtime !== undefined) {
+          await this.assertAgentRuntimeControlCapability(appId);
+        }
         return await taskManager.start(appId, normalizeTaskStartInput(body));
       }
       if (method === 'GET' && runId && !isCancel) {
@@ -431,6 +450,9 @@ export class DesktopRuntimeBridge {
         throw new BridgeError(400, 'manifest_agent_required');
       }
       const body = parseJsonBody(bodyText) as unknown as Omit<AppManifestAgentStartInput, 'agentId'>;
+      if (body.runtime !== undefined) {
+        await this.assertAgentRuntimeControlCapability(appId);
+      }
       const prompt = await this.renderManifestAgentPrompt(appId, agentId, 'initial', body.variables);
       const conversation = await manager.create(appId, {
         title: body.title,
@@ -467,6 +489,9 @@ export class DesktopRuntimeBridge {
       }
       const threadId = decodeURIComponent(resumeMatch[2]);
       const body = parseJsonBody(bodyText) as unknown as AppManifestAgentResumeInput;
+      if (body.runtime !== undefined) {
+        await this.assertAgentRuntimeControlCapability(appId);
+      }
       const agentId = await this.manifestAgentIdForThread(manager, appId, threadId);
       const prompt = await this.renderManifestAgentPrompt(appId, agentId, 'resume', body.variables);
       const conversation = await manager.sendMessage(appId, {
@@ -494,6 +519,9 @@ export class DesktopRuntimeBridge {
       const threadId = decodeURIComponent(steerMatch[2]);
       const runId = decodeURIComponent(steerMatch[3]);
       const body = parseJsonBody(bodyText) as unknown as AppManifestAgentSteerInput;
+      if (body.runtime !== undefined) {
+        await this.assertAgentRuntimeControlCapability(appId);
+      }
       const agentId = await this.manifestAgentIdForThread(manager, appId, threadId);
       const prompt = await this.renderManifestAgentPrompt(appId, agentId, 'steer', body.variables);
       return await manager.steerRun(appId, threadId, runId, {
@@ -531,6 +559,46 @@ export class DesktopRuntimeBridge {
 
     if (method === 'POST' && threadId && runId && isCancel) {
       return await manager.cancel(appId, threadId, runId);
+    }
+
+    throw new BridgeError(404, 'desktop_runtime_route_not_found');
+  }
+
+  private async routeOfficialTools(appId: string, method: string, pathname: string, bodyText: string): Promise<{ handled: boolean; result?: unknown }> {
+    const match = pathname.match(/^\/v1\/apps\/([^/]+)\/tools(?:\/([^/]+))?(?:\/actions\/([^/]+))?$/);
+    if (!match) return { handled: false };
+    if (decodeURIComponent(match[1]) !== appId) {
+      throw new BridgeError(403, 'desktop_runtime_app_forbidden');
+    }
+    const service = this.options.officialTools;
+    if (!service) {
+      throw new BridgeError(503, 'desktop_runtime_official_tools_unavailable');
+    }
+
+    const toolId = match[2] ? decodeURIComponent(match[2]).trim() : '';
+    const actionId = match[3] ? decodeURIComponent(match[3]).trim() : '';
+    if (method === 'GET' && !toolId && !actionId) {
+      return { handled: true, result: { tools: await service.listToolsForApp(appId) } };
+    }
+
+    if (method === 'GET' && toolId && !actionId) {
+      const tool = (await service.listToolsForApp(appId)).find((item) => item.id === toolId);
+      if (!tool) {
+        throw new BridgeError(404, 'desktop_runtime_tool_not_found');
+      }
+      return { handled: true, result: tool };
+    }
+
+    if (method === 'POST' && toolId && actionId) {
+      const body = parseJsonBody(bodyText);
+      return {
+        handled: true,
+        result: await service.callFromApp(appId, {
+          toolId,
+          actionId,
+          input: isRecord(body.input) ? body.input : {},
+        }),
+      };
     }
 
     throw new BridgeError(404, 'desktop_runtime_route_not_found');
@@ -648,6 +716,13 @@ export class DesktopRuntimeBridge {
     }
     if (!this.options.requestFolderGrant || !this.options.listFolderGrants || !this.options.revokeFolderGrant) {
       throw new BridgeError(503, 'desktop_runtime_folder_grants_unavailable');
+    }
+  }
+
+  private async assertAgentRuntimeControlCapability(appId: string): Promise<void> {
+    const capabilities = await (this.options.getAppPlatformCapabilities?.(appId) ?? Promise.resolve(null));
+    if (!capabilities?.agentRuntimeControl) {
+      throw new BridgeError(403, 'desktop_runtime_agent_runtime_control_required');
     }
   }
 
@@ -1180,6 +1255,9 @@ const sha256 = (value: string): string => createHash('sha256').update(value).dig
 
 const cleanString = (value: unknown): string => typeof value === 'string' ? value.trim() : '';
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+
 const safeEqual = (left: string, right: string): boolean => {
   const leftBuffer = Buffer.from(left);
   const rightBuffer = Buffer.from(right);
@@ -1188,6 +1266,7 @@ const safeEqual = (left: string, right: string): boolean => {
 
 const normalizeTaskStartInput = (body: Record<string, unknown>): AppCodexTaskStartInput => {
   const workspace = normalizeWorkspace(body.workspace);
+  const runtime = normalizeRuntimeInput(body.runtime);
   return {
     templateId: typeof body.templateId === 'string' ? body.templateId : '',
     ...(typeof body.locale === 'string' ? { locale: body.locale } : {}),
@@ -1198,24 +1277,71 @@ const normalizeTaskStartInput = (body: Record<string, unknown>): AppCodexTaskSta
       ? { variables: body.variables as AppCodexTaskStartInput['variables'] }
       : {}),
     ...(Array.isArray(body.attachments) ? { attachments: body.attachments as AppCodexTaskStartInput['attachments'] } : {}),
+    ...(runtime ? { runtime } : {}),
     ...(typeof body.workspacePath === 'string' ? { workspacePath: body.workspacePath } : {}),
     ...(workspace ? { workspace } : {}),
   };
 };
 
 const normalizeRuntime = (runtime: AppAgentRuntimeInput | undefined): Partial<AppCodexConversationSendMessageInput> => {
-  const provider = runtime?.provider === 'codex' || runtime?.provider === 'claude' || runtime?.provider === 'antigravity'
-    ? runtime.provider as AgentProvider
-    : undefined;
-  const model = typeof runtime?.model === 'string' && runtime.model !== 'auto' ? runtime.model : undefined;
-  const effort = runtime?.effort && runtime.effort !== 'default' ? runtime.effort : undefined;
-  const workspace = normalizeWorkspace(runtime?.workspace);
+  const normalized = normalizeRuntimeInput(runtime);
+  const provider = normalized?.provider as AgentProvider | undefined;
+  const model = normalized?.model;
+  const effort = normalized?.effort as AppCodexConversationSendMessageInput['effort'];
+  const workspace = normalizeWorkspace(normalized?.workspace);
   return {
     ...(provider ? { provider } : {}),
     ...(model ? { model } : {}),
     ...(effort ? { effort } : {}),
     ...(workspace ? { workspace } : {}),
   };
+};
+
+const normalizeRuntimeInput = (runtime: unknown): AppAgentRuntimeInput | undefined => {
+  if (runtime === undefined || runtime === null) {
+    return undefined;
+  }
+  if (!runtime || typeof runtime !== 'object' || Array.isArray(runtime)) {
+    throw new BridgeError(400, 'agent_runtime_invalid');
+  }
+  const record = runtime as Record<string, unknown>;
+  let provider: AgentProvider | undefined;
+  if (record.provider !== undefined) {
+    if (record.provider !== 'codex' && record.provider !== 'claude' && record.provider !== 'antigravity') {
+      throw new BridgeError(400, 'agent_runtime_provider_unsupported');
+    }
+    provider = record.provider;
+  }
+  let model: string | undefined;
+  if (record.model !== undefined) {
+    if (typeof record.model !== 'string') {
+      throw new BridgeError(400, 'agent_runtime_model_invalid');
+    }
+    const trimmed = record.model.trim();
+    if (trimmed && trimmed !== 'auto') {
+      model = trimmed;
+    }
+  }
+  let effort: AppAgentRuntimeInput['effort'] | undefined;
+  if (record.effort !== undefined) {
+    if (typeof record.effort !== 'string') {
+      throw new BridgeError(400, 'agent_runtime_effort_invalid');
+    }
+    effort = record.effort === 'default' ? undefined : record.effort as AppAgentRuntimeInput['effort'];
+  }
+  const modelParams = record.modelParams && typeof record.modelParams === 'object' && !Array.isArray(record.modelParams)
+    ? record.modelParams as Record<string, unknown>
+    : undefined;
+  const workspace = normalizeWorkspace(record.workspace);
+  const normalized: AppAgentRuntimeInput = {
+    ...(provider ? { provider } : {}),
+    ...(model ? { model } : {}),
+    ...(effort ? { effort } : {}),
+    ...(modelParams ? { modelParams } : {}),
+    ...(record.permissionMode === 'safe' || record.permissionMode === 'unsafe' ? { permissionMode: record.permissionMode } : {}),
+    ...(workspace ? { workspace } : {}),
+  };
+  return Object.keys(normalized).length > 0 ? normalized : undefined;
 };
 
 const normalizeWorkspace = (workspace: unknown): AppAgentWorkspaceInput | undefined => {

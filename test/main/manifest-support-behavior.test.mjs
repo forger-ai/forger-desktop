@@ -1013,7 +1013,15 @@ test('manifest support lazy services build memory/tool contexts, prompt successe
   assert.equal(await testController.buildMemoryContextForApps(['finance-os']), 'memory:automation:finance-os');
   assert.equal(memoryContexts.length, 2);
   assert.match(await testController.buildForgerToolsContextForApp('finance-os'), /gmail/i);
-  assert.match(await testController.buildForgerToolsContextForFreeChat(), /gmail/i);
+  const freeChatToolsContext = await testController.buildForgerToolsContextForFreeChat();
+  assert.match(freeChatToolsContext, /gmail/i);
+  assert.match(freeChatToolsContext, /forger_chrome_extension\.connection\.status/);
+  assert.match(freeChatToolsContext, /forger_chrome_extension\.open_dedicated_tab/);
+  assert.match(freeChatToolsContext, /forger_chrome_extension\.submit_form/);
+  assert.match(freeChatToolsContext, /forger_chrome_extension\.get_styles/);
+  assert.match(freeChatToolsContext, /forger_chrome_extension\.set_styles/);
+  assert.match(freeChatToolsContext, /Forger Chrome Extension status: not connected or not active/);
+  assert.match(freeChatToolsContext, /Free chat can inspect installed apps with `forger_list_installed_apps`/);
   assert.equal(serviceInstances.length, 1);
 
   await assert.rejects(serviceInstances[0].options.getGmailOAuthClientId(), /forger_account_required/);

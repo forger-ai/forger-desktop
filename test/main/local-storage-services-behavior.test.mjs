@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import fs from 'node:fs/promises';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -40,6 +41,16 @@ const { ForgerAccountStore, normalizeForgerAccountUser, publicForgerAccount } = 
 const { OfficialToolsService, normalizeAppToolDeclarations } = require('../../dist-electron/main/official-tools-service.js');
 
 const tmpRoot = async (name) => await fs.mkdtemp(path.join(os.tmpdir(), `forger-${name}-`));
+
+const getFreePort = async () => await new Promise((resolve, reject) => {
+  const server = net.createServer();
+  server.once('error', reject);
+  server.listen(0, '127.0.0.1', () => {
+    const address = server.address();
+    const port = typeof address === 'object' && address ? address.port : 0;
+    server.close(() => resolve(port));
+  });
+});
 
 test('BackupsManager backs up manifest-declared persistent files and restores only inside the install root', async (t) => {
   const root = await tmpRoot('backups');
@@ -966,7 +977,9 @@ test('ForgerAccountStore normalizes persisted sessions and exposes only public a
 
 test('OfficialToolsService persists app grants and keeps unavailable Gmail actions safe', async (t) => {
   const root = await tmpRoot('official-tools');
+  let service;
   t.after(async () => {
+    await service?.stopActiveTools?.();
     await fs.rm(root, { recursive: true, force: true });
   });
   const secretsStore = new SecretsStore(root);
@@ -989,10 +1002,10 @@ test('OfficialToolsService persists app grants and keeps unavailable Gmail actio
     actions: ['gmail.search_messages', 'gmail.connection.status'],
   }]);
 
-  const service = new OfficialToolsService({
+  service = new OfficialToolsService({
     metadataRoot: root,
     secretsStore,
-    getFreePort: async () => 1234,
+    getFreePort,
     openExternalUrl: async () => {
       throw new Error('browser_blocked');
     },

@@ -116,20 +116,41 @@ test('Forger prompt builders include contract, language, files, official tools, 
     mode: 'free-chat',
     gmailReady: true,
     whatsappReady: true,
-    allowedActions: ['gmail.search_messages', 'gmail.send_email', 'whatsapp.list_chats', 'whatsapp.send_message'],
+    chromeExtensionReady: true,
+    allowedActions: [
+      'gmail.search_messages',
+      'gmail.send_email',
+      'whatsapp.list_chats',
+      'whatsapp.send_message',
+      'forger_chrome_extension.connection.status',
+      'forger_chrome_extension.open_dedicated_tab',
+      'forger_chrome_extension.submit_form',
+      'forger_chrome_extension.get_styles',
+      'forger_chrome_extension.set_styles',
+    ],
   });
   assert.match(officialTools, /Gmail status: connected and ready/);
   assert.match(officialTools, /WhatsApp status: connected or active locally/);
+  assert.match(officialTools, /Forger Chrome Extension status: connected and ready/);
   assert.match(officialTools, /`gmail.search_messages`/);
   assert.match(officialTools, /`whatsapp.list_chats`/);
+  assert.match(officialTools, /`forger_chrome_extension.connection.status`/);
+  assert.match(officialTools, /`forger_chrome_extension.open_dedicated_tab`/);
+  assert.match(officialTools, /`forger_chrome_extension.submit_form`/);
+  assert.match(officialTools, /`forger_chrome_extension.get_styles`/);
+  assert.match(officialTools, /`forger_chrome_extension.set_styles`/);
+  assert.match(officialTools, /Free chat can inspect installed apps with `forger_list_installed_apps`/);
   assert.match(officialTools, /unofficial local WhatsApp Web integration/);
   assert.match(officialTools, /Use only chat IDs and message references returned by WhatsApp reads or listings/);
+  assert.match(officialTools, /official Forger tool for a dedicated Chrome window/);
+  assert.match(officialTools, /Use only `forger_chrome_extension\.\*` actions/);
+  assert.match(officialTools, /Do not ask for arbitrary JavaScript execution/);
   assert.match(officialTools, /opening, launching, starting, running, or bringing up the app means using Forger app tools/);
   assert.match(officialTools, /Use the app runtime status tool/);
   assert.match(buildForgerOfficialToolsPromptSection({
     mode: 'free-chat',
     gmailReady: false,
-  }), /Free chat can inspect official tool availability[\s\S]*WhatsApp must be activated[\s\S]*Gmail must be activated/);
+  }), /Free chat can inspect official tool availability[\s\S]*WhatsApp must be activated[\s\S]*Chrome Extension must be activated[\s\S]*Gmail must be activated/);
   assert.match(buildForgerOfficialToolsPromptSection({
     mode: 'app-agent',
     gmailReady: false,
@@ -452,9 +473,10 @@ test('official tool skill templates and seed data keep expected Desktop defaults
   ]);
   const appOfficialSkill = buildInstalledAppSkillTemplates(['gmail.search_messages', 'whatsapp.list_chats']).find((template) => template.id === 'forger-app-official-tools');
   assert.ok(appOfficialSkill);
-  assert.equal(appOfficialSkill.description, 'Use when an installed app wants to call official Forger tools; limit tool calls to manifest-granted actions such as Gmail or WhatsApp read, inspect, download, or send actions.');
+  assert.equal(appOfficialSkill.description, 'Use when an installed app wants to call official Forger tools; limit tool calls to manifest-granted actions such as Gmail, WhatsApp, or Forger Chrome Extension read, inspect, browser-control, download, or send actions.');
   assert.match(appOfficialSkill.body, /`gmail\.search_messages`/);
   assert.match(appOfficialSkill.body, /`whatsapp\.list_chats`/);
+  assert.match(appOfficialSkill.body, /commons\/backend\/forger_desktop\.py/);
   const manifestSkill = templates.find((template) => template.id === 'forger-manifest-authoring');
   assert.ok(manifestSkill);
   assert.match(manifestSkill.body, /## Full Manifest JSON Contract/);
@@ -545,12 +567,17 @@ test('official tool skill templates and seed data keep expected Desktop defaults
   assert.ok(officialToolsSkill);
   assert.doesNotMatch(officialToolsSkill.description, /memory/);
   assert.match(officialToolsSkill.body, /forger_open_app/);
+  assert.doesNotMatch(officialToolsSkill.body, /Free chat/);
+  assert.match(officialToolsSkill.body, /forger_chrome_extension\.connection\.status/);
+  assert.match(officialToolsSkill.body, /forger_chrome_extension\.submit_form/);
+  assert.match(officialToolsSkill.body, /commons\/backend\/forger_desktop\.py/);
   assert.match(officialToolsSkill.body, /Do not manually start app services/);
   const toolsSkill = templates.find((template) => template.id === 'forger-tools');
   assert.ok(toolsSkill);
   assert.match(toolsSkill.body, /Manifest `tools\.required\[\]` means the app cannot perform its core purpose/);
   assert.match(toolsSkill.body, /Manifest `tools\.optional\[\]` means the app can work without the tool/);
   assert.match(toolsSkill.body, /App agents may call official Forger tools only when the selected app context and grants allow/);
+  assert.match(toolsSkill.body, /App backends may call granted official tools through the signed Desktop runtime bridge helpers/);
   assert.match(toolsSkill.body, /Agent-facing grant requests go through Forger MCP/);
   assert.match(toolsSkill.body, /UI grant toggles are for the person to allow or deny optional app access/);
   assert.match(toolsSkill.body, /A granted app may still need visible approval for sensitive actions/);

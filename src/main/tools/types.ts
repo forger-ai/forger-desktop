@@ -41,6 +41,7 @@ export interface InternalToolModule {
   definition: OfficialToolDefinition;
   configure: (context: InternalToolContext) => Promise<ToolMutationResult>;
   execute: (input: CallOfficialToolInput, context: InternalToolContext) => Promise<CallOfficialToolResult>;
+  isConfigured?: (context: InternalToolContext) => Promise<boolean>;
   start?: (context: InternalToolContext) => Promise<void>;
   stop?: (context: InternalToolContext) => Promise<void>;
   deactivate?: (context: InternalToolContext) => Promise<void>;
