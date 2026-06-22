@@ -34,6 +34,9 @@ import type {
   RuntimeStatus,
   SetAppToolGrantInput,
   AudioRuntimeDevices,
+  CallOfficialToolInput,
+  CallOfficialToolResult,
+  OfficialToolSummary,
 } from '../../shared/types';
 import type {
   AppManifest,
@@ -46,7 +49,7 @@ import {
   createStartupLoadingController,
   createStartupLogger,
 } from './startup-loading';
-import { appAllowsAudioInput, appAllowsSpeechToText, appAllowsTextToSpeech, appAllowsWorkspaceFolders } from '../../shared/platform-capabilities';
+import { appAllowsAgentRuntimeControl, appAllowsAudioInput, appAllowsSpeechToText, appAllowsTextToSpeech, appAllowsWorkspaceFolders } from '../../shared/platform-capabilities';
 
 type ServiceConstructor<T> = new (...args: unknown[]) => T;
 type AsyncFn<T = unknown> = (...args: unknown[]) => Promise<T>;
@@ -156,6 +159,7 @@ interface MainLifecycleState {
   memoryStore: LifecycleService | null;
   officialToolsService: (LifecycleService & {
     startActiveTools: () => Promise<void>;
+    stopActiveTools: () => Promise<void>;
     listAgentActionIdsForApp: (appId: string) => Promise<string[]>;
     previewOptionalAppToolGrant: (
       input: Pick<SetAppToolGrantInput, 'appId' | 'toolId'>,
@@ -164,6 +168,8 @@ interface MainLifecycleState {
     setOptionalAppToolGrant: (input: SetAppToolGrantInput, locale?: string) => Promise<AppToolGrantRequestResult>;
     validateAgentCall: (input: unknown, access: { appId: string; requireAppGrant: boolean }) => Promise<unknown>;
     callFromAgent: (input: unknown, access: { appId: string; requireAppGrant: boolean }) => Promise<unknown>;
+    listToolsForApp: (appId: string) => Promise<OfficialToolSummary[]>;
+    callFromApp: (appId: string, input: CallOfficialToolInput) => Promise<CallOfficialToolResult>;
   }) | null;
   speechToTextService: SpeechToTextServiceManager | null;
   textToSpeechService: TextToSpeechServiceManager | null;
@@ -951,6 +957,11 @@ export const registerMainLifecycle = (deps: unknown) => {
     metadataRoot: getForgerMetadataRoot(),
     codexHome: getCodexHome(),
     getAgentRuntime: chooseAgentRuntime,
+    appAllowsAgentRuntimeControl: async (appId: string) => {
+      const record = state.registry.apps[appId];
+      const manifest = record?.installDir ? await resolveInstalledManifest(record.installDir) : null;
+      return appAllowsAgentRuntimeControl(manifest?.platformCapabilities);
+    },
     getCodexCliPath: async () => await resolveCodexCliPath(getCodexRoot()),
     getClaudeCliPath: async () => (await resolveClaudeCli())?.path ?? null,
     getAntigravityCliPath: async () => await (resolveAntigravityCliPath?.() ?? Promise.resolve(null)),
@@ -1011,6 +1022,11 @@ export const registerMainLifecycle = (deps: unknown) => {
     metadataRoot: getForgerMetadataRoot(),
     codexHome: getCodexHome(),
     getAgentRuntime: chooseAgentRuntime,
+    appAllowsAgentRuntimeControl: async (appId: string) => {
+      const record = state.registry.apps[appId];
+      const manifest = record?.installDir ? await resolveInstalledManifest(record.installDir) : null;
+      return appAllowsAgentRuntimeControl(manifest?.platformCapabilities);
+    },
     getCodexCliPath: async () => await resolveCodexCliPath(getCodexRoot()),
     getClaudeCliPath: async () => (await resolveClaudeCli())?.path ?? null,
     getAntigravityCliPath: async () => await (resolveAntigravityCliPath?.() ?? Promise.resolve(null)),
@@ -1147,6 +1163,7 @@ export const registerMainLifecycle = (deps: unknown) => {
         audioInput: appAllowsAudioInput(manifest?.platformCapabilities),
         textToSpeech: appAllowsTextToSpeech(manifest?.platformCapabilities),
         workspaceFolders: appAllowsWorkspaceFolders(manifest?.platformCapabilities),
+        agentRuntimeControl: appAllowsAgentRuntimeControl(manifest?.platformCapabilities),
       };
     },
     requestFolderGrant: async (appId: string, grantToken: string) => {
@@ -1155,6 +1172,10 @@ export const registerMainLifecycle = (deps: unknown) => {
     },
     listFolderGrants: async (appId: string) => await appFolderGrantStore.list(appId),
     revokeFolderGrant: async (appId: string, grantId: string) => await appFolderGrantStore.revoke(appId, grantId),
+    officialTools: state.officialToolsService ? {
+      listToolsForApp: async (appId: string) => await state.officialToolsService!.listToolsForApp(appId),
+      callFromApp: async (appId: string, input: CallOfficialToolInput) => await state.officialToolsService!.callFromApp(appId, input),
+    } : undefined,
     getAudioDevices,
     updateAudioInputDevices: async (devices: AudioRuntimeDevices) => {
       await getLiveVoiceInputService().updateDevices({
@@ -1333,6 +1354,7 @@ const performGracefulShutdown = async (): Promise<void> => {
   ]);
   await Promise.resolve(state.desktopRuntimeBridge?.stop());
   state.desktopRuntimeBridge = null;
+  await Promise.resolve(state.officialToolsService?.stopActiveTools?.());
   state.cloudDeviceManager?.stop();
   state.devCatalogService?.stop?.();
   state.forgerMcpServer?.stop();

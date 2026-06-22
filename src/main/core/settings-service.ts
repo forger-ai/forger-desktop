@@ -30,6 +30,7 @@ import {
   normalizeAgentPermissionMode as normalizeSharedAgentPermissionMode,
   normalizeAntigravityModelAndEffort,
   normalizeProvider,
+  validateAgentRuntimeRequest,
 } from '../../shared/agent-runtime-registry';
 import { normalizeDeveloperPathEntries, validateDeveloperPathEntries } from '../runtime/developer-paths';
 
@@ -398,6 +399,9 @@ const markProviderDisconnected = async (provider: AgentProvider): Promise<void> 
 const chooseAgentRuntime = async (requested?: AgentRuntimeRequest): Promise<AgentRuntime> => {
   const provider = requested?.provider ?? await chooseConnectedProvider();
   const defaults = normalizeSettings(state.settings).agentDefaults;
+  if (requested?.strict) {
+    validateAgentRuntimeRequest(agentProviderRegistry, provider, requested);
+  }
   if (provider === 'claude') {
     const recommended = requested?.recommendations?.claude;
     return {

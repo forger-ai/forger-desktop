@@ -287,11 +287,13 @@ const buildForgerToolsContextForApp = async (appId: string): Promise<string> => 
   const state = await getOfficialToolsService().list().catch(() => null);
   const gmail = state?.tools.find((tool) => tool.id === 'gmail');
   const whatsapp = state?.tools.find((tool) => tool.id === 'whatsapp');
+  const chromeExtension = state?.tools.find((tool) => tool.id === 'forger_chrome_extension');
   const allowedActions = await getOfficialToolsService().listAgentActionIdsForApp(appId).catch(() => new Set<string>());
   return buildForgerOfficialToolsPromptSection({
     mode: 'app-agent',
     gmailReady: gmail?.status === 'configured',
     whatsappReady: whatsapp?.status === 'configured',
+    chromeExtensionReady: chromeExtension?.status === 'configured',
     allowedActions: [...allowedActions],
   });
 };
@@ -300,13 +302,19 @@ const buildForgerToolsContextForFreeChat = async (): Promise<string> => {
   const state = await getOfficialToolsService().list().catch(() => null);
   const gmail = state?.tools.find((tool) => tool.id === 'gmail');
   const whatsapp = state?.tools.find((tool) => tool.id === 'whatsapp');
+  const chromeExtension = state?.tools.find((tool) => tool.id === 'forger_chrome_extension');
   const officialActions = AGENT_TOOL_DEFINITIONS
     .map((tool) => tool.id)
-    .filter((toolId) => toolId.startsWith('gmail.') || toolId.startsWith('whatsapp.'));
+    .filter((toolId) =>
+      toolId.startsWith('gmail.')
+      || toolId.startsWith('whatsapp.')
+      || toolId.startsWith('forger_chrome_extension.')
+    );
   return buildForgerOfficialToolsPromptSection({
     mode: 'free-chat',
     gmailReady: gmail?.status === 'configured',
     whatsappReady: whatsapp?.status === 'configured',
+    chromeExtensionReady: chromeExtension?.status === 'configured',
     allowedActions: officialActions,
   });
 };

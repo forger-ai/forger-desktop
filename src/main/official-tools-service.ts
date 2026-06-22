@@ -225,6 +225,24 @@ export class OfficialToolsService {
     }));
   }
 
+  async stopActiveTools(locale?: string): Promise<void> {
+    const context = this.getContext(locale);
+    await Promise.all(INTERNAL_TOOL_MODULES.map(async (toolModule) => {
+      if (!toolModule.stop) {
+        return;
+      }
+      try {
+        await toolModule.stop(context);
+      } catch (error) {
+        await this.options.appendLog?.('official_tools:stop_failed', {
+          toolId: toolModule.definition.id,
+          message: error instanceof Error ? error.message : 'unknown_error',
+          ...(error instanceof Error && error.stack ? { stack: error.stack } : {}),
+        });
+      }
+    }));
+  }
+
   async refresh(locale?: string): Promise<OfficialToolsState> {
     return this.list(locale);
   }
@@ -594,6 +612,10 @@ export class OfficialToolsService {
   }
 
   private async isConfigured(entry: OfficialToolDefinition): Promise<boolean> {
+    const toolModule = this.modulesById.get(entry.id);
+    if (toolModule?.isConfigured) {
+      return toolModule.isConfigured(this.getContext());
+    }
     for (const secret of entry.secrets.filter((item) => item.required)) {
       if (!await this.options.secretsStore.hasToolSecret(entry.id, secret.name)) {
         return false;

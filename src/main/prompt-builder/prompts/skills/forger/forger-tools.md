@@ -4,7 +4,7 @@ description: Use when designing, reviewing, or explaining Forger-approved tools,
 ---
 
 ## Tool Types
-- Forger tools are approved platform capabilities that apps can request, such as Gmail and WhatsApp.
+- Forger tools are approved platform capabilities that apps can request, such as Gmail, WhatsApp, and the Forger Chrome Extension.
 - Use official Forger tools when an app needs a platform-owned integration, not as a replacement for the app's own data model or visible feature list.
 - App-owned structured tools remain the preferred way to read or change app data. They belong to the installed app and should reflect the app's own validation and domain language.
 - Official Forger tools live on the `forger` MCP server and are separate from app MCP tools, Codex-local connectors, and provider-native tools.
@@ -18,9 +18,11 @@ description: Use when designing, reviewing, or explaining Forger-approved tools,
 
 ## App-Scoped Official Tools
 - App agents may call official Forger tools only when the selected app context and grants allow the requested action.
+- App backends may call granted official tools through the signed Desktop runtime bridge helpers in `commons/backend/forger_desktop.py`. Agents use the `forger` MCP server; app services use the backend helper. Both paths are gated by the same manifest declarations, optional grants, and action ids.
 - App-scoped grants do not create global tool access for every app. Treat each app's grants as local to that app and its declared workflows.
 - If an app lacks a grant for an official tool action, do not use a broader local connector or another tool provider to bypass the missing grant.
-- If an app requests Gmail or WhatsApp, use the current official action ids from `forger-manifest-authoring` and keep the grant reason tied to the visible workflow.
+- If an app requests Gmail, WhatsApp, or the Forger Chrome Extension, use the current official action ids from `forger-manifest-authoring` and keep the grant reason tied to the visible workflow.
+- For Chrome grants, request `set_styles` only for temporary visual highlighting or restoring selected elements. Do not use it to hide content, bypass page UI, or make persistent page changes. Treat `submit_form` as sensitive because it can send data or trigger remote changes.
 
 ## Agent Grant Requests And UI Grants
 - Agent-facing grant requests go through Forger MCP and Desktop-owned approval or grant surfaces when the platform exposes them. Do not invent a separate app permission dialog, hidden setting, or local connector fallback.

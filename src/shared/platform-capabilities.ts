@@ -18,11 +18,17 @@ export interface PlatformWorkspaceFoldersCapability {
   reason: string;
 }
 
+export interface PlatformAgentRuntimeControlCapability {
+  required: boolean;
+  reason: string;
+}
+
 export interface PlatformCapabilities {
   speechToText?: PlatformSpeechToTextCapability;
   textToSpeech?: PlatformTextToSpeechCapability;
   audioInput?: PlatformAudioInputCapability;
   workspaceFolders?: PlatformWorkspaceFoldersCapability;
+  agentRuntimeControl?: PlatformAgentRuntimeControlCapability;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -36,6 +42,7 @@ export const normalizePlatformCapabilities = (value: unknown): PlatformCapabilit
   const textToSpeech = value.textToSpeech;
   const audioInput = value.audioInput;
   const workspaceFolders = value.workspaceFolders;
+  const agentRuntimeControl = value.agentRuntimeControl;
   const result: PlatformCapabilities = {};
   if (speechToText === true) {
     result.speechToText = { required: false, reason: '' };
@@ -69,6 +76,14 @@ export const normalizePlatformCapabilities = (value: unknown): PlatformCapabilit
       reason: typeof workspaceFolders.reason === 'string' ? workspaceFolders.reason.trim() : '',
     };
   }
+  if (agentRuntimeControl === true) {
+    result.agentRuntimeControl = { required: false, reason: '' };
+  } else if (isRecord(agentRuntimeControl)) {
+    result.agentRuntimeControl = {
+      required: agentRuntimeControl.required === true,
+      reason: typeof agentRuntimeControl.reason === 'string' ? agentRuntimeControl.reason.trim() : '',
+    };
+  }
   return result;
 };
 
@@ -83,3 +98,6 @@ export const appAllowsAudioInput = (value: unknown): boolean =>
 
 export const appAllowsWorkspaceFolders = (value: unknown): boolean =>
   Boolean(normalizePlatformCapabilities(value).workspaceFolders);
+
+export const appAllowsAgentRuntimeControl = (value: unknown): boolean =>
+  Boolean(normalizePlatformCapabilities(value).agentRuntimeControl);

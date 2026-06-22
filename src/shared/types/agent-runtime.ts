@@ -64,6 +64,7 @@ export type AgentRuntimeRecommendations = Partial<AgentDefaults>;
 
 export interface AgentRuntimeRequest extends Partial<AgentRuntime> {
   recommendations?: AgentRuntimeRecommendations;
+  strict?: boolean;
 }
 
 export interface AgentModelOptions {

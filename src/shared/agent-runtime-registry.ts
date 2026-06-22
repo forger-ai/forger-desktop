@@ -5,6 +5,7 @@ import type {
   AgentProvider,
   AgentProviderRuntimeRegistry,
   AgentRuntime,
+  AgentRuntimeRequest,
   AntigravityEffort,
   AntigravityModelOption,
   ClaudeEffort,
@@ -430,6 +431,37 @@ export function normalizeAgentProviderEffort(
   const defaultEffort = isCodexReasoningEffort(fallback) ? fallback : registry.codex.defaultReasoningEffort;
   return registry.codex.reasoningEffortValues.has(value as CodexReasoningEffort) ? value as CodexReasoningEffort : defaultEffort;
 }
+
+export class AgentRuntimeRequestValidationError extends Error {
+  public constructor(public readonly code: string) {
+    super(code);
+  }
+}
+
+export const validateAgentRuntimeRequest = (
+  registry: AgentProviderRuntimeRegistry,
+  provider: AgentProvider,
+  requested?: AgentRuntimeRequest,
+): void => {
+  if (!requested) {
+    return;
+  }
+  const model = normalizeString(requested.model);
+  if (model && !registry[provider].modelValues.has(model)) {
+    throw new AgentRuntimeRequestValidationError('agent_runtime_model_unsupported');
+  }
+  if (requested.effort === undefined) {
+    return;
+  }
+  const effortValid = provider === 'claude'
+    ? registry.claude.effortValues.has(requested.effort as ClaudeEffort)
+    : provider === 'antigravity'
+      ? registry.antigravity.effortValues.has(requested.effort as AntigravityEffort)
+      : registry.codex.reasoningEffortValues.has(requested.effort as CodexReasoningEffort);
+  if (!effortValid) {
+    throw new AgentRuntimeRequestValidationError('agent_runtime_effort_unsupported');
+  }
+};
 
 export const normalizeCodexModel = (value: unknown, fallback = DEFAULT_CODEX_MODEL): string =>
   isCodexModel(value) ? value as string : fallback;

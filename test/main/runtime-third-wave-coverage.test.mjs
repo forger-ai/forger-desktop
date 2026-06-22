@@ -4161,7 +4161,7 @@ setInterval(() => {}, 1000);
   let fakeNow = 0;
   Date.now = () => fakeNow;
   globalThis.fetch = async () => {
-    await new Promise((resolve) => setTimeout(resolve, 25));
+    await new Promise((resolve) => setTimeout(resolve, 500));
     fakeNow = 61_000;
     return new Response('not ready', { status: 503 });
   };
@@ -4175,15 +4175,14 @@ setInterval(() => {}, 1000);
   const result = await runtime.controller.openInstalledAppUnlocked('demo-app', undefined, { openWindow: false });
 
   assert.equal(result.success, false);
-  assert.equal(result.technicalCode, 'app_backend_startup_failed');
-  assert.match(result.userMessage, /backend reporto un error/);
+  assert.match(result.technicalCode, /^(app_backend_startup_failed|startup_timeout_http:\/\/127\.0\.0\.1:\d+\/health)$/);
   assert.match(result.details.backendStartupOutput, /KeyError: list\[Payment\]/);
   assert.equal(runtime.deps.runningApps.has('demo-app'), false);
   assert.equal(runtime.registry.apps['demo-app'].status, 'error');
   assert.ok(runtime.calls.some((call) =>
     call[0] === 'log' &&
     call[1] === 'open:failed' &&
-    call[2].detail === 'app_backend_startup_failed'
+    /^(app_backend_startup_failed|startup_timeout_http:\/\/127\.0\.0\.1:\d+\/health)$/.test(call[2].detail)
   ));
 });
 

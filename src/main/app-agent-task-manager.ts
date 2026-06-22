@@ -58,6 +58,7 @@ interface AppAgentTaskManagerOptions {
   metadataRoot: string;
   codexHome: string;
   getAgentRuntime: (requested?: AgentRuntimeRequest) => Promise<AgentRuntime>;
+  appAllowsAgentRuntimeControl?: (appId: string) => Promise<boolean>;
   getCodexCliPath: () => Promise<string | null>;
   getClaudeCliPath: () => Promise<string | null>;
   getAntigravityCliPath?: () => Promise<string | null>;
@@ -120,6 +121,14 @@ const CODEX_TASK_TIMEOUT_MS = 600_000;
 const DEFAULT_MODEL = 'gpt-5.4';
 const DEFAULT_REASONING: CodexReasoningEffort = 'medium';
 
+const hasTaskRuntimeInput = (runtime: AppCodexTaskStartInput['runtime']): boolean => {
+  if (!runtime) {
+    return false;
+  }
+  const modelParams = runtime.modelParams && typeof runtime.modelParams === 'object' ? runtime.modelParams : {};
+  return Boolean(runtime.provider || runtime.model || runtime.effort || modelParams.effort || modelParams.reasoningEffort || runtime.permissionMode);
+};
+
 export class AppAgentTaskManager {
   private readonly tasks = new Map<string, InternalTask>();
   private readonly pendingPermissions = new Map<string, PendingPermission>();
@@ -137,6 +146,10 @@ export class AppAgentTaskManager {
     const appRoot = path.join(this.options.privateAppsRoot, appId);
     if (!(await existsDirectory(appRoot))) {
       throw new Error('app_not_installed');
+    }
+    await this.assertRuntimeControlAllowed(appId, input);
+    if (hasTaskRuntimeInput(input.runtime)) {
+      await this.resolveRuntime(template, input);
     }
 
     const runId = randomUUID();
@@ -263,11 +276,7 @@ export class AppAgentTaskManager {
     input: AppCodexTaskStartInput,
   ): Promise<void> {
     const locale = normalizeTaskLocale(input.locale);
-    const runtime = await this.options.getAgentRuntime(template.runtime ?? {
-      recommendations: template.runtimeRecommendations,
-      model: template.runtimeRecommendations ? undefined : template.model,
-      effort: template.runtimeRecommendations ? undefined : template.reasoningEffort,
-    });
+    const runtime = await this.resolveRuntime(template, input);
     if (runtime.provider === 'antigravity') {
       if (!(await (this.options.getAntigravityAuthenticated?.() ?? Promise.resolve(false)))) {
         throw new Error('antigravity_auth_missing');
@@ -609,6 +618,46 @@ export class AppAgentTaskManager {
     }
 
     return { variables, files };
+  }
+
+  private async assertRuntimeControlAllowed(appId: string, input: AppCodexTaskStartInput): Promise<void> {
+    if (!input.runtime) {
+      return;
+    }
+    if (!(await (this.options.appAllowsAgentRuntimeControl?.(appId) ?? Promise.resolve(false)))) {
+      throw new Error('desktop_runtime_agent_runtime_control_required');
+    }
+  }
+
+  private async resolveRuntime(template: AppPromptTemplate, input: AppCodexTaskStartInput): Promise<AgentRuntime> {
+    if (hasTaskRuntimeInput(input.runtime)) {
+      const runtime = input.runtime as NonNullable<AppCodexTaskStartInput['runtime']>;
+      const templateRuntime = template.runtime;
+      if (runtime.provider !== undefined && runtime.provider !== 'codex' && runtime.provider !== 'claude' && runtime.provider !== 'antigravity') {
+        throw new Error('agent_runtime_provider_unsupported');
+      }
+      const modelParams = runtime.modelParams && typeof runtime.modelParams === 'object'
+        ? runtime.modelParams
+        : {};
+      const effort = runtime.effort === 'default'
+        ? undefined
+        : runtime.effort ?? modelParams.effort ?? modelParams.reasoningEffort;
+      return await this.options.getAgentRuntime({
+        provider: runtime.provider ?? templateRuntime?.provider,
+        model: typeof runtime.model === 'string' && runtime.model.trim() && runtime.model.trim() !== 'auto'
+          ? runtime.model.trim()
+          : templateRuntime?.model,
+        effort: (effort ?? templateRuntime?.effort) as AgentRuntimeRequest['effort'],
+        permissionMode: runtime.permissionMode ?? templateRuntime?.permissionMode,
+        ...(!templateRuntime ? { recommendations: template.runtimeRecommendations } : {}),
+        strict: true,
+      });
+    }
+    return await this.options.getAgentRuntime(template.runtime ?? {
+      recommendations: template.runtimeRecommendations,
+      model: template.runtimeRecommendations ? undefined : template.model,
+      effort: template.runtimeRecommendations ? undefined : template.reasoningEffort,
+    });
   }
 
   private async writeLegacyAttachments(

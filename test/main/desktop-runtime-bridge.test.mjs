@@ -88,6 +88,7 @@ const createBridge = async (options = {}) => {
     requestFolderGrant: options.requestFolderGrant,
     listFolderGrants: options.listFolderGrants,
     revokeFolderGrant: options.revokeFolderGrant,
+    officialTools: options.officialTools,
     getAudioDevices: options.getAudioDevices ?? (async () => ({
       inputDevices: [
         { id: 'default', label: 'Default microphone', kind: 'microphone', default: true, supported: true },
@@ -1001,6 +1002,45 @@ test('desktop runtime task endpoints normalize workspace input for task starts',
   }
 });
 
+test('desktop runtime task endpoints gate and pass runtime control', async () => {
+  const denied = await createBridge();
+  try {
+    const deniedStart = await request(denied.bridge, `/v1/apps/${APP_ID}/agent-tasks`, {
+      method: 'POST',
+      body: {
+        templateId: 'recommend_budget',
+        runtime: { provider: 'codex', model: 'gpt-5.4', effort: 'medium' },
+      },
+    });
+    assert.equal(deniedStart.response.status, 403);
+    assert.equal(deniedStart.payload.error, 'desktop_runtime_agent_runtime_control_required');
+    assert.equal(denied.taskStarts.length, 0);
+  } finally {
+    await denied.stop();
+  }
+
+  const allowed = await createBridge({
+    getAppPlatformCapabilities: async () => ({ agentRuntimeControl: true }),
+  });
+  try {
+    const allowedStart = await request(allowed.bridge, `/v1/apps/${APP_ID}/agent-tasks`, {
+      method: 'POST',
+      body: {
+        templateId: 'recommend_budget',
+        runtime: { provider: 'codex', model: 'gpt-5.4', effort: 'medium' },
+      },
+    });
+    assert.equal(allowedStart.response.status, 200);
+    assert.deepEqual(allowed.taskStarts[0].input.runtime, {
+      provider: 'codex',
+      model: 'gpt-5.4',
+      effort: 'medium',
+    });
+  } finally {
+    await allowed.stop();
+  }
+});
+
 test('desktop runtime task endpoints reject oversized payloads', async () => {
   const harness = await createBridge({ maxBodyBytes: 8 });
   try {
@@ -1045,7 +1085,10 @@ test('desktop runtime bridge serves manifest-first conversation thread routes an
       return { accepted: true, mode: 'queued_for_next_run' };
     },
   };
-  const harness = await createBridge({ getConversationManager: () => manager });
+  const harness = await createBridge({
+    getConversationManager: () => manager,
+    getAppPlatformCapabilities: async () => ({ agentRuntimeControl: true }),
+  });
   try {
     const createPath = `/v1/apps/${APP_ID}/agents/analyst/start`;
     const created = await request(harness.bridge, createPath, {
@@ -1090,17 +1133,15 @@ test('desktop runtime bridge serves manifest-first conversation thread routes an
     assert.equal(calls[3][2].model, 'gpt-5.3-codex');
     assert.equal(calls[3][2].effort, undefined);
 
-    await request(harness.bridge, runPath, {
+    const invalidRuntime = await request(harness.bridge, runPath, {
       method: 'POST',
       body: {
         variables: { topic: 'August' },
         runtime: { provider: 'unknown', model: 'auto', effort: 'default' },
       },
     });
-    assert.equal(calls[4][2].message, 'resume:August');
-    assert.equal(calls[4][2].provider, undefined);
-    assert.equal(calls[4][2].model, undefined);
-    assert.equal(calls[4][2].effort, undefined);
+    assert.equal(invalidRuntime.response.status, 400);
+    assert.equal(invalidRuntime.payload.error, 'agent_runtime_provider_unsupported');
 
     const steer = await request(harness.bridge, `/v1/apps/${APP_ID}/agent-threads/thread-1/runs/run-9/steer`, {
       method: 'POST',
@@ -1108,8 +1149,8 @@ test('desktop runtime bridge serves manifest-first conversation thread routes an
     });
     assert.equal(steer.response.status, 200);
     assert.deepEqual(steer.payload, { accepted: true, mode: 'queued_for_next_run' });
-    assert.equal(calls[5][0], 'steerRun');
-    assert.equal(calls[5][4].message, 'steer:steer');
+    assert.equal(calls[4][0], 'steerRun');
+    assert.equal(calls[4][4].message, 'steer:steer');
 
     const thread = await request(harness.bridge, `/v1/apps/${APP_ID}/agent-threads/thread-1`);
     assert.equal(thread.response.status, 200);
@@ -1129,6 +1170,48 @@ test('desktop runtime bridge serves manifest-first conversation thread routes an
     });
     assert.equal(cancel.response.status, 200);
     assert.deepEqual(cancel.payload, { success: true });
+  } finally {
+    await harness.stop();
+  }
+});
+
+test('desktop runtime bridge gates manifest agent runtime control', async () => {
+  const manager = {
+    async create() {
+      return conversation;
+    },
+    async sendMessage() {
+      return conversation;
+    },
+    async getMetadata() {
+      return { manifestAgentId: 'analyst' };
+    },
+    async steerRun() {
+      return { accepted: true, mode: 'queued_for_next_run' };
+    },
+  };
+  const harness = await createBridge({ getConversationManager: () => manager });
+  try {
+    const start = await request(harness.bridge, `/v1/apps/${APP_ID}/agents/analyst/start`, {
+      method: 'POST',
+      body: { variables: { topic: 'start' }, runtime: { provider: 'codex', model: 'gpt-5.4' } },
+    });
+    assert.equal(start.response.status, 403);
+    assert.equal(start.payload.error, 'desktop_runtime_agent_runtime_control_required');
+
+    const resume = await request(harness.bridge, `/v1/apps/${APP_ID}/agent-threads/thread-1/resume`, {
+      method: 'POST',
+      body: { variables: { topic: 'resume' }, runtime: { provider: 'codex', model: 'gpt-5.4' } },
+    });
+    assert.equal(resume.response.status, 403);
+    assert.equal(resume.payload.error, 'desktop_runtime_agent_runtime_control_required');
+
+    const steer = await request(harness.bridge, `/v1/apps/${APP_ID}/agent-threads/thread-1/runs/run-9/steer`, {
+      method: 'POST',
+      body: { variables: { topic: 'steer' }, runtime: { provider: 'codex', model: 'gpt-5.4' } },
+    });
+    assert.equal(steer.response.status, 403);
+    assert.equal(steer.payload.error, 'desktop_runtime_agent_runtime_control_required');
   } finally {
     await harness.stop();
   }

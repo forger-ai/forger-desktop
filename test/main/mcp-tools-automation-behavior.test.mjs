@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { access, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import net from 'node:net';
 import { tmpdir } from 'node:os';
 import { delimiter, join, resolve } from 'node:path';
 import { createRequire } from 'node:module';
@@ -25,6 +26,9 @@ const {
   computeNextRunAt,
 } = require('../../dist-electron/main/automation-manager.js');
 const {
+  AGENT_TOOL_DEFINITIONS,
+} = require('../../dist-electron/main/core/agent-tool-packages.js');
+const {
   appendTranscript,
   parseClaudeAssistantMessages,
   parseCodexAssistantMessages,
@@ -34,6 +38,16 @@ const {
 
 const wait = (ms) => new Promise((resolveWait) => {
   setTimeout(resolveWait, ms);
+});
+
+const getFreePort = async () => await new Promise((resolve, reject) => {
+  const server = net.createServer();
+  server.once('error', reject);
+  server.listen(0, '127.0.0.1', () => {
+    const address = server.address();
+    const port = typeof address === 'object' && address ? address.port : 0;
+    server.close(() => resolve(port));
+  });
 });
 
 const withPlatform = async (platform, operation) => {
@@ -351,6 +365,18 @@ test('MCP tool schemas expose strict official tool contracts and safe annotation
   assert.equal(sendSchema.additionalProperties, false);
   assert.equal(sendSchema.properties.attachments.items.required[0], 'filePath');
 
+  const chromeSubmitSchema = getMcpToolInputSchema('forger_chrome_extension.submit_form');
+  assert.deepEqual(chromeSubmitSchema.required, ['sessionId', 'selector']);
+  assert.equal(chromeSubmitSchema.properties.submitSelector.type, 'string');
+
+  const chromeGetStylesSchema = getMcpToolInputSchema('forger_chrome_extension.get_styles');
+  assert.deepEqual(chromeGetStylesSchema.required, ['sessionId', 'selector']);
+  assert.equal(chromeGetStylesSchema.properties.properties.items.type, 'string');
+
+  const chromeSetStylesSchema = getMcpToolInputSchema('forger_chrome_extension.set_styles');
+  assert.deepEqual(chromeSetStylesSchema.required, ['sessionId', 'selector', 'styles']);
+  assert.equal(chromeSetStylesSchema.properties.styles.additionalProperties.type, 'string');
+
   const readAttachmentSchema = getMcpToolInputSchema('gmail.read_attachment');
   assert.deepEqual(readAttachmentSchema.required, ['messageId']);
   assert.equal(readAttachmentSchema.properties.attachmentId.type, 'string');
@@ -567,7 +593,7 @@ test('official tool declarations dedupe entries and app grants gate optional too
   const service = new OfficialToolsService({
     metadataRoot: root,
     secretsStore: createSecretsStore(),
-    getFreePort: async () => 1234,
+    getFreePort,
     openExternalUrl: async () => undefined,
     isForgerAccountAuthenticated: () => true,
     getGmailOAuthClientId: async () => 'gmail-client',
@@ -643,7 +669,7 @@ test('official tools configure Gmail through OAuth callback and clean grants on 
         }
       },
     }),
-    getFreePort: async () => 1234,
+    getFreePort,
     openExternalUrl: async (url) => {
       const parsed = new URL(url);
       const callbackUrl = new URL(parsed.searchParams.get('redirect_uri'));
@@ -689,7 +715,7 @@ test('official tools enforce app declarations before configured tool execution',
   const service = new OfficialToolsService({
     metadataRoot: root,
     secretsStore: createSecretsStore(),
-    getFreePort: async () => 1234,
+    getFreePort,
     openExternalUrl: async () => {
       throw new Error('browser_blocked');
     },
@@ -782,7 +808,7 @@ test('official tools preserve registry fallbacks, error status, required gates, 
     secretsStore: createSecretsStore({
       deleteToolSecrets: async (toolId) => deletedTools.push(toolId),
     }),
-    getFreePort: async () => 1234,
+    getFreePort,
     openExternalUrl: async () => {
       throw new Error('browser_blocked');
     },
@@ -857,7 +883,7 @@ test('official tools validate unavailable, undeclared, optional, and malformed r
   const service = new OfficialToolsService({
     metadataRoot: root,
     secretsStore: createSecretsStore(),
-    getFreePort: async () => 1234,
+    getFreePort,
     openExternalUrl: async () => undefined,
     isForgerAccountAuthenticated: () => true,
     getGmailOAuthClientId: async () => 'gmail-client',
@@ -1211,6 +1237,34 @@ test('Forger MCP server handles auth, JSON-RPC lifecycle, session release, and H
 
     harness.server.releaseSession(session.token);
     assert.equal(harness.logs.some((entry) => entry.event === 'agent_tool:mcp_session_released'), true);
+  } finally {
+    harness.stop();
+  }
+});
+
+test('free chat MCP sessions expose installed app and Chrome extension tools', async () => {
+  const harness = await createForgerMcpHarness({ toolDefinitions: AGENT_TOOL_DEFINITIONS });
+  const session = harness.server.createSession('run-free-tools', 'forger', { caller: 'free-chat', appIds: ['finance-os'] });
+
+  try {
+    const listResponse = await callMcp(session, {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/list',
+    });
+    const listPayload = await listResponse.json();
+    const names = listPayload.result.tools.map((tool) => tool.name);
+
+    assert.equal(listResponse.status, 200);
+    assert.equal(names.includes('forger_list_installed_apps'), true);
+    assert.equal(names.includes('forger_chrome_extension.connection.status'), true);
+    assert.equal(names.includes('forger_chrome_extension.open_dedicated_tab'), true);
+    assert.equal(names.includes('forger_chrome_extension.navigate'), true);
+    assert.equal(names.includes('forger_chrome_extension.get_html'), true);
+    assert.equal(names.includes('forger_chrome_extension.submit_form'), true);
+    assert.equal(names.includes('forger_chrome_extension.get_styles'), true);
+    assert.equal(names.includes('forger_chrome_extension.set_styles'), true);
+    assert.equal(names.includes('forger_chrome_extension.close_session'), true);
   } finally {
     harness.stop();
   }
