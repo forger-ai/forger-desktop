@@ -1,4 +1,5 @@
 import type { AppAgent, AppPromptTemplate } from './prompts';
+import type { PlatformCapabilities } from '../platform-capabilities';
 
 export type AgentToolId =
   | 'forger_list_catalog'
@@ -39,6 +40,7 @@ export type AgentToolId =
   | 'forger_chrome_extension.get_current_url'
   | 'forger_chrome_extension.navigate'
   | 'forger_chrome_extension.get_html'
+  | 'forger_chrome_extension.wait_for_selector'
   | 'forger_chrome_extension.click'
   | 'forger_chrome_extension.focus'
   | 'forger_chrome_extension.hover'
@@ -46,6 +48,7 @@ export type AgentToolId =
   | 'forger_chrome_extension.submit_form'
   | 'forger_chrome_extension.get_styles'
   | 'forger_chrome_extension.set_styles'
+  | 'forger_chrome_extension.close_window'
   | 'forger_chrome_extension.close_session'
   | 'whatsapp.connection.status'
   | 'whatsapp.start_pairing'
@@ -221,14 +224,22 @@ export interface AppToolRequirementState {
   declaration: AppToolDeclaration;
   required: boolean;
   tool?: OfficialToolSummary;
+  resolvedActions: OfficialToolActionDefinition[];
+  allActions: boolean;
   granted: boolean;
+  hasStoredGrant: boolean;
   available: boolean;
   configured: boolean;
+}
+
+export interface GetAppToolsInstallGateOptions {
+  defaultOptionalGrants?: boolean;
 }
 
 export interface AppToolsInstallGate {
   appId: string;
   appName: string;
+  platformCapabilities: PlatformCapabilities;
   required: AppToolRequirementState[];
   optional: AppToolRequirementState[];
   agents: AppAgent[];

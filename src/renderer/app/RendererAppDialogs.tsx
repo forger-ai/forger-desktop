@@ -31,7 +31,9 @@ export function RendererAppDialogs({ controller }: RendererAppDialogsProps) {
     pendingInstallBusy,
     setPendingInstallGate,
     renderInstallTool,
+    renderInstallCapability,
     renderInstallItem,
+    capabilityRows,
     handleConfirmInstallWithTools,
     cloudModalOpen,
     setCloudModalOpen,
@@ -136,6 +138,19 @@ export function RendererAppDialogs({ controller }: RendererAppDialogsProps) {
             </Typography>
 
             <Stack spacing={1}>
+              <Typography variant="subtitle2">{t.installGate.capabilitiesTitle}</Typography>
+              {pendingInstallGate && capabilityRows(pendingInstallGate).length > 0 ? (
+                <Stack spacing={1}>
+                  {capabilityRows(pendingInstallGate).map(renderInstallCapability)}
+                </Stack>
+              ) : (
+                <Typography variant="body2" color="text.secondary">
+                  {t.installGate.noCapabilities}
+                </Typography>
+              )}
+            </Stack>
+
+            <Stack spacing={1}>
               <Typography variant="subtitle2">{t.installGate.toolsTitle}</Typography>
               {pendingInstallGate && (pendingInstallGate.required.length > 0 || pendingInstallGate.optional.length > 0) ? (
                 <Stack spacing={1}>
@@ -176,7 +191,7 @@ export function RendererAppDialogs({ controller }: RendererAppDialogsProps) {
           <Button disabled={pendingInstallBusy} onClick={() => setPendingInstallGate(null)}>{t.installGate.cancel}</Button>
           <Button
             variant="contained"
-            disabled={pendingInstallBusy || !pendingInstallGate?.canInstall}
+            disabled={pendingInstallBusy}
             onClick={() => void handleConfirmInstallWithTools()}
           >
             {t.installGate.confirm}

@@ -452,8 +452,16 @@ const installAppRuntime = async (appId: string, localeInput?: string): Promise<I
   }
 
   const toolGate = await getOfficialToolsService().getInstallGate(appId);
-  if (toolGate && !toolGate.canInstall) {
-    return runtimeError(copy.install.requiredToolsMissing, 'required_app_tools_missing');
+  const unavailableRequiredTools = (toolGate?.required ?? []).filter((item) => !item.available || !item.configured);
+  if (unavailableRequiredTools.length > 0) {
+    await appendInstallLog('install:required_tools_unavailable', {
+      appId,
+      tools: unavailableRequiredTools.map((item) => ({
+        toolId: item.declaration.toolId,
+        available: item.available,
+        configured: item.configured,
+      })),
+    });
   }
 
   const initialRecord: InstalledAppRecord = {
@@ -682,6 +690,8 @@ const prepareSocialAppReview = async (
       downloadUrl: download.downloadUrl,
       checksumSha256: download.version.checksumSha256,
       capabilities: download.version.capabilities.map((id) => ({ id })),
+      platformCapabilities: download.version.platformCapabilities,
+      tools: download.version.tools,
       agents: download.version.agents as AppAgent[] | undefined,
       promptTemplates: download.version.promptTemplates as AppPromptTemplate[] | undefined,
     };
@@ -775,6 +785,8 @@ const installSocialAppRuntime = async (input: SocialInstallInput, localeInput?: 
       downloadUrl: download.downloadUrl,
       checksumSha256: download.version.checksumSha256,
       capabilities: download.version.capabilities.map((id) => ({ id })),
+      platformCapabilities: download.version.platformCapabilities,
+      tools: download.version.tools,
       agents: download.version.agents as AppAgent[] | undefined,
       promptTemplates: download.version.promptTemplates as AppPromptTemplate[] | undefined,
     };
@@ -814,6 +826,11 @@ const installSocialAppRuntime = async (input: SocialInstallInput, localeInput?: 
         socialCatalogApp.latestVersion = download.version.version;
         socialCatalogApp.downloadUrl = download.downloadUrl;
         socialCatalogApp.checksumSha256 = download.version.checksumSha256;
+        socialCatalogApp.capabilities = download.version.capabilities.map((id) => ({ id }));
+        socialCatalogApp.platformCapabilities = download.version.platformCapabilities;
+        socialCatalogApp.tools = download.version.tools;
+        socialCatalogApp.agents = download.version.agents as AppAgent[] | undefined;
+        socialCatalogApp.promptTemplates = download.version.promptTemplates as AppPromptTemplate[] | undefined;
       } finally {
         await fs.rm(reviewDir, { recursive: true, force: true }).catch(() => undefined);
         await fs.rm(reviewDownload.zipPath, { force: true }).catch(() => undefined);

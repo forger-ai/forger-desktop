@@ -368,6 +368,11 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     socialInstallReviewDialog,
     closeSocialInstallReviewDialog,
     handleSocialInstallReviewDecision,
+    handleSocialOptionalToolGrant,
+    renderInstallTool,
+    renderInstallItem,
+    renderInstallCapability,
+    capabilityRows,
     codexConfigOpen,
     claudeConfigOpen,
     agentProviderConfigOpen,
@@ -1258,13 +1263,52 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
       />
 
       <RendererAppDialogs controller={controller} />
-      <Dialog open={Boolean(socialInstallReviewDialog?.open)} onClose={socialInstallReviewDialog?.busy ? undefined : closeSocialInstallReviewDialog} maxWidth="xs" fullWidth>
+      <Dialog open={Boolean(socialInstallReviewDialog?.open)} onClose={socialInstallReviewDialog?.busy ? undefined : closeSocialInstallReviewDialog} maxWidth="sm" fullWidth>
         <DialogTitle>{t.social.reviewInstallTitle}</DialogTitle>
         <DialogContent>
-          <Stack spacing={1.5}>
+          <Stack spacing={2.25} sx={{ pt: 1 }}>
             <Typography fontWeight={700}>{socialInstallReviewDialog?.appName}</Typography>
             <Typography color="text.secondary">{t.social.reviewInstallBody}</Typography>
             <Typography variant="body2" color="warning.main">{t.sections.catalog.disclaimer}</Typography>
+            {socialInstallReviewDialog?.gate ? (
+              <>
+                <Stack spacing={1}>
+                  <Typography variant="subtitle2">{t.installGate.capabilitiesTitle}</Typography>
+                  {capabilityRows(socialInstallReviewDialog.gate).length > 0 ? (
+                    <Stack spacing={1}>{capabilityRows(socialInstallReviewDialog.gate).map(renderInstallCapability)}</Stack>
+                  ) : (
+                    <Typography variant="body2" color="text.secondary">{t.installGate.noCapabilities}</Typography>
+                  )}
+                </Stack>
+                <Stack spacing={1}>
+                  <Typography variant="subtitle2">{t.installGate.toolsTitle}</Typography>
+                  {socialInstallReviewDialog.gate.required.length > 0 || socialInstallReviewDialog.gate.optional.length > 0 ? (
+                    <Stack spacing={1}>
+                      {socialInstallReviewDialog.gate.required.map((item: any) => renderInstallTool(item, true, socialInstallReviewDialog.grantDrafts ?? {}, handleSocialOptionalToolGrant))}
+                      {socialInstallReviewDialog.gate.optional.map((item: any) => renderInstallTool(item, false, socialInstallReviewDialog.grantDrafts ?? {}, handleSocialOptionalToolGrant))}
+                    </Stack>
+                  ) : (
+                    <Typography variant="body2" color="text.secondary">{t.installGate.noTools}</Typography>
+                  )}
+                </Stack>
+                <Stack spacing={1}>
+                  <Typography variant="subtitle2">{t.installGate.agentsTitle}</Typography>
+                  {socialInstallReviewDialog.gate.agents.length ? (
+                    <Stack spacing={1}>{socialInstallReviewDialog.gate.agents.map(renderInstallItem)}</Stack>
+                  ) : (
+                    <Typography variant="body2" color="text.secondary">{t.installGate.noAgents}</Typography>
+                  )}
+                </Stack>
+                <Stack spacing={1}>
+                  <Typography variant="subtitle2">{t.installGate.aiTasksTitle}</Typography>
+                  {socialInstallReviewDialog.gate.promptTemplates.length ? (
+                    <Stack spacing={1}>{socialInstallReviewDialog.gate.promptTemplates.map(renderInstallItem)}</Stack>
+                  ) : (
+                    <Typography variant="body2" color="text.secondary">{t.installGate.noAiTasks}</Typography>
+                  )}
+                </Stack>
+              </>
+            ) : null}
             {socialInstallReviewDialog?.busy ? (
               <Stack spacing={1}>
                 <LinearProgress />

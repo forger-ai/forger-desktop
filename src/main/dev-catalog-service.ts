@@ -230,6 +230,7 @@ const toCatalogEntry = async (app: LocalApp, baseUrl: string): Promise<JsonObjec
       agents: optionalArray(app.manifest.agents),
       prompt_templates: optionalArray(app.manifest.promptTemplates),
       tools: optionalRecord(app.manifest.tools),
+      platformCapabilities: optionalRecord(app.manifest.platformCapabilities),
       download_url: `${baseUrl}/download/${encodeURIComponent(app.catalogSlug)}.zip`,
       file_size_bytes: null,
       checksum_sha256: null,

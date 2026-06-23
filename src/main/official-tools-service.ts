@@ -10,10 +10,11 @@ import type {
   CallOfficialToolInput,
   CallOfficialToolResult,
   ConfigureOfficialToolInput,
+  GetAppToolsInstallGateOptions,
   InstalledOfficialToolRecord,
   OfficialToolDefinition,
-  OfficialToolRuntimeEvent,
   OfficialToolSummary,
+  OfficialToolRuntimeEvent,
   OfficialToolsState,
   SetAppToolGrantInput,
   ToolMutationResult,
@@ -23,6 +24,7 @@ import { INTERNAL_TOOL_MODULES } from './tools';
 import type { InternalToolModule } from './tools/types';
 import type { InternalOAuthTokenResponse } from './tools/types';
 import { getSharedCopy } from '../shared/i18n';
+import type { PlatformCapabilities } from '../shared/platform-capabilities';
 
 interface ToolRegistryFile {
   version: 1;
@@ -55,6 +57,7 @@ interface OfficialToolsServiceOptions {
     optional: AppToolDeclaration[];
     agents: AppAgent[];
     promptTemplates: AppPromptTemplate[];
+    platformCapabilities: PlatformCapabilities;
   } | null>;
 }
 
@@ -67,16 +70,34 @@ const emptyRegistry = (): ToolRegistryFile => ({
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 
-const normalizeActionIds = (actions: unknown): string[] =>
-  Array.isArray(actions)
-    ? actions.filter((action): action is string => typeof action === 'string' && action.trim().length > 0)
-    : [];
+const ALL_TOOL_ACTIONS_TOKEN = '*';
+
+const normalizeActionIds = (actions: unknown): string[] => {
+  if (!Array.isArray(actions)) {
+    return [];
+  }
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+  for (const action of actions) {
+    if (typeof action !== 'string') {
+      continue;
+    }
+    const trimmed = action.trim();
+    if (!trimmed || seen.has(trimmed)) {
+      continue;
+    }
+    seen.add(trimmed);
+    normalized.push(trimmed);
+  }
+  return normalized;
+};
 
 const buildToolUnavailableResult = (
   tool: OfficialToolSummary | null,
   surface: 'agent' | 'app',
+  locale?: string,
 ): CallOfficialToolResult => {
-  const copy = getSharedCopy().tools;
+  const copy = getSharedCopy(locale).tools;
   if (!tool) {
     return { success: false, userMessage: copy.unavailable, technicalCode: 'tool_not_found' };
   }
@@ -322,22 +343,23 @@ export class OfficialToolsService {
     return { success: true, userMessage: copy.tools.deactivated, tool: await this.toSummary(toolModule.definition, options?.locale) };
   }
 
-  async getInstallGate(appId: string, locale?: string): Promise<AppToolsInstallGate | null> {
+  async getInstallGate(appId: string, locale?: string, options?: GetAppToolsInstallGateOptions): Promise<AppToolsInstallGate | null> {
     await this.load();
     const declarations = await this.options.getAppToolDeclarations(appId);
     if (!declarations) {
       return null;
     }
-    const required = await Promise.all(declarations.required.map((declaration) => this.toRequirement(appId, declaration, true, locale)));
-    const optional = await Promise.all(declarations.optional.map((declaration) => this.toRequirement(appId, declaration, false, locale)));
+    const required = await Promise.all(declarations.required.map((declaration) => this.toRequirement(appId, declaration, true, locale, options)));
+    const optional = await Promise.all(declarations.optional.map((declaration) => this.toRequirement(appId, declaration, false, locale, options)));
     return {
       appId,
       appName: declarations.appName,
+      platformCapabilities: declarations.platformCapabilities,
       required,
       optional,
       agents: declarations.agents,
       promptTemplates: declarations.promptTemplates,
-      canInstall: required.every((item) => item.available && item.configured),
+      canInstall: true,
     };
   }
 
@@ -452,7 +474,8 @@ export class OfficialToolsService {
     }
     const allowedActions = new Set<string>();
     for (const declaration of declarations.required) {
-      for (const action of declaration.actions) {
+      const tool = await this.getTool(declaration.toolId);
+      for (const action of this.resolveDeclarationActionIds(declaration, tool)) {
         allowedActions.add(action);
       }
     }
@@ -460,7 +483,8 @@ export class OfficialToolsService {
       if (this.registry.appGrants[appId]?.[declaration.toolId] !== true) {
         continue;
       }
-      for (const action of declaration.actions) {
+      const tool = await this.getTool(declaration.toolId);
+      for (const action of this.resolveDeclarationActionIds(declaration, tool)) {
         allowedActions.add(action);
       }
     }
@@ -481,27 +505,27 @@ export class OfficialToolsService {
     if (optional && this.registry.appGrants[appId]?.[input.toolId] !== true) {
       return { success: false, userMessage: 'La app no tiene permiso para usar esta herramienta.', technicalCode: 'app_tool_permission_denied' };
     }
+    const tool = await this.getTool(input.toolId);
     const declaration = required ?? optional;
-    if (!declaration?.actions.includes(input.actionId)) {
+    if (!declaration || !this.declarationAllowsAction(declaration, input.actionId, tool)) {
       return { success: false, userMessage: appToolActionNotDeclaredMessage, technicalCode: 'app_tool_action_not_declared' };
     }
-    const tool = await this.getTool(input.toolId);
     if (!tool || !this.canExecuteTool(tool, input)) {
       return buildToolUnavailableResult(tool, 'app');
     }
     return this.execute(input);
   }
 
-  async callFromAgent(input: CallOfficialToolInput, options?: { appId?: string; requireAppGrant?: boolean }): Promise<CallOfficialToolResult> {
+  async callFromAgent(input: CallOfficialToolInput, options?: { appId?: string; requireAppGrant?: boolean; locale?: string }): Promise<CallOfficialToolResult> {
     await this.load();
     const validation = await this.validateAgentCall(input, options);
     if (validation) {
       return validation;
     }
-    return this.execute(input);
+    return this.execute(input, options?.locale);
   }
 
-  async validateAgentCall(input: CallOfficialToolInput, options?: { appId?: string; requireAppGrant?: boolean }): Promise<CallOfficialToolResult | null> {
+  async validateAgentCall(input: CallOfficialToolInput, options?: { appId?: string; requireAppGrant?: boolean; locale?: string }): Promise<CallOfficialToolResult | null> {
     await this.load();
     if (options?.requireAppGrant) {
       if (!options.appId) {
@@ -519,37 +543,66 @@ export class OfficialToolsService {
       if (optional && this.registry.appGrants[options.appId]?.[input.toolId] !== true) {
         return { success: false, userMessage: 'La app no tiene permiso para usar esta herramienta.', technicalCode: 'app_tool_permission_denied' };
       }
+      const tool = await this.getTool(input.toolId, options?.locale);
       const declaration = required ?? optional;
-      if (!declaration?.actions.includes(input.actionId)) {
+      if (!declaration || !this.declarationAllowsAction(declaration, input.actionId, tool)) {
         return { success: false, userMessage: appToolActionNotDeclaredMessage, technicalCode: 'app_tool_action_not_declared' };
       }
     }
-    const tool = await this.getTool(input.toolId);
+    const tool = await this.getTool(input.toolId, options?.locale);
     if (!tool || !this.canExecuteTool(tool, input)) {
-      return buildToolUnavailableResult(tool, 'agent');
+      return buildToolUnavailableResult(tool, 'agent', options?.locale);
     }
     return null;
   }
 
-  private async execute(input: CallOfficialToolInput): Promise<CallOfficialToolResult> {
+  private async execute(input: CallOfficialToolInput, locale?: string): Promise<CallOfficialToolResult> {
     const toolModule = this.modulesById.get(input.toolId);
     if (!toolModule) {
-      return { success: false, userMessage: 'La herramienta no tiene executor disponible.', technicalCode: 'tool_executor_missing' };
+      return { success: false, userMessage: getSharedCopy(locale).tools.chromeExtension.executorMissing, technicalCode: 'tool_executor_missing' };
     }
-    return toolModule.execute(input, this.getContext());
+    return toolModule.execute(input, this.getContext(locale));
   }
 
-  private async toRequirement(appId: string, declaration: AppToolDeclaration, required: boolean, locale?: string) {
+  private async toRequirement(appId: string, declaration: AppToolDeclaration, required: boolean, locale?: string, options?: GetAppToolsInstallGateOptions) {
     const tool = await this.getTool(declaration.toolId, locale);
     const configured = Boolean(tool && this.isToolUsable(tool));
+    const storedGrant = this.registry.appGrants[appId]?.[declaration.toolId];
+    const hasStoredGrant = typeof storedGrant === 'boolean';
     return {
       declaration,
       required,
       tool: tool ?? undefined,
-      granted: required || this.registry.appGrants[appId]?.[declaration.toolId] === true,
+      resolvedActions: this.resolveDeclarationActions(declaration, tool),
+      allActions: declaration.actions.includes(ALL_TOOL_ACTIONS_TOKEN),
+      granted: required || (hasStoredGrant ? storedGrant : options?.defaultOptionalGrants === true),
+      hasStoredGrant,
       available: Boolean(tool && tool.status !== 'available' && tool.status !== 'error'),
       configured,
     };
+  }
+
+  private resolveDeclarationActionIds(declaration: AppToolDeclaration, tool: OfficialToolSummary | null): string[] {
+    if (declaration.actions.includes(ALL_TOOL_ACTIONS_TOKEN)) {
+      return tool?.actions.map((action) => action.id) ?? [];
+    }
+    return declaration.actions;
+  }
+
+  private resolveDeclarationActions(declaration: AppToolDeclaration, tool: OfficialToolSummary | null) {
+    const actionIds = this.resolveDeclarationActionIds(declaration, tool);
+    if (!tool) {
+      return [];
+    }
+    const allowed = new Set(actionIds);
+    return tool.actions.filter((action) => allowed.has(action.id));
+  }
+
+  private declarationAllowsAction(declaration: AppToolDeclaration, actionId: string, tool: OfficialToolSummary | null): boolean {
+    if (declaration.actions.includes(ALL_TOOL_ACTIONS_TOKEN)) {
+      return Boolean(tool?.actions.some((action) => action.id === actionId));
+    }
+    return declaration.actions.includes(actionId);
   }
 
   private isToolUsable(tool: OfficialToolSummary): boolean {

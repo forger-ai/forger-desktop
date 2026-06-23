@@ -5,6 +5,7 @@ import type {
   AgentToolPackageDefinition,
   AgentToolSettings,
 } from '../../shared/types';
+import { getSharedCopy } from '../../shared/i18n';
 
 export const FORGER_TOOL_PACKAGE_ID = 'forger';
 
@@ -400,6 +401,15 @@ export const AGENT_TOOL_PACKAGES: AgentToolPackageDefinition[] = [
         defaultRequiresApproval: true,
       },
       {
+        id: 'forger_chrome_extension.wait_for_selector',
+        packageId: 'official:forger_chrome_extension',
+        name: 'Esperar selector',
+        description: 'Espera hasta que un selector alcance un estado visible, oculto, adjunto o removido.',
+        category: 'consulta',
+        risk: 'bajo',
+        defaultRequiresApproval: false,
+      },
+      {
         id: 'forger_chrome_extension.click',
         packageId: 'official:forger_chrome_extension',
         name: 'Click en Chrome',
@@ -463,6 +473,15 @@ export const AGENT_TOOL_PACKAGES: AgentToolPackageDefinition[] = [
         defaultRequiresApproval: true,
       },
       {
+        id: 'forger_chrome_extension.close_window',
+        packageId: 'official:forger_chrome_extension',
+        name: 'Cerrar ventana de Chrome',
+        description: 'Cierra la ventana dedicada de Chrome asociada a una sesion.',
+        category: 'vista',
+        risk: 'medio',
+        defaultRequiresApproval: true,
+      },
+      {
         id: 'forger_chrome_extension.close_session',
         packageId: 'official:forger_chrome_extension',
         name: 'Cerrar Chrome dedicado',
@@ -474,6 +493,26 @@ export const AGENT_TOOL_PACKAGES: AgentToolPackageDefinition[] = [
     ],
   },
 ];
+
+export const getAgentToolPackages = (locale?: string | null): AgentToolPackageDefinition[] => {
+  const chromeExtensionCopy = getSharedCopy(locale).officialTools.forger_chrome_extension;
+  return AGENT_TOOL_PACKAGES.map((toolPackage) => {
+    if (toolPackage.id !== 'official:forger_chrome_extension') {
+      return toolPackage;
+    }
+    return {
+      ...toolPackage,
+      name: chromeExtensionCopy.name,
+      description: chromeExtensionCopy.description,
+      tools: toolPackage.tools.map((tool) => {
+        const actionCopy = (chromeExtensionCopy.actions as Partial<Record<AgentToolId, { name: string; description: string }>>)[tool.id];
+        return actionCopy
+          ? { ...tool, name: actionCopy.name, description: actionCopy.description }
+          : tool;
+      }),
+    };
+  });
+};
 
 const MEMORY_TOOL_DEFINITIONS: AgentToolDefinition[] = [
   {

@@ -54,7 +54,7 @@ import { appAllowsAgentRuntimeControl, appAllowsAudioInput, appAllowsSpeechToTex
 type ServiceConstructor<T> = new (...args: unknown[]) => T;
 type AsyncFn<T = unknown> = (...args: unknown[]) => Promise<T>;
 type SyncFn<T = unknown> = (...args: unknown[]) => T;
-type ToolAccess = { appId: string; caller: string };
+type ToolAccess = { appId: string; caller: string; locale?: string };
 type PermissionDecision = unknown;
 type PermissionRequest = unknown;
 type ForgerMcpSessionOptions = { caller: string; appIds: string[]; locale?: string };
@@ -166,8 +166,8 @@ interface MainLifecycleState {
       locale?: string,
     ) => Promise<AppToolGrantRequestPreview>;
     setOptionalAppToolGrant: (input: SetAppToolGrantInput, locale?: string) => Promise<AppToolGrantRequestResult>;
-    validateAgentCall: (input: unknown, access: { appId: string; requireAppGrant: boolean }) => Promise<unknown>;
-    callFromAgent: (input: unknown, access: { appId: string; requireAppGrant: boolean }) => Promise<unknown>;
+    validateAgentCall: (input: unknown, access: { appId: string; requireAppGrant: boolean; locale?: string }) => Promise<unknown>;
+    callFromAgent: (input: unknown, access: { appId: string; requireAppGrant: boolean; locale?: string }) => Promise<unknown>;
     listToolsForApp: (appId: string) => Promise<OfficialToolSummary[]>;
     callFromApp: (appId: string, input: CallOfficialToolInput) => Promise<CallOfficialToolResult>;
   }) | null;
@@ -793,10 +793,12 @@ export const registerMainLifecycle = (deps: unknown) => {
     validateOfficialTool: async (input: unknown, access: ToolAccess) => await getOfficialToolsService().validateAgentCall(input, {
       appId: access.appId,
       requireAppGrant: access.caller === 'app-agent',
+      locale: access.locale,
     }),
     callOfficialTool: async (input: unknown, access: ToolAccess) => await getOfficialToolsService().callFromAgent(input, {
       appId: access.appId,
       requireAppGrant: access.caller === 'app-agent',
+      locale: access.locale,
     }),
     getSpeechToTextState: async () => await getSpeechToTextService().getState(),
     getTextToSpeechState: async () => await getTextToSpeechService().getState(),

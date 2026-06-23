@@ -113,11 +113,11 @@ interface ForgerMcpServerOptions {
   listOfficialToolActionIdsForApp: (appId: string) => Promise<Set<string>>;
   validateOfficialTool: (
     input: CallOfficialToolInput,
-    access: { caller: AgentMcpSession['caller']; appId: string },
+    access: { caller: AgentMcpSession['caller']; appId: string; locale?: string },
   ) => Promise<CallOfficialToolResult | null>;
   callOfficialTool: (
     input: CallOfficialToolInput,
-    access: { caller: AgentMcpSession['caller']; appId: string },
+    access: { caller: AgentMcpSession['caller']; appId: string; locale?: string },
   ) => Promise<CallOfficialToolResult>;
   getSpeechToTextState: () => Promise<SpeechToTextState>;
   getTextToSpeechState: () => Promise<TextToSpeechState>;
@@ -689,7 +689,7 @@ export class ForgerMcpServer {
       const officialToolId = getOfficialToolIdForAction(toolId);
       const validation = await this.options.validateOfficialTool(
         { toolId: officialToolId, actionId: toolId, input: args },
-        { caller: session.caller, appId: session.appId },
+        { caller: session.caller, appId: session.appId, locale: session.locale },
       );
       if (validation) {
         await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result: validation });
@@ -907,7 +907,7 @@ export class ForgerMcpServer {
       const officialToolId = getOfficialToolIdForAction(toolId);
       const result = await this.options.callOfficialTool(
         { toolId: officialToolId, actionId: toolId, input: args },
-        { caller: session.caller, appId: session.appId },
+        { caller: session.caller, appId: session.appId, locale: session.locale },
       );
       await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
       return withToolAuthorization(result, approval);

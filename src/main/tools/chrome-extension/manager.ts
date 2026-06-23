@@ -8,7 +8,9 @@ import type { InternalToolContext } from '../types';
 import {
   CHROME_EXTENSION_DEFAULT_TIMEOUT_MS,
   CHROME_EXTENSION_DEV_ID,
+  CHROME_EXTENSION_MAX_WAIT_TIMEOUT_MS,
   CHROME_EXTENSION_NATIVE_HOST_NAME,
+  CHROME_EXTENSION_WAIT_COMMAND_TIMEOUT_PADDING_MS,
   type ChromeExtensionChannel,
   type ChromeExtensionCommandEnvelope,
   type ChromeExtensionCommandResponse,
@@ -162,6 +164,7 @@ export class ChromeExtensionBridgeManager {
     context: InternalToolContext,
     action: string,
     input: { sessionId?: string; payload?: Record<string, unknown> },
+    options?: { timeoutMs?: number },
   ): Promise<ChromeExtensionCommandResponse> {
     await this.start(context);
     const client = this.getSelectedClient();
@@ -187,6 +190,9 @@ export class ChromeExtensionBridgeManager {
       ...(input.sessionId ? { sessionId: input.sessionId } : {}),
       ...(input.payload ? { payload: input.payload } : {}),
     };
+    const commandTimeoutMs = Number.isFinite(options?.timeoutMs)
+      ? Math.max(1, Math.floor(options?.timeoutMs ?? CHROME_EXTENSION_DEFAULT_TIMEOUT_MS))
+      : CHROME_EXTENSION_DEFAULT_TIMEOUT_MS;
     const response = await new Promise<ChromeExtensionCommandResponse>((resolve) => {
       const timeout = setTimeout(() => {
         this.pending.delete(requestId);
@@ -195,7 +201,7 @@ export class ChromeExtensionBridgeManager {
           success: false,
           error: { code: 'chrome_extension_request_timeout', message: 'Chrome extension request timed out.' },
         });
-      }, CHROME_EXTENSION_DEFAULT_TIMEOUT_MS);
+      }, commandTimeoutMs);
       this.pending.set(requestId, { resolve, timeout });
       client.socket.send(JSON.stringify({ type: 'command', ...envelope }));
     });
@@ -273,6 +279,35 @@ export class ChromeExtensionBridgeManager {
       payload.text = text;
     }
     return { sessionId, payload };
+  }
+
+  parseWaitForSelectorInput(input: unknown): { sessionId: string; payload: Record<string, unknown>; commandTimeoutMs: number } | null {
+    const parsed = this.parseSelectorInput(input);
+    if (!parsed || !isRecord(input)) {
+      return null;
+    }
+    const state = cleanString(input.state) || 'visible';
+    if (!['attached', 'visible', 'hidden', 'detached'].includes(state)) {
+      return null;
+    }
+    const rawTimeoutMs = input.timeoutMs;
+    const timeoutMs = rawTimeoutMs === undefined
+      ? CHROME_EXTENSION_DEFAULT_TIMEOUT_MS
+      : typeof rawTimeoutMs === 'number' && Number.isFinite(rawTimeoutMs)
+        ? Math.floor(rawTimeoutMs)
+        : NaN;
+    if (!Number.isFinite(timeoutMs) || timeoutMs < 1 || timeoutMs > CHROME_EXTENSION_MAX_WAIT_TIMEOUT_MS) {
+      return null;
+    }
+    parsed.payload.state = state;
+    parsed.payload.timeoutMs = timeoutMs;
+    return {
+      ...parsed,
+      commandTimeoutMs: Math.min(
+        CHROME_EXTENSION_MAX_WAIT_TIMEOUT_MS + CHROME_EXTENSION_WAIT_COMMAND_TIMEOUT_PADDING_MS,
+        timeoutMs + CHROME_EXTENSION_WAIT_COMMAND_TIMEOUT_PADDING_MS,
+      ),
+    };
   }
 
   parseSubmitFormInput(input: unknown): { sessionId: string; payload: Record<string, unknown> } | null {
@@ -426,6 +461,25 @@ export class ChromeExtensionBridgeManager {
     if (action === 'close_session' && isRecord(response.data)) {
       const sessionId = cleanString(response.data.sessionId);
       if (sessionId && this.sessions.delete(sessionId)) {
+        await this.saveSessions(context);
+      }
+    }
+    if (action === 'close_window' && isRecord(response.data)) {
+      const sessionId = cleanString(response.data.sessionId);
+      const windowId = typeof response.data.windowId === 'number' ? response.data.windowId : NaN;
+      let changed = false;
+      if (sessionId && this.sessions.delete(sessionId)) {
+        changed = true;
+      }
+      if (Number.isFinite(windowId)) {
+        for (const [storedSessionId, session] of this.sessions.entries()) {
+          if (session.windowId === windowId) {
+            this.sessions.delete(storedSessionId);
+            changed = true;
+          }
+        }
+      }
+      if (changed) {
         await this.saveSessions(context);
       }
     }

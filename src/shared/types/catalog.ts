@@ -1,4 +1,5 @@
 import type { AppToolDeclaration } from './tools';
+import type { PlatformCapabilities } from '../platform-capabilities';
 
 export type AppStatus = 'not_installed' | 'installing' | 'installed' | 'running' | 'error' | 'conflict';
 export type AppExecutionPhase = 'stopped' | 'starting' | 'running' | 'error';
@@ -35,6 +36,7 @@ export interface AppSummary {
   beta?: boolean;
   changelog?: VersionChangelog;
   capabilities?: AppCapability[];
+  platformCapabilities?: PlatformCapabilities;
   userMessage?: string;
   lastErrorOperation?: AppLastErrorOperation;
   catalogStatus?: CatalogPublicationStatus;
