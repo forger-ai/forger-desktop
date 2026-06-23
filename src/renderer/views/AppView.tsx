@@ -299,12 +299,11 @@ export function AppView({
     : [];
   const appHasOfficialToolDeclarations = appToolRequirements.length > 0;
   const appToolWarningCount = appToolRequirements.filter((item) => item.granted && !(item.available && item.configured)).length;
-  const appToolActionNames = (item: AppToolsInstallGate['required'][number]) => {
-    const actionNamesById = new Map((item.tool?.actions ?? []).map((action) => [action.id, action.name]));
-    return item.declaration.actions
-      .map((actionId) => actionNamesById.get(actionId))
-      .filter((label): label is string => Boolean(label));
-  };
+  const appToolActionNames = (item: AppToolsInstallGate['required'][number]) => (
+    item.allActions && item.resolvedActions.length === 0
+      ? [t.installGate.allActions]
+      : item.resolvedActions.map((action) => action.name)
+  );
   const appToolStatusLabel = (item: AppToolsInstallGate['required'][number]) => {
     if (item.available && item.configured) {
       return t.appView.toolConfigured;
@@ -405,6 +404,41 @@ export function AppView({
         </Stack>
       ) : (
         <Typography color="text.secondary">{t.appView.officialToolsEmpty}</Typography>
+      )}
+    </Stack>
+  ) : null;
+
+  const platformCapabilityRows = Object.entries(appToolsInstallGate?.platformCapabilities ?? {}).map(([key, value]) => ({
+    key,
+    label: (t.installGate.capabilityNames as Record<string, string>)[key] ?? key,
+    required: value.required === true,
+    reason: value.reason,
+  }));
+  const platformCapabilitiesContent = details.installed ? (
+    <Stack spacing={1.5}>
+      <Stack spacing={0.5}>
+        <Typography variant="h5">{t.appView.platformCapabilitiesTitle}</Typography>
+        <Typography color="text.secondary">{t.appView.platformCapabilitiesBody}</Typography>
+      </Stack>
+      {platformCapabilityRows.length > 0 ? (
+        <Stack spacing={1}>
+          {platformCapabilityRows.map((item) => (
+            <Box key={item.key} sx={{ border: '1px solid', borderColor: 'divider', bgcolor: 'background.paper', p: 1.5 }}>
+              <Stack spacing={0.75}>
+                <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap" useFlexGap>
+                  <Typography fontWeight={700}>{item.label}</Typography>
+                  <Chip size="small" label={item.required ? t.installGate.requiredCapability : t.installGate.optionalCapability} />
+                  <Chip size="small" variant="outlined" label={t.installGate.informational} />
+                </Stack>
+                {item.reason ? (
+                  <Typography variant="body2" color="text.secondary">{item.reason}</Typography>
+                ) : null}
+              </Stack>
+            </Box>
+          ))}
+        </Stack>
+      ) : (
+        <Typography color="text.secondary">{t.appView.platformCapabilitiesEmpty}</Typography>
       )}
     </Stack>
   ) : null;
@@ -800,6 +834,7 @@ export function AppView({
           {details.app.longDescription ?? details.app.description}
         </Typography>
       </Stack>
+      {platformCapabilitiesContent}
       {appToolsContent}
       {promptTemplates.length > 0 ? (
         <Stack spacing={1.5}>

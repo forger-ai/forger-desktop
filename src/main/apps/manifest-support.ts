@@ -61,6 +61,7 @@ import {
   normalizeAntigravityModelAndEffort,
   normalizeRuntimeEffort,
 } from '../../shared/agent-runtime-registry';
+import { normalizePlatformCapabilities, type PlatformCapabilities } from '../../shared/platform-capabilities';
 import type { AppManifest, AppRegistry, RunningAppProcess } from '../core/main-process-types';
 
 interface ManifestSupportState {
@@ -517,6 +518,7 @@ const resolveAppToolDeclarations = async (
   optional: AppToolDeclaration[];
   agents: AppAgent[];
   promptTemplates: AppPromptTemplate[];
+  platformCapabilities: PlatformCapabilities;
 } | null> => {
   const record = getCurrentRegistry().apps[appId];
   if (record?.installDir) {
@@ -526,6 +528,7 @@ const resolveAppToolDeclarations = async (
       appName: record.name ?? appId,
       agents: normalizeManifestAgents(manifest),
       promptTemplates: normalizeManifestPromptTemplates(manifest),
+      platformCapabilities: normalizePlatformCapabilities(manifest?.platformCapabilities),
       ...declarations,
     };
   }
@@ -539,6 +542,7 @@ const resolveAppToolDeclarations = async (
     appName: catalog.name ?? appId,
     agents: catalog.agents ?? [],
     promptTemplates: catalog.promptTemplates ?? [],
+    platformCapabilities: normalizePlatformCapabilities(catalog.platformCapabilities),
     ...declarations,
   };
 };

@@ -14,11 +14,13 @@ import {
 } from './types';
 
 const ACTION_PREFIX = `${CHROME_EXTENSION_TOOL_ID}.`;
+const defaultDefinitionCopy = getSharedCopy().officialTools.forger_chrome_extension;
+const defaultActionCopy = defaultDefinitionCopy.actions;
 
 const definition: OfficialToolDefinition = {
   id: CHROME_EXTENSION_TOOL_ID,
-  name: 'Forger Chrome Extension',
-  description: 'Operates a dedicated Chrome window through the Forger Chrome extension and a local native bridge.',
+  name: defaultDefinitionCopy.name,
+  description: defaultDefinitionCopy.description,
   version: '0.1.0',
   runtime: 'builtin',
   official: true,
@@ -26,84 +28,96 @@ const definition: OfficialToolDefinition = {
   actions: [
     {
       id: `${ACTION_PREFIX}connection.status`,
-      name: 'Connection status',
-      description: 'Checks whether the Forger Chrome extension is connected.',
+      name: defaultActionCopy[`${ACTION_PREFIX}connection.status`].name,
+      description: defaultActionCopy[`${ACTION_PREFIX}connection.status`].description,
       risk: 'low',
     },
     {
       id: `${ACTION_PREFIX}open_dedicated_tab`,
-      name: 'Open dedicated tab',
-      description: 'Creates a dedicated Chrome window and tab controlled by Forger.',
+      name: defaultActionCopy[`${ACTION_PREFIX}open_dedicated_tab`].name,
+      description: defaultActionCopy[`${ACTION_PREFIX}open_dedicated_tab`].description,
       risk: 'medium',
     },
     {
       id: `${ACTION_PREFIX}get_current_url`,
-      name: 'Get current URL',
-      description: 'Reads the current URL of a dedicated Chrome session.',
+      name: defaultActionCopy[`${ACTION_PREFIX}get_current_url`].name,
+      description: defaultActionCopy[`${ACTION_PREFIX}get_current_url`].description,
       risk: 'low',
     },
     {
       id: `${ACTION_PREFIX}navigate`,
-      name: 'Navigate',
-      description: 'Navigates a dedicated Chrome session to an http or https URL.',
+      name: defaultActionCopy[`${ACTION_PREFIX}navigate`].name,
+      description: defaultActionCopy[`${ACTION_PREFIX}navigate`].description,
       risk: 'medium',
     },
     {
       id: `${ACTION_PREFIX}get_html`,
-      name: 'Get HTML',
-      description: 'Reads page HTML from the full page or from a selector.',
+      name: defaultActionCopy[`${ACTION_PREFIX}get_html`].name,
+      description: defaultActionCopy[`${ACTION_PREFIX}get_html`].description,
       risk: 'high',
     },
     {
+      id: `${ACTION_PREFIX}wait_for_selector`,
+      name: defaultActionCopy[`${ACTION_PREFIX}wait_for_selector`].name,
+      description: defaultActionCopy[`${ACTION_PREFIX}wait_for_selector`].description,
+      risk: 'low',
+    },
+    {
       id: `${ACTION_PREFIX}click`,
-      name: 'Click element',
-      description: 'Clicks an element matched by selector.',
+      name: defaultActionCopy[`${ACTION_PREFIX}click`].name,
+      description: defaultActionCopy[`${ACTION_PREFIX}click`].description,
       risk: 'medium',
     },
     {
       id: `${ACTION_PREFIX}focus`,
-      name: 'Focus element',
-      description: 'Focuses an element matched by selector.',
+      name: defaultActionCopy[`${ACTION_PREFIX}focus`].name,
+      description: defaultActionCopy[`${ACTION_PREFIX}focus`].description,
       risk: 'medium',
     },
     {
       id: `${ACTION_PREFIX}hover`,
-      name: 'Hover element',
-      description: 'Dispatches hover events for an element matched by selector.',
+      name: defaultActionCopy[`${ACTION_PREFIX}hover`].name,
+      description: defaultActionCopy[`${ACTION_PREFIX}hover`].description,
       risk: 'medium',
     },
     {
       id: `${ACTION_PREFIX}input_text`,
-      name: 'Input text',
-      description: 'Writes text into an input or contenteditable element matched by selector.',
+      name: defaultActionCopy[`${ACTION_PREFIX}input_text`].name,
+      description: defaultActionCopy[`${ACTION_PREFIX}input_text`].description,
       risk: 'high',
     },
     {
       id: `${ACTION_PREFIX}submit_form`,
-      name: 'Submit form',
-      description: 'Submits the form associated with an element matched by selector.',
+      name: defaultActionCopy[`${ACTION_PREFIX}submit_form`].name,
+      description: defaultActionCopy[`${ACTION_PREFIX}submit_form`].description,
       risk: 'high',
     },
     {
       id: `${ACTION_PREFIX}get_styles`,
-      name: 'Get styles',
-      description: 'Reads computed and inline CSS styles from an element matched by selector.',
+      name: defaultActionCopy[`${ACTION_PREFIX}get_styles`].name,
+      description: defaultActionCopy[`${ACTION_PREFIX}get_styles`].description,
       risk: 'low',
     },
     {
       id: `${ACTION_PREFIX}set_styles`,
-      name: 'Set styles',
-      description: 'Applies allowed CSS styles to an element matched by selector.',
+      name: defaultActionCopy[`${ACTION_PREFIX}set_styles`].name,
+      description: defaultActionCopy[`${ACTION_PREFIX}set_styles`].description,
+      risk: 'medium',
+    },
+    {
+      id: `${ACTION_PREFIX}close_window`,
+      name: defaultActionCopy[`${ACTION_PREFIX}close_window`].name,
+      description: defaultActionCopy[`${ACTION_PREFIX}close_window`].description,
       risk: 'medium',
     },
     {
       id: `${ACTION_PREFIX}close_session`,
-      name: 'Close session',
-      description: 'Closes a dedicated Chrome window controlled by Forger.',
+      name: defaultActionCopy[`${ACTION_PREFIX}close_session`].name,
+      description: defaultActionCopy[`${ACTION_PREFIX}close_session`].description,
       risk: 'medium',
     },
   ],
-  changelog: ['Dev MVP for a local Chrome extension bridge and dedicated browser sessions.'],
+  changelog: [...defaultDefinitionCopy.changelog],
 };
 
 let manager: ChromeExtensionBridgeManager | null = null;
@@ -146,6 +160,7 @@ const execute = async (
   context: InternalToolContext,
 ): Promise<CallOfficialToolResult> => {
   const toolManager = getManager();
+  const copy = getSharedCopy(context.locale).tools.chromeExtension;
   try {
     if (input.actionId === `${ACTION_PREFIX}connection.status`) {
       return { success: true, data: await toolManager.status(context) };
@@ -153,79 +168,97 @@ const execute = async (
     if (input.actionId === `${ACTION_PREFIX}open_dedicated_tab`) {
       const parsed = toolManager.parseOpenDedicatedTabInput(input.input);
       if (!parsed) {
-        return { success: false, userMessage: 'Indica una URL http o https valida.', technicalCode: 'chrome_extension_open_input_invalid' };
+        return { success: false, userMessage: copy.invalidOpen, technicalCode: 'chrome_extension_open_input_invalid' };
       }
-      return toToolResult(await toolManager.sendCommand(context, 'open_dedicated_tab', parsed), 'chrome_extension_open_failed', 'No pudimos abrir Chrome.');
+      return toToolResult(await toolManager.sendCommand(context, 'open_dedicated_tab', parsed), 'chrome_extension_open_failed', copy.openFailed);
     }
     if (input.actionId === `${ACTION_PREFIX}get_current_url`) {
       const parsed = toolManager.parseSessionInput(input.input);
       if (!parsed) {
-        return { success: false, userMessage: 'Indica la sesion de Chrome que quieres revisar.', technicalCode: 'chrome_extension_session_input_invalid' };
+        return { success: false, userMessage: copy.invalidSessionReview, technicalCode: 'chrome_extension_session_input_invalid' };
       }
-      return toToolResult(await toolManager.sendCommand(context, 'get_current_url', parsed), 'chrome_extension_url_failed', 'No pudimos leer la URL de Chrome.');
+      return toToolResult(await toolManager.sendCommand(context, 'get_current_url', parsed), 'chrome_extension_url_failed', copy.urlFailed);
     }
     if (input.actionId === `${ACTION_PREFIX}navigate`) {
       const parsed = toolManager.parseNavigateInput(input.input);
       if (!parsed) {
-        return { success: false, userMessage: 'Indica la sesion y una URL http o https valida.', technicalCode: 'chrome_extension_navigate_input_invalid' };
+        return { success: false, userMessage: copy.invalidNavigate, technicalCode: 'chrome_extension_navigate_input_invalid' };
       }
-      return toToolResult(await toolManager.sendCommand(context, 'navigate', parsed), 'chrome_extension_navigate_failed', 'No pudimos navegar en Chrome.');
+      return toToolResult(await toolManager.sendCommand(context, 'navigate', parsed), 'chrome_extension_navigate_failed', copy.navigateFailed);
     }
     if (input.actionId === `${ACTION_PREFIX}get_html`) {
       const parsed = toolManager.parseSelectorInput(input.input, { allowMissingSelector: true });
       if (!parsed) {
-        return { success: false, userMessage: 'Indica la sesion de Chrome que quieres leer.', technicalCode: 'chrome_extension_html_input_invalid' };
+        return { success: false, userMessage: copy.invalidHtml, technicalCode: 'chrome_extension_html_input_invalid' };
       }
-      return toToolResult(await toolManager.sendCommand(context, 'get_html', parsed), 'chrome_extension_html_failed', 'No pudimos leer la pagina.');
+      return toToolResult(await toolManager.sendCommand(context, 'get_html', parsed), 'chrome_extension_html_failed', copy.htmlFailed);
+    }
+    if (input.actionId === `${ACTION_PREFIX}wait_for_selector`) {
+      const parsed = toolManager.parseWaitForSelectorInput(input.input);
+      if (!parsed) {
+        return { success: false, userMessage: copy.invalidWaitForSelector, technicalCode: 'chrome_extension_wait_for_selector_input_invalid' };
+      }
+      return toToolResult(
+        await toolManager.sendCommand(context, 'wait_for_selector', parsed, { timeoutMs: parsed.commandTimeoutMs }),
+        'chrome_extension_wait_for_selector_failed',
+        copy.waitForSelectorFailed,
+      );
     }
     if (input.actionId === `${ACTION_PREFIX}click` || input.actionId === `${ACTION_PREFIX}focus` || input.actionId === `${ACTION_PREFIX}hover`) {
       const action = input.actionId.slice(ACTION_PREFIX.length);
       const parsed = toolManager.parseSelectorInput(input.input);
       if (!parsed) {
-        return { success: false, userMessage: 'Indica la sesion y el selector del elemento.', technicalCode: 'chrome_extension_selector_input_invalid' };
+        return { success: false, userMessage: copy.invalidSelector, technicalCode: 'chrome_extension_selector_input_invalid' };
       }
-      return toToolResult(await toolManager.sendCommand(context, action, parsed), `chrome_extension_${action}_failed`, 'No pudimos operar ese elemento.');
+      return toToolResult(await toolManager.sendCommand(context, action, parsed), `chrome_extension_${action}_failed`, copy.elementActionFailed);
     }
     if (input.actionId === `${ACTION_PREFIX}input_text`) {
       const parsed = toolManager.parseSelectorInput(input.input, { includeText: true });
       if (!parsed) {
-        return { success: false, userMessage: 'Indica la sesion, el selector y el texto.', technicalCode: 'chrome_extension_input_text_invalid' };
+        return { success: false, userMessage: copy.invalidInputText, technicalCode: 'chrome_extension_input_text_invalid' };
       }
-      return toToolResult(await toolManager.sendCommand(context, 'input_text', parsed), 'chrome_extension_input_failed', 'No pudimos escribir en ese elemento.');
+      return toToolResult(await toolManager.sendCommand(context, 'input_text', parsed), 'chrome_extension_input_failed', copy.inputFailed);
     }
     if (input.actionId === `${ACTION_PREFIX}submit_form`) {
       const parsed = toolManager.parseSubmitFormInput(input.input);
       if (!parsed) {
-        return { success: false, userMessage: 'Indica la sesion y el selector del formulario o de un elemento dentro del formulario.', technicalCode: 'chrome_extension_submit_form_invalid' };
+        return { success: false, userMessage: copy.invalidSubmitForm, technicalCode: 'chrome_extension_submit_form_invalid' };
       }
-      return toToolResult(await toolManager.sendCommand(context, 'submit_form', parsed), 'chrome_extension_submit_form_failed', 'No pudimos enviar ese formulario.');
+      return toToolResult(await toolManager.sendCommand(context, 'submit_form', parsed), 'chrome_extension_submit_form_failed', copy.submitFormFailed);
     }
     if (input.actionId === `${ACTION_PREFIX}get_styles`) {
       const parsed = toolManager.parseStylesInput(input.input, { includeStyles: false });
       if (!parsed) {
-        return { success: false, userMessage: 'Indica la sesion y el selector del elemento.', technicalCode: 'chrome_extension_get_styles_invalid' };
+        return { success: false, userMessage: copy.invalidGetStyles, technicalCode: 'chrome_extension_get_styles_invalid' };
       }
-      return toToolResult(await toolManager.sendCommand(context, 'get_styles', parsed), 'chrome_extension_get_styles_failed', 'No pudimos leer los estilos de ese elemento.');
+      return toToolResult(await toolManager.sendCommand(context, 'get_styles', parsed), 'chrome_extension_get_styles_failed', copy.getStylesFailed);
     }
     if (input.actionId === `${ACTION_PREFIX}set_styles`) {
       const parsed = toolManager.parseStylesInput(input.input, { includeStyles: true });
       if (!parsed) {
-        return { success: false, userMessage: 'Indica la sesion, el selector y los estilos permitidos.', technicalCode: 'chrome_extension_set_styles_invalid' };
+        return { success: false, userMessage: copy.invalidSetStyles, technicalCode: 'chrome_extension_set_styles_invalid' };
       }
-      return toToolResult(await toolManager.sendCommand(context, 'set_styles', parsed), 'chrome_extension_set_styles_failed', 'No pudimos aplicar esos estilos.');
+      return toToolResult(await toolManager.sendCommand(context, 'set_styles', parsed), 'chrome_extension_set_styles_failed', copy.setStylesFailed);
+    }
+    if (input.actionId === `${ACTION_PREFIX}close_window`) {
+      const parsed = toolManager.parseSessionInput(input.input);
+      if (!parsed) {
+        return { success: false, userMessage: copy.invalidCloseWindow, technicalCode: 'chrome_extension_close_window_input_invalid' };
+      }
+      return toToolResult(await toolManager.sendCommand(context, 'close_window', parsed), 'chrome_extension_close_window_failed', copy.closeWindowFailed);
     }
     if (input.actionId === `${ACTION_PREFIX}close_session`) {
       const parsed = toolManager.parseSessionInput(input.input);
       if (!parsed) {
-        return { success: false, userMessage: 'Indica la sesion de Chrome que quieres cerrar.', technicalCode: 'chrome_extension_close_input_invalid' };
+        return { success: false, userMessage: copy.invalidCloseSession, technicalCode: 'chrome_extension_close_input_invalid' };
       }
-      return toToolResult(await toolManager.sendCommand(context, 'close_session', parsed), 'chrome_extension_close_failed', 'No pudimos cerrar la sesion de Chrome.');
+      return toToolResult(await toolManager.sendCommand(context, 'close_session', parsed), 'chrome_extension_close_failed', copy.closeSessionFailed);
     }
-    return { success: false, userMessage: 'La accion de Chrome no esta disponible.', technicalCode: 'chrome_extension_action_unknown' };
+    return { success: false, userMessage: copy.unknownAction, technicalCode: 'chrome_extension_action_unknown' };
   } catch (error) {
     return {
       success: false,
-      userMessage: 'No pudimos completar la accion de Chrome.',
+      userMessage: copy.actionFailed,
       technicalCode: error instanceof Error ? error.message : 'chrome_extension_action_failed',
     };
   }

@@ -547,7 +547,7 @@ const api: ForgerDesktopApi = {
       ipcRenderer.removeListener(IPC_CHANNELS.desktopErrorReportRequested, wrapped);
     };
   },
-  listAgentTools: () => ipcRenderer.invoke(IPC_CHANNELS.listAgentTools),
+  listAgentTools: (locale?: string) => ipcRenderer.invoke(IPC_CHANNELS.listAgentTools, locale),
   getAgentToolSettings: () => ipcRenderer.invoke(IPC_CHANNELS.getAgentToolSettings),
   updateAgentToolApproval: (input) => ipcRenderer.invoke(IPC_CHANNELS.updateAgentToolApproval, input),
   listOfficialTools: (locale) => ipcRenderer.invoke(IPC_CHANNELS.listOfficialTools, locale),
@@ -565,7 +565,7 @@ const api: ForgerDesktopApi = {
       ipcRenderer.removeListener(IPC_CHANNELS.officialToolEvent, wrapped);
     };
   },
-  getAppToolsInstallGate: (appId, locale) => ipcRenderer.invoke(IPC_CHANNELS.getAppToolsInstallGate, appId, locale),
+  getAppToolsInstallGate: (appId, locale, options) => ipcRenderer.invoke(IPC_CHANNELS.getAppToolsInstallGate, appId, locale, options),
   setAppToolGrant: (input, locale) => ipcRenderer.invoke(IPC_CHANNELS.setAppToolGrant, input, locale),
   memoryList: (input) => ipcRenderer.invoke(IPC_CHANNELS.memoryList, input ?? {}),
   memoryCreate: (input) => ipcRenderer.invoke(IPC_CHANNELS.memoryCreate, input),

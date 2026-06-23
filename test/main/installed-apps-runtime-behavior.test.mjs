@@ -258,7 +258,7 @@ test('fetchDownloadBundle rejects failed downloads and missing backend download 
   );
 });
 
-test('installAppRuntime blocks missing catalog entries and missing required tools before download work', async (t) => {
+test('installAppRuntime blocks missing catalog entries but only logs missing required tools', async (t) => {
   const missingCatalog = await makeLifecycleHarness({ catalogApps: [] });
   t.after(async () => {
     await fs.rm(missingCatalog.root, { recursive: true, force: true });
@@ -269,15 +269,24 @@ test('installAppRuntime blocks missing catalog entries and missing required tool
   assert.deepEqual(missingCatalog.registry.apps, {});
 
   const missingTools = await makeLifecycleHarness({
-    getOfficialToolsService: () => ({ getInstallGate: async () => ({ canInstall: false }) }),
+    getOfficialToolsService: () => ({
+      getInstallGate: async () => ({
+        canInstall: true,
+        required: [{ declaration: { toolId: 'gmail', actions: ['*'], reason: 'Needs Gmail' }, available: false, configured: false }],
+      }),
+    }),
   });
   t.after(async () => {
     await fs.rm(missingTools.root, { recursive: true, force: true });
   });
+  globalThis.fetch = async () => {
+    throw new Error('download_attempted');
+  };
   const toolsResult = await missingTools.controller.installAppRuntime('demo-app');
   assert.equal(toolsResult.success, false);
-  assert.equal(toolsResult.technicalCode, 'required_app_tools_missing');
-  assert.deepEqual(missingTools.registry.apps, {});
+  assert.equal(toolsResult.technicalCode, 'download_attempted');
+  assert.equal(missingTools.calls.some((call) => call[0] === 'log' && call[1] === 'install:required_tools_unavailable'), true);
+  assert.equal(missingTools.registry.apps['demo-app'].status, 'error');
 });
 
 test('installAppRuntime records failed installs when a downloaded ZIP checksum does not match', async (t) => {

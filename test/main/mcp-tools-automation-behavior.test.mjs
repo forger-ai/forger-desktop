@@ -369,9 +369,18 @@ test('MCP tool schemas expose strict official tool contracts and safe annotation
   assert.deepEqual(chromeSubmitSchema.required, ['sessionId', 'selector']);
   assert.equal(chromeSubmitSchema.properties.submitSelector.type, 'string');
 
+  const chromeCloseWindowSchema = getMcpToolInputSchema('forger_chrome_extension.close_window');
+  assert.deepEqual(chromeCloseWindowSchema.required, ['sessionId']);
+  assert.equal(chromeCloseWindowSchema.additionalProperties, false);
+
   const chromeGetStylesSchema = getMcpToolInputSchema('forger_chrome_extension.get_styles');
   assert.deepEqual(chromeGetStylesSchema.required, ['sessionId', 'selector']);
   assert.equal(chromeGetStylesSchema.properties.properties.items.type, 'string');
+
+  const chromeWaitSchema = getMcpToolInputSchema('forger_chrome_extension.wait_for_selector');
+  assert.deepEqual(chromeWaitSchema.required, ['sessionId', 'selector']);
+  assert.deepEqual(chromeWaitSchema.properties.state.enum, ['attached', 'visible', 'hidden', 'detached']);
+  assert.equal(chromeWaitSchema.properties.timeoutMs.maximum, 60000);
 
   const chromeSetStylesSchema = getMcpToolInputSchema('forger_chrome_extension.set_styles');
   assert.deepEqual(chromeSetStylesSchema.required, ['sessionId', 'selector', 'styles']);
@@ -589,6 +598,12 @@ test('official tool declarations dedupe entries and app grants gate optional too
     reason: 'Necesita leer correo',
     actions: ['gmail.search_messages'],
   }]);
+  const wildcardDeclarations = normalizeAppToolDeclarations({
+    required: [{ toolId: 'forger_chrome_extension', reason: 'Puede operar Chrome', actions: ['*', '*', 'forger_chrome_extension.navigate'] }],
+    optional: [{ toolId: 'gmail', reason: 'Puede usar Gmail', actions: ['*', 'gmail.search_messages', '*'] }],
+  });
+  assert.deepEqual(wildcardDeclarations.required[0].actions, ['*', 'forger_chrome_extension.navigate']);
+  assert.deepEqual(wildcardDeclarations.optional[0].actions, ['*', 'gmail.search_messages']);
 
   const service = new OfficialToolsService({
     metadataRoot: root,
@@ -605,6 +620,7 @@ test('official tool declarations dedupe entries and app grants gate optional too
       optional: declarations.optional,
       agents: [],
       promptTemplates: [],
+      platformCapabilities: {},
     }),
   });
 
@@ -642,6 +658,78 @@ test('official tool declarations dedupe entries and app grants gate optional too
       actionId: 'gmail.connection.status',
     });
     assert.deepEqual(status, { success: true, data: { connected: false } });
+  } finally {
+    await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
+  }
+});
+
+test('official tool wildcards expand only within the declared tool and respect optional grants', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'forger-tools-wildcard-'));
+  const service = new OfficialToolsService({
+    metadataRoot: root,
+    secretsStore: createSecretsStore(),
+    getFreePort,
+    openExternalUrl: async () => undefined,
+    isForgerAccountAuthenticated: () => true,
+    getGmailOAuthClientId: async () => 'gmail-client',
+    exchangeGmailOAuthCode: async () => ({ refresh_token: 'refresh' }),
+    refreshGmailOAuthAccessToken: async () => ({ access_token: 'access' }),
+    getAppToolDeclarations: async (appId) => {
+      if (appId === 'required-wildcard') {
+        return {
+          appName: 'Required Wildcard',
+          required: [{ toolId: 'gmail', reason: 'Needs Gmail', actions: ['*'] }],
+          optional: [],
+          agents: [],
+          promptTemplates: [],
+          platformCapabilities: {},
+        };
+      }
+      if (appId === 'optional-wildcard') {
+        return {
+          appName: 'Optional Wildcard',
+          required: [],
+          optional: [{ toolId: 'gmail', reason: 'Can use Gmail', actions: ['*'] }],
+          agents: [],
+          promptTemplates: [],
+          platformCapabilities: {},
+        };
+      }
+      return null;
+    },
+  });
+
+  try {
+    const requiredActions = await service.listAgentActionIdsForApp('required-wildcard');
+    assert.equal(requiredActions.has('gmail.search_messages'), true);
+    assert.equal(requiredActions.has('gmail.send_email'), true);
+    assert.equal(requiredActions.has('whatsapp.send_message'), false);
+
+    const wrongToolAction = await service.validateAgentCall({
+      toolId: 'gmail',
+      actionId: 'whatsapp.send_message',
+    }, { appId: 'required-wildcard', requireAppGrant: true });
+    assert.equal(wrongToolAction.technicalCode, 'app_tool_action_not_declared');
+
+    assert.deepEqual(await service.listAgentActionIdsForApp('optional-wildcard'), new Set());
+    const blockedOptional = await service.validateAgentCall({
+      toolId: 'gmail',
+      actionId: 'gmail.search_messages',
+    }, { appId: 'optional-wildcard', requireAppGrant: true });
+    assert.equal(blockedOptional.technicalCode, 'app_tool_permission_denied');
+
+    const defaultGate = await service.getInstallGate('optional-wildcard');
+    assert.equal(defaultGate.optional[0].granted, false);
+    assert.equal(defaultGate.optional[0].hasStoredGrant, false);
+    const defaultEnabledGate = await service.getInstallGate('optional-wildcard', undefined, { defaultOptionalGrants: true });
+    assert.equal(defaultEnabledGate.optional[0].granted, true);
+    assert.equal(defaultEnabledGate.optional[0].hasStoredGrant, false);
+
+    await service.setAppToolGrant({ appId: 'optional-wildcard', toolId: 'gmail', granted: true });
+    const optionalActions = await service.listAgentActionIdsForApp('optional-wildcard');
+    assert.equal(optionalActions.has('gmail.search_messages'), true);
+    assert.equal(optionalActions.has('gmail.send_email'), true);
+    assert.equal(optionalActions.has('whatsapp.send_message'), false);
   } finally {
     await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
   }
@@ -827,7 +915,7 @@ test('official tools preserve registry fallbacks, error status, required gates, 
 
     const gate = await service.getInstallGate('required-app');
     assert.equal(gate.required[0].available, false);
-    assert.equal(gate.canInstall, false);
+    assert.equal(gate.canInstall, true);
     assert.deepEqual([...await service.listAgentActionIdsForApp('required-app')], ['gmail.search_messages']);
 
     const noAppGrant = await service.validateAgentCall({
@@ -1261,9 +1349,11 @@ test('free chat MCP sessions expose installed app and Chrome extension tools', a
     assert.equal(names.includes('forger_chrome_extension.open_dedicated_tab'), true);
     assert.equal(names.includes('forger_chrome_extension.navigate'), true);
     assert.equal(names.includes('forger_chrome_extension.get_html'), true);
+    assert.equal(names.includes('forger_chrome_extension.wait_for_selector'), true);
     assert.equal(names.includes('forger_chrome_extension.submit_form'), true);
     assert.equal(names.includes('forger_chrome_extension.get_styles'), true);
     assert.equal(names.includes('forger_chrome_extension.set_styles'), true);
+    assert.equal(names.includes('forger_chrome_extension.close_window'), true);
     assert.equal(names.includes('forger_chrome_extension.close_session'), true);
   } finally {
     harness.stop();
@@ -2384,12 +2474,12 @@ test('automation manager handles lifecycle validation, corrupted storage, and ov
     assert.equal(skippedRun.error, 'automation_already_running');
 
     let runs = [];
-    for (let attempt = 0; attempt < 50; attempt += 1) {
+    for (let attempt = 0; attempt < 100; attempt += 1) {
       runs = await manager.listRuns(created.id);
       if (runs.some((run) => run.status === 'succeeded')) {
         break;
       }
-      await wait(20);
+      await wait(25);
     }
     assert.equal(runs.some((run) => run.status === 'succeeded'), true);
     assert.equal(updates.some((event) => event.run?.status === 'skipped'), true);

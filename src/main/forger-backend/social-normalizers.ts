@@ -15,6 +15,11 @@ export const toSocialVersion = (record: Record<string, unknown>) => ({
   runtimeStack: typeof record.runtime_stack === 'string' ? record.runtime_stack : '',
   supportedPlatforms: Array.isArray(record.supported_platforms) ? record.supported_platforms.map(String) : [],
   capabilities: Array.isArray(record.capabilities) ? record.capabilities.map(String) : [],
+  platformCapabilities: typeof record.platform_capabilities === 'object' && record.platform_capabilities !== null
+    ? record.platform_capabilities as Record<string, unknown>
+    : typeof record.platformCapabilities === 'object' && record.platformCapabilities !== null
+      ? record.platformCapabilities as Record<string, unknown>
+      : undefined,
   tools: typeof record.tools === 'object' && record.tools !== null ? record.tools as Record<string, unknown> : undefined,
   agents: Array.isArray(record.agents) ? record.agents : undefined,
   promptTemplates: Array.isArray(record.prompt_templates) ? record.prompt_templates : undefined,

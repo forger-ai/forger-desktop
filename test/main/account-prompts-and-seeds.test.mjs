@@ -490,8 +490,12 @@ test('official tool skill templates and seed data keep expected Desktop defaults
   assert.match(manifestSkill.body, /Do not use legacy Claude Code aliases/);
   assert.match(manifestSkill.body, /gmail\.connection\.status/);
   assert.match(manifestSkill.body, /Every entry in `tools\.required\[\]` and `tools\.optional\[\]` must include `toolId`, `reason`, and `actions`/);
+  assert.match(manifestSkill.body, /"toolId": "forger_chrome_extension"[\s\S]*"actions": \["\*"\]/);
+  assert.match(manifestSkill.body, /special token `"\*"`[\s\S]*every current action for that single `toolId`/);
+  assert.match(manifestSkill.body, /Desktop still allows installation when the tool is missing or unconfigured/);
   assert.match(manifestSkill.body, /`reason` is required, not decorative/);
   assert.match(manifestSkill.body, /Do not add `catalog\.capabilities`/);
+  assert.match(manifestSkill.body, /`platformCapabilities` are informative runtime declarations/);
   assert.match(manifestSkill.body, /platformCapabilities\.speechToText[\s\S]*authorized realtime transcription workflow/);
   assert.match(manifestSkill.body, /platformCapabilities\.textToSpeech[\s\S]*explicit text, model, and voice/);
   const speechSkill = templates.find((template) => template.id === 'forger-speech-to-text');

@@ -1,5 +1,6 @@
 import { normalizeAppCapabilities } from '../../shared/capabilities';
 import { normalizeAgentRuntime } from '../../shared/agent-runtime-registry';
+import { normalizePlatformCapabilities } from '../../shared/platform-capabilities';
 import type {
   AppAgent,
   AppAgentPromptSet,
@@ -36,6 +37,8 @@ export interface PublicCatalogResponseItem {
   prompt_templates?: unknown;
   promptTemplates?: unknown;
   tools?: unknown;
+  platformCapabilities?: unknown;
+  platform_capabilities?: unknown;
   latest_version?: CatalogVersionPayload;
 }
 
@@ -67,6 +70,8 @@ export interface CatalogVersionPayload {
   prompt_templates?: unknown;
   promptTemplates?: unknown;
   tools?: unknown;
+  platformCapabilities?: unknown;
+  platform_capabilities?: unknown;
 }
 
 export interface CatalogNormalizerOptions {
@@ -112,6 +117,12 @@ export const mapCatalogItem = (
     downloadUrl: includeDirectDownloadUrl ? latestVersion?.download_url ?? undefined : undefined,
     changelog: normalizeChangelog(latestVersion?.changelog, latestVersion?.version),
     capabilities: normalizeAppCapabilities(latestVersion?.capabilities ?? latestVersion?.permissions),
+    platformCapabilities: normalizePlatformCapabilities(
+      latestVersion?.platformCapabilities
+        ?? latestVersion?.platform_capabilities
+        ?? appEntry.platformCapabilities
+        ?? appEntry.platform_capabilities,
+    ),
     localNetworkShareSupported: latestVersion?.localNetworkShare === true
       || latestVersion?.local_network_share === true,
     remoteTunnelSupported: latestVersion?.remoteTunnel === true
@@ -183,8 +194,19 @@ const normalizeCatalogTools = (value: unknown): CatalogApp['tools'] | undefined 
           }
           const candidate = item as Record<string, unknown>;
           const toolId = typeof candidate.toolId === 'string' ? candidate.toolId.trim() : '';
+          const seenActions = new Set<string>();
           const actions = Array.isArray(candidate.actions)
-            ? candidate.actions.filter((action): action is string => typeof action === 'string' && action.trim().length > 0)
+            ? candidate.actions.flatMap((action) => {
+                if (typeof action !== 'string') {
+                  return [];
+                }
+                const trimmed = action.trim();
+                if (!trimmed || seenActions.has(trimmed)) {
+                  return [];
+                }
+                seenActions.add(trimmed);
+                return [trimmed];
+              })
             : [];
           if (!toolId || actions.length === 0) {
             return [];

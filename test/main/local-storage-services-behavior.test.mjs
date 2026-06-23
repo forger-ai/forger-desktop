@@ -1079,7 +1079,7 @@ test('OfficialToolsService persists app grants and keeps unavailable Gmail actio
   const requiredGate = await service.getInstallGate('finance-os', 'en');
   assert.equal(requiredGate.required[0].available, true);
   assert.equal(requiredGate.required[0].configured, false);
-  assert.equal(requiredGate.canInstall, false);
+  assert.equal(requiredGate.canInstall, true);
   assert.deepEqual(requiredGate.agents.map((agent) => agent.id), ['assistant']);
   assert.deepEqual([...await service.listAgentActionIdsForApp('finance-os')], ['gmail.search_messages', 'gmail.connection.status']);
 

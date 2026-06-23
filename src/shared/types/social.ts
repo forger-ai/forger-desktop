@@ -275,6 +275,7 @@ export interface SocialUserAppVersion {
   runtimeStack: string;
   supportedPlatforms: string[];
   capabilities: string[];
+  platformCapabilities?: Record<string, unknown>;
   tools?: Record<string, unknown>;
   agents?: unknown[];
   promptTemplates?: unknown[];

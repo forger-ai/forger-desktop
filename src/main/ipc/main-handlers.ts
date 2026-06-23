@@ -4,7 +4,7 @@ import os from 'node:os';
 import { randomUUID } from 'node:crypto';
 import type * as Electron from 'electron';
 import { BrowserWindow, systemPreferences, type IpcMain } from 'electron';
-import { AGENT_TOOL_PACKAGES } from '../core/agent-tool-packages';
+import { getAgentToolPackages } from '../core/agent-tool-packages';
 import type { AppAgentConversationManager } from '../app-agent-conversation-manager';
 import type { AppAgentTaskManager } from '../app-agent-task-manager';
 import type { AutomationManager } from '../automation-manager';
@@ -86,6 +86,7 @@ import type {
   ForgerAccountRegisterInput,
   ForgerAccountSession,
   FriendChatWindowOpenResult,
+  GetAppToolsInstallGateOptions,
   InstallAppResult,
   InstallWelcomeResult,
   LlmRunsSnapshot,
@@ -1349,7 +1350,7 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
   });
   ipcMain.handle(IPC_CHANNELS.disconnectAntigravityAuth, async () => await disconnectAntigravityAuth());
   ipcMain.handle(IPC_CHANNELS.reinstallAntigravity, async () => await reinstallAntigravity());
-  ipcMain.handle(IPC_CHANNELS.listAgentTools, async () => AGENT_TOOL_PACKAGES);
+  ipcMain.handle(IPC_CHANNELS.listAgentTools, async (_event, locale?: string) => getAgentToolPackages(locale));
   ipcMain.handle(IPC_CHANNELS.getAgentToolSettings, async () => state.agentToolSettings);
   ipcMain.handle(IPC_CHANNELS.updateAgentToolApproval, async (_event, input: UpdateAgentToolApprovalInput) => {
     return await updateAgentToolApproval(input);
@@ -1368,8 +1369,8 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
   ipcMain.handle(IPC_CHANNELS.deactivateOfficialTool, async (_event, toolId: string, locale?: string) => {
     return await getOfficialToolsService().deactivate(toolId, { locale });
   });
-  ipcMain.handle(IPC_CHANNELS.getAppToolsInstallGate, async (_event, appId: string, locale?: string): Promise<AppToolsInstallGate | null> => {
-    return await getOfficialToolsService().getInstallGate(appId, locale);
+  ipcMain.handle(IPC_CHANNELS.getAppToolsInstallGate, async (_event, appId: string, locale?: string, options?: GetAppToolsInstallGateOptions): Promise<AppToolsInstallGate | null> => {
+    return await getOfficialToolsService().getInstallGate(appId, locale, options);
   });
   ipcMain.handle(IPC_CHANNELS.setAppToolGrant, async (_event, input: SetAppToolGrantInput, locale?: string): Promise<AppToolsInstallGate | null> => {
     return await getOfficialToolsService().setAppToolGrant(input, locale);

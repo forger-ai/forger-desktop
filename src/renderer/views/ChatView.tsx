@@ -117,6 +117,23 @@ const isMacOs = navigator.platform.toLowerCase().includes('mac');
 const HISTORY_INITIAL_LIMIT = 5;
 const HISTORY_LIMIT_STEP = 10;
 
+const historyItemTimestamp = (item: ConversationHistoryItem) => {
+  const timestamp = Date.parse(item.updatedAt);
+  return Number.isFinite(timestamp) ? timestamp : 0;
+};
+
+const sortHistoryItemsByRecentActivity = (items: ConversationHistoryItem[]) =>
+  [...items].sort((left, right) => historyItemTimestamp(right) - historyItemTimestamp(left));
+
+const historyGroupTimestamp = (group: ConversationHistoryGroup) =>
+  Math.max(0, ...group.items.map(historyItemTimestamp));
+
+const sortHistoryGroupsByRecentActivity = (groups: ConversationHistoryGroup[]) =>
+  [...groups].sort((left, right) => {
+    const activityDifference = historyGroupTimestamp(right) - historyGroupTimestamp(left);
+    return activityDifference !== 0 ? activityDifference : left.label.localeCompare(right.label);
+  });
+
 const readFileAsBase64 = async (file: File): Promise<string> =>
   await new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -384,18 +401,21 @@ export function ChatView({
       });
     });
 
-    return [
+    return sortHistoryGroupsByRecentActivity([
       createAppItems.length > 0
-        ? { id: 'create_app', label: t.sections.chat.historyGroups.createApps, items: createAppItems }
+        ? { id: 'create_app', label: t.sections.chat.historyGroups.createApps, items: sortHistoryItemsByRecentActivity(createAppItems) }
         : null,
       reviewAppItems.length > 0
-        ? { id: 'review_apps', label: t.sections.chat.historyGroups.reviewApps, items: reviewAppItems }
+        ? { id: 'review_apps', label: t.sections.chat.historyGroups.reviewApps, items: sortHistoryItemsByRecentActivity(reviewAppItems) }
         : null,
-      ...Array.from(appGroups.values()).sort((left, right) => left.label.localeCompare(right.label)),
+      ...Array.from(appGroups.values()).map((group) => ({
+        ...group,
+        items: sortHistoryItemsByRecentActivity(group.items),
+      })),
       freeChatItems.length > 0
-        ? { id: 'free_chat', label: t.sections.chat.historyGroups.freeChat, items: freeChatItems }
+        ? { id: 'free_chat', label: t.sections.chat.historyGroups.freeChat, items: sortHistoryItemsByRecentActivity(freeChatItems) }
         : null,
-    ].filter((group): group is ConversationHistoryGroup => Boolean(group));
+    ].filter((group): group is ConversationHistoryGroup => Boolean(group)));
   }, [
     getAppMeta,
     historyItems,

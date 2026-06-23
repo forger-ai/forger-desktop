@@ -36,6 +36,22 @@ test('renderer keeps MCP-created apps in the current chat flow', async () => {
   assert.doesNotMatch(source, /run\.createdApp[\s\S]{0,120}startCreatedAppConversation/);
 });
 
+test('chat history drawer orders conversations and groups by recent activity', async () => {
+  const source = await readSource('src/renderer/views/ChatView.tsx');
+  const controllerSource = await readSource('src/renderer/app/RendererAppController.tsx');
+
+  assert.match(controllerSource, /\.sort\(\(a, b\) => Date\.parse\(b\.updatedAt\) - Date\.parse\(a\.updatedAt\)\)/);
+  assert.match(source, /const historyItemTimestamp = \(item: ConversationHistoryItem\)/);
+  assert.match(source, /const sortHistoryItemsByRecentActivity = \(items: ConversationHistoryItem\[\]\)/);
+  assert.match(source, /const historyGroupTimestamp = \(group: ConversationHistoryGroup\)/);
+  assert.match(source, /const sortHistoryGroupsByRecentActivity = \(groups: ConversationHistoryGroup\[\]\)/);
+  assert.match(source, /return sortHistoryGroupsByRecentActivity\(\[/);
+  assert.match(source, /items: sortHistoryItemsByRecentActivity\(createAppItems\)/);
+  assert.match(source, /items: sortHistoryItemsByRecentActivity\(reviewAppItems\)/);
+  assert.match(source, /items: sortHistoryItemsByRecentActivity\(group\.items\)/);
+  assert.match(source, /items: sortHistoryItemsByRecentActivity\(freeChatItems\)/);
+});
+
 test('product docs stay as a skill, not a chat-mode injection', async () => {
   const freeChatStart = await readSource('src/main/prompt-builder/prompts/chat/free-chat-start.md');
   const createMode = await readSource('src/main/prompt-builder/prompts/partials/chat-modes/create-app.md');

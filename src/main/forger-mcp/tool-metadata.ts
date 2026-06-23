@@ -446,7 +446,11 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
     };
   }
 
-  if (toolId === 'forger_chrome_extension.get_current_url' || toolId === 'forger_chrome_extension.close_session') {
+  if (
+    toolId === 'forger_chrome_extension.get_current_url' ||
+    toolId === 'forger_chrome_extension.close_window' ||
+    toolId === 'forger_chrome_extension.close_session'
+  ) {
     return {
       type: 'object',
       properties: {
@@ -477,6 +481,29 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
         selector: { type: 'string', description: 'Optional CSS selector. If omitted, returns the full page HTML.' },
       },
       required: ['sessionId'],
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'forger_chrome_extension.wait_for_selector') {
+    return {
+      type: 'object',
+      properties: {
+        sessionId: { type: 'string' },
+        selector: { type: 'string' },
+        state: {
+          type: 'string',
+          enum: ['attached', 'visible', 'hidden', 'detached'],
+          description: 'Expected selector state. Defaults to visible.',
+        },
+        timeoutMs: {
+          type: 'number',
+          minimum: 1,
+          maximum: 60000,
+          description: 'Maximum wait time in milliseconds. Defaults to 10000.',
+        },
+      },
+      required: ['sessionId', 'selector'],
       additionalProperties: false,
     };
   }

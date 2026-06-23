@@ -22,7 +22,7 @@ import type { SubmitUsageEventInput, SubmitUsageEventResult } from './usage-even
 import type { ConversationDiagnosticReportPreview, PrepareConversationDiagnosticReportInput, SubmitConversationDiagnosticReportResult } from './diagnostics';
 import type { FailureDiagnosticFields } from './base';
 import type { AntigravityAuthSessionEvent, AntigravityAuthSessionStartResult, AntigravityAuthStatus, CodexAuthStatus, ClaudeAuthStatus, DesktopErrorReportPreview } from './auth';
-import type { AgentToolPackageDefinition, AgentToolSettings, UpdateAgentToolApprovalInput, OfficialToolsState, ToolMutationResult, ConfigureOfficialToolInput, CallOfficialToolInput, CallOfficialToolResult, AppToolsInstallGate, SetAppToolGrantInput, OfficialToolRuntimeEvent } from './tools';
+import type { AgentToolPackageDefinition, AgentToolSettings, UpdateAgentToolApprovalInput, OfficialToolsState, ToolMutationResult, ConfigureOfficialToolInput, CallOfficialToolInput, CallOfficialToolResult, AppToolsInstallGate, SetAppToolGrantInput, OfficialToolRuntimeEvent, GetAppToolsInstallGateOptions } from './tools';
 import type { PickedChatFile, FilesStageForChatInput, FilesDiscardStagedForChatInput, FilesActionResult, FilesListInput, ForgerFileRecord, ForgerFileCategory, FilesCreateCategoryInput, FilesRenameCategoryInput, FilesDeleteCategoryInput, FilesImportInput, FilesMoveInput, FilesRenameInput, FilesDeleteInput, DbListTablesResponse, DbQueryTableResponse } from './data';
 import type { Automation, AutomationRun, AutomationRunSummary, AutomationUpsertInput, WindowControlState } from './automations';
 import type { BackgroundTask, BackgroundTaskEvent, BackgroundTaskUpsertInput } from './background-tasks';
@@ -214,7 +214,7 @@ export interface ForgerDesktopApi {
   submitConversationDiagnosticReport: (input: ConversationDiagnosticReportPreview) => Promise<SubmitConversationDiagnosticReportResult>;
   onDesktopErrorReportRequested: (listener: (event: DesktopErrorReportPreview) => void) => () => void;
   desktopLog: (input: { level?: 'debug' | 'info' | 'warn' | 'error'; event: string; message?: string; context?: Record<string, unknown> }) => Promise<{ success: boolean }>;
-  listAgentTools: () => Promise<AgentToolPackageDefinition[]>;
+  listAgentTools: (locale?: string) => Promise<AgentToolPackageDefinition[]>;
   getAgentToolSettings: () => Promise<AgentToolSettings>;
   updateAgentToolApproval: (input: UpdateAgentToolApprovalInput) => Promise<AgentToolSettings>;
   listOfficialTools: (locale?: string) => Promise<OfficialToolsState>;
@@ -224,7 +224,7 @@ export interface ForgerDesktopApi {
   callOfficialTool: (input: CallOfficialToolInput) => Promise<CallOfficialToolResult>;
   deactivateOfficialTool: (toolId: string, locale?: string) => Promise<ToolMutationResult>;
   onOfficialToolEvent: (listener: (event: OfficialToolRuntimeEvent) => void) => () => void;
-  getAppToolsInstallGate: (appId: string, locale?: string) => Promise<AppToolsInstallGate | null>;
+  getAppToolsInstallGate: (appId: string, locale?: string, options?: GetAppToolsInstallGateOptions) => Promise<AppToolsInstallGate | null>;
   setAppToolGrant: (input: SetAppToolGrantInput, locale?: string) => Promise<AppToolsInstallGate | null>;
   memoryList: (input?: MemoryListInput) => Promise<MemoryEntry[]>;
   memoryCreate: (input: MemoryCreateInput) => Promise<MemoryEntry>;
