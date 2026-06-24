@@ -112,10 +112,102 @@ export const toProviderProgressMessages = (
   locale?: string,
 ): string[] => {
   const jsonMessages = toProgressMessages(stream, text, locale);
-  if (jsonMessages.length > 0 || provider !== 'antigravity') {
+  if (jsonMessages.length > 0) {
     return jsonMessages;
   }
+  if (provider === 'claude') {
+    return toClaudeJsonProgressMessages(stream, text, locale);
+  }
+  if (provider !== 'antigravity') {
+    return [];
+  }
   return toAntigravityPlainTextProgressMessages(stream, text);
+};
+
+const toClaudeJsonProgressMessages = (
+  stream: 'stdout' | 'stderr' | 'meta',
+  text: string,
+  locale?: string,
+): string[] => {
+  if (stream === 'meta') {
+    return [];
+  }
+
+  const mapped: string[] = [];
+  for (const line of text.split(/\r?\n/).map((entry) => entry.trim()).filter(Boolean)) {
+    let entry: Record<string, unknown>;
+    try {
+      entry = JSON.parse(line) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+
+    const textProgress = normalizeClaudeProgressText(extractClaudeProgressText(entry));
+    if (textProgress && mapped[mapped.length - 1] !== textProgress) {
+      mapped.push(textProgress);
+    }
+    if (hasClaudeToolUse(entry)) {
+      const usingTools = getSharedCopy(locale).chat.progress.usingTools;
+      if (mapped[mapped.length - 1] !== usingTools) {
+        mapped.push(usingTools);
+      }
+    }
+  }
+  return mapped.slice(-6);
+};
+
+const extractClaudeProgressText = (entry: Record<string, unknown>): string => {
+  if (typeof entry.text === 'string') {
+    return entry.text;
+  }
+
+  const message = entry.message;
+  if (!message || typeof message !== 'object') {
+    return '';
+  }
+  const content = (message as Record<string, unknown>).content;
+  if (typeof content === 'string') {
+    return content;
+  }
+  if (!Array.isArray(content)) {
+    return '';
+  }
+  return content
+    .map((item) => {
+      if (!item || typeof item !== 'object') {
+        return '';
+      }
+      const text = (item as Record<string, unknown>).text;
+      return typeof text === 'string' ? text : '';
+    })
+    .filter(Boolean)
+    .join('\n');
+};
+
+const hasClaudeToolUse = (entry: Record<string, unknown>): boolean => {
+  const type = typeof entry.type === 'string' ? entry.type : '';
+  if (type === 'tool_use') {
+    return true;
+  }
+
+  const message = entry.message;
+  if (!message || typeof message !== 'object') {
+    return false;
+  }
+  const content = (message as Record<string, unknown>).content;
+  return Array.isArray(content) && content.some((item) => {
+    if (!item || typeof item !== 'object') {
+      return false;
+    }
+    return (item as Record<string, unknown>).type === 'tool_use';
+  });
+};
+
+const normalizeClaudeProgressText = (text: string): string => {
+  const compact = stripMarkdown(text)
+    .replace(/\s+/g, ' ')
+    .trim();
+  return compact.length > 160 ? `${compact.slice(0, 157)}...` : compact;
 };
 
 const toAntigravityPlainTextProgressMessages = (

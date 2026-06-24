@@ -7,7 +7,11 @@ import { delimiter, join } from 'node:path';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
-const { ChatOrchestrator } = require('../../dist-electron/main/chat/orchestrator.js');
+const {
+  CHAT_PROVIDER_INACTIVITY_TIMEOUT_MS,
+  CHAT_PROVIDER_TOTAL_TIMEOUT_MS,
+  ChatOrchestrator,
+} = require('../../dist-electron/main/chat/orchestrator.js');
 const {
   buildAutoAppliedUserMessage,
   buildFunctionalOperationSummary,
@@ -502,7 +506,7 @@ test('chat helper functions normalize history, progress, stale errors, and publi
   assert.deepEqual(toProgressMessages('stdout', JSON.stringify({
     type: 'item.started',
     item: { type: 'command_execution', command: 'mkdir -p frontend/src/features/chessos' },
-  }), 'es'), ['Codex está editando archivos de la app.']);
+  }), 'es'), ['El agente está editando archivos de la app.']);
   assert.deepEqual(toProgressMessages('stdout', JSON.stringify({
     type: 'item.started',
     item: { type: 'command_execution', command: 'cat frontend/src/App.tsx' },
@@ -510,7 +514,7 @@ test('chat helper functions normalize history, progress, stale errors, and publi
   assert.deepEqual(toProgressMessages('stdout', JSON.stringify({
     type: 'item.started',
     item: { type: 'command_execution', command: "python - <<'PY'\nfrom pathlib import Path\nPath('x').write_text('y')\nPY" },
-  }), 'en'), ['Codex is editing app files.']);
+  }), 'en'), ['The agent is editing app files.']);
 
   const internalRun = {
     runId: 'run-1',
@@ -598,6 +602,21 @@ test('chat helper functions normalize history, progress, stale errors, and publi
   ].join('\n')), ['same']);
   assert.deepEqual(toProgressMessages('stdout', '   '), []);
   assert.deepEqual(toProviderProgressMessages('codex', 'stdout', 'I will inspect the app.'), []);
+  assert.deepEqual(toProviderProgressMessages('claude', 'stdout', [
+    JSON.stringify({ message: { content: [{ type: 'text', text: 'I will inspect the editor flow.' }] } }),
+    JSON.stringify({ message: { content: [{ type: 'tool_use', name: 'Read' }] } }),
+    JSON.stringify({ result: 'final claude answer' }),
+  ].join('\n'), 'en'), [
+    'I will inspect the editor flow.',
+    'The agent is using app tools.',
+  ]);
+  assert.deepEqual(toProviderProgressMessages('claude', 'stdout', [
+    JSON.stringify({ text: '- Updating `Editor.tsx` now.' }),
+    JSON.stringify({ type: 'tool_use', name: 'Edit' }),
+  ].join('\n'), 'es'), [
+    'Updating Editor.tsx now.',
+    'El agente está usando herramientas de la app.',
+  ]);
   assert.deepEqual(toProviderProgressMessages('antigravity', 'stdout', [
     'Print mode: conversation=conv-123',
     'I will inspect the app state first.',
@@ -1299,9 +1318,11 @@ test('chat SandboxRunner parses Claude output, tool events, and temporary MCP co
   const root = await mkdtemp(join(tmpdir(), 'forger-chat-claude-'));
   const fakeClaude = join(root, 'claude.cjs');
   const seenConfigPath = join(root, 'seen-config.txt');
+  const seenArgsPath = join(root, 'seen-args.json');
   await writeFile(fakeClaude, `#!/usr/bin/env node
 const fs = require('node:fs');
 const args = process.argv.slice(2);
+fs.writeFileSync(${JSON.stringify(seenArgsPath)}, JSON.stringify(args));
 const configIndex = args.indexOf('--mcp-config');
 if (configIndex >= 0) {
   fs.writeFileSync(${JSON.stringify(seenConfigPath)}, args[configIndex + 1]);
@@ -1320,6 +1341,7 @@ console.log(JSON.stringify({ result: 'final claude answer' }));
       environment: {},
       mcpServers: [
         { name: 'forger', url: 'http://127.0.0.1:1/mcp', token: 'secret', tokenEnvVar: 'FORGER_MCP_TOKEN' },
+        { name: 'app_finance-os', url: 'http://127.0.0.1:2/mcp', token: 'app-secret', tokenEnvVar: 'APP_MCP_TOKEN' },
       ],
       workingDir: root,
       prompt: 'hello',
@@ -1335,6 +1357,10 @@ console.log(JSON.stringify({ result: 'final claude answer' }));
     });
     const mcpConfigPath = (await readFile(seenConfigPath, 'utf8')).trim();
     await assert.rejects(() => readFile(mcpConfigPath, 'utf8'), /ENOENT/);
+    const args = JSON.parse(await readFile(seenArgsPath, 'utf8'));
+    assert.equal(args.includes('--mcp-config'), true);
+    assert.equal(args.includes('--allowedTools'), true);
+    assert.equal(args[args.indexOf('--allowedTools') + 1], 'mcp__forger__*,mcp__app_finance-os__*');
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -1830,6 +1856,8 @@ test('chat orchestrator handles Claude runtime success and missing CLI failures'
   const root = await mkdtemp(join(tmpdir(), 'forger-chat-claude-runtime-'));
   const fakeClaude = join(root, 'claude.cjs');
   await writeFile(fakeClaude, `#!/usr/bin/env node
+console.log(JSON.stringify({ message: { content: [{ type: 'text', text: 'I am reviewing the requested screen.' }] } }));
+console.log(JSON.stringify({ message: { content: [{ type: 'tool_use', name: 'Read' }] } }));
 console.log(JSON.stringify({ session_id: 'claude-thread-1', result: 'claude orchestrator reply' }));
 `, 'utf8');
   await chmod(fakeClaude, 0o755);
@@ -1850,6 +1878,10 @@ console.log(JSON.stringify({ session_id: 'claude-thread-1', result: 'claude orch
     assert.equal(finalRun.status, 'preview_ready');
     assert.equal(finalRun.userMessage, 'claude orchestrator reply');
     assert.equal(finalRun.threadId, 'claude-thread-1');
+    assert.deepEqual(finalRun.progressLog, [
+      'I am reviewing the requested screen.',
+      'El agente está usando herramientas de la app.',
+    ]);
   } finally {
     await successHarness.cleanup();
   }
@@ -1925,6 +1957,48 @@ test('chat orchestrator reports Codex auth and CLI setup failures before provide
     assert.equal(finalRun.errorCode, 'auth_missing');
   } finally {
     await missingClaudeAuthHarness.cleanup();
+  }
+});
+
+test('chat orchestrator gives Claude app update runs extended total and inactivity windows', async () => {
+  const calls = [];
+  const harness = await createHarness({
+    getAgentRuntime: async () => ({ provider: 'claude', model: 'claude-test', effort: 'high' }),
+    getClaudeCliPath: async () => process.execPath,
+    getClaudeAuthenticated: async () => true,
+  });
+  const appId = 'finance-os';
+  const appRoot = join(harness.privateAppsRoot, appId);
+  await mkdir(appRoot, { recursive: true });
+  await writeFile(join(appRoot, 'app.txt'), 'before\n', 'utf8');
+  await ensureGitRepository(appRoot);
+  harness.orchestrator.sandboxRunner = {
+    async runCodex() {
+      throw new Error('not_used');
+    },
+    async runClaude(params) {
+      calls.push(params);
+      return { assistantText: 'Reviewed the requested app change.', threadId: 'claude-timeout-thread', toolEvents: 0 };
+    },
+  };
+
+  try {
+    const started = await harness.orchestrator.startRun({
+      appId,
+      prompt: 'Make the editor workflow clearer',
+      threadId: null,
+      conversationId: 'conversation-claude-timeouts',
+      conversationHistory: [{ role: 'user', content: 'Make the editor workflow clearer' }],
+    });
+    const finalRun = await waitForRun(harness.events, started.runId);
+    assert.equal(finalRun.status, 'preview_ready');
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].timeoutMs, CHAT_PROVIDER_TOTAL_TIMEOUT_MS);
+    assert.equal(calls[0].inactivityTimeoutMs, CHAT_PROVIDER_INACTIVITY_TIMEOUT_MS);
+    assert.ok(calls[0].timeoutMs > 300_000);
+    assert.ok(calls[0].inactivityTimeoutMs > 300_000);
+  } finally {
+    await harness.cleanup();
   }
 });
 

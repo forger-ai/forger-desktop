@@ -135,7 +135,8 @@ export const sharedCopy = {
       updateConflictTitle: 'Actualización combinada',
       autoUpdateNoChanges: 'Revisé la app y no encontré cambios que guardar. Si quieres, dime qué ajustar visualmente o qué flujo esperas cambiar.',
       progress: {
-        editingFiles: 'Codex está editando archivos de la app.',
+        editingFiles: 'El agente está editando archivos de la app.',
+        usingTools: 'El agente está usando herramientas de la app.',
       },
       failures: {
         authMissing: 'Primero conecta Codex en Ajustes para usar Chat con cambios reales.',
@@ -443,7 +444,8 @@ export const sharedCopy = {
       updateConflictTitle: 'Update combined',
       autoUpdateNoChanges: 'I reviewed the app and did not find changes to save. Tell me what visual detail or flow you want adjusted.',
       progress: {
-        editingFiles: 'Codex is editing app files.',
+        editingFiles: 'The agent is editing app files.',
+        usingTools: 'The agent is using app tools.',
       },
       failures: {
         authMissing: 'Connect Codex in Settings first to use Chat with real changes.',

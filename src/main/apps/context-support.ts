@@ -115,7 +115,26 @@ const buildInstalledAppContextSkillTemplates = (allowedOfficialToolActions: stri
 const buildStackSkillTemplates = (_stack: AppManifestStack, _hasAppMcp = false, allowedOfficialToolActions: string[] = []): StackSkillTemplate[] =>
   buildInstalledAppContextSkillTemplates(allowedOfficialToolActions);
 
+const removeUndeclaredSkillTemplates = async (skillsRoot: string, templates: StackSkillTemplate[]): Promise<void> => {
+  const declaredIds = new Set(templates.map((template) => template.id));
+  const entries = await fs.readdir(skillsRoot, { withFileTypes: true }).catch((error: unknown) => {
+    if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') {
+      return [];
+    }
+    throw error;
+  });
+
+  for (const entry of entries) {
+    if (!entry.isDirectory() || declaredIds.has(entry.name)) {
+      continue;
+    }
+    await fs.rm(path.join(skillsRoot, entry.name), { recursive: true, force: true });
+  }
+};
+
 const writeSkillTemplates = async (skillsRoot: string, templates: StackSkillTemplate[]): Promise<void> => {
+  await fs.mkdir(skillsRoot, { recursive: true });
+  await removeUndeclaredSkillTemplates(skillsRoot, templates);
   for (const template of templates) {
     const targetDir = path.join(skillsRoot, template.id);
     await fs.rm(targetDir, { recursive: true, force: true });
