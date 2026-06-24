@@ -433,10 +433,10 @@ test('official tool skill templates and seed data keep expected Desktop defaults
     'forger-app-agents-authoring',
     'forger-app-mcp-data-tools',
     'forger-context',
+    'forger-frontend-patterns',
     'forger-automations',
     'forger-dev-backend-development',
     'forger-dev-in-app-agents',
-    'forger-frontend-patterns',
     'forger-gmail',
     'forger-installed-app-change',
     'forger-localization',
@@ -469,6 +469,7 @@ test('official tool skill templates and seed data keep expected Desktop defaults
     'forger-app-agents-authoring',
     'forger-app-mcp-data-tools',
     'forger-context',
+    'forger-frontend-patterns',
     'forger-app-official-tools',
   ]);
   const appOfficialSkill = buildInstalledAppSkillTemplates(['gmail.search_messages', 'whatsapp.list_chats']).find((template) => template.id === 'forger-app-official-tools');
@@ -542,22 +543,21 @@ test('official tool skill templates and seed data keep expected Desktop defaults
   assert.match(templates.find((template) => template.id === 'forger-tools')?.body ?? '', /^---\nname: forger-tools/m);
   const frontendPatternsSkill = templates.find((template) => template.id === 'forger-frontend-patterns');
   assert.ok(frontendPatternsSkill);
-  assert.equal(frontendPatternsSkill.description, 'Use when creating or changing Forger app frontend code, UX, routed views, forms, responsive layouts, visual systems, Tailwind/shadcn components, interaction states, motion, accessibility, and final UI review.');
-  assert.match(frontendPatternsSkill.body, /Tailwind CSS, shadcn\/ui copied components, and Radix primitives by default/);
-  assert.match(frontendPatternsSkill.body, /Keep `forger-dev-backend-development` separate/);
-  assert.match(frontendPatternsSkill.body, /Infer the app kind, target person, daily workflow/);
-  assert.match(frontendPatternsSkill.body, /one radius logic, one accent logic, one density level/);
-  assert.match(frontendPatternsSkill.body, /TanStack Router for new routed Forger apps/);
-  assert.match(frontendPatternsSkill.body, /npm exec --yes shadcn@latest -- list @shadcn --limit 200 --cwd \./);
-  assert.match(frontendPatternsSkill.body, /npm exec --yes shadcn@latest -- search @shadcn --query "date" --limit 50 --cwd \./);
-  assert.match(frontendPatternsSkill.body, /npm exec --yes shadcn@latest -- add <component> --cwd \./);
-  assert.match(frontendPatternsSkill.body, /Forms must prefer shadcn\/Radix for complex controls/);
-  assert.match(frontendPatternsSkill.body, /date and time fields, check `calendar`, `popover`, `input`, `select`, `form`, `dialog`, `sheet`, `command`/);
-  assert.match(frontendPatternsSkill.body, /Pills and badges are for compact status/);
-  assert.match(frontendPatternsSkill.body, /Do not put cards inside cards/);
-  assert.match(frontendPatternsSkill.body, /Mobile responsive is required/);
-  assert.match(frontendPatternsSkill.body, /Use motion for view transitions/);
-  assert.match(frontendPatternsSkill.body, /Check that no generic AI-default visual pattern/);
+  assert.equal(frontendPatternsSkill.description, 'Use this skill before any change that affects how a Forger app looks, feels, moves, routes, collects input, displays data, handles agent work, or behaves on mobile.');
+  assert.match(frontendPatternsSkill.body, /Approach Forger app UI as the design lead for a private local tool/);
+  assert.match(frontendPatternsSkill.body, /Make a compact design plan before coding/);
+  assert.match(frontendPatternsSkill.body, /Rejected defaults/);
+  assert.match(frontendPatternsSkill.body, /Do not center a narrow `max-w` container/);
+  assert.match(frontendPatternsSkill.body, /Reject the UI if it has/);
+  assert.match(frontendPatternsSkill.body, /Cards inside cards/);
+  assert.match(frontendPatternsSkill.body, /Use a real router for multi-view apps/);
+  assert.match(frontendPatternsSkill.body, /Only the main content pane should scroll/);
+  assert.match(frontendPatternsSkill.body, /When a select, dropdown, popover, calendar, or command menu appears inside a dialog/);
+  assert.match(frontendPatternsSkill.body, /Solve overlay conflicts in reusable primitives/);
+  assert.match(frontendPatternsSkill.body, /Persist messages, active run IDs, proposals, results, cancellation state/);
+  assert.match(frontendPatternsSkill.body, /Agent task screens need/);
+  assert.match(frontendPatternsSkill.body, /Use the person's or computer's locale/);
+  assert.match(frontendPatternsSkill.body, /Work in two passes/);
   assert.doesNotMatch(frontendPatternsSkill.body, /TasteSkill|Read the Room Before Anything Else|Anti-Default Discipline|The audience picks the aesthetic|Use cards ONLY when elevation communicates real hierarchy/);
   assert.equal(templates.some((template) => template.id === 'forger-app-shell-layout'), false);
   assert.equal(templates.some((template) => template.id === 'forger-frontend-product-patterns'), false);

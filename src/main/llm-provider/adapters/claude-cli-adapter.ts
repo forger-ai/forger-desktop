@@ -35,6 +35,7 @@ interface ClaudeBaseRunInput {
   effort: ClaudeEffort;
   permissionMode?: AgentPermissionMode;
   timeoutMs: number;
+  inactivityTimeoutMs?: number;
   threadId?: string | null;
   imagePaths?: string[];
   throwOnNonZero?: boolean;
@@ -66,6 +67,7 @@ export class ClaudeCliAdapter {
       '--effort',
       input.effort,
       ...claudePermissionArgs(input.permissionMode),
+      ...claudeAllowedToolsArgs(mcpServers),
       ...(input.addDirs ?? []).flatMap((dir) => ['--add-dir', dir]),
       ...(mcpConfigPath ? ['--mcp-config', mcpConfigPath] : []),
       ...(input.threadId ? ['--resume', input.threadId] : []),
@@ -92,7 +94,7 @@ export class ClaudeCliAdapter {
           PATH: [path.dirname(input.cliPath), ...input.pathEntries, process.env.PATH ?? ''].filter(Boolean).join(path.delimiter),
         },
         timeoutMs: input.timeoutMs,
-        inactivityTimeoutMs: input.timeoutMs,
+        inactivityTimeoutMs: input.inactivityTimeoutMs ?? input.timeoutMs,
         onChild: input.onChild,
         onStdout: (text) => input.onOutput?.('stdout', text),
         onStderr: (text) => input.onOutput?.('stderr', text),
@@ -135,6 +137,16 @@ export const writeClaudeMcpConfig = async (
   await fs.mkdir(path.dirname(configPath), { recursive: true });
   await fs.writeFile(configPath, JSON.stringify({ mcpServers: mcpServersConfig }, null, 2), 'utf8');
   return configPath;
+};
+
+export const claudeAllowedToolsArgs = (mcpServers: LlmMcpServerConfig[]): string[] => {
+  const allowedTools = [...new Set(
+    mcpServers
+      .map((server) => server.name)
+      .filter((name) => /^[a-zA-Z0-9_-]+$/.test(name))
+      .map((name) => `mcp__${name}__*`),
+  )];
+  return allowedTools.length > 0 ? ['--allowedTools', allowedTools.join(',')] : [];
 };
 
 export const parseClaudeJsonl = (stdout: string, stderr: string): ClaudeParsedOutput => {

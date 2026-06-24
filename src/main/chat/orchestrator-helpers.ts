@@ -211,6 +211,7 @@ export class SandboxRunner {
     effort: ClaudeEffort;
     permissionMode?: AgentPermissionMode;
     timeoutMs: number;
+    inactivityTimeoutMs?: number;
     onChild: (child: ChildProcessWithoutNullStreams) => void;
     onOutput?: (stream: 'stdout' | 'stderr' | 'meta', text: string) => void;
     threadId?: string;
@@ -227,6 +228,7 @@ export class SandboxRunner {
       effort: params.effort,
       permissionMode: params.permissionMode,
       timeoutMs: params.timeoutMs,
+      inactivityTimeoutMs: params.inactivityTimeoutMs,
       onChild: params.onChild,
       onOutput: params.onOutput,
       threadId: params.threadId,

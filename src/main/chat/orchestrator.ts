@@ -136,6 +136,9 @@ interface AppThreadState {
 const hasUnmergedGitStatus = (status: string[]): boolean =>
   status.some((line) => /^(AA|DD|DU|UD|UA|AU|UU)\s/.test(line));
 
+export const CHAT_PROVIDER_TOTAL_TIMEOUT_MS = 60 * 60 * 1000;
+export const CHAT_PROVIDER_INACTIVITY_TIMEOUT_MS = 30 * 60 * 1000;
+
 export class ChatOrchestrator {
   private readonly runs = new Map<string, InternalChatRun>();
   private readonly activeRunIdsByConversation = new Map<string, string>();
@@ -666,7 +669,8 @@ export class ChatOrchestrator {
         sharedRoots: run.sharedRoots,
         model: run.model,
         networkAccess,
-        timeoutMs: 300_000,
+        timeoutMs: CHAT_PROVIDER_TOTAL_TIMEOUT_MS,
+        inactivityTimeoutMs: CHAT_PROVIDER_INACTIVITY_TIMEOUT_MS,
         onChild: (child: ChildProcessWithoutNullStreams) => {
           run.child = child;
           if (run.status === 'canceled') {

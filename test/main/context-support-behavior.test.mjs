@@ -34,11 +34,16 @@ test('context support writes global AGENTS and official tool skills into metadat
   });
   const controller = createController(root);
   const homeRoot = path.join(root, 'home');
+  const skillsRoot = path.join(homeRoot, '.agents', 'skills');
+  await fs.mkdir(path.join(skillsRoot, 'forger-agents'), { recursive: true });
+  await fs.writeFile(path.join(skillsRoot, 'forger-agents', 'SKILL.md'), 'stale legacy skill', 'utf8');
+  await fs.mkdir(path.join(skillsRoot, 'forger-app-design-guidelines'), { recursive: true });
+  await fs.writeFile(path.join(skillsRoot, 'forger-app-design-guidelines', 'SKILL.md'), 'stale frontend skill', 'utf8');
 
   await controller.ensureGlobalAgentsContext(homeRoot);
 
   const agentsMarkdown = await fs.readFile(path.join(homeRoot, 'AGENTS.md'), 'utf8');
-  const skillDirs = await fs.readdir(path.join(homeRoot, '.agents', 'skills'));
+  const skillDirs = await fs.readdir(skillsRoot);
   assert.match(agentsMarkdown, /Forger/);
   assert.ok(skillDirs.includes('forger-context'));
   assert.ok(skillDirs.includes('forger-app-agents-authoring'));
@@ -59,6 +64,7 @@ test('context support writes global AGENTS and official tool skills into metadat
   assert.equal(skillDirs.includes('forger-python-backend'), false);
   assert.equal(skillDirs.includes('forger-tanstack-query-patterns'), false);
   assert.equal(skillDirs.includes('forger-frontend-product-patterns'), false);
+  assert.equal(skillDirs.includes('forger-app-design-guidelines'), false);
   assert.equal(skillDirs.includes('forger-web-interface-review'), false);
   assert.equal(skillDirs.includes('forger-app-shell-layout'), false);
   assert.equal(skillDirs.includes('forger-tailwind-shadcn-patterns'), false);
@@ -115,6 +121,7 @@ test('context support normalizes installed app context for invalid, MCP-only, an
     'forger-app-mcp-data-tools',
     'forger-app-official-tools',
     'forger-context',
+    'forger-frontend-patterns',
   ]);
 
   await controller.normalizeInstalledAgentContext(arrayDir, 'array');
@@ -124,6 +131,7 @@ test('context support normalizes installed app context for invalid, MCP-only, an
     'forger-app-mcp-data-tools',
     'forger-app-official-tools',
     'forger-context',
+    'forger-frontend-patterns',
   ]);
 
   await controller.normalizeInstalledAgentContext(mcpOnlyDir, 'mcp-only');
@@ -132,6 +140,7 @@ test('context support normalizes installed app context for invalid, MCP-only, an
     'forger-app-mcp-data-tools',
     'forger-app-official-tools',
     'forger-context',
+    'forger-frontend-patterns',
   ]);
 
   await controller.normalizeInstalledAgentContext(skillsDir, 'skills');
@@ -140,6 +149,7 @@ test('context support normalizes installed app context for invalid, MCP-only, an
     'forger-app-mcp-data-tools',
     'forger-app-official-tools',
     'forger-context',
+    'forger-frontend-patterns',
     'inside',
   ]);
 });
@@ -173,6 +183,7 @@ test('context support normalizes installed app templates without stack-dependent
     'forger-app-agents-authoring',
     'forger-app-mcp-data-tools',
     'forger-context',
+    'forger-frontend-patterns',
     'forger-app-official-tools',
   ]);
   const stackSkillsRoot = path.join(root, 'stack-skills');
@@ -190,6 +201,7 @@ test('context support normalizes installed app templates without stack-dependent
     'forger-app-agents-authoring',
     'forger-app-mcp-data-tools',
     'forger-context',
+    'forger-frontend-patterns',
     'forger-app-official-tools',
   ]);
 
@@ -199,6 +211,7 @@ test('context support normalizes installed app templates without stack-dependent
     'forger-app-mcp-data-tools',
     'forger-app-official-tools',
     'forger-context',
+    'forger-frontend-patterns',
   ]);
   const officialToolSkill = await fs.readFile(path.join(appDir, '.agents', 'skills', 'forger-app-official-tools', 'SKILL.md'), 'utf8');
   assert.match(officialToolSkill, /`gmail\.search_messages`/);
