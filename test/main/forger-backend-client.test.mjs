@@ -1481,6 +1481,53 @@ test('social app download uses app id instead of version id', async () => {
   }
 });
 
+test('social app download maps Cloud failures to actionable diagnostics', async () => {
+  const cases = [
+    {
+      status: 401,
+      body: { error: 'token_invalidated' },
+      technicalCode: 'forger_cloud_auth_expired',
+      userMessage: /sesión de Forger Cloud expiró/i,
+    },
+    {
+      status: 404,
+      body: { error: 'not_found' },
+      technicalCode: 'social_app_download_not_found',
+      userMessage: /app o el código de invitación/i,
+    },
+    {
+      status: 422,
+      body: { error: 'platform_not_supported' },
+      technicalCode: 'social_app_platform_not_supported',
+      userMessage: /sistema operativo/i,
+    },
+  ];
+
+  for (const item of cases) {
+    const root = await mkdtemp(join(tmpdir(), 'forger-social-download-failure-'));
+    const harness = createClient(root, async () => jsonResponse(item.status, item.body), 'session-token');
+    try {
+      await assert.rejects(
+        () => harness.client.requestSocialAppDownload({
+          appId: 9,
+          platform: 'darwin_arm64',
+          deviceIdentifier: 'desktop',
+        }),
+        (error) => {
+          assert.equal(error.technicalCode, item.technicalCode);
+          assert.equal(error.details.httpStatus, item.status);
+          assert.equal(error.details.backendErrorCode, item.body.error);
+          assert.match(error.message, item.userMessage);
+          return true;
+        },
+      );
+    } finally {
+      harness.restore();
+      await rm(root, { recursive: true, force: true });
+    }
+  }
+});
+
 test('social app resolver fetches public apps by id', async () => {
   const root = await mkdtemp(join(tmpdir(), 'forger-social-resolve-app-'));
   let requestPath;

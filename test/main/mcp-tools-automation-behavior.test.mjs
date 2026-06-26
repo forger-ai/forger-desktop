@@ -2132,7 +2132,7 @@ test('automation command runner executes isolated Codex commands with MCP args a
     assert.ok(capture.args.includes('sandbox_workspace_write.network_access=true'));
     assert.ok(capture.args.includes('mcp_servers.finance-os.tool_timeout_sec=42'));
     assert.ok(capture.args.includes('apps.forger.default_tools_approval_mode="auto"'));
-    assert.ok(capture.args.includes('gpt-5.3-codex'));
+    assert.ok(capture.args.includes('gpt-5.2'));
     assert.deepEqual(streamedMessages.at(-1), ['Primero', 'Segundo']);
     assert.match(transcript, /\[stdout\].*Primero/);
     assert.match(transcript, /\[stderr\] diagnostic line/);

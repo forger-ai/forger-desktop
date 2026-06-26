@@ -770,6 +770,7 @@ test('DesktopErrorReporter filters expected errors, dedupes repeated failures, a
   });
 
 	  reporter.reportChatRunFailure({ appId: 'finance-os', runId: 'run-1', errorCode: 'auth_missing' });
+	  reporter.reportChatRunFailure({ appId: 'finance-os', runId: 'run-expired', errorCode: 'codex_auth_expired' });
 	  reporter.reportAppCodexTaskEvent({
 	    task: {
 	      appId: 'finance-os',

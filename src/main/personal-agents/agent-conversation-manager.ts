@@ -46,7 +46,7 @@ interface AgentConversationManagerOptions {
   onConversationEvent?: (event: PersonalAgentConversationEvent) => void;
 }
 
-const DEFAULT_MODEL = 'gpt-5.4';
+const DEFAULT_MODEL = 'gpt-5.2';
 const DEFAULT_REASONING: CodexReasoningEffort = 'medium';
 const PERSONAL_AGENT_RUN_TIMEOUT_MS = 600_000;
 const FIRST_MESSAGE_TITLE_WORDS = 8;

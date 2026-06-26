@@ -32,6 +32,7 @@ import type {
   StopAppResult,
   PrepareSocialAppReviewInput,
   SocialAppQuarantineRecord,
+  FailureDiagnosticFields,
 } from '../../shared/types';
 
 interface SocialInstallInput {
@@ -655,7 +656,7 @@ const installAppRuntime = async (appId: string, localeInput?: string): Promise<I
 const prepareSocialAppReview = async (
   input: PrepareSocialAppReviewInput,
   localeInput?: string,
-): Promise<{ success: boolean; quarantine?: SocialAppQuarantineRecord; userMessage: string; technicalCode?: string }> => {
+): Promise<{ success: boolean; quarantine?: SocialAppQuarantineRecord; userMessage: string } & FailureDiagnosticFields> => {
   if (!forgerBackendClient) {
     return { success: false, userMessage: 'Inicia sesion en Forger Cloud para revisar apps de Social.', technicalCode: 'backend_client_missing' };
   }
@@ -745,7 +746,7 @@ const prepareSocialAppReview = async (
     return {
       success: false,
       userMessage: localeInput === 'en' ? 'We could not prepare this app for review.' : 'No pudimos preparar esta app para revisión.',
-      technicalCode: diagnostic.technicalCode,
+      ...diagnostic,
     };
   }
 };

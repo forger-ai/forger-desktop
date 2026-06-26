@@ -30,6 +30,7 @@ const {
   writeAntigravityMcpConfig,
 } = require('../../dist-electron/main/app-agent/mcp.js');
 const {
+  detectProviderModelUnsupportedError,
   detectProviderQuotaError,
 } = require('../../dist-electron/main/llm-provider/provider-errors.js');
 
@@ -357,7 +358,7 @@ test('agent runtime registry normalizes providers, defaults, fallbacks, and runt
   });
   assert.deepEqual(runtimeRegistry.resolveAgentRuntime(undefined, runtimeRegistry.DEFAULT_AGENT_DEFAULTS), {
     provider: 'codex',
-    model: 'gpt-5.4',
+    model: 'gpt-5.2',
     effort: 'medium',
   });
   assert.deepEqual(runtimeRegistry.resolveAgentRuntime({ provider: 'claude', model: 'bad', effort: 'bad' }, {
@@ -448,7 +449,7 @@ test('agent runtime registry normalizes providers, defaults, fallbacks, and runt
   assert.equal(runtimeRegistry.agentRuntimeEquals(undefined, undefined), false);
   const defaultsCopy = runtimeRegistry.getDefaultAgentDefaults();
   defaultsCopy.codex.model = 'mutated';
-  assert.equal(runtimeRegistry.DEFAULT_AGENT_DEFAULTS.codex.model, 'gpt-5.4');
+  assert.equal(runtimeRegistry.DEFAULT_AGENT_DEFAULTS.codex.model, 'gpt-5.2');
 });
 
 test('antigravity CLI contract fixture captures real agy command semantics', async () => {
@@ -573,5 +574,15 @@ test('antigravity runner args and parser follow agy print and conversation flags
   assert.deepEqual(detectProviderQuotaError('codex', '', 'Error: rate limit exceeded. Too Many Requests (429).'), {
     chatCode: 'quota_exceeded',
     message: 'Codex quota exceeded',
+  });
+  assert.equal(detectProviderQuotaError('codex', 'Open the quota dashboard to inspect remaining usage.'), null);
+  assert.deepEqual(detectProviderModelUnsupportedError(
+    'codex',
+    '',
+    'ERROR: {"type":"error","status":400,"error":{"type":"invalid_request_error","message":"The \'gpt-5.4\' model is not supported when using Codex with a ChatGPT account."}}',
+  ), {
+    chatCode: 'model_unsupported',
+    message: 'Codex model unsupported: gpt-5.4',
+    model: 'gpt-5.4',
   });
 });

@@ -65,7 +65,7 @@ const migrateLegacyConversation = (conversation: ChatConversation): ChatConversa
     ...normalizedConversation,
     runtime: {
       provider: 'codex',
-      model: 'gpt-5.4',
+      model: 'gpt-5.2',
       effort: 'medium',
     },
   };

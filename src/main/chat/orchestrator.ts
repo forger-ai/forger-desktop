@@ -807,7 +807,7 @@ export class ChatOrchestrator {
       run.status = 'failed';
       run.updatedAt = new Date().toISOString();
       run.errorCode = detail.code;
-      run.userMessage = mapFailureMessage(detail.code, detail.message, run.runLogPath, run.locale);
+      run.userMessage = mapFailureMessage(detail.code, detail.message, run.runLogPath, run.locale, run.provider);
       this.emitRun(run);
       await appendRunLog(run.runLogPath, 'meta', `Run failed: [${detail.code}] ${detail.message}`);
 

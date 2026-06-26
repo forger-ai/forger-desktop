@@ -315,6 +315,48 @@ test('chat prepares Git before Codex runs', async () => {
   }
 });
 
+test('chat retries Codex with a compatible fallback when ChatGPT rejects the selected model', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'forger-chat-codex-model-fallback-'));
+  const fakeCodex = join(root, 'codex-model-fallback.cjs');
+  const callsPath = join(root, 'model-calls.ndjson');
+  await writeFile(fakeCodex, `#!/usr/bin/env node
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+const modelIndex = args.indexOf('--model');
+const model = modelIndex >= 0 ? args[modelIndex + 1] : '';
+fs.appendFileSync(${JSON.stringify(callsPath)}, JSON.stringify({ model, args }) + '\\n');
+if (model === 'gpt-5.4') {
+  console.error('ERROR: {"type":"error","status":400,"error":{"type":"invalid_request_error","message":"The \\'gpt-5.4\\' model is not supported when using Codex with a ChatGPT account."}}');
+  process.exit(1);
+}
+console.log(JSON.stringify({ type: 'thread.started', thread_id: 'fallback-thread' }));
+console.log(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'fallback model reply' } }));
+console.log(JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 1, output_tokens: 1 } }));
+`, 'utf8');
+  await chmod(fakeCodex, 0o755);
+
+  const harness = await createHarness({
+    getAgentRuntime: async () => ({ provider: 'codex', model: 'gpt-5.4', effort: 'medium' }),
+    getCodexCliPath: async () => fakeCodex,
+  });
+  try {
+    const started = await harness.orchestrator.startRun({
+      prompt: 'use compatible fallback',
+      threadId: null,
+      conversationId: 'conversation-codex-model-fallback',
+      userLanguage: 'en',
+    });
+    const finalRun = await waitForRun(harness.events, started.runId);
+    assert.equal(finalRun.status, 'preview_ready');
+    assert.equal(finalRun.userMessage, 'fallback model reply');
+    const calls = (await readFile(callsPath, 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
+    assert.deepEqual(calls.map((call) => call.model), ['gpt-5.4', 'gpt-5.2']);
+  } finally {
+    await harness.cleanup();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('chat run sandbox includes only existing shared file roots', async () => {
   const harness = await createHarness();
   const sharedDir = join(harness.root, 'shared-inputs');
@@ -928,18 +970,28 @@ test('chat error helpers normalize codes and localized failure messages', () => 
   assert.deepEqual(normalizeErrorCode(new Error('plain error')), { code: 'capability_unavailable', message: 'plain error' });
   assert.deepEqual(normalizeErrorCode('bad'), { code: 'capability_unavailable', message: 'unknown_error' });
   assert.match(mapFailureMessage('app_not_installed', undefined, undefined, 'en'), /install|installed/i);
-  assert.match(mapFailureMessage('auth_missing', undefined, undefined, 'en'), /connect Codex/i);
+  assert.match(mapFailureMessage('auth_missing', undefined, undefined, 'en'), /connect a provider/i);
   assert.match(mapFailureMessage('permission_denied', undefined, undefined, 'en'), /permission/i);
   assert.match(mapFailureMessage('timeout', undefined, undefined, 'en'), /too long|long/i);
   assert.match(mapFailureMessage('quota_exceeded', 'Codex quota exceeded', undefined, 'en'), /Codex reached your account usage limit/i);
   assert.match(mapFailureMessage('quota_exceeded', 'Google Antigravity quota exceeded', undefined, 'es'), /Google Antigravity alcanzó el límite de uso/i);
   assert.match(mapFailureMessage('quota_exceeded', undefined, undefined, 'en'), /The provider reached your account usage limit/i);
+  assert.match(mapFailureMessage('model_unsupported', 'Codex model unsupported: gpt-5.4', undefined, 'es'), /Codex no pudo usar el modelo seleccionado/i);
   assert.match(mapFailureMessage('sandbox_violation', undefined, undefined, 'en'), /workspace|access|files/i);
   assert.match(mapFailureMessage('dirty_worktree', undefined, undefined, 'en'), /saved|changes|clean/i);
   assert.match(mapFailureMessage('conflict', undefined, undefined, 'en'), /conflict|changed/i);
   assert.match(mapFailureMessage('canceled', undefined, '/tmp/run.log', 'en'), /\/tmp\/run\.log/);
   assert.match(mapFailureMessage('capability_unavailable', 'command not found', '/tmp/run.log', 'en'), /command not found/);
   assert.match(mapFailureMessage('capability_unavailable', 'provider failed without command keyword', '/tmp/run.log', 'en'), /provider failed/i);
+  assert.match(
+    mapFailureMessage('capability_unavailable', 'usage limit reached', '/tmp/run.log', 'en', 'claude'),
+    /Claude Code/,
+  );
+  assert.doesNotMatch(
+    mapFailureMessage('capability_unavailable', 'usage limit reached', '/tmp/run.log', 'en', 'claude'),
+    /Codex/,
+  );
+  assert.match(mapFailureMessage('auth_missing', undefined, undefined, 'es', 'claude'), /Claude Code/);
 });
 
 test('chat helper text summaries stay functional and app chat prompt hides internal routing labels', async () => {
@@ -1555,7 +1607,7 @@ process.exit(2);
       onChild: () => undefined,
       onOutput: (stream, text) => outputEvents.push([stream, text]),
     }), (error) => {
-      assert.equal(error.chatCode, 'auth_missing');
+      assert.equal(error.chatCode, 'codex_auth_expired');
       assert.equal(error.parsedRun.threadId, 'partial-thread');
       assert.equal(error.parsedRun.toolEvents, 1);
       return true;
@@ -1902,6 +1954,38 @@ console.log(JSON.stringify({ session_id: 'claude-thread-1', result: 'claude orch
     assert.match(finalRun.userMessage, /Claude Code CLI not installed|Claude/i);
   } finally {
     await missingCliHarness.cleanup();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('chat orchestrator classifies Claude usage limits with Claude-specific copy', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'forger-chat-claude-quota-'));
+  const fakeClaude = join(root, 'claude-quota.cjs');
+  await writeFile(fakeClaude, `#!/usr/bin/env node
+console.error('Claude usage limit reached. Try again later.');
+process.exit(1);
+`, 'utf8');
+  await chmod(fakeClaude, 0o755);
+
+  const harness = await createHarness({
+    getAgentRuntime: async () => ({ provider: 'claude', model: 'claude-test', effort: 'medium' }),
+    getClaudeCliPath: async () => fakeClaude,
+    getClaudeAuthenticated: async () => true,
+  });
+  try {
+    const started = await harness.orchestrator.startRun({
+      prompt: 'ask claude at quota',
+      threadId: null,
+      conversationId: 'conversation-claude-quota',
+      userLanguage: 'en',
+    });
+    const finalRun = await waitForRun(harness.events, started.runId);
+    assert.equal(finalRun.status, 'failed');
+    assert.equal(finalRun.errorCode, 'quota_exceeded');
+    assert.match(finalRun.userMessage, /Claude Code reached your account usage limit/);
+    assert.doesNotMatch(finalRun.userMessage, /Codex/);
+  } finally {
+    await harness.cleanup();
     await rm(root, { recursive: true, force: true });
   }
 });

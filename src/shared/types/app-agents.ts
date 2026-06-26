@@ -94,6 +94,9 @@ export interface AppCodexConversationRun {
   createdAt: string;
   updatedAt: string;
   error?: string;
+  errorDetails?: {
+    technicalCode?: string;
+  };
   progressLog?: string[];
   permissionRequest?: PermissionRequest;
 }

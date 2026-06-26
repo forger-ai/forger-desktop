@@ -154,7 +154,7 @@ Use this shape as the current authoring contract. Remove fields that do not appl
       "permissionMode": "safe",
       "runtimeRecommendations": {
         "codex": {
-          "model": "gpt-5.4",
+          "model": "gpt-5.2",
           "reasoningEffort": "medium"
         },
         "claude": {
@@ -201,7 +201,7 @@ Use this shape as the current authoring contract. Remove fields that do not appl
       },
       "runtimeRecommendations": {
         "codex": {
-          "model": "gpt-5.4",
+          "model": "gpt-5.2",
           "reasoningEffort": "medium"
         },
         "claude": {

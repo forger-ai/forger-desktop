@@ -285,6 +285,7 @@ test('conversation helpers serialize public state and build manifest-first promp
     createdAt: 'a',
     updatedAt: 'b',
     error: 'boom',
+    errorDetails: { technicalCode: 'quota_exceeded' },
     permissionRequest: { requestId: 'request-1', title: 'Use tool', body: 'Continue', action: 'tool' },
   }), {
     runId: 'run-2',
@@ -292,6 +293,7 @@ test('conversation helpers serialize public state and build manifest-first promp
     createdAt: 'a',
     updatedAt: 'b',
     error: 'boom',
+    errorDetails: { technicalCode: 'quota_exceeded' },
     permissionRequest: { requestId: 'request-1', title: 'Use tool', body: 'Continue', action: 'tool' },
   });
   assert.deepEqual(toConversation({
@@ -334,7 +336,7 @@ test('conversation helpers normalize ids, metadata, terminal status, progress, a
   assert.equal(isTerminalRunStatus('running'), false);
   assert.equal(isMissingProviderThread('', 'Thread/resume failed: conversation not found'), true);
   assert.equal(isMissingProviderThread('ok', ''), false);
-  assert.deepEqual(defaultAgentRuntime(), { model: 'gpt-5.4', reasoningEffort: 'medium' });
+  assert.deepEqual(defaultAgentRuntime(), { model: 'gpt-5.2', reasoningEffort: 'medium' });
   assert.equal(progressFromConversationOutput(JSON.stringify({
     type: 'item.completed',
     item: { type: 'agent_message', text: '# Done\n\n- Updated `value`.' },

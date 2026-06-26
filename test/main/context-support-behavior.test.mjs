@@ -103,6 +103,7 @@ test('context support normalizes installed app context for invalid, MCP-only, an
   await fs.mkdir(arrayDir, { recursive: true });
   await fs.mkdir(mcpOnlyDir, { recursive: true });
   await fs.mkdir(path.join(skillsDir, 'skills', 'inside'), { recursive: true });
+  await fs.mkdir(path.join(skillsDir, 'skills', 'bad-yaml'), { recursive: true });
   await fs.writeFile(path.join(invalidDir, 'manifest.json'), '{bad json', 'utf8');
   await fs.writeFile(path.join(arrayDir, 'manifest.json'), JSON.stringify([{ stack: { backend: { language: 'python' } } }]), 'utf8');
   await fs.writeFile(path.join(mcpOnlyDir, 'manifest.json'), JSON.stringify({
@@ -110,9 +111,24 @@ test('context support normalizes installed app context for invalid, MCP-only, an
   }), 'utf8');
   await fs.writeFile(path.join(skillsDir, 'manifest.json'), JSON.stringify({
     stack: { backend: { language: 'ruby' } },
-    skills: ['./skills/inside', './skills/missing', './manifest.json', '', 42],
+    skills: ['./skills/inside', './skills/bad-yaml', './skills/missing', './manifest.json', '', 42],
   }), 'utf8');
-  await fs.writeFile(path.join(skillsDir, 'skills', 'inside', 'SKILL.md'), 'inside', 'utf8');
+  await fs.writeFile(path.join(skillsDir, 'skills', 'inside', 'SKILL.md'), [
+    '---',
+    'name: inside',
+    'description: "Use when testing copied app skills: safely."',
+    '---',
+    'inside',
+    '',
+  ].join('\n'), 'utf8');
+  await fs.writeFile(path.join(skillsDir, 'skills', 'bad-yaml', 'SKILL.md'), [
+    '---',
+    'name: bad-yaml',
+    'description: Use when testing copied app skills: unsafe',
+    '---',
+    'bad',
+    '',
+  ].join('\n'), 'utf8');
 
   await controller.normalizeInstalledAgentContext(invalidDir, 'invalid');
   assert.match(await fs.readFile(path.join(invalidDir, 'AGENTS.md'), 'utf8'), /invalid/);
@@ -152,6 +168,7 @@ test('context support normalizes installed app context for invalid, MCP-only, an
     'forger-frontend-patterns',
     'inside',
   ]);
+  assert.equal((await fs.readdir(path.join(skillsDir, '.agents', 'skills'))).includes('bad-yaml'), false);
 });
 
 test('context support normalizes installed app templates without stack-dependent development skills', async (t) => {
@@ -214,6 +231,8 @@ test('context support normalizes installed app templates without stack-dependent
     'forger-frontend-patterns',
   ]);
   const officialToolSkill = await fs.readFile(path.join(appDir, '.agents', 'skills', 'forger-app-official-tools', 'SKILL.md'), 'utf8');
+  assert.match(officialToolSkill, /^name: "forger-app-official-tools"$/m);
+  assert.match(officialToolSkill, /^description: ".*"$/m);
   assert.match(officialToolSkill, /`gmail\.search_messages`/);
   assert.match(officialToolSkill, /`gmail\.read_thread`/);
   assert.doesNotMatch(officialToolSkill, /gmail\.send_email/);

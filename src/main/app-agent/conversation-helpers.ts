@@ -18,7 +18,7 @@ export interface InternalConversationShape extends AppCodexConversation {
 }
 
 const MAX_CONTEXT_CHARS = 40_000;
-const DEFAULT_MODEL = 'gpt-5.4';
+const DEFAULT_MODEL = 'gpt-5.2';
 const DEFAULT_REASONING: CodexReasoningEffort = 'medium';
 
 export const buildManifestAgentStartPrompt = (manifestPrompt: string): string =>
@@ -69,6 +69,7 @@ export const toRun = (run: AppCodexConversationRun): AppCodexConversationRun => 
   createdAt: run.createdAt,
   updatedAt: run.updatedAt,
   ...(run.error ? { error: run.error } : {}),
+  ...(run.errorDetails ? { errorDetails: run.errorDetails } : {}),
   ...(run.progressLog ? { progressLog: run.progressLog } : {}),
   ...(run.permissionRequest ? { permissionRequest: run.permissionRequest } : {}),
 });

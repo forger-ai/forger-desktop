@@ -978,6 +978,59 @@ test('agent auth launches existing managed Antigravity OAuth print mode in a Win
   assert.ok(calls.some((call) => call[0] === 'log' && call[1] === 'antigravity_auth:terminal_opened'));
 });
 
+test('agent auth launches existing managed Antigravity OAuth print mode in a Linux terminal', async (t) => {
+  const spawns = [];
+  const { root, calls, controller } = await makeAgentAuthHarness({
+    buildMacTerminalLoginScript: ({ providerName, logPath, command, cwd }) => {
+      calls.push(['script', providerName, logPath, command, cwd]);
+      return [
+        '#!/bin/bash',
+        `cd '${cwd}'`,
+        command.map((entry) => `'${entry.replace(/'/g, "'\\''")}'`).join(' '),
+      ].join('\n');
+    },
+    canRunCommand: async (command, args) => command.endsWith('agy') && args[0] === '--version',
+    runCommand: async (command, args, options) => calls.push(['run', command, args, options]),
+    runCommandCapture: async (command, args) => {
+      calls.push(['capture', command, args]);
+      if (command === 'which' && args[0] === 'x-terminal-emulator') {
+        return { code: 0, stdout: '/usr/bin/x-terminal-emulator\n', stderr: '' };
+      }
+      if (args[0] === '--version') {
+        return { code: 0, stdout: '1.0.9\n', stderr: '' };
+      }
+      return { code: 1, stdout: '', stderr: 'missing' };
+    },
+    spawn: (command, args, options) => {
+      const child = new FakeChildProcess();
+      child.unref = () => undefined;
+      spawns.push([command, args, options]);
+      queueMicrotask(() => child.emit('spawn'));
+      return child;
+    },
+  });
+  t.after(async () => {
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  await fs.mkdir(path.join(root, 'antigravity-root', 'bin'), { recursive: true });
+  await fs.writeFile(path.join(root, 'antigravity-root', 'bin', 'agy'), '', 'utf8');
+
+  const result = await withPlatform('linux', async () => await controller.connectAntigravityAuth());
+
+  assert.equal(result.success, true);
+  assert.equal(result.status?.installed, true);
+  assert.equal(result.status?.authenticated, false);
+  assert.equal(result.status?.source, 'managed');
+  assert.match(result.userMessage, /terminal/);
+  assert.equal(spawns[0][0], '/usr/bin/x-terminal-emulator');
+  assert.deepEqual(spawns[0][1], ['-e', path.join(root, 'tmp', 'antigravity-login.sh')]);
+  const script = await fs.readFile(path.join(root, 'tmp', 'antigravity-login.sh'), 'utf8');
+  assert.match(script, /Return the exact string OK and do not use tools\./);
+  assert.match(script, /--print-timeout'\s+'5m'/);
+  assert.ok(calls.some((call) => call[0] === 'log' && call[1] === 'antigravity_auth:terminal_opened'));
+  assert.equal(calls.some((call) => call[0] === 'run' && call[1].endsWith('agy')), false);
+});
+
 test('agent auth recognizes Antigravity Windows Credential Manager state', async (t) => {
   const { root, calls, controller } = await makeAgentAuthHarness({
     canRunCommand: async (command, args) => command.endsWith('agy.exe') && args[0] === '--version',

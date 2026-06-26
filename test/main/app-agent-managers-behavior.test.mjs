@@ -71,6 +71,19 @@ process.stdin.on('end', () => {
   return cliPath;
 };
 
+const createFailingCodexCli = async (root, stderr, filename = 'failing-codex.cjs') => {
+  const cliPath = path.join(root, filename);
+  await writeFile(cliPath, `#!/usr/bin/env node
+process.stdin.resume();
+process.stdin.on('end', () => {
+  console.error(${JSON.stringify(stderr)});
+  process.exit(1);
+});
+`, 'utf8');
+  await chmod(cliPath, 0o755);
+  return cliPath;
+};
+
 const readAgentCalls = async (root) => {
   const raw = await readFile(path.join(root, 'agent-calls.ndjson'), 'utf8');
   return raw.trim().split('\n').map((line) => JSON.parse(line));
@@ -232,6 +245,134 @@ test('task manager handles template validation, pending permissions, cancellatio
     ));
     assert.equal(stored.status, 'canceled');
     assert.equal(manager.cancel('other-app', task.runId).success, false);
+  } finally {
+    await roots.cleanup();
+  }
+});
+
+test('app-agent managers propagate provider-classified failures', async () => {
+  const roots = await createTempDesktopRoots('forger-provider-classified-failures-');
+  try {
+    await mkdir(path.join(roots.appsRoot, 'finance-os'), { recursive: true });
+    const cliPath = await createFailingCodexCli(
+      roots.root,
+      'unexpected status 401 Unauthorized: Failed to refresh token: refresh_token_invalidated',
+    );
+    const templates = [{
+      id: 'review',
+      title: 'Review',
+      prompt: 'Review {{topic}}',
+      arguments: [{ name: 'topic', type: 'string', required: true }],
+    }];
+    const shared = {
+      privateAppsRoot: roots.appsRoot,
+      metadataRoot: roots.metadataRoot,
+      codexHome: roots.codexHome,
+      getAgentRuntime: async () => ({ provider: 'codex', model: 'gpt-5.2', effort: 'medium' }),
+      getCodexCliPath: async () => cliPath,
+      getClaudeCliPath: async () => null,
+      getCodexPathEntries: async () => [path.dirname(process.execPath)],
+      getCodexEnvironment: async () => ({}),
+      getCodexAuthenticated: async () => true,
+      getClaudeAuthenticated: async () => false,
+    };
+
+    const taskEvents = [];
+    const { AppAgentTaskManager } = distRequire('main/app-agent-task-manager.js');
+    const taskManager = new AppAgentTaskManager({
+      ...shared,
+      resolvePromptTemplates: async () => templates,
+      onTaskUpdated: (event) => taskEvents.push(event),
+    });
+    const task = await taskManager.start('finance-os', {
+      templateId: 'review',
+      arguments: { topic: 'budget' },
+    });
+    const taskFailure = await waitFor(
+      () => taskEvents.find((event) => event.task.runId === task.runId && event.task.status === 'failed'),
+      'task_codex_auth_expired_failed',
+    );
+    assert.equal(taskFailure.task.errorDetails.technicalCode, 'codex_auth_expired');
+    assert.match(taskFailure.task.error, /Codex/i);
+
+    const conversationEvents = [];
+    const { AppAgentConversationManager } = distRequire('main/app-agent-conversation-manager.js');
+    const conversationManager = new AppAgentConversationManager({
+      ...shared,
+      hasCodexConversation: async () => true,
+      resolveAgents: async () => [],
+      onConversationEvent: (event) => conversationEvents.push(event),
+    });
+    const conversation = await conversationManager.create('finance-os', { title: 'Provider failure' });
+    const started = await conversationManager.sendMessage('finance-os', {
+      conversationId: conversation.conversationId,
+      message: 'Run',
+    });
+    const runFailure = await waitFor(
+      () => conversationEvents.find((event) => event.type === 'run.failed' && event.run.runId === started.activeRun.runId),
+      'conversation_codex_auth_expired_failed',
+    );
+    assert.equal(runFailure.run.errorDetails.technicalCode, 'codex_auth_expired');
+    assert.match(runFailure.run.error, /Codex/i);
+  } finally {
+    await roots.cleanup();
+  }
+});
+
+test('app-agent managers keep provider-specific failure copy for Claude', async () => {
+  const roots = await createTempDesktopRoots('forger-provider-claude-failures-');
+  try {
+    await mkdir(path.join(roots.appsRoot, 'finance-os'), { recursive: true });
+    const cliPath = await createFailingCodexCli(
+      roots.root,
+      'Error: rate limit exceeded. Too Many Requests (429).',
+      'failing-claude.cjs',
+    );
+    const templates = [{
+      id: 'review',
+      title: 'Review',
+      prompt: 'Review {{topic}}',
+      arguments: [{ name: 'topic', type: 'string', required: true }],
+    }];
+    const shared = {
+      privateAppsRoot: roots.appsRoot,
+      metadataRoot: roots.metadataRoot,
+      codexHome: roots.codexHome,
+      getAgentRuntime: async () => ({ provider: 'claude', model: 'claude-test', effort: 'medium' }),
+      getCodexCliPath: async () => null,
+      getClaudeCliPath: async () => cliPath,
+      getCodexPathEntries: async () => [path.dirname(process.execPath)],
+      getCodexEnvironment: async () => ({}),
+      getCodexAuthenticated: async () => false,
+      getClaudeAuthenticated: async () => true,
+    };
+
+    const taskEvents = [];
+    const { AppAgentTaskManager } = distRequire('main/app-agent-task-manager.js');
+    const taskManager = new AppAgentTaskManager({
+      ...shared,
+      resolvePromptTemplates: async () => templates,
+      onTaskUpdated: (event) => taskEvents.push(event),
+    });
+    const task = await taskManager.start('finance-os', {
+      templateId: 'review',
+      arguments: { topic: 'budget' },
+    });
+    const taskFailure = await waitFor(
+      () => taskEvents.find((event) => event.task.runId === task.runId && event.task.status === 'failed'),
+      'task_claude_quota_failed',
+    );
+    assert.equal(taskFailure.task.errorDetails.technicalCode, 'quota_exceeded');
+    assert.match(taskFailure.task.error, /Claude Code/i);
+    assert.doesNotMatch(taskFailure.task.error, /Codex/i);
+
+    const { buildProviderRunFailureError } = distRequire('main/app-agent/provider-failures.js');
+    const { mapFailureMessage } = distRequire('main/chat/progress-errors.js');
+    const conversationError = buildProviderRunFailureError('claude', '', 'Error: rate limit exceeded. Too Many Requests (429).');
+    assert.equal(conversationError.chatCode, 'quota_exceeded');
+    const conversationCopy = mapFailureMessage(conversationError.chatCode, conversationError.message, undefined, 'en', 'claude');
+    assert.match(conversationCopy, /Claude Code/i);
+    assert.doesNotMatch(conversationCopy, /Codex/i);
   } finally {
     await roots.cleanup();
   }
@@ -570,7 +711,7 @@ test('conversation manager loads persisted conversations, skips corrupt files, a
 
     const stored = JSON.parse(await readFile(path.join(storageRoot, 'finance-os.json'), 'utf8'));
     const migrated = stored.conversations.find((conversation) => conversation.conversationId === 'legacy-thread');
-    assert.deepEqual(migrated.runtime, { provider: 'codex', model: 'gpt-5.4', effort: 'medium' });
+    assert.deepEqual(migrated.runtime, { provider: 'codex', model: 'gpt-5.2', effort: 'medium' });
   } finally {
     await roots.cleanup();
   }

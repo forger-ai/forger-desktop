@@ -139,12 +139,16 @@ export const sharedCopy = {
         usingTools: 'El agente está usando herramientas de la app.',
       },
       failures: {
-        authMissing: 'Primero conecta Codex en Ajustes para usar Chat con cambios reales.',
+        authMissing: 'Primero conecta un proveedor en Ajustes para usar Chat con cambios reales.',
+        authMissingProvider: (providerName: string) =>
+          `Primero conecta ${providerName} en Ajustes para usar Chat con cambios reales.`,
         appNotInstalled: 'La app objetivo no está instalada en tu workspace privado.',
         permissionDenied: 'No continuamos porque el permiso fue denegado.',
         timeout: 'La solicitud tardó demasiado y fue detenida.',
         quotaExceeded: (providerName: string) =>
           `${providerName || 'El proveedor'} alcanzó el límite de uso de tu cuenta. Ese límite depende de tu suscripción con ${providerName || 'el proveedor'}. Prueba más tarde o cambia de modelo/proveedor en Ajustes.`,
+        modelUnsupported: (providerName: string) =>
+          `${providerName || 'El proveedor'} no pudo usar el modelo seleccionado con esta cuenta. Cambia a un modelo compatible en Ajustes y vuelve a intentar.`,
         sandboxViolation: 'Bloqueamos una acción fuera del workspace permitido.',
         dirtyWorktree: 'Antes de comenzar, al parecer hay cambios sin guardar en tu aplicación. ¿Quieres que guarde esa versión antes de continuar?',
         conflict: 'Detectamos un conflicto con el estado actual de la app.',
@@ -153,6 +157,10 @@ export const sharedCopy = {
           `No pude ejecutar Codex CLI en este equipo. Revisa login y versión en Ajustes.${snippet ? ` Detalle: ${snippet}` : ''}${logHint}`,
         codexRequestFailed: (snippet: string, logHint: string) =>
           `No pude completar la solicitud con Codex.${snippet ? ` Detalle: ${snippet}` : ''}${logHint}`,
+        providerCliFailed: (providerName: string, snippet: string, logHint: string) =>
+          `No pude ejecutar ${providerName} en este equipo. Revisa login y versión en Ajustes.${snippet ? ` Detalle: ${snippet}` : ''}${logHint}`,
+        providerRequestFailed: (providerName: string, snippet: string, logHint: string) =>
+          `No pude completar la solicitud con ${providerName}.${snippet ? ` Detalle: ${snippet}` : ''}${logHint}`,
       },
     },
     agentTools: {
@@ -448,12 +456,16 @@ export const sharedCopy = {
         usingTools: 'The agent is using app tools.',
       },
       failures: {
-        authMissing: 'Connect Codex in Settings first to use Chat with real changes.',
+        authMissing: 'Connect a provider in Settings first to use Chat with real changes.',
+        authMissingProvider: (providerName: string) =>
+          `Connect ${providerName} in Settings first to use Chat with real changes.`,
         appNotInstalled: 'The target app is not installed in your private workspace.',
         permissionDenied: 'We did not continue because permission was denied.',
         timeout: 'The request took too long and was stopped.',
         quotaExceeded: (providerName: string) =>
           `${providerName || 'The provider'} reached your account usage limit. That limit depends on your subscription with ${providerName || 'the provider'}. Try again later or change the model/provider in Settings.`,
+        modelUnsupported: (providerName: string) =>
+          `${providerName || 'The provider'} could not use the selected model with this account. Change to a compatible model in Settings and try again.`,
         sandboxViolation: 'An action outside the allowed workspace was blocked.',
         dirtyWorktree: 'Before starting, it looks like this app has unsaved changes. Do you want me to save that version before continuing?',
         conflict: 'We detected a conflict with the current app state.',
@@ -462,6 +474,10 @@ export const sharedCopy = {
           `I could not run Codex CLI on this computer. Check login and version in Settings.${snippet ? ` Detail: ${snippet}` : ''}${logHint}`,
         codexRequestFailed: (snippet: string, logHint: string) =>
           `I could not complete the request with Codex.${snippet ? ` Detail: ${snippet}` : ''}${logHint}`,
+        providerCliFailed: (providerName: string, snippet: string, logHint: string) =>
+          `I could not run ${providerName} on this computer. Check login and version in Settings.${snippet ? ` Detail: ${snippet}` : ''}${logHint}`,
+        providerRequestFailed: (providerName: string, snippet: string, logHint: string) =>
+          `I could not complete the request with ${providerName}.${snippet ? ` Detail: ${snippet}` : ''}${logHint}`,
       },
     },
     agentTools: {

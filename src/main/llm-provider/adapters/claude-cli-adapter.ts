@@ -12,6 +12,7 @@ import type {
   LlmRunOutputStream,
   LlmRunResult,
 } from '../types';
+import { createProviderQuotaError, detectProviderQuotaError } from '../provider-errors';
 
 type ClaudeCommandResult = LlmCommandResult & { code: number };
 
@@ -101,6 +102,10 @@ export class ClaudeCliAdapter {
       }) as ClaudeCommandResult;
       assertAllowedMcpServers(result.stdout, result.stderr, new Set(mcpServers.map((server) => server.name)));
       if (result.code !== 0 && input.throwOnNonZero !== false) {
+        const quotaFailure = detectProviderQuotaError('claude', result.stdout, result.stderr);
+        if (quotaFailure) {
+          throw createProviderQuotaError(quotaFailure);
+        }
         throw new Error((result.stderr || result.stdout || 'claude_exec_failed').trim());
       }
       const parsed = parseClaudeJsonl(result.stdout, result.stderr);

@@ -44,8 +44,12 @@ export interface CloudStorageResponse {
   storage?: unknown;
 }
 
-export const backendError = (message: string, technicalCode: string): Error & { technicalCode: string } =>
-  Object.assign(new Error(message), { technicalCode });
+export const backendError = (
+  message: string,
+  technicalCode: string,
+  details: Record<string, unknown> = {},
+): Error & { technicalCode: string; details?: Record<string, unknown> } =>
+  Object.assign(new Error(message), { technicalCode, ...(Object.keys(details).length > 0 ? { details } : {}) });
 
 export const buildBackendHeaders = (
   token: string | undefined,
