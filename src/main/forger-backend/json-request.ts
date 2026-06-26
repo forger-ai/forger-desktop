@@ -18,6 +18,71 @@ const readJson = async (response: Response): Promise<unknown> => {
   }
 };
 
+const backendPayloadErrorCode = (payload: unknown): string | undefined => {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return undefined;
+  }
+  const record = payload as Record<string, unknown>;
+  const error = typeof record.error === 'string' ? record.error.trim() : '';
+  return error || undefined;
+};
+
+const backendPayloadMessage = (payload: unknown): string | undefined => {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return undefined;
+  }
+  const record = payload as Record<string, unknown>;
+  const message = typeof record.message === 'string' ? record.message.trim() : '';
+  return message || undefined;
+};
+
+const backendFailureMessage = (
+  method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
+  status: number,
+  payload: unknown,
+): string => {
+  const backendCode = backendPayloadErrorCode(payload);
+  if (status === 401 || status === 403) {
+    return 'Tu sesión de Forger Cloud expiró. Inicia sesión de nuevo e inténtalo otra vez.';
+  }
+  if (status === 404) {
+    return 'No encontramos esa app o el código de invitación ya no está disponible.';
+  }
+  if (status === 422 && backendCode === 'platform_not_supported') {
+    return 'Esta app no está disponible para este sistema operativo.';
+  }
+  return backendPayloadMessage(payload)
+    ?? (method === 'GET' ? 'Forger Cloud session is no longer valid.' : 'No pudimos completar la accion en Forger Cloud.');
+};
+
+const throwBackendRequestError = (
+  method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
+  response: Response,
+  payload: unknown,
+  code: string,
+): never => {
+  const backendErrorCode = backendPayloadErrorCode(payload);
+  throw backendError(backendFailureMessage(method, response.status, payload), backendTechnicalCode(code, response.status, backendErrorCode), {
+    httpStatus: response.status,
+    ...(backendErrorCode ? { backendErrorCode } : {}),
+  });
+};
+
+const backendTechnicalCode = (code: string, status: number, backendErrorCode?: string): string => {
+  if (code === 'social_user_app_download_failed') {
+    if (status === 401 || status === 403) {
+      return 'forger_cloud_auth_expired';
+    }
+    if (status === 404) {
+      return 'social_app_download_not_found';
+    }
+    if (status === 422 && backendErrorCode === 'platform_not_supported') {
+      return 'social_app_platform_not_supported';
+    }
+  }
+  return `${code}_${status}`;
+};
+
 const requestJson = async (
   options: BackendJsonRequestOptions,
   method: 'GET' | 'POST' | 'PATCH',
@@ -34,10 +99,7 @@ const requestJson = async (
   });
   const payload = await readJson(response);
   if (!response.ok) {
-    const message = method === 'GET'
-      ? 'Forger Cloud session is no longer valid.'
-      : 'No pudimos completar la accion en Forger Cloud.';
-    throw backendError(message, `${code}_${response.status}`);
+    throwBackendRequestError(method, response, payload, code);
   }
   return payload;
 };
@@ -73,7 +135,7 @@ export const deleteBackendJson = async (
   });
   const payload = await readJson(response);
   if (!response.ok) {
-    throw backendError('No pudimos completar la accion en Forger Cloud.', `${code}_${response.status}`);
+    throwBackendRequestError('DELETE', response, payload, code);
   }
   return payload;
 };

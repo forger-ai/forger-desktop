@@ -6,7 +6,7 @@ export const BUNDLED_GIT_VERSION = '2.54.0';
 export const CODEX_CLI_VERSION = '0.135.0';
 export const CLAUDE_CODE_VERSION = '2.1.158';
 export const CODEX_USAGE_DASHBOARD_URL = 'https://chatgpt.com/codex/settings/usage';
-export const BUILT_IN_CODEX_MODEL = 'gpt-5.4';
+export const BUILT_IN_CODEX_MODEL = 'gpt-5.2';
 export const BUILT_IN_CODEX_REASONING: CodexReasoningEffort = 'medium';
 export const BUILT_IN_CLAUDE_MODEL = 'sonnet';
 export const BUILT_IN_CLAUDE_EFFORT: ClaudeEffort = 'medium';
@@ -17,6 +17,7 @@ export const APP_CODEX_MODEL_OPTIONS = [
   { displayModelName: '5.3 Spark', realModelName: 'gpt-5.3-codex-spark', defaultReasoningEffort: 'high' as const },
   { displayModelName: '5.4 Mini', realModelName: 'gpt-5.4-mini', defaultReasoningEffort: 'medium' as const },
   { displayModelName: '5.5', realModelName: 'gpt-5.5', defaultReasoningEffort: 'medium' as const },
+  { displayModelName: '5.2', realModelName: 'gpt-5.2', defaultReasoningEffort: 'medium' as const },
 ];
 
 export const APP_CLAUDE_MODEL_OPTIONS = [

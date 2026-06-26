@@ -325,13 +325,29 @@ export const normalizeErrorCode = (error: unknown): { code: ChatErrorCode; messa
   };
 };
 
-export const mapFailureMessage = (code: ChatErrorCode, detail?: string, runLogPath?: string, locale?: string): string => {
+export const normalizeProviderErrorCode = (error: unknown): { code: ChatErrorCode; message: string } | null => {
+  if (!error || typeof error !== 'object' || !('chatCode' in error)) {
+    return null;
+  }
+  return normalizeErrorCode(error);
+};
+
+export const mapFailureMessage = (
+  code: ChatErrorCode,
+  detail?: string,
+  runLogPath?: string,
+  locale?: string,
+  provider?: AgentProvider,
+): string => {
   const copy = getSharedCopy(locale).chat.failures;
   const snippet = detail?.split('\n').slice(0, 2).join(' ').trim();
   const logHint = runLogPath ? ` Log: ${runLogPath}` : '';
+  const providerName = providerDisplayName(provider);
   switch (code) {
     case 'auth_missing':
-      return copy.authMissing;
+      return providerName ? copy.authMissingProvider(providerName) : copy.authMissing;
+    case 'codex_auth_expired':
+      return copy.authMissingProvider('Codex');
     case 'app_not_installed':
       return copy.appNotInstalled;
     case 'permission_denied':
@@ -340,6 +356,8 @@ export const mapFailureMessage = (code: ChatErrorCode, detail?: string, runLogPa
       return copy.timeout;
     case 'quota_exceeded':
       return copy.quotaExceeded(providerNameFromQuotaDetail(detail));
+    case 'model_unsupported':
+      return copy.modelUnsupported(providerNameFromModelUnsupportedDetail(detail) || providerName);
     case 'sandbox_violation':
       return copy.sandboxViolation;
     case 'dirty_worktree':
@@ -350,9 +368,13 @@ export const mapFailureMessage = (code: ChatErrorCode, detail?: string, runLogPa
       return copy.canceled(logHint);
     default:
       if (detail && /exec|unknown|command|not found|usage/i.test(detail)) {
-        return copy.codexCliFailed(snippet ?? '', logHint).trim();
+        return providerName && provider !== 'codex'
+          ? copy.providerCliFailed(providerName, snippet ?? '', logHint).trim()
+          : copy.codexCliFailed(snippet ?? '', logHint).trim();
       }
-      return copy.codexRequestFailed(snippet ?? '', logHint);
+      return providerName && provider !== 'codex'
+        ? copy.providerRequestFailed(providerName, snippet ?? '', logHint)
+        : copy.codexRequestFailed(snippet ?? '', logHint);
   }
 };
 
@@ -360,4 +382,23 @@ const providerNameFromQuotaDetail = (detail?: string): string => {
   const compact = detail?.replace(/\s+/g, ' ').trim() ?? '';
   const match = compact.match(/^(Google Antigravity|Codex|Claude(?: Code)?)\s+quota exceeded\b/i);
   return match?.[1] ?? '';
+};
+
+const providerNameFromModelUnsupportedDetail = (detail?: string): string => {
+  const compact = detail?.replace(/\s+/g, ' ').trim() ?? '';
+  const match = compact.match(/^(Google Antigravity|Codex|Claude(?: Code)?)\s+model unsupported\b/i);
+  return match?.[1] ?? '';
+};
+
+const providerDisplayName = (provider?: AgentProvider): string => {
+  if (provider === 'claude') {
+    return 'Claude Code';
+  }
+  if (provider === 'antigravity') {
+    return 'Google Antigravity';
+  }
+  if (provider === 'codex') {
+    return 'Codex';
+  }
+  return '';
 };

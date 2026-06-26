@@ -166,7 +166,7 @@ export class PromptOverridesStore {
         return template;
       }
       const base = promptTemplateBase(template, {
-        model: template.model ?? 'gpt-5.4',
+        model: template.model ?? 'gpt-5.2',
         reasoningEffort: template.reasoningEffort ?? 'medium',
       });
       const validation = validatePromptEdit(base, override.prompt);
@@ -195,7 +195,7 @@ export class PromptOverridesStore {
             continue;
           }
           const base = agentPromptBase(agent, key, {
-            model: agent.model ?? 'gpt-5.4',
+            model: agent.model ?? 'gpt-5.2',
             reasoningEffort: agent.reasoningEffort ?? 'medium',
           });
           const validation = validatePromptEdit(base, override.prompt);
@@ -217,7 +217,7 @@ export class PromptOverridesStore {
         return agent;
       }
       const base = agentBase(agent, {
-        model: agent.model ?? 'gpt-5.4',
+        model: agent.model ?? 'gpt-5.2',
         reasoningEffort: agent.reasoningEffort ?? 'medium',
       });
       const validation = validatePromptEdit(base, override.prompt);

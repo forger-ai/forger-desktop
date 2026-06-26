@@ -19,12 +19,14 @@ export type ChatRunStatus =
 
 export type ChatErrorCode =
   | 'auth_missing'
+  | 'codex_auth_expired'
   | 'app_not_installed'
   | 'dirty_worktree'
   | 'sandbox_violation'
   | 'permission_denied'
   | 'timeout'
   | 'quota_exceeded'
+  | 'model_unsupported'
   | 'canceled'
   | 'conflict'
   | 'capability_unavailable';

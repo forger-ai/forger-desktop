@@ -191,7 +191,9 @@ const commandFailureDetails = (error: unknown): Record<string, unknown> => {
   if (!isRecord(error)) {
     return {};
   }
+  const details = isRecord(error.details) ? error.details : {};
   return compactRecord({
+    ...details,
     exitCode: error.exitCode,
     signal: error.signal,
   });

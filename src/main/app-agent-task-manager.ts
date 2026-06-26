@@ -26,6 +26,7 @@ import {
   killProcessTree,
   runCommandCapture,
 } from './app-agent/process';
+import { buildProviderRunFailureError } from './app-agent/provider-failures';
 import {
   appendTranscript,
   buildLegacyPromptVariables,
@@ -48,7 +49,7 @@ import {
 } from './app-agent/task-helpers';
 import type { LlmAppMcpServerConfig } from './app-agent/types';
 import type { AppFolderGrantPublic } from './app-folder-grants';
-import { toProviderProgressMessages } from './chat/progress-errors';
+import { mapFailureMessage, normalizeProviderErrorCode, toProviderProgressMessages } from './chat/progress-errors';
 import { antigravityCliAdapter } from './llm-provider/adapters/antigravity-cli-adapter';
 import { claudeCliAdapter } from './llm-provider/adapters/claude-cli-adapter';
 import { codexCliAdapter, parseCodexJsonl } from './llm-provider/adapters/codex-cli-adapter';
@@ -85,6 +86,7 @@ interface InternalTask extends AppCodexTaskSummary {
   appRoot: string;
   transcriptPath: string;
   child?: ChildProcessWithoutNullStreams;
+  provider?: AgentRuntime['provider'];
 }
 
 interface ResolvedTaskWorkspace {
@@ -92,7 +94,10 @@ interface ResolvedTaskWorkspace {
   additionalRoots: string[];
 }
 
-const taskFailureFromError = (error: unknown): Pick<AppCodexTaskSummary, 'error' | 'errorDetails'> => {
+const taskFailureFromError = (
+  error: unknown,
+  provider?: AgentRuntime['provider'],
+): Pick<AppCodexTaskSummary, 'error' | 'errorDetails'> => {
   if (error instanceof AppPromptStringTooLongError) {
     return {
       error: error.userMessage,
@@ -105,8 +110,18 @@ const taskFailureFromError = (error: unknown): Pick<AppCodexTaskSummary, 'error'
     };
   }
 
+  const providerDetail = normalizeProviderErrorCode(error);
+  if (providerDetail) {
+    return {
+      error: mapFailureMessage(providerDetail.code, providerDetail.message, undefined, undefined, provider),
+      errorDetails: {
+        technicalCode: providerDetail.code,
+      },
+    };
+  }
+
   return {
-    error: error instanceof Error ? error.message : 'app_codex_task_failed',
+    error: error instanceof Error ? error.message : String(error ?? 'app_codex_task_failed'),
   };
 };
 
@@ -118,7 +133,7 @@ interface PendingPermission {
 
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 const CODEX_TASK_TIMEOUT_MS = 600_000;
-const DEFAULT_MODEL = 'gpt-5.4';
+const DEFAULT_MODEL = 'gpt-5.2';
 const DEFAULT_REASONING: CodexReasoningEffort = 'medium';
 
 const hasTaskRuntimeInput = (runtime: AppCodexTaskStartInput['runtime']): boolean => {
@@ -171,7 +186,7 @@ export class AppAgentTaskManager {
     this.emit(task);
 
     void this.execute(task, template, input).catch((error) => {
-      const failure = taskFailureFromError(error);
+      const failure = taskFailureFromError(error, task.provider);
       void this.failTask(task, failure.error ?? 'app_codex_task_failed', failure.errorDetails);
     });
 
@@ -277,6 +292,7 @@ export class AppAgentTaskManager {
   ): Promise<void> {
     const locale = normalizeTaskLocale(input.locale);
     const runtime = await this.resolveRuntime(template, input);
+    task.provider = runtime.provider;
     if (runtime.provider === 'antigravity') {
       if (!(await (this.options.getAntigravityAuthenticated?.() ?? Promise.resolve(false)))) {
         throw new Error('antigravity_auth_missing');
@@ -469,7 +485,7 @@ export class AppAgentTaskManager {
         }
       }
       if (result.code !== 0) {
-        throw new Error((result.stderr || result.stdout || 'codex_exec_failed').trim());
+        throw buildProviderRunFailureError(runtime.provider, result.stdout, result.stderr);
       }
       task.status = 'completed';
       task.updatedAt = new Date().toISOString();

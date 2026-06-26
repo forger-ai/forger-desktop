@@ -77,6 +77,7 @@ export const createAgentAuthController = (deps: AgentAuthDeps) => {
   const { path, fs, spawn, app, getCodexHome, getForgerMetadataRoot, registry, resolveInstalledManifest, findManifestService, translateManifestEnvironment, ensureRuntimeInstalled, DEFAULT_NODE_VERSION, getCodexRoot, CODEX_CLI_VERSION, runCommand, runCommandCapture, buildCodexAuthEnvironment, classifyCodexAuthOutput, extractAllowedCodexAuthUrls, appendInstallLog, getLogsRoot, getTempRoot, serializeErrorForInstallLog, shell, buildMacTerminalLoginScript, buildMacTerminalScriptLaunchCommand, failureDiagnostic, CLAUDE_CODE_VERSION, getClaudeRoot, getAntigravityRoot, canRunCommand, markProviderConnected, markProviderDisconnected, findExistingFile, truncateForInstallLog } = deps;
 const escapeWindowsBatchValue = (value: string): string => value.replace(/%/g, '%%').replace(/"/g, '""');
 const quotePowerShellSingle = (value: string): string => `'${value.replace(/'/g, "''")}'`;
+const quotePosixShell = (value: string): string => `'${value.replace(/'/g, "'\\''")}'`;
 const CODEX_RATE_LIMITS_TIMEOUT_MS = 8_000;
 const CODEX_AUTH_STATUS_RATE_LIMITS_TIMEOUT_MS = 1_500;
 const PROVIDER_CLI_INSTALL_TIMEOUT_MS = 300_000;
@@ -1219,6 +1220,112 @@ const openWindowsAntigravityLoginTerminal = async (input: {
   return { loginLogPath, loginScriptPath, launchCommand };
 };
 
+const LINUX_TERMINAL_CANDIDATES = [
+  'x-terminal-emulator',
+  'gnome-terminal',
+  'konsole',
+  'xfce4-terminal',
+  'mate-terminal',
+  'lxterminal',
+  'xterm',
+];
+
+const resolveLinuxTerminalCommand = async (): Promise<string> => {
+  const envTerminal = process.env.TERMINAL?.trim();
+  if (envTerminal) {
+    return envTerminal;
+  }
+  for (const candidate of LINUX_TERMINAL_CANDIDATES) {
+    const result = await runCommandCapture('which', [candidate], {
+      cwd: app.getPath('userData'),
+      timeoutMs: 3_000,
+    }).catch(() => null);
+    const resolved = result?.code === 0
+      ? result.stdout.split(/\r?\n/).map((line) => line.trim()).find(Boolean)
+      : '';
+    if (resolved) {
+      return resolved;
+    }
+  }
+  throw new Error('linux_terminal_unavailable');
+};
+
+const buildLinuxTerminalArgs = (terminalCommand: string, loginScriptPath: string): string[] => {
+  const executable = path.basename(terminalCommand).toLowerCase();
+  if (executable.includes('gnome-terminal')) {
+    return ['--', loginScriptPath];
+  }
+  if (executable.includes('konsole')) {
+    return ['--noclose', '-e', loginScriptPath];
+  }
+  if (executable.includes('xfce4-terminal') || executable.includes('mate-terminal') || executable.includes('lxterminal')) {
+    return ['-e', loginScriptPath];
+  }
+  return ['-e', loginScriptPath];
+};
+
+const openLinuxDetachedTerminal = async (
+  terminalCommand: string,
+  terminalArgs: string[],
+  cwd: string,
+): Promise<void> => {
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(terminalCommand, terminalArgs, {
+      cwd,
+      detached: true,
+      stdio: 'ignore',
+    });
+    let settled = false;
+    const finish = (error?: Error): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      child.removeAllListeners('error');
+      child.removeAllListeners('spawn');
+      if (error) {
+        reject(error);
+      } else {
+        resolve();
+      }
+    };
+    child.once('error', finish);
+    child.once('spawn', () => finish());
+    child.unref?.();
+  });
+};
+
+const openLinuxAntigravityLoginTerminal = async (input: {
+  cliPath: string;
+  source: 'managed' | 'system';
+}): Promise<{ loginLogPath: string; loginScriptPath: string; terminalCommand: string; terminalArgs: string[] }> => {
+  const loginLogPath = path.join(getLogsRoot(), 'antigravity-login.log');
+  const loginScriptPath = path.join(getTempRoot(), 'antigravity-login.sh');
+  const loginCwd = path.join(getTempRoot(), 'antigravity-auth-login');
+  await fs.mkdir(loginCwd, { recursive: true }).catch(() => undefined);
+  const loginScript = buildMacTerminalLoginScript({
+    providerName: 'Google Antigravity',
+    logPath: loginLogPath,
+    command: [input.cliPath, '--print', ANTIGRAVITY_AUTH_PROBE_PROMPT, '--print-timeout', '5m'],
+    cwd: loginCwd,
+  });
+  await fs.mkdir(path.dirname(loginLogPath), { recursive: true });
+  await fs.mkdir(path.dirname(loginScriptPath), { recursive: true });
+  await fs.writeFile(loginLogPath, [
+    `[${new Date().toISOString()}] Forger prepared Google Antigravity login.`,
+    `antigravityCliPath=${input.cliPath}`,
+    `source=${input.source}`,
+    `loginScriptPath=${loginScriptPath}`,
+    '',
+  ].join('\n'), 'utf8');
+  await fs.writeFile(loginScriptPath, loginScript, 'utf8');
+  await fs.chmod(loginScriptPath, 0o700);
+  const terminalCommand = await resolveLinuxTerminalCommand();
+  const terminalArgs = buildLinuxTerminalArgs(terminalCommand, loginScriptPath);
+  await openLinuxDetachedTerminal(terminalCommand, terminalArgs, app.getPath('userData'));
+  return { loginLogPath, loginScriptPath, terminalCommand: [terminalCommand, ...terminalArgs.map(quotePosixShell)].join(' '), terminalArgs };
+};
+
 const hasMacKeychainGenericPassword = async (service: string, account: string): Promise<boolean> => {
   if (process.platform !== 'darwin') {
     return false;
@@ -1897,6 +2004,27 @@ const connectAntigravityAuth = async (): Promise<{ success: boolean; userMessage
           source,
           antigravityCliPath: cliPath,
           userMessage: 'Completa el login de Google Antigravity en la consola.',
+        },
+      };
+    }
+    if (process.platform === 'linux') {
+      const terminal = await openLinuxAntigravityLoginTerminal({ cliPath, source });
+      await appendInstallLog('antigravity_auth:terminal_opened', {
+        platform: process.platform,
+        cliPath,
+        loginScriptPath: terminal.loginScriptPath,
+        terminalCommand: terminal.terminalCommand,
+        loginLogPath: terminal.loginLogPath,
+      });
+      return {
+        success: true,
+        userMessage: 'Abrimos una terminal para completar la conexión local de Google Antigravity.',
+        status: {
+          installed: true,
+          authenticated: false,
+          source,
+          antigravityCliPath: cliPath,
+          userMessage: 'Completa el login de Google Antigravity en la terminal.',
         },
       };
     }

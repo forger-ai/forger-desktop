@@ -209,7 +209,7 @@ export const runAgentCommand = async (
           mcpServers,
           workingDir: options.cwd,
           prompt: options.prompt,
-          model: options.runtime.model || 'gpt-5.3-codex',
+          model: options.runtime.model || 'gpt-5.2',
           reasoningEffort: options.runtime.effort || 'low',
           networkAccess: options.networkAccess,
           timeoutMs: AUTOMATION_TIMEOUT_MS,

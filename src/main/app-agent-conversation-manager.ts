@@ -42,9 +42,10 @@ import {
   killProcessTree,
   runCommandCapture,
 } from './app-agent/process';
+import { buildProviderRunFailureError } from './app-agent/provider-failures';
 import type { LlmAppMcpServerConfig } from './app-agent/types';
 import type { AppFolderGrantPublic } from './app-folder-grants';
-import { appendRunLog, getRunLogPath, toProviderProgressMessages } from './chat/progress-errors';
+import { appendRunLog, getRunLogPath, mapFailureMessage, normalizeProviderErrorCode, toProviderProgressMessages } from './chat/progress-errors';
 import { antigravityCliAdapter } from './llm-provider/adapters/antigravity-cli-adapter';
 import { claudeCliAdapter } from './llm-provider/adapters/claude-cli-adapter';
 import { codexCliAdapter } from './llm-provider/adapters/codex-cli-adapter';
@@ -88,6 +89,7 @@ interface InternalRun extends AppCodexConversationRun {
   appId: string;
   conversationId: string;
   locale: Locale;
+  provider?: AgentRuntime['provider'];
   child?: ChildProcessWithoutNullStreams;
   attachmentPaths?: string[];
   runLogPath?: string;
@@ -104,7 +106,7 @@ interface ResolvedRunWorkspace {
   additionalRoots: string[];
 }
 
-const DEFAULT_MODEL = 'gpt-5.4';
+const DEFAULT_MODEL = 'gpt-5.2';
 const DEFAULT_REASONING: CodexReasoningEffort = 'medium';
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 const CODEX_CONVERSATION_RUN_TIMEOUT_MS = 600_000;
@@ -261,7 +263,12 @@ export class AppAgentConversationManager {
     });
 
     void this.execute(conversation.conversationId, runId, input).catch((error) => {
-      void this.failRun(runId, error instanceof Error ? error.message : 'codex_conversation_failed');
+      const failedRun = this.runs.get(runId);
+      const providerDetail = normalizeProviderErrorCode(error);
+      const message = providerDetail
+        ? mapFailureMessage(providerDetail.code, providerDetail.message, undefined, input.locale, failedRun?.provider)
+        : error instanceof Error ? error.message : String(error ?? 'app_codex_conversation_failed');
+      void this.failRun(runId, message, providerDetail ? { technicalCode: providerDetail.code } : undefined);
     });
 
     return toConversation(conversation);
@@ -466,6 +473,7 @@ export class AppAgentConversationManager {
       throw new Error('app_not_installed');
     }
     const runtime = await this.resolveRunRuntime(conversation, input);
+    run.provider = runtime.provider;
     if (runtime.provider === 'antigravity') {
       if (!(await (this.options.getAntigravityAuthenticated?.() ?? Promise.resolve(false)))) {
         throw new Error('antigravity_auth_missing');
@@ -665,7 +673,12 @@ export class AppAgentConversationManager {
           await this.execute(conversationId, runId, input, false);
           return;
         }
-        throw new Error((result.stderr || result.stdout || `${runtime.provider}_conversation_exec_failed`).trim());
+        throw buildProviderRunFailureError(
+          runtime.provider,
+          result.stdout,
+          result.stderr,
+          `${runtime.provider}_conversation_exec_failed`,
+        );
       }
 
       if (result.threadId) {
@@ -826,7 +839,11 @@ export class AppAgentConversationManager {
     }
   }
 
-  private async failRun(runId: string, message: string): Promise<void> {
+  private async failRun(
+    runId: string,
+    message: string,
+    errorDetails?: AppCodexConversationRun['errorDetails'],
+  ): Promise<void> {
     const run = this.runs.get(runId);
     if (!run || run.status === 'canceled') {
       return;
@@ -839,6 +856,7 @@ export class AppAgentConversationManager {
     run.permissionRequest = undefined;
     run.status = 'failed';
     run.error = message;
+    run.errorDetails = errorDetails;
     run.updatedAt = new Date().toISOString();
     conversation.activeRun = toRun(run);
     conversation.updatedAt = run.updatedAt;

@@ -132,6 +132,52 @@ const removeUndeclaredSkillTemplates = async (skillsRoot: string, templates: Sta
   }
 };
 
+const yamlScalar = (value: string): string => JSON.stringify(value);
+
+const normalizeSkillTemplateBody = (template: StackSkillTemplate): string => {
+  const bodyWithoutFrontmatter = template.body.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '');
+  return [
+    '---',
+    `name: ${yamlScalar(template.id)}`,
+    `description: ${yamlScalar(template.description)}`,
+    '---',
+    bodyWithoutFrontmatter.replace(/^\s+/, ''),
+  ].join('\n');
+};
+
+const readFrontmatterField = (frontmatter: string, fieldName: 'name' | 'description'): string | null => {
+  const match = frontmatter.match(new RegExp(`^${fieldName}:\\s*(.*)$`, 'm'));
+  if (!match) {
+    return null;
+  }
+  const value = match[1]?.trim() ?? '';
+  if (!value) {
+    return null;
+  }
+  if (value.startsWith('"')) {
+    try {
+      return JSON.parse(value) as string;
+    } catch {
+      return null;
+    }
+  }
+  if (/:\s/.test(value)) {
+    return null;
+  }
+  return value;
+};
+
+const hasValidSkillFrontmatter = (source: string): boolean => {
+  const match = source.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  if (!match) {
+    return false;
+  }
+  return Boolean(
+    readFrontmatterField(match[1], 'name')
+    && readFrontmatterField(match[1], 'description'),
+  );
+};
+
 const writeSkillTemplates = async (skillsRoot: string, templates: StackSkillTemplate[]): Promise<void> => {
   await fs.mkdir(skillsRoot, { recursive: true });
   await removeUndeclaredSkillTemplates(skillsRoot, templates);
@@ -139,7 +185,7 @@ const writeSkillTemplates = async (skillsRoot: string, templates: StackSkillTemp
     const targetDir = path.join(skillsRoot, template.id);
     await fs.rm(targetDir, { recursive: true, force: true });
     await fs.mkdir(targetDir, { recursive: true });
-    await fs.writeFile(path.join(targetDir, 'SKILL.md'), template.body, 'utf8');
+    await fs.writeFile(path.join(targetDir, 'SKILL.md'), normalizeSkillTemplateBody(template), 'utf8');
     await fs.writeFile(path.join(targetDir, 'README.md'), `${template.description}\n`, 'utf8');
   }
 };
@@ -169,6 +215,12 @@ const copyAppSkills = async (installDir: string, skillsRoot: string, manifest: A
 
     const stat = await fs.stat(sourcePathReal).catch(() => null);
     if (!stat?.isDirectory()) {
+      continue;
+    }
+    const skillMarkdownPath = path.join(sourcePathReal, 'SKILL.md');
+    const skillMarkdown = await fs.readFile(skillMarkdownPath, 'utf8').catch(() => null);
+    if (!skillMarkdown || !hasValidSkillFrontmatter(skillMarkdown)) {
+      console.warn('skill_frontmatter_invalid', { sourcePath: sourcePathReal });
       continue;
     }
 

@@ -1584,9 +1584,23 @@ test('normalizeInstalledAgentContext writes app runtime skills while ignoring sk
   });
   const installDir = path.join(root, 'apps', 'demo-app');
   await fs.mkdir(path.join(installDir, 'skills', 'inside'), { recursive: true });
-  await fs.writeFile(path.join(installDir, 'skills', 'inside', 'SKILL.md'), 'inside skill', 'utf8');
+  await fs.writeFile(path.join(installDir, 'skills', 'inside', 'SKILL.md'), [
+    '---',
+    'name: inside',
+    'description: "Use when testing copied runtime skills: safely."',
+    '---',
+    'inside skill',
+    '',
+  ].join('\n'), 'utf8');
   await fs.mkdir(path.join(root, 'outside-skill'), { recursive: true });
-  await fs.writeFile(path.join(root, 'outside-skill', 'SKILL.md'), 'outside skill', 'utf8');
+  await fs.writeFile(path.join(root, 'outside-skill', 'SKILL.md'), [
+    '---',
+    'name: outside-skill',
+    'description: Use when testing outside skill.',
+    '---',
+    'outside skill',
+    '',
+  ].join('\n'), 'utf8');
   await fs.writeFile(path.join(installDir, 'manifest.json'), JSON.stringify({
     stack: {
       backend: { language: 'python', framework: 'fastapi' },

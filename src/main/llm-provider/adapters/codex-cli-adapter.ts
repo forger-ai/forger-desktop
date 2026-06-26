@@ -10,7 +10,7 @@ import {
 } from '../../codex-run-isolation';
 import { codexUnsafeArgs, codexWorkspaceArgs } from '../../agent-permission-mode';
 import { classifyCodexAuthOutput } from '../../codex-auth-helpers';
-import { detectProviderQuotaError } from '../provider-errors';
+import { detectProviderModelUnsupportedError, detectProviderQuotaError } from '../provider-errors';
 import type {
   LlmCommandResult,
   LlmMcpServerConfig,
@@ -20,6 +20,7 @@ import type {
 } from '../types';
 
 const CODEX_ATTEMPT_INACTIVITY_TIMEOUT_MS = 30 * 60 * 1000;
+const CODEX_CHATGPT_COMPATIBLE_FALLBACK_MODEL = 'gpt-5.2';
 
 interface ResolvedLlmCommand {
   command: string;
@@ -121,7 +122,7 @@ export class CodexCliAdapter {
       trustedRoots: [input.workingDir, ...(input.sharedRoots ?? [])],
       networkAccess: input.networkAccess === true,
     });
-    const attempts = buildChatAttempts(input, mcpServers);
+    const attemptGroups = buildChatAttemptGroups(input, mcpServers);
     const topLevelArgs = mcpServers.length > 0 ? ['--ask-for-approval', 'never'] : [];
     const allowedMcpServers = new Set(mcpServers.map((server) => server.name));
     let lastResult: CodexCommandResult | null = null;
@@ -138,34 +139,51 @@ export class CodexCliAdapter {
           'mcpDefaultToolsApprovalMode=forger:auto app:approve',
         ].join(' '),
       );
-      for (const [index, args] of attempts.entries()) {
-        try {
-          const mode = args.includes('resume') ? 'resume' : 'new';
-          const json = args.includes('--json') ? 'json' : 'plain';
-          input.onOutput?.('meta', `Intento ${index + 1}/${attempts.length} (${mode}, ${json}, model=${input.model})`);
-          const result = await input.runCommandCapture(command.command, [...command.prefixArgs, ...topLevelArgs, ...args], {
-            cwd: input.workingDir,
-            env: this.buildEnv(input, command, isolatedCodexHome),
-            inactivityTimeoutMs: CODEX_ATTEMPT_INACTIVITY_TIMEOUT_MS,
-            onChild: input.onChild,
-            onStdout: (text) => input.onOutput?.('stdout', text),
-            onStderr: (text) => input.onOutput?.('stderr', text),
-          }) as CodexCommandResult;
-          assertAllowedMcpServers(result.stdout, result.stderr, allowedMcpServers);
-          lastResult = result;
-          if (result.code === 0) {
-            return this.toRunResult(result, parseCodexJsonl(result.stdout, result.stderr));
-          }
-          lastErrorMessage = (result.stderr || result.stdout || '').trim();
-        } catch (error) {
-          if (error instanceof DisallowedMcpServerError) {
-            throw error;
-          }
-          if (error instanceof Error) {
-            lastErrorMessage = error.message;
-            input.onOutput?.('meta', `Intento ${index + 1} falló: ${error.message}`);
+      for (const group of attemptGroups) {
+        let skipToNextGroup = false;
+        for (const [index, args] of group.attempts.entries()) {
+          try {
+            const mode = args.includes('resume') ? 'resume' : 'new';
+            const json = args.includes('--json') ? 'json' : 'plain';
+            input.onOutput?.('meta', `Intento ${index + 1}/${group.attempts.length} (${mode}, ${json}, model=${group.model})`);
+            const result = await input.runCommandCapture(command.command, [...command.prefixArgs, ...topLevelArgs, ...args], {
+              cwd: input.workingDir,
+              env: this.buildEnv(input, command, isolatedCodexHome),
+              inactivityTimeoutMs: CODEX_ATTEMPT_INACTIVITY_TIMEOUT_MS,
+              onChild: input.onChild,
+              onStdout: (text) => input.onOutput?.('stdout', text),
+              onStderr: (text) => input.onOutput?.('stderr', text),
+            }) as CodexCommandResult;
+            assertAllowedMcpServers(result.stdout, result.stderr, allowedMcpServers);
+            lastResult = result;
+            if (result.code === 0) {
+              return this.toRunResult(result, parseCodexJsonl(result.stdout, result.stderr));
+            }
+            lastErrorMessage = (result.stderr || result.stdout || '').trim();
+            if (group.fallbackModel && detectProviderModelUnsupportedError('codex', result.stdout, result.stderr, lastErrorMessage)) {
+              input.onOutput?.('meta', `El modelo ${group.model} no es compatible con esta cuenta. Reintentando con ${group.fallbackModel}.`);
+              skipToNextGroup = true;
+              break;
+            }
+          } catch (error) {
+            if (error instanceof DisallowedMcpServerError) {
+              throw error;
+            }
+            if (error instanceof Error) {
+              lastErrorMessage = error.message;
+              input.onOutput?.('meta', `Intento ${index + 1} falló: ${error.message}`);
+              if (group.fallbackModel && detectProviderModelUnsupportedError('codex', error.message)) {
+                input.onOutput?.('meta', `El modelo ${group.model} no es compatible con esta cuenta. Reintentando con ${group.fallbackModel}.`);
+                skipToNextGroup = true;
+                break;
+              }
+            }
           }
         }
+        if (group.fallbackModel && skipToNextGroup) {
+          continue;
+        }
+        break;
       }
     } finally {
       if (!input.codexHome) {
@@ -252,7 +270,7 @@ export class CodexCliAdapter {
       'exec',
       '--json',
       '--model',
-      input.model || 'gpt-5.3-codex',
+      input.model || CODEX_CHATGPT_COMPATIBLE_FALLBACK_MODEL,
       '--config',
       `reasoning_effort="${input.reasoningEffort || 'low'}"`,
       ...codexWorkspaceNetworkConfigArgs(input.networkAccess === true),
@@ -326,14 +344,23 @@ export class CodexCliAdapter {
     );
     const timeoutFailure = /\btimed out(?:\s+due to inactivity)?\s+after\b|codex_timeout_after_/i.test(message);
     const quotaFailure = detectProviderQuotaError('codex', lastResult?.stdout, lastResult?.stderr, lastErrorMessage, message);
+    const modelUnsupportedFailure = detectProviderModelUnsupportedError('codex', lastResult?.stdout, lastResult?.stderr, lastErrorMessage, message);
     const chatCode: ChatErrorCode = authFailure === 'codex_auth_expired'
-      ? 'auth_missing'
+      ? 'codex_auth_expired'
       : timeoutFailure
         ? 'timeout'
-        : quotaFailure
-          ? 'quota_exceeded'
-          : 'capability_unavailable';
-    const error = new Error(chatCode === 'quota_exceeded' ? quotaFailure?.message ?? message : message);
+        : modelUnsupportedFailure
+          ? 'model_unsupported'
+          : quotaFailure
+            ? 'quota_exceeded'
+            : 'capability_unavailable';
+    const error = new Error(
+      chatCode === 'model_unsupported'
+        ? modelUnsupportedFailure?.message ?? message
+        : chatCode === 'quota_exceeded'
+          ? quotaFailure?.message ?? message
+          : message,
+    );
     (error as Error & { chatCode?: ChatErrorCode }).chatCode = chatCode;
     (error as Error & { parsedRun?: CodexParsedOutput }).parsedRun = parsed;
     throw error;
@@ -446,6 +473,27 @@ const buildChatAttempts = (input: CodexChatRunInput, mcpServers: LlmMcpServerCon
         ['exec', '--json', ...modelArgs, ...networkArgs, ...mcpArgs, ...commonArgs, input.prompt],
         ['exec', ...modelArgs, ...networkArgs, ...mcpArgs, ...commonArgs, input.prompt],
       ];
+};
+
+const buildChatAttemptGroups = (
+  input: CodexChatRunInput,
+  mcpServers: LlmMcpServerConfig[],
+): Array<{ model: string; attempts: string[][]; fallbackModel?: string }> => {
+  if (input.model === CODEX_CHATGPT_COMPATIBLE_FALLBACK_MODEL) {
+    return [{ model: input.model, attempts: buildChatAttempts(input, mcpServers) }];
+  }
+  const fallbackInput = { ...input, model: CODEX_CHATGPT_COMPATIBLE_FALLBACK_MODEL };
+  return [
+    {
+      model: input.model,
+      attempts: buildChatAttempts(input, mcpServers),
+      fallbackModel: CODEX_CHATGPT_COMPATIBLE_FALLBACK_MODEL,
+    },
+    {
+      model: CODEX_CHATGPT_COMPATIBLE_FALLBACK_MODEL,
+      attempts: buildChatAttempts(fallbackInput, mcpServers),
+    },
+  ];
 };
 
 const toNumber = (value: unknown): number =>

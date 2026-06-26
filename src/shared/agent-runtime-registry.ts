@@ -30,7 +30,7 @@ export interface NormalizeAgentRuntimeFallback extends LegacyCodexRuntimeInput {
   permissionMode?: unknown;
 }
 
-export const DEFAULT_CODEX_MODEL = 'gpt-5.4';
+export const DEFAULT_CODEX_MODEL = 'gpt-5.2';
 export const DEFAULT_CODEX_REASONING_EFFORT: CodexReasoningEffort = 'medium';
 export const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-4-6';
 export const DEFAULT_CLAUDE_EFFORT: ClaudeEffort = 'medium';
