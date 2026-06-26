@@ -81,6 +81,10 @@ export function RendererAppDialogs({ controller }: RendererAppDialogsProps) {
     renameFileDialog,
     setRenameFileDialog,
     handleRenameFileSubmit,
+    renameAppDialog,
+    closeRenameAppDialog,
+    setRenameAppName,
+    submitRenameAppDialog,
     moveFileDialog,
     setMoveFileDialog,
     handleMoveFileSubmit,
@@ -309,6 +313,30 @@ export function RendererAppDialogs({ controller }: RendererAppDialogsProps) {
           <Button onClick={closeSocialUploadDialog}>{t.actions.close}</Button>
           <Button variant="contained" onClick={() => void submitSocialUploadDialog()}>
             {t.social.uploadAction}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={renameAppDialog.open} onClose={closeRenameAppDialog} maxWidth="xs" fullWidth>
+        <DialogTitle>{t.social.renameAppTitle}</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ pt: 1 }}>
+            <Typography color="text.secondary">
+              {renameAppDialog.isRemix ? t.social.renameAppRemixBody : renameAppDialog.syncsCloud ? t.social.renameAppCloudBody : t.social.renameAppLocalBody}
+            </Typography>
+            <TextField
+              label={t.social.renameAppNameLabel}
+              value={renameAppDialog.name}
+              onChange={(event) => setRenameAppName(event.target.value)}
+              fullWidth
+              autoFocus
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeRenameAppDialog} disabled={renameAppDialog.busy}>{t.actions.close}</Button>
+          <Button variant="contained" onClick={() => void submitRenameAppDialog()} disabled={renameAppDialog.busy || !renameAppDialog.name.trim()}>
+            {renameAppDialog.busy ? t.social.saving : t.actions.save}
           </Button>
         </DialogActions>
       </Dialog>

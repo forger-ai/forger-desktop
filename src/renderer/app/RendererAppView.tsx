@@ -189,6 +189,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     handleDeleteApp,
     handleCreateLocalApp,
     handleUploadSocial,
+    handleRenameApp,
     createLocalAppBusy,
     installProgressByApp,
     catalogApps,
@@ -700,6 +701,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
               && app.remoteNetworkShare?.state !== 'closed'
               && app.remoteNetworkShare?.state !== 'inactive';
             const canUploadSocial = canUseAppActionMenu && (isPrivateLocal || isSocialInstalled);
+            const canRenameApp = canUploadSocial;
             const primaryActionLabel = isConflict
               ? t.actions.resolveWithForger
               : canRetryInstallError
@@ -729,6 +731,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
                 primaryDisabled={isInstalling}
                 primaryLoading={isOpening}
                 primaryMenuActions={[
+                  ...(canRenameApp ? [{ label: t.social.renameAppAction, onClick: () => void handleRenameApp(app.id) }] : []),
                   ...(canShareLocalNetwork ? [{ label: t.localNetwork.menuAction, onClick: () => handleStartLocalNetworkShare(app.id) }] : []),
                   ...(canShareRemoteNetwork ? [{ label: t.remoteNetwork.menuAction, onClick: () => handleStartRemoteNetworkShare(app.id) }] : []),
                   ...(canStopRemoteNetwork ? [{ label: t.remoteNetwork.stop, onClick: () => handleStopRemoteNetworkShare(app.id) }] : []),
@@ -893,6 +896,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             onStartRemoteNetworkShare={handleStartRemoteNetworkShare}
             onStopRemoteNetworkShare={handleStopRemoteNetworkShare}
             onUploadSocial={(appId) => void handleUploadSocial(appId)}
+            onRenameApp={(appId) => void handleRenameApp(appId)}
             onConnectSecret={handleConnectSecret}
             onDisconnectSecret={handleDisconnectSecret}
             onDelete={(appId) => void handleDeleteApp(appId)}

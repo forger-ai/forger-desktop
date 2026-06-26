@@ -1325,6 +1325,7 @@ const getMainProcessIpcDeps = () => ({
   testAppPrompt,
   toAppSummary,
   uninstallAppRuntime,
+  upsertInstalledRecord,
   updateAgentDefaults,
   updateAgentToolApproval,
   updateAppDeveloperSettings,

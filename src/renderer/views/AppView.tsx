@@ -73,6 +73,7 @@ interface AppViewProps {
   onStartRemoteNetworkShare: (appId: string) => void;
   onStopRemoteNetworkShare: (appId: string) => void;
   onUploadSocial: (appId: string) => void;
+  onRenameApp: (appId: string) => void;
   onConnectSecret: (appSecretName: string, userSecretId: string) => Promise<void>;
   onDisconnectSecret: (appSecretName: string) => Promise<void>;
   onDelete: (appId: string) => void;
@@ -165,6 +166,7 @@ export function AppView({
   onStartRemoteNetworkShare,
   onStopRemoteNetworkShare,
   onUploadSocial,
+  onRenameApp,
   onConnectSecret,
   onDisconnectSecret,
   onDelete,
@@ -461,6 +463,7 @@ export function AppView({
       onStartRemoteNetworkShare={onStartRemoteNetworkShare}
       onStopRemoteNetworkShare={onStopRemoteNetworkShare}
       onUploadSocial={onUploadSocial}
+      onRenameApp={onRenameApp}
     />
   );
 
