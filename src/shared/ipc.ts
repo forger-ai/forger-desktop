@@ -18,6 +18,7 @@ export const IPC_CHANNELS = {
   restoreAppUserVersion: 'forger:restore-app-user-version',
   resolveAppUpdateConflict: 'forger:resolve-app-update-conflict',
   uninstallApp: 'forger:uninstall-app',
+  renameInstalledApp: 'forger:rename-installed-app',
   getAppDetails: 'forger:get-app-details',
   listAppPrompts: 'forger:app-prompts:list',
   validateAppPrompt: 'forger:app-prompts:validate',

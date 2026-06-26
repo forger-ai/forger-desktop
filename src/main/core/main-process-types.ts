@@ -27,6 +27,12 @@ export interface InstalledAppRecord {
     ownerUsername: string;
     installId?: number;
   };
+  publishedSocialSource?: {
+    userAppId: number;
+    slug: string;
+    ownerUsername: string;
+    installId?: number;
+  };
   localNetworkShareSupported?: boolean;
   remoteTunnelSupported?: boolean;
   pendingUpdate?: {

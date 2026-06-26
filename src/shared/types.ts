@@ -98,7 +98,7 @@ export type { Automation, AutomationFrequency, AutomationFrequencyType, Automati
 export type { BackgroundTask, BackgroundTaskAppRef, BackgroundTaskEvent, BackgroundTaskRelatedEntity, BackgroundTaskResult, BackgroundTaskSource, BackgroundTaskStatus, BackgroundTaskStatusUpdate, BackgroundTaskUpsertInput } from './types/background-tasks';
 export type { LlmRunKind, LlmRunSnapshotItem, LlmRunStatus, LlmRunsSnapshot } from './types/llm-runs';
 export type { PersonalAgent, PersonalAgentConversation, PersonalAgentConversationEvent, PersonalAgentConversationEventType, PersonalAgentConversationGetInput, PersonalAgentConversationsListInput, PersonalAgentConversationStartInput, PersonalAgentConversationStatus, PersonalAgentCreateInput, PersonalAgentDeleteInput, PersonalAgentGrantOptionApp, PersonalAgentGrantOptionTool, PersonalAgentGrantOptionToolAction, PersonalAgentGrantOptions, PersonalAgentHeartbeatSummary, PersonalAgentJournalEntry, PersonalAgentMemory, PersonalAgentMessage, PersonalAgentMessageKind, PersonalAgentMessageRole, PersonalAgentMessageSendInput, PersonalAgentPermission, PersonalAgentRun, PersonalAgentRunProgress, PersonalAgentRunStatus, PersonalAgentUpdatePermissionsInput, PersonalAgentWorkspaceEntry, PersonalAgentWorkspaceFile, PersonalAgentWorkspaceFileReadInput, PersonalAgentWorkspaceFileWriteInput, PersonalAgentWorkspaceListInput, RemoteAgentSessionResult, RemoteAgentSessionState, RemoteAgentSessionStatus } from './types/personal-agents';
-export type { ForgerDeepLink, ForgerDesktopApi } from './types/desktop-api';
+export type { ForgerDeepLink, ForgerDesktopApi, RenameInstalledAppInput, RenameInstalledAppResult } from './types/desktop-api';
 
 declare global {
   interface Window {

@@ -47,6 +47,12 @@ export interface AppSummary {
     ownerUsername: string;
     installId?: number;
   };
+  publishedSocialSource?: {
+    userAppId: number;
+    slug: string;
+    ownerUsername: string;
+    installId?: number;
+  };
   socialUserAppId?: number;
   socialOwnerUsername?: string;
   tools?: {

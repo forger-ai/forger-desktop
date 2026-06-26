@@ -27,6 +27,7 @@ interface AppViewActionsProps {
   onStartRemoteNetworkShare: (appId: string) => void;
   onStopRemoteNetworkShare: (appId: string) => void;
   onUploadSocial: (appId: string) => void;
+  onRenameApp: (appId: string) => void;
 }
 
 export function AppViewActions({
@@ -46,6 +47,7 @@ export function AppViewActions({
   onStartRemoteNetworkShare,
   onStopRemoteNetworkShare,
   onUploadSocial,
+  onRenameApp,
 }: AppViewActionsProps) {
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
   const isRunning = details.status === 'running';
@@ -63,7 +65,9 @@ export function AppViewActions({
     && details.app.remoteNetworkShare?.state !== 'closed'
     && details.app.remoteNetworkShare?.state !== 'inactive';
   const canUploadSocial = canUseAppActionMenu && (details.app.privateLocal === true || Boolean(details.app.socialSource));
+  const canRenameApp = canUploadSocial;
   const appMenuActions = [
+    ...(canRenameApp ? [{ label: t.social.renameAppAction, onClick: () => onRenameApp(appId) }] : []),
     ...(canShareLocalNetwork ? [{ label: t.localNetwork.menuAction, onClick: () => onStartLocalNetworkShare(appId) }] : []),
     ...(canShareRemoteNetwork ? [{ label: t.remoteNetwork.menuAction, onClick: () => onStartRemoteNetworkShare(appId) }] : []),
     ...(canStopRemoteNetwork ? [{ label: t.remoteNetwork.stop, onClick: () => onStopRemoteNetworkShare(appId) }] : []),

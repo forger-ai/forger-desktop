@@ -32,6 +32,16 @@ import type { RemoteActivitySnapshot } from './remote-activity';
 
 export type MicrophonePermissionStatus = 'not-determined' | 'granted' | 'denied' | 'restricted' | 'unknown' | 'unsupported';
 
+export interface RenameInstalledAppInput {
+  appId: string;
+  name: string;
+}
+
+export interface RenameInstalledAppResult extends BasicActionResult {
+  app?: AppSummary;
+  cloudSynced?: boolean;
+}
+
 export interface ForgerDesktopApi {
   listInstalledApps: () => Promise<AppSummary[]>;
   listCatalogApps: () => Promise<CatalogApp[]>;
@@ -52,6 +62,7 @@ export interface ForgerDesktopApi {
   restoreAppUserVersion: (appId: string) => Promise<BasicActionResult>;
   resolveAppUpdateConflict: (appId: string) => Promise<{ runId: string; status: ChatRunStatus } | BasicActionResult>;
   uninstallApp: (appId: string) => Promise<BasicActionResult>;
+  renameInstalledApp: (input: RenameInstalledAppInput) => Promise<RenameInstalledAppResult>;
   getAppDetails: (appId: string) => Promise<AppDetails | null>;
   listAppPrompts: (appId: string) => Promise<AppPromptReviewItem[]>;
   validateAppPrompt: (input: AppPromptReviewInput) => Promise<AppPromptValidationResult>;

@@ -113,6 +113,8 @@ import type {
   SocialUserAppUpdateInput,
   SocialUserAppUploadInput,
   SocialUserAppVisibility,
+  RenameInstalledAppInput,
+  RenameInstalledAppResult,
   SubmitAppRatingInput,
   SubmitProductFeedbackInput,
   SubmitUsageEventInput,
@@ -316,6 +318,7 @@ interface MainProcessIpcDeps {
   switchForgerAccountSession: (account: StoredForgerAccount, result?: { userMessage?: string; technicalCode?: string }) => Promise<ForgerAccountSession>;
   toAppSummary: (record: InstalledAppRecord) => unknown;
   uninstallAppRuntime: (appId: string) => Promise<BasicActionResult>;
+  upsertInstalledRecord: (record: InstalledAppRecord) => Promise<void>;
   updateAgentDefaults: (input: UpdateAgentDefaultsInput) => Promise<Settings>;
   updateDeveloperMode: (input: UpdateDeveloperModeInput) => Promise<Settings>;
   updateAppDeveloperSettings: (input: UpdateAppDeveloperSettingsInput) => Promise<DeveloperPathState>;
@@ -370,8 +373,27 @@ const isDesktopLogLevel = (value: unknown): value is DesktopLogLevel =>
 export const __testMainHandlersInternals = {
 };
 
+const trimInstalledAppName = (value: unknown): string => typeof value === 'string' ? value.trim() : '';
+
+const updateInstalledManifestDisplayName = async (
+  fs: typeof import('node:fs/promises'),
+  path: typeof import('node:path'),
+  installDir: string,
+  name: string,
+): Promise<void> => {
+  const manifestPath = path.join(installDir, 'manifest.json');
+  const raw = await fs.readFile(manifestPath, 'utf8');
+  const parsed = JSON.parse(raw) as Record<string, unknown>;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('app_manifest_invalid');
+  }
+  const catalog = isRecord(parsed.catalog) ? { ...parsed.catalog } : {};
+  parsed.catalog = { ...catalog, display_name: name };
+  await fs.writeFile(manifestPath, `${JSON.stringify(parsed, null, 2)}\n`, 'utf8');
+};
+
 export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
-  const { state, APP_CLAUDE_MODEL_OPTIONS, APP_CODEX_MODEL_OPTIONS, BetterSqlite3, BrowserWindow, CODEX_USAGE_DASHBOARD_URL, IPC_CHANNELS, app, appAgentConversationManager, appendInstallLog, buildAppSecretsState, buildCodexPromptWithAppContext, buildForgerToolsContextForApp, buildForgerToolsContextForFreeChat, canUseCloudDataSync, chatOrchestrator, cloudDeviceManager, connectClaudeAuth, disconnectClaudeAuth, connectAntigravityAuth, startAntigravityAuthSession, writeAntigravityAuthSession, cancelAntigravityAuthSession, disconnectAntigravityAuth, connectCodexAuth, createLocalAppFromSkeleton, createRemoteAppBackup, decryptCloudMessage, decryptCloudMessages, listLocalCloudMessages, dialog, disconnectCodexAuth, ensureCatalogStatuses, failureDiagnostic, forgerBackendClient, forwardCloudSocialEvent, fs, getAppDetails, getBackupsManager, getBackgroundTaskStore, getClaudeAuthStatus, getAntigravityAuthStatus, getCloudIdentityStore, getCodexAuthStatus, getCodexHome, getDesktopUpdater, getDeveloperPathState, getFileLibrary, getForgerHomeRoot, getForgerMetadataRoot, getInstallLogPath, getMemoryStore, getPersonalAgentStore, getPersonalAgentConversationManager, getOfficialToolsService, getSpeechToTextService, getLiveVoiceInputService, getWakeWordService, getTextToSpeechService, getPrivateAppsRoot, getPrivateDataRoot, getRuntimeStatus, getLocalNetworkShareStatus, getRemoteNetworkShareStatus, getRemoteActivitySnapshot, getLlmRunsSnapshot, getSecretsStore, installAppRuntime, prepareSocialAppReview, finishSocialAppInstall, deleteQuarantinedSocialApp, getSocialAppReviewPromptContext, installSocialAppRuntime, installWelcome, ipcMain, listAppPrompts, listCatalogFromBackend, mainWindow, normalizeManifestAgentDefaults, openInstalledApp, startLocalNetworkShare, stopLocalNetworkShare, startRemoteNetworkShare, stopRemoteNetworkShare, openOrFocusFriendChatWindow, path, publicForgerAccount, registry, reinstallClaude, reinstallAntigravity, reinstallCodex, resolveAppIdForWebContents, resolveInstalledAgents, resolveInstalledAppSecrets, resolveInstalledManifest, resolveSelectedAppDisplayName, restoreAppPrompt, restoreAppUserVersionRuntime, restoreRemoteAppBackup, sanitizeRendererChatTrace, sendEncryptedCloudMessage, sendEncryptedCloudAppShareMessage, serializeErrorForInstallLog, setAppAutoSyncSetting, shell, signAppFolderGrant, stopInstalledApp, switchForgerAccountSession, toAppSummary, uninstallAppRuntime, updateAgentDefaults, updateAgentToolApproval, updateAppDeveloperSettings, updateDeveloperMode, updateAppPrompt, updateAppRuntime, updateCodexDefaults, validateArchiveEntries, validateAppPrompt, zipDirectory } = deps;
+  const { state, APP_CLAUDE_MODEL_OPTIONS, APP_CODEX_MODEL_OPTIONS, BetterSqlite3, BrowserWindow, CODEX_USAGE_DASHBOARD_URL, IPC_CHANNELS, app, appAgentConversationManager, appendInstallLog, buildAppSecretsState, buildCodexPromptWithAppContext, buildForgerToolsContextForApp, buildForgerToolsContextForFreeChat, canUseCloudDataSync, chatOrchestrator, cloudDeviceManager, connectClaudeAuth, disconnectClaudeAuth, connectAntigravityAuth, startAntigravityAuthSession, writeAntigravityAuthSession, cancelAntigravityAuthSession, disconnectAntigravityAuth, connectCodexAuth, createLocalAppFromSkeleton, createRemoteAppBackup, decryptCloudMessage, decryptCloudMessages, listLocalCloudMessages, dialog, disconnectCodexAuth, ensureCatalogStatuses, failureDiagnostic, forgerBackendClient, forwardCloudSocialEvent, fs, getAppDetails, getBackupsManager, getBackgroundTaskStore, getClaudeAuthStatus, getAntigravityAuthStatus, getCloudIdentityStore, getCodexAuthStatus, getCodexHome, getDesktopUpdater, getDeveloperPathState, getFileLibrary, getForgerHomeRoot, getForgerMetadataRoot, getInstallLogPath, getMemoryStore, getPersonalAgentStore, getPersonalAgentConversationManager, getOfficialToolsService, getSpeechToTextService, getLiveVoiceInputService, getWakeWordService, getTextToSpeechService, getPrivateAppsRoot, getPrivateDataRoot, getRuntimeStatus, getLocalNetworkShareStatus, getRemoteNetworkShareStatus, getRemoteActivitySnapshot, getLlmRunsSnapshot, getSecretsStore, installAppRuntime, prepareSocialAppReview, finishSocialAppInstall, deleteQuarantinedSocialApp, getSocialAppReviewPromptContext, installSocialAppRuntime, installWelcome, ipcMain, listAppPrompts, listCatalogFromBackend, mainWindow, normalizeManifestAgentDefaults, openInstalledApp, startLocalNetworkShare, stopLocalNetworkShare, startRemoteNetworkShare, stopRemoteNetworkShare, openOrFocusFriendChatWindow, path, publicForgerAccount, registry, reinstallClaude, reinstallAntigravity, reinstallCodex, resolveAppIdForWebContents, resolveInstalledAgents, resolveInstalledAppSecrets, resolveInstalledManifest, resolveSelectedAppDisplayName, restoreAppPrompt, restoreAppUserVersionRuntime, restoreRemoteAppBackup, sanitizeRendererChatTrace, sendEncryptedCloudMessage, sendEncryptedCloudAppShareMessage, serializeErrorForInstallLog, setAppAutoSyncSetting, shell, signAppFolderGrant, stopInstalledApp, switchForgerAccountSession, toAppSummary, uninstallAppRuntime, upsertInstalledRecord, updateAgentDefaults, updateAgentToolApproval, updateAppDeveloperSettings, updateDeveloperMode, updateAppPrompt, updateAppRuntime, updateCodexDefaults, validateArchiveEntries, validateAppPrompt, zipDirectory } = deps;
   const resolveReportRoot = (reader: () => string): string | undefined => {
     try {
       return typeof reader === 'function' ? reader() : undefined;
@@ -642,6 +664,62 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
 
   ipcMain.handle(IPC_CHANNELS.uninstallApp, async (_event, appId: string) => {
     return await uninstallAppRuntime(appId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.renameInstalledApp, async (_event, input: RenameInstalledAppInput): Promise<RenameInstalledAppResult> => {
+    const appId = typeof input?.appId === 'string' ? input.appId : '';
+    const name = trimInstalledAppName(input?.name);
+    const record = registry.apps[appId];
+    if (!record?.installDir) {
+      return { success: false, userMessage: 'No encontramos esta app instalada.', technicalCode: 'app_not_installed' };
+    }
+    if (!name) {
+      return { success: false, userMessage: 'Escribe un nombre para la app.', technicalCode: 'app_name_required' };
+    }
+    if (!record.privateLocal && !record.socialSource) {
+      return { success: false, userMessage: 'Solo puedes cambiar el nombre de apps tuyas o remixes.', technicalCode: 'app_rename_not_owned_or_remixable' };
+    }
+
+    try {
+      await updateInstalledManifestDisplayName(fs, path, record.installDir, name);
+      await upsertInstalledRecord({ ...record, name });
+      state.catalogApps = state.catalogApps.map((entry) => entry.id === appId ? { ...entry, name } : entry);
+    } catch (error) {
+      return {
+        success: false,
+        userMessage: 'No pudimos cambiar el nombre de esta app.',
+        ...failureDiagnostic(error, 'app_rename_local_failed'),
+      };
+    }
+
+    const renamedRecord = registry.apps[appId] ?? { ...record, name };
+    const appSummary = toAppSummary(renamedRecord) as AppSummary;
+    const cloudUserAppId = record.publishedSocialSource?.userAppId ?? record.socialSource?.userAppId;
+    if (!cloudUserAppId) {
+      return { success: true, userMessage: 'Nombre actualizado.', app: appSummary, cloudSynced: false };
+    }
+    if (!forgerBackendClient) {
+      return {
+        success: true,
+        userMessage: 'El nombre cambió en este equipo, pero no pudimos actualizar tu perfil de Forger.',
+        app: appSummary,
+        cloudSynced: false,
+        technicalCode: 'backend_client_missing',
+      };
+    }
+
+    try {
+      await forgerBackendClient.updateSocialApp({ id: cloudUserAppId, name });
+      return { success: true, userMessage: 'Nombre actualizado.', app: appSummary, cloudSynced: true };
+    } catch (error) {
+      return {
+        success: true,
+        userMessage: 'El nombre cambió en este equipo, pero no pudimos actualizar tu perfil de Forger.',
+        app: appSummary,
+        cloudSynced: false,
+        ...failureDiagnostic(error, 'app_rename_cloud_failed'),
+      };
+    }
   });
 
   ipcMain.handle(IPC_CHANNELS.getAppDetails, async (_event, appId: string) => {
@@ -1025,6 +1103,18 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
         relatedEntity: { kind: 'social-upload', id: input.appId, secondaryId: String(appEntry.id) },
         completedAt: new Date().toISOString(),
       });
+      if (registry.apps[input.appId]) {
+        await upsertInstalledRecord({
+          ...registry.apps[input.appId],
+          name: appEntry.name || appName,
+          publishedSocialSource: {
+            userAppId: appEntry.id,
+            slug: appEntry.slug || input.appId,
+            ownerUsername: appEntry.owner.username,
+          },
+        });
+        state.catalogApps = state.catalogApps.map((entry) => entry.id === input.appId ? { ...entry, name: appEntry.name || appName } : entry);
+      }
       return { success: true, app: appEntry, share, userMessage: 'App subida a Social.' };
     } catch (error) {
       const diagnostic = failureDiagnostic(error, 'social_upload_failed');
