@@ -394,7 +394,7 @@ test('personal agent workspace bootstrap happens on create and requireAgent does
   assert.equal(await readFile(path.join(workspaceRoot, 'HUMAN.md'), 'utf8'), '# HUMAN\n\nThe human prefers terse review notes.\n');
 });
 
-test('personal agent UI start creates a blank conversation without sending a synthetic turn', async () => {
+test('personal agent wake starts with localized message and later new conversations stay blank', async () => {
   const metadataRoot = await mkdtemp(path.join(tmpdir(), 'forger-personal-agent-auth-meta-'));
   const forgerHomeRoot = await mkdtemp(path.join(tmpdir(), 'forger-personal-agent-auth-home-'));
   const store = new AgentStore({ metadataRoot, forgerHomeRoot });
@@ -402,29 +402,42 @@ test('personal agent UI start creates a blank conversation without sending a syn
     store,
     metadataRoot,
     codexHome: path.join(metadataRoot, 'codex-home'),
-    getAgentRuntime: async () => ({
-      provider: 'codex',
-      model: 'gpt-5.4',
-      effort: 'medium',
-      permissionMode: 'safe',
-      networkAccess: true,
-    }),
-    getCodexAuthenticated: async () => false,
+    runner: async () => ({ assistantText: 'Estoy despierto.' }),
   });
   const agent = await store.createAgent({ name: 'Auth agent', purpose: 'Test auth handling.' });
   const workspaceRoot = path.join(forgerHomeRoot, 'agents', agent.id, 'workspace');
   const agentsMdBefore = await readFile(path.join(workspaceRoot, 'AGENTS.md'), 'utf8');
 
-  const conversation = await manager.startConversation({
+  const wakeConversation = await manager.startConversation({
+    agentId: agent.id,
+    title: 'Auth chat',
+    initialMessage: 'Hola, despierta',
+  });
+
+  assert.equal(wakeConversation.messages.length, 1);
+  assert.equal(wakeConversation.messages[0].role, 'user');
+  assert.equal(wakeConversation.messages[0].content, 'Hola, despierta');
+  assert.equal(wakeConversation.activeRun.status, 'queued');
+  const completedWake = await waitForConversation(manager, wakeConversation.id, (item) =>
+    item.activeRun?.status === 'completed' && item.messages.some((message) => message.content === 'Estoy despierto.'));
+  assert.deepEqual(
+    completedWake.messages.map((message) => [message.role, message.content]),
+    [
+      ['user', 'Hola, despierta'],
+      ['assistant', 'Estoy despierto.'],
+    ],
+  );
+
+  const blankConversation = await manager.startConversation({
     agentId: agent.id,
     title: 'Auth chat',
   });
 
-  assert.equal(conversation.messages.length, 0);
-  assert.equal(conversation.activeRun, undefined);
-  const persisted = await manager.getConversation(conversation.id);
-  assert.equal(persisted.messages.length, 0);
-  assert.equal(persisted.activeRun, undefined);
+  assert.equal(blankConversation.messages.length, 0);
+  assert.equal(blankConversation.activeRun, undefined);
+  const persistedBlank = await manager.getConversation(blankConversation.id);
+  assert.equal(persistedBlank.messages.length, 0);
+  assert.equal(persistedBlank.activeRun, undefined);
   assert.equal(await readFile(path.join(workspaceRoot, 'AGENTS.md'), 'utf8'), agentsMdBefore);
 });
 

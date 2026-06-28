@@ -229,7 +229,7 @@ export function AgentsView({ t, intelligenceProviderConfigured }: AgentsViewProp
   const [purpose, setPurpose] = useState('');
   const [accessDraft, setAccessDraft] = useState<AccessDraft>(() => defaultAccessDraft());
   const [message, setMessage] = useState('');
-  const [busyAction, setBusyAction] = useState<'create' | 'delete' | 'file' | 'start' | 'send' | 'access' | null>(null);
+  const [busyAction, setBusyAction] = useState<'create' | 'delete' | 'file' | 'wake' | 'start' | 'send' | 'access' | null>(null);
   const [sideTab, setSideTab] = useState<'history' | 'workspace'>('history');
   const [error, setError] = useState<string | null>(null);
   const messagesScrollRef = useRef<HTMLDivElement | null>(null);
@@ -240,10 +240,16 @@ export function AgentsView({ t, intelligenceProviderConfigured }: AgentsViewProp
     [agents, activeAgentId],
   );
 
-  const isBlankAgent = activeAgent && conversations.length === 0 && !conversation;
+  const isBlankAgent = Boolean(activeAgent && conversations.length === 0 && !conversation);
   const fileDirty = Boolean(openFile && fileDraft !== openFile.content);
   const activeRun = conversation?.activeRun;
   const runIsActive = Boolean(activeRun && !isTerminalRunStatus(activeRun.status));
+  const wakeFlowInProgress = Boolean(
+    !isBlankAgent &&
+    runIsActive &&
+    conversations.length === 1 &&
+    conversation?.id === conversations[0]?.id,
+  );
   const visibleMessages = useMemo(
     () => (conversation?.messages ?? []).filter((item) => item.role !== 'system'),
     [conversation?.messages],
@@ -483,6 +489,25 @@ export function AgentsView({ t, intelligenceProviderConfigured }: AgentsViewProp
       const started = await window.forger.personalAgentStartConversation({
         agentId: activeAgent.id,
         title: activeAgent.name,
+      });
+      setConversation(started);
+      setConversations((current) => upsertConversation(current, started));
+    } catch (startError) {
+      setError(startError instanceof Error ? startError.message : t.agents.startError);
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const handleWakeAgent = async () => {
+    if (!activeAgent || !isBlankAgent || busy) return;
+    setBusyAction('wake');
+    setError(null);
+    try {
+      const started = await window.forger.personalAgentStartConversation({
+        agentId: activeAgent.id,
+        title: activeAgent.name,
+        initialMessage: t.agents.wakeAgentMessage,
       });
       setConversation(started);
       setConversations((current) => upsertConversation(current, started));
@@ -911,7 +936,7 @@ export function AgentsView({ t, intelligenceProviderConfigured }: AgentsViewProp
   };
 
   const runStatusLabel = (status: PersonalAgentRunStatus | undefined) => {
-    if (busyAction === 'start') return t.agents.runStarting;
+    if (busyAction === 'wake' || busyAction === 'start') return t.agents.runStarting;
     if (busyAction === 'send') return t.agents.runSending;
     switch (status) {
       case 'queued':
@@ -1098,21 +1123,23 @@ export function AgentsView({ t, intelligenceProviderConfigured }: AgentsViewProp
               <Box sx={{ minWidth: 0, flex: 1 }}>
                 <Typography variant="subtitle2" noWrap>{conversation?.title ?? t.agents.chatTitle}</Typography>
               </Box>
-              {runIsActive || busyAction === 'start' || busyAction === 'send' ? <CircularProgress size={18} /> : null}
-              <Tooltip title={!intelligenceProviderConfigured ? t.agents.llmRequired : ''}>
-                <span>
-                  <Button
-                    startIcon={<AddRounded />}
-                    variant="outlined"
-                    size="small"
-                    disabled={busy || !intelligenceProviderConfigured}
-                    onClick={() => void handleStartConversation()}
-                    sx={{ flexShrink: 0 }}
-                  >
-                    {t.agents.newConversation}
-                  </Button>
-                </span>
-              </Tooltip>
+              {runIsActive || busyAction === 'wake' || busyAction === 'start' || busyAction === 'send' ? <CircularProgress size={18} /> : null}
+              {!isBlankAgent && !wakeFlowInProgress && busyAction !== 'wake' ? (
+                <Tooltip title={!intelligenceProviderConfigured ? t.agents.llmRequired : ''}>
+                  <span>
+                    <Button
+                      startIcon={<AddRounded />}
+                      variant="outlined"
+                      size="small"
+                      disabled={busy || !intelligenceProviderConfigured}
+                      onClick={() => void handleStartConversation()}
+                      sx={{ flexShrink: 0 }}
+                    >
+                      {t.agents.newConversation}
+                    </Button>
+                  </span>
+                </Tooltip>
+              ) : null}
             </Stack>
 
             <Box ref={messagesScrollRef} onScroll={handleMessagesScroll} sx={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
@@ -1125,9 +1152,9 @@ export function AgentsView({ t, intelligenceProviderConfigured }: AgentsViewProp
                       startIcon={<PlayArrowRounded />}
                       variant="contained"
                       disabled={busy}
-                      onClick={() => void handleStartConversation()}
+                      onClick={() => void handleWakeAgent()}
                     >
-                      {t.agents.startConversation}
+                      {t.agents.wakeAgent}
                     </Button>
                   ) : (
                     <Typography variant="body2" color="text.secondary">
@@ -1152,9 +1179,9 @@ export function AgentsView({ t, intelligenceProviderConfigured }: AgentsViewProp
               ) : (
                 <Box sx={{ p: 4, textAlign: 'center', minHeight: '100%', display: 'grid', placeItems: 'center' }}>
                   <Stack spacing={1} alignItems="center">
-                    {(runIsActive || busyAction === 'start') ? <CircularProgress size={22} /> : null}
+                    {(runIsActive || busyAction === 'wake' || busyAction === 'start') ? <CircularProgress size={22} /> : null}
                     <Typography color="text.secondary">
-                      {(runIsActive || busyAction === 'start') ? t.agents.firstRunLoading : t.agents.noMessages}
+                      {(runIsActive || busyAction === 'wake' || busyAction === 'start') ? t.agents.firstRunLoading : t.agents.noMessages}
                     </Typography>
                   </Stack>
                 </Box>

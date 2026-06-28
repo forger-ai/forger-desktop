@@ -165,6 +165,8 @@ export const es = {
     noAgentSelected: 'Selecciona un agente',
     selectHint: 'Elige un agente o crea uno para iniciar una conversación.',
     startConversation: 'Iniciar conversación',
+    wakeAgent: 'Despertar agente',
+    wakeAgentMessage: 'Hola, despierta',
     newConversation: 'Nueva conversación',
     blankTitle: 'Este agente está en blanco',
     blankSubtitle: 'Comienza su primera conversación para despertarlo y aclarar cómo debe ayudarte.',
