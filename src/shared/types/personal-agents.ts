@@ -1,4 +1,4 @@
-import type { AgentPermissionMode } from './agent-runtime';
+import type { AgentPermissionMode, AgentRuntime } from './agent-runtime';
 import type { FailureDiagnosticFields } from './base';
 import type { AgentToolId, OfficialToolSummary } from './tools';
 import type { AppSummary } from './catalog';
@@ -16,6 +16,7 @@ export interface PersonalAgent {
   instructions: string;
   permissionMode: AgentPermissionMode;
   networkAccess: boolean;
+  runtime?: AgentRuntime;
   appIds: string[];
   toolIds: AgentToolId[];
   createdAt: string;
@@ -29,6 +30,7 @@ export interface PersonalAgentCreateInput {
   instructions?: string;
   permissionMode?: AgentPermissionMode;
   networkAccess?: boolean;
+  runtime?: AgentRuntime;
   appIds?: string[];
   toolIds?: AgentToolId[];
 }
@@ -41,6 +43,7 @@ export interface PersonalAgentUpdatePermissionsInput {
   agentId: string;
   permissionMode?: AgentPermissionMode;
   networkAccess?: boolean;
+  runtime?: AgentRuntime;
   appIds?: string[];
   toolIds?: AgentToolId[];
 }
@@ -94,6 +97,7 @@ export interface PersonalAgentConversation {
   createdAt: string;
   updatedAt: string;
   providerThreadId?: string | null;
+  provider?: AgentRuntime['provider'] | null;
   messages: PersonalAgentMessage[];
   activeRun?: PersonalAgentRun;
 }

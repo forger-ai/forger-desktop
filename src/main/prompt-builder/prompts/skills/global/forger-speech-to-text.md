@@ -4,6 +4,7 @@ description: Use when a task needs local audio transcription or translation thro
 ---
 
 - Speech to text is a local Forger platform service, not an installed app, plugin, or external official tool.
+- Installed app Speech to text access depends on the app manifest declaring `platformCapabilities.speechToText`. Use `forger-manifest-authoring` for the exact manifest change and restart requirement.
 - Before promising transcription or translation, check the service status with `forger_speech_to_text_status`.
 - Use file transcription for existing audio files. Use realtime only for an active Desktop or authorized app session where the person has started microphone capture.
 - Use `forger_transcribe_audio` or `forger_translate_audio` only with files explicitly shared by the person, files selected through Forger, or files from an app that declares `platformCapabilities.speechToText`.

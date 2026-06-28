@@ -53,6 +53,15 @@ export const AGENT_TOOL_PACKAGES: AgentToolPackageDefinition[] = [
         defaultRequiresApproval: false,
       },
       {
+        id: 'forger_add_app_to_personal_agent',
+        packageId: FORGER_TOOL_PACKAGE_ID,
+        name: 'Agregar app al agente',
+        description: 'Permite que el agente personal cargue el MCP de una app instalada en sus proximas ejecuciones.',
+        category: 'app',
+        risk: 'medio',
+        defaultRequiresApproval: false,
+      },
+      {
         id: 'forger_request_app_tool_grant',
         packageId: FORGER_TOOL_PACKAGE_ID,
         name: 'Permitir herramienta opcional',

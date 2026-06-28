@@ -46,6 +46,7 @@ import { registerPersonalAgentIpcHandlers } from './personal-agent-handlers';
 import { registerWakeWordIpcHandlers } from './wake-word-handlers';
 import type {
   AgentDefaults,
+  AgentProvider,
   AgentToolPackageDefinition,
   AgentToolSettings,
   AppAgent,
@@ -1497,6 +1498,15 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
     getPersonalAgentConversationManager,
     getPersonalAgentStore,
     ipcMain,
+    isAgentProviderConnected: async (provider: AgentProvider) => {
+      if (provider === 'claude') {
+        return Boolean((await getClaudeAuthStatus() as { authenticated?: boolean }).authenticated);
+      }
+      if (provider === 'antigravity') {
+        return Boolean((await getAntigravityAuthStatus() as { authenticated?: boolean }).authenticated);
+      }
+      return Boolean((await getCodexAuthStatus()).authenticated);
+    },
     listInstalledApps: () => Object.values(registry.apps).map((record) => toAppSummary(record)) as AppSummary[],
     listOfficialTools: async () => await getOfficialToolsService().list(),
   });

@@ -6,6 +6,7 @@ export type AgentToolId =
   | 'forger_list_installed_apps'
   | 'forger_check_updates'
   | 'forger_create_app'
+  | 'forger_add_app_to_personal_agent'
   | 'forger_request_app_tool_grant'
   | 'forger_ask_question'
   | 'forger_list_app_prompts'

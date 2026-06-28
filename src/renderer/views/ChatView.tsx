@@ -341,6 +341,15 @@ export function ChatView({
   const messagesScrollRef = useRef<HTMLDivElement | null>(null);
   const shouldAutoScrollRef = useRef(true);
   const codexUsageCheckedAtRef = useRef(0);
+  const providerLabel = (provider: AgentProvider): string =>
+    providerOptions.find((option) => option.value === provider)?.label ?? provider;
+  const renderProviderValue = (value: AgentProvider | 'auto' | ''): string =>
+    value === ''
+      ? ''
+      : value === 'auto'
+        ? t.sections.chat.autoProviderLabel(providerLabel(resolvedProviderForAuto))
+        : providerOptions.find((option) => option.value === value)?.label ?? providerLabel(value);
+  const selectedProviderValue = providerOptions.some((option) => option.value === selectedProvider) ? selectedProvider : '';
   const effectiveProvider = selectedProvider === 'auto' ? resolvedProviderForAuto : selectedProvider;
   const activeQuestionAction = useMemo(
     () => [...messages].reverse().find((message) => (
@@ -1297,13 +1306,14 @@ export function ChatView({
                   <span>
                     <Select
                       size="small"
-                      value={selectedProvider}
+                      value={selectedProviderValue}
+                      displayEmpty
                       onChange={(event) => onSelectProvider(event.target.value as AgentProvider | 'auto')}
                       {...runtimeMenuHandlers}
-                      disabled={providerLocked || isSending}
+                      disabled={providerLocked || isSending || providerOptions.length === 0}
                       MenuProps={compactSelectMenuProps}
                       inputProps={{ 'aria-label': t.sections.chat.providerSelectorLabel }}
-                      renderValue={(value) => value === 'auto' ? t.sections.chat.autoProviderLabel(resolvedProviderForAuto === 'claude' ? 'Claude' : 'Codex') : providerOptions.find((option) => option.value === value)?.label}
+                      renderValue={(value) => renderProviderValue(value as AgentProvider | 'auto' | '')}
                       sx={{
                         height: 28,
                         minWidth: 98,
@@ -1314,7 +1324,7 @@ export function ChatView({
                     >
                       {providerOptions.map((option) => (
                         <MenuItem key={option.value} value={option.value}>
-                          {option.value === 'auto' ? t.sections.chat.autoProviderLabel(resolvedProviderForAuto === 'claude' ? 'Claude' : 'Codex') : option.label}
+                          {option.value === 'auto' ? t.sections.chat.autoProviderLabel(providerLabel(resolvedProviderForAuto)) : option.label}
                         </MenuItem>
                       ))}
                     </Select>
@@ -1366,7 +1376,7 @@ export function ChatView({
                     </Select>
                   </span>
                 </Tooltip>
-                <Tooltip title={runtimeMenuOpen ? '' : providerLocked ? t.sections.chat.lockedRuntimeTooltip : t.sections.chat.modelSelectorLabel}>
+                <Tooltip title={runtimeMenuOpen ? '' : t.sections.chat.modelSelectorLabel}>
                   <span>
                     <Select
                       size="small"
@@ -1376,7 +1386,7 @@ export function ChatView({
                         activeRuntimeControl.onSelectModel(model);
                       }}
                       {...runtimeMenuHandlers}
-                      disabled={providerLocked || isSending || activeModelOptions.length <= 1}
+                      disabled={isSending || activeModelOptions.length <= 1}
                       MenuProps={compactSelectMenuProps}
                       inputProps={{ 'aria-label': t.sections.chat.modelSelectorLabel }}
                       sx={{
@@ -1395,7 +1405,7 @@ export function ChatView({
                     </Select>
                   </span>
                 </Tooltip>
-                <Tooltip title={runtimeMenuOpen ? '' : providerLocked ? t.sections.chat.lockedRuntimeTooltip : t.sections.chat.effortSelectorLabel}>
+                <Tooltip title={runtimeMenuOpen ? '' : t.sections.chat.effortSelectorLabel}>
                   <span>
                     <Select
                       size="small"
@@ -1404,7 +1414,7 @@ export function ChatView({
                         activeRuntimeControl.onSelectEffort(event.target.value);
                       }}
                       {...runtimeMenuHandlers}
-                      disabled={providerLocked || isSending}
+                      disabled={isSending}
                       MenuProps={compactSelectMenuProps}
                       inputProps={{ 'aria-label': t.sections.chat.effortSelectorLabel }}
                       sx={{

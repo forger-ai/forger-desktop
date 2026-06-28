@@ -17,6 +17,7 @@ import type {
   PersonalAgentWorkspaceFileReadInput,
   PersonalAgentWorkspaceFileWriteInput,
   PersonalAgentWorkspaceListInput,
+  AgentProvider,
 } from '../../shared/types';
 
 interface PersonalAgentIpcHandlersDeps {
@@ -26,6 +27,7 @@ interface PersonalAgentIpcHandlersDeps {
   getPersonalAgentConversationManager: () => AgentConversationManager;
   listInstalledApps: () => AppSummary[];
   listOfficialTools: () => Promise<OfficialToolsState>;
+  isAgentProviderConnected: (provider: AgentProvider) => Promise<boolean>;
 }
 
 export const registerPersonalAgentIpcHandlers = ({
@@ -35,11 +37,13 @@ export const registerPersonalAgentIpcHandlers = ({
   getPersonalAgentConversationManager,
   listInstalledApps,
   listOfficialTools,
+  isAgentProviderConnected,
 }: PersonalAgentIpcHandlersDeps): void => {
   ipcMain.handle(IPC_CHANNELS.personalAgentsList, async () => {
     return await getPersonalAgentStore().listAgents();
   });
   ipcMain.handle(IPC_CHANNELS.personalAgentsCreate, async (_event, input: PersonalAgentCreateInput) => {
+    await validateRuntimeInput(input, isAgentProviderConnected);
     const sanitized = await sanitizePermissionInput(input, listInstalledApps, listOfficialTools);
     return await getPersonalAgentStore().createAgent(sanitized);
   });
@@ -74,6 +78,7 @@ export const registerPersonalAgentIpcHandlers = ({
     };
   });
   ipcMain.handle(IPC_CHANNELS.personalAgentUpdatePermissions, async (_event, input: PersonalAgentUpdatePermissionsInput) => {
+    await validateRuntimeInput(input, isAgentProviderConnected);
     const sanitized = await sanitizePermissionInput(input, listInstalledApps, listOfficialTools);
     return await getPersonalAgentStore().updateAgentPermissions(sanitized);
   });
@@ -101,6 +106,19 @@ export const registerPersonalAgentIpcHandlers = ({
   ipcMain.handle(IPC_CHANNELS.personalAgentGetConversation, async (_event, input: PersonalAgentConversationGetInput) => {
     return await getPersonalAgentConversationManager().getConversation(input);
   });
+};
+
+const validateRuntimeInput = async (
+  input: PersonalAgentCreateInput | PersonalAgentUpdatePermissionsInput,
+  isAgentProviderConnected: (provider: AgentProvider) => Promise<boolean>,
+): Promise<void> => {
+  const provider = input.runtime?.provider;
+  if (!provider) {
+    return;
+  }
+  if (!(await isAgentProviderConnected(provider))) {
+    throw new Error('personal_agent_runtime_provider_not_connected');
+  }
 };
 
 const sanitizePermissionInput = async <T extends PersonalAgentCreateInput | PersonalAgentUpdatePermissionsInput>(

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import AddRounded from '@mui/icons-material/AddRounded';
 import ArrowBackRounded from '@mui/icons-material/ArrowBackRounded';
 import ChatRounded from '@mui/icons-material/ChatRounded';
@@ -6,12 +6,16 @@ import CloseRounded from '@mui/icons-material/CloseRounded';
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
 import DescriptionRounded from '@mui/icons-material/DescriptionRounded';
 import EditRounded from '@mui/icons-material/EditRounded';
+import ExpandMoreRounded from '@mui/icons-material/ExpandMoreRounded';
 import FolderRounded from '@mui/icons-material/FolderRounded';
 import PlayArrowRounded from '@mui/icons-material/PlayArrowRounded';
 import SaveRounded from '@mui/icons-material/SaveRounded';
 import SendRounded from '@mui/icons-material/SendRounded';
 import {
   Alert,
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
   Box,
   Button,
   Card,
@@ -41,8 +45,10 @@ import {
   Typography,
   useTheme,
 } from '@mui/material';
-import type { AgentPermissionMode, AgentToolId, PersonalAgent, PersonalAgentConversation, PersonalAgentConversationEvent, PersonalAgentGrantOptions, PersonalAgentMessage, PersonalAgentRunStatus, PersonalAgentWorkspaceEntry, PersonalAgentWorkspaceFile } from '@shared/types';
+import type { AgentPermissionMode, AgentProvider, AgentRuntime, AgentToolId, AntigravityEffort, PersonalAgent, PersonalAgentConversation, PersonalAgentConversationEvent, PersonalAgentGrantOptionTool, PersonalAgentGrantOptions, PersonalAgentMessage, PersonalAgentRunStatus, PersonalAgentWorkspaceEntry, PersonalAgentWorkspaceFile } from '@shared/types';
 import type { AppDictionary } from '@renderer/i18n';
+import { AGENT_PROVIDER_OPTIONS, ANTIGRAVITY_EFFORT_OPTIONS, ANTIGRAVITY_MODEL_OPTIONS, CLAUDE_EFFORT_OPTIONS, CLAUDE_MODEL_OPTIONS, CODEX_MODEL_OPTIONS, CODEX_REASONING_OPTIONS } from '@renderer/preferences';
+import { getAntigravitySupportedEfforts } from '@shared/agent-runtime-registry';
 import { MarkdownMessage } from './chat/MarkdownMessage';
 
 interface AgentsViewProps {
@@ -60,6 +66,7 @@ interface WorkspaceTreeProps {
 interface AccessDraft {
   permissionMode: AgentPermissionMode;
   networkAccess: boolean;
+  runtime: AgentRuntime;
   appIds: string[];
   toolIds: AgentToolId[];
 }
@@ -145,6 +152,7 @@ const upsertConversation = (
 const defaultAccessDraft = (): AccessDraft => ({
   permissionMode: 'safe',
   networkAccess: false,
+  runtime: defaultPersonalAgentRuntime(),
   appIds: [],
   toolIds: [],
 });
@@ -152,12 +160,37 @@ const defaultAccessDraft = (): AccessDraft => ({
 const accessDraftFromAgent = (agent: PersonalAgent): AccessDraft => ({
   permissionMode: agent.permissionMode,
   networkAccess: agent.networkAccess,
+  runtime: agent.runtime ?? defaultPersonalAgentRuntime(),
   appIds: agent.appIds ?? [],
   toolIds: agent.toolIds ?? [],
 });
 
 const toggleId = <T extends string>(values: T[], id: T, checked: boolean): T[] =>
   checked ? [...new Set([...values, id])] : values.filter((value) => value !== id);
+
+const defaultPersonalAgentRuntime = (): AgentRuntime => ({
+  provider: 'codex',
+  model: CODEX_MODEL_OPTIONS[0]?.realModelName ?? 'gpt-5.2',
+  effort: CODEX_MODEL_OPTIONS[0]?.defaultReasoningEffort ?? 'medium',
+});
+
+const defaultRuntimeForProvider = (provider: AgentProvider): AgentRuntime => {
+  if (provider === 'claude') {
+    return {
+      provider,
+      model: CLAUDE_MODEL_OPTIONS[0]?.realModelName ?? 'claude-sonnet-4-6',
+      effort: CLAUDE_MODEL_OPTIONS[0]?.defaultEffort ?? 'medium',
+    };
+  }
+  if (provider === 'antigravity') {
+    return {
+      provider,
+      model: ANTIGRAVITY_MODEL_OPTIONS[0]?.realModelName ?? 'gemini-3-pro',
+      effort: ANTIGRAVITY_MODEL_OPTIONS[0]?.defaultEffort ?? 'medium',
+    };
+  }
+  return defaultPersonalAgentRuntime();
+};
 
 const personalAgentRunErrorMessage = (error: string | undefined, t: AppDictionary): string | null => {
   if (!error) return null;
@@ -167,7 +200,16 @@ const personalAgentRunErrorMessage = (error: string | undefined, t: AppDictionar
   if (normalized === 'claude_cli_missing') return t.agents.runErrorClaudeCli;
   if (normalized === 'personal_agent_workspace_missing') return t.agents.runErrorWorkspaceMissing;
   if (normalized === 'personal_agent_runtime_unavailable') return t.agents.runErrorRuntimeUnavailable;
+  if (normalized === 'personal_agent_provider_changed_new_conversation_required') return t.agents.runErrorProviderChanged;
   return t.agents.runErrorGeneric;
+};
+
+const personalAgentSaveErrorMessage = (error: unknown, fallback: string, t: AppDictionary): string => {
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  if (message === 'personal_agent_runtime_provider_not_connected') {
+    return t.agents.runtimeProviderNotConnected;
+  }
+  return error instanceof Error ? error.message : fallback;
 };
 
 export function AgentsView({ t, intelligenceProviderConfigured }: AgentsViewProps) {
@@ -185,16 +227,13 @@ export function AgentsView({ t, intelligenceProviderConfigured }: AgentsViewProp
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [purpose, setPurpose] = useState('');
-  const [accessDraft, setAccessDraft] = useState<AccessDraft>({
-    permissionMode: 'safe',
-    networkAccess: false,
-    appIds: [],
-    toolIds: [],
-  });
+  const [accessDraft, setAccessDraft] = useState<AccessDraft>(() => defaultAccessDraft());
   const [message, setMessage] = useState('');
   const [busyAction, setBusyAction] = useState<'create' | 'delete' | 'file' | 'start' | 'send' | 'access' | null>(null);
   const [sideTab, setSideTab] = useState<'history' | 'workspace'>('history');
   const [error, setError] = useState<string | null>(null);
+  const messagesScrollRef = useRef<HTMLDivElement | null>(null);
+  const shouldStickToBottomRef = useRef(true);
 
   const activeAgent = useMemo(
     () => agents.find((agent) => agent.id === activeAgentId) ?? null,
@@ -297,6 +336,24 @@ export function AgentsView({ t, intelligenceProviderConfigured }: AgentsViewProp
     return unsubscribe;
   }, [activeAgentId]);
 
+  useEffect(() => {
+    shouldStickToBottomRef.current = true;
+    window.requestAnimationFrame(() => {
+      const container = messagesScrollRef.current;
+      if (container) {
+        container.scrollTop = container.scrollHeight;
+      }
+    });
+  }, [conversation?.id]);
+
+  useEffect(() => {
+    const container = messagesScrollRef.current;
+    if (!container || !shouldStickToBottomRef.current) {
+      return;
+    }
+    container.scrollTop = container.scrollHeight;
+  }, [visibleMessages.length, runIsActive, runErrorMessage]);
+
   const resetCreateForm = () => {
     setName('');
     setDescription('');
@@ -315,6 +372,7 @@ export function AgentsView({ t, intelligenceProviderConfigured }: AgentsViewProp
         purpose,
         permissionMode: accessDraft.permissionMode,
         networkAccess: accessDraft.networkAccess,
+        runtime: accessDraft.runtime,
         appIds: accessDraft.appIds,
         toolIds: accessDraft.toolIds,
       });
@@ -323,7 +381,7 @@ export function AgentsView({ t, intelligenceProviderConfigured }: AgentsViewProp
       await loadAgents();
       setActiveAgentId(agent.id);
     } catch (createError) {
-      setError(createError instanceof Error ? createError.message : t.agents.createError);
+      setError(personalAgentSaveErrorMessage(createError, t.agents.createError, t));
     } finally {
       setBusyAction(null);
     }
@@ -349,13 +407,14 @@ export function AgentsView({ t, intelligenceProviderConfigured }: AgentsViewProp
         agentId: activeAgent.id,
         permissionMode: accessDraft.permissionMode,
         networkAccess: accessDraft.networkAccess,
+        runtime: accessDraft.runtime,
         appIds: accessDraft.appIds,
         toolIds: accessDraft.toolIds,
       });
       setAgents((current) => current.map((agent) => agent.id === updated.id ? updated : agent));
       setEditAccessOpen(false);
     } catch (accessError) {
-      setError(accessError instanceof Error ? accessError.message : t.agents.accessSaveError);
+      setError(personalAgentSaveErrorMessage(accessError, t.agents.accessSaveError, t));
     } finally {
       setBusyAction(null);
     }
@@ -454,8 +513,18 @@ export function AgentsView({ t, intelligenceProviderConfigured }: AgentsViewProp
     }
   };
 
+  const handleMessagesScroll = () => {
+    const container = messagesScrollRef.current;
+    if (!container) {
+      return;
+    }
+    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+    shouldStickToBottomRef.current = distanceFromBottom < 96;
+  };
+
   const renderAccessChips = (agent: PersonalAgent) => (
     <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
+      <Chip size="small" label={`${AGENT_PROVIDER_OPTIONS.find((option) => option.value === (agent.runtime?.provider ?? 'codex'))?.label ?? agent.runtime?.provider ?? 'Codex'} · ${agent.runtime?.model ?? CODEX_MODEL_OPTIONS[0]?.displayModelName ?? 'gpt-5.2'}`} />
       <Chip size="small" label={agent.permissionMode === 'unsafe' ? t.agents.expandedPermission : t.agents.standardPermission} />
       <Chip size="small" label={agent.networkAccess ? t.agents.internetOn : t.agents.internetOff} />
       <Chip size="small" label={agent.appIds.length > 0 ? t.agents.appsCount(agent.appIds.length) : t.agents.noAppsAccess} />
@@ -463,35 +532,179 @@ export function AgentsView({ t, intelligenceProviderConfigured }: AgentsViewProp
     </Stack>
   );
 
-  const renderAccessControls = () => (
-    <Stack spacing={1.5}>
-      <FormControl size="small" fullWidth>
-        <InputLabel id="agent-permission-mode-label">{t.agents.permissionLevel}</InputLabel>
-        <Select
-          labelId="agent-permission-mode-label"
-          label={t.agents.permissionLevel}
-          value={accessDraft.permissionMode}
-          onChange={(event) => {
-            setAccessDraft((current) => ({
-              ...current,
-              permissionMode: event.target.value === 'unsafe' ? 'unsafe' : 'safe',
-            }));
-          }}
-        >
-          <MenuItem value="safe">{t.agents.standardPermission}</MenuItem>
-          <MenuItem value="unsafe">{t.agents.expandedPermission}</MenuItem>
-        </Select>
-      </FormControl>
-      <FormControlLabel
-        control={(
-          <Switch
-            checked={accessDraft.networkAccess}
-            onChange={(event) => setAccessDraft((current) => ({ ...current, networkAccess: event.target.checked }))}
-          />
-        )}
-        label={t.agents.internetAccess}
-      />
-      <Box>
+  const renderToolAccessControl = (tool: PersonalAgentGrantOptionTool) => {
+    const actionIds = tool.actions.map((action) => action.id);
+    const selectedCount = actionIds.filter((id) => accessDraft.toolIds.includes(id)).length;
+    const allSelected = actionIds.length > 0 && selectedCount === actionIds.length;
+    const partiallySelected = selectedCount > 0 && selectedCount < actionIds.length;
+    const setToolChecked = (checked: boolean) => {
+      setAccessDraft((current) => ({
+        ...current,
+        toolIds: checked
+          ? [...new Set([...current.toolIds, ...actionIds])]
+          : current.toolIds.filter((id) => !actionIds.includes(id)),
+      }));
+    };
+    return (
+      <Accordion key={tool.id} disableGutters variant="outlined" sx={{ '&:before': { display: 'none' } }}>
+        <AccordionSummary expandIcon={<ExpandMoreRounded />}>
+          <Stack direction="row" spacing={1} alignItems="center" sx={{ width: '100%', minWidth: 0 }}>
+            <Checkbox
+              size="small"
+              checked={allSelected}
+              indeterminate={partiallySelected}
+              disabled={!tool.configured || actionIds.length === 0}
+              onClick={(event) => event.stopPropagation()}
+              onFocus={(event) => event.stopPropagation()}
+              onChange={(event) => setToolChecked(event.target.checked)}
+            />
+            <Box sx={{ minWidth: 0, flex: 1 }}>
+              <Typography variant="body2" fontWeight={700} noWrap>{tool.name}</Typography>
+              <Typography variant="caption" color="text.secondary" noWrap>
+                {tool.configured ? t.agents.toolActionsCount(selectedCount, actionIds.length) : t.agents.toolNeedsSetup}
+              </Typography>
+            </Box>
+          </Stack>
+        </AccordionSummary>
+        <AccordionDetails sx={{ pt: 0 }}>
+          <FormGroup>
+            {tool.actions.map((action) => (
+              <FormControlLabel
+                key={action.id}
+                control={(
+                  <Checkbox
+                    checked={accessDraft.toolIds.includes(action.id)}
+                    disabled={!tool.configured}
+                    onChange={(event) => {
+                      setAccessDraft((current) => ({
+                        ...current,
+                        toolIds: toggleId(current.toolIds, action.id, event.target.checked),
+                      }));
+                    }}
+                  />
+                )}
+                label={action.name}
+              />
+            ))}
+          </FormGroup>
+        </AccordionDetails>
+      </Accordion>
+    );
+  };
+
+  const renderAccessControls = () => {
+    const runtimeProvider = accessDraft.runtime.provider;
+    const runtimeModelOptions = runtimeProvider === 'claude'
+      ? CLAUDE_MODEL_OPTIONS
+      : runtimeProvider === 'antigravity'
+        ? ANTIGRAVITY_MODEL_OPTIONS
+        : CODEX_MODEL_OPTIONS;
+    const runtimeEffortOptions = runtimeProvider === 'claude'
+      ? CLAUDE_EFFORT_OPTIONS
+      : runtimeProvider === 'antigravity'
+        ? ANTIGRAVITY_EFFORT_OPTIONS.filter((option) => getAntigravitySupportedEfforts(accessDraft.runtime.model).includes(option.value))
+        : CODEX_REASONING_OPTIONS;
+    const runtimeModelValue = runtimeModelOptions.some((option) => option.realModelName === accessDraft.runtime.model)
+      ? accessDraft.runtime.model
+      : runtimeModelOptions[0]?.realModelName ?? accessDraft.runtime.model;
+    const runtimeEffortValue = runtimeEffortOptions.some((option) => option.value === accessDraft.runtime.effort)
+      ? accessDraft.runtime.effort
+      : runtimeEffortOptions[0]?.value ?? accessDraft.runtime.effort;
+    return (
+      <Stack spacing={1.5}>
+        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
+          <FormControl size="small" fullWidth>
+            <InputLabel id="agent-runtime-provider-label">{t.agents.runtimeProvider}</InputLabel>
+            <Select
+              labelId="agent-runtime-provider-label"
+              label={t.agents.runtimeProvider}
+              value={runtimeProvider}
+              onChange={(event) => {
+                const provider = event.target.value as AgentProvider;
+                setAccessDraft((current) => ({
+                  ...current,
+                  runtime: defaultRuntimeForProvider(provider),
+                }));
+              }}
+            >
+              {AGENT_PROVIDER_OPTIONS.filter((option) => option.value !== 'auto').map((option) => (
+                <MenuItem key={option.value} value={option.value}>{option.label}</MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          <FormControl size="small" fullWidth>
+            <InputLabel id="agent-runtime-model-label">{t.agents.runtimeModel}</InputLabel>
+            <Select
+              labelId="agent-runtime-model-label"
+              label={t.agents.runtimeModel}
+              value={runtimeModelValue}
+              onChange={(event) => {
+                const model = event.target.value;
+                setAccessDraft((current) => {
+                  const supportedEfforts = current.runtime.provider === 'antigravity' ? getAntigravitySupportedEfforts(model) : [];
+                  const nextEffort = current.runtime.provider === 'antigravity' && !supportedEfforts.includes(current.runtime.effort as AntigravityEffort)
+                    ? ANTIGRAVITY_MODEL_OPTIONS.find((option) => option.realModelName === model)?.defaultEffort ?? supportedEfforts[0] ?? 'medium'
+                    : current.runtime.effort;
+                  return {
+                    ...current,
+                    runtime: { ...current.runtime, model, effort: nextEffort },
+                  };
+                });
+              }}
+            >
+              {runtimeModelOptions.map((option) => (
+                <MenuItem key={option.realModelName} value={option.realModelName}>{option.displayModelName}</MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        </Stack>
+        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
+          <FormControl size="small" fullWidth>
+            <InputLabel id="agent-runtime-effort-label">{t.agents.runtimeEffort}</InputLabel>
+            <Select
+              labelId="agent-runtime-effort-label"
+              label={t.agents.runtimeEffort}
+              value={runtimeEffortValue}
+              onChange={(event) => {
+                setAccessDraft((current) => ({
+                  ...current,
+                  runtime: { ...current.runtime, effort: event.target.value as AgentRuntime['effort'] },
+                }));
+              }}
+            >
+              {runtimeEffortOptions.map((option) => (
+                <MenuItem key={option.value} value={option.value}>{option.label}</MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          <FormControl size="small" fullWidth>
+            <InputLabel id="agent-permission-mode-label">{t.agents.permissionLevel}</InputLabel>
+            <Select
+              labelId="agent-permission-mode-label"
+              label={t.agents.permissionLevel}
+              value={accessDraft.permissionMode}
+              onChange={(event) => {
+                setAccessDraft((current) => ({
+                  ...current,
+                  permissionMode: event.target.value === 'unsafe' ? 'unsafe' : 'safe',
+                }));
+              }}
+            >
+              <MenuItem value="safe">{t.agents.standardPermission}</MenuItem>
+              <MenuItem value="unsafe">{t.agents.expandedPermission}</MenuItem>
+            </Select>
+          </FormControl>
+        </Stack>
+        <FormControlLabel
+          control={(
+            <Switch
+              checked={accessDraft.networkAccess}
+              onChange={(event) => setAccessDraft((current) => ({ ...current, networkAccess: event.target.checked }))}
+            />
+          )}
+          label={t.agents.internetAccess}
+        />
+        <Box>
         <Typography variant="subtitle2" sx={{ mb: 0.75 }}>{t.agents.appsAccess}</Typography>
         {grantOptions.apps.length > 0 ? (
           <FormGroup>
@@ -516,44 +729,20 @@ export function AgentsView({ t, intelligenceProviderConfigured }: AgentsViewProp
         ) : (
           <Typography variant="body2" color="text.secondary">{t.agents.noAppsAvailable}</Typography>
         )}
-      </Box>
-      <Box>
-        <Typography variant="subtitle2" sx={{ mb: 0.75 }}>{t.agents.toolsAccess}</Typography>
-        {grantOptions.tools.some((tool) => tool.actions.length > 0) ? (
-          <Stack spacing={1}>
-            {grantOptions.tools.map((tool) => (
-              <Box key={tool.id}>
-                <Typography variant="body2" fontWeight={700}>{tool.name}</Typography>
-                <Typography variant="caption" color="text.secondary">{tool.configured ? tool.description : t.agents.toolNeedsSetup}</Typography>
-                <FormGroup>
-                  {tool.actions.map((action) => (
-                    <FormControlLabel
-                      key={action.id}
-                      control={(
-                        <Checkbox
-                          checked={accessDraft.toolIds.includes(action.id)}
-                          disabled={!tool.configured}
-                          onChange={(event) => {
-                            setAccessDraft((current) => ({
-                              ...current,
-                              toolIds: toggleId(current.toolIds, action.id, event.target.checked),
-                            }));
-                          }}
-                        />
-                      )}
-                      label={action.name}
-                    />
-                  ))}
-                </FormGroup>
-              </Box>
-            ))}
-          </Stack>
-        ) : (
-          <Typography variant="body2" color="text.secondary">{t.agents.noToolsAvailable}</Typography>
-        )}
-      </Box>
-    </Stack>
-  );
+        </Box>
+        <Box>
+          <Typography variant="subtitle2" sx={{ mb: 0.75 }}>{t.agents.toolsAccess}</Typography>
+          {grantOptions.tools.some((tool) => tool.actions.length > 0) ? (
+            <Stack spacing={1}>
+              {grantOptions.tools.map(renderToolAccessControl)}
+            </Stack>
+          ) : (
+            <Typography variant="body2" color="text.secondary">{t.agents.noToolsAvailable}</Typography>
+          )}
+        </Box>
+      </Stack>
+    );
+  };
 
   const renderMainList = () => (
     <Stack spacing={2.25} sx={{ height: '100%', minHeight: 0 }}>
@@ -911,9 +1100,23 @@ export function AgentsView({ t, intelligenceProviderConfigured }: AgentsViewProp
                 <Typography variant="subtitle2" noWrap>{conversation?.title ?? t.agents.chatTitle}</Typography>
               </Box>
               {runIsActive || busyAction === 'start' || busyAction === 'send' ? <CircularProgress size={18} /> : null}
+              <Tooltip title={!intelligenceProviderConfigured ? t.agents.llmRequired : ''}>
+                <span>
+                  <Button
+                    startIcon={<AddRounded />}
+                    variant="outlined"
+                    size="small"
+                    disabled={busy || !intelligenceProviderConfigured}
+                    onClick={() => void handleStartConversation()}
+                    sx={{ flexShrink: 0 }}
+                  >
+                    {t.agents.newConversation}
+                  </Button>
+                </span>
+              </Tooltip>
             </Stack>
 
-            <Box sx={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+            <Box ref={messagesScrollRef} onScroll={handleMessagesScroll} sx={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
               {isBlankAgent ? (
                 <Stack spacing={1.5} alignItems="center" justifyContent="center" sx={{ minHeight: '100%', p: 4, textAlign: 'center' }}>
                   <Typography variant="h6">{t.agents.blankTitle}</Typography>
@@ -959,10 +1162,13 @@ export function AgentsView({ t, intelligenceProviderConfigured }: AgentsViewProp
               )}
             </Box>
 
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} sx={{ p: 1.5, borderTop: `1px solid ${theme.palette.divider}` }}>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ xs: 'stretch', sm: 'flex-end' }} sx={{ p: 1.5, borderTop: `1px solid ${theme.palette.divider}` }}>
               <TextField
                 fullWidth
                 size="small"
+                multiline
+                minRows={2}
+                maxRows={6}
                 value={message}
                 disabled={!conversation || Boolean(runIsActive)}
                 placeholder={t.agents.messagePlaceholder}
@@ -973,12 +1179,23 @@ export function AgentsView({ t, intelligenceProviderConfigured }: AgentsViewProp
                     void handleSendMessage();
                   }
                 }}
+                sx={{
+                  '& .MuiInputBase-root': {
+                    alignItems: 'flex-start',
+                    maxHeight: 168,
+                    overflowY: 'auto',
+                  },
+                  '& textarea': {
+                    overflowY: 'auto !important',
+                  },
+                }}
               />
               <Button
                 startIcon={<SendRounded />}
                 variant="contained"
                 disabled={!conversation || !message.trim() || busy || Boolean(runIsActive)}
                 onClick={() => void handleSendMessage()}
+                sx={{ flexShrink: 0 }}
               >
                 {t.agents.send}
               </Button>

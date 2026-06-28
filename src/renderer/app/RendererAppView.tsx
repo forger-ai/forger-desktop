@@ -24,7 +24,7 @@ import { SettingsView } from '@renderer/views/SettingsView';
 import { SecretsView } from '@renderer/views/SecretsView';
 import { ToolsView } from '@renderer/views/ToolsView';
 import { AGENT_PROVIDER_OPTIONS, ANTIGRAVITY_EFFORT_OPTIONS, ANTIGRAVITY_MODEL_OPTIONS, CHAT_BOT_PICTURE_OPTIONS, CLAUDE_EFFORT_OPTIONS, CLAUDE_MODEL_OPTIONS, CODEX_MODEL_OPTIONS, CODEX_REASONING_OPTIONS } from '@renderer/preferences';
-import { getAntigravitySupportedEfforts } from '@shared/agent-runtime-registry';
+import { buildChatProviderOptions, getAntigravitySupportedEfforts } from '@shared/agent-runtime-registry';
 import { TourOverlay } from '@renderer/tour/TourOverlay';
 import { useForgerTour } from '@renderer/tour/useForgerTour';
 import { appExecutionTooltip } from '@renderer/app-execution-labels';
@@ -386,6 +386,15 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
   const antigravityEffort = antigravitySupportedEfforts.includes(selectedAntigravityRuntimeEffort as AntigravityEffort)
     ? selectedAntigravityRuntimeEffort
     : ANTIGRAVITY_MODEL_OPTIONS.find((option) => option.realModelName === selectedAntigravityRuntimeModel)?.defaultEffort ?? antigravitySupportedEfforts[0] ?? 'medium';
+  const chatProviderOptions = buildChatProviderOptions({
+    codexAuthenticated: codexAuthStatus.authenticated,
+    claudeAuthenticated: claudeAuthStatus.authenticated,
+    antigravityAuthenticated: antigravityAuthStatus.authenticated,
+    lockedProvider: activeConversation?.runtime?.provider ?? null,
+  });
+  const selectedChatProvider = chatProviderOptions.some((option) => option.value === (activeConversation?.runtime?.provider ?? selectedAgentProvider))
+    ? activeConversation?.runtime?.provider ?? selectedAgentProvider
+    : chatProviderOptions[0]?.value ?? 'auto';
 
   const runtimeProviderControls: RuntimeProviderControls = {
     codex: {
@@ -946,8 +955,8 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             onRemovePendingFile={handleRemovePendingChatFile}
             onMentionFile={handleMentionFile}
             onRemoveMentionedFile={(fileId) => setMentionedChatFileIds((current: any[]) => current.filter((id: any) => id !== fileId))}
-            providerOptions={AGENT_PROVIDER_OPTIONS}
-            selectedProvider={activeConversation?.runtime?.provider ?? selectedAgentProvider}
+            providerOptions={chatProviderOptions}
+            selectedProvider={selectedChatProvider}
             resolvedProviderForAuto={resolvedChatProvider}
             onSelectProvider={setSelectedAgentProvider}
             providerLocked={Boolean(activeConversation?.runtime || activeConversation?.threadId || activeConversation?.messages.length)}

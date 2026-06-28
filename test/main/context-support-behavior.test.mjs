@@ -10,6 +10,30 @@ const { createAppContextSupportController } = require('../../dist-electron/main/
 const { FORGER_AGENT_CONTRACT_MARKER_PREFIX } = require('../../dist-electron/main/prompt-builder/forger-base.js');
 
 const tmpRoot = async (name) => await fs.mkdtemp(path.join(os.tmpdir(), `forger-${name}-`));
+const listSkillDirs = async (root) => (await fs.readdir(root)).sort();
+
+const globalAppSkillIds = [
+  'forger-app-agents-authoring',
+  'forger-app-mcp-data-tools',
+  'forger-context',
+  'forger-dev-backend-development',
+  'forger-dev-in-app-agents',
+  'forger-frontend-patterns',
+  'forger-installed-app-change',
+  'forger-localization',
+  'forger-manifest-authoring',
+  'forger-permissions',
+  'forger-remote-tunnel-wiring',
+  'forger-secrets',
+  'forger-speech-to-text',
+  'forger-text-to-speech',
+  'forger-tools',
+].sort();
+
+const installedAppSkillIds = [
+  ...globalAppSkillIds,
+  'forger-app-official-tools',
+].sort();
 
 const createController = (root, overrides = {}) => createAppContextSupportController({
   fs,
@@ -35,6 +59,7 @@ test('context support writes global AGENTS and official tool skills into metadat
   const controller = createController(root);
   const homeRoot = path.join(root, 'home');
   const skillsRoot = path.join(homeRoot, '.agents', 'skills');
+  const claudeSkillsRoot = path.join(homeRoot, '.claude', 'skills');
   await fs.mkdir(path.join(skillsRoot, 'forger-agents'), { recursive: true });
   await fs.writeFile(path.join(skillsRoot, 'forger-agents', 'SKILL.md'), 'stale legacy skill', 'utf8');
   await fs.mkdir(path.join(skillsRoot, 'forger-app-design-guidelines'), { recursive: true });
@@ -43,20 +68,22 @@ test('context support writes global AGENTS and official tool skills into metadat
   await controller.ensureGlobalAgentsContext(homeRoot);
 
   const agentsMarkdown = await fs.readFile(path.join(homeRoot, 'AGENTS.md'), 'utf8');
-  const skillDirs = await fs.readdir(skillsRoot);
+  const skillDirs = await listSkillDirs(skillsRoot);
+  const claudeSkillDirs = await listSkillDirs(claudeSkillsRoot);
   assert.match(agentsMarkdown, /Forger/);
-  assert.ok(skillDirs.includes('forger-context'));
-  assert.ok(skillDirs.includes('forger-app-agents-authoring'));
-  assert.ok(skillDirs.includes('forger-app-mcp-data-tools'));
-  assert.ok(skillDirs.includes('forger-gmail'));
-  assert.ok(skillDirs.includes('forger-manifest-authoring'));
-  assert.ok(skillDirs.includes('forger-dev-in-app-agents'));
-  assert.ok(skillDirs.includes('forger-localization'));
-  assert.ok(skillDirs.includes('forger-frontend-patterns'));
-  assert.ok(skillDirs.includes('forger-dev-backend-development'));
-  assert.ok(skillDirs.includes('forger-installed-app-change'));
-  assert.ok(skillDirs.includes('forger-memory'));
-  assert.ok(skillDirs.includes('forger-remote-tunnel-wiring'));
+  for (const skillId of [
+    ...globalAppSkillIds,
+    'forger-automations',
+    'forger-gmail',
+    'forger-memory',
+    'forger-official-tools',
+    'forger-product-docs',
+    'forger-social-app-review',
+    'forger-whatsapp',
+  ]) {
+    assert.ok(skillDirs.includes(skillId), `${skillId} should be present in .agents skills`);
+    assert.ok(claudeSkillDirs.includes(skillId), `${skillId} should be present in .claude skills`);
+  }
   assert.equal(skillDirs.includes('forger-agents'), false);
   assert.equal(skillDirs.includes('forger-tasks'), false);
   assert.equal(skillDirs.includes('forger-desktop-runtime-bridge'), false);
@@ -132,46 +159,26 @@ test('context support normalizes installed app context for invalid, MCP-only, an
 
   await controller.normalizeInstalledAgentContext(invalidDir, 'invalid');
   assert.match(await fs.readFile(path.join(invalidDir, 'AGENTS.md'), 'utf8'), /invalid/);
-  assert.deepEqual(await fs.readdir(path.join(invalidDir, '.agents', 'skills')), [
-    'forger-app-agents-authoring',
-    'forger-app-mcp-data-tools',
-    'forger-app-official-tools',
-    'forger-context',
-    'forger-frontend-patterns',
-  ]);
+  assert.deepEqual(await listSkillDirs(path.join(invalidDir, '.agents', 'skills')), installedAppSkillIds);
+  assert.deepEqual(await listSkillDirs(path.join(invalidDir, '.claude', 'skills')), installedAppSkillIds);
 
   await controller.normalizeInstalledAgentContext(arrayDir, 'array');
   assert.match(await fs.readFile(path.join(arrayDir, 'AGENTS.md'), 'utf8'), /array/);
-  assert.deepEqual(await fs.readdir(path.join(arrayDir, '.agents', 'skills')), [
-    'forger-app-agents-authoring',
-    'forger-app-mcp-data-tools',
-    'forger-app-official-tools',
-    'forger-context',
-    'forger-frontend-patterns',
-  ]);
+  assert.deepEqual(await listSkillDirs(path.join(arrayDir, '.agents', 'skills')), installedAppSkillIds);
+  assert.deepEqual(await listSkillDirs(path.join(arrayDir, '.claude', 'skills')), installedAppSkillIds);
 
   await controller.normalizeInstalledAgentContext(mcpOnlyDir, 'mcp-only');
-  assert.deepEqual(await fs.readdir(path.join(mcpOnlyDir, '.agents', 'skills')), [
-    'forger-app-agents-authoring',
-    'forger-app-mcp-data-tools',
-    'forger-app-official-tools',
-    'forger-context',
-    'forger-frontend-patterns',
-  ]);
+  assert.deepEqual(await listSkillDirs(path.join(mcpOnlyDir, '.agents', 'skills')), installedAppSkillIds);
+  assert.deepEqual(await listSkillDirs(path.join(mcpOnlyDir, '.claude', 'skills')), installedAppSkillIds);
 
   await controller.normalizeInstalledAgentContext(skillsDir, 'skills');
-  assert.deepEqual(await fs.readdir(path.join(skillsDir, '.agents', 'skills')), [
-    'forger-app-agents-authoring',
-    'forger-app-mcp-data-tools',
-    'forger-app-official-tools',
-    'forger-context',
-    'forger-frontend-patterns',
-    'inside',
-  ]);
+  assert.deepEqual(await listSkillDirs(path.join(skillsDir, '.agents', 'skills')), [...installedAppSkillIds, 'inside'].sort());
+  assert.deepEqual(await listSkillDirs(path.join(skillsDir, '.claude', 'skills')), [...installedAppSkillIds, 'inside'].sort());
   assert.equal((await fs.readdir(path.join(skillsDir, '.agents', 'skills'))).includes('bad-yaml'), false);
+  assert.equal((await fs.readdir(path.join(skillsDir, '.claude', 'skills'))).includes('bad-yaml'), false);
 });
 
-test('context support normalizes installed app templates without stack-dependent development skills', async (t) => {
+test('context support normalizes installed app templates with global development skills', async (t) => {
   const root = await tmpRoot('context-stack');
   t.after(async () => {
     await fs.rm(root, { recursive: true, force: true });
@@ -197,10 +204,7 @@ test('context support normalizes installed app templates without stack-dependent
     backend: { language: ' Python ', framework: ' FastAPI ' },
     frontend: { framework: ' React ', ui: ' MUI ' },
   }, true, ['gmail.search_messages']).map((template) => template.id), [
-    'forger-app-agents-authoring',
-    'forger-app-mcp-data-tools',
-    'forger-context',
-    'forger-frontend-patterns',
+    ...globalAppSkillIds,
     'forger-app-official-tools',
   ]);
   const stackSkillsRoot = path.join(root, 'stack-skills');
@@ -215,21 +219,13 @@ test('context support normalizes installed app templates without stack-dependent
   assert.deepEqual(controller.buildInstalledAppContextSkillTemplates([
     'gmail.search_messages',
   ]).map((template) => template.id), [
-    'forger-app-agents-authoring',
-    'forger-app-mcp-data-tools',
-    'forger-context',
-    'forger-frontend-patterns',
+    ...globalAppSkillIds,
     'forger-app-official-tools',
   ]);
 
   await controller.normalizeInstalledAgentContext(appDir, 'stack');
-  assert.deepEqual(await fs.readdir(path.join(appDir, '.agents', 'skills')), [
-    'forger-app-agents-authoring',
-    'forger-app-mcp-data-tools',
-    'forger-app-official-tools',
-    'forger-context',
-    'forger-frontend-patterns',
-  ]);
+  assert.deepEqual(await listSkillDirs(path.join(appDir, '.agents', 'skills')), installedAppSkillIds);
+  assert.deepEqual(await listSkillDirs(path.join(appDir, '.claude', 'skills')), installedAppSkillIds);
   const officialToolSkill = await fs.readFile(path.join(appDir, '.agents', 'skills', 'forger-app-official-tools', 'SKILL.md'), 'utf8');
   assert.match(officialToolSkill, /^name: "forger-app-official-tools"$/m);
   assert.match(officialToolSkill, /^description: ".*"$/m);
@@ -239,6 +235,18 @@ test('context support normalizes installed app templates without stack-dependent
   const agentsSkill = await fs.readFile(path.join(appDir, '.agents', 'skills', 'forger-app-agents-authoring', 'SKILL.md'), 'utf8');
   assert.match(agentsSkill, /current app facts/);
   assert.match(agentsSkill, /turn-specific tone/);
+  const manifestSkill = await fs.readFile(path.join(appDir, '.agents', 'skills', 'forger-manifest-authoring', 'SKILL.md'), 'utf8');
+  assert.match(manifestSkill, /Agents may edit `manifest\.json`/);
+  assert.match(manifestSkill, /`tools\.optional` is the exception/);
+  assert.match(manifestSkill, /After changing manifest runtime wiring/);
+  const remoteTunnelSkill = await fs.readFile(path.join(appDir, '.agents', 'skills', 'forger-remote-tunnel-wiring', 'SKILL.md'), 'utf8');
+  assert.match(remoteTunnelSkill, /closed beta/);
+  assert.match(remoteTunnelSkill, /hello@forger\.cloud/);
+  assert.match(remoteTunnelSkill, /Use `forger-manifest-authoring`/);
+  const speechSkill = await fs.readFile(path.join(appDir, '.agents', 'skills', 'forger-speech-to-text', 'SKILL.md'), 'utf8');
+  assert.match(speechSkill, /depends on the app manifest declaring `platformCapabilities\.speechToText`/);
+  const ttsSkill = await fs.readFile(path.join(appDir, '.agents', 'skills', 'forger-text-to-speech', 'SKILL.md'), 'utf8');
+  assert.match(ttsSkill, /depends on the app manifest declaring `platformCapabilities\.textToSpeech`/);
 
   const edgeToolsDir = path.join(root, 'edge-tools-app');
   await fs.mkdir(edgeToolsDir, { recursive: true });

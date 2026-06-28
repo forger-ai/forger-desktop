@@ -144,6 +144,44 @@ export const AGENT_PROVIDER_OPTIONS: Array<{ label: string; value: AgentProvider
   { label: 'Google Antigravity', value: 'antigravity' },
 ];
 
+const PROVIDER_OPTION_BY_VALUE = new Map(AGENT_PROVIDER_OPTIONS.map((option) => [option.value, option]));
+
+export interface ChatProviderOptionsInput {
+  codexAuthenticated?: boolean;
+  claudeAuthenticated?: boolean;
+  antigravityAuthenticated?: boolean;
+  lockedProvider?: AgentProvider | null;
+}
+
+export const providerOptionLabel = (provider: AgentProvider): string =>
+  PROVIDER_OPTION_BY_VALUE.get(provider)?.label ?? provider;
+
+export const buildChatProviderOptions = ({
+  codexAuthenticated,
+  claudeAuthenticated,
+  antigravityAuthenticated,
+  lockedProvider,
+}: ChatProviderOptionsInput = {}): Array<{ label: string; value: AgentProviderPreference }> => {
+  const authenticatedProviders: AgentProvider[] = [
+    ...(codexAuthenticated ? ['codex' as const] : []),
+    ...(claudeAuthenticated ? ['claude' as const] : []),
+    ...(antigravityAuthenticated ? ['antigravity' as const] : []),
+  ];
+  const options = [
+    ...(authenticatedProviders.length > 0 ? [PROVIDER_OPTION_BY_VALUE.get('auto')] : []),
+    ...authenticatedProviders.map((provider) => PROVIDER_OPTION_BY_VALUE.get(provider)),
+  ].filter((option): option is { label: string; value: AgentProviderPreference } => Boolean(option));
+
+  if (lockedProvider && !options.some((option) => option.value === lockedProvider)) {
+    const lockedOption = PROVIDER_OPTION_BY_VALUE.get(lockedProvider);
+    if (lockedOption) {
+      options.push(lockedOption);
+    }
+  }
+
+  return options;
+};
+
 export const LLM_PROVIDER_REGISTRY = {
   codex: {
     key: 'codex',
