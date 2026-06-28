@@ -103,8 +103,12 @@ test('renderer has an Agents view that can list, create, delete, inspect, start,
   assert.match(agentsViewSource, /llmRequired/);
   assert.doesNotMatch(agentsViewSource, /workspaceTitle/);
   assert.doesNotMatch(agentsViewSource, /t\.agents\.person|t\.agents\.agent/);
-  assert.doesNotMatch(agentsViewSource, /firstConversationMessage/);
-  assert.doesNotMatch(agentsViewSource, /initialMessage:\s*t\.agents\.firstConversationMessage/);
+  assert.match(agentsViewSource, /const handleWakeAgent/);
+  assert.match(agentsViewSource, /initialMessage:\s*t\.agents\.wakeAgentMessage/);
+  assert.match(agentsViewSource, /t\.agents\.wakeAgent/);
+  assert.match(agentsViewSource, /const wakeFlowInProgress/);
+  assert.match(agentsViewSource, /!isBlankAgent && !wakeFlowInProgress && busyAction !== 'wake'/);
+  assert.match(agentsViewSource, /const handleStartConversation[\s\S]*?personalAgentStartConversation\(\{\s*agentId: activeAgent\.id,\s*title: activeAgent\.name,\s*\}\);/);
   assert.match(agentsViewSource, /permissionLevel/);
   assert.match(agentsViewSource, /runtimeProvider/);
   assert.match(agentsViewSource, /runtimeModel/);
@@ -123,6 +127,10 @@ test('personal agent auth copy is provider-neutral in the Agents surface', async
 
   assert.match(englishSource, /runErrorLlmAuth: 'Connect an LLM to start this conversation\.'/);
   assert.match(spanishSource, /runErrorLlmAuth: 'Conecta un LLM para iniciar esta conversación\.'/);
+  assert.match(englishSource, /wakeAgent: 'Wake agent'/);
+  assert.match(englishSource, /wakeAgentMessage: 'Hello, wake up'/);
+  assert.match(spanishSource, /wakeAgent: 'Despertar agente'/);
+  assert.match(spanishSource, /wakeAgentMessage: 'Hola, despierta'/);
   assert.doesNotMatch(englishSource, /runErrorCodexAuth|runErrorClaudeAuth/);
   assert.doesNotMatch(spanishSource, /runErrorCodexAuth|runErrorClaudeAuth/);
 });
