@@ -434,6 +434,29 @@ test('agent runtime registry normalizes providers, defaults, fallbacks, and runt
     model: 'opus',
     effort: 'max',
   });
+  assert.deepEqual(runtimeRegistry.buildChatProviderOptions({
+    antigravityAuthenticated: true,
+  }), [
+    { label: 'Auto', value: 'auto' },
+    { label: 'Google Antigravity', value: 'antigravity' },
+  ]);
+  assert.deepEqual(runtimeRegistry.buildChatProviderOptions({
+    codexAuthenticated: true,
+    claudeAuthenticated: true,
+  }), [
+    { label: 'Auto', value: 'auto' },
+    { label: 'Codex', value: 'codex' },
+    { label: 'Claude', value: 'claude' },
+  ]);
+  assert.deepEqual(runtimeRegistry.buildChatProviderOptions(), []);
+  assert.deepEqual(runtimeRegistry.buildChatProviderOptions({
+    antigravityAuthenticated: true,
+    lockedProvider: 'codex',
+  }), [
+    { label: 'Auto', value: 'auto' },
+    { label: 'Google Antigravity', value: 'antigravity' },
+    { label: 'Codex', value: 'codex' },
+  ]);
   assert.equal(runtimeRegistry.resolveRuntimeSource(undefined, { provider: 'codex', model: 'gpt-5.5' }), 'override');
   assert.equal(runtimeRegistry.resolveRuntimeSource({ provider: 'claude', model: 'sonnet' }, undefined), 'manifest');
   assert.equal(runtimeRegistry.resolveRuntimeSource(undefined, undefined), 'global');

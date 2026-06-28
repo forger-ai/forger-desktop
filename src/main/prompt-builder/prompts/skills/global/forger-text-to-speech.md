@@ -4,6 +4,7 @@ description: Use when a task needs local voice synthesis through Forger's Text t
 ---
 
 - Text to speech is a local Forger platform service, not an installed app, plugin, or external official tool.
+- Installed app Text to speech access depends on the app manifest declaring `platformCapabilities.textToSpeech`. Use `forger-manifest-authoring` for the exact manifest change and restart requirement.
 - Before promising synthesis, check the service status with `forger_text_to_speech_status`.
 - Before choosing a voice, use `forger_text_to_speech_voices`; every synthesis call must pass `text`, `model`, and `voice` explicitly.
 - Text to speech is separate from Speech to text. Do not assume STT model settings, audio input settings, or transcription languages apply to TTS.

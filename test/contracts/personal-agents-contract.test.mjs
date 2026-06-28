@@ -104,8 +104,14 @@ test('renderer has an Agents view that can list, create, delete, inspect, start,
   assert.doesNotMatch(agentsViewSource, /workspaceTitle/);
   assert.doesNotMatch(agentsViewSource, /t\.agents\.person|t\.agents\.agent/);
   assert.match(agentsViewSource, /permissionLevel/);
+  assert.match(agentsViewSource, /runtimeProvider/);
+  assert.match(agentsViewSource, /runtimeModel/);
+  assert.match(agentsViewSource, /runtimeEffort/);
   assert.match(agentsViewSource, /appsAccess/);
   assert.match(agentsViewSource, /toolsAccess/);
+  assert.match(agentsViewSource, /<Accordion/);
+  assert.match(agentsViewSource, /indeterminate=\{partiallySelected\}/);
+  assert.match(agentsViewSource, /toolActionsCount/);
   assert.match(agentsViewSource, /editAccess/);
 });
 
@@ -124,12 +130,15 @@ test('personal agent public types include run and event contracts', async () => 
 
   assert.match(typesSource, /PersonalAgentRunStatus/);
   assert.match(typesSource, /PersonalAgentUpdatePermissionsInput/);
+  assert.match(typesSource, /runtime\?: AgentRuntime/);
   assert.match(typesSource, /PersonalAgentGrantOptions/);
   assert.match(typesSource, /appIds: string\[\]/);
   assert.match(typesSource, /toolIds: AgentToolId\[\]/);
   assert.match(typesSource, /PersonalAgentRunProgress/);
   assert.match(typesSource, /PersonalAgentConversationEvent/);
   assert.match(typesSource, /activeRun\?: PersonalAgentRun/);
+  assert.match(typesSource, /provider\?: AgentRuntime\['provider'\] \| null/);
+  assert.match(typesSource, /providerThreadId\?: string \| null/);
   assert.match(typesSource, /runId\?: string/);
   assert.match(typesSource, /initialMessage\?: string/);
 });
@@ -141,12 +150,16 @@ test('personal agent runtime wires Forger and granted app MCP access', async () 
 
   assert.match(managerSource, /createForgerMcpSession/);
   assert.match(managerSource, /listenAppMcps\?\.\(input\.agent\.appIds, input\.run\.id\)/);
+  assert.match(managerSource, /resolveRuntimeForAgent/);
+  assert.match(managerSource, /personal_agent_provider_changed_new_conversation_required/);
   assert.match(managerSource, /codexCliAdapter\.runConversation/);
   assert.match(managerSource, /claudeCliAdapter\.run/);
   assert.match(managerSource, /mcpServers,/);
   assert.match(mainProcessSource, /caller: 'personal-agent'/);
+  assert.match(mainProcessSource, /personalAgentId: agent\.id/);
   assert.match(mainProcessSource, /officialToolActionIds: agent\.toolIds/);
   assert.match(mcpSource, /personal-agent/);
+  assert.match(mcpSource, /forger_add_app_to_personal_agent/);
   assert.match(mcpSource, /personal_agent_tool_not_granted/);
   assert.match(mcpSource, /personal_agent_app_not_granted/);
 });

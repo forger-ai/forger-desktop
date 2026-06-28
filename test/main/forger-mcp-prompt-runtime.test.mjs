@@ -97,6 +97,13 @@ test('forger_test_app_prompt schema accepts prompt candidates and variables', ()
   assert.equal(schema.additionalProperties, false);
 });
 
+test('forger_add_app_to_personal_agent schema requires only an appId', () => {
+  const schema = getMcpToolInputSchema('forger_add_app_to_personal_agent');
+  assert.deepEqual(schema.required, ['appId']);
+  assert.equal(schema.properties.appId.type, 'string');
+  assert.equal(schema.additionalProperties, false);
+});
+
 test('speech-to-text MCP schemas expose status and authorized audio paths', () => {
   const statusSchema = getMcpToolInputSchema('forger_speech_to_text_status');
   assert.deepEqual(statusSchema, {
@@ -180,6 +187,89 @@ test('forger_update_app_prompt forwards agentPrompt runtime arguments', async ()
       prompt: 'Review {{item}}.',
       runtime: { provider: 'claude', model: 'sonnet', effort: 'high' },
     });
+  } finally {
+    harness.stop();
+  }
+});
+
+test('forger_add_app_to_personal_agent is listed only for personal-agent sessions and forwards the active agent id', async () => {
+  let capturedInput;
+  const harness = await createServer({
+    getToolDefinitions: () => [{
+      id: 'forger_add_app_to_personal_agent',
+      packageId: 'forger',
+      name: 'Agregar app al agente',
+      description: 'Permite una app para el agente.',
+      category: 'app',
+      risk: 'medio',
+      defaultRequiresApproval: false,
+    }],
+    addAppToPersonalAgent: async (input) => {
+      capturedInput = input;
+      return {
+        success: true,
+        appId: input.appId,
+        alreadyGranted: false,
+        userMessage: 'App agregada.',
+      };
+    },
+  });
+  const personalSession = harness.server.createSession('run-1', 'forger', {
+    caller: 'personal-agent',
+    personalAgentId: 'agent-1',
+    appIds: [],
+  });
+  const freeSession = harness.server.createSession('run-2', 'forger', {
+    caller: 'free-chat',
+    appIds: [],
+  });
+  try {
+    const personalList = await fetch(personalSession.url, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${personalSession.token}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
+    });
+    const personalPayload = await personalList.json();
+    assert.ok(personalPayload.result.tools.some((tool) => tool.name === 'forger_add_app_to_personal_agent'));
+
+    const freeList = await fetch(freeSession.url, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${freeSession.token}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' }),
+    });
+    const freePayload = await freeList.json();
+    assert.ok(!freePayload.result.tools.some((tool) => tool.name === 'forger_add_app_to_personal_agent'));
+
+    const response = await fetch(personalSession.url, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${personalSession.token}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 3,
+        method: 'tools/call',
+        params: {
+          name: 'forger_add_app_to_personal_agent',
+          arguments: { appId: 'finance-os' },
+        },
+      }),
+    });
+    const payload = await response.json();
+    const result = JSON.parse(payload.result.content[0].text);
+
+    assert.equal(response.status, 200);
+    assert.equal(payload.result.isError, false);
+    assert.deepEqual(capturedInput, { agentId: 'agent-1', appId: 'finance-os' });
+    assert.equal(result.success, true);
+    assert.equal(result.appId, 'finance-os');
   } finally {
     harness.stop();
   }

@@ -201,6 +201,20 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
     };
   }
 
+  if (toolId === 'forger_add_app_to_personal_agent') {
+    return {
+      type: 'object',
+      properties: {
+        appId: {
+          type: 'string',
+          description: 'ID de la app instalada cuyo MCP debe quedar disponible para este agente personal en proximas ejecuciones.',
+        },
+      },
+      required: ['appId'],
+      additionalProperties: false,
+    };
+  }
+
   if (toolId === 'forger_request_app_tool_grant') {
     return {
       type: 'object',

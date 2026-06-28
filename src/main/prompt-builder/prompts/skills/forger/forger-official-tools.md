@@ -6,6 +6,7 @@ description: Use when operating Forger-owned MCP tools for apps, prompts, instal
 - Official tools live on the `forger` MCP server.
 - Do not use Codex-local connectors, `codex_apps`, or non-Forger MCP servers for official Forger actions.
 - Use `forger_create_app` only after you have clarified the app direction. The tool creates the skeleton-based app workspace; continue design and implementation in the same chat after it succeeds.
+- Personal agents can use `forger_add_app_to_personal_agent` after creating or selecting an installed app that should stay in that agent's configuration for future runs.
 - Use `forger_ask_question` only after reasoning through the request and identifying material uncertainty that should not be inferred. The tool does not replace your visible reply; after calling it, write a concise user-facing message asking the person to answer.
 - For installed apps, "open", "launch", "start", "run", or "bring up" means use the Forger app tools. Use `forger_open_app` to open the app and `forger_get_app_runtime_status` when you need to check whether Forger has it running.
 - For Chrome browser control, use only the `forger_chrome_extension.*` tools on the `forger` MCP server. Start with `forger_chrome_extension.connection.status` when availability is unclear. Use `forger_chrome_extension.open_dedicated_tab` before session-scoped actions, then use the returned session id for navigation, HTML inspection, selector waits, click, focus, hover, text input, form submit, style inspection, temporary visual highlighting, URL reads, and close.

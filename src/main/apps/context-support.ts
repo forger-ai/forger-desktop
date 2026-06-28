@@ -11,6 +11,7 @@ import {
   buildInstalledAppSkillTemplates,
   buildForgerWorkspaceSkillTemplates,
 } from '../prompt-builder/official-tools';
+import { forgerSkillRoots, writeSkillTemplates as writePromptSkillTemplates } from '../prompt-builder/skill-template-writer';
 import type { CatalogApp } from '../../shared/types';
 import type { AppManifest, AppManifestStack, AppRegistry, StackSkillTemplate } from '../core/main-process-types';
 
@@ -65,8 +66,7 @@ const ensureGlobalAgentsContext = async (forgerHomeRoot: string): Promise<void> 
   await fs.mkdir(forgerHomeRoot, { recursive: true });
   const agentsPath = path.join(forgerHomeRoot, 'AGENTS.md');
   await fs.writeFile(agentsPath, buildGlobalForgerAgentsMarkdown(), 'utf8');
-  const skillsRoot = path.join(forgerHomeRoot, '.agents', 'skills');
-  await writeSkillTemplates(skillsRoot, buildForgerWorkspaceSkillTemplates());
+  await writeSkillTemplatesForRoots(forgerSkillRoots(path, forgerHomeRoot), buildForgerWorkspaceSkillTemplates());
 };
 
 const shouldWriteAppAgentsMarkdown = async (agentsPath: string): Promise<boolean> => {
@@ -115,36 +115,6 @@ const buildInstalledAppContextSkillTemplates = (allowedOfficialToolActions: stri
 const buildStackSkillTemplates = (_stack: AppManifestStack, _hasAppMcp = false, allowedOfficialToolActions: string[] = []): StackSkillTemplate[] =>
   buildInstalledAppContextSkillTemplates(allowedOfficialToolActions);
 
-const removeUndeclaredSkillTemplates = async (skillsRoot: string, templates: StackSkillTemplate[]): Promise<void> => {
-  const declaredIds = new Set(templates.map((template) => template.id));
-  const entries = await fs.readdir(skillsRoot, { withFileTypes: true }).catch((error: unknown) => {
-    if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') {
-      return [];
-    }
-    throw error;
-  });
-
-  for (const entry of entries) {
-    if (!entry.isDirectory() || declaredIds.has(entry.name)) {
-      continue;
-    }
-    await fs.rm(path.join(skillsRoot, entry.name), { recursive: true, force: true });
-  }
-};
-
-const yamlScalar = (value: string): string => JSON.stringify(value);
-
-const normalizeSkillTemplateBody = (template: StackSkillTemplate): string => {
-  const bodyWithoutFrontmatter = template.body.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '');
-  return [
-    '---',
-    `name: ${yamlScalar(template.id)}`,
-    `description: ${yamlScalar(template.description)}`,
-    '---',
-    bodyWithoutFrontmatter.replace(/^\s+/, ''),
-  ].join('\n');
-};
-
 const readFrontmatterField = (frontmatter: string, fieldName: 'name' | 'description'): string | null => {
   const match = frontmatter.match(new RegExp(`^${fieldName}:\\s*(.*)$`, 'm'));
   if (!match) {
@@ -179,15 +149,11 @@ const hasValidSkillFrontmatter = (source: string): boolean => {
 };
 
 const writeSkillTemplates = async (skillsRoot: string, templates: StackSkillTemplate[]): Promise<void> => {
-  await fs.mkdir(skillsRoot, { recursive: true });
-  await removeUndeclaredSkillTemplates(skillsRoot, templates);
-  for (const template of templates) {
-    const targetDir = path.join(skillsRoot, template.id);
-    await fs.rm(targetDir, { recursive: true, force: true });
-    await fs.mkdir(targetDir, { recursive: true });
-    await fs.writeFile(path.join(targetDir, 'SKILL.md'), normalizeSkillTemplateBody(template), 'utf8');
-    await fs.writeFile(path.join(targetDir, 'README.md'), `${template.description}\n`, 'utf8');
-  }
+  await writePromptSkillTemplates({ fs, path }, skillsRoot, templates);
+};
+
+const writeSkillTemplatesForRoots = async (skillsRoots: string[], templates: StackSkillTemplate[]): Promise<void> => {
+  await Promise.all(skillsRoots.map((skillsRoot) => writeSkillTemplates(skillsRoot, templates)));
 };
 
 const copyDirectory = async (sourceDir: string, targetDir: string): Promise<void> => {
@@ -240,12 +206,14 @@ const normalizeInstalledAgentContext = async (installDir: string, appId: string)
 
   const allowedOfficialToolActions = normalizeToolActions(manifest);
 
-  const skillsRoot = path.join(installDir, '.agents', 'skills');
-  await fs.rm(skillsRoot, { recursive: true, force: true });
-  await fs.mkdir(skillsRoot, { recursive: true });
-  await writeSkillTemplates(skillsRoot, buildInstalledAppContextSkillTemplates(allowedOfficialToolActions));
+  const skillsRoots = forgerSkillRoots(path, installDir);
+  await Promise.all(skillsRoots.map(async (skillsRoot) => {
+    await fs.rm(skillsRoot, { recursive: true, force: true });
+    await fs.mkdir(skillsRoot, { recursive: true });
+  }));
+  await writeSkillTemplatesForRoots(skillsRoots, buildInstalledAppContextSkillTemplates(allowedOfficialToolActions));
   if (manifest) {
-    await copyAppSkills(installDir, skillsRoot, manifest);
+    await Promise.all(skillsRoots.map((skillsRoot) => copyAppSkills(installDir, skillsRoot, manifest)));
   }
 };
 

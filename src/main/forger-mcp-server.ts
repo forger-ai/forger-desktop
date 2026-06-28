@@ -51,6 +51,7 @@ interface AgentMcpSession {
   runId: string;
   appId: string;
   caller: 'desktop-chat' | 'app-agent' | 'automation' | 'free-chat' | 'personal-agent';
+  personalAgentId?: string;
   appIds: string[];
   officialToolActionIds: string[];
   locale?: string;
@@ -60,6 +61,7 @@ interface AgentMcpSession {
 
 export interface ForgerMcpSessionAccess {
   caller: AgentMcpSession['caller'];
+  personalAgentId?: string;
   appIds?: string[];
   officialToolActionIds?: string[];
   locale?: string;
@@ -84,6 +86,7 @@ interface ForgerMcpServerOptions {
   listInstalledApps: () => AppSummary[];
   checkUpdates: () => Promise<AppSummary[]>;
   createLocalApp: (input: CreateLocalAppInput, locale?: string) => Promise<CreateLocalAppResult>;
+  addAppToPersonalAgent?: (input: { agentId: string; appId: string }) => Promise<{ success: boolean; appId: string; alreadyGranted: boolean; userMessage: string; technicalCode?: string }>;
   finishSocialAppInstall: (input: { quarantineId: string }, locale?: string) => Promise<InstallAppResult & { appId?: string }>;
   deleteQuarantinedSocialApp: (input: { quarantineId: string }, locale?: string) => Promise<{ success: boolean; userMessage: string; technicalCode?: string }>;
   recordCreatedApp?: (runId: string, createdApp: ChatCreatedAppRequest) => void;
@@ -240,6 +243,7 @@ export class ForgerMcpServer {
       runId,
       appId,
       caller: access?.caller ?? 'desktop-chat',
+      personalAgentId: access?.personalAgentId,
       appIds: access?.appIds ?? (appId === 'forger' ? [] : [appId]),
       officialToolActionIds: access?.officialToolActionIds ?? [],
       locale: access?.locale,
@@ -417,6 +421,9 @@ export class ForgerMcpServer {
         ? new Set(session.officialToolActionIds)
         : null;
     const tools = this.getAllToolDefinitions().filter((tool) => {
+      if (tool.id === 'forger_add_app_to_personal_agent' && session.caller !== 'personal-agent') {
+        return false;
+      }
       if (!isOfficialTool(tool.id)) {
         return true;
       }
@@ -770,6 +777,36 @@ export class ForgerMcpServer {
           purpose: result.app.purpose,
           ...(result.app.lookAndFeel ? { lookAndFeel: result.app.lookAndFeel } : {}),
         });
+      }
+      await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
+      return withToolAuthorization(result, approval);
+    }
+
+    if (toolId === 'forger_add_app_to_personal_agent') {
+      const requestedAppId = cleanString(args.appId);
+      if (session.caller !== 'personal-agent' || !session.personalAgentId || !this.options.addAppToPersonalAgent) {
+        const result = {
+          success: false,
+          appId: requestedAppId,
+          userMessage: 'Esta herramienta solo esta disponible para agentes personales.',
+          technicalCode: 'personal_agent_context_required',
+        };
+        await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
+        return withToolAuthorization(result, approval);
+      }
+      if (!requestedAppId) {
+        const result = {
+          success: false,
+          appId: '',
+          userMessage: 'Indica la app instalada que quieres agregar al agente.',
+          technicalCode: 'personal_agent_app_id_required',
+        };
+        await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
+        return withToolAuthorization(result, approval);
+      }
+      const result = await this.options.addAppToPersonalAgent({ agentId: session.personalAgentId, appId: requestedAppId });
+      if (result.success && !session.appIds.includes(result.appId)) {
+        session.appIds.push(result.appId);
       }
       await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
       return withToolAuthorization(result, approval);

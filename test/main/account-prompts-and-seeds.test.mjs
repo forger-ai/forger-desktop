@@ -433,24 +433,24 @@ test('official tool skill templates and seed data keep expected Desktop defaults
     'forger-app-agents-authoring',
     'forger-app-mcp-data-tools',
     'forger-context',
-    'forger-frontend-patterns',
-    'forger-automations',
     'forger-dev-backend-development',
     'forger-dev-in-app-agents',
-    'forger-gmail',
+    'forger-frontend-patterns',
     'forger-installed-app-change',
     'forger-localization',
     'forger-manifest-authoring',
-    'forger-memory',
-    'forger-official-tools',
     'forger-permissions',
-    'forger-product-docs',
     'forger-remote-tunnel-wiring',
     'forger-secrets',
-    'forger-social-app-review',
     'forger-speech-to-text',
     'forger-text-to-speech',
     'forger-tools',
+    'forger-automations',
+    'forger-gmail',
+    'forger-memory',
+    'forger-official-tools',
+    'forger-product-docs',
+    'forger-social-app-review',
     'forger-whatsapp',
   ]);
   assert.ok(templates.every((template) => template.body.startsWith('---\nname:')));
@@ -469,7 +469,18 @@ test('official tool skill templates and seed data keep expected Desktop defaults
     'forger-app-agents-authoring',
     'forger-app-mcp-data-tools',
     'forger-context',
+    'forger-dev-backend-development',
+    'forger-dev-in-app-agents',
     'forger-frontend-patterns',
+    'forger-installed-app-change',
+    'forger-localization',
+    'forger-manifest-authoring',
+    'forger-permissions',
+    'forger-remote-tunnel-wiring',
+    'forger-secrets',
+    'forger-speech-to-text',
+    'forger-text-to-speech',
+    'forger-tools',
     'forger-app-official-tools',
   ]);
   const appOfficialSkill = buildInstalledAppSkillTemplates(['gmail.search_messages', 'whatsapp.list_chats']).find((template) => template.id === 'forger-app-official-tools');
@@ -493,20 +504,25 @@ test('official tool skill templates and seed data keep expected Desktop defaults
   assert.match(manifestSkill.body, /Every entry in `tools\.required\[\]` and `tools\.optional\[\]` must include `toolId`, `reason`, and `actions`/);
   assert.match(manifestSkill.body, /"toolId": "forger_chrome_extension"[\s\S]*"actions": \["\*"\]/);
   assert.match(manifestSkill.body, /special token `"\*"`[\s\S]*every current action for that single `toolId`/);
-  assert.match(manifestSkill.body, /Desktop still allows installation when the tool is missing or unconfigured/);
+  assert.match(manifestSkill.body, /Agents may edit `manifest\.json`/);
+  assert.match(manifestSkill.body, /After the app restarts, Desktop wires the declared required action set/);
+  assert.match(manifestSkill.body, /`tools\.optional` requires a user grant or approval/);
   assert.match(manifestSkill.body, /`reason` is required, not decorative/);
   assert.match(manifestSkill.body, /Do not add `catalog\.capabilities`/);
-  assert.match(manifestSkill.body, /`platformCapabilities` are informative runtime declarations/);
+  assert.match(manifestSkill.body, /`platformCapabilities` are runtime declarations/);
+  assert.match(manifestSkill.body, /After changing manifest runtime wiring/);
   assert.match(manifestSkill.body, /platformCapabilities\.speechToText[\s\S]*authorized realtime transcription workflow/);
   assert.match(manifestSkill.body, /platformCapabilities\.textToSpeech[\s\S]*explicit text, model, and voice/);
   const speechSkill = templates.find((template) => template.id === 'forger-speech-to-text');
   assert.ok(speechSkill);
+  assert.match(speechSkill.body, /platformCapabilities\.speechToText/);
   assert.match(speechSkill.body, /forger_speech_to_text_status/);
   assert.match(speechSkill.body, /realtime/);
   assert.match(speechSkill.body, /files explicitly shared/);
   assert.match(speechSkill.body, /not permission to capture audio on your own/);
   const ttsSkill = templates.find((template) => template.id === 'forger-text-to-speech');
   assert.ok(ttsSkill);
+  assert.match(ttsSkill.body, /platformCapabilities\.textToSpeech/);
   assert.match(ttsSkill.body, /forger_text_to_speech_voices/);
   assert.match(ttsSkill.body, /text`, `model`, and `voice`/);
   assert.match(ttsSkill.body, /voice defines the language and locale/);

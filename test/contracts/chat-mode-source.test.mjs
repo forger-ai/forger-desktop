@@ -52,6 +52,16 @@ test('chat history drawer orders conversations and groups by recent activity', a
   assert.match(source, /items: sortHistoryItemsByRecentActivity\(freeChatItems\)/);
 });
 
+test('chat locks provider for active conversations but keeps model and effort editable', async () => {
+  const source = await readSource('src/renderer/views/ChatView.tsx');
+
+  assert.match(source, /disabled=\{providerLocked \|\| isSending \|\| providerOptions\.length === 0\}/);
+  assert.match(source, /disabled=\{isSending \|\| activeModelOptions\.length <= 1\}/);
+  assert.match(source, /disabled=\{isSending\}/);
+  assert.doesNotMatch(source, /disabled=\{providerLocked \|\| isSending \|\| activeModelOptions\.length <= 1\}/);
+  assert.doesNotMatch(source, /disabled=\{providerLocked \|\| isSending\}/);
+});
+
 test('product docs stay as a skill, not a chat-mode injection', async () => {
   const freeChatStart = await readSource('src/main/prompt-builder/prompts/chat/free-chat-start.md');
   const createMode = await readSource('src/main/prompt-builder/prompts/partials/chat-modes/create-app.md');

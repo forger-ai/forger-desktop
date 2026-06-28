@@ -37,6 +37,7 @@ import type {
   CallOfficialToolInput,
   CallOfficialToolResult,
   OfficialToolSummary,
+  PersonalAgent,
 } from '../../shared/types';
 import type {
   AppManifest,
@@ -249,6 +250,10 @@ interface MainLifecycleDeps {
   getLegacyForgerMetadataRoot: () => string;
   getMemoryStore: () => { list: AsyncFn; create: AsyncFn; update: AsyncFn; delete: AsyncFn };
   getPersonalAgentHeartbeat: AsyncFn;
+  getPersonalAgentStore: () => {
+    requireAgent: (agentId: string) => Promise<PersonalAgent>;
+    updateAgentPermissions: (input: { agentId: string; appIds?: string[] }) => Promise<PersonalAgent>;
+  };
   getOfficialToolsService: () => NonNullable<MainLifecycleState['officialToolsService']>;
   getSpeechToTextService: () => NonNullable<MainLifecycleState['speechToTextService']>;
   getTextToSpeechService: () => NonNullable<MainLifecycleState['textToSpeechService']>;
@@ -394,6 +399,7 @@ export const registerMainLifecycle = (deps: unknown) => {
     getLegacyForgerMetadataRoot,
     getMemoryStore,
     getPersonalAgentHeartbeat,
+    getPersonalAgentStore,
     getOfficialToolsService,
     getSpeechToTextService,
     getTextToSpeechService,
@@ -751,6 +757,36 @@ export const registerMainLifecycle = (deps: unknown) => {
         .filter((summary) => summary.updateAvailable);
     },
     createLocalApp: createLocalAppFromSkeleton,
+    addAppToPersonalAgent: async ({ agentId, appId }: { agentId: string; appId: string }) => {
+      const record = state.registry.apps[appId];
+      if (!record) {
+        return {
+          success: false,
+          appId,
+          alreadyGranted: false,
+          userMessage: 'La app no esta instalada en Forger.',
+          technicalCode: 'personal_agent_app_not_installed',
+        };
+      }
+      const store = getPersonalAgentStore();
+      const agent = await store.requireAgent(agentId);
+      const nextAppIds = [...new Set([...agent.appIds, appId])];
+      if (nextAppIds.length === agent.appIds.length) {
+        return {
+          success: true,
+          appId,
+          alreadyGranted: true,
+          userMessage: 'El agente ya tenia acceso a esta app.',
+        };
+      }
+      await store.updateAgentPermissions({ agentId, appIds: nextAppIds });
+      return {
+        success: true,
+        appId,
+        alreadyGranted: false,
+        userMessage: 'La app quedo agregada al agente. Sus herramientas estaran disponibles en proximas ejecuciones.',
+      };
+    },
     finishSocialAppInstall,
     deleteQuarantinedSocialApp,
     recordCreatedApp: (runId: string, createdApp: ChatCreatedAppRequest) => state.chatOrchestrator?.recordCreatedAppFromMcp(runId, createdApp),

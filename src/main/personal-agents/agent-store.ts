@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import type { AgentPermissionMode, AgentToolId, PersonalAgent, PersonalAgentConversation, PersonalAgentConversationStatus, PersonalAgentCreateInput, PersonalAgentHeartbeatSummary, PersonalAgentJournalEntry, PersonalAgentMemory, PersonalAgentMessage, PersonalAgentMessageKind, PersonalAgentMessageRole, PersonalAgentPermission, PersonalAgentRun, PersonalAgentRunProgress, PersonalAgentRunStatus, PersonalAgentUpdatePermissionsInput, PersonalAgentWorkspaceEntry, PersonalAgentWorkspaceFile } from '../../shared/types';
+import type { AgentPermissionMode, AgentProvider, AgentRuntime, AgentToolId, PersonalAgent, PersonalAgentConversation, PersonalAgentConversationStatus, PersonalAgentCreateInput, PersonalAgentHeartbeatSummary, PersonalAgentJournalEntry, PersonalAgentMemory, PersonalAgentMessage, PersonalAgentMessageKind, PersonalAgentMessageRole, PersonalAgentPermission, PersonalAgentRun, PersonalAgentRunProgress, PersonalAgentRunStatus, PersonalAgentUpdatePermissionsInput, PersonalAgentWorkspaceEntry, PersonalAgentWorkspaceFile } from '../../shared/types';
+import { buildGlobalSkillTemplates } from '../prompt-builder/official-tools';
 import { buildPersonalAgentWorkspaceDocuments } from '../prompt-builder/personal-agents';
+import { forgerSkillRoots, writeSkillTemplates } from '../prompt-builder/skill-template-writer';
 import { openPersonalAgentSqliteDatabase, type SqliteDatabase } from './sqlite';
 
 interface AgentStoreOptions {
@@ -18,6 +20,9 @@ interface AgentRow {
   instructions: string;
   permission_mode: string;
   network_access: number;
+  runtime_provider?: string | null;
+  runtime_model?: string | null;
+  runtime_effort?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -40,6 +45,7 @@ interface ConversationRow {
   title: string;
   status: string;
   provider_thread_id?: string | null;
+  provider?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -152,14 +158,15 @@ export class AgentStore {
       instructions: sanitizeText(input.instructions, MAX_TEXT_LENGTH),
       permissionMode: normalizePermissionMode(input.permissionMode),
       networkAccess: input.networkAccess === true,
+      ...(normalizeAgentRuntime(input.runtime) ? { runtime: normalizeAgentRuntime(input.runtime) as AgentRuntime } : {}),
       appIds: normalizeGrantTargets(input.appIds),
       toolIds: normalizeToolGrantTargets(input.toolIds),
       createdAt: now,
       updatedAt: now,
     };
     this.requireDb().prepare(`
-      INSERT INTO personal_agents (id, name, description, purpose, instructions, permission_mode, network_access, created_at, updated_at)
-      VALUES (@id, @name, @description, @purpose, @instructions, @permissionMode, @networkAccess, @createdAt, @updatedAt)
+      INSERT INTO personal_agents (id, name, description, purpose, instructions, permission_mode, network_access, runtime_provider, runtime_model, runtime_effort, created_at, updated_at)
+      VALUES (@id, @name, @description, @purpose, @instructions, @permissionMode, @networkAccess, @runtimeProvider, @runtimeModel, @runtimeEffort, @createdAt, @updatedAt)
     `).run({
       id: agent.id,
       name: agent.name,
@@ -168,6 +175,9 @@ export class AgentStore {
       instructions: agent.instructions,
       permissionMode: agent.permissionMode,
       networkAccess: agent.networkAccess ? 1 : 0,
+      runtimeProvider: agent.runtime?.provider ?? null,
+      runtimeModel: agent.runtime?.model ?? null,
+      runtimeEffort: agent.runtime?.effort ?? null,
       createdAt: agent.createdAt,
       updatedAt: agent.updatedAt,
     });
@@ -211,11 +221,12 @@ export class AgentStore {
     const now = new Date().toISOString();
     const permissionMode = normalizePermissionMode(input.permissionMode ?? agent.permissionMode);
     const networkAccess = typeof input.networkAccess === 'boolean' ? input.networkAccess : agent.networkAccess;
+    const runtime = 'runtime' in input ? normalizeAgentRuntime(input.runtime) : agent.runtime;
     this.requireDb().prepare(`
       UPDATE personal_agents
-      SET permission_mode = ?, network_access = ?, updated_at = ?
+      SET permission_mode = ?, network_access = ?, runtime_provider = ?, runtime_model = ?, runtime_effort = ?, updated_at = ?
       WHERE id = ?
-    `).run(permissionMode, networkAccess ? 1 : 0, now, agent.id);
+    `).run(permissionMode, networkAccess ? 1 : 0, runtime?.provider ?? null, runtime?.model ?? null, runtime?.effort ?? null, now, agent.id);
     await this.upsertPermission({
       agentId: agent.id,
       kind: 'legacy',
@@ -284,6 +295,19 @@ export class AgentStore {
       conversation.id,
     );
     return await this.requireConversation(conversation.id);
+  }
+
+  public async updateConversationProvider(input: { conversationId: string; provider: AgentProvider; providerThreadId?: string | null }): Promise<PersonalAgentConversation> {
+    await this.load();
+    const conversation = await this.requireConversation(input.conversationId);
+    const now = new Date().toISOString();
+    this.requireDb().prepare('UPDATE personal_agent_conversations SET provider = ?, provider_thread_id = ?, updated_at = ? WHERE id = ?').run(
+      input.provider,
+      input.providerThreadId ?? conversation.providerThreadId ?? null,
+      now,
+      input.conversationId,
+    );
+    return await this.requireConversation(input.conversationId);
   }
 
   public async listConversations(agentId: string): Promise<PersonalAgentConversation[]> {
@@ -674,6 +698,9 @@ export class AgentStore {
         instructions TEXT NOT NULL DEFAULT '',
         permission_mode TEXT NOT NULL DEFAULT 'safe',
         network_access INTEGER NOT NULL DEFAULT 0,
+        runtime_provider TEXT,
+        runtime_model TEXT,
+        runtime_effort TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
@@ -694,6 +721,7 @@ export class AgentStore {
         agent_id TEXT NOT NULL REFERENCES personal_agents(id) ON DELETE CASCADE,
         title TEXT NOT NULL,
         status TEXT NOT NULL DEFAULT 'active',
+        provider TEXT,
         provider_thread_id TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
@@ -746,6 +774,10 @@ export class AgentStore {
         created_at TEXT NOT NULL
       );
     `);
+    this.ensureColumn('personal_agents', 'runtime_provider', 'TEXT');
+    this.ensureColumn('personal_agents', 'runtime_model', 'TEXT');
+    this.ensureColumn('personal_agents', 'runtime_effort', 'TEXT');
+    this.ensureColumn('personal_agent_conversations', 'provider', 'TEXT');
     this.ensureColumn('personal_agent_conversations', 'provider_thread_id', 'TEXT');
     this.ensureColumn('personal_agent_messages', 'run_id', 'TEXT REFERENCES personal_agent_runs(id) ON DELETE SET NULL');
     this.ensureColumn('personal_agent_permissions', 'kind', "TEXT NOT NULL DEFAULT 'legacy'");
@@ -768,6 +800,10 @@ export class AgentStore {
   private async ensureWorkspace(agent: PersonalAgent): Promise<void> {
     const workspaceRoot = this.workspaceRoot(agent.id);
     await fs.mkdir(workspaceRoot, { recursive: true });
+    await Promise.all(
+      forgerSkillRoots(path, workspaceRoot).map((skillsRoot) =>
+        writeSkillTemplates({ fs, path }, skillsRoot, buildGlobalSkillTemplates())),
+    );
     const docs = buildPersonalAgentWorkspaceDocuments(agent);
     await Promise.all(
       Object.entries(docs).map(async ([filename, content]) => {
@@ -800,6 +836,11 @@ export class AgentStore {
   private agentFromRow(row: AgentRow): PersonalAgent {
     const appIds = this.grantsForAgent(row.id, 'app') as string[];
     const toolIds = this.grantsForAgent(row.id, 'tool') as AgentToolId[];
+    const runtime = normalizeAgentRuntime({
+      provider: row.runtime_provider,
+      model: row.runtime_model,
+      effort: row.runtime_effort,
+    });
     return {
       id: row.id,
       name: row.name,
@@ -808,6 +849,7 @@ export class AgentStore {
       instructions: row.instructions,
       permissionMode: normalizePermissionMode(row.permission_mode),
       networkAccess: row.network_access !== 0,
+      ...(runtime ? { runtime } : {}),
       appIds,
       toolIds,
       createdAt: row.created_at,
@@ -846,6 +888,7 @@ export class AgentStore {
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       ...(row.provider_thread_id ? { providerThreadId: row.provider_thread_id } : {}),
+      ...(normalizeAgentProvider(row.provider) ? { provider: normalizeAgentProvider(row.provider) } : {}),
       messages: this.messagesForConversation(row.id),
       ...(activeRun ? { activeRun } : {}),
     };
@@ -989,6 +1032,32 @@ const normalizeToolGrantTargets = (value: unknown): AgentToolId[] =>
     .filter((target) => !target.startsWith('forger_') && !target.startsWith('memory_')) as AgentToolId[];
 
 const normalizePermissionMode = (value: unknown): AgentPermissionMode => value === 'unsafe' ? 'unsafe' : 'safe';
+
+const normalizeAgentProvider = (value: unknown): AgentProvider | null => {
+  if (value === 'codex' || value === 'claude' || value === 'antigravity') {
+    return value;
+  }
+  return null;
+};
+
+const normalizeAgentRuntime = (value: unknown): AgentRuntime | undefined => {
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+  const input = value as { provider?: unknown; model?: unknown; effort?: unknown; permissionMode?: unknown };
+  const provider = normalizeAgentProvider(input.provider);
+  const model = sanitizeText(input.model, 160);
+  const effort = sanitizeText(input.effort, 40);
+  if (!provider || !model || !effort) {
+    return undefined;
+  }
+  return {
+    provider,
+    model,
+    effort: effort as AgentRuntime['effort'],
+    ...(input.permissionMode ? { permissionMode: normalizePermissionMode(input.permissionMode) } : {}),
+  };
+};
 
 const normalizeMessageRole = (value: unknown): PersonalAgentMessageRole => {
   if (value === 'assistant' || value === 'system') return value;

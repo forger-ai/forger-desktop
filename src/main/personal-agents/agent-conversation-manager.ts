@@ -17,6 +17,7 @@ interface PersonalAgentRunnerInput {
   agent: PersonalAgent;
   conversation: PersonalAgentConversation;
   run: PersonalAgentRun;
+  runtime?: AgentRuntime;
   prompt: string;
   workspaceRoot: string;
   onProgress: (message: string) => void;
@@ -100,6 +101,11 @@ export class AgentConversationManager {
     if (conversation.activeRun && !isTerminalRunStatus(conversation.activeRun.status)) {
       throw new Error('personal_agent_run_active');
     }
+    const agent = await this.options.store.requireAgent(conversation.agentId);
+    const runtime = await this.resolveRuntimeForAgent(agent);
+    if (runtime && conversation.provider && conversation.provider !== runtime.provider) {
+      throw new Error('personal_agent_provider_changed_new_conversation_required');
+    }
     const content = input.content.trim();
     if (!content) {
       throw new Error('personal_agent_message_required');
@@ -133,13 +139,25 @@ export class AgentConversationManager {
     this.emit({ type: 'run.started', conversation: await this.requireUpdatedConversation(conversationId), run });
 
     const agent = await this.options.store.requireAgent(conversation.agentId);
+    const runtime = await this.resolveRuntimeForAgent(agent);
+    if (runtime && conversation.provider && conversation.provider !== runtime.provider) {
+      throw new Error('personal_agent_provider_changed_new_conversation_required');
+    }
+    const conversationForRun = runtime
+      ? await this.options.store.updateConversationProvider({
+        conversationId: conversation.id,
+        provider: runtime.provider,
+        providerThreadId: conversation.provider === runtime.provider || !conversation.provider ? conversation.providerThreadId ?? null : null,
+      })
+      : conversation;
     const workspaceRoot = await this.options.store.workspaceRootForAgent(agent.id);
-    const prompt = await this.buildPrompt(agent, conversation, run);
+    const prompt = await this.buildPrompt(agent, conversationForRun, run);
     const progressWrites: Array<Promise<void>> = [];
     const result = await this.runPersonalAgent({
       agent,
-      conversation,
+      conversation: conversationForRun,
       run,
+      runtime,
       prompt,
       workspaceRoot,
       onProgress: (message) => {
@@ -228,9 +246,10 @@ export class AgentConversationManager {
     if (!this.options.getAgentRuntime || !this.options.metadataRoot || !this.options.codexHome) {
       throw new Error('personal_agent_runtime_unavailable');
     }
-    const runtime = await this.options.getAgentRuntime({
-      permissionMode: input.agent.permissionMode,
-    });
+    const runtime = input.runtime ?? await this.resolveRuntimeForAgent(input.agent);
+    if (!runtime) {
+      throw new Error('personal_agent_runtime_unavailable');
+    }
     if (runtime.provider === 'antigravity') {
       if (!(await (this.options.getAntigravityAuthenticated?.() ?? Promise.resolve(false)))) {
         throw new Error('antigravity_auth_missing');
@@ -367,8 +386,9 @@ export class AgentConversationManager {
       }
       if (result.threadId) {
         input.conversation.providerThreadId = result.threadId;
-        await this.options.store.updateConversationProviderThread({
+        await this.options.store.updateConversationProvider({
           conversationId: input.conversation.id,
+          provider: runtime.provider,
           providerThreadId: result.threadId,
         });
       }
@@ -380,6 +400,17 @@ export class AgentConversationManager {
       }
       this.options.releaseAppMcps?.(input.run.id);
     }
+  }
+
+  private async resolveRuntimeForAgent(agent: PersonalAgent): Promise<AgentRuntime | undefined> {
+    if (!this.options.getAgentRuntime) {
+      return agent.runtime;
+    }
+    return await this.options.getAgentRuntime({
+      ...(agent.runtime ?? {}),
+      permissionMode: agent.permissionMode,
+      strict: Boolean(agent.runtime),
+    });
   }
 
   private handleProviderOutput(

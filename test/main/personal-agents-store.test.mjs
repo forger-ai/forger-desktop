@@ -42,7 +42,16 @@ test('personal agent store creates SQLite-backed agents with safe defaults and p
 
   const workspaceRoot = path.join(forgerHomeRoot, 'agents', agent.id, 'workspace');
   const workspaceFiles = await readdir(workspaceRoot);
-  assert.deepEqual(workspaceFiles.sort(), ['AGENTS.md', 'HOW.md', 'HUMAN.md', 'WHO.md', 'WHY.md']);
+  assert.deepEqual(workspaceFiles.sort(), ['.agents', '.claude', 'AGENTS.md', 'HOW.md', 'HUMAN.md', 'WHO.md', 'WHY.md']);
+  const agentSkillDirs = (await readdir(path.join(workspaceRoot, '.agents', 'skills'))).sort();
+  const claudeSkillDirs = (await readdir(path.join(workspaceRoot, '.claude', 'skills'))).sort();
+  assert.ok(agentSkillDirs.includes('forger-context'));
+  assert.ok(agentSkillDirs.includes('forger-installed-app-change'));
+  assert.ok(agentSkillDirs.includes('forger-manifest-authoring'));
+  assert.ok(agentSkillDirs.includes('forger-speech-to-text'));
+  assert.deepEqual(claudeSkillDirs, agentSkillDirs);
+  assert.equal(agentSkillDirs.includes('forger-app-official-tools'), false);
+  assert.equal(agentSkillDirs.includes('load-movements'), false);
   const agentsMd = await readFile(path.join(workspaceRoot, 'AGENTS.md'), 'utf8');
   const whoMd = await readFile(path.join(workspaceRoot, 'WHO.md'), 'utf8');
   const whyMd = await readFile(path.join(workspaceRoot, 'WHY.md'), 'utf8');
@@ -132,6 +141,172 @@ test('personal agent grants persist as explicit app and tool permissions', async
   assert.deepEqual(persisted.toolIds, ['whatsapp.read_messages']);
   assert.deepEqual(await reloaded.deleteAgent(agent.id), { success: true });
   assert.deepEqual(await reloaded.listPermissions(agent.id), []);
+});
+
+test('personal agent runtime persists and conversations are bound to provider continuity', async () => {
+  const metadataRoot = await mkdtemp(path.join(tmpdir(), 'forger-personal-agents-runtime-meta-'));
+  const forgerHomeRoot = await mkdtemp(path.join(tmpdir(), 'forger-personal-agents-runtime-home-'));
+  const store = new AgentStore({ metadataRoot, forgerHomeRoot });
+  const runtimeRequests = [];
+  const runnerInputs = [];
+  const manager = new AgentConversationManager({
+    store,
+    metadataRoot,
+    codexHome: path.join(metadataRoot, 'codex-home'),
+    getAgentRuntime: async (request) => {
+      runtimeRequests.push(request);
+      return {
+        provider: request?.provider ?? 'codex',
+        model: request?.model ?? 'gpt-5.2',
+        effort: request?.effort ?? 'medium',
+        permissionMode: request?.permissionMode ?? 'safe',
+      };
+    },
+    runner: async (input) => {
+      runnerInputs.push({ runtime: input.runtime, provider: input.conversation.provider });
+      return { assistantText: `Ran ${input.runtime.provider}` };
+    },
+  });
+
+  const agent = await store.createAgent({
+    name: 'Runtime agent',
+    runtime: { provider: 'codex', model: 'gpt-5.4', effort: 'high' },
+  });
+  assert.deepEqual(agent.runtime, { provider: 'codex', model: 'gpt-5.4', effort: 'high' });
+
+  const reloaded = new AgentStore({ metadataRoot, forgerHomeRoot });
+  assert.deepEqual((await reloaded.requireAgent(agent.id)).runtime, agent.runtime);
+
+  const conversation = await manager.startConversation({
+    agentId: agent.id,
+    title: 'Runtime thread',
+    initialMessage: 'Start.',
+  });
+  const completed = await waitForConversation(manager, conversation.id, (item) => item.activeRun?.status === 'completed');
+  assert.equal(completed.provider, 'codex');
+  assert.equal(runnerInputs[0].provider, 'codex');
+  assert.deepEqual(runnerInputs[0].runtime, { provider: 'codex', model: 'gpt-5.4', effort: 'high', permissionMode: 'safe' });
+  assert.deepEqual(runtimeRequests[0], { provider: 'codex', model: 'gpt-5.4', effort: 'high', permissionMode: 'safe', strict: true });
+
+  await store.updateAgentPermissions({
+    agentId: agent.id,
+    runtime: { provider: 'codex', model: 'gpt-5.2', effort: 'medium' },
+  });
+  await manager.sendMessage({ conversationId: conversation.id, content: 'Continue with another model.' });
+  const continued = await waitForConversation(manager, conversation.id, (item) =>
+    item.activeRun?.status === 'completed' && item.messages.at(-1)?.content === 'Ran codex' && item.messages.length >= 4);
+  assert.equal(continued.provider, 'codex');
+
+  await store.updateAgentPermissions({
+    agentId: agent.id,
+    runtime: { provider: 'claude', model: 'claude-sonnet-4-6', effort: 'medium' },
+  });
+  await assert.rejects(
+    manager.sendMessage({ conversationId: conversation.id, content: 'Continue on Claude.' }),
+    /personal_agent_provider_changed_new_conversation_required/,
+  );
+});
+
+test('legacy personal agent databases migrate runtime and provider columns without breaking reads', async () => {
+  const metadataRoot = await mkdtemp(path.join(tmpdir(), 'forger-personal-agents-runtime-migrate-meta-'));
+  const forgerHomeRoot = await mkdtemp(path.join(tmpdir(), 'forger-personal-agents-runtime-migrate-home-'));
+  const sqlitePath = path.join(metadataRoot, 'personal-agents.sqlite');
+  const db = openPersonalAgentSqliteDatabase(sqlitePath);
+  db.exec(`
+    CREATE TABLE personal_agents (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      purpose TEXT NOT NULL DEFAULT '',
+      instructions TEXT NOT NULL DEFAULT '',
+      permission_mode TEXT NOT NULL DEFAULT 'safe',
+      network_access INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE personal_agent_permissions (
+      id TEXT PRIMARY KEY,
+      agent_id TEXT NOT NULL,
+      permission TEXT NOT NULL,
+      mode TEXT NOT NULL DEFAULT 'safe',
+      granted INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE personal_agent_conversations (
+      id TEXT PRIMARY KEY,
+      agent_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'active',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE personal_agent_messages (
+      id TEXT PRIMARY KEY,
+      agent_id TEXT NOT NULL,
+      conversation_id TEXT NOT NULL,
+      role TEXT NOT NULL,
+      kind TEXT NOT NULL DEFAULT 'message',
+      content TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE personal_agent_runs (
+      id TEXT PRIMARY KEY,
+      agent_id TEXT NOT NULL,
+      conversation_id TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'queued',
+      error TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE personal_agent_run_progress (
+      id TEXT PRIMARY KEY,
+      agent_id TEXT NOT NULL,
+      conversation_id TEXT NOT NULL,
+      run_id TEXT NOT NULL,
+      message TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE personal_agent_memories (
+      id TEXT PRIMARY KEY,
+      agent_id TEXT NOT NULL,
+      remember_when TEXT NOT NULL DEFAULT '',
+      title TEXT NOT NULL,
+      content TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE personal_agent_journal_entries (
+      id TEXT PRIMARY KEY,
+      agent_id TEXT NOT NULL,
+      conversation_id TEXT,
+      body TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+  `);
+  const now = new Date().toISOString();
+  db.prepare('INSERT INTO personal_agents (id, name, description, purpose, instructions, permission_mode, network_access, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
+    'agent-legacy',
+    'Legacy agent',
+    '',
+    '',
+    '',
+    'safe',
+    0,
+    now,
+    now,
+  );
+  db.close?.();
+
+  const store = new AgentStore({ metadataRoot, forgerHomeRoot });
+  const agent = await store.requireAgent('agent-legacy');
+  assert.equal(agent.name, 'Legacy agent');
+  assert.equal(agent.runtime, undefined);
+  const updated = await store.updateAgentPermissions({
+    agentId: agent.id,
+    runtime: { provider: 'antigravity', model: 'gemini-3-pro', effort: 'medium' },
+  });
+  assert.deepEqual(updated.runtime, { provider: 'antigravity', model: 'gemini-3-pro', effort: 'medium' });
 });
 
 test('personal agent store migrates legacy permission rows before querying grant columns', async () => {
