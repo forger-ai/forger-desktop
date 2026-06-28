@@ -483,7 +483,6 @@ export function AgentsView({ t, intelligenceProviderConfigured }: AgentsViewProp
       const started = await window.forger.personalAgentStartConversation({
         agentId: activeAgent.id,
         title: activeAgent.name,
-        initialMessage: t.agents.firstConversationMessage,
       });
       setConversation(started);
       setConversations((current) => upsertConversation(current, started));

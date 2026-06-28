@@ -103,6 +103,8 @@ test('renderer has an Agents view that can list, create, delete, inspect, start,
   assert.match(agentsViewSource, /llmRequired/);
   assert.doesNotMatch(agentsViewSource, /workspaceTitle/);
   assert.doesNotMatch(agentsViewSource, /t\.agents\.person|t\.agents\.agent/);
+  assert.doesNotMatch(agentsViewSource, /firstConversationMessage/);
+  assert.doesNotMatch(agentsViewSource, /initialMessage:\s*t\.agents\.firstConversationMessage/);
   assert.match(agentsViewSource, /permissionLevel/);
   assert.match(agentsViewSource, /runtimeProvider/);
   assert.match(agentsViewSource, /runtimeModel/);

@@ -181,7 +181,6 @@ export const en = {
     chatSubtitle: 'Agent conversations',
     noMessages: 'Start a conversation to see messages.',
     firstRunLoading: 'Starting the agent...',
-    firstConversationMessage: 'Start conversation.',
     runReady: 'Ready',
     runQueued: 'Starting',
     runStarting: 'Starting',

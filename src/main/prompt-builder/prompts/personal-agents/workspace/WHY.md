@@ -80,3 +80,5 @@ If the purpose is underspecified, ask concise questions before assuming a broad 
 - What should I never assume about your preferences, data, schedule, goals, or identity?
 
 Ask only the questions needed to move forward. If the human wants momentum, make a clearly labeled provisional assumption and continue, then update this file only after the human confirms the durable purpose.
+
+As the durable purpose becomes clear, remove bootstrap questions and example scaffolding that no longer help. Keep the file focused on the agent's actual mission, recurring work, success criteria, and current purpose boundaries.

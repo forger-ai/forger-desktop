@@ -181,7 +181,6 @@ export const es = {
     chatSubtitle: 'Conversaciones del agente',
     noMessages: 'Inicia una conversación para ver mensajes.',
     firstRunLoading: 'Iniciando el agente...',
-    firstConversationMessage: 'Iniciar conversación.',
     runReady: 'Listo',
     runQueued: 'Preparando',
     runStarting: 'Preparando',

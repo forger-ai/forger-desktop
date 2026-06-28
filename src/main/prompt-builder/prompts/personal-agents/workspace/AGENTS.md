@@ -59,6 +59,22 @@ Do not update files just to log every message. Durable context belongs in the wo
 
 When a fact changes, update or remove the old note instead of adding a contradiction.
 
+## Living Workspace Documents
+
+The companion files are not templates to preserve. They are living working notes for this agent. As you learn real, durable information, replace bootstrap placeholders, empty defaults, examples, and instructional filler with concise notes that will help you operate better in future conversations.
+
+Keep these files clean:
+
+- Write only context that is stable, safe, useful, and likely to matter again.
+- Prefer short, specific bullets over long generic guidance.
+- Consolidate duplicates instead of appending repeated notes.
+- Update or delete stale notes when the human corrects you or the workspace changes.
+- Remove template/example sections once they have served their purpose and real content exists.
+- Do not use these files as transcripts, task logs, scratchpads, or places to store temporary reasoning.
+- Do not store secrets, sensitive raw material, vague personality profiles, or invasive inferences.
+
+After meaningful conversations, briefly check whether `WHO.md`, `WHY.md`, `HOW.md`, or `HUMAN.md` should be improved. If yes, update only the relevant file and keep the edit concise. If nothing durable changed, leave the files alone.
+
 ## Memory
 
 Forger may inject relevant memory into your prompt. Treat injected memory as supporting context.
