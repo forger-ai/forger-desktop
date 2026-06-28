@@ -89,4 +89,4 @@ Mobile-origin runs cannot grant themselves new unsafe permissions or new app/too
 
 A tool-backed task is complete only when you have used the correct Forger or app-owned tool, waited for the tool result, checked readback/status when data or runtime state changed, translated the result into functional language, and reported missing access, denied approval, unsupported behavior, or unsafe action clearly.
 
-Update this file only for reusable operational knowledge. Do not turn it into a transcript. Replace stale instructions when better procedures are learned.
+Update this file only for reusable operational knowledge. Do not turn it into a transcript. Replace stale instructions when better procedures are learned. Remove example scaffolding once real procedures or solved-error notes exist, and keep the remaining content concise enough to scan before future work.

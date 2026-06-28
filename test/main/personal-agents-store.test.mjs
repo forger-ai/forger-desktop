@@ -62,10 +62,17 @@ test('personal agent store creates SQLite-backed agents with safe defaults and p
   assert.match(agentsMd, /WHY\.md/);
   assert.match(agentsMd, /HOW\.md/);
   assert.match(agentsMd, /HUMAN\.md/);
+  assert.match(agentsMd, /The companion files are not templates to preserve/);
+  assert.match(agentsMd, /replace bootstrap placeholders, empty defaults, examples, and instructional filler with concise notes/);
+  assert.match(agentsMd, /Remove template\/example sections once they have served their purpose and real content exists/);
   assert.match(whoMd, /Research partner/);
   assert.match(whyMd, /Keep research threads organized/);
+  assert.match(whoMd, /not a preserved template/);
+  assert.match(whyMd, /remove bootstrap questions and example scaffolding/);
   assert.match(howMd, /does not grant tools/);
+  assert.match(howMd, /Remove example scaffolding once real procedures or solved-error notes exist/);
   assert.match(humanMd, /not a private dossier/);
+  assert.match(humanMd, /remove placeholder text and keep only concise notes/);
   await writeFile(path.join(workspaceRoot, 'notes.txt'), 'Visible note.', 'utf8');
   const workspaceTree = await store.listWorkspace(agent.id);
   assert.deepEqual(
@@ -387,7 +394,7 @@ test('personal agent workspace bootstrap happens on create and requireAgent does
   assert.equal(await readFile(path.join(workspaceRoot, 'HUMAN.md'), 'utf8'), '# HUMAN\n\nThe human prefers terse review notes.\n');
 });
 
-test('personal agent first run preserves localized start message and records provider auth failures', async () => {
+test('personal agent UI start creates a blank conversation without sending a synthetic turn', async () => {
   const metadataRoot = await mkdtemp(path.join(tmpdir(), 'forger-personal-agent-auth-meta-'));
   const forgerHomeRoot = await mkdtemp(path.join(tmpdir(), 'forger-personal-agent-auth-home-'));
   const store = new AgentStore({ metadataRoot, forgerHomeRoot });
@@ -411,18 +418,13 @@ test('personal agent first run preserves localized start message and records pro
   const conversation = await manager.startConversation({
     agentId: agent.id,
     title: 'Auth chat',
-    initialMessage: 'Iniciar conversación.',
   });
 
-  assert.equal(conversation.messages.length, 1);
-  assert.equal(conversation.messages[0].role, 'user');
-  assert.equal(conversation.messages[0].content, 'Iniciar conversación.');
-  assert.equal(conversation.activeRun.status, 'queued');
-
-  const failed = await waitForConversation(manager, conversation.id, (item) => item.activeRun?.status === 'failed');
-  assert.equal(failed.messages.length, 1);
-  assert.equal(failed.messages[0].content, 'Iniciar conversación.');
-  assert.equal(failed.activeRun.error, 'codex_auth_missing');
+  assert.equal(conversation.messages.length, 0);
+  assert.equal(conversation.activeRun, undefined);
+  const persisted = await manager.getConversation(conversation.id);
+  assert.equal(persisted.messages.length, 0);
+  assert.equal(persisted.activeRun, undefined);
   assert.equal(await readFile(path.join(workspaceRoot, 'AGENTS.md'), 'utf8'), agentsMdBefore);
 });
 

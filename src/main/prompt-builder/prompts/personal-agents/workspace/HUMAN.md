@@ -63,6 +63,6 @@ When the human asks you to forget something, remove or update the relevant note 
 
 No durable human profile has been confirmed yet.
 
-Replace this line when the human provides stable, useful context.
+Replace this line when the human provides stable, useful context. As real context appears, remove placeholder text and keep only concise notes the agent can safely reuse.
 
 Use this file to choose tone, defaults, and level of detail. Do not use it as proof of current facts. Before changing files, touching data, or making claims about current behavior, inspect the real workspace, tool result, app state, or user instruction.
