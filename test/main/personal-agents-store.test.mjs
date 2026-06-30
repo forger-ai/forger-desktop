@@ -115,37 +115,43 @@ test('personal agent grants persist as explicit app and tool permissions', async
     name: 'Ops agent',
     networkAccess: true,
     appIds: ['finance-os', 'finance-os', '../bad'],
-    toolIds: ['gmail.search_messages', 'gmail.search_messages', 'forger_open_app'],
+    toolIds: ['gmail.search_messages', 'gmail.search_messages', 'forger_chrome_extension.navigate', '../bad'],
   });
 
   assert.equal(agent.networkAccess, true);
   assert.deepEqual(agent.appIds, ['finance-os']);
-  assert.deepEqual(agent.toolIds, ['gmail.search_messages']);
+  assert.deepEqual([...agent.toolIds].sort(), ['forger_chrome_extension.navigate', 'gmail.search_messages']);
 
   const updated = await store.updateAgentPermissions({
     agentId: agent.id,
     permissionMode: 'unsafe',
     networkAccess: false,
     appIds: ['focus'],
-    toolIds: ['whatsapp.read_messages', 'memory_list'],
+    toolIds: ['whatsapp.read_messages', 'memory_list', 'forger_chrome_extension.get_html'],
   });
   assert.equal(updated.permissionMode, 'unsafe');
   assert.equal(updated.networkAccess, false);
   assert.deepEqual(updated.appIds, ['focus']);
-  assert.deepEqual(updated.toolIds, ['whatsapp.read_messages']);
+  assert.deepEqual([...updated.toolIds].sort(), ['forger_chrome_extension.get_html', 'memory_list', 'whatsapp.read_messages']);
 
   const permissions = await store.listPermissions(agent.id);
   assert.deepEqual(
     permissions
       .filter((permission) => permission.kind !== 'legacy')
-      .map((permission) => [permission.kind, permission.targetId, permission.granted]),
-    [['app', 'focus', true], ['tool', 'whatsapp.read_messages', true]],
+      .map((permission) => [permission.kind, permission.targetId, permission.granted])
+      .sort((left, right) => String(left[1]).localeCompare(String(right[1]))),
+    [
+      ['app', 'focus', true],
+      ['tool', 'forger_chrome_extension.get_html', true],
+      ['tool', 'memory_list', true],
+      ['tool', 'whatsapp.read_messages', true],
+    ],
   );
 
   const reloaded = new AgentStore({ metadataRoot, forgerHomeRoot });
   const [persisted] = await reloaded.listAgents();
   assert.deepEqual(persisted.appIds, ['focus']);
-  assert.deepEqual(persisted.toolIds, ['whatsapp.read_messages']);
+  assert.deepEqual([...persisted.toolIds].sort(), ['forger_chrome_extension.get_html', 'memory_list', 'whatsapp.read_messages']);
   assert.deepEqual(await reloaded.deleteAgent(agent.id), { success: true });
   assert.deepEqual(await reloaded.listPermissions(agent.id), []);
 });

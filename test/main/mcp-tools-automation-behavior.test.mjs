@@ -264,7 +264,7 @@ const createForgerMcpHarness = async (overrides = {}) => {
     appendInstallLog: async (event, payload) => logs.push({ event, payload }),
     requestPermission: overrides.requestPermission ?? (() => null),
     listCatalog: async () => [{ id: 'finance-os', name: 'Finance OS' }],
-    listInstalledApps: () => [{ id: 'finance-os', name: 'Finance OS', status: 'installed', description: 'Finanzas' }],
+    listInstalledApps: () => [{ id: 'finance-os', name: 'Finance OS', status: 'installed', description: 'Finanzas', path: '/Users/test/Forger/apps/finance-os' }],
     checkUpdates: async () => [{ id: 'finance-os', name: 'Finance OS', status: 'update_available', description: 'Finanzas' }],
     createLocalApp: async (input, locale) => ({ success: true, userMessage: 'Creada.', app: { appId: 'created-app', ...input }, locale }),
     recordCreatedApp: overrides.recordCreatedApp ?? (() => undefined),
@@ -1095,7 +1095,7 @@ test('Forger MCP app-agent sessions filter Gmail tools and return validation fai
     appendInstallLog: async (event, payload) => logs.push({ event, payload }),
     requestPermission: () => null,
     listCatalog: async () => [],
-    listInstalledApps: () => [{ id: 'finance-os', name: 'Finance OS', status: 'installed', description: 'Finanzas' }],
+    listInstalledApps: () => [{ id: 'finance-os', name: 'Finance OS', status: 'installed', description: 'Finanzas', path: '/Users/test/Forger/apps/finance-os' }],
     checkUpdates: async () => [],
     getRuntimeStatus: () => ({ status: 'stopped' }),
     openApp: async () => ({ success: true }),
@@ -1490,6 +1490,7 @@ test('Forger MCP tools cover approvals, memory failures, app operations, and pro
     })).json());
     assert.equal(catalog.apps.length, 1);
     assert.equal(installed.apps.length, 1);
+    assert.equal(installed.apps[0].path, '/Users/test/Forger/apps/finance-os');
     assert.equal(updates.updates.length, 1);
     assert.equal(createdApp.success, true);
     assert.equal(createdApp.app.appId, 'created-app');

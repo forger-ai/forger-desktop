@@ -284,6 +284,61 @@ test('main IPC external link handlers reject unsafe URLs and return diagnostics 
   });
 });
 
+test('personal agent IPC filters grants to installed apps and existing official tool actions', async () => {
+  const createInputs = [];
+  const updateInputs = [];
+  const { handlers, IPC_CHANNELS } = await createDeps({
+    getOfficialToolsService: () => ({
+      activate: async () => ({}),
+      callFromApp: async () => ({}),
+      configure: async () => ({}),
+      deactivate: async () => ({}),
+      getInstallGate: async () => null,
+      list: async () => ({
+        tools: [
+          { id: 'gmail', actions: [{ id: 'gmail.search_messages' }] },
+          { id: 'forger_chrome_extension', actions: [{ id: 'forger_chrome_extension.navigate' }] },
+        ],
+      }),
+      listToolsForApp: async () => [],
+      refresh: async () => ({ tools: [] }),
+      setAppToolGrant: async () => null,
+    }),
+    getPersonalAgentStore: () => ({
+      createAgent: async (input) => {
+        createInputs.push(input);
+        return { id: 'agent-1', ...input };
+      },
+      updateAgentPermissions: async (input) => {
+        updateInputs.push(input);
+        return { id: input.agentId, ...input };
+      },
+    }),
+    registry: {
+      apps: {
+        'finance-os': { appId: 'finance-os', name: 'Finance OS' },
+      },
+    },
+    toAppSummary: (record) => ({ id: record.appId, name: record.name, status: 'installed' }),
+  });
+
+  await handlers.get(IPC_CHANNELS.personalAgentsCreate)(null, {
+    name: 'Ops',
+    appIds: ['finance-os', 'missing-app'],
+    toolIds: ['gmail.search_messages', 'forger_chrome_extension.navigate', 'missing.tool'],
+  });
+  await handlers.get(IPC_CHANNELS.personalAgentUpdatePermissions)(null, {
+    agentId: 'agent-1',
+    appIds: ['missing-app', 'finance-os'],
+    toolIds: ['missing.tool', 'forger_chrome_extension.navigate'],
+  });
+
+  assert.deepEqual(createInputs[0].appIds, ['finance-os']);
+  assert.deepEqual(createInputs[0].toolIds, ['gmail.search_messages', 'forger_chrome_extension.navigate']);
+  assert.deepEqual(updateInputs[0].appIds, ['finance-os']);
+  assert.deepEqual(updateInputs[0].toolIds, ['forger_chrome_extension.navigate']);
+});
+
 test('main IPC app-scoped handlers enforce app-window authorization before exposing app capabilities', async () => {
   const { handlers, IPC_CHANNELS } = await createDeps();
 
