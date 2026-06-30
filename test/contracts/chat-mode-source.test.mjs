@@ -85,6 +85,16 @@ test('create app mode tells agents to inspect local and online shadcn components
   assert.match(createMode, /Do not assume the local workspace is the complete component catalog/);
 });
 
+test('create and edit app modes require frontend patterns skill before visual changes', async () => {
+  const createMode = await readSource('src/main/prompt-builder/prompts/partials/chat-modes/create-app.md');
+  const editMode = await readSource('src/main/prompt-builder/prompts/partials/chat-modes/edit-app.md');
+
+  assert.match(createMode, /forger-frontend-patterns/);
+  assert.match(createMode, /before building or changing visual UI, layout, routing, interactions, mobile behavior, or frontend UX/);
+  assert.match(editMode, /forger-frontend-patterns/);
+  assert.match(editMode, /before proposing or implementing visual changes/);
+});
+
 test('renderer separates installed Apps from curated Catalog in navigation and content', async () => {
   const sidebarSource = await readSource('src/renderer/components/Sidebar.tsx');
   const settingsSource = await readSource('src/renderer/views/SettingsView.tsx');

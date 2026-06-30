@@ -1048,6 +1048,7 @@ test('main lifecycle service option callbacks cover catalog, memory, tools, MCP 
   state.registry.apps['finance-os'] = {
     appId: 'finance-os',
     name: 'Finance OS',
+    installDir: '/Users/test/Forger/apps/finance-os',
     requiredNodeVersion: '20',
     requiredPythonVersion: '3.11',
     updateAvailable: true,
@@ -1061,7 +1062,10 @@ test('main lifecycle service option callbacks cover catalog, memory, tools, MCP 
   state.chatOrchestrator.appendExternalProgress = (runId, message) => progress.push([runId, message]);
   assert.deepEqual(await state.forgerMcpServer.options.listCatalog(), catalog);
   assert.deepEqual(await state.forgerMcpServer.options.checkUpdates(), [state.registry.apps['finance-os']]);
-  assert.deepEqual(state.forgerMcpServer.options.listInstalledApps(), [state.registry.apps['finance-os']]);
+  assert.deepEqual(state.forgerMcpServer.options.listInstalledApps(), [{
+    ...state.registry.apps['finance-os'],
+    path: '/Users/test/Forger/apps/finance-os',
+  }]);
 	  assert.equal(state.forgerMcpServer.options.getAppVersion(), '0.0.0-test');
 	  assert.deepEqual(state.forgerMcpServer.options.getToolDefinitions(), []);
 	  assert.equal(state.forgerMcpServer.options.getToolSettings(), state.agentToolSettings);

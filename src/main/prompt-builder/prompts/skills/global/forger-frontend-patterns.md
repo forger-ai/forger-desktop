@@ -127,6 +127,8 @@ Agent chat screens should not be trapped in small cards.
 
 Use available height. Keep the message list scrollable and the composer sticky. Make the composer visually clear and always reachable.
 
+For Tailwind/shadcn apps, use the local chat primitives when building assistant chats: `Message`, `MessageScroller`, `Attachment`, and `Marker` when the flow needs messages, sticky scrolling, uploaded files, progress markers, or tool/status rows.
+
 Distinguish user messages, assistant messages, tool/progress messages, errors, and system/result states.
 
 Show when the agent is queued, thinking, using tools, applying changes, waiting for approval, complete, failed, or canceled.

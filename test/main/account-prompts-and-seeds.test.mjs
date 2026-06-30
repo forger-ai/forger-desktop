@@ -195,6 +195,7 @@ test('Forger prompt builders include contract, language, files, official tools, 
   assert.match(appPrompt, /functional scope, user intent, desired behavior/);
   assert.match(appPrompt, /Do not use it for low-impact design preferences/);
   assert.match(appPrompt, /affected flow/);
+  assert.match(appPrompt, /read and apply the `forger-frontend-patterns` skill before proposing or implementing visual changes/);
   assert.match(appPrompt, /Before editing, check the Git branch and status from `APP_ROOT`/);
   assert.match(appPrompt, /pre-existing unsaved changes/);
   assert.match(appPrompt, /smallest visible change/);
@@ -312,6 +313,7 @@ test('Forger prompt builders include contract, language, files, official tools, 
   assert.match(createPrompt, /Propose a concrete color palette/);
   assert.match(createPrompt, /keep working in this same chat/);
   assert.match(createPrompt, /Internally break the idea into product goals, user stories, data model/);
+  assert.match(createPrompt, /before building or changing visual UI, layout, routing, interactions, mobile behavior, or frontend UX, read and apply the `forger-frontend-patterns` skill/);
   const createResumePrompt = buildCodexPromptForFreeChat({
     turnKind: 'resume',
     chatMode: 'create_app',

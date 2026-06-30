@@ -83,7 +83,7 @@ interface ForgerMcpServerOptions {
     },
   ) => Promise<boolean | null> | null;
   listCatalog: () => Promise<CatalogApp[]>;
-  listInstalledApps: () => AppSummary[];
+  listInstalledApps: () => Array<AppSummary & { path?: string }>;
   checkUpdates: () => Promise<AppSummary[]>;
   createLocalApp: (input: CreateLocalAppInput, locale?: string) => Promise<CreateLocalAppResult>;
   addAppToPersonalAgent?: (input: { agentId: string; appId: string }) => Promise<{ success: boolean; appId: string; alreadyGranted: boolean; userMessage: string; technicalCode?: string }>;

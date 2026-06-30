@@ -748,7 +748,10 @@ export const registerMainLifecycle = (deps: unknown) => {
       ensureCatalogStatuses();
       return state.catalogApps;
     },
-    listInstalledApps: () => Object.values(state.registry.apps).map(toAppSummary),
+    listInstalledApps: () => Object.values(state.registry.apps).map((record) => ({
+      ...toAppSummary(record),
+      ...(record.installDir ? { path: record.installDir } : {}),
+    })),
     checkUpdates: async () => {
       state.catalogApps = await listCatalogFromBackend();
       ensureCatalogStatuses();

@@ -160,7 +160,7 @@ export class AgentStore {
       networkAccess: input.networkAccess === true,
       ...(normalizeAgentRuntime(input.runtime) ? { runtime: normalizeAgentRuntime(input.runtime) as AgentRuntime } : {}),
       appIds: normalizeGrantTargets(input.appIds),
-      toolIds: normalizeToolGrantTargets(input.toolIds),
+      toolIds: normalizeGrantTargets(input.toolIds) as AgentToolId[],
       createdAt: now,
       updatedAt: now,
     };
@@ -238,7 +238,7 @@ export class AgentStore {
       await this.replaceGrants(agent.id, 'app', normalizeGrantTargets(input.appIds), now);
     }
     if (input.toolIds) {
-      await this.replaceGrants(agent.id, 'tool', normalizeToolGrantTargets(input.toolIds), now);
+      await this.replaceGrants(agent.id, 'tool', normalizeGrantTargets(input.toolIds), now);
     }
     return await this.requireAgent(agent.id);
   }
@@ -1026,10 +1026,6 @@ const normalizeGrantTargets = (value: unknown): string[] => {
   const targets = value.map(sanitizeGrantTarget).filter((target): target is string => Boolean(target));
   return [...new Set(targets)].slice(0, MAX_GRANTS);
 };
-
-const normalizeToolGrantTargets = (value: unknown): AgentToolId[] =>
-  normalizeGrantTargets(value)
-    .filter((target) => !target.startsWith('forger_') && !target.startsWith('memory_')) as AgentToolId[];
 
 const normalizePermissionMode = (value: unknown): AgentPermissionMode => value === 'unsafe' ? 'unsafe' : 'safe';
 
