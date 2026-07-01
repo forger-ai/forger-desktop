@@ -1,5 +1,7 @@
 import RefreshRounded from '@mui/icons-material/RefreshRounded';
 import CheckCircleRounded from '@mui/icons-material/CheckCircleRounded';
+import LinkOffRounded from '@mui/icons-material/LinkOffRounded';
+import LogoutRounded from '@mui/icons-material/LogoutRounded';
 import RestartAltRounded from '@mui/icons-material/RestartAltRounded';
 import {
   Alert,
@@ -25,6 +27,8 @@ interface ClaudeConfigModalProps {
   onClose: () => void;
   onConnect: () => Promise<void>;
   onRefresh: () => Promise<void>;
+  onDisconnect: () => Promise<void>;
+  onSignOut: () => Promise<void>;
   onReinstall: () => Promise<void>;
   onOpenExternalUrl: (url: string) => void;
 }
@@ -37,6 +41,8 @@ export function ClaudeConfigModal({
   onClose,
   onConnect,
   onRefresh,
+  onDisconnect,
+  onSignOut,
   onReinstall,
   onOpenExternalUrl,
 }: ClaudeConfigModalProps) {
@@ -116,6 +122,22 @@ export function ClaudeConfigModal({
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose}>{t.actions.close}</Button>
+        <Button variant="outlined" startIcon={<LinkOffRounded />} disabled={busy} onClick={() => void onDisconnect()}>
+          {t.settings.claudeDisconnectForgerAction}
+        </Button>
+        <Button
+          variant="outlined"
+          color="error"
+          startIcon={<LogoutRounded />}
+          disabled={busy}
+          onClick={() => {
+            if (window.confirm(t.settings.claudeSignOutConfirm)) {
+              void onSignOut();
+            }
+          }}
+        >
+          {t.settings.claudeSignOutAction}
+        </Button>
         <Button variant="outlined" startIcon={<RefreshRounded />} disabled={busy} onClick={() => void onRefresh()}>
           {t.agentProvider.refresh}
         </Button>

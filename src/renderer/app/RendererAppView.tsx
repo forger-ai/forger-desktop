@@ -1,6 +1,8 @@
-import { Box, Button, Chip, CssBaseline, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel, LinearProgress, Link, Stack, Switch, ThemeProvider, Tooltip, Typography } from '@mui/material';
+import { alpha, Box, Button, Chip, CssBaseline, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel, LinearProgress, Link, Stack, Switch, ThemeProvider, Tooltip, Typography } from '@mui/material';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import type { AgentEffort, AntigravityEffort, AudioRuntimeBrokerRequest, AudioRuntimeDevices, BackgroundTask, CatalogApp, ClaudeEffort, CodexReasoningEffort, WakeWordState } from '@shared/types';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import type { AgentEffort, AntigravityEffort, AudioRuntimeBrokerRequest, AudioRuntimeDevices, BackgroundTask, CatalogApp, ClaudeEffort, CodexReasoningEffort, DesktopUpdateReleaseSummary, WakeWordState } from '@shared/types';
 import { AppShell } from '@renderer/components/AppShell';
 import { AppCard } from '@renderer/components/AppCard';
 import { AppsGrid } from '@renderer/components/AppsGrid';
@@ -35,6 +37,78 @@ import type { RuntimeProviderControls } from '@renderer/runtime-provider-control
 
 interface RendererAppViewProps {
   controller: Record<string, any>;
+}
+
+function DesktopUpdateSummaryMarkdown({
+  content,
+  onOpenExternalUrl,
+}: {
+  content: string;
+  onOpenExternalUrl: (url: string) => void;
+}) {
+  return (
+    <Box
+      sx={(theme) => ({
+        color: 'text.secondary',
+        fontSize: theme.typography.body2.fontSize,
+        lineHeight: 1.55,
+        overflowWrap: 'anywhere',
+        wordBreak: 'break-word',
+        '& > :first-child': { mt: 0 },
+        '& > :last-child': { mb: 0 },
+        '& p': { my: 0.5 },
+        '& ul, & ol': { my: 0.5, pl: 2.25 },
+        '& li': { mb: 0.35 },
+        '& h1, & h2, & h3, & h4': {
+          color: 'text.primary',
+          fontSize: theme.typography.subtitle2.fontSize,
+          lineHeight: 1.25,
+          mt: 1,
+          mb: 0.5,
+        },
+        '& code': {
+          bgcolor: alpha(theme.palette.text.primary, 0.08),
+          borderRadius: 0.75,
+          color: 'text.primary',
+          fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+          fontSize: '0.88em',
+          px: 0.5,
+          py: 0.1,
+        },
+        '& a': {
+          color: 'primary.main',
+          fontWeight: 500,
+          textUnderlineOffset: '2px',
+        },
+        '& blockquote': {
+          borderLeft: `3px solid ${theme.palette.divider}`,
+          ml: 0,
+          my: 0.75,
+          pl: 1.25,
+        },
+      })}
+    >
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          a: ({ href, children }) => (
+            <Link
+              href={href}
+              onClick={(event) => {
+                if (!href) return;
+                event.preventDefault();
+                onOpenExternalUrl(href);
+              }}
+            >
+              {children}
+            </Link>
+          ),
+        }}
+      >
+        {content}
+      </ReactMarkdown>
+    </Box>
+  );
 }
 
 const platformSupportsSystemAudioCapture = (): boolean =>
@@ -135,6 +209,8 @@ const playRuntimeAudio = async (
 export function RendererAppView({ controller }: RendererAppViewProps) {
   const audioRuntimePlaybacksRef = useRef<Map<string, HTMLAudioElement>>(new Map());
   const [settingsInitialSubview, setSettingsInitialSubview] = useState<'main' | 'llmProvider' | 'storage' | 'wakeWord' | null>(null);
+  const [desktopUpdateModalOpen, setDesktopUpdateModalOpen] = useState(false);
+  const [desktopUpdateModalDismissedVersion, setDesktopUpdateModalDismissedVersion] = useState<string | null>(null);
   const {
     getDesktopApi,
     resetOnboarding,
@@ -395,6 +471,17 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
   const selectedChatProvider = chatProviderOptions.some((option) => option.value === (activeConversation?.runtime?.provider ?? selectedAgentProvider))
     ? activeConversation?.runtime?.provider ?? selectedAgentProvider
     : chatProviderOptions[0]?.value ?? 'auto';
+  const desktopUpdateModalSummaries: DesktopUpdateReleaseSummary[] = desktopUpdateState.pendingReleaseSummaries?.length
+    ? desktopUpdateState.pendingReleaseSummaries
+    : desktopUpdateState.availableVersion && desktopUpdateState.publishedAt && desktopUpdateState.releaseNotes?.summary
+      ? [{
+          version: desktopUpdateState.availableVersion,
+          publishedAt: desktopUpdateState.publishedAt,
+          summary: desktopUpdateState.releaseNotes.summary,
+        }]
+      : [];
+  const canDownloadDesktopUpdate = desktopUpdateState.status === 'available' && Boolean(desktopUpdateState.asset);
+  const canInstallDesktopUpdate = desktopUpdateState.status === 'ready' && Boolean(desktopUpdateState.downloadedPath);
 
   const runtimeProviderControls: RuntimeProviderControls = {
     codex: {
@@ -465,6 +552,23 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
       })();
     });
   }, [getDesktopApi]);
+
+  useEffect(() => {
+    if (
+      (desktopUpdateState.status === 'available' || desktopUpdateState.status === 'ready') &&
+      desktopUpdateState.availableVersion &&
+      desktopUpdateModalDismissedVersion !== desktopUpdateState.availableVersion
+    ) {
+      setDesktopUpdateModalOpen(true);
+    }
+  }, [desktopUpdateModalDismissedVersion, desktopUpdateState.availableVersion, desktopUpdateState.status]);
+
+  const closeDesktopUpdateModal = () => {
+    if (desktopUpdateState.availableVersion) {
+      setDesktopUpdateModalDismissedVersion(desktopUpdateState.availableVersion);
+    }
+    setDesktopUpdateModalOpen(false);
+  };
   const installedViewApps = useMemo<CatalogApp[]>(
     () =>
       installedApps.filter((app: CatalogApp) =>
@@ -791,6 +895,65 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
+      <Dialog
+        open={desktopUpdateModalOpen}
+        onClose={closeDesktopUpdateModal}
+        fullWidth
+        maxWidth="sm"
+      >
+        <DialogTitle>{t.settings.desktopUpdateModalTitle}</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ pt: 0.5 }}>
+            <Typography color="text.secondary">
+              {t.settings.desktopUpdateModalDescription(
+                desktopUpdateState.currentVersion || '-',
+                desktopUpdateState.availableVersion ?? '-',
+              )}
+            </Typography>
+            <Stack spacing={1.25}>
+              <Typography variant="overline" color="text.secondary">
+                {t.settings.desktopUpdateModalChangesHeading}
+              </Typography>
+              {desktopUpdateModalSummaries.length > 0 ? (
+                <Stack spacing={1.5}>
+                  {desktopUpdateModalSummaries.map((release) => (
+                    <Stack spacing={0.5} key={release.version}>
+                      <Typography variant="h6">{`v${release.version}`}</Typography>
+                      <DesktopUpdateSummaryMarkdown
+                        content={release.summary}
+                        onOpenExternalUrl={(url) => void getDesktopApi().openExternalUrl(url)}
+                      />
+                    </Stack>
+                  ))}
+                </Stack>
+              ) : (
+                <Typography variant="body2" color="text.secondary">
+                  {t.appView.updateNoChangelog}
+                </Typography>
+              )}
+            </Stack>
+          </Stack>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2.5 }}>
+          <Button onClick={closeDesktopUpdateModal}>
+            {t.settings.desktopUpdateModalLater}
+          </Button>
+          <Button
+            variant={canInstallDesktopUpdate ? 'outlined' : 'contained'}
+            disabled={desktopUpdateBusy || !canDownloadDesktopUpdate}
+            onClick={() => void runDesktopUpdateAction(() => getDesktopApi().downloadDesktopUpdate())}
+          >
+            {t.settings.desktopDownloadUpdate}
+          </Button>
+          <Button
+            variant="contained"
+            disabled={desktopUpdateBusy || !canInstallDesktopUpdate}
+            onClick={() => void runDesktopUpdateAction(() => getDesktopApi().installDesktopUpdate())}
+          >
+            {t.settings.desktopInstallUpdate}
+          </Button>
+        </DialogActions>
+      </Dialog>
       {socialChatWindowRoute ? (
         <FriendChatWindowView
           account={forgerAccount}
@@ -1215,6 +1378,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             defaultChatPermissionMode={settings.defaultChatPermissionMode}
             defaultChatNetworkAccess={settings.defaultChatNetworkAccess}
             agentDefaults={settings.agentDefaults}
+            providerConnections={settings.providerConnections}
             onAgentDefaultsChange={(input) => void handleAgentDefaultsChange(input)}
             developerMode={settings.developerMode}
             onDeveloperModeChange={handleDeveloperModeChange}

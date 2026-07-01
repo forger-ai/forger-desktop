@@ -208,8 +208,10 @@ export interface ForgerDesktopApi {
   disconnectCodexAuth: () => Promise<{ success: boolean; userMessage: string } & FailureDiagnosticFields>;
   reinstallCodex: () => Promise<{ success: boolean; userMessage: string; status?: CodexAuthStatus } & FailureDiagnosticFields>;
   getClaudeAuthStatus: () => Promise<ClaudeAuthStatus>;
+  confirmClaudeAuthConnection: () => Promise<{ success: boolean; userMessage: string; status: ClaudeAuthStatus } & FailureDiagnosticFields>;
   connectClaudeAuth: () => Promise<{ success: boolean; userMessage: string; status?: ClaudeAuthStatus } & FailureDiagnosticFields>;
   disconnectClaudeAuth: () => Promise<{ success: boolean; userMessage: string; status?: ClaudeAuthStatus } & FailureDiagnosticFields>;
+  signOutClaudeAuth: () => Promise<{ success: boolean; userMessage: string; status?: ClaudeAuthStatus } & FailureDiagnosticFields>;
   reinstallClaude: () => Promise<{ success: boolean; userMessage: string; status?: ClaudeAuthStatus } & FailureDiagnosticFields>;
   getAntigravityAuthStatus: () => Promise<AntigravityAuthStatus>;
   connectAntigravityAuth: () => Promise<{ success: boolean; userMessage: string; status?: AntigravityAuthStatus } & FailureDiagnosticFields>;

@@ -17,7 +17,7 @@ export const codexWorkspaceArgs = (permissionMode: AgentPermissionMode = 'safe')
 export const claudePermissionArgs = (permissionMode: AgentPermissionMode = 'safe'): string[] =>
   isUnsafePermissionMode(permissionMode)
     ? ['--permission-mode', 'bypassPermissions', ...claudeUnsafeRootArgs()]
-    : [];
+    : ['--permission-mode', 'acceptEdits'];
 
 export const claudeUnsafeRootArgs = (platform = process.platform): string[] => {
   if (platform === 'win32') {

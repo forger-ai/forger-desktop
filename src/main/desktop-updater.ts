@@ -6,6 +6,7 @@ import type {
   DesktopUpdateAsset,
   DesktopUpdateMetadata,
   DesktopUpdateReleaseNotes,
+  DesktopUpdateReleaseSummary,
   DesktopUpdateState,
 } from '../shared/types';
 
@@ -65,6 +66,12 @@ const normalizeReleaseNotes = (value: unknown): DesktopUpdateReleaseNotes => {
     changes,
   };
 };
+
+const releaseSummaryFromMetadata = (metadata: DesktopUpdateMetadata): DesktopUpdateReleaseSummary => ({
+  version: metadata.version,
+  publishedAt: metadata.publishedAt,
+  summary: metadata.releaseNotes.summary ?? `Forger Desktop v${metadata.version}`,
+});
 
 const validateAsset = (value: unknown): DesktopUpdateAsset | null => {
   if (!isRecord(value)) {
@@ -139,6 +146,34 @@ const validateMetadata = (value: unknown): DesktopUpdateMetadata => {
   };
 };
 
+const validateMetadataIndex = (value: unknown): DesktopUpdateMetadata[] => {
+  if (!isRecord(value)) {
+    throw new Error('metadata_index_not_object');
+  }
+  if (value.schemaVersion !== 1) {
+    throw new Error('metadata_index_schema_unsupported');
+  }
+  if (!Array.isArray(value.releases)) {
+    throw new Error('metadata_index_releases_missing');
+  }
+  return value.releases.map((entry) => {
+    if (!isRecord(entry)) {
+      return validateMetadata(entry);
+    }
+    return validateMetadata({
+      ...entry,
+      schemaVersion: entry.schemaVersion ?? value.schemaVersion,
+      releaseNotes: entry.releaseNotes ?? { summary: entry.summary },
+    });
+  });
+};
+
+const indexUrlForMetadataUrl = (metadataUrl: string): string => {
+  const parsed = new URL(metadataUrl);
+  parsed.pathname = parsed.pathname.replace(/\/?[^/]*$/, '/index.json');
+  return parsed.toString();
+};
+
 const getInstallerFilename = (asset: DesktopUpdateAsset, version: string): string => {
   const basename = path.basename(new URL(asset.url).pathname);
   const extensionByKind: Record<string, string> = {
@@ -187,16 +222,19 @@ export class DesktopUpdater {
     });
 
     try {
+      const metadataIndex = await this.fetchMetadataIndex().catch(() => null);
       const response = await fetch(this.metadataUrl, { cache: 'no-store' });
       if (!response.ok) {
         throw new Error(`metadata_http_${response.status}`);
       }
       const metadata = validateMetadata(await response.json());
+      const pendingReleaseSummaries = this.pendingReleaseSummaries(metadataIndex, metadata.version);
       const base = {
         currentVersion: this.currentVersion,
         availableVersion: metadata.version,
         publishedAt: metadata.publishedAt,
         releaseNotes: metadata.releaseNotes,
+        pendingReleaseSummaries,
       };
 
       if (!isVersionNewer(metadata.version, this.currentVersion)) {
@@ -347,6 +385,25 @@ export class DesktopUpdater {
     } catch (error) {
       return this.setError('No pudimos abrir el instalador de Forger Desktop.', error);
     }
+  }
+
+  private async fetchMetadataIndex(): Promise<DesktopUpdateMetadata[]> {
+    const response = await fetch(indexUrlForMetadataUrl(this.metadataUrl), { cache: 'no-store' });
+    if (!response.ok) {
+      throw new Error(`metadata_index_http_${response.status}`);
+    }
+    return validateMetadataIndex(await response.json());
+  }
+
+  private pendingReleaseSummaries(
+    metadataIndex: DesktopUpdateMetadata[] | null,
+    latestVersion: string,
+  ): DesktopUpdateReleaseSummary[] {
+    const releases = metadataIndex
+      ?.filter((entry) => isVersionNewer(entry.version, this.currentVersion) && !isVersionNewer(entry.version, latestVersion))
+      .sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt))
+      ?? [];
+    return releases.map(releaseSummaryFromMetadata);
   }
 
   private setError(userMessage: string, error: unknown): DesktopUpdateState {

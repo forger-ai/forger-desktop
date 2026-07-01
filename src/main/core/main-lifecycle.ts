@@ -232,6 +232,7 @@ interface MainLifecycleDeps {
   getAgentPathEntries: (appId?: string) => Promise<string[]>;
   getBackupsRoot: () => string;
   getClaudeAuthStatus: () => Promise<ClaudeAuthStatus>;
+  getClaudeConnectedForForger?: () => Promise<boolean>;
   getAntigravityAuthStatus?: () => Promise<AntigravityAuthStatus>;
   getCloudDeviceAccountStorageKey: () => string | undefined;
   getCloudDevicePath: () => string;
@@ -381,6 +382,7 @@ export const registerMainLifecycle = (deps: unknown) => {
     getAgentPathEntries,
     getBackupsRoot,
     getClaudeAuthStatus,
+    getClaudeConnectedForForger,
     getAntigravityAuthStatus,
     getCloudDeviceAccountStorageKey,
     getCloudDevicePath,
@@ -468,6 +470,11 @@ export const registerMainLifecycle = (deps: unknown) => {
     upsertInstalledRecord,
     waitForHttpOk,
   } = deps as MainLifecycleDeps;
+
+  const getClaudeAuthenticatedForForger = getClaudeConnectedForForger ?? (async () => {
+    const status = await getClaudeAuthStatus();
+    return status.authenticated;
+  });
 
   const appFolderGrantStore = new AppFolderGrantStore(getForgerMetadataRoot());
 
@@ -933,10 +940,7 @@ export const registerMainLifecycle = (deps: unknown) => {
       const status = await getCodexAuthStatus();
       return status.authenticated;
     },
-    getClaudeAuthenticated: async () => {
-      const status = await getClaudeAuthStatus();
-      return status.authenticated;
-    },
+    getClaudeAuthenticated: getClaudeAuthenticatedForForger,
     getAntigravityAuthenticated: async () => {
       const status = await (getAntigravityAuthStatus?.() ?? Promise.resolve({ authenticated: false } as AntigravityAuthStatus));
       return status.authenticated;
@@ -1020,10 +1024,7 @@ export const registerMainLifecycle = (deps: unknown) => {
       const status = await getCodexAuthStatus();
       return status.authenticated;
     },
-    getClaudeAuthenticated: async () => {
-      const status = await getClaudeAuthStatus();
-      return status.authenticated;
-    },
+    getClaudeAuthenticated: getClaudeAuthenticatedForForger,
     getAntigravityAuthenticated: async () => {
       const status = await (getAntigravityAuthStatus?.() ?? Promise.resolve({ authenticated: false } as AntigravityAuthStatus));
       return status.authenticated;
@@ -1085,10 +1086,7 @@ export const registerMainLifecycle = (deps: unknown) => {
       const status = await getCodexAuthStatus();
       return status.authenticated;
     },
-    getClaudeAuthenticated: async () => {
-      const status = await getClaudeAuthStatus();
-      return status.authenticated;
-    },
+    getClaudeAuthenticated: getClaudeAuthenticatedForForger,
     getAntigravityAuthenticated: async () => {
       const status = await (getAntigravityAuthStatus?.() ?? Promise.resolve({ authenticated: false } as AntigravityAuthStatus));
       return status.authenticated;
@@ -1283,10 +1281,7 @@ export const registerMainLifecycle = (deps: unknown) => {
       const status = await getCodexAuthStatus();
       return status.authenticated;
     },
-    getClaudeAuthenticated: async () => {
-      const status = await getClaudeAuthStatus();
-      return status.authenticated;
-    },
+    getClaudeAuthenticated: getClaudeAuthenticatedForForger,
     getAntigravityAuthenticated: async () => {
       const status = await (getAntigravityAuthStatus?.() ?? Promise.resolve({ authenticated: false } as AntigravityAuthStatus));
       return status.authenticated;

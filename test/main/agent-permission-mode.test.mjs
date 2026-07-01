@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const {
+  claudePermissionArgs,
   claudeUnsafeRootArgs,
   codexUnsafeArgs,
   codexWorkspaceArgs,
@@ -14,6 +15,8 @@ test('agent permission mode helpers keep safe runs scoped and unsafe runs explic
   assert.deepEqual(codexWorkspaceArgs('safe'), ['--full-auto', '--sandbox', 'workspace-write']);
   assert.deepEqual(codexUnsafeArgs('unsafe'), ['--dangerously-bypass-approvals-and-sandbox']);
   assert.deepEqual(codexWorkspaceArgs('unsafe'), []);
+  assert.deepEqual(claudePermissionArgs('safe'), ['--permission-mode', 'acceptEdits']);
+  assert.deepEqual(claudePermissionArgs('unsafe').slice(0, 2), ['--permission-mode', 'bypassPermissions']);
   assert.deepEqual(claudeUnsafeRootArgs('darwin'), ['--add-dir', '/']);
   assert.deepEqual(claudeUnsafeRootArgs('linux'), ['--add-dir', '/']);
 });

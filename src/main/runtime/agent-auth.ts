@@ -796,6 +796,7 @@ const reinstallCodex = async (): Promise<{ success: boolean; userMessage: string
 const resolveManagedClaudeCliPath = async (baseDir: string): Promise<string | null> => {
   const candidates = process.platform === 'win32'
     ? [
+        path.join(baseDir, 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe'),
         path.join(baseDir, 'node_modules', '.bin', 'claude.cmd'),
         path.join(baseDir, 'node_modules', '.bin', 'claude'),
       ]
@@ -810,6 +811,23 @@ const resolveManagedClaudeCliPath = async (baseDir: string): Promise<string | nu
   }
   return null;
 };
+
+class ProviderConnectionRegistry {
+  constructor(
+    private readonly markConnected?: (provider: 'codex' | 'claude' | 'antigravity') => Promise<void> | void,
+    private readonly markDisconnected?: (provider: 'codex' | 'claude' | 'antigravity') => Promise<void> | void,
+  ) {}
+
+  async confirm(provider: 'codex' | 'claude' | 'antigravity'): Promise<void> {
+    await this.markConnected?.(provider);
+  }
+
+  async disconnect(provider: 'codex' | 'claude' | 'antigravity'): Promise<void> {
+    await this.markDisconnected?.(provider);
+  }
+}
+
+const providerConnectionRegistry = new ProviderConnectionRegistry(markProviderConnected, markProviderDisconnected);
 
 const getInstalledClaudeCliVersion = async (baseDir: string): Promise<string | null> => {
   const packageJsonPath = path.join(baseDir, 'node_modules', '@anthropic-ai', 'claude-code', 'package.json');
@@ -926,10 +944,6 @@ const getClaudeAuthStatus = async (): Promise<ClaudeAuthStatus> => {
     && !/not\s+(authenticated|logged\s*in)|login required|no active/i.test(statusText),
   );
 
-  if (authenticated) {
-    await markProviderConnected?.('claude');
-  }
-
   return {
     installed: true,
     authenticated,
@@ -937,6 +951,25 @@ const getClaudeAuthStatus = async (): Promise<ClaudeAuthStatus> => {
     claudeCliPath: resolved.path,
     version: versionResult?.stdout.trim() || versionResult?.stderr.trim() || undefined,
     statusText: statusText || undefined,
+  };
+};
+
+const confirmClaudeAuthConnection = async (): Promise<{ success: boolean; userMessage: string; status: ClaudeAuthStatus } & FailureDiagnosticFields> => {
+  const status = await getClaudeAuthStatus();
+  if (status.authenticated) {
+    await providerConnectionRegistry.confirm('claude');
+    return {
+      success: true,
+      userMessage: 'Claude Code está conectado y Forger puede usarlo.',
+      status,
+    };
+  }
+  await providerConnectionRegistry.disconnect('claude');
+  return {
+    success: false,
+    userMessage: 'Forger todavía no pudo confirmar la sesión local de Claude Code.',
+    status,
+    technicalCode: status.installed ? 'claude_auth_not_confirmed' : 'claude_cli_missing',
   };
 };
 
@@ -990,10 +1023,14 @@ const connectClaudeAuth = async (): Promise<{ success: boolean; userMessage: str
         terminalCommand,
         loginLogPath,
       });
+      const status = await getClaudeAuthStatus().catch(() => undefined);
+      if (status?.authenticated) {
+        await providerConnectionRegistry.confirm('claude');
+      }
       return {
         success: true,
         userMessage: 'Abrimos Terminal para completar el login local de Claude Code.',
-        status: await getClaudeAuthStatus().catch(() => undefined),
+        status,
       };
     }
 
@@ -1027,10 +1064,14 @@ const connectClaudeAuth = async (): Promise<{ success: boolean; userMessage: str
         child.once('error', reject);
         child.once('exit', (code) => code === 0 ? resolve() : reject(new Error(`powershell Start-Process exited with code ${code ?? 'unknown'}`)));
       });
+      const status = await getClaudeAuthStatus().catch(() => undefined);
+      if (status?.authenticated) {
+        await providerConnectionRegistry.confirm('claude');
+      }
       return {
         success: true,
         userMessage: 'Abrimos una consola para completar el login local de Claude Code.',
-        status: await getClaudeAuthStatus().catch(() => undefined),
+        status,
       };
     }
 
@@ -1041,10 +1082,16 @@ const connectClaudeAuth = async (): Promise<{ success: boolean; userMessage: str
         label: 'claude auth login',
       },
     });
+    const status = await getClaudeAuthStatus().catch(() => undefined);
+    if (status?.authenticated) {
+      await providerConnectionRegistry.confirm('claude');
+    }
     return {
       success: true,
-      userMessage: 'Login de Claude Code completado.',
-      status: await getClaudeAuthStatus().catch(() => undefined),
+      userMessage: status?.authenticated
+        ? 'Claude Code está conectado y Forger puede usarlo.'
+        : 'Login de Claude Code completado. Forger está verificando la sesión local.',
+      status,
     };
   } catch (error) {
     const diagnostic = providerInstallDiagnostic(error, 'claude_connect_failed', 'claude_cli_install_timeout');
@@ -1088,19 +1135,18 @@ const reinstallClaude = async (): Promise<{ success: boolean; userMessage: strin
 
 const disconnectClaudeAuth = async (): Promise<{ success: boolean; userMessage: string; status?: ClaudeAuthStatus } & FailureDiagnosticFields> => {
   try {
-    await markProviderDisconnected?.('claude');
+    await providerConnectionRegistry.disconnect('claude');
     const status = await getClaudeAuthStatus().catch(() => undefined);
     await appendInstallLog('claude_auth:disconnected', {
       authenticated: status?.authenticated,
       credentialScope: 'external_provider_state_preserved',
     });
     return {
-      success: !status?.authenticated,
+      success: true,
       userMessage: status?.authenticated
-        ? 'Claude Code sigue conectado en este equipo. Forger no borra credenciales locales del proveedor sin una confirmación explícita.'
+        ? 'Forger dejó de usar Claude Code. La sesión local de Claude sigue guardada en este equipo.'
         : 'Claude Code fue desconectado en este equipo.',
       status,
-      ...(status?.authenticated ? { technicalCode: 'claude_auth_still_authenticated' } : {}),
     };
   } catch (error) {
     const diagnostic = failureDiagnostic(error, 'claude_disconnect_failed');
@@ -1111,6 +1157,55 @@ const disconnectClaudeAuth = async (): Promise<{ success: boolean; userMessage: 
     return {
       success: false,
       userMessage: 'No pudimos desconectar Claude Code.',
+      ...diagnostic,
+      status: await getClaudeAuthStatus().catch(() => undefined),
+    };
+  }
+};
+
+const signOutClaudeAuth = async (): Promise<{ success: boolean; userMessage: string; status?: ClaudeAuthStatus } & FailureDiagnosticFields> => {
+  try {
+    const resolved = await resolveClaudeCli();
+    if (!resolved) {
+      await providerConnectionRegistry.disconnect('claude');
+      return {
+        success: true,
+        userMessage: 'Claude Code no está instalado en este equipo.',
+        status: await getClaudeAuthStatus().catch(() => undefined),
+      };
+    }
+
+    await runCommand(resolved.path, ['auth', 'logout'], {
+      cwd: app.getPath('userData'),
+      log: {
+        phase: 'claude_auth',
+        label: 'claude auth logout',
+      },
+      timeoutMs: 30_000,
+    });
+    await providerConnectionRegistry.disconnect('claude');
+    const status = await getClaudeAuthStatus().catch(() => undefined);
+    await appendInstallLog('claude_auth:signed_out', {
+      authenticated: status?.authenticated,
+      source: resolved.source,
+    });
+    return {
+      success: !status?.authenticated,
+      userMessage: status?.authenticated
+        ? 'Claude Code sigue mostrando una sesión activa en este equipo.'
+        : 'Claude Code cerró la sesión local en este equipo.',
+      status,
+      ...(status?.authenticated ? { technicalCode: 'claude_logout_still_authenticated' } : {}),
+    };
+  } catch (error) {
+    const diagnostic = failureDiagnostic(error, 'claude_logout_failed');
+    await appendInstallLog('claude_auth:logout_failed', {
+      detail: diagnostic.technicalCode,
+      error: serializeErrorForInstallLog(error),
+    });
+    return {
+      success: false,
+      userMessage: 'No pudimos cerrar la sesión local de Claude Code.',
       ...diagnostic,
       status: await getClaudeAuthStatus().catch(() => undefined),
     };
@@ -2120,5 +2215,5 @@ const disconnectAntigravityAuth = async (): Promise<{ success: boolean; userMess
   }
 };
 
-  return { getRuntimePathEntries, existsDirectory, getAppLocalToolPathEntries, getCodexToolEnvironment, resolveCodexCliPath, getInstalledCodexCliVersion, ensureCodexCliInstalled, buildManagedCodexAuthEnvironment, getCodexAuthStatus, connectCodexAuth, disconnectCodexAuth, reinstallCodex, getClaudeAuthStatus, connectClaudeAuth, disconnectClaudeAuth, reinstallClaude, resolveAntigravityCli, ensureAntigravityCliInstalled, getAntigravityAuthStatus, connectAntigravityAuth, startAntigravityAuthSession, writeAntigravityAuthSession, cancelAntigravityAuthSession, disconnectAntigravityAuth, reinstallAntigravity };
+  return { getRuntimePathEntries, existsDirectory, getAppLocalToolPathEntries, getCodexToolEnvironment, resolveCodexCliPath, getInstalledCodexCliVersion, ensureCodexCliInstalled, buildManagedCodexAuthEnvironment, getCodexAuthStatus, connectCodexAuth, disconnectCodexAuth, reinstallCodex, getClaudeAuthStatus, confirmClaudeAuthConnection, connectClaudeAuth, disconnectClaudeAuth, signOutClaudeAuth, reinstallClaude, resolveAntigravityCli, ensureAntigravityCliInstalled, getAntigravityAuthStatus, connectAntigravityAuth, startAntigravityAuthSession, writeAntigravityAuthSession, cancelAntigravityAuthSession, disconnectAntigravityAuth, reinstallAntigravity };
 };

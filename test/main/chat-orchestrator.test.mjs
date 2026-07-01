@@ -1431,6 +1431,8 @@ console.log(JSON.stringify({ result: 'final claude answer' }));
     assert.equal(await readFile(seenStdinPath, 'utf8'), 'hello from stdin');
     assert.equal(args.includes('--mcp-config'), true);
     assert.equal(args.includes('hello from stdin'), false);
+    assert.equal(args.includes('--permission-mode'), true);
+    assert.equal(args[args.indexOf('--permission-mode') + 1], 'acceptEdits');
     assert.equal(args.includes('--allowedTools'), true);
     assert.equal(args[args.indexOf('--allowedTools') + 1], 'mcp__forger__*,mcp__app_finance-os__*');
   } finally {

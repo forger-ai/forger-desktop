@@ -13,6 +13,12 @@ export interface DesktopUpdateReleaseNotes {
   changes: string[];
 }
 
+export interface DesktopUpdateReleaseSummary {
+  version: string;
+  publishedAt: string;
+  summary: string;
+}
+
 export interface DesktopUpdateAsset {
   platform: string;
   arch: string;
@@ -37,6 +43,7 @@ export interface DesktopUpdateState {
   availableVersion?: string;
   publishedAt?: string;
   releaseNotes?: DesktopUpdateReleaseNotes;
+  pendingReleaseSummaries?: DesktopUpdateReleaseSummary[];
   asset?: DesktopUpdateAsset;
   downloadedPath?: string;
   progress?: number;

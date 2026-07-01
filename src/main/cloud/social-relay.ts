@@ -73,6 +73,7 @@ const findSqliteFile = async (searchDir: string): Promise<string | null> => {
 const resolveManagedClaudeCliPath = async (baseDir: string): Promise<string | null> => {
   const candidates = process.platform === 'win32'
     ? [
+        path.join(baseDir, 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe'),
         path.join(baseDir, 'node_modules', '.bin', 'claude.cmd'),
         path.join(baseDir, 'node_modules', '.bin', 'claude'),
       ]
