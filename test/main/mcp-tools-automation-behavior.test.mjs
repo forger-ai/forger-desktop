@@ -26,6 +26,9 @@ const {
   computeNextRunAt,
 } = require('../../dist-electron/main/automation-manager.js');
 const {
+  renderPromptFile,
+} = require('../../dist-electron/main/prompt-builder/index.js');
+const {
   AGENT_TOOL_DEFINITIONS,
 } = require('../../dist-electron/main/core/agent-tool-packages.js');
 const {
@@ -2074,8 +2077,10 @@ test('automation command runner executes isolated Codex commands with MCP args a
   await writeFile(fakeCli, [
     '#!/usr/bin/env node',
     'const fs = require("node:fs");',
+    'const stdin = fs.readFileSync(0, "utf8");',
     `fs.writeFileSync(${JSON.stringify(capturePath)}, JSON.stringify({`,
     '  args: process.argv.slice(2),',
+    '  stdin,',
     '  env: {',
     '    CODEX_HOME: process.env.CODEX_HOME,',
     '    FORGER_ALLOWED_ROOTS: process.env.FORGER_ALLOWED_ROOTS,',
@@ -2130,6 +2135,7 @@ test('automation command runner executes isolated Codex commands with MCP args a
     assert.match(capture.env.CODEX_HOME, /forger-automation-codex-home-/);
     await assert.rejects(access(capture.env.CODEX_HOME));
     assert.ok(capture.args.includes('--ask-for-approval'));
+    assert.equal(capture.stdin, 'Haz la tarea');
     assert.ok(capture.args.includes('sandbox_workspace_write.network_access=true'));
     assert.ok(capture.args.includes('mcp_servers.finance-os.tool_timeout_sec=42'));
     assert.ok(capture.args.includes('apps.forger.default_tools_approval_mode="auto"'));
@@ -2193,7 +2199,70 @@ test('automation command runner writes transient Claude MCP config and removes i
     assert.deepEqual(capture.args.slice(0, 2), ['-p', '--output-format']);
     assert.equal(capture.stdin, 'Resume');
     assert.ok(capture.args.includes('--permission-mode'));
+    assert.ok(capture.args.includes('acceptEdits'));
     await assert.rejects(access(capture.configPath));
+  } finally {
+    await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
+  }
+});
+
+test('automation command runner forwards unsafe permissions to Codex, Claude, and Antigravity adapters', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'forger-automation-permissions-'));
+  const codexHome = join(root, 'codex-home');
+  const captures = {
+    codex: join(root, 'codex-capture.json'),
+    claude: join(root, 'claude-capture.json'),
+    antigravity: join(root, 'antigravity-capture.json'),
+  };
+  const makeCli = async (name, capturePath, stdoutLine = 'ok') => {
+    const cliPath = join(root, `${name}.js`);
+    await writeFile(cliPath, [
+      '#!/usr/bin/env node',
+      'const fs = require("node:fs");',
+      'const stdin = fs.readFileSync(0, "utf8");',
+      `fs.writeFileSync(${JSON.stringify(capturePath)}, JSON.stringify({ args: process.argv.slice(2), stdin }));`,
+      `console.log(${JSON.stringify(stdoutLine)});`,
+    ].join('\n'), 'utf8');
+    await chmod(cliPath, 0o755);
+    return cliPath;
+  };
+  await mkdir(codexHome, { recursive: true });
+  await writeFile(join(codexHome, 'auth.json'), '{"token":"test"}', 'utf8');
+  const codexCli = await makeCli('codex', captures.codex, JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'Codex listo' } }));
+  const claudeCli = await makeCli('claude', captures.claude, JSON.stringify({ message: { content: 'Claude listo' } }));
+  const antigravityCli = await makeCli('antigravity', captures.antigravity, 'Antigravity listo');
+
+  try {
+    await runAgentCommand({ command: codexCli, prefixArgs: [], pathEntries: [] }, {
+      runtime: { provider: 'codex', model: 'gpt-test', effort: 'low', permissionMode: 'unsafe' },
+      cwd: root,
+      codexHome,
+      prompt: 'Codex unsafe',
+      transcriptPath: join(root, 'codex.log'),
+    });
+    await runAgentCommand({ command: claudeCli, prefixArgs: [], pathEntries: [] }, {
+      runtime: { provider: 'claude', model: 'claude-test', effort: 'medium', permissionMode: 'unsafe' },
+      cwd: root,
+      codexHome,
+      prompt: 'Claude unsafe',
+      transcriptPath: join(root, 'claude.log'),
+    });
+    await runAgentCommand({ command: antigravityCli, prefixArgs: [], pathEntries: [] }, {
+      runtime: { provider: 'antigravity', model: 'gemini-test', effort: 'medium', permissionMode: 'unsafe' },
+      cwd: root,
+      codexHome,
+      prompt: 'Antigravity unsafe',
+      transcriptPath: join(root, 'antigravity.log'),
+    });
+
+    const codex = JSON.parse(await readFile(captures.codex, 'utf8'));
+    const claude = JSON.parse(await readFile(captures.claude, 'utf8'));
+    const antigravity = JSON.parse(await readFile(captures.antigravity, 'utf8'));
+    assert.ok(codex.args.includes('--dangerously-bypass-approvals-and-sandbox'));
+    assert.equal(codex.args.includes('--sandbox'), false);
+    assert.equal(codex.stdin, 'Codex unsafe');
+    assert.ok(claude.args.includes('bypassPermissions'));
+    assert.ok(antigravity.args.includes('--dangerously-skip-permissions'));
   } finally {
     await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
   }
@@ -2653,6 +2722,202 @@ test('automation manager normalizes stored entries, trims app ids, and ignores m
   }
 });
 
+test('automation manager uses the saved runtime for scheduled and manual executions', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'forger-automation-runtime-'));
+  const metadataRoot = join(root, 'metadata');
+  const fakeCodex = join(root, 'fake-codex.js');
+  const runtimeRequests = [];
+  await mkdir(metadataRoot, { recursive: true });
+  await mkdir(join(root, 'codex-home'), { recursive: true });
+  await writeFile(join(root, 'codex-home', 'auth.json'), '{"token":"test"}', 'utf8');
+  await writeFile(fakeCodex, [
+    '#!/usr/bin/env node',
+    'const fs = require("node:fs");',
+    'fs.readFileSync(0, "utf8");',
+    'console.log(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "Listo" } }));',
+  ].join('\n'), 'utf8');
+  await chmod(fakeCodex, 0o755);
+  await writeFile(join(metadataRoot, 'automations.json'), JSON.stringify([
+    {
+      id: 'stored-runtime',
+      name: 'Runtime',
+      prompt: 'Run with saved runtime',
+      frequency: { type: 'daily', timeOfDay: '08:30' },
+      runtime: { provider: 'codex', model: 'gpt-test', effort: 'high', permissionMode: 'unsafe' },
+      missedRunPolicy: 'always',
+      selectedAppIds: [],
+      enabled: true,
+      running: false,
+      nextRunAt: new Date(Date.now() - 120_000).toISOString(),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    },
+  ]), 'utf8');
+  const manager = new AutomationManager({
+    forgerHomeRoot: root,
+    metadataRoot,
+    codexHome: join(root, 'codex-home'),
+    getAgentRuntime: async (request) => {
+      runtimeRequests.push(request);
+      return {
+        provider: request?.provider ?? 'codex',
+        model: request?.model ?? 'gpt-default',
+        effort: request?.effort ?? 'low',
+        permissionMode: request?.permissionMode ?? 'safe',
+      };
+    },
+    getInstalledApps: () => [],
+    getCodexCliPath: async () => fakeCodex,
+    getClaudeCliPath: async () => null,
+    getCodexPathEntries: async () => [],
+    getCodexAuthenticated: async () => true,
+    getClaudeAuthenticated: async () => false,
+    onAutomationUpdated: () => undefined,
+  });
+
+  try {
+    await manager.initialize();
+    let runs = [];
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      runs = await manager.listRuns('stored-runtime');
+      if (runs[0]?.status === 'succeeded') break;
+      await wait(20);
+    }
+    assert.equal(runs[0].trigger, 'scheduled');
+    assert.equal(runs[0].status, 'succeeded');
+
+    const manual = await manager.runNow('stored-runtime');
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      runs = await manager.listRuns('stored-runtime');
+      if (runs.find((run) => run.id === manual.id)?.status === 'succeeded') break;
+      await wait(20);
+    }
+
+    assert.deepEqual(runtimeRequests, [
+      { provider: 'codex', model: 'gpt-test', effort: 'high', permissionMode: 'unsafe', strict: true },
+      { provider: 'codex', model: 'gpt-test', effort: 'high', permissionMode: 'unsafe', strict: true },
+    ]);
+  } finally {
+    manager.dispose();
+    await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
+  }
+});
+
+test('automation manager applies missed scheduled run policies during initialization', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'forger-automation-missed-'));
+  const metadataRoot = join(root, 'metadata');
+  const fakeCodex = join(root, 'fake-codex.js');
+  const runtimeRequests = [];
+  const now = Date.now();
+  await mkdir(metadataRoot, { recursive: true });
+  await mkdir(join(root, 'codex-home'), { recursive: true });
+  await writeFile(join(root, 'codex-home', 'auth.json'), '{"token":"test"}', 'utf8');
+  await writeFile(fakeCodex, [
+    '#!/usr/bin/env node',
+    'process.stdin.resume();',
+    'process.stdin.on("end", () => {',
+    '  console.log(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "Ejecutado" } }));',
+    '});',
+  ].join('\n'), 'utf8');
+  await chmod(fakeCodex, 0o755);
+  const baseAutomation = {
+    prompt: 'Run',
+    frequency: { type: 'daily', timeOfDay: '08:00' },
+    selectedAppIds: [],
+    enabled: true,
+    running: false,
+    createdAt: new Date(now).toISOString(),
+    updatedAt: new Date(now).toISOString(),
+  };
+  await writeFile(join(metadataRoot, 'automations.json'), JSON.stringify([
+    {
+      ...baseAutomation,
+      id: 'skip-old',
+      name: 'Skip old',
+      missedRunPolicy: 'skip',
+      nextRunAt: new Date(now - 2 * 60 * 60 * 1000).toISOString(),
+    },
+    {
+      ...baseAutomation,
+      id: 'window-old',
+      name: 'Window old',
+      missedRunPolicy: 'within_window',
+      missedRunWindowMinutes: 30,
+      nextRunAt: new Date(now - 2 * 60 * 60 * 1000).toISOString(),
+    },
+    {
+      ...baseAutomation,
+      id: 'window-fresh',
+      name: 'Window fresh',
+      missedRunPolicy: 'within_window',
+      missedRunWindowMinutes: 180,
+      nextRunAt: new Date(now - 2 * 60 * 60 * 1000).toISOString(),
+    },
+    {
+      ...baseAutomation,
+      id: 'always-old',
+      name: 'Always old',
+      missedRunPolicy: 'always',
+      nextRunAt: new Date(now - 2 * 60 * 60 * 1000).toISOString(),
+    },
+  ]), 'utf8');
+  const manager = new AutomationManager({
+    forgerHomeRoot: root,
+    metadataRoot,
+    codexHome: join(root, 'codex-home'),
+    getAgentRuntime: async (request) => {
+      runtimeRequests.push(request ?? null);
+      return { provider: 'codex', model: 'gpt-test', effort: 'low', permissionMode: 'safe' };
+    },
+    getInstalledApps: () => [],
+    getCodexCliPath: async () => fakeCodex,
+    getClaudeCliPath: async () => null,
+    getCodexPathEntries: async () => [],
+    getCodexAuthenticated: async () => true,
+    getClaudeAuthenticated: async () => false,
+    onAutomationUpdated: () => undefined,
+  });
+
+  try {
+    await manager.initialize();
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      const freshRuns = await manager.listRuns('window-fresh');
+      const alwaysRuns = await manager.listRuns('always-old');
+      if (freshRuns[0]?.status === 'succeeded' && alwaysRuns[0]?.status === 'succeeded') break;
+      await wait(20);
+    }
+
+    const skipRuns = await manager.listRuns('skip-old');
+    const windowOldRuns = await manager.listRuns('window-old');
+    const windowFreshRuns = await manager.listRuns('window-fresh');
+    const alwaysRuns = await manager.listRuns('always-old');
+    assert.equal(skipRuns[0].status, 'skipped');
+    assert.equal(skipRuns[0].error, 'automation_missed_schedule');
+    assert.equal(windowOldRuns[0].status, 'skipped');
+    assert.equal(windowFreshRuns[0].status, 'succeeded');
+    assert.equal(alwaysRuns[0].status, 'succeeded');
+    assert.equal(runtimeRequests.length, 2);
+  } finally {
+    manager.dispose();
+    await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
+  }
+});
+
+test('automation prompt describes non-interactive one-time execution and tool guidance', () => {
+  const prompt = renderPromptFile('automations/global-automation.md', {
+    automationName: 'Daily review',
+    forgerPartial: '',
+    appLines: '- Finance OS (id: finance-os)',
+    userInstruction: 'Summarize today.',
+  });
+
+  assert.match(prompt, /one-time, non-interactive job/);
+  assert.match(prompt, /Do not wait for more user input/);
+  assert.match(prompt, /MCP tools/);
+  assert.match(prompt, /destructive or irreversible actions/);
+  assert.match(prompt, /Report what you completed/);
+});
+
 test('automation manager maps missing provider setup to user-facing run failures', async () => {
   const root = await mkdtemp(join(tmpdir(), 'forger-automation-cli-missing-'));
   const metadataRoot = join(root, 'metadata');
@@ -2897,6 +3162,7 @@ test('automation manager runs due stored schedules and keeps enabled automations
       name: 'Scheduled report',
       prompt: 'Run scheduled report',
       frequency: { type: 'hourly' },
+      missedRunPolicy: 'always',
       selectedAppIds: [],
       enabled: true,
       running: true,
@@ -2908,9 +3174,10 @@ test('automation manager runs due stored schedules and keeps enabled automations
   await writeFile(fakeCodex, [
     '#!/usr/bin/env node',
     'const fs = require("node:fs");',
+    'const stdin = fs.readFileSync(0, "utf8");',
     `fs.writeFileSync(${JSON.stringify(capturePath)}, JSON.stringify({`,
     '  args: process.argv.slice(2),',
-    '  prompt: process.argv.at(-1),',
+    '  prompt: stdin,',
     '  cwd: process.cwd(),',
     '}));',
     'console.log(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "Scheduled done" } }));',

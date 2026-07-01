@@ -1,8 +1,9 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import path from 'node:path';
 import { mergePathEntries, spawnProcess } from './runtime/process-spawn';
 import type { LlmMcpServerConfig } from './llm-provider/types';
+import type { AppSecretDeclaration } from '../shared/types';
 
 export interface AppMcpInstalledAppRecord {
   appId: string;
@@ -21,6 +22,7 @@ export interface AppManifestMcp {
 
 export interface AppMcpManifest {
   mcp?: AppManifestMcp;
+  appSecrets?: unknown;
 }
 
 export interface RuntimeBinarySet {
@@ -47,10 +49,18 @@ interface AppMcpState {
   url?: string;
   token?: string;
   tokenEnvVar?: string;
+  secretsFingerprint?: string;
   toolTimeoutSec?: number;
   startPromise?: Promise<AppMcpServerConfig | null>;
   stopPromise?: Promise<void>;
   stopTimer?: NodeJS.Timeout;
+}
+
+export interface ResolvedAppMcpSecretsEnvironment {
+  env: Record<string, string>;
+  missingRequired: AppSecretDeclaration[];
+  secretValues: string[];
+  fingerprint: string;
 }
 
 interface AppMcpManagerOptions {
@@ -72,6 +82,11 @@ interface AppMcpManagerOptions {
     backendDir: string,
   ) => Record<string, string>;
   ensureSqliteDatabaseParent: (environment: Record<string, string>) => Promise<void>;
+  resolveAppSecretsEnvironment?: (
+    appId: string,
+    manifest: AppMcpManifest | null,
+  ) => Promise<ResolvedAppMcpSecretsEnvironment>;
+  formatProcessOutputForInstallLog?: (text: string, secrets: string[]) => string;
   getDesktopRuntimeEnvironment?: (appId: string) => Record<string, string>;
   getRuntimePathEntries: (runtime: RuntimeBinarySet) => string[];
   getPathEntries?: (appId: string) => Promise<string[]>;
@@ -92,6 +107,11 @@ export const findManifestMcp = (manifest: AppMcpManifest | null): AppManifestMcp
     return null;
   }
   return manifest.mcp;
+};
+
+export const createAppMcpSecretsFingerprint = (env: Record<string, string>): string => {
+  const entries = Object.entries(env).sort(([left], [right]) => left.localeCompare(right));
+  return createHash('sha256').update(JSON.stringify(entries)).digest('hex');
 };
 
 export class AppMcpManager {
@@ -148,6 +168,10 @@ export class AppMcpManager {
     if (!mcp) {
       return null;
     }
+    const resolvedSecrets = await this.resolveSecrets(record.appId, manifest, runId);
+    if (!resolvedSecrets) {
+      return null;
+    }
 
     const state = this.getState(appId);
     state.listeners.add(runId);
@@ -159,6 +183,9 @@ export class AppMcpManager {
       clearTimeout(state.stopTimer);
       state.stopTimer = undefined;
     }
+    if (state.status === 'up' && state.secretsFingerprint !== resolvedSecrets.fingerprint) {
+      await this.restartForSecretsChange(state);
+    }
     if (state.status === 'up' && state.url && state.token && state.tokenEnvVar) {
       return this.toConfig(state);
     }
@@ -168,16 +195,20 @@ export class AppMcpManager {
     if (state.status === 'shutting_down' && state.stopPromise) {
       await state.stopPromise.catch(() => undefined);
     }
+    if (state.status === 'up' && state.secretsFingerprint !== resolvedSecrets.fingerprint) {
+      await this.restartForSecretsChange(state);
+    }
     if (state.status === 'up' && state.url && state.token && state.tokenEnvVar) {
       return this.toConfig(state);
     }
-    state.startPromise = this.startOne(record, mcp, state, runId);
+    state.startPromise = this.startOne(record, mcp, resolvedSecrets, state, runId);
     return await state.startPromise;
   }
 
   private async startOne(
     record: AppMcpInstalledAppRecord,
     mcp: AppManifestMcp,
+    resolvedSecrets: ResolvedAppMcpSecretsEnvironment,
     state: AppMcpState,
     runId: string,
   ): Promise<AppMcpServerConfig | null> {
@@ -203,6 +234,7 @@ export class AppMcpManager {
         venv.python,
         port,
         token,
+        resolvedSecrets.env,
       );
       await this.options.ensureSqliteDatabaseParent(config.environment);
       const pathEntries = this.options.getPathEntries
@@ -233,6 +265,7 @@ export class AppMcpManager {
             state.url = undefined;
             state.token = undefined;
             state.tokenEnvVar = undefined;
+            state.secretsFingerprint = undefined;
             state.status = 'down';
           }
           reject(error);
@@ -240,15 +273,17 @@ export class AppMcpManager {
         child.once('error', processStartErrorListener);
       });
       child.stdout.on('data', (chunk) => {
+        const text = this.formatProcessOutput(chunk.toString(), resolvedSecrets.secretValues);
         void this.options.appendInstallLog('app_mcp:stdout', {
           appId: record.appId,
-          text: this.options.truncateForInstallLog(chunk.toString()),
+          text: this.options.truncateForInstallLog(text),
         });
       });
       child.stderr.on('data', (chunk) => {
+        const text = this.formatProcessOutput(chunk.toString(), resolvedSecrets.secretValues);
         void this.options.appendInstallLog('app_mcp:stderr', {
           appId: record.appId,
-          text: this.options.truncateForInstallLog(chunk.toString()),
+          text: this.options.truncateForInstallLog(text),
         });
       });
       child.once('exit', (code, signal) => {
@@ -258,6 +293,7 @@ export class AppMcpManager {
           state.url = undefined;
           state.token = undefined;
           state.tokenEnvVar = undefined;
+          state.secretsFingerprint = undefined;
           state.status = 'down';
         }
       });
@@ -266,6 +302,7 @@ export class AppMcpManager {
       state.url = config.url;
       state.token = token;
       state.tokenEnvVar = config.tokenEnvVar;
+      state.secretsFingerprint = resolvedSecrets.fingerprint;
       state.toolTimeoutSec = config.toolTimeoutSec;
       try {
         await Promise.race([
@@ -279,6 +316,11 @@ export class AppMcpManager {
       }
       if (state.generation !== generation || state.listeners.size === 0) {
         await this.options.terminateProcess(child);
+        state.process = undefined;
+        state.url = undefined;
+        state.token = undefined;
+        state.tokenEnvVar = undefined;
+        state.secretsFingerprint = undefined;
         state.status = 'down';
         return null;
       }
@@ -298,6 +340,7 @@ export class AppMcpManager {
       state.url = undefined;
       state.token = undefined;
       state.tokenEnvVar = undefined;
+      state.secretsFingerprint = undefined;
       state.status = 'down';
       return null;
     } finally {
@@ -312,6 +355,7 @@ export class AppMcpManager {
     venvPython: string,
     port: number,
     token: string,
+    secretsEnvironment: Record<string, string>,
   ): {
     command: string;
     args: string[];
@@ -365,6 +409,7 @@ export class AppMcpManager {
       healthUrl: `http://127.0.0.1:${port}${healthcheck}`,
       environment: {
         ...environment,
+        ...secretsEnvironment,
         ...uvEnvironment,
         ...(this.options.getDesktopRuntimeEnvironment?.(record.appId) ?? {}),
         HOST: '127.0.0.1',
@@ -412,11 +457,74 @@ export class AppMcpManager {
       state.url = undefined;
       state.token = undefined;
       state.tokenEnvVar = undefined;
+      state.secretsFingerprint = undefined;
       state.status = 'down';
     } else {
       state.status = 'down';
     }
     state.stopPromise = undefined;
+  }
+
+  private async restartForSecretsChange(state: AppMcpState): Promise<void> {
+    if (state.stopTimer) {
+      clearTimeout(state.stopTimer);
+      state.stopTimer = undefined;
+    }
+    if (state.status === 'starting' && state.startPromise) {
+      await state.startPromise.catch(() => null);
+    }
+    const child = state.process;
+    state.status = 'shutting_down';
+    state.generation += 1;
+    if (child) {
+      await this.options.appendInstallLog('app_mcp:restart_for_secrets', { appId: state.appId });
+      await this.options.terminateProcess(child).catch(() => undefined);
+    }
+    state.process = undefined;
+    state.url = undefined;
+    state.token = undefined;
+    state.tokenEnvVar = undefined;
+    state.secretsFingerprint = undefined;
+    state.status = 'down';
+    state.stopPromise = undefined;
+  }
+
+  private async resolveSecrets(
+    appId: string,
+    manifest: AppMcpManifest | null,
+    runId: string,
+  ): Promise<ResolvedAppMcpSecretsEnvironment | null> {
+    try {
+      const resolved = this.options.resolveAppSecretsEnvironment
+        ? await this.options.resolveAppSecretsEnvironment(appId, manifest)
+        : defaultResolvedSecretsEnvironment();
+      if (resolved.missingRequired.length > 0) {
+        const error = new Error('required_app_secrets_missing');
+        await this.options.appendInstallLog('app_mcp:start_failed', {
+          appId,
+          error: {
+            technicalCode: 'required_app_secrets_missing',
+            missingRequired: resolved.missingRequired.map((secret) => secret.name),
+          },
+        });
+        this.options.onMcpStartFailed?.({ appId, runId, error });
+        return null;
+      }
+      return resolved;
+    } catch (error) {
+      await this.options.appendInstallLog('app_mcp:start_failed', {
+        appId,
+        error: this.options.serializeErrorForInstallLog(error),
+      });
+      this.options.onMcpStartFailed?.({ appId, runId, error });
+      return null;
+    }
+  }
+
+  private formatProcessOutput(text: string, secrets: string[]): string {
+    return this.options.formatProcessOutputForInstallLog
+      ? this.options.formatProcessOutputForInstallLog(text, secrets)
+      : text;
   }
 
   private getState(appId: string): AppMcpState {
@@ -478,3 +586,10 @@ const normalizeHealthcheckPath = (healthcheck: string | undefined): string => {
   const value = healthcheck?.trim() || '/health';
   return value.startsWith('/') ? value : `/${value}`;
 };
+
+const defaultResolvedSecretsEnvironment = (): ResolvedAppMcpSecretsEnvironment => ({
+  env: {},
+  missingRequired: [],
+  secretValues: [],
+  fingerprint: createAppMcpSecretsFingerprint({}),
+});

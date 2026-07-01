@@ -79,7 +79,7 @@ export interface CodexConversationRunInput extends CodexBaseRunInput {
   imagePaths?: string[];
 }
 
-export interface CodexAutomationRunInput extends Omit<CodexBaseRunInput, 'reasoningEffort' | 'permissionMode'> {
+export interface CodexAutomationRunInput extends Omit<CodexBaseRunInput, 'reasoningEffort'> {
   reasoningEffort?: CodexReasoningEffort | string;
   resolvedCommand?: ResolvedLlmCommand;
 }
@@ -275,16 +275,16 @@ export class CodexCliAdapter {
       '--config',
       `reasoning_effort="${input.reasoningEffort || 'low'}"`,
       ...codexWorkspaceNetworkConfigArgs(input.networkAccess === true),
-      '--full-auto',
-      '--sandbox',
-      'workspace-write',
+      ...codexUnsafeArgs(input.permissionMode),
+      ...codexWorkspaceArgs(input.permissionMode),
       '--skip-git-repo-check',
       ...buildCodexMcpArgs(mcpServers),
       '-C',
       input.workingDir,
-      input.prompt,
+      '--',
+      '-',
     ];
-    return await this.runOnce(input as CodexBaseRunInput, command, args, input.codexHome ?? '', undefined);
+    return await this.runOnce(input as CodexBaseRunInput, command, args, input.codexHome ?? '', input.prompt);
   }
 
   private async runOnce(

@@ -7,6 +7,7 @@ import { appendDesktopLog } from '../desktop-logger';
 import type { DesktopErrorReporter } from '../error-reporting';
 import { reportSanitizerRoots } from '../conversation-diagnostics';
 import type { StoredForgerAccount } from '../forger-account-store';
+import { createAppMcpSecretsFingerprint } from '../app-mcp-manager';
 import type { SpeechToTextServiceManager } from '../speech-to-text-service';
 import type { TextToSpeechServiceManager } from '../text-to-speech-service';
 import type { WakeWordServiceManager } from '../wake-word-service';
@@ -21,6 +22,7 @@ import type {
   AppCodexConversationEvent,
   AppCodexTaskEvent,
   AppSummary,
+  AppSecretDeclaration,
   BasicActionResult,
   CatalogApp,
   ChatCreatedAppRequest,
@@ -243,6 +245,14 @@ interface MainLifecycleDeps {
   getCodexRoot: () => string;
   getCodexToolEnvironment: (appId?: string, runtime?: RuntimeBinarySet) => Promise<Record<string, string>>;
   getDesktopChatNetworkAccessDefault: () => boolean;
+  getManifestAppSecretsValidationError: (manifest: AppManifest | null) => string | null;
+  getSecretsStore: () => {
+    resolveAppEnv: (appId: string, declarations: AppSecretDeclaration[]) => Promise<{
+      env: Record<string, string>;
+      missingRequired: AppSecretDeclaration[];
+      secretValues: string[];
+    }>;
+  };
   getForgerAccountPath: () => string;
   getForgerHomeRoot: () => string;
   getForgerMetadataRoot: () => string;
@@ -288,6 +298,9 @@ interface MainLifecycleDeps {
   loadSettings: () => Promise<void>;
   llmRunsStore?: LlmRunsService;
   mapBackendCategory: SyncFn;
+  formatProcessOutputForInstallLog: (value: string, secretValues: string[]) => string;
+  isSecretsVaultUnavailableError: (error: unknown) => boolean;
+  normalizeManifestAppSecrets: (manifest: AppManifest | null) => AppSecretDeclaration[];
   openInstalledApp: AsyncFn;
   startLocalNetworkShare: AsyncFn;
   stopLocalNetworkShare: AsyncFn;
@@ -393,6 +406,8 @@ export const registerMainLifecycle = (deps: unknown) => {
     getCodexRoot,
     getCodexToolEnvironment,
     getDesktopChatNetworkAccessDefault,
+    getManifestAppSecretsValidationError,
+    getSecretsStore,
     getForgerAccountPath,
     getForgerHomeRoot,
     getForgerMetadataRoot,
@@ -429,6 +444,9 @@ export const registerMainLifecycle = (deps: unknown) => {
     loadSettings,
     llmRunsStore,
     mapBackendCategory,
+    formatProcessOutputForInstallLog,
+    isSecretsVaultUnavailableError,
+    normalizeManifestAppSecrets,
     openInstalledApp,
     openOrFocusAppWindow,
     registerForgerCloudOAuth,
@@ -885,6 +903,26 @@ export const registerMainLifecycle = (deps: unknown) => {
     ensurePathInside,
     translateManifestEnvironment,
     ensureSqliteDatabaseParent,
+    resolveAppSecretsEnvironment: async (appId: string, manifest: AppManifest | null) => {
+      const appSecretsValidationError = getManifestAppSecretsValidationError(manifest);
+      if (appSecretsValidationError) {
+        throw new Error('invalid_app_secrets_manifest');
+      }
+      const declarations = normalizeManifestAppSecrets(manifest);
+      try {
+        const resolved = await getSecretsStore().resolveAppEnv(appId, declarations);
+        return {
+          ...resolved,
+          fingerprint: createAppMcpSecretsFingerprint(resolved.env),
+        };
+      } catch (error) {
+        if (isSecretsVaultUnavailableError(error)) {
+          throw new Error('secrets_vault_unavailable');
+        }
+        throw error;
+      }
+    },
+    formatProcessOutputForInstallLog,
     getDesktopRuntimeEnvironment: (appId: string) => state.desktopRuntimeBridge?.environmentForApp(appId) ?? {},
     getRuntimePathEntries,
     getPathEntries: getAgentPathEntries,

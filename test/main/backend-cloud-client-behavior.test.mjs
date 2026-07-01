@@ -784,6 +784,36 @@ test('catalog listing falls back to local metadata and dedupes backend apps firs
   } finally {
     fallback.restore();
   }
+
+  const publicRetryRequests = [];
+  const publicRetry = createClient(async (url, init = {}) => {
+    publicRetryRequests.push({ url: String(url), init });
+    const parsed = new URL(url);
+    if (parsed.pathname === '/api/v1/catalog/apps' && init.headers?.Authorization) {
+      return jsonResponse(401, { error: 'unauthorized' });
+    }
+    if (parsed.pathname === '/api/v1/catalog/apps') {
+      return jsonResponse(200, [{
+        id: 42,
+        slug: 'public-social',
+        name: 'Public Social',
+        description: 'Visible without login',
+        category: 'productivity',
+        owner: { username: 'ada' },
+        latest_version: { id: 11, version: '1.0.0' },
+      }]);
+    }
+    return jsonResponse(404, { error: 'not_found' });
+  }, 'expired-token');
+  try {
+    const apps = await publicRetry.client.listCatalogApps();
+    assert.deepEqual(apps.map((app) => app.id), ['social-ada-public-social']);
+    assert.equal(publicRetryRequests.length, 2);
+    assert.equal(publicRetryRequests[0].init.headers.Authorization, 'Bearer expired-token');
+    assert.equal(publicRetryRequests[1].init.headers.Authorization, undefined);
+  } finally {
+    publicRetry.restore();
+  }
 });
 
 test('backend client covers fallback branches for auth, reporting, local catalog, and cloud backups', async (t) => {

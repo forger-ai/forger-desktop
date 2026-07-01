@@ -269,10 +269,17 @@ export class ForgerBackendClient {
   async listCatalogApps(): Promise<CatalogApp[]> {
     let backendApps: CatalogApp[] = [];
     try {
-      const response = await fetch(`${this.options.backendBaseUrl}/api/v1/catalog/apps`, {
+      const catalogUrl = `${this.options.backendBaseUrl}/api/v1/catalog/apps`;
+      let response = await fetch(catalogUrl, {
         method: 'GET',
         headers: buildBackendHeaders(this.options.token()),
       });
+      if ((response.status === 401 || response.status === 403) && this.options.token()) {
+        response = await fetch(catalogUrl, {
+          method: 'GET',
+          headers: buildBackendHeaders(undefined),
+        });
+      }
 
       if (response.ok) {
         const payload = await this.readJson<CatalogResponseItem[]>(response);

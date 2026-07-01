@@ -166,7 +166,7 @@ export const runAgentCommand = async (
           prompt: options.prompt,
           model: options.runtime.model,
           effort: options.runtime.effort,
-          permissionMode: 'unsafe',
+          permissionMode: options.runtime.permissionMode ?? 'safe',
           timeoutMs: AUTOMATION_TIMEOUT_MS,
           timeoutMode: 'absolute',
           onOutput: (stream, text) => {
@@ -189,7 +189,7 @@ export const runAgentCommand = async (
           prompt: options.prompt,
           model: options.runtime.model,
           effort: options.runtime.effort as ClaudeEffort,
-          permissionMode: 'unsafe',
+          permissionMode: options.runtime.permissionMode ?? 'safe',
           timeoutMs: AUTOMATION_TIMEOUT_MS,
           onOutput: (stream, text) => {
             if (stream === 'stdout') {
@@ -211,6 +211,7 @@ export const runAgentCommand = async (
           prompt: options.prompt,
           model: options.runtime.model || 'gpt-5.2',
           reasoningEffort: options.runtime.effort || 'low',
+          permissionMode: options.runtime.permissionMode ?? 'safe',
           networkAccess: options.networkAccess,
           timeoutMs: AUTOMATION_TIMEOUT_MS,
           codexHome: isolatedCodexHome,

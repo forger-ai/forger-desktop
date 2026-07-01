@@ -5,6 +5,7 @@ import type {
   AppSummary,
   Automation,
   AutomationFrequency,
+  AutomationMissedRunPolicy,
   AutomationRun,
   AutomationRunStatus,
   AutomationRunSummary,
@@ -14,6 +15,7 @@ import type {
   AgentRuntime,
   AgentRuntimeRequest,
 } from '../shared/types';
+import { normalizeAgentRuntime } from '../shared/types';
 import {
   appendTranscript,
   parseClaudeAssistantMessages,
@@ -46,6 +48,16 @@ interface AutomationManagerOptions {
 }
 
 const MAX_TIMEOUT_MS = 2_147_483_647;
+const MISSED_RUN_GRACE_MS = 60_000;
+export const DEFAULT_AUTOMATION_MISSED_RUN_POLICY: AutomationMissedRunPolicy = 'within_window';
+export const DEFAULT_AUTOMATION_MISSED_RUN_WINDOWS_MINUTES: Record<AutomationFrequency['type'], number> = {
+  hourly: 30,
+  daily: 6 * 60,
+  weekly: 24 * 60,
+};
+
+export const defaultMissedRunWindowMinutes = (frequency: AutomationFrequency): number =>
+  DEFAULT_AUTOMATION_MISSED_RUN_WINDOWS_MINUTES[frequency.type];
 
 export const computeNextRunAt = (frequency: AutomationFrequency, from = new Date()): string => {
   const next = new Date(from);
@@ -100,7 +112,7 @@ export class AutomationManager {
       this.automations.clear();
     }
     await this.saveAutomations();
-    this.scheduleAll();
+    await this.scheduleAll();
   }
 
   public dispose(): void {
@@ -122,6 +134,9 @@ export class AutomationManager {
       name: sanitizeText(input.name, 120),
       prompt: sanitizeText(input.prompt, 20_000),
       frequency: sanitizeFrequency(input.frequency),
+      runtime: sanitizeRuntime(input.runtime),
+      missedRunPolicy: sanitizeMissedRunPolicy(input.missedRunPolicy),
+      missedRunWindowMinutes: sanitizeMissedRunWindowMinutes(input.missedRunWindowMinutes, sanitizeFrequency(input.frequency)),
       selectedAppIds: sanitizeAppIds(input.selectedAppIds),
       enabled,
       running: false,
@@ -132,19 +147,25 @@ export class AutomationManager {
     this.assertValidAutomation(automation);
     this.automations.set(automation.id, automation);
     await this.saveAutomations();
-    this.scheduleAutomation(automation.id);
+    await this.scheduleAutomation(automation.id);
     return automation;
   }
 
   public async update(input: AutomationUpsertInput & { id: string }): Promise<Automation> {
     const current = this.requireAutomation(input.id);
     const frequency = sanitizeFrequency(input.frequency);
+    const runtime = Object.prototype.hasOwnProperty.call(input, 'runtime')
+      ? sanitizeRuntime(input.runtime)
+      : current.runtime;
     const enabled = typeof input.enabled === 'boolean' ? input.enabled : current.enabled;
     const next: Automation = {
       ...current,
       name: sanitizeText(input.name, 120),
       prompt: sanitizeText(input.prompt, 20_000),
       frequency,
+      runtime,
+      missedRunPolicy: sanitizeMissedRunPolicy(input.missedRunPolicy ?? current.missedRunPolicy),
+      missedRunWindowMinutes: sanitizeMissedRunWindowMinutes(input.missedRunWindowMinutes ?? current.missedRunWindowMinutes, frequency),
       selectedAppIds: sanitizeAppIds(input.selectedAppIds),
       enabled,
       nextRunAt: enabled ? computeNextRunAt(frequency) : null,
@@ -153,7 +174,7 @@ export class AutomationManager {
     this.assertValidAutomation(next);
     this.automations.set(next.id, next);
     await this.saveAutomations();
-    this.scheduleAutomation(next.id);
+    await this.scheduleAutomation(next.id);
     return next;
   }
 
@@ -191,7 +212,7 @@ export class AutomationManager {
     };
     this.automations.set(id, next);
     await this.saveAutomations();
-    this.scheduleAutomation(id);
+    await this.scheduleAutomation(id);
     return next;
   }
 
@@ -241,7 +262,8 @@ export class AutomationManager {
     };
     try {
       const automation = this.requireAutomation(automationId);
-      const runtime = await this.options.getAgentRuntime();
+      const runtimeRequest = automation.runtime ? { ...automation.runtime, strict: true as const } : undefined;
+      const runtime = await this.options.getAgentRuntime(runtimeRequest);
       if (runtime.provider === 'antigravity') {
         if (!(await (this.options.getAntigravityAuthenticated?.() ?? Promise.resolve(false)))) {
           throw new Error('antigravity_auth_missing');
@@ -382,7 +404,7 @@ export class AutomationManager {
         this.automations.set(automationId, next);
         await this.saveAutomations();
         this.options.onAutomationUpdated({ automation: next, run: next.lastRun });
-        this.scheduleAutomation(automationId);
+        await this.scheduleAutomation(automationId);
       }
     }
   }
@@ -463,23 +485,80 @@ export class AutomationManager {
     this.options.onAutomationUpdated({ automation: next, run });
   }
 
-  private scheduleAll(): void {
+  private async scheduleAll(): Promise<void> {
     for (const automation of this.automations.values()) {
-      this.scheduleAutomation(automation.id);
+      await this.scheduleAutomation(automation.id);
     }
   }
 
-  private scheduleAutomation(id: string): void {
+  private async scheduleAutomation(id: string): Promise<void> {
     this.clearTimer(id);
     const automation = this.automations.get(id);
     if (!automation?.enabled || !automation.nextRunAt) {
       return;
     }
-    const delay = Math.max(0, Date.parse(automation.nextRunAt) - Date.now());
+    const dueAt = Date.parse(automation.nextRunAt);
+    if (!Number.isFinite(dueAt)) {
+      await this.skipMissedRun(id, 'automation_invalid_schedule');
+      return;
+    }
+    const delay = dueAt - Date.now();
+    if (delay <= 0) {
+      await this.handleDueScheduledRun(id);
+      return;
+    }
     const timer = setTimeout(() => {
-      void this.startRun(id, 'scheduled');
+      void this.scheduleAutomation(id);
     }, Math.min(delay, MAX_TIMEOUT_MS));
     this.timers.set(id, timer);
+  }
+
+  private async handleDueScheduledRun(id: string): Promise<void> {
+    const automation = this.automations.get(id);
+    if (!automation?.enabled || !automation.nextRunAt) {
+      return;
+    }
+    const dueAt = Date.parse(automation.nextRunAt);
+    const latenessMs = Date.now() - dueAt;
+    if (latenessMs <= MISSED_RUN_GRACE_MS) {
+      void this.startRun(id, 'scheduled');
+      return;
+    }
+    if (automation.missedRunPolicy === 'always') {
+      void this.startRun(id, 'scheduled');
+      return;
+    }
+    if (automation.missedRunPolicy === 'within_window') {
+      const windowMs = (automation.missedRunWindowMinutes ?? defaultMissedRunWindowMinutes(automation.frequency)) * 60_000;
+      if (latenessMs <= windowMs) {
+        void this.startRun(id, 'scheduled');
+        return;
+      }
+    }
+    await this.skipMissedRun(id, 'automation_missed_schedule');
+  }
+
+  private async skipMissedRun(id: string, error: string): Promise<void> {
+    const automation = this.automations.get(id);
+    if (!automation) {
+      return;
+    }
+    const run = await this.createRunRecord(automation, 'scheduled', 'skipped', error);
+    await this.updateLastRun(automation.id, toRunSummary(run));
+    const current = this.automations.get(id);
+    if (!current) {
+      return;
+    }
+    const next: Automation = {
+      ...current,
+      running: false,
+      nextRunAt: current.enabled ? computeNextRunAt(current.frequency) : null,
+      updatedAt: new Date().toISOString(),
+    };
+    this.automations.set(id, next);
+    await this.saveAutomations();
+    this.options.onAutomationUpdated({ automation: next, run: toRunSummary(run) });
+    await this.scheduleAutomation(id);
   }
 
   private clearTimer(id: string): void {
@@ -505,6 +584,9 @@ export class AutomationManager {
       name: sanitizeText(entry.name, 120),
       prompt: sanitizeText(entry.prompt, 20_000),
       frequency: sanitizeFrequency(entry.frequency),
+      runtime: sanitizeRuntime(entry.runtime),
+      missedRunPolicy: sanitizeMissedRunPolicy(entry.missedRunPolicy),
+      missedRunWindowMinutes: sanitizeMissedRunWindowMinutes(entry.missedRunWindowMinutes, sanitizeFrequency(entry.frequency)),
       selectedAppIds: sanitizeAppIds(entry.selectedAppIds),
       enabled,
       running: false,
@@ -652,6 +734,23 @@ const sanitizeFrequency = (value: unknown): AutomationFrequency => {
   return { type: 'hourly' };
 };
 
+const sanitizeRuntime = (value: unknown): AgentRuntime | undefined =>
+  normalizeAgentRuntime(value);
+
+const sanitizeMissedRunPolicy = (value: unknown): AutomationMissedRunPolicy =>
+  value === 'skip' || value === 'always' || value === 'within_window'
+    ? value
+    : DEFAULT_AUTOMATION_MISSED_RUN_POLICY;
+
+const sanitizeMissedRunWindowMinutes = (value: unknown, frequency: AutomationFrequency): number => {
+  const numeric = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return defaultMissedRunWindowMinutes(frequency);
+  }
+  const rounded = Math.round(numeric);
+  return Math.min(30 * 24 * 60, Math.max(1, rounded));
+};
+
 const parseTimeOfDay = (value: string | undefined): [number, number] => {
   const formatted = formatTimeOfDay(value);
   const [hour, minute] = formatted.split(':').map((part) => Number(part));
@@ -706,6 +805,18 @@ const friendlyAutomationFailureMessage = (message: string): string => {
   }
   if (message === 'claude_cli_missing') {
     return 'No se pudo ejecutar porque Claude Code no esta listo en este equipo.';
+  }
+  if (message === 'antigravity_auth_missing') {
+    return 'No se pudo ejecutar porque Antigravity no tiene una sesion activa.';
+  }
+  if (message === 'antigravity_cli_missing') {
+    return 'No se pudo ejecutar porque Antigravity no esta listo en este equipo.';
+  }
+  if (message === 'automation_missed_schedule') {
+    return 'La automatizacion no se ejecuto porque Forger no estaba disponible dentro de la ventana configurada.';
+  }
+  if (message === 'automation_invalid_schedule') {
+    return 'La automatizacion no se ejecuto porque tenia una fecha programada invalida.';
   }
   if (message.startsWith('codex_timeout_after_')) {
     return 'La automatizacion se detuvo porque tardo demasiado en responder.';
