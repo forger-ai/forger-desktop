@@ -308,9 +308,6 @@ export const runCommandCapture = async (
       detached: process.platform !== 'win32',
     });
 
-    options.onChild?.(child);
-    child.stdin.end(options.stdinText ?? '');
-
     let stdout = '';
     let stderr = '';
     let settled = false;
@@ -331,6 +328,16 @@ export const runCommandCapture = async (
       settled = true;
       reject(error);
     };
+
+    child.stdin.on('error', (error: NodeJS.ErrnoException) => {
+      if (error.code === 'EPIPE') {
+        return;
+      }
+      finalizeReject(error);
+    });
+
+    options.onChild?.(child);
+    child.stdin.end(options.stdinText ?? '');
 
     const killChild = (): void => {
       try {

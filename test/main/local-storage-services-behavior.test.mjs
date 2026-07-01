@@ -1189,6 +1189,54 @@ test('DesktopUpdater checks metadata, downloads to userData cache, validates che
   assert.ok(states.includes('downloading'));
 });
 
+test('DesktopUpdater accumulates pending release summaries from metadata index', async (t) => {
+  const root = await tmpRoot('desktop-updater-index');
+  const originalFetch = globalThis.fetch;
+  t.after(async () => {
+    globalThis.fetch = originalFetch;
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  const asset = {
+    platform: process.platform,
+    arch: process.arch,
+    kind: process.platform === 'win32' ? 'nsis' : 'dmg',
+    url: 'https://github.com/forger-ai/desktop/releases/download/v0.3.31/forger-desktop-installer.dmg',
+  };
+  globalThis.fetch = async (url) => {
+    if (String(url).endsWith('/index.json')) {
+      return Response.json({
+        schemaVersion: 1,
+        releases: [
+          { version: '0.3.31', publishedAt: '2026-06-30T00:00:00Z', summary: 'Resumen 0.3.31', assets: [asset] },
+          { version: '0.3.30', publishedAt: '2026-06-29T00:00:00Z', summary: 'Resumen 0.3.30', assets: [asset] },
+          { version: '0.3.29', publishedAt: '2026-06-28T00:00:00Z', summary: 'Resumen 0.3.29', assets: [asset] },
+        ],
+      });
+    }
+    return Response.json({
+      schemaVersion: 1,
+      version: '0.3.31',
+      publishedAt: '2026-06-30T00:00:00Z',
+      releaseNotes: { summary: 'Resumen 0.3.31' },
+      assets: [asset],
+    });
+  };
+
+  const updater = new DesktopUpdater({
+    currentVersion: '0.3.29',
+    metadataUrl: 'https://example.invalid/latest.json',
+    userDataPath: root,
+  });
+
+  const available = await updater.check();
+
+  assert.equal(available.status, 'available');
+  assert.deepEqual(available.pendingReleaseSummaries, [
+    { version: '0.3.31', publishedAt: '2026-06-30T00:00:00Z', summary: 'Resumen 0.3.31' },
+    { version: '0.3.30', publishedAt: '2026-06-29T00:00:00Z', summary: 'Resumen 0.3.30' },
+  ]);
+});
+
 test('DesktopUpdater accepts Linux x64 deb and AppImage update assets', async (t) => {
   const root = await tmpRoot('desktop-updater-linux');
   const originalFetch = globalThis.fetch;
@@ -1518,7 +1566,7 @@ test('DesktopUpdater uses environment metadata URL and installer filename fallba
   assert.equal(path.basename(ready.downloadedPath), 'forger-desktop-1.2.1.exe');
   assert.equal(ready.downloadedBytes, installer.length);
   assert.equal(ready.totalBytes, installer.length);
-  assert.deepEqual(fetchedUrls, ['https://metadata.test/latest.json', 'https://github.com/']);
+  assert.deepEqual(fetchedUrls, ['https://metadata.test/index.json', 'https://metadata.test/latest.json', 'https://github.com/']);
 
   const sizedInstaller = Buffer.from('installer-with-header-size');
   globalThis.fetch = async (url) => {

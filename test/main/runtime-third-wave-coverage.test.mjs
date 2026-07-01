@@ -290,6 +290,91 @@ test('agent auth surfaces managed Claude status and does not mark disconnected s
   assert.equal(calls.some((call) => call[0] === 'connected' && call[1] === 'claude'), false);
 });
 
+test('agent auth keeps Claude status pure and confirms connections explicitly', async (t) => {
+  const { root, calls, controller } = await makeAgentAuthHarness({
+    canRunCommand: async (command) => command.endsWith('claude'),
+    runCommandCapture: async (_command, args) => {
+      if (args[0] === '--version') {
+        return { code: 0, stdout: '2.0.0\n', stderr: '' };
+      }
+      return { code: 0, stdout: 'authenticated\n', stderr: '' };
+    },
+  });
+  t.after(async () => {
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  await fs.mkdir(path.join(root, 'claude-root', 'node_modules', '.bin'), { recursive: true });
+  await fs.writeFile(path.join(root, 'claude-root', 'node_modules', '.bin', 'claude'), '', 'utf8');
+
+  const status = await controller.getClaudeAuthStatus();
+  const statusMarkedConnected = calls.some((call) => call[0] === 'connected' && call[1] === 'claude');
+  const confirmation = await controller.confirmClaudeAuthConnection();
+
+  assert.equal(status.authenticated, true);
+  assert.equal(statusMarkedConnected, false);
+  assert.equal(confirmation.success, true);
+  assert.equal(confirmation.status.authenticated, true);
+  assert.equal(calls.some((call) => call[0] === 'connected' && call[1] === 'claude'), true);
+});
+
+test('agent auth separates Claude Forger disconnect from local Claude logout', async (t) => {
+  const { root, calls, controller } = await makeAgentAuthHarness({
+    canRunCommand: async (command) => command.endsWith('claude'),
+    runCommandCapture: async (_command, args) => {
+      if (args[0] === '--version') {
+        return { code: 0, stdout: '2.0.0\n', stderr: '' };
+      }
+      return { code: 0, stdout: 'authenticated\n', stderr: '' };
+    },
+  });
+  t.after(async () => {
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  await fs.mkdir(path.join(root, 'claude-root', 'node_modules', '.bin'), { recursive: true });
+  await fs.writeFile(path.join(root, 'claude-root', 'node_modules', '.bin', 'claude'), '', 'utf8');
+
+  const disconnect = await controller.disconnectClaudeAuth();
+
+  assert.equal(disconnect.success, true);
+  assert.equal(disconnect.status?.authenticated, true);
+  assert.equal(disconnect.technicalCode, undefined);
+  assert.equal(calls.some((call) => call[0] === 'disconnected' && call[1] === 'claude'), true);
+  assert.equal(calls.some((call) => call[0] === 'run' && call[2].join(' ') === 'auth logout'), false);
+});
+
+test('agent auth signs out of Claude through the supported CLI logout command', async (t) => {
+  let loggedOut = false;
+  const { root, calls, controller } = await makeAgentAuthHarness({
+    canRunCommand: async (command) => command.endsWith('claude'),
+    runCommand: async (command, args, options) => {
+      calls.push(['run', command, args, options]);
+      if (args.join(' ') === 'auth logout') {
+        loggedOut = true;
+      }
+    },
+    runCommandCapture: async (_command, args) => {
+      if (args[0] === '--version') {
+        return { code: 0, stdout: '2.0.0\n', stderr: '' };
+      }
+      return loggedOut
+        ? { code: 1, stdout: 'not authenticated\n', stderr: '' }
+        : { code: 0, stdout: 'authenticated\n', stderr: '' };
+    },
+  });
+  t.after(async () => {
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  await fs.mkdir(path.join(root, 'claude-root', 'node_modules', '.bin'), { recursive: true });
+  await fs.writeFile(path.join(root, 'claude-root', 'node_modules', '.bin', 'claude'), '', 'utf8');
+
+  const result = await controller.signOutClaudeAuth();
+
+  assert.equal(result.success, true);
+  assert.equal(result.status?.authenticated, false);
+  assert.equal(calls.some((call) => call[0] === 'run' && call[2].join(' ') === 'auth logout'), true);
+  assert.equal(calls.some((call) => call[0] === 'disconnected' && call[1] === 'claude'), true);
+});
+
 test('agent auth builds app-scoped Codex tool caches and manifest backend environment', async (t) => {
   const { root, controller, deps } = await makeAgentAuthHarness({
     findManifestService: (manifest, name) => manifest?.services?.find((service) => service.name === name) ?? null,
@@ -561,7 +646,7 @@ test('agent auth installs Claude CLI when npm is available and rejects runtimes 
   assert.equal(result.success, true);
   assert.equal(result.status.installed, true);
   assert.equal(result.status.authenticated, true);
-  assert.equal(installed.calls.some((call) => call[0] === 'connected' && call[1] === 'claude'), true);
+  assert.equal(installed.calls.some((call) => call[0] === 'connected' && call[1] === 'claude'), false);
   const claudeInstallCall = installed.calls.find((call) => call[0] === 'run' && call[2]?.includes('@anthropic-ai/claude-code@1.0.0'));
   assert.equal(claudeInstallCall?.[3]?.timeoutMs, 300_000);
 
@@ -1538,7 +1623,7 @@ test('agent auth launches Windows provider consoles without real auth', async (t
 
   const claudeSpawns = [];
   const claude = await makeAgentAuthHarness({
-    canRunCommand: async (command) => command.endsWith('claude.cmd'),
+    canRunCommand: async (command) => command.endsWith('claude.exe'),
     runCommandCapture: async (_command, args) => args[0] === '--version'
       ? { code: 0, stdout: '1.0.0\n', stderr: '' }
       : { code: 0, stdout: 'authenticated\n', stderr: '' },
@@ -1552,14 +1637,15 @@ test('agent auth launches Windows provider consoles without real auth', async (t
   t.after(async () => {
     await fs.rm(claude.root, { recursive: true, force: true });
   });
-  await fs.mkdir(path.join(claude.root, 'claude-root', 'node_modules', '.bin'), { recursive: true });
+  await fs.mkdir(path.join(claude.root, 'claude-root', 'node_modules', '@anthropic-ai', 'claude-code', 'bin'), { recursive: true });
+  await fs.writeFile(path.join(claude.root, 'claude-root', 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe'), '', 'utf8');
 
   const claudeResult = await withPlatform('win32', async () => await claude.controller.connectClaudeAuth());
 
   assert.equal(claudeResult.success, true);
   assert.equal(claudeResult.status?.authenticated, true);
   assert.equal(claudeSpawns[0][0], 'powershell.exe');
-  assert.match(await fs.readFile(path.join(claude.root, 'tmp', 'claude-login.cmd'), 'utf8'), /auth login/);
+  assert.match(await fs.readFile(path.join(claude.root, 'tmp', 'claude-login.cmd'), 'utf8'), /claude\.exe" auth login/);
 });
 
 test('agent auth reports provider launch and managed Claude install failures', async (t) => {
@@ -1681,7 +1767,7 @@ test('git command controller keeps Windows cmd shims as command and args for saf
   await withPlatform('win32', async () => {
     await controller.runCommand(
       npmCommand,
-      ['install', '--no-audit', '--no-fund', '@anthropic-ai/claude-code@2.1.158'],
+      ['install', '--no-audit', '--no-fund', '@anthropic-ai/claude-code@2.1.185'],
       {
         cwd: 'C:\\Forger Test\\runtime root\\claude-code-cli',
         log: { phase: 'claude_auth', label: 'install claude code cli' },
@@ -1691,7 +1777,7 @@ test('git command controller keeps Windows cmd shims as command and args for saf
 
   const spawnCall = calls.find((call) => call[0] === 'spawn');
   assert.equal(spawnCall[1], npmCommand);
-  assert.deepEqual(spawnCall[2], ['install', '--no-audit', '--no-fund', '@anthropic-ai/claude-code@2.1.158']);
+  assert.deepEqual(spawnCall[2], ['install', '--no-audit', '--no-fund', '@anthropic-ai/claude-code@2.1.185']);
   assert.equal(spawnCall[4], false);
   assert.equal(calls.some((call) => call[0] === 'log' && call[1] === 'command:start' && 'shellStrategy' in call[2]), false);
 });

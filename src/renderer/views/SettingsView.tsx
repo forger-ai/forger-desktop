@@ -134,6 +134,7 @@ interface SettingsViewProps {
   defaultChatPermissionMode: Settings['defaultChatPermissionMode'];
   defaultChatNetworkAccess: Settings['defaultChatNetworkAccess'];
   agentDefaults: Settings['agentDefaults'];
+  providerConnections: Settings['providerConnections'];
   onAgentDefaultsChange: (input: UpdateAgentDefaultsInput) => void;
   developerMode: Settings['developerMode'];
   onDeveloperModeChange: (input: UpdateDeveloperModeInput) => Promise<void>;
@@ -413,6 +414,7 @@ export function SettingsView({
   defaultChatPermissionMode,
   defaultChatNetworkAccess,
   agentDefaults,
+  providerConnections,
   onAgentDefaultsChange,
   developerMode,
   onDeveloperModeChange,
@@ -1806,7 +1808,7 @@ export function SettingsView({
         subtitle: t.settings.codexProviderSubtitle,
         body: t.settings.codexProviderCardBody,
         installed: codexAuthStatus.installed,
-        authenticated: codexAuthStatus.authenticated,
+        authenticated: Boolean(providerConnections.codex) && codexAuthStatus.authenticated,
         busy: codexAuthBusy,
         onInstall: onReinstallCodex,
         onSignIn: onOpenCodexConfig,
@@ -1839,7 +1841,7 @@ export function SettingsView({
         subtitle: t.settings.claudeProviderSubtitle,
         body: t.settings.claudeProviderCardBody,
         installed: claudeAuthStatus.installed,
-        authenticated: claudeAuthStatus.authenticated,
+        authenticated: Boolean(providerConnections.claude) && claudeAuthStatus.authenticated,
         busy: claudeAuthBusy,
         onInstall: onReinstallClaude,
         onSignIn: onOpenClaudeConfig,
@@ -1872,7 +1874,7 @@ export function SettingsView({
         subtitle: t.settings.antigravityProviderSubtitle,
         body: t.settings.antigravityProviderCardBody,
         installed: antigravityAuthStatus.installed,
-        authenticated: antigravityAuthStatus.authenticated,
+        authenticated: Boolean(providerConnections.antigravity) && antigravityAuthStatus.authenticated,
         busy: antigravityAuthBusy,
         onInstall: onReinstallAntigravity,
         onSignIn: onOpenAntigravityConfig,

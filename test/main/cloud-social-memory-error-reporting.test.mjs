@@ -307,17 +307,18 @@ test('cloud social relay resolves local database and Claude command paths withou
 
     await withPlatform('win32', async () => {
       const windowsCommands = [];
+      const windowsClaudePath = path.join(claudeRoot, 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe');
       const windowsController = createCloudSocialRelayController(createSocialDeps({
         getClaudeRoot: () => claudeRoot,
-        existsFile: async (candidate) => candidate.endsWith('claude.cmd'),
+        existsFile: async (candidate) => candidate === windowsClaudePath,
         canRunCommand: async (command, args) => {
           windowsCommands.push({ command, args });
-          return command.endsWith('claude.cmd');
+          return command === windowsClaudePath;
         },
       }).deps);
 
-      assert.equal(await windowsController.resolveManagedClaudeCliPath(claudeRoot), path.join(claudeRoot, 'node_modules', '.bin', 'claude.cmd'));
-      assert.equal(windowsCommands[0].command.endsWith('claude.cmd'), true);
+      assert.equal(await windowsController.resolveManagedClaudeCliPath(claudeRoot), windowsClaudePath);
+      assert.equal(windowsCommands[0].command.endsWith('claude.exe'), true);
     });
   });
 });

@@ -58,6 +58,8 @@ export function RendererAppDialogs({ controller }: RendererAppDialogsProps) {
     closeClaudeConfig,
     handleConnectClaudeAuth,
     refreshClaudeAuthStatus,
+    handleDisconnectClaudeAuth,
+    handleSignOutClaudeAuth,
     handleReinstallClaude,
     antigravityConfigOpen,
     antigravityAuthStatus,
@@ -237,6 +239,8 @@ export function RendererAppDialogs({ controller }: RendererAppDialogsProps) {
         onClose={closeClaudeConfig}
         onConnect={handleConnectClaudeAuth}
         onRefresh={refreshClaudeAuthStatus}
+        onDisconnect={handleDisconnectClaudeAuth}
+        onSignOut={handleSignOutClaudeAuth}
         onReinstall={handleReinstallClaude}
         onOpenExternalUrl={(url) => void getDesktopApi().openExternalUrl(url)}
       />

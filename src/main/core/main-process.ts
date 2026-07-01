@@ -499,7 +499,7 @@ const getPersonalAgentConversationManager = (): AgentConversationManager => {
       ensureGitAvailable,
       getCodexEnvironment: async () => await getCodexToolEnvironment(),
       getCodexAuthenticated: async () => (await getCodexAuthStatus()).authenticated,
-      getClaudeAuthenticated: async () => (await getClaudeAuthStatus()).authenticated,
+      getClaudeAuthenticated: getClaudeConnectedForForger,
       getAntigravityAuthenticated: async () => (await getAntigravityAuthStatus()).authenticated,
       createForgerMcpSession: (runId, agent) =>
         forgerMcpServer?.createSession(runId, 'forger', {
@@ -854,9 +854,17 @@ const connectCodexAuth = async (): Promise<{ success: boolean; userMessage: stri
 const disconnectCodexAuth = async (): Promise<{ success: boolean; userMessage: string } & FailureDiagnosticFields> => await getAgentAuthController().disconnectCodexAuth();
 const reinstallCodex = async (): Promise<{ success: boolean; userMessage: string; status?: CodexAuthStatus } & FailureDiagnosticFields> => await getAgentAuthController().reinstallCodex();
 const getClaudeAuthStatus = async (): Promise<ClaudeAuthStatus> => await getAgentAuthController().getClaudeAuthStatus();
+const confirmClaudeAuthConnection = async (): Promise<{ success: boolean; userMessage: string; status: ClaudeAuthStatus } & FailureDiagnosticFields> => await getAgentAuthController().confirmClaudeAuthConnection();
 const connectClaudeAuth = async (): Promise<{ success: boolean; userMessage: string; status?: ClaudeAuthStatus } & FailureDiagnosticFields> => await getAgentAuthController().connectClaudeAuth();
 const disconnectClaudeAuth = async (): Promise<{ success: boolean; userMessage: string; status?: ClaudeAuthStatus } & FailureDiagnosticFields> => await getAgentAuthController().disconnectClaudeAuth();
+const signOutClaudeAuth = async (): Promise<{ success: boolean; userMessage: string; status?: ClaudeAuthStatus } & FailureDiagnosticFields> => await getAgentAuthController().signOutClaudeAuth();
 const reinstallClaude = async (): Promise<{ success: boolean; userMessage: string; status?: ClaudeAuthStatus } & FailureDiagnosticFields> => await getAgentAuthController().reinstallClaude();
+const getClaudeConnectedForForger = async (): Promise<boolean> => {
+  if (!normalizeSettings(settings).providerConnections.claude) {
+    return false;
+  }
+  return (await getClaudeAuthStatus()).authenticated;
+};
 const getAntigravityAuthStatus = async (): Promise<AntigravityAuthStatus> => await getAgentAuthController().getAntigravityAuthStatus();
 const resolveAntigravityCliPath = async (): Promise<string | null> => (await getAgentAuthController().resolveAntigravityCli())?.path ?? null;
 const connectAntigravityAuth = async (): Promise<{ success: boolean; userMessage: string; status?: AntigravityAuthStatus } & FailureDiagnosticFields> => await getAgentAuthController().connectAntigravityAuth();
@@ -1225,8 +1233,10 @@ const getMainProcessIpcDeps = () => ({
   chatOrchestrator,
   cloudDeviceManager,
   cloudSyncSettings,
+  confirmClaudeAuthConnection,
   connectClaudeAuth,
   disconnectClaudeAuth,
+  signOutClaudeAuth,
   connectAntigravityAuth,
   startAntigravityAuthSession,
   writeAntigravityAuthSession,
@@ -1252,6 +1262,7 @@ const getMainProcessIpcDeps = () => ({
   getBackupsManager,
   getBackgroundTaskStore,
   getClaudeAuthStatus,
+  getClaudeConnectedForForger,
   getAntigravityAuthStatus,
   getCloudIdentityStore,
   getCodexAuthStatus,
