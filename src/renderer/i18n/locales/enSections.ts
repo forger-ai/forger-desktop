@@ -13,6 +13,7 @@ export const enSections = {
       refresh: 'Refresh apps',
       filtersLabel: 'Browse by category',
       statusFilterLabel: 'Filter by: Status',
+      signInRequired: 'Sign in or create an account to install Social apps and review who published them.',
       createdBy: (username: string) => `Created by ${username}`,
       statusFilters: {
         all: 'All',
@@ -96,7 +97,7 @@ export const enSections = {
       stopSuccess: 'Response stopped.',
       stopFailed: 'I could not stop the response.',
       newConversation: 'New conversation',
-      notifyForger: 'Notify',
+      notifyForger: 'Report',
       notifyForgerTooltip: 'Share this sanitized conversation with Forger support',
       showHistoryTooltip: 'Show history',
       historyTitle: 'Conversation history',

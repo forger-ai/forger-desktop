@@ -62,7 +62,9 @@ const codexHome = process.env.CODEX_HOME;
 const statePath = path.join(codexHome, 'fake-state.json');
 const callsPath = path.join(codexHome, 'fake-calls.ndjson');
 const mode = args.includes('resume') ? 'resume' : 'new';
-const prompt = args[args.length - 1] || '';
+const argPrompt = args[args.length - 1] || '';
+const stdinPrompt = fs.readFileSync(0, 'utf8');
+const prompt = argPrompt === '-' ? stdinPrompt : argPrompt;
 const threadId = mode === 'resume' ? args[args.length - 2] : '';
 let state = { next: 1, threads: [] };
 try {
@@ -285,6 +287,8 @@ test('chat uses a persistent Codex home so the second message can resume', async
     assert.doesNotMatch(calls[0].prompt, /RESUME hello/);
     assert.match(calls[1].prompt, /RESUME continue/);
     assert.doesNotMatch(calls[1].prompt, /START continue/);
+    assert.equal(calls[1].args.includes('--sandbox'), false);
+    assert.equal(calls[1].args.includes('--full-auto'), false);
     assert.equal(calls[0].codexHome, calls[1].codexHome);
     assert.equal(calls[0].allowedRoots, harness.forgerHomeRoot);
     assert.equal(calls[0].leakedSecret, false);
@@ -803,11 +807,16 @@ test('chat preview file helpers copy, delete, and reject paths outside the app r
 test('chat command runner reports output, process errors, and timeouts behaviorally', async () => {
   const root = await mkdtemp(join(tmpdir(), 'forger-chat-command-runner-'));
   const outputScript = join(root, 'output.cjs');
+  const stdinScript = join(root, 'stdin.cjs');
   const slowScript = join(root, 'slow.cjs');
   await writeFile(outputScript, `
 console.log('stdout line');
 console.error('stderr line');
 process.exit(7);
+`, 'utf8');
+  await writeFile(stdinScript, `
+const fs = require('node:fs');
+console.log(fs.readFileSync(0, 'utf8'));
 `, 'utf8');
   await writeFile(slowScript, `setTimeout(() => {}, 5000);\n`, 'utf8');
   try {
@@ -831,6 +840,13 @@ process.exit(7);
       ['stdout', 'stdout line'],
       ['stderr', 'stderr line'],
     ]);
+
+    const stdinResult = await runCommandCapture(process.execPath, [stdinScript], {
+      cwd: root,
+      timeoutMs: 5_000,
+      stdinText: 'prompt through stdin',
+    });
+    assert.equal(stdinResult.stdout.trim(), 'prompt through stdin');
 
     await assert.rejects(() => runCommandCapture(join(root, 'missing-bin'), [], {
       cwd: root,
@@ -1371,10 +1387,12 @@ test('chat SandboxRunner parses Claude output, tool events, and temporary MCP co
   const fakeClaude = join(root, 'claude.cjs');
   const seenConfigPath = join(root, 'seen-config.txt');
   const seenArgsPath = join(root, 'seen-args.json');
+  const seenStdinPath = join(root, 'seen-stdin.txt');
   await writeFile(fakeClaude, `#!/usr/bin/env node
 const fs = require('node:fs');
 const args = process.argv.slice(2);
 fs.writeFileSync(${JSON.stringify(seenArgsPath)}, JSON.stringify(args));
+fs.writeFileSync(${JSON.stringify(seenStdinPath)}, fs.readFileSync(0, 'utf8'));
 const configIndex = args.indexOf('--mcp-config');
 if (configIndex >= 0) {
   fs.writeFileSync(${JSON.stringify(seenConfigPath)}, args[configIndex + 1]);
@@ -1396,7 +1414,7 @@ console.log(JSON.stringify({ result: 'final claude answer' }));
         { name: 'app_finance-os', url: 'http://127.0.0.1:2/mcp', token: 'app-secret', tokenEnvVar: 'APP_MCP_TOKEN' },
       ],
       workingDir: root,
-      prompt: 'hello',
+      prompt: 'hello from stdin',
       model: 'claude-test',
       effort: 'medium',
       timeoutMs: 5_000,
@@ -1410,7 +1428,9 @@ console.log(JSON.stringify({ result: 'final claude answer' }));
     const mcpConfigPath = (await readFile(seenConfigPath, 'utf8')).trim();
     await assert.rejects(() => readFile(mcpConfigPath, 'utf8'), /ENOENT/);
     const args = JSON.parse(await readFile(seenArgsPath, 'utf8'));
+    assert.equal(await readFile(seenStdinPath, 'utf8'), 'hello from stdin');
     assert.equal(args.includes('--mcp-config'), true);
+    assert.equal(args.includes('hello from stdin'), false);
     assert.equal(args.includes('--allowedTools'), true);
     assert.equal(args[args.indexOf('--allowedTools') + 1], 'mcp__forger__*,mcp__app_finance-os__*');
   } finally {
@@ -1422,12 +1442,14 @@ test('chat SandboxRunner handles Claude fallback replies, resume ids, and failur
   const root = await mkdtemp(join(tmpdir(), 'forger-chat-claude-fallbacks-'));
   const fakeClaude = join(root, 'claude.cjs');
   await writeFile(fakeClaude, `#!/usr/bin/env node
+const fs = require('node:fs');
 const args = process.argv.slice(2);
-if (args.includes('fail claude')) {
+const prompt = [args.join(' '), fs.readFileSync(0, 'utf8')].join(' ');
+if (prompt.includes('fail claude')) {
   console.error('claude failed');
   process.exit(4);
 }
-if (args.includes('plain claude')) {
+if (prompt.includes('plain claude')) {
   console.log('plain line');
   process.exit(0);
 }
@@ -1487,7 +1509,10 @@ test('chat SandboxRunner parses Codex fallback output and failed run diagnostics
   const fakeCodex = join(root, 'codex.cjs');
   await mkdir(codexHome, { recursive: true });
 await writeFile(fakeCodex, `#!/usr/bin/env node
-const prompt = process.argv[process.argv.length - 1] || '';
+const fs = require('node:fs');
+const argPrompt = process.argv[process.argv.length - 1] || '';
+const stdinPrompt = fs.readFileSync(0, 'utf8');
+const prompt = argPrompt === '-' ? stdinPrompt : argPrompt;
 if (prompt.includes('empty success')) {
   process.exit(0);
 }

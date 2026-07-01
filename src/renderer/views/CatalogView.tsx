@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Alert, Button, Chip, Dialog, DialogActions, DialogContent, DialogTitle, LinearProgress, MenuItem, Select, Stack, Typography } from '@mui/material';
-import type { AppCategory, CatalogApp, InstallAppResult, SocialUserAppReviewState } from '@shared/types';
+import type { AppCategory, CatalogApp, ForgerAccountSession, InstallAppResult, SocialUserAppReviewState } from '@shared/types';
 import type { AppDictionary } from '@renderer/i18n';
 import { AppCard } from '@renderer/components/AppCard';
 import { AppsGrid } from '@renderer/components/AppsGrid';
@@ -27,7 +27,9 @@ interface CatalogViewProps {
   onStartRemoteNetworkShare: (appId: string) => void;
   onStopRemoteNetworkShare: (appId: string) => void;
   onUploadSocial: (appId: string) => void;
+  onOpenCloudModal: () => void;
   onRefresh: () => void;
+  account: ForgerAccountSession;
   t: AppDictionary;
   earlyAccessEnabled: boolean;
   getAppMeta: (appId: string) => { name: string; description: string; iconUrl?: string };
@@ -62,7 +64,9 @@ export function CatalogView({
   onStartRemoteNetworkShare,
   onStopRemoteNetworkShare,
   onUploadSocial,
+  onOpenCloudModal,
   onRefresh,
+  account,
   t,
   earlyAccessEnabled,
   getAppMeta,
@@ -83,6 +87,7 @@ export function CatalogView({
     .map(({ app }) => app);
   const [reviewDialogApp, setReviewDialogApp] = useState<CatalogApp | null>(null);
   const [reviewDialogBusy, setReviewDialogBusy] = useState(false);
+  const signedIn = account.authenticated && Boolean(account.user?.confirmed);
   const closeReviewDialog = () => {
     setReviewDialogBusy(false);
     setReviewDialogApp(null);
@@ -110,6 +115,18 @@ export function CatalogView({
         <Typography color="text.secondary">{t.sections.catalog.subtitle}</Typography>
       </Stack>
       <Alert severity="warning">{t.sections.catalog.disclaimer}</Alert>
+      {!signedIn ? (
+        <Alert
+          severity="info"
+          action={
+            <Button color="inherit" size="small" onClick={onOpenCloudModal}>
+              {t.cloud.loginOrRegister}
+            </Button>
+          }
+        >
+          {t.sections.catalog.signInRequired}
+        </Alert>
+      ) : null}
       <Stack spacing={1}>
         <Stack direction="row" spacing={1.25} alignItems="center">
           <Typography variant="body2" color="text.secondary">
@@ -257,6 +274,10 @@ export function CatalogView({
                   }
                   if (!isInstalled) {
                     if (isSocialCatalogApp) {
+                      if (!signedIn) {
+                        onOpenCloudModal();
+                        return;
+                      }
                       setReviewDialogApp(app);
                       return;
                     }

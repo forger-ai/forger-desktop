@@ -858,6 +858,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             onStartRemoteNetworkShare={handleStartRemoteNetworkShare}
             onStopRemoteNetworkShare={handleStopRemoteNetworkShare}
             onUploadSocial={(appId) => void handleUploadSocial(appId)}
+            onOpenCloudModal={() => setCloudModalOpen(true)}
             onRefresh={() => {
               void refreshApps().catch(() => {
                 setBannerSeverity('error');
@@ -875,6 +876,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             getAppMeta={getAppMeta}
             getCategoryLabel={getCategoryLabel}
             installProgressByApp={installProgressByApp}
+            account={forgerAccount}
           />
         ) : null}
 

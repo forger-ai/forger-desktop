@@ -59,7 +59,6 @@ export class ClaudeCliAdapter {
       : null;
     const args = [
       '-p',
-      input.prompt,
       '--output-format',
       'stream-json',
       '--verbose',
@@ -96,6 +95,7 @@ export class ClaudeCliAdapter {
         },
         timeoutMs: input.timeoutMs,
         inactivityTimeoutMs: input.inactivityTimeoutMs ?? input.timeoutMs,
+        stdinText: input.prompt,
         onChild: input.onChild,
         onStdout: (text) => input.onOutput?.('stdout', text),
         onStderr: (text) => input.onOutput?.('stderr', text),

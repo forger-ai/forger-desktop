@@ -8,6 +8,8 @@ const EXPECTED_ERROR_CODES = new Set([
   'no_pending_update_conflict',
   'codex_auth_missing',
   'auth_missing',
+  'backend_client_missing',
+  'forger_cloud_auth_expired',
 ]);
 
 export const buildErrorReport = (

@@ -490,6 +490,35 @@ test('submitConversationDiagnosticReport posts sanitized thread payload with aut
   }
 });
 
+test('submitConversationDiagnosticReport classifies expired Forger Cloud sessions', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'forger-conversation-report-auth-test-'));
+  const harness = createClient(root, async () => jsonResponse(401, { error: 'unauthorized' }, {
+    'x-request-id': 'req-conv-auth',
+  }), 'expired-token');
+
+  try {
+    const result = await harness.client.submitConversationDiagnosticReport({
+      source: 'desktop_chat',
+      conversationId: 'conversation-1',
+      provider: 'codex',
+      desktopVersion: '0.1.test',
+      platform: 'darwin',
+      occurredAt: '2026-05-17T00:00:00.000Z',
+      payload: { conversation: { messages: [{ role: 'user', content: 'debug' }] } },
+    });
+
+    assert.equal(result.success, false);
+    assert.equal(result.technicalCode, 'forger_cloud_auth_expired');
+    assert.match(result.userMessage, /Forger Cloud/);
+    const [entry] = await readLogEntries(root);
+    assert.equal(entry.technicalCode, 'forger_cloud_auth_expired');
+    assert.equal(entry.httpStatus, 401);
+  } finally {
+    harness.restore();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('submitConversationDiagnosticReport uploads sanitized diagnostic files as multipart attachments', async () => {
   const root = await mkdtemp(join(tmpdir(), 'forger-conversation-report-upload-test-'));
   let requestInit;
