@@ -1,4 +1,7 @@
+import type { AgentRuntime } from './agent-runtime';
+
 export type AutomationFrequencyType = 'hourly' | 'daily' | 'weekly';
+export type AutomationMissedRunPolicy = 'skip' | 'always' | 'within_window';
 
 export interface AutomationFrequency {
   type: AutomationFrequencyType;
@@ -27,6 +30,9 @@ export interface Automation {
   name: string;
   prompt: string;
   frequency: AutomationFrequency;
+  runtime?: AgentRuntime;
+  missedRunPolicy: AutomationMissedRunPolicy;
+  missedRunWindowMinutes?: number;
   selectedAppIds: string[];
   enabled: boolean;
   running: boolean;
@@ -45,6 +51,9 @@ export interface AutomationUpsertInput {
   name: string;
   prompt: string;
   frequency: AutomationFrequency;
+  runtime?: AgentRuntime;
+  missedRunPolicy?: AutomationMissedRunPolicy;
+  missedRunWindowMinutes?: number;
   selectedAppIds: string[];
   enabled?: boolean;
 }

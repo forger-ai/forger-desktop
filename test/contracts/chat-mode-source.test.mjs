@@ -32,7 +32,7 @@ test('renderer starts on Chat and binds the mode selector before starting runs',
 test('renderer keeps MCP-created apps in the current chat flow', async () => {
   const source = await readSource('src/renderer/app/RendererAppController.tsx');
 
-  assert.match(source, /if \(run\.createdApp\) \{[\s\S]*eventName: 'local_app_created'[\s\S]*void refreshApps\(\); \}/);
+  assert.match(source, /if \(run\.createdApp\) \{[\s\S]*usageAnalytics\.localAppCreated\(\{ appId: run\.createdApp\.appId[\s\S]*void refreshApps\(\); \}/);
   assert.doesNotMatch(source, /run\.createdApp[\s\S]{0,120}startCreatedAppConversation/);
 });
 

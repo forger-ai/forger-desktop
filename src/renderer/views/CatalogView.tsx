@@ -87,6 +87,7 @@ export function CatalogView({
     .map(({ app }) => app);
   const [reviewDialogApp, setReviewDialogApp] = useState<CatalogApp | null>(null);
   const [reviewDialogBusy, setReviewDialogBusy] = useState(false);
+  const [socialDownloadAccountDialogOpen, setSocialDownloadAccountDialogOpen] = useState(false);
   const signedIn = account.authenticated && Boolean(account.user?.confirmed);
   const closeReviewDialog = () => {
     setReviewDialogBusy(false);
@@ -115,18 +116,6 @@ export function CatalogView({
         <Typography color="text.secondary">{t.sections.catalog.subtitle}</Typography>
       </Stack>
       <Alert severity="warning">{t.sections.catalog.disclaimer}</Alert>
-      {!signedIn ? (
-        <Alert
-          severity="info"
-          action={
-            <Button color="inherit" size="small" onClick={onOpenCloudModal}>
-              {t.cloud.loginOrRegister}
-            </Button>
-          }
-        >
-          {t.sections.catalog.signInRequired}
-        </Alert>
-      ) : null}
       <Stack spacing={1}>
         <Stack direction="row" spacing={1.25} alignItems="center">
           <Typography variant="body2" color="text.secondary">
@@ -275,7 +264,7 @@ export function CatalogView({
                   if (!isInstalled) {
                     if (isSocialCatalogApp) {
                       if (!signedIn) {
-                        onOpenCloudModal();
+                        setSocialDownloadAccountDialogOpen(true);
                         return;
                       }
                       setReviewDialogApp(app);
@@ -324,6 +313,26 @@ export function CatalogView({
           </Button>
           <Button variant="contained" onClick={() => void continueInstall('reviewed')} disabled={reviewDialogBusy}>
             {t.social.reviewWithAiAction}
+          </Button>
+        </DialogActions>
+      </Dialog>
+      <Dialog open={socialDownloadAccountDialogOpen} onClose={() => setSocialDownloadAccountDialogOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>{t.sections.catalog.signInDownloadTitle}</DialogTitle>
+        <DialogContent>
+          <Typography color="text.secondary">{t.sections.catalog.signInDownloadBody}</Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setSocialDownloadAccountDialogOpen(false)}>
+            {t.actions.cancel}
+          </Button>
+          <Button
+            variant="contained"
+            onClick={() => {
+              setSocialDownloadAccountDialogOpen(false);
+              onOpenCloudModal();
+            }}
+          >
+            {t.sections.catalog.signInDownloadAction}
           </Button>
         </DialogActions>
       </Dialog>

@@ -48,6 +48,7 @@ import {
 import type { AgentPermissionMode, AgentProvider, AgentRuntime, AgentToolId, AntigravityEffort, PersonalAgent, PersonalAgentConversation, PersonalAgentConversationEvent, PersonalAgentGrantOptionTool, PersonalAgentGrantOptions, PersonalAgentMessage, PersonalAgentRunStatus, PersonalAgentWorkspaceEntry, PersonalAgentWorkspaceFile } from '@shared/types';
 import type { AppDictionary } from '@renderer/i18n';
 import { AGENT_PROVIDER_OPTIONS, ANTIGRAVITY_EFFORT_OPTIONS, ANTIGRAVITY_MODEL_OPTIONS, CLAUDE_EFFORT_OPTIONS, CLAUDE_MODEL_OPTIONS, CODEX_MODEL_OPTIONS, CODEX_REASONING_OPTIONS } from '@renderer/preferences';
+import { usageAnalytics } from '@renderer/usage-analytics';
 import { getAntigravitySupportedEfforts } from '@shared/agent-runtime-registry';
 import { MarkdownMessage } from './chat/MarkdownMessage';
 
@@ -386,6 +387,7 @@ export function AgentsView({ t, intelligenceProviderConfigured }: AgentsViewProp
       setCreateOpen(false);
       await loadAgents();
       setActiveAgentId(agent.id);
+      usageAnalytics.personalAgentCreated({ surface: 'agents', locale: t.locale });
     } catch (createError) {
       setError(personalAgentSaveErrorMessage(createError, t.agents.createError, t));
     } finally {
@@ -530,6 +532,7 @@ export function AgentsView({ t, intelligenceProviderConfigured }: AgentsViewProp
       setConversation(updated);
       setConversations((current) => upsertConversation(current, updated));
       setMessage('');
+      usageAnalytics.personalAgentMessageSent({ surface: 'agents', locale: t.locale });
     } catch (sendError) {
       setError(sendError instanceof Error ? sendError.message : t.agents.sendError);
     } finally {

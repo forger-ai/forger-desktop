@@ -40,11 +40,16 @@ import type {
   AppSummary,
   Automation,
   AutomationFrequency,
+  AutomationMissedRunPolicy,
   AutomationRun,
   AutomationRunSummary,
   AutomationUpsertInput,
+  AgentEffort,
+  AgentPermissionMode,
+  AgentProvider,
 } from '@shared/types';
 import type { AppDictionary } from '@renderer/i18n';
+import type { RuntimeProviderControls } from '@renderer/runtime-provider-controls';
 
 interface AutomationFormState {
   id?: string;
@@ -53,6 +58,12 @@ interface AutomationFormState {
   frequencyType: AutomationFrequency['type'];
   timeOfDay: string;
   weeklyDay: number;
+  runtimeProvider: AgentProvider | 'auto';
+  runtimeModel: string;
+  runtimeEffort: AgentEffort;
+  permissionMode: AgentPermissionMode;
+  missedRunPolicy: AutomationMissedRunPolicy;
+  missedRunWindowMinutes: number;
   selectedAppIds: string[];
   enabled: boolean;
 }
@@ -65,6 +76,8 @@ interface AutomationsViewProps {
   runs: AutomationRunSummary[];
   selectedRun: AutomationRun | null;
   busy: boolean;
+  providerOptions: Array<{ label: string; value: AgentProvider | 'auto' }>;
+  runtimeProviderControls: RuntimeProviderControls;
   getAppMeta: (appId: string) => { name: string; description: string };
   onSave: (input: AutomationUpsertInput & { id?: string }) => void;
   onDelete: (id: string) => void;
@@ -75,26 +88,75 @@ interface AutomationsViewProps {
   onSelectRun: (runId: string) => void;
 }
 
-const emptyForm = (): AutomationFormState => ({
+const DEFAULT_MISSED_WINDOWS: Record<AutomationFrequency['type'], number> = {
+  hourly: 30,
+  daily: 360,
+  weekly: 1440,
+};
+
+const missedWindowOptions = (frequencyType: AutomationFrequency['type']): Array<{ labelKey: 'minutes' | 'hours' | 'days'; value: number; amount: number }> => {
+  if (frequencyType === 'hourly') {
+    return [
+      { labelKey: 'minutes', value: 5, amount: 5 },
+      { labelKey: 'minutes', value: 15, amount: 15 },
+      { labelKey: 'minutes', value: 30, amount: 30 },
+      { labelKey: 'hours', value: 60, amount: 1 },
+    ];
+  }
+  if (frequencyType === 'daily') {
+    return [
+      { labelKey: 'hours', value: 60, amount: 1 },
+      { labelKey: 'hours', value: 180, amount: 3 },
+      { labelKey: 'hours', value: 360, amount: 6 },
+      { labelKey: 'hours', value: 720, amount: 12 },
+    ];
+  }
+  return [
+    { labelKey: 'hours', value: 360, amount: 6 },
+    { labelKey: 'hours', value: 720, amount: 12 },
+    { labelKey: 'days', value: 1440, amount: 1 },
+    { labelKey: 'days', value: 2880, amount: 2 },
+  ];
+};
+
+const emptyForm = (runtimeProviderControls: RuntimeProviderControls): AutomationFormState => {
+  const codex = runtimeProviderControls.codex;
+  return {
   name: '',
   prompt: '',
   frequencyType: 'hourly',
   timeOfDay: '09:00',
   weeklyDay: 1,
+  runtimeProvider: 'auto',
+  runtimeModel: codex.selectedModel || codex.modelOptions[0]?.realModelName || '',
+  runtimeEffort: codex.selectedEffort || codex.effortOptions[0]?.value || 'low',
+  permissionMode: 'safe',
+  missedRunPolicy: 'within_window',
+  missedRunWindowMinutes: DEFAULT_MISSED_WINDOWS.hourly,
   selectedAppIds: [],
   enabled: false,
-});
+  };
+};
 
-const formFromAutomation = (automation: Automation): AutomationFormState => ({
+const formFromAutomation = (automation: Automation, runtimeProviderControls: RuntimeProviderControls): AutomationFormState => {
+  const fallback = emptyForm(runtimeProviderControls);
+  return {
   id: automation.id,
   name: automation.name,
   prompt: automation.prompt,
   frequencyType: automation.frequency.type,
   timeOfDay: automation.frequency.timeOfDay ?? '09:00',
   weeklyDay: automation.frequency.weeklyDay ?? 1,
+  runtimeProvider: automation.runtime?.provider ?? 'auto',
+  runtimeModel: automation.runtime?.model ?? fallback.runtimeModel,
+  runtimeEffort: automation.runtime?.effort ?? fallback.runtimeEffort,
+  permissionMode: automation.runtime?.permissionMode ?? 'safe',
+  missedRunPolicy: automation.missedRunPolicy ?? 'within_window',
+  missedRunWindowMinutes: automation.missedRunWindowMinutes ?? DEFAULT_MISSED_WINDOWS[automation.frequency.type],
   selectedAppIds: automation.selectedAppIds,
   enabled: automation.enabled,
-});
+  };
+};
 
 const buildInput = (form: AutomationFormState, enabled = form.enabled): AutomationUpsertInput & { id?: string } => {
   const frequency: AutomationFrequency =
@@ -103,11 +165,22 @@ const buildInput = (form: AutomationFormState, enabled = form.enabled): Automati
       : form.frequencyType === 'daily'
         ? { type: 'daily', timeOfDay: form.timeOfDay }
         : { type: 'weekly', timeOfDay: form.timeOfDay, weeklyDay: form.weeklyDay };
+  const runtime = form.runtimeProvider === 'auto'
+    ? undefined
+    : {
+        provider: form.runtimeProvider,
+        model: form.runtimeModel,
+        effort: form.runtimeEffort,
+        permissionMode: form.permissionMode,
+      };
   return {
     id: form.id,
     name: form.name,
     prompt: form.prompt,
     frequency,
+    runtime,
+    missedRunPolicy: form.missedRunPolicy,
+    missedRunWindowMinutes: form.missedRunWindowMinutes,
     selectedAppIds: form.selectedAppIds,
     enabled,
   };
@@ -130,6 +203,17 @@ const statusColor = (status: AutomationRunSummary['status']): 'default' | 'succe
   if (status === 'skipped') return 'warning';
   if (status === 'running') return 'info';
   return 'default';
+};
+
+const formatFrequencyLabel = (automation: Automation, t: AppDictionary): string => {
+  if (automation.frequency.type === 'daily') {
+    return t.sections.automations.frequencySummaries.daily(automation.frequency.timeOfDay ?? '09:00');
+  }
+  if (automation.frequency.type === 'weekly') {
+    const day = t.sections.automations.weekdays[automation.frequency.weeklyDay ?? 1] ?? t.sections.automations.weekdays[1];
+    return t.sections.automations.frequencySummaries.weekly(day, automation.frequency.timeOfDay ?? '09:00');
+  }
+  return t.sections.automations.frequencyLabels.hourly;
 };
 
 function MarkdownRunOutput({ content }: { content: string }) {
@@ -191,6 +275,8 @@ export function AutomationsView({
   runs,
   selectedRun,
   busy,
+  providerOptions,
+  runtimeProviderControls,
   getAppMeta,
   onSave,
   onDelete,
@@ -202,13 +288,16 @@ export function AutomationsView({
 }: AutomationsViewProps) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [runLogOpen, setRunLogOpen] = useState(false);
-  const [form, setForm] = useState<AutomationFormState>(emptyForm);
+  const [form, setForm] = useState<AutomationFormState>(() => emptyForm(runtimeProviderControls));
   const selectedAutomation = useMemo(
     () => automations.find((automation) => automation.id === selectedAutomationId) ?? null,
     [automations, selectedAutomationId],
   );
   const allAppIds = apps.map((appEntry) => appEntry.id);
   const allSelected = allAppIds.length > 0 && allAppIds.every((appId) => form.selectedAppIds.includes(appId));
+  const effectiveProviderOptions = form.runtimeProvider !== 'auto' && !providerOptions.some((option) => option.value === form.runtimeProvider)
+    ? [...providerOptions, { label: form.runtimeProvider, value: form.runtimeProvider }]
+    : providerOptions;
 
   useEffect(() => {
     if (!selectedAutomationId && automations[0]) {
@@ -217,12 +306,12 @@ export function AutomationsView({
   }, [automations, selectedAutomationId, onSelectAutomation]);
 
   const openCreate = () => {
-    setForm(emptyForm());
+    setForm(emptyForm(runtimeProviderControls));
     setDialogOpen(true);
   };
 
   const openEdit = (automation: Automation) => {
-    setForm(formFromAutomation(automation));
+    setForm(formFromAutomation(automation, runtimeProviderControls));
     setDialogOpen(true);
   };
 
@@ -239,6 +328,10 @@ export function AutomationsView({
     onSave(buildInput(form, enabled));
     setDialogOpen(false);
   };
+  const selectedRuntimeControl = runtimeProviderControls[form.runtimeProvider === 'auto' ? 'codex' : form.runtimeProvider];
+  const runtimeModelOptions = selectedRuntimeControl.modelOptions;
+  const runtimeEffortOptions = selectedRuntimeControl.effortOptions;
+  const selectedMissedWindowOptions = missedWindowOptions(form.frequencyType);
 
   const runOutput = selectedRun?.userMessage?.trim()
     || (selectedRun?.status === 'failed' ? selectedRun.error : '')
@@ -291,7 +384,9 @@ export function AutomationsView({
                       <Typography variant="h6" sx={{ wordBreak: 'break-word' }}>{automation.name}</Typography>
                       <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
                         <Chip size="small" label={automation.running ? t.sections.automations.running : automation.enabled ? t.sections.automations.active : t.sections.automations.paused} color={automation.running ? 'info' : automation.enabled ? 'success' : 'default'} />
-                        <Chip size="small" variant="outlined" label={t.sections.automations.frequencyLabels[automation.frequency.type]} />
+                        <Chip size="small" variant="outlined" label={formatFrequencyLabel(automation, t)} />
+                        <Chip size="small" variant="outlined" label={automation.runtime?.provider ? providerOptions.find((option) => option.value === automation.runtime?.provider)?.label ?? automation.runtime.provider : t.sections.automations.autoProvider} />
+                        <Chip size="small" variant="outlined" label={automation.runtime?.permissionMode === 'unsafe' ? t.sections.automations.permissionUnsafe : t.sections.automations.permissionSafe} />
                       </Stack>
                     </Stack>
                     <Stack direction="row" spacing={0.25}>
@@ -468,6 +563,8 @@ export function AutomationsView({
         <DialogTitle>{form.id ? t.sections.automations.edit : t.sections.automations.newAutomation}</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ pt: 1 }}>
+            <Stack spacing={1}>
+              <Typography variant="subtitle2">{t.sections.automations.whatSection}</Typography>
             <TextField
               label={t.sections.automations.name}
               value={form.name}
@@ -482,13 +579,24 @@ export function AutomationsView({
               multiline
               minRows={4}
             />
+            </Stack>
+            <Divider />
+            <Stack spacing={1}>
+              <Typography variant="subtitle2">{t.sections.automations.whenSection}</Typography>
             <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5}>
               <FormControl fullWidth>
                 <InputLabel>{t.sections.automations.frequency}</InputLabel>
                 <Select
                   label={t.sections.automations.frequency}
                   value={form.frequencyType}
-                  onChange={(event) => setForm((current) => ({ ...current, frequencyType: event.target.value as AutomationFrequency['type'] }))}
+                  onChange={(event) => {
+                    const frequencyType = event.target.value as AutomationFrequency['type'];
+                    setForm((current) => ({
+                      ...current,
+                      frequencyType,
+                      missedRunWindowMinutes: DEFAULT_MISSED_WINDOWS[frequencyType],
+                    }));
+                  }}
                 >
                   <MenuItem value="hourly">{t.sections.automations.frequencyLabels.hourly}</MenuItem>
                   <MenuItem value="daily">{t.sections.automations.frequencyLabels.daily}</MenuItem>
@@ -498,6 +606,7 @@ export function AutomationsView({
               {form.frequencyType !== 'hourly' ? (
                 <TextField
                   label={t.sections.automations.timeOfDay}
+                  helperText={t.sections.automations.localTimeHelper}
                   type="time"
                   value={form.timeOfDay}
                   onChange={(event) => setForm((current) => ({ ...current, timeOfDay: event.target.value }))}
@@ -542,6 +651,112 @@ export function AutomationsView({
                 </FormControl>
               ) : null}
             </Stack>
+            <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5}>
+              <FormControl fullWidth>
+                <InputLabel>{t.sections.automations.missedRunPolicy}</InputLabel>
+                <Select
+                  label={t.sections.automations.missedRunPolicy}
+                  value={form.missedRunPolicy}
+                  onChange={(event) => setForm((current) => ({ ...current, missedRunPolicy: event.target.value as AutomationMissedRunPolicy }))}
+                >
+                  <MenuItem value="skip">{t.sections.automations.missedRunPolicies.skip}</MenuItem>
+                  <MenuItem value="always">{t.sections.automations.missedRunPolicies.always}</MenuItem>
+                  <MenuItem value="within_window">{t.sections.automations.missedRunPolicies.within_window}</MenuItem>
+                </Select>
+              </FormControl>
+              {form.missedRunPolicy === 'within_window' ? (
+                <FormControl fullWidth>
+                  <InputLabel>{t.sections.automations.missedRunWindow}</InputLabel>
+                  <Select
+                    label={t.sections.automations.missedRunWindow}
+                    value={form.missedRunWindowMinutes}
+                    onChange={(event) => setForm((current) => ({ ...current, missedRunWindowMinutes: Number(event.target.value) }))}
+                  >
+                    {selectedMissedWindowOptions.map((option) => (
+                      <MenuItem key={option.value} value={option.value}>{t.sections.automations.missedRunWindowLabels[option.labelKey](option.amount)}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              ) : null}
+            </Stack>
+            <Typography variant="caption" color="text.secondary">{t.sections.automations.missedRunHelper[form.missedRunPolicy]}</Typography>
+            </Stack>
+            <Divider />
+            <Stack spacing={1}>
+              <Typography variant="subtitle2">{t.sections.automations.agentSection}</Typography>
+              <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5}>
+                <FormControl fullWidth>
+                  <InputLabel>{t.sections.automations.provider}</InputLabel>
+                  <Select
+                    label={t.sections.automations.provider}
+                    value={form.runtimeProvider}
+                    onChange={(event) => {
+                      const provider = event.target.value as AgentProvider | 'auto';
+                      const control = runtimeProviderControls[provider === 'auto' ? 'codex' : provider];
+                      const model = control.modelOptions[0]?.realModelName ?? form.runtimeModel;
+                      setForm((current) => ({
+                        ...current,
+                        runtimeProvider: provider,
+                        runtimeModel: model,
+                        runtimeEffort: control.modelOptions[0]?.defaultEffort ?? control.effortOptions[0]?.value ?? current.runtimeEffort,
+                      }));
+                    }}
+                  >
+                    {effectiveProviderOptions.map((option) => (
+                      <MenuItem key={option.value} value={option.value}>{option.value === 'auto' ? t.sections.automations.autoProvider : option.label}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+                <FormControl fullWidth disabled={form.runtimeProvider === 'auto'}>
+                  <InputLabel>{t.sections.automations.model}</InputLabel>
+                  <Select
+                    label={t.sections.automations.model}
+                    value={form.runtimeModel}
+                    onChange={(event) => {
+                      const model = event.target.value;
+                      const option = runtimeModelOptions.find((entry) => entry.realModelName === model);
+                      setForm((current) => ({ ...current, runtimeModel: model, runtimeEffort: option?.defaultEffort ?? current.runtimeEffort }));
+                    }}
+                  >
+                    {runtimeModelOptions.map((option) => (
+                      <MenuItem key={option.realModelName} value={option.realModelName}>{option.displayModelName}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+                <FormControl fullWidth disabled={form.runtimeProvider === 'auto'}>
+                  <InputLabel>{t.sections.automations.effort}</InputLabel>
+                  <Select
+                    label={t.sections.automations.effort}
+                    value={form.runtimeEffort}
+                    onChange={(event) => setForm((current) => ({ ...current, runtimeEffort: event.target.value as AgentEffort }))}
+                  >
+                    {runtimeEffortOptions.map((option) => (
+                      <MenuItem key={option.value} value={option.value}>{option.label}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Stack>
+              <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5}>
+                <FormControl fullWidth>
+                  <InputLabel>{t.sections.automations.permissionMode}</InputLabel>
+                  <Select
+                    label={t.sections.automations.permissionMode}
+                    value={form.permissionMode}
+                    onChange={(event) => setForm((current) => ({ ...current, permissionMode: event.target.value as AgentPermissionMode }))}
+                  >
+                    <MenuItem value="safe">{t.sections.automations.permissionSafe}</MenuItem>
+                    <MenuItem value="unsafe">{t.sections.automations.permissionUnsafe}</MenuItem>
+                  </Select>
+                </FormControl>
+                <Box sx={{ flex: 1, display: 'flex', alignItems: 'center' }}>
+                  <Typography variant="caption" color="text.secondary">
+                    {form.permissionMode === 'unsafe' ? t.sections.automations.permissionUnsafeHelper : t.sections.automations.permissionSafeHelper}
+                  </Typography>
+                </Box>
+              </Stack>
+              <Typography variant="caption" color="text.secondary">{t.sections.automations.runtimeHelper}</Typography>
+            </Stack>
+            <Divider />
             <Stack spacing={1}>
               <Stack direction="row" justifyContent="space-between" alignItems="center">
                 <Typography variant="subtitle2">{t.sections.automations.includedApps}</Typography>

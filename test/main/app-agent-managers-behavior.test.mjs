@@ -1319,6 +1319,195 @@ test('app MCP manager starts one server per app, reuses listeners, releases it, 
     }
   });
 
+test('app MCP manager injects resolved app secret env and redacts MCP output logs', async () => {
+  const roots = await createTempDesktopRoots('forger-mcp-manager-secrets-');
+  try {
+    await mkdir(path.join(roots.appsRoot, 'finance-os', 'backend'), { recursive: true });
+    const appSecretValue = 'synthetic-app-secret-for-mcp-test';
+    const secretDeclaration = {
+      name: 'Provider API key',
+      required: true,
+      usage: 'Call the provider API.',
+    };
+    const children = [];
+    const logs = [];
+    const resolvedSecretCalls = [];
+    const childProcessMock = {
+      spawn(command, args, options) {
+        const child = createFakeChildProcess();
+        children.push({ child, command, args, options });
+        return child;
+      },
+    };
+
+    await withMockedModuleLoad(
+      (request) => request === 'node:child_process' ? childProcessMock : null,
+      async () => {
+        const { AppMcpManager } = distRequire('main/app-mcp-manager.js');
+        const manager = new AppMcpManager({
+          getInstalledApp: (appId) => appId === 'finance-os'
+            ? { appId, installDir: path.join(roots.appsRoot, appId), requiredPythonVersion: '3.12' }
+            : null,
+          resolveInstalledManifest: async () => ({
+            appSecrets: [secretDeclaration],
+            mcp: { command: 'python -m app.mcp' },
+          }),
+          resolveAppSecretsEnvironment: async (appId, manifest) => {
+            resolvedSecretCalls.push({ appId, manifest });
+            return {
+              env: { PROVIDER_API_KEY: appSecretValue },
+              missingRequired: [],
+              secretValues: [appSecretValue],
+              fingerprint: 'app-secrets-v1',
+            };
+          },
+          ensureRuntimeInstalled: async () => ({ rootDir: path.join(roots.root, 'runtime'), python: '/runtime/python' }),
+          ensureBackendPythonEnvironment: async () => undefined,
+          getVenvExecutables: (backendDir) => ({ python: path.join(backendDir, '.venv', 'bin', 'python'), pip: 'pip' }),
+          getFreePort: async () => 61234,
+          splitManifestCommand: (command) => command.split(/\s+/).filter(Boolean),
+          ensurePathInside: () => true,
+          translateManifestEnvironment: (environment) => ({ ...environment }),
+          ensureSqliteDatabaseParent: async () => undefined,
+          getRuntimePathEntries: () => [],
+          waitForHttpOk: async () => undefined,
+          terminateProcess: async () => undefined,
+          appendInstallLog: async (event, payload) => {
+            logs.push({ event, payload });
+          },
+          formatProcessOutputForInstallLog: (value, secretValues) =>
+            secretValues.reduce((output, secretValue) => output.split(secretValue).join('[secret]'), value),
+          truncateForInstallLog: (value) => value,
+          serializeErrorForInstallLog: (error) => ({ message: error.message }),
+        });
+
+        const configs = await manager.listenMcps(['finance-os'], 'run-with-secrets');
+        assert.equal(configs.length, 1);
+        assert.equal(children.length, 1);
+        assert.deepEqual(resolvedSecretCalls, [{
+          appId: 'finance-os',
+          manifest: {
+            appSecrets: [secretDeclaration],
+            mcp: { command: 'python -m app.mcp' },
+          },
+        }]);
+        assert.equal(children[0].options.env.PROVIDER_API_KEY, appSecretValue);
+
+        children[0].child.stdout.emit('data', Buffer.from(`stdout ${appSecretValue}`));
+        children[0].child.stderr.emit('data', Buffer.from(`stderr ${appSecretValue}`));
+        await waitFor(
+          () => logs.filter((entry) => entry.event === 'app_mcp:stdout' || entry.event === 'app_mcp:stderr').length === 2,
+          'mcp_secret_redacted_logs',
+        );
+        const streamLogs = logs.filter((entry) => entry.event === 'app_mcp:stdout' || entry.event === 'app_mcp:stderr');
+        assert.equal(streamLogs.some((entry) => entry.payload.text.includes(appSecretValue)), false);
+        assert.equal(streamLogs.every((entry) => entry.payload.text.includes('[secret]')), true);
+        manager.dispose();
+      },
+    );
+  } finally {
+    await roots.cleanup();
+  }
+});
+
+test('app MCP manager blocks missing required secrets and restarts when the secret fingerprint changes', async () => {
+  const roots = await createTempDesktopRoots('forger-mcp-manager-secret-fingerprint-');
+  try {
+    await mkdir(path.join(roots.appsRoot, 'finance-os', 'backend'), { recursive: true });
+    const secretDeclaration = {
+      name: 'Provider API key',
+      required: true,
+      usage: 'Call the provider API.',
+    };
+    const children = [];
+    const logs = [];
+    const terminations = [];
+    const startFailures = [];
+    let resolvedSecrets = {
+      env: {},
+      missingRequired: [secretDeclaration],
+      secretValues: [],
+      fingerprint: 'missing-required-secret',
+    };
+    const childProcessMock = {
+      spawn(command, args, options) {
+        const child = createFakeChildProcess();
+        children.push({ child, command, args, options });
+        return child;
+      },
+    };
+
+    await withMockedModuleLoad(
+      (request) => request === 'node:child_process' ? childProcessMock : null,
+      async () => {
+        const { AppMcpManager } = distRequire('main/app-mcp-manager.js');
+        const manager = new AppMcpManager({
+          getInstalledApp: (appId) => appId === 'finance-os'
+            ? { appId, installDir: path.join(roots.appsRoot, appId), requiredPythonVersion: '3.12' }
+            : null,
+          resolveInstalledManifest: async () => ({
+            appSecrets: [secretDeclaration],
+            mcp: { command: 'python -m app.mcp' },
+          }),
+          resolveAppSecretsEnvironment: async () => resolvedSecrets,
+          ensureRuntimeInstalled: async () => ({ rootDir: path.join(roots.root, 'runtime'), python: '/runtime/python' }),
+          ensureBackendPythonEnvironment: async () => undefined,
+          getVenvExecutables: (backendDir) => ({ python: path.join(backendDir, '.venv', 'bin', 'python'), pip: 'pip' }),
+          getFreePort: async () => 62345,
+          splitManifestCommand: (command) => command.split(/\s+/).filter(Boolean),
+          ensurePathInside: () => true,
+          translateManifestEnvironment: (environment) => ({ ...environment }),
+          ensureSqliteDatabaseParent: async () => undefined,
+          getRuntimePathEntries: () => [],
+          waitForHttpOk: async () => undefined,
+          terminateProcess: async (child) => {
+            terminations.push(child);
+          },
+          appendInstallLog: async (event, payload) => {
+            logs.push({ event, payload });
+          },
+          formatProcessOutputForInstallLog: (value) => value,
+          truncateForInstallLog: (value) => value,
+          serializeErrorForInstallLog: (error) => ({ message: error.message }),
+          onMcpStartFailed: (input) => startFailures.push(input),
+        });
+
+        assert.deepEqual(await manager.listenMcps(['finance-os'], 'run-missing-secret'), []);
+        assert.equal(children.length, 0);
+        assert.equal(startFailures.length, 1);
+        assert.equal(startFailures[0].error.message, 'required_app_secrets_missing');
+        assert.equal(logs.some((entry) => entry.event === 'app_mcp:start_failed' && entry.payload.error.technicalCode === 'required_app_secrets_missing'), true);
+
+        resolvedSecrets = {
+          env: { PROVIDER_API_KEY: 'synthetic-app-secret-v1' },
+          missingRequired: [],
+          secretValues: ['synthetic-app-secret-v1'],
+          fingerprint: 'app-secrets-v1',
+        };
+        const firstConfig = (await manager.listenMcps(['finance-os'], 'run-secret-v1'))[0];
+        assert.equal(children.length, 1);
+        assert.equal(children[0].options.env.PROVIDER_API_KEY, 'synthetic-app-secret-v1');
+        manager.releaseMcps('run-secret-v1');
+
+        resolvedSecrets = {
+          env: { PROVIDER_API_KEY: 'synthetic-app-secret-v2' },
+          missingRequired: [],
+          secretValues: ['synthetic-app-secret-v2'],
+          fingerprint: 'app-secrets-v2',
+        };
+        const restartedConfig = (await manager.listenMcps(['finance-os'], 'run-secret-v2'))[0];
+        assert.equal(children.length, 2);
+        assert.equal(terminations.includes(children[0].child), true);
+        assert.equal(children[1].options.env.PROVIDER_API_KEY, 'synthetic-app-secret-v2');
+        assert.notEqual(restartedConfig.token, firstConfig.token);
+        manager.dispose();
+      },
+    );
+  } finally {
+    await roots.cleanup();
+  }
+});
+
 test('conversation manager executes a codex run with scoped workspace, MCP sessions, attachments, and progress', async () => {
   const roots = await createTempDesktopRoots('forger-conversation-exec-');
   try {
@@ -2631,7 +2820,7 @@ test('app MCP manager handles stale listeners, stop timers, shutdown reuse, and 
     await withMockedModuleLoad(
       (request) => request === 'node:child_process' ? childProcessMock : null,
       async () => {
-        const { AppMcpManager } = distRequire('main/app-mcp-manager.js');
+        const { AppMcpManager, createAppMcpSecretsFingerprint } = distRequire('main/app-mcp-manager.js');
         const manager = new AppMcpManager({
           getInstalledApp: (appId) => appId === 'finance-os' || appId === 'no-mcp'
             ? { appId, installDir: path.join(roots.appsRoot, appId), requiredPythonVersion: '3.12' }
@@ -2676,6 +2865,7 @@ test('app MCP manager handles stale listeners, stop timers, shutdown reuse, and 
         state.url = 'http://127.0.0.1:1234/mcp';
         state.token = 'existing-token';
         state.tokenEnvVar = 'FORGER_APP_MCP_TOKEN_FINANCE_OS';
+        state.secretsFingerprint = createAppMcpSecretsFingerprint({});
         state.toolTimeoutSec = 99;
         state.stopTimer = setTimeout(() => {}, 10_000);
         const reused = await manager.listenMcps(['finance-os'], 'run-reuse');
@@ -2734,7 +2924,7 @@ test('app MCP manager reuses an up server after an in-flight shutdown completes'
   try {
     const appRoot = path.join(roots.appsRoot, 'finance-os');
     await mkdir(appRoot, { recursive: true });
-    const { AppMcpManager } = distRequire('main/app-mcp-manager.js');
+    const { AppMcpManager, createAppMcpSecretsFingerprint } = distRequire('main/app-mcp-manager.js');
     const manager = new AppMcpManager({
       getInstalledApp: () => ({ appId: 'finance-os', installDir: appRoot }),
       resolveInstalledManifest: async () => ({ mcp: { type: 'http', command: 'python -m app.mcp' } }),
@@ -2754,6 +2944,7 @@ test('app MCP manager reuses an up server after an in-flight shutdown completes'
     state.url = 'http://127.0.0.1:5678';
     state.token = 'token';
     state.tokenEnvVar = 'FINANCE_TOKEN';
+    state.secretsFingerprint = createAppMcpSecretsFingerprint({});
     state.stopPromise = {
       catch: async () => {
         state.status = 'up';
@@ -2778,7 +2969,7 @@ test('app MCP manager returns an existing up server without restarting it', asyn
   try {
     const appRoot = path.join(roots.appsRoot, 'finance-os');
     await mkdir(appRoot, { recursive: true });
-    const { AppMcpManager } = distRequire('main/app-mcp-manager.js');
+    const { AppMcpManager, createAppMcpSecretsFingerprint } = distRequire('main/app-mcp-manager.js');
     const manager = new AppMcpManager({
       getInstalledApp: () => ({ appId: 'finance-os', installDir: appRoot }),
       resolveInstalledManifest: async () => ({ mcp: { type: 'http', command: 'python -m app.mcp' } }),
@@ -2800,6 +2991,7 @@ test('app MCP manager returns an existing up server without restarting it', asyn
     state.url = 'http://127.0.0.1:5678';
     state.token = 'token';
     state.tokenEnvVar = 'FINANCE_TOKEN';
+    state.secretsFingerprint = createAppMcpSecretsFingerprint({});
 
     assert.deepEqual(await manager.listenOne('finance-os', 'run-1'), {
       name: 'app_finance-os',
