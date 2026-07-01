@@ -25,6 +25,7 @@ const EXPECTED_ERROR_CODES = new Set([
   'app_not_installed',
   'app_update_conflict',
   'auth_missing',
+  'backend_client_missing',
   'canceled',
   'codex_auth_missing',
   'codex_auth_expired',

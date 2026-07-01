@@ -294,6 +294,7 @@ export const runCommandCapture = async (
     onChild?: (child: ChildProcessWithoutNullStreams) => void;
     onStdout?: (text: string) => void;
     onStderr?: (text: string) => void;
+    stdinText?: string;
   },
 ): Promise<LlmChatCommandResult> => {
   return await new Promise<LlmChatCommandResult>((resolve, reject) => {
@@ -308,7 +309,7 @@ export const runCommandCapture = async (
     });
 
     options.onChild?.(child);
-    child.stdin.end();
+    child.stdin.end(options.stdinText ?? '');
 
     let stdout = '';
     let stderr = '';

@@ -13,6 +13,7 @@ export const esSections = {
       refresh: 'Recargar apps',
       filtersLabel: 'Explorar por categoría',
       statusFilterLabel: 'Filtrar por: Estado',
+      signInRequired: 'Inicia sesión o crea una cuenta para instalar apps de Social y revisar quién las publicó.',
       createdBy: (username: string) => `Creado por ${username}`,
       statusFilters: {
         all: 'Todas',
@@ -96,7 +97,7 @@ export const esSections = {
       stopSuccess: 'Respuesta detenida.',
       stopFailed: 'No pude detener la respuesta.',
       newConversation: 'Nueva conversación',
-      notifyForger: 'Notify',
+      notifyForger: 'Reportar',
       notifyForgerTooltip: 'Compartir esta conversación sanitizada con soporte de Forger',
       showHistoryTooltip: 'Mostrar historial',
       historyTitle: 'Historial de conversaciones',

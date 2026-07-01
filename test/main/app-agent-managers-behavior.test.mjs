@@ -1921,12 +1921,12 @@ test('conversation manager executes a claude run with resume state and cleans MC
         assert.equal((await manager.get('finance-os', 'claude-thread')).messages.at(-1).text, 'Claude finished the review.');
         assert.equal(commandCalls.length, 1);
         assert.equal(commandCalls[0].command, '/usr/local/bin/claude');
-        assert.equal(commandCalls[0].options.stdinText, undefined);
+        assert.equal(commandCalls[0].options.stdinText, 'continue with Claude');
         assert.equal(commandCalls[0].options.env.CODEX_HOME, undefined);
         assert.equal(commandCalls[0].options.env.FORGER_MCP_TOKEN, 'claude-token');
         assert.equal(commandCalls[0].args.includes('--resume'), true);
         assert.equal(commandCalls[0].args.includes('claude-session-old'), true);
-        assert.equal(commandCalls[0].args[1], 'continue with Claude');
+        assert.equal(commandCalls[0].args.includes('continue with Claude'), false);
         const mcpConfigIndex = commandCalls[0].args.indexOf('--mcp-config');
         assert.notEqual(mcpConfigIndex, -1);
         assert.equal(await readFile(commandCalls[0].args[mcpConfigIndex + 1], 'utf8').then(() => 'exists', () => 'removed'), 'removed');
@@ -2384,12 +2384,12 @@ test('task manager executes a claude task through legacy attachments without cod
         assert.equal(completed.task.resultText, 'Claude summarized the attachment.');
         assert.equal(commandCalls.length, 1);
         assert.equal(commandCalls[0].command, '/usr/local/bin/claude');
-        assert.equal(commandCalls[0].options.stdinText, undefined);
+        assert.match(commandCalls[0].options.stdinText, /notes\.txt/);
         assert.equal(commandCalls[0].options.env.CODEX_HOME, undefined);
         const mcpConfigIndex = commandCalls[0].args.indexOf('--mcp-config');
         assert.notEqual(mcpConfigIndex, -1);
         assert.equal(await readFile(commandCalls[0].args[mcpConfigIndex + 1], 'utf8').then(() => 'exists', () => 'removed'), 'removed');
-        assert.match(commandCalls[0].args[1], /notes\.txt/);
+        assert.equal(commandCalls[0].args.some((arg) => /notes\.txt/.test(arg)), false);
         assert.deepEqual(removedHomes, []);
       },
     );

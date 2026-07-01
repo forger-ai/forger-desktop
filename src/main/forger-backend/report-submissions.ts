@@ -170,7 +170,10 @@ export const submitConversationDiagnosticReport = async (
     });
     const requestId = responseRequestId(response);
     if (!response.ok) {
-      const technicalCode = `conversation_diagnostic_report_failed_${response.status}`;
+      const authFailed = response.status === 401 || response.status === 403;
+      const technicalCode = authFailed
+        ? 'forger_cloud_auth_expired'
+        : `conversation_diagnostic_report_failed_${response.status}`;
       await options.appendReportingLog('conversation_diagnostic_report:submit_failed', {
         ...logBase,
         success: false,
@@ -178,7 +181,13 @@ export const submitConversationDiagnosticReport = async (
         requestId,
         technicalCode,
       });
-      return { success: false, userMessage: 'No pudimos enviar el reporte de conversación.', technicalCode };
+      return {
+        success: false,
+        userMessage: authFailed
+          ? 'Inicia sesión en Forger Cloud para enviar el reporte de conversación.'
+          : 'No pudimos enviar el reporte de conversación.',
+        technicalCode,
+      };
     }
     await options.appendReportingLog('conversation_diagnostic_report:submit_success', {
       ...logBase,

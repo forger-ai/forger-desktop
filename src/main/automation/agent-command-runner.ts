@@ -251,6 +251,7 @@ const runCommandCapture = async (
     timeoutMs?: number;
     onStdout?: (text: string) => void;
     onStderr?: (text: string) => void;
+    stdinText?: string;
   },
 ): Promise<LlmAutomationCommandResult> => {
   return await new Promise<LlmAutomationCommandResult>((resolve, reject) => {
@@ -264,7 +265,7 @@ const runCommandCapture = async (
       stdio: ['pipe', 'pipe', 'pipe'],
       detached: process.platform !== 'win32',
     });
-    child.stdin.end();
+    child.stdin.end(options.stdinText ?? '');
 
     let stdout = '';
     let stderr = '';

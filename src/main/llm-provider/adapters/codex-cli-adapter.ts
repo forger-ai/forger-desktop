@@ -150,6 +150,7 @@ export class CodexCliAdapter {
               cwd: input.workingDir,
               env: this.buildEnv(input, command, isolatedCodexHome),
               inactivityTimeoutMs: CODEX_ATTEMPT_INACTIVITY_TIMEOUT_MS,
+              stdinText: input.prompt,
               onChild: input.onChild,
               onStdout: (text) => input.onOutput?.('stdout', text),
               onStderr: (text) => input.onOutput?.('stderr', text),
@@ -336,7 +337,8 @@ export class CodexCliAdapter {
   }
 
   private buildChatError(lastResult: CodexCommandResult | null, lastErrorMessage: string): Error {
-    const message = (lastResult?.stderr || lastResult?.stdout || lastErrorMessage || 'codex_exec_failed').trim();
+    const resultMessage = (lastResult?.stderr || lastResult?.stdout || '').trim();
+    const message = (lastErrorMessage || resultMessage || 'codex_exec_failed').trim();
     const parsed = parseCodexJsonl(lastResult?.stdout ?? '', lastResult?.stderr ?? '');
     const authFailure = classifyCodexAuthOutput(
       [lastResult?.stdout, lastErrorMessage].filter(Boolean).join('\n'),
@@ -461,17 +463,17 @@ const buildChatAttempts = (input: CodexChatRunInput, mcpServers: LlmMcpServerCon
   const commonArgs = ['--skip-git-repo-check', '-C', input.workingDir];
   return input.threadId
     ? [
-        ['exec', 'resume', '--json', ...modelArgs, ...reasoningArgs, ...networkArgs, ...mcpArgs, ...codexUnsafeArgs(input.permissionMode), ...codexWorkspaceArgs(input.permissionMode), '--skip-git-repo-check', input.threadId, input.prompt],
-        ['exec', 'resume', '--json', ...modelArgs, ...reasoningArgs, ...networkArgs, ...mcpArgs, '--skip-git-repo-check', input.threadId, input.prompt],
-        ['exec', 'resume', '--json', ...modelArgs, ...mcpArgs, '--skip-git-repo-check', input.threadId, input.prompt],
-        ['exec', 'resume', ...modelArgs, ...mcpArgs, '--skip-git-repo-check', input.threadId, input.prompt],
+        ['exec', 'resume', '--json', ...modelArgs, ...reasoningArgs, ...networkArgs, ...mcpArgs, '--skip-git-repo-check', '--', input.threadId, '-'],
+        ['exec', 'resume', '--json', ...modelArgs, ...reasoningArgs, ...networkArgs, ...mcpArgs, '--skip-git-repo-check', '--', input.threadId, '-'],
+        ['exec', 'resume', '--json', ...modelArgs, ...mcpArgs, '--skip-git-repo-check', '--', input.threadId, '-'],
+        ['exec', 'resume', ...modelArgs, ...mcpArgs, '--skip-git-repo-check', '--', input.threadId, '-'],
       ]
     : [
-        ['exec', '--json', ...modelArgs, ...reasoningArgs, ...networkArgs, ...mcpArgs, ...codexUnsafeArgs(input.permissionMode), ...codexWorkspaceArgs(input.permissionMode), ...commonArgs, input.prompt],
-        ['exec', '--json', ...modelArgs, ...reasoningArgs, ...networkArgs, ...mcpArgs, ...codexUnsafeArgs(input.permissionMode), ...codexWorkspaceArgs(input.permissionMode), ...commonArgs, input.prompt],
-        ['exec', '--json', ...modelArgs, ...networkArgs, ...mcpArgs, ...codexUnsafeArgs(input.permissionMode), ...codexWorkspaceArgs(input.permissionMode), ...commonArgs, input.prompt],
-        ['exec', '--json', ...modelArgs, ...networkArgs, ...mcpArgs, ...commonArgs, input.prompt],
-        ['exec', ...modelArgs, ...networkArgs, ...mcpArgs, ...commonArgs, input.prompt],
+        ['exec', '--json', ...modelArgs, ...reasoningArgs, ...networkArgs, ...mcpArgs, ...codexUnsafeArgs(input.permissionMode), ...codexWorkspaceArgs(input.permissionMode), ...commonArgs, '--', '-'],
+        ['exec', '--json', ...modelArgs, ...reasoningArgs, ...networkArgs, ...mcpArgs, ...codexUnsafeArgs(input.permissionMode), ...codexWorkspaceArgs(input.permissionMode), ...commonArgs, '--', '-'],
+        ['exec', '--json', ...modelArgs, ...networkArgs, ...mcpArgs, ...codexUnsafeArgs(input.permissionMode), ...codexWorkspaceArgs(input.permissionMode), ...commonArgs, '--', '-'],
+        ['exec', '--json', ...modelArgs, ...networkArgs, ...mcpArgs, ...commonArgs, '--', '-'],
+        ['exec', ...modelArgs, ...networkArgs, ...mcpArgs, ...commonArgs, '--', '-'],
       ];
 };
 

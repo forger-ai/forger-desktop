@@ -863,11 +863,25 @@ const installSocialAppRuntime = async (input: SocialInstallInput, localeInput?: 
     }
     return { ...result, appId: localAppId, userMessage: result.success && !updatingExistingInstall ? copy.install.completed : result.userMessage };
   } catch (error) {
-    const diagnostic = failureDiagnostic(error, 'social_install_failed');
+    const errorRecord = error && typeof error === 'object' ? error as {
+      technicalCode?: unknown;
+      details?: unknown;
+      message?: unknown;
+    } : {};
+    const technicalCode = typeof errorRecord.technicalCode === 'string' ? errorRecord.technicalCode : undefined;
+    const details = errorRecord.details && typeof errorRecord.details === 'object' && !Array.isArray(errorRecord.details)
+      ? errorRecord.details as Record<string, unknown>
+      : undefined;
+    const diagnostic = technicalCode
+      ? { technicalCode, ...(details ? { details } : {}) }
+      : failureDiagnostic(error, 'social_install_failed');
+    const userMessage = technicalCode === 'forger_cloud_auth_expired' && error instanceof Error
+      ? error.message
+      : 'No pudimos instalar esta app de Social.';
     return {
       success: false,
       phase: 'failed',
-      userMessage: 'No pudimos instalar esta app de Social.',
+      userMessage,
       progress: installProgressByPhase.failed,
       ...diagnostic,
     };

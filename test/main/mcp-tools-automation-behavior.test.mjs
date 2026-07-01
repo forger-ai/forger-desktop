@@ -2151,10 +2151,12 @@ test('automation command runner writes transient Claude MCP config and removes i
     '#!/usr/bin/env node',
     'const fs = require("node:fs");',
     'const args = process.argv.slice(2);',
+    'const stdin = fs.readFileSync(0, "utf8");',
     'const configIndex = args.indexOf("--mcp-config");',
     'const configPath = configIndex >= 0 ? args[configIndex + 1] : "";',
     `fs.writeFileSync(${JSON.stringify(capturePath)}, JSON.stringify({`,
     '  args,',
+    '  stdin,',
     '  configPath,',
     '  config: configPath ? JSON.parse(fs.readFileSync(configPath, "utf8")) : null,',
     '  env: { CODEX_HOME: process.env.CODEX_HOME, TOOL_TOKEN: process.env.TOOL_TOKEN },',
@@ -2188,7 +2190,8 @@ test('automation command runner writes transient Claude MCP config and removes i
     assert.equal(capture.env.CODEX_HOME, undefined);
     assert.equal(capture.env.TOOL_TOKEN, 'tool-token');
     assert.equal(capture.config.mcpServers.forger.headers.Authorization, 'Bearer ${TOOL_TOKEN}');
-    assert.deepEqual(capture.args.slice(0, 2), ['-p', 'Resume']);
+    assert.deepEqual(capture.args.slice(0, 2), ['-p', '--output-format']);
+    assert.equal(capture.stdin, 'Resume');
     assert.ok(capture.args.includes('--permission-mode'));
     await assert.rejects(access(capture.configPath));
   } finally {
