@@ -106,6 +106,7 @@ export const IPC_CHANNELS = {
   getCloudStorageUsage: 'forger:cloud-storage:get',
   getCloudDevices: 'forger:cloud-devices:get',
   registerCloudDevice: 'forger:cloud-devices:register',
+  updateCloudDeviceName: 'forger:cloud-devices:update-name',
   unlinkMobileDeviceFromDesktop: 'forger:cloud-devices:unlink-mobile',
   generateDevicePairingCode: 'forger:cloud-devices:pairing-code',
   acceptMobilePairingRequest: 'forger:cloud-devices:pairing-accept',

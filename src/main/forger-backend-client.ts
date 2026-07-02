@@ -631,6 +631,28 @@ export class ForgerBackendClient {
     return normalizeCloudDevice(payload) as CloudDeviceSummary & { registered: boolean };
   }
 
+  async updateDeviceName(input: { deviceId: number; name: string }): Promise<CloudDeviceSummary> {
+    const response = await fetch(`${this.options.backendBaseUrl}/api/v1/me/devices/${input.deviceId}`, {
+      method: 'PATCH',
+      headers: {
+        ...buildBackendHeaders(this.options.token()),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        name: input.name,
+      }),
+    });
+    if (!response.ok) {
+      throw backendError('Forger Cloud session is no longer valid.', `device_name_update_failed_${response.status}`);
+    }
+    const payload = await this.readJson<Record<string, unknown>>(response);
+    const device = normalizeCloudDevice(payload);
+    if (!device) {
+      throw backendError('Forger Cloud response was invalid.', 'device_name_update_payload_invalid');
+    }
+    return device;
+  }
+
   async listDevices(): Promise<CloudDeviceSummary[]> {
     const response = await fetch(`${this.options.backendBaseUrl}/api/v1/me/devices`, {
       method: 'GET',

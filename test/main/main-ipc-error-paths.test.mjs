@@ -816,6 +816,7 @@ test('main IPC delegates common service handlers and returns backend-missing fal
     }),
     cloudDeviceManager: {
       getState: async () => ({ connected: true }),
+      updateCloudDeviceName: async (input) => ({ success: true, updated: input.name }),
       generatePairingCode: async () => ({ success: true, pairingCode: 'ABC12345' }),
       start: async () => calls.push(['cloudDeviceStart']),
     },
@@ -882,6 +883,7 @@ test('main IPC delegates common service handlers and returns backend-missing fal
   assert.equal((await handlers.get(IPC_CHANNELS.submitAppRating)(null, { appId: 'finance-os' })).technicalCode, 'backend_client_missing');
 
   assert.deepEqual(await handlers.get(IPC_CHANNELS.getCloudDevices)(), { connected: true });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.updateCloudDeviceName)(null, { name: 'Studio Mac' }), { success: true, updated: 'Studio Mac' });
   assert.equal((await handlers.get(IPC_CHANNELS.generateDevicePairingCode)()).pairingCode, 'ABC12345');
   assert.equal((await handlers.get(IPC_CHANNELS.getCloudIdentity)()).keyFingerprint, 'fingerprint');
   assert.equal((await handlers.get(IPC_CHANNELS.revealCloudSecretKey)()).privateKey, 'secret');
@@ -1169,6 +1171,7 @@ test('main IPC covers conflict, backup, memory, secret, cloud-device, and free-c
   });
 
   assert.deepEqual(await handlers.get(IPC_CHANNELS.getCloudDevices)(), { devices: [], connected: false });
+  assert.equal((await handlers.get(IPC_CHANNELS.updateCloudDeviceName)(null, { name: 'Studio Mac' })).technicalCode, 'cloud_device_manager_missing');
   assert.equal((await handlers.get(IPC_CHANNELS.generateDevicePairingCode)()).technicalCode, 'cloud_device_manager_missing');
   assert.equal((await handlers.get(IPC_CHANNELS.createUserSecret)(null, { name: 'API key' })).id, 'secret-created');
   assert.equal((await handlers.get(IPC_CHANNELS.updateUserSecret)(null, { id: 'secret-1' })).id, 'secret-1');

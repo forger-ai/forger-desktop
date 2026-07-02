@@ -224,6 +224,77 @@ test('submitAppRating routes Social app reviews by user app id and reports focus
   }
 });
 
+test('cloud device client registers, renames, and lists desktop devices', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'forger-cloud-devices-test-'));
+  const requests = [];
+  const harness = createClient(root, async (url, init) => {
+    requests.push({ url, init });
+    const parsed = new URL(url);
+    if (parsed.pathname === '/api/v1/me/devices/register') {
+      return jsonResponse(201, {
+        id: 7,
+        device_uid: 'desktop-uid',
+        name: 'Studio Mac',
+        device_kind: 'desktop',
+        platform: 'darwin_arm64',
+        paired: true,
+        online: true,
+        installed_apps: [],
+      });
+    }
+    if (parsed.pathname === '/api/v1/me/devices/7' && init.method === 'PATCH') {
+      return jsonResponse(200, {
+        id: 7,
+        device_uid: 'desktop-uid',
+        name: 'Renamed Mac',
+        device_kind: 'desktop',
+        platform: 'darwin_arm64',
+        paired: true,
+        online: true,
+        installed_apps: [],
+      });
+    }
+    if (parsed.pathname === '/api/v1/me/devices') {
+      return jsonResponse(200, [{
+        id: 7,
+        device_uid: 'desktop-uid',
+        name: 'Renamed Mac',
+        device_kind: 'desktop',
+        platform: 'darwin_arm64',
+        paired: true,
+        online: true,
+        installed_apps: [],
+      }]);
+    }
+    return jsonResponse(404, { error: 'not_found' });
+  }, 'session-token');
+
+  try {
+    const registered = await harness.client.registerDevice({
+      deviceUid: 'desktop-uid',
+      deviceSecret: 'secret',
+      name: 'Studio Mac',
+      platform: 'darwin_arm64',
+      deviceKind: 'desktop',
+      publicKey: 'public',
+      keyFingerprint: 'fingerprint',
+    });
+    const renamed = await harness.client.updateDeviceName({ deviceId: 7, name: 'Renamed Mac' });
+    const listed = await harness.client.listDevices();
+
+    assert.equal(registered.name, 'Studio Mac');
+    assert.equal(renamed.name, 'Renamed Mac');
+    assert.equal(listed[0].name, 'Renamed Mac');
+    assert.equal(requests[0].init.method, 'POST');
+    assert.equal(requests[0].init.headers.Authorization, 'Bearer session-token');
+    assert.deepEqual(JSON.parse(requests[1].init.body), { name: 'Renamed Mac' });
+    assert.equal(requests[1].init.method, 'PATCH');
+  } finally {
+    harness.restore();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('mobile desktop authorization client lists and revokes mobile links', async () => {
   const root = await mkdtemp(join(tmpdir(), 'forger-mobile-auth-test-'));
   const requests = [];

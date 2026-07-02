@@ -141,9 +141,10 @@ export class CloudDeviceManager {
         return;
       }
       if (!this.stored?.cloudId) {
-        this.lastMessage = undefined;
-        this.lastTechnicalCode = undefined;
-        return;
+        await this.registerDevice('');
+        if (generation !== this.generation) {
+          return;
+        }
       }
       await this.refreshDevices();
       if (generation !== this.generation) {
@@ -185,10 +186,11 @@ export class CloudDeviceManager {
         }
         this.activeSessionKey = sessionKey;
         await this.loadRegisteredDevice();
-        if (this.stored?.cloudId) {
-          await this.refreshDevices();
-          this.connectSocket(this.generation);
+        if (!this.stored?.cloudId) {
+          await this.registerDevice('');
         }
+        await this.refreshDevices();
+        this.connectSocket(this.generation);
       } catch (error) {
         await this.handleCloudError(error, 'No pudimos revisar los dispositivos conectados.', 'cloud_devices_state_failed');
       }
@@ -211,6 +213,35 @@ export class CloudDeviceManager {
       return { ...this.state(), success: true };
     } catch (error) {
       await this.handleCloudError(error, 'No pudimos registrar este equipo en Forger Cloud.', 'cloud_device_register_failed');
+      return { ...this.state(), success: false };
+    }
+  }
+
+  async updateCloudDeviceName(input: { name: string }): Promise<CloudDevicesState & { success: boolean }> {
+    try {
+      const sessionKey = this.options.accountStorageKey();
+      if (this.activeSessionKey && this.activeSessionKey !== sessionKey) {
+        this.stop();
+      }
+      this.activeSessionKey = sessionKey;
+      await this.loadRegisteredDevice();
+      const device = this.currentDevice;
+      const client = this.options.backendClient();
+      if (!device || !client) {
+        throw new Error('cloud_device_not_registered');
+      }
+      const updatedDevice = await client.updateDeviceName({
+        deviceId: device.id,
+        name: input.name,
+      });
+      this.currentDevice = updatedDevice;
+      this.devices = this.devices.map((entry) => (entry.id === updatedDevice.id ? updatedDevice : entry));
+      await this.refreshDevices();
+      this.lastMessage = `${updatedDevice.name} esta actualizado.`;
+      this.lastTechnicalCode = undefined;
+      return { ...this.state(), success: true };
+    } catch (error) {
+      await this.handleCloudError(error, 'No pudimos actualizar el nombre de este equipo.', 'cloud_device_name_update_failed');
       return { ...this.state(), success: false };
     }
   }

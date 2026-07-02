@@ -4,21 +4,19 @@ import {
   Box,
   Button,
   Chip,
-  CircularProgress,
   Dialog,
   DialogActions,
   DialogContent,
   DialogTitle,
-  Divider,
   Paper,
   Stack,
   TextField,
   Typography,
 } from '@mui/material';
 import CheckRounded from '@mui/icons-material/CheckRounded';
-import CloudUploadRounded from '@mui/icons-material/CloudUploadRounded';
 import CloseRounded from '@mui/icons-material/CloseRounded';
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
+import EditRounded from '@mui/icons-material/EditRounded';
 import LinkOffRounded from '@mui/icons-material/LinkOffRounded';
 import RefreshRounded from '@mui/icons-material/RefreshRounded';
 import { alpha, useTheme } from '@mui/material/styles';
@@ -39,9 +37,9 @@ export function DevicesView({ account, t }: DevicesViewProps) {
   const theme = useTheme();
   const [state, setState] = useState<CloudDevicesState>(emptyState);
   const [busy, setBusy] = useState(false);
-  const [registerOpen, setRegisterOpen] = useState(false);
+  const [editNameOpen, setEditNameOpen] = useState(false);
   const [unlinkAuthorizationId, setUnlinkAuthorizationId] = useState<number | null>(null);
-  const [deviceName, setDeviceName] = useState('');
+  const [deviceNameDraft, setDeviceNameDraft] = useState('');
 
   const refresh = async () => {
     setBusy(true);
@@ -56,11 +54,16 @@ export function DevicesView({ account, t }: DevicesViewProps) {
     void refresh();
   }, []);
 
-  const registerDevice = async () => {
+  const openEditName = () => {
+    setDeviceNameDraft(currentDevice?.name ?? t.sections.devices.fallbackDesktopName);
+    setEditNameOpen(true);
+  };
+
+  const updateDeviceName = async () => {
     setBusy(true);
     try {
-      setState(await window.forger.registerCloudDevice({ name: deviceName }));
-      setRegisterOpen(false);
+      setState(await window.forger.updateCloudDeviceName({ name: deviceNameDraft }));
+      setEditNameOpen(false);
     } finally {
       setBusy(false);
     }
@@ -151,23 +154,15 @@ export function DevicesView({ account, t }: DevicesViewProps) {
                 {currentDevice?.name ?? t.sections.devices.fallbackDesktopName} · {currentDeviceOnline ? t.sections.devices.connected : t.sections.devices.notConnected}
               </Typography>
             </Box>
-            <Chip color={currentDeviceOnline ? 'success' : 'default'} label={currentDeviceOnline ? t.sections.devices.online : t.sections.devices.offline} />
-          </Stack>
-
-          {!currentDevice ? (
-            <>
-              <Divider />
-              <Stack direction={{ xs: 'column', sm: 'row' }} alignItems={{ sm: 'center' }} justifyContent="space-between" gap={2}>
-                <Box>
-                  <Typography fontWeight={700}>Register this device in Cloud</Typography>
-                  <Typography color="text.secondary">Name this desktop before mobile devices can request access.</Typography>
-                </Box>
-                <Button variant="contained" startIcon={busy ? <CircularProgress size={16} color="inherit" /> : <CloudUploadRounded />} onClick={() => setRegisterOpen(true)} disabled={busy}>
-                  Register device
+            <Stack direction="row" alignItems="center" gap={1}>
+              {currentDevice ? (
+                <Button size="small" startIcon={<EditRounded />} onClick={openEditName} disabled={busy}>
+                  {t.sections.devices.editDesktopName}
                 </Button>
-              </Stack>
-            </>
-          ) : null}
+              ) : null}
+              <Chip color={currentDeviceOnline ? 'success' : 'default'} label={currentDeviceOnline ? t.sections.devices.online : t.sections.devices.offline} />
+            </Stack>
+          </Stack>
         </Stack>
       </Paper>
 
@@ -273,23 +268,23 @@ export function DevicesView({ account, t }: DevicesViewProps) {
         {pairedDevices.length === 0 ? <Typography color="text.secondary">{t.sections.devices.noPairedDevices}</Typography> : null}
       </Stack>
 
-      <Dialog open={registerOpen} onClose={() => setRegisterOpen(false)} fullWidth maxWidth="xs">
-        <DialogTitle>Register this device in Cloud</DialogTitle>
+      <Dialog open={editNameOpen} onClose={() => setEditNameOpen(false)} fullWidth maxWidth="xs">
+        <DialogTitle>{t.sections.devices.editDesktopNameTitle}</DialogTitle>
         <DialogContent>
           <TextField
             autoFocus
             fullWidth
-            label="Device name"
+            label={t.sections.devices.desktopNameLabel}
             margin="dense"
-            placeholder="Forger Desktop"
-            value={deviceName}
-            onChange={(event) => setDeviceName(event.target.value)}
+            placeholder={t.sections.devices.fallbackDesktopName}
+            value={deviceNameDraft}
+            onChange={(event) => setDeviceNameDraft(event.target.value)}
           />
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setRegisterOpen(false)} disabled={busy}>Cancel</Button>
-          <Button variant="contained" onClick={() => void registerDevice()} disabled={busy}>
-            Register
+          <Button onClick={() => setEditNameOpen(false)} disabled={busy}>{t.sections.devices.desktopNameCancel}</Button>
+          <Button variant="contained" onClick={() => void updateDeviceName()} disabled={busy}>
+            {t.sections.devices.desktopNameSave}
           </Button>
         </DialogActions>
       </Dialog>
