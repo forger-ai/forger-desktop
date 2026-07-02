@@ -1008,6 +1008,168 @@ test('CloudDeviceManager socket monitor handles stale generations and closed soc
   });
 });
 
+test('CloudDeviceManager auto-registers account-scoped devices on start and reuses them', async (t) => {
+  const root = await tmpRoot('cloud-device-auto-register');
+  const originalWebSocket = globalThis.WebSocket;
+  t.after(async () => {
+    globalThis.WebSocket = originalWebSocket;
+    FakeWebSocket.instances = [];
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  await withMockedElectron({ safeStorage: createSafeStorage() }, async (require) => {
+    clearCloudDeviceModules();
+    globalThis.WebSocket = FakeWebSocket;
+    const { CloudDeviceManager } = require('../../dist-electron/main/cloud-device-manager.js');
+    let account = 'user-a';
+    const registeredInputs = [];
+    const devicesByUid = new Map();
+    const backendClient = {
+      async registerDevice(input) {
+        registeredInputs.push({ ...input, account });
+        const device = {
+          id: registeredInputs.length,
+          deviceUid: input.deviceUid,
+          name: input.name,
+          kind: 'desktop',
+          platform: input.platform,
+          paired: true,
+          online: true,
+          installedApps: [],
+        };
+        devicesByUid.set(input.deviceUid, device);
+        return device;
+      },
+      async listDevices() {
+        return Array.from(devicesByUid.values());
+      },
+    };
+    const manager = new CloudDeviceManager({
+      filePath: path.join(root, 'cloud-device.json'),
+      accountStorageKey: () => account,
+      backendBaseUrl: 'https://cloud.test',
+      backendClient: () => backendClient,
+      token: () => 'session-token',
+      getCloudIdentity: async () => ({ publicKey: 'public', keyFingerprint: 'fingerprint' }),
+      getInstalledApps: () => [],
+    });
+
+    await manager.start();
+    assert.equal(registeredInputs.length, 1);
+    assert.equal((await manager.getState()).currentDevice.id, 1);
+
+    manager.stop();
+    await manager.start();
+    assert.equal(registeredInputs.length, 1);
+    assert.equal((await manager.getState()).currentDevice.id, 1);
+
+    manager.stop();
+    account = 'user-b';
+    await manager.start();
+    assert.equal(registeredInputs.length, 2);
+    assert.equal(registeredInputs[1].account, 'user-b');
+    assert.notEqual(registeredInputs[1].deviceUid, registeredInputs[0].deviceUid);
+    assert.equal((await manager.getState()).currentDevice.id, 2);
+    manager.stop();
+  });
+});
+
+test('CloudDeviceManager leaves cloud login recoverable when auto-registration fails', async (t) => {
+  const root = await tmpRoot('cloud-device-auto-register-failure');
+  const originalWebSocket = globalThis.WebSocket;
+  t.after(async () => {
+    globalThis.WebSocket = originalWebSocket;
+    FakeWebSocket.instances = [];
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  await withMockedElectron({ safeStorage: createSafeStorage() }, async (require) => {
+    clearCloudDeviceModules();
+    globalThis.WebSocket = FakeWebSocket;
+    const { CloudDeviceManager } = require('../../dist-electron/main/cloud-device-manager.js');
+    const manager = new CloudDeviceManager({
+      filePath: path.join(root, 'cloud-device.json'),
+      accountStorageKey: () => 'user-a',
+      backendBaseUrl: 'https://cloud.test',
+      backendClient: () => ({
+        async registerDevice() {
+          throw new Error('device_register_failed_503');
+        },
+        async listDevices() {
+          return [];
+        },
+      }),
+      token: () => 'session-token',
+      getCloudIdentity: async () => ({ publicKey: 'public', keyFingerprint: 'fingerprint' }),
+      getInstalledApps: () => [],
+    });
+
+    await manager.start();
+    const state = await manager.getState();
+    assert.equal(state.currentDevice, undefined);
+    assert.equal(state.registrationRequired, true);
+    assert.equal(state.technicalCode, 'device_register_failed_503');
+    assert.equal(FakeWebSocket.instances.length, 0);
+  });
+});
+
+test('CloudDeviceManager updates the current cloud device name', async (t) => {
+  const root = await tmpRoot('cloud-device-rename');
+  const originalWebSocket = globalThis.WebSocket;
+  t.after(async () => {
+    globalThis.WebSocket = originalWebSocket;
+    FakeWebSocket.instances = [];
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  await withMockedElectron({ safeStorage: createSafeStorage() }, async (require) => {
+    clearCloudDeviceModules();
+    globalThis.WebSocket = FakeWebSocket;
+    const { CloudDeviceManager } = require('../../dist-electron/main/cloud-device-manager.js');
+    let device = {
+      id: 42,
+      deviceUid: 'desktop-uid',
+      name: 'Old Mac',
+      kind: 'desktop',
+      platform: 'darwin_arm64',
+      paired: true,
+      online: true,
+      installedApps: [],
+    };
+    const updateInputs = [];
+    const manager = new CloudDeviceManager({
+      filePath: path.join(root, 'cloud-device.json'),
+      accountStorageKey: () => 'user-a',
+      backendBaseUrl: 'https://cloud.test',
+      backendClient: () => ({
+        async registerDevice(input) {
+          device = { ...device, deviceUid: input.deviceUid, name: input.name };
+          return device;
+        },
+        async listDevices() {
+          return [device];
+        },
+        async updateDeviceName(input) {
+          updateInputs.push(input);
+          device = { ...device, name: input.name };
+          return device;
+        },
+      }),
+      token: () => 'session-token',
+      getCloudIdentity: async () => ({ publicKey: 'public', keyFingerprint: 'fingerprint' }),
+      getInstalledApps: () => [],
+    });
+
+    await manager.start();
+    const renamed = await manager.updateCloudDeviceName({ name: 'Studio Mac' });
+    assert.equal(renamed.success, true);
+    assert.deepEqual(updateInputs, [{ deviceId: 42, name: 'Studio Mac' }]);
+    assert.equal(renamed.currentDevice.name, 'Studio Mac');
+    assert.equal(renamed.devices[0].name, 'Studio Mac');
+    manager.stop();
+  });
+});
+
 test('CloudDeviceManager supports unauthenticated idle state and plaintext device storage fallback', async (t) => {
   const root = await tmpRoot('cloud-device-plaintext');
   const originalWebSocket = globalThis.WebSocket;
@@ -1132,10 +1294,8 @@ test('CloudDeviceManager reloads encrypted stored devices and resets state when 
 
     account = 'other@example.com';
     const switched = await manager.getState();
-    assert.equal(switched.currentDevice, undefined);
-    assert.equal(switched.registrationRequired, true);
-    await manager.registerCloudDevice({ name: 'Device' });
-    assert.equal((await manager.getState()).currentDevice.id, 32);
+    assert.equal(switched.currentDevice.id, 32);
+    assert.equal(switched.registrationRequired, false);
     assert.equal(registeredInputs.at(-1).deviceSecret.length, 64);
     assert.equal(FakeWebSocket.instances.at(-2).closed, true);
 

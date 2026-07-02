@@ -152,6 +152,7 @@ export interface ForgerDesktopApi {
   getCloudStorageUsage: () => Promise<CloudStorageUsage | null>;
   getCloudDevices: () => Promise<CloudDevicesState>;
   registerCloudDevice: (input: { name: string }) => Promise<CloudDevicesState & { success: boolean }>;
+  updateCloudDeviceName: (input: { name: string }) => Promise<CloudDevicesState & { success: boolean }>;
   unlinkMobileDeviceFromDesktop: (authorizationId: number) => Promise<CloudDevicesState & { success: boolean }>;
   generateDevicePairingCode: () => Promise<CloudDevicesState & { success: boolean }>;
   acceptMobilePairingRequest: (requestId: number) => Promise<CloudDevicesState & { success: boolean }>;

@@ -969,6 +969,11 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
       ? await cloudDeviceManager.registerCloudDevice({ name: input?.name ?? '' })
       : { devices: [], connected: false, success: false, userMessage: 'No pudimos registrar este equipo.', technicalCode: 'cloud_device_manager_missing' };
   });
+  ipcMain.handle(IPC_CHANNELS.updateCloudDeviceName, async (_event, input: { name?: string }) => {
+    return cloudDeviceManager
+      ? await cloudDeviceManager.updateCloudDeviceName({ name: input?.name ?? '' })
+      : { devices: [], connected: false, success: false, userMessage: 'No pudimos actualizar este equipo.', technicalCode: 'cloud_device_manager_missing' };
+  });
   ipcMain.handle(IPC_CHANNELS.unlinkMobileDeviceFromDesktop, async (_event, authorizationId: number) => {
     return cloudDeviceManager
       ? await cloudDeviceManager.unlinkMobileDeviceFromDesktop(authorizationId)

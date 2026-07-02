@@ -44,6 +44,7 @@ test('preload exposes a function-only forger API without leaking raw Electron pr
     'closeWindow',
     'getWindowState',
     'onDeepLink',
+    'updateCloudDeviceName',
   ]) {
     assert.equal(typeof api[key], 'function', `${key} should be exposed as a function`);
   }
