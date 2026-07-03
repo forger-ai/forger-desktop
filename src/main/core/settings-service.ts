@@ -5,7 +5,6 @@ import type path from 'node:path';
 import type { PromptOverridesStore } from '../prompt-overrides';
 import type {
   AgentDefaults,
-  AgentEffort,
   AgentPermissionMode,
   AgentProvider,
   AgentProviderRuntimeRegistry,
@@ -18,16 +17,11 @@ import type {
   ClaudeEffort,
   CodexAuthStatus,
   CodexReasoningEffort,
-  LlmProviderProfileMetadata,
-  LlmProviderProfilesState,
-  SetActiveLlmProviderProfileInput,
-  SetActiveLlmProviderProfileResult,
   Settings,
   UpdateAgentDefaultsInput,
   UpdateCodexDefaultsInput,
   UpdateDeveloperModeInput,
 } from '../../shared/types';
-import type { UpdateLlmProviderProfileDefaultsInput } from '../../shared/types/provider-profiles';
 import {
   LLM_PROVIDER_KEYS,
   normalizeAgentProviderEffort,
@@ -109,207 +103,6 @@ const normalizeAgentPermissionMode = (value: unknown): AgentPermissionMode =>
 const normalizeChatNetworkAccess = (value: unknown, fallback = true): boolean =>
   typeof value === 'boolean' ? value : fallback;
 
-const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
-  Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-
-const normalizeOptionalString = (value: unknown): string | undefined => {
-  if (typeof value !== 'string') {
-    return undefined;
-  }
-  const trimmed = value.trim();
-  return trimmed || undefined;
-};
-
-const providerProfileLabel = (provider: AgentProvider): string => {
-  if (provider === 'claude') {
-    return 'Claude';
-  }
-  if (provider === 'antigravity') {
-    return 'Google';
-  }
-  return 'ChatGPT';
-};
-
-const systemProviderProfileId = (provider: AgentProvider): string => `${provider}:system`;
-const legacyLocalProviderProfileId = (provider: AgentProvider): string => `${provider}:local-active`;
-
-const normalizeProviderProfileId = (provider: AgentProvider, value: string | undefined): string | undefined => {
-  if (!value) {
-    return undefined;
-  }
-  return value === legacyLocalProviderProfileId(provider) ? systemProviderProfileId(provider) : value;
-};
-
-const createSystemProviderProfile = (
-  provider: AgentProvider,
-  connectedAt?: string,
-  source: LlmProviderProfileMetadata['source'] = 'legacy_provider_connections',
-): LlmProviderProfileMetadata => ({
-  id: systemProviderProfileId(provider),
-  provider,
-  label: providerProfileLabel(provider),
-  authMode: 'cli',
-  runtimeAuthMode: 'externalActiveOnly',
-  status: connectedAt ? 'connected' : 'missing',
-  source,
-  ...(connectedAt ? { connectedAt } : {}),
-});
-
-const normalizeProfileDefaultModel = (provider: AgentProvider, value: unknown): string | undefined => {
-  const model = normalizeOptionalString(value);
-  if (!model) {
-    return undefined;
-  }
-  if (provider === 'claude') {
-    return normalizeAgentProviderModel(agentProviderRegistry, 'claude', model, agentProviderRegistry.claude.defaultModel);
-  }
-  if (provider === 'antigravity') {
-    return normalizeAgentProviderModel(agentProviderRegistry, 'antigravity', model, agentProviderRegistry.antigravity.defaultModel);
-  }
-  return normalizeAgentProviderModel(agentProviderRegistry, 'codex', model, agentProviderRegistry.codex.defaultModel);
-};
-
-const normalizeProfileDefaultEffort = (provider: AgentProvider, value: unknown): AgentEffort | undefined => {
-  if (value === undefined) {
-    return undefined;
-  }
-  if (provider === 'claude') {
-    return normalizeClaudeEffort(value, agentProviderRegistry.claude.defaultEffort);
-  }
-  if (provider === 'antigravity') {
-    return normalizeAntigravityEffort(value, agentProviderRegistry.antigravity.defaultEffort);
-  }
-  return normalizeCodexReasoningEffort(value, agentProviderRegistry.codex.defaultReasoningEffort);
-};
-
-const normalizeProviderProfile = (
-  provider: AgentProvider,
-  value: unknown,
-): LlmProviderProfileMetadata | null => {
-  if (!isPlainRecord(value)) {
-    return null;
-  }
-  const id = normalizeProviderProfileId(provider, normalizeOptionalString(value.id));
-  if (!id) {
-    return null;
-  }
-  const authMode = value.authMode === 'api_key' || value.authMode === 'oauth' || value.authMode === 'cli'
-    ? value.authMode
-    : 'cli';
-  const runtimeAuthMode = id === systemProviderProfileId(provider)
-    ? 'externalActiveOnly'
-    : value.runtimeAuthMode === 'materialized' || value.runtimeAuthMode === 'externalActiveOnly'
-      ? (provider === 'antigravity' && value.runtimeAuthMode === 'materialized' ? 'externalActiveOnly' : value.runtimeAuthMode)
-      : provider === 'antigravity'
-        ? 'externalActiveOnly'
-        : 'materialized';
-  const status = value.status === 'expired' || value.status === 'missing' || value.status === 'unsupported' || value.status === 'connected'
-    ? value.status
-    : undefined;
-  const source = value.source === 'desktop' || value.source === 'local_cli' || value.source === 'legacy_provider_connections'
-    ? value.source
-    : undefined;
-  const installSource = value.installSource === 'managed' || value.installSource === 'system' || value.installSource === 'local_cli' || value.installSource === 'unknown'
-    ? value.installSource
-    : undefined;
-  const defaultModel = normalizeProfileDefaultModel(provider, value.defaultModel);
-  const defaultEffort = normalizeProfileDefaultEffort(provider, value.defaultEffort);
-  return {
-    id,
-    provider,
-    label: normalizeOptionalString(value.label) ?? providerProfileLabel(provider),
-    authMode,
-    runtimeAuthMode,
-    ...(installSource ? { installSource } : {}),
-    ...(normalizeOptionalString(value.accountHint) ? { accountHint: normalizeOptionalString(value.accountHint) } : {}),
-    ...(status ? { status } : {}),
-    ...(source ? { source } : {}),
-    ...(defaultModel ? { defaultModel } : {}),
-    ...(defaultEffort ? { defaultEffort } : {}),
-    ...(normalizeOptionalString(value.connectedAt) ? { connectedAt: normalizeOptionalString(value.connectedAt) } : {}),
-    ...(normalizeOptionalString(value.lastCheckedAt) ? { lastCheckedAt: normalizeOptionalString(value.lastCheckedAt) } : {}),
-    ...(normalizeOptionalString(value.lastUsedAt) ? { lastUsedAt: normalizeOptionalString(value.lastUsedAt) } : {}),
-    ...(normalizeOptionalString(value.unavailableReason) ? { unavailableReason: normalizeOptionalString(value.unavailableReason) } : {}),
-  };
-};
-
-const normalizeProviderProfiles = (
-  input: Partial<Settings> | undefined,
-  providerConnections: Partial<Record<AgentProvider, string>>,
-): Pick<Settings, 'llmProviderProfiles' | 'activeProviderProfiles'> => {
-  const llmProviderProfiles: Settings['llmProviderProfiles'] = {};
-  const activeProviderProfiles: Settings['activeProviderProfiles'] = {};
-  const rawProfiles = isPlainRecord(input?.llmProviderProfiles) ? input?.llmProviderProfiles : {};
-  const rawActiveProfiles = isPlainRecord(input?.activeProviderProfiles) ? input?.activeProviderProfiles : {};
-  for (const provider of LLM_PROVIDER_KEYS) {
-    const entries = Array.isArray(rawProfiles?.[provider])
-      ? rawProfiles[provider]
-          .map((entry) => normalizeProviderProfile(provider, entry))
-          .filter((entry): entry is LlmProviderProfileMetadata => Boolean(entry))
-      : [];
-    const deduped = new Map<string, LlmProviderProfileMetadata>();
-    for (const entry of entries) {
-      deduped.set(entry.id, entry);
-    }
-    const connectedAt = providerConnections[provider];
-    if (connectedAt) {
-      const systemId = systemProviderProfileId(provider);
-      const existing = deduped.get(systemId);
-      deduped.set(systemId, {
-        ...(existing ?? createSystemProviderProfile(provider, connectedAt)),
-        runtimeAuthMode: 'externalActiveOnly',
-        status: 'connected',
-        connectedAt,
-      });
-    }
-    let profiles = Array.from(deduped.values());
-    const connectedProfiles = profiles.filter((entry) => entry.status === 'connected');
-    const systemProfile = connectedProfiles.find((entry) => entry.id === systemProviderProfileId(provider));
-    const rawActive = normalizeProviderProfileId(provider, normalizeOptionalString(rawActiveProfiles?.[provider]));
-    const active = systemProfile
-      ? systemProfile.id
-      : rawActive && connectedProfiles.some((entry) => entry.id === rawActive)
-      ? rawActive
-      : connectedProfiles[0]?.id;
-    profiles = profiles.map((entry) => ({
-      ...entry,
-      isDefault: active ? entry.id === active : entry.isDefault === true,
-    }));
-    if (profiles.length > 0) {
-      llmProviderProfiles[provider] = profiles;
-    }
-    if (active) {
-      activeProviderProfiles[provider] = active;
-    }
-  }
-  return { llmProviderProfiles, activeProviderProfiles };
-};
-
-const isConnectedProviderProfile = (profile: LlmProviderProfileMetadata | undefined): profile is LlmProviderProfileMetadata =>
-  profile?.status === 'connected';
-
-const resolveRuntimeProviderProfile = (
-  settings: Pick<Settings, 'llmProviderProfiles' | 'activeProviderProfiles'>,
-  provider: AgentProvider,
-  requestedProfileId?: string,
-): LlmProviderProfileMetadata | undefined => {
-  const profiles = settings.llmProviderProfiles[provider] ?? [];
-  const activeProfileId = settings.activeProviderProfiles[provider];
-  const normalizedRequestedProfileId = normalizeProviderProfileId(provider, requestedProfileId);
-  const requested = profiles.find((entry) => entry.id === normalizedRequestedProfileId);
-  if (normalizedRequestedProfileId) {
-    if (isConnectedProviderProfile(requested)) {
-      return requested;
-    }
-    throw new Error('provider_profile_not_found');
-  }
-  const active = profiles.find((entry) => entry.id === normalizeProviderProfileId(provider, activeProfileId));
-  if (isConnectedProviderProfile(active)) {
-    return active;
-  }
-  return profiles.find(isConnectedProviderProfile);
-};
-
 const normalizeSettings = (input?: Partial<Settings>): Settings => {
   const defaults = structuredClone(settingsSeed);
   const rawCodexDefaults =
@@ -366,7 +159,6 @@ const normalizeSettings = (input?: Partial<Settings>): Settings => {
       }
     }
   }
-  const providerProfiles = normalizeProviderProfiles(input, providerConnections);
   const llmProviderDefaults: AgentDefaults = {
     codex: {
       model:
@@ -408,7 +200,6 @@ const normalizeSettings = (input?: Partial<Settings>): Settings => {
     llmProviderDefaults,
     agentDefaults: llmProviderDefaults,
     providerConnections,
-    ...providerProfiles,
   };
 };
 
@@ -575,17 +366,7 @@ const markProviderConnected = async (provider: AgentProvider): Promise<void> => 
     state.settings = current;
     return;
   }
-  const connectedAt = new Date().toISOString();
   const isFirstConnectedProvider = LLM_PROVIDER_KEYS.every((key) => !current.providerConnections[key]);
-  const llmProviderProfiles = {
-    ...current.llmProviderProfiles,
-    [provider]: [
-      createSystemProviderProfile(provider, connectedAt, 'local_cli'),
-      ...(current.llmProviderProfiles[provider] ?? []).filter((profile) =>
-        normalizeProviderProfileId(provider, profile.id) !== systemProviderProfileId(provider),
-      ),
-    ],
-  };
   state.settings = normalizeSettings({
     ...current,
     defaultAgentProvider: isFirstConnectedProvider && current.defaultAgentProvider === 'auto'
@@ -593,12 +374,7 @@ const markProviderConnected = async (provider: AgentProvider): Promise<void> => 
       : current.defaultAgentProvider,
     providerConnections: {
       ...current.providerConnections,
-      [provider]: connectedAt,
-    },
-    llmProviderProfiles,
-    activeProviderProfiles: {
-      ...current.activeProviderProfiles,
-      [provider]: systemProviderProfileId(provider),
+      [provider]: new Date().toISOString(),
     },
   });
   await saveSettings();
@@ -612,71 +388,47 @@ const markProviderDisconnected = async (provider: AgentProvider): Promise<void> 
   }
   const providerConnections = { ...current.providerConnections };
   delete providerConnections[provider];
-  const activeProviderProfiles = { ...current.activeProviderProfiles };
-  delete activeProviderProfiles[provider];
-  const llmProviderProfiles = {
-    ...current.llmProviderProfiles,
-    [provider]: (current.llmProviderProfiles[provider] ?? []).map((profile) => ({ ...profile, status: 'missing' as const })),
-  };
   state.settings = normalizeSettings({
     ...current,
     defaultAgentProvider: current.defaultAgentProvider === provider ? 'auto' : current.defaultAgentProvider,
     providerConnections,
-    llmProviderProfiles,
-    activeProviderProfiles,
   });
   await saveSettings();
 };
 
 const chooseAgentRuntime = async (requested?: AgentRuntimeRequest): Promise<AgentRuntime> => {
   const provider = requested?.provider ?? await chooseConnectedProvider();
-  const normalized = normalizeSettings(state.settings);
-  const defaults = normalized.agentDefaults;
-  const requestedProfileId = normalizeProviderProfileId(provider, normalizeOptionalString(requested?.authProfileId));
-  const profile = resolveRuntimeProviderProfile(normalized, provider, requestedProfileId);
-  if (requestedProfileId && profile?.id !== requestedProfileId) {
-    throw new Error('provider_profile_not_found');
-  }
-  const authProfileId = profile?.id;
+  const defaults = normalizeSettings(state.settings).agentDefaults;
   if (requested?.strict) {
     validateAgentRuntimeRequest(agentProviderRegistry, provider, requested);
   }
   if (provider === 'claude') {
     const recommended = requested?.recommendations?.claude;
-    const fallbackModel = (profile?.defaultModel ?? defaults.claude.model) || agentProviderRegistry.claude.defaultModel;
-    const fallbackEffort = profile?.defaultEffort ?? defaults.claude.effort;
     return {
       provider,
-      model: normalizeClaudeModel(requested?.model ?? recommended?.model, fallbackModel),
-      effort: normalizeClaudeEffort(requested?.effort ?? recommended?.effort, fallbackEffort as ClaudeEffort),
-      ...(authProfileId ? { authProfileId } : {}),
+      model: normalizeClaudeModel(requested?.model ?? recommended?.model, defaults.claude.model || agentProviderRegistry.claude.defaultModel),
+      effort: normalizeClaudeEffort(requested?.effort ?? recommended?.effort, defaults.claude.effort),
     };
   }
   if (provider === 'antigravity') {
     const recommended = requested?.recommendations?.antigravity;
-    const fallbackModel = (profile?.defaultModel ?? defaults.antigravity.model) || agentProviderRegistry.antigravity.defaultModel;
-    const fallbackEffort = (profile?.defaultEffort ?? defaults.antigravity.effort) || agentProviderRegistry.antigravity.defaultEffort;
     const antigravityDefaults = normalizeAntigravityDefaults(
       requested?.model ?? recommended?.model,
       requested?.effort ?? recommended?.effort,
-      fallbackModel,
-      fallbackEffort as AntigravityEffort,
+      defaults.antigravity.model || agentProviderRegistry.antigravity.defaultModel,
+      defaults.antigravity.effort || agentProviderRegistry.antigravity.defaultEffort,
     );
     return {
       provider,
       model: antigravityDefaults.model,
       effort: antigravityDefaults.effort,
-      ...(authProfileId ? { authProfileId } : {}),
     };
   }
   const recommended = requested?.recommendations?.codex;
-  const fallbackModel = (profile?.defaultModel ?? defaults.codex.model) || agentProviderRegistry.codex.defaultModel;
-  const fallbackEffort = profile?.defaultEffort ?? defaults.codex.reasoningEffort;
   return {
     provider: 'codex',
-    model: normalizeCodexModel(requested?.model ?? recommended?.model, fallbackModel),
-    effort: normalizeCodexReasoningEffort(requested?.effort ?? recommended?.reasoningEffort, fallbackEffort as CodexReasoningEffort),
-    ...(authProfileId ? { authProfileId } : {}),
+    model: normalizeCodexModel(requested?.model ?? recommended?.model, defaults.codex.model || agentProviderRegistry.codex.defaultModel),
+    effort: normalizeCodexReasoningEffort(requested?.effort ?? recommended?.reasoningEffort, defaults.codex.reasoningEffort),
   };
 };
 
@@ -709,105 +461,6 @@ const chooseConnectedProvider = async (): Promise<AgentProvider> => {
   return 'codex';
 };
 
-const listLlmProviderProfiles = async (): Promise<LlmProviderProfilesState> => {
-  const normalized = normalizeSettings(state.settings);
-  const providers: LlmProviderProfilesState['providers'] = {};
-  const activeProfileIds: LlmProviderProfilesState['activeProfileIds'] = {};
-  for (const provider of LLM_PROVIDER_KEYS) {
-    const profiles = normalized.llmProviderProfiles[provider] ?? [];
-    const activeProfileId = resolveRuntimeProviderProfile(normalized, provider)?.id;
-    if (activeProfileId) {
-      activeProfileIds[provider] = activeProfileId;
-    }
-    providers[provider] = profiles.map((profile) => ({
-      ...profile,
-      active: profile.id === activeProfileId,
-      isDefault: profile.id === activeProfileId,
-      connected: profile.status === 'connected',
-    }));
-  }
-  return {
-    providers,
-    activeProfileIds,
-    checkedAt: new Date().toISOString(),
-  };
-};
-
-const setActiveLlmProviderProfile = async (
-  input: SetActiveLlmProviderProfileInput,
-): Promise<SetActiveLlmProviderProfileResult> => {
-  const provider = normalizeAgentProvider(input.provider);
-  const profileId = provider
-    ? normalizeProviderProfileId(provider, normalizeOptionalString(input.profileId))
-    : normalizeOptionalString(input.profileId);
-  if (!provider || !profileId) {
-    return { success: false, userMessage: 'No pudimos seleccionar ese perfil.', technicalCode: 'invalid_provider_profile' };
-  }
-  const current = normalizeSettings(state.settings);
-  const profile = (current.llmProviderProfiles[provider] ?? []).find((entry) =>
-    entry.id === profileId && entry.provider === provider,
-  );
-  if (!profile) {
-    return { success: false, userMessage: 'Ese perfil ya no está disponible.', technicalCode: 'provider_profile_not_found' };
-  }
-  if (!isConnectedProviderProfile(profile)) {
-    return { success: false, userMessage: 'Ese perfil no está conectado.', technicalCode: 'provider_profile_not_connected' };
-  }
-  state.settings = normalizeSettings({
-    ...current,
-    activeProviderProfiles: {
-      ...current.activeProviderProfiles,
-      [provider]: profileId,
-    },
-  });
-  await saveSettings();
-  return {
-    success: true,
-    userMessage: 'Perfil seleccionado.',
-    state: await listLlmProviderProfiles(),
-  };
-};
-
-const updateLlmProviderProfileDefaults = async (
-  input: UpdateLlmProviderProfileDefaultsInput,
-): Promise<SetActiveLlmProviderProfileResult> => {
-  const provider = normalizeAgentProvider(input.provider);
-  const profileId = provider
-    ? normalizeProviderProfileId(provider, normalizeOptionalString(input.profileId))
-    : normalizeOptionalString(input.profileId);
-  if (!provider || !profileId) {
-    return { success: false, userMessage: 'No pudimos actualizar ese perfil.', technicalCode: 'invalid_provider_profile' };
-  }
-  const current = normalizeSettings(state.settings);
-  const profiles = current.llmProviderProfiles[provider] ?? [];
-  const profileIndex = profiles.findIndex((profile) => profile.id === profileId && profile.provider === provider);
-  if (profileIndex < 0) {
-    return { success: false, userMessage: 'Ese perfil ya no está disponible.', technicalCode: 'provider_profile_not_found' };
-  }
-  const defaultModel = normalizeProfileDefaultModel(provider, input.model);
-  const defaultEffort = normalizeProfileDefaultEffort(provider, input.effort);
-  const nextProfiles = profiles.map((profile, index) => index === profileIndex
-    ? {
-        ...profile,
-        ...(defaultModel ? { defaultModel } : {}),
-        ...(defaultEffort ? { defaultEffort } : {}),
-      }
-    : profile);
-  state.settings = normalizeSettings({
-    ...current,
-    llmProviderProfiles: {
-      ...current.llmProviderProfiles,
-      [provider]: nextProfiles,
-    },
-  });
-  await saveSettings();
-  return {
-    success: true,
-    userMessage: 'Perfil actualizado.',
-    state: await listLlmProviderProfiles(),
-  };
-};
-
 const withAgentDefaults = <T extends { model?: string; reasoningEffort?: CodexReasoningEffort; runtime?: AgentRuntime; runtimeRecommendations?: AgentRuntimeRecommendations }>(
   entry: T,
   defaults: AgentDefaults = normalizeSettings(state.settings).agentDefaults,
@@ -829,7 +482,6 @@ const withAgentDefaults = <T extends { model?: string; reasoningEffort?: CodexRe
         provider: 'claude',
         model: normalizeClaudeModel(entry.runtime.model, recommendations.claude.model || defaults.claude.model || agentProviderRegistry.claude.defaultModel),
         effort: normalizeClaudeEffort(entry.runtime.effort, defaults.claude.effort),
-        ...(entry.runtime.authProfileId ? { authProfileId: entry.runtime.authProfileId } : {}),
       },
     };
   }
@@ -849,21 +501,6 @@ const withAgentDefaults = <T extends { model?: string; reasoningEffort?: CodexRe
         provider: 'antigravity',
         model: antigravityRuntime.model,
         effort: antigravityRuntime.effort,
-        ...(entry.runtime.authProfileId ? { authProfileId: entry.runtime.authProfileId } : {}),
-      },
-    };
-  }
-  if (entry.runtime?.provider === 'codex') {
-    return {
-      ...entry,
-      runtimeRecommendations: recommendations,
-      model: recommendations.codex.model,
-      reasoningEffort: recommendations.codex.reasoningEffort,
-      runtime: {
-        provider: 'codex',
-        model: normalizeCodexModel(entry.runtime.model, recommendations.codex.model || defaults.codex.model || agentProviderRegistry.codex.defaultModel),
-        effort: normalizeCodexReasoningEffort(entry.runtime.effort, defaults.codex.reasoningEffort),
-        ...(entry.runtime.authProfileId ? { authProfileId: entry.runtime.authProfileId } : {}),
       },
     };
   }
@@ -905,5 +542,5 @@ const mergeRuntimeRecommendations = (
   };
 };
 
-  return { getPromptOverridesStore, normalizeCodexReasoningEffort, normalizeClaudeEffort, normalizeAgentProvider, normalizeDefaultAgentProvider, normalizeSettings, loadSettings, saveSettings, getCodexDefaults, updateCodexDefaults, updateAgentDefaults, updateDeveloperMode, markProviderConnected, markProviderDisconnected, chooseAgentRuntime, chooseConnectedProvider, listLlmProviderProfiles, setActiveLlmProviderProfile, updateLlmProviderProfileDefaults, withAgentDefaults };
+  return { getPromptOverridesStore, normalizeCodexReasoningEffort, normalizeClaudeEffort, normalizeAgentProvider, normalizeDefaultAgentProvider, normalizeSettings, loadSettings, saveSettings, getCodexDefaults, updateCodexDefaults, updateAgentDefaults, updateDeveloperMode, markProviderConnected, markProviderDisconnected, chooseAgentRuntime, chooseConnectedProvider, withAgentDefaults };
 };

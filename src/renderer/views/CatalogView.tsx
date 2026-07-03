@@ -31,6 +31,7 @@ interface CatalogViewProps {
   onRefresh: () => void;
   account: ForgerAccountSession;
   t: AppDictionary;
+  earlyAccessEnabled: boolean;
   getAppMeta: (appId: string) => { name: string; description: string; iconUrl?: string };
   getCategoryLabel: (category: AppCategory) => string;
   installProgressByApp: Record<string, InstallAppResult>;
@@ -67,11 +68,12 @@ export function CatalogView({
   onRefresh,
   account,
   t,
+  earlyAccessEnabled,
   getAppMeta,
   getCategoryLabel,
   installProgressByApp,
 }: CatalogViewProps) {
-  const catalogApps = apps;
+  const catalogApps = apps.filter((app) => app.catalogStatus !== 'coming' || earlyAccessEnabled || isInstalledLike(app));
   const statusApps =
     statusFilter === 'installed'
       ? catalogApps.filter((app) => app.status === 'installed' || app.status === 'running' || app.status === 'error' || app.status === 'conflict')
@@ -169,6 +171,7 @@ export function CatalogView({
             const isEarlyAccess = app.catalogStatus === 'coming';
             const isBeta = app.catalogStatus === 'beta' || Boolean(app.beta);
             const hasDownloadableVersion = Boolean(app.downloadUrl || app.latestVersionId);
+            const canInstallEarlyAccess = !isEarlyAccess || (earlyAccessEnabled && hasDownloadableVersion);
             const primaryAction = isConflict ? 'update' : canRecoverUpdateError ? 'update' : canRetryInstallError ? 'retry' : isInstalled ? (app.status === 'running' ? 'stop' : 'open') : 'install';
             const isSocialCatalogApp = typeof app.socialUserAppId === 'number';
             const createdByLabel = app.socialOwnerUsername
@@ -203,7 +206,9 @@ export function CatalogView({
                 ? isOpening
                   ? t.actions.opening
                   : t.actions.open
-                : isEarlyAccess && !hasDownloadableVersion
+                : isEarlyAccess && !earlyAccessEnabled
+                  ? t.beta.enableEarlyAccessAction
+                  : isEarlyAccess && !hasDownloadableVersion
                     ? t.beta.comingSoonAction
                     : t.actions.install;
 
@@ -223,7 +228,7 @@ export function CatalogView({
                 statusIndicatorLabel={statusIndicatorLabel}
                 primaryAction={primaryAction}
                 primaryActionLabel={primaryActionLabel}
-                primaryDisabled={isInstalling || (!isInstalled && !canRetryInstallError && !canRecoverUpdateError && isEarlyAccess && !hasDownloadableVersion)}
+                primaryDisabled={isInstalling || (!isInstalled && !canRetryInstallError && !canRecoverUpdateError && !canInstallEarlyAccess)}
                 primaryLoading={isOpening}
                 primaryMenuActions={[
                   ...(canShareLocalNetwork ? [{ label: t.localNetwork.menuAction, onClick: () => onStartLocalNetworkShare(app.id) }] : []),

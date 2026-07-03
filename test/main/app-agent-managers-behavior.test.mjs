@@ -6,8 +6,7 @@ import Module from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { isDeepStrictEqual } from 'node:util';
-import { access, chmod, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 
 const require = createRequire(import.meta.url);
 
@@ -954,28 +953,22 @@ test('app-agent managers complete Codex runs with context, attachments, MCP sess
     const releasedRunIds = [];
     const conversationEvents = [];
     const taskEvents = [];
-    const runtimeRequests = [];
     const { AppAgentConversationManager } = distRequire('main/app-agent-conversation-manager.js');
     const { AppAgentTaskManager } = distRequire('main/app-agent-task-manager.js');
     const sharedOptions = {
       privateAppsRoot: roots.appsRoot,
       metadataRoot: roots.metadataRoot,
       codexHome: roots.codexHome,
-      getAgentRuntime: async (request) => {
-        runtimeRequests.push(request);
-        return {
-          provider: request?.provider ?? 'codex',
-          model: request?.model ?? 'gpt-test',
-          effort: request?.effort ?? 'medium',
-          ...(request?.authProfileId ? { authProfileId: request.authProfileId } : {}),
-        };
-      },
+      getAgentRuntime: async (request) => ({
+        provider: request?.provider ?? 'codex',
+        model: request?.model ?? 'gpt-test',
+        effort: request?.effort ?? 'medium',
+      }),
       getCodexCliPath: async () => fakeCli,
       getClaudeCliPath: async () => null,
       getCodexPathEntries: async () => [path.dirname(fakeCli)],
       getCodexEnvironment: async () => ({ FORGER_TEST_ENV: '1' }),
       getAgentNetworkAccess: async () => true,
-      appAllowsAgentRuntimeControl: async () => true,
       getCodexAuthenticated: async () => true,
       getClaudeAuthenticated: async () => false,
       createForgerMcpSession: (runId, appId, locale) => ({
@@ -1029,7 +1022,6 @@ test('app-agent managers complete Codex runs with context, attachments, MCP sess
     const withRun = await conversationManager.sendMessage('finance-os', {
       conversationId: conversation.conversationId,
       message: 'Summarize this screenshot',
-      authProfileId: 'profile-thread',
       attachments: [
         { name: 'screen.png', mimeType: 'image/png', dataBase64: Buffer.from('png').toString('base64') },
         { name: 'notes.txt', mimeType: 'text/plain', dataBase64: Buffer.from('ignored').toString('base64') },
@@ -1047,7 +1039,6 @@ test('app-agent managers complete Codex runs with context, attachments, MCP sess
     const task = await taskManager.start('finance-os', {
       templateId: 'review',
       locale: 'en-US',
-      runtime: { provider: 'codex', model: 'gpt-task', effort: 'medium', authProfileId: 'profile-task' },
       arguments: {
         topic: 'cash flow',
         document: { type: 'file', name: 'screen.png', mimeType: 'image/png', dataBase64: Buffer.from('png').toString('base64') },
@@ -1059,22 +1050,6 @@ test('app-agent managers complete Codex runs with context, attachments, MCP sess
     );
     assert.equal(completedTask.task.resultText, 'codex completed task');
     assert.equal(completedTask.task.progressLog.includes('The assistant finished the task.'), true);
-    assert.ok(runtimeRequests.some((request) => isDeepStrictEqual(request, {
-      provider: 'codex',
-      model: 'agent-model',
-      effort: 'high',
-      permissionMode: undefined,
-      authProfileId: 'profile-thread',
-      strict: true,
-    })));
-    assert.ok(runtimeRequests.some((request) => isDeepStrictEqual(request, {
-      provider: 'codex',
-      model: 'gpt-task',
-      effort: 'medium',
-      permissionMode: undefined,
-      authProfileId: 'profile-task',
-      strict: true,
-    })));
 
     await waitFor(() => releasedRunIds.length >= 2, 'agent_mcp_releases');
     assert.equal(releasedTokens.length, 2);
@@ -1572,7 +1547,7 @@ test('conversation manager executes a codex run with scoped workspace, MCP sessi
             },
           };
         }
-        if (request.endsWith('codex-run-isolation')) {
+        if (request === './codex-run-isolation') {
           return {
             assertAllowedMcpServers: (stdout, stderr, allowed) => {
               isolationCalls.push({ stdout, stderr, allowed: [...allowed] });
@@ -1782,7 +1757,7 @@ test('task manager executes a codex task with typed file arguments, progress, cl
             },
           };
         }
-        if (request.endsWith('codex-run-isolation')) {
+        if (request === './codex-run-isolation') {
           return {
             assertAllowedMcpServers: () => undefined,
             codexWorkspaceNetworkConfigArgs: (enabled) => enabled ? ['--config', 'sandbox_network_access=true'] : [],
@@ -1864,20 +1839,16 @@ test('task manager executes a codex task with typed file arguments, progress, cl
         assert.match(commandCalls[0].options.stdinText, /Memory context/);
         assert.match(commandCalls[0].options.stdinText, /statement-2\.png/);
         assert.equal(commandCalls[0].args.filter((arg) => arg === '--image').length, 2);
-        assert.match(path.basename(commandCalls[0].options.env.CODEX_HOME), /^forger-task-codex-home-/);
+        assert.equal(commandCalls[0].options.env.CODEX_HOME, path.join(roots.root, 'forger-task-codex-home'));
         assert.deepEqual(releasedSessions, ['session-token']);
         assert.deepEqual(releasedMcps, [task.runId]);
-        if (removedHomes.length > 0) {
-          assert.deepEqual(removedHomes, [path.join(roots.root, 'forger-task-codex-home')]);
-        } else {
-          await assert.rejects(access(commandCalls[0].options.env.CODEX_HOME), /ENOENT/);
-        }
+        assert.deepEqual(removedHomes, [path.join(roots.root, 'forger-task-codex-home')]);
 
         const transcript = await readFile(
           path.join(roots.metadataRoot, 'app-codex-runs', 'finance-os', task.runId, 'transcript.log'),
           'utf8',
         );
-        assert.match(transcript, /codex provider run/);
+        assert.match(transcript, /codex \/usr\/local\/bin\/codex/);
         assert.equal(
           await readFile(path.join(appRoot, '.forger', 'tmp', 'codex-task-inputs', task.runId, 'statement.png'), 'utf8')
             .then(() => 'exists', () => 'removed'),
@@ -2456,7 +2427,7 @@ test('conversation manager recovers a missing provider thread with a fresh codex
             },
           };
         }
-        if (request.endsWith('codex-run-isolation')) {
+        if (request === './codex-run-isolation') {
           return {
             assertAllowedMcpServers: () => undefined,
             codexWorkspaceNetworkConfigArgs: () => [],
@@ -2550,7 +2521,7 @@ test('task manager executes a claude task through legacy attachments without cod
             },
           };
         }
-        if (request.endsWith('codex-run-isolation')) {
+        if (request === './codex-run-isolation') {
           return {
             assertAllowedMcpServers: () => undefined,
             codexWorkspaceNetworkConfigArgs: () => [],
@@ -2654,7 +2625,7 @@ test('task manager retries stale codex thread errors with a clean temporary home
             },
           };
         }
-        if (request.endsWith('codex-run-isolation')) {
+        if (request === './codex-run-isolation') {
           return {
             assertAllowedMcpServers: () => undefined,
             codexWorkspaceNetworkConfigArgs: () => [],
@@ -3131,7 +3102,7 @@ test('conversation manager treats a canceled provider result as canceled and cle
             },
           };
         }
-        if (request.endsWith('codex-run-isolation')) {
+        if (request === './codex-run-isolation') {
           return {
             assertAllowedMcpServers: () => undefined,
             codexWorkspaceNetworkConfigArgs: () => [],
@@ -3283,7 +3254,7 @@ test('task manager reports auth, CLI, required argument, and cancellation edge o
             },
           };
         }
-        if (request.endsWith('codex-run-isolation')) {
+        if (request === './codex-run-isolation') {
           return {
             assertAllowedMcpServers: () => undefined,
             codexWorkspaceNetworkConfigArgs: () => [],
@@ -3365,7 +3336,7 @@ test('task manager accepts a recovered Codex stale-thread answer without retryin
             },
           };
         }
-        if (request.endsWith('codex-run-isolation')) {
+        if (request === './codex-run-isolation') {
           return {
             assertAllowedMcpServers: () => undefined,
             codexWorkspaceNetworkConfigArgs: () => [],

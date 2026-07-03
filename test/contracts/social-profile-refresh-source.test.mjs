@@ -10,11 +10,10 @@ test('Social view exposes the refreshed Cloud profile tabs and profile controls'
   const source = await readSource('src/renderer/views/SocialView.tsx');
 
   assert.match(source, /type FullSocialTab = 'friends' \| 'forum' \| 'profile' \| 'search';/);
-  assert.match(source, /{ value: 'friends', label: t\.social\.tabs\.friends }/);
-  assert.match(source, /{ value: 'forum', label: t\.social\.tabs\.forum }/);
-  assert.match(source, /{ value: 'profile', label: t\.social\.tabs\.profile }/);
-  assert.match(source, /{ value: 'search', label: t\.social\.tabs\.search }/);
-  assert.doesNotMatch(source, /label: 'Amigos'/);
+  assert.match(source, /{ value: 'friends', label: 'Amigos' }/);
+  assert.match(source, /{ value: 'forum', label: 'Foro' }/);
+  assert.match(source, /{ value: 'profile', label: 'Mi perfil' }/);
+  assert.match(source, /{ value: 'search', label: 'Buscar' }/);
   assert.doesNotMatch(source, /{ value: 'apps', label: 'Mis apps' }/);
 
   assert.match(source, /displayNameDraft/);

@@ -24,14 +24,11 @@ import {
   type LlmAutomationMcpServerConfig,
 } from './automation/agent-command-runner';
 import { renderPromptFile } from './prompt-builder';
-import type { LlmProviderAuthProfileResolver } from './llm-provider/types';
 
 interface AutomationManagerOptions {
   forgerHomeRoot: string;
   metadataRoot: string;
   codexHome: string;
-  providerProfilesRoot?: string;
-  resolveAuthProfile?: LlmProviderAuthProfileResolver;
   getAgentRuntime: (requested?: AgentRuntimeRequest) => Promise<AgentRuntime>;
   getInstalledApps: () => AppSummary[];
   getCodexCliPath: () => Promise<string | null>;
@@ -330,8 +327,6 @@ export class AutomationManager {
         runtime,
         cwd: this.options.forgerHomeRoot,
         codexHome: this.options.codexHome,
-        providerProfilesRoot: this.options.providerProfilesRoot,
-        resolveAuthProfile: this.options.resolveAuthProfile,
         prompt,
         transcriptPath,
         mcpServers,

@@ -40,8 +40,10 @@ import BackupRounded from '@mui/icons-material/BackupRounded';
 import ConstructionRounded from '@mui/icons-material/ConstructionRounded';
 import ContentCopyRounded from '@mui/icons-material/ContentCopyRounded';
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
+import DevicesRounded from '@mui/icons-material/DevicesRounded';
 import EditRounded from '@mui/icons-material/EditRounded';
-import GridViewRounded from '@mui/icons-material/GridViewRounded';
+import EventRepeatRounded from '@mui/icons-material/EventRepeatRounded';
+import InsertDriveFileRounded from '@mui/icons-material/InsertDriveFileRounded';
 import KeyboardArrowDownRounded from '@mui/icons-material/KeyboardArrowDownRounded';
 import KeyboardArrowRightRounded from '@mui/icons-material/KeyboardArrowRightRounded';
 import ExpandMoreRounded from '@mui/icons-material/ExpandMoreRounded';
@@ -59,6 +61,8 @@ import RestartAltRounded from '@mui/icons-material/RestartAltRounded';
 import RefreshRounded from '@mui/icons-material/RefreshRounded';
 import LogoutRounded from '@mui/icons-material/LogoutRounded';
 import StorageRounded from '@mui/icons-material/StorageRounded';
+import TableChartRounded from '@mui/icons-material/TableChartRounded';
+import VpnKeyRounded from '@mui/icons-material/VpnKeyRounded';
 import VolumeUpRounded from '@mui/icons-material/VolumeUpRounded';
 import type {
   AppSummary,
@@ -90,9 +94,6 @@ import type {
   DeveloperPathState,
   UpdateAgentDefaultsInput,
   UpdateDeveloperModeInput,
-  UpdateLlmProviderProfileDefaultsInput,
-  LlmProviderProfileMetadata,
-  SetActiveLlmProviderProfileInput,
 } from '@shared/types';
 import type { AppDictionary, Locale } from '@renderer/i18n';
 import type { ThemePreference } from '@renderer/theme/appTheme';
@@ -134,11 +135,7 @@ interface SettingsViewProps {
   defaultChatNetworkAccess: Settings['defaultChatNetworkAccess'];
   agentDefaults: Settings['agentDefaults'];
   providerConnections: Settings['providerConnections'];
-  llmProviderProfiles: Settings['llmProviderProfiles'];
-  activeProviderProfiles: Settings['activeProviderProfiles'];
   onAgentDefaultsChange: (input: UpdateAgentDefaultsInput) => void;
-  onActiveProviderProfileChange: (input: SetActiveLlmProviderProfileInput) => void;
-  onProviderProfileDefaultsChange: (input: UpdateLlmProviderProfileDefaultsInput) => void;
   developerMode: Settings['developerMode'];
   onDeveloperModeChange: (input: UpdateDeveloperModeInput) => Promise<void>;
   onOpenCodexConfig: () => void;
@@ -169,10 +166,14 @@ interface SettingsViewProps {
   cloudIdentity: CloudIdentityState | null;
   onRevealCloudSecretKey: () => Promise<string>;
   onRegenerateCloudSecretKey: () => void;
+  earlyAccessEnabled: boolean;
+  advancedMode: boolean;
   usageAnalyticsEnabled: boolean;
   forumParticipation: ForumParticipationState;
   forumParticipationBusy: boolean;
   onEnterForum: () => void;
+  onEarlyAccessChange: (enabled: boolean) => void;
+  onAdvancedModeChange: (enabled: boolean) => void;
   onUsageAnalyticsChange: (enabled: boolean) => void;
   onNavigate: (view: View) => void;
   onResetOnboarding: () => void;
@@ -284,7 +285,6 @@ interface SettingsRowItem {
   label: string;
   description: string;
   icon: ReactNode;
-  trailing?: ReactNode;
   onClick: () => void;
 }
 
@@ -326,7 +326,6 @@ const SettingsRow = ({ item }: { item: SettingsRowItem }) => (
         <Typography variant="subtitle2">{item.label}</Typography>
         <Typography variant="body2" color="text.secondary">{item.description}</Typography>
       </Box>
-      {item.trailing}
       <KeyboardArrowRightRounded color="action" />
     </Stack>
   </CardActionArea>
@@ -416,11 +415,7 @@ export function SettingsView({
   defaultChatNetworkAccess,
   agentDefaults,
   providerConnections,
-  llmProviderProfiles,
-  activeProviderProfiles,
   onAgentDefaultsChange,
-  onActiveProviderProfileChange,
-  onProviderProfileDefaultsChange,
   developerMode,
   onDeveloperModeChange,
   onOpenCodexConfig,
@@ -451,7 +446,11 @@ export function SettingsView({
   cloudIdentity,
   onRevealCloudSecretKey,
   onRegenerateCloudSecretKey,
+  earlyAccessEnabled,
+  advancedMode,
   usageAnalyticsEnabled,
+  onEarlyAccessChange,
+  onAdvancedModeChange,
   onUsageAnalyticsChange,
   onNavigate,
   onResetOnboarding,
@@ -651,6 +650,17 @@ export function SettingsView({
   }, [memories]);
   const memoryFormAppRequired = memoryForm.scope === 'app' && !memoryForm.appId;
   const memoryFormInvalid = !memoryForm.body.trim() || memoryFormAppRequired;
+  const advancedLinks: Array<{ view: View; label: string; description: string; icon: ReactNode }> = [
+    { view: 'tools', label: t.nav.tools, description: t.settings.advancedSurfaces.tools, icon: <ConstructionRounded /> },
+    { view: 'files', label: t.nav.files, description: t.settings.advancedSurfaces.files, icon: <InsertDriveFileRounded /> },
+    { view: 'backups', label: t.nav.backups, description: t.settings.advancedSurfaces.backups, icon: <BackupRounded /> },
+    { view: 'devices', label: t.nav.devices, description: t.settings.advancedSurfaces.devices, icon: <DevicesRounded /> },
+    { view: 'datos', label: t.nav.datos, description: t.settings.advancedSurfaces.datos, icon: <TableChartRounded /> },
+    { view: 'secrets', label: t.nav.secrets, description: t.settings.advancedSurfaces.secrets, icon: <VpnKeyRounded /> },
+    { view: 'automations', label: t.nav.automations, description: t.settings.advancedSurfaces.automations, icon: <EventRepeatRounded /> },
+    { view: 'docs', label: t.nav.docs, description: t.settings.advancedSurfaces.docs, icon: <MenuBookRounded /> },
+  ];
+
   const resetMemoryForm = () => setMemoryForm(EMPTY_MEMORY_FORM);
   const submitMemoryForm = () => {
     if (memoryFormInvalid) return;
@@ -1103,7 +1113,16 @@ export function SettingsView({
           <Stack spacing={0.5}>
             <Typography variant="h6">{t.settings.betaTitle}</Typography>
             <Typography variant="body2" color="text.secondary">{t.settings.betaDescription}</Typography>
-            <Typography variant="caption" color="text.secondary">{t.settings.sidebarBetaThanks}</Typography>
+          </Stack>
+          <Stack spacing={0.5}>
+            <FormControlLabel
+              control={<Switch checked={advancedMode} onChange={(event) => onAdvancedModeChange(event.target.checked)} />}
+              label={t.settings.advancedModeToggle}
+            />
+            <FormControlLabel
+              control={<Switch checked={earlyAccessEnabled} onChange={(event) => onEarlyAccessChange(event.target.checked)} />}
+              label={t.settings.earlyAccessToggle}
+            />
           </Stack>
           <Button size="small" variant="outlined" onClick={onResetOnboarding} sx={{ alignSelf: 'flex-start' }}>
             {t.settings.resetOnboarding}
@@ -1745,12 +1764,9 @@ export function SettingsView({
       installed: boolean;
       authenticated: boolean;
       busy: boolean;
-      profiles: LlmProviderProfileMetadata[];
-      activeProfileId?: string;
       onInstall: () => void;
       onSignIn: () => void;
       onDisconnect: () => void;
-      onProfileChange: (profileId: string) => void;
       modelLabel: string;
       modelValue: string;
       modelOptions: Array<{ displayModelName: string; realModelName: string }>;
@@ -1778,28 +1794,10 @@ export function SettingsView({
       return 'text.disabled';
     };
 
-    const providerProfiles = (provider: AgentProvider) => llmProviderProfiles[provider] ?? [];
-
-    const activeProfileFor = (provider: AgentProvider): LlmProviderProfileMetadata | undefined => {
-      const profiles = providerProfiles(provider);
-      const activeId = activeProviderProfiles[provider];
-      return profiles.find((profile) => profile.id === activeId)
-        ?? profiles.find((profile) => profile.isDefault)
-        ?? profiles[0];
-    };
-    const codexActiveProfile = activeProfileFor('codex');
-    const claudeActiveProfile = activeProfileFor('claude');
-    const antigravityActiveProfile = activeProfileFor('antigravity');
-    const codexDefaultModel = codexActiveProfile?.defaultModel ?? safeAgentDefaults.codex.model;
-    const codexDefaultEffort = (codexActiveProfile?.defaultEffort ?? safeAgentDefaults.codex.reasoningEffort) as CodexReasoningEffort;
-    const claudeDefaultModel = claudeActiveProfile?.defaultModel ?? safeAgentDefaults.claude.model;
-    const claudeDefaultEffort = (claudeActiveProfile?.defaultEffort ?? safeAgentDefaults.claude.effort) as ClaudeEffort;
-    const antigravityDefaultModel = antigravityActiveProfile?.defaultModel ?? safeAgentDefaults.antigravity.model;
-    const antigravityDefaultEffort = (antigravityActiveProfile?.defaultEffort ?? safeAgentDefaults.antigravity.effort) as AntigravityEffort;
-    const antigravitySupportedEfforts = getAntigravitySupportedEfforts(antigravityDefaultModel);
-    const antigravityEffortValue = antigravitySupportedEfforts.includes(antigravityDefaultEffort)
-      ? antigravityDefaultEffort
-      : antigravityModelOptions.find((option) => option.realModelName === antigravityDefaultModel)?.defaultEffort ?? antigravitySupportedEfforts[0] ?? 'medium';
+    const antigravitySupportedEfforts = getAntigravitySupportedEfforts(safeAgentDefaults.antigravity.model);
+    const antigravityEffortValue = antigravitySupportedEfforts.includes(safeAgentDefaults.antigravity.effort)
+      ? safeAgentDefaults.antigravity.effort
+      : antigravityModelOptions.find((option) => option.realModelName === safeAgentDefaults.antigravity.model)?.defaultEffort ?? antigravitySupportedEfforts[0] ?? 'medium';
     const antigravityFilteredEffortOptions = antigravityEffortOptions.filter((option) => antigravitySupportedEfforts.includes(option.value));
 
     const providerCards: ProviderCard[] = [
@@ -1812,36 +1810,29 @@ export function SettingsView({
         installed: codexAuthStatus.installed,
         authenticated: Boolean(providerConnections.codex) && codexAuthStatus.authenticated,
         busy: codexAuthBusy,
-        profiles: providerProfiles('codex'),
-        activeProfileId: activeProviderProfiles.codex,
         onInstall: onReinstallCodex,
         onSignIn: onOpenCodexConfig,
         onDisconnect: onDisconnectCodex,
-        onProfileChange: (profileId) => onActiveProviderProfileChange({ provider: 'codex', profileId }),
         modelLabel: t.settings.providerDefaultModelLabel,
-        modelValue: codexDefaultModel,
+        modelValue: safeAgentDefaults.codex.model,
         modelOptions,
         onModelChange: (value) =>
-          codexActiveProfile
-            ? onProviderProfileDefaultsChange({ provider: 'codex', profileId: codexActiveProfile.id, model: value, effort: codexDefaultEffort })
-            : onAgentDefaultsChange({
-                defaultProvider: defaultAgentProvider,
-                provider: 'codex',
-                model: value,
-                effort: codexDefaultEffort,
-              }),
+          onAgentDefaultsChange({
+            defaultProvider: defaultAgentProvider,
+            provider: 'codex',
+            model: value,
+            effort: safeAgentDefaults.codex.reasoningEffort,
+          }),
         effortLabel: t.settings.providerDefaultEffortLabel,
-        effortValue: codexDefaultEffort,
+        effortValue: safeAgentDefaults.codex.reasoningEffort,
         effortOptions: reasoningOptions,
         onEffortChange: (value) =>
-          codexActiveProfile
-            ? onProviderProfileDefaultsChange({ provider: 'codex', profileId: codexActiveProfile.id, model: codexDefaultModel, effort: value as CodexReasoningEffort })
-            : onAgentDefaultsChange({
-                defaultProvider: defaultAgentProvider,
-                provider: 'codex',
-                model: codexDefaultModel,
-                effort: value as CodexReasoningEffort,
-              }),
+          onAgentDefaultsChange({
+            defaultProvider: defaultAgentProvider,
+            provider: 'codex',
+            model: safeAgentDefaults.codex.model,
+            effort: value as CodexReasoningEffort,
+          }),
       },
       {
         provider: 'claude',
@@ -1852,36 +1843,29 @@ export function SettingsView({
         installed: claudeAuthStatus.installed,
         authenticated: Boolean(providerConnections.claude) && claudeAuthStatus.authenticated,
         busy: claudeAuthBusy,
-        profiles: providerProfiles('claude'),
-        activeProfileId: activeProviderProfiles.claude,
         onInstall: onReinstallClaude,
         onSignIn: onOpenClaudeConfig,
         onDisconnect: onDisconnectClaude,
-        onProfileChange: (profileId) => onActiveProviderProfileChange({ provider: 'claude', profileId }),
         modelLabel: t.settings.providerDefaultModelLabel,
-        modelValue: claudeDefaultModel,
+        modelValue: safeAgentDefaults.claude.model,
         modelOptions: claudeModelOptions,
         onModelChange: (value) =>
-          claudeActiveProfile
-            ? onProviderProfileDefaultsChange({ provider: 'claude', profileId: claudeActiveProfile.id, model: value, effort: claudeDefaultEffort })
-            : onAgentDefaultsChange({
-                defaultProvider: defaultAgentProvider,
-                provider: 'claude',
-                model: value,
-                effort: claudeDefaultEffort,
-              }),
+          onAgentDefaultsChange({
+            defaultProvider: defaultAgentProvider,
+            provider: 'claude',
+            model: value,
+            effort: safeAgentDefaults.claude.effort,
+          }),
         effortLabel: t.settings.providerDefaultEffortLabel,
-        effortValue: claudeDefaultEffort,
+        effortValue: safeAgentDefaults.claude.effort,
         effortOptions: claudeEffortOptions,
         onEffortChange: (value) =>
-          claudeActiveProfile
-            ? onProviderProfileDefaultsChange({ provider: 'claude', profileId: claudeActiveProfile.id, model: claudeDefaultModel, effort: value as ClaudeEffort })
-            : onAgentDefaultsChange({
-                defaultProvider: defaultAgentProvider,
-                provider: 'claude',
-                model: claudeDefaultModel,
-                effort: value as ClaudeEffort,
-              }),
+          onAgentDefaultsChange({
+            defaultProvider: defaultAgentProvider,
+            provider: 'claude',
+            model: safeAgentDefaults.claude.model,
+            effort: value as ClaudeEffort,
+          }),
       },
       {
         provider: 'antigravity',
@@ -1892,39 +1876,35 @@ export function SettingsView({
         installed: antigravityAuthStatus.installed,
         authenticated: Boolean(providerConnections.antigravity) && antigravityAuthStatus.authenticated,
         busy: antigravityAuthBusy,
-        profiles: providerProfiles('antigravity'),
-        activeProfileId: activeProviderProfiles.antigravity,
         onInstall: onReinstallAntigravity,
         onSignIn: onOpenAntigravityConfig,
         onDisconnect: onDisconnectAntigravity,
-        onProfileChange: (profileId) => onActiveProviderProfileChange({ provider: 'antigravity', profileId }),
         modelLabel: t.settings.providerDefaultModelLabel,
-        modelValue: antigravityDefaultModel,
+        modelValue: safeAgentDefaults.antigravity.model,
         modelOptions: antigravityModelOptions,
         onModelChange: (value) => {
           const option = antigravityModelOptions.find((entry) => entry.realModelName === value);
           const supportedEfforts = getAntigravitySupportedEfforts(value);
-          const nextEffort = supportedEfforts.includes(antigravityDefaultEffort)
-            ? antigravityDefaultEffort
+          const nextEffort = supportedEfforts.includes(safeAgentDefaults.antigravity.effort)
+            ? safeAgentDefaults.antigravity.effort
             : option?.defaultEffort ?? supportedEfforts[0] ?? 'medium';
-          if (antigravityActiveProfile) {
-            onProviderProfileDefaultsChange({ provider: 'antigravity', profileId: antigravityActiveProfile.id, model: value, effort: nextEffort });
-            return;
-          }
-          onAgentDefaultsChange({ defaultProvider: defaultAgentProvider, provider: 'antigravity', model: value, effort: nextEffort });
+          onAgentDefaultsChange({
+            defaultProvider: defaultAgentProvider,
+            provider: 'antigravity',
+            model: value,
+            effort: nextEffort,
+          });
         },
         effortLabel: t.settings.providerDefaultEffortLabel,
         effortValue: antigravityEffortValue,
         effortOptions: antigravityFilteredEffortOptions,
         onEffortChange: (value) =>
-          antigravityActiveProfile
-            ? onProviderProfileDefaultsChange({ provider: 'antigravity', profileId: antigravityActiveProfile.id, model: antigravityDefaultModel, effort: value as AntigravityEffort })
-            : onAgentDefaultsChange({
-                defaultProvider: defaultAgentProvider,
-                provider: 'antigravity',
-                model: antigravityDefaultModel,
-                effort: value as AntigravityEffort,
-              }),
+          onAgentDefaultsChange({
+            defaultProvider: defaultAgentProvider,
+            provider: 'antigravity',
+            model: safeAgentDefaults.antigravity.model,
+            effort: value as AntigravityEffort,
+          }),
       },
     ];
 
@@ -1944,24 +1924,21 @@ export function SettingsView({
             minWidth: 0,
             borderRadius: 2,
             border: '1px solid',
-            borderColor: status === 'authenticated' ? 'rgba(104, 211, 145, 0.35)' : 'divider',
-            background: status === 'authenticated'
-              ? 'linear-gradient(180deg, rgba(104, 211, 145, 0.06), rgba(255, 255, 255, 0.015) 42%, rgba(255, 255, 255, 0.01))'
-              : undefined,
-            bgcolor: status === 'authenticated' ? undefined : 'background.paper',
+            borderColor: 'divider',
+            bgcolor: 'background.paper',
             boxShadow: 'none',
           }}
         >
-          <CardContent sx={{ height: '100%', p: 2 }}>
-            <Stack spacing={1.5} sx={{ height: '100%', minHeight: 316 }}>
+          <CardContent sx={{ height: '100%', p: 2.25 }}>
+            <Stack spacing={2} sx={{ height: '100%', minHeight: 390 }}>
               <Stack direction="row" spacing={1.5} alignItems="flex-start">
                 <Box
                   sx={{
-                    width: 42,
-                    height: 42,
+                    width: 44,
+                    height: 44,
                     borderRadius: 1.5,
                     border: '1px solid',
-                    borderColor: status === 'authenticated' ? 'rgba(104, 211, 145, 0.28)' : 'divider',
+                    borderColor: 'divider',
                     bgcolor: 'rgba(255,255,255,0.04)',
                     display: 'grid',
                     placeItems: 'center',
@@ -1976,30 +1953,18 @@ export function SettingsView({
                 </Stack>
               </Stack>
 
-              <Typography variant="body2" color="text.secondary" sx={{ minHeight: 48 }}>
+              <Typography variant="body2" color="text.secondary" sx={{ minHeight: 66 }}>
                 {provider.body}
               </Typography>
 
-              <Stack
-                direction="row"
-                alignItems="center"
-                spacing={1}
-                sx={{
-                  px: 1.25,
-                  py: 0.9,
-                  border: '1px solid',
-                  borderColor: status === 'authenticated' ? 'rgba(104, 211, 145, 0.26)' : 'divider',
-                  borderRadius: 1.25,
-                  bgcolor: 'rgba(255,255,255,0.025)',
-                }}
-              >
+              <Stack direction="row" alignItems="center" spacing={1}>
                 <Box sx={{ width: 9, height: 9, borderRadius: '50%', bgcolor: providerStatusColor(status) }} />
                 <Typography variant="body2" fontWeight={700}>{providerStatusText(status)}</Typography>
               </Stack>
 
-              <Box sx={{ minHeight: status === 'authenticated' ? 118 : 48 }}>
+              <Box sx={{ minHeight: 132 }}>
                 {status === 'authenticated' ? (
-                  <Stack spacing={1}>
+                  <Stack spacing={1.25}>
                     <FormControl size="small" fullWidth>
                       <InputLabel>{provider.modelLabel}</InputLabel>
                       <Select
@@ -2037,14 +2002,13 @@ export function SettingsView({
                 )}
               </Box>
 
-              <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mt: 0.5, minHeight: 34 }}>
+              <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mt: 'auto', minHeight: 36 }}>
                 {primaryActionLabel ? (
                   <Button
                     variant="contained"
                     size="small"
                     disabled={provider.busy}
                     onClick={status === 'uninstalled' ? provider.onInstall : provider.onSignIn}
-                    sx={{ flex: '1 1 160px', minHeight: 34 }}
                   >
                     {primaryActionLabel}
                   </Button>
@@ -2057,7 +2021,6 @@ export function SettingsView({
                     startIcon={<RestartAltRounded />}
                     disabled={provider.busy}
                     onClick={provider.onInstall}
-                    sx={{ flex: '1 1 142px', minHeight: 34 }}
                   >
                     {t.settings.providerReinstallAction}
                   </Button>
@@ -2070,7 +2033,6 @@ export function SettingsView({
                     startIcon={<LogoutRounded />}
                     disabled={provider.busy}
                     onClick={provider.onDisconnect}
-                    sx={{ flex: '1 1 142px', minHeight: 34 }}
                   >
                     {t.settings.providerDisconnectAction}
                   </Button>
@@ -2557,41 +2519,34 @@ export function SettingsView({
     </Stack>
   );
 
-  const anyLlmProviderConnected =
-    (Boolean(providerConnections.codex) && codexAuthStatus.authenticated)
-    || (Boolean(providerConnections.claude) && claudeAuthStatus.authenticated)
-    || (Boolean(providerConnections.antigravity) && antigravityAuthStatus.authenticated);
-  const intelligenceRows: SettingsRowItem[] = [
+  const localRows: SettingsRowItem[] = [
     {
       key: 'llmProvider',
       label: t.settings.llmProviderTitle,
       description: t.settings.settingsRows.llmProvider,
       icon: <PsychologyRounded />,
-      trailing: (
-        <Chip
-          size="small"
-          color={anyLlmProviderConnected ? 'success' : 'default'}
-          variant="outlined"
-          label={anyLlmProviderConnected ? t.settings.llmProviderConnectedChip : t.settings.llmProviderNotConnectedChip}
-        />
-      ),
       onClick: () => setSettingsSubview('llmProvider'),
     },
     {
-      key: 'memory',
-      label: t.settings.memoryTitle,
-      description: t.settings.settingsRows.memory,
-      icon: <MemoryRounded />,
-      onClick: () => setSettingsSubview('memory'),
+      key: 'privacySecurity',
+      label: t.settings.privacy,
+      description: t.settings.settingsRows.privacySecurity,
+      icon: <PrivacyTipRounded />,
+      onClick: () => setSettingsSubview('privacySecurity'),
     },
-  ];
-  const appRows: SettingsRowItem[] = [
     {
       key: 'appearance',
       label: t.settings.appearance,
       description: t.settings.settingsRows.appearance,
       icon: <PaletteRounded />,
       onClick: () => setSettingsSubview('appearance'),
+    },
+    {
+      key: 'storage',
+      label: t.settings.storageTitle,
+      description: t.settings.settingsRows.storage,
+      icon: <StorageRounded />,
+      onClick: () => setSettingsSubview('storage'),
     },
     {
       key: 'speechToText',
@@ -2615,30 +2570,7 @@ export function SettingsView({
       onClick: () => setSettingsSubview('textToSpeech'),
     },
   ];
-  const cloudRows: SettingsRowItem[] = [
-    {
-      key: 'storage',
-      label: t.settings.storageTitle,
-      description: t.settings.settingsRows.storage,
-      icon: <StorageRounded />,
-      onClick: () => setSettingsSubview('storage'),
-    },
-    {
-      key: 'privacySecurity',
-      label: t.settings.privacy,
-      description: t.settings.settingsRows.privacySecurity,
-      icon: <PrivacyTipRounded />,
-      onClick: () => setSettingsSubview('privacySecurity'),
-    },
-  ];
-  const advancedRows: SettingsRowItem[] = [
-    {
-      key: 'sidebarFeatures',
-      label: t.settings.sidebarFeaturesTitle,
-      description: t.settings.settingsRows.sidebarFeatures,
-      icon: <GridViewRounded />,
-      onClick: () => onNavigate('more'),
-    },
+  const systemRows: SettingsRowItem[] = [
     {
       key: 'developerMode',
       label: t.settings.developerModeTitle,
@@ -2647,11 +2579,11 @@ export function SettingsView({
       onClick: () => setSettingsSubview('developerMode'),
     },
     {
-      key: 'docs',
-      label: t.nav.docs,
-      description: t.settings.advancedSurfaces.docs,
-      icon: <MenuBookRounded />,
-      onClick: () => onNavigate('docs'),
+      key: 'memory',
+      label: t.settings.memoryTitle,
+      description: t.settings.settingsRows.memory,
+      icon: <MemoryRounded />,
+      onClick: () => setSettingsSubview('memory'),
     },
   ];
 
@@ -2725,40 +2657,23 @@ export function SettingsView({
         <Typography color="text.secondary">{t.sections.settings.subtitle}</Typography>
       </Stack>
       {renderBetaDisclaimer()}
-      <Stack spacing={0.75}>
-        <Typography variant="overline" color="text.secondary">{t.settings.settingsGroups.intelligence}</Typography>
-        <Card>
-          <SettingsList>
-            {intelligenceRows.map((item) => <SettingsRow item={item} key={item.key} />)}
-          </SettingsList>
-        </Card>
-      </Stack>
-      <Stack spacing={0.75}>
-        <Typography variant="overline" color="text.secondary">{t.settings.settingsGroups.app}</Typography>
-        <Card>
-          <SettingsList>
-            {appRows.map((item) => <SettingsRow item={item} key={item.key} />)}
-          </SettingsList>
-        </Card>
-      </Stack>
-      <Stack spacing={0.75}>
-        <Typography variant="overline" color="text.secondary">{t.settings.settingsGroups.cloudAccount}</Typography>
-        <Card>
-          <SettingsList>
-            {cloudRows.map((item) => <SettingsRow item={item} key={item.key} />)}
-          </SettingsList>
-        </Card>
-      </Stack>
-      <Stack spacing={0.75}>
-        <Typography variant="overline" color="text.secondary">{t.settings.settingsGroups.advanced}</Typography>
-        <Card>
-          <SettingsList>
-            {advancedRows.map((item) => <SettingsRow item={item} key={item.key} />)}
-          </SettingsList>
-        </Card>
-      </Stack>
-      {renderBetaControls()}
       {renderDesktopUpdates()}
+      {renderBetaControls()}
+      <Card>
+        <SettingsList>
+          {localRows.map((item) => <SettingsRow item={item} key={item.key} />)}
+        </SettingsList>
+      </Card>
+      <Card>
+        <SettingsList>
+          {advancedLinks.map((item) => <SettingsRow item={{ ...item, key: item.view, onClick: () => onNavigate(item.view) }} key={item.view} />)}
+        </SettingsList>
+      </Card>
+      <Card>
+        <SettingsList>
+          {systemRows.map((item) => <SettingsRow item={item} key={item.key} />)}
+        </SettingsList>
+      </Card>
     </Stack>
   );
 }

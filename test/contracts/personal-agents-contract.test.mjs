@@ -161,11 +161,9 @@ test('personal agent runtime wires Forger and granted app MCP access', async () 
   assert.match(managerSource, /createForgerMcpSession/);
   assert.match(managerSource, /listenAppMcps\?\.\(input\.agent\.appIds, input\.run\.id\)/);
   assert.match(managerSource, /resolveRuntimeForAgent/);
-  assert.match(managerSource, /\.\.\.\(agent\.runtime \?\? \{\}\)/);
   assert.match(managerSource, /personal_agent_provider_changed_new_conversation_required/);
-  assert.match(managerSource, /createLlmProviderRunService/);
-  assert.match(managerSource, /surface: 'personal_agent'/);
-  assert.doesNotMatch(managerSource, /llm-provider\/adapters/);
+  assert.match(managerSource, /codexCliAdapter\.runConversation/);
+  assert.match(managerSource, /claudeCliAdapter\.run/);
   assert.match(managerSource, /mcpServers,/);
   assert.match(mainProcessSource, /caller: 'personal-agent'/);
   assert.match(mainProcessSource, /personalAgentId: agent\.id/);

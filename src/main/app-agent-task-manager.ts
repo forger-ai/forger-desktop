@@ -12,8 +12,14 @@ import type {
   AppAgentWorkspaceInput,
   AgentRuntime,
   AgentRuntimeRequest,
+  ClaudeEffort,
+  CodexReasoningEffort,
   PermissionRequest,
 } from '../shared/types';
+import {
+  createIsolatedCodexHome,
+  removeIsolatedCodexHome,
+} from './codex-run-isolation';
 import {
   existsDirectory,
   isPathInside,
@@ -44,16 +50,14 @@ import {
 import type { LlmAppMcpServerConfig } from './app-agent/types';
 import type { AppFolderGrantPublic } from './app-folder-grants';
 import { mapFailureMessage, normalizeProviderErrorCode, toProviderProgressMessages } from './chat/progress-errors';
-import { createLlmProviderRunService } from './llm-provider/run-service';
-import { parseCodexJsonl } from './llm-provider/output-parsers';
-import type { LlmProviderAuthProfileResolver } from './llm-provider/types';
+import { antigravityCliAdapter } from './llm-provider/adapters/antigravity-cli-adapter';
+import { claudeCliAdapter } from './llm-provider/adapters/claude-cli-adapter';
+import { codexCliAdapter, parseCodexJsonl } from './llm-provider/adapters/codex-cli-adapter';
 
 interface AppAgentTaskManagerOptions {
   privateAppsRoot: string;
   metadataRoot: string;
   codexHome: string;
-  providerProfilesRoot?: string;
-  resolveAuthProfile?: LlmProviderAuthProfileResolver;
   getAgentRuntime: (requested?: AgentRuntimeRequest) => Promise<AgentRuntime>;
   appAllowsAgentRuntimeControl?: (appId: string) => Promise<boolean>;
   getCodexCliPath: () => Promise<string | null>;
@@ -129,13 +133,15 @@ interface PendingPermission {
 
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 const CODEX_TASK_TIMEOUT_MS = 600_000;
+const DEFAULT_MODEL = 'gpt-5.2';
+const DEFAULT_REASONING: CodexReasoningEffort = 'medium';
 
 const hasTaskRuntimeInput = (runtime: AppCodexTaskStartInput['runtime']): boolean => {
   if (!runtime) {
     return false;
   }
   const modelParams = runtime.modelParams && typeof runtime.modelParams === 'object' ? runtime.modelParams : {};
-  return Boolean(runtime.provider || runtime.model || runtime.authProfileId || runtime.effort || modelParams.effort || modelParams.reasoningEffort || runtime.permissionMode);
+  return Boolean(runtime.provider || runtime.model || runtime.effort || modelParams.effort || modelParams.reasoningEffort || runtime.permissionMode);
 };
 
 export class AppAgentTaskManager {
@@ -287,19 +293,32 @@ export class AppAgentTaskManager {
     const locale = normalizeTaskLocale(input.locale);
     const runtime = await this.resolveRuntime(template, input);
     task.provider = runtime.provider;
-    const providerRunService = createLlmProviderRunService({
-      codexHome: this.options.codexHome,
-      providerProfilesRoot: this.options.providerProfilesRoot,
-      resolveAuthProfile: this.options.resolveAuthProfile,
-      getCodexCliPath: this.options.getCodexCliPath,
-      getClaudeCliPath: this.options.getClaudeCliPath,
-      getAntigravityCliPath: this.options.getAntigravityCliPath,
-      getCodexAuthenticated: this.options.getCodexAuthenticated,
-      getClaudeAuthenticated: this.options.getClaudeAuthenticated,
-      getAntigravityAuthenticated: this.options.getAntigravityAuthenticated,
-      ensureGitAvailable: this.options.ensureGitAvailable,
-    });
-    await providerRunService.assertReady(runtime.provider);
+    if (runtime.provider === 'antigravity') {
+      if (!(await (this.options.getAntigravityAuthenticated?.() ?? Promise.resolve(false)))) {
+        throw new Error('antigravity_auth_missing');
+      }
+    } else if (runtime.provider === 'claude') {
+      if (!(await this.options.getClaudeAuthenticated())) {
+        throw new Error('claude_auth_missing');
+      }
+    } else if (!(await this.options.getCodexAuthenticated())) {
+      throw new Error('codex_auth_missing');
+    }
+    if (runtime.provider === 'codex') {
+      await this.options.ensureGitAvailable?.();
+    }
+    const codexCliPath = runtime.provider === 'codex' ? await this.options.getCodexCliPath() : null;
+    const claudeCliPath = runtime.provider === 'claude' ? await this.options.getClaudeCliPath() : null;
+    const antigravityCliPath = runtime.provider === 'antigravity' ? await (this.options.getAntigravityCliPath?.() ?? Promise.resolve(null)) : null;
+    if (runtime.provider === 'codex' && !codexCliPath) {
+      throw new Error('codex_cli_missing');
+    }
+    if (runtime.provider === 'claude' && !claudeCliPath) {
+      throw new Error('claude_cli_missing');
+    }
+    if (runtime.provider === 'antigravity' && !antigravityCliPath) {
+      throw new Error('antigravity_cli_missing');
+    }
 
     task.status = 'running';
     task.updatedAt = new Date().toISOString();
@@ -308,6 +327,7 @@ export class AppAgentTaskManager {
     this.emit(task);
 
     let forgerMcpSession: { url: string; token: string } | null = null;
+    const temporaryCodexHomes: string[] = [];
     let appMcpsReleased = false;
     try {
       const preparedArguments = await this.preparePromptArguments(task, template, input);
@@ -329,6 +349,8 @@ export class AppAgentTaskManager {
       if (!(await existsDirectory(runRoot))) {
         throw new Error('agent_run_workspace_missing');
       }
+      const model = runtime.model || DEFAULT_MODEL;
+      const reasoningEffort = runtime.provider === 'codex' ? runtime.effort as CodexReasoningEffort : DEFAULT_REASONING;
       const appMcpServers = await (this.options.listenAppMcps?.([task.appId], task.runId) ?? Promise.resolve([]));
       forgerMcpSession = this.options.createForgerMcpSession?.(task.runId, task.appId) ?? null;
       const mcpServers = [
@@ -343,39 +365,32 @@ export class AppAgentTaskManager {
           : []),
         ...appMcpServers,
       ];
+      const providerCommand = runtime.provider === 'codex'
+        ? codexCliPath as string
+        : runtime.provider === 'claude'
+          ? claudeCliPath as string
+          : antigravityCliPath as string;
       const onOutput = (stream: 'stdout' | 'stderr' | 'meta', text: string): void => {
         void appendTranscript(task.transcriptPath, stream, text);
         this.updateProgressFromOutput(task, runtime.provider, stream, text, locale);
       };
-      const runProviderTask = async () =>
-        await providerRunService.run({
-          surface: 'app_prompt_task',
-          mode: 'task',
-          runtime,
-          runId: task.runId,
+      const runCodexTask = async (codexHome: string) =>
+        await codexCliAdapter.runTask({
+          cliPath: codexCliPath as string,
           pathEntries,
           environment,
           mcpServers,
           workingDir: runRoot,
-          configWorkspaceRoot: runtime.provider === 'claude' || runtime.provider === 'antigravity' ? task.appRoot : undefined,
           sharedRoots: additionalRoots,
           addDirs: additionalRoots,
           prompt,
+          model,
+          reasoningEffort,
           permissionMode: runtime.permissionMode,
           networkAccess,
           timeoutMs: CODEX_TASK_TIMEOUT_MS,
-          timeoutMode: 'absolute',
-          codexHomePlan: runtime.provider === 'codex'
-            ? {
-                type: 'temporary',
-                rootCodexHome: this.options.codexHome,
-                prefix: 'forger-task-codex-home',
-                trustedRoots: Array.from(new Set([runRoot, ...additionalRoots])),
-                networkAccess,
-              }
-            : { type: 'none' },
+          codexHome,
           imagePaths,
-          alwaysIncludeMcpConfig: runtime.provider === 'claude' ? true : undefined,
           onChild: (child) => {
             task.child = child;
           },
@@ -383,8 +398,70 @@ export class AppAgentTaskManager {
           runCommandCapture,
         });
 
-      await appendTranscript(task.transcriptPath, 'meta', `${runtime.provider} provider run`);
-      let result = await runProviderTask();
+      await appendTranscript(task.transcriptPath, 'meta', `${runtime.provider} ${providerCommand}`);
+      const isolatedCodexHome = runtime.provider === 'codex'
+        ? await createIsolatedCodexHome(this.options.codexHome, {
+            prefix: 'forger-task-codex-home',
+            trustedRoots: Array.from(new Set([runRoot, ...additionalRoots])),
+            networkAccess,
+          })
+        : '';
+      if (isolatedCodexHome) {
+        temporaryCodexHomes.push(isolatedCodexHome);
+      }
+      const antigravityResult = runtime.provider === 'antigravity'
+        ? await antigravityCliAdapter.run({
+            runId: task.runId,
+            cliPath: antigravityCliPath as string,
+            pathEntries: [path.dirname(antigravityCliPath as string), ...pathEntries],
+            environment,
+            mcpServers,
+            workingDir: runRoot,
+            configWorkspaceRoot: task.appRoot,
+            sharedRoots: additionalRoots,
+            prompt,
+            model,
+            effort: runtime.effort,
+            addDirs: additionalRoots,
+            permissionMode: runtime.permissionMode,
+            timeoutMs: CODEX_TASK_TIMEOUT_MS,
+            timeoutMode: 'absolute',
+            onChild: (child) => {
+              task.child = child;
+            },
+            onOutput,
+            runCommandCapture,
+          })
+        : null;
+      const claudeResult = runtime.provider === 'claude'
+        ? await claudeCliAdapter.run({
+            cliPath: claudeCliPath as string,
+            pathEntries,
+            environment,
+            mcpServers,
+            workingDir: runRoot,
+            configWorkspaceRoot: task.appRoot,
+            sharedRoots: additionalRoots,
+            addDirs: additionalRoots,
+            prompt,
+            model,
+            effort: runtime.effort as ClaudeEffort,
+            permissionMode: runtime.permissionMode,
+            timeoutMs: CODEX_TASK_TIMEOUT_MS,
+            imagePaths,
+            alwaysIncludeMcpConfig: true,
+            onChild: (child) => {
+              task.child = child;
+            },
+            onOutput,
+            runCommandCapture,
+          })
+        : null;
+      let result = runtime.provider === 'antigravity'
+        ? { code: 0, stdout: antigravityResult?.stdout ?? '', stderr: antigravityResult?.stderr ?? '', assistantText: antigravityResult?.assistantText ?? '' }
+        : runtime.provider === 'claude'
+          ? { code: 0, stdout: claudeResult?.stdout ?? '', stderr: claudeResult?.stderr ?? '', assistantText: claudeResult?.assistantText ?? '' }
+          : await runCodexTask(isolatedCodexHome);
       if ((task as AppCodexTaskSummary).status === 'canceled') {
         return;
       }
@@ -396,8 +473,14 @@ export class AppAgentTaskManager {
           this.addProgress(task, taskMessage(locale, 'technicalLimit'));
           await this.persist(task);
           this.emit(task);
+          const cleanCodexHome = await createIsolatedCodexHome(this.options.codexHome, {
+            prefix: 'forger-task-codex-home',
+            trustedRoots: Array.from(new Set([runRoot, ...additionalRoots])),
+            networkAccess,
+          });
+          temporaryCodexHomes.push(cleanCodexHome);
           await appendTranscript(task.transcriptPath, 'meta', 'Retrying Codex task with a clean temporary Codex home.');
-          result = await runProviderTask();
+          result = await runCodexTask(cleanCodexHome);
           if ((task as AppCodexTaskSummary).status === 'canceled') return;
         }
       }
@@ -415,6 +498,8 @@ export class AppAgentTaskManager {
       }
       this.options.releaseAppMcps?.(task.runId);
       appMcpsReleased = true;
+      await Promise.all(temporaryCodexHomes.map((dirPath) => removeIsolatedCodexHome(dirPath)));
+      temporaryCodexHomes.splice(0);
       await this.persist(task);
       this.emit(task);
     } finally {
@@ -425,6 +510,7 @@ export class AppAgentTaskManager {
         this.options.releaseAppMcps?.(task.runId);
       }
       await this.cleanupTaskInputs(task).catch(() => undefined);
+      await Promise.all(temporaryCodexHomes.map((dirPath) => removeIsolatedCodexHome(dirPath)));
     }
   }
 
@@ -577,9 +663,6 @@ export class AppAgentTaskManager {
         model: typeof runtime.model === 'string' && runtime.model.trim() && runtime.model.trim() !== 'auto'
           ? runtime.model.trim()
           : templateRuntime?.model,
-        authProfileId: typeof runtime.authProfileId === 'string' && runtime.authProfileId.trim()
-          ? runtime.authProfileId.trim()
-          : templateRuntime?.authProfileId,
         effort: (effort ?? templateRuntime?.effort) as AgentRuntimeRequest['effort'],
         permissionMode: runtime.permissionMode ?? templateRuntime?.permissionMode,
         ...(!templateRuntime ? { recommendations: template.runtimeRecommendations } : {}),

@@ -48,7 +48,6 @@ import {
   createStartupLogger,
 } from './startup-loading';
 import { appAllowsAgentRuntimeControl, appAllowsAudioInput, appAllowsSpeechToText, appAllowsTextToSpeech, appAllowsWorkspaceFolders } from '../../shared/platform-capabilities';
-import type { LlmProviderAuthProfileResolver } from '../llm-provider/types';
 
 type ServiceConstructor<T = unknown> = new (...args: any[]) => T;
 type AsyncFn<T = unknown> = (...args: any[]) => Promise<T>;
@@ -224,8 +223,6 @@ export interface MainLifecycleDeps {
   getForgerAccountPath: () => string;
   getForgerHomeRoot: () => string;
   getForgerMetadataRoot: () => string;
-  getProviderProfilesRoot?: () => string;
-  resolveLlmProviderAuthProfile?: LlmProviderAuthProfileResolver;
   getSocialAppReviewPromptContext: (appId: string) => Promise<unknown | null>;
   getFreePort: () => Promise<number>;
   getLegacyForgerMetadataRoot: () => string;
@@ -381,8 +378,6 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
     getForgerAccountPath,
     getForgerHomeRoot,
     getForgerMetadataRoot,
-    getProviderProfilesRoot,
-    resolveLlmProviderAuthProfile,
     getSocialAppReviewPromptContext,
     getFreePort,
     getLegacyForgerMetadataRoot,
@@ -460,8 +455,6 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
     upsertInstalledRecord,
     waitForHttpOk,
   } = deps;
-  const getLlmProviderProfilesRoot = (): string | undefined => getProviderProfilesRoot?.();
-  const resolveLlmAuthProfile: LlmProviderAuthProfileResolver = resolveLlmProviderAuthProfile ?? (async () => null);
 
   const getClaudeAuthenticatedForForger = getClaudeConnectedForForger ?? (async () => {
     const status = await getClaudeAuthStatus();
@@ -926,8 +919,6 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
     metadataRoot: getForgerMetadataRoot(),
     legacyMetadataRoot: getLegacyForgerMetadataRoot(),
     codexHome: getCodexHome(),
-    providerProfilesRoot: getLlmProviderProfilesRoot(),
-    resolveAuthProfile: resolveLlmAuthProfile,
     getAgentRuntime: chooseAgentRuntime,
     agentContractVersion: FORGER_AGENT_CONTRACT_VERSION,
     getCodexCliPath: async () => await resolveCodexCliPath(getCodexRoot()),
@@ -1017,8 +1008,6 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
     privateAppsRoot: getPrivateAppsRoot(),
     metadataRoot: getForgerMetadataRoot(),
     codexHome: getCodexHome(),
-    providerProfilesRoot: getLlmProviderProfilesRoot(),
-    resolveAuthProfile: resolveLlmAuthProfile,
     getAgentRuntime: chooseAgentRuntime,
     appAllowsAgentRuntimeControl: async (appId: string) => {
       const record = state.registry.apps[appId];
@@ -1081,8 +1070,6 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
     privateAppsRoot: getPrivateAppsRoot(),
     metadataRoot: getForgerMetadataRoot(),
     codexHome: getCodexHome(),
-    providerProfilesRoot: getLlmProviderProfilesRoot(),
-    resolveAuthProfile: resolveLlmAuthProfile,
     getAgentRuntime: chooseAgentRuntime,
     appAllowsAgentRuntimeControl: async (appId: string) => {
       const record = state.registry.apps[appId];
@@ -1290,8 +1277,6 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
     forgerHomeRoot: getForgerHomeRoot(),
     metadataRoot: getForgerMetadataRoot(),
     codexHome: getCodexHome(),
-    providerProfilesRoot: getLlmProviderProfilesRoot(),
-    resolveAuthProfile: resolveLlmAuthProfile,
     getAgentRuntime: chooseAgentRuntime,
     getInstalledApps: () => Object.values(state.registry.apps).map(toAppSummary),
     getCodexCliPath: async () => await resolveCodexCliPath(getCodexRoot()),
@@ -1337,8 +1322,6 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
   state.memoryMaintenanceManager = new MemoryMaintenanceManager({
     forgerHomeRoot: getForgerHomeRoot(),
     codexHome: getCodexHome(),
-    providerProfilesRoot: getLlmProviderProfilesRoot(),
-    resolveAuthProfile: resolveLlmAuthProfile,
     getAgentRuntime: chooseAgentRuntime,
     getCodexAuthenticated: async () => {
       const status = await getCodexAuthStatus();

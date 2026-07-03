@@ -1287,13 +1287,11 @@ const normalizeRuntime = (runtime: AppAgentRuntimeInput | undefined): Partial<Ap
   const normalized = normalizeRuntimeInput(runtime);
   const provider = normalized?.provider as AgentProvider | undefined;
   const model = normalized?.model;
-  const authProfileId = normalized?.authProfileId;
   const effort = normalized?.effort as AppCodexConversationSendMessageInput['effort'];
   const workspace = normalizeWorkspace(normalized?.workspace);
   return {
     ...(provider ? { provider } : {}),
     ...(model ? { model } : {}),
-    ...(authProfileId ? { authProfileId } : {}),
     ...(effort ? { effort } : {}),
     ...(workspace ? { workspace } : {}),
   };
@@ -1324,16 +1322,6 @@ const normalizeRuntimeInput = (runtime: unknown): AppAgentRuntimeInput | undefin
       model = trimmed;
     }
   }
-  let authProfileId: string | undefined;
-  if (record.authProfileId !== undefined) {
-    if (typeof record.authProfileId !== 'string') {
-      throw new BridgeError(400, 'agent_runtime_auth_profile_invalid');
-    }
-    const trimmed = record.authProfileId.trim();
-    if (trimmed) {
-      authProfileId = trimmed;
-    }
-  }
   let effort: AppAgentRuntimeInput['effort'] | undefined;
   if (record.effort !== undefined) {
     if (typeof record.effort !== 'string') {
@@ -1348,7 +1336,6 @@ const normalizeRuntimeInput = (runtime: unknown): AppAgentRuntimeInput | undefin
   const normalized: AppAgentRuntimeInput = {
     ...(provider ? { provider } : {}),
     ...(model ? { model } : {}),
-    ...(authProfileId ? { authProfileId } : {}),
     ...(effort ? { effort } : {}),
     ...(modelParams ? { modelParams } : {}),
     ...(record.permissionMode === 'safe' || record.permissionMode === 'unsafe' ? { permissionMode: record.permissionMode } : {}),

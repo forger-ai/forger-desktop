@@ -22,8 +22,6 @@ import type { SubmitUsageEventInput, SubmitUsageEventResult } from './usage-even
 import type { ConversationDiagnosticReportPreview, PrepareConversationDiagnosticReportInput, SubmitConversationDiagnosticReportResult } from './diagnostics';
 import type { FailureDiagnosticFields } from './base';
 import type { AntigravityAuthSessionEvent, AntigravityAuthSessionStartResult, AntigravityAuthStatus, CodexAuthStatus, ClaudeAuthStatus, DesktopErrorReportPreview } from './auth';
-import type { AgentProviderUsageResult } from './provider-usage';
-import type { LlmProviderProfileMutationResult, LlmProviderProfilesState, SetActiveLlmProviderProfileInput, SetActiveLlmProviderProfileResult, UpdateLlmProviderProfileDefaultsInput } from './provider-profiles';
 import type { AgentToolPackageDefinition, AgentToolSettings, UpdateAgentToolApprovalInput, OfficialToolsState, ToolMutationResult, ConfigureOfficialToolInput, CallOfficialToolInput, CallOfficialToolResult, AppToolsInstallGate, SetAppToolGrantInput, OfficialToolRuntimeEvent, GetAppToolsInstallGateOptions } from './tools';
 import type { PickedChatFile, FilesStageForChatInput, FilesDiscardStagedForChatInput, FilesActionResult, FilesListInput, ForgerFileRecord, ForgerFileCategory, FilesCreateCategoryInput, FilesRenameCategoryInput, FilesDeleteCategoryInput, FilesImportInput, FilesMoveInput, FilesRenameInput, FilesDeleteInput, DbListTablesResponse, DbQueryTableResponse } from './data';
 import type { Automation, AutomationRun, AutomationRunSummary, AutomationUpsertInput, WindowControlState } from './automations';
@@ -205,10 +203,6 @@ export interface ForgerDesktopApi {
   submitProductFeedback: (input: SubmitProductFeedbackInput) => Promise<{ success: boolean; userMessage?: string; technicalCode?: string } & FailureDiagnosticFields>;
   submitUsageEvent: (input: SubmitUsageEventInput) => Promise<SubmitUsageEventResult>;
   openExternalUrl: (url: string) => Promise<{ success: boolean; userMessage?: string } & FailureDiagnosticFields>;
-  getAgentProviderUsage: () => Promise<AgentProviderUsageResult>;
-  listLlmProviderProfiles: () => Promise<LlmProviderProfilesState>;
-  setActiveLlmProviderProfile: (input: SetActiveLlmProviderProfileInput) => Promise<SetActiveLlmProviderProfileResult>;
-  updateLlmProviderProfileDefaults: (input: UpdateLlmProviderProfileDefaultsInput) => Promise<LlmProviderProfileMutationResult>;
   getCodexAuthStatus: () => Promise<CodexAuthStatus>;
   openCodexUsageDashboard: () => Promise<{ success: boolean; userMessage?: string } & FailureDiagnosticFields>;
   connectCodexAuth: () => Promise<{ success: boolean; userMessage: string } & FailureDiagnosticFields>;

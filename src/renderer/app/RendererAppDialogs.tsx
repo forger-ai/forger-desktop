@@ -46,7 +46,6 @@ export function RendererAppDialogs({ controller }: RendererAppDialogsProps) {
     handleForgerRegister,
     handleForgerUsernameUpdate,
     handleForgerLogout,
-    settings,
     codexConfigOpen,
     codexAuthStatus,
     codexAuthBusy,
@@ -67,6 +66,8 @@ export function RendererAppDialogs({ controller }: RendererAppDialogsProps) {
     antigravityAuthBusy,
     closeAntigravityConfig,
     handleConnectAntigravityAuth,
+    refreshAntigravityAuthStatus,
+    handleReinstallAntigravity,
     agentProviderConfigOpen,
     setAgentProviderConfigOpen,
     setCodexConfigOpen,
@@ -233,7 +234,6 @@ export function RendererAppDialogs({ controller }: RendererAppDialogsProps) {
       <ClaudeConfigModal
         open={claudeConfigOpen}
         status={claudeAuthStatus}
-        forgerConnected={Boolean(settings.providerConnections.claude) && claudeAuthStatus.authenticated}
         busy={claudeAuthBusy}
         t={t}
         onClose={closeClaudeConfig}
@@ -250,7 +250,7 @@ export function RendererAppDialogs({ controller }: RendererAppDialogsProps) {
         provider="antigravity"
         providerName={t.llmProviderConnect.providers.antigravity.name}
         providerOwner={t.llmProviderConnect.providers.antigravity.owner}
-        authenticated={Boolean(settings.providerConnections.antigravity) && antigravityAuthStatus.authenticated}
+        authenticated={antigravityAuthStatus.authenticated}
         installed={antigravityAuthStatus.installed}
         busy={antigravityAuthBusy}
         title={t.llmProviderConnect.providers.antigravity.title}
@@ -262,6 +262,8 @@ export function RendererAppDialogs({ controller }: RendererAppDialogsProps) {
         t={t}
         onClose={closeAntigravityConfig}
         onConnect={handleConnectAntigravityAuth}
+        onRefresh={refreshAntigravityAuthStatus}
+        onReinstall={handleReinstallAntigravity}
         onOpenExternalUrl={(url) => void getDesktopApi().openExternalUrl(url)}
       />
 

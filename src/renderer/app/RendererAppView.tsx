@@ -14,14 +14,13 @@ import { BackupsView } from '@renderer/views/BackupsView';
 import { BackgroundTaskDetailView, BackgroundTasksListView, viewLabel } from '@renderer/views/BackgroundTasksView';
 import { CatalogView } from '@renderer/views/CatalogView';
 import { ChatView } from '@renderer/views/ChatView';
+import { CreateView } from '@renderer/views/CreateView';
 import { DataView } from '@renderer/views/DataView';
 import { DevicesView } from '@renderer/views/DevicesView';
 import { DocsView } from '@renderer/views/DocsView';
 import { FeedbackView } from '@renderer/views/FeedbackView';
 import { FilesView } from '@renderer/views/FilesView';
 import { FriendChatWindowView } from '@renderer/views/FriendChatWindowView';
-import { MoreView } from '@renderer/views/MoreView';
-import type { PinnableView } from '@renderer/components/Sidebar';
 import { SocialView } from '@renderer/views/SocialView';
 import { SettingsView } from '@renderer/views/SettingsView';
 import { SecretsView } from '@renderer/views/SecretsView';
@@ -247,8 +246,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     setBannerMessage,
     handleForgerLogout,
     desktopUpdateState,
-    pinnedViews,
-    togglePinnedView,
+    advancedMode,
     openingAppIds,
     getCategoryLabel,
     handleOpen,
@@ -266,8 +264,10 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     handleResolveConflict,
     openAppDetails,
     handleDeleteApp,
+    handleCreateLocalApp,
     handleUploadSocial,
     handleRenameApp,
+    createLocalAppBusy,
     installProgressByApp,
     catalogApps,
     refreshApps,
@@ -276,6 +276,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     catalogStatusFilter,
     setCatalogStatusFilter,
     handleInstall,
+    earlyAccessEnabled,
     selectedAppDetails,
     selectedAppDetailsId,
     selectedAppToolGate,
@@ -352,6 +353,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     handleRespondQuestion,
     handleFinishSocialReviewInstall,
     handleDeleteSocialReview,
+    refreshCodexAuthStatus,
     prepareConversationDiagnosticReport,
     automations,
     selectedAutomationId,
@@ -414,7 +416,6 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     chatBotPicture,
     setChatBotPicture,
     handleAgentDefaultsChange,
-    handleActiveProviderProfileChange,
     handleDeveloperModeChange,
     setCodexConfigOpen,
     handleReinstallCodex,
@@ -435,6 +436,8 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     handleDeleteMemory,
     cloudIdentity,
     setCloudIdentity,
+    setEarlyAccessEnabled,
+    setAdvancedMode,
     pendingInstallGate,
     cloudModalOpen,
     handleForgerUsernameUpdate,
@@ -462,7 +465,6 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
   const antigravityEffort = antigravitySupportedEfforts.includes(selectedAntigravityRuntimeEffort as AntigravityEffort)
     ? selectedAntigravityRuntimeEffort
     : ANTIGRAVITY_MODEL_OPTIONS.find((option) => option.realModelName === selectedAntigravityRuntimeModel)?.defaultEffort ?? antigravitySupportedEfforts[0] ?? 'medium';
-  const visibleProviderOptions = AGENT_PROVIDER_OPTIONS;
   const chatProviderOptions = buildChatProviderOptions({
     codexAuthenticated: codexAuthStatus.authenticated,
     claudeAuthenticated: claudeAuthStatus.authenticated,
@@ -596,6 +598,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     blocked: Boolean(codexConfigOpen || claudeConfigOpen || agentProviderConfigOpen || cloudModalOpen || pendingInstallGate),
   });
   const intelligenceProviderConfigured = codexAuthStatus.authenticated || claudeAuthStatus.authenticated || antigravityAuthStatus.authenticated;
+  const codexProviderConfigured = codexAuthStatus.authenticated;
 
   useEffect(() => {
     const unsubscribe = getDesktopApi().onWakeWordDetected(() => {
@@ -765,44 +768,29 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     </Stack>
   );
 
-  const renderAdvancedView = (view: PinnableView, content: ReactNode) => (
+  const renderAdvancedView = (view: string, content: ReactNode) => (
     <Stack spacing={2} data-onboarding-target={`advanced-${view}`}>
-      {!pinnedViews.includes(view) ? (
-        <Button variant="text" onClick={() => setCurrentView('more')} sx={{ alignSelf: 'flex-start' }}>
-          {t.more.back}
+      {!advancedMode ? (
+        <Button variant="text" onClick={() => setCurrentView('settings')} sx={{ alignSelf: 'flex-start' }}>
+          {t.settings.backToSettings}
         </Button>
       ) : null}
       {content}
     </Stack>
   );
 
-  const startNewAppConversation = () => {
-    handleStartNewConversation();
-    setCurrentView('chat');
-  };
-
   const renderInstalledAppsView = () => (
     <Stack spacing={2.5}>
-      <Stack direction="row" spacing={1.5} alignItems="flex-start" justifyContent="space-between">
-        <Stack spacing={0.5}>
-          <Typography variant="h4">{t.sections.apps.title}</Typography>
-          <Typography color="text.secondary">{t.sections.apps.subtitle}</Typography>
-        </Stack>
-        <Button variant="contained" onClick={startNewAppConversation} sx={{ flexShrink: 0 }}>
-          {t.sections.apps.newApp}
-        </Button>
+      <Stack spacing={0.5}>
+        <Typography variant="h4">{t.sections.apps.title}</Typography>
+        <Typography color="text.secondary">{t.sections.apps.subtitle}</Typography>
       </Stack>
       {installedViewApps.length === 0 ? (
         <Stack spacing={1.5} alignItems="flex-start">
           <Typography color="text.secondary">{t.sections.apps.empty}</Typography>
-          <Stack direction="row" spacing={1}>
-            <Button variant="contained" onClick={startNewAppConversation}>
-              {t.sections.apps.newApp}
-            </Button>
-            <Button variant="outlined" onClick={() => setCurrentView('catalog')}>
-              {t.sections.apps.openCatalog}
-            </Button>
-          </Stack>
+          <Button variant="outlined" onClick={() => setCurrentView('catalog')}>
+            {t.sections.apps.openCatalog}
+          </Button>
         </Stack>
       ) : (
         <AppsGrid>
@@ -1012,13 +1000,13 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
           onOpenBackgroundTaskHistory={openBackgroundTaskHistory}
           onOpenBackgroundTask={openBackgroundTaskDetail}
           desktopUpdateState={desktopUpdateState}
-          pinnedViews={pinnedViews}
+          advancedMode={advancedMode}
           showForumNav
         >
         {currentView === 'apps' ? renderInstalledAppsView() : null}
 
         {currentView === 'agents' ? (
-          <AgentsView t={t} intelligenceProviderConfigured={intelligenceProviderConfigured} providerOptions={visibleProviderOptions} />
+          <AgentsView t={t} intelligenceProviderConfigured={intelligenceProviderConfigured} />
         ) : null}
 
         {currentView === 'catalog' ? (
@@ -1050,6 +1038,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             onDetails={(appId) => void openAppDetails(appId, 'catalog')}
             onDelete={(appId) => void handleDeleteApp(appId)}
             t={t}
+            earlyAccessEnabled={earlyAccessEnabled}
             getAppMeta={getAppMeta}
             getCategoryLabel={getCategoryLabel}
             installProgressByApp={installProgressByApp}
@@ -1069,7 +1058,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             appSecretsState={appSecretsState}
             secretsBusy={secretsBusy}
             account={forgerAccount}
-            providerOptions={visibleProviderOptions}
+            providerOptions={AGENT_PROVIDER_OPTIONS}
             runtimeProviderControls={runtimeProviderControls}
             codexDefaults={settings.codexDefaults}
             developerMode={settings.developerMode}
@@ -1144,12 +1133,15 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             onSelectPermissionMode={setSelectedChatPermissionMode}
             selectedNetworkAccess={selectedChatNetworkAccess}
             onSelectNetworkAccess={setSelectedChatNetworkAccess}
+            onOpenCodexUsageDashboard={() => void getDesktopApi().openCodexUsageDashboard()}
+            onRefreshCodexUsage={refreshCodexAuthStatus}
             assistantAvatarSrc={chatBotPictureSrc}
             isSending={activeConversationRunActive}
             isResponding={activeConversationRunActive}
             canStopRun={Boolean(activeConversationRunId)}
             progressLines={activeConversationProgressLines}
             intelligenceProviderConfigured={intelligenceProviderConfigured}
+            codexProviderConfigured={codexProviderConfigured}
             onConfigureIntelligenceProvider={openLlmProviderSettings}
             openingAppIds={openingAppIds}
             onOpenApp={(appId) => void handleOpen(appId)}
@@ -1188,6 +1180,14 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
           />
         ) : null}
 
+        {currentView === 'create' ? (
+          <CreateView
+            t={t}
+            busy={createLocalAppBusy}
+            onCreate={handleCreateLocalApp}
+          />
+        ) : null}
+
         {currentView === 'feedback' ? (
           <FeedbackView
             apps={catalogApps}
@@ -1201,15 +1201,6 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
           <DocsView
             locale={activeLocale}
             onOpenExternalUrl={(url) => void getDesktopApi().openExternalUrl(url)}
-          />
-        ) : null}
-
-        {currentView === 'more' ? (
-          <MoreView
-            t={t}
-            pinnedViews={pinnedViews}
-            onTogglePin={togglePinnedView}
-            onOpen={setCurrentView}
           />
         ) : null}
 
@@ -1386,7 +1377,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             onChatBotPictureChange={setChatBotPicture}
             modelOptions={CODEX_MODEL_OPTIONS}
             reasoningOptions={CODEX_REASONING_OPTIONS}
-            providerOptions={visibleProviderOptions}
+            providerOptions={AGENT_PROVIDER_OPTIONS}
             claudeModelOptions={CLAUDE_MODEL_OPTIONS}
             claudeEffortOptions={CLAUDE_EFFORT_OPTIONS}
             antigravityModelOptions={ANTIGRAVITY_MODEL_OPTIONS}
@@ -1396,11 +1387,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             defaultChatNetworkAccess={settings.defaultChatNetworkAccess}
             agentDefaults={settings.agentDefaults}
             providerConnections={settings.providerConnections}
-            llmProviderProfiles={settings.llmProviderProfiles}
-            activeProviderProfiles={settings.activeProviderProfiles}
             onAgentDefaultsChange={(input) => void handleAgentDefaultsChange(input)}
-            onActiveProviderProfileChange={(input) => void handleActiveProviderProfileChange(input)}
-            onProviderProfileDefaultsChange={(input) => void controller.handleProviderProfileDefaultsChange(input)}
             developerMode={settings.developerMode}
             onDeveloperModeChange={handleDeveloperModeChange}
             onOpenCodexConfig={() => setCodexConfigOpen(true)}
@@ -1433,10 +1420,14 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             onRegenerateCloudSecretKey={() => {
               void getDesktopApi().regenerateCloudSecretKey().then(setCloudIdentity);
             }}
+            earlyAccessEnabled={earlyAccessEnabled}
+            advancedMode={advancedMode}
             usageAnalyticsEnabled={usageAnalyticsEnabled}
             forumParticipation={forumParticipation}
             forumParticipationBusy={forumParticipationBusy}
             onEnterForum={handleEnterForum}
+            onEarlyAccessChange={setEarlyAccessEnabled}
+            onAdvancedModeChange={setAdvancedMode}
             onUsageAnalyticsChange={handleUsageAnalyticsChange}
             onNavigate={setCurrentView}
             onResetOnboarding={resetOnboarding}

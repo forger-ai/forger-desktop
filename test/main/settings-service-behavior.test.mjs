@@ -50,8 +50,6 @@ const settingsSeed = () => ({
     antigravity: { model: 'gemini-3.5-flash', effort: 'medium' },
   },
   providerConnections: {},
-  llmProviderProfiles: {},
-  activeProviderProfiles: {},
 });
 
 const createHarness = async (overrides = {}) => {
@@ -211,9 +209,6 @@ test('SettingsService falls back to seeds and records first provider connections
     const firstSaved = JSON.parse(await fs.readFile(harness.settingsPath, 'utf8'));
     assert.equal(firstSaved.defaultAgentProvider, 'claude');
     assert.equal(typeof firstSaved.providerConnections.claude, 'string');
-    assert.equal(firstSaved.activeProviderProfiles.claude, 'claude:system');
-    assert.equal(firstSaved.llmProviderProfiles.claude[0].label, 'Claude');
-    assert.equal(firstSaved.llmProviderProfiles.claude[0].runtimeAuthMode, 'externalActiveOnly');
 
     await harness.controller.markProviderConnected('claude');
     const secondSaved = JSON.parse(await fs.readFile(harness.settingsPath, 'utf8'));
@@ -223,56 +218,6 @@ test('SettingsService falls back to seeds and records first provider connections
     const thirdSaved = JSON.parse(await fs.readFile(harness.settingsPath, 'utf8'));
     assert.equal(thirdSaved.defaultAgentProvider, 'claude');
     assert.equal(typeof thirdSaved.providerConnections.codex, 'string');
-    assert.equal(thirdSaved.activeProviderProfiles.codex, 'codex:system');
-    assert.equal(thirdSaved.llmProviderProfiles.codex[0].runtimeAuthMode, 'externalActiveOnly');
-
-    await harness.controller.markProviderConnected('antigravity');
-    const fourthSaved = JSON.parse(await fs.readFile(harness.settingsPath, 'utf8'));
-    assert.equal(fourthSaved.activeProviderProfiles.antigravity, 'antigravity:system');
-    assert.equal(fourthSaved.llmProviderProfiles.antigravity[0].runtimeAuthMode, 'externalActiveOnly');
-  } finally {
-    await harness.cleanup();
-  }
-});
-
-test('SettingsService migrates legacy local-active profiles to system profiles', async () => {
-  const harness = await createHarness({
-    settings: {
-      providerConnections: {
-        claude: '2026-06-01T00:00:00.000Z',
-      },
-      llmProviderProfiles: {
-        claude: [
-          {
-            id: 'claude:local-active',
-            provider: 'claude',
-            label: 'Claude',
-            authMode: 'cli',
-            runtimeAuthMode: 'materialized',
-            status: 'connected',
-            source: 'local_cli',
-          },
-        ],
-      },
-      activeProviderProfiles: {
-        claude: 'claude:local-active',
-      },
-    },
-  });
-  try {
-    const listed = await harness.controller.listLlmProviderProfiles();
-    assert.equal(listed.activeProfileIds.claude, 'claude:system');
-    assert.equal(listed.providers.claude.some((profile) => profile.id === 'claude:local-active'), false);
-    assert.equal(listed.providers.claude.find((profile) => profile.id === 'claude:system').runtimeAuthMode, 'externalActiveOnly');
-    assert.deepEqual(await harness.controller.chooseAgentRuntime({
-      provider: 'claude',
-      authProfileId: 'claude:local-active',
-    }), {
-      provider: 'claude',
-      model: 'sonnet',
-      effort: 'medium',
-      authProfileId: 'claude:system',
-    });
   } finally {
     await harness.cleanup();
   }
@@ -316,7 +261,6 @@ test('SettingsService chooses connected providers by preference and connection a
       provider: 'claude',
       model: 'opus',
       effort: 'high',
-      authProfileId: 'claude:system',
     });
     assert.deepEqual(harness.controller.withAgentDefaults({
       id: 'agent',
@@ -342,7 +286,6 @@ test('SettingsService chooses connected providers by preference and connection a
       provider: 'codex',
       model: 'gpt-5.4',
       effort: 'none',
-      authProfileId: 'codex:system',
     });
     assert.equal(await harness.controller.chooseAgentRuntime({
       provider: 'codex',
@@ -410,211 +353,6 @@ test('SettingsService chooses provider fallbacks when auth or connection metadat
     assert.equal(antigravityChecks, 0);
   } finally {
     await codexFastPath.cleanup();
-  }
-});
-
-test('SettingsService exposes provider profile state and keeps system as the effective default without secrets', async () => {
-  const harness = await createHarness({
-    settings: {
-      providerConnections: {
-        codex: '2026-06-01T00:00:00.000Z',
-      },
-      llmProviderProfiles: {
-        codex: [
-          {
-            id: 'codex:work',
-            provider: 'codex',
-            label: 'Work',
-            authMode: 'oauth',
-            runtimeAuthMode: 'materialized',
-            accountHint: 'user@example.com',
-            status: 'connected',
-            source: 'desktop',
-            defaultModel: 'gpt-5.4-mini',
-            defaultEffort: 'high',
-          },
-        ],
-      },
-      activeProviderProfiles: {
-        codex: 'codex:work',
-      },
-    },
-  });
-	  try {
-	    const initial = await harness.controller.listLlmProviderProfiles();
-	    assert.equal(initial.activeProfileIds.codex, 'codex:system');
-	    assert.equal(initial.providers.codex.some((profile) => profile.id === 'codex:system'), true);
-	    assert.equal(initial.providers.codex.find((profile) => profile.id === 'codex:system').active, true);
-	    assert.equal(initial.providers.codex.find((profile) => profile.id === 'codex:system').isDefault, true);
-	    assert.equal(initial.providers.codex.find((profile) => profile.id === 'codex:system').runtimeAuthMode, 'externalActiveOnly');
-	    assert.equal(initial.providers.codex.find((profile) => profile.id === 'codex:work').active, false);
-	    assert.equal(initial.providers.codex.find((profile) => profile.id === 'codex:work').accountHint, 'user@example.com');
-	    assert.equal(JSON.stringify(initial).includes('secret'), false);
-	    assert.deepEqual(await harness.controller.chooseAgentRuntime({ provider: 'codex' }), {
-	      provider: 'codex',
-	      model: 'gpt-5.4',
-	      effort: 'medium',
-	      authProfileId: 'codex:system',
-	    });
-	    const updatedDefaults = await harness.controller.updateLlmProviderProfileDefaults({
-	      provider: 'codex',
-	      profileId: 'codex:system',
-	      model: 'gpt-5.4',
-	      effort: 'high',
-	    });
-	    assert.equal(updatedDefaults.success, true);
-	    assert.equal(updatedDefaults.state.providers.codex.find((profile) => profile.id === 'codex:system').defaultModel, 'gpt-5.4');
-	    assert.deepEqual(await harness.controller.chooseAgentRuntime({ provider: 'codex' }), {
-	      provider: 'codex',
-	      model: 'gpt-5.4',
-	      effort: 'high',
-	      authProfileId: 'codex:system',
-	    });
-
-    const selected = await harness.controller.setActiveLlmProviderProfile({
-      provider: 'codex',
-      profileId: 'codex:system',
-    });
-    assert.equal(selected.success, true);
-    assert.equal(selected.state.activeProfileIds.codex, 'codex:system');
-    assert.equal((await harness.controller.chooseAgentRuntime({ provider: 'codex' })).authProfileId, 'codex:system');
-
-    await harness.controller.markProviderDisconnected('codex');
-    const disconnected = await harness.controller.listLlmProviderProfiles();
-    assert.equal(disconnected.activeProfileIds.codex, undefined);
-    assert.equal(disconnected.providers.codex.find((profile) => profile.id === 'codex:system').status, 'missing');
-  } finally {
-    await harness.cleanup();
-  }
-});
-
-test('SettingsService only returns active connected auth profiles for agent runtimes', async () => {
-  const harness = await createHarness({
-    settings: {
-      providerConnections: {
-        codex: '2026-06-01T00:00:00.000Z',
-      },
-      llmProviderProfiles: {
-        codex: [
-          {
-            id: 'codex:expired',
-            provider: 'codex',
-            label: 'Expired',
-            authMode: 'oauth',
-            runtimeAuthMode: 'materialized',
-            status: 'expired',
-            source: 'desktop',
-          },
-          {
-            id: 'codex:work',
-            provider: 'codex',
-            label: 'Work',
-            authMode: 'oauth',
-            runtimeAuthMode: 'materialized',
-            status: 'connected',
-            source: 'desktop',
-          },
-        ],
-      },
-      activeProviderProfiles: {
-        codex: 'codex:expired',
-      },
-    },
-  });
-  try {
-	    const listed = await harness.controller.listLlmProviderProfiles();
-	    assert.equal(listed.activeProfileIds.codex, 'codex:system');
-	    assert.equal(listed.providers.codex.find((profile) => profile.id === 'codex:system').active, true);
-	    assert.equal(listed.providers.codex.find((profile) => profile.id === 'codex:work').active, false);
-
-    await assert.rejects(
-      harness.controller.chooseAgentRuntime({
-        provider: 'codex',
-        authProfileId: 'codex:expired',
-      }),
-      /provider_profile_not_found/,
-    );
-	    assert.equal((await harness.controller.chooseAgentRuntime({ provider: 'codex' })).authProfileId, 'codex:system');
-
-    const missing = await harness.controller.setActiveLlmProviderProfile({
-      provider: 'codex',
-      profileId: 'codex:missing',
-    });
-    assert.equal(missing.success, false);
-    assert.equal(missing.technicalCode, 'provider_profile_not_found');
-
-    const expired = await harness.controller.setActiveLlmProviderProfile({
-      provider: 'codex',
-      profileId: 'codex:expired',
-    });
-    assert.equal(expired.success, false);
-    assert.equal(expired.technicalCode, 'provider_profile_not_connected');
-
-    const selected = await harness.controller.setActiveLlmProviderProfile({
-      provider: 'codex',
-      profileId: 'codex:system',
-    });
-    assert.equal(selected.success, true);
-    assert.equal((await harness.controller.chooseAgentRuntime({ provider: 'codex' })).authProfileId, 'codex:system');
-  } finally {
-    await harness.cleanup();
-  }
-});
-
-test('SettingsService rejects explicit profile overrides that do not belong to the provider', async () => {
-  const harness = await createHarness({
-    settings: {
-      providerConnections: {
-        codex: '2026-06-01T00:00:00.000Z',
-        claude: '2026-06-02T00:00:00.000Z',
-      },
-      llmProviderProfiles: {
-        codex: [
-          {
-            id: 'codex:work',
-            provider: 'codex',
-            label: 'Work',
-            authMode: 'oauth',
-            runtimeAuthMode: 'materialized',
-            status: 'connected',
-            source: 'desktop',
-          },
-        ],
-        claude: [
-          {
-            id: 'claude:work',
-            provider: 'claude',
-            label: 'Claude Work',
-            authMode: 'oauth',
-            runtimeAuthMode: 'materialized',
-            status: 'connected',
-            source: 'desktop',
-          },
-        ],
-      },
-      activeProviderProfiles: {
-        codex: 'codex:work',
-        claude: 'claude:work',
-      },
-    },
-  });
-  try {
-    await assert.rejects(
-      harness.controller.chooseAgentRuntime({
-        provider: 'codex',
-        authProfileId: 'claude:work',
-      }),
-      /provider_profile_not_found/,
-    );
-    await assert.rejects(
-      harness.controller.chooseAgentRuntime({
-        provider: 'claude',
-        authProfileId: 'claude:missing',
-      }),
-      /provider_profile_not_found/,
-    );
-  } finally {
-    await harness.cleanup();
   }
 });
 

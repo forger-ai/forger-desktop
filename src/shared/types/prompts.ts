@@ -111,7 +111,6 @@ export interface AppPromptReviewInput {
   reasoningEffort?: CodexReasoningEffort | null;
   runtime?: AgentRuntime | null;
   provider?: AgentProvider | null;
-  authProfileId?: string | null;
   effort?: AgentEffort | null;
 }
 

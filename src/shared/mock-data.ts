@@ -66,6 +66,4 @@ export const settingsSeed: Settings = {
   llmProviderDefaults: getDefaultAgentDefaults(),
   agentDefaults: getDefaultAgentDefaults(),
   providerConnections: {},
-  llmProviderProfiles: {},
-  activeProviderProfiles: {},
 };

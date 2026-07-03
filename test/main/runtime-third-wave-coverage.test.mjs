@@ -704,9 +704,10 @@ test('agent auth installs Claude CLI when npm is available and rejects runtimes 
   assert.equal(timedOut.sensitiveDetails?.stderr, 'partial err');
 });
 
-test('agent auth connects system Claude on macOS through direct login spawn', async (t) => {
-  const spawned = [];
+test('agent auth connects system Claude through Terminal and records authenticated status', async (t) => {
   const { root, calls, controller } = await makeAgentAuthHarness({
+    buildMacTerminalLoginScript: ({ providerName, logPath, command }) => `${providerName}\n${logPath}\n${command.join(' ')}`,
+    buildMacTerminalScriptLaunchCommand: (scriptPath) => `/bin/bash ${scriptPath}`,
     canRunCommand: async (command, args) => command === '/usr/local/bin/claude' && args[0] === '--version',
     runCommand: async (command, args, options) => calls.push(['run', command, args, options]),
     runCommandCapture: async (command, args) => {
@@ -719,12 +720,6 @@ test('agent auth connects system Claude on macOS through direct login spawn', as
       }
       return { code: 0, stdout: 'authenticated\n', stderr: '' };
     },
-    spawn: (command, args, options) => {
-      const child = new FakeChildProcess();
-      spawned.push([command, args, options]);
-      queueMicrotask(() => child.emit('exit', 0, null));
-      return child;
-    },
   });
   t.after(async () => {
     await fs.rm(root, { recursive: true, force: true });
@@ -736,52 +731,9 @@ test('agent auth connects system Claude on macOS through direct login spawn', as
   assert.equal(result.status?.source, 'system');
   assert.equal(result.status?.authenticated, true);
   assert.equal(result.status?.version, '2.0.0');
-  assert.equal(spawned.length, 1);
-  assert.equal(spawned[0][0], '/usr/local/bin/claude');
-  assert.deepEqual(spawned[0][1], ['auth', 'login']);
-  assert.equal(spawned[0][2].shell, false);
-  assert.equal(spawned[0][2].stdio, 'pipe');
-  assert.equal(calls.some((call) => call[0] === 'run' && call[1] === '/usr/bin/osascript'), false);
-  assert.ok(calls.some((call) => call[0] === 'log' && call[1] === 'claude_auth:login_started'));
+  assert.ok(calls.some((call) => call[0] === 'run' && call[1] === '/usr/bin/osascript'));
+  assert.ok(calls.some((call) => call[0] === 'log' && call[1] === 'claude_auth:terminal_opened'));
   assert.ok(calls.some((call) => call[0] === 'connected' && call[1] === 'claude'));
-});
-
-test('agent auth opens trusted Claude auth URLs once from macOS direct login output', async (t) => {
-  const { root, calls, controller } = await makeAgentAuthHarness({
-    canRunCommand: async (command, args) => command === '/usr/local/bin/claude' && args[0] === '--version',
-    runCommandCapture: async (command, args) => {
-      calls.push(['capture', command, args]);
-      if (command === 'which') {
-        return { code: 0, stdout: '/usr/local/bin/claude\n', stderr: '' };
-      }
-      if (args[0] === '--version') {
-        return { code: 0, stdout: '2.0.0\n', stderr: '' };
-      }
-      return { code: 0, stdout: 'not authenticated\n', stderr: '' };
-    },
-    spawn: () => {
-      const child = new FakeChildProcess();
-      queueMicrotask(() => {
-        child.stdout.emit('data', Buffer.from('open https://claude.ai/oauth/authorize?state=1\n'));
-        child.stderr.emit('data', Buffer.from('again https://claude.ai/oauth/authorize?state=1\n'));
-        child.stdout.emit('data', Buffer.from('ignore https://example.com/oauth/authorize?state=1\n'));
-        child.emit('exit', 0, null);
-      });
-      return child;
-    },
-  });
-  t.after(async () => {
-    await fs.rm(root, { recursive: true, force: true });
-  });
-
-  const result = await withPlatform('darwin', async () => await controller.connectClaudeAuth());
-  await new Promise((resolve) => setImmediate(resolve));
-
-  assert.equal(result.success, true);
-  assert.equal(calls.filter((call) => call[0] === 'openExternal').length, 1);
-  assert.ok(calls.some((call) => call[0] === 'openExternal' && call[1] === 'https://claude.ai/oauth/authorize?state=1'));
-  assert.equal(calls.some((call) => call[0] === 'connected' && call[1] === 'claude'), false);
-  assert.match(await fs.readFile(path.join(root, 'logs', 'claude-login.log'), 'utf8'), /example\.com/);
 });
 
 test('agent auth reports Claude connect failures with missing status fallback', async (t) => {
@@ -1164,7 +1116,7 @@ test('agent auth launches existing managed Antigravity OAuth print mode in a Lin
   assert.equal(calls.some((call) => call[0] === 'run' && call[1].endsWith('agy')), false);
 });
 
-test('agent auth recognizes Antigravity Windows Credential Manager state without enabling Forger use', async (t) => {
+test('agent auth recognizes Antigravity Windows Credential Manager state', async (t) => {
   const { root, calls, controller } = await makeAgentAuthHarness({
     canRunCommand: async (command, args) => command.endsWith('agy.exe') && args[0] === '--version',
     runCommandCapture: async (command, args) => {
@@ -1191,7 +1143,7 @@ test('agent auth recognizes Antigravity Windows Credential Manager state without
   const result = await withPlatform('win32', async () => await controller.getAntigravityAuthStatus());
 
   assert.equal(result.authenticated, true);
-  assert.equal(calls.some((call) => call[0] === 'connected' && call[1] === 'antigravity'), false);
+  assert.ok(calls.some((call) => call[0] === 'connected' && call[1] === 'antigravity'));
   assert.ok(calls.some((call) =>
     call[0] === 'log' &&
     call[1] === 'antigravity_auth:windows_credential_checked' &&
@@ -1340,7 +1292,7 @@ test('agent auth skips Antigravity Windows login console when Credential Manager
   assert.equal(spawns.length, 0);
 });
 
-test('agent auth disconnects Antigravity by clearing local session state', async (t) => {
+test('agent auth disconnects Antigravity in Forger without treating preserved local credentials as a failure', async (t) => {
   const { root, calls, controller } = await makeAgentAuthHarness({
     canRunCommand: async (command, args) => command.endsWith('agy') && args[0] === '--version',
     runCommandCapture: async (command, args) => {
@@ -1366,10 +1318,9 @@ test('agent auth disconnects Antigravity by clearing local session state', async
 
   assert.equal(result.success, true);
   assert.equal(result.technicalCode, undefined);
-  assert.equal(result.status?.authenticated, false);
-  assert.equal(await fs.stat(path.join(root, '.gemini', 'antigravity', 'antigravity_state.pbtxt')).catch(() => null), null);
+  assert.equal(result.status?.authenticated, true);
+  assert.match(result.userMessage, /Forger dejó de usar Google Antigravity/);
   assert.ok(calls.some((call) => call[0] === 'disconnected' && call[1] === 'antigravity'));
-  assert.equal(calls.some((call) => call[0] === 'connected' && call[1] === 'antigravity'), false);
   assert.ok(calls.some((call) => call[0] === 'log' && call[1] === 'antigravity_auth:disconnected'));
 });
 
@@ -1723,26 +1674,6 @@ test('agent auth reports provider launch and managed Claude install failures', a
   assert.equal(codexResult.technicalCode, 'spawn_failed');
   assert.ok(codex.calls.some((call) => call[0] === 'log' && call[1] === 'codex_auth:failed'));
 
-  const claudeLaunch = await makeAgentAuthHarness({
-    canRunCommand: async (command) => command.endsWith('claude'),
-    spawn: () => {
-      const child = new FakeChildProcess();
-      queueMicrotask(() => child.emit('error', new Error('spawn_failed')));
-      return child;
-    },
-  });
-  t.after(async () => {
-    await fs.rm(claudeLaunch.root, { recursive: true, force: true });
-  });
-  await fs.mkdir(path.join(claudeLaunch.root, 'claude-root', 'node_modules', '.bin'), { recursive: true });
-  await fs.writeFile(path.join(claudeLaunch.root, 'claude-root', 'node_modules', '.bin', 'claude'), '', 'utf8');
-
-  const claudeLaunchResult = await withPlatform('darwin', async () => await claudeLaunch.controller.connectClaudeAuth());
-
-  assert.equal(claudeLaunchResult.success, false);
-  assert.equal(claudeLaunchResult.technicalCode, 'spawn_failed');
-  assert.ok(claudeLaunch.calls.some((call) => call[0] === 'log' && call[1] === 'claude_auth:failed'));
-
   const claude = await makeAgentAuthHarness({
     canRunCommand: async () => false,
     runCommand: async () => undefined,
@@ -1836,7 +1767,7 @@ test('git command controller keeps Windows cmd shims as command and args for saf
   await withPlatform('win32', async () => {
     await controller.runCommand(
       npmCommand,
-      ['install', '--no-audit', '--no-fund', '@anthropic-ai/claude-code@2.1.200'],
+      ['install', '--no-audit', '--no-fund', '@anthropic-ai/claude-code@2.1.185'],
       {
         cwd: 'C:\\Forger Test\\runtime root\\claude-code-cli',
         log: { phase: 'claude_auth', label: 'install claude code cli' },
@@ -1846,7 +1777,7 @@ test('git command controller keeps Windows cmd shims as command and args for saf
 
   const spawnCall = calls.find((call) => call[0] === 'spawn');
   assert.equal(spawnCall[1], npmCommand);
-  assert.deepEqual(spawnCall[2], ['install', '--no-audit', '--no-fund', '@anthropic-ai/claude-code@2.1.200']);
+  assert.deepEqual(spawnCall[2], ['install', '--no-audit', '--no-fund', '@anthropic-ai/claude-code@2.1.185']);
   assert.equal(spawnCall[4], false);
   assert.equal(calls.some((call) => call[0] === 'log' && call[1] === 'command:start' && 'shellStrategy' in call[2]), false);
 });

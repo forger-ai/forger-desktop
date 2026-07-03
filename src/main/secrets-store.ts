@@ -31,7 +31,6 @@ interface SecretsVault {
   secrets: Record<string, PersistedSecretRecord>;
   appMappings: Record<string, Record<string, string>>;
   toolSecrets: Record<string, Record<string, EncryptedSecretValue>>;
-  providerProfileSecrets: Record<string, Record<string, EncryptedSecretValue>>;
 }
 
 export interface ResolvedAppSecretsEnv {
@@ -55,7 +54,6 @@ const createEmptyVault = (): SecretsVault => ({
   secrets: {},
   appMappings: {},
   toolSecrets: {},
-  providerProfileSecrets: {},
 });
 
 const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
@@ -70,7 +68,6 @@ const isVault = (value: unknown): value is SecretsVault => {
     && isPlainRecord(value.secrets)
     && isPlainRecord(value.appMappings)
     && (value.toolSecrets === undefined || isPlainRecord(value.toolSecrets))
-    && (value.providerProfileSecrets === undefined || isPlainRecord(value.providerProfileSecrets))
   );
 };
 
@@ -332,50 +329,6 @@ export class SecretsStore {
     return { success: true, userMessage: 'Secretos de herramienta eliminados.' };
   }
 
-  async setProviderProfileSecret(profileId: string, secretName: string, value: string): Promise<SecretMutationResult> {
-    const loadError = await this.loadForMutation();
-    if (loadError) {
-      return loadError;
-    }
-
-    const normalizedProfileId = normalizeSecretName(profileId);
-    const normalizedSecretName = normalizeSecretName(secretName);
-    if (!normalizedProfileId || !normalizedSecretName || !value) {
-      return { success: false, userMessage: 'No pudimos guardar este secreto del proveedor.', technicalCode: 'invalid_provider_profile_secret' };
-    }
-
-    this.vault.providerProfileSecrets[normalizedProfileId] = {
-      ...(this.vault.providerProfileSecrets[normalizedProfileId] ?? {}),
-      [normalizedSecretName]: this.encrypt(value),
-    };
-    await this.saveVault();
-    return { success: true, userMessage: 'Secreto del proveedor guardado.' };
-  }
-
-  async getProviderProfileSecret(profileId: string, secretName: string): Promise<string | null> {
-    await this.load();
-    const encrypted = this.vault.providerProfileSecrets[profileId]?.[secretName];
-    if (!encrypted) {
-      return null;
-    }
-    return this.decrypt(encrypted);
-  }
-
-  async hasProviderProfileSecret(profileId: string, secretName: string): Promise<boolean> {
-    await this.load();
-    return Boolean(this.vault.providerProfileSecrets[profileId]?.[secretName]);
-  }
-
-  async deleteProviderProfileSecrets(profileId: string): Promise<SecretMutationResult> {
-    const loadError = await this.loadForMutation();
-    if (loadError) {
-      return loadError;
-    }
-    delete this.vault.providerProfileSecrets[profileId];
-    await this.saveVault();
-    return { success: true, userMessage: 'Secretos del proveedor eliminados.' };
-  }
-
   private async loadForMutation(): Promise<SecretMutationResult | null> {
     try {
       await this.load();
@@ -439,7 +392,6 @@ export class SecretsStore {
       return {
         ...parsed,
         toolSecrets: parsed.toolSecrets ?? {},
-        providerProfileSecrets: parsed.providerProfileSecrets ?? {},
       };
     } catch (error) {
       if (isSecretsVaultUnavailableError(error)) {

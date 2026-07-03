@@ -1,5 +1,4 @@
 import type { AgentDefaults, AgentEffort, AgentPermissionMode, AgentProvider, CodexReasoningEffort } from './agent-runtime';
-import type { LlmProviderProfileMetadata } from './provider-profiles';
 
 export interface Settings {
   userEmail: string;
@@ -17,8 +16,6 @@ export interface Settings {
   /** @deprecated Use llmProviderDefaults. */
   agentDefaults: AgentDefaults;
   providerConnections: Partial<Record<AgentProvider, string>>;
-  llmProviderProfiles: Partial<Record<AgentProvider, LlmProviderProfileMetadata[]>>;
-  activeProviderProfiles: Partial<Record<AgentProvider, string>>;
 }
 
 export interface DeveloperModeSettings {

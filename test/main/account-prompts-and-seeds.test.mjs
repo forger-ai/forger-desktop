@@ -500,7 +500,7 @@ test('official tool skill templates and seed data keep expected Desktop defaults
   assert.match(manifestSkill.body, /"agents": \[/);
   assert.match(manifestSkill.body, /promptTemplates[\s\S]*agents[\s\S]*tools/);
   assert.match(manifestSkill.body, /"permissionMode": "safe"/);
-  assert.match(manifestSkill.body, /claude-sonnet-5/);
+  assert.match(manifestSkill.body, /claude-sonnet-4-6/);
   assert.match(manifestSkill.body, /Do not use legacy Claude Code aliases/);
   assert.match(manifestSkill.body, /gmail\.connection\.status/);
   assert.match(manifestSkill.body, /Every entry in `tools\.required\[\]` and `tools\.optional\[\]` must include `toolId`, `reason`, and `actions`/);

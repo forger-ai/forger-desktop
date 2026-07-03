@@ -1,4 +1,6 @@
 import TerminalRounded from '@mui/icons-material/TerminalRounded';
+import RefreshRounded from '@mui/icons-material/RefreshRounded';
+import RestartAltRounded from '@mui/icons-material/RestartAltRounded';
 import {
   Alert,
   Box,
@@ -39,6 +41,8 @@ interface LlmProviderConnectModalProps {
   t: AppDictionary;
   onClose: () => void;
   onConnect: () => Promise<void>;
+  onRefresh: () => Promise<void>;
+  onReinstall?: () => Promise<void>;
   onOpenExternalUrl: (url: string) => void;
 }
 
@@ -59,6 +63,8 @@ export function LlmProviderConnectModal({
   t,
   onClose,
   onConnect,
+  onRefresh,
+  onReinstall,
   onOpenExternalUrl,
 }: LlmProviderConnectModalProps) {
   const [accepted, setAccepted] = useState(false);
@@ -165,6 +171,14 @@ export function LlmProviderConnectModal({
       </DialogContent>
       <DialogActions sx={{ px: 3, pb: 2.5 }}>
         <Button onClick={onClose} disabled={busy}>{t.actions.close}</Button>
+        <Button variant="outlined" startIcon={<RefreshRounded />} disabled={busy} onClick={() => void onRefresh()}>
+          {t.llmProviderConnect.refresh}
+        </Button>
+        {onReinstall ? (
+          <Button variant="outlined" color="warning" startIcon={<RestartAltRounded />} disabled={busy} onClick={() => void onReinstall()}>
+            {t.llmProviderConnect.reinstall}
+          </Button>
+        ) : null}
         {!authenticated ? (
           <Button
             variant="contained"
