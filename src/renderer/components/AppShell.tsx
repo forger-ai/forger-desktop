@@ -2,7 +2,7 @@ import { Box } from '@mui/material';
 import type { ReactNode } from 'react';
 import type { AppSummary, BackgroundTask, CloudStorageUsage, DesktopUpdateState, ForgerAccountSession } from '@shared/types';
 import type { AppDictionary } from '@renderer/i18n';
-import { Sidebar, type View } from './Sidebar';
+import { Sidebar, type PinnableView, type View } from './Sidebar';
 import { Topbar } from './Topbar';
 
 interface AppShellProps {
@@ -29,7 +29,7 @@ interface AppShellProps {
   onOpenBackgroundTaskHistory: () => void;
   onOpenBackgroundTask: (taskId: string) => void;
   desktopUpdateState: DesktopUpdateState;
-  advancedMode: boolean;
+  pinnedViews: PinnableView[];
   showForumNav: boolean;
   children: ReactNode;
 }
@@ -58,7 +58,7 @@ export function AppShell({
   onOpenBackgroundTaskHistory,
   onOpenBackgroundTask,
   desktopUpdateState,
-  advancedMode,
+  pinnedViews,
   showForumNav,
   children,
 }: AppShellProps) {
@@ -69,7 +69,7 @@ export function AppShell({
         onNavigate={onNavigate}
         t={t}
         desktopUpdateState={desktopUpdateState}
-        advancedMode={advancedMode}
+        pinnedViews={pinnedViews}
         showForumNav={showForumNav}
       />
       <Box

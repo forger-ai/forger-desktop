@@ -83,11 +83,11 @@ interface SocialViewProps {
 const appCategoryOptions: AppCategory[] = [...APP_CATEGORIES];
 const editableVisibilityOptions: Array<Exclude<SocialUserAppVisibility, 'restricted'>> = ['private', 'friends', 'public'];
 
-const fullSocialTabs: Array<{ value: FullSocialTab; label: string }> = [
-  { value: 'friends', label: 'Amigos' },
-  { value: 'forum', label: 'Foro' },
-  { value: 'profile', label: 'Mi perfil' },
-  { value: 'search', label: 'Buscar' },
+const fullSocialTabs = (t: AppDictionary): Array<{ value: FullSocialTab; label: string }> => [
+  { value: 'friends', label: t.social.tabs.friends },
+  { value: 'forum', label: t.social.tabs.forum },
+  { value: 'profile', label: t.social.tabs.profile },
+  { value: 'search', label: t.social.tabs.search },
 ];
 
 const readFullSocialTab = (): FullSocialTab => {
@@ -1137,7 +1137,7 @@ export function SocialView({
             scrollButtons="auto"
             allowScrollButtonsMobile
           >
-            {fullSocialTabs.map((tab) => <Tab key={tab.value} value={tab.value} label={tab.label} />)}
+            {fullSocialTabs(t).map((tab) => <Tab key={tab.value} value={tab.value} label={tab.label} />)}
           </Tabs>
           <Divider />
           {activeTab === 'friends' ? (signedIn ? renderFriends() : renderSignedOut()) : null}

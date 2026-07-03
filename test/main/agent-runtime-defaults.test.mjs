@@ -99,6 +99,7 @@ test('agent runtime uses desktop defaults when no explicit model is requested', 
       provider: 'claude',
       model: 'opus',
       effort: 'max',
+      authProfileId: 'claude:system',
     });
     assert.deepEqual(await harness.controller.chooseAgentRuntime({ provider: 'codex' }), {
       provider: 'codex',
@@ -119,11 +120,13 @@ test('agent runtime treats requested models as provider-specific recommendations
       provider: 'codex',
       model: 'gpt-5.5',
       effort: 'xhigh',
+      authProfileId: 'codex:system',
     });
     assert.deepEqual(await harness.controller.chooseAgentRuntime({ model: 'unknown-model', effort: 'high' }), {
       provider: 'codex',
       model: 'gpt-5.4-mini',
       effort: 'high',
+      authProfileId: 'codex:system',
     });
   } finally {
     await harness.cleanup();
@@ -139,6 +142,7 @@ test('codex recommendations fall back to claude defaults when claude is the sele
       provider: 'claude',
       model: 'opus',
       effort: 'high',
+      authProfileId: 'claude:system',
     });
   } finally {
     await harness.cleanup();
@@ -159,6 +163,7 @@ test('agent runtime chooses the recommendation for the selected provider', async
       provider: 'claude',
       model: 'sonnet',
       effort: 'medium',
+      authProfileId: 'claude:system',
     });
   } finally {
     await harness.cleanup();

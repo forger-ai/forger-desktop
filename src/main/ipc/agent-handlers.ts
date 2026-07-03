@@ -123,6 +123,8 @@ export const registerAgentIpcHandlers = (deps: AgentIpcDeps): void => {
     const provider = normalizeAgentProvider(runtime?.provider);
     const rawModel = typeof runtime?.model === 'string' ? runtime.model.trim() : '';
     const model = provider && rawModel && rawModel !== 'auto' ? rawModel : undefined;
+    const rawAuthProfileId = typeof runtime?.authProfileId === 'string' ? runtime.authProfileId.trim() : '';
+    const authProfileId = provider && rawAuthProfileId ? rawAuthProfileId : undefined;
     const params = runtime?.modelParams && typeof runtime.modelParams === 'object' ? runtime.modelParams : {};
     const rawEffort = runtime?.effort === 'default' ? undefined : runtime?.effort;
     const effort = rawEffort ?? params.effort ?? params.reasoningEffort;
@@ -134,6 +136,7 @@ export const registerAgentIpcHandlers = (deps: AgentIpcDeps): void => {
     return {
       ...(provider ? { provider } : {}),
       ...(model ? { model } : {}),
+      ...(authProfileId ? { authProfileId } : {}),
       ...(normalizedEffort ? { effort: normalizedEffort } : {}),
       ...(runtime?.permissionMode === 'unsafe' ? { permissionMode: 'unsafe' as const } : {}),
     };

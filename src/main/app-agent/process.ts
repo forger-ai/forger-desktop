@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { AppAgentCommandResult, LlmCommandCaptureOptions, ResolvedLlmCommand } from './types';
 import { spawnProcess } from '../runtime/process-spawn';
-import { codexCliAdapter } from '../llm-provider/adapters/codex-cli-adapter';
+import { createLlmProviderRunService } from '../llm-provider/run-service';
 
 export const runCommandCapture = async (
   command: string,
@@ -125,7 +125,7 @@ export const resolveCodexCommand = async (
   codexCliPath: string,
   pathEntries: string[],
 ): Promise<ResolvedLlmCommand> =>
-  await codexCliAdapter.resolveCommand(codexCliPath, pathEntries);
+  await createLlmProviderRunService().resolveCommand('codex', codexCliPath, pathEntries);
 
 export const findExecutableInPathEntries = async (entries: string[], executableNames: string[]): Promise<string | null> => {
   for (const entry of entries) {

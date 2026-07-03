@@ -55,17 +55,17 @@ test('agentPrompt overrides can carry Claude runtime overrides', async () => {
       kind: 'agentPrompt',
       id: 'advisor:initial',
       prompt: 'Carefully review {{item}}.',
-      runtime: { provider: 'claude', model: 'sonnet', effort: 'high' },
+      runtime: { provider: 'claude', model: 'sonnet', effort: 'high', authProfileId: 'profile-prompt' },
     });
 
     assert.equal(updated.kind, 'agentPrompt');
-    assert.deepEqual(updated.runtime, { provider: 'claude', model: 'sonnet', effort: 'high' });
+    assert.deepEqual(updated.runtime, { provider: 'claude', model: 'sonnet', effort: 'high', authProfileId: 'profile-prompt' });
     assert.equal(updated.runtimeSource, 'override');
-    assert.deepEqual(updated.overrideRuntime, { provider: 'claude', model: 'sonnet', effort: 'high' });
+    assert.deepEqual(updated.overrideRuntime, { provider: 'claude', model: 'sonnet', effort: 'high', authProfileId: 'profile-prompt' });
 
     const [agent] = await harness.store.applyToAgents('finance-os', [legacyCodexAgent]);
     assert.equal(agent.prompts.initial.body, 'Carefully review {{item}}.');
-    assert.deepEqual(agent.runtime, { provider: 'claude', model: 'sonnet', effort: 'high' });
+    assert.deepEqual(agent.runtime, { provider: 'claude', model: 'sonnet', effort: 'high', authProfileId: 'profile-prompt' });
     assert.equal(agent.model, undefined);
     assert.equal(agent.reasoningEffort, undefined);
   } finally {
@@ -151,7 +151,7 @@ test('promptTemplate overrides validate variables, apply runtime fields, and res
       kind: 'promptTemplate',
       id: 'monthly-review',
       prompt: 'Review {{month}} for {{account}} carefully.\r\nReturn a summary.',
-      runtime: { provider: 'claude', model: 'sonnet', effort: 'medium' },
+      runtime: { provider: 'claude', model: 'sonnet', effort: 'medium', authProfileId: 'profile-template' },
       model: ' ignored legacy model ',
       reasoningEffort: 'high',
     });
@@ -159,13 +159,13 @@ test('promptTemplate overrides validate variables, apply runtime fields, and res
     assert.equal(updated.prompt, 'Review {{month}} for {{account}} carefully.\nReturn a summary.');
     assert.equal(updated.modelSource, 'override');
     assert.equal(updated.reasoningEffortSource, 'override');
-    assert.deepEqual(updated.runtime, { provider: 'claude', model: 'sonnet', effort: 'medium' });
+    assert.deepEqual(updated.runtime, { provider: 'claude', model: 'sonnet', effort: 'medium', authProfileId: 'profile-template' });
     assert.equal(updated.model, 'ignored legacy model');
     assert.equal(updated.reasoningEffort, 'high');
 
     const [applied] = await harness.store.applyToPromptTemplates('finance-os', [template]);
     assert.equal(applied.prompt, 'Review {{month}} for {{account}} carefully.\nReturn a summary.');
-    assert.deepEqual(applied.runtime, { provider: 'claude', model: 'sonnet', effort: 'medium' });
+    assert.deepEqual(applied.runtime, { provider: 'claude', model: 'sonnet', effort: 'medium', authProfileId: 'profile-template' });
     assert.equal(applied.model, undefined);
     assert.equal(applied.reasoningEffort, undefined);
 

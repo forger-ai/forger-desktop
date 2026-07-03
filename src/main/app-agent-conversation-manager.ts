@@ -15,15 +15,11 @@ import type {
   AgentRuntimeRecommendations,
   AgentRuntimeRequest,
   AppAgentWorkspaceInput,
-  ClaudeEffort,
   CodexReasoningEffort,
   PermissionRequest,
 } from '../shared/types';
 import { getSharedCopy, normalizeLocale, type Locale } from '../shared/i18n';
-import {
-  assertAllowedMcpServers,
-  preparePersistentIsolatedCodexHome,
-} from './codex-run-isolation';
+import { assertAllowedMcpServers } from './codex-run-isolation';
 import {
   buildConversationRecoveryContext,
   buildManifestAgentRecoveryPrompt,
@@ -46,14 +42,15 @@ import { buildProviderRunFailureError } from './app-agent/provider-failures';
 import type { LlmAppMcpServerConfig } from './app-agent/types';
 import type { AppFolderGrantPublic } from './app-folder-grants';
 import { appendRunLog, getRunLogPath, mapFailureMessage, normalizeProviderErrorCode, toProviderProgressMessages } from './chat/progress-errors';
-import { antigravityCliAdapter } from './llm-provider/adapters/antigravity-cli-adapter';
-import { claudeCliAdapter } from './llm-provider/adapters/claude-cli-adapter';
-import { codexCliAdapter } from './llm-provider/adapters/codex-cli-adapter';
+import { createLlmProviderRunService } from './llm-provider/run-service';
+import type { LlmProviderAuthProfileResolver } from './llm-provider/types';
 
 interface AppAgentConversationManagerOptions {
   privateAppsRoot: string;
   metadataRoot: string;
   codexHome: string;
+  providerProfilesRoot?: string;
+  resolveAuthProfile?: LlmProviderAuthProfileResolver;
   getAgentRuntime: (requested?: AgentRuntimeRequest) => Promise<AgentRuntime>;
   appAllowsAgentRuntimeControl?: (appId: string) => Promise<boolean>;
   getCodexCliPath: () => Promise<string | null>;
@@ -112,8 +109,8 @@ const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 const CODEX_CONVERSATION_RUN_TIMEOUT_MS = 600_000;
 
 const hasRunRuntimeInput = (
-  input: Pick<AppCodexConversationSendMessageInput, 'provider' | 'model' | 'effort' | 'reasoningEffort'>,
-): boolean => Boolean(input.provider || input.model || input.effort || input.reasoningEffort);
+  input: Pick<AppCodexConversationSendMessageInput, 'provider' | 'model' | 'authProfileId' | 'effort' | 'reasoningEffort'>,
+): boolean => Boolean(input.provider || input.model || input.authProfileId || input.effort || input.reasoningEffort);
 
 export class AppAgentConversationManager {
   private readonly conversations = new Map<string, InternalConversation>();
@@ -325,6 +322,10 @@ export class AppAgentConversationManager {
         run: activeRun,
       });
       await this.cancel(appId, conversationId, runId);
+      const canceledRun = this.runs.get(runId);
+      if (canceledRun && isTerminalRunStatus(canceledRun.status)) {
+        conversation.activeRun = undefined;
+      }
     }
     await this.sendMessage(appId, {
       conversationId,
@@ -413,10 +414,11 @@ export class AppAgentConversationManager {
         continue;
       }
       const conversation = this.conversations.get(run.conversationId);
+      const hadPermissionRequest = Boolean(run.permissionRequest) || run.status === 'needs_permission';
       this.resolvePendingPermission(run.runId, 'deny');
       run.permissionRequest = undefined;
-      if (conversation && run.status === 'needs_permission') {
-        run.status = 'running';
+      if (conversation && hadPermissionRequest) {
+        run.status = run.status === 'needs_permission' ? 'running' : run.status;
         run.updatedAt = new Date().toISOString();
         conversation.activeRun = toRun(run);
         conversation.updatedAt = run.updatedAt;
@@ -474,31 +476,8 @@ export class AppAgentConversationManager {
     }
     const runtime = await this.resolveRunRuntime(conversation, input);
     run.provider = runtime.provider;
-    if (runtime.provider === 'antigravity') {
-      if (!(await (this.options.getAntigravityAuthenticated?.() ?? Promise.resolve(false)))) {
-        throw new Error('antigravity_auth_missing');
-      }
-    } else if (runtime.provider === 'claude') {
-      if (!(await this.options.getClaudeAuthenticated())) {
-        throw new Error('claude_auth_missing');
-      }
-    } else if (!(await this.options.getCodexAuthenticated())) {
-      throw new Error('codex_auth_missing');
-    }
-    if (runtime.provider === 'codex') {
-      await this.options.ensureGitAvailable?.();
-    }
-    const codexCliPath = runtime.provider === 'codex' ? await this.options.getCodexCliPath() : null;
-    const claudeCliPath = runtime.provider === 'claude' ? await this.options.getClaudeCliPath() : null;
-    const antigravityCliPath = runtime.provider === 'antigravity' ? await (this.options.getAntigravityCliPath?.() ?? Promise.resolve(null)) : null;
-    if (runtime.provider === 'codex' && !codexCliPath) {
-      throw new Error('codex_cli_missing');
-    }
-    if (runtime.provider === 'claude' && !claudeCliPath) {
-      throw new Error('claude_cli_missing');
-    }
-    if (runtime.provider === 'antigravity' && !antigravityCliPath) {
-      throw new Error('antigravity_cli_missing');
+    if (this.runs.get(runId)?.status === 'canceled') {
+      return;
     }
 
     run.status = 'running';
@@ -532,8 +511,6 @@ export class AppAgentConversationManager {
           : []),
         ...appMcpServers,
       ];
-      const model = runtime.model;
-      const reasoningEffort = runtime.provider === 'codex' ? runtime.effort as CodexReasoningEffort : DEFAULT_REASONING;
       const recoveryContext = !conversation.threadId && conversation.messages.length > 1
         ? buildConversationRecoveryContext(conversation, run.runId)
         : '';
@@ -548,101 +525,57 @@ export class AppAgentConversationManager {
       if (!(await existsDirectory(runRoot))) {
         throw new Error('agent_run_workspace_missing');
       }
-      const antigravityRunRoot = runRoot;
-      const antigravityAdditionalRoots = additionalRoots;
-      const codexHome = runtime.provider === 'codex'
-        ? await preparePersistentIsolatedCodexHome(
-            this.options.codexHome,
-            this.conversationCodexHome(conversation.appId, conversation.conversationId),
-            {
-              trustedRoots: Array.from(new Set([runRoot, ...additionalRoots])),
-              networkAccess,
-            },
-          )
-        : '';
       const onOutput = (stream: 'stdout' | 'stderr' | 'meta', text: string): void => {
         void appendRunLog(run.runLogPath ?? getRunLogPath(this.options.metadataRoot, run.runId), stream, text);
         this.handleOutput(conversation, run, runtime.provider, stream, text);
       };
-      const antigravityResult = runtime.provider === 'antigravity'
-        ? await antigravityCliAdapter.run({
-            runId: run.runId,
-            cliPath: antigravityCliPath as string,
-            pathEntries: [path.dirname(antigravityCliPath as string), ...pathEntries],
-            environment,
-            mcpServers,
-            workingDir: antigravityRunRoot,
-            configWorkspaceRoot: appRoot,
-            sharedRoots: additionalRoots,
-            prompt,
-            model,
-            effort: runtime.effort,
-            conversationId: conversation.threadId,
-            addDirs: antigravityAdditionalRoots,
-            permissionMode: runtime.permissionMode,
-            timeoutMs: CODEX_CONVERSATION_RUN_TIMEOUT_MS,
-            timeoutMode: 'absolute',
-            onChild: (child) => {
-              run.child = child;
-            },
-            onOutput,
-            runCommandCapture,
-          })
-        : null;
-      const claudeResult = runtime.provider === 'claude'
-        ? await claudeCliAdapter.run({
-            cliPath: claudeCliPath as string,
-            pathEntries,
-            environment,
-            mcpServers,
-            workingDir: runRoot,
-            sharedRoots: additionalRoots,
-            addDirs: additionalRoots,
-            prompt,
-            model,
-            effort: runtime.effort as ClaudeEffort,
-            permissionMode: runtime.permissionMode,
-            timeoutMs: CODEX_CONVERSATION_RUN_TIMEOUT_MS,
-            threadId: conversation.threadId,
-            imagePaths: attachmentPaths,
-            throwOnNonZero: false,
-            onChild: (child) => {
-              run.child = child;
-            },
-            onOutput,
-            runCommandCapture,
-          })
-        : null;
-      const codexResult = runtime.provider === 'codex'
-        ? await codexCliAdapter.runConversation({
-            cliPath: codexCliPath as string,
-            pathEntries,
-            environment,
-            mcpServers,
-            workingDir: runRoot,
-            sharedRoots: additionalRoots,
-            addDirs: additionalRoots,
-            prompt,
-            model,
-            reasoningEffort,
-            permissionMode: runtime.permissionMode,
-            networkAccess,
-            timeoutMs: CODEX_CONVERSATION_RUN_TIMEOUT_MS,
-            codexHome,
-            threadId: conversation.threadId,
-            imagePaths: attachmentPaths,
-            onChild: (child) => {
-              run.child = child;
-            },
-            onOutput,
-            runCommandCapture,
-          })
-        : null;
-      const result = runtime.provider === 'antigravity'
-        ? { code: 0, stdout: antigravityResult?.stdout ?? '', stderr: antigravityResult?.stderr ?? '', assistantText: antigravityResult?.assistantText ?? '', threadId: antigravityResult?.conversationId ?? undefined }
-        : runtime.provider === 'claude'
-          ? { code: 0, stdout: claudeResult?.stdout ?? '', stderr: claudeResult?.stderr ?? '', assistantText: claudeResult?.assistantText ?? '', threadId: claudeResult?.threadId }
-          : { code: codexResult?.code ?? 1, stdout: codexResult?.stdout ?? '', stderr: codexResult?.stderr ?? '', assistantText: codexResult?.assistantText ?? '', threadId: codexResult?.threadId };
+      const providerRunService = createLlmProviderRunService({
+        codexHome: this.options.codexHome,
+        providerProfilesRoot: this.options.providerProfilesRoot,
+        resolveAuthProfile: this.options.resolveAuthProfile,
+        getCodexCliPath: this.options.getCodexCliPath,
+        getClaudeCliPath: this.options.getClaudeCliPath,
+        getAntigravityCliPath: this.options.getAntigravityCliPath,
+        getCodexAuthenticated: this.options.getCodexAuthenticated,
+        getClaudeAuthenticated: this.options.getClaudeAuthenticated,
+        getAntigravityAuthenticated: this.options.getAntigravityAuthenticated,
+        ensureGitAvailable: this.options.ensureGitAvailable,
+      });
+      const result = await providerRunService.run({
+        surface: 'app_agent_thread',
+        mode: 'conversation',
+        runtime,
+        runId: run.runId,
+        pathEntries,
+        environment,
+        mcpServers,
+        workingDir: runRoot,
+        configWorkspaceRoot: runtime.provider === 'antigravity' ? appRoot : undefined,
+        sharedRoots: additionalRoots,
+        addDirs: additionalRoots,
+        prompt,
+        permissionMode: runtime.permissionMode,
+        networkAccess,
+        timeoutMs: CODEX_CONVERSATION_RUN_TIMEOUT_MS,
+        timeoutMode: 'absolute',
+        threadId: conversation.threadId,
+        imagePaths: attachmentPaths,
+        throwOnNonZero: runtime.provider === 'claude' ? false : undefined,
+        codexHomePlan: runtime.provider === 'codex'
+          ? {
+              type: 'persistent',
+              rootCodexHome: this.options.codexHome,
+              targetCodexHome: this.conversationCodexHome(conversation.appId, conversation.conversationId),
+              trustedRoots: Array.from(new Set([runRoot, ...additionalRoots])),
+              networkAccess,
+            }
+          : { type: 'none' },
+        onChild: (child) => {
+          run.child = child;
+        },
+        onOutput,
+        runCommandCapture,
+      });
       assertAllowedMcpServers(result.stdout, result.stderr, new Set(mcpServers.map((server) => server.name)));
 
       if (this.runs.get(run.runId)?.status === 'canceled') {
@@ -905,7 +838,7 @@ export class AppAgentConversationManager {
 
   private async assertRuntimeControlAllowed(
     appId: string,
-    input: Pick<AppCodexConversationSendMessageInput, 'provider' | 'model' | 'effort' | 'reasoningEffort'>,
+    input: Pick<AppCodexConversationSendMessageInput, 'provider' | 'model' | 'authProfileId' | 'effort' | 'reasoningEffort'>,
   ): Promise<void> {
     if (!hasRunRuntimeInput(input)) {
       return;
@@ -917,13 +850,14 @@ export class AppAgentConversationManager {
 
   private async resolveRunRuntime(
     conversation: InternalConversation,
-    input: Pick<AppCodexConversationSendMessageInput, 'provider' | 'model' | 'effort' | 'reasoningEffort'>,
+    input: Pick<AppCodexConversationSendMessageInput, 'provider' | 'model' | 'authProfileId' | 'effort' | 'reasoningEffort'>,
   ): Promise<AgentRuntime> {
     const agentRuntime = await this.resolveAgentRuntime(conversation);
     if (hasRunRuntimeInput(input)) {
       return await this.options.getAgentRuntime({
         provider: input.provider ?? agentRuntime.runtime?.provider,
         model: input.model ?? agentRuntime.runtime?.model,
+        authProfileId: input.authProfileId ?? agentRuntime.runtime?.authProfileId,
         effort: input.effort ?? input.reasoningEffort ?? agentRuntime.runtime?.effort,
         permissionMode: agentRuntime.runtime?.permissionMode,
         strict: true,

@@ -137,6 +137,7 @@ export interface AppCodexConversationSendMessageInput {
   workspace?: AppAgentWorkspaceInput;
   provider?: AgentProvider;
   model?: string;
+  authProfileId?: string;
   reasoningEffort?: CodexReasoningEffort;
   effort?: AgentEffort;
   locale?: string;
@@ -175,6 +176,7 @@ export type AppAgentRunEventType =
 
 export interface AppAgentRuntimeInput {
   provider?: string;
+  authProfileId?: string;
   model?: string;
   effort?: AgentEffort | 'default';
   permissionMode?: AgentPermissionMode;
