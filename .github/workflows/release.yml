@@ -155,7 +155,15 @@ jobs:
           TAG_NAME: ${{ github.ref_name }}
         run: |
           VERSION="${TAG_NAME#forger-desktop/v}"
-          gh release view "$TAG_NAME" >/dev/null 2>&1 || gh release create "$TAG_NAME" --title "Forger Desktop v$VERSION" --notes "Forger Desktop v$VERSION"
+          if ! gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            echo "Release $TAG_NAME must exist with changelog notes before publishing artifacts."
+            exit 1
+          fi
+          RELEASE_BODY="$(gh release view "$TAG_NAME" --json body --jq .body)"
+          if [ -z "$RELEASE_BODY" ] || [ "$RELEASE_BODY" = "Forger Desktop v$VERSION" ]; then
+            echo "Release $TAG_NAME is missing changelog notes."
+            exit 1
+          fi
           gh release upload "$TAG_NAME" release-artifacts/* --clobber
           gh release edit "$TAG_NAME" --latest
 

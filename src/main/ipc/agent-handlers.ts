@@ -37,7 +37,7 @@ import {
 export const REMOVED_FORGER_APP_BRIDGE_MESSAGE =
   'The in-app forgerApp bridge has been removed. Use the signed Desktop HTTP runtime bridge from your backend instead.';
 
-interface AgentIpcDeps {
+export interface AgentIpcDeps {
   BUILT_IN_CLAUDE_EFFORT: ClaudeEffort;
   BUILT_IN_CODEX_REASONING: CodexReasoningEffort;
   BetterSqlite3: typeof import('better-sqlite3') | null;
