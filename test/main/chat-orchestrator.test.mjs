@@ -1935,8 +1935,8 @@ test('chat orchestrator handles Claude runtime success and missing CLI failures'
   const root = await mkdtemp(join(tmpdir(), 'forger-chat-claude-runtime-'));
   const fakeClaude = join(root, 'claude.cjs');
   await writeFile(fakeClaude, `#!/usr/bin/env node
-console.log(JSON.stringify({ message: { content: [{ type: 'text', text: 'I am reviewing the requested screen.' }], usage: { input_tokens: 10, cache_read_input_tokens: 4, cache_creation_input_tokens: 3, output_tokens: 5 } } }));
-console.log(JSON.stringify({ type: 'tool_use', message: { content: [{ type: 'tool_use', name: 'Read' }] } }));
+console.log(JSON.stringify({ message: { content: [{ type: 'text', text: 'I am reviewing the requested screen.' }] } }));
+console.log(JSON.stringify({ message: { content: [{ type: 'tool_use', name: 'Read' }] } }));
 console.log(JSON.stringify({ session_id: 'claude-thread-1', result: 'claude orchestrator reply' }));
 `, 'utf8');
   await chmod(fakeClaude, 0o755);
@@ -1961,18 +1961,6 @@ console.log(JSON.stringify({ session_id: 'claude-thread-1', result: 'claude orch
       'I am reviewing the requested screen.',
       'El agente está usando herramientas de la app.',
     ]);
-    const threads = await waitFor(async () => {
-      const raw = await readFile(join(successHarness.metadataRoot, 'threads.json'), 'utf8').catch(() => '');
-      return raw ? JSON.parse(raw) : null;
-    }, 'Claude usage thread state');
-    assert.deepEqual(threads.forger.usage, {
-      inputTokens: 13,
-      cachedInputTokens: 4,
-      outputTokens: 5,
-      reasoningOutputTokens: 0,
-      turns: 1,
-    });
-    assert.equal(threads.forger.toolEvents, 1);
   } finally {
     await successHarness.cleanup();
   }

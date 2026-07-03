@@ -69,7 +69,6 @@ const createDeps = async (overrides = {}) => {
         listBackups: async () => [],
         restoreBackup: async () => ({ success: true }),
       }),
-      getAntigravityAuthStatus: async () => ({ installed: true, authenticated: false, source: 'managed' }),
       getClaudeAuthStatus: async () => ({ authenticated: false }),
       getCloudIdentityStore: () => ({
         getSummary: async () => ({}),
@@ -131,7 +130,6 @@ const createDeps = async (overrides = {}) => {
       ipcMain,
       listAppPrompts: async () => [],
       listCatalogFromBackend: async () => [],
-      listLlmProviderProfiles: async () => ({ providers: {}, activeProfileIds: {}, checkedAt: new Date(0).toISOString() }),
       mainWindow: null,
       normalizeManifestAgentDefaults: () => ({}),
       openInstalledApp: async () => ({ success: true }),
@@ -153,8 +151,6 @@ const createDeps = async (overrides = {}) => {
       sendEncryptedCloudMessage: async (input) => input, sendEncryptedCloudAppShareMessage: async (input) => input,
       serializeErrorForInstallLog: (error) => ({ message: error instanceof Error ? error.message : String(error) }),
       setAppAutoSyncSetting: async () => ({}),
-      setActiveLlmProviderProfile: async () => ({ success: true, state: { providers: {}, activeProfileIds: {}, checkedAt: new Date(0).toISOString() } }),
-      updateLlmProviderProfileDefaults: async () => ({ success: true, state: { providers: {}, activeProfileIds: {}, checkedAt: new Date(0).toISOString() } }),
       shell: electronMock.shell,
       signAppFolderGrant: () => ({ canceled: false }),
       state: {
@@ -286,7 +282,6 @@ test('main IPC external link handlers reject unsafe URLs and return diagnostics 
     technicalCode: 'shell_blocked',
     userMessage: 'No pudimos abrir el panel de uso de Codex.',
   });
-  assert.equal((await handlers.get(IPC_CHANNELS.getAgentProviderUsage)()).success, true);
 });
 
 test('personal agent IPC filters grants to installed apps and existing official tool actions', async () => {
@@ -877,9 +872,6 @@ test('main IPC delegates common service handlers and returns backend-missing fal
   assert.equal(calls.some(([name]) => name === 'ensureCatalogStatuses'), true);
   assert.deepEqual(await handlers.get(IPC_CHANNELS.getCloudSyncSettings)(), { enabled: true });
   assert.deepEqual(await handlers.get(IPC_CHANNELS.getSettings)(), { locale: 'es' });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.listLlmProviderProfiles)(), { providers: {}, activeProfileIds: {}, checkedAt: new Date(0).toISOString() });
-  assert.equal((await handlers.get(IPC_CHANNELS.setActiveLlmProviderProfile)(null, { provider: 'codex', profileId: 'codex:system' })).success, true);
-  assert.equal((await handlers.get(IPC_CHANNELS.updateLlmProviderProfileDefaults)(null, { provider: 'codex', profileId: 'codex:system', model: 'gpt-5' })).success, true);
   assert.deepEqual(await handlers.get(IPC_CHANNELS.getForgerAccount)(), { authenticated: false });
 
   assert.equal((await handlers.get(IPC_CHANNELS.registerForgerAccount)(null, {})).technicalCode, 'backend_client_missing');
@@ -1045,7 +1037,6 @@ test('main IPC delegates cloud account, social, telemetry, auth, and browser suc
 
   assert.deepEqual(await handlers.get(IPC_CHANNELS.openExternalUrl)(null, 'https://example.com/path'), { success: true });
   assert.deepEqual(await handlers.get(IPC_CHANNELS.openCodexUsageDashboard)(), { success: true });
-  assert.equal((await handlers.get(IPC_CHANNELS.getAgentProviderUsage)()).providers[0].provider, 'codex');
   assert.deepEqual(calls.filter(([name]) => name === 'openExternal').map((entry) => entry[1]), [
     'https://example.com/path',
     'https://platform.openai.com/usage',

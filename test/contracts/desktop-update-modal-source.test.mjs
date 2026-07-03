@@ -27,5 +27,5 @@ test('Desktop pins stable Codex and Claude CLI package versions', async () => {
   const defaultsSource = await readSource('src/main/core/agent-runtime-defaults.ts');
 
   assert.match(defaultsSource, /CODEX_CLI_VERSION = '0\.142\.5'/);
-  assert.match(defaultsSource, /CLAUDE_CODE_VERSION = '2\.1\.200'/);
+  assert.match(defaultsSource, /CLAUDE_CODE_VERSION = '2\.1\.185'/);
 });

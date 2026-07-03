@@ -536,39 +536,6 @@ const installErrorMessage = (error: unknown): string => {
   return typeof serialized.message === 'string' ? serialized.message : String(error);
 };
 
-const appendClaudeLoginLog = async (loginLogPath: string, stream: string, text: string): Promise<void> => {
-  await fs.appendFile(
-    loginLogPath,
-    `[${new Date().toISOString()}] [${stream}] ${text.endsWith('\n') ? text : `${text}\n`}`,
-    'utf8',
-  ).catch(() => undefined);
-};
-
-const CLAUDE_AUTH_URL_PATTERN = /https:\/\/[^\s<>"')]+/g;
-
-const extractAllowedClaudeAuthUrls = (text: string): string[] => {
-  const matches = text.match(CLAUDE_AUTH_URL_PATTERN) ?? [];
-  const urls: string[] = [];
-  for (const raw of matches) {
-    const candidate = raw.replace(/[.,;:]+$/g, '');
-    try {
-      const parsed = new URL(candidate);
-      const hostname = parsed.hostname.toLowerCase();
-      if (
-        hostname === 'claude.ai'
-        || hostname.endsWith('.claude.ai')
-        || hostname === 'anthropic.com'
-        || hostname.endsWith('.anthropic.com')
-      ) {
-        urls.push(parsed.toString());
-      }
-    } catch {
-      // Ignore malformed CLI fragments.
-    }
-  }
-  return urls;
-};
-
 const launchMacCodexLoginProcess = async (
   codexCliPath: string,
   codexHome: string,
@@ -955,21 +922,6 @@ const ensureClaudeCliInstalled = async (): Promise<string> => {
   return installed;
 };
 
-const buildClaudeAuthEnvironment = async (cliPath: string, source: 'managed' | 'system'): Promise<NodeJS.ProcessEnv> => {
-  if (source === 'system') {
-    return process.env;
-  }
-  const nodeRuntime = await ensureRuntimeInstalled('node', DEFAULT_NODE_VERSION);
-  return {
-    ...process.env,
-    PATH: [
-      ...getRuntimePathEntries(nodeRuntime),
-      path.dirname(cliPath),
-      process.env.PATH ?? '',
-    ].filter(Boolean).join(path.delimiter),
-  };
-};
-
 const getClaudeAuthStatus = async (): Promise<ClaudeAuthStatus> => {
   const resolved = await resolveClaudeCli();
   if (!resolved) {
@@ -1021,95 +973,55 @@ const confirmClaudeAuthConnection = async (): Promise<{ success: boolean; userMe
   };
 };
 
-const launchMacClaudeLoginProcess = async (
-  cliPath: string,
-  source: 'managed' | 'system',
-): Promise<{ loginLogPath: string; env: NodeJS.ProcessEnv }> => {
-  const loginLogPath = path.join(getLogsRoot(), 'claude-login.log');
-  const env = await buildClaudeAuthEnvironment(cliPath, source);
-  await fs.mkdir(path.dirname(loginLogPath), { recursive: true });
-  await fs.writeFile(
-    loginLogPath,
-    [
-      `[${new Date().toISOString()}] Forger prepared Claude Code login.`,
-      `claudeCliPath=${cliPath}`,
-      `source=${source}`,
-      `pathPrefix=${env.PATH?.split(path.delimiter).slice(0, 3).join(path.delimiter) ?? ''}`,
-      '',
-    ].join('\n'),
-    'utf8',
-  );
-
-  const openedUrls = new Set<string>();
-  const child = spawn(cliPath, ['auth', 'login'], {
-    cwd: app.getPath('userData'),
-    env,
-    shell: false,
-    stdio: 'pipe',
-  });
-
-  const handleOutput = (stream: 'stdout' | 'stderr', text: string): void => {
-    void appendClaudeLoginLog(loginLogPath, stream, text);
-    for (const url of extractAllowedClaudeAuthUrls(text)) {
-      if (openedUrls.has(url)) {
-        continue;
-      }
-      openedUrls.add(url);
-      void shell.openExternal(url).catch((error) => {
-        void appendClaudeLoginLog(loginLogPath, 'open_external_error', installErrorMessage(error));
-      });
-    }
-  };
-
-  child.stdout.on('data', (chunk) => handleOutput('stdout', chunk.toString()));
-  child.stderr.on('data', (chunk) => handleOutput('stderr', chunk.toString()));
-  child.once('exit', (code, signal) => {
-    void appendInstallLog('claude_auth:login_process_exit', {
-      platform: process.platform,
-      code,
-      signal,
-      loginLogPath,
-    });
-    void appendClaudeLoginLog(loginLogPath, 'exit', `code=${code ?? 'null'} signal=${signal ?? 'null'}`);
-  });
-
-  await new Promise<void>((resolve, reject) => {
-    let settled = false;
-    child.once('error', (error) => {
-      if (settled) {
-        void appendClaudeLoginLog(loginLogPath, 'error', installErrorMessage(error));
-        return;
-      }
-      settled = true;
-      reject(error);
-    });
-    setImmediate(() => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      resolve();
-    });
-  });
-
-  return { loginLogPath, env };
-};
-
 const connectClaudeAuth = async (): Promise<{ success: boolean; userMessage: string; status?: ClaudeAuthStatus } & FailureDiagnosticFields> => {
   try {
-    const resolved = await resolveClaudeCli();
-    const cliPath = resolved?.path ?? await ensureClaudeCliInstalled();
-    const cliSource = resolved?.source ?? 'managed';
+    const cliPath = (await resolveClaudeCli())?.path ?? await ensureClaudeCliInstalled();
 
     if (process.platform === 'darwin') {
-      const launched = await launchMacClaudeLoginProcess(cliPath, cliSource);
+      const loginLogPath = path.join(getLogsRoot(), 'claude-login.log');
+      const loginScriptPath = path.join(getTempRoot(), 'claude-login.command');
+      const loginScript = buildMacTerminalLoginScript({
+        providerName: 'Claude Code',
+        logPath: loginLogPath,
+        command: [cliPath, 'auth', 'login'],
+      });
 
-      await appendInstallLog('claude_auth:login_started', {
+      await fs.mkdir(path.dirname(loginLogPath), { recursive: true });
+      await fs.mkdir(path.dirname(loginScriptPath), { recursive: true });
+      await fs.writeFile(
+        loginLogPath,
+        [
+          `[${new Date().toISOString()}] Forger prepared Claude Code login.`,
+          `claudeCliPath=${cliPath}`,
+          `loginScriptPath=${loginScriptPath}`,
+          '',
+        ].join('\n'),
+        'utf8',
+      );
+      await fs.writeFile(loginScriptPath, loginScript, 'utf8');
+      await fs.chmod(loginScriptPath, 0o700);
+      const terminalCommand = buildMacTerminalScriptLaunchCommand(loginScriptPath);
+      await runCommand(
+        '/usr/bin/osascript',
+        [
+          '-e',
+          'tell application "Terminal"',
+          '-e',
+          'activate',
+          '-e',
+          `do script ${JSON.stringify(terminalCommand)}`,
+          '-e',
+          'end tell',
+        ],
+        { cwd: app.getPath('userData') },
+      );
+
+      await appendInstallLog('claude_auth:terminal_opened', {
         platform: process.platform,
         cliPath,
-        source: cliSource,
-        loginLogPath: launched.loginLogPath,
-        pathPrefix: launched.env.PATH?.split(path.delimiter).slice(0, 3).join(path.delimiter),
+        loginScriptPath,
+        terminalCommand,
+        loginLogPath,
       });
       const status = await getClaudeAuthStatus().catch(() => undefined);
       if (status?.authenticated) {
@@ -1117,7 +1029,7 @@ const connectClaudeAuth = async (): Promise<{ success: boolean; userMessage: str
       }
       return {
         success: true,
-        userMessage: 'Iniciamos la conexion con Claude Code. Completa el login de Claude en el navegador.',
+        userMessage: 'Abrimos Terminal para completar el login local de Claude Code.',
         status,
       };
     }
@@ -1555,46 +1467,6 @@ const hasWindowsAntigravityCredential = async (): Promise<boolean> => {
   return Boolean(matchedPattern);
 };
 
-const clearWindowsAntigravityCredentials = async (): Promise<number> => {
-  if (process.platform !== 'win32') {
-    return 0;
-  }
-  let removed = 0;
-  for (const target of ANTIGRAVITY_WINDOWS_CREDENTIAL_PATTERNS) {
-    try {
-      await runCommand('cmdkey.exe', [`/delete:${target}`], {
-        cwd: app.getPath('userData'),
-        timeoutMs: 5_000,
-      });
-      removed += 1;
-    } catch (error) {
-      await appendInstallLog('antigravity_auth:windows_credential_delete_failed', {
-        target,
-        detail: failureDiagnostic(error, 'antigravity_windows_credential_delete_failed').technicalCode,
-      });
-    }
-  }
-  return removed;
-};
-
-const clearMacAntigravityKeychainState = async (): Promise<boolean> => {
-  if (process.platform !== 'darwin') {
-    return false;
-  }
-  try {
-    await runCommand('/usr/bin/security', ['delete-generic-password', '-s', 'gemini', '-a', 'antigravity'], {
-      cwd: app.getPath('userData'),
-      timeoutMs: 5_000,
-    });
-    return true;
-  } catch (error) {
-    await appendInstallLog('antigravity_auth:mac_keychain_delete_failed', {
-      detail: failureDiagnostic(error, 'antigravity_mac_keychain_delete_failed').technicalCode,
-    });
-    return false;
-  }
-};
-
 const ANTIGRAVITY_OAUTH_SUCCESS_PATTERNS = [
   { name: 'oauth_authenticated_successfully', pattern: /OAuth:\s+authenticated successfully/i },
   { name: 'consumer_oauth_authentication_completed', pattern: /consumerOAuth:\s+authentication completed successfully/i },
@@ -1695,32 +1567,6 @@ const hasAntigravityLocalState = async (): Promise<boolean> => {
     return true;
   }
   return false;
-};
-
-const clearAntigravityLocalState = async (): Promise<{ removedPaths: string[]; windowsCredentialsRemoved: number; macKeychainRemoved: boolean }> => {
-  const home = app.getPath('home');
-  const candidates = [
-    path.join(home, '.gemini', 'antigravity', 'antigravity_state.pbtxt'),
-    path.join(home, '.gemini', 'antigravity-cli', 'log'),
-    path.join(home, '.gemini', 'antigravity', 'log'),
-  ];
-  const removedPaths: string[] = [];
-  for (const candidate of candidates) {
-    try {
-      await fs.rm(candidate, { recursive: true, force: true });
-      removedPaths.push(candidate);
-    } catch (error) {
-      await appendInstallLog('antigravity_auth:local_state_delete_failed', {
-        path: candidate,
-        detail: failureDiagnostic(error, 'antigravity_local_state_delete_failed').technicalCode,
-      });
-    }
-  }
-  return {
-    removedPaths,
-    windowsCredentialsRemoved: await clearWindowsAntigravityCredentials(),
-    macKeychainRemoved: await clearMacAntigravityKeychainState(),
-  };
 };
 
 const getManagedAntigravityCliPath = (): string =>
@@ -1939,6 +1785,9 @@ const getAntigravityAuthStatus = async (): Promise<AntigravityAuthStatus> => {
   }
   const versionResult = await runCommandCapture(resolved.path, ['--version'], { cwd: app.getPath('userData'), timeoutMs: 10_000 }).catch(() => null);
   const authenticated = await hasAntigravityLocalState();
+  if (authenticated) {
+    await markProviderConnected?.('antigravity');
+  }
   return {
     installed: true,
     authenticated,
@@ -1963,7 +1812,6 @@ const startAntigravityAuthSession = async (
       cliPath: currentStatus?.antigravityCliPath,
     });
     if (currentStatus?.authenticated) {
-      await markProviderConnected?.('antigravity');
       return {
         success: true,
         userMessage: 'Google Antigravity ya está conectado en este equipo.',
@@ -2206,7 +2054,6 @@ const connectAntigravityAuth = async (): Promise<{ success: boolean; userMessage
     const source = resolved?.source ?? 'managed';
     const currentStatus = await getAntigravityAuthStatus().catch(() => undefined);
     if (currentStatus?.authenticated) {
-      await markProviderConnected?.('antigravity');
       return {
         success: true,
         userMessage: 'Google Antigravity ya está conectado en este equipo.',
@@ -2341,22 +2188,17 @@ const disconnectAntigravityAuth = async (): Promise<{ success: boolean; userMess
     }
     activeAntigravityAuthSessions.clear();
     await markProviderDisconnected?.('antigravity');
-    const cleared = await clearAntigravityLocalState();
     const status = await getAntigravityAuthStatus().catch(() => undefined);
     await appendInstallLog('antigravity_auth:disconnected', {
       authenticated: status?.authenticated,
-      credentialScope: 'local_provider_state_cleared',
-      removedPathCount: cleared.removedPaths.length,
-      windowsCredentialsRemoved: cleared.windowsCredentialsRemoved,
-      macKeychainRemoved: cleared.macKeychainRemoved,
+      credentialScope: 'external_provider_state_preserved',
     });
     return {
       success: true,
       userMessage: status?.authenticated
-        ? 'Google Antigravity sigue mostrando una sesión local activa en este equipo.'
+        ? 'Forger dejó de usar Google Antigravity, pero la sesión local de Google sigue guardada en este computador.'
         : 'Google Antigravity fue desconectado en este equipo.',
       status,
-      ...(status?.authenticated ? { technicalCode: 'antigravity_logout_still_authenticated' } : {}),
     };
   } catch (error) {
     const diagnostic = failureDiagnostic(error, 'antigravity_disconnect_failed');

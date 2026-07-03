@@ -4,8 +4,10 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawnProcess } from '../runtime/process-spawn';
 import type { AgentEffort, AgentPermissionMode, ChatErrorCode, ClaudeEffort, CodexReasoningEffort, PreviewDiffFile } from '../../shared/types';
-import { createLlmProviderRunService, type LlmProviderRunService, type LlmProviderRunServiceOptions } from '../llm-provider/run-service';
-import type { LlmCommandResult, LlmMcpServerConfig as ProviderMcpServerConfig, LlmTokenUsage } from '../llm-provider/types';
+import { antigravityCliAdapter } from '../llm-provider/adapters/antigravity-cli-adapter';
+import { codexCliAdapter, type LlmTokenUsage } from '../llm-provider/adapters/codex-cli-adapter';
+import { claudeCliAdapter } from '../llm-provider/adapters/claude-cli-adapter';
+import type { LlmCommandResult, LlmMcpServerConfig as ProviderMcpServerConfig } from '../llm-provider/types';
 
 export type LlmMcpServerConfig = ProviderMcpServerConfig;
 export type { LlmTokenUsage };
@@ -142,20 +144,13 @@ export class PluginRuntime {
 }
 
 export class SandboxRunner {
-  private readonly providerRunService: LlmProviderRunService;
-  private readonly codexHome: string;
-
-  public constructor(options: string | Pick<LlmProviderRunServiceOptions, 'codexHome' | 'providerProfilesRoot' | 'resolveAuthProfile'>) {
-    const resolvedOptions = typeof options === 'string' ? { codexHome: options } : options;
-    this.codexHome = resolvedOptions.codexHome ?? '';
-    this.providerRunService = createLlmProviderRunService(resolvedOptions);
-  }
+  public constructor(private readonly codexHome: string) {}
 
   public async resolveCodexCommand(params: {
     codexCliPath: string;
     pathEntries: string[];
   }): Promise<{ command: string; prefixArgs: string[]; pathEntries: string[] }> {
-    return await this.providerRunService.resolveCommand('codex', params.codexCliPath, params.pathEntries);
+    return await codexCliAdapter.resolveCommand(params.codexCliPath, params.pathEntries);
   }
 
   public async runCodex(params: {
@@ -168,7 +163,6 @@ export class SandboxRunner {
     prompt: string;
     model: string;
     reasoningEffort: CodexReasoningEffort;
-    authProfileId?: string;
     permissionMode?: AgentPermissionMode;
     networkAccess?: boolean;
     timeoutMs: number;
@@ -177,16 +171,7 @@ export class SandboxRunner {
     threadId?: string;
     codexHome?: string;
   }): Promise<LlmProviderRunResult> {
-    const result = await this.providerRunService.run({
-      surface: 'desktop_chat',
-      mode: 'chat',
-      runtime: {
-        provider: 'codex',
-        model: params.model,
-        effort: params.reasoningEffort,
-        authProfileId: params.authProfileId,
-        permissionMode: params.permissionMode,
-      },
+    const result = await codexCliAdapter.runChat({
       cliPath: params.codexCliPath,
       pathEntries: params.pathEntries,
       environment: params.environment,
@@ -194,18 +179,17 @@ export class SandboxRunner {
       workingDir: params.workingDir,
       sharedRoots: params.sharedRoots,
       prompt: params.prompt,
+      model: params.model,
+      reasoningEffort: params.reasoningEffort,
       permissionMode: params.permissionMode,
       networkAccess: params.networkAccess,
       timeoutMs: params.timeoutMs,
       onChild: params.onChild,
       onOutput: params.onOutput,
       threadId: params.threadId,
-      codexHomePlan: params.codexHome
-        ? { type: 'provided', path: params.codexHome, rootCodexHome: this.codexHome }
-        : { type: 'none' },
+      codexHome: params.codexHome,
+      rootCodexHome: this.codexHome,
       runCommandCapture,
-      checkReady: false,
-      setupErrorMode: 'chat',
     });
     return {
       assistantText: result.assistantText || 'Listo. ¿Qué te gustaría hacer ahora en esta app?',
@@ -225,7 +209,6 @@ export class SandboxRunner {
     prompt: string;
     model: string;
     effort: ClaudeEffort;
-    authProfileId?: string;
     permissionMode?: AgentPermissionMode;
     timeoutMs: number;
     inactivityTimeoutMs?: number;
@@ -233,16 +216,7 @@ export class SandboxRunner {
     onOutput?: (stream: 'stdout' | 'stderr' | 'meta', text: string) => void;
     threadId?: string;
   }): Promise<LlmProviderRunResult> {
-    const result = await this.providerRunService.run({
-      surface: 'desktop_chat',
-      mode: 'conversation',
-      runtime: {
-        provider: 'claude',
-        model: params.model,
-        effort: params.effort,
-        authProfileId: params.authProfileId,
-        permissionMode: params.permissionMode,
-      },
+    const result = await claudeCliAdapter.run({
       cliPath: params.claudeCliPath,
       pathEntries: params.pathEntries,
       environment: params.environment,
@@ -259,13 +233,10 @@ export class SandboxRunner {
       onOutput: params.onOutput,
       threadId: params.threadId,
       runCommandCapture,
-      checkReady: false,
-      setupErrorMode: 'chat',
     });
     return {
       assistantText: result.assistantText || 'Listo. ¿Qué te gustaría hacer ahora en esta app?',
       threadId: result.threadId,
-      ...(result.usageDelta ? { usageDelta: result.usageDelta } : {}),
       toolEvents: result.toolEvents,
     };
   }
@@ -280,23 +251,13 @@ export class SandboxRunner {
     prompt: string;
     model: string;
     effort?: AgentEffort;
-    authProfileId?: string;
     permissionMode?: AgentPermissionMode;
     timeoutMs: number;
     onChild: (child: ChildProcessWithoutNullStreams) => void;
     onOutput?: (stream: 'stdout' | 'stderr' | 'meta', text: string) => void;
     threadId?: string;
   }): Promise<LlmProviderRunResult> {
-    const result = await this.providerRunService.run({
-      surface: 'desktop_chat',
-      mode: 'conversation',
-      runtime: {
-        provider: 'antigravity',
-        model: params.model,
-        effort: params.effort ?? 'medium',
-        authProfileId: params.authProfileId,
-        permissionMode: params.permissionMode,
-      },
+    const result = await antigravityCliAdapter.run({
       cliPath: params.antigravityCliPath,
       pathEntries: params.pathEntries,
       environment: params.environment,
@@ -313,13 +274,10 @@ export class SandboxRunner {
       onChild: params.onChild,
       onOutput: params.onOutput,
       runCommandCapture,
-      checkReady: false,
-      setupErrorMode: 'chat',
     });
     return {
       assistantText: result.assistantText,
-      threadId: result.threadId ?? result.conversationId ?? undefined,
-      ...(result.usageDelta ? { usageDelta: result.usageDelta } : {}),
+      threadId: result.conversationId ?? undefined,
       toolEvents: result.toolEvents,
     };
   }

@@ -1,11 +1,5 @@
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
-import type {
-  AgentEffort,
-  AgentPermissionMode,
-  LlmProviderKey,
-  LlmProviderProfileMetadata,
-  LlmProviderRuntimeAuthMode,
-} from '../../shared/types';
+import type { AgentEffort, AgentPermissionMode, LlmProviderKey } from '../../shared/types';
 
 export interface LlmMcpServerConfig {
   name: string;
@@ -33,18 +27,9 @@ export type LlmRunEvent =
 export interface LlmRunResult {
   assistantText: string;
   conversationId?: string | null;
-  usageDelta?: Partial<LlmTokenUsage>;
   toolEvents: number;
   stdout: string;
   stderr: string;
-}
-
-export interface LlmTokenUsage {
-  inputTokens: number;
-  cachedInputTokens: number;
-  outputTokens: number;
-  reasoningOutputTokens: number;
-  turns: number;
 }
 
 export interface LlmRunCommandCaptureOptions {
@@ -64,27 +49,6 @@ export type LlmRunCommandCapture = (
   options: LlmRunCommandCaptureOptions,
 ) => Promise<LlmCommandResult>;
 
-export interface LlmProviderResolvedAuthProfile extends LlmProviderProfileMetadata {
-  active?: boolean;
-  connected?: boolean;
-  codexHome?: string;
-  rootCodexHome?: string;
-  claudeConfigDir?: string;
-}
-
-export interface LlmProviderResolvedAuthContext {
-  profile: LlmProviderResolvedAuthProfile;
-  runtimeAuthMode: LlmProviderRuntimeAuthMode;
-  environment: Record<string, string>;
-  codexHome?: string;
-  rootCodexHome?: string;
-}
-
-export type LlmProviderAuthProfileResolver = (
-  provider: LlmProviderKey,
-  authProfileId: string,
-) => Promise<LlmProviderResolvedAuthProfile | null | undefined>;
-
 export interface LlmCliRunInput {
   runId?: string;
   cliPath: string;
@@ -101,7 +65,6 @@ export interface LlmCliRunInput {
   conversationId?: string | null;
   permissionMode?: AgentPermissionMode;
   timeoutMs: number;
-  inactivityTimeoutMs?: number;
   timeoutMode?: 'absolute' | 'inactivity';
   onChild?: (child: ChildProcessWithoutNullStreams) => void;
   onOutput?: (stream: LlmRunOutputStream, text: string) => void;

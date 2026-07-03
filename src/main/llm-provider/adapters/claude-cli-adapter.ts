@@ -11,7 +11,6 @@ import type {
   LlmRunCommandCapture,
   LlmRunOutputStream,
   LlmRunResult,
-  LlmTokenUsage,
 } from '../types';
 import { createProviderQuotaError, detectProviderQuotaError } from '../provider-errors';
 
@@ -20,7 +19,6 @@ type ClaudeCommandResult = LlmCommandResult & { code: number };
 export interface ClaudeParsedOutput {
   assistantText: string;
   threadId?: string;
-  usageDelta?: Partial<LlmTokenUsage>;
   toolEvents: number;
 }
 
@@ -118,7 +116,6 @@ export class ClaudeCliAdapter {
         assistantText: parsed.assistantText,
         conversationId: parsed.threadId ?? input.threadId,
         threadId: parsed.threadId ?? input.threadId ?? undefined,
-        usageDelta: parsed.usageDelta,
         toolEvents: parsed.toolEvents,
       };
     } finally {
@@ -165,7 +162,6 @@ export const parseClaudeJsonl = (stdout: string, stderr: string): ClaudeParsedOu
 
   let assistantText = '';
   let threadId: string | undefined;
-  let usageDelta: Partial<LlmTokenUsage> | undefined;
   let toolEvents = 0;
   for (const line of raw.split('\n').map((entry) => entry.trim()).filter(Boolean)) {
     let entry: Record<string, unknown>;
@@ -185,44 +181,12 @@ export const parseClaudeJsonl = (stdout: string, stderr: string): ClaudeParsedOu
     if (type.includes('tool')) {
       toolEvents += 1;
     }
-    const usage = readClaudeUsage(entry);
-    if (usage) {
-      usageDelta = usage;
-    }
     const text = extractClaudeText(entry);
     if (text) {
       assistantText = text;
     }
   }
-  return { assistantText: assistantText.trim(), threadId, usageDelta, toolEvents };
-};
-
-const readClaudeUsage = (entry: Record<string, unknown>): Partial<LlmTokenUsage> | undefined => {
-  const message = entry.message && typeof entry.message === 'object'
-    ? entry.message as Record<string, unknown>
-    : undefined;
-  const usage = entry.usage && typeof entry.usage === 'object'
-    ? entry.usage as Record<string, unknown>
-    : message?.usage && typeof message.usage === 'object'
-      ? message.usage as Record<string, unknown>
-      : undefined;
-  if (!usage) {
-    return undefined;
-  }
-  const inputTokens = toNumber(usage.input_tokens ?? usage.inputTokens);
-  const cacheRead = toNumber(usage.cache_read_input_tokens ?? usage.cacheReadInputTokens ?? usage.cached_input_tokens);
-  const cacheCreation = toNumber(usage.cache_creation_input_tokens ?? usage.cacheCreationInputTokens);
-  const outputTokens = toNumber(usage.output_tokens ?? usage.outputTokens);
-  if (inputTokens <= 0 && cacheRead <= 0 && cacheCreation <= 0 && outputTokens <= 0) {
-    return undefined;
-  }
-  return {
-    inputTokens: inputTokens + cacheCreation,
-    cachedInputTokens: cacheRead,
-    outputTokens,
-    reasoningOutputTokens: 0,
-    turns: 1,
-  };
+  return { assistantText: assistantText.trim(), threadId, toolEvents };
 };
 
 const extractClaudeText = (entry: Record<string, unknown>): string => {
@@ -254,8 +218,5 @@ const extractClaudeText = (entry: Record<string, unknown>): string => {
     .filter(Boolean)
     .join('\n');
 };
-
-const toNumber = (value: unknown): number =>
-  typeof value === 'number' && Number.isFinite(value) ? value : 0;
 
 export const claudeCliAdapter = new ClaudeCliAdapter();

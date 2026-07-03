@@ -64,7 +64,6 @@ import { createManifestSupportController } from '../apps/manifest-support';
 import { createAppContextSupportController } from '../apps/context-support';
 import { createRegistryStoreController } from '../installed-apps/registry-store';
 import { createSettingsServiceController } from './settings-service';
-import type { LlmProviderAuthProfileResolver } from '../llm-provider/types';
 import { configureDesktopUserDataPath, createPathConfigController } from './path-config';
 import { createMainUtilitiesController } from './main-utilities';
 import { createLocalNetworkShareController } from './local-network-share-service';
@@ -113,11 +112,11 @@ import type {
   DesktopErrorReportPreview, DesktopUpdateState, DisconnectAppSecretInput, FailureDiagnosticFields, FilesCreateCategoryInput,
   FilesDeleteCategoryInput, FilesDeleteInput, FilesDiscardStagedForChatInput, FilesImportInput, FilesListInput,
   FilesMoveInput, FilesRenameCategoryInput, FilesRenameInput, FilesStageForChatInput, ForgerAccountLoginInput,
-  ForgerAccountProfileInput, ForgerAccountRegisterInput, FriendChatWindowOpenResult, InstallAppResult, LlmProviderProfilesState, PrepareSocialAppReviewInput, MemoryCreateInput,
+  ForgerAccountProfileInput, ForgerAccountRegisterInput, FriendChatWindowOpenResult, InstallAppResult, PrepareSocialAppReviewInput, MemoryCreateInput,
   MemoryListInput, MemoryUpdateInput, OfficialToolRuntimeEvent, OpenAppResult, RemoteAppBackupSummary,
-  LlmProviderProfileMutationResult, RendererChatTraceEvent, RuntimeStatus, SetActiveLlmProviderProfileInput, SetActiveLlmProviderProfileResult, SetAppToolGrantInput, Settings, SharedFileRef, StopAppResult,
+  RendererChatTraceEvent, RuntimeStatus, SetAppToolGrantInput, Settings, SharedFileRef, StopAppResult,
   SubmitAppRatingInput, SubmitProductFeedbackInput, SubmitUsageEventInput, UpdateAgentDefaultsInput,
-  UpdateAgentToolApprovalInput, UpdateCodexDefaultsInput, UpdateDeveloperModeInput, UpdateLlmProviderProfileDefaultsInput, UpdateUserSecretInput,
+  UpdateAgentToolApprovalInput, UpdateCodexDefaultsInput, UpdateDeveloperModeInput, UpdateUserSecretInput,
 } from '../../shared/types';
 
 const BetterSqlite3 = loadOptionalBetterSqlite();
@@ -245,7 +244,6 @@ const getForgerMetadataRoot = (): string => getPathConfigController().getForgerM
 const getLegacyForgerMetadataRoot = (): string => getPathConfigController().getLegacyForgerMetadataRoot();
 const getCodexRoot = (): string => getPathConfigController().getCodexRoot();
 const getCodexHome = (): string => getPathConfigController().getCodexHome();
-const getProviderProfilesRoot = (): string => path.join(app.getPath('userData'), 'llm-profiles');
 const getClaudeRoot = (): string => getPathConfigController().getClaudeRoot();
 const getAntigravityRoot = (): string => getPathConfigController().getAntigravityRoot();
 const getAgentToolSettingsPath = (): string => getPathConfigController().getAgentToolSettingsPath();
@@ -289,22 +287,6 @@ const markProviderConnected = async (provider: AgentProvider): Promise<void> => 
 const markProviderDisconnected = async (provider: AgentProvider): Promise<void> => await getSettingsServiceController().markProviderDisconnected(provider);
 const chooseAgentRuntime = async (requested?: AgentRuntimeRequest): Promise<AgentRuntime> => await getSettingsServiceController().chooseAgentRuntime(requested);
 const chooseConnectedProvider = async (): Promise<AgentProvider> => await getSettingsServiceController().chooseConnectedProvider();
-const listLlmProviderProfiles = async (): Promise<LlmProviderProfilesState> => await getSettingsServiceController().listLlmProviderProfiles();
-const setActiveLlmProviderProfile = async (input: SetActiveLlmProviderProfileInput): Promise<SetActiveLlmProviderProfileResult> => await getSettingsServiceController().setActiveLlmProviderProfile(input);
-const updateLlmProviderProfileDefaults = async (input: UpdateLlmProviderProfileDefaultsInput): Promise<LlmProviderProfileMutationResult> => await getSettingsServiceController().updateLlmProviderProfileDefaults(input);
-const resolveLlmProviderAuthProfile: LlmProviderAuthProfileResolver = async (provider, authProfileId) => {
-  const profiles = (await listLlmProviderProfiles()).providers[provider] ?? [];
-  const normalizedAuthProfileId = authProfileId === `${provider}:local-active` ? `${provider}:system` : authProfileId;
-  const profile = profiles.find((entry) => entry.id === normalizedAuthProfileId && entry.provider === provider);
-  if (!profile) {
-    return null;
-  }
-  return {
-    ...profile,
-    active: profile.active !== false,
-    connected: profile.status === 'connected',
-  };
-};
 const withAgentDefaults = <T extends { model?: string; reasoningEffort?: CodexReasoningEffort; runtime?: AgentRuntime; runtimeRecommendations?: AgentRuntimeRecommendations }>(input: T, defaults: AgentDefaults = normalizeSettings(settings).agentDefaults): T => getSettingsServiceController().withAgentDefaults(input, defaults);
 
 let agentToolSettings: AgentToolSettings = createInitialAgentToolSettings();
@@ -509,8 +491,6 @@ const getPersonalAgentConversationManager = (): AgentConversationManager => {
       store: getPersonalAgentStore(),
       metadataRoot: getForgerMetadataRoot(),
       codexHome: getCodexHome(),
-      providerProfilesRoot: getProviderProfilesRoot(),
-      resolveAuthProfile: resolveLlmProviderAuthProfile,
       getAgentRuntime: chooseAgentRuntime,
       getCodexCliPath: async () => await resolveCodexCliPath(getCodexRoot()),
       getClaudeCliPath: async () => (await resolveClaudeCli())?.path ?? null,
@@ -1311,7 +1291,6 @@ const getMainProcessIpcDeps = (): MainProcessIpcDeps & AgentIpcDeps => ({
   ipcMain,
   listAppPrompts,
   listCatalogFromBackend,
-  listLlmProviderProfiles,
   mainWindow: getMainWindow(),
   normalizeAgentProvider,
   normalizeClaudeEffort,
@@ -1343,8 +1322,6 @@ const getMainProcessIpcDeps = (): MainProcessIpcDeps & AgentIpcDeps => ({
   sendEncryptedCloudMessage, sendEncryptedCloudAppShareMessage,
   serializeErrorForInstallLog,
   setAppAutoSyncSetting,
-  setActiveLlmProviderProfile,
-  updateLlmProviderProfileDefaults,
   shell,
   signAppFolderGrant,
   stopInstalledApp,
@@ -1444,7 +1421,7 @@ registerMainLifecycle({
   ensureGitAvailable, ensurePathInside, ensureRuntimeInstalled, ensureSqliteDatabaseParent, flushPendingDeepLink, fs, getAgentPathEntries, getBackupsRoot,
   getClaudeAuthStatus, getAntigravityAuthStatus, getCloudDeviceAccountStorageKey, getCloudDevicePath, getCloudIdentityPath, getCloudIdentityStore,
   getCodexAuthStatus, getCodexHome, getCodexRoot, getCodexToolEnvironment, getDesktopChatNetworkAccessDefault: () => settings.defaultChatNetworkAccess !== false, getManifestAppSecretsValidationError, getSecretsStore, getForgerAccountPath, getForgerHomeRoot, getForgerMetadataRoot,
-  getProviderProfilesRoot, resolveLlmProviderAuthProfile, getSocialAppReviewPromptContext,
+  getSocialAppReviewPromptContext,
   getFreePort, getLegacyForgerMetadataRoot, getMemoryStore, getPersonalAgentStore, getOfficialToolsService, getSpeechToTextService, getTextToSpeechService, getLiveVoiceInputService, getWakeWordService,
   getAudioDevices: async () => await getAudioRuntimeBroker().listDevices(),
   playTextToSpeechAudio: async (input: { playbackId: string; audioDataBase64: string; mimeType: string; outputDeviceId?: string }) => await getAudioRuntimeBroker().playAudio(input),

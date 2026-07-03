@@ -1,11 +1,10 @@
 import SendRounded from '@mui/icons-material/SendRounded';
 import AddCommentRounded from '@mui/icons-material/AddCommentRounded';
-import CheckCircleRounded from '@mui/icons-material/CheckCircleRounded';
-import RadioButtonUncheckedRounded from '@mui/icons-material/RadioButtonUncheckedRounded';
 import AddRounded from '@mui/icons-material/AddRounded';
 import AttachFileRounded from '@mui/icons-material/AttachFileRounded';
 import ChevronRightRounded from '@mui/icons-material/ChevronRightRounded';
 import CloseRounded from '@mui/icons-material/CloseRounded';
+import DonutLargeRounded from '@mui/icons-material/DonutLargeRounded';
 import ExpandMoreRounded from '@mui/icons-material/ExpandMoreRounded';
 import HistoryRounded from '@mui/icons-material/HistoryRounded';
 import BugReportRounded from '@mui/icons-material/BugReportRounded';
@@ -20,6 +19,7 @@ import {
   Drawer,
   FormControl,
   IconButton,
+  LinearProgress,
   List,
   ListItem,
   ListItemButton,
@@ -39,6 +39,8 @@ import type {
   AppSummary,
   ChatMode,
   ChatQuestionRequest,
+  CodexAuthStatus,
+  CodexRateLimitBucket,
   ForgerFileCategory,
   ForgerFileRecord,
   FilesStageForChatInput,
@@ -143,6 +145,8 @@ const readFileAsBase64 = async (file: File): Promise<string> =>
     reader.readAsDataURL(file);
   });
 
+const CODEX_USAGE_TOOLTIP_CACHE_MS = 60_000;
+
 const formatRelativeHistoryTime = (updatedAt: string, nowLabel: string) => {
   const timestamp = Date.parse(updatedAt);
   if (!Number.isFinite(timestamp)) {
@@ -163,6 +167,42 @@ const formatRelativeHistoryTime = (updatedAt: string, nowLabel: string) => {
   ];
   const [unit, seconds] = units.find(([, unitSeconds]) => diffSeconds >= unitSeconds) ?? ['m', 60];
   return `${Math.floor(diffSeconds / seconds)}${unit}`;
+};
+
+const CodexUsageTooltipContent = ({
+  bucket,
+  loading,
+  t,
+}: {
+  bucket: CodexRateLimitBucket;
+  loading: boolean;
+  t: AppDictionary;
+}) => {
+  const usedPercent = Math.round(bucket.primary?.usedPercent ?? 0);
+  const remainingPercent = Math.round(bucket.primary?.remainingPercent ?? Math.max(0, 100 - usedPercent));
+  const resetLabel = bucket.primary?.resetsAt
+    ? t.settings.codexUsageReset(new Date(bucket.primary.resetsAt * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }))
+    : null;
+  const bucketName = bucket.limitName || bucket.limitId;
+
+  return (
+    <Stack spacing={0.75} sx={{ minWidth: 220, py: 0.25 }}>
+      <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between">
+        <Typography variant="caption" fontWeight={700}>{t.settings.codexUsageTitle}</Typography>
+        {loading ? <CircularProgress color="inherit" size={12} /> : null}
+      </Stack>
+      <LinearProgress color={bucket.rateLimitReachedType || usedPercent >= 90 ? 'warning' : 'primary'} variant="determinate" value={usedPercent} />
+      <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
+        <Chip size="small" label={t.settings.codexUsageUsed(usedPercent)} />
+        <Chip size="small" label={t.settings.codexUsageRemaining(remainingPercent)} />
+        {bucket.primary?.windowDurationMins ? <Chip size="small" label={t.settings.codexUsageWindow(bucket.primary.windowDurationMins)} /> : null}
+        {resetLabel ? <Chip size="small" label={resetLabel} /> : null}
+      </Stack>
+      <Typography variant="caption" color="inherit">
+        {bucket.rateLimitReachedType ? t.settings.codexUsageLimitReached : t.settings.codexUsageBucket(bucketName)}
+      </Typography>
+    </Stack>
+  );
 };
 
 interface ChatViewProps {
@@ -204,12 +244,15 @@ interface ChatViewProps {
   onSelectPermissionMode: (mode: AgentPermissionMode) => void;
   selectedNetworkAccess: boolean;
   onSelectNetworkAccess: (networkAccess: boolean) => void;
+  onOpenCodexUsageDashboard: () => void;
+  onRefreshCodexUsage: () => Promise<CodexAuthStatus>;
   assistantAvatarSrc: string;
   isSending: boolean;
   isResponding: boolean;
   canStopRun: boolean;
   progressLines: string[];
   intelligenceProviderConfigured: boolean;
+  codexProviderConfigured: boolean;
   onConfigureIntelligenceProvider: () => void;
   openingAppIds: Set<string>;
   onOpenApp: (appId: string) => void;
@@ -259,12 +302,15 @@ export function ChatView({
   onSelectPermissionMode,
   selectedNetworkAccess,
   onSelectNetworkAccess,
+  onOpenCodexUsageDashboard,
+  onRefreshCodexUsage,
   assistantAvatarSrc,
   isSending,
   isResponding,
   canStopRun,
   progressLines,
   intelligenceProviderConfigured,
+  codexProviderConfigured,
   onConfigureIntelligenceProvider,
   openingAppIds,
   onOpenApp,
@@ -285,12 +331,16 @@ export function ChatView({
   const [respondingQuestionRequestIds, setRespondingQuestionRequestIds] = useState<Set<string>>(new Set());
   const [stopBusy, setStopBusy] = useState(false);
   const [runtimeMenuOpen, setRuntimeMenuOpen] = useState(false);
+  const [codexUsageStatus, setCodexUsageStatus] = useState<CodexAuthStatus | null>(null);
+  const [codexUsageLoading, setCodexUsageLoading] = useState(false);
+  const [codexUsageError, setCodexUsageError] = useState(false);
   const [draftMode, setDraftMode] = useState<ChatMode>('create_app');
   const [draftTargetAppId, setDraftTargetAppId] = useState('');
   const inputRef = useRef<HTMLDivElement | null>(null);
   const composerAnchorRef = useRef<HTMLDivElement | null>(null);
   const messagesScrollRef = useRef<HTMLDivElement | null>(null);
   const shouldAutoScrollRef = useRef(true);
+  const codexUsageCheckedAtRef = useRef(0);
   const providerLabel = (provider: AgentProvider): string =>
     providerOptions.find((option) => option.value === provider)?.label ?? provider;
   const renderProviderValue = (value: AgentProvider | 'auto' | ''): string =>
@@ -324,6 +374,7 @@ export function ChatView({
   const activeModelValue = activeRuntimeControl.selectedModel;
   const activeEffortOptions = activeRuntimeControl.effortOptions;
   const activeEffortValue = activeRuntimeControl.selectedEffort;
+  const codexUsageBucket = codexUsageStatus?.rateLimits?.primary ?? codexUsageStatus?.rateLimits?.buckets[0];
   const shouldReserveMacTrafficLightSpace = isMacOs && !windowState?.isFullScreen;
   const historyGroups = useMemo<ConversationHistoryGroup[]>(() => {
     const createAppItems: ConversationHistoryItem[] = [];
@@ -381,6 +432,41 @@ export function ChatView({
     t.sections.chat.historyGroups.freeChat,
     t.sections.chat.historyGroups.reviewApps,
   ]);
+  const refreshCodexUsageForTooltip = async () => {
+    if (!codexProviderConfigured || codexUsageLoading) {
+      return;
+    }
+    const hasFreshUsage = codexUsageBucket && Date.now() - codexUsageCheckedAtRef.current < CODEX_USAGE_TOOLTIP_CACHE_MS;
+    if (hasFreshUsage) {
+      return;
+    }
+    setCodexUsageLoading(true);
+    setCodexUsageError(false);
+    try {
+      const nextStatus = await onRefreshCodexUsage();
+      setCodexUsageStatus(nextStatus);
+      codexUsageCheckedAtRef.current = Date.now();
+    } catch {
+      setCodexUsageError(true);
+    } finally {
+      setCodexUsageLoading(false);
+    }
+  };
+  const codexUsageTooltipTitle = !codexProviderConfigured ? (
+    t.sections.chat.quotaCodexRequired
+  ) : codexUsageBucket ? (
+    <CodexUsageTooltipContent bucket={codexUsageBucket} loading={codexUsageLoading} t={t} />
+  ) : codexUsageLoading ? (
+    <Stack direction="row" spacing={1} alignItems="center">
+      <CircularProgress color="inherit" size={14} />
+      <Typography variant="caption">{t.sections.chat.quotaLoading}</Typography>
+    </Stack>
+  ) : codexUsageError ? (
+    <Typography variant="caption">{t.sections.chat.quotaUnavailable}</Typography>
+  ) : (
+    t.sections.chat.quotaOpenDashboard
+  );
+
   useEffect(() => {
     setDraftMode('create_app');
     setDraftTargetAppId(targetAppId ?? '');
@@ -911,73 +997,6 @@ export function ChatView({
             }}
           >
             <Stack spacing={2.25}>
-              {(() => {
-                const setupSteps = [
-                  {
-                    key: 'connect',
-                    done: intelligenceProviderConfigured,
-                    title: t.sections.chat.setup.connectTitle,
-                    description: t.sections.chat.setup.connectDescription,
-                    onClick: onConfigureIntelligenceProvider,
-                  },
-                  {
-                    key: 'create',
-                    done: installedApps.some((app) => app.privateLocal),
-                    title: t.sections.chat.setup.createTitle,
-                    description: t.sections.chat.setup.createDescription,
-                    onClick: () => setDraftMode('create_app'),
-                  },
-                  {
-                    key: 'chat',
-                    done: historyItems.length > 0,
-                    title: t.sections.chat.setup.chatTitle,
-                    description: t.sections.chat.setup.chatDescription,
-                    onClick: () => setDraftMode('free_chat'),
-                  },
-                ];
-                if (setupSteps.every((step) => step.done)) {
-                  return null;
-                }
-                return (
-                  <Paper variant="outlined" data-onboarding-target="setup-checklist" sx={{ p: 2 }}>
-                    <Stack spacing={1.25}>
-                      <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
-                        {t.sections.chat.setup.title}
-                      </Typography>
-                      {setupSteps.map((step) => (
-                        <Stack
-                          key={step.key}
-                          direction="row"
-                          spacing={1.25}
-                          alignItems="center"
-                          onClick={step.done ? undefined : step.onClick}
-                          sx={{
-                            cursor: step.done ? 'default' : 'pointer',
-                            opacity: step.done ? 0.72 : 1,
-                            borderRadius: 1,
-                            p: 0.5,
-                            '&:hover': step.done ? undefined : { bgcolor: 'action.hover' },
-                          }}
-                        >
-                          {step.done ? (
-                            <CheckCircleRounded color="success" fontSize="small" />
-                          ) : (
-                            <RadioButtonUncheckedRounded color="action" fontSize="small" />
-                          )}
-                          <Box sx={{ minWidth: 0 }}>
-                            <Typography variant="body2" sx={{ fontWeight: 600, textDecoration: step.done ? 'line-through' : 'none' }}>
-                              {step.title}
-                            </Typography>
-                            <Typography variant="caption" color="text.secondary">
-                              {step.description}
-                            </Typography>
-                          </Box>
-                        </Stack>
-                      ))}
-                    </Stack>
-                  </Paper>
-                );
-              })()}
               <Stack spacing={0.5} textAlign="center">
                 <Typography variant="h5">{t.sections.chat.modeSelector.title}</Typography>
                 <Typography variant="body2" color="text.secondary">
@@ -1276,6 +1295,13 @@ export function ChatView({
               </Stack>
 
               <Stack direction="row" spacing={0.75} alignItems="center">
+                <Tooltip title={codexUsageTooltipTitle}>
+                  <span onMouseEnter={() => void refreshCodexUsageForTooltip()} onFocus={() => void refreshCodexUsageForTooltip()}>
+                    <IconButton size="small" onClick={onOpenCodexUsageDashboard} disabled={!codexProviderConfigured}>
+                      <DonutLargeRounded fontSize="small" />
+                    </IconButton>
+                  </span>
+                </Tooltip>
                 <Tooltip title={runtimeMenuOpen ? '' : providerLocked ? t.sections.chat.lockedRuntimeTooltip : t.sections.chat.providerSelectorLabel}>
                   <span>
                     <Select

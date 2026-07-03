@@ -77,8 +77,6 @@ const nativeMessagingManifestPath = (): string => {
 
 const closeServer = async (server: http.Server): Promise<void> =>
   new Promise((resolve) => {
-    server.closeIdleConnections?.();
-    server.closeAllConnections?.();
     server.close(() => resolve());
   });
 

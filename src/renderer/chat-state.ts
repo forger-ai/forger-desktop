@@ -20,7 +20,6 @@ export interface ChatConversation {
     provider: AgentProvider;
     model: string;
     effort: AgentEffort;
-    authProfileId?: string;
   };
   createdAt: string;
   updatedAt: string;
