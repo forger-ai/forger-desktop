@@ -431,6 +431,10 @@ test('main lifecycle service callbacks preserve fallbacks, permissions, and upda
   const runtimeEntries = [];
   const emittedRuns = [];
   const reports = [];
+  const secretValidationInputs = [];
+  const secretNormalizeInputs = [];
+  const secretResolveInputs = [];
+  const secretDeclarations = [{ name: 'OpenAI API key', usage: 'Generates reports', required: true }];
   const { calls, deps, ready, state } = createLifecycleHarness({
     emitChatRunUpdated: (event) => emittedRuns.push(event),
     ensureRuntimeInstalled: async (type, version) => {
@@ -445,6 +449,24 @@ test('main lifecycle service callbacks preserve fallbacks, permissions, and upda
     openOrFocusAppWindow: async (appId, appName, frontendUrl) => {
       openedWindows.push({ appId, appName, frontendUrl });
     },
+    getManifestAppSecretsValidationError: (manifest) => {
+      secretValidationInputs.push(manifest);
+      return null;
+    },
+    normalizeManifestAppSecrets: (manifest) => {
+      secretNormalizeInputs.push(manifest);
+      return secretDeclarations;
+    },
+    getSecretsStore: () => ({
+      resolveAppEnv: async (appId, declarations) => {
+        secretResolveInputs.push({ appId, declarations });
+        return {
+          env: { OPENAI_API_KEY: 'secret-value' },
+          missingRequired: [],
+          secretValues: ['secret-value'],
+        };
+      },
+    }),
   });
   state.desktopErrorReporter = {
     reportAppCodexConversationEvent: () => undefined,
@@ -536,6 +558,16 @@ test('main lifecycle service callbacks preserve fallbacks, permissions, and upda
   state.desktopRuntimeBridge.environmentForApp = (appId) => ({ APP_ID: appId });
   assert.equal(state.appMcpManager.options.getInstalledApp('finance-os'), state.registry.apps['finance-os']);
   assert.deepEqual(state.appMcpManager.options.getDesktopRuntimeEnvironment('finance-os'), { APP_ID: 'finance-os' });
+  const secretManifest = { appSecrets: secretDeclarations };
+  assert.deepEqual(await state.appMcpManager.options.resolveAppSecretsEnvironment('finance-os', secretManifest), {
+    env: { OPENAI_API_KEY: 'secret-value' },
+    fingerprint: '26f00f4e9512011b1f59d2e3fd5b3b2596d1396c4ab02e4fc71c053af4645930',
+    missingRequired: [],
+    secretValues: ['secret-value'],
+  });
+  assert.deepEqual(secretValidationInputs, [secretManifest]);
+  assert.deepEqual(secretNormalizeInputs, [secretManifest]);
+  assert.deepEqual(secretResolveInputs, [{ appId: 'finance-os', declarations: secretDeclarations }]);
   assert.deepEqual(await state.chatOrchestrator.options.getCodexPathEntries('finance-os'), [
     '/node/22/bin/path',
     '/app-tools/bin',

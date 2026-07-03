@@ -501,18 +501,15 @@ const buildPlatform = async (platform) => {
 };
 
 const ensureRelease = async (tag, version) => {
+  const fallbackNotes = `Forger Desktop v${version}`;
+  let releaseBody;
   try {
-    await capture('gh', ['release', 'view', tag]);
+    releaseBody = await capture('gh', ['release', 'view', tag, '--json', 'body', '--jq', '.body']);
   } catch {
-    await run('gh', [
-      'release',
-      'create',
-      tag,
-      '--title',
-      `Forger Desktop v${version}`,
-      '--notes',
-      `Forger Desktop v${version}`,
-    ]);
+    throw new Error(`Release ${tag} must exist with changelog notes before publishing artifacts.`);
+  }
+  if (!releaseBody.trim() || releaseBody.trim() === fallbackNotes) {
+    throw new Error(`Release ${tag} is missing changelog notes.`);
   }
 };
 

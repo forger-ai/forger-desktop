@@ -52,8 +52,8 @@ import { CloudDeviceManager } from '../cloud-device-manager';
 import { CloudIdentityStore, type EncryptedCloudText } from '../cloud-identity-store';
 import { BackupsManager } from '../backups-manager';
 import { createWindowStateEventRegistrar, createWindowStateReader, registerWindowIpcHandlers } from '../ipc/window';
-import { registerAgentIpcHandlers } from '../ipc/agent-handlers';
-import { registerMainIpcHandlers } from '../ipc/main-handlers';
+import { registerAgentIpcHandlers, type AgentIpcDeps } from '../ipc/agent-handlers';
+import { registerMainIpcHandlers, type MainProcessIpcDeps } from '../ipc/main-handlers';
 import { createInstalledAppRuntimeController } from '../runtime/installed-app-runtime';
 import { createInstalledAppLifecycleController } from '../installed-apps/lifecycle';
 import { createLocalAppCreator } from '../installed-apps/local-app-creator';
@@ -76,7 +76,7 @@ import { createRuntimeInstallController } from '../runtime/runtime-install';
 import { spawnProcess } from '../runtime/process-spawn';
 import { loadOptionalBetterSqlite } from '../runtime/optional-better-sqlite';
 import { createWindowBootstrapController } from './window-bootstrap';
-import { AGENT_TOOL_DEFINITIONS, AGENT_TOOL_IDS, AGENT_TOOL_PACKAGES, createInitialAgentToolSettings } from './agent-tool-packages';
+import { AGENT_TOOL_DEFINITIONS, AGENT_TOOL_IDS, createInitialAgentToolSettings } from './agent-tool-packages';
 import { registerMainLifecycle } from './main-lifecycle';
 import type { AppManifest, AppManifestService, AppManifestStack, AppRegistry, InstalledAppRecord, RuntimeBinarySet, RunningAppProcess, StackSkillTemplate } from './main-process-types';
 import { FORGER_AGENT_CONTRACT_MARKER, FORGER_AGENT_CONTRACT_MARKER_PREFIX, FORGER_AGENT_CONTRACT_VERSION, buildGlobalForgerAgentsMarkdown } from '../prompt-builder/forger-base';
@@ -1193,7 +1193,7 @@ const showIncomingCloudMessageNotification = (event: CloudSocialEvent): void => 
 const forwardCloudSocialEvent = (event: CloudSocialEvent): void => getCloudSocialRelayController().forwardCloudSocialEvent(event);
 const handleCloudSocialEvent = async (event: unknown): Promise<void> => await getCloudSocialRelayController().handleCloudSocialEvent(event);
 
-const getMainProcessIpcDeps = () => ({
+const getMainProcessIpcDeps = (): MainProcessIpcDeps & AgentIpcDeps => ({
   state: {
     get agentToolSettings() { return agentToolSettings; },
     set agentToolSettings(value) { agentToolSettings = value; },
@@ -1208,7 +1208,6 @@ const getMainProcessIpcDeps = () => ({
     get settings() { return settings; },
     set settings(value) { settings = value; },
   },
-  AGENT_TOOL_PACKAGES,
   APP_CLAUDE_MODEL_OPTIONS,
   APP_CODEX_MODEL_OPTIONS,
   BetterSqlite3,
@@ -1217,11 +1216,9 @@ const getMainProcessIpcDeps = () => ({
   BUILT_IN_CODEX_REASONING,
   CODEX_USAGE_DASHBOARD_URL,
   IPC_CHANNELS,
-  agentToolSettings,
   app,
   appAgentConversationManager,
   appAgentTaskManager,
-  appFolderGrantSecret,
   appendInstallLog,
   automationManager,
   buildAppSecretsState,
@@ -1229,10 +1226,8 @@ const getMainProcessIpcDeps = () => ({
   buildForgerToolsContextForApp,
   buildForgerToolsContextForFreeChat,
   canUseCloudDataSync,
-  catalogApps,
   chatOrchestrator,
   cloudDeviceManager,
-  cloudSyncSettings,
   confirmClaudeAuthConnection,
   connectClaudeAuth,
   disconnectClaudeAuth,
@@ -1253,16 +1248,13 @@ const getMainProcessIpcDeps = () => ({
   disconnectCodexAuth,
   ensureCatalogStatuses,
   failureDiagnostic,
-  forgerAccount,
   forgerBackendClient,
   forwardCloudSocialEvent,
   fs,
   getAppDetails,
-  getAppRuntimeStatus: getRuntimeStatus,
   getBackupsManager,
   getBackgroundTaskStore,
   getClaudeAuthStatus,
-  getClaudeConnectedForForger,
   getAntigravityAuthStatus,
   getCloudIdentityStore,
   getCodexAuthStatus,
@@ -1270,7 +1262,6 @@ const getMainProcessIpcDeps = () => ({
   getDeveloperPathState,
   getDesktopUpdater,
   getFileLibrary,
-  getManifestAppSecretsValidationError,
   getForgerHomeRoot,
   getForgerMetadataRoot,
   getInstallLogPath,
@@ -1290,9 +1281,11 @@ const getMainProcessIpcDeps = () => ({
   getRemoteActivitySnapshot,
   getLlmRunsSnapshot,
   getSecretsStore,
-  getWindowState,
   installAppRuntime,
   prepareSocialAppReview,
+  finishSocialAppInstall,
+  deleteQuarantinedSocialApp,
+  getSocialAppReviewPromptContext,
   installSocialAppRuntime,
   installWelcome,
   ipcMain,
@@ -1303,13 +1296,11 @@ const getMainProcessIpcDeps = () => ({
   normalizeClaudeEffort,
   normalizeCodexReasoningEffort,
   normalizeManifestAgentDefaults,
-  normalizeManifestAppSecrets,
   openInstalledApp,
   startLocalNetworkShare,
   stopLocalNetworkShare,
   startRemoteNetworkShare,
   stopRemoteNetworkShare,
-  stopRemoteNetworkShareSession,
   openOrFocusFriendChatWindow,
   path,
   publicForgerAccount,
@@ -1330,15 +1321,11 @@ const getMainProcessIpcDeps = () => ({
   sanitizeRendererChatTrace,
   sendEncryptedCloudMessage, sendEncryptedCloudAppShareMessage,
   serializeErrorForInstallLog,
-  formatProcessOutputForInstallLog,
-  isSecretsVaultUnavailableError,
   setAppAutoSyncSetting,
-  settings,
   shell,
   signAppFolderGrant,
   stopInstalledApp,
   switchForgerAccountSession,
-  testAppPrompt,
   toAppSummary,
   uninstallAppRuntime,
   upsertInstalledRecord,
@@ -1371,8 +1358,8 @@ const createWindowBootstrapDeps = () => ({
   isDev,
   loadDesktopWindow,
   path,
-  registerAgentIpcHandlers: (deps: unknown) => registerAgentIpcHandlers(deps as Parameters<typeof registerAgentIpcHandlers>[0]),
-  registerMainIpcHandlers: (deps: unknown) => registerMainIpcHandlers(deps as Parameters<typeof registerMainIpcHandlers>[0]),
+  registerAgentIpcHandlers,
+  registerMainIpcHandlers,
   registerWindowIpcHandlers,
   registerWindowStateEvents,
   state: windowBootstrapState,
@@ -1432,8 +1419,8 @@ registerMainLifecycle({
   finishSocialAppInstall, deleteQuarantinedSocialApp,
   emitAutomationUpdated, emitChatRunUpdated, ensureBackendPythonEnvironment, ensureCatalogStatuses, ensureGlobalAgentsContext,
   ensureGitAvailable, ensurePathInside, ensureRuntimeInstalled, ensureSqliteDatabaseParent, flushPendingDeepLink, fs, getAgentPathEntries, getBackupsRoot,
-  getClaudeAuthStatus, getAntigravityAuthStatus, getCloudDeviceAccountStorageKey, getCloudDevicePath, getCloudIdentityPath, getCloudIdentityStore, getSocialMessagesPath,
-  getCodexAuthStatus, getCodexHome, getCodexRoot, getCodexToolEnvironment, getDesktopChatNetworkAccessDefault: () => settings.defaultChatNetworkAccess !== false, getForgerAccountPath, getForgerHomeRoot, getForgerMetadataRoot,
+  getClaudeAuthStatus, getAntigravityAuthStatus, getCloudDeviceAccountStorageKey, getCloudDevicePath, getCloudIdentityPath, getCloudIdentityStore,
+  getCodexAuthStatus, getCodexHome, getCodexRoot, getCodexToolEnvironment, getDesktopChatNetworkAccessDefault: () => settings.defaultChatNetworkAccess !== false, getManifestAppSecretsValidationError, getSecretsStore, getForgerAccountPath, getForgerHomeRoot, getForgerMetadataRoot,
   getSocialAppReviewPromptContext,
   getFreePort, getLegacyForgerMetadataRoot, getMemoryStore, getPersonalAgentStore, getOfficialToolsService, getSpeechToTextService, getTextToSpeechService, getLiveVoiceInputService, getWakeWordService,
   getAudioDevices: async () => await getAudioRuntimeBroker().listDevices(),
@@ -1447,7 +1434,7 @@ registerMainLifecycle({
   getPrivateAppsRoot, getPrivateDataRoot, getRuntimesRoot,
   getRuntimePathEntries, getRuntimeStatus, getLocalNetworkShareStatus, getRemoteNetworkShareStatus, getTempRoot, getVenvExecutables,
   getPersonalAgentHeartbeat, handleCloudSocialEvent, hasInstalledCodexConversation, ipcMain, listAppPrompts, listCatalogFromBackend, loadAgentToolSettings,
-  loadCloudSyncSettings, loadRegistry, loadSettings, llmRunsStore, mapBackendCategory, openInstalledApp, recordRemoteCloudActivity, startLocalNetworkShare, stopLocalNetworkShare,
+  loadCloudSyncSettings, loadRegistry, loadSettings, llmRunsStore, mapBackendCategory, formatProcessOutputForInstallLog, isSecretsVaultUnavailableError, normalizeManifestAppSecrets, openInstalledApp, startLocalNetworkShare, stopLocalNetworkShare,
   startRemoteNetworkShare, stopRemoteNetworkShare, stopRemoteNetworkShareSession, startRemoteAgentSession, stopRemoteAgentSession, stopRemoteAgentSessionSession, openOrFocusAppWindow, registerForgerCloudOAuth,
   registerIpcHandlers, renderManifestAgentPrompt, resolveClaudeCli, resolveAntigravityCliPath, resolveCodexCliPath, resolveInstalledAgents, resolveInstalledManifest,
   resolveAppFolderGrant: verifyAppFolderGrant, resolveInstalledPromptTemplates, restoreAppPrompt, restartInstalledApp, runningApps, serializeErrorForInstallLog, shell,

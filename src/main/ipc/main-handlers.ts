@@ -82,6 +82,7 @@ import type {
   DesktopErrorReportPreview,
   ConversationDiagnosticReportPreview,
   DisconnectAppSecretInput,
+  FailureDiagnosticFields,
   ForgerAccountLoginInput,
   ForgerAccountProfileInput,
   ForgerAccountRegisterInput,
@@ -89,7 +90,6 @@ import type {
   FriendChatWindowOpenResult,
   GetAppToolsInstallGateOptions,
   InstallAppResult,
-  InstallWelcomeResult,
   LlmRunsSnapshot,
   MemoryCreateInput,
   MemoryListInput,
@@ -169,7 +169,7 @@ interface MainIpcState {
   settings: Settings;
 }
 
-interface MainProcessIpcDeps {
+export interface MainProcessIpcDeps {
   state: MainIpcState;
   APP_CLAUDE_MODEL_OPTIONS: unknown[];
   APP_CODEX_MODEL_OPTIONS: unknown[];
@@ -207,7 +207,7 @@ interface MainProcessIpcDeps {
   dialog: typeof Electron.dialog;
   disconnectCodexAuth: () => Promise<unknown>;
   ensureCatalogStatuses: () => void;
-  failureDiagnostic: (error: unknown, fallbackCode: string) => Record<string, unknown>;
+  failureDiagnostic: (error: unknown, fallbackCode: string) => FailureDiagnosticFields;
   forgerBackendClient: ForgerBackendClient | null;
   forwardCloudSocialEvent: (event: CloudSocialEvent) => void;
   fs: typeof fs;
@@ -241,13 +241,13 @@ interface MainProcessIpcDeps {
   };
   getLiveVoiceInputService: () => {
     getState: () => Promise<unknown>;
-    updateConfig: (input: unknown) => Promise<unknown>;
-    updateDevices: (input: unknown) => Promise<unknown>;
-    createSession: (input: unknown) => Promise<unknown>;
-    stop: (input?: unknown) => Promise<unknown>;
-    recordWakeDetected: (input: unknown) => Promise<unknown>;
-    recordWakeReady: (input: unknown) => Promise<unknown>;
-    recordWakeUnavailable: (input: unknown) => Promise<unknown>;
+    updateConfig: (input: any) => Promise<unknown>;
+    updateDevices: (input: any) => Promise<unknown>;
+    createSession: (input: any) => Promise<unknown>;
+    stop: (input?: any) => Promise<unknown>;
+    recordWakeDetected: (input: any) => Promise<unknown>;
+    recordWakeReady: (input: any) => Promise<unknown>;
+    recordWakeUnavailable: (input: any) => Promise<unknown>;
   };
   getWakeWordService: () => {
     getState: () => Promise<unknown>;
@@ -259,7 +259,7 @@ interface MainProcessIpcDeps {
     recordReady: (input: Partial<WakeWordRuntime>) => Promise<unknown>;
     recordUnavailable: (input: Partial<WakeWordRuntime>) => Promise<unknown>;
     recordDetected: (input: { deviceId?: string; modelId?: string; confidence?: number }) => Promise<unknown>;
-    recordDiagnostic: (input: unknown) => Promise<unknown>;
+    recordDiagnostic: (input: any) => Promise<unknown>;
   };
   getTextToSpeechService: () => {
     getState: () => Promise<unknown>;
@@ -281,10 +281,10 @@ interface MainProcessIpcDeps {
   prepareSocialAppReview: (input: PrepareSocialAppReviewInput, locale?: string) => Promise<{ success: boolean; quarantine?: SocialAppQuarantineRecord; userMessage: string; technicalCode?: string }>;
   finishSocialAppInstall: (input: { quarantineId: string }, locale?: string) => Promise<InstallAppResult & { appId?: string }>;
   deleteQuarantinedSocialApp: (input: { quarantineId: string }, locale?: string) => Promise<{ success: boolean; userMessage: string; technicalCode?: string }>;
-  getSocialAppReviewPromptContext: (appId: string) => Promise<Record<string, unknown> | null>;
+  getSocialAppReviewPromptContext: (appId: string) => Promise<unknown | null>;
   installSocialAppRuntime: (input: { appId?: number; appSlug?: string; shareCode?: string; trustDecision?: 'not_reviewed' | 'reviewed' | 'skipped_review' }, locale?: string) => Promise<InstallAppResult & { appId?: string }>;
   createLocalAppFromSkeleton: (input: CreateLocalAppInput, locale?: string) => Promise<CreateLocalAppResult>;
-  installWelcome: (appId: string, userLanguage?: string) => Promise<InstallWelcomeResult>;
+  installWelcome: (appId: string, userLanguage?: string) => Promise<{ success: boolean; userMessage: string; welcome?: string; technicalCode?: string }>;
   ipcMain: IpcMain;
   listAppPrompts: (appId: string) => Promise<AppPromptReviewItem[]>;
   listCatalogFromBackend: () => Promise<CatalogApp[]>;
@@ -326,7 +326,7 @@ interface MainProcessIpcDeps {
   updateDeveloperMode: (input: UpdateDeveloperModeInput) => Promise<Settings>;
   updateAppDeveloperSettings: (input: UpdateAppDeveloperSettingsInput) => Promise<DeveloperPathState>;
   getDeveloperPathState: (appId?: string) => Promise<DeveloperPathState>;
-  updateAgentToolApproval: (input: UpdateAgentToolApprovalInput) => Promise<Settings>;
+  updateAgentToolApproval: (input: UpdateAgentToolApprovalInput) => Promise<AgentToolSettings>;
   updateAppPrompt: (input: AppPromptReviewInput) => Promise<AppPromptMutationResult>;
   updateAppRuntime: (appId: string, locale?: string) => Promise<InstallAppResult>;
   updateCodexDefaults: (input: UpdateCodexDefaultsInput) => Promise<Settings>;
@@ -1486,7 +1486,12 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
     ensurePathInside,
     fs,
     getPrivateDataRoot,
-    getSocialAppReviewPromptContext,
+    getSocialAppReviewPromptContext: async (appId: string) => {
+      const context = await getSocialAppReviewPromptContext(appId);
+      return context && typeof context === 'object' && !Array.isArray(context)
+        ? context as Record<string, unknown>
+        : null;
+    },
     installedAppPromptContext,
     ipcMain,
     path,

@@ -3,7 +3,9 @@ import type { App, BrowserWindow, IpcMain } from 'electron';
 import type path from 'node:path';
 
 import type { registerAgentIpcHandlers as registerAgentIpcHandlersFn } from '../ipc/agent-handlers';
+import type { AgentIpcDeps } from '../ipc/agent-handlers';
 import type { registerMainIpcHandlers as registerMainIpcHandlersFn } from '../ipc/main-handlers';
+import type { MainProcessIpcDeps } from '../ipc/main-handlers';
 import {
   extractDeepLinkFromArgv,
   parseForgerUrl,
@@ -26,7 +28,7 @@ interface WindowBootstrapDeps {
   app: App;
   desktopErrorReporter: DesktopErrorReporter | null;
   focusDeepLinkWindow: (window: BrowserWindow | null) => void;
-  getMainProcessIpcDeps: () => unknown;
+  getMainProcessIpcDeps: () => MainProcessIpcDeps & AgentIpcDeps;
   getMainWindow: () => BrowserWindow | null;
   getWindowState: (window: BrowserWindow) => WindowControlState;
   ipcMain: IpcMain;
@@ -80,8 +82,8 @@ const createWindow = async (): Promise<void> => {
 
 const registerIpcHandlers = (): void => {
   const deps = getMainProcessIpcDeps();
-  registerMainIpcHandlers(deps as Parameters<typeof registerMainIpcHandlersFn>[0]);
-  registerAgentIpcHandlers(deps as Parameters<typeof registerAgentIpcHandlersFn>[0]);
+  registerMainIpcHandlers(deps);
+  registerAgentIpcHandlers(deps);
 
   registerWindowIpcHandlers({
     ipcMain,

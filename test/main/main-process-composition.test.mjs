@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import Module from 'node:module';
+import path from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import {
   clearDistModule,
@@ -16,6 +20,22 @@ const createDeferred = () => {
     reject = promiseReject;
   });
   return { promise, resolve, reject };
+};
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+const getRequiredMainLifecycleDepNames = () => {
+  const sourcePath = path.resolve(__dirname, '../../src/main/core/main-lifecycle.ts');
+  const source = fs.readFileSync(sourcePath, 'utf8');
+  const match = source.match(/export interface MainLifecycleDeps \{([\s\S]*?)\n\}/);
+  assert.ok(match, 'MainLifecycleDeps interface was not found');
+  return match[1]
+    .split('\n')
+    .map((line) => line.match(/^ {2}([A-Za-z_$][\w$]*)(\?)?:/)?.slice(1, 3))
+    .filter(Boolean)
+    .filter(([, optional]) => optional !== '?')
+    .map(([name]) => name)
+    .sort();
 };
 
 test('main-process composes lifecycle wiring with mocked Electron without launching a BrowserWindow', async () => {
@@ -88,4 +108,49 @@ test('main-process composes lifecycle wiring with mocked Electron without launch
   assert.doesNotThrow(() => beforeQuit());
   assert.doesNotThrow(() => windowAllClosed());
   assert.equal(app.quitCalls, process.platform === 'darwin' ? 0 : 1);
+});
+
+test('main-process passes every required lifecycle dependency into lifecycle wiring', async () => {
+  const app = createElectronAppMock();
+  let lifecycleDeps = null;
+
+  await withMockedElectron(
+    {
+      app,
+      BrowserWindow: class BrowserWindowDouble {},
+      dialog: {},
+      ipcMain: createIpcMainRecorder().ipcMain,
+      Notification: class NotificationDouble {},
+      shell: { openExternal: async () => undefined },
+    },
+    (require) => {
+      const originalLoad = Module._load;
+      Module._load = function loadWithLifecycleCapture(request, parent, isMain) {
+        if (request === './main-lifecycle') {
+          return {
+            registerMainLifecycle(deps) {
+              lifecycleDeps = deps;
+            },
+          };
+        }
+        return originalLoad.apply(this, [request, parent, isMain]);
+      };
+
+      try {
+        clearDistModule('main/core/main-process.js');
+        require('../../dist-electron/main/core/main-process.js');
+      } finally {
+        Module._load = originalLoad;
+      }
+    },
+  );
+
+  assert.ok(lifecycleDeps);
+  const requiredDepNames = getRequiredMainLifecycleDepNames();
+  const missingDepNames = requiredDepNames.filter((name) => !(name in lifecycleDeps));
+  assert.deepEqual(missingDepNames, []);
+
+  for (const name of requiredDepNames) {
+    assert.notEqual(lifecycleDeps[name], undefined, `main-process passed undefined for lifecycle dependency ${name}`);
+  }
 });

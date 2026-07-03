@@ -17,8 +17,6 @@ import type {
   AgentRuntimeRequest,
   AgentToolDefinition,
   AgentToolSettings,
-  AppToolGrantRequestPreview,
-  AppToolGrantRequestResult,
   AppCodexConversationEvent,
   AppCodexTaskEvent,
   AppSummary,
@@ -34,11 +32,8 @@ import type {
   CreateLocalAppInput,
   CreateLocalAppResult,
   RuntimeStatus,
-  SetAppToolGrantInput,
   AudioRuntimeDevices,
   CallOfficialToolInput,
-  CallOfficialToolResult,
-  OfficialToolSummary,
   PersonalAgent,
 } from '../../shared/types';
 import type {
@@ -54,9 +49,9 @@ import {
 } from './startup-loading';
 import { appAllowsAgentRuntimeControl, appAllowsAudioInput, appAllowsSpeechToText, appAllowsTextToSpeech, appAllowsWorkspaceFolders } from '../../shared/platform-capabilities';
 
-type ServiceConstructor<T> = new (...args: unknown[]) => T;
-type AsyncFn<T = unknown> = (...args: unknown[]) => Promise<T>;
-type SyncFn<T = unknown> = (...args: unknown[]) => T;
+type ServiceConstructor<T = unknown> = new (...args: any[]) => T;
+type AsyncFn<T = unknown> = (...args: any[]) => Promise<T>;
+type SyncFn<T = unknown> = (...args: any[]) => T;
 type ToolAccess = { appId: string; caller: string; locale?: string };
 type PermissionDecision = unknown;
 type PermissionRequest = unknown;
@@ -101,22 +96,7 @@ const isRemoteAgentSessionCloseEvent = (event: unknown): event is RemoteAgentSes
   );
 
 interface LifecycleService {
-  start: () => Promise<void> | void;
-  stop: () => Promise<void> | void;
-  dispose: () => void;
-  initialize: () => Promise<void>;
-  load: () => Promise<unknown>;
-  getSummary: () => Promise<unknown>;
-  getPublicRegistration: () => unknown;
-  requestPermission: (runId: string, request: PermissionRequest) => Promise<PermissionDecision | null>;
-  requestExternalPermission: (runId: string, request: PermissionRequest) => Promise<PermissionDecision | null>;
-  createSession: (runId: string, appId: string, options: ForgerMcpSessionOptions) => string | null;
-  releaseSession: (token: string) => void;
-  listenMcps: (appIds: string[], runId: string) => Promise<unknown[]>;
-  releaseMcps: (runId: string) => void;
-  appendExternalProgress: (runId: string, message: string) => void;
-  environmentForApp: (appId: string) => Record<string, string>;
-  publishAgentEvent: (event: ConversationEventLike) => void;
+  [key: string]: any;
 }
 
 interface MemoryMaintenanceService {
@@ -160,20 +140,7 @@ interface MainLifecycleState {
   mainWindow: BrowserWindow | null;
   memoryMaintenanceManager: MemoryMaintenanceService | null;
   memoryStore: LifecycleService | null;
-  officialToolsService: (LifecycleService & {
-    startActiveTools: () => Promise<void>;
-    stopActiveTools: () => Promise<void>;
-    listAgentActionIdsForApp: (appId: string) => Promise<string[]>;
-    previewOptionalAppToolGrant: (
-      input: Pick<SetAppToolGrantInput, 'appId' | 'toolId'>,
-      locale?: string,
-    ) => Promise<AppToolGrantRequestPreview>;
-    setOptionalAppToolGrant: (input: SetAppToolGrantInput, locale?: string) => Promise<AppToolGrantRequestResult>;
-    validateAgentCall: (input: unknown, access: { appId: string; requireAppGrant: boolean; locale?: string }) => Promise<unknown>;
-    callFromAgent: (input: unknown, access: { appId: string; requireAppGrant: boolean; locale?: string }) => Promise<unknown>;
-    listToolsForApp: (appId: string) => Promise<OfficialToolSummary[]>;
-    callFromApp: (appId: string, input: CallOfficialToolInput) => Promise<CallOfficialToolResult>;
-  }) | null;
+  officialToolsService: LifecycleService | null;
   speechToTextService: SpeechToTextServiceManager | null;
   textToSpeechService: TextToSpeechServiceManager | null;
   wakeWordService: WakeWordServiceManager | null;
@@ -183,7 +150,7 @@ interface MainLifecycleState {
   secretsStore: LifecycleService | null;
 }
 
-interface MainLifecycleDeps {
+export interface MainLifecycleDeps {
   AGENT_TOOL_DEFINITIONS: AgentToolDefinition[];
   AppAgentConversationManager: ServiceConstructor<LifecycleService>;
   AppAgentTaskManager: ServiceConstructor<LifecycleService>;
@@ -195,7 +162,7 @@ interface MainLifecycleDeps {
   CloudIdentityStore: ServiceConstructor<LifecycleService>;
   DesktopRuntimeBridge: ServiceConstructor<LifecycleService>;
   DevCatalogService: ServiceConstructor<LifecycleService>;
-  FORGER_AGENT_CONTRACT_VERSION: string;
+  FORGER_AGENT_CONTRACT_VERSION: string | number;
   FileLibrary: ServiceConstructor<LifecycleService & { cleanupStagedFilesForChat: () => Promise<void> }>;
   ForgerAccountStore: ServiceConstructor<ServiceWithLoad<StoredForgerAccount>>;
   ForgerBackendClient: ServiceConstructor<LifecycleService>;
@@ -221,7 +188,7 @@ interface MainLifecycleDeps {
   deleteQuarantinedSocialApp: (input: { quarantineId: string }, locale?: string) => Promise<BasicActionResult>;
   createWindow: () => Promise<void>;
   emitAutomationUpdated: (payload: { automation: unknown; run?: unknown }) => void;
-  emitChatRunUpdated: (event: RunEventLike) => void;
+  emitChatRunUpdated: (event: any) => void;
   ensureBackendPythonEnvironment: AsyncFn<void>;
   ensureCatalogStatuses: () => void;
   ensureGlobalAgentsContext: (root: string) => Promise<void>;
@@ -256,7 +223,7 @@ interface MainLifecycleDeps {
   getForgerAccountPath: () => string;
   getForgerHomeRoot: () => string;
   getForgerMetadataRoot: () => string;
-  getSocialAppReviewPromptContext: (appId: string) => Promise<Record<string, unknown> | null>;
+  getSocialAppReviewPromptContext: (appId: string) => Promise<unknown | null>;
   getFreePort: () => Promise<number>;
   getLegacyForgerMetadataRoot: () => string;
   getMemoryStore: () => { list: AsyncFn; create: AsyncFn; update: AsyncFn; delete: AsyncFn };
@@ -343,7 +310,7 @@ interface MainLifecycleDeps {
   waitForHttpOk: AsyncFn<void>;
 }
 
-export const registerMainLifecycle = (deps: unknown) => {
+export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
   const {
     AGENT_TOOL_DEFINITIONS,
     AppAgentConversationManager,
@@ -487,7 +454,7 @@ export const registerMainLifecycle = (deps: unknown) => {
     updateAppRuntime,
     upsertInstalledRecord,
     waitForHttpOk,
-  } = deps as MainLifecycleDeps;
+  } = deps;
 
   const getClaudeAuthenticatedForForger = getClaudeConnectedForForger ?? (async () => {
     const status = await getClaudeAuthStatus();
@@ -972,7 +939,9 @@ export const registerMainLifecycle = (deps: unknown) => {
         return null;
       }
       const context = await getSocialAppReviewPromptContext(appId);
-      return typeof context?.appRoot === 'string' ? context.appRoot : null;
+      return context && typeof context === 'object' && typeof (context as { appRoot?: unknown }).appRoot === 'string'
+        ? (context as { appRoot: string }).appRoot
+        : null;
     },
     getCodexAuthenticated: async () => {
       const status = await getCodexAuthStatus();
