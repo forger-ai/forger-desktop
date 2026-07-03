@@ -22,6 +22,9 @@ const {
   normalizeAppToolDeclarations,
 } = require('../../dist-electron/main/official-tools-service.js');
 const {
+  __resetChromeExtensionToolForTests,
+} = require('../../dist-electron/main/tools/chrome-extension/index.js');
+const {
   AutomationManager,
   computeNextRunAt,
 } = require('../../dist-electron/main/automation-manager.js');
@@ -41,6 +44,10 @@ const {
 
 const wait = (ms) => new Promise((resolveWait) => {
   setTimeout(resolveWait, ms);
+});
+
+test.after(async () => {
+  await __resetChromeExtensionToolForTests();
 });
 
 const getFreePort = async () => await new Promise((resolve, reject) => {

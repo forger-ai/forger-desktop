@@ -43,6 +43,7 @@ export interface AgentRuntime {
   model: string;
   effort: AgentEffort;
   permissionMode?: AgentPermissionMode;
+  authProfileId?: string;
 }
 
 export interface AgentDefaults {

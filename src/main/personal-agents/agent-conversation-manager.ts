@@ -1,17 +1,15 @@
 import path from 'node:path';
 
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
-import type { AgentRuntime, AgentRuntimeRequest, ClaudeEffort, CodexReasoningEffort, PersonalAgent, PersonalAgentConversation, PersonalAgentConversationEvent, PersonalAgentConversationGetInput, PersonalAgentConversationStartInput, PersonalAgentMessageSendInput, PersonalAgentRun } from '../../shared/types';
-import { preparePersistentIsolatedCodexHome } from '../codex-run-isolation';
+import type { AgentRuntime, AgentRuntimeRequest, PersonalAgent, PersonalAgentConversation, PersonalAgentConversationEvent, PersonalAgentConversationGetInput, PersonalAgentConversationStartInput, PersonalAgentMessageSendInput, PersonalAgentRun } from '../../shared/types';
 import { existsDirectory, runCommandCapture } from '../app-agent/process';
 import type { LlmAppMcpServerConfig } from '../app-agent/types';
 import { appendRunLog, getRunLogPath, toProviderProgressMessages } from '../chat/progress-errors';
 import { buildPersonalAgentInitialWakePrompt } from '../prompt-builder/personal-agents';
 import type { AgentStore } from './agent-store';
 import { isTerminalRunStatus } from './agent-store';
-import { antigravityCliAdapter } from '../llm-provider/adapters/antigravity-cli-adapter';
-import { claudeCliAdapter } from '../llm-provider/adapters/claude-cli-adapter';
-import { codexCliAdapter } from '../llm-provider/adapters/codex-cli-adapter';
+import { createLlmProviderRunService } from '../llm-provider/run-service';
+import type { LlmProviderAuthProfileResolver } from '../llm-provider/types';
 
 interface PersonalAgentRunnerInput {
   agent: PersonalAgent;
@@ -29,6 +27,8 @@ interface AgentConversationManagerOptions {
   store: AgentStore;
   metadataRoot?: string;
   codexHome?: string;
+  providerProfilesRoot?: string;
+  resolveAuthProfile?: LlmProviderAuthProfileResolver;
   getAgentRuntime?: (requested?: AgentRuntimeRequest) => Promise<AgentRuntime>;
   getCodexCliPath?: () => Promise<string | null>;
   getClaudeCliPath?: () => Promise<string | null>;
@@ -47,8 +47,6 @@ interface AgentConversationManagerOptions {
   onConversationEvent?: (event: PersonalAgentConversationEvent) => void;
 }
 
-const DEFAULT_MODEL = 'gpt-5.2';
-const DEFAULT_REASONING: CodexReasoningEffort = 'medium';
 const PERSONAL_AGENT_RUN_TIMEOUT_MS = 600_000;
 const FIRST_MESSAGE_TITLE_WORDS = 8;
 
@@ -250,32 +248,6 @@ export class AgentConversationManager {
     if (!runtime) {
       throw new Error('personal_agent_runtime_unavailable');
     }
-    if (runtime.provider === 'antigravity') {
-      if (!(await (this.options.getAntigravityAuthenticated?.() ?? Promise.resolve(false)))) {
-        throw new Error('antigravity_auth_missing');
-      }
-    } else if (runtime.provider === 'claude') {
-      if (!(await (this.options.getClaudeAuthenticated?.() ?? Promise.resolve(false)))) {
-        throw new Error('claude_auth_missing');
-      }
-    } else if (!(await (this.options.getCodexAuthenticated?.() ?? Promise.resolve(false)))) {
-      throw new Error('codex_auth_missing');
-    }
-    if (runtime.provider === 'codex') {
-      await this.options.ensureGitAvailable?.();
-    }
-    const codexCliPath = runtime.provider === 'codex' ? await (this.options.getCodexCliPath?.() ?? Promise.resolve(null)) : null;
-    const claudeCliPath = runtime.provider === 'claude' ? await (this.options.getClaudeCliPath?.() ?? Promise.resolve(null)) : null;
-    const antigravityCliPath = runtime.provider === 'antigravity' ? await (this.options.getAntigravityCliPath?.() ?? Promise.resolve(null)) : null;
-    if (runtime.provider === 'codex' && !codexCliPath) {
-      throw new Error('codex_cli_missing');
-    }
-    if (runtime.provider === 'claude' && !claudeCliPath) {
-      throw new Error('claude_cli_missing');
-    }
-    if (runtime.provider === 'antigravity' && !antigravityCliPath) {
-      throw new Error('antigravity_cli_missing');
-    }
     if (!(await existsDirectory(input.workspaceRoot))) {
       throw new Error('personal_agent_workspace_missing');
     }
@@ -300,86 +272,58 @@ export class AgentConversationManager {
           : []),
         ...appMcpServers,
       ];
-      const codexHome = runtime.provider === 'codex'
-        ? await preparePersistentIsolatedCodexHome(
-          this.options.codexHome,
-          path.join(this.options.metadataRoot, 'personal-agent-codex-home', input.agent.id, input.conversation.id),
-          { trustedRoots: [input.workspaceRoot], networkAccess },
-        )
-        : '';
       const onOutput = (stream: 'stdout' | 'stderr' | 'meta', text: string): void => {
         void appendRunLog(runLogPath, stream, text);
         this.handleProviderOutput(input, runtime.provider, stream, text);
       };
-      const antigravityResult = runtime.provider === 'antigravity'
-        ? await antigravityCliAdapter.run({
-          runId: input.run.id,
-          cliPath: antigravityCliPath as string,
-          pathEntries: [path.dirname(antigravityCliPath as string), ...pathEntries],
-          environment,
-          mcpServers,
-          workingDir: input.workspaceRoot,
-          configWorkspaceRoot: input.workspaceRoot,
-          prompt: input.prompt,
-          model: runtime.model,
-          effort: runtime.effort,
-          conversationId: input.conversation.providerThreadId,
-          permissionMode: input.agent.permissionMode,
-          timeoutMs: PERSONAL_AGENT_RUN_TIMEOUT_MS,
-          timeoutMode: 'absolute',
-          onChild: (child) => {
-            this.activeChildren.set(input.run.id, child);
-          },
-          onOutput,
-          runCommandCapture,
-        })
-        : null;
-      const claudeResult = runtime.provider === 'claude'
-        ? await claudeCliAdapter.run({
-          cliPath: claudeCliPath as string,
-          pathEntries,
-          environment,
-          mcpServers,
-          workingDir: input.workspaceRoot,
-          prompt: input.prompt,
-          model: runtime.model,
-          effort: runtime.effort as ClaudeEffort,
-          permissionMode: input.agent.permissionMode,
-          timeoutMs: PERSONAL_AGENT_RUN_TIMEOUT_MS,
-          onChild: (child) => {
-            this.activeChildren.set(input.run.id, child);
-          },
-          onOutput,
-          runCommandCapture,
-        })
-        : null;
-      const codexResult = runtime.provider === 'codex'
-        ? await codexCliAdapter.runConversation({
-          cliPath: codexCliPath as string,
-          pathEntries,
-          environment,
-          mcpServers,
-          workingDir: input.workspaceRoot,
-          prompt: input.prompt,
-          model: runtime.model || DEFAULT_MODEL,
-          reasoningEffort: (runtime.effort as CodexReasoningEffort) || DEFAULT_REASONING,
-          permissionMode: input.agent.permissionMode,
-          networkAccess,
-          timeoutMs: PERSONAL_AGENT_RUN_TIMEOUT_MS,
-          codexHome,
-          threadId: input.conversation.providerThreadId,
-          onChild: (child) => {
-            this.activeChildren.set(input.run.id, child);
-          },
-          onOutput,
-          runCommandCapture,
-        })
-        : null;
-      const result = runtime.provider === 'antigravity'
-        ? { code: 0, stdout: antigravityResult?.stdout ?? '', stderr: antigravityResult?.stderr ?? '', assistantText: antigravityResult?.assistantText ?? '', threadId: antigravityResult?.conversationId ?? undefined }
-        : runtime.provider === 'claude'
-          ? { code: 0, stdout: claudeResult?.stdout ?? '', stderr: claudeResult?.stderr ?? '', assistantText: claudeResult?.assistantText ?? '', threadId: claudeResult?.threadId }
-          : { code: codexResult?.code ?? 1, stdout: codexResult?.stdout ?? '', stderr: codexResult?.stderr ?? '', assistantText: codexResult?.assistantText ?? '', threadId: codexResult?.threadId };
+      const providerRunService = createLlmProviderRunService({
+        codexHome: this.options.codexHome,
+        providerProfilesRoot: this.options.providerProfilesRoot,
+        resolveAuthProfile: this.options.resolveAuthProfile,
+        getCodexCliPath: this.options.getCodexCliPath,
+        getClaudeCliPath: this.options.getClaudeCliPath,
+        getAntigravityCliPath: this.options.getAntigravityCliPath,
+        getCodexAuthenticated: this.options.getCodexAuthenticated,
+        getClaudeAuthenticated: this.options.getClaudeAuthenticated,
+        getAntigravityAuthenticated: this.options.getAntigravityAuthenticated,
+        ensureGitAvailable: this.options.ensureGitAvailable,
+      });
+      const result = await providerRunService.run({
+        surface: 'personal_agent',
+        mode: 'conversation',
+        runtime,
+        runId: input.run.id,
+        pathEntries,
+        environment,
+        mcpServers,
+        workingDir: input.workspaceRoot,
+        configWorkspaceRoot: runtime.provider === 'antigravity' ? input.workspaceRoot : undefined,
+        prompt: input.prompt,
+        permissionMode: input.agent.permissionMode,
+        networkAccess,
+        timeoutMs: PERSONAL_AGENT_RUN_TIMEOUT_MS,
+        timeoutMode: 'absolute',
+        threadId: input.conversation.providerThreadId,
+        codexHomePlan: runtime.provider === 'codex'
+          ? {
+              type: 'persistent',
+              rootCodexHome: this.options.codexHome,
+              targetCodexHome: path.join(
+                this.options.metadataRoot,
+                'personal-agent-codex-home',
+                input.agent.id,
+                input.conversation.id,
+              ),
+              trustedRoots: [input.workspaceRoot],
+              networkAccess,
+            }
+          : { type: 'none' },
+        onChild: (child) => {
+          this.activeChildren.set(input.run.id, child);
+        },
+        onOutput,
+        runCommandCapture,
+      });
       this.activeChildren.delete(input.run.id);
       if (result.code !== 0) {
         throw new Error((result.stderr || result.stdout || `${runtime.provider}_personal_agent_exec_failed`).trim());

@@ -1009,7 +1009,7 @@ test('desktop runtime task endpoints gate and pass runtime control', async () =>
       method: 'POST',
       body: {
         templateId: 'recommend_budget',
-        runtime: { provider: 'codex', model: 'gpt-5.4', effort: 'medium' },
+        runtime: { provider: 'codex', model: 'gpt-5.4', effort: 'medium', authProfileId: 'profile-task' },
       },
     });
     assert.equal(deniedStart.response.status, 403);
@@ -1027,7 +1027,7 @@ test('desktop runtime task endpoints gate and pass runtime control', async () =>
       method: 'POST',
       body: {
         templateId: 'recommend_budget',
-        runtime: { provider: 'codex', model: 'gpt-5.4', effort: 'medium' },
+        runtime: { provider: 'codex', model: 'gpt-5.4', effort: 'medium', authProfileId: 'profile-task' },
       },
     });
     assert.equal(allowedStart.response.status, 200);
@@ -1035,6 +1035,7 @@ test('desktop runtime task endpoints gate and pass runtime control', async () =>
       provider: 'codex',
       model: 'gpt-5.4',
       effort: 'medium',
+      authProfileId: 'profile-task',
     });
   } finally {
     await allowed.stop();
@@ -1111,7 +1112,7 @@ test('desktop runtime bridge serves manifest-first conversation thread routes an
       body: {
         variables: { topic: 'June' },
         workspacePath: '/tmp/workspace',
-        runtime: { provider: 'claude', model: 'auto', effort: 'high' },
+        runtime: { provider: 'claude', model: 'auto', effort: 'high', authProfileId: 'profile-thread' },
       },
     });
     assert.equal(run.response.status, 200);
@@ -1120,18 +1121,20 @@ test('desktop runtime bridge serves manifest-first conversation thread routes an
     assert.equal(calls[2][2].provider, 'claude');
     assert.equal(calls[2][2].model, undefined);
     assert.equal(calls[2][2].effort, 'high');
+    assert.equal(calls[2][2].authProfileId, 'profile-thread');
 
     await request(harness.bridge, runPath, {
       method: 'POST',
       body: {
         variables: { topic: 'July' },
-        runtime: { provider: 'codex', model: 'gpt-5.3-codex', effort: 'default' },
+        runtime: { provider: 'codex', model: 'gpt-5.3-codex', effort: 'default', authProfileId: 'profile-resume' },
       },
     });
     assert.equal(calls[3][2].message, 'resume:July');
     assert.equal(calls[3][2].provider, 'codex');
     assert.equal(calls[3][2].model, 'gpt-5.3-codex');
     assert.equal(calls[3][2].effort, undefined);
+    assert.equal(calls[3][2].authProfileId, 'profile-resume');
 
     const invalidRuntime = await request(harness.bridge, runPath, {
       method: 'POST',
@@ -1145,12 +1148,13 @@ test('desktop runtime bridge serves manifest-first conversation thread routes an
 
     const steer = await request(harness.bridge, `/v1/apps/${APP_ID}/agent-threads/thread-1/runs/run-9/steer`, {
       method: 'POST',
-      body: { variables: { topic: 'steer' } },
+      body: { variables: { topic: 'steer' }, runtime: { provider: 'claude', model: 'sonnet', effort: 'medium', authProfileId: 'profile-steer' } },
     });
     assert.equal(steer.response.status, 200);
     assert.deepEqual(steer.payload, { accepted: true, mode: 'queued_for_next_run' });
     assert.equal(calls[4][0], 'steerRun');
     assert.equal(calls[4][4].message, 'steer:steer');
+    assert.equal(calls[4][4].authProfileId, 'profile-steer');
 
     const thread = await request(harness.bridge, `/v1/apps/${APP_ID}/agent-threads/thread-1`);
     assert.equal(thread.response.status, 200);

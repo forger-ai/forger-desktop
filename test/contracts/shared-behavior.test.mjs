@@ -226,16 +226,21 @@ test('agent runtime registry normalizes providers, defaults, fallbacks, and runt
   assert.equal(runtimeRegistry.normalizeClaudeEffort('max'), 'max');
   assert.equal(runtimeRegistry.normalizeRuntimeEffort('claude', 'bad', 'xhigh'), 'xhigh');
   assert.equal(runtimeRegistry.normalizeRuntimeEffort('codex', 'bad', 'xhigh'), 'xhigh');
-  assert.equal(runtimeRegistry.normalizeRuntimeEffort('claude', 'bad', 'not-a-claude-effort'), 'medium');
+  assert.equal(runtimeRegistry.normalizeRuntimeEffort('claude', 'bad', 'not-a-claude-effort'), 'high');
   assert.equal(runtimeRegistry.normalizeRuntimeEffort('codex', 'bad', 'not-a-codex-effort'), 'medium');
   assert.equal(runtimeRegistry.normalizeAgentProviderPreference('bad'), 'auto');
   assert.equal(runtimeRegistry.normalizeCodexReasoningEffort('bad'), 'medium');
-  assert.equal(runtimeRegistry.normalizeClaudeModel('bad'), 'claude-sonnet-4-6');
-  assert.equal(runtimeRegistry.normalizeClaudeEffort('bad'), 'medium');
+  assert.equal(runtimeRegistry.normalizeClaudeModel('bad'), 'claude-sonnet-5');
+  assert.equal(runtimeRegistry.normalizeClaudeEffort('bad'), 'high');
+  assert.equal(runtimeRegistry.isClaudeModel('claude-sonnet-5'), true);
+  assert.equal(runtimeRegistry.isClaudeModel('claude-fable-5'), true);
+  assert.equal(runtimeRegistry.isClaudeModel('fable'), true);
+  assert.equal(runtimeRegistry.getDefaultClaudeEffort('claude-sonnet-5'), 'high');
+  assert.equal(runtimeRegistry.getDefaultClaudeEffort('claude-fable-5'), 'max');
   assert.equal(runtimeRegistry.getDefaultCodexReasoningEffort('gpt-5.3-codex-spark'), 'high');
   assert.equal(runtimeRegistry.getDefaultClaudeEffort('opusplan'), 'high');
   assert.equal(runtimeRegistry.getDefaultCodexReasoningEffort('unknown-model'), 'medium');
-  assert.equal(runtimeRegistry.getDefaultClaudeEffort('unknown-model'), 'medium');
+  assert.equal(runtimeRegistry.getDefaultClaudeEffort('unknown-model'), 'high');
   assert.equal(runtimeRegistry.isAgentProvider('codex'), true);
   assert.equal(runtimeRegistry.isAgentProvider('bad'), false);
   assert.equal(runtimeRegistry.isAgentProviderPreference('auto'), true);
@@ -274,7 +279,7 @@ test('agent runtime registry normalizes providers, defaults, fallbacks, and runt
   assert.equal(runtimeRegistry.normalizeAgentProviderEffort(providerRegistry, 'claude', 'bad', 'max'), 'max');
   assert.equal(runtimeRegistry.normalizeAgentProviderEffort(providerRegistry, 'antigravity', 'bad', 'low'), 'low');
   assert.equal(runtimeRegistry.DEFAULT_AGENT_PROVIDER_RUNTIME_REGISTRY.codex.defaultModel, runtimeRegistry.DEFAULT_CODEX_MODEL);
-  assert.equal(runtimeRegistry.getAgentModelOptions('claude')[0].realModelName, 'claude-opus-4-8');
+  assert.equal(runtimeRegistry.getAgentModelOptions('claude')[0].realModelName, 'claude-sonnet-5');
   assert.equal(runtimeRegistry.getDefaultClaudeEffort('claude-opus-4-8'), 'high');
   assert.equal(runtimeRegistry.getAgentModelOptions('codex')[0].realModelName, 'gpt-5.5');
   assert.deepEqual(runtimeRegistry.normalizeAntigravityModelAndEffort('gemini-3.5-flash-medium', undefined), {
@@ -367,7 +372,7 @@ test('agent runtime registry normalizes providers, defaults, fallbacks, and runt
   }), {
     provider: 'claude',
     model: 'haiku',
-    effort: 'medium',
+    effort: 'high',
     permissionMode: 'safe',
   });
   assert.deepEqual(runtimeRegistry.resolveAgentRuntime({ provider: 'codex', model: 'bad', effort: 'bad' }, {
@@ -438,14 +443,14 @@ test('agent runtime registry normalizes providers, defaults, fallbacks, and runt
     antigravityAuthenticated: true,
   }), [
     { label: 'Auto', value: 'auto' },
-    { label: 'Google Antigravity', value: 'antigravity' },
+    { label: 'Google', value: 'antigravity' },
   ]);
   assert.deepEqual(runtimeRegistry.buildChatProviderOptions({
     codexAuthenticated: true,
     claudeAuthenticated: true,
   }), [
     { label: 'Auto', value: 'auto' },
-    { label: 'Codex', value: 'codex' },
+    { label: 'ChatGPT', value: 'codex' },
     { label: 'Claude', value: 'claude' },
   ]);
   assert.deepEqual(runtimeRegistry.buildChatProviderOptions(), []);
@@ -454,8 +459,8 @@ test('agent runtime registry normalizes providers, defaults, fallbacks, and runt
     lockedProvider: 'codex',
   }), [
     { label: 'Auto', value: 'auto' },
-    { label: 'Google Antigravity', value: 'antigravity' },
-    { label: 'Codex', value: 'codex' },
+    { label: 'Google', value: 'antigravity' },
+    { label: 'ChatGPT', value: 'codex' },
   ]);
   assert.equal(runtimeRegistry.resolveRuntimeSource(undefined, { provider: 'codex', model: 'gpt-5.5' }), 'override');
   assert.equal(runtimeRegistry.resolveRuntimeSource({ provider: 'claude', model: 'sonnet' }, undefined), 'manifest');

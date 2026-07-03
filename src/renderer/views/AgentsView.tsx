@@ -55,6 +55,7 @@ import { MarkdownMessage } from './chat/MarkdownMessage';
 interface AgentsViewProps {
   t: AppDictionary;
   intelligenceProviderConfigured: boolean;
+  providerOptions?: Array<{ label: string; value: AgentProvider | 'auto' }>;
 }
 
 interface WorkspaceTreeProps {
@@ -179,7 +180,7 @@ const defaultRuntimeForProvider = (provider: AgentProvider): AgentRuntime => {
   if (provider === 'claude') {
     return {
       provider,
-      model: CLAUDE_MODEL_OPTIONS[0]?.realModelName ?? 'claude-sonnet-4-6',
+      model: CLAUDE_MODEL_OPTIONS[0]?.realModelName ?? 'claude-sonnet-5',
       effort: CLAUDE_MODEL_OPTIONS[0]?.defaultEffort ?? 'medium',
     };
   }
@@ -213,7 +214,7 @@ const personalAgentSaveErrorMessage = (error: unknown, fallback: string, t: AppD
   return error instanceof Error ? error.message : fallback;
 };
 
-export function AgentsView({ t, intelligenceProviderConfigured }: AgentsViewProps) {
+export function AgentsView({ t, intelligenceProviderConfigured, providerOptions = AGENT_PROVIDER_OPTIONS }: AgentsViewProps) {
   const theme = useTheme();
   const [agents, setAgents] = useState<PersonalAgent[]>([]);
   const [activeAgentId, setActiveAgentId] = useState<string | null>(null);
@@ -551,7 +552,7 @@ export function AgentsView({ t, intelligenceProviderConfigured }: AgentsViewProp
 
   const renderAccessChips = (agent: PersonalAgent) => (
     <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
-      <Chip size="small" label={`${AGENT_PROVIDER_OPTIONS.find((option) => option.value === (agent.runtime?.provider ?? 'codex'))?.label ?? agent.runtime?.provider ?? 'Codex'} · ${agent.runtime?.model ?? CODEX_MODEL_OPTIONS[0]?.displayModelName ?? 'gpt-5.2'}`} />
+      <Chip size="small" label={`${providerOptions.find((option) => option.value === (agent.runtime?.provider ?? 'codex'))?.label ?? agent.runtime?.provider ?? 'Codex'} · ${agent.runtime?.model ?? CODEX_MODEL_OPTIONS[0]?.displayModelName ?? 'gpt-5.2'}`} />
       <Chip size="small" label={agent.permissionMode === 'unsafe' ? t.agents.expandedPermission : t.agents.standardPermission} />
       <Chip size="small" label={agent.networkAccess ? t.agents.internetOn : t.agents.internetOff} />
       <Chip size="small" label={agent.appIds.length > 0 ? t.agents.appsCount(agent.appIds.length) : t.agents.noAppsAccess} />
@@ -654,7 +655,7 @@ export function AgentsView({ t, intelligenceProviderConfigured }: AgentsViewProp
                 }));
               }}
             >
-              {AGENT_PROVIDER_OPTIONS.filter((option) => option.value !== 'auto').map((option) => (
+              {providerOptions.filter((option) => option.value !== 'auto').map((option) => (
                 <MenuItem key={option.value} value={option.value}>{option.label}</MenuItem>
               ))}
             </Select>

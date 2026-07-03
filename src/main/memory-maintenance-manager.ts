@@ -5,10 +5,13 @@ import {
   runAgentCommand,
   type LlmAutomationMcpServerConfig,
 } from './automation/agent-command-runner';
+import type { LlmProviderAuthProfileResolver } from './llm-provider/types';
 
 interface MemoryMaintenanceManagerOptions {
   forgerHomeRoot: string;
   codexHome: string;
+  providerProfilesRoot?: string;
+  resolveAuthProfile?: LlmProviderAuthProfileResolver;
   getAgentRuntime: (requested?: AgentRuntimeRequest) => Promise<AgentRuntime>;
   getCodexAuthenticated: () => Promise<boolean>;
   getCodexCliPath: () => Promise<string | null>;
@@ -86,6 +89,8 @@ export class MemoryMaintenanceManager {
         runtime,
         cwd: this.options.forgerHomeRoot,
         codexHome: this.options.codexHome,
+        providerProfilesRoot: this.options.providerProfilesRoot,
+        resolveAuthProfile: this.options.resolveAuthProfile,
         prompt,
         transcriptPath: path.join(this.options.codexHome, 'memory-maintenance', `${runId}.log`),
         mcpServers,
