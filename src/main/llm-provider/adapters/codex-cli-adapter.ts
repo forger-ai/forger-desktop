@@ -17,6 +17,7 @@ import type {
   LlmRunCommandCapture,
   LlmRunOutputStream,
   LlmRunResult,
+  LlmTokenUsage,
 } from '../types';
 
 const CODEX_ATTEMPT_INACTIVITY_TIMEOUT_MS = 30 * 60 * 1000;
@@ -35,13 +36,7 @@ export interface CodexParsedOutput {
   toolEvents: number;
 }
 
-export interface LlmTokenUsage {
-  inputTokens: number;
-  cachedInputTokens: number;
-  outputTokens: number;
-  reasoningOutputTokens: number;
-  turns: number;
-}
+export type { LlmTokenUsage };
 
 type CodexCommandResult = LlmCommandResult & { code: number };
 

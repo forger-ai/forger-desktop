@@ -16,11 +16,13 @@ test('chat composer keeps per-conversation drafts and stays editable while a run
   assert.match(controllerSource, /setChatDraft\(targetConversationId as string,\s*''\)/);
   assert.match(viewSource, /contentEditable=\{intelligenceProviderConfigured\}/);
   assert.doesNotMatch(viewSource, /codexConfigured/);
+  assert.doesNotMatch(viewSource, /CodexUsageTooltipContent/);
+  assert.doesNotMatch(viewSource, /onOpenCodexUsageDashboard/);
+  assert.doesNotMatch(viewSource, /DonutLargeRounded/);
   assert.match(viewSource, /inputProviderMissingPlaceholder/);
   assert.match(viewSource, /inputProviderMissingTitle/);
   assert.match(viewSource, /inputProviderMissingAction/);
   assert.match(viewSource, /onConfigureIntelligenceProvider/);
-  assert.match(viewSource, /quotaCodexRequired/);
   assert.match(viewSource, /!isSending\s*&&\s*canSendCurrentMode\s*&&\s*\(serializeComposerText\(\)\.trim\(\)/);
 });
 
@@ -31,9 +33,7 @@ test('chat readiness is based on any configured intelligence provider', async ()
   const enSectionsSource = await readSource('src/renderer/i18n/locales/enSections.ts');
 
   assert.match(controllerSource, /const intelligenceProviderConfigured = codexAuthStatus\.authenticated \|\| claudeAuthStatus\.authenticated/);
-  assert.match(controllerSource, /const codexProviderConfigured = codexAuthStatus\.authenticated/);
   assert.match(controllerSource, /intelligenceProviderConfigured=\{intelligenceProviderConfigured\}/);
-  assert.match(controllerSource, /codexProviderConfigured=\{codexProviderConfigured\}/);
   assert.match(panelSource, /intelligenceProviderMissingBody/);
   assert.match(panelSource, /configureIntelligenceProvider/);
   assert.match(panelSource, /agentThinking/);
@@ -45,6 +45,32 @@ test('chat readiness is based on any configured intelligence provider', async ()
   assert.match(esSectionsSource, /Conectar proveedor/);
   assert.match(enSectionsSource, /Connect ChatGPT\/Codex or Claude to chat with Forger/);
   assert.match(enSectionsSource, /Connect provider/);
+});
+
+test('provider usage lives in the sidebar as a compact meter with a floating popover', async () => {
+  const sidebarSource = await readSource('src/renderer/components/Sidebar.tsx');
+  const enSource = await readSource('src/renderer/i18n/en.ts');
+  const esSource = await readSource('src/renderer/i18n/es.ts');
+
+  assert.match(sidebarSource, /SidebarUsageMenu/);
+  assert.match(sidebarSource, /getAgentProviderUsage/);
+  assert.match(sidebarSource, /providerUsage\.title/);
+  assert.match(sidebarSource, /<Popover/);
+  assert.doesNotMatch(sidebarSource, /<Collapse in=\{open\}/);
+  assert.match(sidebarSource, /USAGE_REFRESH_INTERVAL_MS/);
+  assert.match(sidebarSource, /worstRemainingPercent/);
+  assert.match(sidebarSource, /<LinearProgress/);
+  assert.doesNotMatch(sidebarSource, /RefreshRounded/);
+  assert.doesNotMatch(sidebarSource, /IconButton/);
+  assert.doesNotMatch(sidebarSource, /unavailableLabel/);
+  assert.doesNotMatch(sidebarSource, /ChatGPT \/ Codex/);
+  assert.doesNotMatch(sidebarSource, /Claude Code/);
+  assert.doesNotMatch(sidebarSource, /Google Antigravity/);
+  assert.match(sidebarSource, /<SidebarUsageMenu t=\{t\} \/>[\s\S]{0,700}onNavigate\('more'\)[\s\S]{0,900}currentView === 'settings'/);
+  assert.match(enSource, /navLabel:\s*'Usage remaining'/);
+  assert.match(enSource, /title:\s*'Usage remaining'/);
+  assert.match(esSource, /navLabel:\s*'Uso restante'/);
+  assert.match(esSource, /title:\s*'Uso restante'/);
 });
 
 test('question actions replace the composer and answer through the chat start-run path with an envelope prompt', async () => {

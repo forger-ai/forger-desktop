@@ -6,16 +6,24 @@ import test from 'node:test';
 const repoRoot = new URL('../..', import.meta.url);
 const readSource = (path) => readFile(join(repoRoot.pathname, path), 'utf8');
 
-test('catalog network share actions are not gated by early access', async () => {
+test('catalog actions and visibility are not gated by early access', async () => {
   const source = await readSource('src/renderer/views/CatalogView.tsx');
+  const controllerSource = await readSource('src/renderer/app/RendererAppController.tsx');
+  const settingsSource = await readSource('src/renderer/views/SettingsView.tsx');
 
   assert.match(source, /const canShareLocalNetwork = primaryAction === 'open'[\s\S]*app\.localNetworkShareSupported === true;/);
   assert.match(source, /const canShareRemoteNetwork = primaryAction === 'open'[\s\S]*app\.remoteTunnelSupported === true;/);
   assert.match(source, /const canStopRemoteNetwork = Boolean\(app\.remoteNetworkShare\?\.active\)/);
+  assert.match(source, /const catalogApps = apps;/);
+  assert.doesNotMatch(source, /earlyAccessEnabled/);
+  assert.doesNotMatch(source, /canInstallEarlyAccess/);
+  assert.doesNotMatch(source, /enableEarlyAccessAction/);
   assert.doesNotMatch(source, /const canShareLocalNetwork = earlyAccessEnabled/);
   assert.doesNotMatch(source, /const canShareRemoteNetwork = earlyAccessEnabled/);
   assert.doesNotMatch(source, /const canStopRemoteNetwork = earlyAccessEnabled/);
   assert.match(source, /betaLabel=\{isPrivateLocal \? t\.beta\.privateLocalBadge : isEarlyAccess \? t\.beta\.earlyAccessBadge : t\.beta\.appBadge\}/);
+  assert.doesNotMatch(controllerSource, /EARLY_ACCESS_STORAGE_KEY|earlyAccessEnabled|setEarlyAccessEnabled/);
+  assert.doesNotMatch(settingsSource, /earlyAccessEnabled|onEarlyAccessChange|earlyAccessToggle/);
 });
 
 test('installed Apps cards expose network and Social actions in the primary menu', async () => {

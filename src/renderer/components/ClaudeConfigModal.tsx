@@ -22,6 +22,7 @@ import { LlmProviderConnectModal } from './LlmProviderConnectModal';
 interface ClaudeConfigModalProps {
   open: boolean;
   status: ClaudeAuthStatus;
+  forgerConnected: boolean;
   busy: boolean;
   t: AppDictionary;
   onClose: () => void;
@@ -36,6 +37,7 @@ interface ClaudeConfigModalProps {
 export function ClaudeConfigModal({
   open,
   status,
+  forgerConnected,
   busy,
   t,
   onClose,
@@ -57,14 +59,14 @@ export function ClaudeConfigModal({
       ? t.settings.claudeConnectionMissingSession
       : t.settings.claudeConnectionInstallAvailable;
 
-  if (!status.authenticated) {
+  if (!forgerConnected) {
     return (
       <LlmProviderConnectModal
         open={open}
         provider="claude"
         providerName={t.llmProviderConnect.providers.claude.name}
         providerOwner={t.llmProviderConnect.providers.claude.owner}
-        authenticated={status.authenticated}
+        authenticated={false}
         installed={status.installed}
         busy={busy}
         title={t.llmProviderConnect.providers.claude.title}
@@ -76,8 +78,6 @@ export function ClaudeConfigModal({
         t={t}
         onClose={onClose}
         onConnect={onConnect}
-        onRefresh={onRefresh}
-        onReinstall={onReinstall}
         onOpenExternalUrl={onOpenExternalUrl}
       />
     );
@@ -89,7 +89,7 @@ export function ClaudeConfigModal({
       <DialogContent>
         <Stack spacing={2}>
           <Stack direction="row" spacing={1} alignItems="center">
-            <Chip color={status.authenticated ? 'success' : 'default'} label={status.authenticated ? 'Conectado' : 'No conectado'} />
+            <Chip color={forgerConnected ? 'success' : 'default'} label={forgerConnected ? t.llmProviderConnect.connected : t.llmProviderConnect.notConnected} />
             <Chip variant="outlined" label={sourceLabel} />
           </Stack>
           {status.authenticated ? (

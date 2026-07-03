@@ -208,6 +208,7 @@ export interface ChatStartRunInput {
   sharedFiles?: SharedFileRef[];
   provider?: AgentProvider;
   model?: string;
+  authProfileId?: string;
   reasoningEffort?: CodexReasoningEffort;
   effort?: AgentEffort;
   dangerMode?: boolean;

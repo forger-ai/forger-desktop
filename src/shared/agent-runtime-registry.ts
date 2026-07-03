@@ -32,8 +32,8 @@ export interface NormalizeAgentRuntimeFallback extends LegacyCodexRuntimeInput {
 
 export const DEFAULT_CODEX_MODEL = 'gpt-5.2';
 export const DEFAULT_CODEX_REASONING_EFFORT: CodexReasoningEffort = 'medium';
-export const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-4-6';
-export const DEFAULT_CLAUDE_EFFORT: ClaudeEffort = 'medium';
+export const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-5';
+export const DEFAULT_CLAUDE_EFFORT: ClaudeEffort = 'high';
 export const DEFAULT_ANTIGRAVITY_MODEL = 'gemini-3.5-flash';
 export const DEFAULT_ANTIGRAVITY_EFFORT: AntigravityEffort = 'medium';
 export const DEFAULT_AGENT_PROVIDER: AgentProviderPreference = 'auto';
@@ -57,6 +57,8 @@ export const CODEX_REASONING_OPTIONS: Array<{ label: string; value: CodexReasoni
 ];
 
 export const CLAUDE_MODEL_OPTIONS: ClaudeModelOption[] = [
+  { displayModelName: 'Sonnet 5', realModelName: 'claude-sonnet-5', defaultEffort: 'high' },
+  { displayModelName: 'Fable 5', realModelName: 'claude-fable-5', defaultEffort: 'max' },
   { displayModelName: 'Opus 4.8', realModelName: 'claude-opus-4-8', defaultEffort: 'high' },
   { displayModelName: 'Opus 4.7', realModelName: 'claude-opus-4-7', defaultEffort: 'xhigh' },
   { displayModelName: 'Opus 4.6', realModelName: 'claude-opus-4-6', defaultEffort: 'high' },
@@ -69,6 +71,7 @@ export const CLAUDE_MODEL_OPTIONS: ClaudeModelOption[] = [
 const CLAUDE_LEGACY_MODEL_OPTIONS: ClaudeModelOption[] = [
   { displayModelName: 'Default', realModelName: 'default', defaultEffort: 'medium' },
   { displayModelName: 'Best', realModelName: 'best', defaultEffort: 'high' },
+  { displayModelName: 'Fable', realModelName: 'fable', defaultEffort: 'max' },
   { displayModelName: 'Sonnet', realModelName: 'sonnet', defaultEffort: 'medium' },
   { displayModelName: 'Opus', realModelName: 'opus', defaultEffort: 'high' },
   { displayModelName: 'Haiku', realModelName: 'haiku', defaultEffort: 'low' },
@@ -139,9 +142,9 @@ export const ANTIGRAVITY_EFFORT_OPTIONS: Array<{ label: string; value: Antigravi
 
 export const AGENT_PROVIDER_OPTIONS: Array<{ label: string; value: AgentProviderPreference }> = [
   { label: 'Auto', value: 'auto' },
-  { label: 'Codex', value: 'codex' },
+  { label: 'ChatGPT', value: 'codex' },
   { label: 'Claude', value: 'claude' },
-  { label: 'Google Antigravity', value: 'antigravity' },
+  { label: 'Google', value: 'antigravity' },
 ];
 
 const PROVIDER_OPTION_BY_VALUE = new Map(AGENT_PROVIDER_OPTIONS.map((option) => [option.value, option]));
@@ -555,6 +558,7 @@ export const normalizeAgentRuntime = (
   }
   const rawPermissionMode = record?.permissionMode ?? fallback?.permissionMode;
   const permissionMode = isAgentPermissionMode(rawPermissionMode) ? rawPermissionMode : undefined;
+  const authProfileId = normalizeString(record?.authProfileId);
   if (provider === 'claude') {
     const normalizedModel = normalizeClaudeModel(model, model);
     return {
@@ -562,6 +566,7 @@ export const normalizeAgentRuntime = (
       model: normalizedModel,
       effort: normalizeClaudeEffort(record?.effort ?? fallback?.effort ?? fallback?.reasoningEffort, getDefaultClaudeEffort(normalizedModel)),
       ...(permissionMode ? { permissionMode } : {}),
+      ...(authProfileId ? { authProfileId } : {}),
     };
   }
   if (provider === 'antigravity') {
@@ -575,6 +580,7 @@ export const normalizeAgentRuntime = (
       model: normalized.model,
       effort: normalized.effort,
       ...(permissionMode ? { permissionMode } : {}),
+      ...(authProfileId ? { authProfileId } : {}),
     };
   }
   const normalizedModel = normalizeCodexModel(model, model);
@@ -583,6 +589,7 @@ export const normalizeAgentRuntime = (
     model: normalizedModel,
     effort: normalizeCodexReasoningEffort(record?.effort ?? fallback?.effort ?? fallback?.reasoningEffort, getDefaultCodexReasoningEffort(normalizedModel)),
     ...(permissionMode ? { permissionMode } : {}),
+    ...(authProfileId ? { authProfileId } : {}),
   };
 };
 
@@ -598,6 +605,7 @@ export const resolveAgentRuntime = (
       model: normalizeClaudeModel(normalized.model, defaults.claude.model),
       effort: normalizeClaudeEffort(normalized.effort, defaults.claude.effort),
       permissionMode: normalizeAgentPermissionMode(normalized.permissionMode),
+      ...(normalized.authProfileId ? { authProfileId: normalized.authProfileId } : {}),
     };
   }
   if (normalized?.provider === 'codex') {
@@ -606,6 +614,7 @@ export const resolveAgentRuntime = (
       model: normalizeCodexModel(normalized.model, defaults.codex.model),
       effort: normalizeCodexReasoningEffort(normalized.effort, defaults.codex.reasoningEffort),
       permissionMode: normalizeAgentPermissionMode(normalized.permissionMode),
+      ...(normalized.authProfileId ? { authProfileId: normalized.authProfileId } : {}),
     };
   }
   if (normalized?.provider === 'antigravity') {
@@ -620,6 +629,7 @@ export const resolveAgentRuntime = (
       model: antigravity.model,
       effort: antigravity.effort,
       permissionMode: normalizeAgentPermissionMode(normalized.permissionMode),
+      ...(normalized.authProfileId ? { authProfileId: normalized.authProfileId } : {}),
     };
   }
   return {
@@ -714,7 +724,8 @@ export const agentRuntimeEquals = (left?: AgentRuntime | null, right?: AgentRunt
     && left.provider === right.provider
     && left.model === right.model
     && left.effort === right.effort
-    && normalizeAgentPermissionMode(left.permissionMode) === normalizeAgentPermissionMode(right.permissionMode),
+    && normalizeAgentPermissionMode(left.permissionMode) === normalizeAgentPermissionMode(right.permissionMode)
+    && (left.authProfileId ?? '') === (right.authProfileId ?? ''),
   );
 
 export const resolveRuntimeSource = (manifestRuntime: unknown, overrideRuntime: unknown): AgentRuntimeSource => {

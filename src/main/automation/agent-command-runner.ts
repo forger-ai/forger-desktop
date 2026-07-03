@@ -1,16 +1,10 @@
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import type { AgentRuntime, ClaudeEffort } from '../../shared/types';
-import {
-  createIsolatedCodexHome,
-  removeIsolatedCodexHome,
-} from '../codex-run-isolation';
+import type { AgentRuntime } from '../../shared/types';
 import { spawnProcess } from '../runtime/process-spawn';
-import { antigravityCliAdapter } from '../llm-provider/adapters/antigravity-cli-adapter';
-import type { LlmCommandResult, LlmMcpServerConfig } from '../llm-provider/types';
-import { claudeCliAdapter } from '../llm-provider/adapters/claude-cli-adapter';
-import { codexCliAdapter } from '../llm-provider/adapters/codex-cli-adapter';
+import { createLlmProviderRunService } from '../llm-provider/run-service';
+import type { LlmCommandResult, LlmMcpServerConfig, LlmProviderAuthProfileResolver } from '../llm-provider/types';
 
 const AUTOMATION_TIMEOUT_MS = 300_000;
 
@@ -117,7 +111,7 @@ export const resolveCodexCommand = async (
   codexCliPath: string,
   pathEntries: string[],
 ): Promise<{ command: string; prefixArgs: string[]; pathEntries: string[] }> => {
-  return await codexCliAdapter.resolveCommand(codexCliPath, pathEntries);
+  return await createLlmProviderRunService().resolveCommand('codex', codexCliPath, pathEntries);
 };
 
 export const runAgentCommand = async (
@@ -126,6 +120,8 @@ export const runAgentCommand = async (
     runtime: AgentRuntime;
     cwd: string;
     codexHome: string;
+    providerProfilesRoot?: string;
+    resolveAuthProfile?: LlmProviderAuthProfileResolver;
     prompt: string;
     transcriptPath: string;
     mcpServers?: LlmAutomationMcpServerConfig[];
@@ -144,103 +140,68 @@ export const runAgentCommand = async (
     `${options.runtime.provider} ${providerCliPath}${options.runtime.provider === 'codex' ? ' exec' : ''} ${options.prompt}`,
   );
   let stdoutSoFar = '';
-  const isolatedCodexHome = options.runtime.provider === 'codex'
-    ? await createIsolatedCodexHome(options.codexHome, {
-        prefix: 'forger-automation-codex-home',
-        trustedRoots: [options.cwd],
-        networkAccess: options.networkAccess === true,
-      })
-    : '';
-  try {
-    const appendOutput = (stream: 'stdout' | 'stderr' | 'meta', text: string): void => {
-      void appendTranscript(options.transcriptPath, stream, text);
-    };
-    const antigravityResult = options.runtime.provider === 'antigravity'
-      ? await antigravityCliAdapter.run({
-          cliPath: providerCliPath,
-          pathEntries: [path.dirname(providerCliPath), ...providerCommand.pathEntries],
-          environment: {},
-          mcpServers,
-          workingDir: options.cwd,
-          configWorkspaceRoot: options.cwd,
-          prompt: options.prompt,
-          model: options.runtime.model,
-          effort: options.runtime.effort,
-          permissionMode: options.runtime.permissionMode ?? 'safe',
-          timeoutMs: AUTOMATION_TIMEOUT_MS,
-          timeoutMode: 'absolute',
-          onOutput: (stream, text) => {
-            if (stream === 'stdout') {
-              stdoutSoFar += text;
-              options.onAssistantMessages?.([stdoutSoFar.trim()].filter(Boolean));
-            }
-            appendOutput(stream, text);
-          },
-          runCommandCapture,
-        })
-      : null;
-    const claudeResult = options.runtime.provider === 'claude'
-      ? await claudeCliAdapter.run({
-          cliPath: providerCliPath,
+  const appendOutput = (stream: 'stdout' | 'stderr' | 'meta', text: string): void => {
+    void appendTranscript(options.transcriptPath, stream, text);
+  };
+  const providerRunService = createLlmProviderRunService({
+    codexHome: options.codexHome,
+    providerProfilesRoot: options.providerProfilesRoot,
+    resolveAuthProfile: options.resolveAuthProfile,
+  });
+  const result = await providerRunService.run({
+    surface: 'automation',
+    mode: 'automation',
+    runtime: options.runtime,
+    cliPath: providerCliPath,
+    pathEntries: options.runtime.provider === 'antigravity'
+      ? [path.dirname(providerCliPath), ...providerCommand.pathEntries]
+      : providerCommand.pathEntries,
+    environment: {},
+    mcpServers,
+    workingDir: options.cwd,
+    configWorkspaceRoot: options.runtime.provider === 'antigravity' ? options.cwd : undefined,
+    prompt: options.prompt,
+    permissionMode: options.runtime.permissionMode ?? 'safe',
+    networkAccess: options.networkAccess,
+    timeoutMs: AUTOMATION_TIMEOUT_MS,
+    timeoutMode: 'absolute',
+    codexHomePlan: options.runtime.provider === 'codex'
+      ? {
+          type: 'temporary',
+          rootCodexHome: options.codexHome,
+          prefix: 'forger-automation-codex-home',
+          trustedRoots: [options.cwd],
+          networkAccess: options.networkAccess === true,
+        }
+      : { type: 'none' },
+    resolvedCommand: providerCommand.command
+      ? {
+          command: providerCommand.command,
+          prefixArgs: providerCommand.prefixArgs ?? [],
           pathEntries: providerCommand.pathEntries,
-          environment: {},
-          mcpServers,
-          workingDir: options.cwd,
-          prompt: options.prompt,
-          model: options.runtime.model,
-          effort: options.runtime.effort as ClaudeEffort,
-          permissionMode: options.runtime.permissionMode ?? 'safe',
-          timeoutMs: AUTOMATION_TIMEOUT_MS,
-          onOutput: (stream, text) => {
-            if (stream === 'stdout') {
-              stdoutSoFar += text;
-              options.onAssistantMessages?.(parseClaudeAssistantMessages(stdoutSoFar));
-            }
-            appendOutput(stream, text);
-          },
-          runCommandCapture,
-        })
-      : null;
-    const codexResult = options.runtime.provider === 'codex'
-      ? await codexCliAdapter.runAutomation({
-          cliPath: providerCliPath,
-          pathEntries: providerCommand.pathEntries,
-          environment: {},
-          mcpServers,
-          workingDir: options.cwd,
-          prompt: options.prompt,
-          model: options.runtime.model || 'gpt-5.2',
-          reasoningEffort: options.runtime.effort || 'low',
-          permissionMode: options.runtime.permissionMode ?? 'safe',
-          networkAccess: options.networkAccess,
-          timeoutMs: AUTOMATION_TIMEOUT_MS,
-          codexHome: isolatedCodexHome,
-          resolvedCommand: providerCommand.command
-            ? {
-                command: providerCommand.command,
-                prefixArgs: providerCommand.prefixArgs ?? [],
-                pathEntries: providerCommand.pathEntries,
-              }
-            : undefined,
-          onOutput: (stream, text) => {
-            if (stream === 'stdout') {
-              stdoutSoFar += text;
-              options.onAssistantMessages?.(parseCodexAssistantMessages(stdoutSoFar));
-            }
-            appendOutput(stream, text);
-          },
-          runCommandCapture,
-        })
-      : null;
-    const result = options.runtime.provider === 'antigravity'
-      ? { code: 0, stdout: antigravityResult?.stdout ?? '', stderr: antigravityResult?.stderr ?? '' }
-      : options.runtime.provider === 'claude'
-        ? { code: claudeResult?.code ?? 1, stdout: claudeResult?.stdout ?? '', stderr: claudeResult?.stderr ?? '' }
-        : { code: codexResult?.code ?? 1, stdout: codexResult?.stdout ?? '', stderr: codexResult?.stderr ?? '' };
-    return result;
-  } finally {
-    await removeIsolatedCodexHome(isolatedCodexHome);
-  }
+        }
+      : undefined,
+    onOutput: (stream, text) => {
+      if (stream === 'stdout') {
+        stdoutSoFar += text;
+        if (options.runtime.provider === 'antigravity') {
+          options.onAssistantMessages?.([stdoutSoFar.trim()].filter(Boolean));
+        } else if (options.runtime.provider === 'claude') {
+          options.onAssistantMessages?.(parseClaudeAssistantMessages(stdoutSoFar));
+        } else {
+          options.onAssistantMessages?.(parseCodexAssistantMessages(stdoutSoFar));
+        }
+      }
+      appendOutput(stream, text);
+    },
+    runCommandCapture,
+    checkReady: false,
+  });
+  return {
+    code: result.code,
+    stdout: result.stdout,
+    stderr: result.stderr,
+  };
 };
 
 const runCommandCapture = async (

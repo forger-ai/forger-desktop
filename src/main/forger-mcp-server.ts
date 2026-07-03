@@ -227,7 +227,10 @@ export class ForgerMcpServer {
   }
 
   public stop(): void {
-    this.server?.close();
+    const server = this.server;
+    server?.close();
+    server?.closeIdleConnections?.();
+    server?.closeAllConnections?.();
     this.server = null;
     this.url = null;
     this.sessions.clear();

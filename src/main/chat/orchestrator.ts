@@ -25,6 +25,7 @@ import type {
   CodexReasoningEffort,
   PermissionRequest,
 } from '../../shared/types';
+import type { LlmProviderAuthProfileResolver } from '../llm-provider/types';
 import { buildFailureDiagnostic } from '../../shared/error-diagnostics';
 import { getSharedCopy, normalizeLocale, type Locale } from '../../shared/i18n';
 import {
@@ -76,6 +77,8 @@ interface ChatOrchestratorOptions {
   metadataRoot: string;
   legacyMetadataRoot?: string;
   codexHome: string;
+  providerProfilesRoot?: string;
+  resolveAuthProfile?: LlmProviderAuthProfileResolver;
   getAgentRuntime: (requested?: AgentRuntimeRequest) => Promise<AgentRuntime>;
   agentContractVersion: number;
   getCodexCliPath: () => Promise<string | null>;
@@ -110,6 +113,7 @@ interface InternalChatRun extends ChatRun {
   reasoningEffort: CodexReasoningEffort;
   provider: AgentProvider;
   effort: AgentEffort;
+  authProfileId?: string;
   networkAccess: boolean;
   taskType: ForgerTaskType;
   startedWithUpdateConflict: boolean;
@@ -155,7 +159,11 @@ export class ChatOrchestrator {
   public constructor(private readonly options: ChatOrchestratorOptions) {
     this.auditLogger = new AuditLogger(options.privateAppsRoot);
     this.pluginRuntime = new PluginRuntime();
-    this.sandboxRunner = new SandboxRunner(options.codexHome);
+    this.sandboxRunner = new SandboxRunner({
+      codexHome: options.codexHome,
+      providerProfilesRoot: options.providerProfilesRoot,
+      resolveAuthProfile: options.resolveAuthProfile,
+    });
     this.operationHistory = new OperationHistoryStore(options.metadataRoot, options.legacyMetadataRoot);
     void this.loadThreadState();
   }
@@ -199,6 +207,7 @@ export class ChatOrchestrator {
     const runtime = await this.options.getAgentRuntime({
       provider: input.provider,
       model: input.model,
+      authProfileId: input.authProfileId,
       effort: input.effort ?? input.reasoningEffort,
       permissionMode: input.permissionMode,
     });
@@ -229,6 +238,7 @@ export class ChatOrchestrator {
       reasoningEffort: runtime.provider === 'codex' ? runtime.effort as CodexReasoningEffort : 'medium',
       provider: runtime.provider,
       effort: runtime.effort,
+      authProfileId: runtime.authProfileId,
       networkAccess,
       taskType,
       startedWithUpdateConflict: false,
@@ -702,6 +712,7 @@ export class ChatOrchestrator {
             ...commonRunOptions,
             antigravityCliPath: antigravityCliPath as string,
             effort: run.effort,
+            authProfileId: run.authProfileId,
             permissionMode: run.permissionMode,
           });
         }
@@ -710,12 +721,14 @@ export class ChatOrchestrator {
               ...commonRunOptions,
               claudeCliPath: claudeCliPath as string,
               effort: run.effort as ClaudeEffort,
+              authProfileId: run.authProfileId,
               permissionMode: run.permissionMode,
             })
           : await this.sandboxRunner.runCodex({
               ...commonRunOptions,
               codexCliPath: codexCliPath as string,
               reasoningEffort: run.reasoningEffort,
+              authProfileId: run.authProfileId,
               permissionMode: run.permissionMode,
               codexHome: persistentCodexHome,
             });

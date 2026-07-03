@@ -63,7 +63,6 @@ export function CodexConfigModal({
         t={t}
         onClose={onClose}
         onConnect={onConnect}
-        onRefresh={onRefresh}
         onOpenExternalUrl={onOpenExternalUrl}
       />
     );
