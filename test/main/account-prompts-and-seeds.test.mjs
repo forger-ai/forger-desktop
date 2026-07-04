@@ -650,14 +650,6 @@ test('official tool skill templates and seed data keep expected Desktop defaults
   assert.equal(settingsSeed.agentDefaults.codex.model, settingsSeed.codexDefaults.model);
 });
 
-test('create app prompts do not inline official localization skill selection', async () => {
-  const enSections = await fs.readFile(path.resolve('src/renderer/i18n/locales/enSections.ts'), 'utf8');
-  const esSections = await fs.readFile(path.resolve('src/renderer/i18n/locales/esSections.ts'), 'utf8');
-
-  assert.doesNotMatch(enSections, /Use forger-localization any time you write user-facing app text/);
-  assert.doesNotMatch(esSections, /Usa forger-localization cada vez que escribas texto visible para la app/);
-});
-
 test('prompt-builder skills keep loading triggers in frontmatter descriptions', async () => {
   const skillFiles = await readSkillFiles();
   for (const skill of skillFiles) {

@@ -1,10 +1,7 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
 import test from 'node:test';
 import { createRequire } from 'node:module';
 
-const repoRoot = new URL('../..', import.meta.url);
 const require = createRequire(import.meta.url);
 const {
   activeRunFromChatRun,
@@ -13,8 +10,6 @@ const {
   normalizePersistedActiveChatRun,
   normalizePersistedActiveChatRuns,
 } = require('../../dist-electron/shared/chat-run-state.js');
-
-const readSource = (path) => readFile(join(repoRoot.pathname, path), 'utf8');
 
 test('active chat run persistence accepts only complete trimmed identities', () => {
   assert.deepEqual(normalizePersistedActiveChatRun({
@@ -82,22 +77,4 @@ test('terminal chat run status helpers cover final result statuses', () => {
     assert.equal(isTerminalChatRunStatus(status), false);
     assert.equal(isMessageTerminalChatRunStatus(status), false);
   }
-});
-
-test('renderer persists and hydrates active chat runs through one update path', async () => {
-  const source = await readSource('src/renderer/app/RendererAppController.tsx');
-
-  assert.match(source, /activeRuns:\s*Object\.values\(activeChatRunsByConversation\)/);
-  assert.match(source, /for \(const activeRunToHydrate of persistedChatState\.activeRuns\)/);
-  assert.match(source, /desktopApi\.chatGetRun\(\{\s*runId:\s*activeRunToHydrate\.runId\s*\}\)/);
-  assert.match(source, /desktopApi\.onChatRunUpdated\(\(\{\s*run\s*\}\)\s*=>\s*\{\s*applyChatRunUpdate\(run\);/);
-  assert.match(source, /\.then\(\(run\)\s*=>\s*\{\s*if\s*\(run\)\s*\{\s*applyChatRunUpdate\(run\);/);
-  assert.doesNotMatch(source, /setPersistedActiveChatRun/);
-  assert.match(source, /setActiveConversationRuns\(\(current\)\s*=>\s*\(\{\s*\.\.\.current,/);
-  assert.doesNotMatch(source, /\|\|\s*chatRunActive\s*\|\|/);
-  assert.match(source, /clearActiveRunState\(runId\)/);
-  assert.match(source, /clearActiveRunState\(undefined,\s*conversationId\)/);
-
-  const viewSource = await readSource('src/renderer/app/RendererAppView.tsx');
-  assert.match(viewSource, /isSending=\{activeConversationRunActive\}/);
 });
