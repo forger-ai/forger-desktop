@@ -857,7 +857,7 @@ export const es = {
     codexDefaultModel: 'Modelo default',
     codexDefaultThinking: 'Thinking default',
     openBetaTitle: 'Forger está en release experimental',
-    openBetaDescription: 'Forger Desktop está disponible como release experimental. Finance OS es la app experimental principal hoy; las apps de acceso anticipado pueden estar incompletas, fallar o cambiar rápido mientras recopilamos feedback.',
+    openBetaDescription: 'Forger Desktop está disponible como release experimental mientras afinamos el flujo para crear, instalar y mejorar apps locales con agentes. Algunas funciones pueden estar incompletas, fallar o cambiar rápido mientras recopilamos feedback.',
     betaTitle: 'Release experimental',
     betaDescription: 'Revisa opciones del release experimental y reinicia la guía del producto cuando quieras verla de nuevo.',
     advancedSurfacesTitle: 'Superficies avanzadas',

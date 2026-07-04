@@ -381,7 +381,7 @@ const normalizeSettings = (input?: Partial<Settings>): Settings => {
     claude: {
       model:
         typeof rawAgentClaudeDefaults?.model === 'string' && rawAgentClaudeDefaults.model.trim()
-          ? rawAgentClaudeDefaults.model.trim()
+          ? normalizeClaudeModel(rawAgentClaudeDefaults.model.trim(), defaultClaudeModel)
           : defaultClaudeModel,
       effort: normalizeClaudeEffort(rawAgentClaudeDefaults?.effort, defaultClaudeEffort),
     },

@@ -111,6 +111,10 @@ export class ClaudeCliAdapter {
         throw new Error((result.stderr || result.stdout || 'claude_exec_failed').trim());
       }
       const parsed = parseClaudeJsonl(result.stdout, result.stderr);
+      const quotaFailure = detectProviderQuotaError('claude', result.stdout, result.stderr, parsed.assistantText);
+      if (quotaFailure) {
+        throw createProviderQuotaError(quotaFailure);
+      }
       return {
         code: result.code,
         stdout: result.stdout,

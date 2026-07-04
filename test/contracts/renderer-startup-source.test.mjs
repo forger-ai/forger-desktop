@@ -15,5 +15,8 @@ test('renderer startup hydrates provider auth independently from slower startup 
   assert.match(loadDataSource, /settle\(desktopApi\.getCodexAuthStatus\(\), \(value\) => \{ setCodexAuthStatus\(value\);/);
   assert.match(loadDataSource, /settle\(desktopApi\.getClaudeAuthStatus\(\), \(value\) => \{ setClaudeAuthStatus\(value\);/);
   assert.match(loadDataSource, /settle\(desktopApi\.getAntigravityAuthStatus\(\), \(value\) => \{ setAntigravityAuthStatus\(value\);/);
+  assert.match(loadDataSource, /setSelectedCodexModel\(value\.agentDefaults\.codex\.model\);/);
+  assert.match(loadDataSource, /setSelectedClaudeModel\(value\.agentDefaults\.claude\.model\);/);
+  assert.match(loadDataSource, /setSelectedAntigravityModel\(value\.agentDefaults\.antigravity\.model\);/);
   assert.equal(loadDataSource.includes('Promise.allSettled(['), false);
 });

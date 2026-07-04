@@ -411,3 +411,51 @@ test('Claude descriptor parses stream-json usage into normalized usage delta', a
     turns: 1,
   });
 });
+
+test('Claude descriptor classifies zero-exit rate limit stream events as quota failures', async () => {
+  const service = createLlmProviderRunService({
+    getClaudeAuthenticated: async () => true,
+    getClaudeCliPath: async () => '/usr/local/bin/claude',
+  });
+
+  await assert.rejects(
+    () => service.run({
+      surface: 'desktop_chat',
+      mode: 'conversation',
+      runtime: { provider: 'claude', model: 'sonnet', effort: 'medium' },
+      pathEntries: [],
+      environment: {},
+      workingDir: os.tmpdir(),
+      prompt: 'hello',
+      timeoutMs: 1000,
+      runCommandCapture: async () => ({
+        code: 0,
+        stdout: [
+          JSON.stringify({ type: 'system', subtype: 'init', session_id: 'session-1' }),
+          JSON.stringify({
+            type: 'rate_limit_event',
+            rate_limit_info: {
+              status: 'rejected',
+              resetsAt: Math.floor(Date.now() / 1000) + 60 * 60,
+              rateLimitType: 'five_hour',
+            },
+          }),
+          JSON.stringify({
+            type: 'result',
+            subtype: 'success',
+            is_error: true,
+            api_error_status: 429,
+            result: "You've hit your session limit · resets 4pm (America/Santiago)",
+          }),
+        ].join('\n'),
+        stderr: '',
+      }),
+    }),
+    (error) => {
+      assert.equal(error.chatCode, 'quota_exceeded');
+      assert.match(error.message, /Claude Code quota exceeded/i);
+      assert.match(error.message, /resets 4pm/i);
+      return true;
+    },
+  );
+});

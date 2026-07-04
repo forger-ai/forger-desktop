@@ -220,6 +220,44 @@ test('provider usage reads live Claude windows from the OAuth usage endpoint', a
   assert.equal(weekly?.remainingPercent, 29);
 });
 
+test('provider usage logs safe Claude OAuth diagnostics when usage cannot be read', async (t) => {
+  const { getAgentProviderUsage } = loadProviderUsage();
+  const events = [];
+  const { root, deps } = await makeDeps({
+    getClaudeAuthStatus: async () => ({ installed: true, authenticated: true, source: 'managed' }),
+    readClaudeOAuthToken: async () => null,
+    appendLog: async (event, context) => events.push({ event, context }),
+  });
+  t.after(async () => fs.rm(root, { recursive: true, force: true }));
+
+  const result = await getAgentProviderUsage(deps);
+  const claude = result.providers.find((entry) => entry.provider === 'claude');
+
+  assert.equal(claude?.unavailableReason, 'no_recent_usage');
+  assert.deepEqual(events, [{ event: 'provider_usage:claude_oauth_token_missing', context: undefined }]);
+  assert.equal(JSON.stringify(events).includes('token-'), false);
+});
+
+test('provider usage logs safe Claude OAuth endpoint diagnostics', async (t) => {
+  const { getAgentProviderUsage } = loadProviderUsage();
+  const events = [];
+  const { root, deps } = await makeDeps({
+    getClaudeAuthStatus: async () => ({ installed: true, authenticated: true, source: 'managed' }),
+    readClaudeOAuthToken: async () => 'token-123',
+    fetchClaudeUsagePayload: async () => null,
+    appendLog: async (event, context) => events.push({ event, context }),
+  });
+  t.after(async () => fs.rm(root, { recursive: true, force: true }));
+
+  await getAgentProviderUsage(deps);
+
+  assert.deepEqual(events, [{
+    event: 'provider_usage:claude_oauth_checked',
+    context: { hasPayload: false, windowCount: 0 },
+  }]);
+  assert.equal(JSON.stringify(events).includes('token-123'), false);
+});
+
 test('provider usage falls back to Claude audit files when the OAuth endpoint has no data', async (t) => {
   const { getAgentProviderUsage } = loadProviderUsage();
   const resetsAt = Math.floor(Date.now() / 1000) + 60 * 60;

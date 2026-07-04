@@ -24,7 +24,10 @@ export const detectProviderQuotaError = (
 
   const providerMatched = provider === 'antigravity'
     ? /RESOURCE_EXHAUSTED|Individual quota reached|model unreachable|code\s*429|HTTP\s*429|Too Many Requests/i.test(combined)
-    : /\b(?:rate\s*limit(?:ed| reached| exceeded)?|quota\s+(?:exceeded|reached)|usage\s+limit|too many requests|HTTP\s*429|status(?:\s+code)?\s*429|code\s*429)\b/i.test(combined);
+    : /\b(?:rate\s*limit(?:ed| reached| exceeded)?|quota\s+(?:exceeded|reached)|usage\s+limit|session\s+limit|too many requests|HTTP\s*429|status(?:\s+code)?\s*429|code\s*429)\b/i.test(combined)
+      || /"error"\s*:\s*"rate_limit"/i.test(combined)
+      || /"api_error_status"\s*:\s*429/i.test(combined)
+      || /"type"\s*:\s*"rate_limit_event"[\s\S]*"status"\s*:\s*"rejected"/i.test(combined);
   if (!providerMatched) {
     return null;
   }
@@ -78,7 +81,8 @@ export const detectProviderModelUnsupportedError = (
 const extractResetHint = (text: string): string => {
   const match =
     text.match(/\bResets?\s+in\s+([^\n.]+)/i) ??
-    text.match(/\breset(?:s|ting)?\s+(?:in|at)\s+([^\n.]+)/i);
+    text.match(/\breset(?:s|ting)?\s+(?:in|at)\s+([^\n.]+)/i) ??
+    text.match(/\bresets\s+([^\n.]+)/i);
   return match?.[1]?.trim() ?? '';
 };
 

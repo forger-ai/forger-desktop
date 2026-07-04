@@ -64,7 +64,7 @@ const createHarness = async (overrides = {}) => {
     },
   };
   const controller = createSettingsServiceController({
-    agentProviderRegistry: agentProviderRegistry(),
+    agentProviderRegistry: overrides.agentProviderRegistry ?? agentProviderRegistry(),
     PromptOverridesStore: class PromptOverridesStore {
       constructor(filePath) {
         this.filePath = filePath;
@@ -88,6 +88,51 @@ const createHarness = async (overrides = {}) => {
     cleanup: async () => await fs.rm(root, { recursive: true, force: true }),
   };
 };
+
+test('SettingsService migrates legacy Claude default models to selectable provider defaults', async () => {
+  const versionedRegistry = createAgentProviderRuntimeRegistry({
+    codex: {
+      defaultModel: 'gpt-5.4',
+      defaultReasoningEffort: 'medium',
+      modelValues: ['gpt-5.4', 'gpt-5.4-mini'],
+      reasoningEffortValues: ['none', 'low', 'medium', 'high'],
+    },
+    claude: {
+      defaultModel: 'claude-sonnet-5',
+      defaultEffort: 'high',
+      modelValues: ['claude-sonnet-5', 'claude-opus-4-8'],
+      effortValues: ['low', 'medium', 'high', 'max'],
+    },
+    antigravity: {
+      defaultModel: 'gemini-3.5-flash',
+      defaultEffort: 'medium',
+      modelValues: ['gemini-3.5-flash', 'gemini-3.1-pro'],
+      effortValues: ['low', 'medium', 'high'],
+    },
+  });
+  const harness = await createHarness({
+    agentProviderRegistry: versionedRegistry,
+    settings: {
+      llmProviderDefaults: {
+        codex: { model: 'gpt-5.4', reasoningEffort: 'medium' },
+        claude: { model: 'sonnet', effort: 'medium' },
+        antigravity: { model: 'gemini-3.5-flash', effort: 'medium' },
+      },
+      agentDefaults: {
+        codex: { model: 'gpt-5.4', reasoningEffort: 'medium' },
+        claude: { model: 'sonnet', effort: 'medium' },
+        antigravity: { model: 'gemini-3.5-flash', effort: 'medium' },
+      },
+    },
+  });
+  try {
+    await harness.controller.loadSettings();
+    assert.deepEqual(harness.state.settings.agentDefaults.claude, { model: 'claude-sonnet-5', effort: 'medium' });
+    assert.deepEqual(harness.state.settings.llmProviderDefaults.claude, { model: 'claude-sonnet-5', effort: 'medium' });
+  } finally {
+    await harness.cleanup();
+  }
+});
 
 test('SettingsService normalizes persisted settings, preserves safe fields, and caches prompt override stores', async () => {
   const harness = await createHarness();

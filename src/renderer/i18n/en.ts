@@ -857,7 +857,7 @@ export const en = {
     agentDefaultChatNetwork: 'Chat internet',
     codexDefaultThinking: 'Default thinking',
     openBetaTitle: 'Forger is an experimental release',
-    openBetaDescription: 'Forger Desktop is available as an experimental release. Finance OS is the main experimental app today; early access apps may be incomplete, fail, or change quickly while we collect feedback.',
+    openBetaDescription: 'Forger Desktop is available as an experimental release while we refine the flow for creating, installing, and improving local apps with agents. Some features may be incomplete, fail, or change quickly while we collect feedback.',
     betaTitle: 'Experimental release',
     betaDescription: 'Review experimental release settings and reset product guidance when you want to see it again.',
     advancedSurfacesTitle: 'Advanced surfaces',
