@@ -34,6 +34,7 @@ interface ProviderUsageDeps {
   claudeAuditRoots?: () => string[];
   readClaudeOAuthToken?: () => Promise<string | null>;
   fetchClaudeUsagePayload?: (token: string) => Promise<unknown>;
+  appendLog?: (event: string, context?: Record<string, unknown>) => Promise<void>;
 }
 
 const providerLabels = {
@@ -324,15 +325,24 @@ const defaultFetchClaudeUsagePayload = async (token: string): Promise<unknown> =
 const readClaudeUsageWindowsFromApi = async (deps: ProviderUsageDeps): Promise<AgentProviderUsageWindow[]> => {
   const readToken = deps.readClaudeOAuthToken;
   if (!readToken) {
+    await deps.appendLog?.('provider_usage:claude_oauth_reader_missing');
     return [];
   }
   const token = await readToken().catch(() => null);
   if (!token) {
+    await deps.appendLog?.('provider_usage:claude_oauth_token_missing');
     return [];
   }
   const fetchPayload = deps.fetchClaudeUsagePayload ?? defaultFetchClaudeUsagePayload;
   const payload = await fetchPayload(token).catch(() => null);
-  return parseClaudeUsageWindowsFromApi(payload);
+  const windows = parseClaudeUsageWindowsFromApi(payload);
+  if (!payload || windows.length === 0) {
+    await deps.appendLog?.('provider_usage:claude_oauth_checked', {
+      hasPayload: Boolean(payload),
+      windowCount: windows.length,
+    });
+  }
+  return windows;
 };
 
 const readClaudeUsageWindows = async (deps: ProviderUsageDeps): Promise<AgentProviderUsageWindow[]> => {

@@ -1436,6 +1436,14 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
     getAntigravityAuthStatus,
     failureDiagnostic,
     readClaudeOAuthToken,
+    appendLog: async (event, context) => {
+      await appendDesktopLog({
+        metadataRoot: getForgerMetadataRoot(),
+        service: 'agent-runtime',
+        event,
+        context,
+      });
+    },
   }));
   ipcMain.handle(IPC_CHANNELS.listLlmProviderProfiles, async () => await listLlmProviderProfiles());
   ipcMain.handle(IPC_CHANNELS.setActiveLlmProviderProfile, async (_event, input: SetActiveLlmProviderProfileInput) =>
