@@ -39,6 +39,7 @@ import {
   buildRunContext,
   computeRunOutcome,
   evaluateConditionExpression,
+  lookupContextPath,
   renderTemplateString,
   resolveNodeReadiness,
   resolveTemplateValue,
@@ -53,6 +54,7 @@ import { validateOutputAgainstSchema } from './workflow/output-schema';
 const MAX_TIMEOUT_MS = 2_147_483_647;
 const MISSED_RUN_GRACE_MS = 60_000;
 const MAX_PARALLEL_NODES = 4;
+const MAX_FOREACH_ITEMS = 100;
 const DEFAULT_NODE_TIMEOUT_MS = 300_000;
 const INPUT_CONTEXT_MAX_CHARS = 12_000;
 
@@ -633,10 +635,45 @@ export class WorkflowManager {
     if (!this.options.callConnectorAction) {
       return { status: 'failed', error: 'workflow_connectors_unavailable' };
     }
+    if (!node.forEach) {
+      return await this.callConnectorOnce(node, context);
+    }
+
+    const listPath = node.forEach.replace(/^\{\{\s*/, '').replace(/\s*\}\}$/, '');
+    const list = lookupContextPath(context, listPath);
+    if (!Array.isArray(list)) {
+      return { status: 'failed', error: `workflow_foreach_not_a_list:${listPath}` };
+    }
+    const items = list.slice(0, MAX_FOREACH_ITEMS);
+    const results: Array<Record<string, unknown>> = [];
+    for (const [index, item] of items.entries()) {
+      // Each iteration exposes the current item and its index to templates.
+      const iterationContext = { ...context, item, itemIndex: index } as unknown as WorkflowRunContext;
+      const result = await this.callConnectorOnce(node, iterationContext);
+      if (result.status !== 'succeeded') {
+        return {
+          status: 'failed',
+          error: `workflow_foreach_item_failed:${index}:${result.error ?? 'workflow_connector_failed'}`,
+          output: { items: results, count: results.length, failedIndex: index },
+        };
+      }
+      results.push(result.output ?? {});
+    }
+    return {
+      status: 'succeeded',
+      output: { items: results, count: results.length },
+      summary: `${results.length} ejecuciones`,
+    };
+  }
+
+  private async callConnectorOnce(
+    node: WorkflowConnectorNode,
+    context: WorkflowRunContext,
+  ): Promise<WorkflowNodeState> {
     const input = resolveTemplateValue(node.input, context) as Record<string, unknown>;
     const nodeRunInput = { toolId: node.toolId, actionId: node.actionId, input };
     try {
-      const result = await this.options.callConnectorAction(nodeRunInput);
+      const result = await (this.options.callConnectorAction as NonNullable<WorkflowManagerOptions['callConnectorAction']>)(nodeRunInput);
       if (!result.success) {
         return {
           status: 'failed',

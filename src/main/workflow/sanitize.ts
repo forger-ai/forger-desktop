@@ -159,7 +159,15 @@ export const sanitizeWorkflowNode = (
     const input = record.input && typeof record.input === 'object' && !Array.isArray(record.input)
       ? record.input as Record<string, unknown>
       : {};
-    return { ...base, type: 'connector', toolId, actionId, input };
+    const forEach = sanitizeText(record.forEach, 500).replace(/^\{\{\s*/, '').replace(/\s*\}\}$/, '');
+    return {
+      ...base,
+      type: 'connector',
+      toolId,
+      actionId,
+      input,
+      ...(forEach ? { forEach } : {}),
+    };
   }
 
   if (record.type === 'condition') {

@@ -128,7 +128,7 @@ Node types:
 
 - `llm_agent`: runs a one-shot agent with the configured provider (codex, claude, or antigravity), a prompt, enabled platform tools, and enabled apps. Enabling an app starts that app's MCP for the node run. The node prompt supports `{{nodes.<id>.output.<path>}}` and `{{trigger.<path>}}` templates resolved against upstream outputs.
 - `forger_agent`: runs a personal agent defined in Forger with that agent's own runtime, instructions, app grants, and tool grants.
-- `connector`: executes one official tool action deterministically without an LLM, with template-resolved JSON input.
+- `connector`: executes one official tool action deterministically without an LLM, with template-resolved JSON input. An optional `forEach` reference to a list from a previous node runs the action once per item; iteration templates use `{{item.<field>}}` and `{{itemIndex}}`, and the node output becomes `{ items: [...results], count }`. Iteration stops at the first failing item.
 - `condition`: evaluates an expression over upstream outputs and produces `{ result: boolean }`.
 
 Edges carry a condition: `success`, `error`, or `always`. On condition nodes, `success` is the true branch and `error` the false branch. A failed node counts as handled when an outgoing `error` or `always` edge routes the failure; unhandled failures fail the run. Independent branches execute in parallel. Nodes marked `requiresApproval` pause the run in `waiting_approval` until the person approves or rejects the step from the Workflows view.

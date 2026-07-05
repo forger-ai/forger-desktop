@@ -53,6 +53,13 @@ export interface WorkflowConnectorNode extends WorkflowNodeBase {
   toolId: string;
   actionId: string;
   input: Record<string, unknown>;
+  /**
+   * Reference to a list from a previous node (e.g. nodes.gmail.output.messages).
+   * When set, the action runs once per item and templates can use
+   * {{item.<field>}} and {{itemIndex}}. The node output becomes
+   * { items: [...results], count }.
+   */
+  forEach?: string;
 }
 
 export type WorkflowConditionOperator =

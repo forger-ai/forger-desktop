@@ -45,7 +45,7 @@ import type {
 } from '@shared/types';
 import { LLM_PROVIDER_REGISTRY, type AgentProviderPreference } from '@shared/agent-runtime-registry';
 import type { AppDictionary } from '@renderer/i18n';
-import { buildUpstreamFieldSources } from '@shared/workflow-templates';
+import { buildUpstreamFieldSources, parseReferencePath } from '@shared/workflow-templates';
 import type { WorkflowDraft } from './workflow-draft';
 import { createDraftNode, edgeKey } from './workflow-draft';
 import { TemplateEditor, type TemplateSourceNode } from './TemplateEditor';
@@ -409,6 +409,26 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, prov
   const [inputJsonError, setInputJsonError] = useState(false);
   const [schemaJsonError, setSchemaJsonError] = useState(false);
   const [rawConnectorInput, setRawConnectorInput] = useState(false);
+  // With forEach active, connector fields also offer the current item.
+  const connectorSources: TemplateSourceNode[] = (() => {
+    if (node.type !== 'connector' || !node.forEach) {
+      return sources;
+    }
+    const listPath = node.forEach.replace(/^\{\{\s*/, '').replace(/\s*\}\}$/, '');
+    const parts = parseReferencePath(listPath);
+    if (!parts || parts.kind !== 'node' || !parts.nodeId) {
+      return sources;
+    }
+    const origin = sources.find((source) => source.nodeId === parts.nodeId);
+    const prefix = parts.fieldPath ? `${parts.fieldPath}.0.` : '0.';
+    const itemFields = (origin?.fields ?? [])
+      .filter((field) => field.path.startsWith(prefix))
+      .map((field) => ({ path: field.path.slice(prefix.length), sample: field.sample }));
+    return [
+      { nodeId: '__item__', nodeName: copy.itemGroup, referenceBase: 'item', fields: itemFields },
+      ...sources,
+    ];
+  })();
   // Tools are granted per official tool, not per action: selecting a tool
   // enables every action it exposes for this node.
   const officialPackages = useMemo(
@@ -662,6 +682,38 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, prov
               <MenuItem key={action.id} value={action.id}>{action.name}</MenuItem>
             ))}
           </TextField>
+          <TextField
+            size="small"
+            label={copy.forEachLabel}
+            value={node.forEach ?? ''}
+            helperText={copy.forEachHelper}
+            onChange={(event) => onChange((current) => {
+              if (current.type !== 'connector') {
+                return current;
+              }
+              const raw = event.target.value.trim();
+              if (!raw) {
+                const { forEach: _forEach, ...rest } = current;
+                return rest as WorkflowNode;
+              }
+              return { ...current, forEach: raw };
+            })}
+            slotProps={{
+              input: {
+                endAdornment: sources.length > 0 ? (
+                  <MappingMenuButton
+                    sources={sources}
+                    tooltip={copy.mapField}
+                    wholeOutputLabel={copy.wholeOutput}
+                    triggerGroupLabel={copy.triggerData}
+                    onPick={(reference) => onChange((current) => current.type === 'connector'
+                      ? { ...current, forEach: reference.replace(/^\{\{\s*/, '').replace(/\s*\}\}$/, '') }
+                      : current)}
+                  />
+                ) : undefined,
+              },
+            }}
+          />
           {(() => {
             const action = officialTools
               .find((tool) => tool.id === node.toolId)?.actions
@@ -674,7 +726,7 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, prov
                   <SchemaForm
                     schema={inputSchema as Record<string, unknown>}
                     value={node.input ?? {}}
-                    sources={sources}
+                    sources={connectorSources}
                     mapTooltip={copy.mapField}
                     wholeOutputLabel={copy.wholeOutput}
                     triggerGroupLabel={copy.triggerData}

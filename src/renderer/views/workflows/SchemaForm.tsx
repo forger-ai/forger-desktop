@@ -12,8 +12,7 @@ import {
   Typography,
 } from '@mui/material';
 import DataObjectRounded from '@mui/icons-material/DataObjectRounded';
-import { buildReference } from '@shared/workflow-templates';
-import type { TemplateSourceNode } from './TemplateEditor';
+import { referenceForSource, type TemplateSourceNode } from './TemplateEditor';
 
 interface SchemaProperty {
   type?: string;
@@ -48,14 +47,14 @@ export const MappingMenuButton = ({ sources, tooltip, wholeOutputLabel, triggerG
       </Tooltip>
       <Menu anchorEl={anchorEl} open={Boolean(anchorEl)} onClose={close}>
         {sources.flatMap((source) => [
-          <ListSubheader key={`${source.nodeId}-header`} sx={{ lineHeight: '28px', bgcolor: 'transparent' }}>
+          <ListSubheader key={`${source.nodeId}-header`} sx={{ lineHeight: '28px', bgcolor: 'background.paper' }}>
             {source.nodeName}
           </ListSubheader>,
-          <MenuItem key={`${source.nodeId}-whole`} dense onClick={() => pick(buildReference(source.nodeId))}>
+          <MenuItem key={`${source.nodeId}-whole`} dense onClick={() => pick(referenceForSource(source))}>
             {wholeOutputLabel}
           </MenuItem>,
           ...source.fields.map((field) => (
-            <MenuItem key={`${source.nodeId}-${field.path}`} dense onClick={() => pick(buildReference(source.nodeId, field.path))}>
+            <MenuItem key={`${source.nodeId}-${field.path}`} dense onClick={() => pick(referenceForSource(source, field.path))}>
               <Box sx={{ overflow: 'hidden' }}>
                 <Typography variant="body2" noWrap>{field.path}</Typography>
                 {field.sample !== undefined ? (
@@ -67,7 +66,7 @@ export const MappingMenuButton = ({ sources, tooltip, wholeOutputLabel, triggerG
             </MenuItem>
           )),
         ])}
-        <ListSubheader sx={{ lineHeight: '28px', bgcolor: 'transparent' }}>{triggerGroupLabel}</ListSubheader>
+        <ListSubheader sx={{ lineHeight: '28px', bgcolor: 'background.paper' }}>{triggerGroupLabel}</ListSubheader>
         <MenuItem dense onClick={() => pick('trigger.type')}>type</MenuItem>
         <MenuItem dense onClick={() => pick('trigger.firedAt')}>firedAt</MenuItem>
       </Menu>

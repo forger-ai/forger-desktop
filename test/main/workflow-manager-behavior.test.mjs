@@ -411,6 +411,118 @@ test('runNode executes a single step seeded with the latest stored outputs', asy
   }
 });
 
+
+test('forEach connectors run the action once per item with {{item.*}} context', async () => {
+  const harness = await createManager({
+    callConnectorAction: async (input) => {
+      if (input.actionId === 'list.action') {
+        return {
+          success: true,
+          data: {
+            messages: [
+              { subject: 'Factura', from: 'a@x.com' },
+              { subject: 'Boleta', from: 'b@x.com' },
+            ],
+          },
+        };
+      }
+      harness.connectorCalls.push(input);
+      return { success: true, data: { sent: input.input.text } };
+    },
+  });
+  try {
+    const workflow = await harness.manager.upsert({
+      name: 'Fan out',
+      trigger: { type: 'manual' },
+      nodes: [
+        connectorNode('correos', { actionId: 'list.action', input: {} }),
+        connectorNode('avisar', {
+          forEach: '{{nodes.correos.output.messages}}',
+          input: { channelId: '#general', text: '{{itemIndex}}: {{item.subject}} de {{item.from}}' },
+        }),
+      ],
+      edges: [{ from: 'correos', to: 'avisar', condition: 'success' }],
+    });
+    assert.equal(harness.manager.get(workflow.id).nodes[1].forEach, 'nodes.correos.output.messages', 'braces are stripped on save');
+
+    const runSummary = await harness.manager.runNow(workflow.id);
+    const finished = await waitFor(async () => {
+      const run = await harness.manager.getRun(runSummary.id);
+      return run && ['succeeded', 'failed'].includes(run.status) ? run : null;
+    });
+    assert.equal(finished.status, 'succeeded');
+
+    const avisar = finished.nodeRuns.find((nodeRun) => nodeRun.nodeId === 'avisar');
+    assert.equal(avisar.output.count, 2);
+    assert.deepEqual(avisar.output.items, [{ sent: '0: Factura de a@x.com' }, { sent: '1: Boleta de b@x.com' }]);
+    assert.equal(harness.connectorCalls.length, 2);
+
+    const broken = await harness.manager.upsert({
+      name: 'Lista invalida',
+      trigger: { type: 'manual' },
+      nodes: [
+        connectorNode('correos', { actionId: 'list.action', input: {} }),
+        connectorNode('avisar', {
+          forEach: 'nodes.correos.output.nope',
+          input: { channelId: '#general', text: 'x' },
+        }),
+      ],
+      edges: [{ from: 'correos', to: 'avisar', condition: 'success' }],
+    });
+    const brokenRun = await harness.manager.runNow(broken.id);
+    const brokenResult = await waitFor(async () => {
+      const run = await harness.manager.getRun(brokenRun.id);
+      return run && ['succeeded', 'failed'].includes(run.status) ? run : null;
+    });
+    assert.equal(brokenResult.status, 'failed');
+    assert.ok(brokenResult.error.startsWith('workflow_foreach_not_a_list'));
+  } finally {
+    await harness.cleanup();
+  }
+});
+
+test('forEach stops at the first failing item and reports partial results', async () => {
+  let calls = 0;
+  const harness = await createManager({
+    callConnectorAction: async (input) => {
+      if (input.actionId === 'list.action') {
+        return { success: true, data: { items: [{ n: 1 }, { n: 2 }, { n: 3 }] } };
+      }
+      calls += 1;
+      return calls === 2
+        ? { success: false, technicalCode: 'item_boom' }
+        : { success: true, data: { ok: input.input.n } };
+    },
+  });
+  try {
+    const workflow = await harness.manager.upsert({
+      name: 'Fan out con falla',
+      trigger: { type: 'manual' },
+      nodes: [
+        connectorNode('lista', { actionId: 'list.action', input: {} }),
+        connectorNode('proceso', {
+          forEach: 'nodes.lista.output.items',
+          input: { channelId: '#x', text: 'x', n: '{{item.n}}' },
+        }),
+      ],
+      edges: [{ from: 'lista', to: 'proceso', condition: 'success' }],
+    });
+    const runSummary = await harness.manager.runNow(workflow.id);
+    const finished = await waitFor(async () => {
+      const run = await harness.manager.getRun(runSummary.id);
+      return run && ['succeeded', 'failed'].includes(run.status) ? run : null;
+    });
+    assert.equal(finished.status, 'failed');
+    assert.ok(finished.error.startsWith('workflow_foreach_item_failed:1:item_boom'));
+    const proceso = finished.nodeRuns.find((nodeRun) => nodeRun.nodeId === 'proceso');
+    assert.equal(proceso.output.failedIndex, 1);
+    assert.equal(proceso.output.items.length, 1, 'keeps results of items completed before the failure');
+    assert.equal(calls, 2, 'stops at the first failure');
+  } finally {
+    await harness.cleanup();
+  }
+});
+
 test('llm node fails cleanly when the provider is not authenticated', async () => {
   const harness = await createManager();
   try {

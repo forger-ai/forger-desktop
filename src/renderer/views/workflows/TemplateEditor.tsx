@@ -30,9 +30,21 @@ export interface TemplateSourceNode {
   nodeId: string;
   nodeName: string;
   fields: Array<{ path: string; sample?: unknown }>;
+  /**
+   * Custom reference base instead of nodes.<id>.output, e.g. "item" for the
+   * current forEach item of a connector node.
+   */
+  referenceBase?: string;
 }
 
 const REFERENCE_ATTRIBUTE = 'data-template-ref';
+
+export const referenceForSource = (source: TemplateSourceNode, fieldPath?: string): string => {
+  if (source.referenceBase) {
+    return fieldPath ? `${source.referenceBase}.${fieldPath}` : source.referenceBase;
+  }
+  return buildReference(source.nodeId, fieldPath);
+};
 
 /** Builds the dropdown options offered when the person types {{. */
 export const buildTemplateFieldOptions = (
@@ -43,13 +55,13 @@ export const buildTemplateFieldOptions = (
   const options: TemplateFieldOption[] = [];
   for (const source of sources) {
     options.push({
-      referencePath: buildReference(source.nodeId),
+      referencePath: referenceForSource(source),
       label: wholeOutputLabel,
       group: source.nodeName,
     });
     for (const field of source.fields) {
       options.push({
-        referencePath: buildReference(source.nodeId, field.path),
+        referencePath: referenceForSource(source, field.path),
         label: field.path,
         group: source.nodeName,
         sample: field.sample,
@@ -68,6 +80,12 @@ export const pillLabelForReference = (
   triggerGroupLabel: string,
   wholeOutputLabel: string,
 ): string => {
+  const baseSource = sources.find((entry) => entry.referenceBase
+    && (referencePath === entry.referenceBase || referencePath.startsWith(`${entry.referenceBase}.`)));
+  if (baseSource?.referenceBase) {
+    const rest = referencePath.slice(baseSource.referenceBase.length).replace(/^\./, '');
+    return rest ? `${baseSource.nodeName} · ${rest}` : `${baseSource.nodeName} · ${wholeOutputLabel}`;
+  }
   const parts = parseReferencePath(referencePath);
   if (!parts) {
     return referencePath;
@@ -381,7 +399,7 @@ export function TemplateEditor({
               const previousGroup = filteredOptions[index - 1]?.group;
               return [
                 option.group !== previousGroup ? (
-                  <ListSubheader key={`${option.group}-header`} sx={{ lineHeight: '28px', bgcolor: 'transparent' }}>
+                  <ListSubheader key={`${option.group}-header`} sx={{ lineHeight: '28px', bgcolor: 'background.paper' }}>
                     {option.group}
                   </ListSubheader>
                 ) : null,
