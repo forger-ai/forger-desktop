@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const {
   buildReference,
+  findForEachJoinConflict,
   buildUpstreamFieldSources,
   listSampleFields,
   listSchemaFields,
@@ -98,6 +99,47 @@ test('listUpstreamNodeIds returns transitive ancestors in node order', () => {
   assert.deepEqual(listUpstreamNodeIds(nodes, edges, 'c'), ['a', 'b']);
   assert.deepEqual(listUpstreamNodeIds(nodes, edges, 'a'), []);
   assert.deepEqual(listUpstreamNodeIds(nodes, edges, 'aislado'), []);
+});
+
+
+test('findForEachJoinConflict rejects sibling loops joining and allows nested or single loops', () => {
+  const nodes = (forEachIds) => [
+    { id: 'root' },
+    { id: 'a', forEach: forEachIds.includes('a') ? 'nodes.root.output.items' : undefined },
+    { id: 'b', forEach: forEachIds.includes('b') ? 'nodes.root.output.items' : undefined },
+    { id: 'c' },
+  ];
+  const siblingEdges = [
+    { from: 'root', to: 'a', condition: 'success' },
+    { from: 'root', to: 'b', condition: 'success' },
+    { from: 'a', to: 'c', condition: 'success' },
+    { from: 'b', to: 'c', condition: 'success' },
+  ];
+
+  // A and B are sibling loops feeding C: conflict.
+  const conflict = findForEachJoinConflict(nodes(['a', 'b']), siblingEdges);
+  assert.equal(conflict.nodeId, 'c');
+  assert.deepEqual([...conflict.parents].sort(), ['a', 'b']);
+
+  // Only A iterates: joining A and plain B into C is fine.
+  assert.equal(findForEachJoinConflict(nodes(['a']), siblingEdges), null);
+
+  // Nested loops: A -> B -> C where both iterate is a chain, not a join.
+  const nestedEdges = [
+    { from: 'root', to: 'a', condition: 'success' },
+    { from: 'a', to: 'b', condition: 'success' },
+    { from: 'b', to: 'c', condition: 'success' },
+  ];
+  assert.equal(findForEachJoinConflict(nodes(['a', 'b']), nestedEdges), null);
+
+  // C fed by both A and its nested loop B: allowed because A reaches B.
+  const diamondNested = [
+    { from: 'root', to: 'a', condition: 'success' },
+    { from: 'a', to: 'b', condition: 'success' },
+    { from: 'a', to: 'c', condition: 'success' },
+    { from: 'b', to: 'c', condition: 'success' },
+  ];
+  assert.equal(findForEachJoinConflict(nodes(['a', 'b']), diamondNested), null);
 });
 
 test('buildUpstreamFieldSources combines declared contracts with run samples', () => {

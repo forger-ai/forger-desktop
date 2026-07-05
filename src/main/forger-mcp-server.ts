@@ -1504,6 +1504,12 @@ const workflowMcpErrorMessage = (code: string): string => {
   if (code === 'workflow_edge_unknown_node' || code === 'workflow_edge_self_reference') {
     return 'Alguna conexion del flujo referencia nodos invalidos.';
   }
+  if (code === 'workflow_foreach_join_not_allowed') {
+    return 'Un paso no puede recibir conexiones de dos repeticiones (forEach) independientes; las repeticiones anidadas si estan permitidas.';
+  }
+  if (code === 'workflow_foreach_requires_upstream') {
+    return 'Un paso con forEach necesita un paso anterior que produzca la lista a iterar.';
+  }
   if (code === 'workflow_node_id_required' || code === 'workflow_node_id_duplicated') {
     return 'Cada nodo necesita un id unico.';
   }

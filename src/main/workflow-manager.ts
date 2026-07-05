@@ -604,17 +604,9 @@ export class WorkflowManager {
     await syncNodeRun(node.id);
     await appendTranscript(transcriptPath, 'meta', `[node:${node.id}] ${node.name} (${node.type}) started`);
 
-    let result: WorkflowNodeState;
-    if (node.type === 'condition') {
-      const value = evaluateConditionExpression(node.expression, context);
-      result = { status: 'succeeded', output: { result: value }, summary: value ? 'Condicion verdadera' : 'Condicion falsa' };
-    } else if (node.type === 'connector') {
-      result = await this.executeConnectorNode(node, context);
-    } else if (node.type === 'forger_agent') {
-      result = await this.executeForgerAgentNode(workflow, run, node, context, active, transcriptPath);
-    } else {
-      result = await this.executeLlmNode(workflow, run, node, context, active, transcriptPath);
-    }
+    let result = node.forEach
+      ? await this.executeNodeForEach(workflow, run, node, context, active, transcriptPath)
+      : await this.executeNodeOnce(workflow, run, node, context, active, transcriptPath);
 
     if (active.canceled && result.status === 'failed') {
       result = { status: 'canceled' };
@@ -628,18 +620,44 @@ export class WorkflowManager {
     await syncNodeRun(node.id);
   }
 
-  private async executeConnectorNode(
-    node: WorkflowConnectorNode,
+  /** Runs a node once for the given context, regardless of forEach. */
+  private async executeNodeOnce(
+    workflow: Workflow,
+    run: WorkflowRun,
+    node: WorkflowNode,
     context: WorkflowRunContext,
+    active: ActiveRunState,
+    transcriptPath: string,
   ): Promise<WorkflowNodeState> {
-    if (!this.options.callConnectorAction) {
-      return { status: 'failed', error: 'workflow_connectors_unavailable' };
+    if (node.type === 'condition') {
+      const value = evaluateConditionExpression(node.expression, context);
+      return { status: 'succeeded', output: { result: value }, summary: value ? 'Condicion verdadera' : 'Condicion falsa' };
     }
-    if (!node.forEach) {
-      return await this.callConnectorOnce(node, context);
+    if (node.type === 'connector') {
+      return await this.executeConnectorNode(node, context);
     }
+    if (node.type === 'forger_agent') {
+      return await this.executeForgerAgentNode(workflow, run, node, context, active, transcriptPath);
+    }
+    return await this.executeLlmNode(workflow, run, node, context, active, transcriptPath);
+  }
 
-    const listPath = node.forEach.replace(/^\{\{\s*/, '').replace(/\s*\}\}$/, '');
+  /**
+   * Runs a node once per item of the referenced upstream list. Iterations
+   * are sequential, expose {{item.*}} and {{itemIndex}} to templates, stop
+   * at the first failure, and aggregate into { items, count }. Condition
+   * nodes also aggregate a top-level result (true when every item passed)
+   * so their branching edges keep working.
+   */
+  private async executeNodeForEach(
+    workflow: Workflow,
+    run: WorkflowRun,
+    node: WorkflowNode,
+    context: WorkflowRunContext,
+    active: ActiveRunState,
+    transcriptPath: string,
+  ): Promise<WorkflowNodeState> {
+    const listPath = (node.forEach as string).replace(/^\{\{\s*/, '').replace(/\s*\}\}$/, '');
     const list = lookupContextPath(context, listPath);
     if (!Array.isArray(list)) {
       return { status: 'failed', error: `workflow_foreach_not_a_list:${listPath}` };
@@ -647,13 +665,18 @@ export class WorkflowManager {
     const items = list.slice(0, MAX_FOREACH_ITEMS);
     const results: Array<Record<string, unknown>> = [];
     for (const [index, item] of items.entries()) {
-      // Each iteration exposes the current item and its index to templates.
+      if (active.canceled) {
+        return { status: 'canceled', output: { items: results, count: results.length } };
+      }
+      // Each iteration exposes the current item and its index to templates
+      // and, for agent nodes, to the injected input context.
       const iterationContext = { ...context, item, itemIndex: index } as unknown as WorkflowRunContext;
-      const result = await this.callConnectorOnce(node, iterationContext);
+      await appendTranscript(transcriptPath, 'meta', `[node:${node.id}] forEach item ${index + 1}/${items.length}`);
+      const result = await this.executeNodeOnce(workflow, run, node, iterationContext, active, transcriptPath);
       if (result.status !== 'succeeded') {
         return {
           status: 'failed',
-          error: `workflow_foreach_item_failed:${index}:${result.error ?? 'workflow_connector_failed'}`,
+          error: `workflow_foreach_item_failed:${index}:${result.error ?? 'workflow_node_failed'}`,
           output: { items: results, count: results.length, failedIndex: index },
         };
       }
@@ -661,19 +684,28 @@ export class WorkflowManager {
     }
     return {
       status: 'succeeded',
-      output: { items: results, count: results.length },
+      output: {
+        items: results,
+        count: results.length,
+        ...(node.type === 'condition'
+          ? { result: results.every((entry) => entry.result === true) }
+          : {}),
+      },
       summary: `${results.length} ejecuciones`,
     };
   }
 
-  private async callConnectorOnce(
+  private async executeConnectorNode(
     node: WorkflowConnectorNode,
     context: WorkflowRunContext,
   ): Promise<WorkflowNodeState> {
+    if (!this.options.callConnectorAction) {
+      return { status: 'failed', error: 'workflow_connectors_unavailable' };
+    }
     const input = resolveTemplateValue(node.input, context) as Record<string, unknown>;
     const nodeRunInput = { toolId: node.toolId, actionId: node.actionId, input };
     try {
-      const result = await (this.options.callConnectorAction as NonNullable<WorkflowManagerOptions['callConnectorAction']>)(nodeRunInput);
+      const result = await this.options.callConnectorAction(nodeRunInput);
       if (!result.success) {
         return {
           status: 'failed',
@@ -761,8 +793,12 @@ export class WorkflowManager {
       const providerCliPath = await this.resolveProviderCliPath(runtime);
       const pathEntries = await this.options.getCodexPathEntries();
 
+      const iteration = context as unknown as { item?: unknown; itemIndex?: number };
       const inputContext = {
         trigger: context.trigger,
+        // When the node iterates a list (forEach), the current item is part
+        // of the agent's working context.
+        ...(iteration.item !== undefined ? { item: iteration.item, itemIndex: iteration.itemIndex } : {}),
         nodes: Object.fromEntries(
           Object.entries(context.nodes)
             .filter(([, state]) => state.status === 'succeeded' || state.status === 'failed')

@@ -523,6 +523,84 @@ test('forEach stops at the first failing item and reports partial results', asyn
   }
 });
 
+
+test('forEach works on condition nodes and sibling loop joins are rejected on upsert', async () => {
+  const harness = await createManager({
+    callConnectorAction: async (input) => {
+      if (input.actionId === 'list.action') {
+        return { success: true, data: { items: [{ total: 5 }, { total: 0 }] } };
+      }
+      harness.connectorCalls.push(input);
+      return { success: true, data: { ok: true } };
+    },
+  });
+  try {
+    await assert.rejects(
+      harness.manager.upsert({
+        name: 'Join invalido',
+        trigger: { type: 'manual' },
+        nodes: [
+          connectorNode('root', { actionId: 'list.action', input: {} }),
+          connectorNode('a', { forEach: 'nodes.root.output.items' }),
+          connectorNode('b', { forEach: 'nodes.root.output.items' }),
+          connectorNode('c'),
+        ],
+        edges: [
+          { from: 'root', to: 'a', condition: 'success' },
+          { from: 'root', to: 'b', condition: 'success' },
+          { from: 'a', to: 'c', condition: 'success' },
+          { from: 'b', to: 'c', condition: 'success' },
+        ],
+      }),
+      /workflow_foreach_join_not_allowed/,
+    );
+    await assert.rejects(
+      harness.manager.upsert({
+        name: 'ForEach raiz',
+        trigger: { type: 'manual' },
+        nodes: [connectorNode('root', { forEach: 'nodes.x.output.items' })],
+        edges: [],
+      }),
+      /workflow_foreach_requires_upstream/,
+    );
+
+    const workflow = await harness.manager.upsert({
+      name: 'Condicion por item',
+      trigger: { type: 'manual' },
+      nodes: [
+        connectorNode('lista', { actionId: 'list.action', input: {} }),
+        {
+          id: 'todas_positivas',
+          name: 'Todas positivas',
+          type: 'condition',
+          forEach: 'nodes.lista.output.items',
+          expression: { left: '{{item.total}}', operator: 'greater_than', right: '0' },
+        },
+        connectorNode('ok'),
+        connectorNode('alerta'),
+      ],
+      edges: [
+        { from: 'lista', to: 'todas_positivas', condition: 'success' },
+        { from: 'todas_positivas', to: 'ok', condition: 'success' },
+        { from: 'todas_positivas', to: 'alerta', condition: 'error' },
+      ],
+    });
+    const runSummary = await harness.manager.runNow(workflow.id);
+    const finished = await waitFor(async () => {
+      const run = await harness.manager.getRun(runSummary.id);
+      return run && ['succeeded', 'failed'].includes(run.status) ? run : null;
+    });
+    assert.equal(finished.status, 'succeeded');
+    const byNode = Object.fromEntries(finished.nodeRuns.map((nodeRun) => [nodeRun.nodeId, nodeRun]));
+    assert.equal(byNode.todas_positivas.output.result, false, 'aggregate result is false when any item fails');
+    assert.deepEqual(byNode.todas_positivas.output.items, [{ result: true }, { result: false }]);
+    assert.equal(byNode.ok.status, 'skipped', 'false aggregate takes the error branch');
+    assert.equal(byNode.alerta.status, 'succeeded');
+  } finally {
+    await harness.cleanup();
+  }
+});
+
 test('llm node fails cleanly when the provider is not authenticated', async () => {
   const harness = await createManager();
   try {

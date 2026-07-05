@@ -179,7 +179,13 @@ export function WorkflowsView({ t }: { t: AppDictionary }) {
       const technicalCode = error instanceof Error ? error.message : '';
       setBanner({
         severity: 'error',
-        message: technicalCode.includes('workflow_graph_has_cycle') ? copy.graphInvalid : copy.saveError,
+        message: technicalCode.includes('workflow_graph_has_cycle')
+          ? copy.graphInvalid
+          : technicalCode.includes('workflow_foreach_join_not_allowed')
+            ? copy.forEachJoinNotAllowed
+            : technicalCode.includes('workflow_foreach_requires_upstream')
+              ? copy.forEachRequiresUpstream
+              : copy.saveError,
       });
     } finally {
       setBusy(false);

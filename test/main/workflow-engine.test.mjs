@@ -63,6 +63,39 @@ test('validateWorkflowGraph rejects cycles, duplicates and unknown edge nodes', 
   ]));
 });
 
+
+test('validateWorkflowGraph enforces forEach placement rules', () => {
+  const forEachNode = (id, extra = {}) => llmNode(id, { forEach: 'nodes.root.output.items', ...extra });
+
+  assert.throws(
+    () => validateWorkflowGraph([forEachNode('solo')], []),
+    /workflow_foreach_requires_upstream/,
+  );
+
+  const nodes = [llmNode('root'), forEachNode('a'), forEachNode('b'), llmNode('c')];
+  assert.throws(
+    () => validateWorkflowGraph(nodes, [
+      { from: 'root', to: 'a', condition: 'success' },
+      { from: 'root', to: 'b', condition: 'success' },
+      { from: 'a', to: 'c', condition: 'success' },
+      { from: 'b', to: 'c', condition: 'success' },
+    ]),
+    /workflow_foreach_join_not_allowed/,
+  );
+
+  assert.doesNotThrow(() => validateWorkflowGraph(nodes, [
+    { from: 'root', to: 'a', condition: 'success' },
+    { from: 'root', to: 'b', condition: 'success' },
+    { from: 'a', to: 'c', condition: 'success' },
+  ]));
+
+  assert.doesNotThrow(() => validateWorkflowGraph(nodes, [
+    { from: 'root', to: 'a', condition: 'success' },
+    { from: 'a', to: 'b', condition: 'success' },
+    { from: 'b', to: 'c', condition: 'success' },
+  ]), 'nested loops are allowed');
+});
+
 test('topologicalOrder sorts nodes respecting edges', () => {
   const order = topologicalOrder(
     [llmNode('c'), llmNode('a'), llmNode('b')],

@@ -5,6 +5,7 @@ import type {
   WorkflowNode,
   WorkflowNodeRunStatus,
 } from '../../shared/types';
+import { findForEachJoinConflict } from '../../shared/workflow-templates';
 
 export interface WorkflowNodeState {
   status: WorkflowNodeRunStatus;
@@ -54,6 +55,15 @@ export const validateWorkflowGraph = (nodes: WorkflowNode[], edges: WorkflowEdge
     if (edge.from === edge.to) {
       throw new Error('workflow_edge_self_reference');
     }
+  }
+  for (const node of nodes) {
+    // forEach iterates lists produced upstream, so root nodes cannot use it.
+    if (node.forEach && !edges.some((edge) => edge.to === node.id)) {
+      throw new Error('workflow_foreach_requires_upstream');
+    }
+  }
+  if (findForEachJoinConflict(nodes, edges)) {
+    throw new Error('workflow_foreach_join_not_allowed');
   }
   topologicalOrder(nodes, edges);
 };

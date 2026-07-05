@@ -108,12 +108,14 @@ export const sanitizeWorkflowNode = (
   if (!id || !name) {
     return null;
   }
+  const forEach = sanitizeText(record.forEach, 500).replace(/^\{\{\s*/, '').replace(/\s*\}\}$/, '');
   const base = {
     id,
     name,
     ...(sanitizePosition(record.position) ? { position: sanitizePosition(record.position) as WorkflowNodePosition } : {}),
     ...(record.requiresApproval === true ? { requiresApproval: true } : {}),
     ...(sanitizeTimeoutMs(record.timeoutMs) ? { timeoutMs: sanitizeTimeoutMs(record.timeoutMs) as number } : {}),
+    ...(forEach ? { forEach } : {}),
   };
 
   if (record.type === 'llm_agent') {
@@ -159,15 +161,7 @@ export const sanitizeWorkflowNode = (
     const input = record.input && typeof record.input === 'object' && !Array.isArray(record.input)
       ? record.input as Record<string, unknown>
       : {};
-    const forEach = sanitizeText(record.forEach, 500).replace(/^\{\{\s*/, '').replace(/\s*\}\}$/, '');
-    return {
-      ...base,
-      type: 'connector',
-      toolId,
-      actionId,
-      input,
-      ...(forEach ? { forEach } : {}),
-    };
+    return { ...base, type: 'connector', toolId, actionId, input };
   }
 
   if (record.type === 'condition') {

@@ -186,6 +186,47 @@ export const listUpstreamNodeIds = (
   return Array.from(visited).sort((a, b) => order.indexOf(a) - order.indexOf(b));
 };
 
+export interface ForEachJoinConflict {
+  nodeId: string;
+  parents: [string, string];
+}
+
+/**
+ * A node may not join two independent forEach loops: when two of its direct
+ * parents iterate (forEach) and neither is an ancestor of the other, their
+ * iterations cannot be aligned. Nested loops are fine because the inner
+ * forEach node is downstream of the outer one.
+ */
+export const findForEachJoinConflict = (
+  nodes: Array<Pick<WorkflowNode, 'id' | 'forEach'>>,
+  edges: WorkflowEdge[],
+): ForEachJoinConflict | null => {
+  const forEachIds = new Set(nodes.filter((node) => node.forEach).map((node) => node.id));
+  if (forEachIds.size < 2) {
+    return null;
+  }
+  for (const node of nodes) {
+    const forEachParents = Array.from(new Set(
+      edges.filter((edge) => edge.to === node.id && forEachIds.has(edge.from)).map((edge) => edge.from),
+    ));
+    if (forEachParents.length < 2) {
+      continue;
+    }
+    for (let first = 0; first < forEachParents.length; first += 1) {
+      for (let second = first + 1; second < forEachParents.length; second += 1) {
+        const parentA = forEachParents[first] as string;
+        const parentB = forEachParents[second] as string;
+        const upstreamOfA = listUpstreamNodeIds(nodes, edges, parentA);
+        const upstreamOfB = listUpstreamNodeIds(nodes, edges, parentB);
+        if (!upstreamOfA.includes(parentB) && !upstreamOfB.includes(parentA)) {
+          return { nodeId: node.id, parents: [parentA, parentB] };
+        }
+      }
+    }
+  }
+  return null;
+};
+
 /** Fixed output contract of condition nodes. */
 export const CONDITION_OUTPUT_SCHEMA: Record<string, unknown> = {
   type: 'object',

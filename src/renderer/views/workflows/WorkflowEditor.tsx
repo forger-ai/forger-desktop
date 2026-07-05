@@ -45,7 +45,7 @@ import type {
 } from '@shared/types';
 import { LLM_PROVIDER_REGISTRY, type AgentProviderPreference } from '@shared/agent-runtime-registry';
 import type { AppDictionary } from '@renderer/i18n';
-import { buildUpstreamFieldSources, parseReferencePath } from '@shared/workflow-templates';
+import { buildUpstreamFieldSources, findForEachJoinConflict, parseReferencePath } from '@shared/workflow-templates';
 import type { WorkflowDraft } from './workflow-draft';
 import { createDraftNode, edgeKey } from './workflow-draft';
 import { TemplateEditor, type TemplateSourceNode } from './TemplateEditor';
@@ -138,6 +138,7 @@ export function WorkflowEditor({ draft, onDraftChange, apps, agents, toolPackage
   const theme = useTheme();
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedEdgeKey, setSelectedEdgeKey] = useState<string | null>(null);
+  const [connectError, setConnectError] = useState<string | null>(null);
 
   const flowNodes: Node[] = useMemo(() => draft.nodes.map((node, index) => ({
     id: node.id,
@@ -185,12 +186,19 @@ export function WorkflowEditor({ draft, onDraftChange, apps, agents, toolPackage
       if (current.edges.some((edge) => edge.from === connection.source && edge.to === connection.target)) {
         return current;
       }
-      return {
-        ...current,
-        edges: [...current.edges, { from: connection.source as string, to: connection.target as string, condition: 'success' }],
-      };
+      const candidateEdges: WorkflowEdge[] = [
+        ...current.edges,
+        { from: connection.source as string, to: connection.target as string, condition: 'success' },
+      ];
+      // Joining two independent forEach loops is ambiguous; refuse the edge.
+      if (findForEachJoinConflict(current.nodes, candidateEdges)) {
+        setConnectError(copy.forEachJoinNotAllowed);
+        return current;
+      }
+      setConnectError(null);
+      return { ...current, edges: candidateEdges };
     });
-  }, [onDraftChange]);
+  }, [onDraftChange, copy.forEachJoinNotAllowed]);
 
   const selectedNode = draft.nodes.find((node) => node.id === selectedNodeId) ?? null;
   const selectedEdge = draft.edges.find((edge) => edgeKey(edge) === selectedEdgeKey) ?? null;
@@ -277,6 +285,11 @@ export function WorkflowEditor({ draft, onDraftChange, apps, agents, toolPackage
             </Button>
           ))}
         </Stack>
+        {connectError ? (
+          <Alert severity="warning" onClose={() => setConnectError(null)} sx={{ borderRadius: 0 }}>
+            {connectError}
+          </Alert>
+        ) : null}
         <Box
           sx={{
             height: 460,
@@ -409,9 +422,9 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, prov
   const [inputJsonError, setInputJsonError] = useState(false);
   const [schemaJsonError, setSchemaJsonError] = useState(false);
   const [rawConnectorInput, setRawConnectorInput] = useState(false);
-  // With forEach active, connector fields also offer the current item.
-  const connectorSources: TemplateSourceNode[] = (() => {
-    if (node.type !== 'connector' || !node.forEach) {
+  // With forEach active, every field of the node also offers the current item.
+  const sourcesWithItem: TemplateSourceNode[] = (() => {
+    if (!node.forEach) {
       return sources;
     }
     const listPath = node.forEach.replace(/^\{\{\s*/, '').replace(/\s*\}\}$/, '');
@@ -490,7 +503,7 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, prov
         <TemplateEditor
           label={copy.prompt}
           value={node.prompt}
-          sources={sources}
+          sources={sourcesWithItem}
           helperText={sources.length > 0 ? copy.referencePlaceholder : copy.promptHelper}
           placeholder={copy.referencePlaceholder}
           triggerGroupLabel={copy.triggerData}
@@ -682,38 +695,6 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, prov
               <MenuItem key={action.id} value={action.id}>{action.name}</MenuItem>
             ))}
           </TextField>
-          <TextField
-            size="small"
-            label={copy.forEachLabel}
-            value={node.forEach ?? ''}
-            helperText={copy.forEachHelper}
-            onChange={(event) => onChange((current) => {
-              if (current.type !== 'connector') {
-                return current;
-              }
-              const raw = event.target.value.trim();
-              if (!raw) {
-                const { forEach: _forEach, ...rest } = current;
-                return rest as WorkflowNode;
-              }
-              return { ...current, forEach: raw };
-            })}
-            slotProps={{
-              input: {
-                endAdornment: sources.length > 0 ? (
-                  <MappingMenuButton
-                    sources={sources}
-                    tooltip={copy.mapField}
-                    wholeOutputLabel={copy.wholeOutput}
-                    triggerGroupLabel={copy.triggerData}
-                    onPick={(reference) => onChange((current) => current.type === 'connector'
-                      ? { ...current, forEach: reference.replace(/^\{\{\s*/, '').replace(/\s*\}\}$/, '') }
-                      : current)}
-                  />
-                ) : undefined,
-              },
-            }}
-          />
           {(() => {
             const action = officialTools
               .find((tool) => tool.id === node.toolId)?.actions
@@ -726,7 +707,7 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, prov
                   <SchemaForm
                     schema={inputSchema as Record<string, unknown>}
                     value={node.input ?? {}}
-                    sources={connectorSources}
+                    sources={sourcesWithItem}
                     mapTooltip={copy.mapField}
                     wholeOutputLabel={copy.wholeOutput}
                     triggerGroupLabel={copy.triggerData}
@@ -789,9 +770,9 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, prov
               : current)}
             slotProps={{
               input: {
-                endAdornment: sources.length > 0 ? (
+                endAdornment: sourcesWithItem.length > 0 ? (
                   <MappingMenuButton
-                    sources={sources}
+                    sources={sourcesWithItem}
                     tooltip={copy.mapField}
                     wholeOutputLabel={copy.wholeOutput}
                     triggerGroupLabel={copy.triggerData}
@@ -830,6 +811,38 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, prov
       ) : null}
 
       <Divider />
+      {sources.length > 0 ? (
+        <TextField
+          size="small"
+          label={copy.forEachLabel}
+          value={node.forEach ?? ''}
+          helperText={copy.forEachHelper}
+          onChange={(event) => onChange((current) => {
+            const raw = event.target.value.trim();
+            if (!raw) {
+              const { forEach: _forEach, ...rest } = current;
+              return rest as WorkflowNode;
+            }
+            return { ...current, forEach: raw };
+          })}
+          slotProps={{
+            input: {
+              endAdornment: (
+                <MappingMenuButton
+                  sources={sources}
+                  tooltip={copy.mapField}
+                  wholeOutputLabel={copy.wholeOutput}
+                  triggerGroupLabel={copy.triggerData}
+                  onPick={(reference) => onChange((current) => ({
+                    ...current,
+                    forEach: reference.replace(/^\{\{\s*/, '').replace(/\s*\}\}$/, ''),
+                  }))}
+                />
+              ),
+            },
+          }}
+        />
+      ) : null}
       <FormControlLabel
         control={(
           <Checkbox
