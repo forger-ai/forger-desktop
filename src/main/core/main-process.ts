@@ -16,6 +16,7 @@ import { AppAgentConversationManager } from '../app-agent-conversation-manager';
 import { renderManifestAgentPrompt, type ManifestAgentPromptKind } from '../manifest-agent-prompts';
 import { AppMcpManager } from '../app-mcp-manager';
 import { AutomationManager } from '../automation-manager';
+import { WorkflowManager } from '../workflow-manager';
 import { BackgroundTaskStore } from '../background-task-store';
 import {
   extractDeepLinkFromArgv,
@@ -208,6 +209,7 @@ let wakeWordService: WakeWordServiceManager | null = null;
 let desktopUpdater: DesktopUpdater | null = null;
 let desktopErrorReporter: DesktopErrorReporter | null = null;
 let automationManager: AutomationManager | null = null;
+let workflowManager: WorkflowManager | null = null;
 let backgroundTaskStore: BackgroundTaskStore | null = null;
 let appMcpManager: AppMcpManager | null = null;
 let backupsManager: BackupsManager | null = null;
@@ -354,6 +356,12 @@ const buildChatRunIpcTracePayload = (run: ChatRun): Record<string, unknown> => g
 const sanitizeRendererChatTrace = (input: RendererChatTraceEvent): Record<string, unknown> => getMainUtilitiesController().sanitizeRendererChatTrace(input);
 const emitChatRunUpdated = (payload: ChatRunEvent): void => getMainUtilitiesController().emitChatRunUpdated(payload);
 const emitAutomationUpdated = (payload: { automation: unknown; run?: unknown }): void => getMainUtilitiesController().emitAutomationUpdated(payload);
+const emitWorkflowUpdated = (payload: { workflow: unknown; run?: unknown }): void => {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return;
+  }
+  mainWindow.webContents.send(IPC_CHANNELS.workflowUpdated, payload);
+};
 const emitBackgroundTaskUpdated = (payload: { task: BackgroundTask }): void => getMainUtilitiesController().emitBackgroundTaskUpdated(payload);
 const emitDesktopUpdateProgress = (payload: DesktopUpdateState): void => getMainUtilitiesController().emitDesktopUpdateProgress(payload);
 const emitForgerAccountUpdated = (payload: ReturnType<typeof publicForgerAccount> & { success?: boolean; userMessage?: string; technicalCode?: string }): void => getMainUtilitiesController().emitForgerAccountUpdated(payload);
@@ -1241,6 +1249,7 @@ const getMainProcessIpcDeps = (): MainProcessIpcDeps & AgentIpcDeps => ({
   appAgentTaskManager,
   appendInstallLog,
   automationManager,
+  workflowManager,
   buildAppSecretsState,
   buildCodexPromptWithAppContext,
   buildForgerToolsContextForApp,
@@ -1420,6 +1429,7 @@ const mainLifecycleState = {
   get wakeWordService() { return wakeWordService; }, set wakeWordService(value) { wakeWordService = value; },
   get desktopErrorReporter() { return desktopErrorReporter; }, set desktopErrorReporter(value) { desktopErrorReporter = value; },
   get automationManager() { return automationManager; }, set automationManager(value) { automationManager = value; },
+  get workflowManager() { return workflowManager; }, set workflowManager(value) { workflowManager = value; },
   get appMcpManager() { return appMcpManager; }, set appMcpManager(value) { appMcpManager = value; },
   get backupsManager() { return backupsManager; }, set backupsManager(value) { backupsManager = value; },
   get memoryStore() { return memoryStore; }, set memoryStore(value) { memoryStore = value; },
@@ -1433,14 +1443,14 @@ const mainLifecycleState = {
 };
 
 registerMainLifecycle({
-  AGENT_TOOL_DEFINITIONS, AppAgentConversationManager, AppAgentTaskManager, AppMcpManager, AutomationManager,
+  AGENT_TOOL_DEFINITIONS, AppAgentConversationManager, AppAgentTaskManager, AppMcpManager, AutomationManager, WorkflowManager,
   BrowserWindow, ChatOrchestrator, CloudDeviceManager, CloudIdentityStore, DesktopRuntimeBridge,
   DevCatalogService, FORGER_AGENT_CONTRACT_VERSION, FileLibrary, ForgerAccountStore, ForgerBackendClient,
   ForgerMcpServer, IPC_CHANNELS, MemoryMaintenanceManager, MemoryStore, SecretsStore, anyAppAllowsAgentNetworkAccess, app,
   appAllowsAgentNetworkAccess, appWindows, appendInstallLog, backendBaseUrl, buildForgerToolsContextForApp, buildMemoryContextForApp,
   buildMemoryContextForApps, chooseAgentRuntime, clearForgerAccountSession, closeServer, createLocalAppFromSkeleton, createWindow,
   finishSocialAppInstall, deleteQuarantinedSocialApp,
-  emitAutomationUpdated, emitChatRunUpdated, ensureBackendPythonEnvironment, ensureCatalogStatuses, ensureGlobalAgentsContext,
+  emitAutomationUpdated, emitWorkflowUpdated, emitChatRunUpdated, ensureBackendPythonEnvironment, ensureCatalogStatuses, ensureGlobalAgentsContext,
   ensureGitAvailable, ensurePathInside, ensureRuntimeInstalled, ensureSqliteDatabaseParent, flushPendingDeepLink, fs, getAgentPathEntries, getBackupsRoot,
   getClaudeAuthStatus, getAntigravityAuthStatus, getCloudDeviceAccountStorageKey, getCloudDevicePath, getCloudIdentityPath, getCloudIdentityStore,
   getCodexAuthStatus, getCodexHome, getCodexRoot, getCodexToolEnvironment, getDesktopChatNetworkAccessDefault: () => settings.defaultChatNetworkAccess !== false, getManifestAppSecretsValidationError, getSecretsStore, getForgerAccountPath, getForgerHomeRoot, getForgerMetadataRoot,

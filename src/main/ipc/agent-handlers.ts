@@ -2,6 +2,7 @@ import type { IpcMain, IpcMainInvokeEvent } from 'electron';
 import type { AppAgentConversationManager } from '../app-agent-conversation-manager';
 import type { AppAgentTaskManager } from '../app-agent-task-manager';
 import type { AutomationManager } from '../automation-manager';
+import type { WorkflowManager } from '../workflow-manager';
 import type { DesktopErrorReporter } from '../error-reporting';
 import type { ManifestAgentPromptKind } from '../manifest-agent-prompts';
 import type {
@@ -22,6 +23,8 @@ import type {
   AutomationUpsertInput,
   ClaudeEffort,
   CodexReasoningEffort,
+  WorkflowApproveNodeInput,
+  WorkflowUpsertInput,
 } from '../../shared/types';
 import type { AppRegistry } from '../core/main-process-types';
 import type { IPC_CHANNELS as IpcChannels } from '../../shared/ipc';
@@ -45,6 +48,7 @@ export interface AgentIpcDeps {
   appAgentConversationManager: AppAgentConversationManager | null;
   appAgentTaskManager: AppAgentTaskManager | null;
   automationManager: AutomationManager | null;
+  workflowManager: WorkflowManager | null;
   desktopErrorReporter: DesktopErrorReporter | null;
   ipcMain: IpcMain;
   normalizeAgentProvider: (value: unknown) => AgentRuntime['provider'] | undefined;
@@ -63,7 +67,7 @@ export interface AgentIpcDeps {
 }
 
 export const registerAgentIpcHandlers = (deps: AgentIpcDeps): void => {
-  const { BUILT_IN_CLAUDE_EFFORT, BUILT_IN_CODEX_REASONING, BetterSqlite3, IPC_CHANNELS, appAgentConversationManager, appAgentTaskManager, automationManager, desktopErrorReporter, ipcMain, normalizeAgentProvider, normalizeClaudeEffort, normalizeCodexReasoningEffort, registry, renderManifestAgentPrompt, resolveAppDbPath, resolveAppIdForWebContents, resolveInstalledAgents } = deps;
+  const { BUILT_IN_CLAUDE_EFFORT, BUILT_IN_CODEX_REASONING, BetterSqlite3, IPC_CHANNELS, appAgentConversationManager, appAgentTaskManager, automationManager, workflowManager, desktopErrorReporter, ipcMain, normalizeAgentProvider, normalizeClaudeEffort, normalizeCodexReasoningEffort, registry, renderManifestAgentPrompt, resolveAppDbPath, resolveAppIdForWebContents, resolveInstalledAgents } = deps;
   const handleAppAgentTaskStart = async (event: IpcMainInvokeEvent, input: AppCodexTaskStartInput) => {
     const appId = resolveAppIdForWebContents(event.sender.id);
     if (!appId) {
@@ -535,6 +539,65 @@ export const registerAgentIpcHandlers = (deps: AgentIpcDeps): void => {
       return null;
     }
     return await automationManager.getRunTranscript(runId);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.workflowsList, async () => {
+    if (!workflowManager) {
+      return [];
+    }
+    return workflowManager.list();
+  });
+  ipcMain.handle(IPC_CHANNELS.workflowsUpsert, async (_event, input: WorkflowUpsertInput) => {
+    if (!workflowManager) {
+      throw new Error('workflow_manager_unavailable');
+    }
+    return await workflowManager.upsert(input);
+  });
+  ipcMain.handle(IPC_CHANNELS.workflowsDelete, async (_event, id: string) => {
+    if (!workflowManager) {
+      return { success: false, technicalCode: 'workflow_manager_unavailable' };
+    }
+    return await workflowManager.delete(id);
+  });
+  ipcMain.handle(IPC_CHANNELS.workflowsSetEnabled, async (_event, id: string, enabled: boolean) => {
+    if (!workflowManager) {
+      throw new Error('workflow_manager_unavailable');
+    }
+    return await workflowManager.setEnabled(id, Boolean(enabled));
+  });
+  ipcMain.handle(IPC_CHANNELS.workflowsRunNow, async (_event, id: string) => {
+    if (!workflowManager) {
+      throw new Error('workflow_manager_unavailable');
+    }
+    return await workflowManager.runNow(id);
+  });
+  ipcMain.handle(IPC_CHANNELS.workflowsCancelRun, async (_event, runId: string) => {
+    if (!workflowManager) {
+      return { success: false, technicalCode: 'workflow_manager_unavailable' };
+    }
+    return await workflowManager.cancelRun(runId);
+  });
+  ipcMain.handle(IPC_CHANNELS.workflowsApproveNode, async (_event, input: WorkflowApproveNodeInput) => {
+    if (!workflowManager) {
+      return { success: false, technicalCode: 'workflow_manager_unavailable' };
+    }
+    return await workflowManager.approveNode({
+      runId: String(input?.runId ?? ''),
+      nodeId: String(input?.nodeId ?? ''),
+      approved: Boolean(input?.approved),
+    });
+  });
+  ipcMain.handle(IPC_CHANNELS.workflowsListRuns, async (_event, workflowId: string) => {
+    if (!workflowManager) {
+      return [];
+    }
+    return await workflowManager.listRuns(workflowId);
+  });
+  ipcMain.handle(IPC_CHANNELS.workflowsGetRun, async (_event, runId: string) => {
+    if (!workflowManager) {
+      return null;
+    }
+    return await workflowManager.getRun(runId);
   });
 
 };

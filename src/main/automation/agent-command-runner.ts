@@ -126,6 +126,8 @@ export const runAgentCommand = async (
     transcriptPath: string;
     mcpServers?: LlmAutomationMcpServerConfig[];
     networkAccess?: boolean;
+    timeoutMs?: number;
+    onChild?: (child: ChildProcessWithoutNullStreams) => void;
     onAssistantMessages?: (assistantMessages: string[]) => void;
   },
 ): Promise<LlmAutomationCommandResult> => {
@@ -163,8 +165,9 @@ export const runAgentCommand = async (
     prompt: options.prompt,
     permissionMode: options.runtime.permissionMode ?? 'safe',
     networkAccess: options.networkAccess,
-    timeoutMs: AUTOMATION_TIMEOUT_MS,
+    timeoutMs: options.timeoutMs ?? AUTOMATION_TIMEOUT_MS,
     timeoutMode: 'absolute',
+    onChild: options.onChild,
     codexHomePlan: options.runtime.provider === 'codex'
       ? {
           type: 'temporary',
@@ -211,6 +214,7 @@ const runCommandCapture = async (
     cwd: string;
     env?: NodeJS.ProcessEnv;
     timeoutMs?: number;
+    onChild?: (child: ChildProcessWithoutNullStreams) => void;
     onStdout?: (text: string) => void;
     onStderr?: (text: string) => void;
     stdinText?: string;
@@ -227,6 +231,7 @@ const runCommandCapture = async (
       stdio: ['pipe', 'pipe', 'pipe'],
       detached: process.platform !== 'win32',
     });
+    options.onChild?.(child);
     child.stdin.end(options.stdinText ?? '');
 
     let stdout = '';

@@ -1,0 +1,388 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
+const { WorkflowManager, friendlyWorkflowFailureMessage } = require('../../dist-electron/main/workflow-manager.js');
+
+const wait = (ms) => new Promise((resolveWait) => setTimeout(resolveWait, ms));
+
+const waitFor = async (predicate, timeoutMs = 5_000) => {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const value = await predicate();
+    if (value) {
+      return value;
+    }
+    await wait(25);
+  }
+  throw new Error('waitFor_timeout');
+};
+
+const createManager = async (overrides = {}) => {
+  const metadataRoot = await mkdtemp(join(tmpdir(), 'forger-workflows-'));
+  const events = [];
+  const connectorCalls = [];
+  const manager = new WorkflowManager({
+    forgerHomeRoot: metadataRoot,
+    metadataRoot,
+    codexHome: join(metadataRoot, 'codex'),
+    getAgentRuntime: async () => ({ provider: 'codex', model: 'gpt-test', effort: 'medium' }),
+    getInstalledApps: () => [],
+    getCodexCliPath: async () => null,
+    getClaudeCliPath: async () => null,
+    getCodexPathEntries: async () => [],
+    getCodexAuthenticated: async () => false,
+    getClaudeAuthenticated: async () => false,
+    callConnectorAction: overrides.callConnectorAction ?? (async (input) => {
+      connectorCalls.push(input);
+      return { success: true, userMessage: 'ok', data: { echoed: input.input } };
+    }),
+    getPersonalAgent: overrides.getPersonalAgent ?? (async () => null),
+    onWorkflowUpdated: (event) => events.push(event),
+    ...overrides.options,
+  });
+  await manager.initialize();
+  return {
+    manager,
+    metadataRoot,
+    events,
+    connectorCalls,
+    cleanup: async () => {
+      manager.dispose();
+      await rm(metadataRoot, { recursive: true, force: true });
+    },
+  };
+};
+
+const connectorNode = (id, overrides = {}) => ({
+  id,
+  name: `Conector ${id}`,
+  type: 'connector',
+  toolId: 'slack',
+  actionId: 'slack.send_message',
+  input: { channelId: '#general', text: 'hola' },
+  ...overrides,
+});
+
+test('upsert validates and persists workflows, list/get/delete/setEnabled work', async () => {
+  const harness = await createManager();
+  try {
+    await assert.rejects(
+      harness.manager.upsert({ name: '', trigger: { type: 'manual' }, nodes: [connectorNode('a')], edges: [] }),
+      /workflow_name_required/,
+    );
+    await assert.rejects(
+      harness.manager.upsert({ name: 'Sin nodos', trigger: { type: 'manual' }, nodes: [], edges: [] }),
+      /workflow_nodes_required/,
+    );
+    await assert.rejects(
+      harness.manager.upsert({
+        name: 'Ciclo',
+        trigger: { type: 'manual' },
+        nodes: [connectorNode('a'), connectorNode('b')],
+        edges: [
+          { from: 'a', to: 'b', condition: 'success' },
+          { from: 'b', to: 'a', condition: 'success' },
+        ],
+      }),
+      /workflow_graph_has_cycle/,
+    );
+
+    const workflow = await harness.manager.upsert({
+      name: 'Mi flujo',
+      description: 'demo',
+      trigger: { type: 'manual' },
+      nodes: [connectorNode('a')],
+      edges: [],
+    });
+    assert.ok(workflow.id);
+    assert.equal(workflow.enabled, true);
+    assert.equal(workflow.nextRunAt, null);
+    assert.equal(harness.manager.list().length, 1);
+    assert.equal(harness.manager.get(workflow.id)?.name, 'Mi flujo');
+
+    const paused = await harness.manager.setEnabled(workflow.id, false);
+    assert.equal(paused.enabled, false);
+
+    const scheduled = await harness.manager.upsert({
+      id: workflow.id,
+      name: 'Mi flujo',
+      trigger: { type: 'scheduled', frequency: { type: 'hourly' } },
+      nodes: [connectorNode('a')],
+      edges: [],
+      enabled: true,
+    });
+    assert.ok(scheduled.nextRunAt, 'scheduled workflow gets nextRunAt');
+
+    const deletion = await harness.manager.delete(workflow.id);
+    assert.equal(deletion.success, true);
+    assert.equal(harness.manager.list().length, 0);
+    const missing = await harness.manager.delete('nope');
+    assert.equal(missing.success, false);
+  } finally {
+    await harness.cleanup();
+  }
+});
+
+test('runs a connector + condition DAG chaining outputs through templates', async () => {
+  const harness = await createManager();
+  try {
+    const workflow = await harness.manager.upsert({
+      name: 'Encadenado',
+      trigger: { type: 'manual' },
+      nodes: [
+        connectorNode('fuente', { input: { channelId: '#general', text: 'hola' } }),
+        {
+          id: 'hay_datos',
+          name: 'Hay datos',
+          type: 'condition',
+          expression: { left: '{{nodes.fuente.output.echoed.text}}', operator: 'equals', right: 'hola' },
+        },
+        connectorNode('notificar', {
+          input: { channelId: '#general', text: 'texto: {{nodes.fuente.output.echoed.text}}' },
+        }),
+        connectorNode('nunca', { input: { channelId: '#general', text: 'no debería correr' } }),
+      ],
+      edges: [
+        { from: 'fuente', to: 'hay_datos', condition: 'success' },
+        { from: 'hay_datos', to: 'notificar', condition: 'success' },
+        { from: 'hay_datos', to: 'nunca', condition: 'error' },
+      ],
+    });
+
+    const runSummary = await harness.manager.runNow(workflow.id);
+    assert.equal(runSummary.status, 'queued');
+
+    const finished = await waitFor(async () => {
+      const run = await harness.manager.getRun(runSummary.id);
+      return run && ['succeeded', 'failed', 'canceled'].includes(run.status) ? run : null;
+    });
+    assert.equal(finished.status, 'succeeded');
+
+    const byNode = Object.fromEntries(finished.nodeRuns.map((nodeRun) => [nodeRun.nodeId, nodeRun]));
+    assert.equal(byNode.fuente.status, 'succeeded');
+    assert.equal(byNode.hay_datos.status, 'succeeded');
+    assert.deepEqual(byNode.hay_datos.output, { result: true });
+    assert.equal(byNode.notificar.status, 'succeeded');
+    assert.equal(byNode.nunca.status, 'skipped');
+
+    const notifyCall = harness.connectorCalls.find((call) => call.input.text?.startsWith('texto:'));
+    assert.equal(notifyCall.input.text, 'texto: hola');
+
+    const runs = await harness.manager.listRuns(workflow.id);
+    assert.equal(runs.length, 1);
+    assert.equal(runs[0].status, 'succeeded');
+  } finally {
+    await harness.cleanup();
+  }
+});
+
+test('error branches handle connector failures and unhandled failures fail the run', async () => {
+  const harness = await createManager({
+    callConnectorAction: async (input) => input.actionId === 'fail.action'
+      ? { success: false, userMessage: 'falló', technicalCode: 'connector_boom' }
+      : { success: true, data: { ok: true } },
+  });
+  try {
+    const handled = await harness.manager.upsert({
+      name: 'Con manejo',
+      trigger: { type: 'manual' },
+      nodes: [
+        connectorNode('rompe', { actionId: 'fail.action' }),
+        connectorNode('rescate'),
+      ],
+      edges: [{ from: 'rompe', to: 'rescate', condition: 'error' }],
+    });
+    const handledRun = await harness.manager.runNow(handled.id);
+    const handledResult = await waitFor(async () => {
+      const run = await harness.manager.getRun(handledRun.id);
+      return run && ['succeeded', 'failed'].includes(run.status) ? run : null;
+    });
+    assert.equal(handledResult.status, 'succeeded');
+    const byNode = Object.fromEntries(handledResult.nodeRuns.map((nodeRun) => [nodeRun.nodeId, nodeRun]));
+    assert.equal(byNode.rompe.status, 'failed');
+    assert.equal(byNode.rompe.error, 'connector_boom');
+    assert.equal(byNode.rescate.status, 'succeeded');
+
+    const unhandled = await harness.manager.upsert({
+      name: 'Sin manejo',
+      trigger: { type: 'manual' },
+      nodes: [connectorNode('rompe', { actionId: 'fail.action' })],
+      edges: [],
+    });
+    const unhandledRun = await harness.manager.runNow(unhandled.id);
+    const unhandledResult = await waitFor(async () => {
+      const run = await harness.manager.getRun(unhandledRun.id);
+      return run && ['succeeded', 'failed'].includes(run.status) ? run : null;
+    });
+    assert.equal(unhandledResult.status, 'failed');
+    assert.equal(unhandledResult.error, 'connector_boom');
+  } finally {
+    await harness.cleanup();
+  }
+});
+
+test('requiresApproval pauses the run until approveNode resolves it', async () => {
+  const harness = await createManager();
+  try {
+    const workflow = await harness.manager.upsert({
+      name: 'Con aprobación',
+      trigger: { type: 'manual' },
+      nodes: [connectorNode('enviar', { requiresApproval: true })],
+      edges: [],
+    });
+    const runSummary = await harness.manager.runNow(workflow.id);
+
+    const waiting = await waitFor(async () => {
+      const run = await harness.manager.getRun(runSummary.id);
+      return run?.status === 'waiting_approval' ? run : null;
+    });
+    assert.equal(waiting.pendingApprovalNodeId, 'enviar');
+
+    const approval = await harness.manager.approveNode({ runId: runSummary.id, nodeId: 'enviar', approved: true });
+    assert.equal(approval.success, true);
+
+    const finished = await waitFor(async () => {
+      const run = await harness.manager.getRun(runSummary.id);
+      return run && ['succeeded', 'failed'].includes(run.status) ? run : null;
+    });
+    assert.equal(finished.status, 'succeeded');
+
+    const stale = await harness.manager.approveNode({ runId: runSummary.id, nodeId: 'enviar', approved: true });
+    assert.equal(stale.success, false);
+    assert.equal(stale.technicalCode, 'workflow_approval_not_pending');
+  } finally {
+    await harness.cleanup();
+  }
+});
+
+test('rejected approval fails the node and the run when unhandled', async () => {
+  const harness = await createManager();
+  try {
+    const workflow = await harness.manager.upsert({
+      name: 'Rechazado',
+      trigger: { type: 'manual' },
+      nodes: [connectorNode('enviar', { requiresApproval: true })],
+      edges: [],
+    });
+    const runSummary = await harness.manager.runNow(workflow.id);
+    await waitFor(async () => {
+      const run = await harness.manager.getRun(runSummary.id);
+      return run?.status === 'waiting_approval' ? run : null;
+    });
+    await harness.manager.approveNode({ runId: runSummary.id, nodeId: 'enviar', approved: false });
+    const finished = await waitFor(async () => {
+      const run = await harness.manager.getRun(runSummary.id);
+      return run && ['succeeded', 'failed'].includes(run.status) ? run : null;
+    });
+    assert.equal(finished.status, 'failed');
+    assert.equal(finished.error, 'workflow_node_approval_denied');
+    assert.equal(harness.connectorCalls.length, 0);
+  } finally {
+    await harness.cleanup();
+  }
+});
+
+test('MCP node bridge validates output schemas and reports failures', async () => {
+  const harness = await createManager();
+  try {
+    assert.equal(harness.manager.getNodeContext('missing'), null);
+    assert.equal(harness.manager.completeNodeFromMcp('missing', {}).success, false);
+    assert.equal(harness.manager.failNodeFromMcp('missing', {}).success, false);
+  } finally {
+    await harness.cleanup();
+  }
+});
+
+test('parallel branches execute concurrently', async () => {
+  let active = 0;
+  let maxActive = 0;
+  const harness = await createManager({
+    callConnectorAction: async () => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await wait(150);
+      active -= 1;
+      return { success: true, data: { ok: true } };
+    },
+  });
+  try {
+    const workflow = await harness.manager.upsert({
+      name: 'Paralelo',
+      trigger: { type: 'manual' },
+      nodes: [connectorNode('rama1'), connectorNode('rama2'), connectorNode('rama3')],
+      edges: [],
+    });
+    const runSummary = await harness.manager.runNow(workflow.id);
+    const finished = await waitFor(async () => {
+      const run = await harness.manager.getRun(runSummary.id);
+      return run && ['succeeded', 'failed'].includes(run.status) ? run : null;
+    });
+    assert.equal(finished.status, 'succeeded');
+    assert.ok(maxActive >= 2, `expected parallel branches, saw maxActive=${maxActive}`);
+  } finally {
+    await harness.cleanup();
+  }
+});
+
+test('workflow skips concurrent duplicate runs and interrupted runs fail on restart', async () => {
+  const harness = await createManager({
+    callConnectorAction: async () => {
+      await wait(300);
+      return { success: true, data: { ok: true } };
+    },
+  });
+  try {
+    const workflow = await harness.manager.upsert({
+      name: 'Duplicado',
+      trigger: { type: 'manual' },
+      nodes: [connectorNode('lento')],
+      edges: [],
+    });
+    const first = await harness.manager.runNow(workflow.id);
+    await waitFor(async () => harness.manager.get(workflow.id)?.running === true);
+    const second = await harness.manager.runNow(workflow.id);
+    assert.equal(second.status, 'skipped');
+    await waitFor(async () => {
+      const run = await harness.manager.getRun(first.id);
+      return run && ['succeeded', 'failed'].includes(run.status) ? run : null;
+    });
+
+    assert.equal(friendlyWorkflowFailureMessage('workflow_interrupted').includes('interrumpido'), true);
+    assert.equal(friendlyWorkflowFailureMessage('codex_auth_missing').length > 0, true);
+  } finally {
+    await harness.cleanup();
+  }
+});
+
+test('llm node fails cleanly when the provider is not authenticated', async () => {
+  const harness = await createManager();
+  try {
+    const workflow = await harness.manager.upsert({
+      name: 'LLM sin auth',
+      trigger: { type: 'manual' },
+      nodes: [{
+        id: 'agente',
+        name: 'Agente',
+        type: 'llm_agent',
+        prompt: 'haz algo',
+        toolIds: [],
+        appIds: [],
+      }],
+      edges: [],
+    });
+    const runSummary = await harness.manager.runNow(workflow.id);
+    const finished = await waitFor(async () => {
+      const run = await harness.manager.getRun(runSummary.id);
+      return run && ['succeeded', 'failed'].includes(run.status) ? run : null;
+    });
+    assert.equal(finished.status, 'failed');
+    assert.equal(finished.error, 'codex_auth_missing');
+  } finally {
+    await harness.cleanup();
+  }
+});

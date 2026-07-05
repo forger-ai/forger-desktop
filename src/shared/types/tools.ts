@@ -57,7 +57,23 @@ export type AgentToolId =
   | 'whatsapp.read_messages'
   | 'whatsapp.download_attachment'
   | 'whatsapp.send_message'
-  | 'whatsapp.get_chat_details';
+  | 'whatsapp.get_chat_details'
+  | 'workflow_get_context'
+  | 'workflow_complete_node'
+  | 'workflow_fail_node'
+  | 'forger_workflow_list'
+  | 'forger_workflow_get'
+  | 'forger_workflow_upsert'
+  | 'forger_workflow_run'
+  | 'slack.connection.status'
+  | 'slack.list_channels'
+  | 'slack.read_messages'
+  | 'slack.send_message'
+  | 'trello.connection.status'
+  | 'trello.list_boards'
+  | 'trello.list_lists'
+  | 'trello.list_cards'
+  | 'trello.create_card';
 
 export type AgentToolCategory = 'consulta' | 'app' | 'actualizacion' | 'vista' | 'memoria';
 
@@ -115,6 +131,8 @@ export interface OfficialToolSecretDefinition {
   label: string;
   required: boolean;
   usage: string;
+  /** True when the user provides this secret manually (local token connectors). */
+  manual?: boolean;
 }
 
 export interface OfficialToolDefinition {
@@ -200,6 +218,8 @@ export interface ToolMutationResult {
 export interface ConfigureOfficialToolInput {
   toolId: string;
   locale?: string;
+  /** Values for manual secrets declared by the tool, keyed by secret name. */
+  secrets?: Record<string, string>;
 }
 
 export interface CallOfficialToolInput {

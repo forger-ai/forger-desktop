@@ -137,7 +137,7 @@ import {
 
 const AUTH_STATUS_POLL_INTERVAL_MS = 1500; const AUTH_STATUS_POLL_TIMEOUT_MS = 120000; const wait = async (ms: number): Promise<void> => new Promise((resolve) => { setTimeout(resolve, ms); });
 const FORGER_DATA_ROOT_NAME = 'data'; const FREE_CHAT_APP_ID = 'forger'; const ADVANCED_MODE_STORAGE_KEY = 'forger.beta.advancedModeEnabled'; const GLOBAL_ONBOARDING_STORAGE_KEY = 'forger.onboarding.global.dismissed'; const ADVANCED_ONBOARDING_STORAGE_PREFIX = 'forger.onboarding.advanced.';
-const TOOLS_ONBOARDING_MODULE_STORAGE_KEY = 'forger.onboarding.tools.module'; const TOOLS_ONBOARDING_STORAGE_KEYS = { forger: 'forger.onboarding.tools.forger', gmail: 'forger.onboarding.tools.gmail', } as const; const ADVANCED_VIEWS = ['tools', 'files', 'backups', 'devices', 'datos', 'secrets', 'automations'] as const;
+const TOOLS_ONBOARDING_MODULE_STORAGE_KEY = 'forger.onboarding.tools.module'; const TOOLS_ONBOARDING_STORAGE_KEYS = { forger: 'forger.onboarding.tools.forger', gmail: 'forger.onboarding.tools.gmail', } as const; const ADVANCED_VIEWS = ['tools', 'files', 'backups', 'devices', 'datos', 'secrets', 'automations', 'workflows'] as const;
 const PINNED_VIEWS_STORAGE_KEY = 'forger.sidebar.pinnedViews';
 const formatBackupBytes = (bytes: number, locale: string) => { if (!Number.isFinite(bytes) || bytes <= 0) { return '0 B'; }
 const units = ['B', 'KB', 'MB', 'GB', 'TB']; let value = bytes; let unitIndex = 0; while (value >= 1024 && unitIndex < units.length - 1) { value /= 1024; unitIndex += 1; }

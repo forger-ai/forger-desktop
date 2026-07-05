@@ -1,6 +1,7 @@
 import type {
   CallOfficialToolInput,
   CallOfficialToolResult,
+  ConfigureOfficialToolInput,
   OfficialToolDefinition,
   OfficialToolRuntimeEvent,
   ToolMutationResult,
@@ -39,7 +40,7 @@ export interface InternalToolContext {
 
 export interface InternalToolModule {
   definition: OfficialToolDefinition;
-  configure: (context: InternalToolContext) => Promise<ToolMutationResult>;
+  configure: (context: InternalToolContext, input?: ConfigureOfficialToolInput) => Promise<ToolMutationResult>;
   execute: (input: CallOfficialToolInput, context: InternalToolContext) => Promise<CallOfficialToolResult>;
   isConfigured?: (context: InternalToolContext) => Promise<boolean>;
   start?: (context: InternalToolContext) => Promise<void>;

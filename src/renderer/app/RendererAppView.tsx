@@ -10,6 +10,7 @@ import { isOpenableError, isRetryableInstallError, isUpdateError } from '@render
 import { AppView } from '@renderer/views/AppView';
 import { AgentsView } from '@renderer/views/AgentsView';
 import { AutomationsView } from '@renderer/views/AutomationsView';
+import { WorkflowsView } from '@renderer/views/workflows/WorkflowsView';
 import { BackupsView } from '@renderer/views/BackupsView';
 import { BackgroundTaskDetailView, BackgroundTasksListView, viewLabel } from '@renderer/views/BackgroundTasksView';
 import { CatalogView } from '@renderer/views/CatalogView';
@@ -1235,6 +1236,10 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
           />)
         ) : null}
 
+        {currentView === 'workflows' ? (
+          renderAdvancedView('workflows', <WorkflowsView t={t} />)
+        ) : null}
+
         {currentView === 'backgroundTasks' ? (
           <BackgroundTasksListView
             t={t}
@@ -1333,8 +1338,8 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             onActivateOfficialTool={(toolId) =>
               void runOfficialToolAction(toolId, () => getDesktopApi().activateOfficialTool(toolId, activeLocale))
             }
-            onConfigureOfficialTool={(toolId) =>
-              void runOfficialToolAction(toolId, () => getDesktopApi().configureOfficialTool({ toolId, locale: activeLocale }), 'configure')
+            onConfigureOfficialTool={(toolId, secrets) =>
+              void runOfficialToolAction(toolId, () => getDesktopApi().configureOfficialTool({ toolId, locale: activeLocale, ...(secrets ? { secrets } : {}) }), 'configure')
             }
             onStartWhatsAppPairing={async (method, phoneNumber) => {
               const configureResult = await getDesktopApi().configureOfficialTool({ toolId: 'whatsapp', locale: activeLocale });

@@ -43,7 +43,7 @@ interface ToolsViewProps {
   onSelectedToolChange: (tool: SelectedTool) => void;
   onApprovalChange: (toolId: AgentToolDefinition['id'], requiresApproval: boolean) => void;
   onActivateOfficialTool: (toolId: string) => void;
-  onConfigureOfficialTool: (toolId: string) => void;
+  onConfigureOfficialTool: (toolId: string, secrets?: Record<string, string>) => void;
   onStartWhatsAppPairing: (method: 'qr' | 'pairing_code', phoneNumber?: string) => Promise<import('@shared/types').CallOfficialToolResult>;
   onGetWhatsAppStatus: () => Promise<import('@shared/types').CallOfficialToolResult>;
   onOfficialToolEvent: (listener: (event: OfficialToolRuntimeEvent) => void) => () => void;
@@ -182,7 +182,7 @@ export function ToolsView({
         errorMessage={errorMessage}
         t={t}
         onBack={() => onSelectedToolChange(null)}
-        onConnect={() => onConfigureOfficialTool(selectedOfficialTool.id)}
+        onConnect={(secrets) => onConfigureOfficialTool(selectedOfficialTool.id, secrets)}
         onDisconnect={() => onDeactivateOfficialTool(selectedOfficialTool.id)}
         onStartWhatsAppPairing={selectedOfficialTool.id === 'whatsapp' ? onStartWhatsAppPairing : undefined}
         onGetWhatsAppStatus={selectedOfficialTool.id === 'whatsapp' ? onGetWhatsAppStatus : undefined}

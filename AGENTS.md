@@ -120,6 +120,25 @@ This playbook applies when Forger detects a new published version of an already 
 - If a part cannot be integrated maintainably, the agent leaves it out and communicates the functional impact.
 - When a resolution is complete, the agent finishes the merge and saves a new version.
 
+## Workflows
+
+Desktop includes a Flujos (Workflows) module. A workflow is a directed acyclic graph of nodes connected by edges; each node does one unit of work and hands a structured JSON output to the next nodes.
+
+Node types:
+
+- `llm_agent`: runs a one-shot agent with the configured provider (codex, claude, or antigravity), a prompt, enabled platform tools, and enabled apps. Enabling an app starts that app's MCP for the node run. The node prompt supports `{{nodes.<id>.output.<path>}}` and `{{trigger.<path>}}` templates resolved against upstream outputs.
+- `forger_agent`: runs a personal agent defined in Forger with that agent's own runtime, instructions, app grants, and tool grants.
+- `connector`: executes one official tool action deterministically without an LLM, with template-resolved JSON input.
+- `condition`: evaluates an expression over upstream outputs and produces `{ result: boolean }`.
+
+Edges carry a condition: `success`, `error`, or `always`. On condition nodes, `success` is the true branch and `error` the false branch. A failed node counts as handled when an outgoing `error` or `always` edge routes the failure; unhandled failures fail the run. Independent branches execute in parallel. Nodes marked `requiresApproval` pause the run in `waiting_approval` until the person approves or rejects the step from the Workflows view.
+
+Triggers are manual or scheduled with the same frequency and missed-run policies as automations. Runs persist per-node status, input, output, summary, and a transcript under the metadata root.
+
+Agent nodes report their result through Forger MCP tools available only inside workflow node sessions: `workflow_get_context`, `workflow_complete_node` (validates the node's declared output schema), and `workflow_fail_node`. If an agent finishes without reporting, Desktop falls back to the agent's final message as the node output. Chat and personal agents manage workflows through `forger_workflow_list`, `forger_workflow_get`, `forger_workflow_upsert`, and `forger_workflow_run`.
+
+Local connectors (Slack, Trello) are official tools whose credentials are plain tokens the person pastes once; tokens are stored in the local secrets store and validated against the service API. There is no cloud OAuth in this connector layer. New connectors are added with a `TokenConnectorDefinition` in `src/main/tools`.
+
 ## Final-User Communication
 
 - Do not mention implementation, files, paths, endpoints, commands, commits, or branches unless explicitly requested.

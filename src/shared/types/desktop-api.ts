@@ -27,6 +27,7 @@ import type { LlmProviderProfileMutationResult, LlmProviderProfilesState, SetAct
 import type { AgentToolPackageDefinition, AgentToolSettings, UpdateAgentToolApprovalInput, OfficialToolsState, ToolMutationResult, ConfigureOfficialToolInput, CallOfficialToolInput, CallOfficialToolResult, AppToolsInstallGate, SetAppToolGrantInput, OfficialToolRuntimeEvent, GetAppToolsInstallGateOptions } from './tools';
 import type { PickedChatFile, FilesStageForChatInput, FilesDiscardStagedForChatInput, FilesActionResult, FilesListInput, ForgerFileRecord, ForgerFileCategory, FilesCreateCategoryInput, FilesRenameCategoryInput, FilesDeleteCategoryInput, FilesImportInput, FilesMoveInput, FilesRenameInput, FilesDeleteInput, DbListTablesResponse, DbQueryTableResponse } from './data';
 import type { Automation, AutomationRun, AutomationRunSummary, AutomationUpsertInput, WindowControlState } from './automations';
+import type { Workflow, WorkflowApproveNodeInput, WorkflowRun, WorkflowRunSummary, WorkflowUpdatedEvent, WorkflowUpsertInput } from './workflows';
 import type { BackgroundTask, BackgroundTaskEvent, BackgroundTaskUpsertInput } from './background-tasks';
 import type { LlmRunsSnapshot } from './llm-runs';
 import type { PersonalAgent, PersonalAgentConversation, PersonalAgentConversationEvent, PersonalAgentConversationGetInput, PersonalAgentConversationsListInput, PersonalAgentConversationStartInput, PersonalAgentCreateInput, PersonalAgentDeleteInput, PersonalAgentGrantOptions, PersonalAgentMessageSendInput, PersonalAgentUpdatePermissionsInput, PersonalAgentWorkspaceEntry, PersonalAgentWorkspaceFile, PersonalAgentWorkspaceFileReadInput, PersonalAgentWorkspaceFileWriteInput, PersonalAgentWorkspaceListInput } from './personal-agents';
@@ -297,6 +298,16 @@ export interface ForgerDesktopApi {
   automationsListRuns: (automationId: string) => Promise<AutomationRunSummary[]>;
   automationsGetRunTranscript: (runId: string) => Promise<AutomationRun | null>;
   onAutomationUpdated: (listener: (event: { automation: Automation; run?: AutomationRunSummary }) => void) => () => void;
+  workflowsList: () => Promise<Workflow[]>;
+  workflowsUpsert: (input: WorkflowUpsertInput) => Promise<Workflow>;
+  workflowsDelete: (id: string) => Promise<FilesActionResult>;
+  workflowsSetEnabled: (id: string, enabled: boolean) => Promise<Workflow>;
+  workflowsRunNow: (id: string) => Promise<WorkflowRunSummary>;
+  workflowsCancelRun: (runId: string) => Promise<FilesActionResult>;
+  workflowsApproveNode: (input: WorkflowApproveNodeInput) => Promise<FilesActionResult>;
+  workflowsListRuns: (workflowId: string) => Promise<WorkflowRunSummary[]>;
+  workflowsGetRun: (runId: string) => Promise<WorkflowRun | null>;
+  onWorkflowUpdated: (listener: (event: WorkflowUpdatedEvent) => void) => () => void;
   backgroundTasksList: () => Promise<BackgroundTask[]>;
   backgroundTaskGet: (id: string) => Promise<BackgroundTask | null>;
   backgroundTasksUpsert: (input: BackgroundTaskUpsertInput) => Promise<BackgroundTask>;

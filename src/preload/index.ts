@@ -256,6 +256,16 @@ const IPC_CHANNELS = {
   automationsListRuns: 'forger:automations:list-runs',
   automationsGetRunTranscript: 'forger:automations:get-run-transcript',
   automationUpdated: 'forger:automations:updated',
+  workflowsList: 'forger:workflows:list',
+  workflowsUpsert: 'forger:workflows:upsert',
+  workflowsDelete: 'forger:workflows:delete',
+  workflowsSetEnabled: 'forger:workflows:set-enabled',
+  workflowsRunNow: 'forger:workflows:run-now',
+  workflowsCancelRun: 'forger:workflows:cancel-run',
+  workflowsApproveNode: 'forger:workflows:approve-node',
+  workflowsListRuns: 'forger:workflows:list-runs',
+  workflowsGetRun: 'forger:workflows:get-run',
+  workflowUpdated: 'forger:workflows:updated',
   backgroundTasksList: 'forger:background-tasks:list',
   backgroundTaskGet: 'forger:background-tasks:get',
   backgroundTasksUpsert: 'forger:background-tasks:upsert',
@@ -660,6 +670,24 @@ const api: ForgerDesktopApi = {
     ipcRenderer.on(IPC_CHANNELS.automationUpdated, wrapped);
     return () => {
       ipcRenderer.removeListener(IPC_CHANNELS.automationUpdated, wrapped);
+    };
+  },
+  workflowsList: () => ipcRenderer.invoke(IPC_CHANNELS.workflowsList),
+  workflowsUpsert: (input) => ipcRenderer.invoke(IPC_CHANNELS.workflowsUpsert, input),
+  workflowsDelete: (id) => ipcRenderer.invoke(IPC_CHANNELS.workflowsDelete, id),
+  workflowsSetEnabled: (id, enabled) => ipcRenderer.invoke(IPC_CHANNELS.workflowsSetEnabled, id, enabled),
+  workflowsRunNow: (id) => ipcRenderer.invoke(IPC_CHANNELS.workflowsRunNow, id),
+  workflowsCancelRun: (runId) => ipcRenderer.invoke(IPC_CHANNELS.workflowsCancelRun, runId),
+  workflowsApproveNode: (input) => ipcRenderer.invoke(IPC_CHANNELS.workflowsApproveNode, input),
+  workflowsListRuns: (workflowId) => ipcRenderer.invoke(IPC_CHANNELS.workflowsListRuns, workflowId),
+  workflowsGetRun: (runId) => ipcRenderer.invoke(IPC_CHANNELS.workflowsGetRun, runId),
+  onWorkflowUpdated: (listener) => {
+    const wrapped = (_event: unknown, payload: Parameters<typeof listener>[0]) => {
+      listener(payload);
+    };
+    ipcRenderer.on(IPC_CHANNELS.workflowUpdated, wrapped);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.workflowUpdated, wrapped);
     };
   },
   backgroundTasksList: () => ipcRenderer.invoke(IPC_CHANNELS.backgroundTasksList),

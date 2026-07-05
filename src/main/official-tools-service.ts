@@ -315,7 +315,7 @@ export class OfficialToolsService {
       }
     }
 
-    const result = await toolModule.configure(this.getContext(input.locale));
+    const result = await toolModule.configure(this.getContext(input.locale), input);
     await this.recordError(input.toolId, result.success ? undefined : new Error(result.technicalCode ?? 'tool_configuration_failed'));
     return {
       ...result,

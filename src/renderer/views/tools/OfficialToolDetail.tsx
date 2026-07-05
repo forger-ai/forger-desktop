@@ -37,7 +37,7 @@ export const OfficialToolDetail = ({
   errorMessage: string | null;
   t: AppDictionary;
   onBack: () => void;
-  onConnect: () => void;
+  onConnect: (secrets?: Record<string, string>) => void;
   onDisconnect: () => void;
   onStartWhatsAppPairing?: (method: 'qr' | 'pairing_code', phoneNumber?: string) => Promise<CallOfficialToolResult>;
   onGetWhatsAppStatus?: () => Promise<CallOfficialToolResult>;
@@ -48,6 +48,8 @@ export const OfficialToolDetail = ({
   const [whatsAppEvent, setWhatsAppEvent] = useState<OfficialToolRuntimeEvent | null>(null);
   const connected = tool.id === 'whatsapp' ? whatsAppStatus?.connected === true : Boolean(tool.configured);
   const [phoneNumber, setPhoneNumber] = useState('');
+  const manualSecrets = tool.secrets.filter((secret) => secret.manual);
+  const [secretValues, setSecretValues] = useState<Record<string, string>>({});
   const [pairingBusy, setPairingBusy] = useState(false);
   const [pairingResult, setPairingResult] = useState<CallOfficialToolResult | null>(null);
   const refreshWhatsAppStatus = useCallback(async () => {
@@ -125,14 +127,43 @@ export const OfficialToolDetail = ({
             <Button color="error" variant="outlined" disabled={busyOfficialToolId === tool.id} onClick={disconnect}>
               {tool.id === 'whatsapp' ? t.sections.tools.whatsappResetSession : t.sections.tools.disconnect}
             </Button>
-          ) : (
-            <Button variant="contained" disabled={busyOfficialToolId === tool.id} onClick={onConnect}>
+          ) : manualSecrets.length === 0 ? (
+            <Button variant="contained" disabled={busyOfficialToolId === tool.id} onClick={() => onConnect()}>
               {t.sections.tools.activateTool}
             </Button>
-          )}
+          ) : null}
         </Stack>
       </Paper>
       {errorMessage ? <Alert severity="error">{errorMessage}</Alert> : null}
+      {manualSecrets.length > 0 && !connected ? (
+        <Paper variant="outlined" sx={{ p: 2, borderRadius: 1 }}>
+          <Stack spacing={1.5}>
+            <Typography variant="subtitle1" fontWeight={700}>{t.sections.tools.connectorSecretsTitle}</Typography>
+            <Typography variant="body2" color="text.secondary">{t.sections.tools.connectorSecretsHelp}</Typography>
+            {manualSecrets.map((secret) => (
+              <Stack key={secret.name} spacing={0.5}>
+                <TextField
+                  size="small"
+                  type="password"
+                  label={secret.label}
+                  value={secretValues[secret.name] ?? ''}
+                  onChange={(event) => setSecretValues((current) => ({ ...current, [secret.name]: event.target.value }))}
+                />
+                <Typography variant="caption" color="text.secondary">{secret.usage}</Typography>
+              </Stack>
+            ))}
+            <Button
+              variant="contained"
+              sx={{ alignSelf: 'flex-start' }}
+              disabled={busyOfficialToolId === tool.id
+                || manualSecrets.some((secret) => secret.required && !(secretValues[secret.name] ?? '').trim())}
+              onClick={() => onConnect(secretValues)}
+            >
+              {t.sections.tools.connectorSecretsConnect}
+            </Button>
+          </Stack>
+        </Paper>
+      ) : null}
       {tool.id === 'whatsapp' ? (
         <Paper variant="outlined" sx={{ p: 2, borderRadius: 1 }}>
           <Stack spacing={1.5}>

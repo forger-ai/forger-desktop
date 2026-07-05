@@ -96,6 +96,7 @@ const createLifecycleHarness = (overrides = {}) => {
     AppAgentTaskManager: createServiceClass('AppAgentTaskManager', calls),
     AppMcpManager: createServiceClass('AppMcpManager', calls),
     AutomationManager: createServiceClass('AutomationManager', calls),
+    WorkflowManager: createServiceClass('WorkflowManager', calls),
     BrowserWindow: createStartupBrowserWindowClass(calls),
     ChatOrchestrator: createServiceClass('ChatOrchestrator', calls),
     CloudDeviceManager: createServiceClass('CloudDeviceManager', calls),
@@ -144,6 +145,7 @@ const createLifecycleHarness = (overrides = {}) => {
       calls.createdWindows += 1;
     },
     emitAutomationUpdated: () => undefined,
+    emitWorkflowUpdated: () => undefined,
     emitChatRunUpdated: () => undefined,
     ensureBackendPythonEnvironment: async () => undefined,
     ensureCatalogStatuses: () => undefined,
@@ -1040,6 +1042,7 @@ test('main lifecycle service option callbacks cover catalog, memory, tools, MCP 
   const progress = [];
   const { calls, deps, ready, state } = createLifecycleHarness({
     emitAutomationUpdated: (event) => emittedAutomation.push(event),
+    emitWorkflowUpdated: () => undefined,
     emitChatRunUpdated: (event) => emittedRuns.push(event),
     getMemoryStore: () => ({
       create: async (input, access) => {
