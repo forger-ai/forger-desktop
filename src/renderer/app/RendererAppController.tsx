@@ -125,7 +125,7 @@ import {
   type ChatConversation,
   type PersistedChatState,
 } from '@renderer/chat-state';
-import { buildErrorReport as buildErrorReportPreview, shouldPromptForErrorReport } from '@renderer/error-reporting';
+import { buildErrorReport as buildErrorReportPreview, isIgnoredBrowserNoise, shouldPromptForErrorReport } from '@renderer/error-reporting';
 import { FORGER_TOUR_RESET_EVENT } from '@renderer/tour/useForgerTour';
 import {
   getUsageAnalyticsEnabled,
@@ -309,7 +309,7 @@ setErrorReportDialog((current) => current.report?.occurredAt === report.occurred
 setErrorReportDialog((current) => current.report?.occurredAt === report.occurredAt ? { ...current, busy: false, userMessage: t.settings.errorReportPrepareError } : current);
 });
 };
-const requestErrorReport = (input: DesktopErrorReportInput) => { if (!shouldPromptForErrorReport(input.technicalCode)) { return; }
+const requestErrorReport = (input: DesktopErrorReportInput) => { if (isIgnoredBrowserNoise(input.message) || !shouldPromptForErrorReport(input.technicalCode)) { return; }
 prepareAndOpenErrorReport(buildErrorReportPreview(input, desktopUpdateState.currentVersion)); };
 const requestErrorReportFromResult = ( source: DesktopErrorReportInput['source'], operation: string, result: { success: boolean; userMessage?: string } & FailureDiagnosticFields, extra?: Pick<DesktopErrorReportInput, 'appId' | 'appVersion' | 'details' | 'sensitiveDetails'>, ) => { if (result.success || !result.technicalCode || !shouldPromptForErrorReport(result.technicalCode)) { return; }
 requestErrorReport({ source, operation, message: result.userMessage ?? result.technicalCode, technicalCode: result.technicalCode, appId: extra?.appId, appVersion: extra?.appVersion, details: mergeRecords(result.details, extra?.details), sensitiveDetails: mergeRecords(result.sensitiveDetails, extra?.sensitiveDetails), }); };
