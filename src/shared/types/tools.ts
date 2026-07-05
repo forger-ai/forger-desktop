@@ -124,6 +124,8 @@ export interface OfficialToolActionDefinition {
   description: string;
   risk: OfficialToolRisk;
   inputSchema?: Record<string, unknown>;
+  /** Declared shape of the action result, used for workflow data mapping. */
+  outputSchema?: Record<string, unknown>;
 }
 
 export interface OfficialToolSecretDefinition {

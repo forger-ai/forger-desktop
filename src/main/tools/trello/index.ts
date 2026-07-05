@@ -91,6 +91,15 @@ export const trelloToolModule: InternalToolModule = createTokenConnectorModule({
       name: 'Estado de conexion',
       description: 'Revisa si las credenciales de Trello estan conectadas.',
       risk: 'low',
+      outputSchema: {
+        type: 'object',
+        properties: {
+          connected: { type: 'boolean' },
+          username: { type: 'string' },
+          fullName: { type: 'string' },
+        },
+        required: ['connected'],
+      },
       run: async () => ({ success: true, data: { connected: true } }),
     },
     {
@@ -98,6 +107,24 @@ export const trelloToolModule: InternalToolModule = createTokenConnectorModule({
       name: 'Listar tableros',
       description: 'Lista los tableros de la cuenta conectada.',
       risk: 'low',
+      outputSchema: {
+        type: 'object',
+        properties: {
+          boards: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                id: { type: 'string' },
+                name: { type: 'string' },
+                url: { type: 'string' },
+              },
+              required: ['id', 'name'],
+            },
+          },
+        },
+        required: ['boards'],
+      },
       run: async ({ secrets }) => {
         try {
           const boards = await callTrelloApi(secrets, 'GET', '/members/me/boards', {
@@ -120,6 +147,23 @@ export const trelloToolModule: InternalToolModule = createTokenConnectorModule({
       name: 'Listar columnas',
       description: 'Lista las columnas de un tablero.',
       risk: 'low',
+      outputSchema: {
+        type: 'object',
+        properties: {
+          lists: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                id: { type: 'string' },
+                name: { type: 'string' },
+              },
+              required: ['id', 'name'],
+            },
+          },
+        },
+        required: ['lists'],
+      },
       run: async ({ input, secrets }) => {
         const boardId = cleanString(input.boardId);
         if (!boardId) {
@@ -144,6 +188,26 @@ export const trelloToolModule: InternalToolModule = createTokenConnectorModule({
       name: 'Listar tarjetas',
       description: 'Lista las tarjetas de una columna.',
       risk: 'medium',
+      outputSchema: {
+        type: 'object',
+        properties: {
+          cards: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                id: { type: 'string' },
+                name: { type: 'string' },
+                description: { type: 'string' },
+                dueDate: { type: 'string' },
+                url: { type: 'string' },
+              },
+              required: ['id', 'name'],
+            },
+          },
+        },
+        required: ['cards'],
+      },
       run: async ({ input, secrets }) => {
         const listId = cleanString(input.listId);
         if (!listId) {
@@ -176,6 +240,15 @@ export const trelloToolModule: InternalToolModule = createTokenConnectorModule({
       name: 'Crear tarjeta',
       description: 'Crea una tarjeta nueva en una columna.',
       risk: 'high',
+      outputSchema: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          name: { type: 'string' },
+          url: { type: 'string' },
+        },
+        required: ['id'],
+      },
       run: async ({ input, secrets }) => {
         const listId = cleanString(input.listId);
         const name = cleanString(input.name);

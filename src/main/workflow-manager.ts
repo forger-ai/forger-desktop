@@ -223,6 +223,123 @@ export class WorkflowManager {
     return await this.startRun(id, trigger);
   }
 
+  /**
+   * Runs a single node in isolation ("execute step"). Upstream context is
+   * seeded from the latest stored outputs of previous runs, other nodes are
+   * recorded as skipped, and approval pauses are bypassed because the person
+   * triggers the step explicitly.
+   */
+  public async runNode(workflowId: string, nodeId: string): Promise<WorkflowRunSummary> {
+    const workflow = this.requireWorkflow(workflowId);
+    const node = workflow.nodes.find((entry) => entry.id === nodeId);
+    if (!node) {
+      throw new Error('workflow_node_not_found');
+    }
+    if (workflow.running) {
+      const skipped = this.createRunRecord(workflow, 'step', 'skipped', 'workflow_already_running');
+      await this.persistRun(workflow.id, skipped);
+      return toWorkflowRunSummary(skipped);
+    }
+    const run = this.createRunRecord(workflow, 'step', 'queued');
+    for (const nodeRun of run.nodeRuns) {
+      if (nodeRun.nodeId !== nodeId) {
+        nodeRun.status = 'skipped';
+      }
+    }
+    await this.store.appendRunId(workflow.id, run.id);
+    await this.persistRun(workflow.id, run);
+    await this.markWorkflowRunning(workflow.id, true);
+    void this.executeSingleNode(workflow.id, run, nodeId);
+    return toWorkflowRunSummary(run);
+  }
+
+  private async executeSingleNode(workflowId: string, run: WorkflowRun, nodeId: string): Promise<void> {
+    const active: ActiveRunState = {
+      workflowId,
+      canceled: false,
+      children: new Set(),
+      approvalResolvers: new Map(),
+    };
+    this.activeRuns.set(run.id, active);
+    const transcriptPath = this.store.runTranscriptPath(run.id);
+    try {
+      const workflow = this.requireWorkflow(workflowId);
+      const node = workflow.nodes.find((entry) => entry.id === nodeId) as WorkflowNode;
+      await appendTranscript(transcriptPath, 'meta', `Workflow ${workflow.id} single-step run ${run.id} for node ${nodeId}`);
+      run.status = 'running';
+      await this.persistRun(workflowId, run);
+
+      const samples = await this.collectLatestOutputs(workflowId);
+      const states: Record<string, WorkflowNodeState> = Object.fromEntries(
+        workflow.nodes.map((entry) => entry.id === nodeId
+          ? [entry.id, { status: 'pending' as const }]
+          : [entry.id, samples[entry.id] !== undefined
+              ? { status: 'succeeded' as const, output: samples[entry.id] as Record<string, unknown> }
+              : { status: 'skipped' as const }]),
+      );
+      const triggerContext: Record<string, unknown> = {
+        type: 'step',
+        firedAt: run.startedAt,
+        workflow: { id: workflow.id, name: workflow.name },
+      };
+      const syncNodeRun = async (syncNodeId: string): Promise<void> => {
+        if (syncNodeId !== nodeId) {
+          return;
+        }
+        const state = states[nodeId];
+        const nodeRun = run.nodeRuns.find((entry) => entry.nodeId === nodeId);
+        if (!state || !nodeRun) {
+          return;
+        }
+        nodeRun.status = state.status;
+        nodeRun.output = state.output;
+        nodeRun.summary = state.summary;
+        nodeRun.error = state.error;
+        if (state.status === 'running' && !nodeRun.startedAt) {
+          nodeRun.startedAt = new Date().toISOString();
+        }
+        if (['succeeded', 'failed', 'skipped', 'canceled'].includes(state.status) && !nodeRun.finishedAt) {
+          nodeRun.finishedAt = new Date().toISOString();
+        }
+        await this.persistRun(workflowId, run);
+      };
+
+      const stepNode = { ...node, requiresApproval: false } as WorkflowNode;
+      await this.executeNode(workflow, run, stepNode, states, triggerContext, active, transcriptPath, syncNodeRun);
+
+      const state = states[nodeId];
+      run.status = active.canceled
+        ? 'canceled'
+        : state?.status === 'succeeded' ? 'succeeded' : 'failed';
+      run.error = state?.status === 'failed' ? state.error : undefined;
+      run.finishedAt = new Date().toISOString();
+      await this.persistRun(workflowId, run);
+    } catch (error) {
+      run.status = 'failed';
+      run.error = error instanceof Error ? error.message : 'workflow_step_failed';
+      run.finishedAt = new Date().toISOString();
+      await this.persistRun(workflowId, run);
+    } finally {
+      this.activeRuns.delete(run.id);
+      await this.markWorkflowRunning(workflowId, false);
+    }
+  }
+
+  /** Latest known successful output per node id, scanning stored runs newest-first. */
+  public async collectLatestOutputs(workflowId: string): Promise<Record<string, unknown>> {
+    const runIds = await this.store.readRunIds(workflowId);
+    const outputs: Record<string, unknown> = {};
+    for (const runId of runIds.slice(0, 20)) {
+      const run = await this.store.readRun(runId);
+      for (const nodeRun of run?.nodeRuns ?? []) {
+        if (nodeRun.status === 'succeeded' && nodeRun.output !== undefined && !(nodeRun.nodeId in outputs)) {
+          outputs[nodeRun.nodeId] = nodeRun.output;
+        }
+      }
+    }
+    return outputs;
+  }
+
   public async listRuns(workflowId: string): Promise<WorkflowRunSummary[]> {
     const runIds = await this.store.readRunIds(workflowId);
     const runs = await Promise.all(runIds.map((runId) => this.store.readRun(runId)));

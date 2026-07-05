@@ -59,6 +59,26 @@ const definition: OfficialToolDefinition = {
       name: 'Buscar correos',
       description: 'Busca correos en Gmail usando una consulta.',
       risk: 'medium',
+      outputSchema: {
+        type: 'object',
+        properties: {
+          messages: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                messageId: { type: 'string' },
+                threadId: { type: 'string' },
+                from: { type: 'string' },
+                subject: { type: 'string' },
+                snippet: { type: 'string' },
+                date: { type: 'string' },
+              },
+            },
+          },
+        },
+        required: ['messages'],
+      },
     },
     {
       id: 'gmail.read_thread',
@@ -77,6 +97,13 @@ const definition: OfficialToolDefinition = {
       name: 'Enviar correo',
       description: 'Envia un correo desde la cuenta conectada.',
       risk: 'high',
+      outputSchema: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          threadId: { type: 'string' },
+        },
+      },
     },
   ],
   changelog: ['Base inicial para conexion OAuth y acciones Gmail.'],

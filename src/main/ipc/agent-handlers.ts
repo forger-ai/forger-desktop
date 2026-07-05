@@ -571,6 +571,12 @@ export const registerAgentIpcHandlers = (deps: AgentIpcDeps): void => {
     }
     return await workflowManager.runNow(id);
   });
+  ipcMain.handle(IPC_CHANNELS.workflowsRunNode, async (_event, workflowId: string, nodeId: string) => {
+    if (!workflowManager) {
+      throw new Error('workflow_manager_unavailable');
+    }
+    return await workflowManager.runNode(workflowId, nodeId);
+  });
   ipcMain.handle(IPC_CHANNELS.workflowsCancelRun, async (_event, runId: string) => {
     if (!workflowManager) {
       return { success: false, technicalCode: 'workflow_manager_unavailable' };

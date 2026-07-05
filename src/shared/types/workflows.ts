@@ -110,7 +110,7 @@ export interface WorkflowUpsertInput {
   enabled?: boolean;
 }
 
-export type WorkflowRunTrigger = 'manual' | 'scheduled' | 'chat';
+export type WorkflowRunTrigger = 'manual' | 'scheduled' | 'chat' | 'step';
 
 export type WorkflowRunStatus =
   | 'queued'

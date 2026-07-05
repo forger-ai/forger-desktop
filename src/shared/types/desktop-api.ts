@@ -303,6 +303,7 @@ export interface ForgerDesktopApi {
   workflowsDelete: (id: string) => Promise<FilesActionResult>;
   workflowsSetEnabled: (id: string, enabled: boolean) => Promise<Workflow>;
   workflowsRunNow: (id: string) => Promise<WorkflowRunSummary>;
+  workflowsRunNode: (workflowId: string, nodeId: string) => Promise<WorkflowRunSummary>;
   workflowsCancelRun: (runId: string) => Promise<FilesActionResult>;
   workflowsApproveNode: (input: WorkflowApproveNodeInput) => Promise<FilesActionResult>;
   workflowsListRuns: (workflowId: string) => Promise<WorkflowRunSummary[]>;

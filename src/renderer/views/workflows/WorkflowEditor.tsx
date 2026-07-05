@@ -5,17 +5,20 @@ import {
   Box,
   Button,
   Checkbox,
+  Chip,
   Divider,
   FormControlLabel,
   MenuItem,
   Paper,
   Stack,
   TextField,
+  Tooltip,
   Typography,
   useTheme,
 } from '@mui/material';
 import AddRounded from '@mui/icons-material/AddRounded';
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
+import PlayCircleOutlineRounded from '@mui/icons-material/PlayCircleOutlineRounded';
 import {
   Background,
   Controls,
@@ -42,8 +45,11 @@ import type {
 } from '@shared/types';
 import { LLM_PROVIDER_REGISTRY, type AgentProviderPreference } from '@shared/agent-runtime-registry';
 import type { AppDictionary } from '@renderer/i18n';
+import { buildUpstreamFieldSources } from '@shared/workflow-templates';
 import type { WorkflowDraft } from './workflow-draft';
 import { createDraftNode, edgeKey } from './workflow-draft';
+import { TemplateEditor, type TemplateSourceNode } from './TemplateEditor';
+import { MappingMenuButton, SchemaForm } from './SchemaForm';
 
 const NODE_TYPE_COLORS: Record<WorkflowNode['type'], string> = {
   llm_agent: '#7c4dff',
@@ -119,10 +125,15 @@ interface WorkflowEditorProps {
   toolPackages: AgentToolPackageDefinition[];
   officialTools: OfficialToolSummary[];
   providerOptions: ProviderOption[];
+  /** Latest known output per node id, from stored runs. */
+  outputSamples: Record<string, unknown>;
+  /** Node ids present in the saved workflow (test step needs a saved node). */
+  savedNodeIds: ReadonlySet<string>;
+  onRunNode?: (nodeId: string) => void;
   t: AppDictionary;
 }
 
-export function WorkflowEditor({ draft, onDraftChange, apps, agents, toolPackages, officialTools, providerOptions, t }: WorkflowEditorProps) {
+export function WorkflowEditor({ draft, onDraftChange, apps, agents, toolPackages, officialTools, providerOptions, outputSamples, savedNodeIds, onRunNode, t }: WorkflowEditorProps) {
   const copy = t.sections.workflows;
   const theme = useTheme();
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
@@ -183,6 +194,30 @@ export function WorkflowEditor({ draft, onDraftChange, apps, agents, toolPackage
 
   const selectedNode = draft.nodes.find((node) => node.id === selectedNodeId) ?? null;
   const selectedEdge = draft.edges.find((edge) => edgeKey(edge) === selectedEdgeKey) ?? null;
+
+  const connectorOutputSchemas = useMemo(() => {
+    const schemas: Record<string, Record<string, unknown>> = {};
+    for (const tool of officialTools) {
+      for (const action of tool.actions) {
+        if (action.outputSchema) {
+          schemas[action.id] = action.outputSchema;
+        }
+      }
+    }
+    return schemas;
+  }, [officialTools]);
+
+  const upstreamSources: TemplateSourceNode[] = useMemo(() => {
+    if (!selectedNode) {
+      return [];
+    }
+    return buildUpstreamFieldSources(draft, selectedNode.id, { outputSamples, connectorOutputSchemas })
+      .map((source) => ({
+        nodeId: source.node.id,
+        nodeName: source.node.name,
+        fields: source.fields.map((field) => ({ path: field.path, sample: field.sample })),
+      }));
+  }, [draft, selectedNode, outputSamples, connectorOutputSchemas]);
 
   const updateNode = (nodeId: string, updater: (node: WorkflowNode) => WorkflowNode) => {
     onDraftChange((current) => ({
@@ -315,6 +350,9 @@ export function WorkflowEditor({ draft, onDraftChange, apps, agents, toolPackage
             toolPackages={toolPackages}
             officialTools={officialTools}
             providerOptions={providerOptions}
+            sources={upstreamSources}
+            canRunNode={savedNodeIds.has(selectedNode.id)}
+            onRunNode={onRunNode}
             onChange={(updater) => updateNode(selectedNode.id, updater)}
             onDelete={deleteSelectedNode}
           />
@@ -354,7 +392,7 @@ const EdgePanel = ({ edge, copy, onChangeCondition, onDelete }: {
   </Stack>
 );
 
-const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, providerOptions, onChange, onDelete }: {
+const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, providerOptions, sources, canRunNode, onRunNode, onChange, onDelete }: {
   node: WorkflowNode;
   copy: WorkflowCopy;
   apps: AppSummary[];
@@ -362,11 +400,15 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, prov
   toolPackages: AgentToolPackageDefinition[];
   officialTools: OfficialToolSummary[];
   providerOptions: ProviderOption[];
+  sources: TemplateSourceNode[];
+  canRunNode: boolean;
+  onRunNode?: (nodeId: string) => void;
   onChange: (updater: (node: WorkflowNode) => WorkflowNode) => void;
   onDelete: () => void;
 }) => {
   const [inputJsonError, setInputJsonError] = useState(false);
   const [schemaJsonError, setSchemaJsonError] = useState(false);
+  const [rawConnectorInput, setRawConnectorInput] = useState(false);
   // Tools are granted per official tool, not per action: selecting a tool
   // enables every action it exposes for this node.
   const officialPackages = useMemo(
@@ -406,16 +448,35 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, prov
         onChange={(event) => onChange((current) => ({ ...current, name: event.target.value }))}
       />
 
+      {sources.length > 0 ? (
+        <Box>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+            {copy.availableData}
+          </Typography>
+          <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+            {sources.slice(0, 4).map((source) => (
+              <Tooltip
+                key={source.nodeId}
+                title={source.fields.length > 0 ? source.fields.map((field) => field.path).join(', ') : copy.wholeOutput}
+              >
+                <Chip size="small" variant="outlined" label={`${source.nodeName} (${source.fields.length})`} />
+              </Tooltip>
+            ))}
+          </Stack>
+        </Box>
+      ) : null}
+
       {node.type === 'llm_agent' || node.type === 'forger_agent' ? (
-        <TextField
-          size="small"
+        <TemplateEditor
           label={copy.prompt}
           value={node.prompt}
-          multiline
-          minRows={4}
-          helperText={copy.promptHelper}
-          onChange={(event) => onChange((current) => current.type === node.type
-            ? { ...current, prompt: event.target.value } as WorkflowNode
+          sources={sources}
+          helperText={sources.length > 0 ? copy.referencePlaceholder : copy.promptHelper}
+          placeholder={copy.referencePlaceholder}
+          triggerGroupLabel={copy.triggerData}
+          wholeOutputLabel={copy.wholeOutput}
+          onChange={(nextPrompt) => onChange((current) => current.type === node.type
+            ? { ...current, prompt: nextPrompt } as WorkflowNode
             : current)}
         />
       ) : null}
@@ -601,24 +662,66 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, prov
               <MenuItem key={action.id} value={action.id}>{action.name}</MenuItem>
             ))}
           </TextField>
-          <TextField
-            size="small"
-            label={copy.connectorInput}
-            defaultValue={JSON.stringify(node.input ?? {}, null, 2)}
-            multiline
-            minRows={4}
-            error={inputJsonError}
-            helperText={inputJsonError ? copy.connectorInputInvalid : copy.connectorInputHelper}
-            onBlur={(event) => {
-              try {
-                const parsed = JSON.parse(event.target.value || '{}') as Record<string, unknown>;
-                setInputJsonError(false);
-                onChange((current) => current.type === 'connector' ? { ...current, input: parsed } : current);
-              } catch {
-                setInputJsonError(true);
-              }
-            }}
-          />
+          {(() => {
+            const action = officialTools
+              .find((tool) => tool.id === node.toolId)?.actions
+              .find((entry) => entry.id === node.actionId);
+            const inputSchema = action?.inputSchema;
+            const hasFormSchema = Boolean(inputSchema?.properties && Object.keys(inputSchema.properties as Record<string, unknown>).length > 0);
+            if (!rawConnectorInput && hasFormSchema) {
+              return (
+                <>
+                  <SchemaForm
+                    schema={inputSchema as Record<string, unknown>}
+                    value={node.input ?? {}}
+                    sources={sources}
+                    mapTooltip={copy.mapField}
+                    wholeOutputLabel={copy.wholeOutput}
+                    triggerGroupLabel={copy.triggerData}
+                    onChange={(nextInput) => onChange((current) => current.type === 'connector'
+                      ? { ...current, input: nextInput }
+                      : current)}
+                  />
+                  <Button size="small" variant="text" sx={{ alignSelf: 'flex-start' }} onClick={() => setRawConnectorInput(true)}>
+                    {copy.advancedJson}
+                  </Button>
+                </>
+              );
+            }
+            return (
+              <>
+                <TextField
+                  size="small"
+                  label={copy.connectorInput}
+                  defaultValue={JSON.stringify(node.input ?? {}, null, 2)}
+                  multiline
+                  minRows={4}
+                  error={inputJsonError}
+                  helperText={inputJsonError ? copy.connectorInputInvalid : copy.connectorInputHelper}
+                  onBlur={(event) => {
+                    try {
+                      const parsed = JSON.parse(event.target.value || '{}') as Record<string, unknown>;
+                      setInputJsonError(false);
+                      onChange((current) => current.type === 'connector' ? { ...current, input: parsed } : current);
+                    } catch {
+                      setInputJsonError(true);
+                    }
+                  }}
+                />
+                {hasFormSchema ? (
+                  <Button
+                    size="small"
+                    variant="text"
+                    sx={{ alignSelf: 'flex-start' }}
+                    disabled={inputJsonError}
+                    onClick={() => setRawConnectorInput(false)}
+                  >
+                    {copy.formMode}
+                  </Button>
+                ) : null}
+              </>
+            );
+          })()}
         </>
       ) : null}
 
@@ -632,6 +735,21 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, prov
             onChange={(event) => onChange((current) => current.type === 'condition'
               ? { ...current, expression: { ...current.expression, left: event.target.value } }
               : current)}
+            slotProps={{
+              input: {
+                endAdornment: sources.length > 0 ? (
+                  <MappingMenuButton
+                    sources={sources}
+                    tooltip={copy.mapField}
+                    wholeOutputLabel={copy.wholeOutput}
+                    triggerGroupLabel={copy.triggerData}
+                    onPick={(reference) => onChange((current) => current.type === 'condition'
+                      ? { ...current, expression: { ...current.expression, left: reference } }
+                      : current)}
+                  />
+                ) : undefined,
+              },
+            }}
           />
           <TextField
             select
@@ -691,6 +809,21 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, prov
         <Alert severity="warning" variant="outlined">
           {officialTools.find((tool) => tool.id === node.toolId)?.name}: {copy.statusLabels.pending}
         </Alert>
+      ) : null}
+      {onRunNode ? (
+        <>
+          <Divider />
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={<PlayCircleOutlineRounded />}
+            disabled={!canRunNode}
+            onClick={() => onRunNode(node.id)}
+          >
+            {copy.testStep}
+          </Button>
+          <Typography variant="caption" color="text.secondary">{copy.testStepHelper}</Typography>
+        </>
       ) : null}
     </Stack>
   );

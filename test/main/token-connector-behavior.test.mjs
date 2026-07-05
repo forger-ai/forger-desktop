@@ -7,6 +7,8 @@ const { createTokenConnectorModule, ConnectorApiError } = require('../../dist-el
 const { slackToolModule } = require('../../dist-electron/main/tools/slack/index.js');
 const { trelloToolModule } = require('../../dist-electron/main/tools/trello/index.js');
 const { INTERNAL_TOOL_MODULES } = require('../../dist-electron/main/tools/index.js');
+const { validateOutputAgainstSchema } = require('../../dist-electron/main/workflow/output-schema.js');
+const { getMcpToolInputSchema } = require('../../dist-electron/main/forger-mcp/tool-metadata.js');
 
 const createSecretsStore = (initial = {}) => {
   const values = new Map(Object.entries(initial));
@@ -221,6 +223,48 @@ test('trello actions use key/token pair and create cards', async () => {
       );
       assert.equal(badInput.success, false);
       assert.equal(badInput.technicalCode, 'trello_create_input_invalid');
+    },
+  );
+});
+
+
+test('connector actions declare contracts and real outputs conform to them', async () => {
+  for (const module of [slackToolModule, trelloToolModule]) {
+    for (const action of module.definition.actions) {
+      assert.ok(action.outputSchema, `${action.id} declares an output schema`);
+      const inputSchema = getMcpToolInputSchema(action.id);
+      assert.equal(inputSchema.type, 'object', `${action.id} has an MCP input schema`);
+    }
+  }
+
+  const secretsStore = createSecretsStore({ 'slack:bot_token': 'xoxb-token' });
+  const context = createContext(secretsStore);
+  await withMockedFetch(
+    (url) => {
+      if (url.endsWith('/conversations.list')) {
+        return jsonResponse({ ok: true, channels: [{ id: 'C1', name: 'general', is_private: false, num_members: 5 }] });
+      }
+      if (url.endsWith('/chat.postMessage')) {
+        return jsonResponse({ ok: true, channel: 'C1', ts: '123.456' });
+      }
+      if (url.endsWith('/conversations.history')) {
+        return jsonResponse({ ok: true, messages: [{ user: 'U1', text: 'hola', ts: '1.2' }] });
+      }
+      return jsonResponse({ ok: false, error: 'unknown_method' });
+    },
+    async () => {
+      const cases = [
+        ['slack.list_channels', {}],
+        ['slack.send_message', { channelId: 'C1', text: 'hola' }],
+        ['slack.read_messages', { channelId: 'C1' }],
+      ];
+      for (const [actionId, input] of cases) {
+        const result = await slackToolModule.execute({ toolId: 'slack', actionId, input }, context);
+        assert.equal(result.success, true, actionId);
+        const schema = slackToolModule.definition.actions.find((action) => action.id === actionId).outputSchema;
+        const errors = validateOutputAgainstSchema(result.data, schema);
+        assert.deepEqual(errors, [], `${actionId} output matches its declared schema`);
+      }
     },
   );
 });

@@ -94,6 +94,15 @@ export const slackToolModule: InternalToolModule = createTokenConnectorModule({
       name: 'Estado de conexion',
       description: 'Revisa si el token de Slack esta conectado.',
       risk: 'low',
+      outputSchema: {
+        type: 'object',
+        properties: {
+          connected: { type: 'boolean' },
+          team: { type: 'string' },
+          user: { type: 'string' },
+        },
+        required: ['connected'],
+      },
       run: async () => ({ success: true, data: { connected: true } }),
     },
     {
@@ -101,6 +110,25 @@ export const slackToolModule: InternalToolModule = createTokenConnectorModule({
       name: 'Listar canales',
       description: 'Lista los canales visibles para el token conectado.',
       risk: 'low',
+      outputSchema: {
+        type: 'object',
+        properties: {
+          channels: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                id: { type: 'string' },
+                name: { type: 'string' },
+                isPrivate: { type: 'boolean' },
+                memberCount: { type: 'number' },
+              },
+              required: ['id', 'name'],
+            },
+          },
+        },
+        required: ['channels'],
+      },
       run: async ({ input, secrets }) => {
         try {
           const data = await callSlackApi(secrets[SLACK_BOT_TOKEN_SECRET] as string, 'conversations.list', {
@@ -127,6 +155,25 @@ export const slackToolModule: InternalToolModule = createTokenConnectorModule({
       name: 'Leer mensajes',
       description: 'Lee los mensajes recientes de un canal.',
       risk: 'high',
+      outputSchema: {
+        type: 'object',
+        properties: {
+          channelId: { type: 'string' },
+          messages: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                user: { type: 'string' },
+                text: { type: 'string' },
+                ts: { type: 'string' },
+                threadTs: { type: 'string' },
+              },
+            },
+          },
+        },
+        required: ['channelId', 'messages'],
+      },
       run: async ({ input, secrets }) => {
         const channelId = cleanString(input.channelId);
         if (!channelId) {
@@ -156,6 +203,13 @@ export const slackToolModule: InternalToolModule = createTokenConnectorModule({
       name: 'Enviar mensaje',
       description: 'Envia un mensaje a un canal de Slack.',
       risk: 'high',
+      outputSchema: {
+        type: 'object',
+        properties: {
+          channel: { type: 'string' },
+          ts: { type: 'string' },
+        },
+      },
       run: async ({ input, secrets }) => {
         const channelId = cleanString(input.channelId);
         const text = cleanString(input.text);

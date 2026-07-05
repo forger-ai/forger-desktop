@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Box,
@@ -237,6 +237,38 @@ export function WorkflowsView({ t }: { t: AppDictionary }) {
     }
   };
 
+  const runNodeStep = async (nodeId: string) => {
+    if (!selectedWorkflow) {
+      return;
+    }
+    setBusy(true);
+    try {
+      const run = await getDesktopApi().workflowsRunNode(selectedWorkflow.id, nodeId);
+      setTab('runs');
+      await loadRuns(selectedWorkflow.id, run.id);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Latest known output per node, used to preview mappable fields.
+  const outputSamples = useMemo(() => {
+    const samples: Record<string, unknown> = {};
+    for (const run of runs) {
+      for (const nodeRun of run.nodeRuns) {
+        if (nodeRun.status === 'succeeded' && nodeRun.output !== undefined && !(nodeRun.nodeId in samples)) {
+          samples[nodeRun.nodeId] = nodeRun.output;
+        }
+      }
+    }
+    return samples;
+  }, [runs]);
+
+  const savedNodeIds = useMemo(
+    () => new Set(selectedWorkflow?.nodes.map((node) => node.id) ?? []),
+    [selectedWorkflow],
+  );
+
   return (
     <Stack spacing={2}>
       <Stack direction="row" justifyContent="space-between" alignItems="flex-start" flexWrap="wrap" useFlexGap spacing={1}>
@@ -435,6 +467,9 @@ export function WorkflowsView({ t }: { t: AppDictionary }) {
                   toolPackages={toolPackages}
                   officialTools={officialTools}
                   providerOptions={providerOptions}
+                  outputSamples={outputSamples}
+                  savedNodeIds={savedNodeIds}
+                  onRunNode={selectedWorkflow ? (nodeId) => void runNodeStep(nodeId) : undefined}
                   t={t}
                 />
               ) : (

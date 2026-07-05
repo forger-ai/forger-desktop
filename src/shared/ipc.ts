@@ -303,6 +303,7 @@ export const IPC_CHANNELS = {
   workflowsDelete: 'forger:workflows:delete',
   workflowsSetEnabled: 'forger:workflows:set-enabled',
   workflowsRunNow: 'forger:workflows:run-now',
+  workflowsRunNode: 'forger:workflows:run-node',
   workflowsCancelRun: 'forger:workflows:cancel-run',
   workflowsApproveNode: 'forger:workflows:approve-node',
   workflowsListRuns: 'forger:workflows:list-runs',

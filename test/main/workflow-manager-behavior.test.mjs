@@ -359,6 +359,58 @@ test('workflow skips concurrent duplicate runs and interrupted runs fail on rest
   }
 });
 
+
+test('runNode executes a single step seeded with the latest stored outputs', async () => {
+  const harness = await createManager();
+  try {
+    const workflow = await harness.manager.upsert({
+      name: 'Paso a paso',
+      trigger: { type: 'manual' },
+      nodes: [
+        connectorNode('fuente', { input: { channelId: '#general', text: 'hola' } }),
+        connectorNode('destino', {
+          input: { channelId: '#general', text: 'antes: {{nodes.fuente.output.echoed.text}}' },
+          requiresApproval: true,
+        }),
+      ],
+      edges: [{ from: 'fuente', to: 'destino', condition: 'success' }],
+    });
+
+    const fullRun = await harness.manager.runNow(workflow.id);
+    await waitFor(async () => {
+      const run = await harness.manager.getRun(fullRun.id);
+      return run?.status === 'waiting_approval' ? run : null;
+    });
+    await harness.manager.approveNode({ runId: fullRun.id, nodeId: 'destino', approved: true });
+    await waitFor(async () => {
+      const run = await harness.manager.getRun(fullRun.id);
+      return run && ['succeeded', 'failed'].includes(run.status) ? run : null;
+    });
+
+    const outputs = await harness.manager.collectLatestOutputs(workflow.id);
+    assert.deepEqual(outputs.fuente, { echoed: { channelId: '#general', text: 'hola' } });
+
+    harness.connectorCalls.length = 0;
+    const stepRun = await harness.manager.runNode(workflow.id, 'destino');
+    assert.equal(stepRun.trigger, 'step');
+    const finished = await waitFor(async () => {
+      const run = await harness.manager.getRun(stepRun.id);
+      return run && ['succeeded', 'failed'].includes(run.status) ? run : null;
+    });
+    assert.equal(finished.status, 'succeeded');
+
+    const byNode = Object.fromEntries(finished.nodeRuns.map((nodeRun) => [nodeRun.nodeId, nodeRun]));
+    assert.equal(byNode.fuente.status, 'skipped', 'other nodes stay skipped in a step run');
+    assert.equal(byNode.destino.status, 'succeeded');
+    assert.equal(harness.connectorCalls.length, 1, 'approval is bypassed for explicit step runs');
+    assert.equal(harness.connectorCalls[0].input.text, 'antes: hola', 'templates resolve against stored outputs');
+
+    await assert.rejects(harness.manager.runNode(workflow.id, 'nope'), /workflow_node_not_found/);
+  } finally {
+    await harness.cleanup();
+  }
+});
+
 test('llm node fails cleanly when the provider is not authenticated', async () => {
   const harness = await createManager();
   try {

@@ -36,6 +36,8 @@ export interface TokenConnectorActionDefinition {
   name: string;
   description: string;
   risk: OfficialToolRisk;
+  /** Declared shape of the action result, used for workflow data mapping. */
+  outputSchema?: Record<string, unknown>;
   run: (args: TokenConnectorActionArgs) => Promise<CallOfficialToolResult>;
 }
 
@@ -97,6 +99,7 @@ export const createTokenConnectorModule = (definition: TokenConnectorDefinition)
       name: action.name,
       description: action.description,
       risk: action.risk,
+      ...(action.outputSchema ? { outputSchema: action.outputSchema } : {}),
     })),
     ...(definition.changelog ? { changelog: definition.changelog } : {}),
   };

@@ -21,6 +21,8 @@ import type {
 } from '../shared/types';
 import { SecretsStore } from './secrets-store';
 import { INTERNAL_TOOL_MODULES } from './tools';
+import { getMcpToolInputSchema } from './forger-mcp/tool-metadata';
+import type { AgentToolId } from '../shared/types';
 import type { InternalToolModule } from './tools/types';
 import type { InternalOAuthTokenResponse } from './tools/types';
 import { getSharedCopy } from '../shared/i18n';
@@ -124,6 +126,18 @@ const buildToolUnavailableResult = (
   }
   return { success: false, userMessage: copy.notReady, technicalCode: 'tool_not_configured' };
 };
+
+/**
+ * Actions expose the same input schema agents see over MCP so surfaces like
+ * the workflow editor can render forms instead of raw JSON.
+ */
+const withActionSchemas = (entry: OfficialToolDefinition): OfficialToolDefinition => ({
+  ...entry,
+  actions: entry.actions.map((action) => ({
+    ...action,
+    inputSchema: action.inputSchema ?? getMcpToolInputSchema(action.id as AgentToolId),
+  })),
+});
 
 const appToolDeclarationsMissingMessage = 'La app no tiene acceso configurado a herramientas oficiales. La declaracion de herramientas debe incluir un motivo visible y las acciones necesarias.';
 const appToolNotDeclaredMessage = 'La app no tiene acceso configurado a esta herramienta oficial. Revisa que la declaracion incluya toolId, reason y actions.';
@@ -649,7 +663,7 @@ export class OfficialToolsService {
   }
 
   private async toSummary(entry: OfficialToolDefinition, locale?: string): Promise<OfficialToolSummary> {
-    const localized = localizeOfficialToolDefinition(entry, locale);
+    const localized = withActionSchemas(localizeOfficialToolDefinition(entry, locale));
     const installed = this.registry.installed[entry.id];
     const configured = await this.isConfigured(entry);
     if (!installed) {
