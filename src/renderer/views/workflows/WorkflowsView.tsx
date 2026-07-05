@@ -36,7 +36,8 @@ import type {
   WorkflowRunSummary,
 } from '@shared/types';
 import type { AppDictionary } from '@renderer/i18n';
-import { WorkflowEditor } from './WorkflowEditor';
+import { buildChatProviderOptions } from '@shared/agent-runtime-registry';
+import { WorkflowEditor, type ProviderOption } from './WorkflowEditor';
 import {
   draftFromWorkflow,
   draftToUpsertInput,
@@ -77,6 +78,7 @@ export function WorkflowsView({ t }: { t: AppDictionary }) {
   const [agents, setAgents] = useState<PersonalAgent[]>([]);
   const [toolPackages, setToolPackages] = useState<AgentToolPackageDefinition[]>([]);
   const [officialTools, setOfficialTools] = useState<OfficialToolSummary[]>([]);
+  const [providerOptions, setProviderOptions] = useState<ProviderOption[]>([]);
   const selectedIdRef = useRef<string | null>(null);
   selectedIdRef.current = selectedId;
 
@@ -109,6 +111,17 @@ export function WorkflowsView({ t }: { t: AppDictionary }) {
     void desktopApi.personalAgentsList().then(setAgents).catch(() => undefined);
     void desktopApi.listAgentTools(t.locale).then(setToolPackages).catch(() => undefined);
     void desktopApi.listOfficialTools(t.locale).then((state) => setOfficialTools(state.tools)).catch(() => undefined);
+    void Promise.all([
+      desktopApi.getCodexAuthStatus().catch(() => ({ authenticated: false })),
+      desktopApi.getClaudeAuthStatus().catch(() => ({ authenticated: false })),
+      desktopApi.getAntigravityAuthStatus().catch(() => ({ authenticated: false })),
+    ]).then(([codexStatus, claudeStatus, antigravityStatus]) => {
+      setProviderOptions(buildChatProviderOptions({
+        codexAuthenticated: Boolean(codexStatus.authenticated),
+        claudeAuthenticated: Boolean(claudeStatus.authenticated),
+        antigravityAuthenticated: Boolean(antigravityStatus.authenticated),
+      }));
+    });
     const unsubscribe = desktopApi.onWorkflowUpdated(({ workflow, run }) => {
       setWorkflows((current) => {
         const withoutCurrent = current.filter((item) => item.id !== workflow.id);
@@ -421,6 +434,7 @@ export function WorkflowsView({ t }: { t: AppDictionary }) {
                   agents={agents}
                   toolPackages={toolPackages}
                   officialTools={officialTools}
+                  providerOptions={providerOptions}
                   t={t}
                 />
               ) : (

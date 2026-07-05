@@ -12,6 +12,7 @@ import {
   Stack,
   TextField,
   Typography,
+  useTheme,
 } from '@mui/material';
 import AddRounded from '@mui/icons-material/AddRounded';
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
@@ -21,7 +22,6 @@ import {
   Handle,
   Position,
   ReactFlow,
-  applyNodeChanges,
   type Connection,
   type Edge,
   type Node,
@@ -30,6 +30,7 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import type {
+  AgentProvider,
   AgentToolPackageDefinition,
   AppSummary,
   OfficialToolSummary,
@@ -39,6 +40,7 @@ import type {
   WorkflowEdgeCondition,
   WorkflowNode,
 } from '@shared/types';
+import { LLM_PROVIDER_REGISTRY, type AgentProviderPreference } from '@shared/agent-runtime-registry';
 import type { AppDictionary } from '@renderer/i18n';
 import type { WorkflowDraft } from './workflow-draft';
 import { createDraftNode, edgeKey } from './workflow-draft';
@@ -67,8 +69,15 @@ const CONDITION_OPERATORS: WorkflowConditionOperator[] = [
   'is_not_empty',
 ];
 
-const PROVIDER_OPTIONS = ['auto', 'codex', 'claude', 'antigravity'] as const;
-const EFFORT_OPTIONS = ['low', 'medium', 'high'] as const;
+export type ProviderOption = { label: string; value: AgentProviderPreference };
+
+const modelDefaultEffort = (provider: AgentProvider, realModelName: string): string | undefined => {
+  const option = LLM_PROVIDER_REGISTRY[provider].modelOptions
+    .find((model) => model.realModelName === realModelName) as
+    | { defaultEffort?: string; defaultReasoningEffort?: string }
+    | undefined;
+  return option?.defaultEffort ?? option?.defaultReasoningEffort;
+};
 
 type FlowNodeData = { node: WorkflowNode; typeLabel: string };
 
@@ -109,11 +118,13 @@ interface WorkflowEditorProps {
   agents: PersonalAgent[];
   toolPackages: AgentToolPackageDefinition[];
   officialTools: OfficialToolSummary[];
+  providerOptions: ProviderOption[];
   t: AppDictionary;
 }
 
-export function WorkflowEditor({ draft, onDraftChange, apps, agents, toolPackages, officialTools, t }: WorkflowEditorProps) {
+export function WorkflowEditor({ draft, onDraftChange, apps, agents, toolPackages, officialTools, providerOptions, t }: WorkflowEditorProps) {
   const copy = t.sections.workflows;
+  const theme = useTheme();
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedEdgeKey, setSelectedEdgeKey] = useState<string | null>(null);
 
@@ -134,13 +145,14 @@ export function WorkflowEditor({ draft, onDraftChange, apps, agents, toolPackage
     selected: edgeKey(edge) === selectedEdgeKey,
     style: { stroke: EDGE_COLORS[edge.condition], strokeWidth: 2 },
     labelStyle: { fill: EDGE_COLORS[edge.condition], fontSize: 11 },
-  })), [draft.edges, selectedEdgeKey, copy.edgeConditions]);
+    labelBgStyle: { fill: theme.palette.background.paper, fillOpacity: 0.95 },
+    labelBgPadding: [6, 3] as [number, number],
+    labelBgBorderRadius: 4,
+  })), [draft.edges, selectedEdgeKey, copy.edgeConditions, theme.palette.background.paper]);
 
   const handleNodesChange = useCallback((changes: NodeChange[]) => {
     const moved = changes.filter((change) => change.type === 'position' && change.position);
     if (moved.length === 0) {
-      // Let selection changes flow through React Flow's own state.
-      applyNodeChanges(changes, flowNodes);
       return;
     }
     onDraftChange((current) => ({
@@ -152,7 +164,7 @@ export function WorkflowEditor({ draft, onDraftChange, apps, agents, toolPackage
           : node;
       }),
     }));
-  }, [flowNodes, onDraftChange]);
+  }, [onDraftChange]);
 
   const handleConnect = useCallback((connection: Connection) => {
     if (!connection.source || !connection.target || connection.source === connection.target) {
@@ -230,7 +242,30 @@ export function WorkflowEditor({ draft, onDraftChange, apps, agents, toolPackage
             </Button>
           ))}
         </Stack>
-        <Box sx={{ height: 460 }}>
+        <Box
+          sx={{
+            height: 460,
+            '& .react-flow__controls': {
+              boxShadow: theme.shadows[2],
+              borderRadius: 1,
+              overflow: 'hidden',
+            },
+            '& .react-flow__controls button': {
+              backgroundColor: theme.palette.background.paper,
+              color: theme.palette.text.primary,
+              borderBottom: `1px solid ${theme.palette.divider}`,
+            },
+            '& .react-flow__controls button:hover': {
+              backgroundColor: theme.palette.action.hover,
+            },
+            '& .react-flow__controls button svg': {
+              fill: 'currentColor',
+            },
+            '& .react-flow__background': {
+              backgroundColor: theme.palette.background.default,
+            },
+          }}
+        >
           <ReactFlow
             nodes={flowNodes}
             edges={flowEdges}
@@ -279,6 +314,7 @@ export function WorkflowEditor({ draft, onDraftChange, apps, agents, toolPackage
             agents={agents}
             toolPackages={toolPackages}
             officialTools={officialTools}
+            providerOptions={providerOptions}
             onChange={(updater) => updateNode(selectedNode.id, updater)}
             onDelete={deleteSelectedNode}
           />
@@ -318,22 +354,42 @@ const EdgePanel = ({ edge, copy, onChangeCondition, onDelete }: {
   </Stack>
 );
 
-const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, onChange, onDelete }: {
+const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, providerOptions, onChange, onDelete }: {
   node: WorkflowNode;
   copy: WorkflowCopy;
   apps: AppSummary[];
   agents: PersonalAgent[];
   toolPackages: AgentToolPackageDefinition[];
   officialTools: OfficialToolSummary[];
+  providerOptions: ProviderOption[];
   onChange: (updater: (node: WorkflowNode) => WorkflowNode) => void;
   onDelete: () => void;
 }) => {
   const [inputJsonError, setInputJsonError] = useState(false);
   const [schemaJsonError, setSchemaJsonError] = useState(false);
-  const toolOptions = useMemo(
-    () => toolPackages.flatMap((toolPackage) => toolPackage.tools.map((tool) => ({ id: tool.id, label: `${tool.name} (${tool.id})` }))),
+  // Tools are granted per official tool, not per action: selecting a tool
+  // enables every action it exposes for this node.
+  const officialPackages = useMemo(
+    () => toolPackages.filter((toolPackage) => toolPackage.id.startsWith('official:')),
     [toolPackages],
   );
+  const nodeToolIds = node.type === 'llm_agent' ? node.toolIds : [];
+  const selectedPackageIds = useMemo(
+    () => officialPackages
+      .filter((toolPackage) => toolPackage.tools.some((tool) => nodeToolIds.includes(tool.id)))
+      .map((toolPackage) => toolPackage.id),
+    [officialPackages, nodeToolIds],
+  );
+  const nodeProvider = (node.type === 'llm_agent' ? node.runtime?.provider : undefined) ?? null;
+  const visibleProviderOptions = useMemo(() => {
+    const options = providerOptions.length > 0
+      ? providerOptions
+      : [{ label: copy.autoProvider, value: 'auto' as AgentProviderPreference }];
+    if (nodeProvider && !options.some((option) => option.value === nodeProvider)) {
+      return [...options, { label: nodeProvider, value: nodeProvider }];
+    }
+    return options;
+  }, [providerOptions, nodeProvider, copy.autoProvider]);
 
   return (
     <Stack spacing={1.5}>
@@ -396,33 +452,44 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, onCh
                 const { runtime: _runtime, ...rest } = current;
                 return rest as WorkflowNode;
               }
+              const registry = LLM_PROVIDER_REGISTRY[provider as AgentProvider];
               return {
                 ...current,
                 runtime: {
-                  provider: provider as 'codex' | 'claude' | 'antigravity',
-                  model: current.runtime?.model ?? '',
-                  effort: current.runtime?.effort ?? 'medium',
+                  provider: provider as AgentProvider,
+                  model: registry.defaultModel,
+                  effort: registry.defaultEffort,
                 },
               };
             })}
           >
-            {PROVIDER_OPTIONS.map((provider) => (
-              <MenuItem key={provider} value={provider}>
-                {provider === 'auto' ? copy.autoProvider : provider}
+            {visibleProviderOptions.map((option) => (
+              <MenuItem key={option.value} value={option.value}>
+                {option.value === 'auto' ? copy.autoProvider : option.label}
               </MenuItem>
             ))}
           </TextField>
           {node.runtime ? (
             <Stack direction="row" spacing={1}>
               <TextField
+                select
                 size="small"
                 fullWidth
                 label={copy.runtimeModel}
                 value={node.runtime.model}
-                onChange={(event) => onChange((current) => current.type === 'llm_agent' && current.runtime
-                  ? { ...current, runtime: { ...current.runtime, model: event.target.value } }
-                  : current)}
-              />
+                onChange={(event) => onChange((current) => {
+                  if (current.type !== 'llm_agent' || !current.runtime) {
+                    return current;
+                  }
+                  const model = event.target.value;
+                  const effort = modelDefaultEffort(current.runtime.provider, model) ?? current.runtime.effort;
+                  return { ...current, runtime: { ...current.runtime, model, effort: effort as typeof current.runtime.effort } };
+                })}
+              >
+                {LLM_PROVIDER_REGISTRY[node.runtime.provider].modelOptions.map((model) => (
+                  <MenuItem key={model.realModelName} value={model.realModelName}>{model.displayModelName}</MenuItem>
+                ))}
+              </TextField>
               <TextField
                 select
                 size="small"
@@ -433,8 +500,8 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, onCh
                   ? { ...current, runtime: { ...current.runtime, effort: event.target.value as typeof current.runtime.effort } }
                   : current)}
               >
-                {EFFORT_OPTIONS.map((effort) => (
-                  <MenuItem key={effort} value={effort}>{effort}</MenuItem>
+                {LLM_PROVIDER_REGISTRY[node.runtime.provider].effortOptions.map((effort) => (
+                  <MenuItem key={effort.value} value={effort.value}>{effort.label}</MenuItem>
                 ))}
               </TextField>
             </Stack>
@@ -455,11 +522,16 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, onCh
           <Autocomplete
             multiple
             size="small"
-            options={toolOptions.map((option) => option.id)}
-            getOptionLabel={(toolId) => toolOptions.find((option) => option.id === toolId)?.label ?? toolId}
-            value={node.toolIds}
+            options={officialPackages.map((toolPackage) => toolPackage.id)}
+            getOptionLabel={(packageId) => officialPackages.find((toolPackage) => toolPackage.id === packageId)?.name ?? packageId}
+            value={selectedPackageIds}
             onChange={(_event, value) => onChange((current) => current.type === 'llm_agent'
-              ? { ...current, toolIds: value as typeof current.toolIds }
+              ? {
+                  ...current,
+                  toolIds: officialPackages
+                    .filter((toolPackage) => value.includes(toolPackage.id))
+                    .flatMap((toolPackage) => toolPackage.tools.map((tool) => tool.id)),
+                }
               : current)}
             renderInput={(params) => <TextField {...params} label={copy.toolsLabel} />}
           />
