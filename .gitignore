@@ -1,6 +1,7 @@
 node_modules/
 dist/
 dist-electron/
+coverage/
 release/
 resources/app-skeletons/
 src/renderer/docs/forger-docs.generated.ts
