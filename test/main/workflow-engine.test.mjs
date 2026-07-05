@@ -13,6 +13,7 @@ const {
   renderTemplateString,
   resolveNodeReadiness,
   resolveTemplateValue,
+  summarizeWorkflow,
   topologicalOrder,
   validateWorkflowGraph,
 } = require('../../dist-electron/main/workflow/engine.js');
@@ -304,6 +305,124 @@ test('sanitizeWorkflowTrigger defaults to manual and normalizes schedules', () =
   );
   assert.equal(scheduled.missedRunPolicy, 'always');
   assert.equal(scheduled.missedRunWindowMinutes, 15);
+});
+
+
+test('validateWorkflowGraph rejects oversized graphs and blank node ids', () => {
+  const many = Array.from({ length: 31 }, (_value, index) => llmNode(`n${index}`));
+  assert.throws(() => validateWorkflowGraph(many, []), /workflow_too_many_nodes/);
+  assert.throws(() => validateWorkflowGraph([llmNode('   ')], []), /workflow_node_id_required/);
+});
+
+test('template helpers handle primitives, circular values, and unknown operators', () => {
+  const circular = { total: 3 };
+  circular.self = circular;
+  const context = buildRunContext({ ok: true, count: 2 }, {
+    a: { status: 'succeeded', output: { total: 42, flag: false, circular } },
+  });
+
+  assert.equal(lookupContextPath(context, 'nodes.a.output.total.deeper'), undefined, 'primitives stop the walk');
+  assert.equal(renderTemplateString('v={{trigger.count}} f={{nodes.a.output.flag}}', context), 'v=2 f=false');
+  assert.equal(renderTemplateString('c={{nodes.a.output.circular}}', context), 'c=', 'circular values stringify to empty');
+  assert.equal(resolveTemplateValue(null, context), null);
+  assert.equal(resolveTemplateValue(7, context), 7);
+  assert.deepEqual(resolveTemplateValue(['{{nodes.a.output.total}}'], context), [42]);
+  assert.equal(evaluateConditionExpression({ left: 'x', operator: 'operador_falso' }, context), false);
+  assert.equal(evaluateConditionExpression({ left: '{{trigger.count}}', operator: 'greater_than', right: '   ' }, context), false);
+  assert.equal(evaluateConditionExpression({ left: '{{nodes.a.output.missing}}', operator: 'is_empty' }, context), true);
+  assert.equal(evaluateConditionExpression({ left: '{{trigger.count}}', operator: 'is_empty' }, context), false);
+});
+
+test('validateOutputAgainstSchema reports scalar and array item mismatches', () => {
+  assert.deepEqual(
+    validateOutputAgainstSchema([1, 'dos'], { type: 'array', items: { type: 'string' } }),
+    ['output[0] debe ser texto'],
+  );
+  assert.deepEqual(validateOutputAgainstSchema('x', { type: 'number' }), ['output debe ser un numero']);
+  assert.deepEqual(validateOutputAgainstSchema(1, { type: 'boolean' }), ['output debe ser booleano']);
+  assert.deepEqual(validateOutputAgainstSchema(1, { type: 'string' }), ['output debe ser texto']);
+  assert.deepEqual(validateOutputAgainstSchema({ any: 1 }, { description: 'sin tipo' }), []);
+});
+
+test('sanitize helpers normalize hostile node shapes', () => {
+  assert.equal(sanitizeWorkflowNode({ id: 'a', name: null, type: 'condition' }), null, 'missing name');
+  assert.equal(sanitizeWorkflowNode({ id: 'a', name: 'A', type: 'tipo_falso' }), null, 'unknown type');
+  assert.equal(sanitizeWorkflowNode({ id: 'a', name: 'A', type: 'forger_agent', agentId: '', prompt: 'x' }), null);
+  assert.equal(sanitizeWorkflowNode({ id: 'a', name: 'A', type: 'connector', toolId: 't', actionId: '' }), null);
+
+  const agentNode = sanitizeWorkflowNode({
+    id: 'a',
+    name: 'A',
+    type: 'forger_agent',
+    agentId: 'agente-1',
+    prompt: 'revisa',
+    outputSchema: { type: 'object' },
+    position: { x: 'no', y: 2 },
+    timeoutMs: 10 ** 9,
+  });
+  assert.equal(agentNode.agentId, 'agente-1');
+  assert.deepEqual(agentNode.outputSchema, { type: 'object' });
+  assert.equal(agentNode.position, undefined, 'invalid positions are dropped');
+  assert.equal(agentNode.timeoutMs, 30 * 60_000, 'timeouts clamp to the maximum');
+
+  const llm = sanitizeWorkflowNode({
+    id: 'b',
+    name: 'B',
+    type: 'llm_agent',
+    prompt: 'x',
+    toolIds: 'no-es-lista',
+    appIds: 'tampoco',
+    outputSchema: ['no-objeto'],
+  });
+  assert.deepEqual(llm.toolIds, []);
+  assert.deepEqual(llm.appIds, []);
+  assert.equal(llm.outputSchema, undefined);
+
+  const condition = sanitizeWorkflowNode({ id: 'c', name: 'C', type: 'condition' });
+  assert.deepEqual(condition.expression, { left: '', operator: 'is_not_empty' });
+  const emptyDrop = sanitizeWorkflowNode({
+    id: 'd',
+    name: 'D',
+    type: 'condition',
+    expression: { left: 'x', operator: 'is_empty', right: 'se-ignora' },
+  });
+  assert.equal(emptyDrop.expression.right, undefined, 'is_empty drops the comparison value');
+});
+
+test('sanitizeWorkflowTrigger covers weekly normalization and window clamps', () => {
+  const weekly = sanitizeWorkflowTrigger({
+    type: 'scheduled',
+    frequency: { type: 'weekly', timeOfDay: '18:30', weeklyDay: 99 },
+    missedRunWindowMinutes: 10 ** 9,
+  });
+  assert.deepEqual(weekly.frequency, { type: 'weekly', timeOfDay: '18:30', weeklyDay: 6 });
+  assert.equal(weekly.missedRunWindowMinutes, 30 * 24 * 60);
+  const badDay = sanitizeWorkflowTrigger({ type: 'scheduled', frequency: { type: 'weekly', weeklyDay: 'martes' } });
+  assert.equal(badDay.frequency.weeklyDay, 1, 'non-numeric weekdays default to Monday');
+  const noWindow = sanitizeWorkflowTrigger({ type: 'scheduled', frequency: { type: 'hourly' }, missedRunWindowMinutes: 0 });
+  assert.equal(noWindow.missedRunWindowMinutes, undefined);
+});
+
+
+test('remaining engine and sanitize micro-branches', () => {
+  assert.throws(
+    () => validateWorkflowGraph([llmNode('a')], [{ from: 'a', to: 'a', condition: 'success' }]),
+    /workflow_edge_self_reference/,
+  );
+
+  const context = buildRunContext({}, {
+    a: { status: 'succeeded', output: { name: 'Informe', lista: [], objeto: {}, llena: [1] } },
+  });
+  assert.equal(renderTemplateString('hola {{nodes.a.output.name}}', context), 'hola Informe');
+  assert.equal(renderTemplateString('x={{nodes.fantasma.output.y}}!', context), 'x=!', 'missing paths render empty');
+  assert.equal(evaluateConditionExpression({ left: '{{nodes.a.output.lista}}', operator: 'is_empty' }, context), true);
+  assert.equal(evaluateConditionExpression({ left: '{{nodes.a.output.objeto}}', operator: 'is_empty' }, context), true);
+  assert.equal(evaluateConditionExpression({ left: '{{nodes.a.output.llena}}', operator: 'is_not_empty' }, context), true);
+
+  assert.match(summarizeWorkflow({ name: 'Demo', nodes: [llmNode('a')], edges: [] }), /Demo \(1 nodos, 0 conexiones\)/);
+
+  assert.deepEqual(sanitizeWorkflowEdges('no-lista', new Set(['a'])), []);
+  assert.deepEqual(sanitizeWorkflowEdges([null, 'texto', 42], new Set(['a'])), []);
 });
 
 test('sanitizeWorkflowUpsertInput keeps only edges between surviving nodes', () => {

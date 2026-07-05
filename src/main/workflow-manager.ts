@@ -285,11 +285,13 @@ export class WorkflowManager {
         workflow: { id: workflow.id, name: workflow.name },
       };
       const syncNodeRun = async (syncNodeId: string): Promise<void> => {
+        /* c8 ignore next 3 -- executeNode only syncs the node it received. */
         if (syncNodeId !== nodeId) {
           return;
         }
         const state = states[nodeId];
         const nodeRun = run.nodeRuns.find((entry) => entry.nodeId === nodeId);
+        /* c8 ignore next 3 -- states and nodeRuns are seeded from the same node list. */
         if (!state || !nodeRun) {
           return;
         }
@@ -480,6 +482,7 @@ export class WorkflowManager {
       const syncNodeRun = async (nodeId: string): Promise<void> => {
         const node = workflow.nodes.find((entry) => entry.id === nodeId);
         const state = states[nodeId];
+        /* c8 ignore next 3 -- states and nodeRuns are seeded from the same node list. */
         if (!node || !state) {
           return;
         }
@@ -1012,6 +1015,7 @@ export class WorkflowManager {
 
   private async handleDueScheduledRun(id: string): Promise<void> {
     const workflow = this.workflows.get(id);
+    /* c8 ignore next 3 -- scheduleWorkflow already filters paused or deleted workflows; this guards timer races. */
     if (!workflow?.enabled || workflow.trigger.type !== 'scheduled' || !workflow.nextRunAt) {
       return;
     }
@@ -1037,6 +1041,7 @@ export class WorkflowManager {
 
   private async advanceSchedule(id: string): Promise<void> {
     const workflow = this.workflows.get(id);
+    /* c8 ignore next 3 -- only scheduled due handlers call this; guards deletion races. */
     if (!workflow || workflow.trigger.type !== 'scheduled') {
       return;
     }
@@ -1052,6 +1057,7 @@ export class WorkflowManager {
 
   private async skipMissedRun(id: string, error: string): Promise<void> {
     const workflow = this.workflows.get(id);
+    /* c8 ignore next 3 -- only due handlers call this; guards deletion races. */
     if (!workflow) {
       return;
     }

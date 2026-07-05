@@ -102,6 +102,31 @@ test('listUpstreamNodeIds returns transitive ancestors in node order', () => {
 });
 
 
+
+test('reference parsing and field listing edge cases', () => {
+  assert.deepEqual(parseReferencePath('trigger'), { kind: 'trigger', fieldPath: undefined });
+  assert.deepEqual(parseReferencePath('nodes.a'), { kind: 'node', nodeId: 'a', fieldPath: undefined });
+  assert.deepEqual(parseReferencePath('nodes.a.campo.sub'), { kind: 'node', nodeId: 'a', fieldPath: 'campo.sub' });
+  assert.deepEqual(parseReferencePath('nodes.'), null);
+
+  assert.deepEqual(listSchemaFields({ type: 'string' }), [], 'scalar schemas expose no fields');
+  assert.deepEqual(listSchemaFields({ type: 'object', properties: 'nope' }), []);
+  const deep = { type: 'object', properties: { a: { type: 'object', properties: { b: { type: 'object', properties: { c: { type: 'object', properties: { d: { type: 'object', properties: { e: { type: 'string' } } } } } } } } } } };
+  const deepPaths = listSchemaFields(deep).map((field) => field.path);
+  assert.ok(deepPaths.includes('a.b.c'), 'nested fields are listed');
+  assert.ok(!deepPaths.some((path) => path.split('.').length > 5), 'depth is capped');
+  const arrayRoot = listSchemaFields({ type: 'array', items: { type: 'object', properties: { id: { type: 'string' } } } });
+  assert.deepEqual(arrayRoot.map((field) => field.path), ['0.id']);
+  const skipped = listSchemaFields({ type: 'object', properties: { ok: { type: 'string' }, bad: null } });
+  assert.deepEqual(skipped.map((field) => field.path), ['ok']);
+
+  assert.deepEqual(listSampleFields([]), []);
+  assert.deepEqual(listSampleFields('texto'), []);
+  assert.deepEqual(listSampleFields(null), []);
+  const deepSample = listSampleFields({ a: { b: { c: { d: { e: { f: 1 } } } } } }).map((field) => field.path);
+  assert.ok(!deepSample.some((path) => path.split('.').length > 5), 'sample depth is capped');
+});
+
 test('findForEachJoinConflict rejects sibling loops joining and allows nested or single loops', () => {
   const nodes = (forEachIds) => [
     { id: 'root' },
@@ -140,6 +165,23 @@ test('findForEachJoinConflict rejects sibling loops joining and allows nested or
     { from: 'b', to: 'c', condition: 'success' },
   ];
   assert.equal(findForEachJoinConflict(nodes(['a', 'b']), diamondNested), null);
+});
+
+
+test('field listings cap at the per-node maximum and diamond graphs dedupe ancestors', () => {
+  const manyProps = Object.fromEntries(Array.from({ length: 60 }, (_v, i) => [`campo${i}`, { type: 'string' }]));
+  assert.equal(listSchemaFields({ type: 'object', properties: manyProps }).length, 40);
+  const manySample = Object.fromEntries(Array.from({ length: 60 }, (_v, i) => [`s${i}`, i]));
+  assert.equal(listSampleFields(manySample).length, 40);
+
+  const nodes = [{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }];
+  const diamond = [
+    { from: 'a', to: 'b', condition: 'success' },
+    { from: 'a', to: 'c', condition: 'success' },
+    { from: 'b', to: 'd', condition: 'success' },
+    { from: 'c', to: 'd', condition: 'success' },
+  ];
+  assert.deepEqual(listUpstreamNodeIds(nodes, diamond, 'd'), ['a', 'b', 'c']);
 });
 
 test('buildUpstreamFieldSources combines declared contracts with run samples', () => {

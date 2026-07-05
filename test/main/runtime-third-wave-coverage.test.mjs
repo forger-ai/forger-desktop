@@ -4359,8 +4359,14 @@ test('installed app runtime returns backend startup output when healthcheck time
     Date.now = originalDateNow;
     await fs.rm(root, { recursive: true, force: true });
   });
+  // The script signals through a sentinel file once its stderr is flushed so
+  // the fake healthcheck only times out after the runtime captured it. A
+  // fixed sleep here was flaky when the machine ran the full suite.
+  const stderrFlushedFlag = path.join(root, 'stderr-flushed.flag');
   await makeExecutableNodeScript(scriptPath, `
-process.stderr.write('ERROR: Traceback (most recent call last):\\nKeyError: list[Payment]\\n');
+process.stderr.write('ERROR: Traceback (most recent call last):\\nKeyError: list[Payment]\\n', () => {
+  require('node:fs').writeFileSync(${JSON.stringify(stderrFlushedFlag)}, '1');
+});
 setInterval(() => {}, 1000);
 `);
   await fs.mkdir(path.join(installDir, 'backend'), { recursive: true });
@@ -4369,8 +4375,11 @@ setInterval(() => {}, 1000);
   let fakeNow = 0;
   Date.now = () => fakeNow;
   globalThis.fetch = async () => {
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    fakeNow = 61_000;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    const stderrCaptured = await fs.access(stderrFlushedFlag).then(() => true, () => false);
+    if (stderrCaptured) {
+      fakeNow = 61_000;
+    }
     return new Response('not ready', { status: 503 });
   };
 
