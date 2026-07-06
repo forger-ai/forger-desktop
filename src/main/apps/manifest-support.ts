@@ -5,14 +5,16 @@ import { AGENT_TOOL_DEFINITIONS } from '../core/agent-tool-packages';
 import type { ForgerBackendClient } from '../forger-backend-client';
 import type { CloudIdentityStore } from '../cloud-identity-store';
 import type { BackupsManager } from '../backups-manager';
+import type { ConnectionsService } from '../connections-service';
 import type { MemoryStore } from '../memory-store';
 import type { OfficialToolsService } from '../official-tools-service';
 import { normalizeAppToolDeclarations } from '../official-tools-service';
+import { normalizeAppConnectionDeclarations } from '../connections/grants';
 import type { PromptOverridesStore } from '../prompt-overrides';
 import { buildPromptBases, promptOverrideErrorResult } from '../prompt-overrides';
 import { appSecretEnvName } from '../secrets-store';
 import type { SecretsStore } from '../secrets-store';
-import { buildForgerOfficialToolsPromptSection } from '../prompt-builder/official-tools';
+import { buildForgerOfficialToolsPromptSection, isForgerConnectionActionId } from '../prompt-builder/official-tools';
 import { renderManifestAgentPrompt, type ManifestAgentPromptKind } from '../manifest-agent-prompts';
 import {
   promptTestErrorMessage,
@@ -32,6 +34,7 @@ import type {
   AppAgentPromptTemplate,
   AppAgentPromptVariable,
   AppAgentPromptVariableType,
+  AppConnectionDeclaration,
   AppPromptMutationResult,
   AppPromptRestoreInput,
   AppPromptReviewInput,
@@ -59,14 +62,16 @@ import {
   isAgentProvider,
   normalizeAntigravityEffort,
   normalizeAntigravityModelAndEffort,
-  normalizeRuntimeEffort,
+  normalizeRuntimeEffortForModel,
 } from '../../shared/agent-runtime-registry';
 import { normalizePlatformCapabilities, type PlatformCapabilities } from '../../shared/platform-capabilities';
 import type { AppManifest, AppRegistry, RunningAppProcess } from '../core/main-process-types';
+import type { SelfOAuthCallbackServiceLike } from '../oauth-callback/types';
 
 interface ManifestSupportState {
   secretsStore: SecretsStore | null;
   officialToolsService: OfficialToolsService | null;
+  connectionsService: ConnectionsService | null;
   memoryStore: MemoryStore | null;
   backupsManager: BackupsManager | null;
 }
@@ -97,12 +102,14 @@ interface ManifestSupportDeps {
   CODEX_REASONING_VALUES: Set<CodexReasoningEffort>;
   SecretsStore: typeof import('../secrets-store').SecretsStore;
   OfficialToolsService: typeof import('../official-tools-service').OfficialToolsService;
+  ConnectionsService: typeof import('../connections-service').ConnectionsService;
   MemoryStore: typeof import('../memory-store').MemoryStore;
   BackupsManager: typeof import('../backups-manager').BackupsManager;
   getForgerMetadataRoot: () => string;
   getBackupsRoot: () => string;
   getTempRoot: () => string;
   getFreePort: () => Promise<number>;
+  getSelfOAuthCallbackService?: () => SelfOAuthCallbackServiceLike;
   getPromptOverridesStore: () => PromptOverridesStore;
   getCloudIdentityStore: () => CloudIdentityStore;
   hashFileSha256: (filePath: string) => Promise<string>;
@@ -150,12 +157,14 @@ export const createManifestSupportController = (deps: ManifestSupportDeps) => {
     CODEX_REASONING_VALUES,
     SecretsStore,
     OfficialToolsService,
+    ConnectionsService,
     MemoryStore,
     BackupsManager,
     getForgerMetadataRoot,
     getBackupsRoot,
     getTempRoot,
     getFreePort,
+    getSelfOAuthCallbackService,
     getPromptOverridesStore,
     getCloudIdentityStore,
     hashFileSha256,
@@ -261,12 +270,52 @@ const getOfficialToolsService = (): OfficialToolsService => {
         }
         return await client.refreshGmailOAuthAccessToken(input);
       },
+      ...(getSelfOAuthCallbackService ? { selfOAuthCallbackService: getSelfOAuthCallbackService() } : {}),
       appendLog: appendInstallLog,
       emitEvent: emitOfficialToolEvent,
       getAppToolDeclarations: resolveAppToolDeclarations,
     });
   }
   return state.officialToolsService;
+};
+
+const getConnectionsService = (): ConnectionsService => {
+  if (!state.connectionsService) {
+    state.connectionsService = new ConnectionsService({
+      metadataRoot: getForgerMetadataRoot(),
+      secretsStore: getSecretsStore(),
+      getFreePort,
+      openExternalUrl: async (url) => {
+        await shell.openExternal(url);
+      },
+      isForgerAccountAuthenticated: () => Boolean(getCurrentForgerAccount().token),
+      getGmailOAuthClientId: async () => {
+        const client = getCurrentForgerBackendClient();
+        if (!getCurrentForgerAccount().token || !client) {
+          throw new Error('forger_account_required');
+        }
+        return await client.getGmailOAuthClientId();
+      },
+      exchangeGmailOAuthCode: async (input) => {
+        const client = getCurrentForgerBackendClient();
+        if (!getCurrentForgerAccount().token || !client) {
+          throw new Error('forger_account_required');
+        }
+        return await client.exchangeGmailOAuthCode(input);
+      },
+      refreshGmailOAuthAccessToken: async (input) => {
+        const client = getCurrentForgerBackendClient();
+        if (!getCurrentForgerAccount().token || !client) {
+          throw new Error('forger_account_required');
+        }
+        return await client.refreshGmailOAuthAccessToken(input);
+      },
+      appendLog: appendInstallLog,
+      emitEvent: emitOfficialToolEvent,
+      getAppConnectionDeclarations: resolveAppConnectionDeclarations,
+    });
+  }
+  return state.connectionsService;
 };
 
 const getMemoryStore = (): MemoryStore => {
@@ -285,38 +334,42 @@ const buildMemoryContextForApp = async (appId: string): Promise<string> => {
 };
 
 const buildForgerToolsContextForApp = async (appId: string): Promise<string> => {
-  const state = await getOfficialToolsService().list().catch(() => null);
-  const gmail = state?.tools.find((tool) => tool.id === 'gmail');
-  const whatsapp = state?.tools.find((tool) => tool.id === 'whatsapp');
-  const chromeExtension = state?.tools.find((tool) => tool.id === 'forger_chrome_extension');
+  const toolsState = await getOfficialToolsService().list().catch(() => null);
+  const connectionsState = await getConnectionsService().listConnectionsForApp(appId).catch(() => null);
+  const connectionActionIds = new Set(
+    (connectionsState?.requirements ?? []).flatMap((requirement) =>
+      requirement.granted
+        ? requirement.resolvedActions.map((action) => action.id)
+        : []),
+  );
+  const chromeExtension = toolsState?.tools.find((tool) => tool.id === 'forger_chrome_extension');
   const allowedActions = await getOfficialToolsService().listAgentActionIdsForApp(appId).catch(() => new Set<string>());
   return buildForgerOfficialToolsPromptSection({
     mode: 'app-agent',
-    gmailReady: gmail?.status === 'configured',
-    whatsappReady: whatsapp?.status === 'configured',
     chromeExtensionReady: chromeExtension?.status === 'configured',
-    allowedActions: [...allowedActions],
+    allowedActions: [...new Set([...allowedActions, ...connectionActionIds])],
+    connectionRequirements: connectionsState?.requirements ?? [],
+    connectionTypes: connectionsState?.types ?? [],
+    connectionInstances: connectionsState?.instances ?? [],
   });
 };
 
 const buildForgerToolsContextForFreeChat = async (): Promise<string> => {
-  const state = await getOfficialToolsService().list().catch(() => null);
-  const gmail = state?.tools.find((tool) => tool.id === 'gmail');
-  const whatsapp = state?.tools.find((tool) => tool.id === 'whatsapp');
-  const chromeExtension = state?.tools.find((tool) => tool.id === 'forger_chrome_extension');
+  const toolsState = await getOfficialToolsService().list().catch(() => null);
+  const connectionsState = await getConnectionsService().listState().catch(() => null);
+  const chromeExtension = toolsState?.tools.find((tool) => tool.id === 'forger_chrome_extension');
   const officialActions = AGENT_TOOL_DEFINITIONS
     .map((tool) => tool.id)
     .filter((toolId) =>
-      toolId.startsWith('gmail.')
-      || toolId.startsWith('whatsapp.')
+      isForgerConnectionActionId(toolId)
       || toolId.startsWith('forger_chrome_extension.')
     );
   return buildForgerOfficialToolsPromptSection({
     mode: 'free-chat',
-    gmailReady: gmail?.status === 'configured',
-    whatsappReady: whatsapp?.status === 'configured',
     chromeExtensionReady: chromeExtension?.status === 'configured',
     allowedActions: officialActions,
+    connectionTypes: connectionsState?.types ?? [],
+    connectionInstances: connectionsState?.instances ?? [],
   });
 };
 
@@ -538,6 +591,45 @@ const resolveAppToolDeclarations = async (
     return null;
   }
   const declarations = normalizeAppToolDeclarations(catalog.tools);
+  return {
+    appName: catalog.name ?? appId,
+    agents: catalog.agents ?? [],
+    promptTemplates: catalog.promptTemplates ?? [],
+    platformCapabilities: normalizePlatformCapabilities(catalog.platformCapabilities),
+    ...declarations,
+  };
+};
+
+const resolveAppConnectionDeclarations = async (
+  appId: string,
+): Promise<{
+  appName: string;
+  required: AppConnectionDeclaration[];
+  optional: AppConnectionDeclaration[];
+  agents: AppAgent[];
+  promptTemplates: AppPromptTemplate[];
+  platformCapabilities: PlatformCapabilities;
+} | null> => {
+  const record = getCurrentRegistry().apps[appId];
+  if (record?.installDir) {
+    const manifest = await resolveInstalledManifest(record.installDir);
+    const legacyTools = normalizeAppToolDeclarations(manifest?.tools);
+    const declarations = normalizeAppConnectionDeclarations(manifest?.connections, legacyTools);
+    return {
+      appName: record.name ?? appId,
+      agents: normalizeManifestAgents(manifest),
+      promptTemplates: normalizeManifestPromptTemplates(manifest),
+      platformCapabilities: normalizePlatformCapabilities(manifest?.platformCapabilities),
+      ...declarations,
+    };
+  }
+
+  const catalog = catalogApps.find((entry) => entry.id === appId);
+  if (!catalog) {
+    return null;
+  }
+  const legacyTools = normalizeAppToolDeclarations(catalog.tools);
+  const declarations = normalizeAppConnectionDeclarations(catalog.connections, legacyTools);
   return {
     appName: catalog.name ?? appId,
     agents: catalog.agents ?? [],
@@ -835,9 +927,6 @@ const normalizeManifestRuntime = (value: unknown): AgentRuntime | undefined => {
   const record = value as Record<string, unknown>;
   const provider = normalizeAgentProvider(record.provider);
   const model = typeof record.model === 'string' && record.model.trim() ? record.model.trim() : '';
-  const effort = provider
-    ? normalizeRuntimeEffort(provider, record.effort, provider === 'claude' ? BUILT_IN_CLAUDE_EFFORT : provider === 'antigravity' ? DEFAULT_ANTIGRAVITY_EFFORT : BUILT_IN_CODEX_REASONING)
-    : normalizeCodexReasoningEffort(record.effort, BUILT_IN_CODEX_REASONING);
   const permissionMode = record.permissionMode === 'unsafe' ? 'unsafe' : record.permissionMode === 'safe' ? 'safe' : undefined;
   if (!provider || !model) {
     return undefined;
@@ -846,6 +935,9 @@ const normalizeManifestRuntime = (value: unknown): AgentRuntime | undefined => {
     const antigravity = normalizeAntigravityModelAndEffort(model, record.effort);
     return { provider, model: antigravity.model, effort: antigravity.effort, ...(permissionMode ? { permissionMode } : {}) };
   }
+  const effort = provider
+    ? normalizeRuntimeEffortForModel(provider, model, record.effort, provider === 'claude' ? BUILT_IN_CLAUDE_EFFORT : BUILT_IN_CODEX_REASONING)
+    : normalizeCodexReasoningEffort(record.effort, BUILT_IN_CODEX_REASONING);
   return { provider, model, effort, ...(permissionMode ? { permissionMode } : {}) };
 };
 
@@ -1247,5 +1339,5 @@ const formatProcessOutputForInstallLog = (value: string, secretValues: string[])
     ? '[salida omitida porque la app recibio secretos]'
     : value;
 
-  return { normalizeToken, ensurePathInside, toPosixRelativePath, resolveInstalledManifest, manifestAllowsAgentNetworkAccess, appAllowsAgentNetworkAccess, anyAppAllowsAgentNetworkAccess, getSecretsStore, getOfficialToolsService, getMemoryStore, buildMemoryContextForApps, buildMemoryContextForApp, buildForgerToolsContextForApp, buildForgerToolsContextForFreeChat, getBackupsManager, createRemoteAppBackup, restoreRemoteAppBackup, syncAppToCloudIfEnabled, isReservedAppSecretEnvName, normalizeAppSecretDeclaration, normalizeManifestAppSecrets, resolveAppToolDeclarations, normalizeManifestPromptTemplates, normalizeManifestAgents, normalizeManifestAgentKind, normalizeManifestAgentPrompts, normalizeManifestAgentPromptTemplate, normalizeManifestAgentPromptVariables, isAppAgentPromptVariableType, normalizeManifestReasoningEffort, normalizeManifestAgentDefaults, normalizeManifestRuntime, normalizePromptTemplateArguments, resolveInstalledPromptTemplates, resolveInstalledAgents, hasInstalledCodexConversation, resolveInstalledPromptBases, listAppPrompts, validateAppPrompt, testAppPrompt, updateAppPrompt, restoreAppPrompt, getManifestAppSecretsValidationError, resolveInstalledAppSecrets, buildAppSecretsState, formatProcessOutputForInstallLog };
+  return { normalizeToken, ensurePathInside, toPosixRelativePath, resolveInstalledManifest, manifestAllowsAgentNetworkAccess, appAllowsAgentNetworkAccess, anyAppAllowsAgentNetworkAccess, getSecretsStore, getOfficialToolsService, getConnectionsService, getMemoryStore, buildMemoryContextForApps, buildMemoryContextForApp, buildForgerToolsContextForApp, buildForgerToolsContextForFreeChat, getBackupsManager, createRemoteAppBackup, restoreRemoteAppBackup, syncAppToCloudIfEnabled, isReservedAppSecretEnvName, normalizeAppSecretDeclaration, normalizeManifestAppSecrets, resolveAppToolDeclarations, resolveAppConnectionDeclarations, normalizeManifestPromptTemplates, normalizeManifestAgents, normalizeManifestAgentKind, normalizeManifestAgentPrompts, normalizeManifestAgentPromptTemplate, normalizeManifestAgentPromptVariables, isAppAgentPromptVariableType, normalizeManifestReasoningEffort, normalizeManifestAgentDefaults, normalizeManifestRuntime, normalizePromptTemplateArguments, resolveInstalledPromptTemplates, resolveInstalledAgents, hasInstalledCodexConversation, resolveInstalledPromptBases, listAppPrompts, validateAppPrompt, testAppPrompt, updateAppPrompt, restoreAppPrompt, getManifestAppSecretsValidationError, resolveInstalledAppSecrets, buildAppSecretsState, formatProcessOutputForInstallLog };
 };

@@ -21,7 +21,8 @@ export const en = {
     devices: 'Devices',
     datos: 'Data',
     secrets: 'Secrets',
-    tools: 'Tools',
+    connections: 'Connections',
+    tools: 'Forger Tools',
     docs: 'Docs',
     settings: 'Settings',
   },
@@ -717,6 +718,14 @@ export const en = {
         title: 'Your agents',
         body: 'Agents are persistent assistants you configure once and chat with anytime. Give them access to your apps and tools.',
       },
+      connections: {
+        title: 'Connected accounts',
+        body: 'Connect accounts only when you need them. Forger can use services such as Gmail, Google Calendar, Sheets, Drive, Docs, GitHub, Notion, WhatsApp, Slack, or Trello from agents and workflows after you allow access.',
+      },
+      workflows: {
+        title: 'Repeatable workflows',
+        body: 'Build repeatable flows with agents, Forger tools, connected accounts, and conditions. Sending or changing data can pause for approval.',
+      },
       feedback: {
         title: 'Experimental release',
         body: 'Forger is an experimental release. If you find a problem, error, or confusing flow, your feedback helps us improve it.',
@@ -733,8 +742,8 @@ export const en = {
     advanced: {
       views: {
         tools: {
-          title: 'Agent tools',
-          body: 'Tools controls which capabilities agents can use and when they must ask for approval. Review each package to understand the local or connected actions available.',
+          title: 'Forger Tools',
+          body: 'Forger Tools controls platform-owned capabilities agents can use and when they must ask for approval.',
         },
         files: {
           title: 'Files shared with chat',
@@ -753,8 +762,8 @@ export const en = {
           body: 'Data lets you inspect local tables for an installed app. It is an advanced view for diagnosing records, validating imports, and understanding what each app stores.',
         },
         secrets: {
-          title: 'Credentials and secrets',
-          body: 'Secrets stores credentials an app or agent may need. Use it only for sensitive values you explicitly want to manage from Forger.',
+          title: 'Credentials',
+          body: 'Credentials stores private values an app or agent may need. Use it only for values you explicitly want to manage from Forger.',
         },
         automations: {
           title: 'Automations',
@@ -764,8 +773,8 @@ export const en = {
     },
     tools: {
       intro: {
-        title: 'Tools let agents act for you',
-        body: 'Tools are advanced capabilities Forger can use when you ask an agent to inspect apps, manage local state, or work with connected services.',
+        title: 'Forger Tools let agents act for you',
+        body: 'Forger Tools are platform-owned capabilities Forger can use when you ask an agent to inspect apps, manage local state, or operate installed apps.',
       },
       list: {
         title: 'Tool packages live here',
@@ -779,17 +788,61 @@ export const en = {
         title: 'Approvals protect local actions',
         body: 'Low-risk reads can run directly. App changes, restarts, updates, and prompt edits can require your approval before the agent acts.',
       },
-      gmailRow: {
-        title: 'Gmail is an official tool',
-        body: 'Gmail lets the agent search, read, download attachments, and send email only after you connect it.',
+    },
+    connections: {
+      list: {
+        title: 'Connections live apart from tools',
+        body: 'External accounts and service sessions live here. Agents and workflows can use them only after you grant access.',
       },
-      gmailConnect: {
-        title: 'Connect Gmail through Forger Cloud',
-        body: 'Google OAuth needs a secure server-side exchange. Forger Cloud handles that exchange, while Gmail tokens stay in local Desktop storage.',
+      add: {
+        title: 'Add one account at a time',
+        body: 'Use Add connection to connect a new account, workspace, or device session without mixing it into Forger-owned tools.',
       },
-      gmailPermissions: {
-        title: 'Gmail actions stay explicit',
-        body: 'Reading mail, downloading attachments, and sending messages are sensitive actions. Keep approval on when you want to review them first.',
+      row: {
+        title: 'Status is visible per service',
+        body: 'Each row shows whether accounts are connected, need setup, or need attention.',
+      },
+      detail: {
+        title: 'Review accounts and defaults',
+        body: 'The detail view shows account identity, default selection, connection status, and the available actions.',
+      },
+      usedBy: {
+        title: 'See what can use it',
+        body: 'Used by shows the agents, apps, and workflows that reference this connection before you disconnect an account.',
+      },
+      approvals: {
+        title: 'Sensitive actions can pause',
+        body: 'Reading private data, sending messages, or changing external services can require your approval before the action runs.',
+      },
+    },
+    workflows: {
+      list: {
+        title: 'Workflows are repeatable flows',
+        body: 'Workflows can run manually or on a schedule, and you can review recent runs before changing them.',
+      },
+      addStep: {
+        title: 'Build with steps',
+        body: 'A workflow can combine AI agents, Forger agents, Forger tools, connected accounts, and conditions.',
+      },
+      forgerTool: {
+        title: 'Forger tool steps use platform actions',
+        body: 'Use Forger tool steps for local Forger actions such as opening apps, checking status, or managing app prompts.',
+      },
+      connection: {
+        title: 'Connection steps use connected accounts',
+        body: 'Use Connection steps when a flow needs Gmail, Google Calendar, Sheets, Drive, Docs, GitHub, Notion, WhatsApp, Slack, Trello, or another connected service.',
+      },
+      mapping: {
+        title: 'Map outputs into later steps',
+        body: 'Fields from earlier steps can fill prompts and action inputs so the workflow carries data forward.',
+      },
+      approval: {
+        title: 'Pause before risky work',
+        body: 'Turn on approval for steps that send, change, or expose important data.',
+      },
+      history: {
+        title: 'Inspect run history',
+        body: 'Run history lets you inspect what succeeded, what failed, and which step needs attention.',
       },
     },
   },
@@ -1066,14 +1119,15 @@ export const en = {
     storageBreakdownOtherDescription: 'Cloud files that are not backups or uploaded applications.',
     storageDiagnosticsExcluded: 'Diagnostic and error report files do not count toward your cloud storage.',
     advancedSurfaces: {
-      tools: 'Review and configure tools available to agents.',
+      connections: 'Connect accounts and services for agents and workflows.',
+      tools: 'Review and configure Forger-owned tools available to agents.',
       files: 'Manage files shared with Forger chat.',
       backups: 'Create, sync, restore, and delete app backups.',
       devices: 'Review devices linked to Forger Cloud.',
       datos: 'Inspect local app database tables.',
       secrets: 'Save credentials and connect them to apps.',
       automations: 'Schedule repeated app or workspace tasks.',
-      workflows: 'Chain agents, conditions, and connectors into workflows.',
+      workflows: 'Chain agents, Forger tools, connections, and conditions into workflows.',
       docs: 'Read Forger documentation.',
     },
     resetOnboarding: 'Reset onboarding',

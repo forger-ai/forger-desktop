@@ -126,6 +126,9 @@ test('llm node runs the provider CLI, injects context, and falls back to the las
     const nodeRun = finished.nodeRuns.find((entry) => entry.nodeId === 'agente');
     assert.deepEqual(nodeRun.output, { text: 'Resumen final' });
     assert.equal(nodeRun.summary, 'Resumen final');
+    assert.equal(nodeRun.input.inputContext.trigger.type, 'manual');
+    assert.match(nodeRun.input.renderedPrompt, /MEMORIA-GLOBAL/);
+    assert.match(nodeRun.input.renderedPrompt, /Resuelve la tarea con manual/);
     assert.equal(mcpSessions.length, 1);
     assert.deepEqual(mcpSessions[0].appIds, ['finance-os']);
     assert.ok(mcpSessions[0].nodeRunKey.endsWith(':agente'));
@@ -230,7 +233,8 @@ test('forger agent node runs with the personal agent grants and reports missing 
               networkAccess: true,
               runtime: { provider: 'codex', model: 'gpt-test', effort: 'low' },
               appIds: ['finance-os'],
-              toolIds: ['slack.send_message'],
+              toolIds: ['forger_refresh_app_view'],
+              connectionGrants: [],
               createdAt: '',
               updatedAt: '',
             }
@@ -241,7 +245,7 @@ test('forger agent node runs with the personal agent grants and reports missing 
       name: 'Con agente',
       trigger: { type: 'manual' },
       nodes: [
-        { id: 'preparar', name: 'Preparar', type: 'connector', toolId: 'slack', actionId: 'x', input: {} },
+        { id: 'preparar', name: 'Preparar', type: 'connector', toolId: 'forger', actionId: 'x', input: {} },
         { id: 'delegado', name: 'Delegado', type: 'forger_agent', agentId: 'agente-finanzas', prompt: 'Revisa {{nodes.preparar.output.echoed}}' },
         { id: 'fantasma', name: 'Fantasma', type: 'forger_agent', agentId: 'no-existe', prompt: 'x' },
       ],
@@ -262,7 +266,7 @@ test('forger agent node runs with the personal agent grants and reports missing 
 
     const delegadoSession = sessions.find((session) => session.nodeRunKey.endsWith(':delegado'));
     assert.deepEqual(delegadoSession.appIds, ['finance-os'], 'agent grants scope the MCP session');
-    assert.deepEqual(delegadoSession.toolIds, ['slack.send_message']);
+    assert.deepEqual(delegadoSession.toolIds, ['forger_refresh_app_view']);
 
     const transcript = (await withCli.manager.getRun(summary.id)).transcript;
     assert.match(transcript, /Cuidar las finanzas/, 'agent purpose precedes the node prompt');
@@ -295,6 +299,9 @@ test('provider readiness and CLI resolution failures produce clean node errors',
       const finished = await waitForRunEnd(harness.manager, summary.id);
       assert.equal(finished.status, 'failed', expectedError);
       assert.equal(finished.error, expectedError);
+      const nodeRun = finished.nodeRuns.find((entry) => entry.nodeId === 'agente');
+      assert.equal(nodeRun.input.inputContext.trigger.type, 'manual');
+      assert.match(nodeRun.input.renderedPrompt, /Resuelve la tarea con manual/);
     } finally {
       await harness.cleanup();
     }
@@ -353,7 +360,7 @@ test('scheduled workflows run when due, respect missed-run policies, and reject 
           missedRunPolicy: scenario.policy,
           ...(scenario.windowMinutes ? { missedRunWindowMinutes: scenario.windowMinutes } : {}),
         },
-        nodes: [{ id: 'paso', name: 'Paso', type: 'connector', toolId: 'slack', actionId: 'x', input: {} }],
+        nodes: [{ id: 'paso', name: 'Paso', type: 'connector', toolId: 'forger', actionId: 'x', input: {} }],
         edges: [],
         enabled: true,
         running: false,
@@ -387,7 +394,7 @@ test('future schedules arm a timer and pausing clears it', async () => {
     const workflow = await harness.manager.upsert({
       name: 'Futuro',
       trigger: { type: 'scheduled', frequency: { type: 'hourly' } },
-      nodes: [{ id: 'paso', name: 'Paso', type: 'connector', toolId: 'slack', actionId: 'x', input: {} }],
+      nodes: [{ id: 'paso', name: 'Paso', type: 'connector', toolId: 'forger', actionId: 'x', input: {} }],
       edges: [],
       enabled: true,
     });
@@ -421,7 +428,7 @@ test('initialize drops corrupt entries, restores schedules, and fails interrupte
     const workflow = await slowHarness.manager.upsert({
       name: 'Interrumpido',
       trigger: { type: 'manual' },
-      nodes: [{ id: 'lento', name: 'Lento', type: 'connector', toolId: 'slack', actionId: 'x', input: {} }],
+      nodes: [{ id: 'lento', name: 'Lento', type: 'connector', toolId: 'forger', actionId: 'x', input: {} }],
       edges: [],
     });
     const runSummary = await slowHarness.manager.runNow(workflow.id);
@@ -476,7 +483,7 @@ test('runNode while the workflow is running records a skipped step run', async (
     const workflow = await harness.manager.upsert({
       name: 'Ocupado',
       trigger: { type: 'manual' },
-      nodes: [{ id: 'lento', name: 'Lento', type: 'connector', toolId: 'slack', actionId: 'x', input: {} }],
+      nodes: [{ id: 'lento', name: 'Lento', type: 'connector', toolId: 'forger', actionId: 'x', input: {} }],
       edges: [],
     });
     const first = await harness.manager.runNow(workflow.id);
@@ -642,7 +649,7 @@ test('cancelRun resolves pending approvals and cancels remaining branch nodes', 
   }
 });
 
-test('connector nodes fail cleanly without an executor or when the executor throws', async () => {
+test('forger tool nodes fail cleanly without an executor or when the executor throws', async () => {
   const noExecutor = await createManager({ options: { callConnectorAction: undefined } });
   try {
     const workflow = await noExecutor.manager.upsert({
@@ -653,7 +660,7 @@ test('connector nodes fail cleanly without an executor or when the executor thro
     });
     const summary = await noExecutor.manager.runNow(workflow.id);
     const finished = await waitForRunEnd(noExecutor.manager, summary.id);
-    assert.equal(finished.error, 'workflow_connectors_unavailable');
+    assert.equal(finished.error, 'workflow_forger_tools_unavailable');
   } finally {
     await noExecutor.cleanup();
   }

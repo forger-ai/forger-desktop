@@ -190,7 +190,7 @@ test('buildUpstreamFieldSources combines declared contracts with run samples', (
   const workflow = {
     nodes: [
       { id: 'cond', name: 'Cond', type: 'condition', expression: { left: 'x', operator: 'is_not_empty' } },
-      { id: 'slack', name: 'Slack', type: 'connector', toolId: 'slack', actionId: 'slack.send_message', input: {} },
+      { id: 'slack', name: 'Slack', type: 'connection', connectionType: 'slack', actionId: 'slack.send_message', input: {} },
       { id: 'agente', name: 'Agente', type: 'llm_agent', prompt: 'p', toolIds: [], appIds: [] },
       { id: 'final', name: 'Final', type: 'llm_agent', prompt: 'p', toolIds: [], appIds: [] },
     ],
@@ -202,13 +202,13 @@ test('buildUpstreamFieldSources combines declared contracts with run samples', (
   };
   const sources = buildUpstreamFieldSources(workflow, 'final', {
     outputSamples: { agente: { resumen: 'hola' } },
-    connectorOutputSchemas: { 'slack.send_message': slackSendSchema },
+    connectionOutputSchemas: { 'slack.send_message': slackSendSchema },
   });
   const bySourceId = Object.fromEntries(sources.map((source) => [source.node.id, source]));
 
   assert.deepEqual(Object.keys(bySourceId).sort(), ['agente', 'cond', 'slack']);
   assert.ok(bySourceId.cond.fields.some((field) => field.path === 'result'), 'condition exposes result');
-  assert.ok(bySourceId.slack.fields.some((field) => field.path === 'ts'), 'connector exposes declared schema');
+  assert.ok(bySourceId.slack.fields.some((field) => field.path === 'ts'), 'connection exposes declared schema');
   const agentFields = Object.fromEntries(bySourceId.agente.fields.map((field) => [field.path, field]));
   assert.equal(agentFields.resumen.sample, 'hola', 'agent exposes sampled output');
   assert.ok('text' in agentFields, 'agent keeps fallback text contract');

@@ -9,6 +9,7 @@ import { findForEachJoinConflict } from '../../shared/workflow-templates';
 
 export interface WorkflowNodeState {
   status: WorkflowNodeRunStatus;
+  input?: Record<string, unknown>;
   output?: Record<string, unknown>;
   summary?: string;
   error?: string;

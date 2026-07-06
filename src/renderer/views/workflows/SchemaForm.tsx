@@ -18,10 +18,36 @@ interface SchemaProperty {
   type?: string;
   description?: string;
   enum?: unknown[];
+  items?: unknown;
 }
 
 const asSchemaProperty = (value: unknown): SchemaProperty =>
   value && typeof value === 'object' && !Array.isArray(value) ? value as SchemaProperty : {};
+
+const arrayTextValue = (value: unknown): string => {
+  if (Array.isArray(value)) {
+    return value.map((item) => typeof item === 'string' ? item : JSON.stringify(item)).join('\n');
+  }
+  if (typeof value === 'string') {
+    return value;
+  }
+  return '';
+};
+
+const parseStringArrayField = (raw: string): string[] | string | undefined => {
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  if (/^\{\{\s*[a-zA-Z0-9_.-]+\s*\}\}$/.test(trimmed)) {
+    return trimmed;
+  }
+  const items = raw
+    .split(/[\n,]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return items.length > 0 ? items : undefined;
+};
 
 /** Small adornment button that inserts a {{reference}} into a field. */
 export const MappingMenuButton = ({ sources, tooltip, wholeOutputLabel, triggerGroupLabel, onPick }: {
@@ -143,6 +169,36 @@ export function SchemaForm({ schema, value, onChange, sources, mapTooltip, whole
                 />
               )}
               label={label}
+            />
+          );
+        }
+
+        const itemSchema = asSchemaProperty(property.items);
+        if (property.type === 'array' && itemSchema.type === 'string') {
+          const displayValue = arrayTextValue(current);
+          return (
+            <TextField
+              key={key}
+              size="small"
+              label={label}
+              helperText={property.description}
+              value={displayValue}
+              multiline
+              minRows={2}
+              onChange={(event) => setField(key, parseStringArrayField(event.target.value))}
+              slotProps={{
+                input: {
+                  endAdornment: sources.length > 0 ? (
+                    <MappingMenuButton
+                      sources={sources}
+                      tooltip={mapTooltip}
+                      wholeOutputLabel={wholeOutputLabel}
+                      triggerGroupLabel={triggerGroupLabel}
+                      onPick={(reference) => setField(key, displayValue ? parseStringArrayField(`${displayValue}\n${reference}`) : reference)}
+                    />
+                  ) : undefined,
+                },
+              }}
             />
           );
         }

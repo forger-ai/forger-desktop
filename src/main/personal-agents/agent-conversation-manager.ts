@@ -257,6 +257,7 @@ export class AgentConversationManager {
     const networkAccess = input.agent.networkAccess;
     let forgerMcpSession: { url: string; token: string } | null = null;
     let mcpServers: LlmAppMcpServerConfig[] = [];
+    const logWrites: Array<Promise<void>> = [];
     try {
       const appMcpServers = await (this.options.listenAppMcps?.(input.agent.appIds, input.run.id) ?? Promise.resolve([]));
       forgerMcpSession = this.options.createForgerMcpSession?.(input.run.id, input.agent) ?? null;
@@ -273,7 +274,7 @@ export class AgentConversationManager {
         ...appMcpServers,
       ];
       const onOutput = (stream: 'stdout' | 'stderr' | 'meta', text: string): void => {
-        void appendRunLog(runLogPath, stream, text);
+        logWrites.push(appendRunLog(runLogPath, stream, text));
         this.handleProviderOutput(input, runtime.provider, stream, text);
       };
       const providerRunService = createLlmProviderRunService({
@@ -336,6 +337,7 @@ export class AgentConversationManager {
           providerThreadId: result.threadId,
         });
       }
+      await Promise.all(logWrites);
       return { assistantText: result.assistantText };
     } finally {
       this.activeChildren.delete(input.run.id);

@@ -31,6 +31,7 @@ interface SecretsVault {
   secrets: Record<string, PersistedSecretRecord>;
   appMappings: Record<string, Record<string, string>>;
   toolSecrets: Record<string, Record<string, EncryptedSecretValue>>;
+  connectionSecrets: Record<string, Record<string, EncryptedSecretValue>>;
   providerProfileSecrets: Record<string, Record<string, EncryptedSecretValue>>;
 }
 
@@ -55,6 +56,7 @@ const createEmptyVault = (): SecretsVault => ({
   secrets: {},
   appMappings: {},
   toolSecrets: {},
+  connectionSecrets: {},
   providerProfileSecrets: {},
 });
 
@@ -70,6 +72,7 @@ const isVault = (value: unknown): value is SecretsVault => {
     && isPlainRecord(value.secrets)
     && isPlainRecord(value.appMappings)
     && (value.toolSecrets === undefined || isPlainRecord(value.toolSecrets))
+    && (value.connectionSecrets === undefined || isPlainRecord(value.connectionSecrets))
     && (value.providerProfileSecrets === undefined || isPlainRecord(value.providerProfileSecrets))
   );
 };
@@ -106,6 +109,8 @@ const isSecretsEncryptionUnavailableError = (error: unknown): boolean =>
 export class SecretsStore {
   private vault: SecretsVault = createEmptyVault();
   private loaded = false;
+  private loadPromise: Promise<void> | null = null;
+  private saveQueue: Promise<void> = Promise.resolve();
 
   constructor(private readonly userDataPath: string) {}
 
@@ -114,8 +119,12 @@ export class SecretsStore {
       return;
     }
 
-    this.vault = await this.readVault();
-    this.loaded = true;
+    if (!this.loadPromise) {
+      this.loadPromise = this.loadVaultOnce().finally(() => {
+        this.loadPromise = null;
+      });
+    }
+    await this.loadPromise;
   }
 
   async listUserSecrets(): Promise<UserSecretSummary[]> {
@@ -332,6 +341,50 @@ export class SecretsStore {
     return { success: true, userMessage: 'Secretos de herramienta eliminados.' };
   }
 
+  async setConnectionSecret(connectionId: string, secretName: string, value: string): Promise<SecretMutationResult> {
+    const loadError = await this.loadForMutation();
+    if (loadError) {
+      return loadError;
+    }
+
+    const normalizedConnectionId = normalizeSecretName(connectionId);
+    const normalizedSecretName = normalizeSecretName(secretName);
+    if (!normalizedConnectionId || !normalizedSecretName || !value) {
+      return { success: false, userMessage: 'No pudimos guardar este secreto de conexion.', technicalCode: 'invalid_connection_secret' };
+    }
+
+    this.vault.connectionSecrets[normalizedConnectionId] = {
+      ...(this.vault.connectionSecrets[normalizedConnectionId] ?? {}),
+      [normalizedSecretName]: this.encrypt(value),
+    };
+    await this.saveVault();
+    return { success: true, userMessage: 'Secreto de conexion guardado.' };
+  }
+
+  async getConnectionSecret(connectionId: string, secretName: string): Promise<string | null> {
+    await this.load();
+    const encrypted = this.vault.connectionSecrets[connectionId]?.[secretName];
+    if (!encrypted) {
+      return null;
+    }
+    return this.decrypt(encrypted);
+  }
+
+  async hasConnectionSecret(connectionId: string, secretName: string): Promise<boolean> {
+    await this.load();
+    return Boolean(this.vault.connectionSecrets[connectionId]?.[secretName]);
+  }
+
+  async deleteConnectionSecrets(connectionId: string): Promise<SecretMutationResult> {
+    const loadError = await this.loadForMutation();
+    if (loadError) {
+      return loadError;
+    }
+    delete this.vault.connectionSecrets[connectionId];
+    await this.saveVault();
+    return { success: true, userMessage: 'Secretos de conexion eliminados.' };
+  }
+
   async setProviderProfileSecret(profileId: string, secretName: string, value: string): Promise<SecretMutationResult> {
     const loadError = await this.loadForMutation();
     if (loadError) {
@@ -439,6 +492,7 @@ export class SecretsStore {
       return {
         ...parsed,
         toolSecrets: parsed.toolSecrets ?? {},
+        connectionSecrets: parsed.connectionSecrets ?? {},
         providerProfileSecrets: parsed.providerProfileSecrets ?? {},
       };
     } catch (error) {
@@ -449,12 +503,33 @@ export class SecretsStore {
     }
   }
 
+  private async loadVaultOnce(): Promise<void> {
+    this.vault = await this.readVault();
+    this.loaded = true;
+  }
+
   private async saveVault(): Promise<void> {
+    const nextSave = this.saveQueue
+      .catch(() => undefined)
+      .then(() => this.writeVaultFile());
+    this.saveQueue = nextSave;
+    await nextSave;
+  }
+
+  private async writeVaultFile(): Promise<void> {
     const vaultPath = this.getVaultPath();
-    const tempPath = `${vaultPath}.tmp`;
+    const tempPath = path.join(
+      path.dirname(vaultPath),
+      `${path.basename(vaultPath)}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`,
+    );
     await fs.mkdir(path.dirname(vaultPath), { recursive: true });
-    await fs.writeFile(tempPath, JSON.stringify(this.vault, null, 2), { encoding: 'utf8', mode: 0o600 });
-    await fs.rename(tempPath, vaultPath);
-    await fs.chmod(vaultPath, 0o600).catch(() => undefined);
+    try {
+      await fs.writeFile(tempPath, JSON.stringify(this.vault, null, 2), { encoding: 'utf8', mode: 0o600 });
+      await fs.rename(tempPath, vaultPath);
+      await fs.chmod(vaultPath, 0o600).catch(() => undefined);
+    } catch (error) {
+      await fs.unlink(tempPath).catch(() => undefined);
+      throw error;
+    }
   }
 }

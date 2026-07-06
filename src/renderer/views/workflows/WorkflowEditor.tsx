@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Autocomplete,
@@ -6,8 +6,10 @@ import {
   Button,
   Checkbox,
   Chip,
+  CircularProgress,
   Divider,
   FormControlLabel,
+  IconButton,
   MenuItem,
   Paper,
   Stack,
@@ -19,33 +21,42 @@ import {
 import AddRounded from '@mui/icons-material/AddRounded';
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
 import PlayCircleOutlineRounded from '@mui/icons-material/PlayCircleOutlineRounded';
+import CheckCircleRounded from '@mui/icons-material/CheckCircleRounded';
+import CancelRounded from '@mui/icons-material/CancelRounded';
+import PauseCircleRounded from '@mui/icons-material/PauseCircleRounded';
+import RadioButtonUncheckedRounded from '@mui/icons-material/RadioButtonUncheckedRounded';
 import {
   Background,
   Controls,
+  ReactFlow,
+  useNodesState,
   Handle,
   Position,
-  ReactFlow,
   type Connection,
   type Edge,
   type Node,
-  type NodeChange,
   type NodeProps,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import type {
+  AgentEffort,
   AgentProvider,
   AgentToolPackageDefinition,
   AppSummary,
   OfficialToolSummary,
   PersonalAgent,
+  PersonalAgentGrantOptionConnection,
   WorkflowConditionOperator,
   WorkflowEdge,
   WorkflowEdgeCondition,
   WorkflowNode,
+  WorkflowNodePosition,
+  WorkflowNodeRun,
 } from '@shared/types';
-import { LLM_PROVIDER_REGISTRY, type AgentProviderPreference } from '@shared/agent-runtime-registry';
+import { getRuntimeSupportedEfforts, LLM_PROVIDER_REGISTRY, normalizeRuntimeEffortForModel, type AgentProviderPreference } from '@shared/agent-runtime-registry';
 import type { AppDictionary } from '@renderer/i18n';
 import { buildUpstreamFieldSources, findForEachJoinConflict, parseReferencePath } from '@shared/workflow-templates';
+import { resolveWorkflowNodePosition } from '@shared/workflow-node-positions';
 import type { WorkflowDraft } from './workflow-draft';
 import { createDraftNode, edgeKey } from './workflow-draft';
 import { TemplateEditor, type TemplateSourceNode } from './TemplateEditor';
@@ -54,7 +65,8 @@ import { MappingMenuButton, SchemaForm } from './SchemaForm';
 const NODE_TYPE_COLORS: Record<WorkflowNode['type'], string> = {
   llm_agent: '#7c4dff',
   forger_agent: '#2e7d32',
-  connector: '#0288d1',
+  forger_tool: '#0288d1',
+  connection: '#1565c0',
   condition: '#ed6c02',
 };
 
@@ -77,41 +89,98 @@ const CONDITION_OPERATORS: WorkflowConditionOperator[] = [
 
 export type ProviderOption = { label: string; value: AgentProviderPreference };
 
-const modelDefaultEffort = (provider: AgentProvider, realModelName: string): string | undefined => {
-  const option = LLM_PROVIDER_REGISTRY[provider].modelOptions
-    .find((model) => model.realModelName === realModelName) as
-    | { defaultEffort?: string; defaultReasoningEffort?: string }
-    | undefined;
-  return option?.defaultEffort ?? option?.defaultReasoningEffort;
+/** forEach nodes run once per item; surface the item count on the run badge. */
+const forEachCountOf = (node: WorkflowNode, nodeRun: WorkflowNodeRun | undefined): number | undefined => {
+  if (!node.forEach || !nodeRun) {
+    return undefined;
+  }
+  const output = nodeRun.output;
+  if (output && typeof output === 'object' && !Array.isArray(output) && typeof (output as { count?: unknown }).count === 'number') {
+    return (output as { count: number }).count;
+  }
+  return undefined;
 };
 
-type FlowNodeData = { node: WorkflowNode; typeLabel: string };
+type FlowNodeData = {
+  node: WorkflowNode;
+  typeLabel: string;
+  nodeRun?: WorkflowNodeRun;
+  forEachCount?: number;
+  onOpenRun?: (nodeId: string) => void;
+};
 
-const FlowNodeCard = ({ data, selected }: NodeProps) => {
-  const { node, typeLabel } = data as FlowNodeData;
-  const color = NODE_TYPE_COLORS[node.type];
+/** Corner badge that reflects the status of this node in the selected run. */
+const RunStatusBadge = ({ nodeRun, forEachCount, onOpenRun, nodeId }: {
+  nodeRun: WorkflowNodeRun;
+  forEachCount?: number;
+  onOpenRun?: (nodeId: string) => void;
+  nodeId: string;
+}) => {
+  const status = nodeRun.status;
+  const icon = status === 'running'
+    ? <CircularProgress size={18} thickness={5} />
+    : status === 'succeeded'
+      ? <CheckCircleRounded sx={{ fontSize: 20, color: 'success.main' }} />
+      : status === 'failed'
+        ? <CancelRounded sx={{ fontSize: 20, color: 'error.main' }} />
+        : status === 'waiting_approval'
+          ? <PauseCircleRounded sx={{ fontSize: 20, color: 'warning.main' }} />
+          : <RadioButtonUncheckedRounded sx={{ fontSize: 20, color: 'text.disabled' }} />;
   return (
-    <Paper
-      variant="outlined"
+    <Box
+      className="nodrag"
       sx={{
-        px: 1.5,
-        py: 1,
-        minWidth: 170,
-        borderColor: selected ? color : undefined,
-        borderWidth: selected ? 2 : 1,
-        borderLeft: `5px solid ${color}`,
-        borderRadius: 1.5,
-        bgcolor: 'background.paper',
+        position: 'absolute',
+        top: -10,
+        right: -10,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 0.25,
       }}
     >
-      <Handle type="target" position={Position.Left} />
-      <Typography variant="caption" sx={{ color, fontWeight: 700, display: 'block' }}>
-        {typeLabel}
-      </Typography>
-      <Typography variant="body2" sx={{ fontWeight: 600 }}>{node.name}</Typography>
-      <Typography variant="caption" color="text.secondary">id: {node.id}</Typography>
-      <Handle type="source" position={Position.Right} />
-    </Paper>
+      {typeof forEachCount === 'number' ? (
+        <Chip size="small" label={forEachCount} sx={{ height: 18, '& .MuiChip-label': { px: 0.75, fontSize: 11 } }} />
+      ) : null}
+      <IconButton
+        size="small"
+        onClick={(event) => { event.stopPropagation(); onOpenRun?.(nodeId); }}
+        sx={{ p: 0.25, bgcolor: 'background.paper', boxShadow: 1, '&:hover': { bgcolor: 'background.paper' } }}
+      >
+        {icon}
+      </IconButton>
+    </Box>
+  );
+};
+
+const FlowNodeCard = ({ data, selected }: NodeProps) => {
+  const { node, typeLabel, nodeRun, forEachCount, onOpenRun } = data as FlowNodeData;
+  const color = NODE_TYPE_COLORS[node.type];
+  return (
+    <Box sx={{ position: 'relative' }}>
+      <Paper
+        variant="outlined"
+        sx={{
+          px: 1.5,
+          py: 1,
+          minWidth: 170,
+          borderColor: selected ? color : undefined,
+          borderWidth: selected ? 2 : 1,
+          borderLeft: `5px solid ${color}`,
+          borderRadius: 1.5,
+          bgcolor: 'background.paper',
+        }}
+      >
+        <Handle type="target" position={Position.Left} />
+        <Typography variant="caption" sx={{ color, fontWeight: 700, display: 'block' }}>
+          {typeLabel}
+        </Typography>
+        <Typography variant="body2" sx={{ fontWeight: 600 }}>{node.name}</Typography>
+        <Handle type="source" position={Position.Right} />
+      </Paper>
+      {nodeRun ? (
+        <RunStatusBadge nodeRun={nodeRun} forEachCount={forEachCount} onOpenRun={onOpenRun} nodeId={node.id} />
+      ) : null}
+    </Box>
   );
 };
 
@@ -124,62 +193,121 @@ interface WorkflowEditorProps {
   agents: PersonalAgent[];
   toolPackages: AgentToolPackageDefinition[];
   officialTools: OfficialToolSummary[];
+  connectionOptions: PersonalAgentGrantOptionConnection[];
   providerOptions: ProviderOption[];
   /** Latest known output per node id, from stored runs. */
   outputSamples: Record<string, unknown>;
   /** Node ids present in the saved workflow (test step needs a saved node). */
   savedNodeIds: ReadonlySet<string>;
   onRunNode?: (nodeId: string) => void;
+  /** When true the graph can be panned and inspected but not edited (e.g. a run is in progress). */
+  readOnly?: boolean;
+  /** Node status for the run currently projected on the graph, keyed by node id. */
+  nodeRuns?: Record<string, WorkflowNodeRun>;
+  /** Opens the run detail modal for a node badge. */
+  onOpenNodeRun?: (nodeId: string) => void;
   t: AppDictionary;
 }
 
-export function WorkflowEditor({ draft, onDraftChange, apps, agents, toolPackages, officialTools, providerOptions, outputSamples, savedNodeIds, onRunNode, t }: WorkflowEditorProps) {
+export function WorkflowEditor({ draft, onDraftChange, apps, agents, toolPackages, officialTools, connectionOptions, providerOptions, outputSamples, savedNodeIds, onRunNode, readOnly = false, nodeRuns, onOpenNodeRun, t }: WorkflowEditorProps) {
   const copy = t.sections.workflows;
   const theme = useTheme();
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedEdgeKey, setSelectedEdgeKey] = useState<string | null>(null);
   const [connectError, setConnectError] = useState<string | null>(null);
 
-  const flowNodes: Node[] = useMemo(() => draft.nodes.map((node, index) => ({
-    id: node.id,
-    type: 'forgerNode',
-    position: node.position ?? { x: 80 + (index % 4) * 260, y: 80 + Math.floor(index / 4) * 160 },
-    data: { node, typeLabel: copy.nodeTypes[node.type] } satisfies FlowNodeData,
-    selected: node.id === selectedNodeId,
-  })), [draft.nodes, selectedNodeId, copy.nodeTypes]);
+  // React Flow owns the live node positions during a drag; the draft owns the
+  // node content (name, config, existence). We reconcile draft -> internal state
+  // without stomping the dragged position, so moving a node stays smooth instead
+  // of fighting the persisted value on every frame (the source of the blinking).
+  const [rfNodes, setRfNodes, onNodesChange] = useNodesState<Node>([]);
+  const rfNodesRef = useRef(rfNodes);
+  rfNodesRef.current = rfNodes;
+  const lastDraftPositionsRef = useRef(new Map<string, WorkflowNodePosition | undefined>());
 
-  const flowEdges: Edge[] = useMemo(() => draft.edges.map((edge) => ({
-    id: edgeKey(edge),
-    source: edge.from,
-    target: edge.to,
-    label: copy.edgeConditions[edge.condition],
-    animated: edge.condition === 'always',
-    selected: edgeKey(edge) === selectedEdgeKey,
-    style: { stroke: EDGE_COLORS[edge.condition], strokeWidth: 2 },
-    labelStyle: { fill: EDGE_COLORS[edge.condition], fontSize: 11 },
-    labelBgStyle: { fill: theme.palette.background.paper, fillOpacity: 0.95 },
-    labelBgPadding: [6, 3] as [number, number],
-    labelBgBorderRadius: 4,
-  })), [draft.edges, selectedEdgeKey, copy.edgeConditions, theme.palette.background.paper]);
+  // Keep a stable identity for the badge callback so the reconcile effect below
+  // does not re-run (and reset node state) on every parent render.
+  const onOpenNodeRunRef = useRef(onOpenNodeRun);
+  onOpenNodeRunRef.current = onOpenNodeRun;
+  const openNodeRun = useCallback((nodeId: string) => onOpenNodeRunRef.current?.(nodeId), []);
 
-  const handleNodesChange = useCallback((changes: NodeChange[]) => {
-    const moved = changes.filter((change) => change.type === 'position' && change.position);
-    if (moved.length === 0) {
-      return;
+  useLayoutEffect(() => {
+    setRfNodes((previous) => {
+      const previousById = new Map(previous.map((node) => [node.id, node]));
+      const previousDraftPositions = lastDraftPositionsRef.current;
+      const nextDraftPositions = new Map<string, WorkflowNodePosition | undefined>();
+      const nodes = draft.nodes.map((node, index) => {
+        const existing = previousById.get(node.id);
+        nextDraftPositions.set(node.id, node.position ? { ...node.position } : undefined);
+        const position = resolveWorkflowNodePosition({
+          draftPosition: node.position,
+          previousDraftPosition: previousDraftPositions.get(node.id),
+          hadPreviousDraftPosition: previousDraftPositions.has(node.id),
+          livePosition: existing?.position,
+          fallbackPosition: { x: 80 + (index % 4) * 260, y: 80 + Math.floor(index / 4) * 160 },
+        });
+        const nodeRun = nodeRuns?.[node.id];
+        return {
+          id: node.id,
+          type: 'forgerNode',
+          position,
+          draggable: !readOnly,
+          selected: node.id === selectedNodeId,
+          data: {
+            node,
+            typeLabel: copy.nodeTypes[node.type],
+            nodeRun,
+            forEachCount: forEachCountOf(node, nodeRun),
+            onOpenRun: openNodeRun,
+          } satisfies FlowNodeData,
+        } as Node;
+      });
+      lastDraftPositionsRef.current = nextDraftPositions;
+      return nodes;
+    });
+  }, [draft.nodes, selectedNodeId, readOnly, nodeRuns, copy.nodeTypes, openNodeRun, setRfNodes]);
+
+  // Highlight the path a run actually flowed through; dim the branches it skipped.
+  const activeEdgeKeys = useMemo(() => {
+    if (!nodeRuns) {
+      return new Set<string>();
     }
+    const ran = (id: string) => {
+      const status = nodeRuns[id]?.status;
+      return status === 'succeeded' || status === 'failed' || status === 'running' || status === 'waiting_approval';
+    };
+    return new Set(draft.edges.filter((edge) => ran(edge.from) && ran(edge.to)).map(edgeKey));
+  }, [nodeRuns, draft.edges]);
+
+  const flowEdges: Edge[] = useMemo(() => draft.edges.map((edge) => {
+    const active = activeEdgeKeys.has(edgeKey(edge));
+    return {
+      id: edgeKey(edge),
+      source: edge.from,
+      target: edge.to,
+      label: copy.edgeConditions[edge.condition],
+      animated: edge.condition === 'always' || active,
+      selected: edgeKey(edge) === selectedEdgeKey,
+      style: { stroke: EDGE_COLORS[edge.condition], strokeWidth: active ? 3 : 2, opacity: nodeRuns && !active ? 0.35 : 1 },
+      labelStyle: { fill: EDGE_COLORS[edge.condition], fontSize: 11 },
+      labelBgStyle: { fill: theme.palette.background.paper, fillOpacity: 0.95 },
+      labelBgPadding: [6, 3] as [number, number],
+      labelBgBorderRadius: 4,
+    };
+  }), [draft.edges, selectedEdgeKey, copy.edgeConditions, theme.palette.background.paper, activeEdgeKeys, nodeRuns]);
+
+  const handleNodeDragStop = useCallback(() => {
     onDraftChange((current) => ({
       ...current,
       nodes: current.nodes.map((node) => {
-        const change = moved.find((entry) => entry.type === 'position' && entry.id === node.id);
-        return change && change.type === 'position' && change.position
-          ? { ...node, position: { x: change.position.x, y: change.position.y } }
-          : node;
+        const rf = rfNodesRef.current.find((entry) => entry.id === node.id);
+        return rf ? { ...node, position: { x: rf.position.x, y: rf.position.y } } : node;
       }),
     }));
   }, [onDraftChange]);
 
   const handleConnect = useCallback((connection: Connection) => {
-    if (!connection.source || !connection.target || connection.source === connection.target) {
+    if (readOnly || !connection.source || !connection.target || connection.source === connection.target) {
       return;
     }
     onDraftChange((current) => {
@@ -203,29 +331,40 @@ export function WorkflowEditor({ draft, onDraftChange, apps, agents, toolPackage
   const selectedNode = draft.nodes.find((node) => node.id === selectedNodeId) ?? null;
   const selectedEdge = draft.edges.find((edge) => edgeKey(edge) === selectedEdgeKey) ?? null;
 
-  const connectorOutputSchemas = useMemo(() => {
-    const schemas: Record<string, Record<string, unknown>> = {};
-    for (const tool of officialTools) {
-      for (const action of tool.actions) {
+  const actionOutputSchemas = useMemo(() => {
+    const connectionOutputSchemas: Record<string, Record<string, unknown>> = {};
+    const forgerToolOutputSchemas: Record<string, Record<string, unknown>> = {};
+    for (const connection of connectionOptions) {
+      for (const action of connection.actions) {
         if (action.outputSchema) {
-          schemas[action.id] = action.outputSchema;
+          connectionOutputSchemas[action.id] = action.outputSchema;
         }
       }
     }
-    return schemas;
-  }, [officialTools]);
+    for (const tool of officialTools) {
+      if (tool.connectionBacked) {
+        continue;
+      }
+      for (const action of tool.actions) {
+        if (action.outputSchema) {
+          forgerToolOutputSchemas[action.id] = action.outputSchema;
+        }
+      }
+    }
+    return { connectionOutputSchemas, forgerToolOutputSchemas };
+  }, [officialTools, connectionOptions]);
 
   const upstreamSources: TemplateSourceNode[] = useMemo(() => {
     if (!selectedNode) {
       return [];
     }
-    return buildUpstreamFieldSources(draft, selectedNode.id, { outputSamples, connectorOutputSchemas })
+    return buildUpstreamFieldSources(draft, selectedNode.id, { outputSamples, ...actionOutputSchemas })
       .map((source) => ({
         nodeId: source.node.id,
         nodeName: source.node.name,
         fields: source.fields.map((field) => ({ path: field.path, sample: field.sample })),
       }));
-  }, [draft, selectedNode, outputSamples, connectorOutputSchemas]);
+  }, [draft, selectedNode, outputSamples, actionOutputSchemas]);
 
   const updateNode = (nodeId: string, updater: (node: WorkflowNode) => WorkflowNode) => {
     onDraftChange((current) => ({
@@ -236,10 +375,19 @@ export function WorkflowEditor({ draft, onDraftChange, apps, agents, toolPackage
 
   const addNode = (type: WorkflowNode['type']) => {
     onDraftChange((current) => {
+      const anchor = selectedNodeId ? current.nodes.find((node) => node.id === selectedNodeId) : undefined;
       const node = createDraftNode(type, current.nodes, copy.nodeTypes[type]);
+      if (anchor?.position) {
+        node.position = { x: anchor.position.x + 240, y: anchor.position.y + 20 };
+      }
       setSelectedNodeId(node.id);
       setSelectedEdgeKey(null);
-      return { ...current, nodes: [...current.nodes, node] };
+      // Auto-connect from the selected step so new nodes join the flow instead of
+      // stacking on top of each other on a fixed grid.
+      const edges: WorkflowEdge[] = anchor
+        ? [...current.edges, { from: anchor.id, to: node.id, condition: 'success' }]
+        : current.edges;
+      return { ...current, nodes: [...current.nodes, node], edges };
     });
   };
 
@@ -269,30 +417,41 @@ export function WorkflowEditor({ draft, onDraftChange, apps, agents, toolPackage
   };
 
   return (
-    <Stack direction={{ xs: 'column', lg: 'row' }} spacing={1.5} sx={{ minHeight: 480 }}>
-      <Paper variant="outlined" sx={{ flex: 1, minHeight: 480, borderRadius: 1, overflow: 'hidden' }}>
-        <Stack direction="row" spacing={1} sx={{ p: 1, borderBottom: 1, borderColor: 'divider' }} flexWrap="wrap" useFlexGap>
-          {(Object.keys(copy.nodeTypes) as Array<WorkflowNode['type']>).map((type) => (
-            <Button
-              key={type}
-              size="small"
-              variant="outlined"
-              startIcon={<AddRounded />}
-              sx={{ borderColor: NODE_TYPE_COLORS[type], color: NODE_TYPE_COLORS[type] }}
-              onClick={() => addNode(type)}
-            >
-              {copy.nodeTypes[type]}
-            </Button>
-          ))}
-        </Stack>
+    <Stack direction={{ xs: 'column', lg: 'row' }} spacing={1.5} sx={{ height: '100%', minHeight: 0 }}>
+      <Paper variant="outlined" sx={{ flex: 1, minHeight: 0, borderRadius: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+        {readOnly ? null : (
+          <Stack
+            direction="row"
+            spacing={1}
+            data-onboarding-target="workflow-add-step"
+            sx={{ p: 1, borderBottom: 1, borderColor: 'divider', flexShrink: 0 }}
+            flexWrap="wrap"
+            useFlexGap
+          >
+            {(Object.keys(copy.nodeTypes) as Array<WorkflowNode['type']>).map((type) => (
+              <Button
+                key={type}
+                size="small"
+                variant="outlined"
+                data-onboarding-target={type === 'forger_tool' ? 'workflow-step-forger-tool' : type === 'connection' ? 'workflow-step-connection' : undefined}
+                startIcon={<AddRounded />}
+                sx={{ borderColor: NODE_TYPE_COLORS[type], color: NODE_TYPE_COLORS[type] }}
+                onClick={() => addNode(type)}
+              >
+                {copy.nodeTypes[type]}
+              </Button>
+            ))}
+          </Stack>
+        )}
         {connectError ? (
-          <Alert severity="warning" onClose={() => setConnectError(null)} sx={{ borderRadius: 0 }}>
+          <Alert severity="warning" onClose={() => setConnectError(null)} sx={{ borderRadius: 0, flexShrink: 0 }}>
             {connectError}
           </Alert>
         ) : null}
         <Box
           sx={{
-            height: 460,
+            flex: 1,
+            minHeight: 0,
             '& .react-flow__controls': {
               boxShadow: theme.shadows[2],
               borderRadius: 1,
@@ -315,11 +474,15 @@ export function WorkflowEditor({ draft, onDraftChange, apps, agents, toolPackage
           }}
         >
           <ReactFlow
-            nodes={flowNodes}
+            nodes={rfNodes}
             edges={flowEdges}
             nodeTypes={flowNodeTypes}
-            onNodesChange={handleNodesChange}
+            onNodesChange={onNodesChange}
+            onNodeDragStop={handleNodeDragStop}
             onConnect={handleConnect}
+            nodesDraggable={!readOnly}
+            nodesConnectable={!readOnly}
+            deleteKeyCode={null}
             onNodeClick={(_event, node) => {
               setSelectedNodeId(node.id);
               setSelectedEdgeKey(null);
@@ -340,38 +503,41 @@ export function WorkflowEditor({ draft, onDraftChange, apps, agents, toolPackage
           </ReactFlow>
         </Box>
       </Paper>
-      <Paper variant="outlined" sx={{ width: { xs: '100%', lg: 380 }, p: 2, borderRadius: 1, maxHeight: 560, overflow: 'auto' }}>
-        {selectedEdge ? (
-          <EdgePanel
-            edge={selectedEdge}
-            copy={copy}
-            onChangeCondition={(condition) => {
-              const key = edgeKey(selectedEdge);
-              onDraftChange((current) => ({
-                ...current,
-                edges: current.edges.map((edge) => (edgeKey(edge) === key ? { ...edge, condition } : edge)),
-              }));
-            }}
-            onDelete={deleteSelectedEdge}
-          />
-        ) : selectedNode ? (
-          <NodePanel
-            node={selectedNode}
-            copy={copy}
-            apps={apps}
-            agents={agents}
-            toolPackages={toolPackages}
-            officialTools={officialTools}
-            providerOptions={providerOptions}
-            sources={upstreamSources}
-            canRunNode={savedNodeIds.has(selectedNode.id)}
-            onRunNode={onRunNode}
-            onChange={(updater) => updateNode(selectedNode.id, updater)}
-            onDelete={deleteSelectedNode}
-          />
-        ) : (
-          <Typography variant="body2" color="text.secondary">{copy.selectNode}</Typography>
-        )}
+      <Paper variant="outlined" sx={{ width: { xs: '100%', lg: 380 }, p: 2, borderRadius: 1, minHeight: 0, overflow: 'auto', flexShrink: 0 }}>
+        <Box sx={readOnly ? { pointerEvents: 'none', opacity: 0.75 } : undefined}>
+          {selectedEdge ? (
+            <EdgePanel
+              edge={selectedEdge}
+              copy={copy}
+              onChangeCondition={(condition) => {
+                const key = edgeKey(selectedEdge);
+                onDraftChange((current) => ({
+                  ...current,
+                  edges: current.edges.map((edge) => (edgeKey(edge) === key ? { ...edge, condition } : edge)),
+                }));
+              }}
+              onDelete={deleteSelectedEdge}
+            />
+          ) : selectedNode ? (
+            <NodePanel
+              node={selectedNode}
+              copy={copy}
+              apps={apps}
+              agents={agents}
+              toolPackages={toolPackages}
+              officialTools={officialTools}
+              connectionOptions={connectionOptions}
+              providerOptions={providerOptions}
+              sources={upstreamSources}
+              canRunNode={savedNodeIds.has(selectedNode.id)}
+              onRunNode={onRunNode}
+              onChange={(updater) => updateNode(selectedNode.id, updater)}
+              onDelete={deleteSelectedNode}
+            />
+          ) : (
+            <Typography variant="body2" color="text.secondary">{readOnly ? copy.lockedWhileRunning : copy.selectNode}</Typography>
+          )}
+        </Box>
       </Paper>
     </Stack>
   );
@@ -405,13 +571,14 @@ const EdgePanel = ({ edge, copy, onChangeCondition, onDelete }: {
   </Stack>
 );
 
-const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, providerOptions, sources, canRunNode, onRunNode, onChange, onDelete }: {
+const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, connectionOptions, providerOptions, sources, canRunNode, onRunNode, onChange, onDelete }: {
   node: WorkflowNode;
   copy: WorkflowCopy;
   apps: AppSummary[];
   agents: PersonalAgent[];
   toolPackages: AgentToolPackageDefinition[];
   officialTools: OfficialToolSummary[];
+  connectionOptions: PersonalAgentGrantOptionConnection[];
   providerOptions: ProviderOption[];
   sources: TemplateSourceNode[];
   canRunNode: boolean;
@@ -421,7 +588,7 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, prov
 }) => {
   const [inputJsonError, setInputJsonError] = useState(false);
   const [schemaJsonError, setSchemaJsonError] = useState(false);
-  const [rawConnectorInput, setRawConnectorInput] = useState(false);
+  const [rawActionInput, setRawActionInput] = useState(false);
   // With forEach active, every field of the node also offers the current item.
   const sourcesWithItem: TemplateSourceNode[] = (() => {
     if (!node.forEach) {
@@ -465,6 +632,31 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, prov
     }
     return options;
   }, [providerOptions, nodeProvider, copy.autoProvider]);
+  const forgerToolActions = useMemo(() => officialTools
+    .filter((tool) => !tool.connectionBacked && !tool.hidden)
+    .flatMap((tool) => tool.actions.map((action) => ({ tool, action }))), [officialTools]);
+  const connectionActions = useMemo(() => connectionOptions
+    .flatMap((connection) => connection.actions.map((action) => ({
+      connectionType: connection.type,
+      connection,
+      action,
+    }))), [connectionOptions]);
+  const connectionTypes = useMemo(() => connectionOptions.map((connection) => ({
+    type: connection.type,
+    label: connection.displayName,
+    configured: connection.configured,
+    instances: connection.instances,
+  })), [connectionOptions]);
+  const selectedConnectionOption = node.type === 'connection'
+    ? connectionOptions.find((connection) => connection.type === node.connectionType)
+    : undefined;
+  const connectionInstanceLabel = (instance: PersonalAgentGrantOptionConnection['instances'][number]): string =>
+    instance.label
+    || instance.accountIdentity?.email
+    || instance.accountIdentity?.username
+    || instance.accountIdentity?.phoneNumber
+    || instance.accountIdentity?.workspace
+    || instance.id;
 
   return (
     <Stack spacing={1.5}>
@@ -482,7 +674,7 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, prov
       />
 
       {sources.length > 0 ? (
-        <Box>
+        <Box data-onboarding-target="workflow-input-mapping">
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
             {copy.availableData}
           </Typography>
@@ -576,7 +768,7 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, prov
                     return current;
                   }
                   const model = event.target.value;
-                  const effort = modelDefaultEffort(current.runtime.provider, model) ?? current.runtime.effort;
+                  const effort = normalizeRuntimeEffortForModel(current.runtime.provider, model, current.runtime.effort);
                   return { ...current, runtime: { ...current.runtime, model, effort: effort as typeof current.runtime.effort } };
                 })}
               >
@@ -589,12 +781,14 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, prov
                 size="small"
                 sx={{ minWidth: 130 }}
                 label={copy.runtimeEffort}
-                value={node.runtime.effort}
+                value={normalizeRuntimeEffortForModel(node.runtime.provider, node.runtime.model, node.runtime.effort)}
                 onChange={(event) => onChange((current) => current.type === 'llm_agent' && current.runtime
                   ? { ...current, runtime: { ...current.runtime, effort: event.target.value as typeof current.runtime.effort } }
                   : current)}
               >
-                {LLM_PROVIDER_REGISTRY[node.runtime.provider].effortOptions.map((effort) => (
+                {LLM_PROVIDER_REGISTRY[node.runtime.provider].effortOptions
+                  .filter((effort) => getRuntimeSupportedEfforts(node.runtime!.provider, node.runtime!.model).includes(effort.value as AgentEffort))
+                  .map((effort) => (
                   <MenuItem key={effort.value} value={effort.value}>{effort.label}</MenuItem>
                 ))}
               </TextField>
@@ -667,41 +861,26 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, prov
         />
       ) : null}
 
-      {node.type === 'connector' ? (
+      {node.type === 'forger_tool' ? (
         <>
           <TextField
             select
             size="small"
-            label={copy.connectorTool}
+            label={copy.forgerToolAction}
             value={node.toolId}
-            onChange={(event) => onChange((current) => current.type === 'connector'
-              ? { ...current, toolId: event.target.value, actionId: '' }
+            onChange={(event) => onChange((current) => current.type === 'forger_tool'
+              ? { ...current, toolId: event.target.value as typeof current.toolId }
               : current)}
           >
-            {officialTools.map((tool) => (
-              <MenuItem key={tool.id} value={tool.id}>{tool.name}</MenuItem>
-            ))}
-          </TextField>
-          <TextField
-            select
-            size="small"
-            label={copy.connectorAction}
-            value={node.actionId}
-            onChange={(event) => onChange((current) => current.type === 'connector'
-              ? { ...current, actionId: event.target.value }
-              : current)}
-          >
-            {(officialTools.find((tool) => tool.id === node.toolId)?.actions ?? []).map((action) => (
-              <MenuItem key={action.id} value={action.id}>{action.name}</MenuItem>
+            {forgerToolActions.map(({ tool, action }) => (
+              <MenuItem key={action.id} value={action.id}>{tool.name}: {action.name}</MenuItem>
             ))}
           </TextField>
           {(() => {
-            const action = officialTools
-              .find((tool) => tool.id === node.toolId)?.actions
-              .find((entry) => entry.id === node.actionId);
+            const action = forgerToolActions.find((entry) => entry.action.id === node.toolId)?.action;
             const inputSchema = action?.inputSchema;
             const hasFormSchema = Boolean(inputSchema?.properties && Object.keys(inputSchema.properties as Record<string, unknown>).length > 0);
-            if (!rawConnectorInput && hasFormSchema) {
+            if (!rawActionInput && hasFormSchema) {
               return (
                 <>
                   <SchemaForm
@@ -711,11 +890,11 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, prov
                     mapTooltip={copy.mapField}
                     wholeOutputLabel={copy.wholeOutput}
                     triggerGroupLabel={copy.triggerData}
-                    onChange={(nextInput) => onChange((current) => current.type === 'connector'
+                    onChange={(nextInput) => onChange((current) => current.type === 'forger_tool'
                       ? { ...current, input: nextInput }
                       : current)}
                   />
-                  <Button size="small" variant="text" sx={{ alignSelf: 'flex-start' }} onClick={() => setRawConnectorInput(true)}>
+                  <Button size="small" variant="text" sx={{ alignSelf: 'flex-start' }} onClick={() => setRawActionInput(true)}>
                     {copy.advancedJson}
                   </Button>
                 </>
@@ -725,17 +904,17 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, prov
               <>
                 <TextField
                   size="small"
-                  label={copy.connectorInput}
+                  label={copy.actionInput}
                   defaultValue={JSON.stringify(node.input ?? {}, null, 2)}
                   multiline
                   minRows={4}
                   error={inputJsonError}
-                  helperText={inputJsonError ? copy.connectorInputInvalid : copy.connectorInputHelper}
+                  helperText={inputJsonError ? copy.actionInputInvalid : copy.actionInputHelper}
                   onBlur={(event) => {
                     try {
                       const parsed = JSON.parse(event.target.value || '{}') as Record<string, unknown>;
                       setInputJsonError(false);
-                      onChange((current) => current.type === 'connector' ? { ...current, input: parsed } : current);
+                      onChange((current) => current.type === 'forger_tool' ? { ...current, input: parsed } : current);
                     } catch {
                       setInputJsonError(true);
                     }
@@ -747,7 +926,157 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, prov
                     variant="text"
                     sx={{ alignSelf: 'flex-start' }}
                     disabled={inputJsonError}
-                    onClick={() => setRawConnectorInput(false)}
+                    onClick={() => setRawActionInput(false)}
+                  >
+                    {copy.formMode}
+                  </Button>
+                ) : null}
+              </>
+            );
+          })()}
+        </>
+      ) : null}
+
+      {node.type === 'connection' ? (
+        <>
+          <TextField
+            select
+            size="small"
+            label={copy.connectionType}
+            value={node.connectionType}
+            onChange={(event) => onChange((current) => {
+              if (current.type !== 'connection') {
+                return current;
+              }
+              const connectionType = event.target.value;
+              const option = connectionOptions.find((candidate) => candidate.type === connectionType);
+              const defaultConnectionId = option?.instances.length === 1 ? option.instances[0]?.id : undefined;
+              const { connectionId: _connectionId, ...rest } = current;
+              return {
+                ...rest,
+                connectionType,
+                actionId: '',
+                ...(defaultConnectionId ? { connectionId: defaultConnectionId } : {}),
+              };
+            })}
+          >
+            {connectionTypes.map((connectionType) => (
+              <MenuItem key={connectionType.type} value={connectionType.type}>
+                {connectionType.label}{connectionType.configured ? '' : ` - ${copy.statusLabels.pending}`}
+              </MenuItem>
+            ))}
+          </TextField>
+          <TextField
+            select
+            size="small"
+            label={copy.connectionAction}
+            value={node.actionId}
+            onChange={(event) => onChange((current) => current.type === 'connection'
+              ? { ...current, actionId: event.target.value }
+              : current)}
+          >
+            {connectionActions
+              .filter((entry) => entry.connectionType === node.connectionType)
+              .map(({ action }) => (
+                <MenuItem key={action.id} value={action.id}>{action.name}</MenuItem>
+              ))}
+          </TextField>
+          {selectedConnectionOption && selectedConnectionOption.instances.length > 1 ? (
+            <TextField
+              select
+              size="small"
+              label={copy.connectionAccount}
+              value={node.connectionId ?? ''}
+              helperText={copy.connectionIdHelper}
+              onChange={(event) => onChange((current) => {
+                if (current.type !== 'connection') {
+                  return current;
+                }
+                const connectionId = event.target.value;
+                if (!connectionId) {
+                  const { connectionId: _connectionId, ...rest } = current;
+                  return rest as WorkflowNode;
+                }
+                return { ...current, connectionId };
+              })}
+            >
+              <MenuItem value="">{copy.connectionDefaultAccount}</MenuItem>
+              {selectedConnectionOption.instances.map((instance) => (
+                <MenuItem key={instance.id} value={instance.id}>{connectionInstanceLabel(instance)}</MenuItem>
+              ))}
+            </TextField>
+          ) : selectedConnectionOption?.instances.length === 1 ? (
+            <TextField
+              size="small"
+              label={copy.connectionAccount}
+              value={connectionInstanceLabel(selectedConnectionOption.instances[0] as PersonalAgentGrantOptionConnection['instances'][number])}
+              helperText={copy.connectionDefaultAccount}
+              disabled
+            />
+          ) : null}
+          {selectedConnectionOption && selectedConnectionOption.instances.length === 0 ? (
+            <Alert severity="warning" variant="outlined">{copy.connectionMissing}</Alert>
+          ) : null}
+          {selectedConnectionOption && node.connectionId ? (() => {
+            const instance = selectedConnectionOption.instances.find((candidate) => candidate.id === node.connectionId);
+            return instance && instance.status !== 'connected' ? (
+              <Alert severity="warning" variant="outlined">
+                {connectionInstanceLabel(instance)}: {copy.statusLabels.pending}
+              </Alert>
+            ) : null;
+          })() : null}
+          {(() => {
+            const action = connectionActions
+              .find((entry) => entry.connectionType === node.connectionType && entry.action.id === node.actionId)?.action;
+            const inputSchema = action?.inputSchema;
+            const hasFormSchema = Boolean(inputSchema?.properties && Object.keys(inputSchema.properties as Record<string, unknown>).length > 0);
+            if (!rawActionInput && hasFormSchema) {
+              return (
+                <>
+                  <SchemaForm
+                    schema={inputSchema as Record<string, unknown>}
+                    value={node.input ?? {}}
+                    sources={sourcesWithItem}
+                    mapTooltip={copy.mapField}
+                    wholeOutputLabel={copy.wholeOutput}
+                    triggerGroupLabel={copy.triggerData}
+                    onChange={(nextInput) => onChange((current) => current.type === 'connection'
+                      ? { ...current, input: nextInput }
+                      : current)}
+                  />
+                  <Button size="small" variant="text" sx={{ alignSelf: 'flex-start' }} onClick={() => setRawActionInput(true)}>
+                    {copy.advancedJson}
+                  </Button>
+                </>
+              );
+            }
+            return (
+              <>
+                <TextField
+                  size="small"
+                  label={copy.actionInput}
+                  defaultValue={JSON.stringify(node.input ?? {}, null, 2)}
+                  multiline
+                  minRows={4}
+                  error={inputJsonError}
+                  helperText={inputJsonError ? copy.actionInputInvalid : copy.actionInputHelper}
+                  onBlur={(event) => {
+                    try {
+                      const parsed = JSON.parse(event.target.value || '{}') as Record<string, unknown>;
+                      setInputJsonError(false);
+                      onChange((current) => current.type === 'connection' ? { ...current, input: parsed } : current);
+                    } catch {
+                      setInputJsonError(true);
+                    }
+                  }}
+                />
+                {hasFormSchema ? (
+                  <Button
+                    size="small"
+                    variant="text"
+                    sx={{ alignSelf: 'flex-start' }}
+                    disabled={inputJsonError}
+                    onClick={() => setRawActionInput(false)}
                   >
                     {copy.formMode}
                   </Button>
@@ -843,17 +1172,19 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, prov
           }}
         />
       ) : null}
-      <FormControlLabel
-        control={(
-          <Checkbox
-            size="small"
-            checked={node.requiresApproval === true}
-            onChange={(event) => onChange((current) => ({ ...current, requiresApproval: event.target.checked }))}
-          />
-        )}
-        label={copy.requiresApproval}
-      />
-      <Typography variant="caption" color="text.secondary">{copy.requiresApprovalHelper}</Typography>
+      <Box data-onboarding-target="workflow-approval">
+        <FormControlLabel
+          control={(
+            <Checkbox
+              size="small"
+              checked={node.requiresApproval === true}
+              onChange={(event) => onChange((current) => ({ ...current, requiresApproval: event.target.checked }))}
+            />
+          )}
+          label={copy.requiresApproval}
+        />
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>{copy.requiresApprovalHelper}</Typography>
+      </Box>
       <TextField
         size="small"
         type="number"
@@ -870,11 +1201,14 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, prov
           });
         }}
       />
-      {node.type === 'connector' && officialTools.find((tool) => tool.id === node.toolId)?.status !== 'configured' && node.toolId ? (
-        <Alert severity="warning" variant="outlined">
-          {officialTools.find((tool) => tool.id === node.toolId)?.name}: {copy.statusLabels.pending}
-        </Alert>
-      ) : null}
+      {node.type === 'forger_tool' && node.toolId ? (() => {
+        const selectedTool = forgerToolActions.find((entry) => entry.action.id === node.toolId)?.tool;
+        return selectedTool && selectedTool.status !== 'configured' ? (
+          <Alert severity="warning" variant="outlined">
+            {selectedTool.name}: {copy.statusLabels.pending}
+          </Alert>
+        ) : null;
+      })() : null}
       {onRunNode ? (
         <>
           <Divider />

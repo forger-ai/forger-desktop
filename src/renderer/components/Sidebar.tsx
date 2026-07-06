@@ -12,6 +12,7 @@ import FeedbackRounded from '@mui/icons-material/FeedbackRounded';
 import PeopleRounded from '@mui/icons-material/PeopleRounded';
 import SpeedRounded from '@mui/icons-material/SpeedRounded';
 import GridViewRounded from '@mui/icons-material/GridViewRounded';
+import HubRounded from '@mui/icons-material/HubRounded';
 import MenuBookRounded from '@mui/icons-material/MenuBookRounded';
 import SettingsRounded from '@mui/icons-material/SettingsRounded';
 import VpnKeyRounded from '@mui/icons-material/VpnKeyRounded';
@@ -50,11 +51,15 @@ export type View =
   | 'friends'
   | 'automations'
   | 'workflows'
+  | 'workflowEditor'
+  | 'workflowDetail'
   | 'files'
   | 'backups'
   | 'devices'
   | 'datos'
   | 'secrets'
+  | 'connections'
+  | 'connectionDetail'
   | 'tools'
   | 'docs'
   | 'more'
@@ -64,7 +69,7 @@ export type View =
   | 'backgroundTaskDetail';
 const isMacOs = navigator.platform.toLowerCase().includes('mac');
 
-export const PINNABLE_VIEWS = ['automations', 'workflows', 'files', 'backups', 'devices', 'datos', 'secrets', 'tools', 'docs'] as const;
+export const PINNABLE_VIEWS = ['automations', 'workflows', 'files', 'backups', 'devices', 'datos', 'secrets', 'connections', 'tools', 'docs'] as const;
 export type PinnableView = (typeof PINNABLE_VIEWS)[number];
 
 interface SidebarProps {
@@ -93,6 +98,7 @@ export const pinnableNav: Array<{ id: PinnableView; icon: ReactElement }> = [
   { id: 'devices', icon: <DevicesRounded /> },
   { id: 'datos', icon: <TableChartRounded /> },
   { id: 'secrets', icon: <VpnKeyRounded /> },
+  { id: 'connections', icon: <HubRounded /> },
   { id: 'tools', icon: <ConstructionRounded /> },
   { id: 'docs', icon: <MenuBookRounded /> },
 ];
@@ -161,7 +167,6 @@ function SidebarUsageMenu({ t }: { t: AppDictionary }) {
     return () => {
       window.clearInterval(interval);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleToggle = (event: MouseEvent<HTMLElement>) => {
@@ -358,11 +363,15 @@ export function Sidebar({ currentView, onNavigate, t, desktopUpdateState, pinned
     friends: t.nav.community,
     automations: t.nav.automations,
     workflows: t.nav.workflows,
+    workflowEditor: t.nav.workflows,
+    workflowDetail: t.nav.workflows,
     files: t.nav.files,
     backups: t.nav.backups,
     devices: t.nav.devices,
     datos: t.nav.datos,
     secrets: t.nav.secrets,
+    connections: t.nav.connections,
+    connectionDetail: t.nav.connections,
     tools: t.nav.tools,
     docs: t.nav.docs,
     more: t.nav.more,

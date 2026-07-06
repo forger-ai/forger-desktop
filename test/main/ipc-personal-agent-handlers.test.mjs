@@ -8,7 +8,7 @@ const require = createRequire(import.meta.url);
 const { IPC_CHANNELS } = require('../../dist-electron/shared/ipc.js');
 const { registerPersonalAgentIpcHandlers } = require('../../dist-electron/main/ipc/personal-agent-handlers.js');
 
-const createHarness = ({ connectedProviders = ['codex'], officialTools, installedApps } = {}) => {
+const createHarness = ({ connectedProviders = ['codex'], officialTools, connections, installedApps } = {}) => {
   const { handlers, ipcMain } = createIpcMainRecorder();
   const storeCalls = [];
   const managerCalls = [];
@@ -80,11 +80,52 @@ const createHarness = ({ connectedProviders = ['codex'], officialTools, installe
             description: 'Correo',
             configured: true,
             status: 'ready',
+            connectionBacked: true,
+            hidden: true,
+            connectionType: 'gmail',
             actions: [
               { id: 'gmail.search_messages', name: 'Search', description: 'Busca correos', risk: 'low' },
             ],
           },
+          {
+            id: 'forger_chrome_extension',
+            name: 'Chrome',
+            description: 'Controla Chrome',
+            configured: true,
+            status: 'configured',
+            actions: [
+              { id: 'forger_chrome_extension.navigate', name: 'Navigate', description: 'Navega', risk: 'medium' },
+            ],
+          },
           { id: 'no-actions-tool', name: 'Empty', description: '', configured: false, status: 'needs_setup', actions: [] },
+        ],
+      },
+    listConnections: async () =>
+      connections ?? {
+        types: [
+          {
+            type: 'gmail',
+            displayName: 'Gmail',
+            description: 'Correo',
+            setupKind: 'oauth',
+            supportsMultiple: true,
+            actions: [
+              { id: 'gmail.search_messages', name: 'Search', description: 'Busca correos', risk: 'medium' },
+            ],
+            secretsSchema: [],
+            statusActionId: 'gmail.connection.status',
+          },
+        ],
+        instances: [
+          {
+            id: 'gmail-1',
+            type: 'gmail',
+            label: 'Personal',
+            status: 'connected',
+            isDefault: true,
+            createdAt: '2026-07-05T00:00:00.000Z',
+            updatedAt: '2026-07-05T00:00:00.000Z',
+          },
         ],
       },
     isAgentProviderConnected: async (provider) => connectedProviders.includes(provider),
@@ -130,13 +171,13 @@ test('personal agent IPC lists agents and delegates deletion, conversations, and
   ]);
 });
 
-test('personal agent IPC create sanitizes grants to installed apps and known official tool actions', async () => {
+test('personal agent IPC create separates Forger Tool grants from legacy connection action grants', async () => {
   const { handlers, storeCalls } = createHarness();
 
   const created = await handlers.get(IPC_CHANNELS.personalAgentsCreate)(null, {
     name: 'Ops',
     appIds: ['finance-os', 'uninstalled-app'],
-    toolIds: ['gmail.search_messages', 'unknown.action'],
+    toolIds: ['gmail.search_messages', 'forger_chrome_extension.navigate', 'unknown.action'],
   });
 
   assert.equal(created.id, 'agent-2');
@@ -145,7 +186,8 @@ test('personal agent IPC create sanitizes grants to installed apps and known off
     {
       name: 'Ops',
       appIds: ['finance-os'],
-      toolIds: ['gmail.search_messages'],
+      toolIds: ['forger_chrome_extension.navigate'],
+      connectionGrants: [{ type: 'gmail', actions: ['gmail.search_messages'], multiple: true }],
     },
   ]);
 });
@@ -187,7 +229,7 @@ test('personal agent IPC update permissions filters grants before persisting', a
   const updated = await handlers.get(IPC_CHANNELS.personalAgentUpdatePermissions)(null, {
     agentId: 'agent-1',
     appIds: ['uninstalled-app', 'notes'],
-    toolIds: ['unknown.action', 'gmail.search_messages'],
+    toolIds: ['unknown.action', 'gmail.search_messages', 'forger_chrome_extension.navigate'],
   });
 
   assert.equal(updated.id, 'agent-1');
@@ -196,7 +238,8 @@ test('personal agent IPC update permissions filters grants before persisting', a
     {
       agentId: 'agent-1',
       appIds: ['notes'],
-      toolIds: ['gmail.search_messages'],
+      toolIds: ['forger_chrome_extension.navigate'],
+      connectionGrants: [{ type: 'gmail', actions: ['gmail.search_messages'], multiple: true }],
     },
   ]);
 });
@@ -211,19 +254,54 @@ test('personal agent IPC grant options expose installed apps and only tools with
     ],
     tools: [
       {
-        id: 'gmail',
-        name: 'Gmail',
-        description: 'Correo',
+        id: 'forger_chrome_extension',
+        name: 'Chrome',
+        description: 'Controla Chrome',
         configured: true,
-        status: 'ready',
+        status: 'configured',
         actions: [
           {
-            id: 'gmail.search_messages',
-            toolId: 'gmail',
-            name: 'Search',
-            description: 'Busca correos',
-            risk: 'low',
+            id: 'forger_chrome_extension.navigate',
+            toolId: 'forger_chrome_extension',
+            name: 'Navigate',
+            description: 'Navega',
+            risk: 'medium',
           },
+        ],
+      },
+    ],
+    connections: [
+      {
+        type: 'gmail',
+        displayName: 'Gmail',
+        description: 'Correo',
+        configured: true,
+        supportsMultiple: true,
+        definition: {
+          type: 'gmail',
+          displayName: 'Gmail',
+          description: 'Correo',
+          setupKind: 'oauth',
+          supportsMultiple: true,
+          actions: [
+            { id: 'gmail.search_messages', name: 'Search', description: 'Busca correos', risk: 'medium' },
+          ],
+          secretsSchema: [],
+          statusActionId: 'gmail.connection.status',
+        },
+        instances: [
+          {
+            id: 'gmail-1',
+            type: 'gmail',
+            label: 'Personal',
+            status: 'connected',
+            isDefault: true,
+            createdAt: '2026-07-05T00:00:00.000Z',
+            updatedAt: '2026-07-05T00:00:00.000Z',
+          },
+        ],
+        actions: [
+          { id: 'gmail.search_messages', name: 'Search', description: 'Busca correos', risk: 'medium' },
         ],
       },
     ],

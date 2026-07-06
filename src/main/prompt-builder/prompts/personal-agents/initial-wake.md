@@ -11,6 +11,11 @@ This is your first conversation for this agent workspace unless conversation his
 - Permission mode: `{{permissionMode}}`
 - Network access: `{{networkAccess}}`
 
+## Current Forger Access
+
+{{grantedForgerToolsContext}}
+{{grantedConnectionsContext}}
+
 ## Memory Register
 
 {{memoryRegister}}

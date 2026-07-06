@@ -5,14 +5,18 @@ import type {
   AgentRuntime,
   AgentRuntimeRequest,
   AppSummary,
+  CallConnectionActionInput,
+  CallConnectionActionResult,
   CallOfficialToolInput,
   CallOfficialToolResult,
+  ConnectionSessionGrant,
   FilesActionResult,
   PersonalAgent,
   Workflow,
   WorkflowApproveNodeInput,
-  WorkflowConnectorNode,
+  WorkflowConnectionNode,
   WorkflowForgerAgentNode,
+  WorkflowForgerToolNode,
   WorkflowLlmAgentNode,
   WorkflowNode,
   WorkflowNodeRun,
@@ -101,13 +105,16 @@ interface WorkflowManagerOptions {
   createForgerMcpSession?: (
     nodeRunKey: string,
     appIds: string[],
-    officialToolActionIds: string[],
+    forgerToolActionIds: string[],
+    connectionGrants: ConnectionSessionGrant[],
   ) => { url: string; token: string } | null;
   releaseForgerMcpSession?: (token: string) => void;
   buildMemoryContext?: (appIds: string[]) => Promise<string>;
   listenAppMcps?: (appIds: string[], listenerId: string) => Promise<LlmAutomationMcpServerConfig[]>;
   releaseAppMcps?: (listenerId: string) => void;
   getPersonalAgent?: (agentId: string) => Promise<PersonalAgent | null>;
+  callForgerToolAction?: (input: CallOfficialToolInput) => Promise<CallOfficialToolResult>;
+  callConnectionAction?: (input: CallConnectionActionInput) => Promise<CallConnectionActionResult>;
   callConnectorAction?: (input: CallOfficialToolInput) => Promise<CallOfficialToolResult>;
   getValidToolIds?: () => ReadonlySet<string>;
   onWorkflowUpdated: (event: WorkflowUpdatedEvent) => void;
@@ -296,6 +303,7 @@ export class WorkflowManager {
           return;
         }
         nodeRun.status = state.status;
+        nodeRun.input = state.input;
         nodeRun.output = state.output;
         nodeRun.summary = state.summary;
         nodeRun.error = state.error;
@@ -489,6 +497,7 @@ export class WorkflowManager {
         const nodeRun = run.nodeRuns.find((entry) => entry.nodeId === nodeId);
         if (nodeRun) {
           nodeRun.status = state.status;
+          nodeRun.input = state.input;
           nodeRun.output = state.output;
           nodeRun.summary = state.summary;
           nodeRun.error = state.error;
@@ -584,26 +593,27 @@ export class WorkflowManager {
     syncNodeRun: (nodeId: string) => Promise<void>,
   ): Promise<void> {
     const context = buildRunContext(triggerContext, states);
+    const debugInput = this.buildNodeDebugInput(node, context);
 
     if (node.requiresApproval) {
-      states[node.id] = { status: 'waiting_approval' };
+      states[node.id] = { status: 'waiting_approval', input: debugInput };
       await syncNodeRun(node.id);
       const approved = await new Promise<boolean>((resolve) => {
         active.approvalResolvers.set(node.id, resolve);
       });
       if (active.canceled) {
-        states[node.id] = { status: 'canceled' };
+        states[node.id] = { status: 'canceled', input: debugInput };
         await syncNodeRun(node.id);
         return;
       }
       if (!approved) {
-        states[node.id] = { status: 'failed', error: 'workflow_node_approval_denied' };
+        states[node.id] = { status: 'failed', input: debugInput, error: 'workflow_node_approval_denied' };
         await syncNodeRun(node.id);
         return;
       }
     }
 
-    states[node.id] = { status: 'running' };
+    states[node.id] = { status: 'running', input: debugInput };
     await syncNodeRun(node.id);
     await appendTranscript(transcriptPath, 'meta', `[node:${node.id}] ${node.name} (${node.type}) started`);
 
@@ -612,15 +622,59 @@ export class WorkflowManager {
       : await this.executeNodeOnce(workflow, run, node, context, active, transcriptPath);
 
     if (active.canceled && result.status === 'failed') {
-      result = { status: 'canceled' };
+      result = { status: 'canceled', input: result.input ?? debugInput };
     }
-    states[node.id] = result;
+    states[node.id] = { ...result, input: result.input ?? debugInput };
     await appendTranscript(
       transcriptPath,
       'meta',
       `[node:${node.id}] finished with status ${result.status}${result.error ? `: ${result.error}` : ''}`,
     );
     await syncNodeRun(node.id);
+  }
+
+  private buildAgentInputContext(context: WorkflowRunContext): Record<string, unknown> {
+    const iteration = context as unknown as { item?: unknown; itemIndex?: number };
+    return {
+      trigger: context.trigger,
+      ...(iteration.item !== undefined ? { item: iteration.item, itemIndex: iteration.itemIndex } : {}),
+      nodes: Object.fromEntries(
+        Object.entries(context.nodes)
+          .filter(([, state]) => state.status === 'succeeded' || state.status === 'failed')
+          .map(([nodeId, state]) => [nodeId, {
+            status: state.status,
+            output: state.output ?? null,
+            summary: state.summary ?? null,
+            error: state.error ?? null,
+          }]),
+      ),
+    };
+  }
+
+  private buildNodeDebugInput(node: WorkflowNode, context: WorkflowRunContext): Record<string, unknown> {
+    if (node.type === 'forger_tool') {
+      return {
+        toolId: node.toolId,
+        actionId: node.toolId,
+        input: resolveTemplateValue(node.input, context) as Record<string, unknown>,
+      };
+    }
+    if (node.type === 'connection') {
+      return {
+        type: node.connectionType,
+        actionId: node.actionId,
+        ...(node.connectionId ? { connectionId: node.connectionId } : {}),
+        input: resolveTemplateValue(node.input, context) as Record<string, unknown>,
+      };
+    }
+    if (node.type === 'llm_agent' || node.type === 'forger_agent') {
+      const inputContext = this.buildAgentInputContext(context);
+      return {
+        inputContext,
+        renderedPrompt: renderTemplateString(node.prompt, context),
+      };
+    }
+    return { expression: node.expression };
   }
 
   /** Runs a node once for the given context, regardless of forEach. */
@@ -636,8 +690,11 @@ export class WorkflowManager {
       const value = evaluateConditionExpression(node.expression, context);
       return { status: 'succeeded', output: { result: value }, summary: value ? 'Condicion verdadera' : 'Condicion falsa' };
     }
-    if (node.type === 'connector') {
-      return await this.executeConnectorNode(node, context);
+    if (node.type === 'forger_tool') {
+      return await this.executeForgerToolNode(node, context);
+    }
+    if (node.type === 'connection') {
+      return await this.executeConnectionNode(node, context);
     }
     if (node.type === 'forger_agent') {
       return await this.executeForgerAgentNode(workflow, run, node, context, active, transcriptPath);
@@ -698,31 +755,70 @@ export class WorkflowManager {
     };
   }
 
-  private async executeConnectorNode(
-    node: WorkflowConnectorNode,
+  private async executeForgerToolNode(
+    node: WorkflowForgerToolNode,
     context: WorkflowRunContext,
   ): Promise<WorkflowNodeState> {
-    if (!this.options.callConnectorAction) {
-      return { status: 'failed', error: 'workflow_connectors_unavailable' };
+    const executor = this.options.callForgerToolAction ?? this.options.callConnectorAction;
+    if (!executor) {
+      return { status: 'failed', error: 'workflow_forger_tools_unavailable' };
     }
     const input = resolveTemplateValue(node.input, context) as Record<string, unknown>;
-    const nodeRunInput = { toolId: node.toolId, actionId: node.actionId, input };
+    const nodeRunInput = { toolId: node.toolId, actionId: node.toolId, input };
     try {
-      const result = await this.options.callConnectorAction(nodeRunInput);
+      const result = await executor(nodeRunInput);
       if (!result.success) {
         return {
           status: 'failed',
-          error: result.technicalCode ?? result.userMessage ?? 'workflow_connector_failed',
+          input: nodeRunInput,
+          error: result.technicalCode ?? result.userMessage ?? 'workflow_forger_tool_failed',
         };
       }
       const output = result.data && typeof result.data === 'object' && !Array.isArray(result.data)
         ? result.data as Record<string, unknown>
         : { value: result.data ?? null };
-      return { status: 'succeeded', output, summary: result.userMessage };
+      return { status: 'succeeded', input: nodeRunInput, output, summary: result.userMessage };
     } catch (error) {
       return {
         status: 'failed',
-        error: error instanceof Error ? error.message : 'workflow_connector_failed',
+        input: nodeRunInput,
+        error: error instanceof Error ? error.message : 'workflow_forger_tool_failed',
+      };
+    }
+  }
+
+  private async executeConnectionNode(
+    node: WorkflowConnectionNode,
+    context: WorkflowRunContext,
+  ): Promise<WorkflowNodeState> {
+    if (!this.options.callConnectionAction) {
+      return { status: 'failed', error: 'workflow_connections_unavailable' };
+    }
+    const input = resolveTemplateValue(node.input, context) as Record<string, unknown>;
+    const nodeRunInput = {
+      type: node.connectionType,
+      actionId: node.actionId,
+      ...(node.connectionId ? { connectionId: node.connectionId } : {}),
+      input,
+    };
+    try {
+      const result = await this.options.callConnectionAction(nodeRunInput);
+      if (!result.success) {
+        return {
+          status: 'failed',
+          input: nodeRunInput,
+          error: result.technicalCode ?? result.userMessage ?? 'workflow_connection_failed',
+        };
+      }
+      const output = result.data && typeof result.data === 'object' && !Array.isArray(result.data)
+        ? result.data as Record<string, unknown>
+        : { value: result.data ?? null };
+      return { status: 'succeeded', input: nodeRunInput, output, summary: result.userMessage };
+    } catch (error) {
+      return {
+        status: 'failed',
+        input: nodeRunInput,
+        error: error instanceof Error ? error.message : 'workflow_connection_failed',
       };
     }
   }
@@ -744,6 +840,7 @@ export class WorkflowManager {
       runtime: agent.runtime,
       appIds: agent.appIds,
       toolIds: agent.toolIds,
+      connectionGrants: agent.connectionGrants,
       permissionMode: agent.permissionMode,
       networkAccess: agent.networkAccess,
       instructions: [agent.purpose, agent.instructions].filter(Boolean).join('\n\n'),
@@ -764,6 +861,7 @@ export class WorkflowManager {
       runtime: node.runtime,
       appIds: node.appIds,
       toolIds: node.toolIds,
+      connectionGrants: node.connectionGrants,
       outputSchema: node.outputSchema,
     });
   }
@@ -780,6 +878,7 @@ export class WorkflowManager {
       runtime?: AgentRuntime;
       appIds: string[];
       toolIds: string[];
+      connectionGrants: ConnectionSessionGrant[];
       permissionMode?: AgentRuntime['permissionMode'];
       networkAccess?: boolean;
       instructions?: string;
@@ -789,30 +888,23 @@ export class WorkflowManager {
     const nodeRunKey = `${run.id}:${node.id}`;
     let forgerMcpSession: { url: string; token: string } | null = null;
     let appMcpListening = false;
+    const inputContext = this.buildAgentInputContext(context);
+    let nodeRunInput: Record<string, unknown> = {
+      renderedPrompt: renderTemplateString(config.prompt, context),
+      inputContext,
+    };
     try {
+      const memoryContext = await (this.options.buildMemoryContext?.(config.appIds) ?? Promise.resolve(''));
+      const basePrompt = this.buildNodePrompt(workflow, node, config, context, inputContext);
+      const prompt = [memoryContext, config.instructions, basePrompt].filter(Boolean).join('\n\n');
+      nodeRunInput = { renderedPrompt: prompt, inputContext };
+
       const runtimeRequest = config.runtime ? { ...config.runtime, strict: true as const } : undefined;
       const runtime = await this.options.getAgentRuntime(runtimeRequest);
       await this.assertProviderReady(runtime);
       const providerCliPath = await this.resolveProviderCliPath(runtime);
       const pathEntries = await this.options.getCodexPathEntries();
 
-      const iteration = context as unknown as { item?: unknown; itemIndex?: number };
-      const inputContext = {
-        trigger: context.trigger,
-        // When the node iterates a list (forEach), the current item is part
-        // of the agent's working context.
-        ...(iteration.item !== undefined ? { item: iteration.item, itemIndex: iteration.itemIndex } : {}),
-        nodes: Object.fromEntries(
-          Object.entries(context.nodes)
-            .filter(([, state]) => state.status === 'succeeded' || state.status === 'failed')
-            .map(([nodeId, state]) => [nodeId, {
-              status: state.status,
-              output: state.output ?? null,
-              summary: state.summary ?? null,
-              error: state.error ?? null,
-            }]),
-        ),
-      };
       this.nodeContexts.set(nodeRunKey, {
         workflowId: workflow.id,
         workflowName: workflow.name,
@@ -824,7 +916,12 @@ export class WorkflowManager {
       });
       this.nodeCompletions.delete(nodeRunKey);
 
-      forgerMcpSession = this.options.createForgerMcpSession?.(nodeRunKey, config.appIds, config.toolIds) ?? null;
+      forgerMcpSession = this.options.createForgerMcpSession?.(
+        nodeRunKey,
+        config.appIds,
+        config.toolIds,
+        config.connectionGrants,
+      ) ?? null;
       const appMcpServers = await (this.options.listenAppMcps?.(config.appIds, nodeRunKey) ?? Promise.resolve([]));
       appMcpListening = true;
       const mcpServers: LlmAutomationMcpServerConfig[] = [
@@ -841,9 +938,6 @@ export class WorkflowManager {
       ];
       const networkAccess = config.networkAccess
         ?? await (this.options.getAgentNetworkAccess?.(config.appIds) ?? Promise.resolve(false));
-      const memoryContext = await (this.options.buildMemoryContext?.(config.appIds) ?? Promise.resolve(''));
-      const basePrompt = this.buildNodePrompt(workflow, node, config, context, inputContext);
-      const prompt = [memoryContext, config.instructions, basePrompt].filter(Boolean).join('\n\n');
 
       let assistantMessages: string[] = [];
       const result = await runAgentCommand({ cliPath: providerCliPath, pathEntries }, {
@@ -869,10 +963,11 @@ export class WorkflowManager {
       const completion = this.nodeCompletions.get(nodeRunKey);
       if (completion) {
         if (completion.status === 'failed') {
-          return { status: 'failed', error: completion.reason ?? 'workflow_node_reported_failure' };
+          return { status: 'failed', input: nodeRunInput, error: completion.reason ?? 'workflow_node_reported_failure' };
         }
         return {
           status: 'succeeded',
+          input: nodeRunInput,
           output: completion.output ?? {},
           summary: completion.summary ?? assistantMessages[assistantMessages.length - 1]?.slice(0, 2_000),
         };
@@ -889,6 +984,7 @@ export class WorkflowManager {
       if (result.code !== 0) {
         return {
           status: 'failed',
+          input: nodeRunInput,
           error: (result.stderr || result.stdout || 'workflow_agent_exec_failed').trim().slice(0, 2_000),
         };
       }
@@ -896,8 +992,15 @@ export class WorkflowManager {
       // final message so downstream nodes still receive usable output.
       return {
         status: 'succeeded',
+        input: nodeRunInput,
         output: { text: lastMessage },
         summary: lastMessage.slice(0, 2_000),
+      };
+    } catch (error) {
+      return {
+        status: 'failed',
+        input: nodeRunInput,
+        error: error instanceof Error ? error.message : 'workflow_agent_exec_failed',
       };
     } finally {
       this.nodeContexts.delete(nodeRunKey);

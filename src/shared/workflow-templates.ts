@@ -247,8 +247,8 @@ export interface UpstreamFieldSource {
 
 /**
  * Resolves the fields each upstream node offers to `nodeId`, combining the
- * declared contract (connector action schema, agent outputSchema, condition
- * contract) with the sample output of the latest stored run.
+ * declared contract (connection/Forger tool action schema, agent outputSchema,
+ * condition contract) with the sample output of the latest stored run.
  */
 export const buildUpstreamFieldSources = (
   workflow: Pick<Workflow, 'nodes' | 'edges'>,
@@ -256,7 +256,11 @@ export const buildUpstreamFieldSources = (
   options: {
     /** Latest known output per node id, from stored runs. */
     outputSamples?: Record<string, unknown>;
-    /** Declared output schema per connector action id. */
+    /** Declared output schema per connection action id. */
+    connectionOutputSchemas?: Record<string, Record<string, unknown>>;
+    /** Declared output schema per Forger tool action id. */
+    forgerToolOutputSchemas?: Record<string, Record<string, unknown>>;
+    /** @deprecated Legacy name kept while persisted drafts migrate away from connector nodes. */
     connectorOutputSchemas?: Record<string, Record<string, unknown>>;
   } = {},
 ): UpstreamFieldSource[] => {
@@ -265,11 +269,20 @@ export const buildUpstreamFieldSources = (
     .map((upstreamId) => workflow.nodes.find((node) => node.id === upstreamId))
     .filter((node): node is WorkflowNode => Boolean(node))
     .map((node) => {
-      const schema = node.type === 'condition'
-        ? CONDITION_OUTPUT_SCHEMA
-        : node.type === 'connector'
-          ? options.connectorOutputSchemas?.[node.actionId]
-          : node.outputSchema ?? AGENT_FALLBACK_OUTPUT_SCHEMA;
+      const schema = (() => {
+        if (node.type === 'condition') {
+          return CONDITION_OUTPUT_SCHEMA;
+        }
+        if (node.type === 'connection') {
+          return options.connectionOutputSchemas?.[node.actionId]
+            ?? options.connectorOutputSchemas?.[node.actionId];
+        }
+        if (node.type === 'forger_tool') {
+          return options.forgerToolOutputSchemas?.[node.toolId]
+            ?? options.connectorOutputSchemas?.[node.toolId];
+        }
+        return node.outputSchema ?? AGENT_FALLBACK_OUTPUT_SCHEMA;
+      })();
       const schemaFields = schema ? listSchemaFields(schema) : [];
       const sample = options.outputSamples?.[node.id];
       const sampleFields = sample !== undefined ? listSampleFields(sample) : [];

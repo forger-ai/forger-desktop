@@ -27,6 +27,7 @@ import type { InternalToolModule } from './tools/types';
 import type { InternalOAuthTokenResponse } from './tools/types';
 import { getSharedCopy } from '../shared/i18n';
 import type { PlatformCapabilities } from '../shared/platform-capabilities';
+import { isLegacyExternalToolId } from './connections/grants';
 
 interface ToolRegistryFile {
   version: 1;
@@ -666,8 +667,16 @@ export class OfficialToolsService {
     const localized = withActionSchemas(localizeOfficialToolDefinition(entry, locale));
     const installed = this.registry.installed[entry.id];
     const configured = await this.isConfigured(entry);
+    const connectionBacked = isLegacyExternalToolId(entry.id);
+    const connectionHints = connectionBacked
+      ? {
+        connectionBacked: true,
+        connectionType: entry.id,
+        hidden: !configured,
+      }
+      : {};
     if (!installed) {
-      return { ...localized, status: 'available', configured: false };
+      return { ...localized, status: 'available', configured: false, ...connectionHints };
     }
     return {
       ...localized,
@@ -675,6 +684,7 @@ export class OfficialToolsService {
       installedVersion: installed.version,
       configured,
       error: installed.error,
+      ...connectionHints,
     };
   }
 

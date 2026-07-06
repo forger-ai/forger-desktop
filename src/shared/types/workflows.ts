@@ -1,6 +1,7 @@
 import type { AgentRuntime } from './agent-runtime';
 import type { AgentToolId } from './tools';
 import type { AutomationFrequency, AutomationMissedRunPolicy } from './automations';
+import type { ConnectionSessionGrant } from './connections';
 
 export type WorkflowTrigger =
   | { type: 'manual' }
@@ -45,6 +46,7 @@ export interface WorkflowLlmAgentNode extends WorkflowNodeBase {
   runtime?: AgentRuntime;
   toolIds: AgentToolId[];
   appIds: string[];
+  connectionGrants: ConnectionSessionGrant[];
   outputSchema?: Record<string, unknown>;
 }
 
@@ -59,6 +61,20 @@ export interface WorkflowConnectorNode extends WorkflowNodeBase {
   type: 'connector';
   toolId: string;
   actionId: string;
+  input: Record<string, unknown>;
+}
+
+export interface WorkflowForgerToolNode extends WorkflowNodeBase {
+  type: 'forger_tool';
+  toolId: AgentToolId;
+  input: Record<string, unknown>;
+}
+
+export interface WorkflowConnectionNode extends WorkflowNodeBase {
+  type: 'connection';
+  connectionType: string;
+  actionId: string;
+  connectionId?: string;
   input: Record<string, unknown>;
 }
 
@@ -87,7 +103,8 @@ export interface WorkflowConditionNode extends WorkflowNodeBase {
 export type WorkflowNode =
   | WorkflowLlmAgentNode
   | WorkflowForgerAgentNode
-  | WorkflowConnectorNode
+  | WorkflowForgerToolNode
+  | WorkflowConnectionNode
   | WorkflowConditionNode;
 
 export type WorkflowNodeType = WorkflowNode['type'];

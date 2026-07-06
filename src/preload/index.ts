@@ -200,6 +200,11 @@ const IPC_CHANNELS = {
   callOfficialTool: 'forger:official-tools:call',
   deactivateOfficialTool: 'forger:official-tools:deactivate',
   officialToolEvent: 'forger:official-tools:event',
+  connectionsList: 'forger:connections:list',
+  connectionsConfigure: 'forger:connections:configure',
+  connectionsDisconnect: 'forger:connections:disconnect',
+  connectionsCall: 'forger:connections:call',
+  connectionsSetDefault: 'forger:connections:set-default',
   getAppToolsInstallGate: 'forger:app-tools:install-gate',
   setAppToolGrant: 'forger:app-tools:set-grant',
   memoryList: 'forger:memory:list',
@@ -583,6 +588,11 @@ const api: ForgerDesktopApi = {
   configureOfficialTool: (input) => ipcRenderer.invoke(IPC_CHANNELS.configureOfficialTool, input),
   callOfficialTool: (input) => ipcRenderer.invoke(IPC_CHANNELS.callOfficialTool, input),
   deactivateOfficialTool: (toolId, locale) => ipcRenderer.invoke(IPC_CHANNELS.deactivateOfficialTool, toolId, locale),
+  connectionsList: (locale?: string) => ipcRenderer.invoke(IPC_CHANNELS.connectionsList, locale),
+  connectionsConfigure: (input) => ipcRenderer.invoke(IPC_CHANNELS.connectionsConfigure, input),
+  connectionsDisconnect: (input) => ipcRenderer.invoke(IPC_CHANNELS.connectionsDisconnect, input),
+  connectionsCall: (input) => ipcRenderer.invoke(IPC_CHANNELS.connectionsCall, input),
+  connectionsSetDefault: (input) => ipcRenderer.invoke(IPC_CHANNELS.connectionsSetDefault, input),
   onOfficialToolEvent: (listener) => {
     const wrapped = (_event: unknown, payload: Parameters<typeof listener>[0]) => {
       listener(payload);

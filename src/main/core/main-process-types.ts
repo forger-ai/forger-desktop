@@ -121,6 +121,7 @@ export interface AppManifest {
   skills?: string[];
   appSecrets?: unknown;
   tools?: unknown;
+  connections?: unknown;
   platformCapabilities?: {
     speechToText?: boolean | {
       required?: boolean;

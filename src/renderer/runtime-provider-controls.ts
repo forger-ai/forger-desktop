@@ -18,6 +18,8 @@ export interface RuntimeProviderControl {
   effortOptions: RuntimeEffortControlOption[];
   selectedEffort: AgentEffort;
   onSelectEffort: (effort: AgentEffort) => void;
+  effortOptionsForModel: (model: string) => RuntimeEffortControlOption[];
+  normalizeEffortForModel: (model: string, effort: AgentEffort) => AgentEffort;
 }
 
 export type RuntimeProviderControls = Record<AgentProvider, RuntimeProviderControl>;

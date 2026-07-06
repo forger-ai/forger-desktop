@@ -110,6 +110,12 @@ export const slackToolModule: InternalToolModule = createTokenConnectorModule({
       name: 'Listar canales',
       description: 'Lista los canales visibles para el token conectado.',
       risk: 'low',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          limit: { type: 'number', description: 'Maximo de canales a devolver.' },
+        },
+      },
       outputSchema: {
         type: 'object',
         properties: {
@@ -155,6 +161,14 @@ export const slackToolModule: InternalToolModule = createTokenConnectorModule({
       name: 'Leer mensajes',
       description: 'Lee los mensajes recientes de un canal.',
       risk: 'high',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          channelId: { type: 'string', description: 'ID del canal de Slack.' },
+          limit: { type: 'number', description: 'Maximo de mensajes a leer.' },
+        },
+        required: ['channelId'],
+      },
       outputSchema: {
         type: 'object',
         properties: {
@@ -203,6 +217,14 @@ export const slackToolModule: InternalToolModule = createTokenConnectorModule({
       name: 'Enviar mensaje',
       description: 'Envia un mensaje a un canal de Slack.',
       risk: 'high',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          channelId: { type: 'string', description: 'ID del canal de Slack.' },
+          text: { type: 'string', description: 'Texto del mensaje.' },
+        },
+        required: ['channelId', 'text'],
+      },
       outputSchema: {
         type: 'object',
         properties: {

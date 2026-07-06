@@ -10,6 +10,8 @@ const { AgentStore } = require('../../dist-electron/main/personal-agents/agent-s
 const { AgentConversationManager } = require('../../dist-electron/main/personal-agents/agent-conversation-manager.js');
 const { openPersonalAgentSqliteDatabase } = require('../../dist-electron/main/personal-agents/sqlite.js');
 
+const sortConnectionGrants = (grants) => [...grants].sort((left, right) => left.type.localeCompare(right.type));
+
 test('personal agent store creates SQLite-backed agents with safe defaults and private workspace docs', async () => {
   const metadataRoot = await mkdtemp(path.join(tmpdir(), 'forger-personal-agents-meta-'));
   const forgerHomeRoot = await mkdtemp(path.join(tmpdir(), 'forger-personal-agents-home-'));
@@ -26,6 +28,7 @@ test('personal agent store creates SQLite-backed agents with safe defaults and p
   assert.equal(agent.networkAccess, false);
   assert.deepEqual(agent.appIds, []);
   assert.deepEqual(agent.toolIds, []);
+  assert.deepEqual(agent.connectionGrants, []);
   assert.equal(Object.prototype.hasOwnProperty.call(agent, 'workspacePath'), false);
   assert.deepEqual(await store.getHeartbeatSummary(), {
     supported: true,
@@ -115,43 +118,61 @@ test('personal agent grants persist as explicit app and tool permissions', async
     name: 'Ops agent',
     networkAccess: true,
     appIds: ['finance-os', 'finance-os', '../bad'],
-    toolIds: ['gmail.search_messages', 'gmail.search_messages', 'forger_chrome_extension.navigate', '../bad'],
+    toolIds: ['forger_chrome_extension.navigate', '../bad'],
+    connectionGrants: [
+      { type: 'gmail', actions: ['gmail.search_messages', 'gmail.search_messages'], multiple: true, connectionIds: ['gmail-1', 'gmail-2'] },
+      { type: 'slack', actions: ['slack.send_message'], multiple: false, connectionIds: ['slack-1'] },
+    ],
   });
 
   assert.equal(agent.networkAccess, true);
   assert.deepEqual(agent.appIds, ['finance-os']);
-  assert.deepEqual([...agent.toolIds].sort(), ['forger_chrome_extension.navigate', 'gmail.search_messages']);
+  assert.deepEqual([...agent.toolIds].sort(), ['forger_chrome_extension.navigate']);
+  assert.deepEqual(sortConnectionGrants(agent.connectionGrants), [
+    { type: 'gmail', actions: ['gmail.search_messages'], multiple: true, connectionIds: ['gmail-1', 'gmail-2'] },
+    { type: 'slack', actions: ['slack.send_message'], multiple: false, connectionIds: ['slack-1'] },
+  ]);
 
   const updated = await store.updateAgentPermissions({
     agentId: agent.id,
     permissionMode: 'unsafe',
     networkAccess: false,
     appIds: ['focus'],
-    toolIds: ['whatsapp.read_messages', 'memory_list', 'forger_chrome_extension.get_html'],
+    toolIds: ['memory_list', 'forger_chrome_extension.get_html'],
+    connectionGrants: [
+      { type: 'whatsapp', actions: ['whatsapp.read_messages'], multiple: true },
+      { type: 'trello', actions: ['trello.create_card'], multiple: false, connectionIds: ['trello-1'] },
+    ],
   });
   assert.equal(updated.permissionMode, 'unsafe');
   assert.equal(updated.networkAccess, false);
   assert.deepEqual(updated.appIds, ['focus']);
-  assert.deepEqual([...updated.toolIds].sort(), ['forger_chrome_extension.get_html', 'memory_list', 'whatsapp.read_messages']);
+  assert.deepEqual([...updated.toolIds].sort(), ['forger_chrome_extension.get_html', 'memory_list']);
+  assert.deepEqual(sortConnectionGrants(updated.connectionGrants), [
+    { type: 'trello', actions: ['trello.create_card'], multiple: false, connectionIds: ['trello-1'] },
+    { type: 'whatsapp', actions: ['whatsapp.read_messages'], multiple: true },
+  ]);
 
   const permissions = await store.listPermissions(agent.id);
   assert.deepEqual(
     permissions
       .filter((permission) => permission.kind !== 'legacy')
       .map((permission) => [permission.kind, permission.targetId, permission.granted])
-      .sort((left, right) => String(left[1]).localeCompare(String(right[1]))),
+      .sort((left, right) => `${left[0]}:${left[1]}`.localeCompare(`${right[0]}:${right[1]}`)),
     [
       ['app', 'focus', true],
+      ['connection', '{"type":"trello","actions":["trello.create_card"],"multiple":false,"connectionIds":["trello-1"]}', true],
+      ['connection', '{"type":"whatsapp","actions":["whatsapp.read_messages"],"multiple":true}', true],
       ['tool', 'forger_chrome_extension.get_html', true],
       ['tool', 'memory_list', true],
-      ['tool', 'whatsapp.read_messages', true],
     ],
   );
 
   const reloaded = new AgentStore({ metadataRoot, forgerHomeRoot });
   const [persisted] = await reloaded.listAgents();
   assert.deepEqual(persisted.appIds, ['focus']);
-  assert.deepEqual([...persisted.toolIds].sort(), ['forger_chrome_extension.get_html', 'memory_list', 'whatsapp.read_messages']);
+  assert.deepEqual([...persisted.toolIds].sort(), ['forger_chrome_extension.get_html', 'memory_list']);
+  assert.deepEqual(sortConnectionGrants(persisted.connectionGrants), sortConnectionGrants(updated.connectionGrants));
   assert.deepEqual(await reloaded.deleteAgent(agent.id), { success: true });
   assert.deepEqual(await reloaded.listPermissions(agent.id), []);
 });

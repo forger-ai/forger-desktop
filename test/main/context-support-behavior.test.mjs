@@ -237,7 +237,7 @@ test('context support normalizes installed app templates with global development
   assert.match(agentsSkill, /turn-specific tone/);
   const manifestSkill = await fs.readFile(path.join(appDir, '.agents', 'skills', 'forger-manifest-authoring', 'SKILL.md'), 'utf8');
   assert.match(manifestSkill, /Agents may edit `manifest\.json`/);
-  assert.match(manifestSkill, /`tools\.optional` is the exception/);
+  assert.match(manifestSkill, /Optional Forger Tools and Connections still need a user grant or approval/);
   assert.match(manifestSkill, /After changing manifest runtime wiring/);
   const remoteTunnelSkill = await fs.readFile(path.join(appDir, '.agents', 'skills', 'forger-remote-tunnel-wiring', 'SKILL.md'), 'utf8');
   assert.match(remoteTunnelSkill, /closed beta/);

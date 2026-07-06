@@ -32,7 +32,7 @@ export interface TemplateSourceNode {
   fields: Array<{ path: string; sample?: unknown }>;
   /**
    * Custom reference base instead of nodes.<id>.output, e.g. "item" for the
-   * current forEach item of a connector node.
+   * current forEach item of a workflow action node.
    */
   referenceBase?: string;
 }

@@ -12,7 +12,7 @@ export const codexUnsafeArgs = (permissionMode: AgentPermissionMode = 'safe'): s
   isUnsafePermissionMode(permissionMode) ? ['--dangerously-bypass-approvals-and-sandbox'] : [];
 
 export const codexWorkspaceArgs = (permissionMode: AgentPermissionMode = 'safe'): string[] =>
-  isUnsafePermissionMode(permissionMode) ? [] : ['--full-auto', '--sandbox', 'workspace-write'];
+  isUnsafePermissionMode(permissionMode) ? [] : ['--sandbox', 'workspace-write'];
 
 export const claudePermissionArgs = (permissionMode: AgentPermissionMode = 'safe'): string[] =>
   isUnsafePermissionMode(permissionMode)

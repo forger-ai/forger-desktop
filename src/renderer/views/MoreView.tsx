@@ -21,6 +21,7 @@ export function MoreView({ t, pinnedViews, onTogglePin, onOpen }: MoreViewProps)
     devices: t.nav.devices,
     datos: t.nav.datos,
     secrets: t.nav.secrets,
+    connections: t.nav.connections,
     tools: t.nav.tools,
     docs: t.nav.docs,
   };

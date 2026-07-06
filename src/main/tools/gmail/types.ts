@@ -1,5 +1,7 @@
 export const GMAIL_TOOL_ID = 'gmail';
 export const GMAIL_REFRESH_TOKEN_SECRET = 'oauth_refresh_token';
+export const GMAIL_SELF_OAUTH_CLIENT_ID_SECRET = 'self_oauth_client_id';
+export const GMAIL_SELF_OAUTH_CLIENT_SECRET_SECRET = 'self_oauth_client_secret';
 
 export const GMAIL_SCOPES = [
   'https://www.googleapis.com/auth/gmail.readonly',
@@ -34,6 +36,7 @@ export interface GmailSendInput {
   bcc?: string[];
   subject: string;
   body: string;
+  bodyHtml?: string;
   attachments?: GmailSendAttachmentInput[];
 }
 

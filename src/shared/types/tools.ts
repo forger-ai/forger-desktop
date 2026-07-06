@@ -8,6 +8,9 @@ export type AgentToolId =
   | 'forger_create_app'
   | 'forger_add_app_to_personal_agent'
   | 'forger_request_app_tool_grant'
+  | 'forger_connection_list'
+  | 'forger_connection_status'
+  | 'forger_request_connection_grant'
   | 'forger_ask_question'
   | 'forger_list_app_prompts'
   | 'forger_test_app_prompt'
@@ -166,6 +169,11 @@ export interface OfficialToolSummary extends OfficialToolDefinition {
   installedVersion?: string;
   configured: boolean;
   error?: string;
+  /** True when the old tool row is now backed by the Connections domain. */
+  connectionBacked?: boolean;
+  /** UI hint: hide unconfigured legacy connection-backed tools from Forger Tools. */
+  hidden?: boolean;
+  connectionType?: string;
 }
 
 export interface OfficialToolsState {

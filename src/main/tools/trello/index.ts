@@ -147,6 +147,13 @@ export const trelloToolModule: InternalToolModule = createTokenConnectorModule({
       name: 'Listar columnas',
       description: 'Lista las columnas de un tablero.',
       risk: 'low',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          boardId: { type: 'string', description: 'ID del tablero de Trello.' },
+        },
+        required: ['boardId'],
+      },
       outputSchema: {
         type: 'object',
         properties: {
@@ -188,6 +195,14 @@ export const trelloToolModule: InternalToolModule = createTokenConnectorModule({
       name: 'Listar tarjetas',
       description: 'Lista las tarjetas de una columna.',
       risk: 'medium',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          listId: { type: 'string', description: 'ID de la columna de Trello.' },
+          limit: { type: 'number', description: 'Maximo de tarjetas a devolver.' },
+        },
+        required: ['listId'],
+      },
       outputSchema: {
         type: 'object',
         properties: {
@@ -240,6 +255,16 @@ export const trelloToolModule: InternalToolModule = createTokenConnectorModule({
       name: 'Crear tarjeta',
       description: 'Crea una tarjeta nueva en una columna.',
       risk: 'high',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          listId: { type: 'string', description: 'ID de la columna de Trello.' },
+          name: { type: 'string', description: 'Titulo de la tarjeta.' },
+          description: { type: 'string', description: 'Descripcion de la tarjeta.' },
+          dueDate: { type: 'string', description: 'Fecha de vencimiento en formato aceptado por Trello.' },
+        },
+        required: ['listId', 'name'],
+      },
       outputSchema: {
         type: 'object',
         properties: {

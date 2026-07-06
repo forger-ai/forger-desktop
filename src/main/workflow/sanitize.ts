@@ -1,6 +1,7 @@
 import type {
   AgentToolId,
   AutomationFrequency,
+  ConnectionSessionGrant,
   WorkflowConditionExpression,
   WorkflowConditionOperator,
   WorkflowEdge,
@@ -11,6 +12,7 @@ import type {
   WorkflowUpsertInput,
 } from '../../shared/types';
 import { normalizeAgentRuntime } from '../../shared/types';
+import { connectionTypeForActionId, isBuiltInConnectionType } from '../../shared/connection-catalog';
 
 const NODE_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/;
 const MAX_NAME_LENGTH = 120;
@@ -55,6 +57,40 @@ const sanitizeToolIds = (value: unknown, validToolIds?: ReadonlySet<string>): Ag
     .filter((item): item is string => typeof item === 'string')
     .map((item) => item.trim())
     .filter((item) => item.length > 0 && (!validToolIds || validToolIds.has(item))))) as AgentToolId[];
+};
+
+const connectionTypeForAction = (actionId: string): string => {
+  return connectionTypeForActionId(actionId);
+};
+
+const sanitizeConnectionGrants = (value: unknown): ConnectionSessionGrant[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const grants: ConnectionSessionGrant[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      continue;
+    }
+    const record = item as Record<string, unknown>;
+    const type = sanitizeText(record.type, 80);
+    const actions = Array.isArray(record.actions)
+      ? [...new Set(record.actions.map((action) => sanitizeText(action, 160)).filter(Boolean))]
+      : [];
+    const connectionIds = Array.isArray(record.connectionIds)
+      ? [...new Set(record.connectionIds.map((id) => sanitizeText(id, 160)).filter(Boolean))]
+      : [];
+    if (!type || actions.length === 0) {
+      continue;
+    }
+    grants.push({
+      type,
+      actions,
+      multiple: record.multiple === true,
+      ...(connectionIds.length ? { connectionIds } : {}),
+    });
+  }
+  return grants;
 };
 
 const sanitizePosition = (value: unknown): WorkflowNodePosition | undefined => {
@@ -132,6 +168,7 @@ export const sanitizeWorkflowNode = (
       ...(runtime ? { runtime } : {}),
       toolIds: sanitizeToolIds(record.toolIds, validToolIds),
       appIds: sanitizeAppIds(record.appIds),
+      connectionGrants: sanitizeConnectionGrants(record.connectionGrants),
       ...(outputSchema ? { outputSchema } : {}),
     };
   }
@@ -152,6 +189,37 @@ export const sanitizeWorkflowNode = (
     };
   }
 
+  if (record.type === 'forger_tool') {
+    const toolId = sanitizeText(record.toolId, 160);
+    if (!toolId || (validToolIds && !validToolIds.has(toolId))) {
+      return null;
+    }
+    const input = record.input && typeof record.input === 'object' && !Array.isArray(record.input)
+      ? record.input as Record<string, unknown>
+      : {};
+    return { ...base, type: 'forger_tool', toolId: toolId as AgentToolId, input };
+  }
+
+  if (record.type === 'connection') {
+    const connectionType = sanitizeText(record.connectionType, 80);
+    const actionId = sanitizeText(record.actionId, 160);
+    if (!connectionType || !actionId) {
+      return null;
+    }
+    const connectionId = sanitizeText(record.connectionId, 160);
+    const input = record.input && typeof record.input === 'object' && !Array.isArray(record.input)
+      ? record.input as Record<string, unknown>
+      : {};
+    return {
+      ...base,
+      type: 'connection',
+      connectionType,
+      actionId,
+      ...(connectionId ? { connectionId } : {}),
+      input,
+    };
+  }
+
   if (record.type === 'connector') {
     const toolId = sanitizeText(record.toolId, 128);
     const actionId = sanitizeText(record.actionId, 128);
@@ -161,7 +229,14 @@ export const sanitizeWorkflowNode = (
     const input = record.input && typeof record.input === 'object' && !Array.isArray(record.input)
       ? record.input as Record<string, unknown>
       : {};
-    return { ...base, type: 'connector', toolId, actionId, input };
+    const connectionType = isBuiltInConnectionType(toolId) ? toolId : connectionTypeForAction(actionId);
+    if (connectionType) {
+      return { ...base, type: 'connection', connectionType, actionId, input };
+    }
+    if (!validToolIds || validToolIds.has(actionId)) {
+      return { ...base, type: 'forger_tool', toolId: actionId as AgentToolId, input };
+    }
+    return null;
   }
 
   if (record.type === 'condition') {

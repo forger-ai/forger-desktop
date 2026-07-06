@@ -316,6 +316,10 @@ const createForgerMcpHarness = async (overrides = {}) => {
     listOfficialToolActionIdsForApp: async () => new Set(),
     validateOfficialTool: async () => null,
     callOfficialTool: async () => ({ success: true }),
+    listConnectionGrantsForApp: overrides.listConnectionGrantsForApp ?? (async () => []),
+    listConnectionsForSession: overrides.listConnectionsForSession ?? (async (grants) => ({ types: [], instances: [], grants })),
+    callConnectionFromSession: overrides.callConnectionFromSession ?? (async (input) => ({ success: true, data: input })),
+    setAppConnectionGrant: overrides.setAppConnectionGrant,
     onToolProgress: (input) => progress.push(input),
     onToolFailure: (input) => toolFailures.push(input),
     onHttpFailure: (input) => httpFailures.push(input),
@@ -341,6 +345,164 @@ const callMcp = async (session, body, token = session.token) => await fetch(sess
   body: typeof body === 'string' ? body : JSON.stringify(body),
 });
 
+test('MCP tools/list separates Forger Tools from ungranted connection actions', async () => {
+  const harness = await createForgerMcpHarness({
+    toolDefinitions: [
+      {
+        id: 'forger_chrome_extension.navigate',
+        packageId: 'official:forger_chrome_extension',
+        name: 'Navigate',
+        description: 'Navigate Chrome.',
+        category: 'app',
+        risk: 'medio',
+        defaultRequiresApproval: false,
+      },
+      {
+        id: 'gmail.search_messages',
+        packageId: 'official:gmail',
+        name: 'Search Gmail',
+        description: 'Search mail.',
+        category: 'consulta',
+        risk: 'medio',
+        defaultRequiresApproval: false,
+      },
+    ],
+  });
+  try {
+    const session = harness.server.createSession('run-free', 'forger', { caller: 'free-chat' });
+    const response = await callMcp(session, { jsonrpc: '2.0', id: 1, method: 'tools/list' });
+    const payload = await response.json();
+    const names = payload.result.tools.map((tool) => tool.name).sort();
+    assert.equal(names.includes('forger_chrome_extension.navigate'), true);
+    assert.equal(names.includes('forger_connection_list'), true);
+    assert.equal(names.includes('forger_connection_status'), true);
+    assert.equal(names.includes('forger_connection_call'), false);
+    assert.equal(names.includes('gmail.search_messages'), false);
+  } finally {
+    harness.stop();
+  }
+});
+
+test('MCP app-agent exposes and executes only manifest-granted connection actions', async () => {
+  const calls = [];
+  const harness = await createForgerMcpHarness({
+    toolDefinitions: [
+      {
+        id: 'gmail.search_messages',
+        packageId: 'official:gmail',
+        name: 'Search Gmail',
+        description: 'Search mail.',
+        category: 'consulta',
+        risk: 'medio',
+        defaultRequiresApproval: false,
+      },
+      {
+        id: 'gmail.send_email',
+        packageId: 'official:gmail',
+        name: 'Send Gmail',
+        description: 'Send mail.',
+        category: 'app',
+        risk: 'alto',
+        defaultRequiresApproval: false,
+      },
+    ],
+    listConnectionGrantsForApp: async (appId) => {
+      calls.push(['listConnectionGrantsForApp', appId]);
+      return [{ type: 'gmail', actions: ['gmail.search_messages'], multiple: false, connectionIds: ['conn-1'] }];
+    },
+    callConnectionFromSession: async (input, grants) => {
+      calls.push(['callConnectionFromSession', input, grants]);
+      return { success: true, data: { input, grants } };
+    },
+  });
+  try {
+    const session = harness.server.createSession('run-app', 'finance-os', { caller: 'app-agent', appIds: ['finance-os'] });
+    const listed = await (await callMcp(session, { jsonrpc: '2.0', id: 1, method: 'tools/list' })).json();
+    const names = listed.result.tools.map((tool) => tool.name).sort();
+    assert.equal(names.includes('gmail.search_messages'), true);
+    assert.equal(names.includes('gmail.send_email'), false);
+
+    const called = await (await callMcp(session, {
+      jsonrpc: '2.0',
+      id: 2,
+      method: 'tools/call',
+      params: {
+        name: 'gmail.search_messages',
+        arguments: { query: 'from:bank', connectionId: 'conn-1' },
+      },
+    })).json();
+    const result = parseToolTextResult(called);
+    assert.equal(result.success, true);
+    assert.deepEqual(result.data.input, {
+      type: 'gmail',
+      actionId: 'gmail.search_messages',
+      input: { query: 'from:bank' },
+      connectionId: 'conn-1',
+    });
+  } finally {
+    harness.stop();
+  }
+});
+
+test('MCP typed connection actions honor agent tool approval settings', async () => {
+  const permissionRequests = [];
+  const connectionCalls = [];
+  const harness = await createForgerMcpHarness({
+    toolDefinitions: [
+      {
+        id: 'gmail.search_messages',
+        packageId: 'official:gmail',
+        name: 'Search Gmail',
+        description: 'Search mail.',
+        category: 'consulta',
+        risk: 'medio',
+        defaultRequiresApproval: false,
+      },
+    ],
+    approvals: {
+      'gmail.search_messages': true,
+    },
+    requestPermission: async (runId, request) => {
+      permissionRequests.push({ runId, request });
+      return true;
+    },
+    listConnectionGrantsForApp: async () => [
+      { type: 'gmail', actions: ['gmail.search_messages'], multiple: false, connectionIds: ['conn-1'] },
+    ],
+    callConnectionFromSession: async (input, grants) => {
+      connectionCalls.push({ input, grants });
+      return { success: true, data: input };
+    },
+  });
+  try {
+    const session = harness.server.createSession('run-approval', 'finance-os', { caller: 'app-agent', appIds: ['finance-os'] });
+    const payload = await (await callMcp(session, {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/call',
+      params: {
+        name: 'gmail.search_messages',
+        arguments: { query: 'from:bank', connectionId: 'conn-1' },
+      },
+    })).json();
+    const result = parseToolTextResult(payload);
+    assert.equal(result.success, true);
+    assert.equal(result.authorization.required, true);
+    assert.equal(result.authorization.status, 'approved');
+    assert.equal(permissionRequests.length, 1);
+    assert.equal(permissionRequests[0].request.permission, 'gmail.search_messages');
+    assert.equal(connectionCalls.length, 1);
+    assert.deepEqual(connectionCalls[0].input, {
+      type: 'gmail',
+      actionId: 'gmail.search_messages',
+      input: { query: 'from:bank' },
+      connectionId: 'conn-1',
+    });
+  } finally {
+    harness.stop();
+  }
+});
+
 test('MCP tool schemas expose strict official tool contracts and safe annotations', () => {
   assert.equal(getMcpToolInputSchema('memory_list').additionalProperties, false);
   assert.deepEqual(getMcpToolInputSchema('memory_create').required, ['scope', 'kind']);
@@ -364,15 +526,23 @@ test('MCP tool schemas expose strict official tool contracts and safe annotation
 
   const searchSchema = getMcpToolInputSchema('gmail.search_messages');
   assert.deepEqual(searchSchema.required, ['query']);
+  assert.equal(searchSchema.properties.connectionId.type, 'string');
   assert.equal(searchSchema.properties.maxResults.type, 'number');
+
+  const gmailStatusSchema = getMcpToolInputSchema('gmail.connection.status');
+  assert.deepEqual(gmailStatusSchema.required, undefined);
+  assert.equal(gmailStatusSchema.properties.connectionId.type, 'string');
 
   const readThreadSchema = getMcpToolInputSchema('gmail.read_thread');
   assert.equal(readThreadSchema.additionalProperties, false);
+  assert.equal(readThreadSchema.properties.connectionId.type, 'string');
   assert.equal(readThreadSchema.properties.threadId.type, 'string');
 
   const sendSchema = getMcpToolInputSchema('gmail.send_email');
-  assert.deepEqual(sendSchema.required, ['to', 'subject', 'body']);
+  assert.deepEqual(sendSchema.required, ['to', 'subject']);
   assert.equal(sendSchema.additionalProperties, false);
+  assert.equal(sendSchema.properties.connectionId.type, 'string');
+  assert.equal(sendSchema.properties.bodyHtml.type, 'string');
   assert.equal(sendSchema.properties.attachments.items.required[0], 'filePath');
 
   const chromeSubmitSchema = getMcpToolInputSchema('forger_chrome_extension.submit_form');
@@ -405,6 +575,7 @@ test('MCP tool schemas expose strict official tool contracts and safe annotation
   assert.deepEqual(whatsappPairingSchema.properties.method.enum, ['qr', 'pairing_code']);
 
   const whatsappListSchema = getMcpToolInputSchema('whatsapp.list_chats');
+  assert.equal(whatsappListSchema.properties.connectionId.type, 'string');
   assert.deepEqual(whatsappListSchema.properties.chatType.enum, ['direct', 'group', 'channel']);
   assert.equal(whatsappListSchema.properties.query.type, 'string');
 
@@ -422,6 +593,14 @@ test('MCP tool schemas expose strict official tool contracts and safe annotation
 
   const whatsappDetailsSchema = getMcpToolInputSchema('whatsapp.get_chat_details');
   assert.deepEqual(whatsappDetailsSchema.required, ['chatId']);
+
+  const slackReadSchema = getMcpToolInputSchema('slack.read_messages');
+  assert.equal(slackReadSchema.properties.connectionId.type, 'string');
+  assert.deepEqual(slackReadSchema.required, ['channelId']);
+
+  const trelloBoardsSchema = getMcpToolInputSchema('trello.list_boards');
+  assert.equal(trelloBoardsSchema.properties.connectionId.type, 'string');
+  assert.equal(trelloBoardsSchema.additionalProperties, false);
 
   assert.deepEqual(getMcpToolAnnotations({
     id: 'memory_list',
@@ -1133,7 +1312,13 @@ test('Forger MCP app-agent sessions filter Gmail tools and return validation fai
     memoryCreate: async () => ({}),
     memoryUpdate: async () => ({}),
     memoryDelete: async () => ({ success: true }),
-    listOfficialToolActionIdsForApp: async () => new Set(['gmail.search_messages', 'whatsapp.list_chats']),
+    listOfficialToolActionIdsForApp: async () => new Set(),
+    listConnectionGrantsForApp: async () => [
+      { type: 'gmail', actions: ['gmail.search_messages'], multiple: false, connectionIds: ['gmail-1'] },
+      { type: 'whatsapp', actions: ['whatsapp.list_chats'], multiple: false, connectionIds: ['wa-1'] },
+    ],
+    listConnectionsForSession: async (grants) => ({ types: [], instances: [], grants }),
+    callConnectionFromSession: async (input) => ({ success: true, data: { type: input.type, actionId: input.actionId } }),
     validateOfficialTool: async (input) => (
       input.actionId === 'gmail.send_email' || input.actionId === 'whatsapp.send_message'
         ? { success: false, userMessage: 'Sin permiso.', technicalCode: 'app_tool_permission_denied' }
@@ -1155,7 +1340,12 @@ test('Forger MCP app-agent sessions filter Gmail tools and return validation fai
     });
     const listPayload = await listResponse.json();
     const names = listPayload.result.tools.map((tool) => tool.name).sort();
-    assert.deepEqual(names, ['forger_ask_question', 'forger_list_installed_apps', 'gmail.search_messages', 'whatsapp.list_chats']);
+    assert.equal(names.includes('forger_list_installed_apps'), true);
+    assert.equal(names.includes('forger_connection_list'), true);
+    assert.equal(names.includes('gmail.search_messages'), true);
+    assert.equal(names.includes('whatsapp.list_chats'), true);
+    assert.equal(names.includes('gmail.send_email'), false);
+    assert.equal(names.includes('whatsapp.send_message'), false);
 
     const deniedResponse = await fetch(session.url, {
       method: 'POST',
@@ -1172,11 +1362,7 @@ test('Forger MCP app-agent sessions filter Gmail tools and return validation fai
     });
     const deniedPayload = await deniedResponse.json();
     assert.equal(deniedPayload.result.isError, true);
-    assert.deepEqual(parseToolTextResult(deniedPayload), {
-      success: false,
-      userMessage: 'Sin permiso.',
-      technicalCode: 'app_tool_permission_denied',
-    });
+    assert.equal(parseToolTextResult(deniedPayload).technicalCode, 'connection_action_not_granted');
 
     const deniedWhatsappResponse = await fetch(session.url, {
       method: 'POST',
@@ -1211,7 +1397,7 @@ test('Forger MCP app-agent sessions filter Gmail tools and return validation fai
     assert.equal(allowedPayload.result.isError, false);
     assert.deepEqual(parseToolTextResult(allowedPayload), {
       success: true,
-      data: { toolId: 'gmail', actionId: 'gmail.search_messages' },
+      data: { type: 'gmail', actionId: 'gmail.search_messages' },
     });
 
     const allowedWhatsappResponse = await fetch(session.url, {
@@ -1231,7 +1417,7 @@ test('Forger MCP app-agent sessions filter Gmail tools and return validation fai
     assert.equal(allowedWhatsappPayload.result.isError, false);
     assert.deepEqual(parseToolTextResult(allowedWhatsappPayload), {
       success: true,
-      data: { toolId: 'whatsapp', actionId: 'whatsapp.list_chats' },
+      data: { type: 'whatsapp', actionId: 'whatsapp.list_chats' },
     });
     assert.equal(logs.some((entry) => entry.event === 'agent_tool:mcp_tools_list_built'), true);
   } finally {
@@ -1821,17 +2007,17 @@ test('Forger MCP server covers official execution, app prompt success, tool fail
     toolDefinitions: [
       ...defaultMcpToolDefinitions,
       {
-        id: 'gmail.search_messages',
-        packageId: 'gmail',
-        name: 'Buscar correos',
-        description: 'Busca Gmail.',
-        category: 'correo',
+        id: 'forger_chrome_extension.navigate',
+        packageId: 'official:forger_chrome_extension',
+        name: 'Navegar',
+        description: 'Navega Chrome.',
+        category: 'app',
         risk: 'medio',
         defaultRequiresApproval: false,
       },
     ],
     options: {
-      callOfficialTool: async (input) => ({ success: true, data: { actionId: input.actionId, query: input.input.query } }),
+      callOfficialTool: async (input) => ({ success: true, data: { actionId: input.actionId, input: input.input } }),
       updateAppPrompt: async (input) => ({ success: true, runtime: input.runtime, provider: input.provider, model: input.model, effort: input.effort, reasoningEffort: input.reasoningEffort }),
       openApp: async () => {
         throw new Error('open_failed');
@@ -1855,11 +2041,11 @@ test('Forger MCP server covers official execution, app prompt success, tool fail
       jsonrpc: '2.0',
       id: 1,
       method: 'tools/call',
-      params: { name: 'gmail.search_messages', arguments: { query: 'from:bank' } },
+      params: { name: 'forger_chrome_extension.navigate', arguments: { url: 'https://example.com' } },
     })).json());
     assert.deepEqual(official, {
       success: true,
-      data: { actionId: 'gmail.search_messages', query: 'from:bank' },
+      data: { actionId: 'forger_chrome_extension.navigate', input: { url: 'https://example.com' } },
     });
 
     const prompt = parseToolTextResult(await (await callMcp(session, {
@@ -2311,8 +2497,11 @@ test('automation command runner records failed exits and timeout kills in transc
   await writeFile(join(codexHome, 'auth.json'), '{"token":"test"}', 'utf8');
   const failingCli = join(root, 'failing-codex.js');
   const hangingCli = join(root, 'hanging-codex.js');
+  const failingCapturePath = join(root, 'failing-codex-capture.json');
   await writeFile(failingCli, [
     '#!/usr/bin/env node',
+    'const fs = require("node:fs");',
+    `fs.writeFileSync(${JSON.stringify(failingCapturePath)}, JSON.stringify({ args: process.argv.slice(2) }));`,
     'console.log("partial stdout");',
     'console.error("partial stderr");',
     'process.exit(7);',
@@ -2340,6 +2529,12 @@ test('automation command runner records failed exits and timeout kills in transc
     assert.equal(failed.code, 7);
     assert.equal(failed.stdout.trim(), 'partial stdout');
     assert.equal(failed.stderr.trim(), 'partial stderr');
+    const failingCapture = JSON.parse(await readFile(failingCapturePath, 'utf8'));
+    assert.equal(failingCapture.args.includes('--full-auto'), false);
+    assert.deepEqual(failingCapture.args.slice(
+      failingCapture.args.indexOf('--ask-for-approval'),
+      failingCapture.args.indexOf('--ask-for-approval') + 2,
+    ), ['--ask-for-approval', 'never']);
     assert.match(await readFile(join(root, 'failed.log'), 'utf8'), /\[stderr\] partial stderr/);
 
     const originalSetTimeout = globalThis.setTimeout;

@@ -83,6 +83,13 @@ const createDeps = async (overrides = {}) => {
         getState: () => ({ status: 'idle' }),
         install: async () => ({ status: 'installing' }),
       }),
+      getConnectionsService: () => ({
+        call: async () => ({}),
+        configure: async () => ({}),
+        disconnect: async () => ({}),
+        listState: async () => ({ types: [], instances: [] }),
+        setDefaultConnection: async () => ({}),
+      }),
       getFileLibrary: () => ({
         createCategory: async () => ({}),
         deleteCategory: async () => ({}),

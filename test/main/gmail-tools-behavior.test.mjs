@@ -25,6 +25,11 @@ const {
   runGmailOAuthFlow,
 } = require('../../dist-electron/main/tools/gmail/oauth.js');
 const { gmailToolModule } = require('../../dist-electron/main/tools/gmail/index.js');
+const {
+  GMAIL_REFRESH_TOKEN_SECRET,
+  GMAIL_SELF_OAUTH_CLIENT_ID_SECRET,
+  GMAIL_SELF_OAUTH_CLIENT_SECRET_SECRET,
+} = require('../../dist-electron/main/tools/gmail/types.js');
 
 const decodeBase64Url = (value) => {
   const normalized = value.replace(/-/g, '+').replace(/_/g, '/');
@@ -43,7 +48,12 @@ const createSecretsStore = (overrides = {}) => ({
 const createGmailContext = (overrides = {}) => ({
   metadataRoot: '/tmp/forger-gmail-test',
   locale: 'es',
-  secretsStore: createSecretsStore({ getToolSecret: async () => 'refresh-token', hasToolSecret: async () => true }),
+  secretsStore: createSecretsStore({
+    getToolSecret: async (_toolId, secretName) => (
+      secretName === GMAIL_REFRESH_TOKEN_SECRET ? 'refresh-token' : undefined
+    ),
+    hasToolSecret: async (_toolId, secretName) => secretName === GMAIL_REFRESH_TOKEN_SECRET,
+  }),
   getFreePort: async () => 0,
   openExternalUrl: async () => undefined,
   isForgerAccountAuthenticated: () => true,
@@ -67,6 +77,10 @@ test('Gmail send input rejects invalid recipients and external-looking relative 
     body: 'Body',
     attachments: [{ filePath: '/tmp/report.csv' }, null, [], { filePath: 123 }],
   }), null);
+  assert.equal(parseSendInput({
+    to: ['valid@example.com'],
+    subject: 'Subject',
+  }), null);
 
   const parsed = parseSendInput({
     to: [' user@example.com '],
@@ -87,6 +101,14 @@ test('Gmail send input rejects invalid recipients and external-looking relative 
     body: 'Hola',
     attachments: [{ filePath: '/tmp/report.csv', filename: 'report.csv', mimeType: 'text/csv' }],
   });
+
+  const htmlParsed = parseSendInput({
+    to: ['user@example.com'],
+    subject: 'HTML',
+    bodyHtml: '<h1>Hola</h1><p>Mensaje <strong>importante</strong></p>',
+  });
+  assert.equal(htmlParsed.body, 'Hola\nMensaje importante');
+  assert.equal(htmlParsed.bodyHtml, '<h1>Hola</h1><p>Mensaje <strong>importante</strong></p>');
 });
 
 test('Gmail MIME builder creates base64url text and multipart attachment payloads', async () => {
@@ -123,6 +145,19 @@ test('Gmail MIME builder creates base64url text and multipart attachment payload
     assert.match(textWithCopies, /^Cc: copy@example.com$/m);
     assert.match(textWithCopies, /^Bcc: audit@example.com$/m);
 
+    const htmlRaw = await buildRawEmail({
+      to: ['user@example.com'],
+      subject: 'HTML',
+      body: 'Hola texto',
+      bodyHtml: '<p>Hola <strong>HTML</strong></p>',
+    });
+    const htmlEmail = decodeBase64Url(htmlRaw);
+    assert.match(htmlEmail, /Content-Type: multipart\/alternative; boundary="forger-alt-/);
+    assert.match(htmlEmail, /Content-Type: text\/plain; charset="UTF-8"/);
+    assert.match(htmlEmail, /Content-Type: text\/html; charset="UTF-8"/);
+    assert.match(htmlEmail, /Hola texto/);
+    assert.match(htmlEmail, /<p>Hola <strong>HTML<\/strong><\/p>/);
+
     const multipartRaw = await buildRawEmail({
       to: ['user@example.com'],
       cc: ['copy@example.com'],
@@ -139,6 +174,20 @@ test('Gmail MIME builder creates base64url text and multipart attachment payload
     assert.match(multipart, /Content-Disposition: attachment; filename="movimientos.unknownext"/);
     assert.match(multipart, /ZGF0ZSxhbW91bnQK/);
     assert.equal(toBase64Url('a+b/c=').includes('+'), false);
+
+    const htmlMultipartRaw = await buildRawEmail({
+      to: ['user@example.com'],
+      subject: 'HTML adjunto',
+      body: 'Fallback',
+      bodyHtml: '<p>Con <em>adjunto</em></p>',
+      attachments: [{ filePath: attachmentPath, filename: 'movimientos.csv', mimeType: 'text/csv' }],
+    });
+    const htmlMultipart = decodeBase64Url(htmlMultipartRaw);
+    assert.match(htmlMultipart, /Content-Type: multipart\/mixed; boundary="forger-/);
+    assert.match(htmlMultipart, /Content-Type: multipart\/alternative; boundary="forger-alt-/);
+    assert.match(htmlMultipart, /Content-Type: text\/html; charset="UTF-8"/);
+    assert.match(htmlMultipart, /<p>Con <em>adjunto<\/em><\/p>/);
+    assert.match(htmlMultipart, /Content-Disposition: attachment; filename="movimientos.csv"/);
 
     const inferredRaw = await buildRawEmail({
       to: ['user@example.com'],
@@ -198,6 +247,40 @@ test('Gmail OAuth refresh requires Forger auth, stored refresh token, and access
     (error) => error instanceof GmailOAuthError && error.technicalCode === 'gmail_oauth_access_token_missing',
   );
   assert.equal(await refreshGmailAccessToken(createGmailContext()), 'access-token');
+});
+
+test('Gmail OAuth refresh can use self OAuth credentials without Forger auth', async () => {
+  const previousFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), init });
+    return new Response(JSON.stringify({ access_token: 'self-access-token' }), { status: 200 });
+  };
+
+  try {
+    const token = await refreshGmailAccessToken(createGmailContext({
+      isForgerAccountAuthenticated: () => false,
+      secretsStore: createSecretsStore({
+        getToolSecret: async (_toolId, secretName) => {
+          if (secretName === GMAIL_REFRESH_TOKEN_SECRET) return 'refresh-token';
+          if (secretName === GMAIL_SELF_OAUTH_CLIENT_ID_SECRET) return 'self-client-id';
+          if (secretName === GMAIL_SELF_OAUTH_CLIENT_SECRET_SECRET) return 'self-client-secret';
+          return undefined;
+        },
+      }),
+    }));
+
+    assert.equal(token, 'self-access-token');
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, 'https://oauth2.googleapis.com/token');
+    const body = calls[0].init.body;
+    assert.equal(body.get('client_id'), 'self-client-id');
+    assert.equal(body.get('client_secret'), 'self-client-secret');
+    assert.equal(body.get('refresh_token'), 'refresh-token');
+    assert.equal(body.get('grant_type'), 'refresh_token');
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
 });
 
 test('Gmail API client clamps search limits and handles sparse Gmail payloads', async () => {
@@ -558,6 +641,7 @@ test('Gmail official tool executes search, read, attachment, and send actions th
         to: ['user@example.com'],
         subject: 'Hello',
         body: 'Message',
+        bodyHtml: '<p><strong>Message</strong></p>',
         attachments: [{ filePath: attachmentPath }],
       },
     }, context);

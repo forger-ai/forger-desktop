@@ -25,6 +25,7 @@ import type { AntigravityAuthSessionEvent, AntigravityAuthSessionStartResult, An
 import type { AgentProviderUsageResult } from './provider-usage';
 import type { LlmProviderProfileMutationResult, LlmProviderProfilesState, SetActiveLlmProviderProfileInput, SetActiveLlmProviderProfileResult, UpdateLlmProviderProfileDefaultsInput } from './provider-profiles';
 import type { AgentToolPackageDefinition, AgentToolSettings, UpdateAgentToolApprovalInput, OfficialToolsState, ToolMutationResult, ConfigureOfficialToolInput, CallOfficialToolInput, CallOfficialToolResult, AppToolsInstallGate, SetAppToolGrantInput, OfficialToolRuntimeEvent, GetAppToolsInstallGateOptions } from './tools';
+import type { CallConnectionActionInput, CallConnectionActionResult, ConfigureConnectionInput, ConnectionMutationResult, ConnectionsState, DisconnectConnectionInput } from './connections';
 import type { PickedChatFile, FilesStageForChatInput, FilesDiscardStagedForChatInput, FilesActionResult, FilesListInput, ForgerFileRecord, ForgerFileCategory, FilesCreateCategoryInput, FilesRenameCategoryInput, FilesDeleteCategoryInput, FilesImportInput, FilesMoveInput, FilesRenameInput, FilesDeleteInput, DbListTablesResponse, DbQueryTableResponse } from './data';
 import type { Automation, AutomationRun, AutomationRunSummary, AutomationUpsertInput, WindowControlState } from './automations';
 import type { Workflow, WorkflowApproveNodeInput, WorkflowRun, WorkflowRunSummary, WorkflowUpdatedEvent, WorkflowUpsertInput } from './workflows';
@@ -244,6 +245,11 @@ export interface ForgerDesktopApi {
   configureOfficialTool: (input: ConfigureOfficialToolInput) => Promise<ToolMutationResult>;
   callOfficialTool: (input: CallOfficialToolInput) => Promise<CallOfficialToolResult>;
   deactivateOfficialTool: (toolId: string, locale?: string) => Promise<ToolMutationResult>;
+  connectionsList: (locale?: string) => Promise<ConnectionsState>;
+  connectionsConfigure: (input: ConfigureConnectionInput) => Promise<ConnectionMutationResult>;
+  connectionsDisconnect: (input: DisconnectConnectionInput) => Promise<ConnectionMutationResult>;
+  connectionsCall: (input: CallConnectionActionInput) => Promise<CallConnectionActionResult>;
+  connectionsSetDefault: (input: { type: string; connectionId: string }) => Promise<ConnectionMutationResult>;
   onOfficialToolEvent: (listener: (event: OfficialToolRuntimeEvent) => void) => () => void;
   getAppToolsInstallGate: (appId: string, locale?: string, options?: GetAppToolsInstallGateOptions) => Promise<AppToolsInstallGate | null>;
   setAppToolGrant: (input: SetAppToolGrantInput, locale?: string) => Promise<AppToolsInstallGate | null>;

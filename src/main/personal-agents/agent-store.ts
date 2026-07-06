@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import type { AgentPermissionMode, AgentProvider, AgentRuntime, AgentToolId, PersonalAgent, PersonalAgentConversation, PersonalAgentConversationStatus, PersonalAgentCreateInput, PersonalAgentHeartbeatSummary, PersonalAgentJournalEntry, PersonalAgentMemory, PersonalAgentMessage, PersonalAgentMessageKind, PersonalAgentMessageRole, PersonalAgentPermission, PersonalAgentRun, PersonalAgentRunProgress, PersonalAgentRunStatus, PersonalAgentUpdatePermissionsInput, PersonalAgentWorkspaceEntry, PersonalAgentWorkspaceFile } from '../../shared/types';
+import type { AgentPermissionMode, AgentProvider, AgentRuntime, AgentToolId, PersonalAgent, PersonalAgentConnectionGrant, PersonalAgentConversation, PersonalAgentConversationStatus, PersonalAgentCreateInput, PersonalAgentHeartbeatSummary, PersonalAgentJournalEntry, PersonalAgentMemory, PersonalAgentMessage, PersonalAgentMessageKind, PersonalAgentMessageRole, PersonalAgentPermission, PersonalAgentRun, PersonalAgentRunProgress, PersonalAgentRunStatus, PersonalAgentUpdatePermissionsInput, PersonalAgentWorkspaceEntry, PersonalAgentWorkspaceFile } from '../../shared/types';
 import { buildGlobalSkillTemplates } from '../prompt-builder/official-tools';
 import { buildPersonalAgentWorkspaceDocuments } from '../prompt-builder/personal-agents';
 import { forgerSkillRoots, writeSkillTemplates } from '../prompt-builder/skill-template-writer';
@@ -161,6 +161,7 @@ export class AgentStore {
       ...(normalizeAgentRuntime(input.runtime) ? { runtime: normalizeAgentRuntime(input.runtime) as AgentRuntime } : {}),
       appIds: normalizeGrantTargets(input.appIds),
       toolIds: normalizeGrantTargets(input.toolIds) as AgentToolId[],
+      connectionGrants: normalizeConnectionGrants(input.connectionGrants),
       createdAt: now,
       updatedAt: now,
     };
@@ -191,6 +192,7 @@ export class AgentStore {
     });
     await this.replaceGrants(agent.id, 'app', agent.appIds, now);
     await this.replaceGrants(agent.id, 'tool', agent.toolIds, now);
+    await this.replaceConnectionGrants(agent.id, agent.connectionGrants, now);
     return this.requireAgent(agent.id);
   }
 
@@ -239,6 +241,9 @@ export class AgentStore {
     }
     if (input.toolIds) {
       await this.replaceGrants(agent.id, 'tool', normalizeGrantTargets(input.toolIds), now);
+    }
+    if (input.connectionGrants) {
+      await this.replaceConnectionGrants(agent.id, normalizeConnectionGrants(input.connectionGrants), now);
     }
     return await this.requireAgent(agent.id);
   }
@@ -669,6 +674,18 @@ export class AgentStore {
     }
   }
 
+  private async replaceConnectionGrants(agentId: string, grants: PersonalAgentConnectionGrant[], now: string): Promise<void> {
+    const db = this.requireDb();
+    db.prepare('DELETE FROM personal_agent_permissions WHERE agent_id = ? AND kind = ?').run(agentId, 'connection');
+    for (const grant of grants.slice(0, MAX_GRANTS)) {
+      const targetId = encodeConnectionGrant(grant);
+      db.prepare(`
+        INSERT INTO personal_agent_permissions (id, agent_id, kind, target_id, permission, mode, granted, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(randomUUID(), agentId, 'connection', targetId, `connection:${grant.type}`, 'safe', 1, now, now);
+    }
+  }
+
   private async load(): Promise<void> {
     if (!this.loadPromise) {
       this.loadPromise = this.loadFromDisk();
@@ -836,6 +853,7 @@ export class AgentStore {
   private agentFromRow(row: AgentRow): PersonalAgent {
     const appIds = this.grantsForAgent(row.id, 'app') as string[];
     const toolIds = this.grantsForAgent(row.id, 'tool') as AgentToolId[];
+    const connectionGrants = this.connectionGrantsForAgent(row.id);
     const runtime = normalizeAgentRuntime({
       provider: row.runtime_provider,
       model: row.runtime_model,
@@ -852,9 +870,19 @@ export class AgentStore {
       ...(runtime ? { runtime } : {}),
       appIds,
       toolIds,
+      connectionGrants,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };
+  }
+
+  private connectionGrantsForAgent(agentId: string): PersonalAgentConnectionGrant[] {
+    const rows = this.requireDb().prepare(`
+      SELECT target_id FROM personal_agent_permissions
+      WHERE agent_id = ? AND kind = ? AND granted != 0
+      ORDER BY created_at ASC
+    `).all(agentId, 'connection') as Array<{ target_id?: string }>;
+    return normalizeConnectionGrants(rows.map((row) => decodeConnectionGrant(row.target_id)));
   }
 
   private grantsForAgent(agentId: string, kind: 'app' | 'tool'): string[] {
@@ -1027,6 +1055,59 @@ const normalizeGrantTargets = (value: unknown): string[] => {
   return [...new Set(targets)].slice(0, MAX_GRANTS);
 };
 
+const normalizeConnectionGrant = (value: unknown): PersonalAgentConnectionGrant | null => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+  const input = value as Partial<PersonalAgentConnectionGrant>;
+  const type = sanitizeGrantTarget(input.type) ?? '';
+  const actions = normalizeGrantTargets(input.actions);
+  const connectionIds = normalizeGrantTargets(input.connectionIds);
+  if (!type || actions.length === 0) {
+    return null;
+  }
+  return {
+    type,
+    actions,
+    multiple: input.multiple === true,
+    ...(connectionIds.length ? { connectionIds } : {}),
+  };
+};
+
+const normalizeConnectionGrants = (value: unknown): PersonalAgentConnectionGrant[] => {
+  if (!Array.isArray(value)) return [];
+  const grants = new Map<string, PersonalAgentConnectionGrant>();
+  for (const item of value) {
+    const grant = normalizeConnectionGrant(item);
+    if (!grant) continue;
+    const key = `${grant.type}:${grant.connectionIds?.join(',') ?? '*'}`;
+    const existing = grants.get(key);
+    grants.set(key, existing
+      ? {
+          type: grant.type,
+          actions: [...new Set([...existing.actions, ...grant.actions])],
+          multiple: existing.multiple || grant.multiple,
+          ...(existing.connectionIds ?? grant.connectionIds ? { connectionIds: [...new Set([...(existing.connectionIds ?? []), ...(grant.connectionIds ?? [])])] } : {}),
+        }
+      : grant);
+  }
+  return [...grants.values()].slice(0, MAX_GRANTS);
+};
+
+const encodeConnectionGrant = (grant: PersonalAgentConnectionGrant): string =>
+  JSON.stringify(grant);
+
+const decodeConnectionGrant = (value: unknown): PersonalAgentConnectionGrant | null => {
+  if (typeof value !== 'string' || !value.trim()) {
+    return null;
+  }
+  try {
+    return normalizeConnectionGrant(JSON.parse(value) as unknown);
+  } catch {
+    return null;
+  }
+};
+
 const normalizePermissionMode = (value: unknown): AgentPermissionMode => value === 'unsafe' ? 'unsafe' : 'safe';
 
 const normalizeAgentProvider = (value: unknown): AgentProvider | null => {
@@ -1092,8 +1173,10 @@ const isLegacyWorkspacePrompt = (content: string): boolean =>
   LEGACY_MINIMAL_WORKSPACE_PROMPT_PATTERNS.some((pattern) => pattern.test(content));
 
 const parsePermissionGrant = (row: Pick<PermissionRow, 'permission'> & Partial<Pick<PermissionRow, 'kind' | 'target_id'>>): { kind: PersonalAgentPermission['kind']; targetId: string; permission: string } => {
-  const rawKind = row.kind === 'app' || row.kind === 'tool' ? row.kind : 'legacy';
-  const rawTarget = sanitizeGrantTarget(row.target_id) ?? '';
+  const rawKind = row.kind === 'app' || row.kind === 'tool' || row.kind === 'connection' ? row.kind : 'legacy';
+  const rawTarget = rawKind === 'connection' && typeof row.target_id === 'string'
+    ? row.target_id
+    : sanitizeGrantTarget(row.target_id) ?? '';
   if (rawKind !== 'legacy' && rawTarget) {
     return { kind: rawKind, targetId: rawTarget, permission: `${rawKind}:${rawTarget}` };
   }

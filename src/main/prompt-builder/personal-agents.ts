@@ -1,10 +1,49 @@
 import type { PersonalAgent } from '../../shared/types';
 import { renderPromptFile } from './index';
+import { isForgerConnectionActionId } from './official-tools';
 
 export const PERSONAL_AGENT_WORKSPACE_FILES = ['AGENTS.md', 'WHO.md', 'WHY.md', 'HOW.md', 'HUMAN.md'] as const;
 export type PersonalAgentWorkspaceFileName = (typeof PERSONAL_AGENT_WORKSPACE_FILES)[number];
 
 export const PERSONAL_AGENT_PROMPT_MARKER = 'FORGER_PERSONAL_AGENT_PROMPT_VERSION: 1';
+
+const formatActionIds = (actions: string[]): string =>
+  actions.length > 0 ? actions.map((action) => `\`${action}\``).join(', ') : 'none';
+
+const buildPersonalAgentForgerToolsContext = (agent: PersonalAgent): string => {
+  const forgerToolActions = agent.toolIds.filter((toolId) => !isForgerConnectionActionId(toolId));
+  if (forgerToolActions.length === 0) {
+    return '- No Forger Tool actions are granted to this personal agent.';
+  }
+  return [
+    '- Granted Forger Tool actions:',
+    ...forgerToolActions.map((action) => `  - ${action}`),
+  ].join('\n');
+};
+
+const buildPersonalAgentConnectionsContext = (agent: PersonalAgent): string => {
+  const legacyConnectionActions = agent.toolIds.filter(isForgerConnectionActionId);
+  const grantLines = agent.connectionGrants.map((grant) => {
+    const binding = (grant.connectionIds?.length ?? 0) > 0
+      ? 'specific account/session binding is present'
+      : 'no specific account/session binding is embedded';
+    return `  - ${grant.type}: actions ${formatActionIds(grant.actions)}; multiple allowed: ${grant.multiple ? 'yes' : 'no'}; ${binding}.`;
+  });
+  const legacyLines = legacyConnectionActions.length > 0
+    ? [`  - Legacy connection action ids still present in tool grants: ${formatActionIds(legacyConnectionActions)}.`]
+    : [];
+  if (grantLines.length === 0 && legacyLines.length === 0) {
+    return '- No Connections are granted to this personal agent.';
+  }
+  return [
+    '- Granted Connections:',
+    ...grantLines,
+    ...legacyLines,
+    '- Check the matching `*.connection.status` action before external account work when state is unclear.',
+    '- If multiple accounts or sessions are possible and the intended account is ambiguous, ask the person which account/session to use.',
+    '- Sensitive sends, creates, attachment reads, and external writes still require visible Forger approval when Forger asks.',
+  ].join('\n');
+};
 
 const agentPromptVariables = (agent: PersonalAgent) => ({
   promptMarker: PERSONAL_AGENT_PROMPT_MARKER,
@@ -14,6 +53,8 @@ const agentPromptVariables = (agent: PersonalAgent) => ({
   agentInstructions: agent.instructions || 'No extra user instructions have been written yet.',
   permissionMode: agent.permissionMode,
   networkAccess: agent.networkAccess ? 'enabled' : 'disabled',
+  grantedForgerToolsContext: buildPersonalAgentForgerToolsContext(agent),
+  grantedConnectionsContext: buildPersonalAgentConnectionsContext(agent),
 });
 
 export const buildPersonalAgentWorkspaceDocuments = (agent: PersonalAgent): Record<PersonalAgentWorkspaceFileName, string> => ({

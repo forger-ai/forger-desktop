@@ -43,8 +43,8 @@ export const CODEX_MODEL_OPTIONS: CodexModelOption[] = [
   { displayModelName: '5.5', realModelName: 'gpt-5.5', defaultReasoningEffort: 'medium' },
   { displayModelName: '5.4', realModelName: 'gpt-5.4', defaultReasoningEffort: 'medium' },
   { displayModelName: '5.4 Mini', realModelName: 'gpt-5.4-mini', defaultReasoningEffort: 'medium' },
-  { displayModelName: '5.3 Codex', realModelName: 'gpt-5.3-codex', defaultReasoningEffort: 'low' },
-  { displayModelName: '5.3 Spark', realModelName: 'gpt-5.3-codex-spark', defaultReasoningEffort: 'high' },
+  { displayModelName: '5.3 Codex', realModelName: 'gpt-5.3-codex', defaultReasoningEffort: 'low', supportedReasoningEfforts: ['low'] },
+  { displayModelName: '5.3 Spark', realModelName: 'gpt-5.3-codex-spark', defaultReasoningEffort: 'high', supportedReasoningEfforts: ['high'] },
   { displayModelName: '5.2', realModelName: 'gpt-5.2', defaultReasoningEffort: 'medium' },
 ];
 
@@ -327,6 +327,14 @@ export const getDefaultCodexReasoningEffort = (model: unknown): CodexReasoningEf
 export const getDefaultClaudeEffort = (model: unknown): ClaudeEffort =>
   getClaudeModelOption(model)?.defaultEffort ?? DEFAULT_CLAUDE_EFFORT;
 
+export const getCodexSupportedReasoningEfforts = (model: unknown): CodexReasoningEffort[] =>
+  getCodexModelOption(model)?.supportedReasoningEfforts
+    ?? CODEX_REASONING_OPTIONS.map((entry) => entry.value);
+
+export const getClaudeSupportedEfforts = (model: unknown): ClaudeEffort[] =>
+  getClaudeModelOption(model)?.supportedEfforts
+    ?? CLAUDE_EFFORT_OPTIONS.map((entry) => entry.value);
+
 export const getAntigravityModelOption = (model: unknown): AntigravityModelOption | undefined => {
   const normalized = normalizeString(model);
   return ANTIGRAVITY_MODEL_OPTIONS.find((option) => option.realModelName === normalized);
@@ -346,6 +354,46 @@ export const getAntigravitySupportedEfforts = (model: unknown): AntigravityEffor
 
 export const getDefaultAntigravityEffort = (model: unknown): AntigravityEffort =>
   getAntigravityModelOption(model)?.defaultEffort ?? getAntigravityLegacyModelAlias(model)?.effort ?? DEFAULT_ANTIGRAVITY_EFFORT;
+
+export function getRuntimeSupportedEfforts(provider: 'codex', model: unknown): CodexReasoningEffort[];
+export function getRuntimeSupportedEfforts(provider: 'claude', model: unknown): ClaudeEffort[];
+export function getRuntimeSupportedEfforts(provider: 'antigravity', model: unknown): AntigravityEffort[];
+export function getRuntimeSupportedEfforts(provider: AgentProvider, model: unknown): AgentEffort[];
+export function getRuntimeSupportedEfforts(provider: AgentProvider, model: unknown): AgentEffort[] {
+  if (provider === 'claude') {
+    return getClaudeSupportedEfforts(model);
+  }
+  if (provider === 'antigravity') {
+    return getAntigravitySupportedEfforts(model);
+  }
+  return getCodexSupportedReasoningEfforts(model);
+}
+
+export function normalizeRuntimeEffortForModel(provider: 'codex', model: unknown, value: unknown, fallback?: CodexReasoningEffort): CodexReasoningEffort;
+export function normalizeRuntimeEffortForModel(provider: 'claude', model: unknown, value: unknown, fallback?: ClaudeEffort): ClaudeEffort;
+export function normalizeRuntimeEffortForModel(provider: 'antigravity', model: unknown, value: unknown, fallback?: AntigravityEffort): AntigravityEffort;
+export function normalizeRuntimeEffortForModel(provider: AgentProvider, model: unknown, value: unknown, fallback?: AgentEffort): AgentEffort;
+export function normalizeRuntimeEffortForModel(
+  provider: AgentProvider,
+  model: unknown,
+  value: unknown,
+  fallback?: AgentEffort,
+): AgentEffort {
+  const supportedEfforts = getRuntimeSupportedEfforts(provider, model);
+  const fallbackEffort = provider === 'claude'
+    ? getDefaultClaudeEffort(model)
+    : provider === 'antigravity'
+      ? getDefaultAntigravityEffort(model)
+      : getDefaultCodexReasoningEffort(model);
+  const normalized = normalizeRuntimeEffort(provider, value, fallback ?? fallbackEffort);
+  if (supportedEfforts.includes(normalized)) {
+    return normalized;
+  }
+  if (supportedEfforts.includes(fallbackEffort)) {
+    return fallbackEffort;
+  }
+  return supportedEfforts[0] ?? fallbackEffort;
+}
 
 export const normalizeAntigravityModelAndEffort = (
   model: unknown,
@@ -494,12 +542,13 @@ export const validateAgentRuntimeRequest = (
   if (requested.effort === undefined) {
     return;
   }
+  const modelForEffort = model || registry[provider].defaultModel;
   const effortValid = provider === 'claude'
     ? registry.claude.effortValues.has(requested.effort as ClaudeEffort)
     : provider === 'antigravity'
       ? registry.antigravity.effortValues.has(requested.effort as AntigravityEffort)
       : registry.codex.reasoningEffortValues.has(requested.effort as CodexReasoningEffort);
-  if (!effortValid) {
+  if (!effortValid || !getRuntimeSupportedEfforts(provider, modelForEffort).includes(requested.effort as AgentEffort)) {
     throw new AgentRuntimeRequestValidationError('agent_runtime_effort_unsupported');
   }
 };
@@ -540,7 +589,7 @@ export const legacyCodexRuntime = (input?: LegacyCodexRuntimeInput): AgentRuntim
   return {
     provider: 'codex',
     model: normalizeCodexModel(model, model),
-    effort: normalizeCodexReasoningEffort(input?.reasoningEffort ?? input?.effort, getDefaultCodexReasoningEffort(model)),
+    effort: normalizeRuntimeEffortForModel('codex', model, input?.reasoningEffort ?? input?.effort, getDefaultCodexReasoningEffort(model)),
   };
 };
 
@@ -564,7 +613,7 @@ export const normalizeAgentRuntime = (
     return {
       provider,
       model: normalizedModel,
-      effort: normalizeClaudeEffort(record?.effort ?? fallback?.effort ?? fallback?.reasoningEffort, getDefaultClaudeEffort(normalizedModel)),
+      effort: normalizeRuntimeEffortForModel('claude', normalizedModel, record?.effort ?? fallback?.effort ?? fallback?.reasoningEffort, getDefaultClaudeEffort(normalizedModel)),
       ...(permissionMode ? { permissionMode } : {}),
       ...(authProfileId ? { authProfileId } : {}),
     };
@@ -587,7 +636,7 @@ export const normalizeAgentRuntime = (
   return {
     provider,
     model: normalizedModel,
-    effort: normalizeCodexReasoningEffort(record?.effort ?? fallback?.effort ?? fallback?.reasoningEffort, getDefaultCodexReasoningEffort(normalizedModel)),
+    effort: normalizeRuntimeEffortForModel('codex', normalizedModel, record?.effort ?? fallback?.effort ?? fallback?.reasoningEffort, getDefaultCodexReasoningEffort(normalizedModel)),
     ...(permissionMode ? { permissionMode } : {}),
     ...(authProfileId ? { authProfileId } : {}),
   };
@@ -600,19 +649,21 @@ export const resolveAgentRuntime = (
 ): AgentRuntime => {
   const normalized = normalizeAgentRuntime(value, fallback);
   if (normalized?.provider === 'claude') {
+    const model = normalizeClaudeModel(normalized.model, defaults.claude.model);
     return {
       provider: 'claude',
-      model: normalizeClaudeModel(normalized.model, defaults.claude.model),
-      effort: normalizeClaudeEffort(normalized.effort, defaults.claude.effort),
+      model,
+      effort: normalizeRuntimeEffortForModel('claude', model, normalized.effort, defaults.claude.effort),
       permissionMode: normalizeAgentPermissionMode(normalized.permissionMode),
       ...(normalized.authProfileId ? { authProfileId: normalized.authProfileId } : {}),
     };
   }
   if (normalized?.provider === 'codex') {
+    const model = normalizeCodexModel(normalized.model, defaults.codex.model);
     return {
       provider: 'codex',
-      model: normalizeCodexModel(normalized.model, defaults.codex.model),
-      effort: normalizeCodexReasoningEffort(normalized.effort, defaults.codex.reasoningEffort),
+      model,
+      effort: normalizeRuntimeEffortForModel('codex', model, normalized.effort, defaults.codex.reasoningEffort),
       permissionMode: normalizeAgentPermissionMode(normalized.permissionMode),
       ...(normalized.authProfileId ? { authProfileId: normalized.authProfileId } : {}),
     };
@@ -688,10 +739,11 @@ export const runtimeFromDefaultsForProvider = (
   defaults: AgentDefaults = DEFAULT_AGENT_DEFAULTS,
 ): AgentRuntime => {
   if (provider === 'claude') {
+    const model = normalizeClaudeModel(defaults.claude.model, DEFAULT_CLAUDE_MODEL);
     return {
       provider,
-      model: normalizeClaudeModel(defaults.claude.model, DEFAULT_CLAUDE_MODEL),
-      effort: normalizeClaudeEffort(defaults.claude.effort, DEFAULT_CLAUDE_EFFORT),
+      model,
+      effort: normalizeRuntimeEffortForModel('claude', model, defaults.claude.effort, DEFAULT_CLAUDE_EFFORT),
     };
   }
   if (provider === 'antigravity') {
@@ -707,10 +759,11 @@ export const runtimeFromDefaultsForProvider = (
       effort: antigravity.effort,
     };
   }
+  const model = normalizeCodexModel(defaults.codex.model, DEFAULT_CODEX_MODEL);
   return {
     provider,
-    model: normalizeCodexModel(defaults.codex.model, DEFAULT_CODEX_MODEL),
-    effort: normalizeCodexReasoningEffort(defaults.codex.reasoningEffort, DEFAULT_CODEX_REASONING_EFFORT),
+    model,
+    effort: normalizeRuntimeEffortForModel('codex', model, defaults.codex.reasoningEffort, DEFAULT_CODEX_REASONING_EFFORT),
   };
 };
 

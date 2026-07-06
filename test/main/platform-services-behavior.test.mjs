@@ -468,7 +468,7 @@ test('agent permission mode maps to provider CLI arguments', () => {
   assert.deepEqual(codexUnsafeArgs('unsafe'), ['--dangerously-bypass-approvals-and-sandbox']);
   assert.deepEqual(codexUnsafeArgs(), []);
   assert.deepEqual(codexWorkspaceArgs('unsafe'), []);
-  assert.deepEqual(codexWorkspaceArgs(), ['--full-auto', '--sandbox', 'workspace-write']);
+  assert.deepEqual(codexWorkspaceArgs(), ['--sandbox', 'workspace-write']);
   assert.deepEqual(claudePermissionArgs(), ['--permission-mode', 'acceptEdits']);
   const unsafe = claudePermissionArgs('unsafe');
   assert.deepEqual(unsafe.slice(0, 2), ['--permission-mode', 'bypassPermissions']);

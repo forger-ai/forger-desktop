@@ -77,6 +77,7 @@ test('app error report preparation promotes layered diagnostics into sanitized a
       agentRunLog: [
         { type: 'stderr', text: 'failed at /Users/example-user/Desktop/private.csv', token: 'secret-token-value' },
       ],
+      automationTranscript: '[meta] failed at /Users/example-user/Forger/apps/demo-app with OPENAI_API_KEY=secret-token-value',
       rendererStack: 'Error: boom\n    at /Users/example-user/Desktop/app.ts:1:1',
     },
   });
@@ -84,11 +85,12 @@ test('app error report preparation promotes layered diagnostics into sanitized a
   assert.equal(report.sensitiveDetails, undefined);
   assert.deepEqual(
     report.diagnosticFiles.map((file) => file.filename),
-    ['runtime-status.json', 'agent-run.jsonl', 'renderer-stack.log'],
+    ['runtime-status.json', 'agent-run.jsonl', 'renderer-stack.log', 'automation-transcript.log'],
   );
-  assert.equal(attachments.length, 3);
+  assert.equal(attachments.length, 4);
   const attachmentText = attachments.map((attachment) => attachment.text).join('\n');
   assert.match(attachmentText, /FORGER_APPS\/demo-app\/backend/);
+  assert.match(attachmentText, /FORGER_APPS\/demo-app/);
   assert.doesNotMatch(attachmentText, /\/Users\/felipe\/Desktop/);
   assert.doesNotMatch(attachmentText, /secret-token-value/);
 });

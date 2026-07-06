@@ -1654,7 +1654,7 @@ test('normalizeInstalledAgentContext writes app runtime skills while ignoring sk
   assert.ok(claudeGenerated.includes('inside'));
   assert.equal(claudeGenerated.includes('outside-skill'), false);
   const appToolSkill = await fs.readFile(path.join(skillsRoot, 'forger-app-official-tools', 'SKILL.md'), 'utf8');
-  assert.match(appToolSkill, /This app has not declared any official Forger tool actions/);
+  assert.match(appToolSkill, /This app has not declared any Forger Tool or Connection actions/);
   const agentsMarkdown = await fs.readFile(path.join(installDir, 'AGENTS.md'), 'utf8');
   assert.match(agentsMarkdown, /Forger/);
 });

@@ -33,6 +33,9 @@ const {
   detectProviderModelUnsupportedError,
   detectProviderQuotaError,
 } = require('../../dist-electron/main/llm-provider/provider-errors.js');
+const {
+  resolveWorkflowNodePosition,
+} = require('../../dist-electron/shared/workflow-node-positions.js');
 
 test('capability normalization maps aliases, objects, casing, and unknown values safely', () => {
   assert.deepEqual(normalizeAppCapabilityIds([
@@ -80,6 +83,45 @@ test('auth connect attempt tracker isolates active, finished, and canceled attem
   const third = tracker.begin('codex');
   assert.equal(tracker.finish(third), 'codex');
   assert.equal(tracker.busyProvider, null);
+});
+
+test('workflow node position reconciliation honors draft resets without interrupting live drags', () => {
+  const fallbackPosition = { x: 80, y: 80 };
+  assert.deepEqual(resolveWorkflowNodePosition({
+    draftPosition: { x: 10, y: 20 },
+    hadPreviousDraftPosition: false,
+    livePosition: { x: 100, y: 200 },
+    fallbackPosition,
+  }), { x: 10, y: 20 });
+
+  assert.deepEqual(resolveWorkflowNodePosition({
+    draftPosition: { x: 10, y: 20 },
+    previousDraftPosition: { x: 10, y: 20 },
+    hadPreviousDraftPosition: true,
+    livePosition: { x: 100, y: 200 },
+    fallbackPosition,
+  }), { x: 100, y: 200 });
+
+  assert.deepEqual(resolveWorkflowNodePosition({
+    draftPosition: { x: 10, y: 20 },
+    previousDraftPosition: { x: 100, y: 200 },
+    hadPreviousDraftPosition: true,
+    livePosition: { x: 100, y: 200 },
+    fallbackPosition,
+  }), { x: 10, y: 20 });
+
+  assert.deepEqual(resolveWorkflowNodePosition({
+    draftPosition: { x: 140, y: 240 },
+    previousDraftPosition: { x: 10, y: 20 },
+    hadPreviousDraftPosition: true,
+    livePosition: { x: 140, y: 240 },
+    fallbackPosition,
+  }), { x: 140, y: 240 });
+
+  assert.deepEqual(resolveWorkflowNodePosition({
+    hadPreviousDraftPosition: false,
+    fallbackPosition,
+  }), fallbackPosition);
 });
 
 test('failure diagnostics classify unstable command and auth failures without leaking command output into details', () => {
@@ -241,6 +283,9 @@ test('agent runtime registry normalizes providers, defaults, fallbacks, and runt
   assert.equal(runtimeRegistry.getDefaultClaudeEffort('opusplan'), 'high');
   assert.equal(runtimeRegistry.getDefaultCodexReasoningEffort('unknown-model'), 'medium');
   assert.equal(runtimeRegistry.getDefaultClaudeEffort('unknown-model'), 'high');
+  assert.deepEqual(runtimeRegistry.getCodexSupportedReasoningEfforts('gpt-5.3-codex'), ['low']);
+  assert.deepEqual(runtimeRegistry.getRuntimeSupportedEfforts('codex', 'gpt-5.3-codex-spark'), ['high']);
+  assert.equal(runtimeRegistry.normalizeRuntimeEffortForModel('codex', 'gpt-5.3-codex', 'xhigh'), 'low');
   assert.equal(runtimeRegistry.isAgentProvider('codex'), true);
   assert.equal(runtimeRegistry.isAgentProvider('bad'), false);
   assert.equal(runtimeRegistry.isAgentProviderPreference('auto'), true);
@@ -293,12 +338,17 @@ test('agent runtime registry normalizes providers, defaults, fallbacks, and runt
   assert.deepEqual(runtimeRegistry.getAntigravitySupportedEfforts('gemini-3.1-pro'), ['low', 'high']);
   assert.equal(runtimeRegistry.resolveAntigravityCliModel('gemini-3.5-flash', 'high'), 'gemini-3.5-flash-high');
   assert.equal(runtimeRegistry.resolveAntigravityCliModel('gpt-oss-120b', 'high'), 'gpt-oss-120b-medium');
+  assert.throws(() => runtimeRegistry.validateAgentRuntimeRequest(
+    runtimeRegistry.DEFAULT_AGENT_PROVIDER_RUNTIME_REGISTRY,
+    'codex',
+    { model: 'gpt-5.3-codex', effort: 'medium' },
+  ), /agent_runtime_effort_unsupported/);
   assert.equal(runtimeRegistry.legacyCodexRuntime(), undefined);
   assert.equal(runtimeRegistry.legacyCodexRuntime({}), undefined);
   assert.deepEqual(runtimeRegistry.legacyCodexRuntime({ model: 'gpt-5.3-codex', effort: 'xhigh' }), {
     provider: 'codex',
     model: 'gpt-5.3-codex',
-    effort: 'xhigh',
+    effort: 'low',
   });
   assert.deepEqual(runtimeRegistry.normalizeAgentRuntime({
     provider: 'claude',

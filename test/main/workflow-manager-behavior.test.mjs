@@ -60,10 +60,10 @@ const createManager = async (overrides = {}) => {
 
 const connectorNode = (id, overrides = {}) => ({
   id,
-  name: `Conector ${id}`,
+  name: `Forger tool ${id}`,
   type: 'connector',
-  toolId: 'slack',
-  actionId: 'slack.send_message',
+  toolId: 'forger',
+  actionId: 'forger_refresh_app_view',
   input: { channelId: '#general', text: 'hola' },
   ...overrides,
 });

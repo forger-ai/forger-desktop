@@ -16,8 +16,13 @@ import type {
   AppAgentWorkspaceInput,
   AudioPlaybackSummary,
   AudioRuntimeDevices,
+  CallConnectionActionInput,
+  CallConnectionActionResult,
   CallOfficialToolInput,
   CallOfficialToolResult,
+  ConnectionInstance,
+  ConnectionRequirementState,
+  ConnectionTypeDefinition,
   LiveVoiceInputSession,
   OfficialToolSummary,
   SpeechToTextProcessResult,
@@ -89,6 +94,14 @@ export interface DesktopRuntimeBridgeOptions {
   officialTools?: {
     listToolsForApp: (appId: string) => Promise<OfficialToolSummary[]>;
     callFromApp: (appId: string, input: CallOfficialToolInput) => Promise<CallOfficialToolResult>;
+  };
+  connections?: {
+    listConnectionsForApp: (appId: string) => Promise<{
+      types: ConnectionTypeDefinition[];
+      instances: ConnectionInstance[];
+      requirements: ConnectionRequirementState[];
+    }>;
+    callFromApp: (appId: string, input: CallConnectionActionInput) => Promise<CallConnectionActionResult>;
   };
   getAudioDevices?: () => Promise<AudioRuntimeDevices>;
   updateAudioInputDevices?: (input: AudioRuntimeDevices) => Promise<void>;
@@ -329,6 +342,9 @@ export class DesktopRuntimeBridge {
 
     const toolsResult = await this.routeOfficialTools(appId, method, pathname, bodyText);
     if (toolsResult.handled) return toolsResult.result;
+
+    const connectionsResult = await this.routeConnections(appId, method, pathname, bodyText);
+    if (connectionsResult.handled) return connectionsResult.result;
 
     const contextMatch = pathname.match(/^\/v1\/apps\/([^/]+)\/context$/);
     if (contextMatch) {
@@ -597,6 +613,62 @@ export class DesktopRuntimeBridge {
           toolId,
           actionId,
           input: isRecord(body.input) ? body.input : {},
+        }),
+      };
+    }
+
+    throw new BridgeError(404, 'desktop_runtime_route_not_found');
+  }
+
+  private async routeConnections(appId: string, method: string, pathname: string, bodyText: string): Promise<{ handled: boolean; result?: unknown }> {
+    const listMatch = pathname.match(/^\/v1\/apps\/([^/]+)\/connections$/);
+    const statusMatch = pathname.match(/^\/v1\/apps\/([^/]+)\/connections\/([^/]+)\/status$/);
+    const actionMatch = pathname.match(/^\/v1\/apps\/([^/]+)\/connections\/([^/]+)\/actions\/([^/]+)$/);
+    const match = listMatch ?? statusMatch ?? actionMatch;
+    if (!match) return { handled: false };
+    if (decodeURIComponent(match[1]) !== appId) {
+      throw new BridgeError(403, 'desktop_runtime_app_forbidden');
+    }
+    const service = this.options.connections;
+    if (!service) {
+      throw new BridgeError(503, 'desktop_runtime_connections_unavailable');
+    }
+
+    if (listMatch) {
+      if (method !== 'GET') {
+        throw new BridgeError(404, 'desktop_runtime_route_not_found');
+      }
+      return { handled: true, result: await service.listConnectionsForApp(appId) };
+    }
+
+    if (statusMatch) {
+      if (method !== 'GET') {
+        throw new BridgeError(404, 'desktop_runtime_route_not_found');
+      }
+      const type = decodeURIComponent(statusMatch[2]).trim();
+      return {
+        handled: true,
+        result: await service.callFromApp(appId, {
+          type,
+          actionId: `${type}.connection.status`,
+          input: {},
+        }),
+      };
+    }
+
+    if (actionMatch) {
+      if (method !== 'POST') {
+        throw new BridgeError(404, 'desktop_runtime_route_not_found');
+      }
+      const body = parseJsonBody(bodyText);
+      const connectionId = cleanString(body.connectionId);
+      return {
+        handled: true,
+        result: await service.callFromApp(appId, {
+          type: decodeURIComponent(actionMatch[2]).trim(),
+          actionId: decodeURIComponent(actionMatch[3]).trim(),
+          input: isRecord(body.input) ? body.input : {},
+          ...(connectionId ? { connectionId } : {}),
         }),
       };
     }

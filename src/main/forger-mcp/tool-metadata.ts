@@ -237,6 +237,42 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
     };
   }
 
+  if (toolId === 'forger_connection_list') {
+    return {
+      type: 'object',
+      properties: {
+        type: { type: 'string', description: 'Tipo de conexion opcional, por ejemplo gmail.' },
+      },
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'forger_connection_status') {
+    return {
+      type: 'object',
+      properties: {
+        type: { type: 'string' },
+        connectionId: { type: 'string' },
+      },
+      required: ['type'],
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'forger_request_connection_grant') {
+    return {
+      type: 'object',
+      properties: {
+        appId: { type: 'string' },
+        type: { type: 'string' },
+        reason: { type: 'string' },
+        connectionIds: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['appId', 'type'],
+      additionalProperties: false,
+    };
+  }
+
   if (toolId === 'forger_ask_question') {
     return {
       type: 'object',
@@ -378,10 +414,26 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
     };
   }
 
+  if (
+    toolId === 'gmail.connection.status' ||
+    toolId === 'whatsapp.connection.status' ||
+    toolId === 'slack.connection.status' ||
+    toolId === 'trello.connection.status'
+  ) {
+    return {
+      type: 'object',
+      properties: {
+        connectionId: { type: 'string' },
+      },
+      additionalProperties: false,
+    };
+  }
+
   if (toolId === 'gmail.search_messages') {
     return {
       type: 'object',
       properties: {
+        connectionId: { type: 'string' },
         query: { type: 'string' },
         maxResults: { type: 'number' },
       },
@@ -394,6 +446,7 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
     return {
       type: 'object',
       properties: {
+        connectionId: { type: 'string' },
         threadId: { type: 'string' },
         messageId: { type: 'string' },
       },
@@ -405,6 +458,7 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
     return {
       type: 'object',
       properties: {
+        connectionId: { type: 'string' },
         messageId: { type: 'string' },
         attachmentId: { type: 'string' },
         filename: { type: 'string' },
@@ -418,9 +472,11 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
     return {
       type: 'object',
       properties: {
+        connectionId: { type: 'string' },
         to: { type: 'array', items: { type: 'string' } },
         subject: { type: 'string' },
         body: { type: 'string' },
+        bodyHtml: { type: 'string' },
         cc: { type: 'array', items: { type: 'string' } },
         bcc: { type: 'array', items: { type: 'string' } },
         attachments: {
@@ -437,7 +493,7 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
           },
         },
       },
-      required: ['to', 'subject', 'body'],
+      required: ['to', 'subject'],
       additionalProperties: false,
     };
   }
@@ -602,6 +658,7 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
     return {
       type: 'object',
       properties: {
+        connectionId: { type: 'string' },
         method: { type: 'string', enum: ['qr', 'pairing_code'] },
         phoneNumber: { type: 'string' },
       },
@@ -614,6 +671,7 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
     return {
       type: 'object',
       properties: {
+        connectionId: { type: 'string' },
         chatType: { type: 'string', enum: ['direct', 'group', 'channel'] },
         query: { type: 'string' },
         limit: { type: 'number' },
@@ -627,6 +685,7 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
     return {
       type: 'object',
       properties: {
+        connectionId: { type: 'string' },
         chatId: { type: 'string' },
         limit: { type: 'number' },
         beforeMessageRef: { type: 'string' },
@@ -640,6 +699,7 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
     return {
       type: 'object',
       properties: {
+        connectionId: { type: 'string' },
         attachmentId: { type: 'string' },
       },
       required: ['attachmentId'],
@@ -651,6 +711,7 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
     return {
       type: 'object',
       properties: {
+        connectionId: { type: 'string' },
         chatId: { type: 'string' },
         text: { type: 'string' },
         replyToMessageRef: { type: 'string' },
@@ -664,6 +725,7 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
     return {
       type: 'object',
       properties: {
+        connectionId: { type: 'string' },
         chatId: { type: 'string' },
       },
       required: ['chatId'],
@@ -757,7 +819,7 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
         },
         nodes: {
           type: 'array',
-          description: 'Nodos del flujo. Tipos: llm_agent (prompt, toolIds, appIds, runtime, outputSchema), forger_agent (agentId, prompt), connector (toolId, actionId, input), condition (expression con left, operator, right). Todos requieren id y name. requiresApproval pausa el flujo hasta aprobar el paso.',
+          description: 'Nodos del flujo. Tipos: llm_agent (prompt, toolIds, connectionGrants, appIds, runtime, outputSchema), forger_agent (agentId, prompt), forger_tool (toolId, input), connection (connectionType, actionId, connectionId opcional, input), condition (expression con left, operator, right). Todos requieren id y name. requiresApproval pausa el flujo hasta aprobar el paso.',
           items: { type: 'object' },
         },
         edges: {
@@ -783,6 +845,7 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
     return {
       type: 'object',
       properties: {
+        connectionId: { type: 'string' },
         limit: { type: 'number', description: 'Cantidad maxima de canales (default 100).' },
       },
       additionalProperties: false,
@@ -793,6 +856,7 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
     return {
       type: 'object',
       properties: {
+        connectionId: { type: 'string' },
         channelId: { type: 'string' },
         limit: { type: 'number', description: 'Cantidad maxima de mensajes (default 20).' },
       },
@@ -805,6 +869,7 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
     return {
       type: 'object',
       properties: {
+        connectionId: { type: 'string' },
         channelId: { type: 'string', description: 'ID o nombre del canal, por ejemplo C0123 o #general.' },
         text: { type: 'string' },
       },
@@ -813,10 +878,21 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
     };
   }
 
+  if (toolId === 'trello.list_boards') {
+    return {
+      type: 'object',
+      properties: {
+        connectionId: { type: 'string' },
+      },
+      additionalProperties: false,
+    };
+  }
+
   if (toolId === 'trello.list_lists' ) {
     return {
       type: 'object',
       properties: {
+        connectionId: { type: 'string' },
         boardId: { type: 'string' },
       },
       required: ['boardId'],
@@ -828,6 +904,7 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
     return {
       type: 'object',
       properties: {
+        connectionId: { type: 'string' },
         listId: { type: 'string' },
         limit: { type: 'number', description: 'Cantidad maxima de tarjetas (default 50).' },
       },
@@ -840,6 +917,7 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
     return {
       type: 'object',
       properties: {
+        connectionId: { type: 'string' },
         listId: { type: 'string' },
         name: { type: 'string' },
         description: { type: 'string' },

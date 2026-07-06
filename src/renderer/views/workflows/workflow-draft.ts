@@ -1,4 +1,5 @@
 import type {
+  AgentToolId,
   Workflow,
   WorkflowEdge,
   WorkflowNode,
@@ -62,13 +63,16 @@ export const createDraftNode = (
   const position = { x: 80 + (nodes.length % 4) * 260, y: 80 + Math.floor(nodes.length / 4) * 160 };
   const base = { id, name: `${defaultName} ${nodes.length + 1}`, position };
   if (type === 'llm_agent') {
-    return { ...base, type: 'llm_agent', prompt: '', toolIds: [], appIds: [] };
+    return { ...base, type: 'llm_agent', prompt: '', toolIds: [], appIds: [], connectionGrants: [] };
   }
   if (type === 'forger_agent') {
     return { ...base, type: 'forger_agent', agentId: '', prompt: '' };
   }
-  if (type === 'connector') {
-    return { ...base, type: 'connector', toolId: '', actionId: '', input: {} };
+  if (type === 'forger_tool') {
+    return { ...base, type: 'forger_tool', toolId: '' as AgentToolId, input: {} };
+  }
+  if (type === 'connection') {
+    return { ...base, type: 'connection', connectionType: '', actionId: '', input: {} };
   }
   return { ...base, type: 'condition', expression: { left: '', operator: 'is_not_empty' } };
 };

@@ -242,6 +242,7 @@ test('sanitizeWorkflowNode normalizes node payloads and rejects invalid ones', (
     type: 'llm_agent',
     prompt: 'busca',
     toolIds: ['slack.send_message', 'nope', 'slack.send_message'],
+    connectionGrants: [{ type: 'gmail', actions: ['gmail.search_messages'], multiple: true }],
     appIds: ['finance-os', '../evil'],
     requiresApproval: true,
     timeoutMs: 1,
@@ -249,12 +250,13 @@ test('sanitizeWorkflowNode normalizes node payloads and rejects invalid ones', (
   }, new Set(['slack.send_message']));
   assert.equal(node.name, 'Buscar');
   assert.deepEqual(node.toolIds, ['slack.send_message']);
+  assert.deepEqual(node.connectionGrants, [{ type: 'gmail', actions: ['gmail.search_messages'], multiple: true }]);
   assert.deepEqual(node.appIds, ['finance-os']);
   assert.equal(node.requiresApproval, true);
   assert.equal(node.timeoutMs, 10_000);
   assert.deepEqual(node.position, { x: 10, y: 20 });
 
-  const connector = sanitizeWorkflowNode({
+  const connection = sanitizeWorkflowNode({
     id: 'con1',
     name: 'Slack',
     type: 'connector',
@@ -262,8 +264,20 @@ test('sanitizeWorkflowNode normalizes node payloads and rejects invalid ones', (
     actionId: 'slack.send_message',
     input: { channelId: '#general' },
   });
-  assert.equal(connector.type, 'connector');
-  assert.deepEqual(connector.input, { channelId: '#general' });
+  assert.equal(connection.type, 'connection');
+  assert.equal(connection.connectionType, 'slack');
+  assert.deepEqual(connection.input, { channelId: '#general' });
+
+  const forgerTool = sanitizeWorkflowNode({
+    id: 'tool1',
+    name: 'Refresh',
+    type: 'connector',
+    toolId: 'forger',
+    actionId: 'forger_refresh_app_view',
+    input: { appId: 'finance-os' },
+  }, new Set(['forger_refresh_app_view']));
+  assert.equal(forgerTool.type, 'forger_tool');
+  assert.equal(forgerTool.toolId, 'forger_refresh_app_view');
 
   const condition = sanitizeWorkflowNode({
     id: 'cond1',

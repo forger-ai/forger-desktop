@@ -38,6 +38,13 @@ const createDeps = (overrides = {}) => {
     forgerBackendClient: null,
     forwardCloudSocialEvent: () => undefined,
     fs,
+    getConnectionsService: () => ({
+      call: async () => ({}),
+      configure: async () => ({}),
+      disconnect: async () => ({}),
+      listState: async () => ({ types: [], instances: [] }),
+      setDefaultConnection: async () => ({}),
+    }),
     getInstallLogPath: () => '/tmp/forger-install.log',
     ipcMain,
     listCatalogFromBackend: async () => [],

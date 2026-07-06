@@ -7,6 +7,7 @@ import type {
   ToolMutationResult,
 } from '../../shared/types';
 import type { SecretsStore } from '../secrets-store';
+import type { SelfOAuthCallbackServiceLike } from '../oauth-callback/types';
 
 export interface InternalOAuthTokenResponse {
   access_token?: string;
@@ -34,6 +35,7 @@ export interface InternalToolContext {
     clientId: string;
     refreshToken: string;
   }) => Promise<InternalOAuthTokenResponse>;
+  selfOAuthCallbackService?: SelfOAuthCallbackServiceLike;
   appendLog?: (event: string, payload?: Record<string, unknown>) => Promise<void>;
   emitEvent?: (event: OfficialToolRuntimeEvent) => void;
 }

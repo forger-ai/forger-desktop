@@ -37,7 +37,7 @@ const createTempDesktopRoots = async (prefix) => {
     appsRoot: path.join(root, 'apps'),
     metadataRoot: path.join(root, 'metadata'),
     codexHome: path.join(root, 'codex-home'),
-    cleanup: async () => await rm(root, { recursive: true, force: true }),
+    cleanup: async () => await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }),
   };
 };
 

@@ -121,6 +121,7 @@ const missedWindowOptions = (frequencyType: AutomationFrequency['type']): Array<
 
 const emptyForm = (runtimeProviderControls: RuntimeProviderControls): AutomationFormState => {
   const codex = runtimeProviderControls.codex;
+  const runtimeModel = codex.selectedModel || codex.modelOptions[0]?.realModelName || '';
   return {
   name: '',
   prompt: '',
@@ -128,8 +129,8 @@ const emptyForm = (runtimeProviderControls: RuntimeProviderControls): Automation
   timeOfDay: '09:00',
   weeklyDay: 1,
   runtimeProvider: 'auto',
-  runtimeModel: codex.selectedModel || codex.modelOptions[0]?.realModelName || '',
-  runtimeEffort: codex.selectedEffort || codex.effortOptions[0]?.value || 'low',
+  runtimeModel,
+  runtimeEffort: codex.normalizeEffortForModel(runtimeModel, codex.selectedEffort || codex.effortOptionsForModel(runtimeModel)[0]?.value || 'low'),
   permissionMode: 'safe',
   missedRunPolicy: 'within_window',
   missedRunWindowMinutes: DEFAULT_MISSED_WINDOWS.hourly,
@@ -140,6 +141,9 @@ const emptyForm = (runtimeProviderControls: RuntimeProviderControls): Automation
 
 const formFromAutomation = (automation: Automation, runtimeProviderControls: RuntimeProviderControls): AutomationFormState => {
   const fallback = emptyForm(runtimeProviderControls);
+  const runtimeProvider = automation.runtime?.provider ?? 'auto';
+  const runtimeControl = runtimeProviderControls[runtimeProvider === 'auto' ? 'codex' : runtimeProvider];
+  const runtimeModel = automation.runtime?.model ?? fallback.runtimeModel;
   return {
   id: automation.id,
   name: automation.name,
@@ -147,9 +151,9 @@ const formFromAutomation = (automation: Automation, runtimeProviderControls: Run
   frequencyType: automation.frequency.type,
   timeOfDay: automation.frequency.timeOfDay ?? '09:00',
   weeklyDay: automation.frequency.weeklyDay ?? 1,
-  runtimeProvider: automation.runtime?.provider ?? 'auto',
-  runtimeModel: automation.runtime?.model ?? fallback.runtimeModel,
-  runtimeEffort: automation.runtime?.effort ?? fallback.runtimeEffort,
+  runtimeProvider,
+  runtimeModel,
+  runtimeEffort: runtimeControl.normalizeEffortForModel(runtimeModel, automation.runtime?.effort ?? fallback.runtimeEffort),
   permissionMode: automation.runtime?.permissionMode ?? 'safe',
   missedRunPolicy: automation.missedRunPolicy ?? 'within_window',
   missedRunWindowMinutes: automation.missedRunWindowMinutes ?? DEFAULT_MISSED_WINDOWS[automation.frequency.type],
@@ -325,12 +329,13 @@ export function AutomationsView({
   };
 
   const submit = (enabled = form.enabled) => {
-    onSave(buildInput(form, enabled));
+    onSave(buildInput({ ...form, runtimeEffort: runtimeEffortValue }, enabled));
     setDialogOpen(false);
   };
   const selectedRuntimeControl = runtimeProviderControls[form.runtimeProvider === 'auto' ? 'codex' : form.runtimeProvider];
   const runtimeModelOptions = selectedRuntimeControl.modelOptions;
-  const runtimeEffortOptions = selectedRuntimeControl.effortOptions;
+  const runtimeEffortOptions = selectedRuntimeControl.effortOptionsForModel(form.runtimeModel);
+  const runtimeEffortValue = selectedRuntimeControl.normalizeEffortForModel(form.runtimeModel, form.runtimeEffort);
   const selectedMissedWindowOptions = missedWindowOptions(form.frequencyType);
 
   const runOutput = selectedRun?.userMessage?.trim()
@@ -698,7 +703,7 @@ export function AutomationsView({
                         ...current,
                         runtimeProvider: provider,
                         runtimeModel: model,
-                        runtimeEffort: control.modelOptions[0]?.defaultEffort ?? control.effortOptions[0]?.value ?? current.runtimeEffort,
+                        runtimeEffort: control.normalizeEffortForModel(model, control.modelOptions[0]?.defaultEffort ?? current.runtimeEffort),
                       }));
                     }}
                   >
@@ -715,7 +720,7 @@ export function AutomationsView({
                     onChange={(event) => {
                       const model = event.target.value;
                       const option = runtimeModelOptions.find((entry) => entry.realModelName === model);
-                      setForm((current) => ({ ...current, runtimeModel: model, runtimeEffort: option?.defaultEffort ?? current.runtimeEffort }));
+                      setForm((current) => ({ ...current, runtimeModel: model, runtimeEffort: selectedRuntimeControl.normalizeEffortForModel(model, option?.defaultEffort ?? current.runtimeEffort) }));
                     }}
                   >
                     {runtimeModelOptions.map((option) => (
@@ -725,9 +730,9 @@ export function AutomationsView({
                 </FormControl>
                 <FormControl fullWidth disabled={form.runtimeProvider === 'auto'}>
                   <InputLabel>{t.sections.automations.effort}</InputLabel>
-                  <Select
-                    label={t.sections.automations.effort}
-                    value={form.runtimeEffort}
+                    <Select
+                      label={t.sections.automations.effort}
+                    value={runtimeEffortValue}
                     onChange={(event) => setForm((current) => ({ ...current, runtimeEffort: event.target.value as AgentEffort }))}
                   >
                     {runtimeEffortOptions.map((option) => (

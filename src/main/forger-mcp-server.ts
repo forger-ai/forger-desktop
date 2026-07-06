@@ -19,13 +19,17 @@ import type {
   RuntimeStatus,
   StopAppResult,
   InstallAppResult,
+  CallConnectionActionInput,
+  CallConnectionActionResult,
   CallOfficialToolInput,
   CallOfficialToolResult,
+  ConnectionRequirementState,
+  ConnectionSessionGrant,
+  ConnectionsState,
   MemoryCreateInput,
   MemoryEntry,
   MemoryListInput,
   MemoryUpdateInput,
-  AgentRuntime,
   ChatCreatedAppRequest,
   ChatQuestion,
   ChatQuestionRequest,
@@ -44,19 +48,50 @@ import type {
 import { buildFailureDiagnostic } from '../shared/error-diagnostics';
 import { getSharedCopy } from '../shared/i18n';
 import { getMcpToolAnnotations, getMcpToolInputSchema, type McpToolAnnotations } from './forger-mcp/tool-metadata';
+import {
+  cleanString,
+  connectionActionGranted,
+  dedupeConnectionGrants,
+  getAppToolGrantMcpCopy,
+  getBearerToken,
+  getOfficialToolIdForAction,
+  getToolAppId,
+  isAppScopedTool,
+  isConnectionAction,
+  isConnectionManagementTool,
+  isInternalMcpTool,
+  isMemoryTool,
+  isOfficialTool,
+  isPlainRecord,
+  legacyConnectionGrantsFromActionIds,
+  memoryAccess,
+  memoryErrorMessage,
+  parseAppToolGrantRequestInput,
+  parseCreateLocalAppToolInput,
+  parsePromptReviewKind,
+  parsePromptRuntimeOverride,
+  parseQuestionToolInput,
+  readRequestBody,
+  sendMcpJson,
+  toConnectionCallInput,
+  withToolAuthorization,
+  workflowMcpErrorMessage,
+} from './forger-mcp-server-helpers';
 
 export interface ForgerMcpSessionRef {
   url: string;
   token: string;
 }
 
-interface AgentMcpSession {
+export interface AgentMcpSession {
   runId: string;
   appId: string;
   caller: 'desktop-chat' | 'app-agent' | 'automation' | 'free-chat' | 'personal-agent' | 'workflow';
   personalAgentId?: string;
   appIds: string[];
   officialToolActionIds: string[];
+  forgerToolActionIds: string[];
+  connectionGrants: ConnectionSessionGrant[];
   locale?: string;
   token: string;
   createdAt: string;
@@ -67,6 +102,8 @@ export interface ForgerMcpSessionAccess {
   personalAgentId?: string;
   appIds?: string[];
   officialToolActionIds?: string[];
+  forgerToolActionIds?: string[];
+  connectionGrants?: ConnectionSessionGrant[];
   locale?: string;
 }
 
@@ -112,6 +149,19 @@ interface ForgerMcpServerOptions {
     locale?: string,
   ) => Promise<AppToolGrantRequestPreview>;
   setAppToolGrant: (input: SetAppToolGrantInput, locale?: string) => Promise<AppToolGrantRequestResult>;
+  listConnectionGrantsForApp: (appId: string) => Promise<ConnectionSessionGrant[]>;
+  listConnectionsForSession: (grants: ConnectionSessionGrant[]) => Promise<ConnectionsState & { grants: ConnectionSessionGrant[] }>;
+  callConnectionFromSession: (
+    input: CallConnectionActionInput,
+    grants: ConnectionSessionGrant[],
+    access: { caller: AgentMcpSession['caller']; appId: string; locale?: string },
+  ) => Promise<CallConnectionActionResult>;
+  setAppConnectionGrant?: (input: {
+    appId: string;
+    type: string;
+    granted: boolean;
+    connectionIds?: string[];
+  }) => Promise<ConnectionRequirementState | null>;
   memoryList: (input: MemoryListInput, access: MemoryAccessInput) => Promise<MemoryEntry[]>;
   memoryCreate: (input: MemoryCreateInput, access: MemoryAccessInput) => Promise<MemoryEntry>;
   memoryUpdate: (input: MemoryUpdateInput, access: MemoryAccessInput) => Promise<MemoryEntry>;
@@ -160,7 +210,7 @@ type JsonRpcRequest = {
   params?: unknown;
 };
 
-interface ToolApprovalResult {
+export interface ToolApprovalResult {
   approved: boolean;
   required: boolean;
   status: 'not_required' | 'approved' | 'denied' | 'unavailable';
@@ -174,7 +224,7 @@ interface ForgerMcpTool {
   annotations: McpToolAnnotations;
 }
 
-interface MemoryAccessInput {
+export interface MemoryAccessInput {
   caller: AgentMcpSession['caller'];
   appId?: string;
   appIds?: string[];
@@ -216,6 +266,33 @@ const INTERNAL_MCP_TOOL_DEFINITIONS: AgentToolDefinition[] = [
     description: 'Marca el nodo de flujo actual como fallido con un motivo claro.',
     category: 'consulta',
     risk: 'bajo',
+    defaultRequiresApproval: false,
+  },
+  {
+    id: 'forger_connection_list',
+    packageId: 'forger:connections',
+    name: 'Listar conexiones',
+    description: 'Lista conexiones externas disponibles para esta sesion sin exponer secretos.',
+    category: 'consulta',
+    risk: 'bajo',
+    defaultRequiresApproval: false,
+  },
+  {
+    id: 'forger_connection_status',
+    packageId: 'forger:connections',
+    name: 'Revisar estado de conexion',
+    description: 'Revisa el estado de una conexion externa concedida a esta sesion.',
+    category: 'consulta',
+    risk: 'bajo',
+    defaultRequiresApproval: false,
+  },
+  {
+    id: 'forger_request_connection_grant',
+    packageId: 'forger:connections',
+    name: 'Pedir permiso de conexion',
+    description: 'Pide permiso para activar una conexion opcional declarada por una app.',
+    category: 'consulta',
+    risk: 'medio',
     defaultRequiresApproval: false,
   },
 ];
@@ -305,6 +382,11 @@ export class ForgerMcpServer {
       personalAgentId: access?.personalAgentId,
       appIds: access?.appIds ?? (appId === 'forger' ? [] : [appId]),
       officialToolActionIds: access?.officialToolActionIds ?? [],
+      forgerToolActionIds: access?.forgerToolActionIds ?? access?.officialToolActionIds ?? [],
+      connectionGrants: [
+        ...(access?.connectionGrants ?? []),
+        ...legacyConnectionGrantsFromActionIds(access?.officialToolActionIds ?? []),
+      ],
       locale: access?.locale,
       token,
       createdAt: new Date().toISOString(),
@@ -477,8 +559,10 @@ export class ForgerMcpServer {
     const allowedOfficialActions = session.caller === 'app-agent'
       ? await this.options.listOfficialToolActionIdsForApp(session.appId)
       : session.caller === 'personal-agent' || session.caller === 'workflow'
-        ? new Set(session.officialToolActionIds)
+        ? new Set(session.forgerToolActionIds)
         : null;
+    const connectionGrants = await this.getEffectiveConnectionGrants(session);
+    const allowedConnectionActions = new Set(connectionGrants.flatMap((grant) => grant.actions));
     const tools = this.getAllToolDefinitions().filter((tool) => {
       if (tool.id === 'forger_add_app_to_personal_agent' && session.caller !== 'personal-agent') {
         return false;
@@ -488,6 +572,9 @@ export class ForgerMcpServer {
       }
       if (WORKFLOW_MANAGEMENT_TOOL_IDS.has(tool.id) && (session.caller === 'workflow' || session.caller === 'app-agent')) {
         return false;
+      }
+      if (isConnectionAction(tool.id)) {
+        return allowedConnectionActions.has(tool.id);
       }
       if (!isOfficialTool(tool.id)) {
         return true;
@@ -749,7 +836,7 @@ export class ForgerMcpServer {
     });
 
     if (isOfficialTool(toolId)) {
-      if ((session.caller === 'personal-agent' || session.caller === 'workflow') && !session.officialToolActionIds.includes(toolId)) {
+      if ((session.caller === 'personal-agent' || session.caller === 'workflow') && !session.forgerToolActionIds.includes(toolId)) {
         const result = {
           success: false,
           userMessage: getSharedCopy(session.locale).tools.unavailable,
@@ -769,8 +856,27 @@ export class ForgerMcpServer {
       }
     }
 
+    if (isConnectionAction(toolId)) {
+      const grants = await this.getEffectiveConnectionGrants(session);
+      if (!connectionActionGranted(grants, toolId)) {
+        const result = {
+          success: false,
+          userMessage: getSharedCopy(session.locale).tools.unavailable,
+          technicalCode: 'connection_action_not_granted',
+        };
+        await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
+        return result;
+      }
+    }
+
     if (toolId === 'forger_request_app_tool_grant') {
       const result = await this.executeAppToolGrantRequest(session, args);
+      await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
+      return result;
+    }
+
+    if (toolId === 'forger_request_connection_grant') {
+      const result = await this.executeConnectionGrantRequest(session, args);
       await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
       return result;
     }
@@ -801,6 +907,12 @@ export class ForgerMcpServer {
       runId: session.runId,
     });
     this.emitToolProgress(session, toolId, toolId === 'forger_restart_app' ? copy.restartPreparing : '');
+
+    if (isConnectionManagementTool(toolId)) {
+      const result = await this.executeConnectionManagementTool(session, toolId, args);
+      await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
+      return withToolAuthorization(result, approval);
+    }
 
     if (toolId === 'forger_list_catalog') {
       const apps = await this.options.listCatalog();
@@ -1021,6 +1133,17 @@ export class ForgerMcpServer {
       const officialToolId = getOfficialToolIdForAction(toolId);
       const result = await this.options.callOfficialTool(
         { toolId: officialToolId, actionId: toolId, input: args },
+        { caller: session.caller, appId: session.appId, locale: session.locale },
+      );
+      await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
+      return withToolAuthorization(result, approval);
+    }
+
+    if (isConnectionAction(toolId)) {
+      const grants = await this.getEffectiveConnectionGrants(session);
+      const result = await this.options.callConnectionFromSession(
+        toConnectionCallInput(toolId, args),
+        grants,
         { caller: session.caller, appId: session.appId, locale: session.locale },
       );
       await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
@@ -1256,6 +1379,94 @@ export class ForgerMcpServer {
     }
   }
 
+  private async executeConnectionManagementTool(
+    session: AgentMcpSession,
+    toolId: AgentToolId,
+    args: Record<string, unknown>,
+  ): Promise<unknown> {
+    const grants = await this.getEffectiveConnectionGrants(session);
+    if (toolId === 'forger_connection_list') {
+      const state = await this.options.listConnectionsForSession(grants);
+      const type = cleanString(args.type);
+      if (!type) {
+        return { success: true, ...state };
+      }
+      return {
+        success: true,
+        types: state.types.filter((definition) => definition.type === type),
+        instances: state.instances.filter((instance) => instance.type === type),
+        grants: state.grants.filter((grant) => grant.type === type),
+      };
+    }
+    if (toolId === 'forger_connection_status') {
+      const type = cleanString(args.type);
+      if (!type) {
+        return { success: false, userMessage: 'Connection type is required.', technicalCode: 'connection_type_required' };
+      }
+      return await this.options.callConnectionFromSession(
+        {
+          type,
+          actionId: `${type}.connection.status`,
+          input: {},
+          ...(cleanString(args.connectionId) ? { connectionId: cleanString(args.connectionId) } : {}),
+        },
+        grants,
+        { caller: session.caller, appId: session.appId, locale: session.locale },
+      );
+    }
+    return { success: false, userMessage: getSharedCopy(session.locale).tools.unavailable, technicalCode: 'tool_not_found' };
+  }
+
+  private async executeConnectionGrantRequest(
+    session: AgentMcpSession,
+    args: Record<string, unknown>,
+  ): Promise<unknown> {
+    const appId = cleanString(args.appId) || session.appId;
+    const type = cleanString(args.type);
+    if (!appId || !type) {
+      return { success: false, appId, userMessage: 'Choose the app and connection type.', technicalCode: 'connection_grant_input_invalid' };
+    }
+    if (!this.options.setAppConnectionGrant) {
+      return { success: false, appId, userMessage: 'Connection grants are not available yet.', technicalCode: 'connection_grant_unavailable' };
+    }
+    if (session.caller === 'personal-agent' && !session.appIds.includes(appId)) {
+      return { success: false, appId, userMessage: getSharedCopy(session.locale).tools.unavailable, technicalCode: 'personal_agent_app_not_granted' };
+    }
+    const requestPermission = this.options.requestPermission(session.runId, {
+      pluginId: 'forger-app-connections',
+      permission: `optional_connection:${appId}:${type}`,
+      reason: cleanString(args.reason) || `Allow this app to use ${type}.`,
+      risk: 'medium',
+      resource: `Connection ${type}`,
+    });
+    if (!requestPermission) {
+      return { success: false, appId, userMessage: 'Could not show the connection approval prompt.', technicalCode: 'permission_unavailable' };
+    }
+    const approved = await requestPermission;
+    if (!approved) {
+      return { success: false, appId, userMessage: 'The connection was not allowed for this app.', technicalCode: approved === null ? 'permission_unavailable' : 'connection_grant_rejected' };
+    }
+    const connectionIds = Array.isArray(args.connectionIds)
+      ? args.connectionIds.map(cleanString).filter(Boolean)
+      : undefined;
+    const requirement = await this.options.setAppConnectionGrant({
+      appId,
+      type,
+      granted: true,
+      ...(connectionIds?.length ? { connectionIds } : {}),
+    });
+    return requirement
+      ? { success: true, appId, requirement, userMessage: 'The connection is allowed for this app.' }
+      : { success: false, appId, userMessage: 'This app did not declare that connection.', technicalCode: 'app_connection_not_declared' };
+  }
+
+  private async getEffectiveConnectionGrants(session: AgentMcpSession): Promise<ConnectionSessionGrant[]> {
+    if (session.caller === 'app-agent') {
+      return await this.options.listConnectionGrantsForApp(session.appId);
+    }
+    return dedupeConnectionGrants(session.connectionGrants);
+  }
+
   private emitToolProgress(session: AgentMcpSession, toolId: AgentToolId, message: string): void {
     if (!message.trim()) {
       return;
@@ -1268,294 +1479,3 @@ export class ForgerMcpServer {
     });
   }
 }
-
-const isMemoryTool = (toolId: AgentToolId): boolean => toolId.startsWith('memory_');
-
-const OFFICIAL_TOOL_ACTION_PREFIXES: Record<string, string> = {
-  'gmail.': 'gmail',
-  'forger_chrome_extension.': 'forger_chrome_extension',
-  'whatsapp.': 'whatsapp',
-  'slack.': 'slack',
-  'trello.': 'trello',
-};
-
-const isOfficialTool = (toolId: AgentToolId): boolean =>
-  Object.keys(OFFICIAL_TOOL_ACTION_PREFIXES).some((prefix) => toolId.startsWith(prefix));
-
-const getOfficialToolIdForAction = (toolId: AgentToolId): string => {
-  for (const [prefix, officialToolId] of Object.entries(OFFICIAL_TOOL_ACTION_PREFIXES)) {
-    if (toolId.startsWith(prefix)) {
-      return officialToolId;
-    }
-  }
-  return toolId;
-};
-
-const isInternalMcpTool = (toolId: AgentToolId): boolean =>
-  toolId === 'forger_ask_question' || toolId.startsWith('workflow_');
-
-const APP_SCOPED_TOOLS = new Set<AgentToolId>([
-  'forger_request_app_tool_grant',
-  'forger_list_app_prompts',
-  'forger_test_app_prompt',
-  'forger_update_app_prompt',
-  'forger_restore_app_prompt',
-  'forger_get_app_runtime_status',
-  'forger_open_app',
-  'forger_stop_app',
-  'forger_restart_app',
-  'forger_refresh_app_view',
-  'forger_update_app',
-  'forger_finish_social_app_install',
-  'forger_delete_quarantined_social_app',
-]);
-
-const isAppScopedTool = (toolId: AgentToolId): boolean => APP_SCOPED_TOOLS.has(toolId);
-
-const cleanString = (value: unknown): string => typeof value === 'string' ? value.trim() : '';
-
-const parseAppToolGrantRequestInput = (
-  args: Record<string, unknown>,
-): Pick<SetAppToolGrantInput, 'appId' | 'toolId'> | null => {
-  const appId = cleanString(args.appId);
-  const toolId = cleanString(args.toolId);
-  if (!appId || !toolId) {
-    return null;
-  }
-  return { appId, toolId };
-};
-
-const getAppToolGrantMcpCopy = (locale?: string) => {
-  const isEnglish = locale?.toLowerCase().startsWith('en');
-  return isEnglish
-    ? {
-      invalidInput: 'Choose the installed app and optional official tool to allow.',
-      alreadyGranted: 'This optional tool is already allowed for the app.',
-      requestTitle: (toolName: string) => `Forger wants to activate this optional tool in this app: ${toolName}`,
-      requestBody: (appName: string, toolName: string, reason: string) =>
-        `Forger quiere activar esta herramienta opcional en esta aplicación: permitir / no. App: ${appName}. Tool: ${toolName}.${reason ? ` Reason: ${reason}.` : ''}`,
-      waiting: (toolName: string) => `Waiting for permission to activate ${toolName} for this app...`,
-      approved: 'The optional tool was allowed for this app.',
-      rejected: 'The optional tool was not allowed for this app.',
-      approvalUnavailable: 'Could not show the optional tool approval prompt.',
-    }
-    : {
-      invalidInput: 'Elige la app instalada y la herramienta oficial opcional que quieres permitir.',
-      alreadyGranted: 'Esta herramienta opcional ya esta permitida para la app.',
-      requestTitle: (toolName: string) => `Forger quiere activar esta herramienta opcional en esta aplicación: ${toolName}`,
-      requestBody: (appName: string, toolName: string, reason: string) =>
-        `Forger quiere activar esta herramienta opcional en esta aplicación: permitir / no. App: ${appName}. Herramienta: ${toolName}.${reason ? ` Motivo: ${reason}.` : ''}`,
-      waiting: (toolName: string) => `Esperando permiso para activar ${toolName} en esta app...`,
-      approved: 'La herramienta opcional quedo permitida para esta app.',
-      rejected: 'La herramienta opcional no fue permitida para esta app.',
-      approvalUnavailable: 'No se pudo mostrar la aprobacion de herramienta opcional.',
-    };
-};
-
-const parseCreateLocalAppToolInput = (args: Record<string, unknown>): Required<Pick<CreateLocalAppInput, 'name' | 'description' | 'purpose'>> & Pick<CreateLocalAppInput, 'lookAndFeel'> | null => {
-  const name = cleanString(args.name);
-  const description = cleanString(args.description);
-  const purpose = cleanString(args.purpose);
-  const lookAndFeel = cleanString(args.lookAndFeel);
-  if (!name || !description || !purpose) {
-    return null;
-  }
-  return {
-    name,
-    description,
-    purpose,
-    ...(lookAndFeel ? { lookAndFeel } : {}),
-  };
-};
-
-const parseQuestionToolInput = (args: Record<string, unknown>): { questions: ChatQuestion[] } | null => {
-  if (!Array.isArray(args.questions) || args.questions.length < 1 || args.questions.length > 5) {
-    return null;
-  }
-
-  const questionIds = new Set<string>();
-  const questions: ChatQuestion[] = [];
-  for (const rawQuestion of args.questions) {
-    if (!isPlainRecord(rawQuestion)) {
-      return null;
-    }
-    const id = cleanString(rawQuestion.id);
-    const question = cleanString(rawQuestion.question);
-    if (!id || !question || questionIds.has(id) || !Array.isArray(rawQuestion.options) || rawQuestion.options.length < 2 || rawQuestion.options.length > 3) {
-      return null;
-    }
-    questionIds.add(id);
-    const optionIds = new Set<string>();
-    const options = [];
-    for (const rawOption of rawQuestion.options) {
-      if (!isPlainRecord(rawOption)) {
-        return null;
-      }
-      const optionId = cleanString(rawOption.id);
-      const label = cleanString(rawOption.label);
-      const description = cleanString(rawOption.description);
-      if (!optionId || !label || !description || optionIds.has(optionId)) {
-        return null;
-      }
-      optionIds.add(optionId);
-      options.push({ id: optionId, label, description });
-    }
-    questions.push({ id, question, options });
-  }
-  return { questions };
-};
-
-const parsePromptReviewKind = (value: unknown): 'promptTemplate' | 'agent' | 'agentPrompt' | null => {
-  if (value === 'promptTemplate' || value === 'agent' || value === 'agentPrompt') {
-    return value;
-  }
-  return null;
-};
-
-const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
-  Boolean(value && typeof value === 'object' && !Array.isArray(value));
-
-const parsePromptRuntimeOverride = (
-  args: Record<string, unknown>,
-): Pick<AppPromptReviewInput, 'runtime' | 'provider' | 'model' | 'effort' | 'reasoningEffort'> => {
-  const runtime = parseAgentRuntime(args.runtime);
-  const provider = parseAgentProvider(args.provider);
-  const model = typeof args.model === 'string' && args.model.trim() ? args.model.trim() : undefined;
-  const effort = parseAgentEffort(args.effort);
-  const reasoningEffort = parseCodexReasoningEffort(args.reasoningEffort);
-  return {
-    ...(runtime ? { runtime } : {}),
-    ...(provider ? { provider } : {}),
-    ...(model ? { model } : {}),
-    ...(effort ? { effort } : {}),
-    ...(reasoningEffort ? { reasoningEffort } : {}),
-  };
-};
-
-const parseAgentRuntime = (value: unknown): AgentRuntime | undefined => {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return undefined;
-  }
-  const record = value as Record<string, unknown>;
-  const provider = parseAgentProvider(record.provider);
-  const model = typeof record.model === 'string' && record.model.trim() ? record.model.trim() : undefined;
-  const effort = parseAgentEffort(record.effort);
-  if (!provider || !model || !effort) {
-    return undefined;
-  }
-  return { provider, model, effort };
-};
-
-const parseAgentProvider = (value: unknown): 'codex' | 'claude' | undefined =>
-  value === 'codex' || value === 'claude' ? value : undefined;
-
-const parseAgentEffort = (value: unknown): AgentRuntime['effort'] | undefined =>
-  value === 'none' || value === 'low' || value === 'medium' || value === 'high' || value === 'xhigh' || value === 'max'
-    ? value
-    : undefined;
-
-const parseCodexReasoningEffort = (value: unknown): AppPromptReviewInput['reasoningEffort'] | undefined =>
-  value === 'none' || value === 'low' || value === 'medium' || value === 'high' || value === 'xhigh'
-    ? value
-    : undefined;
-
-const memoryAccess = (session: AgentMcpSession): MemoryAccessInput => ({
-  // Workflow nodes get automation-like memory access: scoped to their apps.
-  caller: session.caller === 'workflow' ? 'automation' : session.caller,
-  appId: session.appId === 'forger' ? undefined : session.appId,
-  appIds: session.appIds,
-  runId: session.runId,
-});
-
-const memoryErrorMessage = (error: unknown, locale?: string): string => {
-  const copy = getSharedCopy(locale).agentTools;
-  const code = error instanceof Error ? error.message : 'memory_error';
-  if (code === 'memory_scope_forbidden') {
-    return copy.memoryScopeForbidden;
-  }
-  if (code === 'memory_text_required') {
-    return copy.memoryTextRequired;
-  }
-  if (code === 'memory_app_required') {
-    return copy.memoryAppRequired;
-  }
-  if (code === 'memory_not_found') {
-    return copy.memoryNotFound;
-  }
-  return copy.memoryOperationFailed;
-};
-
-const workflowMcpErrorMessage = (code: string): string => {
-  if (code === 'workflow_not_found') {
-    return 'No encontramos ese flujo.';
-  }
-  if (code === 'workflow_name_required') {
-    return 'El flujo necesita un nombre.';
-  }
-  if (code === 'workflow_nodes_required') {
-    return 'El flujo necesita al menos un nodo.';
-  }
-  if (code === 'workflow_graph_has_cycle') {
-    return 'Las conexiones del flujo forman un ciclo; un flujo debe avanzar siempre hacia adelante.';
-  }
-  if (code === 'workflow_too_many_nodes') {
-    return 'El flujo tiene demasiados nodos.';
-  }
-  if (code === 'workflow_edge_unknown_node' || code === 'workflow_edge_self_reference') {
-    return 'Alguna conexion del flujo referencia nodos invalidos.';
-  }
-  if (code === 'workflow_foreach_join_not_allowed') {
-    return 'Un paso no puede recibir conexiones de dos repeticiones (forEach) independientes; las repeticiones anidadas si estan permitidas.';
-  }
-  if (code === 'workflow_foreach_requires_upstream') {
-    return 'Un paso con forEach necesita un paso anterior que produzca la lista a iterar.';
-  }
-  if (code === 'workflow_node_id_required' || code === 'workflow_node_id_duplicated') {
-    return 'Cada nodo necesita un id unico.';
-  }
-  return 'No pudimos completar la operacion sobre el flujo.';
-};
-
-const getToolAppId = (session: AgentMcpSession, params: Record<string, unknown>): string => {
-  const appId = typeof params.appId === 'string' && params.appId.trim() ? params.appId.trim() : session.appId;
-  return appId;
-};
-
-const withToolAuthorization = (result: unknown, approval: ToolApprovalResult): unknown => {
-  if (!approval.required || !result || typeof result !== 'object' || Array.isArray(result)) {
-    return result;
-  }
-  return {
-    ...(result as Record<string, unknown>),
-    authorization: {
-      required: true,
-      status: approval.status,
-      userMessage: approval.userMessage,
-    },
-  };
-};
-
-const sendMcpJson = (response: ServerResponse, statusCode: number, payload: unknown): void => {
-  response.writeHead(statusCode, {
-    'content-type': 'application/json',
-    'cache-control': 'no-store',
-  });
-  response.end(JSON.stringify(payload));
-};
-
-const readRequestBody = async (request: IncomingMessage): Promise<string> => {
-  const chunks: Buffer[] = [];
-  for await (const chunk of request) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  }
-  return Buffer.concat(chunks).toString('utf8');
-};
-
-const getBearerToken = (request: IncomingMessage): string | null => {
-  const header = request.headers.authorization;
-  if (!header || Array.isArray(header)) {
-    return null;
-  }
-  const match = /^Bearer\s+(.+)$/i.exec(header.trim());
-  return match?.[1] ?? null;
-};

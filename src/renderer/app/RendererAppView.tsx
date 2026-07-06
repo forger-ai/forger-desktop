@@ -10,11 +10,12 @@ import { isOpenableError, isRetryableInstallError, isUpdateError } from '@render
 import { AppView } from '@renderer/views/AppView';
 import { AgentsView } from '@renderer/views/AgentsView';
 import { AutomationsView } from '@renderer/views/AutomationsView';
-import { WorkflowsView } from '@renderer/views/workflows/WorkflowsView';
+import { WorkflowsModule } from '@renderer/views/workflows/WorkflowsModule';
 import { BackupsView } from '@renderer/views/BackupsView';
 import { BackgroundTaskDetailView, BackgroundTasksListView, viewLabel } from '@renderer/views/BackgroundTasksView';
 import { CatalogView } from '@renderer/views/CatalogView';
 import { ChatView } from '@renderer/views/ChatView';
+import { ConnectionsView } from '@renderer/views/ConnectionsView';
 import { DataView } from '@renderer/views/DataView';
 import { DevicesView } from '@renderer/views/DevicesView';
 import { DocsView } from '@renderer/views/DocsView';
@@ -29,7 +30,7 @@ import { SecretsView } from '@renderer/views/SecretsView';
 import { ToolsView } from '@renderer/views/ToolsView';
 import { AGENT_PROVIDER_OPTIONS, ANTIGRAVITY_EFFORT_OPTIONS, ANTIGRAVITY_MODEL_OPTIONS, CHAT_BOT_PICTURE_OPTIONS, CLAUDE_EFFORT_OPTIONS, CLAUDE_MODEL_OPTIONS, CODEX_MODEL_OPTIONS, CODEX_REASONING_OPTIONS } from '@renderer/preferences';
 import { usageAnalytics } from '@renderer/usage-analytics';
-import { buildChatProviderOptions, getAntigravitySupportedEfforts } from '@shared/agent-runtime-registry';
+import { buildChatProviderOptions, getRuntimeSupportedEfforts, normalizeRuntimeEffortForModel } from '@shared/agent-runtime-registry';
 import { TourOverlay } from '@renderer/tour/TourOverlay';
 import { useForgerTour } from '@renderer/tour/useForgerTour';
 import { appExecutionTooltip } from '@renderer/app-execution-labels';
@@ -41,7 +42,6 @@ import type { RuntimeProviderControls } from '@renderer/runtime-provider-control
 interface RendererAppViewProps {
   controller: Record<string, any>;
 }
-
 function DesktopUpdateSummaryMarkdown({
   content,
   onOpenExternalUrl,
@@ -113,7 +113,6 @@ function DesktopUpdateSummaryMarkdown({
     </Box>
   );
 }
-
 const platformSupportsSystemAudioCapture = (): boolean =>
   typeof navigator !== 'undefined' && /Mac|Win|Linux/.test(navigator.platform);
 
@@ -168,7 +167,6 @@ const enumerateAudioRuntimeDevices = async (): Promise<AudioRuntimeDevices> => {
     }],
   };
 };
-
 const decodeAudioDataUrl = (audioDataBase64: string, mimeType: string): string => {
   const raw = atob(audioDataBase64);
   const bytes = new Uint8Array(raw.length);
@@ -244,6 +242,11 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     setBackgroundTasksDrawerOpen,
     backgroundTasksBackView,
     selectedBackgroundTaskId,
+    selectedWorkflowId,
+    openWorkflowDetail,
+    openWorkflowEditor,
+    backToWorkflowList,
+    selectedConnectionId, openConnectionDetail, backToConnectionsList,
     setBannerSeverity,
     setBannerMessage,
     handleForgerLogout,
@@ -456,13 +459,24 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     agentProviderConfigOpen,
   } = controller;
 
+  const selectedCodexRuntimeModel = activeConversation?.runtime?.provider === 'codex' ? activeConversation.runtime.model : selectedCodexModel;
+  const selectedCodexRuntimeEffort = activeConversation?.runtime?.provider === 'codex' ? activeConversation.runtime.effort as AgentEffort : selectedCodexReasoningEffort;
+  const codexEffortOptionsForModel = (model: string) => {
+    const supportedEfforts = getRuntimeSupportedEfforts('codex', model);
+    return CODEX_REASONING_OPTIONS.filter((option) => supportedEfforts.includes(option.value));
+  };
+  const selectedClaudeRuntimeModel = activeConversation?.runtime?.provider === 'claude' ? activeConversation.runtime.model : selectedClaudeModel;
+  const selectedClaudeRuntimeEffort = activeConversation?.runtime?.provider === 'claude' ? activeConversation.runtime.effort as AgentEffort : selectedClaudeEffort;
+  const claudeEffortOptionsForModel = (model: string) => {
+    const supportedEfforts = getRuntimeSupportedEfforts('claude', model);
+    return CLAUDE_EFFORT_OPTIONS.filter((option) => supportedEfforts.includes(option.value));
+  };
   const selectedAntigravityRuntimeModel = activeConversation?.runtime?.provider === 'antigravity' ? activeConversation.runtime.model : selectedAntigravityModel;
   const selectedAntigravityRuntimeEffort = activeConversation?.runtime?.provider === 'antigravity' ? activeConversation.runtime.effort as AgentEffort : selectedAntigravityEffort;
-  const antigravitySupportedEfforts = getAntigravitySupportedEfforts(selectedAntigravityRuntimeModel);
-  const antigravityEffortOptions = ANTIGRAVITY_EFFORT_OPTIONS.filter((option) => antigravitySupportedEfforts.includes(option.value));
-  const antigravityEffort = antigravitySupportedEfforts.includes(selectedAntigravityRuntimeEffort as AntigravityEffort)
-    ? selectedAntigravityRuntimeEffort
-    : ANTIGRAVITY_MODEL_OPTIONS.find((option) => option.realModelName === selectedAntigravityRuntimeModel)?.defaultEffort ?? antigravitySupportedEfforts[0] ?? 'medium';
+  const antigravityEffortOptionsForModel = (model: string) => {
+    const supportedEfforts = getRuntimeSupportedEfforts('antigravity', model);
+    return ANTIGRAVITY_EFFORT_OPTIONS.filter((option) => supportedEfforts.includes(option.value));
+  };
   const visibleProviderOptions = AGENT_PROVIDER_OPTIONS;
   const chatProviderOptions = buildChatProviderOptions({
     codexAuthenticated: codexAuthStatus.authenticated,
@@ -488,34 +502,42 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
   const runtimeProviderControls: RuntimeProviderControls = {
     codex: {
       modelOptions: CODEX_MODEL_OPTIONS.map((option) => ({ ...option, defaultEffort: option.defaultReasoningEffort })),
-      selectedModel: activeConversation?.runtime?.provider === 'codex' ? activeConversation.runtime.model : selectedCodexModel,
-      onSelectModel: setSelectedCodexModel,
-      effortOptions: CODEX_REASONING_OPTIONS,
-      selectedEffort: activeConversation?.runtime?.provider === 'codex' ? activeConversation.runtime.effort as AgentEffort : selectedCodexReasoningEffort,
+      selectedModel: selectedCodexRuntimeModel,
+      onSelectModel: (model) => {
+        setSelectedCodexModel(model);
+        setSelectedCodexReasoningEffort(normalizeRuntimeEffortForModel('codex', model, selectedCodexRuntimeEffort) as CodexReasoningEffort);
+      },
+      effortOptions: codexEffortOptionsForModel(selectedCodexRuntimeModel),
+      selectedEffort: normalizeRuntimeEffortForModel('codex', selectedCodexRuntimeModel, selectedCodexRuntimeEffort),
       onSelectEffort: (effort) => setSelectedCodexReasoningEffort(effort as CodexReasoningEffort),
+      effortOptionsForModel: codexEffortOptionsForModel,
+      normalizeEffortForModel: (model, effort) => normalizeRuntimeEffortForModel('codex', model, effort),
     },
     claude: {
       modelOptions: CLAUDE_MODEL_OPTIONS,
-      selectedModel: activeConversation?.runtime?.provider === 'claude' ? activeConversation.runtime.model : selectedClaudeModel,
-      onSelectModel: setSelectedClaudeModel,
-      effortOptions: CLAUDE_EFFORT_OPTIONS,
-      selectedEffort: activeConversation?.runtime?.provider === 'claude' ? activeConversation.runtime.effort as AgentEffort : selectedClaudeEffort,
+      selectedModel: selectedClaudeRuntimeModel,
+      onSelectModel: (model) => {
+        setSelectedClaudeModel(model);
+        setSelectedClaudeEffort(normalizeRuntimeEffortForModel('claude', model, selectedClaudeRuntimeEffort) as ClaudeEffort);
+      },
+      effortOptions: claudeEffortOptionsForModel(selectedClaudeRuntimeModel),
+      selectedEffort: normalizeRuntimeEffortForModel('claude', selectedClaudeRuntimeModel, selectedClaudeRuntimeEffort),
       onSelectEffort: (effort) => setSelectedClaudeEffort(effort as ClaudeEffort),
+      effortOptionsForModel: claudeEffortOptionsForModel,
+      normalizeEffortForModel: (model, effort) => normalizeRuntimeEffortForModel('claude', model, effort),
     },
     antigravity: {
       modelOptions: ANTIGRAVITY_MODEL_OPTIONS,
       selectedModel: selectedAntigravityRuntimeModel,
       onSelectModel: (model) => {
-        const supportedEfforts = getAntigravitySupportedEfforts(model);
-        const option = ANTIGRAVITY_MODEL_OPTIONS.find((entry) => entry.realModelName === model);
         setSelectedAntigravityModel(model);
-        setSelectedAntigravityEffort(supportedEfforts.includes(selectedAntigravityRuntimeEffort as AntigravityEffort)
-          ? selectedAntigravityRuntimeEffort as AntigravityEffort
-          : option?.defaultEffort ?? supportedEfforts[0] ?? 'medium');
+        setSelectedAntigravityEffort(normalizeRuntimeEffortForModel('antigravity', model, selectedAntigravityRuntimeEffort) as AntigravityEffort);
       },
-      effortOptions: antigravityEffortOptions,
-      selectedEffort: antigravityEffort,
+      effortOptions: antigravityEffortOptionsForModel(selectedAntigravityRuntimeModel),
+      selectedEffort: normalizeRuntimeEffortForModel('antigravity', selectedAntigravityRuntimeModel, selectedAntigravityRuntimeEffort),
       onSelectEffort: setSelectedAntigravityEffort,
+      effortOptionsForModel: antigravityEffortOptionsForModel,
+      normalizeEffortForModel: (model, effort) => normalizeRuntimeEffortForModel('antigravity', model, effort),
     },
   };
 
@@ -590,7 +612,6 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     socialChatWindowRoute,
     selectedToolsTool,
     setSelectedToolsTool,
-    officialTools,
     codexAuthStatus,
     claudeAuthStatus,
     antigravityAuthStatus,
@@ -1236,8 +1257,17 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
           />)
         ) : null}
 
-        {currentView === 'workflows' ? (
-          renderAdvancedView('workflows', <WorkflowsView t={t} />)
+        {currentView === 'workflows' || currentView === 'workflowEditor' || currentView === 'workflowDetail' ? (
+          <WorkflowsModule
+            t={t}
+            view={currentView}
+            selectedWorkflowId={selectedWorkflowId}
+            isPinned={pinnedViews.includes('workflows')}
+            onBackToMore={() => setCurrentView('more')}
+            onOpenList={backToWorkflowList}
+            onOpenDetail={openWorkflowDetail}
+            onOpenEditor={openWorkflowEditor}
+          />
         ) : null}
 
         {currentView === 'backgroundTasks' ? (
@@ -1320,6 +1350,10 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
           />)
         ) : null}
 
+        {currentView === 'connections' ? renderAdvancedView('connections', <ConnectionsView t={t} view="list" selectedConnectionId={null} settings={agentToolSettings} busyToolId={agentToolBusyId} onOpenConnection={openConnectionDetail} onNotice={({ severity, message }) => { setBannerSeverity(severity); setBannerMessage(message); }} onApprovalChange={(toolId, requiresApproval) => void handleAgentToolApprovalChange(toolId, requiresApproval)} />) : null}
+
+        {currentView === 'connectionDetail' ? renderAdvancedView('connections', <ConnectionsView t={t} view="detail" selectedConnectionId={selectedConnectionId} settings={agentToolSettings} busyToolId={agentToolBusyId} onOpenConnection={openConnectionDetail} onBack={backToConnectionsList} onNotice={({ severity, message }) => { setBannerSeverity(severity); setBannerMessage(message); }} onApprovalChange={(toolId, requiresApproval) => void handleAgentToolApprovalChange(toolId, requiresApproval)} />) : null}
+
         {currentView === 'tools' ? (
           renderAdvancedView('tools', <ToolsView
             packages={agentToolPackages}
@@ -1332,9 +1366,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             errorTechnicalCode={agentToolErrorCode}
             t={t}
             onSelectedToolChange={setSelectedToolsTool}
-            onApprovalChange={(toolId, requiresApproval) =>
-              void handleAgentToolApprovalChange(toolId, requiresApproval)
-            }
+            onApprovalChange={(toolId, requiresApproval) => void handleAgentToolApprovalChange(toolId, requiresApproval)}
             onActivateOfficialTool={(toolId) =>
               void runOfficialToolAction(toolId, () => getDesktopApi().activateOfficialTool(toolId, activeLocale))
             }
@@ -1366,6 +1398,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             onDeactivateOfficialTool={(toolId) =>
               void runOfficialToolAction(toolId, () => getDesktopApi().deactivateOfficialTool(toolId, activeLocale))
             }
+            onOpenConnections={() => setCurrentView('connections')}
           />)
         ) : null}
 
@@ -1541,15 +1574,9 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
           </Stack>
         </DialogContent>
         <DialogActions>
-          <Button onClick={closeSocialInstallReviewDialog} disabled={Boolean(socialInstallReviewDialog?.busy)}>
-            {t.actions.cancel}
-          </Button>
-          <Button onClick={() => void handleSocialInstallReviewDecision('skipped_review')} disabled={Boolean(socialInstallReviewDialog?.busy)}>
-            {t.social.installWithoutReviewAction}
-          </Button>
-          <Button variant="contained" onClick={() => void handleSocialInstallReviewDecision('reviewed')} disabled={Boolean(socialInstallReviewDialog?.busy)}>
-            {t.social.reviewWithAiAction}
-          </Button>
+          <Button onClick={closeSocialInstallReviewDialog} disabled={Boolean(socialInstallReviewDialog?.busy)}>{t.actions.cancel}</Button>
+          <Button onClick={() => void handleSocialInstallReviewDecision('skipped_review')} disabled={Boolean(socialInstallReviewDialog?.busy)}>{t.social.installWithoutReviewAction}</Button>
+          <Button variant="contained" onClick={() => void handleSocialInstallReviewDecision('reviewed')} disabled={Boolean(socialInstallReviewDialog?.busy)}>{t.social.reviewWithAiAction}</Button>
         </DialogActions>
       </Dialog>
       <Dialog open={forumPromptOpen} onClose={() => void handleDismissForumPrompt()} maxWidth="xs" fullWidth>
@@ -1560,26 +1587,14 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
           </Stack>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => void handleDismissForumPrompt()} disabled={forumParticipationBusy}>
-            {t.settings.forumPromptLater}
-          </Button>
-          <Button variant="contained" onClick={() => void handleEnterForum()} disabled={forumParticipationBusy}>
-            {t.settings.forumPromptEnter}
-          </Button>
+          <Button onClick={() => void handleDismissForumPrompt()} disabled={forumParticipationBusy}>{t.settings.forumPromptLater}</Button>
+          <Button variant="contained" onClick={() => void handleEnterForum()} disabled={forumParticipationBusy}>{t.settings.forumPromptEnter}</Button>
         </DialogActions>
       </Dialog>
-      <LocalNetworkShareDialog
-        appName={localNetworkShareStatus ? getAppMeta(localNetworkShareStatus.appId).name : ''}
-        open={localNetworkShareDialogOpen}
-        status={localNetworkShareStatus}
-        t={t}
-        onClose={() => setLocalNetworkShareDialogOpen(false)}
-        onStop={() => void handleStopLocalNetworkShare()}
-        onCopied={() => {
+      <LocalNetworkShareDialog appName={localNetworkShareStatus ? getAppMeta(localNetworkShareStatus.appId).name : ''} open={localNetworkShareDialogOpen} status={localNetworkShareStatus} t={t} onClose={() => setLocalNetworkShareDialogOpen(false)} onStop={() => void handleStopLocalNetworkShare()} onCopied={() => {
           setBannerSeverity('success');
           setBannerMessage(t.localNetwork.copied);
-        }}
-      />
+        }} />
     </ThemeProvider>
   );
 }
