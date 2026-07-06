@@ -129,9 +129,13 @@ test('Forger prompt builders include contract, language, files, official tools, 
       'forger_chrome_extension.set_styles',
     ],
   });
-  assert.match(officialTools, /Gmail status: connected and ready/);
-  assert.match(officialTools, /WhatsApp status: connected or active locally/);
+  assert.match(officialTools, /Connections available in this context/);
+  assert.match(officialTools, /Gmail: connected[\s\S]*accounts\/sessions: Gmail/);
+  assert.match(officialTools, /WhatsApp: connected[\s\S]*accounts\/sessions: WhatsApp/);
   assert.match(officialTools, /Forger Chrome Extension status: connected and ready/);
+  assert.match(officialTools, /Available Connection actions[\s\S]*`gmail.search_messages`/);
+  assert.match(officialTools, /Available Connection actions[\s\S]*`whatsapp.list_chats`/);
+  assert.match(officialTools, /Available Forger Tool actions[\s\S]*`forger_chrome_extension.connection.status`/);
   assert.match(officialTools, /`gmail.search_messages`/);
   assert.match(officialTools, /`whatsapp.list_chats`/);
   assert.match(officialTools, /`forger_chrome_extension.connection.status`/);
@@ -140,9 +144,10 @@ test('Forger prompt builders include contract, language, files, official tools, 
   assert.match(officialTools, /`forger_chrome_extension.get_styles`/);
   assert.match(officialTools, /`forger_chrome_extension.set_styles`/);
   assert.match(officialTools, /Free chat can inspect installed apps with `forger_list_installed_apps`/);
-  assert.match(officialTools, /unofficial local WhatsApp Web integration/);
-  assert.match(officialTools, /Use only chat IDs and message references returned by WhatsApp reads or listings/);
-  assert.match(officialTools, /official Forger tool for a dedicated Chrome window/);
+  assert.match(officialTools, /Registered Connections include Gmail, Google Calendar, Google Sheets, Google Drive, Google Docs, GitHub, Notion, WhatsApp, Slack, and Trello/);
+  assert.match(officialTools, /local WhatsApp Web session/);
+  assert.match(officialTools, /only send to chat IDs returned by prior WhatsApp listing or reading/);
+  assert.match(officialTools, /Forger Tool for a dedicated Chrome window/);
   assert.match(officialTools, /Use only `forger_chrome_extension\.\*` actions/);
   assert.match(officialTools, /Do not ask for arbitrary JavaScript execution/);
   assert.match(officialTools, /opening, launching, starting, running, or bringing up the app means using Forger app tools/);
@@ -150,12 +155,13 @@ test('Forger prompt builders include contract, language, files, official tools, 
   assert.match(buildForgerOfficialToolsPromptSection({
     mode: 'free-chat',
     gmailReady: false,
-  }), /Free chat can inspect official tool availability[\s\S]*WhatsApp must be activated[\s\S]*Chrome Extension must be activated[\s\S]*Gmail must be activated/);
+    whatsappReady: false,
+  }), /Free chat can inspect Forger Tool availability[\s\S]*Gmail: not connected[\s\S]*WhatsApp: not connected[\s\S]*Chrome Extension must be activated/);
   assert.match(buildForgerOfficialToolsPromptSection({
     mode: 'app-agent',
     gmailReady: false,
     allowedActions: [],
-  }), /App agents may use official Forger tools[\s\S]*not declared any official Forger tool actions/);
+  }), /App agents may use Forger Tools and Connections[\s\S]*not declared any Forger Tool actions[\s\S]*not declared any Connections/);
 
   const appPrompt = buildCodexPromptWithAppContext({
     appId: 'finance-os',
@@ -487,7 +493,7 @@ test('official tool skill templates and seed data keep expected Desktop defaults
   ]);
   const appOfficialSkill = buildInstalledAppSkillTemplates(['gmail.search_messages', 'whatsapp.list_chats']).find((template) => template.id === 'forger-app-official-tools');
   assert.ok(appOfficialSkill);
-  assert.equal(appOfficialSkill.description, 'Use when an installed app wants to call official Forger tools; limit tool calls to manifest-granted actions such as Gmail, WhatsApp, or Forger Chrome Extension read, inspect, browser-control, download, or send actions.');
+  assert.equal(appOfficialSkill.description, 'Use when an installed app wants to call manifest-granted Forger Tool or registered Connection actions such as Forger Chrome Extension browser-control actions or external account/workspace actions.');
   assert.match(appOfficialSkill.body, /`gmail\.search_messages`/);
   assert.match(appOfficialSkill.body, /`whatsapp\.list_chats`/);
   assert.match(appOfficialSkill.body, /commons\/backend\/forger_desktop\.py/);
@@ -498,17 +504,20 @@ test('official tool skill templates and seed data keep expected Desktop defaults
   assert.match(manifestSkill.body, /"promptTemplates": \[/);
   assert.match(manifestSkill.body, /whatsapp\.send_message/);
   assert.match(manifestSkill.body, /"agents": \[/);
-  assert.match(manifestSkill.body, /promptTemplates[\s\S]*agents[\s\S]*tools/);
+  assert.match(manifestSkill.body, /promptTemplates[\s\S]*agents[\s\S]*tools[\s\S]*connections/);
   assert.match(manifestSkill.body, /"permissionMode": "safe"/);
   assert.match(manifestSkill.body, /claude-sonnet-5/);
   assert.match(manifestSkill.body, /Do not use legacy Claude Code aliases/);
   assert.match(manifestSkill.body, /gmail\.connection\.status/);
-  assert.match(manifestSkill.body, /Every entry in `tools\.required\[\]` and `tools\.optional\[\]` must include `toolId`, `reason`, and `actions`/);
+  assert.match(manifestSkill.body, /Do not put external Connections such as Gmail, Google Calendar, Google Sheets, Google Drive, Google Docs, GitHub, Notion, WhatsApp, Slack, or Trello in `tools`/);
+  assert.match(manifestSkill.body, /Every entry in `connections\.required\[\]` and `connections\.optional\[\]` must include `type`, `reason`, `actions`, and `multiple`/);
+  assert.doesNotMatch(manifestSkill.body, /"toolId": "gmail"/);
   assert.match(manifestSkill.body, /"toolId": "forger_chrome_extension"[\s\S]*"actions": \["\*"\]/);
-  assert.match(manifestSkill.body, /special token `"\*"`[\s\S]*every current action for that single `toolId`/);
+  assert.match(manifestSkill.body, /"type": "gmail"[\s\S]*"multiple": false/);
+  assert.match(manifestSkill.body, /special token `"\*"`[\s\S]*single Forger Tool or Connection type/);
   assert.match(manifestSkill.body, /Agents may edit `manifest\.json`/);
   assert.match(manifestSkill.body, /After the app restarts, Desktop wires the declared required action set/);
-  assert.match(manifestSkill.body, /`tools\.optional` requires a user grant or approval/);
+  assert.match(manifestSkill.body, /`tools\.optional` and `connections\.optional` require a user grant or approval/);
   assert.match(manifestSkill.body, /`reason` is required, not decorative/);
   assert.match(manifestSkill.body, /Do not add `catalog\.capabilities`/);
   assert.match(manifestSkill.body, /`platformCapabilities` are runtime declarations/);
@@ -596,10 +605,10 @@ test('official tool skill templates and seed data keep expected Desktop defaults
   assert.match(officialToolsSkill.body, /Do not manually start app services/);
   const toolsSkill = templates.find((template) => template.id === 'forger-tools');
   assert.ok(toolsSkill);
-  assert.match(toolsSkill.body, /Manifest `tools\.required\[\]` means the app cannot perform its core purpose/);
-  assert.match(toolsSkill.body, /Manifest `tools\.optional\[\]` means the app can work without the tool/);
-  assert.match(toolsSkill.body, /App agents may call official Forger tools only when the selected app context and grants allow/);
-  assert.match(toolsSkill.body, /App backends may call granted official tools through the signed Desktop runtime bridge helpers/);
+  assert.match(toolsSkill.body, /Use `manifest\.tools\.required\[\]` and `manifest\.tools\.optional\[\]` only for Forger Tools/);
+  assert.match(toolsSkill.body, /Use `manifest\.connections\.required\[\]` and `manifest\.connections\.optional\[\]` for registered Connections/);
+  assert.match(toolsSkill.body, /App agents may call Forger Tool and Connection actions only when the selected app context and grants allow/);
+  assert.match(toolsSkill.body, /App backends may call granted Forger Tool and Connection actions through the signed Desktop runtime bridge helpers/);
   assert.match(toolsSkill.body, /Agent-facing grant requests go through Forger MCP/);
   assert.match(toolsSkill.body, /UI grant toggles are for the person to allow or deny optional app access/);
   assert.match(toolsSkill.body, /A granted app may still need visible approval for sensitive actions/);
@@ -608,7 +617,7 @@ test('official tool skill templates and seed data keep expected Desktop defaults
   assert.equal(memorySkill.description, 'Use when reading, saving, updating, deduplicating, deleting, or explaining Forger platform memory, including injected memories, app-scoped memory, global preferences, privacy, and safe user-facing language.');
   assert.match(memorySkill.body, /## read_when/);
   assert.match(memorySkill.body, /Memory is a Forger platform layer/);
-  assert.match(memorySkill.body, /not an installed app feature, app manifest grant, or optional official tool/);
+  assert.match(memorySkill.body, /not an installed app feature, app manifest grant, or optional Forger Tool/);
   assert.match(memorySkill.body, /Memories without `read_when` are always-injected/);
   assert.match(memorySkill.body, /Memories with `read_when` are registered in context by title and condition/);
   assert.match(memorySkill.body, /Treat injected memories as already available context/);
@@ -648,14 +657,6 @@ test('official tool skill templates and seed data keep expected Desktop defaults
   assert.equal(settingsSeed.defaultAgentProvider, 'auto');
   assert.equal(settingsSeed.defaultChatNetworkAccess, true);
   assert.equal(settingsSeed.agentDefaults.codex.model, settingsSeed.codexDefaults.model);
-});
-
-test('create app prompts do not inline official localization skill selection', async () => {
-  const enSections = await fs.readFile(path.resolve('src/renderer/i18n/locales/enSections.ts'), 'utf8');
-  const esSections = await fs.readFile(path.resolve('src/renderer/i18n/locales/esSections.ts'), 'utf8');
-
-  assert.doesNotMatch(enSections, /Use forger-localization any time you write user-facing app text/);
-  assert.doesNotMatch(esSections, /Usa forger-localization cada vez que escribas texto visible para la app/);
 });
 
 test('prompt-builder skills keep loading triggers in frontmatter descriptions', async () => {

@@ -49,6 +49,7 @@ const createLifecycleHarness = (overrides = {}) => {
     chatOrchestrator: null,
     cloudDeviceManager: null,
     cloudIdentityStore: null,
+    connectionsService: null,
     desktopErrorReporter: {
       reportAppCodexConversationEvent: () => undefined,
       reportAppCodexTaskEvent: () => undefined,
@@ -89,6 +90,16 @@ const createLifecycleHarness = (overrides = {}) => {
     listAgentActionIdsForApp: async () => [],
     validateAgentCall: async () => ({}),
   }));
+  const ConnectionsService = createServiceClass('ConnectionsService', calls, () => ({
+    call: async () => ({}),
+    callFromApp: async () => ({}),
+    callFromSession: async () => ({}),
+    listConnectionsForApp: async () => ({ declarations: [], grants: [], instances: [] }),
+    listConnectionsForSession: async () => ({ types: [], instances: [] }),
+    listSessionGrantsForApp: async () => [],
+    listState: async () => ({ types: [], instances: [] }),
+    setAppConnectionGrant: async () => null,
+  }));
 
   const deps = {
     AGENT_TOOL_DEFINITIONS: [],
@@ -96,6 +107,7 @@ const createLifecycleHarness = (overrides = {}) => {
     AppAgentTaskManager: createServiceClass('AppAgentTaskManager', calls),
     AppMcpManager: createServiceClass('AppMcpManager', calls),
     AutomationManager: createServiceClass('AutomationManager', calls),
+    WorkflowManager: createServiceClass('WorkflowManager', calls),
     BrowserWindow: createStartupBrowserWindowClass(calls),
     ChatOrchestrator: createServiceClass('ChatOrchestrator', calls),
     CloudDeviceManager: createServiceClass('CloudDeviceManager', calls),
@@ -144,6 +156,7 @@ const createLifecycleHarness = (overrides = {}) => {
       calls.createdWindows += 1;
     },
     emitAutomationUpdated: () => undefined,
+    emitWorkflowUpdated: () => undefined,
     emitChatRunUpdated: () => undefined,
     ensureBackendPythonEnvironment: async () => undefined,
     ensureCatalogStatuses: () => undefined,
@@ -213,6 +226,14 @@ const createLifecycleHarness = (overrides = {}) => {
     }),
     getPersonalAgentHeartbeat: async () => ({ supported: true, count: 1, ids: ['agent-1'], agents: [{ id: 'agent-1', name: 'Research partner' }] }),
     getOfficialToolsService: () => new OfficialToolsService(),
+    getConnectionsService: () => new ConnectionsService(),
+    getSelfOAuthCallbackService: () => ({
+      callbackUrl: (callbackPath) => `http://127.0.0.1:1234${callbackPath}`,
+      getState: () => ({ baseUrl: 'http://127.0.0.1:1234', port: 1234, portChanged: false }),
+      registerFlow: () => () => undefined,
+      start: async () => undefined,
+      stop: async () => undefined,
+    }),
     getPrivateAppsRoot: () => '/forger/apps',
     getPrivateDataRoot: () => '/forger/data',
     getRuntimesRoot: () => '/runtimes',
@@ -625,21 +646,22 @@ test('main lifecycle service callbacks preserve fallbacks, permissions, and upda
       userMessage: 'No pudimos completar la tarea.',
     },
   });
-	  state.automationManager.options.onAutomationUpdated({
-	    automation: { id: 'auto-1', selectedAppIds: ['finance-os'] },
-	    run: { id: 'auto-run-1', status: 'failed', userMessage: 'Automation failed' },
-	  });
-	  state.automationManager.options.onAutomationUpdated({
-	    automation: { id: 'auto-2', selectedAppIds: ['finance-os'] },
-	    run: { id: 'auto-run-2', status: 'failed', error: 'Automation crashed', userMessage: 'Fallback message' },
-	  });
-	  state.automationManager.options.onAutomationUpdated({
-	    automation: { id: 'auto-3', selectedAppIds: ['finance-os'] },
-	    run: { id: 'auto-run-3', status: 'failed' },
-	  });
-	  assert.deepEqual(emittedRuns.map((event) => event.run.runId), ['run-failed']);
-	  assert.deepEqual(reports, [
-	    ['chat', {
+  state.automationManager.options.onAutomationUpdated({
+    automation: { id: 'auto-1', selectedAppIds: ['finance-os'] },
+    run: { id: 'auto-run-1', status: 'failed', userMessage: 'Automation failed' },
+    diagnosticTranscript: 'Automation transcript with OPENAI_API_KEY=secret',
+  });
+  state.automationManager.options.onAutomationUpdated({
+    automation: { id: 'auto-2', selectedAppIds: ['finance-os'] },
+    run: { id: 'auto-run-2', status: 'failed', error: 'Automation crashed', userMessage: 'Fallback message' },
+  });
+  state.automationManager.options.onAutomationUpdated({
+    automation: { id: 'auto-3', selectedAppIds: ['finance-os'] },
+    run: { id: 'auto-run-3', status: 'failed' },
+  });
+  assert.deepEqual(emittedRuns.map((event) => event.run.runId), ['run-failed']);
+  assert.deepEqual(reports, [
+    ['chat', {
       appId: 'finance-os',
       runId: 'run-failed',
       errorCode: 'runner_failed',
@@ -647,23 +669,24 @@ test('main lifecycle service callbacks preserve fallbacks, permissions, and upda
     }],
     ['automation', {
       automationId: 'auto-1',
-	      runId: 'auto-run-1',
-	      selectedAppIds: ['finance-os'],
-	      error: 'Automation failed',
-	    }],
-	    ['automation', {
-	      automationId: 'auto-2',
-	      runId: 'auto-run-2',
-	      selectedAppIds: ['finance-os'],
-	      error: 'Automation crashed',
-	    }],
-	    ['automation', {
-	      automationId: 'auto-3',
-	      runId: 'auto-run-3',
-	      selectedAppIds: ['finance-os'],
-	      error: 'automation_run_failed',
-	    }],
-	  ]);
+      runId: 'auto-run-1',
+      selectedAppIds: ['finance-os'],
+      error: 'Automation failed',
+      automationTranscript: 'Automation transcript with OPENAI_API_KEY=secret',
+    }],
+    ['automation', {
+      automationId: 'auto-2',
+      runId: 'auto-run-2',
+      selectedAppIds: ['finance-os'],
+      error: 'Automation crashed',
+    }],
+    ['automation', {
+      automationId: 'auto-3',
+      runId: 'auto-run-3',
+      selectedAppIds: ['finance-os'],
+      error: 'automation_run_failed',
+    }],
+  ]);
   assert.equal(runtimeEntries.length, 8);
   assert.deepEqual(await state.chatOrchestrator.options.getCodexEnvironment('finance-os'), {});
   assert.equal(await state.chatOrchestrator.options.getCodexAuthenticated(), true);
@@ -1040,6 +1063,7 @@ test('main lifecycle service option callbacks cover catalog, memory, tools, MCP 
   const progress = [];
   const { calls, deps, ready, state } = createLifecycleHarness({
     emitAutomationUpdated: (event) => emittedAutomation.push(event),
+    emitWorkflowUpdated: () => undefined,
     emitChatRunUpdated: (event) => emittedRuns.push(event),
     getMemoryStore: () => ({
       create: async (input, access) => {
@@ -1215,9 +1239,11 @@ test('main lifecycle service option callbacks cover catalog, memory, tools, MCP 
   state.automationManager.options.onAutomationUpdated({
     automation: { id: 'auto-1', selectedAppIds: ['finance-os'] },
     run: { id: 'auto-run-1', status: 'completed' },
+    diagnosticTranscript: 'internal transcript',
   });
   assert.deepEqual(emittedRuns.map((event) => event.run.runId), ['run-ok']);
   assert.deepEqual(emittedAutomation.map((event) => event.run.id), ['auto-run-1']);
+  assert.equal(emittedAutomation[0].diagnosticTranscript, undefined);
   assert.equal(reports.some(([kind]) => kind === 'chat' || kind === 'automation'), false);
 });
 

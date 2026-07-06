@@ -195,7 +195,8 @@ export class CodexCliAdapter {
     const command = await this.resolveCommand(input.cliPath, input.pathEntries);
     const args = [
       ...command.prefixArgs,
-      ...(mcpServers.length > 0 ? ['--ask-for-approval', 'never'] : []),
+      '--ask-for-approval',
+      'never',
       'exec',
       '--json',
       '--model',
@@ -262,7 +263,8 @@ export class CodexCliAdapter {
     const command = input.resolvedCommand ?? await this.resolveCommand(input.cliPath, input.pathEntries);
     const args = [
       ...command.prefixArgs,
-      ...(mcpServers.length > 0 ? ['--ask-for-approval', 'never'] : []),
+      '--ask-for-approval',
+      'never',
       'exec',
       '--json',
       '--model',

@@ -33,7 +33,6 @@ import type {
   AppSecretsState,
   AgentProvider,
   AgentRuntime,
-  AntigravityEffort,
   DeveloperPathState,
   ForgerAccountSession,
   InstallAppResult,
@@ -45,7 +44,6 @@ import { AppSecretsPanel } from '@renderer/components/AppSecretsDialog';
 import { AppViewActions } from './app-view/AppViewActions';
 import { PromptPreviewDialog, type PromptPreview } from './app-view/PromptPreviewDialog';
 import type { RuntimeProviderControls } from '@renderer/runtime-provider-controls';
-import { getAntigravitySupportedEfforts } from '@shared/agent-runtime-registry';
 
 interface AppViewProps {
   details: AppDetails | null;
@@ -568,12 +566,8 @@ export function AppView({
       : t.appView.promptSettingGlobal;
   const promptRuntimeControl = runtimeProviderControls[promptRuntimeDraft.provider];
   const promptModelOptions = promptRuntimeControl.modelOptions;
-  const promptEffortOptions = promptRuntimeDraft.provider === 'antigravity'
-    ? promptRuntimeControl.effortOptions.filter((option) => getAntigravitySupportedEfforts(promptRuntimeDraft.model).includes(option.value as AntigravityEffort))
-    : promptRuntimeControl.effortOptions;
-  const promptEffortValue = promptEffortOptions.some((option) => option.value === promptRuntimeDraft.effort)
-    ? promptRuntimeDraft.effort
-    : promptModelOptions.find((option) => option.realModelName === promptRuntimeDraft.model)?.defaultEffort ?? promptEffortOptions[0]?.value ?? 'medium';
+  const promptEffortOptions = promptRuntimeControl.effortOptionsForModel(promptRuntimeDraft.model);
+  const promptEffortValue = promptRuntimeControl.normalizeEffortForModel(promptRuntimeDraft.model, promptRuntimeDraft.effort);
   const promptsContent = (
     <Stack spacing={1.5}>
       <Stack spacing={0.5}>
@@ -693,7 +687,7 @@ export function AppView({
                     const provider = event.target.value as AgentProvider;
                     const controls = runtimeProviderControls[provider];
                     const nextModel = controls.modelOptions[0]?.realModelName ?? promptRuntimeDraft.model;
-                    const nextEffort = controls.modelOptions[0]?.defaultEffort ?? controls.effortOptions[0]?.value ?? 'medium';
+                    const nextEffort = controls.normalizeEffortForModel(nextModel, controls.modelOptions[0]?.defaultEffort ?? 'medium');
                     setPromptRuntimeDraft((current) => ({ provider, model: nextModel, effort: nextEffort, permissionMode: current.permissionMode }));
                   }}
                   helperText={runtimeEdited ? t.appView.promptSettingCustom : selectedPromptRuntimeSource}
@@ -713,7 +707,7 @@ export function AppView({
                   onChange={(event) => {
                     const model = event.target.value;
                     const option = promptModelOptions.find((entry) => entry.realModelName === model);
-                    setPromptRuntimeDraft((current) => ({ ...current, model, effort: option?.defaultEffort ?? current.effort }));
+                    setPromptRuntimeDraft((current) => ({ ...current, model, effort: promptRuntimeControl.normalizeEffortForModel(model, option?.defaultEffort ?? current.effort) }));
                   }}
                   helperText={t.appView.promptRuntimeHelper}
                   fullWidth

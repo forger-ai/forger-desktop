@@ -322,8 +322,8 @@ export function ChatView({
   const activeRuntimeControl = runtimeProviderControls[effectiveProvider];
   const activeModelOptions = activeRuntimeControl.modelOptions;
   const activeModelValue = activeRuntimeControl.selectedModel;
-  const activeEffortOptions = activeRuntimeControl.effortOptions;
-  const activeEffortValue = activeRuntimeControl.selectedEffort;
+  const activeEffortOptions = activeRuntimeControl.effortOptionsForModel(activeModelValue);
+  const activeEffortValue = activeRuntimeControl.normalizeEffortForModel(activeModelValue, activeRuntimeControl.selectedEffort);
   const shouldReserveMacTrafficLightSpace = isMacOs && !windowState?.isFullScreen;
   const historyGroups = useMemo<ConversationHistoryGroup[]>(() => {
     const createAppItems: ConversationHistoryItem[] = [];

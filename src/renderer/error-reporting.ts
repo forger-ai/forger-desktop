@@ -29,3 +29,14 @@ export const shouldPromptForErrorReport = (technicalCode?: string): boolean => {
   }
   return !EXPECTED_ERROR_CODES.has(technicalCode);
 };
+
+// Benign browser warnings that fire during normal layout work (for example
+// ResizeObserver notifications while dragging React Flow nodes). They carry
+// no actionable failure, so they never open the error report modal.
+const IGNORED_BROWSER_NOISE = [
+  'ResizeObserver loop completed with undelivered notifications',
+  'ResizeObserver loop limit exceeded',
+];
+
+export const isIgnoredBrowserNoise = (message?: string): boolean =>
+  typeof message === 'string' && IGNORED_BROWSER_NOISE.some((noise) => message.includes(noise));

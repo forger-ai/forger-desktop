@@ -15,12 +15,14 @@ export const es = {
     community: 'Comunidad',
     more: 'Más',
     automations: 'Automatizaciones',
+    workflows: 'Flujos',
     files: 'Archivos',
     backups: 'Respaldos',
     devices: 'Dispositivos',
     datos: 'Datos',
     secrets: 'Secretos',
-    tools: 'Herramientas',
+    connections: 'Conexiones',
+    tools: 'Herramientas Forger',
     docs: 'Docs',
     settings: 'Configuración',
   },
@@ -716,6 +718,14 @@ export const es = {
         title: 'Tus agentes',
         body: 'Los agentes son asistentes persistentes que configuras una vez y con los que puedes conversar cuando quieras. Dales acceso a tus apps y herramientas.',
       },
+      connections: {
+        title: 'Cuentas conectadas',
+        body: 'Conecta cuentas solo cuando las necesites. Forger puede usar servicios como Gmail, Google Calendar, Sheets, Drive, Docs, GitHub, Notion, WhatsApp, Slack o Trello desde agentes y flujos después de que tú permitas el acceso.',
+      },
+      workflows: {
+        title: 'Flujos repetibles',
+        body: 'Construye flujos repetibles con agentes, herramientas Forger, cuentas conectadas y condiciones. Enviar o cambiar datos puede pausar para pedir aprobación.',
+      },
       feedback: {
         title: 'Release experimental',
         body: 'Forger está en release experimental. Si tienes un problema, error o algo confuso, tu feedback nos ayuda a mejorarlo.',
@@ -732,8 +742,8 @@ export const es = {
     advanced: {
       views: {
         tools: {
-          title: 'Herramientas de agentes',
-          body: 'Tools controla qué capacidades puede usar el agente y cuándo debe pedir aprobación. Revisa cada paquete para entender qué acciones locales o conectadas están disponibles.',
+          title: 'Herramientas Forger',
+          body: 'Herramientas Forger controla capacidades propias de la plataforma que los agentes pueden usar y cuándo deben pedir aprobación.',
         },
         files: {
           title: 'Archivos compartidos con chat',
@@ -752,8 +762,8 @@ export const es = {
           body: 'Datos permite inspeccionar tablas locales de una app instalada. Es una vista avanzada para diagnosticar registros, validar imports y entender qué información guarda cada app.',
         },
         secrets: {
-          title: 'Credenciales y secretos',
-          body: 'Secrets guarda credenciales que una app o agente puede necesitar. Úsalo solo para datos sensibles que quieras administrar explícitamente desde Forger.',
+          title: 'Credenciales',
+          body: 'Credenciales guarda valores privados que una app o agente puede necesitar. Úsalo solo para valores que quieras administrar explícitamente desde Forger.',
         },
         automations: {
           title: 'Automatizaciones',
@@ -763,8 +773,8 @@ export const es = {
     },
     tools: {
       intro: {
-        title: 'Las herramientas permiten que el agente actúe por ti',
-        body: 'Tools reúne capacidades avanzadas que Forger puede usar cuando le pides al agente revisar apps, manejar estado local o trabajar con servicios conectados.',
+        title: 'Las herramientas Forger permiten que el agente actúe por ti',
+        body: 'Herramientas Forger reúne capacidades propias de la plataforma que Forger puede usar cuando le pides revisar apps, manejar estado local u operar apps instaladas.',
       },
       list: {
         title: 'Los paquetes de herramientas viven aquí',
@@ -778,17 +788,61 @@ export const es = {
         title: 'Las aprobaciones protegen acciones locales',
         body: 'Las consultas simples pueden ejecutarse directo. Cambios de apps, reinicios, actualizaciones y edición de prompts pueden pedir tu aprobación antes de actuar.',
       },
-      gmailRow: {
-        title: 'Gmail es una herramienta oficial',
-        body: 'Gmail permite buscar, leer, descargar adjuntos y enviar correos solo después de conectarlo.',
+    },
+    connections: {
+      list: {
+        title: 'Las conexiones viven separadas de las herramientas',
+        body: 'Las cuentas externas y sesiones de servicios viven aquí. Los agentes y flujos pueden usarlas solo después de que les des acceso.',
       },
-      gmailConnect: {
-        title: 'Conecta Gmail mediante Forger Cloud',
-        body: 'OAuth de Google necesita un intercambio seguro del lado servidor. Forger Cloud hace ese intercambio y los tokens de Gmail quedan guardados localmente en Desktop.',
+      add: {
+        title: 'Agrega una cuenta a la vez',
+        body: 'Usa Agregar conexión para conectar una cuenta, workspace o sesión de dispositivo sin mezclarla con herramientas propias de Forger.',
       },
-      gmailPermissions: {
-        title: 'Las acciones de Gmail son explícitas',
-        body: 'Leer correos, descargar adjuntos y enviar mensajes son acciones sensibles. Mantén la aprobación activa cuando quieras revisarlas primero.',
+      row: {
+        title: 'El estado se ve por servicio',
+        body: 'Cada fila muestra si hay cuentas conectadas, si falta configuración o si algo necesita atención.',
+      },
+      detail: {
+        title: 'Revisa cuentas y defaults',
+        body: 'El detalle muestra identidad de cuenta, selección por defecto, estado de conexión y acciones disponibles.',
+      },
+      usedBy: {
+        title: 'Revisa qué puede usarla',
+        body: 'Usada por muestra los agentes, apps y flujos que referencian esta conexión antes de desconectar una cuenta.',
+      },
+      approvals: {
+        title: 'Las acciones sensibles pueden pausar',
+        body: 'Leer datos privados, enviar mensajes o cambiar servicios externos puede requerir tu aprobación antes de ejecutarse.',
+      },
+    },
+    workflows: {
+      list: {
+        title: 'Los flujos son procesos repetibles',
+        body: 'Los flujos pueden ejecutarse manualmente o con agenda, y puedes revisar ejecuciones recientes antes de cambiarlos.',
+      },
+      addStep: {
+        title: 'Construye con pasos',
+        body: 'Un flujo puede combinar agentes de IA, agentes Forger, herramientas Forger, cuentas conectadas y condiciones.',
+      },
+      forgerTool: {
+        title: 'Los pasos de herramientas usan acciones de plataforma',
+        body: 'Usa pasos de herramienta Forger para acciones locales como abrir apps, revisar estado o administrar prompts de apps.',
+      },
+      connection: {
+        title: 'Los pasos de conexión usan cuentas conectadas',
+        body: 'Usa pasos de conexión cuando un flujo necesita Gmail, Google Calendar, Sheets, Drive, Docs, GitHub, Notion, WhatsApp, Slack, Trello u otro servicio conectado.',
+      },
+      mapping: {
+        title: 'Mapea salidas en pasos posteriores',
+        body: 'Los campos de pasos anteriores pueden llenar prompts y entradas de acciones para que el flujo transporte datos.',
+      },
+      approval: {
+        title: 'Pausa antes de trabajo riesgoso',
+        body: 'Activa aprobación en pasos que envían, cambian o exponen datos importantes.',
+      },
+      history: {
+        title: 'Inspecciona el historial de ejecuciones',
+        body: 'El historial permite revisar qué resultó bien, qué falló y qué paso necesita atención.',
       },
     },
   },
@@ -1065,13 +1119,15 @@ export const es = {
     storageBreakdownOtherDescription: 'Archivos cloud que no son respaldos ni aplicaciones subidas.',
     storageDiagnosticsExcluded: 'Los archivos de diagnóstico y reportes de error no cuentan para tu storage cloud.',
     advancedSurfaces: {
-      tools: 'Revisa y configura herramientas disponibles para agentes.',
+      connections: 'Conecta cuentas y servicios para agentes y flujos.',
+      tools: 'Revisa y configura herramientas propias de Forger disponibles para agentes.',
       files: 'Administra archivos compartidos con el chat de Forger.',
       backups: 'Crea, sincroniza, restaura y elimina respaldos de apps.',
       devices: 'Revisa dispositivos vinculados a Forger Cloud.',
       datos: 'Inspecciona tablas de bases locales de apps.',
       secrets: 'Guarda credenciales y conéctalas con apps.',
       automations: 'Programa tareas repetidas sobre apps o workspaces.',
+      workflows: 'Encadena agentes, herramientas Forger, conexiones y condiciones en flujos de trabajo.',
       docs: 'Consulta la documentación de Forger.',
     },
     resetOnboarding: 'Restablecer onboarding',

@@ -12,7 +12,7 @@ description: Use when reading, saving, updating, deduplicating, deleting, or exp
 
 ## Platform Contract
 
-- Memory is a Forger platform layer. It is not an installed app feature, app manifest grant, or optional official tool.
+- Memory is a Forger platform layer. It is not an installed app feature, app manifest grant, or optional Forger Tool.
 - Forger injects relevant memory context when available. Treat injected memories as already available context, not as a reason to call a tool again.
 - Memories without `read_when` are always-injected when their scope is available to the current run. Their body is already in context.
 - Memories with `read_when` are registered in context by title and condition. Read the body with `memory_list` only when the condition applies to the current task or when you need an id for update or delete.
@@ -35,7 +35,7 @@ description: Use when reading, saving, updating, deduplicating, deleting, or exp
 - Keep memory short, plain, and future-facing. Write what should guide future behavior, not a transcript of the conversation.
 - Save app-specific information with app scope and the relevant app id.
 - Save cross-Forger preferences with global scope when the current memory access allows a global write.
-- If the current memory access rejects a global write, explain the outcome in simple terms and do not retry through another connector or storage path.
+- If the current memory access rejects a global write, explain the outcome in simple terms and do not retry through another integration or storage path.
 - Do not save one-off instructions, temporary state, unresolved guesses, broad summaries, raw file contents, logs, or implementation details that are only useful for the current turn.
 
 ## Deduplication

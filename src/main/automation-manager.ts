@@ -26,6 +26,12 @@ import {
 import { renderPromptFile } from './prompt-builder';
 import type { LlmProviderAuthProfileResolver } from './llm-provider/types';
 
+interface AutomationManagerUpdateEvent {
+  automation: Automation;
+  run?: AutomationRunSummary;
+  diagnosticTranscript?: string;
+}
+
 interface AutomationManagerOptions {
   forgerHomeRoot: string;
   metadataRoot: string;
@@ -47,7 +53,7 @@ interface AutomationManagerOptions {
   buildMemoryContext?: (appIds: string[]) => Promise<string>;
   listenAppMcps?: (appIds: string[], runId: string) => Promise<LlmAutomationMcpServerConfig[]>;
   releaseAppMcps?: (runId: string) => void;
-  onAutomationUpdated: (event: { automation: Automation; run?: AutomationRunSummary }) => void;
+  onAutomationUpdated: (event: AutomationManagerUpdateEvent) => void;
 }
 
 const MAX_TIMEOUT_MS = 2_147_483_647;
@@ -408,7 +414,11 @@ export class AutomationManager {
         };
         this.automations.set(automationId, next);
         await this.saveAutomations();
-        this.options.onAutomationUpdated({ automation: next, run: next.lastRun });
+        this.options.onAutomationUpdated({
+          automation: next,
+          run: next.lastRun,
+          ...(run.status === 'failed' && run.transcript ? { diagnosticTranscript: run.transcript } : {}),
+        });
         await this.scheduleAutomation(automationId);
       }
     }
@@ -649,10 +659,10 @@ export class AutomationManager {
     await fs.writeFile(this.automationsFilePath(), JSON.stringify(this.sortedAutomations(), null, 2), 'utf8');
   }
 
-  private async writeRun(run: AutomationRun): Promise<void> {
+  private async writeRun(run: AutomationRun, options: { writeTranscript?: boolean } = {}): Promise<void> {
     await fs.mkdir(this.runsRoot(), { recursive: true });
     await fs.writeFile(this.runFilePath(run.id), JSON.stringify(run, null, 2), 'utf8');
-    if (run.transcript) {
+    if (options.writeTranscript !== false && run.transcript) {
       await fs.writeFile(this.runTranscriptPath(run.id), run.transcript, 'utf8');
     }
   }
@@ -672,7 +682,7 @@ export class AutomationManager {
       userMessage,
       userMessages,
     };
-    await this.writeRun(next);
+    await this.writeRun(next, { writeTranscript: false });
     await this.updateLastRun(automationId, toRunSummary(next));
   }
 

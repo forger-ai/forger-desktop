@@ -12,7 +12,7 @@ This app may be installed and operated through Forger, but this file is app cont
 
 - This generated `AGENTS.md` is a fallback context file used when the app does not ship its own app-owned `AGENTS.md`.
 - If the app later ships its own `AGENTS.md`, that file should own app-specific product and operational facts.
-- `manifest.json` describes installation, services, stack, prompt templates, app agents, official tool declarations, app secret declarations, scripts, and skills. It is not a complete list of visible app features.
+- `manifest.json` describes installation, services, stack, prompt templates, app agents, Forger Tool declarations, Connection declarations, app secret declarations, scripts, and skills. It is not a complete list of visible app features.
 - `.agents/skills` contains internal agent playbooks. Use relevant skills before doing work covered by them.
 - Review the real app files before claiming a capability exists.
 

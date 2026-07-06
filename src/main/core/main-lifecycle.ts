@@ -33,6 +33,7 @@ import type {
   CreateLocalAppResult,
   RuntimeStatus,
   AudioRuntimeDevices,
+  CallConnectionActionInput,
   CallOfficialToolInput,
   PersonalAgent,
 } from '../../shared/types';
@@ -49,6 +50,7 @@ import {
 } from './startup-loading';
 import { appAllowsAgentRuntimeControl, appAllowsAudioInput, appAllowsSpeechToText, appAllowsTextToSpeech, appAllowsWorkspaceFolders } from '../../shared/platform-capabilities';
 import type { LlmProviderAuthProfileResolver } from '../llm-provider/types';
+import type { SelfOAuthCallbackServiceLike } from '../oauth-callback/types';
 
 type ServiceConstructor<T = unknown> = new (...args: any[]) => T;
 type AsyncFn<T = unknown> = (...args: any[]) => Promise<T>;
@@ -69,6 +71,7 @@ type LlmRunsService = {
 type AutomationEventLike = {
   automation: { id: string; selectedAppIds: string[] };
   run?: { id: string; status?: string; error?: unknown; userMessage?: string };
+  diagnosticTranscript?: string;
 };
 type ForgerMcpToolFailure = { appId: string; runId: string; toolName?: unknown; error: unknown };
 type ForgerMcpHttpFailure = { error: unknown; appId?: string; runId?: string };
@@ -121,10 +124,12 @@ interface MainLifecycleState {
   appAgentTaskManager: LifecycleService | null;
   appMcpManager: LifecycleService | null;
   automationManager: LifecycleService | null;
+  workflowManager: LifecycleService | null;
   catalogApps: CatalogApp[];
   chatOrchestrator: ChatOrchestratorService | null;
   cloudDeviceManager: LifecycleService | null;
   cloudIdentityStore: LifecycleService | null;
+  connectionsService: LifecycleService | null;
   desktopErrorReporter: DesktopErrorReporter | null;
   desktopRuntimeBridge: LifecycleService | null;
   devCatalogService: LifecycleService | null;
@@ -142,6 +147,7 @@ interface MainLifecycleState {
   memoryMaintenanceManager: MemoryMaintenanceService | null;
   memoryStore: LifecycleService | null;
   officialToolsService: LifecycleService | null;
+  selfOAuthCallbackService: SelfOAuthCallbackServiceLike | null;
   speechToTextService: SpeechToTextServiceManager | null;
   textToSpeechService: TextToSpeechServiceManager | null;
   wakeWordService: WakeWordServiceManager | null;
@@ -157,6 +163,7 @@ export interface MainLifecycleDeps {
   AppAgentTaskManager: ServiceConstructor<LifecycleService>;
   AppMcpManager: ServiceConstructor<LifecycleService>;
   AutomationManager: ServiceConstructor<LifecycleService>;
+  WorkflowManager: ServiceConstructor<LifecycleService>;
   BrowserWindow: typeof BrowserWindow;
   ChatOrchestrator: ServiceConstructor<ChatOrchestratorService>;
   CloudDeviceManager: ServiceConstructor<LifecycleService>;
@@ -189,6 +196,7 @@ export interface MainLifecycleDeps {
   deleteQuarantinedSocialApp: (input: { quarantineId: string }, locale?: string) => Promise<BasicActionResult>;
   createWindow: () => Promise<void>;
   emitAutomationUpdated: (payload: { automation: unknown; run?: unknown }) => void;
+  emitWorkflowUpdated: (payload: { workflow: unknown; run?: unknown }) => void;
   emitChatRunUpdated: (event: any) => void;
   ensureBackendPythonEnvironment: AsyncFn<void>;
   ensureCatalogStatuses: () => void;
@@ -236,6 +244,8 @@ export interface MainLifecycleDeps {
     updateAgentPermissions: (input: { agentId: string; appIds?: string[] }) => Promise<PersonalAgent>;
   };
   getOfficialToolsService: () => NonNullable<MainLifecycleState['officialToolsService']>;
+  getConnectionsService: () => NonNullable<MainLifecycleState['connectionsService']>;
+  getSelfOAuthCallbackService: () => NonNullable<MainLifecycleState['selfOAuthCallbackService']>;
   getSpeechToTextService: () => NonNullable<MainLifecycleState['speechToTextService']>;
   getTextToSpeechService: () => NonNullable<MainLifecycleState['textToSpeechService']>;
   getWakeWordService: () => NonNullable<MainLifecycleState['wakeWordService']>;
@@ -320,6 +330,7 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
     AppAgentTaskManager,
     AppMcpManager,
     AutomationManager,
+    WorkflowManager,
     BrowserWindow,
     ChatOrchestrator,
     CloudDeviceManager,
@@ -352,6 +363,7 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
     deleteQuarantinedSocialApp,
     createWindow,
     emitAutomationUpdated,
+    emitWorkflowUpdated,
     emitChatRunUpdated,
     ensureBackendPythonEnvironment,
     ensureCatalogStatuses,
@@ -390,6 +402,8 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
     getPersonalAgentHeartbeat,
     getPersonalAgentStore,
     getOfficialToolsService,
+    getConnectionsService,
+    getSelfOAuthCallbackService,
     getSpeechToTextService,
     getTextToSpeechService,
     getWakeWordService,
@@ -505,6 +519,18 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
   });
   await startupLogger.step('startup:official_tools:load', async () => {
     await state.officialToolsService?.load();
+  });
+  await startupLogger.step('startup:self_oauth_callback:start', async () => {
+    state.selfOAuthCallbackService = getSelfOAuthCallbackService();
+    await state.selfOAuthCallbackService.start();
+  }).catch((error: unknown) => {
+    void appendInstallLog('self_oauth_callback:start_failed', serializeErrorForInstallLog(error));
+  });
+  await startupLogger.step('startup:connections:create', () => {
+    state.connectionsService = getConnectionsService();
+  });
+  await startupLogger.step('startup:connections:load', async () => {
+    await state.connectionsService?.load();
   });
   if (typeof state.officialToolsService?.startActiveTools === 'function') {
     await startupLogger.step('startup:official_tools:start_active', async () => {
@@ -823,6 +849,15 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
     restoreAppPrompt,
     previewAppToolGrant: async (input: unknown, locale?: string) => await getOfficialToolsService().previewOptionalAppToolGrant(input as { appId: string; toolId: string }, locale),
     setAppToolGrant: async (input: unknown, locale?: string) => await getOfficialToolsService().setOptionalAppToolGrant(input as { appId: string; toolId: string; granted: boolean }, locale),
+    listConnectionGrantsForApp: async (appId: string) => await getConnectionsService().listSessionGrantsForApp(appId),
+    listConnectionsForSession: async (grants: unknown) => await getConnectionsService().listConnectionsForSession(grants as never),
+    callConnectionFromSession: async (input: unknown, grants: unknown) => await getConnectionsService().callFromSession(input as never, grants as never),
+    setAppConnectionGrant: async (input: unknown) => await getConnectionsService().setAppConnectionGrant(input as {
+      appId: string;
+      type: string;
+      granted: boolean;
+      connectionIds?: string[];
+    }),
     memoryList: async (input: unknown, access: unknown) => await getMemoryStore().list(input, access),
     memoryCreate: async (input: unknown, access: unknown) => await getMemoryStore().create(input, access),
     memoryUpdate: async (input: unknown, access: unknown) => await getMemoryStore().update(input, access),
@@ -856,6 +891,27 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
         appInstallDir: record?.installDir,
         appAllowsSpeechToText: access.caller === 'app-agent' ? appAllowsSpeechToText(manifest?.platformCapabilities) : false,
       });
+    },
+    workflowGetNodeContext: (nodeRunKey: string) => state.workflowManager?.getNodeContext(nodeRunKey) ?? null,
+    workflowCompleteNode: (nodeRunKey: string, args: { output?: unknown; summary?: unknown }) =>
+      state.workflowManager?.completeNodeFromMcp(nodeRunKey, args)
+        ?? { success: false, technicalCode: 'workflow_manager_unavailable' },
+    workflowFailNode: (nodeRunKey: string, args: { reason?: unknown }) =>
+      state.workflowManager?.failNodeFromMcp(nodeRunKey, args)
+        ?? { success: false, technicalCode: 'workflow_manager_unavailable' },
+    workflowsList: () => state.workflowManager?.list() ?? [],
+    workflowsGet: (workflowId: string) => state.workflowManager?.get(workflowId) ?? null,
+    workflowsUpsert: async (input: unknown) => {
+      if (!state.workflowManager) {
+        throw new Error('workflow_manager_unavailable');
+      }
+      return await state.workflowManager.upsert(input);
+    },
+    workflowsRun: async (workflowId: string) => {
+      if (!state.workflowManager) {
+        throw new Error('workflow_manager_unavailable');
+      }
+      return await state.workflowManager.runNow(workflowId, 'chat');
     },
     onToolProgress: (input: { runId: string; message: string }) => state.chatOrchestrator?.appendExternalProgress(input.runId, input.message),
     onToolFailure: (input: ForgerMcpToolFailure) => state.desktopErrorReporter?.reportForgerMcpToolFailure(input),
@@ -1235,6 +1291,10 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
       listToolsForApp: async (appId: string) => await state.officialToolsService!.listToolsForApp(appId),
       callFromApp: async (appId: string, input: CallOfficialToolInput) => await state.officialToolsService!.callFromApp(appId, input),
     } : undefined,
+    connections: state.connectionsService ? {
+      listConnectionsForApp: async (appId: string) => await state.connectionsService!.listConnectionsForApp(appId),
+      callFromApp: async (appId: string, input: CallConnectionActionInput) => await state.connectionsService!.callFromApp(appId, input),
+    } : undefined,
     getAudioDevices,
     updateAudioInputDevices: async (devices: AudioRuntimeDevices) => {
       await getLiveVoiceInputService().updateDevices({
@@ -1324,14 +1384,80 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
           runId: event.run.id,
           selectedAppIds: event.automation.selectedAppIds,
           error: event.run.error ?? event.run.userMessage ?? 'automation_run_failed',
+          ...(event.diagnosticTranscript ? { automationTranscript: event.diagnosticTranscript } : {}),
         });
       }
-      emitAutomationUpdated(event as { automation: unknown; run?: unknown });
+      const { diagnosticTranscript: _diagnosticTranscript, ...publicEvent } = event;
+      emitAutomationUpdated(publicEvent as { automation: unknown; run?: unknown });
     },
   });
   });
   await startupLogger.step('startup:automation_manager:initialize', async () => {
     await state.automationManager?.initialize();
+  });
+  await startupLogger.step('startup:workflow_manager:create', () => {
+  state.workflowManager = new WorkflowManager({
+    forgerHomeRoot: getForgerHomeRoot(),
+    metadataRoot: getForgerMetadataRoot(),
+    codexHome: getCodexHome(),
+    providerProfilesRoot: getLlmProviderProfilesRoot(),
+    resolveAuthProfile: resolveLlmAuthProfile,
+    getAgentRuntime: chooseAgentRuntime,
+    getInstalledApps: () => Object.values(state.registry.apps).map(toAppSummary),
+    getCodexCliPath: async () => await resolveCodexCliPath(getCodexRoot()),
+    getClaudeCliPath: async () => (await resolveClaudeCli())?.path ?? null,
+    getAntigravityCliPath: async () => await (resolveAntigravityCliPath?.() ?? Promise.resolve(null)),
+    getCodexPathEntries: async () => await getAgentPathEntries(),
+    getAgentNetworkAccess: anyAppAllowsAgentNetworkAccess,
+    getCodexAuthenticated: async () => {
+      const status = await getCodexAuthStatus();
+      return status.authenticated;
+    },
+    getClaudeAuthenticated: getClaudeAuthenticatedForForger,
+    getAntigravityAuthenticated: async () => {
+      const status = await (getAntigravityAuthStatus?.() ?? Promise.resolve({ authenticated: false } as AntigravityAuthStatus));
+      return status.authenticated;
+    },
+    createForgerMcpSession: (
+      nodeRunKey: string,
+      appIds: string[],
+      forgerToolActionIds: string[],
+      connectionGrants: unknown[],
+    ) =>
+      state.forgerMcpServer?.createSession(nodeRunKey, 'forger', {
+        caller: 'workflow',
+        appIds,
+        forgerToolActionIds,
+        connectionGrants: connectionGrants as never,
+      }) ?? null,
+    releaseForgerMcpSession: (token: string) => state.forgerMcpServer?.releaseSession(token),
+    buildMemoryContext: buildMemoryContextForApps,
+    listenAppMcps: async (appIds: string[], listenerId: string) =>
+      await (state.appMcpManager?.listenMcps(appIds, listenerId) ?? Promise.resolve([])),
+    releaseAppMcps: (listenerId: string) => {
+      state.appMcpManager?.releaseMcps(listenerId);
+    },
+    getPersonalAgent: async (agentId: string) => {
+      try {
+        return await getPersonalAgentStore().requireAgent(agentId);
+      } catch {
+        return null;
+      }
+    },
+    callForgerToolAction: async (input: unknown) =>
+      await getOfficialToolsService().callFromAgent(input),
+    callConnectionAction: async (input: unknown) =>
+      await getConnectionsService().call(input as CallConnectionActionInput),
+    callConnectorAction: async (input: unknown) =>
+      await getOfficialToolsService().callFromAgent(input),
+    getValidToolIds: () => new Set(AGENT_TOOL_DEFINITIONS.map((tool) => tool.id)),
+    onWorkflowUpdated: (event: { workflow: unknown; run?: unknown }) => {
+      emitWorkflowUpdated(event);
+    },
+  });
+  });
+  await startupLogger.step('startup:workflow_manager:initialize', async () => {
+    await state.workflowManager?.initialize();
   });
   await startupLogger.step('startup:memory_maintenance_manager:create', () => {
   state.memoryMaintenanceManager = new MemoryMaintenanceManager({
@@ -1406,6 +1532,7 @@ let gracefulShutdownStarted = false;
 const performGracefulShutdown = async (): Promise<void> => {
   state.memoryMaintenanceManager?.dispose();
   state.automationManager?.dispose();
+  state.workflowManager?.dispose();
   state.appMcpManager?.dispose();
   await Promise.allSettled([
     state.localNetworkShareManager?.stopAll?.() ?? Promise.resolve(),
@@ -1414,6 +1541,8 @@ const performGracefulShutdown = async (): Promise<void> => {
   ]);
   await Promise.resolve(state.desktopRuntimeBridge?.stop());
   state.desktopRuntimeBridge = null;
+  await Promise.resolve(state.selfOAuthCallbackService?.stop());
+  state.selfOAuthCallbackService = null;
   await Promise.resolve(state.officialToolsService?.stopActiveTools?.());
   state.cloudDeviceManager?.stop();
   state.devCatalogService?.stop?.();

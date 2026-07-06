@@ -1,6 +1,6 @@
 {
   "name": "forger-desktop",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "private": true,
   "description": "Desktop launcher for Forger",
   "author": "Forger",
@@ -49,6 +49,7 @@
     "@types/better-sqlite3": "^7.6.13",
     "@types/qrcode": "^1.5.6",
     "@whiskeysockets/baileys": "^7.0.0-rc13",
+    "@xyflow/react": "^12.11.1",
     "better-sqlite3": "^12.9.0",
     "cross-spawn": "^7.0.6",
     "flag-icons": "^7.5.0",
@@ -59,6 +60,7 @@
     "react-dom": "^19.2.0",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
+    "simple-icons": "^16.25.0",
     "tslib": "^2.8.1",
     "ws": "^8.18.3",
     "yauzl": "^3.3.0",

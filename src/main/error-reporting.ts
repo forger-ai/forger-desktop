@@ -271,6 +271,7 @@ export class DesktopErrorReporter {
     runId: string;
     selectedAppIds: string[];
     error: unknown;
+    automationTranscript?: string;
   }): void {
     this.request({
       source: 'automation',
@@ -285,6 +286,7 @@ export class DesktopErrorReporter {
       },
       sensitiveDetails: {
         stack: input.error instanceof Error ? input.error.stack : undefined,
+        automationTranscript: input.automationTranscript,
       },
     });
   }

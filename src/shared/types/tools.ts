@@ -8,6 +8,9 @@ export type AgentToolId =
   | 'forger_create_app'
   | 'forger_add_app_to_personal_agent'
   | 'forger_request_app_tool_grant'
+  | 'forger_connection_list'
+  | 'forger_connection_status'
+  | 'forger_request_connection_grant'
   | 'forger_ask_question'
   | 'forger_list_app_prompts'
   | 'forger_test_app_prompt'
@@ -57,7 +60,23 @@ export type AgentToolId =
   | 'whatsapp.read_messages'
   | 'whatsapp.download_attachment'
   | 'whatsapp.send_message'
-  | 'whatsapp.get_chat_details';
+  | 'whatsapp.get_chat_details'
+  | 'workflow_get_context'
+  | 'workflow_complete_node'
+  | 'workflow_fail_node'
+  | 'forger_workflow_list'
+  | 'forger_workflow_get'
+  | 'forger_workflow_upsert'
+  | 'forger_workflow_run'
+  | 'slack.connection.status'
+  | 'slack.list_channels'
+  | 'slack.read_messages'
+  | 'slack.send_message'
+  | 'trello.connection.status'
+  | 'trello.list_boards'
+  | 'trello.list_lists'
+  | 'trello.list_cards'
+  | 'trello.create_card';
 
 export type AgentToolCategory = 'consulta' | 'app' | 'actualizacion' | 'vista' | 'memoria';
 
@@ -108,6 +127,8 @@ export interface OfficialToolActionDefinition {
   description: string;
   risk: OfficialToolRisk;
   inputSchema?: Record<string, unknown>;
+  /** Declared shape of the action result, used for workflow data mapping. */
+  outputSchema?: Record<string, unknown>;
 }
 
 export interface OfficialToolSecretDefinition {
@@ -115,6 +136,8 @@ export interface OfficialToolSecretDefinition {
   label: string;
   required: boolean;
   usage: string;
+  /** True when the user provides this secret manually (local token connectors). */
+  manual?: boolean;
 }
 
 export interface OfficialToolDefinition {
@@ -146,6 +169,11 @@ export interface OfficialToolSummary extends OfficialToolDefinition {
   installedVersion?: string;
   configured: boolean;
   error?: string;
+  /** True when the old tool row is now backed by the Connections domain. */
+  connectionBacked?: boolean;
+  /** UI hint: hide unconfigured legacy connection-backed tools from Forger Tools. */
+  hidden?: boolean;
+  connectionType?: string;
 }
 
 export interface OfficialToolsState {
@@ -200,6 +228,8 @@ export interface ToolMutationResult {
 export interface ConfigureOfficialToolInput {
   toolId: string;
   locale?: string;
+  /** Values for manual secrets declared by the tool, keyed by secret name. */
+  secrets?: Record<string, string>;
 }
 
 export interface CallOfficialToolInput {

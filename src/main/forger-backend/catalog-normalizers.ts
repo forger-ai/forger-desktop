@@ -8,6 +8,7 @@ import type {
   AppAgentPromptVariable,
   AppAgentPromptVariableType,
   AppCategory,
+  AppConnectionDeclaration,
   AppPromptTemplate,
   AppRatingSummary,
   AppStatus,
@@ -16,6 +17,7 @@ import type {
   CatalogPublicationStatus,
   CodexReasoningEffort,
 } from '../../shared/types';
+import { normalizeAppConnectionDeclarations } from '../connections/grants';
 
 const CODEX_REASONING_VALUES = new Set<CodexReasoningEffort>(['none', 'low', 'medium', 'high', 'xhigh']);
 
@@ -37,6 +39,7 @@ export interface PublicCatalogResponseItem {
   prompt_templates?: unknown;
   promptTemplates?: unknown;
   tools?: unknown;
+  connections?: unknown;
   platformCapabilities?: unknown;
   platform_capabilities?: unknown;
   latest_version?: CatalogVersionPayload;
@@ -70,6 +73,7 @@ export interface CatalogVersionPayload {
   prompt_templates?: unknown;
   promptTemplates?: unknown;
   tools?: unknown;
+  connections?: unknown;
   platformCapabilities?: unknown;
   platform_capabilities?: unknown;
 }
@@ -128,6 +132,7 @@ export const mapCatalogItem = (
     remoteTunnelSupported: latestVersion?.remoteTunnel === true
       || latestVersion?.remote_tunnel === true,
     tools: normalizeCatalogTools(latestVersion?.tools ?? appEntry.tools),
+    connections: normalizeCatalogConnections(latestVersion?.connections ?? appEntry.connections),
     agents: normalizeCatalogAgents(latestVersion?.agents ?? appEntry.agents),
     promptTemplates: normalizeCatalogPromptTemplates(
       latestVersion?.prompt_templates
@@ -144,6 +149,13 @@ export const mapCatalogItem = (
     socialUserAppId,
     socialOwnerUsername: ownerUsername,
   };
+};
+
+const normalizeCatalogConnections = (value: unknown): CatalogApp['connections'] | undefined => {
+  const normalized = normalizeAppConnectionDeclarations(value);
+  const required: AppConnectionDeclaration[] = normalized.required;
+  const optional: AppConnectionDeclaration[] = normalized.optional;
+  return required.length > 0 || optional.length > 0 ? { required, optional } : undefined;
 };
 
 const socialLocalAppId = (ownerUsername: string, slug: string): string => {

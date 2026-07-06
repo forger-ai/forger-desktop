@@ -33,7 +33,7 @@ The agent internally classifies each user request before acting. If a message co
 
 ## Platform Memory
 
-- Memory is a Desktop platform layer, not an app manifest capability and not an optional official tool.
+- Memory is a Desktop platform layer, not an app manifest capability and not an optional Forger Tool.
 - Desktop may inject relevant global or app-scoped memories into prompts before the current user message.
 - Treat injected memories as context that can guide defaults, wording, and workflow choices; verify current app state before making factual claims.
 - Save memory only for durable preferences, stable profile details, recurring workflow choices, constraints, and useful facts that should help future Forger work.
@@ -119,6 +119,30 @@ This playbook applies when Forger detects a new published version of an already 
 - When resolving with the agent, the agent preserves as much as possible from the new version and from the user's customizations.
 - If a part cannot be integrated maintainably, the agent leaves it out and communicates the functional impact.
 - When a resolution is complete, the agent finishes the merge and saves a new version.
+
+## Workflows
+
+Desktop includes a Flujos (Workflows) module. A workflow is a directed acyclic graph of nodes connected by edges; each node does one unit of work and hands a structured JSON output to the next nodes.
+
+Node types:
+
+- `llm_agent`: runs a one-shot agent with the configured provider (codex, claude, or antigravity), a prompt, enabled platform tools, and enabled apps. Enabling an app starts that app's MCP for the node run. The node prompt supports `{{nodes.<id>.output.<path>}}` and `{{trigger.<path>}}` templates resolved against upstream outputs.
+- `forger_agent`: runs a personal agent defined in Forger with that agent's own runtime, instructions, app grants, and tool grants.
+- `forger_tool`: executes one Forger Tool action deterministically without an LLM, with template-resolved JSON input.
+- `connection`: executes one Connection action deterministically without an LLM, with a connection type, optional connection instance, and template-resolved JSON input.
+- `condition`: evaluates an expression over upstream outputs and produces `{ result: boolean }`.
+
+Every node except workflow roots accepts an optional `forEach` reference to a list produced by a previous node: the node runs once per item (sequentially, capped at 100), iteration templates use `{{item.<field>}}` and `{{itemIndex}}`, agent iterations receive the current item in their input context, and the node output becomes `{ items: [...results], count }`. Condition nodes iterating a list also aggregate a top-level `result` that is true only when every item passed, so their branching edges keep working. Iteration stops at the first failing item. A node cannot receive edges from two independent forEach nodes (their iterations cannot be aligned); nested loops are allowed because the inner forEach node is downstream of the outer one.
+
+Edges carry a condition: `success`, `error`, or `always`. On condition nodes, `success` is the true branch and `error` the false branch. A failed node counts as handled when an outgoing `error` or `always` edge routes the failure; unhandled failures fail the run. Independent branches execute in parallel. Nodes marked `requiresApproval` pause the run in `waiting_approval` until the person approves or rejects the step from the Workflows view.
+
+Triggers are manual or scheduled with the same frequency and missed-run policies as automations. Runs persist per-node status, input, output, summary, and a transcript under the metadata root. A single node can also run in isolation as a step run: upstream context is seeded from the latest stored outputs, other nodes are recorded as skipped, and approval pauses are bypassed because the person triggers the step explicitly.
+
+Node inputs and outputs follow one contract: every node produces a JSON object, and every input field accepts a fixed value or a `{{nodes.<id>.output.<path>}}` reference. Forger Tool actions and Connection actions declare input schemas rendered as forms in the editor and output schemas used for downstream mapping; condition nodes always produce `{ result: boolean }`; agent nodes use their declared output schema or the `{ text: string }` fallback. The editor offers upstream fields for mapping from the declared schemas plus the sampled outputs of the latest run, and agent prompts render references as pills with an autocomplete that opens when the person types `{{`.
+
+Agent nodes report their result through Forger MCP tools available only inside workflow node sessions: `workflow_get_context`, `workflow_complete_node` (validates the node's declared output schema), and `workflow_fail_node`. If an agent finishes without reporting, Desktop falls back to the agent's final message as the node output. Chat and personal agents manage workflows through `forger_workflow_list`, `forger_workflow_get`, `forger_workflow_upsert`, and `forger_workflow_run`.
+
+Connections such as Gmail, WhatsApp, Slack, and Trello are managed from the Connections module. Account/session setup, status, safe labels, grants, defaults, and action execution are owned by Desktop Connections, not by workflow nodes. Workflow `connection` nodes reference a connection type, optional connection instance, and action id; they do not store account credentials or session material.
 
 ## Final-User Communication
 

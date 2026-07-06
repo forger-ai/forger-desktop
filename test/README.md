@@ -7,6 +7,23 @@ This directory starts the desktop automated test structure.
 - `contracts/`: fast `node:test` checks for shared contracts that should not drift.
 - `main/`: `node:test` integration tests for main-process services using temp directories and fake CLIs or servers.
 
+## Test Quality Rules
+
+Tests reproduce real use cases of the application and assert observable behavior: return values, persisted state, IPC responses, emitted events, and state transitions of compiled modules from `dist-electron`.
+
+Not allowed:
+
+- Regex or substring matching against TypeScript/TSX source files to assert implementation details.
+- Assertions that removed features stay absent (`doesNotMatch` on identifiers or copy deleted in a previous version).
+- Assertions on cosmetic arrangement, such as menu ordering or which MUI component renders a block.
+- Tests that pin exact third-party versions; assert the shape of the contract (for example, an exact-semver pin) instead of the value.
+
+Allowed contract checks that are not behavior tests:
+
+- Real configuration data: `package.json` build targets, entitlements, workflow artifact names.
+- Generic policy lints that scan all files uniformly (for example, no `@ts-nocheck` under `src/main`).
+- Architectural import boundaries (for example, execution surfaces must not import provider adapters directly).
+
 Run:
 
 ```sh

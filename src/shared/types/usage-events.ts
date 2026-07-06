@@ -11,6 +11,8 @@ export type UsageEventName =
   | 'onboarding_started'
   | 'onboarding_completed'
   | 'onboarding_skipped'
+  | 'onboarding_module_completed'
+  | 'onboarding_module_skipped'
   | 'catalog_viewed'
   | 'app_install_started'
   | 'app_install_succeeded'

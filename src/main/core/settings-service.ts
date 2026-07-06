@@ -35,6 +35,7 @@ import {
   normalizeAgentProviderPreference,
   normalizeAgentPermissionMode as normalizeSharedAgentPermissionMode,
   normalizeAntigravityModelAndEffort,
+  normalizeRuntimeEffortForModel,
   normalizeProvider,
   validateAgentRuntimeRequest,
 } from '../../shared/agent-runtime-registry';
@@ -645,10 +646,11 @@ const chooseAgentRuntime = async (requested?: AgentRuntimeRequest): Promise<Agen
     const recommended = requested?.recommendations?.claude;
     const fallbackModel = (profile?.defaultModel ?? defaults.claude.model) || agentProviderRegistry.claude.defaultModel;
     const fallbackEffort = profile?.defaultEffort ?? defaults.claude.effort;
+    const model = normalizeClaudeModel(requested?.model ?? recommended?.model, fallbackModel);
     return {
       provider,
-      model: normalizeClaudeModel(requested?.model ?? recommended?.model, fallbackModel),
-      effort: normalizeClaudeEffort(requested?.effort ?? recommended?.effort, fallbackEffort as ClaudeEffort),
+      model,
+      effort: normalizeRuntimeEffortForModel('claude', model, requested?.effort ?? recommended?.effort, fallbackEffort as ClaudeEffort),
       ...(authProfileId ? { authProfileId } : {}),
     };
   }
@@ -672,10 +674,11 @@ const chooseAgentRuntime = async (requested?: AgentRuntimeRequest): Promise<Agen
   const recommended = requested?.recommendations?.codex;
   const fallbackModel = (profile?.defaultModel ?? defaults.codex.model) || agentProviderRegistry.codex.defaultModel;
   const fallbackEffort = profile?.defaultEffort ?? defaults.codex.reasoningEffort;
+  const model = normalizeCodexModel(requested?.model ?? recommended?.model, fallbackModel);
   return {
     provider: 'codex',
-    model: normalizeCodexModel(requested?.model ?? recommended?.model, fallbackModel),
-    effort: normalizeCodexReasoningEffort(requested?.effort ?? recommended?.reasoningEffort, fallbackEffort as CodexReasoningEffort),
+    model,
+    effort: normalizeRuntimeEffortForModel('codex', model, requested?.effort ?? recommended?.reasoningEffort, fallbackEffort as CodexReasoningEffort),
     ...(authProfileId ? { authProfileId } : {}),
   };
 };

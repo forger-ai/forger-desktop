@@ -2,6 +2,7 @@ import type { AgentPermissionMode, AgentRuntime } from './agent-runtime';
 import type { FailureDiagnosticFields } from './base';
 import type { AgentToolId, OfficialToolSummary } from './tools';
 import type { AppSummary } from './catalog';
+import type { ConnectionActionDefinition, ConnectionInstance, ConnectionTypeDefinition } from './connections';
 
 export type PersonalAgentMessageRole = 'user' | 'assistant' | 'system';
 export type PersonalAgentMessageKind = 'message' | 'intermediate';
@@ -19,8 +20,16 @@ export interface PersonalAgent {
   runtime?: AgentRuntime;
   appIds: string[];
   toolIds: AgentToolId[];
+  connectionGrants: PersonalAgentConnectionGrant[];
   createdAt: string;
   updatedAt: string;
+}
+
+export interface PersonalAgentConnectionGrant {
+  type: string;
+  actions: string[];
+  multiple: boolean;
+  connectionIds?: string[];
 }
 
 export interface PersonalAgentCreateInput {
@@ -33,6 +42,7 @@ export interface PersonalAgentCreateInput {
   runtime?: AgentRuntime;
   appIds?: string[];
   toolIds?: AgentToolId[];
+  connectionGrants?: PersonalAgentConnectionGrant[];
 }
 
 export interface PersonalAgentDeleteInput {
@@ -46,6 +56,7 @@ export interface PersonalAgentUpdatePermissionsInput {
   runtime?: AgentRuntime;
   appIds?: string[];
   toolIds?: AgentToolId[];
+  connectionGrants?: PersonalAgentConnectionGrant[];
 }
 
 export interface PersonalAgentGrantOptionApp {
@@ -72,15 +83,27 @@ export interface PersonalAgentGrantOptionTool {
   actions: PersonalAgentGrantOptionToolAction[];
 }
 
+export interface PersonalAgentGrantOptionConnection {
+  type: string;
+  displayName: string;
+  description: string;
+  configured: boolean;
+  supportsMultiple: boolean;
+  definition: ConnectionTypeDefinition;
+  instances: ConnectionInstance[];
+  actions: ConnectionActionDefinition[];
+}
+
 export interface PersonalAgentGrantOptions {
   apps: PersonalAgentGrantOptionApp[];
   tools: PersonalAgentGrantOptionTool[];
+  connections: PersonalAgentGrantOptionConnection[];
 }
 
 export interface PersonalAgentPermission {
   id: string;
   agentId: string;
-  kind: 'legacy' | 'app' | 'tool';
+  kind: 'legacy' | 'app' | 'tool' | 'connection';
   targetId: string;
   permission: string;
   mode: AgentPermissionMode;

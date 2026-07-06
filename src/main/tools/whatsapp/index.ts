@@ -45,45 +45,108 @@ const definition: OfficialToolDefinition = {
       name: 'Conectar WhatsApp',
       description: 'Genera un QR o codigo para vincular WhatsApp como dispositivo local.',
       risk: 'high',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          method: {
+            type: 'string',
+            enum: ['qr', 'pairing_code'],
+            description: 'Metodo de vinculacion.',
+          },
+          phoneNumber: { type: 'string', description: 'Numero de telefono requerido para pairing code.' },
+        },
+        required: ['method'],
+      },
     },
     {
       id: 'whatsapp.list_chats',
       name: 'Listar chats',
       description: 'Lista chats de WhatsApp ya observados por Forger.',
       risk: 'low',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Filtro por nombre, numero o texto conocido.' },
+          chatType: {
+            type: 'string',
+            enum: ['direct', 'group', 'channel'],
+            description: 'Tipo de chat a listar.',
+          },
+          limit: { type: 'number', description: 'Maximo de chats a devolver.' },
+          cursor: { type: 'string', description: 'Cursor de paginacion.' },
+        },
+      },
     },
     {
       id: 'whatsapp.read_messages',
       name: 'Leer mensajes',
       description: 'Lee mensajes guardados de un chat observado e identifica si es directo, grupo o canal.',
       risk: 'high',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          chatId: { type: 'string', description: 'ID del chat observado.' },
+          limit: { type: 'number', description: 'Maximo de mensajes a leer.' },
+          beforeMessageRef: { type: 'string', description: 'Referencia de mensaje para paginar hacia atras.' },
+        },
+        required: ['chatId'],
+      },
     },
     {
       id: 'whatsapp.download_attachment',
       name: 'Descargar adjunto',
       description: 'Descarga bajo demanda un adjunto de WhatsApp previamente observado.',
       risk: 'high',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          attachmentId: { type: 'string', description: 'ID del adjunto observado.' },
+        },
+        required: ['attachmentId'],
+      },
     },
     {
       id: 'whatsapp.send_message',
       name: 'Enviar mensaje',
       description: 'Envia un mensaje a un chat de WhatsApp previamente observado.',
       risk: 'high',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          chatId: { type: 'string', description: 'ID del chat observado.' },
+          text: { type: 'string', description: 'Texto del mensaje.' },
+          replyToMessageRef: { type: 'string', description: 'Referencia opcional del mensaje a responder.' },
+        },
+        required: ['chatId', 'text'],
+      },
     },
     {
       id: 'whatsapp.get_chat_details',
       name: 'Ver detalle de chat',
       description: 'Obtiene detalles disponibles de un numero, grupo o canal de WhatsApp.',
       risk: 'high',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          chatId: { type: 'string', description: 'ID del chat observado.' },
+        },
+        required: ['chatId'],
+      },
     },
   ],
   changelog: ['Base experimental no oficial con Baileys para conexion local, lectura y envio controlado.'],
 };
 
-let manager: WhatsAppConnectionManager | null = null;
+const managers = new Map<string, WhatsAppConnectionManager>();
 
 const getManager = (context: InternalToolContext): WhatsAppConnectionManager => {
-  manager ??= createWhatsAppConnectionManager(context);
+  const key = context.metadataRoot;
+  const existing = managers.get(key);
+  if (existing) {
+    return existing;
+  }
+  const manager = createWhatsAppConnectionManager(context);
+  managers.set(key, manager);
   return manager;
 };
 
@@ -170,8 +233,10 @@ export const whatsappToolModule: InternalToolModule = {
     await getManager(context).stopListening();
   },
   deactivate: async (context) => {
+    const key = context.metadataRoot;
+    const manager = managers.get(key);
     await manager?.disconnect(context);
-    manager = null;
+    managers.delete(key);
   },
 };
 
@@ -261,5 +326,5 @@ const parseDownloadAttachmentInput = (input: unknown): WhatsAppDownloadAttachmen
 };
 
 export const __resetWhatsAppToolForTests = (): void => {
-  manager = null;
+  managers.clear();
 };

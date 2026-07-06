@@ -176,12 +176,14 @@ export interface CodexModelOption {
   displayModelName: string;
   realModelName: string;
   defaultReasoningEffort: CodexReasoningEffort;
+  supportedReasoningEfforts?: CodexReasoningEffort[];
 }
 
 export interface ClaudeModelOption {
   displayModelName: string;
   realModelName: string;
   defaultEffort: ClaudeEffort;
+  supportedEfforts?: ClaudeEffort[];
 }
 
 export interface AntigravityModelOption {

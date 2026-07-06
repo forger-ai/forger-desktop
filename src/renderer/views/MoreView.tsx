@@ -15,11 +15,13 @@ export function MoreView({ t, pinnedViews, onTogglePin, onOpen }: MoreViewProps)
   const theme = useTheme();
   const navLabels: Record<PinnableView, string> = {
     automations: t.nav.automations,
+    workflows: t.nav.workflows,
     files: t.nav.files,
     backups: t.nav.backups,
     devices: t.nav.devices,
     datos: t.nav.datos,
     secrets: t.nav.secrets,
+    connections: t.nav.connections,
     tools: t.nav.tools,
     docs: t.nav.docs,
   };

@@ -237,6 +237,42 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
     };
   }
 
+  if (toolId === 'forger_connection_list') {
+    return {
+      type: 'object',
+      properties: {
+        type: { type: 'string', description: 'Tipo de conexion opcional, por ejemplo gmail.' },
+      },
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'forger_connection_status') {
+    return {
+      type: 'object',
+      properties: {
+        type: { type: 'string' },
+        connectionId: { type: 'string' },
+      },
+      required: ['type'],
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'forger_request_connection_grant') {
+    return {
+      type: 'object',
+      properties: {
+        appId: { type: 'string' },
+        type: { type: 'string' },
+        reason: { type: 'string' },
+        connectionIds: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['appId', 'type'],
+      additionalProperties: false,
+    };
+  }
+
   if (toolId === 'forger_ask_question') {
     return {
       type: 'object',
@@ -378,10 +414,26 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
     };
   }
 
+  if (
+    toolId === 'gmail.connection.status' ||
+    toolId === 'whatsapp.connection.status' ||
+    toolId === 'slack.connection.status' ||
+    toolId === 'trello.connection.status'
+  ) {
+    return {
+      type: 'object',
+      properties: {
+        connectionId: { type: 'string' },
+      },
+      additionalProperties: false,
+    };
+  }
+
   if (toolId === 'gmail.search_messages') {
     return {
       type: 'object',
       properties: {
+        connectionId: { type: 'string' },
         query: { type: 'string' },
         maxResults: { type: 'number' },
       },
@@ -394,6 +446,7 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
     return {
       type: 'object',
       properties: {
+        connectionId: { type: 'string' },
         threadId: { type: 'string' },
         messageId: { type: 'string' },
       },
@@ -405,6 +458,7 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
     return {
       type: 'object',
       properties: {
+        connectionId: { type: 'string' },
         messageId: { type: 'string' },
         attachmentId: { type: 'string' },
         filename: { type: 'string' },
@@ -418,9 +472,11 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
     return {
       type: 'object',
       properties: {
+        connectionId: { type: 'string' },
         to: { type: 'array', items: { type: 'string' } },
         subject: { type: 'string' },
         body: { type: 'string' },
+        bodyHtml: { type: 'string' },
         cc: { type: 'array', items: { type: 'string' } },
         bcc: { type: 'array', items: { type: 'string' } },
         attachments: {
@@ -437,7 +493,7 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
           },
         },
       },
-      required: ['to', 'subject', 'body'],
+      required: ['to', 'subject'],
       additionalProperties: false,
     };
   }
@@ -602,6 +658,7 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
     return {
       type: 'object',
       properties: {
+        connectionId: { type: 'string' },
         method: { type: 'string', enum: ['qr', 'pairing_code'] },
         phoneNumber: { type: 'string' },
       },
@@ -614,6 +671,7 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
     return {
       type: 'object',
       properties: {
+        connectionId: { type: 'string' },
         chatType: { type: 'string', enum: ['direct', 'group', 'channel'] },
         query: { type: 'string' },
         limit: { type: 'number' },
@@ -627,6 +685,7 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
     return {
       type: 'object',
       properties: {
+        connectionId: { type: 'string' },
         chatId: { type: 'string' },
         limit: { type: 'number' },
         beforeMessageRef: { type: 'string' },
@@ -640,6 +699,7 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
     return {
       type: 'object',
       properties: {
+        connectionId: { type: 'string' },
         attachmentId: { type: 'string' },
       },
       required: ['attachmentId'],
@@ -651,6 +711,7 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
     return {
       type: 'object',
       properties: {
+        connectionId: { type: 'string' },
         chatId: { type: 'string' },
         text: { type: 'string' },
         replyToMessageRef: { type: 'string' },
@@ -664,9 +725,205 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
     return {
       type: 'object',
       properties: {
+        connectionId: { type: 'string' },
         chatId: { type: 'string' },
       },
       required: ['chatId'],
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'workflow_get_context') {
+    return {
+      type: 'object',
+      properties: {},
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'workflow_complete_node') {
+    return {
+      type: 'object',
+      properties: {
+        output: {
+          type: 'object',
+          description: 'Resultado estructurado del nodo que consumen los nodos siguientes.',
+        },
+        summary: {
+          type: 'string',
+          description: 'Resumen breve del trabajo realizado, orientado al usuario final.',
+        },
+      },
+      required: ['output', 'summary'],
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'workflow_fail_node') {
+    return {
+      type: 'object',
+      properties: {
+        reason: {
+          type: 'string',
+          description: 'Motivo claro por el que el nodo no pudo completarse.',
+        },
+      },
+      required: ['reason'],
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'forger_workflow_list') {
+    return {
+      type: 'object',
+      properties: {},
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'forger_workflow_get' || toolId === 'forger_workflow_run') {
+    return {
+      type: 'object',
+      properties: {
+        workflowId: { type: 'string' },
+      },
+      required: ['workflowId'],
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'forger_workflow_upsert') {
+    return {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'ID del flujo existente. Omitir para crear uno nuevo.' },
+        name: { type: 'string' },
+        description: { type: 'string' },
+        enabled: { type: 'boolean' },
+        trigger: {
+          type: 'object',
+          properties: {
+            type: { type: 'string', enum: ['manual', 'scheduled'] },
+            frequency: {
+              type: 'object',
+              properties: {
+                type: { type: 'string', enum: ['hourly', 'daily', 'weekly'] },
+                timeOfDay: { type: 'string', description: 'HH:MM para daily/weekly.' },
+                weeklyDay: { type: 'number', description: '0 (domingo) a 6 (sabado) para weekly.' },
+              },
+            },
+            missedRunPolicy: { type: 'string', enum: ['skip', 'always', 'within_window'] },
+            missedRunWindowMinutes: { type: 'number' },
+          },
+          required: ['type'],
+        },
+        nodes: {
+          type: 'array',
+          description: 'Nodos del flujo. Tipos: llm_agent (prompt, toolIds, connectionGrants, appIds, runtime, outputSchema), forger_agent (agentId, prompt), forger_tool (toolId, input), connection (connectionType, actionId, connectionId opcional, input), condition (expression con left, operator, right). Todos requieren id y name. requiresApproval pausa el flujo hasta aprobar el paso.',
+          items: { type: 'object' },
+        },
+        edges: {
+          type: 'array',
+          description: 'Conexiones entre nodos: { from, to, condition } con condition success, error o always. En nodos condition, success es la rama verdadera y error la falsa.',
+          items: {
+            type: 'object',
+            properties: {
+              from: { type: 'string' },
+              to: { type: 'string' },
+              condition: { type: 'string', enum: ['success', 'error', 'always'] },
+            },
+            required: ['from', 'to'],
+          },
+        },
+      },
+      required: ['name', 'trigger', 'nodes'],
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'slack.list_channels') {
+    return {
+      type: 'object',
+      properties: {
+        connectionId: { type: 'string' },
+        limit: { type: 'number', description: 'Cantidad maxima de canales (default 100).' },
+      },
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'slack.read_messages') {
+    return {
+      type: 'object',
+      properties: {
+        connectionId: { type: 'string' },
+        channelId: { type: 'string' },
+        limit: { type: 'number', description: 'Cantidad maxima de mensajes (default 20).' },
+      },
+      required: ['channelId'],
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'slack.send_message') {
+    return {
+      type: 'object',
+      properties: {
+        connectionId: { type: 'string' },
+        channelId: { type: 'string', description: 'ID o nombre del canal, por ejemplo C0123 o #general.' },
+        text: { type: 'string' },
+      },
+      required: ['channelId', 'text'],
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'trello.list_boards') {
+    return {
+      type: 'object',
+      properties: {
+        connectionId: { type: 'string' },
+      },
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'trello.list_lists' ) {
+    return {
+      type: 'object',
+      properties: {
+        connectionId: { type: 'string' },
+        boardId: { type: 'string' },
+      },
+      required: ['boardId'],
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'trello.list_cards') {
+    return {
+      type: 'object',
+      properties: {
+        connectionId: { type: 'string' },
+        listId: { type: 'string' },
+        limit: { type: 'number', description: 'Cantidad maxima de tarjetas (default 50).' },
+      },
+      required: ['listId'],
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'trello.create_card') {
+    return {
+      type: 'object',
+      properties: {
+        connectionId: { type: 'string' },
+        listId: { type: 'string' },
+        name: { type: 'string' },
+        description: { type: 'string' },
+        dueDate: { type: 'string', description: 'Fecha limite en formato ISO 8601.' },
+      },
+      required: ['listId', 'name'],
       additionalProperties: false,
     };
   }

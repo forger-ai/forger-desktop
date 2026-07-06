@@ -98,7 +98,7 @@ import type { AppDictionary, Locale } from '@renderer/i18n';
 import type { ThemePreference } from '@renderer/theme/appTheme';
 import type { ChatBotPicture, LanguagePreference } from '@renderer/preferences';
 import type { View } from '@renderer/components/Sidebar';
-import { DEFAULT_AGENT_DEFAULTS, getAntigravitySupportedEfforts } from '@shared/agent-runtime-registry';
+import { DEFAULT_AGENT_DEFAULTS, getRuntimeSupportedEfforts, normalizeRuntimeEffortForModel } from '@shared/agent-runtime-registry';
 import chatGptLogoUrl from '@renderer/assets/provider-logos/chatgpt.svg';
 import claudeLogoUrl from '@renderer/assets/provider-logos/claude.svg';
 import geminiLogoUrl from '@renderer/assets/provider-logos/gemini.svg';
@@ -1791,16 +1791,14 @@ export function SettingsView({
     const claudeActiveProfile = activeProfileFor('claude');
     const antigravityActiveProfile = activeProfileFor('antigravity');
     const codexDefaultModel = codexActiveProfile?.defaultModel ?? safeAgentDefaults.codex.model;
-    const codexDefaultEffort = (codexActiveProfile?.defaultEffort ?? safeAgentDefaults.codex.reasoningEffort) as CodexReasoningEffort;
+    const codexDefaultEffort = normalizeRuntimeEffortForModel('codex', codexDefaultModel, codexActiveProfile?.defaultEffort ?? safeAgentDefaults.codex.reasoningEffort) as CodexReasoningEffort;
+    const codexFilteredEffortOptions = reasoningOptions.filter((option) => getRuntimeSupportedEfforts('codex', codexDefaultModel).includes(option.value));
     const claudeDefaultModel = claudeActiveProfile?.defaultModel ?? safeAgentDefaults.claude.model;
-    const claudeDefaultEffort = (claudeActiveProfile?.defaultEffort ?? safeAgentDefaults.claude.effort) as ClaudeEffort;
+    const claudeDefaultEffort = normalizeRuntimeEffortForModel('claude', claudeDefaultModel, claudeActiveProfile?.defaultEffort ?? safeAgentDefaults.claude.effort) as ClaudeEffort;
+    const claudeFilteredEffortOptions = claudeEffortOptions.filter((option) => getRuntimeSupportedEfforts('claude', claudeDefaultModel).includes(option.value));
     const antigravityDefaultModel = antigravityActiveProfile?.defaultModel ?? safeAgentDefaults.antigravity.model;
-    const antigravityDefaultEffort = (antigravityActiveProfile?.defaultEffort ?? safeAgentDefaults.antigravity.effort) as AntigravityEffort;
-    const antigravitySupportedEfforts = getAntigravitySupportedEfforts(antigravityDefaultModel);
-    const antigravityEffortValue = antigravitySupportedEfforts.includes(antigravityDefaultEffort)
-      ? antigravityDefaultEffort
-      : antigravityModelOptions.find((option) => option.realModelName === antigravityDefaultModel)?.defaultEffort ?? antigravitySupportedEfforts[0] ?? 'medium';
-    const antigravityFilteredEffortOptions = antigravityEffortOptions.filter((option) => antigravitySupportedEfforts.includes(option.value));
+    const antigravityDefaultEffort = normalizeRuntimeEffortForModel('antigravity', antigravityDefaultModel, antigravityActiveProfile?.defaultEffort ?? safeAgentDefaults.antigravity.effort) as AntigravityEffort;
+    const antigravityFilteredEffortOptions = antigravityEffortOptions.filter((option) => getRuntimeSupportedEfforts('antigravity', antigravityDefaultModel).includes(option.value));
 
     const providerCards: ProviderCard[] = [
       {
@@ -1821,18 +1819,22 @@ export function SettingsView({
         modelLabel: t.settings.providerDefaultModelLabel,
         modelValue: codexDefaultModel,
         modelOptions,
-        onModelChange: (value) =>
-          codexActiveProfile
-            ? onProviderProfileDefaultsChange({ provider: 'codex', profileId: codexActiveProfile.id, model: value, effort: codexDefaultEffort })
-            : onAgentDefaultsChange({
-                defaultProvider: defaultAgentProvider,
-                provider: 'codex',
-                model: value,
-                effort: codexDefaultEffort,
-              }),
+        onModelChange: (value) => {
+          const nextEffort = normalizeRuntimeEffortForModel('codex', value, codexDefaultEffort) as CodexReasoningEffort;
+          if (codexActiveProfile) {
+            onProviderProfileDefaultsChange({ provider: 'codex', profileId: codexActiveProfile.id, model: value, effort: nextEffort });
+            return;
+          }
+          onAgentDefaultsChange({
+            defaultProvider: defaultAgentProvider,
+            provider: 'codex',
+            model: value,
+            effort: nextEffort,
+          });
+        },
         effortLabel: t.settings.providerDefaultEffortLabel,
         effortValue: codexDefaultEffort,
-        effortOptions: reasoningOptions,
+        effortOptions: codexFilteredEffortOptions,
         onEffortChange: (value) =>
           codexActiveProfile
             ? onProviderProfileDefaultsChange({ provider: 'codex', profileId: codexActiveProfile.id, model: codexDefaultModel, effort: value as CodexReasoningEffort })
@@ -1861,18 +1863,22 @@ export function SettingsView({
         modelLabel: t.settings.providerDefaultModelLabel,
         modelValue: claudeDefaultModel,
         modelOptions: claudeModelOptions,
-        onModelChange: (value) =>
-          claudeActiveProfile
-            ? onProviderProfileDefaultsChange({ provider: 'claude', profileId: claudeActiveProfile.id, model: value, effort: claudeDefaultEffort })
-            : onAgentDefaultsChange({
-                defaultProvider: defaultAgentProvider,
-                provider: 'claude',
-                model: value,
-                effort: claudeDefaultEffort,
-              }),
+        onModelChange: (value) => {
+          const nextEffort = normalizeRuntimeEffortForModel('claude', value, claudeDefaultEffort) as ClaudeEffort;
+          if (claudeActiveProfile) {
+            onProviderProfileDefaultsChange({ provider: 'claude', profileId: claudeActiveProfile.id, model: value, effort: nextEffort });
+            return;
+          }
+          onAgentDefaultsChange({
+            defaultProvider: defaultAgentProvider,
+            provider: 'claude',
+            model: value,
+            effort: nextEffort,
+          });
+        },
         effortLabel: t.settings.providerDefaultEffortLabel,
         effortValue: claudeDefaultEffort,
-        effortOptions: claudeEffortOptions,
+        effortOptions: claudeFilteredEffortOptions,
         onEffortChange: (value) =>
           claudeActiveProfile
             ? onProviderProfileDefaultsChange({ provider: 'claude', profileId: claudeActiveProfile.id, model: claudeDefaultModel, effort: value as ClaudeEffort })
@@ -1902,11 +1908,7 @@ export function SettingsView({
         modelValue: antigravityDefaultModel,
         modelOptions: antigravityModelOptions,
         onModelChange: (value) => {
-          const option = antigravityModelOptions.find((entry) => entry.realModelName === value);
-          const supportedEfforts = getAntigravitySupportedEfforts(value);
-          const nextEffort = supportedEfforts.includes(antigravityDefaultEffort)
-            ? antigravityDefaultEffort
-            : option?.defaultEffort ?? supportedEfforts[0] ?? 'medium';
+          const nextEffort = normalizeRuntimeEffortForModel('antigravity', value, antigravityDefaultEffort) as AntigravityEffort;
           if (antigravityActiveProfile) {
             onProviderProfileDefaultsChange({ provider: 'antigravity', profileId: antigravityActiveProfile.id, model: value, effort: nextEffort });
             return;
@@ -1914,7 +1916,7 @@ export function SettingsView({
           onAgentDefaultsChange({ defaultProvider: defaultAgentProvider, provider: 'antigravity', model: value, effort: nextEffort });
         },
         effortLabel: t.settings.providerDefaultEffortLabel,
-        effortValue: antigravityEffortValue,
+        effortValue: antigravityDefaultEffort,
         effortOptions: antigravityFilteredEffortOptions,
         onEffortChange: (value) =>
           antigravityActiveProfile

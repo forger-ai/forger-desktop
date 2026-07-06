@@ -31,3 +31,42 @@ export const GmailIcon = () => (
     </svg>
   </Box>
 );
+
+export const SlackIcon = () => (
+  <Box
+    aria-hidden
+    sx={{
+      width: 44,
+      height: 44,
+      display: 'grid',
+      placeItems: 'center',
+      flexShrink: 0,
+    }}
+  >
+    <svg viewBox="0 0 122.8 122.8" width="36" height="36" role="img" aria-label="Slack">
+      <path fill="#36C5F0" d="M25.8 77.6c0 7.1-5.8 12.9-12.9 12.9S0 84.7 0 77.6s5.8-12.9 12.9-12.9h12.9v12.9Zm6.5 0c0-7.1 5.8-12.9 12.9-12.9s12.9 5.8 12.9 12.9v32.3c0 7.1-5.8 12.9-12.9 12.9s-12.9-5.8-12.9-12.9V77.6Z" />
+      <path fill="#2EB67D" d="M45.2 25.8c-7.1 0-12.9-5.8-12.9-12.9S38.1 0 45.2 0s12.9 5.8 12.9 12.9v12.9H45.2Zm0 6.5c7.1 0 12.9 5.8 12.9 12.9s-5.8 12.9-12.9 12.9H12.9C5.8 58.1 0 52.3 0 45.2s5.8-12.9 12.9-12.9h32.3Z" />
+      <path fill="#ECB22E" d="M97 45.2c0-7.1 5.8-12.9 12.9-12.9s12.9 5.8 12.9 12.9-5.8 12.9-12.9 12.9H97V45.2Zm-6.5 0c0 7.1-5.8 12.9-12.9 12.9s-12.9-5.8-12.9-12.9V12.9C64.7 5.8 70.5 0 77.6 0s12.9 5.8 12.9 12.9v32.3Z" />
+      <path fill="#E01E5A" d="M77.6 97c7.1 0 12.9 5.8 12.9 12.9s-5.8 12.9-12.9 12.9-12.9-5.8-12.9-12.9V97h12.9Zm0-6.5c-7.1 0-12.9-5.8-12.9-12.9s5.8-12.9 12.9-12.9h32.3c7.1 0 12.9 5.8 12.9 12.9s-5.8 12.9-12.9 12.9H77.6Z" />
+    </svg>
+  </Box>
+);
+
+export const TrelloIcon = () => (
+  <Box
+    aria-hidden
+    sx={{
+      width: 44,
+      height: 44,
+      display: 'grid',
+      placeItems: 'center',
+      flexShrink: 0,
+    }}
+  >
+    <svg viewBox="0 0 256 256" width="36" height="36" role="img" aria-label="Trello">
+      <rect width="256" height="256" rx="56" fill="#0C66E4" />
+      <rect x="54" y="48" width="54" height="132" rx="14" fill="#FFFFFF" />
+      <rect x="148" y="48" width="54" height="86" rx="14" fill="#FFFFFF" />
+    </svg>
+  </Box>
+);

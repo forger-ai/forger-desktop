@@ -39,6 +39,22 @@ const normalizeAttachments = (value: unknown): GmailSendInput['attachments'] => 
   return attachments.length > 0 ? attachments : undefined;
 };
 
+const htmlToPlainText = (html: string): string =>
+  html
+    .replace(/<\s*(script|style)[^>]*>[\s\S]*?<\s*\/\s*\1\s*>/gi, '')
+    .replace(/<\s*br\s*\/?\s*>/gi, '\n')
+    .replace(/<\s*\/\s*(p|div|li|h[1-6]|tr|table)\s*>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+
 export const parseSendInput = (input: unknown): GmailSendInput | null => {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
     return null;
@@ -49,9 +65,11 @@ export const parseSendInput = (input: unknown): GmailSendInput | null => {
   const bcc = normalizeRecipients(candidate.bcc);
   const subject = typeof candidate.subject === 'string' ? candidate.subject.trim() : '';
   const body = typeof candidate.body === 'string' ? candidate.body : '';
+  const bodyHtml = typeof candidate.bodyHtml === 'string' ? candidate.bodyHtml : '';
+  const plainBody = body || (bodyHtml ? htmlToPlainText(bodyHtml) : '');
   const attachments = normalizeAttachments(candidate.attachments);
 
-  if (to.length === 0 || !subject || !body) {
+  if (to.length === 0 || !subject || (!plainBody && !bodyHtml)) {
     return null;
   }
   const allRecipients = [...to, ...cc, ...bcc];
@@ -64,7 +82,8 @@ export const parseSendInput = (input: unknown): GmailSendInput | null => {
     ...(cc.length > 0 ? { cc } : {}),
     ...(bcc.length > 0 ? { bcc } : {}),
     subject,
-    body,
+    body: plainBody,
+    ...(bodyHtml ? { bodyHtml } : {}),
     ...(attachments ? { attachments } : {}),
   };
 };
@@ -106,40 +125,65 @@ const encodeAttachmentBody = (buffer: Buffer): string => {
   return base64.match(/.{1,76}/g)?.join('\r\n') ?? '';
 };
 
-const buildTextEmail = (input: GmailSendInput): string => {
-  const lines = [
-    `To: ${input.to.join(', ')}`,
-    ...(input.cc?.length ? [`Cc: ${input.cc.join(', ')}`] : []),
-    ...(input.bcc?.length ? [`Bcc: ${input.bcc.join(', ')}`] : []),
-    `Subject: ${encodeHeader(input.subject)}`,
-    'MIME-Version: 1.0',
-    'Content-Type: text/plain; charset="UTF-8"',
-    'Content-Transfer-Encoding: 8bit',
+const messageHeaders = (input: GmailSendInput): string[] => [
+  `To: ${input.to.join(', ')}`,
+  ...(input.cc?.length ? [`Cc: ${input.cc.join(', ')}`] : []),
+  ...(input.bcc?.length ? [`Bcc: ${input.bcc.join(', ')}`] : []),
+  `Subject: ${encodeHeader(input.subject)}`,
+  'MIME-Version: 1.0',
+];
+
+const buildTextPart = (body: string): string[] => [
+  'Content-Type: text/plain; charset="UTF-8"',
+  'Content-Transfer-Encoding: 8bit',
+  '',
+  body,
+];
+
+const buildHtmlPart = (bodyHtml: string): string[] => [
+  'Content-Type: text/html; charset="UTF-8"',
+  'Content-Transfer-Encoding: 8bit',
+  '',
+  bodyHtml,
+];
+
+const createBoundary = (prefix = 'forger'): string =>
+  `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+
+const buildBodyPart = (input: GmailSendInput): string[] => {
+  if (!input.bodyHtml) {
+    return buildTextPart(input.body);
+  }
+  const boundary = createBoundary('forger-alt');
+  return [
+    `Content-Type: multipart/alternative; boundary="${boundary}"`,
     '',
-    input.body,
+    `--${boundary}`,
+    ...buildTextPart(input.body),
+    `--${boundary}`,
+    ...buildHtmlPart(input.bodyHtml),
+    `--${boundary}--`,
   ];
-  return toBase64Url(lines.join('\r\n'));
 };
+
+const buildTextEmail = (input: GmailSendInput): string =>
+  toBase64Url([
+    ...messageHeaders(input),
+    ...buildBodyPart(input),
+  ].join('\r\n'));
 
 export const buildRawEmail = async (input: GmailSendInput): Promise<string> => {
   if (!input.attachments?.length) {
     return buildTextEmail(input);
   }
 
-  const boundary = `forger-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  const boundary = createBoundary();
   const lines = [
-    `To: ${input.to.join(', ')}`,
-    ...(input.cc?.length ? [`Cc: ${input.cc.join(', ')}`] : []),
-    ...(input.bcc?.length ? [`Bcc: ${input.bcc.join(', ')}`] : []),
-    `Subject: ${encodeHeader(input.subject)}`,
-    'MIME-Version: 1.0',
+    ...messageHeaders(input),
     `Content-Type: multipart/mixed; boundary="${boundary}"`,
     '',
     `--${boundary}`,
-    'Content-Type: text/plain; charset="UTF-8"',
-    'Content-Transfer-Encoding: 8bit',
-    '',
-    input.body,
+    ...buildBodyPart(input),
   ];
 
   for (const attachment of input.attachments) {

@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import type {
   CallOfficialToolInput,
   CallOfficialToolResult,
+  ConfigureOfficialToolInput,
   OfficialToolDefinition,
   ToolMutationResult,
 } from '../../../shared/types';
@@ -22,6 +23,8 @@ import { buildRawEmail, parseSendInput } from './mime';
 import { GmailOAuthError, runGmailOAuthFlow } from './oauth';
 import {
   GMAIL_REFRESH_TOKEN_SECRET,
+  GMAIL_SELF_OAUTH_CLIENT_ID_SECRET,
+  GMAIL_SELF_OAUTH_CLIENT_SECRET_SECRET,
   GMAIL_TOOL_ID,
   type GmailAttachmentSummary,
   type GmailReadAttachmentInput,
@@ -59,24 +62,99 @@ const definition: OfficialToolDefinition = {
       name: 'Buscar correos',
       description: 'Busca correos en Gmail usando una consulta.',
       risk: 'medium',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Consulta de busqueda de Gmail.' },
+          maxResults: { type: 'number', description: 'Maximo de correos a devolver.' },
+        },
+        required: ['query'],
+      },
+      outputSchema: {
+        type: 'object',
+        properties: {
+          messages: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                messageId: { type: 'string' },
+                threadId: { type: 'string' },
+                from: { type: 'string' },
+                subject: { type: 'string' },
+                snippet: { type: 'string' },
+                date: { type: 'string' },
+              },
+            },
+          },
+        },
+        required: ['messages'],
+      },
     },
     {
       id: 'gmail.read_thread',
       name: 'Leer conversacion',
       description: 'Lee una conversacion o mensaje de Gmail e incluye metadata de adjuntos.',
       risk: 'high',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          threadId: { type: 'string', description: 'ID de conversacion a leer.' },
+          messageId: { type: 'string', description: 'ID de mensaje a leer si no se usa threadId.' },
+        },
+      },
     },
     {
       id: 'gmail.read_attachment',
       name: 'Leer adjunto',
       description: 'Descarga un adjunto de Gmail y lo deja disponible para el agente.',
       risk: 'high',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          messageId: { type: 'string', description: 'ID del mensaje que contiene el adjunto.' },
+          attachmentId: { type: 'string', description: 'ID del adjunto.' },
+          filename: { type: 'string', description: 'Nombre del adjunto si no se usa attachmentId.' },
+        },
+        required: ['messageId'],
+      },
     },
     {
       id: 'gmail.send_email',
       name: 'Enviar correo',
       description: 'Envia un correo desde la cuenta conectada.',
       risk: 'high',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          to: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Destinatarios, separados por linea o coma.',
+          },
+          cc: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Destinatarios en copia, separados por linea o coma.',
+          },
+          bcc: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Destinatarios en copia oculta, separados por linea o coma.',
+          },
+          subject: { type: 'string', description: 'Asunto del correo.' },
+          body: { type: 'string', description: 'Cuerpo en texto plano o fallback del correo.' },
+          bodyHtml: { type: 'string', description: 'Cuerpo HTML opcional. Si se entrega, Gmail recibe multipart/alternative.' },
+        },
+        required: ['to', 'subject'],
+      },
+      outputSchema: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          threadId: { type: 'string' },
+        },
+      },
     },
   ],
   changelog: ['Base inicial para conexion OAuth y acciones Gmail.'],
@@ -186,10 +264,16 @@ const saveAttachment = async (
   return filePath;
 };
 
-const configure = async (context: InternalToolContext): Promise<ToolMutationResult> => {
+const configure = async (
+  context: InternalToolContext,
+  input?: ConfigureOfficialToolInput,
+): Promise<ToolMutationResult> => {
   const copy = getSharedCopy(context.locale);
   try {
-    await runGmailOAuthFlow(context);
+    await runGmailOAuthFlow(context, {
+      clientId: input?.secrets?.[GMAIL_SELF_OAUTH_CLIENT_ID_SECRET],
+      clientSecret: input?.secrets?.[GMAIL_SELF_OAUTH_CLIENT_SECRET_SECRET],
+    });
     return { success: true, userMessage: copy.tools.gmailConnected };
   } catch (error) {
     const result = toToolResult(error, copy.tools.gmailConnectFailed, 'gmail_oauth_failed');
@@ -264,7 +348,7 @@ const execute = async (
     if (input.actionId === 'gmail.send_email') {
       const parsed = parseSendInput(input.input);
       if (!parsed) {
-        return { success: false, userMessage: 'Completa destinatario, asunto y cuerpo del correo.', technicalCode: 'gmail_send_input_invalid' };
+        return { success: false, userMessage: 'Completa destinatario, asunto y cuerpo del correo en texto o HTML.', technicalCode: 'gmail_send_input_invalid' };
       }
       const sent = await sendMessage(context, await buildRawEmail(parsed));
       return { success: true, userMessage: 'Correo enviado.', data: sent };

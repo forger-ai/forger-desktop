@@ -1,3 +1,4 @@
+import type { AppConnectionDeclaration } from './connections';
 import type { AppToolDeclaration } from './tools';
 import type { PlatformCapabilities } from '../platform-capabilities';
 
@@ -58,6 +59,10 @@ export interface AppSummary {
   tools?: {
     required?: AppToolDeclaration[];
     optional?: AppToolDeclaration[];
+  };
+  connections?: {
+    required?: AppConnectionDeclaration[];
+    optional?: AppConnectionDeclaration[];
   };
   localNetworkShareSupported?: boolean;
   remoteTunnelSupported?: boolean;

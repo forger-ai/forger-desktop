@@ -45,11 +45,11 @@ import {
   Typography,
   useTheme,
 } from '@mui/material';
-import type { AgentPermissionMode, AgentProvider, AgentRuntime, AgentToolId, AntigravityEffort, PersonalAgent, PersonalAgentConversation, PersonalAgentConversationEvent, PersonalAgentGrantOptionTool, PersonalAgentGrantOptions, PersonalAgentMessage, PersonalAgentRunStatus, PersonalAgentWorkspaceEntry, PersonalAgentWorkspaceFile } from '@shared/types';
+import type { AgentEffort, AgentPermissionMode, AgentProvider, AgentRuntime, AgentToolId, PersonalAgent, PersonalAgentConversation, PersonalAgentConversationEvent, PersonalAgentGrantOptionTool, PersonalAgentGrantOptions, PersonalAgentMessage, PersonalAgentRunStatus, PersonalAgentWorkspaceEntry, PersonalAgentWorkspaceFile } from '@shared/types';
 import type { AppDictionary } from '@renderer/i18n';
 import { AGENT_PROVIDER_OPTIONS, ANTIGRAVITY_EFFORT_OPTIONS, ANTIGRAVITY_MODEL_OPTIONS, CLAUDE_EFFORT_OPTIONS, CLAUDE_MODEL_OPTIONS, CODEX_MODEL_OPTIONS, CODEX_REASONING_OPTIONS } from '@renderer/preferences';
 import { usageAnalytics } from '@renderer/usage-analytics';
-import { getAntigravitySupportedEfforts } from '@shared/agent-runtime-registry';
+import { getRuntimeSupportedEfforts, normalizeRuntimeEffortForModel } from '@shared/agent-runtime-registry';
 import { MarkdownMessage } from './chat/MarkdownMessage';
 
 interface AgentsViewProps {
@@ -221,7 +221,7 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
   const [conversations, setConversations] = useState<PersonalAgentConversation[]>([]);
   const [conversation, setConversation] = useState<PersonalAgentConversation | null>(null);
   const [workspaceEntries, setWorkspaceEntries] = useState<PersonalAgentWorkspaceEntry[]>([]);
-  const [grantOptions, setGrantOptions] = useState<PersonalAgentGrantOptions>({ apps: [], tools: [] });
+  const [grantOptions, setGrantOptions] = useState<PersonalAgentGrantOptions>({ apps: [], tools: [], connections: [] });
   const [openFile, setOpenFile] = useState<PersonalAgentWorkspaceFile | null>(null);
   const [fileDraft, setFileDraft] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
@@ -288,7 +288,7 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
     let mounted = true;
     Promise.all([
       window.forger.personalAgentsList(),
-      window.forger.personalAgentGrantOptionsList().catch(() => ({ apps: [], tools: [] })),
+      window.forger.personalAgentGrantOptionsList().catch(() => ({ apps: [], tools: [], connections: [] })),
     ])
       .then(([nextAgents, nextGrantOptions]) => {
         if (!mounted) return;
@@ -627,17 +627,16 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
       : runtimeProvider === 'antigravity'
         ? ANTIGRAVITY_MODEL_OPTIONS
         : CODEX_MODEL_OPTIONS;
-    const runtimeEffortOptions = runtimeProvider === 'claude'
+    const runtimeEffortOptions = (runtimeProvider === 'claude'
       ? CLAUDE_EFFORT_OPTIONS
       : runtimeProvider === 'antigravity'
-        ? ANTIGRAVITY_EFFORT_OPTIONS.filter((option) => getAntigravitySupportedEfforts(accessDraft.runtime.model).includes(option.value))
-        : CODEX_REASONING_OPTIONS;
+        ? ANTIGRAVITY_EFFORT_OPTIONS
+        : CODEX_REASONING_OPTIONS
+    ).filter((option) => getRuntimeSupportedEfforts(runtimeProvider, accessDraft.runtime.model).includes(option.value as AgentEffort));
     const runtimeModelValue = runtimeModelOptions.some((option) => option.realModelName === accessDraft.runtime.model)
       ? accessDraft.runtime.model
       : runtimeModelOptions[0]?.realModelName ?? accessDraft.runtime.model;
-    const runtimeEffortValue = runtimeEffortOptions.some((option) => option.value === accessDraft.runtime.effort)
-      ? accessDraft.runtime.effort
-      : runtimeEffortOptions[0]?.value ?? accessDraft.runtime.effort;
+    const runtimeEffortValue = normalizeRuntimeEffortForModel(runtimeProvider, accessDraft.runtime.model, accessDraft.runtime.effort);
     return (
       <Stack spacing={1.5}>
         <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
@@ -669,13 +668,9 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
               onChange={(event) => {
                 const model = event.target.value;
                 setAccessDraft((current) => {
-                  const supportedEfforts = current.runtime.provider === 'antigravity' ? getAntigravitySupportedEfforts(model) : [];
-                  const nextEffort = current.runtime.provider === 'antigravity' && !supportedEfforts.includes(current.runtime.effort as AntigravityEffort)
-                    ? ANTIGRAVITY_MODEL_OPTIONS.find((option) => option.realModelName === model)?.defaultEffort ?? supportedEfforts[0] ?? 'medium'
-                    : current.runtime.effort;
                   return {
                     ...current,
-                    runtime: { ...current.runtime, model, effort: nextEffort },
+                    runtime: { ...current.runtime, model, effort: normalizeRuntimeEffortForModel(current.runtime.provider, model, current.runtime.effort) },
                   };
                 });
               }}

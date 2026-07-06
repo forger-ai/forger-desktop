@@ -32,7 +32,7 @@ const createController = (overrides = {}) => {
     path: overrides.path ?? path,
     app: { getPath: (name) => `/user-data/${name}` },
     shell: overrides.shell ?? { openExternal: async () => undefined },
-    state: overrides.state ?? { secretsStore: null, officialToolsService: null, memoryStore: null, backupsManager: null },
+    state: overrides.state ?? { secretsStore: null, officialToolsService: null, connectionsService: null, memoryStore: null, backupsManager: null },
     forgerBackendClient: overrides.forgerBackendClient ?? null,
     forgerAccount: overrides.forgerAccount ?? { authenticated: false, token: null },
     getForgerBackendClient: overrides.getForgerBackendClient,
@@ -53,6 +53,15 @@ const createController = (overrides = {}) => {
     CODEX_REASONING_VALUES: new Set(['low', 'medium', 'high']),
     SecretsStore: overrides.SecretsStore ?? class {},
     OfficialToolsService: overrides.OfficialToolsService ?? class {},
+    ConnectionsService: overrides.ConnectionsService ?? class {
+      async listConnectionsForApp() {
+        return { types: [], instances: [], requirements: [] };
+      }
+
+      async listState() {
+        return { types: [], instances: [] };
+      }
+    },
     MemoryStore: overrides.MemoryStore ?? class {},
     BackupsManager: overrides.BackupsManager ?? class {},
     getForgerMetadataRoot: () => '/metadata',
@@ -949,11 +958,91 @@ test('manifest support lazy services build memory/tool contexts, prompt successe
     }
 
     async list() {
-      return { tools: [{ id: 'gmail', status: 'configured' }] };
+      return { tools: [{ id: 'forger_chrome_extension', status: 'configured' }] };
     }
 
-    async listAgentActionIdsForApp(appId) {
-      return new Set([`gmail.read:${appId}`]);
+    async listAgentActionIdsForApp() {
+      return new Set(['forger_chrome_extension.connection.status', 'forger_chrome_extension.open_dedicated_tab']);
+    }
+  }
+  class FakeConnectionsService {
+    constructor(options) {
+      this.options = options;
+    }
+
+    async listConnectionsForApp() {
+      const gmailDefinition = {
+        type: 'gmail',
+        displayName: 'Gmail',
+        description: 'Gmail account',
+        setupKind: 'oauth',
+        supportsMultiple: true,
+        secretsSchema: [],
+        statusActionId: 'gmail.connection.status',
+        actions: [
+          { id: 'gmail.connection.status', name: 'Status', description: 'Check status', risk: 'low' },
+          { id: 'gmail.search_messages', name: 'Search', description: 'Search messages', risk: 'medium' },
+        ],
+      };
+      const gmailInstance = {
+        id: 'gmail-default',
+        type: 'gmail',
+        label: 'Primary Gmail',
+        accountIdentity: { email: 'person@example.com' },
+        status: 'connected',
+        isDefault: true,
+        createdAt: '2026-07-05T00:00:00.000Z',
+        updatedAt: '2026-07-05T00:00:00.000Z',
+      };
+      return {
+        types: [gmailDefinition],
+        instances: [gmailInstance],
+        requirements: [{
+          declaration: {
+            type: 'gmail',
+            reason: 'Read approved messages',
+            actions: ['gmail.connection.status', 'gmail.search_messages'],
+            multiple: false,
+          },
+          required: true,
+          definition: gmailDefinition,
+          resolvedActions: gmailDefinition.actions,
+          allActions: false,
+          granted: true,
+          hasStoredGrant: true,
+          configured: true,
+          instances: [gmailInstance],
+        }],
+      };
+    }
+
+    async listState() {
+      const gmailDefinition = {
+        type: 'gmail',
+        displayName: 'Gmail',
+        description: 'Gmail account',
+        setupKind: 'oauth',
+        supportsMultiple: true,
+        secretsSchema: [],
+        statusActionId: 'gmail.connection.status',
+        actions: [
+          { id: 'gmail.connection.status', name: 'Status', description: 'Check status', risk: 'low' },
+          { id: 'gmail.search_messages', name: 'Search', description: 'Search messages', risk: 'medium' },
+        ],
+      };
+      return {
+        types: [gmailDefinition],
+        instances: [{
+          id: 'gmail-default',
+          type: 'gmail',
+          label: 'Primary Gmail',
+          accountIdentity: { email: 'person@example.com' },
+          status: 'connected',
+          isDefault: true,
+          createdAt: '2026-07-05T00:00:00.000Z',
+          updatedAt: '2026-07-05T00:00:00.000Z',
+        }],
+      };
     }
   }
   class FakeMemoryStore {
@@ -994,6 +1083,7 @@ test('manifest support lazy services build memory/tool contexts, prompt successe
   const runningApps = new Map([['finance-os', {}]]);
   const { controller: testController } = createController({
     OfficialToolsService: FakeOfficialToolsService,
+    ConnectionsService: FakeConnectionsService,
     MemoryStore: FakeMemoryStore,
     BackupsManager: FakeBackupsManager,
     promptOverridesStore,
@@ -1012,15 +1102,21 @@ test('manifest support lazy services build memory/tool contexts, prompt successe
   assert.equal(await testController.buildMemoryContextForApp('finance-os'), 'memory:app-agent:finance-os');
   assert.equal(await testController.buildMemoryContextForApps(['finance-os']), 'memory:automation:finance-os');
   assert.equal(memoryContexts.length, 2);
-  assert.match(await testController.buildForgerToolsContextForApp('finance-os'), /gmail/i);
+  const appToolsContext = await testController.buildForgerToolsContextForApp('finance-os');
+  assert.match(appToolsContext, /Declared app Connections/);
+  assert.match(appToolsContext, /Primary Gmail - person@example\.com/);
+  assert.match(appToolsContext, /Available Connection actions[\s\S]*gmail\.search_messages/);
+  assert.match(appToolsContext, /Available Forger Tool actions[\s\S]*forger_chrome_extension\.connection\.status/);
   const freeChatToolsContext = await testController.buildForgerToolsContextForFreeChat();
-  assert.match(freeChatToolsContext, /gmail/i);
+  assert.match(freeChatToolsContext, /Connections available in this context/);
+  assert.match(freeChatToolsContext, /Gmail: connected/);
+  assert.match(freeChatToolsContext, /Primary Gmail - person@example\.com/);
   assert.match(freeChatToolsContext, /forger_chrome_extension\.connection\.status/);
   assert.match(freeChatToolsContext, /forger_chrome_extension\.open_dedicated_tab/);
   assert.match(freeChatToolsContext, /forger_chrome_extension\.submit_form/);
   assert.match(freeChatToolsContext, /forger_chrome_extension\.get_styles/);
   assert.match(freeChatToolsContext, /forger_chrome_extension\.set_styles/);
-  assert.match(freeChatToolsContext, /Forger Chrome Extension status: not connected or not active/);
+  assert.match(freeChatToolsContext, /Forger Chrome Extension status: connected and ready/);
   assert.match(freeChatToolsContext, /Free chat can inspect installed apps with `forger_list_installed_apps`/);
   assert.equal(serviceInstances.length, 1);
 

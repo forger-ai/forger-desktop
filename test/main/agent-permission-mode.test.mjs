@@ -12,7 +12,7 @@ const {
 
 test('agent permission mode helpers keep safe runs scoped and unsafe runs explicit', () => {
   assert.deepEqual(codexUnsafeArgs('safe'), []);
-  assert.deepEqual(codexWorkspaceArgs('safe'), ['--full-auto', '--sandbox', 'workspace-write']);
+  assert.deepEqual(codexWorkspaceArgs('safe'), ['--sandbox', 'workspace-write']);
   assert.deepEqual(codexUnsafeArgs('unsafe'), ['--dangerously-bypass-approvals-and-sandbox']);
   assert.deepEqual(codexWorkspaceArgs('unsafe'), []);
   assert.deepEqual(claudePermissionArgs('safe'), ['--permission-mode', 'acceptEdits']);

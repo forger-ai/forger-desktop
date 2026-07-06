@@ -6,11 +6,15 @@ import { getSharedCopy } from '../../../shared/i18n';
 import {
   GMAIL_REFRESH_TOKEN_SECRET,
   GMAIL_SCOPES,
+  GMAIL_SELF_OAUTH_CLIENT_ID_SECRET,
+  GMAIL_SELF_OAUTH_CLIENT_SECRET_SECRET,
   GMAIL_TOOL_ID,
   type GoogleTokenResponse,
 } from './types';
+import { runLoopbackOAuthFlow } from '../self-oauth';
 
 const AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
+const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const CALLBACK_PATH = '/oauth/gmail/callback';
 const OAUTH_TIMEOUT_MS = 30 * 60 * 1000;
 
@@ -65,11 +69,38 @@ const toGmailOAuthError = (error: unknown, fallbackMessage: string, fallbackCode
 
 const exchangeCode = async (input: {
   clientId: string;
+  clientSecret?: string;
   code: string;
   codeVerifier: string;
   redirectUri: string;
   context: InternalToolContext;
 }): Promise<GoogleTokenResponse> => {
+  if (input.clientSecret) {
+    const body = new URLSearchParams({
+      client_id: input.clientId,
+      client_secret: input.clientSecret,
+      code: input.code,
+      code_verifier: input.codeVerifier,
+      redirect_uri: input.redirectUri,
+      grant_type: 'authorization_code',
+    });
+    const response = await fetch(TOKEN_URL, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body,
+    }).catch((error) => {
+      throw toGmailOAuthError(error, 'Google no respondio durante OAuth.', 'gmail_oauth_google_exchange_failed');
+    });
+    const token = await response.json().catch(() => ({})) as GoogleTokenResponse;
+    if (!response.ok || token.error) {
+      throw new GmailOAuthError(
+        token.error_description || token.error || 'Google no pudo completar OAuth.',
+        'gmail_oauth_google_exchange_failed',
+      );
+    }
+    return token;
+  }
+
   if (!input.context.isForgerAccountAuthenticated()) {
     throw new GmailOAuthError(
       getSharedCopy(input.context.locale).tools.gmailForgerAccountRequired,
@@ -93,6 +124,36 @@ const exchangeCode = async (input: {
 };
 
 export const refreshGmailAccessToken = async (context: InternalToolContext): Promise<string> => {
+  const refreshToken = await context.secretsStore.getToolSecret(GMAIL_TOOL_ID, GMAIL_REFRESH_TOKEN_SECRET);
+  if (!refreshToken) {
+    throw new GmailOAuthError('Gmail no esta conectado.', 'gmail_oauth_not_connected');
+  }
+  const selfClientId = await context.secretsStore.getToolSecret(GMAIL_TOOL_ID, GMAIL_SELF_OAUTH_CLIENT_ID_SECRET);
+  const selfClientSecret = await context.secretsStore.getToolSecret(GMAIL_TOOL_ID, GMAIL_SELF_OAUTH_CLIENT_SECRET_SECRET);
+
+  if (selfClientId && selfClientSecret) {
+    const response = await fetch(TOKEN_URL, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: selfClientId,
+        client_secret: selfClientSecret,
+        refresh_token: refreshToken,
+        grant_type: 'refresh_token',
+      }),
+    }).catch((error) => {
+      throw toGmailOAuthError(error, 'Google no pudo renovar Gmail.', 'gmail_oauth_google_refresh_failed');
+    });
+    const token = await response.json().catch(() => ({})) as GoogleTokenResponse;
+    if (!response.ok || token.error || !token.access_token) {
+      throw new GmailOAuthError(
+        token.error_description || token.error || 'Google no devolvio access token.',
+        'gmail_oauth_google_refresh_failed',
+      );
+    }
+    return token.access_token;
+  }
+
   if (!context.isForgerAccountAuthenticated()) {
     throw new GmailOAuthError(
       getSharedCopy(context.locale).tools.gmailForgerAccountRequired,
@@ -100,10 +161,6 @@ export const refreshGmailAccessToken = async (context: InternalToolContext): Pro
     );
   }
   const clientId = await getClientId(context);
-  const refreshToken = await context.secretsStore.getToolSecret(GMAIL_TOOL_ID, GMAIL_REFRESH_TOKEN_SECRET);
-  if (!refreshToken) {
-    throw new GmailOAuthError('Gmail no esta conectado.', 'gmail_oauth_not_connected');
-  }
 
   const token = await context.refreshGmailOAuthAccessToken({
     clientId,
@@ -233,9 +290,28 @@ const appendOAuthLog = (context: InternalToolContext, event: string, payload?: R
   void context.appendLog?.(`gmail_oauth:${event}`, payload ?? {});
 };
 
-export const runGmailOAuthFlow = async (context: InternalToolContext): Promise<void> => {
+export const runGmailOAuthFlow = async (
+  context: InternalToolContext,
+  options: { clientId?: string; clientSecret?: string } = {},
+): Promise<void> => {
   const copy = getSharedCopy(context.locale).gmailOAuth;
-  const clientId = await getClientId(context);
+  const clientId = options.clientId?.trim() || await getClientId(context);
+  const clientSecret = options.clientSecret?.trim();
+  if (clientSecret) {
+    await runLoopbackOAuthFlow(context, {
+      toolId: GMAIL_TOOL_ID,
+      clientId,
+      clientSecret,
+      authUrl: AUTH_URL,
+      tokenUrl: TOKEN_URL,
+      callbackPath: CALLBACK_PATH,
+      scopes: GMAIL_SCOPES,
+      authParams: { access_type: 'offline', prompt: 'consent' },
+    });
+    await context.secretsStore.setToolSecret(GMAIL_TOOL_ID, GMAIL_SELF_OAUTH_CLIENT_ID_SECRET, clientId);
+    await context.secretsStore.setToolSecret(GMAIL_TOOL_ID, GMAIL_SELF_OAUTH_CLIENT_SECRET_SECRET, clientSecret);
+    return;
+  }
   const state = base64Url(randomBytes(32));
   const pkce = createPkcePair();
 
@@ -281,6 +357,7 @@ export const runGmailOAuthFlow = async (context: InternalToolContext): Promise<v
 
         const token = await exchangeCode({
           clientId,
+          ...(clientSecret ? { clientSecret } : {}),
           code,
           codeVerifier: pkce.verifier,
           redirectUri,
@@ -299,6 +376,11 @@ export const runGmailOAuthFlow = async (context: InternalToolContext): Promise<v
           const technicalCode = saved.technicalCode ?? 'gmail_oauth_secret_save_failed';
           sendHtml(response, 500, copy.errorTitle, message);
           throw new GmailOAuthError(message, technicalCode);
+        }
+
+        if (clientSecret) {
+          await context.secretsStore.setToolSecret(GMAIL_TOOL_ID, GMAIL_SELF_OAUTH_CLIENT_ID_SECRET, clientId);
+          await context.secretsStore.setToolSecret(GMAIL_TOOL_ID, GMAIL_SELF_OAUTH_CLIENT_SECRET_SECRET, clientSecret);
         }
 
         appendOAuthLog(context, 'refresh_token_saved');

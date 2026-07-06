@@ -16,6 +16,7 @@ import { AppAgentConversationManager } from '../app-agent-conversation-manager';
 import { renderManifestAgentPrompt, type ManifestAgentPromptKind } from '../manifest-agent-prompts';
 import { AppMcpManager } from '../app-mcp-manager';
 import { AutomationManager } from '../automation-manager';
+import { WorkflowManager } from '../workflow-manager';
 import { BackgroundTaskStore } from '../background-task-store';
 import {
   extractDeepLinkFromArgv,
@@ -30,6 +31,7 @@ import { DesktopUpdater } from '../desktop-updater';
 import { DesktopRuntimeBridge } from '../desktop-runtime-bridge';
 import { DesktopErrorReporter } from '../error-reporting';
 import { FileLibrary } from '../file-library';
+import { SelfOAuthCallbackService } from '../oauth-callback/service';
 import { buildMacTerminalLoginScript, buildMacTerminalScriptLaunchCommand } from '../auth-login-scripts';
 import { buildCodexAuthEnvironment, classifyCodexAuthOutput, extractAllowedCodexAuthUrls } from '../codex-auth-helpers';
 import { ForgerMcpServer } from '../forger-mcp-server';
@@ -40,6 +42,7 @@ import { AgentStore } from '../personal-agents/agent-store';
 import { RemoteAgentSessionService } from '../personal-agents/remote-session-service';
 import { PromptOverridesStore, buildPromptBases, promptOverrideErrorResult } from '../prompt-overrides';
 import { OfficialToolsService, normalizeAppToolDeclarations } from '../official-tools-service';
+import { ConnectionsService } from '../connections-service';
 import { AudioRuntimeBroker } from '../audio-runtime-broker';
 import { SpeechToTextServiceManager } from '../speech-to-text-service';
 import { TextToSpeechServiceManager } from '../text-to-speech-service';
@@ -200,6 +203,7 @@ let appAgentConversationManager: AppAgentConversationManager | null = null;
 let fileLibrary: FileLibrary | null = null;
 let secretsStore: SecretsStore | null = null;
 let officialToolsService: OfficialToolsService | null = null;
+let connectionsService: ConnectionsService | null = null;
 let audioRuntimeBroker: AudioRuntimeBroker | null = null;
 let speechToTextService: SpeechToTextServiceManager | null = null;
 let textToSpeechService: TextToSpeechServiceManager | null = null;
@@ -208,6 +212,7 @@ let wakeWordService: WakeWordServiceManager | null = null;
 let desktopUpdater: DesktopUpdater | null = null;
 let desktopErrorReporter: DesktopErrorReporter | null = null;
 let automationManager: AutomationManager | null = null;
+let workflowManager: WorkflowManager | null = null;
 let backgroundTaskStore: BackgroundTaskStore | null = null;
 let appMcpManager: AppMcpManager | null = null;
 let backupsManager: BackupsManager | null = null;
@@ -217,6 +222,7 @@ let personalAgentConversationManager: AgentConversationManager | null = null;
 let remoteAgentSessionService: RemoteAgentSessionService | null = null;
 let memoryMaintenanceManager: MemoryMaintenanceManager | null = null;
 let desktopRuntimeBridge: DesktopRuntimeBridge | null = null;
+let selfOAuthCallbackService: SelfOAuthCallbackService | null = null;
 
 desktopErrorReporter = new DesktopErrorReporter({
   getMainWindow: () => mainWindow,
@@ -354,6 +360,12 @@ const buildChatRunIpcTracePayload = (run: ChatRun): Record<string, unknown> => g
 const sanitizeRendererChatTrace = (input: RendererChatTraceEvent): Record<string, unknown> => getMainUtilitiesController().sanitizeRendererChatTrace(input);
 const emitChatRunUpdated = (payload: ChatRunEvent): void => getMainUtilitiesController().emitChatRunUpdated(payload);
 const emitAutomationUpdated = (payload: { automation: unknown; run?: unknown }): void => getMainUtilitiesController().emitAutomationUpdated(payload);
+const emitWorkflowUpdated = (payload: { workflow: unknown; run?: unknown }): void => {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return;
+  }
+  mainWindow.webContents.send(IPC_CHANNELS.workflowUpdated, payload);
+};
 const emitBackgroundTaskUpdated = (payload: { task: BackgroundTask }): void => getMainUtilitiesController().emitBackgroundTaskUpdated(payload);
 const emitDesktopUpdateProgress = (payload: DesktopUpdateState): void => getMainUtilitiesController().emitDesktopUpdateProgress(payload);
 const emitForgerAccountUpdated = (payload: ReturnType<typeof publicForgerAccount> & { success?: boolean; userMessage?: string; technicalCode?: string }): void => getMainUtilitiesController().emitForgerAccountUpdated(payload);
@@ -367,7 +379,7 @@ const isVersionNewer = (candidate?: string, current?: string): boolean => getMai
 const mapBackendCategory = (backendCategory: string): AppCategory => getMainUtilitiesController().mapBackendCategory(backendCategory);
 const toCatalogStatus = (slug: string): AppStatus => getMainUtilitiesController().toCatalogStatus(slug);
 
-const manifestSupportState = { get secretsStore() { return secretsStore; }, set secretsStore(value) { secretsStore = value; }, get officialToolsService() { return officialToolsService; }, set officialToolsService(value) { officialToolsService = value; }, get memoryStore() { return memoryStore; }, set memoryStore(value) { memoryStore = value; }, get backupsManager() { return backupsManager; }, set backupsManager(value) { backupsManager = value; } };
+const manifestSupportState = { get secretsStore() { return secretsStore; }, set secretsStore(value) { secretsStore = value; }, get officialToolsService() { return officialToolsService; }, set officialToolsService(value) { officialToolsService = value; }, get connectionsService() { return connectionsService; }, set connectionsService(value) { connectionsService = value; }, get memoryStore() { return memoryStore; }, set memoryStore(value) { memoryStore = value; }, get backupsManager() { return backupsManager; }, set backupsManager(value) { backupsManager = value; } };
 const createManifestSupportDeps = () => ({
   BackupsManager,
   BUILT_IN_CLAUDE_EFFORT,
@@ -376,6 +388,7 @@ const createManifestSupportDeps = () => ({
   CODEX_REASONING_VALUES,
   MemoryStore,
   OfficialToolsService,
+  ConnectionsService,
   SecretsStore,
   appendInstallLog,
   app,
@@ -395,6 +408,7 @@ const createManifestSupportDeps = () => ({
   getCodexDefaults,
   getForgerMetadataRoot,
   getFreePort,
+  getSelfOAuthCallbackService,
   getPromptOverridesStore,
   getTempRoot,
   hashFileSha256,
@@ -422,6 +436,14 @@ const appAllowsAgentNetworkAccess = async (appId: string): Promise<boolean> => a
 const anyAppAllowsAgentNetworkAccess = async (appIds: string[]): Promise<boolean> => await getManifestSupportController().anyAppAllowsAgentNetworkAccess(appIds);
 const getSecretsStore = (): SecretsStore => getManifestSupportController().getSecretsStore();
 const getOfficialToolsService = (): OfficialToolsService => getManifestSupportController().getOfficialToolsService();
+const getConnectionsService = (): ConnectionsService => getManifestSupportController().getConnectionsService();
+const getSelfOAuthCallbackService = (): SelfOAuthCallbackService => {
+  selfOAuthCallbackService ??= new SelfOAuthCallbackService({
+    metadataRoot: getForgerMetadataRoot(),
+    appendLog: appendInstallLog,
+  });
+  return selfOAuthCallbackService;
+};
 const getSpeechToTextServiceSourcePath = (): string =>
   app.isPackaged
     ? path.join(process.resourcesPath, 'speech-to-text', 'server.py')
@@ -527,6 +549,8 @@ const getPersonalAgentConversationManager = (): AgentConversationManager => {
           personalAgentId: agent.id,
           appIds: agent.appIds,
           officialToolActionIds: agent.toolIds,
+          forgerToolActionIds: agent.toolIds,
+          connectionGrants: agent.connectionGrants,
         }) ?? null,
       releaseForgerMcpSession: (token) => forgerMcpServer?.releaseSession(token),
       listenAppMcps: async (appIds, runId) => {
@@ -1241,6 +1265,7 @@ const getMainProcessIpcDeps = (): MainProcessIpcDeps & AgentIpcDeps => ({
   appAgentTaskManager,
   appendInstallLog,
   automationManager,
+  workflowManager,
   buildAppSecretsState,
   buildCodexPromptWithAppContext,
   buildForgerToolsContextForApp,
@@ -1289,6 +1314,7 @@ const getMainProcessIpcDeps = (): MainProcessIpcDeps & AgentIpcDeps => ({
   getPersonalAgentStore,
   getPersonalAgentConversationManager,
   getOfficialToolsService,
+  getConnectionsService,
   getSpeechToTextService,
   getLiveVoiceInputService,
   getWakeWordService,
@@ -1415,16 +1441,19 @@ const mainLifecycleState = {
   get fileLibrary() { return fileLibrary; }, set fileLibrary(value) { fileLibrary = value; },
   get secretsStore() { return secretsStore; }, set secretsStore(value) { secretsStore = value; },
   get officialToolsService() { return officialToolsService; }, set officialToolsService(value) { officialToolsService = value; },
+  get connectionsService() { return connectionsService; }, set connectionsService(value) { connectionsService = value; },
   get speechToTextService() { return speechToTextService; }, set speechToTextService(value) { speechToTextService = value; },
   get textToSpeechService() { return textToSpeechService; }, set textToSpeechService(value) { textToSpeechService = value; },
   get wakeWordService() { return wakeWordService; }, set wakeWordService(value) { wakeWordService = value; },
   get desktopErrorReporter() { return desktopErrorReporter; }, set desktopErrorReporter(value) { desktopErrorReporter = value; },
   get automationManager() { return automationManager; }, set automationManager(value) { automationManager = value; },
+  get workflowManager() { return workflowManager; }, set workflowManager(value) { workflowManager = value; },
   get appMcpManager() { return appMcpManager; }, set appMcpManager(value) { appMcpManager = value; },
   get backupsManager() { return backupsManager; }, set backupsManager(value) { backupsManager = value; },
   get memoryStore() { return memoryStore; }, set memoryStore(value) { memoryStore = value; },
   get memoryMaintenanceManager() { return memoryMaintenanceManager; }, set memoryMaintenanceManager(value) { memoryMaintenanceManager = value; },
   get desktopRuntimeBridge() { return desktopRuntimeBridge; }, set desktopRuntimeBridge(value) { desktopRuntimeBridge = value; },
+  get selfOAuthCallbackService() { return selfOAuthCallbackService; }, set selfOAuthCallbackService(value) { selfOAuthCallbackService = value; },
   get localNetworkShareManager() { return localNetworkShareController.manager; }, set localNetworkShareManager(value) { localNetworkShareController.manager = value; },
   get remoteNetworkShareManager() { return remoteNetworkShareManager; },
   get remoteAgentSessionService() { return remoteAgentSessionService; }, set remoteAgentSessionService(value) { remoteAgentSessionService = value; },
@@ -1433,19 +1462,19 @@ const mainLifecycleState = {
 };
 
 registerMainLifecycle({
-  AGENT_TOOL_DEFINITIONS, AppAgentConversationManager, AppAgentTaskManager, AppMcpManager, AutomationManager,
+  AGENT_TOOL_DEFINITIONS, AppAgentConversationManager, AppAgentTaskManager, AppMcpManager, AutomationManager, WorkflowManager,
   BrowserWindow, ChatOrchestrator, CloudDeviceManager, CloudIdentityStore, DesktopRuntimeBridge,
   DevCatalogService, FORGER_AGENT_CONTRACT_VERSION, FileLibrary, ForgerAccountStore, ForgerBackendClient,
   ForgerMcpServer, IPC_CHANNELS, MemoryMaintenanceManager, MemoryStore, SecretsStore, anyAppAllowsAgentNetworkAccess, app,
   appAllowsAgentNetworkAccess, appWindows, appendInstallLog, backendBaseUrl, buildForgerToolsContextForApp, buildMemoryContextForApp,
   buildMemoryContextForApps, chooseAgentRuntime, clearForgerAccountSession, closeServer, createLocalAppFromSkeleton, createWindow,
   finishSocialAppInstall, deleteQuarantinedSocialApp,
-  emitAutomationUpdated, emitChatRunUpdated, ensureBackendPythonEnvironment, ensureCatalogStatuses, ensureGlobalAgentsContext,
+  emitAutomationUpdated, emitWorkflowUpdated, emitChatRunUpdated, ensureBackendPythonEnvironment, ensureCatalogStatuses, ensureGlobalAgentsContext,
   ensureGitAvailable, ensurePathInside, ensureRuntimeInstalled, ensureSqliteDatabaseParent, flushPendingDeepLink, fs, getAgentPathEntries, getBackupsRoot,
   getClaudeAuthStatus, getAntigravityAuthStatus, getCloudDeviceAccountStorageKey, getCloudDevicePath, getCloudIdentityPath, getCloudIdentityStore,
   getCodexAuthStatus, getCodexHome, getCodexRoot, getCodexToolEnvironment, getDesktopChatNetworkAccessDefault: () => settings.defaultChatNetworkAccess !== false, getManifestAppSecretsValidationError, getSecretsStore, getForgerAccountPath, getForgerHomeRoot, getForgerMetadataRoot,
   getProviderProfilesRoot, resolveLlmProviderAuthProfile, getSocialAppReviewPromptContext,
-  getFreePort, getLegacyForgerMetadataRoot, getMemoryStore, getPersonalAgentStore, getOfficialToolsService, getSpeechToTextService, getTextToSpeechService, getLiveVoiceInputService, getWakeWordService,
+  getFreePort, getLegacyForgerMetadataRoot, getMemoryStore, getPersonalAgentStore, getOfficialToolsService, getConnectionsService, getSelfOAuthCallbackService, getSpeechToTextService, getTextToSpeechService, getLiveVoiceInputService, getWakeWordService,
   getAudioDevices: async () => await getAudioRuntimeBroker().listDevices(),
   playTextToSpeechAudio: async (input: { playbackId: string; audioDataBase64: string; mimeType: string; outputDeviceId?: string }) => await getAudioRuntimeBroker().playAudio(input),
   cancelTextToSpeechPlayback: async (playbackId: string) => await getAudioRuntimeBroker().cancelPlayback(playbackId),

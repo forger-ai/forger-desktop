@@ -16,6 +16,7 @@ import {
   getDefaultAntigravityEffort,
   getDefaultCodexReasoningEffort,
   normalizeAntigravityModelAndEffort,
+  normalizeRuntimeEffortForModel,
   isClaudeEffort,
   isClaudeModel,
   isCodexModel,
@@ -111,13 +112,12 @@ export const getStoredCodexModel = (): string => {
 };
 
 export const getStoredCodexReasoningEffort = (): CodexReasoningEffort => {
+  const model = getStoredCodexModel();
   if (typeof window === 'undefined') {
-    return getDefaultCodexReasoningEffort(CODEX_MODEL_OPTIONS[0].realModelName);
+    return normalizeRuntimeEffortForModel('codex', model, getDefaultCodexReasoningEffort(model));
   }
   const stored = window.localStorage.getItem(CODEX_REASONING_STORAGE_KEY);
-  return isCodexReasoningEffort(stored)
-    ? stored as CodexReasoningEffort
-    : getDefaultCodexReasoningEffort(CODEX_MODEL_OPTIONS[0].realModelName);
+  return normalizeRuntimeEffortForModel('codex', model, isCodexReasoningEffort(stored) ? stored : getDefaultCodexReasoningEffort(model));
 };
 
 export const getStoredChatAgentProvider = (): AgentProvider | 'auto' => {

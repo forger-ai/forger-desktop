@@ -116,6 +116,9 @@ const createMcpServer = (overrides = {}) => {
     listOfficialToolActionIdsForApp: async () => new Set(),
     validateOfficialTool: async () => null,
     callOfficialTool: async () => ({ success: true }),
+    listConnectionGrantsForApp: async () => [],
+    listConnectionsForSession: async (grants) => ({ types: [], instances: [], grants }),
+    callConnectionFromSession: async (input) => ({ success: true, data: input }),
     ...overrides.options,
   });
   return { server, logs };
