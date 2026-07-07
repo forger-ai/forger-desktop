@@ -734,10 +734,6 @@ export const en = {
         title: 'Forger Cloud is optional',
         body: 'Add friends today. Soon, Forger Cloud will let you open your apps from your phone, share improvements from your public profile, and publish new apps for others to use.',
       },
-      finance: {
-        title: 'Start creating an app',
-        body: 'Create your first local app, or install Finance OS from the catalog if you want to try the experimental app.',
-      },
     },
     advanced: {
       views: {
@@ -1436,10 +1432,6 @@ export const en = {
     developer_tools: 'Developer Tools',
   } satisfies Record<AppCategory, string>,
   apps: {
-    'finance-os': {
-      name: 'Finance OS',
-      description: 'Track income, spending, and personal reports with a simple view.',
-    },
     'recetario-personal': {
       name: 'Personal Cookbook',
       description: 'Keep recipes, variations, and shopping lists together.',

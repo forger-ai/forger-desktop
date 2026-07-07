@@ -91,7 +91,6 @@ export function useForgerTour({
       { id: 'catalog', title: t.onboarding.steps.catalog.title, body: t.onboarding.steps.catalog.body, target: 'nav-catalog', view: 'catalog' },
       { id: 'feedback', title: t.onboarding.steps.feedback.title, body: t.onboarding.steps.feedback.body, target: 'nav-feedback', view: 'feedback' },
       { id: 'cloud', title: t.onboarding.steps.cloud.title, body: t.onboarding.steps.cloud.body, target: 'account-actions' },
-      { id: 'finance', title: t.onboarding.steps.finance.title, body: t.onboarding.steps.finance.body, target: 'finance-os-card', view: 'catalog' },
     ],
     [t],
   );

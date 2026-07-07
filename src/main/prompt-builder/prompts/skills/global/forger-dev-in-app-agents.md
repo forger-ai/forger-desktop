@@ -31,7 +31,7 @@ description: Use when designing, implementing, reviewing, or explaining in-app A
 - Poll task state with `get_agent_task(run_id)` and expose only safe public fields to the frontend.
 - Cancel task state with `cancel_agent_task(run_id)`.
 - Map `ForgerDesktopRuntimeUnavailable` to a user-facing unavailable state or HTTP 503. Map `ForgerDesktopRuntimeError` to a controlled HTTP error without leaking secrets.
-- Finance OS is the reference pattern: `frontend/src/api/assistant.ts` calls `/api/assistant/...`; `backend/src/app/routes/assistant.py` validates files, preprocesses documents, calls `start_agent_task`, and exposes polling/cancel routes.
+- App-local assistant routes should keep the same shape across products: a frontend API wrapper calls `/api/assistant/...`; backend routes validate inputs, prepare files, call `start_agent_task`, and expose polling/cancel routes.
 
 ## Manifest Agent Threads
 - Manifest agent threads are resumable coworkers declared in `manifest.agents`, such as advisors, reviewers, or orchestrators that continue across messages.

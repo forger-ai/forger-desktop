@@ -174,7 +174,7 @@ const getRuntimeStack = (manifest: JsonObject): string => {
 };
 
 const getCatalogStatus = (app: LocalApp, catalog: JsonObject): string => {
-  return asString(catalog.status, app.sourceSlug === 'finance-os' ? 'beta' : 'coming');
+  return asString(catalog.status, 'coming');
 };
 
 const optionalArray = (value: unknown): unknown[] | undefined => {

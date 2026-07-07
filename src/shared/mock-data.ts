@@ -9,11 +9,6 @@ import {
 
 export const installedAppsSeed: AppSummary[] = [
   {
-    id: 'finance-os',
-    category: 'finance',
-    status: 'installed',
-  },
-  {
     id: 'recetario-personal',
     category: 'home',
     status: 'installed',
@@ -21,11 +16,6 @@ export const installedAppsSeed: AppSummary[] = [
 ];
 
 export const catalogAppsSeed: CatalogApp[] = [
-  {
-    id: 'finance-os',
-    category: 'finance',
-    status: 'installed',
-  },
   {
     id: 'recetario-personal',
     category: 'home',

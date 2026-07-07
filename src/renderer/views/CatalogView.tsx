@@ -219,7 +219,7 @@ export function CatalogView({
                 betaLabel={isPrivateLocal ? t.beta.privateLocalBadge : isEarlyAccess ? t.beta.earlyAccessBadge : t.beta.appBadge}
                 averageRating={app.averageRating}
                 ratingsCount={app.ratingsCount}
-                onboardingTarget={app.id === 'finance-os' ? 'finance-os-card' : undefined}
+                onboardingTarget={undefined}
                 statusIndicatorLabel={statusIndicatorLabel}
                 primaryAction={primaryAction}
                 primaryActionLabel={primaryActionLabel}
