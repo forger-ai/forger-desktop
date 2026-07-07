@@ -166,4 +166,8 @@ export interface StackSkillTemplate {
   id: string;
   description: string;
   body: string;
+  resources?: Array<{
+    path: string;
+    content: Buffer;
+  }>;
 }

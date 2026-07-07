@@ -63,7 +63,6 @@ import {
   isMemoryTool,
   isOfficialTool,
   isPlainRecord,
-  legacyConnectionGrantsFromActionIds,
   memoryAccess,
   memoryErrorMessage,
   parseAppToolGrantRequestInput,
@@ -110,6 +109,7 @@ export interface ForgerMcpSessionAccess {
 interface ForgerMcpServerOptions {
   getAppVersion: () => string;
   getToolDefinitions: () => AgentToolDefinition[];
+  getConnectionToolDefinitions?: () => Promise<AgentToolDefinition[]>;
   getToolSettings: () => AgentToolSettings;
   appendInstallLog: (event: string, payload?: Record<string, unknown>) => Promise<void>;
   requestPermission: (
@@ -383,10 +383,7 @@ export class ForgerMcpServer {
       appIds: access?.appIds ?? (appId === 'forger' ? [] : [appId]),
       officialToolActionIds: access?.officialToolActionIds ?? [],
       forgerToolActionIds: access?.forgerToolActionIds ?? access?.officialToolActionIds ?? [],
-      connectionGrants: [
-        ...(access?.connectionGrants ?? []),
-        ...legacyConnectionGrantsFromActionIds(access?.officialToolActionIds ?? []),
-      ],
+      connectionGrants: access?.connectionGrants ?? [],
       locale: access?.locale,
       token,
       createdAt: new Date().toISOString(),
@@ -514,7 +511,8 @@ export class ForgerMcpServer {
       toolName,
       arguments: params?.arguments ?? null,
     });
-    if (!this.isAgentToolId(toolName)) {
+    const allToolDefinitions = await this.getAllToolDefinitions();
+    if (typeof toolName !== 'string' || !allToolDefinitions.some((tool) => tool.id === toolName)) {
       await this.options.appendInstallLog('agent_tool:mcp_tools_call_rejected', {
         appId: session.appId,
         runId: session.runId,
@@ -528,7 +526,7 @@ export class ForgerMcpServer {
       ? (params.arguments as Record<string, unknown>)
       : {};
     try {
-      const result = await this.executeAgentTool(session, toolName, args);
+      const result = await this.executeAgentTool(session, toolName as AgentToolId, args, allToolDefinitions);
       await this.options.appendInstallLog('agent_tool:mcp_tools_call_completed', {
         appId: session.appId,
         runId: session.runId,
@@ -563,7 +561,8 @@ export class ForgerMcpServer {
         : null;
     const connectionGrants = await this.getEffectiveConnectionGrants(session);
     const allowedConnectionActions = new Set(connectionGrants.flatMap((grant) => grant.actions));
-    const tools = this.getAllToolDefinitions().filter((tool) => {
+    const allToolDefinitions = await this.getAllToolDefinitions();
+    const tools = allToolDefinitions.filter((tool) => {
       if (tool.id === 'forger_add_app_to_personal_agent' && session.caller !== 'personal-agent') {
         return false;
       }
@@ -601,15 +600,18 @@ export class ForgerMcpServer {
     return tools;
   }
 
-  private isAgentToolId(value: unknown): value is AgentToolId {
-    return typeof value === 'string' && this.getAllToolDefinitions().some((tool) => tool.id === value);
-  }
-
-  private getAllToolDefinitions(): AgentToolDefinition[] {
-    return [
+  private async getAllToolDefinitions(): Promise<AgentToolDefinition[]> {
+    const connectionTools = await (this.options.getConnectionToolDefinitions?.() ?? Promise.resolve([]))
+      .catch(() => []);
+    const byId = new Map<AgentToolId, AgentToolDefinition>();
+    for (const tool of [
       ...this.options.getToolDefinitions(),
       ...INTERNAL_MCP_TOOL_DEFINITIONS,
-    ];
+      ...connectionTools,
+    ]) {
+      byId.set(tool.id, tool);
+    }
+    return [...byId.values()];
   }
 
   private async ensureToolApproval(
@@ -814,9 +816,10 @@ export class ForgerMcpServer {
     session: AgentMcpSession,
     toolId: AgentToolId,
     args: Record<string, unknown>,
+    allToolDefinitions?: AgentToolDefinition[],
   ): Promise<unknown> {
     const copy = getSharedCopy(session.locale).agentTools;
-    const tool = this.getAllToolDefinitions().find((candidate) => candidate.id === toolId);
+    const tool = (allToolDefinitions ?? await this.getAllToolDefinitions()).find((candidate) => candidate.id === toolId);
     if (!tool) {
       await this.options.appendInstallLog('agent_tool:not_found', {
         appId: session.appId,

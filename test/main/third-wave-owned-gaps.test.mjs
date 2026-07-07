@@ -17,11 +17,12 @@ const {
   usernameCooldownMessage,
 } = require('../../dist-electron/main/forger-backend/client-helpers.js');
 const { ForgerMcpServer } = require('../../dist-electron/main/forger-mcp-server.js');
+const { connectionToolDefinitionsFromState } = require('../../dist-electron/main/core/mcp-connection-tools.js');
 const { OfficialToolsService } = require('../../dist-electron/main/official-tools-service.js');
 const {
   GmailOAuthError,
   runGmailOAuthFlow,
-} = require('../../dist-electron/main/tools/gmail/oauth.js');
+} = require('../../dist-electron/main/connections/modules/gmail/oauth.js');
 
 const createSecretsStore = (overrides = {}) => ({
   hasToolSecret: async () => false,
@@ -135,6 +136,78 @@ const callMcp = async (session, body) => await fetch(session.url, {
 
 const parseToolResult = (payload) => JSON.parse(payload.result.content[0].text);
 
+test('connection tool definitions map connection actions into MCP tools defensively', async () => {
+  assert.deepEqual(await connectionToolDefinitionsFromState(() => ({})), []);
+
+  const definitions = await connectionToolDefinitionsFromState(() => ({
+    listTypes: async () => [
+      {
+        type: 'gmail',
+        label: 'Gmail',
+        actions: [
+          {
+            id: 'gmail.search_messages',
+            name: 'Search messages',
+            description: 'Search Gmail messages.',
+            risk: 'low',
+            inputSchema: { type: 'object' },
+          },
+          {
+            id: 'gmail.send_message',
+            name: 'Send message',
+            description: 'Send a Gmail message.',
+            risk: 'high',
+            inputSchema: { type: 'object' },
+          },
+        ],
+      },
+      {
+        type: 'slack',
+        label: 'Slack',
+        actions: [
+          {
+            id: 'slack.post_message',
+            name: 'Post message',
+            description: 'Post a Slack message.',
+            risk: 'medium',
+            inputSchema: { type: 'object' },
+          },
+        ],
+      },
+    ],
+  }));
+
+  assert.deepEqual(definitions.map(({ id, packageId, category, risk, defaultRequiresApproval }) => ({
+    id,
+    packageId,
+    category,
+    risk,
+    defaultRequiresApproval,
+  })), [
+    {
+      id: 'gmail.search_messages',
+      packageId: 'connection:gmail',
+      category: 'consulta',
+      risk: 'bajo',
+      defaultRequiresApproval: false,
+    },
+    {
+      id: 'gmail.send_message',
+      packageId: 'connection:gmail',
+      category: 'app',
+      risk: 'alto',
+      defaultRequiresApproval: false,
+    },
+    {
+      id: 'slack.post_message',
+      packageId: 'connection:slack',
+      category: 'app',
+      risk: 'medio',
+      defaultRequiresApproval: false,
+    },
+  ]);
+});
+
 const createBackendClient = (fetchImpl, reportingLogPath = () => undefined) => {
   const previousFetch = globalThis.fetch;
   globalThis.fetch = fetchImpl;
@@ -156,7 +229,7 @@ const createBackendClient = (fetchImpl, reportingLogPath = () => undefined) => {
   };
 };
 
-test('MCP server handles idempotent start, unavailable listen address, and late missing tool definitions', async () => {
+test('MCP server handles idempotent start, unavailable listen address, and missing tool handlers', async () => {
   const first = createMcpServer();
   await first.server.start();
   await first.server.start();
@@ -208,7 +281,11 @@ test('MCP server handles idempotent start, unavailable listen address, and late 
     const payload = await response.json();
     assert.equal(payload.result.isError, true);
     assert.equal(parseToolResult(payload).technicalCode, 'tool_not_found');
-    assert.equal(missing.logs.some((entry) => entry.event === 'agent_tool:not_found'), true);
+    assert.equal(missing.logs.some((entry) => (
+      entry.event === 'agent_tool:call_result'
+      && entry.payload?.toolId === 'transient_tool'
+      && entry.payload?.result?.technicalCode === 'tool_not_found'
+    )), true);
 
     const fallback = parseToolResult(await (await callMcp(session, {
       jsonrpc: '2.0',
@@ -294,22 +371,20 @@ test('OfficialToolsService covers execution fallbacks, missing declarations, and
     assert.deepEqual(await service.listAgentActionIdsForApp('missing-app'), new Set());
 
     await service.load();
-    await service.recordError('gmail', new Error('ignored_without_install'));
-    const activate = await service.activate('gmail');
-    assert.equal(activate.success, true);
+    await service.recordError('forger_chrome_extension', new Error('ignored_without_install'));
 
-    service.getTool = async () => ({ id: 'gmail', name: 'Gmail', status: 'unknown', configured: false });
+    service.getTool = async () => ({ id: 'forger_chrome_extension', name: 'Chrome', status: 'unknown', configured: false });
     const notReady = await service.validateAgentCall({
-      toolId: 'gmail',
-      actionId: 'gmail.search_messages',
+      toolId: 'forger_chrome_extension',
+      actionId: 'forger_chrome_extension.navigate',
     });
     assert.equal(notReady.technicalCode, 'tool_not_configured');
 
     service.validateAgentCall = async () => null;
-    service.modulesById.delete('gmail');
+    service.modulesById.delete('forger_chrome_extension');
     const missingExecutor = await service.callFromAgent({
-      toolId: 'gmail',
-      actionId: 'gmail.connection.status',
+      toolId: 'forger_chrome_extension',
+      actionId: 'forger_chrome_extension.connection.status',
     });
     assert.equal(missingExecutor.technicalCode, 'tool_executor_missing');
   } finally {
@@ -333,7 +408,7 @@ test('OfficialToolsService returns activation failures while configuring inactiv
 
   try {
     service.activate = async () => ({ success: false, userMessage: 'No disponible.', technicalCode: 'activation_failed' });
-    const result = await service.configure({ toolId: 'gmail' });
+    const result = await service.configure({ toolId: 'forger_chrome_extension' });
     assert.equal(result.technicalCode, 'activation_failed');
   } finally {
     await rm(root, { recursive: true, force: true });

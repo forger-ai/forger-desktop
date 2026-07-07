@@ -342,9 +342,6 @@ export function WorkflowEditor({ draft, onDraftChange, apps, agents, toolPackage
       }
     }
     for (const tool of officialTools) {
-      if (tool.connectionBacked) {
-        continue;
-      }
       for (const action of tool.actions) {
         if (action.outputSchema) {
           forgerToolOutputSchemas[action.id] = action.outputSchema;
@@ -633,7 +630,6 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, conn
     return options;
   }, [providerOptions, nodeProvider, copy.autoProvider]);
   const forgerToolActions = useMemo(() => officialTools
-    .filter((tool) => !tool.connectionBacked && !tool.hidden)
     .flatMap((tool) => tool.actions.map((action) => ({ tool, action }))), [officialTools]);
   const connectionActions = useMemo(() => connectionOptions
     .flatMap((connection) => connection.actions.map((action) => ({

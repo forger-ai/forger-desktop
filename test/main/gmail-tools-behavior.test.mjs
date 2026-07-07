@@ -10,7 +10,7 @@ const {
   buildRawEmail,
   parseSendInput,
   toBase64Url,
-} = require('../../dist-electron/main/tools/gmail/mime.js');
+} = require('../../dist-electron/main/connections/modules/gmail/mime.js');
 const {
   GmailApiError,
   readAttachment,
@@ -18,18 +18,18 @@ const {
   readThread,
   searchMessages,
   sendMessage,
-} = require('../../dist-electron/main/tools/gmail/client.js');
+} = require('../../dist-electron/main/connections/modules/gmail/client.js');
 const {
   GmailOAuthError,
   refreshGmailAccessToken,
   runGmailOAuthFlow,
-} = require('../../dist-electron/main/tools/gmail/oauth.js');
-const { gmailToolModule } = require('../../dist-electron/main/tools/gmail/index.js');
+} = require('../../dist-electron/main/connections/modules/gmail/oauth.js');
+const { gmailToolModule } = require('../../dist-electron/main/connections/modules/gmail/index.js');
 const {
   GMAIL_REFRESH_TOKEN_SECRET,
   GMAIL_SELF_OAUTH_CLIENT_ID_SECRET,
   GMAIL_SELF_OAUTH_CLIENT_SECRET_SECRET,
-} = require('../../dist-electron/main/tools/gmail/types.js');
+} = require('../../dist-electron/main/connections/modules/gmail/types.js');
 
 const decodeBase64Url = (value) => {
   const normalized = value.replace(/-/g, '+').replace(/_/g, '/');

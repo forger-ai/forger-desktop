@@ -359,7 +359,7 @@ test('MCP tools/list separates Forger Tools from ungranted connection actions', 
       },
       {
         id: 'gmail.search_messages',
-        packageId: 'official:gmail',
+        packageId: 'connection:gmail',
         name: 'Search Gmail',
         description: 'Search mail.',
         category: 'consulta',
@@ -389,7 +389,7 @@ test('MCP app-agent exposes and executes only manifest-granted connection action
     toolDefinitions: [
       {
         id: 'gmail.search_messages',
-        packageId: 'official:gmail',
+        packageId: 'connection:gmail',
         name: 'Search Gmail',
         description: 'Search mail.',
         category: 'consulta',
@@ -398,7 +398,7 @@ test('MCP app-agent exposes and executes only manifest-granted connection action
       },
       {
         id: 'gmail.send_email',
-        packageId: 'official:gmail',
+        packageId: 'connection:gmail',
         name: 'Send Gmail',
         description: 'Send mail.',
         category: 'app',
@@ -451,7 +451,7 @@ test('MCP typed connection actions honor agent tool approval settings', async ()
     toolDefinitions: [
       {
         id: 'gmail.search_messages',
-        packageId: 'official:gmail',
+        packageId: 'connection:gmail',
         name: 'Search Gmail',
         description: 'Search mail.',
         category: 'consulta',
@@ -601,6 +601,17 @@ test('MCP tool schemas expose strict official tool contracts and safe annotation
   const trelloBoardsSchema = getMcpToolInputSchema('trello.list_boards');
   assert.equal(trelloBoardsSchema.properties.connectionId.type, 'string');
   assert.equal(trelloBoardsSchema.additionalProperties, false);
+
+  assert.deepEqual(getMcpToolInputSchema('trello.filter_cards').required, []);
+  assert.equal(getMcpToolInputSchema('trello.filter_cards').properties.boardId.type, 'string');
+  assert.equal(getMcpToolInputSchema('trello.filter_cards').properties.labelIds.items.type, 'string');
+  assert.deepEqual(getMcpToolInputSchema('trello.update_card').required, ['cardId']);
+  assert.equal(getMcpToolInputSchema('trello.update_card').properties.dueComplete.type, 'boolean');
+  assert.deepEqual(getMcpToolInputSchema('trello.delete_card').required, ['cardId']);
+  assert.deepEqual(getMcpToolInputSchema('trello.comment_card').required, ['cardId', 'text']);
+  assert.deepEqual(getMcpToolInputSchema('trello.list_card_attachments').required, ['cardId']);
+  assert.deepEqual(getMcpToolInputSchema('trello.download_attachment').required, ['cardId', 'attachmentId']);
+  assert.deepEqual(getMcpToolInputSchema('trello.upload_attachment').required, ['cardId', 'filePath']);
 
   assert.deepEqual(getMcpToolAnnotations({
     id: 'memory_list',
@@ -815,12 +826,13 @@ test('official tool declarations dedupe entries and app grants gate optional too
 
   try {
     const refreshed = await service.refresh('en');
-    assert.equal(refreshed.tools.some((tool) => tool.id === 'gmail' && tool.name === 'Gmail'), true);
+    assert.equal(refreshed.tools.some((tool) => tool.id === 'gmail'), false);
+    assert.equal(refreshed.tools.some((tool) => tool.id === 'forger_chrome_extension'), true);
     assert.equal(await service.getTool('missing-tool'), null);
-    await service.activate('gmail');
+    assert.equal((await service.activate('gmail')).technicalCode, 'tool_not_found');
     assert.deepEqual(await service.listToolsForApp('finance-os'), []);
-    let gate = await service.getInstallGate('finance-os');
-    assert.equal(gate.optional[0].granted, false);
+    const gate = await service.getInstallGate('finance-os');
+    assert.deepEqual(gate.optional, []);
     assert.equal(gate.canInstall, true);
 
     const missingGrant = await service.previewOptionalAppToolGrant({ appId: 'finance-os', toolId: 'whatsapp' });
@@ -828,25 +840,23 @@ test('official tool declarations dedupe entries and app grants gate optional too
     assert.equal(missingGrant.technicalCode, 'app_tool_not_declared');
 
     const grantPreview = await service.previewOptionalAppToolGrant({ appId: 'finance-os', toolId: 'gmail' });
-    assert.equal(grantPreview.success, true);
-    assert.equal(grantPreview.alreadyGranted, false);
-    assert.match(grantPreview.warning, /todavia no esta configurada/);
+    assert.equal(grantPreview.success, false);
+    assert.equal(grantPreview.technicalCode, 'app_tool_not_declared');
 
     const grantResult = await service.setOptionalAppToolGrant({ appId: 'finance-os', toolId: 'gmail', granted: true });
-    assert.equal(grantResult.success, true);
-    assert.equal(grantResult.gate.optional[0].granted, true);
-    assert.match(grantResult.warning, /todavia no esta configurada/);
+    assert.equal(grantResult.success, false);
+    assert.equal(grantResult.technicalCode, 'app_tool_not_declared');
 
-    gate = await service.setAppToolGrant({ appId: 'finance-os', toolId: 'gmail', granted: true });
-    assert.equal(gate.optional[0].granted, true);
-    assert.deepEqual([...await service.listAgentActionIdsForApp('finance-os')], ['gmail.send_email']);
-    assert.equal((await service.listToolsForApp('finance-os')).map((tool) => tool.id).join(','), 'gmail');
+    const ignoredGate = await service.setAppToolGrant({ appId: 'finance-os', toolId: 'gmail', granted: true });
+    assert.deepEqual(ignoredGate.optional, []);
+    assert.deepEqual([...await service.listAgentActionIdsForApp('finance-os')], []);
+    assert.deepEqual(await service.listToolsForApp('finance-os'), []);
 
     const status = await service.callFromAgent({
       toolId: 'gmail',
       actionId: 'gmail.connection.status',
     });
-    assert.deepEqual(status, { success: true, data: { connected: false } });
+    assert.equal(status.technicalCode, 'tool_not_found');
   } finally {
     await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
   }
@@ -890,41 +900,37 @@ test('official tool wildcards expand only within the declared tool and respect o
 
   try {
     const requiredActions = await service.listAgentActionIdsForApp('required-wildcard');
-    assert.equal(requiredActions.has('gmail.search_messages'), true);
-    assert.equal(requiredActions.has('gmail.send_email'), true);
+    assert.deepEqual(requiredActions, new Set());
     assert.equal(requiredActions.has('whatsapp.send_message'), false);
 
     const wrongToolAction = await service.validateAgentCall({
       toolId: 'gmail',
       actionId: 'whatsapp.send_message',
     }, { appId: 'required-wildcard', requireAppGrant: true });
-    assert.equal(wrongToolAction.technicalCode, 'app_tool_action_not_declared');
+    assert.equal(wrongToolAction.technicalCode, 'app_tool_not_declared');
 
     assert.deepEqual(await service.listAgentActionIdsForApp('optional-wildcard'), new Set());
     const blockedOptional = await service.validateAgentCall({
       toolId: 'gmail',
       actionId: 'gmail.search_messages',
     }, { appId: 'optional-wildcard', requireAppGrant: true });
-    assert.equal(blockedOptional.technicalCode, 'app_tool_permission_denied');
+    assert.equal(blockedOptional.technicalCode, 'app_tool_not_declared');
 
     const defaultGate = await service.getInstallGate('optional-wildcard');
-    assert.equal(defaultGate.optional[0].granted, false);
-    assert.equal(defaultGate.optional[0].hasStoredGrant, false);
+    assert.deepEqual(defaultGate.optional, []);
     const defaultEnabledGate = await service.getInstallGate('optional-wildcard', undefined, { defaultOptionalGrants: true });
-    assert.equal(defaultEnabledGate.optional[0].granted, true);
-    assert.equal(defaultEnabledGate.optional[0].hasStoredGrant, false);
+    assert.deepEqual(defaultEnabledGate.optional, []);
 
     await service.setAppToolGrant({ appId: 'optional-wildcard', toolId: 'gmail', granted: true });
     const optionalActions = await service.listAgentActionIdsForApp('optional-wildcard');
-    assert.equal(optionalActions.has('gmail.search_messages'), true);
-    assert.equal(optionalActions.has('gmail.send_email'), true);
+    assert.deepEqual(optionalActions, new Set());
     assert.equal(optionalActions.has('whatsapp.send_message'), false);
   } finally {
     await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
   }
 });
 
-test('official tools configure Gmail through OAuth callback and clean grants on deactivate', async () => {
+test('official tools reject Gmail configure and grants because Gmail is a Connection', async () => {
   const root = await mkdtemp(join(tmpdir(), 'forger-tools-configure-'));
   const secrets = new Map();
   const deletedTools = [];
@@ -970,18 +976,18 @@ test('official tools configure Gmail through OAuth callback and clean grants on 
 
   try {
     const configured = await service.configure({ toolId: 'gmail' });
-    assert.equal(configured.success, true);
-    assert.equal((await service.getTool('gmail')).status, 'configured');
+    assert.equal(configured.success, false);
+    assert.equal(configured.technicalCode, 'tool_not_found');
     await service.setAppToolGrant({ appId: 'finance-os', toolId: 'gmail', granted: true });
-    assert.equal((await service.getInstallGate('finance-os')).optional[0].granted, true);
+    assert.deepEqual((await service.getInstallGate('finance-os')).optional, []);
 
     const deactivated = await service.deactivate('gmail');
-    assert.equal(deactivated.success, true);
-    assert.deepEqual(deletedTools, ['gmail']);
+    assert.equal(deactivated.success, false);
+    assert.equal(deactivated.technicalCode, 'tool_not_found');
+    assert.deepEqual(deletedTools, []);
     assert.equal(secrets.size, 0);
     assert.deepEqual(await service.listAgentActionIdsForApp('finance-os'), new Set());
-    const registry = JSON.parse(await readFile(join(root, 'official-tools.json'), 'utf8'));
-    assert.deepEqual(registry.appGrants['finance-os'], {});
+    await assert.rejects(readFile(join(root, 'official-tools.json'), 'utf8'), /ENOENT/);
   } finally {
     await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
   }
@@ -1030,31 +1036,31 @@ test('official tools enforce app declarations before configured tool execution',
       actionId: 'gmail.search_messages',
     })).technicalCode, 'app_tools_not_declared');
 
-    await service.activate('gmail');
+    assert.equal((await service.activate('gmail')).technicalCode, 'tool_not_found');
     const status = await service.callFromApp('finance-os', {
       toolId: 'gmail',
       actionId: 'gmail.connection.status',
     });
-    assert.deepEqual(status, { success: true, data: { connected: false } });
+    assert.equal(status.technicalCode, 'app_tool_not_declared');
 
     const notConfigured = await service.callFromApp('finance-os', {
       toolId: 'gmail',
       actionId: 'gmail.search_messages',
       input: { query: 'from:bank' },
     });
-    assert.equal(notConfigured.technicalCode, 'tool_not_configured');
+    assert.equal(notConfigured.technicalCode, 'app_tool_not_declared');
 
     const optionalDenied = await service.callFromApp('mailer', {
       toolId: 'gmail',
       actionId: 'gmail.send_email',
     });
-    assert.equal(optionalDenied.technicalCode, 'app_tool_permission_denied');
+    assert.equal(optionalDenied.technicalCode, 'app_tool_not_declared');
 
     const undeclaredAction = await service.callFromAgent({
       toolId: 'gmail',
       actionId: 'gmail.read_thread',
     }, { appId: 'finance-os', requireAppGrant: true });
-    assert.equal(undeclaredAction.technicalCode, 'app_tool_action_not_declared');
+    assert.equal(undeclaredAction.technicalCode, 'app_tool_not_declared');
   } finally {
     await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
   }
@@ -1103,9 +1109,9 @@ test('official tools preserve registry fallbacks, error status, required gates, 
     assert.deepEqual(await service.listAgentActionIdsForApp('missing-app'), new Set());
 
     const gate = await service.getInstallGate('required-app');
-    assert.equal(gate.required[0].available, false);
+    assert.deepEqual(gate.required, []);
     assert.equal(gate.canInstall, true);
-    assert.deepEqual([...await service.listAgentActionIdsForApp('required-app')], ['gmail.search_messages']);
+    assert.deepEqual([...await service.listAgentActionIdsForApp('required-app')], []);
 
     const noAppGrant = await service.validateAgentCall({
       toolId: 'gmail',
@@ -1125,26 +1131,26 @@ test('official tools preserve registry fallbacks, error status, required gates, 
     }, { appId: 'required-app', requireAppGrant: true });
     assert.equal(agentUndeclaredTool.technicalCode, 'app_tool_not_declared');
 
-    await service.activate('gmail');
+    assert.equal((await service.activate('gmail')).technicalCode, 'tool_not_found');
     const failedConfigure = await service.configure({ toolId: 'gmail' });
     assert.equal(failedConfigure.success, false);
-    assert.equal(failedConfigure.technicalCode, 'gmail_oauth_client_missing');
-    assert.equal((await service.getTool('gmail')).status, 'error');
+    assert.equal(failedConfigure.technicalCode, 'tool_not_found');
+    assert.equal(await service.getTool('gmail'), null);
 
     const errorStatus = await service.callFromAgent({
       toolId: 'gmail',
       actionId: 'gmail.search_messages',
       input: { query: 'from:bank' },
     });
-    assert.equal(errorStatus.technicalCode, 'tool_configuration_error');
+    assert.equal(errorStatus.technicalCode, 'tool_not_found');
 
     await service.setAppToolGrant({ appId: 'optional-app', toolId: 'gmail', granted: true });
     const kept = await service.deactivate('gmail', { keepSecrets: true });
-    assert.equal(kept.success, true);
+    assert.equal(kept.success, false);
+    assert.equal(kept.technicalCode, 'tool_not_found');
     assert.deepEqual(deletedTools, []);
 
-    const registry = JSON.parse(await readFile(join(root, 'official-tools.json'), 'utf8'));
-    assert.deepEqual(registry.appGrants['optional-app'], {});
+    assert.equal(await readFile(join(root, 'official-tools.json'), 'utf8'), '{bad json');
   } finally {
     await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
   }
@@ -1201,7 +1207,7 @@ test('official tools validate unavailable, undeclared, optional, and malformed r
       actionId: 'gmail.search_messages',
       input: { query: 'from:bank' },
     });
-    assert.equal(inactive.technicalCode, 'tool_not_active');
+    assert.equal(inactive.technicalCode, 'tool_not_found');
 
     const undeclaredTool = await service.callFromApp('finance-os', {
       toolId: 'gmail-missing',
@@ -1210,19 +1216,19 @@ test('official tools validate unavailable, undeclared, optional, and malformed r
     assert.equal(undeclaredTool.technicalCode, 'app_tool_not_declared');
     assert.match(undeclaredTool.userMessage, /toolId, reason y actions/);
 
-    await service.activate('gmail');
+    assert.equal((await service.activate('gmail')).technicalCode, 'tool_not_found');
     const undeclaredAppAction = await service.callFromApp('finance-os', {
       toolId: 'gmail',
       actionId: 'gmail.send_email',
     });
-    assert.equal(undeclaredAppAction.technicalCode, 'app_tool_action_not_declared');
-    assert.match(undeclaredAppAction.userMessage, /accion necesaria/);
+    assert.equal(undeclaredAppAction.technicalCode, 'app_tool_not_declared');
+    assert.match(undeclaredAppAction.userMessage, /toolId, reason y actions/);
 
     const optionalAgentDenied = await service.validateAgentCall({
       toolId: 'gmail',
       actionId: 'gmail.send_email',
     }, { appId: 'mailer', requireAppGrant: true });
-    assert.equal(optionalAgentDenied.technicalCode, 'app_tool_permission_denied');
+    assert.equal(optionalAgentDenied.technicalCode, 'app_tool_not_declared');
   } finally {
     await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
   }

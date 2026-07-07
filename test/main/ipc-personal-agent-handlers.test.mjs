@@ -75,19 +75,6 @@ const createHarness = ({ connectedProviders = ['codex'], officialTools, connecti
       officialTools ?? {
         tools: [
           {
-            id: 'gmail',
-            name: 'Gmail',
-            description: 'Correo',
-            configured: true,
-            status: 'ready',
-            connectionBacked: true,
-            hidden: true,
-            connectionType: 'gmail',
-            actions: [
-              { id: 'gmail.search_messages', name: 'Search', description: 'Busca correos', risk: 'low' },
-            ],
-          },
-          {
             id: 'forger_chrome_extension',
             name: 'Chrome',
             description: 'Controla Chrome',
@@ -171,13 +158,14 @@ test('personal agent IPC lists agents and delegates deletion, conversations, and
   ]);
 });
 
-test('personal agent IPC create separates Forger Tool grants from legacy connection action grants', async () => {
+test('personal agent IPC create separates Forger Tool grants from explicit connection grants', async () => {
   const { handlers, storeCalls } = createHarness();
 
   const created = await handlers.get(IPC_CHANNELS.personalAgentsCreate)(null, {
     name: 'Ops',
     appIds: ['finance-os', 'uninstalled-app'],
     toolIds: ['gmail.search_messages', 'forger_chrome_extension.navigate', 'unknown.action'],
+    connectionGrants: [{ type: 'gmail', actions: ['gmail.search_messages'], multiple: true }],
   });
 
   assert.equal(created.id, 'agent-2');
@@ -230,6 +218,7 @@ test('personal agent IPC update permissions filters grants before persisting', a
     agentId: 'agent-1',
     appIds: ['uninstalled-app', 'notes'],
     toolIds: ['unknown.action', 'gmail.search_messages', 'forger_chrome_extension.navigate'],
+    connectionGrants: [{ type: 'gmail', actions: ['gmail.search_messages'], multiple: true }],
   });
 
   assert.equal(updated.id, 'agent-1');

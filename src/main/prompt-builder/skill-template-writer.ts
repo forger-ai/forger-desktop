@@ -9,6 +9,21 @@ export interface SkillTemplateWriterDeps {
 
 const yamlScalar = (value: string): string => JSON.stringify(value);
 
+const normalizeSkillResourcePath = (pathApi: typeof path, relativePath: string): string => {
+  const normalized = relativePath.replace(/\\/g, '/');
+  const segments = normalized.split('/');
+  if (
+    !normalized
+    || pathApi.isAbsolute(normalized)
+    || segments.some((segment) => !segment || segment === '.' || segment === '..')
+    || normalized === 'SKILL.md'
+    || normalized === 'README.md'
+  ) {
+    throw new Error(`skill_resource_path_invalid:${relativePath}`);
+  }
+  return normalized;
+};
+
 export const normalizeSkillTemplateBody = (template: ForgerSkillTemplate): string => {
   const bodyWithoutFrontmatter = template.body.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '');
   return [
@@ -54,6 +69,12 @@ export const writeSkillTemplates = async (
     await deps.fs.mkdir(targetDir, { recursive: true });
     await deps.fs.writeFile(deps.path.join(targetDir, 'SKILL.md'), normalizeSkillTemplateBody(template), 'utf8');
     await deps.fs.writeFile(deps.path.join(targetDir, 'README.md'), `${template.description}\n`, 'utf8');
+    for (const resource of template.resources ?? []) {
+      const resourcePath = normalizeSkillResourcePath(deps.path, resource.path);
+      const targetPath = deps.path.join(targetDir, resourcePath);
+      await deps.fs.mkdir(deps.path.dirname(targetPath), { recursive: true });
+      await deps.fs.writeFile(targetPath, resource.content);
+    }
   }
 };
 

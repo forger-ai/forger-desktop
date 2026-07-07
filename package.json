@@ -112,7 +112,10 @@
         "from": "src/main/prompt-builder/prompts",
         "to": "prompt-builder/prompts",
         "filter": [
-          "**/*.md"
+          "**/*.md",
+          "**/*.py",
+          "**/*.csv",
+          "**/*.txt"
         ]
       },
       {

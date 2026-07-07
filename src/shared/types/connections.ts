@@ -129,7 +129,6 @@ export interface AppConnectionDeclaration {
   actions: string[];
   reason: string;
   multiple: boolean;
-  legacyToolId?: string;
 }
 
 export interface PersistedConnectionGrant {

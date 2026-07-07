@@ -42,22 +42,6 @@ const getConnectionTypeForAction = (toolId: string): string | null => {
   return connectionTypeForActionId(toolId) || null;
 };
 
-export const legacyConnectionGrantsFromActionIds = (actionIds: string[]): ConnectionSessionGrant[] => {
-  const byType = new Map<string, Set<string>>();
-  for (const actionId of actionIds) {
-    const type = getConnectionTypeForAction(actionId);
-    if (!type) continue;
-    const actions = byType.get(type) ?? new Set<string>();
-    actions.add(actionId);
-    byType.set(type, actions);
-  }
-  return [...byType.entries()].map(([type, actions]) => ({
-    type,
-    actions: [...actions],
-    multiple: true,
-  }));
-};
-
 export const dedupeConnectionGrants = (grants: ConnectionSessionGrant[]): ConnectionSessionGrant[] => {
   const byType = new Map<string, ConnectionSessionGrant>();
   for (const grant of grants) {

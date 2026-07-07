@@ -37,6 +37,7 @@ import type {
   AgentToolDefinition,
   AgentToolSettings,
   AppSummary,
+  CallConnectionActionResult,
   ConfigureConnectionInput,
   ConnectionActionDefinition,
   ConnectionInstance,
@@ -47,6 +48,7 @@ import type {
   Workflow,
 } from '@shared/types';
 import { BUILT_IN_CONNECTION_TYPES } from '@shared/connection-catalog';
+import { getWhatsAppPairingPresentation } from '@shared/connections-pairing';
 import type { AppDictionary } from '@renderer/i18n';
 import { GmailIcon, SlackIcon, TrelloIcon } from './tools/ToolIcons';
 import { BrandIcon } from './tools/BrandIcons';
@@ -152,7 +154,7 @@ export function ConnectionsView({
   const [secrets, setSecrets] = useState<Record<string, string>>({});
   const [gmailMode, setGmailMode] = useState<'forger' | 'self'>('forger');
   const [pairingConnectionId, setPairingConnectionId] = useState<string | null>(null);
-  const [pairingResult, setPairingResult] = useState('');
+  const [pairingResult, setPairingResult] = useState<CallConnectionActionResult | null>(null);
 
   const refresh = useCallback(async () => {
     const [next, nextAgents, nextWorkflows, nextApps] = await Promise.all([
@@ -194,7 +196,7 @@ export function ConnectionsView({
           setSetupOpen(false);
           setSetupGuideOpen(false);
           setPairingConnectionId(null);
-          setPairingResult('');
+          setPairingResult(null);
         }
       })().catch(() => undefined);
     }, 3000);
@@ -254,6 +256,10 @@ export function ConnectionsView({
     };
   }, [agents, apps, selectedDefinition, selectedInstance, workflows]);
   const usageCount = usage.agents.length + usage.workflows.length + usage.apps.length;
+  const pairingPresentation = useMemo(
+    () => getWhatsAppPairingPresentation(pairingResult),
+    [pairingResult],
+  );
 
   const openSetup = (type?: string, connectionId?: string) => {
     const instance = connectionId ? state.instances.find((candidate) => candidate.id === connectionId) ?? null : null;
@@ -263,7 +269,7 @@ export function ConnectionsView({
     setSecrets({});
     setGmailMode('forger');
     setPairingConnectionId(null);
-    setPairingResult('');
+    setPairingResult(null);
     setSetupGuideOpen(false);
     setSetupOpen(true);
   };
@@ -323,9 +329,7 @@ export function ConnectionsView({
         connectionId: result.instance.id,
         input: { method: 'qr' },
       });
-      setPairingResult(pairing.success
-        ? JSON.stringify(pairing.data ?? {}, null, 2)
-        : pairing.userMessage ?? pairing.technicalCode ?? copy.statusCheckFailed);
+      setPairingResult(pairing);
     } finally {
       setBusy(null);
     }
@@ -373,7 +377,7 @@ export function ConnectionsView({
     }
   };
 
-  const canSubmitSetup = Boolean(setupDefinition) && busy === null
+  const canSubmitSetup = Boolean(setupDefinition) && busy === null && !pairingConnectionId
     && (setupDefinition?.type !== 'gmail' || gmailMode === 'forger'
       || (Boolean(secrets[GMAIL_SELF_OAUTH_CLIENT_ID_SECRET]?.trim())
         && Boolean(secrets[GMAIL_SELF_OAUTH_CLIENT_SECRET_SECRET]?.trim())))
@@ -629,7 +633,7 @@ export function ConnectionsView({
                 setSetupType(definition?.type ?? '');
                 setSecrets({});
                 setLabel('');
-                setPairingResult('');
+                setPairingResult(null);
                 setPairingConnectionId(null);
                 setSetupGuideOpen(false);
               }}
@@ -788,15 +792,35 @@ export function ConnectionsView({
               </Stack>
             ) : null}
 
-            {pairingResult ? (
-              <TextField
-                label={copy.pairingResult}
-                value={pairingResult}
-                multiline
-                minRows={4}
-                size="small"
-                helperText={copy.pairingWaiting}
-              />
+            {pairingPresentation.kind === 'error' ? (
+              <Alert severity="error">{pairingPresentation.message || copy.statusCheckFailed}</Alert>
+            ) : null}
+            {pairingPresentation.kind === 'qr' ? (
+              <Stack spacing={1} alignItems="flex-start">
+                <Typography variant="body2" color="text.secondary">{copy.pairingWaiting}</Typography>
+                <Box
+                  component="img"
+                  src={pairingPresentation.qrDataUrl}
+                  alt={copy.pairingResult}
+                  sx={{
+                    width: 220,
+                    height: 220,
+                    border: 1,
+                    borderColor: 'divider',
+                    borderRadius: 1,
+                    p: 1,
+                    bgcolor: 'background.paper',
+                  }}
+                />
+              </Stack>
+            ) : null}
+            {pairingPresentation.kind === 'pairing_code' ? (
+              <Alert severity="info">
+                {copy.pairingResult}: <strong>{pairingPresentation.pairingCode}</strong>
+              </Alert>
+            ) : null}
+            {pairingPresentation.kind === 'waiting' ? (
+              <Alert severity="info" variant="outlined">{copy.pairingWaiting}</Alert>
             ) : null}
           </Stack>
         </DialogContent>

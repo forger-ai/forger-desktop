@@ -913,6 +913,27 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
     };
   }
 
+  if (toolId === 'trello.filter_cards') {
+    return {
+      type: 'object',
+      properties: {
+        connectionId: { type: 'string' },
+        boardId: { type: 'string' },
+        listId: { type: 'string' },
+        query: { type: 'string' },
+        closed: { type: 'boolean' },
+        labelIds: { type: 'array', items: { type: 'string' } },
+        memberIds: { type: 'array', items: { type: 'string' } },
+        dueBefore: { type: 'string', description: 'Fecha maxima de vencimiento en formato ISO 8601.' },
+        dueAfter: { type: 'string', description: 'Fecha minima de vencimiento en formato ISO 8601.' },
+        dueComplete: { type: 'boolean' },
+        limit: { type: 'number', description: 'Cantidad maxima de tarjetas (default 50).' },
+      },
+      required: [],
+      additionalProperties: false,
+    };
+  }
+
   if (toolId === 'trello.create_card') {
     return {
       type: 'object',
@@ -924,6 +945,89 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
         dueDate: { type: 'string', description: 'Fecha limite en formato ISO 8601.' },
       },
       required: ['listId', 'name'],
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'trello.update_card') {
+    return {
+      type: 'object',
+      properties: {
+        connectionId: { type: 'string' },
+        cardId: { type: 'string' },
+        name: { type: 'string' },
+        description: { type: 'string' },
+        listId: { type: 'string' },
+        dueDate: { type: 'string', description: 'Fecha limite en formato ISO 8601.' },
+        dueComplete: { type: 'boolean' },
+        closed: { type: 'boolean' },
+      },
+      required: ['cardId'],
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'trello.delete_card') {
+    return {
+      type: 'object',
+      properties: {
+        connectionId: { type: 'string' },
+        cardId: { type: 'string' },
+      },
+      required: ['cardId'],
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'trello.comment_card') {
+    return {
+      type: 'object',
+      properties: {
+        connectionId: { type: 'string' },
+        cardId: { type: 'string' },
+        text: { type: 'string' },
+      },
+      required: ['cardId', 'text'],
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'trello.list_card_attachments') {
+    return {
+      type: 'object',
+      properties: {
+        connectionId: { type: 'string' },
+        cardId: { type: 'string' },
+      },
+      required: ['cardId'],
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'trello.download_attachment') {
+    return {
+      type: 'object',
+      properties: {
+        connectionId: { type: 'string' },
+        cardId: { type: 'string' },
+        attachmentId: { type: 'string' },
+        fileName: { type: 'string' },
+      },
+      required: ['cardId', 'attachmentId'],
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'trello.upload_attachment') {
+    return {
+      type: 'object',
+      properties: {
+        connectionId: { type: 'string' },
+        cardId: { type: 'string' },
+        filePath: { type: 'string' },
+        name: { type: 'string' },
+      },
+      required: ['cardId', 'filePath'],
       additionalProperties: false,
     };
   }

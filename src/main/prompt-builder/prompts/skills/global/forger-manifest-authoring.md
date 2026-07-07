@@ -1,11 +1,13 @@
 ---
 name: forger-manifest-authoring
-description: Use when creating, editing, validating, or reviewing app manifest.json fields for stack, services, Forger Tools, Connections, appSecrets, promptTemplates, agents, scripts, skills, tunnel, or catalog metadata.
+description: Use when an app needs platform runtime wiring or manifest changes: services, MCP/data tools, Forger Tools, Connections, secrets, promptTemplates, AI tasks, recommendations/import/extract/summarize/generate flows, app agents/assistants/advisors, skills/scripts, platformCapabilities, tunnels, catalog/install metadata, or manifest.json validation.
 ---
 
+- Use this skill even when the person does not say "manifest". Product requests often imply manifest work when an app needs an AI task, assistant, recommendation flow, import/extract/summarize/generate workflow, connected account, Forger Tool, app secret, runtime capability, local sharing, internet sharing, app-local skill, script, service, MCP server, or catalog/install behavior.
 - A manifest is an internal Forger platform contract. It describes how Forger installs, runs, prompts, grants Forger Tools and Connections to, and operates an app. It is not the list of visible app features.
 - Current non-deprecated manifest sections include `name`, `version`, `description`, `changelog`, `stack`, `catalog`, `platformCapabilities`, `services`, `mcp`, `tools`, `connections`, `appSecrets`, `promptTemplates`, `agents`, `scripts`, `skills`, `cloudMessaging`, `agentRuntime`, `remoteTunnel`, and `localNetworkShare`.
 - Treat `catalog.capabilities` as decorative catalog copy only. Do not add `catalog.capabilities` for runtime behavior, permissions, service access, Forger Tools, Connections, secrets, app agents, prompt templates, scripts, skills, messaging, remote tunnel, local network sharing, Speech to text, or Text to speech.
+- If `catalog.supported_platforms` declares Windows, macOS, or Linux support, app code must respect that platform contract. Use `forger-cross-platform-app-code` when code touches OS detection, filesystem paths, processes, runtime startup, scripts, MCP helpers, or app-agent helpers.
 - `localNetworkShare` and `remoteTunnel` are top-level manifest flags. New apps created from Forger default both flags to `true` so Desktop can provide local network sharing and remote tunnel sessions.
 - Agents may edit `manifest.json` when an app needs platform runtime access. Adding `platformCapabilities`, `localNetworkShare`, `remoteTunnel`, `tools.required`, or `connections.required` is the app declaring its runtime contract; after the app is restarted, Desktop re-reads the manifest and wires the matching platform bridge, access metadata, required Forger Tool actions, or required Connection actions. Optional Forger Tools and Connections still need a user grant or approval before the app can use them.
 

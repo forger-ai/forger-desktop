@@ -1633,6 +1633,8 @@ test('normalizeInstalledAgentContext writes app runtime skills while ignoring sk
   assert.ok(generated.includes('forger-installed-app-change'));
   assert.ok(generated.includes('forger-dev-backend-development'));
   assert.ok(generated.includes('forger-manifest-authoring'));
+  assert.ok(generated.includes('forger-memory'));
+  assert.ok(generated.includes('ui-ux-pro-max'));
   assert.equal(generated.includes('forger-python-backend'), false);
   assert.equal(generated.includes('forger-fastapi-contracts'), false);
   assert.equal(generated.includes('forger-frontend-structure'), false);
@@ -1649,10 +1651,14 @@ test('normalizeInstalledAgentContext writes app runtime skills while ignoring sk
   assert.ok(generated.includes('forger-app-mcp-data-tools'));
   assert.ok(generated.includes('inside'));
   assert.equal(generated.includes('outside-skill'), false);
+  await fs.access(path.join(skillsRoot, 'ui-ux-pro-max', 'scripts', 'search.py'));
+  await fs.access(path.join(skillsRoot, 'ui-ux-pro-max', 'data', 'stacks', 'shadcn.csv'));
   const claudeGenerated = await fs.readdir(path.join(installDir, '.claude', 'skills'));
   assert.ok(claudeGenerated.includes('forger-installed-app-change'));
+  assert.ok(claudeGenerated.includes('ui-ux-pro-max'));
   assert.ok(claudeGenerated.includes('inside'));
   assert.equal(claudeGenerated.includes('outside-skill'), false);
+  await fs.access(path.join(installDir, '.claude', 'skills', 'ui-ux-pro-max', 'scripts', 'search.py'));
   const appToolSkill = await fs.readFile(path.join(skillsRoot, 'forger-app-official-tools', 'SKILL.md'), 'utf8');
   assert.match(appToolSkill, /This app has not declared any Forger Tool or Connection actions/);
   const agentsMarkdown = await fs.readFile(path.join(installDir, 'AGENTS.md'), 'utf8');

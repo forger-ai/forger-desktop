@@ -2167,6 +2167,103 @@ test('chat orchestrator saves app versions only when provider runs change files'
   }
 });
 
+test('chat orchestrator saves changed apps created during create-app runs', async () => {
+  const harness = await createHarness();
+  const appId = 'created-planner';
+  const appRoot = join(harness.privateAppsRoot, appId);
+  await mkdir(appRoot, { recursive: true });
+  await writeFile(join(appRoot, 'app.txt'), 'starter\n', 'utf8');
+  await ensureGitRepository(appRoot);
+  await ensureUserModifiedBranch(appRoot);
+  const initialHead = await getGitHead(appRoot);
+  try {
+    harness.orchestrator.sandboxRunner = {
+      async runCodex() {
+        const [runId] = harness.orchestrator.runs.keys();
+        harness.orchestrator.recordCreatedAppFromMcp(runId, {
+          appId,
+          name: 'Created Planner',
+          description: 'Plans useful work.',
+          purpose: 'Help plan a week.',
+        });
+        await writeFile(join(appRoot, 'app.txt'), 'implemented\n', 'utf8');
+        return { assistantText: 'Built the planner flow.', threadId: 'created-app-thread', toolEvents: 1 };
+      },
+      async runClaude() {
+        throw new Error('not_used');
+      },
+    };
+
+    const started = await harness.orchestrator.startRun({
+      prompt: 'Create a planner app',
+      threadId: null,
+      conversationId: 'conversation-created-app-dirty',
+      conversationHistory: [{ role: 'user', content: 'Create a planner app' }],
+      chatMode: 'create_app',
+    });
+    const finalRun = await waitForRun(harness.events, started.runId);
+    assert.equal(finalRun.status, 'applied');
+    assert.equal(finalRun.createdApp?.appId, appId);
+    assert.ok(finalRun.commitSha);
+    assert.notEqual(finalRun.commitSha, initialHead);
+    assert.deepEqual(await getGitStatus(appRoot), []);
+    assert.match(finalRun.userMessage, /Version guardada/);
+
+    const operations = await harness.orchestrator.operationHistory.read(appId);
+    assert.equal(operations.length, 1);
+    assert.equal(operations[0].appId, appId);
+    assert.equal(operations[0].runId, started.runId);
+    assert.equal(operations[0].commitSha, finalRun.commitSha);
+  } finally {
+    await harness.cleanup();
+  }
+});
+
+test('chat orchestrator does not create empty commits for clean created apps', async () => {
+  const harness = await createHarness();
+  const appId = 'created-clean';
+  const appRoot = join(harness.privateAppsRoot, appId);
+  await mkdir(appRoot, { recursive: true });
+  await writeFile(join(appRoot, 'app.txt'), 'starter\n', 'utf8');
+  await ensureGitRepository(appRoot);
+  await ensureUserModifiedBranch(appRoot);
+  const initialHead = await getGitHead(appRoot);
+  try {
+    harness.orchestrator.sandboxRunner = {
+      async runCodex() {
+        const [runId] = harness.orchestrator.runs.keys();
+        harness.orchestrator.recordCreatedAppFromMcp(runId, {
+          appId,
+          name: 'Created Clean',
+          description: 'Clean app.',
+          purpose: 'Stay clean.',
+        });
+        return { assistantText: 'Created the app shell.', threadId: 'created-clean-thread', toolEvents: 1 };
+      },
+      async runClaude() {
+        throw new Error('not_used');
+      },
+    };
+
+    const started = await harness.orchestrator.startRun({
+      prompt: 'Create a clean app',
+      threadId: null,
+      conversationId: 'conversation-created-app-clean',
+      conversationHistory: [{ role: 'user', content: 'Create a clean app' }],
+      chatMode: 'create_app',
+    });
+    const finalRun = await waitForRun(harness.events, started.runId);
+    assert.equal(finalRun.status, 'preview_ready');
+    assert.equal(finalRun.createdApp?.appId, appId);
+    assert.equal(finalRun.commitSha, undefined);
+    assert.equal(await getGitHead(appRoot), initialHead);
+    assert.deepEqual(await getGitStatus(appRoot), []);
+    assert.deepEqual(await harness.orchestrator.operationHistory.read(appId), []);
+  } finally {
+    await harness.cleanup();
+  }
+});
+
 test('chat orchestrator handles late cancellation after provider completion', async () => {
   const harness = await createHarness();
   try {

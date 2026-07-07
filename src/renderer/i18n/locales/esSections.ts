@@ -449,14 +449,6 @@ export const esSections = {
           name: 'Herramientas de Forger',
           description: 'Herramientas incluidas con la aplicación desktop de Forger.',
         },
-        'official:gmail': {
-          name: 'Gmail',
-          description: 'Herramienta oficial para buscar, leer y enviar correos de Gmail.',
-        },
-        'official:whatsapp': {
-          name: 'WhatsApp (no oficial)',
-          description: 'Herramienta no oficial para leer y enviar mensajes con una conexión local de WhatsApp Web.',
-        },
       },
       definitions: {
         forger_list_catalog: {

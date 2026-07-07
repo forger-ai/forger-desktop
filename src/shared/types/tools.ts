@@ -76,7 +76,14 @@ export type AgentToolId =
   | 'trello.list_boards'
   | 'trello.list_lists'
   | 'trello.list_cards'
-  | 'trello.create_card';
+  | 'trello.filter_cards'
+  | 'trello.create_card'
+  | 'trello.update_card'
+  | 'trello.delete_card'
+  | 'trello.comment_card'
+  | 'trello.list_card_attachments'
+  | 'trello.download_attachment'
+  | 'trello.upload_attachment';
 
 export type AgentToolCategory = 'consulta' | 'app' | 'actualizacion' | 'vista' | 'memoria';
 
@@ -169,11 +176,6 @@ export interface OfficialToolSummary extends OfficialToolDefinition {
   installedVersion?: string;
   configured: boolean;
   error?: string;
-  /** True when the old tool row is now backed by the Connections domain. */
-  connectionBacked?: boolean;
-  /** UI hint: hide unconfigured legacy connection-backed tools from Forger Tools. */
-  hidden?: boolean;
-  connectionType?: string;
 }
 
 export interface OfficialToolsState {

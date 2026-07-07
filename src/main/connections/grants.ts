@@ -2,8 +2,6 @@ import type {
   AppConnectionDeclaration,
   PersistedConnectionGrant,
 } from '../../shared/types/connections';
-import type { AppToolDeclaration } from '../../shared/types';
-import { isBuiltInConnectionType } from '../../shared/connection-catalog';
 
 const ALL_ACTIONS_TOKEN = '*';
 
@@ -61,46 +59,14 @@ const normalizeBucket = (value: unknown): AppConnectionDeclaration[] => {
   return [...merged.values()];
 };
 
-const legacyToolToConnectionDeclaration = (declaration: AppToolDeclaration): AppConnectionDeclaration | null => {
-  const type = declaration.toolId.trim();
-  if (!isBuiltInConnectionType(type)) {
-    return null;
-  }
-  return {
-    type,
-    reason: declaration.reason,
-    actions: [...declaration.actions],
-    multiple: false,
-    legacyToolId: declaration.toolId,
-  };
-};
-
-const appendLegacyDeclarations = (
-  target: AppConnectionDeclaration[],
-  legacy: AppToolDeclaration[] | undefined,
-): AppConnectionDeclaration[] => {
-  if (!legacy?.length) {
-    return target;
-  }
-  const byType = new Map(target.map((item) => [item.type, item]));
-  for (const declaration of legacy) {
-    const connection = legacyToolToConnectionDeclaration(declaration);
-    if (!connection || byType.has(connection.type)) {
-      continue;
-    }
-    byType.set(connection.type, connection);
-  }
-  return [...byType.values()];
-};
-
 export const normalizeAppConnectionDeclarations = (
   value: unknown,
-  legacyTools?: { required?: AppToolDeclaration[]; optional?: AppToolDeclaration[] },
+  _legacyTools?: unknown,
 ): { required: AppConnectionDeclaration[]; optional: AppConnectionDeclaration[] } => {
   const record = isRecord(value) ? value : {};
   return {
-    required: appendLegacyDeclarations(normalizeBucket(record.required), legacyTools?.required),
-    optional: appendLegacyDeclarations(normalizeBucket(record.optional), legacyTools?.optional),
+    required: normalizeBucket(record.required),
+    optional: normalizeBucket(record.optional),
   };
 };
 
@@ -137,6 +103,3 @@ export const connectionGrantAllowsAction = (
   _actionCatalog?: Record<string, string[]>,
 ): boolean =>
   grant.granted === true && grant.resolvedActions.includes(actionId);
-
-export const isLegacyExternalToolId = (toolId: string): boolean =>
-  isBuiltInConnectionType(toolId);

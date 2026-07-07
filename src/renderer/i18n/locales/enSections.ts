@@ -449,14 +449,6 @@ export const enSections = {
           name: 'Forger tools',
           description: 'Built-in tools included with the Forger desktop application.',
         },
-        'official:gmail': {
-          name: 'Gmail',
-          description: 'Official tool to search, read, and send Gmail messages.',
-        },
-        'official:whatsapp': {
-          name: 'WhatsApp (unofficial)',
-          description: 'Unofficial tool to read and send messages with a local WhatsApp Web connection.',
-        },
       },
       definitions: {
         forger_list_catalog: {

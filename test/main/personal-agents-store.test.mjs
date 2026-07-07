@@ -51,10 +51,14 @@ test('personal agent store creates SQLite-backed agents with safe defaults and p
   assert.ok(agentSkillDirs.includes('forger-context'));
   assert.ok(agentSkillDirs.includes('forger-installed-app-change'));
   assert.ok(agentSkillDirs.includes('forger-manifest-authoring'));
+  assert.ok(agentSkillDirs.includes('forger-memory'));
   assert.ok(agentSkillDirs.includes('forger-speech-to-text'));
+  assert.ok(agentSkillDirs.includes('ui-ux-pro-max'));
   assert.deepEqual(claudeSkillDirs, agentSkillDirs);
   assert.equal(agentSkillDirs.includes('forger-app-official-tools'), false);
   assert.equal(agentSkillDirs.includes('load-movements'), false);
+  await access(path.join(workspaceRoot, '.agents', 'skills', 'ui-ux-pro-max', 'scripts', 'search.py'));
+  await access(path.join(workspaceRoot, '.claude', 'skills', 'ui-ux-pro-max', 'data', 'products.csv'));
   const agentsMd = await readFile(path.join(workspaceRoot, 'AGENTS.md'), 'utf8');
   const whoMd = await readFile(path.join(workspaceRoot, 'WHO.md'), 'utf8');
   const whyMd = await readFile(path.join(workspaceRoot, 'WHY.md'), 'utf8');

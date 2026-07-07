@@ -1,11 +1,14 @@
 import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { createRequire } from 'node:module';
+import { promisify } from 'node:util';
 
 const require = createRequire(import.meta.url);
+const execFileAsync = promisify(execFile);
 const {
   ForgerAccountStore,
   normalizeForgerAccountUser,
@@ -318,6 +321,7 @@ test('Forger prompt builders include contract, language, files, official tools, 
   assert.match(createPrompt, /Call `forger_create_app` only after the intent is clear enough/);
   assert.match(createPrompt, /Propose a concrete color palette/);
   assert.match(createPrompt, /keep working in this same chat/);
+  assert.match(createPrompt, /finish the turn with the created app saved as an internal app version/);
   assert.match(createPrompt, /Internally break the idea into product goals, user stories, data model/);
   assert.match(createPrompt, /before building or changing visual UI, layout, routing, interactions, mobile behavior, or frontend UX, read and apply the `forger-frontend-patterns` skill/);
   const createResumePrompt = buildCodexPromptForFreeChat({
@@ -441,21 +445,23 @@ test('official tool skill templates and seed data keep expected Desktop defaults
     'forger-app-agents-authoring',
     'forger-app-mcp-data-tools',
     'forger-context',
+    'forger-cross-platform-app-code',
     'forger-dev-backend-development',
     'forger-dev-in-app-agents',
     'forger-frontend-patterns',
     'forger-installed-app-change',
     'forger-localization',
     'forger-manifest-authoring',
+    'forger-memory',
     'forger-permissions',
     'forger-remote-tunnel-wiring',
     'forger-secrets',
     'forger-speech-to-text',
     'forger-text-to-speech',
     'forger-tools',
+    'ui-ux-pro-max',
     'forger-automations',
     'forger-gmail',
-    'forger-memory',
     'forger-official-tools',
     'forger-product-docs',
     'forger-social-app-review',
@@ -477,18 +483,21 @@ test('official tool skill templates and seed data keep expected Desktop defaults
     'forger-app-agents-authoring',
     'forger-app-mcp-data-tools',
     'forger-context',
+    'forger-cross-platform-app-code',
     'forger-dev-backend-development',
     'forger-dev-in-app-agents',
     'forger-frontend-patterns',
     'forger-installed-app-change',
     'forger-localization',
     'forger-manifest-authoring',
+    'forger-memory',
     'forger-permissions',
     'forger-remote-tunnel-wiring',
     'forger-secrets',
     'forger-speech-to-text',
     'forger-text-to-speech',
     'forger-tools',
+    'ui-ux-pro-max',
     'forger-app-official-tools',
   ]);
   const appOfficialSkill = buildInstalledAppSkillTemplates(['gmail.search_messages', 'whatsapp.list_chats']).find((template) => template.id === 'forger-app-official-tools');
@@ -499,6 +508,11 @@ test('official tool skill templates and seed data keep expected Desktop defaults
   assert.match(appOfficialSkill.body, /commons\/backend\/forger_desktop\.py/);
   const manifestSkill = templates.find((template) => template.id === 'forger-manifest-authoring');
   assert.ok(manifestSkill);
+  assert.match(manifestSkill.description, /AI tasks/);
+  assert.match(manifestSkill.description, /recommendations\/import\/extract\/summarize\/generate/);
+  assert.match(manifestSkill.description, /Connections/);
+  assert.match(manifestSkill.body, /Use this skill even when the person does not say "manifest"/);
+  assert.match(manifestSkill.body, /recommendation flow/);
   assert.match(manifestSkill.body, /## Full Manifest JSON Contract/);
   assert.match(manifestSkill.body, /"appSecrets": \[/);
   assert.match(manifestSkill.body, /"promptTemplates": \[/);
@@ -546,8 +560,13 @@ test('official tool skill templates and seed data keep expected Desktop defaults
   assert.equal(templates.some((template) => template.id === 'forger-tanstack-query-patterns'), false);
   const inAppAgentsSkill = templates.find((template) => template.id === 'forger-dev-in-app-agents');
   assert.ok(inAppAgentsSkill);
-  assert.equal(inAppAgentsSkill.description, 'Use when designing, implementing, reviewing, or explaining in-app AI flows, including manifest agent threads, promptTemplate tasks, Desktop runtime bridge calls, resumable conversations, progress UI, polling, cancellation, and app-visible results.');
+  assert.match(inAppAgentsSkill.description, /AI-powered app workflows/);
+  assert.match(inAppAgentsSkill.description, /recommendations/);
+  assert.match(inAppAgentsSkill.description, /import\/extract\/summarize\/generate/);
   assert.match(inAppAgentsSkill.body, /App agents are app-declared conversational coworkers/);
+  assert.match(inAppAgentsSkill.body, /## Trigger Examples/);
+  assert.match(inAppAgentsSkill.body, /assistant/);
+  assert.match(inAppAgentsSkill.body, /recommendations/);
   assert.match(inAppAgentsSkill.body, /Prompt template tasks are app-declared one-shot jobs/);
   assert.match(inAppAgentsSkill.body, /commons\/backend\/forger_desktop\.py/);
   assert.match(inAppAgentsSkill.body, /start_agent_task/);
@@ -570,9 +589,17 @@ test('official tool skill templates and seed data keep expected Desktop defaults
   assert.match(templates.find((template) => template.id === 'forger-tools')?.body ?? '', /^---\nname: forger-tools/m);
   const frontendPatternsSkill = templates.find((template) => template.id === 'forger-frontend-patterns');
   assert.ok(frontendPatternsSkill);
-  assert.equal(frontendPatternsSkill.description, 'Use this skill before any change that affects how a Forger app looks, feels, moves, routes, collects input, displays data, handles agent work, or behaves on mobile.');
+  assert.match(frontendPatternsSkill.description, /UI UX Pro Max/);
   assert.match(frontendPatternsSkill.body, /Approach Forger app UI as the design lead for a private local tool/);
+  assert.match(frontendPatternsSkill.body, /use `ui-ux-pro-max` to generate concrete design intelligence/);
+  assert.match(frontendPatternsSkill.body, /Do not use the upstream `--persist` flag/);
   assert.match(frontendPatternsSkill.body, /Make a compact design plan before coding/);
+  assert.match(frontendPatternsSkill.body, /Persist The Visual Contract/);
+  assert.match(frontendPatternsSkill.body, /memory_list/);
+  assert.match(frontendPatternsSkill.body, /Before creating, editing, reviewing, or visually QAing UI in this app\./);
+  assert.match(frontendPatternsSkill.body, /Visual QA is mandatory/);
+  assert.match(frontendPatternsSkill.body, /Do not substitute `curl`, `\/health`, a frontend HTTP response, build, lint, typecheck, or tests for visual QA/);
+  assert.match(frontendPatternsSkill.body, /If browser or visual inspection tools are unavailable/);
   assert.match(frontendPatternsSkill.body, /Rejected defaults/);
   assert.match(frontendPatternsSkill.body, /Do not center a narrow `max-w` container/);
   assert.match(frontendPatternsSkill.body, /Reject the UI if it has/);
@@ -603,6 +630,7 @@ test('official tool skill templates and seed data keep expected Desktop defaults
   assert.match(officialToolsSkill.body, /forger_chrome_extension\.submit_form/);
   assert.match(officialToolsSkill.body, /commons\/backend\/forger_desktop\.py/);
   assert.match(officialToolsSkill.body, /Do not manually start app services/);
+  assert.match(officialToolsSkill.body, /finish with the app saved as an internal version/);
   const toolsSkill = templates.find((template) => template.id === 'forger-tools');
   assert.ok(toolsSkill);
   assert.match(toolsSkill.body, /Use `manifest\.tools\.required\[\]` and `manifest\.tools\.optional\[\]` only for Forger Tools/);
@@ -625,6 +653,28 @@ test('official tool skill templates and seed data keep expected Desktop defaults
   assert.match(memorySkill.body, /Prefer `memory_update`/);
   assert.match(memorySkill.body, /Never save secrets, credentials, tokens, private keys/);
   assert.match(memorySkill.body, /I updated what Forger remembers/);
+  const uiUxProMaxSkill = templates.find((template) => template.id === 'ui-ux-pro-max');
+  assert.ok(uiUxProMaxSkill);
+  assert.match(uiUxProMaxSkill.description, /UI\/UX design intelligence/);
+  assert.match(uiUxProMaxSkill.body, /python3 <skill-dir>\/scripts\/search\.py/);
+  assert.match(uiUxProMaxSkill.body, /Do not use the upstream `--persist` flag by default/);
+  assert.match(uiUxProMaxSkill.body, /12b486b22e67f5d887962ef8351c1ac863bfaeb9/);
+  assert.ok(uiUxProMaxSkill.resources?.some((resource) => resource.path === 'scripts/search.py'));
+  assert.ok(uiUxProMaxSkill.resources?.some((resource) => resource.path === 'scripts/core.py'));
+  assert.ok(uiUxProMaxSkill.resources?.some((resource) => resource.path === 'scripts/design_system.py'));
+  assert.ok(uiUxProMaxSkill.resources?.some((resource) => resource.path === 'data/products.csv'));
+  assert.ok(uiUxProMaxSkill.resources?.some((resource) => resource.path === 'data/stacks/shadcn.csv'));
+  const { stdout: uiUxSmoke } = await execFileAsync('python3', [
+    path.resolve('src/main/prompt-builder/prompts/skills/global/ui-ux-pro-max/scripts/search.py'),
+    'private local job search assistant',
+    '--design-system',
+    '-p',
+    'Smoke',
+    '-f',
+    'markdown',
+  ]);
+  assert.match(uiUxSmoke, /## Design System: Smoke/);
+  assert.match(uiUxSmoke, /### Colors/);
   const installedAppChangeSkill = templates.find((template) => template.id === 'forger-installed-app-change');
   assert.ok(installedAppChangeSkill);
   assert.match(installedAppChangeSkill.body, /Restart after structural app edits/);

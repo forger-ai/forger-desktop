@@ -1,6 +1,6 @@
 ---
 name: forger-permissions
-description: Use when Forger Tools, Connections, Gmail, file access, destructive actions, secrets, or app operations may require visible permission prompts or user approval.
+description: Use when Forger Tools, Connections, Gmail, uploaded/shared files, external folder grants, filesystem scope, destructive actions, secrets, promptTemplate/app-agent permissionMode, or app operations may require visible permission prompts or user approval.
 ---
 
 - Forger, not Codex, owns visible approval for sensitive Forger Tool and Connection actions.

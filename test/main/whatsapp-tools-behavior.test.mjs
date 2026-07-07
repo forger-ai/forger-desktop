@@ -12,10 +12,10 @@ const {
   encodeStableMessageRef,
   normalizeBaileysMessage,
   phoneNumberFromJid,
-} = require('../../dist-electron/main/tools/whatsapp/normalizer.js');
-const { WhatsAppLocalStore } = require('../../dist-electron/main/tools/whatsapp/store.js');
-const { WhatsAppConnectionManager } = require('../../dist-electron/main/tools/whatsapp/manager.js');
-const { whatsappToolModule, __resetWhatsAppToolForTests } = require('../../dist-electron/main/tools/whatsapp/index.js');
+} = require('../../dist-electron/main/connections/modules/whatsapp/normalizer.js');
+const { WhatsAppLocalStore } = require('../../dist-electron/main/connections/modules/whatsapp/store.js');
+const { WhatsAppConnectionManager } = require('../../dist-electron/main/connections/modules/whatsapp/manager.js');
+const { whatsappToolModule, __resetWhatsAppToolForTests } = require('../../dist-electron/main/connections/modules/whatsapp/index.js');
 
 const createContext = (metadataRoot, events = []) => ({
   metadataRoot,

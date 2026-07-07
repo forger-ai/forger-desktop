@@ -19,6 +19,12 @@ export interface ForgerSkillTemplate {
   id: string;
   description: string;
   body: string;
+  resources?: ForgerSkillTemplateResource[];
+}
+
+export interface ForgerSkillTemplateResource {
+  path: string;
+  content: Buffer;
 }
 
 type SkillGroup = 'global' | 'forger' | 'apps';
@@ -63,6 +69,56 @@ const listSkillFiles = (group: SkillGroup): string[] =>
     .filter((entry) => entry.endsWith('.md'))
     .sort((left, right) => left.localeCompare(right));
 
+const normalizeSkillResourcePath = (relativePath: string): string => {
+  const normalized = relativePath.replace(/\\/g, '/');
+  const segments = normalized.split('/');
+  if (
+    !normalized
+    || path.isAbsolute(normalized)
+    || segments.some((segment) => !segment || segment === '.' || segment === '..')
+    || normalized === 'SKILL.md'
+    || normalized === 'README.md'
+  ) {
+    throw new Error(`skill_resource_path_invalid:${relativePath}`);
+  }
+  return normalized;
+};
+
+const listSkillResourceFiles = (root: string, current = root): string[] => {
+  const entries = fs.readdirSync(current, { withFileTypes: true });
+  const files: string[] = [];
+  for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+    const entryPath = path.join(current, entry.name);
+    if (entry.isSymbolicLink()) {
+      throw new Error(`skill_resource_symlink:${entryPath}`);
+    }
+    if (entry.isDirectory()) {
+      files.push(...listSkillResourceFiles(root, entryPath));
+      continue;
+    }
+    if (entry.isFile()) {
+      files.push(normalizeSkillResourcePath(path.relative(root, entryPath)));
+    }
+  }
+  return files;
+};
+
+const readSkillTemplateResources = (group: SkillGroup, filename: string): ForgerSkillTemplateResource[] | undefined => {
+  const groupDirectory = resolveSkillGroupDirectory(group);
+  const resourceDirectory = path.join(groupDirectory, path.basename(filename, '.md'));
+  if (!fs.existsSync(resourceDirectory)) {
+    return undefined;
+  }
+  if (!fs.statSync(resourceDirectory).isDirectory()) {
+    throw new Error(`skill_resource_path_invalid:${resourceDirectory}`);
+  }
+  const resources = listSkillResourceFiles(resourceDirectory).map((resourcePath) => ({
+    path: resourcePath,
+    content: fs.readFileSync(path.join(resourceDirectory, resourcePath)),
+  }));
+  return resources.length > 0 ? resources : undefined;
+};
+
 const buildSkillTemplateFromFile = (group: SkillGroup, filename: string, variables: Record<string, string> = {}): ForgerSkillTemplate => {
   const relativePath = `skills/${group}/${filename}`;
   const source = fs.readFileSync(path.join(resolveSkillGroupDirectory(group), filename), 'utf8');
@@ -71,6 +127,7 @@ const buildSkillTemplateFromFile = (group: SkillGroup, filename: string, variabl
     id: frontmatter.name,
     description: frontmatter.description,
     body: renderPromptFile(relativePath, variables),
+    resources: readSkillTemplateResources(group, filename),
   };
 };
 
@@ -123,7 +180,7 @@ const displayNameForConnection = (
   ?? FALLBACK_CONNECTION_NAMES[type]
   ?? type;
 
-const legacyConnectionDefinitions = (input: ForgerOfficialToolsPromptInput): ConnectionTypeDefinition[] => {
+const promptConnectionDefinitions = (input: ForgerOfficialToolsPromptInput): ConnectionTypeDefinition[] => {
   if ((input.connectionTypes?.length ?? 0) > 0) {
     return input.connectionTypes ?? [];
   }
@@ -169,7 +226,7 @@ const legacyConnectionDefinitions = (input: ForgerOfficialToolsPromptInput): Con
   return definitions;
 };
 
-const legacyConnectionInstances = (input: ForgerOfficialToolsPromptInput): ConnectionInstance[] => {
+const promptConnectionInstances = (input: ForgerOfficialToolsPromptInput): ConnectionInstance[] => {
   if ((input.connectionInstances?.length ?? 0) > 0) {
     return input.connectionInstances ?? [];
   }
@@ -249,8 +306,8 @@ export const buildForgerOfficialToolsPromptSection = (input: ForgerOfficialTools
   const allowedActions = input.allowedActions ?? [];
   const forgerToolActions = allowedActions.filter((action) => !isForgerConnectionActionId(action));
   const connectionActions = allowedActions.filter(isForgerConnectionActionId);
-  const connectionDefinitions = legacyConnectionDefinitions(input);
-  const connectionInstances = legacyConnectionInstances(input);
+  const connectionDefinitions = promptConnectionDefinitions(input);
+  const connectionInstances = promptConnectionInstances(input);
   const availabilityLine = input.mode === 'free-chat'
     ? 'Free chat may use Forger Tools for global Forger actions and may use Connections only when Forger exposes or grants the requested connection action.'
     : 'App agents may use Forger Tools and Connections only when the selected app context and grants allow the requested action.';

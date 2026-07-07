@@ -65,7 +65,7 @@ export const registerPersonalAgentIpcHandlers = ({
         status: app.status,
       })),
       tools: officialTools.tools
-        .filter((tool) => tool.actions.length > 0 && !tool.connectionBacked && !tool.hidden)
+        .filter((tool) => tool.actions.length > 0)
         .map((tool) => ({
           id: tool.id,
           name: tool.name,
@@ -146,18 +146,8 @@ const sanitizePermissionInput = async <T extends PersonalAgentCreateInput | Pers
   const [officialTools, connections] = await Promise.all([listOfficialTools(), listConnections()]);
   const officialActionIds = new Set(
     officialTools.tools
-      .filter((tool) => !tool.connectionBacked && !tool.hidden)
       .flatMap((tool) => tool.actions.map((action) => action.id)),
   );
-  const connectionActionTypes = new Map(
-    connections.types.flatMap((definition) => definition.actions.map((action) => [action.id, definition.type] as const)),
-  );
-  const legacyConnectionActionGrants = (input.toolIds ?? [])
-    .map((toolId) => {
-      const type = connectionActionTypes.get(toolId);
-      return type ? { type, actions: [String(toolId)], multiple: true } : null;
-    })
-    .filter((grant): grant is PersonalAgentConnectionGrant => Boolean(grant));
   const declaredConnectionGrants = (input.connectionGrants ?? [])
     .map((grant) => {
       const definition = connections.types.find((candidate) => candidate.type === grant.type);
@@ -179,8 +169,8 @@ const sanitizePermissionInput = async <T extends PersonalAgentCreateInput | Pers
     ...input,
     ...(input.appIds ? { appIds: input.appIds.filter((appId) => installedAppIds.has(appId)) } : {}),
     ...(input.toolIds ? { toolIds: input.toolIds.filter((toolId) => officialActionIds.has(toolId)) } : {}),
-    ...((input.connectionGrants || legacyConnectionActionGrants.length > 0)
-      ? { connectionGrants: [...declaredConnectionGrants, ...legacyConnectionActionGrants] }
+    ...(input.connectionGrants
+      ? { connectionGrants: declaredConnectionGrants }
       : {}),
   };
 };

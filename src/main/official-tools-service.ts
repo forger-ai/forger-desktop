@@ -27,7 +27,6 @@ import type { InternalToolModule } from './tools/types';
 import type { InternalOAuthTokenResponse } from './tools/types';
 import { getSharedCopy } from '../shared/i18n';
 import type { PlatformCapabilities } from '../shared/platform-capabilities';
-import { isLegacyExternalToolId } from './connections/grants';
 
 interface ToolRegistryFile {
   version: 1;
@@ -364,8 +363,10 @@ export class OfficialToolsService {
     if (!declarations) {
       return null;
     }
-    const required = await Promise.all(declarations.required.map((declaration) => this.toRequirement(appId, declaration, true, locale, options)));
-    const optional = await Promise.all(declarations.optional.map((declaration) => this.toRequirement(appId, declaration, false, locale, options)));
+    const requiredDeclarations = this.filterKnownDeclarations(declarations.required);
+    const optionalDeclarations = this.filterKnownDeclarations(declarations.optional);
+    const required = await Promise.all(requiredDeclarations.map((declaration) => this.toRequirement(appId, declaration, true, locale, options)));
+    const optional = await Promise.all(optionalDeclarations.map((declaration) => this.toRequirement(appId, declaration, false, locale, options)));
     return {
       appId,
       appName: declarations.appName,
@@ -380,6 +381,13 @@ export class OfficialToolsService {
 
   async setAppToolGrant(input: SetAppToolGrantInput, locale?: string): Promise<AppToolsInstallGate | null> {
     await this.load();
+    if (!this.modulesById.has(input.toolId)) {
+      if (this.registry.appGrants[input.appId]?.[input.toolId] !== undefined) {
+        delete this.registry.appGrants[input.appId][input.toolId];
+        await this.saveRegistry();
+      }
+      return this.getInstallGate(input.appId, locale);
+    }
     this.registry.appGrants[input.appId] = {
       ...(this.registry.appGrants[input.appId] ?? {}),
       [input.toolId]: input.granted,
@@ -404,8 +412,8 @@ export class OfficialToolsService {
         technicalCode: 'app_tools_not_declared',
       };
     }
-    const required = declarations.required.find((item) => item.toolId === toolId);
-    const optional = declarations.optional.find((item) => item.toolId === toolId);
+    const required = this.filterKnownDeclarations(declarations.required).find((item) => item.toolId === toolId);
+    const optional = this.filterKnownDeclarations(declarations.optional).find((item) => item.toolId === toolId);
     if (required && !optional) {
       return {
         success: false,
@@ -474,8 +482,8 @@ export class OfficialToolsService {
       return [];
     }
     const declaredIds = new Set([
-      ...declarations.required.map((item) => item.toolId),
-      ...declarations.optional.filter((item) => this.registry.appGrants[appId]?.[item.toolId] === true).map((item) => item.toolId),
+      ...this.filterKnownDeclarations(declarations.required).map((item) => item.toolId),
+      ...this.filterKnownDeclarations(declarations.optional).filter((item) => this.registry.appGrants[appId]?.[item.toolId] === true).map((item) => item.toolId),
     ]);
     const state = await this.list();
     return state.tools.filter((tool) => declaredIds.has(tool.id) && tool.status !== 'available');
@@ -488,13 +496,13 @@ export class OfficialToolsService {
       return new Set();
     }
     const allowedActions = new Set<string>();
-    for (const declaration of declarations.required) {
+    for (const declaration of this.filterKnownDeclarations(declarations.required)) {
       const tool = await this.getTool(declaration.toolId);
       for (const action of this.resolveDeclarationActionIds(declaration, tool)) {
         allowedActions.add(action);
       }
     }
-    for (const declaration of declarations.optional) {
+    for (const declaration of this.filterKnownDeclarations(declarations.optional)) {
       if (this.registry.appGrants[appId]?.[declaration.toolId] !== true) {
         continue;
       }
@@ -512,8 +520,8 @@ export class OfficialToolsService {
     if (!declarations) {
       return { success: false, userMessage: appToolDeclarationsMissingMessage, technicalCode: 'app_tools_not_declared' };
     }
-    const required = declarations.required.find((item) => item.toolId === input.toolId);
-    const optional = declarations.optional.find((item) => item.toolId === input.toolId);
+    const required = this.filterKnownDeclarations(declarations.required).find((item) => item.toolId === input.toolId);
+    const optional = this.filterKnownDeclarations(declarations.optional).find((item) => item.toolId === input.toolId);
     if (!required && !optional) {
       return { success: false, userMessage: appToolNotDeclaredMessage, technicalCode: 'app_tool_not_declared' };
     }
@@ -550,8 +558,8 @@ export class OfficialToolsService {
       if (!declarations) {
         return { success: false, userMessage: appToolDeclarationsMissingMessage, technicalCode: 'app_tools_not_declared' };
       }
-      const required = declarations.required.find((item) => item.toolId === input.toolId);
-      const optional = declarations.optional.find((item) => item.toolId === input.toolId);
+      const required = this.filterKnownDeclarations(declarations.required).find((item) => item.toolId === input.toolId);
+      const optional = this.filterKnownDeclarations(declarations.optional).find((item) => item.toolId === input.toolId);
       if (!required && !optional) {
         return { success: false, userMessage: appToolNotDeclaredMessage, technicalCode: 'app_tool_not_declared' };
       }
@@ -595,6 +603,10 @@ export class OfficialToolsService {
       available: Boolean(tool && tool.status !== 'available' && tool.status !== 'error'),
       configured,
     };
+  }
+
+  private filterKnownDeclarations(declarations: AppToolDeclaration[]): AppToolDeclaration[] {
+    return declarations.filter((declaration) => this.modulesById.has(declaration.toolId));
   }
 
   private resolveDeclarationActionIds(declaration: AppToolDeclaration, tool: OfficialToolSummary | null): string[] {
@@ -667,16 +679,8 @@ export class OfficialToolsService {
     const localized = withActionSchemas(localizeOfficialToolDefinition(entry, locale));
     const installed = this.registry.installed[entry.id];
     const configured = await this.isConfigured(entry);
-    const connectionBacked = isLegacyExternalToolId(entry.id);
-    const connectionHints = connectionBacked
-      ? {
-        connectionBacked: true,
-        connectionType: entry.id,
-        hidden: !configured,
-      }
-      : {};
     if (!installed) {
-      return { ...localized, status: 'available', configured: false, ...connectionHints };
+      return { ...localized, status: 'available', configured: false };
     }
     return {
       ...localized,
@@ -684,7 +688,6 @@ export class OfficialToolsService {
       installedVersion: installed.version,
       configured,
       error: installed.error,
-      ...connectionHints,
     };
   }
 
