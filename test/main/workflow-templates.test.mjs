@@ -15,7 +15,7 @@ const {
   stringifyTemplateTokens,
   tokenizeTemplate,
 } = require('../../dist-electron/shared/workflow-templates.js');
-const { slackToolModule } = require('../../dist-electron/main/tools/slack/index.js');
+const { slackToolModule } = require('../../dist-electron/main/connections/modules/slack/index.js');
 
 test('tokenizeTemplate splits text and references and round-trips', () => {
   const value = 'Hay {{nodes.buscar.output.total}} pendientes en {{trigger.type}}.';

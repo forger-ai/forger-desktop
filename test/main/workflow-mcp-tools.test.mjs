@@ -103,12 +103,25 @@ const callTool = async (session, name, args = {}) => {
 };
 
 test('workflow node tools are only visible to workflow sessions', async () => {
-  const harness = await createHarness();
+  const harness = await createHarness({
+    getToolDefinitions: () => [
+      ...AGENT_TOOL_DEFINITIONS,
+      {
+        id: 'slack.send_message',
+        packageId: 'connection:slack',
+        name: 'Send Slack message',
+        description: 'Send a Slack message.',
+        category: 'app',
+        risk: 'alto',
+        defaultRequiresApproval: false,
+      },
+    ],
+  });
   try {
     const workflowSession = harness.server.createSession('run-1:paso1', 'forger', {
       caller: 'workflow',
       appIds: [],
-      officialToolActionIds: ['slack.send_message'],
+      connectionGrants: [{ type: 'slack', actions: ['slack.send_message'], multiple: true }],
     });
     const chatSession = harness.server.createSession('run-chat', 'forger', { caller: 'free-chat' });
 
@@ -117,14 +130,45 @@ test('workflow node tools are only visible to workflow sessions', async () => {
     assert.ok(workflowTools.includes('workflow_complete_node'));
     assert.ok(workflowTools.includes('workflow_fail_node'));
     assert.ok(!workflowTools.includes('forger_workflow_upsert'), 'workflow nodes cannot manage workflows');
-    assert.ok(workflowTools.includes('slack.send_message'), 'granted official action is listed');
-    assert.ok(!workflowTools.includes('gmail.send_email'), 'ungranted official action is hidden');
+    assert.ok(workflowTools.includes('slack.send_message'), 'granted connection action is listed');
+    assert.ok(!workflowTools.includes('gmail.send_email'), 'ungranted connection action is hidden');
 
     const chatTools = await listTools(chatSession);
     assert.ok(!chatTools.includes('workflow_complete_node'));
     assert.ok(chatTools.includes('forger_workflow_list'));
     assert.ok(chatTools.includes('forger_workflow_upsert'));
     assert.ok(chatTools.includes('forger_workflow_run'));
+  } finally {
+    harness.stop();
+  }
+});
+
+test('MCP exposes granted connection actions from connection definitions', async () => {
+  const harness = await createHarness({
+    getConnectionToolDefinitions: async () => [
+      {
+        id: 'trello.update_card',
+        packageId: 'connection:trello',
+        name: 'Update Trello card',
+        description: 'Update a Trello card.',
+        category: 'app',
+        risk: 'alto',
+        defaultRequiresApproval: false,
+      },
+    ],
+  });
+  try {
+    const session = harness.server.createSession('run-1', 'forger', {
+      caller: 'personal-agent',
+      appIds: [],
+      connectionGrants: [{ type: 'trello', actions: ['trello.update_card'], multiple: true }],
+    });
+    const tools = await listTools(session);
+    assert.ok(tools.includes('trello.update_card'), 'dynamic granted connection action is listed');
+
+    const result = await callTool(session, 'trello.update_card', { cardId: 'card-1', name: 'Nuevo titulo' });
+    assert.equal(result.success, true);
+    assert.equal(result.data.actionId, 'trello.update_card');
   } finally {
     harness.stop();
   }
@@ -233,4 +277,9 @@ test('workflow tool schemas are strict', () => {
   assert.deepEqual(getMcpToolInputSchema('forger_workflow_upsert').required, ['name', 'trigger', 'nodes']);
   assert.deepEqual(getMcpToolInputSchema('slack.send_message').required, ['channelId', 'text']);
   assert.deepEqual(getMcpToolInputSchema('trello.create_card').required, ['listId', 'name']);
+  assert.deepEqual(getMcpToolInputSchema('trello.update_card').required, ['cardId']);
+  assert.deepEqual(getMcpToolInputSchema('trello.delete_card').required, ['cardId']);
+  assert.deepEqual(getMcpToolInputSchema('trello.comment_card').required, ['cardId', 'text']);
+  assert.deepEqual(getMcpToolInputSchema('trello.download_attachment').required, ['cardId', 'attachmentId']);
+  assert.deepEqual(getMcpToolInputSchema('trello.upload_attachment').required, ['cardId', 'filePath']);
 });

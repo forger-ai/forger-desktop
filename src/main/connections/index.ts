@@ -19,14 +19,14 @@ import type {
   CallOfficialToolResult,
   OfficialToolDefinition,
 } from '../../shared/types';
-import { gmailToolModule } from '../tools/gmail';
-import { whatsappToolModule } from '../tools/whatsapp';
-import { slackToolModule } from '../tools/slack';
-import { trelloToolModule } from '../tools/trello';
-import { calendarToolModule, docsToolModule, driveToolModule, sheetsToolModule } from '../tools/google-workspace';
-import { githubToolModule } from '../tools/github';
-import { notionToolModule } from '../tools/notion';
-import { tokenServiceConnectorModules } from '../tools/token-service-connectors';
+import { gmailToolModule } from './modules/gmail';
+import { whatsappToolModule } from './modules/whatsapp';
+import { slackToolModule } from './modules/slack';
+import { trelloToolModule } from './modules/trello';
+import { calendarToolModule, docsToolModule, driveToolModule, sheetsToolModule } from './modules/google-workspace';
+import { githubToolModule } from './modules/github';
+import { notionToolModule } from './modules/notion';
+import { tokenServiceConnectorModules } from './modules/token-service-connectors';
 import type { InternalToolContext, InternalToolModule } from '../tools/types';
 import type { ConnectionContext, InternalConnectionModule } from './types';
 
@@ -68,7 +68,7 @@ const oauthByType: Record<string, ConnectionTypeDefinition['oauth']> = {
   },
 };
 
-const legacyToolToConnectionActions = (actions: OfficialToolDefinition['actions']): ConnectionActionDefinition[] =>
+const toolActionsToConnectionActions = (actions: OfficialToolDefinition['actions']): ConnectionActionDefinition[] =>
   actions.map((action) => ({
     id: action.id,
     name: action.name,
@@ -78,7 +78,7 @@ const legacyToolToConnectionActions = (actions: OfficialToolDefinition['actions'
     ...(action.outputSchema ? { outputSchema: action.outputSchema } : {}),
   }));
 
-const legacySecretsToConnectionSecrets = (secrets: OfficialToolDefinition['secrets']): ConnectionSecretDefinition[] =>
+const toolSecretsToConnectionSecrets = (secrets: OfficialToolDefinition['secrets']): ConnectionSecretDefinition[] =>
   secrets.map((secret) => ({
     name: secret.name,
     label: secret.label,
@@ -162,7 +162,7 @@ const selectInstance = async (
   return instances.find((instance) => instance.isDefault) ?? instances[0] ?? null;
 };
 
-const createLegacyToolContext = (
+const createConnectionToolContext = (
   context: ConnectionContext,
   toolId: string,
   connectionId: string,
@@ -190,24 +190,24 @@ const createLegacyToolContext = (
   emitEvent: context.emitEvent,
 });
 
-const createLegacyBackedConnectionModule = (
-  legacyModule: InternalToolModule,
+const createToolBackedConnectionModule = (
+  module: InternalToolModule,
   options: { setupKind: ConnectionSetupKind; supportsMultiple: boolean },
 ): InternalConnectionModule => {
-  const type = legacyModule.definition.id;
-  const actions = legacyToolToConnectionActions(legacyModule.definition.actions);
-  const secretsSchema = legacySecretsToConnectionSecrets(legacyModule.definition.secrets);
+  const type = module.definition.id;
+  const actions = toolActionsToConnectionActions(module.definition.actions);
+  const secretsSchema = toolSecretsToConnectionSecrets(module.definition.secrets);
   const statusActionId = actions.find((action) => action.id.endsWith('.connection.status'))?.id ?? `${type}.connection.status`;
   const definition = {
     type,
-    displayName: legacyModule.definition.name,
-    description: legacyModule.definition.description,
+    displayName: module.definition.name,
+    description: module.definition.description,
     setupKind: options.setupKind,
     supportsMultiple: options.supportsMultiple,
     actions,
     secretsSchema,
     statusActionId,
-    version: legacyModule.definition.version,
+    version: module.definition.version,
     ...(oauthByType[type] ? { oauth: oauthByType[type] } : {}),
   };
 
@@ -233,9 +233,9 @@ const createLegacyBackedConnectionModule = (
     if (!instance) {
       return { connected: false, status: 'needs_setup' };
     }
-    const result = await legacyModule.execute(
+    const result = await module.execute(
       { toolId: type, actionId: statusActionId, input: {} },
-      createLegacyToolContext(context, type, instance.id),
+      createConnectionToolContext(context, type, instance.id),
     );
     const normalized = statusFromLegacyResult(result, instance);
     await updateFromStatus(context, instance, normalized);
@@ -271,8 +271,8 @@ const createLegacyBackedConnectionModule = (
           }
         }));
       }
-      const legacyContext = createLegacyToolContext(context, type, instance.id);
-      const configured = await legacyModule.configure(legacyContext, {
+      const connectionToolContext = createConnectionToolContext(context, type, instance.id);
+      const configured = await module.configure(connectionToolContext, {
         toolId: type,
         locale: context.locale,
         secrets: input.secrets,
@@ -294,7 +294,7 @@ const createLegacyBackedConnectionModule = (
       };
     },
     disconnect: async (context: ConnectionContext, input: DisconnectConnectionInput): Promise<ConnectionMutationResult> => {
-      await legacyModule.deactivate?.(createLegacyToolContext(context, type, input.connectionId));
+      await module.deactivate?.(createConnectionToolContext(context, type, input.connectionId));
       await context.deleteInstance(input.connectionId, { keepSecrets: input.keepSecrets });
       return { success: true, userMessage: `${definition.displayName} disconnected.` };
     },
@@ -311,35 +311,35 @@ const createLegacyBackedConnectionModule = (
           technicalCode: 'connection_not_configured',
         };
       }
-      return legacyModule.execute(
+      return module.execute(
         { toolId: type, actionId: input.actionId, input: input.input },
-        createLegacyToolContext(context, type, instance.id),
+        createConnectionToolContext(context, type, instance.id),
       );
     },
     start: async (context: ConnectionContext) => {
       const instances = await context.listPersistedInstances(type);
       await Promise.all(instances.map((instance) =>
-        legacyModule.start?.(createLegacyToolContext(context, type, instance.id))));
+        module.start?.(createConnectionToolContext(context, type, instance.id))));
     },
     stop: async (context: ConnectionContext) => {
       const instances = await context.listPersistedInstances(type);
       await Promise.all(instances.map((instance) =>
-        legacyModule.stop?.(createLegacyToolContext(context, type, instance.id))));
+        module.stop?.(createConnectionToolContext(context, type, instance.id))));
     },
   };
 };
 
 export const BUILT_IN_CONNECTION_MODULES: InternalConnectionModule[] = [
-  createLegacyBackedConnectionModule(gmailToolModule, { setupKind: setupKindByType.gmail, supportsMultiple: true }),
-  createLegacyBackedConnectionModule(calendarToolModule, { setupKind: setupKindByType.calendar, supportsMultiple: true }),
-  createLegacyBackedConnectionModule(sheetsToolModule, { setupKind: setupKindByType.sheets, supportsMultiple: true }),
-  createLegacyBackedConnectionModule(driveToolModule, { setupKind: setupKindByType.drive, supportsMultiple: true }),
-  createLegacyBackedConnectionModule(docsToolModule, { setupKind: setupKindByType.docs, supportsMultiple: true }),
-  createLegacyBackedConnectionModule(githubToolModule, { setupKind: setupKindByType.github, supportsMultiple: true }),
-  createLegacyBackedConnectionModule(notionToolModule, { setupKind: setupKindByType.notion, supportsMultiple: true }),
-  createLegacyBackedConnectionModule(whatsappToolModule, { setupKind: setupKindByType.whatsapp, supportsMultiple: true }),
-  createLegacyBackedConnectionModule(slackToolModule, { setupKind: setupKindByType.slack, supportsMultiple: true }),
-  createLegacyBackedConnectionModule(trelloToolModule, { setupKind: setupKindByType.trello, supportsMultiple: true }),
+  createToolBackedConnectionModule(gmailToolModule, { setupKind: setupKindByType.gmail, supportsMultiple: true }),
+  createToolBackedConnectionModule(calendarToolModule, { setupKind: setupKindByType.calendar, supportsMultiple: true }),
+  createToolBackedConnectionModule(sheetsToolModule, { setupKind: setupKindByType.sheets, supportsMultiple: true }),
+  createToolBackedConnectionModule(driveToolModule, { setupKind: setupKindByType.drive, supportsMultiple: true }),
+  createToolBackedConnectionModule(docsToolModule, { setupKind: setupKindByType.docs, supportsMultiple: true }),
+  createToolBackedConnectionModule(githubToolModule, { setupKind: setupKindByType.github, supportsMultiple: true }),
+  createToolBackedConnectionModule(notionToolModule, { setupKind: setupKindByType.notion, supportsMultiple: true }),
+  createToolBackedConnectionModule(whatsappToolModule, { setupKind: setupKindByType.whatsapp, supportsMultiple: true }),
+  createToolBackedConnectionModule(slackToolModule, { setupKind: setupKindByType.slack, supportsMultiple: true }),
+  createToolBackedConnectionModule(trelloToolModule, { setupKind: setupKindByType.trello, supportsMultiple: true }),
   ...tokenServiceConnectorModules.map((module) =>
-    createLegacyBackedConnectionModule(module, { setupKind: setupKindByType[module.definition.id], supportsMultiple: true })),
+    createToolBackedConnectionModule(module, { setupKind: setupKindByType[module.definition.id], supportsMultiple: true })),
 ];

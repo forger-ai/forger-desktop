@@ -1091,7 +1091,7 @@ test('main lifecycle service option callbacks cover catalog, memory, tools, MCP 
       load: async () => undefined,
       listAgentActionIdsForApp: async (appId) => {
         officialCalls.push(['list', appId]);
-        return ['gmail.read'];
+        return ['forger_chrome_extension.navigate'];
       },
       validateAgentCall: async (input, access) => {
         officialCalls.push(['validate', input, access]);
@@ -1149,12 +1149,12 @@ test('main lifecycle service option callbacks cover catalog, memory, tools, MCP 
   await state.forgerMcpServer.options.memoryDelete('m1', { caller: 'test' });
   assert.deepEqual(memoryCalls.map((entry) => entry[0]), ['list', 'create', 'update', 'delete']);
 
-  assert.deepEqual(await state.forgerMcpServer.options.listOfficialToolActionIdsForApp('finance-os'), ['gmail.read']);
-  assert.deepEqual(await state.forgerMcpServer.options.validateOfficialTool({ toolId: 'gmail' }, {
+  assert.deepEqual(await state.forgerMcpServer.options.listOfficialToolActionIdsForApp('finance-os'), ['forger_chrome_extension.navigate']);
+  assert.deepEqual(await state.forgerMcpServer.options.validateOfficialTool({ toolId: 'forger_chrome_extension' }, {
     appId: 'finance-os',
     caller: 'desktop-chat',
   }), { valid: true });
-  assert.deepEqual(await state.forgerMcpServer.options.callOfficialTool({ toolId: 'gmail' }, {
+  assert.deepEqual(await state.forgerMcpServer.options.callOfficialTool({ toolId: 'forger_chrome_extension' }, {
     appId: 'finance-os',
     caller: 'app-agent',
   }), { called: true });

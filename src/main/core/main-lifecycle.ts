@@ -36,6 +36,7 @@ import type {
   CallConnectionActionInput,
   CallOfficialToolInput,
   PersonalAgent,
+  SecretMutationResult,
 } from '../../shared/types';
 import type {
   AppManifest,
@@ -51,6 +52,7 @@ import {
 import { appAllowsAgentRuntimeControl, appAllowsAudioInput, appAllowsSpeechToText, appAllowsTextToSpeech, appAllowsWorkspaceFolders } from '../../shared/platform-capabilities';
 import type { LlmProviderAuthProfileResolver } from '../llm-provider/types';
 import type { SelfOAuthCallbackServiceLike } from '../oauth-callback/types';
+import { connectionToolDefinitionsFromState } from './mcp-connection-tools';
 
 type ServiceConstructor<T = unknown> = new (...args: any[]) => T;
 type AsyncFn<T = unknown> = (...args: any[]) => Promise<T>;
@@ -189,6 +191,7 @@ export interface MainLifecycleDeps {
   buildMemoryContextForApp: AsyncFn<string>;
   buildMemoryContextForApps: AsyncFn<string>;
   chooseAgentRuntime: (request?: AgentRuntimeRequest) => Promise<AgentRuntime>;
+  cleanupLegacyExternalToolState: (input: { metadataRoot: string; secretsStore: { deleteToolSecrets(toolId: string): Promise<SecretMutationResult> }; appendLog?: (event: string, payload?: Record<string, unknown>) => Promise<void> }) => Promise<void>;
   clearForgerAccountSession: (technicalCode: string) => Promise<void>;
   closeServer: (server: Server) => Promise<void>;
   createLocalAppFromSkeleton: (input: CreateLocalAppInput, locale?: string) => Promise<CreateLocalAppResult>;
@@ -356,6 +359,7 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
     buildMemoryContextForApp,
     buildMemoryContextForApps,
     chooseAgentRuntime,
+    cleanupLegacyExternalToolState,
     clearForgerAccountSession,
     closeServer,
     createLocalAppFromSkeleton,
@@ -513,6 +517,14 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
   await startupLogger.step('startup:settings:load', loadSettings);
   await startupLogger.step('startup:secrets_store:create', () => {
     state.secretsStore = new SecretsStore(app.getPath('userData'));
+  });
+  await startupLogger.step('startup:legacy_external_tools_cleanup', async () => {
+    const secretsStore = state.secretsStore as { deleteToolSecrets(toolId: string): Promise<SecretMutationResult> } | null;
+    if (secretsStore?.deleteToolSecrets) {
+      await cleanupLegacyExternalToolState({ metadataRoot: getForgerMetadataRoot(), secretsStore, appendLog: appendInstallLog });
+    }
+  }).catch((error: unknown) => {
+    void appendInstallLog('legacy_external_tools_cleanup:failed', serializeErrorForInstallLog(error));
   });
   await startupLogger.step('startup:official_tools:create', () => {
     state.officialToolsService = getOfficialToolsService();
@@ -755,6 +767,7 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
   state.forgerMcpServer = new ForgerMcpServer({
     getAppVersion: () => app.getVersion(),
     getToolDefinitions: () => AGENT_TOOL_DEFINITIONS,
+    getConnectionToolDefinitions: async () => await connectionToolDefinitionsFromState(getConnectionsService),
     getToolSettings: () => state.agentToolSettings,
     appendInstallLog,
     requestPermission: async (runId: string, request: PermissionRequest) => {

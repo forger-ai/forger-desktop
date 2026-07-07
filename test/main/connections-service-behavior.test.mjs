@@ -12,6 +12,12 @@ const {
 const {
   ConnectionsService,
 } = require('../../dist-electron/main/connections-service.js');
+const {
+  OfficialToolsService,
+} = require('../../dist-electron/main/official-tools-service.js');
+const {
+  INTERNAL_TOOL_MODULES,
+} = require('../../dist-electron/main/tools/index.js');
 
 const createSecretsStore = () => {
   const values = new Map();
@@ -158,6 +164,42 @@ test('built-in connection registry exposes external services but not Forger Chro
     assert.ok(module.definition.actions.every((action) => action.risk));
   }
   assert.equal(types.includes('forger_chrome_extension'), false);
+});
+
+test('official tool registry keeps external services out of Forger Tools', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'forger-official-tools-external-'));
+  const service = new OfficialToolsService({
+    metadataRoot: root,
+    secretsStore: {
+      ...createSecretsStore(),
+      hasToolSecret: async () => false,
+      getToolSecret: async () => null,
+      setToolSecret: async () => ({ success: true, userMessage: 'ok' }),
+      deleteToolSecrets: async () => ({ success: true, userMessage: 'ok' }),
+    },
+    getFreePort: async () => 1234,
+    openExternalUrl: async () => undefined,
+    isForgerAccountAuthenticated: () => true,
+    getGmailOAuthClientId: async () => 'gmail-client-id',
+    exchangeGmailOAuthCode: async () => ({ refresh_token: 'refresh-token' }),
+    refreshGmailOAuthAccessToken: async () => ({ access_token: 'access-token' }),
+    getAppToolDeclarations: async () => null,
+  });
+  try {
+    const toolIds = INTERNAL_TOOL_MODULES.map((module) => module.definition.id);
+    assert.equal(toolIds.includes('forger_chrome_extension'), true);
+    assert.equal(toolIds.includes('gmail'), false);
+    assert.equal(toolIds.includes('whatsapp'), false);
+    assert.equal(toolIds.includes('slack'), false);
+    assert.equal(toolIds.includes('trello'), false);
+
+    const activated = await service.activate('gmail', 'en');
+    assert.equal(activated.success, false);
+    assert.equal(activated.technicalCode, 'tool_not_found');
+    assert.equal(await service.getTool('gmail', 'en'), null);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test('connection service stores multiple instances with safe identity and one default', async () => {

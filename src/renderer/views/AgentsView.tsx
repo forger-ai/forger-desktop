@@ -45,7 +45,7 @@ import {
   Typography,
   useTheme,
 } from '@mui/material';
-import type { AgentEffort, AgentPermissionMode, AgentProvider, AgentRuntime, AgentToolId, PersonalAgent, PersonalAgentConversation, PersonalAgentConversationEvent, PersonalAgentGrantOptionTool, PersonalAgentGrantOptions, PersonalAgentMessage, PersonalAgentRunStatus, PersonalAgentWorkspaceEntry, PersonalAgentWorkspaceFile } from '@shared/types';
+import type { AgentEffort, AgentPermissionMode, AgentProvider, AgentRuntime, AgentToolId, PersonalAgent, PersonalAgentConnectionGrant, PersonalAgentConversation, PersonalAgentConversationEvent, PersonalAgentGrantOptionConnection, PersonalAgentGrantOptionTool, PersonalAgentGrantOptions, PersonalAgentMessage, PersonalAgentRunStatus, PersonalAgentWorkspaceEntry, PersonalAgentWorkspaceFile } from '@shared/types';
 import type { AppDictionary } from '@renderer/i18n';
 import { AGENT_PROVIDER_OPTIONS, ANTIGRAVITY_EFFORT_OPTIONS, ANTIGRAVITY_MODEL_OPTIONS, CLAUDE_EFFORT_OPTIONS, CLAUDE_MODEL_OPTIONS, CODEX_MODEL_OPTIONS, CODEX_REASONING_OPTIONS } from '@renderer/preferences';
 import { usageAnalytics } from '@renderer/usage-analytics';
@@ -71,6 +71,7 @@ interface AccessDraft {
   runtime: AgentRuntime;
   appIds: string[];
   toolIds: AgentToolId[];
+  connectionGrants: PersonalAgentConnectionGrant[];
 }
 
 function WorkspaceTree({ entries, emptyLabel, selectedPath, onOpenFile }: WorkspaceTreeProps) {
@@ -157,6 +158,7 @@ const defaultAccessDraft = (): AccessDraft => ({
   runtime: defaultPersonalAgentRuntime(),
   appIds: [],
   toolIds: [],
+  connectionGrants: [],
 });
 
 const accessDraftFromAgent = (agent: PersonalAgent): AccessDraft => ({
@@ -165,6 +167,7 @@ const accessDraftFromAgent = (agent: PersonalAgent): AccessDraft => ({
   runtime: agent.runtime ?? defaultPersonalAgentRuntime(),
   appIds: agent.appIds ?? [],
   toolIds: agent.toolIds ?? [],
+  connectionGrants: agent.connectionGrants ?? [],
 });
 
 const toggleId = <T extends string>(values: T[], id: T, checked: boolean): T[] =>
@@ -383,6 +386,7 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
         runtime: accessDraft.runtime,
         appIds: accessDraft.appIds,
         toolIds: accessDraft.toolIds,
+        connectionGrants: accessDraft.connectionGrants,
       });
       resetCreateForm();
       setCreateOpen(false);
@@ -419,6 +423,7 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
         runtime: accessDraft.runtime,
         appIds: accessDraft.appIds,
         toolIds: accessDraft.toolIds,
+        connectionGrants: accessDraft.connectionGrants,
       });
       setAgents((current) => current.map((agent) => agent.id === updated.id ? updated : agent));
       setEditAccessOpen(false);
@@ -557,6 +562,7 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
       <Chip size="small" label={agent.networkAccess ? t.agents.internetOn : t.agents.internetOff} />
       <Chip size="small" label={agent.appIds.length > 0 ? t.agents.appsCount(agent.appIds.length) : t.agents.noAppsAccess} />
       <Chip size="small" label={agent.toolIds.length > 0 ? t.agents.toolsCount(agent.toolIds.length) : t.agents.noToolsAccess} />
+      <Chip size="small" label={agent.connectionGrants.length > 0 ? t.agents.connectionsCount(agent.connectionGrants.length) : t.agents.noConnectionsAccess} />
     </Stack>
   );
 
@@ -615,6 +621,114 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
               />
             ))}
           </FormGroup>
+        </AccordionDetails>
+      </Accordion>
+    );
+  };
+
+  const renderConnectionAccessControl = (connection: PersonalAgentGrantOptionConnection) => {
+    const actionIds = connection.actions.map((action) => action.id as AgentToolId);
+    const grant = accessDraft.connectionGrants.find((item) => item.type === connection.type);
+    const selectedActionIds = grant?.actions ?? [];
+    const selectedCount = actionIds.filter((id) => selectedActionIds.includes(id)).length;
+    const allSelected = actionIds.length > 0 && selectedCount === actionIds.length;
+    const partiallySelected = selectedCount > 0 && selectedCount < actionIds.length;
+    const selectedConnectionIds = grant?.connectionIds ?? [];
+    const upsertConnectionGrant = (nextGrant: PersonalAgentConnectionGrant | null) => {
+      setAccessDraft((current) => ({
+        ...current,
+        connectionGrants: nextGrant
+          ? [
+              ...current.connectionGrants.filter((item) => item.type !== connection.type),
+              nextGrant,
+            ]
+          : current.connectionGrants.filter((item) => item.type !== connection.type),
+      }));
+    };
+    const buildGrant = (actions: string[], connectionIds = selectedConnectionIds): PersonalAgentConnectionGrant | null => {
+      if (actions.length === 0) return null;
+      return {
+        type: connection.type,
+        actions: [...new Set(actions)],
+        multiple: connection.supportsMultiple && connectionIds.length !== 1,
+        ...(connectionIds.length ? { connectionIds } : {}),
+      };
+    };
+    const setConnectionChecked = (checked: boolean) => {
+      upsertConnectionGrant(checked ? buildGrant(actionIds) : null);
+    };
+    const setActionChecked = (actionId: AgentToolId, checked: boolean) => {
+      upsertConnectionGrant(buildGrant(toggleId(selectedActionIds as AgentToolId[], actionId, checked)));
+    };
+    const setConnectionIds = (ids: string[]) => {
+      upsertConnectionGrant(buildGrant(selectedActionIds, ids));
+    };
+    return (
+      <Accordion key={connection.type} disableGutters variant="outlined" sx={{ '&:before': { display: 'none' } }}>
+        <AccordionSummary expandIcon={<ExpandMoreRounded />}>
+          <Stack direction="row" spacing={1} alignItems="center" sx={{ width: '100%', minWidth: 0 }}>
+            <Checkbox
+              size="small"
+              checked={allSelected}
+              indeterminate={partiallySelected}
+              disabled={!connection.configured || actionIds.length === 0}
+              onClick={(event) => event.stopPropagation()}
+              onFocus={(event) => event.stopPropagation()}
+              onChange={(event) => setConnectionChecked(event.target.checked)}
+            />
+            <Box sx={{ minWidth: 0, flex: 1 }}>
+              <Typography variant="body2" fontWeight={700} noWrap>{connection.displayName}</Typography>
+              <Typography variant="caption" color="text.secondary" noWrap>
+                {connection.configured ? t.agents.connectionActionsCount(selectedCount, actionIds.length) : t.agents.connectionNeedsSetup}
+              </Typography>
+            </Box>
+          </Stack>
+        </AccordionSummary>
+        <AccordionDetails sx={{ pt: 0 }}>
+          <Stack spacing={1}>
+            {connection.instances.length > 1 ? (
+              <FormControl size="small" fullWidth disabled={!grant}>
+                <InputLabel id={`agent-connection-instances-${connection.type}`}>{t.agents.connectionInstances}</InputLabel>
+                <Select
+                  labelId={`agent-connection-instances-${connection.type}`}
+                  multiple
+                  label={t.agents.connectionInstances}
+                  value={selectedConnectionIds}
+                  renderValue={(selected) => {
+                    if ((selected as string[]).length === 0) return t.agents.connectionAllInstances;
+                    return (selected as string[])
+                      .map((id) => connection.instances.find((instance) => instance.id === id)?.label ?? id)
+                      .join(', ');
+                  }}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    setConnectionIds(typeof value === 'string' ? value.split(',') : value as string[]);
+                  }}
+                >
+                  {connection.instances.map((instance) => (
+                    <MenuItem key={instance.id} value={instance.id}>
+                      {instance.label}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            ) : null}
+            <FormGroup>
+              {connection.actions.map((action) => (
+                <FormControlLabel
+                  key={action.id}
+                  control={(
+                    <Checkbox
+                      checked={selectedActionIds.includes(action.id)}
+                      disabled={!connection.configured}
+                      onChange={(event) => setActionChecked(action.id as AgentToolId, event.target.checked)}
+                    />
+                  )}
+                  label={action.name}
+                />
+              ))}
+            </FormGroup>
+          </Stack>
         </AccordionDetails>
       </Accordion>
     );
@@ -761,6 +875,16 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
             </Stack>
           ) : (
             <Typography variant="body2" color="text.secondary">{t.agents.noToolsAvailable}</Typography>
+          )}
+        </Box>
+        <Box>
+          <Typography variant="subtitle2" sx={{ mb: 0.75 }}>{t.agents.connectionsAccess}</Typography>
+          {grantOptions.connections.some((connection) => connection.actions.length > 0) ? (
+            <Stack spacing={1}>
+              {grantOptions.connections.map(renderConnectionAccessControl)}
+            </Stack>
+          ) : (
+            <Typography variant="body2" color="text.secondary">{t.agents.noConnectionsAvailable}</Typography>
           )}
         </Box>
       </Stack>

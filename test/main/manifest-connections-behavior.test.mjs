@@ -53,7 +53,7 @@ test('manifest connections normalize required and optional declarations', () => 
   ]);
 });
 
-test('legacy Gmail tool declarations normalize into connection declarations', () => {
+test('legacy external tool declarations do not normalize into connection declarations', () => {
   const normalized = normalizeAppConnectionDeclarations(undefined, {
     required: [{ toolId: 'gmail', reason: 'Read mail.', actions: ['gmail.search_messages'] }],
     optional: [
@@ -61,15 +61,11 @@ test('legacy Gmail tool declarations normalize into connection declarations', ()
       { toolId: 'trello', reason: 'Create cards.', actions: ['trello.create_card'] },
     ],
   });
-  assert.deepEqual(normalized.required, [
-    { type: 'gmail', reason: 'Read mail.', actions: ['gmail.search_messages'], multiple: false, legacyToolId: 'gmail' },
-  ]);
-  assert.deepEqual(normalized.optional, [
-    { type: 'trello', reason: 'Create cards.', actions: ['trello.create_card'], multiple: false, legacyToolId: 'trello' },
-  ]);
+  assert.deepEqual(normalized.required, []);
+  assert.deepEqual(normalized.optional, []);
 });
 
-test('explicit manifest connections win over duplicate legacy tool declarations', () => {
+test('explicit manifest connections are the only connection source when legacy tools are present', () => {
   const normalized = normalizeAppConnectionDeclarations({
     optional: [{ type: 'gmail', reason: 'Use selected mail.', actions: ['gmail.read_thread'], multiple: true }],
   }, {

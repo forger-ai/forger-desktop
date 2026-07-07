@@ -9,6 +9,7 @@ description: Use when creating or changing Forger app backend behavior, includin
 - Keep domain validations before persisting data. Validate required fields, ranges, ownership, duplicates, state transitions, and destructive operations before writing to SQLite.
 - Keep persistence and file work inside the app-private workspace unless the user explicitly shared a file for the task.
 - Treat external folder access as a Forger-owned folder grant. For grant-aware workflows, persist and pass grant ids through task or agent `workspace` inputs such as `cwdGrantId` and `additionalFolderGrantIds`. If the backend needs to request a new grant for a concrete folder path, use the commons helpers that sign with Desktop-injected `FORGER_APP_GRANT_SECRET`; never expose that secret or hand-roll the grant token format in app code. You may persist returned full paths for display and prompt context, but the backend must treat those paths as descriptive data and use grant ids for authorization.
+- Use `forger-cross-platform-app-code` when backend code touches operating-system detection, filesystem paths, temp files, permissions, symlinks, processes, shell commands, runtime startup, ports, services, scripts, MCP helpers, or app-agent helpers.
 - Secrets are declarations and runtime-injected values. Do not add credentials to manifests, logs, tests, prompt text, memory, or committed files.
 - Prefer clear, testable changes that are easy to revert.
 

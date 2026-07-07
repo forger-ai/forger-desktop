@@ -1,7 +1,12 @@
 ---
 name: forger-dev-in-app-agents
-description: Use when designing, implementing, reviewing, or explaining in-app AI flows, including manifest agent threads, promptTemplate tasks, Desktop runtime bridge calls, resumable conversations, progress UI, polling, cancellation, and app-visible results.
+description: Use when designing, implementing, reviewing, or explaining AI-powered app workflows: assistants, advisors, recommendations, import/extract/summarize/generate tasks, promptTemplate jobs, manifest agent threads, Desktop runtime bridge calls, MCP/Connection tool use, progress UI, polling, cancellation, resumable conversations, and app-visible results.
 ---
+
+## Trigger Examples
+- Feature language may say "assistant", "advisor", "agent", "AI task", "recommendations", "review", "summarize", "extract", "classify", "generate", "import from a file", "analyze my data", "connect to Gmail/WhatsApp/Slack/etc.", or "show progress while the agent works".
+- App UI may need to start, poll, cancel, resume, or display the result of AI work.
+- Pair `forger-manifest-authoring` with this skill when the flow requires a `promptTemplate`, manifest `agent`, Forger Tool, Connection, app secret, platform capability, or runtime recommendation.
 
 ## Flow Types
 - App agents are app-declared conversational coworkers that can hold a thread, resume prior context, accept follow-up steering, and keep working with the person over multiple turns.

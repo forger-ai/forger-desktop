@@ -772,9 +772,23 @@ export class ChatOrchestrator {
         assistantReply.toolEvents,
       );
       let auditType = 'chat_reply';
+      let createdAppAutoApplied = false;
+      try {
+        createdAppAutoApplied =
+          run.appId === 'forger' && run.createdApp
+            ? await this.finalizeCreatedAppUpdate(run, assistantReply.assistantText)
+            : false;
+      } catch (error) {
+        if (error && typeof error === 'object') {
+          (error as Error & { saveVersionFailed?: boolean }).saveVersionFailed = true;
+        }
+        throw error;
+      }
       const finalStatus = run.appId === 'forger' ? [] : await getGitStatus(run.appRoot);
       const hasUnmergedFiles = hasUnmergedGitStatus(finalStatus);
-      if (run.startedWithUpdateConflict || hasUnmergedFiles) {
+      if (createdAppAutoApplied) {
+        auditType = 'created_app_update_auto_applied';
+      } else if (run.startedWithUpdateConflict || hasUnmergedFiles) {
         await this.finalizeUpdateConflictResolution(run, assistantReply.assistantText);
         auditType = 'update_conflict_resolved';
       } else if (finalStatus.length > 0) {
@@ -817,10 +831,15 @@ export class ChatOrchestrator {
       }
 
       const detail = normalizeErrorCode(error);
+      const saveVersionFailed = Boolean(
+        error && typeof error === 'object' && (error as { saveVersionFailed?: boolean }).saveVersionFailed,
+      );
       run.status = 'failed';
       run.updatedAt = new Date().toISOString();
       run.errorCode = detail.code;
-      run.userMessage = mapFailureMessage(detail.code, detail.message, run.runLogPath, run.locale, run.provider);
+      run.userMessage = saveVersionFailed
+        ? getSharedCopy(run.locale).chat.saveVersionFailed
+        : mapFailureMessage(detail.code, detail.message, run.runLogPath, run.locale, run.provider);
       this.emitRun(run);
       await appendRunLog(run.runLogPath, 'meta', `Run failed: [${detail.code}] ${detail.message}`);
 
@@ -840,6 +859,61 @@ export class ChatOrchestrator {
       this.options.releaseAppMcps?.(run.runId);
       this.releaseRunLocks(run);
     }
+  }
+
+  private async finalizeCreatedAppUpdate(run: InternalChatRun, assistantText: string): Promise<boolean> {
+    if (!run.createdApp?.appId) {
+      return false;
+    }
+
+    await this.options.ensureGitAvailable?.();
+    const createdAppId = run.createdApp.appId;
+    const resolvedAppRoot =
+      (await (this.options.resolveChatAppRoot?.(createdAppId, 'edit_app') ?? Promise.resolve(null))) ??
+      path.join(this.options.privateAppsRoot, sanitizeId(createdAppId));
+    if (!(await existsDirectory(resolvedAppRoot))) {
+      throw createChatError('app_not_installed', 'Created app is not installed');
+    }
+
+    await ensureUserModifiedBranch(resolvedAppRoot);
+    const status = await getGitStatus(resolvedAppRoot);
+    const hasUnmerged = hasUnmergedGitStatus(status);
+    if (hasUnmerged) {
+      throw createChatError('conflict', 'created_app_merge_conflicts_remain');
+    }
+    if (status.length === 0) {
+      return false;
+    }
+
+    const commitSha = await gitCommit(resolvedAppRoot, `forger(create): ${run.createdApp.name}`);
+    const operationId = randomUUID();
+    await this.operationHistory.append(createdAppId, {
+      operationId,
+      appId: createdAppId,
+      runId: run.runId,
+      commitSha,
+      createdAt: new Date().toISOString(),
+      title: summarizeOperationTitle(run.prompt),
+      summary: buildFunctionalOperationSummary(assistantText),
+    });
+
+    run.status = 'applied';
+    run.updatedAt = new Date().toISOString();
+    run.operationId = operationId;
+    run.commitSha = commitSha;
+    run.userMessage = buildAutoAppliedUserMessage(assistantText);
+    this.emitRun(run);
+
+    await this.auditLogger.log({
+      type: 'created_app_auto_apply',
+      runId: run.runId,
+      appId: createdAppId,
+      operationId,
+      commitSha,
+      changedFiles: status.length,
+    });
+
+    return true;
   }
 
   private async finalizeAutoAppliedUpdate(run: InternalChatRun, assistantText: string): Promise<void> {

@@ -16,18 +16,21 @@ const globalAppSkillIds = [
   'forger-app-agents-authoring',
   'forger-app-mcp-data-tools',
   'forger-context',
+  'forger-cross-platform-app-code',
   'forger-dev-backend-development',
   'forger-dev-in-app-agents',
   'forger-frontend-patterns',
   'forger-installed-app-change',
   'forger-localization',
   'forger-manifest-authoring',
+  'forger-memory',
   'forger-permissions',
   'forger-remote-tunnel-wiring',
   'forger-secrets',
   'forger-speech-to-text',
   'forger-text-to-speech',
   'forger-tools',
+  'ui-ux-pro-max',
 ].sort();
 
 const installedAppSkillIds = [
@@ -75,7 +78,6 @@ test('context support writes global AGENTS and official tool skills into metadat
     ...globalAppSkillIds,
     'forger-automations',
     'forger-gmail',
-    'forger-memory',
     'forger-official-tools',
     'forger-product-docs',
     'forger-social-app-review',
@@ -84,6 +86,10 @@ test('context support writes global AGENTS and official tool skills into metadat
     assert.ok(skillDirs.includes(skillId), `${skillId} should be present in .agents skills`);
     assert.ok(claudeSkillDirs.includes(skillId), `${skillId} should be present in .claude skills`);
   }
+  await fs.access(path.join(skillsRoot, 'ui-ux-pro-max', 'scripts', 'search.py'));
+  await fs.access(path.join(skillsRoot, 'ui-ux-pro-max', 'data', 'stacks', 'shadcn.csv'));
+  await fs.access(path.join(claudeSkillsRoot, 'ui-ux-pro-max', 'scripts', 'search.py'));
+  await fs.access(path.join(claudeSkillsRoot, 'ui-ux-pro-max', 'data', 'products.csv'));
   assert.equal(skillDirs.includes('forger-agents'), false);
   assert.equal(skillDirs.includes('forger-tasks'), false);
   assert.equal(skillDirs.includes('forger-desktop-runtime-bridge'), false);
@@ -239,6 +245,14 @@ test('context support normalizes installed app templates with global development
   assert.match(manifestSkill, /Agents may edit `manifest\.json`/);
   assert.match(manifestSkill, /Optional Forger Tools and Connections still need a user grant or approval/);
   assert.match(manifestSkill, /After changing manifest runtime wiring/);
+  assert.match(manifestSkill, /Use this skill even when the person does not say "manifest"/);
+  const frontendSkill = await fs.readFile(path.join(appDir, '.agents', 'skills', 'forger-frontend-patterns', 'SKILL.md'), 'utf8');
+  assert.match(frontendSkill, /Visual QA is mandatory/);
+  const uiUxSkill = await fs.readFile(path.join(appDir, '.agents', 'skills', 'ui-ux-pro-max', 'SKILL.md'), 'utf8');
+  assert.match(uiUxSkill, /Do not use the upstream `--persist` flag by default/);
+  await fs.access(path.join(appDir, '.agents', 'skills', 'ui-ux-pro-max', 'scripts', 'search.py'));
+  await fs.access(path.join(appDir, '.agents', 'skills', 'ui-ux-pro-max', 'data', 'stacks', 'react.csv'));
+  await fs.access(path.join(appDir, '.claude', 'skills', 'ui-ux-pro-max', 'scripts', 'search.py'));
   const remoteTunnelSkill = await fs.readFile(path.join(appDir, '.agents', 'skills', 'forger-remote-tunnel-wiring', 'SKILL.md'), 'utf8');
   assert.match(remoteTunnelSkill, /closed beta/);
   assert.match(remoteTunnelSkill, /hello@forger\.cloud/);

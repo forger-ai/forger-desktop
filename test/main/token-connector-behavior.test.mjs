@@ -1,11 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createRequire } from 'node:module';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const require = createRequire(import.meta.url);
-const { createTokenConnectorModule, ConnectorApiError } = require('../../dist-electron/main/tools/token-connector.js');
-const { slackToolModule } = require('../../dist-electron/main/tools/slack/index.js');
-const { trelloToolModule } = require('../../dist-electron/main/tools/trello/index.js');
+const { createTokenConnectorModule, ConnectorApiError } = require('../../dist-electron/main/connections/modules/token-connector.js');
+const { slackToolModule } = require('../../dist-electron/main/connections/modules/slack/index.js');
+const { trelloToolModule } = require('../../dist-electron/main/connections/modules/trello/index.js');
 const { INTERNAL_TOOL_MODULES } = require('../../dist-electron/main/tools/index.js');
 const { validateOutputAgainstSchema } = require('../../dist-electron/main/workflow/output-schema.js');
 const { getMcpToolInputSchema } = require('../../dist-electron/main/forger-mcp/tool-metadata.js');
@@ -66,10 +69,19 @@ const jsonResponse = (payload, status = 200) => ({
   json: async () => payload,
 });
 
-test('slack and trello connector modules are registered as internal tools', () => {
+const binaryResponse = (payload, status = 200, headers = {}) => ({
+  ok: status >= 200 && status < 300,
+  status,
+  headers: {
+    get: (name) => headers[name.toLowerCase()] ?? null,
+  },
+  arrayBuffer: async () => Buffer.from(payload),
+});
+
+test('slack and trello connector modules are connection modules, not internal tools', () => {
   const ids = INTERNAL_TOOL_MODULES.map((module) => module.definition.id);
-  assert.ok(ids.includes('slack'));
-  assert.ok(ids.includes('trello'));
+  assert.equal(ids.includes('slack'), false);
+  assert.equal(ids.includes('trello'), false);
   const slackSecrets = slackToolModule.definition.secrets;
   assert.equal(slackSecrets.length, 1);
   assert.equal(slackSecrets[0].manual, true, 'slack secrets are manual local tokens');
@@ -225,6 +237,170 @@ test('trello actions use key/token pair and create cards', async () => {
       assert.equal(badInput.technicalCode, 'trello_create_input_invalid');
     },
   );
+});
+
+test('trello card actions filter, update, delete, comment, download, and upload safely', async () => {
+  const metadataRoot = await mkdtemp(join(tmpdir(), 'forger-trello-actions-'));
+  const uploadPath = join(metadataRoot, 'upload.txt');
+  await writeFile(uploadPath, 'archivo local', 'utf8');
+  const secretsStore = createSecretsStore({
+    'trello:api_key': 'key-1',
+    'trello:api_token': 'token-1',
+  });
+  const context = { ...createContext(secretsStore), metadataRoot };
+
+  try {
+    await withMockedFetch(
+      (url, options) => {
+        if (url.includes('/lists/list-1/cards') && options.method === 'GET') {
+          return jsonResponse([
+            {
+              id: 'card-1',
+              name: 'Enviar informe',
+              desc: 'Con adjunto',
+              due: '2026-07-08T12:00:00.000Z',
+              dueComplete: false,
+              url: 'https://trello.com/c/card-1',
+              idList: 'list-1',
+              closed: false,
+              idLabels: ['label-1'],
+              idMembers: ['member-1'],
+            },
+            {
+              id: 'card-2',
+              name: 'Otro trabajo',
+              desc: '',
+              due: null,
+              dueComplete: false,
+              url: 'https://trello.com/c/card-2',
+              idList: 'list-1',
+              closed: false,
+              idLabels: ['label-2'],
+              idMembers: [],
+            },
+          ]);
+        }
+        if (url.includes('/cards/card-1') && options.method === 'PUT') {
+          return jsonResponse({
+            id: 'card-1',
+            name: 'Enviar informe final',
+            desc: 'Actualizada',
+            due: '2026-07-09T12:00:00.000Z',
+            dueComplete: true,
+            url: 'https://trello.com/c/card-1',
+            idList: 'list-2',
+            closed: false,
+          });
+        }
+        if (url.includes('/cards/card-1/actions/comments') && options.method === 'POST') {
+          return jsonResponse({ id: 'comment-1', data: { text: 'Listo' }, date: '2026-07-07T12:00:00.000Z' });
+        }
+        if (url.includes('/cards/card-1/attachments') && options.method === 'GET') {
+          return jsonResponse([
+            {
+              id: 'att-1',
+              name: 'informe.pdf',
+              url: 'https://api.trello.com/1/cards/card-1/attachments/att-1/download/informe.pdf',
+              bytes: 7,
+              mimeType: 'application/pdf',
+              date: '2026-07-07T12:00:00.000Z',
+            },
+          ]);
+        }
+        if (url.includes('/cards/card-1/attachments/att-1/download/informe.pdf')) {
+          return binaryResponse('PDFDATA', 200, {
+            'content-type': 'application/pdf',
+            'content-length': '7',
+          });
+        }
+        if (url.includes('/cards/card-1/attachments') && options.method === 'POST') {
+          assert.ok(options.body instanceof FormData);
+          return jsonResponse({ id: 'att-2', name: 'upload.txt', bytes: 13, mimeType: 'text/plain' });
+        }
+        if (url.includes('/cards/card-1') && options.method === 'DELETE') {
+          return jsonResponse({});
+        }
+        return jsonResponse({}, 404);
+      },
+      async (calls) => {
+        const filtered = await trelloToolModule.execute(
+          {
+            toolId: 'trello',
+            actionId: 'trello.filter_cards',
+            input: { listId: 'list-1', query: 'informe', labelIds: ['label-1'], memberIds: ['member-1'], limit: 10 },
+          },
+          context,
+        );
+        assert.equal(filtered.success, true);
+        assert.deepEqual(filtered.data.cards.map((card) => card.id), ['card-1']);
+
+        const updated = await trelloToolModule.execute(
+          {
+            toolId: 'trello',
+            actionId: 'trello.update_card',
+            input: { cardId: 'card-1', name: 'Enviar informe final', listId: 'list-2', dueComplete: true },
+          },
+          context,
+        );
+        assert.equal(updated.success, true);
+        assert.equal(updated.data.card.name, 'Enviar informe final');
+
+        const commented = await trelloToolModule.execute(
+          { toolId: 'trello', actionId: 'trello.comment_card', input: { cardId: 'card-1', text: 'Listo' } },
+          context,
+        );
+        assert.equal(commented.success, true);
+        assert.equal(commented.data.comment.id, 'comment-1');
+
+        const attachments = await trelloToolModule.execute(
+          { toolId: 'trello', actionId: 'trello.list_card_attachments', input: { cardId: 'card-1' } },
+          context,
+        );
+        assert.equal(attachments.success, true);
+        assert.equal(attachments.data.attachments[0].id, 'att-1');
+        assert.equal(JSON.stringify(attachments).includes('token-1'), false);
+
+        const downloaded = await trelloToolModule.execute(
+          {
+            toolId: 'trello',
+            actionId: 'trello.download_attachment',
+            input: { cardId: 'card-1', attachmentId: 'att-1', fileName: 'informe.pdf' },
+          },
+          context,
+        );
+        assert.equal(downloaded.success, true);
+        assert.equal(await readFile(downloaded.data.filePath, 'utf8'), 'PDFDATA');
+        assert.equal(downloaded.data.size, 7);
+        assert.equal(JSON.stringify(downloaded).includes('token-1'), false);
+
+        const uploaded = await trelloToolModule.execute(
+          {
+            toolId: 'trello',
+            actionId: 'trello.upload_attachment',
+            input: { cardId: 'card-1', filePath: uploadPath, name: 'upload.txt' },
+          },
+          context,
+        );
+        assert.equal(uploaded.success, true);
+        assert.equal(uploaded.data.attachment.id, 'att-2');
+
+        const deleted = await trelloToolModule.execute(
+          { toolId: 'trello', actionId: 'trello.delete_card', input: { cardId: 'card-1' } },
+          context,
+        );
+        assert.equal(deleted.success, true);
+        assert.deepEqual(deleted.data, { id: 'card-1', deleted: true });
+
+        const updateCall = calls.find((call) => call.url.includes('/cards/card-1') && call.options.method === 'PUT');
+        assert.ok(updateCall.url.includes('name=Enviar+informe+final'));
+        assert.ok(updateCall.url.includes('idList=list-2'));
+        assert.ok(updateCall.url.includes('dueComplete=true'));
+        assert.equal(JSON.stringify({ filtered, updated, commented, attachments, downloaded, uploaded, deleted }).includes('token-1'), false);
+      },
+    );
+  } finally {
+    await rm(metadataRoot, { recursive: true, force: true });
+  }
 });
 
 

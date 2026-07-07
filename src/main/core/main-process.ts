@@ -43,6 +43,7 @@ import { RemoteAgentSessionService } from '../personal-agents/remote-session-ser
 import { PromptOverridesStore, buildPromptBases, promptOverrideErrorResult } from '../prompt-overrides';
 import { OfficialToolsService, normalizeAppToolDeclarations } from '../official-tools-service';
 import { ConnectionsService } from '../connections-service';
+import { cleanupLegacyExternalToolState } from '../legacy-external-tools-cleanup';
 import { AudioRuntimeBroker } from '../audio-runtime-broker';
 import { SpeechToTextServiceManager } from '../speech-to-text-service';
 import { TextToSpeechServiceManager } from '../text-to-speech-service';
@@ -1467,7 +1468,7 @@ registerMainLifecycle({
   DevCatalogService, FORGER_AGENT_CONTRACT_VERSION, FileLibrary, ForgerAccountStore, ForgerBackendClient,
   ForgerMcpServer, IPC_CHANNELS, MemoryMaintenanceManager, MemoryStore, SecretsStore, anyAppAllowsAgentNetworkAccess, app,
   appAllowsAgentNetworkAccess, appWindows, appendInstallLog, backendBaseUrl, buildForgerToolsContextForApp, buildMemoryContextForApp,
-  buildMemoryContextForApps, chooseAgentRuntime, clearForgerAccountSession, closeServer, createLocalAppFromSkeleton, createWindow,
+  buildMemoryContextForApps, chooseAgentRuntime, cleanupLegacyExternalToolState, clearForgerAccountSession, closeServer, createLocalAppFromSkeleton, createWindow,
   finishSocialAppInstall, deleteQuarantinedSocialApp,
   emitAutomationUpdated, emitWorkflowUpdated, emitChatRunUpdated, ensureBackendPythonEnvironment, ensureCatalogStatuses, ensureGlobalAgentsContext,
   ensureGitAvailable, ensurePathInside, ensureRuntimeInstalled, ensureSqliteDatabaseParent, flushPendingDeepLink, fs, getAgentPathEntries, getBackupsRoot,

@@ -22,23 +22,18 @@ const buildPersonalAgentForgerToolsContext = (agent: PersonalAgent): string => {
 };
 
 const buildPersonalAgentConnectionsContext = (agent: PersonalAgent): string => {
-  const legacyConnectionActions = agent.toolIds.filter(isForgerConnectionActionId);
   const grantLines = agent.connectionGrants.map((grant) => {
     const binding = (grant.connectionIds?.length ?? 0) > 0
       ? 'specific account/session binding is present'
       : 'no specific account/session binding is embedded';
     return `  - ${grant.type}: actions ${formatActionIds(grant.actions)}; multiple allowed: ${grant.multiple ? 'yes' : 'no'}; ${binding}.`;
   });
-  const legacyLines = legacyConnectionActions.length > 0
-    ? [`  - Legacy connection action ids still present in tool grants: ${formatActionIds(legacyConnectionActions)}.`]
-    : [];
-  if (grantLines.length === 0 && legacyLines.length === 0) {
+  if (grantLines.length === 0) {
     return '- No Connections are granted to this personal agent.';
   }
   return [
     '- Granted Connections:',
     ...grantLines,
-    ...legacyLines,
     '- Check the matching `*.connection.status` action before external account work when state is unclear.',
     '- If multiple accounts or sessions are possible and the intended account is ambiguous, ask the person which account/session to use.',
     '- Sensitive sends, creates, attachment reads, and external writes still require visible Forger approval when Forger asks.',

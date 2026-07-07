@@ -1,6 +1,6 @@
 ---
 name: forger-frontend-patterns
-description: Use this skill before any change that affects how a Forger app looks, feels, moves, routes, collects input, displays data, handles agent work, or behaves on mobile.
+description: Use this skill before any change that affects how a Forger app looks, feels, moves, routes, collects input, displays data, handles agent work, uses UI UX Pro Max design guidance, needs visual identity, persists a visual contract in Forger memory, or behaves on mobile.
 ---
 
 # Forger Frontend Patterns
@@ -25,16 +25,37 @@ Choose layout, density, navigation, color, components, and motion from those ans
 
 ## Design Direction
 
-Make a compact design plan before coding:
+Before coding, use `ui-ux-pro-max` to generate concrete design intelligence for the app. Run its design-system search with a query that names the app's actual job, user, workflow, density, and React/Tailwind/shadcn stack. Search shadcn or UX domains when components, forms, tables, charts, motion, or accessibility are central to the change.
+
+Do not use the upstream `--persist` flag unless the person explicitly asks for design-system files in the app. Forger persists the selected visual contract through memory, not through a `design-system/` folder in the app repository.
+
+Make a compact design plan before coding. Include both the UI UX Pro Max recommendation and the Forger-specific decision:
 
 - `Mode`: minimalist utility, operational panel, chat-first assistant, review workflow, data manager, creative tool, or mobile companion.
 - `Density`: sparse, balanced, dense, or high-throughput.
 - `Layout`: the shell, routes, main panes, scrolling regions, and persistent controls.
 - `Palette`: semantic colors for background, surface, border, primary, accent, destructive, success, warning, and focus.
+- `Typography`: heading, body, numeric/data text, label scale, and long-label behavior.
+- `Components`: the primitive rules for buttons, forms, tables, cards, dialogs, drawers, charts, and agent progress.
+- `Motion`: the exact transitions that support route changes, overlays, task progress, or state changes.
 - `Signature`: one specific visual or interaction choice that fits the app and avoids generic template output.
 - `Rejected defaults`: name the generic patterns you are intentionally avoiding.
 
 Only start coding after the plan fits the app's actual workflow.
+
+## Persist The Visual Contract
+
+After choosing the design direction, use `forger-memory` and save or update an app-scoped memory for the selected app. Use `memory_list` first to avoid duplicates, then `memory_update` or `memory_create`.
+
+Use this memory shape:
+
+- `scope`: `app`
+- `kind`: `constraint`
+- `title`: `Visual system`
+- `read_when`: `Before creating, editing, reviewing, or visually QAing UI in this app.`
+- `body`: the compact visual contract: product pattern, palette tokens, typography, density, layout, component rules, motion, and rejected defaults.
+
+Keep the memory short and future-facing. Do not save screenshots, raw HTML, logs, user data, secrets, or one-off observations.
 
 ## General Layout Direction
 
@@ -185,6 +206,16 @@ Work in two passes:
 - First pass: build the intended structure and interactions.
 - Second pass: critique the UI against the app's workflow and remove generic or decorative choices.
 
+Visual QA is mandatory for visual UI work.
+
+Open, restart, or bring up the installed app through Forger Desktop tools such as `forger_open_app`, `forger_restart_app`, and `forger_get_app_runtime_status`. Do not manually start Python, uvicorn, npm, Vite, FastAPI, or localhost services just to inspect the app.
+
+Use available Forger browser or Chrome Extension actions to inspect the real rendered app: open a dedicated tab when available, wait for selectors, inspect HTML/styles, interact with navigation, forms, dialogs, dropdowns, drawers, and agent progress states, and verify desktop plus narrow mobile behavior when the tool supports it.
+
+Do not substitute `curl`, `/health`, a frontend HTTP response, build, lint, typecheck, or tests for visual QA. Those checks can prove services and code health; they do not prove visual quality.
+
+If browser or visual inspection tools are unavailable, state that visual QA could not be completed and explain which non-visual checks passed. Do not claim the UI is polished or visually verified.
+
 Before finishing, verify:
 
 - Desktop uses space well.
@@ -196,3 +227,4 @@ Before finishing, verify:
 - Copy is localized.
 - Primary actions are visible.
 - The result does not look like a generic generated dashboard.
+- The UI UX Pro Max visual contract is reflected in real tokens, layout, components, and motion.

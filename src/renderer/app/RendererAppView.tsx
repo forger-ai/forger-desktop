@@ -29,7 +29,6 @@ import { SettingsView } from '@renderer/views/SettingsView';
 import { SecretsView } from '@renderer/views/SecretsView';
 import { ToolsView } from '@renderer/views/ToolsView';
 import { AGENT_PROVIDER_OPTIONS, ANTIGRAVITY_EFFORT_OPTIONS, ANTIGRAVITY_MODEL_OPTIONS, CHAT_BOT_PICTURE_OPTIONS, CLAUDE_EFFORT_OPTIONS, CLAUDE_MODEL_OPTIONS, CODEX_MODEL_OPTIONS, CODEX_REASONING_OPTIONS } from '@renderer/preferences';
-import { usageAnalytics } from '@renderer/usage-analytics';
 import { buildChatProviderOptions, getRuntimeSupportedEfforts, normalizeRuntimeEffortForModel } from '@shared/agent-runtime-registry';
 import { TourOverlay } from '@renderer/tour/TourOverlay';
 import { useForgerTour } from '@renderer/tour/useForgerTour';
@@ -405,7 +404,6 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     setSelectedToolsTool,
     handleAgentToolApprovalChange,
     runOfficialToolAction,
-    refreshOfficialTools,
     activeLocale,
     codexAuthBusy,
     claudeAuthBusy,
@@ -1373,32 +1371,9 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             onConfigureOfficialTool={(toolId, secrets) =>
               void runOfficialToolAction(toolId, () => getDesktopApi().configureOfficialTool({ toolId, locale: activeLocale, ...(secrets ? { secrets } : {}) }), 'configure')
             }
-            onStartWhatsAppPairing={async (method, phoneNumber) => {
-              const configureResult = await getDesktopApi().configureOfficialTool({ toolId: 'whatsapp', locale: activeLocale });
-              if (configureResult.success) {
-                usageAnalytics.officialToolConnected({ toolId: 'whatsapp', surface: 'tools', locale: t.locale, origin: 'user_action' });
-              }
-              const result = await getDesktopApi().callOfficialTool({
-                toolId: 'whatsapp',
-                actionId: 'whatsapp.start_pairing',
-                input: {
-                  method,
-                  ...(phoneNumber ? { phoneNumber } : {}),
-                },
-              });
-              await refreshOfficialTools();
-              return result;
-            }}
-            onGetWhatsAppStatus={async () => getDesktopApi().callOfficialTool({
-              toolId: 'whatsapp',
-              actionId: 'whatsapp.connection.status',
-              input: {},
-            })}
-            onOfficialToolEvent={(listener) => getDesktopApi().onOfficialToolEvent(listener)}
             onDeactivateOfficialTool={(toolId) =>
               void runOfficialToolAction(toolId, () => getDesktopApi().deactivateOfficialTool(toolId, activeLocale))
             }
-            onOpenConnections={() => setCurrentView('connections')}
           />)
         ) : null}
 

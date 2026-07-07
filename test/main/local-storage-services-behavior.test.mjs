@@ -975,7 +975,7 @@ test('ForgerAccountStore normalizes persisted sessions and exposes only public a
   assert.deepEqual(await store.load(), { authenticated: false });
 });
 
-test('OfficialToolsService persists app grants and keeps unavailable Gmail actions safe', async (t) => {
+test('OfficialToolsService ignores external manifest.tools declarations and keeps Chrome as an official tool', async (t) => {
   const root = await tmpRoot('official-tools');
   let service;
   t.after(async () => {
@@ -985,22 +985,14 @@ test('OfficialToolsService persists app grants and keeps unavailable Gmail actio
   const secretsStore = new SecretsStore(root);
   const declarations = normalizeAppToolDeclarations({
     required: [
-      { toolId: 'gmail-missing-reason', actions: ['gmail.send_email'] },
       { toolId: 'gmail', reason: 'Necesita leer correo', actions: ['gmail.search_messages', 'gmail.connection.status', '', 7] },
-      { toolId: 'gmail', reason: 'Duplicado ignorado', actions: ['gmail.send_email'] },
+      { toolId: 'forger_chrome_extension', reason: 'Necesita Chrome', actions: ['forger_chrome_extension.navigate'] },
     ],
     optional: [
       { toolId: 'gmail', reason: 'Puede enviar correo', actions: ['gmail.send_email'] },
-      { toolId: 'whatsapp', reason: 'Puede avisar por WhatsApp', actions: ['whatsapp.list_chats', 'whatsapp.send_message'] },
-      { toolId: '', reason: 'Sin herramienta', actions: ['gmail.send_email'] },
-      { toolId: 'gmail', reason: '', actions: ['gmail.send_email'] },
+      { toolId: 'whatsapp', reason: 'Puede avisar por WhatsApp', actions: ['whatsapp.send_message'] },
     ],
   });
-  assert.deepEqual(declarations.required, [{
-    toolId: 'gmail',
-    reason: 'Necesita leer correo',
-    actions: ['gmail.search_messages', 'gmail.connection.status'],
-  }]);
 
   service = new OfficialToolsService({
     metadataRoot: root,
@@ -1018,127 +1010,48 @@ test('OfficialToolsService persists app grants and keeps unavailable Gmail actio
         return {
           appName: 'Finance OS',
           required: declarations.required,
-          optional: [],
+          optional: declarations.optional,
           agents: [{ id: 'assistant', title: 'Assistant', initialPrompt: 'Help' }],
           promptTemplates: [{ id: 'review', title: 'Review', prompt: 'Review data' }],
-        };
-      }
-      if (appId === 'mailer') {
-        return {
-          appName: 'Mailer',
-          required: [],
-          optional: declarations.optional,
-          agents: [],
-          promptTemplates: [],
+          platformCapabilities: {},
         };
       }
       return null;
     },
   });
 
-  assert.equal((await service.activate('missing-tool')).technicalCode, 'tool_not_found');
-  assert.equal((await service.configure({ toolId: 'missing-tool' })).technicalCode, 'tool_not_found');
-  assert.equal(await service.getInstallGate('missing-app'), null);
+  const state = await service.list('en');
+  assert.equal(state.tools.some((tool) => tool.id === 'forger_chrome_extension'), true);
+  assert.equal(state.tools.some((tool) => tool.id === 'gmail'), false);
+  assert.equal(state.tools.some((tool) => tool.id === 'whatsapp'), false);
+
+  const requiredGate = await service.getInstallGate('finance-os', 'en');
+  assert.equal(requiredGate.required.length, 1);
+  assert.equal(requiredGate.required[0].declaration.toolId, 'forger_chrome_extension');
+  assert.equal(requiredGate.required[0].configured, false);
+  assert.equal(requiredGate.optional.length, 0);
+  assert.equal(requiredGate.canInstall, true);
+  assert.deepEqual(requiredGate.agents.map((agent) => agent.id), ['assistant']);
+  assert.deepEqual([...await service.listAgentActionIdsForApp('finance-os')], ['forger_chrome_extension.navigate']);
+
+  assert.equal((await service.activate('gmail', 'en')).technicalCode, 'tool_not_found');
+  assert.equal((await service.configure({ toolId: 'whatsapp', locale: 'en' })).technicalCode, 'tool_not_found');
+  assert.equal((await service.previewOptionalAppToolGrant({ appId: 'finance-os', toolId: 'gmail' })).technicalCode, 'app_tool_not_declared');
+  assert.equal((await service.setOptionalAppToolGrant({ appId: 'finance-os', toolId: 'whatsapp', granted: true })).technicalCode, 'app_tool_not_declared');
   assert.equal((await service.callFromAgent({
-    toolId: 'missing-tool',
-    actionId: 'missing.action',
+    toolId: 'gmail',
+    actionId: 'gmail.search_messages',
   })).technicalCode, 'tool_not_found');
   assert.equal((await service.callFromAgent({
     toolId: 'gmail',
     actionId: 'gmail.search_messages',
-  })).technicalCode, 'tool_not_active');
-  assert.equal((await service.callFromAgent({
-    toolId: 'gmail',
-    actionId: 'gmail.search_messages',
-  }, { requireAppGrant: true })).technicalCode, 'app_tools_not_declared');
-  assert.equal((await service.callFromAgent({
-    toolId: 'gmail',
-    actionId: 'gmail.search_messages',
-  }, { requireAppGrant: true, appId: 'missing-app' })).technicalCode, 'app_tools_not_declared');
-  assert.equal((await service.callFromAgent({
-    toolId: 'gmail',
-    actionId: 'gmail.search_messages',
-  }, { requireAppGrant: true, appId: 'mailer' })).technicalCode, 'app_tool_permission_denied');
-  assert.equal((await service.callFromAgent({
-    toolId: 'gmail',
-    actionId: 'gmail.read_thread',
-  }, { requireAppGrant: true, appId: 'finance-os' })).technicalCode, 'app_tool_action_not_declared');
-  assert.equal((await service.callFromAgent({
-    toolId: 'missing-tool',
-    actionId: 'missing.action',
   }, { requireAppGrant: true, appId: 'finance-os' })).technicalCode, 'app_tool_not_declared');
-
-  const activated = await service.activate('gmail', 'en');
-  assert.equal(activated.success, true);
-  assert.equal(activated.tool.status, 'installed');
-  const activatedWhatsapp = await service.activate('whatsapp', 'en');
-  assert.equal(activatedWhatsapp.success, true);
-  assert.equal(activatedWhatsapp.tool.status, 'configured');
-  assert.equal((await service.list('en')).tools.some((tool) => tool.id === 'whatsapp'), true);
-
-  const requiredGate = await service.getInstallGate('finance-os', 'en');
-  assert.equal(requiredGate.required[0].available, true);
-  assert.equal(requiredGate.required[0].configured, false);
-  assert.equal(requiredGate.canInstall, true);
-  assert.deepEqual(requiredGate.agents.map((agent) => agent.id), ['assistant']);
-  assert.deepEqual([...await service.listAgentActionIdsForApp('finance-os')], ['gmail.search_messages', 'gmail.connection.status']);
-
-  const optionalBeforeGrant = await service.getInstallGate('mailer');
-  assert.equal(optionalBeforeGrant.optional[0].granted, false);
-  assert.equal(optionalBeforeGrant.optional[1].declaration.toolId, 'whatsapp');
-  assert.deepEqual(await service.listToolsForApp('mailer'), []);
-  await service.setAppToolGrant({ appId: 'mailer', toolId: 'gmail', granted: true });
-  await service.setAppToolGrant({ appId: 'mailer', toolId: 'whatsapp', granted: true });
-  assert.equal((await service.getInstallGate('mailer')).optional[0].granted, true);
-  assert.deepEqual((await service.listToolsForApp('mailer')).map((tool) => tool.id).sort(), ['gmail', 'whatsapp']);
-  assert.deepEqual([...await service.listAgentActionIdsForApp('mailer')].sort(), ['gmail.send_email', 'whatsapp.list_chats', 'whatsapp.send_message']);
-
-  const status = await service.callFromApp('finance-os', {
-    toolId: 'gmail',
-    actionId: 'gmail.connection.status',
-  });
-  assert.deepEqual(status, { success: true, data: { connected: false } });
   assert.equal((await service.callFromApp('finance-os', {
     toolId: 'gmail',
-    actionId: 'gmail.send_email',
-  })).technicalCode, 'app_tool_action_not_declared');
-  const missingDeclarations = await service.callFromApp('unknown-app', {
-    toolId: 'gmail',
     actionId: 'gmail.connection.status',
-  });
-  assert.equal(missingDeclarations.technicalCode, 'app_tools_not_declared');
-  assert.match(missingDeclarations.userMessage, /motivo visible/);
-  assert.equal((await service.callFromAgent({
-    toolId: 'gmail',
-    actionId: 'gmail.search_messages',
-    input: { query: 'from:bank' },
-  })).technicalCode, 'tool_not_configured');
-  assert.equal((await service.callFromApp('mailer', {
-    toolId: 'gmail',
-    actionId: 'gmail.send_email',
-  })).technicalCode, 'tool_not_configured');
-  assert.equal((await service.callFromApp('mailer', {
-    toolId: 'whatsapp',
-    actionId: 'whatsapp.send_message',
-    input: { chatId: '569123@s.whatsapp.net', text: 'Hola' },
-  })).technicalCode, 'whatsapp_chat_not_observed');
+  })).technicalCode, 'app_tool_not_declared');
 
-  const configured = await service.configure({ toolId: 'gmail', locale: 'es' });
-  assert.equal(configured.success, false);
-  assert.equal(configured.technicalCode, 'forger_account_required');
-  assert.equal((await service.getTool('gmail')).status, 'error');
-  assert.equal((await service.callFromAgent({
-    toolId: 'gmail',
-    actionId: 'gmail.search_messages',
-  })).technicalCode, 'tool_configuration_error');
   assert.equal((await service.deactivate('missing-tool')).technicalCode, 'tool_not_found');
-
-  const deactivated = await service.deactivate('gmail', { keepSecrets: true });
-  assert.equal(deactivated.success, true);
-  const deactivatedWhatsapp = await service.deactivate('whatsapp', { keepSecrets: true });
-  assert.equal(deactivatedWhatsapp.success, true);
-  const registry = JSON.parse(await fs.readFile(path.join(root, 'official-tools.json'), 'utf8'));
-  assert.deepEqual(registry.appGrants.mailer, {});
 });
 
 test('DesktopUpdater checks metadata, downloads to userData cache, validates checksum, and opens the downloaded installer', async (t) => {

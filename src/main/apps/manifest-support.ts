@@ -613,8 +613,7 @@ const resolveAppConnectionDeclarations = async (
   const record = getCurrentRegistry().apps[appId];
   if (record?.installDir) {
     const manifest = await resolveInstalledManifest(record.installDir);
-    const legacyTools = normalizeAppToolDeclarations(manifest?.tools);
-    const declarations = normalizeAppConnectionDeclarations(manifest?.connections, legacyTools);
+    const declarations = normalizeAppConnectionDeclarations(manifest?.connections);
     return {
       appName: record.name ?? appId,
       agents: normalizeManifestAgents(manifest),
@@ -628,8 +627,7 @@ const resolveAppConnectionDeclarations = async (
   if (!catalog) {
     return null;
   }
-  const legacyTools = normalizeAppToolDeclarations(catalog.tools);
-  const declarations = normalizeAppConnectionDeclarations(catalog.connections, legacyTools);
+  const declarations = normalizeAppConnectionDeclarations(catalog.connections);
   return {
     appName: catalog.name ?? appId,
     agents: catalog.agents ?? [],
