@@ -651,8 +651,8 @@ test('official tool skill templates and seed data keep expected Desktop defaults
   assert.match(productDocsSkill.body, /what Forger is, how Forger works, which capabilities exist/);
   assert.match(productDocsSkill.body, /Do not use this documentation as the guide for creating an app, writing code, designing manifests, implementing MCP servers, changing app data, modifying installed apps/);
   assert.match(productDocsSkill.body, /verify the current state before answering/);
-  assert.equal(installedAppsSeed.length, 2);
-  assert.equal(catalogAppsSeed.some((app) => app.id === 'finance-os'), true);
+  assert.equal(installedAppsSeed.length, 1);
+  assert.equal(catalogAppsSeed.some((app) => app.id === 'finance-os'), false);
   assert.equal(settingsSeed.safeMode, true);
   assert.equal(settingsSeed.defaultAgentProvider, 'auto');
   assert.equal(settingsSeed.defaultChatNetworkAccess, true);
