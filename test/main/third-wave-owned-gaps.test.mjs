@@ -196,14 +196,14 @@ test('connection tool definitions map connection actions into MCP tools defensiv
       packageId: 'connection:gmail',
       category: 'app',
       risk: 'alto',
-      defaultRequiresApproval: false,
+      defaultRequiresApproval: true,
     },
     {
       id: 'slack.post_message',
       packageId: 'connection:slack',
       category: 'app',
       risk: 'medio',
-      defaultRequiresApproval: false,
+      defaultRequiresApproval: true,
     },
   ]);
 });

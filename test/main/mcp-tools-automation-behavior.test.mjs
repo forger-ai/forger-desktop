@@ -136,6 +136,24 @@ const defaultMcpToolDefinitions = [
     defaultRequiresApproval: false,
   },
   {
+    id: 'forger_get_app_view_snapshot',
+    packageId: 'forger',
+    name: 'Snapshot vista',
+    description: 'Lee la vista de la app.',
+    category: 'consulta',
+    risk: 'bajo',
+    defaultRequiresApproval: false,
+  },
+  {
+    id: 'forger_get_app_runtime_diagnostics',
+    packageId: 'forger',
+    name: 'Diagnostico runtime',
+    description: 'Lee diagnosticos de runtime.',
+    category: 'consulta',
+    risk: 'bajo',
+    defaultRequiresApproval: false,
+  },
+  {
     id: 'forger_open_app',
     packageId: 'forger',
     name: 'Abrir',
@@ -284,7 +302,13 @@ const createForgerMcpHarness = async (overrides = {}) => {
       questions: input.questions,
       createdAt: '2026-01-01T00:00:00.000Z',
     })),
-    getRuntimeStatus: (appId) => ({ status: appId === 'finance-os' ? 'running' : 'stopped' }),
+    getRuntimeStatus: (appId) => ({
+      status: appId === 'finance-os' ? 'running' : 'stopped',
+      frontendUrl: appId === 'finance-os' ? 'http://127.0.0.1:55597' : undefined,
+      backendUrl: appId === 'finance-os' ? 'http://127.0.0.1:55598' : undefined,
+    }),
+    getAppViewSnapshot: async (appId, input) => ({ success: true, appId, snapshot: { selector: input.selector ?? 'body', text: 'Vista demo' } }),
+    getAppRuntimeDiagnostics: async (appId, input) => ({ success: true, appId, recentLines: input.recentLines ?? 80 }),
     openApp: async (appId) => ({ success: true, appId }),
     stopApp: async (appId) => ({ success: true, appId }),
     restartApp: async (appId, options) => {
@@ -378,6 +402,150 @@ test('MCP tools/list separates Forger Tools from ungranted connection actions', 
     assert.equal(names.includes('forger_connection_status'), true);
     assert.equal(names.includes('forger_connection_call'), false);
     assert.equal(names.includes('gmail.search_messages'), false);
+  } finally {
+    harness.stop();
+  }
+});
+
+test('MCP inter-agent tools are visible only inside personal-agent conversations and delegate with context', async () => {
+  const calls = [];
+  const thread = {
+    id: 'thread-1',
+    callerAgentId: 'agent-a',
+    callerAgentName: 'Planner',
+    targetAgentId: 'agent-b',
+    targetAgentName: 'Budget',
+    sourceConversationId: 'conversation-a',
+    targetConversationId: 'conversation-b',
+    parentThreadId: null,
+    rootThreadId: null,
+    createdByRunId: 'run-personal',
+    title: 'Budget review',
+    status: 'completed',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:01:00.000Z',
+    messages: [],
+  };
+  const harness = await createForgerMcpHarness({
+    options: {
+      listAgentPeers: async (input) => {
+        calls.push(['list', input]);
+        return {
+          success: true,
+          peers: [{ agentId: 'agent-b', name: 'Budget', criteria: 'Ask for budget questions.' }],
+          recentThreads: [thread],
+        };
+      },
+      askAgent: async (input) => {
+        calls.push(['ask', input]);
+        return {
+          success: true,
+          status: 'completed',
+          thread,
+          response: 'Budget approved.',
+        };
+      },
+      readAgentThread: async (input) => {
+        calls.push(['read', input]);
+        return {
+          success: true,
+          thread,
+        };
+      },
+    },
+  });
+  try {
+    const freeSession = harness.server.createSession('run-free-peer', 'forger', { caller: 'free-chat' });
+    const freeListed = await (await callMcp(freeSession, { jsonrpc: '2.0', id: 1, method: 'tools/list' })).json();
+    const freeNames = freeListed.result.tools.map((tool) => tool.name);
+    assert.equal(freeNames.includes('forger_list_agent_peers'), false);
+    assert.equal(freeNames.includes('forger_ask_agent'), false);
+    assert.equal(freeNames.includes('forger_read_agent_thread'), false);
+
+    const incompleteSession = harness.server.createSession('run-incomplete-peer', 'forger', {
+      caller: 'personal-agent',
+      personalAgentId: 'agent-a',
+    });
+    const incompleteListed = await (await callMcp(incompleteSession, { jsonrpc: '2.0', id: 2, method: 'tools/list' })).json();
+    assert.equal(incompleteListed.result.tools.some((tool) => tool.name === 'forger_ask_agent'), false);
+
+    const personalSession = harness.server.createSession('run-personal', 'forger', {
+      caller: 'personal-agent',
+      personalAgentId: 'agent-a',
+      personalAgentConversationId: 'conversation-a',
+      personalAgentCallStackIds: ['agent-root', 'agent-a'],
+    });
+    const personalListed = await (await callMcp(personalSession, { jsonrpc: '2.0', id: 3, method: 'tools/list' })).json();
+    const personalNames = personalListed.result.tools.map((tool) => tool.name);
+    assert.equal(personalNames.includes('forger_list_agent_peers'), true);
+    assert.equal(personalNames.includes('forger_ask_agent'), true);
+    assert.equal(personalNames.includes('forger_read_agent_thread'), true);
+
+    const listedPeers = parseToolTextResult(await (await callMcp(personalSession, {
+      jsonrpc: '2.0',
+      id: 4,
+      method: 'tools/call',
+      params: { name: 'forger_list_agent_peers', arguments: {} },
+    })).json());
+    assert.equal(listedPeers.success, true);
+    assert.equal(listedPeers.peers[0].agentId, 'agent-b');
+    assert.equal(listedPeers.recentThreads[0].id, 'thread-1');
+
+    const asked = parseToolTextResult(await (await callMcp(personalSession, {
+      jsonrpc: '2.0',
+      id: 5,
+      method: 'tools/call',
+      params: {
+        name: 'forger_ask_agent',
+        arguments: {
+          targetAgentId: 'agent-b',
+          message: 'Can you review launch budget?',
+        },
+      },
+    })).json());
+    assert.equal(asked.success, true);
+    assert.equal(asked.thread.id, 'thread-1');
+    assert.equal(asked.response, 'Budget approved.');
+
+    const read = parseToolTextResult(await (await callMcp(personalSession, {
+      jsonrpc: '2.0',
+      id: 6,
+      method: 'tools/call',
+      params: {
+        name: 'forger_read_agent_thread',
+        arguments: { threadId: 'thread-1' },
+      },
+    })).json());
+    assert.equal(read.success, true);
+    assert.equal(read.thread.id, 'thread-1');
+
+    const rejected = parseToolTextResult(await (await callMcp(freeSession, {
+      jsonrpc: '2.0',
+      id: 7,
+      method: 'tools/call',
+      params: {
+        name: 'forger_ask_agent',
+        arguments: {
+          targetAgentId: 'agent-b',
+          message: 'Should not run.',
+        },
+      },
+    })).json());
+    assert.equal(rejected.success, false);
+    assert.equal(rejected.technicalCode, 'personal_agent_context_required');
+
+    assert.deepEqual(calls, [
+      ['list', { agentId: 'agent-a' }],
+      ['ask', {
+        callerAgentId: 'agent-a',
+        callerConversationId: 'conversation-a',
+        callerRunId: 'run-personal',
+        callStackAgentIds: ['agent-root', 'agent-a'],
+        targetAgentId: 'agent-b',
+        message: 'Can you review launch budget?',
+      }],
+      ['read', { agentId: 'agent-a', threadId: 'thread-1' }],
+    ]);
   } finally {
     harness.stop();
   }
@@ -503,6 +671,76 @@ test('MCP typed connection actions honor agent tool approval settings', async ()
   }
 });
 
+test('MCP typed connection actions use definition approval defaults and persisted off overrides', async () => {
+  const permissionRequests = [];
+  const connectionCalls = [];
+  const approvals = {};
+  const harness = await createForgerMcpHarness({
+    toolDefinitions: [
+      {
+        id: 'gmail.send_email',
+        packageId: 'connection:gmail',
+        name: 'Send Gmail',
+        description: 'Send mail.',
+        category: 'app',
+        risk: 'alto',
+        defaultRequiresApproval: true,
+      },
+    ],
+    approvals,
+    requestPermission: async (runId, request) => {
+      permissionRequests.push({ runId, request });
+      return true;
+    },
+    listConnectionGrantsForApp: async () => [
+      { type: 'gmail', actions: ['gmail.send_email'], multiple: false, connectionIds: ['conn-1'] },
+    ],
+    callConnectionFromSession: async (input, grants) => {
+      connectionCalls.push({ input, grants });
+      return { success: true, data: input };
+    },
+  });
+  try {
+    const session = harness.server.createSession('run-connection-default', 'finance-os', { caller: 'app-agent', appIds: ['finance-os'] });
+    const firstPayload = await (await callMcp(session, {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/call',
+      params: {
+        name: 'gmail.send_email',
+        arguments: { to: ['person@example.com'], subject: 'Hola', body: 'Mensaje', connectionId: 'conn-1' },
+      },
+    })).json();
+    const firstResult = parseToolTextResult(firstPayload);
+    assert.equal(firstResult.success, true);
+    assert.equal(firstResult.authorization.required, true);
+    assert.equal(firstResult.authorization.status, 'approved');
+    assert.equal(permissionRequests.length, 1);
+    assert.equal(permissionRequests[0].request.permission, 'gmail.send_email');
+
+    permissionRequests.length = 0;
+    connectionCalls.length = 0;
+    approvals['gmail.send_email'] = false;
+
+    const secondPayload = await (await callMcp(session, {
+      jsonrpc: '2.0',
+      id: 2,
+      method: 'tools/call',
+      params: {
+        name: 'gmail.send_email',
+        arguments: { to: ['person@example.com'], subject: 'Hola', body: 'Mensaje', connectionId: 'conn-1' },
+      },
+    })).json();
+    const secondResult = parseToolTextResult(secondPayload);
+    assert.equal(secondResult.success, true);
+    assert.equal(secondResult.authorization, undefined);
+    assert.equal(permissionRequests.length, 0);
+    assert.equal(connectionCalls.length, 1);
+  } finally {
+    harness.stop();
+  }
+});
+
 test('MCP tool schemas expose strict official tool contracts and safe annotations', () => {
   assert.equal(getMcpToolInputSchema('memory_list').additionalProperties, false);
   assert.deepEqual(getMcpToolInputSchema('memory_create').required, ['scope', 'kind']);
@@ -510,6 +748,12 @@ test('MCP tool schemas expose strict official tool contracts and safe annotation
   assert.deepEqual(getMcpToolInputSchema('memory_update').required, ['id']);
   assert.deepEqual(getMcpToolInputSchema('memory_delete').required, ['id']);
   assert.deepEqual(getMcpToolInputSchema('forger_open_app').required, ['appId']);
+  assert.deepEqual(getMcpToolInputSchema('forger_get_app_view_snapshot').required, ['appId']);
+  assert.equal(getMcpToolInputSchema('forger_get_app_view_snapshot').properties.selector.type, 'string');
+  assert.equal(getMcpToolInputSchema('forger_get_app_view_snapshot').properties.includeHtml.type, 'boolean');
+  assert.equal(getMcpToolInputSchema('forger_get_app_view_snapshot').properties.url, undefined);
+  assert.deepEqual(getMcpToolInputSchema('forger_get_app_runtime_diagnostics').required, ['appId']);
+  assert.equal(getMcpToolInputSchema('forger_get_app_runtime_diagnostics').properties.recentLines.maximum, 200);
   assert.deepEqual(getMcpToolInputSchema('forger_create_app').required, ['name', 'description', 'purpose']);
   assert.equal(getMcpToolInputSchema('forger_create_app').properties.agentPrompt, undefined);
   assert.deepEqual(getMcpToolInputSchema('forger_request_app_tool_grant').required, ['appId', 'toolId']);
@@ -1651,6 +1895,18 @@ test('Forger MCP tools cover approvals, memory failures, app operations, and pro
       method: 'tools/call',
       params: { name: 'forger_get_app_runtime_status', arguments: { appId: 'finance-os' } },
     })).json());
+    const snapshot = parseToolTextResult(await (await callMcp(automationSession, {
+      jsonrpc: '2.0',
+      id: 21,
+      method: 'tools/call',
+      params: { name: 'forger_get_app_view_snapshot', arguments: { appId: 'finance-os', selector: 'main', includeHtml: true } },
+    })).json());
+    const diagnostics = parseToolTextResult(await (await callMcp(automationSession, {
+      jsonrpc: '2.0',
+      id: 22,
+      method: 'tools/call',
+      params: { name: 'forger_get_app_runtime_diagnostics', arguments: { appId: 'finance-os', recentLines: 20 } },
+    })).json());
     const opened = parseToolTextResult(await (await callMcp(automationSession, {
       jsonrpc: '2.0',
       id: 17,
@@ -1698,6 +1954,10 @@ test('Forger MCP tools cover approvals, memory failures, app operations, and pro
     assert.equal(createdApp.app.appId, 'created-app');
     assert.equal(createdApp.app.agentPrompt, undefined);
     assert.equal(status.status.status, 'running');
+    assert.equal(snapshot.success, true);
+    assert.equal(snapshot.snapshot.selector, 'main');
+    assert.equal(diagnostics.success, true);
+    assert.equal(diagnostics.recentLines, 20);
     assert.equal(opened.appId, 'finance-os');
     assert.equal(refreshed.userMessage, 'Vista refrescada.');
     assert.equal(updated.locale, undefined);
@@ -2008,10 +2268,20 @@ test('Forger MCP tools exercise approved app runtime calls, memory access, and u
 });
 
 test('Forger MCP server covers official execution, app prompt success, tool failures, and auth header fallbacks', async () => {
+  const officialCalls = [];
   const harness = await createForgerMcpHarness({
     approvals: { forger_open_app: false },
     toolDefinitions: [
       ...defaultMcpToolDefinitions,
+      {
+        id: 'forger_chrome_extension.open_dedicated_tab',
+        packageId: 'official:forger_chrome_extension',
+        name: 'Abrir Chrome',
+        description: 'Abre Chrome.',
+        category: 'app',
+        risk: 'medio',
+        defaultRequiresApproval: false,
+      },
       {
         id: 'forger_chrome_extension.navigate',
         packageId: 'official:forger_chrome_extension',
@@ -2023,7 +2293,10 @@ test('Forger MCP server covers official execution, app prompt success, tool fail
       },
     ],
     options: {
-      callOfficialTool: async (input) => ({ success: true, data: { actionId: input.actionId, input: input.input } }),
+      callOfficialTool: async (input) => {
+        officialCalls.push(input);
+        return { success: true, data: { actionId: input.actionId, input: input.input } };
+      },
       updateAppPrompt: async (input) => ({ success: true, runtime: input.runtime, provider: input.provider, model: input.model, effort: input.effort, reasoningEffort: input.reasoningEffort }),
       openApp: async () => {
         throw new Error('open_failed');
@@ -2053,6 +2326,30 @@ test('Forger MCP server covers official execution, app prompt success, tool fail
       success: true,
       data: { actionId: 'forger_chrome_extension.navigate', input: { url: 'https://example.com' } },
     });
+    assert.equal(officialCalls.length, 1);
+
+    const blockedNavigate = parseToolTextResult(await (await callMcp(session, {
+      jsonrpc: '2.0',
+      id: 20,
+      method: 'tools/call',
+      params: { name: 'forger_chrome_extension.navigate', arguments: { url: 'http://127.0.0.1:55597/perfil' } },
+    })).json());
+    assert.equal(blockedNavigate.success, false);
+    assert.equal(blockedNavigate.technicalCode, 'forger_app_runtime_url_not_chrome_target');
+    assert.equal(blockedNavigate.blockedRuntimeUrl, 'frontendUrl');
+    assert.equal(blockedNavigate.suggestedTools.includes('forger_get_app_view_snapshot'), true);
+
+    const blockedOpen = parseToolTextResult(await (await callMcp(session, {
+      jsonrpc: '2.0',
+      id: 21,
+      method: 'tools/call',
+      params: { name: 'forger_chrome_extension.open_dedicated_tab', arguments: { url: 'http://127.0.0.1:55598/api/health' } },
+    })).json());
+    assert.equal(blockedOpen.success, false);
+    assert.equal(blockedOpen.technicalCode, 'forger_app_runtime_url_not_chrome_target');
+    assert.equal(blockedOpen.blockedRuntimeUrl, 'backendUrl');
+    assert.equal(officialCalls.length, 1);
+    assert.equal(harness.logs.some((entry) => entry.event === 'agent_tool:chrome_app_url_blocked'), true);
 
     const prompt = parseToolTextResult(await (await callMcp(session, {
       jsonrpc: '2.0',
@@ -2399,6 +2696,8 @@ test('automation command runner writes transient Claude MCP config and removes i
     assert.equal(capture.stdin, 'Resume');
     assert.ok(capture.args.includes('--permission-mode'));
     assert.ok(capture.args.includes('acceptEdits'));
+    assert.ok(capture.args.includes('--allowedTools'));
+    assert.equal(capture.args[capture.args.indexOf('--allowedTools') + 1], 'Bash,mcp__forger__*');
     await assert.rejects(access(capture.configPath));
   } finally {
     await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });

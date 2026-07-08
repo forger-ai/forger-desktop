@@ -4,6 +4,7 @@ import type { AgentEffort, AgentPermissionMode, AgentProvider, CodexReasoningEff
 import type { AppAgent, AppPromptReviewItem, AppPromptTemplate } from './prompts';
 import type { FailureDiagnosticFields } from './base';
 import type { SocialUserApp } from './social';
+import type { AgentRunActivity } from './agent-run-activity';
 
 export type ChatRunStatus =
   | 'queued'
@@ -109,6 +110,7 @@ export interface ChatRun {
   errorCode?: ChatErrorCode;
   userMessage?: string;
   progressLog?: string[];
+  activity?: AgentRunActivity;
   operationId?: string;
   commitSha?: string;
   conversationId?: string;

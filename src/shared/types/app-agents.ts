@@ -1,4 +1,5 @@
 import type { AgentEffort, AgentPermissionMode, AgentProvider, CodexReasoningEffort } from './agent-runtime';
+import type { AgentRunActivity } from './agent-run-activity';
 import type { PermissionRequest } from './chat';
 
 export type AppCodexTaskStatus =
@@ -63,6 +64,7 @@ export interface AppCodexTaskSummary {
     actualLength?: number;
   };
   progressLog?: string[];
+  activity?: AgentRunActivity;
   permissionRequest?: PermissionRequest;
 }
 
@@ -98,6 +100,7 @@ export interface AppCodexConversationRun {
     technicalCode?: string;
   };
   progressLog?: string[];
+  activity?: AgentRunActivity;
   permissionRequest?: PermissionRequest;
 }
 

@@ -1,5 +1,6 @@
 import type { AppAgent, AppPromptTemplate } from './prompts';
 import type { PlatformCapabilities } from '../platform-capabilities';
+import type { BuiltInConnectionType } from '../connection-catalog';
 
 export type AgentToolId =
   | 'forger_list_catalog'
@@ -7,6 +8,9 @@ export type AgentToolId =
   | 'forger_check_updates'
   | 'forger_create_app'
   | 'forger_add_app_to_personal_agent'
+  | 'forger_list_agent_peers'
+  | 'forger_ask_agent'
+  | 'forger_read_agent_thread'
   | 'forger_request_app_tool_grant'
   | 'forger_connection_list'
   | 'forger_connection_status'
@@ -27,6 +31,8 @@ export type AgentToolId =
   | 'forger_text_to_speech_voices'
   | 'forger_synthesize_speech'
   | 'forger_get_app_runtime_status'
+  | 'forger_get_app_view_snapshot'
+  | 'forger_get_app_runtime_diagnostics'
   | 'forger_open_app'
   | 'forger_stop_app'
   | 'forger_restart_app'
@@ -107,14 +113,18 @@ export interface AgentToolPackageDefinition {
   tools: AgentToolDefinition[];
 }
 
-export type AgentToolApprovalSettings = Partial<Record<AgentToolId, boolean>>;
+export type ConnectionActionId = `${BuiltInConnectionType}.${string}`;
+
+export type AgentToolApprovalId = AgentToolId | ConnectionActionId;
+
+export type AgentToolApprovalSettings = Partial<Record<AgentToolApprovalId, boolean>>;
 
 export interface AgentToolSettings {
   approvals: AgentToolApprovalSettings;
 }
 
 export interface UpdateAgentToolApprovalInput {
-  toolId: AgentToolId;
+  toolId: AgentToolApprovalId;
   requiresApproval: boolean;
 }
 

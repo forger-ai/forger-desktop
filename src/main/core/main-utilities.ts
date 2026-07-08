@@ -11,6 +11,7 @@ import { appendDesktopLog, type DesktopLogService } from '../desktop-logger';
 import type { AGENT_TOOL_DEFINITIONS, AGENT_TOOL_IDS } from './agent-tool-packages';
 import type { IPC_CHANNELS } from '../../shared/ipc';
 import { withAppExecutionState } from '../../shared/app-execution-state';
+import { isConnectionActionId } from '../../shared/connection-catalog';
 import type {
   AgentToolApprovalSettings,
   AgentToolId,
@@ -292,12 +293,21 @@ const appendInstallLog = async (event: string, payload: Record<string, unknown> 
 const isAgentToolId = (value: unknown): value is AgentToolId =>
   typeof value === 'string' && AGENT_TOOL_IDS.has(value as AgentToolId);
 
+const isAgentToolApprovalId = (value: unknown): value is UpdateAgentToolApprovalInput['toolId'] =>
+  isAgentToolId(value) || (typeof value === 'string' && isConnectionActionId(value));
+
 const normalizeAgentToolSettings = (input?: Partial<AgentToolSettings>): AgentToolSettings => {
   const approvals = AGENT_TOOL_DEFINITIONS.reduce((acc, tool) => {
     const configured = input?.approvals?.[tool.id];
     acc[tool.id] = typeof configured === 'boolean' ? configured : tool.defaultRequiresApproval;
     return acc;
   }, {} as AgentToolApprovalSettings);
+
+  for (const [toolId, configured] of Object.entries(input?.approvals ?? {})) {
+    if (typeof configured === 'boolean' && isConnectionActionId(toolId)) {
+      approvals[toolId as UpdateAgentToolApprovalInput['toolId']] = configured;
+    }
+  }
 
   return { approvals };
 };
@@ -317,7 +327,7 @@ const saveAgentToolSettings = async (): Promise<void> => {
 };
 
 const updateAgentToolApproval = async (input: UpdateAgentToolApprovalInput): Promise<AgentToolSettings> => {
-  if (!isAgentToolId(input.toolId)) {
+  if (!isAgentToolApprovalId(input.toolId)) {
     throw new Error('invalid_agent_tool_id');
   }
   state.agentToolSettings = normalizeAgentToolSettings({

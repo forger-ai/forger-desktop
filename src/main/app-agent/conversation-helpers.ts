@@ -71,6 +71,7 @@ export const toRun = (run: AppCodexConversationRun): AppCodexConversationRun => 
   ...(run.error ? { error: run.error } : {}),
   ...(run.errorDetails ? { errorDetails: run.errorDetails } : {}),
   ...(run.progressLog ? { progressLog: run.progressLog } : {}),
+  ...(run.activity ? { activity: run.activity } : {}),
   ...(run.permissionRequest ? { permissionRequest: run.permissionRequest } : {}),
 });
 
@@ -109,6 +110,7 @@ export const toAppAgentRunSummary = (
     ...(run.error ? { error: run.error } : {}),
     ...(resultText ? { resultText } : {}),
     ...(run.progressLog ? { progressLog: run.progressLog } : {}),
+    ...(run.activity ? { activity: run.activity } : {}),
   };
 };
 

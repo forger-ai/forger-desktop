@@ -129,6 +129,7 @@ export const runAgentCommand = async (
     timeoutMs?: number;
     onChild?: (child: ChildProcessWithoutNullStreams) => void;
     onAssistantMessages?: (assistantMessages: string[]) => void;
+    onOutput?: (stream: 'stdout' | 'stderr' | 'meta', text: string) => void;
   },
 ): Promise<LlmAutomationCommandResult> => {
   const mcpServers = options.mcpServers ?? [];
@@ -195,6 +196,7 @@ export const runAgentCommand = async (
           options.onAssistantMessages?.(parseCodexAssistantMessages(stdoutSoFar));
         }
       }
+      options.onOutput?.(stream, text);
       appendOutput(stream, text);
     },
     runCommandCapture,

@@ -544,10 +544,13 @@ const getPersonalAgentConversationManager = (): AgentConversationManager => {
       getCodexAuthenticated: async () => (await getCodexAuthStatus()).authenticated,
       getClaudeAuthenticated: getClaudeConnectedForForger,
       getAntigravityAuthenticated: async () => (await getAntigravityAuthStatus()).authenticated,
-      createForgerMcpSession: (runId, agent) =>
+      createForgerMcpSession: (runId, agent, context) =>
         forgerMcpServer?.createSession(runId, 'forger', {
           caller: 'personal-agent',
           personalAgentId: agent.id,
+          personalAgentConversationId: context.conversationId,
+          personalAgentPeerThreadId: context.peerThreadId,
+          personalAgentCallStackIds: context.callStackAgentIds,
           appIds: agent.appIds,
           officialToolActionIds: agent.toolIds,
           forgerToolActionIds: agent.toolIds,
@@ -1475,7 +1478,7 @@ registerMainLifecycle({
   getClaudeAuthStatus, getAntigravityAuthStatus, getCloudDeviceAccountStorageKey, getCloudDevicePath, getCloudIdentityPath, getCloudIdentityStore,
   getCodexAuthStatus, getCodexHome, getCodexRoot, getCodexToolEnvironment, getDesktopChatNetworkAccessDefault: () => settings.defaultChatNetworkAccess !== false, getManifestAppSecretsValidationError, getSecretsStore, getForgerAccountPath, getForgerHomeRoot, getForgerMetadataRoot,
   getProviderProfilesRoot, resolveLlmProviderAuthProfile, getSocialAppReviewPromptContext,
-  getFreePort, getLegacyForgerMetadataRoot, getMemoryStore, getPersonalAgentStore, getOfficialToolsService, getConnectionsService, getSelfOAuthCallbackService, getSpeechToTextService, getTextToSpeechService, getLiveVoiceInputService, getWakeWordService,
+  getFreePort, getLegacyForgerMetadataRoot, getMemoryStore, getPersonalAgentStore, getPersonalAgentConversationManager, getOfficialToolsService, getConnectionsService, getSelfOAuthCallbackService, getSpeechToTextService, getTextToSpeechService, getLiveVoiceInputService, getWakeWordService,
   getAudioDevices: async () => await getAudioRuntimeBroker().listDevices(),
   playTextToSpeechAudio: async (input: { playbackId: string; audioDataBase64: string; mimeType: string; outputDeviceId?: string }) => await getAudioRuntimeBroker().playAudio(input),
   cancelTextToSpeechPlayback: async (playbackId: string) => await getAudioRuntimeBroker().cancelPlayback(playbackId),

@@ -27,8 +27,6 @@ export const connectionToolDefinitionsFromState = async (
     description: action.description,
     category: action.risk === 'low' ? 'consulta' : 'app',
     risk: toMcpRisk(action.risk),
-    // Connection grants are explicit access decisions. Per-call approvals can
-    // be layered later without making granted personal-agent actions unusable.
-    defaultRequiresApproval: false,
+    defaultRequiresApproval: action.risk !== 'low',
   } satisfies AgentToolDefinition)));
 };

@@ -1,3 +1,5 @@
+import type fs from 'node:fs/promises';
+import type path from 'node:path';
 import type { IpcMain } from 'electron';
 import type { AgentConversationManager } from '../personal-agents/agent-conversation-manager';
 import type { AgentStore } from '../personal-agents/agent-store';
@@ -15,16 +17,24 @@ import type {
   PersonalAgentGrantOptions,
   PersonalAgentConnectionGrant,
   PersonalAgentMessageSendInput,
+  PersonalAgentPeerGrant,
+  PersonalAgentPeerThreadGetInput,
+  PersonalAgentPeerThreadsListInput,
   PersonalAgentUpdatePermissionsInput,
   PersonalAgentWorkspaceFileReadInput,
   PersonalAgentWorkspaceFileWriteInput,
   PersonalAgentWorkspaceListInput,
   AgentProvider,
+  SharedFileRef,
 } from '../../shared/types';
 
 interface PersonalAgentIpcHandlersDeps {
   IPC_CHANNELS: typeof IpcChannels;
+  fs: typeof fs;
+  path: typeof path;
   ipcMain: IpcMain;
+  ensurePathInside: (rootPath: string, targetPath: string) => boolean;
+  getPrivateDataRoot: () => string;
   getPersonalAgentStore: () => AgentStore;
   getPersonalAgentConversationManager: () => AgentConversationManager;
   listInstalledApps: () => AppSummary[];
@@ -33,9 +43,19 @@ interface PersonalAgentIpcHandlersDeps {
   isAgentProviderConnected: (provider: AgentProvider) => Promise<boolean>;
 }
 
+const isConnectedConnectionInstance = (instance: ConnectionsState['instances'][number]): boolean =>
+  instance.status === 'connected';
+
+const connectedInstancesForType = (connections: ConnectionsState, type: string): ConnectionsState['instances'] =>
+  connections.instances.filter((instance) => instance.type === type && isConnectedConnectionInstance(instance));
+
 export const registerPersonalAgentIpcHandlers = ({
   IPC_CHANNELS,
+  fs,
+  path,
   ipcMain,
+  ensurePathInside,
+  getPrivateDataRoot,
   getPersonalAgentStore,
   getPersonalAgentConversationManager,
   listInstalledApps,
@@ -48,14 +68,15 @@ export const registerPersonalAgentIpcHandlers = ({
   });
   ipcMain.handle(IPC_CHANNELS.personalAgentsCreate, async (_event, input: PersonalAgentCreateInput) => {
     await validateRuntimeInput(input, isAgentProviderConnected);
-    const sanitized = await sanitizePermissionInput(input, listInstalledApps, listOfficialTools, listConnections);
+    const sanitized = await sanitizePermissionInput(input, listInstalledApps, listOfficialTools, listConnections, () => getPersonalAgentStore().listAgents());
     return await getPersonalAgentStore().createAgent(sanitized);
   });
   ipcMain.handle(IPC_CHANNELS.personalAgentGrantOptionsList, async (): Promise<PersonalAgentGrantOptions> => {
-    const [apps, officialTools, connections] = await Promise.all([
+    const [apps, officialTools, connections, agents] = await Promise.all([
       Promise.resolve(listInstalledApps()),
       listOfficialTools(),
       listConnections(),
+      getPersonalAgentStore().listAgents(),
     ]);
     return {
       apps: apps.map((app) => ({
@@ -80,21 +101,31 @@ export const registerPersonalAgentIpcHandlers = ({
             risk: action.risk,
           })),
         })),
-      connections: connections.types.map((definition) => ({
-        type: definition.type,
-        displayName: definition.displayName,
-        description: definition.description,
-        configured: connections.instances.some((instance) => instance.type === definition.type),
-        supportsMultiple: definition.supportsMultiple,
-        definition,
-        instances: connections.instances.filter((instance) => instance.type === definition.type),
-        actions: definition.actions,
+      connections: connections.types
+        .map((definition) => {
+          const instances = connectedInstancesForType(connections, definition.type);
+          return {
+            type: definition.type,
+            displayName: definition.displayName,
+            description: definition.description,
+            configured: instances.length > 0,
+            supportsMultiple: definition.supportsMultiple,
+            definition,
+            instances,
+            actions: definition.actions,
+          };
+        })
+        .filter((connection) => connection.configured && connection.actions.length > 0),
+      peerAgents: agents.map((agent) => ({
+        agentId: agent.id,
+        name: agent.name,
+        description: agent.description,
       })),
     };
   });
   ipcMain.handle(IPC_CHANNELS.personalAgentUpdatePermissions, async (_event, input: PersonalAgentUpdatePermissionsInput) => {
     await validateRuntimeInput(input, isAgentProviderConnected);
-    const sanitized = await sanitizePermissionInput(input, listInstalledApps, listOfficialTools, listConnections);
+    const sanitized = await sanitizePermissionInput(input, listInstalledApps, listOfficialTools, listConnections, () => getPersonalAgentStore().listAgents());
     return await getPersonalAgentStore().updateAgentPermissions(sanitized);
   });
   ipcMain.handle(IPC_CHANNELS.personalAgentsDelete, async (_event, input: PersonalAgentDeleteInput) => {
@@ -116,11 +147,60 @@ export const registerPersonalAgentIpcHandlers = ({
     return await getPersonalAgentConversationManager().startConversation(input);
   });
   ipcMain.handle(IPC_CHANNELS.personalAgentSendMessage, async (_event, input: PersonalAgentMessageSendInput) => {
-    return await getPersonalAgentConversationManager().sendMessage(input);
+    const sharedFiles = await sanitizeSharedFiles(input.sharedFiles, { fs, path, getPrivateDataRoot, ensurePathInside });
+    return await getPersonalAgentConversationManager().sendMessage(sharedFiles.length > 0
+      ? { ...input, sharedFiles }
+      : input);
   });
   ipcMain.handle(IPC_CHANNELS.personalAgentGetConversation, async (_event, input: PersonalAgentConversationGetInput) => {
     return await getPersonalAgentConversationManager().getConversation(input);
   });
+  ipcMain.handle(IPC_CHANNELS.personalAgentPeerThreadsList, async (_event, input: PersonalAgentPeerThreadsListInput) => {
+    if (!input.conversationId) {
+      return [];
+    }
+    return await getPersonalAgentStore().listPeerThreadsForConversation({
+      agentId: input.agentId,
+      conversationId: input.conversationId,
+    });
+  });
+  ipcMain.handle(IPC_CHANNELS.personalAgentPeerThreadGet, async (_event, input: PersonalAgentPeerThreadGetInput) => {
+    return await getPersonalAgentStore().getPeerThread(input.threadId);
+  });
+};
+
+const sanitizeSharedFiles = async (
+  input: SharedFileRef[] | undefined,
+  deps: {
+    fs: typeof fs;
+    path: typeof path;
+    getPrivateDataRoot: () => string;
+    ensurePathInside: (rootPath: string, targetPath: string) => boolean;
+  },
+): Promise<SharedFileRef[]> => {
+  if (!input?.length) {
+    return [];
+  }
+  const sharedFiles: SharedFileRef[] = [];
+  const privateDataRoot = deps.getPrivateDataRoot();
+  const dataRootReal = await deps.fs.realpath(privateDataRoot).catch(async () => {
+    await deps.fs.mkdir(privateDataRoot, { recursive: true });
+    return deps.fs.realpath(privateDataRoot);
+  });
+  for (const fileRef of input ?? []) {
+    const candidatePath = deps.path.isAbsolute(fileRef.path) ? fileRef.path : deps.path.join(privateDataRoot, fileRef.path);
+    const realPath = await deps.fs.realpath(candidatePath).catch(() => null);
+    if (!realPath || !deps.ensurePathInside(dataRootReal, realPath)) {
+      continue;
+    }
+    sharedFiles.push({
+      ...fileRef,
+      path: realPath,
+      relativePath: fileRef.relativePath ?? deps.path.relative(privateDataRoot, realPath).replace(/\\/g, '/'),
+      name: fileRef.name ?? deps.path.basename(realPath),
+    });
+  }
+  return sharedFiles;
 };
 
 const validateRuntimeInput = async (
@@ -141,9 +221,24 @@ const sanitizePermissionInput = async <T extends PersonalAgentCreateInput | Pers
   listInstalledApps: () => AppSummary[],
   listOfficialTools: () => Promise<OfficialToolsState>,
   listConnections: () => Promise<ConnectionsState>,
+  listPersonalAgents: () => Promise<Array<{ id: string }>>,
 ): Promise<T> => {
   const installedAppIds = new Set(listInstalledApps().map((app) => app.id));
-  const [officialTools, connections] = await Promise.all([listOfficialTools(), listConnections()]);
+  const [officialTools, connections, personalAgents] = await Promise.all([
+    listOfficialTools(),
+    listConnections(),
+    input.peerAgentGrants ? listPersonalAgents() : Promise.resolve([]),
+  ]);
+  const personalAgentIds = new Set(personalAgents.map((agent) => agent.id));
+  const connectedInstanceIdsByType = new Map<string, Set<string>>();
+  for (const instance of connections.instances) {
+    if (!isConnectedConnectionInstance(instance)) {
+      continue;
+    }
+    const current = connectedInstanceIdsByType.get(instance.type) ?? new Set<string>();
+    current.add(instance.id);
+    connectedInstanceIdsByType.set(instance.type, current);
+  }
   const officialActionIds = new Set(
     officialTools.tools
       .flatMap((tool) => tool.actions.map((action) => action.id)),
@@ -155,8 +250,11 @@ const sanitizePermissionInput = async <T extends PersonalAgentCreateInput | Pers
       const validActions = new Set(definition.actions.map((action) => action.id));
       const actions = [...new Set(grant.actions.filter((action) => validActions.has(action)))];
       if (actions.length === 0) return null;
-      const validInstanceIds = new Set(connections.instances.filter((instance) => instance.type === grant.type).map((instance) => instance.id));
+      const validInstanceIds = connectedInstanceIdsByType.get(grant.type) ?? new Set<string>();
+      if (validInstanceIds.size === 0) return null;
+      const hasExplicitConnectionIds = Array.isArray(grant.connectionIds) && grant.connectionIds.length > 0;
       const connectionIds = grant.connectionIds?.filter((connectionId) => validInstanceIds.has(connectionId)) ?? [];
+      if (hasExplicitConnectionIds && connectionIds.length === 0) return null;
       return {
         type: grant.type,
         actions,
@@ -165,12 +263,24 @@ const sanitizePermissionInput = async <T extends PersonalAgentCreateInput | Pers
       };
     })
     .filter((grant): grant is PersonalAgentConnectionGrant => Boolean(grant));
+  const declaredPeerGrants = (input.peerAgentGrants ?? [])
+    .map((grant) => {
+      if (!personalAgentIds.has(grant.agentId) || ('agentId' in input && input.agentId === grant.agentId)) return null;
+      return {
+        agentId: grant.agentId,
+        criteria: typeof grant.criteria === 'string' ? grant.criteria.slice(0, 2_000).trim() : '',
+      };
+    })
+    .filter((grant): grant is PersonalAgentPeerGrant => Boolean(grant));
   return {
     ...input,
     ...(input.appIds ? { appIds: input.appIds.filter((appId) => installedAppIds.has(appId)) } : {}),
     ...(input.toolIds ? { toolIds: input.toolIds.filter((toolId) => officialActionIds.has(toolId)) } : {}),
     ...(input.connectionGrants
       ? { connectionGrants: declaredConnectionGrants }
+      : {}),
+    ...(input.peerAgentGrants
+      ? { peerAgentGrants: declaredPeerGrants }
       : {}),
   };
 };

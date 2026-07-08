@@ -2,7 +2,7 @@ import type { PersonalAgent } from '../../shared/types';
 import { renderPromptFile } from './index';
 import { isForgerConnectionActionId } from './official-tools';
 
-export const PERSONAL_AGENT_WORKSPACE_FILES = ['AGENTS.md', 'WHO.md', 'WHY.md', 'HOW.md', 'HUMAN.md'] as const;
+export const PERSONAL_AGENT_WORKSPACE_FILES = ['AGENTS.md', 'WHO.md', 'WHY.md', 'HOW.md', 'HUMAN.md', 'OTHERS.md'] as const;
 export type PersonalAgentWorkspaceFileName = (typeof PERSONAL_AGENT_WORKSPACE_FILES)[number];
 
 export const PERSONAL_AGENT_PROMPT_MARKER = 'FORGER_PERSONAL_AGENT_PROMPT_VERSION: 1';
@@ -58,6 +58,7 @@ export const buildPersonalAgentWorkspaceDocuments = (agent: PersonalAgent): Reco
   'WHY.md': renderPromptFile('personal-agents/workspace/WHY.md', agentPromptVariables(agent)),
   'HOW.md': renderPromptFile('personal-agents/workspace/HOW.md', agentPromptVariables(agent)),
   'HUMAN.md': renderPromptFile('personal-agents/workspace/HUMAN.md', agentPromptVariables(agent)),
+  'OTHERS.md': renderPromptFile('personal-agents/workspace/OTHERS.md', agentPromptVariables(agent)),
 });
 
 export const buildPersonalAgentInitialWakePrompt = (params: {

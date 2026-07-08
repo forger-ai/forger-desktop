@@ -18,7 +18,7 @@ const createHarness = async (overrides = {}) => {
     getToolDefinitions: () => AGENT_TOOL_DEFINITIONS,
     getToolSettings: () => ({ approvals: {} }),
     appendInstallLog: async (event, payload) => logs.push({ event, payload }),
-    requestPermission: () => null,
+    requestPermission: () => Promise.resolve(true),
     listCatalog: async () => [],
     listInstalledApps: () => [],
     checkUpdates: async () => [],

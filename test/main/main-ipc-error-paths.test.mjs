@@ -34,6 +34,7 @@ const createDeps = async (overrides = {}) => {
       IPC_CHANNELS,
       app: {
         getVersion: () => '0.0.0-test',
+        quit: () => undefined,
       },
       appAgentConversationManager: null,
       appAgentTaskManager: null,
@@ -918,6 +919,7 @@ test('main IPC delegates common service handlers and returns backend-missing fal
   assert.equal((await handlers.get(IPC_CHANNELS.checkDesktopUpdates)()).status, 'available');
   assert.equal((await handlers.get(IPC_CHANNELS.downloadDesktopUpdate)()).status, 'downloaded');
   assert.equal((await handlers.get(IPC_CHANNELS.installDesktopUpdate)()).status, 'installing');
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.desktopUpdateQuitForInstall)(), { success: true });
 
   assert.deepEqual(await handlers.get(IPC_CHANNELS.logoutForgerAccount)(), { authenticated: false, success: true });
   assert.equal(deps.state.catalogApps.length, 1);
@@ -927,7 +929,14 @@ test('main IPC delegates cloud account, social, telemetry, auth, and browser suc
   const calls = [];
   const catalog = [{ id: 'finance-os', name: 'Finance OS' }];
   const accountState = { authenticated: false };
+  let quitCalls = 0;
   const { handlers, IPC_CHANNELS, deps } = await createDeps({
+    app: {
+      getVersion: () => '0.0.0-test',
+      quit: () => {
+        quitCalls += 1;
+      },
+    },
     canUseCloudDataSync: () => true,
     connectClaudeAuth: async () => ({ success: true, provider: 'claude' }),
     connectCodexAuth: async () => ({ success: true, provider: 'codex' }),
@@ -1070,6 +1079,8 @@ test('main IPC delegates cloud account, social, telemetry, auth, and browser suc
   assert.equal((await handlers.get(IPC_CHANNELS.checkDesktopUpdates)()).status, 'available');
   assert.equal((await handlers.get(IPC_CHANNELS.downloadDesktopUpdate)()).status, 'downloaded');
   assert.equal((await handlers.get(IPC_CHANNELS.installDesktopUpdate)()).status, 'installed');
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.desktopUpdateQuitForInstall)(), { success: true });
+  assert.equal(quitCalls, 1);
 });
 
 test('main IPC covers conflict, backup, memory, secret, cloud-device, and free-chat fallback branches', async () => {

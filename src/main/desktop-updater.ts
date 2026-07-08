@@ -10,7 +10,8 @@ import type {
   DesktopUpdateState,
 } from '../shared/types';
 
-const DEFAULT_METADATA_URL = 'https://forger-ai.github.io/desktop-versions/latest.json',
+const DEFAULT_INSTALLER_QUIT_DELAY_SECONDS = 5,
+  DEFAULT_METADATA_URL = 'https://forger-ai.github.io/desktop-versions/latest.json',
   SUPPORTED_INSTALLER_KINDS = new Set(['dmg', 'nsis', 'deb', 'appimage']);
 
 interface DesktopUpdaterOptions {
@@ -378,8 +379,12 @@ export class DesktopUpdater {
       if (openError) {
         throw new Error(openError);
       }
+      const installerRequiresQuit = process.platform === 'darwin' || process.platform === 'linux';
       return this.setState({
         ...state,
+        status: 'installer_opened',
+        installerRequiresQuit,
+        installerQuitDelaySeconds: installerRequiresQuit ? DEFAULT_INSTALLER_QUIT_DELAY_SECONDS : undefined,
         userMessage: 'Abrimos el instalador. Sigue los pasos del sistema para completar la actualizacion.',
       });
     } catch (error) {

@@ -152,9 +152,13 @@ test('Forger prompt builders include contract, language, files, official tools, 
   assert.match(officialTools, /only send to chat IDs returned by prior WhatsApp listing or reading/);
   assert.match(officialTools, /Forger Tool for a dedicated Chrome window/);
   assert.match(officialTools, /Use only `forger_chrome_extension\.\*` actions/);
+  assert.match(officialTools, /Use Forger Chrome Extension only for external web pages/);
+  assert.match(officialTools, /Do not use Chrome Extension for installed app frontend\/backend runtime URLs/);
   assert.match(officialTools, /Do not ask for arbitrary JavaScript execution/);
   assert.match(officialTools, /opening, launching, starting, running, or bringing up the app means using Forger app tools/);
   assert.match(officialTools, /Use the app runtime status tool/);
+  assert.match(officialTools, /frontendUrl`, `backendUrl`, localhost ports/);
+  assert.match(officialTools, /forger_get_app_view_snapshot/);
   assert.match(buildForgerOfficialToolsPromptSection({
     mode: 'free-chat',
     gmailReady: false,
@@ -210,6 +214,9 @@ test('Forger prompt builders include contract, language, files, official tools, 
   assert.match(appPrompt, /smallest visible change/);
   assert.match(appPrompt, /For non-trivial behavior changes, write or update behavior\/spec tests before implementation/);
   assert.match(appPrompt, /Restart the installed app through Forger Desktop/);
+  assert.match(appPrompt, /forger_get_app_view_snapshot/);
+  assert.match(appPrompt, /internal runtime diagnostics only/);
+  assert.match(appPrompt, /Never open, navigate to, or inspect installed app runtime URLs with Chrome Extension/);
   assert.match(appPrompt, /save the result as a new internal app version/);
   assert.match(appPrompt, /use APP_ROOT for versioning checks/);
   assert.match(appPrompt, /Opening or starting an installed app means opening it through Forger Desktop/);
@@ -247,6 +254,8 @@ test('Forger prompt builders include contract, language, files, official tools, 
   assert.match(appResumePrompt, /save the result as a new internal app version/);
   assert.match(appResumePrompt, /opening or starting an installed app means opening it through Forger Desktop/i);
   assert.match(appResumePrompt, /Use Forger MCP app tools to open the app and to check runtime status/);
+  assert.match(appResumePrompt, /forger_get_app_runtime_diagnostics/);
+  assert.match(appResumePrompt, /URLs returned by lifecycle\/status tools as internal runtime diagnostics only/);
   assert.doesNotMatch(appResumePrompt, /NETWORK ACCESS/);
   assert.match(appResumePrompt, /SHARED FILES IN THIS MESSAGE:[\s\S]*budget\.csv/);
   assert.match(appResumePrompt, /USER MESSAGE:\nContinuar/);
@@ -322,6 +331,8 @@ test('Forger prompt builders include contract, language, files, official tools, 
   assert.match(createPrompt, /Propose a concrete color palette/);
   assert.match(createPrompt, /keep working in this same chat/);
   assert.match(createPrompt, /finish the turn with the created app saved as an internal app version/);
+  assert.match(createPrompt, /forger_get_app_view_snapshot/);
+  assert.match(createPrompt, /Never open, navigate to, or inspect those installed app runtime URLs with Chrome Extension/);
   assert.match(createPrompt, /Internally break the idea into product goals, user stories, data model/);
   assert.match(createPrompt, /before building or changing visual UI, layout, routing, interactions, mobile behavior, or frontend UX, read and apply the `forger-frontend-patterns` skill/);
   const createResumePrompt = buildCodexPromptForFreeChat({
@@ -599,6 +610,10 @@ test('official tool skill templates and seed data keep expected Desktop defaults
   assert.match(frontendPatternsSkill.body, /Before creating, editing, reviewing, or visually QAing UI in this app\./);
   assert.match(frontendPatternsSkill.body, /Visual QA is mandatory/);
   assert.match(frontendPatternsSkill.body, /Do not substitute `curl`, `\/health`, a frontend HTTP response, build, lint, typecheck, or tests for visual QA/);
+  assert.match(frontendPatternsSkill.body, /forger_get_app_view_snapshot/);
+  assert.match(frontendPatternsSkill.body, /Use Chrome Extension only for external web pages/);
+  assert.match(frontendPatternsSkill.body, /internal runtime diagnostics only/);
+  assert.doesNotMatch(frontendPatternsSkill.body, /Use available Forger browser or Chrome Extension actions to inspect the real rendered app/);
   assert.match(frontendPatternsSkill.body, /If browser or visual inspection tools are unavailable/);
   assert.match(frontendPatternsSkill.body, /Rejected defaults/);
   assert.match(frontendPatternsSkill.body, /Do not center a narrow `max-w` container/);
@@ -630,6 +645,9 @@ test('official tool skill templates and seed data keep expected Desktop defaults
   assert.match(officialToolsSkill.body, /forger_chrome_extension\.submit_form/);
   assert.match(officialToolsSkill.body, /commons\/backend\/forger_desktop\.py/);
   assert.match(officialToolsSkill.body, /Do not manually start app services/);
+  assert.match(officialToolsSkill.body, /forger_get_app_view_snapshot/);
+  assert.match(officialToolsSkill.body, /Use Chrome Extension only for external web pages/);
+  assert.match(officialToolsSkill.body, /Never open, navigate to, or inspect installed app runtime URLs with Chrome Extension/);
   assert.match(officialToolsSkill.body, /finish with the app saved as an internal version/);
   const toolsSkill = templates.find((template) => template.id === 'forger-tools');
   assert.ok(toolsSkill);
@@ -687,6 +705,9 @@ test('official tool skill templates and seed data keep expected Desktop defaults
   assert.match(installedAppChangeSkill.body, /Failed to resolve import/);
   assert.match(installedAppChangeSkill.body, /stopping and reopening the installed app, including its local services/);
   assert.match(installedAppChangeSkill.body, /Do not use `forger_refresh_app_view` as the recovery step after app edits/);
+  assert.match(installedAppChangeSkill.body, /forger_get_app_view_snapshot/);
+  assert.match(installedAppChangeSkill.body, /internal diagnostics only/);
+  assert.match(installedAppChangeSkill.body, /Never open, navigate to, or inspect installed app runtime URLs with Chrome Extension/);
   const localizationSkill = templates.find((template) => template.id === 'forger-localization');
   assert.ok(localizationSkill);
   assert.equal(localizationSkill.description, 'Use when writing or changing user-facing app text, localization, language detection, assistant copy, prompt copy, labels, navigation, validation, empty/loading/error/success states, or messages.');

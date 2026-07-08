@@ -89,6 +89,13 @@ const classifyTechnicalCode = (
     };
   }
 
+  if (/\bruntime_node_executable_not_found\b/i.test(text)) {
+    return {
+      technicalCode: 'runtime_node_executable_not_found',
+      details: { classifier: 'runtime_node_executable_not_found' },
+    };
+  }
+
   if (/401\s+Unauthorized/i.test(text) && /refresh token|Failed to refresh token/i.test(text)) {
     return {
       technicalCode: 'codex_auth_expired',
@@ -107,6 +114,15 @@ const classifyTechnicalCode = (
     return {
       technicalCode: 'command_timeout',
       details: { classifier: 'command_timeout' },
+    };
+  }
+
+  if (
+    /\bENOSPC\b|no space left on device|not enough space on the disk|disk_space_unavailable/i.test(text)
+  ) {
+    return {
+      technicalCode: 'disk_space_unavailable',
+      details: { classifier: 'disk_space_unavailable' },
     };
   }
 

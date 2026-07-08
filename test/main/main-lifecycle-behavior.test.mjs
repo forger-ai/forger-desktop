@@ -33,6 +33,7 @@ const createLifecycleHarness = (overrides = {}) => {
     startupWindows: [],
     closedStartupWindows: [],
     stopped: [],
+    stoppedInstalledApps: [],
     terminated: [],
   };
   const appListeners = new Map();
@@ -284,7 +285,10 @@ const createLifecycleHarness = (overrides = {}) => {
     stopRemoteAgentSession: async (agentId) => (calls.terminated.push(['remote-agent-stop', agentId]), { success: true, status: { active: false, agentId, state: 'closed', sessionId: 'agent-session-1' } }),
     stopRemoteAgentSessionSession: async (sessionId) => (calls.terminated.push(['remote-agent-session-stop', sessionId]), { success: true, status: { active: false, agentId: 'agent-1', state: 'closed', sessionId } }),
     state,
-    stopInstalledApp: async () => ({}),
+    stopInstalledApp: async (appId) => {
+      calls.stoppedInstalledApps.push(appId);
+      return {};
+    },
     stopRemoteNetworkShareSession: async (sessionId) => {
       calls.terminated.push(['remote-session', sessionId]);
       throw new Error('cloud_close_failed');
@@ -570,6 +574,60 @@ test('main lifecycle service callbacks preserve fallbacks, permissions, and upda
   });
   assert.deepEqual(reloads, ['reload']);
 
+  assert.deepEqual(await state.forgerMcpServer.options.getAppViewSnapshot('missing-app', {}), {
+    success: false,
+    appId: 'missing-app',
+    userMessage: 'La app no esta abierta en Forger.',
+    technicalCode: 'app_window_not_open',
+  });
+
+  deps.runningApps.set('finance-os', {
+    backend: { pid: 111 },
+    frontend: { pid: 222 },
+    backendUrl: 'http://127.0.0.1:8000',
+    frontendUrl: 'http://127.0.0.1:5173',
+    locale: 'es',
+  });
+  deps.appWindows.set('finance-os', {
+    isDestroyed: () => false,
+    webContents: {
+      executeJavaScript: async (script, userGesture) => {
+        assert.equal(userGesture, true);
+        assert.match(script, /"selector":"main"/);
+        assert.match(script, /"includeHtml":true/);
+        return { success: true, selector: 'main', text: 'Rendered app' };
+      },
+      getURL: () => 'forger-app://finance-os',
+      getTitle: () => 'Finance OS',
+      isLoading: () => false,
+      reloadIgnoringCache: () => undefined,
+    },
+  });
+  const snapshot = await state.forgerMcpServer.options.getAppViewSnapshot('finance-os', {
+    selector: 'main',
+    includeHtml: true,
+    maxChars: 5000,
+  });
+  assert.equal(snapshot.success, true);
+  assert.deepEqual(snapshot.snapshot, { success: true, selector: 'main', text: 'Rendered app' });
+
+  const diagnostics = await state.forgerMcpServer.options.getAppRuntimeDiagnostics('finance-os', { recentLines: 20 });
+  assert.equal(diagnostics.success, true);
+  assert.deepEqual(diagnostics.appWindow, {
+    open: true,
+    url: 'forger-app://finance-os',
+    title: 'Finance OS',
+    loading: false,
+  });
+  assert.deepEqual(diagnostics.runningProcess, {
+    backendPid: 111,
+    frontendPid: 222,
+    backendUrl: 'http://127.0.0.1:8000',
+    frontendUrl: 'http://127.0.0.1:5173',
+    locale: 'es',
+  });
+  assert.equal(diagnostics.logsDirectory, '/forger/.forger/logs');
+
   assert.deepEqual(await state.appAgentTaskManager.options.getCodexPathEntries('finance-os'), [
     '/node/22/bin/path',
     '/app-tools/bin',
@@ -696,12 +754,18 @@ test('main lifecycle service callbacks preserve fallbacks, permissions, and upda
   assert.equal(await state.appAgentTaskManager.options.getClaudeAuthenticated(), false);
 });
 
-test('main lifecycle shutdown disposes managers, stops bridges, terminates running apps, and quits non-mac windows', async () => {
+test('main lifecycle shutdown disposes managers, stops bridges, stops running apps, and quits non-mac windows', async () => {
   const backend = { pid: 1 };
   const frontend = { pid: 2 };
   const proxyServer = { close: () => undefined };
+  const runningApps = new Map([['finance-os', { backend, frontend, proxyServer }]]);
   const { appListeners, calls, deps, ready, state } = createLifecycleHarness({
-    runningApps: new Map([['finance-os', { backend, frontend, proxyServer }]]),
+    runningApps,
+    stopInstalledApp: async (appId) => {
+      calls.stoppedInstalledApps.push(appId);
+      runningApps.delete(appId);
+      return { success: true };
+    },
   });
 
   registerMainLifecycle(deps);
@@ -718,16 +782,42 @@ test('main lifecycle shutdown disposes managers, stops bridges, terminates runni
   assert.ok(calls.stopped.includes('CloudDeviceManager'));
   assert.ok(calls.stopped.includes('DevCatalogService'));
   assert.ok(calls.stopped.includes('ForgerMcpServer'));
-  assert.deepEqual(calls.terminated, [
-    ['process', backend],
-    ['process', frontend],
-    ['server', proxyServer],
-  ]);
+  assert.deepEqual(calls.stoppedInstalledApps, ['finance-os']);
+  assert.deepEqual(calls.terminated, []);
   assert.equal(state.desktopRuntimeBridge, null);
   assert.equal(state.forgerMcpServer, null);
 
   withProcessPlatform('linux', () => appListeners.get('window-all-closed')());
   assert.equal(calls.quitCalls, 1);
+});
+
+test('main lifecycle shutdown terminates remaining running app processes when normal stop fails', async () => {
+  const backend = { pid: 1 };
+  const frontend = { pid: 2 };
+  const proxyServer = { close: () => undefined };
+  const runningApps = new Map([['finance-os', { backend, frontend, proxyServer }]]);
+  const { appListeners, calls, deps, ready } = createLifecycleHarness({
+    runningApps,
+    stopInstalledApp: async (appId) => {
+      calls.stoppedInstalledApps.push(appId);
+      throw new Error('stop_failed');
+    },
+  });
+
+  registerMainLifecycle(deps);
+  ready.resolve();
+  await ready.promise;
+  await waitForMainLifecycle(() => calls.createdWindows === 1);
+
+  appListeners.get('before-quit')();
+  await waitForMainLifecycle(() => calls.terminated.length === 3);
+
+  assert.deepEqual(calls.stoppedInstalledApps, ['finance-os']);
+  assert.deepEqual(calls.terminated, [
+    ['process', backend],
+    ['process', frontend],
+    ['server', proxyServer],
+  ]);
 });
 
 test('main lifecycle waits for remote agent shutdown reports before stopping cloud device manager on quit', async () => {

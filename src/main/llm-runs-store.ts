@@ -2,8 +2,10 @@ import type { BrowserWindow } from 'electron';
 
 import { IPC_CHANNELS } from '../shared/ipc';
 import type {
+  AgentRunActivity,
   AppCodexConversationEvent,
   AppCodexTaskEvent,
+  ChatRunEvent,
   LlmRunSnapshotItem,
   LlmRunStatus,
   LlmRunsSnapshot,
@@ -49,7 +51,8 @@ export class LlmRunsStore {
     if (!run) {
       return null;
     }
-    const progress = cleanOptionalText(event.progress?.message ?? run.progress.at(-1)?.message);
+    const activity = run.activity ?? null;
+    const progress = cleanOptionalText(activity?.summary ?? event.progress?.message ?? run.progress.at(-1)?.message);
     const error = cleanOptionalText(run.error);
     return this.upsert({
       id: `personal-agent:${run.id}`,
@@ -60,6 +63,7 @@ export class LlmRunsStore {
       status: normalizeStatus(run.status),
       ...(progress ? { progress } : {}),
       ...(error ? { error } : {}),
+      ...(activity ? { activity } : {}),
       startedAt: run.createdAt,
       updatedAt: run.updatedAt,
     });
@@ -73,7 +77,8 @@ export class LlmRunsStore {
     if (!run) {
       return null;
     }
-    const progress = cleanOptionalText(event.progress ?? run.progressLog?.at(-1));
+    const activity = run.activity ?? null;
+    const progress = cleanOptionalText(activity?.summary ?? event.progress ?? run.progressLog?.at(-1));
     const error = cleanOptionalText(run.error);
     return this.upsert({
       id: `app-agent-thread:${event.conversation.appId}:${run.runId}`,
@@ -85,6 +90,7 @@ export class LlmRunsStore {
       status: normalizeStatus(run.status),
       ...(progress ? { progress } : {}),
       ...(error ? { error } : {}),
+      ...(activity ? { activity } : {}),
       startedAt: run.createdAt,
       updatedAt: run.updatedAt,
     });
@@ -95,7 +101,8 @@ export class LlmRunsStore {
     context: AppRunContext = {},
   ): LlmRunsSnapshot {
     const task = event.task;
-    const progress = cleanOptionalText(task.progressLog?.at(-1));
+    const activity = task.activity ?? null;
+    const progress = cleanOptionalText(activity?.summary ?? task.progressLog?.at(-1));
     const error = cleanOptionalText(task.error);
     return this.upsert({
       id: `app-prompt-task:${task.appId}:${task.runId}`,
@@ -107,8 +114,54 @@ export class LlmRunsStore {
       status: normalizeStatus(task.status),
       ...(progress ? { progress } : {}),
       ...(error ? { error } : {}),
+      ...(activity ? { activity } : {}),
       startedAt: task.createdAt,
       updatedAt: task.updatedAt,
+    });
+  }
+
+  public recordChatRunEvent(
+    event: ChatRunEvent,
+    context: AppRunContext = {},
+  ): LlmRunsSnapshot {
+    const run = event.run;
+    const activity = run.activity ?? null;
+    const progress = cleanOptionalText(activity?.summary ?? run.progressLog?.at(-1));
+    const error = cleanOptionalText(run.userMessage);
+    return this.upsert({
+      id: `desktop-chat:${run.runId}`,
+      kind: 'desktop_chat',
+      sourceId: run.runId,
+      appId: run.appId,
+      appName: cleanText(context.appName, run.appId === 'forger' ? 'Forger' : run.appId),
+      title: cleanText(activity?.sourceRef?.title, run.appId === 'forger' ? 'Forger chat' : 'App chat'),
+      status: normalizeStatus(run.status),
+      ...(progress ? { progress } : {}),
+      ...(run.status === 'failed' && error ? { error } : {}),
+      ...(activity ? { activity } : {}),
+      startedAt: run.createdAt,
+      updatedAt: run.updatedAt,
+    });
+  }
+
+  public recordWorkflowNodeActivity(
+    activity: AgentRunActivity,
+    context: AppRunContext = {},
+  ): LlmRunsSnapshot {
+    const source = activity.sourceRef;
+    return this.upsert({
+      id: `workflow-node:${activity.runId}`,
+      kind: 'workflow_node',
+      sourceId: activity.runId,
+      ...(source?.appId ? { appId: source.appId } : {}),
+      appName: cleanText(context.appName ?? source?.workflowName ?? source?.appName, 'Workflow'),
+      title: cleanText(source?.nodeName ?? source?.title, source?.workflowName ?? 'Workflow node'),
+      status: normalizeStatus(activity.status),
+      ...(cleanOptionalText(activity.summary) ? { progress: cleanOptionalText(activity.summary) } : {}),
+      ...(activity.status === 'failed' && cleanOptionalText(activity.summary) ? { error: cleanOptionalText(activity.summary) } : {}),
+      activity,
+      startedAt: activity.startedAt,
+      updatedAt: activity.updatedAt,
     });
   }
 
@@ -141,6 +194,9 @@ const normalizeStatus = (value: string): LlmRunStatus => {
     || value === 'canceled'
   ) {
     return value;
+  }
+  if (value === 'preview_ready' || value === 'applied' || value === 'undone') {
+    return 'completed';
   }
   return 'running';
 };

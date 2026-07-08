@@ -44,10 +44,20 @@ import type {
   Workflow,
   WorkflowRunSummary,
   WorkflowUpsertInput,
+  PersonalAgentPeerGrant,
+  PersonalAgentPeerThread,
 } from '../shared/types';
+import type { PersonalAgentAskPeerInput, PersonalAgentAskPeerResult } from './personal-agents/agent-conversation-manager';
 import { buildFailureDiagnostic } from '../shared/error-diagnostics';
 import { getSharedCopy } from '../shared/i18n';
 import { getMcpToolAnnotations, getMcpToolInputSchema, type McpToolAnnotations } from './forger-mcp/tool-metadata';
+import {
+  getChromeAppRuntimeUrlBlock,
+  INTERNAL_MCP_TOOL_DEFINITIONS,
+  PERSONAL_AGENT_PEER_TOOL_IDS,
+  WORKFLOW_MANAGEMENT_TOOL_IDS,
+  WORKFLOW_NODE_TOOL_IDS,
+} from './forger-mcp/internal-tools';
 import {
   cleanString,
   connectionActionGranted,
@@ -87,6 +97,9 @@ export interface AgentMcpSession {
   appId: string;
   caller: 'desktop-chat' | 'app-agent' | 'automation' | 'free-chat' | 'personal-agent' | 'workflow';
   personalAgentId?: string;
+  personalAgentConversationId?: string;
+  personalAgentPeerThreadId?: string;
+  personalAgentCallStackIds?: string[];
   appIds: string[];
   officialToolActionIds: string[];
   forgerToolActionIds: string[];
@@ -99,6 +112,9 @@ export interface AgentMcpSession {
 export interface ForgerMcpSessionAccess {
   caller: AgentMcpSession['caller'];
   personalAgentId?: string;
+  personalAgentConversationId?: string;
+  personalAgentPeerThreadId?: string;
+  personalAgentCallStackIds?: string[];
   appIds?: string[];
   officialToolActionIds?: string[];
   forgerToolActionIds?: string[];
@@ -127,6 +143,9 @@ interface ForgerMcpServerOptions {
   checkUpdates: () => Promise<AppSummary[]>;
   createLocalApp: (input: CreateLocalAppInput, locale?: string) => Promise<CreateLocalAppResult>;
   addAppToPersonalAgent?: (input: { agentId: string; appId: string }) => Promise<{ success: boolean; appId: string; alreadyGranted: boolean; userMessage: string; technicalCode?: string }>;
+  listAgentPeers?: (input: { agentId: string }) => Promise<{ success: boolean; peers: PersonalAgentPeerGrant[]; recentThreads?: PersonalAgentPeerThread[] }>;
+  askAgent?: (input: PersonalAgentAskPeerInput) => Promise<PersonalAgentAskPeerResult>;
+  readAgentThread?: (input: { agentId: string; threadId: string }) => Promise<{ success: boolean; thread?: PersonalAgentPeerThread; userMessage?: string; technicalCode?: string }>;
   finishSocialAppInstall: (input: { quarantineId: string }, locale?: string) => Promise<InstallAppResult & { appId?: string }>;
   deleteQuarantinedSocialApp: (input: { quarantineId: string }, locale?: string) => Promise<{ success: boolean; userMessage: string; technicalCode?: string }>;
   recordCreatedApp?: (runId: string, createdApp: ChatCreatedAppRequest) => void;
@@ -135,6 +154,8 @@ interface ForgerMcpServerOptions {
     input: { questions: ChatQuestion[] },
   ) => Promise<ChatQuestionRequest>;
   getRuntimeStatus: (appId: string) => RuntimeStatus;
+  getAppViewSnapshot: (appId: string, input: { selector?: string; includeHtml?: boolean; maxChars?: number }) => Promise<Record<string, unknown>>;
+  getAppRuntimeDiagnostics: (appId: string, input: { recentLines?: number }) => Promise<Record<string, unknown>>;
   openApp: (appId: string) => Promise<OpenAppResult>;
   stopApp: (appId: string) => Promise<StopAppResult>;
   restartApp: (appId: string, options?: { onProgress?: (message: string) => void }) => Promise<OpenAppResult>;
@@ -231,85 +252,6 @@ export interface MemoryAccessInput {
   runId?: string;
 }
 
-const INTERNAL_MCP_TOOL_DEFINITIONS: AgentToolDefinition[] = [
-  {
-    id: 'forger_ask_question',
-    packageId: 'forger:internal',
-    name: 'Hacer preguntas',
-    description: 'Registra preguntas estructuradas para que la persona responda antes de continuar.',
-    category: 'consulta',
-    risk: 'bajo',
-    defaultRequiresApproval: false,
-  },
-  {
-    id: 'workflow_get_context',
-    packageId: 'forger:internal',
-    name: 'Leer contexto del nodo',
-    description: 'Devuelve el contexto completo de entrada del nodo de flujo en ejecucion, incluyendo los outputs de los nodos anteriores.',
-    category: 'consulta',
-    risk: 'bajo',
-    defaultRequiresApproval: false,
-  },
-  {
-    id: 'workflow_complete_node',
-    packageId: 'forger:internal',
-    name: 'Completar nodo de flujo',
-    description: 'Marca el nodo de flujo actual como exitoso y registra el output estructurado que consumen los nodos siguientes.',
-    category: 'consulta',
-    risk: 'bajo',
-    defaultRequiresApproval: false,
-  },
-  {
-    id: 'workflow_fail_node',
-    packageId: 'forger:internal',
-    name: 'Reportar fallo de nodo',
-    description: 'Marca el nodo de flujo actual como fallido con un motivo claro.',
-    category: 'consulta',
-    risk: 'bajo',
-    defaultRequiresApproval: false,
-  },
-  {
-    id: 'forger_connection_list',
-    packageId: 'forger:connections',
-    name: 'Listar conexiones',
-    description: 'Lista conexiones externas disponibles para esta sesion sin exponer secretos.',
-    category: 'consulta',
-    risk: 'bajo',
-    defaultRequiresApproval: false,
-  },
-  {
-    id: 'forger_connection_status',
-    packageId: 'forger:connections',
-    name: 'Revisar estado de conexion',
-    description: 'Revisa el estado de una conexion externa concedida a esta sesion.',
-    category: 'consulta',
-    risk: 'bajo',
-    defaultRequiresApproval: false,
-  },
-  {
-    id: 'forger_request_connection_grant',
-    packageId: 'forger:connections',
-    name: 'Pedir permiso de conexion',
-    description: 'Pide permiso para activar una conexion opcional declarada por una app.',
-    category: 'consulta',
-    risk: 'medio',
-    defaultRequiresApproval: false,
-  },
-];
-
-const WORKFLOW_NODE_TOOL_IDS = new Set<AgentToolId>([
-  'workflow_get_context',
-  'workflow_complete_node',
-  'workflow_fail_node',
-]);
-
-const WORKFLOW_MANAGEMENT_TOOL_IDS = new Set<AgentToolId>([
-  'forger_workflow_list',
-  'forger_workflow_get',
-  'forger_workflow_upsert',
-  'forger_workflow_run',
-]);
-
 export class ForgerMcpServer {
   private readonly sessions = new Map<string, AgentMcpSession>();
   private server: http.Server | null = null;
@@ -380,6 +322,9 @@ export class ForgerMcpServer {
       appId,
       caller: access?.caller ?? 'desktop-chat',
       personalAgentId: access?.personalAgentId,
+      personalAgentConversationId: access?.personalAgentConversationId,
+      personalAgentPeerThreadId: access?.personalAgentPeerThreadId,
+      personalAgentCallStackIds: access?.personalAgentCallStackIds,
       appIds: access?.appIds ?? (appId === 'forger' ? [] : [appId]),
       officialToolActionIds: access?.officialToolActionIds ?? [],
       forgerToolActionIds: access?.forgerToolActionIds ?? access?.officialToolActionIds ?? [],
@@ -566,6 +511,9 @@ export class ForgerMcpServer {
       if (tool.id === 'forger_add_app_to_personal_agent' && session.caller !== 'personal-agent') {
         return false;
       }
+      if (PERSONAL_AGENT_PEER_TOOL_IDS.has(tool.id) && (session.caller !== 'personal-agent' || !session.personalAgentId || !session.personalAgentConversationId)) {
+        return false;
+      }
       if (WORKFLOW_NODE_TOOL_IDS.has(tool.id) && session.caller !== 'workflow') {
         return false;
       }
@@ -619,6 +567,7 @@ export class ForgerMcpServer {
     tool: AgentToolDefinition,
   ): Promise<ToolApprovalResult> {
     const copy = getSharedCopy(session.locale).agentTools;
+    const requiresApproval = this.options.getToolSettings().approvals[tool.id] ?? tool.defaultRequiresApproval;
     if (isMemoryTool(tool.id) || isInternalMcpTool(tool.id)) {
       return {
         approved: true,
@@ -641,7 +590,7 @@ export class ForgerMcpServer {
         userMessage: copy.approvalNotRequired,
       };
     }
-    if (!this.options.getToolSettings().approvals[tool.id]) {
+    if (!requiresApproval) {
       await this.options.appendInstallLog('agent_tool:approval_skipped', {
         appId: session.appId,
         runId: session.runId,
@@ -835,7 +784,7 @@ export class ForgerMcpServer {
       runId: session.runId,
       toolId,
       args,
-      requiresApproval: Boolean(this.options.getToolSettings().approvals[tool.id]),
+      requiresApproval: this.options.getToolSettings().approvals[tool.id] ?? tool.defaultRequiresApproval,
     });
 
     if (isOfficialTool(toolId)) {
@@ -856,6 +805,23 @@ export class ForgerMcpServer {
       if (validation) {
         await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result: validation });
         return validation;
+      }
+      const runtimeUrlBlock = getChromeAppRuntimeUrlBlock({
+        appId: session.appId,
+        toolId,
+        targetUrl: cleanString(args.url),
+        status: this.options.getRuntimeStatus(session.appId),
+      });
+      if (runtimeUrlBlock) {
+        await this.options.appendInstallLog('agent_tool:chrome_app_url_blocked', {
+          appId: session.appId,
+          runId: session.runId,
+          toolId,
+          url: cleanString(args.url),
+          blockedRuntimeUrl: runtimeUrlBlock.blockedRuntimeUrl,
+        });
+        await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result: runtimeUrlBlock });
+        return runtimeUrlBlock;
       }
     }
 
@@ -990,6 +956,81 @@ export class ForgerMcpServer {
       }
       await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
       return withToolAuthorization(result, approval);
+    }
+
+    if (toolId === 'forger_list_agent_peers') {
+      if (session.caller !== 'personal-agent' || !session.personalAgentId || !this.options.listAgentPeers) {
+        const result = {
+          success: false,
+          userMessage: 'Esta herramienta solo esta disponible para agentes personales.',
+          technicalCode: 'personal_agent_context_required',
+        };
+        await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
+        return result;
+      }
+      const result = await this.options.listAgentPeers({ agentId: session.personalAgentId });
+      await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
+      return result;
+    }
+
+    if (toolId === 'forger_ask_agent') {
+      if (session.caller !== 'personal-agent' || !session.personalAgentId || !session.personalAgentConversationId || !this.options.askAgent) {
+        const result = {
+          success: false,
+          userMessage: 'Esta herramienta solo esta disponible dentro de una conversacion de agente personal.',
+          technicalCode: 'personal_agent_context_required',
+        };
+        await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
+        return result;
+      }
+      const message = cleanString(args.message);
+      const targetAgentId = cleanString(args.targetAgentId);
+      const threadId = cleanString(args.threadId);
+      if (!message || (!targetAgentId && !threadId)) {
+        const result = {
+          success: false,
+          userMessage: 'Indica un mensaje y un targetAgentId o threadId.',
+          technicalCode: 'personal_agent_peer_input_invalid',
+        };
+        await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
+        return result;
+      }
+      const result = await this.options.askAgent({
+        callerAgentId: session.personalAgentId,
+        callerConversationId: session.personalAgentConversationId,
+        callerRunId: session.runId,
+        callStackAgentIds: session.personalAgentCallStackIds,
+        ...(targetAgentId ? { targetAgentId } : {}),
+        ...(threadId ? { threadId } : {}),
+        message,
+      });
+      await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
+      return result;
+    }
+
+    if (toolId === 'forger_read_agent_thread') {
+      if (session.caller !== 'personal-agent' || !session.personalAgentId || !this.options.readAgentThread) {
+        const result = {
+          success: false,
+          userMessage: 'Esta herramienta solo esta disponible para agentes personales.',
+          technicalCode: 'personal_agent_context_required',
+        };
+        await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
+        return result;
+      }
+      const threadId = cleanString(args.threadId);
+      if (!threadId) {
+        const result = {
+          success: false,
+          userMessage: 'Indica el threadId a leer.',
+          technicalCode: 'personal_agent_peer_thread_id_required',
+        };
+        await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
+        return result;
+      }
+      const result = await this.options.readAgentThread({ agentId: session.personalAgentId, threadId });
+      await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
+      return result;
     }
 
     if (toolId === 'forger_finish_social_app_install' || toolId === 'forger_delete_quarantined_social_app') {
@@ -1225,6 +1266,24 @@ export class ForgerMcpServer {
 
     if (toolId === 'forger_get_app_runtime_status') {
       const result = { success: true, status: this.options.getRuntimeStatus(appId) };
+      await this.options.appendInstallLog('agent_tool:call_result', { appId, runId: session.runId, toolId, result });
+      return withToolAuthorization(result, approval);
+    }
+
+    if (toolId === 'forger_get_app_view_snapshot') {
+      const result = await this.options.getAppViewSnapshot(appId, {
+        ...(cleanString(args.selector) ? { selector: cleanString(args.selector) } : {}),
+        ...(typeof args.includeHtml === 'boolean' ? { includeHtml: args.includeHtml } : {}),
+        ...(typeof args.maxChars === 'number' ? { maxChars: args.maxChars } : {}),
+      });
+      await this.options.appendInstallLog('agent_tool:call_result', { appId, runId: session.runId, toolId, result });
+      return withToolAuthorization(result, approval);
+    }
+
+    if (toolId === 'forger_get_app_runtime_diagnostics') {
+      const result = await this.options.getAppRuntimeDiagnostics(appId, {
+        ...(typeof args.recentLines === 'number' ? { recentLines: args.recentLines } : {}),
+      });
       await this.options.appendInstallLog('agent_tool:call_result', { appId, runId: session.runId, toolId, result });
       return withToolAuthorization(result, approval);
     }

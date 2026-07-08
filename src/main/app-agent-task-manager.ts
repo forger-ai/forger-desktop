@@ -3,6 +3,7 @@ import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type {
+  AgentRunActivityStatus,
   AppCodexTaskAttachment,
   AppCodexTaskEvent,
   AppCodexTaskStartInput,
@@ -43,6 +44,15 @@ import {
 } from './app-agent/task-helpers';
 import type { LlmAppMcpServerConfig } from './app-agent/types';
 import type { AppFolderGrantPublic } from './app-folder-grants';
+import {
+  addPermissionActivityItem,
+  addStatusActivityItem,
+  appendProviderActivity,
+  createAgentRunActivity,
+  finalizeAgentRunActivity,
+  normalizeActivityStatus,
+  persistAgentRunActivity,
+} from './chat/agent-run-activity';
 import { mapFailureMessage, normalizeProviderErrorCode, toProviderProgressMessages } from './chat/progress-errors';
 import { createLlmProviderRunService } from './llm-provider/run-service';
 import { parseCodexJsonl } from './llm-provider/output-parsers';
@@ -172,6 +182,18 @@ export class AppAgentTaskManager {
       createdAt: now,
       updatedAt: now,
       progressLog: [],
+      activity: createAgentRunActivity({
+        runId,
+        surface: 'app_prompt_task',
+        status: 'queued',
+        startedAt: now,
+        updatedAt: now,
+        sourceRef: {
+          appId,
+          taskId: templateId,
+          title: templateId,
+        },
+      }),
       appRoot,
       transcriptPath: path.join(runDir, 'transcript.log'),
     };
@@ -209,6 +231,7 @@ export class AppAgentTaskManager {
     task.status = 'canceled';
     task.updatedAt = new Date().toISOString();
     task.error = 'canceled';
+    this.updateActivityForTask(task, 'canceled', task.error);
     void this.persist(task);
     void this.cleanupTaskInputs(task);
     this.emit(task);
@@ -231,6 +254,12 @@ export class AppAgentTaskManager {
     task.permissionRequest = request;
     task.status = 'needs_permission';
     task.updatedAt = new Date().toISOString();
+    task.activity = addPermissionActivityItem(
+      task.activity ?? this.createActivityForTask(task),
+      request.reason || `Permission requested for ${request.resource}.`,
+      `${request.permission}:${request.resource}`,
+    );
+    this.updateActivityForTask(task, 'needs_permission');
     await this.persist(task);
     this.emit(task);
 
@@ -242,6 +271,7 @@ export class AppAgentTaskManager {
       task.permissionRequest = undefined;
       task.status = task.status === 'needs_permission' ? 'running' : task.status;
       task.updatedAt = new Date().toISOString();
+      this.updateActivityForTask(task, normalizeActivityStatus(task.status));
       await this.persist(task);
       this.emit(task);
     }
@@ -303,6 +333,7 @@ export class AppAgentTaskManager {
 
     task.status = 'running';
     task.updatedAt = new Date().toISOString();
+    this.updateActivityForTask(task, 'running');
     this.addProgress(task, taskMessage(locale, 'preparing'));
     await this.persist(task);
     this.emit(task);
@@ -408,6 +439,7 @@ export class AppAgentTaskManager {
       task.updatedAt = new Date().toISOString();
       task.resultText = result.assistantText || taskMessage(locale, 'completed');
       this.addProgress(task, taskMessage(locale, 'finished'));
+      this.updateActivityForTask(task, 'completed');
       await this.cleanupTaskInputs(task).catch(() => undefined);
       if (forgerMcpSession) {
         this.options.releaseForgerMcpSession?.(forgerMcpSession.token);
@@ -438,6 +470,7 @@ export class AppAgentTaskManager {
     task.updatedAt = new Date().toISOString();
     task.error = message;
     task.errorDetails = errorDetails;
+    this.updateActivityForTask(task, 'failed', message);
     await appendTranscript(task.transcriptPath, 'meta', `Run failed: ${message}`);
     await this.persist(task);
     this.emit(task);
@@ -667,6 +700,8 @@ export class AppAgentTaskManager {
     }
     task.progressLog = [...(task.progressLog ?? []), message].slice(-40);
     task.updatedAt = new Date().toISOString();
+    task.activity = addStatusActivityItem(task.activity ?? this.createActivityForTask(task), message);
+    this.updateActivityForTask(task, normalizeActivityStatus(task.status));
   }
 
   private updateProgressFromOutput(
@@ -676,14 +711,26 @@ export class AppAgentTaskManager {
     text: string,
     locale: TaskLocale,
   ): void {
+    const activityItemCount = task.activity?.counts.total ?? 0;
+    task.activity = appendProviderActivity({
+      activity: task.activity ?? this.createActivityForTask(task),
+      provider,
+      stream,
+      text,
+    });
+    const activityChanged = (task.activity?.counts.total ?? 0) !== activityItemCount;
     const messages = provider === 'antigravity'
       ? toProviderProgressMessages(provider, stream, text, locale)
       : [progressFromCodexOutput(text, locale)].filter((progress): progress is string => Boolean(progress));
-    if (messages.length === 0) {
+    if (messages.length === 0 && !activityChanged) {
       return;
     }
     for (const message of messages) {
       this.addProgress(task, message);
+    }
+    if (messages.length === 0) {
+      task.updatedAt = new Date().toISOString();
+      this.updateActivityForTask(task, normalizeActivityStatus(task.status));
     }
     void this.persist(task);
     this.emit(task);
@@ -707,6 +754,33 @@ export class AppAgentTaskManager {
   private emit(task: InternalTask): void {
     this.options.onTaskUpdated({ task: toSummary(task) });
   }
+
+  private createActivityForTask(task: InternalTask) {
+    return createAgentRunActivity({
+      runId: task.runId,
+      surface: 'app_prompt_task',
+      status: normalizeActivityStatus(task.status),
+      startedAt: task.createdAt,
+      updatedAt: task.updatedAt,
+      sourceRef: {
+        appId: task.appId,
+        taskId: task.templateId,
+        title: task.templateId,
+      },
+    });
+  }
+
+  private updateActivityForTask(task: InternalTask, status: AgentRunActivityStatus, error?: string): void {
+    const base = task.activity ?? this.createActivityForTask(task);
+    task.activity = status === 'completed' || status === 'failed' || status === 'canceled'
+      ? finalizeAgentRunActivity(base, status, task.updatedAt, error)
+      : {
+          ...base,
+          status,
+          updatedAt: task.updatedAt,
+        };
+    void persistAgentRunActivity(this.options.metadataRoot, task.activity);
+  }
 }
 
 const toSummary = (task: InternalTask): AppCodexTaskSummary => ({
@@ -720,6 +794,7 @@ const toSummary = (task: InternalTask): AppCodexTaskSummary => ({
   error: task.error,
   errorDetails: task.errorDetails,
   progressLog: task.progressLog,
+  activity: task.activity,
   permissionRequest: task.permissionRequest,
 });
 

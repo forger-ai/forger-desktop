@@ -4,21 +4,14 @@ import type { Server } from 'node:http';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 
 import { appendDesktopLog } from '../desktop-logger';
-import type { DesktopErrorReporter } from '../error-reporting';
 import { reportSanitizerRoots } from '../conversation-diagnostics';
 import type { StoredForgerAccount } from '../forger-account-store';
 import { createAppMcpSecretsFingerprint } from '../app-mcp-manager';
-import type { SpeechToTextServiceManager } from '../speech-to-text-service';
-import type { TextToSpeechServiceManager } from '../text-to-speech-service';
-import type { WakeWordServiceManager } from '../wake-word-service';
 import { AppFolderGrantStore } from '../app-folder-grants';
 import type {
   AgentRuntime,
   AgentRuntimeRequest,
   AgentToolDefinition,
-  AgentToolSettings,
-  AppCodexConversationEvent,
-  AppCodexTaskEvent,
   AppSummary,
   AppSecretDeclaration,
   BasicActionResult,
@@ -34,13 +27,35 @@ import type {
   RuntimeStatus,
   AudioRuntimeDevices,
   CallConnectionActionInput,
-  CallOfficialToolInput,
-  PersonalAgent,
-  SecretMutationResult,
-} from '../../shared/types';
+	  CallOfficialToolInput,
+	  PersonalAgent,
+	  PersonalAgentPeerThread,
+	  SecretMutationResult,
+	} from '../../shared/types';
+import type {
+  AsyncFn,
+  AutomationEventLike,
+  ChatOrchestratorService,
+  ConversationEventLike,
+  ForgerMcpHttpFailure,
+  ForgerMcpSessionOptions,
+  ForgerMcpToolFailure,
+  LifecycleService,
+  LlmRunsService,
+  MainLifecycleState,
+  MemoryMaintenanceService,
+  PermissionDecision,
+  PermissionRequest,
+  RunEventLike,
+  ServiceConstructor,
+  ServiceWithLoad,
+  SyncFn,
+  TaskEventLike,
+  ToolAccess,
+} from './main-lifecycle-types';
+
 import type {
   AppManifest,
-  AppRegistry,
   InstalledAppRecord,
   RuntimeBinarySet,
   RunningAppProcess,
@@ -51,32 +66,9 @@ import {
 } from './startup-loading';
 import { appAllowsAgentRuntimeControl, appAllowsAudioInput, appAllowsSpeechToText, appAllowsTextToSpeech, appAllowsWorkspaceFolders } from '../../shared/platform-capabilities';
 import type { LlmProviderAuthProfileResolver } from '../llm-provider/types';
-import type { SelfOAuthCallbackServiceLike } from '../oauth-callback/types';
 import { connectionToolDefinitionsFromState } from './mcp-connection-tools';
+import { createAppRuntimeDiagnostics } from './app-runtime-diagnostics';
 
-type ServiceConstructor<T = unknown> = new (...args: any[]) => T;
-type AsyncFn<T = unknown> = (...args: any[]) => Promise<T>;
-type SyncFn<T = unknown> = (...args: any[]) => T;
-type ToolAccess = { appId: string; caller: string; locale?: string };
-type PermissionDecision = unknown;
-type PermissionRequest = unknown;
-type ForgerMcpSessionOptions = { caller: string; appIds: string[]; locale?: string };
-type RunEventLike = {
-  run: { status: string; appId: string; runId: string; errorCode?: string; userMessage?: string };
-};
-type TaskEventLike = AppCodexTaskEvent;
-type ConversationEventLike = AppCodexConversationEvent;
-type LlmRunsService = {
-  recordAppAgentConversationEvent: (event: ConversationEventLike, context?: { appName?: string }) => unknown;
-  recordAppPromptTaskEvent: (event: TaskEventLike, context?: { appName?: string }) => unknown;
-};
-type AutomationEventLike = {
-  automation: { id: string; selectedAppIds: string[] };
-  run?: { id: string; status?: string; error?: unknown; userMessage?: string };
-  diagnosticTranscript?: string;
-};
-type ForgerMcpToolFailure = { appId: string; runId: string; toolName?: unknown; error: unknown };
-type ForgerMcpHttpFailure = { error: unknown; appId?: string; runId?: string };
 type RemoteTunnelCloseEvent = { type: 'remote_tunnel_close'; session_id: string };
 type RemoteAgentSessionCloseEvent = { type: string; agent_id?: string; agentId?: string; session_id?: string; sessionId?: string };
 
@@ -100,64 +92,6 @@ const isRemoteAgentSessionCloseEvent = (event: unknown): event is RemoteAgentSes
         || typeof (event as { sessionId?: unknown }).sessionId === 'string'
       ),
   );
-
-interface LifecycleService {
-  [key: string]: any;
-}
-
-interface MemoryMaintenanceService {
-  initialize: () => Promise<void>;
-  dispose: () => void;
-}
-
-interface ChatOrchestratorService extends LifecycleService {
-  recordCreatedAppFromMcp: (runId: string, createdApp: ChatCreatedAppRequest) => void;
-  registerQuestionFromMcp: (
-    runId: string,
-    input: { questions: ChatQuestion[] },
-  ) => Promise<ChatQuestionRequest>;
-}
-
-type ServiceWithLoad<T> = Omit<LifecycleService, 'load'> & { load: () => Promise<T> };
-
-interface MainLifecycleState {
-  agentToolSettings: AgentToolSettings;
-  appAgentConversationManager: LifecycleService | null;
-  appAgentTaskManager: LifecycleService | null;
-  appMcpManager: LifecycleService | null;
-  automationManager: LifecycleService | null;
-  workflowManager: LifecycleService | null;
-  catalogApps: CatalogApp[];
-  chatOrchestrator: ChatOrchestratorService | null;
-  cloudDeviceManager: LifecycleService | null;
-  cloudIdentityStore: LifecycleService | null;
-  connectionsService: LifecycleService | null;
-  desktopErrorReporter: DesktopErrorReporter | null;
-  desktopRuntimeBridge: LifecycleService | null;
-  devCatalogService: LifecycleService | null;
-  fileLibrary: (LifecycleService & { cleanupStagedFilesForChat?: () => Promise<void> }) | null;
-  forgerAccount: StoredForgerAccount;
-  forgerAccountStore: ServiceWithLoad<StoredForgerAccount> | null;
-  forgerBackendClient: LifecycleService | null;
-  forgerMcpServer: LifecycleService | null;
-  localCatalogJsonUrl: string | undefined;
-  localNetworkShareManager: { stopAll?: () => Promise<void> } | null;
-  llmRunsStore?: LlmRunsService;
-  remoteNetworkShareManager: { stopAll?: () => Promise<void> } | null;
-  remoteAgentSessionService: { stopAll?: () => Promise<void> } | null;
-  mainWindow: BrowserWindow | null;
-  memoryMaintenanceManager: MemoryMaintenanceService | null;
-  memoryStore: LifecycleService | null;
-  officialToolsService: LifecycleService | null;
-  selfOAuthCallbackService: SelfOAuthCallbackServiceLike | null;
-  speechToTextService: SpeechToTextServiceManager | null;
-  textToSpeechService: TextToSpeechServiceManager | null;
-  wakeWordService: WakeWordServiceManager | null;
-  pendingDeepLink: unknown;
-  pendingDeepLinkFlushScheduled: boolean;
-  registry: AppRegistry;
-  secretsStore: LifecycleService | null;
-}
 
 export interface MainLifecycleDeps {
   AGENT_TOOL_DEFINITIONS: AgentToolDefinition[];
@@ -241,12 +175,18 @@ export interface MainLifecycleDeps {
   getFreePort: () => Promise<number>;
   getLegacyForgerMetadataRoot: () => string;
   getMemoryStore: () => { list: AsyncFn; create: AsyncFn; update: AsyncFn; delete: AsyncFn };
-  getPersonalAgentHeartbeat: AsyncFn;
-  getPersonalAgentStore: () => {
-    requireAgent: (agentId: string) => Promise<PersonalAgent>;
-    updateAgentPermissions: (input: { agentId: string; appIds?: string[] }) => Promise<PersonalAgent>;
-  };
-  getOfficialToolsService: () => NonNullable<MainLifecycleState['officialToolsService']>;
+	  getPersonalAgentHeartbeat: AsyncFn;
+	  getPersonalAgentStore: () => {
+	    requireAgent: (agentId: string) => Promise<PersonalAgent>;
+	    updateAgentPermissions: (input: { agentId: string; appIds?: string[] }) => Promise<PersonalAgent>;
+	    listPeerGrants: (agentId: string) => Promise<PersonalAgent['peerAgentGrants']>;
+	    listRecentPeerThreadsForAgent: (agentId: string, limit?: number) => Promise<PersonalAgentPeerThread[]>;
+	    requirePeerThreadAccess: (input: { agentId: string; threadId: string }) => Promise<PersonalAgentPeerThread>;
+	  };
+	  getPersonalAgentConversationManager: () => {
+	    askPeerAgent: AsyncFn;
+	  };
+	  getOfficialToolsService: () => NonNullable<MainLifecycleState['officialToolsService']>;
   getConnectionsService: () => NonNullable<MainLifecycleState['connectionsService']>;
   getSelfOAuthCallbackService: () => NonNullable<MainLifecycleState['selfOAuthCallbackService']>;
   getSpeechToTextService: () => NonNullable<MainLifecycleState['speechToTextService']>;
@@ -405,6 +345,7 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
     getMemoryStore,
     getPersonalAgentHeartbeat,
     getPersonalAgentStore,
+    getPersonalAgentConversationManager,
     getOfficialToolsService,
     getConnectionsService,
     getSelfOAuthCallbackService,
@@ -487,6 +428,17 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
   });
 
   const appFolderGrantStore = new AppFolderGrantStore(getForgerMetadataRoot());
+
+  const {
+    getAppRuntimeDiagnostics,
+    getAppViewSnapshot,
+  } = createAppRuntimeDiagnostics({
+    appWindows,
+    runningApps,
+    getForgerMetadataRoot,
+    getRuntimeStatus,
+    serializeErrorForInstallLog,
+  });
 
   app.whenReady().then(async () => {
   const startupLoading = createStartupLoadingController(BrowserWindow, typeof app.getLocale === 'function' ? app.getLocale() : undefined);
@@ -798,9 +750,9 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
         .filter((summary) => summary.updateAvailable);
     },
     createLocalApp: createLocalAppFromSkeleton,
-    addAppToPersonalAgent: async ({ agentId, appId }: { agentId: string; appId: string }) => {
-      const record = state.registry.apps[appId];
-      if (!record) {
+	    addAppToPersonalAgent: async ({ agentId, appId }: { agentId: string; appId: string }) => {
+	      const record = state.registry.apps[appId];
+	      if (!record) {
         return {
           success: false,
           appId,
@@ -821,14 +773,42 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
         };
       }
       await store.updateAgentPermissions({ agentId, appIds: nextAppIds });
-      return {
-        success: true,
-        appId,
-        alreadyGranted: false,
-        userMessage: 'La app quedo agregada al agente. Sus herramientas estaran disponibles en proximas ejecuciones.',
-      };
-    },
-    finishSocialAppInstall,
+	      return {
+	        success: true,
+	        appId,
+	        alreadyGranted: false,
+	        userMessage: 'La app quedo agregada al agente. Sus herramientas estaran disponibles en proximas ejecuciones.',
+	      };
+	    },
+	    listAgentPeers: async ({ agentId }: { agentId: string }) => {
+	      const store = getPersonalAgentStore();
+	      const [peers, recentThreads] = await Promise.all([
+	        store.listPeerGrants(agentId),
+	        store.listRecentPeerThreadsForAgent(agentId, 10),
+	      ]);
+	      return {
+	        success: true,
+	        peers,
+	        recentThreads,
+	      };
+	    },
+	    askAgent: async (input: unknown) => await getPersonalAgentConversationManager().askPeerAgent(input),
+	    readAgentThread: async ({ agentId, threadId }: { agentId: string; threadId: string }) => {
+	      try {
+	        const thread = await getPersonalAgentStore().requirePeerThreadAccess({ agentId, threadId });
+	        return {
+	          success: true,
+	          thread,
+	        };
+	      } catch (error) {
+	        return {
+	          success: false,
+	          userMessage: 'No se pudo leer este thread entre agentes.',
+	          technicalCode: error instanceof Error ? error.message : 'personal_agent_peer_thread_read_failed',
+	        };
+	      }
+	    },
+	    finishSocialAppInstall,
     deleteQuarantinedSocialApp,
     recordCreatedApp: (runId: string, createdApp: ChatCreatedAppRequest) => state.chatOrchestrator?.recordCreatedAppFromMcp(runId, createdApp),
     registerQuestion: async (runId: string, input: { questions: ChatQuestion[] }) => {
@@ -838,6 +818,8 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
       return await state.chatOrchestrator.registerQuestionFromMcp(runId, input);
     },
     getRuntimeStatus,
+    getAppViewSnapshot,
+    getAppRuntimeDiagnostics,
     openApp: openInstalledApp,
     stopApp: stopInstalledApp,
     restartApp: restartInstalledApp,
@@ -1059,6 +1041,9 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
       ensureCatalogStatuses();
     },
     onRunUpdated: (event: RunEventLike) => {
+      llmRunsStore?.recordChatRunEvent(event, {
+        appName: state.registry.apps[event.run.appId]?.name ?? (event.run.appId === 'forger' ? 'Forger' : undefined),
+      });
       const target = event.run.appId ? appWindows.get(event.run.appId) : null;
       if (target && !target.isDestroyed()) {
         void appendInstallLog('chat_run:app_window_state', {
@@ -1464,6 +1449,13 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
     callConnectorAction: async (input: unknown) =>
       await getOfficialToolsService().callFromAgent(input),
     getValidToolIds: () => new Set(AGENT_TOOL_DEFINITIONS.map((tool) => tool.id)),
+    onAgentRunActivity: (activity: unknown) => {
+      llmRunsStore?.recordWorkflowNodeActivity(activity, {
+        appName: typeof activity === 'object' && activity && 'sourceRef' in activity
+          ? state.registry.apps[String((activity as { sourceRef?: { appId?: unknown } }).sourceRef?.appId ?? '')]?.name
+          : undefined,
+      });
+    },
     onWorkflowUpdated: (event: { workflow: unknown; run?: unknown }) => {
       emitWorkflowUpdated(event);
     },
@@ -1567,6 +1559,10 @@ const performGracefulShutdown = async (): Promise<void> => {
   state.textToSpeechService = null;
   state.wakeWordService?.stop();
   state.wakeWordService = null;
+
+  const runningAppIds = [...runningApps.keys()];
+  await Promise.allSettled(runningAppIds.map((appId) => stopInstalledApp(appId)));
+
   await Promise.allSettled([...runningApps.values()].flatMap((running) => [
     terminateProcess(running.backend),
     terminateProcess(running.frontend),

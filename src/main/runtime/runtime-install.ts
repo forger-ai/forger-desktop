@@ -38,6 +38,7 @@ const appendFlattenLog = deps.appendInstallLog ?? (async () => undefined);
 const RUNTIME_PLATFORM_ALIASES = new Set(['darwin_arm64', 'darwin_x64', 'linux_x64', 'win32_x64']);
 const PYTHON_DARWIN_RUNTIME_REVISION = 'python-darwin-disable-library-validation-2026-06-02';
 const FLATTEN_RETRY_DELAYS_MS = [25, 100];
+const MIN_RUNTIME_INSTALL_FREE_BYTES = 1_024 * 1_024 * 1_024;
 
 interface RuntimeReadyMetadata {
   installedAt: string;
@@ -53,6 +54,33 @@ const fileExists = async (filePath: string): Promise<boolean> => {
 
 const wait = async (ms: number): Promise<void> => {
   await new Promise((resolve) => setTimeout(resolve, ms));
+};
+
+const availableDiskBytes = async (dir: string): Promise<number | null> => {
+  try {
+    await fs.mkdir(dir, { recursive: true });
+    const stats = await fs.statfs(dir);
+    return Number(stats.bavail) * Number(stats.bsize);
+  } catch {
+    return null;
+  }
+};
+
+const createDiskSpaceError = (availableBytes: number, requiredBytes: number, scope: string): Error => {
+  const error = new Error('disk_space_unavailable');
+  (error as Error & { details?: Record<string, unknown> }).details = {
+    availableBytes,
+    requiredBytes,
+    scope,
+  };
+  return error;
+};
+
+const assertEnoughDiskSpace = async (dir: string, requiredBytes: number, scope: string): Promise<void> => {
+  const availableBytes = await availableDiskBytes(dir);
+  if (availableBytes !== null && availableBytes < requiredBytes) {
+    throw createDiskSpaceError(availableBytes, requiredBytes, scope);
+  }
 };
 
 const errorCode = (error: unknown): string | undefined =>
@@ -401,6 +429,7 @@ const ensureRuntimeInstalled = async (
 
     const tempDir = path.join(getTempRoot(), `${type}-${version}-${platformAlias}-${Date.now()}`);
     await fs.mkdir(path.dirname(targetRoot), { recursive: true });
+    await assertEnoughDiskSpace(path.dirname(targetRoot), MIN_RUNTIME_INSTALL_FREE_BYTES, `${type}_runtime`);
     await fs.rm(tempDir, { recursive: true, force: true });
     await extractArchive(archiveToExtract, tempDir);
     await flattenSingleTopLevelDirectory(tempDir);
@@ -409,9 +438,15 @@ const ensureRuntimeInstalled = async (
     await fs.mkdir(path.dirname(targetRoot), { recursive: true });
     await fs.rename(tempDir, targetRoot);
     await clearMacQuarantine(targetRoot);
-    await writeRuntimeReadyMetadata(readyPath, type, platformAlias, runtimeArchiveSha256);
 
-    return await resolveRuntimeExecutables(targetRoot, type);
+    try {
+      const runtime = await resolveRuntimeExecutables(targetRoot, type);
+      await writeRuntimeReadyMetadata(readyPath, type, platformAlias, runtimeArchiveSha256);
+      return runtime;
+    } catch (error) {
+      await fs.rm(targetRoot, { recursive: true, force: true }).catch(() => undefined);
+      throw error;
+    }
   })();
 
   runtimeLocks.set(lockKey, task);

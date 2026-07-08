@@ -78,7 +78,12 @@ export const toConnectionCallInput = (
 };
 
 export const isInternalMcpTool = (toolId: AgentToolId): boolean =>
-  toolId === 'forger_ask_question' || toolId.startsWith('workflow_') || toolId.startsWith('forger_connection_');
+  toolId === 'forger_ask_question'
+  || toolId === 'forger_list_agent_peers'
+  || toolId === 'forger_ask_agent'
+  || toolId === 'forger_read_agent_thread'
+  || toolId.startsWith('workflow_')
+  || toolId.startsWith('forger_connection_');
 
 const APP_SCOPED_TOOLS = new Set<AgentToolId>([
   'forger_request_app_tool_grant',
@@ -87,6 +92,8 @@ const APP_SCOPED_TOOLS = new Set<AgentToolId>([
   'forger_update_app_prompt',
   'forger_restore_app_prompt',
   'forger_get_app_runtime_status',
+  'forger_get_app_view_snapshot',
+  'forger_get_app_runtime_diagnostics',
   'forger_open_app',
   'forger_stop_app',
   'forger_restart_app',

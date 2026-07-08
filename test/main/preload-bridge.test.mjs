@@ -49,6 +49,7 @@ test('preload exposes a function-only forger API without leaking raw Electron pr
     'listLlmProviderProfiles',
     'setActiveLlmProviderProfile',
     'updateLlmProviderProfileDefaults',
+    'desktopUpdateQuitForInstall',
   ]) {
     assert.equal(typeof api[key], 'function', `${key} should be exposed as a function`);
   }
@@ -73,6 +74,7 @@ test('preload forwards representative commands to the expected IPC channels with
   await api.setActiveLlmProviderProfile({ provider: 'codex', profileId: 'codex:system' });
   await api.updateLlmProviderProfileDefaults({ provider: 'codex', profileId: 'codex:system', model: 'gpt-5' });
   await api.openExternalUrl('https://forger.ai/help');
+  await api.desktopUpdateQuitForInstall();
   await api.dbQueryTable('finance-os', 'transactions', 25);
   await api.automationsGetRunTranscript('run-99');
   await api.backgroundTaskGet('task-99');
@@ -92,6 +94,7 @@ test('preload forwards representative commands to the expected IPC channels with
     ['forger:llm-provider-profiles:set-active', { provider: 'codex', profileId: 'codex:system' }],
     ['forger:llm-provider-profiles:update-defaults', { provider: 'codex', profileId: 'codex:system', model: 'gpt-5' }],
     ['forger:open-external-url', 'https://forger.ai/help'],
+    ['forger:desktop-update:quit-for-install'],
     ['forger:db:query-table', 'finance-os', 'transactions', 25],
     ['forger:automations:get-run-transcript', 'run-99'],
     ['forger:background-tasks:get', 'task-99'],

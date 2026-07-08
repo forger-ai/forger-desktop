@@ -66,6 +66,7 @@ const fakeConnectionModule = {
       type: 'gmail',
       label: input.label,
       accountIdentity: { email: input.email, subject: input.subject },
+      status: input.status,
       secrets: { refresh_token: input.refreshToken },
     });
     return { success: true, userMessage: 'connected', instance };
@@ -334,6 +335,63 @@ test('multi-account calls without connection id use default and fail when no def
     assert.equal(result.technicalCode, 'connection_default_missing');
     assert.deepEqual(result.data.connections.map((connection) => connection.label).sort(), ['A', 'B']);
     assert.equal(JSON.stringify(result).includes('refresh-'), false);
+  } finally {
+    await harness.cleanup();
+  }
+});
+
+test('connection sessions and calls only use connected instances for non-status actions', async () => {
+  const harness = await createService();
+  try {
+    const connected = await harness.service.configure({
+      type: 'gmail',
+      label: 'Connected',
+      email: 'connected@example.com',
+      subject: 'sub-connected',
+      refreshToken: 'refresh-connected',
+    });
+    const disconnected = await harness.service.configure({
+      type: 'gmail',
+      label: 'Disconnected',
+      email: 'disconnected@example.com',
+      subject: 'sub-disconnected',
+      refreshToken: 'refresh-disconnected',
+      status: 'needs_reconnect',
+    });
+
+    const session = await harness.service.listConnectionsForSession([
+      {
+        type: 'gmail',
+        actions: ['gmail.search_messages'],
+        multiple: true,
+        connectionIds: [connected.instance.id, disconnected.instance.id],
+      },
+    ]);
+    assert.deepEqual(session.instances.map((instance) => instance.id), [connected.instance.id]);
+
+    const explicitDisconnected = await harness.service.call({
+      type: 'gmail',
+      actionId: 'gmail.search_messages',
+      connectionId: disconnected.instance.id,
+      input: { query: 'from:example.com' },
+      grant: {
+        type: 'gmail',
+        actions: ['gmail.search_messages'],
+        multiple: true,
+        connectionIds: [connected.instance.id, disconnected.instance.id],
+      },
+    });
+    assert.equal(explicitDisconnected.success, false);
+    assert.equal(explicitDisconnected.technicalCode, 'connection_not_connected');
+
+    const statusStillAllowed = await harness.service.call({
+      type: 'gmail',
+      actionId: 'gmail.connection.status',
+      connectionId: disconnected.instance.id,
+      input: {},
+    });
+    assert.equal(statusStillAllowed.success, true);
+    assert.equal(statusStillAllowed.data.connected, true);
   } finally {
     await harness.cleanup();
   }
