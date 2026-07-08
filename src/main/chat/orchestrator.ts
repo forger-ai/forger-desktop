@@ -56,6 +56,15 @@ import {
   type LlmTokenUsage,
 } from './orchestrator-helpers';
 import {
+  addPermissionActivityItem,
+  addStatusActivityItem,
+  appendProviderActivity,
+  createAgentRunActivity,
+  finalizeAgentRunActivity,
+  normalizeActivityStatus,
+  persistAgentRunActivity,
+} from './agent-run-activity';
+import {
   appendRunLog,
   buildChatRecoveryContext,
   getRunLogPath,
@@ -234,6 +243,18 @@ export class ChatOrchestrator {
       sharedRoots,
       runLogPath: getRunLogPath(this.options.metadataRoot, runId),
       progressLog: [],
+      activity: createAgentRunActivity({
+        runId,
+        surface: 'desktop_chat',
+        status: 'queued',
+        startedAt: now,
+        updatedAt: now,
+        sourceRef: {
+          appId,
+          conversationId,
+          title: input.chatMode ?? 'Desktop chat',
+        },
+      }),
       model: runtime.model,
       reasoningEffort: runtime.provider === 'codex' ? runtime.effort as CodexReasoningEffort : 'medium',
       provider: runtime.provider,
@@ -556,7 +577,17 @@ export class ChatOrchestrator {
       return;
     }
     run.progressLog = [...(run.progressLog ?? []), trimmed].slice(-40);
+    run.activity = addStatusActivityItem(run.activity ?? createAgentRunActivity({
+      runId,
+      surface: 'desktop_chat',
+      status: normalizeActivityStatus(run.status),
+      startedAt: run.createdAt,
+      updatedAt: run.updatedAt,
+      sourceRef: { appId: run.appId, conversationId: run.conversationId },
+    }), trimmed);
     run.updatedAt = new Date().toISOString();
+    run.activity = { ...run.activity, status: normalizeActivityStatus(run.status), updatedAt: run.updatedAt };
+    void persistAgentRunActivity(this.options.metadataRoot, run.activity);
     this.emitRun(run);
   }
 
@@ -629,6 +660,17 @@ export class ChatOrchestrator {
       run.updatedAt = new Date().toISOString();
       run.status = 'running';
       run.userMessage = undefined;
+      run.activity = {
+        ...(run.activity ?? createAgentRunActivity({
+          runId: run.runId,
+          surface: 'desktop_chat',
+          startedAt: run.createdAt,
+          updatedAt: run.updatedAt,
+          sourceRef: { appId: run.appId, conversationId: run.conversationId },
+        })),
+        status: 'running',
+        updatedAt: run.updatedAt,
+      };
       this.emitRun(run);
       await fs.mkdir(path.dirname(run.runLogPath), { recursive: true });
       await fs.writeFile(
@@ -692,10 +734,27 @@ export class ChatOrchestrator {
             return;
           }
           void appendRunLog(run.runLogPath, stream, text);
+          const activityItemCount = run.activity?.counts.total ?? 0;
+          run.activity = appendProviderActivity({
+            activity: run.activity ?? createAgentRunActivity({
+              runId: run.runId,
+              surface: 'desktop_chat',
+              status: normalizeActivityStatus(run.status),
+              startedAt: run.createdAt,
+              updatedAt: run.updatedAt,
+              sourceRef: { appId: run.appId, conversationId: run.conversationId },
+            }),
+            provider: run.provider,
+            stream,
+            text,
+          });
+          const activityChanged = (run.activity?.counts.total ?? 0) !== activityItemCount;
           const steps = toProviderProgressMessages(run.provider, stream, text, run.locale);
-          if (steps.length > 0) {
+          if (steps.length > 0 || activityChanged) {
             run.progressLog = [...(run.progressLog ?? []), ...steps].slice(-40);
             run.updatedAt = new Date().toISOString();
+            run.activity = { ...run.activity, status: normalizeActivityStatus(run.status), updatedAt: run.updatedAt };
+            void persistAgentRunActivity(this.options.metadataRoot, run.activity);
             this.emitRun(run);
           }
         },
@@ -750,6 +809,10 @@ export class ChatOrchestrator {
           ...(run.progressLog ?? []),
           `Provider thread ${lostThreadId} is unavailable. Starting a fresh provider thread for this Chat conversation.`,
         ].slice(-40);
+        run.activity = addStatusActivityItem(
+          run.activity ?? this.createActivityForRun(run),
+          `Provider thread ${lostThreadId} is unavailable. Starting a fresh provider thread for this Chat conversation.`,
+        );
         run.updatedAt = new Date().toISOString();
         this.emitRun(run);
         await appendRunLog(
@@ -1033,6 +1096,11 @@ export class ChatOrchestrator {
     run.status = 'needs_permission';
     run.updatedAt = new Date().toISOString();
     run.userMessage = undefined;
+    run.activity = addPermissionActivityItem(
+      run.activity ?? this.createActivityForRun(run),
+      request.reason || `Permission requested for ${request.resource}.`,
+      `${request.permission}:${request.resource}`,
+    );
     this.emitRun(run);
 
     const decision = await new Promise<'allow' | 'deny'>((resolve) => {
@@ -1063,9 +1131,44 @@ export class ChatOrchestrator {
   }
 
   private emitRun(run: InternalChatRun): void {
+    run.activity = this.activityForEmit(run);
+    void persistAgentRunActivity(this.options.metadataRoot, run.activity);
     const publicRun = toPublicChatRun(run);
     void this.options.trace?.('chat_run_emit', buildChatRunTracePayload(publicRun));
     this.options.onRunUpdated({ run: publicRun });
+  }
+
+  private createActivityForRun(run: InternalChatRun) {
+    return createAgentRunActivity({
+      runId: run.runId,
+      surface: 'desktop_chat',
+      status: normalizeActivityStatus(run.status),
+      startedAt: run.createdAt,
+      updatedAt: run.updatedAt,
+      sourceRef: {
+        appId: run.appId,
+        conversationId: run.conversationId,
+        title: run.appId === 'forger' ? 'Forger chat' : 'App chat',
+      },
+    });
+  }
+
+  private activityForEmit(run: InternalChatRun) {
+    const activity = run.activity ?? this.createActivityForRun(run);
+    const status = normalizeActivityStatus(run.status);
+    if (status === 'completed' || status === 'failed' || status === 'canceled') {
+      return finalizeAgentRunActivity(
+        activity,
+        status,
+        run.updatedAt,
+        status === 'failed' ? run.userMessage ?? run.errorCode : undefined,
+      );
+    }
+    return {
+      ...activity,
+      status,
+      updatedAt: run.updatedAt,
+    };
   }
 
   private conversationLockKey(appId: string, conversationId: string): string {

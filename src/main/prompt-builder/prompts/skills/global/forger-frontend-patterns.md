@@ -210,7 +210,11 @@ Visual QA is mandatory for visual UI work.
 
 Open, restart, or bring up the installed app through Forger Desktop tools such as `forger_open_app`, `forger_restart_app`, and `forger_get_app_runtime_status`. Do not manually start Python, uvicorn, npm, Vite, FastAPI, or localhost services just to inspect the app.
 
-Use available Forger browser or Chrome Extension actions to inspect the real rendered app: open a dedicated tab when available, wait for selectors, inspect HTML/styles, interact with navigation, forms, dialogs, dropdowns, drawers, and agent progress states, and verify desktop plus narrow mobile behavior when the tool supports it.
+Treat `frontendUrl`, `backendUrl`, localhost ports, and URLs returned by `forger_open_app`, `forger_restart_app`, or app runtime status tools as internal runtime diagnostics only. Never open, navigate to, or inspect installed app runtime URLs with Chrome Extension, a custom URL, a system browser, provider-native browser tools, `open`, `WebFetch`, or non-Forger browser control.
+
+For installed app visual debugging, use `forger_get_app_view_snapshot` against the Desktop-owned app window when available. Use `forger_get_app_runtime_diagnostics` for runtime status, app-window state, and recent logs. These helpers take an `appId` and optional selector/debug options, not raw runtime URLs.
+
+Use Chrome Extension only for external web pages that are not installed app frontend/backend runtime URLs.
 
 Do not substitute `curl`, `/health`, a frontend HTTP response, build, lint, typecheck, or tests for visual QA. Those checks can prove services and code health; they do not prove visual quality.
 

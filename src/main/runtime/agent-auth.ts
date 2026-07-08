@@ -81,6 +81,9 @@ const quotePosixShell = (value: string): string => `'${value.replace(/'/g, "'\\'
 const CODEX_RATE_LIMITS_TIMEOUT_MS = 8_000;
 const CODEX_AUTH_STATUS_RATE_LIMITS_TIMEOUT_MS = 1_500;
 const PROVIDER_CLI_INSTALL_TIMEOUT_MS = 300_000;
+const MIN_PROVIDER_CLI_INSTALL_FREE_BYTES = 512 * 1_024 * 1_024;
+const PROVIDER_DISK_SPACE_USER_MESSAGE = 'No hay suficiente espacio libre para instalar los componentes locales. Libera espacio en el disco y vuelve a intentarlo.';
+const PROVIDER_NODE_RUNTIME_USER_MESSAGE = 'No pudimos preparar el runtime local de Node. Libera espacio en el disco y vuelve a intentarlo para que Forger lo reconstruya.';
 
 const isCommandTimeoutError = (error: unknown): boolean =>
   Boolean(
@@ -101,6 +104,49 @@ const providerInstallDiagnostic = (
   return isCommandTimeoutError(error)
     ? { ...diagnostic, technicalCode: timeoutCode }
     : diagnostic;
+};
+
+const providerInstallUserMessage = (diagnostic: FailureDiagnosticFields, fallback: string): string => {
+  if (diagnostic.technicalCode === 'disk_space_unavailable') {
+    return PROVIDER_DISK_SPACE_USER_MESSAGE;
+  }
+  if (diagnostic.technicalCode === 'runtime_node_executable_not_found') {
+    return PROVIDER_NODE_RUNTIME_USER_MESSAGE;
+  }
+  return fallback;
+};
+
+const availableDiskBytes = async (dir: string): Promise<number | null> => {
+  try {
+    await fs.mkdir(dir, { recursive: true });
+    const stats = await fs.statfs(dir);
+    return Number(stats.bavail) * Number(stats.bsize);
+  } catch {
+    return null;
+  }
+};
+
+const createDiskSpaceError = (availableBytes: number, requiredBytes: number, scope: string): Error => {
+  const error = new Error('disk_space_unavailable');
+  (error as Error & { details?: Record<string, unknown> }).details = {
+    availableBytes,
+    requiredBytes,
+    scope,
+  };
+  return error;
+};
+
+const assertProviderInstallDiskSpace = async (provider: 'codex' | 'claude' | 'antigravity'): Promise<void> => {
+  const availableBytes = await availableDiskBytes(app.getPath('userData'));
+  if (availableBytes === null || availableBytes >= MIN_PROVIDER_CLI_INSTALL_FREE_BYTES) {
+    return;
+  }
+  await appendInstallLog(`${provider}_auth:install_preflight_failed`, {
+    detail: 'disk_space_unavailable',
+    availableBytes,
+    requiredBytes: MIN_PROVIDER_CLI_INSTALL_FREE_BYTES,
+  });
+  throw createDiskSpaceError(availableBytes, MIN_PROVIDER_CLI_INSTALL_FREE_BYTES, `${provider}_cli`);
 };
 
 const getCodexAuthFilePath = (): string => path.join(getCodexHome(), 'auth.json');
@@ -223,6 +269,7 @@ const ensureCodexCliInstalled = async (): Promise<string> => {
     });
   }
 
+  await assertProviderInstallDiskSpace('codex');
   const nodeRuntime = await ensureRuntimeInstalled('node', DEFAULT_NODE_VERSION);
   const codexRoot = getCodexRoot();
   await fs.mkdir(codexRoot, { recursive: true });
@@ -774,7 +821,7 @@ const connectCodexAuth = async (): Promise<{ success: boolean; userMessage: stri
     });
     return {
       success: false,
-      userMessage: 'No pudimos iniciar el login de Codex.',
+      userMessage: providerInstallUserMessage(diagnostic, 'No pudimos iniciar el login de Codex.'),
       ...diagnostic,
     };
   }
@@ -800,6 +847,7 @@ const disconnectCodexAuth = async (): Promise<{ success: boolean; userMessage: s
 
 const reinstallCodex = async (): Promise<{ success: boolean; userMessage: string; status?: CodexAuthStatus } & FailureDiagnosticFields> => {
   try {
+    await assertProviderInstallDiskSpace('codex');
     await fs.rm(getCodexRoot(), { recursive: true, force: true });
     await fs.rm(getCodexHome(), { recursive: true, force: true });
     await fs.mkdir(getCodexRoot(), { recursive: true });
@@ -819,7 +867,7 @@ const reinstallCodex = async (): Promise<{ success: boolean; userMessage: string
     });
     return {
       success: false,
-      userMessage: 'No pudimos reinstalar Codex.',
+      userMessage: providerInstallUserMessage(diagnostic, 'No pudimos reinstalar Codex.'),
       ...diagnostic,
       status: await getCodexAuthStatus().catch(() => undefined),
     };
@@ -913,6 +961,7 @@ const ensureClaudeCliInstalled = async (): Promise<string> => {
       expectedVersion: CLAUDE_CODE_VERSION,
     });
   }
+  await assertProviderInstallDiskSpace('claude');
   const claudeRoot = getClaudeRoot();
   await fs.mkdir(claudeRoot, { recursive: true });
   const packageJsonPath = path.join(claudeRoot, 'package.json');
@@ -1189,7 +1238,7 @@ const connectClaudeAuth = async (): Promise<{ success: boolean; userMessage: str
     });
     return {
       success: false,
-      userMessage: 'No pudimos iniciar el login de Claude Code.',
+      userMessage: providerInstallUserMessage(diagnostic, 'No pudimos iniciar el login de Claude Code.'),
       ...diagnostic,
       status: await getClaudeAuthStatus().catch(() => undefined),
     };
@@ -1198,6 +1247,7 @@ const connectClaudeAuth = async (): Promise<{ success: boolean; userMessage: str
 
 const reinstallClaude = async (): Promise<{ success: boolean; userMessage: string; status?: ClaudeAuthStatus } & FailureDiagnosticFields> => {
   try {
+    await assertProviderInstallDiskSpace('claude');
     await fs.rm(getClaudeRoot(), { recursive: true, force: true });
     await fs.mkdir(getClaudeRoot(), { recursive: true });
     await ensureClaudeCliInstalled();
@@ -1214,7 +1264,7 @@ const reinstallClaude = async (): Promise<{ success: boolean; userMessage: strin
     });
     return {
       success: false,
-      userMessage: 'No pudimos instalar Claude Code.',
+      userMessage: providerInstallUserMessage(diagnostic, 'No pudimos instalar Claude Code.'),
       ...diagnostic,
       status: await getClaudeAuthStatus().catch(() => undefined),
     };
@@ -1872,6 +1922,7 @@ const installManagedAntigravityCli = async (input: { resetRoot?: boolean } = {})
   }
 
   const installPromise = (async (): Promise<string> => {
+    await assertProviderInstallDiskSpace('antigravity');
     if (input.resetRoot) {
       await fs.rm(getAntigravityRoot(), { recursive: true, force: true });
     }
@@ -2172,7 +2223,7 @@ const startAntigravityAuthSession = async (
     });
     return {
       success: false,
-      userMessage: 'No pudimos iniciar la conexión con Google Antigravity.',
+      userMessage: providerInstallUserMessage(diagnostic, 'No pudimos iniciar la conexión con Google Antigravity.'),
       ...diagnostic,
       status: await getAntigravityAuthStatus().catch(() => undefined),
     };
@@ -2326,7 +2377,7 @@ const reinstallAntigravity = async (): Promise<{ success: boolean; userMessage: 
     });
     return {
       success: false,
-      userMessage: 'No pudimos instalar Google Antigravity.',
+      userMessage: providerInstallUserMessage(diagnostic, 'No pudimos instalar Google Antigravity.'),
       ...diagnostic,
       status: await getAntigravityAuthStatus().catch(() => undefined),
     };

@@ -163,6 +163,10 @@ test('failure diagnostics classify unstable command and auth failures without le
     error: new Error('env: node: No such file or directory'),
   }).technicalCode, 'codex_node_runtime_missing');
   assert.equal(buildFailureDiagnostic({
+    fallbackCode: 'claude_reinstall_failed',
+    error: new Error('runtime_node_executable_not_found'),
+  }).technicalCode, 'runtime_node_executable_not_found');
+  assert.equal(buildFailureDiagnostic({
     fallbackCode: 'desktop_error',
     rawError: '401 Unauthorized Failed to refresh token',
   }).technicalCode, 'codex_auth_expired');
@@ -182,6 +186,20 @@ test('failure diagnostics classify unstable command and auth failures without le
     details: { classifier: 'filesystem_enotempty' },
     sensitiveDetails: { rawError: 'rename failed with ENOTEMPTY' },
   });
+  const diskDiagnostic = buildFailureDiagnostic({
+    fallbackCode: 'codex_reinstall_failed',
+    error: {
+      exitCode: 1,
+      command: 'npm',
+      args: ['install', '@openai/codex'],
+      cwd: 'DESKTOP_USER_DATA/codex-cli',
+      stderr: 'npm warn tar TAR_ENTRY_ERROR ENOSPC: no space left on device, write',
+    },
+  });
+  assert.equal(diskDiagnostic.technicalCode, 'disk_space_unavailable');
+  assert.equal(diskDiagnostic.details.classifier, 'disk_space_unavailable');
+  assert.equal(diskDiagnostic.details.exitCode, 1);
+  assert.match(diskDiagnostic.sensitiveDetails.stderr, /ENOSPC/);
   assert.equal(buildFailureDiagnostic({
     fallbackCode: 'bad fallback',
     rawError: 'unknown',

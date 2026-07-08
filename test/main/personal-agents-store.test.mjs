@@ -45,7 +45,7 @@ test('personal agent store creates SQLite-backed agents with safe defaults and p
 
   const workspaceRoot = path.join(forgerHomeRoot, 'agents', agent.id, 'workspace');
   const workspaceFiles = await readdir(workspaceRoot);
-  assert.deepEqual(workspaceFiles.sort(), ['.agents', '.claude', 'AGENTS.md', 'HOW.md', 'HUMAN.md', 'WHO.md', 'WHY.md']);
+  assert.deepEqual(workspaceFiles.sort(), ['.agents', '.claude', 'AGENTS.md', 'HOW.md', 'HUMAN.md', 'OTHERS.md', 'WHO.md', 'WHY.md']);
   const agentSkillDirs = (await readdir(path.join(workspaceRoot, '.agents', 'skills'))).sort();
   const claudeSkillDirs = (await readdir(path.join(workspaceRoot, '.claude', 'skills'))).sort();
   assert.ok(agentSkillDirs.includes('forger-context'));
@@ -64,11 +64,13 @@ test('personal agent store creates SQLite-backed agents with safe defaults and p
   const whyMd = await readFile(path.join(workspaceRoot, 'WHY.md'), 'utf8');
   const howMd = await readFile(path.join(workspaceRoot, 'HOW.md'), 'utf8');
   const humanMd = await readFile(path.join(workspaceRoot, 'HUMAN.md'), 'utf8');
+  const othersMd = await readFile(path.join(workspaceRoot, 'OTHERS.md'), 'utf8');
   assert.match(agentsMd, /FORGER_PERSONAL_AGENT_PROMPT_VERSION: 1/);
   assert.match(agentsMd, /WHO\.md/);
   assert.match(agentsMd, /WHY\.md/);
   assert.match(agentsMd, /HOW\.md/);
   assert.match(agentsMd, /HUMAN\.md/);
+  assert.match(agentsMd, /OTHERS\.md/);
   assert.match(agentsMd, /The companion files are not templates to preserve/);
   assert.match(agentsMd, /replace bootstrap placeholders, empty defaults, examples, and instructional filler with concise notes/);
   assert.match(agentsMd, /Remove template\/example sections once they have served their purpose and real content exists/);
@@ -80,6 +82,9 @@ test('personal agent store creates SQLite-backed agents with safe defaults and p
   assert.match(howMd, /Remove example scaffolding once real procedures or solved-error notes exist/);
   assert.match(humanMd, /not a private dossier/);
   assert.match(humanMd, /remove placeholder text and keep only concise notes/);
+  assert.match(othersMd, /Editing this file alone never grants a permission/);
+  assert.match(othersMd, /current Forger-controlled tool, app, Connection, and approval allowlist/);
+  assert.match(othersMd, /Inter-Agent Communication Criteria/);
   await writeFile(path.join(workspaceRoot, 'notes.txt'), 'Visible note.', 'utf8');
   const workspaceTree = await store.listWorkspace(agent.id);
   assert.deepEqual(
@@ -89,6 +94,7 @@ test('personal agent store creates SQLite-backed agents with safe defaults and p
       ['HOW.md', 'HOW.md', 'file'],
       ['HUMAN.md', 'HUMAN.md', 'file'],
       ['notes.txt', 'notes.txt', 'file'],
+      ['OTHERS.md', 'OTHERS.md', 'file'],
       ['WHO.md', 'WHO.md', 'file'],
       ['WHY.md', 'WHY.md', 'file'],
     ],
@@ -179,6 +185,189 @@ test('personal agent grants persist as explicit app and tool permissions', async
   assert.deepEqual(sortConnectionGrants(persisted.connectionGrants), sortConnectionGrants(updated.connectionGrants));
   assert.deepEqual(await reloaded.deleteAgent(agent.id), { success: true });
   assert.deepEqual(await reloaded.listPermissions(agent.id), []);
+});
+
+test('personal agent peer grants, peer threads, message provenance, and attachments persist relationally', async () => {
+  const metadataRoot = await mkdtemp(path.join(tmpdir(), 'forger-personal-agents-peer-meta-'));
+  const forgerHomeRoot = await mkdtemp(path.join(tmpdir(), 'forger-personal-agents-peer-home-'));
+  const store = new AgentStore({ metadataRoot, forgerHomeRoot });
+
+  const planner = await store.createAgent({
+    name: 'Planner',
+    description: 'Coordinates work.',
+  });
+  const budget = await store.createAgent({
+    name: 'Budget',
+    description: 'Reviews numbers.',
+  });
+  const legal = await store.createAgent({
+    name: 'Legal',
+    description: 'Checks constraints.',
+  });
+
+  const plannerWorkspace = path.join(forgerHomeRoot, 'agents', planner.id, 'workspace');
+  const othersPath = path.join(plannerWorkspace, 'OTHERS.md');
+  await writeFile(
+    othersPath,
+    `${await readFile(othersPath, 'utf8')}\n# Manual peer notes\nKeep escalation notes outside the managed block.\n`,
+    'utf8',
+  );
+
+  const updatedPlanner = await store.updateAgentPermissions({
+    agentId: planner.id,
+    peerAgentGrants: [
+      { agentId: budget.id, criteria: 'Ask for budget forecasts and cost tradeoffs.' },
+      { agentId: planner.id, criteria: 'Self grants are ignored.' },
+      { agentId: 'missing-agent', criteria: 'Missing agents are ignored.' },
+    ],
+  });
+  await store.updateAgentPermissions({
+    agentId: budget.id,
+    peerAgentGrants: [
+      { agentId: legal.id, criteria: 'Ask about policy or legal constraints.' },
+    ],
+  });
+
+  assert.deepEqual(
+    updatedPlanner.peerAgentGrants.map((grant) => [grant.agentId, grant.name, grant.criteria]),
+    [[budget.id, 'Budget', 'Ask for budget forecasts and cost tradeoffs.']],
+  );
+  assert.deepEqual(
+    (await store.listPeerGrants(planner.id)).map((grant) => [grant.agentId, grant.name, grant.description, grant.criteria]),
+    [[budget.id, 'Budget', 'Reviews numbers.', 'Ask for budget forecasts and cost tradeoffs.']],
+  );
+  const othersMd = await readFile(othersPath, 'utf8');
+  assert.match(othersMd, /<!-- FORGER_MANAGED_PEER_AGENTS_BEGIN -->/);
+  assert.match(othersMd, /Budget/);
+  assert.match(othersMd, /Ask for budget forecasts and cost tradeoffs/);
+  assert.match(othersMd, /# Manual peer notes/);
+  assert.match(othersMd, /Keep escalation notes outside the managed block/);
+
+  const plannerConversation = await store.createConversation({
+    agentId: planner.id,
+    title: 'Launch plan',
+  });
+  const budgetConversation = await store.createConversation({
+    agentId: budget.id,
+    title: 'Budget review',
+    origin: 'agent',
+    readOnly: true,
+    initiatorAgentId: planner.id,
+  });
+  const plannerRun = await store.createRun({
+    agentId: planner.id,
+    conversationId: plannerConversation.id,
+  });
+  const budgetThread = await store.createPeerThread({
+    callerAgentId: planner.id,
+    targetAgentId: budget.id,
+    sourceConversationId: plannerConversation.id,
+    targetConversationId: budgetConversation.id,
+    createdByRunId: plannerRun.id,
+    title: 'Budget review',
+  });
+  const sharedFilePath = path.join(forgerHomeRoot, 'private-data', 'imports', 'budget.pdf');
+  await store.addMessage({
+    agentId: budget.id,
+    conversationId: budgetConversation.id,
+    role: 'user',
+    authorType: 'agent',
+    authorAgentId: planner.id,
+    content: 'Can you review this budget before launch?',
+    files: [{
+      path: sharedFilePath,
+      relativePath: 'imports/budget.pdf',
+      name: 'budget.pdf',
+      sizeBytes: 2048,
+      source: 'attached',
+    }],
+  });
+  await store.addMessage({
+    agentId: budget.id,
+    conversationId: budgetConversation.id,
+    role: 'assistant',
+    content: 'Budget looks acceptable if legal confirms the vendor clause.',
+  });
+
+  const legalConversation = await store.createConversation({
+    agentId: legal.id,
+    title: 'Vendor clause',
+    origin: 'agent',
+    readOnly: true,
+    initiatorAgentId: budget.id,
+  });
+  const budgetRun = await store.createRun({
+    agentId: budget.id,
+    conversationId: budgetConversation.id,
+  });
+  const legalThread = await store.createPeerThread({
+    callerAgentId: budget.id,
+    targetAgentId: legal.id,
+    sourceConversationId: budgetConversation.id,
+    targetConversationId: legalConversation.id,
+    parentThreadId: budgetThread.id,
+    createdByRunId: budgetRun.id,
+    title: 'Vendor clause',
+  });
+  await store.addMessage({
+    agentId: legal.id,
+    conversationId: legalConversation.id,
+    role: 'user',
+    authorType: 'agent',
+    authorAgentId: budget.id,
+    content: 'Please check the vendor clause.',
+  });
+
+  const persistedBudgetConversation = await store.requireConversation(budgetConversation.id);
+  assert.equal(persistedBudgetConversation.origin, 'agent');
+  assert.equal(persistedBudgetConversation.readOnly, true);
+  assert.equal(persistedBudgetConversation.initiatorAgentId, planner.id);
+  assert.equal(persistedBudgetConversation.initiatorAgentName, 'Planner');
+  assert.equal(persistedBudgetConversation.peerThreadId, budgetThread.id);
+
+  const persistedThread = await store.getPeerThread(budgetThread.id);
+  assert.equal(persistedThread.id, budgetThread.id);
+  assert.equal(persistedThread.callerAgentName, 'Planner');
+  assert.equal(persistedThread.targetAgentName, 'Budget');
+  assert.equal(persistedThread.messages.length, 2);
+  assert.equal(persistedThread.messages[0].authorType, 'agent');
+  assert.equal(persistedThread.messages[0].authorAgentId, planner.id);
+  assert.equal(persistedThread.messages[0].authorAgentName, 'Planner');
+  assert.deepEqual(
+    persistedThread.messages[0].files.map((file) => [file.name, file.path, file.relativePath, file.sizeBytes, file.source]),
+    [['budget.pdf', sharedFilePath, 'imports/budget.pdf', 2048, 'attached']],
+  );
+  assert.equal(persistedThread.messages[1].authorType, 'agent');
+  assert.equal(persistedThread.messages[1].authorAgentId, budget.id);
+  assert.equal(persistedThread.children.length, 1);
+  assert.equal(persistedThread.children[0].id, legalThread.id);
+  assert.equal(persistedThread.children[0].targetAgentName, 'Legal');
+  assert.equal(persistedThread.children[0].messages[0].authorAgentId, budget.id);
+
+  assert.deepEqual(
+    (await store.listPeerThreadsForConversation({ agentId: planner.id, conversationId: plannerConversation.id }))
+      .map((thread) => [thread.id, thread.children[0]?.id]),
+    [[budgetThread.id, legalThread.id]],
+  );
+  assert.deepEqual(
+    (await store.listPeerThreadsForConversation({ agentId: budget.id, conversationId: budgetConversation.id }))
+      .map((thread) => thread.id),
+    [legalThread.id],
+  );
+  assert.deepEqual(
+    (await store.listRecentPeerThreadsForAgent(planner.id)).map((thread) => [thread.id, thread.children[0]?.id]),
+    [[budgetThread.id, legalThread.id]],
+  );
+  assert.deepEqual(
+    (await store.listRecentPeerThreadsForAgent(budget.id)).map((thread) => thread.id).sort(),
+    [budgetThread.id, legalThread.id].sort(),
+  );
+  assert.equal((await store.requirePeerThreadAccess({ agentId: planner.id, threadId: budgetThread.id })).id, budgetThread.id);
+  assert.equal((await store.requirePeerThreadAccess({ agentId: budget.id, threadId: budgetThread.id })).id, budgetThread.id);
+  await assert.rejects(
+    store.requirePeerThreadAccess({ agentId: legal.id, threadId: budgetThread.id }),
+    /personal_agent_peer_thread_not_allowed/,
+  );
 });
 
 test('personal agent runtime persists and conversations are bound to provider continuity', async () => {
@@ -653,6 +842,35 @@ test('personal agent conversation manager does not persist progress that duplica
   assert.equal(completed.activeRun.progress.length, 2);
   assert.equal(completed.activeRun.progress[0].message, '¿De qué ciudad o comuna quieres el clima? Si quieres, te lo doy con temperatura actual y pronóstico de hoy.');
   assert.equal(completed.activeRun.progress[1].message, 'La herramienta de clima no resolvió Providencia bien; voy a usar una fuente directa.');
+});
+
+test('personal agent conversation manager persists full long progress messages', async () => {
+  const metadataRoot = await mkdtemp(path.join(tmpdir(), 'forger-personal-agent-long-progress-meta-'));
+  const forgerHomeRoot = await mkdtemp(path.join(tmpdir(), 'forger-personal-agent-long-progress-home-'));
+  const store = new AgentStore({ metadataRoot, forgerHomeRoot });
+  const longProgress = Array.from({ length: 70 }, (_value, index) =>
+    `nota-${index.toString().padStart(2, '0')} conserva el texto intermedio completo`)
+    .join(' ');
+  const manager = new AgentConversationManager({
+    store,
+    runner: async ({ onProgress }) => {
+      onProgress(longProgress);
+      return { assistantText: 'Respuesta final completa.' };
+    },
+  });
+  const agent = await store.createAgent({ name: 'Long progress agent', purpose: 'Reports long intermediate notes.' });
+
+  const conversation = await manager.startConversation({
+    agentId: agent.id,
+    title: 'Long progress',
+    initialMessage: 'Trabaja con detalle.',
+  });
+  const completed = await waitForConversation(manager, conversation.id, (item) =>
+    item.activeRun?.status === 'completed' && item.messages.some((message) => message.role === 'assistant'));
+
+  assert.equal(longProgress.length > 1000, true);
+  assert.equal(completed.activeRun.progress[0].message, longProgress);
+  assert.equal(completed.messages.find((message) => message.kind === 'intermediate')?.content, longProgress);
 });
 
 const waitForConversation = async (manager, conversationId, predicate) => {

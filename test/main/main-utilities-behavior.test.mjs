@@ -98,6 +98,8 @@ test('main utility tool settings load, normalize, reject unknown tools, and pers
     await writeFile(settingsPath, JSON.stringify({
       approvals: {
         forger_open_app: false,
+        'gmail.search_messages': true,
+        'not_a_connection.search_messages': true,
         unknown_tool: true,
       },
     }), 'utf8');
@@ -109,8 +111,11 @@ test('main utility tool settings load, normalize, reject unknown tools, and pers
     await controller.loadAgentToolSettings();
     assert.equal(typeof state.agentToolSettings.approvals.forger_open_app, 'boolean');
     assert.equal(state.agentToolSettings.approvals.forger_list_catalog, false);
+    assert.equal(state.agentToolSettings.approvals['gmail.search_messages'], true);
+    assert.equal(state.agentToolSettings.approvals['not_a_connection.search_messages'], undefined);
     assert.equal(state.agentToolSettings.approvals.unknown_tool, undefined);
     assert.equal(controller.isAgentToolId('forger_open_app'), true);
+    assert.equal(controller.isAgentToolId('gmail.search_messages'), false);
     assert.equal(controller.isAgentToolId('unknown_tool'), false);
 
     await assert.rejects(
@@ -119,8 +124,11 @@ test('main utility tool settings load, normalize, reject unknown tools, and pers
     );
 
     await controller.updateAgentToolApproval({ toolId: 'forger_open_app', requiresApproval: true });
+    await controller.updateAgentToolApproval({ toolId: 'gmail.search_messages', requiresApproval: false });
     const saved = JSON.parse(await readFile(settingsPath, 'utf8'));
     assert.equal(saved.approvals.forger_open_app, true);
+    assert.equal(saved.approvals['gmail.search_messages'], false);
+    assert.equal(saved.approvals['not_a_connection.search_messages'], undefined);
     assert.equal(saved.approvals.unknown_tool, undefined);
   } finally {
     await rm(root, { recursive: true, force: true });

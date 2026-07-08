@@ -163,6 +163,7 @@ test('live voice input IPC delegates to the service and broadcasts state changes
 const registerMainHandlersWithSystemPreferences = async (systemPreferences) => {
   const { handlers, ipcMain } = createIpcMainRecorder();
   await withMockedElectron({ systemPreferences }, async (mockedRequire) => {
+    clearDistModule('main/ipc/microphone-permissions.js');
     clearDistModule('main/ipc/main-handlers.js');
     const { registerMainIpcHandlers } = mockedRequire('../../dist-electron/main/ipc/main-handlers.js');
     registerMainIpcHandlers({
@@ -173,6 +174,7 @@ const registerMainHandlersWithSystemPreferences = async (systemPreferences) => {
     });
   });
   clearDistModule('main/ipc/main-handlers.js');
+  clearDistModule('main/ipc/microphone-permissions.js');
   return handlers;
 };
 

@@ -92,17 +92,16 @@ export const toProgressMessages = (
       if (itemType === 'agent_message') {
         const messageText = typeof item.text === 'string' ? item.text.trim() : '';
         if (messageText) {
-          const compact = messageText.replace(/\s+/g, ' ');
-          const snippet = compact.length > 160 ? `${compact.slice(0, 160)}...` : compact;
-          if (mapped[mapped.length - 1] !== snippet) {
-            mapped.push(snippet);
+          const progress = normalizeProgressText(messageText);
+          if (progress && mapped[mapped.length - 1] !== progress) {
+            mapped.push(progress);
           }
         }
       }
     }
   }
 
-  return mapped.slice(-6);
+  return mapped;
 };
 
 export const toProviderProgressMessages = (
@@ -153,7 +152,7 @@ const toClaudeJsonProgressMessages = (
       }
     }
   }
-  return mapped.slice(-6);
+  return mapped;
 };
 
 const extractClaudeProgressText = (entry: Record<string, unknown>): string => {
@@ -204,10 +203,7 @@ const hasClaudeToolUse = (entry: Record<string, unknown>): boolean => {
 };
 
 const normalizeClaudeProgressText = (text: string): string => {
-  const compact = stripMarkdown(text)
-    .replace(/\s+/g, ' ')
-    .trim();
-  return compact.length > 160 ? `${compact.slice(0, 157)}...` : compact;
+  return normalizeProgressText(text);
 };
 
 const toAntigravityPlainTextProgressMessages = (
@@ -228,15 +224,17 @@ const toAntigravityPlainTextProgressMessages = (
       mapped.push(normalized);
     }
   }
-  return mapped.slice(-6);
+  return mapped;
 };
 
 const normalizeAntigravityProgressLine = (line: string): string => {
-  const compact = stripMarkdown(line)
+  return normalizeProgressText(line);
+};
+
+const normalizeProgressText = (text: string): string =>
+  stripMarkdown(text)
     .replace(/\s+/g, ' ')
     .trim();
-  return compact.length > 160 ? `${compact.slice(0, 157)}...` : compact;
-};
 
 const isAntigravityProgressNoise = (line: string): boolean => {
   const compact = line.trim();
@@ -296,7 +294,12 @@ export const appendRunLog = async (
     const line = `[${new Date().toISOString()}] [${stream}] ${text}`;
     await fs.appendFile(runLogPath, line.endsWith('\n') ? line : `${line}\n`, 'utf8');
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') {
+      return;
+    }
+    const message = error instanceof Error ? error.message : '';
+    if (code === 'EINVAL' && /\binvalid argument\b/i.test(message) && message.includes(runLogPath)) {
       return;
     }
     throw error;

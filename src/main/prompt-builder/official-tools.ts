@@ -333,7 +333,7 @@ export const buildForgerOfficialToolsPromptSection = (input: ForgerOfficialTools
     connectionsLine,
     connectionStatusGuidance: connectionStatusGuidance(input.mode),
     chromeExtensionInstruction: input.chromeExtensionReady
-      ? 'When the request needs a real browser session, call `forger_chrome_extension.open_dedicated_tab`, then use the returned session id for navigation, inspection, selector waits, click, focus, hover, input, form submit, style inspection, visual highlighting, URL read, and close actions.'
+      ? 'When the request needs a real external browser session, call `forger_chrome_extension.open_dedicated_tab`, then use the returned session id for navigation, inspection, selector waits, click, focus, hover, input, form submit, style inspection, visual highlighting, URL read, and close actions. Do not use Chrome Extension for installed app frontend/backend runtime URLs.'
       : 'If Chrome browser control is requested and unavailable, first call `forger_chrome_extension.connection.status` when it is available; otherwise explain that the Forger Chrome Extension must be activated and connected in Forger Tools.',
   });
 };

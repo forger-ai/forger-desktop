@@ -4,7 +4,7 @@ import path from 'node:path';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import type { AgentPermissionMode, ClaudeEffort } from '../../../shared/types';
 import { assertAllowedMcpServers } from '../../codex-run-isolation';
-import { claudePermissionArgs } from '../../agent-permission-mode';
+import { claudePermissionArgs, isUnsafePermissionMode } from '../../agent-permission-mode';
 import type {
   LlmCommandResult,
   LlmMcpServerConfig,
@@ -69,7 +69,7 @@ export class ClaudeCliAdapter {
       '--effort',
       input.effort,
       ...claudePermissionArgs(input.permissionMode),
-      ...claudeAllowedToolsArgs(mcpServers),
+      ...claudeAllowedToolsArgs(mcpServers, input.permissionMode),
       ...(input.addDirs ?? []).flatMap((dir) => ['--add-dir', dir]),
       ...(mcpConfigPath ? ['--mcp-config', mcpConfigPath] : []),
       ...(input.threadId ? ['--resume', input.threadId] : []),
@@ -151,12 +151,19 @@ export const writeClaudeMcpConfig = async (
   return configPath;
 };
 
-export const claudeAllowedToolsArgs = (mcpServers: LlmMcpServerConfig[]): string[] => {
+export const claudeAllowedToolsArgs = (
+  mcpServers: LlmMcpServerConfig[],
+  permissionMode: AgentPermissionMode = 'safe',
+): string[] => {
+  const mcpAllowedTools = mcpServers
+    .map((server) => server.name)
+    .filter((name) => /^[a-zA-Z0-9_-]+$/.test(name))
+    .map((name) => `mcp__${name}__*`);
   const allowedTools = [...new Set(
-    mcpServers
-      .map((server) => server.name)
-      .filter((name) => /^[a-zA-Z0-9_-]+$/.test(name))
-      .map((name) => `mcp__${name}__*`),
+    [
+      ...(isUnsafePermissionMode(permissionMode) ? [] : ['Bash']),
+      ...mcpAllowedTools,
+    ],
   )];
   return allowedTools.length > 0 ? ['--allowedTools', allowedTools.join(',')] : [];
 };

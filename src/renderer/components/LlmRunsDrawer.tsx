@@ -9,7 +9,6 @@ import {
   Drawer,
   IconButton,
   List,
-  ListItemButton,
   ListItemText,
   Stack,
   Tooltip,
@@ -19,6 +18,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { LlmRunKind, LlmRunSnapshotItem, LlmRunStatus, LlmRunsSnapshot } from '@shared/types';
 import type { AppDictionary } from '@renderer/i18n';
 import { formatBackgroundTaskDateTime } from '@renderer/views/BackgroundTasksView';
+import { AgentRunActivityReceipt } from './AgentRunActivityReceipt';
 
 interface LlmRunsDrawerProps {
   t: AppDictionary;
@@ -103,26 +103,33 @@ export function LlmRunsDrawer({ t }: LlmRunsDrawerProps) {
           ) : (
             <List disablePadding sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
               {items.map((item) => (
-                <ListItemButton key={item.id} disableGutters sx={{ alignItems: 'flex-start', border: '1px solid', borderColor: 'divider', borderRadius: 1, px: 1.5, py: 1.25 }}>
-                  <Box sx={{ pt: 0.25, pr: 1.25 }}>{statusIcon(item.status)}</Box>
-                  <ListItemText
-                    primary={
-                      <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between" sx={{ minWidth: 0 }}>
-                        <Typography fontWeight={700} noWrap sx={{ minWidth: 0 }}>{item.title}</Typography>
-                        <Chip size="small" color={statusColor(item.status)} label={t.llmRuns.statuses[item.status]} sx={{ height: 22, flexShrink: 0, '& .MuiChip-label': { px: 0.75, fontSize: 11 } }} />
-                      </Stack>
-                    }
-                    secondary={
-                      <Stack spacing={0.25} sx={{ mt: 0.5 }}>
-                        <Typography variant="caption" color="text.secondary">
-                          {item.appName} · {kindLabel(item.kind, t)}
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary">{item.progress || item.error || t.llmRuns.noProgress}</Typography>
-                        <Typography variant="caption" color="text.secondary">{formatBackgroundTaskDateTime(item.updatedAt)}</Typography>
-                      </Stack>
-                    }
-                  />
-                </ListItemButton>
+                <Box key={item.id} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1, px: 1.5, py: 1.25 }}>
+                  <Stack direction="row" alignItems="flex-start">
+                    <Box sx={{ pt: 0.25, pr: 1.25 }}>{statusIcon(item.status)}</Box>
+                    <ListItemText
+                      primary={
+                        <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between" sx={{ minWidth: 0 }}>
+                          <Typography fontWeight={700} noWrap sx={{ minWidth: 0 }}>{item.title}</Typography>
+                          <Chip size="small" color={statusColor(item.status)} label={t.llmRuns.statuses[item.status]} sx={{ height: 22, flexShrink: 0, '& .MuiChip-label': { px: 0.75, fontSize: 11 } }} />
+                        </Stack>
+                      }
+                      secondary={
+                        <Stack spacing={0.25} sx={{ mt: 0.5 }}>
+                          <Typography variant="caption" color="text.secondary">
+                            {item.appName} · {kindLabel(item.kind, t)}
+                          </Typography>
+                          <Typography variant="body2" color="text.secondary">{item.progress || item.error || t.llmRuns.noProgress}</Typography>
+                          <Typography variant="caption" color="text.secondary">{formatBackgroundTaskDateTime(item.updatedAt)}</Typography>
+                        </Stack>
+                      }
+                    />
+                  </Stack>
+                  {item.activity || item.progress || item.error ? (
+                    <Box sx={{ mt: 1 }}>
+                      <AgentRunActivityReceipt t={t} activity={item.activity ?? fallbackActivityForItem(item, t)} />
+                    </Box>
+                  ) : null}
+                </Box>
               ))}
             </List>
           )}
@@ -133,7 +140,32 @@ export function LlmRunsDrawer({ t }: LlmRunsDrawerProps) {
 }
 
 const kindLabel = (kind: LlmRunKind, t: AppDictionary): string => {
+  if (kind === 'desktop_chat') return t.llmRuns.kinds.desktopChat;
   if (kind === 'personal_agent_conversation') return t.llmRuns.kinds.personalAgentConversation;
   if (kind === 'app_agent_thread') return t.llmRuns.kinds.appAgentThread;
+  if (kind === 'workflow_node') return t.llmRuns.kinds.workflowNode;
   return t.llmRuns.kinds.appPromptTask;
 };
+
+const fallbackActivityForItem = (item: LlmRunSnapshotItem, t: AppDictionary) => ({
+  title: t.agentRunActivityReceipt.activityTitle(item.progress || item.error ? 1 : 0),
+  summary: item.progress || item.error || t.llmRuns.noProgress,
+  status: item.status,
+  kind: item.kind,
+  appName: item.appName,
+  startedAt: item.startedAt,
+  updatedAt: item.updatedAt,
+  completedAt: isActive(item.status) ? undefined : item.updatedAt,
+  sections: item.progress || item.error
+    ? [{
+        id: 'notes',
+        title: item.error ? t.agentRunActivityReceipt.sections.errors : t.agentRunActivityReceipt.sections.notes,
+        items: [{
+          id: `${item.id}:fallback`,
+          label: item.progress || item.error || t.llmRuns.noProgress,
+          value: item.status,
+          tone: item.error ? 'error' as const : 'default' as const,
+        }],
+      }]
+    : [],
+});

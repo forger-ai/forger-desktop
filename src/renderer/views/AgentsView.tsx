@@ -1,16 +1,17 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import AddRounded from '@mui/icons-material/AddRounded';
 import ArrowBackRounded from '@mui/icons-material/ArrowBackRounded';
+import AttachFileRounded from '@mui/icons-material/AttachFileRounded';
 import ChatRounded from '@mui/icons-material/ChatRounded';
 import CloseRounded from '@mui/icons-material/CloseRounded';
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
 import DescriptionRounded from '@mui/icons-material/DescriptionRounded';
-import EditRounded from '@mui/icons-material/EditRounded';
 import ExpandMoreRounded from '@mui/icons-material/ExpandMoreRounded';
-import FolderRounded from '@mui/icons-material/FolderRounded';
+import HistoryRounded from '@mui/icons-material/HistoryRounded';
 import PlayArrowRounded from '@mui/icons-material/PlayArrowRounded';
 import SaveRounded from '@mui/icons-material/SaveRounded';
 import SendRounded from '@mui/icons-material/SendRounded';
+import SettingsRounded from '@mui/icons-material/SettingsRounded';
 import {
   Alert,
   Accordion,
@@ -35,6 +36,7 @@ import {
   InputLabel,
   IconButton,
   MenuItem,
+  Paper,
   Select,
   Stack,
   Switch,
@@ -45,177 +47,41 @@ import {
   Typography,
   useTheme,
 } from '@mui/material';
-import type { AgentEffort, AgentPermissionMode, AgentProvider, AgentRuntime, AgentToolId, PersonalAgent, PersonalAgentConnectionGrant, PersonalAgentConversation, PersonalAgentConversationEvent, PersonalAgentGrantOptionConnection, PersonalAgentGrantOptionTool, PersonalAgentGrantOptions, PersonalAgentMessage, PersonalAgentRunStatus, PersonalAgentWorkspaceEntry, PersonalAgentWorkspaceFile } from '@shared/types';
+import type { AgentEffort, AgentProvider, AgentRuntime, AgentToolId, PersonalAgent, PersonalAgentConnectionGrant, PersonalAgentConversation, PersonalAgentConversationEvent, PersonalAgentGrantOptionConnection, PersonalAgentGrantOptionTool, PersonalAgentGrantOptions, PersonalAgentMessage, PersonalAgentPeerThread, PersonalAgentWorkspaceEntry, PersonalAgentWorkspaceFile, PickedChatFile, SharedFileRef, WindowControlState } from '@shared/types';
 import type { AppDictionary } from '@renderer/i18n';
 import { AGENT_PROVIDER_OPTIONS, ANTIGRAVITY_EFFORT_OPTIONS, ANTIGRAVITY_MODEL_OPTIONS, CLAUDE_EFFORT_OPTIONS, CLAUDE_MODEL_OPTIONS, CODEX_MODEL_OPTIONS, CODEX_REASONING_OPTIONS } from '@renderer/preferences';
 import { usageAnalytics } from '@renderer/usage-analytics';
 import { getRuntimeSupportedEfforts, normalizeRuntimeEffortForModel } from '@shared/agent-runtime-registry';
+import { AgentRunActivityReceipt } from '@renderer/components/AgentRunActivityReceipt';
 import { MarkdownMessage } from './chat/MarkdownMessage';
+import {
+  isMacOsPlatform,
+  sortItemsByRecentActivity,
+} from './chat/history-drawer-helpers';
+import { AgentConversationHistoryDrawer } from './AgentConversationHistoryDrawer';
+import {
+  type AccessDraft,
+  type AgentConversationHistoryGroup,
+  type RenderPersonalAgentMessageOptions,
+  compactFileLabel,
+  connectionInstanceLabel,
+  defaultAccessDraft,
+  defaultRuntimeForProvider,
+  isTerminalRunStatus,
+  personalAgentRunErrorMessage,
+  personalAgentSaveErrorMessage,
+  progressMessagesForMessageRun,
+  toggleId,
+  upsertConversation,
+  visiblePeerThreadMessages,
+  WorkspaceTree,
+} from './AgentsView.helpers';
 
 interface AgentsViewProps {
   t: AppDictionary;
   intelligenceProviderConfigured: boolean;
   providerOptions?: Array<{ label: string; value: AgentProvider | 'auto' }>;
 }
-
-interface WorkspaceTreeProps {
-  entries: PersonalAgentWorkspaceEntry[];
-  emptyLabel: string;
-  selectedPath?: string;
-  onOpenFile: (entry: PersonalAgentWorkspaceEntry) => void;
-}
-
-interface AccessDraft {
-  permissionMode: AgentPermissionMode;
-  networkAccess: boolean;
-  runtime: AgentRuntime;
-  appIds: string[];
-  toolIds: AgentToolId[];
-  connectionGrants: PersonalAgentConnectionGrant[];
-}
-
-function WorkspaceTree({ entries, emptyLabel, selectedPath, onOpenFile }: WorkspaceTreeProps) {
-  if (entries.length === 0) {
-    return (
-      <Box sx={{ p: 2 }}>
-        <Typography variant="body2" color="text.secondary">{emptyLabel}</Typography>
-      </Box>
-    );
-  }
-
-  const renderEntry = (entry: PersonalAgentWorkspaceEntry, depth: number) => (
-    <Box key={entry.relativePath}>
-      <Stack
-        direction="row"
-        spacing={0.75}
-        alignItems="center"
-        role={entry.kind === 'file' ? 'button' : undefined}
-        tabIndex={entry.kind === 'file' ? 0 : undefined}
-        onClick={() => {
-          if (entry.kind === 'file') {
-            onOpenFile(entry);
-          }
-        }}
-        onKeyDown={(event) => {
-          if (entry.kind === 'file' && (event.key === 'Enter' || event.key === ' ')) {
-            event.preventDefault();
-            onOpenFile(entry);
-          }
-        }}
-        sx={{
-          bgcolor: entry.relativePath === selectedPath ? 'action.selected' : 'transparent',
-          cursor: entry.kind === 'file' ? 'pointer' : 'default',
-          minHeight: 30,
-          pl: 1 + depth * 1.5,
-          pr: 1,
-          '&:hover': {
-            bgcolor: entry.kind === 'file' ? 'action.hover' : 'transparent',
-          },
-        }}
-      >
-        {entry.kind === 'directory' ? (
-          <FolderRounded color="action" sx={{ fontSize: 18, flexShrink: 0 }} />
-        ) : (
-          <DescriptionRounded color="action" sx={{ fontSize: 18, flexShrink: 0 }} />
-        )}
-        <Typography
-          variant="body2"
-          title={entry.relativePath}
-          sx={{
-            minWidth: 0,
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          {entry.name}
-        </Typography>
-      </Stack>
-      {entry.children?.map((child) => renderEntry(child, depth + 1))}
-    </Box>
-  );
-
-  return <Box sx={{ py: 0.75 }}>{entries.map((entry) => renderEntry(entry, 0))}</Box>;
-}
-
-const isTerminalRunStatus = (status: PersonalAgentRunStatus | undefined): boolean =>
-  status === 'completed' || status === 'failed' || status === 'canceled';
-
-const upsertConversation = (
-  current: PersonalAgentConversation[],
-  conversation: PersonalAgentConversation,
-): PersonalAgentConversation[] => {
-  const next = [
-    conversation,
-    ...current.filter((item) => item.id !== conversation.id),
-  ];
-  return next.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
-};
-
-const defaultAccessDraft = (): AccessDraft => ({
-  permissionMode: 'safe',
-  networkAccess: false,
-  runtime: defaultPersonalAgentRuntime(),
-  appIds: [],
-  toolIds: [],
-  connectionGrants: [],
-});
-
-const accessDraftFromAgent = (agent: PersonalAgent): AccessDraft => ({
-  permissionMode: agent.permissionMode,
-  networkAccess: agent.networkAccess,
-  runtime: agent.runtime ?? defaultPersonalAgentRuntime(),
-  appIds: agent.appIds ?? [],
-  toolIds: agent.toolIds ?? [],
-  connectionGrants: agent.connectionGrants ?? [],
-});
-
-const toggleId = <T extends string>(values: T[], id: T, checked: boolean): T[] =>
-  checked ? [...new Set([...values, id])] : values.filter((value) => value !== id);
-
-const defaultPersonalAgentRuntime = (): AgentRuntime => ({
-  provider: 'codex',
-  model: CODEX_MODEL_OPTIONS[0]?.realModelName ?? 'gpt-5.2',
-  effort: CODEX_MODEL_OPTIONS[0]?.defaultReasoningEffort ?? 'medium',
-});
-
-const defaultRuntimeForProvider = (provider: AgentProvider): AgentRuntime => {
-  if (provider === 'claude') {
-    return {
-      provider,
-      model: CLAUDE_MODEL_OPTIONS[0]?.realModelName ?? 'claude-sonnet-5',
-      effort: CLAUDE_MODEL_OPTIONS[0]?.defaultEffort ?? 'medium',
-    };
-  }
-  if (provider === 'antigravity') {
-    return {
-      provider,
-      model: ANTIGRAVITY_MODEL_OPTIONS[0]?.realModelName ?? 'gemini-3-pro',
-      effort: ANTIGRAVITY_MODEL_OPTIONS[0]?.defaultEffort ?? 'medium',
-    };
-  }
-  return defaultPersonalAgentRuntime();
-};
-
-const personalAgentRunErrorMessage = (error: string | undefined, t: AppDictionary): string | null => {
-  if (!error) return null;
-  const normalized = error.trim();
-  if (normalized === 'codex_auth_missing' || normalized === 'claude_auth_missing') return t.agents.runErrorLlmAuth;
-  if (normalized === 'codex_cli_missing') return t.agents.runErrorCodexCli;
-  if (normalized === 'claude_cli_missing') return t.agents.runErrorClaudeCli;
-  if (normalized === 'personal_agent_workspace_missing') return t.agents.runErrorWorkspaceMissing;
-  if (normalized === 'personal_agent_runtime_unavailable') return t.agents.runErrorRuntimeUnavailable;
-  if (normalized === 'personal_agent_provider_changed_new_conversation_required') return t.agents.runErrorProviderChanged;
-  return t.agents.runErrorGeneric;
-};
-
-const personalAgentSaveErrorMessage = (error: unknown, fallback: string, t: AppDictionary): string => {
-  const message = error instanceof Error ? error.message : String(error ?? '');
-  if (message === 'personal_agent_runtime_provider_not_connected') {
-    return t.agents.runtimeProviderNotConnected;
-  }
-  return error instanceof Error ? error.message : fallback;
-};
 
 export function AgentsView({ t, intelligenceProviderConfigured, providerOptions = AGENT_PROVIDER_OPTIONS }: AgentsViewProps) {
   const theme = useTheme();
@@ -224,18 +90,24 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
   const [conversations, setConversations] = useState<PersonalAgentConversation[]>([]);
   const [conversation, setConversation] = useState<PersonalAgentConversation | null>(null);
   const [workspaceEntries, setWorkspaceEntries] = useState<PersonalAgentWorkspaceEntry[]>([]);
-  const [grantOptions, setGrantOptions] = useState<PersonalAgentGrantOptions>({ apps: [], tools: [], connections: [] });
+  const [grantOptions, setGrantOptions] = useState<PersonalAgentGrantOptions>({ apps: [], tools: [], connections: [], peerAgents: [] });
   const [openFile, setOpenFile] = useState<PersonalAgentWorkspaceFile | null>(null);
   const [fileDraft, setFileDraft] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
-  const [editAccessOpen, setEditAccessOpen] = useState(false);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [purpose, setPurpose] = useState('');
   const [accessDraft, setAccessDraft] = useState<AccessDraft>(() => defaultAccessDraft());
   const [message, setMessage] = useState('');
+  const [pendingFiles, setPendingFiles] = useState<PickedChatFile[]>([]);
+  const [detailTab, setDetailTab] = useState<'chat' | 'workspace' | 'settings'>('chat');
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [windowState, setWindowState] = useState<WindowControlState | null>(null);
+  const [collapsedHistoryGroups, setCollapsedHistoryGroups] = useState<Record<string, boolean>>({});
+  const [historyGroupLimits, setHistoryGroupLimits] = useState<Record<string, number>>({});
+  const [peerThreads, setPeerThreads] = useState<PersonalAgentPeerThread[]>([]);
+  const [openPeerThread, setOpenPeerThread] = useState<PersonalAgentPeerThread | null>(null);
   const [busyAction, setBusyAction] = useState<'create' | 'delete' | 'file' | 'wake' | 'start' | 'send' | 'access' | null>(null);
-  const [sideTab, setSideTab] = useState<'history' | 'workspace'>('history');
   const [error, setError] = useState<string | null>(null);
   const messagesScrollRef = useRef<HTMLDivElement | null>(null);
   const shouldStickToBottomRef = useRef(true);
@@ -256,13 +128,29 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
     conversation?.id === conversations[0]?.id,
   );
   const visibleMessages = useMemo(
-    () => (conversation?.messages ?? []).filter((item) => item.role !== 'system'),
+    () => (conversation?.messages ?? []).filter((item) => item.role !== 'system' && item.kind !== 'intermediate'),
     [conversation?.messages],
   );
   const runErrorMessage = activeRun?.status === 'failed'
     ? personalAgentRunErrorMessage(activeRun.error, t)
     : null;
+  const activeRunProgressCount = activeRun?.progress.length ?? 0;
+  const activeRunActivityCount = activeRun?.activity?.items.length ?? 0;
   const busy = busyAction !== null;
+  const conversationReadOnly = Boolean(conversation && (conversation.readOnly || conversation.origin === 'agent'));
+  const shouldReserveMacTrafficLightSpace = isMacOsPlatform() && !windowState?.isFullScreen;
+  const historyGroups = useMemo<AgentConversationHistoryGroup[]>(() => {
+    const userStarted = sortItemsByRecentActivity(conversations.filter((item) => item.origin !== 'agent'));
+    const agentStarted = sortItemsByRecentActivity(conversations.filter((item) => item.origin === 'agent'));
+    return [
+      userStarted.length > 0
+        ? { id: 'user-started', label: t.locale === 'es' ? 'Iniciadas por el usuario' : 'Started by user', items: userStarted }
+        : null,
+      agentStarted.length > 0
+        ? { id: 'agent-started', label: t.locale === 'es' ? 'Iniciadas por agentes' : 'Started by agents', items: agentStarted }
+        : null,
+    ].filter((group): group is AgentConversationHistoryGroup => Boolean(group));
+  }, [conversations, t.locale]);
 
   const loadAgents = useCallback(async () => {
     const nextAgents = await window.forger.personalAgentsList();
@@ -291,7 +179,7 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
     let mounted = true;
     Promise.all([
       window.forger.personalAgentsList(),
-      window.forger.personalAgentGrantOptionsList().catch(() => ({ apps: [], tools: [], connections: [] })),
+      window.forger.personalAgentGrantOptionsList().catch(() => ({ apps: [], tools: [], connections: [], peerAgents: [] })),
     ])
       .then(([nextAgents, nextGrantOptions]) => {
         if (!mounted) return;
@@ -309,6 +197,31 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
   }, [t.agents.loadError]);
 
   useEffect(() => {
+    if (!isMacOsPlatform()) {
+      return undefined;
+    }
+
+    let mounted = true;
+    void window.forger
+      .getWindowState()
+      .then((state) => {
+        if (mounted) {
+          setWindowState(state);
+        }
+      })
+      .catch(() => undefined);
+
+    const removeListener = window.forger.onWindowStateChanged((state) => {
+      setWindowState(state);
+    });
+
+    return () => {
+      mounted = false;
+      removeListener();
+    };
+  }, []);
+
+  useEffect(() => {
     let mounted = true;
     if (!activeAgentId) {
       setConversations([]);
@@ -316,6 +229,9 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
       setWorkspaceEntries([]);
       setOpenFile(null);
       setFileDraft('');
+      setPendingFiles([]);
+      setPeerThreads([]);
+      setOpenPeerThread(null);
       return () => {
         mounted = false;
       };
@@ -348,6 +264,30 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
   }, [activeAgentId]);
 
   useEffect(() => {
+    let mounted = true;
+    if (!activeAgent || !conversation) {
+      setPeerThreads([]);
+      return () => {
+        mounted = false;
+      };
+    }
+    window.forger.personalAgentPeerThreadsList({ agentId: activeAgent.id, conversationId: conversation.id })
+      .then((threads) => {
+        if (mounted) {
+          setPeerThreads(threads);
+        }
+      })
+      .catch(() => {
+        if (mounted) {
+          setPeerThreads(conversation.peerThreads ?? []);
+        }
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [activeAgent, conversation]);
+
+  useEffect(() => {
     shouldStickToBottomRef.current = true;
     window.requestAnimationFrame(() => {
       const container = messagesScrollRef.current;
@@ -362,8 +302,10 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
     if (!container || !shouldStickToBottomRef.current) {
       return;
     }
-    container.scrollTop = container.scrollHeight;
-  }, [visibleMessages.length, runIsActive, runErrorMessage]);
+    window.requestAnimationFrame(() => {
+      container.scrollTop = container.scrollHeight;
+    });
+  }, [visibleMessages.length, runIsActive, runErrorMessage, activeRunProgressCount, activeRunActivityCount, activeRun?.updatedAt, conversation?.updatedAt]);
 
   const resetCreateForm = () => {
     setName('');
@@ -387,6 +329,7 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
         appIds: accessDraft.appIds,
         toolIds: accessDraft.toolIds,
         connectionGrants: accessDraft.connectionGrants,
+        peerAgentGrants: accessDraft.peerAgentGrants,
       });
       resetCreateForm();
       setCreateOpen(false);
@@ -405,12 +348,6 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
     setCreateOpen(true);
   };
 
-  const handleOpenEditAccess = () => {
-    if (!activeAgent) return;
-    setAccessDraft(accessDraftFromAgent(activeAgent));
-    setEditAccessOpen(true);
-  };
-
   const handleSaveAccess = async () => {
     if (!activeAgent || busy) return;
     setBusyAction('access');
@@ -424,9 +361,9 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
         appIds: accessDraft.appIds,
         toolIds: accessDraft.toolIds,
         connectionGrants: accessDraft.connectionGrants,
+        peerAgentGrants: accessDraft.peerAgentGrants,
       });
       setAgents((current) => current.map((agent) => agent.id === updated.id ? updated : agent));
-      setEditAccessOpen(false);
     } catch (accessError) {
       setError(personalAgentSaveErrorMessage(accessError, t.agents.accessSaveError, t));
     } finally {
@@ -526,18 +463,55 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
     }
   };
 
+  const handlePickFiles = async () => {
+    if (busy) return;
+    const picked = await window.forger.filesPickForChat();
+    setPendingFiles((current) => {
+      const seen = new Set(current.map((file) => file.sourcePath));
+      return [...current, ...picked.filter((file) => !seen.has(file.sourcePath))];
+    });
+  };
+
+  const handleRemovePendingFile = (sourcePath: string) => {
+    setPendingFiles((current) => current.filter((file) => file.sourcePath !== sourcePath));
+  };
+
+  const handleOpenPeerThread = async (threadId: string) => {
+    try {
+      const thread = await window.forger.personalAgentPeerThreadGet({ threadId });
+      setOpenPeerThread(thread);
+    } catch (threadError) {
+      setError(threadError instanceof Error ? threadError.message : (t.locale === 'es' ? 'No se pudo abrir el thread.' : 'Could not open the thread.'));
+    }
+  };
+
   const handleSendMessage = async () => {
-    if (!activeAgent || !conversation || !message.trim() || busy || runIsActive) return;
+    if (!activeAgent || !conversation || conversationReadOnly || (!message.trim() && pendingFiles.length === 0) || busy || runIsActive) return;
     setBusyAction('send');
     setError(null);
     try {
+      const importedFiles = pendingFiles.length > 0
+        ? await window.forger.filesImport({ sourcePaths: pendingFiles.map((file) => file.sourcePath) })
+        : [];
+      const sharedFiles: SharedFileRef[] = importedFiles.map((file) => ({
+        id: file.id,
+        path: file.relativePath,
+        name: file.name,
+        relativePath: file.relativePath,
+        sizeBytes: file.sizeBytes,
+        modifiedAt: file.modifiedAt,
+        source: 'attached',
+      }));
+      const content = message.trim() || (t.locale === 'es' ? 'Revisa los archivos compartidos.' : 'Review the shared files.');
       const updated = await window.forger.personalAgentSendMessage({
         conversationId: conversation.id,
-        content: message,
+        content,
+        sharedFiles,
       });
       setConversation(updated);
       setConversations((current) => upsertConversation(current, updated));
       setMessage('');
+      setPendingFiles([]);
       usageAnalytics.personalAgentMessageSent({ surface: 'agents', locale: t.locale });
     } catch (sendError) {
       setError(sendError instanceof Error ? sendError.message : t.agents.sendError);
@@ -697,7 +671,10 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
                   renderValue={(selected) => {
                     if ((selected as string[]).length === 0) return t.agents.connectionAllInstances;
                     return (selected as string[])
-                      .map((id) => connection.instances.find((instance) => instance.id === id)?.label ?? id)
+                      .map((id) => {
+                        const instance = connection.instances.find((candidate) => candidate.id === id);
+                        return instance ? connectionInstanceLabel(instance) : id;
+                      })
                       .join(', ');
                   }}
                   onChange={(event) => {
@@ -707,7 +684,7 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
                 >
                   {connection.instances.map((instance) => (
                     <MenuItem key={instance.id} value={instance.id}>
-                      {instance.label}
+                      {connectionInstanceLabel(instance)}
                     </MenuItem>
                   ))}
                 </Select>
@@ -887,6 +864,61 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
             <Typography variant="body2" color="text.secondary">{t.agents.noConnectionsAvailable}</Typography>
           )}
         </Box>
+        <Box>
+          <Typography variant="subtitle2" sx={{ mb: 0.75 }}>
+            {t.locale === 'es' ? 'Agentes permitidos' : 'Allowed agents'}
+          </Typography>
+          {grantOptions.peerAgents.filter((peer) => peer.agentId !== activeAgent?.id).length > 0 ? (
+            <Stack spacing={1}>
+              {grantOptions.peerAgents.filter((peer) => peer.agentId !== activeAgent?.id).map((peer) => {
+                const grant = accessDraft.peerAgentGrants.find((item) => item.agentId === peer.agentId);
+                return (
+                  <Paper key={peer.agentId} variant="outlined" sx={{ p: 1.25, borderRadius: 1 }}>
+                    <Stack spacing={1}>
+                      <FormControlLabel
+                        control={(
+                          <Checkbox
+                            checked={Boolean(grant)}
+                            onChange={(event) => {
+                              setAccessDraft((current) => ({
+                                ...current,
+                                peerAgentGrants: event.target.checked
+                                  ? [...current.peerAgentGrants.filter((item) => item.agentId !== peer.agentId), { agentId: peer.agentId, name: peer.name, description: peer.description, criteria: '' }]
+                                  : current.peerAgentGrants.filter((item) => item.agentId !== peer.agentId),
+                              }));
+                            }}
+                          />
+                        )}
+                        label={peer.name}
+                      />
+                      {grant ? (
+                        <TextField
+                          size="small"
+                          fullWidth
+                          multiline
+                          minRows={2}
+                          label={t.locale === 'es' ? 'Criterio de uso' : 'Usage criteria'}
+                          value={grant.criteria}
+                          onChange={(event) => {
+                            setAccessDraft((current) => ({
+                              ...current,
+                              peerAgentGrants: current.peerAgentGrants.map((item) =>
+                                item.agentId === peer.agentId ? { ...item, criteria: event.target.value } : item),
+                            }));
+                          }}
+                        />
+                      ) : null}
+                    </Stack>
+                  </Paper>
+                );
+              })}
+            </Stack>
+          ) : (
+            <Typography variant="body2" color="text.secondary">
+              {t.locale === 'es' ? 'No hay otros agentes personales disponibles.' : 'No other personal agents are available.'}
+            </Typography>
+          )}
+        </Box>
       </Stack>
     );
   };
@@ -1058,30 +1090,26 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
     );
   };
 
-  const runStatusLabel = (status: PersonalAgentRunStatus | undefined) => {
-    if (busyAction === 'wake' || busyAction === 'start') return t.agents.runStarting;
-    if (busyAction === 'send') return t.agents.runSending;
-    switch (status) {
-      case 'queued':
-        return t.agents.runQueued;
-      case 'running':
-        return t.agents.runRunning;
-      case 'needs_permission':
-        return t.agents.runNeedsPermission;
-      case 'completed':
-        return t.agents.runCompleted;
-      case 'failed':
-        return t.agents.runFailed;
-      case 'canceled':
-        return t.agents.runCanceled;
-      default:
-        return t.agents.runReady;
-    }
-  };
-
-  const renderMessage = (item: PersonalAgentMessage) => {
+  const renderMessage = (item: PersonalAgentMessage, options: RenderPersonalAgentMessageOptions = {}) => {
     const isUser = item.role === 'user';
     const isIntermediate = item.kind === 'intermediate';
+    const messageRun = !isUser && !isIntermediate && item.runId && activeRun?.id === item.runId
+      ? activeRun
+      : undefined;
+    const messageRunProgress = messageRun?.progress.map((entry) => ({
+      id: entry.id,
+      message: entry.message,
+      createdAt: entry.createdAt,
+    })) ?? [];
+    const contextRunProgress = messageRun
+      ? []
+      : progressMessagesForMessageRun(item, options.contextMessages);
+    const receiptProgressMessages = messageRun ? messageRunProgress : contextRunProgress;
+    const authorLabel = item.authorType === 'agent' && item.authorAgentName
+      ? item.authorAgentName
+      : item.authorType === 'agent' && item.authorAgentId
+        ? item.authorAgentId
+        : null;
     return (
       <Stack
         key={item.id}
@@ -1091,6 +1119,7 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
       >
         <Box
           sx={{
+            width: isUser ? undefined : '78%',
             maxWidth: isUser ? '72%' : '78%',
             minWidth: 0,
             px: isUser ? 1.6 : 0,
@@ -1106,6 +1135,23 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
             wordBreak: 'break-word',
           }}
         >
+          {authorLabel ? (
+            <Typography variant="caption" sx={{ display: 'block', mb: 0.5, opacity: 0.78 }}>
+              {authorLabel}
+            </Typography>
+          ) : null}
+          {messageRun?.activity || receiptProgressMessages.length > 0 ? (
+            <Box sx={{ mb: item.content ? 1 : 0 }}>
+              <AgentRunActivityReceipt
+                t={t}
+                activity={messageRun?.activity}
+                completedAt={item.createdAt}
+                mode="completed"
+                progressMessages={receiptProgressMessages}
+                excludeText={item.content}
+              />
+            </Box>
+          ) : null}
           {isUser ? (
             <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
               {item.content}
@@ -1117,93 +1163,180 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
           ) : (
             <MarkdownMessage content={item.content} />
           )}
+          {item.files?.length ? (
+            <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap" sx={{ mt: 1 }}>
+              {item.files.map((file) => (
+                <Chip
+                  key={file.id}
+                  size="small"
+                  label={compactFileLabel(file.name)}
+                  variant={isUser ? 'filled' : 'outlined'}
+                  sx={{ maxWidth: 220 }}
+                />
+              ))}
+            </Stack>
+          ) : null}
         </Box>
       </Stack>
     );
   };
 
-  const renderSidePanel = () => (
-    <Box
+  const renderPeerThreadRows = (threads: PersonalAgentPeerThread[], depth = 0): ReactElement[] =>
+    threads.flatMap((thread) => [
+      <Box
+        key={thread.id}
+        role="button"
+        tabIndex={0}
+        onClick={() => void handleOpenPeerThread(thread.id)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            void handleOpenPeerThread(thread.id);
+          }
+        }}
+        sx={{
+          cursor: 'pointer',
+          borderRadius: 1,
+          ml: depth * 1.25,
+          px: 1,
+          py: 0.85,
+          '&:hover': { bgcolor: 'action.hover' },
+        }}
+      >
+        <Typography variant="body2" fontWeight={700} noWrap>
+          {thread.callerAgentName ?? thread.callerAgentId}{' -> '}{thread.targetAgentName ?? thread.targetAgentId}
+        </Typography>
+        <Typography variant="caption" color="text.secondary" noWrap>{thread.title}</Typography>
+      </Box>,
+      ...(thread.children?.length ? renderPeerThreadRows(thread.children, depth + 1) : []),
+    ]);
+
+  const renderPeerPanel = () => (
+    <Paper
+      variant="outlined"
       sx={{
-        width: { xs: '100%', lg: 320 },
-        flexShrink: 0,
-        minHeight: 0,
-        border: `1px solid ${theme.palette.divider}`,
-        borderRadius: 1,
-        display: 'flex',
+        display: { xs: 'none', lg: 'flex' },
         flexDirection: 'column',
+        width: 300,
+        minHeight: 0,
+        borderRadius: 1,
         overflow: 'hidden',
       }}
     >
-      <Tabs
-        value={sideTab}
-        onChange={(_event, value: 'history' | 'workspace') => setSideTab(value)}
-        variant="fullWidth"
-        sx={{ borderBottom: `1px solid ${theme.palette.divider}`, minHeight: 44 }}
-      >
-        <Tab value="history" label={t.agents.historyTab} sx={{ minHeight: 44 }} />
-        <Tab value="workspace" label={t.agents.workspaceTab} sx={{ minHeight: 44 }} />
-      </Tabs>
-
-      <Box sx={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
-        {sideTab === 'history' ? (
-          conversations.length > 0 ? (
-            <Stack divider={<Divider />}>
-              {conversations.map((item) => (
-                <Box
-                  key={item.id}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => setConversation(item)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' || event.key === ' ') {
-                      event.preventDefault();
-                      setConversation(item);
-                    }
-                  }}
-                  sx={{
-                    bgcolor: item.id === conversation?.id ? 'action.selected' : 'transparent',
-                    cursor: 'pointer',
-                    p: 1.25,
-                    '&:hover': { bgcolor: 'action.hover' },
-                  }}
-                >
-                  <Stack spacing={0.75}>
-                    <Typography variant="body2" fontWeight={700} noWrap>{item.title}</Typography>
-                    <Stack direction="row" spacing={0.75} alignItems="center">
-                      <Chip size="small" label={runStatusLabel(item.activeRun?.status)} />
-                      <Typography variant="caption" color="text.secondary" noWrap>
-                        {new Date(item.updatedAt).toLocaleString()}
-                      </Typography>
-                    </Stack>
-                  </Stack>
-                </Box>
-              ))}
-            </Stack>
-          ) : (
-            <Box sx={{ p: 2 }}>
-              <Typography variant="body2" color="text.secondary">{t.agents.historyEmpty}</Typography>
-            </Box>
-          )
-        ) : (
-          <Stack sx={{ minHeight: '100%' }}>
-            <WorkspaceTree
-              entries={workspaceEntries}
-              emptyLabel={t.agents.workspaceEmpty}
-              selectedPath={openFile?.relativePath}
-              onOpenFile={(entry) => void handleOpenFile(entry)}
-            />
-          </Stack>
+      <Stack direction="row" spacing={1} alignItems="center" sx={{ px: 1.25, py: 1, borderBottom: `1px solid ${theme.palette.divider}` }}>
+        <ChatRounded color="action" fontSize="small" />
+        <Typography variant="subtitle2" noWrap>{t.locale === 'es' ? 'Mensajes con otros agentes' : 'Messages with other agents'}</Typography>
+      </Stack>
+      <Box sx={{ flex: 1, minHeight: 0, overflow: 'auto', p: 0.75 }}>
+        {peerThreads.length > 0 ? renderPeerThreadRows(peerThreads) : (
+          <Typography variant="body2" color="text.secondary" sx={{ p: 1 }}>
+            {t.locale === 'es' ? 'No hay threads con otros agentes.' : 'No peer agent threads yet.'}
+          </Typography>
         )}
       </Box>
-    </Box>
+    </Paper>
   );
+
+  const renderComposer = () => {
+    if (conversationReadOnly) {
+      return (
+        <Box sx={{ p: 1.5, borderTop: `1px solid ${theme.palette.divider}` }}>
+          <Typography variant="body2" color="text.secondary">
+            {t.locale === 'es'
+              ? 'Esta conversacion fue iniciada por otro agente. Puedes revisarla, pero no responder desde aqui.'
+              : 'This thread was started by another agent. You can review it, but replies are not available here.'}
+          </Typography>
+        </Box>
+      );
+    }
+    return (
+      <Paper variant="outlined" sx={{ m: 1.5, mt: 0, p: 1, borderRadius: 1 }}>
+        {pendingFiles.length > 0 ? (
+          <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap" sx={{ mb: 1 }}>
+            {pendingFiles.map((file) => (
+              <Chip
+                key={file.sourcePath}
+                size="small"
+                label={compactFileLabel(file.name)}
+                onDelete={() => handleRemovePendingFile(file.sourcePath)}
+              />
+            ))}
+          </Stack>
+        ) : null}
+        <TextField
+          fullWidth
+          multiline
+          minRows={2}
+          maxRows={6}
+          variant="standard"
+          value={message}
+          disabled={!conversation || Boolean(runIsActive)}
+          placeholder={t.agents.messagePlaceholder}
+          onChange={(event) => setMessage(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && !event.shiftKey) {
+              event.preventDefault();
+              void handleSendMessage();
+            }
+          }}
+          slotProps={{ input: { disableUnderline: true } }}
+        />
+        <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mt: 0.75 }}>
+          <Tooltip title={t.sections.chat.attachFiles}>
+            <span>
+              <IconButton size="small" disabled={busy || Boolean(runIsActive)} onClick={() => void handlePickFiles()}>
+                <AttachFileRounded fontSize="small" />
+              </IconButton>
+            </span>
+          </Tooltip>
+          <Tooltip title={t.agents.send}>
+            <span>
+              <IconButton
+                color="primary"
+                disabled={!conversation || (!message.trim() && pendingFiles.length === 0) || busy || Boolean(runIsActive)}
+                onClick={() => void handleSendMessage()}
+              >
+                <SendRounded />
+              </IconButton>
+            </span>
+          </Tooltip>
+        </Stack>
+      </Paper>
+    );
+  };
 
   const renderDetail = () => {
     if (!activeAgent) return renderMainList();
 
     return (
       <Stack spacing={1.5} sx={{ height: '100%', minHeight: 0 }}>
+        <AgentConversationHistoryDrawer
+          t={t}
+          open={historyOpen}
+          groups={historyGroups}
+          selectedConversationId={conversation?.id}
+          collapsedGroups={collapsedHistoryGroups}
+          groupLimits={historyGroupLimits}
+          reserveTrafficLightSpace={shouldReserveMacTrafficLightSpace}
+          onClose={() => setHistoryOpen(false)}
+          onSelectConversation={(item) => {
+            setConversation(item);
+            setHistoryOpen(false);
+            setDetailTab('chat');
+          }}
+          onToggleGroup={(groupId) => {
+            setCollapsedHistoryGroups((current) => ({
+              ...current,
+              [groupId]: current[groupId] !== true,
+            }));
+          }}
+          onShowMore={(groupId, nextLimit) => {
+            setHistoryGroupLimits((current) => ({
+              ...current,
+              [groupId]: nextLimit,
+            }));
+          }}
+        />
         <Stack direction="row" spacing={1.25} alignItems="center">
           <Tooltip title={t.actions.back}>
             <IconButton onClick={() => setActiveAgentId(null)}>
@@ -1216,21 +1349,65 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
               {activeAgent.purpose || activeAgent.description || t.agents.noDescription}
             </Typography>
           </Box>
-          <Button startIcon={<EditRounded />} variant="outlined" onClick={handleOpenEditAccess}>
-            {t.agents.editAccess}
-          </Button>
+          <Tooltip title={t.agents.historyTab}>
+            <IconButton onClick={() => setHistoryOpen(true)}>
+              <HistoryRounded />
+            </IconButton>
+          </Tooltip>
+          <Tooltip title={t.agents.editAccess}>
+            <IconButton onClick={() => setDetailTab('settings')}>
+              <SettingsRounded />
+            </IconButton>
+          </Tooltip>
         </Stack>
 
-        {renderAccessChips(activeAgent)}
+        <Tabs value={detailTab} onChange={(_event, value: 'chat' | 'workspace' | 'settings') => setDetailTab(value)}>
+          <Tab value="chat" label={t.agents.chatTitle} />
+          <Tab value="workspace" label={t.agents.workspaceTab} />
+          <Tab value="settings" label={t.locale === 'es' ? 'Configuracion' : 'Settings'} />
+        </Tabs>
 
         {error ? <Alert severity="error">{error}</Alert> : null}
 
-        <Stack
-          direction={{ xs: 'column', lg: 'row' }}
-          spacing={1.5}
-          sx={{ flex: 1, minHeight: 0, overflow: 'hidden', position: 'relative' }}
-        >
-          {renderSidePanel()}
+        <Box sx={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+          {detailTab === 'workspace' ? (
+            <Stack direction={{ xs: 'column', lg: 'row' }} spacing={1.5} sx={{ height: '100%', minHeight: 0 }}>
+              <Paper variant="outlined" sx={{ flex: 1, minHeight: 0, overflow: 'auto', borderRadius: 1 }}>
+                <WorkspaceTree
+                  entries={workspaceEntries}
+                  emptyLabel={t.agents.workspaceEmpty}
+                  selectedPath={openFile?.relativePath}
+                  onOpenFile={(entry) => void handleOpenFile(entry)}
+                />
+              </Paper>
+              {renderFilePanel()}
+            </Stack>
+          ) : detailTab === 'settings' ? (
+            <Paper variant="outlined" sx={{ height: '100%', minHeight: 0, overflow: 'auto', p: 2, borderRadius: 1 }}>
+              <Stack spacing={2}>
+                {renderAccessControls()}
+                <Box>
+                  <Button
+                    startIcon={<SaveRounded />}
+                    variant="contained"
+                    disabled={busyAction === 'access'}
+                    onClick={() => void handleSaveAccess()}
+                  >
+                    {t.agents.saveAccess}
+                  </Button>
+                </Box>
+              </Stack>
+            </Paper>
+          ) : (
+            <Box
+              sx={{
+                display: 'grid',
+                gridTemplateColumns: { xs: '1fr', lg: peerThreads.length ? 'minmax(0, 1fr) 300px' : '1fr' },
+                gap: 1.5,
+                height: '100%',
+                minHeight: 0,
+              }}
+            >
           <Stack
             sx={{
               flex: 1,
@@ -1242,6 +1419,11 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
             }}
           >
             <Stack direction="row" spacing={1} alignItems="center" sx={{ px: 1.5, py: 1.25, borderBottom: `1px solid ${theme.palette.divider}` }}>
+              <Tooltip title={t.agents.historyTab}>
+                <IconButton size="small" onClick={() => setHistoryOpen(true)}>
+                  <HistoryRounded fontSize="small" />
+                </IconButton>
+              </Tooltip>
               <ChatRounded color="action" />
               <Box sx={{ minWidth: 0, flex: 1 }}>
                 <Typography variant="subtitle2" noWrap>{conversation?.title ?? t.agents.chatTitle}</Typography>
@@ -1287,74 +1469,67 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
                 </Stack>
               ) : visibleMessages.length ? (
                 <Stack spacing={2} sx={{ p: 1.5, minWidth: 0 }}>
-                  {visibleMessages.map((item) => renderMessage(item))}
+                  {visibleMessages.map((item) => renderMessage(item, { contextMessages: conversation?.messages ?? [] }))}
                   {runIsActive ? (
-                    <Stack direction="row" spacing={1} alignItems="center" sx={{ maxWidth: '78%', color: 'text.secondary' }}>
-                      <CircularProgress size={16} />
-                      <Typography variant="body2">{t.agents.firstRunLoading}</Typography>
-                    </Stack>
+                    <Box sx={{ width: '78%', maxWidth: '78%', minWidth: 0 }}>
+                      <AgentRunActivityReceipt
+                        t={t}
+                        activity={activeRun?.activity}
+                        mode="live"
+                        progressMessages={activeRun?.progress.map((entry) => ({
+                          id: entry.id,
+                          message: entry.message,
+                          createdAt: entry.createdAt,
+                        })) ?? []}
+                        emptyLabel={t.agents.firstRunLoading}
+                      />
+                    </Box>
                   ) : runErrorMessage ? (
-                    <Typography variant="body2" color="error" sx={{ maxWidth: '78%', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
+                    <Typography variant="body2" color="error" sx={{ width: '78%', maxWidth: '78%', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
                       {runErrorMessage}
                     </Typography>
                   ) : null}
                 </Stack>
               ) : (
-                <Box sx={{ p: 4, textAlign: 'center', minHeight: '100%', display: 'grid', placeItems: 'center' }}>
-                  <Stack spacing={1} alignItems="center">
-                    {(runIsActive || busyAction === 'wake' || busyAction === 'start') ? <CircularProgress size={22} /> : null}
-                    <Typography color="text.secondary">
-                      {(runIsActive || busyAction === 'wake' || busyAction === 'start') ? t.agents.firstRunLoading : t.agents.noMessages}
-                    </Typography>
-                  </Stack>
+                <Box sx={{ p: runIsActive ? 1.5 : 4, textAlign: runIsActive ? 'left' : 'center', minHeight: '100%', display: 'grid', placeItems: runIsActive ? 'start stretch' : 'center' }}>
+                  {runIsActive ? (
+                    <Box sx={{ width: '78%', maxWidth: '78%', minWidth: 0 }}>
+                      <AgentRunActivityReceipt
+                        t={t}
+                        activity={activeRun?.activity}
+                        mode="live"
+                        progressMessages={activeRun?.progress.map((entry) => ({
+                          id: entry.id,
+                          message: entry.message,
+                          createdAt: entry.createdAt,
+                        })) ?? []}
+                        emptyLabel={t.agents.firstRunLoading}
+                      />
+                    </Box>
+                  ) : (
+                    <Stack spacing={1} alignItems="center">
+                      {(busyAction === 'wake' || busyAction === 'start') ? <CircularProgress size={22} /> : null}
+                      <Typography color="text.secondary">
+                        {(busyAction === 'wake' || busyAction === 'start') ? t.agents.firstRunLoading : t.agents.noMessages}
+                      </Typography>
+                    </Stack>
+                  )}
                 </Box>
               )}
             </Box>
 
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ xs: 'stretch', sm: 'flex-end' }} sx={{ p: 1.5, borderTop: `1px solid ${theme.palette.divider}` }}>
-              <TextField
-                fullWidth
-                size="small"
-                multiline
-                minRows={2}
-                maxRows={6}
-                value={message}
-                disabled={!conversation || Boolean(runIsActive)}
-                placeholder={t.agents.messagePlaceholder}
-                onChange={(event) => setMessage(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' && !event.shiftKey) {
-                    event.preventDefault();
-                    void handleSendMessage();
-                  }
-                }}
-                sx={{
-                  '& .MuiInputBase-root': {
-                    alignItems: 'flex-start',
-                    maxHeight: 168,
-                    overflowY: 'auto',
-                  },
-                  '& textarea': {
-                    overflowY: 'auto !important',
-                  },
-                }}
-              />
-              <Button
-                startIcon={<SendRounded />}
-                variant="contained"
-                disabled={!conversation || !message.trim() || busy || Boolean(runIsActive)}
-                onClick={() => void handleSendMessage()}
-                sx={{ flexShrink: 0 }}
-              >
-                {t.agents.send}
-              </Button>
-            </Stack>
+            {renderComposer()}
           </Stack>
-          {renderFilePanel()}
-        </Stack>
+          {peerThreads.length ? renderPeerPanel() : null}
+            </Box>
+          )}
+        </Box>
       </Stack>
     );
   };
+
+  const openPeerThreadMessages = openPeerThread?.messages ?? [];
+  const openPeerThreadVisibleMessages = visiblePeerThreadMessages(openPeerThreadMessages);
 
   return (
     <>
@@ -1401,23 +1576,23 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
         </DialogActions>
       </Dialog>
 
-      <Dialog open={editAccessOpen} onClose={() => setEditAccessOpen(false)} fullWidth maxWidth="sm">
-        <DialogTitle>{t.agents.editAccess}</DialogTitle>
-        <DialogContent>
-          <Box sx={{ pt: 0.5 }}>
-            {renderAccessControls()}
-          </Box>
+      <Dialog open={Boolean(openPeerThread)} onClose={() => setOpenPeerThread(null)} fullWidth maxWidth="md">
+        <DialogTitle>
+          {openPeerThread
+            ? `${openPeerThread.callerAgentName ?? openPeerThread.callerAgentId} -> ${openPeerThread.targetAgentName ?? openPeerThread.targetAgentId}`
+            : ''}
+        </DialogTitle>
+        <DialogContent dividers>
+          <Stack spacing={1.5}>
+            {openPeerThreadVisibleMessages.length > 0 ? openPeerThreadVisibleMessages.map((item) => renderMessage(item, { contextMessages: openPeerThreadMessages })) : (
+              <Typography variant="body2" color="text.secondary">
+                {t.locale === 'es' ? 'Este thread no tiene mensajes visibles.' : 'This thread has no visible messages.'}
+              </Typography>
+            )}
+          </Stack>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setEditAccessOpen(false)}>{t.actions.close}</Button>
-          <Button
-            startIcon={<SaveRounded />}
-            variant="contained"
-            disabled={busyAction === 'access'}
-            onClick={() => void handleSaveAccess()}
-          >
-            {t.agents.saveAccess}
-          </Button>
+          <Button onClick={() => setOpenPeerThread(null)}>{t.actions.close}</Button>
         </DialogActions>
       </Dialog>
     </>

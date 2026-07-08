@@ -98,6 +98,7 @@ const IPC_CHANNELS = {
   checkDesktopUpdates: 'forger:desktop-update:check',
   downloadDesktopUpdate: 'forger:desktop-update:download',
   installDesktopUpdate: 'forger:desktop-update:install',
+  desktopUpdateQuitForInstall: 'forger:desktop-update:quit-for-install',
   desktopUpdateProgress: 'forger:desktop-update:progress',
   getForgerAccount: 'forger:account:get',
   registerForgerAccount: 'forger:account:register',
@@ -225,6 +226,8 @@ const IPC_CHANNELS = {
   personalAgentStartConversation: 'forger:personal-agents:conversation:start',
   personalAgentSendMessage: 'forger:personal-agents:conversation:send',
   personalAgentGetConversation: 'forger:personal-agents:conversation:get',
+  personalAgentPeerThreadsList: 'forger:personal-agents:peer-threads:list',
+  personalAgentPeerThreadGet: 'forger:personal-agents:peer-thread:get',
   personalAgentConversationEvent: 'forger:personal-agents:conversation:event',
   chatStartRun: 'forger:chat:start-run',
   chatGetRun: 'forger:chat:get-run',
@@ -446,6 +449,7 @@ const api: ForgerDesktopApi = {
   checkDesktopUpdates: () => ipcRenderer.invoke(IPC_CHANNELS.checkDesktopUpdates),
   downloadDesktopUpdate: () => ipcRenderer.invoke(IPC_CHANNELS.downloadDesktopUpdate),
   installDesktopUpdate: () => ipcRenderer.invoke(IPC_CHANNELS.installDesktopUpdate),
+  desktopUpdateQuitForInstall: () => ipcRenderer.invoke(IPC_CHANNELS.desktopUpdateQuitForInstall),
   onDesktopUpdateProgress: (listener) => {
     const wrapped = (_event: unknown, payload: Parameters<typeof listener>[0]) => {
       listener(payload);
@@ -628,6 +632,8 @@ const api: ForgerDesktopApi = {
   personalAgentStartConversation: (input) => ipcRenderer.invoke(IPC_CHANNELS.personalAgentStartConversation, input),
   personalAgentSendMessage: (input) => ipcRenderer.invoke(IPC_CHANNELS.personalAgentSendMessage, input),
   personalAgentGetConversation: (input) => ipcRenderer.invoke(IPC_CHANNELS.personalAgentGetConversation, input),
+  personalAgentPeerThreadsList: (input) => ipcRenderer.invoke(IPC_CHANNELS.personalAgentPeerThreadsList, input),
+  personalAgentPeerThreadGet: (input) => ipcRenderer.invoke(IPC_CHANNELS.personalAgentPeerThreadGet, input),
   onPersonalAgentConversationEvent: (listener) => {
     const wrapped = (_event: IpcRendererEvent, payload: PersonalAgentConversationEvent) => listener(payload);
     ipcRenderer.on(IPC_CHANNELS.personalAgentConversationEvent, wrapped);

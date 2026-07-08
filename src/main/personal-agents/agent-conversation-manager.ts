@@ -1,9 +1,17 @@
 import path from 'node:path';
 
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
-import type { AgentRuntime, AgentRuntimeRequest, PersonalAgent, PersonalAgentConversation, PersonalAgentConversationEvent, PersonalAgentConversationGetInput, PersonalAgentConversationStartInput, PersonalAgentMessageSendInput, PersonalAgentRun } from '../../shared/types';
+import type { AgentRunActivity, AgentRunActivityStatus, AgentRuntime, AgentRuntimeRequest, PersonalAgent, PersonalAgentConversation, PersonalAgentConversationEvent, PersonalAgentConversationGetInput, PersonalAgentConversationStartInput, PersonalAgentMessage, PersonalAgentMessageSendInput, PersonalAgentPeerThread, PersonalAgentRun } from '../../shared/types';
 import { existsDirectory, runCommandCapture } from '../app-agent/process';
 import type { LlmAppMcpServerConfig } from '../app-agent/types';
+import {
+  addStatusActivityItem,
+  appendProviderActivity,
+  createAgentRunActivity,
+  finalizeAgentRunActivity,
+  normalizeActivityStatus,
+  persistAgentRunActivity,
+} from '../chat/agent-run-activity';
 import { appendRunLog, getRunLogPath, toProviderProgressMessages } from '../chat/progress-errors';
 import { buildPersonalAgentInitialWakePrompt } from '../prompt-builder/personal-agents';
 import type { AgentStore } from './agent-store';
@@ -18,7 +26,9 @@ interface PersonalAgentRunnerInput {
   runtime?: AgentRuntime;
   prompt: string;
   workspaceRoot: string;
-  onProgress: (message: string) => void;
+  trustedRoots: string[];
+  mcpContext: PersonalAgentMcpRunContext;
+  onProgress: (message: string, options?: { includeActivity?: boolean }) => void;
 }
 
 type PersonalAgentRunner = (input: PersonalAgentRunnerInput) => Promise<{ assistantText: string }>;
@@ -39,7 +49,7 @@ interface AgentConversationManagerOptions {
   getCodexAuthenticated?: () => Promise<boolean>;
   getClaudeAuthenticated?: () => Promise<boolean>;
   getAntigravityAuthenticated?: () => Promise<boolean>;
-  createForgerMcpSession?: (runId: string, agent: PersonalAgent) => { url: string; token: string } | null;
+  createForgerMcpSession?: (runId: string, agent: PersonalAgent, context: PersonalAgentMcpRunContext) => { url: string; token: string } | null;
   releaseForgerMcpSession?: (token: string) => void;
   listenAppMcps?: (appIds: string[], runId: string) => Promise<LlmAppMcpServerConfig[]>;
   releaseAppMcps?: (runId: string) => void;
@@ -49,9 +59,36 @@ interface AgentConversationManagerOptions {
 
 const PERSONAL_AGENT_RUN_TIMEOUT_MS = 600_000;
 const FIRST_MESSAGE_TITLE_WORDS = 8;
+const MAX_PEER_AGENT_DEPTH = 5;
+
+export interface PersonalAgentMcpRunContext {
+  conversationId: string;
+  peerThreadId?: string;
+  callStackAgentIds: string[];
+}
+
+export interface PersonalAgentAskPeerInput {
+  callerAgentId: string;
+  callerConversationId: string;
+  callerRunId: string;
+  callStackAgentIds?: string[];
+  targetAgentId?: string;
+  threadId?: string;
+  message: string;
+}
+
+export interface PersonalAgentAskPeerResult {
+  success: boolean;
+  status: 'completed' | 'failed' | 'timeout' | 'running';
+  thread?: PersonalAgentPeerThread;
+  response?: string;
+  userMessage: string;
+  technicalCode?: string;
+}
 
 export class AgentConversationManager {
   private readonly activeChildren = new Map<string, ChildProcessWithoutNullStreams>();
+  private readonly activities = new Map<string, AgentRunActivity>();
   private readonly listeners = new Set<(event: PersonalAgentConversationEvent) => void>();
 
   public constructor(private readonly options: AgentConversationManagerOptions) {}
@@ -96,6 +133,9 @@ export class AgentConversationManager {
 
   public async sendMessage(input: PersonalAgentMessageSendInput): Promise<PersonalAgentConversation> {
     const conversation = await this.options.store.requireConversation(input.conversationId);
+    if (conversation.readOnly || conversation.origin === 'agent') {
+      throw new Error('personal_agent_conversation_read_only');
+    }
     if (conversation.activeRun && !isTerminalRunStatus(conversation.activeRun.status)) {
       throw new Error('personal_agent_run_active');
     }
@@ -116,27 +156,174 @@ export class AgentConversationManager {
       });
     }
     const run = await this.options.store.createRun({ agentId: conversation.agentId, conversationId: conversation.id });
+    this.activities.set(run.id, this.createActivityForRun(run, agent, conversation));
     const message = await this.options.store.addMessage({
       agentId: conversation.agentId,
       conversationId: conversation.id,
       runId: run.id,
       role: 'user',
       content,
+      files: input.sharedFiles,
     });
     const updated = await this.requireUpdatedConversation(conversation.id);
     this.emit({ type: 'message.created', conversation: updated, message, run: updated.activeRun });
-    void this.executeRun(updated.id, run.id).catch((error) => {
-      void this.failRun(run.id, error);
+    void this.executeRunSafely(updated.id, run.id, {
+      conversationId: updated.id,
+      callStackAgentIds: [agent.id],
     });
     return updated;
   }
 
-  private async executeRun(conversationId: string, runId: string): Promise<void> {
+  public async askPeerAgent(input: PersonalAgentAskPeerInput): Promise<PersonalAgentAskPeerResult> {
+    const message = input.message.trim();
+    if (!message) {
+      return {
+        success: false,
+        status: 'failed',
+        userMessage: 'El mensaje para el otro agente esta vacio.',
+        technicalCode: 'personal_agent_peer_message_required',
+      };
+    }
+    const caller = await this.options.store.requireAgent(input.callerAgentId);
+    const callerConversation = await this.options.store.requireConversation(input.callerConversationId);
+    if (callerConversation.agentId !== caller.id) {
+      throw new Error('personal_agent_peer_source_conversation_mismatch');
+    }
+    let target: PersonalAgent;
+    let thread: PersonalAgentPeerThread;
+    if (input.threadId) {
+      const existingThread = await this.options.store.getPeerThread(input.threadId);
+      if (!existingThread) {
+        throw new Error('personal_agent_peer_thread_not_found');
+      }
+      if (existingThread.callerAgentId !== caller.id || existingThread.sourceConversationId !== callerConversation.id) {
+        throw new Error('personal_agent_peer_thread_not_allowed');
+      }
+      target = await this.options.store.requireAgent(existingThread.targetAgentId);
+      thread = existingThread;
+    } else {
+      const targetAgentId = input.targetAgentId?.trim();
+      if (!targetAgentId) {
+        throw new Error('personal_agent_peer_target_required');
+      }
+      target = await this.options.store.requireAgent(targetAgentId);
+      if (target.id === caller.id) {
+        throw new Error('personal_agent_peer_self_call_blocked');
+      }
+      const callStack = normalizeCallStack(input.callStackAgentIds, caller.id);
+      if (callStack.includes(target.id)) {
+        throw new Error('personal_agent_peer_cycle_blocked');
+      }
+      if (callStack.length >= MAX_PEER_AGENT_DEPTH) {
+        throw new Error('personal_agent_peer_depth_exceeded');
+      }
+      const grant = await this.options.store.getPeerGrant(caller.id, target.id);
+      if (!grant) {
+        throw new Error('personal_agent_peer_not_granted');
+      }
+      const targetConversation = await this.options.store.createConversation({
+        agentId: target.id,
+        title: deriveConversationTitle(message),
+        origin: 'agent',
+        readOnly: true,
+        initiatorAgentId: caller.id,
+      });
+      const parentThread = await this.options.store.getPeerThreadByTargetConversation(callerConversation.id);
+      thread = await this.options.store.createPeerThread({
+        callerAgentId: caller.id,
+        targetAgentId: target.id,
+        sourceConversationId: callerConversation.id,
+        targetConversationId: targetConversation.id,
+        parentThreadId: parentThread?.id,
+        createdByRunId: input.callerRunId,
+        title: deriveConversationTitle(message),
+      });
+      this.emit({ type: 'conversation.created', conversation: await this.options.store.requireConversation(targetConversation.id) });
+    }
+    const grant = await this.options.store.getPeerGrant(caller.id, target.id);
+    if (!grant) {
+      throw new Error('personal_agent_peer_not_granted');
+    }
+    const targetConversation = await this.options.store.requireConversation(thread.targetConversationId);
+    if (targetConversation.activeRun && !isTerminalRunStatus(targetConversation.activeRun.status)) {
+      throw new Error('personal_agent_run_active');
+    }
+    const runtime = await this.resolveRuntimeForAgent(target);
+    if (runtime && targetConversation.provider && targetConversation.provider !== runtime.provider) {
+      throw new Error('personal_agent_provider_changed_new_conversation_required');
+    }
+    const run = await this.options.store.createRun({ agentId: target.id, conversationId: targetConversation.id });
+    this.activities.set(run.id, this.createActivityForRun(run, target, targetConversation));
+    const userMessage = await this.options.store.addMessage({
+      agentId: target.id,
+      conversationId: targetConversation.id,
+      runId: run.id,
+      role: 'user',
+      authorType: 'agent',
+      authorAgentId: caller.id,
+      content: message,
+    });
+    const updatedTargetConversation = await this.requireUpdatedConversation(targetConversation.id);
+    this.emit({ type: 'message.created', conversation: updatedTargetConversation, message: userMessage, run: updatedTargetConversation.activeRun });
+    const callStack = [...normalizeCallStack(input.callStackAgentIds, caller.id), target.id];
+    const execution = this.executeRunSafely(updatedTargetConversation.id, run.id, {
+      conversationId: updatedTargetConversation.id,
+      peerThreadId: thread.id,
+      callStackAgentIds: callStack,
+    });
+    const executionResult = await withTimeout(execution, PERSONAL_AGENT_RUN_TIMEOUT_MS);
+    const latestThread = await this.options.store.getPeerThread(thread.id) ?? thread;
+    if (!executionResult) {
+      return {
+        success: false,
+        status: 'timeout',
+        thread: latestThread,
+        userMessage: 'El agente destino sigue trabajando. El transcript quedo guardado en el thread.',
+        technicalCode: 'personal_agent_peer_timeout',
+      };
+    }
+    if (!executionResult.success) {
+      await this.options.store.updatePeerThreadStatus({ threadId: thread.id, status: 'failed' });
+      return {
+        success: false,
+        status: 'failed',
+        thread: await this.options.store.getPeerThread(thread.id) ?? latestThread,
+        userMessage: 'El agente destino no pudo responder.',
+        technicalCode: executionResult.error instanceof Error ? executionResult.error.message : 'personal_agent_peer_run_failed',
+      };
+    }
+    const completedThread = await this.options.store.getPeerThread(thread.id) ?? latestThread;
+    const response = latestAssistantMessage(completedThread.messages);
+    return {
+      success: true,
+      status: 'completed',
+      thread: completedThread,
+      response: response?.content,
+      userMessage: response?.content ?? 'El agente destino termino sin texto visible.',
+    };
+  }
+
+  private async executeRunSafely(
+    conversationId: string,
+    runId: string,
+    context: PersonalAgentMcpRunContext,
+  ): Promise<{ success: true } | { success: false; error: unknown }> {
+    try {
+      await this.executeRun(conversationId, runId, context);
+      return { success: true };
+    } catch (error) {
+      await this.failRun(runId, error);
+      return { success: false, error };
+    }
+  }
+
+  private async executeRun(conversationId: string, runId: string, context: PersonalAgentMcpRunContext): Promise<void> {
     const conversation = await this.options.store.requireConversation(conversationId);
     const run = await this.options.store.updateRunStatus({ runId, status: 'running' });
-    this.emit({ type: 'run.started', conversation: await this.requireUpdatedConversation(conversationId), run });
 
     const agent = await this.options.store.requireAgent(conversation.agentId);
+    this.updateActivityForRun(run, 'running', { agent, conversation });
+    this.emit({ type: 'run.started', conversation: await this.requireUpdatedConversation(conversationId), run });
     const runtime = await this.resolveRuntimeForAgent(agent);
     if (runtime && conversation.provider && conversation.provider !== runtime.provider) {
       throw new Error('personal_agent_provider_changed_new_conversation_required');
@@ -150,6 +337,7 @@ export class AgentConversationManager {
       : conversation;
     const workspaceRoot = await this.options.store.workspaceRootForAgent(agent.id);
     const prompt = await this.buildPrompt(agent, conversationForRun, run);
+    const trustedRoots = trustedRootsForConversationFiles(workspaceRoot, conversationForRun.messages);
     const progressWrites: Array<Promise<void>> = [];
     const result = await this.runPersonalAgent({
       agent,
@@ -158,8 +346,12 @@ export class AgentConversationManager {
       runtime,
       prompt,
       workspaceRoot,
-      onProgress: (message) => {
-        progressWrites.push(this.recordProgress(run.id, message));
+      trustedRoots,
+      mcpContext: context,
+      onProgress: (message, progressOptions) => {
+        progressWrites.push(this.recordProgress(run.id, message, {
+          includeActivity: progressOptions?.includeActivity !== false,
+        }));
       },
     });
     await Promise.all(progressWrites);
@@ -174,6 +366,7 @@ export class AgentConversationManager {
     });
     const completed = await this.options.store.updateRunStatus({ runId, status: 'completed' });
     const updated = await this.requireUpdatedConversation(conversationId);
+    this.updateActivityForRun(completed, 'completed', { agent, conversation: updated });
     this.emit({ type: 'message.created', conversation: updated, message: assistantMessage, run: completed });
     this.emit({ type: 'run.completed', conversation: updated, run: completed });
   }
@@ -189,14 +382,26 @@ export class AgentConversationManager {
       error: error instanceof Error ? error.message : String(error ?? 'personal_agent_run_failed'),
     });
     this.activeChildren.delete(runId);
+    this.updateActivityForRun(failed, 'failed', { error: failed.error });
     this.emit({ type: 'run.failed', conversation: await this.requireUpdatedConversation(run.conversationId), run: failed });
   }
 
-  private async recordProgress(runId: string, message: string): Promise<void> {
+  private async recordProgress(
+    runId: string,
+    message: string,
+    options: { includeActivity?: boolean } = {},
+  ): Promise<void> {
     const progress = await this.options.store.addRunProgress({ runId, message });
     const run = await this.options.store.getRun(runId);
     if (!run) {
       return;
+    }
+    if (options.includeActivity !== false) {
+      this.activities.set(
+        runId,
+        addStatusActivityItem(this.activities.get(runId) ?? this.createActivityForRun(run), message),
+      );
+      this.persistActivity(runId);
     }
     const intermediateMessage = await this.options.store.addMessage({
       agentId: run.agentId,
@@ -219,9 +424,9 @@ export class AgentConversationManager {
     const bootstrap = buildPersonalAgentInitialWakePrompt({ agent, memoryRegister });
     const transcript = conversation.messages
       .filter((message) => message.role !== 'system')
-      .map((message) => `${message.role}: ${message.content}`)
+      .map((message) => renderMessageForPrompt(agent, message))
       .join('\n\n');
-    const currentMessage = conversation.messages.find((message) => message.runId === run.id && message.role === 'user')?.content ?? '';
+    const currentMessage = conversation.messages.find((message) => message.runId === run.id && message.role === 'user');
     return [
       bootstrap,
       '',
@@ -229,7 +434,7 @@ export class AgentConversationManager {
       transcript || '- No visible messages yet.',
       '',
       'Current user message:',
-      currentMessage,
+      currentMessage ? renderMessageForPrompt(agent, currentMessage) : '',
     ].join('\n');
   }
 
@@ -260,7 +465,7 @@ export class AgentConversationManager {
     const logWrites: Array<Promise<void>> = [];
     try {
       const appMcpServers = await (this.options.listenAppMcps?.(input.agent.appIds, input.run.id) ?? Promise.resolve([]));
-      forgerMcpSession = this.options.createForgerMcpSession?.(input.run.id, input.agent) ?? null;
+      forgerMcpSession = this.options.createForgerMcpSession?.(input.run.id, input.agent, input.mcpContext) ?? null;
       mcpServers = [
         ...(forgerMcpSession
           ? [{
@@ -315,7 +520,7 @@ export class AgentConversationManager {
                 input.agent.id,
                 input.conversation.id,
               ),
-              trustedRoots: [input.workspaceRoot],
+              trustedRoots: input.trustedRoots,
               networkAccess,
             }
           : { type: 'none' },
@@ -365,8 +570,24 @@ export class AgentConversationManager {
     stream: 'stdout' | 'stderr' | 'meta',
     text: string,
   ): void {
-    for (const message of toProviderProgressMessages(provider, stream, text)) {
-      input.onProgress(message);
+    const priorCount = this.activities.get(input.run.id)?.counts.total ?? 0;
+    this.activities.set(
+      input.run.id,
+      appendProviderActivity({
+        activity: this.activities.get(input.run.id) ?? this.createActivityForRun(input.run, input.agent, input.conversation),
+        provider,
+        stream,
+        text,
+      }),
+    );
+    const activityChanged = (this.activities.get(input.run.id)?.counts.total ?? 0) !== priorCount;
+    const messages = toProviderProgressMessages(provider, stream, text);
+    for (const message of messages) {
+      input.onProgress(message, { includeActivity: !activityChanged });
+    }
+    if (activityChanged && messages.length === 0) {
+      this.persistActivity(input.run.id);
+      void this.emitActivityProgress(input.run.id);
     }
   }
 
@@ -375,16 +596,168 @@ export class AgentConversationManager {
     if (!updated) {
       throw new Error('personal_agent_conversation_not_found');
     }
-    return updated;
+    return this.withActivityConversation(updated);
   }
 
   private emit(event: PersonalAgentConversationEvent): void {
-    this.options.onConversationEvent?.(event);
+    const normalizedEvent = this.withActivityEvent(event);
+    this.options.onConversationEvent?.(normalizedEvent);
     for (const listener of this.listeners) {
-      listener(event);
+      listener(normalizedEvent);
     }
+  }
+
+  private createActivityForRun(
+    run: PersonalAgentRun,
+    agent?: PersonalAgent,
+    conversation?: PersonalAgentConversation,
+  ): AgentRunActivity {
+    return createAgentRunActivity({
+      runId: run.id,
+      surface: 'personal_agent_conversation',
+      status: normalizeActivityStatus(run.status),
+      startedAt: run.createdAt,
+      updatedAt: run.updatedAt,
+      sourceRef: {
+        agentId: run.agentId,
+        agentName: agent?.name,
+        conversationId: run.conversationId,
+        title: conversation?.title,
+      },
+    });
+  }
+
+  private updateActivityForRun(
+    run: PersonalAgentRun,
+    status: AgentRunActivityStatus,
+    context: { agent?: PersonalAgent; conversation?: PersonalAgentConversation; error?: string } = {},
+  ): void {
+    const base = this.activities.get(run.id) ?? this.createActivityForRun(run, context.agent, context.conversation);
+    const updatedAt = run.updatedAt;
+    const activity = status === 'completed' || status === 'failed' || status === 'canceled'
+      ? finalizeAgentRunActivity(base, status, updatedAt, context.error)
+      : {
+          ...base,
+          status,
+          updatedAt,
+        };
+    this.activities.set(run.id, activity);
+    this.persistActivity(run.id);
+  }
+
+  private withActivityRun(run: PersonalAgentRun | undefined): PersonalAgentRun | undefined {
+    if (!run) {
+      return undefined;
+    }
+    const activity = this.activities.get(run.id);
+    return activity ? { ...run, activity } : run;
+  }
+
+  private withActivityConversation(conversation: PersonalAgentConversation): PersonalAgentConversation {
+    return {
+      ...conversation,
+      ...(conversation.activeRun ? { activeRun: this.withActivityRun(conversation.activeRun) } : {}),
+    };
+  }
+
+  private withActivityEvent(event: PersonalAgentConversationEvent): PersonalAgentConversationEvent {
+    return {
+      ...event,
+      conversation: this.withActivityConversation(event.conversation),
+      ...(event.run ? { run: this.withActivityRun(event.run) } : {}),
+    };
+  }
+
+  private persistActivity(runId: string): void {
+    const activity = this.activities.get(runId);
+    if (!activity || !this.options.metadataRoot) {
+      return;
+    }
+    void persistAgentRunActivity(path.join(this.options.metadataRoot, 'personal-agents'), activity);
+  }
+
+  private async emitActivityProgress(runId: string): Promise<void> {
+    const run = await this.options.store.getRun(runId);
+    if (!run) {
+      return;
+    }
+    const conversation = await this.requireUpdatedConversation(run.conversationId);
+    this.emit({
+      type: 'run.progress',
+      conversation,
+      run,
+      progress: {
+        id: `${runId}:activity:${Date.now()}`,
+        agentId: run.agentId,
+        conversationId: run.conversationId,
+        runId,
+        message: this.activities.get(runId)?.summary ?? '',
+        createdAt: new Date().toISOString(),
+      },
+    });
   }
 }
 
 const deriveConversationTitle = (content: string): string =>
   content.split(/\s+/).slice(0, FIRST_MESSAGE_TITLE_WORDS).join(' ').slice(0, 80);
+
+const normalizeCallStack = (value: unknown, callerAgentId: string): string[] => {
+  const ids = Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0) : [];
+  const stack = ids.length > 0 ? ids : [callerAgentId];
+  return [...new Set(stack)].slice(0, MAX_PEER_AGENT_DEPTH);
+};
+
+const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number): Promise<T | null> => {
+  let timeout: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<null>((resolve) => {
+        timeout = setTimeout(() => resolve(null), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  }
+};
+
+const latestAssistantMessage = (messages: PersonalAgentMessage[] | undefined): PersonalAgentMessage | null => {
+  if (!messages?.length) {
+    return null;
+  }
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message.role === 'assistant' && message.kind === 'message') {
+      return message;
+    }
+  }
+  return null;
+};
+
+const renderMessageForPrompt = (agent: PersonalAgent, message: PersonalAgentMessage): string => {
+  const authorLabel = message.authorType === 'agent'
+    ? message.authorAgentName ?? (message.role === 'assistant' ? agent.name : message.authorAgentId ?? 'Agent')
+    : message.authorType === 'system'
+      ? 'System'
+      : 'Human';
+  const fileLines = (message.files ?? []).map((file) =>
+    `  - ${file.name} (${file.relativePath || file.path})${typeof file.sizeBytes === 'number' ? `, ${file.sizeBytes} bytes` : ''}`);
+  return [
+    `${message.role} (${authorLabel}): ${message.content}`,
+    ...(fileLines.length > 0 ? ['Shared files:', ...fileLines] : []),
+  ].join('\n');
+};
+
+const trustedRootsForConversationFiles = (workspaceRoot: string, messages: PersonalAgentMessage[]): string[] => {
+  const roots = new Set<string>([workspaceRoot]);
+  for (const message of messages) {
+    for (const file of message.files ?? []) {
+      if (path.isAbsolute(file.path)) {
+        roots.add(path.dirname(file.path));
+      }
+    }
+  }
+  return [...roots];
+};

@@ -36,6 +36,7 @@ import type { AppDictionary } from '@renderer/i18n';
 import type {
   AgentProvider,
   AgentPermissionMode,
+  AgentRunActivity,
   AppSummary,
   ChatMode,
   ChatQuestionRequest,
@@ -49,6 +50,14 @@ import type {
 import { useEffect, useMemo, useRef, useState } from 'react';
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
 import { compactCategoryLabel, compactFileName } from './chat-view-helpers';
+import {
+  formatRelativeHistoryTime,
+  HISTORY_INITIAL_LIMIT,
+  HISTORY_LIMIT_STEP,
+  historyUpdatedAtTimestamp,
+  isMacOsPlatform,
+  sortItemsByRecentActivity,
+} from './chat/history-drawer-helpers';
 import { ChatMessagesPanel } from './chat/ChatMessagesPanel';
 import { QuestionComposer, type QuestionAction } from './chat/QuestionComposer';
 import type { RuntimeProviderControls } from '@renderer/runtime-provider-controls';
@@ -80,6 +89,7 @@ export interface ChatMessage {
     request: ChatQuestionRequest;
     status?: 'pending' | 'answered';
   };
+  activity?: AgentRunActivity;
 }
 
 export interface ChatQuestionAnswer {
@@ -111,17 +121,12 @@ interface ConversationHistoryGroup {
   items: ConversationHistoryItem[];
 }
 
-const isMacOs = navigator.platform.toLowerCase().includes('mac');
-const HISTORY_INITIAL_LIMIT = 5;
-const HISTORY_LIMIT_STEP = 10;
-
 const historyItemTimestamp = (item: ConversationHistoryItem) => {
-  const timestamp = Date.parse(item.updatedAt);
-  return Number.isFinite(timestamp) ? timestamp : 0;
+  return historyUpdatedAtTimestamp(item.updatedAt);
 };
 
 const sortHistoryItemsByRecentActivity = (items: ConversationHistoryItem[]) =>
-  [...items].sort((left, right) => historyItemTimestamp(right) - historyItemTimestamp(left));
+  sortItemsByRecentActivity(items);
 
 const historyGroupTimestamp = (group: ConversationHistoryGroup) =>
   Math.max(0, ...group.items.map(historyItemTimestamp));
@@ -142,28 +147,6 @@ const readFileAsBase64 = async (file: File): Promise<string> =>
     reader.onerror = () => reject(reader.error ?? new Error('clipboard_image_read_failed'));
     reader.readAsDataURL(file);
   });
-
-const formatRelativeHistoryTime = (updatedAt: string, nowLabel: string) => {
-  const timestamp = Date.parse(updatedAt);
-  if (!Number.isFinite(timestamp)) {
-    return '';
-  }
-  const diffSeconds = Math.max(0, Math.round((Date.now() - timestamp) / 1000));
-  if (diffSeconds < 60) {
-    return nowLabel;
-  }
-
-  const units: Array<[string, number]> = [
-    ['y', 60 * 60 * 24 * 365],
-    ['mo', 60 * 60 * 24 * 30],
-    ['w', 60 * 60 * 24 * 7],
-    ['d', 60 * 60 * 24],
-    ['h', 60 * 60],
-    ['m', 60],
-  ];
-  const [unit, seconds] = units.find(([, unitSeconds]) => diffSeconds >= unitSeconds) ?? ['m', 60];
-  return `${Math.floor(diffSeconds / seconds)}${unit}`;
-};
 
 interface ChatViewProps {
   t: AppDictionary;
@@ -209,6 +192,7 @@ interface ChatViewProps {
   isResponding: boolean;
   canStopRun: boolean;
   progressLines: string[];
+  activity?: AgentRunActivity;
   intelligenceProviderConfigured: boolean;
   onConfigureIntelligenceProvider: () => void;
   openingAppIds: Set<string>;
@@ -264,6 +248,7 @@ export function ChatView({
   isResponding,
   canStopRun,
   progressLines,
+  activity,
   intelligenceProviderConfigured,
   onConfigureIntelligenceProvider,
   openingAppIds,
@@ -324,7 +309,7 @@ export function ChatView({
   const activeModelValue = activeRuntimeControl.selectedModel;
   const activeEffortOptions = activeRuntimeControl.effortOptionsForModel(activeModelValue);
   const activeEffortValue = activeRuntimeControl.normalizeEffortForModel(activeModelValue, activeRuntimeControl.selectedEffort);
-  const shouldReserveMacTrafficLightSpace = isMacOs && !windowState?.isFullScreen;
+  const shouldReserveMacTrafficLightSpace = isMacOsPlatform() && !windowState?.isFullScreen;
   const historyGroups = useMemo<ConversationHistoryGroup[]>(() => {
     const createAppItems: ConversationHistoryItem[] = [];
     const reviewAppItems: ConversationHistoryItem[] = [];
@@ -387,7 +372,7 @@ export function ChatView({
   }, [activeConversationId, targetAppId]);
 
   useEffect(() => {
-    if (!isMacOs) {
+    if (!isMacOsPlatform()) {
       return undefined;
     }
 
@@ -677,7 +662,7 @@ export function ChatView({
       return;
     }
     scrollEl.scrollTop = scrollEl.scrollHeight;
-  }, [messages.length, isResponding, progressLines.length]);
+  }, [messages.length, isResponding, progressLines.length, activity?.items.length]);
 
   return (
     <Box
@@ -1063,6 +1048,7 @@ export function ChatView({
           assistantAvatarSrc={assistantAvatarSrc}
           isSending={isResponding}
           progressLines={progressLines}
+          activity={activity}
           openingAppIds={openingAppIds}
           respondingPermissionIds={respondingPermissionIds}
           scrollRef={messagesScrollRef}

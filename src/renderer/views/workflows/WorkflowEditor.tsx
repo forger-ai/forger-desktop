@@ -87,6 +87,17 @@ const CONDITION_OPERATORS: WorkflowConditionOperator[] = [
   'is_not_empty',
 ];
 
+const isConnectedConnectionInstance = (instance: PersonalAgentGrantOptionConnection['instances'][number]): boolean =>
+  instance.status === 'connected';
+
+const connectionInstanceLabel = (instance: PersonalAgentGrantOptionConnection['instances'][number]): string =>
+  instance.accountIdentity?.email
+  ?? instance.accountIdentity?.username
+  ?? instance.accountIdentity?.workspace
+  ?? instance.accountIdentity?.phoneNumber
+  ?? instance.label
+  ?? instance.id;
+
 export type ProviderOption = { label: string; value: AgentProviderPreference };
 
 /** forEach nodes run once per item; surface the item count on the run badge. */
@@ -426,17 +437,20 @@ export function WorkflowEditor({ draft, onDraftChange, apps, agents, toolPackage
             useFlexGap
           >
             {(Object.keys(copy.nodeTypes) as Array<WorkflowNode['type']>).map((type) => (
-              <Button
-                key={type}
-                size="small"
-                variant="outlined"
-                data-onboarding-target={type === 'forger_tool' ? 'workflow-step-forger-tool' : type === 'connection' ? 'workflow-step-connection' : undefined}
-                startIcon={<AddRounded />}
-                sx={{ borderColor: NODE_TYPE_COLORS[type], color: NODE_TYPE_COLORS[type] }}
-                onClick={() => addNode(type)}
-              >
-                {copy.nodeTypes[type]}
-              </Button>
+              <Tooltip key={type} title={copy.nodeTypeTooltips[type]}>
+                <span>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    data-onboarding-target={type === 'forger_tool' ? 'workflow-step-forger-tool' : type === 'connection' ? 'workflow-step-connection' : undefined}
+                    startIcon={<AddRounded />}
+                    sx={{ borderColor: NODE_TYPE_COLORS[type], color: NODE_TYPE_COLORS[type] }}
+                    onClick={() => addNode(type)}
+                  >
+                    {copy.nodeTypes[type]}
+                  </Button>
+                </span>
+              </Tooltip>
             ))}
           </Stack>
         )}
@@ -631,33 +645,40 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, conn
   }, [providerOptions, nodeProvider, copy.autoProvider]);
   const forgerToolActions = useMemo(() => officialTools
     .flatMap((tool) => tool.actions.map((action) => ({ tool, action }))), [officialTools]);
-  const connectionActions = useMemo(() => connectionOptions
+  const connectedConnectionOptions = useMemo(() => connectionOptions
+    .map((connection) => ({
+      ...connection,
+      instances: connection.instances.filter(isConnectedConnectionInstance),
+    }))
+    .filter((connection) => connection.instances.length > 0 && connection.actions.length > 0), [connectionOptions]);
+  const connectionActions = useMemo(() => connectedConnectionOptions
     .flatMap((connection) => connection.actions.map((action) => ({
       connectionType: connection.type,
       connection,
       action,
-    }))), [connectionOptions]);
-  const connectionTypes = useMemo(() => connectionOptions.map((connection) => ({
+    }))), [connectedConnectionOptions]);
+  const connectionTypes = useMemo(() => connectedConnectionOptions.map((connection) => ({
     type: connection.type,
     label: connection.displayName,
     configured: connection.configured,
     instances: connection.instances,
-  })), [connectionOptions]);
+  })), [connectedConnectionOptions]);
   const selectedConnectionOption = node.type === 'connection'
-    ? connectionOptions.find((connection) => connection.type === node.connectionType)
+    ? connectedConnectionOptions.find((connection) => connection.type === node.connectionType)
     : undefined;
-  const connectionInstanceLabel = (instance: PersonalAgentGrantOptionConnection['instances'][number]): string =>
-    instance.label
-    || instance.accountIdentity?.email
-    || instance.accountIdentity?.username
-    || instance.accountIdentity?.phoneNumber
-    || instance.accountIdentity?.workspace
-    || instance.id;
+  const connectionTypeAvailable = node.type !== 'connection'
+    || !node.connectionType
+    || connectionTypes.some((connectionType) => connectionType.type === node.connectionType);
+  const connectionIdAvailable = node.type !== 'connection'
+    || !node.connectionId
+    || Boolean(selectedConnectionOption?.instances.some((instance) => instance.id === node.connectionId));
 
   return (
     <Stack spacing={1.5}>
       <Stack direction="row" alignItems="center" justifyContent="space-between">
-        <Typography variant="subtitle1" fontWeight={700}>{copy.nodeTypes[node.type]}</Typography>
+        <Tooltip title={copy.nodeTypeTooltips[node.type]}>
+          <Typography variant="subtitle1" fontWeight={700}>{copy.nodeTypes[node.type]}</Typography>
+        </Tooltip>
         <Button color="error" size="small" startIcon={<DeleteOutlineRounded />} onClick={onDelete}>
           {copy.deleteNode}
         </Button>
@@ -939,13 +960,13 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, conn
             select
             size="small"
             label={copy.connectionType}
-            value={node.connectionType}
+            value={connectionTypeAvailable ? node.connectionType : ''}
             onChange={(event) => onChange((current) => {
               if (current.type !== 'connection') {
                 return current;
               }
               const connectionType = event.target.value;
-              const option = connectionOptions.find((candidate) => candidate.type === connectionType);
+              const option = connectedConnectionOptions.find((candidate) => candidate.type === connectionType);
               const defaultConnectionId = option?.instances.length === 1 ? option.instances[0]?.id : undefined;
               const { connectionId: _connectionId, ...rest } = current;
               return {
@@ -958,7 +979,7 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, conn
           >
             {connectionTypes.map((connectionType) => (
               <MenuItem key={connectionType.type} value={connectionType.type}>
-                {connectionType.label}{connectionType.configured ? '' : ` - ${copy.statusLabels.pending}`}
+                {connectionType.label}
               </MenuItem>
             ))}
           </TextField>
@@ -982,7 +1003,7 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, conn
               select
               size="small"
               label={copy.connectionAccount}
-              value={node.connectionId ?? ''}
+              value={connectionIdAvailable ? node.connectionId ?? '' : ''}
               helperText={copy.connectionIdHelper}
               onChange={(event) => onChange((current) => {
                 if (current.type !== 'connection') {
@@ -1013,14 +1034,9 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, conn
           {selectedConnectionOption && selectedConnectionOption.instances.length === 0 ? (
             <Alert severity="warning" variant="outlined">{copy.connectionMissing}</Alert>
           ) : null}
-          {selectedConnectionOption && node.connectionId ? (() => {
-            const instance = selectedConnectionOption.instances.find((candidate) => candidate.id === node.connectionId);
-            return instance && instance.status !== 'connected' ? (
-              <Alert severity="warning" variant="outlined">
-                {connectionInstanceLabel(instance)}: {copy.statusLabels.pending}
-              </Alert>
-            ) : null;
-          })() : null}
+          {node.connectionType && (!connectionTypeAvailable || !selectedConnectionOption || !connectionIdAvailable) ? (
+            <Alert severity="warning" variant="outlined">{copy.connectionMissing}</Alert>
+          ) : null}
           {(() => {
             const action = connectionActions
               .find((entry) => entry.connectionType === node.connectionType && entry.action.id === node.actionId)?.action;

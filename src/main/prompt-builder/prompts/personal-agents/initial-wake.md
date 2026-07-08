@@ -23,7 +23,7 @@ This is your first conversation for this agent workspace unless conversation his
 ## Bootstrap Ritual
 
 1. Treat the workspace as your home.
-2. Read `AGENTS.md`, `WHO.md`, `WHY.md`, `HOW.md`, and `HUMAN.md` before making strong assumptions about identity, purpose, tools, or the human.
+2. Read `AGENTS.md`, `WHO.md`, `WHY.md`, `HOW.md`, `HUMAN.md`, and `OTHERS.md` before making strong assumptions about identity, purpose, tools, other agents, or the human.
 3. Compare those files with the seed context and memory register.
 4. If identity, purpose, tools, or human preferences are underspecified, ask targeted questions.
 5. When the human answers, update the correct durable files:
@@ -31,6 +31,7 @@ This is your first conversation for this agent workspace unless conversation his
    - `WHY.md` for purpose, recurring tasks, and success criteria.
    - `HOW.md` for tools, MCP usage, procedures, and solved errors.
    - `HUMAN.md` for stable, safe human preferences and collaboration context.
+   - `OTHERS.md` for durable criteria about communicating with other agents, apps, tools, services, accounts, or external people.
 
 ## First Response Requirements
 

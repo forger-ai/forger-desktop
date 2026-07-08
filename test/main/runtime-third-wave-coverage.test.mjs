@@ -15,6 +15,7 @@ const { createAgentAuthController } = require('../../dist-electron/main/runtime/
 const { createCommandGitController } = require('../../dist-electron/main/runtime/command-git.js');
 const { createRuntimeInstallController } = require('../../dist-electron/main/runtime/runtime-install.js');
 const { createInstalledAppRuntimeController } = require('../../dist-electron/main/runtime/installed-app-runtime.js');
+const { buildFailureDiagnostic } = require('../../dist-electron/shared/error-diagnostics.js');
 
 const tmpRoot = async (name) => await fs.mkdtemp(path.join(os.tmpdir(), `forger-${name}-`));
 const pythonDarwinReadyMetadata = (archiveSha256 = 'python-archive-sha') => JSON.stringify({
@@ -67,6 +68,8 @@ const withEnv = async (patch, operation) => {
     }
   }
 };
+
+const fsWithStatfs = (statfs) => Object.assign(Object.create(fs), { statfs });
 
 const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -623,6 +626,58 @@ test('agent auth reinstalls Codex and reports fallback status when reinstall fai
   assert.equal(failed.technicalCode, 'npm_failed');
   assert.equal(failed.status.installed, false);
   assert.equal(failure.calls.some((call) => call[0] === 'log' && call[1] === 'codex_auth:reinstall_failed'), true);
+});
+
+test('agent auth reports disk pressure before destructive provider reinstalls', async (t) => {
+  const lowDiskFs = fsWithStatfs(async () => ({ bavail: 1, bsize: 1024 }));
+  const codex = await makeAgentAuthHarness({
+    fs: lowDiskFs,
+    failureDiagnostic: (error, fallbackCode) => buildFailureDiagnostic({ error, fallbackCode }),
+  });
+  t.after(async () => {
+    await fs.rm(codex.root, { recursive: true, force: true });
+  });
+  await fs.mkdir(path.join(codex.root, 'codex-root', 'old'), { recursive: true });
+  await fs.mkdir(path.join(codex.root, 'codex-home'), { recursive: true });
+  await fs.writeFile(path.join(codex.root, 'codex-home', 'auth.json'), '{}', 'utf8');
+
+  const result = await codex.controller.reinstallCodex();
+
+  assert.equal(result.success, false);
+  assert.equal(result.technicalCode, 'disk_space_unavailable');
+  assert.match(result.userMessage, /espacio libre/);
+  assert.equal((await fs.stat(path.join(codex.root, 'codex-root', 'old')).catch(() => null))?.isDirectory(), true);
+  assert.equal((await fs.stat(path.join(codex.root, 'codex-home', 'auth.json')).catch(() => null))?.isFile(), true);
+  assert.equal(codex.calls.some((call) => call[0] === 'runtime'), false);
+  assert.equal(codex.calls.some((call) => call[0] === 'run'), false);
+  assert.equal(codex.calls.some((call) => call[0] === 'log' && call[1] === 'codex_auth:install_preflight_failed'), true);
+});
+
+test('agent auth maps provider npm ENOSPC failures to disk-space guidance', async (t) => {
+  const codex = await makeAgentAuthHarness({
+    failureDiagnostic: (error, fallbackCode) => buildFailureDiagnostic({ error, fallbackCode }),
+    runCommand: async () => {
+      throw Object.assign(new Error('command_failed_1'), {
+        exitCode: 1,
+        signal: null,
+        command: '/forger/node/npm',
+        args: ['install', '--no-audit', '--no-fund', '@openai/codex@0.99.0'],
+        cwd: '/forger/codex-cli',
+        stderr: 'npm warn tar TAR_ENTRY_ERROR ENOSPC: no space left on device, write',
+      });
+    },
+  });
+  t.after(async () => {
+    await fs.rm(codex.root, { recursive: true, force: true });
+  });
+
+  const result = await codex.controller.reinstallCodex();
+
+  assert.equal(result.success, false);
+  assert.equal(result.technicalCode, 'disk_space_unavailable');
+  assert.match(result.userMessage, /espacio libre/);
+  assert.equal(result.details.classifier, 'disk_space_unavailable');
+  assert.match(result.sensitiveDetails.stderr, /ENOSPC/);
 });
 
 test('agent auth installs Claude CLI when npm is available and rejects runtimes without npm', async (t) => {
@@ -3490,6 +3545,9 @@ test('runtime install rejects checksum mismatches and missing runtime executable
     controller.ensureRuntimeInstalled('node', '22.0.0'),
     /runtime_node_executable_not_found/,
   );
+  const missingNodeRoot = path.join(root, 'runtimes', 'node', '22.0.0', 'darwin_arm64');
+  assert.equal(await fs.stat(missingNodeRoot).catch(() => null), null);
+  assert.equal(await fs.stat(path.join(missingNodeRoot, '.ready')).catch(() => null), null);
 
   const pythonMissing = createRuntimeInstallController({
     DEFAULT_NODE_VERSION: '22.0.0',
@@ -3519,6 +3577,44 @@ test('runtime install rejects checksum mismatches and missing runtime executable
     pythonMissing.ensureRuntimeInstalled('python', '22.0.0'),
     /runtime_python_executable_not_found/,
   );
+});
+
+test('runtime install rejects low disk space before extracting archives', async (t) => {
+  const root = await tmpRoot('runtime-install-low-disk');
+  const archivePath = path.join(root, 'resources', 'node', '22.0.0', 'node.tgz');
+  const calls = [];
+  t.after(async () => {
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  await fs.mkdir(path.dirname(archivePath), { recursive: true });
+  await fs.writeFile(archivePath, 'archive', 'utf8');
+  const controller = createRuntimeInstallController({
+    DEFAULT_NODE_VERSION: '22.0.0',
+    DEFAULT_PYTHON_VERSION: '3.12.0',
+    app: { getPath: () => root },
+    clearMacQuarantine: async () => undefined,
+    extractArchive: async () => calls.push(['extract']),
+    findRuntimeArchive: async () => archivePath,
+    findRuntimeChecksumFile: async () => null,
+    fs: fsWithStatfs(async () => ({ bavail: 1, bsize: 1024 })),
+    getBundledResourcesRoot: () => path.join(root, 'resources'),
+    getRuntimesRoot: () => path.join(root, 'runtimes'),
+    getTempRoot: () => path.join(root, 'tmp'),
+    hashFileSha256: async () => 'archive-sha',
+    installBackendDependenciesWithUv: async () => undefined,
+    normalizeNodeRuntimeVersion: (value) => value,
+    normalizeVersionForFolder: (value) => value,
+    path,
+    resolvePlatformAlias: () => 'darwin_arm64',
+    runCommand: async () => undefined,
+    runtimeLocks: new Map(),
+  });
+
+  await assert.rejects(
+    controller.ensureRuntimeInstalled('node', '22.0.0'),
+    /disk_space_unavailable/,
+  );
+  assert.equal(calls.some((call) => call[0] === 'extract'), false);
 });
 
 const makeInstalledRuntimeHarness = (overrides = {}) => {

@@ -29,6 +29,7 @@ Read them in this order:
 3. `WHY.md`: why you exist, what recurring need you serve, success criteria, and purpose boundaries.
 4. `HOW.md`: how you work, how you use tools and MCP, procedures, solved errors, and permission boundaries.
 5. `HUMAN.md`: stable, safe context about the human that helps you collaborate better.
+6. `OTHERS.md`: when and how you communicate with other agents, apps, tools, or external accounts.
 
 If the user provides new instructions that conflict with these files, follow the current explicit instruction for the current task, then update the relevant workspace file only when the change is durable and safe to remember.
 
@@ -54,6 +55,7 @@ Update the companion files when stable context changes:
 - Put mission, recurring tasks, success criteria, and purpose questions in `WHY.md`.
 - Put tool usage, MCP conventions, repeatable procedures, solved tool errors, and permission practices in `HOW.md`.
 - Put stable, safe human preferences and useful collaboration context in `HUMAN.md`.
+- Put durable criteria for communicating with other agents, apps, tools, services, and external accounts in `OTHERS.md`.
 
 Do not update files just to log every message. Durable context belongs in the workspace. Temporary reasoning, abandoned attempts, and one-off task details do not.
 
@@ -73,7 +75,7 @@ Keep these files clean:
 - Do not use these files as transcripts, task logs, scratchpads, or places to store temporary reasoning.
 - Do not store secrets, sensitive raw material, vague personality profiles, or invasive inferences.
 
-After meaningful conversations, briefly check whether `WHO.md`, `WHY.md`, `HOW.md`, or `HUMAN.md` should be improved. If yes, update only the relevant file and keep the edit concise. If nothing durable changed, leave the files alone.
+After meaningful conversations, briefly check whether `WHO.md`, `WHY.md`, `HOW.md`, `HUMAN.md`, or `OTHERS.md` should be improved. If yes, update only the relevant file and keep the edit concise. If nothing durable changed, leave the files alone.
 
 ## Memory
 

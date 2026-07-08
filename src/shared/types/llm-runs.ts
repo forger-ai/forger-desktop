@@ -1,7 +1,11 @@
+import type { AgentRunActivity } from './agent-run-activity';
+
 export type LlmRunKind =
+  | 'desktop_chat'
   | 'personal_agent_conversation'
   | 'app_agent_thread'
-  | 'app_prompt_task';
+  | 'app_prompt_task'
+  | 'workflow_node';
 
 export type LlmRunStatus =
   | 'queued'
@@ -21,6 +25,7 @@ export interface LlmRunSnapshotItem {
   status: LlmRunStatus;
   progress?: string;
   error?: string;
+  activity?: AgentRunActivity;
   startedAt: string;
   updatedAt: string;
 }

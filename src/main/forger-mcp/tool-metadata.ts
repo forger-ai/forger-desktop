@@ -93,6 +93,54 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
     };
   }
 
+  if (toolId === 'forger_get_app_view_snapshot') {
+    return {
+      type: 'object',
+      properties: {
+        appId: {
+          type: 'string',
+          description: 'ID de la app instalada cuya ventana de Forger se inspeccionara.',
+        },
+        selector: {
+          type: 'string',
+          description: 'Selector CSS opcional dentro de la ventana de la app. Omitir para inspeccionar body.',
+        },
+        includeHtml: {
+          type: 'boolean',
+          description: 'Incluye HTML truncado del selector cuando hace falta diagnosticar estructura.',
+        },
+        maxChars: {
+          type: 'number',
+          minimum: 1000,
+          maximum: 50000,
+          description: 'Limite aproximado de caracteres para texto y HTML devueltos.',
+        },
+      },
+      required: ['appId'],
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'forger_get_app_runtime_diagnostics') {
+    return {
+      type: 'object',
+      properties: {
+        appId: {
+          type: 'string',
+          description: 'ID de la app instalada cuyo runtime y logs recientes se revisaran.',
+        },
+        recentLines: {
+          type: 'number',
+          minimum: 10,
+          maximum: 200,
+          description: 'Cantidad maxima de lineas recientes por log.',
+        },
+      },
+      required: ['appId'],
+      additionalProperties: false,
+    };
+  }
+
   if (toolId === 'forger_finish_social_app_install' || toolId === 'forger_delete_quarantined_social_app') {
     return {
       type: 'object',
@@ -211,6 +259,50 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
         },
       },
       required: ['appId'],
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'forger_list_agent_peers') {
+    return {
+      type: 'object',
+      properties: {},
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'forger_ask_agent') {
+    return {
+      type: 'object',
+      properties: {
+        targetAgentId: {
+          type: 'string',
+          description: 'ID del agente permitido al que se iniciara un thread nuevo. Omitir cuando threadId continua un thread existente.',
+        },
+        threadId: {
+          type: 'string',
+          description: 'Thread inter-agente existente para continuar.',
+        },
+        message: {
+          type: 'string',
+          description: 'Mensaje que recibira el otro agente.',
+        },
+      },
+      required: ['message'],
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'forger_read_agent_thread') {
+    return {
+      type: 'object',
+      properties: {
+        threadId: {
+          type: 'string',
+          description: 'Thread inter-agente permitido que se leera en modo solo lectura.',
+        },
+      },
+      required: ['threadId'],
       additionalProperties: false,
     };
   }

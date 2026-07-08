@@ -3,6 +3,7 @@ import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type {
+  AgentRunActivityStatus,
   AppCodexConversation,
   AppCodexConversationCreateInput,
   AppCodexConversationEvent,
@@ -41,6 +42,15 @@ import {
 import { buildProviderRunFailureError } from './app-agent/provider-failures';
 import type { LlmAppMcpServerConfig } from './app-agent/types';
 import type { AppFolderGrantPublic } from './app-folder-grants';
+import {
+  addPermissionActivityItem,
+  addStatusActivityItem,
+  appendProviderActivity,
+  createAgentRunActivity,
+  finalizeAgentRunActivity,
+  normalizeActivityStatus,
+  persistAgentRunActivity,
+} from './chat/agent-run-activity';
 import { appendRunLog, getRunLogPath, mapFailureMessage, normalizeProviderErrorCode, toProviderProgressMessages } from './chat/progress-errors';
 import { createLlmProviderRunService } from './llm-provider/run-service';
 import type { LlmProviderAuthProfileResolver } from './llm-provider/types';
@@ -245,6 +255,19 @@ export class AppAgentConversationManager {
       createdAt: now,
       updatedAt: now,
       progressLog: [],
+      activity: createAgentRunActivity({
+        runId,
+        surface: 'app_agent_thread',
+        status: 'queued',
+        startedAt: now,
+        updatedAt: now,
+        sourceRef: {
+          appId,
+          conversationId: conversation.conversationId,
+          agentId: typeof conversation.metadata?.agentId === 'string' ? conversation.metadata.agentId : undefined,
+          title: conversation.title,
+        },
+      }),
       runLogPath: getRunLogPath(this.options.metadataRoot, runId),
     };
     conversation.messages.push(userMessage);
@@ -287,6 +310,7 @@ export class AppAgentConversationManager {
     run.permissionRequest = undefined;
     run.status = 'canceled';
     run.updatedAt = new Date().toISOString();
+    this.updateActivityForRun(run, conversation, 'canceled');
     conversation.activeRun = toRun(run);
     conversation.updatedAt = run.updatedAt;
     await this.persistApp(appId);
@@ -361,6 +385,12 @@ export class AppAgentConversationManager {
     run.permissionRequest = request;
     run.status = 'needs_permission';
     run.updatedAt = new Date().toISOString();
+    run.activity = addPermissionActivityItem(
+      run.activity ?? this.createActivityForRun(run, conversation),
+      request.reason || `Permission requested for ${request.resource}.`,
+      `${request.permission}:${request.resource}`,
+    );
+    this.updateActivityForRun(run, conversation, 'needs_permission');
     conversation.activeRun = toRun(run);
     conversation.updatedAt = run.updatedAt;
     await this.persistApp(run.appId);
@@ -378,6 +408,7 @@ export class AppAgentConversationManager {
       run.permissionRequest = undefined;
       run.status = run.status === 'needs_permission' ? 'running' : run.status;
       run.updatedAt = new Date().toISOString();
+      this.updateActivityForRun(run, conversation, normalizeActivityStatus(run.status));
       conversation.activeRun = toRun(run);
       conversation.updatedAt = run.updatedAt;
       await this.persistApp(run.appId);
@@ -482,6 +513,7 @@ export class AppAgentConversationManager {
 
     run.status = 'running';
     run.updatedAt = new Date().toISOString();
+    this.updateActivityForRun(run, conversation, 'running');
     conversation.activeRun = toRun(run);
     conversation.updatedAt = run.updatedAt;
     await this.persistApp(conversation.appId);
@@ -589,7 +621,12 @@ export class AppAgentConversationManager {
             ...(run.progressLog ?? []),
             `Provider thread ${lostThreadId} is unavailable. Starting a fresh provider thread for this Vibe conversation.`,
           ].slice(-40);
+          run.activity = addStatusActivityItem(
+            run.activity ?? this.createActivityForRun(run, conversation),
+            `Provider thread ${lostThreadId} is unavailable. Starting a fresh provider thread for this Vibe conversation.`,
+          );
           run.updatedAt = new Date().toISOString();
+          this.updateActivityForRun(run, conversation, 'running');
           conversation.activeRun = toRun(run);
           conversation.updatedAt = run.updatedAt;
           await this.persistApp(conversation.appId);
@@ -628,6 +665,7 @@ export class AppAgentConversationManager {
       conversation.messages.push(assistantMessage);
       run.status = 'completed';
       run.updatedAt = assistantMessage.createdAt;
+      this.updateActivityForRun(run, conversation, 'completed');
       conversation.activeRun = toRun(run);
       conversation.updatedAt = assistantMessage.createdAt;
       await this.persistApp(conversation.appId);
@@ -751,18 +789,30 @@ export class AppAgentConversationManager {
     stream: 'stdout' | 'stderr' | 'meta',
     text: string,
   ): void {
+    const activityItemCount = run.activity?.counts.total ?? 0;
+    run.activity = appendProviderActivity({
+      activity: run.activity ?? this.createActivityForRun(run, conversation),
+      provider,
+      stream,
+      text,
+    });
+    const activityChanged = (run.activity?.counts.total ?? 0) !== activityItemCount;
     const progressMessages = provider === 'antigravity'
       ? toProviderProgressMessages(provider, stream, text, run.locale)
       : [progressFromCodexOutput(text, run.locale)].filter((progress): progress is string => Boolean(progress));
-    if (progressMessages.length === 0) {
+    if (progressMessages.length === 0 && !activityChanged) {
       return;
     }
     run.progressLog = [...(run.progressLog ?? []), ...progressMessages].slice(-40);
     run.updatedAt = new Date().toISOString();
+    this.updateActivityForRun(run, conversation, normalizeActivityStatus(run.status));
     conversation.activeRun = toRun(run);
     conversation.updatedAt = run.updatedAt;
     void this.persistApp(conversation.appId);
-    for (const progress of progressMessages) {
+    const eventProgressMessages = progressMessages.length > 0
+      ? progressMessages
+      : run.activity?.summary ? [run.activity.summary] : [];
+    for (const progress of eventProgressMessages) {
       this.options.onConversationEvent({
         type: 'run.progress',
         conversation: toConversation(conversation),
@@ -791,6 +841,7 @@ export class AppAgentConversationManager {
     run.error = message;
     run.errorDetails = errorDetails;
     run.updatedAt = new Date().toISOString();
+    this.updateActivityForRun(run, conversation, 'failed', message);
     conversation.activeRun = toRun(run);
     conversation.updatedAt = run.updatedAt;
     await this.persistApp(run.appId);
@@ -808,6 +859,39 @@ export class AppAgentConversationManager {
         pending.resolve(decision);
       }
     }
+  }
+
+  private createActivityForRun(run: InternalRun, conversation?: InternalConversation) {
+    return createAgentRunActivity({
+      runId: run.runId,
+      surface: 'app_agent_thread',
+      status: normalizeActivityStatus(run.status),
+      startedAt: run.createdAt,
+      updatedAt: run.updatedAt,
+      sourceRef: {
+        appId: run.appId,
+        conversationId: run.conversationId,
+        agentId: typeof conversation?.metadata?.agentId === 'string' ? conversation.metadata.agentId : undefined,
+        title: conversation?.title,
+      },
+    });
+  }
+
+  private updateActivityForRun(
+    run: InternalRun,
+    conversation: InternalConversation | undefined,
+    status: AgentRunActivityStatus,
+    error?: string,
+  ): void {
+    const base = run.activity ?? this.createActivityForRun(run, conversation);
+    run.activity = status === 'completed' || status === 'failed' || status === 'canceled'
+      ? finalizeAgentRunActivity(base, status, run.updatedAt, error)
+      : {
+          ...base,
+          status,
+          updatedAt: run.updatedAt,
+        };
+    void persistAgentRunActivity(this.options.metadataRoot, run.activity);
   }
 
   private async assertEnabled(appId: string): Promise<void> {

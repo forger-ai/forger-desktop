@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import path from 'node:path';
 import type {
+  AgentRunActivity,
   AgentRuntime,
   AgentRuntimeRequest,
   AppSummary,
@@ -37,6 +38,12 @@ import {
   computeNextRunAt,
   defaultMissedRunWindowMinutes,
 } from './automation-manager';
+import {
+  appendProviderActivity,
+  createAgentRunActivity,
+  finalizeAgentRunActivity,
+  persistAgentRunActivity,
+} from './chat/agent-run-activity';
 import { renderPromptFile } from './prompt-builder';
 import type { LlmProviderAuthProfileResolver } from './llm-provider/types';
 import {
@@ -117,6 +124,7 @@ interface WorkflowManagerOptions {
   callConnectionAction?: (input: CallConnectionActionInput) => Promise<CallConnectionActionResult>;
   callConnectorAction?: (input: CallOfficialToolInput) => Promise<CallOfficialToolResult>;
   getValidToolIds?: () => ReadonlySet<string>;
+  onAgentRunActivity?: (activity: AgentRunActivity) => void;
   onWorkflowUpdated: (event: WorkflowUpdatedEvent) => void;
 }
 
@@ -888,6 +896,28 @@ export class WorkflowManager {
     const nodeRunKey = `${run.id}:${node.id}`;
     let forgerMcpSession: { url: string; token: string } | null = null;
     let appMcpListening = false;
+    const startedAt = new Date().toISOString();
+    let activity = createAgentRunActivity({
+      runId: nodeRunKey,
+      surface: 'workflow_node',
+      status: 'running',
+      startedAt,
+      updatedAt: startedAt,
+      sourceRef: {
+        workflowId: workflow.id,
+        workflowName: workflow.name,
+        nodeId: node.id,
+        nodeName: node.name,
+        title: node.name,
+        appId: config.appIds[0],
+      },
+    });
+    const emitActivity = (next: AgentRunActivity): void => {
+      activity = next;
+      this.options.onAgentRunActivity?.(activity);
+      void persistAgentRunActivity(this.options.metadataRoot, activity);
+    };
+    emitActivity(activity);
     const inputContext = this.buildAgentInputContext(context);
     let nodeRunInput: Record<string, unknown> = {
       renderedPrompt: renderTemplateString(config.prompt, context),
@@ -955,6 +985,21 @@ export class WorkflowManager {
           active.children.add(child);
           child.once('exit', () => active.children.delete(child));
         },
+        onOutput: (stream, text) => {
+          const nextActivity = appendProviderActivity({
+            activity,
+            provider: runtime.provider,
+            stream,
+            text,
+          });
+          if (nextActivity.counts.total !== activity.counts.total) {
+            emitActivity({
+              ...nextActivity,
+              status: 'running',
+              updatedAt: new Date().toISOString(),
+            });
+          }
+        },
         onAssistantMessages: (messages) => {
           assistantMessages = messages;
         },
@@ -963,8 +1008,10 @@ export class WorkflowManager {
       const completion = this.nodeCompletions.get(nodeRunKey);
       if (completion) {
         if (completion.status === 'failed') {
+          emitActivity(finalizeAgentRunActivity(activity, 'failed', new Date().toISOString(), completion.reason));
           return { status: 'failed', input: nodeRunInput, error: completion.reason ?? 'workflow_node_reported_failure' };
         }
+        emitActivity(finalizeAgentRunActivity(activity, 'completed', new Date().toISOString()));
         return {
           status: 'succeeded',
           input: nodeRunInput,
@@ -982,6 +1029,12 @@ export class WorkflowManager {
         ?? assistantMessages[assistantMessages.length - 1]
         ?? '';
       if (result.code !== 0) {
+        emitActivity(finalizeAgentRunActivity(
+          activity,
+          'failed',
+          new Date().toISOString(),
+          (result.stderr || result.stdout || 'workflow_agent_exec_failed').trim().slice(0, 2_000),
+        ));
         return {
           status: 'failed',
           input: nodeRunInput,
@@ -990,6 +1043,7 @@ export class WorkflowManager {
       }
       // The agent finished without reporting through MCP: fall back to its
       // final message so downstream nodes still receive usable output.
+      emitActivity(finalizeAgentRunActivity(activity, 'completed', new Date().toISOString()));
       return {
         status: 'succeeded',
         input: nodeRunInput,
@@ -997,6 +1051,12 @@ export class WorkflowManager {
         summary: lastMessage.slice(0, 2_000),
       };
     } catch (error) {
+      emitActivity(finalizeAgentRunActivity(
+        activity,
+        'failed',
+        new Date().toISOString(),
+        error instanceof Error ? error.message : 'workflow_agent_exec_failed',
+      ));
       return {
         status: 'failed',
         input: nodeRunInput,

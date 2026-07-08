@@ -5,6 +5,7 @@ export type DesktopUpdateStatus =
   | 'available'
   | 'downloading'
   | 'ready'
+  | 'installer_opened'
   | 'unsupported'
   | 'error';
 
@@ -46,6 +47,8 @@ export interface DesktopUpdateState {
   pendingReleaseSummaries?: DesktopUpdateReleaseSummary[];
   asset?: DesktopUpdateAsset;
   downloadedPath?: string;
+  installerRequiresQuit?: boolean;
+  installerQuitDelaySeconds?: number;
   progress?: number;
   downloadedBytes?: number;
   totalBytes?: number;

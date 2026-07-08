@@ -130,6 +130,9 @@ const toConnectionInstance = (
   isDefault: defaults[persisted.type] === persisted.id,
 });
 
+const isConnectedConnectionInstance = (instance: ConnectionInstance): boolean =>
+  instance.status === 'connected';
+
 export class ConnectionsService {
   private readonly modulesByType: Map<string, InternalConnectionModule>;
   private registry: ConnectionsRegistryFile = emptyRegistry();
@@ -344,6 +347,9 @@ export class ConnectionsService {
     }
     const instances = (await this.listInstances()).filter((instance) => {
       if (!grantTypes.has(instance.type)) {
+        return false;
+      }
+      if (!isConnectedConnectionInstance(instance)) {
         return false;
       }
       const allowedIds = allowedIdsByType.get(instance.type);
@@ -602,20 +608,28 @@ export class ConnectionsService {
   ): Promise<string | CallConnectionActionResult | null> {
     const instances = await this.listInstances(type);
     const grantedIds = grant?.connectionIds?.length ? new Set(grant.connectionIds) : null;
-    const available = grantedIds
+    const grantedInstances = grantedIds
       ? instances.filter((instance) => grantedIds.has(instance.id))
       : instances;
+    const available = grantedInstances.filter(isConnectedConnectionInstance);
     if (requestedConnectionId) {
-      const match = available.find((instance) => instance.id === requestedConnectionId);
-      return match
-        ? match.id
-        : { success: false, userMessage: 'Connection is not available for this caller.', technicalCode: 'connection_not_granted' };
+      const grantedMatch = grantedInstances.find((instance) => instance.id === requestedConnectionId);
+      if (!grantedMatch) {
+        return { success: false, userMessage: 'Connection is not available for this caller.', technicalCode: 'connection_not_granted' };
+      }
+      if (!isConnectedConnectionInstance(grantedMatch)) {
+        return { success: false, userMessage: 'Connection is not connected.', technicalCode: 'connection_not_connected' };
+      }
+      return grantedMatch.id;
     }
     const defaultInstance = available.find((instance) => instance.isDefault);
     if (defaultInstance) {
       return defaultInstance.id;
     }
     if (available.length === 0) {
+      if (grantedInstances.length > 0) {
+        return { success: false, userMessage: 'Connection is not connected.', technicalCode: 'connection_not_connected' };
+      }
       return null;
     }
     return {

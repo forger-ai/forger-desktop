@@ -3,9 +3,13 @@ import type { FailureDiagnosticFields } from './base';
 import type { AgentToolId, OfficialToolSummary } from './tools';
 import type { AppSummary } from './catalog';
 import type { ConnectionActionDefinition, ConnectionInstance, ConnectionTypeDefinition } from './connections';
+import type { SharedFileRef } from './chat';
+import type { AgentRunActivity } from './agent-run-activity';
 
 export type PersonalAgentMessageRole = 'user' | 'assistant' | 'system';
 export type PersonalAgentMessageKind = 'message' | 'intermediate';
+export type PersonalAgentMessageAuthorType = 'human' | 'agent' | 'system';
+export type PersonalAgentConversationOrigin = 'user' | 'agent';
 export type PersonalAgentConversationStatus = 'active' | 'archived';
 export type PersonalAgentRunStatus = 'queued' | 'running' | 'needs_permission' | 'completed' | 'failed' | 'canceled';
 
@@ -21,6 +25,7 @@ export interface PersonalAgent {
   appIds: string[];
   toolIds: AgentToolId[];
   connectionGrants: PersonalAgentConnectionGrant[];
+  peerAgentGrants: PersonalAgentPeerGrant[];
   createdAt: string;
   updatedAt: string;
 }
@@ -30,6 +35,15 @@ export interface PersonalAgentConnectionGrant {
   actions: string[];
   multiple: boolean;
   connectionIds?: string[];
+}
+
+export interface PersonalAgentPeerGrant {
+  agentId: string;
+  name?: string;
+  description?: string;
+  criteria: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface PersonalAgentCreateInput {
@@ -43,6 +57,7 @@ export interface PersonalAgentCreateInput {
   appIds?: string[];
   toolIds?: AgentToolId[];
   connectionGrants?: PersonalAgentConnectionGrant[];
+  peerAgentGrants?: PersonalAgentPeerGrant[];
 }
 
 export interface PersonalAgentDeleteInput {
@@ -57,6 +72,7 @@ export interface PersonalAgentUpdatePermissionsInput {
   appIds?: string[];
   toolIds?: AgentToolId[];
   connectionGrants?: PersonalAgentConnectionGrant[];
+  peerAgentGrants?: PersonalAgentPeerGrant[];
 }
 
 export interface PersonalAgentGrantOptionApp {
@@ -94,10 +110,17 @@ export interface PersonalAgentGrantOptionConnection {
   actions: ConnectionActionDefinition[];
 }
 
+export interface PersonalAgentGrantOptionPeerAgent {
+  agentId: string;
+  name: string;
+  description?: string;
+}
+
 export interface PersonalAgentGrantOptions {
   apps: PersonalAgentGrantOptionApp[];
   tools: PersonalAgentGrantOptionTool[];
   connections: PersonalAgentGrantOptionConnection[];
+  peerAgents: PersonalAgentGrantOptionPeerAgent[];
 }
 
 export interface PersonalAgentPermission {
@@ -117,12 +140,18 @@ export interface PersonalAgentConversation {
   agentId: string;
   title: string;
   status: PersonalAgentConversationStatus;
+  origin: PersonalAgentConversationOrigin;
+  readOnly: boolean;
+  initiatorAgentId?: string;
+  initiatorAgentName?: string;
+  peerThreadId?: string;
   createdAt: string;
   updatedAt: string;
   providerThreadId?: string | null;
   provider?: AgentRuntime['provider'] | null;
   messages: PersonalAgentMessage[];
   activeRun?: PersonalAgentRun;
+  peerThreads?: PersonalAgentPeerThread[];
 }
 
 export interface PersonalAgentConversationsListInput {
@@ -146,13 +175,59 @@ export interface PersonalAgentMessage {
   runId?: string;
   role: PersonalAgentMessageRole;
   kind: PersonalAgentMessageKind;
+  authorType: PersonalAgentMessageAuthorType;
+  authorAgentId?: string;
+  authorAgentName?: string;
   content: string;
+  createdAt: string;
+  files?: PersonalAgentMessageFile[];
+}
+
+export interface PersonalAgentMessageFile {
+  id: string;
+  messageId: string;
+  agentId: string;
+  conversationId: string;
+  name: string;
+  path: string;
+  relativePath: string;
+  sizeBytes?: number;
+  source?: SharedFileRef['source'];
   createdAt: string;
 }
 
 export interface PersonalAgentMessageSendInput {
   conversationId: string;
   content: string;
+  sharedFiles?: SharedFileRef[];
+}
+
+export interface PersonalAgentPeerThread {
+  id: string;
+  callerAgentId: string;
+  callerAgentName?: string;
+  targetAgentId: string;
+  targetAgentName?: string;
+  sourceConversationId: string;
+  targetConversationId: string;
+  parentThreadId?: string | null;
+  rootThreadId?: string | null;
+  createdByRunId?: string | null;
+  title: string;
+  status: 'active' | 'failed' | 'completed';
+  createdAt: string;
+  updatedAt: string;
+  messages?: PersonalAgentMessage[];
+  children?: PersonalAgentPeerThread[];
+}
+
+export interface PersonalAgentPeerThreadsListInput {
+  agentId: string;
+  conversationId?: string;
+}
+
+export interface PersonalAgentPeerThreadGetInput {
+  threadId: string;
 }
 
 export interface PersonalAgentRunProgress {
@@ -170,6 +245,7 @@ export interface PersonalAgentRun {
   conversationId: string;
   status: PersonalAgentRunStatus;
   progress: PersonalAgentRunProgress[];
+  activity?: AgentRunActivity;
   error?: string;
   createdAt: string;
   updatedAt: string;

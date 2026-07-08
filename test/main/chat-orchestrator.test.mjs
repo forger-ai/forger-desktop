@@ -547,7 +547,7 @@ test('chat helper functions normalize history, progress, stale errors, and publi
   ].join('\n'));
   assert.equal(progress[0], 'First response');
   assert.match(progress[1], /^Second/);
-  assert.ok(progress[1].endsWith('...'));
+  assert.equal(progress[1], 'Second'.repeat(60));
   assert.deepEqual(toProgressMessages('meta', progress[0]), []);
   assert.deepEqual(toProgressMessages('stdout', JSON.stringify({
     type: 'item.started',
@@ -703,6 +703,13 @@ test('chat run logs use the metadata run directory and preserve existing newline
     await assert.doesNotReject(() => appendRunLog(runLogPath, 'meta', 'cleanup race'));
 
     fsPromises.mkdir = originalMkdir;
+    fsPromises.appendFile = async () => {
+      const error = new Error(`EINVAL: invalid argument, open '${runLogPath}'`);
+      error.code = 'EINVAL';
+      throw error;
+    };
+    await assert.doesNotReject(() => appendRunLog(runLogPath, 'meta', 'cleanup race during append'));
+
     fsPromises.appendFile = async () => {
       const error = new Error('run log denied');
       error.code = 'EACCES';
@@ -1434,7 +1441,7 @@ console.log(JSON.stringify({ result: 'final claude answer' }));
     assert.equal(args.includes('--permission-mode'), true);
     assert.equal(args[args.indexOf('--permission-mode') + 1], 'acceptEdits');
     assert.equal(args.includes('--allowedTools'), true);
-    assert.equal(args[args.indexOf('--allowedTools') + 1], 'mcp__forger__*,mcp__app_finance-os__*');
+    assert.equal(args[args.indexOf('--allowedTools') + 1], 'Bash,mcp__forger__*,mcp__app_finance-os__*');
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -3,7 +3,7 @@ import type path from 'node:path';
 import os from 'node:os';
 import { randomUUID } from 'node:crypto';
 import type * as Electron from 'electron';
-import { BrowserWindow, systemPreferences, type IpcMain } from 'electron';
+import { BrowserWindow, type IpcMain } from 'electron';
 import { getAgentToolPackages } from '../core/agent-tool-packages';
 import type { AppAgentConversationManager } from '../app-agent-conversation-manager';
 import type { AppAgentTaskManager } from '../app-agent-task-manager';
@@ -37,13 +37,13 @@ import {
 } from '../desktop-error-report-artifacts';
 import { appendDesktopLog, type DesktopLogLevel } from '../desktop-logger';
 import type { IPC_CHANNELS as IpcChannels } from '../../shared/ipc';
-import type { MicrophonePermissionStatus } from '../../shared/types/desktop-api';
 import { registerAppCloudMessagingIpcHandlers } from './app-cloud-messaging-handlers';
 import { registerAppRuntimeIpcHandlers } from './app-runtime-handlers';
 import { registerChatIpcHandlers } from './chat-handlers';
 import { registerConnectionIpcHandlers } from './connection-handlers';
 import { registerFileLibraryIpcHandlers } from './file-library-handlers';
 import { registerLiveVoiceInputIpcHandlers } from './live-voice-input-handlers';
+import { getMicrophonePermissionStatus, requestMicrophonePermission } from './microphone-permissions';
 import { registerPersonalAgentIpcHandlers } from './personal-agent-handlers';
 import { registerWakeWordIpcHandlers } from './wake-word-handlers';
 import { getAgentProviderUsageSafely } from '../provider-usage';
@@ -144,34 +144,6 @@ import type { AppManifest, AppRegistry, InstalledAppRecord } from '../core/main-
 
 const conversationDiagnosticAttachmentCache = new Map<string, ConversationDiagnosticAttachmentUpload[]>();
 const desktopErrorReportAttachmentCache = new Map<string, DesktopErrorReportAttachmentUpload[]>();
-
-const normalizeMicrophonePermissionStatus = (value: unknown): MicrophonePermissionStatus => {
-  if (
-    value === 'not-determined' ||
-    value === 'granted' ||
-    value === 'denied' ||
-    value === 'restricted' ||
-    value === 'unknown'
-  ) {
-    return value;
-  }
-  return 'unknown';
-};
-
-const getMicrophonePermissionStatus = (): MicrophonePermissionStatus => {
-  if (process.platform !== 'darwin' || typeof systemPreferences.getMediaAccessStatus !== 'function') {
-    return 'unsupported';
-  }
-  return normalizeMicrophonePermissionStatus(systemPreferences.getMediaAccessStatus('microphone'));
-};
-
-const requestMicrophonePermission = async (): Promise<MicrophonePermissionStatus> => {
-  if (process.platform !== 'darwin' || typeof systemPreferences.askForMediaAccess !== 'function') {
-    return getMicrophonePermissionStatus();
-  }
-  const granted = await systemPreferences.askForMediaAccess('microphone');
-  return granted ? 'granted' : getMicrophonePermissionStatus();
-};
 
 interface MainIpcState {
   agentToolSettings: AgentToolSettings;
@@ -941,6 +913,10 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
   ipcMain.handle(IPC_CHANNELS.checkDesktopUpdates, async () => await getDesktopUpdater().check());
   ipcMain.handle(IPC_CHANNELS.downloadDesktopUpdate, async () => await getDesktopUpdater().download());
   ipcMain.handle(IPC_CHANNELS.installDesktopUpdate, async () => await getDesktopUpdater().install());
+  ipcMain.handle(IPC_CHANNELS.desktopUpdateQuitForInstall, async () => {
+    app.quit();
+    return { success: true };
+  });
   ipcMain.handle(IPC_CHANNELS.getForgerAccount, async () => publicForgerAccount(state.forgerAccount));
   ipcMain.handle(IPC_CHANNELS.registerForgerAccount, async (_event, input: ForgerAccountRegisterInput) => {
     return forgerBackendClient
@@ -1552,9 +1528,13 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
 
   registerPersonalAgentIpcHandlers({
     IPC_CHANNELS,
+    ensurePathInside,
+    fs,
+    getPrivateDataRoot,
     getPersonalAgentConversationManager,
     getPersonalAgentStore,
     ipcMain,
+    path,
     isAgentProviderConnected: async (provider: AgentProvider) => {
       if (provider === 'claude') {
         return Boolean((await getClaudeAuthStatus() as { authenticated?: boolean }).authenticated);

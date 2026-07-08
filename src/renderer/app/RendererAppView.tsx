@@ -1,8 +1,6 @@
-import { alpha, Box, Button, Chip, CssBaseline, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel, LinearProgress, Link, Stack, Switch, ThemeProvider, Tooltip, Typography } from '@mui/material';
+import { Box, Button, Chip, CssBaseline, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel, LinearProgress, Link, Stack, Switch, ThemeProvider, Tooltip, Typography } from '@mui/material';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import type { AgentEffort, AntigravityEffort, AudioRuntimeBrokerRequest, AudioRuntimeDevices, BackgroundTask, CatalogApp, ClaudeEffort, CodexReasoningEffort, DesktopUpdateReleaseSummary, WakeWordState } from '@shared/types';
+import type { AgentEffort, AntigravityEffort, AudioRuntimeBrokerRequest, BackgroundTask, CatalogApp, ClaudeEffort, CodexReasoningEffort, DesktopUpdateReleaseSummary, WakeWordState } from '@shared/types';
 import { AppShell } from '@renderer/components/AppShell';
 import { AppCard } from '@renderer/components/AppCard';
 import { AppsGrid } from '@renderer/components/AppsGrid';
@@ -34,6 +32,8 @@ import { TourOverlay } from '@renderer/tour/TourOverlay';
 import { useForgerTour } from '@renderer/tour/useForgerTour';
 import { appExecutionTooltip } from '@renderer/app-execution-labels';
 import { RendererAppDialogs } from './RendererAppDialogs';
+import { DesktopUpdateSummaryMarkdown } from './DesktopUpdateSummaryMarkdown';
+import { enumerateAudioRuntimeDevices, playRuntimeAudio } from './audio-runtime-browser';
 import { LocalNetworkShareDialog } from '@renderer/components/LocalNetworkShareDialog';
 import { WakeWordClientRunner } from '@renderer/services/WakeWordClientRunner';
 import type { RuntimeProviderControls } from '@renderer/runtime-provider-controls';
@@ -41,176 +41,14 @@ import type { RuntimeProviderControls } from '@renderer/runtime-provider-control
 interface RendererAppViewProps {
   controller: Record<string, any>;
 }
-function DesktopUpdateSummaryMarkdown({
-  content,
-  onOpenExternalUrl,
-}: {
-  content: string;
-  onOpenExternalUrl: (url: string) => void;
-}) {
-  return (
-    <Box
-      sx={(theme) => ({
-        color: 'text.secondary',
-        fontSize: theme.typography.body2.fontSize,
-        lineHeight: 1.55,
-        overflowWrap: 'anywhere',
-        wordBreak: 'break-word',
-        '& > :first-child': { mt: 0 },
-        '& > :last-child': { mb: 0 },
-        '& p': { my: 0.5 },
-        '& ul, & ol': { my: 0.5, pl: 2.25 },
-        '& li': { mb: 0.35 },
-        '& h1, & h2, & h3, & h4': {
-          color: 'text.primary',
-          fontSize: theme.typography.subtitle2.fontSize,
-          lineHeight: 1.25,
-          mt: 1,
-          mb: 0.5,
-        },
-        '& code': {
-          bgcolor: alpha(theme.palette.text.primary, 0.08),
-          borderRadius: 0.75,
-          color: 'text.primary',
-          fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-          fontSize: '0.88em',
-          px: 0.5,
-          py: 0.1,
-        },
-        '& a': {
-          color: 'primary.main',
-          fontWeight: 500,
-          textUnderlineOffset: '2px',
-        },
-        '& blockquote': {
-          borderLeft: `3px solid ${theme.palette.divider}`,
-          ml: 0,
-          my: 0.75,
-          pl: 1.25,
-        },
-      })}
-    >
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={{
-          a: ({ href, children }) => (
-            <Link
-              href={href}
-              onClick={(event) => {
-                if (!href) return;
-                event.preventDefault();
-                onOpenExternalUrl(href);
-              }}
-            >
-              {children}
-            </Link>
-          ),
-        }}
-      >
-        {content}
-      </ReactMarkdown>
-    </Box>
-  );
-}
-const platformSupportsSystemAudioCapture = (): boolean =>
-  typeof navigator !== 'undefined' && /Mac|Win|Linux/.test(navigator.platform);
-
-const enumerateAudioRuntimeDevices = async (): Promise<AudioRuntimeDevices> => {
-  if (!navigator.mediaDevices?.enumerateDevices) {
-    return { inputDevices: [], outputDevices: [] };
-  }
-  let devices = await navigator.mediaDevices.enumerateDevices();
-  if (devices.some((device) => (device.kind === 'audioinput' || device.kind === 'audiooutput') && !device.label)) {
-    const probe = await navigator.mediaDevices.getUserMedia({ audio: true }).catch(() => null);
-    probe?.getTracks().forEach((track) => track.stop());
-    devices = await navigator.mediaDevices.enumerateDevices();
-  }
-  const inputDevices = devices
-    .filter((device) => device.kind === 'audioinput')
-    .map((device, index) => ({
-      id: device.deviceId || `audioinput-${index}`,
-      label: device.label || (index === 0 ? 'Default microphone' : `Microphone ${index + 1}`),
-      kind: 'microphone' as const,
-      ...(device.groupId ? { groupId: device.groupId } : {}),
-      default: index === 0 || device.deviceId === 'default',
-      supported: true,
-    }));
-  const systemAudioDevices = platformSupportsSystemAudioCapture()
-    ? [{
-      id: 'system-audio:default',
-      label: 'System audio',
-      kind: 'system_audio' as const,
-      default: inputDevices.length === 0,
-      supported: true,
-      requiresDisplayCapture: true,
-    }]
-    : [];
-  const outputDevices = devices
-    .filter((device) => device.kind === 'audiooutput')
-    .map((device, index) => ({
-      id: device.deviceId || `audiooutput-${index}`,
-      label: device.label || (index === 0 ? 'Default speaker' : `Speaker ${index + 1}`),
-      kind: 'speaker' as const,
-      ...(device.groupId ? { groupId: device.groupId } : {}),
-      default: index === 0 || device.deviceId === 'default',
-      supported: true,
-    }));
-  return {
-    inputDevices: [...inputDevices, ...systemAudioDevices],
-    outputDevices: outputDevices.length > 0 ? outputDevices : [{
-      id: 'default',
-      label: 'Default speaker',
-      kind: 'speaker',
-      default: true,
-      supported: true,
-    }],
-  };
-};
-const decodeAudioDataUrl = (audioDataBase64: string, mimeType: string): string => {
-  const raw = atob(audioDataBase64);
-  const bytes = new Uint8Array(raw.length);
-  for (let index = 0; index < raw.length; index += 1) {
-    bytes[index] = raw.charCodeAt(index);
-  }
-  return URL.createObjectURL(new Blob([bytes], { type: mimeType || 'audio/wav' }));
-};
-
-const playRuntimeAudio = async (
-  activePlaybacks: Map<string, HTMLAudioElement>,
-  input: Extract<AudioRuntimeBrokerRequest, { type: 'play_audio' }>,
-): Promise<{ success: boolean; durationSeconds?: number; error?: string }> => {
-  const objectUrl = decodeAudioDataUrl(input.audioDataBase64, input.mimeType);
-  const audio = new Audio(objectUrl);
-  activePlaybacks.set(input.playbackId, audio);
-  try {
-    if (input.outputDeviceId && input.outputDeviceId !== 'default' && 'setSinkId' in audio) {
-      await (audio as HTMLAudioElement & { setSinkId: (sinkId: string) => Promise<void> }).setSinkId(input.outputDeviceId).catch(() => undefined);
-    }
-    await new Promise<void>((resolve, reject) => {
-      audio.onended = () => resolve();
-      audio.onerror = () => reject(new Error('audio_playback_failed'));
-      void audio.play().catch(reject);
-    });
-    return {
-      success: true,
-      ...(Number.isFinite(audio.duration) ? { durationSeconds: audio.duration } : {}),
-    };
-  } catch (error) {
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'audio_playback_failed',
-    };
-  } finally {
-    activePlaybacks.delete(input.playbackId);
-    URL.revokeObjectURL(objectUrl);
-  }
-};
 
 export function RendererAppView({ controller }: RendererAppViewProps) {
   const audioRuntimePlaybacksRef = useRef<Map<string, HTMLAudioElement>>(new Map());
+  const desktopUpdateQuitRequestedRef = useRef(false);
   const [settingsInitialSubview, setSettingsInitialSubview] = useState<'main' | 'llmProvider' | 'storage' | 'wakeWord' | null>(null);
   const [desktopUpdateModalOpen, setDesktopUpdateModalOpen] = useState(false);
   const [desktopUpdateModalDismissedVersion, setDesktopUpdateModalDismissedVersion] = useState<string | null>(null);
+  const [desktopUpdateQuitCountdownSeconds, setDesktopUpdateQuitCountdownSeconds] = useState<number | null>(null);
   const {
     getDesktopApi,
     resetOnboarding,
@@ -347,6 +185,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     activeConversationRunActive,
     activeConversationRunId,
     activeConversationProgressLines,
+    activeConversationActivity,
     codexAuthStatus,
     claudeAuthStatus,
     antigravityAuthStatus,
@@ -496,6 +335,12 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
       : [];
   const canDownloadDesktopUpdate = desktopUpdateState.status === 'available' && Boolean(desktopUpdateState.asset);
   const canInstallDesktopUpdate = desktopUpdateState.status === 'ready' && Boolean(desktopUpdateState.downloadedPath);
+  const isDesktopUpdateDownloading = desktopUpdateState.status === 'downloading';
+  const isDesktopUpdateInstallerOpened = desktopUpdateState.status === 'installer_opened';
+  const desktopUpdateInstallerRequiresQuit = isDesktopUpdateInstallerOpened && desktopUpdateState.installerRequiresQuit === true;
+  const desktopUpdateProgressPercent = typeof desktopUpdateState.progress === 'number'
+    ? Math.max(0, Math.min(100, Math.round(desktopUpdateState.progress * 100)))
+    : null;
 
   const runtimeProviderControls: RuntimeProviderControls = {
     codex: {
@@ -577,19 +422,84 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
 
   useEffect(() => {
     if (
-      (desktopUpdateState.status === 'available' || desktopUpdateState.status === 'ready') &&
+      (
+        desktopUpdateState.status === 'available' ||
+        desktopUpdateState.status === 'downloading' ||
+        desktopUpdateState.status === 'ready' ||
+        desktopUpdateInstallerRequiresQuit
+      ) &&
       desktopUpdateState.availableVersion &&
       desktopUpdateModalDismissedVersion !== desktopUpdateState.availableVersion
     ) {
       setDesktopUpdateModalOpen(true);
     }
-  }, [desktopUpdateModalDismissedVersion, desktopUpdateState.availableVersion, desktopUpdateState.status]);
+  }, [
+    desktopUpdateInstallerRequiresQuit,
+    desktopUpdateModalDismissedVersion,
+    desktopUpdateState.availableVersion,
+    desktopUpdateState.status,
+  ]);
+
+  useEffect(() => {
+    if (
+      desktopUpdateState.status === 'installer_opened' &&
+      desktopUpdateState.installerRequiresQuit === false &&
+      desktopUpdateState.availableVersion
+    ) {
+      setDesktopUpdateModalDismissedVersion(desktopUpdateState.availableVersion);
+      setDesktopUpdateModalOpen(false);
+    }
+  }, [
+    desktopUpdateState.availableVersion,
+    desktopUpdateState.installerRequiresQuit,
+    desktopUpdateState.status,
+  ]);
+
+  useEffect(() => {
+    if (!desktopUpdateModalOpen || !desktopUpdateInstallerRequiresQuit) {
+      setDesktopUpdateQuitCountdownSeconds(null);
+      desktopUpdateQuitRequestedRef.current = false;
+      return () => undefined;
+    }
+
+    const delaySeconds = desktopUpdateState.installerQuitDelaySeconds ?? 5;
+    setDesktopUpdateQuitCountdownSeconds(delaySeconds);
+    const timer = window.setInterval(() => {
+      setDesktopUpdateQuitCountdownSeconds((current) => {
+        const next = Math.max(0, (current ?? delaySeconds) - 1);
+        if (next === 0 && !desktopUpdateQuitRequestedRef.current) {
+          desktopUpdateQuitRequestedRef.current = true;
+          window.clearInterval(timer);
+          void getDesktopApi().desktopUpdateQuitForInstall();
+        }
+        return next;
+      });
+    }, 1000);
+
+    return () => {
+      window.clearInterval(timer);
+      desktopUpdateQuitRequestedRef.current = false;
+    };
+  }, [
+    desktopUpdateInstallerRequiresQuit,
+    desktopUpdateModalOpen,
+    desktopUpdateState.installerQuitDelaySeconds,
+    getDesktopApi,
+  ]);
 
   const closeDesktopUpdateModal = () => {
+    if (isDesktopUpdateDownloading) {
+      return;
+    }
     if (desktopUpdateState.availableVersion) {
       setDesktopUpdateModalDismissedVersion(desktopUpdateState.availableVersion);
     }
     setDesktopUpdateModalOpen(false);
+  };
+
+  const quitDesktopUpdateForInstall = () => {
+    desktopUpdateQuitRequestedRef.current = true;
+    void getDesktopApi().desktopUpdateQuitForInstall();
   };
   const installedViewApps = useMemo<CatalogApp[]>(
     () =>
@@ -945,6 +855,33 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
                 desktopUpdateState.availableVersion ?? '-',
               )}
             </Typography>
+            {isDesktopUpdateDownloading ? (
+              <Stack spacing={1}>
+                <Typography variant="body2" color="text.secondary">
+                  {desktopUpdateProgressPercent === null
+                    ? t.settings.desktopDownloading
+                    : t.settings.desktopDownloadProgress(desktopUpdateProgressPercent)}
+                </Typography>
+                <LinearProgress
+                  variant={desktopUpdateProgressPercent === null ? 'indeterminate' : 'determinate'}
+                  value={desktopUpdateProgressPercent ?? undefined}
+                />
+              </Stack>
+            ) : null}
+            {isDesktopUpdateInstallerOpened ? (
+              <Stack spacing={1}>
+                <Typography variant="body2" color="text.secondary">
+                  {t.settings.desktopUpdateInstallerOpened}
+                </Typography>
+                {desktopUpdateInstallerRequiresQuit ? (
+                  <Typography variant="body2" color="text.secondary">
+                    {t.settings.desktopUpdateInstallerQuitCountdown(
+                      desktopUpdateQuitCountdownSeconds ?? desktopUpdateState.installerQuitDelaySeconds ?? 5,
+                    )}
+                  </Typography>
+                ) : null}
+              </Stack>
+            ) : null}
             <Stack spacing={1.25}>
               <Typography variant="overline" color="text.secondary">
                 {t.settings.desktopUpdateModalChangesHeading}
@@ -970,23 +907,40 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
           </Stack>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2.5 }}>
-          <Button onClick={closeDesktopUpdateModal}>
-            {t.settings.desktopUpdateModalLater}
-          </Button>
-          <Button
-            variant={canInstallDesktopUpdate ? 'outlined' : 'contained'}
-            disabled={desktopUpdateBusy || !canDownloadDesktopUpdate}
-            onClick={() => void runDesktopUpdateAction(() => getDesktopApi().downloadDesktopUpdate())}
-          >
-            {t.settings.desktopDownloadUpdate}
-          </Button>
-          <Button
-            variant="contained"
-            disabled={desktopUpdateBusy || !canInstallDesktopUpdate}
-            onClick={() => void runDesktopUpdateAction(() => getDesktopApi().installDesktopUpdate())}
-          >
-            {t.settings.desktopInstallUpdate}
-          </Button>
+          {desktopUpdateInstallerRequiresQuit ? (
+            <>
+              <Button onClick={closeDesktopUpdateModal}>
+                {t.settings.desktopUpdateInstallerCloseLater}
+              </Button>
+              <Button variant="contained" onClick={quitDesktopUpdateForInstall}>
+                {t.settings.desktopUpdateInstallerCloseNow}
+              </Button>
+            </>
+          ) : isDesktopUpdateInstallerOpened ? (
+            <Button onClick={closeDesktopUpdateModal}>
+              {t.settings.desktopUpdateModalLater}
+            </Button>
+          ) : (
+            <>
+              <Button disabled={isDesktopUpdateDownloading} onClick={closeDesktopUpdateModal}>
+                {t.settings.desktopUpdateModalLater}
+              </Button>
+              <Button
+                variant={canInstallDesktopUpdate ? 'outlined' : 'contained'}
+                disabled={desktopUpdateBusy || !canDownloadDesktopUpdate}
+                onClick={() => void runDesktopUpdateAction(() => getDesktopApi().downloadDesktopUpdate())}
+              >
+                {t.settings.desktopDownloadUpdate}
+              </Button>
+              <Button
+                variant="contained"
+                disabled={desktopUpdateBusy || !canInstallDesktopUpdate}
+                onClick={() => void runDesktopUpdateAction(() => getDesktopApi().installDesktopUpdate())}
+              >
+                {t.settings.desktopInstallUpdate}
+              </Button>
+            </>
+          )}
         </DialogActions>
       </Dialog>
       {socialChatWindowRoute ? (
@@ -1169,6 +1123,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             isResponding={activeConversationRunActive}
             canStopRun={Boolean(activeConversationRunId)}
             progressLines={activeConversationProgressLines}
+            activity={activeConversationActivity}
             intelligenceProviderConfigured={intelligenceProviderConfigured}
             onConfigureIntelligenceProvider={openLlmProviderSettings}
             openingAppIds={openingAppIds}

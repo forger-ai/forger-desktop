@@ -8,6 +8,31 @@ const require = createRequire(import.meta.url);
 const { IPC_CHANNELS } = require('../../dist-electron/shared/ipc.js');
 const { registerPersonalAgentIpcHandlers } = require('../../dist-electron/main/ipc/personal-agent-handlers.js');
 
+const connectionDefinition = (overrides = {}) => ({
+  type: 'gmail',
+  displayName: 'Gmail',
+  description: 'Correo',
+  setupKind: 'oauth',
+  supportsMultiple: true,
+  actions: [
+    { id: 'gmail.search_messages', name: 'Search', description: 'Busca correos', risk: 'medium' },
+  ],
+  secretsSchema: [],
+  statusActionId: 'gmail.connection.status',
+  ...overrides,
+});
+
+const connectionInstance = (overrides = {}) => ({
+  id: 'gmail-1',
+  type: 'gmail',
+  label: 'Personal',
+  status: 'connected',
+  isDefault: true,
+  createdAt: '2026-07-05T00:00:00.000Z',
+  updatedAt: '2026-07-05T00:00:00.000Z',
+  ...overrides,
+});
+
 const createHarness = ({ connectedProviders = ['codex'], officialTools, connections, installedApps } = {}) => {
   const { handlers, ipcMain } = createIpcMainRecorder();
   const storeCalls = [];
@@ -90,29 +115,10 @@ const createHarness = ({ connectedProviders = ['codex'], officialTools, connecti
     listConnections: async () =>
       connections ?? {
         types: [
-          {
-            type: 'gmail',
-            displayName: 'Gmail',
-            description: 'Correo',
-            setupKind: 'oauth',
-            supportsMultiple: true,
-            actions: [
-              { id: 'gmail.search_messages', name: 'Search', description: 'Busca correos', risk: 'medium' },
-            ],
-            secretsSchema: [],
-            statusActionId: 'gmail.connection.status',
-          },
+          connectionDefinition(),
         ],
         instances: [
-          {
-            id: 'gmail-1',
-            type: 'gmail',
-            label: 'Personal',
-            status: 'connected',
-            isDefault: true,
-            createdAt: '2026-07-05T00:00:00.000Z',
-            updatedAt: '2026-07-05T00:00:00.000Z',
-          },
+          connectionInstance(),
         ],
       },
     isAgentProviderConnected: async (provider) => connectedProviders.includes(provider),
@@ -294,7 +300,111 @@ test('personal agent IPC grant options expose installed apps and only tools with
         ],
       },
     ],
+    peerAgents: [
+      { agentId: 'agent-1', name: 'Ops', description: undefined },
+    ],
   });
+});
+
+test('personal agent IPC grant options expose only connected connection accounts by instance', async () => {
+  const { handlers } = createHarness({
+    connections: {
+      types: [
+        connectionDefinition(),
+        connectionDefinition({
+          type: 'trello',
+          displayName: 'Trello',
+          description: 'Tableros',
+          statusActionId: 'trello.connection.status',
+          actions: [
+            { id: 'trello.create_card', name: 'Create card', description: 'Crea tarjetas', risk: 'medium' },
+          ],
+        }),
+        connectionDefinition({
+          type: 'slack',
+          displayName: 'Slack',
+          description: 'Mensajes',
+          statusActionId: 'slack.connection.status',
+          actions: [
+            { id: 'slack.send_message', name: 'Send message', description: 'Envia mensajes', risk: 'high' },
+          ],
+        }),
+      ],
+      instances: [
+        connectionInstance({ id: 'gmail-connected', label: 'Gmail connected', accountIdentity: { email: 'ok@example.com' } }),
+        connectionInstance({ id: 'gmail-disabled', label: 'Gmail disabled', status: 'disabled', isDefault: false }),
+        connectionInstance({ id: 'trello-a', type: 'trello', label: 'Trello A', accountIdentity: { username: 'user-a' } }),
+        connectionInstance({ id: 'trello-b', type: 'trello', label: 'Trello B', accountIdentity: { username: 'user-b' }, isDefault: false }),
+        connectionInstance({ id: 'slack-needs-setup', type: 'slack', label: 'Slack pending', status: 'needs_setup' }),
+      ],
+    },
+  });
+
+  const options = await handlers.get(IPC_CHANNELS.personalAgentGrantOptionsList)();
+  assert.deepEqual(options.connections.map((connection) => ({
+    type: connection.type,
+    configured: connection.configured,
+    instanceIds: connection.instances.map((instance) => instance.id),
+  })), [
+    { type: 'gmail', configured: true, instanceIds: ['gmail-connected'] },
+    { type: 'trello', configured: true, instanceIds: ['trello-a', 'trello-b'] },
+  ]);
+});
+
+test('personal agent IPC create and update keep only connected connection grant instances', async () => {
+  const connections = {
+    types: [connectionDefinition()],
+    instances: [
+      connectionInstance({ id: 'gmail-connected' }),
+      connectionInstance({ id: 'gmail-disabled', status: 'disabled', isDefault: false }),
+    ],
+  };
+  const { handlers, storeCalls } = createHarness({ connections });
+
+  await handlers.get(IPC_CHANNELS.personalAgentsCreate)(null, {
+    name: 'Ops',
+    connectionGrants: [
+      {
+        type: 'gmail',
+        actions: ['gmail.search_messages'],
+        multiple: true,
+        connectionIds: ['gmail-connected', 'gmail-disabled', 'missing'],
+      },
+    ],
+  });
+  assert.deepEqual(storeCalls[0], [
+    'createAgent',
+    {
+      name: 'Ops',
+      connectionGrants: [
+        {
+          type: 'gmail',
+          actions: ['gmail.search_messages'],
+          multiple: true,
+          connectionIds: ['gmail-connected'],
+        },
+      ],
+    },
+  ]);
+
+  await handlers.get(IPC_CHANNELS.personalAgentUpdatePermissions)(null, {
+    agentId: 'agent-1',
+    connectionGrants: [
+      {
+        type: 'gmail',
+        actions: ['gmail.search_messages'],
+        multiple: true,
+        connectionIds: ['gmail-disabled'],
+      },
+    ],
+  });
+  assert.deepEqual(storeCalls[1], [
+    'updateAgentPermissions',
+    {
+      agentId: 'agent-1',
+      connectionGrants: [],
+    },
+  ]);
 });
 
 test('personal agent IPC conversation channels delegate to the conversation manager with the renderer input', async () => {

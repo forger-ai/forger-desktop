@@ -139,6 +139,8 @@ test('llm node runs the provider CLI, injects context, and falls back to the las
     assert.match(transcript, /MEMORIA-GLOBAL/, 'memory context is prepended to the prompt');
     assert.match(transcript, /Finance OS \(id: finance-os\)/, 'enabled apps are described');
     assert.match(transcript, /workflow_complete_node/, 'node contract is in the prompt');
+    assert.match(transcript, /Work autonomously inside this node/, 'autonomous node work is required');
+    assert.match(transcript, /exactly what information is missing/, 'missing-information failures are explicit');
 
     withCli.manager.dispose();
   } finally {

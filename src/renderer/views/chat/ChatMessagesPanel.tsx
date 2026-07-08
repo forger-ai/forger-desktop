@@ -1,7 +1,9 @@
 import { Avatar, Box, Button, Chip, CircularProgress, Paper, Stack, Typography, useTheme } from '@mui/material';
 import type { AppDictionary } from '@renderer/i18n';
+import type { AgentRunActivity } from '@shared/types';
 import type { ChatMessage } from '../ChatView';
 import { compactFileName, formatBytes } from '../chat-view-helpers';
+import { AgentRunActivityReceipt } from '@renderer/components/AgentRunActivityReceipt';
 import { MarkdownMessage } from './MarkdownMessage';
 
 interface ChatMessagesPanelProps {
@@ -11,6 +13,7 @@ interface ChatMessagesPanelProps {
   assistantAvatarSrc: string;
   isSending: boolean;
   progressLines: string[];
+  activity?: AgentRunActivity;
   openingAppIds: Set<string>;
   respondingPermissionIds: Set<string>;
   scrollRef: React.RefObject<HTMLDivElement | null>;
@@ -28,6 +31,7 @@ export function ChatMessagesPanel({
   assistantAvatarSrc,
   isSending,
   progressLines,
+  activity,
   openingAppIds,
   respondingPermissionIds,
   scrollRef,
@@ -98,20 +102,14 @@ export function ChatMessagesPanel({
                 '& img': { objectFit: 'contain' },
               }}
             />
-            <Box sx={{ maxWidth: '78%', minWidth: 0, color: 'text.secondary', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
-              <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
-                <CircularProgress size={14} />
-                <Typography variant="caption">{t.sections.chat.agentThinking}</Typography>
-              </Stack>
-              {progressLines.length > 0 ? (
-                <Box component="ul" sx={{ m: 0, pl: 2, minWidth: 0, maxWidth: '100%' }}>
-                  {progressLines.slice(-6).map((line, idx) => (
-                    <Typography component="li" variant="caption" key={`${idx}-${line}`} sx={{ overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
-                      {line}
-                    </Typography>
-                  ))}
-                </Box>
-              ) : null}
+            <Box sx={{ width: '78%', maxWidth: '78%', minWidth: 0, color: 'text.secondary', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
+              <AgentRunActivityReceipt
+                t={t}
+                activity={activity}
+                mode="live"
+                progressMessages={progressLines}
+                emptyLabel={t.sections.chat.agentThinking}
+              />
             </Box>
           </Stack>
         ) : null}
@@ -163,6 +161,7 @@ function ChatMessageRow({
       ) : null}
       <Box
         sx={{
+          width: message.role === 'user' ? undefined : '78%',
           maxWidth: message.role === 'user' ? '72%' : '78%',
           minWidth: 0,
           px: message.role === 'user' ? 1.6 : 0,
@@ -179,6 +178,9 @@ function ChatMessageRow({
       >
         {message.role === 'assistant' ? (
           <Stack spacing={1} sx={{ minWidth: 0 }}>
+            {message.activity ? (
+              <AgentRunActivityReceipt t={t} activity={message.activity} mode="completed" excludeText={message.content} />
+            ) : null}
             <MarkdownMessage content={message.content} />
             {message.action?.type === 'open-app' ? (
               <OpenAppActionButton action={message.action} openingAppIds={openingAppIds} t={t} onOpenApp={onOpenApp} />

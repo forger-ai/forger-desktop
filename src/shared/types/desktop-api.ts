@@ -31,7 +31,7 @@ import type { Automation, AutomationRun, AutomationRunSummary, AutomationUpsertI
 import type { Workflow, WorkflowApproveNodeInput, WorkflowRun, WorkflowRunSummary, WorkflowUpdatedEvent, WorkflowUpsertInput } from './workflows';
 import type { BackgroundTask, BackgroundTaskEvent, BackgroundTaskUpsertInput } from './background-tasks';
 import type { LlmRunsSnapshot } from './llm-runs';
-import type { PersonalAgent, PersonalAgentConversation, PersonalAgentConversationEvent, PersonalAgentConversationGetInput, PersonalAgentConversationsListInput, PersonalAgentConversationStartInput, PersonalAgentCreateInput, PersonalAgentDeleteInput, PersonalAgentGrantOptions, PersonalAgentMessageSendInput, PersonalAgentUpdatePermissionsInput, PersonalAgentWorkspaceEntry, PersonalAgentWorkspaceFile, PersonalAgentWorkspaceFileReadInput, PersonalAgentWorkspaceFileWriteInput, PersonalAgentWorkspaceListInput } from './personal-agents';
+import type { PersonalAgent, PersonalAgentConversation, PersonalAgentConversationEvent, PersonalAgentConversationGetInput, PersonalAgentConversationsListInput, PersonalAgentConversationStartInput, PersonalAgentCreateInput, PersonalAgentDeleteInput, PersonalAgentGrantOptions, PersonalAgentMessageSendInput, PersonalAgentPeerThread, PersonalAgentPeerThreadGetInput, PersonalAgentPeerThreadsListInput, PersonalAgentUpdatePermissionsInput, PersonalAgentWorkspaceEntry, PersonalAgentWorkspaceFile, PersonalAgentWorkspaceFileReadInput, PersonalAgentWorkspaceFileWriteInput, PersonalAgentWorkspaceListInput } from './personal-agents';
 import type { RemoteActivitySnapshot } from './remote-activity';
 
 export type MicrophonePermissionStatus = 'not-determined' | 'granted' | 'denied' | 'restricted' | 'unknown' | 'unsupported';
@@ -144,6 +144,7 @@ export interface ForgerDesktopApi {
   checkDesktopUpdates: () => Promise<DesktopUpdateState>;
   downloadDesktopUpdate: () => Promise<DesktopUpdateState>;
   installDesktopUpdate: () => Promise<DesktopUpdateState>;
+  desktopUpdateQuitForInstall: () => Promise<{ success: true }>;
   onDesktopUpdateProgress: (listener: (event: DesktopUpdateState) => void) => () => void;
   getForgerAccount: () => Promise<ForgerAccountSession>;
   registerForgerAccount: (input: ForgerAccountRegisterInput) => Promise<ForgerAccountSession & { success: boolean; userMessage?: string; technicalCode?: string }>;
@@ -271,6 +272,8 @@ export interface ForgerDesktopApi {
   personalAgentStartConversation: (input: PersonalAgentConversationStartInput) => Promise<PersonalAgentConversation>;
   personalAgentSendMessage: (input: PersonalAgentMessageSendInput) => Promise<PersonalAgentConversation>;
   personalAgentGetConversation: (input: PersonalAgentConversationGetInput) => Promise<PersonalAgentConversation | null>;
+  personalAgentPeerThreadsList: (input: PersonalAgentPeerThreadsListInput) => Promise<PersonalAgentPeerThread[]>;
+  personalAgentPeerThreadGet: (input: PersonalAgentPeerThreadGetInput) => Promise<PersonalAgentPeerThread | null>;
   onPersonalAgentConversationEvent: (listener: (event: PersonalAgentConversationEvent) => void) => () => void;
   chatStartRun: (input: ChatStartRunInput) => Promise<{ runId: string; status: ChatRunStatus }>;
   chatGetRun: (input: ChatGetRunInput) => Promise<ChatRun | null>;

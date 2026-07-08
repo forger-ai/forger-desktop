@@ -1093,13 +1093,17 @@ test('DesktopUpdater checks metadata, downloads to userData cache, validates che
   const available = await updater.check();
   const ready = await updater.download();
   const installed = await updater.install();
+  const requiresQuit = process.platform === 'darwin' || process.platform === 'linux';
 
   assert.equal(available.status, 'available');
   assert.equal(ready.status, 'ready');
   assert.equal(await fs.readFile(ready.downloadedPath, 'utf8'), installer.toString('utf8'));
-  assert.equal(installed.status, 'ready');
+  assert.equal(installed.status, 'installer_opened');
+  assert.equal(installed.installerRequiresQuit, requiresQuit);
+  assert.equal(installed.installerQuitDelaySeconds, requiresQuit ? 5 : undefined);
   assert.ok(states.includes('checking'));
   assert.ok(states.includes('downloading'));
+  assert.ok(states.includes('installer_opened'));
 });
 
 test('DesktopUpdater accumulates pending release summaries from metadata index', async (t) => {
