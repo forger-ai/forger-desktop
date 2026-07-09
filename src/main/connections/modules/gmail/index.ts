@@ -11,11 +11,22 @@ import type {
 import type { InternalToolContext, InternalToolModule } from '../../../tools/types';
 import { getSharedCopy } from '../../../../shared/i18n';
 import {
+  deleteDraft,
+  getDraft,
+  getProfile,
   GmailApiError,
+  listChanges,
+  listDrafts,
+  listLabels,
+  listThreads,
+  modifyThread,
+  moveThread,
   readAttachment,
   readMessage,
   readThread,
+  saveDraft,
   searchMessages,
+  sendDraft,
   sendMessage,
   validateConnection,
 } from './client';
@@ -27,13 +38,74 @@ import {
   GMAIL_SELF_OAUTH_CLIENT_SECRET_SECRET,
   GMAIL_TOOL_ID,
   type GmailAttachmentSummary,
+  type GmailDeleteDraftInput,
+  type GmailGetDraftInput,
+  type GmailListChangesInput,
+  type GmailListDraftsInput,
+  type GmailListThreadsInput,
+  type GmailModifyThreadInput,
+  type GmailMoveThreadInput,
   type GmailReadAttachmentInput,
   type GmailReadInput,
+  type GmailSaveDraftInput,
   type GmailSearchInput,
+  type GmailSendDraftInput,
 } from './types';
 
 const MAX_READ_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 const MAX_INLINE_ATTACHMENT_BYTES = 2 * 1024 * 1024;
+
+const gmailMessageSummarySchema = {
+  type: 'object',
+  properties: {
+    id: { type: 'string' },
+    threadId: { type: 'string' },
+    subject: { type: 'string' },
+    from: { type: 'string' },
+    to: { type: 'string' },
+    date: { type: 'string' },
+    snippet: { type: 'string' },
+    labelIds: { type: 'array', items: { type: 'string' } },
+    unread: { type: 'boolean' },
+    starred: { type: 'boolean' },
+    hasAttachments: { type: 'boolean' },
+  },
+};
+
+const gmailSendInputProperties = {
+  to: {
+    type: 'array',
+    items: { type: 'string' },
+    description: 'Destinatarios, separados por linea o coma.',
+  },
+  cc: {
+    type: 'array',
+    items: { type: 'string' },
+    description: 'Destinatarios en copia, separados por linea o coma.',
+  },
+  bcc: {
+    type: 'array',
+    items: { type: 'string' },
+    description: 'Destinatarios en copia oculta, separados por linea o coma.',
+  },
+  subject: { type: 'string', description: 'Asunto del correo.' },
+  body: { type: 'string', description: 'Cuerpo en texto plano o fallback del correo.' },
+  bodyHtml: { type: 'string', description: 'Cuerpo HTML opcional. Si se entrega, Gmail recibe multipart/alternative.' },
+  attachments: {
+    type: 'array',
+    description: 'Adjuntos locales que el agente ya tiene disponibles.',
+    items: {
+      type: 'object',
+      properties: {
+        filePath: { type: 'string' },
+        filename: { type: 'string' },
+        mimeType: { type: 'string' },
+      },
+      required: ['filePath'],
+      additionalProperties: false,
+    },
+  },
+};
 
 const definition: OfficialToolDefinition = {
   id: GMAIL_TOOL_ID,
@@ -58,6 +130,28 @@ const definition: OfficialToolDefinition = {
       risk: 'low',
     },
     {
+      id: 'gmail.get_profile',
+      name: 'Perfil de Gmail',
+      description: 'Obtiene el correo conectado y el historyId inicial de Gmail.',
+      risk: 'low',
+      inputSchema: {
+        type: 'object',
+        properties: {},
+        additionalProperties: false,
+      },
+    },
+    {
+      id: 'gmail.list_labels',
+      name: 'Listar etiquetas',
+      description: 'Lista etiquetas y carpetas visibles de Gmail con contadores basicos.',
+      risk: 'low',
+      inputSchema: {
+        type: 'object',
+        properties: {},
+        additionalProperties: false,
+      },
+    },
+    {
       id: 'gmail.search_messages',
       name: 'Buscar correos',
       description: 'Busca correos en Gmail usando una consulta.',
@@ -69,26 +163,33 @@ const definition: OfficialToolDefinition = {
           maxResults: { type: 'number', description: 'Maximo de correos a devolver.' },
         },
         required: ['query'],
+        additionalProperties: false,
       },
       outputSchema: {
         type: 'object',
         properties: {
           messages: {
             type: 'array',
-            items: {
-              type: 'object',
-              properties: {
-                messageId: { type: 'string' },
-                threadId: { type: 'string' },
-                from: { type: 'string' },
-                subject: { type: 'string' },
-                snippet: { type: 'string' },
-                date: { type: 'string' },
-              },
-            },
+            items: gmailMessageSummarySchema,
           },
         },
         required: ['messages'],
+      },
+    },
+    {
+      id: 'gmail.list_threads',
+      name: 'Listar conversaciones',
+      description: 'Lista conversaciones de Gmail con metadata resumida y paginacion.',
+      risk: 'medium',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Consulta opcional de Gmail.' },
+          labelIds: { type: 'array', items: { type: 'string' }, description: 'IDs de etiquetas para filtrar.' },
+          maxResults: { type: 'number', description: 'Maximo de conversaciones a devolver.' },
+          pageToken: { type: 'string', description: 'Token de pagina devuelto por Gmail.' },
+        },
+        additionalProperties: false,
       },
     },
     {
@@ -102,6 +203,59 @@ const definition: OfficialToolDefinition = {
           threadId: { type: 'string', description: 'ID de conversacion a leer.' },
           messageId: { type: 'string', description: 'ID de mensaje a leer si no se usa threadId.' },
         },
+        additionalProperties: false,
+      },
+    },
+    {
+      id: 'gmail.list_changes',
+      name: 'Sincronizar cambios',
+      description: 'Lista cambios de Gmail desde un historyId para sincronizacion incremental.',
+      risk: 'medium',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          startHistoryId: { type: 'string', description: 'historyId desde el que Gmail debe entregar cambios.' },
+          maxResults: { type: 'number', description: 'Maximo de cambios a devolver.' },
+          pageToken: { type: 'string', description: 'Token de pagina devuelto por Gmail.' },
+        },
+        required: ['startHistoryId'],
+        additionalProperties: false,
+      },
+    },
+    {
+      id: 'gmail.modify_thread',
+      name: 'Modificar conversacion',
+      description: 'Aplica cambios de etiquetas a una conversacion, incluyendo leido, no leido, destacado o archivado.',
+      risk: 'medium',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          threadId: { type: 'string' },
+          addLabelIds: { type: 'array', items: { type: 'string' } },
+          removeLabelIds: { type: 'array', items: { type: 'string' } },
+          markRead: { type: 'boolean' },
+          markUnread: { type: 'boolean' },
+          star: { type: 'boolean' },
+          unstar: { type: 'boolean' },
+          archive: { type: 'boolean' },
+        },
+        required: ['threadId'],
+        additionalProperties: false,
+      },
+    },
+    {
+      id: 'gmail.move_thread',
+      name: 'Mover conversacion',
+      description: 'Mueve una conversacion a la papelera o la restaura desde la papelera.',
+      risk: 'high',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          threadId: { type: 'string' },
+          destination: { type: 'string', enum: ['trash', 'untrash'] },
+        },
+        required: ['threadId', 'destination'],
+        additionalProperties: false,
       },
     },
     {
@@ -117,6 +271,79 @@ const definition: OfficialToolDefinition = {
           filename: { type: 'string', description: 'Nombre del adjunto si no se usa attachmentId.' },
         },
         required: ['messageId'],
+        additionalProperties: false,
+      },
+    },
+    {
+      id: 'gmail.list_drafts',
+      name: 'Listar borradores',
+      description: 'Lista borradores de Gmail con metadata de mensaje.',
+      risk: 'high',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          maxResults: { type: 'number' },
+          pageToken: { type: 'string' },
+        },
+        additionalProperties: false,
+      },
+    },
+    {
+      id: 'gmail.get_draft',
+      name: 'Leer borrador',
+      description: 'Lee un borrador de Gmail por ID.',
+      risk: 'high',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          draftId: { type: 'string' },
+        },
+        required: ['draftId'],
+        additionalProperties: false,
+      },
+    },
+    {
+      id: 'gmail.save_draft',
+      name: 'Guardar borrador',
+      description: 'Crea o actualiza un borrador de Gmail sin enviarlo.',
+      risk: 'high',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          draftId: { type: 'string', description: 'ID de borrador a actualizar. Si falta, se crea uno nuevo.' },
+          threadId: { type: 'string', description: 'ID de conversacion donde responder.' },
+          ...gmailSendInputProperties,
+        },
+        required: ['to', 'subject'],
+        additionalProperties: false,
+      },
+    },
+    {
+      id: 'gmail.delete_draft',
+      name: 'Eliminar borrador',
+      description: 'Elimina un borrador de Gmail.',
+      risk: 'high',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          draftId: { type: 'string' },
+        },
+        required: ['draftId'],
+        additionalProperties: false,
+      },
+    },
+    {
+      id: 'gmail.send_draft',
+      name: 'Enviar borrador',
+      description: 'Envia un borrador existente de Gmail.',
+      risk: 'high',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          draftId: { type: 'string' },
+        },
+        required: ['draftId'],
+        additionalProperties: false,
       },
     },
     {
@@ -126,27 +353,9 @@ const definition: OfficialToolDefinition = {
       risk: 'high',
       inputSchema: {
         type: 'object',
-        properties: {
-          to: {
-            type: 'array',
-            items: { type: 'string' },
-            description: 'Destinatarios, separados por linea o coma.',
-          },
-          cc: {
-            type: 'array',
-            items: { type: 'string' },
-            description: 'Destinatarios en copia, separados por linea o coma.',
-          },
-          bcc: {
-            type: 'array',
-            items: { type: 'string' },
-            description: 'Destinatarios en copia oculta, separados por linea o coma.',
-          },
-          subject: { type: 'string', description: 'Asunto del correo.' },
-          body: { type: 'string', description: 'Cuerpo en texto plano o fallback del correo.' },
-          bodyHtml: { type: 'string', description: 'Cuerpo HTML opcional. Si se entrega, Gmail recibe multipart/alternative.' },
-        },
+        properties: gmailSendInputProperties,
         required: ['to', 'subject'],
+        additionalProperties: false,
       },
       outputSchema: {
         type: 'object',
@@ -169,6 +378,14 @@ const toToolResult = (error: unknown, fallbackMessage: string, fallbackCode: str
     };
   }
   if (error instanceof GmailApiError) {
+    if (error.technicalCode === 'gmail_scope_required') {
+      return {
+        success: false,
+        userMessage: 'Reconecta Gmail para autorizar las nuevas acciones.',
+        technicalCode: 'gmail_scope_required',
+        data: { needsReconnect: true },
+      };
+    }
     return {
       success: false,
       userMessage: fallbackMessage,
@@ -194,7 +411,136 @@ const parseSearchInput = (input: unknown): GmailSearchInput | null => {
   const maxResults = typeof candidate.maxResults === 'number' && Number.isFinite(candidate.maxResults)
     ? candidate.maxResults
     : undefined;
-  return { query, ...(maxResults ? { maxResults } : {}) };
+  const pageToken = typeof candidate.pageToken === 'string' ? candidate.pageToken.trim() : '';
+  return { query, ...(maxResults ? { maxResults } : {}), ...(pageToken ? { pageToken } : {}) };
+};
+
+const stringArray = (value: unknown): string[] =>
+  Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string').map((item) => item.trim()).filter(Boolean)
+    : [];
+
+const optionalNumber = (value: unknown): number | undefined =>
+  typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+
+const parseListThreadsInput = (input: unknown): GmailListThreadsInput | null => {
+  if (input === undefined || input === null) {
+    return {};
+  }
+  if (typeof input !== 'object' || Array.isArray(input)) {
+    return null;
+  }
+  const candidate = input as Record<string, unknown>;
+  const query = typeof candidate.query === 'string' ? candidate.query.trim() : '';
+  const labelIds = stringArray(candidate.labelIds);
+  const pageToken = typeof candidate.pageToken === 'string' ? candidate.pageToken.trim() : '';
+  return {
+    ...(query ? { query } : {}),
+    ...(labelIds.length > 0 ? { labelIds } : {}),
+    ...(optionalNumber(candidate.maxResults) ? { maxResults: optionalNumber(candidate.maxResults) } : {}),
+    ...(pageToken ? { pageToken } : {}),
+  };
+};
+
+const parseListChangesInput = (input: unknown): GmailListChangesInput | null => {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    return null;
+  }
+  const candidate = input as Record<string, unknown>;
+  const startHistoryId = typeof candidate.startHistoryId === 'string' ? candidate.startHistoryId.trim() : '';
+  const pageToken = typeof candidate.pageToken === 'string' ? candidate.pageToken.trim() : '';
+  if (!startHistoryId) {
+    return null;
+  }
+  return {
+    startHistoryId,
+    ...(optionalNumber(candidate.maxResults) ? { maxResults: optionalNumber(candidate.maxResults) } : {}),
+    ...(pageToken ? { pageToken } : {}),
+  };
+};
+
+const parseModifyThreadInput = (input: unknown): GmailModifyThreadInput | null => {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    return null;
+  }
+  const candidate = input as Record<string, unknown>;
+  const threadId = typeof candidate.threadId === 'string' ? candidate.threadId.trim() : '';
+  if (!threadId) {
+    return null;
+  }
+  const addLabelIds = new Set(stringArray(candidate.addLabelIds));
+  const removeLabelIds = new Set(stringArray(candidate.removeLabelIds));
+  if (candidate.markRead === true) removeLabelIds.add('UNREAD');
+  if (candidate.markUnread === true) addLabelIds.add('UNREAD');
+  if (candidate.star === true) addLabelIds.add('STARRED');
+  if (candidate.unstar === true) removeLabelIds.add('STARRED');
+  if (candidate.archive === true) removeLabelIds.add('INBOX');
+  const add = [...addLabelIds].filter((labelId) => !removeLabelIds.has(labelId));
+  const remove = [...removeLabelIds].filter((labelId) => !addLabelIds.has(labelId));
+  if (add.length === 0 && remove.length === 0) {
+    return null;
+  }
+  return {
+    threadId,
+    ...(add.length > 0 ? { addLabelIds: add } : {}),
+    ...(remove.length > 0 ? { removeLabelIds: remove } : {}),
+  };
+};
+
+const parseMoveThreadInput = (input: unknown): GmailMoveThreadInput | null => {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    return null;
+  }
+  const candidate = input as Record<string, unknown>;
+  const threadId = typeof candidate.threadId === 'string' ? candidate.threadId.trim() : '';
+  const destination = candidate.destination === 'trash' || candidate.destination === 'untrash'
+    ? candidate.destination
+    : null;
+  return threadId && destination ? { threadId, destination } : null;
+};
+
+const parseListDraftsInput = (input: unknown): GmailListDraftsInput | null => {
+  if (input === undefined || input === null) {
+    return {};
+  }
+  if (typeof input !== 'object' || Array.isArray(input)) {
+    return null;
+  }
+  const candidate = input as Record<string, unknown>;
+  const pageToken = typeof candidate.pageToken === 'string' ? candidate.pageToken.trim() : '';
+  return {
+    ...(optionalNumber(candidate.maxResults) ? { maxResults: optionalNumber(candidate.maxResults) } : {}),
+    ...(pageToken ? { pageToken } : {}),
+  };
+};
+
+const parseDraftIdInput = <T extends GmailGetDraftInput | GmailDeleteDraftInput | GmailSendDraftInput>(
+  input: unknown,
+): T | null => {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    return null;
+  }
+  const candidate = input as Record<string, unknown>;
+  const draftId = typeof candidate.draftId === 'string' ? candidate.draftId.trim() : '';
+  return draftId ? { draftId } as T : null;
+};
+
+const parseSaveDraftInput = (input: unknown): GmailSaveDraftInput | null => {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    return null;
+  }
+  const send = parseSendInput(input);
+  if (!send) {
+    return null;
+  }
+  const candidate = input as Record<string, unknown>;
+  const draftId = typeof candidate.draftId === 'string' ? candidate.draftId.trim() : '';
+  const threadId = typeof candidate.threadId === 'string' ? candidate.threadId.trim() : '';
+  return {
+    ...send,
+    ...(draftId ? { draftId } : {}),
+    ...(threadId ? { threadId } : {}),
+  };
 };
 
 const parseReadInput = (input: unknown): GmailReadInput | null => {
@@ -299,13 +645,29 @@ const execute = async (
       return { success: true, data: { connected: true } };
     }
 
+    if (input.actionId === 'gmail.get_profile') {
+      return { success: true, data: { profile: await getProfile(context) } };
+    }
+
+    if (input.actionId === 'gmail.list_labels') {
+      return { success: true, data: { labels: await listLabels(context) } };
+    }
+
     if (input.actionId === 'gmail.search_messages') {
       const parsed = parseSearchInput(input.input);
       if (!parsed) {
         return { success: false, userMessage: 'Ingresa una busqueda valida para Gmail.', technicalCode: 'gmail_search_input_invalid' };
       }
-      const messages = await searchMessages(context, parsed.query, parsed.maxResults);
+      const messages = await searchMessages(context, parsed.query, parsed.maxResults, parsed.pageToken);
       return { success: true, data: { messages } };
+    }
+
+    if (input.actionId === 'gmail.list_threads') {
+      const parsed = parseListThreadsInput(input.input);
+      if (!parsed) {
+        return { success: false, userMessage: 'Ingresa filtros validos para listar conversaciones de Gmail.', technicalCode: 'gmail_list_threads_input_invalid' };
+      }
+      return { success: true, data: await listThreads(context, parsed) };
     }
 
     if (input.actionId === 'gmail.read_thread') {
@@ -317,6 +679,30 @@ const execute = async (
         ? await readThread(context, parsed.threadId)
         : await readMessage(context, parsed.messageId as string);
       return { success: true, data };
+    }
+
+    if (input.actionId === 'gmail.list_changes') {
+      const parsed = parseListChangesInput(input.input);
+      if (!parsed) {
+        return { success: false, userMessage: 'Indica un historyId valido para sincronizar Gmail.', technicalCode: 'gmail_list_changes_input_invalid' };
+      }
+      return { success: true, data: await listChanges(context, parsed) };
+    }
+
+    if (input.actionId === 'gmail.modify_thread') {
+      const parsed = parseModifyThreadInput(input.input);
+      if (!parsed) {
+        return { success: false, userMessage: 'Indica una conversacion y al menos una modificacion de Gmail.', technicalCode: 'gmail_modify_thread_input_invalid' };
+      }
+      return { success: true, data: { thread: await modifyThread(context, parsed) } };
+    }
+
+    if (input.actionId === 'gmail.move_thread') {
+      const parsed = parseMoveThreadInput(input.input);
+      if (!parsed) {
+        return { success: false, userMessage: 'Indica una conversacion y destino trash o untrash.', technicalCode: 'gmail_move_thread_input_invalid' };
+      }
+      return { success: true, data: { thread: await moveThread(context, parsed) } };
     }
 
     if (input.actionId === 'gmail.read_attachment') {
@@ -343,6 +729,46 @@ const execute = async (
           ...(buffer.byteLength <= MAX_INLINE_ATTACHMENT_BYTES ? { dataBase64: buffer.toString('base64') } : {}),
         },
       };
+    }
+
+    if (input.actionId === 'gmail.list_drafts') {
+      const parsed = parseListDraftsInput(input.input);
+      if (!parsed) {
+        return { success: false, userMessage: 'Ingresa paginacion valida para listar borradores de Gmail.', technicalCode: 'gmail_list_drafts_input_invalid' };
+      }
+      return { success: true, data: await listDrafts(context, parsed) };
+    }
+
+    if (input.actionId === 'gmail.get_draft') {
+      const parsed = parseDraftIdInput<GmailGetDraftInput>(input.input);
+      if (!parsed) {
+        return { success: false, userMessage: 'Indica un borrador de Gmail valido.', technicalCode: 'gmail_get_draft_input_invalid' };
+      }
+      return { success: true, data: { draft: await getDraft(context, parsed) } };
+    }
+
+    if (input.actionId === 'gmail.save_draft') {
+      const parsed = parseSaveDraftInput(input.input);
+      if (!parsed) {
+        return { success: false, userMessage: 'Completa destinatario, asunto y cuerpo del borrador en texto o HTML.', technicalCode: 'gmail_save_draft_input_invalid' };
+      }
+      return { success: true, userMessage: 'Borrador guardado.', data: { draft: await saveDraft(context, parsed, await buildRawEmail(parsed)) } };
+    }
+
+    if (input.actionId === 'gmail.delete_draft') {
+      const parsed = parseDraftIdInput<GmailDeleteDraftInput>(input.input);
+      if (!parsed) {
+        return { success: false, userMessage: 'Indica un borrador de Gmail valido.', technicalCode: 'gmail_delete_draft_input_invalid' };
+      }
+      return { success: true, userMessage: 'Borrador eliminado.', data: await deleteDraft(context, parsed.draftId) };
+    }
+
+    if (input.actionId === 'gmail.send_draft') {
+      const parsed = parseDraftIdInput<GmailSendDraftInput>(input.input);
+      if (!parsed) {
+        return { success: false, userMessage: 'Indica un borrador de Gmail valido.', technicalCode: 'gmail_send_draft_input_invalid' };
+      }
+      return { success: true, userMessage: 'Correo enviado.', data: await sendDraft(context, parsed) };
     }
 
     if (input.actionId === 'gmail.send_email') {

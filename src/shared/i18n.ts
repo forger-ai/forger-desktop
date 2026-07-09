@@ -231,17 +231,61 @@ export const sharedCopy = {
             name: 'Estado de conexión',
             description: 'Revisa si Gmail está conectado.',
           },
+          'gmail.get_profile': {
+            name: 'Perfil de Gmail',
+            description: 'Obtiene el correo conectado y el cursor de sincronización inicial.',
+          },
+          'gmail.list_labels': {
+            name: 'Listar etiquetas',
+            description: 'Lista etiquetas y carpetas de Gmail con contadores básicos.',
+          },
           'gmail.search_messages': {
             name: 'Buscar correos',
             description: 'Busca correos en Gmail usando una consulta.',
+          },
+          'gmail.list_threads': {
+            name: 'Listar conversaciones',
+            description: 'Lista conversaciones de Gmail con metadata resumida y paginación.',
           },
           'gmail.read_thread': {
             name: 'Leer conversación',
             description: 'Lee una conversación o mensaje de Gmail e incluye metadata de adjuntos.',
           },
+          'gmail.list_changes': {
+            name: 'Sincronizar cambios',
+            description: 'Lista cambios de Gmail desde un historyId.',
+          },
+          'gmail.modify_thread': {
+            name: 'Modificar conversación',
+            description: 'Aplica cambios de etiquetas, lectura, destacado o archivado a una conversación.',
+          },
+          'gmail.move_thread': {
+            name: 'Mover conversación',
+            description: 'Mueve una conversación a papelera o la restaura.',
+          },
           'gmail.read_attachment': {
             name: 'Leer adjunto',
             description: 'Descarga un adjunto de Gmail y lo deja disponible para el agente.',
+          },
+          'gmail.list_drafts': {
+            name: 'Listar borradores',
+            description: 'Lista borradores de Gmail.',
+          },
+          'gmail.get_draft': {
+            name: 'Leer borrador',
+            description: 'Lee un borrador de Gmail por ID.',
+          },
+          'gmail.save_draft': {
+            name: 'Guardar borrador',
+            description: 'Crea o actualiza un borrador de Gmail.',
+          },
+          'gmail.delete_draft': {
+            name: 'Eliminar borrador',
+            description: 'Elimina un borrador de Gmail.',
+          },
+          'gmail.send_draft': {
+            name: 'Enviar borrador',
+            description: 'Envía un borrador existente de Gmail.',
           },
           'gmail.send_email': {
             name: 'Enviar correo',
@@ -578,17 +622,61 @@ export const sharedCopy = {
             name: 'Connection status',
             description: 'Checks whether Gmail is connected.',
           },
+          'gmail.get_profile': {
+            name: 'Get profile',
+            description: 'Gets the connected Gmail address and initial sync cursor.',
+          },
+          'gmail.list_labels': {
+            name: 'List labels',
+            description: 'Lists Gmail labels and folders with basic counts.',
+          },
           'gmail.search_messages': {
             name: 'Search messages',
             description: 'Searches Gmail messages with a query.',
+          },
+          'gmail.list_threads': {
+            name: 'List conversations',
+            description: 'Lists Gmail conversations with summary metadata and pagination.',
           },
           'gmail.read_thread': {
             name: 'Read conversation',
             description: 'Reads a Gmail conversation or message and includes attachment metadata.',
           },
+          'gmail.list_changes': {
+            name: 'Sync changes',
+            description: 'Lists Gmail changes from a historyId.',
+          },
+          'gmail.modify_thread': {
+            name: 'Modify conversation',
+            description: 'Applies label, read, starred, or archive changes to a conversation.',
+          },
+          'gmail.move_thread': {
+            name: 'Move conversation',
+            description: 'Moves a conversation to trash or restores it.',
+          },
           'gmail.read_attachment': {
             name: 'Read attachment',
             description: 'Downloads a Gmail attachment and makes it available to the agent.',
+          },
+          'gmail.list_drafts': {
+            name: 'List drafts',
+            description: 'Lists Gmail drafts.',
+          },
+          'gmail.get_draft': {
+            name: 'Read draft',
+            description: 'Reads a Gmail draft by ID.',
+          },
+          'gmail.save_draft': {
+            name: 'Save draft',
+            description: 'Creates or updates a Gmail draft.',
+          },
+          'gmail.delete_draft': {
+            name: 'Delete draft',
+            description: 'Deletes a Gmail draft.',
+          },
+          'gmail.send_draft': {
+            name: 'Send draft',
+            description: 'Sends an existing Gmail draft.',
           },
           'gmail.send_email': {
             name: 'Send email',

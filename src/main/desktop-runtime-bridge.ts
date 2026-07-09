@@ -21,8 +21,10 @@ import type {
   CallOfficialToolInput,
   CallOfficialToolResult,
   ConnectionInstance,
+  ConnectionMutationResult,
   ConnectionRequirementState,
   ConnectionTypeDefinition,
+  ConfigureConnectionInput,
   LiveVoiceInputSession,
   OfficialToolSummary,
   SpeechToTextProcessResult,
@@ -102,6 +104,17 @@ export interface DesktopRuntimeBridgeOptions {
       requirements: ConnectionRequirementState[];
     }>;
     callFromApp: (appId: string, input: CallConnectionActionInput) => Promise<CallConnectionActionResult>;
+    configureFromApp?: (appId: string, input: ConfigureConnectionInput) => Promise<ConnectionMutationResult>;
+    requestGrantFromApp?: (appId: string, input: {
+      type: string;
+      reason?: string;
+      connectionIds?: string[];
+    }) => Promise<{
+      success: boolean;
+      userMessage: string;
+      technicalCode?: string;
+      requirement?: ConnectionRequirementState;
+    }>;
   };
   getAudioDevices?: () => Promise<AudioRuntimeDevices>;
   updateAudioInputDevices?: (input: AudioRuntimeDevices) => Promise<void>;
@@ -622,9 +635,11 @@ export class DesktopRuntimeBridge {
 
   private async routeConnections(appId: string, method: string, pathname: string, bodyText: string): Promise<{ handled: boolean; result?: unknown }> {
     const listMatch = pathname.match(/^\/v1\/apps\/([^/]+)\/connections$/);
+    const setupMatch = pathname.match(/^\/v1\/apps\/([^/]+)\/connections\/([^/]+)\/setup$/);
+    const grantRequestMatch = pathname.match(/^\/v1\/apps\/([^/]+)\/connections\/([^/]+)\/grants\/request$/);
     const statusMatch = pathname.match(/^\/v1\/apps\/([^/]+)\/connections\/([^/]+)\/status$/);
     const actionMatch = pathname.match(/^\/v1\/apps\/([^/]+)\/connections\/([^/]+)\/actions\/([^/]+)$/);
-    const match = listMatch ?? statusMatch ?? actionMatch;
+    const match = listMatch ?? setupMatch ?? grantRequestMatch ?? statusMatch ?? actionMatch;
     if (!match) return { handled: false };
     if (decodeURIComponent(match[1]) !== appId) {
       throw new BridgeError(403, 'desktop_runtime_app_forbidden');
@@ -639,6 +654,60 @@ export class DesktopRuntimeBridge {
         throw new BridgeError(404, 'desktop_runtime_route_not_found');
       }
       return { handled: true, result: await service.listConnectionsForApp(appId) };
+    }
+
+    if (setupMatch) {
+      if (method !== 'POST') {
+        throw new BridgeError(404, 'desktop_runtime_route_not_found');
+      }
+      if (!service.configureFromApp) {
+        throw new BridgeError(503, 'desktop_runtime_connection_setup_unavailable');
+      }
+      const body = parseJsonBody(bodyText);
+      const type = decodeURIComponent(setupMatch[2]).trim();
+      const label = cleanString(body.label);
+      const connectionId = cleanString(body.connectionId);
+      const result = await service.configureFromApp(appId, {
+        type,
+        ...(label ? { label } : {}),
+        ...(connectionId ? { connectionId } : {}),
+      });
+      if (result.success) {
+        this.publishRuntimeEvent(appId, 'desktop.connections.changed', {
+          reason: 'setup',
+          type,
+          ...(result.instance?.id ? { connectionId: result.instance.id } : connectionId ? { connectionId } : {}),
+        });
+      }
+      return { handled: true, result };
+    }
+
+    if (grantRequestMatch) {
+      if (method !== 'POST') {
+        throw new BridgeError(404, 'desktop_runtime_route_not_found');
+      }
+      if (!service.requestGrantFromApp) {
+        throw new BridgeError(503, 'desktop_runtime_connection_grant_unavailable');
+      }
+      const body = parseJsonBody(bodyText);
+      const type = decodeURIComponent(grantRequestMatch[2]).trim();
+      const reason = cleanString(body.reason);
+      const connectionIds = Array.isArray(body.connectionIds)
+        ? body.connectionIds.map(cleanString).filter(Boolean)
+        : undefined;
+      const result = await service.requestGrantFromApp(appId, {
+        type,
+        ...(reason ? { reason } : {}),
+        ...(connectionIds?.length ? { connectionIds } : {}),
+      });
+      if (result.success) {
+        this.publishRuntimeEvent(appId, 'desktop.connections.changed', {
+          reason: 'grant',
+          type,
+          ...(connectionIds?.length ? { connectionIds } : {}),
+        });
+      }
+      return { handled: true, result };
     }
 
     if (statusMatch) {

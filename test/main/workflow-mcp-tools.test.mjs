@@ -102,6 +102,95 @@ const callTool = async (session, name, args = {}) => {
   return JSON.parse(payload.result.content[0].text);
 };
 
+test('published app info tool exposes schema and updates Social app metadata', async () => {
+  const schema = getMcpToolInputSchema('forger_update_published_app_info');
+  assert.deepEqual(schema.anyOf, [{ required: ['userAppId'] }, { required: ['appId'] }]);
+  assert.equal(schema.properties.userAppId.type, 'number');
+  assert.equal(schema.properties.appId.type, 'string');
+  assert.deepEqual(schema.properties.visibility.enum, ['public', 'friends', 'private']);
+  assert.ok(schema.properties.category.enum.includes('productivity'));
+  assert.equal(schema.additionalProperties, false);
+
+  const updates = [];
+  const harness = await createHarness({
+    updatePublishedAppInfo: async (input) => {
+      updates.push(input);
+      return {
+        success: true,
+        userMessage: 'Informacion publicada actualizada.',
+        app: {
+          id: input.userAppId,
+          slug: 'demo',
+          name: input.name,
+          visibility: input.visibility,
+          status: 'published',
+          owner: { id: 1, username: 'ada' },
+        },
+      };
+    },
+  });
+  try {
+    const session = harness.server.createSession('run-social', 'forger', { caller: 'free-chat' });
+    const tools = await listTools(session);
+    assert.ok(tools.includes('forger_update_published_app_info'));
+
+    const result = await callTool(session, 'forger_update_published_app_info', {
+      userAppId: 42,
+      name: 'Nueva App',
+      shortDescription: '',
+      description: 'Descripcion larga',
+      category: 'utilities',
+      visibility: 'private',
+    });
+
+    assert.equal(result.success, true);
+    assert.equal(result.app.id, 42);
+    assert.deepEqual(updates, [{
+      userAppId: 42,
+      name: 'Nueva App',
+      shortDescription: '',
+      description: 'Descripcion larga',
+      category: 'utilities',
+      visibility: 'private',
+    }]);
+    assert.deepEqual(result.authorization, {
+      required: true,
+      status: 'approved',
+      userMessage: 'Autorización recibida. La herramienta continuó con la acción solicitada.',
+    });
+  } finally {
+    harness.stop();
+  }
+});
+
+test('published app info tool rejects calls without update fields', async () => {
+  const updates = [];
+  const harness = await createHarness({
+    updatePublishedAppInfo: async (input) => {
+      updates.push(input);
+      return { success: true, userMessage: 'ok' };
+    },
+  });
+  try {
+    const session = harness.server.createSession('run-social', 'forger', { caller: 'free-chat' });
+    const result = await callTool(session, 'forger_update_published_app_info', { userAppId: 42 });
+
+    assert.equal(result.success, false);
+    assert.equal(result.technicalCode, 'published_app_info_input_invalid');
+    assert.deepEqual(updates, []);
+
+    const invalidVisibility = await callTool(session, 'forger_update_published_app_info', {
+      userAppId: 42,
+      visibility: 'restricted',
+    });
+    assert.equal(invalidVisibility.success, false);
+    assert.equal(invalidVisibility.technicalCode, 'published_app_info_input_invalid');
+    assert.deepEqual(updates, []);
+  } finally {
+    harness.stop();
+  }
+});
+
 test('workflow node tools are only visible to workflow sessions', async () => {
   const harness = await createHarness({
     getToolDefinitions: () => [

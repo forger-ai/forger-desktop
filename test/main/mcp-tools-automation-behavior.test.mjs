@@ -772,15 +772,36 @@ test('MCP tool schemas expose strict official tool contracts and safe annotation
   assert.deepEqual(searchSchema.required, ['query']);
   assert.equal(searchSchema.properties.connectionId.type, 'string');
   assert.equal(searchSchema.properties.maxResults.type, 'number');
+  assert.equal(searchSchema.properties.pageToken.type, 'string');
 
   const gmailStatusSchema = getMcpToolInputSchema('gmail.connection.status');
   assert.deepEqual(gmailStatusSchema.required, undefined);
   assert.equal(gmailStatusSchema.properties.connectionId.type, 'string');
 
+  const listThreadsSchema = getMcpToolInputSchema('gmail.list_threads');
+  assert.equal(listThreadsSchema.additionalProperties, false);
+  assert.equal(listThreadsSchema.properties.connectionId.type, 'string');
+  assert.equal(listThreadsSchema.properties.labelIds.items.type, 'string');
+  assert.equal(listThreadsSchema.properties.pageToken.type, 'string');
+
   const readThreadSchema = getMcpToolInputSchema('gmail.read_thread');
   assert.equal(readThreadSchema.additionalProperties, false);
   assert.equal(readThreadSchema.properties.connectionId.type, 'string');
   assert.equal(readThreadSchema.properties.threadId.type, 'string');
+
+  const changesSchema = getMcpToolInputSchema('gmail.list_changes');
+  assert.deepEqual(changesSchema.required, ['startHistoryId']);
+  assert.equal(changesSchema.properties.connectionId.type, 'string');
+  assert.equal(changesSchema.properties.pageToken.type, 'string');
+
+  const modifySchema = getMcpToolInputSchema('gmail.modify_thread');
+  assert.deepEqual(modifySchema.required, ['threadId']);
+  assert.equal(modifySchema.properties.markRead.type, 'boolean');
+  assert.equal(modifySchema.properties.addLabelIds.items.type, 'string');
+
+  const moveSchema = getMcpToolInputSchema('gmail.move_thread');
+  assert.deepEqual(moveSchema.required, ['threadId', 'destination']);
+  assert.deepEqual(moveSchema.properties.destination.enum, ['trash', 'untrash']);
 
   const sendSchema = getMcpToolInputSchema('gmail.send_email');
   assert.deepEqual(sendSchema.required, ['to', 'subject']);
@@ -788,6 +809,15 @@ test('MCP tool schemas expose strict official tool contracts and safe annotation
   assert.equal(sendSchema.properties.connectionId.type, 'string');
   assert.equal(sendSchema.properties.bodyHtml.type, 'string');
   assert.equal(sendSchema.properties.attachments.items.required[0], 'filePath');
+
+  const saveDraftSchema = getMcpToolInputSchema('gmail.save_draft');
+  assert.deepEqual(saveDraftSchema.required, ['to', 'subject']);
+  assert.equal(saveDraftSchema.properties.draftId.type, 'string');
+  assert.equal(saveDraftSchema.properties.threadId.type, 'string');
+  assert.equal(saveDraftSchema.properties.attachments.items.required[0], 'filePath');
+
+  const sendDraftSchema = getMcpToolInputSchema('gmail.send_draft');
+  assert.deepEqual(sendDraftSchema.required, ['draftId']);
 
   const chromeSubmitSchema = getMcpToolInputSchema('forger_chrome_extension.submit_form');
   assert.deepEqual(chromeSubmitSchema.required, ['sessionId', 'selector']);

@@ -33,15 +33,24 @@ const connectionInstance = (overrides = {}) => ({
   ...overrides,
 });
 
-const createHarness = ({ connectedProviders = ['codex'], officialTools, connections, installedApps } = {}) => {
+const createHarness = ({ connectedProviders = ['codex'], officialTools, connections, installedApps, existingAgent } = {}) => {
   const { handlers, ipcMain } = createIpcMainRecorder();
   const storeCalls = [];
   const managerCalls = [];
+  const agentRecord = existingAgent ?? {
+    id: 'agent-1',
+    name: 'Ops',
+    appIds: [],
+    toolIds: [],
+    connectionGrants: [],
+    peerAgentGrants: [],
+  };
   const store = {
     listAgents: async () => {
       storeCalls.push(['listAgents']);
       return [{ id: 'agent-1', name: 'Ops' }];
     },
+    requireAgent: async (agentId) => ({ ...agentRecord, id: agentId }),
     createAgent: async (input) => {
       storeCalls.push(['createAgent', input]);
       return { id: 'agent-2', ...input };
@@ -239,6 +248,81 @@ test('personal agent IPC update permissions filters grants before persisting', a
   ]);
 });
 
+test('personal agent IPC update preserves existing grants when option catalogs are temporarily unavailable', async () => {
+  const existingAgent = {
+    id: 'agent-1',
+    name: 'Ops',
+    appIds: ['finance-os'],
+    toolIds: ['forger_chrome_extension.navigate'],
+    connectionGrants: [
+      {
+        type: 'gmail',
+        actions: ['gmail.search_messages'],
+        multiple: true,
+        connectionIds: ['gmail-1'],
+      },
+    ],
+    peerAgentGrants: [],
+  };
+  const { handlers, storeCalls } = createHarness({
+    existingAgent,
+    installedApps: [],
+    officialTools: { tools: [] },
+    connections: { types: [], instances: [] },
+  });
+
+  await handlers.get(IPC_CHANNELS.personalAgentUpdatePermissions)(null, {
+    agentId: 'agent-1',
+    appIds: ['finance-os', 'unknown-app'],
+    toolIds: ['forger_chrome_extension.navigate', 'unknown.action'],
+    connectionGrants: [
+      {
+        type: 'gmail',
+        actions: ['gmail.search_messages'],
+        multiple: true,
+        connectionIds: ['gmail-1'],
+      },
+      {
+        type: 'slack',
+        actions: ['slack.send_message'],
+        multiple: false,
+      },
+    ],
+  });
+  assert.deepEqual(storeCalls[0], [
+    'updateAgentPermissions',
+    {
+      agentId: 'agent-1',
+      appIds: ['finance-os'],
+      toolIds: ['forger_chrome_extension.navigate'],
+      connectionGrants: [
+        {
+          type: 'gmail',
+          actions: ['gmail.search_messages'],
+          multiple: true,
+          connectionIds: ['gmail-1'],
+        },
+      ],
+    },
+  ]);
+
+  await handlers.get(IPC_CHANNELS.personalAgentUpdatePermissions)(null, {
+    agentId: 'agent-1',
+    appIds: [],
+    toolIds: [],
+    connectionGrants: [],
+  });
+  assert.deepEqual(storeCalls[1], [
+    'updateAgentPermissions',
+    {
+      agentId: 'agent-1',
+      appIds: [],
+      toolIds: [],
+      connectionGrants: [],
+    },
+  ]);
+});
+
 test('personal agent IPC grant options expose installed apps and only tools with actions', async () => {
   const { handlers } = createHarness();
 
@@ -304,6 +388,22 @@ test('personal agent IPC grant options expose installed apps and only tools with
       { agentId: 'agent-1', name: 'Ops', description: undefined },
     ],
   });
+});
+
+test('personal agent IPC grant options fall back to app id for blank app names', async () => {
+  const { handlers } = createHarness({
+    installedApps: [
+      { id: 'recipes', name: '   ', description: '   ', shortDescription: 'Recetas', status: 'running' },
+      { id: 'journal', name: 'Diario', description: 'Notas personales', status: 'installed' },
+    ],
+  });
+
+  const options = await handlers.get(IPC_CHANNELS.personalAgentGrantOptionsList)();
+
+  assert.deepEqual(options.apps, [
+    { appId: 'recipes', name: 'recipes', description: 'Recetas', status: 'running' },
+    { appId: 'journal', name: 'Diario', description: 'Notas personales', status: 'installed' },
+  ]);
 });
 
 test('personal agent IPC grant options expose only connected connection accounts by instance', async () => {

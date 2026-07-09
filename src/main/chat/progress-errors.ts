@@ -231,10 +231,97 @@ const normalizeAntigravityProgressLine = (line: string): string => {
   return normalizeProgressText(line);
 };
 
-const normalizeProgressText = (text: string): string =>
-  stripMarkdown(text)
+const normalizeProgressText = (text: string): string => {
+  if (isInternalProviderProgressText(text)) {
+    return '';
+  }
+  const normalized = stripMarkdown(text)
     .replace(/\s+/g, ' ')
     .trim();
+  return isInternalProviderProgressText(normalized) ? '' : normalized;
+};
+
+export const isInternalProviderProgressText = (text: string): boolean => {
+  const raw = text.trim();
+  if (!raw) {
+    return false;
+  }
+
+  const decoded = decodeProviderProgressText(raw);
+  const lower = decoded.toLowerCase();
+  const containsMcpToolAnnotations = lower.includes('"annotations"') && (
+    lower.includes('"readonlyhint"') ||
+    lower.includes('"destructivehint"') ||
+    lower.includes('"idempotenthint"') ||
+    lower.includes('"openworldhint"')
+  );
+  const containsToolsList = lower.includes('"tools"') && lower.includes('"name"') && containsMcpToolAnnotations;
+  const containsJsonRpcToolsList = lower.includes('"jsonrpc"') && lower.includes('"tools/list"');
+  const containsForgerToolMetadata = lower.includes('"name":"forger_') && containsMcpToolAnnotations;
+
+  if (containsMcpToolAnnotations || containsToolsList || containsJsonRpcToolsList || containsForgerToolMetadata) {
+    return looksLikeJsonish(raw) || looksLikeJsonish(decoded) || raw.includes('\\"');
+  }
+
+  return looksLikeStructuredProviderPayload(raw) || looksLikeStructuredProviderPayload(decoded);
+};
+
+const decodeProviderProgressText = (text: string): string =>
+  text
+    .replace(/\\\\/g, '\\')
+    .replace(/\\"/g, '"')
+    .replace(/\\n/g, ' ')
+    .replace(/\\r/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const looksLikeJsonish = (text: string): boolean => {
+  const value = text.trim();
+  if (/^[{[]/.test(value)) {
+    return true;
+  }
+  const structuralChars = value.match(/[{}[\]":,]/g)?.length ?? 0;
+  return structuralChars >= 8 && structuralChars / Math.max(value.length, 1) > 0.08;
+};
+
+const looksLikeStructuredProviderPayload = (text: string): boolean => {
+  const value = text.trim();
+  if (!value) {
+    return false;
+  }
+  if (isJsonObjectOrArray(value) || isJsonFragmentLine(value) || isJsonStringValueFragment(value)) {
+    return true;
+  }
+  const keyValueCount = jsonKeyValueMatches(value).length;
+  if (keyValueCount >= 2 && looksLikeJsonish(value)) {
+    return true;
+  }
+  return keyValueCount >= 1 && isJsonKeyValueFragment(value);
+};
+
+const isJsonObjectOrArray = (text: string): boolean => {
+  if (!/^[{[]/.test(text.trim())) {
+    return false;
+  }
+  try {
+    const parsed = JSON.parse(text);
+    return parsed !== null && typeof parsed === 'object';
+  } catch {
+    return false;
+  }
+};
+
+const isJsonFragmentLine = (text: string): boolean =>
+  /^[\s{}[,\]]+$/.test(text.trim());
+
+const isJsonStringValueFragment = (text: string): boolean =>
+  /^"[^"]*",?$/.test(text.trim()) || /^[A-Za-z0-9_-]{8,}",?$/.test(text.trim());
+
+const isJsonKeyValueFragment = (text: string): boolean =>
+  /^\s*"?[A-Za-z][A-Za-z0-9_-]*"?\s*:\s*(?:"[^"]*"|-?\d+(?:\.\d+)?|true|false|null|[{[])/i.test(text.trim());
+
+const jsonKeyValueMatches = (text: string): RegExpMatchArray[] =>
+  Array.from(text.matchAll(/(?:^|[\s,{])"?[A-Za-z][A-Za-z0-9_-]*"?\s*:\s*(?:"[^"]*"|-?\d+(?:\.\d+)?|true|false|null|[{[])/gi));
 
 const isAntigravityProgressNoise = (line: string): boolean => {
   const compact = line.trim();

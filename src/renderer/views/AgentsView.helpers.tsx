@@ -6,6 +6,7 @@ import type {
   AgentProvider,
   AgentRuntime,
   AgentToolId,
+  PersonalAgent,
   PersonalAgentConnectionGrant,
   PersonalAgentConversation,
   PersonalAgentGrantOptionConnection,
@@ -143,6 +144,20 @@ export const defaultAccessDraft = (): AccessDraft => ({
   toolIds: [],
   connectionGrants: [],
   peerAgentGrants: [],
+});
+
+export const accessDraftFromAgent = (agent: PersonalAgent): AccessDraft => ({
+  permissionMode: agent.permissionMode,
+  networkAccess: agent.networkAccess,
+  runtime: agent.runtime ? { ...agent.runtime } : defaultPersonalAgentRuntime(),
+  appIds: [...agent.appIds],
+  toolIds: [...agent.toolIds],
+  connectionGrants: agent.connectionGrants.map((grant) => ({
+    ...grant,
+    actions: [...grant.actions],
+    ...(grant.connectionIds ? { connectionIds: [...grant.connectionIds] } : {}),
+  })),
+  peerAgentGrants: agent.peerAgentGrants.map((grant) => ({ ...grant })),
 });
 
 export const toggleId = <T extends string>(values: T[], id: T, checked: boolean): T[] =>

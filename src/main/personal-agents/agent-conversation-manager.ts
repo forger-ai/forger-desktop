@@ -26,6 +26,7 @@ interface PersonalAgentRunnerInput {
   runtime?: AgentRuntime;
   prompt: string;
   workspaceRoot: string;
+  sharedRoots: string[];
   trustedRoots: string[];
   mcpContext: PersonalAgentMcpRunContext;
   onProgress: (message: string, options?: { includeActivity?: boolean }) => void;
@@ -53,6 +54,7 @@ interface AgentConversationManagerOptions {
   releaseForgerMcpSession?: (token: string) => void;
   listenAppMcps?: (appIds: string[], runId: string) => Promise<LlmAppMcpServerConfig[]>;
   releaseAppMcps?: (runId: string) => void;
+  resolveAppTrustedRoots?: (appIds: string[]) => Promise<string[]>;
   runner?: PersonalAgentRunner;
   onConversationEvent?: (event: PersonalAgentConversationEvent) => void;
 }
@@ -337,7 +339,11 @@ export class AgentConversationManager {
       : conversation;
     const workspaceRoot = await this.options.store.workspaceRootForAgent(agent.id);
     const prompt = await this.buildPrompt(agent, conversationForRun, run);
-    const trustedRoots = trustedRootsForConversationFiles(workspaceRoot, conversationForRun.messages);
+    const sharedRoots = await this.resolveAppTrustedRoots(agent.appIds);
+    const trustedRoots = [
+      ...trustedRootsForConversationFiles(workspaceRoot, conversationForRun.messages),
+      ...sharedRoots,
+    ];
     const progressWrites: Array<Promise<void>> = [];
     const result = await this.runPersonalAgent({
       agent,
@@ -346,6 +352,7 @@ export class AgentConversationManager {
       runtime,
       prompt,
       workspaceRoot,
+      sharedRoots,
       trustedRoots,
       mcpContext: context,
       onProgress: (message, progressOptions) => {
@@ -504,6 +511,8 @@ export class AgentConversationManager {
         mcpServers,
         workingDir: input.workspaceRoot,
         configWorkspaceRoot: runtime.provider === 'antigravity' ? input.workspaceRoot : undefined,
+        sharedRoots: input.sharedRoots,
+        addDirs: input.sharedRoots,
         prompt: input.prompt,
         permissionMode: input.agent.permissionMode,
         networkAccess,
@@ -520,7 +529,7 @@ export class AgentConversationManager {
                 input.agent.id,
                 input.conversation.id,
               ),
-              trustedRoots: input.trustedRoots,
+              trustedRoots: Array.from(new Set(input.trustedRoots)),
               networkAccess,
             }
           : { type: 'none' },
@@ -562,6 +571,27 @@ export class AgentConversationManager {
       permissionMode: agent.permissionMode,
       strict: Boolean(agent.runtime),
     });
+  }
+
+  private async resolveAppTrustedRoots(appIds: string[]): Promise<string[]> {
+    if (!appIds.length || !this.options.resolveAppTrustedRoots) {
+      return [];
+    }
+    const resolvedRoots = await this.options.resolveAppTrustedRoots([...new Set(appIds)]);
+    const roots: string[] = [];
+    const seen = new Set<string>();
+    for (const rawRoot of resolvedRoots) {
+      if (typeof rawRoot !== 'string' || !rawRoot.trim()) {
+        continue;
+      }
+      const root = path.resolve(rawRoot);
+      if (seen.has(root) || !(await existsDirectory(root))) {
+        continue;
+      }
+      seen.add(root);
+      roots.push(root);
+    }
+    return roots;
   }
 
   private handleProviderOutput(

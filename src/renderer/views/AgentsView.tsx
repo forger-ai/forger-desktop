@@ -6,7 +6,6 @@ import ChatRounded from '@mui/icons-material/ChatRounded';
 import CloseRounded from '@mui/icons-material/CloseRounded';
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
 import DescriptionRounded from '@mui/icons-material/DescriptionRounded';
-import ExpandMoreRounded from '@mui/icons-material/ExpandMoreRounded';
 import HistoryRounded from '@mui/icons-material/HistoryRounded';
 import PlayArrowRounded from '@mui/icons-material/PlayArrowRounded';
 import SaveRounded from '@mui/icons-material/SaveRounded';
@@ -14,15 +13,11 @@ import SendRounded from '@mui/icons-material/SendRounded';
 import SettingsRounded from '@mui/icons-material/SettingsRounded';
 import {
   Alert,
-  Accordion,
-  AccordionDetails,
-  AccordionSummary,
   Box,
   Button,
   Card,
   CardActionArea,
   CardContent,
-  Checkbox,
   Chip,
   CircularProgress,
   Dialog,
@@ -30,16 +25,9 @@ import {
   DialogContent,
   DialogTitle,
   Divider,
-  FormControl,
-  FormControlLabel,
-  FormGroup,
-  InputLabel,
   IconButton,
-  MenuItem,
   Paper,
-  Select,
   Stack,
-  Switch,
   Tab,
   Tabs,
   TextField,
@@ -47,11 +35,10 @@ import {
   Typography,
   useTheme,
 } from '@mui/material';
-import type { AgentEffort, AgentProvider, AgentRuntime, AgentToolId, PersonalAgent, PersonalAgentConnectionGrant, PersonalAgentConversation, PersonalAgentConversationEvent, PersonalAgentGrantOptionConnection, PersonalAgentGrantOptionTool, PersonalAgentGrantOptions, PersonalAgentMessage, PersonalAgentPeerThread, PersonalAgentWorkspaceEntry, PersonalAgentWorkspaceFile, PickedChatFile, SharedFileRef, WindowControlState } from '@shared/types';
+import type { AgentProvider, AppSummary, PersonalAgent, PersonalAgentConversation, PersonalAgentConversationEvent, PersonalAgentGrantOptions, PersonalAgentMessage, PersonalAgentPeerThread, PersonalAgentWorkspaceEntry, PersonalAgentWorkspaceFile, PickedChatFile, SharedFileRef, WindowControlState } from '@shared/types';
 import type { AppDictionary } from '@renderer/i18n';
-import { AGENT_PROVIDER_OPTIONS, ANTIGRAVITY_EFFORT_OPTIONS, ANTIGRAVITY_MODEL_OPTIONS, CLAUDE_EFFORT_OPTIONS, CLAUDE_MODEL_OPTIONS, CODEX_MODEL_OPTIONS, CODEX_REASONING_OPTIONS } from '@renderer/preferences';
+import { AGENT_PROVIDER_OPTIONS, CODEX_MODEL_OPTIONS } from '@renderer/preferences';
 import { usageAnalytics } from '@renderer/usage-analytics';
-import { getRuntimeSupportedEfforts, normalizeRuntimeEffortForModel } from '@shared/agent-runtime-registry';
 import { AgentRunActivityReceipt } from '@renderer/components/AgentRunActivityReceipt';
 import { MarkdownMessage } from './chat/MarkdownMessage';
 import {
@@ -63,27 +50,27 @@ import {
   type AccessDraft,
   type AgentConversationHistoryGroup,
   type RenderPersonalAgentMessageOptions,
+  accessDraftFromAgent,
   compactFileLabel,
-  connectionInstanceLabel,
   defaultAccessDraft,
-  defaultRuntimeForProvider,
   isTerminalRunStatus,
   personalAgentRunErrorMessage,
   personalAgentSaveErrorMessage,
   progressMessagesForMessageRun,
-  toggleId,
   upsertConversation,
   visiblePeerThreadMessages,
   WorkspaceTree,
 } from './AgentsView.helpers';
+import { AgentAccessControls } from './AgentAccessControls';
 
 interface AgentsViewProps {
   t: AppDictionary;
   intelligenceProviderConfigured: boolean;
   providerOptions?: Array<{ label: string; value: AgentProvider | 'auto' }>;
+  installedApps?: AppSummary[];
 }
 
-export function AgentsView({ t, intelligenceProviderConfigured, providerOptions = AGENT_PROVIDER_OPTIONS }: AgentsViewProps) {
+export function AgentsView({ t, intelligenceProviderConfigured, providerOptions = AGENT_PROVIDER_OPTIONS, installedApps = [] }: AgentsViewProps) {
   const theme = useTheme();
   const [agents, setAgents] = useState<PersonalAgent[]>([]);
   const [activeAgentId, setActiveAgentId] = useState<string | null>(null);
@@ -97,7 +84,8 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [purpose, setPurpose] = useState('');
-  const [accessDraft, setAccessDraft] = useState<AccessDraft>(() => defaultAccessDraft());
+  const [createAccessDraft, setCreateAccessDraft] = useState<AccessDraft>(() => defaultAccessDraft());
+  const [settingsAccessDraft, setSettingsAccessDraft] = useState<AccessDraft>(() => defaultAccessDraft());
   const [message, setMessage] = useState('');
   const [pendingFiles, setPendingFiles] = useState<PickedChatFile[]>([]);
   const [detailTab, setDetailTab] = useState<'chat' | 'workspace' | 'settings'>('chat');
@@ -109,6 +97,7 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
   const [openPeerThread, setOpenPeerThread] = useState<PersonalAgentPeerThread | null>(null);
   const [busyAction, setBusyAction] = useState<'create' | 'delete' | 'file' | 'wake' | 'start' | 'send' | 'access' | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [settingsDraftAgentVersion, setSettingsDraftAgentVersion] = useState<string | null>(null);
   const messagesScrollRef = useRef<HTMLDivElement | null>(null);
   const shouldStickToBottomRef = useRef(true);
 
@@ -116,6 +105,16 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
     () => agents.find((agent) => agent.id === activeAgentId) ?? null,
     [agents, activeAgentId],
   );
+  const activeAgentVersion = activeAgent ? `${activeAgent.id}:${activeAgent.updatedAt}` : null;
+  const settingsDraftReady = settingsDraftAgentVersion === activeAgentVersion;
+
+  useEffect(() => {
+    if (settingsDraftReady) {
+      return;
+    }
+    setSettingsAccessDraft(activeAgent ? accessDraftFromAgent(activeAgent) : defaultAccessDraft());
+    setSettingsDraftAgentVersion(activeAgentVersion);
+  }, [activeAgent, activeAgentVersion, settingsDraftReady]);
 
   const isBlankAgent = Boolean(activeAgent && conversations.length === 0 && !conversation);
   const fileDirty = Boolean(openFile && fileDraft !== openFile.content);
@@ -139,6 +138,13 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
   const busy = busyAction !== null;
   const conversationReadOnly = Boolean(conversation && (conversation.readOnly || conversation.origin === 'agent'));
   const shouldReserveMacTrafficLightSpace = isMacOsPlatform() && !windowState?.isFullScreen;
+  const installedAppsGrantOptionsKey = useMemo(
+    () => installedApps
+      .map((app) => `${app.id}:${app.name ?? ''}:${app.description ?? ''}:${app.shortDescription ?? ''}:${app.status}`)
+      .sort()
+      .join('|'),
+    [installedApps],
+  );
   const historyGroups = useMemo<AgentConversationHistoryGroup[]>(() => {
     const userStarted = sortItemsByRecentActivity(conversations.filter((item) => item.origin !== 'agent'));
     const agentStarted = sortItemsByRecentActivity(conversations.filter((item) => item.origin === 'agent'));
@@ -194,7 +200,7 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
     return () => {
       mounted = false;
     };
-  }, [t.agents.loadError]);
+  }, [installedAppsGrantOptionsKey, t.agents.loadError]);
 
   useEffect(() => {
     if (!isMacOsPlatform()) {
@@ -311,7 +317,7 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
     setName('');
     setDescription('');
     setPurpose('');
-    setAccessDraft(defaultAccessDraft());
+    setCreateAccessDraft(defaultAccessDraft());
   };
 
   const handleCreate = async () => {
@@ -323,13 +329,13 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
         name,
         description,
         purpose,
-        permissionMode: accessDraft.permissionMode,
-        networkAccess: accessDraft.networkAccess,
-        runtime: accessDraft.runtime,
-        appIds: accessDraft.appIds,
-        toolIds: accessDraft.toolIds,
-        connectionGrants: accessDraft.connectionGrants,
-        peerAgentGrants: accessDraft.peerAgentGrants,
+        permissionMode: createAccessDraft.permissionMode,
+        networkAccess: createAccessDraft.networkAccess,
+        runtime: createAccessDraft.runtime,
+        appIds: createAccessDraft.appIds,
+        toolIds: createAccessDraft.toolIds,
+        connectionGrants: createAccessDraft.connectionGrants,
+        peerAgentGrants: createAccessDraft.peerAgentGrants,
       });
       resetCreateForm();
       setCreateOpen(false);
@@ -349,19 +355,19 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
   };
 
   const handleSaveAccess = async () => {
-    if (!activeAgent || busy) return;
+    if (!activeAgent || busy || !settingsDraftReady) return;
     setBusyAction('access');
     setError(null);
     try {
       const updated = await window.forger.personalAgentUpdatePermissions({
         agentId: activeAgent.id,
-        permissionMode: accessDraft.permissionMode,
-        networkAccess: accessDraft.networkAccess,
-        runtime: accessDraft.runtime,
-        appIds: accessDraft.appIds,
-        toolIds: accessDraft.toolIds,
-        connectionGrants: accessDraft.connectionGrants,
-        peerAgentGrants: accessDraft.peerAgentGrants,
+        permissionMode: settingsAccessDraft.permissionMode,
+        networkAccess: settingsAccessDraft.networkAccess,
+        runtime: settingsAccessDraft.runtime,
+        appIds: settingsAccessDraft.appIds,
+        toolIds: settingsAccessDraft.toolIds,
+        connectionGrants: settingsAccessDraft.connectionGrants,
+        peerAgentGrants: settingsAccessDraft.peerAgentGrants,
       });
       setAgents((current) => current.map((agent) => agent.id === updated.id ? updated : agent));
     } catch (accessError) {
@@ -540,388 +546,16 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
     </Stack>
   );
 
-  const renderToolAccessControl = (tool: PersonalAgentGrantOptionTool) => {
-    const actionIds = tool.actions.map((action) => action.id);
-    const selectedCount = actionIds.filter((id) => accessDraft.toolIds.includes(id)).length;
-    const allSelected = actionIds.length > 0 && selectedCount === actionIds.length;
-    const partiallySelected = selectedCount > 0 && selectedCount < actionIds.length;
-    const setToolChecked = (checked: boolean) => {
-      setAccessDraft((current) => ({
-        ...current,
-        toolIds: checked
-          ? [...new Set([...current.toolIds, ...actionIds])]
-          : current.toolIds.filter((id) => !actionIds.includes(id)),
-      }));
-    };
-    return (
-      <Accordion key={tool.id} disableGutters variant="outlined" sx={{ '&:before': { display: 'none' } }}>
-        <AccordionSummary expandIcon={<ExpandMoreRounded />}>
-          <Stack direction="row" spacing={1} alignItems="center" sx={{ width: '100%', minWidth: 0 }}>
-            <Checkbox
-              size="small"
-              checked={allSelected}
-              indeterminate={partiallySelected}
-              disabled={!tool.configured || actionIds.length === 0}
-              onClick={(event) => event.stopPropagation()}
-              onFocus={(event) => event.stopPropagation()}
-              onChange={(event) => setToolChecked(event.target.checked)}
-            />
-            <Box sx={{ minWidth: 0, flex: 1 }}>
-              <Typography variant="body2" fontWeight={700} noWrap>{tool.name}</Typography>
-              <Typography variant="caption" color="text.secondary" noWrap>
-                {tool.configured ? t.agents.toolActionsCount(selectedCount, actionIds.length) : t.agents.toolNeedsSetup}
-              </Typography>
-            </Box>
-          </Stack>
-        </AccordionSummary>
-        <AccordionDetails sx={{ pt: 0 }}>
-          <FormGroup>
-            {tool.actions.map((action) => (
-              <FormControlLabel
-                key={action.id}
-                control={(
-                  <Checkbox
-                    checked={accessDraft.toolIds.includes(action.id)}
-                    disabled={!tool.configured}
-                    onChange={(event) => {
-                      setAccessDraft((current) => ({
-                        ...current,
-                        toolIds: toggleId(current.toolIds, action.id, event.target.checked),
-                      }));
-                    }}
-                  />
-                )}
-                label={action.name}
-              />
-            ))}
-          </FormGroup>
-        </AccordionDetails>
-      </Accordion>
-    );
-  };
-
-  const renderConnectionAccessControl = (connection: PersonalAgentGrantOptionConnection) => {
-    const actionIds = connection.actions.map((action) => action.id as AgentToolId);
-    const grant = accessDraft.connectionGrants.find((item) => item.type === connection.type);
-    const selectedActionIds = grant?.actions ?? [];
-    const selectedCount = actionIds.filter((id) => selectedActionIds.includes(id)).length;
-    const allSelected = actionIds.length > 0 && selectedCount === actionIds.length;
-    const partiallySelected = selectedCount > 0 && selectedCount < actionIds.length;
-    const selectedConnectionIds = grant?.connectionIds ?? [];
-    const upsertConnectionGrant = (nextGrant: PersonalAgentConnectionGrant | null) => {
-      setAccessDraft((current) => ({
-        ...current,
-        connectionGrants: nextGrant
-          ? [
-              ...current.connectionGrants.filter((item) => item.type !== connection.type),
-              nextGrant,
-            ]
-          : current.connectionGrants.filter((item) => item.type !== connection.type),
-      }));
-    };
-    const buildGrant = (actions: string[], connectionIds = selectedConnectionIds): PersonalAgentConnectionGrant | null => {
-      if (actions.length === 0) return null;
-      return {
-        type: connection.type,
-        actions: [...new Set(actions)],
-        multiple: connection.supportsMultiple && connectionIds.length !== 1,
-        ...(connectionIds.length ? { connectionIds } : {}),
-      };
-    };
-    const setConnectionChecked = (checked: boolean) => {
-      upsertConnectionGrant(checked ? buildGrant(actionIds) : null);
-    };
-    const setActionChecked = (actionId: AgentToolId, checked: boolean) => {
-      upsertConnectionGrant(buildGrant(toggleId(selectedActionIds as AgentToolId[], actionId, checked)));
-    };
-    const setConnectionIds = (ids: string[]) => {
-      upsertConnectionGrant(buildGrant(selectedActionIds, ids));
-    };
-    return (
-      <Accordion key={connection.type} disableGutters variant="outlined" sx={{ '&:before': { display: 'none' } }}>
-        <AccordionSummary expandIcon={<ExpandMoreRounded />}>
-          <Stack direction="row" spacing={1} alignItems="center" sx={{ width: '100%', minWidth: 0 }}>
-            <Checkbox
-              size="small"
-              checked={allSelected}
-              indeterminate={partiallySelected}
-              disabled={!connection.configured || actionIds.length === 0}
-              onClick={(event) => event.stopPropagation()}
-              onFocus={(event) => event.stopPropagation()}
-              onChange={(event) => setConnectionChecked(event.target.checked)}
-            />
-            <Box sx={{ minWidth: 0, flex: 1 }}>
-              <Typography variant="body2" fontWeight={700} noWrap>{connection.displayName}</Typography>
-              <Typography variant="caption" color="text.secondary" noWrap>
-                {connection.configured ? t.agents.connectionActionsCount(selectedCount, actionIds.length) : t.agents.connectionNeedsSetup}
-              </Typography>
-            </Box>
-          </Stack>
-        </AccordionSummary>
-        <AccordionDetails sx={{ pt: 0 }}>
-          <Stack spacing={1}>
-            {connection.instances.length > 1 ? (
-              <FormControl size="small" fullWidth disabled={!grant}>
-                <InputLabel id={`agent-connection-instances-${connection.type}`}>{t.agents.connectionInstances}</InputLabel>
-                <Select
-                  labelId={`agent-connection-instances-${connection.type}`}
-                  multiple
-                  label={t.agents.connectionInstances}
-                  value={selectedConnectionIds}
-                  renderValue={(selected) => {
-                    if ((selected as string[]).length === 0) return t.agents.connectionAllInstances;
-                    return (selected as string[])
-                      .map((id) => {
-                        const instance = connection.instances.find((candidate) => candidate.id === id);
-                        return instance ? connectionInstanceLabel(instance) : id;
-                      })
-                      .join(', ');
-                  }}
-                  onChange={(event) => {
-                    const value = event.target.value;
-                    setConnectionIds(typeof value === 'string' ? value.split(',') : value as string[]);
-                  }}
-                >
-                  {connection.instances.map((instance) => (
-                    <MenuItem key={instance.id} value={instance.id}>
-                      {connectionInstanceLabel(instance)}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            ) : null}
-            <FormGroup>
-              {connection.actions.map((action) => (
-                <FormControlLabel
-                  key={action.id}
-                  control={(
-                    <Checkbox
-                      checked={selectedActionIds.includes(action.id)}
-                      disabled={!connection.configured}
-                      onChange={(event) => setActionChecked(action.id as AgentToolId, event.target.checked)}
-                    />
-                  )}
-                  label={action.name}
-                />
-              ))}
-            </FormGroup>
-          </Stack>
-        </AccordionDetails>
-      </Accordion>
-    );
-  };
-
-  const renderAccessControls = () => {
-    const runtimeProvider = accessDraft.runtime.provider;
-    const runtimeModelOptions = runtimeProvider === 'claude'
-      ? CLAUDE_MODEL_OPTIONS
-      : runtimeProvider === 'antigravity'
-        ? ANTIGRAVITY_MODEL_OPTIONS
-        : CODEX_MODEL_OPTIONS;
-    const runtimeEffortOptions = (runtimeProvider === 'claude'
-      ? CLAUDE_EFFORT_OPTIONS
-      : runtimeProvider === 'antigravity'
-        ? ANTIGRAVITY_EFFORT_OPTIONS
-        : CODEX_REASONING_OPTIONS
-    ).filter((option) => getRuntimeSupportedEfforts(runtimeProvider, accessDraft.runtime.model).includes(option.value as AgentEffort));
-    const runtimeModelValue = runtimeModelOptions.some((option) => option.realModelName === accessDraft.runtime.model)
-      ? accessDraft.runtime.model
-      : runtimeModelOptions[0]?.realModelName ?? accessDraft.runtime.model;
-    const runtimeEffortValue = normalizeRuntimeEffortForModel(runtimeProvider, accessDraft.runtime.model, accessDraft.runtime.effort);
-    return (
-      <Stack spacing={1.5}>
-        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
-          <FormControl size="small" fullWidth>
-            <InputLabel id="agent-runtime-provider-label">{t.agents.runtimeProvider}</InputLabel>
-            <Select
-              labelId="agent-runtime-provider-label"
-              label={t.agents.runtimeProvider}
-              value={runtimeProvider}
-              onChange={(event) => {
-                const provider = event.target.value as AgentProvider;
-                setAccessDraft((current) => ({
-                  ...current,
-                  runtime: defaultRuntimeForProvider(provider),
-                }));
-              }}
-            >
-              {providerOptions.filter((option) => option.value !== 'auto').map((option) => (
-                <MenuItem key={option.value} value={option.value}>{option.label}</MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-          <FormControl size="small" fullWidth>
-            <InputLabel id="agent-runtime-model-label">{t.agents.runtimeModel}</InputLabel>
-            <Select
-              labelId="agent-runtime-model-label"
-              label={t.agents.runtimeModel}
-              value={runtimeModelValue}
-              onChange={(event) => {
-                const model = event.target.value;
-                setAccessDraft((current) => {
-                  return {
-                    ...current,
-                    runtime: { ...current.runtime, model, effort: normalizeRuntimeEffortForModel(current.runtime.provider, model, current.runtime.effort) },
-                  };
-                });
-              }}
-            >
-              {runtimeModelOptions.map((option) => (
-                <MenuItem key={option.realModelName} value={option.realModelName}>{option.displayModelName}</MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-        </Stack>
-        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
-          <FormControl size="small" fullWidth>
-            <InputLabel id="agent-runtime-effort-label">{t.agents.runtimeEffort}</InputLabel>
-            <Select
-              labelId="agent-runtime-effort-label"
-              label={t.agents.runtimeEffort}
-              value={runtimeEffortValue}
-              onChange={(event) => {
-                setAccessDraft((current) => ({
-                  ...current,
-                  runtime: { ...current.runtime, effort: event.target.value as AgentRuntime['effort'] },
-                }));
-              }}
-            >
-              {runtimeEffortOptions.map((option) => (
-                <MenuItem key={option.value} value={option.value}>{option.label}</MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-          <FormControl size="small" fullWidth>
-            <InputLabel id="agent-permission-mode-label">{t.agents.permissionLevel}</InputLabel>
-            <Select
-              labelId="agent-permission-mode-label"
-              label={t.agents.permissionLevel}
-              value={accessDraft.permissionMode}
-              onChange={(event) => {
-                setAccessDraft((current) => ({
-                  ...current,
-                  permissionMode: event.target.value === 'unsafe' ? 'unsafe' : 'safe',
-                }));
-              }}
-            >
-              <MenuItem value="safe">{t.agents.standardPermission}</MenuItem>
-              <MenuItem value="unsafe">{t.agents.expandedPermission}</MenuItem>
-            </Select>
-          </FormControl>
-        </Stack>
-        <FormControlLabel
-          control={(
-            <Switch
-              checked={accessDraft.networkAccess}
-              onChange={(event) => setAccessDraft((current) => ({ ...current, networkAccess: event.target.checked }))}
-            />
-          )}
-          label={t.agents.internetAccess}
-        />
-        <Box>
-        <Typography variant="subtitle2" sx={{ mb: 0.75 }}>{t.agents.appsAccess}</Typography>
-        {grantOptions.apps.length > 0 ? (
-          <FormGroup>
-            {grantOptions.apps.map((app) => (
-              <FormControlLabel
-                key={app.appId}
-                control={(
-                  <Checkbox
-                    checked={accessDraft.appIds.includes(app.appId)}
-                    onChange={(event) => {
-                      setAccessDraft((current) => ({
-                        ...current,
-                        appIds: toggleId(current.appIds, app.appId, event.target.checked),
-                      }));
-                    }}
-                  />
-                )}
-                label={app.name}
-              />
-            ))}
-          </FormGroup>
-        ) : (
-          <Typography variant="body2" color="text.secondary">{t.agents.noAppsAvailable}</Typography>
-        )}
-        </Box>
-        <Box>
-          <Typography variant="subtitle2" sx={{ mb: 0.75 }}>{t.agents.toolsAccess}</Typography>
-          {grantOptions.tools.some((tool) => tool.actions.length > 0) ? (
-            <Stack spacing={1}>
-              {grantOptions.tools.map(renderToolAccessControl)}
-            </Stack>
-          ) : (
-            <Typography variant="body2" color="text.secondary">{t.agents.noToolsAvailable}</Typography>
-          )}
-        </Box>
-        <Box>
-          <Typography variant="subtitle2" sx={{ mb: 0.75 }}>{t.agents.connectionsAccess}</Typography>
-          {grantOptions.connections.some((connection) => connection.actions.length > 0) ? (
-            <Stack spacing={1}>
-              {grantOptions.connections.map(renderConnectionAccessControl)}
-            </Stack>
-          ) : (
-            <Typography variant="body2" color="text.secondary">{t.agents.noConnectionsAvailable}</Typography>
-          )}
-        </Box>
-        <Box>
-          <Typography variant="subtitle2" sx={{ mb: 0.75 }}>
-            {t.locale === 'es' ? 'Agentes permitidos' : 'Allowed agents'}
-          </Typography>
-          {grantOptions.peerAgents.filter((peer) => peer.agentId !== activeAgent?.id).length > 0 ? (
-            <Stack spacing={1}>
-              {grantOptions.peerAgents.filter((peer) => peer.agentId !== activeAgent?.id).map((peer) => {
-                const grant = accessDraft.peerAgentGrants.find((item) => item.agentId === peer.agentId);
-                return (
-                  <Paper key={peer.agentId} variant="outlined" sx={{ p: 1.25, borderRadius: 1 }}>
-                    <Stack spacing={1}>
-                      <FormControlLabel
-                        control={(
-                          <Checkbox
-                            checked={Boolean(grant)}
-                            onChange={(event) => {
-                              setAccessDraft((current) => ({
-                                ...current,
-                                peerAgentGrants: event.target.checked
-                                  ? [...current.peerAgentGrants.filter((item) => item.agentId !== peer.agentId), { agentId: peer.agentId, name: peer.name, description: peer.description, criteria: '' }]
-                                  : current.peerAgentGrants.filter((item) => item.agentId !== peer.agentId),
-                              }));
-                            }}
-                          />
-                        )}
-                        label={peer.name}
-                      />
-                      {grant ? (
-                        <TextField
-                          size="small"
-                          fullWidth
-                          multiline
-                          minRows={2}
-                          label={t.locale === 'es' ? 'Criterio de uso' : 'Usage criteria'}
-                          value={grant.criteria}
-                          onChange={(event) => {
-                            setAccessDraft((current) => ({
-                              ...current,
-                              peerAgentGrants: current.peerAgentGrants.map((item) =>
-                                item.agentId === peer.agentId ? { ...item, criteria: event.target.value } : item),
-                            }));
-                          }}
-                        />
-                      ) : null}
-                    </Stack>
-                  </Paper>
-                );
-              })}
-            </Stack>
-          ) : (
-            <Typography variant="body2" color="text.secondary">
-              {t.locale === 'es' ? 'No hay otros agentes personales disponibles.' : 'No other personal agents are available.'}
-            </Typography>
-          )}
-        </Box>
-      </Stack>
-    );
-  };
+  const renderAccessControls = (draft: AccessDraft, setDraft: typeof setCreateAccessDraft) => (
+    <AgentAccessControls
+      activeAgentId={activeAgent?.id}
+      draft={draft}
+      grantOptions={grantOptions}
+      providerOptions={providerOptions}
+      setDraft={setDraft}
+      t={t}
+    />
+  );
 
   const renderMainList = () => (
     <Stack spacing={2.25} sx={{ height: '100%', minHeight: 0 }}>
@@ -1385,12 +1019,12 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
           ) : detailTab === 'settings' ? (
             <Paper variant="outlined" sx={{ height: '100%', minHeight: 0, overflow: 'auto', p: 2, borderRadius: 1 }}>
               <Stack spacing={2}>
-                {renderAccessControls()}
+                {renderAccessControls(settingsAccessDraft, setSettingsAccessDraft)}
                 <Box>
                   <Button
                     startIcon={<SaveRounded />}
                     variant="contained"
-                    disabled={busyAction === 'access'}
+                    disabled={busyAction === 'access' || !settingsDraftReady}
                     onClick={() => void handleSaveAccess()}
                   >
                     {t.agents.saveAccess}
@@ -1560,7 +1194,7 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
               onChange={(event) => setPurpose(event.target.value)}
             />
             <Divider />
-            {renderAccessControls()}
+            {renderAccessControls(createAccessDraft, setCreateAccessDraft)}
           </Stack>
         </DialogContent>
         <DialogActions>

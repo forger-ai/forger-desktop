@@ -19,7 +19,7 @@ description: Use when designing, reviewing, or explaining Forger Tools, Connecti
 
 ## App-Scoped Access
 - App agents may call Forger Tool and Connection actions only when the selected app context and grants allow the requested action.
-- App backends may call granted Forger Tool and Connection actions through the signed Desktop runtime bridge helpers in `commons/backend/forger_desktop.py`. Both paths are gated by manifest declarations, optional grants, and action ids.
+- App backends may call granted Forger Tool and Connection actions through the signed Desktop runtime bridge helpers in `commons/backend/forger_desktop.py`. They may also call the connection setup and optional-grant request helpers when the app declared that Connection. These paths are gated by manifest declarations, optional grants, and action ids.
 - App-scoped grants do not create global access for every app. Treat each app's grants as local to that app and its declared workflows.
 - If an app lacks a grant for a Forger Tool or Connection action, do not use a broader local integration or another provider to bypass the missing grant.
 - For Chrome grants, request `set_styles` only for temporary visual highlighting or restoring selected elements. Do not use it to hide content, bypass page UI, or make persistent page changes. Treat `submit_form` as sensitive because it can send data or trigger remote changes.

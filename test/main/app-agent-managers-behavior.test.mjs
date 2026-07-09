@@ -19,6 +19,8 @@ const distRequire = (relativePath) => {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const leakedMcpToolMetadata = '\\"name\\":\\"forger_get_app_runtime_status\\",\\"annotations\\":{\\"readOnlyHint\\":true,\\"destructiveHint\\":false,\\"idempotentHint\\":true,\\"openWorldHint\\":false}}';
+
 const waitFor = async (predicate, label) => {
   for (let index = 0; index < 400; index += 1) {
     const value = predicate();
@@ -2085,7 +2087,10 @@ test('conversation manager executes a claude run with resume state and cleans MC
             },
             runCommandCapture: async (command, args, options) => {
               commandCalls.push({ command, args, options });
-              options.onStdout('{"type":"assistant","message":{"content":[{"text":"Working in Claude."}]}}\n');
+              options.onStdout([
+                JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'Working in Claude.' }] } }),
+                JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: leakedMcpToolMetadata }] } }),
+              ].join('\n') + '\n');
               return {
                 code: 0,
                 stdout: '{"session_id":"claude-session-new","result":"Claude finished the review."}\n',
@@ -2145,6 +2150,11 @@ test('conversation manager executes a claude run with resume state and cleans MC
         assert.equal(commandCalls[0].args.includes('--resume'), true);
         assert.equal(commandCalls[0].args.includes('claude-session-old'), true);
         assert.equal(commandCalls[0].args.includes('continue with Claude'), false);
+        const progressEvents = events.filter((event) => event.type === 'run.progress' && event.run.runId === started.activeRun.runId);
+        assert.equal(progressEvents.some((event) => event.progress === 'Working in Claude.'), true);
+        assert.equal(progressEvents.some((event) => /annotations|readOnlyHint|forger_get_app_runtime_status/.test(event.progress)), false);
+        assert.equal(completed.run.progressLog.some((entry) => /annotations|readOnlyHint|forger_get_app_runtime_status/.test(entry)), false);
+        assert.doesNotMatch(completed.run.activity.summary, /annotations|readOnlyHint|forger_get_app_runtime_status/);
         const mcpConfigIndex = commandCalls[0].args.indexOf('--mcp-config');
         assert.notEqual(mcpConfigIndex, -1);
         assert.equal(await readFile(commandCalls[0].args[mcpConfigIndex + 1], 'utf8').then(() => 'exists', () => 'removed'), 'removed');
@@ -2541,7 +2551,10 @@ test('task manager executes a claude task through legacy attachments without cod
             },
             runCommandCapture: async (command, args, options) => {
               commandCalls.push({ command, args, options });
-              options.onStderr('{"type":"assistant","text":"Claude is reading."}\n');
+              options.onStderr([
+                JSON.stringify({ type: 'assistant', text: 'Claude is reading.' }),
+                JSON.stringify({ type: 'assistant', text: leakedMcpToolMetadata }),
+              ].join('\n') + '\n');
               return {
                 code: 0,
                 stdout: '{"session_id":"task-session","message":{"content":[{"text":"Claude summarized the attachment."}]}}\n',
@@ -2600,6 +2613,9 @@ test('task manager executes a claude task through legacy attachments without cod
         );
 
         assert.equal(completed.task.resultText, 'Claude summarized the attachment.');
+        assert.equal(completed.task.progressLog.some((entry) => entry === 'Claude is reading.'), true);
+        assert.equal(completed.task.progressLog.some((entry) => /annotations|readOnlyHint|forger_get_app_runtime_status/.test(entry)), false);
+        assert.doesNotMatch(completed.task.activity.summary, /annotations|readOnlyHint|forger_get_app_runtime_status/);
         assert.equal(commandCalls.length, 1);
         assert.equal(commandCalls[0].command, '/usr/local/bin/claude');
         assert.match(commandCalls[0].options.stdinText, /notes\.txt/);

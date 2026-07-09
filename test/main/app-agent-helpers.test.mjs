@@ -6,6 +6,7 @@ import test from 'node:test';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
+const escapedLeakedAppToolOutput = 'b6fi5hhqto8i\\",\\n \\"category_name\\": \\"Essentials\\",\\n \\"category_kind\\": \\"EXPENSE\\",\\n \\"subcategory_id\\": \\"1ldp5nlvwvuupje8zcvz9bwmv\\",\\n \\"subcategory_name\\": \\"Transport\\"';
 const {
   buildConversationRecoveryContext,
   buildManifestAgentRecoveryPrompt,
@@ -341,6 +342,10 @@ test('conversation helpers normalize ids, metadata, terminal status, progress, a
     type: 'item.completed',
     item: { type: 'agent_message', text: '# Done\n\n- Updated `value`.' },
   })), 'Done Updated value.');
+  assert.equal(progressFromConversationOutput(JSON.stringify({
+    type: 'item.completed',
+    item: { type: 'agent_message', text: escapedLeakedAppToolOutput },
+  }), 'en'), null);
   assert.match(progressFromConversationOutput(JSON.stringify({ type: 'turn.started' }), 'en'), /thinking/i);
   assert.match(progressFromConversationOutput(JSON.stringify({
     type: 'item.completed',
@@ -462,6 +467,10 @@ test('task helpers validate arguments, render prompts, and parse progress states
     type: 'item.completed',
     item: { type: 'agent_message', text: '# Done\n\nA'.repeat(160) },
   }), 'en')?.endsWith('...'), true);
+  assert.equal(progressFromTaskOutput(JSON.stringify({
+    type: 'item.completed',
+    item: { type: 'agent_message', text: escapedLeakedAppToolOutput },
+  }), 'en'), null);
   assert.equal(progressFromTaskOutput(JSON.stringify({
     type: 'item.completed',
     item: { type: 'agent_message', text: '' },

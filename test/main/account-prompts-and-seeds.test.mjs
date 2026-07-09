@@ -203,8 +203,10 @@ test('Forger prompt builders include contract, language, files, official tools, 
   assert.match(appPrompt, /use the app's AGENTS\.md for app-specific facts/);
   assert.match(appPrompt, /Use the chat-mode instructions above for the Forger operational workflow/);
   assert.doesNotMatch(appPrompt, /follow the Forger contract in AGENTS\.md/);
-  assert.match(appPrompt, /Always use Plan Mode before programming/);
+  assert.match(appPrompt, /Always make a visible plan before programming/);
+  assert.doesNotMatch(appPrompt, /Always use Plan Mode before programming/);
   assert.match(appPrompt, /forger_ask_question/);
+  assert.match(appPrompt, /request_user_input[\s\S]*Default mode/);
   assert.match(appPrompt, /functional scope, user intent, desired behavior/);
   assert.match(appPrompt, /Do not use it for low-impact design preferences/);
   assert.match(appPrompt, /affected flow/);
@@ -327,6 +329,7 @@ test('Forger prompt builders include contract, language, files, official tools, 
   });
   assert.match(createPrompt, /FORGER CHAT MODE: create_app/);
   assert.match(createPrompt, /Prefer `forger_ask_question`/);
+  assert.match(createPrompt, /request_user_input[\s\S]*Default mode/);
   assert.match(createPrompt, /Call `forger_create_app` only after the intent is clear enough/);
   assert.match(createPrompt, /Propose a concrete color palette/);
   assert.match(createPrompt, /keep working in this same chat/);
@@ -433,6 +436,7 @@ test('Forger prompt builders include contract, language, files, official tools, 
   assert.match(globalAgents, /### Building a New App[\s\S]*When creating or modifying a newly created app always scan your memory[\s\S]*Offer two or three product directions/);
   assert.match(globalAgents, /### Building a New App[\s\S]*use `forger-localization` before drafting labels, navigation, empty states, loading states, error states, success states/);
   assert.match(globalAgents, /### Asking Clarifying Questions[\s\S]*use `forger_ask_question` when it is available/);
+  assert.match(globalAgents, /### Asking Clarifying Questions[\s\S]*request_user_input[\s\S]*Default mode/);
   assert.match(globalAgents, /### Asking Clarifying Questions[\s\S]*creates the visual question interface/);
   assert.match(globalAgents, /### Asking Clarifying Questions[\s\S]*Do not write a menu, checklist, or numbered list of question options/);
   assert.match(globalAgents, /### Modifying an App[\s\S]*1\. Identify what should feel different[\s\S]*3\. Work on one visible improvement[\s\S]*4\. Save the result as a new version/);
@@ -644,6 +648,7 @@ test('official tool skill templates and seed data keep expected Desktop defaults
   assert.match(officialToolsSkill.body, /forger_chrome_extension\.connection\.status/);
   assert.match(officialToolsSkill.body, /forger_chrome_extension\.submit_form/);
   assert.match(officialToolsSkill.body, /commons\/backend\/forger_desktop\.py/);
+  assert.match(officialToolsSkill.body, /request_user_input[\s\S]*Default mode/);
   assert.match(officialToolsSkill.body, /Do not manually start app services/);
   assert.match(officialToolsSkill.body, /forger_get_app_view_snapshot/);
   assert.match(officialToolsSkill.body, /Use Chrome Extension only for external web pages/);

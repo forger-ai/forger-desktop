@@ -54,4 +54,5 @@ export interface DesktopUpdateState {
   totalBytes?: number;
   userMessage?: string;
   technicalCode?: string;
+  diagnosticDetails?: Record<string, unknown>;
 }
