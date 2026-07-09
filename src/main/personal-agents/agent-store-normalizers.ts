@@ -9,11 +9,14 @@ import type {
   PersonalAgentMemory,
   PersonalAgentMessageAuthorType,
   PersonalAgentMessageRole,
+  PersonalAgentMessageSource,
   PersonalAgentPeerGrant,
   PersonalAgentPeerThread,
   PersonalAgentPermission,
+  PersonalAgentRoutineRunStatus,
   PersonalAgentRunProgress,
   PersonalAgentRunStatus,
+  PersonalAgentWakeupStatus,
   SharedFileRef,
 } from '../../shared/types';
 
@@ -249,9 +252,17 @@ export const normalizeSharedFileRefs = (value: unknown): SharedFileRef[] => {
   return files;
 };
 
-export const normalizeConversationOrigin = (value: unknown): PersonalAgentConversationOrigin => value === 'agent' ? 'agent' : 'user';
+export const normalizeConversationOrigin = (value: unknown): PersonalAgentConversationOrigin => {
+  if (value === 'agent' || value === 'routine') return value;
+  return 'user';
+};
 
 export const normalizeConversationStatus = (value: unknown): PersonalAgentConversationStatus => value === 'archived' ? 'archived' : 'active';
+
+export const normalizeMessageSource = (value: unknown): PersonalAgentMessageSource => {
+  if (value === 'routine' || value === 'scheduled_wakeup') return value;
+  return 'human';
+};
 
 export const normalizePeerThreadStatus = (value: unknown): PersonalAgentPeerThread['status'] => {
   if (value === 'failed' || value === 'completed') return value;
@@ -261,6 +272,16 @@ export const normalizePeerThreadStatus = (value: unknown): PersonalAgentPeerThre
 export const normalizeRunStatus = (value: unknown): PersonalAgentRunStatus => {
   if (value === 'running' || value === 'needs_permission' || value === 'completed' || value === 'failed' || value === 'canceled') return value;
   return 'queued';
+};
+
+export const normalizeRoutineRunStatus = (value: unknown): PersonalAgentRoutineRunStatus => {
+  if (value === 'running' || value === 'succeeded' || value === 'failed' || value === 'skipped') return value;
+  return 'queued';
+};
+
+export const normalizeWakeupStatus = (value: unknown): PersonalAgentWakeupStatus => {
+  if (value === 'fired' || value === 'canceled') return value;
+  return 'scheduled';
 };
 
 export const isTerminalRunStatus = (status: PersonalAgentRunStatus | undefined): boolean =>

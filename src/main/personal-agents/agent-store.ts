@@ -1,11 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import type { AgentPermissionMode, AgentProvider, AgentRuntime, AgentToolId, PersonalAgent, PersonalAgentConnectionGrant, PersonalAgentConversation, PersonalAgentConversationOrigin, PersonalAgentCreateInput, PersonalAgentHeartbeatSummary, PersonalAgentJournalEntry, PersonalAgentMemory, PersonalAgentMessage, PersonalAgentMessageAuthorType, PersonalAgentMessageFile, PersonalAgentMessageKind, PersonalAgentMessageRole, PersonalAgentPeerGrant, PersonalAgentPeerThread, PersonalAgentPermission, PersonalAgentRun, PersonalAgentRunProgress, PersonalAgentRunStatus, PersonalAgentUpdatePermissionsInput, PersonalAgentWorkspaceEntry, PersonalAgentWorkspaceFile, SharedFileRef } from '../../shared/types';
+import type { AgentPermissionMode, AgentProvider, AgentRuntime, AgentToolId, AutomationFrequency, AutomationMissedRunPolicy, PersonalAgent, PersonalAgentConnectionGrant, PersonalAgentConversation, PersonalAgentConversationOrigin, PersonalAgentCreateInput, PersonalAgentHeartbeatSummary, PersonalAgentJournalEntry, PersonalAgentMemory, PersonalAgentMessage, PersonalAgentMessageAuthorType, PersonalAgentMessageFile, PersonalAgentMessageKind, PersonalAgentMessageRole, PersonalAgentMessageSource, PersonalAgentPeerGrant, PersonalAgentPeerThread, PersonalAgentPermission, PersonalAgentRoutine, PersonalAgentRoutineRun, PersonalAgentRoutineRunStatus, PersonalAgentRun, PersonalAgentRunProgress, PersonalAgentRunStatus, PersonalAgentScheduledWakeup, PersonalAgentUpdatePermissionsInput, PersonalAgentWorkspaceEntry, PersonalAgentWorkspaceFile, SharedFileRef } from '../../shared/types';
 import { buildGlobalSkillTemplates } from '../prompt-builder/official-tools';
 import { buildPersonalAgentWorkspaceDocuments } from '../prompt-builder/personal-agents';
 import { forgerSkillRoots, writeSkillTemplates } from '../prompt-builder/skill-template-writer';
 import { openPersonalAgentSqliteDatabase, type SqliteDatabase } from './sqlite';
+import { AgentRoutineStore } from './agent-store-routines';
+import { PERSONAL_AGENT_SCHEMA_SQL } from './agent-store-schema';
 import { readPersonalAgentWorkspaceEntries } from './agent-store-workspace';
 import {
   MAX_DESCRIPTION_LENGTH,
@@ -31,6 +33,7 @@ import {
   normalizeGrantTargets,
   normalizeMessageAuthorType,
   normalizeMessageRole,
+  normalizeMessageSource,
   normalizeMessageText,
   normalizePeerGrants,
   normalizePeerThreadStatus,
@@ -48,7 +51,6 @@ import {
 } from './agent-store-normalizers';
 
 export { isTerminalRunStatus } from './agent-store-normalizers';
-
 interface AgentStoreOptions {
   metadataRoot: string;
   forgerHomeRoot: string;
@@ -90,6 +92,8 @@ interface ConversationRow {
   read_only?: number;
   initiator_agent_id?: string | null;
   peer_thread_id?: string | null;
+  routine_id?: string | null;
+  draft_message?: string | null;
   provider_thread_id?: string | null;
   provider?: string | null;
   created_at: string;
@@ -105,6 +109,9 @@ interface MessageRow {
   kind: string;
   author_type?: string | null;
   author_agent_id?: string | null;
+  source?: string | null;
+  routine_id?: string | null;
+  wakeup_id?: string | null;
   content: string;
   created_at: string;
 }
@@ -193,8 +200,19 @@ const OTHERS_PEER_BLOCK_END = '<!-- FORGER_MANAGED_PEER_AGENTS_END -->';
 export class AgentStore {
   private db: SqliteDatabase | null = null;
   private loadPromise: Promise<void> | null = null;
+  private readonly routineStore: AgentRoutineStore;
 
-  public constructor(private readonly options: AgentStoreOptions) {}
+  public constructor(private readonly options: AgentStoreOptions) {
+    this.routineStore = new AgentRoutineStore({
+      load: () => this.load(),
+      requireDb: () => this.requireDb(),
+      requireAgent: (agentId) => this.requireAgent(agentId),
+      requireConversation: (conversationId) => this.requireConversation(conversationId),
+      createConversation: (input) => this.createConversation(input),
+      updateConversationTitle: (input) => this.updateConversationTitle(input),
+      touchConversation: (agentId, conversationId, updatedAt) => this.touchConversation(agentId, conversationId, updatedAt),
+    });
+  }
 
   public async listAgents(): Promise<PersonalAgent[]> {
     await this.load();
@@ -505,6 +523,98 @@ export class AgentStore {
     return rows.map(permissionFromRow);
   }
 
+  public async listRoutines(agentId: string): Promise<PersonalAgentRoutine[]> {
+    return this.routineStore.listRoutines(agentId);
+  }
+
+  public async getRoutine(routineId: string): Promise<PersonalAgentRoutine | null> {
+    return this.routineStore.getRoutine(routineId);
+  }
+
+  public async requireRoutine(routineId: string): Promise<PersonalAgentRoutine> {
+    return this.routineStore.requireRoutine(routineId);
+  }
+
+  public async createRoutine(input: {
+    agentId: string;
+    name: string;
+    prompt: string;
+    frequency: AutomationFrequency;
+    missedRunPolicy: AutomationMissedRunPolicy;
+    missedRunWindowMinutes?: number;
+    enabled: boolean;
+    nextRunAt: string | null;
+    authorizationText: string;
+  }): Promise<PersonalAgentRoutine> {
+    return this.routineStore.createRoutine(input);
+  }
+
+  public async updateRoutine(input: {
+    routineId: string;
+    name: string;
+    prompt: string;
+    frequency: AutomationFrequency;
+    missedRunPolicy: AutomationMissedRunPolicy;
+    missedRunWindowMinutes?: number;
+    enabled: boolean;
+    nextRunAt: string | null;
+    authorizationText: string;
+  }): Promise<PersonalAgentRoutine> {
+    return this.routineStore.updateRoutine(input);
+  }
+
+  public async deleteRoutine(routineId: string): Promise<{ success: boolean }> {
+    return this.routineStore.deleteRoutine(routineId);
+  }
+
+  public async setRoutineEnabled(input: { routineId: string; enabled: boolean; nextRunAt: string | null }): Promise<PersonalAgentRoutine> {
+    return this.routineStore.setRoutineEnabled(input);
+  }
+
+  public async updateRoutineSchedule(input: { routineId: string; running?: boolean; nextRunAt?: string | null; lastUpdatedAt?: string }): Promise<PersonalAgentRoutine> {
+    return this.routineStore.updateRoutineSchedule(input);
+  }
+
+  public async createRoutineRun(input: {
+    routineId: string;
+    trigger: PersonalAgentRoutineRun['trigger'];
+    status?: PersonalAgentRoutineRunStatus;
+    error?: string;
+    messageId?: string;
+  }): Promise<PersonalAgentRoutineRun> {
+    return this.routineStore.createRoutineRun(input);
+  }
+
+  public async updateRoutineRun(input: { runId: string; status: PersonalAgentRoutineRunStatus; error?: string; messageId?: string }): Promise<PersonalAgentRoutineRun> {
+    return this.routineStore.updateRoutineRun(input);
+  }
+
+  public async scheduleWakeup(input: {
+    agentId: string;
+    conversationId: string;
+    prompt: string;
+    dueAt: string;
+    createdByRunId?: string | null;
+  }): Promise<PersonalAgentScheduledWakeup> {
+    return this.routineStore.scheduleWakeup(input);
+  }
+
+  public async cancelWakeup(input: { wakeupId?: string; conversationId?: string }): Promise<PersonalAgentScheduledWakeup | null> {
+    return this.routineStore.cancelWakeup(input);
+  }
+
+  public async updateWakeupStatus(input: { wakeupId: string; status: PersonalAgentScheduledWakeup['status'] }): Promise<PersonalAgentScheduledWakeup> {
+    return this.routineStore.updateWakeupStatus(input);
+  }
+
+  public async listScheduledWakeups(): Promise<PersonalAgentScheduledWakeup[]> {
+    return this.routineStore.listScheduledWakeups();
+  }
+
+  public async updateConversationDraft(input: { conversationId: string; draftMessage: string }): Promise<PersonalAgentConversation> {
+    return this.routineStore.updateConversationDraft(input);
+  }
+
   public async createConversation(input: {
     agentId: string;
     title?: string;
@@ -512,6 +622,7 @@ export class AgentStore {
     readOnly?: boolean;
     initiatorAgentId?: string | null;
     peerThreadId?: string | null;
+    routineId?: string | null;
   }): Promise<PersonalAgentConversation> {
     await this.load();
     const agent = await this.requireAgent(input.agentId);
@@ -520,9 +631,10 @@ export class AgentStore {
     const origin = normalizeConversationOrigin(input.origin);
     const initiatorAgentId = sanitizeAgentId(input.initiatorAgentId) ?? null;
     const peerThreadId = sanitizeAgentId(input.peerThreadId) ?? null;
+    const routineId = sanitizeAgentId(input.routineId) ?? null;
     this.requireDb().prepare(`
-      INSERT INTO personal_agent_conversations (id, agent_id, title, status, origin, read_only, initiator_agent_id, peer_thread_id, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO personal_agent_conversations (id, agent_id, title, status, origin, read_only, initiator_agent_id, peer_thread_id, routine_id, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       conversationId,
       agent.id,
@@ -532,6 +644,7 @@ export class AgentStore {
       input.readOnly === true || origin === 'agent' ? 1 : 0,
       initiatorAgentId,
       peerThreadId,
+      routineId,
       now,
       now,
     );
@@ -613,6 +726,9 @@ export class AgentStore {
     kind?: PersonalAgentMessageKind;
     authorType?: PersonalAgentMessageAuthorType;
     authorAgentId?: string | null;
+    source?: PersonalAgentMessageSource;
+    routineId?: string | null;
+    wakeupId?: string | null;
     content: string;
     files?: SharedFileRef[];
   }): Promise<PersonalAgentMessage> {
@@ -628,6 +744,9 @@ export class AgentStore {
     const now = new Date().toISOString();
     const authorType = normalizeMessageAuthorType(input.authorType, input.role);
     const authorAgentId = authorType === 'agent' ? sanitizeAgentId(input.authorAgentId) ?? input.agentId : null;
+    const source = normalizeMessageSource(input.source);
+    const routineId = sanitizeAgentId(input.routineId) ?? null;
+    const wakeupId = sanitizeAgentId(input.wakeupId) ?? null;
     const message: PersonalAgentMessage = {
       id: randomUUID(),
       agentId: input.agentId,
@@ -637,13 +756,16 @@ export class AgentStore {
       kind: input.kind === 'intermediate' ? 'intermediate' : 'message',
       authorType,
       ...(authorAgentId ? { authorAgentId } : {}),
+      source,
+      ...(routineId ? { routineId } : {}),
+      ...(wakeupId ? { wakeupId } : {}),
       content,
       createdAt: now,
     };
     this.requireDb().prepare(`
-      INSERT INTO personal_agent_messages (id, agent_id, conversation_id, run_id, role, kind, author_type, author_agent_id, content, created_at)
-      VALUES (@id, @agentId, @conversationId, @runId, @role, @kind, @authorType, @authorAgentId, @content, @createdAt)
-    `).run({ ...message, runId: message.runId ?? null, authorAgentId });
+      INSERT INTO personal_agent_messages (id, agent_id, conversation_id, run_id, role, kind, author_type, author_agent_id, source, routine_id, wakeup_id, content, created_at)
+      VALUES (@id, @agentId, @conversationId, @runId, @role, @kind, @authorType, @authorAgentId, @source, @routineId, @wakeupId, @content, @createdAt)
+    `).run({ ...message, runId: message.runId ?? null, authorAgentId, routineId, wakeupId });
     const files = normalizeSharedFileRefs(input.files).slice(0, MAX_MESSAGE_FILES);
     if (files.length > 0) {
       const insertFile = this.requireDb().prepare(`
@@ -997,139 +1119,7 @@ export class AgentStore {
   }
 
   private createSchema(): void {
-    this.requireDb().exec(`
-      CREATE TABLE IF NOT EXISTS personal_agents (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        description TEXT NOT NULL DEFAULT '',
-        purpose TEXT NOT NULL DEFAULT '',
-        instructions TEXT NOT NULL DEFAULT '',
-        permission_mode TEXT NOT NULL DEFAULT 'safe',
-        network_access INTEGER NOT NULL DEFAULT 0,
-        runtime_provider TEXT,
-        runtime_model TEXT,
-        runtime_effort TEXT,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS personal_agent_permissions (
-        id TEXT PRIMARY KEY,
-        agent_id TEXT NOT NULL REFERENCES personal_agents(id) ON DELETE CASCADE,
-        kind TEXT NOT NULL DEFAULT 'legacy',
-        target_id TEXT NOT NULL DEFAULT '',
-        permission TEXT NOT NULL,
-        mode TEXT NOT NULL DEFAULT 'safe',
-        granted INTEGER NOT NULL DEFAULT 0,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        UNIQUE(agent_id, kind, target_id)
-      );
-      CREATE TABLE IF NOT EXISTS personal_agent_conversations (
-        id TEXT PRIMARY KEY,
-        agent_id TEXT NOT NULL REFERENCES personal_agents(id) ON DELETE CASCADE,
-        title TEXT NOT NULL,
-        status TEXT NOT NULL DEFAULT 'active',
-        origin TEXT NOT NULL DEFAULT 'user',
-        read_only INTEGER NOT NULL DEFAULT 0,
-        initiator_agent_id TEXT REFERENCES personal_agents(id) ON DELETE SET NULL,
-        peer_thread_id TEXT,
-        provider TEXT,
-        provider_thread_id TEXT,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_personal_agent_conversations_agent ON personal_agent_conversations(agent_id, updated_at);
-      CREATE TABLE IF NOT EXISTS personal_agent_messages (
-        id TEXT PRIMARY KEY,
-        agent_id TEXT NOT NULL REFERENCES personal_agents(id) ON DELETE CASCADE,
-        conversation_id TEXT NOT NULL REFERENCES personal_agent_conversations(id) ON DELETE CASCADE,
-        run_id TEXT REFERENCES personal_agent_runs(id) ON DELETE SET NULL,
-        role TEXT NOT NULL,
-        kind TEXT NOT NULL DEFAULT 'message',
-        author_type TEXT NOT NULL DEFAULT 'human',
-        author_agent_id TEXT REFERENCES personal_agents(id) ON DELETE SET NULL,
-        content TEXT NOT NULL,
-        created_at TEXT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_personal_agent_messages_conversation ON personal_agent_messages(conversation_id, created_at);
-      CREATE TABLE IF NOT EXISTS personal_agent_message_files (
-        id TEXT PRIMARY KEY,
-        message_id TEXT NOT NULL REFERENCES personal_agent_messages(id) ON DELETE CASCADE,
-        agent_id TEXT NOT NULL REFERENCES personal_agents(id) ON DELETE CASCADE,
-        conversation_id TEXT NOT NULL REFERENCES personal_agent_conversations(id) ON DELETE CASCADE,
-        name TEXT NOT NULL,
-        path TEXT NOT NULL,
-        relative_path TEXT NOT NULL,
-        size_bytes INTEGER,
-        source TEXT,
-        created_at TEXT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_personal_agent_message_files_message ON personal_agent_message_files(message_id, created_at);
-      CREATE TABLE IF NOT EXISTS personal_agent_peer_grants (
-        id TEXT PRIMARY KEY,
-        agent_id TEXT NOT NULL REFERENCES personal_agents(id) ON DELETE CASCADE,
-        peer_agent_id TEXT NOT NULL REFERENCES personal_agents(id) ON DELETE CASCADE,
-        criteria TEXT NOT NULL DEFAULT '',
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        UNIQUE(agent_id, peer_agent_id)
-      );
-      CREATE INDEX IF NOT EXISTS idx_personal_agent_peer_grants_agent ON personal_agent_peer_grants(agent_id, updated_at);
-      CREATE TABLE IF NOT EXISTS personal_agent_peer_threads (
-        id TEXT PRIMARY KEY,
-        caller_agent_id TEXT NOT NULL REFERENCES personal_agents(id) ON DELETE CASCADE,
-        target_agent_id TEXT NOT NULL REFERENCES personal_agents(id) ON DELETE CASCADE,
-        source_conversation_id TEXT NOT NULL REFERENCES personal_agent_conversations(id) ON DELETE CASCADE,
-        target_conversation_id TEXT NOT NULL REFERENCES personal_agent_conversations(id) ON DELETE CASCADE,
-        parent_thread_id TEXT REFERENCES personal_agent_peer_threads(id) ON DELETE SET NULL,
-        root_thread_id TEXT REFERENCES personal_agent_peer_threads(id) ON DELETE SET NULL,
-        created_by_run_id TEXT REFERENCES personal_agent_runs(id) ON DELETE SET NULL,
-        title TEXT NOT NULL,
-        status TEXT NOT NULL DEFAULT 'active',
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        UNIQUE(target_conversation_id)
-      );
-      CREATE INDEX IF NOT EXISTS idx_personal_agent_peer_threads_source ON personal_agent_peer_threads(source_conversation_id, updated_at);
-      CREATE INDEX IF NOT EXISTS idx_personal_agent_peer_threads_target ON personal_agent_peer_threads(target_agent_id, updated_at);
-      CREATE INDEX IF NOT EXISTS idx_personal_agent_peer_threads_parent ON personal_agent_peer_threads(parent_thread_id, updated_at);
-      CREATE INDEX IF NOT EXISTS idx_personal_agent_peer_threads_root ON personal_agent_peer_threads(root_thread_id, updated_at);
-      CREATE TABLE IF NOT EXISTS personal_agent_runs (
-        id TEXT PRIMARY KEY,
-        agent_id TEXT NOT NULL REFERENCES personal_agents(id) ON DELETE CASCADE,
-        conversation_id TEXT NOT NULL REFERENCES personal_agent_conversations(id) ON DELETE CASCADE,
-        status TEXT NOT NULL DEFAULT 'queued',
-        error TEXT,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_personal_agent_runs_conversation ON personal_agent_runs(conversation_id, updated_at);
-      CREATE TABLE IF NOT EXISTS personal_agent_run_progress (
-        id TEXT PRIMARY KEY,
-        agent_id TEXT NOT NULL REFERENCES personal_agents(id) ON DELETE CASCADE,
-        conversation_id TEXT NOT NULL REFERENCES personal_agent_conversations(id) ON DELETE CASCADE,
-        run_id TEXT NOT NULL REFERENCES personal_agent_runs(id) ON DELETE CASCADE,
-        message TEXT NOT NULL,
-        created_at TEXT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_personal_agent_run_progress_run ON personal_agent_run_progress(run_id, created_at);
-      CREATE TABLE IF NOT EXISTS personal_agent_memories (
-        id TEXT PRIMARY KEY,
-        agent_id TEXT NOT NULL REFERENCES personal_agents(id) ON DELETE CASCADE,
-        remember_when TEXT NOT NULL DEFAULT '',
-        title TEXT NOT NULL,
-        content TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS personal_agent_journal_entries (
-        id TEXT PRIMARY KEY,
-        agent_id TEXT NOT NULL REFERENCES personal_agents(id) ON DELETE CASCADE,
-        conversation_id TEXT REFERENCES personal_agent_conversations(id) ON DELETE SET NULL,
-        body TEXT NOT NULL,
-        created_at TEXT NOT NULL
-      );
-    `);
+    this.requireDb().exec(PERSONAL_AGENT_SCHEMA_SQL);
     this.ensureColumn('personal_agents', 'runtime_provider', 'TEXT');
     this.ensureColumn('personal_agents', 'runtime_model', 'TEXT');
     this.ensureColumn('personal_agents', 'runtime_effort', 'TEXT');
@@ -1137,11 +1127,16 @@ export class AgentStore {
     this.ensureColumn('personal_agent_conversations', 'read_only', 'INTEGER NOT NULL DEFAULT 0');
     this.ensureColumn('personal_agent_conversations', 'initiator_agent_id', 'TEXT REFERENCES personal_agents(id) ON DELETE SET NULL');
     this.ensureColumn('personal_agent_conversations', 'peer_thread_id', 'TEXT');
+    this.ensureColumn('personal_agent_conversations', 'routine_id', 'TEXT');
+    this.ensureColumn('personal_agent_conversations', 'draft_message', "TEXT NOT NULL DEFAULT ''");
     this.ensureColumn('personal_agent_conversations', 'provider', 'TEXT');
     this.ensureColumn('personal_agent_conversations', 'provider_thread_id', 'TEXT');
     this.ensureColumn('personal_agent_messages', 'run_id', 'TEXT REFERENCES personal_agent_runs(id) ON DELETE SET NULL');
     this.ensureColumn('personal_agent_messages', 'author_type', "TEXT NOT NULL DEFAULT 'human'");
     this.ensureColumn('personal_agent_messages', 'author_agent_id', 'TEXT REFERENCES personal_agents(id) ON DELETE SET NULL');
+    this.ensureColumn('personal_agent_messages', 'source', "TEXT NOT NULL DEFAULT 'human'");
+    this.ensureColumn('personal_agent_messages', 'routine_id', 'TEXT');
+    this.ensureColumn('personal_agent_messages', 'wakeup_id', 'TEXT');
     this.ensureColumn('personal_agent_permissions', 'kind', "TEXT NOT NULL DEFAULT 'legacy'");
     this.ensureColumn('personal_agent_permissions', 'target_id', "TEXT NOT NULL DEFAULT ''");
     this.backfillPermissionGrantColumns();
@@ -1327,6 +1322,7 @@ export class AgentStore {
     const peerThread = row.peer_thread_id ? this.peerThreadRowById(row.peer_thread_id) : this.peerThreadRowByTargetConversation(row.id);
     const initiatorAgentId = sanitizeAgentId(row.initiator_agent_id) ?? peerThread?.caller_agent_id ?? null;
     const initiatorAgentName = initiatorAgentId ? this.agentNameById(initiatorAgentId) : null;
+    const scheduledWakeup = this.routineStore.scheduledWakeupForConversation(row.id);
     return {
       id: row.id,
       agentId: row.agent_id,
@@ -1337,6 +1333,9 @@ export class AgentStore {
       ...(initiatorAgentId ? { initiatorAgentId } : {}),
       ...(initiatorAgentName ? { initiatorAgentName } : {}),
       ...(row.peer_thread_id ?? peerThread?.id ? { peerThreadId: row.peer_thread_id ?? peerThread?.id } : {}),
+      ...(sanitizeAgentId(row.routine_id) ? { routineId: sanitizeAgentId(row.routine_id) as string } : {}),
+      ...(row.draft_message ? { draftMessage: row.draft_message } : {}),
+      ...(scheduledWakeup ? { scheduledWakeup } : {}),
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       ...(row.provider_thread_id ? { providerThreadId: row.provider_thread_id } : {}),
@@ -1367,6 +1366,9 @@ export class AgentStore {
       authorType,
       ...(authorAgentId ? { authorAgentId } : {}),
       ...(authorAgentName ? { authorAgentName } : {}),
+      source: normalizeMessageSource(row.source),
+      ...(sanitizeAgentId(row.routine_id) ? { routineId: sanitizeAgentId(row.routine_id) as string } : {}),
+      ...(sanitizeAgentId(row.wakeup_id) ? { wakeupId: sanitizeAgentId(row.wakeup_id) as string } : {}),
       content: row.content,
       createdAt: row.created_at,
       ...(files.length > 0 ? { files } : {}),

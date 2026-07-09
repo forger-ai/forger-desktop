@@ -315,6 +315,77 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
     };
   }
 
+  if (toolId === 'wakeup_in') {
+    return {
+      type: 'object',
+      properties: {
+        seconds: { type: 'number', description: 'Segundos a esperar. Minimo 5.' },
+        prompt: { type: 'string', description: 'Prompt visible que se insertara al despertar en esta misma conversacion.' },
+      },
+      required: ['seconds', 'prompt'],
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'cancel_wakeup') {
+    return {
+      type: 'object',
+      properties: {
+        wakeupId: { type: 'string', description: 'ID opcional del wakeup. Si se omite, cancela el de la conversacion actual.' },
+      },
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'create_agent_routine' || toolId === 'update_agent_routine') {
+    return {
+      type: 'object',
+      properties: {
+        ...(toolId === 'update_agent_routine' ? { routineId: { type: 'string' } } : {}),
+        name: { type: 'string' },
+        prompt: { type: 'string', description: 'Prompt visible que se insertara en el thread de la rutina en cada ejecucion.' },
+        periodicity: {
+          type: 'object',
+          properties: {
+            type: { type: 'string', enum: ['hourly', 'daily', 'weekly'] },
+            timeOfDay: { type: 'string', description: 'HH:MM para daily/weekly.' },
+            weeklyDay: { type: 'number', description: '0 (domingo) a 6 (sabado) para weekly.' },
+          },
+          required: ['type'],
+          additionalProperties: false,
+        },
+        missedRunPolicy: { type: 'string', enum: ['skip', 'always', 'within_window'] },
+        missedRunWindowMinutes: { type: 'number' },
+        enabled: { type: 'boolean' },
+        authorizationText: { type: 'string', description: 'Texto con la autorizacion de la persona para esta mutacion.' },
+      },
+      required: toolId === 'update_agent_routine'
+        ? ['routineId', 'name', 'prompt', 'periodicity', 'authorizationText']
+        : ['name', 'prompt', 'periodicity', 'authorizationText'],
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'list_agent_routines') {
+    return {
+      type: 'object',
+      properties: {},
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'delete_agent_routine') {
+    return {
+      type: 'object',
+      properties: {
+        routineId: { type: 'string' },
+        authorizationText: { type: 'string', description: 'Texto con la autorizacion de la persona para borrar la rutina.' },
+      },
+      required: ['routineId', 'authorizationText'],
+      additionalProperties: false,
+    };
+  }
+
   if (toolId === 'forger_list_agent_peers') {
     return {
       type: 'object',

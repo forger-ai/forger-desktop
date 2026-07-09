@@ -2,6 +2,7 @@ import type fs from 'node:fs/promises';
 import type path from 'node:path';
 import type { IpcMain } from 'electron';
 import type { AgentConversationManager } from '../personal-agents/agent-conversation-manager';
+import type { AgentRoutineManager } from '../personal-agents/agent-routine-manager';
 import type { AgentStore } from '../personal-agents/agent-store';
 import type { IPC_CHANNELS as IpcChannels } from '../../shared/ipc';
 import type {
@@ -11,6 +12,7 @@ import type {
   OfficialToolsState,
   PersonalAgentConversationsListInput,
   PersonalAgentConversationGetInput,
+  PersonalAgentConversationDraftUpdateInput,
   PersonalAgentConversationStartInput,
   PersonalAgentCreateInput,
   PersonalAgentDeleteInput,
@@ -21,7 +23,13 @@ import type {
   PersonalAgentPeerGrant,
   PersonalAgentPeerThreadGetInput,
   PersonalAgentPeerThreadsListInput,
+  PersonalAgentRoutineDeleteInput,
+  PersonalAgentRoutineListInput,
+  PersonalAgentRoutineRunNowInput,
+  PersonalAgentRoutineSetEnabledInput,
+  PersonalAgentRoutineUpsertInput,
   PersonalAgentUpdatePermissionsInput,
+  PersonalAgentWakeupCancelInput,
   PersonalAgentWorkspaceFileReadInput,
   PersonalAgentWorkspaceFileWriteInput,
   PersonalAgentWorkspaceListInput,
@@ -38,6 +46,7 @@ interface PersonalAgentIpcHandlersDeps {
   getPrivateDataRoot: () => string;
   getPersonalAgentStore: () => AgentStore;
   getPersonalAgentConversationManager: () => AgentConversationManager;
+  getPersonalAgentRoutineManager: () => AgentRoutineManager;
   listInstalledApps: () => AppSummary[];
   listOfficialTools: () => Promise<OfficialToolsState>;
   listConnections: () => Promise<ConnectionsState>;
@@ -66,6 +75,7 @@ export const registerPersonalAgentIpcHandlers = ({
   getPrivateDataRoot,
   getPersonalAgentStore,
   getPersonalAgentConversationManager,
+  getPersonalAgentRoutineManager,
   listInstalledApps,
   listOfficialTools,
   listConnections,
@@ -164,6 +174,30 @@ export const registerPersonalAgentIpcHandlers = ({
   });
   ipcMain.handle(IPC_CHANNELS.personalAgentGetConversation, async (_event, input: PersonalAgentConversationGetInput) => {
     return await getPersonalAgentConversationManager().getConversation(input);
+  });
+  ipcMain.handle(IPC_CHANNELS.personalAgentConversationDraftUpdate, async (_event, input: PersonalAgentConversationDraftUpdateInput) => {
+    return await getPersonalAgentRoutineManager().updateDraft(input);
+  });
+  ipcMain.handle(IPC_CHANNELS.personalAgentWakeupCancel, async (_event, input: PersonalAgentWakeupCancelInput) => {
+    return await getPersonalAgentRoutineManager().cancelWakeup(input);
+  });
+  ipcMain.handle(IPC_CHANNELS.personalAgentRoutinesList, async (_event, input: PersonalAgentRoutineListInput) => {
+    return await getPersonalAgentRoutineManager().list(input);
+  });
+  ipcMain.handle(IPC_CHANNELS.personalAgentRoutinesCreate, async (_event, input: PersonalAgentRoutineUpsertInput & { agentId: string }) => {
+    return await getPersonalAgentRoutineManager().create(input.agentId, input);
+  });
+  ipcMain.handle(IPC_CHANNELS.personalAgentRoutinesUpdate, async (_event, input: PersonalAgentRoutineUpsertInput & { routineId: string }) => {
+    return await getPersonalAgentRoutineManager().update(input);
+  });
+  ipcMain.handle(IPC_CHANNELS.personalAgentRoutinesSetEnabled, async (_event, input: PersonalAgentRoutineSetEnabledInput) => {
+    return await getPersonalAgentRoutineManager().setEnabled(input);
+  });
+  ipcMain.handle(IPC_CHANNELS.personalAgentRoutinesDelete, async (_event, input: PersonalAgentRoutineDeleteInput) => {
+    return await getPersonalAgentRoutineManager().delete(input);
+  });
+  ipcMain.handle(IPC_CHANNELS.personalAgentRoutinesRunNow, async (_event, input: PersonalAgentRoutineRunNowInput) => {
+    return await getPersonalAgentRoutineManager().runNow(input);
   });
   ipcMain.handle(IPC_CHANNELS.personalAgentPeerThreadsList, async (_event, input: PersonalAgentPeerThreadsListInput) => {
     if (!input.conversationId) {

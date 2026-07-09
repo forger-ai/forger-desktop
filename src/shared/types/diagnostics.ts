@@ -1,6 +1,6 @@
 import type { AgentProvider } from './agent-runtime';
 
-export type ConversationDiagnosticSource = 'desktop_chat' | 'app_agent_conversation';
+export type ConversationDiagnosticSource = 'desktop_chat' | 'app_agent_conversation' | 'personal_agent_conversation';
 
 export interface ConversationDiagnosticMessage {
   id?: string;
@@ -26,6 +26,20 @@ export interface PrepareConversationDiagnosticReportInput {
     runtime?: Record<string, unknown>;
     messages?: ConversationDiagnosticMessage[];
   };
+  personalAgent?: {
+    id: string;
+    name?: string;
+    description?: string;
+  };
+  run?: {
+    id: string;
+    status?: string;
+    error?: string;
+    progress?: Array<{ id?: string; message: string; createdAt?: string }>;
+    activity?: Record<string, unknown>;
+    createdAt?: string;
+    updatedAt?: string;
+  };
 }
 
 export interface ConversationDiagnosticReportPreview {
@@ -46,7 +60,7 @@ export interface ConversationDiagnosticReportPreview {
 }
 
 export interface ConversationDiagnosticFileSummary {
-  kind: 'run_log' | 'codex_session_jsonl' | 'claude_run_log';
+  kind: 'run_log' | 'codex_session_jsonl' | 'claude_run_log' | 'antigravity_run_log';
   filename: string;
   contentType: string;
   originalByteSize: number;

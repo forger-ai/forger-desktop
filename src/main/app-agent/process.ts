@@ -17,8 +17,6 @@ export const runCommandCapture = async (
       stdio: ['pipe', 'pipe', 'pipe'],
       detached: process.platform !== 'win32',
     });
-    options.onChild?.(child);
-    child.stdin.end(options.stdinText ?? '');
 
     let stdout = '';
     let stderr = '';
@@ -45,6 +43,16 @@ export const runCommandCapture = async (
     };
     refreshCommandTimeout();
 
+    child.stdin.on('error', (error: NodeJS.ErrnoException) => {
+      if (error.code === 'EPIPE') {
+        return;
+      }
+      clearCommandTimeout();
+      if (!settled) {
+        settled = true;
+        reject(error);
+      }
+    });
     child.stdout.on('data', (chunk) => {
       const text = chunk.toString();
       stdout += text;
@@ -71,6 +79,8 @@ export const runCommandCapture = async (
         resolve({ code: typeof code === 'number' ? code : 1, stdout, stderr });
       }
     });
+    options.onChild?.(child);
+    child.stdin.end(options.stdinText ?? '');
   });
 
 export const killProcessTree = (child: ChildProcessWithoutNullStreams | undefined): void => {

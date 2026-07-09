@@ -57,8 +57,12 @@ import type {
   MemoryCreateInput,
   MemoryEntry,
   MemoryUpdateInput,
+  PersonalAgent,
+  PersonalAgentConversation,
+  PersonalAgentRun,
   OfficialToolSummary,
   PickedChatFile,
+  PrepareConversationDiagnosticReportInput,
   RemoteNetworkShareStatus,
   RemoteAppBackupSummary,
   RemoteBackupsUsage,
@@ -147,6 +151,77 @@ const readStoredBoolean = (key: string, fallback = false) => { if (typeof window
 const readStoredPinnedViews = (): PinnableView[] => { if (typeof window === 'undefined') return []; const raw = window.localStorage.getItem(PINNED_VIEWS_STORAGE_KEY); if (raw !== null) { try { const parsed: unknown = JSON.parse(raw); if (Array.isArray(parsed)) { return PINNABLE_VIEWS.filter((view) => parsed.includes(view)); } } catch { /* corrupt value: fall through to legacy migration */ } }
 return readStoredBoolean(ADVANCED_MODE_STORAGE_KEY) ? PINNABLE_VIEWS.filter((view) => view !== 'docs') : []; };
 const mergeRecords = ( first?: Record<string, unknown>, second?: Record<string, unknown>, ): Record<string, unknown> | undefined => { const merged = { ...(first ?? {}), ...(second ?? {}) }; return Object.keys(merged).length > 0 ? merged : undefined; };
+const STABLE_TECHNICAL_CODE_PATTERN = /^[a-z][a-z0-9_]{1,96}$/i;
+type DiagnosticConversationMessages = NonNullable<PrepareConversationDiagnosticReportInput['conversation']>['messages'];
+const personalAgentDiagnosticTechnicalCode = (error?: string): string | undefined => {
+  const normalized = error?.trim();
+  if (!normalized) {
+    return undefined;
+  }
+  return STABLE_TECHNICAL_CODE_PATTERN.test(normalized) ? normalized : 'personal_agent_run_failed';
+};
+const personalAgentMessagesForDiagnostic = (conversation: PersonalAgentConversation): DiagnosticConversationMessages =>
+  conversation.messages
+    .flatMap((message) => {
+      if (message.role !== 'user' && message.role !== 'assistant') {
+        return [];
+      }
+      return [{
+        id: message.id,
+        role: message.role,
+        content: message.content,
+        ...(message.runId ? { runId: message.runId } : {}),
+        createdAt: message.createdAt,
+      }];
+    });
+const buildPersonalAgentConversationDiagnosticInput = (
+  request: PersonalAgentConversationDiagnosticRequest,
+): PrepareConversationDiagnosticReportInput => {
+  const run = request.run ?? request.conversation.activeRun;
+  const provider = request.conversation.provider ?? request.agent.runtime?.provider;
+  const runtime = request.agent.runtime
+    ? { ...request.agent.runtime }
+    : provider
+      ? { provider }
+      : undefined;
+  const technicalCode = run?.status === 'failed'
+    ? personalAgentDiagnosticTechnicalCode(run.error) ?? 'personal_agent_run_failed'
+    : personalAgentDiagnosticTechnicalCode(run?.error);
+  return {
+    source: 'personal_agent_conversation',
+    conversationId: request.conversation.id,
+    ...(run?.id ? { runId: run.id } : {}),
+    title: request.conversation.title || request.agent.name,
+    ...(provider ? { provider } : {}),
+    ...(technicalCode ? { technicalCode } : {}),
+    personalAgent: {
+      id: request.agent.id,
+      name: request.agent.name,
+      description: request.agent.description,
+    },
+    conversation: {
+      title: request.conversation.title,
+      threadId: request.conversation.providerThreadId ?? null,
+      ...(runtime ? { runtime } : {}),
+      messages: personalAgentMessagesForDiagnostic(request.conversation),
+    },
+    ...(run ? {
+      run: {
+        id: run.id,
+        status: run.status,
+        ...(run.error ? { error: run.error } : {}),
+        progress: run.progress.map((entry) => ({
+          id: entry.id,
+          message: entry.message,
+          createdAt: entry.createdAt,
+        })),
+        ...(run.activity ? { activity: run.activity as unknown as Record<string, unknown> } : {}),
+        createdAt: run.createdAt,
+        updatedAt: run.updatedAt,
+      },
+    } : {}),
+  };
+};
 const initialSettings: Settings = { userEmail: '', plan: 'Free', safeMode: false, developerMode: { enabled: false, pathEntries: [] }, codexDefaults: { ...DEFAULT_AGENT_DEFAULTS.codex }, defaultAgentProvider: 'auto', defaultChatPermissionMode: 'safe', defaultChatNetworkAccess: true, agentDefaults: { codex: { ...DEFAULT_AGENT_DEFAULTS.codex }, claude: { ...DEFAULT_AGENT_DEFAULTS.claude }, antigravity: { ...DEFAULT_AGENT_DEFAULTS.antigravity }, }, llmProviderDefaults: { codex: { ...DEFAULT_AGENT_DEFAULTS.codex }, claude: { ...DEFAULT_AGENT_DEFAULTS.claude }, antigravity: { ...DEFAULT_AGENT_DEFAULTS.antigravity }, }, providerConnections: {}, llmProviderProfiles: {}, activeProviderProfiles: {}, };
 const initialCodexAuthStatus: CodexAuthStatus = { installed: false, authenticated: false, authFilePath: '', codexHome: '', };
 const initialClaudeAuthStatus: ClaudeAuthStatus = { installed: false, authenticated: false, source: 'missing', };
@@ -175,6 +250,12 @@ interface ErrorReportDialogState {
 open: boolean; report: DesktopErrorReportPreview | null; busy: boolean; userMessage?: string; }
 interface ConversationDiagnosticDialogState {
 open: boolean; report: ConversationDiagnosticReportPreview | null; busy: boolean; userMessage?: string; description: string; }
+interface PersonalAgentConversationDiagnosticRequest {
+  agent: PersonalAgent;
+  conversation: PersonalAgentConversation;
+  run?: PersonalAgentRun;
+  auto?: boolean;
+}
 interface RemoteTunnelReadyDialogState {
 open: boolean; appId: string; appName: string; portalUrl: string; sessionId?: string; }
 interface SocialInstallReviewDialogState {
@@ -885,8 +966,8 @@ setErrorReportDialog((current) => ({ ...current, busy: false, userMessage: resul
 };
 const closeConversationDiagnosticDialog = () => { if (conversationDiagnosticDialog.busy) { return; }
 setConversationDiagnosticDialog({ open: false, report: null, busy: false, description: '' }); };
-const prepareConversationDiagnosticReport = async () => { if (!activeConversation || conversationDiagnosticDialog.busy) { return; }
-setConversationDiagnosticDialog({ open: true, report: null, busy: true, description: '' }); try { const report = await getDesktopApi().prepareConversationDiagnosticReport({ source: 'desktop_chat', appId: activeConversation.appId === FREE_CHAT_APP_ID ? undefined : activeConversation.appId, conversationId: activeConversation.id, runId: activeConversationRunId ?? undefined, title: activeConversation.title, provider: activeConversation.runtime?.provider ?? (selectedAgentProvider === 'auto' ? resolvedChatProvider : selectedAgentProvider), conversation: { appId: activeConversation.appId === FREE_CHAT_APP_ID ? undefined : activeConversation.appId, title: activeConversation.title, threadId: activeConversation.threadId, runtime: activeConversation.runtime as Record<string, unknown> | undefined, messages: activeConversation.messages.map((message) => ({ id: message.id, role: message.role, content: message.content, })), }, }); setConversationDiagnosticDialog({ open: true, report, busy: false, description: '' }); } catch (error) { setConversationDiagnosticDialog({ open: true, report: null, busy: false, description: '', userMessage: error instanceof Error ? error.message : t.settings.conversationReportPrepareError }); } };
+const prepareConversationDiagnosticReport = async (personalAgentRequest?: PersonalAgentConversationDiagnosticRequest) => { if ((!personalAgentRequest && !activeConversation) || conversationDiagnosticDialog.busy) { return; }
+setConversationDiagnosticDialog({ open: true, report: null, busy: true, description: '' }); try { const input = personalAgentRequest ? buildPersonalAgentConversationDiagnosticInput(personalAgentRequest) : { source: 'desktop_chat' as const, appId: activeConversation?.appId === FREE_CHAT_APP_ID ? undefined : activeConversation?.appId, conversationId: activeConversation?.id ?? '', runId: activeConversationRunId ?? undefined, title: activeConversation?.title, provider: activeConversation?.runtime?.provider ?? (selectedAgentProvider === 'auto' ? resolvedChatProvider : selectedAgentProvider), conversation: { appId: activeConversation?.appId === FREE_CHAT_APP_ID ? undefined : activeConversation?.appId, title: activeConversation?.title, threadId: activeConversation?.threadId, runtime: activeConversation?.runtime as Record<string, unknown> | undefined, messages: activeConversation?.messages.map((message) => ({ id: message.id, role: message.role, content: message.content, })) ?? [], }, }; const report = await getDesktopApi().prepareConversationDiagnosticReport(input); setConversationDiagnosticDialog({ open: true, report, busy: false, description: '' }); } catch (error) { setConversationDiagnosticDialog({ open: true, report: null, busy: false, description: '', userMessage: error instanceof Error ? error.message : t.settings.conversationReportPrepareError }); } };
 const copyConversationDiagnosticReport = async () => { if (!conversationDiagnosticDialog.report) { return; }
 const { diagnosticAttachmentToken: _diagnosticAttachmentToken, ...copyableReport } = conversationDiagnosticDialog.report;
 await navigator.clipboard.writeText(JSON.stringify({ ...copyableReport, description: conversationDiagnosticDialog.description.trim() || undefined }, null, 2)); setConversationDiagnosticDialog((current) => ({ ...current, userMessage: t.settings.conversationReportCopied })); };

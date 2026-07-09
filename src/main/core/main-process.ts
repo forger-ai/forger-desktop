@@ -38,6 +38,7 @@ import { ForgerMcpServer } from '../forger-mcp-server';
 import { MemoryMaintenanceManager } from '../memory-maintenance-manager';
 import { MemoryStore } from '../memory-store';
 import { AgentConversationManager } from '../personal-agents/agent-conversation-manager';
+import { AgentRoutineManager } from '../personal-agents/agent-routine-manager';
 import { AgentStore } from '../personal-agents/agent-store';
 import { RemoteAgentSessionService } from '../personal-agents/remote-session-service';
 import { PromptOverridesStore, buildPromptBases, promptOverrideErrorResult } from '../prompt-overrides';
@@ -118,7 +119,7 @@ import type {
   FilesDeleteCategoryInput, FilesDeleteInput, FilesDiscardStagedForChatInput, FilesImportInput, FilesListInput,
   FilesMoveInput, FilesRenameCategoryInput, FilesRenameInput, FilesStageForChatInput, ForgerAccountLoginInput,
   ForgerAccountProfileInput, ForgerAccountRegisterInput, FriendChatWindowOpenResult, InstallAppResult, LlmProviderProfilesState, PrepareSocialAppReviewInput, MemoryCreateInput,
-  MemoryListInput, MemoryUpdateInput, OfficialToolRuntimeEvent, OpenAppResult, RemoteAppBackupSummary,
+  MemoryListInput, MemoryUpdateInput, OfficialToolRuntimeEvent, OpenAppResult, PersonalAgentConversationEvent, RemoteAppBackupSummary,
   LlmProviderProfileMutationResult, RendererChatTraceEvent, RuntimeStatus, SetActiveLlmProviderProfileInput, SetActiveLlmProviderProfileResult, SetAppToolGrantInput, Settings, SharedFileRef, StopAppResult,
   SubmitAppRatingInput, SubmitProductFeedbackInput, SubmitUsageEventInput, UpdateAgentDefaultsInput,
   UpdateAgentToolApprovalInput, UpdateCodexDefaultsInput, UpdateDeveloperModeInput, UpdateLlmProviderProfileDefaultsInput, UpdateUserSecretInput,
@@ -220,6 +221,7 @@ let backupsManager: BackupsManager | null = null;
 let memoryStore: MemoryStore | null = null;
 let personalAgentStore: AgentStore | null = null;
 let personalAgentConversationManager: AgentConversationManager | null = null;
+let personalAgentRoutineManager: AgentRoutineManager | null = null;
 let remoteAgentSessionService: RemoteAgentSessionService | null = null;
 let memoryMaintenanceManager: MemoryMaintenanceManager | null = null;
 let desktopRuntimeBridge: DesktopRuntimeBridge | null = null;
@@ -526,6 +528,15 @@ const getPersonalAgentStore = (): AgentStore => {
   }
   return personalAgentStore;
 };
+const emitPersonalAgentConversationEvent = (event: PersonalAgentConversationEvent): void => {
+  void (async () => {
+    const agent = await getPersonalAgentStore().getAgent(event.conversation.agentId).catch(() => null);
+    llmRunsStore.recordPersonalAgentConversationEvent(event, { agentName: agent?.name });
+  })();
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send(IPC_CHANNELS.personalAgentConversationEvent, event);
+  }
+};
 const getPersonalAgentConversationManager = (): AgentConversationManager => {
   if (!personalAgentConversationManager) {
     personalAgentConversationManager = new AgentConversationManager({
@@ -568,18 +579,20 @@ const getPersonalAgentConversationManager = (): AgentConversationManager => {
       releaseAppMcps: (runId) => {
         appMcpManager?.releaseMcps(runId);
       },
-      onConversationEvent: (event) => {
-        void (async () => {
-          const agent = await getPersonalAgentStore().getAgent(event.conversation.agentId).catch(() => null);
-          llmRunsStore.recordPersonalAgentConversationEvent(event, { agentName: agent?.name });
-        })();
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send(IPC_CHANNELS.personalAgentConversationEvent, event);
-        }
-      },
+      onConversationEvent: emitPersonalAgentConversationEvent,
     });
   }
   return personalAgentConversationManager;
+};
+const getPersonalAgentRoutineManager = (): AgentRoutineManager => {
+  if (!personalAgentRoutineManager) {
+    personalAgentRoutineManager = new AgentRoutineManager({
+      store: getPersonalAgentStore(),
+      conversationManager: getPersonalAgentConversationManager(),
+      onConversationEvent: emitPersonalAgentConversationEvent,
+    });
+  }
+  return personalAgentRoutineManager;
 };
 const getRemoteAgentSessionService = (): RemoteAgentSessionService => {
   if (!remoteAgentSessionService) {
@@ -1321,6 +1334,7 @@ const getMainProcessIpcDeps = (): MainProcessIpcDeps & AgentIpcDeps => ({
   getMemoryStore,
   getPersonalAgentStore,
   getPersonalAgentConversationManager,
+  getPersonalAgentRoutineManager,
   getOfficialToolsService,
   getConnectionsService,
   getSpeechToTextService,
@@ -1419,6 +1433,7 @@ const createWindowBootstrapDeps = () => ({
   registerMainIpcHandlers,
   registerWindowIpcHandlers,
   registerWindowStateEvents,
+  shell,
   state: windowBootstrapState,
   useCustomWindowFrame,
 });
@@ -1462,6 +1477,7 @@ const mainLifecycleState = {
   get memoryMaintenanceManager() { return memoryMaintenanceManager; }, set memoryMaintenanceManager(value) { memoryMaintenanceManager = value; },
   get desktopRuntimeBridge() { return desktopRuntimeBridge; }, set desktopRuntimeBridge(value) { desktopRuntimeBridge = value; },
   get selfOAuthCallbackService() { return selfOAuthCallbackService; }, set selfOAuthCallbackService(value) { selfOAuthCallbackService = value; },
+  get personalAgentRoutineManager() { return personalAgentRoutineManager; }, set personalAgentRoutineManager(value) { personalAgentRoutineManager = value; },
   get localNetworkShareManager() { return localNetworkShareController.manager; }, set localNetworkShareManager(value) { localNetworkShareController.manager = value; },
   get remoteNetworkShareManager() { return remoteNetworkShareManager; },
   get remoteAgentSessionService() { return remoteAgentSessionService; }, set remoteAgentSessionService(value) { remoteAgentSessionService = value; },
@@ -1482,7 +1498,7 @@ registerMainLifecycle({
   getClaudeAuthStatus, getAntigravityAuthStatus, getCloudDeviceAccountStorageKey, getCloudDevicePath, getCloudIdentityPath, getCloudIdentityStore,
   getCodexAuthStatus, getCodexHome, getCodexRoot, getCodexToolEnvironment, getDesktopChatNetworkAccessDefault: () => settings.defaultChatNetworkAccess !== false, getManifestAppSecretsValidationError, getSecretsStore, getForgerAccountPath, getForgerHomeRoot, getForgerMetadataRoot,
   getProviderProfilesRoot, resolveLlmProviderAuthProfile, getSocialAppReviewPromptContext,
-  getFreePort, getLegacyForgerMetadataRoot, getMemoryStore, getPersonalAgentStore, getPersonalAgentConversationManager, getOfficialToolsService, getConnectionsService, getSelfOAuthCallbackService, getSpeechToTextService, getTextToSpeechService, getLiveVoiceInputService, getWakeWordService,
+  getFreePort, getLegacyForgerMetadataRoot, getMemoryStore, getPersonalAgentStore, getPersonalAgentConversationManager, getPersonalAgentRoutineManager, getOfficialToolsService, getConnectionsService, getSelfOAuthCallbackService, getSpeechToTextService, getTextToSpeechService, getLiveVoiceInputService, getWakeWordService,
   getAudioDevices: async () => await getAudioRuntimeBroker().listDevices(),
   playTextToSpeechAudio: async (input: { playbackId: string; audioDataBase64: string; mimeType: string; outputDeviceId?: string }) => await getAudioRuntimeBroker().playAudio(input),
   cancelTextToSpeechPlayback: async (playbackId: string) => await getAudioRuntimeBroker().cancelPlayback(playbackId),

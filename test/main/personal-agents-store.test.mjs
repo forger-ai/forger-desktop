@@ -8,6 +8,7 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const { AgentStore } = require('../../dist-electron/main/personal-agents/agent-store.js');
 const { AgentConversationManager } = require('../../dist-electron/main/personal-agents/agent-conversation-manager.js');
+const { AgentRoutineManager } = require('../../dist-electron/main/personal-agents/agent-routine-manager.js');
 const { openPersonalAgentSqliteDatabase } = require('../../dist-electron/main/personal-agents/sqlite.js');
 
 const sortConnectionGrants = (grants) => [...grants].sort((left, right) => left.type.localeCompare(right.type));
@@ -889,6 +890,216 @@ test('personal agent conversation manager persists full long progress messages',
   assert.equal(longProgress.length > 1000, true);
   assert.equal(completed.activeRun.progress[0].message, longProgress);
   assert.equal(completed.messages.find((message) => message.kind === 'intermediate')?.content, longProgress);
+});
+
+test('personal agent routines create a conversable thread, reuse it on each trigger, and skip while busy', async () => {
+  const metadataRoot = await mkdtemp(path.join(tmpdir(), 'forger-personal-agent-routine-meta-'));
+  const forgerHomeRoot = await mkdtemp(path.join(tmpdir(), 'forger-personal-agent-routine-home-'));
+  const store = new AgentStore({ metadataRoot, forgerHomeRoot });
+  let releaseRunner;
+  const runnerGate = new Promise((resolve) => {
+    releaseRunner = resolve;
+  });
+  let runnerCalls = 0;
+  const conversationManager = new AgentConversationManager({
+    store,
+    runner: async () => {
+      runnerCalls += 1;
+      if (runnerCalls === 2) {
+        await runnerGate;
+      }
+      return { assistantText: `Respuesta ${runnerCalls}.` };
+    },
+  });
+  const routineManager = new AgentRoutineManager({ store, conversationManager });
+  const agent = await store.createAgent({ name: 'Routine agent', purpose: 'Runs scheduled checks.' });
+
+  const routine = await routineManager.create(agent.id, {
+    name: 'Status check',
+    prompt: 'Revisa estado.',
+    frequency: { type: 'hourly' },
+    missedRunPolicy: 'within_window',
+    missedRunWindowMinutes: 30,
+    enabled: false,
+    authorizationText: 'User approved routine',
+  });
+
+  assert.equal(routine.agentId, agent.id);
+  assert.equal(routine.enabled, false);
+  const routineConversation = await store.requireConversation(routine.conversationId);
+  assert.equal(routineConversation.origin, 'routine');
+  assert.equal(routineConversation.routineId, routine.id);
+  assert.equal(routineConversation.readOnly, false);
+
+  const firstRun = await routineManager.runNow({ routineId: routine.id });
+  assert.equal(firstRun.status, 'running');
+  const firstCompleted = await waitForConversation(conversationManager, routine.conversationId, (item) =>
+    item.activeRun?.status === 'completed' && item.messages.some((message) => message.content === 'Respuesta 1.'));
+  assert.deepEqual(
+    firstCompleted.messages.map((message) => [message.role, message.source, message.content]),
+    [
+      ['user', 'routine', 'Revisa estado.'],
+      ['assistant', 'human', 'Respuesta 1.'],
+    ],
+  );
+  assert.equal((await store.requireRoutine(routine.id)).lastRun.status, 'succeeded');
+
+  await routineManager.runNow({ routineId: routine.id });
+  const runningConversation = await waitForConversation(conversationManager, routine.conversationId, (item) =>
+    item.activeRun?.status === 'running');
+  assert.equal(runningConversation.messages.at(-1).source, 'routine');
+  const skipped = await routineManager.runNow({ routineId: routine.id });
+  assert.equal(skipped.status, 'skipped');
+  assert.equal(skipped.error, 'routine_thread_busy');
+  releaseRunner();
+  await waitForConversation(conversationManager, routine.conversationId, (item) =>
+    item.activeRun?.status === 'completed' && item.messages.some((message) => message.content === 'Respuesta 2.'));
+
+  const userUpdated = await conversationManager.sendMessage({
+    conversationId: routine.conversationId,
+    content: 'Gracias, sigue desde aqui.',
+  });
+  assert.equal(userUpdated.messages.at(-1).role, 'user');
+  assert.equal(userUpdated.messages.at(-1).source, 'human');
+  const finalConversation = await waitForConversation(conversationManager, routine.conversationId, (item) =>
+    item.activeRun?.status === 'completed' && item.messages.some((message) => message.content === 'Respuesta 3.'));
+  assert.equal(finalConversation.id, routine.conversationId);
+  assert.equal(finalConversation.messages.filter((message) => message.source === 'routine').length, 2);
+});
+
+test('personal agent wakeup_in enforces minimum seconds, blocks sending, persists draft, cancels, and wakes in same thread', async () => {
+  const metadataRoot = await mkdtemp(path.join(tmpdir(), 'forger-personal-agent-wakeup-meta-'));
+  const forgerHomeRoot = await mkdtemp(path.join(tmpdir(), 'forger-personal-agent-wakeup-home-'));
+  const store = new AgentStore({ metadataRoot, forgerHomeRoot });
+  const conversationManager = new AgentConversationManager({
+    store,
+    runner: async () => ({ assistantText: 'Despertado.' }),
+  });
+  const routineManager = new AgentRoutineManager({ store, conversationManager });
+  const agent = await store.createAgent({ name: 'Wakeup agent', purpose: 'Waits and resumes.' });
+  const conversation = await conversationManager.createConversation({ agentId: agent.id, title: 'Waiting' });
+
+  await assert.rejects(
+    routineManager.scheduleWakeup({
+      agentId: agent.id,
+      conversationId: conversation.id,
+      seconds: 4,
+      prompt: 'Muy pronto.',
+    }),
+    /personal_agent_wakeup_minimum_seconds/,
+  );
+
+  const wakeup = await routineManager.scheduleWakeup({
+    agentId: agent.id,
+    conversationId: conversation.id,
+    seconds: 60,
+    prompt: 'Revisa si ya esta listo.',
+  });
+  assert.equal(wakeup.status, 'scheduled');
+  await assert.rejects(
+    conversationManager.sendMessage({ conversationId: conversation.id, content: 'No deberia enviar.' }),
+    /personal_agent_wakeup_active/,
+  );
+  const drafted = await routineManager.updateDraft({
+    conversationId: conversation.id,
+    draftMessage: 'Mensaje escrito mientras espera.',
+  });
+  assert.equal(drafted.draftMessage, 'Mensaje escrito mientras espera.');
+
+  const canceled = await routineManager.cancelWakeup({ conversationId: conversation.id });
+  assert.equal(canceled.status, 'canceled');
+  const afterCancel = await conversationManager.sendMessage({
+    conversationId: conversation.id,
+    content: 'Ahora si envia.',
+  });
+  assert.equal(afterCancel.messages.at(-1).content, 'Ahora si envia.');
+  await waitForConversation(conversationManager, conversation.id, (item) =>
+    item.activeRun?.status === 'completed' && item.messages.some((message) => message.content === 'Despertado.'));
+
+  const secondConversation = await conversationManager.createConversation({ agentId: agent.id, title: 'Second wait' });
+  const dueWakeup = await routineManager.scheduleWakeup({
+    agentId: agent.id,
+    conversationId: secondConversation.id,
+    seconds: 5,
+    prompt: 'Despierta ahora.',
+  });
+  await store.updateWakeupStatus({ wakeupId: dueWakeup.id, status: 'fired' });
+  await store.scheduleWakeup({
+    agentId: agent.id,
+    conversationId: secondConversation.id,
+    prompt: 'Despierta ahora.',
+    dueAt: new Date(Date.now() - 1000).toISOString(),
+  });
+  await routineManager.initialize();
+  const awakened = await waitForConversation(conversationManager, secondConversation.id, (item) =>
+    item.activeRun?.status === 'completed' && item.messages.some((message) => message.source === 'scheduled_wakeup'));
+  assert.deepEqual(
+    awakened.messages.map((message) => [message.role, message.source, message.content]),
+    [
+      ['user', 'scheduled_wakeup', 'Despierta ahora.'],
+      ['assistant', 'human', 'Despertado.'],
+    ],
+  );
+  assert.equal(awakened.scheduledWakeup, undefined);
+  routineManager.dispose();
+});
+
+test('personal agent routines apply missedRunPolicy skip always and within_window without retries', async () => {
+  const metadataRoot = await mkdtemp(path.join(tmpdir(), 'forger-personal-agent-routine-missed-meta-'));
+  const forgerHomeRoot = await mkdtemp(path.join(tmpdir(), 'forger-personal-agent-routine-missed-home-'));
+  const store = new AgentStore({ metadataRoot, forgerHomeRoot });
+  const conversationManager = new AgentConversationManager({
+    store,
+    runner: async () => ({ assistantText: 'Run completed once.' }),
+  });
+  const routineManager = new AgentRoutineManager({ store, conversationManager });
+  const agent = await store.createAgent({ name: 'Policy agent', purpose: 'Checks missed schedules.' });
+  const oldPast = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+
+  const skipRoutine = await routineManager.create(agent.id, {
+    name: 'Skip old',
+    prompt: 'Skip me.',
+    frequency: { type: 'hourly' },
+    missedRunPolicy: 'skip',
+    enabled: false,
+    authorizationText: 'User approved skip',
+  });
+  const alwaysRoutine = await routineManager.create(agent.id, {
+    name: 'Always old',
+    prompt: 'Run me.',
+    frequency: { type: 'hourly' },
+    missedRunPolicy: 'always',
+    enabled: false,
+    authorizationText: 'User approved always',
+  });
+  const windowRoutine = await routineManager.create(agent.id, {
+    name: 'Window old',
+    prompt: 'Window skip.',
+    frequency: { type: 'hourly' },
+    missedRunPolicy: 'within_window',
+    missedRunWindowMinutes: 1,
+    enabled: false,
+    authorizationText: 'User approved window',
+  });
+  await store.setRoutineEnabled({ routineId: skipRoutine.id, enabled: true, nextRunAt: oldPast });
+  await store.setRoutineEnabled({ routineId: alwaysRoutine.id, enabled: true, nextRunAt: oldPast });
+  await store.setRoutineEnabled({ routineId: windowRoutine.id, enabled: true, nextRunAt: oldPast });
+
+  await routineManager.initialize();
+  const alwaysConversation = await waitForConversation(conversationManager, alwaysRoutine.conversationId, (item) =>
+    item.activeRun?.status === 'completed' && item.messages.some((message) => message.source === 'routine'));
+
+  assert.equal(alwaysConversation.messages.filter((message) => message.source === 'routine').length, 1);
+  assert.equal((await store.requireRoutine(alwaysRoutine.id)).lastRun.status, 'succeeded');
+  const skippedOld = await store.requireRoutine(skipRoutine.id);
+  assert.equal(skippedOld.lastRun.status, 'skipped');
+  assert.equal(skippedOld.lastRun.error, 'routine_missed_schedule');
+  const skippedWindow = await store.requireRoutine(windowRoutine.id);
+  assert.equal(skippedWindow.lastRun.status, 'skipped');
+  assert.equal(skippedWindow.lastRun.error, 'routine_missed_schedule');
+  assert.equal((await store.requireConversation(skipRoutine.conversationId)).messages.length, 0);
+  assert.equal((await store.requireConversation(windowRoutine.conversationId)).messages.length, 0);
+  routineManager.dispose();
 });
 
 const waitForConversation = async (manager, conversationId, predicate) => {

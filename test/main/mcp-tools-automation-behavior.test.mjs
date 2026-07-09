@@ -551,6 +551,220 @@ test('MCP inter-agent tools are visible only inside personal-agent conversations
   }
 });
 
+test('MCP routine tools are visible only inside personal-agent conversations and use current agent context', async () => {
+  const calls = [];
+  const routine = {
+    id: 'routine-1',
+    agentId: 'agent-a',
+    conversationId: 'routine-conversation-1',
+    name: 'Daily check',
+    prompt: 'Check status.',
+    frequency: { type: 'daily', timeOfDay: '09:00' },
+    missedRunPolicy: 'within_window',
+    missedRunWindowMinutes: 60,
+    enabled: true,
+    running: false,
+    nextRunAt: '2026-01-02T12:00:00.000Z',
+    authorizationText: 'User approved',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  };
+  const harness = await createForgerMcpHarness({
+    options: {
+      schedulePersonalAgentWakeup: async (input) => {
+        calls.push(['wakeup', input]);
+        return {
+          id: 'wakeup-1',
+          agentId: input.agentId,
+          conversationId: input.conversationId,
+          prompt: input.prompt,
+          dueAt: '2026-01-01T00:00:05.000Z',
+          status: 'scheduled',
+          createdByRunId: input.runId,
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        };
+      },
+      cancelPersonalAgentWakeup: async (input) => {
+        calls.push(['cancelWakeup', input]);
+        return {
+          id: input.wakeupId ?? 'wakeup-1',
+          agentId: 'agent-a',
+          conversationId: input.conversationId,
+          prompt: 'Check later.',
+          dueAt: '2026-01-01T00:00:05.000Z',
+          status: 'canceled',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:01.000Z',
+        };
+      },
+      createAgentRoutine: async (input) => {
+        calls.push(['createRoutine', input]);
+        return { ...routine, ...input, id: 'routine-created', conversationId: 'routine-conversation-created' };
+      },
+      listAgentRoutines: async (input) => {
+        calls.push(['listRoutines', input]);
+        return [routine];
+      },
+      updateAgentRoutine: async (input) => {
+        calls.push(['updateRoutine', input]);
+        return { ...routine, ...input, updatedAt: '2026-01-01T00:02:00.000Z' };
+      },
+      deleteAgentRoutine: async (input) => {
+        calls.push(['deleteRoutine', input]);
+        return { success: true };
+      },
+    },
+  });
+  try {
+    const routineToolNames = ['wakeup_in', 'cancel_wakeup', 'create_agent_routine', 'list_agent_routines', 'update_agent_routine', 'delete_agent_routine'];
+    const nonPersonalSessions = [
+      harness.server.createSession('run-desktop-routine', 'finance-os', { caller: 'desktop-chat' }),
+      harness.server.createSession('run-free-routine', 'forger', { caller: 'free-chat' }),
+      harness.server.createSession('run-app-routine', 'finance-os', { caller: 'app-agent', appIds: ['finance-os'] }),
+      harness.server.createSession('run-automation-routine', 'forger', { caller: 'automation' }),
+      harness.server.createSession('run-workflow-routine', 'forger', { caller: 'workflow' }),
+    ];
+    for (const session of nonPersonalSessions) {
+      const listed = await (await callMcp(session, { jsonrpc: '2.0', id: 1, method: 'tools/list' })).json();
+      const names = listed.result.tools.map((tool) => tool.name);
+      for (const toolName of routineToolNames) {
+        assert.equal(names.includes(toolName), false, `${toolName} should be hidden for ${session.appId}:${session.token}`);
+      }
+    }
+
+    const incompleteSession = harness.server.createSession('run-incomplete-routine', 'forger', {
+      caller: 'personal-agent',
+      personalAgentId: 'agent-a',
+    });
+    const incompleteListed = await (await callMcp(incompleteSession, { jsonrpc: '2.0', id: 2, method: 'tools/list' })).json();
+    assert.equal(incompleteListed.result.tools.some((tool) => routineToolNames.includes(tool.name)), false);
+
+    const personalSession = harness.server.createSession('run-personal-routine', 'forger', {
+      caller: 'personal-agent',
+      personalAgentId: 'agent-a',
+      personalAgentConversationId: 'conversation-a',
+    });
+    const personalListed = await (await callMcp(personalSession, { jsonrpc: '2.0', id: 3, method: 'tools/list' })).json();
+    const personalNames = personalListed.result.tools.map((tool) => tool.name);
+    for (const toolName of routineToolNames) {
+      assert.equal(personalNames.includes(toolName), true, `${toolName} should be visible for personal-agent conversation`);
+    }
+
+    const wakeup = parseToolTextResult(await (await callMcp(personalSession, {
+      jsonrpc: '2.0',
+      id: 4,
+      method: 'tools/call',
+      params: { name: 'wakeup_in', arguments: { seconds: 5, prompt: 'Check later.' } },
+    })).json());
+    assert.equal(wakeup.success, true);
+    assert.equal(wakeup.wakeup.id, 'wakeup-1');
+
+    const created = parseToolTextResult(await (await callMcp(personalSession, {
+      jsonrpc: '2.0',
+      id: 5,
+      method: 'tools/call',
+      params: {
+        name: 'create_agent_routine',
+        arguments: {
+          name: 'Daily check',
+          periodicity: { type: 'daily', timeOfDay: '09:00' },
+          missedRunPolicy: 'within_window',
+          missedRunWindowMinutes: 60,
+          prompt: 'Check status.',
+          authorizationText: 'User approved',
+        },
+      },
+    })).json());
+    assert.equal(created.success, true);
+    assert.equal(created.routine.id, 'routine-created');
+
+    const listedRoutines = parseToolTextResult(await (await callMcp(personalSession, {
+      jsonrpc: '2.0',
+      id: 6,
+      method: 'tools/call',
+      params: { name: 'list_agent_routines', arguments: {} },
+    })).json());
+    assert.equal(listedRoutines.success, true);
+    assert.equal(listedRoutines.routines[0].id, 'routine-1');
+
+    const updated = parseToolTextResult(await (await callMcp(personalSession, {
+      jsonrpc: '2.0',
+      id: 7,
+      method: 'tools/call',
+      params: {
+        name: 'update_agent_routine',
+        arguments: {
+          routineId: 'routine-1',
+          name: 'Weekly check',
+          periodicity: { type: 'weekly', timeOfDay: '08:30', weeklyDay: 2 },
+          missedRunPolicy: 'skip',
+          prompt: 'Check weekly status.',
+          authorizationText: 'User approved update',
+        },
+      },
+    })).json());
+    assert.equal(updated.success, true);
+    assert.equal(updated.routine.frequency.type, 'weekly');
+
+    const canceled = parseToolTextResult(await (await callMcp(personalSession, {
+      jsonrpc: '2.0',
+      id: 8,
+      method: 'tools/call',
+      params: { name: 'cancel_wakeup', arguments: {} },
+    })).json());
+    assert.equal(canceled.success, true);
+    assert.equal(canceled.wakeup.status, 'canceled');
+
+    const deleted = parseToolTextResult(await (await callMcp(personalSession, {
+      jsonrpc: '2.0',
+      id: 9,
+      method: 'tools/call',
+      params: { name: 'delete_agent_routine', arguments: { routineId: 'routine-1', authorizationText: 'User approved delete' } },
+    })).json());
+    assert.equal(deleted.success, true);
+
+    const rejected = parseToolTextResult(await (await callMcp(nonPersonalSessions[1], {
+      jsonrpc: '2.0',
+      id: 10,
+      method: 'tools/call',
+      params: { name: 'wakeup_in', arguments: { seconds: 5, prompt: 'Nope.' } },
+    })).json());
+    assert.equal(rejected.success, false);
+    assert.equal(rejected.technicalCode, 'personal_agent_context_required');
+
+    assert.deepEqual(calls, [
+      ['wakeup', { agentId: 'agent-a', conversationId: 'conversation-a', runId: 'run-personal-routine', seconds: 5, prompt: 'Check later.' }],
+      ['createRoutine', {
+        agentId: 'agent-a',
+        name: 'Daily check',
+        prompt: 'Check status.',
+        frequency: { type: 'daily', timeOfDay: '09:00' },
+        missedRunPolicy: 'within_window',
+        missedRunWindowMinutes: 60,
+        enabled: undefined,
+        authorizationText: 'User approved',
+      }],
+      ['listRoutines', { agentId: 'agent-a' }],
+      ['updateRoutine', {
+        agentId: 'agent-a',
+        routineId: 'routine-1',
+        name: 'Weekly check',
+        prompt: 'Check weekly status.',
+        frequency: { type: 'weekly', timeOfDay: '08:30', weeklyDay: 2 },
+        missedRunPolicy: 'skip',
+        missedRunWindowMinutes: undefined,
+        enabled: undefined,
+        authorizationText: 'User approved update',
+      }],
+      ['cancelWakeup', { wakeupId: undefined, conversationId: 'conversation-a' }],
+      ['deleteRoutine', { agentId: 'agent-a', routineId: 'routine-1', authorizationText: 'User approved delete' }],
+    ]);
+  } finally {
+    harness.stop();
+  }
+});
+
 test('MCP app-agent exposes and executes only manifest-granted connection actions', async () => {
   const calls = [];
   const harness = await createForgerMcpHarness({

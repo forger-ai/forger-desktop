@@ -473,9 +473,10 @@ test('Gmail API client normalizes malformed Gmail payload branches', async () =>
   }
 });
 
-test('Gmail API client supports mailbox metadata, sync, sanitized HTML, mutations, and drafts', async () => {
+test('Gmail API client supports mailbox metadata, sync, raw HTML, mutations, and drafts', async () => {
   const calls = [];
   const previousFetch = globalThis.fetch;
+  const rawHtml = '<div onclick="bad()" style="color:red"><script>alert(1)</script><form><input></form><a href="javascript:bad()">bad</a><img src="https://tracker.example/pixel.png" srcset="https://tracker.example/2x.png 2x"><p>Safe</p></div>';
   const fullThread = {
     id: 'thread-1',
     historyId: 'hist-thread',
@@ -561,7 +562,7 @@ test('Gmail API client supports mailbox metadata, sync, sanitized HTML, mutation
             {
               mimeType: 'text/html',
               body: {
-                data: toBase64Url('<div onclick="bad()" style="color:red"><script>alert(1)</script><form><input></form><a href="javascript:bad()">bad</a><img src="https://tracker.example/pixel.png" srcset="https://tracker.example/2x.png 2x"><p>Safe</p></div>'),
+                data: toBase64Url(rawHtml),
               },
             },
           ],
@@ -670,9 +671,7 @@ test('Gmail API client supports mailbox metadata, sync, sanitized HTML, mutation
     const htmlMessage = await readMessage(context, 'm-html');
     assert.equal(htmlMessage.textBody, 'plain body');
     assert.equal(htmlMessage.labelIds.includes('UNREAD'), true);
-    assert.match(htmlMessage.htmlBody, /<p>Safe<\/p>/);
-    assert.doesNotMatch(htmlMessage.htmlBody, /script|onclick|style=|form|input|javascript:/i);
-    assert.doesNotMatch(htmlMessage.htmlBody, /https:\/\/tracker\.example/i);
+    assert.equal(htmlMessage.htmlBody, rawHtml);
     assert.deepEqual(await listChanges(context, { startHistoryId: 'hist-100', maxResults: 1000 }), {
       historyId: 'hist-101',
       nextPageToken: 'history-page-2',

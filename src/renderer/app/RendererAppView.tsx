@@ -997,6 +997,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             intelligenceProviderConfigured={intelligenceProviderConfigured}
             providerOptions={visibleProviderOptions}
             installedApps={installedApps}
+            onNotifyForger={(input) => void prepareConversationDiagnosticReport(input)}
           />
         ) : null}
 

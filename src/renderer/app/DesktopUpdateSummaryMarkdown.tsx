@@ -1,6 +1,7 @@
-import { alpha, Box, Link } from '@mui/material';
+import { alpha, Box } from '@mui/material';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { ExternalMarkdownLink } from '@renderer/components/ExternalMarkdownLink';
 
 interface DesktopUpdateSummaryMarkdownProps {
   content: string;
@@ -57,16 +58,9 @@ export function DesktopUpdateSummaryMarkdown({
         remarkPlugins={[remarkGfm]}
         components={{
           a: ({ href, children }) => (
-            <Link
-              href={href}
-              onClick={(event) => {
-                if (!href) return;
-                event.preventDefault();
-                onOpenExternalUrl(href);
-              }}
-            >
+            <ExternalMarkdownLink href={href} onOpenExternalUrl={onOpenExternalUrl}>
               {children}
-            </Link>
+            </ExternalMarkdownLink>
           ),
         }}
       >

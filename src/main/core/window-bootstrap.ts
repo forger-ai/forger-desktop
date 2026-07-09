@@ -1,6 +1,7 @@
 
 import type { App, BrowserWindow, IpcMain } from 'electron';
 import type path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import type { registerAgentIpcHandlers as registerAgentIpcHandlersFn } from '../ipc/agent-handlers';
 import type { AgentIpcDeps } from '../ipc/agent-handlers';
@@ -20,6 +21,11 @@ interface WindowBootstrapState {
   mainWindow: BrowserWindow | null;
   pendingDeepLink: ForgerDeepLink | null;
   pendingDeepLinkFlushScheduled: boolean;
+}
+
+interface WindowBootstrapShell {
+  openExternal: (url: string) => Promise<void>;
+  openPath: (path: string) => Promise<string>;
 }
 
 interface WindowBootstrapDeps {
@@ -44,12 +50,59 @@ interface WindowBootstrapDeps {
     quitApp: () => void;
   }) => void;
   registerWindowStateEvents: (window: BrowserWindow) => void;
+  shell: WindowBootstrapShell;
   state: WindowBootstrapState;
   useCustomWindowFrame: boolean;
 }
 
+const isAllowedMainWindowUrl = (window: BrowserWindow, targetUrl: string): boolean => {
+  try {
+    const currentUrl = window.webContents.getURL();
+    if (!currentUrl) return false;
+    const current = new URL(currentUrl);
+    const target = new URL(targetUrl);
+    if (current.protocol === 'file:' || target.protocol === 'file:') {
+      return current.protocol === 'file:' && target.protocol === 'file:' && current.pathname === target.pathname;
+    }
+    return current.origin === target.origin;
+  } catch {
+    return false;
+  }
+};
+
+const openOutsideMainWindow = (targetUrl: string, shell: WindowBootstrapShell): void => {
+  try {
+    const parsed = new URL(targetUrl);
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+      void shell.openExternal(parsed.toString()).catch(() => undefined);
+      return;
+    }
+    if (parsed.protocol === 'file:') {
+      void shell.openPath(fileURLToPath(parsed)).catch(() => undefined);
+    }
+  } catch {
+    // Ignore invalid navigation targets.
+  }
+};
+
+const registerMainWindowNavigationGuards = (window: BrowserWindow, shell: WindowBootstrapShell): void => {
+  window.webContents.on('will-navigate', (event, targetUrl) => {
+    if (isAllowedMainWindowUrl(window, targetUrl)) return;
+    event.preventDefault();
+    openOutsideMainWindow(targetUrl, shell);
+  });
+  window.webContents.setWindowOpenHandler(({ url }) => {
+    if (isAllowedMainWindowUrl(window, url)) {
+      void window.loadURL(url);
+      return { action: 'deny' };
+    }
+    openOutsideMainWindow(url, shell);
+    return { action: 'deny' };
+  });
+};
+
 export const createWindowBootstrapController = (deps: WindowBootstrapDeps) => {
-  const { state, path, app, BrowserWindow, isDev, useCustomWindowFrame, registerWindowStateEvents, desktopErrorReporter, loadDesktopWindow, getMainProcessIpcDeps, getMainWindow, registerMainIpcHandlers, registerAgentIpcHandlers, registerWindowIpcHandlers, ipcMain, getWindowState, focusDeepLinkWindow, IPC_CHANNELS } = deps;
+  const { state, path, app, BrowserWindow, isDev, useCustomWindowFrame, registerWindowStateEvents, desktopErrorReporter, loadDesktopWindow, getMainProcessIpcDeps, getMainWindow, registerMainIpcHandlers, registerAgentIpcHandlers, registerWindowIpcHandlers, shell, ipcMain, getWindowState, focusDeepLinkWindow, IPC_CHANNELS } = deps;
 const createWindow = async (): Promise<void> => {
   const preloadPath = path.join(__dirname, '..', '..', 'preload', 'index.js');
 
@@ -78,6 +131,7 @@ const createWindow = async (): Promise<void> => {
   });
 
   await loadDesktopWindow(state.mainWindow);
+  registerMainWindowNavigationGuards(state.mainWindow, shell);
 };
 
 const registerIpcHandlers = (): void => {

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } 
 import AddRounded from '@mui/icons-material/AddRounded';
 import ArrowBackRounded from '@mui/icons-material/ArrowBackRounded';
 import AttachFileRounded from '@mui/icons-material/AttachFileRounded';
+import BugReportRounded from '@mui/icons-material/BugReportRounded';
 import ChatRounded from '@mui/icons-material/ChatRounded';
 import CloseRounded from '@mui/icons-material/CloseRounded';
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
@@ -35,7 +36,7 @@ import {
   Typography,
   useTheme,
 } from '@mui/material';
-import type { AgentProvider, AppSummary, PersonalAgent, PersonalAgentConversation, PersonalAgentConversationEvent, PersonalAgentGrantOptions, PersonalAgentMessage, PersonalAgentPeerThread, PersonalAgentWorkspaceEntry, PersonalAgentWorkspaceFile, PickedChatFile, SharedFileRef, WindowControlState } from '@shared/types';
+import type { AgentProvider, AppSummary, AutomationFrequency, AutomationMissedRunPolicy, PersonalAgent, PersonalAgentConversation, PersonalAgentConversationEvent, PersonalAgentGrantOptions, PersonalAgentMessage, PersonalAgentPeerThread, PersonalAgentRoutine, PersonalAgentRun, PersonalAgentWorkspaceEntry, PersonalAgentWorkspaceFile, PickedChatFile, SharedFileRef, WindowControlState } from '@shared/types';
 import type { AppDictionary } from '@renderer/i18n';
 import { AGENT_PROVIDER_OPTIONS, CODEX_MODEL_OPTIONS } from '@renderer/preferences';
 import { usageAnalytics } from '@renderer/usage-analytics';
@@ -46,6 +47,12 @@ import {
   sortItemsByRecentActivity,
 } from './chat/history-drawer-helpers';
 import { AgentConversationHistoryDrawer } from './AgentConversationHistoryDrawer';
+import {
+  AgentRoutineDialog,
+  AgentRoutinesPanel,
+  defaultRoutineMissedRunWindowMinutes,
+  normalizeTimeOfDay,
+} from './AgentRoutinesPanel';
 import {
   type AccessDraft,
   type AgentConversationHistoryGroup,
@@ -68,14 +75,19 @@ interface AgentsViewProps {
   intelligenceProviderConfigured: boolean;
   providerOptions?: Array<{ label: string; value: AgentProvider | 'auto' }>;
   installedApps?: AppSummary[];
+  onNotifyForger?: (input: { agent: PersonalAgent; conversation: PersonalAgentConversation; run?: PersonalAgentRun; auto?: boolean }) => void;
 }
 
-export function AgentsView({ t, intelligenceProviderConfigured, providerOptions = AGENT_PROVIDER_OPTIONS, installedApps = [] }: AgentsViewProps) {
+type AgentDetailTab = 'chat' | 'workspace' | 'routines' | 'settings';
+type RoutineFrequencyType = AutomationFrequency['type'];
+
+export function AgentsView({ t, intelligenceProviderConfigured, providerOptions = AGENT_PROVIDER_OPTIONS, installedApps = [], onNotifyForger }: AgentsViewProps) {
   const theme = useTheme();
   const [agents, setAgents] = useState<PersonalAgent[]>([]);
   const [activeAgentId, setActiveAgentId] = useState<string | null>(null);
   const [conversations, setConversations] = useState<PersonalAgentConversation[]>([]);
   const [conversation, setConversation] = useState<PersonalAgentConversation | null>(null);
+  const [routines, setRoutines] = useState<PersonalAgentRoutine[]>([]);
   const [workspaceEntries, setWorkspaceEntries] = useState<PersonalAgentWorkspaceEntry[]>([]);
   const [grantOptions, setGrantOptions] = useState<PersonalAgentGrantOptions>({ apps: [], tools: [], connections: [], peerAgents: [] });
   const [openFile, setOpenFile] = useState<PersonalAgentWorkspaceFile | null>(null);
@@ -88,18 +100,31 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
   const [settingsAccessDraft, setSettingsAccessDraft] = useState<AccessDraft>(() => defaultAccessDraft());
   const [message, setMessage] = useState('');
   const [pendingFiles, setPendingFiles] = useState<PickedChatFile[]>([]);
-  const [detailTab, setDetailTab] = useState<'chat' | 'workspace' | 'settings'>('chat');
+  const [detailTab, setDetailTab] = useState<AgentDetailTab>('chat');
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [routineDialogOpen, setRoutineDialogOpen] = useState(false);
+  const [editingRoutine, setEditingRoutine] = useState<PersonalAgentRoutine | null>(null);
+  const [routineName, setRoutineName] = useState('');
+  const [routinePrompt, setRoutinePrompt] = useState('');
+  const [routineFrequencyType, setRoutineFrequencyType] = useState<RoutineFrequencyType>('hourly');
+  const [routineTimeOfDay, setRoutineTimeOfDay] = useState('09:00');
+  const [routineWeeklyDay, setRoutineWeeklyDay] = useState(1);
+  const [routineMissedRunPolicy, setRoutineMissedRunPolicy] = useState<AutomationMissedRunPolicy>('within_window');
+  const [routineMissedRunWindowMinutes, setRoutineMissedRunWindowMinutes] = useState('30');
+  const [routineEnabled, setRoutineEnabled] = useState(true);
+  const [routineAuthorizationText, setRoutineAuthorizationText] = useState('');
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const [windowState, setWindowState] = useState<WindowControlState | null>(null);
   const [collapsedHistoryGroups, setCollapsedHistoryGroups] = useState<Record<string, boolean>>({});
   const [historyGroupLimits, setHistoryGroupLimits] = useState<Record<string, number>>({});
   const [peerThreads, setPeerThreads] = useState<PersonalAgentPeerThread[]>([]);
   const [openPeerThread, setOpenPeerThread] = useState<PersonalAgentPeerThread | null>(null);
-  const [busyAction, setBusyAction] = useState<'create' | 'delete' | 'file' | 'wake' | 'start' | 'send' | 'access' | null>(null);
+  const [busyAction, setBusyAction] = useState<'create' | 'delete' | 'file' | 'wake' | 'start' | 'send' | 'access' | 'routine' | 'cancelWakeup' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [settingsDraftAgentVersion, setSettingsDraftAgentVersion] = useState<string | null>(null);
   const messagesScrollRef = useRef<HTMLDivElement | null>(null);
   const shouldStickToBottomRef = useRef(true);
+  const autoReportedRunIdsRef = useRef<Set<string>>(new Set());
 
   const activeAgent = useMemo(
     () => agents.find((agent) => agent.id === activeAgentId) ?? null,
@@ -120,6 +145,9 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
   const fileDirty = Boolean(openFile && fileDraft !== openFile.content);
   const activeRun = conversation?.activeRun;
   const runIsActive = Boolean(activeRun && !isTerminalRunStatus(activeRun.status));
+  const scheduledWakeup = conversation?.scheduledWakeup?.status === 'scheduled' ? conversation.scheduledWakeup : null;
+  const wakeupIsActive = Boolean(scheduledWakeup);
+  const wakeupCountdownMs = scheduledWakeup ? Math.max(0, Date.parse(scheduledWakeup.dueAt) - nowMs) : 0;
   const wakeFlowInProgress = Boolean(
     !isBlankAgent &&
     runIsActive &&
@@ -133,6 +161,7 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
   const runErrorMessage = activeRun?.status === 'failed'
     ? personalAgentRunErrorMessage(activeRun.error, t)
     : null;
+  const runErrorIsGeneric = runErrorMessage === t.agents.runErrorGeneric;
   const activeRunProgressCount = activeRun?.progress.length ?? 0;
   const activeRunActivityCount = activeRun?.activity?.items.length ?? 0;
   const busy = busyAction !== null;
@@ -146,9 +175,13 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
     [installedApps],
   );
   const historyGroups = useMemo<AgentConversationHistoryGroup[]>(() => {
-    const userStarted = sortItemsByRecentActivity(conversations.filter((item) => item.origin !== 'agent'));
+    const routineStarted = sortItemsByRecentActivity(conversations.filter((item) => item.origin === 'routine'));
+    const userStarted = sortItemsByRecentActivity(conversations.filter((item) => item.origin !== 'agent' && item.origin !== 'routine'));
     const agentStarted = sortItemsByRecentActivity(conversations.filter((item) => item.origin === 'agent'));
     return [
+      routineStarted.length > 0
+        ? { id: 'routine-started', label: t.locale === 'es' ? 'Rutinas' : 'Routines', items: routineStarted }
+        : null,
       userStarted.length > 0
         ? { id: 'user-started', label: t.locale === 'es' ? 'Iniciadas por el usuario' : 'Started by user', items: userStarted }
         : null,
@@ -157,6 +190,17 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
         : null,
     ].filter((group): group is AgentConversationHistoryGroup => Boolean(group));
   }, [conversations, t.locale]);
+
+  useEffect(() => {
+    if (!onNotifyForger || !activeAgent || !conversation || !activeRun || activeRun.status !== 'failed' || !runErrorIsGeneric) {
+      return;
+    }
+    if (autoReportedRunIdsRef.current.has(activeRun.id)) {
+      return;
+    }
+    autoReportedRunIdsRef.current.add(activeRun.id);
+    onNotifyForger({ agent: activeAgent, conversation, run: activeRun, auto: true });
+  }, [activeAgent, activeRun, conversation, onNotifyForger, runErrorIsGeneric]);
 
   const loadAgents = useCallback(async () => {
     const nextAgents = await window.forger.personalAgentsList();
@@ -168,12 +212,14 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
   }, []);
 
   const loadAgentDetail = useCallback(async (agentId: string, preferredConversationId?: string) => {
-    const [nextConversations, nextWorkspaceEntries] = await Promise.all([
+    const [nextConversations, nextWorkspaceEntries, nextRoutines] = await Promise.all([
       window.forger.personalAgentConversationsList({ agentId }).catch(() => []),
       window.forger.personalAgentWorkspaceList({ agentId }).catch(() => []),
+      window.forger.personalAgentRoutinesList({ agentId }).catch(() => []),
     ]);
     setConversations(nextConversations);
     setWorkspaceEntries(nextWorkspaceEntries);
+    setRoutines(nextRoutines);
     setConversation(
       nextConversations.find((item) => item.id === preferredConversationId) ??
       nextConversations[0] ??
@@ -232,6 +278,7 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
     if (!activeAgentId) {
       setConversations([]);
       setConversation(null);
+      setRoutines([]);
       setWorkspaceEntries([]);
       setOpenFile(null);
       setFileDraft('');
@@ -265,6 +312,17 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
         }
         return current;
       });
+      if (event.routine) {
+        setRoutines((current) => {
+          const index = current.findIndex((item) => item.id === event.routine?.id);
+          if (index < 0) {
+            return [event.routine as PersonalAgentRoutine, ...current];
+          }
+          const next = [...current];
+          next[index] = event.routine as PersonalAgentRoutine;
+          return next.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+        });
+      }
     });
     return unsubscribe;
   }, [activeAgentId]);
@@ -295,6 +353,8 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
 
   useEffect(() => {
     shouldStickToBottomRef.current = true;
+    setMessage(conversation?.draftMessage ?? '');
+    setPendingFiles([]);
     window.requestAnimationFrame(() => {
       const container = messagesScrollRef.current;
       if (container) {
@@ -302,6 +362,15 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
       }
     });
   }, [conversation?.id]);
+
+  useEffect(() => {
+    if (!scheduledWakeup) {
+      return undefined;
+    }
+    setNowMs(Date.now());
+    const timer = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [scheduledWakeup?.id]);
 
   useEffect(() => {
     const container = messagesScrollRef.current;
@@ -482,6 +551,164 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
     setPendingFiles((current) => current.filter((file) => file.sourcePath !== sourcePath));
   };
 
+  const handleComposerChange = (value: string) => {
+    setMessage(value);
+    if (conversation?.id && wakeupIsActive) {
+      void window.forger.personalAgentConversationDraftUpdate({
+        conversationId: conversation.id,
+        draftMessage: value,
+      }).catch(() => undefined);
+    }
+  };
+
+  const handleCancelWakeup = async () => {
+    if (!conversation || !wakeupIsActive || busy) return;
+    setBusyAction('cancelWakeup');
+    setError(null);
+    try {
+      await window.forger.personalAgentWakeupCancel({ conversationId: conversation.id });
+    } catch (cancelError) {
+      setError(cancelError instanceof Error ? cancelError.message : (t.locale === 'es' ? 'No se pudo cancelar el despertar.' : 'Could not cancel the wakeup.'));
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const resetRoutineForm = () => {
+    setEditingRoutine(null);
+    setRoutineName('');
+    setRoutinePrompt('');
+    setRoutineFrequencyType('hourly');
+    setRoutineTimeOfDay('09:00');
+    setRoutineWeeklyDay(1);
+    setRoutineMissedRunPolicy('within_window');
+    setRoutineMissedRunWindowMinutes('30');
+    setRoutineEnabled(true);
+    setRoutineAuthorizationText('');
+  };
+
+  const handleOpenRoutineCreate = () => {
+    resetRoutineForm();
+    setRoutineDialogOpen(true);
+  };
+
+  const handleOpenRoutineEdit = (routine: PersonalAgentRoutine) => {
+    setEditingRoutine(routine);
+    setRoutineName(routine.name);
+    setRoutinePrompt(routine.prompt);
+    setRoutineFrequencyType(routine.frequency.type);
+    setRoutineTimeOfDay('timeOfDay' in routine.frequency ? routine.frequency.timeOfDay ?? '09:00' : '09:00');
+    setRoutineWeeklyDay('weeklyDay' in routine.frequency ? routine.frequency.weeklyDay ?? 1 : 1);
+    setRoutineMissedRunPolicy(routine.missedRunPolicy);
+    setRoutineMissedRunWindowMinutes(String(routine.missedRunWindowMinutes ?? defaultRoutineMissedRunWindowMinutes(routine.frequency.type)));
+    setRoutineEnabled(routine.enabled);
+    setRoutineAuthorizationText('');
+    setRoutineDialogOpen(true);
+  };
+
+  const routineFrequencyFromForm = (): AutomationFrequency => {
+    if (routineFrequencyType === 'daily') {
+      return { type: 'daily', timeOfDay: normalizeTimeOfDay(routineTimeOfDay) };
+    }
+    if (routineFrequencyType === 'weekly') {
+      return {
+        type: 'weekly',
+        timeOfDay: normalizeTimeOfDay(routineTimeOfDay),
+        weeklyDay: Math.min(6, Math.max(0, Math.floor(Number(routineWeeklyDay)))),
+      };
+    }
+    return { type: 'hourly' };
+  };
+
+  const handleSaveRoutine = async () => {
+    if (!activeAgent || busy || !routineName.trim() || !routinePrompt.trim() || !routineAuthorizationText.trim()) return;
+    setBusyAction('routine');
+    setError(null);
+    try {
+      const input = {
+        name: routineName,
+        prompt: routinePrompt,
+        frequency: routineFrequencyFromForm(),
+        missedRunPolicy: routineMissedRunPolicy,
+        missedRunWindowMinutes: Number(routineMissedRunWindowMinutes) || undefined,
+        enabled: routineEnabled,
+        authorizationText: routineAuthorizationText,
+      };
+      const saved = editingRoutine
+        ? await window.forger.personalAgentRoutinesUpdate({ ...input, routineId: editingRoutine.id })
+        : await window.forger.personalAgentRoutinesCreate({ ...input, agentId: activeAgent.id });
+      setRoutines((current) => {
+        const without = current.filter((item) => item.id !== saved.id);
+        return [saved, ...without].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+      });
+      setRoutineDialogOpen(false);
+      resetRoutineForm();
+      await loadAgentDetail(activeAgent.id, conversation?.id);
+    } catch (routineError) {
+      setError(routineError instanceof Error ? routineError.message : (t.locale === 'es' ? 'No se pudo guardar la rutina.' : 'Could not save the routine.'));
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const handleToggleRoutine = async (routine: PersonalAgentRoutine) => {
+    if (busy) return;
+    const authorizationText = window.prompt(t.locale === 'es' ? 'Autorizacion para modificar esta rutina' : 'Authorization to change this routine');
+    if (!authorizationText?.trim()) return;
+    setBusyAction('routine');
+    setError(null);
+    try {
+      const updated = await window.forger.personalAgentRoutinesSetEnabled({
+        routineId: routine.id,
+        enabled: !routine.enabled,
+        authorizationText,
+      });
+      setRoutines((current) => current.map((item) => item.id === updated.id ? updated : item));
+    } catch (routineError) {
+      setError(routineError instanceof Error ? routineError.message : (t.locale === 'es' ? 'No se pudo modificar la rutina.' : 'Could not update the routine.'));
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const handleDeleteRoutine = async (routine: PersonalAgentRoutine) => {
+    if (busy || !window.confirm(t.locale === 'es' ? 'Eliminar esta rutina? El thread se conservara como conversacion normal.' : 'Delete this routine? The thread will remain as a normal conversation.')) return;
+    const authorizationText = window.prompt(t.locale === 'es' ? 'Autorizacion para eliminar esta rutina' : 'Authorization to delete this routine');
+    if (!authorizationText?.trim()) return;
+    setBusyAction('routine');
+    setError(null);
+    try {
+      await window.forger.personalAgentRoutinesDelete({ routineId: routine.id, authorizationText });
+      setRoutines((current) => current.filter((item) => item.id !== routine.id));
+      if (activeAgent) {
+        await loadAgentDetail(activeAgent.id, conversation?.id);
+      }
+    } catch (routineError) {
+      setError(routineError instanceof Error ? routineError.message : (t.locale === 'es' ? 'No se pudo eliminar la rutina.' : 'Could not delete the routine.'));
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const handleOpenRoutineThread = async (routine: PersonalAgentRoutine) => {
+    const local = conversations.find((item) => item.id === routine.conversationId);
+    if (local) {
+      setConversation(local);
+      setDetailTab('chat');
+      return;
+    }
+    try {
+      const loaded = await window.forger.personalAgentGetConversation({ conversationId: routine.conversationId });
+      if (loaded) {
+        setConversation(loaded);
+        setConversations((current) => upsertConversation(current, loaded));
+        setDetailTab('chat');
+      }
+    } catch (threadError) {
+      setError(threadError instanceof Error ? threadError.message : (t.locale === 'es' ? 'No se pudo abrir el thread de la rutina.' : 'Could not open the routine thread.'));
+    }
+  };
+
   const handleOpenPeerThread = async (threadId: string) => {
     try {
       const thread = await window.forger.personalAgentPeerThreadGet({ threadId });
@@ -492,7 +719,7 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
   };
 
   const handleSendMessage = async () => {
-    if (!activeAgent || !conversation || conversationReadOnly || (!message.trim() && pendingFiles.length === 0) || busy || runIsActive) return;
+    if (!activeAgent || !conversation || conversationReadOnly || (!message.trim() && pendingFiles.length === 0) || busy || runIsActive || wakeupIsActive) return;
     setBusyAction('send');
     setError(null);
     try {
@@ -727,6 +954,12 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
   const renderMessage = (item: PersonalAgentMessage, options: RenderPersonalAgentMessageOptions = {}) => {
     const isUser = item.role === 'user';
     const isIntermediate = item.kind === 'intermediate';
+    const isScheduledUser = isUser && item.source !== 'human';
+    const scheduledLabel = item.source === 'routine'
+      ? (t.locale === 'es' ? 'Rutina' : 'Routine')
+      : item.source === 'scheduled_wakeup'
+        ? (t.locale === 'es' ? 'Despertar' : 'Wakeup')
+        : null;
     const messageRun = !isUser && !isIntermediate && item.runId && activeRun?.id === item.runId
       ? activeRun
       : undefined;
@@ -759,9 +992,9 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
             px: isUser ? 1.6 : 0,
             py: isUser ? 1.2 : 0,
             borderRadius: isUser ? 1 : 0,
-            bgcolor: isUser ? 'primary.main' : 'transparent',
+            bgcolor: isScheduledUser ? 'action.selected' : isUser ? 'primary.main' : 'transparent',
             color: isUser
-              ? theme.palette.primary.contrastText
+              ? isScheduledUser ? theme.palette.text.primary : theme.palette.primary.contrastText
               : isIntermediate
                 ? theme.palette.text.secondary
                 : theme.palette.text.primary,
@@ -772,6 +1005,11 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
           {authorLabel ? (
             <Typography variant="caption" sx={{ display: 'block', mb: 0.5, opacity: 0.78 }}>
               {authorLabel}
+            </Typography>
+          ) : null}
+          {scheduledLabel ? (
+            <Typography variant="caption" sx={{ display: 'block', mb: 0.5, opacity: 0.72 }}>
+              {scheduledLabel}
             </Typography>
           ) : null}
           {messageRun?.activity || receiptProgressMessages.length > 0 ? (
@@ -885,6 +1123,41 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
     }
     return (
       <Paper variant="outlined" sx={{ m: 1.5, mt: 0, p: 1, borderRadius: 1 }}>
+        {scheduledWakeup ? (
+          <Stack
+            direction={{ xs: 'column', sm: 'row' }}
+            spacing={1}
+            alignItems={{ xs: 'stretch', sm: 'center' }}
+            sx={{
+              border: `1px solid ${theme.palette.divider}`,
+              borderRadius: 1,
+              mb: 1,
+              px: 1,
+              py: 0.75,
+              bgcolor: 'action.hover',
+            }}
+          >
+            <Box sx={{ flex: 1, minWidth: 0 }}>
+              <Typography variant="body2" fontWeight={700}>
+                {t.locale === 'es'
+                  ? `Este agente esta esperando ${formatCountdown(wakeupCountdownMs)} para volver a llamarse`
+                  : `This agent is waiting ${formatCountdown(wakeupCountdownMs)} before calling itself again`}
+              </Typography>
+              <Typography variant="caption" color="text.secondary" noWrap>
+                {scheduledWakeup.prompt}
+              </Typography>
+            </Box>
+            <Button
+              size="small"
+              color="inherit"
+              startIcon={<CloseRounded />}
+              disabled={busyAction === 'cancelWakeup'}
+              onClick={() => void handleCancelWakeup()}
+            >
+              {t.locale === 'es' ? 'Cancelar' : 'Cancel'}
+            </Button>
+          </Stack>
+        ) : null}
         {pendingFiles.length > 0 ? (
           <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap" sx={{ mb: 1 }}>
             {pendingFiles.map((file) => (
@@ -906,7 +1179,7 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
           value={message}
           disabled={!conversation || Boolean(runIsActive)}
           placeholder={t.agents.messagePlaceholder}
-          onChange={(event) => setMessage(event.target.value)}
+          onChange={(event) => handleComposerChange(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === 'Enter' && !event.shiftKey) {
               event.preventDefault();
@@ -918,16 +1191,16 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
         <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mt: 0.75 }}>
           <Tooltip title={t.sections.chat.attachFiles}>
             <span>
-              <IconButton size="small" disabled={busy || Boolean(runIsActive)} onClick={() => void handlePickFiles()}>
+              <IconButton size="small" disabled={busy || Boolean(runIsActive) || wakeupIsActive} onClick={() => void handlePickFiles()}>
                 <AttachFileRounded fontSize="small" />
               </IconButton>
             </span>
           </Tooltip>
-          <Tooltip title={t.agents.send}>
+          <Tooltip title={wakeupIsActive ? (t.locale === 'es' ? 'Este agente esta esperando para volver a llamarse.' : 'This agent is waiting before calling itself again.') : t.agents.send}>
             <span>
               <IconButton
                 color="primary"
-                disabled={!conversation || (!message.trim() && pendingFiles.length === 0) || busy || Boolean(runIsActive)}
+                disabled={!conversation || (!message.trim() && pendingFiles.length === 0) || busy || Boolean(runIsActive) || wakeupIsActive}
                 onClick={() => void handleSendMessage()}
               >
                 <SendRounded />
@@ -995,9 +1268,10 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
           </Tooltip>
         </Stack>
 
-        <Tabs value={detailTab} onChange={(_event, value: 'chat' | 'workspace' | 'settings') => setDetailTab(value)}>
+        <Tabs value={detailTab} onChange={(_event, value: AgentDetailTab) => setDetailTab(value)}>
           <Tab value="chat" label={t.agents.chatTitle} />
           <Tab value="workspace" label={t.agents.workspaceTab} />
+          <Tab value="routines" label={t.locale === 'es' ? 'Rutinas' : 'Routines'} />
           <Tab value="settings" label={t.locale === 'es' ? 'Configuracion' : 'Settings'} />
         </Tabs>
 
@@ -1016,6 +1290,17 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
               </Paper>
               {renderFilePanel()}
             </Stack>
+          ) : detailTab === 'routines' ? (
+            <AgentRoutinesPanel
+              t={t}
+              routines={routines}
+              busy={busy}
+              onCreate={handleOpenRoutineCreate}
+              onOpenThread={(routine) => void handleOpenRoutineThread(routine)}
+              onToggle={(routine) => void handleToggleRoutine(routine)}
+              onEdit={handleOpenRoutineEdit}
+              onDelete={(routine) => void handleDeleteRoutine(routine)}
+            />
           ) : detailTab === 'settings' ? (
             <Paper variant="outlined" sx={{ height: '100%', minHeight: 0, overflow: 'auto', p: 2, borderRadius: 1 }}>
               <Stack spacing={2}>
@@ -1063,6 +1348,26 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
                 <Typography variant="subtitle2" noWrap>{conversation?.title ?? t.agents.chatTitle}</Typography>
               </Box>
               {runIsActive || busyAction === 'wake' || busyAction === 'start' || busyAction === 'send' ? <CircularProgress size={18} /> : null}
+              {conversation && activeAgent && onNotifyForger ? (
+                <Tooltip title={t.sections.chat.notifyForgerTooltip}>
+                  <span>
+                    <IconButton
+                      size="small"
+                      aria-label={t.sections.chat.notifyForger}
+                      onClick={() => onNotifyForger({ agent: activeAgent, conversation, run: activeRun ?? conversation.activeRun })}
+                      sx={{
+                        width: 32,
+                        height: 32,
+                        border: `1px solid ${theme.palette.divider}`,
+                        borderRadius: 1,
+                        flexShrink: 0,
+                      }}
+                    >
+                      <BugReportRounded fontSize="small" />
+                    </IconButton>
+                  </span>
+                </Tooltip>
+              ) : null}
               {!isBlankAgent && !wakeFlowInProgress && busyAction !== 'wake' ? (
                 <Tooltip title={!intelligenceProviderConfigured ? t.agents.llmRequired : ''}>
                   <span>
@@ -1210,6 +1515,33 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
         </DialogActions>
       </Dialog>
 
+      <AgentRoutineDialog
+        t={t}
+        open={routineDialogOpen}
+        editingRoutine={editingRoutine}
+        busy={busy}
+        name={routineName}
+        prompt={routinePrompt}
+        frequencyType={routineFrequencyType}
+        timeOfDay={routineTimeOfDay}
+        weeklyDay={routineWeeklyDay}
+        missedRunPolicy={routineMissedRunPolicy}
+        missedRunWindowMinutes={routineMissedRunWindowMinutes}
+        enabled={routineEnabled}
+        authorizationText={routineAuthorizationText}
+        onClose={() => setRoutineDialogOpen(false)}
+        onSave={() => void handleSaveRoutine()}
+        onNameChange={setRoutineName}
+        onPromptChange={setRoutinePrompt}
+        onFrequencyTypeChange={setRoutineFrequencyType}
+        onTimeOfDayChange={setRoutineTimeOfDay}
+        onWeeklyDayChange={setRoutineWeeklyDay}
+        onMissedRunPolicyChange={setRoutineMissedRunPolicy}
+        onMissedRunWindowMinutesChange={setRoutineMissedRunWindowMinutes}
+        onEnabledChange={setRoutineEnabled}
+        onAuthorizationTextChange={setRoutineAuthorizationText}
+      />
+
       <Dialog open={Boolean(openPeerThread)} onClose={() => setOpenPeerThread(null)} fullWidth maxWidth="md">
         <DialogTitle>
           {openPeerThread
@@ -1232,3 +1564,10 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
     </>
   );
 }
+
+const formatCountdown = (milliseconds: number): string => {
+  const totalSeconds = Math.max(0, Math.ceil(milliseconds / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+};

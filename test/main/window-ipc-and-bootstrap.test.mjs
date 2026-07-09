@@ -24,6 +24,12 @@ const withPlatform = async (platform, callback) => {
   }
 };
 
+const createShellMock = (overrides = {}) => ({
+  openExternal: async () => undefined,
+  openPath: async () => '',
+  ...overrides,
+});
+
 const createWindowDouble = (overrides = {}) => {
   const events = new Map();
   const sends = [];
@@ -179,8 +185,10 @@ test('window bootstrap creates the main BrowserWindow with secure renderer defau
   const electronBrowserWindow = class BrowserWindowDouble {
     constructor(options) {
       this.options = options;
+      this.currentUrl = '';
       this.webContents = {
         events: new Map(),
+        getURL: () => this.currentUrl,
         isLoading: () => false,
         on: (event, listener) => {
           this.webContents.events.set(event, listener);
@@ -189,12 +197,20 @@ test('window bootstrap creates the main BrowserWindow with secure renderer defau
           this.webContents.events.set(event, listener);
         },
         send: () => {},
+        setWindowOpenHandler: (handler) => {
+          this.webContents.openHandler = handler;
+        },
       };
       constructedWindows.push(this);
+    }
+    async loadURL(url) {
+      this.currentUrl = url;
     }
   };
   const ipcRecorder = createIpcMainRecorder();
   const calls = [];
+  const externalUrls = [];
+  const openedPaths = [];
   let mainWindow = null;
 
   const { IPC_CHANNELS } = await import('../../dist-electron/shared/ipc.js');
@@ -219,6 +235,7 @@ test('window bootstrap creates the main BrowserWindow with secure renderer defau
     ipcMain: ipcRecorder.ipcMain,
     isDev: false,
     loadDesktopWindow: async (window) => {
+      window.currentUrl = 'http://127.0.0.1:5173/';
       calls.push(['load', window]);
     },
     path: { join: (...parts) => parts.join('/') },
@@ -226,6 +243,13 @@ test('window bootstrap creates the main BrowserWindow with secure renderer defau
     registerMainIpcHandlers: (deps) => calls.push(['main-ipc', deps]),
     registerWindowIpcHandlers: (deps) => calls.push(['window-ipc', deps]),
     registerWindowStateEvents: (window) => calls.push(['window-events', window]),
+    shell: createShellMock({
+      openExternal: async (url) => externalUrls.push(url),
+      openPath: async (targetPath) => {
+        openedPaths.push(targetPath);
+        return '';
+      },
+    }),
     state: { mainWindow: null, pendingDeepLink: null },
     useCustomWindowFrame: true,
   });
@@ -235,6 +259,20 @@ test('window bootstrap creates the main BrowserWindow with secure renderer defau
   controller.registerIpcHandlers();
   calls.find((call) => call[0] === 'window-ipc')[1].quitApp();
   mainWindow.webContents.events.get('render-process-gone')({}, { reason: 'crashed' });
+  const externalNavigation = [];
+  mainWindow.webContents.events.get('will-navigate')(
+    { preventDefault: () => externalNavigation.push('prevented') },
+    'https://example.com/docs',
+  );
+  const internalNavigation = [];
+  mainWindow.webContents.events.get('will-navigate')(
+    { preventDefault: () => internalNavigation.push('prevented') },
+    'http://127.0.0.1:5173/settings',
+  );
+  assert.deepEqual(mainWindow.webContents.openHandler({ url: 'https://example.com/popup' }), { action: 'deny' });
+  assert.deepEqual(mainWindow.webContents.openHandler({ url: 'file:///tmp/report.txt' }), { action: 'deny' });
+  assert.deepEqual(mainWindow.webContents.openHandler({ url: 'javascript:alert(1)' }), { action: 'deny' });
+  assert.deepEqual(mainWindow.webContents.openHandler({ url: 'http://127.0.0.1:5173/help' }), { action: 'deny' });
 
   assert.equal(constructedWindows.length, 1);
   assert.equal(constructedWindows[0].options.frame, false);
@@ -264,6 +302,11 @@ test('window bootstrap creates the main BrowserWindow with secure renderer defau
   ]);
   assert.equal(app.quitCalls, 1);
   assert.equal(app.protocolRegistrations.length, 1);
+  assert.deepEqual(externalNavigation, ['prevented']);
+  assert.deepEqual(internalNavigation, []);
+  assert.deepEqual(externalUrls, ['https://example.com/docs', 'https://example.com/popup']);
+  assert.deepEqual(openedPaths, ['/tmp/report.txt']);
+  assert.equal(mainWindow.currentUrl, 'http://127.0.0.1:5173/help');
 });
 
 test('window bootstrap keeps native frames portable and ignores empty pending deep-link flushes', async () => {
@@ -273,13 +316,21 @@ test('window bootstrap keeps native frames portable and ignores empty pending de
     const electronBrowserWindow = class BrowserWindowDouble {
       constructor(options) {
         this.options = options;
+        this.currentUrl = 'http://127.0.0.1:5173/';
         this.webContents = {
+          getURL: () => this.currentUrl,
           isLoading: () => false,
           on: () => {},
           once: () => {},
           send: () => {},
+          setWindowOpenHandler: (handler) => {
+            this.webContents.openHandler = handler;
+          },
         };
         constructedWindows.push(this);
+      }
+      async loadURL(url) {
+        this.currentUrl = url;
       }
     };
     const state = { mainWindow: null, pendingDeepLink: null };
@@ -311,6 +362,7 @@ test('window bootstrap keeps native frames portable and ignores empty pending de
       registerMainIpcHandlers: () => {},
       registerWindowIpcHandlers: () => {},
       registerWindowStateEvents: () => {},
+      shell: createShellMock(),
       state,
       useCustomWindowFrame: false,
     });
@@ -370,6 +422,7 @@ test('window bootstrap defers deep-links while loading and flushes them after lo
     registerMainIpcHandlers: () => {},
     registerWindowIpcHandlers: () => {},
     registerWindowStateEvents: () => {},
+    shell: createShellMock(),
     state,
     useCustomWindowFrame: false,
   });
@@ -431,6 +484,7 @@ test('window bootstrap handles single-instance, open-url, and pending deep-link 
     registerMainIpcHandlers: () => {},
     registerWindowIpcHandlers: () => {},
     registerWindowStateEvents: () => {},
+    shell: createShellMock(),
     state,
     useCustomWindowFrame: false,
   });
@@ -480,6 +534,7 @@ test('window bootstrap handles single-instance, open-url, and pending deep-link 
         registerMainIpcHandlers: () => {},
         registerWindowIpcHandlers: () => {},
         registerWindowStateEvents: () => {},
+        shell: createShellMock(),
         state: { mainWindow: null, pendingDeepLink: null },
         useCustomWindowFrame: false,
       });
@@ -517,6 +572,7 @@ test('window bootstrap captures cold-start deep-links from process argv', async 
           registerMainIpcHandlers: () => {},
           registerWindowIpcHandlers: () => {},
           registerWindowStateEvents: () => {},
+          shell: createShellMock(),
           state,
           useCustomWindowFrame: false,
         });
