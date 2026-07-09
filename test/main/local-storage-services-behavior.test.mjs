@@ -1322,6 +1322,9 @@ test('DesktopUpdater reports up-to-date, unsupported, checksum, download, and in
     const state = await updater.download();
     assert.equal(state.status, 'error');
     assert.equal(state.technicalCode, 'download_http_503');
+    assert.equal(state.diagnosticDetails.phase, 'download');
+    assert.equal(state.diagnosticDetails.reason, 'download_http_error');
+    assert.equal(state.diagnosticDetails.httpStatus, 503);
   });
 
   await withFetch(async () => new Response('{}', { status: 500 }), async () => {
@@ -1329,31 +1332,76 @@ test('DesktopUpdater reports up-to-date, unsupported, checksum, download, and in
     const state = await updater.check();
     assert.equal(state.status, 'error');
     assert.equal(state.technicalCode, 'metadata_http_500');
+    assert.equal(state.diagnosticDetails.phase, 'metadata_latest');
+    assert.equal(state.diagnosticDetails.reason, 'metadata_http_error');
+    assert.equal(state.diagnosticDetails.httpStatus, 500);
+    assert.deepEqual(state.diagnosticDetails.endpoint, { host: 'example.invalid', path: '/latest.json' });
+    assert.equal(state.diagnosticDetails.metadataIndexFailure.reason, 'metadata_http_error');
   });
 
-	  const idleUpdater = new DesktopUpdater({ currentVersion: '0.1.0', metadataUrl: 'https://example.invalid/latest.json', userDataPath: root });
-	  assert.equal((await idleUpdater.install()).technicalCode, 'idle');
+  await withFetch(async (url) => {
+    const cause = String(url).endsWith('/index.json')
+      ? { code: 'ENOTFOUND', name: 'DNSFailure' }
+      : { code: 'ETIMEDOUT', name: 'TimeoutError' };
+    throw new Error('fetch failed', { cause });
+  }, async () => {
+    const updater = new DesktopUpdater({ currentVersion: '0.1.0', metadataUrl: 'https://example.invalid/latest.json', userDataPath: root });
+    const state = await updater.check();
+    assert.equal(state.status, 'error');
+    assert.equal(state.technicalCode, 'desktop_update_metadata_fetch_failed');
+    assert.equal(state.diagnosticDetails.phase, 'metadata_latest');
+    assert.equal(state.diagnosticDetails.reason, 'fetch_failed');
+    assert.equal(state.diagnosticDetails.errorCauseCode, 'ETIMEDOUT');
+    assert.deepEqual(state.diagnosticDetails.endpoint, { host: 'example.invalid', path: '/latest.json' });
+    assert.equal(state.diagnosticDetails.metadataIndexFailure.phase, 'metadata_index');
+    assert.equal(state.diagnosticDetails.metadataIndexFailure.reason, 'fetch_failed');
+    assert.equal(state.diagnosticDetails.metadataIndexFailure.errorCauseCode, 'ENOTFOUND');
+  });
 
-	  await withFetch(async (url) => {
-	    if (String(url).endsWith('/latest.json')) {
-	      return Response.json(metadataFor({ assets: [{ ...metadataFor().assets[0], sha256: undefined }] }));
-	    }
-	    return new Response('ready', { status: 200, headers: { 'content-length': '5' } });
-	  }, async () => {
-	    const updater = new DesktopUpdater({ currentVersion: '0.1.0', metadataUrl: 'https://example.invalid/latest.json', userDataPath: root });
-	    const ready = await updater.download();
-	    assert.equal(ready.status, 'ready');
-	    const originalOpenPath = require.cache[electronPath].exports.shell.openPath;
-	    require.cache[electronPath].exports.shell.openPath = async () => 'permission denied';
-	    try {
-	      const failed = await updater.install();
-	      assert.equal(failed.status, 'error');
-	      assert.equal(failed.technicalCode, 'permission denied');
-	    } finally {
-	      require.cache[electronPath].exports.shell.openPath = originalOpenPath;
-	    }
-	  });
-	});
+  await withFetch(async (url) => {
+    if (String(url).endsWith('/latest.json')) {
+      return Response.json(metadataFor({ assets: [{ ...metadataFor().assets[0], sha256: undefined }] }));
+    }
+    throw new Error('fetch failed', { cause: { code: 'ECONNRESET', name: 'SocketError' } });
+  }, async () => {
+    const updater = new DesktopUpdater({ currentVersion: '0.1.0', metadataUrl: 'https://example.invalid/latest.json', userDataPath: root });
+    await updater.check();
+    const state = await updater.download();
+    assert.equal(state.status, 'error');
+    assert.equal(state.technicalCode, 'desktop_update_download_fetch_failed');
+    assert.equal(state.diagnosticDetails.phase, 'download');
+    assert.equal(state.diagnosticDetails.reason, 'fetch_failed');
+    assert.equal(state.diagnosticDetails.errorCauseCode, 'ECONNRESET');
+    assert.equal(state.diagnosticDetails.assetPlatform, process.platform);
+    assert.equal(state.diagnosticDetails.assetArch, process.arch);
+  });
+
+  const idleUpdater = new DesktopUpdater({ currentVersion: '0.1.0', metadataUrl: 'https://example.invalid/latest.json', userDataPath: root });
+  assert.equal((await idleUpdater.install()).technicalCode, 'idle');
+
+  await withFetch(async (url) => {
+    if (String(url).endsWith('/latest.json')) {
+      return Response.json(metadataFor({ assets: [{ ...metadataFor().assets[0], sha256: undefined }] }));
+    }
+    return new Response('ready', { status: 200, headers: { 'content-length': '5' } });
+  }, async () => {
+    const updater = new DesktopUpdater({ currentVersion: '0.1.0', metadataUrl: 'https://example.invalid/latest.json', userDataPath: root });
+    const ready = await updater.download();
+    assert.equal(ready.status, 'ready');
+    const originalOpenPath = require.cache[electronPath].exports.shell.openPath;
+    require.cache[electronPath].exports.shell.openPath = async () => 'permission denied';
+    try {
+      const failed = await updater.install();
+      assert.equal(failed.status, 'error');
+      assert.equal(failed.technicalCode, 'desktop_update_install_open_failed');
+      assert.equal(failed.diagnosticDetails.phase, 'install');
+      assert.equal(failed.diagnosticDetails.reason, 'unstable_error_message');
+      assert.equal(failed.diagnosticDetails.filename, path.basename(ready.downloadedPath));
+    } finally {
+      require.cache[electronPath].exports.shell.openPath = originalOpenPath;
+    }
+  });
+});
 
 test('DesktopUpdater rejects malformed metadata and supports arrayBuffer downloads without content length', async (t) => {
   const root = await tmpRoot('desktop-updater-malformed');

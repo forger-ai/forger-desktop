@@ -8,9 +8,11 @@ import type {
   ConnectionSessionGrant,
   CreateLocalAppInput,
   SetAppToolGrantInput,
+  SocialUserAppVisibility,
 } from '../shared/types';
 import { getSharedCopy } from '../shared/i18n';
 import { CONNECTION_ACTION_PREFIXES, connectionTypeForActionId } from '../shared/connection-catalog';
+import { APP_CATEGORIES } from '../shared/types/catalog';
 import type { AgentMcpSession, MemoryAccessInput, ToolApprovalResult } from './forger-mcp-server';
 
 export const isMemoryTool = (toolId: AgentToolId): boolean => toolId.startsWith('memory_');
@@ -106,6 +108,97 @@ const APP_SCOPED_TOOLS = new Set<AgentToolId>([
 export const isAppScopedTool = (toolId: AgentToolId): boolean => APP_SCOPED_TOOLS.has(toolId);
 
 export const cleanString = (value: unknown): string => typeof value === 'string' ? value.trim() : '';
+
+export interface PublishedAppInfoUpdateInput {
+  userAppId?: number;
+  appId?: string;
+  visibility?: Exclude<SocialUserAppVisibility, 'restricted'>;
+  name?: string;
+  shortDescription?: string;
+  description?: string;
+  longDescription?: string;
+  category?: string;
+}
+
+const hasOwn = (value: object, key: string): boolean => Object.prototype.hasOwnProperty.call(value, key);
+
+const parsePositiveInteger = (value: unknown): number | undefined => {
+  const numeric = typeof value === 'number'
+    ? value
+    : typeof value === 'string' && value.trim()
+      ? Number(value.trim())
+      : Number.NaN;
+  return Number.isInteger(numeric) && numeric > 0 ? numeric : undefined;
+};
+
+export const parsePublishedAppInfoUpdateInput = (
+  args: Record<string, unknown>,
+): PublishedAppInfoUpdateInput | null => {
+  const userAppId = parsePositiveInteger(args.userAppId);
+  const appId = cleanString(args.appId);
+  if (!userAppId && !appId) {
+    return null;
+  }
+
+  const input: PublishedAppInfoUpdateInput = {
+    ...(userAppId ? { userAppId } : {}),
+    ...(appId ? { appId } : {}),
+  };
+  let hasUpdate = false;
+
+  if (hasOwn(args, 'name')) {
+    if (typeof args.name !== 'string') {
+      return null;
+    }
+    const name = cleanString(args.name);
+    if (!name) {
+      return null;
+    }
+    input.name = name;
+    hasUpdate = true;
+  }
+  if (hasOwn(args, 'shortDescription')) {
+    if (typeof args.shortDescription !== 'string') {
+      return null;
+    }
+    input.shortDescription = cleanString(args.shortDescription);
+    hasUpdate = true;
+  }
+  if (hasOwn(args, 'description')) {
+    if (typeof args.description !== 'string') {
+      return null;
+    }
+    input.description = cleanString(args.description);
+    hasUpdate = true;
+  }
+  if (hasOwn(args, 'longDescription')) {
+    if (typeof args.longDescription !== 'string') {
+      return null;
+    }
+    input.longDescription = cleanString(args.longDescription);
+    hasUpdate = true;
+  }
+  if (hasOwn(args, 'category')) {
+    if (typeof args.category !== 'string') {
+      return null;
+    }
+    const category = cleanString(args.category);
+    if (!APP_CATEGORIES.some((candidate) => candidate === category)) {
+      return null;
+    }
+    input.category = category;
+    hasUpdate = true;
+  }
+  if (hasOwn(args, 'visibility')) {
+    if (args.visibility !== 'public' && args.visibility !== 'friends' && args.visibility !== 'private') {
+      return null;
+    }
+    input.visibility = args.visibility;
+    hasUpdate = true;
+  }
+
+  return hasUpdate ? input : null;
+};
 
 export const parseAppToolGrantRequestInput = (
   args: Record<string, unknown>,

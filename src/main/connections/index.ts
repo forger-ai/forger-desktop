@@ -56,7 +56,13 @@ const setupKindByType: Record<string, ConnectionSetupKind> = {
 };
 
 const oauthByType: Record<string, ConnectionTypeDefinition['oauth']> = {
-  gmail: { callbackPath: '/oauth/gmail/callback', scopes: ['https://www.googleapis.com/auth/gmail.modify'] },
+  gmail: {
+    callbackPath: '/oauth/gmail/callback',
+    scopes: [
+      'https://www.googleapis.com/auth/gmail.modify',
+      'https://www.googleapis.com/auth/gmail.compose',
+    ],
+  },
   calendar: { callbackPath: '/oauth/calendar/callback', scopes: ['https://www.googleapis.com/auth/calendar'] },
   sheets: { callbackPath: '/oauth/sheets/callback', scopes: ['https://www.googleapis.com/auth/spreadsheets'] },
   drive: { callbackPath: '/oauth/drive/callback', scopes: ['https://www.googleapis.com/auth/drive.file'] },

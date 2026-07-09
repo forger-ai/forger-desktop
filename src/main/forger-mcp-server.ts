@@ -46,6 +46,7 @@ import type {
   WorkflowUpsertInput,
   PersonalAgentPeerGrant,
   PersonalAgentPeerThread,
+  SocialUserApp,
 } from '../shared/types';
 import type { PersonalAgentAskPeerInput, PersonalAgentAskPeerResult } from './personal-agents/agent-conversation-manager';
 import { buildFailureDiagnostic } from '../shared/error-diagnostics';
@@ -77,9 +78,11 @@ import {
   memoryErrorMessage,
   parseAppToolGrantRequestInput,
   parseCreateLocalAppToolInput,
+  parsePublishedAppInfoUpdateInput,
   parsePromptReviewKind,
   parsePromptRuntimeOverride,
   parseQuestionToolInput,
+  type PublishedAppInfoUpdateInput,
   readRequestBody,
   sendMcpJson,
   toConnectionCallInput,
@@ -142,6 +145,10 @@ interface ForgerMcpServerOptions {
   listInstalledApps: () => Array<AppSummary & { path?: string }>;
   checkUpdates: () => Promise<AppSummary[]>;
   createLocalApp: (input: CreateLocalAppInput, locale?: string) => Promise<CreateLocalAppResult>;
+  updatePublishedAppInfo?: (
+    input: PublishedAppInfoUpdateInput,
+    locale?: string,
+  ) => Promise<{ success: boolean; userMessage: string; app?: SocialUserApp; technicalCode?: string }>;
   addAppToPersonalAgent?: (input: { agentId: string; appId: string }) => Promise<{ success: boolean; appId: string; alreadyGranted: boolean; userMessage: string; technicalCode?: string }>;
   listAgentPeers?: (input: { agentId: string }) => Promise<{ success: boolean; peers: PersonalAgentPeerGrant[]; recentThreads?: PersonalAgentPeerThread[] }>;
   askAgent?: (input: PersonalAgentAskPeerInput) => Promise<PersonalAgentAskPeerResult>;
@@ -899,6 +906,28 @@ export class ForgerMcpServer {
     if (toolId === 'forger_check_updates') {
       const updates = await this.options.checkUpdates();
       const result = { success: true, updates };
+      await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
+      return withToolAuthorization(result, approval);
+    }
+
+    if (toolId === 'forger_update_published_app_info') {
+      const input = parsePublishedAppInfoUpdateInput(args);
+      if (!input) {
+        const result = {
+          success: false,
+          userMessage: 'Indica la app publicada y al menos un campo de informacion para actualizar.',
+          technicalCode: 'published_app_info_input_invalid',
+        };
+        await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
+        return withToolAuthorization(result, approval);
+      }
+      const result = this.options.updatePublishedAppInfo
+        ? await this.options.updatePublishedAppInfo(input, session.locale)
+        : {
+            success: false,
+            userMessage: 'No pudimos actualizar la informacion publicada de esta app.',
+            technicalCode: 'published_app_info_update_unavailable',
+          };
       await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
       return withToolAuthorization(result, approval);
     }

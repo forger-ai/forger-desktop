@@ -13,10 +13,21 @@ const {
 } = require('../../dist-electron/main/connections/modules/gmail/mime.js');
 const {
   GmailApiError,
+  deleteDraft,
+  getDraft,
+  getProfile,
+  listChanges,
+  listDrafts,
+  listLabels,
+  listThreads,
+  modifyThread,
+  moveThread,
   readAttachment,
   readMessage,
   readThread,
+  saveDraft,
   searchMessages,
+  sendDraft,
   sendMessage,
 } = require('../../dist-electron/main/connections/modules/gmail/client.js');
 const {
@@ -364,6 +375,9 @@ test('Gmail API client decodes messages, attachments, sends raw payloads, and ma
       id: 'm-1',
       threadId: 't-1',
       snippet: 'snippet',
+      unread: false,
+      starred: false,
+      hasAttachments: false,
     }]);
     const message = await readMessage(context, 'm-2');
     assert.equal(message.headers.subject, 'Hello');
@@ -436,7 +450,9 @@ test('Gmail API client normalizes malformed Gmail payload branches', async () =>
     assert.deepEqual(await searchMessages(context, 'sparse', 3), [{
       id: 'm-sparse',
       threadId: 't-sparse',
-      snippet: undefined,
+      unread: false,
+      starred: false,
+      hasAttachments: false,
     }]);
     const message = await readMessage(context, 'm-sparse');
     assert.equal(message.id, '');
@@ -452,6 +468,255 @@ test('Gmail API client normalizes malformed Gmail payload branches', async () =>
     }]);
     assert.deepEqual(await readThread(context, 't-sparse'), { id: '123', messages: [message] });
     assert.deepEqual(await sendMessage(context, 'raw-message'), { id: '', threadId: undefined });
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test('Gmail API client supports mailbox metadata, sync, sanitized HTML, mutations, and drafts', async () => {
+  const calls = [];
+  const previousFetch = globalThis.fetch;
+  const fullThread = {
+    id: 'thread-1',
+    historyId: 'hist-thread',
+    messages: [{
+      id: 'm-full',
+      threadId: 'thread-1',
+      labelIds: ['INBOX'],
+      payload: {
+        headers: [{ name: 'Subject', value: 'Thread body' }],
+        parts: [{ mimeType: 'text/plain', body: { data: toBase64Url('Thread body text') } }],
+      },
+    }],
+  };
+  const draftMessage = {
+    id: 'draft-message-1',
+    threadId: 'thread-draft',
+    payload: {
+      headers: [{ name: 'Subject', value: 'Draft' }],
+      parts: [{ mimeType: 'text/plain', body: { data: toBase64Url('Draft body') } }],
+    },
+  };
+  globalThis.fetch = async (url, init = {}) => {
+    calls.push({ url: String(url), init });
+    const parsed = new URL(url);
+    if (parsed.pathname.endsWith('/profile')) {
+      return new Response(JSON.stringify({
+        emailAddress: 'person@example.com',
+        messagesTotal: 12,
+        threadsTotal: 5,
+        historyId: 'hist-100',
+      }), { status: 200 });
+    }
+    if (parsed.pathname.endsWith('/labels')) {
+      return new Response(JSON.stringify({
+        labels: [
+          { id: 'INBOX', name: 'Inbox', type: 'system', messagesTotal: 10, messagesUnread: 2 },
+          { id: null, name: 'ignored' },
+        ],
+      }), { status: 200 });
+    }
+    if (parsed.pathname.endsWith('/threads') && parsed.searchParams.get('q') === 'label:inbox') {
+      assert.equal(parsed.searchParams.get('labelIds'), 'INBOX');
+      assert.equal(parsed.searchParams.get('maxResults'), '2');
+      return new Response(JSON.stringify({
+        threads: [{ id: 'thread-1' }],
+        nextPageToken: 'thread-page-2',
+        resultSizeEstimate: 1,
+      }), { status: 200 });
+    }
+    if (parsed.pathname.endsWith('/threads/thread-1') && parsed.searchParams.get('format') === 'metadata') {
+      return new Response(JSON.stringify({
+        id: 'thread-1',
+        historyId: 'hist-thread',
+        snippet: 'latest snippet',
+        messages: [{
+          id: 'm-last',
+          threadId: 'thread-1',
+          snippet: 'message snippet',
+          labelIds: ['INBOX', 'UNREAD', 'STARRED'],
+          payload: {
+            headers: [
+              { name: 'Subject', value: 'Hello thread' },
+              { name: 'From', value: 'Sender <sender@example.com>' },
+              { name: 'To', value: 'Reader <reader@example.com>' },
+              { name: 'Date', value: 'Wed, 1 Jul 2026 10:00:00 +0000' },
+            ],
+            parts: [
+              { filename: 'invoice.pdf', mimeType: 'application/pdf', body: { attachmentId: 'att-1', size: 42 } },
+            ],
+          },
+        }],
+      }), { status: 200 });
+    }
+    if (parsed.pathname.endsWith('/messages/m-html') && parsed.searchParams.get('format') === 'full') {
+      return new Response(JSON.stringify({
+        id: 'm-html',
+        threadId: 'thread-html',
+        labelIds: ['UNREAD'],
+        payload: {
+          headers: [{ name: 'Subject', value: 'HTML' }],
+          parts: [
+            { mimeType: 'text/plain', body: { data: toBase64Url('plain body') } },
+            {
+              mimeType: 'text/html',
+              body: {
+                data: toBase64Url('<div onclick="bad()" style="color:red"><script>alert(1)</script><form><input></form><a href="javascript:bad()">bad</a><img src="https://tracker.example/pixel.png" srcset="https://tracker.example/2x.png 2x"><p>Safe</p></div>'),
+              },
+            },
+          ],
+        },
+      }), { status: 200 });
+    }
+    if (parsed.pathname.endsWith('/history') && parsed.searchParams.get('startHistoryId') === 'hist-100') {
+      return new Response(JSON.stringify({
+        historyId: 'hist-101',
+        nextPageToken: 'history-page-2',
+        history: [{
+          messagesAdded: [{ message: { id: 'm-added', threadId: 'thread-added', labelIds: ['INBOX'] } }],
+          labelsAdded: [{ message: { id: 'm-label-added', threadId: 'thread-added', labelIds: ['STARRED'] } }],
+          labelsRemoved: [{ message: { id: 'm-label-removed', threadId: 'thread-removed', labelIds: ['UNREAD'] } }],
+        }],
+      }), { status: 200 });
+    }
+    if (parsed.pathname.endsWith('/history') && parsed.searchParams.get('startHistoryId') === 'expired') {
+      return new Response(JSON.stringify({ error: { message: 'History expired' } }), { status: 404 });
+    }
+    if (parsed.pathname.endsWith('/threads/thread-1/modify')) {
+      assert.equal(init.method, 'POST');
+      assert.deepEqual(JSON.parse(init.body), {
+        addLabelIds: ['STARRED'],
+        removeLabelIds: ['UNREAD'],
+      });
+      return new Response(JSON.stringify({ id: 'thread-1' }), { status: 200 });
+    }
+    if (parsed.pathname.endsWith('/threads/thread-1/trash') || parsed.pathname.endsWith('/threads/thread-1/untrash')) {
+      assert.equal(init.method, 'POST');
+      return new Response(JSON.stringify({ id: 'thread-1' }), { status: 200 });
+    }
+    if (parsed.pathname.endsWith('/threads/thread-1') && parsed.searchParams.get('format') === 'full') {
+      return new Response(JSON.stringify(fullThread), { status: 200 });
+    }
+    if (parsed.pathname.endsWith('/drafts') && parsed.searchParams.get('maxResults') === '1') {
+      return new Response(JSON.stringify({
+        drafts: [{ id: 'draft-1' }],
+        nextPageToken: 'draft-page-2',
+        resultSizeEstimate: 1,
+      }), { status: 200 });
+    }
+    if (parsed.pathname.endsWith('/drafts/draft-1') && parsed.searchParams.get('format') === 'full') {
+      return new Response(JSON.stringify({ id: 'draft-1', message: draftMessage }), { status: 200 });
+    }
+    if (parsed.pathname.endsWith('/drafts') && init.method === 'POST') {
+      assert.equal(JSON.parse(init.body).message.raw, 'raw-draft');
+      return new Response(JSON.stringify({ id: 'draft-new', message: draftMessage }), { status: 200 });
+    }
+    if (parsed.pathname.endsWith('/drafts/draft-1') && init.method === 'PUT') {
+      assert.equal(JSON.parse(init.body).message.threadId, 'thread-draft');
+      return new Response(JSON.stringify({ id: 'draft-1', message: draftMessage }), { status: 200 });
+    }
+    if (parsed.pathname.endsWith('/drafts/draft-1') && init.method === 'DELETE') {
+      return new Response(JSON.stringify({}), { status: 200 });
+    }
+    if (parsed.pathname.endsWith('/drafts/send')) {
+      assert.deepEqual(JSON.parse(init.body), { id: 'draft-1' });
+      return new Response(JSON.stringify({ id: 'sent-draft', threadId: 'thread-draft' }), { status: 200 });
+    }
+    if (parsed.pathname.endsWith('/messages/scope')) {
+      return new Response(JSON.stringify({ error: { message: 'Request had insufficient authentication scopes.' } }), { status: 403 });
+    }
+    return new Response(JSON.stringify({ error: { message: `unexpected ${parsed.pathname}` } }), { status: 500 });
+  };
+
+  try {
+    const context = createGmailContext();
+    assert.deepEqual(await getProfile(context), {
+      emailAddress: 'person@example.com',
+      messagesTotal: 12,
+      threadsTotal: 5,
+      historyId: 'hist-100',
+    });
+    assert.deepEqual(await listLabels(context), [{
+      id: 'INBOX',
+      name: 'Inbox',
+      type: 'system',
+      messagesTotal: 10,
+      messagesUnread: 2,
+      threadsTotal: undefined,
+      threadsUnread: undefined,
+    }]);
+    assert.deepEqual(await listThreads(context, {
+      query: 'label:inbox',
+      labelIds: ['INBOX'],
+      maxResults: 2,
+    }), {
+      threads: [{
+        threadId: 'thread-1',
+        latestMessageId: 'm-last',
+        historyId: 'hist-thread',
+        subject: 'Hello thread',
+        from: 'Sender <sender@example.com>',
+        participants: ['Sender <sender@example.com>', 'Reader <reader@example.com>'],
+        snippet: 'latest snippet',
+        date: 'Wed, 1 Jul 2026 10:00:00 +0000',
+        labelIds: ['INBOX', 'UNREAD', 'STARRED'],
+        unread: true,
+        starred: true,
+        hasAttachments: true,
+      }],
+      nextPageToken: 'thread-page-2',
+      resultSizeEstimate: 1,
+    });
+    const htmlMessage = await readMessage(context, 'm-html');
+    assert.equal(htmlMessage.textBody, 'plain body');
+    assert.equal(htmlMessage.labelIds.includes('UNREAD'), true);
+    assert.match(htmlMessage.htmlBody, /<p>Safe<\/p>/);
+    assert.doesNotMatch(htmlMessage.htmlBody, /script|onclick|style=|form|input|javascript:/i);
+    assert.doesNotMatch(htmlMessage.htmlBody, /https:\/\/tracker\.example/i);
+    assert.deepEqual(await listChanges(context, { startHistoryId: 'hist-100', maxResults: 1000 }), {
+      historyId: 'hist-101',
+      nextPageToken: 'history-page-2',
+      changes: [
+        { messageId: 'm-added', threadId: 'thread-added', labelIds: ['INBOX'], type: 'message_added' },
+        { messageId: 'm-label-added', threadId: 'thread-added', labelIds: ['STARRED'], type: 'label_added' },
+        { messageId: 'm-label-removed', threadId: 'thread-removed', labelIds: ['UNREAD'], type: 'label_removed' },
+      ],
+    });
+    await assert.rejects(
+      () => listChanges(context, { startHistoryId: 'expired' }),
+      (error) => error instanceof GmailApiError && error.technicalCode === 'gmail_history_expired',
+    );
+    assert.equal((await modifyThread(context, {
+      threadId: 'thread-1',
+      addLabelIds: ['STARRED'],
+      removeLabelIds: ['UNREAD'],
+    })).id, 'thread-1');
+    assert.equal((await moveThread(context, { threadId: 'thread-1', destination: 'trash' })).id, 'thread-1');
+    assert.equal((await moveThread(context, { threadId: 'thread-1', destination: 'untrash' })).id, 'thread-1');
+    assert.deepEqual(await listDrafts(context, { maxResults: 1 }), {
+      drafts: [{ id: 'draft-1', message: await getDraft(context, { draftId: 'draft-1' }).then((draft) => draft.message) }],
+      nextPageToken: 'draft-page-2',
+      resultSizeEstimate: 1,
+    });
+    assert.equal((await saveDraft(context, {
+      to: ['reader@example.com'],
+      subject: 'Draft',
+      body: 'Draft body',
+    }, 'raw-draft')).id, 'draft-new');
+    assert.equal((await saveDraft(context, {
+      draftId: 'draft-1',
+      threadId: 'thread-draft',
+      to: ['reader@example.com'],
+      subject: 'Draft',
+      body: 'Draft body',
+    }, 'raw-draft')).id, 'draft-1');
+    assert.deepEqual(await deleteDraft(context, 'draft-1'), { id: 'draft-1', deleted: true });
+    assert.deepEqual(await sendDraft(context, { draftId: 'draft-1' }), { id: 'sent-draft', threadId: 'thread-draft' });
+    await assert.rejects(
+      () => readMessage(context, 'scope'),
+      (error) => error instanceof GmailApiError && error.technicalCode === 'gmail_scope_required',
+    );
+    assert.equal(calls.every((call) => call.init.headers.Authorization === 'Bearer access-token'), true);
   } finally {
     globalThis.fetch = previousFetch;
   }
@@ -606,7 +871,14 @@ test('Gmail official tool executes search, read, attachment, and send actions th
       input: { query: ' from:bank ', maxResults: 500 },
     }, context);
     assert.equal(search.success, true);
-    assert.deepEqual(search.data.messages, [{ id: 'm-1', threadId: 't-1', snippet: 'result' }]);
+    assert.deepEqual(search.data.messages, [{
+      id: 'm-1',
+      threadId: 't-1',
+      snippet: 'result',
+      unread: false,
+      starred: false,
+      hasAttachments: false,
+    }]);
 
     const read = await gmailToolModule.execute({
       toolId: 'gmail',

@@ -11,6 +11,7 @@ import type {
   AgentRunActivitySurface,
 } from '../../shared/types';
 import { sanitizeReportPayload } from '../../shared/report-sanitizer';
+import { isInternalProviderProgressText } from './progress-errors';
 
 type OutputStream = 'stdout' | 'stderr' | 'meta';
 
@@ -247,7 +248,7 @@ const parseCodexItems = (stream: OutputStream, text: string, now: string): Agent
     const entry = parseJsonRecord(line);
     if (!entry) {
       if (!looksLikeStructuredFragment(line)) {
-        items.push(stream === 'stderr' ? errorItem(line, now, index) : noteItem(line, now, index));
+        pushTextItem(items, stream, line, now, index);
       }
       continue;
     }
@@ -275,7 +276,7 @@ const parseCodexItems = (stream: OutputStream, text: string, now: string): Agent
     if (itemType === 'agent_message') {
       const textValue = stringValue(item.text);
       if (textValue) {
-        items.push(noteItem(textValue, now, index));
+        pushTextItem(items, 'stdout', textValue, now, index);
       }
       continue;
     }
@@ -298,7 +299,7 @@ const parseClaudeItems = (stream: OutputStream, text: string, now: string): Agen
     const entry = parseJsonRecord(line);
     if (!entry) {
       if (!looksLikeStructuredFragment(line)) {
-        items.push(stream === 'stderr' ? errorItem(line, now, index) : noteItem(line, now, index));
+        pushTextItem(items, stream, line, now, index);
       }
       continue;
     }
@@ -308,14 +309,14 @@ const parseClaudeItems = (stream: OutputStream, text: string, now: string): Agen
     }
     const directText = stringValue(entry.result) || stringValue(entry.text);
     if (directText) {
-      items.push(noteItem(directText, now, index));
+      pushTextItem(items, 'stdout', directText, now, index);
     }
     for (const content of claudeContentItems(entry)) {
       const kind = stringValue(content.type);
       if (kind === 'text') {
         const note = stringValue(content.text);
         if (note) {
-          items.push(noteItem(note, now, index));
+          pushTextItem(items, 'stdout', note, now, index);
         }
       } else if (kind === 'tool_use') {
         const name = stringValue(content.name) || 'tool_use';
@@ -346,7 +347,7 @@ const parseAntigravityItems = (stream: OutputStream, text: string, now: string):
     if (isAntigravityNoise(line)) {
       continue;
     }
-    items.push(noteItem(line, now, index));
+    pushTextItem(items, 'stdout', line, now, index);
   }
   return items;
 };
@@ -387,6 +388,19 @@ const errorItem = (text: string, now: string, index: number): AgentRunActivityIt
   status: 'failed',
   createdAt: now,
 });
+
+const pushTextItem = (
+  items: AgentRunActivityItem[],
+  stream: OutputStream,
+  text: string,
+  now: string,
+  index: number,
+): void => {
+  if (isInternalProviderProgressText(text)) {
+    return;
+  }
+  items.push(stream === 'stderr' ? errorItem(text, now, index) : noteItem(text, now, index));
+};
 
 const commandItem = (
   command: string,

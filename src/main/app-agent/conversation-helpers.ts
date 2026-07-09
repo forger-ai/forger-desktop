@@ -10,6 +10,7 @@ import type {
 } from '../../shared/types';
 import { getSharedCopy } from '../../shared/i18n';
 import { renderPromptFile } from '../prompt-builder';
+import { isInternalProviderProgressText } from '../chat/progress-errors';
 
 export interface InternalConversationShape extends AppCodexConversation {
   threadId?: string | null;
@@ -205,7 +206,13 @@ export const progressFromCodexOutput = (text: string, locale?: string): string |
       if (parsed.type === 'item.completed' && parsed.item && typeof parsed.item === 'object') {
         const item = parsed.item as Record<string, unknown>;
         if (item.type === 'agent_message' && typeof item.text === 'string') {
+          if (isInternalProviderProgressText(item.text)) {
+            return null;
+          }
           const compact = stripMarkdown(item.text).replace(/\s+/g, ' ').trim();
+          if (!compact || isInternalProviderProgressText(compact)) {
+            return null;
+          }
           return compact.length > 160 ? `${compact.slice(0, 157)}...` : compact;
         }
         if (String(item.type ?? '').includes('tool') || item.type === 'command_execution') {

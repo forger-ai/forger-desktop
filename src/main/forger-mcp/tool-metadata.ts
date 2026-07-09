@@ -4,6 +4,7 @@ import {
   LLM_PROVIDER_KEYS,
   LLM_PROVIDER_REGISTRY,
 } from '../../shared/agent-runtime-registry';
+import { APP_CATEGORIES } from '../../shared/types/catalog';
 
 export interface McpToolAnnotations {
   readOnlyHint: boolean;
@@ -150,6 +151,57 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
           description: 'ID local de la cuarentena activa. Si se omite, Forger usa el contexto del chat de revision.',
         },
       },
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'forger_update_published_app_info') {
+    return {
+      type: 'object',
+      properties: {
+        userAppId: {
+          type: 'number',
+          minimum: 1,
+          description: 'ID numerico de la app publicada en Social. En el catalogo aparece como socialUserAppId.',
+        },
+        appId: {
+          type: 'string',
+          description: 'ID local de una app instalada que ya esta asociada a una publicacion Social.',
+        },
+        name: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 120,
+          description: 'Nombre visible de la app publicada.',
+        },
+        shortDescription: {
+          type: 'string',
+          maxLength: 180,
+          description: 'Descripcion corta visible en tarjetas o listados.',
+        },
+        description: {
+          type: 'string',
+          description: 'Descripcion publica de la app.',
+        },
+        longDescription: {
+          type: 'string',
+          description: 'Descripcion larga publica de la app.',
+        },
+        category: {
+          type: 'string',
+          enum: [...APP_CATEGORIES],
+          description: 'Categoria publica de la app.',
+        },
+        visibility: {
+          type: 'string',
+          enum: ['public', 'friends', 'private'],
+          description: 'Visibilidad publica de la app en Social.',
+        },
+      },
+      anyOf: [
+        { required: ['userAppId'] },
+        { required: ['appId'] },
+      ],
       additionalProperties: false,
     };
   }
@@ -508,6 +560,8 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
 
   if (
     toolId === 'gmail.connection.status' ||
+    toolId === 'gmail.get_profile' ||
+    toolId === 'gmail.list_labels' ||
     toolId === 'whatsapp.connection.status' ||
     toolId === 'slack.connection.status' ||
     toolId === 'trello.connection.status'
@@ -528,8 +582,23 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
         connectionId: { type: 'string' },
         query: { type: 'string' },
         maxResults: { type: 'number' },
+        pageToken: { type: 'string' },
       },
       required: ['query'],
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'gmail.list_threads') {
+    return {
+      type: 'object',
+      properties: {
+        connectionId: { type: 'string' },
+        query: { type: 'string' },
+        labelIds: { type: 'array', items: { type: 'string' } },
+        maxResults: { type: 'number' },
+        pageToken: { type: 'string' },
+      },
       additionalProperties: false,
     };
   }
@@ -546,6 +615,52 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
     };
   }
 
+  if (toolId === 'gmail.list_changes') {
+    return {
+      type: 'object',
+      properties: {
+        connectionId: { type: 'string' },
+        startHistoryId: { type: 'string' },
+        maxResults: { type: 'number' },
+        pageToken: { type: 'string' },
+      },
+      required: ['startHistoryId'],
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'gmail.modify_thread') {
+    return {
+      type: 'object',
+      properties: {
+        connectionId: { type: 'string' },
+        threadId: { type: 'string' },
+        addLabelIds: { type: 'array', items: { type: 'string' } },
+        removeLabelIds: { type: 'array', items: { type: 'string' } },
+        markRead: { type: 'boolean' },
+        markUnread: { type: 'boolean' },
+        star: { type: 'boolean' },
+        unstar: { type: 'boolean' },
+        archive: { type: 'boolean' },
+      },
+      required: ['threadId'],
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'gmail.move_thread') {
+    return {
+      type: 'object',
+      properties: {
+        connectionId: { type: 'string' },
+        threadId: { type: 'string' },
+        destination: { type: 'string', enum: ['trash', 'untrash'] },
+      },
+      required: ['threadId', 'destination'],
+      additionalProperties: false,
+    };
+  }
+
   if (toolId === 'gmail.read_attachment') {
     return {
       type: 'object',
@@ -556,6 +671,62 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
         filename: { type: 'string' },
       },
       required: ['messageId'],
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'gmail.list_drafts') {
+    return {
+      type: 'object',
+      properties: {
+        connectionId: { type: 'string' },
+        maxResults: { type: 'number' },
+        pageToken: { type: 'string' },
+      },
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'gmail.get_draft' || toolId === 'gmail.delete_draft' || toolId === 'gmail.send_draft') {
+    return {
+      type: 'object',
+      properties: {
+        connectionId: { type: 'string' },
+        draftId: { type: 'string' },
+      },
+      required: ['draftId'],
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'gmail.save_draft') {
+    return {
+      type: 'object',
+      properties: {
+        connectionId: { type: 'string' },
+        draftId: { type: 'string' },
+        threadId: { type: 'string' },
+        to: { type: 'array', items: { type: 'string' } },
+        subject: { type: 'string' },
+        body: { type: 'string' },
+        bodyHtml: { type: 'string' },
+        cc: { type: 'array', items: { type: 'string' } },
+        bcc: { type: 'array', items: { type: 'string' } },
+        attachments: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              filePath: { type: 'string' },
+              filename: { type: 'string' },
+              mimeType: { type: 'string' },
+            },
+            required: ['filePath'],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ['to', 'subject'],
       additionalProperties: false,
     };
   }

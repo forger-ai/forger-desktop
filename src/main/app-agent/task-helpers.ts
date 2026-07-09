@@ -7,6 +7,7 @@ import type {
   AppPromptTemplateArgument,
 } from '../../shared/types';
 import { renderPromptFile } from '../prompt-builder';
+import { isInternalProviderProgressText } from '../chat/progress-errors';
 
 export interface PreparedFileArgument {
   argumentName: string;
@@ -334,11 +335,14 @@ const progressFromAgentMessage = (item: Record<string, unknown>): string | null 
   if (typeof item.text !== 'string') {
     return null;
   }
+  if (isInternalProviderProgressText(item.text)) {
+    return null;
+  }
   const firstSentence = stripMarkdown(item.text)
     .replace(/\s+/g, ' ')
     .split(/(?<=[.!?])\s+/)[0]
     .trim();
-  if (!firstSentence) {
+  if (!firstSentence || isInternalProviderProgressText(firstSentence)) {
     return null;
   }
   return firstSentence.length > 140 ? `${firstSentence.slice(0, 137)}...` : firstSentence;

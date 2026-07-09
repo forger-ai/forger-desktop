@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash, createHmac } from 'node:crypto';
 import { createRequire } from 'node:module';
 import test from 'node:test';
+import { WebSocket } from 'ws';
 
 const require = createRequire(import.meta.url);
 const { DesktopRuntimeBridge } = require('../../dist-electron/main/desktop-runtime-bridge.js');
@@ -32,6 +33,73 @@ const request = async (bridge, path, { method = 'GET', body } = {}) => {
   });
   const payload = await response.json().catch(() => null);
   return { response, payload };
+};
+
+const socketStates = new WeakMap();
+
+const attachSocketState = (socket) => {
+  const state = { queue: [], waiters: [] };
+  socketStates.set(socket, state);
+  socket.on('message', (data) => {
+    const message = JSON.parse(Buffer.from(data).toString('utf8'));
+    const waiter = state.waiters.shift();
+    if (waiter) {
+      waiter.resolve(message);
+      return;
+    }
+    state.queue.push(message);
+  });
+  socket.on('error', (error) => {
+    for (const waiter of state.waiters.splice(0)) {
+      waiter.reject(error);
+    }
+  });
+};
+
+const nextSocketMessage = (socket) => new Promise((resolve, reject) => {
+  const state = socketStates.get(socket);
+  if (!state) {
+    reject(new Error('websocket_state_missing'));
+    return;
+  }
+  const queued = state.queue.shift();
+  if (queued) {
+    resolve(queued);
+    return;
+  }
+  const timeout = setTimeout(() => {
+    const index = state.waiters.findIndex((waiter) => waiter.resolve === resolve);
+    if (index >= 0) {
+      state.waiters.splice(index, 1);
+    }
+    reject(new Error('websocket_message_timeout'));
+  }, 2000);
+  state.waiters.push({
+    resolve: (message) => {
+      clearTimeout(timeout);
+      resolve(message);
+    },
+    reject: (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    },
+  });
+});
+
+const connectRuntimeEvents = async (bridge) => {
+  const eventsPath = `/v1/apps/${APP_ID}/runtime-events`;
+  const socket = new WebSocket(`${bridge.url.replace('http:', 'ws:')}${eventsPath}`, {
+    headers: sign({ method: 'GET', path: eventsPath, body: '' }),
+  });
+  attachSocketState(socket);
+  await new Promise((resolve, reject) => {
+    socket.once('open', resolve);
+    socket.once('error', reject);
+    socket.once('unexpected-response', (_request, response) => {
+      reject(new Error(`websocket_unexpected_response_${response.statusCode}`));
+    });
+  });
+  return socket;
 };
 
 const createBridge = async (options = {}) => {
@@ -129,6 +197,108 @@ test('desktop runtime connection endpoints list, status, and delegate app-grante
     });
     assert.deepEqual(calls.map(([name]) => name), ['listConnectionsForApp', 'callFromApp', 'callFromApp']);
   } finally {
+    await harness.stop();
+  }
+});
+
+test('desktop runtime connection setup and grant request routes delegate safely and emit runtime events', async () => {
+  const calls = [];
+  const harness = await createBridge({
+    connections: {
+      listConnectionsForApp: async () => ({ types: [], instances: [], requirements: [] }),
+      callFromApp: async () => ({ success: true }),
+      configureFromApp: async (appId, input) => {
+        calls.push(['configureFromApp', appId, input]);
+        return {
+          success: true,
+          userMessage: 'configured',
+          instance: {
+            id: 'conn-setup',
+            type: input.type,
+            label: input.label ?? 'Gmail',
+            status: 'connected',
+            isDefault: true,
+            createdAt: '2026-07-05T00:00:00.000Z',
+            updatedAt: '2026-07-05T00:00:00.000Z',
+          },
+        };
+      },
+      requestGrantFromApp: async (appId, input) => {
+        calls.push(['requestGrantFromApp', appId, input]);
+        return {
+          success: true,
+          userMessage: 'granted',
+          requirement: {
+            declaration: {
+              type: input.type,
+              actions: ['gmail.search_messages'],
+              reason: input.reason ?? 'Use Gmail',
+              multiple: false,
+            },
+            required: false,
+            resolvedActions: [],
+            allActions: false,
+            granted: true,
+            hasStoredGrant: true,
+            configured: true,
+            instances: [],
+          },
+        };
+      },
+    },
+  });
+  const eventSocket = await connectRuntimeEvents(harness.bridge);
+  try {
+    await nextSocketMessage(eventSocket);
+    const setup = await request(
+      harness.bridge,
+      `/v1/apps/${APP_ID}/connections/gmail/setup`,
+      {
+        method: 'POST',
+        body: {
+          label: 'Personal Gmail',
+          connectionId: 'conn-existing',
+          secrets: { refreshToken: 'must-not-pass-through' },
+        },
+      },
+    );
+    assert.equal(setup.response.status, 200);
+    assert.equal(setup.payload.success, true);
+    const setupEvent = await nextSocketMessage(eventSocket);
+    assert.equal(setupEvent.type, 'desktop.connections.changed');
+    assert.deepEqual(setupEvent.payload, {
+      reason: 'setup',
+      type: 'gmail',
+      connectionId: 'conn-setup',
+    });
+
+    const grant = await request(
+      harness.bridge,
+      `/v1/apps/${APP_ID}/connections/gmail/grants/request`,
+      {
+        method: 'POST',
+        body: {
+          reason: 'Use Gmail from the app',
+          connectionIds: ['conn-setup'],
+        },
+      },
+    );
+    assert.equal(grant.response.status, 200);
+    assert.equal(grant.payload.success, true);
+    const grantEvent = await nextSocketMessage(eventSocket);
+    assert.equal(grantEvent.type, 'desktop.connections.changed');
+    assert.deepEqual(grantEvent.payload, {
+      reason: 'grant',
+      type: 'gmail',
+      connectionIds: ['conn-setup'],
+    });
+
+    assert.deepEqual(calls, [
+      ['configureFromApp', APP_ID, { type: 'gmail', label: 'Personal Gmail', connectionId: 'conn-existing' }],
+      ['requestGrantFromApp', APP_ID, { type: 'gmail', reason: 'Use Gmail from the app', connectionIds: ['conn-setup'] }],
+    ]);
+  } finally {
+    eventSocket.close();
     await harness.stop();
   }
 });

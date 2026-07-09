@@ -340,6 +340,66 @@ test('multi-account calls without connection id use default and fail when no def
   }
 });
 
+test('app connection setup is declaration-bound, OAuth-only, and ignores app secrets', async () => {
+  const manualModule = {
+    ...fakeConnectionModule,
+    definition: {
+      ...fakeConnectionModule.definition,
+      type: 'slack',
+      displayName: 'Slack',
+      setupKind: 'manual_secret',
+      statusActionId: 'slack.connection.status',
+      actions: [
+        { id: 'slack.connection.status', name: 'Status', description: 'Status', risk: 'low' },
+      ],
+    },
+    async listInstances(context) {
+      return context.listPersistedInstances('slack');
+    },
+  };
+  const harness = await createAppAwareService({
+    required: [],
+    optional: [
+      {
+        type: 'gmail',
+        reason: 'Connect Gmail.',
+        actions: ['gmail.connection.status'],
+        multiple: false,
+      },
+      {
+        type: 'slack',
+        reason: 'Connect Slack.',
+        actions: ['slack.connection.status'],
+        multiple: false,
+      },
+    ],
+  }, [fakeConnectionModule, manualModule]);
+  try {
+    const configured = await harness.service.configureFromApp('finance-os', {
+      type: 'gmail',
+      label: 'Personal Gmail',
+      secrets: { refresh_token: 'app-must-not-set-this' },
+      refreshToken: 'also-ignored',
+    });
+    assert.equal(configured.success, true);
+    assert.equal(configured.instance.label, 'Personal Gmail');
+    assert.equal(
+      await harness.service.getSecretForTest(configured.instance.id, 'refresh_token'),
+      null,
+    );
+
+    const undeclared = await harness.service.configureFromApp('finance-os', { type: 'trello' });
+    assert.equal(undeclared.success, false);
+    assert.equal(undeclared.technicalCode, 'app_connection_not_declared');
+
+    const manual = await harness.service.configureFromApp('finance-os', { type: 'slack' });
+    assert.equal(manual.success, false);
+    assert.equal(manual.technicalCode, 'connection_setup_not_oauth');
+  } finally {
+    await harness.cleanup();
+  }
+});
+
 test('connection sessions and calls only use connected instances for non-status actions', async () => {
   const harness = await createService();
   try {

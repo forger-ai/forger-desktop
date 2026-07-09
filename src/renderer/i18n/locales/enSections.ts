@@ -523,17 +523,61 @@ export const enSections = {
           name: 'Gmail status',
           description: 'Checks whether the Gmail account is connected.',
         },
+        'gmail.get_profile': {
+          name: 'Gmail profile',
+          description: 'Gets the connected email address and initial sync cursor.',
+        },
+        'gmail.list_labels': {
+          name: 'List labels',
+          description: 'Lists Gmail labels and folders.',
+        },
         'gmail.search_messages': {
           name: 'Search messages',
           description: 'Searches Gmail messages with a query.',
+        },
+        'gmail.list_threads': {
+          name: 'List conversations',
+          description: 'Lists Gmail conversations with summary metadata.',
         },
         'gmail.read_thread': {
           name: 'Read email',
           description: 'Reads a Gmail conversation or message and identifies attachments.',
         },
+        'gmail.list_changes': {
+          name: 'Sync changes',
+          description: 'Lists Gmail changes from a historyId.',
+        },
+        'gmail.modify_thread': {
+          name: 'Modify conversation',
+          description: 'Applies label, read, starred, or archive changes.',
+        },
+        'gmail.move_thread': {
+          name: 'Move conversation',
+          description: 'Moves a conversation to trash or restores it.',
+        },
         'gmail.read_attachment': {
           name: 'Read attachment',
           description: 'Downloads a Gmail attachment so the agent can review or reuse it.',
+        },
+        'gmail.list_drafts': {
+          name: 'List drafts',
+          description: 'Lists Gmail drafts.',
+        },
+        'gmail.get_draft': {
+          name: 'Read draft',
+          description: 'Reads a Gmail draft.',
+        },
+        'gmail.save_draft': {
+          name: 'Save draft',
+          description: 'Creates or updates a Gmail draft.',
+        },
+        'gmail.delete_draft': {
+          name: 'Delete draft',
+          description: 'Deletes a Gmail draft.',
+        },
+        'gmail.send_draft': {
+          name: 'Send draft',
+          description: 'Sends an existing Gmail draft.',
         },
         'gmail.send_email': {
           name: 'Send email',

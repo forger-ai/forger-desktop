@@ -27,11 +27,12 @@ import type {
   RuntimeStatus,
   AudioRuntimeDevices,
   CallConnectionActionInput,
-	  CallOfficialToolInput,
-	  PersonalAgent,
-	  PersonalAgentPeerThread,
-	  SecretMutationResult,
-	} from '../../shared/types';
+  ConfigureConnectionInput,
+  CallOfficialToolInput,
+  PersonalAgent,
+  PersonalAgentPeerThread,
+  SecretMutationResult,
+} from '../../shared/types';
 import type {
   AsyncFn,
   AutomationEventLike,
@@ -68,6 +69,7 @@ import { appAllowsAgentRuntimeControl, appAllowsAudioInput, appAllowsSpeechToTex
 import type { LlmProviderAuthProfileResolver } from '../llm-provider/types';
 import { connectionToolDefinitionsFromState } from './mcp-connection-tools';
 import { createAppRuntimeDiagnostics } from './app-runtime-diagnostics';
+import { createConnectionGrantRequester, createPublishedAppInfoUpdater } from './main-lifecycle-mcp-handlers';
 
 type RemoteTunnelCloseEvent = { type: 'remote_tunnel_close'; session_id: string };
 type RemoteAgentSessionCloseEvent = { type: string; agent_id?: string; agentId?: string; session_id?: string; sessionId?: string };
@@ -121,6 +123,7 @@ export interface MainLifecycleDeps {
   appWindows: Map<string, BrowserWindow>;
   appendInstallLog: (event: string, payload?: Record<string, unknown>) => Promise<void>;
   backendBaseUrl: string;
+  dialog: typeof import('electron').dialog;
   buildForgerToolsContextForApp: AsyncFn<string>;
   buildMemoryContextForApp: AsyncFn<string>;
   buildMemoryContextForApps: AsyncFn<string>;
@@ -295,6 +298,7 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
     appWindows,
     appendInstallLog,
     backendBaseUrl,
+    dialog,
     buildForgerToolsContextForApp,
     buildMemoryContextForApp,
     buildMemoryContextForApps,
@@ -750,6 +754,7 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
         .filter((summary) => summary.updateAvailable);
     },
     createLocalApp: createLocalAppFromSkeleton,
+    updatePublishedAppInfo: createPublishedAppInfoUpdater(state),
 	    addAppToPersonalAgent: async ({ agentId, appId }: { agentId: string; appId: string }) => {
 	      const record = state.registry.apps[appId];
 	      if (!record) {
@@ -1292,6 +1297,8 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
     connections: state.connectionsService ? {
       listConnectionsForApp: async (appId: string) => await state.connectionsService!.listConnectionsForApp(appId),
       callFromApp: async (appId: string, input: CallConnectionActionInput) => await state.connectionsService!.callFromApp(appId, input),
+      configureFromApp: async (appId: string, input: ConfigureConnectionInput) => await state.connectionsService!.configureFromApp(appId, input),
+      requestGrantFromApp: createConnectionGrantRequester({ dialog, state }),
     } : undefined,
     getAudioDevices,
     updateAudioInputDevices: async (devices: AudioRuntimeDevices) => {

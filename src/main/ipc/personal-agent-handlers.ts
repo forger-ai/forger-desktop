@@ -14,6 +14,7 @@ import type {
   PersonalAgentConversationStartInput,
   PersonalAgentCreateInput,
   PersonalAgentDeleteInput,
+  PersonalAgent,
   PersonalAgentGrantOptions,
   PersonalAgentConnectionGrant,
   PersonalAgentMessageSendInput,
@@ -49,6 +50,13 @@ const isConnectedConnectionInstance = (instance: ConnectionsState['instances'][n
 const connectedInstancesForType = (connections: ConnectionsState, type: string): ConnectionsState['instances'] =>
   connections.instances.filter((instance) => instance.type === type && isConnectedConnectionInstance(instance));
 
+const trimmedTextOrUndefined = (value: string | undefined): string | undefined => {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
+};
+
+const appGrantOptionName = (app: AppSummary): string => trimmedTextOrUndefined(app.name) ?? app.id;
+
 export const registerPersonalAgentIpcHandlers = ({
   IPC_CHANNELS,
   fs,
@@ -81,8 +89,8 @@ export const registerPersonalAgentIpcHandlers = ({
     return {
       apps: apps.map((app) => ({
         appId: app.id,
-        name: app.name ?? app.id,
-        description: app.description,
+        name: appGrantOptionName(app),
+        description: trimmedTextOrUndefined(app.description) ?? trimmedTextOrUndefined(app.shortDescription),
         status: app.status,
       })),
       tools: officialTools.tools
@@ -125,8 +133,10 @@ export const registerPersonalAgentIpcHandlers = ({
   });
   ipcMain.handle(IPC_CHANNELS.personalAgentUpdatePermissions, async (_event, input: PersonalAgentUpdatePermissionsInput) => {
     await validateRuntimeInput(input, isAgentProviderConnected);
-    const sanitized = await sanitizePermissionInput(input, listInstalledApps, listOfficialTools, listConnections, () => getPersonalAgentStore().listAgents());
-    return await getPersonalAgentStore().updateAgentPermissions(sanitized);
+    const store = getPersonalAgentStore();
+    const existingAgent = await store.requireAgent(input.agentId);
+    const sanitized = await sanitizePermissionInput(input, listInstalledApps, listOfficialTools, listConnections, () => store.listAgents(), existingAgent);
+    return await store.updateAgentPermissions(sanitized);
   });
   ipcMain.handle(IPC_CHANNELS.personalAgentsDelete, async (_event, input: PersonalAgentDeleteInput) => {
     return await getPersonalAgentStore().deleteAgent(input.agentId);
@@ -222,6 +232,7 @@ const sanitizePermissionInput = async <T extends PersonalAgentCreateInput | Pers
   listOfficialTools: () => Promise<OfficialToolsState>,
   listConnections: () => Promise<ConnectionsState>,
   listPersonalAgents: () => Promise<Array<{ id: string }>>,
+  existingAgent?: PersonalAgent,
 ): Promise<T> => {
   const installedAppIds = new Set(listInstalledApps().map((app) => app.id));
   const [officialTools, connections, personalAgents] = await Promise.all([
@@ -243,25 +254,11 @@ const sanitizePermissionInput = async <T extends PersonalAgentCreateInput | Pers
     officialTools.tools
       .flatMap((tool) => tool.actions.map((action) => action.id)),
   );
+  const existingAppIds = new Set(existingAgent?.appIds ?? []);
+  const existingToolIds = new Set(existingAgent?.toolIds ?? []);
+  const existingConnectionGrants = new Map((existingAgent?.connectionGrants ?? []).map((grant) => [grant.type, grant]));
   const declaredConnectionGrants = (input.connectionGrants ?? [])
-    .map((grant) => {
-      const definition = connections.types.find((candidate) => candidate.type === grant.type);
-      if (!definition) return null;
-      const validActions = new Set(definition.actions.map((action) => action.id));
-      const actions = [...new Set(grant.actions.filter((action) => validActions.has(action)))];
-      if (actions.length === 0) return null;
-      const validInstanceIds = connectedInstanceIdsByType.get(grant.type) ?? new Set<string>();
-      if (validInstanceIds.size === 0) return null;
-      const hasExplicitConnectionIds = Array.isArray(grant.connectionIds) && grant.connectionIds.length > 0;
-      const connectionIds = grant.connectionIds?.filter((connectionId) => validInstanceIds.has(connectionId)) ?? [];
-      if (hasExplicitConnectionIds && connectionIds.length === 0) return null;
-      return {
-        type: grant.type,
-        actions,
-        multiple: grant.multiple === true,
-        ...(connectionIds.length ? { connectionIds } : {}),
-      };
-    })
+    .map((grant) => sanitizeConnectionGrant(grant, connections, connectedInstanceIdsByType, existingConnectionGrants.get(grant.type)))
     .filter((grant): grant is PersonalAgentConnectionGrant => Boolean(grant));
   const declaredPeerGrants = (input.peerAgentGrants ?? [])
     .map((grant) => {
@@ -274,13 +271,54 @@ const sanitizePermissionInput = async <T extends PersonalAgentCreateInput | Pers
     .filter((grant): grant is PersonalAgentPeerGrant => Boolean(grant));
   return {
     ...input,
-    ...(input.appIds ? { appIds: input.appIds.filter((appId) => installedAppIds.has(appId)) } : {}),
-    ...(input.toolIds ? { toolIds: input.toolIds.filter((toolId) => officialActionIds.has(toolId)) } : {}),
+    ...(input.appIds ? { appIds: input.appIds.filter((appId) => installedAppIds.has(appId) || existingAppIds.has(appId)) } : {}),
+    ...(input.toolIds ? { toolIds: input.toolIds.filter((toolId) => officialActionIds.has(toolId) || existingToolIds.has(toolId)) } : {}),
     ...(input.connectionGrants
       ? { connectionGrants: declaredConnectionGrants }
       : {}),
     ...(input.peerAgentGrants
       ? { peerAgentGrants: declaredPeerGrants }
       : {}),
+  };
+};
+
+const cloneConnectionGrant = (grant: PersonalAgentConnectionGrant): PersonalAgentConnectionGrant => ({
+  type: grant.type,
+  actions: [...grant.actions],
+  multiple: grant.multiple,
+  ...(grant.connectionIds ? { connectionIds: [...grant.connectionIds] } : {}),
+});
+
+const sanitizeConnectionGrant = (
+  grant: PersonalAgentConnectionGrant,
+  connections: ConnectionsState,
+  connectedInstanceIdsByType: Map<string, Set<string>>,
+  existingGrant?: PersonalAgentConnectionGrant,
+): PersonalAgentConnectionGrant | null => {
+  const definition = connections.types.find((candidate) => candidate.type === grant.type);
+  if (!definition) {
+    return existingGrant ? cloneConnectionGrant(existingGrant) : null;
+  }
+  const validActions = new Set(definition.actions.map((action) => action.id));
+  const actions = [...new Set(grant.actions.filter((action) => validActions.has(action)))];
+  if (actions.length === 0) {
+    return existingGrant ? cloneConnectionGrant(existingGrant) : null;
+  }
+  const validInstanceIds = connectedInstanceIdsByType.get(grant.type) ?? new Set<string>();
+  const existingConnectionIds = new Set(existingGrant?.connectionIds ?? []);
+  if (validInstanceIds.size === 0 && existingGrant) {
+    return cloneConnectionGrant(existingGrant);
+  }
+  const hasExplicitConnectionIds = Array.isArray(grant.connectionIds) && grant.connectionIds.length > 0;
+  const connectionIds = grant.connectionIds?.filter((connectionId) =>
+    validInstanceIds.has(connectionId) || existingConnectionIds.has(connectionId)) ?? [];
+  if (hasExplicitConnectionIds && connectionIds.length === 0) {
+    return existingGrant ? cloneConnectionGrant(existingGrant) : null;
+  }
+  return {
+    type: grant.type,
+    actions,
+    multiple: grant.multiple === true,
+    ...(connectionIds.length ? { connectionIds } : {}),
   };
 };

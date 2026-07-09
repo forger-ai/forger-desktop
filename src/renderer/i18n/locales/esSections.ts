@@ -523,17 +523,61 @@ export const esSections = {
           name: 'Estado de Gmail',
           description: 'Revisa si la cuenta de Gmail está conectada.',
         },
+        'gmail.get_profile': {
+          name: 'Perfil de Gmail',
+          description: 'Obtiene el correo conectado y el cursor inicial de sincronización.',
+        },
+        'gmail.list_labels': {
+          name: 'Listar etiquetas',
+          description: 'Lista etiquetas y carpetas de Gmail.',
+        },
         'gmail.search_messages': {
           name: 'Buscar correos',
           description: 'Busca correos de Gmail usando una consulta.',
+        },
+        'gmail.list_threads': {
+          name: 'Listar conversaciones',
+          description: 'Lista conversaciones de Gmail con metadata resumida.',
         },
         'gmail.read_thread': {
           name: 'Leer correo',
           description: 'Lee una conversación o mensaje de Gmail e identifica adjuntos.',
         },
+        'gmail.list_changes': {
+          name: 'Sincronizar cambios',
+          description: 'Lista cambios de Gmail desde un historyId.',
+        },
+        'gmail.modify_thread': {
+          name: 'Modificar conversación',
+          description: 'Aplica etiquetas, lectura, destacado o archivado.',
+        },
+        'gmail.move_thread': {
+          name: 'Mover conversación',
+          description: 'Mueve una conversación a papelera o la restaura.',
+        },
         'gmail.read_attachment': {
           name: 'Leer adjunto',
           description: 'Descarga un adjunto de Gmail para que el agente pueda revisarlo o reutilizarlo.',
+        },
+        'gmail.list_drafts': {
+          name: 'Listar borradores',
+          description: 'Lista borradores de Gmail.',
+        },
+        'gmail.get_draft': {
+          name: 'Leer borrador',
+          description: 'Lee un borrador de Gmail.',
+        },
+        'gmail.save_draft': {
+          name: 'Guardar borrador',
+          description: 'Crea o actualiza un borrador de Gmail.',
+        },
+        'gmail.delete_draft': {
+          name: 'Eliminar borrador',
+          description: 'Elimina un borrador de Gmail.',
+        },
+        'gmail.send_draft': {
+          name: 'Enviar borrador',
+          description: 'Envía un borrador existente de Gmail.',
         },
         'gmail.send_email': {
           name: 'Enviar correo',

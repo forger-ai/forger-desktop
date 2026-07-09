@@ -992,7 +992,12 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
         {currentView === 'apps' ? renderInstalledAppsView() : null}
 
         {currentView === 'agents' ? (
-          <AgentsView t={t} intelligenceProviderConfigured={intelligenceProviderConfigured} providerOptions={visibleProviderOptions} />
+          <AgentsView
+            t={t}
+            intelligenceProviderConfigured={intelligenceProviderConfigured}
+            providerOptions={visibleProviderOptions}
+            installedApps={installedApps}
+          />
         ) : null}
 
         {currentView === 'catalog' ? (

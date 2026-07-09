@@ -233,6 +233,15 @@ export const AGENT_TOOL_PACKAGES: AgentToolPackageDefinition[] = [
         defaultRequiresApproval: true,
       },
       {
+        id: 'forger_update_published_app_info',
+        packageId: FORGER_TOOL_PACKAGE_ID,
+        name: 'Editar info publicada',
+        description: 'Actualiza nombre, descripcion, categoria o visibilidad de una app publicada en Social.',
+        category: 'app',
+        risk: 'medio',
+        defaultRequiresApproval: true,
+      },
+      {
         id: 'forger_workflow_list',
         packageId: FORGER_TOOL_PACKAGE_ID,
         name: 'Listar flujos',

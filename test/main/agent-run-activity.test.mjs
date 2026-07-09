@@ -41,6 +41,27 @@ const timelineLabels = {
   },
 };
 
+const leakedMcpToolMetadata = '\\"name\\":\\"forger_get_app_runtime_status\\",\\"annotations\\":{\\"readOnlyHint\\":true,\\"destructiveHint\\":false,\\"idempotentHint\\":true,\\"openWorldHint\\":false}}';
+const leakedAppToolOutput = [
+  '[',
+  '  {',
+  '    "id": "b6fi5hhqto8i",',
+  '    "category_name": "Essentials",',
+  '    "category_kind": "EXPENSE",',
+  '    "subcategory_id": "1ldp5nlvwvuupje8zcvz9bwmv",',
+  '    "subcategory_name": "Transport"',
+  '  },',
+  '  {',
+  '    "id": "frf9vhfni29bi91c5lt7xmbj2",',
+  '    "date": "2026-06-21T00:00:00",',
+  '    "amount": 13480.0,',
+  '    "business": "LOS LEONES",',
+  '    "reason": "Merchant charge pending review"',
+  '  }',
+  ']',
+].join('\n');
+const escapedLeakedAppToolOutput = 'b6fi5hhqto8i\\",\\n \\"category_name\\": \\"Essentials\\",\\n \\"category_kind\\": \\"EXPENSE\\",\\n \\"subcategory_id\\": \\"1ldp5nlvwvuupje8zcvz9bwmv\\",\\n \\"subcategory_name\\": \\"Transport\\"';
+
 test('parses Codex JSONL chunks into sanitized activity items', () => {
   const secret = 'sk-private-token-value';
   const items = parseProviderOutputActivityItems({
@@ -162,6 +183,70 @@ test('parses Claude stream events with message text, tool use, and final result'
   assert.equal(items[1].summary.includes('felipe@example.com'), false);
   assert.equal(items[2].technicalLabel, 'Read');
   assert.equal(items[3].summary, 'Final answer.');
+});
+
+test('filters internal MCP metadata from Claude progress and activity notes', () => {
+  const output = [
+    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'I am checking the running app.' }] } }),
+    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: leakedMcpToolMetadata }] } }),
+    JSON.stringify({ type: 'assistant', text: leakedMcpToolMetadata }),
+    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'forger_get_app_view_snapshot' }] } }),
+  ].join('\n');
+
+  const progress = toProviderProgressMessages('claude', 'stdout', output, 'en');
+  assert.deepEqual(progress, [
+    'I am checking the running app.',
+    'The agent is using app tools.',
+  ]);
+  assert.equal(progress.some((entry) => /annotations|readOnlyHint|forger_get_app_runtime_status/.test(entry)), false);
+
+  const items = parseProviderOutputActivityItems({
+    provider: 'claude',
+    stream: 'stdout',
+    now,
+    text: output,
+  });
+  assert.deepEqual(items.map((item) => item.kind), ['assistant_note', 'mcp_call']);
+  assert.equal(items.some((item) => /annotations|readOnlyHint|forger_get_app_runtime_status/.test(item.summary)), false);
+});
+
+test('filters pretty-printed app tool outputs from provider activity notes', () => {
+  const items = parseProviderOutputActivityItems({
+    provider: 'codex',
+    stream: 'stdout',
+    now,
+    text: [
+      JSON.stringify({ type: 'item.started', item: { type: 'mcp_tool_call', server: 'app_finance_os', name: 'list_movements' } }),
+      leakedAppToolOutput,
+    ].join('\n'),
+  });
+
+  assert.deepEqual(items.map((item) => item.kind), ['mcp_call']);
+  assert.equal(items.some((item) => /category_name|subcategory_id|LOS LEONES|Merchant charge/.test(item.summary)), false);
+});
+
+test('filters escaped app tool outputs from Claude progress and activity notes', () => {
+  const output = [
+    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'I am checking the movements.' }] } }),
+    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: escapedLeakedAppToolOutput }] } }),
+    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'app_finance_os.list_movements' }] } }),
+  ].join('\n');
+
+  const progress = toProviderProgressMessages('claude', 'stdout', output, 'en');
+  assert.deepEqual(progress, [
+    'I am checking the movements.',
+    'The agent is using app tools.',
+  ]);
+  assert.equal(progress.some((entry) => /category_name|subcategory_id|LOS LEONES|Merchant charge/.test(entry)), false);
+
+  const items = parseProviderOutputActivityItems({
+    provider: 'claude',
+    stream: 'stdout',
+    now,
+    text: output,
+  });
+  assert.deepEqual(items.map((item) => item.kind), ['assistant_note', 'mcp_call']);
+  assert.equal(items.some((item) => /category_name|subcategory_id|LOS LEONES|Merchant charge/.test(item.summary)), false);
 });
 
 test('handles plain provider output safely and skips malformed structured fragments', () => {

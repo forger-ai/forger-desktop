@@ -561,6 +561,10 @@ const getPersonalAgentConversationManager = (): AgentConversationManager => {
         const installedAppIds = appIds.filter((appId) => Boolean(registry.apps[appId]));
         return await (appMcpManager?.listenMcps(installedAppIds, runId) ?? Promise.resolve([]));
       },
+      resolveAppTrustedRoots: async (appIds) =>
+        appIds
+          .map((appId) => registry.apps[appId]?.installDir)
+          .filter((installDir): installDir is string => Boolean(installDir)),
       releaseAppMcps: (runId) => {
         appMcpManager?.releaseMcps(runId);
       },
@@ -1470,7 +1474,7 @@ registerMainLifecycle({
   BrowserWindow, ChatOrchestrator, CloudDeviceManager, CloudIdentityStore, DesktopRuntimeBridge,
   DevCatalogService, FORGER_AGENT_CONTRACT_VERSION, FileLibrary, ForgerAccountStore, ForgerBackendClient,
   ForgerMcpServer, IPC_CHANNELS, MemoryMaintenanceManager, MemoryStore, SecretsStore, anyAppAllowsAgentNetworkAccess, app,
-  appAllowsAgentNetworkAccess, appWindows, appendInstallLog, backendBaseUrl, buildForgerToolsContextForApp, buildMemoryContextForApp,
+  appAllowsAgentNetworkAccess, appWindows, appendInstallLog, backendBaseUrl, dialog, buildForgerToolsContextForApp, buildMemoryContextForApp,
   buildMemoryContextForApps, chooseAgentRuntime, cleanupLegacyExternalToolState, clearForgerAccountSession, closeServer, createLocalAppFromSkeleton, createWindow,
   finishSocialAppInstall, deleteQuarantinedSocialApp,
   emitAutomationUpdated, emitWorkflowUpdated, emitChatRunUpdated, ensureBackendPythonEnvironment, ensureCatalogStatuses, ensureGlobalAgentsContext,

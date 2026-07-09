@@ -9,6 +9,7 @@ import type {
   DesktopUpdateReleaseSummary,
   DesktopUpdateState,
 } from '../shared/types';
+import { isStableTechnicalCode } from '../shared/error-diagnostics';
 
 const DEFAULT_INSTALLER_QUIT_DELAY_SECONDS = 5,
   DEFAULT_METADATA_URL = 'https://forger-ai.github.io/desktop-versions/latest.json',
@@ -19,6 +20,20 @@ interface DesktopUpdaterOptions {
   userDataPath: string;
   metadataUrl?: string;
   onStateChanged?: (state: DesktopUpdateState) => void;
+}
+
+type DesktopUpdateFailurePhase =
+  | 'metadata_index'
+  | 'metadata_latest'
+  | 'download'
+  | 'install'
+  | 'state';
+
+interface DesktopUpdateFailureContext {
+  phase: DesktopUpdateFailurePhase;
+  fallbackTechnicalCode: string;
+  url?: string;
+  extraDetails?: Record<string, unknown>;
 }
 
 const parseVersionParts = (value?: string): number[] | null => {
@@ -52,8 +67,111 @@ const isVersionNewer = (candidate?: string, current?: string): boolean => {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value && typeof value === 'object' && !Array.isArray(value));
 
+const compactRecord = (input: Record<string, unknown>): Record<string, unknown> =>
+  Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined && value !== null && value !== ''));
+
 const isValidSha256 = (value: unknown): value is string =>
   typeof value === 'string' && /^[a-f0-9]{64}$/i.test(value.trim());
+
+const errorMessage = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error ?? '');
+
+const safeUrlSummary = (value?: string): Record<string, string> | undefined => {
+  if (!value) {
+    return undefined;
+  }
+  try {
+    const parsed = new URL(value);
+    return compactRecord({
+      host: parsed.hostname,
+      path: parsed.pathname,
+    }) as Record<string, string>;
+  } catch {
+    return undefined;
+  }
+};
+
+const errorCauseField = (error: unknown, key: 'code' | 'name'): string | undefined => {
+  if (!(error instanceof Error) || !isRecord(error.cause)) {
+    return undefined;
+  }
+  const value = error.cause[key];
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+};
+
+const httpStatusFromMessage = (message: string): number | undefined => {
+  const match = message.match(/^(?:metadata|metadata_index|download)_http_(\d{3})$/);
+  return match ? Number.parseInt(match[1], 10) : undefined;
+};
+
+const failureReasonFromMessage = (message: string): string => {
+  if (/fetch failed|failed to fetch/i.test(message)) {
+    return 'fetch_failed';
+  }
+  if (/^metadata(?:_index)?_http_\d{3}$/.test(message)) {
+    return 'metadata_http_error';
+  }
+  if (/^download_http_\d{3}$/.test(message)) {
+    return 'download_http_error';
+  }
+  if (message === 'checksum_mismatch') {
+    return 'checksum_mismatch';
+  }
+  if (message.startsWith('metadata_')) {
+    return 'metadata_validation_failed';
+  }
+  if (isStableTechnicalCode(message)) {
+    return message;
+  }
+  return message ? 'unstable_error_message' : 'unknown_error';
+};
+
+const technicalCodeForFailure = (
+  phase: DesktopUpdateFailurePhase,
+  error: unknown,
+  fallbackTechnicalCode: string,
+): string => {
+  const message = errorMessage(error).trim();
+  if (isStableTechnicalCode(message)) {
+    return message;
+  }
+  if (/fetch failed|failed to fetch/i.test(message)) {
+    if (phase === 'metadata_index') {
+      return 'desktop_update_metadata_index_fetch_failed';
+    }
+    if (phase === 'metadata_latest') {
+      return 'desktop_update_metadata_fetch_failed';
+    }
+    if (phase === 'download') {
+      return 'desktop_update_download_fetch_failed';
+    }
+  }
+  if (phase === 'install') {
+    return 'desktop_update_install_open_failed';
+  }
+  return fallbackTechnicalCode;
+};
+
+const buildFailureDiagnostic = (
+  error: unknown,
+  context: DesktopUpdateFailureContext,
+): { technicalCode: string; details: Record<string, unknown> } => {
+  const message = errorMessage(error).trim();
+  const details = compactRecord({
+    phase: context.phase,
+    reason: failureReasonFromMessage(message),
+    endpoint: safeUrlSummary(context.url),
+    httpStatus: httpStatusFromMessage(message),
+    errorName: error instanceof Error ? error.name : typeof error,
+    errorCauseCode: errorCauseField(error, 'code'),
+    errorCauseName: errorCauseField(error, 'name'),
+    ...context.extraDetails,
+  });
+  return {
+    technicalCode: technicalCodeForFailure(context.phase, error, context.fallbackTechnicalCode),
+    details,
+  };
+};
 
 const normalizeReleaseNotes = (value: unknown): DesktopUpdateReleaseNotes => {
   if (!isRecord(value)) {
@@ -220,10 +338,23 @@ export class DesktopUpdater {
       downloadedBytes: undefined,
       totalBytes: undefined,
       technicalCode: undefined,
+      diagnosticDetails: undefined,
     });
 
+    const metadataIndexUrl = indexUrlForMetadataUrl(this.metadataUrl);
+    let metadataIndex: DesktopUpdateMetadata[] | null = null;
+    let metadataIndexFailure: Record<string, unknown> | undefined;
     try {
-      const metadataIndex = await this.fetchMetadataIndex().catch(() => null);
+      metadataIndex = await this.fetchMetadataIndex(metadataIndexUrl);
+    } catch (error) {
+      metadataIndexFailure = buildFailureDiagnostic(error, {
+        phase: 'metadata_index',
+        fallbackTechnicalCode: 'desktop_update_metadata_index_failed',
+        url: metadataIndexUrl,
+      }).details;
+    }
+
+    try {
       const response = await fetch(this.metadataUrl, { cache: 'no-store' });
       if (!response.ok) {
         throw new Error(`metadata_http_${response.status}`);
@@ -273,7 +404,12 @@ export class DesktopUpdater {
         userMessage: 'Hay una actualizacion de Forger Desktop disponible.',
       });
     } catch (error) {
-      return this.setError('No pudimos revisar actualizaciones de Forger Desktop.', error);
+      return this.setError('No pudimos revisar actualizaciones de Forger Desktop.', error, {
+        phase: 'metadata_latest',
+        fallbackTechnicalCode: 'desktop_update_metadata_failed',
+        url: this.metadataUrl,
+        extraDetails: metadataIndexFailure ? { metadataIndexFailure } : undefined,
+      });
     }
   }
 
@@ -283,7 +419,14 @@ export class DesktopUpdater {
       state = await this.check();
     }
     if (state.status !== 'available' || !state.asset || !state.availableVersion) {
-      return this.setError('No hay una actualizacion lista para descargar.', state.technicalCode ?? state.status);
+      return this.setError('No hay una actualizacion lista para descargar.', state.technicalCode ?? state.status, {
+        phase: 'state',
+        fallbackTechnicalCode: 'desktop_update_download_unavailable',
+        extraDetails: {
+          previousStatus: state.status,
+          availableVersion: state.availableVersion,
+        },
+      });
     }
 
     const asset = state.asset;
@@ -291,6 +434,8 @@ export class DesktopUpdater {
     const filename = getInstallerFilename(asset, version);
     const destinationPath = path.join(this.cacheDir, version, filename);
     const tempPath = `${destinationPath}.download`;
+    let downloadedBytes = 0;
+    let totalBytes: number | undefined;
 
     try {
       await fs.mkdir(path.dirname(destinationPath), { recursive: true });
@@ -302,7 +447,7 @@ export class DesktopUpdater {
       }
 
       const contentLength = Number.parseInt(response.headers.get('content-length') ?? '', 10);
-      const totalBytes = asset.size ?? (Number.isFinite(contentLength) && contentLength > 0 ? contentLength : undefined);
+      totalBytes = asset.size ?? (Number.isFinite(contentLength) && contentLength > 0 ? contentLength : undefined);
       this.setState({
         ...state,
         status: 'downloading',
@@ -313,7 +458,6 @@ export class DesktopUpdater {
       });
 
       const hash = createHash('sha256');
-      let downloadedBytes = 0;
       const file = await fs.open(tempPath, 'w');
       try {
         if (!response.body) {
@@ -364,14 +508,34 @@ export class DesktopUpdater {
       });
     } catch (error) {
       await fs.rm(tempPath, { force: true }).catch(() => undefined);
-      return this.setError('No pudimos descargar la actualizacion de Forger Desktop.', error);
+      return this.setError('No pudimos descargar la actualizacion de Forger Desktop.', error, {
+        phase: 'download',
+        fallbackTechnicalCode: 'desktop_update_download_failed',
+        url: asset.url,
+        extraDetails: {
+          availableVersion: version,
+          assetPlatform: asset.platform,
+          assetArch: asset.arch,
+          assetKind: asset.kind,
+          filename,
+          downloadedBytes,
+          totalBytes,
+        },
+      });
     }
   }
 
   async install(): Promise<DesktopUpdateState> {
     const state = this.getState();
     if (state.status !== 'ready' || !state.downloadedPath) {
-      return this.setError('Descarga la actualizacion antes de instalarla.', state.status);
+      return this.setError('Descarga la actualizacion antes de instalarla.', state.status, {
+        phase: 'state',
+        fallbackTechnicalCode: 'desktop_update_install_unavailable',
+        extraDetails: {
+          previousStatus: state.status,
+          availableVersion: state.availableVersion,
+        },
+      });
     }
 
     try {
@@ -388,12 +552,22 @@ export class DesktopUpdater {
         userMessage: 'Abrimos el instalador. Sigue los pasos del sistema para completar la actualizacion.',
       });
     } catch (error) {
-      return this.setError('No pudimos abrir el instalador de Forger Desktop.', error);
+      return this.setError('No pudimos abrir el instalador de Forger Desktop.', error, {
+        phase: 'install',
+        fallbackTechnicalCode: 'desktop_update_install_failed',
+        extraDetails: {
+          availableVersion: state.availableVersion,
+          assetPlatform: state.asset?.platform,
+          assetArch: state.asset?.arch,
+          assetKind: state.asset?.kind,
+          filename: path.basename(state.downloadedPath),
+        },
+      });
     }
   }
 
-  private async fetchMetadataIndex(): Promise<DesktopUpdateMetadata[]> {
-    const response = await fetch(indexUrlForMetadataUrl(this.metadataUrl), { cache: 'no-store' });
+  private async fetchMetadataIndex(metadataIndexUrl: string): Promise<DesktopUpdateMetadata[]> {
+    const response = await fetch(metadataIndexUrl, { cache: 'no-store' });
     if (!response.ok) {
       throw new Error(`metadata_index_http_${response.status}`);
     }
@@ -411,13 +585,18 @@ export class DesktopUpdater {
     return releases.map(releaseSummaryFromMetadata);
   }
 
-  private setError(userMessage: string, error: unknown): DesktopUpdateState {
-    const technicalCode = error instanceof Error ? error.message : String(error);
+  private setError(
+    userMessage: string,
+    error: unknown,
+    context: DesktopUpdateFailureContext,
+  ): DesktopUpdateState {
+    const diagnostic = buildFailureDiagnostic(error, context);
     return this.setState({
       ...this.state,
       status: 'error',
       userMessage,
-      technicalCode,
+      technicalCode: diagnostic.technicalCode,
+      diagnosticDetails: diagnostic.details,
     });
   }
 

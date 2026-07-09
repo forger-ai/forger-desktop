@@ -187,6 +187,31 @@ export class ConnectionsService {
     return module.configure(this.getContext(), { ...input, type });
   }
 
+  async configureFromApp(appId: string, input: ConfigureConnectionInput): Promise<ConnectionMutationResult> {
+    await this.load();
+    const declarations = await this.options.getAppConnectionDeclarations?.(appId);
+    if (!declarations) {
+      return { success: false, userMessage: 'This app has not declared connections.', technicalCode: 'app_connections_not_declared' };
+    }
+    const type = cleanString(input.type);
+    const declaration = [...declarations.required, ...declarations.optional].find((item) => item.type === type);
+    if (!declaration) {
+      return { success: false, userMessage: 'This app has not declared this connection.', technicalCode: 'app_connection_not_declared' };
+    }
+    const module = this.modulesByType.get(type);
+    if (!module) {
+      return { success: false, userMessage: 'Connection type is not available.', technicalCode: 'connection_type_not_found' };
+    }
+    if (module.definition.setupKind !== 'oauth') {
+      return { success: false, userMessage: 'This connection cannot be configured from an app.', technicalCode: 'connection_setup_not_oauth' };
+    }
+    return this.configure({
+      type,
+      ...(cleanString(input.label) ? { label: cleanString(input.label) } : {}),
+      ...(cleanString(input.connectionId) ? { connectionId: cleanString(input.connectionId) } : {}),
+    });
+  }
+
   async disconnect(input: DisconnectConnectionInput): Promise<ConnectionMutationResult> {
     await this.load();
     const type = cleanString(input.type);

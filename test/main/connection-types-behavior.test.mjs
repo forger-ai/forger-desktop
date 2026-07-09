@@ -74,7 +74,26 @@ test('built-in connection actions with user input declare inputSchema for workfl
   const harness = await createService();
   try {
     const expectedActions = new Map([
-      ['gmail', ['gmail.search_messages', 'gmail.read_thread', 'gmail.read_attachment', 'gmail.send_email']],
+      [
+        'gmail',
+        [
+          'gmail.get_profile',
+          'gmail.list_labels',
+          'gmail.search_messages',
+          'gmail.list_threads',
+          'gmail.read_thread',
+          'gmail.list_changes',
+          'gmail.modify_thread',
+          'gmail.move_thread',
+          'gmail.read_attachment',
+          'gmail.list_drafts',
+          'gmail.get_draft',
+          'gmail.save_draft',
+          'gmail.delete_draft',
+          'gmail.send_draft',
+          'gmail.send_email',
+        ],
+      ],
       ['calendar', ['calendar.list_events', 'calendar.create_event', 'calendar.update_event', 'calendar.delete_event']],
       ['sheets', ['sheets.read_range', 'sheets.append_rows', 'sheets.update_range']],
       ['drive', ['drive.list_files', 'drive.download_file', 'drive.upload_file']],

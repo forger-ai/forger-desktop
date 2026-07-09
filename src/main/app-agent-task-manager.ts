@@ -719,9 +719,9 @@ export class AppAgentTaskManager {
       text,
     });
     const activityChanged = (task.activity?.counts.total ?? 0) !== activityItemCount;
-    const messages = provider === 'antigravity'
-      ? toProviderProgressMessages(provider, stream, text, locale)
-      : [progressFromCodexOutput(text, locale)].filter((progress): progress is string => Boolean(progress));
+    const messages = provider === 'codex'
+      ? [progressFromCodexOutput(text, locale)].filter((progress): progress is string => Boolean(progress))
+      : toProviderProgressMessages(provider, stream, text, locale);
     if (messages.length === 0 && !activityChanged) {
       return;
     }

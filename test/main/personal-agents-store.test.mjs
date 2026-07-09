@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { access, chmod, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
+import { access, chmod, mkdir, mkdtemp, readFile, readdir, realpath, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -665,8 +665,18 @@ test('personal agent Codex runs prepare Git and write logs under metadata root',
   const metadataRoot = await mkdtemp(path.join(tmpdir(), 'forger-personal-agent-git-meta-'));
   const forgerHomeRoot = await mkdtemp(path.join(tmpdir(), 'forger-personal-agent-git-home-'));
   const fakeCodexCli = path.join(metadataRoot, 'fake-codex.cjs');
+  const connectedAppRoot = path.join(forgerHomeRoot, 'apps', 'finance-os');
+  const invocationCapturePath = path.join(metadataRoot, 'codex-invocation.json');
+  await mkdir(connectedAppRoot, { recursive: true });
   await writeFile(fakeCodexCli, [
     '#!/usr/bin/env node',
+    'const fs = require("node:fs");',
+    'fs.writeFileSync(process.env.FORGER_CAPTURE_PATH, JSON.stringify({',
+    '  argv: process.argv.slice(2),',
+    '  cwd: process.cwd(),',
+    '  allowedRoots: process.env.FORGER_ALLOWED_ROOTS,',
+    '  codexHome: process.env.CODEX_HOME,',
+    '}, null, 2));',
     'console.log(JSON.stringify({ type: "thread.started", thread_id: "personal-thread" }));',
     'console.log(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "Prepared Git." } }));',
   ].join('\n'), 'utf8');
@@ -687,13 +697,14 @@ test('personal agent Codex runs prepare Git and write logs under metadata root',
     }),
     getCodexCliPath: async () => fakeCodexCli,
     getCodexPathEntries: async () => [],
-    getCodexEnvironment: async () => ({}),
+    getCodexEnvironment: async () => ({ FORGER_CAPTURE_PATH: invocationCapturePath }),
     getCodexAuthenticated: async () => true,
+    resolveAppTrustedRoots: async (appIds) => appIds.includes('finance-os') ? [connectedAppRoot] : [],
     ensureGitAvailable: async () => {
       ensureGitCalls += 1;
     },
   });
-  const agent = await store.createAgent({ name: 'Git agent', purpose: 'Test Git preparation.' });
+  const agent = await store.createAgent({ name: 'Git agent', purpose: 'Test Git preparation.', appIds: ['finance-os'] });
   const conversation = await manager.startConversation({
     agentId: agent.id,
     title: 'Git prep',
@@ -703,6 +714,13 @@ test('personal agent Codex runs prepare Git and write logs under metadata root',
     item.activeRun?.status === 'completed' && item.messages.some((message) => message.content === 'Prepared Git.'));
 
   assert.equal(ensureGitCalls, 1);
+  const invocation = JSON.parse(await readFile(invocationCapturePath, 'utf8'));
+  assert.equal(invocation.cwd, await realpath(path.join(forgerHomeRoot, 'agents', agent.id, 'workspace')));
+  assert.ok(invocation.argv.includes('--add-dir'));
+  assert.equal(invocation.argv[invocation.argv.indexOf('--add-dir') + 1], connectedAppRoot);
+  assert.ok(invocation.allowedRoots.split(path.delimiter).includes(connectedAppRoot));
+  const isolatedConfig = await readFile(path.join(invocation.codexHome, 'config.toml'), 'utf8');
+  assert.match(isolatedConfig, new RegExp(`\\[projects\\.${JSON.stringify(path.resolve(connectedAppRoot)).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\]`));
   const runLog = await readFile(path.join(metadataRoot, 'personal-agents', 'runs', `${completed.activeRun.id}.log`), 'utf8');
   assert.match(runLog, /Prepared Git/);
   await assert.rejects(

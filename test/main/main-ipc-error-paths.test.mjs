@@ -326,6 +326,13 @@ test('personal agent IPC filters grants to installed apps and existing official 
         updateInputs.push(input);
         return { id: input.agentId, ...input };
       },
+      requireAgent: async (agentId) => ({
+        id: agentId,
+        appIds: [],
+        toolIds: [],
+        connectionGrants: [],
+        peerAgentGrants: [],
+      }),
     }),
     registry: {
       apps: {
