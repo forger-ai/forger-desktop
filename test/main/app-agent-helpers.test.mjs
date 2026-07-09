@@ -242,6 +242,30 @@ test('app-agent process helpers reject inactive commands through timeout', async
   }), /codex_timeout_after_50ms/);
 });
 
+test('app-agent process helper ignores broken stdin pipes after a child exits early', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'forger-app-agent-epipe-'));
+  const closeStdinScript = path.join(root, 'close-stdin.cjs');
+  try {
+    await writeFile(closeStdinScript, [
+      'process.stdin.destroy();',
+      'setTimeout(() => {',
+      '  process.stdout.write("closed-stdin");',
+      '}, 25);',
+    ].join('\n'));
+
+    const result = await runCommandCapture(process.execPath, [closeStdinScript], {
+      cwd: root,
+      stdinText: 'x'.repeat(8 * 1024 * 1024),
+      timeoutMs: 5_000,
+    });
+
+    assert.equal(result.code, 0);
+    assert.equal(result.stdout, 'closed-stdin');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('conversation helpers serialize public state and build manifest-first prompts', () => {
   assert.equal(buildManifestAgentStartPrompt('  # Start\nDo it.  '), '# Start\nDo it.');
   assert.equal(buildManifestAgentResumePrompt('  # Resume\nContinue.  '), '# Resume\nContinue.');

@@ -1,4 +1,5 @@
 import type { AgentPermissionMode, AgentRuntime } from './agent-runtime';
+import type { AutomationFrequency, AutomationMissedRunPolicy } from './automations';
 import type { FailureDiagnosticFields } from './base';
 import type { AgentToolId, OfficialToolSummary } from './tools';
 import type { AppSummary } from './catalog';
@@ -9,9 +10,13 @@ import type { AgentRunActivity } from './agent-run-activity';
 export type PersonalAgentMessageRole = 'user' | 'assistant' | 'system';
 export type PersonalAgentMessageKind = 'message' | 'intermediate';
 export type PersonalAgentMessageAuthorType = 'human' | 'agent' | 'system';
-export type PersonalAgentConversationOrigin = 'user' | 'agent';
+export type PersonalAgentMessageSource = 'human' | 'routine' | 'scheduled_wakeup';
+export type PersonalAgentConversationOrigin = 'user' | 'agent' | 'routine';
 export type PersonalAgentConversationStatus = 'active' | 'archived';
 export type PersonalAgentRunStatus = 'queued' | 'running' | 'needs_permission' | 'completed' | 'failed' | 'canceled';
+export type PersonalAgentRoutineRunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'skipped';
+export type PersonalAgentRoutineRunTrigger = 'manual' | 'scheduled';
+export type PersonalAgentWakeupStatus = 'scheduled' | 'fired' | 'canceled';
 
 export interface PersonalAgent {
   id: string;
@@ -145,6 +150,9 @@ export interface PersonalAgentConversation {
   initiatorAgentId?: string;
   initiatorAgentName?: string;
   peerThreadId?: string;
+  routineId?: string;
+  draftMessage?: string;
+  scheduledWakeup?: PersonalAgentScheduledWakeup;
   createdAt: string;
   updatedAt: string;
   providerThreadId?: string | null;
@@ -178,6 +186,9 @@ export interface PersonalAgentMessage {
   authorType: PersonalAgentMessageAuthorType;
   authorAgentId?: string;
   authorAgentName?: string;
+  source: PersonalAgentMessageSource;
+  routineId?: string;
+  wakeupId?: string;
   content: string;
   createdAt: string;
   files?: PersonalAgentMessageFile[];
@@ -251,14 +262,108 @@ export interface PersonalAgentRun {
   updatedAt: string;
 }
 
+export interface PersonalAgentRoutineRunSummary {
+  id: string;
+  routineId: string;
+  agentId: string;
+  conversationId: string;
+  trigger: PersonalAgentRoutineRunTrigger;
+  status: PersonalAgentRoutineRunStatus;
+  startedAt: string;
+  finishedAt?: string;
+  error?: string;
+  messageId?: string;
+}
+
+export type PersonalAgentRoutineRun = PersonalAgentRoutineRunSummary;
+
+export interface PersonalAgentRoutine {
+  id: string;
+  agentId: string;
+  conversationId: string;
+  name: string;
+  prompt: string;
+  frequency: AutomationFrequency;
+  missedRunPolicy: AutomationMissedRunPolicy;
+  missedRunWindowMinutes?: number;
+  enabled: boolean;
+  running: boolean;
+  nextRunAt: string | null;
+  authorizationText: string;
+  createdAt: string;
+  updatedAt: string;
+  lastRun?: PersonalAgentRoutineRunSummary;
+}
+
+export interface PersonalAgentRoutineUpsertInput {
+  id?: string;
+  name: string;
+  prompt: string;
+  frequency: AutomationFrequency;
+  missedRunPolicy?: AutomationMissedRunPolicy;
+  missedRunWindowMinutes?: number;
+  enabled?: boolean;
+  authorizationText: string;
+}
+
+export interface PersonalAgentRoutineListInput {
+  agentId: string;
+}
+
+export interface PersonalAgentRoutineRunNowInput {
+  routineId: string;
+}
+
+export interface PersonalAgentRoutineSetEnabledInput {
+  routineId: string;
+  enabled: boolean;
+  authorizationText: string;
+}
+
+export interface PersonalAgentRoutineDeleteInput {
+  routineId: string;
+  authorizationText: string;
+}
+
+export interface PersonalAgentScheduledWakeup {
+  id: string;
+  agentId: string;
+  conversationId: string;
+  prompt: string;
+  dueAt: string;
+  status: PersonalAgentWakeupStatus;
+  createdByRunId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PersonalAgentWakeupScheduleInput {
+  seconds: number;
+  prompt: string;
+}
+
+export interface PersonalAgentWakeupCancelInput {
+  wakeupId?: string;
+  conversationId?: string;
+}
+
+export interface PersonalAgentConversationDraftUpdateInput {
+  conversationId: string;
+  draftMessage: string;
+}
+
 export type PersonalAgentConversationEventType =
   | 'conversation.created'
   | 'message.created'
+  | 'conversation.updated'
   | 'run.started'
   | 'run.progress'
   | 'run.completed'
   | 'run.failed'
-  | 'run.canceled';
+  | 'run.canceled'
+  | 'wakeup.scheduled'
+  | 'wakeup.canceled'
+  | 'routine.updated';
 
 export interface PersonalAgentConversationEvent {
   type: PersonalAgentConversationEventType;
@@ -266,6 +371,8 @@ export interface PersonalAgentConversationEvent {
   message?: PersonalAgentMessage;
   run?: PersonalAgentRun;
   progress?: PersonalAgentRunProgress;
+  routine?: PersonalAgentRoutine;
+  wakeup?: PersonalAgentScheduledWakeup;
 }
 
 export interface PersonalAgentMemory {

@@ -87,6 +87,7 @@ export interface MainLifecycleState {
   llmRunsStore?: LlmRunsService;
   remoteNetworkShareManager: { stopAll?: () => Promise<void> } | null;
   remoteAgentSessionService: { stopAll?: () => Promise<void> } | null;
+  personalAgentRoutineManager: { initialize: () => Promise<void>; dispose?: () => void } | null;
   mainWindow: BrowserWindow | null;
   memoryMaintenanceManager: MemoryMaintenanceService | null;
   memoryStore: LifecycleService | null;

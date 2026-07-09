@@ -173,3 +173,128 @@ test('app-agent conversation diagnostics attach Claude run log as provider sessi
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test('personal-agent conversation diagnostics include Antigravity run evidence when available', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'forger-personal-agent-diagnostic-'));
+  try {
+    const metadataRoot = path.join(root, 'Forger', '.forger');
+    const personalRunDir = path.join(metadataRoot, 'personal-agents', 'runs');
+    const agentWorkspace = path.join(root, 'Forger', 'agents', 'agent-1', 'workspace');
+    const antigravityLogDir = path.join(agentWorkspace, '.forger', 'tmp');
+    await mkdir(personalRunDir, { recursive: true });
+    await mkdir(antigravityLogDir, { recursive: true });
+    await writeFile(
+      path.join(personalRunDir, 'run-personal.log'),
+      `stdout failed inside ${agentWorkspace}\n`,
+      'utf8',
+    );
+    await writeFile(
+      path.join(antigravityLogDir, 'antigravity-run-personal.log'),
+      `antigravity trace inside ${antigravityLogDir}\n`,
+      'utf8',
+    );
+
+    const input = {
+      source: 'personal_agent_conversation',
+      conversationId: 'conv-personal',
+      runId: 'run-personal',
+      title: 'Mi agente',
+      provider: 'antigravity',
+      technicalCode: 'personal_agent_run_failed',
+      personalAgent: {
+        id: 'agent-1',
+        name: 'Mi agente',
+        description: 'Revisa tareas.',
+      },
+      conversation: {
+        title: 'Agent chat',
+        threadId: 'agy-thread-1',
+        runtime: { provider: 'antigravity', model: 'gemini-test' },
+        messages: [
+          { id: 'm1', role: 'user', content: 'Haz la revisión.', createdAt: '2026-07-09T12:00:00.000Z' },
+          { id: 'm2', role: 'assistant', content: 'Estoy revisando.', runId: 'run-personal', createdAt: '2026-07-09T12:00:01.000Z' },
+        ],
+      },
+      run: {
+        id: 'run-personal',
+        status: 'failed',
+        error: `failed at ${agentWorkspace}`,
+        progress: [{ id: 'p1', message: 'Ejecutando Antigravity', createdAt: '2026-07-09T12:00:02.000Z' }],
+        activity: { items: [{ id: 'a1', label: 'Terminal' }] },
+        createdAt: '2026-07-09T12:00:00.000Z',
+        updatedAt: '2026-07-09T12:01:00.000Z',
+      },
+    };
+
+    const {
+      buildConversationDiagnosticAttachments,
+      buildConversationDiagnosticReport,
+    } = distRequire('main/conversation-diagnostics.js');
+    const report = await buildConversationDiagnosticReport(makeOptions(root), input);
+    const attachments = await buildConversationDiagnosticAttachments(makeOptions(root), input);
+
+    const text = JSON.stringify(report);
+    assert.equal(report.source, 'personal_agent_conversation');
+    assert.equal(report.provider, 'antigravity');
+    assert.equal(report.technicalCode, 'personal_agent_run_failed');
+    assert.equal(report.payload.kind, 'personal_agent_conversation');
+    assert.equal(report.payload.personalAgent.id, 'agent-1');
+    assert.equal(report.payload.conversation.messages.length, 2);
+    assert.equal(report.payload.run.error.includes('FORGER_HOME/agents/agent-1/workspace'), true);
+    assert.equal(report.payload.providerSession.provider, 'antigravity');
+    assert.equal(report.payload.providerSession.source, 'antigravity_run_log');
+    assert.equal(report.payload.providerSession.transcript.text, undefined);
+    assert.equal(text.includes(agentWorkspace), false);
+    assert.deepEqual(attachments.map((attachment) => attachment.kind).sort(), ['antigravity_run_log', 'run_log']);
+    assert.equal(attachments.every((attachment) => !attachment.text.includes(agentWorkspace)), true);
+    assert.equal(attachments.some((attachment) => attachment.text.includes('FORGER_HOME/agents/agent-1/workspace')), true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('personal-agent Codex diagnostics search the personal-agent codex home before fallback', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'forger-personal-agent-codex-diagnostic-'));
+  try {
+    const metadataRoot = path.join(root, 'Forger', '.forger');
+    const sessionDir = path.join(metadataRoot, 'personal-agent-codex-home', 'agent-1', 'conv-personal', 'sessions', '2026', '07', '09');
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(
+      path.join(sessionDir, 'rollout.jsonl'),
+      [
+        JSON.stringify({ type: 'session_meta', payload: { id: 'codex-thread-personal' } }),
+        JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'agent evidence' } }),
+      ].join('\n'),
+      'utf8',
+    );
+
+    const input = {
+      source: 'personal_agent_conversation',
+      conversationId: 'conv-personal',
+      runId: 'run-codex',
+      personalAgent: { id: 'agent-1', name: 'Codex Agent' },
+      conversation: {
+        title: 'Agent chat',
+        threadId: 'codex-thread-personal',
+        runtime: { provider: 'codex', model: 'gpt-test' },
+        messages: [],
+      },
+    };
+
+    const {
+      buildConversationDiagnosticAttachments,
+      buildConversationDiagnosticReport,
+    } = distRequire('main/conversation-diagnostics.js');
+    const report = await buildConversationDiagnosticReport(makeOptions(root), input);
+    const attachments = await buildConversationDiagnosticAttachments(makeOptions(root), input);
+
+    assert.equal(report.payload.providerSession.provider, 'codex');
+    assert.equal(report.payload.providerSession.source, 'codex_session_jsonl');
+    assert.deepEqual(report.payload.providerSession.transcript.matched, ['codex-thread-personal']);
+    assert.equal(attachments.length, 1);
+    assert.equal(attachments[0].kind, 'codex_session_jsonl');
+    assert.equal(attachments[0].text.includes('agent evidence'), true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

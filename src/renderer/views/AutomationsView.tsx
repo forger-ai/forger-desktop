@@ -36,6 +36,7 @@ import {
 } from '@mui/material';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { ExternalMarkdownLink } from '@renderer/components/ExternalMarkdownLink';
 import type {
   AppSummary,
   Automation,
@@ -266,7 +267,16 @@ function MarkdownRunOutput({ content }: { content: string }) {
         },
       }}
     >
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          a: ({ href, children }) => (
+            <ExternalMarkdownLink href={href}>{children}</ExternalMarkdownLink>
+          ),
+        }}
+      >
+        {content}
+      </ReactMarkdown>
     </Box>
   );
 }

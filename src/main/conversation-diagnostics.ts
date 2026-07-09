@@ -54,7 +54,9 @@ export const buildConversationDiagnosticReport = async (
   const roots = reportSanitizerRoots(options, appId);
   const payload = input.source === 'app_agent_conversation'
     ? await buildAppAgentPayload(options, input)
-    : await buildDesktopChatPayload(options, input);
+    : input.source === 'personal_agent_conversation'
+      ? await buildPersonalAgentPayload(options, input)
+      : await buildDesktopChatPayload(options, input);
   return sanitizeReportPayload({
     source: input.source,
     ...(appId ? { appId } : {}),
@@ -116,7 +118,7 @@ const buildAppAgentPayload = async (
     provider: typeof input.provider === 'string'
       ? input.provider
       : typeof (conversation.runtime as Record<string, unknown> | undefined)?.provider === 'string'
-        ? (conversation.runtime as Record<string, unknown>).provider as 'codex' | 'claude'
+        ? (conversation.runtime as Record<string, unknown>).provider as string
         : undefined,
     threadId: typeof conversation.threadId === 'string' ? conversation.threadId : undefined,
     runId: input.runId || (snapshotRecord?.requestedRunId && typeof snapshotRecord.requestedRunId === 'string' ? snapshotRecord.requestedRunId : undefined),
@@ -131,20 +133,75 @@ const buildAppAgentPayload = async (
   };
 };
 
+const buildPersonalAgentPayload = async (
+  options: BuildConversationDiagnosticOptions,
+  input: PrepareConversationDiagnosticReportInput,
+): Promise<Record<string, unknown>> => {
+  const provider = input.provider ?? providerFromRuntime(input.conversation?.runtime);
+  const runLog = input.runId ? await readTail(personalAgentRunLogPath(options.getForgerMetadataRoot(), input.runId)) : null;
+  const antigravityLog = provider === 'antigravity' && input.runId && input.personalAgent?.id
+    ? await readTail(personalAgentAntigravityLogPath(options.getForgerHomeRoot(), input.personalAgent.id, input.runId))
+    : null;
+  const providerSession = await buildProviderSession({
+    provider,
+    threadId: input.conversation?.threadId,
+    runId: input.runId,
+    runLog,
+    antigravityLog,
+    codexHomeRoots: [
+      ...(input.personalAgent?.id
+        ? [personalAgentCodexHome(options.getForgerMetadataRoot(), input.personalAgent.id, input.conversationId)]
+        : []),
+      options.getCodexHome(),
+    ],
+  });
+  return {
+    kind: 'personal_agent_conversation',
+    personalAgent: input.personalAgent ?? null,
+    conversation: input.conversation ?? {
+      title: input.title,
+      messages: [],
+    },
+    run: input.run ?? (input.runId ? { id: input.runId } : null),
+    rawRunLog: summarizeTextArtifact(runLog),
+    antigravityRunLog: summarizeTextArtifact(antigravityLog),
+    providerSession,
+  };
+};
+
 const appAgentConversationCodexHome = (metadataRoot: string, appId: string, conversationId: string): string =>
   path.join(metadataRoot, 'app-agent-conversations-runtime', sanitizeId(appId), sanitizeId(conversationId), 'codex-home');
 
 const conversationCodexHome = (metadataRoot: string, appId: string, conversationId: string): string =>
   path.join(metadataRoot, 'chat-conversations-runtime', sanitizeId(appId), sanitizeId(conversationId), 'codex-home');
 
+const personalAgentCodexHome = (metadataRoot: string, agentId: string, conversationId: string): string =>
+  path.join(metadataRoot, 'personal-agent-codex-home', sanitizeId(agentId), sanitizeId(conversationId));
+
+const personalAgentRunLogPath = (metadataRoot: string, runId: string): string =>
+  getRunLogPath(path.join(metadataRoot, 'personal-agents'), runId);
+
+const personalAgentAntigravityLogPath = (forgerHomeRoot: string, agentId: string, runId: string): string =>
+  path.join(forgerHomeRoot, 'agents', sanitizeId(agentId), 'workspace', '.forger', 'tmp', `antigravity-${sanitizeId(runId)}.log`);
+
+const providerFromRuntime = (runtime?: Record<string, unknown>): string | undefined =>
+  typeof runtime?.provider === 'string' ? runtime.provider : undefined;
+
 const buildProviderSession = async (input: {
   provider?: string;
   threadId?: string | null;
   runId?: string | null;
   runLog?: Record<string, unknown> | null;
+  antigravityLog?: Record<string, unknown> | null;
   codexHomeRoots: string[];
 }): Promise<Record<string, unknown>> => {
-  const provider = input.provider === 'claude' ? 'claude' : input.provider === 'codex' ? 'codex' : undefined;
+  const provider = input.provider === 'claude'
+    ? 'claude'
+    : input.provider === 'codex'
+      ? 'codex'
+      : input.provider === 'antigravity'
+        ? 'antigravity'
+        : undefined;
   const threadId = typeof input.threadId === 'string' && input.threadId.trim() ? input.threadId.trim() : undefined;
   const runId = typeof input.runId === 'string' && input.runId.trim() ? input.runId.trim() : undefined;
   if (provider === 'codex') {
@@ -166,6 +223,15 @@ const buildProviderSession = async (input: {
       transcript: summarizeTextArtifact(input.runLog),
     };
   }
+  if (provider === 'antigravity') {
+    return {
+      provider,
+      threadId,
+      runId,
+      source: input.antigravityLog ? 'antigravity_run_log' : input.runLog ? 'run_log' : 'run_log_not_found',
+      transcript: summarizeTextArtifact(input.antigravityLog ?? input.runLog),
+    };
+  }
   return {
     provider: provider ?? null,
     threadId,
@@ -181,12 +247,15 @@ export const buildConversationDiagnosticAttachments = async (
 ): Promise<ConversationDiagnosticAttachmentUpload[]> => {
   const appId = input.appId || input.conversation?.appId;
   const roots = reportSanitizerRoots(options, appId);
+  const provider = input.provider ?? providerFromRuntime(input.conversation?.runtime);
   const attachments: ConversationDiagnosticAttachmentUpload[] = [];
   if (input.runId) {
-    const runLogPath = getRunLogPath(options.getForgerMetadataRoot(), input.runId);
+    const runLogPath = input.source === 'personal_agent_conversation'
+      ? personalAgentRunLogPath(options.getForgerMetadataRoot(), input.runId)
+      : getRunLogPath(options.getForgerMetadataRoot(), input.runId);
     const runLog = await buildAttachmentFromFile({
       filePath: runLogPath,
-      kind: input.provider === 'claude' ? 'claude_run_log' : 'run_log',
+      kind: provider === 'claude' ? 'claude_run_log' : 'run_log',
       filename: safeDiagnosticFilename(`run-log-${input.runId}.log`),
       contentType: 'text/plain',
       roots,
@@ -196,14 +265,16 @@ export const buildConversationDiagnosticAttachments = async (
     }
   }
 
-  if (input.provider === 'codex') {
+  if (provider === 'codex') {
     const codexHome = input.source === 'app_agent_conversation'
       ? appAgentConversationCodexHome(options.getForgerMetadataRoot(), input.appId ?? appId ?? 'forger', input.conversationId)
-      : conversationCodexHome(
-        options.getForgerMetadataRoot(),
-        input.conversation?.appId ?? input.appId ?? 'forger',
-        input.conversationId,
-      );
+      : input.source === 'personal_agent_conversation' && input.personalAgent?.id
+        ? personalAgentCodexHome(options.getForgerMetadataRoot(), input.personalAgent.id, input.conversationId)
+        : conversationCodexHome(
+          options.getForgerMetadataRoot(),
+          input.conversation?.appId ?? input.appId ?? 'forger',
+          input.conversationId,
+        );
     const codexFilePath = await findCodexSessionFile([
       codexHome,
       options.getCodexHome(),
@@ -219,6 +290,19 @@ export const buildConversationDiagnosticAttachments = async (
       if (codexSession) {
         attachments.push(codexSession);
       }
+    }
+  }
+
+  if (input.source === 'personal_agent_conversation' && provider === 'antigravity' && input.runId && input.personalAgent?.id) {
+    const antigravityLog = await buildAttachmentFromFile({
+      filePath: personalAgentAntigravityLogPath(options.getForgerHomeRoot(), input.personalAgent.id, input.runId),
+      kind: 'antigravity_run_log',
+      filename: safeDiagnosticFilename(`antigravity-run-log-${input.runId}.log`),
+      contentType: 'text/plain',
+      roots,
+    });
+    if (antigravityLog) {
+      attachments.push(antigravityLog);
     }
   }
 

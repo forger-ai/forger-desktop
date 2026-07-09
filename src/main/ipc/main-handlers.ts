@@ -20,6 +20,7 @@ import type { ForgerBackendClient } from '../forger-backend-client';
 import type { StoredForgerAccount } from '../forger-account-store';
 import type { MemoryStore } from '../memory-store';
 import type { AgentConversationManager } from '../personal-agents/agent-conversation-manager';
+import type { AgentRoutineManager } from '../personal-agents/agent-routine-manager';
 import type { AgentStore } from '../personal-agents/agent-store';
 import type { OfficialToolsService } from '../official-tools-service';
 import type { ConnectionsService } from '../connections-service';
@@ -41,17 +42,16 @@ import { registerAppCloudMessagingIpcHandlers } from './app-cloud-messaging-hand
 import { registerAppRuntimeIpcHandlers } from './app-runtime-handlers';
 import { registerChatIpcHandlers } from './chat-handlers';
 import { registerConnectionIpcHandlers } from './connection-handlers';
+import { registerExternalUrlIpcHandlers } from './external-url-handler';
 import { registerFileLibraryIpcHandlers } from './file-library-handlers';
 import { registerLiveVoiceInputIpcHandlers } from './live-voice-input-handlers';
 import { getMicrophonePermissionStatus, requestMicrophonePermission } from './microphone-permissions';
 import { registerPersonalAgentIpcHandlers } from './personal-agent-handlers';
+import { registerProviderAuthIpcHandlers } from './provider-auth-handlers';
 import { registerWakeWordIpcHandlers } from './wake-word-handlers';
-import { getAgentProviderUsageSafely } from '../provider-usage';
-import { readClaudeOAuthToken } from '../claude-oauth';
 import type {
   AgentDefaults,
   AgentProvider,
-  AgentProviderUsageResult,
   AntigravityAuthStatus,
   AgentToolPackageDefinition,
   AgentToolSettings,
@@ -212,6 +212,7 @@ export interface MainProcessIpcDeps {
   getMemoryStore: () => MemoryStore;
   getPersonalAgentStore: () => AgentStore;
   getPersonalAgentConversationManager: () => AgentConversationManager;
+  getPersonalAgentRoutineManager: () => AgentRoutineManager;
   getOfficialToolsService: () => OfficialToolsService;
   getConnectionsService: () => ConnectionsService;
   getSpeechToTextService: () => {
@@ -385,7 +386,7 @@ const updateInstalledManifestDisplayName = async (
 };
 
 export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
-  const { state, APP_CLAUDE_MODEL_OPTIONS, APP_CODEX_MODEL_OPTIONS, BetterSqlite3, BrowserWindow, CODEX_USAGE_DASHBOARD_URL, IPC_CHANNELS, app, appAgentConversationManager, appendInstallLog, buildAppSecretsState, buildCodexPromptWithAppContext, buildForgerToolsContextForApp, buildForgerToolsContextForFreeChat, canUseCloudDataSync, chatOrchestrator, cloudDeviceManager, confirmClaudeAuthConnection, connectClaudeAuth, disconnectClaudeAuth, signOutClaudeAuth, connectAntigravityAuth, startAntigravityAuthSession, writeAntigravityAuthSession, cancelAntigravityAuthSession, disconnectAntigravityAuth, connectCodexAuth, createLocalAppFromSkeleton, createRemoteAppBackup, decryptCloudMessage, decryptCloudMessages, listLocalCloudMessages, dialog, disconnectCodexAuth, ensureCatalogStatuses, failureDiagnostic, forgerBackendClient, forwardCloudSocialEvent, fs, getAppDetails, getBackupsManager, getBackgroundTaskStore, getClaudeAuthStatus, getAntigravityAuthStatus, getCloudIdentityStore, getCodexAuthStatus, getCodexHome, getDesktopUpdater, getDeveloperPathState, getFileLibrary, getForgerHomeRoot, getForgerMetadataRoot, getInstallLogPath, getMemoryStore, getPersonalAgentStore, getPersonalAgentConversationManager, getOfficialToolsService, getConnectionsService, getSpeechToTextService, getLiveVoiceInputService, getWakeWordService, getTextToSpeechService, getPrivateAppsRoot, getPrivateDataRoot, getRuntimeStatus, getLocalNetworkShareStatus, getRemoteNetworkShareStatus, getRemoteActivitySnapshot, getLlmRunsSnapshot, getSecretsStore, installAppRuntime, prepareSocialAppReview, finishSocialAppInstall, deleteQuarantinedSocialApp, getSocialAppReviewPromptContext, installSocialAppRuntime, installWelcome, ipcMain, listAppPrompts, listCatalogFromBackend, listLlmProviderProfiles, mainWindow, normalizeManifestAgentDefaults, openInstalledApp, startLocalNetworkShare, stopLocalNetworkShare, startRemoteNetworkShare, stopRemoteNetworkShare, openOrFocusFriendChatWindow, path, publicForgerAccount, registry, reinstallClaude, reinstallAntigravity, reinstallCodex, resolveAppIdForWebContents, resolveInstalledAgents, resolveInstalledAppSecrets, resolveInstalledManifest, resolveSelectedAppDisplayName, restoreAppPrompt, restoreAppUserVersionRuntime, restoreRemoteAppBackup, sanitizeRendererChatTrace, sendEncryptedCloudMessage, sendEncryptedCloudAppShareMessage, serializeErrorForInstallLog, setAppAutoSyncSetting, setActiveLlmProviderProfile, updateLlmProviderProfileDefaults, shell, signAppFolderGrant, stopInstalledApp, switchForgerAccountSession, toAppSummary, uninstallAppRuntime, upsertInstalledRecord, updateAgentDefaults, updateAgentToolApproval, updateAppDeveloperSettings, updateDeveloperMode, updateAppPrompt, updateAppRuntime, updateCodexDefaults, validateArchiveEntries, validateAppPrompt, zipDirectory } = deps;
+  const { state, APP_CLAUDE_MODEL_OPTIONS, APP_CODEX_MODEL_OPTIONS, BetterSqlite3, BrowserWindow, CODEX_USAGE_DASHBOARD_URL, IPC_CHANNELS, app, appAgentConversationManager, appendInstallLog, buildAppSecretsState, buildCodexPromptWithAppContext, buildForgerToolsContextForApp, buildForgerToolsContextForFreeChat, canUseCloudDataSync, chatOrchestrator, cloudDeviceManager, confirmClaudeAuthConnection, connectClaudeAuth, disconnectClaudeAuth, signOutClaudeAuth, connectAntigravityAuth, startAntigravityAuthSession, writeAntigravityAuthSession, cancelAntigravityAuthSession, disconnectAntigravityAuth, connectCodexAuth, createLocalAppFromSkeleton, createRemoteAppBackup, decryptCloudMessage, decryptCloudMessages, listLocalCloudMessages, dialog, disconnectCodexAuth, ensureCatalogStatuses, failureDiagnostic, forgerBackendClient, forwardCloudSocialEvent, fs, getAppDetails, getBackupsManager, getBackgroundTaskStore, getClaudeAuthStatus, getAntigravityAuthStatus, getCloudIdentityStore, getCodexAuthStatus, getCodexHome, getDesktopUpdater, getDeveloperPathState, getFileLibrary, getForgerHomeRoot, getForgerMetadataRoot, getInstallLogPath, getMemoryStore, getPersonalAgentStore, getPersonalAgentConversationManager, getPersonalAgentRoutineManager, getOfficialToolsService, getConnectionsService, getSpeechToTextService, getLiveVoiceInputService, getWakeWordService, getTextToSpeechService, getPrivateAppsRoot, getPrivateDataRoot, getRuntimeStatus, getLocalNetworkShareStatus, getRemoteNetworkShareStatus, getRemoteActivitySnapshot, getLlmRunsSnapshot, getSecretsStore, installAppRuntime, prepareSocialAppReview, finishSocialAppInstall, deleteQuarantinedSocialApp, getSocialAppReviewPromptContext, installSocialAppRuntime, installWelcome, ipcMain, listAppPrompts, listCatalogFromBackend, listLlmProviderProfiles, mainWindow, normalizeManifestAgentDefaults, openInstalledApp, startLocalNetworkShare, stopLocalNetworkShare, startRemoteNetworkShare, stopRemoteNetworkShare, openOrFocusFriendChatWindow, path, publicForgerAccount, registry, reinstallClaude, reinstallAntigravity, reinstallCodex, resolveAppIdForWebContents, resolveInstalledAgents, resolveInstalledAppSecrets, resolveInstalledManifest, resolveSelectedAppDisplayName, restoreAppPrompt, restoreAppUserVersionRuntime, restoreRemoteAppBackup, sanitizeRendererChatTrace, sendEncryptedCloudMessage, sendEncryptedCloudAppShareMessage, serializeErrorForInstallLog, setAppAutoSyncSetting, setActiveLlmProviderProfile, updateLlmProviderProfileDefaults, shell, signAppFolderGrant, stopInstalledApp, switchForgerAccountSession, toAppSummary, uninstallAppRuntime, upsertInstalledRecord, updateAgentDefaults, updateAgentToolApproval, updateAppDeveloperSettings, updateDeveloperMode, updateAppPrompt, updateAppRuntime, updateCodexDefaults, validateArchiveEntries, validateAppPrompt, zipDirectory } = deps;
   const resolveReportRoot = (reader: () => string): string | undefined => {
     try {
       return typeof reader === 'function' ? reader() : undefined;
@@ -1393,81 +1394,38 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
     });
     return { success: true };
   });
-  ipcMain.handle(IPC_CHANNELS.openExternalUrl, async (_event, targetUrl: string) => {
-    try {
-      const parsed = new URL(targetUrl);
-      if (parsed.protocol !== 'https:') {
-        return { success: false, userMessage: 'No pudimos abrir ese enlace.', technicalCode: 'unsupported_url_protocol' };
-      }
-
-      await shell.openExternal(parsed.toString());
-      return { success: true };
-    } catch (error) {
-      return { success: false, userMessage: 'No pudimos abrir ese enlace.', ...failureDiagnostic(error, 'open_external_url_failed') };
-    }
-  });
-  ipcMain.handle(IPC_CHANNELS.getAgentProviderUsage, async (): Promise<AgentProviderUsageResult> => await getAgentProviderUsageSafely({
+  registerExternalUrlIpcHandlers({ IPC_CHANNELS, failureDiagnostic, fs, ipcMain, path, shell });
+  registerProviderAuthIpcHandlers({
+    IPC_CHANNELS,
+    CODEX_USAGE_DASHBOARD_URL,
     fs,
+    ipcMain,
     path,
-    codexUsageDashboardUrl: CODEX_USAGE_DASHBOARD_URL,
+    shell,
+    getMainWindow: () => mainWindow,
+    getForgerMetadataRoot,
     getCodexAuthStatus,
     getClaudeAuthStatus,
     getAntigravityAuthStatus,
+    listLlmProviderProfiles,
+    setActiveLlmProviderProfile,
+    updateLlmProviderProfileDefaults,
+    connectCodexAuth,
+    disconnectCodexAuth,
+    reinstallCodex,
+    confirmClaudeAuthConnection,
+    connectClaudeAuth,
+    disconnectClaudeAuth,
+    signOutClaudeAuth,
+    reinstallClaude,
+    connectAntigravityAuth,
+    startAntigravityAuthSession,
+    writeAntigravityAuthSession,
+    cancelAntigravityAuthSession,
+    disconnectAntigravityAuth,
+    reinstallAntigravity,
     failureDiagnostic,
-    readClaudeOAuthToken,
-    appendLog: async (event, context) => {
-      await appendDesktopLog({
-        metadataRoot: getForgerMetadataRoot(),
-        service: 'agent-runtime',
-        event,
-        context,
-      });
-    },
-  }));
-  ipcMain.handle(IPC_CHANNELS.listLlmProviderProfiles, async () => await listLlmProviderProfiles());
-  ipcMain.handle(IPC_CHANNELS.setActiveLlmProviderProfile, async (_event, input: SetActiveLlmProviderProfileInput) =>
-    await setActiveLlmProviderProfile(input),
-  );
-  ipcMain.handle(IPC_CHANNELS.updateLlmProviderProfileDefaults, async (_event, input: UpdateLlmProviderProfileDefaultsInput) =>
-    await updateLlmProviderProfileDefaults(input),
-  );
-  ipcMain.handle(IPC_CHANNELS.getCodexAuthStatus, async () => await getCodexAuthStatus());
-  ipcMain.handle(IPC_CHANNELS.openCodexUsageDashboard, async () => {
-    try {
-      await shell.openExternal(CODEX_USAGE_DASHBOARD_URL);
-      return { success: true };
-    } catch (error) {
-      return { success: false, ...failureDiagnostic(error, 'open_codex_usage_failed'), userMessage: 'No pudimos abrir el panel de uso de Codex.' };
-    }
   });
-  ipcMain.handle(IPC_CHANNELS.connectCodexAuth, async () => await connectCodexAuth());
-  ipcMain.handle(IPC_CHANNELS.disconnectCodexAuth, async () => await disconnectCodexAuth());
-  ipcMain.handle(IPC_CHANNELS.reinstallCodex, async () => await reinstallCodex());
-  ipcMain.handle(IPC_CHANNELS.getClaudeAuthStatus, async () => await getClaudeAuthStatus());
-  ipcMain.handle(IPC_CHANNELS.confirmClaudeAuthConnection, async () => await confirmClaudeAuthConnection());
-  ipcMain.handle(IPC_CHANNELS.connectClaudeAuth, async () => await connectClaudeAuth());
-  ipcMain.handle(IPC_CHANNELS.disconnectClaudeAuth, async () => await disconnectClaudeAuth());
-  ipcMain.handle(IPC_CHANNELS.signOutClaudeAuth, async () => await signOutClaudeAuth());
-  ipcMain.handle(IPC_CHANNELS.reinstallClaude, async () => await reinstallClaude());
-  ipcMain.handle(IPC_CHANNELS.getAntigravityAuthStatus, async () => await getAntigravityAuthStatus());
-  ipcMain.handle(IPC_CHANNELS.connectAntigravityAuth, async () => await connectAntigravityAuth());
-  ipcMain.handle(IPC_CHANNELS.startAntigravityAuthSession, async () => await startAntigravityAuthSession((event) => {
-    mainWindow?.webContents.send(IPC_CHANNELS.antigravityAuthSessionEvent, event);
-  }));
-  ipcMain.handle(IPC_CHANNELS.writeAntigravityAuthSession, async (_event, input: { sessionId?: unknown; input?: unknown }) => {
-    if (typeof input?.sessionId !== 'string' || typeof input?.input !== 'string') {
-      return { success: false, userMessage: 'Invalid Antigravity auth input.', technicalCode: 'invalid_antigravity_auth_input' };
-    }
-    return await writeAntigravityAuthSession(input.sessionId, input.input);
-  });
-  ipcMain.handle(IPC_CHANNELS.cancelAntigravityAuthSession, async (_event, sessionId: unknown) => {
-    if (typeof sessionId !== 'string') {
-      return { success: false, userMessage: 'Invalid Antigravity auth session.', technicalCode: 'invalid_antigravity_auth_session' };
-    }
-    return await cancelAntigravityAuthSession(sessionId);
-  });
-  ipcMain.handle(IPC_CHANNELS.disconnectAntigravityAuth, async () => await disconnectAntigravityAuth());
-  ipcMain.handle(IPC_CHANNELS.reinstallAntigravity, async () => await reinstallAntigravity());
   ipcMain.handle(IPC_CHANNELS.listAgentTools, async (_event, locale?: string) => getAgentToolPackages(locale));
   ipcMain.handle(IPC_CHANNELS.getAgentToolSettings, async () => state.agentToolSettings);
   ipcMain.handle(IPC_CHANNELS.updateAgentToolApproval, async (_event, input: UpdateAgentToolApprovalInput) => {
@@ -1532,6 +1490,7 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
     fs,
     getPrivateDataRoot,
     getPersonalAgentConversationManager,
+    getPersonalAgentRoutineManager,
     getPersonalAgentStore,
     ipcMain,
     path,

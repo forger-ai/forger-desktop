@@ -14,6 +14,7 @@ import type {
   AgentToolDefinition,
   AppSummary,
   AppSecretDeclaration,
+  AutomationFrequency,
   BasicActionResult,
   CatalogApp,
   ChatCreatedAppRequest,
@@ -70,30 +71,8 @@ import type { LlmProviderAuthProfileResolver } from '../llm-provider/types';
 import { connectionToolDefinitionsFromState } from './mcp-connection-tools';
 import { createAppRuntimeDiagnostics } from './app-runtime-diagnostics';
 import { createConnectionGrantRequester, createPublishedAppInfoUpdater } from './main-lifecycle-mcp-handlers';
-
-type RemoteTunnelCloseEvent = { type: 'remote_tunnel_close'; session_id: string };
-type RemoteAgentSessionCloseEvent = { type: string; agent_id?: string; agentId?: string; session_id?: string; sessionId?: string };
-
-const isRemoteTunnelCloseEvent = (event: unknown): event is RemoteTunnelCloseEvent =>
-  Boolean(
-    event
-      && typeof event === 'object'
-      && (event as { type?: unknown }).type === 'remote_tunnel_close'
-      && typeof (event as { session_id?: unknown }).session_id === 'string',
-  );
-
-const isRemoteAgentSessionCloseEvent = (event: unknown): event is RemoteAgentSessionCloseEvent =>
-  Boolean(
-    event
-      && typeof event === 'object'
-      && ['agent_access_disconnect_requested', 'remote_agent_session_close', 'personal_agent_session_close'].includes(String((event as { type?: unknown }).type))
-      && (
-        typeof (event as { agent_id?: unknown }).agent_id === 'string'
-        || typeof (event as { agentId?: unknown }).agentId === 'string'
-        || typeof (event as { session_id?: unknown }).session_id === 'string'
-        || typeof (event as { sessionId?: unknown }).sessionId === 'string'
-      ),
-  );
+import { registerGracefulShutdownHandlers } from './main-lifecycle-shutdown';
+import { isRemoteAgentSessionCloseEvent, isRemoteTunnelCloseEvent } from './remote-session-events';
 
 export interface MainLifecycleDeps {
   AGENT_TOOL_DEFINITIONS: AgentToolDefinition[];
@@ -181,15 +160,26 @@ export interface MainLifecycleDeps {
 	  getPersonalAgentHeartbeat: AsyncFn;
 	  getPersonalAgentStore: () => {
 	    requireAgent: (agentId: string) => Promise<PersonalAgent>;
+    requireRoutine: (routineId: string) => Promise<{ agentId: string }>;
 	    updateAgentPermissions: (input: { agentId: string; appIds?: string[] }) => Promise<PersonalAgent>;
 	    listPeerGrants: (agentId: string) => Promise<PersonalAgent['peerAgentGrants']>;
 	    listRecentPeerThreadsForAgent: (agentId: string, limit?: number) => Promise<PersonalAgentPeerThread[]>;
 	    requirePeerThreadAccess: (input: { agentId: string; threadId: string }) => Promise<PersonalAgentPeerThread>;
 	  };
-	  getPersonalAgentConversationManager: () => {
-	    askPeerAgent: AsyncFn;
-	  };
-	  getOfficialToolsService: () => NonNullable<MainLifecycleState['officialToolsService']>;
+		  getPersonalAgentConversationManager: () => {
+		    askPeerAgent: AsyncFn;
+		  };
+  getPersonalAgentRoutineManager?: () => {
+    initialize: () => Promise<void>;
+    dispose: () => void;
+    scheduleWakeup: AsyncFn;
+    cancelWakeup: AsyncFn;
+    create: AsyncFn;
+    list: AsyncFn;
+    update: AsyncFn;
+    delete: AsyncFn;
+  };
+		  getOfficialToolsService: () => NonNullable<MainLifecycleState['officialToolsService']>;
   getConnectionsService: () => NonNullable<MainLifecycleState['connectionsService']>;
   getSelfOAuthCallbackService: () => NonNullable<MainLifecycleState['selfOAuthCallbackService']>;
   getSpeechToTextService: () => NonNullable<MainLifecycleState['speechToTextService']>;
@@ -350,6 +340,7 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
     getPersonalAgentHeartbeat,
     getPersonalAgentStore,
     getPersonalAgentConversationManager,
+    getPersonalAgentRoutineManager,
     getOfficialToolsService,
     getConnectionsService,
     getSelfOAuthCallbackService,
@@ -425,12 +416,15 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
   } = deps;
   const getLlmProviderProfilesRoot = (): string | undefined => getProviderProfilesRoot?.();
   const resolveLlmAuthProfile: LlmProviderAuthProfileResolver = resolveLlmProviderAuthProfile ?? (async () => null);
-
+  const requirePersonalAgentRoutineManager = () => {
+    const manager = getPersonalAgentRoutineManager?.();
+    if (!manager) throw new Error('personal_agent_routines_unavailable');
+    return manager;
+  };
   const getClaudeAuthenticatedForForger = getClaudeConnectedForForger ?? (async () => {
     const status = await getClaudeAuthStatus();
     return status.authenticated;
   });
-
   const appFolderGrantStore = new AppFolderGrantStore(getForgerMetadataRoot());
 
   const {
@@ -812,7 +806,56 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
 	          technicalCode: error instanceof Error ? error.message : 'personal_agent_peer_thread_read_failed',
 	        };
 	      }
-	    },
+    },
+    schedulePersonalAgentWakeup: async (input: { agentId: string; conversationId: string; runId: string; seconds: number; prompt: string }) =>
+      await requirePersonalAgentRoutineManager().scheduleWakeup({
+        agentId: input.agentId,
+        conversationId: input.conversationId,
+        createdByRunId: input.runId,
+        seconds: input.seconds,
+        prompt: input.prompt,
+      }),
+    cancelPersonalAgentWakeup: async (input: { wakeupId?: string; conversationId?: string }) =>
+      await requirePersonalAgentRoutineManager().cancelWakeup(input),
+    createAgentRoutine: async (input: {
+      agentId: string;
+      name: string;
+      prompt: string;
+      frequency: AutomationFrequency;
+      missedRunPolicy?: 'skip' | 'always' | 'within_window';
+      missedRunWindowMinutes?: number;
+      enabled?: boolean;
+      authorizationText: string;
+    }) => await requirePersonalAgentRoutineManager().create(input.agentId, input),
+    listAgentRoutines: async ({ agentId }: { agentId: string }) =>
+      await requirePersonalAgentRoutineManager().list({ agentId }),
+    updateAgentRoutine: async (input: {
+      agentId: string;
+      routineId: string;
+      name: string;
+      prompt: string;
+      frequency: AutomationFrequency;
+      missedRunPolicy?: 'skip' | 'always' | 'within_window';
+      missedRunWindowMinutes?: number;
+      enabled?: boolean;
+      authorizationText: string;
+    }) => {
+      const routine = await getPersonalAgentStore().requireRoutine(input.routineId);
+      if (routine.agentId !== input.agentId) {
+        throw new Error('personal_agent_routine_not_found');
+      }
+      return await requirePersonalAgentRoutineManager().update(input);
+    },
+    deleteAgentRoutine: async (input: { agentId: string; routineId: string; authorizationText: string }) => {
+      const routine = await getPersonalAgentStore().requireRoutine(input.routineId);
+      if (routine.agentId !== input.agentId) {
+        throw new Error('personal_agent_routine_not_found');
+      }
+      return await requirePersonalAgentRoutineManager().delete({
+        routineId: input.routineId,
+        authorizationText: input.authorizationText,
+      });
+    },
 	    finishSocialAppInstall,
     deleteQuarantinedSocialApp,
     recordCreatedApp: (runId: string, createdApp: ChatCreatedAppRequest) => state.chatOrchestrator?.recordCreatedAppFromMcp(runId, createdApp),
@@ -1471,6 +1514,12 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
   await startupLogger.step('startup:workflow_manager:initialize', async () => {
     await state.workflowManager?.initialize();
   });
+  await startupLogger.step('startup:personal_agent_routine_manager:initialize', async () => {
+    const routineManager = getPersonalAgentRoutineManager?.();
+    if (!routineManager) return;
+    state.personalAgentRoutineManager = routineManager;
+    await routineManager.initialize();
+  });
   await startupLogger.step('startup:memory_maintenance_manager:create', () => {
   state.memoryMaintenanceManager = new MemoryMaintenanceManager({
     forgerHomeRoot: getForgerHomeRoot(),
@@ -1540,60 +1589,12 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
   }
 });
 
-let gracefulShutdownStarted = false;
-const performGracefulShutdown = async (): Promise<void> => {
-  state.memoryMaintenanceManager?.dispose();
-  state.automationManager?.dispose();
-  state.workflowManager?.dispose();
-  state.appMcpManager?.dispose();
-  await Promise.allSettled([
-    state.localNetworkShareManager?.stopAll?.() ?? Promise.resolve(),
-    state.remoteNetworkShareManager?.stopAll?.() ?? Promise.resolve(),
-    state.remoteAgentSessionService?.stopAll?.() ?? Promise.resolve(),
-  ]);
-  await Promise.resolve(state.desktopRuntimeBridge?.stop());
-  state.desktopRuntimeBridge = null;
-  await Promise.resolve(state.selfOAuthCallbackService?.stop());
-  state.selfOAuthCallbackService = null;
-  await Promise.resolve(state.officialToolsService?.stopActiveTools?.());
-  state.cloudDeviceManager?.stop();
-  state.devCatalogService?.stop?.();
-  state.forgerMcpServer?.stop();
-  state.forgerMcpServer = null;
-  state.speechToTextService?.stop();
-  state.speechToTextService = null;
-  state.textToSpeechService?.stop();
-  state.textToSpeechService = null;
-  state.wakeWordService?.stop();
-  state.wakeWordService = null;
-
-  const runningAppIds = [...runningApps.keys()];
-  await Promise.allSettled(runningAppIds.map((appId) => stopInstalledApp(appId)));
-
-  await Promise.allSettled([...runningApps.values()].flatMap((running) => [
-    terminateProcess(running.backend),
-    terminateProcess(running.frontend),
-    closeServer(running.proxyServer),
-  ]));
-};
-
-app.on('before-quit', (event) => {
-  if (gracefulShutdownStarted) {
-    return;
-  }
-  gracefulShutdownStarted = true;
-  const shouldResumeQuit = typeof event?.preventDefault === 'function';
-  event?.preventDefault?.();
-  void performGracefulShutdown().finally(() => {
-    if (shouldResumeQuit) {
-      app.quit();
-    }
-  });
-});
-
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit();
-  }
+registerGracefulShutdownHandlers({
+  app,
+  state,
+  runningApps,
+  stopInstalledApp,
+  terminateProcess,
+  closeServer,
 });
 };

@@ -140,29 +140,10 @@ const findTextBody = (payload: Record<string, unknown>): string | undefined => {
   return undefined;
 };
 
-const sanitizeHtmlBody = (html: string): string => {
-  let sanitized = html
-    .replace(/<!--[\s\S]*?-->/g, '')
-    .replace(/<\s*(script|style|iframe|object|embed|form|input|button|textarea|select|option|meta|link)[^>]*>[\s\S]*?<\s*\/\s*\1\s*>/gi, '')
-    .replace(/<\s*(script|style|iframe|object|embed|form|input|button|textarea|select|option|meta|link)\b[^>]*\/?>/gi, '')
-    .replace(/\s+on[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
-    .replace(/\s+style\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
-    .replace(/\s+(href|src)\s*=\s*("[^"]*javascript:[^"]*"|'[^']*javascript:[^']*'|[^\s>]*javascript:[^\s>]*)/gi, '');
-  sanitized = sanitized.replace(/<img\b([^>]*?)>/gi, (_match, attrs: string) => {
-    const nextAttrs = String(attrs)
-      .replace(/\s+srcset\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
-      .replace(/\s+src\s*=\s*"https?:\/\/[^"]*"/gi, '')
-      .replace(/\s+src\s*=\s*'https?:\/\/[^']*'/gi, '')
-      .replace(/\s+src\s*=\s*https?:\/\/[^\s>]+/gi, '');
-    return `<img${nextAttrs}>`;
-  });
-  return sanitized.trim();
-};
-
 const findHtmlBody = (payload: Record<string, unknown>): string | undefined => {
   const body = asRecord(payload.body);
   if (payload.mimeType === 'text/html' && typeof body.data === 'string') {
-    return sanitizeHtmlBody(decodeBase64Url(body.data));
+    return decodeBase64Url(body.data);
   }
   const parts = Array.isArray(payload.parts) ? payload.parts : [];
   for (const part of parts) {

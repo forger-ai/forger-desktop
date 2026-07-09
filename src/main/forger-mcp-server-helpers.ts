@@ -81,6 +81,12 @@ export const toConnectionCallInput = (
 
 export const isInternalMcpTool = (toolId: AgentToolId): boolean =>
   toolId === 'forger_ask_question'
+  || toolId === 'wakeup_in'
+  || toolId === 'cancel_wakeup'
+  || toolId === 'create_agent_routine'
+  || toolId === 'list_agent_routines'
+  || toolId === 'update_agent_routine'
+  || toolId === 'delete_agent_routine'
   || toolId === 'forger_list_agent_peers'
   || toolId === 'forger_ask_agent'
   || toolId === 'forger_read_agent_thread'

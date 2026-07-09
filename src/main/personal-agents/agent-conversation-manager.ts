@@ -1,7 +1,7 @@
 import path from 'node:path';
 
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
-import type { AgentRunActivity, AgentRunActivityStatus, AgentRuntime, AgentRuntimeRequest, PersonalAgent, PersonalAgentConversation, PersonalAgentConversationEvent, PersonalAgentConversationGetInput, PersonalAgentConversationStartInput, PersonalAgentMessage, PersonalAgentMessageSendInput, PersonalAgentPeerThread, PersonalAgentRun } from '../../shared/types';
+import type { AgentRunActivity, AgentRunActivityStatus, AgentRuntime, AgentRuntimeRequest, PersonalAgent, PersonalAgentConversation, PersonalAgentConversationEvent, PersonalAgentConversationGetInput, PersonalAgentConversationStartInput, PersonalAgentMessage, PersonalAgentMessageSendInput, PersonalAgentMessageSource, PersonalAgentPeerThread, PersonalAgentRun } from '../../shared/types';
 import { existsDirectory, runCommandCapture } from '../app-agent/process';
 import type { LlmAppMcpServerConfig } from '../app-agent/types';
 import {
@@ -88,6 +88,15 @@ export interface PersonalAgentAskPeerResult {
   technicalCode?: string;
 }
 
+export interface PersonalAgentScheduledMessageInput {
+  conversationId: string;
+  content: string;
+  source: Exclude<PersonalAgentMessageSource, 'human'>;
+  routineId?: string | null;
+  wakeupId?: string | null;
+  onRunSettled?: (result: { success: true } | { success: false; error: unknown }) => void | Promise<void>;
+}
+
 export class AgentConversationManager {
   private readonly activeChildren = new Map<string, ChildProcessWithoutNullStreams>();
   private readonly activities = new Map<string, AgentRunActivity>();
@@ -134,9 +143,38 @@ export class AgentConversationManager {
   }
 
   public async sendMessage(input: PersonalAgentMessageSendInput): Promise<PersonalAgentConversation> {
+    return await this.sendMessageInternal(input, { source: 'human' });
+  }
+
+  public async sendScheduledMessage(input: PersonalAgentScheduledMessageInput): Promise<PersonalAgentConversation> {
+    return await this.sendMessageInternal(
+      { conversationId: input.conversationId, content: input.content },
+      {
+        source: input.source,
+        routineId: input.routineId,
+        wakeupId: input.wakeupId,
+        bypassWakeupBlock: true,
+        onRunSettled: input.onRunSettled,
+      },
+    );
+  }
+
+  private async sendMessageInternal(
+    input: PersonalAgentMessageSendInput,
+    options: {
+      source: PersonalAgentMessageSource;
+      routineId?: string | null;
+      wakeupId?: string | null;
+      bypassWakeupBlock?: boolean;
+      onRunSettled?: (result: { success: true } | { success: false; error: unknown }) => void | Promise<void>;
+    },
+  ): Promise<PersonalAgentConversation> {
     const conversation = await this.options.store.requireConversation(input.conversationId);
     if (conversation.readOnly || conversation.origin === 'agent') {
       throw new Error('personal_agent_conversation_read_only');
+    }
+    if (!options.bypassWakeupBlock && conversation.scheduledWakeup?.status === 'scheduled') {
+      throw new Error('personal_agent_wakeup_active');
     }
     if (conversation.activeRun && !isTerminalRunStatus(conversation.activeRun.status)) {
       throw new Error('personal_agent_run_active');
@@ -164,15 +202,26 @@ export class AgentConversationManager {
       conversationId: conversation.id,
       runId: run.id,
       role: 'user',
+      authorType: options.source === 'human' ? 'human' : 'system',
+      source: options.source,
+      routineId: options.routineId,
+      wakeupId: options.wakeupId,
       content,
       files: input.sharedFiles,
     });
+    if (options.source === 'human' && conversation.draftMessage) {
+      await this.options.store.updateConversationDraft({ conversationId: conversation.id, draftMessage: '' });
+    }
     const updated = await this.requireUpdatedConversation(conversation.id);
     this.emit({ type: 'message.created', conversation: updated, message, run: updated.activeRun });
-    void this.executeRunSafely(updated.id, run.id, {
+    const execution = this.executeRunSafely(updated.id, run.id, {
       conversationId: updated.id,
       callStackAgentIds: [agent.id],
     });
+    if (options.onRunSettled) {
+      void execution.then((result) => options.onRunSettled?.(result));
+    }
+    void execution;
     return updated;
   }
 

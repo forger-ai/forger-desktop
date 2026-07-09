@@ -31,7 +31,7 @@ import type { Automation, AutomationRun, AutomationRunSummary, AutomationUpsertI
 import type { Workflow, WorkflowApproveNodeInput, WorkflowRun, WorkflowRunSummary, WorkflowUpdatedEvent, WorkflowUpsertInput } from './workflows';
 import type { BackgroundTask, BackgroundTaskEvent, BackgroundTaskUpsertInput } from './background-tasks';
 import type { LlmRunsSnapshot } from './llm-runs';
-import type { PersonalAgent, PersonalAgentConversation, PersonalAgentConversationEvent, PersonalAgentConversationGetInput, PersonalAgentConversationsListInput, PersonalAgentConversationStartInput, PersonalAgentCreateInput, PersonalAgentDeleteInput, PersonalAgentGrantOptions, PersonalAgentMessageSendInput, PersonalAgentPeerThread, PersonalAgentPeerThreadGetInput, PersonalAgentPeerThreadsListInput, PersonalAgentUpdatePermissionsInput, PersonalAgentWorkspaceEntry, PersonalAgentWorkspaceFile, PersonalAgentWorkspaceFileReadInput, PersonalAgentWorkspaceFileWriteInput, PersonalAgentWorkspaceListInput } from './personal-agents';
+import type { PersonalAgent, PersonalAgentConversation, PersonalAgentConversationDraftUpdateInput, PersonalAgentConversationEvent, PersonalAgentConversationGetInput, PersonalAgentConversationsListInput, PersonalAgentConversationStartInput, PersonalAgentCreateInput, PersonalAgentDeleteInput, PersonalAgentGrantOptions, PersonalAgentMessageSendInput, PersonalAgentPeerThread, PersonalAgentPeerThreadGetInput, PersonalAgentPeerThreadsListInput, PersonalAgentRoutine, PersonalAgentRoutineDeleteInput, PersonalAgentRoutineListInput, PersonalAgentRoutineRun, PersonalAgentRoutineRunNowInput, PersonalAgentRoutineSetEnabledInput, PersonalAgentRoutineUpsertInput, PersonalAgentScheduledWakeup, PersonalAgentUpdatePermissionsInput, PersonalAgentWakeupCancelInput, PersonalAgentWorkspaceEntry, PersonalAgentWorkspaceFile, PersonalAgentWorkspaceFileReadInput, PersonalAgentWorkspaceFileWriteInput, PersonalAgentWorkspaceListInput } from './personal-agents';
 import type { RemoteActivitySnapshot } from './remote-activity';
 
 export type MicrophonePermissionStatus = 'not-determined' | 'granted' | 'denied' | 'restricted' | 'unknown' | 'unsupported';
@@ -272,6 +272,14 @@ export interface ForgerDesktopApi {
   personalAgentStartConversation: (input: PersonalAgentConversationStartInput) => Promise<PersonalAgentConversation>;
   personalAgentSendMessage: (input: PersonalAgentMessageSendInput) => Promise<PersonalAgentConversation>;
   personalAgentGetConversation: (input: PersonalAgentConversationGetInput) => Promise<PersonalAgentConversation | null>;
+  personalAgentConversationDraftUpdate: (input: PersonalAgentConversationDraftUpdateInput) => Promise<PersonalAgentConversation>;
+  personalAgentWakeupCancel: (input: PersonalAgentWakeupCancelInput) => Promise<PersonalAgentScheduledWakeup | null>;
+  personalAgentRoutinesList: (input: PersonalAgentRoutineListInput) => Promise<PersonalAgentRoutine[]>;
+  personalAgentRoutinesCreate: (input: PersonalAgentRoutineUpsertInput & { agentId: string }) => Promise<PersonalAgentRoutine>;
+  personalAgentRoutinesUpdate: (input: PersonalAgentRoutineUpsertInput & { routineId: string }) => Promise<PersonalAgentRoutine>;
+  personalAgentRoutinesSetEnabled: (input: PersonalAgentRoutineSetEnabledInput) => Promise<PersonalAgentRoutine>;
+  personalAgentRoutinesDelete: (input: PersonalAgentRoutineDeleteInput) => Promise<{ success: boolean }>;
+  personalAgentRoutinesRunNow: (input: PersonalAgentRoutineRunNowInput) => Promise<PersonalAgentRoutineRun>;
   personalAgentPeerThreadsList: (input: PersonalAgentPeerThreadsListInput) => Promise<PersonalAgentPeerThread[]>;
   personalAgentPeerThreadGet: (input: PersonalAgentPeerThreadGetInput) => Promise<PersonalAgentPeerThread | null>;
   onPersonalAgentConversationEvent: (listener: (event: PersonalAgentConversationEvent) => void) => () => void;

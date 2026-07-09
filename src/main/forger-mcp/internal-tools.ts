@@ -24,6 +24,60 @@ export const INTERNAL_MCP_TOOL_DEFINITIONS: AgentToolDefinition[] = [
     defaultRequiresApproval: false,
   },
   {
+    id: 'wakeup_in',
+    packageId: 'forger:internal',
+    name: 'Despertar en segundos',
+    description: 'Programa un despertar one-shot en esta misma conversacion de agente personal. Bloquea el envio hasta despertar o cancelar.',
+    category: 'consulta',
+    risk: 'bajo',
+    defaultRequiresApproval: false,
+  },
+  {
+    id: 'cancel_wakeup',
+    packageId: 'forger:internal',
+    name: 'Cancelar despertar',
+    description: 'Cancela el despertar one-shot pendiente de esta conversacion de agente personal.',
+    category: 'consulta',
+    risk: 'bajo',
+    defaultRequiresApproval: false,
+  },
+  {
+    id: 'create_agent_routine',
+    packageId: 'forger:internal',
+    name: 'Crear rutina de agente',
+    description: 'Crea una rutina periodica one-shot para el agente personal actual, con thread propio conversable.',
+    category: 'actualizacion',
+    risk: 'medio',
+    defaultRequiresApproval: false,
+  },
+  {
+    id: 'list_agent_routines',
+    packageId: 'forger:internal',
+    name: 'Listar rutinas de agente',
+    description: 'Lista las rutinas del agente personal actual.',
+    category: 'consulta',
+    risk: 'bajo',
+    defaultRequiresApproval: false,
+  },
+  {
+    id: 'update_agent_routine',
+    packageId: 'forger:internal',
+    name: 'Actualizar rutina de agente',
+    description: 'Actualiza una rutina existente del agente personal actual con autorizacion textual.',
+    category: 'actualizacion',
+    risk: 'medio',
+    defaultRequiresApproval: false,
+  },
+  {
+    id: 'delete_agent_routine',
+    packageId: 'forger:internal',
+    name: 'Eliminar rutina de agente',
+    description: 'Elimina una rutina del agente personal actual conservando el thread conversable.',
+    category: 'actualizacion',
+    risk: 'medio',
+    defaultRequiresApproval: false,
+  },
+  {
     id: 'forger_ask_agent',
     packageId: 'forger:internal',
     name: 'Preguntar a otro agente',
@@ -107,6 +161,15 @@ export const PERSONAL_AGENT_PEER_TOOL_IDS = new Set<AgentToolId>([
   'forger_list_agent_peers',
   'forger_ask_agent',
   'forger_read_agent_thread',
+]);
+
+export const PERSONAL_AGENT_ROUTINE_TOOL_IDS = new Set<AgentToolId>([
+  'wakeup_in',
+  'cancel_wakeup',
+  'create_agent_routine',
+  'list_agent_routines',
+  'update_agent_routine',
+  'delete_agent_routine',
 ]);
 
 export const WORKFLOW_MANAGEMENT_TOOL_IDS = new Set<AgentToolId>([

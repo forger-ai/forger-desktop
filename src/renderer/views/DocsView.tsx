@@ -16,6 +16,7 @@ import {
 import { useEffect, useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { ExternalMarkdownLink } from '@renderer/components/ExternalMarkdownLink';
 import { forgerDocsBundle, type ForgerDocEntry, type ForgerDocsLanguage } from '@renderer/docs/forger-docs.generated';
 import type { Locale } from '@renderer/i18n';
 
@@ -199,16 +200,9 @@ export function DocsView({ locale, onOpenExternalUrl }: DocsViewProps) {
                   h3: ({ children }) => <h3 id={slugifyHeading(String(children))}>{children}</h3>,
                   h4: ({ children }) => <h4 id={slugifyHeading(String(children))}>{children}</h4>,
                   a: ({ href, children }) => (
-                    <a
-                      href={href}
-                      onClick={(event) => {
-                        if (!href) return;
-                        event.preventDefault();
-                        onOpenExternalUrl(href);
-                      }}
-                    >
+                    <ExternalMarkdownLink href={href} onOpenExternalUrl={onOpenExternalUrl}>
                       {children}
-                    </a>
+                    </ExternalMarkdownLink>
                   ),
                 }}
               >

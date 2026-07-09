@@ -37,6 +37,7 @@ const createHarness = ({ connectedProviders = ['codex'], officialTools, connecti
   const { handlers, ipcMain } = createIpcMainRecorder();
   const storeCalls = [];
   const managerCalls = [];
+  const routineCalls = [];
   const agentRecord = existingAgent ?? {
     id: 'agent-1',
     name: 'Ops',
@@ -94,12 +95,47 @@ const createHarness = ({ connectedProviders = ['codex'], officialTools, connecti
       return { conversationId: input.conversationId, messages: [] };
     },
   };
+  const routineManager = {
+    updateDraft: async (input) => {
+      routineCalls.push(['updateDraft', input]);
+      return { id: input.conversationId, draftMessage: input.draftMessage };
+    },
+    cancelWakeup: async (input) => {
+      routineCalls.push(['cancelWakeup', input]);
+      return input.conversationId ? { id: 'wakeup-1', conversationId: input.conversationId, status: 'canceled' } : null;
+    },
+    list: async (input) => {
+      routineCalls.push(['listRoutines', input]);
+      return [{ id: 'routine-1', agentId: input.agentId }];
+    },
+    create: async (agentId, input) => {
+      routineCalls.push(['createRoutine', agentId, input]);
+      return { id: 'routine-2', agentId, ...input };
+    },
+    update: async (input) => {
+      routineCalls.push(['updateRoutine', input]);
+      return { id: input.routineId, ...input };
+    },
+    setEnabled: async (input) => {
+      routineCalls.push(['setRoutineEnabled', input]);
+      return { id: input.routineId, enabled: input.enabled };
+    },
+    delete: async (input) => {
+      routineCalls.push(['deleteRoutine', input]);
+      return { success: true };
+    },
+    runNow: async (input) => {
+      routineCalls.push(['runRoutineNow', input]);
+      return { id: 'routine-run-1', routineId: input.routineId, status: 'queued' };
+    },
+  };
 
   registerPersonalAgentIpcHandlers({
     IPC_CHANNELS,
     ipcMain,
     getPersonalAgentStore: () => store,
     getPersonalAgentConversationManager: () => conversationManager,
+    getPersonalAgentRoutineManager: () => routineManager,
     listInstalledApps: () =>
       installedApps ?? [
         { id: 'finance-os', name: 'Finance OS', description: 'Finanzas', status: 'installed' },
@@ -133,7 +169,7 @@ const createHarness = ({ connectedProviders = ['codex'], officialTools, connecti
     isAgentProviderConnected: async (provider) => connectedProviders.includes(provider),
   });
 
-  return { handlers, storeCalls, managerCalls };
+  return { handlers, storeCalls, managerCalls, routineCalls };
 };
 
 test('personal agent IPC lists agents and delegates deletion, conversations, and workspace reads/writes', async () => {
@@ -170,6 +206,88 @@ test('personal agent IPC lists agents and delegates deletion, conversations, and
     ['listWorkspace', 'agent-1'],
     ['readWorkspaceTextFile', { agentId: 'agent-1', path: 'notes.md' }],
     ['writeWorkspaceTextFile', { agentId: 'agent-1', path: 'notes.md', text: 'nuevo' }],
+  ]);
+});
+
+test('personal agent IPC delegates routines, wakeup cancel, and conversation drafts', async () => {
+  const { handlers, routineCalls } = createHarness();
+
+  assert.deepEqual(
+    await handlers.get(IPC_CHANNELS.personalAgentConversationDraftUpdate)(null, {
+      conversationId: 'conv-1',
+      draftMessage: 'Draft while waiting.',
+    }),
+    { id: 'conv-1', draftMessage: 'Draft while waiting.' },
+  );
+  assert.deepEqual(
+    await handlers.get(IPC_CHANNELS.personalAgentWakeupCancel)(null, { conversationId: 'conv-1' }),
+    { id: 'wakeup-1', conversationId: 'conv-1', status: 'canceled' },
+  );
+  assert.deepEqual(
+    await handlers.get(IPC_CHANNELS.personalAgentRoutinesList)(null, { agentId: 'agent-1' }),
+    [{ id: 'routine-1', agentId: 'agent-1' }],
+  );
+  assert.equal(
+    (await handlers.get(IPC_CHANNELS.personalAgentRoutinesCreate)(null, {
+      agentId: 'agent-1',
+      name: 'Daily check',
+      prompt: 'Check status.',
+      frequency: { type: 'daily', timeOfDay: '09:00' },
+      authorizationText: 'User approved',
+    })).id,
+    'routine-2',
+  );
+  assert.equal(
+    (await handlers.get(IPC_CHANNELS.personalAgentRoutinesUpdate)(null, {
+      routineId: 'routine-1',
+      name: 'Weekly check',
+      prompt: 'Check weekly.',
+      frequency: { type: 'weekly', timeOfDay: '08:00', weeklyDay: 1 },
+      authorizationText: 'User approved',
+    })).id,
+    'routine-1',
+  );
+  assert.deepEqual(
+    await handlers.get(IPC_CHANNELS.personalAgentRoutinesSetEnabled)(null, {
+      routineId: 'routine-1',
+      enabled: false,
+      authorizationText: 'User approved',
+    }),
+    { id: 'routine-1', enabled: false },
+  );
+  assert.deepEqual(
+    await handlers.get(IPC_CHANNELS.personalAgentRoutinesRunNow)(null, { routineId: 'routine-1' }),
+    { id: 'routine-run-1', routineId: 'routine-1', status: 'queued' },
+  );
+  assert.deepEqual(
+    await handlers.get(IPC_CHANNELS.personalAgentRoutinesDelete)(null, {
+      routineId: 'routine-1',
+      authorizationText: 'User approved',
+    }),
+    { success: true },
+  );
+
+  assert.deepEqual(routineCalls, [
+    ['updateDraft', { conversationId: 'conv-1', draftMessage: 'Draft while waiting.' }],
+    ['cancelWakeup', { conversationId: 'conv-1' }],
+    ['listRoutines', { agentId: 'agent-1' }],
+    ['createRoutine', 'agent-1', {
+      agentId: 'agent-1',
+      name: 'Daily check',
+      prompt: 'Check status.',
+      frequency: { type: 'daily', timeOfDay: '09:00' },
+      authorizationText: 'User approved',
+    }],
+    ['updateRoutine', {
+      routineId: 'routine-1',
+      name: 'Weekly check',
+      prompt: 'Check weekly.',
+      frequency: { type: 'weekly', timeOfDay: '08:00', weeklyDay: 1 },
+      authorizationText: 'User approved',
+    }],
+    ['setRoutineEnabled', { routineId: 'routine-1', enabled: false, authorizationText: 'User approved' }],
+    ['runRoutineNow', { routineId: 'routine-1' }],
+    ['deleteRoutine', { routineId: 'routine-1', authorizationText: 'User approved' }],
   ]);
 });
 

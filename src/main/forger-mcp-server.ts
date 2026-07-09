@@ -44,8 +44,11 @@ import type {
   Workflow,
   WorkflowRunSummary,
   WorkflowUpsertInput,
+  AutomationFrequency,
   PersonalAgentPeerGrant,
   PersonalAgentPeerThread,
+  PersonalAgentRoutine,
+  PersonalAgentScheduledWakeup,
   SocialUserApp,
 } from '../shared/types';
 import type { PersonalAgentAskPeerInput, PersonalAgentAskPeerResult } from './personal-agents/agent-conversation-manager';
@@ -56,13 +59,19 @@ import {
   getChromeAppRuntimeUrlBlock,
   INTERNAL_MCP_TOOL_DEFINITIONS,
   PERSONAL_AGENT_PEER_TOOL_IDS,
+  PERSONAL_AGENT_ROUTINE_TOOL_IDS,
   WORKFLOW_MANAGEMENT_TOOL_IDS,
   WORKFLOW_NODE_TOOL_IDS,
 } from './forger-mcp/internal-tools';
 import {
+  executeConnectionGrantRequest,
+  executeConnectionManagementTool,
+  getEffectiveConnectionGrants,
+} from './forger-mcp/connection-tools';
+import { executePersonalAgentRoutineTool } from './forger-mcp/personal-agent-routine-tools';
+import {
   cleanString,
   connectionActionGranted,
-  dedupeConnectionGrants,
   getAppToolGrantMcpCopy,
   getBearerToken,
   getOfficialToolIdForAction,
@@ -150,6 +159,31 @@ interface ForgerMcpServerOptions {
     locale?: string,
   ) => Promise<{ success: boolean; userMessage: string; app?: SocialUserApp; technicalCode?: string }>;
   addAppToPersonalAgent?: (input: { agentId: string; appId: string }) => Promise<{ success: boolean; appId: string; alreadyGranted: boolean; userMessage: string; technicalCode?: string }>;
+  schedulePersonalAgentWakeup?: (input: { agentId: string; conversationId: string; runId: string; seconds: number; prompt: string }) => Promise<PersonalAgentScheduledWakeup>;
+  cancelPersonalAgentWakeup?: (input: { wakeupId?: string; conversationId?: string }) => Promise<PersonalAgentScheduledWakeup | null>;
+  createAgentRoutine?: (input: {
+    agentId: string;
+    name: string;
+    prompt: string;
+    frequency: AutomationFrequency;
+    missedRunPolicy?: 'skip' | 'always' | 'within_window';
+    missedRunWindowMinutes?: number;
+    enabled?: boolean;
+    authorizationText: string;
+  }) => Promise<PersonalAgentRoutine>;
+  listAgentRoutines?: (input: { agentId: string }) => Promise<PersonalAgentRoutine[]>;
+  updateAgentRoutine?: (input: {
+    agentId: string;
+    routineId: string;
+    name: string;
+    prompt: string;
+    frequency: AutomationFrequency;
+    missedRunPolicy?: 'skip' | 'always' | 'within_window';
+    missedRunWindowMinutes?: number;
+    enabled?: boolean;
+    authorizationText: string;
+  }) => Promise<PersonalAgentRoutine>;
+  deleteAgentRoutine?: (input: { agentId: string; routineId: string; authorizationText: string }) => Promise<{ success: boolean }>;
   listAgentPeers?: (input: { agentId: string }) => Promise<{ success: boolean; peers: PersonalAgentPeerGrant[]; recentThreads?: PersonalAgentPeerThread[] }>;
   askAgent?: (input: PersonalAgentAskPeerInput) => Promise<PersonalAgentAskPeerResult>;
   readAgentThread?: (input: { agentId: string; threadId: string }) => Promise<{ success: boolean; thread?: PersonalAgentPeerThread; userMessage?: string; technicalCode?: string }>;
@@ -511,7 +545,7 @@ export class ForgerMcpServer {
       : session.caller === 'personal-agent' || session.caller === 'workflow'
         ? new Set(session.forgerToolActionIds)
         : null;
-    const connectionGrants = await this.getEffectiveConnectionGrants(session);
+    const connectionGrants = await getEffectiveConnectionGrants(session, this.options);
     const allowedConnectionActions = new Set(connectionGrants.flatMap((grant) => grant.actions));
     const allToolDefinitions = await this.getAllToolDefinitions();
     const tools = allToolDefinitions.filter((tool) => {
@@ -519,6 +553,9 @@ export class ForgerMcpServer {
         return false;
       }
       if (PERSONAL_AGENT_PEER_TOOL_IDS.has(tool.id) && (session.caller !== 'personal-agent' || !session.personalAgentId || !session.personalAgentConversationId)) {
+        return false;
+      }
+      if (PERSONAL_AGENT_ROUTINE_TOOL_IDS.has(tool.id) && (session.caller !== 'personal-agent' || !session.personalAgentId || !session.personalAgentConversationId)) {
         return false;
       }
       if (WORKFLOW_NODE_TOOL_IDS.has(tool.id) && session.caller !== 'workflow') {
@@ -833,7 +870,7 @@ export class ForgerMcpServer {
     }
 
     if (isConnectionAction(toolId)) {
-      const grants = await this.getEffectiveConnectionGrants(session);
+      const grants = await getEffectiveConnectionGrants(session, this.options);
       if (!connectionActionGranted(grants, toolId)) {
         const result = {
           success: false,
@@ -852,7 +889,7 @@ export class ForgerMcpServer {
     }
 
     if (toolId === 'forger_request_connection_grant') {
-      const result = await this.executeConnectionGrantRequest(session, args);
+      const result = await executeConnectionGrantRequest(session, args, this.options);
       await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
       return result;
     }
@@ -885,7 +922,7 @@ export class ForgerMcpServer {
     this.emitToolProgress(session, toolId, toolId === 'forger_restart_app' ? copy.restartPreparing : '');
 
     if (isConnectionManagementTool(toolId)) {
-      const result = await this.executeConnectionManagementTool(session, toolId, args);
+      const result = await executeConnectionManagementTool(session, toolId, args, this.options);
       await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
       return withToolAuthorization(result, approval);
     }
@@ -985,6 +1022,12 @@ export class ForgerMcpServer {
       }
       await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
       return withToolAuthorization(result, approval);
+    }
+
+    if (PERSONAL_AGENT_ROUTINE_TOOL_IDS.has(toolId)) {
+      const result = await executePersonalAgentRoutineTool(session, toolId, args, this.options);
+      await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
+      return result;
     }
 
     if (toolId === 'forger_list_agent_peers') {
@@ -1213,7 +1256,7 @@ export class ForgerMcpServer {
     }
 
     if (isConnectionAction(toolId)) {
-      const grants = await this.getEffectiveConnectionGrants(session);
+      const grants = await getEffectiveConnectionGrants(session, this.options);
       const result = await this.options.callConnectionFromSession(
         toConnectionCallInput(toolId, args),
         grants,
@@ -1468,94 +1511,6 @@ export class ForgerMcpServer {
         technicalCode: code,
       };
     }
-  }
-
-  private async executeConnectionManagementTool(
-    session: AgentMcpSession,
-    toolId: AgentToolId,
-    args: Record<string, unknown>,
-  ): Promise<unknown> {
-    const grants = await this.getEffectiveConnectionGrants(session);
-    if (toolId === 'forger_connection_list') {
-      const state = await this.options.listConnectionsForSession(grants);
-      const type = cleanString(args.type);
-      if (!type) {
-        return { success: true, ...state };
-      }
-      return {
-        success: true,
-        types: state.types.filter((definition) => definition.type === type),
-        instances: state.instances.filter((instance) => instance.type === type),
-        grants: state.grants.filter((grant) => grant.type === type),
-      };
-    }
-    if (toolId === 'forger_connection_status') {
-      const type = cleanString(args.type);
-      if (!type) {
-        return { success: false, userMessage: 'Connection type is required.', technicalCode: 'connection_type_required' };
-      }
-      return await this.options.callConnectionFromSession(
-        {
-          type,
-          actionId: `${type}.connection.status`,
-          input: {},
-          ...(cleanString(args.connectionId) ? { connectionId: cleanString(args.connectionId) } : {}),
-        },
-        grants,
-        { caller: session.caller, appId: session.appId, locale: session.locale },
-      );
-    }
-    return { success: false, userMessage: getSharedCopy(session.locale).tools.unavailable, technicalCode: 'tool_not_found' };
-  }
-
-  private async executeConnectionGrantRequest(
-    session: AgentMcpSession,
-    args: Record<string, unknown>,
-  ): Promise<unknown> {
-    const appId = cleanString(args.appId) || session.appId;
-    const type = cleanString(args.type);
-    if (!appId || !type) {
-      return { success: false, appId, userMessage: 'Choose the app and connection type.', technicalCode: 'connection_grant_input_invalid' };
-    }
-    if (!this.options.setAppConnectionGrant) {
-      return { success: false, appId, userMessage: 'Connection grants are not available yet.', technicalCode: 'connection_grant_unavailable' };
-    }
-    if (session.caller === 'personal-agent' && !session.appIds.includes(appId)) {
-      return { success: false, appId, userMessage: getSharedCopy(session.locale).tools.unavailable, technicalCode: 'personal_agent_app_not_granted' };
-    }
-    const requestPermission = this.options.requestPermission(session.runId, {
-      pluginId: 'forger-app-connections',
-      permission: `optional_connection:${appId}:${type}`,
-      reason: cleanString(args.reason) || `Allow this app to use ${type}.`,
-      risk: 'medium',
-      resource: `Connection ${type}`,
-    });
-    if (!requestPermission) {
-      return { success: false, appId, userMessage: 'Could not show the connection approval prompt.', technicalCode: 'permission_unavailable' };
-    }
-    const approved = await requestPermission;
-    if (!approved) {
-      return { success: false, appId, userMessage: 'The connection was not allowed for this app.', technicalCode: approved === null ? 'permission_unavailable' : 'connection_grant_rejected' };
-    }
-    const connectionIds = Array.isArray(args.connectionIds)
-      ? args.connectionIds.map(cleanString).filter(Boolean)
-      : undefined;
-    const requirement = await this.options.setAppConnectionGrant({
-      appId,
-      type,
-      granted: true,
-      ...(connectionIds?.length ? { connectionIds } : {}),
-    });
-    return requirement
-      ? { success: true, appId, requirement, userMessage: 'The connection is allowed for this app.' }
-      : { success: false, appId, userMessage: 'This app did not declare that connection.', technicalCode: 'app_connection_not_declared' };
-  }
-
-  private async getEffectiveConnectionGrants(session: AgentMcpSession): Promise<ConnectionSessionGrant[]> {
-    if (session.caller === 'app-agent') {
-      return await this.options.listConnectionGrantsForApp(session.appId);
-    }
-    return dedupeConnectionGrants(session.connectionGrants);
   }
 
   private emitToolProgress(session: AgentMcpSession, toolId: AgentToolId, message: string): void {

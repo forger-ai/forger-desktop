@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
 
 import { createIpcMainRecorder } from './electron-test-helpers.mjs';
 
@@ -20,6 +22,7 @@ const createDeps = async (overrides = {}) => {
     },
     shell: {
       openExternal: async () => undefined,
+      openPath: async () => '',
     },
   };
 
@@ -271,24 +274,55 @@ test('main IPC cloud and social handlers return explicit errors when backend ser
 });
 
 test('main IPC external link handlers reject unsafe URLs and return diagnostics on shell failures', async () => {
+  const openedPaths = [];
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'forger-open-link-'));
+  const filePath = path.join(tempDir, 'note.txt');
+  const blockedPath = path.join(tempDir, 'blocked.txt');
+  const homePath = path.join(os.homedir(), 'forger-open-link-missing.txt');
+  await fs.writeFile(filePath, 'hello', 'utf8');
+  await fs.writeFile(blockedPath, 'blocked', 'utf8');
   const { handlers, IPC_CHANNELS } = await createDeps({
     shell: {
       openExternal: async () => {
         throw new Error('shell_blocked');
       },
+      openPath: async (targetPath) => {
+        openedPaths.push(targetPath);
+        return targetPath === blockedPath ? 'permission denied' : '';
+      },
     },
   });
 
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.openExternalUrl)(null, 'http://example.com'), {
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.openExternalUrl)(null, 'javascript:alert(1)'), {
     success: false,
     userMessage: 'No pudimos abrir ese enlace.',
     technicalCode: 'unsupported_url_protocol',
+  });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.openExternalUrl)(null, 'relative/file.txt'), {
+    success: false,
+    userMessage: 'No pudimos abrir ese enlace.',
+    technicalCode: 'unsupported_url_protocol',
+  });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.openExternalUrl)(null, 'http://example.com'), {
+    success: false,
+    userMessage: 'No pudimos abrir ese enlace.',
+    technicalCode: 'shell_blocked',
   });
   assert.deepEqual(await handlers.get(IPC_CHANNELS.openExternalUrl)(null, 'https://example.com'), {
     success: false,
     userMessage: 'No pudimos abrir ese enlace.',
     technicalCode: 'shell_blocked',
   });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.openExternalUrl)(null, `${filePath}:12`), { success: true });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.openExternalUrl)(null, pathToFileURL(filePath).toString()), { success: true });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.openExternalUrl)(null, '~/forger-open-link-missing.txt'), { success: true });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.openExternalUrl)(null, blockedPath), {
+    success: false,
+    userMessage: 'No pudimos abrir ese enlace.',
+    technicalCode: 'open_local_path_failed',
+    sensitiveDetails: { error: 'permission denied' },
+  });
+  assert.deepEqual(openedPaths, [filePath, filePath, homePath, blockedPath]);
   assert.deepEqual(await handlers.get(IPC_CHANNELS.openCodexUsageDashboard)(), {
     success: false,
     technicalCode: 'shell_blocked',
@@ -988,6 +1022,10 @@ test('main IPC delegates cloud account, social, telemetry, auth, and browser suc
     sendEncryptedCloudMessage: async (input) => ({ id: 9, ...input }),
     shell: {
       openExternal: async (url) => calls.push(['openExternal', url]),
+      openPath: async (targetPath) => {
+        calls.push(['openPath', targetPath]);
+        return '';
+      },
     },
     state: {
       agentToolSettings: { approvals: { gmail: true } },
@@ -1067,10 +1105,12 @@ test('main IPC delegates cloud account, social, telemetry, auth, and browser suc
   assert.equal((await handlers.get(IPC_CHANNELS.submitDesktopErrorReport)(null, { source: 'main' })).report.arch, process.arch);
 
   assert.deepEqual(await handlers.get(IPC_CHANNELS.openExternalUrl)(null, 'https://example.com/path'), { success: true });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.openExternalUrl)(null, 'http://example.com/path'), { success: true });
   assert.deepEqual(await handlers.get(IPC_CHANNELS.openCodexUsageDashboard)(), { success: true });
   assert.equal((await handlers.get(IPC_CHANNELS.getAgentProviderUsage)()).providers[0].provider, 'codex');
   assert.deepEqual(calls.filter(([name]) => name === 'openExternal').map((entry) => entry[1]), [
     'https://example.com/path',
+    'http://example.com/path',
     'https://platform.openai.com/usage',
   ]);
   assert.deepEqual(await handlers.get(IPC_CHANNELS.getCodexAuthStatus)(), { installed: true, authenticated: true });
