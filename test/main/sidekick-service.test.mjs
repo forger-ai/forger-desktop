@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs/promises';
-import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -10,8 +9,6 @@ import test from 'node:test';
 import { WebSocket } from 'ws';
 
 import { clearDistModule, withMockedElectron } from './electron-test-helpers.mjs';
-
-const require = createRequire(import.meta.url);
 
 const createSafeStorage = () => ({
   isEncryptionAvailable: () => true,

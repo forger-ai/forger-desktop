@@ -1588,7 +1588,6 @@ export class AgentStore {
     }
     return realCandidatePath;
   }
-
   private async resolveWorkspaceFile(agentId: string, relativePath: string): Promise<string> {
     const cleanRelativePath = path.normalize(relativePath);
     if (!cleanRelativePath || cleanRelativePath.startsWith('..') || path.isAbsolute(cleanRelativePath)) {

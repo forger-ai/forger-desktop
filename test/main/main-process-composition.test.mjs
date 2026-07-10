@@ -94,18 +94,22 @@ test('main-process composes lifecycle wiring with mocked Electron without launch
   assert.equal(whenReadyCalls, 2);
   assert.deepEqual(
     appListeners.map(([event]) => event),
-    ['before-quit', 'window-all-closed'],
+    ['before-quit', 'before-quit', 'window-all-closed'],
   );
   assert.equal(constructedWindows.length, 0);
   assert.equal(ipcRecorder.handlers.size, 0);
   assert.deepEqual(shellCalls, []);
 
-  const beforeQuit = appListeners.find(([event]) => event === 'before-quit')?.[1];
+  const beforeQuitListeners = appListeners
+    .filter(([event]) => event === 'before-quit')
+    .map(([, listener]) => listener);
   const windowAllClosed = appListeners.find(([event]) => event === 'window-all-closed')?.[1];
-  assert.equal(typeof beforeQuit, 'function');
+  assert.equal(beforeQuitListeners.length, 2);
   assert.equal(typeof windowAllClosed, 'function');
 
-  assert.doesNotThrow(() => beforeQuit());
+  for (const beforeQuit of beforeQuitListeners) {
+    assert.doesNotThrow(() => beforeQuit());
+  }
   assert.doesNotThrow(() => windowAllClosed());
   assert.equal(app.quitCalls, process.platform === 'darwin' ? 0 : 1);
 });

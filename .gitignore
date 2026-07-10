@@ -2,6 +2,8 @@ node_modules/
 dist/
 dist-electron/
 coverage/
+__pycache__/
+*.pyc
 release/
 resources/app-skeletons/
 src/renderer/docs/forger-docs.generated.ts

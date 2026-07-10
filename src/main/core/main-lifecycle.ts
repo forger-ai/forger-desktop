@@ -1596,12 +1596,5 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
   }
 });
 
-registerGracefulShutdownHandlers({
-  app,
-  state,
-  runningApps,
-  stopInstalledApp,
-  terminateProcess,
-  closeServer,
-});
+registerGracefulShutdownHandlers({ app, state, runningApps, stopInstalledApp, terminateProcess, closeServer });
 };

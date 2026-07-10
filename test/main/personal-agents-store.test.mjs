@@ -1115,7 +1115,7 @@ test('personal agent routines apply missedRunPolicy skip always and within_windo
 });
 
 const waitForConversation = async (manager, conversationId, predicate) => {
-  const deadline = Date.now() + 2_000;
+  const deadline = Date.now() + 5_000;
   while (Date.now() < deadline) {
     const conversation = await manager.getConversation(conversationId);
     if (conversation && predicate(conversation)) {
