@@ -213,8 +213,15 @@ export const persistAgentRunActivity = async (
   activity: AgentRunActivity,
 ): Promise<void> => {
   const filePath = path.join(metadataRoot, 'agent-run-activity', `${safePathSegment(activity.runId)}.json`);
-  await fs.mkdir(path.dirname(filePath), { recursive: true });
-  await fs.writeFile(filePath, `${JSON.stringify(activity, null, 2)}\n`, 'utf8');
+  try {
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    await fs.writeFile(filePath, `${JSON.stringify(activity, null, 2)}\n`, 'utf8');
+  } catch (error) {
+    if ((error as { code?: unknown }).code === 'ENOENT') {
+      return;
+    }
+    throw error;
+  }
 };
 
 export const normalizeActivityStatus = (status: string): AgentRunActivityStatus => {
