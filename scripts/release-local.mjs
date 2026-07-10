@@ -115,6 +115,35 @@ const exists = async (filePath) => {
   }
 };
 
+const isMacRuntimeArchive = (filePath) => {
+  const fileName = path.basename(filePath);
+  return fileName.endsWith('.tar.gz') && fileName.includes('darwin');
+};
+
+export const collectMacRuntimeArchives = async (runtimeRoots) => {
+  const archives = [];
+  const visit = async (entryPath) => {
+    const stats = await fs.stat(entryPath);
+    if (stats.isDirectory()) {
+      const entries = await fs.readdir(entryPath);
+      await Promise.all(entries.map((entry) => visit(path.join(entryPath, entry))));
+      return;
+    }
+
+    if (stats.isFile() && isMacRuntimeArchive(entryPath)) {
+      archives.push(entryPath);
+    }
+  };
+
+  for (const runtimeRoot of runtimeRoots) {
+    if (await exists(runtimeRoot)) {
+      await visit(runtimeRoot);
+    }
+  }
+
+  return archives.sort((left, right) => left.localeCompare(right));
+};
+
 const getCurrentPlatform = () => {
   if (process.platform === 'darwin') {
     return 'mac';
@@ -254,9 +283,11 @@ const prepareMacSigningKeychain = async () => {
 
 const signMacRuntimeArchives = async () => {
   const identity = await resolveMacSigningIdentity();
+  const pythonRuntimeRoot = path.join(rootDir, 'resources', 'runtimes', 'python');
+  const gitRuntimeRoot = path.join(rootDir, 'resources', 'runtimes', 'git');
   const runtimeRoots = [
-    path.join(rootDir, 'resources', 'runtimes', 'python'),
-    path.join(rootDir, 'resources', 'runtimes', 'git'),
+    pythonRuntimeRoot,
+    gitRuntimeRoot,
   ];
   const backupRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'forger-runtime-backups-'));
   const backups = [];
@@ -273,20 +304,11 @@ const signMacRuntimeArchives = async () => {
     return async () => {};
   }
 
-  const archives = (
-    await Promise.all(existingRuntimeRoots.map((runtimeRoot) => capture('find', [
-      runtimeRoot,
-      '-type',
-      'f',
-      '(',
-      '-name',
-      '*darwin*.tar.gz',
-      '-o',
-      '-name',
-      '*apple-darwin*.tar.gz',
-      ')',
-    ])))
-  ).flatMap((output) => output.split('\n').filter(Boolean));
+  const archives = await collectMacRuntimeArchives(existingRuntimeRoots);
+  const pythonArchives = archives.filter((archive) => archive.startsWith(`${pythonRuntimeRoot}${path.sep}`));
+  if ((await exists(pythonRuntimeRoot)) && pythonArchives.length === 0) {
+    throw new Error('Expected macOS Python runtime archives to sign, but none were discovered.');
+  }
 
   const restoreBackups = async () => {
     for (const [backupPath, originalPath] of backups.reverse()) {
@@ -473,6 +495,7 @@ const notarizeMacArtifact = async (artifactPath, waitForResult) => {
       const logOutput = await capture('xcrun', logArgs);
       await fs.writeFile(logPath, logOutput);
       console.error(`Apple notarization log written to ${logPath}`);
+      console.error(logOutput);
     }
 
     throw new Error(`Apple notarization failed with status: ${status}`);
@@ -589,7 +612,9 @@ const main = async () => {
   }
 };
 
-main().catch((error) => {
-  console.error(error instanceof Error ? error.message : error);
-  process.exit(1);
-});
+if (path.resolve(process.argv[1] ?? '') === __filename) {
+  main().catch((error) => {
+    console.error(error instanceof Error ? error.message : error);
+    process.exit(1);
+  });
+}
