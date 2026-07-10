@@ -74,6 +74,9 @@ test('preload forwards representative commands to the expected IPC channels with
   await api.setActiveLlmProviderProfile({ provider: 'codex', profileId: 'codex:system' });
   await api.updateLlmProviderProfileDefaults({ provider: 'codex', profileId: 'codex:system', model: 'gpt-5' });
   await api.openExternalUrl('https://forger.ai/help');
+  await api.sidekicksStartMicrophoneRecording({ sidekickId: 'sidekick-001' });
+  await api.sidekicksStopMicrophoneRecording({ sidekickId: 'sidekick-001' });
+  await api.sidekicksReadMicrophoneRecording({ sidekickId: 'sidekick-001', recordingId: 'recording-001' });
   await api.desktopUpdateQuitForInstall();
   await api.dbQueryTable('finance-os', 'transactions', 25);
   await api.automationsGetRunTranscript('run-99');
@@ -94,6 +97,9 @@ test('preload forwards representative commands to the expected IPC channels with
     ['forger:llm-provider-profiles:set-active', { provider: 'codex', profileId: 'codex:system' }],
     ['forger:llm-provider-profiles:update-defaults', { provider: 'codex', profileId: 'codex:system', model: 'gpt-5' }],
     ['forger:open-external-url', 'https://forger.ai/help'],
+    ['forger:sidekicks:microphone:start', { sidekickId: 'sidekick-001' }],
+    ['forger:sidekicks:microphone:stop', { sidekickId: 'sidekick-001' }],
+    ['forger:sidekicks:microphone:read', { sidekickId: 'sidekick-001', recordingId: 'recording-001' }],
     ['forger:desktop-update:quit-for-install'],
     ['forger:db:query-table', 'finance-os', 'transactions', 25],
     ['forger:automations:get-run-transcript', 'run-99'],

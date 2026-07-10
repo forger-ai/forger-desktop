@@ -229,7 +229,7 @@ export function CatalogView({
                   ...(canShareLocalNetwork ? [{ label: t.localNetwork.menuAction, onClick: () => onStartLocalNetworkShare(app.id) }] : []),
                   ...(canShareRemoteNetwork ? [{ label: t.remoteNetwork.menuAction, onClick: () => onStartRemoteNetworkShare(app.id) }] : []),
                   ...(canStopRemoteNetwork ? [{ label: t.remoteNetwork.stop, onClick: () => onStopRemoteNetworkShare(app.id) }] : []),
-                  ...(isPrivateLocal ? [{ label: t.locale === 'es' ? 'Subir a Social' : 'Upload to Social', onClick: () => onUploadSocial(app.id) }] : []),
+                  ...(isPrivateLocal ? [{ label: t.social.uploadTitle, onClick: () => onUploadSocial(app.id) }] : []),
                 ]}
                 installProgress={installProgress}
                 onPrimaryAction={() => {

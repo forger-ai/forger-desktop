@@ -177,6 +177,7 @@ test('agent auth status reads Codex app-server rate limits when authenticated', 
       const child = new FakeChildProcess();
       child.stdin = {
         destroyed: false,
+        on: () => {},
         write: (text) => {
           const message = JSON.parse(text);
           appServerMessages.push(message);
@@ -1446,6 +1447,7 @@ test('agent auth Antigravity embedded session opens OAuth URL in main and redact
       child = new FakeChildProcess();
       child.stdin = {
         destroyed: false,
+        on: () => {},
         write: (value) => written.push(value),
       };
       return child;

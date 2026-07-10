@@ -44,6 +44,7 @@ import { RemoteAgentSessionService } from '../personal-agents/remote-session-ser
 import { PromptOverridesStore, buildPromptBases, promptOverrideErrorResult } from '../prompt-overrides';
 import { OfficialToolsService, normalizeAppToolDeclarations } from '../official-tools-service';
 import { ConnectionsService } from '../connections-service';
+import { SidekickService } from '../sidekick-service';
 import { cleanupLegacyExternalToolState } from '../legacy-external-tools-cleanup';
 import { AudioRuntimeBroker } from '../audio-runtime-broker';
 import { SpeechToTextServiceManager } from '../speech-to-text-service';
@@ -190,9 +191,14 @@ app.whenReady().then(() => {
       })
       .catch(() => {
         callback({});
-      });
+    });
   });
 }).catch(() => undefined);
+app.on('before-quit', () => {
+  void sidekickService?.dispose().catch((error: unknown) => {
+    void appendInstallLog('sidekick:dispose_failed', serializeErrorForInstallLog(error));
+  });
+});
 const friendChatWindows = new Map<number, BrowserWindow>();
 const stoppingApps = new Set<string>();
 const appLifecycleLocks = new Map<string, Promise<unknown>>();
@@ -206,6 +212,7 @@ let fileLibrary: FileLibrary | null = null;
 let secretsStore: SecretsStore | null = null;
 let officialToolsService: OfficialToolsService | null = null;
 let connectionsService: ConnectionsService | null = null;
+let sidekickService: SidekickService | null = null;
 let audioRuntimeBroker: AudioRuntimeBroker | null = null;
 let speechToTextService: SpeechToTextServiceManager | null = null;
 let textToSpeechService: TextToSpeechServiceManager | null = null;
@@ -440,6 +447,20 @@ const anyAppAllowsAgentNetworkAccess = async (appIds: string[]): Promise<boolean
 const getSecretsStore = (): SecretsStore => getManifestSupportController().getSecretsStore();
 const getOfficialToolsService = (): OfficialToolsService => getManifestSupportController().getOfficialToolsService();
 const getConnectionsService = (): ConnectionsService => getManifestSupportController().getConnectionsService();
+const getSidekickService = (): SidekickService => {
+  sidekickService ??= new SidekickService({
+    metadataRoot: getForgerMetadataRoot(),
+    appendLog: appendInstallLog,
+    getCloudIdentity: async () => await getCloudIdentityStore().getPublicRegistration(),
+    emitState: (state) => {
+      if (!mainWindow || mainWindow.isDestroyed()) {
+        return;
+      }
+      mainWindow.webContents.send(IPC_CHANNELS.sidekicksChanged, state);
+    },
+  });
+  return sidekickService;
+};
 const getSelfOAuthCallbackService = (): SelfOAuthCallbackService => {
   selfOAuthCallbackService ??= new SelfOAuthCallbackService({
     metadataRoot: getForgerMetadataRoot(),
@@ -1337,6 +1358,7 @@ const getMainProcessIpcDeps = (): MainProcessIpcDeps & AgentIpcDeps => ({
   getPersonalAgentRoutineManager,
   getOfficialToolsService,
   getConnectionsService,
+  getSidekickService,
   getSpeechToTextService,
   getLiveVoiceInputService,
   getWakeWordService,
@@ -1514,7 +1536,7 @@ registerMainLifecycle({
   startRemoteNetworkShare, stopRemoteNetworkShare, stopRemoteNetworkShareSession, startRemoteAgentSession, stopRemoteAgentSession, stopRemoteAgentSessionSession, openOrFocusAppWindow, registerForgerCloudOAuth,
   registerIpcHandlers, renderManifestAgentPrompt, resolveClaudeCli, resolveAntigravityCliPath, resolveCodexCliPath, resolveInstalledAgents, resolveInstalledManifest,
   resolveAppFolderGrant: verifyAppFolderGrant, resolveInstalledPromptTemplates, restoreAppPrompt, restartInstalledApp, runningApps, serializeErrorForInstallLog, shell,
-  splitManifestCommand, startDevCatalogService, state: mainLifecycleState, stopInstalledApp, switchForgerAccountSession, terminateProcess,
+  splitManifestCommand, startDevCatalogService, startSidekickIfPaired: async () => await getSidekickService().startIfPaired(), state: mainLifecycleState, stopInstalledApp, switchForgerAccountSession, terminateProcess,
   testAppPrompt, toAppSummary, toCatalogStatus, translateManifestEnvironment, truncateForInstallLog, updateAppPrompt, updateAppRuntime,
   upsertInstalledRecord, waitForHttpOk,
 });

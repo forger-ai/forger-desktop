@@ -25,6 +25,7 @@ import type { PinnableView } from '@renderer/components/Sidebar';
 import { SocialView } from '@renderer/views/SocialView';
 import { SettingsView } from '@renderer/views/SettingsView';
 import { SecretsView } from '@renderer/views/SecretsView';
+import { SidekicksView } from '@renderer/views/SidekicksView';
 import { ToolsView } from '@renderer/views/ToolsView';
 import { AGENT_PROVIDER_OPTIONS, ANTIGRAVITY_EFFORT_OPTIONS, ANTIGRAVITY_MODEL_OPTIONS, CHAT_BOT_PICTURE_OPTIONS, CLAUDE_EFFORT_OPTIONS, CLAUDE_MODEL_OPTIONS, CODEX_MODEL_OPTIONS, CODEX_REASONING_OPTIONS } from '@renderer/preferences';
 import { buildChatProviderOptions, getRuntimeSupportedEfforts, normalizeRuntimeEffortForModel } from '@shared/agent-runtime-registry';
@@ -793,7 +794,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
                   ...(canShareLocalNetwork ? [{ label: t.localNetwork.menuAction, onClick: () => handleStartLocalNetworkShare(app.id) }] : []),
                   ...(canShareRemoteNetwork ? [{ label: t.remoteNetwork.menuAction, onClick: () => handleStartRemoteNetworkShare(app.id) }] : []),
                   ...(canStopRemoteNetwork ? [{ label: t.remoteNetwork.stop, onClick: () => handleStopRemoteNetworkShare(app.id) }] : []),
-                  ...(canUploadSocial ? [{ label: t.locale === 'es' ? 'Subir a Social' : 'Upload to Social', onClick: () => void handleUploadSocial(app.id) }] : []),
+                  ...(canUploadSocial ? [{ label: t.social.uploadTitle, onClick: () => void handleUploadSocial(app.id) }] : []),
                 ]}
                 installProgress={installProgress}
                 secondaryActionLabel={isConflict ? t.actions.restoreUserVersion : app.updateAvailable ? t.actions.update : undefined}
@@ -1287,6 +1288,10 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
 
         {currentView === 'devices' ? (
           renderAdvancedView('devices', <DevicesView account={forgerAccount} t={t} />)
+        ) : null}
+
+        {currentView === 'sidekicks' ? (
+          renderAdvancedView('sidekicks', <SidekicksView t={t} />)
         ) : null}
 
         {currentView === 'datos' ? (

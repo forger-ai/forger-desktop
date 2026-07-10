@@ -49,6 +49,7 @@ import type {
   AgentPermissionMode,
   AgentProvider,
 } from '@shared/types';
+import { DEFAULT_INTERVAL_MINUTES, MAX_INTERVAL_MINUTES, MIN_INTERVAL_MINUTES } from '@shared/types';
 import type { AppDictionary } from '@renderer/i18n';
 import type { RuntimeProviderControls } from '@renderer/runtime-provider-controls';
 
@@ -59,6 +60,7 @@ interface AutomationFormState {
   frequencyType: AutomationFrequency['type'];
   timeOfDay: string;
   weeklyDay: number;
+  intervalMinutes: string;
   runtimeProvider: AgentProvider | 'auto';
   runtimeModel: string;
   runtimeEffort: AgentEffort;
@@ -90,6 +92,7 @@ interface AutomationsViewProps {
 }
 
 const DEFAULT_MISSED_WINDOWS: Record<AutomationFrequency['type'], number> = {
+  interval: DEFAULT_INTERVAL_MINUTES,
   hourly: 30,
   daily: 360,
   weekly: 1440,
@@ -129,6 +132,7 @@ const emptyForm = (runtimeProviderControls: RuntimeProviderControls): Automation
   frequencyType: 'hourly',
   timeOfDay: '09:00',
   weeklyDay: 1,
+  intervalMinutes: String(DEFAULT_INTERVAL_MINUTES),
   runtimeProvider: 'auto',
   runtimeModel,
   runtimeEffort: codex.normalizeEffortForModel(runtimeModel, codex.selectedEffort || codex.effortOptionsForModel(runtimeModel)[0]?.value || 'low'),
@@ -152,6 +156,7 @@ const formFromAutomation = (automation: Automation, runtimeProviderControls: Run
   frequencyType: automation.frequency.type,
   timeOfDay: automation.frequency.timeOfDay ?? '09:00',
   weeklyDay: automation.frequency.weeklyDay ?? 1,
+  intervalMinutes: String(automation.frequency.intervalMinutes ?? DEFAULT_INTERVAL_MINUTES),
   runtimeProvider,
   runtimeModel,
   runtimeEffort: runtimeControl.normalizeEffortForModel(runtimeModel, automation.runtime?.effort ?? fallback.runtimeEffort),
@@ -165,11 +170,13 @@ const formFromAutomation = (automation: Automation, runtimeProviderControls: Run
 
 const buildInput = (form: AutomationFormState, enabled = form.enabled): AutomationUpsertInput & { id?: string } => {
   const frequency: AutomationFrequency =
-    form.frequencyType === 'hourly'
-      ? { type: 'hourly' }
-      : form.frequencyType === 'daily'
-        ? { type: 'daily', timeOfDay: form.timeOfDay }
-        : { type: 'weekly', timeOfDay: form.timeOfDay, weeklyDay: form.weeklyDay };
+    form.frequencyType === 'interval'
+      ? { type: 'interval', intervalMinutes: clampIntervalMinutes(form.intervalMinutes) }
+      : form.frequencyType === 'hourly'
+        ? { type: 'hourly' }
+        : form.frequencyType === 'daily'
+          ? { type: 'daily', timeOfDay: form.timeOfDay }
+          : { type: 'weekly', timeOfDay: form.timeOfDay, weeklyDay: form.weeklyDay };
   const runtime = form.runtimeProvider === 'auto'
     ? undefined
     : {
@@ -178,14 +185,15 @@ const buildInput = (form: AutomationFormState, enabled = form.enabled): Automati
         effort: form.runtimeEffort,
         permissionMode: form.permissionMode,
       };
+  const isInterval = frequency.type === 'interval';
   return {
     id: form.id,
     name: form.name,
     prompt: form.prompt,
     frequency,
     runtime,
-    missedRunPolicy: form.missedRunPolicy,
-    missedRunWindowMinutes: form.missedRunWindowMinutes,
+    missedRunPolicy: isInterval ? 'within_window' : form.missedRunPolicy,
+    missedRunWindowMinutes: isInterval ? undefined : form.missedRunWindowMinutes,
     selectedAppIds: form.selectedAppIds,
     enabled,
   };
@@ -210,7 +218,18 @@ const statusColor = (status: AutomationRunSummary['status']): 'default' | 'succe
   return 'default';
 };
 
+const clampIntervalMinutes = (value: string): number => {
+  const numeric = Math.round(Number(value));
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return DEFAULT_INTERVAL_MINUTES;
+  }
+  return Math.min(MAX_INTERVAL_MINUTES, Math.max(MIN_INTERVAL_MINUTES, numeric));
+};
+
 const formatFrequencyLabel = (automation: Automation, t: AppDictionary): string => {
+  if (automation.frequency.type === 'interval') {
+    return t.sections.automations.frequencySummaries.interval(automation.frequency.intervalMinutes ?? DEFAULT_INTERVAL_MINUTES);
+  }
   if (automation.frequency.type === 'daily') {
     return t.sections.automations.frequencySummaries.daily(automation.frequency.timeOfDay ?? '09:00');
   }
@@ -613,12 +632,25 @@ export function AutomationsView({
                     }));
                   }}
                 >
+                  <MenuItem value="interval">{t.sections.automations.frequencyLabels.interval}</MenuItem>
                   <MenuItem value="hourly">{t.sections.automations.frequencyLabels.hourly}</MenuItem>
                   <MenuItem value="daily">{t.sections.automations.frequencyLabels.daily}</MenuItem>
                   <MenuItem value="weekly">{t.sections.automations.frequencyLabels.weekly}</MenuItem>
                 </Select>
               </FormControl>
-              {form.frequencyType !== 'hourly' ? (
+              {form.frequencyType === 'interval' ? (
+                <TextField
+                  label={t.sections.automations.intervalMinutes}
+                  helperText={t.sections.automations.intervalMinutesHelper}
+                  type="number"
+                  value={form.intervalMinutes}
+                  onChange={(event) => setForm((current) => ({ ...current, intervalMinutes: event.target.value }))}
+                  onBlur={() => setForm((current) => ({ ...current, intervalMinutes: String(clampIntervalMinutes(current.intervalMinutes)) }))}
+                  fullWidth
+                  inputProps={{ min: MIN_INTERVAL_MINUTES, max: MAX_INTERVAL_MINUTES, step: 1 }}
+                />
+              ) : null}
+              {form.frequencyType !== 'hourly' && form.frequencyType !== 'interval' ? (
                 <TextField
                   label={t.sections.automations.timeOfDay}
                   helperText={t.sections.automations.localTimeHelper}
@@ -666,6 +698,8 @@ export function AutomationsView({
                 </FormControl>
               ) : null}
             </Stack>
+            {form.frequencyType !== 'interval' ? (
+              <>
             <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5}>
               <FormControl fullWidth>
                 <InputLabel>{t.sections.automations.missedRunPolicy}</InputLabel>
@@ -695,6 +729,8 @@ export function AutomationsView({
               ) : null}
             </Stack>
             <Typography variant="caption" color="text.secondary">{t.sections.automations.missedRunHelper[form.missedRunPolicy]}</Typography>
+              </>
+            ) : null}
             </Stack>
             <Divider />
             <Stack spacing={1}>

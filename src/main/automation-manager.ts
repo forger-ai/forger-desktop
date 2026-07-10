@@ -15,7 +15,7 @@ import type {
   AgentRuntime,
   AgentRuntimeRequest,
 } from '../shared/types';
-import { normalizeAgentRuntime } from '../shared/types';
+import { DEFAULT_INTERVAL_MINUTES, MAX_INTERVAL_MINUTES, MIN_INTERVAL_MINUTES, normalizeAgentRuntime } from '../shared/types';
 import {
   appendTranscript,
   parseClaudeAssistantMessages,
@@ -60,16 +60,27 @@ const MAX_TIMEOUT_MS = 2_147_483_647;
 const MISSED_RUN_GRACE_MS = 60_000;
 export const DEFAULT_AUTOMATION_MISSED_RUN_POLICY: AutomationMissedRunPolicy = 'within_window';
 export const DEFAULT_AUTOMATION_MISSED_RUN_WINDOWS_MINUTES: Record<AutomationFrequency['type'], number> = {
+  interval: DEFAULT_INTERVAL_MINUTES,
   hourly: 30,
   daily: 6 * 60,
   weekly: 24 * 60,
 };
 
-export const defaultMissedRunWindowMinutes = (frequency: AutomationFrequency): number =>
-  DEFAULT_AUTOMATION_MISSED_RUN_WINDOWS_MINUTES[frequency.type];
+export const defaultMissedRunWindowMinutes = (frequency: AutomationFrequency): number => {
+  if (frequency.type === 'interval') {
+    return normalizeIntervalMinutes(frequency.intervalMinutes);
+  }
+  return DEFAULT_AUTOMATION_MISSED_RUN_WINDOWS_MINUTES[frequency.type];
+};
 
 export const computeNextRunAt = (frequency: AutomationFrequency, from = new Date()): string => {
   const next = new Date(from);
+
+  if (frequency.type === 'interval') {
+    next.setSeconds(0, 0);
+    next.setTime(next.getTime() + normalizeIntervalMinutes(frequency.intervalMinutes) * 60_000);
+    return next.toISOString();
+  }
 
   if (frequency.type === 'hourly') {
     next.setHours(next.getHours() + 1);
@@ -736,6 +747,9 @@ const sanitizeAppIds = (value: unknown): string[] => {
 
 const sanitizeFrequency = (value: unknown): AutomationFrequency => {
   const input = value && typeof value === 'object' ? value as Partial<AutomationFrequency> : {};
+  if (input.type === 'interval') {
+    return { type: 'interval', intervalMinutes: normalizeIntervalMinutes(input.intervalMinutes) };
+  }
   if (input.type === 'daily') {
     return { type: 'daily', timeOfDay: formatTimeOfDay(input.timeOfDay) };
   }
@@ -785,6 +799,14 @@ const formatTimeOfDay = (value: string | undefined): string => {
 const normalizeWeeklyDay = (value: unknown): number => {
   const day = typeof value === 'number' && Number.isInteger(value) ? value : 1;
   return Math.min(6, Math.max(0, day));
+};
+
+const normalizeIntervalMinutes = (value: unknown): number => {
+  const numeric = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return DEFAULT_INTERVAL_MINUTES;
+  }
+  return Math.min(MAX_INTERVAL_MINUTES, Math.max(MIN_INTERVAL_MINUTES, Math.round(numeric)));
 };
 
 const toRunSummary = (run: AutomationRun): AutomationRunSummary => ({

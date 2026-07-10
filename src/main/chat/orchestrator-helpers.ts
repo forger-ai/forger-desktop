@@ -3,6 +3,7 @@ import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawnProcess } from '../runtime/process-spawn';
+import { guardChildStdin } from '../child-stdio';
 import type { AgentEffort, AgentPermissionMode, ChatErrorCode, ClaudeEffort, CodexReasoningEffort, PreviewDiffFile } from '../../shared/types';
 import { createLlmProviderRunService, type LlmProviderRunService, type LlmProviderRunServiceOptions } from '../llm-provider/run-service';
 import type { LlmCommandResult, LlmMcpServerConfig as ProviderMcpServerConfig, LlmTokenUsage } from '../llm-provider/types';
@@ -371,12 +372,7 @@ export const runCommandCapture = async (
       reject(error);
     };
 
-    child.stdin.on('error', (error: NodeJS.ErrnoException) => {
-      if (error.code === 'EPIPE') {
-        return;
-      }
-      finalizeReject(error);
-    });
+    guardChildStdin(child, finalizeReject);
 
     options.onChild?.(child);
     child.stdin.end(options.stdinText ?? '');

@@ -4,6 +4,7 @@ import type { AppDictionary } from '@renderer/i18n';
 import type { WorkflowDraft } from './workflow-draft';
 
 const DEFAULT_MISSED_WINDOWS: Record<AutomationFrequency['type'], number> = {
+  interval: 15,
   hourly: 30,
   daily: 360,
   weekly: 1440,

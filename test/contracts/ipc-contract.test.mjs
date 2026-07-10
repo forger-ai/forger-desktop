@@ -173,6 +173,39 @@ test('live voice input IPC channels keep stable public names and avoid raw audio
   }
 });
 
+test('Sidekick IPC channels keep protected microphone playback names and avoid file path exposure', () => {
+  assert.deepEqual(
+    {
+      sidekicksGetState: IPC_CHANNELS.sidekicksGetState,
+      sidekicksScanUsb: IPC_CHANNELS.sidekicksScanUsb,
+      sidekicksConfigureUsb: IPC_CHANNELS.sidekicksConfigureUsb,
+      sidekicksSendDisplay: IPC_CHANNELS.sidekicksSendDisplay,
+      sidekicksStartMicrophoneRecording: IPC_CHANNELS.sidekicksStartMicrophoneRecording,
+      sidekicksStopMicrophoneRecording: IPC_CHANNELS.sidekicksStopMicrophoneRecording,
+      sidekicksReadMicrophoneRecording: IPC_CHANNELS.sidekicksReadMicrophoneRecording,
+      sidekicksForget: IPC_CHANNELS.sidekicksForget,
+      sidekicksChanged: IPC_CHANNELS.sidekicksChanged,
+    },
+    {
+      sidekicksGetState: 'forger:sidekicks:get-state',
+      sidekicksScanUsb: 'forger:sidekicks:scan-usb',
+      sidekicksConfigureUsb: 'forger:sidekicks:configure-usb',
+      sidekicksSendDisplay: 'forger:sidekicks:send-display',
+      sidekicksStartMicrophoneRecording: 'forger:sidekicks:microphone:start',
+      sidekicksStopMicrophoneRecording: 'forger:sidekicks:microphone:stop',
+      sidekicksReadMicrophoneRecording: 'forger:sidekicks:microphone:read',
+      sidekicksForget: 'forger:sidekicks:forget',
+      sidekicksChanged: 'forger:sidekicks:changed',
+    },
+  );
+
+  for (const [key, channel] of Object.entries(IPC_CHANNELS)) {
+    if (key.toLowerCase().includes('sidekick')) {
+      assert.doesNotMatch(channel, /(file|path|directory|filesystem)/i);
+    }
+  }
+});
+
 test('audio runtime broker IPC channels stay internal and stable', () => {
   assert.deepEqual(
     {

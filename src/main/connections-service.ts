@@ -33,6 +33,7 @@ import type { SelfOAuthCallbackServiceLike } from './oauth-callback/types';
 import {
   connectionGrantAllowsAction,
   resolveConnectionActionSnapshot,
+  resolveGrantActions,
 } from './connections/grants';
 
 interface PersistedConnectionInstance {
@@ -327,7 +328,7 @@ export class ConnectionsService {
       actionId,
       grant: {
         type,
-        actions: grant.resolvedActions,
+        actions: resolveGrantActions(grant, this.getActionCatalog()),
         connectionIds: grant.connectionIds,
         multiple: grant.multiple,
       },
@@ -468,21 +469,26 @@ export class ConnectionsService {
     const storedGrant = this.registry.appGrants[appId]?.[declaration.type];
     const hasStoredGrant = Boolean(storedGrant);
     const grant = storedGrant ?? this.buildGrantSnapshot(declaration, { granted: required });
-    const resolvedActionIds = new Set(grant.resolvedActions);
+    const resolvedActionIds = new Set(resolveGrantActions(grant, this.getActionCatalog()));
     const resolvedActions = (definition?.actions ?? []).filter((action) => resolvedActionIds.has(action.id));
+    const declaresAllActions = declaration.actions.includes('*');
     return {
       declaration,
       required,
       ...(definition ? { definition } : {}),
       resolvedActions,
-      allActions: declaration.actions.includes('*'),
+      allActions: declaresAllActions,
       granted: required || storedGrant?.granted === true,
       hasStoredGrant,
       configured: instances.length > 0,
       instances: storedGrant?.connectionIds?.length
         ? instances.filter((instance) => storedGrant.connectionIds?.includes(instance.id))
         : instances,
-      reviewNeeded: Boolean(storedGrant && storedGrant.actionCatalogHash !== this.hashForType(declaration.type)),
+      reviewNeeded: Boolean(
+        storedGrant
+        && !declaresAllActions
+        && storedGrant.actionCatalogHash !== this.hashForType(declaration.type),
+      ),
     };
   }
 
@@ -496,7 +502,7 @@ export class ConnectionsService {
   private snapshotToSessionGrant(grant: PersistedConnectionGrant): ConnectionSessionGrant {
     return {
       type: grant.type,
-      actions: [...grant.resolvedActions],
+      actions: resolveGrantActions(grant, this.getActionCatalog()),
       multiple: grant.multiple,
       ...(grant.connectionIds?.length ? { connectionIds: [...grant.connectionIds] } : {}),
     };

@@ -505,18 +505,27 @@ test('app connection calls enforce required and optional manifest grants', async
   }
 });
 
-test('optional app connection grants freeze resolved actions at approval time', async () => {
+test('wildcard app connection grants always allow the live set of connection actions', async () => {
+  // Dedicated module clone so we can grow its action catalog without leaking
+  // into other tests that share the default fake module.
+  const mutableGmailModule = {
+    ...fakeConnectionModule,
+    definition: {
+      ...fakeConnectionModule.definition,
+      actions: fakeConnectionModule.definition.actions.map((action) => ({ ...action })),
+    },
+  };
   const harness = await createAppAwareService({
     required: [],
     optional: [
       {
         type: 'gmail',
-        reason: 'Use selected mail actions.',
+        reason: 'Use every mail action, including future ones.',
         actions: ['*'],
         multiple: true,
       },
     ],
-  });
+  }, [mutableGmailModule]);
   try {
     const configured = await harness.service.configure({
       type: 'gmail',
@@ -550,13 +559,35 @@ test('optional app connection grants freeze resolved actions at approval time', 
     });
     assert.equal(afterGrant.success, true);
 
-    const unknownFutureAction = await harness.service.callFromApp('finance-os', {
+    // An action added to the connection after approval is allowed without any
+    // new grant or re-approval, because the app declared all actions ('*').
+    mutableGmailModule.definition.actions.push({
+      id: 'gmail.delete_message',
+      name: 'Delete',
+      description: 'Delete message',
+      risk: 'high',
+    });
+    const newlyAddedAction = await harness.service.callFromApp('finance-os', {
       type: 'gmail',
       actionId: 'gmail.delete_message',
       input: {},
     });
-    assert.equal(unknownFutureAction.success, false);
-    assert.equal(unknownFutureAction.technicalCode, 'app_connection_action_not_declared');
+    assert.equal(newlyAddedAction.success, true);
+
+    // The wildcard grant no longer requires review when the catalog changes.
+    const requirements = (await harness.service.listConnectionsForApp('finance-os')).requirements;
+    const gmailRequirement = requirements.find((item) => item.declaration.type === 'gmail');
+    assert.equal(gmailRequirement.allActions, true);
+    assert.notEqual(gmailRequirement.reviewNeeded, true);
+
+    // Actions that do not exist on the connection are still rejected.
+    const missingAction = await harness.service.callFromApp('finance-os', {
+      type: 'gmail',
+      actionId: 'gmail.unknown_action',
+      input: {},
+    });
+    assert.equal(missingAction.success, false);
+    assert.equal(missingAction.technicalCode, 'app_connection_action_not_declared');
   } finally {
     await harness.cleanup();
   }

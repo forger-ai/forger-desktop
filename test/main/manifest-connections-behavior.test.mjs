@@ -76,26 +76,32 @@ test('explicit manifest connections are the only connection source when legacy t
   ]);
 });
 
-test('wildcard connection actions resolve within one type and freeze the approval snapshot', () => {
+test('wildcard connection actions resolve within one type and follow the live catalog', () => {
   const grant = resolveConnectionActionSnapshot({
     type: 'slack',
     reason: 'Post approved reports.',
     actions: ['*'],
     multiple: true,
   }, actionCatalog);
-  assert.deepEqual(grant.resolvedActions, [
-    'slack.connection.status',
-    'slack.list_channels',
-    'slack.send_message',
-  ]);
-  assert.equal(grant.resolvedActions.includes('gmail.search_messages'), false);
   assert.equal(connectionGrantAllowsAction(grant, 'slack.send_message', actionCatalog), true);
+  // Wildcard grants never leak into another connection type.
+  assert.equal(connectionGrantAllowsAction(grant, 'gmail.search_messages', actionCatalog), false);
 
+  // Actions added to the connection after approval are allowed without a new grant.
   const futureCatalog = {
     ...actionCatalog,
     slack: [...actionCatalog.slack, 'slack.invite_user'],
   };
-  assert.equal(connectionGrantAllowsAction(grant, 'slack.invite_user', futureCatalog), false);
+  assert.equal(connectionGrantAllowsAction(grant, 'slack.invite_user', futureCatalog), true);
+
+  // Denying the grant still blocks every action, even under a wildcard request.
+  const denied = resolveConnectionActionSnapshot({
+    type: 'slack',
+    reason: 'Post approved reports.',
+    actions: ['*'],
+    multiple: true,
+  }, actionCatalog, { granted: false });
+  assert.equal(connectionGrantAllowsAction(denied, 'slack.send_message', actionCatalog), false);
 });
 
 test('optional connections are not callable until an explicit grant exists', () => {

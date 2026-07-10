@@ -5,6 +5,7 @@ import BackupRounded from '@mui/icons-material/BackupRounded';
 import EventRepeatRounded from '@mui/icons-material/EventRepeatRounded';
 import ConstructionRounded from '@mui/icons-material/ConstructionRounded';
 import DevicesRounded from '@mui/icons-material/DevicesRounded';
+import DeveloperBoardRounded from '@mui/icons-material/DeveloperBoardRounded';
 import InsertDriveFileRounded from '@mui/icons-material/InsertDriveFileRounded';
 import SmartToyRounded from '@mui/icons-material/SmartToyRounded';
 import TableChartRounded from '@mui/icons-material/TableChartRounded';
@@ -56,6 +57,7 @@ export type View =
   | 'files'
   | 'backups'
   | 'devices'
+  | 'sidekicks'
   | 'datos'
   | 'secrets'
   | 'connections'
@@ -69,7 +71,7 @@ export type View =
   | 'backgroundTaskDetail';
 const isMacOs = navigator.platform.toLowerCase().includes('mac');
 
-export const PINNABLE_VIEWS = ['automations', 'workflows', 'files', 'backups', 'devices', 'datos', 'secrets', 'connections', 'tools', 'docs'] as const;
+export const PINNABLE_VIEWS = ['automations', 'workflows', 'files', 'backups', 'devices', 'sidekicks', 'datos', 'secrets', 'connections', 'tools', 'docs'] as const;
 export type PinnableView = (typeof PINNABLE_VIEWS)[number];
 
 interface SidebarProps {
@@ -96,6 +98,7 @@ export const pinnableNav: Array<{ id: PinnableView; icon: ReactElement }> = [
   { id: 'files', icon: <InsertDriveFileRounded /> },
   { id: 'backups', icon: <BackupRounded /> },
   { id: 'devices', icon: <DevicesRounded /> },
+  { id: 'sidekicks', icon: <DeveloperBoardRounded /> },
   { id: 'datos', icon: <TableChartRounded /> },
   { id: 'secrets', icon: <VpnKeyRounded /> },
   { id: 'connections', icon: <HubRounded /> },
@@ -368,6 +371,7 @@ export function Sidebar({ currentView, onNavigate, t, desktopUpdateState, pinned
     files: t.nav.files,
     backups: t.nav.backups,
     devices: t.nav.devices,
+    sidekicks: t.nav.sidekicks,
     datos: t.nav.datos,
     secrets: t.nav.secrets,
     connections: t.nav.connections,

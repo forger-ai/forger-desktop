@@ -22,6 +22,7 @@ import type {
   FailureDiagnosticFields,
 } from '../../shared/types';
 import type { SpawnProcess } from './process-spawn';
+import { guardChildStdin } from '../child-stdio';
 
 interface CommandCaptureResult {
   code?: number | null;
@@ -439,6 +440,7 @@ const readCodexAppServerRateLimits = async (
       cleanup();
       reject(error);
     };
+    guardChildStdin(child, finalizeReject);
     const send = (payload: Record<string, unknown>): void => {
       if (!child.stdin || child.stdin.destroyed) {
         throw new Error('codex_app_server_stdin_unavailable');
@@ -2042,6 +2044,7 @@ const startAntigravityAuthSession = async (
       shell: false,
       stdio: 'pipe',
     });
+    guardChildStdin(child);
     activeAntigravityAuthSessions.set(sessionId, { child, completed: false });
     let outputChunks = 0;
     let urlEvents = 0;

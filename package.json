@@ -1,6 +1,6 @@
 {
   "name": "forger-desktop",
-  "version": "0.5.4",
+  "version": "0.5.5",
   "private": true,
   "license": "GPL-3.0-only",
   "description": "Desktop launcher for Forger",
@@ -52,6 +52,7 @@
     "@whiskeysockets/baileys": "^7.0.0-rc13",
     "@xyflow/react": "^12.11.1",
     "better-sqlite3": "^12.9.0",
+    "bonjour-service": "^1.4.3",
     "cross-spawn": "^7.0.6",
     "flag-icons": "^7.5.0",
     "i18n-iso-countries": "^7.14.0",
@@ -61,6 +62,7 @@
     "react-dom": "^19.2.0",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
+    "serialport": "^13.0.0",
     "simple-icons": "^16.25.0",
     "tslib": "^2.8.1",
     "ws": "^8.18.3",
@@ -153,7 +155,9 @@
       }
     ],
     "asarUnpack": [
-      "node_modules/better-sqlite3/**/*"
+      "node_modules/better-sqlite3/**/*",
+      "node_modules/@serialport/**/*",
+      "node_modules/serialport/**/*"
     ],
     "mac": {
       "category": "public.app-category.productivity",

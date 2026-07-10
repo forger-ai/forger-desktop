@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { DEFAULT_INTERVAL_MINUTES, MAX_INTERVAL_MINUTES, MIN_INTERVAL_MINUTES } from '../../shared/types';
 import type {
   AutomationFrequency,
   AutomationMissedRunPolicy,
@@ -30,6 +31,7 @@ interface RoutineRow {
   frequency_type: string;
   frequency_time_of_day: string | null;
   frequency_weekly_day: number | null;
+  frequency_interval_minutes: number | null;
   missed_run_policy: string;
   missed_run_window_minutes: number | null;
   enabled: number;
@@ -135,11 +137,11 @@ export class AgentRoutineStore {
     this.context.requireDb().prepare(`
       INSERT INTO personal_agent_routines (
         id, agent_id, conversation_id, name, prompt, frequency_type,
-        frequency_time_of_day, frequency_weekly_day, missed_run_policy,
-        missed_run_window_minutes, enabled, running, next_run_at,
+        frequency_time_of_day, frequency_weekly_day, frequency_interval_minutes,
+        missed_run_policy, missed_run_window_minutes, enabled, running, next_run_at,
         authorization_text, created_at, updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       routineId,
       agent.id,
@@ -149,6 +151,7 @@ export class AgentRoutineStore {
       frequency.type,
       frequency.timeOfDay ?? null,
       frequency.weeklyDay ?? null,
+      frequency.intervalMinutes ?? null,
       normalizeMissedRunPolicy(input.missedRunPolicy),
       normalizeMissedRunWindowMinutes(input.missedRunWindowMinutes, frequency),
       input.enabled ? 1 : 0,
@@ -185,8 +188,8 @@ export class AgentRoutineStore {
     this.context.requireDb().prepare(`
       UPDATE personal_agent_routines
       SET name = ?, prompt = ?, frequency_type = ?, frequency_time_of_day = ?,
-        frequency_weekly_day = ?, missed_run_policy = ?, missed_run_window_minutes = ?,
-        enabled = ?, next_run_at = ?, authorization_text = ?, updated_at = ?
+        frequency_weekly_day = ?, frequency_interval_minutes = ?, missed_run_policy = ?,
+        missed_run_window_minutes = ?, enabled = ?, next_run_at = ?, authorization_text = ?, updated_at = ?
       WHERE id = ?
     `).run(
       name,
@@ -194,6 +197,7 @@ export class AgentRoutineStore {
       frequency.type,
       frequency.timeOfDay ?? null,
       frequency.weeklyDay ?? null,
+      frequency.intervalMinutes ?? null,
       normalizeMissedRunPolicy(input.missedRunPolicy),
       normalizeMissedRunWindowMinutes(input.missedRunWindowMinutes, frequency),
       input.enabled ? 1 : 0,
@@ -475,6 +479,7 @@ export const PERSONAL_AGENT_ROUTINE_SCHEMA_SQL = `
     frequency_type TEXT NOT NULL,
     frequency_time_of_day TEXT,
     frequency_weekly_day INTEGER,
+    frequency_interval_minutes INTEGER,
     missed_run_policy TEXT NOT NULL DEFAULT 'within_window',
     missed_run_window_minutes INTEGER,
     enabled INTEGER NOT NULL DEFAULT 1,
@@ -516,6 +521,9 @@ export const PERSONAL_AGENT_ROUTINE_SCHEMA_SQL = `
 
 const normalizeRoutineFrequency = (value: unknown): AutomationFrequency => {
   const input = value && typeof value === 'object' ? value as Partial<AutomationFrequency> : {};
+  if (input.type === 'interval') {
+    return { type: 'interval', intervalMinutes: normalizeIntervalMinutes(input.intervalMinutes) };
+  }
   if (input.type === 'daily') {
     return { type: 'daily', timeOfDay: formatTimeOfDay(input.timeOfDay) };
   }
@@ -541,9 +549,18 @@ const normalizeMissedRunWindowMinutes = (value: unknown, frequency: AutomationFr
 };
 
 const defaultMissedRunWindowMinutes = (frequency: AutomationFrequency): number => {
+  if (frequency.type === 'interval') return normalizeIntervalMinutes(frequency.intervalMinutes);
   if (frequency.type === 'hourly') return 30;
   if (frequency.type === 'daily') return 6 * 60;
   return 24 * 60;
+};
+
+const normalizeIntervalMinutes = (value: unknown): number => {
+  const numeric = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return DEFAULT_INTERVAL_MINUTES;
+  }
+  return Math.min(MAX_INTERVAL_MINUTES, Math.max(MIN_INTERVAL_MINUTES, Math.round(numeric)));
 };
 
 const formatTimeOfDay = (value: unknown): string => {
@@ -561,7 +578,10 @@ const normalizeWeeklyDay = (value: unknown): number => {
   return Math.min(6, Math.max(0, day));
 };
 
-const frequencyFromRow = (row: Pick<RoutineRow, 'frequency_type' | 'frequency_time_of_day' | 'frequency_weekly_day'>): AutomationFrequency => {
+const frequencyFromRow = (row: Pick<RoutineRow, 'frequency_type' | 'frequency_time_of_day' | 'frequency_weekly_day' | 'frequency_interval_minutes'>): AutomationFrequency => {
+  if (row.frequency_type === 'interval') {
+    return { type: 'interval', intervalMinutes: normalizeIntervalMinutes(row.frequency_interval_minutes ?? undefined) };
+  }
   if (row.frequency_type === 'daily') {
     return { type: 'daily', timeOfDay: formatTimeOfDay(row.frequency_time_of_day ?? undefined) };
   }

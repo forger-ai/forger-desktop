@@ -244,6 +244,7 @@ export interface MainLifecycleDeps {
   shell: Shell;
   splitManifestCommand: SyncFn;
   startDevCatalogService: () => Promise<void>;
+  startSidekickIfPaired?: () => Promise<void>;
   state: MainLifecycleState;
   stopInstalledApp: AsyncFn;
   switchForgerAccountSession: AsyncFn;
@@ -392,6 +393,7 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
     shell,
     splitManifestCommand,
     startDevCatalogService,
+    startSidekickIfPaired,
     startLocalNetworkShare,
     startRemoteNetworkShare,
     state,
@@ -493,6 +495,11 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
   });
   await startupLogger.step('startup:connections:load', async () => {
     await state.connectionsService?.load();
+  });
+  await startupLogger.step('startup:sidekick:start_if_paired', async () => {
+    await startSidekickIfPaired?.();
+  }).catch((error: unknown) => {
+    void appendInstallLog('sidekick:start_if_paired_failed', serializeErrorForInstallLog(error));
   });
   if (typeof state.officialToolsService?.startActiveTools === 'function') {
     await startupLogger.step('startup:official_tools:start_active', async () => {
@@ -1589,12 +1596,5 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
   }
 });
 
-registerGracefulShutdownHandlers({
-  app,
-  state,
-  runningApps,
-  stopInstalledApp,
-  terminateProcess,
-  closeServer,
-});
+registerGracefulShutdownHandlers({ app, state, runningApps, stopInstalledApp, terminateProcess, closeServer });
 };

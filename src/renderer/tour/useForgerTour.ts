@@ -18,8 +18,8 @@ const WORKFLOWS_TOUR_MODULE_STORAGE_KEY = 'forger.onboarding.workflows.module';
 const TOOLS_TOUR_STORAGE_KEYS = {
   forger: 'forger.onboarding.tools.forger',
 } as const;
-const ADVANCED_VIEWS = ['tools', 'files', 'backups', 'devices', 'datos', 'secrets', 'automations', 'connections', 'workflows'] as const;
-const GENERIC_ADVANCED_VIEWS = ['files', 'backups', 'devices', 'datos', 'secrets', 'automations'] as const;
+const ADVANCED_VIEWS = ['tools', 'files', 'backups', 'devices', 'sidekicks', 'datos', 'secrets', 'automations', 'connections', 'workflows'] as const;
+const GENERIC_ADVANCED_VIEWS = ['files', 'backups', 'devices', 'sidekicks', 'datos', 'secrets', 'automations'] as const;
 
 type AdvancedView = (typeof GENERIC_ADVANCED_VIEWS)[number];
 type AdvancedRouteView = (typeof ADVANCED_VIEWS)[number];

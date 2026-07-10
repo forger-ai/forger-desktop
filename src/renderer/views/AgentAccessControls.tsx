@@ -231,7 +231,7 @@ export function AgentAccessControls({
       </Box>
       <Box>
         <Typography variant="subtitle2" sx={{ mb: 0.75 }}>
-          {t.locale === 'es' ? 'Agentes permitidos' : 'Allowed agents'}
+          {t.agents.allowedAgents}
         </Typography>
         {peerOptions.length > 0 ? (
           <Stack spacing={1}>
@@ -262,7 +262,7 @@ export function AgentAccessControls({
                         fullWidth
                         multiline
                         minRows={2}
-                        label={t.locale === 'es' ? 'Criterio de uso' : 'Usage criteria'}
+                        label={t.agents.usageCriteria}
                         value={grant.criteria}
                         onChange={(event) => {
                           setDraft((current) => ({
@@ -280,7 +280,7 @@ export function AgentAccessControls({
           </Stack>
         ) : (
           <Typography variant="body2" color="text.secondary">
-            {t.locale === 'es' ? 'No hay otros agentes personales disponibles.' : 'No other personal agents are available.'}
+            {t.agents.noPeerAgentsAvailable}
           </Typography>
         )}
       </Box>
