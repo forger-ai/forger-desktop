@@ -298,11 +298,21 @@ test('agent runtime registry normalizes providers, defaults, fallbacks, and runt
   assert.equal(runtimeRegistry.getDefaultClaudeEffort('claude-sonnet-5'), 'high');
   assert.equal(runtimeRegistry.getDefaultClaudeEffort('claude-fable-5'), 'max');
   assert.equal(runtimeRegistry.getDefaultCodexReasoningEffort('gpt-5.3-codex-spark'), 'high');
+  assert.equal(runtimeRegistry.getDefaultCodexReasoningEffort('gpt-5.6-sol'), 'low');
+  assert.equal(runtimeRegistry.getDefaultCodexReasoningEffort('gpt-5.6-terra'), 'medium');
+  assert.equal(runtimeRegistry.getDefaultCodexReasoningEffort('gpt-5.6-luna'), 'medium');
   assert.equal(runtimeRegistry.getDefaultClaudeEffort('opusplan'), 'high');
   assert.equal(runtimeRegistry.getDefaultCodexReasoningEffort('unknown-model'), 'medium');
   assert.equal(runtimeRegistry.getDefaultClaudeEffort('unknown-model'), 'high');
+  assert.deepEqual(runtimeRegistry.getCodexSupportedReasoningEfforts('gpt-5.6-sol'), ['low', 'medium', 'high', 'xhigh', 'max', 'ultra']);
+  assert.deepEqual(runtimeRegistry.getCodexSupportedReasoningEfforts('gpt-5.6-terra'), ['low', 'medium', 'high', 'xhigh', 'max', 'ultra']);
+  assert.deepEqual(runtimeRegistry.getCodexSupportedReasoningEfforts('gpt-5.6-luna'), ['low', 'medium', 'high', 'xhigh', 'max']);
+  assert.deepEqual(runtimeRegistry.getCodexSupportedReasoningEfforts('gpt-5.5'), ['none', 'low', 'medium', 'high', 'xhigh']);
   assert.deepEqual(runtimeRegistry.getCodexSupportedReasoningEfforts('gpt-5.3-codex'), ['low']);
   assert.deepEqual(runtimeRegistry.getRuntimeSupportedEfforts('codex', 'gpt-5.3-codex-spark'), ['high']);
+  assert.equal(runtimeRegistry.normalizeRuntimeEffortForModel('codex', 'gpt-5.6-luna', 'ultra'), 'medium');
+  assert.equal(runtimeRegistry.normalizeRuntimeEffortForModel('codex', 'gpt-5.6-sol', 'ultra'), 'ultra');
+  assert.equal(runtimeRegistry.normalizeRuntimeEffortForModel('codex', 'gpt-5.5', 'max'), 'medium');
   assert.equal(runtimeRegistry.normalizeRuntimeEffortForModel('codex', 'gpt-5.3-codex', 'xhigh'), 'low');
   assert.equal(runtimeRegistry.isAgentProvider('codex'), true);
   assert.equal(runtimeRegistry.isAgentProvider('bad'), false);
@@ -344,7 +354,7 @@ test('agent runtime registry normalizes providers, defaults, fallbacks, and runt
   assert.equal(runtimeRegistry.DEFAULT_AGENT_PROVIDER_RUNTIME_REGISTRY.codex.defaultModel, runtimeRegistry.DEFAULT_CODEX_MODEL);
   assert.equal(runtimeRegistry.getAgentModelOptions('claude')[0].realModelName, 'claude-sonnet-5');
   assert.equal(runtimeRegistry.getDefaultClaudeEffort('claude-opus-4-8'), 'high');
-  assert.equal(runtimeRegistry.getAgentModelOptions('codex')[0].realModelName, 'gpt-5.5');
+  assert.equal(runtimeRegistry.getAgentModelOptions('codex')[0].realModelName, 'gpt-5.6-sol');
   assert.deepEqual(runtimeRegistry.normalizeAntigravityModelAndEffort('gemini-3.5-flash-medium', undefined), {
     model: 'gemini-3.5-flash',
     effort: 'medium',

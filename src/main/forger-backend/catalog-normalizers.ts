@@ -19,7 +19,7 @@ import type {
 } from '../../shared/types';
 import { normalizeAppConnectionDeclarations } from '../connections/grants';
 
-const CODEX_REASONING_VALUES = new Set<CodexReasoningEffort>(['none', 'low', 'medium', 'high', 'xhigh']);
+const CODEX_REASONING_VALUES = new Set<CodexReasoningEffort>(['none', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']);
 
 export interface PublicCatalogResponseItem {
   id?: number | string;

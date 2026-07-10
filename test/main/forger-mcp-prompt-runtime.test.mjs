@@ -85,10 +85,10 @@ test('forger_update_app_prompt schema accepts agentPrompt and runtime overrides'
   assert.deepEqual(schema.properties.kind.enum, ['promptTemplate', 'agent', 'agentPrompt']);
   assert.equal(schema.properties.runtime.oneOf[0].properties.provider.const, 'codex');
   assert.equal(schema.properties.runtime.oneOf[1].properties.provider.const, 'claude');
-  assert.deepEqual(schema.properties.runtime.oneOf[0].properties.effort.enum, ['none', 'low', 'medium', 'high', 'xhigh']);
+  assert.deepEqual(schema.properties.runtime.oneOf[0].properties.effort.enum, ['none', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']);
   assert.deepEqual(schema.properties.runtime.oneOf[1].properties.effort.enum, ['low', 'medium', 'high', 'xhigh', 'max']);
   assert.equal(schema.properties.model.type, 'string');
-  assert.deepEqual(schema.properties.reasoningEffort.enum, ['none', 'low', 'medium', 'high', 'xhigh']);
+  assert.deepEqual(schema.properties.reasoningEffort.enum, ['none', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']);
 });
 
 test('forger_test_app_prompt schema accepts prompt candidates and variables', () => {

@@ -132,7 +132,7 @@ configureDesktopUserDataPath({ app, isDev, path });
 const backendBaseUrl = process.env.FORGER_BACKEND_URL ?? (isDev ? 'http://127.0.0.1:3300' : 'https://platform.forger.cloud');
 let localCatalogJsonUrl: string | undefined;
 const CODEX_MODEL_VALUES = new Set(APP_CODEX_MODEL_OPTIONS.map((option) => option.realModelName));
-const CODEX_REASONING_VALUES = new Set<CodexReasoningEffort>(['none', 'low', 'medium', 'high', 'xhigh']);
+const CODEX_REASONING_VALUES = new Set<CodexReasoningEffort>(['none', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']);
 const CLAUDE_MODEL_VALUES = new Set(APP_CLAUDE_MODEL_OPTIONS.map((option) => option.realModelName));
 const CLAUDE_EFFORT_VALUES = new Set<ClaudeEffort>(['low', 'medium', 'high', 'xhigh', 'max']);
 const ANTIGRAVITY_MODEL_VALUES = new Set(ANTIGRAVITY_MODEL_OPTIONS.map((option) => option.realModelName));

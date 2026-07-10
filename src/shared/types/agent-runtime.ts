@@ -170,7 +170,7 @@ export interface AppAiSubscriptionStatus {
   connected: boolean;
 }
 
-export type CodexReasoningEffort = 'none' | 'low' | 'medium' | 'high' | 'xhigh';
+export type CodexReasoningEffort = 'none' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
 
 export interface CodexModelOption {
   displayModelName: string;

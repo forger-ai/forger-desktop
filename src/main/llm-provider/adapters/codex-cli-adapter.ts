@@ -23,6 +23,9 @@ import type {
 const CODEX_ATTEMPT_INACTIVITY_TIMEOUT_MS = 30 * 60 * 1000;
 const CODEX_CHATGPT_COMPATIBLE_FALLBACK_MODEL = 'gpt-5.2';
 
+const codexReasoningConfigArg = (reasoningEffort: CodexReasoningEffort | string): string =>
+  `model_reasoning_effort="${reasoningEffort}"`;
+
 interface ResolvedLlmCommand {
   command: string;
   prefixArgs: string[];
@@ -202,7 +205,7 @@ export class CodexCliAdapter {
       '--model',
       input.model,
       '--config',
-      `reasoning_effort="${input.reasoningEffort}"`,
+      codexReasoningConfigArg(input.reasoningEffort),
       ...codexWorkspaceNetworkConfigArgs(input.networkAccess === true),
       ...codexUnsafeArgs(input.permissionMode),
       ...codexWorkspaceArgs(input.permissionMode),
@@ -228,7 +231,7 @@ export class CodexCliAdapter {
       '--model',
       input.model,
       '--config',
-      `reasoning_effort="${input.reasoningEffort}"`,
+      codexReasoningConfigArg(input.reasoningEffort),
       ...codexWorkspaceNetworkConfigArgs(input.networkAccess === true),
       ...codexUnsafeArgs(input.permissionMode),
       ...(input.threadId ? [] : codexWorkspaceArgs(input.permissionMode)),
@@ -270,7 +273,7 @@ export class CodexCliAdapter {
       '--model',
       input.model || CODEX_CHATGPT_COMPATIBLE_FALLBACK_MODEL,
       '--config',
-      `reasoning_effort="${input.reasoningEffort || 'low'}"`,
+      codexReasoningConfigArg(input.reasoningEffort || 'low'),
       ...codexWorkspaceNetworkConfigArgs(input.networkAccess === true),
       ...codexUnsafeArgs(input.permissionMode),
       ...codexWorkspaceArgs(input.permissionMode),
@@ -454,7 +457,7 @@ export const parseCodexJsonl = (stdout: string, stderr: string): CodexParsedOutp
 
 const buildChatAttempts = (input: CodexChatRunInput, mcpServers: LlmMcpServerConfig[]): string[][] => {
   const modelArgs = ['--model', input.model];
-  const reasoningArgs = ['--config', `reasoning_effort="${input.reasoningEffort}"`];
+  const reasoningArgs = ['--config', codexReasoningConfigArg(input.reasoningEffort)];
   const networkArgs = codexWorkspaceNetworkConfigArgs(input.networkAccess === true);
   const mcpArgs = buildCodexMcpArgs(mcpServers);
   const commonArgs = ['--skip-git-repo-check', '-C', input.workingDir];
