@@ -123,6 +123,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     selectedAppToolGate,
     selectedAppToolGrantBusyId,
     handleAppDetailsToolGrant,
+    handleAppDetailsConnectionGrant,
     appSecretsState,
     secretsBusy,
     settings,
@@ -285,10 +286,11 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     socialInstallReviewDialog,
     closeSocialInstallReviewDialog,
     handleSocialInstallReviewDecision,
-    handleSocialOptionalToolGrant,
+    handleSocialOptionalGrantDraftChange,
     socialDownloadAccountRequiredOpen,
     setSocialDownloadAccountRequiredOpen,
     renderInstallTool,
+    renderInstallConnection,
     renderInstallItem,
     renderInstallCapability,
     capabilityRows,
@@ -1071,7 +1073,9 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             onDelete={(appId) => void handleDeleteApp(appId)}
             onOpenAccount={() => setCloudModalOpen(true)}
             onSetAppToolGrant={(toolId, granted) => void handleAppDetailsToolGrant(toolId, granted)}
+            onSetAppConnectionGrant={(type, granted) => void handleAppDetailsConnectionGrant(type, granted)}
             onOpenTools={() => setCurrentView('tools')}
+            onOpenConnections={() => setCurrentView('connections')}
             onOpenProfile={(username) => {
               const normalized = username.trim().replace(/^@/, '');
               if (!normalized) return;
@@ -1479,11 +1483,22 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
                   <Typography variant="subtitle2">{t.installGate.toolsTitle}</Typography>
                   {socialInstallReviewDialog.gate.required.length > 0 || socialInstallReviewDialog.gate.optional.length > 0 ? (
                     <Stack spacing={1}>
-                      {socialInstallReviewDialog.gate.required.map((item: any) => renderInstallTool(item, true, socialInstallReviewDialog.grantDrafts ?? {}, handleSocialOptionalToolGrant))}
-                      {socialInstallReviewDialog.gate.optional.map((item: any) => renderInstallTool(item, false, socialInstallReviewDialog.grantDrafts ?? {}, handleSocialOptionalToolGrant))}
+                      {socialInstallReviewDialog.gate.required.map((item: any) => renderInstallTool(item, true, socialInstallReviewDialog.grantDrafts ?? {}, handleSocialOptionalGrantDraftChange))}
+                      {socialInstallReviewDialog.gate.optional.map((item: any) => renderInstallTool(item, false, socialInstallReviewDialog.grantDrafts ?? {}, handleSocialOptionalGrantDraftChange))}
                     </Stack>
                   ) : (
                     <Typography variant="body2" color="text.secondary">{t.installGate.noTools}</Typography>
+                  )}
+                </Stack>
+                <Stack spacing={1}>
+                  <Typography variant="subtitle2">{t.installGate.connectionsTitle}</Typography>
+                  {(socialInstallReviewDialog.gate.connectionRequired?.length ?? 0) > 0 || (socialInstallReviewDialog.gate.connectionOptional?.length ?? 0) > 0 ? (
+                    <Stack spacing={1}>
+                      {(socialInstallReviewDialog.gate.connectionRequired ?? []).map((item: any) => renderInstallConnection(item, true, socialInstallReviewDialog.grantDrafts ?? {}, handleSocialOptionalGrantDraftChange))}
+                      {(socialInstallReviewDialog.gate.connectionOptional ?? []).map((item: any) => renderInstallConnection(item, false, socialInstallReviewDialog.grantDrafts ?? {}, handleSocialOptionalGrantDraftChange))}
+                    </Stack>
+                  ) : (
+                    <Typography variant="body2" color="text.secondary">{t.installGate.noConnections}</Typography>
                   )}
                 </Stack>
                 <Stack spacing={1}>

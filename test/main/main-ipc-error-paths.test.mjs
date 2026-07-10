@@ -91,7 +91,9 @@ const createDeps = async (overrides = {}) => {
         call: async () => ({}),
         configure: async () => ({}),
         disconnect: async () => ({}),
+        listConnectionsForApp: async () => ({ types: [], instances: [], requirements: [] }),
         listState: async () => ({ types: [], instances: [] }),
+        setAppConnectionGrant: async () => null,
         setDefaultConnection: async () => ({}),
       }),
       getFileLibrary: () => ({
@@ -1304,8 +1306,13 @@ test('main IPC delegates app lifecycle, prompt, secret, official-tool, and file-
     refresh: async (locale) => [{ id: 'gmail', refreshed: true, locale }],
     setAppToolGrant: async (input, locale) => ({ input, locale }),
   };
+  const connections = {
+    listConnectionsForApp: async () => ({ types: [], instances: [], requirements: [] }),
+    setAppConnectionGrant: async (input) => ({ input }),
+  };
   const { handlers, IPC_CHANNELS } = await createDeps({
     buildAppSecretsState: async (appId) => ({ appId, appSecrets: [] }),
+    getConnectionsService: () => connections,
     getAppDetails: async (appId) => ({ appId, name: 'Finance OS' }),
     getFileLibrary: () => fileLibrary,
     getOfficialToolsService: () => officialTools,
@@ -1353,8 +1360,9 @@ test('main IPC delegates app lifecycle, prompt, secret, official-tool, and file-
   assert.deepEqual(await handlers.get(IPC_CHANNELS.activateOfficialTool)(null, 'gmail', 'es'), { op: 'activate', toolId: 'gmail', locale: 'es' });
   assert.deepEqual(await handlers.get(IPC_CHANNELS.configureOfficialTool)(null, { toolId: 'gmail' }), { op: 'configure', input: { toolId: 'gmail' } });
   assert.deepEqual(await handlers.get(IPC_CHANNELS.deactivateOfficialTool)(null, 'gmail', 'es'), { op: 'deactivate', toolId: 'gmail', options: { locale: 'es' } });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.getAppToolsInstallGate)(null, 'finance-os', 'es'), { appId: 'finance-os', locale: 'es' });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.setAppToolGrant)(null, { appId: 'finance-os', toolId: 'gmail' }, 'es'), { input: { appId: 'finance-os', toolId: 'gmail' }, locale: 'es' });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.getAppToolsInstallGate)(null, 'finance-os', 'es'), { appId: 'finance-os', locale: 'es', connectionRequired: [], connectionOptional: [] });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.setAppToolGrant)(null, { appId: 'finance-os', toolId: 'gmail' }, 'es'), { appId: 'finance-os', locale: 'es', connectionRequired: [], connectionOptional: [] });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.setAppConnectionGrant)(null, { appId: 'finance-os', type: 'gmail', granted: true }, 'es'), { appId: 'finance-os', locale: 'es', connectionRequired: [], connectionOptional: [] });
 
   assert.deepEqual(await handlers.get(IPC_CHANNELS.filesStageForChat)(null, { fileId: 'file-1' }), { op: 'stage', input: { fileId: 'file-1' } });
   assert.deepEqual(await handlers.get(IPC_CHANNELS.filesDiscardStagedForChat)(null, { fileId: 'file-1' }), { op: 'discard', input: { fileId: 'file-1' } });

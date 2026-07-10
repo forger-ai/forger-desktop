@@ -201,7 +201,7 @@ test('desktop runtime connection endpoints list, status, and delegate app-grante
   }
 });
 
-test('desktop runtime connection setup and grant request routes delegate safely and emit runtime events', async () => {
+test('desktop runtime connection setup emits runtime events and grant requests stay manifest-managed', async () => {
   const calls = [];
   const harness = await createBridge({
     connections: {
@@ -220,28 +220,6 @@ test('desktop runtime connection setup and grant request routes delegate safely 
             isDefault: true,
             createdAt: '2026-07-05T00:00:00.000Z',
             updatedAt: '2026-07-05T00:00:00.000Z',
-          },
-        };
-      },
-      requestGrantFromApp: async (appId, input) => {
-        calls.push(['requestGrantFromApp', appId, input]);
-        return {
-          success: true,
-          userMessage: 'granted',
-          requirement: {
-            declaration: {
-              type: input.type,
-              actions: ['gmail.search_messages'],
-              reason: input.reason ?? 'Use Gmail',
-              multiple: false,
-            },
-            required: false,
-            resolvedActions: [],
-            allActions: false,
-            granted: true,
-            hasStoredGrant: true,
-            configured: true,
-            instances: [],
           },
         };
       },
@@ -284,18 +262,11 @@ test('desktop runtime connection setup and grant request routes delegate safely 
       },
     );
     assert.equal(grant.response.status, 200);
-    assert.equal(grant.payload.success, true);
-    const grantEvent = await nextSocketMessage(eventSocket);
-    assert.equal(grantEvent.type, 'desktop.connections.changed');
-    assert.deepEqual(grantEvent.payload, {
-      reason: 'grant',
-      type: 'gmail',
-      connectionIds: ['conn-setup'],
-    });
+    assert.equal(grant.payload.success, false);
+    assert.equal(grant.payload.technicalCode, 'connection_grant_manifest_managed');
 
     assert.deepEqual(calls, [
       ['configureFromApp', APP_ID, { type: 'gmail', label: 'Personal Gmail', connectionId: 'conn-existing' }],
-      ['requestGrantFromApp', APP_ID, { type: 'gmail', reason: 'Use Gmail from the app', connectionIds: ['conn-setup'] }],
     ]);
   } finally {
     eventSocket.close();

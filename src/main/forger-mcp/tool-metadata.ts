@@ -474,20 +474,6 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
     };
   }
 
-  if (toolId === 'forger_request_connection_grant') {
-    return {
-      type: 'object',
-      properties: {
-        appId: { type: 'string' },
-        type: { type: 'string' },
-        reason: { type: 'string' },
-        connectionIds: { type: 'array', items: { type: 'string' } },
-      },
-      required: ['appId', 'type'],
-      additionalProperties: false,
-    };
-  }
-
   if (toolId === 'forger_ask_question') {
     return {
       type: 'object',

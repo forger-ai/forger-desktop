@@ -112,6 +112,7 @@ import type {
   RuntimeStatus,
   SetActiveLlmProviderProfileInput,
   SetActiveLlmProviderProfileResult,
+  SetAppConnectionGrantInput,
   SetAppToolGrantInput,
   Settings,
   SpeechToTextConfigInput,
@@ -369,6 +370,11 @@ const isDesktopLogLevel = (value: unknown): value is DesktopLogLevel =>
 export const __testMainHandlersInternals = {
 };
 
+const splitConnectionRequirements = (requirements: Awaited<ReturnType<ConnectionsService['listConnectionsForApp']>>['requirements']) => ({
+  connectionRequired: requirements.filter((requirement) => requirement.required),
+  connectionOptional: requirements.filter((requirement) => !requirement.required),
+});
+
 const trimInstalledAppName = (value: unknown): string => typeof value === 'string' ? value.trim() : '';
 
 const updateInstalledManifestDisplayName = async (
@@ -425,6 +431,23 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
     return {
       ...(status ? { localNetworkShare: status } : {}),
       ...(remoteStatus ? { remoteNetworkShare: remoteStatus } : {}),
+    };
+  };
+  const buildAppAccessInstallGate = async (
+    appId: string,
+    locale?: string,
+    options?: GetAppToolsInstallGateOptions,
+  ): Promise<AppToolsInstallGate | null> => {
+    const [gate, connections] = await Promise.all([
+      getOfficialToolsService().getInstallGate(appId, locale, options),
+      getConnectionsService().listConnectionsForApp(appId, options),
+    ]);
+    if (!gate) {
+      return null;
+    }
+    return {
+      ...gate,
+      ...splitConnectionRequirements(connections.requirements),
     };
   };
   const ensurePathInside = (rootPath: string, targetPath: string): boolean => {
@@ -1451,10 +1474,15 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
   registerConnectionIpcHandlers({ IPC_CHANNELS, ipcMain, getConnectionsService });
   registerSidekickIpcHandlers({ IPC_CHANNELS, ipcMain, getSidekickService });
   ipcMain.handle(IPC_CHANNELS.getAppToolsInstallGate, async (_event, appId: string, locale?: string, options?: GetAppToolsInstallGateOptions): Promise<AppToolsInstallGate | null> => {
-    return await getOfficialToolsService().getInstallGate(appId, locale, options);
+    return await buildAppAccessInstallGate(appId, locale, options);
   });
   ipcMain.handle(IPC_CHANNELS.setAppToolGrant, async (_event, input: SetAppToolGrantInput, locale?: string): Promise<AppToolsInstallGate | null> => {
-    return await getOfficialToolsService().setAppToolGrant(input, locale);
+    await getOfficialToolsService().setAppToolGrant(input, locale);
+    return await buildAppAccessInstallGate(input.appId, locale);
+  });
+  ipcMain.handle(IPC_CHANNELS.setAppConnectionGrant, async (_event, input: SetAppConnectionGrantInput, locale?: string): Promise<AppToolsInstallGate | null> => {
+    await getConnectionsService().setAppConnectionGrant(input);
+    return await buildAppAccessInstallGate(input.appId, locale);
   });
   registerChatIpcHandlers({
     IPC_CHANNELS,

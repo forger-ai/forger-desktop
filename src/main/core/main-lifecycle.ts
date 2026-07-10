@@ -70,7 +70,7 @@ import { appAllowsAgentRuntimeControl, appAllowsAudioInput, appAllowsSpeechToTex
 import type { LlmProviderAuthProfileResolver } from '../llm-provider/types';
 import { connectionToolDefinitionsFromState } from './mcp-connection-tools';
 import { createAppRuntimeDiagnostics } from './app-runtime-diagnostics';
-import { createConnectionGrantRequester, createPublishedAppInfoUpdater } from './main-lifecycle-mcp-handlers';
+import { createPublishedAppInfoUpdater } from './main-lifecycle-mcp-handlers';
 import { registerGracefulShutdownHandlers } from './main-lifecycle-shutdown';
 import { isRemoteAgentSessionCloseEvent, isRemoteTunnelCloseEvent } from './remote-session-events';
 
@@ -902,12 +902,6 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
     listConnectionGrantsForApp: async (appId: string) => await getConnectionsService().listSessionGrantsForApp(appId),
     listConnectionsForSession: async (grants: unknown) => await getConnectionsService().listConnectionsForSession(grants as never),
     callConnectionFromSession: async (input: unknown, grants: unknown) => await getConnectionsService().callFromSession(input as never, grants as never),
-    setAppConnectionGrant: async (input: unknown) => await getConnectionsService().setAppConnectionGrant(input as {
-      appId: string;
-      type: string;
-      granted: boolean;
-      connectionIds?: string[];
-    }),
     memoryList: async (input: unknown, access: unknown) => await getMemoryStore().list(input, access),
     memoryCreate: async (input: unknown, access: unknown) => await getMemoryStore().create(input, access),
     memoryUpdate: async (input: unknown, access: unknown) => await getMemoryStore().update(input, access),
@@ -1348,7 +1342,6 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
       listConnectionsForApp: async (appId: string) => await state.connectionsService!.listConnectionsForApp(appId),
       callFromApp: async (appId: string, input: CallConnectionActionInput) => await state.connectionsService!.callFromApp(appId, input),
       configureFromApp: async (appId: string, input: ConfigureConnectionInput) => await state.connectionsService!.configureFromApp(appId, input),
-      requestGrantFromApp: createConnectionGrantRequester({ dialog, state }),
     } : undefined,
     getAudioDevices,
     updateAudioInputDevices: async (devices: AudioRuntimeDevices) => {

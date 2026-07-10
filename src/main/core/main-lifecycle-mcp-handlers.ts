@@ -1,13 +1,9 @@
 import type {
-  ConnectionActionDefinition,
-  ConnectionRequirementState,
   SocialUserApp,
   SocialUserAppUpdateInput,
   SocialUserAppVisibility,
 } from '../../shared/types';
 import type { MainLifecycleState } from './main-lifecycle-types';
-
-type ElectronDialog = typeof import('electron').dialog;
 
 export interface PublishedAppInfoUpdateInput {
   userAppId?: number;
@@ -22,16 +18,6 @@ export interface PublishedAppInfoUpdateInput {
 
 interface BackendClientWithSocialUpdates {
   updateSocialApp?: (input: SocialUserAppUpdateInput) => Promise<SocialUserApp>;
-}
-
-interface ConnectionsServiceWithAppGrants {
-  listConnectionsForApp: (appId: string) => Promise<{ requirements: ConnectionRequirementState[] }>;
-  setAppConnectionGrant: (input: {
-    appId: string;
-    type: string;
-    granted: boolean;
-    connectionIds?: string[];
-  }) => Promise<ConnectionRequirementState | null | undefined>;
 }
 
 export const createPublishedAppInfoUpdater = (state: MainLifecycleState) =>
@@ -83,97 +69,3 @@ export const createPublishedAppInfoUpdater = (state: MainLifecycleState) =>
       };
     }
   };
-
-export const createConnectionGrantRequester = ({
-  dialog,
-  state,
-}: {
-  dialog: ElectronDialog;
-  state: MainLifecycleState;
-}) =>
-  async (appId: string, input: { type: string; reason?: string; connectionIds?: string[] }) => {
-    const type = typeof input.type === 'string' ? input.type.trim() : '';
-    if (!type) {
-      return {
-        success: false,
-        userMessage: 'Connection type is required.',
-        technicalCode: 'connection_type_required',
-      };
-    }
-
-    const service = state.connectionsService as ConnectionsServiceWithAppGrants | null;
-    const connectionState = await service!.listConnectionsForApp(appId);
-    const requirement = connectionState.requirements.find((candidate) => candidate.declaration.type === type);
-    if (!requirement) {
-      return {
-        success: false,
-        userMessage: 'This app has not declared this connection.',
-        technicalCode: 'app_connection_not_declared',
-      };
-    }
-    if (requirement.granted && !requirement.reviewNeeded) {
-      return {
-        success: true,
-        userMessage: 'This connection is already allowed for the app.',
-        requirement,
-      };
-    }
-
-    const appName = state.registry.apps[appId]?.name ?? appId;
-    const connectionName = requirement.definition?.displayName ?? type;
-    const detail = connectionGrantDialogDetail(requirement, input);
-    const decision = await dialog.showMessageBox({
-      type: 'question',
-      buttons: ['Allow', 'Cancel'],
-      defaultId: 1,
-      cancelId: 1,
-      title: 'Allow connection access?',
-      message: `Allow ${appName} to use ${connectionName}?`,
-      detail,
-    });
-    if (decision.response !== 0) {
-      return {
-        success: false,
-        userMessage: 'The connection was not allowed for the app.',
-        technicalCode: 'connection_grant_rejected',
-        requirement,
-      };
-    }
-
-    const updatedRequirement = await service!.setAppConnectionGrant({
-      appId,
-      type,
-      granted: true,
-      ...(input.connectionIds?.length ? { connectionIds: input.connectionIds } : {}),
-    });
-    return updatedRequirement
-      ? {
-        success: true,
-        userMessage: 'The connection is allowed for the app.',
-        requirement: updatedRequirement,
-      }
-      : {
-        success: false,
-        userMessage: 'This app has not declared this connection.',
-        technicalCode: 'app_connection_not_declared',
-      };
-  };
-
-const connectionGrantDialogDetail = (
-  requirement: ConnectionRequirementState,
-  input: { reason?: string; connectionIds?: string[] },
-): string => {
-  const declaredReason = typeof requirement.declaration.reason === 'string'
-    ? requirement.declaration.reason.trim()
-    : '';
-  const requestReason = typeof input.reason === 'string' ? input.reason.trim() : '';
-  const actionNames = requirement.resolvedActions
-    .map((action: ConnectionActionDefinition) => action.name || action.id)
-    .filter(Boolean)
-    .join(', ');
-  return [
-    requestReason || declaredReason,
-    actionNames ? `Actions: ${actionNames}` : '',
-    input.connectionIds?.length ? `Selected connections: ${input.connectionIds.join(', ')}` : '',
-  ].filter(Boolean).join('\n\n');
-};

@@ -140,15 +140,6 @@ export const INTERNAL_MCP_TOOL_DEFINITIONS: AgentToolDefinition[] = [
     risk: 'bajo',
     defaultRequiresApproval: false,
   },
-  {
-    id: 'forger_request_connection_grant',
-    packageId: 'forger:connections',
-    name: 'Pedir permiso de conexion',
-    description: 'Pide permiso para activar una conexion opcional declarada por una app.',
-    category: 'consulta',
-    risk: 'medio',
-    defaultRequiresApproval: false,
-  },
 ];
 
 export const WORKFLOW_NODE_TOOL_IDS = new Set<AgentToolId>([

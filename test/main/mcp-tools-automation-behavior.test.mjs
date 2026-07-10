@@ -46,6 +46,16 @@ const wait = (ms) => new Promise((resolveWait) => {
   setTimeout(resolveWait, ms);
 });
 
+const waitFor = async (predicate, { attempts = 200, delayMs = 20 } = {}) => {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (await predicate()) {
+      return true;
+    }
+    await wait(delayMs);
+  }
+  return false;
+};
+
 test.after(async () => {
   await __resetChromeExtensionToolForTests();
 });
@@ -3385,14 +3395,20 @@ test('automation manager records successful Codex runs with memory context and r
     await manager.runNow(automation.id);
 
     let runs = [];
-    for (let attempt = 0; attempt < 50; attempt += 1) {
+    const completed = await waitFor(async () => {
       runs = await manager.listRuns(automation.id);
-      if (runs[0]?.status === 'succeeded') {
-        break;
+      if (runs[0]?.status !== 'succeeded') {
+        return false;
       }
-      await wait(20);
-    }
+      try {
+        await access(capturePath);
+        return true;
+      } catch {
+        return false;
+      }
+    });
 
+    assert.equal(completed, true);
     const capture = JSON.parse(await readFile(capturePath, 'utf8'));
     const transcript = await manager.getRunTranscript(runs[0].id);
     assert.equal(runs[0].status, 'succeeded');
@@ -3529,21 +3545,21 @@ test('automation manager uses the saved runtime for scheduled and manual executi
   try {
     await manager.initialize();
     let runs = [];
-    for (let attempt = 0; attempt < 50; attempt += 1) {
+    const scheduledCompleted = await waitFor(async () => {
       runs = await manager.listRuns('stored-runtime');
-      if (runs[0]?.status === 'succeeded') break;
-      await wait(20);
-    }
+      return runs[0]?.status === 'succeeded';
+    });
+    assert.equal(scheduledCompleted, true);
     assert.equal(runs[0].trigger, 'scheduled');
     assert.equal(runs[0].status, 'succeeded');
 
     const manual = await manager.runNow('stored-runtime');
-    for (let attempt = 0; attempt < 50; attempt += 1) {
+    const manualCompleted = await waitFor(async () => {
       runs = await manager.listRuns('stored-runtime');
-      if (runs.find((run) => run.id === manual.id)?.status === 'succeeded') break;
-      await wait(20);
-    }
+      return runs.find((run) => run.id === manual.id)?.status === 'succeeded';
+    });
 
+    assert.equal(manualCompleted, true);
     assert.deepEqual(runtimeRequests, [
       { provider: 'codex', model: 'gpt-test', effort: 'high', permissionMode: 'unsafe', strict: true },
       { provider: 'codex', model: 'gpt-test', effort: 'high', permissionMode: 'unsafe', strict: true },
@@ -3631,13 +3647,13 @@ test('automation manager applies missed scheduled run policies during initializa
 
   try {
     await manager.initialize();
-    for (let attempt = 0; attempt < 50; attempt += 1) {
+    const completed = await waitFor(async () => {
       const freshRuns = await manager.listRuns('window-fresh');
       const alwaysRuns = await manager.listRuns('always-old');
-      if (freshRuns[0]?.status === 'succeeded' && alwaysRuns[0]?.status === 'succeeded') break;
-      await wait(20);
-    }
+      return freshRuns[0]?.status === 'succeeded' && alwaysRuns[0]?.status === 'succeeded';
+    });
 
+    assert.equal(completed, true);
     const skipRuns = await manager.listRuns('skip-old');
     const windowOldRuns = await manager.listRuns('window-old');
     const windowFreshRuns = await manager.listRuns('window-fresh');
@@ -3957,7 +3973,7 @@ test('automation manager runs due stored schedules and keeps enabled automations
     let runs = [];
     let [scheduled] = manager.list();
     let captureReady = false;
-    for (let attempt = 0; attempt < 50; attempt += 1) {
+    const completed = await waitFor(async () => {
       runs = await manager.listRuns('scheduled');
       [scheduled] = manager.list();
       try {
@@ -3966,12 +3982,10 @@ test('automation manager runs due stored schedules and keeps enabled automations
       } catch {
         captureReady = false;
       }
-      if (runs[0]?.status === 'succeeded' && scheduled.running === false && captureReady) {
-        break;
-      }
-      await wait(20);
-    }
+      return runs[0]?.status === 'succeeded' && scheduled.running === false && captureReady;
+    });
 
+    assert.equal(completed, true);
     assert.equal(captureReady, true);
     const capture = JSON.parse(await readFile(capturePath, 'utf8'));
     assert.equal(runs[0].trigger, 'scheduled');

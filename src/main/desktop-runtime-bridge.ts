@@ -105,16 +105,6 @@ export interface DesktopRuntimeBridgeOptions {
     }>;
     callFromApp: (appId: string, input: CallConnectionActionInput) => Promise<CallConnectionActionResult>;
     configureFromApp?: (appId: string, input: ConfigureConnectionInput) => Promise<ConnectionMutationResult>;
-    requestGrantFromApp?: (appId: string, input: {
-      type: string;
-      reason?: string;
-      connectionIds?: string[];
-    }) => Promise<{
-      success: boolean;
-      userMessage: string;
-      technicalCode?: string;
-      requirement?: ConnectionRequirementState;
-    }>;
   };
   getAudioDevices?: () => Promise<AudioRuntimeDevices>;
   updateAudioInputDevices?: (input: AudioRuntimeDevices) => Promise<void>;
@@ -686,28 +676,15 @@ export class DesktopRuntimeBridge {
       if (method !== 'POST') {
         throw new BridgeError(404, 'desktop_runtime_route_not_found');
       }
-      if (!service.requestGrantFromApp) {
-        throw new BridgeError(503, 'desktop_runtime_connection_grant_unavailable');
-      }
-      const body = parseJsonBody(bodyText);
       const type = decodeURIComponent(grantRequestMatch[2]).trim();
-      const reason = cleanString(body.reason);
-      const connectionIds = Array.isArray(body.connectionIds)
-        ? body.connectionIds.map(cleanString).filter(Boolean)
-        : undefined;
-      const result = await service.requestGrantFromApp(appId, {
-        type,
-        ...(reason ? { reason } : {}),
-        ...(connectionIds?.length ? { connectionIds } : {}),
-      });
-      if (result.success) {
-        this.publishRuntimeEvent(appId, 'desktop.connections.changed', {
-          reason: 'grant',
-          type,
-          ...(connectionIds?.length ? { connectionIds } : {}),
-        });
-      }
-      return { handled: true, result };
+      return {
+        handled: true,
+        result: {
+          success: false,
+          userMessage: 'Connection access is managed by the app manifest review.',
+          technicalCode: type ? 'connection_grant_manifest_managed' : 'connection_type_required',
+        },
+      };
     }
 
     if (statusMatch) {

@@ -32,6 +32,7 @@ import type { OfficialToolRuntimeEvent } from '../shared/types';
 import type { SelfOAuthCallbackServiceLike } from './oauth-callback/types';
 import {
   connectionGrantAllowsAction,
+  grantRequestsAllActions,
   resolveConnectionActionSnapshot,
   resolveGrantActions,
 } from './connections/grants';
@@ -93,6 +94,15 @@ interface EffectiveConnectionGrant {
 
 interface ServiceCallConnectionActionInput extends CallConnectionActionInput {
   grant?: EffectiveConnectionGrant;
+}
+
+interface AppConnectionRequirementsOptions {
+  defaultOptionalGrants?: boolean;
+}
+
+interface EffectiveAppConnectionGrant extends EffectiveConnectionGrant {
+  actionDeclared: boolean;
+  actionGranted: boolean;
 }
 
 const emptyRegistry = (): ConnectionsRegistryFile => ({
@@ -277,13 +287,13 @@ export class ConnectionsService {
     return result;
   }
 
-  async listConnectionsForApp(appId: string): Promise<{
+  async listConnectionsForApp(appId: string, options?: AppConnectionRequirementsOptions): Promise<{
     types: ConnectionTypeDefinition[];
     instances: ConnectionInstance[];
     requirements: ConnectionRequirementState[];
   }> {
     await this.load();
-    const requirements = await this.getRequirementsForApp(appId);
+    const requirements = await this.getRequirementsForApp(appId, options);
     const callableTypes = new Set(
       requirements
         .filter((requirement) => requirement.granted)
@@ -306,32 +316,22 @@ export class ConnectionsService {
     const actionId = cleanString(input.actionId);
     const required = declarations.required.find((item) => item.type === type);
     const optional = declarations.optional.find((item) => item.type === type);
-    const declaration = required ?? optional;
-    if (!declaration) {
+    if (!required && !optional) {
       return { success: false, userMessage: 'This app has not declared this connection.', technicalCode: 'app_connection_not_declared' };
     }
-
-    const storedGrant = this.registry.appGrants[appId]?.[type];
-    const grant = required
-      ? storedGrant ?? this.buildGrantSnapshot(declaration, { granted: true })
-      : storedGrant;
-    if (!grant?.granted) {
-      return { success: false, userMessage: 'The app does not have permission to use this connection.', technicalCode: 'app_connection_permission_denied' };
-    }
-    if (!connectionGrantAllowsAction(grant, actionId, this.getActionCatalog())) {
+    const grant = this.buildEffectiveAppGrant(appId, type, actionId, required, optional);
+    if (!grant.actionDeclared) {
       return { success: false, userMessage: 'This connection action was not declared by the app.', technicalCode: 'app_connection_action_not_declared' };
+    }
+    if (!grant.actionGranted) {
+      return { success: false, userMessage: 'The app does not have permission to use this connection.', technicalCode: 'app_connection_permission_denied' };
     }
 
     return this.call({
       ...input,
       type,
       actionId,
-      grant: {
-        type,
-        actions: resolveGrantActions(grant, this.getActionCatalog()),
-        connectionIds: grant.connectionIds,
-        multiple: grant.multiple,
-      },
+      grant,
     });
   }
 
@@ -343,19 +343,18 @@ export class ConnectionsService {
     }
     const grants: ConnectionSessionGrant[] = [];
     for (const declaration of declarations.required) {
-      const snapshot = this.registry.appGrants[appId]?.[declaration.type]
-        ?? this.buildGrantSnapshot(declaration, { granted: true });
+      const snapshot = this.buildGrantSnapshot(declaration, { granted: true });
       if (snapshot.granted) {
         grants.push(this.snapshotToSessionGrant(snapshot));
       }
     }
     for (const declaration of declarations.optional) {
-      const snapshot = this.registry.appGrants[appId]?.[declaration.type];
+      const snapshot = this.getStoredGrantForDeclaration(appId, declaration);
       if (snapshot?.granted) {
         grants.push(this.snapshotToSessionGrant(snapshot));
       }
     }
-    return grants;
+    return this.mergeSessionGrants(grants);
   }
 
   async listConnectionsForSession(grants: ConnectionSessionGrant[]): Promise<{
@@ -419,7 +418,8 @@ export class ConnectionsService {
       return null;
     }
     const type = cleanString(input.type);
-    const declaration = [...declarations.required, ...declarations.optional].find((item) => item.type === type);
+    const declaration = declarations.optional.find((item) => item.type === type)
+      ?? declarations.required.find((item) => item.type === type);
     if (!declaration) {
       return null;
     }
@@ -444,17 +444,17 @@ export class ConnectionsService {
     await this.saveRegistry();
   }
 
-  private async getRequirementsForApp(appId: string): Promise<ConnectionRequirementState[]> {
+  private async getRequirementsForApp(appId: string, options?: AppConnectionRequirementsOptions): Promise<ConnectionRequirementState[]> {
     const declarations = await this.options.getAppConnectionDeclarations?.(appId);
     if (!declarations) {
       return [];
     }
     const requirements: ConnectionRequirementState[] = [];
     for (const declaration of declarations.required) {
-      requirements.push(await this.toRequirement(appId, declaration, true));
+      requirements.push(await this.toRequirement(appId, declaration, true, options));
     }
     for (const declaration of declarations.optional) {
-      requirements.push(await this.toRequirement(appId, declaration, false));
+      requirements.push(await this.toRequirement(appId, declaration, false, options));
     }
     return requirements;
   }
@@ -463,12 +463,17 @@ export class ConnectionsService {
     appId: string,
     declaration: AppConnectionDeclaration,
     required: boolean,
+    options?: AppConnectionRequirementsOptions,
   ): Promise<ConnectionRequirementState> {
     const definition = this.modulesByType.get(declaration.type)?.definition;
     const instances = await this.listInstances(declaration.type);
-    const storedGrant = this.registry.appGrants[appId]?.[declaration.type];
+    const storedGrant = required
+      ? undefined
+      : this.getStoredGrantForDeclaration(appId, declaration);
     const hasStoredGrant = Boolean(storedGrant);
-    const grant = storedGrant ?? this.buildGrantSnapshot(declaration, { granted: required });
+    const grant = storedGrant ?? this.buildGrantSnapshot(declaration, {
+      granted: required || options?.defaultOptionalGrants === true,
+    });
     const resolvedActionIds = new Set(resolveGrantActions(grant, this.getActionCatalog()));
     const resolvedActions = (definition?.actions ?? []).filter((action) => resolvedActionIds.has(action.id));
     const declaresAllActions = declaration.actions.includes('*');
@@ -478,18 +483,85 @@ export class ConnectionsService {
       ...(definition ? { definition } : {}),
       resolvedActions,
       allActions: declaresAllActions,
-      granted: required || storedGrant?.granted === true,
+      granted: required || (hasStoredGrant ? storedGrant?.granted === true : options?.defaultOptionalGrants === true),
       hasStoredGrant,
       configured: instances.length > 0,
       instances: storedGrant?.connectionIds?.length
         ? instances.filter((instance) => storedGrant.connectionIds?.includes(instance.id))
         : instances,
-      reviewNeeded: Boolean(
-        storedGrant
-        && !declaresAllActions
-        && storedGrant.actionCatalogHash !== this.hashForType(declaration.type),
-      ),
+      reviewNeeded: Boolean(storedGrant && this.storedGrantNeedsReview(storedGrant, declaration)),
     };
+  }
+
+  private buildEffectiveAppGrant(
+    appId: string,
+    type: string,
+    actionId: string,
+    required?: AppConnectionDeclaration,
+    optional?: AppConnectionDeclaration,
+  ): EffectiveAppConnectionGrant {
+    const requiredGrant = required
+      ? this.buildGrantSnapshot(required, { granted: true })
+      : null;
+    const optionalDeclarationGrant = optional
+      ? this.buildGrantSnapshot(optional, { granted: true })
+      : null;
+    const optionalStoredGrant = optional
+      ? this.getStoredGrantForDeclaration(appId, optional)
+      : undefined;
+    const declaredByRequired = Boolean(requiredGrant && connectionGrantAllowsAction(requiredGrant, actionId, this.getActionCatalog()));
+    const declaredByOptional = Boolean(optionalDeclarationGrant && connectionGrantAllowsAction(optionalDeclarationGrant, actionId, this.getActionCatalog()));
+    const optionalAllowsAction = Boolean(optionalStoredGrant && connectionGrantAllowsAction(optionalStoredGrant, actionId, this.getActionCatalog()));
+    const actionGranted = declaredByRequired || optionalAllowsAction;
+    const grantForAction = declaredByRequired ? requiredGrant : optionalStoredGrant;
+    const actionGrants = [
+      ...(requiredGrant ? [requiredGrant] : []),
+      ...(optionalStoredGrant?.granted ? [optionalStoredGrant] : []),
+    ];
+    const actions = [...new Set(actionGrants.flatMap((grant) => resolveGrantActions(grant, this.getActionCatalog())))];
+    return {
+      type,
+      actions,
+      multiple: actionGrants.some((grant) => grant.multiple),
+      ...(grantForAction?.connectionIds?.length ? { connectionIds: [...grantForAction.connectionIds] } : {}),
+      actionDeclared: declaredByRequired || declaredByOptional,
+      actionGranted,
+    };
+  }
+
+  private getStoredGrantForDeclaration(
+    appId: string,
+    declaration: AppConnectionDeclaration,
+  ): PersistedConnectionGrant | undefined {
+    const storedGrant = this.registry.appGrants[appId]?.[declaration.type];
+    if (!storedGrant || storedGrant.type !== declaration.type) {
+      return undefined;
+    }
+    if (grantRequestsAllActions(storedGrant)) {
+      return storedGrant;
+    }
+    if (declaration.actions.includes('*')) {
+      return storedGrant.requestedActions.includes('*') ? storedGrant : undefined;
+    }
+    const declarationGrant = this.buildGrantSnapshot(declaration, { granted: true });
+    const declarationActions = new Set(resolveGrantActions(declarationGrant, this.getActionCatalog()));
+    return storedGrant.requestedActions.some((action) => declarationActions.has(action))
+      || storedGrant.resolvedActions.some((action) => declarationActions.has(action))
+      ? storedGrant
+      : undefined;
+  }
+
+  private storedGrantNeedsReview(
+    storedGrant: PersistedConnectionGrant,
+    declaration: AppConnectionDeclaration,
+  ): boolean {
+    if (declaration.actions.includes('*')) {
+      return !grantRequestsAllActions(storedGrant);
+    }
+    const declarationGrant = this.buildGrantSnapshot(declaration, { granted: true });
+    const approvedActions = new Set(resolveGrantActions(storedGrant, this.getActionCatalog()));
+    return resolveGrantActions(declarationGrant, this.getActionCatalog())
+      .some((action) => !approvedActions.has(action));
   }
 
   private buildGrantSnapshot(
@@ -506,6 +578,27 @@ export class ConnectionsService {
       multiple: grant.multiple,
       ...(grant.connectionIds?.length ? { connectionIds: [...grant.connectionIds] } : {}),
     };
+  }
+
+  private mergeSessionGrants(grants: ConnectionSessionGrant[]): ConnectionSessionGrant[] {
+    const byType = new Map<string, ConnectionSessionGrant>();
+    for (const grant of grants) {
+      const existing = byType.get(grant.type);
+      if (!existing) {
+        byType.set(grant.type, grant);
+        continue;
+      }
+      const connectionIds = existing.connectionIds || grant.connectionIds
+        ? [...new Set([...(existing.connectionIds ?? []), ...(grant.connectionIds ?? [])])]
+        : undefined;
+      byType.set(grant.type, {
+        type: grant.type,
+        actions: [...new Set([...existing.actions, ...grant.actions])],
+        multiple: existing.multiple || grant.multiple,
+        ...(connectionIds?.length ? { connectionIds } : {}),
+      });
+    }
+    return [...byType.values()];
   }
 
   private getActionCatalog(): Record<string, string[]> {

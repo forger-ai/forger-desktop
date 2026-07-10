@@ -163,6 +163,13 @@ export interface ConnectionRequirementState {
   reviewNeeded?: boolean;
 }
 
+export interface SetAppConnectionGrantInput {
+  appId: string;
+  type: string;
+  granted: boolean;
+  connectionIds?: string[];
+}
+
 export interface ConnectionsState {
   types: ConnectionTypeDefinition[];
   instances: ConnectionInstance[];

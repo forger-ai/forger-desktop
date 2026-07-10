@@ -457,14 +457,14 @@ test('connection sessions and calls only use connected instances for non-status 
   }
 });
 
-test('app connection calls enforce required and optional manifest grants', async () => {
+test('app connection calls merge required and optional declarations for the same type', async () => {
   const harness = await createAppAwareService({
     required: [
       {
         type: 'gmail',
         reason: 'Read customer messages.',
         actions: ['gmail.search_messages'],
-        multiple: false,
+        multiple: true,
       },
     ],
     optional: [
@@ -472,7 +472,7 @@ test('app connection calls enforce required and optional manifest grants', async
         type: 'gmail',
         reason: 'Send approved replies.',
         actions: ['gmail.send_email'],
-        multiple: false,
+        multiple: true,
       },
     ],
   });
@@ -486,20 +486,44 @@ test('app connection calls enforce required and optional manifest grants', async
     });
     assert.equal(configured.success, true);
 
-    const allowed = await harness.service.callFromApp('finance-os', {
+    const requiredCall = await harness.service.callFromApp('finance-os', {
       type: 'gmail',
       actionId: 'gmail.search_messages',
       input: { query: 'from:client@example.com' },
     });
-    assert.equal(allowed.success, true);
+    assert.equal(requiredCall.success, true);
 
-    const denied = await harness.service.callFromApp('finance-os', {
+    const optionalBeforeGrant = await harness.service.callFromApp('finance-os', {
       type: 'gmail',
       actionId: 'gmail.send_email',
       input: { to: 'client@example.com' },
     });
-    assert.equal(denied.success, false);
-    assert.equal(denied.technicalCode, 'app_connection_action_not_declared');
+    assert.equal(optionalBeforeGrant.success, false);
+    assert.equal(optionalBeforeGrant.technicalCode, 'app_connection_permission_denied');
+
+    const grant = await harness.service.setAppConnectionGrant({
+      appId: 'finance-os',
+      type: 'gmail',
+      granted: true,
+      connectionIds: [configured.instance.id],
+    });
+    assert.equal(grant.granted, true);
+    assert.deepEqual(grant.resolvedActions.map((action) => action.id), ['gmail.send_email']);
+
+    const optionalAfterGrant = await harness.service.callFromApp('finance-os', {
+      type: 'gmail',
+      actionId: 'gmail.send_email',
+      input: { to: 'client@example.com' },
+    });
+    assert.equal(optionalAfterGrant.success, true);
+    assert.equal(optionalAfterGrant.data.actionId, 'gmail.send_email');
+    assert.equal(optionalAfterGrant.data.connectionId, configured.instance.id);
+
+    const sessionGrants = await harness.service.listSessionGrantsForApp('finance-os');
+    assert.equal(sessionGrants.length, 1);
+    assert.deepEqual(sessionGrants[0].type, 'gmail');
+    assert.deepEqual([...sessionGrants[0].actions].sort(), ['gmail.search_messages', 'gmail.send_email']);
+    assert.equal(sessionGrants[0].multiple, true);
   } finally {
     await harness.cleanup();
   }

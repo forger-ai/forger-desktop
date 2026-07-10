@@ -31,6 +31,7 @@ export function RendererAppDialogs({ controller }: RendererAppDialogsProps) {
     pendingInstallBusy,
     setPendingInstallGate,
     renderInstallTool,
+    renderInstallConnection,
     renderInstallCapability,
     renderInstallItem,
     capabilityRows,
@@ -165,6 +166,20 @@ export function RendererAppDialogs({ controller }: RendererAppDialogsProps) {
               ) : (
                 <Typography variant="body2" color="text.secondary">
                   {t.installGate.noTools}
+                </Typography>
+              )}
+            </Stack>
+
+            <Stack spacing={1}>
+              <Typography variant="subtitle2">{t.installGate.connectionsTitle}</Typography>
+              {pendingInstallGate && ((pendingInstallGate.connectionRequired?.length ?? 0) > 0 || (pendingInstallGate.connectionOptional?.length ?? 0) > 0) ? (
+                <Stack spacing={1}>
+                  {(pendingInstallGate.connectionRequired ?? []).map((item: any) => renderInstallConnection(item, true))}
+                  {(pendingInstallGate.connectionOptional ?? []).map((item: any) => renderInstallConnection(item, false))}
+                </Stack>
+              ) : (
+                <Typography variant="body2" color="text.secondary">
+                  {t.installGate.noConnections}
                 </Typography>
               )}
             </Stack>

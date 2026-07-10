@@ -1,6 +1,7 @@
 import type { AppAgent, AppPromptTemplate } from './prompts';
 import type { PlatformCapabilities } from '../platform-capabilities';
 import type { BuiltInConnectionType } from '../connection-catalog';
+import type { ConnectionRequirementState } from './connections';
 
 export type AgentToolId =
   | 'forger_list_catalog'
@@ -20,7 +21,6 @@ export type AgentToolId =
   | 'forger_request_app_tool_grant'
   | 'forger_connection_list'
   | 'forger_connection_status'
-  | 'forger_request_connection_grant'
   | 'forger_ask_question'
   | 'forger_list_app_prompts'
   | 'forger_test_app_prompt'
@@ -303,6 +303,8 @@ export interface AppToolsInstallGate {
   platformCapabilities: PlatformCapabilities;
   required: AppToolRequirementState[];
   optional: AppToolRequirementState[];
+  connectionRequired?: ConnectionRequirementState[];
+  connectionOptional?: ConnectionRequirementState[];
   agents: AppAgent[];
   promptTemplates: AppPromptTemplate[];
   canInstall: boolean;

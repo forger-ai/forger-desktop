@@ -23,7 +23,6 @@ import type {
   CallConnectionActionResult,
   CallOfficialToolInput,
   CallOfficialToolResult,
-  ConnectionRequirementState,
   ConnectionSessionGrant,
   ConnectionsState,
   MemoryCreateInput,
@@ -64,7 +63,6 @@ import {
   WORKFLOW_NODE_TOOL_IDS,
 } from './forger-mcp/internal-tools';
 import {
-  executeConnectionGrantRequest,
   executeConnectionManagementTool,
   getEffectiveConnectionGrants,
 } from './forger-mcp/connection-tools';
@@ -218,12 +216,6 @@ interface ForgerMcpServerOptions {
     grants: ConnectionSessionGrant[],
     access: { caller: AgentMcpSession['caller']; appId: string; locale?: string },
   ) => Promise<CallConnectionActionResult>;
-  setAppConnectionGrant?: (input: {
-    appId: string;
-    type: string;
-    granted: boolean;
-    connectionIds?: string[];
-  }) => Promise<ConnectionRequirementState | null>;
   memoryList: (input: MemoryListInput, access: MemoryAccessInput) => Promise<MemoryEntry[]>;
   memoryCreate: (input: MemoryCreateInput, access: MemoryAccessInput) => Promise<MemoryEntry>;
   memoryUpdate: (input: MemoryUpdateInput, access: MemoryAccessInput) => Promise<MemoryEntry>;
@@ -884,12 +876,6 @@ export class ForgerMcpServer {
 
     if (toolId === 'forger_request_app_tool_grant') {
       const result = await this.executeAppToolGrantRequest(session, args);
-      await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
-      return result;
-    }
-
-    if (toolId === 'forger_request_connection_grant') {
-      const result = await executeConnectionGrantRequest(session, args, this.options);
       await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
       return result;
     }

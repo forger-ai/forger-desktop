@@ -26,7 +26,7 @@ import type { AntigravityAuthSessionEvent, AntigravityAuthSessionStartResult, An
 import type { AgentProviderUsageResult } from './provider-usage';
 import type { LlmProviderProfileMutationResult, LlmProviderProfilesState, SetActiveLlmProviderProfileInput, SetActiveLlmProviderProfileResult, UpdateLlmProviderProfileDefaultsInput } from './provider-profiles';
 import type { AgentToolPackageDefinition, AgentToolSettings, UpdateAgentToolApprovalInput, OfficialToolsState, ToolMutationResult, ConfigureOfficialToolInput, CallOfficialToolInput, CallOfficialToolResult, AppToolsInstallGate, SetAppToolGrantInput, OfficialToolRuntimeEvent, GetAppToolsInstallGateOptions } from './tools';
-import type { CallConnectionActionInput, CallConnectionActionResult, ConfigureConnectionInput, ConnectionMutationResult, ConnectionsState, DisconnectConnectionInput } from './connections';
+import type { CallConnectionActionInput, CallConnectionActionResult, ConfigureConnectionInput, ConnectionMutationResult, ConnectionsState, DisconnectConnectionInput, SetAppConnectionGrantInput } from './connections';
 import type { PickedChatFile, FilesStageForChatInput, FilesDiscardStagedForChatInput, FilesActionResult, FilesListInput, ForgerFileRecord, ForgerFileCategory, FilesCreateCategoryInput, FilesRenameCategoryInput, FilesDeleteCategoryInput, FilesImportInput, FilesMoveInput, FilesRenameInput, FilesDeleteInput, DbListTablesResponse, DbQueryTableResponse } from './data';
 import type { Automation, AutomationRun, AutomationRunSummary, AutomationUpsertInput, WindowControlState } from './automations';
 import type { Workflow, WorkflowApproveNodeInput, WorkflowRun, WorkflowRunSummary, WorkflowUpdatedEvent, WorkflowUpsertInput } from './workflows';
@@ -264,6 +264,7 @@ export interface ForgerDesktopApi {
   onOfficialToolEvent: (listener: (event: OfficialToolRuntimeEvent) => void) => () => void;
   getAppToolsInstallGate: (appId: string, locale?: string, options?: GetAppToolsInstallGateOptions) => Promise<AppToolsInstallGate | null>;
   setAppToolGrant: (input: SetAppToolGrantInput, locale?: string) => Promise<AppToolsInstallGate | null>;
+  setAppConnectionGrant: (input: SetAppConnectionGrantInput, locale?: string) => Promise<AppToolsInstallGate | null>;
   memoryList: (input?: MemoryListInput) => Promise<MemoryEntry[]>;
   memoryCreate: (input: MemoryCreateInput) => Promise<MemoryEntry>;
   memoryUpdate: (input: MemoryUpdateInput) => Promise<MemoryEntry>;
