@@ -234,7 +234,6 @@ export class CodexCliAdapter {
       ...(input.threadId ? [] : codexWorkspaceArgs(input.permissionMode)),
       '--skip-git-repo-check',
       ...buildCodexMcpArgs(mcpServers),
-      ...(input.addDirs ?? []).flatMap((dir) => ['--add-dir', dir]),
     ];
     const args = input.threadId
       ? [
@@ -249,6 +248,7 @@ export class CodexCliAdapter {
           ...command.prefixArgs,
           ...(mcpServers.length > 0 ? ['--ask-for-approval', 'never'] : []),
           ...common,
+          ...(input.addDirs ?? []).flatMap((dir) => ['--add-dir', dir]),
           '-C',
           input.workingDir,
           ...(input.imagePaths ?? []).flatMap((filePath) => ['--image', filePath]),

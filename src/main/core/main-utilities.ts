@@ -8,6 +8,7 @@ import type { DesktopUpdater } from '../desktop-updater';
 import type { DesktopErrorReporter } from '../error-reporting';
 import type { ForgerAccountStore, StoredForgerAccount, publicForgerAccount } from '../forger-account-store';
 import { appendDesktopLog, type DesktopLogService } from '../desktop-logger';
+import { isBenignPipeError } from '../child-stdio';
 import type { AGENT_TOOL_DEFINITIONS, AGENT_TOOL_IDS } from './agent-tool-packages';
 import type { IPC_CHANNELS } from '../../shared/ipc';
 import { withAppExecutionState } from '../../shared/app-execution-state';
@@ -83,6 +84,11 @@ let activeProcessErrorReporter: DesktopErrorReporter | null = null;
 let processErrorHandlersRegistered = false;
 
 const handleMainUncaughtException = (error: Error): void => {
+  // Writing to a stdin/socket after the peer has gone surfaces here as a benign
+  // `write EPIPE`. Swallow it so it never becomes a spurious desktop error report.
+  if (isBenignPipeError(error)) {
+    return;
+  }
   activeProcessErrorReporter?.reportMainUncaughtException(error);
 };
 

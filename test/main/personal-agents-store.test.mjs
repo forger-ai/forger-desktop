@@ -728,6 +728,18 @@ test('personal agent Codex runs prepare Git and write logs under metadata root',
     access(path.join(metadataRoot, 'personal-agents', '.forger', 'runs', `${completed.activeRun.id}.log`)),
     /ENOENT/,
   );
+
+  // Follow-up messages resume the recorded thread. `--add-dir` is only valid on a
+  // fresh `codex exec`; `codex exec resume` rejects it, so the resume invocation
+  // must omit it while still keeping the shared roots trusted via the env.
+  const messageCountAfterFirst = completed.messages.length;
+  await manager.sendMessage({ conversationId: conversation.id, content: 'Keep going.' });
+  await waitForConversation(manager, conversation.id, (item) =>
+    item.messages.length >= messageCountAfterFirst + 2 && item.activeRun?.status === 'completed');
+  const resumeInvocation = JSON.parse(await readFile(invocationCapturePath, 'utf8'));
+  assert.ok(resumeInvocation.argv.includes('resume'), 'follow-up should resume via codex exec resume');
+  assert.equal(resumeInvocation.argv.includes('--add-dir'), false, 'resume must not pass --add-dir');
+  assert.ok(resumeInvocation.allowedRoots.split(path.delimiter).includes(connectedAppRoot));
 });
 
 test('personal agent conversation manager starts a real run, persists progress, and blocks overlapping sends', async () => {

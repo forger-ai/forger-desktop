@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { AppAgentCommandResult, LlmCommandCaptureOptions, ResolvedLlmCommand } from './types';
 import { spawnProcess } from '../runtime/process-spawn';
+import { guardChildStdin } from '../child-stdio';
 import { createLlmProviderRunService } from '../llm-provider/run-service';
 
 export const runCommandCapture = async (
@@ -43,10 +44,7 @@ export const runCommandCapture = async (
     };
     refreshCommandTimeout();
 
-    child.stdin.on('error', (error: NodeJS.ErrnoException) => {
-      if (error.code === 'EPIPE') {
-        return;
-      }
+    guardChildStdin(child, (error) => {
       clearCommandTimeout();
       if (!settled) {
         settled = true;

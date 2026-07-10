@@ -71,7 +71,7 @@ export function AppViewActions({
     ...(canShareLocalNetwork ? [{ label: t.localNetwork.menuAction, onClick: () => onStartLocalNetworkShare(appId) }] : []),
     ...(canShareRemoteNetwork ? [{ label: t.remoteNetwork.menuAction, onClick: () => onStartRemoteNetworkShare(appId) }] : []),
     ...(canStopRemoteNetwork ? [{ label: t.remoteNetwork.stop, onClick: () => onStopRemoteNetworkShare(appId) }] : []),
-    ...(canUploadSocial ? [{ label: t.locale === 'es' ? 'Subir a Social' : 'Upload to Social', onClick: () => onUploadSocial(appId) }] : []),
+    ...(canUploadSocial ? [{ label: t.social.uploadTitle, onClick: () => onUploadSocial(appId) }] : []),
   ];
   const appMenuEnabled = appMenuActions.length > 0;
 

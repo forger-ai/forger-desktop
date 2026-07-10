@@ -73,6 +73,26 @@ export const normalizeAppConnectionDeclarations = (
 const hashActions = (type: string, actions: string[]): string =>
   `${type}:${actions.join('|')}`;
 
+export const grantRequestsAllActions = (
+  grant: Pick<PersistedConnectionGrant, 'requestedActions'>,
+): boolean => grant.requestedActions.includes(ALL_ACTIONS_TOKEN);
+
+/**
+ * Effective actions a grant currently allows. Grants that requested all
+ * actions (`*`) always resolve against the live action catalog, so actions
+ * added to a connection after approval become available without a new grant.
+ * Explicit grants stay frozen to the actions approved at grant time.
+ */
+export const resolveGrantActions = (
+  grant: Pick<PersistedConnectionGrant, 'type' | 'requestedActions' | 'resolvedActions'>,
+  actionCatalog: Record<string, string[]>,
+): string[] => {
+  if (grantRequestsAllActions(grant)) {
+    return [...(actionCatalog[grant.type] ?? [])];
+  }
+  return [...grant.resolvedActions];
+};
+
 export const resolveConnectionActionSnapshot = (
   declaration: AppConnectionDeclaration,
   actionCatalog: Record<string, string[]>,
@@ -100,6 +120,13 @@ export const resolveConnectionActionSnapshot = (
 export const connectionGrantAllowsAction = (
   grant: PersistedConnectionGrant,
   actionId: string,
-  _actionCatalog?: Record<string, string[]>,
-): boolean =>
-  grant.granted === true && grant.resolvedActions.includes(actionId);
+  actionCatalog: Record<string, string[]> = {},
+): boolean => {
+  if (grant.granted !== true) {
+    return false;
+  }
+  if (grantRequestsAllActions(grant)) {
+    return (actionCatalog[grant.type] ?? []).includes(actionId);
+  }
+  return grant.resolvedActions.includes(actionId);
+};

@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { AgentRuntime } from '../../shared/types';
 import { spawnProcess } from '../runtime/process-spawn';
+import { guardChildStdin } from '../child-stdio';
 import { createLlmProviderRunService } from '../llm-provider/run-service';
 import type { LlmCommandResult, LlmMcpServerConfig, LlmProviderAuthProfileResolver } from '../llm-provider/types';
 
@@ -234,7 +235,6 @@ const runCommandCapture = async (
       detached: process.platform !== 'win32',
     });
     options.onChild?.(child);
-    child.stdin.end(options.stdinText ?? '');
 
     let stdout = '';
     let stderr = '';
@@ -289,5 +289,12 @@ const runCommandCapture = async (
       }
       finish(() => resolve({ code: typeof code === 'number' ? code : 1, stdout, stderr }));
     });
+    guardChildStdin(child, (error) => {
+      if (timeout) {
+        clearTimeout(timeout);
+      }
+      finish(() => reject(error));
+    });
+    child.stdin.end(options.stdinText ?? '');
   });
 };

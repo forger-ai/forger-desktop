@@ -19,6 +19,7 @@ export function MoreView({ t, pinnedViews, onTogglePin, onOpen }: MoreViewProps)
     files: t.nav.files,
     backups: t.nav.backups,
     devices: t.nav.devices,
+    sidekicks: t.nav.sidekicks,
     datos: t.nav.datos,
     secrets: t.nav.secrets,
     connections: t.nav.connections,

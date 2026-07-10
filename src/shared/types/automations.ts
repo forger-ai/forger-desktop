@@ -1,12 +1,17 @@
 import type { AgentRuntime } from './agent-runtime';
 
-export type AutomationFrequencyType = 'hourly' | 'daily' | 'weekly';
+export type AutomationFrequencyType = 'interval' | 'hourly' | 'daily' | 'weekly';
 export type AutomationMissedRunPolicy = 'skip' | 'always' | 'within_window';
+
+export const MIN_INTERVAL_MINUTES = 1;
+export const MAX_INTERVAL_MINUTES = 24 * 60;
+export const DEFAULT_INTERVAL_MINUTES = 15;
 
 export interface AutomationFrequency {
   type: AutomationFrequencyType;
   timeOfDay?: string;
   weeklyDay?: number;
+  intervalMinutes?: number;
 }
 
 export type AutomationRunTrigger = 'manual' | 'scheduled';

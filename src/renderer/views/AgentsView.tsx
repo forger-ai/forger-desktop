@@ -50,9 +50,11 @@ import { AgentConversationHistoryDrawer } from './AgentConversationHistoryDrawer
 import {
   AgentRoutineDialog,
   AgentRoutinesPanel,
+  clampRoutineIntervalMinutes,
   defaultRoutineMissedRunWindowMinutes,
   normalizeTimeOfDay,
 } from './AgentRoutinesPanel';
+import { DEFAULT_INTERVAL_MINUTES } from '@shared/types';
 import {
   type AccessDraft,
   type AgentConversationHistoryGroup,
@@ -109,6 +111,7 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
   const [routineFrequencyType, setRoutineFrequencyType] = useState<RoutineFrequencyType>('hourly');
   const [routineTimeOfDay, setRoutineTimeOfDay] = useState('09:00');
   const [routineWeeklyDay, setRoutineWeeklyDay] = useState(1);
+  const [routineIntervalMinutes, setRoutineIntervalMinutes] = useState(String(DEFAULT_INTERVAL_MINUTES));
   const [routineMissedRunPolicy, setRoutineMissedRunPolicy] = useState<AutomationMissedRunPolicy>('within_window');
   const [routineMissedRunWindowMinutes, setRoutineMissedRunWindowMinutes] = useState('30');
   const [routineEnabled, setRoutineEnabled] = useState(true);
@@ -178,17 +181,18 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
     const routineStarted = sortItemsByRecentActivity(conversations.filter((item) => item.origin === 'routine'));
     const userStarted = sortItemsByRecentActivity(conversations.filter((item) => item.origin !== 'agent' && item.origin !== 'routine'));
     const agentStarted = sortItemsByRecentActivity(conversations.filter((item) => item.origin === 'agent'));
-    return [
+    const groups: Array<AgentConversationHistoryGroup | null> = [
       routineStarted.length > 0
-        ? { id: 'routine-started', label: t.locale === 'es' ? 'Rutinas' : 'Routines', items: routineStarted }
+        ? { id: 'routine-started', label: t.agents.conversationGroups.routine, items: routineStarted }
         : null,
       userStarted.length > 0
-        ? { id: 'user-started', label: t.locale === 'es' ? 'Iniciadas por el usuario' : 'Started by user', items: userStarted }
+        ? { id: 'user-started', label: t.agents.conversationGroups.user, items: userStarted }
         : null,
       agentStarted.length > 0
-        ? { id: 'agent-started', label: t.locale === 'es' ? 'Iniciadas por agentes' : 'Started by agents', items: agentStarted }
+        ? { id: 'agent-started', label: t.agents.conversationGroups.agent, items: agentStarted }
         : null,
-    ].filter((group): group is AgentConversationHistoryGroup => Boolean(group));
+    ];
+    return groups.filter((group): group is AgentConversationHistoryGroup => Boolean(group));
   }, [conversations, t.locale]);
 
   useEffect(() => {
@@ -568,7 +572,7 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
     try {
       await window.forger.personalAgentWakeupCancel({ conversationId: conversation.id });
     } catch (cancelError) {
-      setError(cancelError instanceof Error ? cancelError.message : (t.locale === 'es' ? 'No se pudo cancelar el despertar.' : 'Could not cancel the wakeup.'));
+      setError(cancelError instanceof Error ? cancelError.message : t.agents.wakeupCancelError);
     } finally {
       setBusyAction(null);
     }
@@ -581,6 +585,7 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
     setRoutineFrequencyType('hourly');
     setRoutineTimeOfDay('09:00');
     setRoutineWeeklyDay(1);
+    setRoutineIntervalMinutes(String(DEFAULT_INTERVAL_MINUTES));
     setRoutineMissedRunPolicy('within_window');
     setRoutineMissedRunWindowMinutes('30');
     setRoutineEnabled(true);
@@ -599,6 +604,7 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
     setRoutineFrequencyType(routine.frequency.type);
     setRoutineTimeOfDay('timeOfDay' in routine.frequency ? routine.frequency.timeOfDay ?? '09:00' : '09:00');
     setRoutineWeeklyDay('weeklyDay' in routine.frequency ? routine.frequency.weeklyDay ?? 1 : 1);
+    setRoutineIntervalMinutes(String(routine.frequency.intervalMinutes ?? DEFAULT_INTERVAL_MINUTES));
     setRoutineMissedRunPolicy(routine.missedRunPolicy);
     setRoutineMissedRunWindowMinutes(String(routine.missedRunWindowMinutes ?? defaultRoutineMissedRunWindowMinutes(routine.frequency.type)));
     setRoutineEnabled(routine.enabled);
@@ -607,6 +613,9 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
   };
 
   const routineFrequencyFromForm = (): AutomationFrequency => {
+    if (routineFrequencyType === 'interval') {
+      return { type: 'interval', intervalMinutes: clampRoutineIntervalMinutes(routineIntervalMinutes) };
+    }
     if (routineFrequencyType === 'daily') {
       return { type: 'daily', timeOfDay: normalizeTimeOfDay(routineTimeOfDay) };
     }
@@ -625,12 +634,14 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
     setBusyAction('routine');
     setError(null);
     try {
+      const frequency = routineFrequencyFromForm();
+      const isInterval = frequency.type === 'interval';
       const input = {
         name: routineName,
         prompt: routinePrompt,
-        frequency: routineFrequencyFromForm(),
-        missedRunPolicy: routineMissedRunPolicy,
-        missedRunWindowMinutes: Number(routineMissedRunWindowMinutes) || undefined,
+        frequency,
+        missedRunPolicy: isInterval ? ('within_window' as AutomationMissedRunPolicy) : routineMissedRunPolicy,
+        missedRunWindowMinutes: isInterval ? undefined : (Number(routineMissedRunWindowMinutes) || undefined),
         enabled: routineEnabled,
         authorizationText: routineAuthorizationText,
       };
@@ -645,7 +656,7 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
       resetRoutineForm();
       await loadAgentDetail(activeAgent.id, conversation?.id);
     } catch (routineError) {
-      setError(routineError instanceof Error ? routineError.message : (t.locale === 'es' ? 'No se pudo guardar la rutina.' : 'Could not save the routine.'));
+      setError(routineError instanceof Error ? routineError.message : t.agents.routines.saveError);
     } finally {
       setBusyAction(null);
     }
@@ -653,7 +664,7 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
 
   const handleToggleRoutine = async (routine: PersonalAgentRoutine) => {
     if (busy) return;
-    const authorizationText = window.prompt(t.locale === 'es' ? 'Autorizacion para modificar esta rutina' : 'Authorization to change this routine');
+    const authorizationText = window.prompt(t.agents.routines.changeAuthPrompt);
     if (!authorizationText?.trim()) return;
     setBusyAction('routine');
     setError(null);
@@ -665,15 +676,15 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
       });
       setRoutines((current) => current.map((item) => item.id === updated.id ? updated : item));
     } catch (routineError) {
-      setError(routineError instanceof Error ? routineError.message : (t.locale === 'es' ? 'No se pudo modificar la rutina.' : 'Could not update the routine.'));
+      setError(routineError instanceof Error ? routineError.message : t.agents.routines.updateError);
     } finally {
       setBusyAction(null);
     }
   };
 
   const handleDeleteRoutine = async (routine: PersonalAgentRoutine) => {
-    if (busy || !window.confirm(t.locale === 'es' ? 'Eliminar esta rutina? El thread se conservara como conversacion normal.' : 'Delete this routine? The thread will remain as a normal conversation.')) return;
-    const authorizationText = window.prompt(t.locale === 'es' ? 'Autorizacion para eliminar esta rutina' : 'Authorization to delete this routine');
+    if (busy || !window.confirm(t.agents.routines.deleteConfirm)) return;
+    const authorizationText = window.prompt(t.agents.routines.deleteAuthPrompt);
     if (!authorizationText?.trim()) return;
     setBusyAction('routine');
     setError(null);
@@ -684,7 +695,7 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
         await loadAgentDetail(activeAgent.id, conversation?.id);
       }
     } catch (routineError) {
-      setError(routineError instanceof Error ? routineError.message : (t.locale === 'es' ? 'No se pudo eliminar la rutina.' : 'Could not delete the routine.'));
+      setError(routineError instanceof Error ? routineError.message : t.agents.routines.deleteError);
     } finally {
       setBusyAction(null);
     }
@@ -705,7 +716,7 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
         setDetailTab('chat');
       }
     } catch (threadError) {
-      setError(threadError instanceof Error ? threadError.message : (t.locale === 'es' ? 'No se pudo abrir el thread de la rutina.' : 'Could not open the routine thread.'));
+      setError(threadError instanceof Error ? threadError.message : t.agents.routines.openThreadError);
     }
   };
 
@@ -714,7 +725,7 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
       const thread = await window.forger.personalAgentPeerThreadGet({ threadId });
       setOpenPeerThread(thread);
     } catch (threadError) {
-      setError(threadError instanceof Error ? threadError.message : (t.locale === 'es' ? 'No se pudo abrir el thread.' : 'Could not open the thread.'));
+      setError(threadError instanceof Error ? threadError.message : t.agents.openThreadError);
     }
   };
 
@@ -735,7 +746,7 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
         modifiedAt: file.modifiedAt,
         source: 'attached',
       }));
-      const content = message.trim() || (t.locale === 'es' ? 'Revisa los archivos compartidos.' : 'Review the shared files.');
+      const content = message.trim() || t.agents.defaultSharedFilesMessage;
       const updated = await window.forger.personalAgentSendMessage({
         conversationId: conversation.id,
         content,
@@ -956,9 +967,9 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
     const isIntermediate = item.kind === 'intermediate';
     const isScheduledUser = isUser && item.source !== 'human';
     const scheduledLabel = item.source === 'routine'
-      ? (t.locale === 'es' ? 'Rutina' : 'Routine')
+      ? t.agents.messageBadge.routine
       : item.source === 'scheduled_wakeup'
-        ? (t.locale === 'es' ? 'Despertar' : 'Wakeup')
+        ? t.agents.messageBadge.wakeup
         : null;
     const messageRun = !isUser && !isIntermediate && item.runId && activeRun?.id === item.runId
       ? activeRun
@@ -1097,12 +1108,12 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
     >
       <Stack direction="row" spacing={1} alignItems="center" sx={{ px: 1.25, py: 1, borderBottom: `1px solid ${theme.palette.divider}` }}>
         <ChatRounded color="action" fontSize="small" />
-        <Typography variant="subtitle2" noWrap>{t.locale === 'es' ? 'Mensajes con otros agentes' : 'Messages with other agents'}</Typography>
+        <Typography variant="subtitle2" noWrap>{t.agents.peerThreadsTitle}</Typography>
       </Stack>
       <Box sx={{ flex: 1, minHeight: 0, overflow: 'auto', p: 0.75 }}>
         {peerThreads.length > 0 ? renderPeerThreadRows(peerThreads) : (
           <Typography variant="body2" color="text.secondary" sx={{ p: 1 }}>
-            {t.locale === 'es' ? 'No hay threads con otros agentes.' : 'No peer agent threads yet.'}
+            {t.agents.peerThreadsEmpty}
           </Typography>
         )}
       </Box>
@@ -1114,9 +1125,7 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
       return (
         <Box sx={{ p: 1.5, borderTop: `1px solid ${theme.palette.divider}` }}>
           <Typography variant="body2" color="text.secondary">
-            {t.locale === 'es'
-              ? 'Esta conversacion fue iniciada por otro agente. Puedes revisarla, pero no responder desde aqui.'
-              : 'This thread was started by another agent. You can review it, but replies are not available here.'}
+            {t.agents.readOnlyThread}
           </Typography>
         </Box>
       );
@@ -1139,9 +1148,7 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
           >
             <Box sx={{ flex: 1, minWidth: 0 }}>
               <Typography variant="body2" fontWeight={700}>
-                {t.locale === 'es'
-                  ? `Este agente esta esperando ${formatCountdown(wakeupCountdownMs)} para volver a llamarse`
-                  : `This agent is waiting ${formatCountdown(wakeupCountdownMs)} before calling itself again`}
+                {t.agents.wakeupWaiting(formatCountdown(wakeupCountdownMs))}
               </Typography>
               <Typography variant="caption" color="text.secondary" noWrap>
                 {scheduledWakeup.prompt}
@@ -1154,7 +1161,7 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
               disabled={busyAction === 'cancelWakeup'}
               onClick={() => void handleCancelWakeup()}
             >
-              {t.locale === 'es' ? 'Cancelar' : 'Cancel'}
+              {t.actions.cancel}
             </Button>
           </Stack>
         ) : null}
@@ -1196,7 +1203,7 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
               </IconButton>
             </span>
           </Tooltip>
-          <Tooltip title={wakeupIsActive ? (t.locale === 'es' ? 'Este agente esta esperando para volver a llamarse.' : 'This agent is waiting before calling itself again.') : t.agents.send}>
+          <Tooltip title={wakeupIsActive ? t.agents.wakeupWaitingShort : t.agents.send}>
             <span>
               <IconButton
                 color="primary"
@@ -1271,8 +1278,8 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
         <Tabs value={detailTab} onChange={(_event, value: AgentDetailTab) => setDetailTab(value)}>
           <Tab value="chat" label={t.agents.chatTitle} />
           <Tab value="workspace" label={t.agents.workspaceTab} />
-          <Tab value="routines" label={t.locale === 'es' ? 'Rutinas' : 'Routines'} />
-          <Tab value="settings" label={t.locale === 'es' ? 'Configuracion' : 'Settings'} />
+          <Tab value="routines" label={t.agents.routines.tab} />
+          <Tab value="settings" label={t.agents.settingsTab} />
         </Tabs>
 
         {error ? <Alert severity="error">{error}</Alert> : null}
@@ -1525,6 +1532,7 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
         frequencyType={routineFrequencyType}
         timeOfDay={routineTimeOfDay}
         weeklyDay={routineWeeklyDay}
+        intervalMinutes={routineIntervalMinutes}
         missedRunPolicy={routineMissedRunPolicy}
         missedRunWindowMinutes={routineMissedRunWindowMinutes}
         enabled={routineEnabled}
@@ -1536,6 +1544,7 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
         onFrequencyTypeChange={setRoutineFrequencyType}
         onTimeOfDayChange={setRoutineTimeOfDay}
         onWeeklyDayChange={setRoutineWeeklyDay}
+        onIntervalMinutesChange={setRoutineIntervalMinutes}
         onMissedRunPolicyChange={setRoutineMissedRunPolicy}
         onMissedRunWindowMinutesChange={setRoutineMissedRunWindowMinutes}
         onEnabledChange={setRoutineEnabled}
@@ -1552,7 +1561,7 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
           <Stack spacing={1.5}>
             {openPeerThreadVisibleMessages.length > 0 ? openPeerThreadVisibleMessages.map((item) => renderMessage(item, { contextMessages: openPeerThreadMessages })) : (
               <Typography variant="body2" color="text.secondary">
-                {t.locale === 'es' ? 'Este thread no tiene mensajes visibles.' : 'This thread has no visible messages.'}
+                {t.agents.peerThreadEmpty}
               </Typography>
             )}
           </Stack>

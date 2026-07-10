@@ -1137,6 +1137,7 @@ export class AgentStore {
     this.ensureColumn('personal_agent_messages', 'source', "TEXT NOT NULL DEFAULT 'human'");
     this.ensureColumn('personal_agent_messages', 'routine_id', 'TEXT');
     this.ensureColumn('personal_agent_messages', 'wakeup_id', 'TEXT');
+    this.ensureColumn('personal_agent_routines', 'frequency_interval_minutes', 'INTEGER');
     this.ensureColumn('personal_agent_permissions', 'kind', "TEXT NOT NULL DEFAULT 'legacy'");
     this.ensureColumn('personal_agent_permissions', 'target_id', "TEXT NOT NULL DEFAULT ''");
     this.backfillPermissionGrantColumns();

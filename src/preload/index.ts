@@ -57,6 +57,15 @@ const IPC_CHANNELS = {
   speechToTextProcess: 'forger:speech-to-text:process',
   speechToTextProcessUpload: 'forger:speech-to-text:process-upload',
   speechToTextCreateRealtimeSession: 'forger:speech-to-text:create-realtime-session',
+  sidekicksGetState: 'forger:sidekicks:get-state',
+  sidekicksScanUsb: 'forger:sidekicks:scan-usb',
+  sidekicksConfigureUsb: 'forger:sidekicks:configure-usb',
+  sidekicksSendDisplay: 'forger:sidekicks:send-display',
+  sidekicksStartMicrophoneRecording: 'forger:sidekicks:microphone:start',
+  sidekicksStopMicrophoneRecording: 'forger:sidekicks:microphone:stop',
+  sidekicksReadMicrophoneRecording: 'forger:sidekicks:microphone:read',
+  sidekicksForget: 'forger:sidekicks:forget',
+  sidekicksChanged: 'forger:sidekicks:changed',
   microphonePermissionStatus: 'forger:microphone-permission:status',
   microphonePermissionRequest: 'forger:microphone-permission:request',
   liveVoiceInputGetState: 'forger:live-voice-input:get-state',
@@ -376,6 +385,23 @@ const api: ForgerDesktopApi = {
   speechToTextProcess: (input) => ipcRenderer.invoke(IPC_CHANNELS.speechToTextProcess, input),
   speechToTextProcessUpload: (input) => ipcRenderer.invoke(IPC_CHANNELS.speechToTextProcessUpload, input),
   speechToTextCreateRealtimeSession: () => ipcRenderer.invoke(IPC_CHANNELS.speechToTextCreateRealtimeSession),
+  sidekicksGetState: () => ipcRenderer.invoke(IPC_CHANNELS.sidekicksGetState),
+  sidekicksScanUsb: () => ipcRenderer.invoke(IPC_CHANNELS.sidekicksScanUsb),
+  sidekicksConfigureUsb: (input) => ipcRenderer.invoke(IPC_CHANNELS.sidekicksConfigureUsb, input),
+  sidekicksSendDisplay: (input) => ipcRenderer.invoke(IPC_CHANNELS.sidekicksSendDisplay, input),
+  sidekicksStartMicrophoneRecording: (input) => ipcRenderer.invoke(IPC_CHANNELS.sidekicksStartMicrophoneRecording, input),
+  sidekicksStopMicrophoneRecording: (input) => ipcRenderer.invoke(IPC_CHANNELS.sidekicksStopMicrophoneRecording, input),
+  sidekicksReadMicrophoneRecording: (input) => ipcRenderer.invoke(IPC_CHANNELS.sidekicksReadMicrophoneRecording, input),
+  sidekicksForget: (sidekickId) => ipcRenderer.invoke(IPC_CHANNELS.sidekicksForget, sidekickId),
+  onSidekicksChanged: (listener) => {
+    const wrapped = (_event: unknown, payload: Parameters<typeof listener>[0]) => {
+      listener(payload);
+    };
+    ipcRenderer.on(IPC_CHANNELS.sidekicksChanged, wrapped);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.sidekicksChanged, wrapped);
+    };
+  },
   microphonePermissionStatus: () => ipcRenderer.invoke(IPC_CHANNELS.microphonePermissionStatus),
   microphonePermissionRequest: () => ipcRenderer.invoke(IPC_CHANNELS.microphonePermissionRequest),
   liveVoiceInputGetState: () => ipcRenderer.invoke(IPC_CHANNELS.liveVoiceInputGetState),
