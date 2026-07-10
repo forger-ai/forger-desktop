@@ -66,7 +66,7 @@ interface PromptRuntimeDefaults {
   runtime?: AgentRuntime;
 }
 
-const REASONING_VALUES = new Set<CodexReasoningEffort>(['none', 'low', 'medium', 'high', 'xhigh']);
+const REASONING_VALUES = new Set<CodexReasoningEffort>(['none', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra']);
 
 const emptyStore = (): PromptOverridesFile => ({
   version: PROMPT_OVERRIDES_VERSION,

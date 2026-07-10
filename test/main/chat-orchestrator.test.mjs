@@ -1922,6 +1922,7 @@ test('chat orchestrator resolves network access from desktop chat input or defau
     await waitForRun(harness.events, explicit.runId);
     const [explicitCall] = await readFakeCalls(harness.metadataRoot, 'forger', 'conversation-explicit-network');
     assert.ok(explicitCall.args.includes('--config'));
+    assert.ok(explicitCall.args.includes('model_reasoning_effort="medium"'));
     assert.ok(explicitCall.args.includes('sandbox_workspace_write.network_access=true'));
 
     const defaulted = await harness.orchestrator.startRun({

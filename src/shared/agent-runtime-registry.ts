@@ -39,13 +39,20 @@ export const DEFAULT_ANTIGRAVITY_EFFORT: AntigravityEffort = 'medium';
 export const DEFAULT_AGENT_PROVIDER: AgentProviderPreference = 'auto';
 export const LLM_PROVIDER_KEYS: AgentProvider[] = ['codex', 'claude', 'antigravity'];
 
+const CODEX_CLASSIC_REASONING_EFFORTS: CodexReasoningEffort[] = ['none', 'low', 'medium', 'high', 'xhigh'];
+const CODEX_MAX_REASONING_EFFORTS: CodexReasoningEffort[] = ['low', 'medium', 'high', 'xhigh', 'max'];
+const CODEX_ULTRA_REASONING_EFFORTS: CodexReasoningEffort[] = ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
+
 export const CODEX_MODEL_OPTIONS: CodexModelOption[] = [
-  { displayModelName: '5.5', realModelName: 'gpt-5.5', defaultReasoningEffort: 'medium' },
-  { displayModelName: '5.4', realModelName: 'gpt-5.4', defaultReasoningEffort: 'medium' },
-  { displayModelName: '5.4 Mini', realModelName: 'gpt-5.4-mini', defaultReasoningEffort: 'medium' },
+  { displayModelName: '5.6 Sol', realModelName: 'gpt-5.6-sol', defaultReasoningEffort: 'low', supportedReasoningEfforts: CODEX_ULTRA_REASONING_EFFORTS },
+  { displayModelName: '5.6 Terra', realModelName: 'gpt-5.6-terra', defaultReasoningEffort: 'medium', supportedReasoningEfforts: CODEX_ULTRA_REASONING_EFFORTS },
+  { displayModelName: '5.6 Luna', realModelName: 'gpt-5.6-luna', defaultReasoningEffort: 'medium', supportedReasoningEfforts: CODEX_MAX_REASONING_EFFORTS },
+  { displayModelName: '5.5', realModelName: 'gpt-5.5', defaultReasoningEffort: 'medium', supportedReasoningEfforts: CODEX_CLASSIC_REASONING_EFFORTS },
+  { displayModelName: '5.4', realModelName: 'gpt-5.4', defaultReasoningEffort: 'medium', supportedReasoningEfforts: CODEX_CLASSIC_REASONING_EFFORTS },
+  { displayModelName: '5.4 Mini', realModelName: 'gpt-5.4-mini', defaultReasoningEffort: 'medium', supportedReasoningEfforts: CODEX_CLASSIC_REASONING_EFFORTS },
   { displayModelName: '5.3 Codex', realModelName: 'gpt-5.3-codex', defaultReasoningEffort: 'low', supportedReasoningEfforts: ['low'] },
   { displayModelName: '5.3 Spark', realModelName: 'gpt-5.3-codex-spark', defaultReasoningEffort: 'high', supportedReasoningEfforts: ['high'] },
-  { displayModelName: '5.2', realModelName: 'gpt-5.2', defaultReasoningEffort: 'medium' },
+  { displayModelName: '5.2', realModelName: 'gpt-5.2', defaultReasoningEffort: 'medium', supportedReasoningEfforts: CODEX_CLASSIC_REASONING_EFFORTS },
 ];
 
 export const CODEX_REASONING_OPTIONS: Array<{ label: string; value: CodexReasoningEffort }> = [
@@ -54,6 +61,8 @@ export const CODEX_REASONING_OPTIONS: Array<{ label: string; value: CodexReasoni
   { label: 'Medium', value: 'medium' },
   { label: 'High', value: 'high' },
   { label: 'XHigh', value: 'xhigh' },
+  { label: 'Max', value: 'max' },
+  { label: 'Ultra', value: 'ultra' },
 ];
 
 export const CLAUDE_MODEL_OPTIONS: ClaudeModelOption[] = [

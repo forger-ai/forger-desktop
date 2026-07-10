@@ -3,7 +3,7 @@ import type { ClaudeEffort, CodexReasoningEffort } from '../../shared/types';
 export const DEFAULT_NODE_VERSION = '22';
 export const DEFAULT_PYTHON_VERSION = '3.12';
 export const BUNDLED_GIT_VERSION = '2.54.0';
-export const CODEX_CLI_VERSION = '0.142.5';
+export const CODEX_CLI_VERSION = '0.144.1';
 export const CLAUDE_CODE_VERSION = '2.1.200';
 export const CODEX_USAGE_DASHBOARD_URL = 'https://chatgpt.com/codex/settings/usage';
 export const BUILT_IN_CODEX_MODEL = 'gpt-5.2';
@@ -11,13 +11,20 @@ export const BUILT_IN_CODEX_REASONING: CodexReasoningEffort = 'medium';
 export const BUILT_IN_CLAUDE_MODEL = 'claude-sonnet-5';
 export const BUILT_IN_CLAUDE_EFFORT: ClaudeEffort = 'high';
 
+const CODEX_CLASSIC_REASONING_EFFORTS: CodexReasoningEffort[] = ['none', 'low', 'medium', 'high', 'xhigh'];
+const CODEX_MAX_REASONING_EFFORTS: CodexReasoningEffort[] = ['low', 'medium', 'high', 'xhigh', 'max'];
+const CODEX_ULTRA_REASONING_EFFORTS: CodexReasoningEffort[] = ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
+
 export const APP_CODEX_MODEL_OPTIONS = [
-  { displayModelName: '5.4', realModelName: 'gpt-5.4', defaultReasoningEffort: 'medium' as const },
+  { displayModelName: '5.6 Sol', realModelName: 'gpt-5.6-sol', defaultReasoningEffort: 'low' as const, supportedReasoningEfforts: CODEX_ULTRA_REASONING_EFFORTS },
+  { displayModelName: '5.6 Terra', realModelName: 'gpt-5.6-terra', defaultReasoningEffort: 'medium' as const, supportedReasoningEfforts: CODEX_ULTRA_REASONING_EFFORTS },
+  { displayModelName: '5.6 Luna', realModelName: 'gpt-5.6-luna', defaultReasoningEffort: 'medium' as const, supportedReasoningEfforts: CODEX_MAX_REASONING_EFFORTS },
+  { displayModelName: '5.5', realModelName: 'gpt-5.5', defaultReasoningEffort: 'medium' as const, supportedReasoningEfforts: CODEX_CLASSIC_REASONING_EFFORTS },
+  { displayModelName: '5.4', realModelName: 'gpt-5.4', defaultReasoningEffort: 'medium' as const, supportedReasoningEfforts: CODEX_CLASSIC_REASONING_EFFORTS },
+  { displayModelName: '5.4 Mini', realModelName: 'gpt-5.4-mini', defaultReasoningEffort: 'medium' as const, supportedReasoningEfforts: CODEX_CLASSIC_REASONING_EFFORTS },
   { displayModelName: '5.3 Codex', realModelName: 'gpt-5.3-codex', defaultReasoningEffort: 'low' as const, supportedReasoningEfforts: ['low' as const] },
   { displayModelName: '5.3 Spark', realModelName: 'gpt-5.3-codex-spark', defaultReasoningEffort: 'high' as const, supportedReasoningEfforts: ['high' as const] },
-  { displayModelName: '5.4 Mini', realModelName: 'gpt-5.4-mini', defaultReasoningEffort: 'medium' as const },
-  { displayModelName: '5.5', realModelName: 'gpt-5.5', defaultReasoningEffort: 'medium' as const },
-  { displayModelName: '5.2', realModelName: 'gpt-5.2', defaultReasoningEffort: 'medium' as const },
+  { displayModelName: '5.2', realModelName: 'gpt-5.2', defaultReasoningEffort: 'medium' as const, supportedReasoningEfforts: CODEX_CLASSIC_REASONING_EFFORTS },
 ];
 
 export const APP_CLAUDE_MODEL_OPTIONS = [
