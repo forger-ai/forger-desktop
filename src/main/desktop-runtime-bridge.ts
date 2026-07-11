@@ -46,6 +46,8 @@ import type { ManifestAgentPromptKind } from './manifest-agent-prompts';
 import { REMOVED_FORGER_APP_BRIDGE_MESSAGE } from './ipc/agent-handlers';
 import { normalizeLocale } from '../shared/i18n';
 import { AgentRuntimeRequestValidationError } from '../shared/agent-runtime-registry';
+import { DesktopRuntimeBridgeError as BridgeError } from './desktop-runtime-bridge-error';
+import { routeSidekickRuntimeRequest, type SidekickRuntimeBridgeOptions } from './sidekick-runtime-bridge';
 
 const MAX_BODY_BYTES = 96 * 1024 * 1024;
 const SIGNATURE_WINDOW_MS = 5 * 60 * 1000;
@@ -70,7 +72,7 @@ interface AudioFileTranscriptionJob {
   completedAt?: string;
 }
 
-export interface DesktopRuntimeBridgeOptions {
+export interface DesktopRuntimeBridgeOptions extends SidekickRuntimeBridgeOptions {
   getInstalledApp: (appId: string) => { installDir?: string } | undefined;
   getConversationManager: () => AppAgentConversationManager | null;
   getTaskManager?: () => AppAgentTaskManager | null;
@@ -89,6 +91,8 @@ export interface DesktopRuntimeBridgeOptions {
     textToSpeech: boolean;
     workspaceFolders?: boolean;
     agentRuntimeControl?: boolean;
+    sidekickDisplay?: boolean;
+    sidekickSpeech?: boolean;
   }>;
   requestFolderGrant?: (appId: string, grantToken: string) => Promise<AppFolderGrantPublic | null>;
   listFolderGrants?: (appId: string) => Promise<AppFolderGrantPublic[]>;
@@ -340,6 +344,9 @@ export class DesktopRuntimeBridge {
   }
 
   private async route(appId: string, method: string, pathname: string, bodyText: string): Promise<unknown> {
+    const sidekickResult = await routeSidekickRuntimeRequest(this.options, appId, method, pathname, bodyText);
+    if (sidekickResult.handled) return sidekickResult.result;
+
     const audioResult = await this.routeAudio(appId, method, pathname, bodyText);
     if (audioResult.handled) return audioResult.result;
 
@@ -1320,12 +1327,6 @@ export class DesktopRuntimeBridge {
       ...envelope,
       signature: createHmac('sha256', secret).update(signaturePayload).digest('hex'),
     };
-  }
-}
-
-class BridgeError extends Error {
-  public constructor(public readonly status: number, message: string) {
-    super(message);
   }
 }
 

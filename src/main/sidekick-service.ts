@@ -15,9 +15,15 @@ import type {
   SidekickMicrophonePlaybackResult,
   SidekickMicrophoneRecordingInput,
   SidekickMutationResult,
+  SidekickPersonalAgentInput,
+  SidekickScreenInput,
+  SidekickSpeakInput,
+  SidekickSpeakerPcmInput,
+  SidekickSpeakerPlaybackResult,
   SidekickState,
   SidekickSummary,
   SidekickUsbDevice,
+  SidekickWakeEvent,
 } from '../shared/types';
 import {
   SIDEKICK_ACK_TIMEOUT_MS,
@@ -54,6 +60,7 @@ import {
   isStoredSidekickRecording,
   normalizeCapabilities,
   normalizeSidekickBattery,
+  normalizeSidekickTime,
   normalizeSidekickUsbDevice,
   normalizeVisibleSidekickName,
   openSerialPort,
@@ -63,6 +70,7 @@ import {
   sidekickFailureState,
   stripRecordingStorageFields,
   summarizeMicrophoneRecording,
+  summarizeSpeakerPlayback,
   summarizeUsbSerialCommand,
   summarizeUsbSerialLine,
   waitForPairConfiguredAck,
@@ -70,8 +78,10 @@ import {
   writeJsonAtomic,
   writeSerialLine,
 } from './sidekick-service-helpers';
+import { chunkSidekickPcm, wavToSidekickPcm } from './sidekick-audio-codec';
 import type {
   ActiveSidekickRecording,
+  ActiveSidekickPlayback,
   PendingRecordingAck,
   SidekickNetworkPayload,
   SidekickRuntimeState,
@@ -81,8 +91,20 @@ import type {
   StoredSidekickRecording,
   StoredSidekickRecordingFile,
 } from './sidekick-service-helpers';
+import { parseSidekickTimeReceipt, parseSidekickWakeReceipt, SidekickSpeakerReceipts } from './sidekick-network-receipts';
 
 export { normalizeSidekickUsbDevice } from './sidekick-service-helpers';
+
+const SIDEKICK_TIME_RESYNC_MS = 15 * 60 * 1000;
+
+const localTimeSync = (): { epochMs: number; timeZone: string; utcOffsetMinutes: number } => {
+  const now = new Date();
+  return {
+    epochMs: now.getTime(),
+    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+    utcOffsetMinutes: -now.getTimezoneOffset(),
+  };
+};
 
 export interface SidekickServiceOptions {
   metadataRoot: string;
@@ -94,6 +116,20 @@ export interface SidekickServiceOptions {
   bonjourFactory?: () => Bonjour;
   maxRecordingBytes?: number;
   recentRecordingLimit?: number;
+  getTimeSync?: () => { epochMs: number; timeZone: string; utcOffsetMinutes: number };
+  synthesizeSpeech?: (input: { text: string; model: string; voice: string; speed?: number; format: 'wav' }) => Promise<{
+    success: boolean;
+    audioDataBase64?: string;
+    userMessage?: string;
+    technicalCode?: string;
+  }>;
+  onWakeDetected?: (event: SidekickWakeEvent) => void | Promise<void>;
+  onMicrophonePcm?: (event: {
+    sidekickId: string;
+    recordingId: string;
+    chunkSequence: number;
+    pcm: Uint8Array;
+  }) => void | Promise<void>;
 }
 
 export class SidekickService {
@@ -118,6 +154,7 @@ export class SidekickService {
   private recordings: StoredSidekickRecording[] = [];
   private readonly maxRecordingBytes: number;
   private readonly recentRecordingLimit: number;
+  private readonly speakerReceipts = new SidekickSpeakerReceipts();
 
   constructor(private readonly options: SidekickServiceOptions) {
     this.storePath = path.join(options.metadataRoot, 'sidekicks.json');
@@ -317,6 +354,105 @@ export class SidekickService {
     }
   }
 
+  async setPersonalAgent(input: SidekickPersonalAgentInput): Promise<SidekickMutationResult> {
+    await this.load();
+    const record = this.findRecord(input.sidekickId);
+    if (!record) return sidekickFailureState(this.buildState(), 'Ese Sidekick ya no está registrado.', 'sidekick_not_registered');
+    const personalAgentId = input.personalAgentId?.trim();
+    if (personalAgentId && !/^[A-Za-z0-9_-]{1,64}$/.test(personalAgentId)) {
+      return sidekickFailureState(this.buildState(), 'El agente personal no es válido.', 'sidekick_personal_agent_id_invalid');
+    }
+    record.personalAgentId = personalAgentId || undefined;
+    record.updatedAt = new Date().toISOString();
+    await this.save();
+    this.emit();
+    return { ...this.buildState(), success: true };
+  }
+
+  async sendScreen(input: SidekickScreenInput): Promise<SidekickMutationResult> {
+    await this.load();
+    await this.loadRecordingsIndex();
+    const record = this.findRecord(input.sidekickId);
+    if (!record) {
+      return sidekickFailureState(this.buildState(), 'Ese Sidekick ya no está registrado.', 'sidekick_not_registered');
+    }
+    const runtime = this.runtimes.get(record.sidekickId);
+    if (!runtime?.socket || runtime.socket.readyState !== WebSocket.OPEN || !runtime.sessionId || runtime.status !== 'online') {
+      return sidekickFailureState(this.buildState(), 'El Sidekick está desconectado.', 'sidekick_offline');
+    }
+    if (!record.capabilities.includes('display.screens')) {
+      return sidekickFailureState(this.buildState(), 'Ese Sidekick no admite pantallas visuales.', 'sidekick_screen_capability_missing');
+    }
+    const title = input.title?.trim();
+    const body = input.body?.trim();
+    const text = input.text?.trimEnd();
+    if ((title?.length ?? 0) > 96 || (body?.length ?? 0) > 512 || (text?.length ?? 0) > 4000) {
+      return sidekickFailureState(this.buildState(), 'El contenido de la pantalla es demasiado largo.', 'sidekick_screen_content_too_long');
+    }
+    if (input.template === 'state' && !['listening', 'thinking', 'speaking', 'sleeping', 'error'].includes(input.icon ?? '')) {
+      return sidekickFailureState(this.buildState(), 'El estado visual no es válido.', 'sidekick_screen_icon_invalid');
+    }
+    try {
+      await this.sendEncrypted(record, runtime, {
+        v: 1,
+        id: randomUUID(),
+        cmd: 'screen.set',
+        template: input.template,
+        ...(input.icon ? { icon: input.icon } : {}),
+        ...(title ? { title } : {}),
+        ...(body ? { body } : {}),
+        ...(typeof text === 'string' ? { text } : {}),
+      });
+      return { ...this.buildState(), success: true };
+    } catch (error) {
+      void this.log('sidekick:screen_send_failed', {
+        sidekickId: record.sidekickId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return sidekickFailureState(this.buildState(), 'No pude actualizar la pantalla.', 'sidekick_screen_send_failed');
+    }
+  }
+
+  async speak(input: SidekickSpeakInput): Promise<SidekickSpeakerPlaybackResult> {
+    const text = typeof input.text === 'string' ? input.text.trim() : '';
+    const model = typeof input.model === 'string' ? input.model.trim() : '';
+    const voice = typeof input.voice === 'string' ? input.voice.trim() : '';
+    if (!text || !model || !voice) {
+      return { success: false, userMessage: 'Elige una voz y escribe qué debe decir.', technicalCode: 'sidekick_speech_input_required' };
+    }
+    if (!this.options.synthesizeSpeech) {
+      return { success: false, userMessage: 'La voz de Forger no está disponible.', technicalCode: 'sidekick_tts_unavailable' };
+    }
+    await this.sendScreen({ sidekickId: input.sidekickId, template: 'state', icon: 'speaking' }).catch(() => undefined);
+    try {
+      const synthesized = await this.options.synthesizeSpeech({
+        text,
+        model,
+        voice,
+        speed: input.speed,
+        format: 'wav',
+      });
+      if (!synthesized.success || !synthesized.audioDataBase64) {
+        return {
+          success: false,
+          userMessage: synthesized.userMessage ?? 'No pude preparar la voz.',
+          technicalCode: synthesized.technicalCode ?? 'sidekick_tts_failed',
+        };
+      }
+      const wav = Buffer.from(synthesized.audioDataBase64, 'base64');
+      const pcm = wavToSidekickPcm(wav);
+      return await this.playSpeakerPcm({ sidekickId: input.sidekickId, samples: pcm.samples });
+    } catch (error) {
+      return {
+        success: false,
+        userMessage: 'No pude preparar la voz para el Sidekick.',
+        technicalCode: error instanceof Error ? error.message : 'sidekick_tts_failed',
+      };
+    } finally {
+      await this.sendScreen({ sidekickId: input.sidekickId, template: 'idle' }).catch(() => undefined);
+    }
+  }
+
   async startMicrophoneRecording(input: SidekickMicrophoneRecordingInput): Promise<SidekickMutationResult> {
     await this.load();
     await this.loadRecordingsIndex();
@@ -343,9 +479,15 @@ export class SidekickService {
         'sidekick_microphone_recording_active',
       );
     }
+    if (runtime.speakerPlayback) {
+      return sidekickFailureState(this.buildState(), 'Espera a que termine el audio antes de usar el micrófono.', 'sidekick_audio_busy');
+    }
 
     const recordingId = randomUUID();
-    await fs.mkdir(this.recordingsTmpDir, { recursive: true });
+    const persist = input.transient !== true;
+    if (persist) {
+      await fs.mkdir(this.recordingsTmpDir, { recursive: true });
+    }
     runtime.microphoneRecording = {
       sidekickId: record.sidekickId,
       recordingId,
@@ -353,7 +495,9 @@ export class SidekickService {
       startedAt: new Date().toISOString(),
       bytes: 0,
       chunks: 0,
-      tempPcmPath: this.stagedPcmPath(recordingId),
+      tempPcmPath: persist ? this.stagedPcmPath(recordingId) : '',
+      persist,
+      nextChunkSequence: 0,
       sampleRate: SIDEKICK_MIC_SAMPLE_RATE,
       channels: SIDEKICK_MIC_CHANNELS,
       format: SIDEKICK_MIC_FORMAT,
@@ -483,6 +627,182 @@ export class SidekickService {
     };
   }
 
+  async syncTime(sidekickId: string): Promise<void> {
+    await this.load();
+    const record = this.findRecord(sidekickId);
+    const runtime = this.runtimes.get(sidekickId);
+    if (!record || !runtime?.socket || runtime.socket.readyState !== WebSocket.OPEN || !runtime.sessionId || runtime.status !== 'online') {
+      throw new Error('sidekick_offline');
+    }
+    if (!record.capabilities.includes('system.time.sync')) {
+      return;
+    }
+    const value = this.options.getTimeSync?.() ?? localTimeSync();
+    if (
+      !Number.isSafeInteger(value.epochMs) ||
+      !Number.isInteger(value.utcOffsetMinutes) ||
+      value.utcOffsetMinutes < -840 ||
+      value.utcOffsetMinutes > 840 ||
+      !/^[A-Za-z0-9_+/-]{1,63}$/.test(value.timeZone)
+    ) {
+      throw new Error('sidekick_time_sync_invalid');
+    }
+    await this.sendEncrypted(record, runtime, {
+      v: 1,
+      id: randomUUID(),
+      cmd: 'system.time.sync',
+      epochMs: value.epochMs,
+      timeZone: value.timeZone,
+      utcOffsetMinutes: value.utcOffsetMinutes,
+    });
+    runtime.lastTimeSyncAt = Date.now();
+  }
+
+  async playSpeakerPcm(input: SidekickSpeakerPcmInput): Promise<SidekickSpeakerPlaybackResult> {
+    await this.load();
+    const record = this.findRecord(input.sidekickId);
+    if (!record) {
+      return { success: false, userMessage: 'Ese Sidekick ya no está registrado.', technicalCode: 'sidekick_not_registered' };
+    }
+    const runtime = this.runtimes.get(record.sidekickId);
+    if (!runtime?.socket || runtime.socket.readyState !== WebSocket.OPEN || !runtime.sessionId || runtime.status !== 'online') {
+      return { success: false, userMessage: 'El Sidekick está desconectado.', technicalCode: 'sidekick_offline' };
+    }
+    if (!record.capabilities.includes('speaker.playback')) {
+      return { success: false, userMessage: 'Ese Sidekick no tiene reproducción de audio.', technicalCode: 'sidekick_speaker_capability_missing' };
+    }
+    if (!(input.samples instanceof Int16Array) || input.samples.length === 0) {
+      return { success: false, userMessage: 'El audio está vacío.', technicalCode: 'sidekick_speaker_audio_required' };
+    }
+    if (runtime.microphoneRecording) {
+      return { success: false, userMessage: 'Detén el micrófono antes de reproducir audio.', technicalCode: 'sidekick_audio_busy' };
+    }
+    if (runtime.speakerPlayback) {
+      return { success: false, userMessage: 'El Sidekick ya está reproduciendo audio.', technicalCode: 'sidekick_speaker_playback_active' };
+    }
+
+    const playbackId = randomUUID();
+    const active: ActiveSidekickPlayback = {
+      sidekickId: record.sidekickId,
+      playbackId,
+      status: 'starting',
+      samplesSent: 0,
+      samplesPlayed: 0,
+      bufferedSamples: 0,
+      underruns: 0,
+      droppedChunks: 0,
+      queueDepth: 1,
+    };
+    runtime.speakerPlayback = active;
+    runtime.speakerErrorMessage = undefined;
+    runtime.speakerErrorCode = undefined;
+    this.emit();
+
+    try {
+      const started = this.speakerReceipts.wait(runtime, `started:${playbackId}`);
+      await this.sendEncrypted(record, runtime, {
+        v: 1,
+        id: randomUUID(),
+        cmd: 'speaker.play.start',
+        playbackId,
+        sampleRate: 16_000,
+        channels: 1,
+        format: 'pcm_s16le',
+      });
+      await started;
+
+      // Ventana deslizante: hasta `window` chunks en vuelo (la cola del
+      // firmware admite queueDepth; se deja margen para no gatillar
+      // playback_backpressure). Con lockstep estricto el round trip completo
+      // tenia que caber en los 64 ms de un chunk y cualquier jitter cortaba
+      // el audio; con la ventana el Sidekick acumula ~380 ms de colchon.
+      const window = Math.min(6, Math.max(1, active.queueDepth - 2));
+      const pending: Array<Promise<void>> = [];
+      for (const chunk of chunkSidekickPcm(input.samples)) {
+        while (pending.length >= window) {
+          await pending.shift();
+        }
+        const progressed = this.speakerReceipts.wait(runtime, `progress:${playbackId}:${chunk.chunkSequence}`);
+        // Un fallo rechaza todos los acks pendientes a la vez; el catch vacio
+        // evita unhandledRejection en los que aun no llegan a su await (el
+        // await posterior sobre la promesa original sigue rechazando).
+        progressed.catch(() => undefined);
+        pending.push(progressed);
+        await this.sendEncrypted(record, runtime, {
+          v: 1,
+          id: randomUUID(),
+          cmd: 'speaker.play.chunk',
+          playbackId,
+          chunkSequence: chunk.chunkSequence,
+          sampleCount: chunk.sampleCount,
+          pcmBase64: chunk.pcmBase64,
+        });
+        active.samplesSent += chunk.sampleCount;
+        this.emit();
+      }
+      while (pending.length > 0) {
+        await pending.shift();
+      }
+
+      active.status = 'stopping';
+      const stopped = this.speakerReceipts.wait(runtime, `stopped:${playbackId}`);
+      await this.sendEncrypted(record, runtime, {
+        v: 1,
+        id: randomUUID(),
+        cmd: 'speaker.play.stop',
+        playbackId,
+      });
+      this.emit();
+      await stopped;
+      const result: SidekickSpeakerPlaybackResult = {
+        success: true,
+        playbackId,
+        samplesPlayed: active.samplesPlayed,
+        underruns: active.underruns,
+        droppedChunks: active.droppedChunks,
+      };
+      runtime.speakerPlayback = undefined;
+      this.emit();
+      return result;
+    } catch (error) {
+      await this.log('sidekick:speaker_playback_failed', {
+        sidekickId: record.sidekickId,
+        playbackId,
+        error: error instanceof Error ? error.message : String(error),
+        samplesSent: active.samplesSent,
+        samplesPlayed: active.samplesPlayed,
+        bufferedSamples: active.bufferedSamples,
+        underruns: active.underruns,
+        droppedChunks: active.droppedChunks,
+        pendingAcks: [...runtime.pendingSpeakerAcks.keys()],
+      });
+      this.speakerReceipts.reject(runtime, new Error('sidekick_speaker_playback_failed'));
+      if (runtime.socket?.readyState === WebSocket.OPEN && runtime.sessionId) {
+        active.status = 'cancelling';
+        const stopped = this.speakerReceipts.wait(runtime, `stopped:${playbackId}`);
+        void stopped.catch(() => undefined);
+        await this.sendEncrypted(record, runtime, {
+            v: 1,
+            id: randomUUID(),
+            cmd: 'speaker.play.cancel',
+            playbackId,
+          })
+          .then(async () => await stopped)
+          .catch(() => undefined);
+      }
+      runtime.speakerPlayback = undefined;
+      runtime.speakerErrorMessage = 'No pude reproducir el audio en el Sidekick.';
+      runtime.speakerErrorCode = error instanceof Error ? error.message : 'sidekick_speaker_playback_failed';
+      this.emit();
+      return {
+        success: false,
+        playbackId,
+        userMessage: runtime.speakerErrorMessage,
+        technicalCode: runtime.speakerErrorCode,
+      };
+    }
+  }
+
   async forget(sidekickId: string): Promise<SidekickMutationResult> {
     await this.load();
     await this.loadRecordingsIndex();
@@ -493,6 +813,7 @@ export class SidekickService {
     const runtime = this.runtimes.get(sidekickId);
     if (runtime) {
       await this.cleanupActiveRecording(runtime, 'sidekick_forgotten');
+      this.speakerReceipts.reject(runtime, new Error('sidekick_forgotten'));
     }
     runtime?.socket?.close();
     this.runtimes.delete(sidekickId);
@@ -516,6 +837,7 @@ export class SidekickService {
     }
     for (const runtime of this.runtimes.values()) {
       await this.cleanupActiveRecording(runtime, 'sidekick_disposed');
+      this.speakerReceipts.reject(runtime, new Error('sidekick_disposed'));
       runtime.socket?.close();
     }
     this.wsServer?.close();
@@ -641,6 +963,7 @@ export class SidekickService {
     if (!isNetworkHelloPayload(payload, record.sidekickId)) {
       throw new Error('sidekick_network_hello_invalid');
     }
+    const supersededSocket = runtime.socket !== socket ? runtime.socket : undefined;
     runtime.socket = socket;
     runtime.sessionId = parsed.sessionId;
     runtime.rxSeq = parsed.seq;
@@ -649,11 +972,21 @@ export class SidekickService {
     runtime.ipAddress = typeof payload.ip === 'string' && payload.ip.trim() ? payload.ip.trim() : ipAddress;
     runtime.errorMessage = undefined;
     runtime.battery = normalizeSidekickBattery(payload.battery) ?? runtime.battery;
+    // Un Sidekick solo puede tener una sesion activa. Tras un reset USB/TCP la
+    // conexion anterior puede quedar ESTABLISHED hasta el keepalive; cerrarla
+    // evita recibos y comandos de dos sesiones para el mismo dispositivo.
+    supersededSocket?.close(1000, 'sidekick_session_superseded');
 
     record.firmwareVersion = typeof payload.fw === 'string' ? payload.fw : record.firmwareVersion;
     record.capabilities = normalizeCapabilities(payload.capabilities);
     record.updatedAt = new Date().toISOString();
     await this.save();
+    await this.syncTime(record.sidekickId).catch((error: unknown) => {
+      void this.log('sidekick:time_sync_failed', {
+        sidekickId: record.sidekickId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
     this.emit();
   }
 
@@ -663,6 +996,12 @@ export class SidekickService {
       if (runtime.socket === socket) {
         if (runtime.microphoneRecording) {
           void this.failActiveRecording(runtime, 'El Sidekick se desconectó durante la prueba de micrófono.', 'sidekick_socket_closed');
+        }
+        if (runtime.speakerPlayback) {
+          this.speakerReceipts.reject(runtime, new Error('sidekick_socket_closed'));
+          runtime.speakerPlayback = undefined;
+          runtime.speakerErrorMessage = 'El Sidekick se desconectó durante la reproducción.';
+          runtime.speakerErrorCode = 'sidekick_socket_closed';
         }
         runtime.socket = undefined;
         runtime.status = 'offline';
@@ -688,7 +1027,21 @@ export class SidekickService {
           }
           runtime.status = 'offline';
           runtime.socket = undefined;
+          if (runtime.speakerPlayback) {
+            this.speakerReceipts.reject(runtime, new Error('sidekick_heartbeat_timeout'));
+            runtime.speakerPlayback = undefined;
+            runtime.speakerErrorMessage = 'El Sidekick se desconectó durante la reproducción.';
+            runtime.speakerErrorCode = 'sidekick_heartbeat_timeout';
+          }
           changed = true;
+        } else if (
+          runtime.status === 'online' &&
+          (!runtime.lastTimeSyncAt || now - runtime.lastTimeSyncAt >= SIDEKICK_TIME_RESYNC_MS)
+        ) {
+          const sidekickId = Array.from(this.runtimes.entries()).find(([, candidate]) => candidate === runtime)?.[0];
+          if (sidekickId && !sidekickId.startsWith('usb:')) {
+            void this.syncTime(sidekickId).catch(() => undefined);
+          }
         }
       }
       if (changed) {
@@ -722,11 +1075,33 @@ export class SidekickService {
     if (battery) {
       runtime.battery = battery;
     }
+    const clock = normalizeSidekickTime(payload.time);
+    if (clock) {
+      runtime.time = { ...runtime.time, ...clock };
+    }
     switch (payload.type) {
       case 'heartbeat':
       case 'network.heartbeat':
       case 'network.status':
       case 'battery.status':
+        return;
+      case 'system.time.synced':
+        runtime.time = parseSidekickTimeReceipt(payload);
+        return;
+      case 'speaker.playback.started':
+        this.speakerReceipts.handleStarted(runtime, payload);
+        return;
+      case 'speaker.playback.progress':
+        this.speakerReceipts.handleProgress(runtime, payload);
+        return;
+      case 'speaker.playback.stopped':
+        this.speakerReceipts.handleStopped(runtime, payload);
+        return;
+      case 'speaker.playback.error':
+        this.speakerReceipts.handleError(runtime, payload);
+        return;
+      case 'wake.detected':
+        await this.handleWakeDetected(runtime, payload);
         return;
       case 'microphone.recording.started':
         await this.handleRecordingStarted(runtime, payload);
@@ -745,17 +1120,28 @@ export class SidekickService {
     }
   }
 
+  private async handleWakeDetected(runtime: SidekickRuntimeState, payload: SidekickNetworkPayload): Promise<void> {
+    await this.options.onWakeDetected?.(parseSidekickWakeReceipt(payload));
+    runtime.lastSeenAt = new Date().toISOString();
+  }
+
+  // Igual que con los receipts de speaker: los mensajes de microfono que no
+  // calzan con la grabacion activa se ignoran (chunks tardios tras cancelar
+  // son trafico esperado); lanzar aqui cerraba el socket completo y forzaba
+  // la reconexion del Sidekick. Solo datos malformados de la grabacion activa
+  // fallan esa grabacion, avisando al dispositivo para que deje de grabar.
   private async handleRecordingStarted(runtime: SidekickRuntimeState, payload: SidekickNetworkPayload): Promise<void> {
     const active = runtime.microphoneRecording;
+    if (!active || active.status !== 'starting' || payload.recordingId !== active.recordingId) {
+      return;
+    }
     if (
-      !active ||
-      active.status !== 'starting' ||
-      payload.recordingId !== active.recordingId ||
       payload.sampleRate !== SIDEKICK_MIC_SAMPLE_RATE ||
       payload.channels !== SIDEKICK_MIC_CHANNELS ||
       payload.format !== SIDEKICK_MIC_FORMAT
     ) {
-      throw new Error('sidekick_microphone_started_invalid');
+      await this.abortActiveRecording(runtime, 'El Sidekick inició la grabación con un formato inválido.', 'sidekick_microphone_started_invalid');
+      return;
     }
     active.status = 'recording';
     runtime.microphoneErrorMessage = undefined;
@@ -770,24 +1156,38 @@ export class SidekickService {
       (active.status !== 'recording' && active.status !== 'stopping') ||
       payload.recordingId !== active.recordingId
     ) {
-      throw new Error('sidekick_microphone_chunk_out_of_session');
+      return;
     }
     if (typeof payload.data !== 'string') {
-      await this.failActiveRecording(runtime, 'El Sidekick envió audio inválido.', 'sidekick_microphone_chunk_invalid');
-      throw new Error('sidekick_microphone_chunk_invalid');
+      await this.abortActiveRecording(runtime, 'El Sidekick envió audio inválido.', 'sidekick_microphone_chunk_invalid');
+      return;
+    }
+    const sequence = typeof payload.chunkSequence === 'number' ? payload.chunkSequence : active.nextChunkSequence;
+    if (!Number.isInteger(sequence) || sequence !== active.nextChunkSequence) {
+      await this.abortActiveRecording(runtime, 'El Sidekick envió audio fuera de secuencia.', 'sidekick_microphone_chunk_sequence_invalid');
+      return;
     }
     const chunk = decodeCanonicalBase64Chunk(payload.data);
     if (!chunk || chunk.byteLength > SIDEKICK_MIC_MAX_CHUNK_BYTES || chunk.byteLength % 2 !== 0) {
-      await this.failActiveRecording(runtime, 'El Sidekick envió audio inválido.', 'sidekick_microphone_chunk_invalid');
-      throw new Error('sidekick_microphone_chunk_invalid');
+      await this.abortActiveRecording(runtime, 'El Sidekick envió audio inválido.', 'sidekick_microphone_chunk_invalid');
+      return;
     }
     if (active.bytes + chunk.byteLength + WAV_HEADER_BYTES > this.maxRecordingBytes) {
-      await this.failActiveRecording(runtime, 'La prueba de micrófono superó el tamaño máximo.', 'sidekick_microphone_recording_too_large');
-      throw new Error('sidekick_microphone_recording_too_large');
+      await this.abortActiveRecording(runtime, 'La prueba de micrófono superó el tamaño máximo.', 'sidekick_microphone_recording_too_large');
+      return;
     }
-    await fs.appendFile(active.tempPcmPath, chunk);
+    await this.options.onMicrophonePcm?.({
+      sidekickId: active.sidekickId,
+      recordingId: active.recordingId,
+      chunkSequence: sequence,
+      pcm: new Uint8Array(chunk),
+    });
+    if (active.persist) {
+      await fs.appendFile(active.tempPcmPath, chunk);
+    }
     active.bytes += chunk.byteLength;
     active.chunks += 1;
+    active.nextChunkSequence += 1;
   }
 
   private async handleRecordingStopped(runtime: SidekickRuntimeState, payload: SidekickNetworkPayload): Promise<void> {
@@ -795,12 +1195,17 @@ export class SidekickService {
     if (
       !active ||
       (active.status !== 'recording' && active.status !== 'stopping') ||
-      payload.recordingId !== active.recordingId ||
-      typeof payload.sampleCount !== 'number' ||
-      !Number.isInteger(payload.sampleCount) ||
-      payload.sampleCount < 0
+      payload.recordingId !== active.recordingId
     ) {
-      throw new Error('sidekick_microphone_stopped_invalid');
+      return;
+    }
+    if (typeof payload.sampleCount !== 'number' || !Number.isInteger(payload.sampleCount) || payload.sampleCount < 0) {
+      await this.failActiveRecording(
+        runtime,
+        'El Sidekick cerró la grabación con datos inválidos.',
+        'sidekick_microphone_stopped_invalid',
+      );
+      return;
     }
     const receivedSampleCount = active.bytes / (active.channels * 2);
     if (!Number.isInteger(receivedSampleCount) || receivedSampleCount !== payload.sampleCount) {
@@ -811,7 +1216,9 @@ export class SidekickService {
       );
       return;
     }
-    await this.finalizeActiveRecording(active, payload.sampleCount);
+    if (active.persist) {
+      await this.finalizeActiveRecording(active, payload.sampleCount);
+    }
     runtime.microphoneRecording = undefined;
     runtime.microphoneErrorMessage = undefined;
     runtime.microphoneErrorCode = undefined;
@@ -820,12 +1227,36 @@ export class SidekickService {
 
   private async handleRecordingError(runtime: SidekickRuntimeState, payload: SidekickNetworkPayload): Promise<void> {
     const active = runtime.microphoneRecording;
-    if (!active || payload.recordingId !== active.recordingId || !isSafeCode(payload.code)) {
-      throw new Error('sidekick_microphone_error_invalid');
+    if (!active || payload.recordingId !== active.recordingId) {
+      return;
     }
-    const code = `sidekick_microphone_${String(payload.code)}`;
+    const code = isSafeCode(payload.code)
+      ? `sidekick_microphone_${String(payload.code)}`
+      : 'sidekick_microphone_error_invalid';
     await this.failActiveRecording(runtime, 'El Sidekick informó un error de micrófono.', code);
     this.rejectPendingRecordingAcks(runtime, active.recordingId, new Error(code));
+  }
+
+  // Falla la grabacion activa y pide al Sidekick que deje de grabar. Antes el
+  // socket se cerraba y la desconexion cancelaba la captura del dispositivo;
+  // sin ese cierre hay que avisarle explicitamente (best effort: si el stop no
+  // llega, el dispositivo cancela solo al perder la sesion).
+  private async abortActiveRecording(runtime: SidekickRuntimeState, message: string, code: string): Promise<void> {
+    const active = runtime.microphoneRecording;
+    await this.failActiveRecording(runtime, message, code);
+    if (!active) {
+      return;
+    }
+    const record = this.findRecord(active.sidekickId);
+    if (!record || !runtime.socket || runtime.socket.readyState !== WebSocket.OPEN || !runtime.sessionId) {
+      return;
+    }
+    await this.sendEncrypted(record, runtime, {
+      v: 1,
+      id: randomUUID(),
+      cmd: 'microphone.record.stop',
+      recordingId: active.recordingId,
+    }).catch(() => undefined);
   }
 
   private waitForRecordingAck(
@@ -899,7 +1330,9 @@ export class SidekickService {
     }
     runtime.microphoneRecording = undefined;
     this.rejectPendingRecordingAcks(runtime, active.recordingId, new Error(code));
-    await fs.rm(active.tempPcmPath, { force: true }).catch(() => undefined);
+    if (active.tempPcmPath) {
+      await fs.rm(active.tempPcmPath, { force: true }).catch(() => undefined);
+    }
   }
 
   private async finalizeActiveRecording(active: ActiveSidekickRecording, sampleCount: number): Promise<void> {
@@ -1149,7 +1582,7 @@ export class SidekickService {
   private ensureRuntime(sidekickId: string): SidekickRuntimeState {
     let runtime = this.runtimes.get(sidekickId);
     if (!runtime) {
-      runtime = { status: 'offline', txSeq: 0, pendingRecordingAcks: new Map() };
+      runtime = { status: 'offline', txSeq: 0, pendingRecordingAcks: new Map(), pendingSpeakerAcks: new Map() };
       this.runtimes.set(sidekickId, runtime);
     }
     return runtime;
@@ -1184,7 +1617,10 @@ export class SidekickService {
         lastSeenAt: runtime?.lastSeenAt,
         firmwareVersion: record.firmwareVersion,
         capabilities: record.capabilities,
+        personalAgentId: record.personalAgentId,
         battery: runtime?.battery,
+        time: runtime?.time,
+        speakerPlayback: summarizeSpeakerPlayback(runtime),
         microphoneRecording: summarizeMicrophoneRecording(runtime),
         microphoneRecordings: this.recordings
           .filter((entry) => entry.sidekickId === record.sidekickId)
@@ -1202,6 +1638,7 @@ export class SidekickService {
         status: runtime.status,
         usbPath: runtime.usbPath,
         capabilities: [],
+        speakerPlayback: summarizeSpeakerPlayback(runtime),
         microphoneRecording: summarizeMicrophoneRecording(runtime),
         microphoneRecordings: [],
         errorMessage: runtime.errorMessage,

@@ -471,6 +471,7 @@ test('official tool skill templates and seed data keep expected Desktop defaults
     'forger-permissions',
     'forger-remote-tunnel-wiring',
     'forger-secrets',
+    'forger-sidekick',
     'forger-speech-to-text',
     'forger-text-to-speech',
     'forger-tools',
@@ -509,6 +510,7 @@ test('official tool skill templates and seed data keep expected Desktop defaults
     'forger-permissions',
     'forger-remote-tunnel-wiring',
     'forger-secrets',
+    'forger-sidekick',
     'forger-speech-to-text',
     'forger-text-to-speech',
     'forger-tools',
@@ -550,6 +552,8 @@ test('official tool skill templates and seed data keep expected Desktop defaults
   assert.match(manifestSkill.body, /`reason` is required, not decorative/);
   assert.match(manifestSkill.body, /Do not add `catalog\.capabilities`/);
   assert.match(manifestSkill.body, /`platformCapabilities` are runtime declarations/);
+  assert.match(manifestSkill.body, /platformCapabilities\.sidekickDisplay[\s\S]*signed Desktop runtime bridge/);
+  assert.match(manifestSkill.body, /platformCapabilities\.sidekickSpeech[\s\S]*never receives firmware sockets/);
   assert.match(manifestSkill.body, /After changing manifest runtime wiring/);
   assert.match(manifestSkill.body, /platformCapabilities\.speechToText[\s\S]*authorized realtime transcription workflow/);
   assert.match(manifestSkill.body, /platformCapabilities\.textToSpeech[\s\S]*explicit text, model, and voice/);

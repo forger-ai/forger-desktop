@@ -16,6 +16,29 @@ export interface SidekickBatteryStatus {
   voltageMv?: number;
 }
 
+export interface SidekickTimeStatus {
+  synced: boolean;
+  epochMs?: number;
+  timeZone?: string;
+  utcOffsetMinutes?: number;
+  driftMs?: number;
+  clockAdjusted?: boolean;
+  lastSyncedAt?: string;
+}
+
+export type SidekickSpeakerPlaybackStatus = 'idle' | 'starting' | 'playing' | 'stopping' | 'cancelling' | 'error';
+
+export interface SidekickSpeakerPlaybackState {
+  status: SidekickSpeakerPlaybackStatus;
+  playbackId?: string;
+  samplesSent?: number;
+  samplesPlayed?: number;
+  bufferedSamples?: number;
+  underruns?: number;
+  errorMessage?: string;
+  technicalCode?: string;
+}
+
 export type SidekickMicrophoneRecordingStatus = 'idle' | 'starting' | 'recording' | 'stopping' | 'error';
 
 export interface SidekickMicrophoneRecordingState {
@@ -49,12 +72,20 @@ export interface SidekickSummary {
   lastSeenAt?: string;
   firmwareVersion?: string;
   capabilities: string[];
+  personalAgentId?: string;
   battery?: SidekickBatteryStatus;
+  time?: SidekickTimeStatus;
+  speakerPlayback: SidekickSpeakerPlaybackState;
   microphoneRecording: SidekickMicrophoneRecordingState;
   microphoneRecordings: SidekickMicrophoneRecordingSummary[];
   usbPath?: string;
   ipAddress?: string;
   errorMessage?: string;
+}
+
+export interface SidekickPersonalAgentInput {
+  sidekickId: string;
+  personalAgentId?: string;
 }
 
 export interface SidekickState {
@@ -80,8 +111,38 @@ export interface SidekickDisplayInput {
   text?: string;
 }
 
+export type SidekickScreenTemplate = 'idle' | 'state' | 'card' | 'transcript';
+
+export interface SidekickScreenInput {
+  sidekickId: string;
+  template: SidekickScreenTemplate;
+  icon?: 'listening' | 'thinking' | 'speaking' | 'sleeping' | 'error' | 'bell' | 'info' | 'audio' | 'wifi' | 'warning' | 'ok' | 'battery' | 'settings' | 'home' | 'download' | 'upload' | 'play' | 'pause';
+  title?: string;
+  body?: string;
+  text?: string;
+}
+
+export interface SidekickSpeakInput {
+  sidekickId: string;
+  text: string;
+  model: string;
+  voice: string;
+  speed?: number;
+}
+
 export interface SidekickMicrophoneRecordingInput {
   sidekickId: string;
+  transient?: boolean;
+}
+
+export interface SidekickWakeEvent {
+  sidekickId: string;
+  wakeId: string;
+  model: string;
+  wakeWord: string;
+  wordIndex: number;
+  detectedAtMs: number;
+  epochMs?: number;
 }
 
 export interface SidekickMicrophonePlaybackInput {
@@ -94,6 +155,21 @@ export interface SidekickMicrophonePlaybackResult {
   mimeType?: 'audio/wav';
   bytes?: Uint8Array;
   sizeBytes?: number;
+  userMessage?: string;
+  technicalCode?: string;
+}
+
+export interface SidekickSpeakerPcmInput {
+  sidekickId: string;
+  samples: Int16Array;
+}
+
+export interface SidekickSpeakerPlaybackResult {
+  success: boolean;
+  playbackId?: string;
+  samplesPlayed?: number;
+  underruns?: number;
+  droppedChunks?: number;
   userMessage?: string;
   technicalCode?: string;
 }

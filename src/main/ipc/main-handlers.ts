@@ -1472,7 +1472,7 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
     return await getOfficialToolsService().deactivate(toolId, { locale });
   });
   registerConnectionIpcHandlers({ IPC_CHANNELS, ipcMain, getConnectionsService });
-  registerSidekickIpcHandlers({ IPC_CHANNELS, ipcMain, getSidekickService });
+  registerSidekickIpcHandlers({ IPC_CHANNELS, ipcMain, getSidekickService, getPersonalAgentStore });
   ipcMain.handle(IPC_CHANNELS.getAppToolsInstallGate, async (_event, appId: string, locale?: string, options?: GetAppToolsInstallGateOptions): Promise<AppToolsInstallGate | null> => {
     return await buildAppAccessInstallGate(appId, locale, options);
   });

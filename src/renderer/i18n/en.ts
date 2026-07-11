@@ -1,6 +1,5 @@
 import type { AppCategory } from '@shared/types';
 import { enSections } from './locales/enSections';
-
 export const en = {
   locale: 'en',
   appName: 'Forger',
@@ -319,8 +318,28 @@ export const en = {
       deleteError: 'Could not delete the routine.', openThreadError: 'Could not open the routine thread.',
     },
   },
-  sections: enSections,
-  topbar: {
+  sections: {
+    ...enSections,
+    sidekicks: {
+      ...enSections.sidekicks,
+      subtitle: 'Connect a Sidekick once, then use its screen, microphone, voice, and local time over Wi-Fi.',
+      journeyTitle: 'Get your Sidekick ready', setupStepConnect: '1. Connect it by USB', setupStepNetwork: '2. Choose its name and Wi-Fi', setupStepReady: '3. Wait until it appears online',
+      compatibleUsbOnly: 'Compatible Espressif devices appear here automatically.', otherUsbTitle: 'Other serial devices', otherUsbEmpty: 'No other serial devices detected.',
+      pairedTitle: 'Your Sidekicks', empty: 'Connect a Sidekick by USB to get started.', deviceReady: 'Ready to use', deviceNeedsAttention: 'Needs attention',
+      technicalDetails: 'Technical details', sidekickId: 'Device ID', servicePort: 'Local service port', capabilities: 'Capabilities',
+      screenTitle: 'Screen', screenSubtitle: 'Choose what the Sidekick should show.',
+      screenPresets: { idle: 'Clock', listening: 'Listening', thinking: 'Thinking', speaking: 'Speaking', card: 'Card', transcript: 'Transcript' },
+      screenTitleLabel: 'Title', screenBodyLabel: 'Detail', screenTranscriptLabel: 'Text', screenSend: 'Show on Sidekick',
+      screenSuccess: 'The Sidekick screen was updated.', screenError: 'Could not update the Sidekick screen.', voiceTitle: 'Voice',
+      voiceSubtitle: 'Use Forger’s local voice models to make this Sidekick speak.', agentTitle: 'Personal agent', agentSubtitle: 'Choose who listens and answers when this Sidekick wakes up.', agentLabel: 'Agent who answers', agentNone: 'Create a personal agent before using voice conversations.', agentAutomatic: 'Selected automatically because this is your only personal agent.', agentRequired: 'Choose a personal agent', agentSaved: 'This Sidekick now answers with the selected agent.', agentError: 'Could not save the personal agent for this Sidekick.',
+      voiceTextLabel: 'What should it say?', voiceDefaultText: 'Hello! I am your Forger Sidekick.', voiceModelLabel: 'Model', voiceVoiceLabel: 'Voice', voiceSpeak: 'Speak',
+      voiceLoading: 'Loading local voices…', voiceOffline: 'Connect this Sidekick over Wi-Fi to use its voice.',
+      voiceUnavailable: 'No enabled local voice is available yet. Enable one in Voice settings.',
+      voiceUnsupported: 'This Sidekick firmware does not support speaker playback.', voiceSpeaking: 'Preparing and playing the response…', voiceSuccess: 'The Sidekick finished speaking.', voiceError: 'Could not play the voice on this Sidekick.',
+      timeTitle: 'Local time', timeSynced: 'Synchronized with this computer', timePending: 'Waiting for time synchronization', timeZoneUnknown: 'Time zone not detected yet', timeLastSync: 'Last synchronized',
+      timeDrift: (milliseconds: number) => `${Math.abs(milliseconds).toLocaleString()} ms difference corrected`, forgetConfirm: (name: string) => `Forget ${name}? You will need to connect it by USB to pair it again.`,
+    },
+  }, topbar: {
     safeMode: 'Safe mode active',
     guestUser: 'Guest mode',
   },
@@ -443,6 +462,7 @@ export const en = {
       audioInput: 'Microphone input',
       workspaceFolders: 'Shared folders',
       agentRuntimeControl: 'Agent runtime control',
+      sidekickDisplay: 'Sidekick screen', sidekickSpeech: 'Sidekick voice',
     },
     toolActive: 'Active',
     toolNeedsConfiguration: 'Needs configuration',

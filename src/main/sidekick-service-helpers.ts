@@ -9,10 +9,12 @@ import type {
   SidekickBatteryStatus,
   SidekickMicrophoneRecordingState,
   SidekickMicrophoneRecordingSummary,
+  SidekickSpeakerPlaybackState,
   SidekickMutationResult,
   SidekickState,
   SidekickStatus,
   SidekickUsbDevice,
+  SidekickTimeStatus,
 } from '../shared/types';
 export const SIDEKICK_PROTO = 'forger-sidekick-v1';
 export const SIDEKICK_SERVICE_TYPE = 'forger-sidekick';
@@ -49,6 +51,7 @@ export interface StoredSidekickRecord {
   updatedAt: string;
   firmwareVersion?: string;
   capabilities: string[];
+  personalAgentId?: string;
   desktopKeyFingerprint?: string;
   encryptedPairingSecret: string;
 }
@@ -60,14 +63,20 @@ export interface SidekickRuntimeState {
   ipAddress?: string;
   errorMessage?: string;
   battery?: SidekickBatteryStatus;
+  time?: SidekickTimeStatus;
   microphoneRecording?: ActiveSidekickRecording;
   microphoneErrorMessage?: string;
   microphoneErrorCode?: string;
+  speakerPlayback?: ActiveSidekickPlayback;
+  speakerErrorMessage?: string;
+  speakerErrorCode?: string;
   socket?: WebSocket;
   sessionId?: string;
   txSeq: number;
   rxSeq?: number;
   pendingRecordingAcks: Map<string, PendingRecordingAck>;
+  pendingSpeakerAcks: Map<string, PendingSpeakerAck>;
+  lastTimeSyncAt?: number;
 }
 
 export interface SidekickNetworkPayload {
@@ -78,12 +87,34 @@ export interface SidekickNetworkPayload {
   capabilities?: unknown;
   ip?: string;
   battery?: unknown;
+  time?: unknown;
   recordingId?: unknown;
+  playbackId?: unknown;
   sampleRate?: unknown;
   channels?: unknown;
   format?: unknown;
   data?: unknown;
   sampleCount?: unknown;
+  maxChunkSamples?: unknown;
+  queueDepth?: unknown;
+  lastChunkSequence?: unknown;
+  bufferedSamples?: unknown;
+  underruns?: unknown;
+  droppedChunks?: unknown;
+  samplesPlayed?: unknown;
+  requestId?: unknown;
+  timeZone?: unknown;
+  utcOffsetMinutes?: unknown;
+  epochMs?: unknown;
+  deviceEpochMs?: unknown;
+  driftMs?: unknown;
+  clockAdjusted?: unknown;
+  wakeId?: unknown;
+  model?: unknown;
+  wakeWord?: unknown;
+  wordIndex?: unknown;
+  detectedAtMs?: unknown;
+  chunkSequence?: unknown;
   code?: unknown;
 }
 
@@ -104,9 +135,30 @@ export interface ActiveSidekickRecording {
   bytes: number;
   chunks: number;
   tempPcmPath: string;
+  persist: boolean;
+  nextChunkSequence: number;
   sampleRate: 16000;
   channels: 1;
   format: 'pcm_s16le';
+}
+
+export interface ActiveSidekickPlayback {
+  sidekickId: string;
+  playbackId: string;
+  status: 'starting' | 'playing' | 'stopping' | 'cancelling';
+  samplesSent: number;
+  samplesPlayed: number;
+  bufferedSamples: number;
+  underruns: number;
+  droppedChunks: number;
+  queueDepth: number;
+}
+
+export interface PendingSpeakerAck {
+  key: string;
+  timeout: NodeJS.Timeout;
+  resolve: () => void;
+  reject: (error: Error) => void;
 }
 
 export interface PendingRecordingAck {
@@ -316,6 +368,30 @@ export const normalizeSidekickBattery = (input: unknown): SidekickBatteryStatus 
   };
 };
 
+export const normalizeSidekickTime = (input: unknown): SidekickTimeStatus | null => {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    return null;
+  }
+  const value = input as Record<string, unknown>;
+  const epochMs = typeof value.epochMs === 'number' && Number.isSafeInteger(value.epochMs) ? value.epochMs : undefined;
+  const offset = typeof value.utcOffsetMinutes === 'number' && Number.isInteger(value.utcOffsetMinutes) &&
+    value.utcOffsetMinutes >= -840 && value.utcOffsetMinutes <= 840
+    ? value.utcOffsetMinutes
+    : undefined;
+  const timeZone = typeof value.timeZone === 'string' && /^[A-Za-z0-9_+/-]{1,63}$/.test(value.timeZone)
+    ? value.timeZone
+    : undefined;
+  if (typeof value.synced !== 'boolean' && epochMs === undefined && offset === undefined && !timeZone) {
+    return null;
+  }
+  return {
+    synced: value.synced === true,
+    ...(epochMs !== undefined ? { epochMs } : {}),
+    ...(offset !== undefined ? { utcOffsetMinutes: offset } : {}),
+    ...(timeZone ? { timeZone } : {}),
+  };
+};
+
 export const isNetworkHelloPayload = (input: unknown, sidekickId: string): input is SidekickNetworkPayload => {
   const value = input as SidekickNetworkPayload | null;
   return Boolean(
@@ -358,6 +434,7 @@ export const isStoredSidekickRecord = (input: unknown): input is StoredSidekickR
     typeof value.pairedAt === 'string' &&
     typeof value.updatedAt === 'string' &&
     Array.isArray(value.capabilities) &&
+    (typeof value.personalAgentId === 'undefined' || typeof value.personalAgentId === 'string') &&
     typeof value.encryptedPairingSecret === 'string',
   );
 };
@@ -414,6 +491,27 @@ export const summarizeMicrophoneRecording = (runtime?: SidekickRuntimeState): Si
       status: 'error',
       errorMessage: runtime.microphoneErrorMessage,
       technicalCode: runtime.microphoneErrorCode,
+    };
+  }
+  return { status: 'idle' };
+};
+
+export const summarizeSpeakerPlayback = (runtime?: SidekickRuntimeState): SidekickSpeakerPlaybackState => {
+  if (runtime?.speakerPlayback) {
+    return {
+      status: runtime.speakerPlayback.status,
+      playbackId: runtime.speakerPlayback.playbackId,
+      samplesSent: runtime.speakerPlayback.samplesSent,
+      samplesPlayed: runtime.speakerPlayback.samplesPlayed,
+      bufferedSamples: runtime.speakerPlayback.bufferedSamples,
+      underruns: runtime.speakerPlayback.underruns,
+    };
+  }
+  if (runtime?.speakerErrorMessage || runtime?.speakerErrorCode) {
+    return {
+      status: 'error',
+      errorMessage: runtime.speakerErrorMessage,
+      technicalCode: runtime.speakerErrorCode,
     };
   }
   return { status: 'idle' };
