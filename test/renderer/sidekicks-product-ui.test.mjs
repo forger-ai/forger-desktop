@@ -19,10 +19,19 @@ test('Sidekicks product view keeps privileged device actions behind the preload 
 test('Sidekicks product view defaults to compatible USB and hides diagnostics in an accordion', async () => {
   const source = await fs.readFile(viewPath, 'utf8');
   assert.match(source, /filter\(\(device\) => device\.likelySidekick\)/);
-  assert.match(source, /<Accordion[\s\S]*copy\.technicalDetails/);
+  assert.match(source, /<Accordion[\s\S]*copy\.advancedTitle[\s\S]*TechnicalDetails/);
   assert.match(source, /sidekick\.time/);
   assert.match(source, /sidekick\.capabilities\.includes\('display\.screens'\)/);
   assert.match(source, /sidekick\.capabilities\.includes\('speaker\.playback'\)/);
+});
+
+test('Sidekicks product view exposes the idle rotation and voice assistant sections', async () => {
+  const source = await fs.readFile(viewPath, 'utf8');
+  assert.match(source, /sidekicksSetIdleConfig\(/);
+  assert.match(source, /sidekicksSetIdleImage\(/);
+  assert.match(source, /SIDEKICK_IDLE_SCREENS/);
+  assert.match(source, /copy\.trainingTitle/);
+  assert.match(source, /wake\.word\.local/);
 });
 
 test('new Sidekick product copy exists in English and Spanish', async () => {

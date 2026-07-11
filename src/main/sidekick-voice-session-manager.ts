@@ -5,12 +5,13 @@ export const SIDEKICK_VOICE_CONVERSATION_TTL_MS = 30 * 60 * 1_000;
 export type SidekickVoiceScreen =
   | 'idle'
   | 'listening'
+  | 'transcribing'
   | 'thinking'
   | 'transcript'
   | 'speaking'
   | 'error';
 
-export type SidekickVoiceSessionPhase = SidekickVoiceScreen | 'transcribing';
+export type SidekickVoiceSessionPhase = SidekickVoiceScreen;
 
 export interface SidekickWakeEvent {
   sidekickId: string;
@@ -187,7 +188,11 @@ const DEFAULT_OPTIONS: Required<SidekickVoiceSessionManagerOptions> = {
   silenceAfterSpeechMs: 1_000,
   maxSessionMs: 120_000,
   maxPcmChunkBytes: 32_768,
-  speechRmsThreshold: 250,
+  // Calibrado para el mic del Sidekick con PGA 30 dB + 12 dB digitales: el
+  // piso de ruido ronda 400-700 RMS y la voz cercana supera 2000. Con el
+  // umbral antiguo (250) el ruido contaba como voz y el silencio nunca
+  // cortaba la escucha.
+  speechRmsThreshold: 1000,
 };
 
 class SidekickVoiceInterruptedError extends Error {
@@ -379,7 +384,8 @@ export class SidekickVoiceSessionManager {
         }), session));
         if (!assistantText) throw new Error('sidekick_voice_agent_response_empty');
         session.assistantText = assistantText;
-        await this.transition(session, 'transcript');
+        // El pipeline visible en el dispositivo es transcribir -> pensar ->
+        // hablar; el texto va por TTS, sin pantalla de transcript intermedia.
         await this.transition(session, 'speaking');
         await this.raceWithAbort(this.deps.speakWithTts({
           sidekickId: session.sidekickId,
@@ -452,8 +458,9 @@ export class SidekickVoiceSessionManager {
       session.pcmChunks.length = 0;
       return '';
     }
-    session.phase = 'transcribing';
-    this.emitPhase(session);
+    // Primer paso visible del pipeline en el dispositivo:
+    // transcribiendo -> pensando -> hablando.
+    await this.transitionBestEffort(session, 'transcribing');
     if (session.realtimeStt) {
       const transcript = await this.raceWithAbort(session.realtimeStt.finish(session.controller.signal), session);
       session.sttSettled = true;
@@ -554,7 +561,13 @@ export class SidekickVoiceSessionManager {
 
   private raceWithAbort<T>(promise: Promise<T>, session: ActiveVoiceSession): Promise<T> {
     const signal = session.controller.signal;
-    if (signal.aborted) return Promise.reject(new SidekickVoiceInterruptedError(session.interruptKind ?? 'cancelled'));
+    if (signal.aborted) {
+      // La promesa en vuelo pierde la carrera pero sigue viva: sin este catch
+      // su rechazo posterior (p. ej. sidekick_offline) queda sin observador y
+      // revienta como unhandledRejection del proceso main.
+      promise.catch(() => undefined);
+      return Promise.reject(new SidekickVoiceInterruptedError(session.interruptKind ?? 'cancelled'));
+    }
     return new Promise<T>((resolve, reject) => {
       const onAbort = (): void => {
         signal.removeEventListener('abort', onAbort);

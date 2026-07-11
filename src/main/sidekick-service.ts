@@ -9,8 +9,13 @@ import { SerialPort, ReadlineParser } from 'serialport';
 import { WebSocket, WebSocketServer } from 'ws';
 
 import type {
+  AgentProviderUsageEntry,
   SidekickConfigureInput,
   SidekickDisplayInput,
+  SidekickIdleConfig,
+  SidekickIdleConfigInput,
+  SidekickIdleImageInput,
+  SidekickIdleScreen,
   SidekickMicrophonePlaybackInput,
   SidekickMicrophonePlaybackResult,
   SidekickMicrophoneRecordingInput,
@@ -24,6 +29,11 @@ import type {
   SidekickSummary,
   SidekickUsbDevice,
   SidekickWakeEvent,
+} from '../shared/types';
+import {
+  SIDEKICK_DEFAULT_IDLE_CONFIG,
+  SIDEKICK_IDLE_IMAGE_BYTES,
+  SIDEKICK_IDLE_SCREENS,
 } from '../shared/types';
 import {
   SIDEKICK_ACK_TIMEOUT_MS,
@@ -130,7 +140,14 @@ export interface SidekickServiceOptions {
     chunkSequence: number;
     pcm: Uint8Array;
   }) => void | Promise<void>;
+  // Uso de Claude/Codex para la pantalla idle de limites del dispositivo.
+  getProviderUsage?: () => Promise<AgentProviderUsageEntry[]>;
 }
+
+// Con la pantalla de limites activa en el dispositivo, el refresco es casi en
+// vivo; sin ella no se empuja nada en el sweep.
+const SIDEKICK_LIMITS_PUSH_INTERVAL_MS = 20 * 1000;
+const SIDEKICK_IDLE_IMAGE_CHUNK_BYTES = 4096;
 
 export class SidekickService {
   private stored: StoredSidekickFile | null = null;
@@ -148,6 +165,7 @@ export class SidekickService {
   private readonly recordingsIndexPath: string;
   private readonly recordingsFilesDir: string;
   private readonly recordingsTmpDir: string;
+  private readonly idleImagesDir: string;
   private readonly serialPortClass: typeof SerialPort;
   private readonly storage: Pick<typeof safeStorage, 'isEncryptionAvailable' | 'encryptString' | 'decryptString'>;
   private recordingsLoaded = false;
@@ -161,6 +179,7 @@ export class SidekickService {
     this.recordingsIndexPath = path.join(options.metadataRoot, 'sidekick-recordings', 'index.json');
     this.recordingsFilesDir = path.join(options.metadataRoot, 'sidekick-recordings', 'files');
     this.recordingsTmpDir = path.join(options.metadataRoot, 'sidekick-recordings', 'tmp');
+    this.idleImagesDir = path.join(options.metadataRoot, 'sidekick-idle-images');
     this.serialPortClass = options.serialPortClass ?? SerialPort;
     this.storage = options.safeStorageAdapter ?? safeStorage;
     this.maxRecordingBytes = options.maxRecordingBytes ?? SIDEKICK_MIC_MAX_WAV_BYTES;
@@ -803,6 +822,183 @@ export class SidekickService {
     }
   }
 
+  // --- Personalizacion idle (config, imagen custom, limites) ----------------
+
+  private normalizeIdleConfig(config: SidekickIdleConfig): SidekickIdleConfig {
+    const screens = SIDEKICK_IDLE_SCREENS.filter((screen) => config.screens.includes(screen));
+    const rotateSeconds = Number.isFinite(config.rotateSeconds)
+      ? Math.min(3600, Math.max(5, Math.round(config.rotateSeconds)))
+      : SIDEKICK_DEFAULT_IDLE_CONFIG.rotateSeconds;
+    return {
+      screens: screens.length > 0 ? screens : [...SIDEKICK_DEFAULT_IDLE_CONFIG.screens],
+      rotateSeconds,
+    };
+  }
+
+  private idleImagePath(sidekickId: string): string | null {
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(sidekickId)) {
+      return null;
+    }
+    const filePath = path.join(this.idleImagesDir, `${sidekickId}.rgb565`);
+    return isPathInside(this.idleImagesDir, filePath) ? filePath : null;
+  }
+
+  async setIdleConfig(input: SidekickIdleConfigInput): Promise<SidekickMutationResult> {
+    await this.load();
+    const record = this.findRecord(input.sidekickId);
+    if (!record) {
+      return sidekickFailureState(this.buildState(), 'Ese Sidekick ya no está registrado.', 'sidekick_not_registered');
+    }
+    record.idleConfig = this.normalizeIdleConfig(input.config);
+    record.updatedAt = new Date().toISOString();
+    await this.save();
+    const runtime = this.runtimes.get(record.sidekickId);
+    if (runtime?.socket?.readyState === WebSocket.OPEN && runtime.sessionId && runtime.status === 'online') {
+      await this.pushIdleConfig(record, runtime).catch(() => undefined);
+      // Si activaron la pantalla custom y hay imagen guardada, reenviarla.
+      if (record.idleConfig.screens.includes('custom')) {
+        await this.pushIdleImage(record, runtime).catch(() => undefined);
+      }
+    }
+    this.emit();
+    return { ...this.buildState(), success: true };
+  }
+
+  async setIdleImage(input: SidekickIdleImageInput): Promise<SidekickMutationResult> {
+    await this.load();
+    const record = this.findRecord(input.sidekickId);
+    if (!record) {
+      return sidekickFailureState(this.buildState(), 'Ese Sidekick ya no está registrado.', 'sidekick_not_registered');
+    }
+    const bytes = Buffer.from(input.rgb565);
+    if (bytes.byteLength !== SIDEKICK_IDLE_IMAGE_BYTES) {
+      return sidekickFailureState(this.buildState(), 'La imagen no tiene el tamaño exacto de la pantalla.', 'sidekick_idle_image_size_invalid');
+    }
+    const filePath = this.idleImagePath(record.sidekickId);
+    if (!filePath) {
+      return sidekickFailureState(this.buildState(), 'No pude guardar la imagen.', 'sidekick_idle_image_path_invalid');
+    }
+    await fs.mkdir(this.idleImagesDir, { recursive: true });
+    await fs.writeFile(filePath, bytes);
+    record.idleImagePreviewDataUrl =
+      typeof input.previewDataUrl === 'string' && input.previewDataUrl.startsWith('data:image/') &&
+      input.previewDataUrl.length <= 300_000
+        ? input.previewDataUrl
+        : undefined;
+    record.updatedAt = new Date().toISOString();
+    await this.save();
+    const runtime = this.runtimes.get(record.sidekickId);
+    if (runtime?.socket?.readyState === WebSocket.OPEN && runtime.sessionId && runtime.status === 'online') {
+      await this.pushIdleImage(record, runtime).catch(() => undefined);
+    }
+    this.emit();
+    return { ...this.buildState(), success: true };
+  }
+
+  private async pushIdleConfig(record: StoredSidekickRecord, runtime: SidekickRuntimeState): Promise<void> {
+    const config = record.idleConfig ?? SIDEKICK_DEFAULT_IDLE_CONFIG;
+    await this.sendEncrypted(record, runtime, {
+      v: 1,
+      id: randomUUID(),
+      cmd: 'idle.config',
+      screens: config.screens,
+      rotateSeconds: config.rotateSeconds,
+    });
+  }
+
+  private async pushIdleImage(record: StoredSidekickRecord, runtime: SidekickRuntimeState): Promise<void> {
+    const filePath = this.idleImagePath(record.sidekickId);
+    if (!filePath) {
+      return;
+    }
+    const bytes = await fs.readFile(filePath).catch(() => null);
+    if (!bytes || bytes.byteLength !== SIDEKICK_IDLE_IMAGE_BYTES) {
+      return;
+    }
+    await this.sendEncrypted(record, runtime, {
+      v: 1,
+      id: randomUUID(),
+      cmd: 'idle.image.begin',
+      bytes: bytes.byteLength,
+    });
+    for (let offset = 0; offset < bytes.byteLength; offset += SIDEKICK_IDLE_IMAGE_CHUNK_BYTES) {
+      const chunk = bytes.subarray(offset, Math.min(offset + SIDEKICK_IDLE_IMAGE_CHUNK_BYTES, bytes.byteLength));
+      await this.sendEncrypted(record, runtime, {
+        v: 1,
+        id: randomUUID(),
+        cmd: 'idle.image.chunk',
+        offset,
+        dataBase64: chunk.toString('base64'),
+      });
+    }
+    await this.sendEncrypted(record, runtime, {
+      v: 1,
+      id: randomUUID(),
+      cmd: 'idle.image.commit',
+      bytes: bytes.byteLength,
+    });
+  }
+
+  private async pushLimits(record: StoredSidekickRecord, runtime: SidekickRuntimeState): Promise<void> {
+    if (!this.options.getProviderUsage) {
+      return;
+    }
+    const entries = await this.options.getProviderUsage().catch(() => [] as AgentProviderUsageEntry[]);
+    const rows: Array<{ provider: string; window: string; usedPercent?: number; reset?: string }> = [];
+    // Reset como en el widget del Desktop: hora local ("7:18pm") si cae en
+    // las proximas 24 h, fecha corta ("Jul 18") si es mas adelante.
+    const formatReset = (resetsAt?: number): string | undefined => {
+      if (typeof resetsAt !== 'number') {
+        return undefined;
+      }
+      const resetMs = resetsAt * 1000;
+      if (resetMs <= Date.now()) {
+        return undefined;
+      }
+      if (resetMs - Date.now() <= 24 * 60 * 60 * 1000) {
+        return new Date(resetMs)
+          .toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+          .replace(' ', '')
+          .toLowerCase();
+      }
+      return new Date(resetMs).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    };
+    for (const entry of entries) {
+      if (!entry.connected) {
+        continue;
+      }
+      for (const window of entry.windows) {
+        if (rows.length >= 6) {
+          break;
+        }
+        const reset = formatReset(window.resetsAt);
+        rows.push({
+          provider: entry.label.slice(0, 15),
+          window: window.kind === 'five_hour' ? '5h' : 'Weekly',
+          ...(typeof window.usedPercent === 'number' ? { usedPercent: Math.round(window.usedPercent) } : {}),
+          ...(reset ? { reset } : {}),
+        });
+      }
+    }
+    runtime.lastLimitsPushAt = Date.now();
+    await this.sendEncrypted(record, runtime, {
+      v: 1,
+      id: randomUUID(),
+      cmd: 'limits.update',
+      rows,
+    });
+  }
+
+  // Al conectar (hello de red) se reenvia toda la personalizacion: el firmware
+  // no persiste config de idle ni imagen, Desktop es la fuente de verdad.
+  private async pushCustomization(record: StoredSidekickRecord, runtime: SidekickRuntimeState): Promise<void> {
+    await this.pushIdleConfig(record, runtime).catch(() => undefined);
+    await this.pushLimits(record, runtime).catch(() => undefined);
+    if ((record.idleConfig ?? SIDEKICK_DEFAULT_IDLE_CONFIG).screens.includes('custom')) {
+      await this.pushIdleImage(record, runtime).catch(() => undefined);
+    }
+  }
+
   async forget(sidekickId: string): Promise<SidekickMutationResult> {
     await this.load();
     await this.loadRecordingsIndex();
@@ -823,6 +1019,10 @@ export class SidekickService {
       await Promise.all(removedRecordings.map(async (recording) => {
         await fs.rm(path.join(this.recordingsFilesDir, recording.filename), { force: true }).catch(() => undefined);
       }));
+      const idleImage = this.idleImagePath(sidekickId);
+      if (idleImage) {
+        await fs.rm(idleImage, { force: true }).catch(() => undefined);
+      }
       await this.saveRecordingsIndex();
       await this.save();
     }
@@ -987,6 +1187,7 @@ export class SidekickService {
         error: error instanceof Error ? error.message : String(error),
       });
     });
+    void this.pushCustomization(record, runtime).catch(() => undefined);
     this.emit();
   }
 
@@ -1041,6 +1242,21 @@ export class SidekickService {
           const sidekickId = Array.from(this.runtimes.entries()).find(([, candidate]) => candidate === runtime)?.[0];
           if (sidekickId && !sidekickId.startsWith('usb:')) {
             void this.syncTime(sidekickId).catch(() => undefined);
+          }
+        } else if (
+          runtime.status === 'online' &&
+          runtime.lastLimitsPushAt !== undefined &&
+          now - runtime.lastLimitsPushAt >= SIDEKICK_LIMITS_PUSH_INTERVAL_MS
+        ) {
+          // Refresco periodico solo si el dispositivo tiene la pantalla de
+          // limites en su rotacion idle.
+          const sidekickId = Array.from(this.runtimes.entries()).find(([, candidate]) => candidate === runtime)?.[0];
+          const record = sidekickId ? this.findRecord(sidekickId) : null;
+          if (record && (record.idleConfig ?? SIDEKICK_DEFAULT_IDLE_CONFIG).screens.includes('limits')) {
+            void this.pushLimits(record, runtime).catch(() => undefined);
+          } else if (runtime.lastLimitsPushAt !== undefined) {
+            // Evita reevaluar cada sweep de 5 s cuando la pantalla no esta activa.
+            runtime.lastLimitsPushAt = now;
           }
         }
       }
@@ -1625,6 +1841,8 @@ export class SidekickService {
         microphoneRecordings: this.recordings
           .filter((entry) => entry.sidekickId === record.sidekickId)
           .map(stripRecordingStorageFields),
+        idleConfig: record.idleConfig ?? { ...SIDEKICK_DEFAULT_IDLE_CONFIG, screens: [...SIDEKICK_DEFAULT_IDLE_CONFIG.screens] },
+        idleImagePreviewDataUrl: record.idleImagePreviewDataUrl,
         usbPath: runtime?.usbPath,
         ipAddress: runtime?.ipAddress,
         errorMessage: runtime?.errorMessage,
@@ -1641,6 +1859,7 @@ export class SidekickService {
         speakerPlayback: summarizeSpeakerPlayback(runtime),
         microphoneRecording: summarizeMicrophoneRecording(runtime),
         microphoneRecordings: [],
+        idleConfig: { ...SIDEKICK_DEFAULT_IDLE_CONFIG, screens: [...SIDEKICK_DEFAULT_IDLE_CONFIG.screens] },
         errorMessage: runtime.errorMessage,
       }));
     return {

@@ -77,6 +77,8 @@ import { createMainUtilitiesController } from './main-utilities';
 import { createLocalNetworkShareController } from './local-network-share-service';
 import { createDeveloperPathService } from './developer-path-service';
 import { APP_CLAUDE_MODEL_OPTIONS, APP_CODEX_MODEL_OPTIONS, BUILT_IN_CLAUDE_EFFORT, BUILT_IN_CLAUDE_MODEL, BUILT_IN_CODEX_MODEL, BUILT_IN_CODEX_REASONING, BUNDLED_GIT_VERSION, CLAUDE_CODE_VERSION, CODEX_CLI_VERSION, CODEX_USAGE_DASHBOARD_URL, DEFAULT_NODE_VERSION, DEFAULT_PYTHON_VERSION } from './agent-runtime-defaults';
+import { getAgentProviderUsageSafely } from '../provider-usage';
+import { readClaudeOAuthToken } from '../claude-oauth';
 import { RemoteNetworkShareManager } from '../remote-network-share-manager';
 import { RemoteActivityStore } from '../remote-activity-store';
 import { LlmRunsStore } from '../llm-runs-store';
@@ -462,6 +464,16 @@ const getSidekickService = (): SidekickService => {
     synthesizeSpeech: async (input) => await getTextToSpeechService().synthesize(input),
     onWakeDetected: (event) => getSidekickVoiceRuntime().onWakeDetected(event),
     onMicrophonePcm: (event) => getSidekickVoiceRuntime().onMicrophonePcm(event),
+    getProviderUsage: async () => (await getAgentProviderUsageSafely({
+      fs,
+      path,
+      codexUsageDashboardUrl: CODEX_USAGE_DASHBOARD_URL,
+      getCodexAuthStatus,
+      getClaudeAuthStatus,
+      getAntigravityAuthStatus,
+      failureDiagnostic,
+      readClaudeOAuthToken,
+    })).providers,
     emitState: (state) => {
       getSidekickVoiceRuntime().onSidekickState(state);
       if (!mainWindow || mainWindow.isDestroyed()) {

@@ -67,6 +67,8 @@ const IPC_CHANNELS = {
   sidekicksStartMicrophoneRecording: 'forger:sidekicks:microphone:start',
   sidekicksStopMicrophoneRecording: 'forger:sidekicks:microphone:stop',
   sidekicksReadMicrophoneRecording: 'forger:sidekicks:microphone:read',
+  sidekicksSetIdleConfig: 'forger:sidekicks:idle:set-config',
+  sidekicksSetIdleImage: 'forger:sidekicks:idle:set-image',
   sidekicksForget: 'forger:sidekicks:forget',
   sidekicksChanged: 'forger:sidekicks:changed',
   microphonePermissionStatus: 'forger:microphone-permission:status',
@@ -399,6 +401,8 @@ const api: ForgerDesktopApi = {
   sidekicksStartMicrophoneRecording: (input) => ipcRenderer.invoke(IPC_CHANNELS.sidekicksStartMicrophoneRecording, input),
   sidekicksStopMicrophoneRecording: (input) => ipcRenderer.invoke(IPC_CHANNELS.sidekicksStopMicrophoneRecording, input),
   sidekicksReadMicrophoneRecording: (input) => ipcRenderer.invoke(IPC_CHANNELS.sidekicksReadMicrophoneRecording, input),
+  sidekicksSetIdleConfig: (input) => ipcRenderer.invoke(IPC_CHANNELS.sidekicksSetIdleConfig, input),
+  sidekicksSetIdleImage: (input) => ipcRenderer.invoke(IPC_CHANNELS.sidekicksSetIdleImage, input),
   sidekicksForget: (sidekickId) => ipcRenderer.invoke(IPC_CHANNELS.sidekicksForget, sidekickId),
   onSidekicksChanged: (listener) => {
     const wrapped = (_event: unknown, payload: Parameters<typeof listener>[0]) => {

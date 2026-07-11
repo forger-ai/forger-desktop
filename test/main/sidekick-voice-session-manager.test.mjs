@@ -172,7 +172,7 @@ test('BDD: a wake word completes listening, STT, agent, transcript and TTS witho
     conversationId: 'conversation-1',
   });
   assert.deepEqual(harness.calls.screens.map((screen) => screen.screen), [
-    'listening', 'thinking', 'transcript', 'speaking', 'idle',
+    'listening', 'transcribing', 'thinking', 'speaking', 'idle',
   ]);
   assert.equal(harness.calls.sttAppends.length, 1);
   assert.equal(harness.calls.messages[0].content, 'enciende la luz');
@@ -296,7 +296,7 @@ test('BDD: STT failures show an error state and always recover the device to idl
 
   assert.equal(result.status, 'error');
   assert.equal(result.technicalCode, 'stt_connection_lost');
-  assert.deepEqual(harness.calls.screens.map((screen) => screen.screen), ['listening', 'error', 'idle']);
+  assert.deepEqual(harness.calls.screens.map((screen) => screen.screen), ['listening', 'transcribing', 'error', 'idle']);
   assert.equal(harness.calls.speech.length, 0);
   await harness.manager.dispose();
 });

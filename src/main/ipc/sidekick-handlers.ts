@@ -1,7 +1,7 @@
 import type { IpcMain } from 'electron';
 
 import type { IPC_CHANNELS as IpcChannels } from '../../shared/ipc';
-import type { SidekickConfigureInput, SidekickDisplayInput, SidekickMicrophonePlaybackInput, SidekickMicrophoneRecordingInput, SidekickPersonalAgentInput, SidekickScreenInput, SidekickSpeakInput } from '../../shared/types';
+import type { SidekickConfigureInput, SidekickDisplayInput, SidekickIdleConfigInput, SidekickIdleImageInput, SidekickMicrophonePlaybackInput, SidekickMicrophoneRecordingInput, SidekickPersonalAgentInput, SidekickScreenInput, SidekickSpeakInput } from '../../shared/types';
 import type { AgentStore } from '../personal-agents/agent-store';
 import type { SidekickService } from '../sidekick-service';
 
@@ -34,5 +34,7 @@ export const registerSidekickIpcHandlers = ({
   ipcMain.handle(IPC_CHANNELS.sidekicksStartMicrophoneRecording, async (_event, input: SidekickMicrophoneRecordingInput) => await getSidekickService().startMicrophoneRecording(input));
   ipcMain.handle(IPC_CHANNELS.sidekicksStopMicrophoneRecording, async (_event, input: SidekickMicrophoneRecordingInput) => await getSidekickService().stopMicrophoneRecording(input));
   ipcMain.handle(IPC_CHANNELS.sidekicksReadMicrophoneRecording, async (_event, input: SidekickMicrophonePlaybackInput) => await getSidekickService().readMicrophoneRecording(input));
+  ipcMain.handle(IPC_CHANNELS.sidekicksSetIdleConfig, async (_event, input: SidekickIdleConfigInput) => await getSidekickService().setIdleConfig(input));
+  ipcMain.handle(IPC_CHANNELS.sidekicksSetIdleImage, async (_event, input: SidekickIdleImageInput) => await getSidekickService().setIdleImage(input));
   ipcMain.handle(IPC_CHANNELS.sidekicksForget, async (_event, sidekickId: string) => await getSidekickService().forget(sidekickId));
 };

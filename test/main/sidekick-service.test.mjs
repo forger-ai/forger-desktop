@@ -162,25 +162,35 @@ const desktopCommandQueue = (socket) => {
   return socket.__desktopCommandQueue;
 };
 
-const readDesktopCommand = async (socket, internals, pairingSecret) => {
+const readDesktopCommand = async (socket, internals, pairingSecret, { includeCustomization = false } = {}) => {
   const queue = desktopCommandQueue(socket);
-  const raw = queue.messages.length > 0
-    ? queue.messages.shift()
-    : await new Promise((resolve, reject) => {
-      const waiter = (message) => {
-        clearTimeout(timeout);
-        resolve(message);
-      };
-      const timeout = setTimeout(() => {
-        const index = queue.waiters.indexOf(waiter);
-        if (index >= 0) {
-          queue.waiters.splice(index, 1);
-        }
-        reject(new Error('desktop_command_timeout'));
-      }, 1000);
-      queue.waiters.push(waiter);
-    });
-  return internals.decryptSidekickEnvelope(JSON.parse(raw.toString()), pairingSecret);
+  for (;;) {
+    const raw = queue.messages.length > 0
+      ? queue.messages.shift()
+      : await new Promise((resolve, reject) => {
+        const waiter = (message) => {
+          clearTimeout(timeout);
+          resolve(message);
+        };
+        const timeout = setTimeout(() => {
+          const index = queue.waiters.indexOf(waiter);
+          if (index >= 0) {
+            queue.waiters.splice(index, 1);
+          }
+          reject(new Error('desktop_command_timeout'));
+        }, 1000);
+        queue.waiters.push(waiter);
+      });
+    const command = internals.decryptSidekickEnvelope(JSON.parse(raw.toString()), pairingSecret);
+    // Tras el hello, Desktop empuja la personalizacion idle en segundo plano;
+    // los tests que esperan comandos puntuales la ignoran salvo que la pidan.
+    const isCustomization = typeof command.cmd === 'string' &&
+      (command.cmd.startsWith('idle.') || command.cmd === 'limits.update');
+    if (isCustomization && !includeCustomization) {
+      continue;
+    }
+    return command;
+  }
 };
 
 test('Sidekick crypto helpers derive and decrypt AES-GCM envelopes with the pairing secret', async () => {

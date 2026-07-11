@@ -63,6 +63,33 @@ export interface SidekickMicrophoneRecordingSummary {
   sizeBytes: number;
 }
 
+// Pantallas idle que rotan en el dispositivo. 'custom' requiere una imagen
+// cargada; 'limits' muestra el uso de Claude/Codex que empuja Desktop.
+export type SidekickIdleScreen = 'eyes' | 'sleep' | 'clock' | 'limits' | 'custom';
+
+export interface SidekickIdleConfig {
+  screens: SidekickIdleScreen[];
+  rotateSeconds: number;
+}
+
+export const SIDEKICK_IDLE_SCREENS: readonly SidekickIdleScreen[] = ['eyes', 'sleep', 'clock', 'limits', 'custom'];
+export const SIDEKICK_DEFAULT_IDLE_CONFIG: SidekickIdleConfig = { screens: ['eyes', 'clock'], rotateSeconds: 15 };
+// La imagen custom viaja como RGB565 little-endian del tamano exacto del LCD.
+export const SIDEKICK_IDLE_IMAGE_WIDTH = 240;
+export const SIDEKICK_IDLE_IMAGE_HEIGHT = 240;
+export const SIDEKICK_IDLE_IMAGE_BYTES = SIDEKICK_IDLE_IMAGE_WIDTH * SIDEKICK_IDLE_IMAGE_HEIGHT * 2;
+
+export interface SidekickIdleConfigInput {
+  sidekickId: string;
+  config: SidekickIdleConfig;
+}
+
+export interface SidekickIdleImageInput {
+  sidekickId: string;
+  rgb565: ArrayBuffer;
+  previewDataUrl?: string;
+}
+
 export interface SidekickSummary {
   sidekickId: string;
   name: string;
@@ -78,6 +105,8 @@ export interface SidekickSummary {
   speakerPlayback: SidekickSpeakerPlaybackState;
   microphoneRecording: SidekickMicrophoneRecordingState;
   microphoneRecordings: SidekickMicrophoneRecordingSummary[];
+  idleConfig: SidekickIdleConfig;
+  idleImagePreviewDataUrl?: string;
   usbPath?: string;
   ipAddress?: string;
   errorMessage?: string;
@@ -116,7 +145,7 @@ export type SidekickScreenTemplate = 'idle' | 'state' | 'card' | 'transcript';
 export interface SidekickScreenInput {
   sidekickId: string;
   template: SidekickScreenTemplate;
-  icon?: 'listening' | 'thinking' | 'speaking' | 'sleeping' | 'error' | 'bell' | 'info' | 'audio' | 'wifi' | 'warning' | 'ok' | 'battery' | 'settings' | 'home' | 'download' | 'upload' | 'play' | 'pause';
+  icon?: 'listening' | 'transcribing' | 'thinking' | 'speaking' | 'sleeping' | 'error' | 'bell' | 'info' | 'audio' | 'wifi' | 'warning' | 'ok' | 'battery' | 'settings' | 'home' | 'download' | 'upload' | 'play' | 'pause';
   title?: string;
   body?: string;
   text?: string;

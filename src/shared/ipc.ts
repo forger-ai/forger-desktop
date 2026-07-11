@@ -63,6 +63,8 @@ export const IPC_CHANNELS = {
   sidekicksStartMicrophoneRecording: 'forger:sidekicks:microphone:start',
   sidekicksStopMicrophoneRecording: 'forger:sidekicks:microphone:stop',
   sidekicksReadMicrophoneRecording: 'forger:sidekicks:microphone:read',
+  sidekicksSetIdleConfig: 'forger:sidekicks:idle:set-config',
+  sidekicksSetIdleImage: 'forger:sidekicks:idle:set-image',
   sidekicksForget: 'forger:sidekicks:forget',
   sidekicksChanged: 'forger:sidekicks:changed',
   microphonePermissionStatus: 'forger:microphone-permission:status',

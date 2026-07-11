@@ -7,6 +7,7 @@ import type { WebSocket } from 'ws';
 
 import type {
   SidekickBatteryStatus,
+  SidekickIdleConfig,
   SidekickMicrophoneRecordingState,
   SidekickMicrophoneRecordingSummary,
   SidekickSpeakerPlaybackState,
@@ -54,6 +55,8 @@ export interface StoredSidekickRecord {
   personalAgentId?: string;
   desktopKeyFingerprint?: string;
   encryptedPairingSecret: string;
+  idleConfig?: SidekickIdleConfig;
+  idleImagePreviewDataUrl?: string;
 }
 
 export interface SidekickRuntimeState {
@@ -77,6 +80,7 @@ export interface SidekickRuntimeState {
   pendingRecordingAcks: Map<string, PendingRecordingAck>;
   pendingSpeakerAcks: Map<string, PendingSpeakerAck>;
   lastTimeSyncAt?: number;
+  lastLimitsPushAt?: number;
 }
 
 export interface SidekickNetworkPayload {
