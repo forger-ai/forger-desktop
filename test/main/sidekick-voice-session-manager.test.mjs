@@ -475,6 +475,12 @@ test('BDD: respond_and_wait speaks, cues, captures a follow-up, and keeps the sa
           cancel: async () => { harness.calls.sttCancels += 1; },
         };
       },
+      // Firmware restores idle when the listening cue playback drains. The
+      // session manager must render listening again after that receipt.
+      playListeningCue: async (input) => {
+        harness.calls.listeningCues.push(input);
+        harness.calls.screens.push({ sidekickId: input.sidekickId, screen: 'idle', source: 'cue-playback' });
+      },
     },
   });
   const completion = harness.manager.triggerWake({ sidekickId: 'sidekick-1' });
@@ -482,6 +488,7 @@ test('BDD: respond_and_wait speaks, cues, captures a follow-up, and keeps the sa
   harness.emitPcm();
   harness.clock.advance(500);
   await eventually(() => harness.calls.microphoneStarts.length === 2);
+  assert.equal(harness.calls.screens.at(-1).screen, 'listening');
   harness.emitPcm();
   harness.clock.advance(500);
   const result = await completion;

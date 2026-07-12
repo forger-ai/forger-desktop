@@ -616,7 +616,6 @@ export class SidekickVoiceSessionManager {
         return this.result(session, 'completed', 'sidekick_voice_follow_up_cap');
       }
       session.followUpTurns += 1;
-      await this.transitionBestEffort(session, 'listening');
       if (this.deps.playListeningCue) {
         await Promise.resolve(this.deps.playListeningCue({
           sidekickId: session.sidekickId,
@@ -625,6 +624,10 @@ export class SidekickVoiceSessionManager {
         })).catch(() => undefined);
       }
       this.resetCaptureState(session);
+      // Speaker playback restores the firmware screen to idle when the cue
+      // drains. Render listening after the cue so it remains authoritative
+      // while the follow-up microphone is open.
+      await this.transitionBestEffort(session, 'listening');
       await this.beginCapture(session, this.options.followUpOnsetTimeoutMs);
       await this.raceWithAbort(session.captureDone, session);
       const transcript = await this.finishCapture(session);
