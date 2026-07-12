@@ -19,8 +19,7 @@ import { AutomationManager } from '../automation-manager';
 import { WorkflowManager } from '../workflow-manager';
 import { BackgroundTaskStore } from '../background-task-store';
 import {
-  extractDeepLinkFromArgv,
-  focusWindow as focusDeepLinkWindow,
+  extractDeepLinkFromArgv, focusWindow as focusDeepLinkWindow,
   FORGER_PROTOCOL,
   parseForgerUrl,
   registerForgerProtocol,
@@ -608,6 +607,7 @@ const getPersonalAgentConversationManager = (): AgentConversationManager => {
           personalAgentConversationId: context.conversationId,
           personalAgentPeerThreadId: context.peerThreadId,
           personalAgentCallStackIds: context.callStackAgentIds,
+          personalAgentCanSpawnAgents: agent.canSpawnAgents,
           sidekick: context.sidekick ? { sidekickId: context.sidekick.sidekickId } : undefined,
           appIds: agent.appIds,
           officialToolActionIds: agent.toolIds,

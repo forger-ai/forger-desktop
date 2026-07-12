@@ -1,4 +1,5 @@
 import type { AppCategory } from '@shared/types';
+import { esAgentGroups } from './locales/agentGroups';
 import { esBackgroundTasks } from './locales/esBackgroundTasks';
 import { esSections } from './locales/esSections';
 export const es = { locale: 'es',
@@ -190,15 +191,14 @@ export const es = { locale: 'es',
     name: 'Nombre',
     description: 'Descripción',
     purpose: 'Para qué sirve',
-    create: 'Crear agente',
+    create: 'Crear agente', ...esAgentGroups,
     delete: 'Eliminar agente',
     deleteConfirm: (name: string) => `¿Eliminar "${name}"? Esta acción borra su workspace y conversaciones locales.`,
     empty: 'Todavía no tienes agentes personales.',
     noDescription: 'Sin descripción.',
     standardPermission: 'Acceso normal',
     expandedPermission: 'Acceso ampliado',
-    permissionLevel: 'Nivel de acceso',
-    internetAccess: 'Permitir internet',
+    permissionLevel: 'Nivel de acceso', internetAccess: 'Permitir internet',
     internetOn: 'Internet activado',
     internetOff: 'Sin internet',
     appsAccess: 'Apps',

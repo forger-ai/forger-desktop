@@ -24,6 +24,15 @@ export const INTERNAL_MCP_TOOL_DEFINITIONS: AgentToolDefinition[] = [
     defaultRequiresApproval: false,
   },
   {
+    id: 'forger_create_personal_agent',
+    packageId: 'forger:internal',
+    name: 'Crear agente personal',
+    description: 'Crea un agente personal nuevo cuando el agente actual tiene permiso para crear otros agentes.',
+    category: 'actualizacion',
+    risk: 'medio',
+    defaultRequiresApproval: false,
+  },
+  {
     id: 'respond_and_end',
     packageId: 'forger:internal',
     name: 'Responder y terminar',

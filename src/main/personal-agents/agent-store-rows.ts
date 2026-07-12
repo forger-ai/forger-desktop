@@ -6,6 +6,9 @@ export interface AgentRow {
   instructions: string;
   permission_mode: string;
   network_access: number;
+  can_spawn_agents?: number;
+  created_by_agent_id?: string | null;
+  group_id?: string | null;
   runtime_provider?: string | null;
   runtime_model?: string | null;
   runtime_effort?: string | null;

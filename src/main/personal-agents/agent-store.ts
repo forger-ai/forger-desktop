@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import type { AgentPermissionMode, AgentProvider, AgentRuntime, AgentToolId, AutomationFrequency, AutomationMissedRunPolicy, PersonalAgent, PersonalAgentConnectionGrant, PersonalAgentConversation, PersonalAgentConversationOrigin, PersonalAgentCreateInput, PersonalAgentHeartbeatSummary, PersonalAgentJournalEntry, PersonalAgentMemory, PersonalAgentMessage, PersonalAgentMessageAuthorType, PersonalAgentMessageFile, PersonalAgentMessageKind, PersonalAgentMessageRole, PersonalAgentMessageSource, PersonalAgentPeerGrant, PersonalAgentPeerThread, PersonalAgentPermission, PersonalAgentRoutine, PersonalAgentRoutineRun, PersonalAgentRoutineRunStatus, PersonalAgentRun, PersonalAgentRunProgress, PersonalAgentRunStatus, PersonalAgentScheduledWakeup, PersonalAgentUpdatePermissionsInput, PersonalAgentWorkspaceEntry, PersonalAgentWorkspaceFile, SharedFileRef } from '../../shared/types';
+import type { AgentPermissionMode, AgentProvider, AgentRuntime, AgentToolId, AutomationFrequency, AutomationMissedRunPolicy, PersonalAgent, PersonalAgentConnectionGrant, PersonalAgentConversation, PersonalAgentConversationOrigin, PersonalAgentCreateInput, PersonalAgentGroup, PersonalAgentGroupCreateInput, PersonalAgentGroupUpdateInput, PersonalAgentHeartbeatSummary, PersonalAgentJournalEntry, PersonalAgentMemory, PersonalAgentMessage, PersonalAgentMessageAuthorType, PersonalAgentMessageFile, PersonalAgentMessageKind, PersonalAgentMessageRole, PersonalAgentMessageSource, PersonalAgentPeerGrant, PersonalAgentPeerThread, PersonalAgentPermission, PersonalAgentRoutine, PersonalAgentRoutineRun, PersonalAgentRoutineRunStatus, PersonalAgentRun, PersonalAgentRunProgress, PersonalAgentRunStatus, PersonalAgentScheduledWakeup, PersonalAgentUpdateGroupInput, PersonalAgentUpdatePermissionsInput, PersonalAgentWorkspaceEntry, PersonalAgentWorkspaceFile, SharedFileRef } from '../../shared/types';
 import { buildGlobalSkillTemplates } from '../prompt-builder/official-tools';
 import { buildPersonalAgentWorkspaceDocuments } from '../prompt-builder/personal-agents';
 import { forgerSkillRoots, writeSkillTemplates } from '../prompt-builder/skill-template-writer';
@@ -20,6 +20,8 @@ import type {
   RunRow,
 } from './agent-store-rows';
 import { AgentRoutineStore } from './agent-store-routines';
+import { AgentGroupStore } from './agent-store-groups';
+import { createPersonalAgentFromAgent, type CreatePersonalAgentFromAgentInput } from './agent-store-spawn';
 import { PERSONAL_AGENT_SCHEMA_SQL } from './agent-store-schema';
 import { readPersonalAgentWorkspaceEntries } from './agent-store-workspace';
 import {
@@ -77,8 +79,14 @@ export class AgentStore {
   private db: SqliteDatabase | null = null;
   private loadPromise: Promise<void> | null = null;
   private readonly routineStore: AgentRoutineStore;
+  private readonly groupStore: AgentGroupStore;
 
   public constructor(private readonly options: AgentStoreOptions) {
+    this.groupStore = new AgentGroupStore({
+      load: () => this.load(),
+      requireDb: () => this.requireDb(),
+      requireAgent: (agentId) => this.requireAgent(agentId),
+    });
     this.routineStore = new AgentRoutineStore({
       load: () => this.load(),
       requireDb: () => this.requireDb(),
@@ -94,6 +102,26 @@ export class AgentStore {
     await this.load();
     const rows = this.requireDb().prepare('SELECT * FROM personal_agents ORDER BY updated_at DESC').all() as AgentRow[];
     return rows.map((row) => this.agentFromRow(row));
+  }
+
+  public async listGroups(): Promise<PersonalAgentGroup[]> {
+    return this.groupStore.list();
+  }
+
+  public async createGroup(input: PersonalAgentGroupCreateInput): Promise<PersonalAgentGroup> {
+    return this.groupStore.create(input);
+  }
+
+  public async updateGroup(input: PersonalAgentGroupUpdateInput): Promise<PersonalAgentGroup> {
+    return this.groupStore.update(input);
+  }
+
+  public async deleteGroup(groupId: string): Promise<{ success: boolean }> {
+    return this.groupStore.delete(groupId);
+  }
+
+  public async updateAgentGroup(input: PersonalAgentUpdateGroupInput): Promise<PersonalAgent> {
+    return this.groupStore.updateAgent(input);
   }
 
   public async getHeartbeatSummary(): Promise<PersonalAgentHeartbeatSummary> {
@@ -122,12 +150,29 @@ export class AgentStore {
   }
 
   public async createAgent(input: PersonalAgentCreateInput): Promise<PersonalAgent> {
+    return this.createAgentRecord(input);
+  }
+
+  public async createAgentFromAgent(input: CreatePersonalAgentFromAgentInput): Promise<PersonalAgent> {
+    await this.load();
+    return createPersonalAgentFromAgent(input, {
+      requireAgent: (agentId) => this.requireAgent(agentId),
+      requireGroup: (groupId) => this.requireGroup(groupId),
+      createAgent: (agentInput, creatorId) => this.createAgentRecord(agentInput, creatorId),
+      grantPeer: (agentId, peerAgentId, criteria) => this.grantPeer(agentId, peerAgentId, criteria),
+      deleteAgent: (agentId) => this.deleteAgent(agentId),
+    });
+  }
+
+  private async createAgentRecord(input: PersonalAgentCreateInput, createdByAgentId?: string): Promise<PersonalAgent> {
     await this.load();
     const now = new Date().toISOString();
     const name = sanitizeText(input.name, MAX_NAME_LENGTH);
     if (!name) {
       throw new Error('personal_agent_name_required');
     }
+    const groupId = sanitizeAgentId(input.groupId ?? undefined);
+    if (groupId) this.requireGroup(groupId);
     const agent: PersonalAgent = {
       id: randomUUID(),
       name,
@@ -136,6 +181,9 @@ export class AgentStore {
       instructions: sanitizeText(input.instructions, MAX_TEXT_LENGTH),
       permissionMode: normalizePermissionMode(input.permissionMode),
       networkAccess: input.networkAccess === true,
+      canSpawnAgents: input.canSpawnAgents === true,
+      ...(createdByAgentId ? { createdByAgentId } : {}),
+      ...(groupId ? { groupId } : {}),
       ...(normalizeAgentRuntime(input.runtime) ? { runtime: normalizeAgentRuntime(input.runtime) as AgentRuntime } : {}),
       appIds: normalizeGrantTargets(input.appIds),
       toolIds: normalizeGrantTargets(input.toolIds) as AgentToolId[],
@@ -145,8 +193,8 @@ export class AgentStore {
       updatedAt: now,
     };
     this.requireDb().prepare(`
-      INSERT INTO personal_agents (id, name, description, purpose, instructions, permission_mode, network_access, runtime_provider, runtime_model, runtime_effort, created_at, updated_at)
-      VALUES (@id, @name, @description, @purpose, @instructions, @permissionMode, @networkAccess, @runtimeProvider, @runtimeModel, @runtimeEffort, @createdAt, @updatedAt)
+      INSERT INTO personal_agents (id, name, description, purpose, instructions, permission_mode, network_access, can_spawn_agents, created_by_agent_id, group_id, runtime_provider, runtime_model, runtime_effort, created_at, updated_at)
+      VALUES (@id, @name, @description, @purpose, @instructions, @permissionMode, @networkAccess, @canSpawnAgents, @createdByAgentId, @groupId, @runtimeProvider, @runtimeModel, @runtimeEffort, @createdAt, @updatedAt)
     `).run({
       id: agent.id,
       name: agent.name,
@@ -155,6 +203,9 @@ export class AgentStore {
       instructions: agent.instructions,
       permissionMode: agent.permissionMode,
       networkAccess: agent.networkAccess ? 1 : 0,
+      canSpawnAgents: agent.canSpawnAgents ? 1 : 0,
+      createdByAgentId: agent.createdByAgentId ?? null,
+      groupId: agent.groupId ?? null,
       runtimeProvider: agent.runtime?.provider ?? null,
       runtimeModel: agent.runtime?.model ?? null,
       runtimeEffort: agent.runtime?.effort ?? null,
@@ -204,12 +255,18 @@ export class AgentStore {
     const now = new Date().toISOString();
     const permissionMode = normalizePermissionMode(input.permissionMode ?? agent.permissionMode);
     const networkAccess = typeof input.networkAccess === 'boolean' ? input.networkAccess : agent.networkAccess;
+    const canSpawnAgents = typeof input.canSpawnAgents === 'boolean' ? input.canSpawnAgents : agent.canSpawnAgents;
+    let groupId = agent.groupId ?? null;
+    if ('groupId' in input) {
+      groupId = sanitizeAgentId(input.groupId ?? undefined) ?? null;
+      if (groupId) this.requireGroup(groupId);
+    }
     const runtime = 'runtime' in input ? normalizeAgentRuntime(input.runtime) : agent.runtime;
     this.requireDb().prepare(`
       UPDATE personal_agents
-      SET permission_mode = ?, network_access = ?, runtime_provider = ?, runtime_model = ?, runtime_effort = ?, updated_at = ?
+      SET permission_mode = ?, network_access = ?, can_spawn_agents = ?, group_id = ?, runtime_provider = ?, runtime_model = ?, runtime_effort = ?, updated_at = ?
       WHERE id = ?
-    `).run(permissionMode, networkAccess ? 1 : 0, runtime?.provider ?? null, runtime?.model ?? null, runtime?.effort ?? null, now, agent.id);
+    `).run(permissionMode, networkAccess ? 1 : 0, canSpawnAgents ? 1 : 0, groupId, runtime?.provider ?? null, runtime?.model ?? null, runtime?.effort ?? null, now, agent.id);
     await this.upsertPermission({
       agentId: agent.id,
       kind: 'legacy',
@@ -1003,6 +1060,17 @@ export class AgentStore {
     }
   }
 
+  private async grantPeer(agentId: string, peerAgentId: string, criteria: string): Promise<void> {
+    const now = new Date().toISOString();
+    this.requireDb().prepare(`
+      INSERT INTO personal_agent_peer_grants (id, agent_id, peer_agent_id, criteria, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(agent_id, peer_agent_id) DO UPDATE SET criteria = excluded.criteria, updated_at = excluded.updated_at
+    `).run(randomUUID(), agentId, peerAgentId, sanitizeText(criteria, MAX_PEER_CRITERIA_LENGTH), now, now);
+    this.requireDb().prepare('UPDATE personal_agents SET updated_at = ? WHERE id = ?').run(now, agentId);
+    await this.syncOthersWorkspaceFile(await this.requireAgent(agentId));
+  }
+
   private async load(): Promise<void> {
     if (!this.loadPromise) {
       this.loadPromise = this.loadFromDisk();
@@ -1027,6 +1095,9 @@ export class AgentStore {
     this.ensureColumn('personal_agents', 'runtime_provider', 'TEXT');
     this.ensureColumn('personal_agents', 'runtime_model', 'TEXT');
     this.ensureColumn('personal_agents', 'runtime_effort', 'TEXT');
+    this.ensureColumn('personal_agents', 'can_spawn_agents', 'INTEGER NOT NULL DEFAULT 0');
+    this.ensureColumn('personal_agents', 'created_by_agent_id', 'TEXT REFERENCES personal_agents(id) ON DELETE SET NULL');
+    this.ensureColumn('personal_agents', 'group_id', 'TEXT REFERENCES personal_agent_groups(id) ON DELETE SET NULL');
     this.ensureColumn('personal_agent_conversations', 'origin', "TEXT NOT NULL DEFAULT 'user'");
     this.ensureColumn('personal_agent_conversations', 'read_only', 'INTEGER NOT NULL DEFAULT 0');
     this.ensureColumn('personal_agent_conversations', 'initiator_agent_id', 'TEXT REFERENCES personal_agents(id) ON DELETE SET NULL');
@@ -1052,6 +1123,8 @@ export class AgentStore {
       CREATE INDEX IF NOT EXISTS idx_personal_agent_permissions_agent_kind ON personal_agent_permissions(agent_id, kind);
       CREATE UNIQUE INDEX IF NOT EXISTS idx_personal_agent_permissions_unique_grant ON personal_agent_permissions(agent_id, kind, target_id);
       CREATE INDEX IF NOT EXISTS idx_personal_agent_conversations_sidekick ON personal_agent_conversations(sidekick_id, agent_id, updated_at);
+      CREATE INDEX IF NOT EXISTS idx_personal_agents_group ON personal_agents(group_id, updated_at);
+      CREATE INDEX IF NOT EXISTS idx_personal_agents_created_by ON personal_agents(created_by_agent_id, updated_at);
     `);
   }
 
@@ -1146,6 +1219,10 @@ export class AgentStore {
     return row ? this.agentFromRow(row) : null;
   }
 
+  private requireGroup(id: string): PersonalAgentGroup {
+    return this.groupStore.require(id);
+  }
+
   private agentFromRow(row: AgentRow): PersonalAgent {
     const appIds = this.grantsForAgent(row.id, 'app') as string[];
     const toolIds = this.grantsForAgent(row.id, 'tool') as AgentToolId[];
@@ -1164,6 +1241,9 @@ export class AgentStore {
       instructions: row.instructions,
       permissionMode: normalizePermissionMode(row.permission_mode),
       networkAccess: row.network_access !== 0,
+      canSpawnAgents: row.can_spawn_agents !== 0,
+      ...(row.created_by_agent_id ? { createdByAgentId: row.created_by_agent_id } : {}),
+      ...(row.group_id ? { groupId: row.group_id } : {}),
       ...(runtime ? { runtime } : {}),
       appIds,
       toolIds,

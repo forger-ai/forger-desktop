@@ -33,6 +33,7 @@ import type { Workflow, WorkflowApproveNodeInput, WorkflowRun, WorkflowRunSummar
 import type { BackgroundTask, BackgroundTaskEvent, BackgroundTaskUpsertInput } from './background-tasks';
 import type { LlmRunsSnapshot } from './llm-runs';
 import type { PersonalAgent, PersonalAgentConversation, PersonalAgentConversationDraftUpdateInput, PersonalAgentConversationEvent, PersonalAgentConversationGetInput, PersonalAgentConversationsListInput, PersonalAgentConversationStartInput, PersonalAgentCreateInput, PersonalAgentDeleteInput, PersonalAgentGrantOptions, PersonalAgentMessageSendInput, PersonalAgentPeerThread, PersonalAgentPeerThreadGetInput, PersonalAgentPeerThreadsListInput, PersonalAgentRoutine, PersonalAgentRoutineDeleteInput, PersonalAgentRoutineListInput, PersonalAgentRoutineRun, PersonalAgentRoutineRunNowInput, PersonalAgentRoutineSetEnabledInput, PersonalAgentRoutineUpsertInput, PersonalAgentScheduledWakeup, PersonalAgentUpdatePermissionsInput, PersonalAgentWakeupCancelInput, PersonalAgentWorkspaceEntry, PersonalAgentWorkspaceFile, PersonalAgentWorkspaceFileReadInput, PersonalAgentWorkspaceFileWriteInput, PersonalAgentWorkspaceListInput } from './personal-agents';
+import type { PersonalAgentGroup, PersonalAgentGroupCreateInput, PersonalAgentGroupDeleteInput, PersonalAgentGroupUpdateInput, PersonalAgentUpdateGroupInput } from './personal-agents';
 import type { RemoteActivitySnapshot } from './remote-activity';
 
 export type MicrophonePermissionStatus = 'not-determined' | 'granted' | 'denied' | 'restricted' | 'unknown' | 'unsupported';
@@ -279,6 +280,11 @@ export interface ForgerDesktopApi {
   onLlmRunsSnapshotChanged: (listener: (snapshot: LlmRunsSnapshot) => void) => () => void;
   personalAgentsList: () => Promise<PersonalAgent[]>;
   personalAgentsCreate: (input: PersonalAgentCreateInput) => Promise<PersonalAgent>;
+  personalAgentGroupsList: () => Promise<PersonalAgentGroup[]>;
+  personalAgentGroupsCreate: (input: PersonalAgentGroupCreateInput) => Promise<PersonalAgentGroup>;
+  personalAgentGroupsUpdate: (input: PersonalAgentGroupUpdateInput) => Promise<PersonalAgentGroup>;
+  personalAgentGroupsDelete: (input: PersonalAgentGroupDeleteInput) => Promise<{ success: boolean }>;
+  personalAgentUpdateGroup: (input: PersonalAgentUpdateGroupInput) => Promise<PersonalAgent>;
   personalAgentGrantOptionsList: () => Promise<PersonalAgentGrantOptions>;
   personalAgentUpdatePermissions: (input: PersonalAgentUpdatePermissionsInput) => Promise<PersonalAgent>;
   personalAgentsDelete: (input: PersonalAgentDeleteInput) => Promise<{ success: boolean }>;

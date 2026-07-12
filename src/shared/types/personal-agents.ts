@@ -26,6 +26,9 @@ export interface PersonalAgent {
   instructions: string;
   permissionMode: AgentPermissionMode;
   networkAccess: boolean;
+  canSpawnAgents: boolean;
+  createdByAgentId?: string;
+  groupId?: string;
   runtime?: AgentRuntime;
   appIds: string[];
   toolIds: AgentToolId[];
@@ -58,6 +61,8 @@ export interface PersonalAgentCreateInput {
   instructions?: string;
   permissionMode?: AgentPermissionMode;
   networkAccess?: boolean;
+  canSpawnAgents?: boolean;
+  groupId?: string | null;
   runtime?: AgentRuntime;
   appIds?: string[];
   toolIds?: AgentToolId[];
@@ -73,11 +78,38 @@ export interface PersonalAgentUpdatePermissionsInput {
   agentId: string;
   permissionMode?: AgentPermissionMode;
   networkAccess?: boolean;
+  canSpawnAgents?: boolean;
+  groupId?: string | null;
   runtime?: AgentRuntime;
   appIds?: string[];
   toolIds?: AgentToolId[];
   connectionGrants?: PersonalAgentConnectionGrant[];
   peerAgentGrants?: PersonalAgentPeerGrant[];
+}
+
+export interface PersonalAgentGroup {
+  id: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PersonalAgentGroupCreateInput {
+  name: string;
+}
+
+export interface PersonalAgentGroupUpdateInput {
+  groupId: string;
+  name: string;
+}
+
+export interface PersonalAgentGroupDeleteInput {
+  groupId: string;
+}
+
+export interface PersonalAgentUpdateGroupInput {
+  agentId: string;
+  groupId: string | null;
 }
 
 export interface PersonalAgentGrantOptionApp {

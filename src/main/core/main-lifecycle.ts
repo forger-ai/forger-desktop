@@ -8,11 +8,9 @@ import type { StoredForgerAccount } from '../forger-account-store';
 import { createAppMcpSecretsFingerprint } from '../app-mcp-manager';
 import { AppFolderGrantStore } from '../app-folder-grants';
 import type {
-  AgentRuntime,
-  AgentRuntimeRequest,
+  AgentRuntime, AgentRuntimeRequest,
   AgentToolDefinition,
-  AppSummary,
-  AppSecretDeclaration,
+  AppSummary, AppSecretDeclaration,
   AutomationFrequency,
   BasicActionResult,
   CatalogApp,
@@ -160,6 +158,7 @@ export interface MainLifecycleDeps {
 	  getPersonalAgentHeartbeat: AsyncFn;
 	  getPersonalAgentStore: () => {
 	    requireAgent: (agentId: string) => Promise<PersonalAgent>;
+	    createAgentFromAgent: (input: { creatorAgentId: string; name: string; description?: string; purpose?: string; instructions?: string; groupId?: string }) => Promise<PersonalAgent>;
     requireRoutine: (routineId: string) => Promise<{ agentId: string }>;
 	    updateAgentPermissions: (input: { agentId: string; appIds?: string[] }) => Promise<PersonalAgent>;
 	    listPeerGrants: (agentId: string) => Promise<PersonalAgent['peerAgentGrants']>;
@@ -790,6 +789,7 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
 	        userMessage: 'La app quedo agregada al agente. Sus herramientas estaran disponibles en proximas ejecuciones.',
 	      };
 	    },
+	    createPersonalAgentFromAgent: async (input: { creatorAgentId: string; name: string; description?: string; purpose?: string; instructions?: string; groupId?: string }) => await getPersonalAgentStore().createAgentFromAgent(input),
 	    listAgentPeers: async ({ agentId }: { agentId: string }) => {
 	      const store = getPersonalAgentStore();
 	      const [peers, recentThreads] = await Promise.all([

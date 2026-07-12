@@ -40,6 +40,19 @@ const buildPersonalAgentConnectionsContext = (agent: PersonalAgent): string => {
   ].join('\n');
 };
 
+const buildPersonalAgentSpawnContext = (agent: PersonalAgent): string => {
+  if (!agent.canSpawnAgents) {
+    return '- Agent creation: disabled. `forger_create_personal_agent` is not available in this run. Do not claim that you can create agents or attempt to bypass this permission.';
+  }
+  return [
+    '- Agent creation: enabled. `forger_create_personal_agent` is available in this run.',
+    '- Use it only when the human explicitly asks or authorizes you to create a personal agent. Do not create agents speculatively or only to delegate ordinary work.',
+    '- A created agent starts with safe permissions, no internet, no apps, no tools, no connections, and no permission to create more agents.',
+    "- The created agent inherits the creator's runtime and, unless another valid group is selected, inherits the creator's group.",
+    '- The creator can contact the created agent automatically. The created agent does not receive reciprocal contact permission automatically.',
+  ].join('\n');
+};
+
 const agentPromptVariables = (agent: PersonalAgent) => ({
   promptMarker: PERSONAL_AGENT_PROMPT_MARKER,
   agentName: agent.name,
@@ -48,6 +61,7 @@ const agentPromptVariables = (agent: PersonalAgent) => ({
   agentInstructions: agent.instructions || 'No extra user instructions have been written yet.',
   permissionMode: agent.permissionMode,
   networkAccess: agent.networkAccess ? 'enabled' : 'disabled',
+  spawnAgentsContext: buildPersonalAgentSpawnContext(agent),
   grantedForgerToolsContext: buildPersonalAgentForgerToolsContext(agent),
   grantedConnectionsContext: buildPersonalAgentConnectionsContext(agent),
 });

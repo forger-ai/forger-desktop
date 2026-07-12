@@ -9,6 +9,7 @@ export type AgentToolId =
   | 'forger_check_updates'
   | 'forger_create_app'
   | 'forger_add_app_to_personal_agent'
+  | 'forger_create_personal_agent'
   | 'wakeup_in'
   | 'cancel_wakeup'
   | 'respond_and_end'

@@ -330,6 +330,21 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
     };
   }
 
+  if (toolId === 'forger_create_personal_agent') {
+    return {
+      type: 'object',
+      properties: {
+        name: { type: 'string', maxLength: 100, description: 'Nombre visible del agente personal.' },
+        description: { type: 'string', maxLength: 500, description: 'Descripcion breve y visible del agente.' },
+        purpose: { type: 'string', maxLength: 8_000, description: 'Responsabilidad principal del agente.' },
+        instructions: { type: 'string', maxLength: 8_000, description: 'Instrucciones de trabajo especificas para el agente.' },
+        groupId: { type: 'string', description: 'Grupo opcional. Si se omite, hereda el grupo del agente creador cuando existe.' },
+      },
+      required: ['name'],
+      additionalProperties: false,
+    };
+  }
+
   if (toolId === 'wakeup_in') {
     return {
       type: 'object',

@@ -1,4 +1,5 @@
 import type { AppCategory } from '@shared/types';
+import { enAgentGroups } from './locales/agentGroups';
 import { enBackgroundTasks } from './locales/enBackgroundTasks';
 import { enSections } from './locales/enSections';
 export const en = { locale: 'en',
@@ -190,15 +191,14 @@ export const en = { locale: 'en',
     name: 'Name',
     description: 'Description',
     purpose: 'Purpose',
-    create: 'Create agent',
+    create: 'Create agent', ...enAgentGroups,
     delete: 'Delete agent',
     deleteConfirm: (name: string) => `Delete "${name}"? This removes its local workspace and conversations.`,
     empty: 'You do not have personal agents yet.',
     noDescription: 'No description.',
     standardPermission: 'Standard access',
     expandedPermission: 'Full access',
-    permissionLevel: 'Access level',
-    internetAccess: 'Allow internet',
+    permissionLevel: 'Access level', internetAccess: 'Allow internet',
     internetOn: 'Internet on',
     internetOff: 'No internet',
     appsAccess: 'Apps',
