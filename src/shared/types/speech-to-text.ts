@@ -114,6 +114,8 @@ export interface SpeechToTextProcessInput {
   path: string;
   task?: SpeechToTextTask;
   language?: string;
+  /** Restricts language detection to this subset (ISO-639-1). Ignored when `language` is set. */
+  languages?: string[];
   model?: string;
 }
 
@@ -123,6 +125,8 @@ export interface SpeechToTextUploadInput {
   data: ArrayBuffer;
   task?: SpeechToTextTask;
   language?: string;
+  /** Restricts language detection to this subset (ISO-639-1). Ignored when `language` is set. */
+  languages?: string[];
   model?: string;
   ephemeral?: boolean;
 }

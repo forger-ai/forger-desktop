@@ -237,15 +237,29 @@ test('SidekickService persists normalized voice, locale, and conversation TTL pe
     const pairingSecret = randomBytes(32).toString('base64');
     await writePairedSidekickStore(root, pairingSecret);
     const service = createSidekickService(SidekickService, root);
+    assert.deepEqual((await service.getState()).sidekicks[0].voiceConfig, {
+      sttLanguageMode: 'subset',
+      sttLanguages: ['es', 'en'],
+      conversationTtlMinutes: 30,
+    });
     const updated = await service.setVoiceConfig({
       sidekickId: SIDEKICK_ID,
-      config: { model: 'kokoro', voice: 'ef_dora', locale: 'es-CL', conversationTtlMinutes: 45 },
+      config: {
+        model: 'kokoro',
+        voice: 'ef_dora',
+        locale: 'es-CL',
+        sttLanguageMode: 'subset',
+        sttLanguages: ['ES', 'en', 'en', 'nope'],
+        conversationTtlMinutes: 45,
+      },
     });
     assert.equal(updated.success, true);
     assert.deepEqual(updated.sidekicks[0].voiceConfig, {
       model: 'kokoro',
       voice: 'ef_dora',
       locale: 'es-CL',
+      sttLanguageMode: 'subset',
+      sttLanguages: ['es', 'en'],
       conversationTtlMinutes: 45,
     });
     const persisted = JSON.parse(await fs.readFile(path.join(root, 'sidekicks.json'), 'utf8'));
@@ -266,7 +280,11 @@ test('SidekickService persists normalized voice, locale, and conversation TTL pe
     };
     await fs.writeFile(path.join(root, 'sidekicks.json'), JSON.stringify(persisted), 'utf8');
     const reloaded = createSidekickService(SidekickService, root);
-    assert.deepEqual((await reloaded.getState()).sidekicks[0].voiceConfig, { conversationTtlMinutes: 30 });
+    assert.deepEqual((await reloaded.getState()).sidekicks[0].voiceConfig, {
+      sttLanguageMode: 'subset',
+      sttLanguages: ['es', 'en'],
+      conversationTtlMinutes: 30,
+    });
     await reloaded.dispose();
   });
 });

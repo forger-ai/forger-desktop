@@ -57,6 +57,7 @@ export interface MessageRow {
   wakeup_id?: string | null;
   source_locale?: string | null;
   content: string;
+  reasoning?: string | null;
   created_at: string;
 }
 

@@ -11,11 +11,13 @@ import {
   finalizeAgentRunActivity,
   normalizeActivityStatus,
   persistAgentRunActivity,
+  sanitizeAgentRunActivityText,
 } from '../chat/agent-run-activity';
 import { appendRunLog, getRunLogPath, toProviderProgressMessages } from '../chat/progress-errors';
 import { buildPersonalAgentInitialWakePrompt } from '../prompt-builder/personal-agents';
 import type { AgentStore } from './agent-store';
 import { isTerminalRunStatus } from './agent-store';
+import { isDuplicateFinalProgress, normalizeMessageText } from './agent-store-normalizers';
 import { createLlmProviderRunService } from '../llm-provider/run-service';
 import type { LlmProviderAuthProfileResolver } from '../llm-provider/types';
 
@@ -182,6 +184,22 @@ export class AgentConversationManager {
       throw new Error('personal_agent_conversation_id_required');
     }
     return await this.options.store.getConversation(conversationId);
+  }
+
+  public async cancelRun(runId: string): Promise<boolean> {
+    const run = await this.options.store.getRun(runId);
+    if (!run || isTerminalRunStatus(run.status)) return false;
+    const child = this.activeChildren.get(runId);
+    if (child && !child.killed) child.kill('SIGTERM');
+    const canceled = await this.options.store.updateRunStatus({ runId, status: 'canceled' });
+    this.activeChildren.delete(runId);
+    this.updateActivityForRun(canceled, 'canceled');
+    this.emit({
+      type: 'run.canceled',
+      conversation: await this.requireUpdatedConversation(run.conversationId),
+      run: canceled,
+    });
+    return true;
   }
 
   public async sendMessage(input: PersonalAgentMessageSendInput): Promise<PersonalAgentConversation> {
@@ -462,6 +480,7 @@ export class AgentConversationManager {
       ...sharedRoots,
     ];
     const progressWrites: Array<Promise<void>> = [];
+    const visibleActivityParts: string[] = [];
     const result = await this.runPersonalAgent({
       agent,
       conversation: conversationForRun,
@@ -473,14 +492,27 @@ export class AgentConversationManager {
       trustedRoots,
       mcpContext: context,
       onProgress: (message, progressOptions) => {
-        progressWrites.push(this.recordProgress(run.id, message, {
+        const visibleActivity = typeof message === 'string'
+          ? sanitizeAgentRunActivityText(message)
+          : '';
+        if (!visibleActivity) return;
+        visibleActivityParts.push(visibleActivity);
+        progressWrites.push(this.recordProgress(run.id, visibleActivity, {
           includeActivity: progressOptions?.includeActivity !== false,
         }));
       },
     });
     await Promise.all(progressWrites);
+    const latestRun = await this.options.store.getRun(run.id);
+    if (latestRun?.status === 'canceled') return;
     const assistantText = result.assistantText || 'Done.';
     await this.options.store.deleteDuplicateRunProgress({ runId: run.id, finalContent: assistantText });
+    const normalizedFinal = normalizeMessageText(assistantText);
+    // The persisted `reasoning` field is a user-visible activity summary. It
+    // contains sanitized progress receipts, never hidden chain-of-thought.
+    const reasoning = visibleActivityParts
+      .filter((part) => !isDuplicateFinalProgress(normalizedFinal, part))
+      .join('\n\n');
     const assistantMessage = await this.options.store.addMessage({
       agentId: conversation.agentId,
       conversationId: conversation.id,
@@ -488,6 +520,7 @@ export class AgentConversationManager {
       role: 'assistant',
       source: conversation.origin === 'sidekick' ? 'sidekick' : undefined,
       content: assistantText,
+      ...(reasoning ? { reasoning } : {}),
     });
     const completed = await this.options.store.updateRunStatus({ runId, status: 'completed' });
     const updated = await this.requireUpdatedConversation(conversationId);
@@ -555,7 +588,7 @@ export class AgentConversationManager {
       : '- No agent memories have been saved yet.';
     const bootstrap = buildPersonalAgentInitialWakePrompt({ agent, memoryRegister });
     const transcript = conversation.messages
-      .filter((message) => message.role !== 'system')
+      .filter((message) => message.role !== 'system' && message.kind !== 'spoken')
       .map((message) => renderMessageForPrompt(agent, message))
       .join('\n\n');
     const currentMessage = conversation.messages.find((message) => message.runId === run.id && message.role === 'user');
@@ -564,9 +597,17 @@ export class AgentConversationManager {
       `- This request came from Sidekick ${context.sidekick.sidekickId}.`,
       `- Respond in the language and regional style represented by BCP-47 locale ${context.sidekick.locale}.`,
       '- Keep the response brief, natural, and suitable for spoken delivery.',
-      '- Return only text that should be spoken.',
-      '- Do not call or invoke TTS, audio playback, or a Sidekick audio MCP/tool. Desktop synthesizes and cancels playback.',
+      '- Finish exactly once with respond_and_end, or use respond_and_wait only when a spoken follow-up is required.',
+      '- The text argument is the exact text Desktop will speak. Do not repeat it as an additional final answer.',
+      '- Do not call TTS or audio playback tools. respond_and_* only declares text and mode; Desktop synthesizes, plays, and cancels audio.',
       '',
+    ] : [];
+    const sidekickFinalReminder = context.sidekick ? [
+      '',
+      'Mandatory Sidekick final action:',
+      '- Call exactly one response tool. Do not finish with plain assistant text.',
+      '- Use respond_and_wait when the spoken text asks a question or needs the person to answer; otherwise use respond_and_end.',
+      '- Plain assistant text is only a compatibility fallback: a final question mark waits for one reply; other text closes the session.',
     ] : [];
     return [
       bootstrap,
@@ -577,6 +618,7 @@ export class AgentConversationManager {
       '',
       'Current user message:',
       currentMessage ? renderMessageForPrompt(agent, currentMessage) : '',
+      ...sidekickFinalReminder,
     ].join('\n');
   }
 

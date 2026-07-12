@@ -66,6 +66,8 @@ const createHarness = ({ buffered = false, overrides = {}, managerOptions = {} }
     conversations: [],
     messages: [],
     speech: [],
+    listeningCues: [],
+    spokenMessages: [],
     events: [],
     unsubscribes: 0,
   };
@@ -104,10 +106,12 @@ const createHarness = ({ buffered = false, overrides = {}, managerOptions = {} }
       calls.conversations.push(input);
       return { conversationId: input.existingConversationId ?? `conversation-${++conversationNumber}` };
     },
-    sendMessageAndWaitForFinal: async (input) => {
+    sendMessageAndWaitForOutcome: async (input) => {
       calls.messages.push(input);
-      return 'La luz quedó encendida.';
+      return { mode: 'end', text: 'La luz quedó encendida.' };
     },
+    playListeningCue: async (input) => { calls.listeningCues.push(input); },
+    recordSpokenMessage: async (input) => { calls.spokenMessages.push(input); },
     sendScreen: async (input) => {
       calls.screens.push(input);
     },
@@ -183,6 +187,7 @@ test('BDD: a wake word completes listening, STT, agent, transcript and TTS witho
   assert.equal(harness.calls.sttAppends.length, 2);
   assert.equal(harness.calls.messages[0].content, 'enciende la luz');
   assert.equal(harness.calls.speech[0].text, 'La luz quedó encendida.');
+  assert.equal(harness.calls.spokenMessages[0].text, 'La luz quedó encendida.');
   assert.equal(harness.calls.microphoneStarts.length, 1);
   assert.equal(harness.calls.microphoneStops[0].reason, 'complete');
   assert.equal(harness.manager.getActiveSession('sidekick-1'), null);
@@ -429,7 +434,7 @@ test('BDD: firmware playback interruption terminates without error and the follo
 test('BDD: an agent that exceeds the session deadline is aborted and never reaches TTS', async () => {
   const harness = createHarness({
     overrides: {
-      sendMessageAndWaitForFinal: async (input) => {
+      sendMessageAndWaitForOutcome: async (input) => {
         harness.calls.messages.push(input);
         return await new Promise(() => undefined);
       },
@@ -449,6 +454,120 @@ test('BDD: an agent that exceeds the session deadline is aborted and never reach
   assert.equal(harness.calls.speech.length, 0);
   assert.equal(harness.calls.screens.at(-1).screen, 'idle');
   await harness.manager.dispose();
+});
+
+test('BDD: respond_and_wait speaks, cues, captures a follow-up, and keeps the same conversation', async () => {
+  let turn = 0;
+  const harness = createHarness({
+    overrides: {
+      sendMessageAndWaitForOutcome: async (input) => {
+        harness.calls.messages.push(input);
+        turn += 1;
+        return turn === 1
+          ? { mode: 'wait', text: 'Claro, ¿de qué habitación?', runSettled: Promise.resolve() }
+          : { mode: 'end', text: 'Listo, encendí la luz del living.' };
+      },
+      createRealtimeSttSession: async () => {
+        const capture = turn;
+        return {
+          appendPcm: async (pcm) => harness.calls.sttAppends.push(Uint8Array.from(pcm)),
+          finish: async () => capture === 0 ? 'enciende la luz' : 'del living',
+          cancel: async () => { harness.calls.sttCancels += 1; },
+        };
+      },
+    },
+  });
+  const completion = harness.manager.triggerWake({ sidekickId: 'sidekick-1' });
+  await eventually(() => harness.calls.microphoneStarts.length === 1);
+  harness.emitPcm();
+  harness.clock.advance(500);
+  await eventually(() => harness.calls.microphoneStarts.length === 2);
+  harness.emitPcm();
+  harness.clock.advance(500);
+  const result = await completion;
+
+  assert.equal(result.status, 'completed');
+  assert.deepEqual(harness.calls.messages.map((entry) => entry.conversationId), ['conversation-1', 'conversation-1']);
+  assert.deepEqual(harness.calls.messages.map((entry) => entry.content), ['enciende la luz', 'del living']);
+  assert.equal(harness.calls.listeningCues.length, 1);
+  assert.deepEqual(harness.calls.spokenMessages.map((entry) => entry.text), [
+    'Claro, ¿de qué habitación?',
+    'Listo, encendí la luz del living.',
+  ]);
+  await harness.manager.dispose();
+});
+
+test('BDD: spoken receipt waits for the agent run to settle and preserves the originating run id', async () => {
+  let settleRun;
+  const runSettled = new Promise((resolve) => { settleRun = resolve; });
+  const harness = createHarness({
+    overrides: {
+      sendMessageAndWaitForOutcome: async (input) => {
+        harness.calls.messages.push(input);
+        return { mode: 'end', text: 'Respuesta por tool.', runId: 'run-tool-1', runSettled };
+      },
+    },
+  });
+  const completion = harness.manager.triggerWake({ sidekickId: 'sidekick-1' });
+  await eventually(() => harness.calls.microphoneStarts.length === 1);
+  harness.emitPcm();
+  harness.clock.advance(500);
+  await eventually(() => harness.calls.speech.length === 1);
+  assert.equal(harness.calls.spokenMessages.length, 0);
+  settleRun();
+  const result = await completion;
+  assert.equal(result.status, 'completed');
+  assert.deepEqual(harness.calls.spokenMessages, [{
+    sidekickId: 'sidekick-1',
+    conversationId: 'conversation-1',
+    runId: 'run-tool-1',
+    text: 'Respuesta por tool.',
+  }]);
+  await harness.manager.dispose();
+});
+
+test('BDD: follow-up silence and turn cap end gracefully without another agent call', async () => {
+  const silence = createHarness({
+    overrides: {
+      sendMessageAndWaitForOutcome: async (input) => {
+        silence.calls.messages.push(input);
+        return { mode: 'wait', text: 'Te escucho.', runSettled: Promise.resolve() };
+      },
+    },
+  });
+  const silenceCompletion = silence.manager.triggerWake({ sidekickId: 'sidekick-1' });
+  await eventually(() => silence.calls.microphoneStarts.length === 1);
+  silence.emitPcm();
+  silence.clock.advance(500);
+  await eventually(() => silence.calls.microphoneStarts.length === 2);
+  silence.clock.advance(10_000);
+  const silenceResult = await silenceCompletion;
+  assert.equal(silenceResult.status, 'completed');
+  assert.equal(silenceResult.technicalCode, 'sidekick_voice_follow_up_silence');
+  assert.equal(silence.calls.messages.length, 1);
+  await silence.manager.dispose();
+
+  const capped = createHarness({
+    managerOptions: { maxFollowUpTurns: 1 },
+    overrides: {
+      sendMessageAndWaitForOutcome: async (input) => {
+        capped.calls.messages.push(input);
+        return { mode: 'wait', text: `Respuesta ${capped.calls.messages.length}.`, runSettled: Promise.resolve() };
+      },
+    },
+  });
+  const capCompletion = capped.manager.triggerWake({ sidekickId: 'sidekick-1' });
+  await eventually(() => capped.calls.microphoneStarts.length === 1);
+  capped.emitPcm();
+  capped.clock.advance(500);
+  await eventually(() => capped.calls.microphoneStarts.length === 2);
+  capped.emitPcm();
+  capped.clock.advance(500);
+  const capResult = await capCompletion;
+  assert.equal(capResult.status, 'completed');
+  assert.equal(capResult.technicalCode, 'sidekick_voice_follow_up_cap');
+  assert.equal(capped.calls.messages.length, 2);
+  await capped.manager.dispose();
 });
 
 test('BDD: STT failures show an error state and always recover the device to idle', async () => {

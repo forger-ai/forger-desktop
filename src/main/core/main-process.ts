@@ -167,7 +167,6 @@ const appFolderGrantSecret = randomBytes(32).toString('base64url');
 const useCustomWindowFrame = process.platform === 'win32';
 const getWindowState = createWindowStateReader(useCustomWindowFrame);
 const registerWindowStateEvents = createWindowStateEventRegistrar(getWindowState);
-
 const RUNTIME_PLATFORM_ALIASES = new Set(['darwin_arm64', 'darwin_x64', 'linux_x64', 'win32_x64']);
 
 let mainWindow: BrowserWindow | null = null;
@@ -609,6 +608,7 @@ const getPersonalAgentConversationManager = (): AgentConversationManager => {
           personalAgentConversationId: context.conversationId,
           personalAgentPeerThreadId: context.peerThreadId,
           personalAgentCallStackIds: context.callStackAgentIds,
+          sidekick: context.sidekick ? { sidekickId: context.sidekick.sidekickId } : undefined,
           appIds: agent.appIds,
           officialToolActionIds: agent.toolIds,
           forgerToolActionIds: agent.toolIds,
@@ -1588,6 +1588,7 @@ registerMainLifecycle({
   getPersonalAgentHeartbeat, handleCloudSocialEvent, hasInstalledCodexConversation, ipcMain, listAppPrompts, listCatalogFromBackend, loadAgentToolSettings,
   loadCloudSyncSettings, loadRegistry, loadSettings, llmRunsStore, mapBackendCategory, formatProcessOutputForInstallLog, isSecretsVaultUnavailableError, normalizeManifestAppSecrets, openInstalledApp, startLocalNetworkShare, stopLocalNetworkShare,
   startRemoteNetworkShare, stopRemoteNetworkShare, stopRemoteNetworkShareSession, startRemoteAgentSession, stopRemoteAgentSession, stopRemoteAgentSessionSession, openOrFocusAppWindow, registerForgerCloudOAuth,
+  resolveSidekickVoiceOutcome: (input) => getSidekickVoiceRuntime().resolveAgentToolOutcome(input),
   registerIpcHandlers, renderManifestAgentPrompt, resolveClaudeCli, resolveAntigravityCliPath, resolveCodexCliPath, resolveInstalledAgents, resolveInstalledManifest,
   resolveAppFolderGrant: verifyAppFolderGrant, resolveInstalledPromptTemplates, restoreAppPrompt, restartInstalledApp, runningApps, serializeErrorForInstallLog, shell,
   splitManifestCommand, startDevCatalogService, startSidekickIfPaired: async () => {

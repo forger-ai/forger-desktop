@@ -22,7 +22,14 @@ class FakeSegment:
 
 
 class FakeModel:
+    def __init__(self, responses=None):
+        self.calls = []
+        self.responses = list(responses or [])
+
     def transcribe(self, _path: str, **_kwargs):
+        self.calls.append(_kwargs)
+        if self.responses:
+            return self.responses.pop(0)
         return [FakeSegment(" private "), FakeSegment(" transcript ")], SimpleNamespace(
             duration=1.25,
             language="es",
@@ -76,6 +83,58 @@ class SpeechToTextServerPersistenceTest(unittest.TestCase):
         persisted = json.loads((self.root / "metadata" / "processed-files.json").read_text())
         self.assertEqual(persisted[0]["path"], str(self.audio_path.resolve()))
         self.assertEqual(persisted[0]["textPreview"], "private transcript")
+
+    def test_explicit_language_takes_precedence_over_language_subset(self):
+        response = self.client.post(
+            "/v1/transcribe",
+            headers=self.headers,
+            json={"path": str(self.audio_path), "language": "fr", "languages": ["es", "en"]},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.state.model.calls, [{"task": "transcribe", "language": "fr"}])
+
+    def test_subset_retries_with_highest_allowed_language_when_free_detection_is_outside(self):
+        self.state.model = FakeModel([
+            (
+                [FakeSegment(" first ")],
+                SimpleNamespace(
+                    duration=1.0,
+                    language="fr",
+                    all_language_probs=[("fr", 0.7), ("en", 0.2), ("es", 0.1)],
+                ),
+            ),
+            ([FakeSegment(" english ")], SimpleNamespace(duration=1.0, language="en")),
+        ])
+
+        response = self.client.post(
+            "/v1/transcribe",
+            headers=self.headers,
+            json={"path": str(self.audio_path), "languages": ["ES", "en", "en", "invalid"]},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["text"], "english")
+        self.assertEqual(self.state.model.calls, [
+            {"task": "transcribe"},
+            {"task": "transcribe", "language": "en"},
+        ])
+
+    def test_subset_without_probabilities_retries_with_first_allowed_language(self):
+        self.state.model = FakeModel([
+            ([FakeSegment(" first ")], SimpleNamespace(duration=1.0, language="fr")),
+            ([FakeSegment(" spanish ")], SimpleNamespace(duration=1.0, language="es")),
+        ])
+
+        response = self.client.post(
+            "/v1/transcribe",
+            headers=self.headers,
+            json={"path": str(self.audio_path), "languages": ["es", "en"]},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["text"], "spanish")
+        self.assertEqual(self.state.model.calls[-1], {"task": "transcribe", "language": "es"})
 
 
 if __name__ == "__main__":

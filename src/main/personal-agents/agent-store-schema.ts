@@ -59,6 +59,7 @@ export const PERSONAL_AGENT_SCHEMA_SQL = `
     wakeup_id TEXT,
     source_locale TEXT,
     content TEXT NOT NULL,
+    reasoning TEXT,
     created_at TEXT NOT NULL
   );
   CREATE INDEX IF NOT EXISTS idx_personal_agent_messages_conversation ON personal_agent_messages(conversation_id, created_at);

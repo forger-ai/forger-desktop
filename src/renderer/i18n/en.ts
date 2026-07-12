@@ -1,8 +1,7 @@
 import type { AppCategory } from '@shared/types';
 import { enBackgroundTasks } from './locales/enBackgroundTasks';
 import { enSections } from './locales/enSections';
-export const en = {
-  locale: 'en',
+export const en = { locale: 'en',
   appName: 'Forger',
   appTagline: 'Local apps you can open and adapt by chatting.',
   nav: {
@@ -312,7 +311,8 @@ export const en = {
       screenSuccess: 'The Sidekick screen was updated.', screenError: 'Could not update the Sidekick screen.', voiceTitle: 'Voice',
       voiceSubtitle: 'Use Forger’s local voice models to make this Sidekick speak.', agentTitle: 'Personal agent', agentSubtitle: 'Choose who listens and answers when this Sidekick wakes up.', agentLabel: 'Agent who answers', agentNone: 'Create a personal agent before using voice conversations.', agentAutomatic: 'Selected automatically because this is your only personal agent.', agentRequired: 'Choose a personal agent', agentSaved: 'This Sidekick now answers with the selected agent.', agentError: 'Could not save the personal agent for this Sidekick.',
       voiceSettingsTitle: 'Voice conversation', voiceSettingsSubtitle: 'Choose the voice and how long this Sidekick keeps a wake conversation active.', voiceLocaleLabel: 'Conversation language', voiceLocaleAutomatic: 'Automatic', voiceLocaleDerived: 'The language follows the selected voice.', voiceTtlLabel: 'Keep conversation active', voiceTtlOption: (minutes: number) => minutes < 60 ? `${minutes} minutes` : minutes === 60 ? '1 hour' : minutes < 1440 ? `${minutes / 60} hours` : '24 hours', voiceSettingsSave: 'Save voice settings', voiceSettingsSaved: 'Voice settings saved.', voiceSettingsError: 'Could not save the voice settings.',
-      conversationsTitle: 'Sidekick conversations', conversationsSubtitle: 'The wake audio is processed temporarily and is not saved. Only the private conversation for this Sidekick remains visible here.', conversationsLoading: 'Loading conversations...', conversationsEmpty: 'No wake conversations yet.', conversationOpen: 'Open', conversationExclusive: 'Exclusive to this Sidekick', conversationReadOnly: 'Read-only', conversationNoMessages: 'This conversation has no visible messages.', conversationPerson: 'You', conversationAgent: 'Agent', conversationsError: 'Could not load Sidekick conversations.',
+      sttLanguageLabel: 'Dictation language', sttLanguageVoice: 'Match the selected voice', sttLanguageAuto: 'Automatic (detect language)', sttLanguageSpanglish: 'Español + English (spanglish)', sttLanguageHelper: 'How what you say to the Sidekick is recognized.',
+      conversationsTitle: 'Sidekick conversations', conversationsSubtitle: 'The wake audio is processed temporarily and is not saved. Only the private conversation for this Sidekick remains visible here.', conversationsLoading: 'Loading conversations...', conversationsEmpty: 'No wake conversations yet.', conversationOpen: 'Open', conversationExclusive: 'Exclusive to this Sidekick', conversationReadOnly: 'Read-only', conversationNoMessages: 'This conversation has no visible messages.', conversationPerson: 'You', conversationAgent: 'Agent', conversationSpoken: 'Said', conversationReasoning: 'Activity', conversationsError: 'Could not load Sidekick conversations.',
       voiceTextLabel: 'What should it say?', voiceDefaultText: 'Hello! I am your Forger Sidekick.', voiceModelLabel: 'Model', voiceVoiceLabel: 'Voice', voiceSpeak: 'Speak',
       voiceLoading: 'Loading local voices…', voiceOffline: 'Connect this Sidekick over Wi-Fi to use its voice.',
       voiceUnavailable: 'No enabled local voice is available yet. Enable one in Voice settings.',

@@ -2,7 +2,6 @@ import type { App, BrowserWindow, IpcMain, Shell } from 'electron';
 import type fs from 'node:fs/promises';
 import type { Server } from 'node:http';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
-
 import { appendDesktopLog } from '../desktop-logger';
 import { reportSanitizerRoots } from '../conversation-diagnostics';
 import type { StoredForgerAccount } from '../forger-account-store';
@@ -55,7 +54,6 @@ import type {
   TaskEventLike,
   ToolAccess,
 } from './main-lifecycle-types';
-
 import type {
   AppManifest,
   InstalledAppRecord,
@@ -74,8 +72,8 @@ import { createPublishedAppInfoUpdater } from './main-lifecycle-mcp-handlers';
 import { registerGracefulShutdownHandlers } from './main-lifecycle-shutdown';
 import { isRemoteAgentSessionCloseEvent, isRemoteTunnelCloseEvent } from './remote-session-events';
 import type { SidekickService } from '../sidekick-service';
+import type { SidekickVoiceOutcomeInput } from '../sidekick-voice-runtime';
 import { createSidekickRuntimeBridgeBindings } from '../sidekick-runtime-bridge';
-
 export interface MainLifecycleDeps {
   AGENT_TOOL_DEFINITIONS: AgentToolDefinition[];
   AppAgentConversationManager: ServiceConstructor<LifecycleService>;
@@ -187,6 +185,7 @@ export interface MainLifecycleDeps {
   getSpeechToTextService: () => NonNullable<MainLifecycleState['speechToTextService']>;
   getTextToSpeechService: () => NonNullable<MainLifecycleState['textToSpeechService']>;
   getSidekickService: () => SidekickService;
+  resolveSidekickVoiceOutcome: (input: SidekickVoiceOutcomeInput) => { accepted: boolean };
   getWakeWordService: () => NonNullable<MainLifecycleState['wakeWordService']>;
   getLiveVoiceInputService: () => {
     createSession: AsyncFn;
@@ -730,6 +729,7 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
     getToolDefinitions: () => AGENT_TOOL_DEFINITIONS,
     getConnectionToolDefinitions: async () => await connectionToolDefinitionsFromState(getConnectionsService),
     getToolSettings: () => state.agentToolSettings,
+    resolveSidekickVoiceOutcome: deps.resolveSidekickVoiceOutcome,
     appendInstallLog,
     requestPermission: async (runId: string, request: PermissionRequest) => {
       const taskDecision = await (state.appAgentTaskManager?.requestPermission(runId, request) ?? Promise.resolve(null));

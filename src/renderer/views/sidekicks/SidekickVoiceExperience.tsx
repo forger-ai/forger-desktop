@@ -1,7 +1,12 @@
 import ChatRounded from '@mui/icons-material/ChatRounded';
+import ExpandMoreRounded from '@mui/icons-material/ExpandMoreRounded';
 import LockRounded from '@mui/icons-material/LockRounded';
 import SaveRounded from '@mui/icons-material/SaveRounded';
+import VolumeUpRounded from '@mui/icons-material/VolumeUpRounded';
 import {
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
   Alert,
   Box,
   Button,
@@ -32,6 +37,32 @@ type SidekickCopy = AppDictionary['sections']['sidekicks'];
 
 const TTL_OPTIONS = [15, 30, 60, 180, 360, 720, 1440] as const;
 
+const FIXED_STT_LANGUAGES = ['es', 'en', 'fr', 'it', 'pt', 'ja', 'zh', 'hi'] as const;
+
+const sttLanguageDisplayName = (code: string): string => {
+  try {
+    return new Intl.DisplayNames(undefined, { type: 'language' }).of(code) ?? code;
+  } catch {
+    return code;
+  }
+};
+
+const encodeSttSelection = (config: Pick<SidekickVoiceConfig, 'sttLanguageMode' | 'sttLanguages'>): string => {
+  if (config.sttLanguageMode === 'auto') return 'auto';
+  if (config.sttLanguageMode === 'fixed' && config.sttLanguages?.[0]) return `fixed:${config.sttLanguages[0]}`;
+  if (config.sttLanguageMode === 'voice') return 'voice';
+  return 'subset';
+};
+
+const decodeSttSelection = (
+  selection: string,
+): Pick<SidekickVoiceConfig, 'sttLanguageMode' | 'sttLanguages'> => {
+  if (selection === 'auto') return { sttLanguageMode: 'auto' };
+  if (selection === 'subset') return { sttLanguageMode: 'subset', sttLanguages: ['es', 'en'] };
+  if (selection.startsWith('fixed:')) return { sttLanguageMode: 'fixed', sttLanguages: [selection.slice('fixed:'.length)] };
+  return { sttLanguageMode: 'voice' };
+};
+
 const formatDate = (value: string): string =>
   new Date(value).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
 
@@ -52,6 +83,7 @@ export function SidekickVoiceSettings({
   const [model, setModel] = useState(remote.model ?? '');
   const [voice, setVoice] = useState(remote.voice ?? '');
   const [conversationTtlMinutes, setConversationTtlMinutes] = useState(remote.conversationTtlMinutes);
+  const [sttSelection, setSttSelection] = useState(encodeSttSelection(remote));
   const models = ttsState?.models.filter((entry) => entry.installed) ?? [];
   const defaultModel = models.find((entry) => entry.id === ttsState?.config.defaultModel)?.id
     ?? models[0]?.id
@@ -85,15 +117,17 @@ export function SidekickVoiceSettings({
     ?? effectiveRemoteVoices.find((entry) => entry.id === effectiveRemoteVoice)?.locale
     ?? '';
 
-  const remoteKey = `${remote.model ?? ''}|${remote.voice ?? ''}|${remote.locale ?? ''}|${remote.conversationTtlMinutes}`;
+  const remoteSttSelection = encodeSttSelection(remote);
+  const remoteKey = `${remote.model ?? ''}|${remote.voice ?? ''}|${remote.locale ?? ''}|${remote.conversationTtlMinutes}|${remoteSttSelection}`;
   useEffect(() => {
     setModel(remote.model ?? '');
     setVoice(remote.voice ?? '');
     setConversationTtlMinutes(remote.conversationTtlMinutes);
+    setSttSelection(remoteSttSelection);
   }, [remoteKey, sidekick.sidekickId]);
 
-  const currentKey = `${selectedModel}|${selectedVoice}|${selectedLocale}|${conversationTtlMinutes}`;
-  const normalizedRemoteKey = `${effectiveRemoteModel}|${effectiveRemoteVoice}|${effectiveRemoteLocale}|${remote.conversationTtlMinutes}`;
+  const currentKey = `${selectedModel}|${selectedVoice}|${selectedLocale}|${conversationTtlMinutes}|${sttSelection}`;
+  const normalizedRemoteKey = `${effectiveRemoteModel}|${effectiveRemoteVoice}|${effectiveRemoteLocale}|${remote.conversationTtlMinutes}|${remoteSttSelection}`;
   const dirty = currentKey !== normalizedRemoteKey;
 
   return (
@@ -149,6 +183,23 @@ export function SidekickVoiceSettings({
           ))}
         </TextField>
       </Stack>
+      <TextField
+        select
+        fullWidth
+        size="small"
+        label={copy.sttLanguageLabel}
+        helperText={copy.sttLanguageHelper}
+        value={sttSelection}
+        onChange={(event) => setSttSelection(event.target.value)}
+        disabled={busy}
+      >
+        <MenuItem value="voice">{copy.sttLanguageVoice}</MenuItem>
+        <MenuItem value="subset">{copy.sttLanguageSpanglish}</MenuItem>
+        <MenuItem value="auto">{copy.sttLanguageAuto}</MenuItem>
+        {FIXED_STT_LANGUAGES.map((code) => (
+          <MenuItem key={code} value={`fixed:${code}`}>{sttLanguageDisplayName(code)}</MenuItem>
+        ))}
+      </TextField>
       {!ttsState?.installed ? <Alert severity="info">{copy.voiceUnavailable}</Alert> : null}
       <Button
         variant="contained"
@@ -159,6 +210,7 @@ export function SidekickVoiceSettings({
           model: selectedModel,
           voice: selectedVoice,
           locale: selectedLocale || undefined,
+          ...decodeSttSelection(sttSelection),
           conversationTtlMinutes,
         })}
       >
@@ -240,10 +292,41 @@ export function SidekickConversationDialog({
               ) : visibleMessages.map((message, index) => (
                 <Stack key={message.id} spacing={0.5}>
                   {index > 0 ? <Divider /> : null}
-                  <Typography variant="caption" color="text.secondary">
-                    {message.role === 'user' ? copy.conversationPerson : copy.conversationAgent} · {formatDate(message.createdAt)}
-                  </Typography>
-                  <MarkdownMessage content={message.content} />
+                  {message.kind === 'spoken' ? (
+                    <Paper
+                      variant="outlined"
+                      sx={{ p: 1.25, borderRadius: 2, borderStyle: 'dashed', bgcolor: 'action.hover' }}
+                    >
+                      <Stack direction="row" spacing={0.75} alignItems="center">
+                        <VolumeUpRounded fontSize="small" color="action" />
+                        <Typography variant="caption" color="text.secondary" fontWeight={700}>
+                          {copy.conversationSpoken} · {formatDate(message.createdAt)}
+                        </Typography>
+                      </Stack>
+                      <Typography variant="body2" sx={{ fontStyle: 'italic', mt: 0.5 }}>{message.content}</Typography>
+                    </Paper>
+                  ) : (
+                    <>
+                      <Typography variant="caption" color="text.secondary">
+                        {message.role === 'user' ? copy.conversationPerson : copy.conversationAgent} · {formatDate(message.createdAt)}
+                      </Typography>
+                      {message.reasoning ? (
+                        <Accordion
+                          disableGutters
+                          elevation={0}
+                          sx={{ '&:before': { display: 'none' }, bgcolor: 'transparent' }}
+                        >
+                          <AccordionSummary expandIcon={<ExpandMoreRounded fontSize="small" />} sx={{ minHeight: 0, px: 0.5, '& .MuiAccordionSummary-content': { my: 0.25 } }}>
+                            <Typography variant="caption" color="text.secondary">{copy.conversationReasoning}</Typography>
+                          </AccordionSummary>
+                          <AccordionDetails sx={{ px: 0.5, py: 0.5 }}>
+                            <MarkdownMessage content={message.reasoning} />
+                          </AccordionDetails>
+                        </Accordion>
+                      ) : null}
+                      <MarkdownMessage content={message.content} />
+                    </>
+                  )}
                 </Stack>
               ))}
             </Stack>

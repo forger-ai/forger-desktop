@@ -7,6 +7,7 @@ import {
   SidekickVoiceSessionManager,
   type SidekickDisconnectEvent,
   type SidekickPcmEvent,
+  type SidekickVoiceAgentOutcome,
   type SidekickVoiceSessionEvent,
   type SidekickWakeEvent,
 } from './sidekick-voice-session-manager';
@@ -29,6 +30,21 @@ interface SidekickVoiceRuntimeDeps {
   appendLog?: (event: string, payload?: Record<string, unknown>) => Promise<void>;
 }
 
+interface PendingVoiceOutcome {
+  sidekickId: string;
+  conversationId: string;
+  runId: string;
+  resolve: (outcome: { mode: 'end' | 'wait'; text: string }) => void;
+}
+
+export interface SidekickVoiceOutcomeInput {
+  sidekickId: string;
+  conversationId: string;
+  runId: string;
+  mode: 'end' | 'wait';
+  text: string;
+}
+
 export const selectSidekickPersonalAgentId = (
   configuredId: string | undefined,
   agents: readonly { id: string }[],
@@ -42,6 +58,27 @@ export const selectSidekickPersonalAgentId = (
   throw new Error('sidekick_voice_personal_agent_selection_required');
 };
 
+const LISTENING_CUE_SAMPLE_RATE = 16_000;
+
+/**
+ * Cue de "te escucho": 150 ms de silencio (settle del DAC/PA tras el arranque
+ * en frio del codec del dispositivo) + tono de 1.2 kHz de 120 ms con fades de
+ * 10 ms para evitar clicks.
+ */
+export const buildListeningCuePcm = (): Int16Array => {
+  const silence = Math.round(LISTENING_CUE_SAMPLE_RATE * 0.15);
+  const tone = Math.round(LISTENING_CUE_SAMPLE_RATE * 0.12);
+  const fade = Math.round(LISTENING_CUE_SAMPLE_RATE * 0.01);
+  const samples = new Int16Array(silence + tone);
+  for (let i = 0; i < tone; i += 1) {
+    let amplitude = 9_000;
+    if (i < fade) amplitude *= i / fade;
+    if (tone - i <= fade) amplitude *= (tone - i) / fade;
+    samples[silence + i] = Math.round(amplitude * Math.sin((2 * Math.PI * 1_200 * i) / LISTENING_CUE_SAMPLE_RATE));
+  }
+  return samples;
+};
+
 export class SidekickVoiceRuntime {
   private readonly wakeListeners = new Set<(event: SidekickWakeEvent) => void>();
   private readonly pcmListeners = new Set<(event: SidekickPcmEvent) => void>();
@@ -49,6 +86,7 @@ export class SidekickVoiceRuntime {
   private readonly microphonePreprocessors = new Map<string, SidekickMicrophonePreprocessor>();
   private readonly deviceStatuses = new Map<string, SidekickSummary['status']>();
   private readonly playbackStartedListeners = new Map<string, Set<() => void>>();
+  private readonly pendingOutcomes = new Map<string, PendingVoiceOutcome>();
   private readonly manager: SidekickVoiceSessionManager;
   private logWork: Promise<void> = Promise.resolve();
 
@@ -84,7 +122,11 @@ export class SidekickVoiceRuntime {
           mimeType: 'audio/wav',
           data: Uint8Array.from(wav).buffer,
           task: 'transcribe',
-          language: profile.locale.split('-')[0],
+          ...(profile.sttLanguages?.length === 1
+            ? { language: profile.sttLanguages[0] }
+            : profile.sttLanguages && profile.sttLanguages.length > 1
+              ? { languages: profile.sttLanguages }
+              : {}),
           ephemeral: true,
         });
         if (signal.aborted) throw signal.reason;
@@ -93,7 +135,9 @@ export class SidekickVoiceRuntime {
       },
       getConversationTtlMs: async (sidekickId) => (await this.resolveVoiceProfile(sidekickId)).conversationTtlMs,
       createOrReuseConversation: (input) => this.createOrReuseConversation(input),
-      sendMessageAndWaitForFinal: (input) => this.sendMessageAndWaitForFinal(input),
+      sendMessageAndWaitForOutcome: (input) => this.sendMessageAndWaitForOutcome(input),
+      playListeningCue: (input) => this.playListeningCue(input),
+      recordSpokenMessage: (input) => this.recordSpokenMessage(input),
       sendScreen: async ({ sidekickId, screen, transcript, response }) => {
         const service = this.deps.getSidekickService();
         const result = screen === 'idle'
@@ -119,6 +163,7 @@ export class SidekickVoiceRuntime {
   public async dispose(): Promise<void> {
     await this.manager.dispose();
     this.playbackStartedListeners.clear();
+    this.pendingOutcomes.clear();
     await this.logWork.catch(() => undefined);
   }
 
@@ -233,38 +278,76 @@ export class SidekickVoiceRuntime {
     return { conversationId: conversation.id };
   }
 
-  private async sendMessageAndWaitForFinal(input: {
+  /**
+   * Envia el transcript al agente y resuelve cuando hay un "outcome" hablable:
+   * o el agente llamo respond_and_end / respond_and_wait (via
+   * resolveAgentToolOutcome), o el run termino con texto plano (fallback =
+   * respond_and_end). `runSettled` queda pendiente hasta el cierre real del run.
+   */
+  private async sendMessageAndWaitForOutcome(input: {
     sidekickId: string;
     conversationId: string;
     content: string;
     signal: AbortSignal;
-  }): Promise<string> {
+  }): Promise<SidekickVoiceAgentOutcome> {
     const manager = this.deps.getPersonalAgentConversationManager();
-    return await new Promise<string>((resolve, reject) => {
-      let settled = false;
-      const settle = (callback: () => void): void => {
-        if (settled) return;
-        settled = true;
-        unsubscribe();
-        input.signal.removeEventListener('abort', onAbort);
+    let resolveRunSettled: () => void = () => undefined;
+    const runSettled = new Promise<void>((resolve) => {
+      resolveRunSettled = resolve;
+    });
+    return await new Promise<SidekickVoiceAgentOutcome>((resolve, reject) => {
+      let outcomeSettled = false;
+      let runFinished = false;
+      let expectedRunId: string | undefined;
+      let bufferedTerminalEvent: Parameters<Parameters<typeof manager.onConversationEvent>[0]>[0] | undefined;
+      const settleOutcome = (callback: () => void): void => {
+        if (outcomeSettled) return;
+        outcomeSettled = true;
+        if (expectedRunId) this.pendingOutcomes.delete(expectedRunId);
         callback();
       };
-      const onAbort = (): void => settle(() => reject(input.signal.reason ?? new Error('sidekick_voice_cancelled')));
-      const unsubscribe = manager.onConversationEvent((event) => {
+      const finishRun = (): void => {
+        if (runFinished) return;
+        runFinished = true;
+        unsubscribe();
+        input.signal.removeEventListener('abort', onAbort);
+        resolveRunSettled();
+      };
+      const onAbort = (): void => {
+        if (expectedRunId) void manager.cancelRun(expectedRunId).catch(() => undefined);
+        finishRun();
+        settleOutcome(() => reject(input.signal.reason ?? new Error('sidekick_voice_cancelled')));
+      };
+      const handleTerminalEvent = (event: Parameters<Parameters<typeof manager.onConversationEvent>[0]>[0]): void => {
         if (event.conversation.id !== input.conversationId) return;
+        if (!expectedRunId) {
+          if (event.type === 'run.completed' || event.type === 'run.failed' || event.type === 'run.canceled') {
+            bufferedTerminalEvent = event;
+          }
+          return;
+        }
+        if (event.run?.id !== expectedRunId) return;
         if (event.type === 'run.completed') {
+          finishRun();
           const assistant = [...event.conversation.messages]
             .reverse()
-            .find((message) => message.role === 'assistant' && (!event.run?.id || message.runId === event.run.id));
-          settle(() => resolve(assistant?.content ?? ''));
+            .find((message) => message.role === 'assistant' && message.kind === 'message' && message.runId === expectedRunId);
+          const text = assistant?.content?.trim() ?? '';
+          // Some providers can complete with plain text even when the response
+          // tools are available. A final question is an unambiguous request for
+          // a spoken reply, so preserve the multi-turn experience as fallback.
+          const mode = text.endsWith('?') ? 'wait' as const : 'end' as const;
+          settleOutcome(() => resolve({ mode, text, runId: expectedRunId, runSettled }));
         } else if (event.type === 'run.failed' || event.type === 'run.canceled') {
-          settle(() => reject(new Error(event.run?.error ?? `sidekick_voice_agent_${event.type}`)));
+          finishRun();
+          settleOutcome(() => reject(new Error(event.run?.error ?? `sidekick_voice_agent_${event.type}`)));
         }
-      });
+      };
+      const unsubscribe = manager.onConversationEvent(handleTerminalEvent);
       input.signal.addEventListener('abort', onAbort, { once: true });
       void this.resolveVoiceProfile(input.sidekickId).then(async (profile) => {
         if (input.signal.aborted) throw input.signal.reason ?? new Error('sidekick_voice_cancelled');
-        return await manager.sendSidekickMessage({
+        const conversation = await manager.sendSidekickMessage({
           conversationId: input.conversationId,
           sidekickId: input.sidekickId,
           content: input.content,
@@ -272,9 +355,68 @@ export class SidekickVoiceRuntime {
           model: profile.model,
           voice: profile.voice,
         });
+        expectedRunId = conversation.activeRun?.id;
+        if (!expectedRunId) throw new Error('sidekick_voice_agent_run_id_missing');
+        if (input.signal.aborted) {
+          await manager.cancelRun(expectedRunId).catch(() => undefined);
+          throw input.signal.reason ?? new Error('sidekick_voice_cancelled');
+        }
+        this.pendingOutcomes.set(expectedRunId, {
+          sidekickId: input.sidekickId,
+          conversationId: input.conversationId,
+          runId: expectedRunId,
+          resolve: (outcome) => settleOutcome(() => resolve({ ...outcome, runId: expectedRunId, runSettled })),
+        });
+        if (bufferedTerminalEvent) handleTerminalEvent(bufferedTerminalEvent);
       }).catch((error: unknown) => {
-        settle(() => reject(error));
+        finishRun();
+        settleOutcome(() => reject(error));
       });
+    });
+  }
+
+  /**
+   * Llamado por el MCP server cuando el agente invoca respond_and_end o
+   * respond_and_wait. Acepta solo si hay un turno de voz esperando outcome
+   * para esa conversacion.
+   */
+  public resolveAgentToolOutcome(input: SidekickVoiceOutcomeInput): { accepted: boolean } {
+    const pending = this.pendingOutcomes.get(input.runId);
+    if (
+      !pending || pending.sidekickId !== input.sidekickId ||
+      pending.conversationId !== input.conversationId || pending.runId !== input.runId
+    ) return { accepted: false };
+    this.pendingOutcomes.delete(input.runId);
+    pending.resolve({ mode: input.mode, text: input.text });
+    void this.deps.appendLog?.('sidekick:voice_tool_outcome', {
+      sidekickId: input.sidekickId,
+      conversationId: input.conversationId,
+      mode: input.mode,
+      textLength: input.text.length,
+    });
+    return { accepted: true };
+  }
+
+  private async playListeningCue(input: { sidekickId: string; sessionId: string; signal: AbortSignal }): Promise<void> {
+    if (input.signal.aborted) throw input.signal.reason;
+    const result = await this.deps.getSidekickService().playSpeakerPcm(
+      { sidekickId: input.sidekickId, samples: buildListeningCuePcm() },
+      { signal: input.signal },
+    );
+    if (!result.success) throw new Error(result.technicalCode ?? 'sidekick_voice_listening_cue_failed');
+  }
+
+  private async recordSpokenMessage(input: { sidekickId: string; conversationId: string; runId?: string; text: string }): Promise<void> {
+    const conversation = await this.deps.getPersonalAgentConversationManager().getConversation(input.conversationId);
+    if (!conversation) return;
+    await this.deps.getPersonalAgentStore().addMessage({
+      agentId: conversation.agentId,
+      conversationId: input.conversationId,
+      runId: input.runId,
+      role: 'assistant',
+      kind: 'spoken',
+      source: 'sidekick',
+      content: input.text,
     });
   }
 

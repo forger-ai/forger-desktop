@@ -1,9 +1,15 @@
 import {
   SIDEKICK_DEFAULT_CONVERSATION_TTL_MINUTES,
+  SIDEKICK_DEFAULT_STT_LANGUAGE_SUBSET,
   SIDEKICK_MAX_CONVERSATION_TTL_MINUTES,
   SIDEKICK_MIN_CONVERSATION_TTL_MINUTES,
 } from '../shared/types';
-import type { SidekickSummary, TextToSpeechState, TextToSpeechVoice } from '../shared/types';
+import type {
+  SidekickSummary,
+  SidekickVoiceConfig,
+  TextToSpeechState,
+  TextToSpeechVoice,
+} from '../shared/types';
 
 const VOICE_LANGUAGE_LOCALES: Record<string, string> = {
   english: 'en',
@@ -35,8 +41,42 @@ export interface ResolvedSidekickVoiceProfile {
   model: string;
   voice: string;
   locale: string;
+  /**
+   * Idiomas permitidos para el STT (ISO-639-1). `undefined` = autodeteccion
+   * libre; un elemento = idioma fijo; varios = subset restringido.
+   */
+  sttLanguages?: string[];
   conversationTtlMs: number;
 }
+
+const resolveSttLanguages = (
+  voiceConfig: Pick<SidekickVoiceConfig, 'sttLanguageMode' | 'sttLanguages'>,
+  locale: string,
+): string[] | undefined => {
+  const configured = [...new Set(
+    (voiceConfig.sttLanguages ?? [])
+      .map((code) => code.trim().toLowerCase())
+      .filter((code) => /^[a-z]{2}$/.test(code)),
+  )];
+  switch (voiceConfig.sttLanguageMode) {
+    case 'voice': {
+      const voiceLanguage = locale.split('-')[0].toLowerCase();
+      return /^[a-z]{2}$/.test(voiceLanguage) ? [voiceLanguage] : undefined;
+    }
+    case 'auto':
+      return undefined;
+    case 'fixed':
+      if (configured.length >= 1) return [configured[0]];
+      break;
+    case 'subset':
+      if (configured.length >= 2) return configured;
+      if (configured.length === 0) return [...SIDEKICK_DEFAULT_STT_LANGUAGE_SUBSET];
+      break;
+    default:
+      return [...SIDEKICK_DEFAULT_STT_LANGUAGE_SUBSET];
+  }
+  return [...SIDEKICK_DEFAULT_STT_LANGUAGE_SUBSET];
+};
 
 export const resolveSidekickVoiceProfile = (
   sidekick: Pick<SidekickSummary, 'voiceConfig'>,
@@ -63,6 +103,7 @@ export const resolveSidekickVoiceProfile = (
     model: selected.model,
     voice: selected.id,
     locale,
+    sttLanguages: resolveSttLanguages(sidekick.voiceConfig, locale),
     conversationTtlMs: ttlMinutes * 60_000,
   };
 };

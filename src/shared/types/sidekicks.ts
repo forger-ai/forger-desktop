@@ -83,11 +83,23 @@ export const SIDEKICK_DEFAULT_CONVERSATION_TTL_MINUTES = 30;
 export const SIDEKICK_MIN_CONVERSATION_TTL_MINUTES = 1;
 export const SIDEKICK_MAX_CONVERSATION_TTL_MINUTES = 24 * 60;
 
+export type SidekickSttLanguageMode = 'voice' | 'auto' | 'fixed' | 'subset';
+
+export const SIDEKICK_DEFAULT_STT_LANGUAGE_SUBSET = ['es', 'en'] as const;
+
 export interface SidekickVoiceConfig {
   model?: string;
   voice?: string;
   /** BCP-47 locale derived from the selected voice metadata. */
   locale?: string;
+  /**
+   * How dictation (STT) language is chosen: 'subset' restricts detection to
+   * sttLanguages and defaults to Spanish + English, 'voice' explicitly follows
+   * the TTS voice locale, 'auto' detects freely, and 'fixed' pins one language.
+   */
+  sttLanguageMode?: SidekickSttLanguageMode;
+  /** ISO-639-1 codes; 1 entry for 'fixed', 2+ for 'subset'. */
+  sttLanguages?: string[];
   conversationTtlMinutes: number;
 }
 

@@ -416,6 +416,8 @@ export class SidekickService {
       ...(model ? { model } : {}),
       ...(voice ? { voice } : {}),
       ...(locale ? { locale } : {}),
+      ...(input.config?.sttLanguageMode ? { sttLanguageMode: input.config.sttLanguageMode } : {}),
+      ...(Array.isArray(input.config?.sttLanguages) ? { sttLanguages: input.config.sttLanguages } : {}),
       conversationTtlMinutes: ttl,
     });
     record.updatedAt = new Date().toISOString();

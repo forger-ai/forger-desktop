@@ -107,6 +107,89 @@ test('forger_add_app_to_personal_agent schema requires only an appId', () => {
   assert.equal(schema.additionalProperties, false);
 });
 
+test('Sidekick response tools require text and reject extra fields', () => {
+  for (const toolId of ['respond_and_end', 'respond_and_wait']) {
+    const schema = getMcpToolInputSchema(toolId);
+    assert.deepEqual(schema.required, ['text']);
+    assert.equal(schema.properties.text.type, 'string');
+    assert.equal(schema.properties.text.maxLength, 4000);
+    assert.equal(schema.additionalProperties, false);
+  }
+});
+
+test('BDD: Sidekick tools are scoped to the matching personal-agent run and dispatch exactly once', async () => {
+  const outcomes = [];
+  const harness = await createServer({
+    resolveSidekickVoiceOutcome: (input) => {
+      outcomes.push(input);
+      return outcomes.length === 1 ? { accepted: true } : { accepted: false };
+    },
+  });
+  const sidekickSession = harness.server.createSession('run-voice-1', 'forger', {
+    caller: 'personal-agent',
+    personalAgentId: 'agent-1',
+    personalAgentConversationId: 'conversation-1',
+    sidekick: { sidekickId: 'sidekick-1' },
+    appIds: [],
+  });
+  const plainSession = harness.server.createSession('run-plain', 'forger', {
+    caller: 'personal-agent',
+    personalAgentId: 'agent-1',
+    personalAgentConversationId: 'conversation-1',
+    appIds: [],
+  });
+  try {
+    const list = async (session) => {
+      const response = await fetch(session.url, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${session.token}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
+      });
+      return (await response.json()).result.tools.map((tool) => tool.name);
+    };
+    assert.ok((await list(sidekickSession)).includes('respond_and_wait'));
+    assert.ok(!(await list(plainSession)).includes('respond_and_wait'));
+
+    const call = async (text = '¿En qué habitación?') => {
+      const response = await fetch(sidekickSession.url, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${sidekickSession.token}`, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0', id: 2, method: 'tools/call',
+          params: { name: 'respond_and_wait', arguments: { text } },
+        }),
+      });
+      const payload = await response.json();
+      return JSON.parse(payload.result.content[0].text);
+    };
+    assert.deepEqual(await call('x'.repeat(4_001)), {
+      success: false,
+      accepted: false,
+      userMessage: 'La respuesta de voz supera el largo permitido.',
+      technicalCode: 'sidekick_voice_response_text_too_long',
+    });
+    assert.equal(outcomes.length, 0);
+    assert.deepEqual(await call(), { success: true, accepted: true, mode: 'wait' });
+    assert.deepEqual(await call(), {
+      success: false,
+      accepted: false,
+      technicalCode: 'sidekick_voice_outcome_not_pending',
+    });
+    assert.deepEqual(outcomes, [
+      {
+        sidekickId: 'sidekick-1', conversationId: 'conversation-1', runId: 'run-voice-1',
+        mode: 'wait', text: '¿En qué habitación?',
+      },
+      {
+        sidekickId: 'sidekick-1', conversationId: 'conversation-1', runId: 'run-voice-1',
+        mode: 'wait', text: '¿En qué habitación?',
+      },
+    ]);
+  } finally {
+    harness.stop();
+  }
+});
+
 test('speech-to-text MCP schemas expose status and authorized audio paths', () => {
   const statusSchema = getMcpToolInputSchema('forger_speech_to_text_status');
   assert.deepEqual(statusSchema, {

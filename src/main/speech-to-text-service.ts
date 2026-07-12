@@ -399,6 +399,7 @@ export class SpeechToTextServiceManager {
           path: audioPath,
           task,
           language: input.language,
+          ...(Array.isArray(input.languages) && input.languages.length > 0 ? { languages: input.languages } : {}),
           ...(access.ephemeral === true ? { ephemeral: true } : {}),
         }),
       }, worker ? { port: worker.port, token: worker.token } : undefined);
@@ -458,7 +459,7 @@ export class SpeechToTextServiceManager {
     );
     await this.deps.fs.writeFile(uploadPath, Buffer.from(input.data));
     try {
-      return await this.process({ path: uploadPath, task: input.task, language: input.language, model: input.model }, {
+      return await this.process({ path: uploadPath, task: input.task, language: input.language, languages: input.languages, model: input.model }, {
         extraAllowedRoots: [uploadRoot],
         ephemeral: input.ephemeral === true,
       });

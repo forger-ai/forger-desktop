@@ -44,6 +44,19 @@ export interface SidekickVoiceConversationRef {
   conversationId: string;
 }
 
+export interface SidekickVoiceAgentOutcome {
+  /** 'end' cierra la sesion tras hablar; 'wait' reabre el mic para un follow-up. */
+  mode: 'end' | 'wait';
+  text: string;
+  runId?: string;
+  /**
+   * Se resuelve cuando el run del agente termina. Tras un outcome por tool el
+   * run sigue cerrandose en background; enviar el follow-up antes colisiona
+   * con el run activo.
+   */
+  runSettled?: Promise<void>;
+}
+
 export interface SidekickVoiceScreenInput {
   sidekickId: string;
   screen: SidekickVoiceScreen;
@@ -104,6 +117,9 @@ export interface SidekickVoiceSessionManagerOptions {
   speechCancellationTimeoutMs?: number;
   terminalScreenTimeoutMs?: number;
   terminalStateDwellMs?: number;
+  maxFollowUpTurns?: number;
+  followUpOnsetTimeoutMs?: number;
+  runSettleTimeoutMs?: number;
 }
 
 export interface SidekickVoiceSessionManagerDeps {
@@ -139,12 +155,25 @@ export interface SidekickVoiceSessionManagerDeps {
     ttlMs: number;
   }) => Promise<SidekickVoiceConversationRef>;
   getConversationTtlMs?: (sidekickId: string) => Promise<number>;
-  sendMessageAndWaitForFinal: (input: {
+  sendMessageAndWaitForOutcome: (input: {
     sidekickId: string;
     conversationId: string;
     content: string;
     signal: AbortSignal;
-  }) => Promise<string>;
+  }) => Promise<SidekickVoiceAgentOutcome>;
+  /** Bip corto de "te escucho" reproducido en el dispositivo antes de reabrir el mic. */
+  playListeningCue?: (input: {
+    sidekickId: string;
+    sessionId: string;
+    signal: AbortSignal;
+  }) => Promise<void>;
+  /** Persiste el texto efectivamente hablado por el dispositivo (globito "dijo:"). */
+  recordSpokenMessage?: (input: {
+    sidekickId: string;
+    conversationId: string;
+    runId?: string;
+    text: string;
+  }) => Promise<void>;
   sendScreen: (input: SidekickVoiceScreenInput) => Promise<void>;
   speakWithTts: (input: {
     sidekickId: string;
@@ -202,6 +231,7 @@ interface ActiveVoiceSession {
   speechWork?: Promise<void>;
   playbackStarted: boolean;
   conversationId?: string;
+  followUpTurns: number;
   completion?: Promise<SidekickVoiceSessionResult>;
 }
 
@@ -210,7 +240,9 @@ const DEFAULT_OPTIONS: Required<SidekickVoiceSessionManagerOptions> = {
   maxListeningMs: 15_000,
   speechOnsetTimeoutMs: 6_000,
   silenceAfterSpeechMs: 1_000,
-  maxSessionMs: 120_000,
+  // Cinco intercambios pueden incluir varias síntesis TTS; el presupuesto es
+  // absoluto y sigue acotado, pero evita cortar una conversación válida.
+  maxSessionMs: 300_000,
   maxPcmChunkBytes: 32_768,
   // Calibrado para el mic del Sidekick con PGA 30 dB + 12 dB digitales: el
   // piso de ruido ronda 400-700 RMS y la voz cercana supera 2000. Con el
@@ -224,6 +256,9 @@ const DEFAULT_OPTIONS: Required<SidekickVoiceSessionManagerOptions> = {
   speechCancellationTimeoutMs: 5_000,
   terminalScreenTimeoutMs: 2_000,
   terminalStateDwellMs: 1_500,
+  maxFollowUpTurns: 5,
+  followUpOnsetTimeoutMs: 6_000,
+  runSettleTimeoutMs: 15_000,
 };
 
 class SidekickVoiceInterruptedError extends Error {
@@ -287,6 +322,9 @@ export class SidekickVoiceSessionManager {
     }
     if (!Number.isInteger(this.options.speechStartChunks)) {
       throw new Error('sidekick_voice_speechStartChunks_invalid');
+    }
+    if (!Number.isInteger(this.options.maxFollowUpTurns)) {
+      throw new Error('sidekick_voice_maxFollowUpTurns_invalid');
     }
     if (this.options.speechContinueRmsThreshold > this.options.speechStartRmsThreshold) {
       throw new Error('sidekick_voice_speech_threshold_hysteresis_invalid');
@@ -430,6 +468,7 @@ export class SidekickVoiceSessionManager {
       resolveCaptureDone,
       captureRequested: false,
       playbackStarted: false,
+      followUpTurns: 0,
     };
   }
 
@@ -438,26 +477,7 @@ export class SidekickVoiceSessionManager {
     try {
       session.sessionTimer = this.setTimer(() => this.abortSession(session, 'timeout'), this.options.maxSessionMs);
       await this.transitionBestEffort(session, 'listening');
-      session.realtimeStt = this.deps.createRealtimeSttSession
-        ? await this.raceWithAbort(this.deps.createRealtimeSttSession({
-          sidekickId: session.sidekickId,
-          sessionId: session.sessionId,
-          signal: session.controller.signal,
-        }), session)
-        : undefined;
-      const microphone = await this.raceWithAbort(this.deps.startTransientMicrophone({
-        sidekickId: session.sidekickId,
-        sessionId: session.sessionId,
-        signal: session.controller.signal,
-      }), session);
-      session.microphoneStarted = true;
-      session.microphoneState = 'started';
-      session.recordingId = microphone?.recordingId;
-      session.acceptingPcm = true;
-      session.listeningTimer = this.setTimer(
-        () => this.requestCaptureFinish(session),
-        this.options.speechOnsetTimeoutMs,
-      );
+      await this.beginCapture(session, this.options.speechOnsetTimeoutMs);
       await this.raceWithAbort(session.captureDone, session);
 
       const transcript = await this.finishCapture(session);
@@ -466,35 +486,7 @@ export class SidekickVoiceSessionManager {
         await this.transitionBestEffort(session, 'error');
       } else {
         session.transcript = cleanText(transcript);
-        await this.transitionBestEffort(session, 'thinking');
-        const conversation = await this.raceWithAbort(this.resolveConversation(session), session);
-        session.conversationId = conversation.conversationId;
-        const assistantText = cleanText(await this.raceWithAbort(this.deps.sendMessageAndWaitForFinal({
-          sidekickId: session.sidekickId,
-          conversationId: conversation.conversationId,
-          content: session.transcript,
-          signal: session.controller.signal,
-        }), session));
-        if (!assistantText) throw new Error('sidekick_voice_agent_response_empty');
-        session.assistantText = assistantText;
-        // TTS puede tardar varios segundos en sintetizar. La pantalla sigue en
-        // thinking hasta que el adaptador confirma que el hardware comenzo a
-        // reproducir; `speaking` representa audio real, no preparacion.
-        const speechWork = Promise.resolve(this.deps.speakWithTts({
-          sidekickId: session.sidekickId,
-          text: assistantText,
-          signal: session.controller.signal,
-          onPlaybackStarted: async () => {
-            if (session.playbackStarted || session.controller.signal.aborted || !this.isCurrent(session)) return;
-            session.playbackStarted = true;
-            await this.transitionBestEffort(session, 'speaking');
-          },
-        }));
-        session.speechWork = speechWork;
-        await this.raceWithAbort(speechWork, session);
-        session.speechWork = undefined;
-        if (!session.playbackStarted) throw new Error('sidekick_voice_playback_start_unconfirmed');
-        result = this.result(session, 'completed');
+        result = await this.runAgentTurns(session);
       }
     } catch (error) {
       const interrupted = error instanceof SidekickVoiceInterruptedError ? error.kind : session.interruptKind;
@@ -514,6 +506,135 @@ export class SidekickVoiceSessionManager {
     }
     this.emitSessionFinished(session, result);
     return result;
+  }
+
+  private async beginCapture(session: ActiveVoiceSession, onsetTimeoutMs: number): Promise<void> {
+    session.realtimeStt = this.deps.createRealtimeSttSession
+      ? await this.raceWithAbort(this.deps.createRealtimeSttSession({
+        sidekickId: session.sidekickId,
+        sessionId: session.sessionId,
+        signal: session.controller.signal,
+      }), session)
+      : undefined;
+    const microphone = await this.raceWithAbort(this.deps.startTransientMicrophone({
+      sidekickId: session.sidekickId,
+      sessionId: session.sessionId,
+      signal: session.controller.signal,
+    }), session);
+    session.microphoneStarted = true;
+    session.microphoneState = 'started';
+    session.recordingId = microphone?.recordingId;
+    session.acceptingPcm = true;
+    session.listeningTimer = this.setTimer(
+      () => this.requestCaptureFinish(session),
+      onsetTimeoutMs,
+    );
+  }
+
+  private resetCaptureState(session: ActiveVoiceSession): void {
+    this.clearCaptureTimers(session);
+    let resolveCaptureDone = (): void => undefined;
+    const captureDone = new Promise<void>((resolve) => {
+      resolveCaptureDone = resolve;
+    });
+    session.captureDone = captureDone;
+    session.resolveCaptureDone = resolveCaptureDone;
+    session.captureRequested = false;
+    session.acceptingPcm = false;
+    session.heardSpeech = false;
+    session.speechActive = false;
+    session.speechCandidateChunks = 0;
+    session.pcmChunks = [];
+    session.pcmWork = Promise.resolve();
+    session.pcmError = undefined;
+    session.realtimeStt = undefined;
+    session.sttSettled = false;
+    session.microphoneStarted = false;
+    session.microphoneState = 'not_started';
+    session.recordingId = undefined;
+  }
+
+  private async runAgentTurns(session: ActiveVoiceSession): Promise<SidekickVoiceSessionResult> {
+    await this.transitionBestEffort(session, 'thinking');
+    const conversation = await this.raceWithAbort(this.resolveConversation(session), session);
+    session.conversationId = conversation.conversationId;
+    for (;;) {
+      const outcome = await this.raceWithAbort(this.deps.sendMessageAndWaitForOutcome({
+        sidekickId: session.sidekickId,
+        conversationId: session.conversationId,
+        content: session.transcript!,
+        signal: session.controller.signal,
+      }), session);
+      const assistantText = cleanText(outcome.text);
+      if (!assistantText) throw new Error('sidekick_voice_agent_response_empty');
+      session.assistantText = assistantText;
+      session.playbackStarted = false;
+      // TTS puede tardar varios segundos en sintetizar. La pantalla sigue en
+      // thinking hasta que el adaptador confirma que el hardware comenzo a
+      // reproducir; `speaking` representa audio real, no preparacion.
+      const speechWork = Promise.resolve(this.deps.speakWithTts({
+        sidekickId: session.sidekickId,
+        text: assistantText,
+        signal: session.controller.signal,
+        onPlaybackStarted: async () => {
+          if (session.playbackStarted || session.controller.signal.aborted || !this.isCurrent(session)) return;
+          session.playbackStarted = true;
+          await this.transitionBestEffort(session, 'speaking');
+        },
+      }));
+      session.speechWork = speechWork;
+      await this.raceWithAbort(speechWork, session);
+      session.speechWork = undefined;
+      if (!session.playbackStarted) throw new Error('sidekick_voice_playback_start_unconfirmed');
+      let runSettleTimedOut = false;
+      if (outcome.runSettled) {
+        try {
+          await this.raceWithAbort(
+            this.withDeadline(outcome.runSettled, this.options.runSettleTimeoutMs, 'sidekick_voice_run_settle_timeout'),
+            session,
+          );
+        } catch (error) {
+          if (error instanceof SidekickVoiceInterruptedError) throw error;
+          runSettleTimedOut = true;
+        }
+      }
+      if (this.deps.recordSpokenMessage) {
+        await Promise.resolve(this.deps.recordSpokenMessage({
+          sidekickId: session.sidekickId,
+          conversationId: session.conversationId,
+          ...(outcome.runId ? { runId: outcome.runId } : {}),
+          text: assistantText,
+        })).catch(() => undefined);
+      }
+      if (runSettleTimedOut) {
+        return this.result(session, 'completed', 'sidekick_voice_run_settle_timeout');
+      }
+      if (outcome.mode !== 'wait') {
+        return this.result(session, 'completed');
+      }
+      if (session.followUpTurns >= this.options.maxFollowUpTurns) {
+        return this.result(session, 'completed', 'sidekick_voice_follow_up_cap');
+      }
+      session.followUpTurns += 1;
+      await this.transitionBestEffort(session, 'listening');
+      if (this.deps.playListeningCue) {
+        await Promise.resolve(this.deps.playListeningCue({
+          sidekickId: session.sidekickId,
+          sessionId: session.sessionId,
+          signal: session.controller.signal,
+        })).catch(() => undefined);
+      }
+      this.resetCaptureState(session);
+      await this.beginCapture(session, this.options.followUpOnsetTimeoutMs);
+      await this.raceWithAbort(session.captureDone, session);
+      const transcript = await this.finishCapture(session);
+      if (!session.heardSpeech || !cleanText(transcript)) {
+        // Silencio en el follow-up: cierre ordenado, sin pantalla de error.
+        return this.result(session, 'completed', 'sidekick_voice_follow_up_silence');
+      }
+      session.transcript = cleanText(transcript);
+      await this.transitionBestEffort(session, 'thinking');
+    }
   }
 
   private receivePcm(event: SidekickPcmEvent): void {
@@ -655,6 +776,11 @@ export class SidekickVoiceSessionManager {
     if (!session.sttSettled) {
       await Promise.resolve(session.realtimeStt?.cancel()).catch(() => undefined);
       session.sttSettled = true;
+    }
+    // Close adapters that may still be waiting for the agent run after a tool
+    // outcome. Completed audio work has already settled at this point.
+    if (!session.controller.signal.aborted) {
+      session.controller.abort(new Error('sidekick_voice_session_closed'));
     }
     session.pcmChunks.length = 0;
     if (result.status === 'silence' || result.status === 'error') {

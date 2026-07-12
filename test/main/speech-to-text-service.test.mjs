@@ -376,6 +376,8 @@ test('SpeechToTextServiceManager treats ephemeral uploads as private and clears 
       const body = JSON.parse(String(init?.body));
       uploadedPath = body.path;
       assert.equal(body.ephemeral, true);
+      assert.equal(body.language, 'es');
+      assert.deepEqual(body.languages, ['es', 'en']);
       assert.equal(await fs.readFile(uploadedPath, 'utf8'), 'new private audio');
       await assert.rejects(fs.access(crashResidue));
       return Response.json({
@@ -396,6 +398,7 @@ test('SpeechToTextServiceManager treats ephemeral uploads as private and clears 
       data: Uint8Array.from(Buffer.from('new private audio')).buffer,
       task: 'transcribe',
       language: 'es',
+      languages: ['es', 'en'],
       ephemeral: true,
     });
 

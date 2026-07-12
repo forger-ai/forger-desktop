@@ -46,6 +46,7 @@ test('Sidekick voice profile uses exact voice metadata as locale source of truth
     model: 'kokoro',
     voice: 'ef_dora',
     locale: 'es',
+    sttLanguages: ['es', 'en'],
     conversationTtlMs: 45 * 60_000,
   });
   assert.throws(
@@ -58,8 +59,26 @@ test('Sidekick voice profile uses exact voice metadata as locale source of truth
     model: 'kokoro',
     voice: 'af_heart',
     locale: 'en-US',
+    sttLanguages: ['es', 'en'],
     conversationTtlMs: 30 * 60_000,
   });
+});
+
+test('Sidekick voice profile resolves STT languages per mode', () => {
+  const profileFor = (sttConfig) => resolveSidekickVoiceProfile(
+    sidekick('online', { voiceConfig: { ...sidekick().voiceConfig, ...sttConfig } }),
+    voiceState,
+  ).sttLanguages;
+  // New and legacy profiles default to the bilingual subset.
+  assert.deepEqual(profileFor({}), ['es', 'en']);
+  assert.deepEqual(profileFor({ sttLanguageMode: 'voice' }), ['es']);
+  assert.equal(profileFor({ sttLanguageMode: 'auto' }), undefined);
+  assert.deepEqual(profileFor({ sttLanguageMode: 'fixed', sttLanguages: ['en'] }), ['en']);
+  assert.deepEqual(profileFor({ sttLanguageMode: 'subset', sttLanguages: ['es', 'en'] }), ['es', 'en']);
+  // Subset without configured codes falls back to the default spanglish pair.
+  assert.deepEqual(profileFor({ sttLanguageMode: 'subset' }), ['es', 'en']);
+  // Invalid explicit configurations fall back to the safe bilingual default.
+  assert.deepEqual(profileFor({ sttLanguageMode: 'fixed', sttLanguages: ['nope'] }), ['es', 'en']);
 });
 
 const runtimeDeps = (overrides = {}) => {
@@ -266,7 +285,7 @@ test('Sidekick abort during profile resolution never starts an agent run afterwa
   harness.conversationManager.sendSidekickMessage = async () => { sends += 1; };
   const runtime = new SidekickVoiceRuntime(harness.deps);
   const controller = new AbortController();
-  const result = runtime.sendMessageAndWaitForFinal({
+  const result = runtime.sendMessageAndWaitForOutcome({
     sidekickId: 'sidekick-1',
     conversationId: 'conversation-1',
     content: 'Hola',
@@ -277,6 +296,106 @@ test('Sidekick abort during profile resolution never starts an agent run afterwa
   await assert.rejects(result, /sidekick_voice_cancelled/);
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(sends, 0);
+  await runtime.dispose();
+});
+
+test('BDD: runtime accepts a Sidekick MCP outcome only for its exact run, conversation and device', async () => {
+  const listeners = new Set();
+  let sent;
+  let sends = 0;
+  const harness = runtimeDeps({
+    getPersonalAgentConversationManager: () => ({
+      onConversationEvent: (listener) => { listeners.add(listener); return () => listeners.delete(listener); },
+      sendSidekickMessage: async () => { sends += 1; return { activeRun: { id: 'run-voice-1' } }; },
+      cancelRun: async () => true,
+    }),
+  });
+  const runtime = new SidekickVoiceRuntime(harness.deps);
+  const pending = runtime.sendMessageAndWaitForOutcome({
+    sidekickId: 'sidekick-1', conversationId: 'conversation-1', content: 'Hola',
+    signal: new AbortController().signal,
+  });
+  await eventually(() => sends === 1);
+  assert.equal(runtime.resolveAgentToolOutcome({
+    sidekickId: 'wrong', conversationId: 'conversation-1', runId: 'run-voice-1', mode: 'end', text: 'No',
+  }).accepted, false);
+  assert.equal(runtime.resolveAgentToolOutcome({
+    sidekickId: 'sidekick-1', conversationId: 'other', runId: 'run-voice-1', mode: 'end', text: 'No',
+  }).accepted, false);
+  assert.equal(runtime.resolveAgentToolOutcome({
+    sidekickId: 'sidekick-1', conversationId: 'conversation-1', runId: 'stale-run', mode: 'end', text: 'No',
+  }).accepted, false);
+  assert.equal(runtime.resolveAgentToolOutcome({
+    sidekickId: 'sidekick-1', conversationId: 'conversation-1', runId: 'run-voice-1', mode: 'wait', text: '¿Algo más?',
+  }).accepted, true);
+  sent = await pending;
+  assert.equal(sent.mode, 'wait');
+  assert.equal(sent.text, '¿Algo más?');
+  assert.equal(sent.runId, 'run-voice-1');
+  assert.equal(runtime.resolveAgentToolOutcome({
+    sidekickId: 'sidekick-1', conversationId: 'conversation-1', runId: 'run-voice-1', mode: 'end', text: 'Duplicado',
+  }).accepted, false);
+  for (const listener of listeners) listener({
+    type: 'run.completed',
+    conversation: { id: 'conversation-1', messages: [] },
+    run: { id: 'run-voice-1' },
+  });
+  await sent.runSettled;
+  await runtime.dispose();
+});
+
+test('BDD: runtime falls back to the completed run final text and abort cancels the real run', async () => {
+  const listeners = new Set();
+  const canceled = [];
+  let latestSentRun;
+  const manager = {
+    onConversationEvent: (listener) => { listeners.add(listener); return () => listeners.delete(listener); },
+    sendSidekickMessage: async () => { latestSentRun = 'run-fallback'; return { activeRun: { id: latestSentRun } }; },
+    cancelRun: async (runId) => { canceled.push(runId); return true; },
+  };
+  const runtime = new SidekickVoiceRuntime(runtimeDeps({ getPersonalAgentConversationManager: () => manager }).deps);
+  const fallback = runtime.sendMessageAndWaitForOutcome({
+    sidekickId: 'sidekick-1', conversationId: 'conversation-1', content: 'Hola',
+    signal: new AbortController().signal,
+  });
+  await eventually(() => listeners.size === 1);
+  for (const listener of listeners) listener({
+    type: 'run.completed',
+    conversation: {
+      id: 'conversation-1',
+      messages: [{ role: 'assistant', kind: 'message', runId: 'run-fallback', content: 'Respuesta final.' }],
+    },
+    run: { id: 'run-fallback' },
+  });
+  assert.deepEqual(await fallback, {
+    mode: 'end', text: 'Respuesta final.', runId: 'run-fallback', runSettled: (await fallback).runSettled,
+  });
+
+  manager.sendSidekickMessage = async () => { latestSentRun = 'run-question'; return { activeRun: { id: latestSentRun } }; };
+  const questionFallback = runtime.sendMessageAndWaitForOutcome({
+    sidekickId: 'sidekick-1', conversationId: 'conversation-1', content: 'Pregunta',
+    signal: new AbortController().signal,
+  });
+  await eventually(() => latestSentRun === 'run-question');
+  for (const listener of listeners) listener({
+    type: 'run.completed',
+    conversation: {
+      id: 'conversation-1',
+      messages: [{ role: 'assistant', kind: 'message', runId: 'run-question', content: '¿Qué prefieres?' }],
+    },
+    run: { id: 'run-question' },
+  });
+  assert.equal((await questionFallback).mode, 'wait');
+
+  manager.sendSidekickMessage = async () => { latestSentRun = 'run-abort'; return { activeRun: { id: latestSentRun } }; };
+  const controller = new AbortController();
+  const aborted = runtime.sendMessageAndWaitForOutcome({
+    sidekickId: 'sidekick-1', conversationId: 'conversation-1', content: 'Otra', signal: controller.signal,
+  });
+  await eventually(() => latestSentRun === 'run-abort');
+  controller.abort(new Error('sidekick_voice_cancelled'));
+  await assert.rejects(aborted, /sidekick_voice_cancelled/);
+  await eventually(() => canceled.includes('run-abort'));
   await runtime.dispose();
 });
 

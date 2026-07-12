@@ -8,7 +8,7 @@ import type { SharedFileRef } from './chat';
 import type { AgentRunActivity } from './agent-run-activity';
 
 export type PersonalAgentMessageRole = 'user' | 'assistant' | 'system';
-export type PersonalAgentMessageKind = 'message' | 'intermediate';
+export type PersonalAgentMessageKind = 'message' | 'intermediate' | 'spoken';
 export type PersonalAgentMessageAuthorType = 'human' | 'agent' | 'system';
 export type PersonalAgentMessageSource = 'human' | 'routine' | 'scheduled_wakeup' | 'sidekick';
 export type PersonalAgentConversationOrigin = 'user' | 'agent' | 'routine' | 'sidekick';
@@ -193,6 +193,8 @@ export interface PersonalAgentMessage {
   routineId?: string;
   wakeupId?: string;
   content: string;
+  /** Sanitized visible activity captured while the run produced this message. */
+  reasoning?: string;
   createdAt: string;
   files?: PersonalAgentMessageFile[];
 }

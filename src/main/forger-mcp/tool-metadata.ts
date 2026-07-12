@@ -72,6 +72,21 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
     };
   }
 
+  if (toolId === 'respond_and_end' || toolId === 'respond_and_wait') {
+    return {
+      type: 'object',
+      properties: {
+        text: {
+          type: 'string',
+          maxLength: 4000,
+          description: 'Texto exacto que el Sidekick hablara en voz alta. Breve, natural y en el idioma del turno.',
+        },
+      },
+      required: ['text'],
+      additionalProperties: false,
+    };
+  }
+
   if (
     toolId === 'forger_get_app_runtime_status' ||
     toolId === 'forger_open_app' ||

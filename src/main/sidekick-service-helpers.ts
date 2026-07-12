@@ -16,11 +16,13 @@ import type {
   SidekickStatus,
   SidekickUsbDevice,
   SidekickTimeStatus,
+  SidekickSttLanguageMode,
   SidekickVoiceConfig,
   SidekickWakeBeepState,
 } from '../shared/types';
 import {
   SIDEKICK_DEFAULT_CONVERSATION_TTL_MINUTES,
+  SIDEKICK_DEFAULT_STT_LANGUAGE_SUBSET,
   SIDEKICK_MAX_CONVERSATION_TTL_MINUTES,
   SIDEKICK_MIN_CONVERSATION_TTL_MINUTES,
 } from '../shared/types';
@@ -480,9 +482,35 @@ export const normalizedStoredSidekickVoiceConfig = (value?: Partial<SidekickVoic
     }
   }
   const ttl = Number(value?.conversationTtlMinutes);
+  const sttLanguages = Array.isArray(value?.sttLanguages)
+    ? [...new Set(
+        value.sttLanguages
+          .filter((code): code is string => typeof code === 'string')
+          .map((code) => code.trim().toLowerCase())
+          .filter((code) => /^[a-z]{2}$/.test(code)),
+      )]
+    : [];
+  const rawMode = value?.sttLanguageMode;
+  let sttLanguageMode: SidekickSttLanguageMode = 'subset';
+  if (rawMode === 'auto') {
+    sttLanguageMode = 'auto';
+  } else if (rawMode === 'voice') {
+    sttLanguageMode = 'voice';
+  } else if (rawMode === 'fixed' && sttLanguages.length >= 1) {
+    sttLanguageMode = 'fixed';
+  } else if (rawMode === 'subset' && sttLanguages.length >= 2) {
+    sttLanguageMode = 'subset';
+  }
   return {
     ...(model && voice ? { model, voice } : {}),
     ...(locale ? { locale } : {}),
+    sttLanguageMode,
+    ...(sttLanguageMode === 'fixed' ? { sttLanguages: [sttLanguages[0]] } : {}),
+    ...(sttLanguageMode === 'subset' ? {
+      sttLanguages: sttLanguages.length >= 2
+        ? sttLanguages
+        : [...SIDEKICK_DEFAULT_STT_LANGUAGE_SUBSET],
+    } : {}),
     conversationTtlMinutes: Number.isInteger(ttl) &&
       ttl >= SIDEKICK_MIN_CONVERSATION_TTL_MINUTES &&
       ttl <= SIDEKICK_MAX_CONVERSATION_TTL_MINUTES

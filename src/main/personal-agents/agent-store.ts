@@ -45,6 +45,7 @@ import {
   normalizeConversationStatus,
   normalizeGrantTargets,
   normalizeMessageAuthorType,
+  normalizeMessageKind,
   normalizeMessageRole,
   normalizeMessageSource,
   normalizeMessageText,
@@ -626,6 +627,7 @@ export class AgentStore {
     wakeupId?: string | null;
     locale?: string | null;
     content: string;
+    reasoning?: string | null;
     files?: SharedFileRef[];
   }): Promise<PersonalAgentMessage> {
     await this.load();
@@ -646,13 +648,14 @@ export class AgentStore {
     const locale = typeof input.locale === 'string' && /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(input.locale.trim())
       ? input.locale.trim()
       : null;
+    const reasoning = sanitizeText(input.reasoning, MAX_TEXT_LENGTH) || null;
     const message: PersonalAgentMessage = {
       id: randomUUID(),
       agentId: input.agentId,
       conversationId: input.conversationId,
       ...(input.runId ? { runId: input.runId } : {}),
       role: normalizeMessageRole(input.role),
-      kind: input.kind === 'intermediate' ? 'intermediate' : 'message',
+      kind: normalizeMessageKind(input.kind),
       authorType,
       ...(authorAgentId ? { authorAgentId } : {}),
       source,
@@ -660,12 +663,13 @@ export class AgentStore {
       ...(wakeupId ? { wakeupId } : {}),
       ...(locale ? { locale } : {}),
       content,
+      ...(reasoning ? { reasoning } : {}),
       createdAt: now,
     };
     this.requireDb().prepare(`
-      INSERT INTO personal_agent_messages (id, agent_id, conversation_id, run_id, role, kind, author_type, author_agent_id, source, routine_id, wakeup_id, source_locale, content, created_at)
-      VALUES (@id, @agentId, @conversationId, @runId, @role, @kind, @authorType, @authorAgentId, @source, @routineId, @wakeupId, @locale, @content, @createdAt)
-    `).run({ ...message, runId: message.runId ?? null, authorAgentId, routineId, wakeupId, locale });
+      INSERT INTO personal_agent_messages (id, agent_id, conversation_id, run_id, role, kind, author_type, author_agent_id, source, routine_id, wakeup_id, source_locale, content, reasoning, created_at)
+      VALUES (@id, @agentId, @conversationId, @runId, @role, @kind, @authorType, @authorAgentId, @source, @routineId, @wakeupId, @locale, @content, @reasoning, @createdAt)
+    `).run({ ...message, runId: message.runId ?? null, authorAgentId, routineId, wakeupId, locale, reasoning });
     const files = normalizeSharedFileRefs(input.files).slice(0, MAX_MESSAGE_FILES);
     if (files.length > 0) {
       const insertFile = this.requireDb().prepare(`
@@ -1039,6 +1043,7 @@ export class AgentStore {
     this.ensureColumn('personal_agent_messages', 'routine_id', 'TEXT');
     this.ensureColumn('personal_agent_messages', 'wakeup_id', 'TEXT');
     this.ensureColumn('personal_agent_messages', 'source_locale', 'TEXT');
+    this.ensureColumn('personal_agent_messages', 'reasoning', 'TEXT');
     this.ensureColumn('personal_agent_routines', 'frequency_interval_minutes', 'INTEGER');
     this.ensureColumn('personal_agent_permissions', 'kind', "TEXT NOT NULL DEFAULT 'legacy'");
     this.ensureColumn('personal_agent_permissions', 'target_id', "TEXT NOT NULL DEFAULT ''");
@@ -1252,7 +1257,7 @@ export class AgentStore {
   }
 
   private messagesForConversation(conversationId: string): PersonalAgentMessage[] {
-    const rows = this.requireDb().prepare('SELECT * FROM personal_agent_messages WHERE conversation_id = ? ORDER BY created_at ASC').all(conversationId) as MessageRow[];
+    const rows = this.requireDb().prepare('SELECT * FROM personal_agent_messages WHERE conversation_id = ? ORDER BY created_at ASC, rowid ASC').all(conversationId) as MessageRow[];
     return rows.map((row) => this.messageFromRow(row));
   }
 
@@ -1267,7 +1272,7 @@ export class AgentStore {
       conversationId: row.conversation_id,
       ...(row.run_id ? { runId: row.run_id } : {}),
       role: normalizeMessageRole(row.role),
-      kind: row.kind === 'intermediate' ? 'intermediate' : 'message',
+      kind: normalizeMessageKind(row.kind),
       authorType,
       ...(authorAgentId ? { authorAgentId } : {}),
       ...(authorAgentName ? { authorAgentName } : {}),
@@ -1276,6 +1281,7 @@ export class AgentStore {
       ...(sanitizeAgentId(row.routine_id) ? { routineId: sanitizeAgentId(row.routine_id) as string } : {}),
       ...(sanitizeAgentId(row.wakeup_id) ? { wakeupId: sanitizeAgentId(row.wakeup_id) as string } : {}),
       content: row.content,
+      ...(row.reasoning ? { reasoning: row.reasoning } : {}),
       createdAt: row.created_at,
       ...(files.length > 0 ? { files } : {}),
     };

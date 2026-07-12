@@ -8,6 +8,7 @@ import type {
   PersonalAgentJournalEntry,
   PersonalAgentMemory,
   PersonalAgentMessageAuthorType,
+  PersonalAgentMessageKind,
   PersonalAgentMessageRole,
   PersonalAgentMessageSource,
   PersonalAgentPeerGrant,
@@ -219,6 +220,11 @@ export const normalizeAgentRuntime = (value: unknown): AgentRuntime | undefined 
 export const normalizeMessageRole = (value: unknown): PersonalAgentMessageRole => {
   if (value === 'assistant' || value === 'system') return value;
   return 'user';
+};
+
+export const normalizeMessageKind = (value: unknown): PersonalAgentMessageKind => {
+  if (value === 'intermediate' || value === 'spoken') return value;
+  return 'message';
 };
 
 export const normalizeMessageAuthorType = (value: unknown, role?: unknown): PersonalAgentMessageAuthorType => {

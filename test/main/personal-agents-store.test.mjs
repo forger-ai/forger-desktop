@@ -530,6 +530,10 @@ test('legacy personal agent databases migrate runtime and provider columns witho
   const agent = await store.requireAgent('agent-legacy');
   assert.equal(agent.name, 'Legacy agent');
   assert.equal(agent.runtime, undefined);
+  const migratedDb = openPersonalAgentSqliteDatabase(sqlitePath);
+  const messageColumns = migratedDb.prepare('PRAGMA table_info(personal_agent_messages)').all();
+  assert.ok(messageColumns.some((column) => column.name === 'reasoning'));
+  migratedDb.close?.();
   const updated = await store.updateAgentPermissions({
     agentId: agent.id,
     runtime: { provider: 'antigravity', model: 'gemini-3-pro', effort: 'medium' },
@@ -769,6 +773,15 @@ test('Sidekick conversations persist their device relation, stay read-only, and 
     /personal_agent_conversation_read_only/,
   );
 
+  await store.addMessage({
+    agentId: agent.id,
+    conversationId: conversation.id,
+    role: 'assistant',
+    kind: 'spoken',
+    source: 'sidekick',
+    content: 'Este recibo hablado no debe volver al contexto del agente.',
+  });
+
   await manager.sendSidekickMessage({
     conversationId: conversation.id,
     sidekickId: 'sidekick-desk',
@@ -776,21 +789,84 @@ test('Sidekick conversations persist their device relation, stay read-only, and 
     locale: 'es-CL',
   });
   const completed = await waitForConversation(manager, conversation.id, (item) => item.activeRun?.status === 'completed');
-  assert.deepEqual(completed.messages.map((message) => [message.role, message.source, message.locale]), [
-    ['user', 'sidekick', 'es-CL'],
-    ['assistant', 'sidekick', undefined],
+  assert.deepEqual(completed.messages.map((message) => [message.role, message.source, message.locale, message.kind]), [
+    ['assistant', 'sidekick', undefined, 'spoken'],
+    ['user', 'sidekick', 'es-CL', 'message'],
+    ['assistant', 'sidekick', undefined, 'message'],
   ]);
   assert.match(capturedPrompt, /es-CL/);
   assert.match(capturedPrompt, /brief.*natural.*spoken/i);
-  assert.match(capturedPrompt, /only text/i);
-  assert.match(capturedPrompt, /do not (?:call|invoke).*(?:TTS|audio)/i);
+  assert.match(capturedPrompt, /respond_and_end|respond_and_wait/i);
+  assert.match(capturedPrompt, /respond_and_\* only declares text and mode/i);
+  assert.match(capturedPrompt, /Mandatory Sidekick final action/i);
+  assert.match(capturedPrompt, /respond_and_wait when the spoken text asks a question/i);
+  assert.match(capturedPrompt, /plain assistant text.*final question mark waits/i);
+  assert.doesNotMatch(capturedPrompt, /do not call.*sidekick audio/i);
+  assert.doesNotMatch(capturedPrompt, /recibo hablado no debe volver/i);
+  assert.doesNotMatch(capturedPrompt, /only text/i);
   assert.match(capturedPrompt, /Desktop.*synthesi[sz]es.*cancel/i);
-  assert.doesNotMatch(completed.messages[0].content, /brief|locale|spoken/i);
+  assert.doesNotMatch(completed.messages[1].content, /brief|locale|spoken/i);
 
   const reloaded = new AgentStore({ metadataRoot, forgerHomeRoot });
   const latest = await reloaded.findLatestSidekickConversation({ sidekickId: 'sidekick-desk', agentId: agent.id });
   assert.equal(latest.id, conversation.id);
   assert.equal(latest.sidekickId, 'sidekick-desk');
+});
+
+test('personal agent messages persist reasoning and the spoken kind across reloads', async () => {
+  const metadataRoot = await mkdtemp(path.join(tmpdir(), 'forger-personal-agent-spoken-meta-'));
+  const forgerHomeRoot = await mkdtemp(path.join(tmpdir(), 'forger-personal-agent-spoken-home-'));
+  const store = new AgentStore({ metadataRoot, forgerHomeRoot });
+  const agent = await store.createAgent({ name: 'Speaker' });
+  const conversation = await store.createConversation({ agentId: agent.id, title: 'Voz', origin: 'sidekick', sidekickId: 'sidekick-desk' });
+
+  const withReasoning = await store.addMessage({
+    agentId: agent.id,
+    conversationId: conversation.id,
+    role: 'assistant',
+    source: 'sidekick',
+    content: 'La respuesta final.',
+    reasoning: 'Primero revisé la agenda.\n\nDespués confirmé la hora.',
+  });
+  assert.equal(withReasoning.kind, 'message');
+  assert.equal(withReasoning.reasoning, 'Primero revisé la agenda.\n\nDespués confirmé la hora.');
+
+  const spoken = await store.addMessage({
+    agentId: agent.id,
+    conversationId: conversation.id,
+    role: 'assistant',
+    kind: 'spoken',
+    source: 'sidekick',
+    content: 'Hola, tu reunión es a las tres.',
+  });
+  assert.equal(spoken.kind, 'spoken');
+
+  const reloadedStore = new AgentStore({ metadataRoot, forgerHomeRoot });
+  const persisted = await reloadedStore.requireConversation(conversation.id);
+  assert.deepEqual(
+    persisted.messages.map((message) => [message.kind, message.reasoning ?? null]),
+    [
+      ['message', 'Primero revisé la agenda.\n\nDespués confirmé la hora.'],
+      ['spoken', null],
+    ],
+  );
+
+  // Messages created within the same clock tick keep insertion order. This
+  // makes the written response and the subsequent spoken receipt deterministic.
+  const sameTimestamp = '2026-07-12T12:00:00.000Z';
+  const orderingDb = openPersonalAgentSqliteDatabase(path.join(metadataRoot, 'personal-agents.sqlite'));
+  orderingDb.prepare('UPDATE personal_agent_messages SET created_at = ? WHERE conversation_id = ?').run(sameTimestamp, conversation.id);
+  orderingDb.close();
+  const ordered = await new AgentStore({ metadataRoot, forgerHomeRoot }).requireConversation(conversation.id);
+  assert.deepEqual(ordered.messages.map((message) => message.id), [withReasoning.id, spoken.id]);
+
+  // Unknown kinds stored by future/older versions must coerce to 'message'.
+  const db = openPersonalAgentSqliteDatabase(path.join(metadataRoot, 'personal-agents.sqlite'));
+  assert.ok(db);
+  db.prepare("UPDATE personal_agent_messages SET kind = 'mystery' WHERE id = ?").run(spoken.id);
+  db.close();
+  const coerced = await new AgentStore({ metadataRoot, forgerHomeRoot }).requireConversation(conversation.id);
+  assert.equal(coerced.messages[1].kind, 'message');
 });
 
 test('personal agent conversation manager starts a real run, persists progress, and blocks overlapping sends', async () => {
@@ -924,6 +1000,29 @@ test('personal agent conversation manager does not persist progress that duplica
   assert.equal(completed.activeRun.progress.length, 2);
   assert.equal(completed.activeRun.progress[0].message, '¿De qué ciudad o comuna quieres el clima? Si quieres, te lo doy con temperatura actual y pronóstico de hoy.');
   assert.equal(completed.activeRun.progress[1].message, 'La herramienta de clima no resolvió Providencia bien; voy a usar una fuente directa.');
+  assert.equal(completed.messages.at(-1).reasoning, [
+    '¿De qué ciudad o comuna quieres el clima? Si quieres, te lo doy con temperatura actual y pronóstico de hoy.',
+    'La herramienta de clima no resolvió Providencia bien; voy a usar una fuente directa.',
+  ].join('\n\n'));
+});
+
+test('personal agent visible activity stored with the final message redacts secrets', async () => {
+  const metadataRoot = await mkdtemp(path.join(tmpdir(), 'forger-personal-agent-activity-redaction-meta-'));
+  const forgerHomeRoot = await mkdtemp(path.join(tmpdir(), 'forger-personal-agent-activity-redaction-home-'));
+  const store = new AgentStore({ metadataRoot, forgerHomeRoot });
+  const manager = new AgentConversationManager({
+    store,
+    runner: async ({ onProgress }) => {
+      onProgress('Consultando servicio con token=ghp_12345678901234567890');
+      return { assistantText: 'Listo.' };
+    },
+  });
+  const agent = await store.createAgent({ name: 'Safe activity agent' });
+  const conversation = await manager.startConversation({ agentId: agent.id, initialMessage: 'Hazlo.' });
+  const completed = await waitForConversation(manager, conversation.id, (item) => item.activeRun?.status === 'completed');
+  const final = completed.messages.find((message) => message.role === 'assistant' && message.kind === 'message');
+  assert.match(final.reasoning, /hidden sensitive value/i);
+  assert.doesNotMatch(final.reasoning, /ghp_12345678901234567890/);
 });
 
 test('personal agent conversation manager persists full long progress messages', async () => {
@@ -953,6 +1052,32 @@ test('personal agent conversation manager persists full long progress messages',
   assert.equal(longProgress.length > 1000, true);
   assert.equal(completed.activeRun.progress[0].message, longProgress);
   assert.equal(completed.messages.find((message) => message.kind === 'intermediate')?.content, longProgress);
+});
+
+test('personal agent cancellation marks the active run canceled and suppresses a late final message', async () => {
+  const metadataRoot = await mkdtemp(path.join(tmpdir(), 'forger-personal-agent-cancel-meta-'));
+  const forgerHomeRoot = await mkdtemp(path.join(tmpdir(), 'forger-personal-agent-cancel-home-'));
+  const store = new AgentStore({ metadataRoot, forgerHomeRoot });
+  let releaseRunner;
+  const gate = new Promise((resolve) => { releaseRunner = resolve; });
+  const manager = new AgentConversationManager({
+    store,
+    runner: async () => {
+      await gate;
+      return { assistantText: 'Esta respuesta llegó después de cancelar.' };
+    },
+  });
+  const agent = await store.createAgent({ name: 'Cancelable agent' });
+  const conversation = await manager.startConversation({ agentId: agent.id, initialMessage: 'Espera.' });
+  const running = await waitForConversation(manager, conversation.id, (item) => item.activeRun?.status === 'running');
+
+  assert.equal(await manager.cancelRun(running.activeRun.id), true);
+  assert.equal(await manager.cancelRun(running.activeRun.id), false);
+  releaseRunner();
+  await new Promise((resolve) => setImmediate(resolve));
+  const canceled = await store.requireConversation(conversation.id);
+  assert.equal(canceled.activeRun.status, 'canceled');
+  assert.equal(canceled.messages.some((message) => message.content.includes('después de cancelar')), false);
 });
 
 test('personal agent routines create a conversable thread, reuse it on each trigger, and skip while busy', async () => {
