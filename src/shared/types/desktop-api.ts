@@ -9,7 +9,7 @@ import type { InstallWelcomeResult } from './chat';
 import type { AppSecretsState, UserSecretSummary, CreateUserSecretInput, UpdateUserSecretInput, DeleteUserSecretInput, ConnectAppSecretInput, DisconnectAppSecretInput, SecretMutationResult } from './secrets';
 import type { DeveloperPathState, Settings, UpdateAppDeveloperSettingsInput, UpdateCodexDefaultsInput, UpdateDeveloperModeInput, UpdateAgentDefaultsInput, MemoryListInput, MemoryEntry, MemoryCreateInput, MemoryUpdateInput } from './settings';
 import type { SpeechToTextConfigInput, SpeechToTextProcessInput, SpeechToTextProcessResult, SpeechToTextRealtimeSession, SpeechToTextState, SpeechToTextUploadInput } from './speech-to-text';
-import type { SidekickConfigureInput, SidekickDisplayInput, SidekickIdleConfigInput, SidekickIdleImageInput, SidekickMicrophonePlaybackInput, SidekickMicrophonePlaybackResult, SidekickMicrophoneRecordingInput, SidekickMutationResult, SidekickPersonalAgentInput, SidekickScreenInput, SidekickSpeakInput, SidekickSpeakerPlaybackResult, SidekickState } from './sidekicks';
+import type { SidekickConfigureInput, SidekickDisplayInput, SidekickIdleConfigInput, SidekickIdleImageInput, SidekickMicrophonePlaybackInput, SidekickMicrophonePlaybackResult, SidekickMicrophoneRecordingInput, SidekickMutationResult, SidekickPersonalAgentInput, SidekickScreenInput, SidekickSpeakInput, SidekickSpeakerPlaybackResult, SidekickState, SidekickVoiceConfigInput } from './sidekicks';
 import type { TextToSpeechConfigInput, TextToSpeechState, TextToSpeechSynthesizeInput, TextToSpeechSynthesizeResult } from './text-to-speech';
 import type { LiveVoiceInputConfigInput, LiveVoiceInputDeviceListInput, LiveVoiceInputSession, LiveVoiceInputSessionInput, LiveVoiceInputState, LiveVoiceInputStopInput, LiveVoiceInputWakeEvent, LiveVoiceInputWakeRuntime } from './live-voice-input';
 import type { WakeWordConfigInput, WakeWordDetectionEvent, WakeWordDiagnosticEvent, WakeWordRuntime, WakeWordSession, WakeWordState } from './wake-word';
@@ -110,6 +110,7 @@ export interface ForgerDesktopApi {
   sidekicksSendDisplay: (input: SidekickDisplayInput) => Promise<SidekickMutationResult>;
   sidekicksSendScreen: (input: SidekickScreenInput) => Promise<SidekickMutationResult>;
   sidekicksSetPersonalAgent: (input: SidekickPersonalAgentInput) => Promise<SidekickMutationResult>;
+  sidekicksSetVoiceConfig: (input: SidekickVoiceConfigInput) => Promise<SidekickMutationResult>;
   sidekicksSpeak: (input: SidekickSpeakInput) => Promise<SidekickSpeakerPlaybackResult>;
   sidekicksStartMicrophoneRecording: (input: SidekickMicrophoneRecordingInput) => Promise<SidekickMutationResult>;
   sidekicksStopMicrophoneRecording: (input: SidekickMicrophoneRecordingInput) => Promise<SidekickMutationResult>;

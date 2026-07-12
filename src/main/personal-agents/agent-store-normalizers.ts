@@ -253,14 +253,14 @@ export const normalizeSharedFileRefs = (value: unknown): SharedFileRef[] => {
 };
 
 export const normalizeConversationOrigin = (value: unknown): PersonalAgentConversationOrigin => {
-  if (value === 'agent' || value === 'routine') return value;
+  if (value === 'agent' || value === 'routine' || value === 'sidekick') return value;
   return 'user';
 };
 
 export const normalizeConversationStatus = (value: unknown): PersonalAgentConversationStatus => value === 'archived' ? 'archived' : 'active';
 
 export const normalizeMessageSource = (value: unknown): PersonalAgentMessageSource => {
-  if (value === 'routine' || value === 'scheduled_wakeup') return value;
+  if (value === 'routine' || value === 'scheduled_wakeup' || value === 'sidekick') return value;
   return 'human';
 };
 

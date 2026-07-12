@@ -742,6 +742,57 @@ test('personal agent Codex runs prepare Git and write logs under metadata root',
   assert.ok(resumeInvocation.allowedRoots.split(path.delimiter).includes(connectedAppRoot));
 });
 
+test('Sidekick conversations persist their device relation, stay read-only, and carry locale only through the internal voice path', async () => {
+  const metadataRoot = await mkdtemp(path.join(tmpdir(), 'forger-personal-agent-sidekick-meta-'));
+  const forgerHomeRoot = await mkdtemp(path.join(tmpdir(), 'forger-personal-agent-sidekick-home-'));
+  const store = new AgentStore({ metadataRoot, forgerHomeRoot });
+  let capturedPrompt = '';
+  const manager = new AgentConversationManager({
+    store,
+    runner: async ({ prompt }) => {
+      capturedPrompt = prompt;
+      return { assistantText: 'Listo, te respondo en español.' };
+    },
+  });
+  const agent = await store.createAgent({ name: 'Home helper' });
+  const conversation = await manager.createSidekickConversation({
+    agentId: agent.id,
+    sidekickId: 'sidekick-desk',
+    title: 'Sidekick · Escritorio',
+  });
+
+  assert.equal(conversation.origin, 'sidekick');
+  assert.equal(conversation.sidekickId, 'sidekick-desk');
+  assert.equal(conversation.readOnly, true);
+  await assert.rejects(
+    manager.sendMessage({ conversationId: conversation.id, content: 'This renderer path must stay blocked.' }),
+    /personal_agent_conversation_read_only/,
+  );
+
+  await manager.sendSidekickMessage({
+    conversationId: conversation.id,
+    sidekickId: 'sidekick-desk',
+    content: '¿Qué hora es?',
+    locale: 'es-CL',
+  });
+  const completed = await waitForConversation(manager, conversation.id, (item) => item.activeRun?.status === 'completed');
+  assert.deepEqual(completed.messages.map((message) => [message.role, message.source, message.locale]), [
+    ['user', 'sidekick', 'es-CL'],
+    ['assistant', 'sidekick', undefined],
+  ]);
+  assert.match(capturedPrompt, /es-CL/);
+  assert.match(capturedPrompt, /brief.*natural.*spoken/i);
+  assert.match(capturedPrompt, /only text/i);
+  assert.match(capturedPrompt, /do not (?:call|invoke).*(?:TTS|audio)/i);
+  assert.match(capturedPrompt, /Desktop.*synthesi[sz]es.*cancel/i);
+  assert.doesNotMatch(completed.messages[0].content, /brief|locale|spoken/i);
+
+  const reloaded = new AgentStore({ metadataRoot, forgerHomeRoot });
+  const latest = await reloaded.findLatestSidekickConversation({ sidekickId: 'sidekick-desk', agentId: agent.id });
+  assert.equal(latest.id, conversation.id);
+  assert.equal(latest.sidekickId, 'sidekick-desk');
+});
+
 test('personal agent conversation manager starts a real run, persists progress, and blocks overlapping sends', async () => {
   const metadataRoot = await mkdtemp(path.join(tmpdir(), 'forger-personal-agent-conversations-meta-'));
   const forgerHomeRoot = await mkdtemp(path.join(tmpdir(), 'forger-personal-agent-conversations-home-'));

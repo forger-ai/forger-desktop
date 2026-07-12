@@ -124,6 +124,7 @@ export interface SpeechToTextUploadInput {
   task?: SpeechToTextTask;
   language?: string;
   model?: string;
+  ephemeral?: boolean;
 }
 
 export interface SpeechToTextProcessResult {

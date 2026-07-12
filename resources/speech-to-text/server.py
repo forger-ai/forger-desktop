@@ -21,6 +21,7 @@ class ProcessRequest(BaseModel):
     path: str
     task: str = "transcribe"
     language: str | None = None
+    ephemeral: bool = False
 
 
 class RuntimeState:
@@ -452,17 +453,18 @@ def make_app(state: RuntimeState) -> FastAPI:
                     "model": state.model_name,
                     "text": text,
                 })
-                state.processed_files.append({
-                    "path": str(audio_path),
-                    "task": task,
-                    "processedAt": job["updatedAt"],
-                    "durationSeconds": duration,
-                    "sizeBytes": size_bytes,
-                    "language": language,
-                    "model": state.model_name,
-                    "textPreview": text[:240],
-                })
-                state._write_processed_files()
+                if not input_data.ephemeral:
+                    state.processed_files.append({
+                        "path": str(audio_path),
+                        "task": task,
+                        "processedAt": job["updatedAt"],
+                        "durationSeconds": duration,
+                        "sizeBytes": size_bytes,
+                        "language": language,
+                        "model": state.model_name,
+                        "textPreview": text[:240],
+                    })
+                    state._write_processed_files()
                 state.log_event("job_completed", {"task": task, "sizeBytes": size_bytes, "durationSeconds": duration, "language": language, "model": state.model_name})
             except Exception as exc:
                 technical_code = str(exc) or "speech_to_text_failed"

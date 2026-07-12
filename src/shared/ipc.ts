@@ -59,6 +59,7 @@ export const IPC_CHANNELS = {
   sidekicksSendDisplay: 'forger:sidekicks:send-display',
   sidekicksSendScreen: 'forger:sidekicks:send-screen',
   sidekicksSetPersonalAgent: 'forger:sidekicks:set-personal-agent',
+  sidekicksSetVoiceConfig: 'forger:sidekicks:set-voice-config',
   sidekicksSpeak: 'forger:sidekicks:speak',
   sidekicksStartMicrophoneRecording: 'forger:sidekicks:microphone:start',
   sidekicksStopMicrophoneRecording: 'forger:sidekicks:microphone:stop',

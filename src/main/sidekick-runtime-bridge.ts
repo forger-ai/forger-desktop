@@ -51,7 +51,7 @@ const ICONS = new Set([
   'listening', 'thinking', 'speaking', 'sleeping', 'error', 'bell', 'info', 'audio', 'wifi', 'warning',
   'ok', 'battery', 'settings', 'home', 'download', 'upload', 'play', 'pause',
 ]);
-const STATE_ICONS = new Set(['listening', 'thinking', 'speaking', 'sleeping', 'error']);
+const STATE_ICONS = new Set(['listening', 'transcribing', 'thinking', 'speaking', 'sleeping', 'error']);
 
 const fail = (status: number, code: string): never => { throw new DesktopRuntimeBridgeError(status, code); };
 const clean = (value: unknown): string => typeof value === 'string' ? value.trim() : '';

@@ -28,36 +28,29 @@ import type {
   SidekickState,
   SidekickSummary,
   SidekickUsbDevice,
+  SidekickVoicePhase,
+  SidekickVoiceConfigInput,
   SidekickWakeEvent,
 } from '../shared/types';
 import {
+  SIDEKICK_MAX_CONVERSATION_TTL_MINUTES,
+  SIDEKICK_MIN_CONVERSATION_TTL_MINUTES,
   SIDEKICK_DEFAULT_IDLE_CONFIG,
   SIDEKICK_IDLE_IMAGE_BYTES,
   SIDEKICK_IDLE_SCREENS,
 } from '../shared/types';
 import {
-  SIDEKICK_ACK_TIMEOUT_MS,
   SIDEKICK_BAUD_RATE,
   SIDEKICK_HEARTBEAT_TIMEOUT_MS,
   SIDEKICK_MDNS_SERVICE,
-  SIDEKICK_MIC_CHANNELS,
-  SIDEKICK_MIC_FORMAT,
-  SIDEKICK_MIC_MAX_CHUNK_BYTES,
-  SIDEKICK_MIC_MAX_WAV_BYTES,
-  SIDEKICK_MIC_MIME_TYPE,
-  SIDEKICK_MIC_RECENT_LIMIT,
-  SIDEKICK_MIC_SAMPLE_RATE,
   SIDEKICK_OFFLINE_SWEEP_MS,
   SIDEKICK_PROTO,
   SIDEKICK_SERVICE_TYPE,
   SIDEKICK_VISIBLE_NAME_MAX_LENGTH,
   SIDEKICK_WS_MAX_PAYLOAD_BYTES,
   SIDEKICK_WS_PATH,
-  WAV_HEADER_BYTES,
-  buildPcm16MonoWav,
   buildSidekickHostname,
   closeSerialPort,
-  decodeCanonicalBase64Chunk,
   decryptSidekickEnvelope,
   deriveSidekickKey,
   drainSerialPort,
@@ -65,20 +58,17 @@ import {
   isEncryptedEnvelope,
   isNetworkHelloPayload,
   isPathInside,
-  isSafeCode,
   isStoredSidekickRecord,
-  isStoredSidekickRecording,
   normalizeCapabilities,
   normalizeSidekickBattery,
   normalizeSidekickTime,
   normalizeSidekickUsbDevice,
   normalizeVisibleSidekickName,
+  normalizedStoredSidekickVoiceConfig,
   openSerialPort,
-  recordingAckKey,
   sidekickConfigureFailureCode,
   sidekickConfigureFailureMessage,
   sidekickFailureState,
-  stripRecordingStorageFields,
   summarizeMicrophoneRecording,
   summarizeSpeakerPlayback,
   summarizeUsbSerialCommand,
@@ -90,18 +80,17 @@ import {
 } from './sidekick-service-helpers';
 import { chunkSidekickPcm, wavToSidekickPcm } from './sidekick-audio-codec';
 import type {
-  ActiveSidekickRecording,
   ActiveSidekickPlayback,
-  PendingRecordingAck,
   SidekickNetworkPayload,
   SidekickRuntimeState,
   SidekickUsbHello,
   StoredSidekickFile,
   StoredSidekickRecord,
-  StoredSidekickRecording,
-  StoredSidekickRecordingFile,
 } from './sidekick-service-helpers';
 import { parseSidekickTimeReceipt, parseSidekickWakeReceipt, SidekickSpeakerReceipts } from './sidekick-network-receipts';
+import { raceSidekickOperationWithSignal } from './sidekick-service-reliability';
+import { SidekickMicrophoneController } from './sidekick-microphone-controller';
+import { handleNetworkRxOverflow, handleWakeBeepResult } from './sidekick-diagnostics';
 
 export { normalizeSidekickUsbDevice } from './sidekick-service-helpers';
 
@@ -115,6 +104,11 @@ const localTimeSync = (): { epochMs: number; timeZone: string; utcOffsetMinutes:
     utcOffsetMinutes: -now.getTimezoneOffset(),
   };
 };
+
+export interface SidekickSessionInvalidationEvent {
+  sidekickId: string;
+  reason: 'reconnected' | 'forgotten';
+}
 
 export interface SidekickServiceOptions {
   metadataRoot: string;
@@ -140,6 +134,8 @@ export interface SidekickServiceOptions {
     chunkSequence: number;
     pcm: Uint8Array;
   }) => void | Promise<void>;
+  onSessionInvalidated?: (event: SidekickSessionInvalidationEvent) => void | Promise<void>;
+  getVoicePhase?: (sidekickId: string) => SidekickVoicePhase | undefined;
   // Uso de Claude/Codex para la pantalla idle de limites del dispositivo.
   getProviderUsage?: () => Promise<AgentProviderUsageEntry[]>;
 }
@@ -162,33 +158,36 @@ export class SidekickService {
   private servicePort: number | null = null;
   private offlineTimer: NodeJS.Timeout | null = null;
   private readonly storePath: string;
-  private readonly recordingsIndexPath: string;
-  private readonly recordingsFilesDir: string;
-  private readonly recordingsTmpDir: string;
   private readonly idleImagesDir: string;
   private readonly serialPortClass: typeof SerialPort;
   private readonly storage: Pick<typeof safeStorage, 'isEncryptionAvailable' | 'encryptString' | 'decryptString'>;
-  private recordingsLoaded = false;
-  private recordings: StoredSidekickRecording[] = [];
-  private readonly maxRecordingBytes: number;
-  private readonly recentRecordingLimit: number;
   private readonly speakerReceipts = new SidekickSpeakerReceipts();
+  private readonly microphone: SidekickMicrophoneController;
+  private readonly socketMessageWork = new Map<WebSocket, Promise<void>>();
+  private disposing = false;
 
   constructor(private readonly options: SidekickServiceOptions) {
     this.storePath = path.join(options.metadataRoot, 'sidekicks.json');
-    this.recordingsIndexPath = path.join(options.metadataRoot, 'sidekick-recordings', 'index.json');
-    this.recordingsFilesDir = path.join(options.metadataRoot, 'sidekick-recordings', 'files');
-    this.recordingsTmpDir = path.join(options.metadataRoot, 'sidekick-recordings', 'tmp');
     this.idleImagesDir = path.join(options.metadataRoot, 'sidekick-idle-images');
     this.serialPortClass = options.serialPortClass ?? SerialPort;
     this.storage = options.safeStorageAdapter ?? safeStorage;
-    this.maxRecordingBytes = options.maxRecordingBytes ?? SIDEKICK_MIC_MAX_WAV_BYTES;
-    this.recentRecordingLimit = options.recentRecordingLimit ?? SIDEKICK_MIC_RECENT_LIMIT;
+    this.microphone = new SidekickMicrophoneController({
+      metadataRoot: options.metadataRoot,
+      maxRecordingBytes: options.maxRecordingBytes,
+      recentRecordingLimit: options.recentRecordingLimit,
+      findRecord: (sidekickId) => this.findRecord(sidekickId),
+      getRuntime: (sidekickId) => this.runtimes.get(sidekickId),
+      buildState: () => this.buildState(),
+      sendEncrypted: async (record, runtime, payload) => await this.sendEncrypted(record, runtime, payload),
+      emit: () => this.emit(),
+      log: async (event, payload) => await this.log(event, payload),
+      onMicrophonePcm: options.onMicrophonePcm,
+    });
   }
 
   async getState(): Promise<SidekickState> {
     await this.load();
-    await this.loadRecordingsIndex();
+    await this.microphone.load();
     if ((this.stored?.records.length ?? 0) > 0) {
       await this.ensureNetworkService().catch((error: unknown) => {
         void this.log('sidekick:network_service_start_failed', { error: String(error) });
@@ -200,9 +199,13 @@ export class SidekickService {
     return this.buildState();
   }
 
+  public notifyVoiceStateChanged(): void {
+    this.emit();
+  }
+
   async scanUsb(): Promise<SidekickState> {
     await this.load();
-    await this.loadRecordingsIndex();
+    await this.microphone.load();
     if ((this.stored?.records.length ?? 0) > 0) {
       await this.ensureNetworkService().catch((error: unknown) => {
         void this.log('sidekick:network_service_start_failed', { error: String(error) });
@@ -223,7 +226,7 @@ export class SidekickService {
       return;
     }
     await this.load();
-    await this.loadRecordingsIndex();
+    await this.microphone.load();
     if ((this.stored?.records.length ?? 0) === 0) {
       return;
     }
@@ -233,7 +236,7 @@ export class SidekickService {
 
   async configureUsb(input: SidekickConfigureInput): Promise<SidekickMutationResult> {
     await this.load();
-    await this.loadRecordingsIndex();
+    await this.microphone.load();
     const ssid = input.ssid.trim();
     if (!ssid) {
       return sidekickFailureState(this.buildState(), 'Ingresa el nombre de la red Wi-Fi.', 'sidekick_wifi_ssid_required');
@@ -345,7 +348,7 @@ export class SidekickService {
 
   async sendDisplay(input: SidekickDisplayInput): Promise<SidekickMutationResult> {
     await this.load();
-    await this.loadRecordingsIndex();
+    await this.microphone.load();
     const record = this.findRecord(input.sidekickId);
     if (!record) {
       return sidekickFailureState(this.buildState(), 'Ese Sidekick ya no está registrado.', 'sidekick_not_registered');
@@ -388,9 +391,42 @@ export class SidekickService {
     return { ...this.buildState(), success: true };
   }
 
+  async setVoiceConfig(input: SidekickVoiceConfigInput): Promise<SidekickMutationResult> {
+    await this.load();
+    const record = this.findRecord(input.sidekickId);
+    if (!record) return sidekickFailureState(this.buildState(), 'Ese Sidekick ya no está registrado.', 'sidekick_not_registered');
+    const model = input.config?.model?.trim();
+    const voice = input.config?.voice?.trim();
+    const locale = input.config?.locale?.trim();
+    const ttl = input.config?.conversationTtlMinutes;
+    if (!Number.isInteger(ttl) || ttl < SIDEKICK_MIN_CONVERSATION_TTL_MINUTES || ttl > SIDEKICK_MAX_CONVERSATION_TTL_MINUTES) {
+      return sidekickFailureState(this.buildState(), 'El tiempo de continuidad no es válido.', 'sidekick_voice_conversation_ttl_invalid');
+    }
+    if (Boolean(model) !== Boolean(voice) || (locale && (!model || !voice))) {
+      return sidekickFailureState(this.buildState(), 'La voz seleccionada no es válida.', 'sidekick_voice_config_incomplete');
+    }
+    if (
+      (model && !/^[A-Za-z0-9._-]{1,128}$/.test(model)) ||
+      (voice && !/^[A-Za-z0-9._-]{1,128}$/.test(voice)) ||
+      (locale && !/^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(locale))
+    ) {
+      return sidekickFailureState(this.buildState(), 'La voz seleccionada no es válida.', 'sidekick_voice_config_invalid');
+    }
+    record.voiceConfig = normalizedStoredSidekickVoiceConfig({
+      ...(model ? { model } : {}),
+      ...(voice ? { voice } : {}),
+      ...(locale ? { locale } : {}),
+      conversationTtlMinutes: ttl,
+    });
+    record.updatedAt = new Date().toISOString();
+    await this.save();
+    this.emit();
+    return { ...this.buildState(), success: true };
+  }
+
   async sendScreen(input: SidekickScreenInput): Promise<SidekickMutationResult> {
     await this.load();
-    await this.loadRecordingsIndex();
+    await this.microphone.load();
     const record = this.findRecord(input.sidekickId);
     if (!record) {
       return sidekickFailureState(this.buildState(), 'Ese Sidekick ya no está registrado.', 'sidekick_not_registered');
@@ -408,7 +444,7 @@ export class SidekickService {
     if ((title?.length ?? 0) > 96 || (body?.length ?? 0) > 512 || (text?.length ?? 0) > 4000) {
       return sidekickFailureState(this.buildState(), 'El contenido de la pantalla es demasiado largo.', 'sidekick_screen_content_too_long');
     }
-    if (input.template === 'state' && !['listening', 'thinking', 'speaking', 'sleeping', 'error'].includes(input.icon ?? '')) {
+    if (input.template === 'state' && !['listening', 'transcribing', 'thinking', 'speaking', 'sleeping', 'error'].includes(input.icon ?? '')) {
       return sidekickFailureState(this.buildState(), 'El estado visual no es válido.', 'sidekick_screen_icon_invalid');
     }
     try {
@@ -432,7 +468,10 @@ export class SidekickService {
     }
   }
 
-  async speak(input: SidekickSpeakInput): Promise<SidekickSpeakerPlaybackResult> {
+  async speak(
+    input: SidekickSpeakInput,
+    options: { signal?: AbortSignal; manageScreen?: boolean } = {},
+  ): Promise<SidekickSpeakerPlaybackResult> {
     const text = typeof input.text === 'string' ? input.text.trim() : '';
     const model = typeof input.model === 'string' ? input.model.trim() : '';
     const voice = typeof input.voice === 'string' ? input.voice.trim() : '';
@@ -442,15 +481,18 @@ export class SidekickService {
     if (!this.options.synthesizeSpeech) {
       return { success: false, userMessage: 'La voz de Forger no está disponible.', technicalCode: 'sidekick_tts_unavailable' };
     }
-    await this.sendScreen({ sidekickId: input.sidekickId, template: 'state', icon: 'speaking' }).catch(() => undefined);
+    const manageScreen = options.manageScreen !== false;
+    if (manageScreen) {
+      await this.sendScreen({ sidekickId: input.sidekickId, template: 'state', icon: 'speaking' }).catch(() => undefined);
+    }
     try {
-      const synthesized = await this.options.synthesizeSpeech({
+      const synthesized = await raceSidekickOperationWithSignal(this.options.synthesizeSpeech({
         text,
         model,
         voice,
         speed: input.speed,
         format: 'wav',
-      });
+      }), options.signal);
       if (!synthesized.success || !synthesized.audioDataBase64) {
         return {
           success: false,
@@ -460,190 +502,35 @@ export class SidekickService {
       }
       const wav = Buffer.from(synthesized.audioDataBase64, 'base64');
       const pcm = wavToSidekickPcm(wav);
-      return await this.playSpeakerPcm({ sidekickId: input.sidekickId, samples: pcm.samples });
+      return await this.playSpeakerPcm({ sidekickId: input.sidekickId, samples: pcm.samples }, { signal: options.signal });
     } catch (error) {
+      if (options.signal?.aborted) {
+        return { success: false, userMessage: 'La reproducción fue interrumpida.', technicalCode: 'sidekick_speaker_playback_cancelled' };
+      }
       return {
         success: false,
         userMessage: 'No pude preparar la voz para el Sidekick.',
         technicalCode: error instanceof Error ? error.message : 'sidekick_tts_failed',
       };
     } finally {
-      await this.sendScreen({ sidekickId: input.sidekickId, template: 'idle' }).catch(() => undefined);
+      if (manageScreen) {
+        await this.sendScreen({ sidekickId: input.sidekickId, template: 'idle' }).catch(() => undefined);
+      }
     }
   }
 
   async startMicrophoneRecording(input: SidekickMicrophoneRecordingInput): Promise<SidekickMutationResult> {
     await this.load();
-    await this.loadRecordingsIndex();
-    const record = this.findRecord(input.sidekickId);
-    if (!record) {
-      return sidekickFailureState(this.buildState(), 'Ese Sidekick ya no está registrado.', 'sidekick_not_registered');
-    }
-    const runtime = this.runtimes.get(record.sidekickId);
-    const online = runtime?.socket?.readyState === WebSocket.OPEN && runtime.sessionId && runtime.status === 'online';
-    if (!online) {
-      return sidekickFailureState(this.buildState(), 'El Sidekick está desconectado.', 'sidekick_offline');
-    }
-    if (!record.capabilities.includes('microphone.record')) {
-      return sidekickFailureState(
-        this.buildState(),
-        'Ese Sidekick no informa soporte para grabación de micrófono.',
-        'sidekick_microphone_capability_missing',
-      );
-    }
-    if (runtime.microphoneRecording) {
-      return sidekickFailureState(
-        this.buildState(),
-        'Ese Sidekick ya tiene una grabación activa.',
-        'sidekick_microphone_recording_active',
-      );
-    }
-    if (runtime.speakerPlayback) {
-      return sidekickFailureState(this.buildState(), 'Espera a que termine el audio antes de usar el micrófono.', 'sidekick_audio_busy');
-    }
-
-    const recordingId = randomUUID();
-    const persist = input.transient !== true;
-    if (persist) {
-      await fs.mkdir(this.recordingsTmpDir, { recursive: true });
-    }
-    runtime.microphoneRecording = {
-      sidekickId: record.sidekickId,
-      recordingId,
-      status: 'starting',
-      startedAt: new Date().toISOString(),
-      bytes: 0,
-      chunks: 0,
-      tempPcmPath: persist ? this.stagedPcmPath(recordingId) : '',
-      persist,
-      nextChunkSequence: 0,
-      sampleRate: SIDEKICK_MIC_SAMPLE_RATE,
-      channels: SIDEKICK_MIC_CHANNELS,
-      format: SIDEKICK_MIC_FORMAT,
-    };
-    runtime.microphoneErrorMessage = undefined;
-    runtime.microphoneErrorCode = undefined;
-    this.emit();
-
-    const waitForStarted = this.waitForRecordingAck(runtime, 'started', recordingId);
-    try {
-      await this.sendEncrypted(record, runtime, {
-        v: 1,
-        id: randomUUID(),
-        cmd: 'microphone.record.start',
-        recordingId,
-        sampleRate: SIDEKICK_MIC_SAMPLE_RATE,
-        channels: SIDEKICK_MIC_CHANNELS,
-        format: SIDEKICK_MIC_FORMAT,
-      });
-      await waitForStarted;
-      return { ...this.buildState(), success: true };
-    } catch (error) {
-      this.cancelPendingRecordingAck(runtime, 'started', recordingId);
-      await this.failActiveRecording(runtime, 'No pude iniciar la prueba de micrófono.', 'sidekick_microphone_start_failed');
-      void this.log('sidekick:microphone_start_failed', {
-        sidekickId: record.sidekickId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      return sidekickFailureState(this.buildState(), 'No pude iniciar la prueba de micrófono.', 'sidekick_microphone_start_failed');
-    }
+    return await this.microphone.start(input);
   }
 
   async stopMicrophoneRecording(input: SidekickMicrophoneRecordingInput): Promise<SidekickMutationResult> {
     await this.load();
-    await this.loadRecordingsIndex();
-    const record = this.findRecord(input.sidekickId);
-    if (!record) {
-      return sidekickFailureState(this.buildState(), 'Ese Sidekick ya no está registrado.', 'sidekick_not_registered');
-    }
-    const runtime = this.runtimes.get(record.sidekickId);
-    const active = runtime?.microphoneRecording;
-    if (!runtime || !active || active.status === 'starting') {
-      return sidekickFailureState(this.buildState(), 'Ese Sidekick no tiene una grabación activa.', 'sidekick_microphone_recording_not_active');
-    }
-    if (!runtime.socket || runtime.socket.readyState !== WebSocket.OPEN || !runtime.sessionId || runtime.status !== 'online') {
-      await this.failActiveRecording(runtime, 'El Sidekick se desconectó durante la grabación.', 'sidekick_offline');
-      return sidekickFailureState(this.buildState(), 'El Sidekick está desconectado.', 'sidekick_offline');
-    }
-
-    active.status = 'stopping';
-    runtime.microphoneErrorMessage = undefined;
-    runtime.microphoneErrorCode = undefined;
-    this.emit();
-
-    const waitForStopped = this.waitForRecordingAck(runtime, 'stopped', active.recordingId);
-    try {
-      await this.sendEncrypted(record, runtime, {
-        v: 1,
-        id: randomUUID(),
-        cmd: 'microphone.record.stop',
-        recordingId: active.recordingId,
-      });
-      await waitForStopped;
-      return { ...this.buildState(), success: true };
-    } catch (error) {
-      this.cancelPendingRecordingAck(runtime, 'stopped', active.recordingId);
-      const technicalCode = error instanceof Error ? error.message : 'sidekick_microphone_stop_failed';
-      const sampleCountMismatch = technicalCode === 'sidekick_microphone_sample_count_mismatch';
-      if (runtime.microphoneRecording?.recordingId === active.recordingId) {
-        runtime.microphoneRecording.status = 'recording';
-        runtime.microphoneErrorMessage = sampleCountMismatch
-          ? 'La grabación de micrófono quedó incompleta y no se guardó.'
-          : 'No pude detener la prueba de micrófono.';
-        runtime.microphoneErrorCode = sampleCountMismatch
-          ? 'sidekick_microphone_sample_count_mismatch'
-          : 'sidekick_microphone_stop_failed';
-      }
-      void this.log('sidekick:microphone_stop_failed', {
-        sidekickId: record.sidekickId,
-        error: technicalCode,
-      });
-      this.emit();
-      return sidekickFailureState(
-        this.buildState(),
-        sampleCountMismatch
-          ? 'La grabación de micrófono quedó incompleta y no se guardó.'
-          : 'No pude detener la prueba de micrófono.',
-        sampleCountMismatch ? technicalCode : 'sidekick_microphone_stop_failed',
-      );
-    }
+    return await this.microphone.stop(input);
   }
 
   async readMicrophoneRecording(input: SidekickMicrophonePlaybackInput): Promise<SidekickMicrophonePlaybackResult> {
-    await this.loadRecordingsIndex();
-    const recording = this.recordings.find(
-      (entry) => entry.sidekickId === input.sidekickId && entry.recordingId === input.recordingId,
-    );
-    if (!recording) {
-      return {
-        success: false,
-        userMessage: 'No encontré esa grabación.',
-        technicalCode: 'sidekick_microphone_recording_not_found',
-      };
-    }
-    const filePath = path.join(this.recordingsFilesDir, recording.filename);
-    if (!isPathInside(this.recordingsFilesDir, filePath)) {
-      return {
-        success: false,
-        userMessage: 'No pude abrir esa grabación.',
-        technicalCode: 'sidekick_microphone_recording_invalid_path',
-      };
-    }
-    const stat = await fs.stat(filePath).catch(() => null);
-    if (!stat || stat.size > this.maxRecordingBytes || stat.size !== recording.sizeBytes) {
-      return {
-        success: false,
-        userMessage: 'No pude abrir esa grabación.',
-        technicalCode: 'sidekick_microphone_recording_size_invalid',
-      };
-    }
-    const bytes = await fs.readFile(filePath);
-    return {
-      success: true,
-      mimeType: SIDEKICK_MIC_MIME_TYPE,
-      bytes: new Uint8Array(bytes),
-      sizeBytes: bytes.byteLength,
-    };
+    return await this.microphone.read(input);
   }
 
   async syncTime(sidekickId: string): Promise<void> {
@@ -677,7 +564,10 @@ export class SidekickService {
     runtime.lastTimeSyncAt = Date.now();
   }
 
-  async playSpeakerPcm(input: SidekickSpeakerPcmInput): Promise<SidekickSpeakerPlaybackResult> {
+  async playSpeakerPcm(
+    input: SidekickSpeakerPcmInput,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<SidekickSpeakerPlaybackResult> {
     await this.load();
     const record = this.findRecord(input.sidekickId);
     if (!record) {
@@ -711,6 +601,7 @@ export class SidekickService {
       underruns: 0,
       droppedChunks: 0,
       queueDepth: 1,
+      maxInFlightChunks: 1,
     };
     runtime.speakerPlayback = active;
     runtime.speakerErrorMessage = undefined;
@@ -728,18 +619,17 @@ export class SidekickService {
         channels: 1,
         format: 'pcm_s16le',
       });
-      await started;
+      await raceSidekickOperationWithSignal(started, options.signal);
 
-      // Ventana deslizante: hasta `window` chunks en vuelo (la cola del
-      // firmware admite queueDepth; se deja margen para no gatillar
-      // playback_backpressure). Con lockstep estricto el round trip completo
-      // tenia que caber en los 64 ms de un chunk y cualquier jitter cortaba
-      // el audio; con la ventana el Sidekick acumula ~380 ms de colchon.
-      const window = Math.min(6, Math.max(1, active.queueDepth - 2));
+      // La ventana viene negociada por firmware y ya considera transporte,
+      // cola de comandos y cola de audio. Firmware legado cae a lockstep para
+      // evitar inferir capacidad desde queueDepth, que no describe WebSocket.
+      const window = active.maxInFlightChunks;
       const pending: Array<Promise<void>> = [];
       for (const chunk of chunkSidekickPcm(input.samples)) {
+        if (options.signal?.aborted) throw options.signal.reason ?? new Error('sidekick_operation_cancelled');
         while (pending.length >= window) {
-          await pending.shift();
+          await raceSidekickOperationWithSignal(pending.shift()!, options.signal);
         }
         const progressed = this.speakerReceipts.wait(runtime, `progress:${playbackId}:${chunk.chunkSequence}`);
         // Un fallo rechaza todos los acks pendientes a la vez; el catch vacio
@@ -760,7 +650,7 @@ export class SidekickService {
         this.emit();
       }
       while (pending.length > 0) {
-        await pending.shift();
+        await raceSidekickOperationWithSignal(pending.shift()!, options.signal);
       }
 
       active.status = 'stopping';
@@ -772,7 +662,7 @@ export class SidekickService {
         playbackId,
       });
       this.emit();
-      await stopped;
+      await raceSidekickOperationWithSignal(stopped, options.signal);
       const result: SidekickSpeakerPlaybackResult = {
         success: true,
         playbackId,
@@ -784,10 +674,14 @@ export class SidekickService {
       this.emit();
       return result;
     } catch (error) {
-      await this.log('sidekick:speaker_playback_failed', {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const interrupted = errorMessage === 'sidekick_speaker_playback_interrupted' || errorMessage === 'sidekick_session_reconnected';
+      const cancelled = options.signal?.aborted === true || interrupted;
+      await this.log(cancelled ? 'sidekick:speaker_playback_interrupted' : 'sidekick:speaker_playback_failed', {
         sidekickId: record.sidekickId,
         playbackId,
-        error: error instanceof Error ? error.message : String(error),
+        outcome: cancelled ? 'interrupted' : 'failed',
+        technicalCode: errorMessage,
         samplesSent: active.samplesSent,
         samplesPlayed: active.samplesPlayed,
         bufferedSamples: active.bufferedSamples,
@@ -795,8 +689,8 @@ export class SidekickService {
         droppedChunks: active.droppedChunks,
         pendingAcks: [...runtime.pendingSpeakerAcks.keys()],
       });
-      this.speakerReceipts.reject(runtime, new Error('sidekick_speaker_playback_failed'));
-      if (runtime.socket?.readyState === WebSocket.OPEN && runtime.sessionId) {
+      this.speakerReceipts.reject(runtime, new Error(cancelled ? 'sidekick_speaker_playback_cancelled' : 'sidekick_speaker_playback_failed'));
+      if (runtime.speakerPlayback === active && runtime.socket?.readyState === WebSocket.OPEN && runtime.sessionId) {
         active.status = 'cancelling';
         const stopped = this.speakerReceipts.wait(runtime, `stopped:${playbackId}`);
         void stopped.catch(() => undefined);
@@ -810,24 +704,38 @@ export class SidekickService {
           .catch(() => undefined);
       }
       runtime.speakerPlayback = undefined;
-      runtime.speakerErrorMessage = 'No pude reproducir el audio en el Sidekick.';
-      runtime.speakerErrorCode = error instanceof Error ? error.message : 'sidekick_speaker_playback_failed';
+      runtime.speakerErrorMessage = cancelled ? undefined : 'No pude reproducir el audio en el Sidekick.';
+      runtime.speakerErrorCode = cancelled
+        ? undefined
+        : error instanceof Error ? error.message : 'sidekick_speaker_playback_failed';
       this.emit();
       return {
         success: false,
         playbackId,
-        userMessage: runtime.speakerErrorMessage,
-        technicalCode: runtime.speakerErrorCode,
+        userMessage: cancelled ? 'La reproducción fue interrumpida.' : runtime.speakerErrorMessage,
+        technicalCode: interrupted
+          ? 'sidekick_speaker_playback_interrupted'
+          : cancelled ? 'sidekick_speaker_playback_cancelled' : runtime.speakerErrorCode,
       };
     }
   }
 
   // --- Personalizacion idle (config, imagen custom, limites) ----------------
 
-  private normalizeIdleConfig(config: SidekickIdleConfig): SidekickIdleConfig {
-    const screens = SIDEKICK_IDLE_SCREENS.filter((screen) => config.screens.includes(screen));
-    const rotateSeconds = Number.isFinite(config.rotateSeconds)
-      ? Math.min(3600, Math.max(5, Math.round(config.rotateSeconds)))
+  private normalizeIdleConfig(config?: SidekickIdleConfig): SidekickIdleConfig {
+    const requestedScreens: unknown[] = Array.isArray(config?.screens) ? config.screens : [];
+    const screens: SidekickIdleScreen[] = [];
+    const seen = new Set<SidekickIdleScreen>();
+    for (const value of requestedScreens) {
+      if (!SIDEKICK_IDLE_SCREENS.includes(value as SidekickIdleScreen) || seen.has(value as SidekickIdleScreen)) {
+        continue;
+      }
+      const screen = value as SidekickIdleScreen;
+      seen.add(screen);
+      screens.push(screen);
+    }
+    const rotateSeconds = Number.isFinite(config?.rotateSeconds)
+      ? Math.min(3600, Math.max(5, Math.round(config?.rotateSeconds ?? SIDEKICK_DEFAULT_IDLE_CONFIG.rotateSeconds)))
       : SIDEKICK_DEFAULT_IDLE_CONFIG.rotateSeconds;
     return {
       screens: screens.length > 0 ? screens : [...SIDEKICK_DEFAULT_IDLE_CONFIG.screens],
@@ -896,7 +804,7 @@ export class SidekickService {
   }
 
   private async pushIdleConfig(record: StoredSidekickRecord, runtime: SidekickRuntimeState): Promise<void> {
-    const config = record.idleConfig ?? SIDEKICK_DEFAULT_IDLE_CONFIG;
+    const config = this.normalizeIdleConfig(record.idleConfig);
     await this.sendEncrypted(record, runtime, {
       v: 1,
       id: randomUUID(),
@@ -1001,29 +909,29 @@ export class SidekickService {
 
   async forget(sidekickId: string): Promise<SidekickMutationResult> {
     await this.load();
-    await this.loadRecordingsIndex();
+    await this.microphone.load();
     const before = this.stored?.records.length ?? 0;
-    if (this.stored) {
-      this.stored.records = this.stored.records.filter((record) => record.sidekickId !== sidekickId);
-    }
+    const registered = this.stored?.records.some((record) => record.sidekickId === sidekickId) ?? false;
     const runtime = this.runtimes.get(sidekickId);
     if (runtime) {
-      await this.cleanupActiveRecording(runtime, 'sidekick_forgotten');
+      await this.microphone.cleanupActive(runtime, 'sidekick_forgotten');
       this.speakerReceipts.reject(runtime, new Error('sidekick_forgotten'));
+      runtime.speakerPlayback = undefined;
+    }
+    if (registered || runtime) {
+      await this.notifySessionInvalidated(sidekickId, 'forgotten');
+    }
+    if (this.stored) {
+      this.stored.records = this.stored.records.filter((record) => record.sidekickId !== sidekickId);
     }
     runtime?.socket?.close();
     this.runtimes.delete(sidekickId);
     if (before !== (this.stored?.records.length ?? 0)) {
-      const removedRecordings = this.recordings.filter((recording) => recording.sidekickId === sidekickId);
-      this.recordings = this.recordings.filter((recording) => recording.sidekickId !== sidekickId);
-      await Promise.all(removedRecordings.map(async (recording) => {
-        await fs.rm(path.join(this.recordingsFilesDir, recording.filename), { force: true }).catch(() => undefined);
-      }));
+      await this.microphone.forget(sidekickId);
       const idleImage = this.idleImagePath(sidekickId);
       if (idleImage) {
         await fs.rm(idleImage, { force: true }).catch(() => undefined);
       }
-      await this.saveRecordingsIndex();
       await this.save();
     }
     this.emit();
@@ -1031,15 +939,18 @@ export class SidekickService {
   }
 
   async dispose(): Promise<void> {
+    this.disposing = true;
     if (this.offlineTimer) {
       clearInterval(this.offlineTimer);
       this.offlineTimer = null;
     }
     for (const runtime of this.runtimes.values()) {
-      await this.cleanupActiveRecording(runtime, 'sidekick_disposed');
+      await this.microphone.cleanupActive(runtime, 'sidekick_disposed');
       this.speakerReceipts.reject(runtime, new Error('sidekick_disposed'));
       runtime.socket?.close();
     }
+    await Promise.allSettled([...this.socketMessageWork.values()]);
+    this.socketMessageWork.clear();
     this.wsServer?.close();
     this.wsServer = null;
     if (this.httpServer) {
@@ -1072,7 +983,9 @@ export class SidekickService {
     this.wsServer.on('connection', (socket, request) => {
       const ipAddress = request.socket.remoteAddress;
       let messageQueue = Promise.resolve();
+      this.socketMessageWork.set(socket, messageQueue);
       socket.on('message', (raw) => {
+        if (this.disposing) return;
         messageQueue = messageQueue.then(
           async () => await this.handleSocketMessage(socket, raw.toString(), ipAddress),
           async () => await this.handleSocketMessage(socket, raw.toString(), ipAddress),
@@ -1080,9 +993,14 @@ export class SidekickService {
           void this.log('sidekick:socket_message_failed', { error: String(error) });
           socket.close();
         });
+        this.socketMessageWork.set(socket, messageQueue);
       });
-      socket.on('close', () => {
-        this.markSocketClosed(socket);
+      socket.on('close', (code, reason) => {
+        this.markSocketClosed(socket, code, reason.toString('utf8'));
+        const pending = this.socketMessageWork.get(socket);
+        void pending?.finally(() => {
+          if (this.socketMessageWork.get(socket) === pending) this.socketMessageWork.delete(socket);
+        });
       });
     });
     await new Promise<void>((resolve, reject) => {
@@ -1164,6 +1082,25 @@ export class SidekickService {
       throw new Error('sidekick_network_hello_invalid');
     }
     const supersededSocket = runtime.socket !== socket ? runtime.socket : undefined;
+    const connectionChanged = Boolean(runtime.sessionId) && (
+      runtime.socket !== socket || runtime.sessionId !== parsed.sessionId
+    );
+    const sessionWasInvalidated = Boolean(
+      runtime.microphoneRecording ||
+      runtime.speakerPlayback ||
+      connectionChanged,
+    );
+    if (runtime.microphoneRecording) {
+      await this.microphone.cleanupActive(runtime, 'sidekick_session_reconnected');
+    }
+    if (runtime.speakerPlayback) {
+      this.speakerReceipts.reject(runtime, new Error('sidekick_session_reconnected'));
+      runtime.speakerPlayback = undefined;
+    }
+    runtime.microphoneErrorMessage = undefined;
+    runtime.microphoneErrorCode = undefined;
+    runtime.speakerErrorMessage = undefined;
+    runtime.speakerErrorCode = undefined;
     runtime.socket = socket;
     runtime.sessionId = parsed.sessionId;
     runtime.rxSeq = parsed.seq;
@@ -1172,14 +1109,16 @@ export class SidekickService {
     runtime.ipAddress = typeof payload.ip === 'string' && payload.ip.trim() ? payload.ip.trim() : ipAddress;
     runtime.errorMessage = undefined;
     runtime.battery = normalizeSidekickBattery(payload.battery) ?? runtime.battery;
+    record.firmwareVersion = typeof payload.fw === 'string' ? payload.fw : record.firmwareVersion;
+    record.capabilities = normalizeCapabilities(payload.capabilities);
+    record.updatedAt = new Date().toISOString();
     // Un Sidekick solo puede tener una sesion activa. Tras un reset USB/TCP la
     // conexion anterior puede quedar ESTABLISHED hasta el keepalive; cerrarla
     // evita recibos y comandos de dos sesiones para el mismo dispositivo.
     supersededSocket?.close(1000, 'sidekick_session_superseded');
-
-    record.firmwareVersion = typeof payload.fw === 'string' ? payload.fw : record.firmwareVersion;
-    record.capabilities = normalizeCapabilities(payload.capabilities);
-    record.updatedAt = new Date().toISOString();
+    if (sessionWasInvalidated) {
+      await this.notifySessionInvalidated(record.sidekickId, 'reconnected');
+    }
     await this.save();
     await this.syncTime(record.sidekickId).catch((error: unknown) => {
       void this.log('sidekick:time_sync_failed', {
@@ -1191,12 +1130,20 @@ export class SidekickService {
     this.emit();
   }
 
-  private markSocketClosed(socket: WebSocket): void {
+  private markSocketClosed(socket: WebSocket, closeCode?: number, closeReason?: string): void {
     let changed = false;
-    for (const runtime of this.runtimes.values()) {
+    for (const [sidekickId, runtime] of this.runtimes.entries()) {
       if (runtime.socket === socket) {
+        void this.log('sidekick:socket_closed', {
+          sidekickId,
+          closeCode,
+          closeReason: closeReason || undefined,
+          microphoneStatus: runtime.microphoneRecording?.status ?? 'idle',
+          speakerStatus: runtime.speakerPlayback?.status ?? 'idle',
+          voicePhase: this.options.getVoicePhase?.(sidekickId) ?? 'idle',
+        });
         if (runtime.microphoneRecording) {
-          void this.failActiveRecording(runtime, 'El Sidekick se desconectó durante la prueba de micrófono.', 'sidekick_socket_closed');
+          void this.microphone.failActive(runtime, 'El Sidekick se desconectó durante la prueba de micrófono.', 'sidekick_socket_closed');
         }
         if (runtime.speakerPlayback) {
           this.speakerReceipts.reject(runtime, new Error('sidekick_socket_closed'));
@@ -1224,7 +1171,7 @@ export class SidekickService {
       for (const runtime of this.runtimes.values()) {
         if (runtime.status === 'online' && runtime.lastSeenAt && now - Date.parse(runtime.lastSeenAt) > SIDEKICK_HEARTBEAT_TIMEOUT_MS) {
           if (runtime.microphoneRecording) {
-            void this.failActiveRecording(runtime, 'El Sidekick se desconectó durante la prueba de micrófono.', 'sidekick_heartbeat_timeout');
+            void this.microphone.failActive(runtime, 'El Sidekick se desconectó durante la prueba de micrófono.', 'sidekick_heartbeat_timeout');
           }
           runtime.status = 'offline';
           runtime.socket = undefined;
@@ -1316,20 +1263,30 @@ export class SidekickService {
       case 'speaker.playback.error':
         this.speakerReceipts.handleError(runtime, payload);
         return;
+      case 'wake.beep.result': {
+        handleWakeBeepResult(runtime, payload, {
+          emit: () => this.emit(),
+          log: async (event, context) => await this.log(event, context),
+          rejectSpeaker: (error) => this.speakerReceipts.reject(runtime, error),
+        });
+        return;
+      }
+      case 'network.rx_overflow': {
+        handleNetworkRxOverflow(runtime, payload, {
+          emit: () => this.emit(),
+          log: async (event, context) => await this.log(event, context),
+          rejectSpeaker: (error) => this.speakerReceipts.reject(runtime, error),
+        });
+        return;
+      }
       case 'wake.detected':
         await this.handleWakeDetected(runtime, payload);
         return;
       case 'microphone.recording.started':
-        await this.handleRecordingStarted(runtime, payload);
-        return;
       case 'microphone.recording.chunk':
-        await this.handleRecordingChunk(runtime, payload);
-        return;
       case 'microphone.recording.stopped':
-        await this.handleRecordingStopped(runtime, payload);
-        return;
       case 'microphone.recording.error':
-        await this.handleRecordingError(runtime, payload);
+        await this.microphone.handlePayload(runtime, payload);
         return;
       default:
         return;
@@ -1339,253 +1296,6 @@ export class SidekickService {
   private async handleWakeDetected(runtime: SidekickRuntimeState, payload: SidekickNetworkPayload): Promise<void> {
     await this.options.onWakeDetected?.(parseSidekickWakeReceipt(payload));
     runtime.lastSeenAt = new Date().toISOString();
-  }
-
-  // Igual que con los receipts de speaker: los mensajes de microfono que no
-  // calzan con la grabacion activa se ignoran (chunks tardios tras cancelar
-  // son trafico esperado); lanzar aqui cerraba el socket completo y forzaba
-  // la reconexion del Sidekick. Solo datos malformados de la grabacion activa
-  // fallan esa grabacion, avisando al dispositivo para que deje de grabar.
-  private async handleRecordingStarted(runtime: SidekickRuntimeState, payload: SidekickNetworkPayload): Promise<void> {
-    const active = runtime.microphoneRecording;
-    if (!active || active.status !== 'starting' || payload.recordingId !== active.recordingId) {
-      return;
-    }
-    if (
-      payload.sampleRate !== SIDEKICK_MIC_SAMPLE_RATE ||
-      payload.channels !== SIDEKICK_MIC_CHANNELS ||
-      payload.format !== SIDEKICK_MIC_FORMAT
-    ) {
-      await this.abortActiveRecording(runtime, 'El Sidekick inició la grabación con un formato inválido.', 'sidekick_microphone_started_invalid');
-      return;
-    }
-    active.status = 'recording';
-    runtime.microphoneErrorMessage = undefined;
-    runtime.microphoneErrorCode = undefined;
-    this.resolvePendingRecordingAck(runtime, 'started', active.recordingId);
-  }
-
-  private async handleRecordingChunk(runtime: SidekickRuntimeState, payload: SidekickNetworkPayload): Promise<void> {
-    const active = runtime.microphoneRecording;
-    if (
-      !active ||
-      (active.status !== 'recording' && active.status !== 'stopping') ||
-      payload.recordingId !== active.recordingId
-    ) {
-      return;
-    }
-    if (typeof payload.data !== 'string') {
-      await this.abortActiveRecording(runtime, 'El Sidekick envió audio inválido.', 'sidekick_microphone_chunk_invalid');
-      return;
-    }
-    const sequence = typeof payload.chunkSequence === 'number' ? payload.chunkSequence : active.nextChunkSequence;
-    if (!Number.isInteger(sequence) || sequence !== active.nextChunkSequence) {
-      await this.abortActiveRecording(runtime, 'El Sidekick envió audio fuera de secuencia.', 'sidekick_microphone_chunk_sequence_invalid');
-      return;
-    }
-    const chunk = decodeCanonicalBase64Chunk(payload.data);
-    if (!chunk || chunk.byteLength > SIDEKICK_MIC_MAX_CHUNK_BYTES || chunk.byteLength % 2 !== 0) {
-      await this.abortActiveRecording(runtime, 'El Sidekick envió audio inválido.', 'sidekick_microphone_chunk_invalid');
-      return;
-    }
-    if (active.bytes + chunk.byteLength + WAV_HEADER_BYTES > this.maxRecordingBytes) {
-      await this.abortActiveRecording(runtime, 'La prueba de micrófono superó el tamaño máximo.', 'sidekick_microphone_recording_too_large');
-      return;
-    }
-    await this.options.onMicrophonePcm?.({
-      sidekickId: active.sidekickId,
-      recordingId: active.recordingId,
-      chunkSequence: sequence,
-      pcm: new Uint8Array(chunk),
-    });
-    if (active.persist) {
-      await fs.appendFile(active.tempPcmPath, chunk);
-    }
-    active.bytes += chunk.byteLength;
-    active.chunks += 1;
-    active.nextChunkSequence += 1;
-  }
-
-  private async handleRecordingStopped(runtime: SidekickRuntimeState, payload: SidekickNetworkPayload): Promise<void> {
-    const active = runtime.microphoneRecording;
-    if (
-      !active ||
-      (active.status !== 'recording' && active.status !== 'stopping') ||
-      payload.recordingId !== active.recordingId
-    ) {
-      return;
-    }
-    if (typeof payload.sampleCount !== 'number' || !Number.isInteger(payload.sampleCount) || payload.sampleCount < 0) {
-      await this.failActiveRecording(
-        runtime,
-        'El Sidekick cerró la grabación con datos inválidos.',
-        'sidekick_microphone_stopped_invalid',
-      );
-      return;
-    }
-    const receivedSampleCount = active.bytes / (active.channels * 2);
-    if (!Number.isInteger(receivedSampleCount) || receivedSampleCount !== payload.sampleCount) {
-      await this.failActiveRecording(
-        runtime,
-        'La grabación de micrófono quedó incompleta y no se guardó.',
-        'sidekick_microphone_sample_count_mismatch',
-      );
-      return;
-    }
-    if (active.persist) {
-      await this.finalizeActiveRecording(active, payload.sampleCount);
-    }
-    runtime.microphoneRecording = undefined;
-    runtime.microphoneErrorMessage = undefined;
-    runtime.microphoneErrorCode = undefined;
-    this.resolvePendingRecordingAck(runtime, 'stopped', active.recordingId);
-  }
-
-  private async handleRecordingError(runtime: SidekickRuntimeState, payload: SidekickNetworkPayload): Promise<void> {
-    const active = runtime.microphoneRecording;
-    if (!active || payload.recordingId !== active.recordingId) {
-      return;
-    }
-    const code = isSafeCode(payload.code)
-      ? `sidekick_microphone_${String(payload.code)}`
-      : 'sidekick_microphone_error_invalid';
-    await this.failActiveRecording(runtime, 'El Sidekick informó un error de micrófono.', code);
-    this.rejectPendingRecordingAcks(runtime, active.recordingId, new Error(code));
-  }
-
-  // Falla la grabacion activa y pide al Sidekick que deje de grabar. Antes el
-  // socket se cerraba y la desconexion cancelaba la captura del dispositivo;
-  // sin ese cierre hay que avisarle explicitamente (best effort: si el stop no
-  // llega, el dispositivo cancela solo al perder la sesion).
-  private async abortActiveRecording(runtime: SidekickRuntimeState, message: string, code: string): Promise<void> {
-    const active = runtime.microphoneRecording;
-    await this.failActiveRecording(runtime, message, code);
-    if (!active) {
-      return;
-    }
-    const record = this.findRecord(active.sidekickId);
-    if (!record || !runtime.socket || runtime.socket.readyState !== WebSocket.OPEN || !runtime.sessionId) {
-      return;
-    }
-    await this.sendEncrypted(record, runtime, {
-      v: 1,
-      id: randomUUID(),
-      cmd: 'microphone.record.stop',
-      recordingId: active.recordingId,
-    }).catch(() => undefined);
-  }
-
-  private waitForRecordingAck(
-    runtime: SidekickRuntimeState,
-    kind: PendingRecordingAck['kind'],
-    recordingId: string,
-  ): Promise<void> {
-    const key = recordingAckKey(kind, recordingId);
-    this.cancelPendingRecordingAck(runtime, kind, recordingId);
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        runtime.pendingRecordingAcks.delete(key);
-        reject(new Error(`sidekick_microphone_${kind}_timeout`));
-      }, SIDEKICK_ACK_TIMEOUT_MS);
-      timeout.unref?.();
-      runtime.pendingRecordingAcks.set(key, { recordingId, kind, timeout, resolve, reject });
-    });
-  }
-
-  private resolvePendingRecordingAck(runtime: SidekickRuntimeState, kind: PendingRecordingAck['kind'], recordingId: string): void {
-    const key = recordingAckKey(kind, recordingId);
-    const pending = runtime.pendingRecordingAcks.get(key);
-    if (!pending) {
-      return;
-    }
-    clearTimeout(pending.timeout);
-    runtime.pendingRecordingAcks.delete(key);
-    pending.resolve();
-  }
-
-  private cancelPendingRecordingAck(runtime: SidekickRuntimeState, kind: PendingRecordingAck['kind'], recordingId: string): void {
-    const key = recordingAckKey(kind, recordingId);
-    const pending = runtime.pendingRecordingAcks.get(key);
-    if (!pending) {
-      return;
-    }
-    clearTimeout(pending.timeout);
-    runtime.pendingRecordingAcks.delete(key);
-  }
-
-  private rejectPendingRecordingAcks(runtime: SidekickRuntimeState, recordingId: string, error: Error): void {
-    for (const [key, pending] of runtime.pendingRecordingAcks.entries()) {
-      if (pending.recordingId !== recordingId) {
-        continue;
-      }
-      clearTimeout(pending.timeout);
-      runtime.pendingRecordingAcks.delete(key);
-      pending.reject(error);
-    }
-  }
-
-  private stagedPcmPath(recordingId: string): string {
-    return path.join(this.recordingsTmpDir, `${recordingId}.pcm`);
-  }
-
-  private async failActiveRecording(runtime: SidekickRuntimeState, message: string, code: string): Promise<void> {
-    const active = runtime.microphoneRecording;
-    if (active) {
-      await this.cleanupActiveRecording(runtime, code);
-      this.rejectPendingRecordingAcks(runtime, active.recordingId, new Error(code));
-    }
-    runtime.microphoneErrorMessage = message;
-    runtime.microphoneErrorCode = code;
-    this.emit();
-  }
-
-  private async cleanupActiveRecording(runtime: SidekickRuntimeState, code: string): Promise<void> {
-    const active = runtime.microphoneRecording;
-    if (!active) {
-      return;
-    }
-    runtime.microphoneRecording = undefined;
-    this.rejectPendingRecordingAcks(runtime, active.recordingId, new Error(code));
-    if (active.tempPcmPath) {
-      await fs.rm(active.tempPcmPath, { force: true }).catch(() => undefined);
-    }
-  }
-
-  private async finalizeActiveRecording(active: ActiveSidekickRecording, sampleCount: number): Promise<void> {
-    await this.loadRecordingsIndex();
-    await fs.mkdir(this.recordingsFilesDir, { recursive: true });
-    const pcm = await fs.readFile(active.tempPcmPath).catch(() => Buffer.alloc(0));
-    if (pcm.byteLength !== active.bytes || pcm.byteLength + WAV_HEADER_BYTES > this.maxRecordingBytes) {
-      await fs.rm(active.tempPcmPath, { force: true }).catch(() => undefined);
-      throw new Error('sidekick_microphone_recording_size_invalid');
-    }
-    const wav = buildPcm16MonoWav(pcm, SIDEKICK_MIC_SAMPLE_RATE);
-    const filename = `${active.recordingId}.wav`;
-    const finalPath = path.join(this.recordingsFilesDir, filename);
-    const tmpPath = path.join(this.recordingsTmpDir, `${active.recordingId}.wav.tmp`);
-    await fs.writeFile(tmpPath, wav);
-    await fs.rename(tmpPath, finalPath);
-    await fs.rm(active.tempPcmPath, { force: true }).catch(() => undefined);
-    const stoppedAt = new Date().toISOString();
-    const durationMs = Math.round((sampleCount / SIDEKICK_MIC_SAMPLE_RATE) * 1000);
-    this.recordings = [
-      {
-        recordingId: active.recordingId,
-        sidekickId: active.sidekickId,
-        createdAt: active.startedAt,
-        stoppedAt,
-        durationMs,
-        sampleCount,
-        sampleRate: SIDEKICK_MIC_SAMPLE_RATE,
-        channels: SIDEKICK_MIC_CHANNELS,
-        format: SIDEKICK_MIC_FORMAT,
-        sizeBytes: wav.byteLength,
-        filename,
-      },
-      ...this.recordings.filter((entry) => entry.recordingId !== active.recordingId),
-    ];
-    await this.pruneRecordings(active.sidekickId);
-    await this.saveRecordingsIndex();
   }
 
   private buildDisplayCommand(input: SidekickDisplayInput): Record<string, unknown> | null {
@@ -1712,45 +1422,6 @@ export class SidekickService {
     await writeJsonAtomic(this.storePath, this.stored);
   }
 
-  private async loadRecordingsIndex(): Promise<void> {
-    if (this.recordingsLoaded) {
-      return;
-    }
-    try {
-      const parsed = JSON.parse(await fs.readFile(this.recordingsIndexPath, 'utf8')) as StoredSidekickRecordingFile;
-      this.recordings = parsed?.version === 1 && Array.isArray(parsed.recordings)
-        ? parsed.recordings.filter(isStoredSidekickRecording)
-        : [];
-    } catch {
-      this.recordings = [];
-    }
-    this.recordingsLoaded = true;
-  }
-
-  private async saveRecordingsIndex(): Promise<void> {
-    await fs.mkdir(path.dirname(this.recordingsIndexPath), { recursive: true });
-    await writeJsonAtomic(this.recordingsIndexPath, { version: 1, recordings: this.recordings } satisfies StoredSidekickRecordingFile);
-  }
-
-  private async pruneRecordings(sidekickId: string): Promise<void> {
-    const kept: StoredSidekickRecording[] = [];
-    const removed: StoredSidekickRecording[] = [];
-    const counts = new Map<string, number>();
-    for (const recording of this.recordings.sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))) {
-      const count = counts.get(recording.sidekickId) ?? 0;
-      if (recording.sidekickId === sidekickId && count >= this.recentRecordingLimit) {
-        removed.push(recording);
-        continue;
-      }
-      kept.push(recording);
-      counts.set(recording.sidekickId, count + 1);
-    }
-    this.recordings = kept;
-    await Promise.all(removed.map(async (recording) => {
-      await fs.rm(path.join(this.recordingsFilesDir, recording.filename), { force: true }).catch(() => undefined);
-    }));
-  }
-
   private async upsertRecord(input: {
     sidekickId: string;
     name: string;
@@ -1834,14 +1505,15 @@ export class SidekickService {
         firmwareVersion: record.firmwareVersion,
         capabilities: record.capabilities,
         personalAgentId: record.personalAgentId,
+        voiceConfig: normalizedStoredSidekickVoiceConfig(record.voiceConfig),
         battery: runtime?.battery,
         time: runtime?.time,
+        wakeBeep: runtime?.wakeBeep,
+        voicePhase: this.options.getVoicePhase?.(record.sidekickId) ?? 'idle',
         speakerPlayback: summarizeSpeakerPlayback(runtime),
         microphoneRecording: summarizeMicrophoneRecording(runtime),
-        microphoneRecordings: this.recordings
-          .filter((entry) => entry.sidekickId === record.sidekickId)
-          .map(stripRecordingStorageFields),
-        idleConfig: record.idleConfig ?? { ...SIDEKICK_DEFAULT_IDLE_CONFIG, screens: [...SIDEKICK_DEFAULT_IDLE_CONFIG.screens] },
+        microphoneRecordings: this.microphone.summariesFor(record.sidekickId),
+        idleConfig: this.normalizeIdleConfig(record.idleConfig),
         idleImagePreviewDataUrl: record.idleImagePreviewDataUrl,
         usbPath: runtime?.usbPath,
         ipAddress: runtime?.ipAddress,
@@ -1856,6 +1528,8 @@ export class SidekickService {
         status: runtime.status,
         usbPath: runtime.usbPath,
         capabilities: [],
+        voiceConfig: normalizedStoredSidekickVoiceConfig(),
+        voicePhase: 'idle',
         speakerPlayback: summarizeSpeakerPlayback(runtime),
         microphoneRecording: summarizeMicrophoneRecording(runtime),
         microphoneRecordings: [],
@@ -1873,6 +1547,21 @@ export class SidekickService {
 
   private emit(): void {
     this.options.emitState?.(this.buildState());
+  }
+
+  private async notifySessionInvalidated(
+    sidekickId: string,
+    reason: SidekickSessionInvalidationEvent['reason'],
+  ): Promise<void> {
+    try {
+      await this.options.onSessionInvalidated?.({ sidekickId, reason });
+    } catch (error) {
+      await this.log('sidekick:session_invalidation_failed', {
+        sidekickId,
+        reason,
+        technicalCode: error instanceof Error ? error.message : String(error),
+      }).catch(() => undefined);
+    }
   }
 
   private async log(event: string, payload: Record<string, unknown> = {}): Promise<void> {

@@ -10,8 +10,8 @@ import type { AgentRunActivity } from './agent-run-activity';
 export type PersonalAgentMessageRole = 'user' | 'assistant' | 'system';
 export type PersonalAgentMessageKind = 'message' | 'intermediate';
 export type PersonalAgentMessageAuthorType = 'human' | 'agent' | 'system';
-export type PersonalAgentMessageSource = 'human' | 'routine' | 'scheduled_wakeup';
-export type PersonalAgentConversationOrigin = 'user' | 'agent' | 'routine';
+export type PersonalAgentMessageSource = 'human' | 'routine' | 'scheduled_wakeup' | 'sidekick';
+export type PersonalAgentConversationOrigin = 'user' | 'agent' | 'routine' | 'sidekick';
 export type PersonalAgentConversationStatus = 'active' | 'archived';
 export type PersonalAgentRunStatus = 'queued' | 'running' | 'needs_permission' | 'completed' | 'failed' | 'canceled';
 export type PersonalAgentRoutineRunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'skipped';
@@ -147,6 +147,7 @@ export interface PersonalAgentConversation {
   status: PersonalAgentConversationStatus;
   origin: PersonalAgentConversationOrigin;
   readOnly: boolean;
+  sidekickId?: string;
   initiatorAgentId?: string;
   initiatorAgentName?: string;
   peerThreadId?: string;
@@ -187,6 +188,8 @@ export interface PersonalAgentMessage {
   authorAgentId?: string;
   authorAgentName?: string;
   source: PersonalAgentMessageSource;
+  /** BCP-47 locale attached by trusted non-renderer voice input. */
+  locale?: string;
   routineId?: string;
   wakeupId?: string;
   content: string;

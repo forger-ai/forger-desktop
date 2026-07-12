@@ -6,6 +6,19 @@ import { buildGlobalSkillTemplates } from '../prompt-builder/official-tools';
 import { buildPersonalAgentWorkspaceDocuments } from '../prompt-builder/personal-agents';
 import { forgerSkillRoots, writeSkillTemplates } from '../prompt-builder/skill-template-writer';
 import { openPersonalAgentSqliteDatabase, type SqliteDatabase } from './sqlite';
+import type {
+  AgentRow,
+  ConversationRow,
+  JournalEntryRow,
+  MemoryRow,
+  MessageFileRow,
+  MessageRow,
+  PeerGrantRow,
+  PeerThreadRow,
+  PermissionRow,
+  RunProgressRow,
+  RunRow,
+} from './agent-store-rows';
 import { AgentRoutineStore } from './agent-store-routines';
 import { PERSONAL_AGENT_SCHEMA_SQL } from './agent-store-schema';
 import { readPersonalAgentWorkspaceEntries } from './agent-store-workspace';
@@ -54,144 +67,6 @@ export { isTerminalRunStatus } from './agent-store-normalizers';
 interface AgentStoreOptions {
   metadataRoot: string;
   forgerHomeRoot: string;
-}
-
-interface AgentRow {
-  id: string;
-  name: string;
-  description: string;
-  purpose: string;
-  instructions: string;
-  permission_mode: string;
-  network_access: number;
-  runtime_provider?: string | null;
-  runtime_model?: string | null;
-  runtime_effort?: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-interface PermissionRow {
-  id: string;
-  agent_id: string;
-  kind?: string;
-  target_id?: string;
-  permission: string;
-  mode: string;
-  granted: number;
-  created_at: string;
-  updated_at: string;
-}
-
-interface ConversationRow {
-  id: string;
-  agent_id: string;
-  title: string;
-  status: string;
-  origin?: string;
-  read_only?: number;
-  initiator_agent_id?: string | null;
-  peer_thread_id?: string | null;
-  routine_id?: string | null;
-  draft_message?: string | null;
-  provider_thread_id?: string | null;
-  provider?: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-interface MessageRow {
-  id: string;
-  agent_id: string;
-  conversation_id: string;
-  run_id: string | null;
-  role: string;
-  kind: string;
-  author_type?: string | null;
-  author_agent_id?: string | null;
-  source?: string | null;
-  routine_id?: string | null;
-  wakeup_id?: string | null;
-  content: string;
-  created_at: string;
-}
-
-interface MessageFileRow {
-  id: string;
-  message_id: string;
-  agent_id: string;
-  conversation_id: string;
-  name: string;
-  path: string;
-  relative_path: string;
-  size_bytes: number | null;
-  source: string | null;
-  created_at: string;
-}
-
-interface PeerGrantRow {
-  id: string;
-  agent_id: string;
-  peer_agent_id: string;
-  criteria: string;
-  created_at: string;
-  updated_at: string;
-  peer_name?: string | null;
-  peer_description?: string | null;
-}
-
-interface PeerThreadRow {
-  id: string;
-  caller_agent_id: string;
-  target_agent_id: string;
-  source_conversation_id: string;
-  target_conversation_id: string;
-  parent_thread_id: string | null;
-  root_thread_id: string | null;
-  created_by_run_id: string | null;
-  title: string;
-  status: string;
-  created_at: string;
-  updated_at: string;
-  caller_name?: string | null;
-  target_name?: string | null;
-}
-
-interface RunRow {
-  id: string;
-  agent_id: string;
-  conversation_id: string;
-  status: string;
-  error: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-interface RunProgressRow {
-  id: string;
-  agent_id: string;
-  conversation_id: string;
-  run_id: string;
-  message: string;
-  created_at: string;
-}
-
-interface MemoryRow {
-  id: string;
-  agent_id: string;
-  remember_when: string;
-  title: string;
-  content: string;
-  created_at: string;
-  updated_at: string;
-}
-
-interface JournalEntryRow {
-  id: string;
-  agent_id: string;
-  conversation_id: string | null;
-  body: string;
-  created_at: string;
 }
 
 const OTHERS_PEER_BLOCK_BEGIN = '<!-- FORGER_MANAGED_PEER_AGENTS_BEGIN -->';
@@ -623,6 +498,7 @@ export class AgentStore {
     initiatorAgentId?: string | null;
     peerThreadId?: string | null;
     routineId?: string | null;
+    sidekickId?: string | null;
   }): Promise<PersonalAgentConversation> {
     await this.load();
     const agent = await this.requireAgent(input.agentId);
@@ -632,19 +508,24 @@ export class AgentStore {
     const initiatorAgentId = sanitizeAgentId(input.initiatorAgentId) ?? null;
     const peerThreadId = sanitizeAgentId(input.peerThreadId) ?? null;
     const routineId = sanitizeAgentId(input.routineId) ?? null;
+    const sidekickId = sanitizeGrantTarget(input.sidekickId) ?? null;
+    if (origin === 'sidekick' && !sidekickId) {
+      throw new Error('personal_agent_sidekick_id_required');
+    }
     this.requireDb().prepare(`
-      INSERT INTO personal_agent_conversations (id, agent_id, title, status, origin, read_only, initiator_agent_id, peer_thread_id, routine_id, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO personal_agent_conversations (id, agent_id, title, status, origin, read_only, initiator_agent_id, peer_thread_id, routine_id, sidekick_id, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       conversationId,
       agent.id,
       sanitizeText(input.title, 160) || agent.name,
       'active',
       origin,
-      input.readOnly === true || origin === 'agent' ? 1 : 0,
+      input.readOnly === true || origin === 'agent' || origin === 'sidekick' ? 1 : 0,
       initiatorAgentId,
       peerThreadId,
       routineId,
+      sidekickId,
       now,
       now,
     );
@@ -710,6 +591,20 @@ export class AgentStore {
     return row ? this.conversationFromRow(row) : null;
   }
 
+  public async findLatestSidekickConversation(input: { sidekickId: string; agentId: string }): Promise<PersonalAgentConversation | null> {
+    await this.load();
+    const sidekickId = sanitizeGrantTarget(input.sidekickId);
+    const agentId = sanitizeAgentId(input.agentId);
+    if (!sidekickId || !agentId) return null;
+    const row = this.requireDb().prepare(`
+      SELECT * FROM personal_agent_conversations
+      WHERE sidekick_id = ? AND agent_id = ? AND origin = 'sidekick'
+      ORDER BY updated_at DESC
+      LIMIT 1
+    `).get(sidekickId, agentId) as ConversationRow | undefined;
+    return row ? this.conversationFromRow(row) : null;
+  }
+
   public async requireConversation(id: string): Promise<PersonalAgentConversation> {
     const conversation = await this.getConversation(id);
     if (!conversation) {
@@ -729,6 +624,7 @@ export class AgentStore {
     source?: PersonalAgentMessageSource;
     routineId?: string | null;
     wakeupId?: string | null;
+    locale?: string | null;
     content: string;
     files?: SharedFileRef[];
   }): Promise<PersonalAgentMessage> {
@@ -747,6 +643,9 @@ export class AgentStore {
     const source = normalizeMessageSource(input.source);
     const routineId = sanitizeAgentId(input.routineId) ?? null;
     const wakeupId = sanitizeAgentId(input.wakeupId) ?? null;
+    const locale = typeof input.locale === 'string' && /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(input.locale.trim())
+      ? input.locale.trim()
+      : null;
     const message: PersonalAgentMessage = {
       id: randomUUID(),
       agentId: input.agentId,
@@ -759,13 +658,14 @@ export class AgentStore {
       source,
       ...(routineId ? { routineId } : {}),
       ...(wakeupId ? { wakeupId } : {}),
+      ...(locale ? { locale } : {}),
       content,
       createdAt: now,
     };
     this.requireDb().prepare(`
-      INSERT INTO personal_agent_messages (id, agent_id, conversation_id, run_id, role, kind, author_type, author_agent_id, source, routine_id, wakeup_id, content, created_at)
-      VALUES (@id, @agentId, @conversationId, @runId, @role, @kind, @authorType, @authorAgentId, @source, @routineId, @wakeupId, @content, @createdAt)
-    `).run({ ...message, runId: message.runId ?? null, authorAgentId, routineId, wakeupId });
+      INSERT INTO personal_agent_messages (id, agent_id, conversation_id, run_id, role, kind, author_type, author_agent_id, source, routine_id, wakeup_id, source_locale, content, created_at)
+      VALUES (@id, @agentId, @conversationId, @runId, @role, @kind, @authorType, @authorAgentId, @source, @routineId, @wakeupId, @locale, @content, @createdAt)
+    `).run({ ...message, runId: message.runId ?? null, authorAgentId, routineId, wakeupId, locale });
     const files = normalizeSharedFileRefs(input.files).slice(0, MAX_MESSAGE_FILES);
     if (files.length > 0) {
       const insertFile = this.requireDb().prepare(`
@@ -1128,6 +1028,7 @@ export class AgentStore {
     this.ensureColumn('personal_agent_conversations', 'initiator_agent_id', 'TEXT REFERENCES personal_agents(id) ON DELETE SET NULL');
     this.ensureColumn('personal_agent_conversations', 'peer_thread_id', 'TEXT');
     this.ensureColumn('personal_agent_conversations', 'routine_id', 'TEXT');
+    this.ensureColumn('personal_agent_conversations', 'sidekick_id', 'TEXT');
     this.ensureColumn('personal_agent_conversations', 'draft_message', "TEXT NOT NULL DEFAULT ''");
     this.ensureColumn('personal_agent_conversations', 'provider', 'TEXT');
     this.ensureColumn('personal_agent_conversations', 'provider_thread_id', 'TEXT');
@@ -1137,6 +1038,7 @@ export class AgentStore {
     this.ensureColumn('personal_agent_messages', 'source', "TEXT NOT NULL DEFAULT 'human'");
     this.ensureColumn('personal_agent_messages', 'routine_id', 'TEXT');
     this.ensureColumn('personal_agent_messages', 'wakeup_id', 'TEXT');
+    this.ensureColumn('personal_agent_messages', 'source_locale', 'TEXT');
     this.ensureColumn('personal_agent_routines', 'frequency_interval_minutes', 'INTEGER');
     this.ensureColumn('personal_agent_permissions', 'kind', "TEXT NOT NULL DEFAULT 'legacy'");
     this.ensureColumn('personal_agent_permissions', 'target_id', "TEXT NOT NULL DEFAULT ''");
@@ -1144,6 +1046,7 @@ export class AgentStore {
     this.requireDb().exec(`
       CREATE INDEX IF NOT EXISTS idx_personal_agent_permissions_agent_kind ON personal_agent_permissions(agent_id, kind);
       CREATE UNIQUE INDEX IF NOT EXISTS idx_personal_agent_permissions_unique_grant ON personal_agent_permissions(agent_id, kind, target_id);
+      CREATE INDEX IF NOT EXISTS idx_personal_agent_conversations_sidekick ON personal_agent_conversations(sidekick_id, agent_id, updated_at);
     `);
   }
 
@@ -1330,7 +1233,8 @@ export class AgentStore {
       title: row.title,
       status: normalizeConversationStatus(row.status),
       origin,
-      readOnly: row.read_only !== 0 || origin === 'agent',
+      readOnly: row.read_only !== 0 || origin === 'agent' || origin === 'sidekick',
+      ...(sanitizeGrantTarget(row.sidekick_id) ? { sidekickId: sanitizeGrantTarget(row.sidekick_id) as string } : {}),
       ...(initiatorAgentId ? { initiatorAgentId } : {}),
       ...(initiatorAgentName ? { initiatorAgentName } : {}),
       ...(row.peer_thread_id ?? peerThread?.id ? { peerThreadId: row.peer_thread_id ?? peerThread?.id } : {}),
@@ -1368,6 +1272,7 @@ export class AgentStore {
       ...(authorAgentId ? { authorAgentId } : {}),
       ...(authorAgentName ? { authorAgentName } : {}),
       source: normalizeMessageSource(row.source),
+      ...(row.source_locale ? { locale: row.source_locale } : {}),
       ...(sanitizeAgentId(row.routine_id) ? { routineId: sanitizeAgentId(row.routine_id) as string } : {}),
       ...(sanitizeAgentId(row.wakeup_id) ? { wakeupId: sanitizeAgentId(row.wakeup_id) as string } : {}),
       content: row.content,

@@ -16,6 +16,13 @@ import type {
   SidekickStatus,
   SidekickUsbDevice,
   SidekickTimeStatus,
+  SidekickVoiceConfig,
+  SidekickWakeBeepState,
+} from '../shared/types';
+import {
+  SIDEKICK_DEFAULT_CONVERSATION_TTL_MINUTES,
+  SIDEKICK_MAX_CONVERSATION_TTL_MINUTES,
+  SIDEKICK_MIN_CONVERSATION_TTL_MINUTES,
 } from '../shared/types';
 export const SIDEKICK_PROTO = 'forger-sidekick-v1';
 export const SIDEKICK_SERVICE_TYPE = 'forger-sidekick';
@@ -53,6 +60,7 @@ export interface StoredSidekickRecord {
   firmwareVersion?: string;
   capabilities: string[];
   personalAgentId?: string;
+  voiceConfig?: SidekickVoiceConfig;
   desktopKeyFingerprint?: string;
   encryptedPairingSecret: string;
   idleConfig?: SidekickIdleConfig;
@@ -67,6 +75,7 @@ export interface SidekickRuntimeState {
   errorMessage?: string;
   battery?: SidekickBatteryStatus;
   time?: SidekickTimeStatus;
+  wakeBeep?: SidekickWakeBeepState;
   microphoneRecording?: ActiveSidekickRecording;
   microphoneErrorMessage?: string;
   microphoneErrorCode?: string;
@@ -101,11 +110,15 @@ export interface SidekickNetworkPayload {
   sampleCount?: unknown;
   maxChunkSamples?: unknown;
   queueDepth?: unknown;
+  maxInFlightChunks?: unknown;
+  audioQueueDepth?: unknown;
+  playbackProtocolVersion?: unknown;
   lastChunkSequence?: unknown;
   bufferedSamples?: unknown;
   underruns?: unknown;
   droppedChunks?: unknown;
   samplesPlayed?: unknown;
+  cancelled?: unknown;
   requestId?: unknown;
   timeZone?: unknown;
   utcOffsetMinutes?: unknown;
@@ -114,6 +127,11 @@ export interface SidekickNetworkPayload {
   driftMs?: unknown;
   clockAdjusted?: unknown;
   wakeId?: unknown;
+  status?: unknown;
+  durationMs?: unknown;
+  droppedMessages?: unknown;
+  totalDroppedMessages?: unknown;
+  maxInFlightMessages?: unknown;
   model?: unknown;
   wakeWord?: unknown;
   wordIndex?: unknown;
@@ -156,6 +174,7 @@ export interface ActiveSidekickPlayback {
   underruns: number;
   droppedChunks: number;
   queueDepth: number;
+  maxInFlightChunks: number;
 }
 
 export interface PendingSpeakerAck {
@@ -171,6 +190,7 @@ export interface PendingRecordingAck {
   timeout: NodeJS.Timeout;
   resolve: () => void;
   reject: (error: Error) => void;
+  promise: Promise<void>;
 }
 
 export interface SidekickUsbHello {
@@ -439,8 +459,36 @@ export const isStoredSidekickRecord = (input: unknown): input is StoredSidekickR
     typeof value.updatedAt === 'string' &&
     Array.isArray(value.capabilities) &&
     (typeof value.personalAgentId === 'undefined' || typeof value.personalAgentId === 'string') &&
+    (typeof value.voiceConfig === 'undefined' || (typeof value.voiceConfig === 'object' && value.voiceConfig !== null)) &&
     typeof value.encryptedPairingSecret === 'string',
   );
+};
+
+export const normalizedStoredSidekickVoiceConfig = (value?: Partial<SidekickVoiceConfig>): SidekickVoiceConfig => {
+  const model = typeof value?.model === 'string' && /^[A-Za-z0-9._-]{1,128}$/.test(value.model.trim())
+    ? value.model.trim()
+    : undefined;
+  const voice = typeof value?.voice === 'string' && /^[A-Za-z0-9._-]{1,128}$/.test(value.voice.trim())
+    ? value.voice.trim()
+    : undefined;
+  let locale: string | undefined;
+  if (model && voice && typeof value?.locale === 'string') {
+    try {
+      locale = Intl.getCanonicalLocales(value.locale.trim())[0];
+    } catch {
+      locale = undefined;
+    }
+  }
+  const ttl = Number(value?.conversationTtlMinutes);
+  return {
+    ...(model && voice ? { model, voice } : {}),
+    ...(locale ? { locale } : {}),
+    conversationTtlMinutes: Number.isInteger(ttl) &&
+      ttl >= SIDEKICK_MIN_CONVERSATION_TTL_MINUTES &&
+      ttl <= SIDEKICK_MAX_CONVERSATION_TTL_MINUTES
+      ? ttl
+      : SIDEKICK_DEFAULT_CONVERSATION_TTL_MINUTES,
+  };
 };
 
 export const isStoredSidekickRecording = (input: unknown): input is StoredSidekickRecording => {

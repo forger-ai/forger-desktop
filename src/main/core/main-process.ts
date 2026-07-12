@@ -82,6 +82,7 @@ import { readClaudeOAuthToken } from '../claude-oauth';
 import { RemoteNetworkShareManager } from '../remote-network-share-manager';
 import { RemoteActivityStore } from '../remote-activity-store';
 import { LlmRunsStore } from '../llm-runs-store';
+import { hydratePersistedPersonalAgentRuns } from '../llm-runs-hydration';
 import { createRuntimeInstallController } from '../runtime/runtime-install';
 import { spawnProcess } from '../runtime/process-spawn';
 import { loadOptionalBetterSqlite } from '../runtime/optional-better-sqlite';
@@ -464,6 +465,8 @@ const getSidekickService = (): SidekickService => {
     synthesizeSpeech: async (input) => await getTextToSpeechService().synthesize(input),
     onWakeDetected: (event) => getSidekickVoiceRuntime().onWakeDetected(event),
     onMicrophonePcm: (event) => getSidekickVoiceRuntime().onMicrophonePcm(event),
+    onSessionInvalidated: (event) => getSidekickVoiceRuntime().onSidekickSessionInvalidated(event),
+    getVoicePhase: (sidekickId) => getSidekickVoiceRuntime().getVisiblePhase(sidekickId),
     getProviderUsage: async () => (await getAgentProviderUsageSafely({
       fs,
       path,
@@ -1177,7 +1180,23 @@ const recordRemoteCloudActivity = (event: { kind: 'app' | 'agent'; targetId: str
   });
 };
 const getRemoteActivitySnapshot = () => remoteActivityStore.snapshot();
-const getLlmRunsSnapshot = () => llmRunsStore.snapshot();
+let llmRunsHydration: Promise<void> | null = null;
+const ensureLlmRunsHydrated = async (): Promise<void> => {
+  llmRunsHydration ??= hydratePersistedPersonalAgentRuns({
+    agentStore: getPersonalAgentStore(),
+    llmRunsStore,
+  }).catch((error: unknown) => {
+    llmRunsHydration = null;
+    void appendInstallLog('llm_runs:hydrate_failed', {
+      technicalCode: error instanceof Error ? error.message : String(error),
+    });
+  });
+  await llmRunsHydration;
+};
+const getLlmRunsSnapshot = async () => {
+  await ensureLlmRunsHydrated();
+  return llmRunsStore.snapshot();
+};
 
 const localNetworkShareController = createLocalNetworkShareController({
   runningApps,

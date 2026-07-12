@@ -129,6 +129,73 @@ test('LLM runs store records desktop chat activity without double counting runs'
   assert.equal(snapshot.items[0].activity.runId, 'chat-run-1');
 });
 
+test('LLM runs store ignores an older active event after a terminal event', () => {
+  const { sends, store } = createHarness();
+  const conversation = {
+    id: 'conversation-monotonic',
+    agentId: 'agent-1',
+    title: 'Wake response',
+    status: 'active',
+    createdAt: '2026-06-12T11:00:00.000Z',
+    updatedAt: '2026-06-12T11:02:00.000Z',
+    messages: [],
+  };
+
+  store.recordPersonalAgentConversationEvent({
+    type: 'run.completed',
+    conversation,
+    run: {
+      id: 'run-monotonic',
+      agentId: 'agent-1',
+      conversationId: conversation.id,
+      status: 'completed',
+      progress: [],
+      createdAt: '2026-06-12T11:00:00.000Z',
+      updatedAt: '2026-06-12T11:02:00.000Z',
+    },
+  });
+  const sendCountAfterCompletion = sends.length;
+
+  const snapshot = store.recordPersonalAgentConversationEvent({
+    type: 'run.started',
+    conversation: { ...conversation, updatedAt: '2026-06-12T11:01:00.000Z' },
+    run: {
+      id: 'run-monotonic',
+      agentId: 'agent-1',
+      conversationId: conversation.id,
+      status: 'running',
+      progress: [],
+      createdAt: '2026-06-12T11:00:00.000Z',
+      updatedAt: '2026-06-12T11:01:00.000Z',
+    },
+  });
+
+  assert.equal(snapshot.items[0].status, 'completed');
+  assert.equal(snapshot.activeCount, 0);
+  assert.equal(sends.length, sendCountAfterCompletion);
+});
+
+test('LLM runs store keeps a terminal state when timestamps tie', () => {
+  const { store } = createHarness();
+  const eventFor = (status) => ({
+    run: {
+      runId: 'chat-run-terminal-tie',
+      appId: 'forger',
+      prompt: 'hello',
+      status,
+      createdAt: '2026-06-12T11:00:00.000Z',
+      updatedAt: '2026-06-12T11:02:00.000Z',
+      progressLog: [],
+    },
+  });
+
+  store.recordChatRunEvent(eventFor('preview_ready'));
+  store.recordChatRunEvent(eventFor('running'));
+
+  assert.equal(store.snapshot().items[0].status, 'completed');
+  assert.equal(store.snapshot().activeCount, 0);
+});
+
 test('LLM runs store records workflow node activity', () => {
   const { store } = createHarness();
   const nodeActivity = activity('workflow-run-1:node-1', 'workflow_node', {

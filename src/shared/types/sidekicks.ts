@@ -79,6 +79,31 @@ export const SIDEKICK_IDLE_IMAGE_WIDTH = 240;
 export const SIDEKICK_IDLE_IMAGE_HEIGHT = 240;
 export const SIDEKICK_IDLE_IMAGE_BYTES = SIDEKICK_IDLE_IMAGE_WIDTH * SIDEKICK_IDLE_IMAGE_HEIGHT * 2;
 
+export const SIDEKICK_DEFAULT_CONVERSATION_TTL_MINUTES = 30;
+export const SIDEKICK_MIN_CONVERSATION_TTL_MINUTES = 1;
+export const SIDEKICK_MAX_CONVERSATION_TTL_MINUTES = 24 * 60;
+
+export interface SidekickVoiceConfig {
+  model?: string;
+  voice?: string;
+  /** BCP-47 locale derived from the selected voice metadata. */
+  locale?: string;
+  conversationTtlMinutes: number;
+}
+
+export interface SidekickVoiceConfigInput {
+  sidekickId: string;
+  config: SidekickVoiceConfig;
+}
+
+export type SidekickVoicePhase =
+  | 'idle'
+  | 'listening'
+  | 'transcribing'
+  | 'thinking'
+  | 'speaking'
+  | 'error';
+
 export interface SidekickIdleConfigInput {
   sidekickId: string;
   config: SidekickIdleConfig;
@@ -100,8 +125,11 @@ export interface SidekickSummary {
   firmwareVersion?: string;
   capabilities: string[];
   personalAgentId?: string;
+  voiceConfig: SidekickVoiceConfig;
   battery?: SidekickBatteryStatus;
   time?: SidekickTimeStatus;
+  wakeBeep?: SidekickWakeBeepState;
+  voicePhase: SidekickVoicePhase;
   speakerPlayback: SidekickSpeakerPlaybackState;
   microphoneRecording: SidekickMicrophoneRecordingState;
   microphoneRecordings: SidekickMicrophoneRecordingSummary[];
@@ -110,6 +138,14 @@ export interface SidekickSummary {
   usbPath?: string;
   ipAddress?: string;
   errorMessage?: string;
+}
+
+export interface SidekickWakeBeepState {
+  wakeId: string;
+  status: 'completed' | 'failed';
+  durationMs: number;
+  updatedAt: string;
+  technicalCode?: string;
 }
 
 export interface SidekickPersonalAgentInput {

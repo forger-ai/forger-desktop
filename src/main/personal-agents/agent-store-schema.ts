@@ -37,6 +37,7 @@ export const PERSONAL_AGENT_SCHEMA_SQL = `
     initiator_agent_id TEXT REFERENCES personal_agents(id) ON DELETE SET NULL,
     peer_thread_id TEXT,
     routine_id TEXT,
+    sidekick_id TEXT,
     draft_message TEXT NOT NULL DEFAULT '',
     provider TEXT,
     provider_thread_id TEXT,
@@ -56,6 +57,7 @@ export const PERSONAL_AGENT_SCHEMA_SQL = `
     source TEXT NOT NULL DEFAULT 'human',
     routine_id TEXT,
     wakeup_id TEXT,
+    source_locale TEXT,
     content TEXT NOT NULL,
     created_at TEXT NOT NULL
   );

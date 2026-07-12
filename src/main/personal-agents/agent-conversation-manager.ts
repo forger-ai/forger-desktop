@@ -67,6 +67,21 @@ export interface PersonalAgentMcpRunContext {
   conversationId: string;
   peerThreadId?: string;
   callStackAgentIds: string[];
+  sidekick?: {
+    sidekickId: string;
+    locale: string;
+    model?: string;
+    voice?: string;
+  };
+}
+
+export interface PersonalAgentSidekickMessageInput {
+  conversationId: string;
+  sidekickId: string;
+  content: string;
+  locale: string;
+  model?: string;
+  voice?: string;
 }
 
 export interface PersonalAgentAskPeerInput {
@@ -122,6 +137,33 @@ export class AgentConversationManager {
     return conversation;
   }
 
+  public async createSidekickConversation(input: { agentId: string; sidekickId: string; title?: string }): Promise<PersonalAgentConversation> {
+    const agent = await this.options.store.requireAgent(input.agentId);
+    await this.options.store.workspaceRootForAgent(agent.id);
+    const conversation = await this.options.store.createConversation({
+      agentId: agent.id,
+      title: input.title,
+      origin: 'sidekick',
+      readOnly: true,
+      sidekickId: input.sidekickId,
+    });
+    this.emit({ type: 'conversation.created', conversation });
+    return conversation;
+  }
+
+  public async canReuseSidekickConversation(input: { conversationId: string; sidekickId: string; agentId: string }): Promise<boolean> {
+    const conversation = await this.options.store.getConversation(input.conversationId);
+    if (
+      !conversation || conversation.origin !== 'sidekick' || !conversation.readOnly ||
+      conversation.sidekickId !== input.sidekickId || conversation.agentId !== input.agentId ||
+      conversation.status !== 'active' ||
+      (conversation.activeRun && !isTerminalRunStatus(conversation.activeRun.status))
+    ) return false;
+    const agent = await this.options.store.requireAgent(input.agentId);
+    const runtime = await this.resolveRuntimeForAgent(agent);
+    return !runtime || !conversation.provider || conversation.provider === runtime.provider;
+  }
+
   public async startConversation(input: PersonalAgentConversationStartInput): Promise<PersonalAgentConversation> {
     const conversation = await this.createConversation(input);
     const initialMessage = input.initialMessage?.trim();
@@ -146,6 +188,27 @@ export class AgentConversationManager {
     return await this.sendMessageInternal(input, { source: 'human' });
   }
 
+  public async sendSidekickMessage(input: PersonalAgentSidekickMessageInput): Promise<PersonalAgentConversation> {
+    const conversation = await this.options.store.requireConversation(input.conversationId);
+    if (conversation.origin !== 'sidekick' || conversation.sidekickId !== input.sidekickId) {
+      throw new Error('personal_agent_sidekick_conversation_mismatch');
+    }
+    return await this.sendMessageInternal(
+      { conversationId: input.conversationId, content: input.content },
+      {
+        source: 'sidekick',
+        bypassReadOnly: true,
+        locale: input.locale,
+        sidekick: {
+          sidekickId: input.sidekickId,
+          locale: input.locale,
+          ...(input.model ? { model: input.model } : {}),
+          ...(input.voice ? { voice: input.voice } : {}),
+        },
+      },
+    );
+  }
+
   public async sendScheduledMessage(input: PersonalAgentScheduledMessageInput): Promise<PersonalAgentConversation> {
     return await this.sendMessageInternal(
       { conversationId: input.conversationId, content: input.content },
@@ -166,11 +229,14 @@ export class AgentConversationManager {
       routineId?: string | null;
       wakeupId?: string | null;
       bypassWakeupBlock?: boolean;
+      bypassReadOnly?: boolean;
+      locale?: string;
+      sidekick?: PersonalAgentMcpRunContext['sidekick'];
       onRunSettled?: (result: { success: true } | { success: false; error: unknown }) => void | Promise<void>;
     },
   ): Promise<PersonalAgentConversation> {
     const conversation = await this.options.store.requireConversation(input.conversationId);
-    if (conversation.readOnly || conversation.origin === 'agent') {
+    if ((conversation.readOnly || conversation.origin === 'agent') && !options.bypassReadOnly) {
       throw new Error('personal_agent_conversation_read_only');
     }
     if (!options.bypassWakeupBlock && conversation.scheduledWakeup?.status === 'scheduled') {
@@ -202,8 +268,9 @@ export class AgentConversationManager {
       conversationId: conversation.id,
       runId: run.id,
       role: 'user',
-      authorType: options.source === 'human' ? 'human' : 'system',
+      authorType: options.source === 'human' || options.source === 'sidekick' ? 'human' : 'system',
       source: options.source,
+      locale: options.locale,
       routineId: options.routineId,
       wakeupId: options.wakeupId,
       content,
@@ -217,6 +284,7 @@ export class AgentConversationManager {
     const execution = this.executeRunSafely(updated.id, run.id, {
       conversationId: updated.id,
       callStackAgentIds: [agent.id],
+      ...(options.sidekick ? { sidekick: options.sidekick } : {}),
     });
     if (options.onRunSettled) {
       void execution.then((result) => options.onRunSettled?.(result));
@@ -387,7 +455,7 @@ export class AgentConversationManager {
       })
       : conversation;
     const workspaceRoot = await this.options.store.workspaceRootForAgent(agent.id);
-    const prompt = await this.buildPrompt(agent, conversationForRun, run);
+    const prompt = await this.buildPrompt(agent, conversationForRun, run, context);
     const sharedRoots = await this.resolveAppTrustedRoots(agent.appIds);
     const trustedRoots = [
       ...trustedRootsForConversationFiles(workspaceRoot, conversationForRun.messages),
@@ -418,6 +486,7 @@ export class AgentConversationManager {
       conversationId: conversation.id,
       runId: run.id,
       role: 'assistant',
+      source: conversation.origin === 'sidekick' ? 'sidekick' : undefined,
       content: assistantText,
     });
     const completed = await this.options.store.updateRunStatus({ runId, status: 'completed' });
@@ -459,12 +528,14 @@ export class AgentConversationManager {
       );
       this.persistActivity(runId);
     }
+    const sourceConversation = await this.options.store.requireConversation(run.conversationId);
     const intermediateMessage = await this.options.store.addMessage({
       agentId: run.agentId,
       conversationId: run.conversationId,
       runId: run.id,
       role: 'assistant',
       kind: 'intermediate',
+      source: sourceConversation.origin === 'sidekick' ? 'sidekick' : undefined,
       content: message,
     });
     const conversation = await this.requireUpdatedConversation(run.conversationId);
@@ -472,7 +543,12 @@ export class AgentConversationManager {
     this.emit({ type: 'run.progress', conversation, run, progress });
   }
 
-  private async buildPrompt(agent: PersonalAgent, conversation: PersonalAgentConversation, run: PersonalAgentRun): Promise<string> {
+  private async buildPrompt(
+    agent: PersonalAgent,
+    conversation: PersonalAgentConversation,
+    run: PersonalAgentRun,
+    context: PersonalAgentMcpRunContext,
+  ): Promise<string> {
     const memories = await this.options.store.listMemories(agent.id);
     const memoryRegister = memories.length > 0
       ? memories.map((memory) => `- ${memory.title}: ${memory.content}${memory.rememberWhen ? ` (remember when: ${memory.rememberWhen})` : ''}`).join('\n')
@@ -483,9 +559,19 @@ export class AgentConversationManager {
       .map((message) => renderMessageForPrompt(agent, message))
       .join('\n\n');
     const currentMessage = conversation.messages.find((message) => message.runId === run.id && message.role === 'user');
+    const sidekickContract = context.sidekick ? [
+      'Sidekick voice response contract (highest priority for this turn):',
+      `- This request came from Sidekick ${context.sidekick.sidekickId}.`,
+      `- Respond in the language and regional style represented by BCP-47 locale ${context.sidekick.locale}.`,
+      '- Keep the response brief, natural, and suitable for spoken delivery.',
+      '- Return only text that should be spoken.',
+      '- Do not call or invoke TTS, audio playback, or a Sidekick audio MCP/tool. Desktop synthesizes and cancels playback.',
+      '',
+    ] : [];
     return [
       bootstrap,
       '',
+      ...sidekickContract,
       'Visible conversation so far:',
       transcript || '- No visible messages yet.',
       '',

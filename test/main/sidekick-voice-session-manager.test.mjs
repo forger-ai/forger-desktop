@@ -44,12 +44,14 @@ const eventually = async (predicate, message = 'condition not reached') => {
   assert.fail(message);
 };
 
-const speech = (samples = 160) => {
+const pcmAt = (amplitude, samples = 160) => {
   const bytes = new Uint8Array(samples * 2);
   const view = new DataView(bytes.buffer);
-  for (let index = 0; index < samples; index += 1) view.setInt16(index * 2, 2_000, true);
+  for (let index = 0; index < samples; index += 1) view.setInt16(index * 2, amplitude, true);
   return bytes;
 };
+
+const speech = (samples = 160) => pcmAt(2_000, samples);
 
 const createHarness = ({ buffered = false, overrides = {}, managerOptions = {} } = {}) => {
   const clock = new FakeClock();
@@ -111,6 +113,7 @@ const createHarness = ({ buffered = false, overrides = {}, managerOptions = {} }
     },
     speakWithTts: async (input) => {
       calls.speech.push(input);
+      await input.onPlaybackStarted();
     },
     now: () => clock.now,
     setTimer: clock.setTimer,
@@ -120,7 +123,9 @@ const createHarness = ({ buffered = false, overrides = {}, managerOptions = {} }
   };
   const manager = new SidekickVoiceSessionManager(deps, {
     maxListeningMs: 10_000,
+    speechOnsetTimeoutMs: 10_000,
     silenceAfterSpeechMs: 500,
+    speechStartChunks: 1,
     maxSessionMs: 60_000,
     ...managerOptions,
   });
@@ -152,6 +157,7 @@ const completeTurn = async (harness, sidekickId = 'sidekick-1') => {
   const completion = harness.manager.triggerWake({ sidekickId });
   await eventually(() => harness.calls.microphoneStarts.length === startCount + 1);
   harness.emitPcm(speech(), sidekickId);
+  harness.emitPcm(speech(), sidekickId);
   harness.clock.advance(500);
   return await completion;
 };
@@ -174,13 +180,18 @@ test('BDD: a wake word completes listening, STT, agent, transcript and TTS witho
   assert.deepEqual(harness.calls.screens.map((screen) => screen.screen), [
     'listening', 'transcribing', 'thinking', 'speaking', 'idle',
   ]);
-  assert.equal(harness.calls.sttAppends.length, 1);
+  assert.equal(harness.calls.sttAppends.length, 2);
   assert.equal(harness.calls.messages[0].content, 'enciende la luz');
   assert.equal(harness.calls.speech[0].text, 'La luz quedó encendida.');
   assert.equal(harness.calls.microphoneStarts.length, 1);
   assert.equal(harness.calls.microphoneStops[0].reason, 'complete');
   assert.equal(harness.manager.getActiveSession('sidekick-1'), null);
   assert.equal(/pcm|audio|chunk/i.test(JSON.stringify({ result, observed })), false);
+  assert.deepEqual(
+    observed.map((event) => event.eventSequence),
+    observed.map((_event, index) => index + 1),
+    'session events are strictly ordered for log/UI correlation',
+  );
   unsubscribe();
   await harness.manager.dispose();
 });
@@ -214,7 +225,67 @@ test('BDD: silence stops the transient microphone and returns to idle without in
   assert.equal(harness.calls.messages.length, 0);
   assert.equal(harness.calls.speech.length, 0);
   assert.equal(harness.calls.sttCancels, 1);
-  assert.deepEqual(harness.calls.screens.map((screen) => screen.screen), ['listening', 'idle']);
+  assert.deepEqual(harness.calls.screens.map((screen) => screen.screen), ['listening', 'error']);
+  assert.equal(harness.manager.getActiveSession('sidekick-1'), null, 'terminal dwell must not retain the turn');
+  harness.clock.advance(1_500);
+  await eventually(() => harness.calls.screens.at(-1)?.screen === 'idle');
+  await harness.manager.dispose();
+});
+
+test('BDD: VAD requires sustained onset and uses a lower continuation threshold before ending speech', async () => {
+  const harness = createHarness({
+    managerOptions: {
+      speechStartRmsThreshold: 1_000,
+      speechContinueRmsThreshold: 700,
+      speechStartChunks: 2,
+    },
+  });
+  const completion = harness.manager.triggerWake({ sidekickId: 'sidekick-1' });
+  await eventually(() => harness.calls.microphoneStarts.length === 1);
+
+  harness.emitPcm(pcmAt(2_000));
+  harness.emitPcm(pcmAt(200));
+  assert.equal(harness.manager.getActiveSession('sidekick-1').heardSpeech, false, 'one loud spike is not speech onset');
+
+  harness.emitPcm(pcmAt(1_200));
+  harness.emitPcm(pcmAt(1_100));
+  assert.equal(harness.manager.getActiveSession('sidekick-1').heardSpeech, true);
+  harness.clock.advance(400);
+  harness.emitPcm(pcmAt(800));
+  harness.clock.advance(400);
+  assert.equal(harness.manager.getActiveSession('sidekick-1').phase, 'listening', 'continuing voice extends the endpoint');
+  harness.emitPcm(pcmAt(300));
+  harness.clock.advance(100);
+
+  assert.equal((await completion).status, 'completed');
+  await harness.manager.dispose();
+});
+
+test('BDD: speaking is emitted only after playback reports that hardware started', async () => {
+  let reportPlaybackStarted;
+  let finishPlayback;
+  const harness = createHarness({
+    overrides: {
+      speakWithTts: async (input) => {
+        harness.calls.speech.push(input);
+        reportPlaybackStarted = input.onPlaybackStarted;
+        await new Promise((resolve) => { finishPlayback = resolve; });
+      },
+    },
+  });
+  const completion = harness.manager.triggerWake({ sidekickId: 'sidekick-1' });
+  await eventually(() => harness.calls.microphoneStarts.length === 1);
+  harness.emitPcm();
+  harness.emitPcm();
+  harness.clock.advance(500);
+  await eventually(() => Boolean(reportPlaybackStarted));
+
+  assert.equal(harness.manager.getActiveSession('sidekick-1').phase, 'thinking');
+  assert.equal(harness.calls.screens.some((screen) => screen.screen === 'speaking'), false);
+  await reportPlaybackStarted();
+  assert.equal(harness.manager.getActiveSession('sidekick-1').phase, 'speaking');
+  finishPlayback();
+  assert.equal((await completion).status, 'completed');
   await harness.manager.dispose();
 });
 
@@ -257,6 +328,104 @@ test('BDD: a hardware disconnect ends the turn without trying to continue to the
   await harness.manager.dispose();
 });
 
+test('BDD: microphone stop has a hard deadline and still releases the session back to idle', async () => {
+  const harness = createHarness({
+    overrides: {
+      stopTransientMicrophone: async (input) => {
+        harness.calls.microphoneStops.push(input);
+        if (harness.calls.microphoneStops.length === 1) {
+          return await new Promise(() => undefined);
+        }
+      },
+    },
+    managerOptions: { microphoneStopTimeoutMs: 250 },
+  });
+  const completion = harness.manager.triggerWake({ sidekickId: 'sidekick-1' });
+  await eventually(() => harness.calls.microphoneStarts.length === 1);
+  harness.emitPcm();
+  harness.clock.advance(500);
+  await eventually(() => harness.calls.microphoneStops.length === 1);
+  harness.clock.advance(250);
+
+  const result = await completion;
+  assert.equal(result.status, 'error');
+  assert.equal(result.technicalCode, 'sidekick_voice_microphone_stop_timeout');
+  assert.equal(harness.calls.microphoneStops.length, 2, 'terminal cleanup retries an unconfirmed stop idempotently');
+  assert.equal(harness.manager.getActiveSession('sidekick-1'), null);
+  assert.equal(harness.calls.screens.at(-1).screen, 'error');
+  harness.clock.advance(1_500);
+  await eventually(() => harness.calls.screens.at(-1)?.screen === 'idle');
+  await harness.manager.dispose();
+});
+
+test('BDD: a wake during speaking cancels playback and waits for its terminal ack before listening again', async () => {
+  let releaseCancelledPlayback;
+  let playbackAborted = false;
+  const harness = createHarness({
+    overrides: {
+      speakWithTts: async (input) => {
+        harness.calls.speech.push(input);
+        await input.onPlaybackStarted();
+        if (harness.calls.speech.length > 1) return;
+        await new Promise((resolve) => {
+          releaseCancelledPlayback = resolve;
+          input.signal.addEventListener('abort', () => { playbackAborted = true; }, { once: true });
+        });
+      },
+    },
+    managerOptions: { speechCancellationTimeoutMs: 1_000 },
+  });
+  const first = harness.manager.triggerWake({ sidekickId: 'sidekick-1' });
+  await eventually(() => harness.calls.microphoneStarts.length === 1);
+  harness.emitPcm();
+  harness.clock.advance(500);
+  await eventually(() => harness.manager.getActiveSession('sidekick-1')?.phase === 'speaking');
+
+  const second = harness.manager.triggerWake({ sidekickId: 'sidekick-1' });
+  await eventually(() => playbackAborted);
+  assert.equal(harness.calls.microphoneStarts.length, 1, 'new capture must wait for playback cancellation');
+  releaseCancelledPlayback();
+  await eventually(() => harness.calls.microphoneStarts.length === 2);
+  assert.equal((await first).status, 'cancelled');
+
+  harness.emitPcm();
+  harness.clock.advance(500);
+  assert.equal((await second).status, 'completed');
+  assert.deepEqual(harness.calls.screens.map((screen) => screen.screen), [
+    'listening', 'transcribing', 'thinking', 'speaking', 'idle',
+    'listening', 'transcribing', 'thinking', 'speaking', 'idle',
+  ]);
+  await harness.manager.dispose();
+});
+
+test('BDD: firmware playback interruption terminates without error and the following wake starts listening', async () => {
+  const harness = createHarness({
+    overrides: {
+      speakWithTts: async (input) => {
+        harness.calls.speech.push(input);
+        await input.onPlaybackStarted();
+        if (harness.calls.speech.length === 1) throw new Error('sidekick_speaker_playback_interrupted');
+      },
+    },
+  });
+  const first = harness.manager.triggerWake({ sidekickId: 'sidekick-1' });
+  await eventually(() => harness.calls.microphoneStarts.length === 1);
+  harness.emitPcm();
+  harness.clock.advance(500);
+  const interrupted = await first;
+  assert.equal(interrupted.status, 'cancelled');
+  assert.equal(interrupted.technicalCode, 'sidekick_speaker_playback_interrupted');
+  assert.equal(harness.calls.screens.some((screen) => screen.screen === 'error'), false);
+
+  const second = harness.manager.triggerWake({ sidekickId: 'sidekick-1' });
+  await eventually(() => harness.calls.microphoneStarts.length === 2);
+  assert.equal(harness.manager.getActiveSession('sidekick-1').phase, 'listening');
+  harness.emitPcm();
+  harness.clock.advance(500);
+  assert.equal((await second).status, 'completed');
+  await harness.manager.dispose();
+});
+
 test('BDD: an agent that exceeds the session deadline is aborted and never reaches TTS', async () => {
   const harness = createHarness({
     overrides: {
@@ -296,7 +465,9 @@ test('BDD: STT failures show an error state and always recover the device to idl
 
   assert.equal(result.status, 'error');
   assert.equal(result.technicalCode, 'stt_connection_lost');
-  assert.deepEqual(harness.calls.screens.map((screen) => screen.screen), ['listening', 'transcribing', 'error', 'idle']);
+  assert.deepEqual(harness.calls.screens.map((screen) => screen.screen), ['listening', 'transcribing', 'error']);
+  harness.clock.advance(1_500);
+  await eventually(() => harness.calls.screens.at(-1)?.screen === 'idle');
   assert.equal(harness.calls.speech.length, 0);
   await harness.manager.dispose();
 });

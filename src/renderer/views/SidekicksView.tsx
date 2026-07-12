@@ -1,14 +1,18 @@
-import AccessTimeRounded from '@mui/icons-material/AccessTimeRounded';
-import AutoAwesomeRounded from '@mui/icons-material/AutoAwesomeRounded';
+import AddRounded from '@mui/icons-material/AddRounded';
+import ArrowBackRounded from '@mui/icons-material/ArrowBackRounded';
 import BatteryChargingFullRounded from '@mui/icons-material/BatteryChargingFullRounded';
 import BatteryUnknownRounded from '@mui/icons-material/BatteryUnknownRounded';
 import BedtimeRounded from '@mui/icons-material/BedtimeRounded';
 import CheckCircleRounded from '@mui/icons-material/CheckCircleRounded';
+import ChevronRightRounded from '@mui/icons-material/ChevronRightRounded';
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
+import DragIndicatorRounded from '@mui/icons-material/DragIndicatorRounded';
 import ExpandMoreRounded from '@mui/icons-material/ExpandMoreRounded';
 import GraphicEqRounded from '@mui/icons-material/GraphicEqRounded';
 import ImageRounded from '@mui/icons-material/ImageRounded';
 import InsertChartRounded from '@mui/icons-material/InsertChartRounded';
+import KeyboardArrowDownRounded from '@mui/icons-material/KeyboardArrowDownRounded';
+import KeyboardArrowUpRounded from '@mui/icons-material/KeyboardArrowUpRounded';
 import MicRounded from '@mui/icons-material/MicRounded';
 import PlayArrowRounded from '@mui/icons-material/PlayArrowRounded';
 import RefreshRounded from '@mui/icons-material/RefreshRounded';
@@ -18,7 +22,6 @@ import StopRounded from '@mui/icons-material/StopRounded';
 import UsbRounded from '@mui/icons-material/UsbRounded';
 import VolumeUpRounded from '@mui/icons-material/VolumeUpRounded';
 import WatchLaterRounded from '@mui/icons-material/WatchLaterRounded';
-import WifiRounded from '@mui/icons-material/WifiRounded';
 import {
   Accordion,
   AccordionDetails,
@@ -33,6 +36,10 @@ import {
   DialogTitle,
   Divider,
   LinearProgress,
+  IconButton,
+  List,
+  ListItemButton,
+  ListItemText,
   MenuItem,
   Paper,
   Stack,
@@ -44,6 +51,8 @@ import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactEleme
 import type { AppDictionary } from '@renderer/i18n';
 import type {
   PersonalAgent,
+  PersonalAgentConversation,
+  PersonalAgentConversationEvent,
   SidekickIdleConfig,
   SidekickIdleScreen,
   SidekickMicrophoneRecordingSummary,
@@ -51,10 +60,17 @@ import type {
   SidekickState,
   SidekickStatus,
   SidekickSummary,
+  SidekickVoiceConfig,
   SidekickUsbDevice,
+  SpeechToTextState,
   TextToSpeechState,
 } from '@shared/types';
 import { SIDEKICK_IDLE_IMAGE_HEIGHT, SIDEKICK_IDLE_IMAGE_WIDTH, SIDEKICK_IDLE_SCREENS } from '@shared/types';
+import {
+  SidekickConversationDialog,
+  SidekickConversationList,
+  SidekickVoiceSettings,
+} from './sidekicks/SidekickVoiceExperience';
 
 interface SidekicksViewProps {
   t: AppDictionary;
@@ -64,6 +80,7 @@ type SidekickCopy = AppDictionary['sections']['sidekicks'];
 type ScreenPreset = 'idle' | 'listening' | 'thinking' | 'speaking' | 'card' | 'transcript';
 
 const emptyState: SidekickState = { desktopId: '', sidekicks: [], detectedUsb: [] };
+const TERMINAL_PERSONAL_AGENT_RUN_STATUSES = new Set(['completed', 'failed', 'canceled']);
 
 const statusColor = (status: SidekickStatus): 'default' | 'primary' | 'success' | 'warning' | 'error' =>
   status === 'online'
@@ -103,6 +120,38 @@ const formatTime = (sidekick: SidekickSummary): string | null => {
   } catch {
     return new Date(sidekick.time.epochMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   }
+};
+
+const sidekickConversationFreshness = (conversation: PersonalAgentConversation): string => {
+  const runUpdatedAt = conversation.activeRun?.updatedAt ?? '';
+  const messageCreatedAt = conversation.messages.at(-1)?.createdAt ?? '';
+  return [conversation.updatedAt, runUpdatedAt, messageCreatedAt].sort().at(-1) ?? '';
+};
+
+const freshestSidekickConversation = (
+  current: PersonalAgentConversation,
+  incoming: PersonalAgentConversation,
+): PersonalAgentConversation => {
+  const comparison = sidekickConversationFreshness(incoming).localeCompare(sidekickConversationFreshness(current));
+  if (comparison !== 0) return comparison > 0 ? incoming : current;
+  const currentRunTerminal = TERMINAL_PERSONAL_AGENT_RUN_STATUSES.has(current.activeRun?.status ?? '');
+  const incomingRunTerminal = TERMINAL_PERSONAL_AGENT_RUN_STATUSES.has(incoming.activeRun?.status ?? '');
+  if (currentRunTerminal !== incomingRunTerminal) return incomingRunTerminal ? incoming : current;
+  if (incoming.messages.length !== current.messages.length) {
+    return incoming.messages.length > current.messages.length ? incoming : current;
+  }
+  return incoming;
+};
+
+const upsertSidekickConversation = (
+  current: PersonalAgentConversation[],
+  conversation: PersonalAgentConversation,
+): PersonalAgentConversation[] => {
+  const existing = current.find((item) => item.id === conversation.id);
+  const next = existing
+    ? current.map((item) => item.id === conversation.id ? freshestSidekickConversation(item, conversation) : item)
+    : [conversation, ...current];
+  return next.sort((left, right) => sidekickConversationFreshness(right).localeCompare(sidekickConversationFreshness(left)));
 };
 
 // Convierte cualquier imagen a RGB565 little-endian del tamano exacto del LCD,
@@ -146,40 +195,6 @@ function SidekickBatteryChip({ sidekick, copy }: { sidekick: SidekickSummary; co
   );
 }
 
-// Tira de conexion USB -> Wi-Fi -> Forger que refleja las etapas que muestra
-// la pantalla del dispositivo.
-function SidekickConnectionFlow({ sidekick, copy }: { sidekick: SidekickSummary; copy: SidekickCopy }) {
-  const steps: Array<{ label: string; icon: ReactElement; done: boolean; active: boolean }> = [
-    { label: copy.flowUsb, icon: <UsbRounded fontSize="small" />, done: true, active: false },
-    {
-      label: copy.flowWifi,
-      icon: <WifiRounded fontSize="small" />,
-      done: sidekick.status === 'online',
-      active: sidekick.status === 'wifi_pending' || sidekick.status === 'pairing',
-    },
-    {
-      label: sidekick.status === 'wifi_pending' ? copy.flowSearching : copy.flowForger,
-      icon: <AutoAwesomeRounded fontSize="small" />,
-      done: sidekick.status === 'online',
-      active: sidekick.status === 'wifi_pending',
-    },
-  ];
-  return (
-    <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
-      {steps.map((step) => (
-        <Chip
-          key={step.label}
-          size="small"
-          icon={step.done ? <CheckCircleRounded fontSize="small" /> : step.icon}
-          color={step.done ? 'success' : step.active ? 'warning' : 'default'}
-          variant={step.done || step.active ? 'filled' : 'outlined'}
-          label={step.label}
-        />
-      ))}
-    </Stack>
-  );
-}
-
 const IDLE_SCREEN_ICONS: Record<SidekickIdleScreen, ReactElement> = {
   eyes: <SmartToyRounded fontSize="small" />,
   sleep: <BedtimeRounded fontSize="small" />,
@@ -209,6 +224,7 @@ function SidekickIdleSection({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const hasImage = Boolean(sidekick.idleImagePreviewDataUrl);
   const connected = sidekick.status === 'online';
+  const supportsCustomOrder = sidekick.capabilities.includes('display.idle-order');
 
   // Resincroniza el formulario cuando llega estado nuevo del servicio.
   const remoteKey = `${sidekick.idleConfig.screens.join(',')}|${sidekick.idleConfig.rotateSeconds}`;
@@ -225,6 +241,17 @@ function SidekickIdleSection({
     setScreens((current) => (
       current.includes(screen) ? current.filter((entry) => entry !== screen) : [...current, screen]
     ));
+  };
+
+  const moveScreen = (screen: SidekickIdleScreen, offset: -1 | 1) => {
+    setScreens((current) => {
+      const index = current.indexOf(screen);
+      const target = index + offset;
+      if (index < 0 || target < 0 || target >= current.length) return current;
+      const next = [...current];
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
   };
 
   const rotateLabel = (seconds: number): string => {
@@ -244,22 +271,40 @@ function SidekickIdleSection({
         <Typography variant="subtitle1" fontWeight={700}>{copy.idleTitle}</Typography>
         <Typography variant="body2" color="text.secondary">{copy.idleSubtitle}</Typography>
       </Box>
-      <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
-        {SIDEKICK_IDLE_SCREENS.map((screen) => {
-          const enabled = screens.includes(screen);
-          const disabled = busy || (screen === 'custom' && !hasImage);
-          return (
+      <Stack spacing={0.75}>
+        {screens.map((screen, index) => (
+          <Paper key={screen} variant="outlined" sx={{ px: 1, py: 0.5, borderRadius: 2 }}>
+            <Stack direction="row" alignItems="center" spacing={0.75}>
+              {supportsCustomOrder ? <DragIndicatorRounded color="disabled" aria-hidden /> : null}
+              <Box sx={{ display: 'flex', color: 'text.secondary' }}>{IDLE_SCREEN_ICONS[screen]}</Box>
+              <Typography variant="body2" sx={{ flex: 1 }}>{index + 1}. {copy.idleScreens[screen]}</Typography>
+              <Chip size="small" color="primary" label={copy.screenActive} onClick={() => toggleScreen(screen)} disabled={busy} />
+              {supportsCustomOrder ? (
+                <>
+                  <IconButton size="small" aria-label={copy.screenMoveUp(copy.idleScreens[screen])} disabled={busy || index === 0} onClick={() => moveScreen(screen, -1)}>
+                    <KeyboardArrowUpRounded fontSize="small" />
+                  </IconButton>
+                  <IconButton size="small" aria-label={copy.screenMoveDown(copy.idleScreens[screen])} disabled={busy || index === screens.length - 1} onClick={() => moveScreen(screen, 1)}>
+                    <KeyboardArrowDownRounded fontSize="small" />
+                  </IconButton>
+                </>
+              ) : null}
+            </Stack>
+          </Paper>
+        ))}
+        <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
+          {SIDEKICK_IDLE_SCREENS.filter((screen) => !screens.includes(screen)).map((screen) => (
             <Chip
               key={screen}
               icon={IDLE_SCREEN_ICONS[screen]}
               label={copy.idleScreens[screen]}
-              color={enabled ? 'primary' : 'default'}
-              variant={enabled ? 'filled' : 'outlined'}
-              disabled={disabled}
+              variant="outlined"
+              disabled={busy || (screen === 'custom' && !hasImage)}
               onClick={() => toggleScreen(screen)}
             />
-          );
-        })}
+          ))}
+        </Stack>
+        {!supportsCustomOrder ? <Typography variant="caption" color="text.secondary">{copy.screenOrderUnavailable}</Typography> : null}
       </Stack>
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems={{ xs: 'stretch', sm: 'center' }}>
         <TextField
@@ -704,9 +749,59 @@ function TechnicalDetails({ sidekick, state, copy }: { sidekick: SidekickSummary
   );
 }
 
+function SidekickLocalVoiceSetup({
+  copy,
+  speechState,
+  ttsState,
+  speechSetupBusy,
+  onInstallSpeechToText,
+  onInstallTextToSpeech,
+}: {
+  copy: SidekickCopy;
+  speechState: SpeechToTextState | null;
+  ttsState: TextToSpeechState | null;
+  speechSetupBusy: 'stt' | 'tts' | null;
+  onInstallSpeechToText: () => void;
+  onInstallTextToSpeech: () => void;
+}) {
+  const sttReady = speechState?.installed === true && !speechState.repairRequired;
+  const ttsReady = ttsState?.installed === true && ttsState.voices.some((voice) => voice.installed && voice.enabled);
+  return (
+    <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2 }}>
+      <Stack spacing={1.25}>
+        <Box>
+          <Typography variant="subtitle2">{copy.voiceSetupTitle}</Typography>
+          <Typography variant="body2" color="text.secondary">{copy.voiceSetupOptional}</Typography>
+        </Box>
+        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+          <Stack direction="row" alignItems="center" spacing={1} sx={{ flex: 1 }}>
+            <Chip size="small" color={sttReady ? 'success' : 'default'} label={sttReady ? copy.voiceSetupReady : speechState?.repairRequired ? copy.voiceSetupRepairNeeded : copy.voiceSetupMissing} />
+            <Typography variant="body2" sx={{ flex: 1 }}>{copy.voiceSetupUnderstand}</Typography>
+            {!sttReady ? <Button size="small" disabled={Boolean(speechSetupBusy)} onClick={onInstallSpeechToText}>{speechState?.repairRequired ? copy.voiceSetupRepair : copy.voiceSetupInstall}</Button> : null}
+          </Stack>
+          <Stack direction="row" alignItems="center" spacing={1} sx={{ flex: 1 }}>
+            <Chip size="small" color={ttsReady ? 'success' : 'default'} label={ttsReady ? copy.voiceSetupReady : copy.voiceSetupMissing} />
+            <Typography variant="body2" sx={{ flex: 1 }}>{copy.voiceSetupRespond}</Typography>
+            {!ttsReady ? <Button size="small" disabled={Boolean(speechSetupBusy)} onClick={onInstallTextToSpeech}>{copy.voiceSetupInstall}</Button> : null}
+          </Stack>
+        </Stack>
+        {speechSetupBusy ? (
+          <Stack spacing={0.5}>
+            <LinearProgress />
+            <Typography variant="caption" color="text.secondary">{speechSetupBusy === 'stt' ? copy.voiceSetupInstallingStt : copy.voiceSetupInstallingTts}</Typography>
+          </Stack>
+        ) : null}
+      </Stack>
+    </Paper>
+  );
+}
+
 function SidekickSetupCard({
   copy,
   busy,
+  speechState,
+  ttsState,
+  speechSetupBusy,
   compatibleUsb,
   otherUsb,
   selectedPortPath,
@@ -718,10 +813,15 @@ function SidekickSetupCard({
   onNameChange,
   onSsidChange,
   onPasswordChange,
+  onInstallSpeechToText,
+  onInstallTextToSpeech,
   onConfigure,
 }: {
   copy: SidekickCopy;
   busy: boolean;
+  speechState: SpeechToTextState | null;
+  ttsState: TextToSpeechState | null;
+  speechSetupBusy: 'stt' | 'tts' | null;
   compatibleUsb: SidekickUsbDevice[];
   otherUsb: SidekickUsbDevice[];
   selectedPortPath: string;
@@ -733,6 +833,8 @@ function SidekickSetupCard({
   onNameChange: (value: string) => void;
   onSsidChange: (value: string) => void;
   onPasswordChange: (value: string) => void;
+  onInstallSpeechToText: () => void;
+  onInstallTextToSpeech: () => void;
   onConfigure: () => void;
 }) {
   return (
@@ -764,6 +866,14 @@ function SidekickSetupCard({
         <TextField fullWidth label={copy.ssidLabel} value={ssid} onChange={(event) => onSsidChange(event.target.value)} disabled={busy} />
         <TextField fullWidth label={copy.passwordLabel} type="password" value={password} onChange={(event) => onPasswordChange(event.target.value)} disabled={busy} />
       </Stack>
+      <SidekickLocalVoiceSetup
+        copy={copy}
+        speechState={speechState}
+        ttsState={ttsState}
+        speechSetupBusy={speechSetupBusy}
+        onInstallSpeechToText={onInstallSpeechToText}
+        onInstallTextToSpeech={onInstallTextToSpeech}
+      />
       <Button variant="contained" startIcon={<UsbRounded />} disabled={busy || !selectedPortPath || Boolean(nameError) || !ssid || !password} onClick={onConfigure} sx={{ alignSelf: { xs: 'stretch', sm: 'flex-end' } }}>
         {copy.configure}
       </Button>
@@ -782,7 +892,9 @@ function SidekickSetupCard({
 export function SidekicksView({ t }: SidekicksViewProps) {
   const copy = t.sections.sidekicks;
   const [state, setState] = useState<SidekickState>(emptyState);
+  const [speechState, setSpeechState] = useState<SpeechToTextState | null>(null);
   const [ttsState, setTtsState] = useState<TextToSpeechState | null>(null);
+  const [speechSetupBusy, setSpeechSetupBusy] = useState<'stt' | 'tts' | null>(null);
   const [personalAgents, setPersonalAgents] = useState<PersonalAgent[]>([]);
   const [busy, setBusy] = useState(false);
   const [name, setName] = useState<string>(copy.defaultName);
@@ -796,7 +908,13 @@ export function SidekicksView({ t }: SidekicksViewProps) {
   const [voiceBusy, setVoiceBusy] = useState<Record<string, boolean>>({});
   const [agentBusy, setAgentBusy] = useState<Record<string, boolean>>({});
   const [idleBusy, setIdleBusy] = useState<Record<string, boolean>>({});
+  const [voiceConfigBusy, setVoiceConfigBusy] = useState<Record<string, boolean>>({});
+  const [conversationLoading, setConversationLoading] = useState(false);
+  const [conversationSidekickId, setConversationSidekickId] = useState<string | null>(null);
+  const [sidekickConversations, setSidekickConversations] = useState<Record<string, PersonalAgentConversation[]>>({});
+  const [openConversation, setOpenConversation] = useState<PersonalAgentConversation | null>(null);
   const [configuringId, setConfiguringId] = useState<string | null>(null);
+  const [unlinking, setUnlinking] = useState<SidekickSummary | null>(null);
   const [setupOpen, setSetupOpen] = useState(false);
 
   const compatibleUsb = useMemo(() => state.detectedUsb.filter((device) => device.likelySidekick), [state.detectedUsb]);
@@ -810,13 +928,15 @@ export function SidekicksView({ t }: SidekicksViewProps) {
     setBusy(true);
     setNotice(null);
     try {
-      const [sidekicks, speech, agents] = await Promise.all([
+      const [sidekicks, speech, textToSpeech, agents] = await Promise.all([
         window.forger.sidekicksGetState(),
+        window.forger.speechToTextGetState().catch(() => null),
         window.forger.textToSpeechGetState().catch(() => null),
         window.forger.personalAgentsList().catch(() => []),
       ]);
       setState(sidekicks);
-      setTtsState(speech);
+      setSpeechState(speech);
+      setTtsState(textToSpeech);
       setPersonalAgents(agents);
     } catch {
       setNotice({ severity: 'error', message: copy.loadError });
@@ -826,9 +946,25 @@ export function SidekicksView({ t }: SidekicksViewProps) {
   };
 
   useEffect(() => {
-    const dispose = window.forger.onSidekicksChanged(setState);
+    const disposeSidekicks = window.forger.onSidekicksChanged(setState);
+    const disposeConversations = window.forger.onPersonalAgentConversationEvent((event: PersonalAgentConversationEvent) => {
+      if (event.conversation.origin !== 'sidekick' || !event.conversation.sidekickId) return;
+      const sidekickId = event.conversation.sidekickId;
+      setSidekickConversations((current) => ({
+        ...current,
+        [sidekickId]: upsertSidekickConversation(current[sidekickId] ?? [], event.conversation),
+      }));
+      setOpenConversation((current) => (
+        current?.id === event.conversation.id
+          ? freshestSidekickConversation(current, event.conversation)
+          : current
+      ));
+    });
     void refresh();
-    return dispose;
+    return () => {
+      disposeSidekicks();
+      disposeConversations();
+    };
   }, []);
 
   const scanUsb = async () => {
@@ -851,6 +987,7 @@ export function SidekicksView({ t }: SidekicksViewProps) {
       setState(result);
       if (result.success) {
         setPassword('');
+        setSetupOpen(false);
         setNotice({ severity: 'info', message: copy.configureSuccess });
       } else {
         setNotice({ severity: 'error', message: result.userMessage ?? copy.configureError });
@@ -859,6 +996,30 @@ export function SidekicksView({ t }: SidekicksViewProps) {
       setNotice({ severity: 'error', message: copy.configureError });
     } finally {
       setBusy(false);
+    }
+  };
+
+  const installSpeechToText = async () => {
+    setSpeechSetupBusy('stt');
+    setNotice(null);
+    try {
+      setSpeechState(await window.forger.speechToTextInstall());
+    } catch {
+      setNotice({ severity: 'error', message: copy.voiceSetupInstallError });
+    } finally {
+      setSpeechSetupBusy(null);
+    }
+  };
+
+  const installTextToSpeech = async () => {
+    setSpeechSetupBusy('tts');
+    setNotice(null);
+    try {
+      setTtsState(await window.forger.textToSpeechInstall());
+    } catch {
+      setNotice({ severity: 'error', message: copy.voiceSetupInstallError });
+    } finally {
+      setSpeechSetupBusy(null);
     }
   };
 
@@ -933,6 +1094,46 @@ export function SidekicksView({ t }: SidekicksViewProps) {
     }
   };
 
+  const saveVoiceConfig = async (sidekickId: string, config: SidekickVoiceConfig) => {
+    setVoiceConfigBusy((current) => ({ ...current, [sidekickId]: true }));
+    setNotice(null);
+    try {
+      const result = await window.forger.sidekicksSetVoiceConfig({ sidekickId, config });
+      setState(result);
+      setNotice({ severity: result.success ? 'success' : 'error', message: result.success ? copy.voiceSettingsSaved : result.userMessage ?? copy.voiceSettingsError });
+    } catch {
+      setNotice({ severity: 'error', message: copy.voiceSettingsError });
+    } finally {
+      setVoiceConfigBusy((current) => ({ ...current, [sidekickId]: false }));
+    }
+  };
+
+  const loadSidekickConversations = async (sidekick: SidekickSummary) => {
+    setConversationSidekickId(sidekick.sidekickId);
+    setConversationLoading(true);
+    try {
+      const conversations = (
+        await Promise.all(personalAgents.map((agent) => (
+          window.forger.personalAgentConversationsList({ agentId: agent.id }).catch(() => [])
+        )))
+      ).flat();
+      const matching = conversations.filter((conversation) => (
+        conversation.origin === 'sidekick' && conversation.sidekickId === sidekick.sidekickId
+      ));
+      setSidekickConversations((current) => ({
+        ...current,
+        [sidekick.sidekickId]: matching.reduce(
+          (merged, conversation) => upsertSidekickConversation(merged, conversation),
+          current[sidekick.sidekickId] ?? [],
+        ),
+      }));
+    } catch {
+      setNotice({ severity: 'error', message: copy.conversationsError });
+    } finally {
+      setConversationLoading(false);
+    }
+  };
+
   const setMicrophoneBusyFor = (sidekickId: string, value: boolean) => setMicrophoneBusy((current) => ({ ...current, [sidekickId]: value }));
   const setMicrophoneErrorFor = (sidekickId: string, value?: string) => setMicrophoneErrors((current) => ({ ...current, [sidekickId]: value }));
 
@@ -965,10 +1166,11 @@ export function SidekicksView({ t }: SidekicksViewProps) {
   };
 
   const forget = async (sidekick: SidekickSummary) => {
-    if (!window.confirm(copy.forgetConfirm(sidekick.name))) return;
     setBusy(true);
     try {
       setState(await window.forger.sidekicksForget(sidekick.sidekickId));
+      setConfiguringId(null);
+      setUnlinking(null);
     } finally {
       setBusy(false);
     }
@@ -978,6 +1180,9 @@ export function SidekicksView({ t }: SidekicksViewProps) {
     <SidekickSetupCard
       copy={copy}
       busy={busy}
+      speechState={speechState}
+      ttsState={ttsState}
+      speechSetupBusy={speechSetupBusy}
       compatibleUsb={compatibleUsb}
       otherUsb={otherUsb}
       selectedPortPath={selectedPortPath}
@@ -989,15 +1194,149 @@ export function SidekicksView({ t }: SidekicksViewProps) {
       onNameChange={setName}
       onSsidChange={setSsid}
       onPasswordChange={setPassword}
+      onInstallSpeechToText={() => void installSpeechToText()}
+      onInstallTextToSpeech={() => void installTextToSpeech()}
       onConfigure={() => void configure()}
     />
   );
 
-  // El detalle vive en un modal por dispositivo; la ruta es solo el listado.
   const configuring = pairedSidekicks.find((entry) => entry.sidekickId === configuringId) ?? null;
+  const configuringWakeBeep = configuring
+    ? (configuring as SidekickSummary & { wakeBeep?: { status: 'completed' | 'failed'; technicalCode?: string } }).wakeBeep
+    : undefined;
+  const voiceReady = (sidekick: SidekickSummary): boolean => {
+    const sttReady = speechState?.installed === true && !speechState.repairRequired;
+    const ttsReady = ttsState?.installed === true
+      && ttsState.voices.some((voice) => voice.installed && voice.enabled);
+    const agentReady = personalAgents.some((agent) => agent.id === sidekick.personalAgentId)
+      || (!sidekick.personalAgentId && personalAgents.length === 1);
+    return sttReady
+      && ttsReady
+      && agentReady
+      && sidekick.capabilities.includes('wake.word.local')
+      && sidekick.capabilities.includes('microphone.record')
+      && sidekick.capabilities.includes('speaker.playback');
+  };
+
+  if (configuring) {
+    const conversationsVisible = conversationSidekickId === configuring.sidekickId;
+    return (
+      <Stack spacing={2.5}>
+        <Stack direction="row" spacing={1.25} alignItems="center">
+          <IconButton aria-label={copy.backToSidekicks} onClick={() => setConfiguringId(null)}>
+            <ArrowBackRounded />
+          </IconButton>
+          <Box sx={{ flex: 1, minWidth: 0 }}>
+            <Typography variant="h4" noWrap>{configuring.name}</Typography>
+            <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap" alignItems="center">
+              <Chip size="small" color={statusColor(configuring.status)} label={copy.statuses[configuring.status]} />
+              {configuring.voicePhase !== 'idle' ? (
+                <Chip
+                  size="small"
+                  color={configuring.voicePhase === 'error' ? 'error' : 'primary'}
+                  label={copy.voicePhases[configuring.voicePhase]}
+                />
+              ) : null}
+              <SidekickBatteryChip sidekick={configuring} copy={copy} />
+              <Chip size="small" color={voiceReady(configuring) ? 'success' : 'default'} variant={voiceReady(configuring) ? 'filled' : 'outlined'} label={voiceReady(configuring) ? copy.voiceReady : copy.voiceNeedsSetup} />
+            </Stack>
+          </Box>
+        </Stack>
+
+        {notice ? <Alert severity={notice.severity}>{notice.message}</Alert> : null}
+
+        <Paper variant="outlined" sx={{ p: { xs: 2, md: 2.5 }, borderRadius: 3 }}>
+          <Stack spacing={2}>
+            <Typography variant="h6">{copy.voiceSectionTitle}</Typography>
+            {configuringWakeBeep?.status === 'failed' ? (
+              <Alert severity="warning">{copy.voiceError}</Alert>
+            ) : null}
+            <SidekickLocalVoiceSetup
+              copy={copy}
+              speechState={speechState}
+              ttsState={ttsState}
+              speechSetupBusy={speechSetupBusy}
+              onInstallSpeechToText={() => void installSpeechToText()}
+              onInstallTextToSpeech={() => void installTextToSpeech()}
+            />
+            <SidekickVoiceAssistantSection sidekick={configuring} copy={copy} agents={personalAgents} busy={Boolean(agentBusy[configuring.sidekickId])} onSelect={setPersonalAgent} />
+            <Divider />
+            <SidekickVoiceSettings sidekick={configuring} copy={copy} ttsState={ttsState} busy={Boolean(voiceConfigBusy[configuring.sidekickId])} onSave={saveVoiceConfig} />
+          </Stack>
+        </Paper>
+
+        <Paper variant="outlined" sx={{ p: { xs: 2, md: 2.5 }, borderRadius: 3 }}>
+          <SidekickIdleSection sidekick={configuring} copy={copy} busy={Boolean(idleBusy[configuring.sidekickId])} onSaveConfig={saveIdleConfig} onUploadImage={uploadIdleImage} />
+        </Paper>
+
+        <Paper variant="outlined" sx={{ p: { xs: 2, md: 2.5 }, borderRadius: 3 }}>
+          <Stack spacing={1.5}>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} justifyContent="space-between" alignItems={{ xs: 'stretch', sm: 'center' }}>
+              <Box>
+                <Typography variant="h6">{copy.conversationsTitle}</Typography>
+                <Typography variant="body2" color="text.secondary">{copy.conversationsSubtitle}</Typography>
+              </Box>
+              <Button variant="outlined" onClick={() => void loadSidekickConversations(configuring)}>{copy.conversationsOpen}</Button>
+            </Stack>
+            {conversationsVisible ? (
+              <SidekickConversationList copy={copy} conversations={sidekickConversations[configuring.sidekickId] ?? []} loading={conversationLoading} onOpen={setOpenConversation} />
+            ) : null}
+          </Stack>
+        </Paper>
+
+        <Paper variant="outlined" sx={{ p: { xs: 2, md: 2.5 }, borderRadius: 3 }}>
+          <Stack spacing={1}>
+            <Typography variant="h6">{copy.deviceSectionTitle}</Typography>
+            <Typography variant="body2" color="text.secondary">
+              {configuring.status === 'online' ? copy.deviceReady : configuring.errorMessage ?? copy.deviceNeedsAttention}
+            </Typography>
+            {formatTime(configuring) ? <Typography variant="body2">{copy.timeTitle}: {formatTime(configuring)}</Typography> : null}
+          </Stack>
+        </Paper>
+
+        <Accordion variant="outlined" disableGutters sx={{ borderRadius: '12px !important', '&:before': { display: 'none' } }}>
+          <AccordionSummary expandIcon={<ExpandMoreRounded />}>
+            <Typography variant="h6">{copy.advancedTitle}</Typography>
+          </AccordionSummary>
+          <AccordionDetails>
+            <Stack spacing={2.25}>
+              <SidekickScreenControls sidekick={configuring} copy={copy} busy={Boolean(screenBusy[configuring.sidekickId])} onSend={sendScreen} />
+              <Divider />
+              <SidekickVoiceControls sidekick={configuring} copy={copy} ttsState={ttsState} busy={Boolean(voiceBusy[configuring.sidekickId])} onSpeak={speak} />
+              <Divider />
+              <SidekickMicrophoneControls sidekick={configuring} copy={copy} busy={Boolean(microphoneBusy[configuring.sidekickId])} error={microphoneErrors[configuring.sidekickId]} onStart={startMicrophoneRecording} onStop={stopMicrophoneRecording} />
+              <SidekickTrainingPlaceholder copy={copy} />
+              <Divider />
+              <TechnicalDetails sidekick={configuring} state={state} copy={copy} />
+            </Stack>
+          </AccordionDetails>
+        </Accordion>
+
+        <Paper variant="outlined" sx={{ p: { xs: 2, md: 2.5 }, borderRadius: 3, borderColor: 'error.light' }}>
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} justifyContent="space-between" alignItems={{ xs: 'stretch', sm: 'center' }}>
+            <Box>
+              <Typography variant="h6" color="error">{copy.dangerTitle}</Typography>
+              <Typography variant="body2" color="text.secondary">{copy.dangerSubtitle}</Typography>
+            </Box>
+            <Button color="error" variant="outlined" startIcon={<DeleteOutlineRounded />} onClick={() => setUnlinking(configuring)}>{copy.unlinkAction}</Button>
+          </Stack>
+        </Paper>
+
+        <SidekickConversationDialog copy={copy} conversation={openConversation} onClose={() => setOpenConversation(null)} />
+        <Dialog open={Boolean(unlinking)} onClose={() => setUnlinking(null)} fullWidth maxWidth="xs">
+          <DialogTitle>{copy.unlinkConfirmTitle}</DialogTitle>
+          <DialogContent><Typography>{copy.forgetConfirm(configuring.name)}</Typography></DialogContent>
+          <DialogActions>
+            <Button onClick={() => setUnlinking(null)}>{copy.unlinkCancel}</Button>
+            <Button color="error" variant="contained" disabled={busy} onClick={() => void forget(configuring)}>{copy.unlinkConfirm}</Button>
+          </DialogActions>
+        </Dialog>
+      </Stack>
+    );
+  }
 
   return (
-    <Stack spacing={3}>
+    <Stack spacing={2.5}>
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} justifyContent="space-between" alignItems={{ xs: 'stretch', sm: 'flex-start' }}>
         <Box>
           <Typography variant="h4">{copy.title}</Typography>
@@ -1005,112 +1344,30 @@ export function SidekicksView({ t }: SidekicksViewProps) {
         </Box>
         <Stack direction="row" spacing={1}>
           <Button startIcon={<RefreshRounded />} onClick={() => void refresh()} disabled={busy}>{copy.refresh}</Button>
+          <Button variant="contained" startIcon={<AddRounded />} onClick={() => { void scanUsb(); setSetupOpen(true); }}>{copy.addSidekick}</Button>
         </Stack>
       </Stack>
 
       {notice ? <Alert severity={notice.severity}>{notice.message}</Alert> : state.userMessage ? <Alert severity={state.technicalCode ? 'error' : 'success'}>{state.userMessage}</Alert> : null}
 
-      {pairedSidekicks.length === 0 ? (
-        <Paper variant="outlined" sx={{ p: { xs: 2, md: 3 }, borderRadius: 3 }}>{setupCard}</Paper>
-      ) : null}
-
-      {pairedSidekicks.map((sidekick) => (
-        <Paper key={sidekick.sidekickId} variant="outlined" sx={{ p: { xs: 2, md: 2.5 }, borderRadius: 3 }}>
-          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} justifyContent="space-between" alignItems={{ xs: 'stretch', sm: 'center' }}>
-            <Box sx={{ minWidth: 0 }}>
-              <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap" alignItems="center">
-                <Typography variant="h6">{sidekick.name}</Typography>
-                <Chip size="small" color={statusColor(sidekick.status)} label={copy.statuses[sidekick.status]} />
-                <SidekickBatteryChip sidekick={sidekick} copy={copy} />
-                {formatTime(sidekick) ? (
-                  <Chip size="small" variant="outlined" icon={<AccessTimeRounded />} label={formatTime(sidekick)} />
-                ) : null}
-              </Stack>
-              <Typography variant="body2" color={sidekick.status === 'online' ? 'success.main' : sidekick.status === 'error' ? 'error' : 'text.secondary'}>
-                {sidekick.status === 'online' ? copy.deviceReady : sidekick.errorMessage ?? copy.deviceNeedsAttention}
-              </Typography>
-              <Box sx={{ pt: 1 }}>
-                <SidekickConnectionFlow sidekick={sidekick} copy={copy} />
-              </Box>
-            </Box>
-            <Stack direction="row" spacing={1} alignItems="center">
-              <Button variant="contained" onClick={() => setConfiguringId(sidekick.sidekickId)}>{copy.deviceConfigure}</Button>
-              <Button size="small" color="error" startIcon={<DeleteOutlineRounded />} disabled={busy} onClick={() => void forget(sidekick)}>{copy.forget}</Button>
-            </Stack>
-          </Stack>
-        </Paper>
-      ))}
-
-      {pairedSidekicks.length > 0 ? (
-        <Button variant="outlined" startIcon={<UsbRounded />} onClick={() => { void scanUsb(); setSetupOpen(true); }} sx={{ alignSelf: 'flex-start' }}>
-          {copy.setupAnother}
-        </Button>
-      ) : null}
-
-      <Dialog open={Boolean(configuring)} onClose={() => setConfiguringId(null)} fullWidth maxWidth="md" scroll="paper">
-        {configuring ? (
-          <>
-            <DialogTitle>
-              <Stack direction="row" spacing={1} alignItems="center" useFlexGap flexWrap="wrap">
-                <span>{configuring.name}</span>
-                <Chip size="small" color={statusColor(configuring.status)} label={copy.statuses[configuring.status]} />
-              </Stack>
-            </DialogTitle>
-            <DialogContent dividers>
-              <Stack spacing={2.25} sx={{ pt: 0.5 }}>
-                <SidekickIdleSection
-                  sidekick={configuring}
-                  copy={copy}
-                  busy={Boolean(idleBusy[configuring.sidekickId])}
-                  onSaveConfig={saveIdleConfig}
-                  onUploadImage={uploadIdleImage}
+      {pairedSidekicks.length === 0 ? <Paper variant="outlined" sx={{ p: 3, borderRadius: 3, textAlign: 'center' }}><Typography color="text.secondary">{copy.empty}</Typography></Paper> : (
+        <Paper variant="outlined" sx={{ borderRadius: 3, overflow: 'hidden' }}>
+          <List disablePadding>
+            {pairedSidekicks.map((sidekick, index) => (
+              <ListItemButton key={sidekick.sidekickId} divider={index < pairedSidekicks.length - 1} onClick={() => setConfiguringId(sidekick.sidekickId)} sx={{ py: 1.5, px: 2 }}>
+                <ListItemText
+                  primary={<Typography fontWeight={700}>{sidekick.name}</Typography>}
+                  secondary={<Stack component="span" direction="row" spacing={0.75} useFlexGap flexWrap="wrap" sx={{ pt: 0.5 }}><Chip size="small" color={sidekick.status === 'online' ? 'success' : 'default'} label={sidekick.status === 'online' ? copy.statuses.online : copy.statuses.offline} />{sidekick.voicePhase !== 'idle' ? <Chip size="small" color={sidekick.voicePhase === 'error' ? 'error' : 'primary'} label={copy.voicePhases[sidekick.voicePhase]} /> : null}<SidekickBatteryChip sidekick={sidekick} copy={copy} /><Chip size="small" color={voiceReady(sidekick) ? 'success' : 'default'} variant="outlined" label={voiceReady(sidekick) ? copy.voiceReady : copy.voiceNeedsSetup} /></Stack>}
                 />
-                <Divider />
-                <SidekickVoiceAssistantSection sidekick={configuring} copy={copy} agents={personalAgents} busy={Boolean(agentBusy[configuring.sidekickId])} onSelect={setPersonalAgent} />
-                <SidekickTrainingPlaceholder copy={copy} />
-                <Divider />
-                <Accordion disableGutters elevation={0} sx={{ '&:before': { display: 'none' }, bgcolor: 'transparent' }}>
-                  <AccordionSummary expandIcon={<ExpandMoreRounded />} sx={{ px: 0 }}>
-                    <Typography variant="body2" color="text.secondary">{copy.testsTitle}</Typography>
-                  </AccordionSummary>
-                  <AccordionDetails sx={{ px: 0, pt: 0 }}>
-                    <Stack spacing={2.25}>
-                      <SidekickVoiceControls sidekick={configuring} copy={copy} ttsState={ttsState} busy={Boolean(voiceBusy[configuring.sidekickId])} onSpeak={speak} />
-                      <Divider />
-                      <SidekickMicrophoneControls
-                        sidekick={configuring}
-                        copy={copy}
-                        busy={Boolean(microphoneBusy[configuring.sidekickId])}
-                        error={microphoneErrors[configuring.sidekickId]}
-                        onStart={startMicrophoneRecording}
-                        onStop={stopMicrophoneRecording}
-                      />
-                    </Stack>
-                  </AccordionDetails>
-                </Accordion>
-                <Accordion disableGutters elevation={0} sx={{ '&:before': { display: 'none' }, bgcolor: 'transparent' }}>
-                  <AccordionSummary expandIcon={<ExpandMoreRounded />} sx={{ px: 0 }}>
-                    <Typography variant="body2" color="text.secondary">{copy.advancedTitle}</Typography>
-                  </AccordionSummary>
-                  <AccordionDetails sx={{ px: 0, pt: 0 }}>
-                    <Stack spacing={2.25}>
-                      <SidekickScreenControls sidekick={configuring} copy={copy} busy={Boolean(screenBusy[configuring.sidekickId])} onSend={sendScreen} />
-                      <Divider />
-                      <TechnicalDetails sidekick={configuring} state={state} copy={copy} />
-                    </Stack>
-                  </AccordionDetails>
-                </Accordion>
-              </Stack>
-            </DialogContent>
-            <DialogActions>
-              <Button onClick={() => setConfiguringId(null)}>{copy.configClose}</Button>
-            </DialogActions>
-          </>
-        ) : null}
-      </Dialog>
+                <ChevronRightRounded color="action" />
+              </ListItemButton>
+            ))}
+          </List>
+        </Paper>
+      )}
 
       <Dialog open={setupOpen} onClose={() => setSetupOpen(false)} fullWidth maxWidth="md" scroll="paper">
-        <DialogTitle>{copy.journeyTitle}</DialogTitle>
+        <DialogTitle>{copy.addSidekick}</DialogTitle>
         <DialogContent dividers>{setupCard}</DialogContent>
         <DialogActions>
           <Button onClick={() => setSetupOpen(false)}>{copy.configClose}</Button>

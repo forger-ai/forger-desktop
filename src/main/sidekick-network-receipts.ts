@@ -53,6 +53,8 @@ export const parseSidekickWakeReceipt = (payload: SidekickNetworkPayload): Sidek
 };
 
 export class SidekickSpeakerReceipts {
+  public constructor(private readonly ackTimeoutMs = SPEAKER_ACK_TIMEOUT_MS) {}
+
   // Los receipts que no calzan con una reproduccion activa se ignoran en vez
   // de lanzar: un `stopped` o `progress` tardio (p. ej. tras un cancel por
   // timeout) es trafico esperado, y lanzar aqui cierra el socket completo del
@@ -71,6 +73,22 @@ export class SidekickSpeakerReceipts {
       return;
     }
     active.queueDepth = payload.queueDepth;
+    if (payload.maxInFlightChunks === undefined) {
+      // Firmware anterior no anunciaba la capacidad del transporte. Lockstep
+      // es el unico fallback seguro porque queueDepth describe la cola de
+      // audio, no la cola WebSocket que recibe los comandos.
+      active.maxInFlightChunks = 1;
+    } else if (
+      typeof payload.maxInFlightChunks !== 'number' ||
+      !Number.isInteger(payload.maxInFlightChunks) ||
+      payload.maxInFlightChunks < 1 ||
+      payload.maxInFlightChunks > payload.queueDepth
+    ) {
+      this.reject(runtime, new Error('sidekick_speaker_started_invalid'));
+      return;
+    } else {
+      active.maxInFlightChunks = payload.maxInFlightChunks;
+    }
     active.status = 'playing';
     this.resolve(runtime, `started:${active.playbackId}`);
   }
@@ -98,8 +116,11 @@ export class SidekickSpeakerReceipts {
 
   public handleStopped(runtime: SidekickRuntimeState, payload: SidekickNetworkPayload): void {
     const active = runtime.speakerPlayback;
+    const spontaneousCancellation = payload.cancelled === true && Boolean(
+      active && (active.status === 'starting' || active.status === 'playing'),
+    );
     if (
-      !active || (active.status !== 'stopping' && active.status !== 'cancelling') ||
+      !active || (!spontaneousCancellation && active.status !== 'stopping' && active.status !== 'cancelling') ||
       payload.playbackId !== active.playbackId
     ) {
       return;
@@ -119,6 +140,11 @@ export class SidekickSpeakerReceipts {
     active.samplesPlayed = payload.samplesPlayed;
     active.underruns = payload.underruns;
     active.droppedChunks = payload.droppedChunks;
+    if (spontaneousCancellation) {
+      runtime.speakerPlayback = undefined;
+      this.reject(runtime, new Error('sidekick_speaker_playback_interrupted'));
+      return;
+    }
     this.resolve(runtime, `stopped:${active.playbackId}`);
   }
 
@@ -145,7 +171,7 @@ export class SidekickSpeakerReceipts {
       const timeout = setTimeout(() => {
         runtime.pendingSpeakerAcks.delete(key);
         reject(new Error('sidekick_speaker_ack_timeout'));
-      }, SPEAKER_ACK_TIMEOUT_MS);
+      }, this.ackTimeoutMs);
       timeout.unref?.();
       runtime.pendingSpeakerAcks.set(key, { key, timeout, resolve, reject });
     });

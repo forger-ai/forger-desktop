@@ -41,6 +41,7 @@ import type { AppDictionary } from '@renderer/i18n';
 import { AGENT_PROVIDER_OPTIONS, CODEX_MODEL_OPTIONS } from '@renderer/preferences';
 import { usageAnalytics } from '@renderer/usage-analytics';
 import { AgentRunActivityReceipt } from '@renderer/components/AgentRunActivityReceipt';
+import { mergeConversationSnapshots, newerConversation } from '@renderer/stores/personal-agent-conversation-snapshots';
 import { MarkdownMessage } from './chat/MarkdownMessage';
 import {
   isMacOsPlatform,
@@ -71,7 +72,6 @@ import {
   WorkspaceTree,
 } from './AgentsView.helpers';
 import { AgentAccessControls } from './AgentAccessControls';
-
 interface AgentsViewProps {
   t: AppDictionary;
   intelligenceProviderConfigured: boolean;
@@ -86,6 +86,7 @@ type RoutineFrequencyType = AutomationFrequency['type'];
 export function AgentsView({ t, intelligenceProviderConfigured, providerOptions = AGENT_PROVIDER_OPTIONS, installedApps = [], onNotifyForger }: AgentsViewProps) {
   const theme = useTheme();
   const [agents, setAgents] = useState<PersonalAgent[]>([]);
+  const [sidekickNames, setSidekickNames] = useState<Record<string, string>>({});
   const [activeAgentId, setActiveAgentId] = useState<string | null>(null);
   const [conversations, setConversations] = useState<PersonalAgentConversation[]>([]);
   const [conversation, setConversation] = useState<PersonalAgentConversation | null>(null);
@@ -168,7 +169,7 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
   const activeRunProgressCount = activeRun?.progress.length ?? 0;
   const activeRunActivityCount = activeRun?.activity?.items.length ?? 0;
   const busy = busyAction !== null;
-  const conversationReadOnly = Boolean(conversation && (conversation.readOnly || conversation.origin === 'agent'));
+  const conversationReadOnly = Boolean(conversation && (conversation.readOnly || conversation.origin === 'agent' || conversation.origin === 'sidekick'));
   const shouldReserveMacTrafficLightSpace = isMacOsPlatform() && !windowState?.isFullScreen;
   const installedAppsGrantOptionsKey = useMemo(
     () => installedApps
@@ -179,9 +180,16 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
   );
   const historyGroups = useMemo<AgentConversationHistoryGroup[]>(() => {
     const routineStarted = sortItemsByRecentActivity(conversations.filter((item) => item.origin === 'routine'));
-    const userStarted = sortItemsByRecentActivity(conversations.filter((item) => item.origin !== 'agent' && item.origin !== 'routine'));
+    const userStarted = sortItemsByRecentActivity(conversations.filter((item) => item.origin === 'user'));
     const agentStarted = sortItemsByRecentActivity(conversations.filter((item) => item.origin === 'agent'));
+    const sidekickStarted = sortItemsByRecentActivity(conversations.filter((item) => item.origin === 'sidekick'));
+    const sidekickGroups = [...new Set(sidekickStarted.map((item) => item.sidekickId ?? ''))].map((sidekickId) => ({
+      id: `sidekick-${sidekickId || 'unknown'}`,
+      label: t.agents.conversationGroups.sidekick(sidekickId ? sidekickNames[sidekickId] : undefined),
+      items: sidekickStarted.filter((item) => (item.sidekickId ?? '') === sidekickId),
+    }));
     const groups: Array<AgentConversationHistoryGroup | null> = [
+      ...sidekickGroups,
       routineStarted.length > 0
         ? { id: 'routine-started', label: t.agents.conversationGroups.routine, items: routineStarted }
         : null,
@@ -193,7 +201,7 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
         : null,
     ];
     return groups.filter((group): group is AgentConversationHistoryGroup => Boolean(group));
-  }, [conversations, t.locale]);
+  }, [conversations, sidekickNames, t.locale]);
 
   useEffect(() => {
     if (!onNotifyForger || !activeAgent || !conversation || !activeRun || activeRun.status !== 'failed' || !runErrorIsGeneric) {
@@ -207,8 +215,12 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
   }, [activeAgent, activeRun, conversation, onNotifyForger, runErrorIsGeneric]);
 
   const loadAgents = useCallback(async () => {
-    const nextAgents = await window.forger.personalAgentsList();
+    const [nextAgents, sidekickState] = await Promise.all([
+      window.forger.personalAgentsList(),
+      window.forger.sidekicksGetState().catch(() => null),
+    ]);
     setAgents(nextAgents);
+    setSidekickNames(Object.fromEntries((sidekickState?.sidekicks ?? []).map((sidekick) => [sidekick.sidekickId, sidekick.name])));
     setActiveAgentId((current) => {
       if (!current) return null;
       return nextAgents.some((agent) => agent.id === current) ? current : null;
@@ -221,14 +233,16 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
       window.forger.personalAgentWorkspaceList({ agentId }).catch(() => []),
       window.forger.personalAgentRoutinesList({ agentId }).catch(() => []),
     ]);
-    setConversations(nextConversations);
+    setConversations((current) => mergeConversationSnapshots(current.filter((item) => item.agentId === agentId), nextConversations));
     setWorkspaceEntries(nextWorkspaceEntries);
     setRoutines(nextRoutines);
-    setConversation(
-      nextConversations.find((item) => item.id === preferredConversationId) ??
-      nextConversations[0] ??
-      null,
-    );
+    setConversation((current) => {
+      if (current?.agentId === agentId) {
+        const refreshed = nextConversations.find((item) => item.id === current.id);
+        return refreshed ? newerConversation(current, refreshed) : current;
+      }
+      return nextConversations.find((item) => item.id === preferredConversationId) ?? nextConversations[0] ?? null;
+    });
   }, []);
 
   useEffect(() => {
@@ -236,11 +250,13 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
     Promise.all([
       window.forger.personalAgentsList(),
       window.forger.personalAgentGrantOptionsList().catch(() => ({ apps: [], tools: [], connections: [], peerAgents: [] })),
+      window.forger.sidekicksGetState().catch(() => null),
     ])
-      .then(([nextAgents, nextGrantOptions]) => {
+      .then(([nextAgents, nextGrantOptions, sidekickState]) => {
         if (!mounted) return;
         setAgents(nextAgents);
         setGrantOptions(nextGrantOptions);
+        setSidekickNames(Object.fromEntries((sidekickState?.sidekicks ?? []).map((sidekick) => [sidekick.sidekickId, sidekick.name])));
       })
       .catch((loadError) => {
         if (mounted) {
@@ -306,7 +322,7 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
 
   useEffect(() => {
     const unsubscribe = window.forger.onPersonalAgentConversationEvent((event: PersonalAgentConversationEvent) => {
-      if (activeAgentId && event.conversation.agentId !== activeAgentId) {
+      if (!activeAgentId || event.conversation.agentId !== activeAgentId) {
         return;
       }
       setConversations((current) => upsertConversation(current, event.conversation));
@@ -970,7 +986,9 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
       ? t.agents.messageBadge.routine
       : item.source === 'scheduled_wakeup'
         ? t.agents.messageBadge.wakeup
-        : null;
+        : item.source === 'sidekick'
+          ? t.agents.messageBadge.sidekick
+          : null;
     const messageRun = !isUser && !isIntermediate && item.runId && activeRun?.id === item.runId
       ? activeRun
       : undefined;
@@ -1125,7 +1143,7 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
       return (
         <Box sx={{ p: 1.5, borderTop: `1px solid ${theme.palette.divider}` }}>
           <Typography variant="body2" color="text.secondary">
-            {t.agents.readOnlyThread}
+            {conversation?.origin === 'sidekick' ? t.agents.sidekickReadOnlyThread : t.agents.readOnlyThread}
           </Typography>
         </Box>
       );

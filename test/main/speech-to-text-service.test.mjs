@@ -352,3 +352,104 @@ test('SpeechToTextServiceManager returns reportable JSON when server rejects pro
     await harness.cleanup();
   }
 });
+
+test('SpeechToTextServiceManager treats ephemeral uploads as private and clears crash residue once', async () => {
+  const harness = await createHarness();
+  const originalFetch = globalThis.fetch;
+  try {
+    const speechRoot = path.join(harness.root, 'metadata', 'speech-to-text');
+    const ephemeralRoot = path.join(speechRoot, 'temp-uploads', 'ephemeral');
+    const crashResidue = path.join(ephemeralRoot, 'interrupted-sidekick.wav');
+    await fs.mkdir(ephemeralRoot, { recursive: true });
+    await fs.writeFile(crashResidue, 'private audio');
+    await fs.writeFile(path.join(speechRoot, 'installed.json'), VALID_INSTALL_MARKER);
+    harness.manager.child = { killed: false, kill: () => {} };
+    harness.manager.port = 45123;
+    harness.manager.token = 'test-token';
+
+    let uploadedPath;
+    globalThis.fetch = async (url, init) => {
+      const pathname = new URL(String(url)).pathname;
+      if (pathname === '/health') return Response.json({ ok: true, model: 'base', activeJobs: 0, queuedJobs: 0, activeRealtimeSessions: 0 });
+      if (pathname === '/v1/jobs') return Response.json({ jobs: [] });
+      if (pathname === '/v1/processed-files') return Response.json({ processedFiles: [] });
+      const body = JSON.parse(String(init?.body));
+      uploadedPath = body.path;
+      assert.equal(body.ephemeral, true);
+      assert.equal(await fs.readFile(uploadedPath, 'utf8'), 'new private audio');
+      await assert.rejects(fs.access(crashResidue));
+      return Response.json({
+        id: 'ephemeral-job',
+        path: uploadedPath,
+        task: 'transcribe',
+        status: 'completed',
+        createdAt: 'now',
+        updatedAt: 'now',
+        model: 'base',
+        text: 'private transcript',
+      });
+    };
+
+    const result = await harness.manager.processUpload({
+      filename: '../sidekick voice.wav',
+      mimeType: 'audio/wav',
+      data: Uint8Array.from(Buffer.from('new private audio')).buffer,
+      task: 'transcribe',
+      language: 'es',
+      ephemeral: true,
+    });
+
+    assert.equal(result.success, true);
+    assert.equal(result.text, 'private transcript');
+    assert.equal(path.dirname(uploadedPath), await fs.realpath(ephemeralRoot));
+    assert.equal(path.basename(uploadedPath).includes('..'), false);
+    await assert.rejects(fs.access(uploadedPath));
+  } finally {
+    globalThis.fetch = originalFetch;
+    harness.manager.child = null;
+    harness.manager.stop();
+    await harness.cleanup();
+  }
+});
+
+test('SpeechToTextServiceManager keeps ordinary upload persistence behavior by default', async () => {
+  const harness = await createHarness();
+  const originalFetch = globalThis.fetch;
+  try {
+    const speechRoot = path.join(harness.root, 'metadata', 'speech-to-text');
+    await fs.mkdir(speechRoot, { recursive: true });
+    await fs.writeFile(path.join(speechRoot, 'installed.json'), VALID_INSTALL_MARKER);
+    harness.manager.child = { killed: false, kill: () => {} };
+    harness.manager.port = 45123;
+    harness.manager.token = 'test-token';
+
+    globalThis.fetch = async (_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      assert.equal(Object.hasOwn(body, 'ephemeral'), false);
+      return Response.json({
+        id: 'ordinary-job',
+        path: body.path,
+        task: 'transcribe',
+        status: 'completed',
+        createdAt: 'now',
+        updatedAt: 'now',
+        model: 'base',
+        text: 'ordinary transcript',
+      });
+    };
+
+    const result = await harness.manager.processUpload({
+      filename: 'ordinary.wav',
+      data: Uint8Array.from(Buffer.from('ordinary audio')).buffer,
+    });
+
+    assert.equal(result.success, true);
+    assert.equal(path.basename(result.job.path).endsWith('-ordinary.wav'), true);
+    assert.equal(result.job.path.includes(`${path.sep}ephemeral${path.sep}`), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+    harness.manager.child = null;
+    harness.manager.stop();
+    await harness.cleanup();
+  }
+});

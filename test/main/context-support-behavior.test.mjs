@@ -27,6 +27,7 @@ const globalAppSkillIds = [
   'forger-permissions',
   'forger-remote-tunnel-wiring',
   'forger-secrets',
+  'forger-sidekick',
   'forger-speech-to-text',
   'forger-text-to-speech',
   'forger-tools',

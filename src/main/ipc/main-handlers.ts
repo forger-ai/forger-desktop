@@ -120,6 +120,7 @@ import type {
   SpeechToTextUploadInput,
   TextToSpeechConfigInput,
   TextToSpeechSynthesizeInput,
+  TextToSpeechState,
   WakeWordConfigInput,
   WakeWordRuntime,
   StopAppResult,
@@ -253,7 +254,7 @@ export interface MainProcessIpcDeps {
     recordDiagnostic: (input: any) => Promise<unknown>;
   };
   getTextToSpeechService: () => {
-    getState: () => Promise<unknown>;
+    getState: () => Promise<TextToSpeechState>;
     install: () => Promise<unknown>;
     start: () => Promise<unknown>;
     stop: () => void;
@@ -266,7 +267,7 @@ export interface MainProcessIpcDeps {
   getLocalNetworkShareStatus?: (appId: string) => RuntimeStatus['localNetworkShare'];
   getRemoteNetworkShareStatus?: (appId: string) => RuntimeStatus['remoteNetworkShare'];
   getRemoteActivitySnapshot?: () => RemoteActivitySnapshot;
-  getLlmRunsSnapshot?: () => LlmRunsSnapshot;
+  getLlmRunsSnapshot?: () => LlmRunsSnapshot | Promise<LlmRunsSnapshot>;
   getSecretsStore: () => SecretsStore;
   installAppRuntime: (appId: string, locale?: string) => Promise<InstallAppResult>;
   prepareSocialAppReview: (input: PrepareSocialAppReviewInput, locale?: string) => Promise<{ success: boolean; quarantine?: SocialAppQuarantineRecord; userMessage: string; technicalCode?: string }>;
@@ -806,7 +807,7 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
   });
 
   ipcMain.handle(IPC_CHANNELS.llmRunsSnapshotGet, async () => {
-    return llmRunsSnapshotFor();
+    return await llmRunsSnapshotFor();
   });
 
   ipcMain.handle(IPC_CHANNELS.getAppSecrets, async (_event, appId: string) => {
@@ -1472,7 +1473,7 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
     return await getOfficialToolsService().deactivate(toolId, { locale });
   });
   registerConnectionIpcHandlers({ IPC_CHANNELS, ipcMain, getConnectionsService });
-  registerSidekickIpcHandlers({ IPC_CHANNELS, ipcMain, getSidekickService, getPersonalAgentStore });
+  registerSidekickIpcHandlers({ IPC_CHANNELS, ipcMain, getSidekickService, getPersonalAgentStore, getTextToSpeechService });
   ipcMain.handle(IPC_CHANNELS.getAppToolsInstallGate, async (_event, appId: string, locale?: string, options?: GetAppToolsInstallGateOptions): Promise<AppToolsInstallGate | null> => {
     return await buildAppAccessInstallGate(appId, locale, options);
   });
