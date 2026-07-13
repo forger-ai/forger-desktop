@@ -2,10 +2,11 @@ import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { AgentPermissionMode, AgentProvider, AgentRuntime, AgentToolId, AutomationFrequency, AutomationMissedRunPolicy, PersonalAgent, PersonalAgentConnectionGrant, PersonalAgentConversation, PersonalAgentConversationOrigin, PersonalAgentCreateInput, PersonalAgentGroup, PersonalAgentGroupCreateInput, PersonalAgentGroupUpdateInput, PersonalAgentHeartbeatSummary, PersonalAgentJournalEntry, PersonalAgentMemory, PersonalAgentMessage, PersonalAgentMessageAuthorType, PersonalAgentMessageFile, PersonalAgentMessageKind, PersonalAgentMessageRole, PersonalAgentMessageSource, PersonalAgentPeerGrant, PersonalAgentPeerThread, PersonalAgentPermission, PersonalAgentRoutine, PersonalAgentRoutineRun, PersonalAgentRoutineRunStatus, PersonalAgentRun, PersonalAgentRunProgress, PersonalAgentRunStatus, PersonalAgentScheduledWakeup, PersonalAgentUpdateGroupInput, PersonalAgentUpdatePermissionsInput, PersonalAgentWorkspaceEntry, PersonalAgentWorkspaceFile, SharedFileRef } from '../../shared/types';
-import { buildGlobalSkillTemplates } from '../prompt-builder/official-tools';
+import { buildPersonalAgentSkillTemplates } from '../prompt-builder/official-tools';
 import { buildPersonalAgentWorkspaceDocuments } from '../prompt-builder/personal-agents';
 import { forgerSkillRoots, writeSkillTemplates } from '../prompt-builder/skill-template-writer';
 import { openPersonalAgentSqliteDatabase, type SqliteDatabase } from './sqlite';
+import { buildManagedAgentToolsBlock, extractLegacyOthersDurableCriteria } from './agent-store-others-migration';
 import type {
   AgentRow,
   ConversationRow,
@@ -285,9 +286,12 @@ export class AgentStore {
     }
     if (input.peerAgentGrants) {
       await this.replacePeerGrants(agent.id, normalizePeerGrants(input.peerAgentGrants), now);
-      await this.syncOthersWorkspaceFile(await this.requireAgent(agent.id));
     }
-    return await this.requireAgent(agent.id);
+    const updated = await this.requireAgent(agent.id);
+    if (input.peerAgentGrants || typeof input.canSpawnAgents === 'boolean') {
+      await this.syncOthersWorkspaceFile(updated);
+    }
+    return updated;
   }
 
   public async listPeerGrants(agentId: string): Promise<PersonalAgentPeerGrant[]> {
@@ -1141,7 +1145,7 @@ export class AgentStore {
     await fs.mkdir(workspaceRoot, { recursive: true });
     await Promise.all(
       forgerSkillRoots(path, workspaceRoot).map((skillsRoot) =>
-        writeSkillTemplates({ fs, path }, skillsRoot, buildGlobalSkillTemplates())),
+        writeSkillTemplates({ fs, path }, skillsRoot, buildPersonalAgentSkillTemplates())),
     );
     const docs = buildPersonalAgentWorkspaceDocuments(agent);
     await Promise.all(
@@ -1182,7 +1186,13 @@ export class AgentStore {
     if (!existing.trim()) {
       existing = fallbackContent;
     }
-    const block = this.buildOthersManagedPeerBlock(agent);
+    const legacyDurableCriteria = extractLegacyOthersDurableCriteria(existing);
+    if (legacyDurableCriteria !== null) {
+      existing = legacyDurableCriteria
+        ? `${fallbackContent.trimEnd()}\n\n${legacyDurableCriteria}\n`
+        : fallbackContent;
+    }
+    const block = buildManagedAgentToolsBlock(agent);
     const beginIndex = existing.indexOf(OTHERS_PEER_BLOCK_BEGIN);
     const endIndex = existing.indexOf(OTHERS_PEER_BLOCK_END);
     const next = beginIndex >= 0 && endIndex > beginIndex
@@ -1191,27 +1201,6 @@ export class AgentStore {
     if (next !== existing) {
       await fs.writeFile(filePath, next, 'utf8');
     }
-  }
-
-  private buildOthersManagedPeerBlock(agent: PersonalAgent): string {
-    const lines = [
-      OTHERS_PEER_BLOCK_BEGIN,
-      '## Forger-Managed Agent Peers',
-      '',
-      'This block is generated from Forger Desktop permissions. Edit peer access in Forger Settings; manual notes belong outside this block.',
-      '',
-    ];
-    if (agent.peerAgentGrants.length === 0) {
-      lines.push('- No peer agents are currently allowed.');
-    } else {
-      lines.push(...agent.peerAgentGrants.map((grant) => {
-        const label = grant.name ? `${grant.name} (${grant.agentId})` : grant.agentId;
-        const criteria = grant.criteria || 'No specific criteria recorded.';
-        return `- ${label}: ${criteria}`;
-      }));
-    }
-    lines.push('', OTHERS_PEER_BLOCK_END);
-    return lines.join('\n');
   }
 
   private async agentById(id: string): Promise<PersonalAgent | null> {

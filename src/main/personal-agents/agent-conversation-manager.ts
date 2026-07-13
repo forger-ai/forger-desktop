@@ -582,16 +582,17 @@ export class AgentConversationManager {
     run: PersonalAgentRun,
     context: PersonalAgentMcpRunContext,
   ): Promise<string> {
-    const memories = await this.options.store.listMemories(agent.id);
-    const memoryRegister = memories.length > 0
-      ? memories.map((memory) => `- ${memory.title}: ${memory.content}${memory.rememberWhen ? ` (remember when: ${memory.rememberWhen})` : ''}`).join('\n')
-      : '- No agent memories have been saved yet.';
-    const bootstrap = buildPersonalAgentInitialWakePrompt({ agent, memoryRegister });
+    const currentMessage = conversation.messages.find((message) => message.runId === run.id && message.role === 'user');
+    const isFirstRun = !conversation.messages.some((message) =>
+      message.id !== currentMessage?.id && message.role !== 'system' && message.kind !== 'spoken');
+    const bootstrap = isFirstRun
+      ? await this.buildConversationBootstrap(agent)
+      : '';
     const transcript = conversation.messages
-      .filter((message) => message.role !== 'system' && message.kind !== 'spoken')
+      .filter((message) =>
+        message.id !== currentMessage?.id && message.role !== 'system' && message.kind !== 'spoken')
       .map((message) => renderMessageForPrompt(agent, message))
       .join('\n\n');
-    const currentMessage = conversation.messages.find((message) => message.runId === run.id && message.role === 'user');
     const sidekickContract = context.sidekick ? [
       'Sidekick voice response contract (highest priority for this turn):',
       `- This request came from Sidekick ${context.sidekick.sidekickId}.`,
@@ -610,8 +611,7 @@ export class AgentConversationManager {
       '- Plain assistant text is only a compatibility fallback: a final question mark waits for one reply; other text closes the session.',
     ] : [];
     return [
-      bootstrap,
-      '',
+      ...(bootstrap ? [bootstrap, ''] : []),
       ...sidekickContract,
       'Visible conversation so far:',
       transcript || '- No visible messages yet.',
@@ -620,6 +620,14 @@ export class AgentConversationManager {
       currentMessage ? renderMessageForPrompt(agent, currentMessage) : '',
       ...sidekickFinalReminder,
     ].join('\n');
+  }
+
+  private async buildConversationBootstrap(agent: PersonalAgent): Promise<string> {
+    const memories = await this.options.store.listMemories(agent.id);
+    const memoryRegister = memories.length > 0
+      ? memories.map((memory) => `- ${memory.title}: ${memory.content}${memory.rememberWhen ? ` (remember when: ${memory.rememberWhen})` : ''}`).join('\n')
+      : '- No agent memories have been saved yet.';
+    return buildPersonalAgentInitialWakePrompt({ agent, memoryRegister });
   }
 
   private async runPersonalAgent(input: PersonalAgentRunnerInput): Promise<{ assistantText: string }> {

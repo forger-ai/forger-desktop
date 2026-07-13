@@ -13,7 +13,6 @@ This is your first conversation for this agent workspace unless conversation his
 
 ## Current Forger Access
 
-{{spawnAgentsContext}}
 {{grantedForgerToolsContext}}
 {{grantedConnectionsContext}}
 

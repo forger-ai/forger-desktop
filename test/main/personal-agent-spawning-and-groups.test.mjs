@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -56,6 +56,28 @@ test('agent groups are optional persisted records and agents can move into and o
   assert.equal((await reloaded.listGroups())[0].name, 'Product research');
   assert.equal((await reloaded.requireAgent(grouped.id)).groupId, undefined);
   assert.equal((await reloaded.requireAgent(ungrouped.id)).groupId, undefined);
+});
+
+test('OTHERS.md keeps current spawn and peer configuration outside repeated turn prompts', async () => {
+  const { store } = await createStore('forger-agent-tools-configuration');
+  const creator = await store.createAgent({ name: 'Coordinator', canSpawnAgents: true });
+  const specialist = await store.createAgent({ name: 'Specialist' });
+  await store.updateAgentPermissions({
+    agentId: creator.id,
+    peerAgentGrants: [{ agentId: specialist.id, criteria: 'Use for specialist reviews.' }],
+  });
+
+  const workspaceRoot = await store.workspaceRootForAgent(creator.id);
+  const enabled = await readFile(path.join(workspaceRoot, 'OTHERS.md'), 'utf8');
+  assert.match(enabled, /Create other agents: enabled/);
+  assert.match(enabled, /Contact other agents: enabled for 1 allowed agent/);
+  assert.match(enabled, /Specialist/);
+  assert.match(enabled, /Use for specialist reviews/);
+
+  await store.updateAgentPermissions({ agentId: creator.id, canSpawnAgents: false });
+  const disabled = await readFile(path.join(workspaceRoot, 'OTHERS.md'), 'utf8');
+  assert.match(disabled, /Create other agents: disabled/);
+  assert.match(disabled, /Contact other agents: enabled for 1 allowed agent/);
 });
 
 test('an enabled creator atomically spawns a safe child, inherits its group, and receives a peer write grant', async () => {

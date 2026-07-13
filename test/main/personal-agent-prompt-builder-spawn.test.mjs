@@ -4,8 +4,9 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const { buildPersonalAgentInitialWakePrompt } = require('../../dist-electron/main/prompt-builder/personal-agents.js');
+const { buildPersonalAgentSkillTemplates } = require('../../dist-electron/main/prompt-builder/official-tools.js');
 
-const buildAgent = (canSpawnAgents) => ({
+const buildAgent = (canSpawnAgents, peerAgentGrants = []) => ({
   id: 'agent-lead',
   name: 'Team lead',
   description: 'Coordinates specialists.',
@@ -17,14 +18,14 @@ const buildAgent = (canSpawnAgents) => ({
   appIds: [],
   toolIds: [],
   connectionGrants: [],
-  peerAgentGrants: [],
+  peerAgentGrants,
   createdAt: '2026-07-12T00:00:00.000Z',
   updatedAt: '2026-07-12T00:00:00.000Z',
 });
 
-test('personal-agent prompt explains the spawn MCP only as an active, explicit permission', () => {
+test('personal-agent prompt does not repeat agent-tool configuration or instructions', () => {
   const enabled = buildPersonalAgentInitialWakePrompt({
-    agent: buildAgent(true),
+    agent: buildAgent(true, [{ agentId: 'budget', name: 'Budget reviewer', criteria: 'Use for budget checks.' }]),
     memoryRegister: '- No memories.',
   });
   const disabled = buildPersonalAgentInitialWakePrompt({
@@ -32,15 +33,30 @@ test('personal-agent prompt explains the spawn MCP only as an active, explicit p
     memoryRegister: '- No memories.',
   });
 
-  assert.match(enabled, /Agent creation: enabled/);
-  assert.match(enabled, /`forger_create_personal_agent` is available/);
-  assert.match(enabled, /explicitly asks or authorizes/);
-  assert.match(enabled, /safe permissions, no internet, no apps, no tools, no connections/);
-  assert.match(enabled, /creator can contact the created agent/);
-  assert.match(enabled, /inherits the creator's group/);
+  assert.doesNotMatch(enabled, /Create other agents:/);
+  assert.doesNotMatch(enabled, /Contact other agents:/);
+  assert.doesNotMatch(enabled, /Budget reviewer/);
+  assert.doesNotMatch(enabled, /Use for budget checks/);
+  assert.doesNotMatch(enabled, /forger_create_personal_agent/);
+  assert.doesNotMatch(enabled, /forger_ask_agent/);
+  assert.doesNotMatch(enabled, /explicitly asks or authorizes/);
 
-  assert.match(disabled, /Agent creation: disabled/);
-  assert.match(disabled, /`forger_create_personal_agent` is not available/);
-  assert.match(disabled, /Do not claim that you can create agents/);
-  assert.doesNotMatch(disabled, /`forger_create_personal_agent` is available/);
+  assert.doesNotMatch(disabled, /Create other agents:/);
+  assert.doesNotMatch(disabled, /Contact other agents:/);
+  assert.doesNotMatch(disabled, /forger_create_personal_agent/);
+  assert.doesNotMatch(disabled, /forger_list_agent_peers/);
+});
+
+test('personal-agent-tools skill owns spawn and peer communication instructions', () => {
+  const skill = buildPersonalAgentSkillTemplates().find((template) => template.id === 'forger-personal-agent-tools');
+  assert.ok(skill);
+  assert.match(skill.description, /create or communicate with other personal agents/i);
+  assert.match(skill.body, /forger_create_personal_agent/);
+  assert.match(skill.body, /forger_list_agent_peers/);
+  assert.match(skill.body, /forger_ask_agent/);
+  assert.match(skill.body, /forger_read_agent_thread/);
+  assert.match(skill.body, /explicit request or authorization/);
+  assert.match(skill.body, /safe permissions, no internet, no apps, no tools, no connections/);
+  assert.match(skill.body, /threadId/);
+  assert.match(skill.body, /does not automatically receive reciprocal access/);
 });

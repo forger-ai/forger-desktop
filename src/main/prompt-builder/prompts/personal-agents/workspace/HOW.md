@@ -27,7 +27,6 @@ Do not use non-Forger integrations, provider-native tools, or unrelated MCP serv
 
 ## Current Forger Access
 
-{{spawnAgentsContext}}
 {{grantedForgerToolsContext}}
 {{grantedConnectionsContext}}
 
