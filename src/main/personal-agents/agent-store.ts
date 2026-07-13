@@ -1,12 +1,28 @@
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import type { AgentPermissionMode, AgentProvider, AgentRuntime, AgentToolId, AutomationFrequency, AutomationMissedRunPolicy, PersonalAgent, PersonalAgentConnectionGrant, PersonalAgentConversation, PersonalAgentConversationOrigin, PersonalAgentCreateInput, PersonalAgentHeartbeatSummary, PersonalAgentJournalEntry, PersonalAgentMemory, PersonalAgentMessage, PersonalAgentMessageAuthorType, PersonalAgentMessageFile, PersonalAgentMessageKind, PersonalAgentMessageRole, PersonalAgentMessageSource, PersonalAgentPeerGrant, PersonalAgentPeerThread, PersonalAgentPermission, PersonalAgentRoutine, PersonalAgentRoutineRun, PersonalAgentRoutineRunStatus, PersonalAgentRun, PersonalAgentRunProgress, PersonalAgentRunStatus, PersonalAgentScheduledWakeup, PersonalAgentUpdatePermissionsInput, PersonalAgentWorkspaceEntry, PersonalAgentWorkspaceFile, SharedFileRef } from '../../shared/types';
-import { buildGlobalSkillTemplates } from '../prompt-builder/official-tools';
+import type { AgentPermissionMode, AgentProvider, AgentRuntime, AgentToolId, AutomationFrequency, AutomationMissedRunPolicy, PersonalAgent, PersonalAgentConnectionGrant, PersonalAgentConversation, PersonalAgentConversationOrigin, PersonalAgentCreateInput, PersonalAgentGroup, PersonalAgentGroupCreateInput, PersonalAgentGroupUpdateInput, PersonalAgentHeartbeatSummary, PersonalAgentJournalEntry, PersonalAgentMemory, PersonalAgentMessage, PersonalAgentMessageAuthorType, PersonalAgentMessageFile, PersonalAgentMessageKind, PersonalAgentMessageRole, PersonalAgentMessageSource, PersonalAgentPeerGrant, PersonalAgentPeerThread, PersonalAgentPermission, PersonalAgentRoutine, PersonalAgentRoutineRun, PersonalAgentRoutineRunStatus, PersonalAgentRun, PersonalAgentRunProgress, PersonalAgentRunStatus, PersonalAgentScheduledWakeup, PersonalAgentUpdateGroupInput, PersonalAgentUpdatePermissionsInput, PersonalAgentWorkspaceEntry, PersonalAgentWorkspaceFile, SharedFileRef } from '../../shared/types';
+import { buildPersonalAgentSkillTemplates } from '../prompt-builder/official-tools';
 import { buildPersonalAgentWorkspaceDocuments } from '../prompt-builder/personal-agents';
 import { forgerSkillRoots, writeSkillTemplates } from '../prompt-builder/skill-template-writer';
 import { openPersonalAgentSqliteDatabase, type SqliteDatabase } from './sqlite';
+import { buildManagedAgentToolsBlock, extractLegacyOthersDurableCriteria } from './agent-store-others-migration';
+import type {
+  AgentRow,
+  ConversationRow,
+  JournalEntryRow,
+  MemoryRow,
+  MessageFileRow,
+  MessageRow,
+  PeerGrantRow,
+  PeerThreadRow,
+  PermissionRow,
+  RunProgressRow,
+  RunRow,
+} from './agent-store-rows';
 import { AgentRoutineStore } from './agent-store-routines';
+import { AgentGroupStore } from './agent-store-groups';
+import { createPersonalAgentFromAgent, type CreatePersonalAgentFromAgentInput } from './agent-store-spawn';
 import { PERSONAL_AGENT_SCHEMA_SQL } from './agent-store-schema';
 import { readPersonalAgentWorkspaceEntries } from './agent-store-workspace';
 import {
@@ -32,6 +48,7 @@ import {
   normalizeConversationStatus,
   normalizeGrantTargets,
   normalizeMessageAuthorType,
+  normalizeMessageKind,
   normalizeMessageRole,
   normalizeMessageSource,
   normalizeMessageText,
@@ -56,144 +73,6 @@ interface AgentStoreOptions {
   forgerHomeRoot: string;
 }
 
-interface AgentRow {
-  id: string;
-  name: string;
-  description: string;
-  purpose: string;
-  instructions: string;
-  permission_mode: string;
-  network_access: number;
-  runtime_provider?: string | null;
-  runtime_model?: string | null;
-  runtime_effort?: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-interface PermissionRow {
-  id: string;
-  agent_id: string;
-  kind?: string;
-  target_id?: string;
-  permission: string;
-  mode: string;
-  granted: number;
-  created_at: string;
-  updated_at: string;
-}
-
-interface ConversationRow {
-  id: string;
-  agent_id: string;
-  title: string;
-  status: string;
-  origin?: string;
-  read_only?: number;
-  initiator_agent_id?: string | null;
-  peer_thread_id?: string | null;
-  routine_id?: string | null;
-  draft_message?: string | null;
-  provider_thread_id?: string | null;
-  provider?: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-interface MessageRow {
-  id: string;
-  agent_id: string;
-  conversation_id: string;
-  run_id: string | null;
-  role: string;
-  kind: string;
-  author_type?: string | null;
-  author_agent_id?: string | null;
-  source?: string | null;
-  routine_id?: string | null;
-  wakeup_id?: string | null;
-  content: string;
-  created_at: string;
-}
-
-interface MessageFileRow {
-  id: string;
-  message_id: string;
-  agent_id: string;
-  conversation_id: string;
-  name: string;
-  path: string;
-  relative_path: string;
-  size_bytes: number | null;
-  source: string | null;
-  created_at: string;
-}
-
-interface PeerGrantRow {
-  id: string;
-  agent_id: string;
-  peer_agent_id: string;
-  criteria: string;
-  created_at: string;
-  updated_at: string;
-  peer_name?: string | null;
-  peer_description?: string | null;
-}
-
-interface PeerThreadRow {
-  id: string;
-  caller_agent_id: string;
-  target_agent_id: string;
-  source_conversation_id: string;
-  target_conversation_id: string;
-  parent_thread_id: string | null;
-  root_thread_id: string | null;
-  created_by_run_id: string | null;
-  title: string;
-  status: string;
-  created_at: string;
-  updated_at: string;
-  caller_name?: string | null;
-  target_name?: string | null;
-}
-
-interface RunRow {
-  id: string;
-  agent_id: string;
-  conversation_id: string;
-  status: string;
-  error: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-interface RunProgressRow {
-  id: string;
-  agent_id: string;
-  conversation_id: string;
-  run_id: string;
-  message: string;
-  created_at: string;
-}
-
-interface MemoryRow {
-  id: string;
-  agent_id: string;
-  remember_when: string;
-  title: string;
-  content: string;
-  created_at: string;
-  updated_at: string;
-}
-
-interface JournalEntryRow {
-  id: string;
-  agent_id: string;
-  conversation_id: string | null;
-  body: string;
-  created_at: string;
-}
-
 const OTHERS_PEER_BLOCK_BEGIN = '<!-- FORGER_MANAGED_PEER_AGENTS_BEGIN -->';
 const OTHERS_PEER_BLOCK_END = '<!-- FORGER_MANAGED_PEER_AGENTS_END -->';
 
@@ -201,8 +80,14 @@ export class AgentStore {
   private db: SqliteDatabase | null = null;
   private loadPromise: Promise<void> | null = null;
   private readonly routineStore: AgentRoutineStore;
+  private readonly groupStore: AgentGroupStore;
 
   public constructor(private readonly options: AgentStoreOptions) {
+    this.groupStore = new AgentGroupStore({
+      load: () => this.load(),
+      requireDb: () => this.requireDb(),
+      requireAgent: (agentId) => this.requireAgent(agentId),
+    });
     this.routineStore = new AgentRoutineStore({
       load: () => this.load(),
       requireDb: () => this.requireDb(),
@@ -218,6 +103,26 @@ export class AgentStore {
     await this.load();
     const rows = this.requireDb().prepare('SELECT * FROM personal_agents ORDER BY updated_at DESC').all() as AgentRow[];
     return rows.map((row) => this.agentFromRow(row));
+  }
+
+  public async listGroups(): Promise<PersonalAgentGroup[]> {
+    return this.groupStore.list();
+  }
+
+  public async createGroup(input: PersonalAgentGroupCreateInput): Promise<PersonalAgentGroup> {
+    return this.groupStore.create(input);
+  }
+
+  public async updateGroup(input: PersonalAgentGroupUpdateInput): Promise<PersonalAgentGroup> {
+    return this.groupStore.update(input);
+  }
+
+  public async deleteGroup(groupId: string): Promise<{ success: boolean }> {
+    return this.groupStore.delete(groupId);
+  }
+
+  public async updateAgentGroup(input: PersonalAgentUpdateGroupInput): Promise<PersonalAgent> {
+    return this.groupStore.updateAgent(input);
   }
 
   public async getHeartbeatSummary(): Promise<PersonalAgentHeartbeatSummary> {
@@ -246,12 +151,29 @@ export class AgentStore {
   }
 
   public async createAgent(input: PersonalAgentCreateInput): Promise<PersonalAgent> {
+    return this.createAgentRecord(input);
+  }
+
+  public async createAgentFromAgent(input: CreatePersonalAgentFromAgentInput): Promise<PersonalAgent> {
+    await this.load();
+    return createPersonalAgentFromAgent(input, {
+      requireAgent: (agentId) => this.requireAgent(agentId),
+      requireGroup: (groupId) => this.requireGroup(groupId),
+      createAgent: (agentInput, creatorId) => this.createAgentRecord(agentInput, creatorId),
+      grantPeer: (agentId, peerAgentId, criteria) => this.grantPeer(agentId, peerAgentId, criteria),
+      deleteAgent: (agentId) => this.deleteAgent(agentId),
+    });
+  }
+
+  private async createAgentRecord(input: PersonalAgentCreateInput, createdByAgentId?: string): Promise<PersonalAgent> {
     await this.load();
     const now = new Date().toISOString();
     const name = sanitizeText(input.name, MAX_NAME_LENGTH);
     if (!name) {
       throw new Error('personal_agent_name_required');
     }
+    const groupId = sanitizeAgentId(input.groupId ?? undefined);
+    if (groupId) this.requireGroup(groupId);
     const agent: PersonalAgent = {
       id: randomUUID(),
       name,
@@ -260,6 +182,9 @@ export class AgentStore {
       instructions: sanitizeText(input.instructions, MAX_TEXT_LENGTH),
       permissionMode: normalizePermissionMode(input.permissionMode),
       networkAccess: input.networkAccess === true,
+      canSpawnAgents: input.canSpawnAgents === true,
+      ...(createdByAgentId ? { createdByAgentId } : {}),
+      ...(groupId ? { groupId } : {}),
       ...(normalizeAgentRuntime(input.runtime) ? { runtime: normalizeAgentRuntime(input.runtime) as AgentRuntime } : {}),
       appIds: normalizeGrantTargets(input.appIds),
       toolIds: normalizeGrantTargets(input.toolIds) as AgentToolId[],
@@ -269,8 +194,8 @@ export class AgentStore {
       updatedAt: now,
     };
     this.requireDb().prepare(`
-      INSERT INTO personal_agents (id, name, description, purpose, instructions, permission_mode, network_access, runtime_provider, runtime_model, runtime_effort, created_at, updated_at)
-      VALUES (@id, @name, @description, @purpose, @instructions, @permissionMode, @networkAccess, @runtimeProvider, @runtimeModel, @runtimeEffort, @createdAt, @updatedAt)
+      INSERT INTO personal_agents (id, name, description, purpose, instructions, permission_mode, network_access, can_spawn_agents, created_by_agent_id, group_id, runtime_provider, runtime_model, runtime_effort, created_at, updated_at)
+      VALUES (@id, @name, @description, @purpose, @instructions, @permissionMode, @networkAccess, @canSpawnAgents, @createdByAgentId, @groupId, @runtimeProvider, @runtimeModel, @runtimeEffort, @createdAt, @updatedAt)
     `).run({
       id: agent.id,
       name: agent.name,
@@ -279,6 +204,9 @@ export class AgentStore {
       instructions: agent.instructions,
       permissionMode: agent.permissionMode,
       networkAccess: agent.networkAccess ? 1 : 0,
+      canSpawnAgents: agent.canSpawnAgents ? 1 : 0,
+      createdByAgentId: agent.createdByAgentId ?? null,
+      groupId: agent.groupId ?? null,
       runtimeProvider: agent.runtime?.provider ?? null,
       runtimeModel: agent.runtime?.model ?? null,
       runtimeEffort: agent.runtime?.effort ?? null,
@@ -328,12 +256,18 @@ export class AgentStore {
     const now = new Date().toISOString();
     const permissionMode = normalizePermissionMode(input.permissionMode ?? agent.permissionMode);
     const networkAccess = typeof input.networkAccess === 'boolean' ? input.networkAccess : agent.networkAccess;
+    const canSpawnAgents = typeof input.canSpawnAgents === 'boolean' ? input.canSpawnAgents : agent.canSpawnAgents;
+    let groupId = agent.groupId ?? null;
+    if ('groupId' in input) {
+      groupId = sanitizeAgentId(input.groupId ?? undefined) ?? null;
+      if (groupId) this.requireGroup(groupId);
+    }
     const runtime = 'runtime' in input ? normalizeAgentRuntime(input.runtime) : agent.runtime;
     this.requireDb().prepare(`
       UPDATE personal_agents
-      SET permission_mode = ?, network_access = ?, runtime_provider = ?, runtime_model = ?, runtime_effort = ?, updated_at = ?
+      SET permission_mode = ?, network_access = ?, can_spawn_agents = ?, group_id = ?, runtime_provider = ?, runtime_model = ?, runtime_effort = ?, updated_at = ?
       WHERE id = ?
-    `).run(permissionMode, networkAccess ? 1 : 0, runtime?.provider ?? null, runtime?.model ?? null, runtime?.effort ?? null, now, agent.id);
+    `).run(permissionMode, networkAccess ? 1 : 0, canSpawnAgents ? 1 : 0, groupId, runtime?.provider ?? null, runtime?.model ?? null, runtime?.effort ?? null, now, agent.id);
     await this.upsertPermission({
       agentId: agent.id,
       kind: 'legacy',
@@ -352,9 +286,12 @@ export class AgentStore {
     }
     if (input.peerAgentGrants) {
       await this.replacePeerGrants(agent.id, normalizePeerGrants(input.peerAgentGrants), now);
-      await this.syncOthersWorkspaceFile(await this.requireAgent(agent.id));
     }
-    return await this.requireAgent(agent.id);
+    const updated = await this.requireAgent(agent.id);
+    if (input.peerAgentGrants || typeof input.canSpawnAgents === 'boolean') {
+      await this.syncOthersWorkspaceFile(updated);
+    }
+    return updated;
   }
 
   public async listPeerGrants(agentId: string): Promise<PersonalAgentPeerGrant[]> {
@@ -623,6 +560,7 @@ export class AgentStore {
     initiatorAgentId?: string | null;
     peerThreadId?: string | null;
     routineId?: string | null;
+    sidekickId?: string | null;
   }): Promise<PersonalAgentConversation> {
     await this.load();
     const agent = await this.requireAgent(input.agentId);
@@ -632,19 +570,24 @@ export class AgentStore {
     const initiatorAgentId = sanitizeAgentId(input.initiatorAgentId) ?? null;
     const peerThreadId = sanitizeAgentId(input.peerThreadId) ?? null;
     const routineId = sanitizeAgentId(input.routineId) ?? null;
+    const sidekickId = sanitizeGrantTarget(input.sidekickId) ?? null;
+    if (origin === 'sidekick' && !sidekickId) {
+      throw new Error('personal_agent_sidekick_id_required');
+    }
     this.requireDb().prepare(`
-      INSERT INTO personal_agent_conversations (id, agent_id, title, status, origin, read_only, initiator_agent_id, peer_thread_id, routine_id, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO personal_agent_conversations (id, agent_id, title, status, origin, read_only, initiator_agent_id, peer_thread_id, routine_id, sidekick_id, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       conversationId,
       agent.id,
       sanitizeText(input.title, 160) || agent.name,
       'active',
       origin,
-      input.readOnly === true || origin === 'agent' ? 1 : 0,
+      input.readOnly === true || origin === 'agent' || origin === 'sidekick' ? 1 : 0,
       initiatorAgentId,
       peerThreadId,
       routineId,
+      sidekickId,
       now,
       now,
     );
@@ -710,6 +653,20 @@ export class AgentStore {
     return row ? this.conversationFromRow(row) : null;
   }
 
+  public async findLatestSidekickConversation(input: { sidekickId: string; agentId: string }): Promise<PersonalAgentConversation | null> {
+    await this.load();
+    const sidekickId = sanitizeGrantTarget(input.sidekickId);
+    const agentId = sanitizeAgentId(input.agentId);
+    if (!sidekickId || !agentId) return null;
+    const row = this.requireDb().prepare(`
+      SELECT * FROM personal_agent_conversations
+      WHERE sidekick_id = ? AND agent_id = ? AND origin = 'sidekick'
+      ORDER BY updated_at DESC
+      LIMIT 1
+    `).get(sidekickId, agentId) as ConversationRow | undefined;
+    return row ? this.conversationFromRow(row) : null;
+  }
+
   public async requireConversation(id: string): Promise<PersonalAgentConversation> {
     const conversation = await this.getConversation(id);
     if (!conversation) {
@@ -729,7 +686,9 @@ export class AgentStore {
     source?: PersonalAgentMessageSource;
     routineId?: string | null;
     wakeupId?: string | null;
+    locale?: string | null;
     content: string;
+    reasoning?: string | null;
     files?: SharedFileRef[];
   }): Promise<PersonalAgentMessage> {
     await this.load();
@@ -747,25 +706,31 @@ export class AgentStore {
     const source = normalizeMessageSource(input.source);
     const routineId = sanitizeAgentId(input.routineId) ?? null;
     const wakeupId = sanitizeAgentId(input.wakeupId) ?? null;
+    const locale = typeof input.locale === 'string' && /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(input.locale.trim())
+      ? input.locale.trim()
+      : null;
+    const reasoning = sanitizeText(input.reasoning, MAX_TEXT_LENGTH) || null;
     const message: PersonalAgentMessage = {
       id: randomUUID(),
       agentId: input.agentId,
       conversationId: input.conversationId,
       ...(input.runId ? { runId: input.runId } : {}),
       role: normalizeMessageRole(input.role),
-      kind: input.kind === 'intermediate' ? 'intermediate' : 'message',
+      kind: normalizeMessageKind(input.kind),
       authorType,
       ...(authorAgentId ? { authorAgentId } : {}),
       source,
       ...(routineId ? { routineId } : {}),
       ...(wakeupId ? { wakeupId } : {}),
+      ...(locale ? { locale } : {}),
       content,
+      ...(reasoning ? { reasoning } : {}),
       createdAt: now,
     };
     this.requireDb().prepare(`
-      INSERT INTO personal_agent_messages (id, agent_id, conversation_id, run_id, role, kind, author_type, author_agent_id, source, routine_id, wakeup_id, content, created_at)
-      VALUES (@id, @agentId, @conversationId, @runId, @role, @kind, @authorType, @authorAgentId, @source, @routineId, @wakeupId, @content, @createdAt)
-    `).run({ ...message, runId: message.runId ?? null, authorAgentId, routineId, wakeupId });
+      INSERT INTO personal_agent_messages (id, agent_id, conversation_id, run_id, role, kind, author_type, author_agent_id, source, routine_id, wakeup_id, source_locale, content, reasoning, created_at)
+      VALUES (@id, @agentId, @conversationId, @runId, @role, @kind, @authorType, @authorAgentId, @source, @routineId, @wakeupId, @locale, @content, @reasoning, @createdAt)
+    `).run({ ...message, runId: message.runId ?? null, authorAgentId, routineId, wakeupId, locale, reasoning });
     const files = normalizeSharedFileRefs(input.files).slice(0, MAX_MESSAGE_FILES);
     if (files.length > 0) {
       const insertFile = this.requireDb().prepare(`
@@ -1099,6 +1064,17 @@ export class AgentStore {
     }
   }
 
+  private async grantPeer(agentId: string, peerAgentId: string, criteria: string): Promise<void> {
+    const now = new Date().toISOString();
+    this.requireDb().prepare(`
+      INSERT INTO personal_agent_peer_grants (id, agent_id, peer_agent_id, criteria, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(agent_id, peer_agent_id) DO UPDATE SET criteria = excluded.criteria, updated_at = excluded.updated_at
+    `).run(randomUUID(), agentId, peerAgentId, sanitizeText(criteria, MAX_PEER_CRITERIA_LENGTH), now, now);
+    this.requireDb().prepare('UPDATE personal_agents SET updated_at = ? WHERE id = ?').run(now, agentId);
+    await this.syncOthersWorkspaceFile(await this.requireAgent(agentId));
+  }
+
   private async load(): Promise<void> {
     if (!this.loadPromise) {
       this.loadPromise = this.loadFromDisk();
@@ -1123,11 +1099,15 @@ export class AgentStore {
     this.ensureColumn('personal_agents', 'runtime_provider', 'TEXT');
     this.ensureColumn('personal_agents', 'runtime_model', 'TEXT');
     this.ensureColumn('personal_agents', 'runtime_effort', 'TEXT');
+    this.ensureColumn('personal_agents', 'can_spawn_agents', 'INTEGER NOT NULL DEFAULT 0');
+    this.ensureColumn('personal_agents', 'created_by_agent_id', 'TEXT REFERENCES personal_agents(id) ON DELETE SET NULL');
+    this.ensureColumn('personal_agents', 'group_id', 'TEXT REFERENCES personal_agent_groups(id) ON DELETE SET NULL');
     this.ensureColumn('personal_agent_conversations', 'origin', "TEXT NOT NULL DEFAULT 'user'");
     this.ensureColumn('personal_agent_conversations', 'read_only', 'INTEGER NOT NULL DEFAULT 0');
     this.ensureColumn('personal_agent_conversations', 'initiator_agent_id', 'TEXT REFERENCES personal_agents(id) ON DELETE SET NULL');
     this.ensureColumn('personal_agent_conversations', 'peer_thread_id', 'TEXT');
     this.ensureColumn('personal_agent_conversations', 'routine_id', 'TEXT');
+    this.ensureColumn('personal_agent_conversations', 'sidekick_id', 'TEXT');
     this.ensureColumn('personal_agent_conversations', 'draft_message', "TEXT NOT NULL DEFAULT ''");
     this.ensureColumn('personal_agent_conversations', 'provider', 'TEXT');
     this.ensureColumn('personal_agent_conversations', 'provider_thread_id', 'TEXT');
@@ -1137,6 +1117,8 @@ export class AgentStore {
     this.ensureColumn('personal_agent_messages', 'source', "TEXT NOT NULL DEFAULT 'human'");
     this.ensureColumn('personal_agent_messages', 'routine_id', 'TEXT');
     this.ensureColumn('personal_agent_messages', 'wakeup_id', 'TEXT');
+    this.ensureColumn('personal_agent_messages', 'source_locale', 'TEXT');
+    this.ensureColumn('personal_agent_messages', 'reasoning', 'TEXT');
     this.ensureColumn('personal_agent_routines', 'frequency_interval_minutes', 'INTEGER');
     this.ensureColumn('personal_agent_permissions', 'kind', "TEXT NOT NULL DEFAULT 'legacy'");
     this.ensureColumn('personal_agent_permissions', 'target_id', "TEXT NOT NULL DEFAULT ''");
@@ -1144,6 +1126,9 @@ export class AgentStore {
     this.requireDb().exec(`
       CREATE INDEX IF NOT EXISTS idx_personal_agent_permissions_agent_kind ON personal_agent_permissions(agent_id, kind);
       CREATE UNIQUE INDEX IF NOT EXISTS idx_personal_agent_permissions_unique_grant ON personal_agent_permissions(agent_id, kind, target_id);
+      CREATE INDEX IF NOT EXISTS idx_personal_agent_conversations_sidekick ON personal_agent_conversations(sidekick_id, agent_id, updated_at);
+      CREATE INDEX IF NOT EXISTS idx_personal_agents_group ON personal_agents(group_id, updated_at);
+      CREATE INDEX IF NOT EXISTS idx_personal_agents_created_by ON personal_agents(created_by_agent_id, updated_at);
     `);
   }
 
@@ -1160,7 +1145,7 @@ export class AgentStore {
     await fs.mkdir(workspaceRoot, { recursive: true });
     await Promise.all(
       forgerSkillRoots(path, workspaceRoot).map((skillsRoot) =>
-        writeSkillTemplates({ fs, path }, skillsRoot, buildGlobalSkillTemplates())),
+        writeSkillTemplates({ fs, path }, skillsRoot, buildPersonalAgentSkillTemplates())),
     );
     const docs = buildPersonalAgentWorkspaceDocuments(agent);
     await Promise.all(
@@ -1201,7 +1186,13 @@ export class AgentStore {
     if (!existing.trim()) {
       existing = fallbackContent;
     }
-    const block = this.buildOthersManagedPeerBlock(agent);
+    const legacyDurableCriteria = extractLegacyOthersDurableCriteria(existing);
+    if (legacyDurableCriteria !== null) {
+      existing = legacyDurableCriteria
+        ? `${fallbackContent.trimEnd()}\n\n${legacyDurableCriteria}\n`
+        : fallbackContent;
+    }
+    const block = buildManagedAgentToolsBlock(agent);
     const beginIndex = existing.indexOf(OTHERS_PEER_BLOCK_BEGIN);
     const endIndex = existing.indexOf(OTHERS_PEER_BLOCK_END);
     const next = beginIndex >= 0 && endIndex > beginIndex
@@ -1212,30 +1203,13 @@ export class AgentStore {
     }
   }
 
-  private buildOthersManagedPeerBlock(agent: PersonalAgent): string {
-    const lines = [
-      OTHERS_PEER_BLOCK_BEGIN,
-      '## Forger-Managed Agent Peers',
-      '',
-      'This block is generated from Forger Desktop permissions. Edit peer access in Forger Settings; manual notes belong outside this block.',
-      '',
-    ];
-    if (agent.peerAgentGrants.length === 0) {
-      lines.push('- No peer agents are currently allowed.');
-    } else {
-      lines.push(...agent.peerAgentGrants.map((grant) => {
-        const label = grant.name ? `${grant.name} (${grant.agentId})` : grant.agentId;
-        const criteria = grant.criteria || 'No specific criteria recorded.';
-        return `- ${label}: ${criteria}`;
-      }));
-    }
-    lines.push('', OTHERS_PEER_BLOCK_END);
-    return lines.join('\n');
-  }
-
   private async agentById(id: string): Promise<PersonalAgent | null> {
     const row = this.requireDb().prepare('SELECT * FROM personal_agents WHERE id = ?').get(id) as AgentRow | undefined;
     return row ? this.agentFromRow(row) : null;
+  }
+
+  private requireGroup(id: string): PersonalAgentGroup {
+    return this.groupStore.require(id);
   }
 
   private agentFromRow(row: AgentRow): PersonalAgent {
@@ -1256,6 +1230,9 @@ export class AgentStore {
       instructions: row.instructions,
       permissionMode: normalizePermissionMode(row.permission_mode),
       networkAccess: row.network_access !== 0,
+      canSpawnAgents: row.can_spawn_agents !== 0,
+      ...(row.created_by_agent_id ? { createdByAgentId: row.created_by_agent_id } : {}),
+      ...(row.group_id ? { groupId: row.group_id } : {}),
       ...(runtime ? { runtime } : {}),
       appIds,
       toolIds,
@@ -1330,7 +1307,8 @@ export class AgentStore {
       title: row.title,
       status: normalizeConversationStatus(row.status),
       origin,
-      readOnly: row.read_only !== 0 || origin === 'agent',
+      readOnly: row.read_only !== 0 || origin === 'agent' || origin === 'sidekick',
+      ...(sanitizeGrantTarget(row.sidekick_id) ? { sidekickId: sanitizeGrantTarget(row.sidekick_id) as string } : {}),
       ...(initiatorAgentId ? { initiatorAgentId } : {}),
       ...(initiatorAgentName ? { initiatorAgentName } : {}),
       ...(row.peer_thread_id ?? peerThread?.id ? { peerThreadId: row.peer_thread_id ?? peerThread?.id } : {}),
@@ -1348,7 +1326,7 @@ export class AgentStore {
   }
 
   private messagesForConversation(conversationId: string): PersonalAgentMessage[] {
-    const rows = this.requireDb().prepare('SELECT * FROM personal_agent_messages WHERE conversation_id = ? ORDER BY created_at ASC').all(conversationId) as MessageRow[];
+    const rows = this.requireDb().prepare('SELECT * FROM personal_agent_messages WHERE conversation_id = ? ORDER BY created_at ASC, rowid ASC').all(conversationId) as MessageRow[];
     return rows.map((row) => this.messageFromRow(row));
   }
 
@@ -1363,14 +1341,16 @@ export class AgentStore {
       conversationId: row.conversation_id,
       ...(row.run_id ? { runId: row.run_id } : {}),
       role: normalizeMessageRole(row.role),
-      kind: row.kind === 'intermediate' ? 'intermediate' : 'message',
+      kind: normalizeMessageKind(row.kind),
       authorType,
       ...(authorAgentId ? { authorAgentId } : {}),
       ...(authorAgentName ? { authorAgentName } : {}),
       source: normalizeMessageSource(row.source),
+      ...(row.source_locale ? { locale: row.source_locale } : {}),
       ...(sanitizeAgentId(row.routine_id) ? { routineId: sanitizeAgentId(row.routine_id) as string } : {}),
       ...(sanitizeAgentId(row.wakeup_id) ? { wakeupId: sanitizeAgentId(row.wakeup_id) as string } : {}),
       content: row.content,
+      ...(row.reasoning ? { reasoning: row.reasoning } : {}),
       createdAt: row.created_at,
       ...(files.length > 0 ? { files } : {}),
     };

@@ -1,6 +1,12 @@
 import { PERSONAL_AGENT_ROUTINE_SCHEMA_SQL } from './agent-store-routines';
 
 export const PERSONAL_AGENT_SCHEMA_SQL = `
+  CREATE TABLE IF NOT EXISTS personal_agent_groups (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
   CREATE TABLE IF NOT EXISTS personal_agents (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -9,6 +15,9 @@ export const PERSONAL_AGENT_SCHEMA_SQL = `
     instructions TEXT NOT NULL DEFAULT '',
     permission_mode TEXT NOT NULL DEFAULT 'safe',
     network_access INTEGER NOT NULL DEFAULT 0,
+    can_spawn_agents INTEGER NOT NULL DEFAULT 0,
+    created_by_agent_id TEXT REFERENCES personal_agents(id) ON DELETE SET NULL,
+    group_id TEXT REFERENCES personal_agent_groups(id) ON DELETE SET NULL,
     runtime_provider TEXT,
     runtime_model TEXT,
     runtime_effort TEXT,
@@ -37,6 +46,7 @@ export const PERSONAL_AGENT_SCHEMA_SQL = `
     initiator_agent_id TEXT REFERENCES personal_agents(id) ON DELETE SET NULL,
     peer_thread_id TEXT,
     routine_id TEXT,
+    sidekick_id TEXT,
     draft_message TEXT NOT NULL DEFAULT '',
     provider TEXT,
     provider_thread_id TEXT,
@@ -56,7 +66,9 @@ export const PERSONAL_AGENT_SCHEMA_SQL = `
     source TEXT NOT NULL DEFAULT 'human',
     routine_id TEXT,
     wakeup_id TEXT,
+    source_locale TEXT,
     content TEXT NOT NULL,
+    reasoning TEXT,
     created_at TEXT NOT NULL
   );
   CREATE INDEX IF NOT EXISTS idx_personal_agent_messages_conversation ON personal_agent_messages(conversation_id, created_at);

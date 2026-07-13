@@ -9,7 +9,7 @@ import type { InstallWelcomeResult } from './chat';
 import type { AppSecretsState, UserSecretSummary, CreateUserSecretInput, UpdateUserSecretInput, DeleteUserSecretInput, ConnectAppSecretInput, DisconnectAppSecretInput, SecretMutationResult } from './secrets';
 import type { DeveloperPathState, Settings, UpdateAppDeveloperSettingsInput, UpdateCodexDefaultsInput, UpdateDeveloperModeInput, UpdateAgentDefaultsInput, MemoryListInput, MemoryEntry, MemoryCreateInput, MemoryUpdateInput } from './settings';
 import type { SpeechToTextConfigInput, SpeechToTextProcessInput, SpeechToTextProcessResult, SpeechToTextRealtimeSession, SpeechToTextState, SpeechToTextUploadInput } from './speech-to-text';
-import type { SidekickConfigureInput, SidekickDisplayInput, SidekickMicrophonePlaybackInput, SidekickMicrophonePlaybackResult, SidekickMicrophoneRecordingInput, SidekickMutationResult, SidekickState } from './sidekicks';
+import type { SidekickConfigureInput, SidekickDisplayInput, SidekickIdleConfigInput, SidekickIdleImageInput, SidekickMicrophonePlaybackInput, SidekickMicrophonePlaybackResult, SidekickMicrophoneRecordingInput, SidekickMutationResult, SidekickPersonalAgentInput, SidekickScreenInput, SidekickSpeakInput, SidekickSpeakerPlaybackResult, SidekickState, SidekickVoiceConfigInput } from './sidekicks';
 import type { TextToSpeechConfigInput, TextToSpeechState, TextToSpeechSynthesizeInput, TextToSpeechSynthesizeResult } from './text-to-speech';
 import type { LiveVoiceInputConfigInput, LiveVoiceInputDeviceListInput, LiveVoiceInputSession, LiveVoiceInputSessionInput, LiveVoiceInputState, LiveVoiceInputStopInput, LiveVoiceInputWakeEvent, LiveVoiceInputWakeRuntime } from './live-voice-input';
 import type { WakeWordConfigInput, WakeWordDetectionEvent, WakeWordDiagnosticEvent, WakeWordRuntime, WakeWordSession, WakeWordState } from './wake-word';
@@ -33,6 +33,7 @@ import type { Workflow, WorkflowApproveNodeInput, WorkflowRun, WorkflowRunSummar
 import type { BackgroundTask, BackgroundTaskEvent, BackgroundTaskUpsertInput } from './background-tasks';
 import type { LlmRunsSnapshot } from './llm-runs';
 import type { PersonalAgent, PersonalAgentConversation, PersonalAgentConversationDraftUpdateInput, PersonalAgentConversationEvent, PersonalAgentConversationGetInput, PersonalAgentConversationsListInput, PersonalAgentConversationStartInput, PersonalAgentCreateInput, PersonalAgentDeleteInput, PersonalAgentGrantOptions, PersonalAgentMessageSendInput, PersonalAgentPeerThread, PersonalAgentPeerThreadGetInput, PersonalAgentPeerThreadsListInput, PersonalAgentRoutine, PersonalAgentRoutineDeleteInput, PersonalAgentRoutineListInput, PersonalAgentRoutineRun, PersonalAgentRoutineRunNowInput, PersonalAgentRoutineSetEnabledInput, PersonalAgentRoutineUpsertInput, PersonalAgentScheduledWakeup, PersonalAgentUpdatePermissionsInput, PersonalAgentWakeupCancelInput, PersonalAgentWorkspaceEntry, PersonalAgentWorkspaceFile, PersonalAgentWorkspaceFileReadInput, PersonalAgentWorkspaceFileWriteInput, PersonalAgentWorkspaceListInput } from './personal-agents';
+import type { PersonalAgentGroup, PersonalAgentGroupCreateInput, PersonalAgentGroupDeleteInput, PersonalAgentGroupUpdateInput, PersonalAgentUpdateGroupInput } from './personal-agents';
 import type { RemoteActivitySnapshot } from './remote-activity';
 
 export type MicrophonePermissionStatus = 'not-determined' | 'granted' | 'denied' | 'restricted' | 'unknown' | 'unsupported';
@@ -108,9 +109,15 @@ export interface ForgerDesktopApi {
   sidekicksScanUsb: () => Promise<SidekickState>;
   sidekicksConfigureUsb: (input: SidekickConfigureInput) => Promise<SidekickMutationResult>;
   sidekicksSendDisplay: (input: SidekickDisplayInput) => Promise<SidekickMutationResult>;
+  sidekicksSendScreen: (input: SidekickScreenInput) => Promise<SidekickMutationResult>;
+  sidekicksSetPersonalAgent: (input: SidekickPersonalAgentInput) => Promise<SidekickMutationResult>;
+  sidekicksSetVoiceConfig: (input: SidekickVoiceConfigInput) => Promise<SidekickMutationResult>;
+  sidekicksSpeak: (input: SidekickSpeakInput) => Promise<SidekickSpeakerPlaybackResult>;
   sidekicksStartMicrophoneRecording: (input: SidekickMicrophoneRecordingInput) => Promise<SidekickMutationResult>;
   sidekicksStopMicrophoneRecording: (input: SidekickMicrophoneRecordingInput) => Promise<SidekickMutationResult>;
   sidekicksReadMicrophoneRecording: (input: SidekickMicrophonePlaybackInput) => Promise<SidekickMicrophonePlaybackResult>;
+  sidekicksSetIdleConfig: (input: SidekickIdleConfigInput) => Promise<SidekickMutationResult>;
+  sidekicksSetIdleImage: (input: SidekickIdleImageInput) => Promise<SidekickMutationResult>;
   sidekicksForget: (sidekickId: string) => Promise<SidekickMutationResult>;
   onSidekicksChanged: (listener: (event: SidekickState) => void) => () => void;
   microphonePermissionStatus: () => Promise<MicrophonePermissionStatus>;
@@ -273,6 +280,11 @@ export interface ForgerDesktopApi {
   onLlmRunsSnapshotChanged: (listener: (snapshot: LlmRunsSnapshot) => void) => () => void;
   personalAgentsList: () => Promise<PersonalAgent[]>;
   personalAgentsCreate: (input: PersonalAgentCreateInput) => Promise<PersonalAgent>;
+  personalAgentGroupsList: () => Promise<PersonalAgentGroup[]>;
+  personalAgentGroupsCreate: (input: PersonalAgentGroupCreateInput) => Promise<PersonalAgentGroup>;
+  personalAgentGroupsUpdate: (input: PersonalAgentGroupUpdateInput) => Promise<PersonalAgentGroup>;
+  personalAgentGroupsDelete: (input: PersonalAgentGroupDeleteInput) => Promise<{ success: boolean }>;
+  personalAgentUpdateGroup: (input: PersonalAgentUpdateGroupInput) => Promise<PersonalAgent>;
   personalAgentGrantOptionsList: () => Promise<PersonalAgentGrantOptions>;
   personalAgentUpdatePermissions: (input: PersonalAgentUpdatePermissionsInput) => Promise<PersonalAgent>;
   personalAgentsDelete: (input: PersonalAgentDeleteInput) => Promise<{ success: boolean }>;

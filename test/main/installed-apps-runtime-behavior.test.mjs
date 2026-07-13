@@ -404,6 +404,56 @@ test('ensureBackendPythonEnvironment installs uv into the managed Python when th
   assert.ok(harness.calls.some((call) => call[0] === 'log' && call[1] === 'backend_python_env:repair_ready'));
 });
 
+test('ensureBackendPythonEnvironment serializes managed Python uv repair across app backends', async (t) => {
+  let managedUvInstalled = false;
+  let installCalls = 0;
+  let releaseInstall;
+  let resolveInstallStarted;
+  const installStarted = new Promise((resolve) => {
+    resolveInstallStarted = resolve;
+  });
+  const release = new Promise((resolve) => {
+    releaseInstall = resolve;
+  });
+  const harness = await makeLifecycleHarness({
+    runCommand: async (command, args, options) => {
+      harness.calls.push(['run', command, args.join(' '), options.cwd]);
+      if (args.join(' ') === '-m pip install --upgrade pip uv') {
+        installCalls += 1;
+        resolveInstallStarted();
+        await release;
+        managedUvInstalled = true;
+      }
+    },
+    runCommandCapture: async (command, args, options) => {
+      harness.calls.push(['capture', command, args.join(' '), options.cwd]);
+      if (command === '/runtime/python' && args.join(' ') === '-m uv --version' && !managedUvInstalled) {
+        return { code: 1, stdout: '', stderr: 'No module named uv' };
+      }
+      return { code: 0, stdout: '', stderr: '' };
+    },
+  });
+  t.after(async () => {
+    await fs.rm(harness.root, { recursive: true, force: true });
+  });
+  const firstBackend = path.join(harness.root, 'apps', 'first-app', 'backend');
+  const secondBackend = path.join(harness.root, 'apps', 'second-app', 'backend');
+  await fs.mkdir(path.join(firstBackend, '.venv', 'bin'), { recursive: true });
+  await fs.mkdir(path.join(secondBackend, '.venv', 'bin'), { recursive: true });
+  await fs.writeFile(path.join(firstBackend, '.venv', 'bin', 'python'), '', 'utf8');
+  await fs.writeFile(path.join(secondBackend, '.venv', 'bin', 'python'), '', 'utf8');
+
+  const first = harness.controller.ensureBackendPythonEnvironment('/runtime/python', firstBackend, 'first-app', 'app_mcp_start');
+  await installStarted;
+  const second = harness.controller.ensureBackendPythonEnvironment('/runtime/python', secondBackend, 'second-app', 'app_mcp_start');
+  releaseInstall();
+  await Promise.all([first, second]);
+
+  assert.equal(installCalls, 1);
+  assert.equal(harness.calls.filter((call) => call[0] === 'run' && call[2] === '-m pip install --upgrade pip uv').length, 1);
+  assert.equal(harness.deps.backendPythonEnvironmentLocks.size, 0);
+});
+
 test('ensureBackendPythonEnvironment smoke checks native Python dependencies', async (t) => {
   const harness = await makeLifecycleHarness();
   t.after(async () => {

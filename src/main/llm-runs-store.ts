@@ -26,6 +26,7 @@ interface PersonalRunContext {
 }
 
 const ACTIVE_STATUSES = new Set<LlmRunStatus>(['queued', 'running', 'needs_permission']);
+const TERMINAL_STATUSES = new Set<LlmRunStatus>(['completed', 'failed', 'canceled']);
 
 export class LlmRunsStore {
   private readonly runs = new Map<string, LlmRunSnapshotItem>();
@@ -166,6 +167,10 @@ export class LlmRunsStore {
   }
 
   private upsert(input: LlmRunSnapshotItem): LlmRunsSnapshot {
+    const current = this.runs.get(input.id);
+    if (current && !shouldReplaceRun(current, input)) {
+      return this.snapshot();
+    }
     this.runs.set(input.id, input);
     return this.emit();
   }
@@ -209,4 +214,17 @@ const cleanText = (value: string | undefined, fallback: string): string => {
 const cleanOptionalText = (value: string | undefined): string | undefined => {
   const trimmed = value?.trim().replace(/\s+/g, ' ') ?? '';
   return trimmed ? trimmed.slice(0, 240) : undefined;
+};
+
+const shouldReplaceRun = (current: LlmRunSnapshotItem, incoming: LlmRunSnapshotItem): boolean => {
+  const timestampComparison = incoming.updatedAt.localeCompare(current.updatedAt);
+  if (timestampComparison !== 0) {
+    return timestampComparison > 0;
+  }
+  const currentTerminal = TERMINAL_STATUSES.has(current.status);
+  const incomingTerminal = TERMINAL_STATUSES.has(incoming.status);
+  if (currentTerminal !== incomingTerminal) {
+    return incomingTerminal;
+  }
+  return true;
 };

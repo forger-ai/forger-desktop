@@ -27,7 +27,7 @@ export interface ForgerSkillTemplateResource {
   content: Buffer;
 }
 
-type SkillGroup = 'global' | 'forger' | 'apps';
+type SkillGroup = 'global' | 'forger' | 'apps' | 'personal-agents';
 
 interface SkillFrontmatter {
   name: string;
@@ -351,6 +351,11 @@ export const buildForgerOfficialToolsPromptSection = (input: ForgerOfficialTools
 
 export const buildGlobalSkillTemplates = (): ForgerSkillTemplate[] =>
   buildSkillTemplatesForGroup('global');
+
+export const buildPersonalAgentSkillTemplates = (): ForgerSkillTemplate[] => [
+  ...buildGlobalSkillTemplates(),
+  ...buildSkillTemplatesForGroup('personal-agents'),
+];
 
 export const buildForgerWorkspaceSkillTemplates = (): ForgerSkillTemplate[] => [
   ...buildGlobalSkillTemplates(),

@@ -89,6 +89,19 @@ The agent internally classifies each user request before acting. If a message co
 - User changes live on `user-modified`.
 - Technical history is internal. To the user, talk about saved versions and the previous version.
 
+## Personal Agents
+
+- Personal agents can belong to an optional agent group. Agents without a group remain fully supported and appear in a separate ungrouped section.
+- Agent groups organize the Agents view only. Deleting a group preserves its agents and leaves them ungrouped.
+- Each personal agent has an explicit `canSpawnAgents` permission. The permission is disabled by default and can be changed from that agent's settings.
+- A permitted personal agent can create another personal agent through Forger MCP. The created agent starts with safe permissions, no internet, no apps, no tools, no connections, and no permission to create more agents.
+- A created agent inherits the creator's runtime and, unless another valid group is selected, the creator's group.
+- Desktop records which personal agent created another agent. The Agents view shows that relationship with localized `Created by` copy while the creator still exists.
+- The creator automatically receives a peer grant for the created agent, so it can start or continue conversations with that agent. The created agent does not automatically receive reciprocal access.
+- Each personal-agent workspace receives the `forger-personal-agent-tools` skill with the procedures for creating agents, discovering allowed peers, starting or continuing inter-agent threads, and reading threads.
+- `OTHERS.md` contains the Forger-managed current configuration for creating and contacting agents plus concise human-specific collaboration criteria. It does not duplicate the common Agent Tools procedure.
+- The full personal-agent bootstrap and memory register are included only on the first run of a conversation. Later turns contain the visible conversation and current message without repeating the bootstrap; Sidekick turns continue to include their required voice contract.
+
 ## Installed App Update Playbook
 
 This playbook applies when Forger detects a new published version of an already installed app.

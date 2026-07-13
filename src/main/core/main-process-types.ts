@@ -144,6 +144,14 @@ export interface AppManifest {
       required?: boolean;
       reason?: string;
     };
+    sidekickDisplay?: boolean | {
+      required?: boolean;
+      reason?: string;
+    };
+    sidekickSpeech?: boolean | {
+      required?: boolean;
+      reason?: string;
+    };
   };
   agentRuntime?: {
     networkAccess?: boolean;

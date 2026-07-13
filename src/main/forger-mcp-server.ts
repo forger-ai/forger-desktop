@@ -2,8 +2,7 @@ import { randomBytes } from 'node:crypto';
 import * as http from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type {
-  AgentToolDefinition,
-  AgentToolId,
+  AgentToolDefinition, AgentToolId,
   AgentToolSettings,
   AppSummary,
   AppPromptMutationResult,
@@ -60,6 +59,7 @@ import {
   PERSONAL_AGENT_PEER_TOOL_IDS,
   PERSONAL_AGENT_ROUTINE_TOOL_IDS,
   WORKFLOW_MANAGEMENT_TOOL_IDS,
+  SIDEKICK_VOICE_TOOL_IDS,
   WORKFLOW_NODE_TOOL_IDS,
 } from './forger-mcp/internal-tools';
 import {
@@ -67,6 +67,7 @@ import {
   getEffectiveConnectionGrants,
 } from './forger-mcp/connection-tools';
 import { executePersonalAgentRoutineTool } from './forger-mcp/personal-agent-routine-tools';
+import { canUsePersonalAgentSpawnTool, executePersonalAgentSpawnTool, type PersonalAgentSpawnToolOptions } from './forger-mcp/personal-agent-spawn-tool';
 import {
   cleanString,
   connectionActionGranted,
@@ -110,6 +111,9 @@ export interface AgentMcpSession {
   personalAgentConversationId?: string;
   personalAgentPeerThreadId?: string;
   personalAgentCallStackIds?: string[];
+  personalAgentCanSpawnAgents?: boolean;
+  /** Present only for runs originated by a Sidekick voice turn. */
+  sidekick?: { sidekickId: string };
   appIds: string[];
   officialToolActionIds: string[];
   forgerToolActionIds: string[];
@@ -125,6 +129,8 @@ export interface ForgerMcpSessionAccess {
   personalAgentConversationId?: string;
   personalAgentPeerThreadId?: string;
   personalAgentCallStackIds?: string[];
+  personalAgentCanSpawnAgents?: boolean;
+  sidekick?: { sidekickId: string };
   appIds?: string[];
   officialToolActionIds?: string[];
   forgerToolActionIds?: string[];
@@ -132,7 +138,7 @@ export interface ForgerMcpSessionAccess {
   locale?: string;
 }
 
-interface ForgerMcpServerOptions {
+interface ForgerMcpServerOptions extends PersonalAgentSpawnToolOptions {
   getAppVersion: () => string;
   getToolDefinitions: () => AgentToolDefinition[];
   getConnectionToolDefinitions?: () => Promise<AgentToolDefinition[]>;
@@ -248,6 +254,13 @@ interface ForgerMcpServerOptions {
     nodeRunKey: string,
     args: { reason?: unknown },
   ) => { success: boolean; technicalCode?: string };
+  resolveSidekickVoiceOutcome?: (input: {
+    sidekickId: string;
+    conversationId: string;
+    runId: string;
+    mode: 'end' | 'wait';
+    text: string;
+  }) => { accepted: boolean };
   workflowsList?: () => Workflow[];
   workflowsGet?: (workflowId: string) => Workflow | null;
   workflowsUpsert?: (input: WorkflowUpsertInput) => Promise<Workflow>;
@@ -358,6 +371,8 @@ export class ForgerMcpServer {
       personalAgentConversationId: access?.personalAgentConversationId,
       personalAgentPeerThreadId: access?.personalAgentPeerThreadId,
       personalAgentCallStackIds: access?.personalAgentCallStackIds,
+      personalAgentCanSpawnAgents: access?.personalAgentCanSpawnAgents,
+      sidekick: access?.sidekick,
       appIds: access?.appIds ?? (appId === 'forger' ? [] : [appId]),
       officialToolActionIds: access?.officialToolActionIds ?? [],
       forgerToolActionIds: access?.forgerToolActionIds ?? access?.officialToolActionIds ?? [],
@@ -544,6 +559,9 @@ export class ForgerMcpServer {
       if (tool.id === 'forger_add_app_to_personal_agent' && session.caller !== 'personal-agent') {
         return false;
       }
+      if (tool.id === 'forger_create_personal_agent' && !canUsePersonalAgentSpawnTool(session)) {
+        return false;
+      }
       if (PERSONAL_AGENT_PEER_TOOL_IDS.has(tool.id) && (session.caller !== 'personal-agent' || !session.personalAgentId || !session.personalAgentConversationId)) {
         return false;
       }
@@ -551,6 +569,9 @@ export class ForgerMcpServer {
         return false;
       }
       if (WORKFLOW_NODE_TOOL_IDS.has(tool.id) && session.caller !== 'workflow') {
+        return false;
+      }
+      if (SIDEKICK_VOICE_TOOL_IDS.has(tool.id) && (session.caller !== 'personal-agent' || !session.sidekick || !session.personalAgentConversationId)) {
         return false;
       }
       if (WORKFLOW_MANAGEMENT_TOOL_IDS.has(tool.id) && (session.caller === 'workflow' || session.caller === 'app-agent')) {
@@ -1010,6 +1031,12 @@ export class ForgerMcpServer {
       return withToolAuthorization(result, approval);
     }
 
+    if (toolId === 'forger_create_personal_agent') {
+      const result = await executePersonalAgentSpawnTool(session, args, this.options);
+      await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
+      return result;
+    }
+
     if (PERSONAL_AGENT_ROUTINE_TOOL_IDS.has(toolId)) {
       const result = await executePersonalAgentRoutineTool(session, toolId, args, this.options);
       await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
@@ -1137,6 +1164,66 @@ export class ForgerMcpServer {
         await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
         return result;
       }
+    }
+
+    if (SIDEKICK_VOICE_TOOL_IDS.has(toolId)) {
+      const text = cleanString(args.text);
+      if (
+        session.caller !== 'personal-agent' || !session.sidekick ||
+        !session.personalAgentConversationId
+      ) {
+        const result = {
+          success: false,
+          accepted: false,
+          technicalCode: 'sidekick_voice_context_required',
+        };
+        await this.options.appendInstallLog('agent_tool:call_result', {
+          appId: session.appId, runId: session.runId, toolId, result,
+        });
+        return result;
+      }
+      if (!text) {
+        const result = {
+          success: false,
+          accepted: false,
+          technicalCode: 'sidekick_voice_response_text_required',
+        };
+        await this.options.appendInstallLog('agent_tool:call_result', {
+          appId: session.appId, runId: session.runId, toolId, result,
+        });
+        return result;
+      }
+      if (text.length > 4_000) {
+        const result = {
+          success: false,
+          accepted: false,
+          userMessage: 'La respuesta de voz supera el largo permitido.',
+          technicalCode: 'sidekick_voice_response_text_too_long',
+        };
+        await this.options.appendInstallLog('agent_tool:call_result', {
+          appId: session.appId, runId: session.runId, toolId, result,
+        });
+        return result;
+      }
+      const mode = toolId === 'respond_and_wait' ? 'wait' as const : 'end' as const;
+      const outcome = this.options.resolveSidekickVoiceOutcome?.({
+        sidekickId: session.sidekick.sidekickId,
+        conversationId: session.personalAgentConversationId,
+        runId: session.runId,
+        mode,
+        text,
+      }) ?? { accepted: false };
+      const result = outcome.accepted
+        ? { success: true, accepted: true, mode }
+        : {
+            success: false,
+            accepted: false,
+            technicalCode: 'sidekick_voice_outcome_not_pending',
+          };
+      await this.options.appendInstallLog('agent_tool:call_result', {
+        appId: session.appId, runId: session.runId, toolId, result,
+      });
+      return result;
     }
 
     if (WORKFLOW_NODE_TOOL_IDS.has(toolId)) {

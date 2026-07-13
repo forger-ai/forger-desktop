@@ -2,141 +2,24 @@ import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
 import { WebSocket } from 'ws';
 
 import { clearDistModule, withMockedElectron } from './electron-test-helpers.mjs';
-
-const createSafeStorage = () => ({
-  isEncryptionAvailable: () => true,
-  encryptString: (value) => Buffer.from(`sealed:${value}`, 'utf8'),
-  decryptString: (buffer) => buffer.toString('utf8').replace(/^sealed:/, ''),
-});
-
-const tmpRoot = async (name) => await fs.mkdtemp(path.join(os.tmpdir(), `forger-${name}-`));
-
-const openWebSocket = async (url) => await new Promise((resolve, reject) => {
-  const socket = new WebSocket(url);
-  socket.once('open', () => resolve(socket));
-  socket.once('error', reject);
-});
-
-const waitForSocketClose = async (socket) => await new Promise((resolve) => {
-  if (socket.readyState === WebSocket.CLOSED) {
-    resolve();
-    return;
-  }
-  socket.once('close', () => resolve());
-});
-
-const waitForState = async (readState, predicate) => {
-  for (let attempt = 0; attempt < 50; attempt += 1) {
-    const state = await readState();
-    if (predicate(state)) {
-      return state;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-  return await readState();
-};
-
-const SIDEKICK_ID = 'sidekick-001';
-const DESKTOP_ID = 'desktop-fingerprint';
-
-const writePairedSidekickStore = async (root, pairingSecret, capabilities = ['display.text', 'wifi.websocket']) => {
-  await fs.writeFile(path.join(root, 'sidekicks.json'), JSON.stringify({
-    version: 1,
-    desktopId: DESKTOP_ID,
-    records: [{
-      sidekickId: SIDEKICK_ID,
-      name: 'Desk Sidekick',
-      hostname: 'desk-sidekick-test',
-      pairedAt: new Date('2026-07-09T10:00:00.000Z').toISOString(),
-      updatedAt: new Date('2026-07-09T10:00:00.000Z').toISOString(),
-      firmwareVersion: '0.3.0',
-      capabilities,
-      encryptedPairingSecret: Buffer.from(`sealed:${pairingSecret}`, 'utf8').toString('base64'),
-    }],
-  }), 'utf8');
-};
-
-const createSidekickService = (SidekickService, root, options = {}) => {
-  class FakeSerialPort extends EventEmitter {
-    static async list() {
-      return [];
-    }
-  }
-
-  return new SidekickService({
-    metadataRoot: root,
-    serialPortClass: FakeSerialPort,
-    bonjourFactory: () => ({
-      publish: () => ({ stop: (callback) => callback?.() }),
-      destroy: (callback) => callback?.(),
-    }),
-    safeStorageAdapter: createSafeStorage(),
-    getCloudIdentity: async () => ({ publicKey: 'public-key', keyFingerprint: DESKTOP_ID }),
-    ...options,
-  });
-};
-
-const connectPairedSidekick = async ({
-  service,
-  internals,
-  pairingSecret,
-  capabilities = ['display.text', 'wifi.websocket', 'microphone.record'],
-  battery,
-}) => {
-  const initial = await service.getState();
-  const socket = await openWebSocket(`ws://127.0.0.1:${initial.servicePort}/sidekick`);
-  const sessionId = `session-${randomBytes(4).toString('hex')}`;
-  let seq = 1;
-  const sendPayload = (payload) => {
-    socket.send(JSON.stringify(internals.encryptSidekickPayload({
-      sidekickId: SIDEKICK_ID,
-      ...payload,
-    }, {
-      pairingSecretBase64: pairingSecret,
-      sidekickId: SIDEKICK_ID,
-      desktopId: DESKTOP_ID,
-      sessionId,
-      seq,
-    })));
-    seq += 1;
-  };
-  sendPayload({
-    v: 1,
-    type: 'network.hello',
-    fw: '0.4.0',
-    capabilities,
-    ip: '192.168.4.12',
-    battery,
-  });
-  await waitForState(
-    () => service.getState(),
-    (state) => state.sidekicks[0]?.status === 'online',
-  );
-  return { socket, sendPayload };
-};
-
-const readDesktopCommand = async (socket, internals, pairingSecret) => await new Promise((resolve, reject) => {
-  const timeout = setTimeout(() => {
-    socket.off('message', onMessage);
-    reject(new Error('desktop_command_timeout'));
-  }, 1000);
-  const onMessage = (raw) => {
-    clearTimeout(timeout);
-    try {
-      resolve(internals.decryptSidekickEnvelope(JSON.parse(raw.toString()), pairingSecret));
-    } catch (error) {
-      reject(error);
-    }
-  };
-  socket.once('message', onMessage);
-});
+import {
+  SIDEKICK_ID,
+  connectPairedSidekick,
+  createSafeStorage,
+  createSidekickService,
+  openWebSocket,
+  readDesktopCommand,
+  tmpRoot,
+  waitForSocketClose,
+  waitForState,
+  writePairedSidekickStore,
+} from './sidekick-service-test-harness.mjs';
 
 test('Sidekick crypto helpers derive and decrypt AES-GCM envelopes with the pairing secret', async () => {
   await withMockedElectron({ safeStorage: createSafeStorage() }, async (require) => {
@@ -491,7 +374,125 @@ test('SidekickService configures over USB only after matching pair.configured AC
     assert.equal(online.sidekicks[0].firmwareVersion, '0.3.0');
     assert.deepEqual(online.sidekicks[0].capabilities, ['display.text', 'wifi.websocket', 'display.clear']);
     assert.equal(online.sidekicks[0].ipAddress, '192.168.4.12');
-    onlineSocket.close();
+
+    const superseded = waitForSocketClose(onlineSocket);
+    const replacementSocket = await openWebSocket(`ws://127.0.0.1:${result.servicePort}/sidekick`);
+    replacementSocket.send(JSON.stringify(__testSidekickInternals.encryptSidekickPayload({
+      v: 1,
+      type: 'network.hello',
+      sidekickId: 'sidekick-001',
+      fw: '0.3.0',
+      capabilities: ['display.text', 'wifi.websocket', 'display.clear'],
+      ip: '192.168.4.12',
+    }, {
+      pairingSecretBase64: writes[1].pairingSecret,
+      sidekickId: 'sidekick-001',
+      desktopId: 'desktop-fingerprint',
+      sessionId: 'session-replacement',
+      seq: 1,
+    })));
+    await superseded;
+    const replaced = await waitForState(
+      () => service.getState(),
+      (state) => state.sidekicks[0]?.status === 'online',
+    );
+    assert.equal(replaced.sidekicks[0].status, 'online');
+    replacementSocket.close();
+    await service.dispose();
+  });
+});
+
+test('SidekickService preserves ordered idle screens across validation, persistence, and reconnects', async (t) => {
+  const root = await tmpRoot('sidekick-idle-screen-order');
+  t.after(async () => {
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  await withMockedElectron({ safeStorage: createSafeStorage() }, async (require) => {
+    clearDistModule('main/sidekick-service.js');
+    const { SidekickService, __testSidekickInternals } = require('../../dist-electron/main/sidekick-service.js');
+    const pairingSecret = randomBytes(32).toString('base64');
+    const capabilities = [
+      'display.text',
+      'wifi.websocket',
+      'display.screens',
+      'display.idle-order',
+      'system.time.sync',
+    ];
+    await writePairedSidekickStore(root, pairingSecret, capabilities);
+    const service = createSidekickService(SidekickService, root);
+    const firstConnection = await connectPairedSidekick({
+      service,
+      internals: __testSidekickInternals,
+      pairingSecret,
+      capabilities,
+    });
+
+    const initialConfig = await readDesktopCommand(
+      firstConnection.socket,
+      __testSidekickInternals,
+      pairingSecret,
+      { includeCustomization: true },
+    );
+    assert.equal(initialConfig.cmd, 'idle.config');
+    assert.deepEqual(initialConfig.screens, ['eyes', 'clock']);
+
+    const updated = await service.setIdleConfig({
+      sidekickId: SIDEKICK_ID,
+      config: {
+        screens: ['limits', 'eyes', 'limits', 'unsupported', 'clock'],
+        rotateSeconds: 18.6,
+      },
+    });
+    assert.equal(updated.success, true);
+    assert.deepEqual(updated.sidekicks[0].capabilities, capabilities);
+    assert.deepEqual(updated.sidekicks[0].idleConfig, {
+      screens: ['limits', 'eyes', 'clock'],
+      rotateSeconds: 19,
+    });
+
+    const pushed = await readDesktopCommand(
+      firstConnection.socket,
+      __testSidekickInternals,
+      pairingSecret,
+      { includeCustomization: true },
+    );
+    assert.equal(pushed.cmd, 'idle.config');
+    assert.deepEqual(pushed.screens, ['limits', 'eyes', 'clock']);
+
+    const persisted = JSON.parse(await fs.readFile(path.join(root, 'sidekicks.json'), 'utf8'));
+    assert.deepEqual(persisted.records[0].idleConfig, {
+      screens: ['limits', 'eyes', 'clock'],
+      rotateSeconds: 19,
+    });
+
+    firstConnection.socket.close();
+    await waitForSocketClose(firstConnection.socket);
+    const secondConnection = await connectPairedSidekick({
+      service,
+      internals: __testSidekickInternals,
+      pairingSecret,
+      capabilities,
+    });
+    const reconnectedConfig = await readDesktopCommand(
+      secondConnection.socket,
+      __testSidekickInternals,
+      pairingSecret,
+      { includeCustomization: true },
+    );
+    assert.equal(reconnectedConfig.cmd, 'idle.config');
+    assert.deepEqual(reconnectedConfig.screens, ['limits', 'eyes', 'clock']);
+
+    const fallback = await service.setIdleConfig({
+      sidekickId: SIDEKICK_ID,
+      config: { screens: [], rotateSeconds: Number.NaN },
+    });
+    assert.deepEqual(fallback.sidekicks[0].idleConfig, {
+      screens: ['eyes', 'clock'],
+      rotateSeconds: 15,
+    });
+
+    secondConnection.socket.close();
     await service.dispose();
   });
 });
@@ -738,6 +739,40 @@ test('SidekickService normalizes battery telemetry from hello and heartbeat payl
   });
 });
 
+test('SidekickService persists an explicit personal-agent binding per device and can clear it', async (t) => {
+  const root = await tmpRoot('sidekick-service-agent-binding');
+  t.after(async () => {
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  await withMockedElectron({ safeStorage: createSafeStorage() }, async (require) => {
+    clearDistModule('main/sidekick-service.js');
+    const { SidekickService } = require('../../dist-electron/main/sidekick-service.js');
+    const pairingSecret = randomBytes(32).toString('base64');
+    await writePairedSidekickStore(root, pairingSecret);
+    const service = createSidekickService(SidekickService, root);
+
+    const assigned = await service.setPersonalAgent({ sidekickId: SIDEKICK_ID, personalAgentId: 'agent-voice-001' });
+    assert.equal(assigned.success, true);
+    assert.equal(assigned.sidekicks[0].personalAgentId, 'agent-voice-001');
+    const persisted = JSON.parse(await fs.readFile(path.join(root, 'sidekicks.json'), 'utf8'));
+    assert.equal(persisted.records[0].personalAgentId, 'agent-voice-001');
+
+    const invalid = await service.setPersonalAgent({ sidekickId: SIDEKICK_ID, personalAgentId: '../agent' });
+    assert.equal(invalid.success, false);
+    assert.equal(invalid.technicalCode, 'sidekick_personal_agent_id_invalid');
+    assert.equal((await service.getState()).sidekicks[0].personalAgentId, 'agent-voice-001');
+
+    const reloaded = createSidekickService(SidekickService, root);
+    assert.equal((await reloaded.getState()).sidekicks[0].personalAgentId, 'agent-voice-001');
+    const cleared = await reloaded.setPersonalAgent({ sidekickId: SIDEKICK_ID });
+    assert.equal(cleared.success, true);
+    assert.equal(cleared.sidekicks[0].personalAgentId, undefined);
+    await service.dispose();
+    await reloaded.dispose();
+  });
+});
+
 test('SidekickService rejects remote microphone start when offline or capability is missing', async (t) => {
   const root = await tmpRoot('sidekick-service-mic-rejections');
   t.after(async () => {
@@ -931,7 +966,7 @@ test('SidekickService discards an incomplete microphone capture when stopped sam
   });
 });
 
-test('SidekickService rejects malformed or out-of-session microphone data and closes the socket', async (t) => {
+test('SidekickService ignores out-of-session microphone chunks without closing the socket', async (t) => {
   const root = await tmpRoot('sidekick-service-mic-invalid');
   t.after(async () => {
     await fs.rm(root, { recursive: true, force: true });
@@ -951,18 +986,16 @@ test('SidekickService rejects malformed or out-of-session microphone data and cl
       recordingId: 'wrong-recording',
       data: Buffer.from([0x00, 0x00]).toString('base64'),
     });
-    await waitForSocketClose(socket);
-    const state = await waitForState(
-      () => service.getState(),
-      (candidate) => candidate.sidekicks[0]?.status === 'offline',
-    );
-    assert.equal(state.sidekicks[0].status, 'offline');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(socket.readyState, WebSocket.OPEN);
+    const state = await service.getState();
+    assert.equal(state.sidekicks[0].status, 'online');
 
     await service.dispose();
   });
 });
 
-test('SidekickService enforces microphone size bounds and rejects noncanonical base64 chunks', async (t) => {
+test('SidekickService fails oversized or noncanonical microphone chunks and asks the device to stop', async (t) => {
   const root = await tmpRoot('sidekick-service-mic-size');
   t.after(async () => {
     await fs.rm(root, { recursive: true, force: true });
@@ -987,21 +1020,28 @@ test('SidekickService enforces microphone size bounds and rejects noncanonical b
       format: 'pcm_s16le',
     });
     await startPromise;
+    // El comando de stop se emite apenas el chunk invalido se procesa, asi
+    // que el listener debe quedar armado antes de enviar el chunk.
+    const firstStopPromise = readDesktopCommand(socket, __testSidekickInternals, pairingSecret);
     sendPayload({
       v: 1,
       type: 'microphone.recording.chunk',
       recordingId: startCommand.recordingId,
       data: Buffer.alloc(22).toString('base64'),
     });
-    await waitForSocketClose(socket);
-    let state = await service.getState();
-    assert.equal(state.sidekicks[0].microphoneRecording.status, 'error');
+    const firstStop = await firstStopPromise;
+    let state = await waitForState(
+      () => service.getState(),
+      (candidate) => candidate.sidekicks[0]?.microphoneRecording?.status === 'error',
+    );
     assert.equal(state.sidekicks[0].microphoneRecording.technicalCode, 'sidekick_microphone_recording_too_large');
+    assert.equal(firstStop.cmd, 'microphone.record.stop');
+    assert.equal(firstStop.recordingId, startCommand.recordingId);
+    assert.equal(socket.readyState, WebSocket.OPEN);
 
-    const second = await connectPairedSidekick({ service, internals: __testSidekickInternals, pairingSecret });
     const secondStartPromise = service.startMicrophoneRecording({ sidekickId: SIDEKICK_ID });
-    const secondStartCommand = await readDesktopCommand(second.socket, __testSidekickInternals, pairingSecret);
-    second.sendPayload({
+    const secondStartCommand = await readDesktopCommand(socket, __testSidekickInternals, pairingSecret);
+    sendPayload({
       v: 1,
       type: 'microphone.recording.started',
       recordingId: secondStartCommand.recordingId,
@@ -1010,16 +1050,22 @@ test('SidekickService enforces microphone size bounds and rejects noncanonical b
       format: 'pcm_s16le',
     });
     await secondStartPromise;
-    second.sendPayload({
+    const secondStopPromise = readDesktopCommand(socket, __testSidekickInternals, pairingSecret);
+    sendPayload({
       v: 1,
       type: 'microphone.recording.chunk',
       recordingId: secondStartCommand.recordingId,
       data: 'AA',
     });
-    await waitForSocketClose(second.socket);
-    state = await service.getState();
+    const secondStop = await secondStopPromise;
+    state = await waitForState(
+      () => service.getState(),
+      (candidate) => candidate.sidekicks[0]?.microphoneRecording?.technicalCode === 'sidekick_microphone_chunk_invalid',
+    );
     assert.equal(state.sidekicks[0].microphoneRecording.status, 'error');
-    assert.equal(state.sidekicks[0].microphoneRecording.technicalCode, 'sidekick_microphone_chunk_invalid');
+    assert.equal(secondStop.cmd, 'microphone.record.stop');
+    assert.equal(secondStop.recordingId, secondStartCommand.recordingId);
+    assert.equal(socket.readyState, WebSocket.OPEN);
 
     await service.dispose();
   });
@@ -1035,8 +1081,12 @@ test('SidekickService cleans up active staged microphone recordings when the soc
     clearDistModule('main/sidekick-service.js');
     const { SidekickService, __testSidekickInternals } = require('../../dist-electron/main/sidekick-service.js');
     const pairingSecret = randomBytes(32).toString('base64');
+    const logs = [];
     await writePairedSidekickStore(root, pairingSecret, ['display.text', 'wifi.websocket', 'microphone.record']);
-    const service = createSidekickService(SidekickService, root);
+    const service = createSidekickService(SidekickService, root, {
+      appendLog: async (event, payload) => { logs.push({ event, payload }); },
+      getVoicePhase: () => 'listening',
+    });
     const { socket, sendPayload } = await connectPairedSidekick({ service, internals: __testSidekickInternals, pairingSecret });
 
     const startPromise = service.startMicrophoneRecording({ sidekickId: SIDEKICK_ID });
@@ -1056,7 +1106,7 @@ test('SidekickService cleans up active staged microphone recordings when the soc
       recordingId: startCommand.recordingId,
       data: Buffer.from([0x00, 0x00]).toString('base64'),
     });
-    socket.close();
+    socket.close(4001, 'wifi_reset');
     await waitForSocketClose(socket);
     const state = await waitForState(
       () => service.getState(),
@@ -1064,8 +1114,321 @@ test('SidekickService cleans up active staged microphone recordings when the soc
     );
     assert.equal(state.sidekicks[0].microphoneRecording.status, 'error');
     assert.equal(state.sidekicks[0].microphoneRecording.technicalCode, 'sidekick_socket_closed');
+    await waitForState(async () => logs, (entries) => entries.some((entry) => entry.event === 'sidekick:socket_closed'));
+    const socketLog = logs.find((entry) => entry.event === 'sidekick:socket_closed');
+    assert.deepEqual(socketLog.payload, {
+      sidekickId: SIDEKICK_ID,
+      closeCode: 4001,
+      closeReason: 'wifi_reset',
+      microphoneStatus: 'recording',
+      speakerStatus: 'idle',
+      voicePhase: 'listening',
+    });
     await assert.rejects(fs.stat(path.join(root, 'sidekick-recordings', 'tmp', `${startCommand.recordingId}.pcm`)), { code: 'ENOENT' });
 
+    await service.dispose();
+  });
+});
+
+test('SidekickService localizes and corrects time immediately after the encrypted hello', async (t) => {
+  const root = await tmpRoot('sidekick-service-time-sync');
+  t.after(async () => {
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  await withMockedElectron({ safeStorage: createSafeStorage() }, async (require) => {
+    clearDistModule('main/sidekick-service.js');
+    const { SidekickService, __testSidekickInternals } = require('../../dist-electron/main/sidekick-service.js');
+    const pairingSecret = randomBytes(32).toString('base64');
+    await writePairedSidekickStore(root, pairingSecret, ['display.text', 'wifi.websocket', 'system.time.sync']);
+    const service = createSidekickService(SidekickService, root, {
+      getTimeSync: () => ({
+        epochMs: 1_784_201_400_123,
+        timeZone: 'America/Santiago',
+        utcOffsetMinutes: -180,
+      }),
+    });
+    const { socket, timeSyncCommand } = await connectPairedSidekick({
+      service,
+      internals: __testSidekickInternals,
+      pairingSecret,
+      capabilities: ['display.text', 'wifi.websocket', 'system.time.sync'],
+    });
+
+    assert.deepEqual(timeSyncCommand, {
+      v: 1,
+      id: timeSyncCommand.id,
+      cmd: 'system.time.sync',
+      epochMs: 1_784_201_400_123,
+      timeZone: 'America/Santiago',
+      utcOffsetMinutes: -180,
+    });
+    socket.close();
+    await service.dispose();
+  });
+});
+
+test('SidekickService streams PCM chunks within the firmware credit window and drains playback', async (t) => {
+  const root = await tmpRoot('sidekick-service-speaker');
+  t.after(async () => {
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  await withMockedElectron({ safeStorage: createSafeStorage() }, async (require) => {
+    clearDistModule('main/sidekick-service.js');
+    const { SidekickService, __testSidekickInternals } = require('../../dist-electron/main/sidekick-service.js');
+    const pairingSecret = randomBytes(32).toString('base64');
+    await writePairedSidekickStore(root, pairingSecret, ['wifi.websocket', 'speaker.playback', 'microphone.record', 'system.time.sync']);
+    const service = createSidekickService(SidekickService, root);
+    const { socket, sendPayload } = await connectPairedSidekick({
+      service,
+      internals: __testSidekickInternals,
+      pairingSecret,
+      capabilities: ['wifi.websocket', 'speaker.playback', 'microphone.record', 'system.time.sync'],
+    });
+    const samples = Int16Array.from({ length: 1026 }, (_, index) => index - 513);
+    const playbackPromise = service.playSpeakerPcm({ sidekickId: SIDEKICK_ID, samples });
+
+    const start = await readDesktopCommand(socket, __testSidekickInternals, pairingSecret);
+    assert.equal(start.cmd, 'speaker.play.start');
+    assert.equal(start.sampleRate, 16000);
+    assert.equal(start.channels, 1);
+    assert.equal(start.format, 'pcm_s16le');
+    const microphoneWhilePlaying = await service.startMicrophoneRecording({ sidekickId: SIDEKICK_ID, transient: true });
+    assert.equal(microphoneWhilePlaying.success, false);
+    assert.equal(microphoneWhilePlaying.technicalCode, 'sidekick_audio_busy');
+    sendPayload({
+      v: 1,
+      type: 'speaker.playback.started',
+      playbackId: start.playbackId,
+      maxChunkSamples: 1024,
+      queueDepth: 8,
+    });
+
+    const first = await readDesktopCommand(socket, __testSidekickInternals, pairingSecret);
+    assert.equal(first.cmd, 'speaker.play.chunk');
+    assert.equal(first.chunkSequence, 0);
+    assert.equal(first.sampleCount, 1024);
+    assert.equal(Buffer.from(first.pcmBase64, 'base64').length, 2048);
+
+    sendPayload({
+      v: 1,
+      type: 'speaker.playback.progress',
+      playbackId: start.playbackId,
+      lastChunkSequence: 0,
+      bufferedSamples: 0,
+      underruns: 0,
+    });
+
+    const second = await readDesktopCommand(socket, __testSidekickInternals, pairingSecret);
+    assert.equal(second.chunkSequence, 1);
+    assert.equal(second.sampleCount, 2);
+    sendPayload({
+      v: 1,
+      type: 'speaker.playback.progress',
+      playbackId: start.playbackId,
+      lastChunkSequence: 1,
+      bufferedSamples: 0,
+      underruns: 0,
+    });
+
+    const stop = await readDesktopCommand(socket, __testSidekickInternals, pairingSecret);
+    assert.equal(stop.cmd, 'speaker.play.stop');
+    sendPayload({
+      v: 1,
+      type: 'speaker.playback.stopped',
+      playbackId: start.playbackId,
+      samplesPlayed: 1026,
+      underruns: 0,
+      droppedChunks: 0,
+    });
+    const played = await playbackPromise;
+    assert.equal(played.success, true);
+    assert.equal(played.playbackId, start.playbackId);
+    assert.equal(played.samplesPlayed, 1026);
+
+    socket.close();
+    await service.dispose();
+  });
+});
+
+test('SidekickService exposes encrypted wake beep results in live Sidekick state', async (t) => {
+  const root = await tmpRoot('sidekick-service-wake-beep');
+  t.after(async () => {
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  await withMockedElectron({ safeStorage: createSafeStorage() }, async (require) => {
+    clearDistModule('main/sidekick-service.js');
+    const { SidekickService, __testSidekickInternals } = require('../../dist-electron/main/sidekick-service.js');
+    const pairingSecret = randomBytes(32).toString('base64');
+    await writePairedSidekickStore(root, pairingSecret, ['wifi.websocket', 'wake.word.local']);
+    const service = createSidekickService(SidekickService, root);
+    const { socket, sendPayload } = await connectPairedSidekick({
+      service,
+      internals: __testSidekickInternals,
+      pairingSecret,
+      capabilities: ['wifi.websocket', 'wake.word.local'],
+    });
+
+    sendPayload({
+      v: 1,
+      type: 'wake.beep.result',
+      wakeId: 'wake-1',
+      status: 'failed',
+      durationMs: 137,
+      code: 'ESP_FAIL',
+    });
+    const state = await waitForState(
+      () => service.getState(),
+      (candidate) => candidate.sidekicks[0]?.wakeBeep?.wakeId === 'wake-1',
+    );
+    assert.deepEqual(state.sidekicks[0].wakeBeep, {
+      wakeId: 'wake-1',
+      status: 'failed',
+      durationMs: 137,
+      updatedAt: state.sidekicks[0].wakeBeep.updatedAt,
+      technicalCode: 'sidekick_wake_beep_esp_fail',
+    });
+
+    socket.close();
+    await service.dispose();
+  });
+});
+
+test('SidekickService streams long audio without exceeding negotiated transport credits', async (t) => {
+  const root = await tmpRoot('sidekick-service-speaker-long');
+  t.after(async () => {
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  await withMockedElectron({ safeStorage: createSafeStorage() }, async (require) => {
+    clearDistModule('main/sidekick-service.js');
+    const { SidekickService, __testSidekickInternals } = require('../../dist-electron/main/sidekick-service.js');
+    const pairingSecret = randomBytes(32).toString('base64');
+    await writePairedSidekickStore(root, pairingSecret, ['wifi.websocket', 'speaker.playback']);
+    const service = createSidekickService(SidekickService, root);
+    const { socket, sendPayload } = await connectPairedSidekick({
+      service,
+      internals: __testSidekickInternals,
+      pairingSecret,
+      capabilities: ['wifi.websocket', 'speaker.playback'],
+    });
+    const chunkCount = 24;
+    const sampleCount = chunkCount * 1024 + 17;
+    const samples = Int16Array.from({ length: sampleCount }, (_, index) => index % 32767);
+    const playbackPromise = service.playSpeakerPcm({ sidekickId: SIDEKICK_ID, samples });
+    const start = await readDesktopCommand(socket, __testSidekickInternals, pairingSecret);
+    sendPayload({
+      v: 1,
+      type: 'speaker.playback.started',
+      playbackId: start.playbackId,
+      maxChunkSamples: 1024,
+      queueDepth: 8,
+      maxInFlightChunks: 3,
+    });
+
+    const totalChunks = chunkCount + 1;
+    for (let sequence = 0; sequence < totalChunks; sequence += 1) {
+      const chunk = await readDesktopCommand(socket, __testSidekickInternals, pairingSecret);
+      assert.equal(chunk.cmd, 'speaker.play.chunk');
+      assert.equal(chunk.chunkSequence, sequence);
+      if (sequence >= 2) {
+        sendPayload({
+          v: 1,
+          type: 'speaker.playback.progress',
+          playbackId: start.playbackId,
+          lastChunkSequence: sequence - 2,
+          bufferedSamples: 2048,
+          underruns: 0,
+        });
+      }
+    }
+    for (let sequence = totalChunks - 2; sequence < totalChunks; sequence += 1) {
+      sendPayload({
+        v: 1,
+        type: 'speaker.playback.progress',
+        playbackId: start.playbackId,
+        lastChunkSequence: sequence,
+        bufferedSamples: 0,
+        underruns: 0,
+      });
+    }
+
+    const stop = await readDesktopCommand(socket, __testSidekickInternals, pairingSecret);
+    assert.equal(stop.cmd, 'speaker.play.stop');
+    sendPayload({
+      v: 1,
+      type: 'speaker.playback.stopped',
+      playbackId: start.playbackId,
+      samplesPlayed: sampleCount,
+      underruns: 0,
+      droppedChunks: 0,
+    });
+    const result = await playbackPromise;
+    assert.equal(result.success, true);
+    assert.equal(result.samplesPlayed, sampleCount);
+
+    socket.close();
+    await service.dispose();
+  });
+});
+
+test('SidekickService drains a cancelled speaker session without closing the socket', async (t) => {
+  const root = await tmpRoot('sidekick-service-speaker-cancel');
+  t.after(async () => {
+    await fs.rm(root, { recursive: true, force: true });
+  });
+
+  await withMockedElectron({ safeStorage: createSafeStorage() }, async (require) => {
+    clearDistModule('main/sidekick-service.js');
+    const { SidekickService, __testSidekickInternals } = require('../../dist-electron/main/sidekick-service.js');
+    const pairingSecret = randomBytes(32).toString('base64');
+    await writePairedSidekickStore(root, pairingSecret, ['wifi.websocket', 'speaker.playback']);
+    const service = createSidekickService(SidekickService, root);
+    const { socket, sendPayload } = await connectPairedSidekick({
+      service,
+      internals: __testSidekickInternals,
+      pairingSecret,
+      capabilities: ['wifi.websocket', 'speaker.playback'],
+    });
+    const playbackPromise = service.playSpeakerPcm({
+      sidekickId: SIDEKICK_ID,
+      samples: Int16Array.from({ length: 1024 }, (_, index) => index),
+    });
+    const start = await readDesktopCommand(socket, __testSidekickInternals, pairingSecret);
+    sendPayload({
+      v: 1,
+      type: 'speaker.playback.started',
+      playbackId: start.playbackId,
+      maxChunkSamples: 1024,
+      queueDepth: 8,
+    });
+    await readDesktopCommand(socket, __testSidekickInternals, pairingSecret);
+    sendPayload({
+      v: 1,
+      type: 'speaker.playback.error',
+      playbackId: start.playbackId,
+      code: 'playback_backpressure',
+    });
+
+    const cancel = await readDesktopCommand(socket, __testSidekickInternals, pairingSecret);
+    assert.equal(cancel.cmd, 'speaker.play.cancel');
+    sendPayload({
+      v: 1,
+      type: 'speaker.playback.stopped',
+      playbackId: start.playbackId,
+      samplesPlayed: 0,
+      underruns: 0,
+      droppedChunks: 0,
+      cancelled: true,
+    });
+    const result = await playbackPromise;
+    assert.equal(result.success, false);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.equal(socket.readyState, WebSocket.OPEN);
+
+    socket.close();
     await service.dispose();
   });
 });

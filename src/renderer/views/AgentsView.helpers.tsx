@@ -10,6 +10,7 @@ import type {
   PersonalAgentConnectionGrant,
   PersonalAgentConversation,
   PersonalAgentGrantOptionConnection,
+  PersonalAgentGroup,
   PersonalAgentMessage,
   PersonalAgentPeerGrant,
   PersonalAgentRunStatus,
@@ -33,6 +34,8 @@ interface WorkspaceTreeProps {
 export interface AccessDraft {
   permissionMode: AgentPermissionMode;
   networkAccess: boolean;
+  canSpawnAgents: boolean;
+  groupId: string | null;
   runtime: AgentRuntime;
   appIds: string[];
   toolIds: AgentToolId[];
@@ -45,6 +48,35 @@ export interface AgentConversationHistoryGroup {
   label: string;
   items: PersonalAgentConversation[];
 }
+
+export interface PersonalAgentDisplayGroup {
+  groupId: string | null;
+  name?: string;
+  agents: PersonalAgent[];
+}
+
+export const groupAgentsForDisplay = (
+  agents: PersonalAgent[],
+  groups: PersonalAgentGroup[],
+): PersonalAgentDisplayGroup[] => {
+  const sortedGroups = [...groups].sort((left, right) => left.name.localeCompare(right.name));
+  const grouped = sortedGroups
+    .map((group) => ({
+      groupId: group.id,
+      name: group.name,
+      agents: agents
+        .filter((agent) => agent.groupId === group.id)
+        .sort((left, right) => left.name.localeCompare(right.name)),
+    }))
+    .filter((group) => group.agents.length > 0);
+  const knownGroupIds = new Set(groups.map((group) => group.id));
+  const ungrouped = agents
+    .filter((agent) => !agent.groupId || !knownGroupIds.has(agent.groupId))
+    .sort((left, right) => left.name.localeCompare(right.name));
+  return ungrouped.length > 0
+    ? [...grouped, { groupId: null, agents: ungrouped }]
+    : grouped;
+};
 
 export interface RenderPersonalAgentMessageOptions {
   contextMessages?: PersonalAgentMessage[];
@@ -139,6 +171,8 @@ export const upsertConversation = (
 export const defaultAccessDraft = (): AccessDraft => ({
   permissionMode: 'safe',
   networkAccess: false,
+  canSpawnAgents: false,
+  groupId: null,
   runtime: defaultPersonalAgentRuntime(),
   appIds: [],
   toolIds: [],
@@ -149,6 +183,8 @@ export const defaultAccessDraft = (): AccessDraft => ({
 export const accessDraftFromAgent = (agent: PersonalAgent): AccessDraft => ({
   permissionMode: agent.permissionMode,
   networkAccess: agent.networkAccess,
+  canSpawnAgents: agent.canSpawnAgents,
+  groupId: agent.groupId ?? null,
   runtime: agent.runtime ? { ...agent.runtime } : defaultPersonalAgentRuntime(),
   appIds: [...agent.appIds],
   toolIds: [...agent.toolIds],

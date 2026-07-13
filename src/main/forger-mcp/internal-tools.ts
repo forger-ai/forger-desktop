@@ -24,6 +24,33 @@ export const INTERNAL_MCP_TOOL_DEFINITIONS: AgentToolDefinition[] = [
     defaultRequiresApproval: false,
   },
   {
+    id: 'forger_create_personal_agent',
+    packageId: 'forger:internal',
+    name: 'Crear agente personal',
+    description: 'Crea un agente personal nuevo cuando el agente actual tiene permiso para crear otros agentes.',
+    category: 'actualizacion',
+    risk: 'medio',
+    defaultRequiresApproval: false,
+  },
+  {
+    id: 'respond_and_end',
+    packageId: 'forger:internal',
+    name: 'Responder y terminar',
+    description: 'Habla el texto por el Sidekick y termina el turno de voz. Llamar exactamente una vez por turno; el texto se reproduce tal cual.',
+    category: 'consulta',
+    risk: 'bajo',
+    defaultRequiresApproval: false,
+  },
+  {
+    id: 'respond_and_wait',
+    packageId: 'forger:internal',
+    name: 'Responder y esperar',
+    description: 'Habla el texto por el Sidekick y deja el microfono escuchando de inmediato el follow-up de la persona, sin wake word. Usar solo cuando se necesita su respuesta para continuar.',
+    category: 'consulta',
+    risk: 'bajo',
+    defaultRequiresApproval: false,
+  },
+  {
     id: 'wakeup_in',
     packageId: 'forger:internal',
     name: 'Despertar en segundos',
@@ -161,6 +188,11 @@ export const PERSONAL_AGENT_ROUTINE_TOOL_IDS = new Set<AgentToolId>([
   'list_agent_routines',
   'update_agent_routine',
   'delete_agent_routine',
+]);
+
+export const SIDEKICK_VOICE_TOOL_IDS = new Set<AgentToolId>([
+  'respond_and_end',
+  'respond_and_wait',
 ]);
 
 export const WORKFLOW_MANAGEMENT_TOOL_IDS = new Set<AgentToolId>([

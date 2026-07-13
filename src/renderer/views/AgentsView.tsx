@@ -5,7 +5,6 @@ import AttachFileRounded from '@mui/icons-material/AttachFileRounded';
 import BugReportRounded from '@mui/icons-material/BugReportRounded';
 import ChatRounded from '@mui/icons-material/ChatRounded';
 import CloseRounded from '@mui/icons-material/CloseRounded';
-import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
 import DescriptionRounded from '@mui/icons-material/DescriptionRounded';
 import HistoryRounded from '@mui/icons-material/HistoryRounded';
 import PlayArrowRounded from '@mui/icons-material/PlayArrowRounded';
@@ -16,9 +15,6 @@ import {
   Alert,
   Box,
   Button,
-  Card,
-  CardActionArea,
-  CardContent,
   Chip,
   CircularProgress,
   Dialog,
@@ -36,11 +32,12 @@ import {
   Typography,
   useTheme,
 } from '@mui/material';
-import type { AgentProvider, AppSummary, AutomationFrequency, AutomationMissedRunPolicy, PersonalAgent, PersonalAgentConversation, PersonalAgentConversationEvent, PersonalAgentGrantOptions, PersonalAgentMessage, PersonalAgentPeerThread, PersonalAgentRoutine, PersonalAgentRun, PersonalAgentWorkspaceEntry, PersonalAgentWorkspaceFile, PickedChatFile, SharedFileRef, WindowControlState } from '@shared/types';
+import type { AgentProvider, AppSummary, AutomationFrequency, AutomationMissedRunPolicy, PersonalAgent, PersonalAgentConversation, PersonalAgentConversationEvent, PersonalAgentGrantOptions, PersonalAgentGroup, PersonalAgentMessage, PersonalAgentPeerThread, PersonalAgentRoutine, PersonalAgentRun, PersonalAgentWorkspaceEntry, PersonalAgentWorkspaceFile, PickedChatFile, SharedFileRef, WindowControlState } from '@shared/types';
 import type { AppDictionary } from '@renderer/i18n';
 import { AGENT_PROVIDER_OPTIONS, CODEX_MODEL_OPTIONS } from '@renderer/preferences';
 import { usageAnalytics } from '@renderer/usage-analytics';
 import { AgentRunActivityReceipt } from '@renderer/components/AgentRunActivityReceipt';
+import { mergeConversationSnapshots, newerConversation } from '@renderer/stores/personal-agent-conversation-snapshots';
 import { MarkdownMessage } from './chat/MarkdownMessage';
 import {
   isMacOsPlatform,
@@ -62,6 +59,7 @@ import {
   accessDraftFromAgent,
   compactFileLabel,
   defaultAccessDraft,
+  groupAgentsForDisplay,
   isTerminalRunStatus,
   personalAgentRunErrorMessage,
   personalAgentSaveErrorMessage,
@@ -71,7 +69,7 @@ import {
   WorkspaceTree,
 } from './AgentsView.helpers';
 import { AgentAccessControls } from './AgentAccessControls';
-
+import { AgentCreateDialog, AgentGroupSelect, AgentGroupsDialog, AgentIdentityChips, AgentsOverview } from './AgentGroupsUi';
 interface AgentsViewProps {
   t: AppDictionary;
   intelligenceProviderConfigured: boolean;
@@ -86,6 +84,8 @@ type RoutineFrequencyType = AutomationFrequency['type'];
 export function AgentsView({ t, intelligenceProviderConfigured, providerOptions = AGENT_PROVIDER_OPTIONS, installedApps = [], onNotifyForger }: AgentsViewProps) {
   const theme = useTheme();
   const [agents, setAgents] = useState<PersonalAgent[]>([]);
+  const [agentGroups, setAgentGroups] = useState<PersonalAgentGroup[]>([]);
+  const [sidekickNames, setSidekickNames] = useState<Record<string, string>>({});
   const [activeAgentId, setActiveAgentId] = useState<string | null>(null);
   const [conversations, setConversations] = useState<PersonalAgentConversation[]>([]);
   const [conversation, setConversation] = useState<PersonalAgentConversation | null>(null);
@@ -95,6 +95,10 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
   const [openFile, setOpenFile] = useState<PersonalAgentWorkspaceFile | null>(null);
   const [fileDraft, setFileDraft] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
+  const [groupsOpen, setGroupsOpen] = useState(false);
+  const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
+  const [groupName, setGroupName] = useState('');
+  const [groupDialogError, setGroupDialogError] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [purpose, setPurpose] = useState('');
@@ -122,7 +126,7 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
   const [historyGroupLimits, setHistoryGroupLimits] = useState<Record<string, number>>({});
   const [peerThreads, setPeerThreads] = useState<PersonalAgentPeerThread[]>([]);
   const [openPeerThread, setOpenPeerThread] = useState<PersonalAgentPeerThread | null>(null);
-  const [busyAction, setBusyAction] = useState<'create' | 'delete' | 'file' | 'wake' | 'start' | 'send' | 'access' | 'routine' | 'cancelWakeup' | null>(null);
+  const [busyAction, setBusyAction] = useState<'create' | 'delete' | 'file' | 'wake' | 'start' | 'send' | 'access' | 'routine' | 'cancelWakeup' | 'group' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [settingsDraftAgentVersion, setSettingsDraftAgentVersion] = useState<string | null>(null);
   const messagesScrollRef = useRef<HTMLDivElement | null>(null);
@@ -133,6 +137,13 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
     () => agents.find((agent) => agent.id === activeAgentId) ?? null,
     [agents, activeAgentId],
   );
+  const agentSections = useMemo(() => {
+    return groupAgentsForDisplay(agents, agentGroups).map((group) => ({
+      id: group.groupId ?? 'ungrouped',
+      label: group.name ?? t.agents.ungrouped,
+      agents: group.agents,
+    }));
+  }, [agentGroups, agents, t.agents.ungrouped]);
   const activeAgentVersion = activeAgent ? `${activeAgent.id}:${activeAgent.updatedAt}` : null;
   const settingsDraftReady = settingsDraftAgentVersion === activeAgentVersion;
 
@@ -168,7 +179,7 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
   const activeRunProgressCount = activeRun?.progress.length ?? 0;
   const activeRunActivityCount = activeRun?.activity?.items.length ?? 0;
   const busy = busyAction !== null;
-  const conversationReadOnly = Boolean(conversation && (conversation.readOnly || conversation.origin === 'agent'));
+  const conversationReadOnly = Boolean(conversation && (conversation.readOnly || conversation.origin === 'agent' || conversation.origin === 'sidekick'));
   const shouldReserveMacTrafficLightSpace = isMacOsPlatform() && !windowState?.isFullScreen;
   const installedAppsGrantOptionsKey = useMemo(
     () => installedApps
@@ -179,9 +190,16 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
   );
   const historyGroups = useMemo<AgentConversationHistoryGroup[]>(() => {
     const routineStarted = sortItemsByRecentActivity(conversations.filter((item) => item.origin === 'routine'));
-    const userStarted = sortItemsByRecentActivity(conversations.filter((item) => item.origin !== 'agent' && item.origin !== 'routine'));
+    const userStarted = sortItemsByRecentActivity(conversations.filter((item) => item.origin === 'user'));
     const agentStarted = sortItemsByRecentActivity(conversations.filter((item) => item.origin === 'agent'));
+    const sidekickStarted = sortItemsByRecentActivity(conversations.filter((item) => item.origin === 'sidekick'));
+    const sidekickGroups = [...new Set(sidekickStarted.map((item) => item.sidekickId ?? ''))].map((sidekickId) => ({
+      id: `sidekick-${sidekickId || 'unknown'}`,
+      label: t.agents.conversationGroups.sidekick(sidekickId ? sidekickNames[sidekickId] : undefined),
+      items: sidekickStarted.filter((item) => (item.sidekickId ?? '') === sidekickId),
+    }));
     const groups: Array<AgentConversationHistoryGroup | null> = [
+      ...sidekickGroups,
       routineStarted.length > 0
         ? { id: 'routine-started', label: t.agents.conversationGroups.routine, items: routineStarted }
         : null,
@@ -193,7 +211,7 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
         : null,
     ];
     return groups.filter((group): group is AgentConversationHistoryGroup => Boolean(group));
-  }, [conversations, t.locale]);
+  }, [conversations, sidekickNames, t.locale]);
 
   useEffect(() => {
     if (!onNotifyForger || !activeAgent || !conversation || !activeRun || activeRun.status !== 'failed' || !runErrorIsGeneric) {
@@ -207,8 +225,14 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
   }, [activeAgent, activeRun, conversation, onNotifyForger, runErrorIsGeneric]);
 
   const loadAgents = useCallback(async () => {
-    const nextAgents = await window.forger.personalAgentsList();
+    const [nextAgents, nextGroups, sidekickState] = await Promise.all([
+      window.forger.personalAgentsList(),
+      window.forger.personalAgentGroupsList(),
+      window.forger.sidekicksGetState().catch(() => null),
+    ]);
     setAgents(nextAgents);
+    setAgentGroups(nextGroups);
+    setSidekickNames(Object.fromEntries((sidekickState?.sidekicks ?? []).map((sidekick) => [sidekick.sidekickId, sidekick.name])));
     setActiveAgentId((current) => {
       if (!current) return null;
       return nextAgents.some((agent) => agent.id === current) ? current : null;
@@ -221,26 +245,32 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
       window.forger.personalAgentWorkspaceList({ agentId }).catch(() => []),
       window.forger.personalAgentRoutinesList({ agentId }).catch(() => []),
     ]);
-    setConversations(nextConversations);
+    setConversations((current) => mergeConversationSnapshots(current.filter((item) => item.agentId === agentId), nextConversations));
     setWorkspaceEntries(nextWorkspaceEntries);
     setRoutines(nextRoutines);
-    setConversation(
-      nextConversations.find((item) => item.id === preferredConversationId) ??
-      nextConversations[0] ??
-      null,
-    );
+    setConversation((current) => {
+      if (current?.agentId === agentId) {
+        const refreshed = nextConversations.find((item) => item.id === current.id);
+        return refreshed ? newerConversation(current, refreshed) : current;
+      }
+      return nextConversations.find((item) => item.id === preferredConversationId) ?? nextConversations[0] ?? null;
+    });
   }, []);
 
   useEffect(() => {
     let mounted = true;
     Promise.all([
       window.forger.personalAgentsList(),
+      window.forger.personalAgentGroupsList(),
       window.forger.personalAgentGrantOptionsList().catch(() => ({ apps: [], tools: [], connections: [], peerAgents: [] })),
+      window.forger.sidekicksGetState().catch(() => null),
     ])
-      .then(([nextAgents, nextGrantOptions]) => {
+      .then(([nextAgents, nextGroups, nextGrantOptions, sidekickState]) => {
         if (!mounted) return;
         setAgents(nextAgents);
+        setAgentGroups(nextGroups);
         setGrantOptions(nextGrantOptions);
+        setSidekickNames(Object.fromEntries((sidekickState?.sidekicks ?? []).map((sidekick) => [sidekick.sidekickId, sidekick.name])));
       })
       .catch((loadError) => {
         if (mounted) {
@@ -306,7 +336,7 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
 
   useEffect(() => {
     const unsubscribe = window.forger.onPersonalAgentConversationEvent((event: PersonalAgentConversationEvent) => {
-      if (activeAgentId && event.conversation.agentId !== activeAgentId) {
+      if (!activeAgentId || event.conversation.agentId !== activeAgentId) {
         return;
       }
       setConversations((current) => upsertConversation(current, event.conversation));
@@ -404,6 +434,8 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
         purpose,
         permissionMode: createAccessDraft.permissionMode,
         networkAccess: createAccessDraft.networkAccess,
+        canSpawnAgents: createAccessDraft.canSpawnAgents,
+        groupId: createAccessDraft.groupId,
         runtime: createAccessDraft.runtime,
         appIds: createAccessDraft.appIds,
         toolIds: createAccessDraft.toolIds,
@@ -432,19 +464,72 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
     setBusyAction('access');
     setError(null);
     try {
-      const updated = await window.forger.personalAgentUpdatePermissions({
+      let updated = await window.forger.personalAgentUpdatePermissions({
         agentId: activeAgent.id,
         permissionMode: settingsAccessDraft.permissionMode,
         networkAccess: settingsAccessDraft.networkAccess,
+        canSpawnAgents: settingsAccessDraft.canSpawnAgents,
         runtime: settingsAccessDraft.runtime,
         appIds: settingsAccessDraft.appIds,
         toolIds: settingsAccessDraft.toolIds,
         connectionGrants: settingsAccessDraft.connectionGrants,
         peerAgentGrants: settingsAccessDraft.peerAgentGrants,
       });
+      if ((activeAgent.groupId ?? null) !== settingsAccessDraft.groupId) {
+        updated = await window.forger.personalAgentUpdateGroup({
+          agentId: activeAgent.id,
+          groupId: settingsAccessDraft.groupId,
+        });
+      }
       setAgents((current) => current.map((agent) => agent.id === updated.id ? updated : agent));
     } catch (accessError) {
       setError(personalAgentSaveErrorMessage(accessError, t.agents.accessSaveError, t));
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const handleOpenGroups = () => {
+    setEditingGroupId(null);
+    setGroupName('');
+    setGroupDialogError(null);
+    setGroupsOpen(true);
+  };
+
+  const handleSaveGroup = async () => {
+    const normalizedName = groupName.trim();
+    if (!normalizedName || busy) return;
+    setBusyAction('group');
+    setGroupDialogError(null);
+    try {
+      if (editingGroupId) {
+        await window.forger.personalAgentGroupsUpdate({ groupId: editingGroupId, name: normalizedName });
+      } else {
+        await window.forger.personalAgentGroupsCreate({ name: normalizedName });
+      }
+      setEditingGroupId(null);
+      setGroupName('');
+      await loadAgents();
+    } catch {
+      setGroupDialogError(t.agents.groupSaveError);
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const handleDeleteGroup = async (group: PersonalAgentGroup) => {
+    if (busy || !window.confirm(t.agents.deleteGroupConfirm(group.name))) return;
+    setBusyAction('group');
+    setGroupDialogError(null);
+    try {
+      await window.forger.personalAgentGroupsDelete({ groupId: group.id });
+      if (editingGroupId === group.id) {
+        setEditingGroupId(null);
+        setGroupName('');
+      }
+      await loadAgents();
+    } catch {
+      setGroupDialogError(t.agents.groupDeleteError);
     } finally {
       setBusyAction(null);
     }
@@ -795,78 +880,23 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
     />
   );
 
+  const createdByLabel = (agent: PersonalAgent): string | null => agent.createdByAgentId
+    ? t.agents.createdBy(agents.find((candidate) => candidate.id === agent.createdByAgentId)?.name ?? agent.createdByAgentId)
+    : null;
+
   const renderMainList = () => (
-    <Stack spacing={2.25} sx={{ height: '100%', minHeight: 0 }}>
-      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems={{ xs: 'stretch', sm: 'center' }}>
-        <Box sx={{ flex: 1, minWidth: 0 }}>
-          <Typography variant="h4">{t.agents.title}</Typography>
-          <Typography color="text.secondary">{t.agents.subtitle}</Typography>
-        </Box>
-        <Button startIcon={<AddRounded />} variant="contained" onClick={handleOpenCreate}>
-          {t.agents.create}
-        </Button>
-      </Stack>
-
-      {error ? <Alert severity="error">{error}</Alert> : null}
-
-      {agents.length === 0 ? (
-        <Box
-          sx={{
-            border: `1px dashed ${theme.palette.divider}`,
-            borderRadius: 1,
-            p: 4,
-            textAlign: 'center',
-          }}
-        >
-          <Typography color="text.secondary">{t.agents.empty}</Typography>
-        </Box>
-      ) : (
-        <Box
-          sx={{
-            display: 'grid',
-            gridTemplateColumns: {
-              xs: '1fr',
-              md: 'repeat(2, minmax(0, 1fr))',
-              xl: 'repeat(3, minmax(0, 1fr))',
-            },
-            gap: 1.5,
-          }}
-        >
-          {agents.map((agent) => (
-            <Card key={agent.id} variant="outlined" sx={{ borderRadius: 1 }}>
-              <CardActionArea onClick={() => setActiveAgentId(agent.id)} sx={{ alignItems: 'stretch' }}>
-                <CardContent sx={{ p: 1.75, '&:last-child': { pb: 1.75 } }}>
-                  <Stack spacing={1.25}>
-                    <Stack direction="row" spacing={1} alignItems="flex-start">
-                      <Box sx={{ flex: 1, minWidth: 0 }}>
-                        <Typography variant="subtitle1" fontWeight={700}>{agent.name}</Typography>
-                        <Typography variant="body2" color="text.secondary">
-                          {agent.description || t.agents.noDescription}
-                        </Typography>
-                      </Box>
-                      <Tooltip title={t.agents.delete}>
-                        <IconButton
-                          size="small"
-                          disabled={busy}
-                          onClick={(event) => {
-                            event.preventDefault();
-                            event.stopPropagation();
-                            void handleDelete(agent);
-                          }}
-                        >
-                          <DeleteOutlineRounded fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                    </Stack>
-                    {renderAccessChips(agent)}
-                  </Stack>
-                </CardContent>
-              </CardActionArea>
-            </Card>
-          ))}
-        </Box>
-      )}
-    </Stack>
+    <AgentsOverview
+      agents={agents}
+      busy={busy}
+      createdByLabel={createdByLabel}
+      error={error} onCreate={handleOpenCreate}
+      onDelete={(agent) => void handleDelete(agent)}
+      onManageGroups={handleOpenGroups} manageGroupsLabel={t.agents.manageGroups}
+      onOpen={(agent) => setActiveAgentId(agent.id)}
+      renderAccessChips={renderAccessChips}
+      sections={agentSections}
+      t={t}
+    />
   );
 
   const renderFilePanel = () => {
@@ -970,7 +1000,9 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
       ? t.agents.messageBadge.routine
       : item.source === 'scheduled_wakeup'
         ? t.agents.messageBadge.wakeup
-        : null;
+        : item.source === 'sidekick'
+          ? t.agents.messageBadge.sidekick
+          : null;
     const messageRun = !isUser && !isIntermediate && item.runId && activeRun?.id === item.runId
       ? activeRun
       : undefined;
@@ -1125,7 +1157,7 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
       return (
         <Box sx={{ p: 1.5, borderTop: `1px solid ${theme.palette.divider}` }}>
           <Typography variant="body2" color="text.secondary">
-            {t.agents.readOnlyThread}
+            {conversation?.origin === 'sidekick' ? t.agents.sidekickReadOnlyThread : t.agents.readOnlyThread}
           </Typography>
         </Box>
       );
@@ -1262,6 +1294,7 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
             <Typography variant="body2" color="text.secondary" noWrap>
               {activeAgent.purpose || activeAgent.description || t.agents.noDescription}
             </Typography>
+            <AgentIdentityChips agent={activeAgent} agents={agents} groups={agentGroups} t={t} />
           </Box>
           <Tooltip title={t.agents.historyTab}>
             <IconButton onClick={() => setHistoryOpen(true)}>
@@ -1311,6 +1344,11 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
           ) : detailTab === 'settings' ? (
             <Paper variant="outlined" sx={{ height: '100%', minHeight: 0, overflow: 'auto', p: 2, borderRadius: 1 }}>
               <Stack spacing={2}>
+                <Box>
+                  <Typography variant="subtitle2" sx={{ mb: 1 }}>{t.agents.group}</Typography>
+                  <AgentGroupSelect draft={settingsAccessDraft} groups={agentGroups} id="personal-agent-settings-group" setDraft={setSettingsAccessDraft} t={t} />
+                </Box>
+                <Divider />
                 {renderAccessControls(settingsAccessDraft, setSettingsAccessDraft)}
                 <Box>
                   <Button
@@ -1481,46 +1519,25 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
     <>
       {activeAgentId ? renderDetail() : renderMainList()}
 
-      <Dialog open={createOpen} onClose={() => setCreateOpen(false)} fullWidth maxWidth="sm">
-        <DialogTitle>{t.agents.createTitle}</DialogTitle>
-        <DialogContent>
-          <Stack spacing={2} sx={{ pt: 0.5 }}>
-            <TextField
-              size="small"
-              label={t.agents.name}
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-            />
-            <TextField
-              size="small"
-              label={t.agents.description}
-              value={description}
-              onChange={(event) => setDescription(event.target.value)}
-            />
-            <TextField
-              size="small"
-              multiline
-              minRows={4}
-              label={t.agents.purpose}
-              value={purpose}
-              onChange={(event) => setPurpose(event.target.value)}
-            />
-            <Divider />
-            {renderAccessControls(createAccessDraft, setCreateAccessDraft)}
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setCreateOpen(false)}>{t.actions.close}</Button>
-          <Button
-            startIcon={<AddRounded />}
-            variant="contained"
-            disabled={!name.trim() || busy}
-            onClick={() => void handleCreate()}
-          >
-            {t.agents.create}
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <AgentCreateDialog
+        accessControls={renderAccessControls(createAccessDraft, setCreateAccessDraft)}
+        busy={busy} description={description} draft={createAccessDraft}
+        groups={agentGroups} name={name}
+        onClose={() => setCreateOpen(false)}
+        onCreate={() => void handleCreate()}
+        onDescriptionChange={setDescription} onNameChange={setName} onPurposeChange={setPurpose}
+        open={createOpen} purpose={purpose} setDraft={setCreateAccessDraft} t={t}
+      />
+
+      <AgentGroupsDialog
+        agents={agents} busy={busyAction === 'group'} editingGroupId={editingGroupId}
+        error={groupDialogError} groupName={groupName} groups={agentGroups}
+        onClose={() => setGroupsOpen(false)}
+        onDelete={(group) => void handleDeleteGroup(group)}
+        onEdit={(group) => { setEditingGroupId(group.id); setGroupName(group.name); }}
+        onGroupNameChange={setGroupName} onSave={() => void handleSaveGroup()}
+        open={groupsOpen} t={t}
+      />
 
       <AgentRoutineDialog
         t={t}

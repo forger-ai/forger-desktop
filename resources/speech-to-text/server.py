@@ -21,6 +21,10 @@ class ProcessRequest(BaseModel):
     path: str
     task: str = "transcribe"
     language: str | None = None
+    # Restringe la deteccion de idioma a este subconjunto (codigos ISO-639-1).
+    # Ignorado cuando `language` viene definido.
+    languages: list[str] | None = None
+    ephemeral: bool = False
 
 
 class RuntimeState:
@@ -95,6 +99,27 @@ def now_iso() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
+def normalized_language_subset(languages: list[str] | None) -> list[str]:
+    result: list[str] = []
+    for code in languages or []:
+        normalized = str(code).strip().lower()
+        if len(normalized) == 2 and normalized.isalpha() and normalized not in result:
+            result.append(normalized)
+    return result
+
+
+def pick_subset_language(all_language_probs: Any, languages: list[str]) -> str:
+    probs: dict[str, float] = {}
+    try:
+        for code, prob in all_language_probs or []:
+            probs[str(code)] = float(prob)
+    except Exception:
+        probs = {}
+    if not probs:
+        return languages[0]
+    return max(languages, key=lambda code: probs.get(code, 0.0))
+
+
 def sanitize_details(details: dict[str, Any]) -> dict[str, Any]:
     allowed = {
         "audioDurationSeconds",
@@ -103,6 +128,7 @@ def sanitize_details(details: dict[str, Any]) -> dict[str, Any]:
         "httpStatus",
         "kind",
         "language",
+        "languages",
         "lastRealtimeFactor",
         "model",
         "operation",
@@ -437,13 +463,25 @@ def make_app(state: RuntimeState) -> FastAPI:
             state.log_event("job_started", {"task": task, "sizeBytes": size_bytes, "model": state.model_name})
             try:
                 model = await asyncio.to_thread(state.load_model)
+                subset = [] if input_data.language else normalized_language_subset(input_data.languages)
                 kwargs: dict[str, Any] = {"task": task}
                 if input_data.language:
                     kwargs["language"] = input_data.language
+                elif len(subset) == 1:
+                    kwargs["language"] = subset[0]
                 segments, info = await asyncio.to_thread(model.transcribe, str(audio_path), **kwargs)
                 text = " ".join(segment.text.strip() for segment in segments).strip()
                 duration = float(getattr(info, "duration", 0) or 0)
                 language = str(getattr(info, "language", "") or "")
+                if len(subset) > 1 and language not in subset:
+                    # La deteccion libre cayo fuera del subconjunto: repetir con el
+                    # mejor candidato del subconjunto segun las probabilidades.
+                    kwargs["language"] = pick_subset_language(
+                        getattr(info, "all_language_probs", None), subset)
+                    segments, info = await asyncio.to_thread(model.transcribe, str(audio_path), **kwargs)
+                    text = " ".join(segment.text.strip() for segment in segments).strip()
+                    duration = float(getattr(info, "duration", 0) or 0)
+                    language = str(getattr(info, "language", "") or "")
                 job.update({
                     "status": "completed",
                     "updatedAt": now_iso(),
@@ -452,18 +490,19 @@ def make_app(state: RuntimeState) -> FastAPI:
                     "model": state.model_name,
                     "text": text,
                 })
-                state.processed_files.append({
-                    "path": str(audio_path),
-                    "task": task,
-                    "processedAt": job["updatedAt"],
-                    "durationSeconds": duration,
-                    "sizeBytes": size_bytes,
-                    "language": language,
-                    "model": state.model_name,
-                    "textPreview": text[:240],
-                })
-                state._write_processed_files()
-                state.log_event("job_completed", {"task": task, "sizeBytes": size_bytes, "durationSeconds": duration, "language": language, "model": state.model_name})
+                if not input_data.ephemeral:
+                    state.processed_files.append({
+                        "path": str(audio_path),
+                        "task": task,
+                        "processedAt": job["updatedAt"],
+                        "durationSeconds": duration,
+                        "sizeBytes": size_bytes,
+                        "language": language,
+                        "model": state.model_name,
+                        "textPreview": text[:240],
+                    })
+                    state._write_processed_files()
+                state.log_event("job_completed", {"task": task, "sizeBytes": size_bytes, "durationSeconds": duration, "language": language, "languages": "+".join(subset), "model": state.model_name})
             except Exception as exc:
                 technical_code = str(exc) or "speech_to_text_failed"
                 job.update({

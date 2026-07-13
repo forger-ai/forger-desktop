@@ -173,6 +173,23 @@ export function AgentAccessControls({
         )}
         label={t.agents.internetAccess}
       />
+      <FormControlLabel
+        control={(
+          <Switch
+            checked={draft.canSpawnAgents}
+            onChange={(event) => setDraft((current) => ({ ...current, canSpawnAgents: event.target.checked }))}
+          />
+        )}
+        label={(
+          <Box>
+            <Typography variant="body2">{t.agents.canSpawnAgents}</Typography>
+            <Typography variant="caption" color="text.secondary">
+              {t.agents.canSpawnAgentsHint}
+            </Typography>
+          </Box>
+        )}
+        sx={{ alignItems: 'flex-start', '& .MuiSwitch-root': { mt: -0.5 } }}
+      />
       <Box>
         <Typography variant="subtitle2" sx={{ mb: 0.75 }}>{t.agents.appsAccess}</Typography>
         {grantOptions.apps.length > 0 ? (

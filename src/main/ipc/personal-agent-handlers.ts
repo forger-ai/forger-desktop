@@ -18,6 +18,9 @@ import type {
   PersonalAgentDeleteInput,
   PersonalAgent,
   PersonalAgentGrantOptions,
+  PersonalAgentGroupCreateInput,
+  PersonalAgentGroupDeleteInput,
+  PersonalAgentGroupUpdateInput,
   PersonalAgentConnectionGrant,
   PersonalAgentMessageSendInput,
   PersonalAgentPeerGrant,
@@ -29,6 +32,7 @@ import type {
   PersonalAgentRoutineSetEnabledInput,
   PersonalAgentRoutineUpsertInput,
   PersonalAgentUpdatePermissionsInput,
+  PersonalAgentUpdateGroupInput,
   PersonalAgentWakeupCancelInput,
   PersonalAgentWorkspaceFileReadInput,
   PersonalAgentWorkspaceFileWriteInput,
@@ -88,6 +92,21 @@ export const registerPersonalAgentIpcHandlers = ({
     await validateRuntimeInput(input, isAgentProviderConnected);
     const sanitized = await sanitizePermissionInput(input, listInstalledApps, listOfficialTools, listConnections, () => getPersonalAgentStore().listAgents());
     return await getPersonalAgentStore().createAgent(sanitized);
+  });
+  ipcMain.handle(IPC_CHANNELS.personalAgentGroupsList, async () => {
+    return await getPersonalAgentStore().listGroups();
+  });
+  ipcMain.handle(IPC_CHANNELS.personalAgentGroupsCreate, async (_event, input: PersonalAgentGroupCreateInput) => {
+    return await getPersonalAgentStore().createGroup(input);
+  });
+  ipcMain.handle(IPC_CHANNELS.personalAgentGroupsUpdate, async (_event, input: PersonalAgentGroupUpdateInput) => {
+    return await getPersonalAgentStore().updateGroup(input);
+  });
+  ipcMain.handle(IPC_CHANNELS.personalAgentGroupsDelete, async (_event, input: PersonalAgentGroupDeleteInput) => {
+    return await getPersonalAgentStore().deleteGroup(input.groupId);
+  });
+  ipcMain.handle(IPC_CHANNELS.personalAgentUpdateGroup, async (_event, input: PersonalAgentUpdateGroupInput) => {
+    return await getPersonalAgentStore().updateAgentGroup(input);
   });
   ipcMain.handle(IPC_CHANNELS.personalAgentGrantOptionsList, async (): Promise<PersonalAgentGrantOptions> => {
     const [apps, officialTools, connections, agents] = await Promise.all([

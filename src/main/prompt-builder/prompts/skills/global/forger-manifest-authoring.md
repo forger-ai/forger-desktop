@@ -51,6 +51,14 @@ Use this shape as the current authoring contract. Remove fields that do not appl
     "agentRuntimeControl": {
       "required": false,
       "reason": "Lets this app choose provider, model, or effort per agent task or manifest-agent run for a visible model-selection workflow."
+    },
+    "sidekickDisplay": {
+      "required": false,
+      "reason": "Lets this app show bounded status cards or transcripts on a paired Forger Sidekick through Desktop."
+    },
+    "sidekickSpeech": {
+      "required": false,
+      "reason": "Lets this app speak user-visible alerts through a paired Forger Sidekick using Forger's local voice service."
     }
   },
   "stack": {
@@ -289,6 +297,8 @@ Use this shape as the current authoring contract. Remove fields that do not appl
 - `platformCapabilities.textToSpeech` is the runtime declaration for Forger's local Text to speech service. Use it only when the app has a real local voice synthesis workflow where calls provide explicit text, model, and voice. Apps can use the signed Desktop runtime bridge `/audio/say` endpoint for ephemeral playback after listing output devices. `reason` must describe the user-visible workflow enabled by that local service.
 - `platformCapabilities.workspaceFolders` is the runtime declaration for folder-grant workflows. Use it only when the app has a visible feature that needs the person to grant one or more external folders. It does not grant access by itself, and it is not a provider filesystem setting, Forger Tool, Connection, app secret, script, or catalog capability.
 - `platformCapabilities.agentRuntimeControl` is the runtime declaration for app backend flows that choose provider, model, or effort per agent task or manifest-agent run through the signed Desktop runtime bridge. Use it only when the app has a visible workflow that needs model selection. It may be `true` or an object with `required` and `reason`; prefer the object form with a concrete user-visible reason. Without it, any request body that sends `runtime` to agent tasks or manifest-agent start, resume, or steer is rejected, and those runs use the runtime configured in the manifest, prompt overrides, or Desktop defaults.
+- `platformCapabilities.sidekickDisplay` is the narrow runtime declaration for an app that shows bounded `idle`, `state`, `card`, or `transcript` screens on a paired Sidekick. The app uses the signed Desktop runtime bridge `GET /v1/apps/:appId/sidekicks` and `POST /v1/apps/:appId/sidekicks/screen`; it never connects to Sidekick firmware or receives its transport secret.
+- `platformCapabilities.sidekickSpeech` is the narrow runtime declaration for an app that speaks through a paired Sidekick. It must be declared together with `platformCapabilities.textToSpeech`, and the app uses `POST /v1/apps/:appId/sidekicks/speak` with explicit text, model, and voice. Desktop owns synthesis, format conversion, encrypted transport, and ephemeral playback; the app never receives firmware sockets, pairing keys, or synthesized audio bytes.
 - Folder grants are Forger-owned permissions. The app may request them only through Forger-controlled UI or runtime flows, must explain the user-visible reason, and must treat grant ids as handles to approved folders instead of asking agents, backends, or prompts to browse arbitrary local paths.
 - Prompt-template tasks, app agent runs, and conversation runs that need granted folders should receive a `workspace` object with `cwdGrantId` for the selected working folder and `additionalFolderGrantIds` for extra approved folders. Apps may keep returned full paths in saved data, UI, and prompts so agents can understand the person's workspace, but raw paths are context only; Desktop authorizes and resolves access from grant ids.
 - Keep `localNetworkShare` and `remoteTunnel` as top-level runtime flags. Do not move them into `catalog.capabilities` or visible feature lists. After changing these flags, restart the app so Desktop updates the installed app runtime metadata and sharing/tunnel support.

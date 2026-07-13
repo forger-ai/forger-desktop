@@ -23,12 +23,24 @@ export interface PlatformAgentRuntimeControlCapability {
   reason: string;
 }
 
+export interface PlatformSidekickDisplayCapability {
+  required: boolean;
+  reason: string;
+}
+
+export interface PlatformSidekickSpeechCapability {
+  required: boolean;
+  reason: string;
+}
+
 export interface PlatformCapabilities {
   speechToText?: PlatformSpeechToTextCapability;
   textToSpeech?: PlatformTextToSpeechCapability;
   audioInput?: PlatformAudioInputCapability;
   workspaceFolders?: PlatformWorkspaceFoldersCapability;
   agentRuntimeControl?: PlatformAgentRuntimeControlCapability;
+  sidekickDisplay?: PlatformSidekickDisplayCapability;
+  sidekickSpeech?: PlatformSidekickSpeechCapability;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -43,6 +55,8 @@ export const normalizePlatformCapabilities = (value: unknown): PlatformCapabilit
   const audioInput = value.audioInput;
   const workspaceFolders = value.workspaceFolders;
   const agentRuntimeControl = value.agentRuntimeControl;
+  const sidekickDisplay = value.sidekickDisplay;
+  const sidekickSpeech = value.sidekickSpeech;
   const result: PlatformCapabilities = {};
   if (speechToText === true) {
     result.speechToText = { required: false, reason: '' };
@@ -84,6 +98,22 @@ export const normalizePlatformCapabilities = (value: unknown): PlatformCapabilit
       reason: typeof agentRuntimeControl.reason === 'string' ? agentRuntimeControl.reason.trim() : '',
     };
   }
+  if (sidekickDisplay === true) {
+    result.sidekickDisplay = { required: false, reason: '' };
+  } else if (isRecord(sidekickDisplay)) {
+    result.sidekickDisplay = {
+      required: sidekickDisplay.required === true,
+      reason: typeof sidekickDisplay.reason === 'string' ? sidekickDisplay.reason.trim() : '',
+    };
+  }
+  if (sidekickSpeech === true) {
+    result.sidekickSpeech = { required: false, reason: '' };
+  } else if (isRecord(sidekickSpeech)) {
+    result.sidekickSpeech = {
+      required: sidekickSpeech.required === true,
+      reason: typeof sidekickSpeech.reason === 'string' ? sidekickSpeech.reason.trim() : '',
+    };
+  }
   return result;
 };
 
@@ -101,3 +131,9 @@ export const appAllowsWorkspaceFolders = (value: unknown): boolean =>
 
 export const appAllowsAgentRuntimeControl = (value: unknown): boolean =>
   Boolean(normalizePlatformCapabilities(value).agentRuntimeControl);
+
+export const appAllowsSidekickDisplay = (value: unknown): boolean =>
+  Boolean(normalizePlatformCapabilities(value).sidekickDisplay);
+
+export const appAllowsSidekickSpeech = (value: unknown): boolean =>
+  Boolean(normalizePlatformCapabilities(value).sidekickSpeech);

@@ -16,6 +16,29 @@ export interface SidekickBatteryStatus {
   voltageMv?: number;
 }
 
+export interface SidekickTimeStatus {
+  synced: boolean;
+  epochMs?: number;
+  timeZone?: string;
+  utcOffsetMinutes?: number;
+  driftMs?: number;
+  clockAdjusted?: boolean;
+  lastSyncedAt?: string;
+}
+
+export type SidekickSpeakerPlaybackStatus = 'idle' | 'starting' | 'playing' | 'stopping' | 'cancelling' | 'error';
+
+export interface SidekickSpeakerPlaybackState {
+  status: SidekickSpeakerPlaybackStatus;
+  playbackId?: string;
+  samplesSent?: number;
+  samplesPlayed?: number;
+  bufferedSamples?: number;
+  underruns?: number;
+  errorMessage?: string;
+  technicalCode?: string;
+}
+
 export type SidekickMicrophoneRecordingStatus = 'idle' | 'starting' | 'recording' | 'stopping' | 'error';
 
 export interface SidekickMicrophoneRecordingState {
@@ -40,6 +63,70 @@ export interface SidekickMicrophoneRecordingSummary {
   sizeBytes: number;
 }
 
+// Pantallas idle que rotan en el dispositivo. 'custom' requiere una imagen
+// cargada; 'limits' muestra el uso de Claude/Codex que empuja Desktop.
+export type SidekickIdleScreen = 'eyes' | 'sleep' | 'clock' | 'limits' | 'custom';
+
+export interface SidekickIdleConfig {
+  screens: SidekickIdleScreen[];
+  rotateSeconds: number;
+}
+
+export const SIDEKICK_IDLE_SCREENS: readonly SidekickIdleScreen[] = ['eyes', 'sleep', 'clock', 'limits', 'custom'];
+export const SIDEKICK_DEFAULT_IDLE_CONFIG: SidekickIdleConfig = { screens: ['eyes', 'clock'], rotateSeconds: 15 };
+// La imagen custom viaja como RGB565 little-endian del tamano exacto del LCD.
+export const SIDEKICK_IDLE_IMAGE_WIDTH = 240;
+export const SIDEKICK_IDLE_IMAGE_HEIGHT = 240;
+export const SIDEKICK_IDLE_IMAGE_BYTES = SIDEKICK_IDLE_IMAGE_WIDTH * SIDEKICK_IDLE_IMAGE_HEIGHT * 2;
+
+export const SIDEKICK_DEFAULT_CONVERSATION_TTL_MINUTES = 30;
+export const SIDEKICK_MIN_CONVERSATION_TTL_MINUTES = 1;
+export const SIDEKICK_MAX_CONVERSATION_TTL_MINUTES = 24 * 60;
+
+export type SidekickSttLanguageMode = 'voice' | 'auto' | 'fixed' | 'subset';
+
+export const SIDEKICK_DEFAULT_STT_LANGUAGE_SUBSET = ['es', 'en'] as const;
+
+export interface SidekickVoiceConfig {
+  model?: string;
+  voice?: string;
+  /** BCP-47 locale derived from the selected voice metadata. */
+  locale?: string;
+  /**
+   * How dictation (STT) language is chosen: 'subset' restricts detection to
+   * sttLanguages and defaults to Spanish + English, 'voice' explicitly follows
+   * the TTS voice locale, 'auto' detects freely, and 'fixed' pins one language.
+   */
+  sttLanguageMode?: SidekickSttLanguageMode;
+  /** ISO-639-1 codes; 1 entry for 'fixed', 2+ for 'subset'. */
+  sttLanguages?: string[];
+  conversationTtlMinutes: number;
+}
+
+export interface SidekickVoiceConfigInput {
+  sidekickId: string;
+  config: SidekickVoiceConfig;
+}
+
+export type SidekickVoicePhase =
+  | 'idle'
+  | 'listening'
+  | 'transcribing'
+  | 'thinking'
+  | 'speaking'
+  | 'error';
+
+export interface SidekickIdleConfigInput {
+  sidekickId: string;
+  config: SidekickIdleConfig;
+}
+
+export interface SidekickIdleImageInput {
+  sidekickId: string;
+  rgb565: ArrayBuffer;
+  previewDataUrl?: string;
+}
+
 export interface SidekickSummary {
   sidekickId: string;
   name: string;
@@ -49,12 +136,33 @@ export interface SidekickSummary {
   lastSeenAt?: string;
   firmwareVersion?: string;
   capabilities: string[];
+  personalAgentId?: string;
+  voiceConfig: SidekickVoiceConfig;
   battery?: SidekickBatteryStatus;
+  time?: SidekickTimeStatus;
+  wakeBeep?: SidekickWakeBeepState;
+  voicePhase: SidekickVoicePhase;
+  speakerPlayback: SidekickSpeakerPlaybackState;
   microphoneRecording: SidekickMicrophoneRecordingState;
   microphoneRecordings: SidekickMicrophoneRecordingSummary[];
+  idleConfig: SidekickIdleConfig;
+  idleImagePreviewDataUrl?: string;
   usbPath?: string;
   ipAddress?: string;
   errorMessage?: string;
+}
+
+export interface SidekickWakeBeepState {
+  wakeId: string;
+  status: 'completed' | 'failed';
+  durationMs: number;
+  updatedAt: string;
+  technicalCode?: string;
+}
+
+export interface SidekickPersonalAgentInput {
+  sidekickId: string;
+  personalAgentId?: string;
 }
 
 export interface SidekickState {
@@ -80,8 +188,38 @@ export interface SidekickDisplayInput {
   text?: string;
 }
 
+export type SidekickScreenTemplate = 'idle' | 'state' | 'card' | 'transcript';
+
+export interface SidekickScreenInput {
+  sidekickId: string;
+  template: SidekickScreenTemplate;
+  icon?: 'listening' | 'transcribing' | 'thinking' | 'speaking' | 'sleeping' | 'error' | 'bell' | 'info' | 'audio' | 'wifi' | 'warning' | 'ok' | 'battery' | 'settings' | 'home' | 'download' | 'upload' | 'play' | 'pause';
+  title?: string;
+  body?: string;
+  text?: string;
+}
+
+export interface SidekickSpeakInput {
+  sidekickId: string;
+  text: string;
+  model: string;
+  voice: string;
+  speed?: number;
+}
+
 export interface SidekickMicrophoneRecordingInput {
   sidekickId: string;
+  transient?: boolean;
+}
+
+export interface SidekickWakeEvent {
+  sidekickId: string;
+  wakeId: string;
+  model: string;
+  wakeWord: string;
+  wordIndex: number;
+  detectedAtMs: number;
+  epochMs?: number;
 }
 
 export interface SidekickMicrophonePlaybackInput {
@@ -94,6 +232,21 @@ export interface SidekickMicrophonePlaybackResult {
   mimeType?: 'audio/wav';
   bytes?: Uint8Array;
   sizeBytes?: number;
+  userMessage?: string;
+  technicalCode?: string;
+}
+
+export interface SidekickSpeakerPcmInput {
+  sidekickId: string;
+  samples: Int16Array;
+}
+
+export interface SidekickSpeakerPlaybackResult {
+  success: boolean;
+  playbackId?: string;
+  samplesPlayed?: number;
+  underruns?: number;
+  droppedChunks?: number;
   userMessage?: string;
   technicalCode?: string;
 }

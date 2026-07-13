@@ -19,8 +19,7 @@ import { AutomationManager } from '../automation-manager';
 import { WorkflowManager } from '../workflow-manager';
 import { BackgroundTaskStore } from '../background-task-store';
 import {
-  extractDeepLinkFromArgv,
-  focusWindow as focusDeepLinkWindow,
+  extractDeepLinkFromArgv, focusWindow as focusDeepLinkWindow,
   FORGER_PROTOCOL,
   parseForgerUrl,
   registerForgerProtocol,
@@ -45,6 +44,7 @@ import { PromptOverridesStore, buildPromptBases, promptOverrideErrorResult } fro
 import { OfficialToolsService, normalizeAppToolDeclarations } from '../official-tools-service';
 import { ConnectionsService } from '../connections-service';
 import { SidekickService } from '../sidekick-service';
+import { SidekickVoiceRuntime } from '../sidekick-voice-runtime';
 import { cleanupLegacyExternalToolState } from '../legacy-external-tools-cleanup';
 import { AudioRuntimeBroker } from '../audio-runtime-broker';
 import { SpeechToTextServiceManager } from '../speech-to-text-service';
@@ -76,9 +76,12 @@ import { createMainUtilitiesController } from './main-utilities';
 import { createLocalNetworkShareController } from './local-network-share-service';
 import { createDeveloperPathService } from './developer-path-service';
 import { APP_CLAUDE_MODEL_OPTIONS, APP_CODEX_MODEL_OPTIONS, BUILT_IN_CLAUDE_EFFORT, BUILT_IN_CLAUDE_MODEL, BUILT_IN_CODEX_MODEL, BUILT_IN_CODEX_REASONING, BUNDLED_GIT_VERSION, CLAUDE_CODE_VERSION, CODEX_CLI_VERSION, CODEX_USAGE_DASHBOARD_URL, DEFAULT_NODE_VERSION, DEFAULT_PYTHON_VERSION } from './agent-runtime-defaults';
+import { getAgentProviderUsageSafely } from '../provider-usage';
+import { readClaudeOAuthToken } from '../claude-oauth';
 import { RemoteNetworkShareManager } from '../remote-network-share-manager';
 import { RemoteActivityStore } from '../remote-activity-store';
 import { LlmRunsStore } from '../llm-runs-store';
+import { hydratePersistedPersonalAgentRuns } from '../llm-runs-hydration';
 import { createRuntimeInstallController } from '../runtime/runtime-install';
 import { spawnProcess } from '../runtime/process-spawn';
 import { loadOptionalBetterSqlite } from '../runtime/optional-better-sqlite';
@@ -163,7 +166,6 @@ const appFolderGrantSecret = randomBytes(32).toString('base64url');
 const useCustomWindowFrame = process.platform === 'win32';
 const getWindowState = createWindowStateReader(useCustomWindowFrame);
 const registerWindowStateEvents = createWindowStateEventRegistrar(getWindowState);
-
 const RUNTIME_PLATFORM_ALIASES = new Set(['darwin_arm64', 'darwin_x64', 'linux_x64', 'win32_x64']);
 
 let mainWindow: BrowserWindow | null = null;
@@ -195,9 +197,14 @@ app.whenReady().then(() => {
   });
 }).catch(() => undefined);
 app.on('before-quit', () => {
-  void sidekickService?.dispose().catch((error: unknown) => {
-    void appendInstallLog('sidekick:dispose_failed', serializeErrorForInstallLog(error));
-  });
+  void (async () => {
+    await sidekickVoiceRuntime?.dispose().catch((error: unknown) => {
+      void appendInstallLog('sidekick:voice_dispose_failed', serializeErrorForInstallLog(error));
+    });
+    await sidekickService?.dispose().catch((error: unknown) => {
+      void appendInstallLog('sidekick:dispose_failed', serializeErrorForInstallLog(error));
+    });
+  })();
 });
 const friendChatWindows = new Map<number, BrowserWindow>();
 const stoppingApps = new Set<string>();
@@ -213,6 +220,7 @@ let secretsStore: SecretsStore | null = null;
 let officialToolsService: OfficialToolsService | null = null;
 let connectionsService: ConnectionsService | null = null;
 let sidekickService: SidekickService | null = null;
+let sidekickVoiceRuntime: SidekickVoiceRuntime | null = null;
 let audioRuntimeBroker: AudioRuntimeBroker | null = null;
 let speechToTextService: SpeechToTextServiceManager | null = null;
 let textToSpeechService: TextToSpeechServiceManager | null = null;
@@ -452,7 +460,23 @@ const getSidekickService = (): SidekickService => {
     metadataRoot: getForgerMetadataRoot(),
     appendLog: appendInstallLog,
     getCloudIdentity: async () => await getCloudIdentityStore().getPublicRegistration(),
+    synthesizeSpeech: async (input) => await getTextToSpeechService().synthesize(input),
+    onWakeDetected: (event) => getSidekickVoiceRuntime().onWakeDetected(event),
+    onMicrophonePcm: (event) => getSidekickVoiceRuntime().onMicrophonePcm(event),
+    onSessionInvalidated: (event) => getSidekickVoiceRuntime().onSidekickSessionInvalidated(event),
+    getVoicePhase: (sidekickId) => getSidekickVoiceRuntime().getVisiblePhase(sidekickId),
+    getProviderUsage: async () => (await getAgentProviderUsageSafely({
+      fs,
+      path,
+      codexUsageDashboardUrl: CODEX_USAGE_DASHBOARD_URL,
+      getCodexAuthStatus,
+      getClaudeAuthStatus,
+      getAntigravityAuthStatus,
+      failureDiagnostic,
+      readClaudeOAuthToken,
+    })).providers,
     emitState: (state) => {
+      getSidekickVoiceRuntime().onSidekickState(state);
       if (!mainWindow || mainWindow.isDestroyed()) {
         return;
       }
@@ -583,6 +607,8 @@ const getPersonalAgentConversationManager = (): AgentConversationManager => {
           personalAgentConversationId: context.conversationId,
           personalAgentPeerThreadId: context.peerThreadId,
           personalAgentCallStackIds: context.callStackAgentIds,
+          personalAgentCanSpawnAgents: agent.canSpawnAgents,
+          sidekick: context.sidekick ? { sidekickId: context.sidekick.sidekickId } : undefined,
           appIds: agent.appIds,
           officialToolActionIds: agent.toolIds,
           forgerToolActionIds: agent.toolIds,
@@ -604,6 +630,18 @@ const getPersonalAgentConversationManager = (): AgentConversationManager => {
     });
   }
   return personalAgentConversationManager;
+};
+
+const getSidekickVoiceRuntime = (): SidekickVoiceRuntime => {
+  sidekickVoiceRuntime ??= new SidekickVoiceRuntime({
+    getSidekickService,
+    getSpeechToTextService,
+    getTextToSpeechService,
+    getPersonalAgentStore,
+    getPersonalAgentConversationManager,
+    appendLog: appendInstallLog,
+  });
+  return sidekickVoiceRuntime;
 };
 const getPersonalAgentRoutineManager = (): AgentRoutineManager => {
   if (!personalAgentRoutineManager) {
@@ -1142,7 +1180,23 @@ const recordRemoteCloudActivity = (event: { kind: 'app' | 'agent'; targetId: str
   });
 };
 const getRemoteActivitySnapshot = () => remoteActivityStore.snapshot();
-const getLlmRunsSnapshot = () => llmRunsStore.snapshot();
+let llmRunsHydration: Promise<void> | null = null;
+const ensureLlmRunsHydrated = async (): Promise<void> => {
+  llmRunsHydration ??= hydratePersistedPersonalAgentRuns({
+    agentStore: getPersonalAgentStore(),
+    llmRunsStore,
+  }).catch((error: unknown) => {
+    llmRunsHydration = null;
+    void appendInstallLog('llm_runs:hydrate_failed', {
+      technicalCode: error instanceof Error ? error.message : String(error),
+    });
+  });
+  await llmRunsHydration;
+};
+const getLlmRunsSnapshot = async () => {
+  await ensureLlmRunsHydrated();
+  return llmRunsStore.snapshot();
+};
 
 const localNetworkShareController = createLocalNetworkShareController({
   runningApps,
@@ -1520,7 +1574,7 @@ registerMainLifecycle({
   getClaudeAuthStatus, getAntigravityAuthStatus, getCloudDeviceAccountStorageKey, getCloudDevicePath, getCloudIdentityPath, getCloudIdentityStore,
   getCodexAuthStatus, getCodexHome, getCodexRoot, getCodexToolEnvironment, getDesktopChatNetworkAccessDefault: () => settings.defaultChatNetworkAccess !== false, getManifestAppSecretsValidationError, getSecretsStore, getForgerAccountPath, getForgerHomeRoot, getForgerMetadataRoot,
   getProviderProfilesRoot, resolveLlmProviderAuthProfile, getSocialAppReviewPromptContext,
-  getFreePort, getLegacyForgerMetadataRoot, getMemoryStore, getPersonalAgentStore, getPersonalAgentConversationManager, getPersonalAgentRoutineManager, getOfficialToolsService, getConnectionsService, getSelfOAuthCallbackService, getSpeechToTextService, getTextToSpeechService, getLiveVoiceInputService, getWakeWordService,
+  getFreePort, getLegacyForgerMetadataRoot, getMemoryStore, getPersonalAgentStore, getPersonalAgentConversationManager, getPersonalAgentRoutineManager, getOfficialToolsService, getConnectionsService, getSelfOAuthCallbackService, getSidekickService, getSpeechToTextService, getTextToSpeechService, getLiveVoiceInputService, getWakeWordService,
   getAudioDevices: async () => await getAudioRuntimeBroker().listDevices(),
   playTextToSpeechAudio: async (input: { playbackId: string; audioDataBase64: string; mimeType: string; outputDeviceId?: string }) => await getAudioRuntimeBroker().playAudio(input),
   cancelTextToSpeechPlayback: async (playbackId: string) => await getAudioRuntimeBroker().cancelPlayback(playbackId),
@@ -1534,9 +1588,13 @@ registerMainLifecycle({
   getPersonalAgentHeartbeat, handleCloudSocialEvent, hasInstalledCodexConversation, ipcMain, listAppPrompts, listCatalogFromBackend, loadAgentToolSettings,
   loadCloudSyncSettings, loadRegistry, loadSettings, llmRunsStore, mapBackendCategory, formatProcessOutputForInstallLog, isSecretsVaultUnavailableError, normalizeManifestAppSecrets, openInstalledApp, startLocalNetworkShare, stopLocalNetworkShare,
   startRemoteNetworkShare, stopRemoteNetworkShare, stopRemoteNetworkShareSession, startRemoteAgentSession, stopRemoteAgentSession, stopRemoteAgentSessionSession, openOrFocusAppWindow, registerForgerCloudOAuth,
+  resolveSidekickVoiceOutcome: (input) => getSidekickVoiceRuntime().resolveAgentToolOutcome(input),
   registerIpcHandlers, renderManifestAgentPrompt, resolveClaudeCli, resolveAntigravityCliPath, resolveCodexCliPath, resolveInstalledAgents, resolveInstalledManifest,
   resolveAppFolderGrant: verifyAppFolderGrant, resolveInstalledPromptTemplates, restoreAppPrompt, restartInstalledApp, runningApps, serializeErrorForInstallLog, shell,
-  splitManifestCommand, startDevCatalogService, startSidekickIfPaired: async () => await getSidekickService().startIfPaired(), state: mainLifecycleState, stopInstalledApp, switchForgerAccountSession, terminateProcess,
+  splitManifestCommand, startDevCatalogService, startSidekickIfPaired: async () => {
+    getSidekickVoiceRuntime().start();
+    await getSidekickService().startIfPaired();
+  }, state: mainLifecycleState, stopInstalledApp, switchForgerAccountSession, terminateProcess,
   testAppPrompt, toAppSummary, toCatalogStatus, translateManifestEnvironment, truncateForInstallLog, updateAppPrompt, updateAppRuntime,
   upsertInstalledRecord, waitForHttpOk,
 });

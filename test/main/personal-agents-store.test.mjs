@@ -53,6 +53,7 @@ test('personal agent store creates SQLite-backed agents with safe defaults and p
   assert.ok(agentSkillDirs.includes('forger-installed-app-change'));
   assert.ok(agentSkillDirs.includes('forger-manifest-authoring'));
   assert.ok(agentSkillDirs.includes('forger-memory'));
+  assert.ok(agentSkillDirs.includes('forger-personal-agent-tools'));
   assert.ok(agentSkillDirs.includes('forger-speech-to-text'));
   assert.ok(agentSkillDirs.includes('ui-ux-pro-max'));
   assert.deepEqual(claudeSkillDirs, agentSkillDirs);
@@ -83,9 +84,11 @@ test('personal agent store creates SQLite-backed agents with safe defaults and p
   assert.match(howMd, /Remove example scaffolding once real procedures or solved-error notes exist/);
   assert.match(humanMd, /not a private dossier/);
   assert.match(humanMd, /remove placeholder text and keep only concise notes/);
-  assert.match(othersMd, /Editing this file alone never grants a permission/);
-  assert.match(othersMd, /current Forger-controlled tool, app, Connection, and approval allowlist/);
-  assert.match(othersMd, /Inter-Agent Communication Criteria/);
+  assert.match(othersMd, /Editing the manual part of this file never grants/);
+  assert.match(othersMd, /Forger-managed configuration block/);
+  assert.match(othersMd, /Durable Collaboration Criteria/);
+  assert.match(othersMd, /Create other agents: disabled/);
+  assert.match(othersMd, /Contact other agents: disabled/);
   await writeFile(path.join(workspaceRoot, 'notes.txt'), 'Visible note.', 'utf8');
   const workspaceTree = await store.listWorkspace(agent.id);
   assert.deepEqual(
@@ -118,6 +121,73 @@ test('personal agent store creates SQLite-backed agents with safe defaults and p
   assert.deepEqual(await reloaded.deleteAgent(agent.id), { success: true });
   assert.deepEqual(await reloaded.listAgents(), []);
   await assert.rejects(access(path.join(forgerHomeRoot, 'agents', agent.id)), /ENOENT/);
+});
+
+test('personal agent store migrates a v1 OTHERS workspace without losing durable user criteria', async () => {
+  const metadataRoot = await mkdtemp(path.join(tmpdir(), 'forger-personal-agents-others-v1-meta-'));
+  const forgerHomeRoot = await mkdtemp(path.join(tmpdir(), 'forger-personal-agents-others-v1-home-'));
+  const store = new AgentStore({ metadataRoot, forgerHomeRoot });
+  const agent = await store.createAgent({ name: 'Migration keeper', canSpawnAgents: true });
+  const workspaceRoot = path.join(forgerHomeRoot, 'agents', agent.id, 'workspace');
+  const othersPath = path.join(workspaceRoot, 'OTHERS.md');
+
+  await writeFile(othersPath, `<!-- FORGER_PERSONAL_AGENT_PROMPT_VERSION: 1 -->
+# OTHERS
+
+This file defines how \`Migration keeper\` decides when to communicate with other agents, installed apps, Forger Tools, Connections, external accounts, or people outside the current conversation.
+
+## Current Permission Context
+
+- Permission mode: \`safe\`
+- Network access: \`disabled\`
+
+## Source Of Truth
+
+Use this order when deciding whether you may contact or coordinate with another agent, app, tool, service, account, or person:
+
+1. Current explicit human instruction and visible approval.
+2. Current Forger allowlist, app grants, tool grants, Connection grants, and runtime approval state.
+
+## Inter-Agent Communication Criteria
+
+Communicate with another agent only when the human explicitly asks or the agent owns required information.
+
+## Approval Boundaries
+
+Ask for explicit confirmation before sending or publishing outside the private workspace.
+
+## What To Record Here
+
+Record only reusable collaboration rules that help future runs, such as:
+
+- Which agents or apps should be consulted for specific recurring topics.
+- When a handoff is appropriate or inappropriate.
+
+- Ask the Finance reviewer before approving purchases above USD 500.
+- Never share customer transcripts with peer agents.
+
+Do not store secrets, raw sensitive content, private message bodies, account identifiers that are not necessary, or one-off transcript details. Replace stale collaboration rules when the human corrects them.
+
+<!-- FORGER_MANAGED_PEER_AGENTS_BEGIN -->
+## Forger-Managed Agent Peers
+
+- No peer agents are currently allowed.
+<!-- FORGER_MANAGED_PEER_AGENTS_END -->
+`, 'utf8');
+
+  await store.workspaceRootForAgent(agent.id);
+
+  const migrated = await readFile(othersPath, 'utf8');
+  assert.match(migrated, /This file keeps the current collaboration configuration/);
+  assert.match(migrated, /## Durable Collaboration Criteria/);
+  assert.match(migrated, /Ask the Finance reviewer before approving purchases above USD 500/);
+  assert.match(migrated, /Never share customer transcripts with peer agents/);
+  assert.match(migrated, /Create other agents: enabled/);
+  assert.match(migrated, /Contact other agents: disabled/);
+  assert.doesNotMatch(migrated, /## Source Of Truth/);
+  assert.doesNotMatch(migrated, /## Inter-Agent Communication Criteria/);
+  assert.doesNotMatch(migrated, /## Approval Boundaries/);
+  assert.equal((migrated.match(/FORGER_MANAGED_PEER_AGENTS_BEGIN/g) ?? []).length, 1);
 });
 
 test('personal agent grants persist as explicit app and tool permissions', async () => {
@@ -530,6 +600,10 @@ test('legacy personal agent databases migrate runtime and provider columns witho
   const agent = await store.requireAgent('agent-legacy');
   assert.equal(agent.name, 'Legacy agent');
   assert.equal(agent.runtime, undefined);
+  const migratedDb = openPersonalAgentSqliteDatabase(sqlitePath);
+  const messageColumns = migratedDb.prepare('PRAGMA table_info(personal_agent_messages)').all();
+  assert.ok(messageColumns.some((column) => column.name === 'reasoning'));
+  migratedDb.close?.();
   const updated = await store.updateAgentPermissions({
     agentId: agent.id,
     runtime: { provider: 'antigravity', model: 'gemini-3-pro', effort: 'medium' },
@@ -742,16 +816,145 @@ test('personal agent Codex runs prepare Git and write logs under metadata root',
   assert.ok(resumeInvocation.allowedRoots.split(path.delimiter).includes(connectedAppRoot));
 });
 
+test('Sidekick conversations persist their device relation, stay read-only, and carry locale only through the internal voice path', async () => {
+  const metadataRoot = await mkdtemp(path.join(tmpdir(), 'forger-personal-agent-sidekick-meta-'));
+  const forgerHomeRoot = await mkdtemp(path.join(tmpdir(), 'forger-personal-agent-sidekick-home-'));
+  const store = new AgentStore({ metadataRoot, forgerHomeRoot });
+  let capturedPrompt = '';
+  const manager = new AgentConversationManager({
+    store,
+    runner: async ({ prompt }) => {
+      capturedPrompt = prompt;
+      return { assistantText: 'Listo, te respondo en español.' };
+    },
+  });
+  const agent = await store.createAgent({ name: 'Home helper' });
+  const conversation = await manager.createSidekickConversation({
+    agentId: agent.id,
+    sidekickId: 'sidekick-desk',
+    title: 'Sidekick · Escritorio',
+  });
+
+  assert.equal(conversation.origin, 'sidekick');
+  assert.equal(conversation.sidekickId, 'sidekick-desk');
+  assert.equal(conversation.readOnly, true);
+  await assert.rejects(
+    manager.sendMessage({ conversationId: conversation.id, content: 'This renderer path must stay blocked.' }),
+    /personal_agent_conversation_read_only/,
+  );
+
+  await store.addMessage({
+    agentId: agent.id,
+    conversationId: conversation.id,
+    role: 'assistant',
+    kind: 'spoken',
+    source: 'sidekick',
+    content: 'Este recibo hablado no debe volver al contexto del agente.',
+  });
+
+  await manager.sendSidekickMessage({
+    conversationId: conversation.id,
+    sidekickId: 'sidekick-desk',
+    content: '¿Qué hora es?',
+    locale: 'es-CL',
+  });
+  const completed = await waitForConversation(manager, conversation.id, (item) => item.activeRun?.status === 'completed');
+  assert.deepEqual(completed.messages.map((message) => [message.role, message.source, message.locale, message.kind]), [
+    ['assistant', 'sidekick', undefined, 'spoken'],
+    ['user', 'sidekick', 'es-CL', 'message'],
+    ['assistant', 'sidekick', undefined, 'message'],
+  ]);
+  assert.match(capturedPrompt, /es-CL/);
+  assert.match(capturedPrompt, /brief.*natural.*spoken/i);
+  assert.match(capturedPrompt, /respond_and_end|respond_and_wait/i);
+  assert.match(capturedPrompt, /respond_and_\* only declares text and mode/i);
+  assert.match(capturedPrompt, /Mandatory Sidekick final action/i);
+  assert.match(capturedPrompt, /respond_and_wait when the spoken text asks a question/i);
+  assert.match(capturedPrompt, /plain assistant text.*final question mark waits/i);
+  assert.doesNotMatch(capturedPrompt, /do not call.*sidekick audio/i);
+  assert.doesNotMatch(capturedPrompt, /recibo hablado no debe volver/i);
+  assert.doesNotMatch(capturedPrompt, /only text/i);
+  assert.match(capturedPrompt, /Desktop.*synthesi[sz]es.*cancel/i);
+  assert.doesNotMatch(completed.messages[1].content, /brief|locale|spoken/i);
+
+  const reloaded = new AgentStore({ metadataRoot, forgerHomeRoot });
+  const latest = await reloaded.findLatestSidekickConversation({ sidekickId: 'sidekick-desk', agentId: agent.id });
+  assert.equal(latest.id, conversation.id);
+  assert.equal(latest.sidekickId, 'sidekick-desk');
+});
+
+test('personal agent messages persist reasoning and the spoken kind across reloads', async () => {
+  const metadataRoot = await mkdtemp(path.join(tmpdir(), 'forger-personal-agent-spoken-meta-'));
+  const forgerHomeRoot = await mkdtemp(path.join(tmpdir(), 'forger-personal-agent-spoken-home-'));
+  const store = new AgentStore({ metadataRoot, forgerHomeRoot });
+  const agent = await store.createAgent({ name: 'Speaker' });
+  const conversation = await store.createConversation({ agentId: agent.id, title: 'Voz', origin: 'sidekick', sidekickId: 'sidekick-desk' });
+
+  const withReasoning = await store.addMessage({
+    agentId: agent.id,
+    conversationId: conversation.id,
+    role: 'assistant',
+    source: 'sidekick',
+    content: 'La respuesta final.',
+    reasoning: 'Primero revisé la agenda.\n\nDespués confirmé la hora.',
+  });
+  assert.equal(withReasoning.kind, 'message');
+  assert.equal(withReasoning.reasoning, 'Primero revisé la agenda.\n\nDespués confirmé la hora.');
+
+  const spoken = await store.addMessage({
+    agentId: agent.id,
+    conversationId: conversation.id,
+    role: 'assistant',
+    kind: 'spoken',
+    source: 'sidekick',
+    content: 'Hola, tu reunión es a las tres.',
+  });
+  assert.equal(spoken.kind, 'spoken');
+
+  const reloadedStore = new AgentStore({ metadataRoot, forgerHomeRoot });
+  const persisted = await reloadedStore.requireConversation(conversation.id);
+  assert.deepEqual(
+    persisted.messages.map((message) => [message.kind, message.reasoning ?? null]),
+    [
+      ['message', 'Primero revisé la agenda.\n\nDespués confirmé la hora.'],
+      ['spoken', null],
+    ],
+  );
+
+  // Messages created within the same clock tick keep insertion order. This
+  // makes the written response and the subsequent spoken receipt deterministic.
+  const sameTimestamp = '2026-07-12T12:00:00.000Z';
+  const orderingDb = openPersonalAgentSqliteDatabase(path.join(metadataRoot, 'personal-agents.sqlite'));
+  orderingDb.prepare('UPDATE personal_agent_messages SET created_at = ? WHERE conversation_id = ?').run(sameTimestamp, conversation.id);
+  orderingDb.close();
+  const ordered = await new AgentStore({ metadataRoot, forgerHomeRoot }).requireConversation(conversation.id);
+  assert.deepEqual(ordered.messages.map((message) => message.id), [withReasoning.id, spoken.id]);
+
+  // Unknown kinds stored by future/older versions must coerce to 'message'.
+  const db = openPersonalAgentSqliteDatabase(path.join(metadataRoot, 'personal-agents.sqlite'));
+  assert.ok(db);
+  db.prepare("UPDATE personal_agent_messages SET kind = 'mystery' WHERE id = ?").run(spoken.id);
+  db.close();
+  const coerced = await new AgentStore({ metadataRoot, forgerHomeRoot }).requireConversation(conversation.id);
+  assert.equal(coerced.messages[1].kind, 'message');
+});
+
 test('personal agent conversation manager starts a real run, persists progress, and blocks overlapping sends', async () => {
   const metadataRoot = await mkdtemp(path.join(tmpdir(), 'forger-personal-agent-conversations-meta-'));
   const forgerHomeRoot = await mkdtemp(path.join(tmpdir(), 'forger-personal-agent-conversations-home-'));
   const store = new AgentStore({ metadataRoot, forgerHomeRoot });
   const events = [];
+  let runnerCallCount = 0;
   const manager = new AgentConversationManager({
     store,
     runner: async ({ prompt, workspaceRoot, onProgress }) => {
-      assert.match(prompt, /Bootstrap Ritual/);
-      assert.match(prompt, /Memory Register/);
+      if (runnerCallCount === 0) {
+        assert.match(prompt, /Bootstrap Ritual/);
+        assert.match(prompt, /Memory Register/);
+      } else {
+        assert.doesNotMatch(prompt, /Bootstrap Ritual|Memory Register/);
+      }
+      runnerCallCount += 1;
       assert.match(workspaceRoot, /workspace$/);
       onProgress('Reading workspace');
       return { assistantText: 'Ready to plan.' };
@@ -873,6 +1076,29 @@ test('personal agent conversation manager does not persist progress that duplica
   assert.equal(completed.activeRun.progress.length, 2);
   assert.equal(completed.activeRun.progress[0].message, '¿De qué ciudad o comuna quieres el clima? Si quieres, te lo doy con temperatura actual y pronóstico de hoy.');
   assert.equal(completed.activeRun.progress[1].message, 'La herramienta de clima no resolvió Providencia bien; voy a usar una fuente directa.');
+  assert.equal(completed.messages.at(-1).reasoning, [
+    '¿De qué ciudad o comuna quieres el clima? Si quieres, te lo doy con temperatura actual y pronóstico de hoy.',
+    'La herramienta de clima no resolvió Providencia bien; voy a usar una fuente directa.',
+  ].join('\n\n'));
+});
+
+test('personal agent visible activity stored with the final message redacts secrets', async () => {
+  const metadataRoot = await mkdtemp(path.join(tmpdir(), 'forger-personal-agent-activity-redaction-meta-'));
+  const forgerHomeRoot = await mkdtemp(path.join(tmpdir(), 'forger-personal-agent-activity-redaction-home-'));
+  const store = new AgentStore({ metadataRoot, forgerHomeRoot });
+  const manager = new AgentConversationManager({
+    store,
+    runner: async ({ onProgress }) => {
+      onProgress('Consultando servicio con token=ghp_12345678901234567890');
+      return { assistantText: 'Listo.' };
+    },
+  });
+  const agent = await store.createAgent({ name: 'Safe activity agent' });
+  const conversation = await manager.startConversation({ agentId: agent.id, initialMessage: 'Hazlo.' });
+  const completed = await waitForConversation(manager, conversation.id, (item) => item.activeRun?.status === 'completed');
+  const final = completed.messages.find((message) => message.role === 'assistant' && message.kind === 'message');
+  assert.match(final.reasoning, /hidden sensitive value/i);
+  assert.doesNotMatch(final.reasoning, /ghp_12345678901234567890/);
 });
 
 test('personal agent conversation manager persists full long progress messages', async () => {
@@ -902,6 +1128,32 @@ test('personal agent conversation manager persists full long progress messages',
   assert.equal(longProgress.length > 1000, true);
   assert.equal(completed.activeRun.progress[0].message, longProgress);
   assert.equal(completed.messages.find((message) => message.kind === 'intermediate')?.content, longProgress);
+});
+
+test('personal agent cancellation marks the active run canceled and suppresses a late final message', async () => {
+  const metadataRoot = await mkdtemp(path.join(tmpdir(), 'forger-personal-agent-cancel-meta-'));
+  const forgerHomeRoot = await mkdtemp(path.join(tmpdir(), 'forger-personal-agent-cancel-home-'));
+  const store = new AgentStore({ metadataRoot, forgerHomeRoot });
+  let releaseRunner;
+  const gate = new Promise((resolve) => { releaseRunner = resolve; });
+  const manager = new AgentConversationManager({
+    store,
+    runner: async () => {
+      await gate;
+      return { assistantText: 'Esta respuesta llegó después de cancelar.' };
+    },
+  });
+  const agent = await store.createAgent({ name: 'Cancelable agent' });
+  const conversation = await manager.startConversation({ agentId: agent.id, initialMessage: 'Espera.' });
+  const running = await waitForConversation(manager, conversation.id, (item) => item.activeRun?.status === 'running');
+
+  assert.equal(await manager.cancelRun(running.activeRun.id), true);
+  assert.equal(await manager.cancelRun(running.activeRun.id), false);
+  releaseRunner();
+  await new Promise((resolve) => setImmediate(resolve));
+  const canceled = await store.requireConversation(conversation.id);
+  assert.equal(canceled.activeRun.status, 'canceled');
+  assert.equal(canceled.messages.some((message) => message.content.includes('después de cancelar')), false);
 });
 
 test('personal agent routines create a conversable thread, reuse it on each trigger, and skip while busy', async () => {

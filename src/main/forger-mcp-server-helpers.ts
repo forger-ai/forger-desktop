@@ -83,6 +83,8 @@ export const isInternalMcpTool = (toolId: AgentToolId): boolean =>
   toolId === 'forger_ask_question'
   || toolId === 'wakeup_in'
   || toolId === 'cancel_wakeup'
+  || toolId === 'respond_and_end'
+  || toolId === 'respond_and_wait'
   || toolId === 'create_agent_routine'
   || toolId === 'list_agent_routines'
   || toolId === 'update_agent_routine'

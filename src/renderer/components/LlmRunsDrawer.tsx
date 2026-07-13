@@ -55,13 +55,13 @@ export function LlmRunsDrawer({ t }: LlmRunsDrawerProps) {
 
   const refresh = async () => {
     const nextSnapshot = await window.forger.getLlmRunsSnapshot().catch(() => emptySnapshot());
-    setSnapshot(nextSnapshot);
+    setSnapshot((current) => nextSnapshot.updatedAt >= current.updatedAt ? nextSnapshot : current);
   };
 
   useEffect(() => {
     void refresh();
     const unsubscribe = window.forger.onLlmRunsSnapshotChanged((nextSnapshot) => {
-      setSnapshot(nextSnapshot);
+      setSnapshot((current) => nextSnapshot.updatedAt >= current.updatedAt ? nextSnapshot : current);
     });
     return unsubscribe;
   }, []);

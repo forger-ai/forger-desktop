@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 
 const { ForgerMcpServer } = await import('../dist-electron/main/forger-mcp-server.js');
 
-const gmailReadTool = {
+const gmailReadConnectionAction = {
   id: 'gmail.read_thread',
-  packageId: 'official:gmail',
+  packageId: 'connection:gmail',
   name: 'Leer correo',
   description: 'Lee una conversacion o mensaje de Gmail e identifica adjuntos.',
   category: 'consulta',
@@ -16,12 +16,12 @@ const createServer = (overrides = {}) => {
   const calls = {
     logs: [],
     permissionRequests: [],
-    officialCalls: [],
-    validations: [],
+    connectionCalls: [],
   };
   const server = new ForgerMcpServer({
     getAppVersion: () => 'test',
-    getToolDefinitions: () => [gmailReadTool],
+    getToolDefinitions: () => [],
+    getConnectionToolDefinitions: async () => [gmailReadConnectionAction],
     getToolSettings: () => ({ approvals: { 'gmail.read_thread': true } }),
     appendInstallLog: async (event, payload) => {
       calls.logs.push({ event, payload });
@@ -50,13 +50,14 @@ const createServer = (overrides = {}) => {
       throw new Error('not_used');
     },
     memoryDelete: async () => ({ success: true }),
-    listOfficialToolActionIdsForApp: async () => new Set(['gmail.read_thread']),
-    validateOfficialTool: async (input, access) => {
-      calls.validations.push({ input, access });
-      return null;
-    },
-    callOfficialTool: async (input, access) => {
-      calls.officialCalls.push({ input, access });
+    listConnectionGrantsForApp: async () => [{
+      type: 'gmail',
+      actions: ['gmail.read_thread'],
+      multiple: false,
+      connectionIds: ['gmail-1'],
+    }],
+    callConnectionFromSession: async (input, grants, access) => {
+      calls.connectionCalls.push({ input, grants, access });
       return { success: true, data: { threadId: input.input?.threadId ?? null } };
     },
     ...overrides,
@@ -94,15 +95,20 @@ const callTool = async (session, actionId = 'gmail.read_thread') => {
     const session = server.createSession('automation-run-1', 'forger', {
       caller: 'automation',
       appIds: ['finance-os'],
+      connectionGrants: [{
+        type: 'gmail',
+        actions: ['gmail.read_thread'],
+        multiple: false,
+        connectionIds: ['gmail-1'],
+      }],
     });
     assert.ok(session);
 
     const result = await callTool(session);
     assert.equal(result.success, true);
     assert.equal(calls.permissionRequests.length, 0);
-    assert.equal(calls.officialCalls.length, 1);
-    assert.equal(calls.validations.length, 1);
-    assert.equal(calls.officialCalls[0].access.caller, 'automation');
+    assert.equal(calls.connectionCalls.length, 1);
+    assert.equal(calls.connectionCalls[0].access.caller, 'automation');
     assert.ok(calls.logs.some((entry) =>
       entry.event === 'agent_tool:approval_skipped' &&
       entry.payload?.reason === 'automation_non_interactive'
@@ -125,24 +131,15 @@ const callTool = async (session, actionId = 'gmail.read_thread') => {
     const result = await callTool(session);
     assert.equal(result.success, true);
     assert.equal(calls.permissionRequests.length, 1);
-    assert.equal(calls.officialCalls.length, 1);
-    assert.equal(calls.officialCalls[0].access.caller, 'app-agent');
+    assert.equal(calls.connectionCalls.length, 1);
+    assert.equal(calls.connectionCalls[0].access.caller, 'app-agent');
   } finally {
     server.stop();
   }
 }
 
 {
-  const { server, calls } = createServer({
-    validateOfficialTool: async (input, access) => {
-      calls.validations.push({ input, access });
-      return {
-        success: false,
-        userMessage: 'Gmail is not connected.',
-        technicalCode: 'tool_unavailable',
-      };
-    },
-  });
+  const { server, calls } = createServer();
   await server.start();
   try {
     const session = server.createSession('automation-run-2', 'forger', {
@@ -153,10 +150,9 @@ const callTool = async (session, actionId = 'gmail.read_thread') => {
 
     const result = await callTool(session);
     assert.equal(result.success, false);
-    assert.equal(result.technicalCode, 'tool_unavailable');
+    assert.equal(result.technicalCode, 'connection_action_not_granted');
     assert.equal(calls.permissionRequests.length, 0);
-    assert.equal(calls.officialCalls.length, 0);
-    assert.equal(calls.validations.length, 1);
+    assert.equal(calls.connectionCalls.length, 0);
   } finally {
     server.stop();
   }

@@ -53,6 +53,7 @@ interface SpeechAccess {
   appInstallDir?: string;
   appAllowsSpeechToText?: boolean;
   extraAllowedRoots?: string[];
+  ephemeral?: boolean;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -133,6 +134,7 @@ export class SpeechToTextServiceManager {
   private lastError: string | undefined;
   private port: number | null = null;
   private readonly explicitlyAllowedPaths = new Set<string>();
+  private ephemeralUploadCleanupPromise: Promise<void> | null = null;
   private readonly modelWorkers = new Map<string, SpeechWorkerRef>();
   private startPromise: Promise<SpeechToTextState> | null = null;
   private starting = false;
@@ -142,6 +144,11 @@ export class SpeechToTextServiceManager {
 
   async load(): Promise<void> {
     this.config = await this.readConfig();
+    await this.prepareEphemeralUploadRoot().catch(async (error: unknown) => {
+      await this.appendServiceLog('ephemeral_upload_cleanup_failed', {
+        technicalCode: error instanceof Error ? error.message : 'speech_ephemeral_upload_cleanup_failed',
+      });
+    });
   }
 
   async install(): Promise<SpeechToTextState> {
@@ -388,7 +395,13 @@ export class SpeechToTextServiceManager {
       }
       payload = await this.fetchJson(endpoint, {
         method: 'POST',
-        body: JSON.stringify({ path: audioPath, task, language: input.language }),
+        body: JSON.stringify({
+          path: audioPath,
+          task,
+          language: input.language,
+          ...(Array.isArray(input.languages) && input.languages.length > 0 ? { languages: input.languages } : {}),
+          ...(access.ephemeral === true ? { ephemeral: true } : {}),
+        }),
       }, worker ? { port: worker.port, token: worker.token } : undefined);
     } catch (error) {
       const result = this.normalizeServiceError(error, task);
@@ -434,14 +447,21 @@ export class SpeechToTextServiceManager {
   }
 
   async processUpload(input: SpeechToTextUploadInput): Promise<SpeechToTextProcessResult> {
-    const filename = input.filename.replace(/[^a-zA-Z0-9._-]/g, '_') || 'recording.webm';
-    const uploadRoot = this.deps.path.join(this.root(), 'temp-uploads');
+    const filename = input.filename.replace(/[^a-zA-Z0-9._-]/g, '_').replace(/^\.+/, '') || 'recording.webm';
+    if (input.ephemeral === true) await this.prepareEphemeralUploadRoot();
+    const uploadRoot = input.ephemeral === true ? this.ephemeralUploadRoot() : this.tempUploadRoot();
     await this.deps.fs.mkdir(uploadRoot, { recursive: true });
-    const uploadPath = this.deps.path.join(uploadRoot, `${Date.now()}-${filename}`);
+    const uploadPath = this.deps.path.join(
+      uploadRoot,
+      input.ephemeral === true
+        ? `${Date.now()}-${randomBytes(8).toString('hex')}-${filename}`
+        : `${Date.now()}-${filename}`,
+    );
     await this.deps.fs.writeFile(uploadPath, Buffer.from(input.data));
     try {
-      return await this.process({ path: uploadPath, task: input.task, language: input.language, model: input.model }, {
+      return await this.process({ path: uploadPath, task: input.task, language: input.language, languages: input.languages, model: input.model }, {
         extraAllowedRoots: [uploadRoot],
+        ephemeral: input.ephemeral === true,
       });
     } finally {
       await this.deps.fs.rm(uploadPath, { force: true }).catch(() => undefined);
@@ -456,14 +476,31 @@ export class SpeechToTextServiceManager {
       ...(access.extraAllowedRoots ?? []),
       ...(access.appAllowsSpeechToText && access.appInstallDir ? [access.appInstallDir] : []),
     ];
-    const allowed = this.explicitlyAllowedPaths.has(realPath) || roots.some((root) => {
-      const relative = this.deps.path.relative(this.deps.path.resolve(root), realPath);
+    const canonicalRoots = await Promise.all(roots.map(async (root) => {
+      const resolved = this.deps.path.resolve(root);
+      return await this.deps.fs.realpath(resolved).catch(() => resolved);
+    }));
+    const allowed = this.explicitlyAllowedPaths.has(realPath) || canonicalRoots.some((root) => {
+      const relative = this.deps.path.relative(root, realPath);
       return relative === '' || (!relative.startsWith('..') && !this.deps.path.isAbsolute(relative));
     });
     if (!allowed) {
       throw new Error('speech_audio_path_not_allowed');
     }
     return realPath;
+  }
+
+  private prepareEphemeralUploadRoot(): Promise<void> {
+    if (!this.ephemeralUploadCleanupPromise) {
+      this.ephemeralUploadCleanupPromise = (async () => {
+        const root = this.ephemeralUploadRoot();
+        await this.deps.fs.rm(root, { recursive: true, force: true });
+        await this.deps.fs.mkdir(root, { recursive: true });
+      })().catch(() => {
+        throw new Error('speech_ephemeral_upload_cleanup_failed');
+      });
+    }
+    return this.ephemeralUploadCleanupPromise;
   }
 
   private async readConfig(): Promise<SpeechToTextConfig> {
@@ -809,6 +846,14 @@ export class SpeechToTextServiceManager {
 
   private processedFilesPath(): string {
     return this.deps.path.join(this.root(), 'processed-files.json');
+  }
+
+  private tempUploadRoot(): string {
+    return this.deps.path.join(this.root(), 'temp-uploads');
+  }
+
+  private ephemeralUploadRoot(): string {
+    return this.deps.path.join(this.tempUploadRoot(), 'ephemeral');
   }
 
   private modelCacheRoot(): string {

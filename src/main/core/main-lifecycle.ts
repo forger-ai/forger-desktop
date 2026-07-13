@@ -2,18 +2,15 @@ import type { App, BrowserWindow, IpcMain, Shell } from 'electron';
 import type fs from 'node:fs/promises';
 import type { Server } from 'node:http';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
-
 import { appendDesktopLog } from '../desktop-logger';
 import { reportSanitizerRoots } from '../conversation-diagnostics';
 import type { StoredForgerAccount } from '../forger-account-store';
 import { createAppMcpSecretsFingerprint } from '../app-mcp-manager';
 import { AppFolderGrantStore } from '../app-folder-grants';
 import type {
-  AgentRuntime,
-  AgentRuntimeRequest,
+  AgentRuntime, AgentRuntimeRequest,
   AgentToolDefinition,
-  AppSummary,
-  AppSecretDeclaration,
+  AppSummary, AppSecretDeclaration,
   AutomationFrequency,
   BasicActionResult,
   CatalogApp,
@@ -55,7 +52,6 @@ import type {
   TaskEventLike,
   ToolAccess,
 } from './main-lifecycle-types';
-
 import type {
   AppManifest,
   InstalledAppRecord,
@@ -66,14 +62,16 @@ import {
   createStartupLoadingController,
   createStartupLogger,
 } from './startup-loading';
-import { appAllowsAgentRuntimeControl, appAllowsAudioInput, appAllowsSpeechToText, appAllowsTextToSpeech, appAllowsWorkspaceFolders } from '../../shared/platform-capabilities';
+import { appAllowsAgentRuntimeControl, appAllowsAudioInput, appAllowsSidekickDisplay, appAllowsSidekickSpeech, appAllowsSpeechToText, appAllowsTextToSpeech, appAllowsWorkspaceFolders } from '../../shared/platform-capabilities';
 import type { LlmProviderAuthProfileResolver } from '../llm-provider/types';
 import { connectionToolDefinitionsFromState } from './mcp-connection-tools';
 import { createAppRuntimeDiagnostics } from './app-runtime-diagnostics';
 import { createPublishedAppInfoUpdater } from './main-lifecycle-mcp-handlers';
 import { registerGracefulShutdownHandlers } from './main-lifecycle-shutdown';
 import { isRemoteAgentSessionCloseEvent, isRemoteTunnelCloseEvent } from './remote-session-events';
-
+import type { SidekickService } from '../sidekick-service';
+import type { SidekickVoiceOutcomeInput } from '../sidekick-voice-runtime';
+import { createSidekickRuntimeBridgeBindings } from '../sidekick-runtime-bridge';
 export interface MainLifecycleDeps {
   AGENT_TOOL_DEFINITIONS: AgentToolDefinition[];
   AppAgentConversationManager: ServiceConstructor<LifecycleService>;
@@ -160,6 +158,7 @@ export interface MainLifecycleDeps {
 	  getPersonalAgentHeartbeat: AsyncFn;
 	  getPersonalAgentStore: () => {
 	    requireAgent: (agentId: string) => Promise<PersonalAgent>;
+	    createAgentFromAgent: (input: { creatorAgentId: string; name: string; description?: string; purpose?: string; instructions?: string; groupId?: string }) => Promise<PersonalAgent>;
     requireRoutine: (routineId: string) => Promise<{ agentId: string }>;
 	    updateAgentPermissions: (input: { agentId: string; appIds?: string[] }) => Promise<PersonalAgent>;
 	    listPeerGrants: (agentId: string) => Promise<PersonalAgent['peerAgentGrants']>;
@@ -184,6 +183,8 @@ export interface MainLifecycleDeps {
   getSelfOAuthCallbackService: () => NonNullable<MainLifecycleState['selfOAuthCallbackService']>;
   getSpeechToTextService: () => NonNullable<MainLifecycleState['speechToTextService']>;
   getTextToSpeechService: () => NonNullable<MainLifecycleState['textToSpeechService']>;
+  getSidekickService: () => SidekickService;
+  resolveSidekickVoiceOutcome: (input: SidekickVoiceOutcomeInput) => { accepted: boolean };
   getWakeWordService: () => NonNullable<MainLifecycleState['wakeWordService']>;
   getLiveVoiceInputService: () => {
     createSession: AsyncFn;
@@ -345,6 +346,7 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
     getOfficialToolsService,
     getConnectionsService,
     getSelfOAuthCallbackService,
+    getSidekickService,
     getSpeechToTextService,
     getTextToSpeechService,
     getWakeWordService,
@@ -726,6 +728,7 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
     getToolDefinitions: () => AGENT_TOOL_DEFINITIONS,
     getConnectionToolDefinitions: async () => await connectionToolDefinitionsFromState(getConnectionsService),
     getToolSettings: () => state.agentToolSettings,
+    resolveSidekickVoiceOutcome: deps.resolveSidekickVoiceOutcome,
     appendInstallLog,
     requestPermission: async (runId: string, request: PermissionRequest) => {
       const taskDecision = await (state.appAgentTaskManager?.requestPermission(runId, request) ?? Promise.resolve(null));
@@ -786,6 +789,7 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
 	        userMessage: 'La app quedo agregada al agente. Sus herramientas estaran disponibles en proximas ejecuciones.',
 	      };
 	    },
+	    createPersonalAgentFromAgent: async (input: { creatorAgentId: string; name: string; description?: string; purpose?: string; instructions?: string; groupId?: string }) => await getPersonalAgentStore().createAgentFromAgent(input),
 	    listAgentPeers: async ({ agentId }: { agentId: string }) => {
 	      const store = getPersonalAgentStore();
 	      const [peers, recentThreads] = await Promise.all([
@@ -1326,6 +1330,8 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
         textToSpeech: appAllowsTextToSpeech(manifest?.platformCapabilities),
         workspaceFolders: appAllowsWorkspaceFolders(manifest?.platformCapabilities),
         agentRuntimeControl: appAllowsAgentRuntimeControl(manifest?.platformCapabilities),
+        sidekickDisplay: appAllowsSidekickDisplay(manifest?.platformCapabilities),
+        sidekickSpeech: appAllowsSidekickSpeech(manifest?.platformCapabilities),
       };
     },
     requestFolderGrant: async (appId: string, grantToken: string) => {
@@ -1384,6 +1390,7 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
     playTextToSpeechAudio,
     cancelTextToSpeechPlayback,
     deleteTextToSpeechAudio,
+    ...createSidekickRuntimeBridgeBindings(getSidekickService),
     renderManifestAgentPrompt,
     resolveInstalledAgents,
     appendInstallLog,

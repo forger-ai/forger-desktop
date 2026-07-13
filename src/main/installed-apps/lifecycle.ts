@@ -271,14 +271,7 @@ const installBackendDependenciesWithUv = async (
   backendDir: string,
   appId: string,
 ): Promise<void> => {
-  await runCommand(pythonPath, ['-m', 'pip', 'install', '--upgrade', 'pip', 'uv'], {
-    cwd: backendDir,
-    log: {
-      appId,
-      phase: 'installing_backend',
-      label: 'install pip and uv',
-    },
-  });
+  await ensureManagedPythonUv(pythonPath, backendDir, appId);
 
   const lockPath = path.join(backendDir, 'uv.lock');
   const uvArgs = ['-m', 'uv', 'sync', '--no-install-project', '--extra', 'dev'];
@@ -309,7 +302,14 @@ const ensureManagedPythonUv = async (
   backendDir: string,
   appId: string,
 ): Promise<void> => {
-  await runCommand(pythonPath, ['-m', 'pip', 'install', '--upgrade', 'pip', 'uv'], {
+  const lockKey = `managed-python-uv:${path.resolve(pythonPath)}`;
+  const pending = backendPythonEnvironmentLocks.get(lockKey);
+  if (pending) {
+    await pending;
+    return;
+  }
+
+  const task = runCommand(pythonPath, ['-m', 'pip', 'install', '--upgrade', 'pip', 'uv'], {
     cwd: backendDir,
     log: {
       appId,
@@ -317,6 +317,13 @@ const ensureManagedPythonUv = async (
       label: 'install pip and uv',
     },
   });
+
+  backendPythonEnvironmentLocks.set(lockKey, task);
+  try {
+    await task;
+  } finally {
+    backendPythonEnvironmentLocks.delete(lockKey);
+  }
 };
 
 const isBackendPythonEnvironmentUsable = async (

@@ -72,6 +72,21 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
     };
   }
 
+  if (toolId === 'respond_and_end' || toolId === 'respond_and_wait') {
+    return {
+      type: 'object',
+      properties: {
+        text: {
+          type: 'string',
+          maxLength: 4000,
+          description: 'Texto exacto que el Sidekick hablara en voz alta. Breve, natural y en el idioma del turno.',
+        },
+      },
+      required: ['text'],
+      additionalProperties: false,
+    };
+  }
+
   if (
     toolId === 'forger_get_app_runtime_status' ||
     toolId === 'forger_open_app' ||
@@ -311,6 +326,21 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
         },
       },
       required: ['appId'],
+      additionalProperties: false,
+    };
+  }
+
+  if (toolId === 'forger_create_personal_agent') {
+    return {
+      type: 'object',
+      properties: {
+        name: { type: 'string', maxLength: 100, description: 'Nombre visible del agente personal.' },
+        description: { type: 'string', maxLength: 500, description: 'Descripcion breve y visible del agente.' },
+        purpose: { type: 'string', maxLength: 8_000, description: 'Responsabilidad principal del agente.' },
+        instructions: { type: 'string', maxLength: 8_000, description: 'Instrucciones de trabajo especificas para el agente.' },
+        groupId: { type: 'string', description: 'Grupo opcional. Si se omite, hereda el grupo del agente creador cuando existe.' },
+      },
+      required: ['name'],
       additionalProperties: false,
     };
   }

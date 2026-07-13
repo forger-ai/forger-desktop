@@ -8,10 +8,10 @@ import type { SharedFileRef } from './chat';
 import type { AgentRunActivity } from './agent-run-activity';
 
 export type PersonalAgentMessageRole = 'user' | 'assistant' | 'system';
-export type PersonalAgentMessageKind = 'message' | 'intermediate';
+export type PersonalAgentMessageKind = 'message' | 'intermediate' | 'spoken';
 export type PersonalAgentMessageAuthorType = 'human' | 'agent' | 'system';
-export type PersonalAgentMessageSource = 'human' | 'routine' | 'scheduled_wakeup';
-export type PersonalAgentConversationOrigin = 'user' | 'agent' | 'routine';
+export type PersonalAgentMessageSource = 'human' | 'routine' | 'scheduled_wakeup' | 'sidekick';
+export type PersonalAgentConversationOrigin = 'user' | 'agent' | 'routine' | 'sidekick';
 export type PersonalAgentConversationStatus = 'active' | 'archived';
 export type PersonalAgentRunStatus = 'queued' | 'running' | 'needs_permission' | 'completed' | 'failed' | 'canceled';
 export type PersonalAgentRoutineRunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'skipped';
@@ -26,6 +26,9 @@ export interface PersonalAgent {
   instructions: string;
   permissionMode: AgentPermissionMode;
   networkAccess: boolean;
+  canSpawnAgents: boolean;
+  createdByAgentId?: string;
+  groupId?: string;
   runtime?: AgentRuntime;
   appIds: string[];
   toolIds: AgentToolId[];
@@ -58,6 +61,8 @@ export interface PersonalAgentCreateInput {
   instructions?: string;
   permissionMode?: AgentPermissionMode;
   networkAccess?: boolean;
+  canSpawnAgents?: boolean;
+  groupId?: string | null;
   runtime?: AgentRuntime;
   appIds?: string[];
   toolIds?: AgentToolId[];
@@ -73,11 +78,38 @@ export interface PersonalAgentUpdatePermissionsInput {
   agentId: string;
   permissionMode?: AgentPermissionMode;
   networkAccess?: boolean;
+  canSpawnAgents?: boolean;
+  groupId?: string | null;
   runtime?: AgentRuntime;
   appIds?: string[];
   toolIds?: AgentToolId[];
   connectionGrants?: PersonalAgentConnectionGrant[];
   peerAgentGrants?: PersonalAgentPeerGrant[];
+}
+
+export interface PersonalAgentGroup {
+  id: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PersonalAgentGroupCreateInput {
+  name: string;
+}
+
+export interface PersonalAgentGroupUpdateInput {
+  groupId: string;
+  name: string;
+}
+
+export interface PersonalAgentGroupDeleteInput {
+  groupId: string;
+}
+
+export interface PersonalAgentUpdateGroupInput {
+  agentId: string;
+  groupId: string | null;
 }
 
 export interface PersonalAgentGrantOptionApp {
@@ -147,6 +179,7 @@ export interface PersonalAgentConversation {
   status: PersonalAgentConversationStatus;
   origin: PersonalAgentConversationOrigin;
   readOnly: boolean;
+  sidekickId?: string;
   initiatorAgentId?: string;
   initiatorAgentName?: string;
   peerThreadId?: string;
@@ -187,9 +220,13 @@ export interface PersonalAgentMessage {
   authorAgentId?: string;
   authorAgentName?: string;
   source: PersonalAgentMessageSource;
+  /** BCP-47 locale attached by trusted non-renderer voice input. */
+  locale?: string;
   routineId?: string;
   wakeupId?: string;
   content: string;
+  /** Sanitized visible activity captured while the run produced this message. */
+  reasoning?: string;
   createdAt: string;
   files?: PersonalAgentMessageFile[];
 }
