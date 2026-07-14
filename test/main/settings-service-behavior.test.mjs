@@ -38,6 +38,11 @@ const settingsSeed = () => ({
   defaultAgentProvider: 'auto',
   defaultChatPermissionMode: 'safe',
   defaultChatNetworkAccess: true,
+  providerInactivityTimeoutMinutes: {
+    codex: 240,
+    claude: 240,
+    antigravity: 240,
+  },
   codexDefaults: { model: 'gpt-5.4', reasoningEffort: 'medium' },
   llmProviderDefaults: {
     codex: { model: 'gpt-5.4', reasoningEffort: 'medium' },
@@ -144,6 +149,11 @@ test('SettingsService normalizes persisted settings, preserves safe fields, and 
       defaultAgentProvider: 'invalid',
       defaultChatPermissionMode: 'unsafe',
       defaultChatNetworkAccess: false,
+      providerTotalTimeoutMinutes: {
+        codex: 30,
+        claude: 480,
+        antigravity: 0,
+      },
       codexDefaults: { model: 'custom-codex', reasoningEffort: 'invalid' },
       agentDefaults: {
         codex: { model: 'agent-codex', reasoningEffort: 'high' },
@@ -166,6 +176,11 @@ test('SettingsService normalizes persisted settings, preserves safe fields, and 
     assert.equal(harness.state.settings.defaultAgentProvider, 'auto');
     assert.equal(harness.state.settings.defaultChatPermissionMode, 'unsafe');
     assert.equal(harness.state.settings.defaultChatNetworkAccess, false);
+    assert.deepEqual(harness.state.settings.providerInactivityTimeoutMinutes, {
+      codex: 30,
+      claude: 480,
+      antigravity: 0,
+    });
     assert.deepEqual(harness.state.settings.codexDefaults, { model: 'custom-codex', reasoningEffort: 'medium' });
     assert.deepEqual(harness.state.settings.agentDefaults.codex, { model: 'agent-codex', reasoningEffort: 'high' });
     assert.deepEqual(harness.state.settings.agentDefaults.claude, { model: 'opus', effort: 'max' });
@@ -202,18 +217,22 @@ test('SettingsService updates defaults and normalizes invalid provider/model inp
       provider: 'codex',
       model: 'gpt-5.4',
       effort: 'none',
+      inactivityTimeoutMinutes: 30,
     });
     assert.equal(codex.defaultAgentProvider, 'auto');
     assert.deepEqual(codex.agentDefaults.codex, { model: 'gpt-5.4', reasoningEffort: 'none' });
+    assert.equal(codex.providerInactivityTimeoutMinutes.codex, 30);
 
     const claude = await harness.controller.updateAgentDefaults({
       defaultProvider: 'codex',
       provider: 'claude',
       model: 'opus',
       effort: 'max',
+      inactivityTimeoutMinutes: 480,
     });
     assert.equal(claude.defaultAgentProvider, 'codex');
     assert.deepEqual(claude.agentDefaults.claude, { model: 'opus', effort: 'max' });
+    assert.equal(claude.providerInactivityTimeoutMinutes.claude, 480);
     assert.equal(JSON.parse(await fs.readFile(harness.settingsPath, 'utf8')).defaultAgentProvider, 'codex');
 
     const invalidCodex = await harness.controller.updateCodexDefaults({
@@ -239,8 +258,25 @@ test('SettingsService updates defaults and normalizes invalid provider/model inp
       provider: 'antigravity',
       model: 'gemini-3.5-flash',
       effort: 'high',
+      inactivityTimeoutMinutes: 0,
     });
     assert.deepEqual(antigravity.agentDefaults.antigravity, { model: 'gemini-3.5-flash', effort: 'high' });
+    assert.deepEqual(antigravity.providerInactivityTimeoutMinutes, {
+      codex: 30,
+      claude: 480,
+      antigravity: 0,
+    });
+    assert.deepEqual(JSON.parse(await fs.readFile(harness.settingsPath, 'utf8')).providerInactivityTimeoutMinutes, {
+      codex: 30,
+      claude: 480,
+      antigravity: 0,
+    });
+
+    const invalidTimeout = await harness.controller.updateAgentDefaults({
+      provider: 'claude',
+      inactivityTimeoutMinutes: Number.NaN,
+    });
+    assert.equal(invalidTimeout.providerInactivityTimeoutMinutes.claude, 240);
   } finally {
     await harness.cleanup();
   }

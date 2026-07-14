@@ -348,6 +348,7 @@ const shouldSkipSocialUploadPath = (sourcePath: string, root: string, pathModule
   const relative = pathModule.relative(root, sourcePath);
   const parts = relative.split(pathModule.sep).filter(Boolean);
   if (parts.some((part) => SOCIAL_UPLOAD_EXCLUDED_NAMES.has(part))) return true;
+  if (parts.length === 2 && parts[0] === 'frontend' && parts[1] === 'package-lock.json') return true;
   if (parts.includes('data') && /\.(sqlite|sqlite-|db|backup)/i.test(pathModule.basename(sourcePath))) return true;
   if (/\.env(\.|$)/i.test(pathModule.basename(sourcePath))) return true;
   return false;

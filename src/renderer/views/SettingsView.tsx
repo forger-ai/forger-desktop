@@ -60,6 +60,7 @@ import RefreshRounded from '@mui/icons-material/RefreshRounded';
 import LogoutRounded from '@mui/icons-material/LogoutRounded';
 import StorageRounded from '@mui/icons-material/StorageRounded';
 import VolumeUpRounded from '@mui/icons-material/VolumeUpRounded';
+import { PROVIDER_INACTIVITY_TIMEOUT_OPTIONS_MINUTES } from '@shared/provider-timeouts';
 import type {
   AppSummary,
   AntigravityAuthStatus,
@@ -132,6 +133,7 @@ interface SettingsViewProps {
   defaultAgentProvider: Settings['defaultAgentProvider'];
   defaultChatPermissionMode: Settings['defaultChatPermissionMode'];
   defaultChatNetworkAccess: Settings['defaultChatNetworkAccess'];
+  providerInactivityTimeoutMinutes: Settings['providerInactivityTimeoutMinutes'];
   agentDefaults: Settings['agentDefaults'];
   providerConnections: Settings['providerConnections'];
   llmProviderProfiles: Settings['llmProviderProfiles'];
@@ -414,6 +416,7 @@ export function SettingsView({
   defaultAgentProvider,
   defaultChatPermissionMode,
   defaultChatNetworkAccess,
+  providerInactivityTimeoutMinutes,
   agentDefaults,
   providerConnections,
   llmProviderProfiles,
@@ -1759,6 +1762,8 @@ export function SettingsView({
       effortValue: string;
       effortOptions: Array<{ label: string; value: string }>;
       onEffortChange: (value: string) => void;
+      timeoutMinutes: number;
+      onTimeoutChange: (value: number) => void;
     };
 
     const providerStatus = (provider: Pick<ProviderCard, 'installed' | 'authenticated'>): ProviderStatusKind => {
@@ -1844,6 +1849,8 @@ export function SettingsView({
                 model: codexDefaultModel,
                 effort: value as CodexReasoningEffort,
               }),
+        timeoutMinutes: providerInactivityTimeoutMinutes.codex,
+        onTimeoutChange: (value) => onAgentDefaultsChange({ provider: 'codex', inactivityTimeoutMinutes: value }),
       },
       {
         provider: 'claude',
@@ -1888,6 +1895,8 @@ export function SettingsView({
                 model: claudeDefaultModel,
                 effort: value as ClaudeEffort,
               }),
+        timeoutMinutes: providerInactivityTimeoutMinutes.claude,
+        onTimeoutChange: (value) => onAgentDefaultsChange({ provider: 'claude', inactivityTimeoutMinutes: value }),
       },
       {
         provider: 'antigravity',
@@ -1927,6 +1936,8 @@ export function SettingsView({
                 model: antigravityDefaultModel,
                 effort: value as AntigravityEffort,
               }),
+        timeoutMinutes: providerInactivityTimeoutMinutes.antigravity,
+        onTimeoutChange: (value) => onAgentDefaultsChange({ provider: 'antigravity', inactivityTimeoutMinutes: value }),
       },
     ];
 
@@ -1955,7 +1966,7 @@ export function SettingsView({
           }}
         >
           <CardContent sx={{ height: '100%', p: 2 }}>
-            <Stack spacing={1.5} sx={{ height: '100%', minHeight: 316 }}>
+            <Stack spacing={1.5} sx={{ height: '100%', minHeight: 372 }}>
               <Stack direction="row" spacing={1.5} alignItems="flex-start">
                 <Box
                   sx={{
@@ -1999,7 +2010,7 @@ export function SettingsView({
                 <Typography variant="body2" fontWeight={700}>{providerStatusText(status)}</Typography>
               </Stack>
 
-              <Box sx={{ minHeight: status === 'authenticated' ? 118 : 48 }}>
+              <Box sx={{ minHeight: status === 'authenticated' ? 174 : 48 }}>
                 {status === 'authenticated' ? (
                   <Stack spacing={1}>
                     <FormControl size="small" fullWidth>
@@ -2029,6 +2040,27 @@ export function SettingsView({
                             {option.label}
                           </MenuItem>
                         ))}
+                      </Select>
+                    </FormControl>
+                    <FormControl size="small" fullWidth>
+                      <InputLabel>{t.settings.providerInactivityTimeoutLabel}</InputLabel>
+                      <Select
+                        label={t.settings.providerInactivityTimeoutLabel}
+                        value={provider.timeoutMinutes}
+                        onChange={(event) => provider.onTimeoutChange(Number(event.target.value))}
+                      >
+                        {PROVIDER_INACTIVITY_TIMEOUT_OPTIONS_MINUTES.map((minutes) => {
+                          const hours = minutes / 60;
+                          return (
+                            <MenuItem value={minutes} key={minutes}>
+                              {minutes === 0
+                                ? t.settings.providerTimeoutUnlimited
+                                : minutes < 60
+                                  ? `${minutes} ${t.settings.providerTimeoutMinutes}`
+                                  : `${hours} ${hours === 1 ? t.settings.providerTimeoutHour : t.settings.providerTimeoutHours}`}
+                            </MenuItem>
+                          );
+                        })}
                       </Select>
                     </FormControl>
                   </Stack>

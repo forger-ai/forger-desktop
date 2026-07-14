@@ -1377,6 +1377,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             defaultAgentProvider={settings.defaultAgentProvider}
             defaultChatPermissionMode={settings.defaultChatPermissionMode}
             defaultChatNetworkAccess={settings.defaultChatNetworkAccess}
+            providerInactivityTimeoutMinutes={settings.providerInactivityTimeoutMinutes}
             agentDefaults={settings.agentDefaults}
             providerConnections={settings.providerConnections}
             llmProviderProfiles={settings.llmProviderProfiles}

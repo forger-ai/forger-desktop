@@ -8,7 +8,7 @@ import type { StoredForgerAccount } from '../forger-account-store';
 import { createAppMcpSecretsFingerprint } from '../app-mcp-manager';
 import { AppFolderGrantStore } from '../app-folder-grants';
 import type {
-  AgentRuntime, AgentRuntimeRequest,
+  AgentProvider, AgentRuntime, AgentRuntimeRequest,
   AgentToolDefinition,
   AppSummary, AppSecretDeclaration,
   AutomationFrequency,
@@ -52,12 +52,7 @@ import type {
   TaskEventLike,
   ToolAccess,
 } from './main-lifecycle-types';
-import type {
-  AppManifest,
-  InstalledAppRecord,
-  RuntimeBinarySet,
-  RunningAppProcess,
-} from './main-process-types';
+import type { AppManifest, InstalledAppRecord, RuntimeBinarySet, RunningAppProcess } from './main-process-types';
 import {
   createStartupLoadingController,
   createStartupLogger,
@@ -138,6 +133,7 @@ export interface MainLifecycleDeps {
   getCodexRoot: () => string;
   getCodexToolEnvironment: (appId?: string, runtime?: RuntimeBinarySet) => Promise<Record<string, string>>;
   getDesktopChatNetworkAccessDefault: () => boolean;
+  getProviderInactivityTimeoutMs: (provider: AgentProvider) => number;
   getManifestAppSecretsValidationError: (manifest: AppManifest | null) => string | null;
   getSecretsStore: () => {
     resolveAppEnv: (appId: string, declarations: AppSecretDeclaration[]) => Promise<{
@@ -328,6 +324,7 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
     getCodexRoot,
     getCodexToolEnvironment,
     getDesktopChatNetworkAccessDefault,
+    getProviderInactivityTimeoutMs,
     getManifestAppSecretsValidationError,
     getSecretsStore,
     getForgerAccountPath,
@@ -1047,6 +1044,7 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
       return await getCodexToolEnvironment(appId, appPythonRuntime);
     },
     getChatNetworkAccessDefault: getDesktopChatNetworkAccessDefault,
+    getProviderInactivityTimeoutMs,
     resolveChatAppRoot: async (appId: string, chatMode?: string) => {
       if (chatMode !== 'social_app_review') {
         return null;

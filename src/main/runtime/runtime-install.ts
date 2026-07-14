@@ -34,11 +34,40 @@ interface RuntimeInstallDeps {
 
 export const createRuntimeInstallController = (deps: RuntimeInstallDeps) => {
   const { fs, path, runtimeLocks, getBundledResourcesRoot, getTempRoot, getRuntimesRoot, resolvePlatformAlias, normalizeVersionForFolder, normalizeNodeRuntimeVersion, findRuntimeArchive, findRuntimeChecksumFile, hashFileSha256, extractArchive, clearMacQuarantine, runCommand, installBackendDependenciesWithUv } = deps;
-const appendFlattenLog = deps.appendInstallLog ?? (async () => undefined);
+const appendInstallLog = deps.appendInstallLog ?? (async () => undefined);
 const RUNTIME_PLATFORM_ALIASES = new Set(['darwin_arm64', 'darwin_x64', 'linux_x64', 'win32_x64']);
 const PYTHON_DARWIN_RUNTIME_REVISION = 'python-darwin-disable-library-validation-2026-06-02';
 const FLATTEN_RETRY_DELAYS_MS = [25, 100];
 const MIN_RUNTIME_INSTALL_FREE_BYTES = 1_024 * 1_024 * 1_024;
+const FRONTEND_NATIVE_DEPENDENCY_PROBE = [
+  'rollup',
+  'vite',
+  'esbuild',
+  '@swc/core',
+  'lightningcss',
+];
+const FRONTEND_NATIVE_DEPENDENCY_PROBE_SCRIPT = `
+const { createRequire } = require('node:module');
+const { pathToFileURL } = require('node:url');
+const path = require('node:path');
+const appRequire = createRequire(path.join(process.cwd(), 'package.json'));
+const candidates = ${JSON.stringify(FRONTEND_NATIVE_DEPENDENCY_PROBE)};
+(async () => {
+  for (const candidate of candidates) {
+    let resolved;
+    try {
+      resolved = appRequire.resolve(candidate);
+    } catch (error) {
+      if (error && error.code === 'MODULE_NOT_FOUND') continue;
+      throw error;
+    }
+    await import(pathToFileURL(resolved).href);
+  }
+})().catch((error) => {
+  console.error(error && error.stack ? error.stack : error);
+  process.exitCode = 1;
+});
+`;
 
 interface RuntimeReadyMetadata {
   installedAt: string;
@@ -108,7 +137,7 @@ const moveFlattenChild = async (source: string, target: string): Promise<void> =
   for (const delayMs of [0, ...FLATTEN_RETRY_DELAYS_MS]) {
     if (delayMs > 0) {
       await wait(delayMs);
-      await appendFlattenLog('flatten:move_retry', flattenLogPayload(source, target, { delayMs }));
+      await appendInstallLog('flatten:move_retry', flattenLogPayload(source, target, { delayMs }));
     }
 
     try {
@@ -119,7 +148,7 @@ const moveFlattenChild = async (source: string, target: string): Promise<void> =
         throw error;
       }
       if (delayMs === FLATTEN_RETRY_DELAYS_MS[FLATTEN_RETRY_DELAYS_MS.length - 1]) {
-        await appendFlattenLog('flatten:move_fallback', flattenLogPayload(source, target, { errorCode: errorCode(error) }));
+        await appendInstallLog('flatten:move_fallback', flattenLogPayload(source, target, { errorCode: errorCode(error) }));
         await fs.rm(target, { recursive: true, force: true });
         await fs.cp(source, target, { recursive: true });
         await fs.rm(source, { recursive: true, force: true });
@@ -190,6 +219,113 @@ const writeRuntimeReadyMetadata = async (
   await fs.writeFile(readyPath, `${JSON.stringify(metadata, null, 2)}\n`, 'utf8');
 };
 
+interface OptionalDependencyDeclaration {
+  name: string;
+  requiredBy: string;
+  version: string;
+}
+
+const commandErrorOutput = (error: unknown): string => {
+  if (!error || typeof error !== 'object') {
+    return error instanceof Error ? error.message : String(error ?? '');
+  }
+  const candidate = error as { message?: unknown; stderr?: unknown; stdout?: unknown };
+  return [candidate.message, candidate.stderr, candidate.stdout]
+    .filter((value): value is string => typeof value === 'string' && value.length > 0)
+    .join('\n');
+};
+
+const missingModuleFromError = (error: unknown): string | null => {
+  const match = commandErrorOutput(error).match(
+    /Cannot find (?:module|package)\s+['"]?((?:@[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?\/)?[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?)['"]?/i,
+  );
+  const name = match?.[1]?.trim();
+  return name ?? null;
+};
+
+const isExactPackageVersion = (value: string): boolean =>
+  /^\d+\.\d+\.\d+(?:-[0-9a-z.-]+)?(?:\+[0-9a-z.-]+)?$/i.test(value);
+
+const packageDirectories = async (nodeModulesDir: string): Promise<string[]> => {
+  const entries = await fs.readdir(nodeModulesDir, { withFileTypes: true }).catch(() => []);
+  const directories: string[] = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) {
+      continue;
+    }
+    const entryPath = path.join(nodeModulesDir, entry.name);
+    if (!entry.name.startsWith('@')) {
+      directories.push(entryPath);
+      continue;
+    }
+    const scopedEntries = await fs.readdir(entryPath, { withFileTypes: true }).catch(() => []);
+    directories.push(...scopedEntries
+      .filter((scopedEntry) => scopedEntry.isDirectory())
+      .map((scopedEntry) => path.join(entryPath, scopedEntry.name)));
+  }
+  return directories;
+};
+
+const findOptionalDependencyDeclaration = async (
+  frontendDir: string,
+  dependencyName: string,
+): Promise<OptionalDependencyDeclaration | null> => {
+  const pending = [path.join(frontendDir, 'node_modules')];
+  const visited = new Set<string>();
+  while (pending.length > 0) {
+    const nodeModulesDir = pending.shift() as string;
+    if (visited.has(nodeModulesDir)) {
+      continue;
+    }
+    visited.add(nodeModulesDir);
+    for (const packageDir of await packageDirectories(nodeModulesDir)) {
+      pending.push(path.join(packageDir, 'node_modules'));
+      try {
+        const packageJson = JSON.parse(await fs.readFile(path.join(packageDir, 'package.json'), 'utf8')) as {
+          name?: unknown;
+          optionalDependencies?: unknown;
+        };
+        const optionalDependencies = packageJson.optionalDependencies;
+        if (!optionalDependencies || typeof optionalDependencies !== 'object' || Array.isArray(optionalDependencies)) {
+          continue;
+        }
+        const version = (optionalDependencies as Record<string, unknown>)[dependencyName];
+        if (typeof version !== 'string' || !isExactPackageVersion(version)) {
+          continue;
+        }
+        return {
+          name: dependencyName,
+          requiredBy: typeof packageJson.name === 'string' ? packageJson.name : path.basename(packageDir),
+          version,
+        };
+      } catch {
+        // Ignore unrelated or incomplete package metadata while looking for the declaration.
+      }
+    }
+  }
+  return null;
+};
+
+const frontendCommandEnvironment = (nodePath: string): NodeJS.ProcessEnv => ({
+  PATH: `${path.dirname(nodePath)}${path.delimiter}${process.env.PATH ?? ''}`,
+});
+
+const verifyFrontendNativeDependencies = async (
+  nodePath: string,
+  frontendDir: string,
+  appId: string,
+): Promise<void> => {
+  await runCommand(nodePath, ['-e', FRONTEND_NATIVE_DEPENDENCY_PROBE_SCRIPT], {
+    cwd: frontendDir,
+    env: frontendCommandEnvironment(nodePath),
+    log: {
+      appId,
+      phase: 'installing_frontend',
+      label: 'verify native optional dependencies',
+    },
+  });
+};
+
 const installFrontendDependenciesWithNpm = async (
   nodePath: string,
   npmPath: string,
@@ -202,15 +338,65 @@ const installFrontendDependenciesWithNpm = async (
 
   await runCommand(npmPath, args, {
     cwd: frontendDir,
-    env: {
-      PATH: `${path.dirname(nodePath)}${path.delimiter}${process.env.PATH ?? ''}`,
-    },
+    env: frontendCommandEnvironment(nodePath),
     log: {
       appId,
       phase: 'installing_frontend',
       label,
     },
   });
+
+  try {
+    await verifyFrontendNativeDependencies(nodePath, frontendDir, appId);
+  } catch (verificationError) {
+    const dependencyName = missingModuleFromError(verificationError);
+    const declaration = dependencyName
+      ? await findOptionalDependencyDeclaration(frontendDir, dependencyName)
+      : null;
+    if (!declaration) {
+      throw verificationError;
+    }
+
+    await appendInstallLog('frontend:native_optional_repair:start', {
+      appId,
+      dependency: declaration.name,
+      requiredBy: declaration.requiredBy,
+      version: declaration.version,
+    });
+    try {
+      await runCommand(npmPath, [
+        'install',
+        '--no-save',
+        '--package-lock=false',
+        '--include=optional',
+        `${declaration.name}@${declaration.version}`,
+      ], {
+        cwd: frontendDir,
+        env: frontendCommandEnvironment(nodePath),
+        log: {
+          appId,
+          phase: 'installing_frontend',
+          label: `repair optional dependency ${declaration.name}`,
+        },
+      });
+      await verifyFrontendNativeDependencies(nodePath, frontendDir, appId);
+      await appendInstallLog('frontend:native_optional_repair:success', {
+        appId,
+        dependency: declaration.name,
+        requiredBy: declaration.requiredBy,
+        version: declaration.version,
+      });
+    } catch (repairError) {
+      await appendInstallLog('frontend:native_optional_repair:failed', {
+        appId,
+        dependency: declaration.name,
+        requiredBy: declaration.requiredBy,
+        version: declaration.version,
+        error: repairError instanceof Error ? repairError.message : String(repairError),
+      });
+      throw repairError;
+    }
+  }
 };
 
 const installAppDependencies = async (
@@ -261,12 +447,12 @@ const flattenSingleTopLevelDirectory = async (targetDir: string): Promise<void> 
 
   const topFolder = path.join(targetDir, topEntry.name);
 
-  await appendFlattenLog('flatten:start', { operation: 'flatten', sourceName: topEntry.name, childCount: children.length });
+  await appendInstallLog('flatten:start', { operation: 'flatten', sourceName: topEntry.name, childCount: children.length });
   for (const child of children) {
     await moveFlattenChild(path.join(topFolder, child), path.join(targetDir, child));
   }
   await fs.rm(topFolder, { recursive: true, force: true });
-  await appendFlattenLog('flatten:success', { operation: 'flatten', sourceName: topEntry.name, childCount: children.length });
+  await appendInstallLog('flatten:success', { operation: 'flatten', sourceName: topEntry.name, childCount: children.length });
 };
 
 const findExistingFile = async (baseDir: string, candidates: string[]): Promise<string | null> => {

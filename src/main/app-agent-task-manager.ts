@@ -599,31 +599,69 @@ export class AppAgentTaskManager {
       if (runtime.provider !== undefined && runtime.provider !== 'codex' && runtime.provider !== 'claude' && runtime.provider !== 'antigravity') {
         throw new Error('agent_runtime_provider_unsupported');
       }
+      const templateProviderAvailable = templateRuntime && !runtime.provider
+        ? await this.isProviderAuthenticated(templateRuntime.provider)
+        : false;
+      const compatibleTemplateRuntime = templateRuntime && (
+        runtime.provider
+          ? runtime.provider === templateRuntime.provider
+          : templateProviderAvailable
+      )
+        ? templateRuntime
+        : undefined;
+      const fallsBackFromTemplateProvider = Boolean(templateRuntime && !runtime.provider && !templateProviderAvailable);
       const modelParams = runtime.modelParams && typeof runtime.modelParams === 'object'
         ? runtime.modelParams
         : {};
       const effort = runtime.effort === 'default'
         ? undefined
         : runtime.effort ?? modelParams.effort ?? modelParams.reasoningEffort;
+      const provider = runtime.provider ?? compatibleTemplateRuntime?.provider;
+      const model = !fallsBackFromTemplateProvider && typeof runtime.model === 'string' && runtime.model.trim() && runtime.model.trim() !== 'auto'
+        ? runtime.model.trim()
+        : compatibleTemplateRuntime?.model;
+      const authProfileId = !fallsBackFromTemplateProvider && typeof runtime.authProfileId === 'string' && runtime.authProfileId.trim()
+        ? runtime.authProfileId.trim()
+        : compatibleTemplateRuntime?.authProfileId;
+      const resolvedEffort = (
+        (!fallsBackFromTemplateProvider ? effort : undefined) ?? compatibleTemplateRuntime?.effort
+      ) as AgentRuntimeRequest['effort'];
+      const permissionMode = runtime.permissionMode ?? templateRuntime?.permissionMode;
       return await this.options.getAgentRuntime({
-        provider: runtime.provider ?? templateRuntime?.provider,
-        model: typeof runtime.model === 'string' && runtime.model.trim() && runtime.model.trim() !== 'auto'
-          ? runtime.model.trim()
-          : templateRuntime?.model,
-        authProfileId: typeof runtime.authProfileId === 'string' && runtime.authProfileId.trim()
-          ? runtime.authProfileId.trim()
-          : templateRuntime?.authProfileId,
-        effort: (effort ?? templateRuntime?.effort) as AgentRuntimeRequest['effort'],
-        permissionMode: runtime.permissionMode ?? templateRuntime?.permissionMode,
-        ...(!templateRuntime ? { recommendations: template.runtimeRecommendations } : {}),
+        provider,
+        model,
+        authProfileId,
+        effort: resolvedEffort,
+        permissionMode,
+        ...(!compatibleTemplateRuntime ? { recommendations: template.runtimeRecommendations } : {}),
         strict: true,
       });
     }
-    return await this.options.getAgentRuntime(template.runtime ?? {
+    if (template.runtime) {
+      const templateProviderAvailable = await this.isProviderAuthenticated(template.runtime.provider);
+      if (templateProviderAvailable) {
+        return await this.options.getAgentRuntime(template.runtime);
+      }
+      return await this.options.getAgentRuntime({
+        recommendations: template.runtimeRecommendations,
+        ...(template.runtime.permissionMode ? { permissionMode: template.runtime.permissionMode } : {}),
+      });
+    }
+    return await this.options.getAgentRuntime({
       recommendations: template.runtimeRecommendations,
       model: template.runtimeRecommendations ? undefined : template.model,
       effort: template.runtimeRecommendations ? undefined : template.reasoningEffort,
     });
+  }
+
+  private async isProviderAuthenticated(provider: AgentRuntime['provider']): Promise<boolean> {
+    if (provider === 'claude') {
+      return await this.options.getClaudeAuthenticated().catch(() => false);
+    }
+    if (provider === 'antigravity') {
+      return await (this.options.getAntigravityAuthenticated?.().catch(() => false) ?? Promise.resolve(false));
+    }
+    return await this.options.getCodexAuthenticated().catch(() => false);
   }
 
   private async writeLegacyAttachments(

@@ -6,6 +6,7 @@ import {
   DEFAULT_CODEX_REASONING_EFFORT,
   getDefaultAgentDefaults,
 } from './agent-runtime-registry';
+import { DEFAULT_PROVIDER_INACTIVITY_TIMEOUTS_MINUTES } from './provider-timeouts';
 
 export const installedAppsSeed: AppSummary[] = [
   {
@@ -53,6 +54,7 @@ export const settingsSeed: Settings = {
   defaultAgentProvider: DEFAULT_AGENT_PROVIDER,
   defaultChatPermissionMode: DEFAULT_AGENT_PERMISSION_MODE,
   defaultChatNetworkAccess: true,
+  providerInactivityTimeoutMinutes: { ...DEFAULT_PROVIDER_INACTIVITY_TIMEOUTS_MINUTES },
   llmProviderDefaults: getDefaultAgentDefaults(),
   agentDefaults: getDefaultAgentDefaults(),
   providerConnections: {},

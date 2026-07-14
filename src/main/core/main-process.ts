@@ -99,6 +99,7 @@ import {
   createAgentProviderRuntimeRegistry,
 } from '../../shared/agent-runtime-registry';
 import { appAllowsAudioInput, appAllowsSpeechToText, appAllowsTextToSpeech } from '../../shared/platform-capabilities';
+import { providerInactivityTimeoutMinutesToMs } from '../../shared/provider-timeouts';
 import { buildForgerAppAgentsMarkdown } from '../prompt-builder/apps-base';
 import { buildCodexPromptForFreeChat, buildCodexPromptWithAppContext } from '../prompt-builder/user-message';
 import { buildForgerOfficialToolSkillTemplates, buildForgerOfficialToolsPromptSection } from '../prompt-builder/official-tools';
@@ -128,7 +129,6 @@ import type {
   SubmitAppRatingInput, SubmitProductFeedbackInput, SubmitUsageEventInput, UpdateAgentDefaultsInput,
   UpdateAgentToolApprovalInput, UpdateCodexDefaultsInput, UpdateDeveloperModeInput, UpdateLlmProviderProfileDefaultsInput, UpdateUserSecretInput,
 } from '../../shared/types';
-
 const BetterSqlite3 = loadOptionalBetterSqlite();
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
 configureDesktopUserDataPath({ app, isDev, path });
@@ -1572,7 +1572,7 @@ registerMainLifecycle({
   emitAutomationUpdated, emitWorkflowUpdated, emitChatRunUpdated, ensureBackendPythonEnvironment, ensureCatalogStatuses, ensureGlobalAgentsContext,
   ensureGitAvailable, ensurePathInside, ensureRuntimeInstalled, ensureSqliteDatabaseParent, flushPendingDeepLink, fs, getAgentPathEntries, getBackupsRoot,
   getClaudeAuthStatus, getAntigravityAuthStatus, getCloudDeviceAccountStorageKey, getCloudDevicePath, getCloudIdentityPath, getCloudIdentityStore,
-  getCodexAuthStatus, getCodexHome, getCodexRoot, getCodexToolEnvironment, getDesktopChatNetworkAccessDefault: () => settings.defaultChatNetworkAccess !== false, getManifestAppSecretsValidationError, getSecretsStore, getForgerAccountPath, getForgerHomeRoot, getForgerMetadataRoot,
+  getCodexAuthStatus, getCodexHome, getCodexRoot, getCodexToolEnvironment, getDesktopChatNetworkAccessDefault: () => settings.defaultChatNetworkAccess !== false, getProviderInactivityTimeoutMs: (provider: AgentProvider) => providerInactivityTimeoutMinutesToMs(settings.providerInactivityTimeoutMinutes?.[provider]), getManifestAppSecretsValidationError, getSecretsStore, getForgerAccountPath, getForgerHomeRoot, getForgerMetadataRoot,
   getProviderProfilesRoot, resolveLlmProviderAuthProfile, getSocialAppReviewPromptContext,
   getFreePort, getLegacyForgerMetadataRoot, getMemoryStore, getPersonalAgentStore, getPersonalAgentConversationManager, getPersonalAgentRoutineManager, getOfficialToolsService, getConnectionsService, getSelfOAuthCallbackService, getSidekickService, getSpeechToTextService, getTextToSpeechService, getLiveVoiceInputService, getWakeWordService,
   getAudioDevices: async () => await getAudioRuntimeBroker().listDevices(),

@@ -40,6 +40,10 @@ import {
   validateAgentRuntimeRequest,
 } from '../../shared/agent-runtime-registry';
 import { normalizeDeveloperPathEntries, validateDeveloperPathEntries } from '../runtime/developer-paths';
+import {
+  DEFAULT_PROVIDER_INACTIVITY_TIMEOUTS_MINUTES,
+  normalizeProviderInactivityTimeoutMinutes,
+} from '../../shared/provider-timeouts';
 
 interface SettingsServiceState {
   promptOverridesStore: PromptOverridesStore | null;
@@ -109,6 +113,15 @@ const normalizeAgentPermissionMode = (value: unknown): AgentPermissionMode =>
 
 const normalizeChatNetworkAccess = (value: unknown, fallback = true): boolean =>
   typeof value === 'boolean' ? value : fallback;
+
+const normalizeProviderInactivityTimeouts = (value: unknown): Settings['providerInactivityTimeoutMinutes'] => {
+  const record = isPlainRecord(value) ? value : {};
+  return {
+    codex: normalizeProviderInactivityTimeoutMinutes(record.codex, DEFAULT_PROVIDER_INACTIVITY_TIMEOUTS_MINUTES.codex),
+    claude: normalizeProviderInactivityTimeoutMinutes(record.claude, DEFAULT_PROVIDER_INACTIVITY_TIMEOUTS_MINUTES.claude),
+    antigravity: normalizeProviderInactivityTimeoutMinutes(record.antigravity, DEFAULT_PROVIDER_INACTIVITY_TIMEOUTS_MINUTES.antigravity),
+  };
+};
 
 const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -402,6 +415,10 @@ const normalizeSettings = (input?: Partial<Settings>): Settings => {
     defaultAgentProvider: normalizeDefaultAgentProvider(input?.defaultAgentProvider),
     defaultChatPermissionMode: normalizeAgentPermissionMode(input?.defaultChatPermissionMode ?? defaults.defaultChatPermissionMode),
     defaultChatNetworkAccess: normalizeChatNetworkAccess(input?.defaultChatNetworkAccess, defaults.defaultChatNetworkAccess),
+    providerInactivityTimeoutMinutes: normalizeProviderInactivityTimeouts(
+      input?.providerInactivityTimeoutMinutes
+      ?? (input as Partial<Settings> & { providerTotalTimeoutMinutes?: unknown } | undefined)?.providerTotalTimeoutMinutes,
+    ),
     codexDefaults: {
       model: codexModel,
       reasoningEffort: codexReasoningEffort,
@@ -467,8 +484,16 @@ const updateAgentDefaults = async (input: UpdateAgentDefaultsInput): Promise<Set
     ? current.defaultChatNetworkAccess
     : normalizeChatNetworkAccess(input.defaultChatNetworkAccess, current.defaultChatNetworkAccess);
   const provider = normalizeAgentProvider(input.provider);
+  const providerInactivityTimeoutMinutes = provider
+    ? {
+        ...current.providerInactivityTimeoutMinutes,
+        [provider]: input.inactivityTimeoutMinutes === undefined
+          ? current.providerInactivityTimeoutMinutes[provider]
+          : normalizeProviderInactivityTimeoutMinutes(input.inactivityTimeoutMinutes),
+      }
+    : current.providerInactivityTimeoutMinutes;
   if (!provider) {
-    state.settings = normalizeSettings({ ...current, defaultAgentProvider, defaultChatPermissionMode, defaultChatNetworkAccess });
+    state.settings = normalizeSettings({ ...current, defaultAgentProvider, defaultChatPermissionMode, defaultChatNetworkAccess, providerInactivityTimeoutMinutes });
     await saveSettings();
     return state.settings;
   }
@@ -478,6 +503,7 @@ const updateAgentDefaults = async (input: UpdateAgentDefaultsInput): Promise<Set
       defaultAgentProvider,
       defaultChatPermissionMode,
       defaultChatNetworkAccess,
+      providerInactivityTimeoutMinutes,
       codexDefaults: {
         model: input.model ?? current.agentDefaults.codex.model,
         reasoningEffort: normalizeCodexReasoningEffort(input.effort, current.agentDefaults.codex.reasoningEffort),
@@ -512,6 +538,7 @@ const updateAgentDefaults = async (input: UpdateAgentDefaultsInput): Promise<Set
       defaultAgentProvider,
       defaultChatPermissionMode,
       defaultChatNetworkAccess,
+      providerInactivityTimeoutMinutes,
       llmProviderDefaults: {
         ...current.llmProviderDefaults,
         antigravity: {
@@ -535,6 +562,7 @@ const updateAgentDefaults = async (input: UpdateAgentDefaultsInput): Promise<Set
     defaultAgentProvider,
     defaultChatPermissionMode,
     defaultChatNetworkAccess,
+    providerInactivityTimeoutMinutes,
     llmProviderDefaults: {
       ...current.llmProviderDefaults,
       claude: {

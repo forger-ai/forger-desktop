@@ -3351,6 +3351,132 @@ test('runtime install installs full app dependencies with progress messages and 
   const npmCi = calls.find((call) => call[0] === 'run' && call[2][0] === 'ci' && call[3].log.label === 'npm ci');
   assert.ok(npmCi);
   assert.deepEqual(npmCi[2], ['ci']);
+  assert.ok(calls.some((call) => call[0] === 'run' && call[2][0] === '-e' && call[3].log.label === 'verify native optional dependencies'));
+  assert.equal(calls.some((call) => call[0] === 'run' && call[2][0] === 'install'), false);
+});
+
+test('runtime install repairs a missing platform-native optional dependency without changing the app lockfile', async (t) => {
+  const root = await tmpRoot('runtime-install-native-optional-repair');
+  const calls = [];
+  const frontendDir = path.join(root, 'frontend');
+  const lockPath = path.join(frontendDir, 'package-lock.json');
+  const lockContents = '{"lockfileVersion":3,"packages":{}}\n';
+  t.after(async () => {
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  await fs.mkdir(path.join(frontendDir, 'node_modules', 'rollup'), { recursive: true });
+  await fs.writeFile(lockPath, lockContents, 'utf8');
+  await fs.writeFile(path.join(frontendDir, 'node_modules', 'rollup', 'package.json'), JSON.stringify({
+    name: 'rollup',
+    version: '4.60.2',
+    optionalDependencies: {
+      '@rollup/rollup-win32-x64-msvc': '4.60.2',
+    },
+  }), 'utf8');
+  let probeAttempts = 0;
+  const controller = createRuntimeInstallController({
+    DEFAULT_NODE_VERSION: '22.1.0',
+    DEFAULT_PYTHON_VERSION: '3.12.0',
+    appendInstallLog: async (event, payload) => calls.push(['log', event, payload]),
+    app: { getPath: () => root },
+    clearMacQuarantine: async () => undefined,
+    extractArchive: async () => undefined,
+    findRuntimeArchive: async () => null,
+    findRuntimeChecksumFile: async () => null,
+    fs,
+    getBundledResourcesRoot: () => path.join(root, 'resources'),
+    getRuntimesRoot: () => path.join(root, 'runtimes'),
+    getTempRoot: () => path.join(root, 'tmp'),
+    hashFileSha256: async () => '',
+    installBackendDependenciesWithUv: async () => undefined,
+    normalizeNodeRuntimeVersion: (value) => value,
+    normalizeVersionForFolder: (value) => value,
+    path,
+    resolvePlatformAlias: () => 'win32_x64',
+    runCommand: async (command, args, options) => {
+      calls.push(['run', command, args, options]);
+      if (command.endsWith('node.exe') && args[0] === '-e' && probeAttempts++ === 0) {
+        const error = new Error('native dependency probe failed');
+        error.stderr = 'Error: Cannot find module @rollup/rollup-win32-x64-msvc. npm has a bug related to optional dependencies';
+        throw error;
+      }
+    },
+    runtimeLocks: new Map(),
+  });
+
+  await controller.installFrontendDependenciesWithNpm(
+    path.join(root, 'node.exe'),
+    path.join(root, 'npm.cmd'),
+    frontendDir,
+    'social',
+  );
+
+  assert.equal(await fs.readFile(lockPath, 'utf8'), lockContents);
+  assert.deepEqual(
+    calls.filter((call) => call[0] === 'run').map((call) => [
+      path.basename(call[1]),
+      call[2][0] === '-e' ? ['-e'] : call[2],
+    ]),
+    [
+      ['npm.cmd', ['ci']],
+      ['node.exe', ['-e']],
+      ['npm.cmd', ['install', '--no-save', '--package-lock=false', '--include=optional', '@rollup/rollup-win32-x64-msvc@4.60.2']],
+      ['node.exe', ['-e']],
+    ],
+  );
+  assert.ok(calls.some((call) => call[0] === 'log' && call[1] === 'frontend:native_optional_repair:start'));
+  assert.ok(calls.some((call) => call[0] === 'log' && call[1] === 'frontend:native_optional_repair:success'));
+});
+
+test('runtime install does not mask unrelated frontend dependency verification failures', async (t) => {
+  const root = await tmpRoot('runtime-install-native-optional-real-failure');
+  const calls = [];
+  const frontendDir = path.join(root, 'frontend');
+  t.after(async () => {
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  await fs.mkdir(frontendDir, { recursive: true });
+  await fs.writeFile(path.join(frontendDir, 'package-lock.json'), '{}', 'utf8');
+  const verificationError = Object.assign(new Error('frontend verification failed'), {
+    stderr: 'SyntaxError: Unexpected token in vite configuration',
+  });
+  const controller = createRuntimeInstallController({
+    DEFAULT_NODE_VERSION: '22.1.0',
+    DEFAULT_PYTHON_VERSION: '3.12.0',
+    app: { getPath: () => root },
+    clearMacQuarantine: async () => undefined,
+    extractArchive: async () => undefined,
+    findRuntimeArchive: async () => null,
+    findRuntimeChecksumFile: async () => null,
+    fs,
+    getBundledResourcesRoot: () => path.join(root, 'resources'),
+    getRuntimesRoot: () => path.join(root, 'runtimes'),
+    getTempRoot: () => path.join(root, 'tmp'),
+    hashFileSha256: async () => '',
+    installBackendDependenciesWithUv: async () => undefined,
+    normalizeNodeRuntimeVersion: (value) => value,
+    normalizeVersionForFolder: (value) => value,
+    path,
+    resolvePlatformAlias: () => 'win32_x64',
+    runCommand: async (command, args, options) => {
+      calls.push(['run', command, args, options]);
+      if (command.endsWith('node.exe')) {
+        throw verificationError;
+      }
+    },
+    runtimeLocks: new Map(),
+  });
+
+  await assert.rejects(
+    controller.installFrontendDependenciesWithNpm(
+      path.join(root, 'node.exe'),
+      path.join(root, 'npm.cmd'),
+      frontendDir,
+      'social',
+    ),
+    (error) => error === verificationError,
+  );
+  assert.equal(calls.filter((call) => call[0] === 'run' && call[2][0] === 'install').length, 0);
 });
 
 test('runtime install supports experimental x64 aliases but keeps unsupported architectures blocked', async (t) => {

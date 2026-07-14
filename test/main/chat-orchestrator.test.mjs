@@ -8,8 +8,6 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const {
-  CHAT_PROVIDER_INACTIVITY_TIMEOUT_MS,
-  CHAT_PROVIDER_TOTAL_TIMEOUT_MS,
   ChatOrchestrator,
 } = require('../../dist-electron/main/chat/orchestrator.js');
 const {
@@ -2091,43 +2089,58 @@ test('chat orchestrator reports Codex auth and CLI setup failures before provide
   }
 });
 
-test('chat orchestrator gives Claude app update runs extended total and inactivity windows', async () => {
+test('chat orchestrator has no hard deadline and applies provider-specific inactivity windows', async () => {
   const calls = [];
   const harness = await createHarness({
-    getAgentRuntime: async () => ({ provider: 'claude', model: 'claude-test', effort: 'high' }),
+    getAgentRuntime: async (request) => ({ provider: request?.provider ?? 'claude', model: `${request?.provider ?? 'claude'}-test`, effort: 'high' }),
     getClaudeCliPath: async () => process.execPath,
     getClaudeAuthenticated: async () => true,
+    getAntigravityCliPath: async () => process.execPath,
+    getAntigravityAuthenticated: async () => true,
+    getProviderInactivityTimeoutMs: (provider) => ({
+      codex: 30 * 60_000,
+      claude: 8 * 60 * 60_000,
+      antigravity: 0,
+    })[provider],
   });
-  const appId = 'finance-os';
-  const appRoot = join(harness.privateAppsRoot, appId);
-  await mkdir(appRoot, { recursive: true });
-  await writeFile(join(appRoot, 'app.txt'), 'before\n', 'utf8');
-  await ensureGitRepository(appRoot);
   harness.orchestrator.sandboxRunner = {
-    async runCodex() {
-      throw new Error('not_used');
+    async runCodex(params) {
+      calls.push({ provider: 'codex', ...params });
+      return { assistantText: 'Codex completed.', threadId: 'codex-timeout-thread', toolEvents: 0 };
     },
     async runClaude(params) {
-      calls.push(params);
+      calls.push({ provider: 'claude', ...params });
       return { assistantText: 'Reviewed the requested app change.', threadId: 'claude-timeout-thread', toolEvents: 0 };
+    },
+    async runAntigravity(params) {
+      calls.push({ provider: 'antigravity', ...params });
+      return { assistantText: 'Antigravity completed.', threadId: 'antigravity-timeout-thread', toolEvents: 0 };
     },
   };
 
   try {
-    const started = await harness.orchestrator.startRun({
-      appId,
-      prompt: 'Make the editor workflow clearer',
-      threadId: null,
-      conversationId: 'conversation-claude-timeouts',
-      conversationHistory: [{ role: 'user', content: 'Make the editor workflow clearer' }],
-    });
-    const finalRun = await waitForRun(harness.events, started.runId);
-    assert.equal(finalRun.status, 'preview_ready');
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].timeoutMs, CHAT_PROVIDER_TOTAL_TIMEOUT_MS);
-    assert.equal(calls[0].inactivityTimeoutMs, CHAT_PROVIDER_INACTIVITY_TIMEOUT_MS);
-    assert.ok(calls[0].timeoutMs > 300_000);
-    assert.ok(calls[0].inactivityTimeoutMs > 300_000);
+    for (const provider of ['codex', 'claude', 'antigravity']) {
+      const appId = `finance-os-${provider}`;
+      const appRoot = join(harness.privateAppsRoot, appId);
+      await mkdir(appRoot, { recursive: true });
+      await writeFile(join(appRoot, 'app.txt'), 'before\n', 'utf8');
+      await ensureGitRepository(appRoot);
+      const started = await harness.orchestrator.startRun({
+        appId,
+        provider,
+        prompt: `Make the editor workflow clearer with ${provider}`,
+        threadId: null,
+        conversationId: `conversation-${provider}-timeouts`,
+        conversationHistory: [{ role: 'user', content: 'Make the editor workflow clearer' }],
+      });
+      const finalRun = await waitForRun(harness.events, started.runId);
+      assert.equal(finalRun.status, 'preview_ready');
+    }
+    assert.deepEqual(calls.map(({ provider, timeoutMs, inactivityTimeoutMs }) => ({ provider, timeoutMs, inactivityTimeoutMs })), [
+      { provider: 'codex', timeoutMs: 0, inactivityTimeoutMs: 30 * 60_000 },
+      { provider: 'claude', timeoutMs: 0, inactivityTimeoutMs: 8 * 60 * 60_000 },
+      { provider: 'antigravity', timeoutMs: 0, inactivityTimeoutMs: 0 },
+    ]);
   } finally {
     await harness.cleanup();
   }
