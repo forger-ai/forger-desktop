@@ -13,6 +13,7 @@ export interface Settings {
   defaultAgentProvider: AgentProvider | 'auto';
   defaultChatPermissionMode: AgentPermissionMode;
   defaultChatNetworkAccess: boolean;
+  providerInactivityTimeoutMinutes: Record<AgentProvider, number>;
   llmProviderDefaults: AgentDefaults;
   /** @deprecated Use llmProviderDefaults. */
   agentDefaults: AgentDefaults;
@@ -57,6 +58,7 @@ export interface UpdateAgentDefaultsInput {
   provider?: AgentProvider;
   model?: string;
   effort?: AgentEffort;
+  inactivityTimeoutMinutes?: number;
 }
 
 export type MemoryScope = 'global' | 'app';

@@ -1184,6 +1184,115 @@ test('task manager completes Claude runs and reports provider setup failures beh
   }
 });
 
+test('prompt tasks inherit a connected provider when the manifest preference is unavailable, while request overrides stay strict', async () => {
+  const roots = await createTempDesktopRoots('forger-task-provider-inheritance-');
+  try {
+    await mkdir(path.join(roots.appsRoot, 'finance-os'), { recursive: true });
+    const fakeClaude = await createFakeAgentCli(roots.root, 'fake-claude.cjs');
+    const runtimeRequests = [];
+    const events = [];
+    const { AppAgentTaskManager } = distRequire('main/app-agent-task-manager.js');
+    const manager = new AppAgentTaskManager({
+      privateAppsRoot: roots.appsRoot,
+      metadataRoot: roots.metadataRoot,
+      codexHome: roots.codexHome,
+      getAgentRuntime: async (request) => {
+        runtimeRequests.push(request);
+        if (request?.provider === 'codex') {
+          return {
+            provider: 'codex',
+            model: request.model ?? 'gpt-manifest',
+            effort: request.effort ?? 'high',
+          };
+        }
+        return {
+          provider: 'claude',
+          model: request?.recommendations?.claude?.model ?? 'claude-connected',
+          effort: request?.recommendations?.claude?.effort ?? 'medium',
+        };
+      },
+      appAllowsAgentRuntimeControl: async () => true,
+      getCodexCliPath: async () => process.execPath,
+      getClaudeCliPath: async () => fakeClaude,
+      getCodexPathEntries: async () => [path.dirname(fakeClaude)],
+      getCodexEnvironment: async () => ({}),
+      getCodexAuthenticated: async () => false,
+      getClaudeAuthenticated: async () => true,
+      resolvePromptTemplates: async () => [{
+        id: 'review',
+        title: 'Review',
+        prompt: 'Review {{topic}}',
+        arguments: [{ name: 'topic', type: 'string', required: true }],
+        runtime: { provider: 'codex', model: 'gpt-manifest', effort: 'high' },
+        runtimeRecommendations: {
+          codex: { model: 'gpt-recommended', reasoningEffort: 'high' },
+          claude: { model: 'claude-recommended', effort: 'medium' },
+        },
+      }],
+      onTaskUpdated: (event) => events.push(event),
+    });
+
+    const inherited = await manager.start('finance-os', {
+      templateId: 'review',
+      arguments: { topic: 'budget' },
+    });
+    const completed = await waitFor(
+      () => events.find((event) => event.task.runId === inherited.runId && event.task.status === 'completed'),
+      'task_connected_provider_inherited',
+    );
+    assert.equal(completed.task.resultText, 'claude completed task');
+    assert.deepEqual(runtimeRequests[0], {
+      recommendations: {
+        codex: { model: 'gpt-recommended', reasoningEffort: 'high' },
+        claude: { model: 'claude-recommended', effort: 'medium' },
+      },
+    });
+
+    runtimeRequests.length = 0;
+    const inheritedWithRuntimeOptions = await manager.start('finance-os', {
+      templateId: 'review',
+      arguments: { topic: 'budget' },
+      runtime: {
+        model: 'gpt-stale-template-selection',
+        effort: 'high',
+        permissionMode: 'safe',
+      },
+    });
+    const completedWithRuntimeOptions = await waitFor(
+      () => events.find((event) => event.task.runId === inheritedWithRuntimeOptions.runId && event.task.status === 'completed'),
+      'task_connected_provider_inherited_with_runtime_options',
+    );
+    assert.equal(completedWithRuntimeOptions.task.resultText, 'claude completed task');
+    assert.deepEqual(runtimeRequests[0], {
+      provider: undefined,
+      model: undefined,
+      authProfileId: undefined,
+      effort: undefined,
+      permissionMode: 'safe',
+      recommendations: {
+        codex: { model: 'gpt-recommended', reasoningEffort: 'high' },
+        claude: { model: 'claude-recommended', effort: 'medium' },
+      },
+      strict: true,
+    });
+
+    runtimeRequests.length = 0;
+    const explicit = await manager.start('finance-os', {
+      templateId: 'review',
+      arguments: { topic: 'budget' },
+      runtime: { provider: 'codex' },
+    });
+    const failed = await waitFor(
+      () => events.find((event) => event.task.runId === explicit.runId && event.task.status === 'failed'),
+      'task_explicit_disconnected_provider_failed',
+    );
+    assert.equal(failed.task.error, 'codex_auth_missing');
+    assert.equal(runtimeRequests.every((request) => request?.provider === 'codex'), true);
+  } finally {
+    await roots.cleanup();
+  }
+});
+
 const withMockedModuleLoad = async (mockForRequest, callback) => {
   const originalLoad = Module._load;
   Module._load = function loadWithMocks(request, parent, isMain) {

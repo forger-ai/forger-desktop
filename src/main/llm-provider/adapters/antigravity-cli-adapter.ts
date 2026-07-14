@@ -58,7 +58,7 @@ export class AntigravityCliAdapter {
           PATH: [path.dirname(input.cliPath), ...input.pathEntries, process.env.PATH ?? ''].filter(Boolean).join(path.delimiter),
         },
         ...(input.timeoutMode === 'inactivity'
-          ? { inactivityTimeoutMs: input.timeoutMs }
+          ? { inactivityTimeoutMs: input.inactivityTimeoutMs ?? input.timeoutMs }
           : { timeoutMs: input.timeoutMs }),
         onChild: input.onChild,
         onStdout: (text) => emitOutput('stdout', text),

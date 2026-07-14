@@ -79,6 +79,7 @@ import {
   buildChatRunTracePayload,
   toPublicChatRun,
 } from './run-serialization';
+import { providerInactivityTimeoutMinutesToMs } from '../../shared/provider-timeouts';
 
 interface ChatOrchestratorOptions {
   forgerHomeRoot: string;
@@ -97,6 +98,7 @@ interface ChatOrchestratorOptions {
   getCodexEnvironment: (appId?: string) => Promise<Record<string, string>>;
   ensureGitAvailable?: () => Promise<void>;
   getChatNetworkAccessDefault?: () => Promise<boolean> | boolean;
+  getProviderInactivityTimeoutMs?: (provider: AgentProvider) => Promise<number> | number;
   resolveChatAppRoot?: (appId: string, chatMode?: ChatStartRunInput['chatMode']) => Promise<string | null>;
   getCodexAuthenticated: () => Promise<boolean>;
   getClaudeAuthenticated: () => Promise<boolean>;
@@ -149,8 +151,7 @@ interface AppThreadState {
 const hasUnmergedGitStatus = (status: string[]): boolean =>
   status.some((line) => /^(AA|DD|DU|UD|UA|AU|UU)\s/.test(line));
 
-export const CHAT_PROVIDER_TOTAL_TIMEOUT_MS = 60 * 60 * 1000;
-export const CHAT_PROVIDER_INACTIVITY_TIMEOUT_MS = 30 * 60 * 1000;
+export const CHAT_PROVIDER_INACTIVITY_TIMEOUT_MS = providerInactivityTimeoutMinutesToMs(undefined);
 
 export class ChatOrchestrator {
   private readonly runs = new Map<string, InternalChatRun>();
@@ -712,6 +713,13 @@ export class ChatOrchestrator {
             },
           )
         : undefined;
+      const requestedProviderInactivityTimeoutMs = await (
+        this.options.getProviderInactivityTimeoutMs?.(run.provider)
+        ?? Promise.resolve(CHAT_PROVIDER_INACTIVITY_TIMEOUT_MS)
+      );
+      const providerInactivityTimeoutMs = providerInactivityTimeoutMinutesToMs(
+        typeof requestedProviderInactivityTimeoutMs === 'number' ? requestedProviderInactivityTimeoutMs / 60_000 : undefined,
+      );
 
       const commonRunOptionsBase = {
         pathEntries: codexPathEntries,
@@ -721,8 +729,8 @@ export class ChatOrchestrator {
         sharedRoots: run.sharedRoots,
         model: run.model,
         networkAccess,
-        timeoutMs: CHAT_PROVIDER_TOTAL_TIMEOUT_MS,
-        inactivityTimeoutMs: CHAT_PROVIDER_INACTIVITY_TIMEOUT_MS,
+        timeoutMs: 0,
+        inactivityTimeoutMs: providerInactivityTimeoutMs,
         onChild: (child: ChildProcessWithoutNullStreams) => {
           run.child = child;
           if (run.status === 'canceled') {

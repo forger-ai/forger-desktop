@@ -57,6 +57,7 @@ interface CodexBaseRunInput {
   permissionMode?: AgentPermissionMode;
   networkAccess?: boolean;
   timeoutMs: number;
+  inactivityTimeoutMs?: number;
   codexHome?: string;
   onChild?: (child: ChildProcessWithoutNullStreams) => void;
   onOutput?: (stream: LlmRunOutputStream, text: string) => void;
@@ -147,7 +148,7 @@ export class CodexCliAdapter {
             const result = await input.runCommandCapture(command.command, [...command.prefixArgs, ...topLevelArgs, ...args], {
               cwd: input.workingDir,
               env: this.buildEnv(input, command, isolatedCodexHome),
-              inactivityTimeoutMs: CODEX_ATTEMPT_INACTIVITY_TIMEOUT_MS,
+              inactivityTimeoutMs: input.inactivityTimeoutMs ?? CODEX_ATTEMPT_INACTIVITY_TIMEOUT_MS,
               stdinText: input.prompt,
               onChild: input.onChild,
               onStdout: (text) => input.onOutput?.('stdout', text),
@@ -299,6 +300,7 @@ export class CodexCliAdapter {
       cwd: input.workingDir,
       env: this.buildEnv(input, command, codexHome),
       timeoutMs: input.timeoutMs,
+      inactivityTimeoutMs: input.inactivityTimeoutMs,
       stdinText,
       onChild: input.onChild,
       onStdout: (text) => input.onOutput?.('stdout', text),

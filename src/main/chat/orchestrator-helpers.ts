@@ -173,6 +173,7 @@ export class SandboxRunner {
     permissionMode?: AgentPermissionMode;
     networkAccess?: boolean;
     timeoutMs: number;
+    inactivityTimeoutMs?: number;
     onChild: (child: ChildProcessWithoutNullStreams) => void;
     onOutput?: (stream: 'stdout' | 'stderr' | 'meta', text: string) => void;
     threadId?: string;
@@ -198,6 +199,7 @@ export class SandboxRunner {
       permissionMode: params.permissionMode,
       networkAccess: params.networkAccess,
       timeoutMs: params.timeoutMs,
+      inactivityTimeoutMs: params.inactivityTimeoutMs,
       onChild: params.onChild,
       onOutput: params.onOutput,
       threadId: params.threadId,
@@ -284,6 +286,7 @@ export class SandboxRunner {
     authProfileId?: string;
     permissionMode?: AgentPermissionMode;
     timeoutMs: number;
+    inactivityTimeoutMs?: number;
     onChild: (child: ChildProcessWithoutNullStreams) => void;
     onOutput?: (stream: 'stdout' | 'stderr' | 'meta', text: string) => void;
     threadId?: string;
@@ -310,6 +313,7 @@ export class SandboxRunner {
       conversationId: params.threadId,
       permissionMode: params.permissionMode,
       timeoutMs: params.timeoutMs,
+      inactivityTimeoutMs: params.inactivityTimeoutMs,
       timeoutMode: 'inactivity',
       onChild: params.onChild,
       onOutput: params.onOutput,

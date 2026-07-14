@@ -290,10 +290,12 @@ test('social upload stages a filtered copy of the app, uploads it, and records t
   const installDir = await fs.mkdtemp(path.join(tmpdir(), 'forger-social-src-'));
   try {
     await fs.mkdir(path.join(installDir, 'src'), { recursive: true });
+    await fs.mkdir(path.join(installDir, 'frontend'), { recursive: true });
     await fs.mkdir(path.join(installDir, 'node_modules', 'pkg'), { recursive: true });
     await fs.mkdir(path.join(installDir, 'data'), { recursive: true });
     await fs.writeFile(path.join(installDir, 'app.py'), 'print("hola")', 'utf8');
     await fs.writeFile(path.join(installDir, 'src', 'main.py'), 'main', 'utf8');
+    await fs.writeFile(path.join(installDir, 'frontend', 'package-lock.json'), '{"lockfileVersion":3}', 'utf8');
     await fs.writeFile(path.join(installDir, 'node_modules', 'pkg', 'index.js'), 'x', 'utf8');
     await fs.writeFile(path.join(installDir, 'data', 'store.sqlite'), 'db', 'utf8');
     await fs.writeFile(path.join(installDir, '.env.local'), 'SECRET=1', 'utf8');
@@ -360,7 +362,11 @@ test('social upload stages a filtered copy of the app, uploads it, and records t
     assert.equal(result.share.deepLink, 'https://forger.app/s/registro-facil');
 
     stagedFiles.sort();
-    assert.deepEqual(stagedFiles, ['demo-app/app.py', 'demo-app/src/main.py'], 'staging must drop node_modules, data DBs, and .env files');
+    assert.deepEqual(
+      stagedFiles,
+      ['demo-app/app.py', 'demo-app/src/main.py'],
+      'staging must drop runtime artifacts, private data, and platform-conditioned frontend lockfiles',
+    );
 
     assert.equal(uploads.length, 1);
     assert.equal(uploads[0].name, 'Registro Fácil ✨');
