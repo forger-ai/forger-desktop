@@ -48,6 +48,8 @@ import type {
   SubmitAppRatingInput,
   SubmitUsageEventInput,
   SubmitUsageEventResult,
+  TeamDemoRequestInput,
+  TeamDemoRequestResult,
 } from '../shared/types';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -92,6 +94,7 @@ import {
 import { type ConversationDiagnosticAttachmentUpload, type DesktopErrorReportAttachmentUpload, submitConversationDiagnosticReport, submitDesktopErrorReport } from './forger-backend/report-submissions';
 import { deleteBackendJson, getBackendJson, patchBackendJson, postBackendJson } from './forger-backend/json-request';
 import { toSocialUserApp, toSocialUserAppUploadAttempt, toSocialUserProfileDetail, toSocialVersion } from './forger-backend/social-normalizers';
+import { TeamDemoClient } from './forger-backend/team-demo-client';
 
 interface ClientOptions {
   backendBaseUrl: string;
@@ -247,6 +250,10 @@ const forumItems = (payload: unknown): unknown[] => {
 
 export class ForgerBackendClient {
   constructor(private readonly options: ClientOptions) {}
+
+  async requestTeamDemo(input: TeamDemoRequestInput): Promise<TeamDemoRequestResult> {
+    return await new TeamDemoClient(this.options).request(input);
+  }
 
   private async appendReportingLog(event: string, details: Record<string, unknown>): Promise<void> {
     const logPath = this.options.reportingLogPath?.() ?? defaultReportingLogPath();

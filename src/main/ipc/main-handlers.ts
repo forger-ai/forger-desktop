@@ -96,6 +96,7 @@ import type {
   ForgerAccountProfileInput,
   ForgerAccountRegisterInput,
   ForgerAccountSession,
+  TeamDemoRequestInput,
   FriendChatWindowOpenResult,
   GetAppToolsInstallGateOptions,
   InstallAppResult,
@@ -1302,6 +1303,11 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
     return forgerBackendClient
       ? await forgerBackendClient.submitProductFeedback(input)
       : { success: false, userMessage: 'No pudimos enviar el feedback.', technicalCode: 'backend_client_missing' };
+  });
+  ipcMain.handle(IPC_CHANNELS.requestTeamDemo, async (_event, input: TeamDemoRequestInput) => {
+    return forgerBackendClient
+      ? await forgerBackendClient.requestTeamDemo(input)
+      : { success: false, userMessage: 'No pudimos enviar tu solicitud.', technicalCode: 'backend_client_missing' };
   });
   ipcMain.handle(IPC_CHANNELS.submitUsageEvent, async (_event, input: SubmitUsageEventInput) => {
     const eventInput: SubmitUsageEventInput = {

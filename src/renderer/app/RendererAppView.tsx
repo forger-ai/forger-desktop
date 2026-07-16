@@ -27,6 +27,7 @@ import { SettingsView } from '@renderer/views/SettingsView';
 import { SecretsView } from '@renderer/views/SecretsView';
 import { SidekicksView } from '@renderer/views/SidekicksView';
 import { ToolsView } from '@renderer/views/ToolsView';
+import { TeamDemoView } from '@renderer/views/teams/TeamDemoView';
 import { AGENT_PROVIDER_OPTIONS, ANTIGRAVITY_EFFORT_OPTIONS, ANTIGRAVITY_MODEL_OPTIONS, CHAT_BOT_PICTURE_OPTIONS, CLAUDE_EFFORT_OPTIONS, CLAUDE_MODEL_OPTIONS, CODEX_MODEL_OPTIONS, CODEX_REASONING_OPTIONS } from '@renderer/preferences';
 import { buildChatProviderOptions, getRuntimeSupportedEfforts, normalizeRuntimeEffortForModel } from '@shared/agent-runtime-registry';
 import { TourOverlay } from '@renderer/tour/TourOverlay';
@@ -1197,6 +1198,13 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             onTogglePin={togglePinnedView}
             onOpen={setCurrentView}
           />
+        ) : null}
+
+        {currentView === 'teams' ? (
+          renderAdvancedView('teams', <TeamDemoView
+            locale={activeLocale}
+            onRequestDemo={(input) => getDesktopApi().requestTeamDemo(input)}
+          />)
         ) : null}
 
         {currentView === 'automations' ? (

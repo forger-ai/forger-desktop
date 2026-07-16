@@ -35,6 +35,7 @@ import type { LlmRunsSnapshot } from './llm-runs';
 import type { PersonalAgent, PersonalAgentConversation, PersonalAgentConversationDraftUpdateInput, PersonalAgentConversationEvent, PersonalAgentConversationGetInput, PersonalAgentConversationsListInput, PersonalAgentConversationStartInput, PersonalAgentCreateInput, PersonalAgentDeleteInput, PersonalAgentGrantOptions, PersonalAgentMessageSendInput, PersonalAgentPeerThread, PersonalAgentPeerThreadGetInput, PersonalAgentPeerThreadsListInput, PersonalAgentRoutine, PersonalAgentRoutineDeleteInput, PersonalAgentRoutineListInput, PersonalAgentRoutineRun, PersonalAgentRoutineRunNowInput, PersonalAgentRoutineSetEnabledInput, PersonalAgentRoutineUpsertInput, PersonalAgentScheduledWakeup, PersonalAgentUpdatePermissionsInput, PersonalAgentWakeupCancelInput, PersonalAgentWorkspaceEntry, PersonalAgentWorkspaceFile, PersonalAgentWorkspaceFileReadInput, PersonalAgentWorkspaceFileWriteInput, PersonalAgentWorkspaceListInput } from './personal-agents';
 import type { PersonalAgentGroup, PersonalAgentGroupCreateInput, PersonalAgentGroupDeleteInput, PersonalAgentGroupUpdateInput, PersonalAgentUpdateGroupInput } from './personal-agents';
 import type { RemoteActivitySnapshot } from './remote-activity';
+import type { TeamDemoRequestInput, TeamDemoRequestResult } from './teams';
 
 export type MicrophonePermissionStatus = 'not-determined' | 'granted' | 'denied' | 'restricted' | 'unknown' | 'unsupported';
 
@@ -223,6 +224,7 @@ export interface ForgerDesktopApi {
   regenerateCloudSecretKey: () => Promise<CloudIdentityState>;
   submitAppRating: (input: SubmitAppRatingInput) => Promise<{ success: boolean; rating?: AppRatingSummary; userMessage?: string; technicalCode?: string }>;
   submitProductFeedback: (input: SubmitProductFeedbackInput) => Promise<{ success: boolean; userMessage?: string; technicalCode?: string } & FailureDiagnosticFields>;
+  requestTeamDemo: (input: TeamDemoRequestInput) => Promise<TeamDemoRequestResult>;
   submitUsageEvent: (input: SubmitUsageEventInput) => Promise<SubmitUsageEventResult>;
   openExternalUrl: (url: string) => Promise<{ success: boolean; userMessage?: string } & FailureDiagnosticFields>;
   getAgentProviderUsage: () => Promise<AgentProviderUsageResult>;

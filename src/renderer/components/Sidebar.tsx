@@ -11,6 +11,7 @@ import SmartToyRounded from '@mui/icons-material/SmartToyRounded';
 import TableChartRounded from '@mui/icons-material/TableChartRounded';
 import FeedbackRounded from '@mui/icons-material/FeedbackRounded';
 import PeopleRounded from '@mui/icons-material/PeopleRounded';
+import GroupsRounded from '@mui/icons-material/GroupsRounded';
 import SpeedRounded from '@mui/icons-material/SpeedRounded';
 import GridViewRounded from '@mui/icons-material/GridViewRounded';
 import HubRounded from '@mui/icons-material/HubRounded';
@@ -63,6 +64,7 @@ export type View =
   | 'connections'
   | 'connectionDetail'
   | 'tools'
+  | 'teams'
   | 'docs'
   | 'more'
   | 'settings'
@@ -71,7 +73,7 @@ export type View =
   | 'backgroundTaskDetail';
 const isMacOs = navigator.platform.toLowerCase().includes('mac');
 
-export const PINNABLE_VIEWS = ['automations', 'workflows', 'files', 'backups', 'devices', 'sidekicks', 'datos', 'secrets', 'connections', 'tools', 'docs'] as const;
+export const PINNABLE_VIEWS = ['automations', 'workflows', 'files', 'backups', 'devices', 'sidekicks', 'datos', 'secrets', 'connections', 'tools', 'teams', 'docs'] as const;
 export type PinnableView = (typeof PINNABLE_VIEWS)[number];
 
 interface SidebarProps {
@@ -103,6 +105,7 @@ export const pinnableNav: Array<{ id: PinnableView; icon: ReactElement }> = [
   { id: 'secrets', icon: <VpnKeyRounded /> },
   { id: 'connections', icon: <HubRounded /> },
   { id: 'tools', icon: <ConstructionRounded /> },
+  { id: 'teams', icon: <GroupsRounded /> },
   { id: 'docs', icon: <MenuBookRounded /> },
 ];
 
@@ -377,6 +380,7 @@ export function Sidebar({ currentView, onNavigate, t, desktopUpdateState, pinned
     connections: t.nav.connections,
     connectionDetail: t.nav.connections,
     tools: t.nav.tools,
+    teams: 'Teams',
     docs: t.nav.docs,
     more: t.nav.more,
     settings: t.nav.settings,

@@ -171,6 +171,7 @@ export const IPC_CHANNELS = {
   regenerateCloudSecretKey: 'forger:cloud-identity:regenerate',
   submitAppRating: 'forger:catalog:rating:submit',
   submitProductFeedback: 'forger:feedback:submit',
+  requestTeamDemo: 'forger:teams:request-demo',
   submitUsageEvent: 'forger:usage-events:submit',
   openExternalUrl: 'forger:open-external-url',
   getAgentProviderUsage: 'forger:agent-provider-usage:get',

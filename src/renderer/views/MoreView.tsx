@@ -3,6 +3,7 @@ import PushPinRounded from '@mui/icons-material/PushPinRounded';
 import { alpha, Box, Card, CardActionArea, Chip, IconButton, Stack, Tooltip, Typography, useTheme } from '@mui/material';
 import type { AppDictionary } from '@renderer/i18n';
 import { pinnableNav, type PinnableView, type View } from '@renderer/components/Sidebar';
+import { getTeamDemoCopy } from '@renderer/views/teams/teamDemoCopy';
 
 interface MoreViewProps {
   t: AppDictionary;
@@ -24,6 +25,7 @@ export function MoreView({ t, pinnedViews, onTogglePin, onOpen }: MoreViewProps)
     secrets: t.nav.secrets,
     connections: t.nav.connections,
     tools: t.nav.tools,
+    teams: getTeamDemoCopy(t.locale).title,
     docs: t.nav.docs,
   };
   return (
@@ -59,7 +61,7 @@ export function MoreView({ t, pinnedViews, onTogglePin, onOpen }: MoreViewProps)
                     </Typography>
                   </Stack>
                   <Typography variant="body2" color="text.secondary">
-                    {t.settings.advancedSurfaces[item.id]}
+                    {item.id === 'teams' ? getTeamDemoCopy(t.locale).moreDescription : t.settings.advancedSurfaces[item.id]}
                   </Typography>
                   {pinned ? (
                     <Chip size="small" color="primary" variant="outlined" label={t.more.pinnedBadge} sx={{ alignSelf: 'flex-start' }} />
