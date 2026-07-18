@@ -976,6 +976,7 @@ test('submitUsageEvent sends allowlisted parameters without user content fields'
 
     assert.equal(result.success, true);
     assert.equal(requestBody.event_name, 'app_opened');
+    assert.equal(requestBody.product_scope, 'desktop');
     assert.equal(requestBody.installation_identifier, 'installation-test');
     assert.equal(requestBody.desktop_version, '0.1.test');
     assert.equal(requestBody.platform, 'darwin_arm64');

@@ -1589,6 +1589,7 @@ export class ForgerBackendClient {
         },
         body: JSON.stringify({
           event_name: input.eventName,
+          product_scope: 'desktop',
           installation_identifier: input.installationIdentifier,
           surface: input.surface,
           desktop_version: desktopVersion,
