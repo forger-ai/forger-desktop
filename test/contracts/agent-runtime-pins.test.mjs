@@ -17,8 +17,8 @@ test('desktop pins exact runtime and agent CLI versions instead of floating rang
 });
 
 test('desktop ships built-in model defaults for every supported provider', () => {
-  assert.equal(typeof defaults.BUILT_IN_CODEX_MODEL, 'string');
-  assert.ok(defaults.BUILT_IN_CODEX_MODEL.length > 0);
+  assert.equal(defaults.BUILT_IN_CODEX_MODEL, 'gpt-5.4');
+  assert.equal(defaults.BUILT_IN_CODEX_REASONING, 'medium');
   assert.equal(typeof defaults.BUILT_IN_CLAUDE_MODEL, 'string');
   assert.ok(defaults.BUILT_IN_CLAUDE_MODEL.length > 0);
   assert.ok(Array.isArray(defaults.APP_CODEX_MODEL_OPTIONS) && defaults.APP_CODEX_MODEL_OPTIONS.length > 0);
