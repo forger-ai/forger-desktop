@@ -441,7 +441,7 @@ test('agent runtime registry normalizes providers, defaults, fallbacks, and runt
   });
   assert.deepEqual(runtimeRegistry.resolveAgentRuntime(undefined, runtimeRegistry.DEFAULT_AGENT_DEFAULTS), {
     provider: 'codex',
-    model: 'gpt-5.2',
+    model: 'gpt-5.4',
     effort: 'medium',
   });
   assert.deepEqual(runtimeRegistry.resolveAgentRuntime({ provider: 'claude', model: 'bad', effort: 'bad' }, {
@@ -555,7 +555,7 @@ test('agent runtime registry normalizes providers, defaults, fallbacks, and runt
   assert.equal(runtimeRegistry.agentRuntimeEquals(undefined, undefined), false);
   const defaultsCopy = runtimeRegistry.getDefaultAgentDefaults();
   defaultsCopy.codex.model = 'mutated';
-  assert.equal(runtimeRegistry.DEFAULT_AGENT_DEFAULTS.codex.model, 'gpt-5.2');
+  assert.equal(runtimeRegistry.DEFAULT_AGENT_DEFAULTS.codex.model, 'gpt-5.4');
 });
 
 test('antigravity CLI contract fixture captures real agy command semantics', async () => {
