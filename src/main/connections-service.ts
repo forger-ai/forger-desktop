@@ -144,6 +144,10 @@ const toConnectionInstance = (
 const isConnectedConnectionInstance = (instance: ConnectionInstance): boolean =>
   instance.status === 'connected';
 
+const isSetupConnectionAction = (definition: ConnectionTypeDefinition, actionId: string): boolean =>
+  (definition.setupKind === 'qr_pairing' || definition.setupKind === 'local_device')
+  && actionId.endsWith('.start_pairing');
+
 export class ConnectionsService {
   private readonly modulesByType: Map<string, InternalConnectionModule>;
   private registry: ConnectionsRegistryFile = emptyRegistry();
@@ -265,9 +269,12 @@ export class ConnectionsService {
     }
 
     const isStatusAction = actionId === module.definition.statusActionId;
+    const isSetupAction = isSetupConnectionAction(module.definition, actionId);
     const resolved = isStatusAction
       ? input.connectionId
-      : await this.resolveConnectionId(type, input.connectionId, input.grant);
+      : await this.resolveConnectionId(type, input.connectionId, input.grant, {
+          requireConnected: !isSetupAction,
+        });
     if (resolved && typeof resolved !== 'string') {
       return resolved;
     }
@@ -729,19 +736,23 @@ export class ConnectionsService {
     type: string,
     requestedConnectionId?: string,
     grant?: EffectiveConnectionGrant,
+    options: { requireConnected?: boolean } = {},
   ): Promise<string | CallConnectionActionResult | null> {
     const instances = await this.listInstances(type);
+    const requireConnected = options.requireConnected !== false;
     const grantedIds = grant?.connectionIds?.length ? new Set(grant.connectionIds) : null;
     const grantedInstances = grantedIds
       ? instances.filter((instance) => grantedIds.has(instance.id))
       : instances;
-    const available = grantedInstances.filter(isConnectedConnectionInstance);
+    const available = requireConnected
+      ? grantedInstances.filter(isConnectedConnectionInstance)
+      : grantedInstances;
     if (requestedConnectionId) {
       const grantedMatch = grantedInstances.find((instance) => instance.id === requestedConnectionId);
       if (!grantedMatch) {
         return { success: false, userMessage: 'Connection is not available for this caller.', technicalCode: 'connection_not_granted' };
       }
-      if (!isConnectedConnectionInstance(grantedMatch)) {
+      if (requireConnected && !isConnectedConnectionInstance(grantedMatch)) {
         return { success: false, userMessage: 'Connection is not connected.', technicalCode: 'connection_not_connected' };
       }
       return grantedMatch.id;
