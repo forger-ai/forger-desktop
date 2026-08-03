@@ -457,6 +457,77 @@ test('connection sessions and calls only use connected instances for non-status 
   }
 });
 
+test('local pairing setup actions can run before the connection is connected', async () => {
+  const pairingModule = {
+    definition: {
+      type: 'whatsapp',
+      displayName: 'WhatsApp',
+      description: 'WhatsApp local pairing',
+      setupKind: 'qr_pairing',
+      supportsMultiple: true,
+      statusActionId: 'whatsapp.connection.status',
+      secretsSchema: [],
+      actions: [
+        { id: 'whatsapp.connection.status', name: 'Status', description: 'Status', risk: 'low' },
+        { id: 'whatsapp.start_pairing', name: 'Pair', description: 'Pair', risk: 'high' },
+        { id: 'whatsapp.list_chats', name: 'Chats', description: 'Chats', risk: 'low' },
+      ],
+    },
+    async configure(context, input) {
+      const instance = await context.createInstance({
+        type: 'whatsapp',
+        label: input.label,
+        status: 'needs_setup',
+      });
+      return { success: true, userMessage: 'created', instance };
+    },
+    async disconnect(context, input) {
+      await context.deleteInstance(input.connectionId);
+      return { success: true, userMessage: 'disconnected' };
+    },
+    async listInstances(context) {
+      return context.listPersistedInstances('whatsapp');
+    },
+    async status() {
+      return { connected: false, status: 'needs_setup' };
+    },
+    async execute(_context, input) {
+      if (input.actionId === 'whatsapp.connection.status') {
+        return { success: true, data: { connected: false, status: 'needs_setup' } };
+      }
+      return { success: true, data: { connectionId: input.connectionId, actionId: input.actionId } };
+    },
+  };
+  const harness = await createService([pairingModule]);
+  try {
+    const configured = await harness.service.configure({
+      type: 'whatsapp',
+      label: 'New phone',
+    });
+    assert.equal(configured.success, true);
+    assert.equal(configured.instance.status, 'needs_setup');
+
+    const pairing = await harness.service.call({
+      type: 'whatsapp',
+      actionId: 'whatsapp.start_pairing',
+      connectionId: configured.instance.id,
+      input: { method: 'qr' },
+    });
+    assert.equal(pairing.success, true);
+    assert.equal(pairing.data.connectionId, configured.instance.id);
+
+    const regularAction = await harness.service.call({
+      type: 'whatsapp',
+      actionId: 'whatsapp.list_chats',
+      connectionId: configured.instance.id,
+    });
+    assert.equal(regularAction.success, false);
+    assert.equal(regularAction.technicalCode, 'connection_not_connected');
+  } finally {
+    await harness.cleanup();
+  }
+});
+
 test('app connection calls merge required and optional declarations for the same type', async () => {
   const harness = await createAppAwareService({
     required: [
