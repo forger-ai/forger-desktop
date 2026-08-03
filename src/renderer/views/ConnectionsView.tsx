@@ -234,6 +234,10 @@ export function ConnectionsView({
   const selectedInstance = sortedInstances.find((instance) => instance.id === selectedConnectionId) ?? null;
   const selectedDefinition = selectedInstance ? typeById.get(selectedInstance.type) ?? null : null;
   const setupDefinition = orderedTypes.find((definition) => definition.type === setupType) ?? null;
+  const setupInstance = setupConnectionId
+    ? state.instances.find((instance) => instance.id === setupConnectionId) ?? null
+    : null;
+  const isReconnectSetup = setupInstance?.status === 'needs_reconnect' || setupInstance?.status === 'error';
   const setupGuideCopy = useMemo(() => getSetupGuideUiCopy(t.locale), [t.locale]);
   const showSetupGuide = Boolean(setupDefinition?.setupGuide)
     && (setupDefinition?.type !== 'gmail' || gmailMode === 'self');
@@ -314,13 +318,13 @@ export function ConnectionsView({
     };
     const result = await runMutation(`configure:${setupDefinition.type}`, () => window.forger.connectionsConfigure(input));
     if (!result?.success || !result.instance) return;
-    onOpenConnection(result.instance.id);
     if (setupDefinition.type !== 'whatsapp') {
+      onOpenConnection(result.instance.id);
       setSetupOpen(false);
       setSetupGuideOpen(false);
       return;
     }
-    setPairingConnectionId(result.instance.id);
+    setSetupConnectionId(result.instance.id);
     setBusy('pair:whatsapp');
     try {
       const pairing = await window.forger.connectionsCall({
@@ -330,6 +334,14 @@ export function ConnectionsView({
         input: { method: 'qr' },
       });
       setPairingResult(pairing);
+      setPairingConnectionId(pairing.success ? result.instance.id : null);
+    } catch {
+      setPairingResult({
+        success: false,
+        userMessage: copy.statusCheckFailed,
+        technicalCode: 'whatsapp_pairing_unhandled_error',
+      });
+      setPairingConnectionId(null);
     } finally {
       setBusy(null);
     }
@@ -350,7 +362,7 @@ export function ConnectionsView({
       type: definition.type,
       connectionId: instance.id,
     }));
-    if (view === 'detail') {
+    if (view === 'detail' && result.success) {
       onNotice?.({ severity: result.success ? 'success' : 'error', message: result.userMessage });
       onBack?.();
     }
@@ -501,9 +513,11 @@ export function ConnectionsView({
                     <Typography variant="body2" color="text.secondary">{selectedDefinition.displayName}</Typography>
                   </Box>
                 </Stack>
-                {selectedInstance.status === 'needs_reconnect' || selectedInstance.status === 'error' ? (
+                {selectedInstance.status === 'needs_setup'
+                || selectedInstance.status === 'needs_reconnect'
+                || selectedInstance.status === 'error' ? (
                   <Button variant="contained" onClick={() => openSetup(selectedDefinition.type, selectedInstance.id)}>
-                    {copy.reconnect}
+                    {selectedInstance.status === 'needs_setup' ? copy.connect : copy.reconnect}
                   </Button>
                 ) : null}
               </Stack>
@@ -621,7 +635,7 @@ export function ConnectionsView({
         setSetupOpen(false);
         setSetupGuideOpen(false);
       }} maxWidth="sm" fullWidth>
-        <DialogTitle>{setupConnectionId ? copy.reconnectTitle : copy.setupTitle}</DialogTitle>
+        <DialogTitle>{isReconnectSetup ? copy.reconnectTitle : copy.setupTitle}</DialogTitle>
         <DialogContent>
           <Stack spacing={1.5} sx={{ pt: 0.5 }}>
             <Autocomplete
@@ -830,7 +844,7 @@ export function ConnectionsView({
             setSetupGuideOpen(false);
           }}>{pairingConnectionId ? t.actions.close : t.actions.cancel}</Button>
           <Button variant="contained" disabled={!canSubmitSetup} onClick={() => void configure()}>
-            {setupConnectionId ? copy.reconnect : copy.connect}
+            {isReconnectSetup ? copy.reconnect : copy.connect}
           </Button>
         </DialogActions>
       </Dialog>

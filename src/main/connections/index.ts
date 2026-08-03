@@ -142,10 +142,12 @@ const statusFromLegacyResult = (
   }
   const data = isRecord(result.data) ? result.data : {};
   const connected = data.connected === true;
-  const needsReconnect = data.needsReconnect === true || data.connected === false && Boolean(instance);
+  const needsReconnect = data.needsReconnect === true
+    || (data.connected === false && data.configured !== false && Boolean(instance));
   const status: ConnectionStatus = connected
     ? 'connected'
-    : needsReconnect ? 'needs_reconnect' : 'needs_setup';
+    : data.qrAvailable === true ? 'connecting'
+      : needsReconnect ? 'needs_reconnect' : 'needs_setup';
   const identity = safeIdentityFromValue(data) ?? instance?.accountIdentity;
   return {
     connected,

@@ -156,6 +156,35 @@ test('built-in connection actions with user input declare inputSchema for workfl
   }
 });
 
+test('WhatsApp can start a clean setup again after disconnecting an unfinished connection', async () => {
+  const harness = await createService();
+  try {
+    const first = await harness.service.configure({
+      type: 'whatsapp',
+      label: 'Old phone',
+    });
+    assert.equal(first.success, true);
+    assert.equal(first.instance.status, 'needs_setup');
+
+    const disconnected = await harness.service.disconnect({
+      type: 'whatsapp',
+      connectionId: first.instance.id,
+    });
+    assert.equal(disconnected.success, true);
+    assert.equal((await harness.service.listInstances('whatsapp')).length, 0);
+
+    const replacement = await harness.service.configure({
+      type: 'whatsapp',
+      label: 'New phone',
+    });
+    assert.equal(replacement.success, true);
+    assert.notEqual(replacement.instance.id, first.instance.id);
+    assert.equal(replacement.instance.status, 'needs_setup');
+  } finally {
+    await harness.cleanup();
+  }
+});
+
 test('new connection registry entries use self-managed setup and expose safe schemas', async () => {
   const harness = await createService();
   try {
