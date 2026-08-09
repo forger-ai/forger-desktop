@@ -43,6 +43,9 @@ export const settingsSeed: Settings = {
   userEmail: '',
   plan: 'Free',
   safeMode: true,
+  earlyAccess: {
+    workflowsEnabled: false,
+  },
   developerMode: {
     enabled: false,
     pathEntries: [],

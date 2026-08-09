@@ -15,6 +15,7 @@ import {
 
 const require = createRequire(import.meta.url);
 const { registerMainLifecycle } = require('../../dist-electron/main/core/main-lifecycle.js');
+const { WorkflowFeatureController } = require('../../dist-electron/main/workflow-feature-controller.js');
 
 const createLifecycleHarness = (overrides = {}) => {
   const ready = createDeferred();
@@ -35,6 +36,7 @@ const createLifecycleHarness = (overrides = {}) => {
     stopped: [],
     stoppedInstalledApps: [],
     terminated: [],
+    workflowPreferences: [],
   };
   const appListeners = new Map();
   const ipcMain = {};
@@ -46,6 +48,7 @@ const createLifecycleHarness = (overrides = {}) => {
     appAgentTaskManager: null,
     appMcpManager: null,
     automationManager: null,
+    workflowFeatureController: null,
     catalogApps: [],
     chatOrchestrator: null,
     cloudDeviceManager: null,
@@ -109,6 +112,7 @@ const createLifecycleHarness = (overrides = {}) => {
     AppMcpManager: createServiceClass('AppMcpManager', calls),
     AutomationManager: createServiceClass('AutomationManager', calls),
     WorkflowManager: createServiceClass('WorkflowManager', calls),
+    WorkflowFeatureController,
     BrowserWindow: createStartupBrowserWindowClass(calls),
     ChatOrchestrator: createServiceClass('ChatOrchestrator', calls),
     CloudDeviceManager: createServiceClass('CloudDeviceManager', calls),
@@ -258,6 +262,9 @@ const createLifecycleHarness = (overrides = {}) => {
     normalizeNodeRuntimeVersion: (value) => value ?? '22',
     openInstalledApp: async () => ({}),
     openOrFocusAppWindow: async () => undefined,
+    persistWorkflowsEarlyAccess: async (enabled) => {
+      calls.workflowPreferences.push(enabled);
+    },
     registerForgerCloudOAuth: (options) => {
       calls.oauthRegistered = true;
       calls.oauthOptions = options;
@@ -375,6 +382,57 @@ test('main lifecycle initializes services, wires task status through provider-ag
   assert.equal(await state.chatOrchestrator.options.getChatNetworkAccessDefault(), false);
   assert.equal(state.chatOrchestrator.options.getAgentNetworkAccess, undefined);
   assert.equal(await state.appAgentTaskManager.options.getAgentNetworkAccess('forger'), false);
+});
+
+test('main lifecycle keeps workflows runtime closed when early access is disabled', async () => {
+  const { calls, deps, ready, state } = createLifecycleHarness();
+  state.settings.earlyAccess = { workflowsEnabled: false };
+
+  registerMainLifecycle(deps);
+  ready.resolve();
+  await ready.promise;
+  await waitForMainLifecycle(() => calls.createdWindows === 1);
+
+  assert.equal(calls.constructed.some((entry) => entry.name === 'WorkflowManager'), false);
+  assert.equal(calls.initialized.includes('WorkflowManager'), false);
+  assert.ok(state.workflowFeatureController);
+  assert.equal(state.workflowFeatureController.isEnabled(), false);
+  assert.equal(state.workflowFeatureController.getManager(), null);
+});
+
+test('main lifecycle initializes one workflow manager through the enabled feature controller', async () => {
+  const { calls, deps, ready, state } = createLifecycleHarness();
+  state.settings.earlyAccess = { workflowsEnabled: true };
+
+  registerMainLifecycle(deps);
+  ready.resolve();
+  await ready.promise;
+  await waitForMainLifecycle(() => calls.createdWindows === 1);
+
+  const workflowManagers = calls.constructed.filter((entry) => entry.name === 'WorkflowManager');
+  assert.equal(workflowManagers.length, 1);
+  assert.equal(calls.initialized.filter((name) => name === 'WorkflowManager').length, 1);
+  assert.ok(state.workflowFeatureController);
+  assert.equal(state.workflowFeatureController.isEnabled(), true);
+  assert.equal(state.workflowFeatureController.getManager(), workflowManagers[0].service);
+});
+
+test('main lifecycle feature controller persists explicit workflow enable and disable changes', async () => {
+  const { calls, deps, ready, state } = createLifecycleHarness();
+  state.settings.earlyAccess = { workflowsEnabled: false };
+
+  registerMainLifecycle(deps);
+  ready.resolve();
+  await ready.promise;
+  await waitForMainLifecycle(() => calls.createdWindows === 1);
+
+  assert.deepEqual(calls.workflowPreferences, []);
+  await state.workflowFeatureController.enable();
+  await state.workflowFeatureController.disable();
+
+  assert.deepEqual(calls.workflowPreferences, [true, false]);
+  assert.equal(state.workflowFeatureController.isEnabled(), false);
+  assert.equal(state.workflowManager, null);
 });
 
 test('main lifecycle writes startup logs for services before the initial window opens', async () => {

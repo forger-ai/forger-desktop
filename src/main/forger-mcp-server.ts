@@ -97,12 +97,10 @@ import {
   withToolAuthorization,
   workflowMcpErrorMessage,
 } from './forger-mcp-server-helpers';
-
 export interface ForgerMcpSessionRef {
   url: string;
   token: string;
 }
-
 export interface AgentMcpSession {
   runId: string;
   appId: string;
@@ -122,7 +120,6 @@ export interface AgentMcpSession {
   token: string;
   createdAt: string;
 }
-
 export interface ForgerMcpSessionAccess {
   caller: AgentMcpSession['caller'];
   personalAgentId?: string;
@@ -137,7 +134,6 @@ export interface ForgerMcpSessionAccess {
   connectionGrants?: ConnectionSessionGrant[];
   locale?: string;
 }
-
 interface ForgerMcpServerOptions extends PersonalAgentSpawnToolOptions {
   getAppVersion: () => string;
   getToolDefinitions: () => AgentToolDefinition[];
@@ -265,51 +261,44 @@ interface ForgerMcpServerOptions extends PersonalAgentSpawnToolOptions {
   workflowsGet?: (workflowId: string) => Workflow | null;
   workflowsUpsert?: (input: WorkflowUpsertInput) => Promise<Workflow>;
   workflowsRun?: (workflowId: string) => Promise<WorkflowRunSummary>;
+  isWorkflowsEnabled?: () => boolean;
   onToolProgress?: (input: { appId: string; runId: string; toolName?: unknown; message: string }) => void;
   onToolFailure?: (input: { appId: string; runId: string; toolName?: unknown; error: unknown }) => void;
   onHttpFailure?: (input: { appId?: string; runId?: string; error: unknown }) => void;
 }
-
 type JsonRpcRequest = {
   jsonrpc?: string;
   id?: string | number | null;
   method?: string;
   params?: unknown;
 };
-
 export interface ToolApprovalResult {
   approved: boolean;
   required: boolean;
   status: 'not_required' | 'approved' | 'denied' | 'unavailable';
   userMessage: string;
 }
-
 interface ForgerMcpTool {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
   annotations: McpToolAnnotations;
 }
-
 export interface MemoryAccessInput {
   caller: AgentMcpSession['caller'];
   appId?: string;
   appIds?: string[];
   runId?: string;
 }
-
 export class ForgerMcpServer {
   private readonly sessions = new Map<string, AgentMcpSession>();
   private server: http.Server | null = null;
   private url: string | null = null;
-
   public constructor(private readonly options: ForgerMcpServerOptions) {}
-
   public async start(): Promise<void> {
     if (this.server && this.url) {
       return;
     }
-
     const server = http.createServer((request, response) => {
       void this.handleHttpRequest(request, response).catch((error) => {
         void this.options.appendInstallLog('agent_tool:mcp_http_error', {
@@ -327,7 +316,6 @@ export class ForgerMcpServer {
         });
       });
     });
-
     await new Promise<void>((resolve, reject) => {
       server.once('error', reject);
       server.listen(0, '127.0.0.1', () => {
@@ -335,18 +323,15 @@ export class ForgerMcpServer {
         resolve();
       });
     });
-
     const address = server.address();
     if (!address || typeof address === 'string') {
       server.close();
       throw new Error('forger_mcp_server_address_unavailable');
     }
-
     this.server = server;
     this.url = `http://127.0.0.1:${address.port}/mcp`;
     await this.options.appendInstallLog('agent_tool:mcp_server_started', { url: this.url });
   }
-
   public stop(): void {
     const server = this.server;
     server?.close();
@@ -356,7 +341,6 @@ export class ForgerMcpServer {
     this.url = null;
     this.sessions.clear();
   }
-
   public createSession(runId: string, appId: string, access?: ForgerMcpSessionAccess): ForgerMcpSessionRef | null {
     if (!this.url) {
       void this.options.appendInstallLog('agent_tool:mcp_session_unavailable', { runId, appId });
@@ -389,7 +373,6 @@ export class ForgerMcpServer {
     });
     return { url: this.url, token };
   }
-
   public releaseSession(token: string): void {
     const session = this.sessions.get(token);
     this.sessions.delete(token);
@@ -399,7 +382,6 @@ export class ForgerMcpServer {
       tokenSuffix: token.slice(-6),
     });
   }
-
   private async handleHttpRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const requestPath = new URL(request.url ?? '/', 'http://127.0.0.1').pathname;
     if (request.method !== 'POST' || requestPath !== '/mcp') {
@@ -556,6 +538,9 @@ export class ForgerMcpServer {
     const allowedConnectionActions = new Set(connectionGrants.flatMap((grant) => grant.actions));
     const allToolDefinitions = await this.getAllToolDefinitions();
     const tools = allToolDefinitions.filter((tool) => {
+      if (WORKFLOW_MANAGEMENT_TOOL_IDS.has(tool.id) && !this.isWorkflowsEnabled()) {
+        return false;
+      }
       if (tool.id === 'forger_add_app_to_personal_agent' && session.caller !== 'personal-agent') {
         return false;
       }
@@ -843,6 +828,17 @@ export class ForgerMcpServer {
       args,
       requiresApproval: this.options.getToolSettings().approvals[tool.id] ?? tool.defaultRequiresApproval,
     });
+
+    if (WORKFLOW_MANAGEMENT_TOOL_IDS.has(toolId) && !this.isWorkflowsEnabled()) {
+      const result = { success: false, technicalCode: 'workflow_feature_disabled' };
+      await this.options.appendInstallLog('agent_tool:call_result', {
+        appId: session.appId,
+        runId: session.runId,
+        toolId,
+        result,
+      });
+      return result;
+    }
 
     if (isOfficialTool(toolId)) {
       if ((session.caller === 'personal-agent' || session.caller === 'workflow') && !session.forgerToolActionIds.includes(toolId)) {
@@ -1596,5 +1592,9 @@ export class ForgerMcpServer {
       toolName: toolId,
       message,
     });
+  }
+
+  private isWorkflowsEnabled(): boolean {
+    return this.options.isWorkflowsEnabled?.() ?? true;
   }
 }

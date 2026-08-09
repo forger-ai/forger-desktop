@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { access, chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
@@ -20,6 +20,27 @@ const waitFor = async (predicate, timeoutMs = 5_000) => {
     await wait(25);
   }
   throw new Error('waitFor_timeout');
+};
+
+const createRecordingCodexCli = async (root) => {
+  const callsPath = join(root, 'workflow-provider-calls.ndjson');
+  const cliPath = join(root, 'workflow-provider.cjs');
+  await writeFile(cliPath, `#!/usr/bin/env node
+const fs = require('node:fs');
+let stdin = '';
+process.stdin.on('data', (chunk) => { stdin += chunk; });
+process.stdin.on('end', () => {
+  fs.appendFileSync(${JSON.stringify(callsPath)}, JSON.stringify({
+    args: process.argv.slice(2),
+    stdin,
+  }) + '\\n');
+  console.log(JSON.stringify({ type: 'thread.started', thread_id: 'workflow-thread' }));
+  console.log(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'Workflow complete.' } }));
+  console.log(JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 2, output_tokens: 3 } }));
+});
+`, 'utf8');
+  await chmod(cliPath, 0o755);
+  return { cliPath, callsPath };
 };
 
 const createManager = async (overrides = {}) => {
@@ -626,5 +647,148 @@ test('llm node fails cleanly when the provider is not authenticated', async () =
     assert.equal(finished.error, 'codex_auth_missing');
   } finally {
     await harness.cleanup();
+  }
+});
+
+test('llm workflow nodes keep every selected app in the strict runtime, MCP sessions, and prompt', async () => {
+  const providerRoot = await mkdtemp(join(tmpdir(), 'forger-workflow-provider-propagation-'));
+  const provider = await createRecordingCodexCli(providerRoot);
+  const runtimeRequests = [];
+  const forgerSessions = [];
+  const appMcpListeners = [];
+
+  const strictHarness = await createManager({
+    options: {
+      getAgentRuntime: async (request) => {
+        runtimeRequests.push(request);
+        return { provider: 'codex', model: 'gpt-workflow', effort: 'high' };
+      },
+      getInstalledApps: () => [
+        { id: 'sales-app', name: 'Sales', status: 'installed', description: 'Sales workspace' },
+        { id: 'inventory-app', name: 'Inventory', status: 'installed', description: 'Inventory workspace' },
+      ],
+      getCodexCliPath: async () => provider.cliPath,
+      getCodexAuthenticated: async () => true,
+      createForgerMcpSession: (listenerId, appIds, toolIds, connectionGrants) => {
+        forgerSessions.push({ listenerId, appIds, toolIds, connectionGrants });
+        return { url: 'http://127.0.0.1:7000/mcp', token: 'forger-token' };
+      },
+      listenRequiredAppMcps: async (appIds, listenerId) => {
+        appMcpListeners.push({ appIds, listenerId });
+        return {
+          servers: appIds.map((appId, index) => ({
+            appId,
+            config: {
+              name: `app_${appId}`,
+              url: `http://127.0.0.1:${7100 + index}/mcp`,
+              token: `token-${appId}`,
+              tokenEnvVar: `FORGER_APP_MCP_TOKEN_${index}`,
+              toolTimeoutSec: 30,
+            },
+          })),
+          failures: [],
+        };
+      },
+    },
+  });
+  try {
+    const workflow = await strictHarness.manager.upsert({
+      name: 'Cross-app review',
+      trigger: { type: 'manual' },
+      nodes: [{
+        id: 'review',
+        name: 'Review sales and stock',
+        type: 'llm_agent',
+        prompt: 'Compare both selected apps.',
+        runtime: { provider: 'codex', model: 'gpt-workflow', effort: 'high' },
+        toolIds: [],
+        appIds: ['sales-app', 'inventory-app'],
+      }],
+      edges: [],
+    });
+
+    const queued = await strictHarness.manager.runNow(workflow.id);
+    const finished = await waitFor(async () => {
+      const run = await strictHarness.manager.getRun(queued.id);
+      return run && ['succeeded', 'failed'].includes(run.status) ? run : null;
+    });
+
+    assert.equal(finished.status, 'succeeded');
+    assert.deepEqual(runtimeRequests, [{
+      provider: 'codex',
+      model: 'gpt-workflow',
+      effort: 'high',
+      strict: true,
+    }]);
+    assert.equal(forgerSessions.length, 1);
+    assert.deepEqual(forgerSessions[0].appIds, ['sales-app', 'inventory-app']);
+    assert.equal(appMcpListeners.length, 1);
+    assert.deepEqual(appMcpListeners[0].appIds, ['sales-app', 'inventory-app']);
+    assert.equal(appMcpListeners[0].listenerId, forgerSessions[0].listenerId);
+
+    const providerCalls = (await readFile(provider.callsPath, 'utf8'))
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    assert.equal(providerCalls.length, 1);
+    assert.equal(providerCalls[0].stdin.includes('Sales (id: sales-app)'), true);
+    assert.equal(providerCalls[0].stdin.includes('Inventory (id: inventory-app)'), true);
+  } finally {
+    await strictHarness.cleanup();
+    await rm(providerRoot, { recursive: true, force: true });
+  }
+});
+
+test('a required app MCP failure fails the node before the provider starts', async () => {
+  const providerRoot = await mkdtemp(join(tmpdir(), 'forger-workflow-provider-not-started-'));
+  const provider = await createRecordingCodexCli(providerRoot);
+  const strictMcpCalls = [];
+  const harness = await createManager({
+    options: {
+      getAgentRuntime: async () => ({ provider: 'codex', model: 'gpt-workflow', effort: 'medium' }),
+      getInstalledApps: () => [
+        { id: 'sales-app', name: 'Sales', status: 'installed' },
+        { id: 'broken-app', name: 'Broken', status: 'installed' },
+      ],
+      getCodexCliPath: async () => provider.cliPath,
+      getCodexAuthenticated: async () => true,
+      listenRequiredAppMcps: async (appIds, listenerId) => {
+        strictMcpCalls.push({ appIds, listenerId });
+        return {
+          servers: [],
+          failures: [{ appId: 'broken-app', code: 'app_mcp_start_failed' }],
+        };
+      },
+    },
+  });
+  try {
+    const workflow = await harness.manager.upsert({
+      name: 'Strict app MCP preflight',
+      trigger: { type: 'manual' },
+      nodes: [{
+        id: 'review',
+        name: 'Review required apps',
+        type: 'llm_agent',
+        prompt: 'Review sales with the required companion app.',
+        toolIds: [],
+        appIds: ['sales-app', 'broken-app'],
+      }],
+      edges: [],
+    });
+
+    const queued = await harness.manager.runNow(workflow.id);
+    const finished = await waitFor(async () => {
+      const run = await harness.manager.getRun(queued.id);
+      return run && ['succeeded', 'failed'].includes(run.status) ? run : null;
+    });
+
+    assert.equal(finished.status, 'failed');
+    assert.equal(finished.error, 'workflow_required_app_mcp_unavailable');
+    assert.equal(finished.nodeRuns[0].error, 'workflow_required_app_mcp_unavailable');
+    assert.deepEqual(strictMcpCalls.map((call) => call.appIds), [['sales-app', 'broken-app']]);
+    await assert.rejects(access(provider.callsPath), { code: 'ENOENT' });
+  } finally {
+    await harness.cleanup();
+    await rm(providerRoot, { recursive: true, force: true });
   }
 });

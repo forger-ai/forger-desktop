@@ -677,6 +677,32 @@ test('text-to-speech, developer settings, and background task channels delegate 
   assert.deepEqual(taskStore.upserts, [{ id: 'task-2', status: 'queued' }]);
 });
 
+test('workflows early-access IPC delegates each runtime toggle once and returns updated settings', async () => {
+  const calls = [];
+  const settingsFor = (workflowsEnabled) => ({
+    userEmail: 'person@forger.test',
+    plan: 'local',
+    safeMode: true,
+    earlyAccess: { workflowsEnabled },
+  });
+  const { handlers } = createDeps({
+    updateWorkflowsEarlyAccess: async (enabled) => {
+      calls.push(enabled);
+      return settingsFor(enabled);
+    },
+  });
+
+  assert.deepEqual(
+    await handlers.get(IPC_CHANNELS.updateWorkflowsEarlyAccess)(null, true),
+    settingsFor(true),
+  );
+  assert.deepEqual(
+    await handlers.get(IPC_CHANNELS.updateWorkflowsEarlyAccess)(null, false),
+    settingsFor(false),
+  );
+  assert.deepEqual(calls, [true, false]);
+});
+
 test('remote share and activity channels delegate when wired and fall back to empty snapshots', async () => {
   const { handlers } = createDeps({
     getLlmRunsSnapshot: () => ({ items: [{ runId: 'run-1' }], activeCount: 1, errorCount: 0, updatedAt: 'now' }),

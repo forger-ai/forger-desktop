@@ -154,6 +154,7 @@ export interface ForgerDesktopApi {
   textToSpeechSynthesize: (input: TextToSpeechSynthesizeInput) => Promise<TextToSpeechSynthesizeResult>;
   updateCodexDefaults: (input: UpdateCodexDefaultsInput) => Promise<Settings>;
   updateAgentDefaults: (input: UpdateAgentDefaultsInput) => Promise<Settings>;
+  updateWorkflowsEarlyAccess: (enabled: boolean) => Promise<Settings>;
   updateDeveloperMode: (input: UpdateDeveloperModeInput) => Promise<Settings>;
   updateAppDeveloperSettings: (input: UpdateAppDeveloperSettingsInput) => Promise<DeveloperPathState>;
   getDeveloperPathState: (appId?: string) => Promise<DeveloperPathState>;

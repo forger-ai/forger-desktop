@@ -1,6 +1,7 @@
 import type { AppCategory } from '@shared/types';
 import { enAgentGroups } from './locales/agentGroups';
 import { enBackgroundTasks } from './locales/enBackgroundTasks';
+import { enMore } from './locales/enMore';
 import { enSections } from './locales/enSections';
 export const en = { locale: 'en',
   appName: 'Forger',
@@ -27,14 +28,7 @@ export const en = { locale: 'en',
     docs: 'Docs',
     settings: 'Settings',
   },
-  more: {
-    title: 'More',
-    subtitle: 'Extra workspaces for advanced use. Pin the ones you use often to your sidebar.',
-    back: 'Back to More',
-    pin: 'Show in sidebar',
-    unpin: 'Remove from sidebar',
-    pinnedBadge: 'In sidebar',
-  },
+  more: enMore,
   backgroundTasks: enBackgroundTasks,
   llmRuns: {
     title: 'Agent activity',

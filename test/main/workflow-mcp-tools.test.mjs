@@ -52,6 +52,7 @@ const createHarness = async (overrides = {}) => {
     getTextToSpeechState: async () => ({}),
     synthesizeTextToSpeech: async () => ({ success: false }),
     processSpeechToText: async () => ({ success: false }),
+    isWorkflowsEnabled: () => true,
     workflowGetNodeContext: (nodeRunKey) => nodeRunKey === 'run-1:paso1'
       ? { workflowId: 'wf-1', runId: 'run-1', nodeId: 'paso1', input: { trigger: { type: 'manual' } } }
       : null,
@@ -333,6 +334,51 @@ test('chat sessions manage workflows through forger_workflow_* tools', async () 
     const run = await callTool(session, 'forger_workflow_run', { workflowId: 'wf-1' });
     assert.equal(run.success, true);
     assert.equal(run.run.workflowId, 'wf-1');
+  } finally {
+    harness.stop();
+  }
+});
+
+test('disabled workflow management tools are absent from MCP discovery', async () => {
+  const harness = await createHarness({ isWorkflowsEnabled: () => false });
+  try {
+    const session = harness.server.createSession('run-chat-disabled', 'forger', { caller: 'free-chat' });
+    const tools = await listTools(session);
+
+    assert.deepEqual(tools.filter((name) => name.startsWith('forger_workflow_')), []);
+  } finally {
+    harness.stop();
+  }
+});
+
+test('stale workflow management calls fail closed without reaching manager callbacks', async () => {
+  const workflowCalls = [];
+  const harness = await createHarness({
+    isWorkflowsEnabled: () => false,
+    workflowsList: () => {
+      workflowCalls.push('list');
+      return [];
+    },
+    workflowsGet: () => {
+      workflowCalls.push('get');
+      return null;
+    },
+    workflowsUpsert: async () => {
+      workflowCalls.push('upsert');
+      return { id: 'unexpected' };
+    },
+    workflowsRun: async () => {
+      workflowCalls.push('run');
+      return { id: 'unexpected', workflowId: 'wf-1', status: 'queued' };
+    },
+  });
+  try {
+    const session = harness.server.createSession('run-chat-stale', 'forger', { caller: 'free-chat' });
+
+    const staleResult = await callTool(session, 'forger_workflow_run', { workflowId: 'wf-1' });
+    assert.equal(staleResult.success, false);
+    assert.equal(staleResult.technicalCode, 'workflow_feature_disabled');
+    assert.deepEqual(workflowCalls, []);
   } finally {
     harness.stop();
   }

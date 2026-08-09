@@ -27,7 +27,9 @@ import type {
   UpdateCodexDefaultsInput,
   UpdateDeveloperModeInput,
 } from '../../shared/types';
+import type { UpdateEarlyAccessInput } from '../../shared/types/settings';
 import type { UpdateLlmProviderProfileDefaultsInput } from '../../shared/types/provider-profiles';
+import { hasValidLegacyWorkflows } from '../workflow/legacy';
 import {
   LLM_PROVIDER_KEYS,
   normalizeAgentProviderEffort,
@@ -59,13 +61,14 @@ interface SettingsServiceDeps {
   getCodexAuthStatus: () => Promise<CodexAuthStatus>;
   getPromptOverridesPath: () => string;
   getSettingsPath: () => string;
+  getMetadataRoot?: () => string;
   path: typeof path;
   settingsSeed: Settings;
   state: SettingsServiceState;
 }
 
 export const createSettingsServiceController = (deps: SettingsServiceDeps) => {
-  const { state, PromptOverridesStore, getPromptOverridesPath, settingsSeed, fs, path, getSettingsPath, agentProviderRegistry, getCodexAuthStatus, getClaudeAuthStatus, getAntigravityAuthStatus } = deps;
+  const { state, PromptOverridesStore, getPromptOverridesPath, settingsSeed, fs, path, getSettingsPath, getMetadataRoot, agentProviderRegistry, getCodexAuthStatus, getClaudeAuthStatus, getAntigravityAuthStatus } = deps;
 const getPromptOverridesStore = (): PromptOverridesStore => {
   state.promptOverridesStore ??= new PromptOverridesStore(getPromptOverridesPath());
   return state.promptOverridesStore;
@@ -408,6 +411,9 @@ const normalizeSettings = (input?: Partial<Settings>): Settings => {
     userEmail: typeof input?.userEmail === 'string' ? input.userEmail : defaults.userEmail,
     plan: typeof input?.plan === 'string' ? input.plan : defaults.plan,
     safeMode: typeof input?.safeMode === 'boolean' ? input.safeMode : defaults.safeMode,
+    earlyAccess: {
+      workflowsEnabled: input?.earlyAccess?.workflowsEnabled === true,
+    },
     developerMode: {
       enabled: input?.developerMode?.enabled === true,
       pathEntries: normalizeDeveloperPathEntries(input?.developerMode?.pathEntries, path),
@@ -433,9 +439,33 @@ const normalizeSettings = (input?: Partial<Settings>): Settings => {
 const loadSettings = async (): Promise<void> => {
   try {
     const raw = await fs.readFile(getSettingsPath(), 'utf8');
-    state.settings = normalizeSettings(JSON.parse(raw) as Partial<Settings>);
+    const parsed = JSON.parse(raw) as Partial<Settings>;
+    const earlyAccess = parsed.earlyAccess as unknown;
+    const hasExplicitWorkflowsPreference = Boolean(
+      earlyAccess
+      && typeof earlyAccess === 'object'
+      && Object.prototype.hasOwnProperty.call(earlyAccess, 'workflowsEnabled'),
+    );
+    state.settings = normalizeSettings(parsed);
+    if (!hasExplicitWorkflowsPreference && await legacyWorkflowsExist()) {
+      state.settings = normalizeSettings({
+        ...state.settings,
+        earlyAccess: { workflowsEnabled: true },
+      });
+      await saveSettings();
+    }
   } catch {
     state.settings = normalizeSettings(settingsSeed);
+  }
+};
+
+const legacyWorkflowsExist = async (): Promise<boolean> => {
+  const metadataRoot = getMetadataRoot?.() ?? path.dirname(getSettingsPath());
+  try {
+    const raw = await fs.readFile(path.join(metadataRoot, 'workflows.json'), 'utf8');
+    return hasValidLegacyWorkflows(JSON.parse(raw) as unknown);
+  } catch {
+    return false;
   }
 };
 
@@ -445,6 +475,17 @@ const saveSettings = async (): Promise<void> => {
 };
 
 const getCodexDefaults = (): Settings['codexDefaults'] => normalizeSettings(state.settings).codexDefaults;
+
+const updateEarlyAccess = async (input: UpdateEarlyAccessInput): Promise<Settings> => {
+  state.settings = normalizeSettings({
+    ...state.settings,
+    earlyAccess: {
+      workflowsEnabled: input.workflowsEnabled === true,
+    },
+  });
+  await saveSettings();
+  return state.settings;
+};
 
 const updateCodexDefaults = async (input: UpdateCodexDefaultsInput): Promise<Settings> => {
   state.settings = normalizeSettings({
@@ -936,5 +977,5 @@ const mergeRuntimeRecommendations = (
   };
 };
 
-  return { getPromptOverridesStore, normalizeCodexReasoningEffort, normalizeClaudeEffort, normalizeAgentProvider, normalizeDefaultAgentProvider, normalizeSettings, loadSettings, saveSettings, getCodexDefaults, updateCodexDefaults, updateAgentDefaults, updateDeveloperMode, markProviderConnected, markProviderDisconnected, chooseAgentRuntime, chooseConnectedProvider, listLlmProviderProfiles, setActiveLlmProviderProfile, updateLlmProviderProfileDefaults, withAgentDefaults };
+  return { getPromptOverridesStore, normalizeCodexReasoningEffort, normalizeClaudeEffort, normalizeAgentProvider, normalizeDefaultAgentProvider, normalizeSettings, loadSettings, saveSettings, getCodexDefaults, updateEarlyAccess, updateCodexDefaults, updateAgentDefaults, updateDeveloperMode, markProviderConnected, markProviderDisconnected, chooseAgentRuntime, chooseConnectedProvider, listLlmProviderProfiles, setActiveLlmProviderProfile, updateLlmProviderProfileDefaults, withAgentDefaults };
 };

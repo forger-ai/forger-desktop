@@ -1,6 +1,7 @@
 import type { AppCategory } from '@shared/types';
 import { esAgentGroups } from './locales/agentGroups';
 import { esBackgroundTasks } from './locales/esBackgroundTasks';
+import { esMore } from './locales/esMore';
 import { esSections } from './locales/esSections';
 export const es = { locale: 'es',
   appName: 'Forger',
@@ -27,14 +28,7 @@ export const es = { locale: 'es',
     docs: 'Docs',
     settings: 'Configuración',
   },
-  more: {
-    title: 'Más',
-    subtitle: 'Espacios adicionales para uso avanzado. Fija los que más uses en tu barra lateral.',
-    back: 'Volver a Más',
-    pin: 'Mostrar en la barra lateral',
-    unpin: 'Quitar de la barra lateral',
-    pinnedBadge: 'En la barra lateral',
-  },
+  more: esMore,
   backgroundTasks: esBackgroundTasks,
   llmRuns: {
     title: 'Actividad de agentes',

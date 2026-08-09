@@ -1,0 +1,17 @@
+export const enMore = {
+  title: 'More',
+  subtitle: 'Extra workspaces for advanced use. Pin the ones you use often to your sidebar.',
+  back: 'Back to More',
+  pin: 'Show in sidebar',
+  unpin: 'Remove from sidebar',
+  pinnedBadge: 'In sidebar',
+  workflowsEnabled: 'Workflows enabled',
+  workflowsDisabled: 'Try Workflows',
+  workflowsEnabling: 'Turning on Workflows…',
+  workflowsDisabling: 'Turning off Workflows…',
+  workflowsDisableTitle: 'Turn off Workflows?',
+  workflowsDisableBody: 'Workflows will be hidden and scheduled workflows won’t start. Your saved workflows and run history will stay on this device.',
+  workflowsDisableCancel: 'Keep enabled',
+  workflowsDisableConfirm: 'Turn off Workflows',
+  workflowsUpdateError: 'We could not update Workflows access.',
+};

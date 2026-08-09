@@ -30,6 +30,7 @@ interface AppShellProps {
   onOpenBackgroundTask: (taskId: string) => void;
   desktopUpdateState: DesktopUpdateState;
   pinnedViews: PinnableView[];
+  workflowsEnabled: boolean;
   showForumNav: boolean;
   children: ReactNode;
 }
@@ -59,6 +60,7 @@ export function AppShell({
   onOpenBackgroundTask,
   desktopUpdateState,
   pinnedViews,
+  workflowsEnabled,
   showForumNav,
   children,
 }: AppShellProps) {
@@ -70,6 +72,7 @@ export function AppShell({
         t={t}
         desktopUpdateState={desktopUpdateState}
         pinnedViews={pinnedViews}
+        workflowsEnabled={workflowsEnabled}
         showForumNav={showForumNav}
       />
       <Box

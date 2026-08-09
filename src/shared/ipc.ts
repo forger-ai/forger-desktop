@@ -102,6 +102,7 @@ export const IPC_CHANNELS = {
   textToSpeechSynthesize: 'forger:text-to-speech:synthesize',
   updateCodexDefaults: 'forger:update-codex-defaults',
   updateAgentDefaults: 'forger:update-agent-defaults',
+  updateWorkflowsEarlyAccess: 'forger:workflows:update-early-access',
   updateDeveloperMode: 'forger:update-developer-mode',
   updateAppDeveloperSettings: 'forger:update-app-developer-settings',
   getDeveloperPathState: 'forger:get-developer-path-state',
