@@ -105,7 +105,7 @@ test('Given Antigravity setup states, when automations execute, then auth, CLI, 
   const managers = [];
   t.after(async () => {
     for (const manager of managers) manager.dispose();
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   });
 
   const runCase = async (name, overrides) => {

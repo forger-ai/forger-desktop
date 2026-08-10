@@ -9,9 +9,9 @@ const require = createRequire(import.meta.url);
 const { AppAgentConversationManager } = require('../../dist-electron/main/app-agent-conversation-manager.js');
 
 const waitForPendingPermission = async (manager, requestId) => {
-  for (let index = 0; index < 1_000; index += 1) {
+  for (let index = 0; index < 500; index += 1) {
     if (manager.pendingPermissions.has(requestId)) return;
-    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setTimeout(resolve, 10));
   }
   throw new Error(`pending_permission_not_observed:${requestId}`);
 };

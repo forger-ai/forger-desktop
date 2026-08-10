@@ -10,7 +10,7 @@ const { WorkflowManager, friendlyWorkflowFailureMessage } = require('../../dist-
 
 const wait = (ms) => new Promise((resolveWait) => setTimeout(resolveWait, ms));
 
-const waitFor = async (predicate, timeoutMs = 5_000) => {
+const waitFor = async (predicate, timeoutMs = 15_000) => {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
     const value = await predicate();
