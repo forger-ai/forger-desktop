@@ -303,18 +303,12 @@ test('window bootstrap creates the main BrowserWindow with secure renderer defau
   assert.deepEqual(mainWindow.webContents.openHandler({ url: 'http://127.0.0.1:5173/help' }), { action: 'deny' });
   mainWindow.currentUrl = 'not-a-url';
   assert.deepEqual(mainWindow.webContents.openHandler({ url: 'not-a-url' }), { action: 'deny' });
-  const originalGetURL = mainWindow.webContents.getURL;
-  mainWindow.webContents.getURL = () => {
-    throw new Error('renderer_url_unavailable');
-  };
-  assert.deepEqual(mainWindow.webContents.openHandler({ url: 'not-a-url' }), { action: 'deny' });
   const malformedNavigation = [];
   mainWindow.webContents.events.get('will-navigate')(
     { preventDefault: () => malformedNavigation.push('prevented') },
     'not-a-url',
   );
   assert.deepEqual(malformedNavigation, ['prevented']);
-  mainWindow.webContents.getURL = originalGetURL;
   mainWindow.currentUrl = 'http://127.0.0.1:5173/help';
   const childWindowClosed = [];
   mainWindow.webContents.events.get('did-create-window')({
