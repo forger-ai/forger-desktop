@@ -495,6 +495,12 @@ test('window bootstrap keeps native frames portable and ignores empty pending de
     assert.equal(constructedWindows[0].options.titleBarStyle, undefined);
     assert.equal(constructedWindows[0].options.trafficLightPosition, undefined);
     assert.deepEqual(focusCalls, []);
+
+    await withPlatform('darwin', async () => {
+      await controller.createWindow();
+      assert.equal(constructedWindows[1].options.titleBarStyle, 'hidden');
+      assert.deepEqual(constructedWindows[1].options.trafficLightPosition, { x: 14, y: 16 });
+    });
   });
 });
 
