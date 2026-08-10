@@ -12,6 +12,7 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./test/renderer/setup.ts'],
     include: ['test/renderer/**/*.test.{ts,tsx}'],
+    testTimeout: 15_000,
     // Interaction-heavy MUI suites contend for timers and CPU when every file
     // runs at once, producing false five-second timeouts under coverage/CI.
     fileParallelism: false,
