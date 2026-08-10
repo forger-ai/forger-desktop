@@ -1169,7 +1169,7 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
         },
         nodes: {
           type: 'array',
-          description: 'Nodos del flujo. Tipos: llm_agent (prompt, toolIds, connectionGrants, appIds, runtime, outputSchema), forger_agent (agentId, prompt), forger_tool (toolId, input), connection (connectionType, actionId, connectionId opcional, input), condition (expression con left, operator, right). Todos requieren id y name. requiresApproval pausa el flujo hasta aprobar el paso.',
+          description: 'Nodos del flujo. Tipos: app_action (appId, toolName, input; ejecuta una accion exacta sin IA), llm_agent (prompt, toolIds, connectionGrants, appIds, runtime, outputSchema), forger_agent (agentId, prompt), forger_tool (toolId, input), connection (connectionType, actionId, connectionId opcional, input), condition (expression con left, operator, right). Todos requieren id y name. requiresApproval pausa el flujo hasta aprobar el paso.',
           items: { type: 'object' },
         },
         edges: {

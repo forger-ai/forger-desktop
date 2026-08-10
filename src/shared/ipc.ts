@@ -337,6 +337,7 @@ export const IPC_CHANNELS = {
   automationsGetRunTranscript: 'forger:automations:get-run-transcript',
   automationUpdated: 'forger:automations:updated',
   workflowsList: 'forger:workflows:list',
+  workflowsListAppActions: 'forger:workflows:list-app-actions',
   workflowsUpsert: 'forger:workflows:upsert',
   workflowsDelete: 'forger:workflows:delete',
   workflowsSetEnabled: 'forger:workflows:set-enabled',

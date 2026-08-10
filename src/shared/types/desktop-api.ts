@@ -29,7 +29,7 @@ import type { AgentToolPackageDefinition, AgentToolSettings, UpdateAgentToolAppr
 import type { CallConnectionActionInput, CallConnectionActionResult, ConfigureConnectionInput, ConnectionMutationResult, ConnectionsState, DisconnectConnectionInput, SetAppConnectionGrantInput } from './connections';
 import type { PickedChatFile, FilesStageForChatInput, FilesDiscardStagedForChatInput, FilesActionResult, FilesListInput, ForgerFileRecord, ForgerFileCategory, FilesCreateCategoryInput, FilesRenameCategoryInput, FilesDeleteCategoryInput, FilesImportInput, FilesMoveInput, FilesRenameInput, FilesDeleteInput, DbListTablesResponse, DbQueryTableResponse } from './data';
 import type { Automation, AutomationRun, AutomationRunSummary, AutomationUpsertInput, WindowControlState } from './automations';
-import type { Workflow, WorkflowApproveNodeInput, WorkflowRun, WorkflowRunSummary, WorkflowUpdatedEvent, WorkflowUpsertInput } from './workflows';
+import type { Workflow, WorkflowAppActionCatalog, WorkflowApproveNodeInput, WorkflowRun, WorkflowRunSummary, WorkflowUpdatedEvent, WorkflowUpsertInput } from './workflows';
 import type { BackgroundTask, BackgroundTaskEvent, BackgroundTaskUpsertInput } from './background-tasks';
 import type { LlmRunsSnapshot } from './llm-runs';
 import type { PersonalAgent, PersonalAgentConversation, PersonalAgentConversationDraftUpdateInput, PersonalAgentConversationEvent, PersonalAgentConversationGetInput, PersonalAgentConversationsListInput, PersonalAgentConversationStartInput, PersonalAgentCreateInput, PersonalAgentDeleteInput, PersonalAgentGrantOptions, PersonalAgentMessageSendInput, PersonalAgentPeerThread, PersonalAgentPeerThreadGetInput, PersonalAgentPeerThreadsListInput, PersonalAgentRoutine, PersonalAgentRoutineDeleteInput, PersonalAgentRoutineListInput, PersonalAgentRoutineRun, PersonalAgentRoutineRunNowInput, PersonalAgentRoutineSetEnabledInput, PersonalAgentRoutineUpsertInput, PersonalAgentScheduledWakeup, PersonalAgentUpdatePermissionsInput, PersonalAgentWakeupCancelInput, PersonalAgentWorkspaceEntry, PersonalAgentWorkspaceFile, PersonalAgentWorkspaceFileReadInput, PersonalAgentWorkspaceFileWriteInput, PersonalAgentWorkspaceListInput } from './personal-agents';
@@ -340,6 +340,7 @@ export interface ForgerDesktopApi {
   automationsGetRunTranscript: (runId: string) => Promise<AutomationRun | null>;
   onAutomationUpdated: (listener: (event: { automation: Automation; run?: AutomationRunSummary }) => void) => () => void;
   workflowsList: () => Promise<Workflow[]>;
+  workflowsListAppActions: (appId: string) => Promise<WorkflowAppActionCatalog>;
   workflowsUpsert: (input: WorkflowUpsertInput) => Promise<Workflow>;
   workflowsDelete: (id: string) => Promise<FilesActionResult>;
   workflowsSetEnabled: (id: string, enabled: boolean) => Promise<Workflow>;

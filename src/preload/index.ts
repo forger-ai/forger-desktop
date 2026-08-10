@@ -295,6 +295,7 @@ const IPC_CHANNELS = {
   automationsGetRunTranscript: 'forger:automations:get-run-transcript',
   automationUpdated: 'forger:automations:updated',
   workflowsList: 'forger:workflows:list',
+  workflowsListAppActions: 'forger:workflows:list-app-actions',
   workflowsUpsert: 'forger:workflows:upsert',
   workflowsDelete: 'forger:workflows:delete',
   workflowsSetEnabled: 'forger:workflows:set-enabled',
@@ -758,6 +759,7 @@ const api: ForgerDesktopApi = {
     };
   },
   workflowsList: () => ipcRenderer.invoke(IPC_CHANNELS.workflowsList),
+  workflowsListAppActions: (appId) => ipcRenderer.invoke(IPC_CHANNELS.workflowsListAppActions, appId),
   workflowsUpsert: (input) => ipcRenderer.invoke(IPC_CHANNELS.workflowsUpsert, input),
   workflowsDelete: (id) => ipcRenderer.invoke(IPC_CHANNELS.workflowsDelete, id),
   workflowsSetEnabled: (id, enabled) => ipcRenderer.invoke(IPC_CHANNELS.workflowsSetEnabled, id, enabled),

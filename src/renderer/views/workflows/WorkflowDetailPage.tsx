@@ -175,6 +175,8 @@ export function WorkflowDetailPage({
             providerOptions={data.providerOptions}
             outputSamples={data.outputSamples}
             savedNodeIds={data.savedNodeIds}
+            appActionCatalogs={data.appActionCatalogs}
+            loadAppActions={data.loadAppActions}
             onRunNode={onRunNode}
             readOnly={running}
             nodeRuns={nodeRunsById}

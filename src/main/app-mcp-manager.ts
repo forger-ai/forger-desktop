@@ -331,14 +331,14 @@ export class AppMcpManager {
         child.once('error', processStartErrorListener);
       });
       child.stdout.on('data', (chunk) => {
-        const text = this.formatProcessOutput(chunk.toString(), resolvedSecrets.secretValues);
+        const text = this.formatProcessOutput(chunk.toString(), [...resolvedSecrets.secretValues, token]);
         void this.options.appendInstallLog('app_mcp:stdout', {
           appId: record.appId,
           text: this.options.truncateForInstallLog(text),
         });
       });
       child.stderr.on('data', (chunk) => {
-        const text = this.formatProcessOutput(chunk.toString(), resolvedSecrets.secretValues);
+        const text = this.formatProcessOutput(chunk.toString(), [...resolvedSecrets.secretValues, token]);
         void this.options.appendInstallLog('app_mcp:stderr', {
           appId: record.appId,
           text: this.options.truncateForInstallLog(text),

@@ -19,6 +19,7 @@ import type { WakeWordServiceManager } from '../wake-word-service';
 import type { WorkflowFeatureController } from '../workflow-feature-controller';
 import type { WorkflowManager } from '../workflow-manager';
 import type { AppRegistry } from './main-process-types';
+import type { AppMcpToolLifecycleService } from './workflow-app-actions-lifecycle';
 
 export type ServiceConstructor<T = unknown> = new (...args: any[]) => T;
 export type AsyncFn<T = unknown> = (...args: any[]) => Promise<T>;
@@ -70,6 +71,7 @@ export interface MainLifecycleState {
   appAgentConversationManager: LifecycleService | null;
   appAgentTaskManager: LifecycleService | null;
   appMcpManager: LifecycleService | null;
+  appMcpToolService?: AppMcpToolLifecycleService | null;
   automationManager: LifecycleService | null;
   workflowFeatureController: WorkflowFeatureController | null;
   workflowManager: WorkflowManager | null;

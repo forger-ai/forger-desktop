@@ -70,6 +70,76 @@ export interface WorkflowForgerToolNode extends WorkflowNodeBase {
   input: Record<string, unknown>;
 }
 
+export type WorkflowAppActionEffect = 'read' | 'write' | 'destructive' | 'external' | 'unknown';
+
+export interface WorkflowAppActionAnnotations {
+  readOnlyHint?: boolean;
+  destructiveHint?: boolean;
+  idempotentHint?: boolean;
+  openWorldHint?: boolean;
+}
+
+/** Safe tool metadata exposed to the renderer. It never contains MCP credentials or endpoints. */
+export interface WorkflowAppActionSummary {
+  toolName: string;
+  title: string;
+  description?: string;
+  inputSchema: Record<string, unknown>;
+  outputSchema: Record<string, unknown>;
+  annotations: WorkflowAppActionAnnotations;
+  effect: WorkflowAppActionEffect;
+}
+
+export interface WorkflowAppActionCatalog {
+  appId: string;
+  appName: string;
+  appVersion?: string;
+  actions: WorkflowAppActionSummary[];
+}
+
+/** Presentation and schema snapshot retained when an installed app or action later disappears. */
+export interface WorkflowAppActionContract {
+  appName: string;
+  appVersion?: string;
+  actionTitle: string;
+  description?: string;
+  inputSchema: Record<string, unknown>;
+  outputSchema: Record<string, unknown>;
+  annotations: WorkflowAppActionAnnotations;
+  effect: WorkflowAppActionEffect;
+}
+
+export interface WorkflowAppActionDefinition extends WorkflowAppActionSummary {
+  appId: string;
+  appName: string;
+  appVersion?: string;
+}
+
+export interface WorkflowAppActionSelection {
+  appId: string;
+  toolName: string;
+}
+
+export interface WorkflowAppActionCallInput extends WorkflowAppActionSelection {
+  runId: string;
+  input: Record<string, unknown>;
+  timeoutMs?: number;
+  signal?: AbortSignal;
+}
+
+export interface WorkflowAppActionCallResult {
+  structuredContent?: unknown;
+  isError?: boolean;
+}
+
+export interface WorkflowAppActionNode extends WorkflowNodeBase {
+  type: 'app_action';
+  appId: string;
+  toolName: string;
+  input: Record<string, unknown>;
+  contract?: WorkflowAppActionContract;
+}
+
 export interface WorkflowConnectionNode extends WorkflowNodeBase {
   type: 'connection';
   connectionType: string;
@@ -103,6 +173,7 @@ export interface WorkflowConditionNode extends WorkflowNodeBase {
 export type WorkflowNode =
   | WorkflowLlmAgentNode
   | WorkflowForgerAgentNode
+  | WorkflowAppActionNode
   | WorkflowForgerToolNode
   | WorkflowConnectionNode
   | WorkflowConditionNode;

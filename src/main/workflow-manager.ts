@@ -14,6 +14,11 @@ import type {
   FilesActionResult,
   PersonalAgent,
   Workflow,
+  WorkflowAppActionCallInput,
+  WorkflowAppActionCallResult,
+  WorkflowAppActionCatalog,
+  WorkflowAppActionDefinition,
+  WorkflowAppActionSelection,
   WorkflowApproveNodeInput,
   WorkflowConnectionNode,
   WorkflowForgerAgentNode,
@@ -58,6 +63,11 @@ import {
   type WorkflowNodeState,
   type WorkflowRunContext,
 } from './workflow/engine';
+import {
+  appActionRequiresMandatoryApproval,
+  executeWorkflowAppAction,
+  prepareWorkflowAppActions,
+} from './workflow/app-actions';
 import { WorkflowStore, toWorkflowRunSummary } from './workflow/store';
 import { sanitizeWorkflowUpsertInput } from './workflow/sanitize';
 import { validateOutputAgainstSchema } from './workflow/output-schema';
@@ -89,6 +99,8 @@ export interface WorkflowNodeCompletion {
 interface ActiveRunState {
   workflowId: string;
   canceled: boolean;
+  abortController: AbortController;
+  appActions: Map<string, WorkflowAppActionDefinition>;
   children: Set<ChildProcessWithoutNullStreams>;
   approvalResolvers: Map<string, (approved: boolean) => void>;
 }
@@ -126,6 +138,14 @@ interface WorkflowManagerOptions {
     failures: Array<{ appId: string; code: string }>;
   }>;
   releaseAppMcps?: (listenerId: string) => void;
+  listAppActions?: (appId: string) => Promise<WorkflowAppActionCatalog>;
+  prepareAppActions?: (
+    selections: WorkflowAppActionSelection[],
+    runId: string,
+    signal?: AbortSignal,
+  ) => Promise<WorkflowAppActionDefinition[]>;
+  callAppAction?: (input: WorkflowAppActionCallInput) => Promise<WorkflowAppActionCallResult>;
+  releaseAppActions?: (runId: string) => void | Promise<void>;
   getPersonalAgent?: (agentId: string) => Promise<PersonalAgent | null>;
   callForgerToolAction?: (input: CallOfficialToolInput) => Promise<CallOfficialToolResult>;
   callConnectionAction?: (input: CallConnectionActionInput) => Promise<CallConnectionActionResult>;
@@ -187,6 +207,9 @@ export class WorkflowManager {
   }
 
   public async upsert(input: WorkflowUpsertInput): Promise<Workflow> {
+    if (input.nodes.some((node) => node.type === 'app_action' && (!node.appId.trim() || !node.toolName.trim()))) {
+      throw new Error('workflow_app_action_incomplete');
+    }
     const sanitized = sanitizeWorkflowUpsertInput(input, this.options.getValidToolIds?.());
     if (!sanitized.name.trim()) {
       throw new Error('workflow_name_required');
@@ -255,6 +278,13 @@ export class WorkflowManager {
     return await this.startRun(id, trigger);
   }
 
+  public async listAppActions(appId: string): Promise<WorkflowAppActionCatalog> {
+    if (!this.options.listAppActions) {
+      throw new Error('workflow_app_actions_unavailable');
+    }
+    return await this.options.listAppActions(appId);
+  }
+
   /**
    * Runs a single node in isolation ("execute step"). Upstream context is
    * seeded from the latest stored outputs of previous runs, other nodes are
@@ -289,6 +319,8 @@ export class WorkflowManager {
     const active: ActiveRunState = {
       workflowId,
       canceled: false,
+      abortController: new AbortController(),
+      appActions: new Map(),
       children: new Set(),
       approvalResolvers: new Map(),
     };
@@ -297,6 +329,14 @@ export class WorkflowManager {
     try {
       const workflow = this.requireWorkflow(workflowId);
       const node = workflow.nodes.find((entry) => entry.id === nodeId) as WorkflowNode;
+      active.appActions = await prepareWorkflowAppActions({
+        workflow,
+        runId: run.id,
+        signal: active.abortController.signal,
+        prepare: this.options.prepareAppActions,
+        call: this.options.callAppAction,
+        release: this.options.releaseAppActions,
+      });
       await appendTranscript(transcriptPath, 'meta', `Workflow ${workflow.id} single-step run ${run.id} for node ${nodeId}`);
       run.status = 'running';
       await this.persistRun(workflowId, run);
@@ -350,11 +390,14 @@ export class WorkflowManager {
       run.finishedAt = new Date().toISOString();
       await this.persistRun(workflowId, run);
     } catch (error) {
-      run.status = 'failed';
-      run.error = error instanceof Error ? error.message : 'workflow_step_failed';
+      const message = error instanceof Error ? error.message : 'workflow_step_failed';
+      const canceled = active.canceled || message === 'workflow_app_action_canceled';
+      run.status = canceled ? 'canceled' : 'failed';
+      run.error = canceled ? undefined : message;
       run.finishedAt = new Date().toISOString();
       await this.persistRun(workflowId, run);
     } finally {
+      await Promise.resolve(this.options.releaseAppActions?.(run.id)).catch(() => undefined);
       this.activeRuns.delete(run.id);
       await this.markWorkflowRunning(workflowId, false);
     }
@@ -394,6 +437,7 @@ export class WorkflowManager {
       return { success: false, technicalCode: 'workflow_run_not_active', userMessage: 'Ese flujo no esta en ejecucion.' };
     }
     active.canceled = true;
+    active.abortController.abort();
     for (const resolver of active.approvalResolvers.values()) {
       resolver(false);
     }
@@ -489,6 +533,8 @@ export class WorkflowManager {
     const active: ActiveRunState = {
       workflowId,
       canceled: false,
+      abortController: new AbortController(),
+      appActions: new Map(),
       children: new Set(),
       approvalResolvers: new Map(),
     };
@@ -496,6 +542,14 @@ export class WorkflowManager {
     const transcriptPath = this.store.runTranscriptPath(run.id);
     try {
       const workflow = this.requireWorkflow(workflowId);
+      active.appActions = await prepareWorkflowAppActions({
+        workflow,
+        runId: run.id,
+        signal: active.abortController.signal,
+        prepare: this.options.prepareAppActions,
+        call: this.options.callAppAction,
+        release: this.options.releaseAppActions,
+      });
       await appendTranscript(transcriptPath, 'meta', `Workflow ${workflow.id} (${workflow.name}) run ${run.id} started`);
       run.status = 'running';
       await this.persistRun(workflowId, run);
@@ -594,11 +648,13 @@ export class WorkflowManager {
     } catch (error) {
       const message = error instanceof Error ? error.message : 'workflow_run_failed';
       await appendTranscript(transcriptPath, 'meta', `Workflow run failed: ${message}`);
-      run.status = 'failed';
-      run.error = message;
+      const canceled = active.canceled || message === 'workflow_app_action_canceled';
+      run.status = canceled ? 'canceled' : 'failed';
+      run.error = canceled ? undefined : message;
       run.finishedAt = new Date().toISOString();
       await this.persistRun(workflowId, run);
     } finally {
+      await Promise.resolve(this.options.releaseAppActions?.(run.id)).catch(() => undefined);
       this.activeRuns.delete(run.id);
       await this.markWorkflowRunning(workflowId, false);
       await this.scheduleWorkflow(workflowId);
@@ -618,7 +674,9 @@ export class WorkflowManager {
     const context = buildRunContext(triggerContext, states);
     const debugInput = this.buildNodeDebugInput(node, context);
 
-    if (node.requiresApproval) {
+    const requiresApproval = node.requiresApproval === true
+      || (node.type === 'app_action' && appActionRequiresMandatoryApproval(node, active.appActions));
+    if (requiresApproval) {
       states[node.id] = { status: 'waiting_approval', input: debugInput };
       await syncNodeRun(node.id);
       const approved = await new Promise<boolean>((resolve) => {
@@ -690,6 +748,16 @@ export class WorkflowManager {
         input: resolveTemplateValue(node.input, context) as Record<string, unknown>,
       };
     }
+    if (node.type === 'app_action') {
+      return {
+        appId: node.appId,
+        appName: node.contract?.appName ?? node.appId,
+        toolName: node.toolName,
+        actionTitle: node.contract?.actionTitle ?? node.toolName,
+        effect: node.contract?.effect ?? 'unknown',
+        input: resolveTemplateValue(node.input, context) as Record<string, unknown>,
+      };
+    }
     if (node.type === 'llm_agent' || node.type === 'forger_agent') {
       const inputContext = this.buildAgentInputContext(context);
       return {
@@ -718,6 +786,17 @@ export class WorkflowManager {
     }
     if (node.type === 'connection') {
       return await this.executeConnectionNode(node, context);
+    }
+    if (node.type === 'app_action') {
+      return await executeWorkflowAppAction({
+        node,
+        context,
+        runId: run.id,
+        signal: active.abortController.signal,
+        definitions: active.appActions,
+        call: this.options.callAppAction,
+        defaultTimeoutMs: DEFAULT_NODE_TIMEOUT_MS,
+      });
     }
     if (node.type === 'forger_agent') {
       return await this.executeForgerAgentNode(workflow, run, node, context, active, transcriptPath);

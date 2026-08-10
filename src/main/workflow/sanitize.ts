@@ -4,6 +4,9 @@ import type {
   ConnectionSessionGrant,
   WorkflowConditionExpression,
   WorkflowConditionOperator,
+  WorkflowAppActionAnnotations,
+  WorkflowAppActionContract,
+  WorkflowAppActionEffect,
   WorkflowEdge,
   WorkflowEdgeCondition,
   WorkflowNode,
@@ -13,6 +16,11 @@ import type {
 } from '../../shared/types';
 import { normalizeAgentRuntime } from '../../shared/types';
 import { connectionTypeForActionId, isBuiltInConnectionType } from '../../shared/connection-catalog';
+import {
+  isSafeAppActionJson,
+  MAX_APP_ACTION_INPUT_BYTES,
+  MAX_APP_ACTION_SCHEMA_BYTES,
+} from './app-action-json';
 
 const NODE_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/;
 const MAX_NAME_LENGTH = 120;
@@ -116,6 +124,61 @@ const sanitizeOutputSchema = (value: unknown): Record<string, unknown> | undefin
     ? value as Record<string, unknown>
     : undefined;
 
+const APP_ACTION_EFFECTS: ReadonlySet<WorkflowAppActionEffect> = new Set([
+  'read',
+  'write',
+  'destructive',
+  'external',
+  'unknown',
+]);
+
+const sanitizeAppActionAnnotations = (value: unknown): WorkflowAppActionAnnotations => {
+  const record = value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+  return {
+    ...(typeof record.readOnlyHint === 'boolean' ? { readOnlyHint: record.readOnlyHint } : {}),
+    ...(typeof record.destructiveHint === 'boolean' ? { destructiveHint: record.destructiveHint } : {}),
+    ...(typeof record.idempotentHint === 'boolean' ? { idempotentHint: record.idempotentHint } : {}),
+    ...(typeof record.openWorldHint === 'boolean' ? { openWorldHint: record.openWorldHint } : {}),
+  };
+};
+
+const sanitizeAppActionContract = (value: unknown): WorkflowAppActionContract | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const appName = sanitizeText(record.appName, MAX_NAME_LENGTH);
+  const actionTitle = sanitizeText(record.actionTitle, MAX_NAME_LENGTH);
+  const inputSchema = sanitizeOutputSchema(record.inputSchema);
+  const outputSchema = sanitizeOutputSchema(record.outputSchema);
+  const effect = APP_ACTION_EFFECTS.has(record.effect as WorkflowAppActionEffect)
+    ? record.effect as WorkflowAppActionEffect
+    : 'unknown';
+  if (!appName || !actionTitle || !inputSchema || !outputSchema
+    || !isSafeAppActionSchema(inputSchema)
+    || !isSafeAppActionSchema(outputSchema)) {
+    return undefined;
+  }
+  const appVersion = sanitizeText(record.appVersion, 80);
+  const description = sanitizeText(record.description, 2_000);
+  return {
+    appName,
+    ...(appVersion ? { appVersion } : {}),
+    actionTitle,
+    ...(description ? { description } : {}),
+    inputSchema,
+    outputSchema,
+    annotations: sanitizeAppActionAnnotations(record.annotations),
+    effect,
+  };
+};
+
+const isSafeAppActionSchema = (schema: Record<string, unknown>): boolean => {
+  return isSafeAppActionJson(schema, MAX_APP_ACTION_SCHEMA_BYTES);
+};
+
 const sanitizeConditionExpression = (value: unknown): WorkflowConditionExpression => {
   const record = value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -186,6 +249,29 @@ export const sanitizeWorkflowNode = (
       agentId,
       prompt,
       ...(outputSchema ? { outputSchema } : {}),
+    };
+  }
+
+  if (record.type === 'app_action') {
+    const appId = sanitizeText(record.appId, 128);
+    const toolName = sanitizeText(record.toolName, 160);
+    if (!appId || !NODE_ID_PATTERN.test(appId) || !toolName) {
+      return null;
+    }
+    const input = record.input && typeof record.input === 'object' && !Array.isArray(record.input)
+      ? record.input as Record<string, unknown>
+      : {};
+    if (!isSafeAppActionJson(input, MAX_APP_ACTION_INPUT_BYTES)) {
+      return null;
+    }
+    const contract = sanitizeAppActionContract(record.contract);
+    return {
+      ...base,
+      type: 'app_action',
+      appId,
+      toolName,
+      input,
+      ...(contract ? { contract } : {}),
     };
   }
 

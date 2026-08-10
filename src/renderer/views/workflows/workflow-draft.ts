@@ -68,6 +68,9 @@ export const createDraftNode = (
   if (type === 'forger_agent') {
     return { ...base, type: 'forger_agent', agentId: '', prompt: '' };
   }
+  if (type === 'app_action') {
+    return { ...base, type: 'app_action', appId: '', toolName: '', input: {} };
+  }
   if (type === 'forger_tool') {
     return { ...base, type: 'forger_tool', toolId: '' as AgentToolId, input: {} };
   }

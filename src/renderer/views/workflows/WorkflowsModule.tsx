@@ -13,7 +13,7 @@ import type {
 import type { AppDictionary } from '@renderer/i18n';
 import { buildChatProviderOptions } from '@shared/agent-runtime-registry';
 import type { View } from '@renderer/components/Sidebar';
-import type { ProviderOption } from './WorkflowEditor';
+import type { AppActionCatalogState, ProviderOption } from './WorkflowEditor';
 import { WorkflowsListView } from './WorkflowsListView';
 import { WorkflowEditorPage, type WorkflowGraphData } from './WorkflowEditorPage';
 import { WorkflowDetailPage } from './WorkflowDetailPage';
@@ -58,6 +58,9 @@ export function WorkflowsModule({ t, view, selectedWorkflowId, isPinned, onBackT
   const [officialTools, setOfficialTools] = useState<OfficialToolSummary[]>([]);
   const [connectionOptions, setConnectionOptions] = useState<PersonalAgentGrantOptionConnection[]>([]);
   const [providerOptions, setProviderOptions] = useState<ProviderOption[]>([]);
+  const [appActionCatalogs, setAppActionCatalogs] = useState<Record<string, AppActionCatalogState>>({});
+  const appActionCatalogsRef = useRef<Record<string, AppActionCatalogState>>({});
+  const appActionRequestIdsRef = useRef<Record<string, number>>({});
 
   const [draft, setDraft] = useState<WorkflowDraft | null>(null);
   const [baseline, setBaseline] = useState<string>('');
@@ -90,6 +93,42 @@ export function WorkflowsModule({ t, view, selectedWorkflowId, isPinned, onBackT
     const targetRunId = preferredRunId ?? nextRuns[0]?.id ?? null;
     setSelectedRunId(targetRunId);
     setSelectedRun(targetRunId ? await desktopApi.workflowsGetRun(targetRunId) : null);
+  }, []);
+
+  const loadAppActions = useCallback(async (appId: string, force = false) => {
+    if (!appId) return;
+    const existing = appActionCatalogsRef.current[appId];
+    if (!force && (existing?.status === 'loading' || existing?.status === 'ready')) return;
+    const requestId = (appActionRequestIdsRef.current[appId] ?? 0) + 1;
+    appActionRequestIdsRef.current[appId] = requestId;
+    const loadingCatalogs: Record<string, AppActionCatalogState> = {
+      ...appActionCatalogsRef.current,
+      [appId]: { ...existing, status: 'loading', error: undefined },
+    };
+    appActionCatalogsRef.current = loadingCatalogs;
+    setAppActionCatalogs(loadingCatalogs);
+    try {
+      const catalog = await getDesktopApi().workflowsListAppActions(appId);
+      if (appActionRequestIdsRef.current[appId] !== requestId) return;
+      const readyCatalogs: Record<string, AppActionCatalogState> = {
+        ...appActionCatalogsRef.current,
+        [appId]: { status: 'ready', catalog },
+      };
+      appActionCatalogsRef.current = readyCatalogs;
+      setAppActionCatalogs(readyCatalogs);
+    } catch (error) {
+      if (appActionRequestIdsRef.current[appId] !== requestId) return;
+      const errorCatalogs: Record<string, AppActionCatalogState> = {
+        ...appActionCatalogsRef.current,
+        [appId]: {
+          ...appActionCatalogsRef.current[appId],
+          status: 'error',
+          error: error instanceof Error ? error.message : 'workflow_app_actions_unavailable',
+        },
+      };
+      appActionCatalogsRef.current = errorCatalogs;
+      setAppActionCatalogs(errorCatalogs);
+    }
   }, []);
 
   useEffect(() => {
@@ -181,6 +220,7 @@ export function WorkflowsModule({ t, view, selectedWorkflowId, isPinned, onBackT
 
   const graphData: WorkflowGraphData = {
     apps, agents, toolPackages, officialTools, connectionOptions, providerOptions, outputSamples, savedNodeIds,
+    appActionCatalogs, loadAppActions,
   };
 
   const dirty = draft ? signatureOf(draft) !== baseline : false;
@@ -199,6 +239,10 @@ export function WorkflowsModule({ t, view, selectedWorkflowId, isPinned, onBackT
     }
     if (draft.nodes.length === 0) {
       setBanner({ severity: 'error', message: copy.nodesRequired });
+      return;
+    }
+    if (draft.nodes.some((node) => node.type === 'app_action' && (!node.appId || !node.toolName))) {
+      setBanner({ severity: 'error', message: copy.appActionIncomplete });
       return;
     }
     setBusy(true);
@@ -225,6 +269,8 @@ export function WorkflowsModule({ t, view, selectedWorkflowId, isPinned, onBackT
             ? copy.forEachJoinNotAllowed
             : code.includes('workflow_foreach_requires_upstream')
               ? copy.forEachRequiresUpstream
+              : code.includes('workflow_app_action_incomplete')
+                ? copy.appActionIncomplete
               : copy.saveError,
       });
     } finally {

@@ -8,7 +8,7 @@ import type {
   PersonalAgentGrantOptionConnection,
 } from '@shared/types';
 import type { AppDictionary } from '@renderer/i18n';
-import { WorkflowEditor, type ProviderOption } from './WorkflowEditor';
+import { WorkflowEditor, type AppActionCatalogState, type ProviderOption } from './WorkflowEditor';
 import { WorkflowParamsForm } from './WorkflowParamsForm';
 import type { WorkflowDraft } from './workflow-draft';
 
@@ -21,6 +21,8 @@ export interface WorkflowGraphData {
   providerOptions: ProviderOption[];
   outputSamples: Record<string, unknown>;
   savedNodeIds: ReadonlySet<string>;
+  appActionCatalogs: Record<string, AppActionCatalogState>;
+  loadAppActions: (appId: string, force?: boolean) => void;
 }
 
 /** Create view: name/description/schedule inline above the graph as the star. */
@@ -61,6 +63,8 @@ export function WorkflowEditorPage({ t, draft, onDraftChange, data, busy, banner
           providerOptions={data.providerOptions}
           outputSamples={data.outputSamples}
           savedNodeIds={data.savedNodeIds}
+          appActionCatalogs={data.appActionCatalogs}
+          loadAppActions={data.loadAppActions}
           t={t}
         />
       </Box>

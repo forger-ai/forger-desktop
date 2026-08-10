@@ -14,7 +14,7 @@ import {
 } from '@mui/material';
 import CheckRounded from '@mui/icons-material/CheckRounded';
 import CloseRounded from '@mui/icons-material/CloseRounded';
-import type { WorkflowNodeRunStatus, WorkflowRun } from '@shared/types';
+import type { WorkflowAppActionEffect, WorkflowNodeRunStatus, WorkflowRun } from '@shared/types';
 import type { AppDictionary } from '@renderer/i18n';
 
 type WorkflowCopy = AppDictionary['sections']['workflows'];
@@ -48,6 +48,21 @@ const CodeBlock = ({ value, empty }: { value: unknown; empty: string }) => {
   );
 };
 
+const APP_ACTION_EFFECTS = new Set<WorkflowAppActionEffect>(['read', 'write', 'destructive', 'external', 'unknown']);
+
+const appActionApprovalDetails = (input: Record<string, unknown> | undefined) => {
+  if (!input) return null;
+  const appName = typeof input.appName === 'string' ? input.appName : '';
+  const actionTitle = typeof input.actionTitle === 'string' ? input.actionTitle : '';
+  const effect = typeof input.effect === 'string' && APP_ACTION_EFFECTS.has(input.effect as WorkflowAppActionEffect)
+    ? input.effect as WorkflowAppActionEffect
+    : 'unknown';
+  const actionInput = input.input && typeof input.input === 'object' && !Array.isArray(input.input)
+    ? input.input as Record<string, unknown>
+    : {};
+  return appName && actionTitle ? { appName, actionTitle, effect, actionInput } : null;
+};
+
 /** Input / Log / Output detail for a single node run, opened from a node badge. */
 export function WorkflowRunModal({ open, run, focusNodeId, copy, onClose, onApprove }: {
   open: boolean;
@@ -65,6 +80,9 @@ export function WorkflowRunModal({ open, run, focusNodeId, copy, onClose, onAppr
   const nodeRun = run?.nodeRuns.find((entry) => entry.nodeId === focusNodeId) ?? null;
   const waiting = run?.status === 'waiting_approval' && run.pendingApprovalNodeId === focusNodeId;
   const logText = [nodeRun?.summary, nodeRun?.error, run?.transcript].filter(Boolean).join('\n\n');
+  const appActionApproval = nodeRun?.nodeType === 'app_action'
+    ? appActionApprovalDetails(nodeRun.input)
+    : null;
 
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="md">
@@ -82,12 +100,25 @@ export function WorkflowRunModal({ open, run, focusNodeId, copy, onClose, onAppr
         ) : (
           <Stack spacing={1.5}>
             {nodeRun.error ? <Alert severity="error" variant="outlined">{nodeRun.error}</Alert> : null}
+            {waiting && appActionApproval ? (
+              <Alert severity="warning" variant="outlined" icon={false}>
+                <Stack spacing={1}>
+                  <Typography variant="subtitle2">{copy.appActionApprovalTitle}</Typography>
+                  <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap" useFlexGap>
+                    <Chip size="small" label={`${appActionApproval.appName} · ${appActionApproval.actionTitle}`} />
+                    <Chip size="small" variant="outlined" label={copy.appActionEffects[appActionApproval.effect]} />
+                  </Stack>
+                  <Typography variant="caption" color="text.secondary">{copy.appActionApprovalData}</Typography>
+                  <CodeBlock value={appActionApproval.actionInput} empty={copy.noData} />
+                </Stack>
+              </Alert>
+            ) : null}
             <Tabs value={tab} onChange={(_event, value) => setTab(value as typeof tab)}>
               <Tab value="input" label={copy.input} />
               <Tab value="log" label={copy.log} />
               <Tab value="output" label={copy.output} />
             </Tabs>
-            {tab === 'input' ? <CodeBlock value={nodeRun.input} empty={copy.noData} /> : null}
+            {tab === 'input' ? <CodeBlock value={appActionApproval?.actionInput ?? nodeRun.input} empty={copy.noData} /> : null}
             {tab === 'log' ? <CodeBlock value={logText} empty={copy.noData} /> : null}
             {tab === 'output' ? <CodeBlock value={nodeRun.output} empty={copy.noData} /> : null}
             {waiting && onApprove ? (

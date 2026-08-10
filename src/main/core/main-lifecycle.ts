@@ -10,13 +10,9 @@ import { AppFolderGrantStore } from '../app-folder-grants';
 import type {
   AgentProvider, AgentRuntime, AgentRuntimeRequest,
   AgentToolDefinition,
-  AppSummary, AppSecretDeclaration,
-  AutomationFrequency,
-  BasicActionResult,
-  CatalogApp,
-  ChatCreatedAppRequest,
-  ChatQuestion,
-  ChatQuestionRequest,
+  AppSummary, AppSecretDeclaration, AutomationFrequency,
+  BasicActionResult, CatalogApp, ChatCreatedAppRequest,
+  ChatQuestion, ChatQuestionRequest,
   AntigravityAuthStatus,
   CodexAuthStatus,
   ClaudeAuthStatus,
@@ -70,11 +66,13 @@ import type { SidekickVoiceOutcomeInput } from '../sidekick-voice-runtime';
 import { createSidekickRuntimeBridgeBindings } from '../sidekick-runtime-bridge';
 import type { WorkflowFeatureController as WorkflowFeatureControllerService } from '../workflow-feature-controller';
 import type { WorkflowManager as WorkflowManagerService } from '../workflow-manager';
+import { createAppMcpToolLifecycleService, createWorkflowAppActionBindings, type AppMcpToolServiceConstructor } from './workflow-app-actions-lifecycle';
 export interface MainLifecycleDeps {
   AGENT_TOOL_DEFINITIONS: AgentToolDefinition[];
   AppAgentConversationManager: ServiceConstructor<LifecycleService>;
   AppAgentTaskManager: ServiceConstructor<LifecycleService>;
   AppMcpManager: ServiceConstructor<LifecycleService>;
+  AppMcpToolService?: AppMcpToolServiceConstructor;
   AutomationManager: ServiceConstructor<LifecycleService>;
   WorkflowFeatureController: typeof WorkflowFeatureControllerService;
   WorkflowManager: ServiceConstructor<WorkflowManagerService>;
@@ -267,6 +265,7 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
     AppAgentConversationManager,
     AppAgentTaskManager,
     AppMcpManager,
+    AppMcpToolService,
     AutomationManager,
     WorkflowFeatureController,
     WorkflowManager,
@@ -1013,6 +1012,7 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
     onMcpStartFailed: (input: { appId: string; runId: string; error: unknown }) => state.desktopErrorReporter?.reportAppMcpStartFailure(input),
   });
   });
+  await startupLogger.step('startup:app_mcp_tool_service:create', () => { state.appMcpToolService = createAppMcpToolLifecycleService(AppMcpToolService, state.appMcpManager, () => Object.values(state.registry.apps).map(toAppSummary)); });
   await startupLogger.step('startup:file_library:create', () => {
     state.fileLibrary = new FileLibrary(getPrivateDataRoot(), getForgerMetadataRoot());
   });
@@ -1496,6 +1496,7 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
     releaseAppMcps: (listenerId: string) => {
       state.appMcpManager?.releaseMcps(listenerId);
     },
+    ...createWorkflowAppActionBindings(() => state.appMcpToolService),
     getPersonalAgent: async (agentId: string) => {
       try {
         return await getPersonalAgentStore().requireAgent(agentId);

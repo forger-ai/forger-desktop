@@ -281,6 +281,9 @@ export const buildUpstreamFieldSources = (
           return options.forgerToolOutputSchemas?.[node.toolId]
             ?? options.connectorOutputSchemas?.[node.toolId];
         }
+        if (node.type === 'app_action') {
+          return node.contract?.outputSchema;
+        }
         return node.outputSchema ?? AGENT_FALLBACK_OUTPUT_SCHEMA;
       })();
       const schemaFields = schema ? listSchemaFields(schema) : [];

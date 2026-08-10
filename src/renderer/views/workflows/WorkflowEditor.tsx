@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Autocomplete,
@@ -47,6 +47,9 @@ import type {
   PersonalAgent,
   PersonalAgentGrantOptionConnection,
   WorkflowConditionOperator,
+  WorkflowAppActionContract,
+  WorkflowAppActionCatalog,
+  WorkflowAppActionSummary,
   WorkflowEdge,
   WorkflowEdgeCondition,
   WorkflowNode,
@@ -61,10 +64,18 @@ import type { WorkflowDraft } from './workflow-draft';
 import { createDraftNode, edgeKey } from './workflow-draft';
 import { TemplateEditor, type TemplateSourceNode } from './TemplateEditor';
 import { MappingMenuButton, SchemaForm } from './SchemaForm';
+import { AppActionChangeDialog } from './AppActionChangeDialog';
+import {
+  appActionContractMatchesSummary,
+  preserveCompatibleAppActionInput,
+  summarizeAppActionContractChange,
+  type PendingAppActionChange,
+} from './app-action-editor';
 
 const NODE_TYPE_COLORS: Record<WorkflowNode['type'], string> = {
   llm_agent: '#7c4dff',
   forger_agent: '#2e7d32',
+  app_action: '#00695c',
   forger_tool: '#0288d1',
   connection: '#1565c0',
   condition: '#ed6c02',
@@ -98,7 +109,18 @@ const connectionInstanceLabel = (instance: PersonalAgentGrantOptionConnection['i
   ?? instance.label
   ?? instance.id;
 
+const hasSchemaProperties = (schema: Record<string, unknown> | undefined): boolean =>
+  Boolean(schema?.properties
+    && typeof schema.properties === 'object'
+    && !Array.isArray(schema.properties)
+    && Object.keys(schema.properties as Record<string, unknown>).length > 0);
+
 export type ProviderOption = { label: string; value: AgentProviderPreference };
+export type AppActionCatalogState = {
+  status: 'idle' | 'loading' | 'ready' | 'error';
+  catalog?: WorkflowAppActionCatalog;
+  error?: string;
+};
 
 /** forEach nodes run once per item; surface the item count on the run badge. */
 const forEachCountOf = (node: WorkflowNode, nodeRun: WorkflowNodeRun | undefined): number | undefined => {
@@ -118,6 +140,13 @@ type FlowNodeData = {
   nodeRun?: WorkflowNodeRun;
   forEachCount?: number;
   onOpenRun?: (nodeId: string) => void;
+};
+
+const appActionCardLabel = (node: WorkflowNode): string | null => {
+  if (node.type !== 'app_action') return null;
+  const app = node.contract?.appName || node.appId;
+  const action = node.contract?.actionTitle || node.toolName;
+  return app && action ? `${app} · ${action}` : null;
 };
 
 /** Corner badge that reflects the status of this node in the selected run. */
@@ -186,6 +215,11 @@ const FlowNodeCard = ({ data, selected }: NodeProps) => {
           {typeLabel}
         </Typography>
         <Typography variant="body2" sx={{ fontWeight: 600 }}>{node.name}</Typography>
+        {appActionCardLabel(node) ? (
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', maxWidth: 220 }} noWrap>
+            {appActionCardLabel(node)}
+          </Typography>
+        ) : null}
         <Handle type="source" position={Position.Right} />
       </Paper>
       {nodeRun ? (
@@ -210,6 +244,8 @@ interface WorkflowEditorProps {
   outputSamples: Record<string, unknown>;
   /** Node ids present in the saved workflow (test step needs a saved node). */
   savedNodeIds: ReadonlySet<string>;
+  appActionCatalogs: Record<string, AppActionCatalogState>;
+  loadAppActions: (appId: string, force?: boolean) => void;
   onRunNode?: (nodeId: string) => void;
   /** When true the graph can be panned and inspected but not edited (e.g. a run is in progress). */
   readOnly?: boolean;
@@ -220,7 +256,7 @@ interface WorkflowEditorProps {
   t: AppDictionary;
 }
 
-export function WorkflowEditor({ draft, onDraftChange, apps, agents, toolPackages, officialTools, connectionOptions, providerOptions, outputSamples, savedNodeIds, onRunNode, readOnly = false, nodeRuns, onOpenNodeRun, t }: WorkflowEditorProps) {
+export function WorkflowEditor({ draft, onDraftChange, apps, agents, toolPackages, officialTools, connectionOptions, providerOptions, outputSamples, savedNodeIds, appActionCatalogs, loadAppActions, onRunNode, readOnly = false, nodeRuns, onOpenNodeRun, t }: WorkflowEditorProps) {
   const copy = t.sections.workflows;
   const theme = useTheme();
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
@@ -539,6 +575,8 @@ export function WorkflowEditor({ draft, onDraftChange, apps, agents, toolPackage
               officialTools={officialTools}
               connectionOptions={connectionOptions}
               providerOptions={providerOptions}
+              appActionCatalogs={appActionCatalogs}
+              loadAppActions={loadAppActions}
               sources={upstreamSources}
               canRunNode={savedNodeIds.has(selectedNode.id)}
               onRunNode={onRunNode}
@@ -582,7 +620,7 @@ const EdgePanel = ({ edge, copy, onChangeCondition, onDelete }: {
   </Stack>
 );
 
-const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, connectionOptions, providerOptions, sources, canRunNode, onRunNode, onChange, onDelete }: {
+const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, connectionOptions, providerOptions, appActionCatalogs, loadAppActions, sources, canRunNode, onRunNode, onChange, onDelete }: {
   node: WorkflowNode;
   copy: WorkflowCopy;
   apps: AppSummary[];
@@ -591,6 +629,8 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, conn
   officialTools: OfficialToolSummary[];
   connectionOptions: PersonalAgentGrantOptionConnection[];
   providerOptions: ProviderOption[];
+  appActionCatalogs: Record<string, AppActionCatalogState>;
+  loadAppActions: (appId: string, force?: boolean) => void;
   sources: TemplateSourceNode[];
   canRunNode: boolean;
   onRunNode?: (nodeId: string) => void;
@@ -600,6 +640,7 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, conn
   const [inputJsonError, setInputJsonError] = useState(false);
   const [schemaJsonError, setSchemaJsonError] = useState(false);
   const [rawActionInput, setRawActionInput] = useState(false);
+  const [pendingAppAction, setPendingAppAction] = useState<PendingAppActionChange | null>(null);
   // With forEach active, every field of the node also offers the current item.
   const sourcesWithItem: TemplateSourceNode[] = (() => {
     if (!node.forEach) {
@@ -672,6 +713,109 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, conn
   const connectionIdAvailable = node.type !== 'connection'
     || !node.connectionId
     || Boolean(selectedConnectionOption?.instances.some((instance) => instance.id === node.connectionId));
+  const installedApps = useMemo(
+    () => apps.filter((app) => app.status === 'installed' || app.status === 'running'),
+    [apps],
+  );
+  const appActionState = node.type === 'app_action' && node.appId
+    ? appActionCatalogs[node.appId]
+    : undefined;
+  const appActionCatalog = appActionState?.catalog;
+  const selectedCatalogAction = node.type === 'app_action'
+    ? appActionCatalog?.actions.find((action) => action.toolName === node.toolName)
+    : undefined;
+  const appActionContract = node.type === 'app_action' ? node.contract : undefined;
+  const appActionContractPending = node.type === 'app_action'
+    && Boolean(node.toolName && !node.contract && selectedCatalogAction);
+  const appActionContractChanged = node.type === 'app_action'
+    && Boolean(node.contract && selectedCatalogAction
+      && !appActionContractMatchesSummary(node.contract, selectedCatalogAction));
+  const appActionEffect = appActionContract?.effect ?? selectedCatalogAction?.effect;
+  const appActionRequiresApproval = appActionEffect === 'destructive'
+    || appActionEffect === 'external'
+    || appActionEffect === 'unknown';
+  const selectedAppAvailable = node.type !== 'app_action'
+    || !node.appId
+    || installedApps.some((app) => app.id === node.appId);
+
+  useEffect(() => {
+    if (node.type === 'app_action' && node.appId && selectedAppAvailable && !appActionState) {
+      loadAppActions(node.appId);
+    }
+  }, [node.type, node.type === 'app_action' ? node.appId : '', selectedAppAvailable, appActionState, loadAppActions]);
+
+  useEffect(() => {
+    if (node.type === 'app_action' && appActionRequiresApproval && node.requiresApproval !== true) {
+      onChange((current) => current.type === 'app_action'
+        ? { ...current, requiresApproval: true }
+        : current);
+    }
+  }, [node.type, node.type === 'app_action' ? node.id : '', node.requiresApproval, appActionRequiresApproval, onChange]);
+
+  const contractForAction = (action: WorkflowAppActionSummary): WorkflowAppActionContract => ({
+    appName: appActionCatalog?.appName
+      ?? (node.type === 'app_action' ? installedApps.find((app) => app.id === node.appId)?.name ?? node.appId : ''),
+    ...(appActionCatalog?.appVersion ? { appVersion: appActionCatalog.appVersion } : {}),
+    actionTitle: action.title,
+    ...(action.description ? { description: action.description } : {}),
+    inputSchema: action.inputSchema,
+    outputSchema: action.outputSchema,
+    annotations: action.annotations,
+    effect: action.effect,
+  });
+
+  const hasConfiguredAppAction = node.type === 'app_action'
+    && Boolean(node.toolName || Object.keys(node.input).length > 0 || node.contract);
+
+  const applyAppActionApp = (appId: string): void => {
+    if (appId) loadAppActions(appId);
+    onChange((current) => {
+      if (current.type !== 'app_action') return current;
+      const { contract: _contract, ...rest } = current;
+      return { ...rest, appId, toolName: '', input: {} };
+    });
+  };
+
+  const applyAppActionSelection = (action: WorkflowAppActionSummary): void => {
+    const contract = contractForAction(action);
+    onChange((current) => current.type === 'app_action'
+      ? {
+          ...current,
+          toolName: action.toolName,
+          input: {},
+          contract,
+          requiresApproval: contract.effect !== 'read',
+        }
+      : current);
+  };
+
+  const adoptCurrentAppActionContract = (selectedCatalogAction: WorkflowAppActionSummary): void => {
+    const contract = contractForAction(selectedCatalogAction);
+    const nextInput = node.type === 'app_action'
+      ? preserveCompatibleAppActionInput(node.input, contract.inputSchema)
+      : {};
+    onChange((current) => current.type === 'app_action'
+      ? {
+          ...current,
+          contract,
+          input: nextInput,
+          requiresApproval: contract.effect !== 'read'
+            ? true
+            : current.requiresApproval,
+        }
+      : current);
+  };
+
+  const applyPendingAppAction = (): void => {
+    if (!pendingAppAction) return;
+    if (pendingAppAction.kind === 'app') applyAppActionApp(pendingAppAction.appId);
+    else if (pendingAppAction.kind === 'action') applyAppActionSelection(pendingAppAction.action);
+    else adoptCurrentAppActionContract(pendingAppAction.action);
+    setPendingAppAction(null);
+  };
+  const pendingContractChange = node.type === 'app_action' && pendingAppAction?.kind === 'contract'
+    ? summarizeAppActionContractChange(node.contract, pendingAppAction.action, node.input)
+    : null;
 
   return (
     <Stack spacing={1.5}>
@@ -721,6 +865,168 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, conn
             ? { ...current, prompt: nextPrompt } as WorkflowNode
             : current)}
         />
+      ) : null}
+
+      {node.type === 'app_action' ? (
+        <>
+          <TextField
+            select
+            size="small"
+            label={copy.appActionApp}
+            value={node.appId}
+            helperText={copy.appActionAppHelper}
+            onChange={(event) => {
+              const appId = event.target.value;
+              if (appId === node.appId) return;
+              if (hasConfiguredAppAction) setPendingAppAction({ kind: 'app', appId });
+              else applyAppActionApp(appId);
+            }}
+          >
+            {node.appId && !installedApps.some((app) => app.id === node.appId) ? (
+              <MenuItem value={node.appId}>{node.contract?.appName ?? node.appId} · {copy.appActionUnavailable}</MenuItem>
+            ) : null}
+            {installedApps.map((app) => (
+              <MenuItem key={app.id} value={app.id}>{app.name ?? app.id}</MenuItem>
+            ))}
+          </TextField>
+
+          {!selectedAppAvailable ? (
+            <Alert severity="warning" variant="outlined">{copy.appActionAppMissing}</Alert>
+          ) : null}
+          {selectedAppAvailable && node.appId && appActionState?.status === 'loading' ? (
+            <Stack direction="row" spacing={1} alignItems="center">
+              <CircularProgress size={16} />
+              <Typography variant="body2" color="text.secondary">{copy.appActionLoading}</Typography>
+            </Stack>
+          ) : null}
+          {selectedAppAvailable && node.appId && appActionState?.status === 'error' ? (
+            <Alert
+              severity="warning"
+              variant="outlined"
+              action={<Button size="small" color="inherit" onClick={() => loadAppActions(node.appId, true)}>{copy.retry}</Button>}
+            >
+              {copy.appActionLoadError}
+            </Alert>
+          ) : null}
+
+          {node.appId && (appActionCatalog || node.contract) ? (
+            <TextField
+              select
+              size="small"
+              label={copy.appActionAction}
+              value={node.toolName}
+              helperText={copy.appActionActionHelper}
+              onChange={(event) => {
+                const toolName = event.target.value;
+                if (toolName === node.toolName) return;
+                const action = appActionCatalog?.actions.find((candidate) => candidate.toolName === toolName);
+                if (!action) return;
+                if (hasConfiguredAppAction) setPendingAppAction({ kind: 'action', action });
+                else applyAppActionSelection(action);
+              }}
+            >
+              {node.toolName && !appActionCatalog?.actions.some((action) => action.toolName === node.toolName) ? (
+                <MenuItem value={node.toolName}>{node.contract?.actionTitle ?? node.toolName} · {copy.appActionUnavailable}</MenuItem>
+              ) : null}
+              {(appActionCatalog?.actions ?? []).map((action) => (
+                <MenuItem key={action.toolName} value={action.toolName}>{action.title}</MenuItem>
+              ))}
+            </TextField>
+          ) : null}
+
+          {appActionState?.status === 'ready' && appActionCatalog?.actions.length === 0 ? (
+            <Alert severity="info" variant="outlined">{copy.appActionEmpty}</Alert>
+          ) : null}
+          {appActionContractPending && selectedCatalogAction ? (
+            <Alert
+              severity="warning"
+              variant="outlined"
+              action={<Button size="small" color="inherit" onClick={() => setPendingAppAction({ kind: 'contract', action: selectedCatalogAction })}>{copy.appActionAdoptCurrentContract}</Button>}
+            >
+              {copy.appActionContractPending}
+            </Alert>
+          ) : null}
+          {appActionContractChanged && selectedCatalogAction ? (
+            <Alert
+              severity="warning"
+              variant="outlined"
+              action={<Button size="small" color="inherit" onClick={() => setPendingAppAction({ kind: 'contract', action: selectedCatalogAction })}>{copy.appActionReviewCurrentContract}</Button>}
+            >
+              {copy.appActionContractChanged}
+            </Alert>
+          ) : null}
+          {node.toolName && node.contract && !selectedCatalogAction
+            && (!selectedAppAvailable || appActionState?.status === 'ready' || appActionState?.status === 'error') ? (
+            <Alert severity="warning" variant="outlined">{copy.appActionSnapshot}</Alert>
+          ) : null}
+          {appActionContract ? (
+            <Stack spacing={0.75}>
+              <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap" useFlexGap>
+                <Chip size="small" label={`${appActionContract.appName} · ${appActionContract.actionTitle}`} />
+                <Chip size="small" variant="outlined" label={copy.appActionEffects[appActionContract.effect]} />
+                {appActionContract.appVersion ? <Chip size="small" variant="outlined" label={`v${appActionContract.appVersion}`} /> : null}
+              </Stack>
+              {appActionContract.description ? (
+                <Typography variant="caption" color="text.secondary">{appActionContract.description}</Typography>
+              ) : null}
+              {appActionRequiresApproval ? (
+                <Alert severity="warning" variant="outlined">{copy.appActionApprovalRequired}</Alert>
+              ) : null}
+            </Stack>
+          ) : null}
+
+          {appActionContract ? (() => {
+            const hasFormSchema = hasSchemaProperties(appActionContract.inputSchema);
+            if (!rawActionInput && hasFormSchema) {
+              return (
+                <>
+                  <SchemaForm
+                    schema={appActionContract.inputSchema}
+                    value={node.input ?? {}}
+                    sources={sourcesWithItem}
+                    mapTooltip={copy.mapField}
+                    wholeOutputLabel={copy.wholeOutput}
+                    triggerGroupLabel={copy.triggerData}
+                    onChange={(nextInput) => onChange((current) => current.type === 'app_action'
+                      ? { ...current, input: nextInput }
+                      : current)}
+                  />
+                  <Button size="small" variant="text" sx={{ alignSelf: 'flex-start' }} onClick={() => setRawActionInput(true)}>
+                    {copy.advancedJson}
+                  </Button>
+                </>
+              );
+            }
+            return (
+              <>
+                <TextField
+                  key={`${node.appId}:${node.toolName}:json-input`}
+                  size="small"
+                  label={copy.actionInput}
+                  defaultValue={JSON.stringify(node.input ?? {}, null, 2)}
+                  multiline
+                  minRows={4}
+                  error={inputJsonError}
+                  helperText={inputJsonError ? copy.actionInputInvalid : copy.actionInputHelper}
+                  onBlur={(event) => {
+                    try {
+                      const parsed = JSON.parse(event.target.value || '{}') as Record<string, unknown>;
+                      setInputJsonError(false);
+                      onChange((current) => current.type === 'app_action' ? { ...current, input: parsed } : current);
+                    } catch {
+                      setInputJsonError(true);
+                    }
+                  }}
+                />
+                {hasFormSchema ? (
+                  <Button size="small" variant="text" sx={{ alignSelf: 'flex-start' }} disabled={inputJsonError} onClick={() => setRawActionInput(false)}>
+                    {copy.formMode}
+                  </Button>
+                ) : null}
+              </>
+            );
+          })() : null}
+        </>
       ) : null}
 
       {node.type === 'forger_agent' ? (
@@ -1189,7 +1495,8 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, conn
           control={(
             <Checkbox
               size="small"
-              checked={node.requiresApproval === true}
+              checked={node.requiresApproval === true || appActionRequiresApproval}
+              disabled={appActionRequiresApproval}
               onChange={(event) => onChange((current) => ({ ...current, requiresApproval: event.target.checked }))}
             />
           )}
@@ -1236,6 +1543,16 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, conn
           <Typography variant="caption" color="text.secondary">{copy.testStepHelper}</Typography>
         </>
       ) : null}
+      <AppActionChangeDialog
+        pending={pendingAppAction}
+        contract={appActionContract}
+        contractChanged={appActionContractChanged}
+        contractChange={pendingContractChange}
+        apps={installedApps}
+        copy={copy}
+        onCancel={() => setPendingAppAction(null)}
+        onApply={applyPendingAppAction}
+      />
     </Stack>
   );
 };

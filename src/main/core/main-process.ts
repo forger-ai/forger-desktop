@@ -15,16 +15,14 @@ import { AppAgentTaskManager } from '../app-agent-task-manager';
 import { AppAgentConversationManager } from '../app-agent-conversation-manager';
 import { renderManifestAgentPrompt, type ManifestAgentPromptKind } from '../manifest-agent-prompts';
 import { AppMcpManager } from '../app-mcp-manager';
+import { AppMcpToolService } from '../app-mcp-tool-service';
 import { AutomationManager } from '../automation-manager';
 import { WorkflowFeatureController } from '../workflow-feature-controller';
 import { WorkflowManager } from '../workflow-manager';
 import { BackgroundTaskStore } from '../background-task-store';
 import {
   extractDeepLinkFromArgv, focusWindow as focusDeepLinkWindow,
-  FORGER_PROTOCOL,
-  parseForgerUrl,
-  registerForgerProtocol,
-  type ForgerDeepLink,
+  FORGER_PROTOCOL, parseForgerUrl, registerForgerProtocol, type ForgerDeepLink,
 } from '../deep-links';
 import { DevCatalogService } from '../dev-catalog-service';
 import { DesktopUpdater } from '../desktop-updater';
@@ -242,6 +240,7 @@ const updateWorkflowsEarlyAccess = async (enabled: boolean): Promise<Settings> =
 };
 let backgroundTaskStore: BackgroundTaskStore | null = null;
 let appMcpManager: AppMcpManager | null = null;
+let appMcpToolService: AppMcpToolService | null = null;
 let backupsManager: BackupsManager | null = null;
 let memoryStore: MemoryStore | null = null;
 let personalAgentStore: AgentStore | null = null;
@@ -1544,6 +1543,7 @@ const mainLifecycleState = {
   get workflowFeatureController() { return workflowFeatureController; }, set workflowFeatureController(value) { workflowFeatureController = value; },
   get workflowManager() { return workflowManager; }, set workflowManager(value) { workflowManager = value; },
   get appMcpManager() { return appMcpManager; }, set appMcpManager(value) { appMcpManager = value; },
+  get appMcpToolService() { return appMcpToolService; }, set appMcpToolService(value) { appMcpToolService = value; },
   get backupsManager() { return backupsManager; }, set backupsManager(value) { backupsManager = value; },
   get memoryStore() { return memoryStore; }, set memoryStore(value) { memoryStore = value; },
   get memoryMaintenanceManager() { return memoryMaintenanceManager; }, set memoryMaintenanceManager(value) { memoryMaintenanceManager = value; },
@@ -1559,7 +1559,7 @@ const mainLifecycleState = {
 };
 
 registerMainLifecycle({
-  AGENT_TOOL_DEFINITIONS, AppAgentConversationManager, AppAgentTaskManager, AppMcpManager, AutomationManager, WorkflowFeatureController, WorkflowManager,
+  AGENT_TOOL_DEFINITIONS, AppAgentConversationManager, AppAgentTaskManager, AppMcpManager, AppMcpToolService, AutomationManager, WorkflowFeatureController, WorkflowManager,
   BrowserWindow, ChatOrchestrator, CloudDeviceManager, CloudIdentityStore, DesktopRuntimeBridge,
   DevCatalogService, FORGER_AGENT_CONTRACT_VERSION, FileLibrary, ForgerAccountStore, ForgerBackendClient,
   ForgerMcpServer, IPC_CHANNELS, MemoryMaintenanceManager, MemoryStore, SecretsStore, anyAppAllowsAgentNetworkAccess, app,

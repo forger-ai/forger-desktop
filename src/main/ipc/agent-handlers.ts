@@ -557,6 +557,13 @@ export const registerAgentIpcHandlers = (deps: AgentIpcDeps): void => {
   ipcMain.handle(IPC_CHANNELS.workflowsList, async () => {
     return requireWorkflowManager().list();
   });
+  ipcMain.handle(IPC_CHANNELS.workflowsListAppActions, async (_event, appId: string) => {
+    const normalizedAppId = typeof appId === 'string' ? appId.trim() : '';
+    if (!normalizedAppId) {
+      throw new Error('workflow_app_action_app_required');
+    }
+    return await requireWorkflowManager().listAppActions(normalizedAppId);
+  });
   ipcMain.handle(IPC_CHANNELS.workflowsUpsert, async (_event, input: WorkflowUpsertInput) => {
     return await requireWorkflowManager().upsert(input);
   });
