@@ -234,8 +234,7 @@ export const whatsappToolModule: InternalToolModule = {
   },
   deactivate: async (context) => {
     const key = context.metadataRoot;
-    const manager = managers.get(key);
-    await manager?.disconnect(context);
+    await getManager(context).disconnect(context);
     managers.delete(key);
   },
 };

@@ -312,6 +312,7 @@ test('WhatsApp manager treats Baileys restart-required disconnect as reconnectab
   const context = createContext(root);
   const store = new WhatsAppLocalStore(root);
   const manager = new WhatsAppConnectionManager(store);
+  manager.authenticated = true;
   let reconnectAttempts = 0;
   manager.ensureStarted = async () => {
     reconnectAttempts += 1;
@@ -344,6 +345,7 @@ test('WhatsApp manager reconnects lost sockets but does not loop generic connect
   });
   const context = createContext(root);
   const manager = new WhatsAppConnectionManager(new WhatsAppLocalStore(root));
+  manager.authenticated = true;
   let reconnectAttempts = 0;
   manager.ensureStarted = async () => {
     reconnectAttempts += 1;
@@ -380,7 +382,7 @@ test('WhatsApp status starts the socket when auth exists after app restart', asy
   const context = createContext(root);
   const store = new WhatsAppLocalStore(root);
   await mkdir(store.authDirectory(), { recursive: true });
-  await writeFile(join(store.authDirectory(), 'creds.json'), '{}', 'utf8');
+  await writeFile(join(store.authDirectory(), 'creds.json'), JSON.stringify({ registered: true }), 'utf8');
   const manager = new WhatsAppConnectionManager(store);
   let started = 0;
   manager.ensureStarted = async () => {
@@ -395,6 +397,138 @@ test('WhatsApp status starts the socket when auth exists after app restart', asy
   assert.equal(status.connected, true);
 });
 
+test('WhatsApp credentials with registered false are not configured', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'forger-whatsapp-unregistered-creds-'));
+  t.after(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+  const store = new WhatsAppLocalStore(root);
+  await mkdir(store.authDirectory(), { recursive: true });
+  await writeFile(join(store.authDirectory(), 'creds.json'), JSON.stringify({ registered: false }), 'utf8');
+  const manager = new WhatsAppConnectionManager(store);
+
+  const status = await manager.status();
+
+  assert.equal(status.configured, false);
+  assert.equal(status.connected, false);
+  assert.equal(status.needsReconnect, undefined);
+});
+
+test('WhatsApp QR identity is configured before registered becomes true', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'forger-whatsapp-paired-identity-'));
+  t.after(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+  const store = new WhatsAppLocalStore(root);
+  await mkdir(store.authDirectory(), { recursive: true });
+  await writeFile(join(store.authDirectory(), 'creds.json'), JSON.stringify({
+    registered: false,
+    me: { id: 'business-device' },
+    account: { details: 'paired' },
+  }), 'utf8');
+  const manager = new WhatsAppConnectionManager(store);
+
+  const status = await manager.status();
+
+  assert.equal(status.configured, true);
+  assert.equal(status.connected, false);
+});
+
+test('WhatsApp close before authentication does not require reconnection', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'forger-whatsapp-pre-auth-close-'));
+  t.after(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+  const context = createContext(root);
+  const manager = new WhatsAppConnectionManager(new WhatsAppLocalStore(root));
+
+  manager.handleConnectionUpdate({
+    connection: 'close',
+    lastDisconnect: { error: new Error('Connection Failure') },
+  }, context);
+
+  const status = await manager.status();
+  assert.equal(status.configured, false);
+  assert.equal(status.connected, false);
+  assert.equal(status.needsReconnect, undefined);
+});
+
+test('WhatsApp pairing fetches the latest protocol version through the injected loader', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'forger-whatsapp-latest-version-'));
+  const store = new WhatsAppLocalStore(root);
+  const latestVersion = [2, 3000, 1043857760];
+  let fetchLatestCalls = 0;
+  let socketConfig;
+  let manager;
+  const loadBaileys = async () => ({
+    fetchLatestBaileysVersion: async () => {
+      fetchLatestCalls += 1;
+      return { version: latestVersion, isLatest: true };
+    },
+    useMultiFileAuthState: async () => ({ state: {}, saveCreds: async () => undefined }),
+    default: (config) => {
+      socketConfig = config;
+      return {
+        ev: {
+          on: (event, handler) => {
+            if (event === 'connection.update') {
+              queueMicrotask(() => handler({ qr: 'fresh-versioned-qr' }));
+            }
+          },
+        },
+        end: () => undefined,
+      };
+    },
+  });
+  manager = new WhatsAppConnectionManager(store, loadBaileys);
+  t.after(async () => {
+    await manager.disconnect();
+    await rm(root, { recursive: true, force: true });
+  });
+
+  const result = await manager.startPairing(createContext(root), { method: 'qr' });
+
+  assert.equal(fetchLatestCalls, 1);
+  assert.deepEqual(socketConfig?.version, latestVersion);
+  assert.equal(result.status, 'qr_ready');
+});
+
+test('WhatsApp pairing failure before QR is recoverable instead of pending', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'forger-whatsapp-pairing-failure-'));
+  const store = new WhatsAppLocalStore(root);
+  let manager;
+  const loadBaileys = async () => ({
+    fetchLatestBaileysVersion: async () => ({ version: [2, 3000, 1043857760], isLatest: true }),
+    useMultiFileAuthState: async () => ({ state: {}, saveCreds: async () => undefined }),
+    default: () => ({
+      ev: {
+        on: (event, handler) => {
+          if (event === 'connection.update') {
+            queueMicrotask(() => handler({
+              connection: 'close',
+              lastDisconnect: { error: new Error('Connection Failure') },
+            }));
+          }
+        },
+      },
+      end: () => undefined,
+    }),
+  });
+  manager = new WhatsAppConnectionManager(store, loadBaileys);
+  manager.waitForQr = async () => null;
+  t.after(async () => {
+    await manager.disconnect();
+    await rm(root, { recursive: true, force: true });
+  });
+
+  const result = await manager.startPairing(createContext(root), { method: 'qr' });
+
+  assert.equal(result.success, false);
+  assert.equal(result.recoverable, true);
+  assert.notEqual(result.status, 'qr_pending');
+  assert.equal(typeof result.technicalCode, 'string');
+});
+
 test('WhatsApp QR pairing clears stale auth before starting a fresh QR session', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'forger-whatsapp-stale-auth-'));
   t.after(async () => {
@@ -403,7 +537,7 @@ test('WhatsApp QR pairing clears stale auth before starting a fresh QR session',
   const context = createContext(root);
   const store = new WhatsAppLocalStore(root);
   await mkdir(store.authDirectory(), { recursive: true });
-  await writeFile(join(store.authDirectory(), 'creds.json'), '{}', 'utf8');
+  await writeFile(join(store.authDirectory(), 'creds.json'), JSON.stringify({ registered: true }), 'utf8');
   const manager = new WhatsAppConnectionManager(store);
   let ended = false;
   let startedAfterClear = false;
