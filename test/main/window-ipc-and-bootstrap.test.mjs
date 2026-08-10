@@ -221,8 +221,10 @@ test('window bootstrap creates the main BrowserWindow with secure renderer defau
   const openedPaths = [];
   const reportPath = path.resolve('report.txt');
   const otherReportPath = path.resolve('other-report.txt');
+  const thirdReportPath = path.resolve('third-report.txt');
   const reportUrl = pathToFileURL(reportPath).toString();
   const otherReportUrl = pathToFileURL(otherReportPath).toString();
+  const thirdReportUrl = pathToFileURL(thirdReportPath).toString();
   let mainWindow = null;
   let friendWindows = [];
 
@@ -305,6 +307,18 @@ test('window bootstrap creates the main BrowserWindow with secure renderer defau
   assert.deepEqual(mainWindow.webContents.openHandler({ url: 'javascript:alert(1)' }), { action: 'deny' });
   assert.deepEqual(mainWindow.webContents.openHandler({ url: reportUrl }), { action: 'deny' });
   assert.deepEqual(mainWindow.webContents.openHandler({ url: otherReportUrl }), { action: 'deny' });
+  const sameFileNavigation = [];
+  mainWindow.webContents.events.get('will-navigate')(
+    { preventDefault: () => sameFileNavigation.push('prevented') },
+    reportUrl,
+  );
+  const differentFileNavigation = [];
+  mainWindow.webContents.events.get('will-navigate')(
+    { preventDefault: () => differentFileNavigation.push('prevented') },
+    thirdReportUrl,
+  );
+  assert.deepEqual(sameFileNavigation, []);
+  assert.deepEqual(differentFileNavigation, ['prevented']);
   mainWindow.currentUrl = 'http://127.0.0.1:5173/';
   assert.deepEqual(mainWindow.webContents.openHandler({ url: 'javascript:alert(1)' }), { action: 'deny' });
   assert.deepEqual(mainWindow.webContents.openHandler({ url: 'http://127.0.0.1:5173/help' }), { action: 'deny' });
@@ -359,7 +373,7 @@ test('window bootstrap creates the main BrowserWindow with secure renderer defau
   assert.deepEqual(externalNavigation, ['prevented']);
   assert.deepEqual(internalNavigation, []);
   assert.deepEqual(externalUrls, ['https://example.com/docs', 'https://example.com/popup']);
-  assert.deepEqual(openedPaths, [reportPath, otherReportPath]);
+  assert.deepEqual(openedPaths, [reportPath, otherReportPath, thirdReportPath]);
   assert.equal(mainWindow.currentUrl, 'http://127.0.0.1:5173/help');
 
   const replacementWindow = createWindowDouble();
