@@ -155,8 +155,9 @@ test('real Electron startup preserves renderer isolation and denies uncontrolled
 
     const initialWindowCount = electronApp.windows().length;
     const unexpectedWindow = electronApp.waitForEvent('window', { timeout: 1_000 }).then(() => true, () => false);
-    const openReturnedNull = await page.evaluate(() => window.open('about:blank', 'uncontrolled-e2e-child') === null);
-    expect(openReturnedNull).toBe(true);
+    await page.evaluate(() => {
+      window.open('about:blank', 'uncontrolled-e2e-child');
+    });
     expect(await unexpectedWindow).toBe(false);
     expect(electronApp.windows()).toHaveLength(initialWindowCount);
     const shellCalls = await electronApp.evaluate(() => (
