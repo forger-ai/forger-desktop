@@ -295,7 +295,7 @@ test('window bootstrap creates the main BrowserWindow with secure renderer defau
   assert.equal(constructedWindows.length, 1);
   assert.equal(constructedWindows[0].options.frame, false);
   assert.match(
-    constructedWindows[0].options.webPreferences.preload,
+    constructedWindows[0].options.webPreferences.preload.replaceAll('\\', '/'),
     /dist-electron\/main\/core\/\.\.\/\.\.\/preload\/index\.js$/,
   );
   assert.deepEqual(
