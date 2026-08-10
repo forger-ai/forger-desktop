@@ -34,6 +34,7 @@ const settingsSeed = () => ({
   userEmail: '',
   plan: 'Free',
   safeMode: true,
+  earlyAccess: { workflowsEnabled: false },
   developerMode: { enabled: false, pathEntries: [] },
   defaultAgentProvider: 'auto',
   defaultChatPermissionMode: 'safe',
@@ -59,6 +60,24 @@ const settingsSeed = () => ({
   activeProviderProfiles: {},
 });
 
+const legacyWorkflow = () => ({
+  id: 'legacy-workflow-1',
+  name: 'Legacy workflow',
+  trigger: { type: 'manual' },
+  nodes: [{
+    id: 'legacy-condition',
+    name: 'Legacy condition',
+    type: 'condition',
+    expression: { left: 'ready', operator: 'equals', right: 'ready' },
+  }],
+  edges: [],
+  enabled: true,
+  running: false,
+  nextRunAt: null,
+  createdAt: '2026-01-01T00:00:00.000Z',
+  updatedAt: '2026-01-01T00:00:00.000Z',
+});
+
 const createHarness = async (overrides = {}) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forger-settings-service-'));
   const state = {
@@ -75,11 +94,12 @@ const createHarness = async (overrides = {}) => {
         this.filePath = filePath;
       }
     },
-    fs,
+    fs: overrides.fileSystem ?? fs,
     getAntigravityAuthStatus: overrides.getAntigravityAuthStatus,
     getClaudeAuthStatus: overrides.getClaudeAuthStatus ?? (async () => ({ authenticated: overrides.claudeAuthenticated ?? false })),
     getCodexAuthStatus: overrides.getCodexAuthStatus ?? (async () => ({ authenticated: overrides.codexAuthenticated ?? false })),
     getPromptOverridesPath: () => path.join(root, 'prompt-overrides.json'),
+    getMetadataRoot: () => root,
     getSettingsPath: () => path.join(root, 'settings.json'),
     path,
     settingsSeed: settingsSeed(),
@@ -89,6 +109,7 @@ const createHarness = async (overrides = {}) => {
     controller,
     root,
     settingsPath: path.join(root, 'settings.json'),
+    workflowsPath: path.join(root, 'workflows.json'),
     state,
     cleanup: async () => await fs.rm(root, { recursive: true, force: true }),
   };
@@ -188,6 +209,131 @@ test('SettingsService normalizes persisted settings, preserves safe fields, and 
     assert.deepEqual(harness.state.settings.providerConnections, { codex: '2026-05-20T00:00:00.000Z' });
     assert.equal(harness.controller.getPromptOverridesStore(), store);
     assert.equal(store.filePath, path.join(harness.root, 'prompt-overrides.json'));
+  } finally {
+    await harness.cleanup();
+  }
+});
+
+test('SettingsService defaults workflows early access off and preserves an explicit persisted opt-in', async () => {
+  const harness = await createHarness();
+  try {
+    await harness.controller.loadSettings();
+    assert.equal(harness.state.settings.earlyAccess?.workflowsEnabled, false);
+
+    await fs.writeFile(harness.settingsPath, JSON.stringify({
+      earlyAccess: { workflowsEnabled: true },
+    }), 'utf8');
+    await harness.controller.loadSettings();
+    assert.equal(harness.state.settings.earlyAccess?.workflowsEnabled, true);
+
+    await fs.writeFile(harness.settingsPath, JSON.stringify({
+      earlyAccess: { workflowsEnabled: 'true' },
+    }), 'utf8');
+    await harness.controller.loadSettings();
+    assert.equal(harness.state.settings.earlyAccess?.workflowsEnabled, false);
+  } finally {
+    await harness.cleanup();
+  }
+});
+
+test('SettingsService updateEarlyAccess persists the normalized workflow opt-in', async () => {
+  const harness = await createHarness();
+  try {
+    await harness.controller.loadSettings();
+
+    const updated = await harness.controller.updateEarlyAccess({ workflowsEnabled: true });
+
+    assert.equal(updated.earlyAccess?.workflowsEnabled, true);
+    assert.equal(harness.state.settings.earlyAccess?.workflowsEnabled, true);
+    const persisted = JSON.parse(await fs.readFile(harness.settingsPath, 'utf8'));
+    assert.equal(persisted.earlyAccess?.workflowsEnabled, true);
+    assert.equal(persisted.safeMode, true, 'updating early access preserves unrelated settings');
+  } finally {
+    await harness.cleanup();
+  }
+});
+
+test('SettingsService upgrades a valid legacy workflow install to an explicit opt-in exactly once', async () => {
+  let settingsWrites = 0;
+  const fileSystem = {
+    ...fs,
+    writeFile: async (filePath, ...args) => {
+      if (path.basename(String(filePath)) === 'settings.json') {
+        settingsWrites += 1;
+      }
+      return await fs.writeFile(filePath, ...args);
+    },
+  };
+  const harness = await createHarness({ fileSystem });
+  try {
+    await fs.writeFile(harness.settingsPath, JSON.stringify({
+      userEmail: 'legacy@example.com',
+      safeMode: true,
+    }), 'utf8');
+    await fs.writeFile(harness.workflowsPath, JSON.stringify([legacyWorkflow()]), 'utf8');
+
+    await harness.controller.loadSettings();
+
+    assert.equal(harness.state.settings.earlyAccess?.workflowsEnabled, true);
+    assert.equal(settingsWrites, 1);
+    const migrated = JSON.parse(await fs.readFile(harness.settingsPath, 'utf8'));
+    assert.equal(migrated.earlyAccess?.workflowsEnabled, true);
+    assert.equal(migrated.userEmail, 'legacy@example.com');
+
+    await fs.writeFile(harness.workflowsPath, '[]', 'utf8');
+    await harness.controller.loadSettings();
+    assert.equal(harness.state.settings.earlyAccess?.workflowsEnabled, true);
+    assert.equal(settingsWrites, 1, 'the persisted explicit setting prevents a second migration write');
+  } finally {
+    await harness.cleanup();
+  }
+});
+
+test('SettingsService keeps workflows off when legacy workflow storage has no valid entries', async (t) => {
+  const cases = [
+    { name: 'empty workflow list', raw: '[]' },
+    { name: 'corrupt workflow JSON', raw: '{not valid json' },
+    {
+      name: 'invalid workflow entries',
+      raw: JSON.stringify([
+        null,
+        {},
+        { id: 'missing-name', trigger: { type: 'manual' }, nodes: [], edges: [] },
+        { name: 'Missing id', trigger: { type: 'manual' }, nodes: [], edges: [] },
+      ]),
+    },
+  ];
+
+  for (const scenario of cases) {
+    await t.test(scenario.name, async () => {
+      const harness = await createHarness();
+      try {
+        await fs.writeFile(harness.settingsPath, JSON.stringify({ safeMode: true }), 'utf8');
+        await fs.writeFile(harness.workflowsPath, scenario.raw, 'utf8');
+
+        await harness.controller.loadSettings();
+
+        assert.equal(harness.state.settings.earlyAccess?.workflowsEnabled, false);
+      } finally {
+        await harness.cleanup();
+      }
+    });
+  }
+});
+
+test('SettingsService never overrides an explicit workflows opt-out during legacy upgrade', async () => {
+  const harness = await createHarness();
+  try {
+    await fs.writeFile(harness.settingsPath, JSON.stringify({
+      earlyAccess: { workflowsEnabled: false },
+    }), 'utf8');
+    await fs.writeFile(harness.workflowsPath, JSON.stringify([legacyWorkflow()]), 'utf8');
+
+    await harness.controller.loadSettings();
+
+    assert.equal(harness.state.settings.earlyAccess?.workflowsEnabled, false);
+    const persisted = JSON.parse(await fs.readFile(harness.settingsPath, 'utf8'));
+    assert.equal(persisted.earlyAccess?.workflowsEnabled, false);
   } finally {
     await harness.cleanup();
   }

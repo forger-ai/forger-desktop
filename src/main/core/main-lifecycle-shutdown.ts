@@ -26,7 +26,9 @@ export const registerGracefulShutdownHandlers = ({
     state.memoryMaintenanceManager?.dispose();
     state.personalAgentRoutineManager?.dispose?.();
     state.automationManager?.dispose();
-    state.workflowManager?.dispose();
+    await state.workflowFeatureController?.dispose();
+    state.workflowFeatureController = null;
+    state.workflowManager = null;
     state.appMcpManager?.dispose();
     await Promise.allSettled([
       state.localNetworkShareManager?.stopAll?.() ?? Promise.resolve(),

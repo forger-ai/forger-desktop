@@ -84,6 +84,9 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     openWorkflowDetail,
     openWorkflowEditor,
     backToWorkflowList,
+    workflowsEnabled,
+    workflowsEarlyAccessBusy,
+    handleUpdateWorkflowsEarlyAccess,
     selectedConnectionId, openConnectionDetail, backToConnectionsList,
     setBannerSeverity,
     setBannerMessage,
@@ -990,6 +993,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
           onOpenBackgroundTask={openBackgroundTaskDetail}
           desktopUpdateState={desktopUpdateState}
           pinnedViews={pinnedViews}
+          workflowsEnabled={workflowsEnabled}
           showForumNav
         >
         {currentView === 'apps' ? renderInstalledAppsView() : null}
@@ -1194,8 +1198,11 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
           <MoreView
             t={t}
             pinnedViews={pinnedViews}
+            workflowsEnabled={workflowsEnabled}
+            workflowsEarlyAccessBusy={workflowsEarlyAccessBusy}
             onTogglePin={togglePinnedView}
             onOpen={setCurrentView}
+            onUpdateWorkflowsEarlyAccess={handleUpdateWorkflowsEarlyAccess}
           />
         ) : null}
 
@@ -1221,7 +1228,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
           />)
         ) : null}
 
-        {currentView === 'workflows' || currentView === 'workflowEditor' || currentView === 'workflowDetail' ? (
+        {workflowsEnabled && (currentView === 'workflows' || currentView === 'workflowEditor' || currentView === 'workflowDetail') ? (
           <WorkflowsModule
             t={t}
             view={currentView}

@@ -3073,6 +3073,132 @@ test('app MCP manager handles stale listeners, stop timers, shutdown reuse, and 
   }
 });
 
+test('strict app MCP startup reports the failed app and rolls back listeners already acquired for the run', async () => {
+  const roots = await createTempDesktopRoots('forger-required-mcp-results-');
+  try {
+    await mkdir(path.join(roots.appsRoot, 'sales-app', 'backend'), { recursive: true });
+    await mkdir(path.join(roots.appsRoot, 'broken-app', 'backend'), { recursive: true });
+    const children = [];
+    const terminations = [];
+    const childProcessMock = {
+      spawn(command, args, options) {
+        const child = createFakeChildProcess();
+        children.push({ child, command, args, options });
+        return child;
+      },
+    };
+
+    await withMockedModuleLoad(
+      (request) => request === 'node:child_process' ? childProcessMock : null,
+      async () => {
+        const { AppMcpManager } = distRequire('main/app-mcp-manager.js');
+        let nextPort = 55100;
+        const manager = new AppMcpManager({
+          getInstalledApp: (appId) => ['sales-app', 'broken-app'].includes(appId)
+            ? { appId, installDir: path.join(roots.appsRoot, appId), requiredPythonVersion: '3.12' }
+            : null,
+          resolveInstalledManifest: async () => ({ mcp: { command: 'python -m app.mcp' } }),
+          ensureRuntimeInstalled: async () => ({ rootDir: path.join(roots.root, 'runtime'), python: '/runtime/python' }),
+          ensureBackendPythonEnvironment: async (_python, _backendDir, appId) => {
+            if (appId === 'broken-app') {
+              throw new Error('synthetic required app failure');
+            }
+          },
+          getVenvExecutables: (backendDir) => ({ python: path.join(backendDir, '.venv', 'bin', 'python'), pip: 'pip' }),
+          getFreePort: async () => {
+            nextPort += 1;
+            return nextPort;
+          },
+          splitManifestCommand: (command) => (command ?? '').split(' ').filter(Boolean),
+          ensurePathInside: () => true,
+          translateManifestEnvironment: (environment) => ({ ...environment }),
+          ensureSqliteDatabaseParent: async () => undefined,
+          getRuntimePathEntries: () => [],
+          waitForHttpOk: async () => undefined,
+          terminateProcess: async (child) => {
+            terminations.push(child);
+          },
+          appendInstallLog: async () => undefined,
+          truncateForInstallLog: (value) => value,
+          serializeErrorForInstallLog: (error) => ({ message: error.message }),
+        });
+
+        const result = await manager.listenRequiredMcps(['sales-app', 'broken-app'], 'strict-run');
+
+        assert.deepEqual(result, {
+          servers: [],
+          failures: [{ appId: 'broken-app', code: 'app_mcp_start_failed' }],
+        });
+        assert.equal(children.length, 1, 'the healthy app was acquired before the aggregate result was known');
+        assert.equal(manager.runListeners.has('strict-run'), false);
+        assert.equal(manager.states.get('sales-app').listeners.has('strict-run'), false);
+        await waitFor(() => terminations.length === 1, 'strict_mcp_rollback');
+        manager.dispose();
+      },
+    );
+  } finally {
+    await roots.cleanup();
+  }
+});
+
+test('strict app MCP startup assigns injective token environment variables to colliding app ids', async () => {
+  const roots = await createTempDesktopRoots('forger-required-mcp-token-env-');
+  try {
+    await mkdir(path.join(roots.appsRoot, 'sales-app', 'backend'), { recursive: true });
+    await mkdir(path.join(roots.appsRoot, 'sales_app', 'backend'), { recursive: true });
+    const childProcessMock = {
+      spawn() {
+        return createFakeChildProcess();
+      },
+    };
+
+    await withMockedModuleLoad(
+      (request) => request === 'node:child_process' ? childProcessMock : null,
+      async () => {
+        const { AppMcpManager } = distRequire('main/app-mcp-manager.js');
+        let nextPort = 55200;
+        const manager = new AppMcpManager({
+          getInstalledApp: (appId) => ['sales-app', 'sales_app'].includes(appId)
+            ? { appId, installDir: path.join(roots.appsRoot, appId), requiredPythonVersion: '3.12' }
+            : null,
+          resolveInstalledManifest: async () => ({ mcp: { command: 'python -m app.mcp' } }),
+          ensureRuntimeInstalled: async () => ({ rootDir: path.join(roots.root, 'runtime'), python: '/runtime/python' }),
+          ensureBackendPythonEnvironment: async () => undefined,
+          getVenvExecutables: (backendDir) => ({ python: path.join(backendDir, '.venv', 'bin', 'python'), pip: 'pip' }),
+          getFreePort: async () => {
+            nextPort += 1;
+            return nextPort;
+          },
+          splitManifestCommand: (command) => (command ?? '').split(' ').filter(Boolean),
+          ensurePathInside: () => true,
+          translateManifestEnvironment: (environment) => ({ ...environment }),
+          ensureSqliteDatabaseParent: async () => undefined,
+          getRuntimePathEntries: () => [],
+          waitForHttpOk: async () => undefined,
+          terminateProcess: async () => undefined,
+          appendInstallLog: async () => undefined,
+          truncateForInstallLog: (value) => value,
+          serializeErrorForInstallLog: (error) => ({ message: error.message }),
+        });
+
+        const result = await manager.listenRequiredMcps(['sales-app', 'sales_app'], 'collision-run');
+
+        assert.deepEqual(result.failures, []);
+        assert.deepEqual(result.servers.map((server) => server.appId), ['sales-app', 'sales_app']);
+        assert.equal(result.servers.length, 2);
+        assert.notEqual(
+          result.servers[0].config.tokenEnvVar,
+          result.servers[1].config.tokenEnvVar,
+          'valid app ids must never overwrite each other in the provider environment',
+        );
+        manager.dispose();
+      },
+    );
+  } finally {
+    await roots.cleanup();
+  }
+});
+
 test('app MCP manager reuses an up server after an in-flight shutdown completes', async () => {
   const roots = await createTempDesktopRoots('forger-mcp-manager-shutdown-reuse-');
   try {

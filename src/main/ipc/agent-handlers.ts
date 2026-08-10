@@ -49,6 +49,7 @@ export interface AgentIpcDeps {
   appAgentTaskManager: AppAgentTaskManager | null;
   automationManager: AutomationManager | null;
   workflowManager: WorkflowManager | null;
+  getWorkflowManager?: () => WorkflowManager | null;
   desktopErrorReporter: DesktopErrorReporter | null;
   ipcMain: IpcMain;
   normalizeAgentProvider: (value: unknown) => AgentRuntime['provider'] | undefined;
@@ -68,6 +69,18 @@ export interface AgentIpcDeps {
 
 export const registerAgentIpcHandlers = (deps: AgentIpcDeps): void => {
   const { BUILT_IN_CLAUDE_EFFORT, BUILT_IN_CODEX_REASONING, BetterSqlite3, IPC_CHANNELS, appAgentConversationManager, appAgentTaskManager, automationManager, workflowManager, desktopErrorReporter, ipcMain, normalizeAgentProvider, normalizeClaudeEffort, normalizeCodexReasoningEffort, registry, renderManifestAgentPrompt, resolveAppDbPath, resolveAppIdForWebContents, resolveInstalledAgents } = deps;
+  const getWorkflowManager = deps.getWorkflowManager ?? (() => workflowManager);
+  const requireWorkflowManager = (): WorkflowManager => {
+    const manager = getWorkflowManager();
+    if (!manager) throw new Error('workflow_manager_unavailable');
+    return manager;
+  };
+  const workflowUnavailableResult = (error: unknown) => ({
+    success: false,
+    technicalCode: error instanceof Error && error.message === 'workflow_feature_disabled'
+      ? 'workflow_feature_disabled'
+      : 'workflow_manager_unavailable',
+  });
   const handleAppAgentTaskStart = async (event: IpcMainInvokeEvent, input: AppCodexTaskStartInput) => {
     const appId = resolveAppIdForWebContents(event.sender.id);
     if (!appId) {
@@ -542,68 +555,50 @@ export const registerAgentIpcHandlers = (deps: AgentIpcDeps): void => {
   });
 
   ipcMain.handle(IPC_CHANNELS.workflowsList, async () => {
-    if (!workflowManager) {
-      return [];
-    }
-    return workflowManager.list();
+    return requireWorkflowManager().list();
   });
   ipcMain.handle(IPC_CHANNELS.workflowsUpsert, async (_event, input: WorkflowUpsertInput) => {
-    if (!workflowManager) {
-      throw new Error('workflow_manager_unavailable');
-    }
-    return await workflowManager.upsert(input);
+    return await requireWorkflowManager().upsert(input);
   });
   ipcMain.handle(IPC_CHANNELS.workflowsDelete, async (_event, id: string) => {
-    if (!workflowManager) {
-      return { success: false, technicalCode: 'workflow_manager_unavailable' };
+    try {
+      return await requireWorkflowManager().delete(id);
+    } catch (error) {
+      return workflowUnavailableResult(error);
     }
-    return await workflowManager.delete(id);
   });
   ipcMain.handle(IPC_CHANNELS.workflowsSetEnabled, async (_event, id: string, enabled: boolean) => {
-    if (!workflowManager) {
-      throw new Error('workflow_manager_unavailable');
-    }
-    return await workflowManager.setEnabled(id, Boolean(enabled));
+    return await requireWorkflowManager().setEnabled(id, Boolean(enabled));
   });
   ipcMain.handle(IPC_CHANNELS.workflowsRunNow, async (_event, id: string) => {
-    if (!workflowManager) {
-      throw new Error('workflow_manager_unavailable');
-    }
-    return await workflowManager.runNow(id);
+    return await requireWorkflowManager().runNow(id);
   });
   ipcMain.handle(IPC_CHANNELS.workflowsRunNode, async (_event, workflowId: string, nodeId: string) => {
-    if (!workflowManager) {
-      throw new Error('workflow_manager_unavailable');
-    }
-    return await workflowManager.runNode(workflowId, nodeId);
+    return await requireWorkflowManager().runNode(workflowId, nodeId);
   });
   ipcMain.handle(IPC_CHANNELS.workflowsCancelRun, async (_event, runId: string) => {
-    if (!workflowManager) {
-      return { success: false, technicalCode: 'workflow_manager_unavailable' };
+    try {
+      return await requireWorkflowManager().cancelRun(runId);
+    } catch (error) {
+      return workflowUnavailableResult(error);
     }
-    return await workflowManager.cancelRun(runId);
   });
   ipcMain.handle(IPC_CHANNELS.workflowsApproveNode, async (_event, input: WorkflowApproveNodeInput) => {
-    if (!workflowManager) {
-      return { success: false, technicalCode: 'workflow_manager_unavailable' };
+    try {
+      return await requireWorkflowManager().approveNode({
+        runId: String(input?.runId ?? ''),
+        nodeId: String(input?.nodeId ?? ''),
+        approved: Boolean(input?.approved),
+      });
+    } catch (error) {
+      return workflowUnavailableResult(error);
     }
-    return await workflowManager.approveNode({
-      runId: String(input?.runId ?? ''),
-      nodeId: String(input?.nodeId ?? ''),
-      approved: Boolean(input?.approved),
-    });
   });
   ipcMain.handle(IPC_CHANNELS.workflowsListRuns, async (_event, workflowId: string) => {
-    if (!workflowManager) {
-      return [];
-    }
-    return await workflowManager.listRuns(workflowId);
+    return await requireWorkflowManager().listRuns(workflowId);
   });
   ipcMain.handle(IPC_CHANNELS.workflowsGetRun, async (_event, runId: string) => {
-    if (!workflowManager) {
-      return null;
-    }
-    return await workflowManager.getRun(runId);
+    return await requireWorkflowManager().getRun(runId);
   });
 
 };

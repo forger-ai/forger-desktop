@@ -8,6 +8,7 @@ import type {
   ChatCreatedAppRequest,
   ChatQuestion,
   ChatQuestionRequest,
+  Settings,
 } from '../../shared/types';
 import type { DesktopErrorReporter } from '../error-reporting';
 import type { StoredForgerAccount } from '../forger-account-store';
@@ -15,6 +16,8 @@ import type { SelfOAuthCallbackServiceLike } from '../oauth-callback/types';
 import type { SpeechToTextServiceManager } from '../speech-to-text-service';
 import type { TextToSpeechServiceManager } from '../text-to-speech-service';
 import type { WakeWordServiceManager } from '../wake-word-service';
+import type { WorkflowFeatureController } from '../workflow-feature-controller';
+import type { WorkflowManager } from '../workflow-manager';
 import type { AppRegistry } from './main-process-types';
 
 export type ServiceConstructor<T = unknown> = new (...args: any[]) => T;
@@ -68,7 +71,8 @@ export interface MainLifecycleState {
   appAgentTaskManager: LifecycleService | null;
   appMcpManager: LifecycleService | null;
   automationManager: LifecycleService | null;
-  workflowManager: LifecycleService | null;
+  workflowFeatureController: WorkflowFeatureController | null;
+  workflowManager: WorkflowManager | null;
   catalogApps: CatalogApp[];
   chatOrchestrator: ChatOrchestratorService | null;
   cloudDeviceManager: LifecycleService | null;
@@ -100,4 +104,5 @@ export interface MainLifecycleState {
   pendingDeepLinkFlushScheduled: boolean;
   registry: AppRegistry;
   secretsStore: LifecycleService | null;
+  settings: Settings;
 }

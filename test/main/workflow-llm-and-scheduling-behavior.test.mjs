@@ -65,7 +65,7 @@ const createManager = async (overrides = {}) => {
     onWorkflowUpdated: (event) => events.push(event),
     ...overrides.options,
   });
-  await manager.initialize();
+  await manager.initialize(overrides.initializeOptions);
   return {
     manager,
     metadataRoot,
@@ -385,6 +385,62 @@ test('scheduled workflows run when due, respect missed-run policies, and reject 
       assert.ok(Date.parse(stored.nextRunAt) > Date.now(), 'next run is in the future');
       await harness.cleanup();
     } finally {
+      await rm(metadataRoot, { recursive: true, force: true });
+    }
+  }
+});
+
+test('reactivating workflows recalculates an expired schedule without a catch-up run', async () => {
+  const metadataRoot = await mkdtemp(join(tmpdir(), 'forger-wf-reactivate-'));
+  const reactivatedAt = Date.now();
+  const expiredNextRunAt = new Date(reactivatedAt - 3 * 60 * 60_000).toISOString();
+  const workflow = {
+    id: 'wf-reactivated-after-suspension',
+    name: 'Reactivado tras suspensión global',
+    trigger: {
+      type: 'scheduled',
+      frequency: { type: 'hourly' },
+      missedRunPolicy: 'always',
+    },
+    nodes: [{ id: 'paso', name: 'Paso', type: 'connector', toolId: 'forger', actionId: 'x', input: {} }],
+    edges: [],
+    enabled: true,
+    running: false,
+    nextRunAt: expiredNextRunAt,
+    createdAt: new Date(reactivatedAt - 24 * 60 * 60_000).toISOString(),
+    updatedAt: expiredNextRunAt,
+  };
+  await writeFile(join(metadataRoot, 'workflows.json'), JSON.stringify([workflow]), 'utf8');
+
+  let harness;
+  try {
+    harness = await createManager({
+      metadataRoot,
+      initializeOptions: { recalculateSchedulesFromNow: true },
+    });
+    await wait(100);
+
+    const reactivated = harness.manager.get(workflow.id);
+    assert.ok(reactivated, 'the enabled scheduled workflow remains available');
+    assert.ok(
+      Date.parse(reactivated.nextRunAt) > reactivatedAt,
+      'the next run is recalculated strictly after reactivation',
+    );
+    assert.equal(reactivated.lastRun, undefined, 'the expired date does not create a catch-up result');
+    assert.deepEqual(await harness.manager.listRuns(workflow.id), [], 'no scheduled or skipped run is persisted');
+    assert.deepEqual(
+      harness.events.filter((event) => event.run),
+      [],
+      'reactivation does not publish a run event for the expired date',
+    );
+
+    const persisted = JSON.parse(await readFile(join(metadataRoot, 'workflows.json'), 'utf8'));
+    assert.ok(Date.parse(persisted[0].nextRunAt) > reactivatedAt, 'the recalculated schedule is durable');
+    assert.equal(persisted[0].trigger.missedRunPolicy, 'always', 'the workflow policy is preserved');
+  } finally {
+    if (harness) {
+      await harness.cleanup();
+    } else {
       await rm(metadataRoot, { recursive: true, force: true });
     }
   }

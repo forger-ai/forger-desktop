@@ -5,6 +5,7 @@ export interface Settings {
   userEmail: string;
   plan: string;
   safeMode: boolean;
+  earlyAccess: EarlyAccessSettings;
   developerMode: DeveloperModeSettings;
   codexDefaults: {
     model: string;
@@ -20,6 +21,14 @@ export interface Settings {
   providerConnections: Partial<Record<AgentProvider, string>>;
   llmProviderProfiles: Partial<Record<AgentProvider, LlmProviderProfileMetadata[]>>;
   activeProviderProfiles: Partial<Record<AgentProvider, string>>;
+}
+
+export interface EarlyAccessSettings {
+  workflowsEnabled: boolean;
+}
+
+export interface UpdateEarlyAccessInput {
+  workflowsEnabled: boolean;
 }
 
 export interface DeveloperModeSettings {

@@ -80,6 +80,7 @@ interface SidebarProps {
   t: AppDictionary;
   desktopUpdateState: DesktopUpdateState;
   pinnedViews: PinnableView[];
+  workflowsEnabled: boolean;
   showForumNav: boolean;
 }
 
@@ -324,7 +325,7 @@ function SidebarUsageMenu({ t }: { t: AppDictionary }) {
   );
 }
 
-export function Sidebar({ currentView, onNavigate, t, desktopUpdateState, pinnedViews, showForumNav }: SidebarProps) {
+export function Sidebar({ currentView, onNavigate, t, desktopUpdateState, pinnedViews, workflowsEnabled, showForumNav }: SidebarProps) {
   const theme = useTheme();
   const [windowState, setWindowState] = useState<WindowControlState | null>(null);
   const shouldReserveMacTrafficLightSpace =
@@ -386,7 +387,7 @@ export function Sidebar({ currentView, onNavigate, t, desktopUpdateState, pinned
   };
   const showUpdateBanner = desktopUpdateState.status === 'available' || desktopUpdateState.status === 'ready';
   const mainNav = defaultNav.filter((item) => item.id !== 'friends' || showForumNav);
-  const pinnedNav = pinnableNav.filter((item) => pinnedViews.includes(item.id));
+  const pinnedNav = pinnableNav.filter((item) => pinnedViews.includes(item.id) && (item.id !== 'workflows' || workflowsEnabled));
 
   return (
     <Box

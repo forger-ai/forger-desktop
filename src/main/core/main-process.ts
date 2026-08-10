@@ -16,6 +16,7 @@ import { AppAgentConversationManager } from '../app-agent-conversation-manager';
 import { renderManifestAgentPrompt, type ManifestAgentPromptKind } from '../manifest-agent-prompts';
 import { AppMcpManager } from '../app-mcp-manager';
 import { AutomationManager } from '../automation-manager';
+import { WorkflowFeatureController } from '../workflow-feature-controller';
 import { WorkflowManager } from '../workflow-manager';
 import { BackgroundTaskStore } from '../background-task-store';
 import {
@@ -127,7 +128,7 @@ import type {
   MemoryListInput, MemoryUpdateInput, OfficialToolRuntimeEvent, OpenAppResult, PersonalAgentConversationEvent, RemoteAppBackupSummary,
   LlmProviderProfileMutationResult, RendererChatTraceEvent, RuntimeStatus, SetActiveLlmProviderProfileInput, SetActiveLlmProviderProfileResult, SetAppToolGrantInput, Settings, SharedFileRef, StopAppResult,
   SubmitAppRatingInput, SubmitProductFeedbackInput, SubmitUsageEventInput, UpdateAgentDefaultsInput,
-  UpdateAgentToolApprovalInput, UpdateCodexDefaultsInput, UpdateDeveloperModeInput, UpdateLlmProviderProfileDefaultsInput, UpdateUserSecretInput,
+  UpdateAgentToolApprovalInput, UpdateCodexDefaultsInput, UpdateDeveloperModeInput, UpdateEarlyAccessInput, UpdateLlmProviderProfileDefaultsInput, UpdateUserSecretInput,
 } from '../../shared/types';
 const BetterSqlite3 = loadOptionalBetterSqlite();
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
@@ -167,7 +168,6 @@ const useCustomWindowFrame = process.platform === 'win32';
 const getWindowState = createWindowStateReader(useCustomWindowFrame);
 const registerWindowStateEvents = createWindowStateEventRegistrar(getWindowState);
 const RUNTIME_PLATFORM_ALIASES = new Set(['darwin_arm64', 'darwin_x64', 'linux_x64', 'win32_x64']);
-
 let mainWindow: BrowserWindow | null = null;
 const remoteActivityStore = new RemoteActivityStore({ getMainWindow: () => mainWindow });
 const llmRunsStore = new LlmRunsStore({ getMainWindow: () => mainWindow });
@@ -184,7 +184,6 @@ let forgerBackendClient: ForgerBackendClient | null = null;
 const cloudSyncSettings: CloudSyncSettings = { appSync: {} };
 const runningApps = new Map<string, RunningAppProcess>();
 const appWindows = new Map<string, BrowserWindow>();
-
 app.whenReady().then(() => {
   session.defaultSession.setDisplayMediaRequestHandler((_request, callback) => {
     desktopCapturer.getSources({ types: ['screen'] })
@@ -229,7 +228,18 @@ let wakeWordService: WakeWordServiceManager | null = null;
 let desktopUpdater: DesktopUpdater | null = null;
 let desktopErrorReporter: DesktopErrorReporter | null = null;
 let automationManager: AutomationManager | null = null;
+let workflowFeatureController: WorkflowFeatureController | null = null;
 let workflowManager: WorkflowManager | null = null;
+const updateWorkflowsEarlyAccess = async (enabled: boolean): Promise<Settings> => {
+  const controller = workflowFeatureController;
+  if (!controller) throw new Error('workflow_feature_controller_unavailable');
+  if (enabled) {
+    await controller.enable();
+  } else {
+    await controller.disable();
+  }
+  return settings;
+};
 let backgroundTaskStore: BackgroundTaskStore | null = null;
 let appMcpManager: AppMcpManager | null = null;
 let backupsManager: BackupsManager | null = null;
@@ -241,15 +251,12 @@ let remoteAgentSessionService: RemoteAgentSessionService | null = null;
 let memoryMaintenanceManager: MemoryMaintenanceManager | null = null;
 let desktopRuntimeBridge: DesktopRuntimeBridge | null = null;
 let selfOAuthCallbackService: SelfOAuthCallbackService | null = null;
-
 desktopErrorReporter = new DesktopErrorReporter({
   getMainWindow: () => mainWindow,
   getAppVersion: () => app.getVersion(),
   getInstalledApp: (appId) => registry.apps[appId],
 });
-
 let promptOverridesStore: PromptOverridesStore | null = null;
-
 const createPathConfigDeps = () => ({ app, forgerAccount, isDev, os, path });
 const getPathConfigController = () => createPathConfigController(createPathConfigDeps());
 const normalizeVersionForFolder = (value: string): string => getPathConfigController().normalizeVersionForFolder(value);
@@ -281,7 +288,6 @@ const getCloudIdentityPath = (): string => getPathConfigController().getCloudIde
 const getSocialMessagesPath = (): string => getPathConfigController().getSocialMessagesPath();
 const getCloudSyncSettingsPath = (): string => getPathConfigController().getCloudSyncSettingsPath();
 const getCloudDeviceAccountStorageKey = (): string | undefined => getPathConfigController().getCloudDeviceAccountStorageKey();
-
 const settingsServiceState = { get promptOverridesStore() { return promptOverridesStore; }, set promptOverridesStore(value) { promptOverridesStore = value; }, get settings() { return settings; }, set settings(value) { settings = value; } };
 const createSettingsServiceDeps = () => ({
   agentProviderRegistry: AGENT_PROVIDER_RUNTIME_REGISTRY,
@@ -292,6 +298,7 @@ const createSettingsServiceDeps = () => ({
   getCodexAuthStatus,
   path,
   getPromptOverridesPath,
+  getMetadataRoot: getForgerMetadataRoot,
   getSettingsPath,
   settingsSeed,
   state: settingsServiceState,
@@ -308,6 +315,7 @@ const saveSettings = async (): Promise<void> => await getSettingsServiceControll
 const getCodexDefaults = (): Settings['codexDefaults'] => getSettingsServiceController().getCodexDefaults();
 const updateCodexDefaults = async (input: UpdateCodexDefaultsInput): Promise<Settings> => await getSettingsServiceController().updateCodexDefaults(input);
 const updateAgentDefaults = async (input: UpdateAgentDefaultsInput): Promise<Settings> => await getSettingsServiceController().updateAgentDefaults(input);
+const updateEarlyAccess = async (input: UpdateEarlyAccessInput): Promise<Settings> => await getSettingsServiceController().updateEarlyAccess(input);
 const updateDeveloperMode = async (input: UpdateDeveloperModeInput): Promise<Settings> => await getSettingsServiceController().updateDeveloperMode(input);
 const markProviderConnected = async (provider: AgentProvider): Promise<void> => await getSettingsServiceController().markProviderConnected(provider);
 const markProviderDisconnected = async (provider: AgentProvider): Promise<void> => await getSettingsServiceController().markProviderDisconnected(provider);
@@ -330,11 +338,8 @@ const resolveLlmProviderAuthProfile: LlmProviderAuthProfileResolver = async (pro
   };
 };
 const withAgentDefaults = <T extends { model?: string; reasoningEffort?: CodexReasoningEffort; runtime?: AgentRuntime; runtimeRecommendations?: AgentRuntimeRecommendations }>(input: T, defaults: AgentDefaults = normalizeSettings(settings).agentDefaults): T => getSettingsServiceController().withAgentDefaults(input, defaults);
-
 let agentToolSettings: AgentToolSettings = createInitialAgentToolSettings();
-
 let forgerMcpServer: ForgerMcpServer | null = null;
-
 const mainUtilitiesState = { get agentToolSettings() { return agentToolSettings; }, set agentToolSettings(value) { agentToolSettings = value; }, get catalogApps() { return catalogApps; }, set catalogApps(value) { catalogApps = value; }, get desktopUpdater() { return desktopUpdater; }, set desktopUpdater(value) { desktopUpdater = value; }, get forgerAccount() { return forgerAccount; }, set forgerAccount(value) { forgerAccount = value; }, get settings() { return settings; }, set settings(value) { settings = value; } };
 const getMainWindow = (): BrowserWindow | null => mainWindow;
 const createMainUtilitiesDeps = () => ({ AGENT_TOOL_DEFINITIONS, AGENT_TOOL_IDS, APP_FOLDER_GRANT_TTL_MS, Buffer, Date, DesktopUpdater, IPC_CHANNELS, app, appFolderGrantSecret, appWindows, buildFailureDiagnostic, cloudDeviceManager, createHmac, desktopErrorReporter, forgerAccountStore, friendChatWindows, fs, getAgentToolSettingsPath, getForgerMetadataRoot, getInstallLogPath, installProgressByPhase, isDev, getLocalNetworkShareStatus, getRemoteNetworkShareStatus, getMainWindow, path, publicForgerAccount, registry, runningApps, state: mainUtilitiesState });
@@ -396,7 +401,6 @@ const parseVersionParts = (value?: string): number[] | null => getMainUtilitiesC
 const isVersionNewer = (candidate?: string, current?: string): boolean => getMainUtilitiesController().isVersionNewer(candidate, current);
 const mapBackendCategory = (backendCategory: string): AppCategory => getMainUtilitiesController().mapBackendCategory(backendCategory);
 const toCatalogStatus = (slug: string): AppStatus => getMainUtilitiesController().toCatalogStatus(slug);
-
 const manifestSupportState = { get secretsStore() { return secretsStore; }, set secretsStore(value) { secretsStore = value; }, get officialToolsService() { return officialToolsService; }, set officialToolsService(value) { officialToolsService = value; }, get connectionsService() { return connectionsService; }, set connectionsService(value) { connectionsService = value; }, get memoryStore() { return memoryStore; }, set memoryStore(value) { memoryStore = value; }, get backupsManager() { return backupsManager; }, set backupsManager(value) { backupsManager = value; } };
 const createManifestSupportDeps = () => ({
   BackupsManager,
@@ -631,7 +635,6 @@ const getPersonalAgentConversationManager = (): AgentConversationManager => {
   }
   return personalAgentConversationManager;
 };
-
 const getSidekickVoiceRuntime = (): SidekickVoiceRuntime => {
   sidekickVoiceRuntime ??= new SidekickVoiceRuntime({
     getSidekickService,
@@ -739,7 +742,6 @@ const getManifestAppSecretsValidationError = (manifest: AppManifest | null): str
 const resolveInstalledAppSecrets = async (appId: string): Promise<AppSecretDeclaration[]> => await getManifestSupportController().resolveInstalledAppSecrets(appId);
 const buildAppSecretsState = async (appId: string): Promise<AppSecretsState> => await getManifestSupportController().buildAppSecretsState(appId);
 const formatProcessOutputForInstallLog = (value: string, secretValues: string[]): string => getManifestSupportController().formatProcessOutputForInstallLog(value, secretValues);
-
 const createAppContextSupportDeps = () => ({
   appLifecycleLocks,
   catalogApps,
@@ -771,7 +773,6 @@ const resolveSelectedAppDisplayName = (appId: string): string => getAppContextSu
 const getFileLibrary = (): FileLibrary => getAppContextSupportController().getFileLibrary();
 const withAppLifecycleLock = async <T>(appId: string, operation: () => Promise<T>): Promise<T> => await getAppContextSupportController().withAppLifecycleLock(appId, operation);
 const listCatalogFromBackend = async (): Promise<CatalogApp[]> => await getAppContextSupportController().listCatalogFromBackend();
-
 const createRegistryStoreDeps = () => ({
   DEFAULT_PYTHON_VERSION,
   DEFAULT_NODE_VERSION,
@@ -829,7 +830,6 @@ const canUseCloudDataSync = (): boolean => getRegistryStoreController().canUseCl
 const upsertInstalledRecord = async (record: InstalledAppRecord): Promise<void> => await getRegistryStoreController().upsertInstalledRecord(record);
 const removeInstalledRecord = async (appId: string): Promise<void> => await getRegistryStoreController().removeInstalledRecord(appId);
 const ensureCatalogStatuses = (): void => getRegistryStoreController().ensureCatalogStatuses();
-
 const createCommandGitDeps = () => ({
   BUNDLED_GIT_VERSION,
   appendInstallLog,
@@ -878,7 +878,6 @@ const collectPersistentInstallPaths = (manifest: AppManifest | null): string[] =
 const gitCommitAllExcept = async (cwd: string, message: string, excludedPaths: string[]): Promise<string> => await getCommandGitController().gitCommitAllExcept(cwd, message, excludedPaths);
 const copyReleaseContentsForUpdate = async (sourceDir: string, targetDir: string, preservedPaths: string[]): Promise<void> => await getCommandGitController().copyReleaseContentsForUpdate(sourceDir, targetDir, preservedPaths);
 const syncReleaseIntoInstalledApp = async (sourceDir: string, targetDir: string, preservedPaths: string[]): Promise<void> => await getCommandGitController().syncReleaseIntoInstalledApp(sourceDir, targetDir, preservedPaths);
-
 const createRuntimeInstallDeps = () => ({ DEFAULT_NODE_VERSION, DEFAULT_PYTHON_VERSION, appendInstallLog, app, clearMacQuarantine, extractArchive, findRuntimeArchive, findRuntimeChecksumFile, fs, getBundledResourcesRoot, getRuntimesRoot, getTempRoot, hashFileSha256, installBackendDependenciesWithUv, normalizeNodeRuntimeVersion, normalizeVersionForFolder, path, resolvePlatformAlias, runCommand, runtimeLocks });
 const getRuntimeInstallController = () => createRuntimeInstallController(createRuntimeInstallDeps());
 const fileExists = async (filePath: string): Promise<boolean> => await getRuntimeInstallController().fileExists(filePath);
@@ -909,7 +908,6 @@ const flattenSingleTopLevelDirectory = async (targetDir: string): Promise<void> 
 const findExistingFile = async (baseDir: string, candidates: string[]): Promise<string | null> => await getRuntimeInstallController().findExistingFile(baseDir, candidates);
 const resolveRuntimeExecutables = async (runtimeRoot: string, type: 'node' | 'python'): Promise<RuntimeBinarySet> => await getRuntimeInstallController().resolveRuntimeExecutables(runtimeRoot, type);
 const ensureRuntimeInstalled = async (type: 'node' | 'python', version: string): Promise<RuntimeBinarySet> => await getRuntimeInstallController().ensureRuntimeInstalled(type, version);
-
 const createAgentAuthDeps = () => ({
   CLAUDE_CODE_VERSION,
   CODEX_CLI_VERSION,
@@ -997,7 +995,6 @@ const writeAntigravityAuthSession = async (sessionId: string, input: string): Pr
 const cancelAntigravityAuthSession = async (sessionId: string): Promise<{ success: boolean; userMessage?: string } & FailureDiagnosticFields> => await getAgentAuthController().cancelAntigravityAuthSession(sessionId);
 const disconnectAntigravityAuth = async (): Promise<{ success: boolean; userMessage: string; status?: AntigravityAuthStatus } & FailureDiagnosticFields> => await getAgentAuthController().disconnectAntigravityAuth();
 const reinstallAntigravity = async (): Promise<{ success: boolean; userMessage: string; status?: AntigravityAuthStatus } & FailureDiagnosticFields> => await getAgentAuthController().reinstallAntigravity();
-
 const createInstalledAppLifecycleDeps = () => ({
   DEFAULT_NODE_VERSION,
   DEFAULT_PYTHON_VERSION,
@@ -1069,7 +1066,6 @@ const createInstalledAppLifecycleDeps = () => ({
   validateArchiveEntries,
   truncateForInstallLog,
 });
-
 const getInstalledAppLifecycleController = () => createInstalledAppLifecycleController(createInstalledAppLifecycleDeps());
 const fetchDownloadBundle = async (catalogApp: CatalogApp) => await getInstalledAppLifecycleController().fetchDownloadBundle(catalogApp);
 const getVenvExecutables = (backendDir: string): { python: string; pip: string } => getInstalledAppLifecycleController().getVenvExecutables(backendDir);
@@ -1090,7 +1086,6 @@ const readLocalChangeSummaries = async (appDir: string): Promise<AppLocalChangeS
 const getAppDetails = async (appId: string): Promise<AppDetails | null> => await getInstalledAppLifecycleController().getAppDetails(appId);
 const uninstallAppRuntime = async (appId: string): Promise<BasicActionResult> => await getInstalledAppLifecycleController().uninstallAppRuntime(appId);
 const installWelcome = async (appId: string, userLanguage?: string): Promise<{ success: boolean; userMessage: string; welcome?: string; technicalCode?: string }> => await getInstalledAppLifecycleController().installWelcome(appId, userLanguage);
-
 const createInstalledAppRuntimeDeps = () => ({
   FORGER_PROTOCOL,
   app,
@@ -1146,7 +1141,6 @@ const createInstalledAppRuntimeDeps = () => ({
   wait,
   withAppLifecycleLock,
 });
-
 const getInstalledAppRuntimeController = () => createInstalledAppRuntimeController(createInstalledAppRuntimeDeps());
 const waitForHttpOk = async (url: string, timeoutMs: number): Promise<void> => await getInstalledAppRuntimeController().waitForHttpOk(url, timeoutMs);
 const getFreePort = async (): Promise<number> => await getInstalledAppRuntimeController().getFreePort();
@@ -1197,7 +1191,6 @@ const getLlmRunsSnapshot = async () => {
   await ensureLlmRunsHydrated();
   return llmRunsStore.snapshot();
 };
-
 const localNetworkShareController = createLocalNetworkShareController({
   runningApps,
   openInstalledApp: openInstalledAppUnlocked,
@@ -1362,6 +1355,7 @@ const getMainProcessIpcDeps = (): MainProcessIpcDeps & AgentIpcDeps => ({
   appendInstallLog,
   automationManager,
   workflowManager,
+  getWorkflowManager: () => workflowFeatureController?.requireManager() ?? workflowManager,
   buildAppSecretsState,
   buildCodexPromptWithAppContext,
   buildForgerToolsContextForApp,
@@ -1480,6 +1474,7 @@ const getMainProcessIpcDeps = (): MainProcessIpcDeps & AgentIpcDeps => ({
   updateAgentToolApproval,
   updateAppDeveloperSettings,
   updateDeveloperMode,
+  updateWorkflowsEarlyAccess,
   updateAppPrompt,
   updateAppRuntime,
   updateCodexDefaults,
@@ -1546,6 +1541,7 @@ const mainLifecycleState = {
   get wakeWordService() { return wakeWordService; }, set wakeWordService(value) { wakeWordService = value; },
   get desktopErrorReporter() { return desktopErrorReporter; }, set desktopErrorReporter(value) { desktopErrorReporter = value; },
   get automationManager() { return automationManager; }, set automationManager(value) { automationManager = value; },
+  get workflowFeatureController() { return workflowFeatureController; }, set workflowFeatureController(value) { workflowFeatureController = value; },
   get workflowManager() { return workflowManager; }, set workflowManager(value) { workflowManager = value; },
   get appMcpManager() { return appMcpManager; }, set appMcpManager(value) { appMcpManager = value; },
   get backupsManager() { return backupsManager; }, set backupsManager(value) { backupsManager = value; },
@@ -1559,16 +1555,20 @@ const mainLifecycleState = {
   get remoteAgentSessionService() { return remoteAgentSessionService; }, set remoteAgentSessionService(value) { remoteAgentSessionService = value; },
   get forgerMcpServer() { return forgerMcpServer; }, set forgerMcpServer(value) { forgerMcpServer = value; },
   get agentToolSettings() { return agentToolSettings; }, set agentToolSettings(value) { agentToolSettings = value; },
+  get settings() { return settings; }, set settings(value) { settings = value; },
 };
 
 registerMainLifecycle({
-  AGENT_TOOL_DEFINITIONS, AppAgentConversationManager, AppAgentTaskManager, AppMcpManager, AutomationManager, WorkflowManager,
+  AGENT_TOOL_DEFINITIONS, AppAgentConversationManager, AppAgentTaskManager, AppMcpManager, AutomationManager, WorkflowFeatureController, WorkflowManager,
   BrowserWindow, ChatOrchestrator, CloudDeviceManager, CloudIdentityStore, DesktopRuntimeBridge,
   DevCatalogService, FORGER_AGENT_CONTRACT_VERSION, FileLibrary, ForgerAccountStore, ForgerBackendClient,
   ForgerMcpServer, IPC_CHANNELS, MemoryMaintenanceManager, MemoryStore, SecretsStore, anyAppAllowsAgentNetworkAccess, app,
   appAllowsAgentNetworkAccess, appWindows, appendInstallLog, backendBaseUrl, dialog, buildForgerToolsContextForApp, buildMemoryContextForApp,
   buildMemoryContextForApps, chooseAgentRuntime, cleanupLegacyExternalToolState, clearForgerAccountSession, closeServer, createLocalAppFromSkeleton, createWindow,
   finishSocialAppInstall, deleteQuarantinedSocialApp,
+  persistWorkflowsEarlyAccess: async (enabled: boolean) => {
+    await updateEarlyAccess({ workflowsEnabled: enabled });
+  },
   emitAutomationUpdated, emitWorkflowUpdated, emitChatRunUpdated, ensureBackendPythonEnvironment, ensureCatalogStatuses, ensureGlobalAgentsContext,
   ensureGitAvailable, ensurePathInside, ensureRuntimeInstalled, ensureSqliteDatabaseParent, flushPendingDeepLink, fs, getAgentPathEntries, getBackupsRoot,
   getClaudeAuthStatus, getAntigravityAuthStatus, getCloudDeviceAccountStorageKey, getCloudDevicePath, getCloudIdentityPath, getCloudIdentityStore,

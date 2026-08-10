@@ -118,6 +118,13 @@ interface WorkflowManagerOptions {
   releaseForgerMcpSession?: (token: string) => void;
   buildMemoryContext?: (appIds: string[]) => Promise<string>;
   listenAppMcps?: (appIds: string[], listenerId: string) => Promise<LlmAutomationMcpServerConfig[]>;
+  listenRequiredAppMcps?: (
+    appIds: string[],
+    listenerId: string,
+  ) => Promise<{
+    servers: Array<{ appId: string; config: LlmAutomationMcpServerConfig }>;
+    failures: Array<{ appId: string; code: string }>;
+  }>;
   releaseAppMcps?: (listenerId: string) => void;
   getPersonalAgent?: (agentId: string) => Promise<PersonalAgent | null>;
   callForgerToolAction?: (input: CallOfficialToolInput) => Promise<CallOfficialToolResult>;
@@ -126,6 +133,10 @@ interface WorkflowManagerOptions {
   getValidToolIds?: () => ReadonlySet<string>;
   onAgentRunActivity?: (activity: AgentRunActivity) => void;
   onWorkflowUpdated: (event: WorkflowUpdatedEvent) => void;
+}
+
+export interface WorkflowManagerInitializeOptions {
+  recalculateSchedulesFromNow?: boolean;
 }
 
 export class WorkflowManager {
@@ -140,13 +151,17 @@ export class WorkflowManager {
     this.store = new WorkflowStore({ metadataRoot: options.metadataRoot });
   }
 
-  public async initialize(): Promise<void> {
+  public async initialize(options: WorkflowManagerInitializeOptions = {}): Promise<void> {
     await this.store.initialize();
     const entries = await this.store.readWorkflows();
     for (const entry of entries) {
       const normalized = this.normalizeWorkflow(entry);
       if (normalized) {
-        this.workflows.set(normalized.id, normalized);
+        this.workflows.set(normalized.id, options.recalculateSchedulesFromNow
+          && normalized.enabled
+          && normalized.trigger.type === 'scheduled'
+          ? { ...normalized, nextRunAt: computeNextRunAt(normalized.trigger.frequency) }
+          : normalized);
       }
     }
     await this.failInterruptedRuns();
@@ -952,8 +967,10 @@ export class WorkflowManager {
         config.toolIds,
         config.connectionGrants,
       ) ?? null;
-      const appMcpServers = await (this.options.listenAppMcps?.(config.appIds, nodeRunKey) ?? Promise.resolve([]));
       appMcpListening = true;
+      const appMcpServers = this.options.listenRequiredAppMcps
+        ? await this.listenRequiredAppMcps(config.appIds, nodeRunKey)
+        : await (this.options.listenAppMcps?.(config.appIds, nodeRunKey) ?? Promise.resolve([]));
       const mcpServers: LlmAutomationMcpServerConfig[] = [
         ...(forgerMcpSession
           ? [{
@@ -1072,6 +1089,17 @@ export class WorkflowManager {
         this.options.releaseAppMcps?.(nodeRunKey);
       }
     }
+  }
+
+  private async listenRequiredAppMcps(
+    appIds: string[],
+    listenerId: string,
+  ): Promise<LlmAutomationMcpServerConfig[]> {
+    const result = await this.options.listenRequiredAppMcps!(appIds, listenerId);
+    if (result.failures.length > 0) {
+      throw new Error('workflow_required_app_mcp_unavailable');
+    }
+    return result.servers.map((server) => server.config);
   }
 
   private buildNodePrompt(

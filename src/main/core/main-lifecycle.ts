@@ -30,6 +30,7 @@ import type {
   PersonalAgent,
   PersonalAgentPeerThread,
   SecretMutationResult,
+  WorkflowUpsertInput,
 } from '../../shared/types';
 import type {
   AsyncFn,
@@ -67,13 +68,16 @@ import { isRemoteAgentSessionCloseEvent, isRemoteTunnelCloseEvent } from './remo
 import type { SidekickService } from '../sidekick-service';
 import type { SidekickVoiceOutcomeInput } from '../sidekick-voice-runtime';
 import { createSidekickRuntimeBridgeBindings } from '../sidekick-runtime-bridge';
+import type { WorkflowFeatureController as WorkflowFeatureControllerService } from '../workflow-feature-controller';
+import type { WorkflowManager as WorkflowManagerService } from '../workflow-manager';
 export interface MainLifecycleDeps {
   AGENT_TOOL_DEFINITIONS: AgentToolDefinition[];
   AppAgentConversationManager: ServiceConstructor<LifecycleService>;
   AppAgentTaskManager: ServiceConstructor<LifecycleService>;
   AppMcpManager: ServiceConstructor<LifecycleService>;
   AutomationManager: ServiceConstructor<LifecycleService>;
-  WorkflowManager: ServiceConstructor<LifecycleService>;
+  WorkflowFeatureController: typeof WorkflowFeatureControllerService;
+  WorkflowManager: ServiceConstructor<WorkflowManagerService>;
   BrowserWindow: typeof BrowserWindow;
   ChatOrchestrator: ServiceConstructor<ChatOrchestratorService>;
   CloudDeviceManager: ServiceConstructor<LifecycleService>;
@@ -215,6 +219,7 @@ export interface MainLifecycleDeps {
   isSecretsVaultUnavailableError: (error: unknown) => boolean;
   normalizeManifestAppSecrets: (manifest: AppManifest | null) => AppSecretDeclaration[];
   openInstalledApp: AsyncFn;
+  persistWorkflowsEarlyAccess: (enabled: boolean) => Promise<void>;
   startLocalNetworkShare: AsyncFn;
   stopLocalNetworkShare: AsyncFn;
   startRemoteNetworkShare: AsyncFn;
@@ -256,7 +261,6 @@ export interface MainLifecycleDeps {
   upsertInstalledRecord: (record: InstalledAppRecord) => Promise<void>;
   waitForHttpOk: AsyncFn<void>;
 }
-
 export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
   const {
     AGENT_TOOL_DEFINITIONS,
@@ -264,6 +268,7 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
     AppAgentTaskManager,
     AppMcpManager,
     AutomationManager,
+    WorkflowFeatureController,
     WorkflowManager,
     BrowserWindow,
     ChatOrchestrator,
@@ -374,6 +379,7 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
     isSecretsVaultUnavailableError,
     normalizeManifestAppSecrets,
     openInstalledApp,
+    persistWorkflowsEarlyAccess,
     openOrFocusAppWindow,
     registerForgerCloudOAuth,
     registerIpcHandlers,
@@ -427,7 +433,6 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
     return status.authenticated;
   });
   const appFolderGrantStore = new AppFolderGrantStore(getForgerMetadataRoot());
-
   const {
     getAppRuntimeDiagnostics,
     getAppViewSnapshot,
@@ -438,7 +443,6 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
     getRuntimeStatus,
     serializeErrorForInstallLog,
   });
-
   app.whenReady().then(async () => {
   const startupLoading = createStartupLoadingController(BrowserWindow, typeof app.getLocale === 'function' ? app.getLocale() : undefined);
   const startupLogger = createStartupLogger(getForgerMetadataRoot, startupLoading.update);
@@ -452,7 +456,6 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
       await fs.mkdir(getPath(), { recursive: true });
     }, { name, path: getPath() });
   };
-
   await ensureDirectory('temp', getTempRoot);
   await ensureDirectory('runtimes', getRuntimesRoot);
   await ensureDirectory('forgerHome', getForgerHomeRoot);
@@ -725,6 +728,7 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
     getToolDefinitions: () => AGENT_TOOL_DEFINITIONS,
     getConnectionToolDefinitions: async () => await connectionToolDefinitionsFromState(getConnectionsService),
     getToolSettings: () => state.agentToolSettings,
+    isWorkflowsEnabled: () => state.workflowFeatureController?.isEnabled() ?? false,
     resolveSidekickVoiceOutcome: deps.resolveSidekickVoiceOutcome,
     appendInstallLog,
     requestPermission: async (runId: string, request: PermissionRequest) => {
@@ -950,7 +954,7 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
       if (!state.workflowManager) {
         throw new Error('workflow_manager_unavailable');
       }
-      return await state.workflowManager.upsert(input);
+      return await state.workflowManager.upsert(input as WorkflowUpsertInput);
     },
     workflowsRun: async (workflowId: string) => {
       if (!state.workflowManager) {
@@ -1448,8 +1452,9 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
   await startupLogger.step('startup:automation_manager:initialize', async () => {
     await state.automationManager?.initialize();
   });
-  await startupLogger.step('startup:workflow_manager:create', () => {
-  state.workflowManager = new WorkflowManager({
+  await startupLogger.step('startup:workflow_feature_controller:create', () => { state.workflowFeatureController = new WorkflowFeatureController({
+    initialEnabled: state.settings.earlyAccess?.workflowsEnabled === true, persistEnabled: persistWorkflowsEarlyAccess,
+    createManager: () => new WorkflowManager({
     forgerHomeRoot: getForgerHomeRoot(),
     metadataRoot: getForgerMetadataRoot(),
     codexHome: getCodexHome(),
@@ -1487,6 +1492,7 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
     buildMemoryContext: buildMemoryContextForApps,
     listenAppMcps: async (appIds: string[], listenerId: string) =>
       await (state.appMcpManager?.listenMcps(appIds, listenerId) ?? Promise.resolve([])),
+    listenRequiredAppMcps: async (appIds: string[], listenerId: string) => await (state.appMcpManager?.listenRequiredMcps(appIds, listenerId) ?? Promise.resolve({ servers: [], failures: [...new Set(appIds)].map((appId) => ({ appId, code: 'app_mcp_start_failed' as const })) })),
     releaseAppMcps: (listenerId: string) => {
       state.appMcpManager?.releaseMcps(listenerId);
     },
@@ -1514,11 +1520,10 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
     onWorkflowUpdated: (event: { workflow: unknown; run?: unknown }) => {
       emitWorkflowUpdated(event);
     },
-  });
-  });
-  await startupLogger.step('startup:workflow_manager:initialize', async () => {
-    await state.workflowManager?.initialize();
-  });
+    }),
+    onManagerChanged: (manager) => { state.workflowManager = manager; },
+  }); });
+  await startupLogger.step('startup:workflow_feature_controller:initialize', async () => { await state.workflowFeatureController?.initialize(); });
   await startupLogger.step('startup:personal_agent_routine_manager:initialize', async () => {
     const routineManager = getPersonalAgentRoutineManager?.();
     if (!routineManager) return;
@@ -1552,12 +1557,10 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
   await startupLogger.step('startup:memory_maintenance_manager:initialize', async () => {
     await state.memoryMaintenanceManager?.initialize();
   });
-
   await startupLogger.step('startup:ipc_handlers:register', registerIpcHandlers);
   await startupLogger.step('startup:catalog_statuses:ensure', ensureCatalogStatuses);
   await startupLogger.step('startup:main_window:create', createWindow);
   startupLoading.close();
-
   const schedulePendingDeepLinkFlush = (): void => {
     if (!state.mainWindow || !state.pendingDeepLink || state.pendingDeepLinkFlushScheduled) return;
     state.pendingDeepLinkFlushScheduled = true;
@@ -1566,11 +1569,9 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
       flushPendingDeepLink();
     });
   };
-
   // Deliver any deep-link captured before the renderer existed (cold
   // boot from `process.argv` or an `open-url` fired during startup).
   schedulePendingDeepLinkFlush();
-
   app.on('activate', async () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       await startupLogger.step('startup:main_window:create_on_activate', createWindow);
@@ -1593,6 +1594,5 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
     console.error('Forger Desktop startup failed', error);
   }
 });
-
 registerGracefulShutdownHandlers({ app, state, runningApps, stopInstalledApp, terminateProcess, closeServer });
 };

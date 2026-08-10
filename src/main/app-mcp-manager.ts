@@ -38,6 +38,22 @@ export type AppMcpServerConfig = LlmMcpServerConfig;
 /** @deprecated Use AppMcpServerConfig. */
 export type CodexMcpServerConfig = AppMcpServerConfig;
 
+export type AppMcpListenFailureCode =
+  | 'app_not_installed'
+  | 'app_mcp_not_declared'
+  | 'required_app_secrets_missing'
+  | 'app_mcp_secrets_unavailable'
+  | 'app_mcp_start_failed';
+
+export interface RequiredAppMcpListenResult {
+  servers: Array<{ appId: string; config: AppMcpServerConfig }>;
+  failures: Array<{ appId: string; code: AppMcpListenFailureCode }>;
+}
+
+type AppMcpListenResult =
+  | { appId: string; config: AppMcpServerConfig }
+  | { appId: string; code: AppMcpListenFailureCode };
+
 type AppMcpStatus = 'down' | 'starting' | 'up' | 'shutting_down';
 
 interface AppMcpState {
@@ -121,10 +137,32 @@ export class AppMcpManager {
   public constructor(private readonly options: AppMcpManagerOptions) {}
 
   public async listenMcps(appIds: string[], runId: string): Promise<AppMcpServerConfig[]> {
-    const configs = await Promise.all(
-      Array.from(new Set(appIds)).map((appId) => this.listenOne(appId, runId)),
+    const results = await Promise.all(
+      Array.from(new Set(appIds)).map((appId) => this.listenOneWithResult(appId, runId)),
     );
-    return configs.filter((config): config is AppMcpServerConfig => Boolean(config));
+    return results.flatMap((result) => 'config' in result ? [result.config] : []);
+  }
+
+  public async listenRequiredMcps(
+    appIds: string[],
+    runId: string,
+  ): Promise<RequiredAppMcpListenResult> {
+    const results = await Promise.all(
+      Array.from(new Set(appIds)).map((appId) => this.listenOneWithResult(appId, runId)),
+    );
+    const failures = results.flatMap((result) => 'code' in result
+      ? [{ appId: result.appId, code: result.code }]
+      : []);
+    if (failures.length > 0) {
+      this.releaseMcps(runId);
+      return { servers: [], failures };
+    }
+    return {
+      servers: results.flatMap((result) => 'config' in result
+        ? [{ appId: result.appId, config: toStrictConfig(result.appId, result.config) }]
+        : []),
+      failures: [],
+    };
   }
 
   public releaseMcps(runId: string): void {
@@ -158,17 +196,37 @@ export class AppMcpManager {
     this.runListeners.clear();
   }
 
-  private async listenOne(appId: string, runId: string): Promise<AppMcpServerConfig | null> {
+  private async listenOneWithResult(appId: string, runId: string): Promise<AppMcpListenResult> {
+    let failureCode: AppMcpListenFailureCode | undefined;
+    try {
+      const config = await this.listenOne(appId, runId, (code) => {
+        failureCode ??= code;
+      });
+      return config
+        ? { appId, config }
+        : { appId, code: failureCode ?? 'app_mcp_start_failed' };
+    } catch {
+      return { appId, code: failureCode ?? 'app_mcp_start_failed' };
+    }
+  }
+
+  private async listenOne(
+    appId: string,
+    runId: string,
+    onFailure: (code: AppMcpListenFailureCode) => void,
+  ): Promise<AppMcpServerConfig | null> {
     const record = this.options.getInstalledApp(appId);
     if (!record?.installDir) {
+      onFailure('app_not_installed');
       return null;
     }
     const manifest = await this.options.resolveInstalledManifest(record.installDir);
     const mcp = findManifestMcp(manifest);
     if (!mcp) {
+      onFailure('app_mcp_not_declared');
       return null;
     }
-    const resolvedSecrets = await this.resolveSecrets(record.appId, manifest, runId);
+    const resolvedSecrets = await this.resolveSecrets(record.appId, manifest, runId, onFailure);
     if (!resolvedSecrets) {
       return null;
     }
@@ -493,12 +551,14 @@ export class AppMcpManager {
     appId: string,
     manifest: AppMcpManifest | null,
     runId: string,
+    onFailure: (code: AppMcpListenFailureCode) => void,
   ): Promise<ResolvedAppMcpSecretsEnvironment | null> {
     try {
       const resolved = this.options.resolveAppSecretsEnvironment
         ? await this.options.resolveAppSecretsEnvironment(appId, manifest)
         : defaultResolvedSecretsEnvironment();
       if (resolved.missingRequired.length > 0) {
+        onFailure('required_app_secrets_missing');
         const error = new Error('required_app_secrets_missing');
         await this.options.appendInstallLog('app_mcp:start_failed', {
           appId,
@@ -512,6 +572,7 @@ export class AppMcpManager {
       }
       return resolved;
     } catch (error) {
+      onFailure('app_mcp_secrets_unavailable');
       await this.options.appendInstallLog('app_mcp:start_failed', {
         appId,
         error: this.options.serializeErrorForInstallLog(error),
@@ -561,6 +622,18 @@ const safeMcpServerName = (appId: string): string =>
 
 const safeMcpTokenEnvVar = (appId: string): string =>
   `FORGER_APP_MCP_TOKEN_${appId.replace(/[^a-zA-Z0-9]/g, '_').toUpperCase()}`;
+
+const stableMcpIdentityHash = (appId: string): string =>
+  createHash('sha256').update(appId).digest('hex').slice(0, 10);
+
+const toStrictConfig = (appId: string, config: AppMcpServerConfig): AppMcpServerConfig => {
+  const suffix = stableMcpIdentityHash(appId);
+  return {
+    ...config,
+    name: `${safeMcpServerName(appId)}_${suffix}`,
+    tokenEnvVar: `${safeMcpTokenEnvVar(appId)}_${suffix.toUpperCase()}`,
+  };
+};
 
 const translateMcpEnvironment = (
   environment: Record<string, string>,

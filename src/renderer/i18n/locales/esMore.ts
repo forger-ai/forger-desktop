@@ -1,0 +1,17 @@
+export const esMore = {
+  title: 'Más',
+  subtitle: 'Espacios adicionales para uso avanzado. Fija los que más uses en tu barra lateral.',
+  back: 'Volver a Más',
+  pin: 'Mostrar en la barra lateral',
+  unpin: 'Quitar de la barra lateral',
+  pinnedBadge: 'En la barra lateral',
+  workflowsEnabled: 'Flujos activados',
+  workflowsDisabled: 'Probar Flujos',
+  workflowsEnabling: 'Activando Flujos…',
+  workflowsDisabling: 'Desactivando Flujos…',
+  workflowsDisableTitle: '¿Desactivar Flujos?',
+  workflowsDisableBody: 'La sección Flujos se ocultará y los flujos programados no se iniciarán; los flujos guardados y el historial permanecerán en este dispositivo.',
+  workflowsDisableCancel: 'Mantener activado',
+  workflowsDisableConfirm: 'Desactivar Flujos',
+  workflowsUpdateError: 'No pudimos actualizar el acceso a Flujos.',
+};
