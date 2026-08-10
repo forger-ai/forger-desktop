@@ -16,6 +16,15 @@ const waitForPendingPermission = async (manager, requestId) => {
   throw new Error(`pending_permission_not_observed:${requestId}`);
 };
 
+const waitForRunFailure = async (harness, runId) => {
+  for (let attempt = 0; attempt < 500; attempt += 1) {
+    const failure = harness.events.find((event) => event.type === 'run.failed' && event.run.runId === runId);
+    if (failure) return failure;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`run_failed_not_observed:${runId}`);
+};
+
 const createHarness = async (overrides = {}) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'forger-app-conversation-b19-'));
   const appsRoot = path.join(root, 'apps');
@@ -438,11 +447,7 @@ test('given an unknown asynchronous execution failure, the public run ends with 
       conversationId: conversation.conversationId,
       message: 'Trigger the provider',
     });
-    let failure;
-    for (let index = 0; index < 30 && !failure; index += 1) {
-      failure = harness.events.find((event) => event.type === 'run.failed' && event.run.runId === queued.activeRun.runId);
-      if (!failure) await new Promise((resolve) => setImmediate(resolve));
-    }
+    const failure = await waitForRunFailure(harness, queued.activeRun.runId);
     assert.equal(failure.run.error, 'app_codex_conversation_failed');
   } finally {
     await harness.cleanup();
@@ -466,11 +471,7 @@ test('given a stale folder grant, execution fails before starting a provider out
       message: 'Inspect the shared folder',
       workspace: { cwdGrantId: 'removed-folder' },
     });
-    let failure;
-    for (let index = 0; index < 1_000 && !failure; index += 1) {
-      failure = harness.events.find((event) => event.type === 'run.failed' && event.run.runId === queued.activeRun.runId);
-      if (!failure) await new Promise((resolve) => setImmediate(resolve));
-    }
+    const failure = await waitForRunFailure(harness, queued.activeRun.runId);
     assert.match(failure.run.error, /agent_run_workspace_missing/);
   } finally {
     await harness.cleanup();
