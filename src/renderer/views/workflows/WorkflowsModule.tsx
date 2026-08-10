@@ -7,13 +7,16 @@ import type {
   PersonalAgent,
   PersonalAgentGrantOptionConnection,
   Workflow,
+  WorkflowAppActionDefinition,
+  WorkflowReviewReport,
+  WorkflowRevisionSummary,
   WorkflowRun,
   WorkflowRunSummary,
 } from '@shared/types';
 import type { AppDictionary } from '@renderer/i18n';
 import { buildChatProviderOptions } from '@shared/agent-runtime-registry';
 import type { View } from '@renderer/components/Sidebar';
-import type { ProviderOption } from './WorkflowEditor';
+import type { ProviderOption, WorkflowAppActionOption } from './WorkflowEditor';
 import { WorkflowsListView } from './WorkflowsListView';
 import { WorkflowEditorPage, type WorkflowGraphData } from './WorkflowEditorPage';
 import { WorkflowDetailPage } from './WorkflowDetailPage';
@@ -53,6 +56,8 @@ export function WorkflowsModule({ t, view, selectedWorkflowId, isPinned, onBackT
   const copy = t.sections.workflows;
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
   const [apps, setApps] = useState<AppSummary[]>([]);
+  const [appActions, setAppActions] = useState<WorkflowAppActionOption[]>([]);
+  const [loadingAppActionAppIds, setLoadingAppActionAppIds] = useState<ReadonlySet<string>>(new Set());
   const [agents, setAgents] = useState<PersonalAgent[]>([]);
   const [toolPackages, setToolPackages] = useState<AgentToolPackageDefinition[]>([]);
   const [officialTools, setOfficialTools] = useState<OfficialToolSummary[]>([]);
@@ -62,6 +67,9 @@ export function WorkflowsModule({ t, view, selectedWorkflowId, isPinned, onBackT
   const [draft, setDraft] = useState<WorkflowDraft | null>(null);
   const [baseline, setBaseline] = useState<string>('');
   const [runs, setRuns] = useState<WorkflowRunSummary[]>([]);
+  const [revisions, setRevisions] = useState<WorkflowRevisionSummary[]>([]);
+  const [review, setReview] = useState<WorkflowReviewReport | null>(null);
+  const [reviewOpen, setReviewOpen] = useState(false);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [selectedRun, setSelectedRun] = useState<WorkflowRun | null>(null);
   const [busy, setBusy] = useState(false);
@@ -74,6 +82,8 @@ export function WorkflowsModule({ t, view, selectedWorkflowId, isPinned, onBackT
   const selectedRunIdRef = useRef<string | null>(selectedRunId);
   selectedRunIdRef.current = selectedRunId;
   const draftInitRef = useRef<string | null>(null);
+  const loadedAppActionsRef = useRef(new Set<string>());
+  const loadingAppActionsRef = useRef(new Set<string>());
 
   const selectedWorkflow = workflows.find((workflow) => workflow.id === selectedWorkflowId) ?? null;
 
@@ -83,6 +93,27 @@ export function WorkflowsModule({ t, view, selectedWorkflowId, isPinned, onBackT
     return next;
   }, []);
 
+  const requestAppActions = useCallback(async (appId: string) => {
+    if (!appId || loadedAppActionsRef.current.has(appId) || loadingAppActionsRef.current.has(appId)) {
+      return;
+    }
+    loadingAppActionsRef.current.add(appId);
+    setLoadingAppActionAppIds(new Set(loadingAppActionsRef.current));
+    try {
+      const actions: WorkflowAppActionDefinition[] = await getDesktopApi().workflowsListAppActions(appId);
+      setAppActions((current) => [
+        ...current.filter((entry) => entry.appId !== appId),
+        ...actions.map((action) => ({ appId, action })),
+      ]);
+      loadedAppActionsRef.current.add(appId);
+    } catch {
+      setBanner({ severity: 'error', message: copy.appActionLoadError });
+    } finally {
+      loadingAppActionsRef.current.delete(appId);
+      setLoadingAppActionAppIds(new Set(loadingAppActionsRef.current));
+    }
+  }, [copy.appActionLoadError]);
+
   const loadRuns = useCallback(async (workflowId: string, preferredRunId?: string) => {
     const desktopApi = getDesktopApi();
     const nextRuns = await desktopApi.workflowsListRuns(workflowId);
@@ -90,6 +121,11 @@ export function WorkflowsModule({ t, view, selectedWorkflowId, isPinned, onBackT
     const targetRunId = preferredRunId ?? nextRuns[0]?.id ?? null;
     setSelectedRunId(targetRunId);
     setSelectedRun(targetRunId ? await desktopApi.workflowsGetRun(targetRunId) : null);
+  }, []);
+
+  const loadRevisions = useCallback(async (workflowId: string) => {
+    const nextRevisions = await getDesktopApi().workflowsListRevisions(workflowId);
+    setRevisions(nextRevisions);
   }, []);
 
   useEffect(() => {
@@ -145,6 +181,9 @@ export function WorkflowsModule({ t, view, selectedWorkflowId, isPinned, onBackT
         setRuns([]);
         setSelectedRun(null);
         setSelectedRunId(null);
+        setRevisions([]);
+        setReview(null);
+        setReviewOpen(false);
         setBanner(null);
       }
       return;
@@ -156,11 +195,14 @@ export function WorkflowsModule({ t, view, selectedWorkflowId, isPinned, onBackT
         const next = draftFromWorkflow(workflow);
         setDraft(next);
         setBaseline(signatureOf(next));
+        setReview(workflow.review ?? null);
+        setReviewOpen(false);
         setBanner(null);
         void loadRuns(workflow.id);
+        void loadRevisions(workflow.id);
       }
     }
-  }, [view, selectedWorkflowId, workflows, loadRuns]);
+  }, [view, selectedWorkflowId, workflows, loadRuns, loadRevisions]);
 
   const outputSamples = useMemo(() => {
     const samples: Record<string, unknown> = {};
@@ -180,7 +222,18 @@ export function WorkflowsModule({ t, view, selectedWorkflowId, isPinned, onBackT
   );
 
   const graphData: WorkflowGraphData = {
-    apps, agents, toolPackages, officialTools, connectionOptions, providerOptions, outputSamples, savedNodeIds,
+    apps,
+    appActions,
+    loadingAppActionAppIds,
+    loadedAppActionAppIds: loadedAppActionsRef.current,
+    onRequestAppActions: requestAppActions,
+    agents,
+    toolPackages,
+    officialTools,
+    connectionOptions,
+    providerOptions,
+    outputSamples,
+    savedNodeIds,
   };
 
   const dirty = draft ? signatureOf(draft) !== baseline : false;
@@ -201,6 +254,10 @@ export function WorkflowsModule({ t, view, selectedWorkflowId, isPinned, onBackT
       setBanner({ severity: 'error', message: copy.nodesRequired });
       return;
     }
+    if (draft.nodes.some((node) => node.type === 'app_action' && (!node.appId || !node.toolName))) {
+      setBanner({ severity: 'error', message: copy.appActionSelectionRequired });
+      return;
+    }
     setBusy(true);
     try {
       const wasCreate = !draft.id;
@@ -209,7 +266,9 @@ export function WorkflowsModule({ t, view, selectedWorkflowId, isPinned, onBackT
       const savedDraft = draftFromWorkflow(saved);
       setDraft(savedDraft);
       setBaseline(signatureOf(savedDraft));
+      setReview(null);
       setBanner({ severity: 'success', message: copy.saved });
+      void loadRevisions(saved.id);
       if (wasCreate) {
         draftInitRef.current = `workflowDetail:${saved.id}`;
         onOpenDetail(saved.id);
@@ -230,7 +289,7 @@ export function WorkflowsModule({ t, view, selectedWorkflowId, isPinned, onBackT
     } finally {
       setBusy(false);
     }
-  }, [draft, copy, refreshWorkflows, onOpenDetail, loadRuns]);
+  }, [draft, copy, refreshWorkflows, onOpenDetail, loadRuns, loadRevisions]);
 
   const discardDraft = useCallback(() => {
     if (!selectedWorkflow) {
@@ -249,15 +308,83 @@ export function WorkflowsModule({ t, view, selectedWorkflowId, isPinned, onBackT
       if (selectedWorkflowIdRef.current === workflow.id) {
         await loadRuns(workflow.id, run.id);
       }
+    } catch {
+      setBanner({ severity: 'error', message: copy.appliedRequired });
     } finally {
       setBusy(false);
     }
-  }, [loadRuns]);
+  }, [copy.appliedRequired, loadRuns]);
+
+  const reviewDraft = useCallback(async (workflow: Workflow) => {
+    setBusy(true);
+    try {
+      const report = await getDesktopApi().workflowsReview(workflow.id);
+      setReview(report);
+      setReviewOpen(true);
+    } catch {
+      setBanner({ severity: 'error', message: copy.reviewError });
+    } finally {
+      setBusy(false);
+    }
+  }, [copy.reviewError]);
+
+  const applyReview = useCallback(async (workflow: Workflow) => {
+    if (!review || review.status !== 'ready') return;
+    setBusy(true);
+    try {
+      const updated = await getDesktopApi().workflowsApply(workflow.id, {
+        definitionHash: review.definitionHash,
+        expectedRevision: workflow.revision,
+      });
+      setWorkflows((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      const next = draftFromWorkflow(updated);
+      setDraft(next);
+      setBaseline(signatureOf(next));
+      setReview(updated.review ?? review);
+      setReviewOpen(false);
+      setBanner({ severity: 'success', message: copy.applied });
+      await loadRevisions(updated.id);
+    } catch {
+      setReview(null);
+      setReviewOpen(false);
+      setBanner({ severity: 'error', message: copy.applyError });
+    } finally {
+      setBusy(false);
+    }
+  }, [copy.applied, copy.applyError, loadRevisions, review]);
 
   const toggleEnabled = useCallback(async (workflow: Workflow) => {
-    const updated = await getDesktopApi().workflowsSetEnabled(workflow.id, !workflow.enabled);
-    setWorkflows((current) => current.map((item) => (item.id === updated.id ? updated : item)));
-  }, []);
+    setBusy(true);
+    try {
+      const updated = await getDesktopApi().workflowsSetEnabled(workflow.id, !workflow.enabled);
+      setWorkflows((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+    } catch {
+      setBanner({ severity: 'error', message: copy.activationError });
+    } finally {
+      setBusy(false);
+    }
+  }, [copy.activationError]);
+
+  const restoreRevision = useCallback(async (workflow: Workflow, revision: WorkflowRevisionSummary) => {
+    setBusy(true);
+    try {
+      const updated = await getDesktopApi().workflowsRestoreRevision(workflow.id, {
+        revisionId: revision.id,
+        expectedRevision: workflow.revision,
+      });
+      setWorkflows((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      const next = draftFromWorkflow(updated);
+      setDraft(next);
+      setBaseline(signatureOf(next));
+      setReview(null);
+      setBanner({ severity: 'success', message: copy.restoredDraft });
+      await loadRevisions(updated.id);
+    } catch {
+      setBanner({ severity: 'error', message: copy.restoreError });
+    } finally {
+      setBusy(false);
+    }
+  }, [copy.restoreError, copy.restoredDraft, loadRevisions]);
 
   const deleteWorkflow = useCallback(async (workflow: Workflow) => {
     await getDesktopApi().workflowsDelete(workflow.id);
@@ -301,6 +428,19 @@ export function WorkflowsModule({ t, view, selectedWorkflowId, isPinned, onBackT
     setSelectedRunId(runId);
     setSelectedRun(await getDesktopApi().workflowsGetRun(runId));
   }, []);
+
+  const retryRun = useCallback(async (runId: string) => {
+    if (!selectedWorkflowIdRef.current) return;
+    setBusy(true);
+    try {
+      const run = await getDesktopApi().workflowsRetryRun(runId);
+      await loadRuns(selectedWorkflowIdRef.current, run.id);
+    } catch {
+      setBanner({ severity: 'error', message: copy.retryError });
+    } finally {
+      setBusy(false);
+    }
+  }, [copy.retryError, loadRuns]);
 
   if (view === 'workflows') {
     return (
@@ -355,6 +495,14 @@ export function WorkflowsModule({ t, view, selectedWorkflowId, isPinned, onBackT
           onBack={onOpenList}
           onRunNow={() => void runNow(selectedWorkflow)}
           onToggleEnabled={() => void toggleEnabled(selectedWorkflow)}
+          onReview={() => void reviewDraft(selectedWorkflow)}
+          review={review}
+          reviewOpen={reviewOpen}
+          onCloseReview={() => setReviewOpen(false)}
+          onApplyReview={() => void applyReview(selectedWorkflow)}
+          revisions={revisions}
+          onReloadRevisions={() => void loadRevisions(selectedWorkflow.id)}
+          onRestoreRevision={(revision) => void restoreRevision(selectedWorkflow, revision)}
           onRunNode={(nodeId) => void runNodeStep(nodeId)}
           runs={runs}
           selectedRunId={selectedRunId}
@@ -362,6 +510,7 @@ export function WorkflowsModule({ t, view, selectedWorkflowId, isPinned, onBackT
           selectedRun={selectedRun}
           onApproveNode={(nodeId, approved) => void approveNode(nodeId, approved)}
           onCancelRun={() => void cancelRun()}
+          onRetryRun={(runId) => void retryRun(runId)}
         />
       ) : null}
     </Box>

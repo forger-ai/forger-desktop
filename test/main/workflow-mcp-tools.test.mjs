@@ -69,6 +69,8 @@ const createHarness = async (overrides = {}) => {
     workflowsList: () => [{ id: 'wf-1', name: 'Flujo demo' }],
     workflowsGet: (workflowId) => workflowId === 'wf-1' ? { id: 'wf-1', name: 'Flujo demo' } : null,
     workflowsUpsert: async (input) => ({ id: 'wf-new', ...input }),
+    workflowsReview: async (workflowId) => ({ workflowId, status: 'ready', definitionHash: 'hash-1', issues: [] }),
+    workflowsApply: async (workflowId, input) => ({ id: workflowId, appliedRevision: input.expectedRevision }),
     workflowsRun: async (workflowId) => ({ id: 'run-x', workflowId, status: 'queued' }),
     ...overrides,
   });
@@ -227,6 +229,8 @@ test('workflow node tools are only visible to workflow sessions', async () => {
     assert.ok(!chatTools.includes('workflow_complete_node'));
     assert.ok(chatTools.includes('forger_workflow_list'));
     assert.ok(chatTools.includes('forger_workflow_upsert'));
+    assert.ok(chatTools.includes('forger_workflow_review'));
+    assert.ok(chatTools.includes('forger_workflow_apply'));
     assert.ok(chatTools.includes('forger_workflow_run'));
   } finally {
     harness.stop();
@@ -330,6 +334,26 @@ test('chat sessions manage workflows through forger_workflow_* tools', async () 
     });
     assert.equal(upserted.success, true);
     assert.equal(upserted.workflow.id, 'wf-new');
+    const transportLog = harness.logs.find((entry) =>
+      entry.event === 'agent_tool:mcp_tools_call_received'
+      && entry.payload.toolName === 'forger_workflow_upsert');
+    assert.ok(transportLog);
+    assert.equal('arguments' in transportLog.payload, false, 'the MCP transport log never stores tool payloads');
+    assert.equal(transportLog.payload.argumentCount, 3);
+    const upsertLog = harness.logs.find((entry) =>
+      entry.event === 'agent_tool:call_received' && entry.payload.toolId === 'forger_workflow_upsert');
+    assert.ok(upsertLog);
+    assert.equal('args' in upsertLog.payload, false, 'workflow definitions are not persisted in tool logs');
+    assert.equal(upsertLog.payload.argumentCount, 3);
+
+    const review = await callTool(session, 'forger_workflow_review', { workflowId: 'wf-1' });
+    assert.equal(review.success, true);
+    assert.equal(review.review.status, 'ready');
+    const applied = await callTool(session, 'forger_workflow_apply', {
+      workflowId: 'wf-1', definitionHash: review.review.definitionHash, expectedRevision: 1,
+    });
+    assert.equal(applied.success, true);
+    assert.equal(applied.workflow.appliedRevision, 1);
 
     const run = await callTool(session, 'forger_workflow_run', { workflowId: 'wf-1' });
     assert.equal(run.success, true);
@@ -409,7 +433,32 @@ test('workflow tool schemas are strict', () => {
   assert.deepEqual(getMcpToolInputSchema('workflow_complete_node').required, ['output', 'summary']);
   assert.deepEqual(getMcpToolInputSchema('workflow_fail_node').required, ['reason']);
   assert.deepEqual(getMcpToolInputSchema('forger_workflow_get').required, ['workflowId']);
-  assert.deepEqual(getMcpToolInputSchema('forger_workflow_upsert').required, ['name', 'trigger', 'nodes']);
+  assert.deepEqual(getMcpToolInputSchema('forger_workflow_review').required, ['workflowId']);
+  assert.deepEqual(getMcpToolInputSchema('forger_workflow_apply').required, [
+    'workflowId', 'definitionHash', 'expectedRevision',
+  ]);
+  const workflowUpsert = getMcpToolInputSchema('forger_workflow_upsert');
+  assert.deepEqual(workflowUpsert.required, ['name', 'trigger', 'nodes', 'edges']);
+  assert.equal(workflowUpsert.additionalProperties, false);
+  assert.deepEqual(
+    workflowUpsert.properties.nodes.items.oneOf.map((schema) => schema.properties.type.const),
+    ['app_action', 'llm_agent', 'forger_agent', 'forger_tool', 'connection', 'condition'],
+  );
+  for (const nodeSchema of workflowUpsert.properties.nodes.items.oneOf) {
+    assert.equal(nodeSchema.additionalProperties, false);
+    assert.ok(nodeSchema.required.includes('id'));
+    assert.ok(nodeSchema.required.includes('name'));
+    assert.ok(nodeSchema.required.includes('type'));
+  }
+  const appActionSchema = workflowUpsert.properties.nodes.items.oneOf[0];
+  assert.deepEqual(appActionSchema.required, [
+    'id', 'name', 'type', 'appId', 'toolName', 'input', 'action',
+  ]);
+  assert.equal(appActionSchema.properties.action.additionalProperties, false);
+  assert.deepEqual(workflowUpsert.allOf, [{
+    if: { required: ['id'] },
+    then: { required: ['expectedRevision'] },
+  }]);
   assert.deepEqual(getMcpToolInputSchema('slack.send_message').required, ['channelId', 'text']);
   assert.deepEqual(getMcpToolInputSchema('trello.create_card').required, ['listId', 'name']);
   assert.deepEqual(getMcpToolInputSchema('trello.update_card').required, ['cardId']);

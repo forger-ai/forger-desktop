@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import fs from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -547,13 +547,19 @@ test('main utility logs install diagnostics and serializes command failures with
     const longStdout = 'x'.repeat(60_005);
     const commandError = new controller.CommandFailedError('git', ['status'], '/repo', 1, null, longStdout, 'bad');
 
-    await controller.appendInstallLog('install:test', { appId: 'demo-app' });
+    await controller.appendInstallLog('install:test', {
+      appId: 'demo-app',
+      token: 'super-secret-token',
+      details: 'Authorization: Bearer abcdefghijklmnopqrstuvwxyz',
+    });
     const serialized = controller.serializeErrorForInstallLog(commandError);
     const plain = controller.serializeErrorForInstallLog('plain failure');
     const entry = JSON.parse(await readFile(logPath, 'utf8'));
 
     assert.equal(entry.event, 'install:test');
     assert.equal(entry.appId, 'demo-app');
+    assert.equal(entry.token, '[REDACTED]');
+    assert.doesNotMatch(entry.details, /abcdefghijklmnopqrstuvwxyz/);
     assert.equal(entry.packaged, true);
     assert.equal(entry.dev, false);
     assert.equal(serialized.command, 'git');
@@ -561,6 +567,9 @@ test('main utility logs install diagnostics and serializes command failures with
     assert.match(serialized.stdout, /\.\.\.\[truncated 5 chars\]$/);
     assert.deepEqual(plain, { message: 'plain failure' });
     assert.equal(controller.truncateForInstallLog('short'), 'short');
+    if (process.platform !== 'win32') {
+      assert.equal((await stat(logPath)).mode & 0o777, 0o600);
+    }
   } finally {
     await rm(root, { recursive: true, force: true });
   }

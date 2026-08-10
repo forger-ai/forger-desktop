@@ -1,137 +1,55 @@
 import { randomUUID } from 'node:crypto';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
-import path from 'node:path';
 import type {
-  AgentRunActivity,
-  AgentRuntime,
-  AgentRuntimeRequest,
-  AppSummary,
-  CallConnectionActionInput,
-  CallConnectionActionResult,
-  CallOfficialToolInput,
-  CallOfficialToolResult,
-  ConnectionSessionGrant,
   FilesActionResult,
-  PersonalAgent,
   Workflow,
+  WorkflowApplyInput,
   WorkflowApproveNodeInput,
-  WorkflowConnectionNode,
-  WorkflowForgerAgentNode,
-  WorkflowForgerToolNode,
-  WorkflowLlmAgentNode,
   WorkflowNode,
   WorkflowNodeRun,
+  WorkflowRestoreRevisionInput,
+  WorkflowReviewReport,
+  WorkflowRevision,
   WorkflowRun,
   WorkflowRunSummary,
   WorkflowRunTrigger,
   WorkflowUpdatedEvent,
   WorkflowUpsertInput,
 } from '../shared/types';
-import {
-  appendTranscript,
-  parseClaudeAssistantMessages,
-  parseCodexAssistantMessages,
-  runAgentCommand,
-  type LlmAutomationMcpServerConfig,
-} from './automation/agent-command-runner';
+import { appendTranscript } from './automation/agent-command-runner';
 import {
   computeNextRunAt,
   defaultMissedRunWindowMinutes,
 } from './automation-manager';
 import {
-  appendProviderActivity,
-  createAgentRunActivity,
-  finalizeAgentRunActivity,
-  persistAgentRunActivity,
-} from './chat/agent-run-activity';
-import { renderPromptFile } from './prompt-builder';
-import type { LlmProviderAuthProfileResolver } from './llm-provider/types';
-import {
-  buildRunContext,
   computeRunOutcome,
-  evaluateConditionExpression,
-  lookupContextPath,
-  renderTemplateString,
   resolveNodeReadiness,
-  resolveTemplateValue,
   validateWorkflowGraph,
   type WorkflowNodeState,
-  type WorkflowRunContext,
 } from './workflow/engine';
+import {
+  WorkflowNodeRuntime,
+  type ActiveRunState,
+  type WorkflowMcpNodeContext,
+  type WorkflowNodeRuntimeOptions,
+} from './workflow/node-runtime';
 import { WorkflowStore, toWorkflowRunSummary } from './workflow/store';
 import { sanitizeWorkflowUpsertInput } from './workflow/sanitize';
-import { validateOutputAgainstSchema } from './workflow/output-schema';
+import {
+  createWorkflowRevision,
+  reviewWorkflowDefinition,
+  workflowDefinitionHash,
+  workflowForExecution,
+} from './workflow/revisions';
+
+export type { WorkflowMcpNodeContext, WorkflowNodeCompletion } from './workflow/node-runtime';
 
 const MAX_TIMEOUT_MS = 2_147_483_647;
 const MISSED_RUN_GRACE_MS = 60_000;
 const MAX_PARALLEL_NODES = 4;
-const MAX_FOREACH_ITEMS = 100;
-const DEFAULT_NODE_TIMEOUT_MS = 300_000;
-const INPUT_CONTEXT_MAX_CHARS = 12_000;
 
-export interface WorkflowMcpNodeContext {
-  workflowId: string;
-  workflowName: string;
-  runId: string;
-  nodeId: string;
-  nodeName: string;
-  input: Record<string, unknown>;
-  outputSchema?: Record<string, unknown>;
-}
-
-export interface WorkflowNodeCompletion {
-  status: 'succeeded' | 'failed';
-  output?: Record<string, unknown>;
-  summary?: string;
-  reason?: string;
-}
-
-interface ActiveRunState {
-  workflowId: string;
-  canceled: boolean;
-  children: Set<ChildProcessWithoutNullStreams>;
-  approvalResolvers: Map<string, (approved: boolean) => void>;
-}
-
-interface WorkflowManagerOptions {
-  forgerHomeRoot: string;
-  metadataRoot: string;
-  codexHome: string;
-  providerProfilesRoot?: string;
-  resolveAuthProfile?: LlmProviderAuthProfileResolver;
-  getAgentRuntime: (requested?: AgentRuntimeRequest) => Promise<AgentRuntime>;
-  getInstalledApps: () => AppSummary[];
-  getCodexCliPath: () => Promise<string | null>;
-  getClaudeCliPath: () => Promise<string | null>;
-  getAntigravityCliPath?: () => Promise<string | null>;
-  getCodexPathEntries: () => Promise<string[]>;
-  getAgentNetworkAccess?: (appIds: string[]) => Promise<boolean>;
-  getCodexAuthenticated: () => Promise<boolean>;
-  getClaudeAuthenticated: () => Promise<boolean>;
-  getAntigravityAuthenticated?: () => Promise<boolean>;
-  createForgerMcpSession?: (
-    nodeRunKey: string,
-    appIds: string[],
-    forgerToolActionIds: string[],
-    connectionGrants: ConnectionSessionGrant[],
-  ) => { url: string; token: string } | null;
-  releaseForgerMcpSession?: (token: string) => void;
-  buildMemoryContext?: (appIds: string[]) => Promise<string>;
-  listenAppMcps?: (appIds: string[], listenerId: string) => Promise<LlmAutomationMcpServerConfig[]>;
-  listenRequiredAppMcps?: (
-    appIds: string[],
-    listenerId: string,
-  ) => Promise<{
-    servers: Array<{ appId: string; config: LlmAutomationMcpServerConfig }>;
-    failures: Array<{ appId: string; code: string }>;
-  }>;
-  releaseAppMcps?: (listenerId: string) => void;
-  getPersonalAgent?: (agentId: string) => Promise<PersonalAgent | null>;
-  callForgerToolAction?: (input: CallOfficialToolInput) => Promise<CallOfficialToolResult>;
-  callConnectionAction?: (input: CallConnectionActionInput) => Promise<CallConnectionActionResult>;
-  callConnectorAction?: (input: CallOfficialToolInput) => Promise<CallOfficialToolResult>;
+interface WorkflowManagerOptions extends WorkflowNodeRuntimeOptions {
   getValidToolIds?: () => ReadonlySet<string>;
-  onAgentRunActivity?: (activity: AgentRunActivity) => void;
   onWorkflowUpdated: (event: WorkflowUpdatedEvent) => void;
 }
 
@@ -143,25 +61,51 @@ export class WorkflowManager {
   private workflows = new Map<string, Workflow>();
   private timers = new Map<string, NodeJS.Timeout>();
   private activeRuns = new Map<string, ActiveRunState>();
-  private nodeContexts = new Map<string, WorkflowMcpNodeContext>();
-  private nodeCompletions = new Map<string, WorkflowNodeCompletion>();
+  private revisions = new Map<string, WorkflowRevision[]>();
+  private workflowOperationTails = new Map<string, Promise<void>>();
+  private runTasks = new Map<string, Promise<void>>();
+  private inFlightOperations = new Set<Promise<unknown>>();
+  private disposed = false;
+  private disposePromise: Promise<void> | null = null;
   private readonly store: WorkflowStore;
+  private readonly nodeRuntime: WorkflowNodeRuntime;
 
   public constructor(private readonly options: WorkflowManagerOptions) {
     this.store = new WorkflowStore({ metadataRoot: options.metadataRoot });
+    this.nodeRuntime = new WorkflowNodeRuntime(options);
   }
 
   public async initialize(options: WorkflowManagerInitializeOptions = {}): Promise<void> {
+    this.disposed = false;
+    this.disposePromise = null;
     await this.store.initialize();
     const entries = await this.store.readWorkflows();
     for (const entry of entries) {
       const normalized = this.normalizeWorkflow(entry);
       if (normalized) {
-        this.workflows.set(normalized.id, options.recalculateSchedulesFromNow
-          && normalized.enabled
-          && normalized.trigger.type === 'scheduled'
-          ? { ...normalized, nextRunAt: computeNextRunAt(normalized.trigger.frequency) }
-          : normalized);
+        let revisions = (await this.store.readRevisions(normalized.id))
+          .filter((revision) => revision.workflowId === normalized.id)
+          .sort((left, right) => right.revision - left.revision);
+        if (revisions.length === 0) {
+          const migrated = createWorkflowRevision(normalized, {
+            id: normalized.revisionId,
+            applied: normalized.appliedRevisionId === normalized.revisionId,
+            ...(normalized.appliedRevisionId === normalized.revisionId ? { appliedAt: normalized.updatedAt } : {}),
+          });
+          revisions = [migrated];
+          await this.store.saveRevisions(normalized.id, revisions);
+        }
+        this.revisions.set(normalized.id, revisions);
+        const applied = this.appliedRevisionFor(normalized);
+        const withAppliedTrigger = applied
+          ? { ...normalized, appliedTrigger: applied.workflow.trigger }
+          : normalized;
+        const recalculated = options.recalculateSchedulesFromNow
+          && withAppliedTrigger.enabled
+          && applied?.workflow.trigger.type === 'scheduled'
+          ? { ...withAppliedTrigger, nextRunAt: computeNextRunAt(applied.workflow.trigger.frequency) }
+          : withAppliedTrigger;
+        this.workflows.set(withAppliedTrigger.id, recalculated);
       }
     }
     await this.failInterruptedRuns();
@@ -171,11 +115,29 @@ export class WorkflowManager {
     }
   }
 
-  public dispose(): void {
-    for (const timer of this.timers.values()) {
-      clearTimeout(timer);
-    }
-    this.timers.clear();
+  public dispose(): Promise<void> {
+    if (this.disposePromise) return this.disposePromise;
+    this.disposed = true;
+    this.disposePromise = (async () => {
+      for (const timer of this.timers.values()) clearTimeout(timer);
+      this.timers.clear();
+
+      for (const active of this.activeRuns.values()) this.cancelActiveRun(active);
+      await Promise.allSettled([...this.workflowOperationTails.values()]);
+      for (const active of this.activeRuns.values()) this.cancelActiveRun(active);
+      await Promise.allSettled([...this.runTasks.values()]);
+      await Promise.allSettled([...this.inFlightOperations]);
+      await Promise.allSettled([...this.workflowOperationTails.values()]);
+      for (const active of this.activeRuns.values()) this.cancelActiveRun(active);
+      await Promise.allSettled([...this.runTasks.values()]);
+      await Promise.allSettled(
+        [...this.activeRuns.keys()].map(async (runId) => {
+          await Promise.resolve().then(() => this.options.releaseAppActions?.(runId));
+        }),
+      );
+      this.activeRuns.clear();
+    })();
+    return this.disposePromise;
   }
 
   public list(): Workflow[] {
@@ -187,72 +149,227 @@ export class WorkflowManager {
   }
 
   public async upsert(input: WorkflowUpsertInput): Promise<Workflow> {
-    const sanitized = sanitizeWorkflowUpsertInput(input, this.options.getValidToolIds?.());
+    const sanitized = sanitizeWorkflowUpsertInput(
+      input,
+      this.options.getValidToolIds?.(),
+      { rejectInvalidNodes: true },
+    );
     if (!sanitized.name.trim()) {
       throw new Error('workflow_name_required');
     }
     validateWorkflowGraph(sanitized.nodes, sanitized.edges);
+    const create = sanitized.id === undefined;
+    const workflowId = sanitized.id ?? randomUUID();
+    return await this.withWorkflowLock(workflowId, async () => {
+      this.assertNotDisposed();
+      return await this.upsertUnlocked(sanitized, workflowId, create);
+    });
+  }
+
+  private async upsertUnlocked(
+    sanitized: WorkflowUpsertInput,
+    workflowId: string,
+    create: boolean,
+  ): Promise<Workflow> {
     const now = new Date().toISOString();
-    const current = input.id ? this.workflows.get(input.id) : undefined;
-    if (input.id && !current) {
+    const current = this.workflows.get(workflowId);
+    if (!create && !current) {
       throw new Error('workflow_not_found');
     }
-    const enabled = typeof sanitized.enabled === 'boolean' ? sanitized.enabled : current?.enabled ?? true;
+    if (current && sanitized.expectedRevision === undefined) {
+      throw new Error('workflow_expected_revision_required');
+    }
+    if (current && sanitized.expectedRevision !== undefined && sanitized.expectedRevision !== current.revision) {
+      throw new Error('workflow_revision_conflict');
+    }
+    const revision = (current?.revision ?? 0) + 1;
+    const revisionId = randomUUID();
     const workflow: Workflow = {
-      id: current?.id ?? randomUUID(),
+      id: current?.id ?? workflowId,
       name: sanitized.name,
       ...(sanitized.description ? { description: sanitized.description } : {}),
       trigger: sanitized.trigger,
       nodes: sanitized.nodes,
       edges: sanitized.edges,
-      enabled,
+      enabled: current?.enabled ?? false,
       running: current?.running ?? false,
-      nextRunAt: enabled && sanitized.trigger.type === 'scheduled'
-        ? computeNextRunAt(sanitized.trigger.frequency)
-        : null,
+      nextRunAt: current?.nextRunAt ?? null,
       createdAt: current?.createdAt ?? now,
       updatedAt: now,
       ...(current?.lastRun ? { lastRun: current.lastRun } : {}),
+      revision,
+      revisionId,
+      ...(current?.appliedRevision !== undefined ? { appliedRevision: current.appliedRevision } : {}),
+      ...(current?.appliedRevisionId ? { appliedRevisionId: current.appliedRevisionId } : {}),
+      ...(current?.appliedTrigger ? { appliedTrigger: current.appliedTrigger } : {}),
     };
+    const revisionSnapshot = createWorkflowRevision(workflow, { id: revisionId });
+    const revisions = [revisionSnapshot, ...(this.revisions.get(workflow.id) ?? [])];
+    this.revisions.set(workflow.id, revisions);
+    await this.store.saveRevisions(workflow.id, revisions);
     this.workflows.set(workflow.id, workflow);
     await this.saveWorkflows();
-    await this.scheduleWorkflow(workflow.id);
     this.options.onWorkflowUpdated({ workflow });
     return workflow;
   }
 
-  public async delete(id: string): Promise<FilesActionResult> {
-    if (!this.workflows.has(id)) {
-      return { success: false, technicalCode: 'workflow_not_found', userMessage: 'No encontramos ese flujo.' };
+  public async review(id: string): Promise<WorkflowReviewReport> {
+    return await this.withWorkflowLock(id, async () => {
+      this.assertNotDisposed();
+      const workflow = this.requireWorkflow(id);
+      const report = reviewWorkflowDefinition(workflow);
+      const next: Workflow = { ...workflow, review: report };
+      this.workflows.set(id, next);
+      await this.saveWorkflows();
+      this.options.onWorkflowUpdated({ workflow: next });
+      return report;
+    });
+  }
+
+  public async apply(id: string, input: WorkflowApplyInput): Promise<Workflow> {
+    return await this.trackOperation(this.applyUnlockedBetweenPreflights(id, input));
+  }
+
+  private async applyUnlockedBetweenPreflights(id: string, input: WorkflowApplyInput): Promise<Workflow> {
+    const captured = await this.withWorkflowLock(id, async () => {
+      this.assertNotDisposed();
+      const workflow = this.requireWorkflow(id);
+      this.assertWorkflowReadyToApply(workflow, input);
+      this.nodeRuntime.assertAuthenticAppActionNodes(workflow.nodes);
+      return structuredClone(workflow);
+    });
+    const preflightNodes = await this.nodeRuntime.resolveLiveAppActionNodes(captured.nodes);
+    const operationId = `workflow-apply-${randomUUID()}`;
+    try {
+      await this.nodeRuntime.preflightAppActionNodes(preflightNodes, operationId);
+      return await this.withWorkflowLock(id, async () => {
+        this.assertNotDisposed();
+        const workflow = this.requireWorkflow(id);
+        this.assertWorkflowReadyToApply(workflow, input);
+        if (workflow.revisionId !== captured.revisionId) throw new Error('workflow_review_stale');
+        this.nodeRuntime.assertAuthenticAppActionNodes(workflow.nodes);
+        this.nodeRuntime.assertLiveAppActionNodesMatch(workflow.nodes, preflightNodes);
+
+        const revisions = this.requireRevisions(id).map((revision) => revision.id === workflow.revisionId
+          ? { ...revision, applied: true, appliedAt: new Date().toISOString() }
+          : { ...revision, applied: false, appliedAt: undefined });
+        const applied = revisions.find((revision) => revision.id === workflow.revisionId);
+        if (!applied || applied.definitionHash !== input.definitionHash) {
+          throw new Error('workflow_revision_not_found');
+        }
+        this.nodeRuntime.assertAuthenticAppActionNodes(applied.workflow.nodes);
+        this.revisions.set(id, revisions);
+        await this.store.saveRevisions(id, revisions);
+        const next: Workflow = {
+          ...workflow,
+          appliedRevision: applied.revision,
+          appliedRevisionId: applied.id,
+          appliedTrigger: applied.workflow.trigger,
+        };
+        this.workflows.set(id, next);
+        await this.saveWorkflows();
+        this.options.onWorkflowUpdated({ workflow: next });
+        return next;
+      });
+    } finally {
+      await Promise.resolve(this.options.releaseAppActions?.(operationId)).catch(() => undefined);
     }
-    this.clearTimer(id);
-    this.workflows.delete(id);
-    await this.saveWorkflows();
-    return { success: true, userMessage: 'Flujo eliminado.' };
+  }
+
+  public async listRevisions(id: string): Promise<WorkflowRevision[]> {
+    this.requireWorkflow(id);
+    return structuredClone(this.requireRevisions(id));
+  }
+
+  public async restoreRevision(id: string, input: WorkflowRestoreRevisionInput): Promise<Workflow> {
+    return await this.withWorkflowLock(id, async () => {
+      this.assertNotDisposed();
+      const current = this.requireWorkflow(id);
+      this.assertExpectedRevision(current, input.expectedRevision);
+      const source = this.requireRevisions(id).find((revision) => revision.id === input.revisionId);
+      if (!source) throw new Error('workflow_revision_not_found');
+      const snapshot = source.workflow;
+      const sanitized = sanitizeWorkflowUpsertInput({
+        id,
+        expectedRevision: current.revision,
+        name: snapshot.name,
+        ...(snapshot.description ? { description: snapshot.description } : {}),
+        trigger: snapshot.trigger,
+        nodes: snapshot.nodes,
+        edges: snapshot.edges,
+      }, this.options.getValidToolIds?.());
+      validateWorkflowGraph(sanitized.nodes, sanitized.edges);
+      return await this.upsertUnlocked(sanitized, id, false);
+    });
+  }
+
+  public async delete(id: string): Promise<FilesActionResult> {
+    return await this.withWorkflowLock(id, async () => {
+      this.assertNotDisposed();
+      if (!this.workflows.has(id)) {
+        return { success: false, technicalCode: 'workflow_not_found', userMessage: 'No encontramos ese flujo.' };
+      }
+      this.clearTimer(id);
+      this.workflows.delete(id);
+      this.revisions.delete(id);
+      await this.store.deleteRevisions(id);
+      await this.saveWorkflows();
+      return { success: true, userMessage: 'Flujo eliminado.' };
+    });
   }
 
   public async setEnabled(id: string, enabled: boolean): Promise<Workflow> {
-    const workflow = this.requireWorkflow(id);
-    const next: Workflow = {
-      ...workflow,
-      enabled,
-      nextRunAt: enabled && workflow.trigger.type === 'scheduled'
-        ? computeNextRunAt(workflow.trigger.frequency)
-        : null,
-      updatedAt: new Date().toISOString(),
-    };
-    this.workflows.set(id, next);
-    if (!enabled) {
-      this.clearTimer(id);
-    }
-    await this.saveWorkflows();
+    const next = await this.withWorkflowLock(id, async () => {
+      this.assertNotDisposed();
+      const workflow = this.requireWorkflow(id);
+      if (enabled && !workflow.appliedRevisionId) {
+        throw new Error('workflow_applied_revision_required');
+      }
+      const applied = workflow.appliedRevisionId ? this.appliedWorkflowFor(workflow) : null;
+      if (enabled && applied?.trigger.type !== 'scheduled') {
+        throw new Error('workflow_manual_cannot_activate');
+      }
+      const updated: Workflow = {
+        ...workflow,
+        enabled,
+        nextRunAt: enabled && applied?.trigger.type === 'scheduled'
+          ? computeNextRunAt(applied.trigger.frequency)
+          : null,
+        updatedAt: new Date().toISOString(),
+      };
+      this.workflows.set(id, updated);
+      if (!enabled) this.clearTimer(id);
+      await this.saveWorkflows();
+      this.options.onWorkflowUpdated({ workflow: updated });
+      return updated;
+    });
     await this.scheduleWorkflow(id);
-    this.options.onWorkflowUpdated({ workflow: next });
     return next;
   }
 
   public async runNow(id: string, trigger: WorkflowRunTrigger = 'manual'): Promise<WorkflowRunSummary> {
-    return await this.startRun(id, trigger);
+    return await this.trackOperation(this.startRun(id, trigger));
+  }
+
+  public async retryRun(runId: string): Promise<WorkflowRunSummary> {
+    return await this.trackOperation(this.retryRunOperation(runId));
+  }
+
+  private async retryRunOperation(runId: string): Promise<WorkflowRunSummary> {
+    this.assertNotDisposed();
+    const previous = await this.store.readRun(runId);
+    if (!previous || previous.status !== 'failed') {
+      throw new Error('workflow_retry_not_safe');
+    }
+    if (previous.safeToRetry !== true) {
+      throw new Error('workflow_run_effects_uncertain');
+    }
+    const revision = this.requireRevisions(previous.workflowId)
+      .find((entry) => entry.id === previous.workflowRevisionId);
+    if (!revision || revision.definitionHash !== previous.definitionHash) {
+      throw new Error('workflow_retry_revision_unavailable');
+    }
+    return await this.startRun(previous.workflowId, previous.trigger, revision, previous.id);
   }
 
   /**
@@ -262,27 +379,44 @@ export class WorkflowManager {
    * triggers the step explicitly.
    */
   public async runNode(workflowId: string, nodeId: string): Promise<WorkflowRunSummary> {
-    const workflow = this.requireWorkflow(workflowId);
-    const node = workflow.nodes.find((entry) => entry.id === nodeId);
-    if (!node) {
-      throw new Error('workflow_node_not_found');
-    }
-    if (workflow.running) {
-      const skipped = this.createRunRecord(workflow, 'step', 'skipped', 'workflow_already_running');
-      await this.persistRun(workflow.id, skipped);
-      return toWorkflowRunSummary(skipped);
-    }
-    const run = this.createRunRecord(workflow, 'step', 'queued');
-    for (const nodeRun of run.nodeRuns) {
-      if (nodeRun.nodeId !== nodeId) {
-        nodeRun.status = 'skipped';
+    return await this.trackOperation(this.runNodeOperation(workflowId, nodeId));
+  }
+
+  private async runNodeOperation(workflowId: string, nodeId: string): Promise<WorkflowRunSummary> {
+    const prepared = await this.withWorkflowLock(workflowId, async () => {
+      this.assertNotDisposed();
+      const current = this.requireWorkflow(workflowId);
+      const revision = this.requireRunnableRevision(current);
+      const workflow = workflowForExecution(current, revision);
+      const node = workflow.nodes.find((entry) => entry.id === nodeId);
+      if (!node) throw new Error('workflow_node_not_found');
+      if (current.running) {
+        const skipped = this.createRunRecord(workflow, revision, 'step', 'skipped', 'workflow_already_running');
+        await this.persistRunUnlocked(workflow.id, skipped);
+        return { run: skipped, execute: false };
       }
+      const run = this.createRunRecord(workflow, revision, 'step', 'queued');
+      for (const nodeRun of run.nodeRuns) {
+        if (nodeRun.nodeId !== nodeId) nodeRun.status = 'skipped';
+      }
+      this.workflows.set(workflowId, { ...current, running: true, updatedAt: new Date().toISOString() });
+      try {
+        await this.saveWorkflows();
+        await this.store.appendRunId(workflow.id, run.id);
+        await this.persistRunUnlocked(workflow.id, run);
+      } catch (error) {
+        this.workflows.set(workflowId, current);
+        await this.saveWorkflows().catch(() => undefined);
+        throw error;
+      }
+      return { run, execute: true };
+    });
+    if (prepared.execute && !this.disposed) {
+      this.launchRunTask(prepared.run, () => this.executeSingleNode(workflowId, prepared.run, nodeId));
+    } else if (prepared.execute) {
+      await this.cancelPreparedRun(workflowId, prepared.run);
     }
-    await this.store.appendRunId(workflow.id, run.id);
-    await this.persistRun(workflow.id, run);
-    await this.markWorkflowRunning(workflow.id, true);
-    void this.executeSingleNode(workflow.id, run, nodeId);
-    return toWorkflowRunSummary(run);
+    return toWorkflowRunSummary(prepared.run);
   }
 
   private async executeSingleNode(workflowId: string, run: WorkflowRun, nodeId: string): Promise<void> {
@@ -290,12 +424,13 @@ export class WorkflowManager {
       workflowId,
       canceled: false,
       children: new Set(),
+      actionAbortControllers: new Set(),
       approvalResolvers: new Map(),
     };
     this.activeRuns.set(run.id, active);
     const transcriptPath = this.store.runTranscriptPath(run.id);
     try {
-      const workflow = this.requireWorkflow(workflowId);
+      const workflow = this.workflowForRun(run);
       const node = workflow.nodes.find((entry) => entry.id === nodeId) as WorkflowNode;
       await appendTranscript(transcriptPath, 'meta', `Workflow ${workflow.id} single-step run ${run.id} for node ${nodeId}`);
       run.status = 'running';
@@ -326,8 +461,8 @@ export class WorkflowManager {
           return;
         }
         nodeRun.status = state.status;
-        nodeRun.input = state.input;
-        nodeRun.output = state.output;
+        nodeRun.input = this.nodeRuntime.persistedNodeRunValue(node, state.input);
+        nodeRun.output = this.nodeRuntime.persistedNodeRunValue(node, state.output);
         nodeRun.summary = state.summary;
         nodeRun.error = state.error;
         if (state.status === 'running' && !nodeRun.startedAt) {
@@ -336,11 +471,32 @@ export class WorkflowManager {
         if (['succeeded', 'failed', 'skipped', 'canceled'].includes(state.status) && !nodeRun.finishedAt) {
           nodeRun.finishedAt = new Date().toISOString();
         }
+        const waitingNode = run.nodeRuns.find((entry) => entry.status === 'waiting_approval');
+        run.pendingApprovalNodeId = waitingNode?.nodeId;
+        run.status = waitingNode ? 'waiting_approval' : 'running';
         await this.persistRun(workflowId, run);
       };
 
+      let preflightComplete = false;
+      try {
+        await this.nodeRuntime.preflightAppActionNodes([node], run.id);
+        preflightComplete = true;
+      } catch (error) {
+        run.safeToRetry = true;
+        throw error;
+      }
       const stepNode = { ...node, requiresApproval: false } as WorkflowNode;
-      await this.executeNode(workflow, run, stepNode, states, triggerContext, active, transcriptPath, syncNodeRun);
+      await this.nodeRuntime.executeNode(
+        workflow,
+        run,
+        stepNode,
+        states,
+        triggerContext,
+        active,
+        transcriptPath,
+        syncNodeRun,
+      );
+      if (preflightComplete) run.safeToRetry = false;
 
       const state = states[nodeId];
       run.status = active.canceled
@@ -355,6 +511,7 @@ export class WorkflowManager {
       run.finishedAt = new Date().toISOString();
       await this.persistRun(workflowId, run);
     } finally {
+      await Promise.resolve(this.options.releaseAppActions?.(run.id)).catch(() => undefined);
       this.activeRuns.delete(run.id);
       await this.markWorkflowRunning(workflowId, false);
     }
@@ -393,14 +550,7 @@ export class WorkflowManager {
     if (!active) {
       return { success: false, technicalCode: 'workflow_run_not_active', userMessage: 'Ese flujo no esta en ejecucion.' };
     }
-    active.canceled = true;
-    for (const resolver of active.approvalResolvers.values()) {
-      resolver(false);
-    }
-    active.approvalResolvers.clear();
-    for (const child of active.children) {
-      this.killChild(child);
-    }
+    this.cancelActiveRun(active);
     return { success: true, userMessage: 'Deteniendo el flujo...' };
   }
 
@@ -425,64 +575,72 @@ export class WorkflowManager {
   // --- Forger MCP bridge -------------------------------------------------
 
   public getNodeContext(nodeRunKey: string): WorkflowMcpNodeContext | null {
-    return this.nodeContexts.get(nodeRunKey) ?? null;
+    return this.nodeRuntime.getNodeContext(nodeRunKey);
   }
 
   public completeNodeFromMcp(
     nodeRunKey: string,
     args: { output?: unknown; summary?: unknown },
   ): { success: boolean; errors?: string[]; technicalCode?: string } {
-    const context = this.nodeContexts.get(nodeRunKey);
-    if (!context) {
-      return { success: false, technicalCode: 'workflow_node_context_not_found' };
-    }
-    const output = args.output && typeof args.output === 'object' && !Array.isArray(args.output)
-      ? args.output as Record<string, unknown>
-      : {};
-    if (context.outputSchema) {
-      const errors = validateOutputAgainstSchema(output, context.outputSchema);
-      if (errors.length > 0) {
-        return { success: false, errors, technicalCode: 'workflow_output_schema_invalid' };
-      }
-    }
-    this.nodeCompletions.set(nodeRunKey, {
-      status: 'succeeded',
-      output,
-      summary: typeof args.summary === 'string' ? args.summary.trim().slice(0, 2_000) : undefined,
-    });
-    return { success: true };
+    return this.nodeRuntime.completeNodeFromMcp(nodeRunKey, args);
   }
 
   public failNodeFromMcp(
     nodeRunKey: string,
     args: { reason?: unknown },
   ): { success: boolean; technicalCode?: string } {
-    const context = this.nodeContexts.get(nodeRunKey);
-    if (!context) {
-      return { success: false, technicalCode: 'workflow_node_context_not_found' };
-    }
-    const reason = typeof args.reason === 'string' && args.reason.trim()
-      ? args.reason.trim().slice(0, 2_000)
-      : 'workflow_node_reported_failure';
-    this.nodeCompletions.set(nodeRunKey, { status: 'failed', reason });
-    return { success: true };
+    return this.nodeRuntime.failNodeFromMcp(nodeRunKey, args);
   }
 
   // --- Run execution -----------------------------------------------------
 
-  private async startRun(id: string, trigger: WorkflowRunTrigger): Promise<WorkflowRunSummary> {
-    const workflow = this.requireWorkflow(id);
-    if (workflow.running) {
-      const skipped = this.createRunRecord(workflow, trigger, 'skipped', 'workflow_already_running');
-      await this.persistRun(workflow.id, skipped);
-      return toWorkflowRunSummary(skipped);
+  private async startRun(
+    id: string,
+    trigger: WorkflowRunTrigger,
+    requestedRevision?: WorkflowRevision,
+    retryOfRunId?: string,
+  ): Promise<WorkflowRunSummary> {
+    const prepared = await this.withWorkflowLock(id, async () => {
+      this.assertNotDisposed();
+      const current = this.requireWorkflow(id);
+      if (trigger === 'scheduled' && (!current.enabled || !current.appliedRevisionId)) {
+        throw new Error('workflow_schedule_not_active');
+      }
+      const revision = requestedRevision
+        ? this.requireRequestedRevision(current.id, requestedRevision)
+        : this.requireRunnableRevision(current);
+      const workflow = workflowForExecution(current, revision);
+      if (current.running) {
+        const skipped = this.createRunRecord(
+          workflow,
+          revision,
+          trigger,
+          'skipped',
+          'workflow_already_running',
+          retryOfRunId,
+        );
+        await this.persistRunUnlocked(workflow.id, skipped);
+        return { run: skipped, execute: false };
+      }
+      const run = this.createRunRecord(workflow, revision, trigger, 'queued', undefined, retryOfRunId);
+      this.workflows.set(id, { ...current, running: true, updatedAt: new Date().toISOString() });
+      try {
+        await this.saveWorkflows();
+        await this.store.appendRunId(workflow.id, run.id);
+        await this.persistRunUnlocked(workflow.id, run);
+      } catch (error) {
+        this.workflows.set(id, current);
+        await this.saveWorkflows().catch(() => undefined);
+        throw error;
+      }
+      return { run, execute: true };
+    });
+    if (prepared.execute && !this.disposed) {
+      this.launchRunTask(prepared.run, () => this.executeRun(id, prepared.run));
+    } else if (prepared.execute) {
+      await this.cancelPreparedRun(id, prepared.run);
     }
-    const run = this.createRunRecord(workflow, trigger, 'queued');
-    await this.store.appendRunId(workflow.id, run.id);
-    await this.persistRun(workflow.id, run);
-    await this.markWorkflowRunning(workflow.id, true);
-    void this.executeRun(workflow.id, run);
-    return toWorkflowRunSummary(run);
+    return toWorkflowRunSummary(prepared.run);
   }
 
   private async executeRun(workflowId: string, run: WorkflowRun): Promise<void> {
@@ -490,12 +648,21 @@ export class WorkflowManager {
       workflowId,
       canceled: false,
       children: new Set(),
+      actionAbortControllers: new Set(),
       approvalResolvers: new Map(),
     };
     this.activeRuns.set(run.id, active);
     const transcriptPath = this.store.runTranscriptPath(run.id);
     try {
-      const workflow = this.requireWorkflow(workflowId);
+      const workflow = this.workflowForRun(run);
+      let preflightComplete = false;
+      try {
+        await this.nodeRuntime.preflightAppActionNodes(workflow.nodes, run.id);
+        preflightComplete = true;
+      } catch (error) {
+        run.safeToRetry = true;
+        throw error;
+      }
       await appendTranscript(transcriptPath, 'meta', `Workflow ${workflow.id} (${workflow.name}) run ${run.id} started`);
       run.status = 'running';
       await this.persistRun(workflowId, run);
@@ -520,8 +687,8 @@ export class WorkflowManager {
         const nodeRun = run.nodeRuns.find((entry) => entry.nodeId === nodeId);
         if (nodeRun) {
           nodeRun.status = state.status;
-          nodeRun.input = state.input;
-          nodeRun.output = state.output;
+          nodeRun.input = this.nodeRuntime.persistedNodeRunValue(node, state.input);
+          nodeRun.output = this.nodeRuntime.persistedNodeRunValue(node, state.output);
           nodeRun.summary = state.summary;
           nodeRun.error = state.error;
           if (state.status === 'running' && !nodeRun.startedAt) {
@@ -554,7 +721,16 @@ export class WorkflowManager {
         const toStart = readiness.ready.filter((nodeId) => !executing.has(nodeId)).slice(0, Math.max(0, capacity));
         for (const nodeId of toStart) {
           const node = workflow.nodes.find((entry) => entry.id === nodeId) as WorkflowNode;
-          const promise = this.executeNode(workflow, run, node, states, triggerContext, active, transcriptPath, syncNodeRun)
+          const promise = this.nodeRuntime.executeNode(
+            workflow,
+            run,
+            node,
+            states,
+            triggerContext,
+            active,
+            transcriptPath,
+            syncNodeRun,
+          )
             .catch(async (error) => {
               states[node.id] = {
                 status: 'failed',
@@ -586,6 +762,7 @@ export class WorkflowManager {
         ? { status: 'canceled' as const }
         : computeRunOutcome(workflow.nodes, workflow.edges, states);
       run.status = outcome.status;
+      if (preflightComplete) run.safeToRetry = false;
       run.error = outcome.status === 'failed' ? outcome.error : undefined;
       run.pendingApprovalNodeId = undefined;
       run.finishedAt = new Date().toISOString();
@@ -599,672 +776,115 @@ export class WorkflowManager {
       run.finishedAt = new Date().toISOString();
       await this.persistRun(workflowId, run);
     } finally {
+      await Promise.resolve(this.options.releaseAppActions?.(run.id)).catch(() => undefined);
       this.activeRuns.delete(run.id);
       await this.markWorkflowRunning(workflowId, false);
       await this.scheduleWorkflow(workflowId);
     }
   }
 
-  private async executeNode(
-    workflow: Workflow,
-    run: WorkflowRun,
-    node: WorkflowNode,
-    states: Record<string, WorkflowNodeState>,
-    triggerContext: Record<string, unknown>,
-    active: ActiveRunState,
-    transcriptPath: string,
-    syncNodeRun: (nodeId: string) => Promise<void>,
-  ): Promise<void> {
-    const context = buildRunContext(triggerContext, states);
-    const debugInput = this.buildNodeDebugInput(node, context);
-
-    if (node.requiresApproval) {
-      states[node.id] = { status: 'waiting_approval', input: debugInput };
-      await syncNodeRun(node.id);
-      const approved = await new Promise<boolean>((resolve) => {
-        active.approvalResolvers.set(node.id, resolve);
-      });
-      if (active.canceled) {
-        states[node.id] = { status: 'canceled', input: debugInput };
-        await syncNodeRun(node.id);
-        return;
-      }
-      if (!approved) {
-        states[node.id] = { status: 'failed', input: debugInput, error: 'workflow_node_approval_denied' };
-        await syncNodeRun(node.id);
-        return;
-      }
-    }
-
-    states[node.id] = { status: 'running', input: debugInput };
-    await syncNodeRun(node.id);
-    await appendTranscript(transcriptPath, 'meta', `[node:${node.id}] ${node.name} (${node.type}) started`);
-
-    let result = node.forEach
-      ? await this.executeNodeForEach(workflow, run, node, context, active, transcriptPath)
-      : await this.executeNodeOnce(workflow, run, node, context, active, transcriptPath);
-
-    if (active.canceled && result.status === 'failed') {
-      result = { status: 'canceled', input: result.input ?? debugInput };
-    }
-    states[node.id] = { ...result, input: result.input ?? debugInput };
-    await appendTranscript(
-      transcriptPath,
-      'meta',
-      `[node:${node.id}] finished with status ${result.status}${result.error ? `: ${result.error}` : ''}`,
-    );
-    await syncNodeRun(node.id);
-  }
-
-  private buildAgentInputContext(context: WorkflowRunContext): Record<string, unknown> {
-    const iteration = context as unknown as { item?: unknown; itemIndex?: number };
-    return {
-      trigger: context.trigger,
-      ...(iteration.item !== undefined ? { item: iteration.item, itemIndex: iteration.itemIndex } : {}),
-      nodes: Object.fromEntries(
-        Object.entries(context.nodes)
-          .filter(([, state]) => state.status === 'succeeded' || state.status === 'failed')
-          .map(([nodeId, state]) => [nodeId, {
-            status: state.status,
-            output: state.output ?? null,
-            summary: state.summary ?? null,
-            error: state.error ?? null,
-          }]),
-      ),
-    };
-  }
-
-  private buildNodeDebugInput(node: WorkflowNode, context: WorkflowRunContext): Record<string, unknown> {
-    if (node.type === 'forger_tool') {
-      return {
-        toolId: node.toolId,
-        actionId: node.toolId,
-        input: resolveTemplateValue(node.input, context) as Record<string, unknown>,
-      };
-    }
-    if (node.type === 'connection') {
-      return {
-        type: node.connectionType,
-        actionId: node.actionId,
-        ...(node.connectionId ? { connectionId: node.connectionId } : {}),
-        input: resolveTemplateValue(node.input, context) as Record<string, unknown>,
-      };
-    }
-    if (node.type === 'llm_agent' || node.type === 'forger_agent') {
-      const inputContext = this.buildAgentInputContext(context);
-      return {
-        inputContext,
-        renderedPrompt: renderTemplateString(node.prompt, context),
-      };
-    }
-    return { expression: node.expression };
-  }
-
-  /** Runs a node once for the given context, regardless of forEach. */
-  private async executeNodeOnce(
-    workflow: Workflow,
-    run: WorkflowRun,
-    node: WorkflowNode,
-    context: WorkflowRunContext,
-    active: ActiveRunState,
-    transcriptPath: string,
-  ): Promise<WorkflowNodeState> {
-    if (node.type === 'condition') {
-      const value = evaluateConditionExpression(node.expression, context);
-      return { status: 'succeeded', output: { result: value }, summary: value ? 'Condicion verdadera' : 'Condicion falsa' };
-    }
-    if (node.type === 'forger_tool') {
-      return await this.executeForgerToolNode(node, context);
-    }
-    if (node.type === 'connection') {
-      return await this.executeConnectionNode(node, context);
-    }
-    if (node.type === 'forger_agent') {
-      return await this.executeForgerAgentNode(workflow, run, node, context, active, transcriptPath);
-    }
-    return await this.executeLlmNode(workflow, run, node, context, active, transcriptPath);
-  }
-
-  /**
-   * Runs a node once per item of the referenced upstream list. Iterations
-   * are sequential, expose {{item.*}} and {{itemIndex}} to templates, stop
-   * at the first failure, and aggregate into { items, count }. Condition
-   * nodes also aggregate a top-level result (true when every item passed)
-   * so their branching edges keep working.
-   */
-  private async executeNodeForEach(
-    workflow: Workflow,
-    run: WorkflowRun,
-    node: WorkflowNode,
-    context: WorkflowRunContext,
-    active: ActiveRunState,
-    transcriptPath: string,
-  ): Promise<WorkflowNodeState> {
-    const listPath = (node.forEach as string).replace(/^\{\{\s*/, '').replace(/\s*\}\}$/, '');
-    const list = lookupContextPath(context, listPath);
-    if (!Array.isArray(list)) {
-      return { status: 'failed', error: `workflow_foreach_not_a_list:${listPath}` };
-    }
-    const items = list.slice(0, MAX_FOREACH_ITEMS);
-    const results: Array<Record<string, unknown>> = [];
-    for (const [index, item] of items.entries()) {
-      if (active.canceled) {
-        return { status: 'canceled', output: { items: results, count: results.length } };
-      }
-      // Each iteration exposes the current item and its index to templates
-      // and, for agent nodes, to the injected input context.
-      const iterationContext = { ...context, item, itemIndex: index } as unknown as WorkflowRunContext;
-      await appendTranscript(transcriptPath, 'meta', `[node:${node.id}] forEach item ${index + 1}/${items.length}`);
-      const result = await this.executeNodeOnce(workflow, run, node, iterationContext, active, transcriptPath);
-      if (result.status !== 'succeeded') {
-        return {
-          status: 'failed',
-          error: `workflow_foreach_item_failed:${index}:${result.error ?? 'workflow_node_failed'}`,
-          output: { items: results, count: results.length, failedIndex: index },
-        };
-      }
-      results.push(result.output ?? {});
-    }
-    return {
-      status: 'succeeded',
-      output: {
-        items: results,
-        count: results.length,
-        ...(node.type === 'condition'
-          ? { result: results.every((entry) => entry.result === true) }
-          : {}),
-      },
-      summary: `${results.length} ejecuciones`,
-    };
-  }
-
-  private async executeForgerToolNode(
-    node: WorkflowForgerToolNode,
-    context: WorkflowRunContext,
-  ): Promise<WorkflowNodeState> {
-    const executor = this.options.callForgerToolAction ?? this.options.callConnectorAction;
-    if (!executor) {
-      return { status: 'failed', error: 'workflow_forger_tools_unavailable' };
-    }
-    const input = resolveTemplateValue(node.input, context) as Record<string, unknown>;
-    const nodeRunInput = { toolId: node.toolId, actionId: node.toolId, input };
-    try {
-      const result = await executor(nodeRunInput);
-      if (!result.success) {
-        return {
-          status: 'failed',
-          input: nodeRunInput,
-          error: result.technicalCode ?? result.userMessage ?? 'workflow_forger_tool_failed',
-        };
-      }
-      const output = result.data && typeof result.data === 'object' && !Array.isArray(result.data)
-        ? result.data as Record<string, unknown>
-        : { value: result.data ?? null };
-      return { status: 'succeeded', input: nodeRunInput, output, summary: result.userMessage };
-    } catch (error) {
-      return {
-        status: 'failed',
-        input: nodeRunInput,
-        error: error instanceof Error ? error.message : 'workflow_forger_tool_failed',
-      };
-    }
-  }
-
-  private async executeConnectionNode(
-    node: WorkflowConnectionNode,
-    context: WorkflowRunContext,
-  ): Promise<WorkflowNodeState> {
-    if (!this.options.callConnectionAction) {
-      return { status: 'failed', error: 'workflow_connections_unavailable' };
-    }
-    const input = resolveTemplateValue(node.input, context) as Record<string, unknown>;
-    const nodeRunInput = {
-      type: node.connectionType,
-      actionId: node.actionId,
-      ...(node.connectionId ? { connectionId: node.connectionId } : {}),
-      input,
-    };
-    try {
-      const result = await this.options.callConnectionAction(nodeRunInput);
-      if (!result.success) {
-        return {
-          status: 'failed',
-          input: nodeRunInput,
-          error: result.technicalCode ?? result.userMessage ?? 'workflow_connection_failed',
-        };
-      }
-      const output = result.data && typeof result.data === 'object' && !Array.isArray(result.data)
-        ? result.data as Record<string, unknown>
-        : { value: result.data ?? null };
-      return { status: 'succeeded', input: nodeRunInput, output, summary: result.userMessage };
-    } catch (error) {
-      return {
-        status: 'failed',
-        input: nodeRunInput,
-        error: error instanceof Error ? error.message : 'workflow_connection_failed',
-      };
-    }
-  }
-
-  private async executeForgerAgentNode(
-    workflow: Workflow,
-    run: WorkflowRun,
-    node: WorkflowForgerAgentNode,
-    context: WorkflowRunContext,
-    active: ActiveRunState,
-    transcriptPath: string,
-  ): Promise<WorkflowNodeState> {
-    const agent = await (this.options.getPersonalAgent?.(node.agentId) ?? Promise.resolve(null));
-    if (!agent) {
-      return { status: 'failed', error: 'workflow_personal_agent_not_found' };
-    }
-    return await this.runAgentNode(workflow, run, node, context, active, transcriptPath, {
-      prompt: node.prompt,
-      runtime: agent.runtime,
-      appIds: agent.appIds,
-      toolIds: agent.toolIds,
-      connectionGrants: agent.connectionGrants,
-      permissionMode: agent.permissionMode,
-      networkAccess: agent.networkAccess,
-      instructions: [agent.purpose, agent.instructions].filter(Boolean).join('\n\n'),
-      outputSchema: node.outputSchema,
-    });
-  }
-
-  private async executeLlmNode(
-    workflow: Workflow,
-    run: WorkflowRun,
-    node: WorkflowLlmAgentNode,
-    context: WorkflowRunContext,
-    active: ActiveRunState,
-    transcriptPath: string,
-  ): Promise<WorkflowNodeState> {
-    return await this.runAgentNode(workflow, run, node, context, active, transcriptPath, {
-      prompt: node.prompt,
-      runtime: node.runtime,
-      appIds: node.appIds,
-      toolIds: node.toolIds,
-      connectionGrants: node.connectionGrants,
-      outputSchema: node.outputSchema,
-    });
-  }
-
-  private async runAgentNode(
-    workflow: Workflow,
-    run: WorkflowRun,
-    node: WorkflowNode,
-    context: WorkflowRunContext,
-    active: ActiveRunState,
-    transcriptPath: string,
-    config: {
-      prompt: string;
-      runtime?: AgentRuntime;
-      appIds: string[];
-      toolIds: string[];
-      connectionGrants: ConnectionSessionGrant[];
-      permissionMode?: AgentRuntime['permissionMode'];
-      networkAccess?: boolean;
-      instructions?: string;
-      outputSchema?: Record<string, unknown>;
-    },
-  ): Promise<WorkflowNodeState> {
-    const nodeRunKey = `${run.id}:${node.id}`;
-    let forgerMcpSession: { url: string; token: string } | null = null;
-    let appMcpListening = false;
-    const startedAt = new Date().toISOString();
-    let activity = createAgentRunActivity({
-      runId: nodeRunKey,
-      surface: 'workflow_node',
-      status: 'running',
-      startedAt,
-      updatedAt: startedAt,
-      sourceRef: {
-        workflowId: workflow.id,
-        workflowName: workflow.name,
-        nodeId: node.id,
-        nodeName: node.name,
-        title: node.name,
-        appId: config.appIds[0],
-      },
-    });
-    const emitActivity = (next: AgentRunActivity): void => {
-      activity = next;
-      this.options.onAgentRunActivity?.(activity);
-      void persistAgentRunActivity(this.options.metadataRoot, activity);
-    };
-    emitActivity(activity);
-    const inputContext = this.buildAgentInputContext(context);
-    let nodeRunInput: Record<string, unknown> = {
-      renderedPrompt: renderTemplateString(config.prompt, context),
-      inputContext,
-    };
-    try {
-      const memoryContext = await (this.options.buildMemoryContext?.(config.appIds) ?? Promise.resolve(''));
-      const basePrompt = this.buildNodePrompt(workflow, node, config, context, inputContext);
-      const prompt = [memoryContext, config.instructions, basePrompt].filter(Boolean).join('\n\n');
-      nodeRunInput = { renderedPrompt: prompt, inputContext };
-
-      const runtimeRequest = config.runtime ? { ...config.runtime, strict: true as const } : undefined;
-      const runtime = await this.options.getAgentRuntime(runtimeRequest);
-      await this.assertProviderReady(runtime);
-      const providerCliPath = await this.resolveProviderCliPath(runtime);
-      const pathEntries = await this.options.getCodexPathEntries();
-
-      this.nodeContexts.set(nodeRunKey, {
-        workflowId: workflow.id,
-        workflowName: workflow.name,
-        runId: run.id,
-        nodeId: node.id,
-        nodeName: node.name,
-        input: inputContext,
-        ...(config.outputSchema ? { outputSchema: config.outputSchema } : {}),
-      });
-      this.nodeCompletions.delete(nodeRunKey);
-
-      forgerMcpSession = this.options.createForgerMcpSession?.(
-        nodeRunKey,
-        config.appIds,
-        config.toolIds,
-        config.connectionGrants,
-      ) ?? null;
-      appMcpListening = true;
-      const appMcpServers = this.options.listenRequiredAppMcps
-        ? await this.listenRequiredAppMcps(config.appIds, nodeRunKey)
-        : await (this.options.listenAppMcps?.(config.appIds, nodeRunKey) ?? Promise.resolve([]));
-      const mcpServers: LlmAutomationMcpServerConfig[] = [
-        ...(forgerMcpSession
-          ? [{
-              name: 'forger',
-              url: forgerMcpSession.url,
-              token: forgerMcpSession.token,
-              tokenEnvVar: 'FORGER_MCP_TOKEN',
-              toolTimeoutSec: 600,
-            }]
-          : []),
-        ...appMcpServers,
-      ];
-      const networkAccess = config.networkAccess
-        ?? await (this.options.getAgentNetworkAccess?.(config.appIds) ?? Promise.resolve(false));
-
-      let assistantMessages: string[] = [];
-      const result = await runAgentCommand({ cliPath: providerCliPath, pathEntries }, {
-        runtime: config.permissionMode ? { ...runtime, permissionMode: config.permissionMode } : runtime,
-        cwd: this.options.forgerHomeRoot,
-        codexHome: this.options.codexHome,
-        providerProfilesRoot: this.options.providerProfilesRoot,
-        resolveAuthProfile: this.options.resolveAuthProfile,
-        prompt,
-        transcriptPath,
-        mcpServers,
-        networkAccess,
-        timeoutMs: node.timeoutMs ?? DEFAULT_NODE_TIMEOUT_MS,
-        onChild: (child) => {
-          active.children.add(child);
-          child.once('exit', () => active.children.delete(child));
-        },
-        onOutput: (stream, text) => {
-          const nextActivity = appendProviderActivity({
-            activity,
-            provider: runtime.provider,
-            stream,
-            text,
-          });
-          if (nextActivity.counts.total !== activity.counts.total) {
-            emitActivity({
-              ...nextActivity,
-              status: 'running',
-              updatedAt: new Date().toISOString(),
-            });
-          }
-        },
-        onAssistantMessages: (messages) => {
-          assistantMessages = messages;
-        },
-      });
-
-      const completion = this.nodeCompletions.get(nodeRunKey);
-      if (completion) {
-        if (completion.status === 'failed') {
-          emitActivity(finalizeAgentRunActivity(activity, 'failed', new Date().toISOString(), completion.reason));
-          return { status: 'failed', input: nodeRunInput, error: completion.reason ?? 'workflow_node_reported_failure' };
-        }
-        emitActivity(finalizeAgentRunActivity(activity, 'completed', new Date().toISOString()));
-        return {
-          status: 'succeeded',
-          input: nodeRunInput,
-          output: completion.output ?? {},
-          summary: completion.summary ?? assistantMessages[assistantMessages.length - 1]?.slice(0, 2_000),
-        };
-      }
-
-      const parsedMessages = runtime.provider === 'claude'
-        ? parseClaudeAssistantMessages(result.stdout, result.stderr)
-        : runtime.provider === 'antigravity'
-          ? [result.stdout.trim()].filter(Boolean)
-          : parseCodexAssistantMessages(result.stdout, result.stderr);
-      const lastMessage = parsedMessages[parsedMessages.length - 1]
-        ?? assistantMessages[assistantMessages.length - 1]
-        ?? '';
-      if (result.code !== 0) {
-        emitActivity(finalizeAgentRunActivity(
-          activity,
-          'failed',
-          new Date().toISOString(),
-          (result.stderr || result.stdout || 'workflow_agent_exec_failed').trim().slice(0, 2_000),
-        ));
-        return {
-          status: 'failed',
-          input: nodeRunInput,
-          error: (result.stderr || result.stdout || 'workflow_agent_exec_failed').trim().slice(0, 2_000),
-        };
-      }
-      // The agent finished without reporting through MCP: fall back to its
-      // final message so downstream nodes still receive usable output.
-      emitActivity(finalizeAgentRunActivity(activity, 'completed', new Date().toISOString()));
-      return {
-        status: 'succeeded',
-        input: nodeRunInput,
-        output: { text: lastMessage },
-        summary: lastMessage.slice(0, 2_000),
-      };
-    } catch (error) {
-      emitActivity(finalizeAgentRunActivity(
-        activity,
-        'failed',
-        new Date().toISOString(),
-        error instanceof Error ? error.message : 'workflow_agent_exec_failed',
-      ));
-      return {
-        status: 'failed',
-        input: nodeRunInput,
-        error: error instanceof Error ? error.message : 'workflow_agent_exec_failed',
-      };
-    } finally {
-      this.nodeContexts.delete(nodeRunKey);
-      this.nodeCompletions.delete(nodeRunKey);
-      if (forgerMcpSession) {
-        this.options.releaseForgerMcpSession?.(forgerMcpSession.token);
-      }
-      if (appMcpListening) {
-        this.options.releaseAppMcps?.(nodeRunKey);
-      }
-    }
-  }
-
-  private async listenRequiredAppMcps(
-    appIds: string[],
-    listenerId: string,
-  ): Promise<LlmAutomationMcpServerConfig[]> {
-    const result = await this.options.listenRequiredAppMcps!(appIds, listenerId);
-    if (result.failures.length > 0) {
-      throw new Error('workflow_required_app_mcp_unavailable');
-    }
-    return result.servers.map((server) => server.config);
-  }
-
-  private buildNodePrompt(
-    workflow: Workflow,
-    node: WorkflowNode,
-    config: { prompt: string; appIds: string[]; outputSchema?: Record<string, unknown> },
-    context: WorkflowRunContext,
-    inputContext: Record<string, unknown>,
-  ): string {
-    const installedApps = this.options.getInstalledApps();
-    const selected = installedApps.filter((appEntry) => config.appIds.includes(appEntry.id));
-    const appLines = selected.length > 0
-      ? selected.map((appEntry) =>
-          [
-            `- ${appEntry.name ?? appEntry.id} (id: ${appEntry.id})`,
-            `  Status: ${appEntry.status}`,
-            `  Description: ${appEntry.description ?? ''}`,
-            `  Relative workspace: ${path.posix.join('apps', appEntry.id)}`,
-          ].join('\n'),
-        )
-      : ['- No included apps.'];
-    const serializedInput = JSON.stringify(inputContext, null, 2);
-    const truncatedInput = serializedInput.length > INPUT_CONTEXT_MAX_CHARS
-      ? `${serializedInput.slice(0, INPUT_CONTEXT_MAX_CHARS)}\n... (truncated, call workflow_get_context for the full input)`
-      : serializedInput;
-    const outputSchemaSection = config.outputSchema
-      ? `## Expected Output Schema\n\n\`\`\`json\n${JSON.stringify(config.outputSchema, null, 2)}\n\`\`\``
-      : '';
-    return renderPromptFile('workflows/llm-node.md', {
-      workflowName: workflow.name,
-      nodeName: node.name,
-      nodeId: node.id,
-      forgerPartial: renderPromptFile('partials/forger.md', {}),
-      outputSchemaSection,
-      appLines: appLines.join('\n'),
-      inputContext: truncatedInput,
-      userInstruction: renderTemplateString(config.prompt, context),
-    });
-  }
-
-  private async assertProviderReady(runtime: AgentRuntime): Promise<void> {
-    if (runtime.provider === 'antigravity') {
-      if (!(await (this.options.getAntigravityAuthenticated?.() ?? Promise.resolve(false)))) {
-        throw new Error('antigravity_auth_missing');
-      }
-      return;
-    }
-    if (runtime.provider === 'claude') {
-      if (!(await this.options.getClaudeAuthenticated())) {
-        throw new Error('claude_auth_missing');
-      }
-      return;
-    }
-    if (!(await this.options.getCodexAuthenticated())) {
-      throw new Error('codex_auth_missing');
-    }
-  }
-
-  private async resolveProviderCliPath(runtime: AgentRuntime): Promise<string> {
-    if (runtime.provider === 'claude') {
-      const cliPath = await this.options.getClaudeCliPath();
-      if (!cliPath) {
-        throw new Error('claude_cli_missing');
-      }
-      return cliPath;
-    }
-    if (runtime.provider === 'antigravity') {
-      const cliPath = await (this.options.getAntigravityCliPath?.() ?? Promise.resolve(null));
-      if (!cliPath) {
-        throw new Error('antigravity_cli_missing');
-      }
-      return cliPath;
-    }
-    const cliPath = await this.options.getCodexCliPath();
-    if (!cliPath) {
-      throw new Error('codex_cli_missing');
-    }
-    return cliPath;
-  }
-
   // --- Scheduling ---------------------------------------------------------
 
   private async scheduleWorkflow(id: string): Promise<void> {
     this.clearTimer(id);
-    const workflow = this.workflows.get(id);
-    if (!workflow?.enabled || workflow.trigger.type !== 'scheduled' || !workflow.nextRunAt) {
+    if (this.disposed) return;
+    const current = this.workflows.get(id);
+    if (!current?.enabled || !current.appliedRevisionId || !current.nextRunAt) {
       return;
     }
-    const dueAt = Date.parse(workflow.nextRunAt);
-    if (!Number.isFinite(dueAt)) {
-      await this.skipMissedRun(id, 'workflow_invalid_schedule');
-      return;
-    }
+    const workflow = this.appliedWorkflowFor(current);
+    if (workflow.trigger.type !== 'scheduled') return;
+    const dueAt = Date.parse(current.nextRunAt);
+    if (!Number.isFinite(dueAt)) return await this.handleDueScheduledRun(id);
     const delay = dueAt - Date.now();
     if (delay <= 0) {
       await this.handleDueScheduledRun(id);
       return;
     }
     const timer = setTimeout(() => {
-      void this.scheduleWorkflow(id);
+      void this.scheduleWorkflow(id).catch(() => undefined);
     }, Math.min(delay, MAX_TIMEOUT_MS));
     this.timers.set(id, timer);
   }
 
   private async handleDueScheduledRun(id: string): Promise<void> {
-    const workflow = this.workflows.get(id);
-    /* c8 ignore next 3 -- scheduleWorkflow already filters paused or deleted workflows; this guards timer races. */
-    if (!workflow?.enabled || workflow.trigger.type !== 'scheduled' || !workflow.nextRunAt) {
-      return;
-    }
-    const dueAt = Date.parse(workflow.nextRunAt);
-    const latenessMs = Date.now() - dueAt;
-    const missedRunPolicy = workflow.trigger.missedRunPolicy ?? 'within_window';
-    if (latenessMs <= MISSED_RUN_GRACE_MS || missedRunPolicy === 'always') {
-      await this.advanceSchedule(id);
-      void this.startRun(id, 'scheduled');
-      return;
-    }
-    if (missedRunPolicy === 'within_window') {
-      const windowMs = (workflow.trigger.missedRunWindowMinutes
-        ?? defaultMissedRunWindowMinutes(workflow.trigger.frequency)) * 60_000;
-      if (latenessMs <= windowMs) {
-        await this.advanceSchedule(id);
-        void this.startRun(id, 'scheduled');
-        return;
+    const decision: { reschedule: boolean; revision?: WorkflowRevision } = await this.withWorkflowLock(id, async () => {
+      const current = this.workflows.get(id);
+      if (this.disposed || !current?.enabled || !current.appliedRevisionId || !current.nextRunAt) {
+        return { reschedule: false };
       }
+      const revision = this.requireAppliedRevision(current);
+      const workflow = workflowForExecution(current, revision);
+      if (workflow.trigger.type !== 'scheduled') return { reschedule: false };
+      const dueAt = Date.parse(current.nextRunAt);
+      if (!Number.isFinite(dueAt)) {
+        await this.skipMissedRunUnlocked(id, 'workflow_invalid_schedule');
+        return { reschedule: true };
+      }
+      const latenessMs = Date.now() - dueAt;
+      if (latenessMs < 0) return { reschedule: true };
+      const missedRunPolicy = workflow.trigger.missedRunPolicy ?? 'within_window';
+      if (latenessMs <= MISSED_RUN_GRACE_MS || missedRunPolicy === 'always') {
+        await this.advanceScheduleUnlocked(id);
+        return { reschedule: true, revision };
+      }
+      if (missedRunPolicy === 'within_window') {
+        const windowMs = (workflow.trigger.missedRunWindowMinutes
+          ?? defaultMissedRunWindowMinutes(workflow.trigger.frequency)) * 60_000;
+        if (latenessMs <= windowMs) {
+          await this.advanceScheduleUnlocked(id);
+          return { reschedule: true, revision };
+        }
+      }
+      await this.skipMissedRunUnlocked(id, 'workflow_missed_schedule');
+      return { reschedule: true };
+    });
+    if (decision.reschedule) await this.scheduleWorkflow(id);
+    if (decision.revision) {
+      void this.trackOperation(this.startRun(id, 'scheduled', decision.revision)).catch(() => undefined);
     }
-    await this.skipMissedRun(id, 'workflow_missed_schedule');
   }
 
-  private async advanceSchedule(id: string): Promise<void> {
-    const workflow = this.workflows.get(id);
-    /* c8 ignore next 3 -- only scheduled due handlers call this; guards deletion races. */
-    if (!workflow || workflow.trigger.type !== 'scheduled') {
+  /** Must run while holding the workflow lock. */
+  private async advanceScheduleUnlocked(id: string): Promise<void> {
+    const current = this.workflows.get(id);
+    if (!current?.appliedRevisionId) {
       return;
     }
+    const workflow = this.appliedWorkflowFor(current);
+    if (workflow.trigger.type !== 'scheduled') return;
     const next: Workflow = {
-      ...workflow,
-      nextRunAt: workflow.enabled ? computeNextRunAt(workflow.trigger.frequency) : null,
+      ...current,
+      nextRunAt: current.enabled ? computeNextRunAt(workflow.trigger.frequency) : null,
       updatedAt: new Date().toISOString(),
     };
     this.workflows.set(id, next);
     await this.saveWorkflows();
-    await this.scheduleWorkflow(id);
   }
 
-  private async skipMissedRun(id: string, error: string): Promise<void> {
-    const workflow = this.workflows.get(id);
-    /* c8 ignore next 3 -- only due handlers call this; guards deletion races. */
-    if (!workflow) {
+  /** Must run while holding the workflow lock. */
+  private async skipMissedRunUnlocked(id: string, error: string): Promise<void> {
+    const current = this.workflows.get(id);
+    if (!current) {
       return;
     }
-    const run = this.createRunRecord(workflow, 'scheduled', 'skipped', error);
+    const revision = this.requireAppliedRevision(current);
+    const workflow = workflowForExecution(current, revision);
+    const run = this.createRunRecord(workflow, revision, 'scheduled', 'skipped', error);
     await this.store.appendRunId(workflow.id, run.id);
-    await this.persistRun(workflow.id, run);
-    await this.advanceSchedule(id);
+    await this.persistRunUnlocked(workflow.id, run);
+    await this.advanceScheduleUnlocked(id);
   }
 
   // --- Persistence helpers --------------------------------------------------
 
   private createRunRecord(
     workflow: Workflow,
+    revision: WorkflowRevision,
     trigger: WorkflowRunTrigger,
     status: WorkflowRun['status'],
     error?: string,
+    retryOfRunId?: string,
   ): WorkflowRun {
     const now = new Date().toISOString();
     const nodeRuns: WorkflowNodeRun[] = workflow.nodes.map((node) => ({
@@ -1282,31 +902,54 @@ export class WorkflowManager {
       ...(status === 'skipped' ? { finishedAt: now } : {}),
       ...(error ? { error } : {}),
       nodeRuns,
+      workflowRevision: revision.revision,
+      workflowRevisionId: revision.id,
+      definitionHash: revision.definitionHash,
+      ...(retryOfRunId ? { retryOfRunId } : {}),
+      safeToRetry: false,
       transcript: '',
     };
   }
 
   private async persistRun(workflowId: string, run: WorkflowRun): Promise<void> {
-    await this.store.writeRun(run);
+    await this.withWorkflowLock(workflowId, async () => {
+      await this.persistRunUnlocked(workflowId, run);
+    });
+  }
+
+  private async persistRunUnlocked(workflowId: string, run: WorkflowRun): Promise<void> {
     const workflow = this.workflows.get(workflowId);
     if (!workflow) {
+      await this.store.writeRun(run);
       return;
     }
+    const finishingActiveRun = this.activeRuns.has(run.id)
+      && ['succeeded', 'completed_with_issues', 'failed', 'canceled'].includes(run.status);
+    if (!finishingActiveRun) await this.store.writeRun(run);
     const next: Workflow = {
       ...workflow,
+      ...(finishingActiveRun ? { running: false } : {}),
       lastRun: toWorkflowRunSummary(run),
       updatedAt: new Date().toISOString(),
     };
     this.workflows.set(workflowId, next);
     await this.saveWorkflows();
+    if (finishingActiveRun) await this.store.writeRun(run);
     this.options.onWorkflowUpdated({ workflow: next, run: toWorkflowRunSummary(run) });
   }
 
   private async markWorkflowRunning(id: string, running: boolean): Promise<void> {
+    await this.withWorkflowLock(id, async () => {
+      await this.markWorkflowRunningUnlocked(id, running);
+    });
+  }
+
+  private async markWorkflowRunningUnlocked(id: string, running: boolean): Promise<void> {
     const workflow = this.workflows.get(id);
     if (!workflow) {
       return;
     }
+    if (workflow.running === running) return;
     const next: Workflow = { ...workflow, running, updatedAt: new Date().toISOString() };
     this.workflows.set(id, next);
     await this.saveWorkflows();
@@ -1373,6 +1016,123 @@ export class WorkflowManager {
     return workflow;
   }
 
+  private assertNotDisposed(): void {
+    if (this.disposed) throw new Error('workflow_manager_disposed');
+  }
+
+  private async withWorkflowLock<T>(workflowId: string, operation: () => Promise<T>): Promise<T> {
+    const previous = this.workflowOperationTails.get(workflowId) ?? Promise.resolve();
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => { release = resolve; });
+    const tail = previous.then(() => current, () => current);
+    this.workflowOperationTails.set(workflowId, tail);
+    await previous.catch(() => undefined);
+    try {
+      return await operation();
+    } finally {
+      release();
+      if (this.workflowOperationTails.get(workflowId) === tail) {
+        this.workflowOperationTails.delete(workflowId);
+      }
+    }
+  }
+
+  private trackOperation<T>(operation: Promise<T>): Promise<T> {
+    this.inFlightOperations.add(operation);
+    void operation.finally(() => this.inFlightOperations.delete(operation)).catch(() => undefined);
+    return operation;
+  }
+
+  private launchRunTask(run: WorkflowRun, execute: () => Promise<void>): void {
+    const task = execute();
+    this.runTasks.set(run.id, task);
+    void task.finally(() => this.runTasks.delete(run.id)).catch(() => undefined);
+  }
+
+  private async cancelPreparedRun(workflowId: string, run: WorkflowRun): Promise<void> {
+    run.status = 'canceled';
+    run.finishedAt = new Date().toISOString();
+    for (const nodeRun of run.nodeRuns) {
+      if (!['succeeded', 'failed', 'skipped'].includes(nodeRun.status)) nodeRun.status = 'canceled';
+    }
+    await this.withWorkflowLock(workflowId, async () => {
+      const workflow = this.workflows.get(workflowId);
+      if (workflow) this.workflows.set(workflowId, { ...workflow, running: false });
+      await this.persistRunUnlocked(workflowId, run);
+    });
+  }
+
+  private cancelActiveRun(active: ActiveRunState): void {
+    active.canceled = true;
+    for (const resolver of active.approvalResolvers.values()) resolver(false);
+    active.approvalResolvers.clear();
+    for (const controller of active.actionAbortControllers) controller.abort();
+    for (const child of active.children) this.killChild(child);
+  }
+
+  private assertWorkflowReadyToApply(workflow: Workflow, input: WorkflowApplyInput): void {
+    this.assertExpectedRevision(workflow, input.expectedRevision);
+    const definitionHash = workflowDefinitionHash(workflow);
+    if (!workflow.review || workflow.review.status !== 'ready') {
+      throw new Error('workflow_review_required');
+    }
+    if (workflow.review.definitionHash !== input.definitionHash || definitionHash !== input.definitionHash) {
+      throw new Error('workflow_review_stale');
+    }
+  }
+
+  private requireRevisions(id: string): WorkflowRevision[] {
+    const revisions = this.revisions.get(id);
+    if (!revisions) throw new Error('workflow_revision_not_found');
+    return revisions;
+  }
+
+  private appliedRevisionFor(workflow: Workflow): WorkflowRevision | undefined {
+    if (!workflow.appliedRevisionId) return undefined;
+    return this.revisions.get(workflow.id)?.find((revision) => revision.id === workflow.appliedRevisionId);
+  }
+
+  private requireAppliedRevision(workflow: Workflow): WorkflowRevision {
+    const revision = this.appliedRevisionFor(workflow);
+    if (!revision) throw new Error('workflow_applied_revision_required');
+    return revision;
+  }
+
+  private requireRunnableRevision(workflow: Workflow): WorkflowRevision {
+    const revision = this.appliedRevisionFor(workflow)
+      ?? this.requireRevisions(workflow.id).find((entry) => entry.id === workflow.revisionId);
+    if (!revision) throw new Error('workflow_revision_not_found');
+    return revision;
+  }
+
+  private requireRequestedRevision(workflowId: string, requested: WorkflowRevision): WorkflowRevision {
+    const revision = this.requireRevisions(workflowId).find((entry) => entry.id === requested.id);
+    if (!revision || revision.definitionHash !== requested.definitionHash) {
+      throw new Error('workflow_run_revision_unavailable');
+    }
+    return revision;
+  }
+
+  private appliedWorkflowFor(workflow: Workflow): Workflow {
+    return workflowForExecution(workflow, this.requireAppliedRevision(workflow));
+  }
+
+  private workflowForRun(run: WorkflowRun): Workflow {
+    const current = this.requireWorkflow(run.workflowId);
+    const revision = this.requireRevisions(run.workflowId)
+      .find((entry) => entry.id === run.workflowRevisionId);
+    if (!revision || revision.definitionHash !== run.definitionHash) {
+      throw new Error('workflow_run_revision_unavailable');
+    }
+    return workflowForExecution(current, revision);
+  }
+
+  private assertExpectedRevision(workflow: Workflow, expectedRevision: number): void {
+    if (!Number.isInteger(expectedRevision) || expectedRevision !== workflow.revision) {
+      throw new Error('workflow_revision_conflict');
+    }
+  }
+
   private normalizeWorkflow(entry: Workflow): Workflow | null {
     if (!entry || typeof entry !== 'object' || typeof entry.id !== 'string' || !entry.id) {
       return null;
@@ -1383,8 +1143,11 @@ export class WorkflowManager {
         return null;
       }
       validateWorkflowGraph(sanitized.nodes, sanitized.edges);
-      const enabled = Boolean(entry.enabled);
-      return {
+      const legacy = !Number.isInteger(entry.revision) || entry.revision < 1 || typeof entry.revisionId !== 'string';
+      const revision = legacy ? 1 : entry.revision;
+      const revisionId = legacy ? randomUUID() : entry.revisionId;
+      const enabled = Boolean(entry.enabled) && (!legacy || sanitized.trigger.type === 'scheduled');
+      const normalized: Workflow = {
         id: entry.id,
         name: sanitized.name,
         ...(sanitized.description ? { description: sanitized.description } : {}),
@@ -1393,13 +1156,37 @@ export class WorkflowManager {
         edges: sanitized.edges,
         enabled,
         running: false,
-        nextRunAt: enabled && sanitized.trigger.type === 'scheduled'
-          ? entry.nextRunAt ?? computeNextRunAt(sanitized.trigger.frequency)
+        nextRunAt: enabled
+          ? entry.nextRunAt ?? (sanitized.trigger.type === 'scheduled'
+              ? computeNextRunAt(sanitized.trigger.frequency)
+              : null)
           : null,
         createdAt: entry.createdAt || new Date().toISOString(),
         updatedAt: entry.updatedAt || new Date().toISOString(),
         ...(entry.lastRun ? { lastRun: entry.lastRun } : {}),
+        revision,
+        revisionId,
+        ...(legacy || Number.isInteger(entry.appliedRevision)
+          ? { appliedRevision: legacy ? 1 : entry.appliedRevision }
+          : {}),
+        ...(legacy || (typeof entry.appliedRevisionId === 'string' && entry.appliedRevisionId)
+          ? { appliedRevisionId: legacy ? revisionId : entry.appliedRevisionId }
+          : {}),
       };
+      if (
+        !legacy
+        && entry.review
+        && (entry.review.status === 'ready' || entry.review.status === 'blocked')
+        && Array.isArray(entry.review.issues)
+        && entry.review.definitionHash === workflowDefinitionHash(normalized)
+      ) {
+        normalized.review = {
+          status: entry.review.status,
+          issues: entry.review.issues.filter((issue): issue is string => typeof issue === 'string'),
+          definitionHash: entry.review.definitionHash,
+        };
+      }
+      return normalized;
     } catch {
       return null;
     }

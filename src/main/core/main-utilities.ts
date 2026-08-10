@@ -13,6 +13,7 @@ import type { AGENT_TOOL_DEFINITIONS, AGENT_TOOL_IDS } from './agent-tool-packag
 import type { IPC_CHANNELS } from '../../shared/ipc';
 import { withAppExecutionState } from '../../shared/app-execution-state';
 import { isConnectionActionId } from '../../shared/connection-catalog';
+import { sanitizeReportPayload } from '../../shared/report-sanitizer';
 import type {
   AgentToolApprovalSettings,
   AgentToolId,
@@ -271,6 +272,10 @@ const resolveAppIdForWebContents = (webContentsId: number): string | null => {
 
 const appendInstallLog = async (event: string, payload: Record<string, unknown> = {}): Promise<void> => {
   const logPath = getInstallLogPath();
+  const safePayload = sanitizeReportPayload(payload, {
+    roots: [{ alias: 'FORGER_METADATA', path: getForgerMetadataRoot() }],
+    maxStringLength: MAX_INSTALL_LOG_FIELD_LENGTH,
+  });
   const entry = {
     timestamp: new Date().toISOString(),
     event,
@@ -278,12 +283,13 @@ const appendInstallLog = async (event: string, payload: Record<string, unknown> 
     arch: process.arch,
     packaged: app.isPackaged,
     dev: isDev,
-    ...payload,
+    ...safePayload,
   };
 
   try {
-    await fs.mkdir(path.dirname(logPath), { recursive: true });
-    await fs.appendFile(logPath, `${JSON.stringify(entry)}\n`, 'utf8');
+    await fs.mkdir(path.dirname(logPath), { recursive: true, mode: 0o700 });
+    await fs.appendFile(logPath, `${JSON.stringify(entry)}\n`, { encoding: 'utf8', mode: 0o600 });
+    await fs.chmod(logPath, 0o600).catch(() => undefined);
   } catch (error) {
     console.warn('Failed to write Forger install log', error);
   }
@@ -292,7 +298,7 @@ const appendInstallLog = async (event: string, payload: Record<string, unknown> 
     level: event.includes('failed') || event.includes('error') ? 'error' : 'info',
     service: serviceForLogEvent(event),
     event,
-    context: payload,
+    context: safePayload,
   });
 };
 

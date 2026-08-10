@@ -178,7 +178,7 @@ export const computeRunOutcome = (
   nodes: WorkflowNode[],
   edges: WorkflowEdge[],
   states: Record<string, WorkflowNodeState>,
-): { status: 'succeeded' | 'failed' | 'canceled'; error?: string } => {
+): { status: 'succeeded' | 'completed_with_issues' | 'failed' | 'canceled'; error?: string } => {
   const canceled = nodes.find((node) => states[node.id]?.status === 'canceled');
   if (canceled) {
     return { status: 'canceled' };
@@ -191,6 +191,12 @@ export const computeRunOutcome = (
       status: 'failed',
       error: states[unhandledFailure.id]?.error ?? `workflow_node_failed:${unhandledFailure.id}`,
     };
+  }
+  const handledFailure = nodes.some(
+    (node) => states[node.id]?.status === 'failed' && isFailureHandled(node.id, edges),
+  );
+  if (handledFailure) {
+    return { status: 'completed_with_issues' };
   }
   return { status: 'succeeded' };
 };

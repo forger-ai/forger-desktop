@@ -8,12 +8,16 @@ import type {
   PersonalAgentGrantOptionConnection,
 } from '@shared/types';
 import type { AppDictionary } from '@renderer/i18n';
-import { WorkflowEditor, type ProviderOption } from './WorkflowEditor';
+import { WorkflowEditor, type ProviderOption, type WorkflowAppActionOption } from './WorkflowEditor';
 import { WorkflowParamsForm } from './WorkflowParamsForm';
 import type { WorkflowDraft } from './workflow-draft';
 
 export interface WorkflowGraphData {
   apps: AppSummary[];
+  appActions: WorkflowAppActionOption[];
+  loadingAppActionAppIds: ReadonlySet<string>;
+  loadedAppActionAppIds: ReadonlySet<string>;
+  onRequestAppActions: (appId: string) => void;
   agents: PersonalAgent[];
   toolPackages: AgentToolPackageDefinition[];
   officialTools: OfficialToolSummary[];
@@ -43,7 +47,7 @@ export function WorkflowEditorPage({ t, draft, onDraftChange, data, busy, banner
           <IconButton size="small" onClick={onBack}><ArrowBackRounded /></IconButton>
         </Tooltip>
         <Typography variant="h5" sx={{ flex: 1 }}>{copy.createTitle}</Typography>
-        <Button variant="contained" disabled={busy} onClick={onSave}>{copy.save}</Button>
+        <Button variant="contained" disabled={busy} onClick={onSave}>{copy.saveDraft}</Button>
       </Stack>
       {banner ? <Alert severity={banner.severity} onClose={onClearBanner} sx={{ flexShrink: 0 }}>{banner.message}</Alert> : null}
       <Paper variant="outlined" sx={{ p: 2, borderRadius: 1, flexShrink: 0 }}>
@@ -54,6 +58,10 @@ export function WorkflowEditorPage({ t, draft, onDraftChange, data, busy, banner
           draft={draft}
           onDraftChange={onDraftChange}
           apps={data.apps}
+          appActions={data.appActions}
+          loadingAppActionAppIds={data.loadingAppActionAppIds}
+          loadedAppActionAppIds={data.loadedAppActionAppIds}
+          onRequestAppActions={data.onRequestAppActions}
           agents={data.agents}
           toolPackages={data.toolPackages}
           officialTools={data.officialTools}

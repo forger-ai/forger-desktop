@@ -158,7 +158,7 @@ test('resolveNodeReadiness starts roots, waits for sources and skips dead branch
   assert.deepEqual(readiness, { ready: [], skipped: [] });
 });
 
-test('computeRunOutcome fails on unhandled node failure and succeeds when handled', () => {
+test('computeRunOutcome fails on unhandled node failure and reports handled incidents', () => {
   const nodes = [llmNode('a'), llmNode('b')];
   const handledEdges = [{ from: 'a', to: 'b', condition: 'error' }];
   assert.equal(isFailureHandled('a', handledEdges), true);
@@ -167,7 +167,7 @@ test('computeRunOutcome fails on unhandled node failure and succeeds when handle
       a: { status: 'failed', error: 'boom' },
       b: { status: 'succeeded' },
     }).status,
-    'succeeded',
+    'completed_with_issues',
   );
   const outcome = computeRunOutcome(nodes, [], {
     a: { status: 'failed', error: 'boom' },

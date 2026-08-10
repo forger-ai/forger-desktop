@@ -3,6 +3,7 @@ import type { AppAgentConversationManager } from '../app-agent-conversation-mana
 import type { AppAgentTaskManager } from '../app-agent-task-manager';
 import type { AutomationManager } from '../automation-manager';
 import type { WorkflowManager } from '../workflow-manager';
+import type { WorkflowAppActionRuntime } from '../app-action-runtime';
 import type { DesktopErrorReporter } from '../error-reporting';
 import type { ManifestAgentPromptKind } from '../manifest-agent-prompts';
 import type {
@@ -23,7 +24,9 @@ import type {
   AutomationUpsertInput,
   ClaudeEffort,
   CodexReasoningEffort,
+  WorkflowApplyInput,
   WorkflowApproveNodeInput,
+  WorkflowRestoreRevisionInput,
   WorkflowUpsertInput,
 } from '../../shared/types';
 import type { AppRegistry } from '../core/main-process-types';
@@ -50,6 +53,8 @@ export interface AgentIpcDeps {
   automationManager: AutomationManager | null;
   workflowManager: WorkflowManager | null;
   getWorkflowManager?: () => WorkflowManager | null;
+  workflowAppActionRuntime: WorkflowAppActionRuntime | null;
+  getWorkflowAppActionRuntime?: () => WorkflowAppActionRuntime | null;
   desktopErrorReporter: DesktopErrorReporter | null;
   ipcMain: IpcMain;
   normalizeAgentProvider: (value: unknown) => AgentRuntime['provider'] | undefined;
@@ -70,6 +75,8 @@ export interface AgentIpcDeps {
 export const registerAgentIpcHandlers = (deps: AgentIpcDeps): void => {
   const { BUILT_IN_CLAUDE_EFFORT, BUILT_IN_CODEX_REASONING, BetterSqlite3, IPC_CHANNELS, appAgentConversationManager, appAgentTaskManager, automationManager, workflowManager, desktopErrorReporter, ipcMain, normalizeAgentProvider, normalizeClaudeEffort, normalizeCodexReasoningEffort, registry, renderManifestAgentPrompt, resolveAppDbPath, resolveAppIdForWebContents, resolveInstalledAgents } = deps;
   const getWorkflowManager = deps.getWorkflowManager ?? (() => workflowManager);
+  const getWorkflowAppActionRuntime = deps.getWorkflowAppActionRuntime
+    ?? (() => deps.workflowAppActionRuntime);
   const requireWorkflowManager = (): WorkflowManager => {
     const manager = getWorkflowManager();
     if (!manager) throw new Error('workflow_manager_unavailable');
@@ -81,6 +88,53 @@ export const registerAgentIpcHandlers = (deps: AgentIpcDeps): void => {
       ? 'workflow_feature_disabled'
       : 'workflow_manager_unavailable',
   });
+  const requireWorkflowId = (value: unknown): string => {
+    const id = typeof value === 'string' ? value.trim() : '';
+    if (!id || id.length > 160) throw new Error('workflow_id_required');
+    return id;
+  };
+  const requireExpectedRevision = (value: unknown): number => {
+    if (!Number.isSafeInteger(value) || Number(value) < 1) {
+      throw new Error('workflow_expected_revision_required');
+    }
+    return Number(value);
+  };
+  const normalizeWorkflowApplyInput = (value: unknown): WorkflowApplyInput => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new Error('workflow_apply_input_required');
+    }
+    const record = value as Record<string, unknown>;
+    const definitionHash = typeof record.definitionHash === 'string' ? record.definitionHash.trim() : '';
+    if (!definitionHash || definitionHash.length > 128) {
+      throw new Error('workflow_definition_hash_required');
+    }
+    return { definitionHash, expectedRevision: requireExpectedRevision(record.expectedRevision) };
+  };
+  const normalizeWorkflowRestoreInput = (value: unknown): WorkflowRestoreRevisionInput => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new Error('workflow_restore_input_required');
+    }
+    const record = value as Record<string, unknown>;
+    const revisionId = typeof record.revisionId === 'string' ? record.revisionId.trim() : '';
+    if (!revisionId || revisionId.length > 160) {
+      throw new Error('workflow_revision_id_required');
+    }
+    return { revisionId, expectedRevision: requireExpectedRevision(record.expectedRevision) };
+  };
+  const normalizeWorkflowApprovalInput = (value: unknown): WorkflowApproveNodeInput => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new Error('workflow_approval_input_invalid');
+    }
+    const record = value as Record<string, unknown>;
+    if (typeof record.approved !== 'boolean') {
+      throw new Error('workflow_approval_input_invalid');
+    }
+    return {
+      runId: requireWorkflowId(record.runId),
+      nodeId: requireWorkflowId(record.nodeId),
+      approved: record.approved,
+    };
+  };
   const handleAppAgentTaskStart = async (event: IpcMainInvokeEvent, input: AppCodexTaskStartInput) => {
     const appId = resolveAppIdForWebContents(event.sender.id);
     if (!appId) {
@@ -557,8 +611,32 @@ export const registerAgentIpcHandlers = (deps: AgentIpcDeps): void => {
   ipcMain.handle(IPC_CHANNELS.workflowsList, async () => {
     return requireWorkflowManager().list();
   });
+  ipcMain.handle(IPC_CHANNELS.workflowsListAppActions, async (_event, appId: string) => {
+    requireWorkflowManager();
+    const runtime = getWorkflowAppActionRuntime();
+    if (!runtime) throw new Error('workflow_app_actions_unavailable');
+    const normalizedAppId = typeof appId === 'string' ? appId.trim() : '';
+    if (!normalizedAppId) throw new Error('workflow_app_id_required');
+    return await runtime.listAppActions(normalizedAppId);
+  });
   ipcMain.handle(IPC_CHANNELS.workflowsUpsert, async (_event, input: WorkflowUpsertInput) => {
     return await requireWorkflowManager().upsert(input);
+  });
+  ipcMain.handle(IPC_CHANNELS.workflowsReview, async (_event, id: unknown) => {
+    return await requireWorkflowManager().review(requireWorkflowId(id));
+  });
+  ipcMain.handle(IPC_CHANNELS.workflowsApply, async (_event, id: unknown, input: unknown) => {
+    return await requireWorkflowManager().apply(requireWorkflowId(id), normalizeWorkflowApplyInput(input));
+  });
+  ipcMain.handle(IPC_CHANNELS.workflowsListRevisions, async (_event, id: unknown) => {
+    const revisions = await requireWorkflowManager().listRevisions(requireWorkflowId(id));
+    return revisions.map(({ workflow: _workflow, ...summary }) => summary);
+  });
+  ipcMain.handle(IPC_CHANNELS.workflowsRestoreRevision, async (_event, id: unknown, input: unknown) => {
+    return await requireWorkflowManager().restoreRevision(
+      requireWorkflowId(id),
+      normalizeWorkflowRestoreInput(input),
+    );
   });
   ipcMain.handle(IPC_CHANNELS.workflowsDelete, async (_event, id: string) => {
     try {
@@ -567,8 +645,9 @@ export const registerAgentIpcHandlers = (deps: AgentIpcDeps): void => {
       return workflowUnavailableResult(error);
     }
   });
-  ipcMain.handle(IPC_CHANNELS.workflowsSetEnabled, async (_event, id: string, enabled: boolean) => {
-    return await requireWorkflowManager().setEnabled(id, Boolean(enabled));
+  ipcMain.handle(IPC_CHANNELS.workflowsSetEnabled, async (_event, id: unknown, enabled: unknown) => {
+    if (typeof enabled !== 'boolean') throw new Error('workflow_enabled_required');
+    return await requireWorkflowManager().setEnabled(requireWorkflowId(id), enabled);
   });
   ipcMain.handle(IPC_CHANNELS.workflowsRunNow, async (_event, id: string) => {
     return await requireWorkflowManager().runNow(id);
@@ -583,13 +662,10 @@ export const registerAgentIpcHandlers = (deps: AgentIpcDeps): void => {
       return workflowUnavailableResult(error);
     }
   });
-  ipcMain.handle(IPC_CHANNELS.workflowsApproveNode, async (_event, input: WorkflowApproveNodeInput) => {
+  ipcMain.handle(IPC_CHANNELS.workflowsApproveNode, async (_event, input: unknown) => {
+    const normalized = normalizeWorkflowApprovalInput(input);
     try {
-      return await requireWorkflowManager().approveNode({
-        runId: String(input?.runId ?? ''),
-        nodeId: String(input?.nodeId ?? ''),
-        approved: Boolean(input?.approved),
-      });
+      return await requireWorkflowManager().approveNode(normalized);
     } catch (error) {
       return workflowUnavailableResult(error);
     }
@@ -599,6 +675,9 @@ export const registerAgentIpcHandlers = (deps: AgentIpcDeps): void => {
   });
   ipcMain.handle(IPC_CHANNELS.workflowsGetRun, async (_event, runId: string) => {
     return await requireWorkflowManager().getRun(runId);
+  });
+  ipcMain.handle(IPC_CHANNELS.workflowsRetryRun, async (_event, runId: unknown) => {
+    return await requireWorkflowManager().retryRun(requireWorkflowId(runId));
   });
 
 };

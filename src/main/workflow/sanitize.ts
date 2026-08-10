@@ -11,8 +11,14 @@ import type {
   WorkflowTrigger,
   WorkflowUpsertInput,
 } from '../../shared/types';
+import type { WorkflowAppActionEffect, WorkflowAppActionRisk } from '../../shared/types/workflows';
 import { normalizeAgentRuntime } from '../../shared/types';
 import { connectionTypeForActionId, isBuiltInConnectionType } from '../../shared/connection-catalog';
+import { validateWorkflowStructuredValueLimits } from './output-schema';
+import {
+  assertAuthenticWorkflowAppAction,
+  workflowAppActionContractValue,
+} from './revisions';
 
 const NODE_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/;
 const MAX_NAME_LENGTH = 120;
@@ -29,6 +35,20 @@ const CONDITION_OPERATORS: ReadonlySet<WorkflowConditionOperator> = new Set([
   'less_than',
   'is_empty',
   'is_not_empty',
+]);
+
+const APP_ACTION_EFFECTS: ReadonlySet<WorkflowAppActionEffect> = new Set([
+  'read',
+  'write',
+  'external',
+  'destructive',
+  'unknown',
+]);
+
+const APP_ACTION_RISKS: ReadonlySet<WorkflowAppActionRisk> = new Set([
+  'low',
+  'medium',
+  'high',
 ]);
 
 export const sanitizeText = (value: unknown, maxLength: number): string =>
@@ -189,6 +209,63 @@ export const sanitizeWorkflowNode = (
     };
   }
 
+  if (record.type === 'app_action') {
+    const appId = sanitizeNodeId(record.appId);
+    const toolName = sanitizeText(record.toolName, 160);
+    const actionRecord = record.action && typeof record.action === 'object' && !Array.isArray(record.action)
+      ? record.action as Record<string, unknown>
+      : null;
+    const title = sanitizeText(actionRecord?.title, MAX_NAME_LENGTH);
+    const description = sanitizeText(actionRecord?.description, 500);
+    const inputSchema = sanitizeOutputSchema(actionRecord?.inputSchema);
+    const outputSchema = sanitizeOutputSchema(actionRecord?.outputSchema);
+    const effect = actionRecord?.effect as WorkflowAppActionEffect;
+    const risk = actionRecord?.risk as WorkflowAppActionRisk;
+    const contractHash = sanitizeText(actionRecord?.contractHash, 256);
+    if (
+      !appId
+      || !toolName
+      || !title
+      || !inputSchema
+      || !outputSchema
+      || !APP_ACTION_EFFECTS.has(effect)
+      || !APP_ACTION_RISKS.has(risk)
+      || typeof actionRecord?.idempotent !== 'boolean'
+      || !contractHash
+    ) {
+      return null;
+    }
+    const input = record.input && typeof record.input === 'object' && !Array.isArray(record.input)
+      ? record.input as Record<string, unknown>
+      : {};
+    const action = {
+      title,
+      ...(description ? { description } : {}),
+      inputSchema,
+      outputSchema,
+      effect,
+      risk,
+      idempotent: actionRecord.idempotent,
+      contractHash,
+    };
+    assertAuthenticWorkflowAppAction(toolName, action);
+    if (
+      validateWorkflowStructuredValueLimits(input).length > 0
+      || validateWorkflowStructuredValueLimits(workflowAppActionContractValue(toolName, action)).length > 0
+    ) {
+      throw new Error('workflow_app_action_contract_limits_exceeded');
+    }
+    return {
+      ...base,
+      type: 'app_action',
+      appId,
+      toolName,
+      input,
+      action,
+      ...(record.requiresApproval === false ? { requiresApproval: false } : {}),
+    };
+  }
+
   if (record.type === 'forger_tool') {
     const toolId = sanitizeText(record.toolId, 160);
     if (!toolId || (validToolIds && !validToolIds.has(toolId))) {
@@ -329,22 +406,38 @@ export const sanitizeWorkflowTrigger = (value: unknown): WorkflowTrigger => {
 };
 
 export const sanitizeWorkflowUpsertInput = (
-  input: WorkflowUpsertInput,
+  input: unknown,
   validToolIds?: ReadonlySet<string>,
-): Omit<WorkflowUpsertInput, 'id'> => {
-  const nodes = Array.isArray(input.nodes)
-    ? input.nodes
-        .map((node) => sanitizeWorkflowNode(node, validToolIds))
-        .filter((node): node is WorkflowNode => node !== null)
+  options: { rejectInvalidNodes?: boolean } = {},
+): WorkflowUpsertInput => {
+  const record = input && typeof input === 'object' && !Array.isArray(input)
+    ? input as Record<string, unknown>
+    : {};
+  const parsedNodes = Array.isArray(record.nodes)
+    ? record.nodes.map((node) => sanitizeWorkflowNode(node, validToolIds))
     : [];
+  if (options.rejectInvalidNodes && parsedNodes.some((node) => node === null)) {
+    throw new Error('workflow_node_invalid');
+  }
+  const nodes = parsedNodes.filter((node): node is WorkflowNode => node !== null);
   const nodeIds = new Set(nodes.map((node) => node.id));
-  const description = sanitizeText(input.description, 500);
+  const hasId = Object.prototype.hasOwnProperty.call(record, 'id');
+  const id = sanitizeNodeId(record.id);
+  const description = sanitizeText(record.description, 500);
+  const hasExpectedRevision = Object.prototype.hasOwnProperty.call(record, 'expectedRevision');
+  const expectedRevision = typeof record.expectedRevision === 'number'
+    && Number.isInteger(record.expectedRevision)
+    && record.expectedRevision > 0
+    ? record.expectedRevision
+    : hasExpectedRevision ? 0 : undefined;
   return {
-    name: sanitizeText(input.name, MAX_NAME_LENGTH),
+    ...(hasId ? { id } : {}),
+    name: sanitizeText(record.name, MAX_NAME_LENGTH),
     ...(description ? { description } : {}),
-    trigger: sanitizeWorkflowTrigger(input.trigger),
+    trigger: sanitizeWorkflowTrigger(record.trigger),
     nodes,
-    edges: sanitizeWorkflowEdges(input.edges, nodeIds),
-    ...(typeof input.enabled === 'boolean' ? { enabled: input.enabled } : {}),
+    edges: sanitizeWorkflowEdges(record.edges, nodeIds),
+    ...(typeof record.enabled === 'boolean' ? { enabled: record.enabled } : {}),
+    ...(expectedRevision !== undefined ? { expectedRevision } : {}),
   };
 };

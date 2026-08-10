@@ -456,7 +456,15 @@ test('future schedules arm a timer and pausing clears it', async () => {
       edges: [],
       enabled: true,
     });
-    assert.ok(Date.parse(workflow.nextRunAt) > Date.now());
+    assert.equal(workflow.enabled, false);
+    assert.equal(workflow.nextRunAt, null);
+    const review = await harness.manager.review(workflow.id);
+    await harness.manager.apply(workflow.id, {
+      definitionHash: review.definitionHash,
+      expectedRevision: workflow.revision,
+    });
+    const activated = await harness.manager.setEnabled(workflow.id, true);
+    assert.ok(Date.parse(activated.nextRunAt) > Date.now());
     const paused = await harness.manager.setEnabled(workflow.id, false);
     assert.equal(paused.nextRunAt, null);
     const resumed = await harness.manager.setEnabled(workflow.id, true);
@@ -834,7 +842,7 @@ test('a due timer fires and runs the scheduled workflow', async () => {
     const harness = await createManager({ metadataRoot });
     const finished = await waitFor(async () => {
       const current = harness.manager.get('wf-timer');
-      return current?.lastRun?.status === 'succeeded' ? current : null;
+      return current?.lastRun?.status === 'succeeded' && current.running === false ? current : null;
     });
     assert.equal(finished.lastRun.status, 'succeeded');
     await harness.cleanup();
