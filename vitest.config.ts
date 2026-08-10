@@ -12,6 +12,9 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./test/renderer/setup.ts'],
     include: ['test/renderer/**/*.test.{ts,tsx}'],
+    // Interaction-heavy MUI suites contend for timers and CPU when every file
+    // runs at once, producing false five-second timeouts under coverage/CI.
+    fileParallelism: false,
     coverage: {
       provider: 'v8',
       include: ['src/renderer/**/*.{ts,tsx}'],
@@ -22,10 +25,10 @@ export default defineConfig({
       reporter: ['text', 'json-summary'],
       reportsDirectory: 'coverage/renderer',
       thresholds: {
-        statements: 0.84,
-        branches: 1.1,
-        functions: 0.49,
-        lines: 1.11,
+        statements: 100,
+        branches: 100,
+        functions: 100,
+        lines: 100,
       },
     },
   },

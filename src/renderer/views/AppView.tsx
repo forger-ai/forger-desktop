@@ -683,6 +683,16 @@ export function AppView({
       : t.appView.promptSettingGlobal;
   const promptRuntimeControl = runtimeProviderControls[promptRuntimeDraft.provider];
   const promptModelOptions = promptRuntimeControl.modelOptions;
+  const visiblePromptModelOptions = promptModelOptions.some((option) => option.realModelName === promptRuntimeDraft.model)
+    ? promptModelOptions
+    : [
+      ...promptModelOptions,
+      {
+        displayModelName: promptRuntimeDraft.model,
+        realModelName: promptRuntimeDraft.model,
+        defaultEffort: promptRuntimeDraft.effort,
+      },
+    ];
   const promptEffortOptions = promptRuntimeControl.effortOptionsForModel(promptRuntimeDraft.model);
   const promptEffortValue = promptRuntimeControl.normalizeEffortForModel(promptRuntimeDraft.model, promptRuntimeDraft.effort);
   const promptsContent = (
@@ -823,13 +833,13 @@ export function AppView({
                   value={promptRuntimeDraft.model}
                   onChange={(event) => {
                     const model = event.target.value;
-                    const option = promptModelOptions.find((entry) => entry.realModelName === model);
-                    setPromptRuntimeDraft((current) => ({ ...current, model, effort: promptRuntimeControl.normalizeEffortForModel(model, option?.defaultEffort ?? current.effort) }));
+                    const option = visiblePromptModelOptions.find((entry) => entry.realModelName === model)!;
+                    setPromptRuntimeDraft((current) => ({ ...current, model, effort: promptRuntimeControl.normalizeEffortForModel(model, option.defaultEffort) }));
                   }}
                   helperText={t.appView.promptRuntimeHelper}
                   fullWidth
                 >
-                  {promptModelOptions.map((option) => (
+                  {visiblePromptModelOptions.map((option) => (
                     <MenuItem value={option.realModelName} key={option.realModelName}>
                       {option.displayModelName}
                     </MenuItem>

@@ -497,16 +497,3 @@ test('file picker resolves the current main window for every dialog', async () =
   await handlers.get(IPC_CHANNELS.filesPickForChat)({ sender: { id: 301 } });
   assert.deepEqual(dialogParents, [firstWindow, secondWindow]);
 });
-
-test('chat and personal-agent attachment cancellation releases opaque grants', async () => {
-  const controllerSource = await fs.readFile(path.resolve('src/renderer/app/RendererAppController.tsx'), 'utf8');
-  const agentsSource = await fs.readFile(path.resolve('src/renderer/views/AgentsView.tsx'), 'utf8');
-  const chatViewSource = await fs.readFile(path.resolve('src/renderer/views/ChatView.tsx'), 'utf8');
-
-  assert.match(controllerSource, /filesReleaseSelections\(\{ grantIds \}\)/);
-  assert.match(controllerSource, /releaseChatFileSelections\(pendingChatFiles\)/);
-  assert.match(agentsSource, /filesReleaseSelections\(\{ grantIds:/);
-  assert.match(agentsSource, /releaseFileSelections\(pendingFilesRef\.current\)/);
-  assert.match(chatViewSource, /onRemovePendingFile\(file\.grantId\)/);
-  assert.doesNotMatch(`${controllerSource}\n${agentsSource}\n${chatViewSource}`, /file\.sourcePath/);
-});

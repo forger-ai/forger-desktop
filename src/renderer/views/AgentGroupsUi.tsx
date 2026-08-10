@@ -169,34 +169,29 @@ export function AgentsOverview({ agents, busy, createdByLabel, error, manageGrou
               </Stack>
               <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(2, minmax(0, 1fr))', xl: 'repeat(3, minmax(0, 1fr))' }, gap: 1.5 }}>
                 {section.agents.map((agent) => (
-                  <Card key={agent.id} variant="outlined" sx={{ borderRadius: 1, height: '100%' }}>
+                  <Card key={agent.id} variant="outlined" sx={{ borderRadius: 1, height: '100%', position: 'relative' }}>
                     <CardActionArea onClick={() => onOpen(agent)} sx={{ alignItems: 'stretch', height: '100%' }}>
                       <CardContent sx={{ p: 1.75, '&:last-child': { pb: 1.75 } }}>
                         <Stack spacing={1.25}>
-                          <Stack direction="row" spacing={1} alignItems="flex-start">
-                            <Box sx={{ flex: 1, minWidth: 0 }}>
-                              <Typography variant="subtitle1" fontWeight={700}>{agent.name}</Typography>
-                              <Typography variant="body2" color="text.secondary">{agent.description || t.agents.noDescription}</Typography>
-                            </Box>
-                            <Tooltip title={t.agents.delete}>
-                              <IconButton
-                                size="small"
-                                disabled={busy}
-                                onClick={(event) => {
-                                  event.preventDefault();
-                                  event.stopPropagation();
-                                  onDelete(agent);
-                                }}
-                              >
-                                <DeleteOutlineRounded fontSize="small" />
-                              </IconButton>
-                            </Tooltip>
-                          </Stack>
+                          <Box sx={{ minWidth: 0, pr: 4 }}>
+                            <Typography variant="subtitle1" fontWeight={700}>{agent.name}</Typography>
+                            <Typography variant="body2" color="text.secondary">{agent.description || t.agents.noDescription}</Typography>
+                          </Box>
                           {createdByLabel(agent) ? <Chip size="small" variant="outlined" color="primary" label={createdByLabel(agent)} sx={{ alignSelf: 'flex-start' }} /> : null}
                           {renderAccessChips(agent)}
                         </Stack>
                       </CardContent>
                     </CardActionArea>
+                    <Tooltip title={t.agents.delete}>
+                      <IconButton
+                        size="small"
+                        disabled={busy}
+                        onClick={() => onDelete(agent)}
+                        sx={{ position: 'absolute', top: 10, right: 10, zIndex: 1 }}
+                      >
+                        <DeleteOutlineRounded fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
                   </Card>
                 ))}
               </Box>

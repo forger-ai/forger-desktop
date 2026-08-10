@@ -114,6 +114,8 @@ const relativePathsEqual = (left: string, right: string): boolean => {
   return normalizedLeft === normalizedRight;
 };
 
+const relativePathKey = (value: string): string => process.platform === 'win32' ? value.toLowerCase() : value;
+
 const relativePathIsWithin = (rootPath: string, targetPath: string): boolean => {
   const normalizedRoot = process.platform === 'win32' ? rootPath.toLowerCase() : rootPath;
   const normalizedTarget = process.platform === 'win32' ? targetPath.toLowerCase() : targetPath;
@@ -190,6 +192,9 @@ const translatedEnvironment = (
 
   const translated: Record<string, string> = {};
   for (const [key, value] of Object.entries(environment)) {
+    if (typeof value !== 'string') {
+      continue;
+    }
     let next = value;
     for (const [placeholder, replacement] of Object.entries(placeholders)) {
       next = next.split(placeholder).join(replacement);
@@ -627,7 +632,7 @@ export class BackupsManager {
   private async collectPersistentPathContract(appRecord: BackupAppRecord): Promise<PersistentPathContract[]> {
     const manifest = await readManifest(appRecord.installDir);
     const contract = new Map<string, PersistentPathContract>();
-    contract.set('backend/data', { relativePath: 'backend/data', allowsDescendants: true });
+    contract.set(relativePathKey('backend/data'), { relativePath: 'backend/data', allowsDescendants: true });
 
     for (const service of manifest?.services ?? []) {
       for (const volume of service.volumes ?? []) {
@@ -636,7 +641,7 @@ export class BackupsManager {
         }
         const normalized = normalizeRelativePath(volume.source);
         if (normalized) {
-          contract.set(normalized, { relativePath: normalized, allowsDescendants: true });
+          contract.set(relativePathKey(normalized), { relativePath: normalized, allowsDescendants: true });
         }
       }
 
@@ -646,7 +651,7 @@ export class BackupsManager {
       if (sqlitePath && path.isAbsolute(sqlitePath)) {
         const relativeDbPath = normalizeRelativePath(path.relative(appRecord.installDir, sqlitePath));
         if (relativeDbPath) {
-          contract.set(relativeDbPath, { relativePath: relativeDbPath, allowsDescendants: false });
+          contract.set(relativePathKey(relativeDbPath), { relativePath: relativeDbPath, allowsDescendants: false });
         }
       }
     }
@@ -714,10 +719,7 @@ export class BackupsManager {
 
     for (let attempt = 0; attempt < 8; attempt += 1) {
       const backupId = uniqueBackupId();
-      const backupDir = this.resolveBackupPath(appId, backupId);
-      if (!backupDir) {
-        return null;
-      }
+      const backupDir = path.resolve(appBackupRoot, backupId);
       const parentStillSafe = await ensureCanonicalPathInside(this.backupsRoot, appBackupRoot).catch(() => false);
       const destinationIsSafe = await ensureCanonicalPathInside(this.backupsRoot, backupDir).catch(() => false);
       if (!parentStillSafe || !destinationIsSafe) {
@@ -757,7 +759,7 @@ export class BackupsManager {
       return null;
     }
     const appBackupRoot = path.resolve(this.backupsRoot, validAppId);
-    return ensurePathInside(this.backupsRoot, appBackupRoot) ? appBackupRoot : null;
+    return appBackupRoot;
   }
 
   private resolveBackupPath(appId: string, backupId: string): string | null {
@@ -767,7 +769,7 @@ export class BackupsManager {
       return null;
     }
     const backupPath = path.resolve(appBackupRoot, validBackupId);
-    return ensurePathInside(this.backupsRoot, backupPath) ? backupPath : null;
+    return backupPath;
   }
 
   private async readMetadata(appId: string, backupId: string): Promise<BackupMetadata> {

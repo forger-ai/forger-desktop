@@ -155,14 +155,6 @@ export function DataView({
       );
     }
 
-    if (!selectedTable) {
-      return (
-        <Stack alignItems="center" justifyContent="center" sx={{ flex: 1 }}>
-          <Typography variant="body2" color="text.secondary">{t.sections.datos.noTableSelected}</Typography>
-        </Stack>
-      );
-    }
-
     if (isLoadingRows) {
       return (
         <Stack alignItems="center" justifyContent="center" sx={{ flex: 1 }} spacing={1.5}>

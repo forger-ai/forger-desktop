@@ -262,7 +262,7 @@ export class OfficialToolsService {
 
   async stopActiveTools(locale?: string): Promise<void> {
     const context = this.getContext(locale);
-    await Promise.all(INTERNAL_TOOL_MODULES.map(async (toolModule) => {
+    await Promise.all([...this.modulesById.values()].map(async (toolModule) => {
       if (!toolModule.stop) {
         return;
       }
@@ -285,7 +285,7 @@ export class OfficialToolsService {
   async list(locale?: string): Promise<OfficialToolsState> {
     await this.load();
     return {
-      tools: await Promise.all(INTERNAL_TOOL_MODULES.map((toolModule) => this.toSummary(toolModule.definition, locale))),
+      tools: await Promise.all([...this.modulesById.values()].map((toolModule) => this.toSummary(toolModule.definition, locale))),
     };
   }
 
@@ -470,8 +470,8 @@ export class OfficialToolsService {
       ...preview,
       gate,
       userMessage: input.granted
-        ? copy.granted(preview.tool?.name ?? input.toolId, preview.appName ?? input.appId)
-        : copy.revoked(preview.tool?.name ?? input.toolId, preview.appName ?? input.appId),
+        ? copy.granted(preview.tool!.name, preview.appName!)
+        : copy.revoked(preview.tool!.name, preview.appName!),
     };
   }
 
@@ -567,8 +567,8 @@ export class OfficialToolsService {
         return { success: false, userMessage: 'La app no tiene permiso para usar esta herramienta.', technicalCode: 'app_tool_permission_denied' };
       }
       const tool = await this.getTool(input.toolId, options?.locale);
-      const declaration = required ?? optional;
-      if (!declaration || !this.declarationAllowsAction(declaration, input.actionId, tool)) {
+      const declaration = required ? required : optional!;
+      if (!this.declarationAllowsAction(declaration, input.actionId, tool)) {
         return { success: false, userMessage: appToolActionNotDeclaredMessage, technicalCode: 'app_tool_action_not_declared' };
       }
     }

@@ -358,11 +358,13 @@ export class CodexCliAdapter {
           : quotaFailure
             ? 'quota_exceeded'
             : 'capability_unavailable';
+    const modelUnsupportedMessage = modelUnsupportedFailure ? modelUnsupportedFailure.message : message;
+    const quotaMessage = quotaFailure ? quotaFailure.message : message;
     const error = new Error(
       chatCode === 'model_unsupported'
-        ? modelUnsupportedFailure?.message ?? message
+        ? modelUnsupportedMessage
         : chatCode === 'quota_exceeded'
-          ? quotaFailure?.message ?? message
+          ? quotaMessage
           : message,
     );
     (error as Error & { chatCode?: ChatErrorCode }).chatCode = chatCode;

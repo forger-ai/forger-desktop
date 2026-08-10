@@ -407,14 +407,12 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             });
             return;
           }
-          if (request.type === 'cancel_playback') {
-            const audio = audioRuntimePlaybacksRef.current.get(request.playbackId);
-            if (audio) {
-              audio.pause();
-              audioRuntimePlaybacksRef.current.delete(request.playbackId);
-            }
-            await api.audioRuntimeBrokerRespond({ requestId: request.requestId, success: true, result: { success: true } });
+          const audio = audioRuntimePlaybacksRef.current.get(request.playbackId);
+          if (audio) {
+            audio.pause();
+            audioRuntimePlaybacksRef.current.delete(request.playbackId);
           }
+          await api.audioRuntimeBrokerRespond({ requestId: request.requestId, success: true, result: { success: true } });
         } catch (error) {
           await api.audioRuntimeBrokerRespond({
             requestId: request.requestId,
@@ -472,7 +470,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     setDesktopUpdateQuitCountdownSeconds(delaySeconds);
     const timer = window.setInterval(() => {
       setDesktopUpdateQuitCountdownSeconds((current) => {
-        const next = Math.max(0, (current ?? delaySeconds) - 1);
+        const next = Math.max(0, current! - 1);
         if (next === 0 && !desktopUpdateQuitRequestedRef.current) {
           desktopUpdateQuitRequestedRef.current = true;
           window.clearInterval(timer);

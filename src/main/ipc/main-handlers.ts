@@ -1104,6 +1104,10 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
     const uploadRoot = path.join(os.tmpdir(), `forger-social-upload-${input.appId}-${Date.now()}`);
     const stageDir = path.join(uploadRoot, input.appId);
     const zipPath = path.join(os.tmpdir(), `forger-social-upload-${input.appId}-${Date.now()}.zip`);
+    const cleanupUpload = async (): Promise<void> => {
+      await fs.rm(uploadRoot, { recursive: true, force: true }).catch(() => undefined);
+      await fs.rm(zipPath, { force: true }).catch(() => undefined);
+    };
     try {
       await taskStore.appendStatusUpdate(taskId, { message: 'Preparando app', status: 'running' });
       await fs.rm(uploadRoot, { recursive: true, force: true });
@@ -1158,8 +1162,10 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
         });
         state.catalogApps = state.catalogApps.map((entry) => entry.id === input.appId ? { ...entry, name: appEntry.name || appName } : entry);
       }
+      await cleanupUpload();
       return { success: true, app: appEntry, share, userMessage: 'App subida a Social.' };
     } catch (error) {
+      await cleanupUpload();
       const diagnostic = failureDiagnostic(error, 'social_upload_failed');
       await taskStore.upsert({
         id: taskId,
@@ -1175,9 +1181,6 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
         completedAt: new Date().toISOString(),
       });
       return { success: false, userMessage: 'No pudimos subir la app a Social.', ...diagnostic };
-    } finally {
-      await fs.rm(uploadRoot, { recursive: true, force: true }).catch(() => undefined);
-      await fs.rm(zipPath, { force: true }).catch(() => undefined);
     }
   });
   ipcMain.handle(IPC_CHANNELS.createSocialAppShare, async (_event, userAppId: number) => {

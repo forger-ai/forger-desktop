@@ -183,10 +183,12 @@ export function BackupsView({
       setLocalSelection([]);
     }
   };
-  const renderAppSelect = (value: string, onChange: (appId: string) => void) => (
+  const renderAppSelect = (value: string, onChange: (appId: string) => void, id: string) => (
     <FormControl size="small" sx={{ minWidth: 240 }}>
-      <InputLabel>{labels.appLabel}</InputLabel>
+      <InputLabel id={`${id}-label`}>{labels.appLabel}</InputLabel>
       <Select
+        id={id}
+        labelId={`${id}-label`}
         value={value}
         label={labels.appLabel}
         onChange={(event) => onChange(event.target.value)}
@@ -244,7 +246,7 @@ export function BackupsView({
             </Typography>
           </Box>
           <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ xs: 'stretch', sm: 'center' }}>
-            {renderAppSelect(activeLocalAppId, setLocalAppId)}
+            {renderAppSelect(activeLocalAppId, setLocalAppId, 'local-backup-app')}
             <Button
               variant="contained"
               startIcon={<BackupRounded />}
@@ -407,8 +409,8 @@ export function BackupsView({
             </Stack>
           </Box>
           <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ xs: 'stretch', sm: 'center' }}>
-            {renderAppSelect(activeCloudAppId, setCloudAppId)}
-            <Tooltip title={labels.autoSyncTooltip}>
+            {renderAppSelect(activeCloudAppId, setCloudAppId, 'cloud-backup-app')}
+            <Tooltip title={labels.autoSyncTooltip} describeChild>
               <FormControlLabel
                 control={
                   <Switch

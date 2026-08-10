@@ -97,9 +97,7 @@ export function WorkflowDetailPage({
     setParamsOpen(true);
   };
   const cancelParams = () => {
-    if (paramsSnapshot) {
-      onDraftChange((current) => ({ ...current, ...paramsSnapshot }));
-    }
+    onDraftChange((current) => ({ ...current, ...paramsSnapshot! }));
     setParamsOpen(false);
   };
   const saveParams = () => {
@@ -186,7 +184,9 @@ export function WorkflowDetailPage({
           <Paper variant="outlined" sx={{ width: 300, flexShrink: 0, borderRadius: 1, overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
             <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ p: 1.5, pb: 1 }}>
               <Typography variant="subtitle2">{copy.runsTitle}</Typography>
-              <IconButton size="small" onClick={() => setDrawerOpen(false)}><CloseRounded fontSize="small" /></IconButton>
+              <IconButton size="small" aria-label={t.actions.close} onClick={() => setDrawerOpen(false)}>
+                <CloseRounded fontSize="small" />
+              </IconButton>
             </Stack>
             <Divider />
             {runs.length === 0 ? (
@@ -199,7 +199,7 @@ export function WorkflowDetailPage({
                       primary={new Date(run.startedAt).toLocaleString()}
                       secondary={copy.runTriggers[run.trigger]}
                     />
-                    <Chip size="small" color={STATUS_COLORS[run.status] ?? 'default'} label={copy.statusLabels[run.status]} />
+                    <Chip size="small" color={STATUS_COLORS[run.status]} label={copy.statusLabels[run.status]} />
                   </ListItemButton>
                 ))}
               </List>

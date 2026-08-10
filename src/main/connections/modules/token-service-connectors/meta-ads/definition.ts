@@ -11,9 +11,9 @@ const action = (
   name: string,
   description: string,
   risk: OfficialToolActionDefinition['risk'],
-  inputSchema?: Record<string, unknown>,
-  outputSchema?: Record<string, unknown>,
-): OfficialToolActionDefinition => ({ id, name, description, risk, ...(inputSchema ? { inputSchema } : {}), ...(outputSchema ? { outputSchema } : {}) });
+  inputSchema: Record<string, unknown> | undefined,
+  outputSchema: Record<string, unknown>,
+): OfficialToolActionDefinition => ({ id, name, description, risk, ...(inputSchema ? { inputSchema } : {}), outputSchema });
 
 const listOutput = (key: string) => schema({ [key]: { type: 'array', items: { type: 'object' } } }, [key]);
 

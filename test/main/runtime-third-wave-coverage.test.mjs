@@ -70,6 +70,7 @@ const withEnv = async (patch, operation) => {
 };
 
 const fsWithStatfs = (statfs) => Object.assign(Object.create(fs), { statfs });
+const fsWithAvailableDisk = fsWithStatfs(async () => ({ bavail: 2 * 1024 * 1024, bsize: 1024 }));
 
 const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -123,7 +124,7 @@ const makeAgentAuthHarness = async (overrides = {}) => {
       return null;
     },
     findManifestService: () => null,
-    fs,
+    fs: fsWithAvailableDisk,
     getClaudeRoot: () => path.join(root, 'claude-root'),
     getAntigravityRoot: () => path.join(root, 'antigravity-root'),
     getCodexHome: () => path.join(root, 'codex-home'),
@@ -1680,12 +1681,11 @@ test('agent auth records failed Codex status checks and disconnect diagnostics',
   assert.ok(calls.some((call) => call[0] === 'log' && call[1] === 'codex_auth:status_failed'));
 
   const disconnect = await makeAgentAuthHarness({
-    fs: {
-      ...fs,
+    fs: Object.assign(Object.create(fsWithAvailableDisk), {
       rm: async () => {
         throw new Error('rm_denied');
       },
-    },
+    }),
   });
   t.after(async () => {
     await fs.rm(disconnect.root, { recursive: true, force: true });
@@ -3149,7 +3149,7 @@ test('runtime install refreshes legacy Python runtimes on macOS', async (t) => {
     },
     findRuntimeArchive: async () => archivePath,
     findRuntimeChecksumFile: async () => null,
-    fs,
+    fs: fsWithAvailableDisk,
     getBundledResourcesRoot: () => path.join(root, 'resources'),
     getRuntimesRoot: () => path.join(root, 'runtimes'),
     getTempRoot: () => path.join(root, 'tmp'),
@@ -3256,7 +3256,7 @@ test('runtime install refreshes stale Python runtime metadata on macOS', async (
       },
       findRuntimeArchive: async () => archivePath,
       findRuntimeChecksumFile: async () => null,
-      fs,
+      fs: fsWithAvailableDisk,
       getBundledResourcesRoot: () => path.join(root, 'resources'),
       getRuntimesRoot: () => path.join(root, 'runtimes'),
       getTempRoot: () => path.join(root, 'tmp'),
@@ -3556,7 +3556,7 @@ test('runtime install extracts checked archives once and resolves flattened Pyth
       return archivePath;
     },
     findRuntimeChecksumFile: async () => checksumPath,
-    fs,
+    fs: fsWithAvailableDisk,
     getBundledResourcesRoot: () => path.join(root, 'resources'),
     getRuntimesRoot: () => path.join(root, 'runtimes'),
     getTempRoot: () => path.join(root, 'tmp'),
@@ -3607,7 +3607,7 @@ test('runtime install resolves Windows node archives by token into canonical pla
       return archivePath;
     },
     findRuntimeChecksumFile: async () => null,
-    fs,
+    fs: fsWithAvailableDisk,
     getBundledResourcesRoot: () => path.join(root, 'resources'),
     getRuntimesRoot: () => path.join(root, 'runtimes'),
     getTempRoot: () => path.join(root, 'tmp'),
@@ -3649,7 +3649,7 @@ test('runtime install rejects checksum mismatches and missing runtime executable
     },
     findRuntimeArchive: async () => archivePath,
     findRuntimeChecksumFile: async () => checksumPath,
-    fs,
+    fs: fsWithAvailableDisk,
     getBundledResourcesRoot: () => path.join(root, 'resources'),
     getRuntimesRoot: () => path.join(root, 'runtimes'),
     getTempRoot: () => path.join(root, 'tmp'),
@@ -3687,7 +3687,7 @@ test('runtime install rejects checksum mismatches and missing runtime executable
     },
     findRuntimeArchive: async () => archivePath,
     findRuntimeChecksumFile: async () => null,
-    fs,
+    fs: fsWithAvailableDisk,
     getBundledResourcesRoot: () => path.join(root, 'resources'),
     getRuntimesRoot: () => path.join(root, 'runtimes-python-missing'),
     getTempRoot: () => path.join(root, 'tmp-python-missing'),

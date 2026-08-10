@@ -1,5 +1,6 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import http, { type IncomingMessage, type ServerResponse } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import os from 'node:os';
 
 import type {
@@ -154,7 +155,7 @@ export class LocalNetworkShareManager {
         return;
       }
 
-      const pathValue = rawUrl || requestUrl.pathname || '/';
+      const pathValue = rawUrl || requestUrl.pathname;
       if (isBlockedPath(pathValue)) {
         response.statusCode = 403;
         response.end('path_blocked');
@@ -218,13 +219,8 @@ const listenLan = async (server: http.Server): Promise<number> =>
   await new Promise<number>((resolve, reject) => {
     server.once('error', reject);
     server.listen(0, '0.0.0.0', () => {
-      const address = server.address();
-      if (address && typeof address === 'object') {
-        resolve(address.port);
-        return;
-      }
-      /* c8 ignore next -- Node returns an address object after a successful TCP listen. */
-      reject(new Error('local_network_port_unavailable'));
+      const address = server.address() as AddressInfo;
+      resolve(address.port);
     });
   });
 

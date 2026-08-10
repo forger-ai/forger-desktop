@@ -94,7 +94,7 @@ export const pillLabelForReference = (
     return `${triggerGroupLabel} · ${parts.fieldPath ?? 'type'}`;
   }
   const source = sources.find((entry) => entry.nodeId === parts.nodeId);
-  const nodeName = source?.nodeName ?? parts.nodeId ?? referencePath;
+  const nodeName = source?.nodeName ?? parts.nodeId;
   return parts.fieldPath ? `${nodeName} · ${parts.fieldPath}` : `${nodeName} · ${wholeOutputLabel}`;
 };
 
@@ -185,14 +185,11 @@ export function TemplateEditor({
   };
 
   const serialize = (): string => {
-    const root = editorRef.current;
-    if (!root) {
-      return value;
-    }
+    const root = editorRef.current!;
     let result = '';
     const walk = (node: Node): void => {
       if (node.nodeType === Node.TEXT_NODE) {
-        result += node.textContent ?? '';
+        result += (node as Text).data;
         return;
       }
       if (node.nodeType !== Node.ELEMENT_NODE) {
@@ -219,10 +216,7 @@ export function TemplateEditor({
   };
 
   const renderValue = (nextValue: string): void => {
-    const root = editorRef.current;
-    if (!root) {
-      return;
-    }
+    const root = editorRef.current!;
     root.innerHTML = '';
     const tokens: TemplateToken[] = tokenizeTemplate(nextValue);
     for (const token of tokens) {
@@ -269,14 +263,14 @@ export function TemplateEditor({
     if (!editorRef.current?.contains(node)) {
       return null;
     }
-    return { node, text: (node.textContent ?? '').slice(0, range.startOffset) };
+    return { node, text: node.data.slice(0, range.startOffset) };
   };
 
   const updateMenuFromCaret = (): void => {
     const before = textBeforeCaret();
     const match = before ? /\{\{([a-zA-Z0-9_. -]*)$/.exec(before.text) : null;
     if (match) {
-      setMenuFilter(match[1] ?? '');
+      setMenuFilter(match[1]);
       setMenuIndex(0);
       setMenuOpen(true);
     } else {
@@ -289,7 +283,7 @@ export function TemplateEditor({
     if (before) {
       const match = /\{\{([a-zA-Z0-9_. -]*)$/.exec(before.text);
       if (match) {
-        const start = before.text.length - (match[0]?.length ?? 0);
+        const start = before.text.length - match[0].length;
         const selection = window.getSelection();
         const range = document.createRange();
         range.setStart(before.node, start);

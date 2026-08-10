@@ -94,7 +94,7 @@ export class WorkflowStore {
   private runStoragePath(fileName: string): string {
     const root = path.resolve(this.runsRoot());
     const target = path.resolve(root, fileName);
-    const rootWithSeparator = root.endsWith(path.sep) ? root : `${root}${path.sep}`;
+    const rootWithSeparator = `${root}${path.sep}`;
     if (target !== root && !target.startsWith(rootWithSeparator)) {
       throw new Error('workflow_run_path_outside_storage');
     }

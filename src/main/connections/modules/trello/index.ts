@@ -111,7 +111,7 @@ const filterCards = (
 const callTrelloDownload = async (
   secrets: Record<string, string>,
   attachmentUrl: string,
-): Promise<{ buffer: Buffer; contentType?: string; size?: number }> => {
+): Promise<{ buffer: Buffer; contentType?: string; size: number }> => {
   const url = new URL(attachmentUrl);
   url.searchParams.set('key', secrets[TRELLO_API_KEY_SECRET] as string);
   url.searchParams.set('token', secrets[TRELLO_API_TOKEN_SECRET] as string);
@@ -175,6 +175,20 @@ export const trelloToolModule: InternalToolModule = createTokenConnectorModule({
   description: 'Revisa tableros, administra tarjetas y trabaja con adjuntos de Trello usando una API key y token guardados localmente en secretos.',
   version: '0.1.0',
   connectionStatusActionId: 'trello.connection.status',
+  connectionStatusAction: {
+    name: 'Estado de conexion',
+    description: 'Revisa si las credenciales de Trello estan conectadas.',
+    risk: 'low',
+    outputSchema: {
+      type: 'object',
+      properties: {
+        connected: { type: 'boolean' },
+        username: { type: 'string' },
+        fullName: { type: 'string' },
+      },
+      required: ['connected'],
+    },
+  },
   secrets: [
     {
       name: TRELLO_API_KEY_SECRET,
@@ -213,22 +227,6 @@ export const trelloToolModule: InternalToolModule = createTokenConnectorModule({
     }
   },
   actions: [
-    {
-      id: 'trello.connection.status',
-      name: 'Estado de conexion',
-      description: 'Revisa si las credenciales de Trello estan conectadas.',
-      risk: 'low',
-      outputSchema: {
-        type: 'object',
-        properties: {
-          connected: { type: 'boolean' },
-          username: { type: 'string' },
-          fullName: { type: 'string' },
-        },
-        required: ['connected'],
-      },
-      run: async () => ({ success: true, data: { connected: true } }),
-    },
     {
       id: 'trello.list_boards',
       name: 'Listar tableros',
@@ -745,7 +743,7 @@ export const trelloToolModule: InternalToolModule = createTokenConnectorModule({
               attachmentId,
               fileName,
               filePath,
-              size: downloaded.size ?? downloaded.buffer.byteLength,
+              size: downloaded.size,
               sha256: createHash('sha256').update(downloaded.buffer).digest('hex'),
               mimeType: cleanString(attachment.mimeType) || downloaded.contentType,
             },

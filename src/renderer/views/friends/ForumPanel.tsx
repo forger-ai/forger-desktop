@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import AddRounded from '@mui/icons-material/AddRounded';
 import ArrowBackRounded from '@mui/icons-material/ArrowBackRounded';
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
@@ -52,6 +52,9 @@ const placeholderBody = (status: ForumPost['status'], kind: 'post' | 'comment') 
   return '';
 };
 
+const forumErrorMessage = (error: unknown, fallback: string) =>
+  error instanceof Error ? error.message : fallback;
+
 export function ForumPanel({ active, onNotify, onOpenProfile }: ForumPanelProps) {
   const theme = useTheme();
   const [participation, setParticipation] = useState<ForumParticipationState | null>(null);
@@ -65,14 +68,14 @@ export function ForumPanel({ active, onNotify, onOpenProfile }: ForumPanelProps)
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const destructiveActionPendingRef = useRef(false);
 
   const isOptedIn = participation?.status === 'opted_in';
   const selectedPostId = selectedPost?.id;
   const visibleComments = useMemo(() => selectedPost?.comments ?? [], [selectedPost]);
 
-  const loadForum = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
-    if (!active) return;
-    if (!silent) setLoading(true);
+  const loadForum = useCallback(async () => {
+    setLoading(true);
     setError(null);
     try {
       const state = await window.forger.getForumParticipation();
@@ -84,15 +87,14 @@ export function ForumPanel({ active, onNotify, onOpenProfile }: ForumPanelProps)
         setSelectedPost(null);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No pudimos cargar el foro.');
+      setError(forumErrorMessage(err, 'No pudimos cargar el foro.'));
     } finally {
-      if (!silent) setLoading(false);
+      setLoading(false);
     }
   }, [active]);
 
   const refreshSelectedPost = useCallback(async () => {
-    if (!selectedPostId) return;
-    const next = await window.forger.getForumPost(selectedPostId);
+    const next = await window.forger.getForumPost(selectedPostId!);
     setSelectedPost(next);
     setPosts((current) => current.map((post) => (post.id === next.id ? { ...post, ...next, comments: post.comments } : post)));
   }, [selectedPostId]);
@@ -102,7 +104,6 @@ export function ForumPanel({ active, onNotify, onOpenProfile }: ForumPanelProps)
   }, [active, loadForum]);
 
   const handleOptIn = async () => {
-    if (busy) return;
     setBusy(true);
     setError(null);
     try {
@@ -111,7 +112,7 @@ export function ForumPanel({ active, onNotify, onOpenProfile }: ForumPanelProps)
       setPosts(await window.forger.listForumPosts(50));
       onNotify?.('Foro activado.', 'success');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No pudimos activar el foro.');
+      setError(forumErrorMessage(err, 'No pudimos activar el foro.'));
     } finally {
       setBusy(false);
     }
@@ -120,7 +121,6 @@ export function ForumPanel({ active, onNotify, onOpenProfile }: ForumPanelProps)
   const handleCreatePost = async (event: FormEvent) => {
     event.preventDefault();
     const body = postBody.trim();
-    if (!body || busy) return;
     setBusy(true);
     setError(null);
     try {
@@ -131,20 +131,19 @@ export function ForumPanel({ active, onNotify, onOpenProfile }: ForumPanelProps)
       setCreatePostOpen(false);
       onNotify?.('Post publicado.', 'success');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No pudimos publicar el post.');
+      setError(forumErrorMessage(err, 'No pudimos publicar el post.'));
     } finally {
       setBusy(false);
     }
   };
 
   const handleOpenPost = async (post: ForumPost) => {
-    if (busy) return;
     setBusy(true);
     setError(null);
     try {
       setSelectedPost(await window.forger.getForumPost(post.id));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No pudimos abrir el post.');
+      setError(forumErrorMessage(err, 'No pudimos abrir el post.'));
     } finally {
       setBusy(false);
     }
@@ -153,16 +152,16 @@ export function ForumPanel({ active, onNotify, onOpenProfile }: ForumPanelProps)
   const handleCreateComment = async (event: FormEvent) => {
     event.preventDefault();
     const body = commentBody.trim();
-    if (!selectedPost || !body || busy) return;
+    const postId = selectedPost!.id;
     setBusy(true);
     setError(null);
     try {
-      await window.forger.createForumComment(selectedPost.id, body);
+      await window.forger.createForumComment(postId, body);
       setCommentBody('');
       await refreshSelectedPost();
-      setPosts((current) => current.map((post) => post.id === selectedPost.id ? { ...post, commentsCount: post.commentsCount + 1 } : post));
+      setPosts((current) => current.map((post) => post.id === postId ? { ...post, commentsCount: post.commentsCount + 1 } : post));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No pudimos comentar.');
+      setError(forumErrorMessage(err, 'No pudimos comentar.'));
     } finally {
       setBusy(false);
     }
@@ -171,48 +170,48 @@ export function ForumPanel({ active, onNotify, onOpenProfile }: ForumPanelProps)
   const handleReply = async (event: FormEvent) => {
     event.preventDefault();
     const body = replyBody.trim();
-    if (!replyTargetId || !body || busy) return;
     setBusy(true);
     setError(null);
     try {
-      await window.forger.replyForumComment(replyTargetId, body);
+      await window.forger.replyForumComment(replyTargetId!, body);
       setReplyTargetId(null);
       setReplyBody('');
       await refreshSelectedPost();
-      if (selectedPost) {
-        setPosts((current) => current.map((post) => post.id === selectedPost.id ? { ...post, commentsCount: post.commentsCount + 1 } : post));
-      }
+      setPosts((current) => current.map((post) => post.id === selectedPost!.id ? { ...post, commentsCount: post.commentsCount + 1 } : post));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No pudimos responder.');
+      setError(forumErrorMessage(err, 'No pudimos responder.'));
     } finally {
       setBusy(false);
     }
   };
 
-  const handlePostAction = async (action: 'delete' | 'hide' | 'unhide') => {
-    if (!selectedPost || busy) return;
+  const handlePostAction = async (currentPost: ForumPost, action: 'delete' | 'hide' | 'unhide') => {
+    if (destructiveActionPendingRef.current) return;
+    destructiveActionPendingRef.current = true;
     setBusy(true);
     setError(null);
     try {
       const next = action === 'delete'
-        ? await window.forger.deleteForumPost(selectedPost.id)
-        : await window.forger.moderateForumPost(selectedPost.id, action);
+        ? await window.forger.deleteForumPost(currentPost.id)
+        : await window.forger.moderateForumPost(currentPost.id, action);
       if (action === 'delete') {
         setSelectedPost(null);
-        setPosts((current) => current.filter((post) => post.id !== selectedPost.id));
+        setPosts((current) => current.filter((post) => post.id !== currentPost.id));
         return;
       }
-      setSelectedPost({ ...selectedPost, ...next });
+      setSelectedPost({ ...currentPost, ...next });
       setPosts((current) => current.map((post) => (post.id === next.id ? { ...post, ...next } : post)));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No pudimos actualizar el post.');
+      setError(forumErrorMessage(err, 'No pudimos actualizar el post.'));
     } finally {
+      destructiveActionPendingRef.current = false;
       setBusy(false);
     }
   };
 
   const handleCommentAction = async (comment: ForumComment, action: 'delete' | 'hide' | 'unhide') => {
-    if (busy) return;
+    if (destructiveActionPendingRef.current) return;
+    destructiveActionPendingRef.current = true;
     setBusy(true);
     setError(null);
     try {
@@ -223,8 +222,9 @@ export function ForumPanel({ active, onNotify, onOpenProfile }: ForumPanelProps)
       }
       await refreshSelectedPost();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No pudimos actualizar el comentario.');
+      setError(forumErrorMessage(err, 'No pudimos actualizar el comentario.'));
     } finally {
+      destructiveActionPendingRef.current = false;
       setBusy(false);
     }
   };
@@ -262,22 +262,22 @@ export function ForumPanel({ active, onNotify, onOpenProfile }: ForumPanelProps)
             ) : null}
             <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
               {canReply ? (
-                <Button size="small" startIcon={<ReplyRounded />} onClick={() => setReplyTargetId(comment.id)}>
+                <Button size="small" startIcon={<ReplyRounded />} disabled={busy} onClick={() => setReplyTargetId(comment.id)}>
                   Responder
                 </Button>
               ) : null}
               {comment.canDelete && comment.status !== 'deleted' ? (
-                <Button size="small" color="inherit" startIcon={<DeleteOutlineRounded />} onClick={() => void handleCommentAction(comment, 'delete')}>
+                <Button size="small" color="inherit" startIcon={<DeleteOutlineRounded />} disabled={busy} onClick={() => void handleCommentAction(comment, 'delete')}>
                   Eliminar
                 </Button>
               ) : null}
               {comment.canModerate && comment.status === 'visible' ? (
-                <Button size="small" color="warning" startIcon={<VisibilityOffRounded />} onClick={() => void handleCommentAction(comment, 'hide')}>
+                <Button size="small" color="warning" startIcon={<VisibilityOffRounded />} disabled={busy} onClick={() => void handleCommentAction(comment, 'hide')}>
                   Ocultar
                 </Button>
               ) : null}
               {comment.canModerate && comment.status === 'hidden' ? (
-                <Button size="small" color="success" startIcon={<VisibilityRounded />} onClick={() => void handleCommentAction(comment, 'unhide')}>
+                <Button size="small" color="success" startIcon={<VisibilityRounded />} disabled={busy} onClick={() => void handleCommentAction(comment, 'unhide')}>
                   Restaurar
                 </Button>
               ) : null}
@@ -377,17 +377,17 @@ export function ForumPanel({ active, onNotify, onOpenProfile }: ForumPanelProps)
             ) : null}
             <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
               {selectedPost.canDelete && selectedPost.status !== 'deleted' ? (
-                <Button size="small" color="inherit" startIcon={<DeleteOutlineRounded />} onClick={() => void handlePostAction('delete')}>
+                <Button size="small" color="inherit" startIcon={<DeleteOutlineRounded />} disabled={busy} onClick={() => void handlePostAction(selectedPost, 'delete')}>
                   Eliminar
                 </Button>
               ) : null}
               {selectedPost.canModerate && selectedPost.status === 'visible' ? (
-                <Button size="small" color="warning" startIcon={<VisibilityOffRounded />} onClick={() => void handlePostAction('hide')}>
+                <Button size="small" color="warning" startIcon={<VisibilityOffRounded />} disabled={busy} onClick={() => void handlePostAction(selectedPost, 'hide')}>
                   Ocultar
                 </Button>
               ) : null}
               {selectedPost.canModerate && selectedPost.status === 'hidden' ? (
-                <Button size="small" color="success" startIcon={<VisibilityRounded />} onClick={() => void handlePostAction('unhide')}>
+                <Button size="small" color="success" startIcon={<VisibilityRounded />} disabled={busy} onClick={() => void handlePostAction(selectedPost, 'unhide')}>
                   Restaurar
                 </Button>
               ) : null}

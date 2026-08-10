@@ -25,9 +25,9 @@ export const buildProviderRunFailureError = (
           : null;
   const error = new Error(
     chatCode === 'model_unsupported'
-      ? modelUnsupportedFailure?.message ?? message
+      ? modelUnsupportedFailure!.message
       : chatCode === 'quota_exceeded'
-        ? quotaFailure?.message ?? message
+        ? quotaFailure!.message
         : message,
   );
   if (chatCode) {

@@ -469,7 +469,7 @@ export class AgentConversationManager {
       ? await this.options.store.updateConversationProvider({
         conversationId: conversation.id,
         provider: runtime.provider,
-        providerThreadId: conversation.provider === runtime.provider || !conversation.provider ? conversation.providerThreadId ?? null : null,
+        providerThreadId: conversation.providerThreadId ?? null,
       })
       : conversation;
     const workspaceRoot = await this.options.store.workspaceRootForAgent(agent.id);
@@ -786,16 +786,14 @@ export class AgentConversationManager {
     text: string,
   ): void {
     const priorCount = this.activities.get(input.run.id)?.counts.total ?? 0;
-    this.activities.set(
-      input.run.id,
-      appendProviderActivity({
-        activity: this.activities.get(input.run.id) ?? this.createActivityForRun(input.run, input.agent, input.conversation),
-        provider,
-        stream,
-        text,
-      }),
-    );
-    const activityChanged = (this.activities.get(input.run.id)?.counts.total ?? 0) !== priorCount;
+    const activity = appendProviderActivity({
+      activity: this.activities.get(input.run.id) ?? this.createActivityForRun(input.run, input.agent, input.conversation),
+      provider,
+      stream,
+      text,
+    });
+    this.activities.set(input.run.id, activity);
+    const activityChanged = activity.counts.total !== priorCount;
     const messages = toProviderProgressMessages(provider, stream, text);
     for (const message of messages) {
       input.onProgress(message, { includeActivity: !activityChanged });

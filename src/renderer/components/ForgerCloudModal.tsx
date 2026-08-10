@@ -85,7 +85,7 @@ const countryOptions = (() => {
     .filter((code) => /^[A-Z]{2}$/.test(code))
     .map((code) => ({
       code,
-      label: displayNames.of(code) ?? code,
+      label: displayNames.of(code)!,
     }))
     .sort((a, b) => {
       const groupDifference = countrySortGroup(a.code) - countrySortGroup(b.code);
@@ -132,9 +132,7 @@ export function ForgerCloudModal({
   useEffect(() => {
     if (open) {
       setMode(account.authenticated ? 'intro' : mode);
-      if (account.user?.username) {
-        setProfileUsername(account.user.username);
-      }
+      setProfileUsername(account.user?.username ?? '');
       setEditingUsername(false);
     }
   }, [account.authenticated, account.user?.username, mode, open]);
@@ -199,8 +197,6 @@ export function ForgerCloudModal({
     { icon: <PeopleAltRounded color="primary" />, title: t.cloud.cards.feedback.title, body: t.cloud.cards.feedback.body },
     { icon: <SmartphoneRounded color="primary" />, title: t.cloud.cards.sync.title, body: t.cloud.cards.sync.body },
   ];
-  const formTitle = mode === 'login' ? t.cloud.loginTitle : mode === 'register' ? t.cloud.registerTitle : null;
-
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
       <DialogTitle sx={{ position: 'relative', px: 4, pt: 4, pb: 3 }}>
@@ -387,11 +383,9 @@ export function ForgerCloudModal({
 
               {mode === 'login' ? (
                 <Stack spacing={1.5} alignItems="center" sx={{ width: 'min(100%, 420px)' }}>
-                  {formTitle ? (
-                    <Typography variant="h6" color="text.primary" textAlign="center" sx={{ mb: 0.5 }}>
-                      {formTitle}
-                    </Typography>
-                  ) : null}
+                  <Typography variant="h6" color="text.primary" textAlign="center" sx={{ mb: 0.5 }}>
+                    {t.cloud.loginTitle}
+                  </Typography>
                   <TextField label={t.settings.emailLabel} type="email" value={email} onChange={(event) => setEmail(event.target.value)} fullWidth />
                   <TextField label={t.settings.passwordLabel} type="password" value={password} onChange={(event) => setPassword(event.target.value)} fullWidth />
                   <Button variant="contained" startIcon={<LoginRounded />} onClick={submitLogin} disabled={busy || !email.trim() || !password.trim()} fullWidth>
@@ -412,11 +406,9 @@ export function ForgerCloudModal({
 
               {mode === 'register' ? (
                 <Stack spacing={1.5} sx={{ width: 'min(100%, 520px)' }}>
-                  {formTitle ? (
-                    <Typography variant="h6" color="text.primary" textAlign="center" sx={{ mb: 0.5 }}>
-                      {formTitle}
-                    </Typography>
-                  ) : null}
+                  <Typography variant="h6" color="text.primary" textAlign="center" sx={{ mb: 0.5 }}>
+                    {t.cloud.registerTitle}
+                  </Typography>
                   <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
                     <TextField label={t.cloud.firstName} value={firstName} onChange={(event) => setFirstName(event.target.value)} fullWidth />
                     <TextField label={t.cloud.lastName} value={lastName} onChange={(event) => setLastName(event.target.value)} fullWidth />

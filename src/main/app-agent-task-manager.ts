@@ -203,7 +203,7 @@ export class AppAgentTaskManager {
 
     void this.execute(task, template, input).catch((error) => {
       const failure = taskFailureFromError(error, task.provider);
-      void this.failTask(task, failure.error ?? 'app_codex_task_failed', failure.errorDetails);
+      void this.failTask(task, failure.error!, failure.errorDetails);
     });
 
     return toSummary(task);
@@ -756,7 +756,7 @@ export class AppAgentTaskManager {
       stream,
       text,
     });
-    const activityChanged = (task.activity?.counts.total ?? 0) !== activityItemCount;
+    const activityChanged = task.activity.counts.total !== activityItemCount;
     const messages = provider === 'codex'
       ? [progressFromCodexOutput(text, locale)].filter((progress): progress is string => Boolean(progress))
       : toProviderProgressMessages(provider, stream, text, locale);

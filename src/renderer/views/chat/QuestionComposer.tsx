@@ -64,36 +64,27 @@ export function QuestionComposer({
     }));
   };
 
-  const buildAnswers = () => questions.flatMap((question) => {
-    const answer = answersByQuestionId[question.id];
-    if (!answer) {
-      return [];
-    }
-    if (answer.mode === 'freeText' && answer.freeText.trim()) {
-      return [{
+  const buildAnswers = () => questions.map((question) => {
+    const answer = answersByQuestionId[question.id]!;
+    if (answer.mode === 'freeText') {
+      return {
         questionId: question.id,
         question: question.question,
         optionId: '__free_text__',
         label: answer.freeText.trim(),
-      }];
+      };
     }
-    const selectedOption = question.options.find((option) => option.id === answer.optionId);
-    return selectedOption ? [{
+    const selectedOption = question.options.find((option) => option.id === answer.optionId)!;
+    return {
       questionId: question.id,
       question: question.question,
       optionId: selectedOption.id,
       label: selectedOption.label,
       ...(selectedOption.description ? { description: selectedOption.description } : {}),
-    }] : [];
+    };
   });
 
   const advance = () => {
-    if (isLastQuestion && !canSubmit) {
-      return;
-    }
-    if (!isLastQuestion && !canAdvance) {
-      return;
-    }
     if (!isLastQuestion) {
       setCurrentQuestionIndex((current) => current + 1);
       return;
@@ -104,9 +95,6 @@ export function QuestionComposer({
   };
 
   const previous = () => {
-    if (isResponding) {
-      return;
-    }
     setCurrentQuestionIndex((current) => Math.max(0, current - 1));
   };
 

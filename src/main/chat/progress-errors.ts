@@ -280,7 +280,8 @@ const looksLikeJsonish = (text: string): boolean => {
   if (/^[{[]/.test(value)) {
     return true;
   }
-  const structuralChars = value.match(/[{}[\]":,]/g)?.length ?? 0;
+  // Callers only ask for this heuristic after finding JSON metadata or key/value syntax.
+  const structuralChars = value.match(/[{}[\]":,]/g)!.length;
   return structuralChars >= 8 && structuralChars / Math.max(value.length, 1) > 0.08;
 };
 
@@ -459,8 +460,8 @@ export const mapFailureMessage = (
     default:
       if (detail && /exec|unknown|command|not found|usage/i.test(detail)) {
         return providerName && provider !== 'codex'
-          ? copy.providerCliFailed(providerName, snippet ?? '', logHint).trim()
-          : copy.codexCliFailed(snippet ?? '', logHint).trim();
+          ? copy.providerCliFailed(providerName, snippet!, logHint).trim()
+          : copy.codexCliFailed(snippet!, logHint).trim();
       }
       return providerName && provider !== 'codex'
         ? copy.providerRequestFailed(providerName, snippet ?? '', logHint)

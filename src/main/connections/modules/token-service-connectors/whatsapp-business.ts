@@ -17,7 +17,7 @@ const sendMessage = (id: string, name: string, bodyFor: (input: Record<string, u
     const to = req(input, 'to', 'whatsapp_business_to_required'); if (typeof to !== 'string') return to;
     const phoneNumber = phone(input, secrets); if (!phoneNumber) return fail('whatsapp_business_phone_number_required');
     const body = bodyFor(input); if (!body) return fail('whatsapp_business_input_invalid');
-    return { success: true, userMessage: 'Mensaje enviado por WhatsApp Business.', data: { message: await api(secrets, `/${phoneNumber}/messages`, { method: 'POST', body: JSON.stringify({ messaging_product: 'whatsapp', to, ...body }) }) } };
+    return { success: true, userMessage: 'Mensaje enviado por WhatsApp Business.', data: { message: await api(secrets, `/${encodeURIComponent(phoneNumber)}/messages`, { method: 'POST', body: JSON.stringify({ messaging_product: 'whatsapp', to, ...body }) }) } };
   },
 });
 
@@ -26,7 +26,7 @@ const actions: TokenConnectorActionDefinition[] = [
     id: 'whatsapp_business.list_phone_numbers', name: 'Listar numeros', description: 'Lista numeros de la cuenta WABA.', risk: 'low',
     inputSchema: schema(), outputSchema: arraySchema('phoneNumbers'),
     run: async ({ secrets }) => {
-      const data = record(await api(secrets, `/${secrets.business_account_id}/phone_numbers`));
+      const data = record(await api(secrets, `/${encodeURIComponent(secrets.business_account_id)}/phone_numbers`));
       return { success: true, data: { phoneNumbers: list(data.data) } };
     },
   },
@@ -44,7 +44,7 @@ const actions: TokenConnectorActionDefinition[] = [
       if (typeof content !== 'string') return content; if (typeof filename !== 'string') return filename; if (typeof mime !== 'string') return mime;
       const phoneNumber = phone(input, secrets); if (!phoneNumber) return fail('whatsapp_business_phone_number_required');
       const form = new FormData(); form.set('messaging_product', 'whatsapp'); form.set('file', new Blob([Buffer.from(content, 'base64')], { type: mime }), filename);
-      return { success: true, data: { media: await api(secrets, `/${phoneNumber}/media`, { method: 'POST', body: form }) } };
+      return { success: true, data: { media: await api(secrets, `/${encodeURIComponent(phoneNumber)}/media`, { method: 'POST', body: form }) } };
     },
   },
   sendMessage('whatsapp_business.send_media_message', 'Enviar media', (input) => {
@@ -57,7 +57,7 @@ const actions: TokenConnectorActionDefinition[] = [
     run: async ({ input, secrets }) => {
       const message = req(input, 'messageId', 'whatsapp_business_message_required'); if (typeof message !== 'string') return message;
       const phoneNumber = phone(input, secrets); if (!phoneNumber) return fail('whatsapp_business_phone_number_required');
-      await api(secrets, `/${phoneNumber}/messages`, { method: 'POST', body: JSON.stringify({ messaging_product: 'whatsapp', status: 'read', message_id: message }) });
+      await api(secrets, `/${encodeURIComponent(phoneNumber)}/messages`, { method: 'POST', body: JSON.stringify({ messaging_product: 'whatsapp', status: 'read', message_id: message }) });
       return { success: true, data: { markedRead: true } };
     },
   },
@@ -66,7 +66,7 @@ const actions: TokenConnectorActionDefinition[] = [
     inputSchema: schema({ phoneNumberId: { type: 'string' } }), outputSchema: objectSchema('profile'),
     run: async ({ input, secrets }) => {
       const phoneNumber = phone(input, secrets); if (!phoneNumber) return fail('whatsapp_business_phone_number_required');
-      const data = record(await api(secrets, `/${phoneNumber}/whatsapp_business_profile?fields=about,address,description,email,profile_picture_url,websites,vertical`));
+      const data = record(await api(secrets, `/${encodeURIComponent(phoneNumber)}/whatsapp_business_profile?fields=about,address,description,email,profile_picture_url,websites,vertical`));
       return { success: true, data: { profile: record(list(data.data)[0]) } };
     },
   },
@@ -75,7 +75,7 @@ const actions: TokenConnectorActionDefinition[] = [
     inputSchema: schema({ about: { type: 'string' }, description: { type: 'string' }, email: { type: 'string' }, phoneNumberId: { type: 'string' } }), outputSchema: schema({ updated: { type: 'boolean' } }, ['updated']),
     run: async ({ input, secrets }) => {
       const phoneNumber = phone(input, secrets); if (!phoneNumber) return fail('whatsapp_business_phone_number_required');
-      await api(secrets, `/${phoneNumber}/whatsapp_business_profile`, { method: 'POST', body: JSON.stringify({ messaging_product: 'whatsapp', about: clean(input.about) || undefined, description: clean(input.description) || undefined, email: clean(input.email) || undefined }) });
+      await api(secrets, `/${encodeURIComponent(phoneNumber)}/whatsapp_business_profile`, { method: 'POST', body: JSON.stringify({ messaging_product: 'whatsapp', about: clean(input.about) || undefined, description: clean(input.description) || undefined, email: clean(input.email) || undefined }) });
       return { success: true, data: { updated: true } };
     },
   },
@@ -84,6 +84,6 @@ const actions: TokenConnectorActionDefinition[] = [
 export const whatsappBusinessToolModule = moduleFrom({
   id: 'whatsapp_business', name: 'WhatsApp Business Cloud', description: 'Envia mensajes oficiales de WhatsApp Business Cloud.',
   secrets: [secret('access_token', 'Access token de Meta', 'Token con permisos de WhatsApp Business.'), secret('business_account_id', 'WhatsApp Business Account ID', 'ID de la cuenta WABA.'), secret('phone_number_id', 'Phone Number ID', 'ID del numero emisor.', false), secret('api_version', 'Version Graph API', 'Si se deja vacia usa v23.0.', false), secret('app_secret', 'App secret', 'Opcional para appsecret_proof.', false)],
-  validate: async (secrets) => { const data = record(await api(secrets, `/${secrets.business_account_id}/phone_numbers`)); return { ok: true, data: { subject: secrets.business_account_id, phoneNumber: clean(record(list(data.data)[0]).display_phone_number), workspace: 'WhatsApp Business Cloud' } }; },
+  validate: async (secrets) => { const data = record(await api(secrets, `/${encodeURIComponent(secrets.business_account_id)}/phone_numbers`)); return { ok: true, data: { subject: secrets.business_account_id, phoneNumber: clean(record(list(data.data)[0]).display_phone_number), workspace: 'WhatsApp Business Cloud' } }; },
   actions,
 });

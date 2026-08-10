@@ -446,7 +446,7 @@ export const buildSidekickHostname = (visibleName: string, sidekickId: string): 
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/-+/g, '-')
     .replace(/^-|-$/g, '');
-  const base = (asciiBase || 'sidekick').slice(0, maxBaseLength).replace(/-+$/g, '') || 'sidekick';
+  const base = (asciiBase || 'sidekick').slice(0, maxBaseLength).replace(/-+$/g, '');
   return `${base}-${suffix}`;
 };
 
@@ -694,7 +694,7 @@ export const waitForUsbHello = (
   parser: ReadlineParser,
   requestId: string,
 ): { promise: Promise<SidekickUsbHello>; cancel: () => void } => {
-  let cancel: () => void = () => undefined;
+  let cancel!: () => void;
   const promise = new Promise<SidekickUsbHello>((resolve, reject) => {
     let settled = false;
     const onData = (line: string) => {
@@ -733,7 +733,7 @@ export const waitForPairConfiguredAck = (
   parser: ReadlineParser,
   expected: { requestId: string; sidekickId: string; hostname: string },
 ): { promise: Promise<void>; cancel: () => void } => {
-  let cancel: () => void = () => undefined;
+  let cancel!: () => void;
   const promise = new Promise<void>((resolve, reject) => {
     let settled = false;
     const onData = (line: string) => {

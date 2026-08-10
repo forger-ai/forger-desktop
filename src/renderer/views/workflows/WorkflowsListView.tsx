@@ -98,14 +98,14 @@ export function WorkflowsListView({ t, workflows, busy, onCreate, onOpen, onTogg
                 <Stack direction="row" spacing={0.25} alignItems="center" sx={{ px: 1 }}>
                   <Tooltip title={copy.runNow}>
                     <span>
-                      <IconButton size="small" disabled={busy || workflow.running} onClick={() => onRunNow(workflow)}>
+                      <IconButton aria-label={copy.runNow} size="small" disabled={busy || workflow.running} onClick={() => onRunNow(workflow)}>
                         <PlayArrowRounded fontSize="small" />
                       </IconButton>
                     </span>
                   </Tooltip>
                   <Tooltip title={workflow.enabled ? copy.disable : copy.enable}>
                     <span>
-                      <IconButton size="small" disabled={busy} onClick={() => onToggleEnabled(workflow)}>
+                      <IconButton aria-label={workflow.enabled ? copy.disable : copy.enable} size="small" disabled={busy} onClick={() => onToggleEnabled(workflow)}>
                         {workflow.enabled ? <PauseRounded fontSize="small" /> : <PlayArrowRounded fontSize="small" />}
                       </IconButton>
                     </span>
@@ -135,9 +135,7 @@ export function WorkflowsListView({ t, workflows, busy, onCreate, onOpen, onTogg
             color="error"
             variant="contained"
             onClick={() => {
-              if (pendingDelete) {
-                onDelete(pendingDelete);
-              }
+              onDelete(pendingDelete!);
               setPendingDelete(null);
             }}
           >

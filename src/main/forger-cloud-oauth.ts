@@ -89,8 +89,8 @@ const sendHtml = (response: http.ServerResponse, statusCode: number, title: stri
 </html>`);
 };
 
-const log = (options: RegisterOptions, event: string, payload?: Record<string, unknown>) => {
-  void options.appendLog?.(`forger_cloud_oauth:${event}`, payload ?? {});
+const log = (options: RegisterOptions, event: string, payload: Record<string, unknown>) => {
+  void options.appendLog?.(`forger_cloud_oauth:${event}`, payload);
 };
 
 const runProviderLoginFlow = async (options: RegisterOptions): Promise<StoredForgerAccount & { success: boolean; userMessage?: string; technicalCode?: string }> => {
@@ -110,7 +110,7 @@ const runProviderLoginFlow = async (options: RegisterOptions): Promise<StoredFor
   const nonce = base64Url(randomBytes(32));
   const pkce = provider.usePkce ? createPkcePair() : null;
   let server: http.Server | null = null;
-  let redirectUri = '';
+  let redirectUri = 'http://127.0.0.1';
   let exchangeRedirectUri = '';
   let settled = false;
   let listeningResolve: ((port: number) => void) | null = null;
@@ -119,7 +119,7 @@ const runProviderLoginFlow = async (options: RegisterOptions): Promise<StoredFor
   const callbackPromise = new Promise<StoredForgerAccount & { success: boolean; userMessage?: string; technicalCode?: string }>((resolve, reject) => {
     server = http.createServer((request, response) => {
       void (async () => {
-        const requestUrl = new URL(request.url ?? '/', redirectUri || 'http://127.0.0.1');
+        const requestUrl = new URL(String(request.url), redirectUri);
         if (requestUrl.pathname !== provider.callbackPath) {
           sendHtml(response, 404, 'Forger Cloud', 'Esta ventana no corresponde al inicio de sesion de Forger Cloud.');
           return;
@@ -143,7 +143,7 @@ const runProviderLoginFlow = async (options: RegisterOptions): Promise<StoredFor
           ? await client.createGoogleLoginSession({
             clientId,
             code,
-            codeVerifier: pkce?.verifier ?? '',
+            codeVerifier: pkce!.verifier,
             redirectUri: exchangeRedirectUri,
           })
           : await client.createAppleLoginSession({

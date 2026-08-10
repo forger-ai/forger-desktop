@@ -171,6 +171,7 @@ export class TextToSpeechServiceManager {
     this.port = port;
     this.token = token;
     child.on('exit', (code) => {
+      if (this.child !== child) return;
       this.lastError = code === 0 || code === null ? undefined : `text_to_speech_server_exited_${code}`;
       void this.appendServiceLog('server_exit', { code, technicalCode: this.lastError });
       this.child = null;
@@ -178,6 +179,7 @@ export class TextToSpeechServiceManager {
       this.token = null;
     });
     child.on('error', (error) => {
+      if (this.child !== child) return;
       this.lastError = error.message || 'text_to_speech_spawn_failed';
       this.child = null;
       this.port = null;

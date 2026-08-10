@@ -59,9 +59,11 @@ interface SpeechAccess {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 
+type NormalizedSpeechErrorResult = SpeechToTextProcessResult & Required<Pick<SpeechToTextProcessResult, 'userMessage' | 'technicalCode' | 'reportable'>>;
+
 class SpeechToTextHttpError extends Error {
-  constructor(readonly status: number, readonly payload?: SpeechToTextProcessResult) {
-    super(payload?.technicalCode ?? `speech_http_${status}`);
+  constructor(readonly status: number, readonly payload: NormalizedSpeechErrorResult) {
+    super(payload.technicalCode);
   }
 }
 
@@ -144,9 +146,9 @@ export class SpeechToTextServiceManager {
 
   async load(): Promise<void> {
     this.config = await this.readConfig();
-    await this.prepareEphemeralUploadRoot().catch(async (error: unknown) => {
+    await this.prepareEphemeralUploadRoot().catch(async () => {
       await this.appendServiceLog('ephemeral_upload_cleanup_failed', {
-        technicalCode: error instanceof Error ? error.message : 'speech_ephemeral_upload_cleanup_failed',
+        technicalCode: 'speech_ephemeral_upload_cleanup_failed',
       });
     });
   }
@@ -827,9 +829,9 @@ export class SpeechToTextServiceManager {
         success: false,
         service: 'speech_to_text',
         operation: error.payload.operation ?? operation,
-        userMessage: error.payload.userMessage ?? 'Speech to text failed.',
+        userMessage: error.payload.userMessage,
         technicalCode: error.payload.technicalCode,
-        reportable: error.payload.reportable ?? true,
+        reportable: error.payload.reportable,
         ...(error.payload.details ? { details: sanitizeReportableDetails(error.payload.details) } : {}),
       };
     }
@@ -937,7 +939,7 @@ const sanitizeReportableDetails = (details: Record<string, unknown>): Record<str
   return sanitized;
 };
 
-const normalizeSpeechErrorResult = (value: unknown): SpeechToTextProcessResult => {
+const normalizeSpeechErrorResult = (value: unknown): NormalizedSpeechErrorResult => {
   const payload = isRecord(value) && isRecord(value.detail) ? value.detail : value;
   if (!isRecord(payload)) return { success: false, service: 'speech_to_text', operation: 'request', userMessage: 'Speech to text failed.', technicalCode: 'speech_invalid_error_response', reportable: true };
   return {

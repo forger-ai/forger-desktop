@@ -192,8 +192,9 @@ export class ChromeExtensionBridgeManager {
       ...(input.sessionId ? { sessionId: input.sessionId } : {}),
       ...(input.payload ? { payload: input.payload } : {}),
     };
-    const commandTimeoutMs = Number.isFinite(options?.timeoutMs)
-      ? Math.max(1, Math.floor(options?.timeoutMs ?? CHROME_EXTENSION_DEFAULT_TIMEOUT_MS))
+    const requestedTimeoutMs = options?.timeoutMs;
+    const commandTimeoutMs = Number.isFinite(requestedTimeoutMs)
+      ? Math.max(1, Math.floor(requestedTimeoutMs as number))
       : CHROME_EXTENSION_DEFAULT_TIMEOUT_MS;
     const response = await new Promise<ChromeExtensionCommandResponse>((resolve) => {
       const timeout = setTimeout(() => {
@@ -573,4 +574,5 @@ const normalizeNativeError = (value: unknown): { message?: string; code?: string
 
 export const __test = {
   isAllowedUrl,
+  nativeMessagingManifestPath,
 };

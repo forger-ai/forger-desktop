@@ -159,7 +159,7 @@ const normalizeProviderProfileId = (provider: AgentProvider, value: string | und
 
 const createSystemProviderProfile = (
   provider: AgentProvider,
-  connectedAt?: string,
+  connectedAt: string,
   source: LlmProviderProfileMetadata['source'] = 'legacy_provider_connections',
 ): LlmProviderProfileMetadata => ({
   id: systemProviderProfileId(provider),
@@ -167,9 +167,9 @@ const createSystemProviderProfile = (
   label: providerProfileLabel(provider),
   authMode: 'cli',
   runtimeAuthMode: 'externalActiveOnly',
-  status: connectedAt ? 'connected' : 'missing',
+  status: 'connected',
   source,
-  ...(connectedAt ? { connectedAt } : {}),
+  connectedAt,
 });
 
 const normalizeProfileDefaultModel = (provider: AgentProvider, value: unknown): string | undefined => {
@@ -686,7 +686,7 @@ const markProviderDisconnected = async (provider: AgentProvider): Promise<void> 
   delete activeProviderProfiles[provider];
   const llmProviderProfiles = {
     ...current.llmProviderProfiles,
-    [provider]: (current.llmProviderProfiles[provider] ?? []).map((profile) => ({ ...profile, status: 'missing' as const })),
+    [provider]: current.llmProviderProfiles[provider]!.map((profile) => ({ ...profile, status: 'missing' as const })),
   };
   state.settings = normalizeSettings({
     ...current,
@@ -704,16 +704,13 @@ const chooseAgentRuntime = async (requested?: AgentRuntimeRequest): Promise<Agen
   const defaults = normalized.agentDefaults;
   const requestedProfileId = normalizeProviderProfileId(provider, normalizeOptionalString(requested?.authProfileId));
   const profile = resolveRuntimeProviderProfile(normalized, provider, requestedProfileId);
-  if (requestedProfileId && profile?.id !== requestedProfileId) {
-    throw new Error('provider_profile_not_found');
-  }
   const authProfileId = profile?.id;
   if (requested?.strict) {
     validateAgentRuntimeRequest(agentProviderRegistry, provider, requested);
   }
   if (provider === 'claude') {
     const recommended = requested?.recommendations?.claude;
-    const fallbackModel = (profile?.defaultModel ?? defaults.claude.model) || agentProviderRegistry.claude.defaultModel;
+    const fallbackModel = profile?.defaultModel ?? defaults.claude.model;
     const fallbackEffort = profile?.defaultEffort ?? defaults.claude.effort;
     const model = normalizeClaudeModel(requested?.model ?? recommended?.model, fallbackModel);
     return {
@@ -725,8 +722,8 @@ const chooseAgentRuntime = async (requested?: AgentRuntimeRequest): Promise<Agen
   }
   if (provider === 'antigravity') {
     const recommended = requested?.recommendations?.antigravity;
-    const fallbackModel = (profile?.defaultModel ?? defaults.antigravity.model) || agentProviderRegistry.antigravity.defaultModel;
-    const fallbackEffort = (profile?.defaultEffort ?? defaults.antigravity.effort) || agentProviderRegistry.antigravity.defaultEffort;
+    const fallbackModel = profile?.defaultModel ?? defaults.antigravity.model;
+    const fallbackEffort = profile?.defaultEffort ?? defaults.antigravity.effort;
     const antigravityDefaults = normalizeAntigravityDefaults(
       requested?.model ?? recommended?.model,
       requested?.effort ?? recommended?.effort,
@@ -741,7 +738,7 @@ const chooseAgentRuntime = async (requested?: AgentRuntimeRequest): Promise<Agen
     };
   }
   const recommended = requested?.recommendations?.codex;
-  const fallbackModel = (profile?.defaultModel ?? defaults.codex.model) || agentProviderRegistry.codex.defaultModel;
+  const fallbackModel = profile?.defaultModel ?? defaults.codex.model;
   const fallbackEffort = profile?.defaultEffort ?? defaults.codex.reasoningEffort;
   const model = normalizeCodexModel(requested?.model ?? recommended?.model, fallbackModel);
   return {
@@ -756,7 +753,7 @@ const chooseConnectedProvider = async (): Promise<AgentProvider> => {
   const normalized = normalizeSettings(state.settings);
   const timestampOrder = LLM_PROVIDER_KEYS
     .filter((provider) => Boolean(normalized.providerConnections[provider]))
-    .sort((left, right) => Date.parse(normalized.providerConnections[left] ?? '') - Date.parse(normalized.providerConnections[right] ?? ''));
+    .sort((left, right) => Date.parse(normalized.providerConnections[left]!) - Date.parse(normalized.providerConnections[right]!));
   const preferredOrder = normalized.defaultAgentProvider === 'auto'
     ? timestampOrder
     : [normalized.defaultAgentProvider, ...timestampOrder.filter((provider) => provider !== normalized.defaultAgentProvider)];
@@ -899,7 +896,7 @@ const withAgentDefaults = <T extends { model?: string; reasoningEffort?: CodexRe
       reasoningEffort: recommendations.codex.reasoningEffort,
       runtime: {
         provider: 'claude',
-        model: normalizeClaudeModel(entry.runtime.model, recommendations.claude.model || defaults.claude.model || agentProviderRegistry.claude.defaultModel),
+        model: normalizeClaudeModel(entry.runtime.model, recommendations.claude.model),
         effort: normalizeClaudeEffort(entry.runtime.effort, defaults.claude.effort),
         ...(entry.runtime.authProfileId ? { authProfileId: entry.runtime.authProfileId } : {}),
       },
@@ -909,7 +906,7 @@ const withAgentDefaults = <T extends { model?: string; reasoningEffort?: CodexRe
     const antigravityRuntime = normalizeAntigravityDefaults(
       entry.runtime.model,
       entry.runtime.effort,
-      recommendations.antigravity.model || defaults.antigravity.model || agentProviderRegistry.antigravity.defaultModel,
+      recommendations.antigravity.model,
       defaults.antigravity.effort || agentProviderRegistry.antigravity.defaultEffort,
     );
     return {
@@ -933,7 +930,7 @@ const withAgentDefaults = <T extends { model?: string; reasoningEffort?: CodexRe
       reasoningEffort: recommendations.codex.reasoningEffort,
       runtime: {
         provider: 'codex',
-        model: normalizeCodexModel(entry.runtime.model, recommendations.codex.model || defaults.codex.model || agentProviderRegistry.codex.defaultModel),
+        model: normalizeCodexModel(entry.runtime.model, recommendations.codex.model),
         effort: normalizeCodexReasoningEffort(entry.runtime.effort, defaults.codex.reasoningEffort),
         ...(entry.runtime.authProfileId ? { authProfileId: entry.runtime.authProfileId } : {}),
       },
