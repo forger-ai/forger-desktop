@@ -299,6 +299,9 @@ test('window bootstrap creates the main BrowserWindow with secure renderer defau
   );
   assert.deepEqual(mainWindow.webContents.openHandler({ url: 'https://example.com/popup' }), { action: 'deny' });
   assert.deepEqual(mainWindow.webContents.openHandler({ url: reportUrl }), { action: 'deny' });
+  mainWindow.currentUrl = reportUrl;
+  assert.deepEqual(mainWindow.webContents.openHandler({ url: reportUrl }), { action: 'deny' });
+  mainWindow.currentUrl = 'http://127.0.0.1:5173/';
   assert.deepEqual(mainWindow.webContents.openHandler({ url: 'javascript:alert(1)' }), { action: 'deny' });
   assert.deepEqual(mainWindow.webContents.openHandler({ url: 'http://127.0.0.1:5173/help' }), { action: 'deny' });
   mainWindow.currentUrl = 'not-a-url';
