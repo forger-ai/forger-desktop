@@ -142,6 +142,7 @@ test('Given an Antigravity command with no optional capture settings, when stdou
   state.child.stdout.emit('data', Buffer.from(' second'));
   state.child.stderr.emit('data', Buffer.from('diagnostic'));
   state.child.emit('exit', null);
+  state.child.emit('error', new Error('late-child-error'));
 
   assert.deepEqual(await execution, { code: 1, stdout: ' first  second', stderr: 'diagnostic' });
   assert.equal(state.child.stdinValue, '');
