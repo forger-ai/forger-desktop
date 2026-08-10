@@ -624,7 +624,7 @@ describe('SettingsView memory behavior', () => {
     const globalRow = globalTitle.closest('.MuiStack-root')?.parentElement?.parentElement as HTMLElement;
     const iconButtons = within(globalRow).getAllByRole('button');
     await user.click(iconButtons[0] as HTMLElement);
-    expect(screen.getByText(t.settings.memoryEdit)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: t.settings.memoryEdit })).toBeInTheDocument();
     await user.clear(screen.getByLabelText(t.settings.memoryBody));
     await user.type(screen.getByLabelText(t.settings.memoryBody), 'Updated memory');
     await user.click(screen.getByRole('button', { name: t.settings.memorySave }));
