@@ -295,6 +295,16 @@ test('window bootstrap creates the main BrowserWindow with secure renderer defau
   assert.deepEqual(mainWindow.webContents.openHandler({ url: reportUrl }), { action: 'deny' });
   assert.deepEqual(mainWindow.webContents.openHandler({ url: 'javascript:alert(1)' }), { action: 'deny' });
   assert.deepEqual(mainWindow.webContents.openHandler({ url: 'http://127.0.0.1:5173/help' }), { action: 'deny' });
+  const childWindowClosed = [];
+  mainWindow.webContents.events.get('did-create-window')({
+    isDestroyed: () => false,
+    close: () => childWindowClosed.push('close'),
+  });
+  mainWindow.webContents.events.get('did-create-window')({
+    isDestroyed: () => true,
+    close: () => childWindowClosed.push('destroyed-close'),
+  });
+  assert.deepEqual(childWindowClosed, ['close']);
 
   assert.equal(constructedWindows.length, 1);
   assert.equal(constructedWindows[0].options.frame, false);

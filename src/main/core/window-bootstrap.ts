@@ -99,6 +99,9 @@ const registerMainWindowNavigationGuards = (window: BrowserWindow, shell: Window
     openOutsideMainWindow(url, shell);
     return { action: 'deny' };
   });
+  window.webContents.on('did-create-window', (childWindow) => {
+    if (!childWindow.isDestroyed()) childWindow.close();
+  });
 };
 
 export const createWindowBootstrapController = (deps: WindowBootstrapDeps) => {

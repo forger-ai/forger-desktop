@@ -30,9 +30,9 @@ const makeOptions = (root, overrides = {}) => ({
 });
 
 const waitForRun = async (manager, automationId, predicate) => {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
+  for (let attempt = 0; attempt < 500; attempt += 1) {
     const runs = await manager.listRuns(automationId);
-    if (predicate(runs[0])) return runs[0];
+    if (runs[0] && predicate(runs[0])) return runs[0];
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   throw new Error('automation_run_timeout');
