@@ -16,6 +16,12 @@ const loadWindowModule = async (BrowserWindow) =>
     return require('../../dist-electron/main/ipc/window.js');
   });
 
+const loadMicrophonePermissions = async (systemPreferences) =>
+  await withMockedElectron({ systemPreferences }, (require) => {
+    clearDistModule('main/ipc/microphone-permissions.js');
+    return require('../../dist-electron/main/ipc/microphone-permissions.js');
+  });
+
 const withPlatform = async (platform, callback) => {
   const descriptor = Object.getOwnPropertyDescriptor(process, 'platform');
   Object.defineProperty(process, 'platform', { value: platform });
@@ -295,6 +301,9 @@ test('window bootstrap creates the main BrowserWindow with secure renderer defau
   assert.deepEqual(mainWindow.webContents.openHandler({ url: reportUrl }), { action: 'deny' });
   assert.deepEqual(mainWindow.webContents.openHandler({ url: 'javascript:alert(1)' }), { action: 'deny' });
   assert.deepEqual(mainWindow.webContents.openHandler({ url: 'http://127.0.0.1:5173/help' }), { action: 'deny' });
+  mainWindow.currentUrl = 'not-a-url';
+  assert.deepEqual(mainWindow.webContents.openHandler({ url: 'not-a-url' }), { action: 'deny' });
+  mainWindow.currentUrl = 'http://127.0.0.1:5173/help';
   const childWindowClosed = [];
   mainWindow.webContents.events.get('did-create-window')({
     isDestroyed: () => false,
@@ -343,6 +352,54 @@ test('window bootstrap creates the main BrowserWindow with secure renderer defau
   const replacementWindow = createWindowDouble();
   mainWindow = replacementWindow;
   assert.equal(registeredMainDeps.getMainWindow(), replacementWindow);
+});
+
+test('microphone permissions normalize every platform and native response safely', async () => {
+  await withPlatform('linux', async () => {
+    const module = await loadMicrophonePermissions({
+      getMediaAccessStatus: () => 'granted',
+      askForMediaAccess: async () => true,
+    });
+    assert.equal(module.getMicrophonePermissionStatus(), 'unsupported');
+    assert.equal(await module.requestMicrophonePermission(), 'unsupported');
+  });
+
+  await withPlatform('darwin', async () => {
+    let currentStatus = 'not-determined';
+    let askedFor = null;
+    const systemPreferences = {
+      getMediaAccessStatus: (mediaType) => {
+        askedFor = mediaType;
+        return currentStatus;
+      },
+      askForMediaAccess: async (mediaType) => {
+        askedFor = mediaType;
+        return true;
+      },
+    };
+    const module = await loadMicrophonePermissions(systemPreferences);
+    for (const status of ['not-determined', 'granted', 'denied', 'restricted', 'unknown']) {
+      currentStatus = status;
+      assert.equal(module.getMicrophonePermissionStatus(), status);
+      assert.equal(askedFor, 'microphone');
+    }
+    currentStatus = 'unexpected-native-status';
+    assert.equal(module.getMicrophonePermissionStatus(), 'unknown');
+    assert.equal(await module.requestMicrophonePermission(), 'granted');
+
+    systemPreferences.askForMediaAccess = async () => false;
+    currentStatus = 'denied';
+    assert.equal(await module.requestMicrophonePermission(), 'denied');
+  });
+
+  await withPlatform('darwin', async () => {
+    const module = await loadMicrophonePermissions({
+      getMediaAccessStatus: undefined,
+      askForMediaAccess: undefined,
+    });
+    assert.equal(module.getMicrophonePermissionStatus(), 'unsupported');
+    assert.equal(await module.requestMicrophonePermission(), 'unsupported');
+  });
 });
 
 test('window bootstrap keeps native frames portable and ignores empty pending deep-link flushes', async () => {
