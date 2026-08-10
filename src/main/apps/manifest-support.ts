@@ -1,3 +1,4 @@
+import { createHash, verify as verifySignature } from 'node:crypto';
 import type fs from 'node:fs/promises';
 import type path from 'node:path';
 import type { App as ElectronApp, shell as electronShell } from 'electron';
@@ -425,15 +426,21 @@ const createRemoteAppBackup = async (
 
   const archivePath = path.join(getTempRoot(), 'cloud-backups', `${localBackup.backup.appId}-${localBackup.backup.backupId}.zip`);
   await fs.rm(archivePath, { force: true }).catch(() => undefined);
-  await zipDirectory(backupDir, archivePath);
-  const archiveChecksum = await hashFileSha256(archivePath);
-  const backupSignature = await getCloudIdentityStore().signText(JSON.stringify({
-    appId: localBackup.backup.appId,
-    backupId: localBackup.backup.backupId,
-    checksumSha256: archiveChecksum,
-  })).catch(() => null);
-
   try {
+    await zipDirectory(backupDir, archivePath);
+    const archiveChecksum = await hashFileSha256(archivePath);
+    const backupSignature = await getCloudIdentityStore().signText(JSON.stringify({
+      appId: localBackup.backup.appId,
+      backupId: localBackup.backup.backupId,
+      checksumSha256: archiveChecksum,
+    })).catch(() => null);
+    if (!backupSignature?.signature || !backupSignature.keyFingerprint || backupSignature.algorithm !== 'rsa-sha256') {
+      return {
+        success: false,
+        userMessage: 'No pudimos firmar el respaldo antes de subirlo.',
+        technicalCode: 'remote_backup_signature_failed',
+      };
+    }
     return await forgerBackendClient.createRemoteBackup({
       archivePath,
       localBackup: localBackup.backup,
@@ -445,6 +452,69 @@ const createRemoteAppBackup = async (
     });
   } finally {
     await fs.rm(archivePath, { force: true }).catch(() => undefined);
+  }
+};
+
+const verifyRemoteBackupAuthenticity = async (
+  remoteBackup: {
+    appId: string;
+    metadata: Record<string, unknown>;
+    signature?: string;
+    signatureKeyFingerprint?: string;
+    signatureAlgorithm?: string;
+  },
+  checksumSha256: string,
+): Promise<void> => {
+  if (!remoteBackup.signature || !remoteBackup.signatureKeyFingerprint || !remoteBackup.signatureAlgorithm) {
+    throw new Error('remote_backup_signature_missing');
+  }
+  if (remoteBackup.signatureAlgorithm !== 'rsa-sha256') {
+    throw new Error('remote_backup_signature_algorithm_unsupported');
+  }
+  const backupId = typeof remoteBackup.metadata.local_backup_id === 'string'
+    ? remoteBackup.metadata.local_backup_id
+    : '';
+  if (!backupId) {
+    throw new Error('remote_backup_signature_payload_invalid');
+  }
+
+  const backendClient = getCurrentForgerBackendClient();
+  if (!backendClient) {
+    throw new Error('remote_backup_signature_key_unavailable');
+  }
+  const signingDevice = (await backendClient.listDevices()).find((device) =>
+    device.keyFingerprint === remoteBackup.signatureKeyFingerprint && typeof device.publicKey === 'string'
+  );
+  const publicKey = signingDevice?.publicKey ?? '';
+  const calculatedFingerprint = publicKey
+    ? createHash('sha256').update(publicKey).digest('hex')
+    : '';
+  if (
+    !publicKey
+    || calculatedFingerprint !== remoteBackup.signatureKeyFingerprint
+  ) {
+    throw new Error('remote_backup_signature_key_mismatch');
+  }
+
+  const payload = JSON.stringify({
+    appId: remoteBackup.appId,
+    backupId,
+    checksumSha256,
+  });
+  const authentic = (() => {
+    try {
+      return verifySignature(
+        'sha256',
+        Buffer.from(payload, 'utf8'),
+        publicKey,
+        Buffer.from(remoteBackup.signature, 'base64'),
+      );
+    } catch {
+      return false;
+    }
+  })();
+  if (!authentic) {
+    throw new Error('remote_backup_signature_invalid');
   }
 };
 
@@ -473,6 +543,7 @@ const restoreRemoteAppBackup = async (remoteBackupId: number): Promise<BasicActi
     if (expectedChecksum && actualChecksum !== expectedChecksum) {
       throw new Error('remote_backup_checksum_mismatch');
     }
+    await verifyRemoteBackupAuthenticity(remoteBackup, actualChecksum);
     await validateArchiveEntries(downloadPath);
     await extractArchive(downloadPath, extractDir);
     return await getBackupsManager().restoreBackupDirectory({ appId: remoteBackup.appId, backupDir: extractDir });

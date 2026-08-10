@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createRequire } from 'node:module';
 
-import { clearDistModule, createIpcMainRecorder, withMockedElectron } from './electron-test-helpers.mjs';
+import { clearDistModule, createIpcMainRecorder, createTrustedMainWindow, withMockedElectron } from './electron-test-helpers.mjs';
 
 const require = createRequire(import.meta.url);
 const { IPC_CHANNELS } = require('../../dist-electron/shared/ipc.js');
@@ -162,26 +162,29 @@ test('live voice input IPC delegates to the service and broadcasts state changes
 
 const registerMainHandlersWithSystemPreferences = async (systemPreferences) => {
   const { handlers, ipcMain } = createIpcMainRecorder();
+  const { mainWindow, trustedIpcEvent } = createTrustedMainWindow();
   await withMockedElectron({ systemPreferences }, async (mockedRequire) => {
     clearDistModule('main/ipc/microphone-permissions.js');
     clearDistModule('main/ipc/main-handlers.js');
     const { registerMainIpcHandlers } = mockedRequire('../../dist-electron/main/ipc/main-handlers.js');
     registerMainIpcHandlers({
       IPC_CHANNELS,
+      getMainWindow: () => mainWindow,
       ipcMain,
+      mainWindow,
       registry: { apps: {} },
       state: { settings: {} },
     });
   });
   clearDistModule('main/ipc/main-handlers.js');
   clearDistModule('main/ipc/microphone-permissions.js');
-  return handlers;
+  return { handlers, trustedIpcEvent };
 };
 
 test('microphone permission IPC reports the macOS media access status and normalizes unknown values', async () => {
   const askCalls = [];
   const mediaAccess = { status: 'granted', askResult: true };
-  const handlers = await registerMainHandlersWithSystemPreferences({
+  const { handlers, trustedIpcEvent } = await registerMainHandlersWithSystemPreferences({
     getMediaAccessStatus: (mediaType) => {
       assert.equal(mediaType, 'microphone');
       return mediaAccess.status;
@@ -194,26 +197,26 @@ test('microphone permission IPC reports the macOS media access status and normal
   const darwin = process.platform === 'darwin';
 
   assert.equal(
-    await handlers.get(IPC_CHANNELS.microphonePermissionStatus)(),
+    await handlers.get(IPC_CHANNELS.microphonePermissionStatus)(trustedIpcEvent),
     darwin ? 'granted' : 'unsupported',
   );
 
   mediaAccess.status = 'some-future-status';
   assert.equal(
-    await handlers.get(IPC_CHANNELS.microphonePermissionStatus)(),
+    await handlers.get(IPC_CHANNELS.microphonePermissionStatus)(trustedIpcEvent),
     darwin ? 'unknown' : 'unsupported',
   );
 
   mediaAccess.status = 'denied';
   mediaAccess.askResult = true;
   assert.equal(
-    await handlers.get(IPC_CHANNELS.microphonePermissionRequest)(),
+    await handlers.get(IPC_CHANNELS.microphonePermissionRequest)(trustedIpcEvent),
     darwin ? 'granted' : 'unsupported',
   );
 
   mediaAccess.askResult = false;
   assert.equal(
-    await handlers.get(IPC_CHANNELS.microphonePermissionRequest)(),
+    await handlers.get(IPC_CHANNELS.microphonePermissionRequest)(trustedIpcEvent),
     darwin ? 'denied' : 'unsupported',
   );
   if (darwin) {
@@ -222,8 +225,8 @@ test('microphone permission IPC reports the macOS media access status and normal
 });
 
 test('microphone permission IPC reports unsupported when the platform lacks media access APIs', async () => {
-  const handlers = await registerMainHandlersWithSystemPreferences({});
+  const { handlers, trustedIpcEvent } = await registerMainHandlersWithSystemPreferences({});
 
-  assert.equal(await handlers.get(IPC_CHANNELS.microphonePermissionStatus)(), 'unsupported');
-  assert.equal(await handlers.get(IPC_CHANNELS.microphonePermissionRequest)(), 'unsupported');
+  assert.equal(await handlers.get(IPC_CHANNELS.microphonePermissionStatus)(trustedIpcEvent), 'unsupported');
+  assert.equal(await handlers.get(IPC_CHANNELS.microphonePermissionRequest)(trustedIpcEvent), 'unsupported');
 });

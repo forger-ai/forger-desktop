@@ -50,6 +50,7 @@ import { getMicrophonePermissionStatus, requestMicrophonePermission } from './mi
 import { registerPersonalAgentIpcHandlers } from './personal-agent-handlers';
 import { registerProviderAuthIpcHandlers } from './provider-auth-handlers';
 import { registerSidekickIpcHandlers } from './sidekick-handlers';
+import { createHighRiskIpcInputValidators, createTrustedIpcMain } from './trusted-ipc';
 import { registerWakeWordIpcHandlers } from './wake-word-handlers';
 import type {
   AgentDefaults,
@@ -281,6 +282,8 @@ export interface MainProcessIpcDeps {
   listAppPrompts: (appId: string) => Promise<AppPromptReviewItem[]>;
   listCatalogFromBackend: () => Promise<CatalogApp[]>;
   listLlmProviderProfiles: () => Promise<LlmProviderProfilesState>;
+  getFriendChatWindows: () => Electron.BrowserWindow[];
+  getMainWindow: () => Electron.BrowserWindow | null;
   mainWindow: Electron.BrowserWindow | null;
   normalizeManifestAgentDefaults: (manifest: AppManifest | null) => AgentDefaults;
   openInstalledApp: (appId: string, locale?: string) => Promise<OpenAppResult>;
@@ -398,7 +401,13 @@ const updateInstalledManifestDisplayName = async (
 };
 
 export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
-  const { state, APP_CLAUDE_MODEL_OPTIONS, APP_CODEX_MODEL_OPTIONS, BetterSqlite3, BrowserWindow, CODEX_USAGE_DASHBOARD_URL, IPC_CHANNELS, app, appAgentConversationManager, appendInstallLog, buildAppSecretsState, buildCodexPromptWithAppContext, buildForgerToolsContextForApp, buildForgerToolsContextForFreeChat, canUseCloudDataSync, chatOrchestrator, cloudDeviceManager, confirmClaudeAuthConnection, connectClaudeAuth, disconnectClaudeAuth, signOutClaudeAuth, connectAntigravityAuth, startAntigravityAuthSession, writeAntigravityAuthSession, cancelAntigravityAuthSession, disconnectAntigravityAuth, connectCodexAuth, createLocalAppFromSkeleton, createRemoteAppBackup, decryptCloudMessage, decryptCloudMessages, listLocalCloudMessages, dialog, disconnectCodexAuth, ensureCatalogStatuses, failureDiagnostic, forgerBackendClient, forwardCloudSocialEvent, fs, getAppDetails, getBackupsManager, getBackgroundTaskStore, getClaudeAuthStatus, getAntigravityAuthStatus, getCloudIdentityStore, getCodexAuthStatus, getCodexHome, getDesktopUpdater, getDeveloperPathState, getFileLibrary, getForgerHomeRoot, getForgerMetadataRoot, getInstallLogPath, getMemoryStore, getPersonalAgentStore, getPersonalAgentConversationManager, getPersonalAgentRoutineManager, getOfficialToolsService, getConnectionsService, getSidekickService, getSpeechToTextService, getLiveVoiceInputService, getWakeWordService, getTextToSpeechService, getPrivateAppsRoot, getPrivateDataRoot, getRuntimeStatus, getLocalNetworkShareStatus, getRemoteNetworkShareStatus, getRemoteActivitySnapshot, getLlmRunsSnapshot, getSecretsStore, installAppRuntime, prepareSocialAppReview, finishSocialAppInstall, deleteQuarantinedSocialApp, getSocialAppReviewPromptContext, installSocialAppRuntime, installWelcome, ipcMain, listAppPrompts, listCatalogFromBackend, listLlmProviderProfiles, mainWindow, normalizeManifestAgentDefaults, openInstalledApp, startLocalNetworkShare, stopLocalNetworkShare, startRemoteNetworkShare, stopRemoteNetworkShare, openOrFocusFriendChatWindow, path, publicForgerAccount, registry, reinstallClaude, reinstallAntigravity, reinstallCodex, resolveAppIdForWebContents, resolveInstalledAgents, resolveInstalledAppSecrets, resolveInstalledManifest, resolveSelectedAppDisplayName, restoreAppPrompt, restoreAppUserVersionRuntime, restoreRemoteAppBackup, sanitizeRendererChatTrace, sendEncryptedCloudMessage, sendEncryptedCloudAppShareMessage, serializeErrorForInstallLog, setAppAutoSyncSetting, setActiveLlmProviderProfile, updateLlmProviderProfileDefaults, shell, signAppFolderGrant, stopInstalledApp, switchForgerAccountSession, toAppSummary, uninstallAppRuntime, upsertInstalledRecord, updateAgentDefaults, updateAgentToolApproval, updateAppDeveloperSettings, updateDeveloperMode, updateWorkflowsEarlyAccess, updateAppPrompt, updateAppRuntime, updateCodexDefaults, validateArchiveEntries, validateAppPrompt, zipDirectory } = deps;
+  const { state, APP_CLAUDE_MODEL_OPTIONS, APP_CODEX_MODEL_OPTIONS, BetterSqlite3, BrowserWindow, CODEX_USAGE_DASHBOARD_URL, IPC_CHANNELS, app, appAgentConversationManager, appendInstallLog, buildAppSecretsState, buildCodexPromptWithAppContext, buildForgerToolsContextForApp, buildForgerToolsContextForFreeChat, canUseCloudDataSync, chatOrchestrator, cloudDeviceManager, confirmClaudeAuthConnection, connectClaudeAuth, disconnectClaudeAuth, signOutClaudeAuth, connectAntigravityAuth, startAntigravityAuthSession, writeAntigravityAuthSession, cancelAntigravityAuthSession, disconnectAntigravityAuth, connectCodexAuth, createLocalAppFromSkeleton, createRemoteAppBackup, decryptCloudMessage, decryptCloudMessages, listLocalCloudMessages, dialog, disconnectCodexAuth, ensureCatalogStatuses, failureDiagnostic, forgerBackendClient, forwardCloudSocialEvent, fs, getAppDetails, getBackupsManager, getBackgroundTaskStore, getClaudeAuthStatus, getAntigravityAuthStatus, getCloudIdentityStore, getCodexAuthStatus, getCodexHome, getDesktopUpdater, getDeveloperPathState, getFileLibrary, getForgerHomeRoot, getForgerMetadataRoot, getInstallLogPath, getMemoryStore, getPersonalAgentStore, getPersonalAgentConversationManager, getPersonalAgentRoutineManager, getOfficialToolsService, getConnectionsService, getSidekickService, getSpeechToTextService, getLiveVoiceInputService, getWakeWordService, getTextToSpeechService, getPrivateAppsRoot, getPrivateDataRoot, getRuntimeStatus, getLocalNetworkShareStatus, getRemoteNetworkShareStatus, getRemoteActivitySnapshot, getLlmRunsSnapshot, getSecretsStore, installAppRuntime, prepareSocialAppReview, finishSocialAppInstall, deleteQuarantinedSocialApp, getSocialAppReviewPromptContext, installSocialAppRuntime, installWelcome, ipcMain: untrustedIpcMain, listAppPrompts, listCatalogFromBackend, listLlmProviderProfiles, getFriendChatWindows, getMainWindow, mainWindow, normalizeManifestAgentDefaults, openInstalledApp, startLocalNetworkShare, stopLocalNetworkShare, startRemoteNetworkShare, stopRemoteNetworkShare, openOrFocusFriendChatWindow, path, publicForgerAccount, registry, reinstallClaude, reinstallAntigravity, reinstallCodex, resolveAppIdForWebContents, resolveInstalledAgents, resolveInstalledAppSecrets, resolveInstalledManifest, resolveSelectedAppDisplayName, restoreAppPrompt, restoreAppUserVersionRuntime, restoreRemoteAppBackup, sanitizeRendererChatTrace, sendEncryptedCloudMessage, sendEncryptedCloudAppShareMessage, serializeErrorForInstallLog, setAppAutoSyncSetting, setActiveLlmProviderProfile, updateLlmProviderProfileDefaults, shell, signAppFolderGrant, stopInstalledApp, switchForgerAccountSession, toAppSummary, uninstallAppRuntime, upsertInstalledRecord, updateAgentDefaults, updateAgentToolApproval, updateAppDeveloperSettings, updateDeveloperMode, updateWorkflowsEarlyAccess, updateAppPrompt, updateAppRuntime, updateCodexDefaults, validateArchiveEntries, validateAppPrompt, zipDirectory } = deps;
+  const ipcMain = createTrustedIpcMain({
+    ipcMain: untrustedIpcMain,
+    getMainWindow,
+    getAdditionalTrustedWindows: getFriendChatWindows,
+    inputValidators: createHighRiskIpcInputValidators(IPC_CHANNELS),
+  });
   const resolveReportRoot = (reader: () => string): string | undefined => {
     try {
       return typeof reader === 'function' ? reader() : undefined;
@@ -1434,7 +1443,7 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
     ipcMain,
     path,
     shell,
-    getMainWindow: () => mainWindow,
+    getMainWindow,
     getForgerMetadataRoot,
     getCodexAuthStatus,
     getClaudeAuthStatus,
@@ -1518,8 +1527,8 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
     IPC_CHANNELS,
     dialog,
     getFileLibrary,
+    getMainWindow,
     ipcMain,
-    mainWindow,
   });
 
   registerPersonalAgentIpcHandlers({
@@ -1555,7 +1564,7 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
     fs,
     getCodexAuthStatus,
     getOfficialToolsService,
-    ipcMain,
+    ipcMain: untrustedIpcMain,
     normalizeManifestAgentDefaults,
     registry,
     resolveAppIdForWebContents,
@@ -1567,7 +1576,7 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
   registerAppCloudMessagingIpcHandlers({
     IPC_CHANNELS,
     listLocalCloudMessages,
-    ipcMain,
+    ipcMain: untrustedIpcMain,
     registry,
     resolveAppIdForWebContents,
     resolveInstalledManifest,

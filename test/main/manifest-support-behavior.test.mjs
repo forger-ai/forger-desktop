@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash, generateKeyPairSync, sign } from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -69,7 +70,10 @@ const createController = (overrides = {}) => {
     getTempRoot: () => overrides.tempRoot ?? '/tmp',
     getFreePort: async () => 12345,
     getPromptOverridesStore: () => promptOverridesStore,
-    getCloudIdentityStore: () => overrides.cloudIdentityStore ?? ({ signText: async () => null }),
+    getCloudIdentityStore: () => overrides.cloudIdentityStore ?? ({
+      signText: async () => null,
+      getPublicRegistration: async () => ({ publicKey: '', keyFingerprint: '' }),
+    }),
     hashFileSha256: overrides.hashFileSha256 ?? (async () => 'checksum'),
     zipDirectory: overrides.zipDirectory ?? (async () => undefined),
     validateArchiveEntries: overrides.validateArchiveEntries ?? (async () => undefined),
@@ -865,12 +869,26 @@ test('manifest support handles remote backup safety, checksum, signatures, and c
     },
   };
   await fs.mkdir(path.join(root, 'local-backup'), { recursive: true });
+  const { publicKey, privateKey } = generateKeyPairSync('rsa', {
+    modulusLength: 2048,
+    publicKeyEncoding: { type: 'spki', format: 'pem' },
+    privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+  });
+  const keyFingerprint = createHash('sha256').update(publicKey).digest('hex');
+  const signedBackupPayload = JSON.stringify({
+    appId: 'finance-os',
+    backupId: 'backup-1',
+    checksumSha256: 'download-checksum',
+  });
   const remoteBackups = [{
     id: 7,
     appId: 'finance-os',
     appName: 'Finance OS',
-    backupId: 'backup-1',
+    metadata: { local_backup_id: 'backup-1' },
     checksumSha256: 'remote-checksum',
+    signature: sign('sha256', Buffer.from(signedBackupPayload, 'utf8'), privateKey).toString('base64'),
+    signatureKeyFingerprint: keyFingerprint,
+    signatureAlgorithm: 'rsa-sha256',
   }];
   const backendCalls = [];
   const backendClient = {
@@ -881,6 +899,10 @@ test('manifest support handles remote backup safety, checksum, signatures, and c
     async listRemoteBackups() {
       backendCalls.push(['list']);
       return { backups: remoteBackups };
+    },
+    async listDevices() {
+      backendCalls.push(['devices']);
+      return [{ publicKey, keyFingerprint }];
     },
     async downloadRemoteBackup(id, downloadPath) {
       backendCalls.push(['download', id, path.relative(root, downloadPath)]);
@@ -918,12 +940,43 @@ test('manifest support handles remote backup safety, checksum, signatures, and c
   assert.equal(createCall.source, 'manual');
   assert.ok(removed.some((entry) => entry.endsWith('.zip')));
 
+  const unsignedController = createController({
+    state: { secretsStore: null, officialToolsService: null, memoryStore: null, backupsManager },
+    forgerBackendClient: backendClient,
+    forgerAccount: { authenticated: true, token: 'token' },
+    canUseCloudDataSync: () => true,
+    tempRoot,
+    hashFileSha256: async () => 'download-checksum',
+    zipDirectory: async (_source, archivePath) => {
+      await fs.mkdir(path.dirname(archivePath), { recursive: true });
+      await fs.writeFile(archivePath, 'zip', 'utf8');
+    },
+    cloudIdentityStore: { signText: async () => null },
+  }).controller;
+  assert.equal(
+    (await unsignedController.createRemoteAppBackup({ appId: 'finance-os', backupType: 'manual' })).technicalCode,
+    'remote_backup_signature_failed',
+  );
+
   const restored = await controller.restoreRemoteAppBackup(7);
   assert.equal(restored.success, true);
   assert.match(restored.userMessage, /^restored:finance-os:/);
   assert.ok(removed.some((entry) => entry.includes('-extracted-')));
 
   assert.equal((await controller.restoreRemoteAppBackup(99)).technicalCode, 'remote_backup_not_found');
+
+  const authenticSignature = remoteBackups[0].signature;
+  remoteBackups[0].signature = Buffer.from('forged-signature').toString('base64');
+  await assert.rejects(controller.restoreRemoteAppBackup(7), /remote_backup_signature_invalid/);
+  remoteBackups[0].signature = authenticSignature;
+
+  remoteBackups[0].signatureKeyFingerprint = 'untrusted-key';
+  await assert.rejects(controller.restoreRemoteAppBackup(7), /remote_backup_signature_key_mismatch/);
+  remoteBackups[0].signatureKeyFingerprint = keyFingerprint;
+
+  remoteBackups[0].signature = undefined;
+  await assert.rejects(controller.restoreRemoteAppBackup(7), /remote_backup_signature_missing/);
+  remoteBackups[0].signature = authenticSignature;
 
   const mismatchController = createController({
     state: { secretsStore: null, officialToolsService: null, memoryStore: null, backupsManager },

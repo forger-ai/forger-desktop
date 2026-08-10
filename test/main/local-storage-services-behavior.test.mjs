@@ -104,6 +104,56 @@ test('BackupsManager backs up manifest-declared persistent files and restores on
   assert.equal(await fs.stat(path.join(root, 'outside')).catch(() => null), null);
 });
 
+test('BackupsManager allocates unique complete backups for concurrent creates in the same millisecond', async (t) => {
+  const root = await tmpRoot('backups-concurrent-create');
+  const OriginalDate = globalThis.Date;
+  const frozenTime = '2026-08-09T12:34:56.789Z';
+  class FrozenDate extends OriginalDate {
+    constructor(...args) {
+      super(...(args.length > 0 ? args : [frozenTime]));
+    }
+
+    static now() {
+      return OriginalDate.parse(frozenTime);
+    }
+  }
+  globalThis.Date = FrozenDate;
+  t.after(async () => {
+    globalThis.Date = OriginalDate;
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  const installDir = path.join(root, 'apps', 'demo-app');
+  const backupsRoot = path.join(root, 'metadata', 'backups');
+  const databasePath = path.join(installDir, 'backend', 'data', 'app.sqlite3');
+  await fs.mkdir(path.dirname(databasePath), { recursive: true });
+  await fs.writeFile(databasePath, 'stable-db', 'utf8');
+  const appRecord = { appId: 'demo-app', name: 'Demo App', version: '1.0.0', installDir };
+  const manager = new BackupsManager({
+    backupsRoot,
+    listInstalledApps: () => [appRecord],
+    getInstalledApp: () => appRecord,
+    isAppRunning: () => false,
+  });
+
+  const outcomes = await Promise.allSettled(
+    Array.from({ length: 8 }, () => manager.createBackup({ appId: 'demo-app', reason: 'manual' })),
+  );
+
+  assert.deepEqual(outcomes.map((outcome) => outcome.status), Array(8).fill('fulfilled'));
+  const results = outcomes.map((outcome) => outcome.value);
+  assert.equal(results.every((result) => result.success && result.backup?.fileCount === 1), true);
+  const backupIds = results.map((result) => result.backup.backupId);
+  assert.equal(new Set(backupIds).size, results.length);
+  assert.equal((await manager.listBackups('demo-app')).length, results.length);
+  for (const result of results) {
+    const backupDir = manager.backupDirectory('demo-app', result.backup.backupId);
+    const metadata = JSON.parse(await fs.readFile(path.join(backupDir, 'metadata.json'), 'utf8'));
+    assert.equal(metadata.backupId, result.backup.backupId);
+    assert.equal(metadata.files.length, 1);
+    assert.equal(await fs.readFile(path.join(backupDir, metadata.files[0].backupRelativePath), 'utf8'), 'stable-db');
+  }
+});
+
 test('BackupsManager refuses to restore while an app is running', async (t) => {
   const root = await tmpRoot('backups-running');
   t.after(async () => {
@@ -228,6 +278,181 @@ test('BackupsManager batch deletes selected safe backup ids and reports invalid 
   assert.equal(await fs.stat(secondDir).catch(() => null), null);
 });
 
+test('BackupsManager rejects malicious app ids without deleting outside the global backups root', async (t) => {
+  const root = await tmpRoot('backups-app-id-escape');
+  t.after(async () => {
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  const backupsRoot = path.join(root, 'metadata', 'backups');
+  const outsideAppRoot = path.join(root, 'outside-app');
+  const outsideBackup = path.join(outsideAppRoot, 'sentinel-backup');
+  const sentinelPath = path.join(outsideBackup, 'must-survive.txt');
+  const maliciousAppId = path.relative(backupsRoot, outsideAppRoot);
+  await fs.mkdir(outsideBackup, { recursive: true });
+  await fs.writeFile(sentinelPath, 'keep me', 'utf8');
+  const maliciousRecord = {
+    appId: maliciousAppId,
+    name: 'Malicious App',
+    version: '1.0.0',
+    installDir: path.join(root, 'apps', 'malicious'),
+  };
+  const manager = new BackupsManager({
+    backupsRoot,
+    listInstalledApps: () => [maliciousRecord],
+    getInstalledApp: () => maliciousRecord,
+    isAppRunning: () => false,
+  });
+
+  const deleted = await manager.deleteBackup({ appId: maliciousAppId, backupId: 'sentinel-backup' });
+  const created = await manager.createBackup({ appId: maliciousAppId });
+
+  assert.equal(manager.backupDirectory(maliciousAppId, 'sentinel-backup'), null);
+  assert.equal(deleted.success, false);
+  assert.equal(deleted.technicalCode, 'invalid_app_id');
+  assert.equal(created.success, false);
+  assert.equal(created.technicalCode, 'invalid_app_id');
+  assert.equal(await fs.readFile(sentinelPath, 'utf8'), 'keep me');
+  assert.deepEqual(await manager.listBackups(maliciousAppId), []);
+});
+
+test('BackupsManager rejects canonical backup escapes through symlinked app directories', async (t) => {
+  const root = await tmpRoot('backups-symlink-delete');
+  t.after(async () => {
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  const backupsRoot = path.join(root, 'metadata', 'backups');
+  const outsideAppRoot = path.join(root, 'outside-app');
+  const outsideBackup = path.join(outsideAppRoot, 'sentinel-backup');
+  const sentinelPath = path.join(outsideBackup, 'must-survive.txt');
+  await fs.mkdir(backupsRoot, { recursive: true });
+  await fs.mkdir(outsideBackup, { recursive: true });
+  await fs.writeFile(sentinelPath, 'keep me', 'utf8');
+  await fs.symlink(outsideAppRoot, path.join(backupsRoot, 'demo-app'), process.platform === 'win32' ? 'junction' : 'dir');
+  const manager = new BackupsManager({
+    backupsRoot,
+    listInstalledApps: () => [],
+    getInstalledApp: () => undefined,
+    isAppRunning: () => false,
+  });
+
+  const deleted = await manager.deleteBackup({ appId: 'demo-app', backupId: 'sentinel-backup' });
+
+  assert.equal(deleted.success, false);
+  assert.equal(deleted.technicalCode, 'unsafe_backup_path');
+  assert.equal(await fs.readFile(sentinelPath, 'utf8'), 'keep me');
+});
+
+test('BackupsManager refuses restore reads that escape through symlinked backup files', async (t) => {
+  const root = await tmpRoot('backups-symlink-restore');
+  t.after(async () => {
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  const installDir = path.join(root, 'apps', 'demo-app');
+  const backupsRoot = path.join(root, 'metadata', 'backups');
+  const databasePath = path.join(installDir, 'backend', 'data', 'app.sqlite3');
+  const outsideFile = path.join(root, 'outside.sqlite3');
+  await fs.mkdir(path.dirname(databasePath), { recursive: true });
+  await fs.writeFile(databasePath, 'original-db', 'utf8');
+  await fs.writeFile(outsideFile, 'original-db', 'utf8');
+  const appRecord = { appId: 'demo-app', name: 'Demo App', version: '1.0.0', installDir };
+  const manager = new BackupsManager({
+    backupsRoot,
+    listInstalledApps: () => [appRecord],
+    getInstalledApp: () => appRecord,
+    isAppRunning: () => false,
+  });
+  const created = await manager.createBackup({ appId: 'demo-app' });
+  const backedUpFile = path.join(
+    manager.backupDirectory('demo-app', created.backup.backupId),
+    created.backup.files[0].backupRelativePath,
+  );
+  await fs.rm(backedUpFile);
+  await fs.symlink(outsideFile, backedUpFile, 'file');
+  await fs.writeFile(databasePath, 'changed-db', 'utf8');
+
+  await assert.rejects(
+    manager.restoreBackup({ appId: 'demo-app', backupId: created.backup.backupId }),
+    /unsafe_backup_file_path/,
+  );
+  assert.equal(await fs.readFile(databasePath, 'utf8'), 'changed-db');
+});
+
+test('BackupsManager refuses restore writes that escape through symlinked install directories', async (t) => {
+  const root = await tmpRoot('backups-symlink-restore-target');
+  t.after(async () => {
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  const installDir = path.join(root, 'apps', 'demo-app');
+  const backupsRoot = path.join(root, 'metadata', 'backups');
+  const dataDir = path.join(installDir, 'backend', 'data');
+  const databasePath = path.join(dataDir, 'app.sqlite3');
+  const outsideDataDir = path.join(root, 'outside-data');
+  const outsideDatabasePath = path.join(outsideDataDir, 'app.sqlite3');
+  await fs.mkdir(dataDir, { recursive: true });
+  await fs.writeFile(databasePath, 'backup-db', 'utf8');
+  const appRecord = { appId: 'demo-app', name: 'Demo App', version: '1.0.0', installDir };
+  const manager = new BackupsManager({
+    backupsRoot,
+    listInstalledApps: () => [appRecord],
+    getInstalledApp: () => appRecord,
+    isAppRunning: () => false,
+  });
+  const created = await manager.createBackup({ appId: 'demo-app' });
+  await fs.rm(dataDir, { recursive: true });
+  await fs.mkdir(outsideDataDir, { recursive: true });
+  await fs.writeFile(outsideDatabasePath, 'must-survive', 'utf8');
+  await fs.symlink(outsideDataDir, dataDir, process.platform === 'win32' ? 'junction' : 'dir');
+
+  await assert.rejects(
+    manager.restoreBackup({ appId: 'demo-app', backupId: created.backup.backupId }),
+    /unsafe_backup_restore_path/,
+  );
+  assert.equal(await fs.readFile(outsideDatabasePath, 'utf8'), 'must-survive');
+});
+
+test('BackupsManager revalidates a restore target after its parent is swapped for a symlink', async (t) => {
+  const root = await tmpRoot('backups-restore-parent-swap');
+  const originalMkdir = fs.mkdir;
+  t.after(async () => {
+    fs.mkdir = originalMkdir;
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  const installDir = path.join(root, 'apps', 'demo-app');
+  const backupsRoot = path.join(root, 'metadata', 'backups');
+  const dataDir = path.join(installDir, 'backend', 'data');
+  const databasePath = path.join(dataDir, 'app.sqlite3');
+  const outsideDataDir = path.join(root, 'outside-data');
+  const outsideDatabasePath = path.join(outsideDataDir, 'app.sqlite3');
+  await fs.mkdir(dataDir, { recursive: true });
+  await fs.writeFile(databasePath, 'backup-db', 'utf8');
+  await fs.mkdir(outsideDataDir, { recursive: true });
+  await fs.writeFile(outsideDatabasePath, 'must-survive', 'utf8');
+  const appRecord = { appId: 'demo-app', name: 'Demo App', version: '1.0.0', installDir };
+  const manager = new BackupsManager({
+    backupsRoot,
+    listInstalledApps: () => [appRecord],
+    getInstalledApp: () => appRecord,
+    isAppRunning: () => false,
+  });
+  const created = await manager.createBackup({ appId: 'demo-app' });
+  let swapArmed = true;
+  fs.mkdir = async (targetPath, options) => {
+    if (swapArmed && path.resolve(String(targetPath)) === path.resolve(dataDir)) {
+      swapArmed = false;
+      await fs.rm(dataDir, { recursive: true, force: true });
+      await fs.symlink(outsideDataDir, dataDir, process.platform === 'win32' ? 'junction' : 'dir');
+    }
+    return await originalMkdir(targetPath, options);
+  };
+
+  await assert.rejects(
+    manager.restoreBackup({ appId: 'demo-app', backupId: created.backup.backupId }),
+    /unsafe_backup_restore_path/,
+  );
+  assert.equal(swapArmed, false);
+  assert.equal(await fs.readFile(outsideDatabasePath, 'utf8'), 'must-survive');
+});
+
 test('BackupsManager rejects malformed metadata and collects docker-style sqlite paths without workspace access', async (t) => {
   const root = await tmpRoot('backups-malformed');
   t.after(async () => {
@@ -333,6 +558,7 @@ test('BackupsManager handles apps without data files and ignores runtime-only fi
   assert.equal(created.success, true);
   assert.equal(created.backup.fileCount, 0);
   assert.match(created.userMessage, /sin archivos/);
+  assert.deepEqual(await manager.listBackups(''), []);
   assert.deepEqual(await manager.listBackups('missing-app'), []);
 
   const noManifestRecord = { appId: 'no-manifest', name: 'No Manifest', version: '1.0.0', installDir: path.join(root, 'apps', 'no-manifest') };
@@ -497,7 +723,7 @@ test('BackupsManager covers unsafe restore metadata, skipped paths, and non-file
   }), 'utf8');
   await assert.rejects(
     () => manager.restoreBackupDirectory({ appId: 'demo-app', backupDir }),
-    /unsafe_backup_restore_path/,
+    /remote_backup_target_not_persistent/,
   );
 });
 

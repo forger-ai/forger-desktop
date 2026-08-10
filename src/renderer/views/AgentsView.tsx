@@ -106,6 +106,8 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
   const [settingsAccessDraft, setSettingsAccessDraft] = useState<AccessDraft>(() => defaultAccessDraft());
   const [message, setMessage] = useState('');
   const [pendingFiles, setPendingFiles] = useState<PickedChatFile[]>([]);
+  const pendingFilesRef = useRef<PickedChatFile[]>([]);
+  const releaseFileSelections = useCallback((files: PickedChatFile[]) => { if (files.length > 0) void window.forger.filesReleaseSelections({ grantIds: files.map((file) => file.grantId) }).catch(() => undefined); }, []);
   const [detailTab, setDetailTab] = useState<AgentDetailTab>('chat');
   const [historyOpen, setHistoryOpen] = useState(false);
   const [routineDialogOpen, setRoutineDialogOpen] = useState(false);
@@ -132,6 +134,9 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
   const messagesScrollRef = useRef<HTMLDivElement | null>(null);
   const shouldStickToBottomRef = useRef(true);
   const autoReportedRunIdsRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => { pendingFilesRef.current = pendingFiles; }, [pendingFiles]);
+  useEffect(() => () => { releaseFileSelections(pendingFilesRef.current); }, [releaseFileSelections]);
 
   const activeAgent = useMemo(
     () => agents.find((agent) => agent.id === activeAgentId) ?? null,
@@ -316,7 +321,7 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
       setWorkspaceEntries([]);
       setOpenFile(null);
       setFileDraft('');
-      setPendingFiles([]);
+      releaseFileSelections(pendingFilesRef.current); pendingFilesRef.current = []; setPendingFiles([]);
       setPeerThreads([]);
       setOpenPeerThread(null);
       return () => {
@@ -332,7 +337,7 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
     return () => {
       mounted = false;
     };
-  }, [activeAgentId, loadAgentDetail, t.agents.loadError]);
+  }, [activeAgentId, loadAgentDetail, releaseFileSelections, t.agents.loadError]);
 
   useEffect(() => {
     const unsubscribe = window.forger.onPersonalAgentConversationEvent((event: PersonalAgentConversationEvent) => {
@@ -388,14 +393,14 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
   useEffect(() => {
     shouldStickToBottomRef.current = true;
     setMessage(conversation?.draftMessage ?? '');
-    setPendingFiles([]);
+    releaseFileSelections(pendingFilesRef.current); pendingFilesRef.current = []; setPendingFiles([]);
     window.requestAnimationFrame(() => {
       const container = messagesScrollRef.current;
       if (container) {
         container.scrollTop = container.scrollHeight;
       }
     });
-  }, [conversation?.id]);
+  }, [conversation?.id, releaseFileSelections]);
 
   useEffect(() => {
     if (!scheduledWakeup) {
@@ -630,15 +635,10 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
   const handlePickFiles = async () => {
     if (busy) return;
     const picked = await window.forger.filesPickForChat();
-    setPendingFiles((current) => {
-      const seen = new Set(current.map((file) => file.sourcePath));
-      return [...current, ...picked.filter((file) => !seen.has(file.sourcePath))];
-    });
+    setPendingFiles((current) => { const seen = new Set(current.map((file) => file.grantId)); return [...current, ...picked.filter((file) => !seen.has(file.grantId))]; });
   };
 
-  const handleRemovePendingFile = (sourcePath: string) => {
-    setPendingFiles((current) => current.filter((file) => file.sourcePath !== sourcePath));
-  };
+  const handleRemovePendingFile = (grantId: string) => { releaseFileSelections(pendingFiles.filter((file) => file.grantId === grantId)); setPendingFiles((current) => current.filter((file) => file.grantId !== grantId)); };
 
   const handleComposerChange = (value: string) => {
     setMessage(value);
@@ -820,7 +820,7 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
     setError(null);
     try {
       const importedFiles = pendingFiles.length > 0
-        ? await window.forger.filesImport({ sourcePaths: pendingFiles.map((file) => file.sourcePath) })
+        ? await window.forger.filesImport({ grantIds: pendingFiles.map((file) => file.grantId) })
         : [];
       const sharedFiles: SharedFileRef[] = importedFiles.map((file) => ({
         id: file.id,
@@ -840,6 +840,7 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
       setConversation(updated);
       setConversations((current) => upsertConversation(current, updated));
       setMessage('');
+      pendingFilesRef.current = [];
       setPendingFiles([]);
       usageAnalytics.personalAgentMessageSent({ surface: 'agents', locale: t.locale });
     } catch (sendError) {
@@ -1201,10 +1202,10 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
           <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap" sx={{ mb: 1 }}>
             {pendingFiles.map((file) => (
               <Chip
-                key={file.sourcePath}
+                key={file.grantId}
                 size="small"
                 label={compactFileLabel(file.name)}
-                onDelete={() => handleRemovePendingFile(file.sourcePath)}
+                onDelete={() => handleRemovePendingFile(file.grantId)}
               />
             ))}
           </Stack>

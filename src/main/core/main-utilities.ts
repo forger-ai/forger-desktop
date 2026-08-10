@@ -7,7 +7,12 @@ import type path from 'node:path';
 import type { DesktopUpdater } from '../desktop-updater';
 import type { DesktopErrorReporter } from '../error-reporting';
 import type { ForgerAccountStore, StoredForgerAccount, publicForgerAccount } from '../forger-account-store';
-import { appendDesktopLog, type DesktopLogService } from '../desktop-logger';
+import {
+  appendDesktopLog,
+  sanitizeDesktopLogString,
+  sanitizeDesktopLogValue,
+  type DesktopLogService,
+} from '../desktop-logger';
 import { isBenignPipeError } from '../child-stdio';
 import type { AGENT_TOOL_DEFINITIONS, AGENT_TOOL_IDS } from './agent-tool-packages';
 import type { IPC_CHANNELS } from '../../shared/ipc';
@@ -271,19 +276,24 @@ const resolveAppIdForWebContents = (webContentsId: number): string | null => {
 
 const appendInstallLog = async (event: string, payload: Record<string, unknown> = {}): Promise<void> => {
   const logPath = getInstallLogPath();
-  const entry = {
+  const sanitizedEvent = sanitizeDesktopLogString(event);
+  const sanitizedPayload = sanitizeDesktopLogValue(payload) as Record<string, unknown>;
+  const entry = sanitizeDesktopLogValue({
     timestamp: new Date().toISOString(),
-    event,
+    event: sanitizedEvent,
     platform: process.platform,
     arch: process.arch,
     packaged: app.isPackaged,
     dev: isDev,
-    ...payload,
-  };
+    ...sanitizedPayload,
+  }) as Record<string, unknown>;
 
   try {
-    await fs.mkdir(path.dirname(logPath), { recursive: true });
-    await fs.appendFile(logPath, `${JSON.stringify(entry)}\n`, 'utf8');
+    const logDirectory = path.dirname(logPath);
+    await fs.mkdir(logDirectory, { recursive: true, mode: 0o700 });
+    await fs.chmod(logDirectory, 0o700);
+    await fs.appendFile(logPath, `${JSON.stringify(entry)}\n`, { encoding: 'utf8', mode: 0o600 });
+    await fs.chmod(logPath, 0o600);
   } catch (error) {
     console.warn('Failed to write Forger install log', error);
   }
@@ -291,8 +301,8 @@ const appendInstallLog = async (event: string, payload: Record<string, unknown> 
     metadataRoot: getForgerMetadataRoot(),
     level: event.includes('failed') || event.includes('error') ? 'error' : 'info',
     service: serviceForLogEvent(event),
-    event,
-    context: payload,
+    event: sanitizedEvent,
+    context: sanitizedPayload,
   });
 };
 

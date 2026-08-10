@@ -51,6 +51,7 @@ export interface AgentIpcDeps {
   workflowManager: WorkflowManager | null;
   getWorkflowManager?: () => WorkflowManager | null;
   desktopErrorReporter: DesktopErrorReporter | null;
+  desktopIpcMain: IpcMain;
   ipcMain: IpcMain;
   normalizeAgentProvider: (value: unknown) => AgentRuntime['provider'] | undefined;
   normalizeClaudeEffort: (value: unknown, fallback: ClaudeEffort) => ClaudeEffort;
@@ -68,7 +69,7 @@ export interface AgentIpcDeps {
 }
 
 export const registerAgentIpcHandlers = (deps: AgentIpcDeps): void => {
-  const { BUILT_IN_CLAUDE_EFFORT, BUILT_IN_CODEX_REASONING, BetterSqlite3, IPC_CHANNELS, appAgentConversationManager, appAgentTaskManager, automationManager, workflowManager, desktopErrorReporter, ipcMain, normalizeAgentProvider, normalizeClaudeEffort, normalizeCodexReasoningEffort, registry, renderManifestAgentPrompt, resolveAppDbPath, resolveAppIdForWebContents, resolveInstalledAgents } = deps;
+  const { BUILT_IN_CLAUDE_EFFORT, BUILT_IN_CODEX_REASONING, BetterSqlite3, IPC_CHANNELS, appAgentConversationManager, appAgentTaskManager, automationManager, workflowManager, desktopErrorReporter, desktopIpcMain, ipcMain, normalizeAgentProvider, normalizeClaudeEffort, normalizeCodexReasoningEffort, registry, renderManifestAgentPrompt, resolveAppDbPath, resolveAppIdForWebContents, resolveInstalledAgents } = deps;
   const getWorkflowManager = deps.getWorkflowManager ?? (() => workflowManager);
   const requireWorkflowManager = (): WorkflowManager => {
     const manager = getWorkflowManager();
@@ -454,7 +455,7 @@ export const registerAgentIpcHandlers = (deps: AgentIpcDeps): void => {
   ipcMain.handle(IPC_CHANNELS.appAgentConversationApprovePermission, handleAppAgentConversationApprovePermission);
   ipcMain.handle(IPC_CHANNELS.appCodexConversationApprovePermission, handleAppAgentConversationApprovePermission);
 
-  ipcMain.handle(IPC_CHANNELS.dbListTables, async (_event, appId: string) => {
+  desktopIpcMain.handle(IPC_CHANNELS.dbListTables, async (_event, appId: string) => {
     if (!BetterSqlite3) {
       return { error: 'db_module_unavailable' };
     }
@@ -474,7 +475,7 @@ export const registerAgentIpcHandlers = (deps: AgentIpcDeps): void => {
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.dbQueryTable, async (_event, appId: string, tableName: string, limit = 1000) => {
+  desktopIpcMain.handle(IPC_CHANNELS.dbQueryTable, async (_event, appId: string, tableName: string, limit = 1000) => {
     if (!BetterSqlite3) {
       return { error: 'db_module_unavailable' };
     }
@@ -499,91 +500,91 @@ export const registerAgentIpcHandlers = (deps: AgentIpcDeps): void => {
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.automationsList, async () => {
+  desktopIpcMain.handle(IPC_CHANNELS.automationsList, async () => {
     if (!automationManager) {
       return [];
     }
     return automationManager.list();
   });
-  ipcMain.handle(IPC_CHANNELS.automationsCreate, async (_event, input: AutomationUpsertInput) => {
+  desktopIpcMain.handle(IPC_CHANNELS.automationsCreate, async (_event, input: AutomationUpsertInput) => {
     if (!automationManager) {
       throw new Error('automation_manager_unavailable');
     }
     return await automationManager.create(input);
   });
-  ipcMain.handle(IPC_CHANNELS.automationsUpdate, async (_event, input: AutomationUpsertInput & { id: string }) => {
+  desktopIpcMain.handle(IPC_CHANNELS.automationsUpdate, async (_event, input: AutomationUpsertInput & { id: string }) => {
     if (!automationManager) {
       throw new Error('automation_manager_unavailable');
     }
     return await automationManager.update(input);
   });
-  ipcMain.handle(IPC_CHANNELS.automationsDelete, async (_event, id: string) => {
+  desktopIpcMain.handle(IPC_CHANNELS.automationsDelete, async (_event, id: string) => {
     if (!automationManager) {
       return { success: false, technicalCode: 'automation_manager_unavailable' };
     }
     return await automationManager.delete(id);
   });
-  ipcMain.handle(IPC_CHANNELS.automationsPause, async (_event, id: string) => {
+  desktopIpcMain.handle(IPC_CHANNELS.automationsPause, async (_event, id: string) => {
     if (!automationManager) {
       throw new Error('automation_manager_unavailable');
     }
     return await automationManager.pause(id);
   });
-  ipcMain.handle(IPC_CHANNELS.automationsResume, async (_event, id: string) => {
+  desktopIpcMain.handle(IPC_CHANNELS.automationsResume, async (_event, id: string) => {
     if (!automationManager) {
       throw new Error('automation_manager_unavailable');
     }
     return await automationManager.resume(id);
   });
-  ipcMain.handle(IPC_CHANNELS.automationsRunNow, async (_event, id: string) => {
+  desktopIpcMain.handle(IPC_CHANNELS.automationsRunNow, async (_event, id: string) => {
     if (!automationManager) {
       throw new Error('automation_manager_unavailable');
     }
     return await automationManager.runNow(id);
   });
-  ipcMain.handle(IPC_CHANNELS.automationsListRuns, async (_event, automationId: string) => {
+  desktopIpcMain.handle(IPC_CHANNELS.automationsListRuns, async (_event, automationId: string) => {
     if (!automationManager) {
       return [];
     }
     return await automationManager.listRuns(automationId);
   });
-  ipcMain.handle(IPC_CHANNELS.automationsGetRunTranscript, async (_event, runId: string) => {
+  desktopIpcMain.handle(IPC_CHANNELS.automationsGetRunTranscript, async (_event, runId: string) => {
     if (!automationManager) {
       return null;
     }
     return await automationManager.getRunTranscript(runId);
   });
 
-  ipcMain.handle(IPC_CHANNELS.workflowsList, async () => {
+  desktopIpcMain.handle(IPC_CHANNELS.workflowsList, async () => {
     return requireWorkflowManager().list();
   });
-  ipcMain.handle(IPC_CHANNELS.workflowsUpsert, async (_event, input: WorkflowUpsertInput) => {
+  desktopIpcMain.handle(IPC_CHANNELS.workflowsUpsert, async (_event, input: WorkflowUpsertInput) => {
     return await requireWorkflowManager().upsert(input);
   });
-  ipcMain.handle(IPC_CHANNELS.workflowsDelete, async (_event, id: string) => {
+  desktopIpcMain.handle(IPC_CHANNELS.workflowsDelete, async (_event, id: string) => {
     try {
       return await requireWorkflowManager().delete(id);
     } catch (error) {
       return workflowUnavailableResult(error);
     }
   });
-  ipcMain.handle(IPC_CHANNELS.workflowsSetEnabled, async (_event, id: string, enabled: boolean) => {
+  desktopIpcMain.handle(IPC_CHANNELS.workflowsSetEnabled, async (_event, id: string, enabled: boolean) => {
     return await requireWorkflowManager().setEnabled(id, Boolean(enabled));
   });
-  ipcMain.handle(IPC_CHANNELS.workflowsRunNow, async (_event, id: string) => {
+  desktopIpcMain.handle(IPC_CHANNELS.workflowsRunNow, async (_event, id: string) => {
     return await requireWorkflowManager().runNow(id);
   });
-  ipcMain.handle(IPC_CHANNELS.workflowsRunNode, async (_event, workflowId: string, nodeId: string) => {
+  desktopIpcMain.handle(IPC_CHANNELS.workflowsRunNode, async (_event, workflowId: string, nodeId: string) => {
     return await requireWorkflowManager().runNode(workflowId, nodeId);
   });
-  ipcMain.handle(IPC_CHANNELS.workflowsCancelRun, async (_event, runId: string) => {
+  desktopIpcMain.handle(IPC_CHANNELS.workflowsCancelRun, async (_event, runId: string) => {
     try {
       return await requireWorkflowManager().cancelRun(runId);
     } catch (error) {
       return workflowUnavailableResult(error);
     }
   });
-  ipcMain.handle(IPC_CHANNELS.workflowsApproveNode, async (_event, input: WorkflowApproveNodeInput) => {
+  desktopIpcMain.handle(IPC_CHANNELS.workflowsApproveNode, async (_event, input: WorkflowApproveNodeInput) => {
     try {
       return await requireWorkflowManager().approveNode({
         runId: String(input?.runId ?? ''),
@@ -594,10 +595,10 @@ export const registerAgentIpcHandlers = (deps: AgentIpcDeps): void => {
       return workflowUnavailableResult(error);
     }
   });
-  ipcMain.handle(IPC_CHANNELS.workflowsListRuns, async (_event, workflowId: string) => {
+  desktopIpcMain.handle(IPC_CHANNELS.workflowsListRuns, async (_event, workflowId: string) => {
     return await requireWorkflowManager().listRuns(workflowId);
   });
-  ipcMain.handle(IPC_CHANNELS.workflowsGetRun, async (_event, runId: string) => {
+  desktopIpcMain.handle(IPC_CHANNELS.workflowsGetRun, async (_event, runId: string) => {
     return await requireWorkflowManager().getRun(runId);
   });
 
