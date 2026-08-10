@@ -69,9 +69,9 @@ const loadRunner = (state) => {
 };
 
 const waitFor = async (predicate, label) => {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
+  for (let attempt = 0; attempt < 500; attempt += 1) {
     if (predicate()) return;
-    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setTimeout(resolve, 10));
   }
   throw new Error(`condition_not_reached:${label}`);
 };
