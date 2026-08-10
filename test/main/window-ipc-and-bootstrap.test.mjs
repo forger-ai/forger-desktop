@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
+import path from 'node:path';
 import test from 'node:test';
+import { pathToFileURL } from 'node:url';
 
 import {
   clearDistModule,
@@ -211,6 +213,8 @@ test('window bootstrap creates the main BrowserWindow with secure renderer defau
   const calls = [];
   const externalUrls = [];
   const openedPaths = [];
+  const reportPath = path.resolve('report.txt');
+  const reportUrl = pathToFileURL(reportPath).toString();
   let mainWindow = null;
   let friendWindows = [];
 
@@ -288,7 +292,7 @@ test('window bootstrap creates the main BrowserWindow with secure renderer defau
     'http://127.0.0.1:5173/settings',
   );
   assert.deepEqual(mainWindow.webContents.openHandler({ url: 'https://example.com/popup' }), { action: 'deny' });
-  assert.deepEqual(mainWindow.webContents.openHandler({ url: 'file:///tmp/report.txt' }), { action: 'deny' });
+  assert.deepEqual(mainWindow.webContents.openHandler({ url: reportUrl }), { action: 'deny' });
   assert.deepEqual(mainWindow.webContents.openHandler({ url: 'javascript:alert(1)' }), { action: 'deny' });
   assert.deepEqual(mainWindow.webContents.openHandler({ url: 'http://127.0.0.1:5173/help' }), { action: 'deny' });
 
@@ -323,7 +327,7 @@ test('window bootstrap creates the main BrowserWindow with secure renderer defau
   assert.deepEqual(externalNavigation, ['prevented']);
   assert.deepEqual(internalNavigation, []);
   assert.deepEqual(externalUrls, ['https://example.com/docs', 'https://example.com/popup']);
-  assert.deepEqual(openedPaths, ['/tmp/report.txt']);
+  assert.deepEqual(openedPaths, [reportPath]);
   assert.equal(mainWindow.currentUrl, 'http://127.0.0.1:5173/help');
 
   const replacementWindow = createWindowDouble();

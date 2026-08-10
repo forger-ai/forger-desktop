@@ -2148,6 +2148,24 @@ test('chat orchestrator has no hard deadline and applies provider-specific inact
 
 test('chat orchestrator saves app versions only when provider runs change files', async () => {
   const harness = await createHarness();
+  let releaseFirstRunAudit;
+  const firstRunAuditReleased = new Promise((resolve) => {
+    releaseFirstRunAudit = resolve;
+  });
+  let notifyFirstRunAuditStarted;
+  const firstRunAuditStarted = new Promise((resolve) => {
+    notifyFirstRunAuditStarted = resolve;
+  });
+  let blockNextReplyAudit = true;
+  harness.orchestrator.auditLogger = {
+    async log(entry) {
+      if (blockNextReplyAudit && entry.type === 'chat_reply') {
+        blockNextReplyAudit = false;
+        notifyFirstRunAuditStarted();
+        await firstRunAuditReleased;
+      }
+    },
+  };
   const appId = 'finance-os';
   const appRoot = join(harness.privateAppsRoot, appId);
   await mkdir(appRoot, { recursive: true });
@@ -2163,6 +2181,7 @@ test('chat orchestrator saves app versions only when provider runs change files'
     });
     const updateRun = await waitForRun(harness.events, update.runId);
     assert.equal(updateRun.status, 'preview_ready');
+    await firstRunAuditStarted;
 
     harness.orchestrator.sandboxRunner = {
       async runCodex() {
@@ -2180,10 +2199,12 @@ test('chat orchestrator saves app versions only when provider runs change files'
       conversationId: 'conversation-auto-update-changed-files',
       conversationHistory: [{ role: 'user', content: 'Please improve the dashboard layout' }],
     });
+    releaseFirstRunAudit();
     const changedRun = await waitForRun(harness.events, changed.runId);
     assert.equal(changedRun.status, 'applied');
     assert.match(changedRun.userMessage, /Version guardada/);
   } finally {
+    releaseFirstRunAudit();
     await harness.cleanup();
   }
 });
