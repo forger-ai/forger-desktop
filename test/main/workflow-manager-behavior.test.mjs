@@ -73,7 +73,7 @@ const createManager = async (overrides = {}) => {
     events,
     connectorCalls,
     cleanup: async () => {
-      manager.dispose();
+      await manager.dispose();
       await rm(metadataRoot, { recursive: true, force: true });
     },
   };

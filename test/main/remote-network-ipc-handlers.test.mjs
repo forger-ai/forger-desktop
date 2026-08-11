@@ -2,11 +2,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createRequire } from 'node:module';
 
-import { createIpcMainRecorder } from './electron-test-helpers.mjs';
+import { createIpcMainRecorder, createTrustedMainWindow } from './electron-test-helpers.mjs';
 
 const require = createRequire(import.meta.url);
 const { IPC_CHANNELS } = require('../../dist-electron/shared/ipc.js');
 const { registerMainIpcHandlers } = require('../../dist-electron/main/ipc/main-handlers.js');
+const { mainWindow, trustedIpcEvent } = createTrustedMainWindow();
 
 test('main IPC delegates remote network share handlers', async () => {
   const { handlers, ipcMain } = createIpcMainRecorder();
@@ -47,6 +48,7 @@ test('main IPC delegates remote network share handlers', async () => {
     getPrivateDataRoot: () => '/tmp',
     getRuntimeStatus: () => ({}),
     getLocalNetworkShareStatus: () => ({}),
+    getMainWindow: () => mainWindow,
     getRemoteNetworkShareStatus: (appId) => ({ active: true, appId, state: 'connected', tunnelUrl: 'https://finance.loca.lt' }),
     getSecretsStore: () => ({}),
     installAppRuntime: async () => ({}),
@@ -54,6 +56,7 @@ test('main IPC delegates remote network share handlers', async () => {
     ipcMain,
     listAppPrompts: async () => [],
     listCatalogFromBackend: async () => [],
+    mainWindow,
     normalizeManifestAgentDefaults: () => ({}),
     openInstalledApp: async () => ({}),
     openOrFocusFriendChatWindow: async () => ({}),
@@ -93,17 +96,17 @@ test('main IPC delegates remote network share handlers', async () => {
     stopRemoteNetworkShare: async (appId) => ({ success: true, appId, status: { active: false, appId, state: 'closed' } }),
   });
 
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.startRemoteNetworkShare)(null, 'finance-os'), {
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.startRemoteNetworkShare)(trustedIpcEvent, 'finance-os'), {
     success: true,
     appId: 'finance-os',
     status: { active: true, appId: 'finance-os', state: 'preparing' },
   });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.stopRemoteNetworkShare)(null, 'finance-os'), {
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.stopRemoteNetworkShare)(trustedIpcEvent, 'finance-os'), {
     success: true,
     appId: 'finance-os',
     status: { active: false, appId: 'finance-os', state: 'closed' },
   });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.getRemoteNetworkShareStatus)(null, 'finance-os'), {
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.getRemoteNetworkShareStatus)(trustedIpcEvent, 'finance-os'), {
     active: true,
     appId: 'finance-os',
     state: 'connected',

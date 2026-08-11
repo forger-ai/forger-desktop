@@ -27,7 +27,7 @@ import type { AgentProviderUsageResult } from './provider-usage';
 import type { LlmProviderProfileMutationResult, LlmProviderProfilesState, SetActiveLlmProviderProfileInput, SetActiveLlmProviderProfileResult, UpdateLlmProviderProfileDefaultsInput } from './provider-profiles';
 import type { AgentToolPackageDefinition, AgentToolSettings, UpdateAgentToolApprovalInput, OfficialToolsState, ToolMutationResult, ConfigureOfficialToolInput, CallOfficialToolInput, CallOfficialToolResult, AppToolsInstallGate, SetAppToolGrantInput, OfficialToolRuntimeEvent, GetAppToolsInstallGateOptions } from './tools';
 import type { CallConnectionActionInput, CallConnectionActionResult, ConfigureConnectionInput, ConnectionMutationResult, ConnectionsState, DisconnectConnectionInput, SetAppConnectionGrantInput } from './connections';
-import type { PickedChatFile, FilesStageForChatInput, FilesDiscardStagedForChatInput, FilesActionResult, FilesListInput, ForgerFileRecord, ForgerFileCategory, FilesCreateCategoryInput, FilesRenameCategoryInput, FilesDeleteCategoryInput, FilesImportInput, FilesMoveInput, FilesRenameInput, FilesDeleteInput, DbListTablesResponse, DbQueryTableResponse } from './data';
+import type { PickedChatFile, FilesStageForChatInput, FilesDiscardStagedForChatInput, FilesReleaseSelectionsInput, FilesActionResult, FilesListInput, ForgerFileRecord, ForgerFileCategory, FilesCreateCategoryInput, FilesRenameCategoryInput, FilesDeleteCategoryInput, FilesImportInput, FilesMoveInput, FilesRenameInput, FilesDeleteInput, DbListTablesResponse, DbQueryTableResponse } from './data';
 import type { Automation, AutomationRun, AutomationRunSummary, AutomationUpsertInput, WindowControlState } from './automations';
 import type {
   Workflow,
@@ -330,6 +330,7 @@ export interface ForgerDesktopApi {
   filesPickForChat: () => Promise<PickedChatFile[]>;
   filesStageForChat: (input: FilesStageForChatInput) => Promise<PickedChatFile>;
   filesDiscardStagedForChat: (input: FilesDiscardStagedForChatInput) => Promise<FilesActionResult>;
+  filesReleaseSelections: (input: FilesReleaseSelectionsInput) => Promise<FilesActionResult>;
   filesList: (input?: FilesListInput) => Promise<ForgerFileRecord[]>;
   filesListCategories: () => Promise<ForgerFileCategory[]>;
   filesCreateCategory: (input: FilesCreateCategoryInput) => Promise<ForgerFileCategory>;

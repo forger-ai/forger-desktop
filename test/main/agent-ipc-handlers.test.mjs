@@ -2,14 +2,21 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createRequire } from 'node:module';
 
-import { createIpcMainRecorder } from './electron-test-helpers.mjs';
+import { createIpcMainRecorder, createTrustedMainWindow } from './electron-test-helpers.mjs';
 
 const require = createRequire(import.meta.url);
 const { IPC_CHANNELS } = require('../../dist-electron/shared/ipc.js');
 const { registerAgentIpcHandlers } = require('../../dist-electron/main/ipc/agent-handlers.js');
+const { createTrustedIpcMain } = require('../../dist-electron/main/ipc/trusted-ipc.js');
+const desktopWindow = createTrustedMainWindow({ id: 9001 });
 
 const createDeps = (overrides = {}) => {
   const { handlers, ipcMain } = createIpcMainRecorder();
+  const desktopIpcMain = createTrustedIpcMain({
+    ipcMain,
+    getMainWindow: () => desktopWindow.mainWindow,
+    getAdditionalTrustedWindows: overrides.getFriendChatWindows ?? (() => []),
+  });
   const deps = {
     BUILT_IN_CLAUDE_EFFORT: 'medium',
     BUILT_IN_CODEX_REASONING: 'medium',
@@ -19,6 +26,7 @@ const createDeps = (overrides = {}) => {
     appAgentTaskManager: null,
     automationManager: null,
     desktopErrorReporter: null,
+    desktopIpcMain,
     ipcMain,
     normalizeAgentProvider: (value) => value,
     normalizeClaudeEffort: (value, fallback) => value ?? fallback,
@@ -35,6 +43,7 @@ const createDeps = (overrides = {}) => {
 };
 
 const eventForWebContents = (id) => ({ sender: { id } });
+const desktopIpcEvent = desktopWindow.trustedIpcEvent;
 
 test('agent IPC registers current and legacy task/conversation aliases to the same handlers', () => {
   const { handlers } = createDeps();
@@ -509,11 +518,11 @@ test('manifest-agent IPC rejects missing identifiers, missing installs, and unde
 test('database IPC handlers return explicit errors when sqlite or app database paths are unavailable', async () => {
   const withoutSqlite = createDeps();
 
-  assert.deepEqual(await withoutSqlite.handlers.get(IPC_CHANNELS.dbListTables)(eventForWebContents(1), 'finance-os'), {
+  assert.deepEqual(await withoutSqlite.handlers.get(IPC_CHANNELS.dbListTables)(desktopIpcEvent, 'finance-os'), {
     error: 'db_module_unavailable',
   });
   assert.deepEqual(
-    await withoutSqlite.handlers.get(IPC_CHANNELS.dbQueryTable)(eventForWebContents(1), 'finance-os', 'accounts'),
+    await withoutSqlite.handlers.get(IPC_CHANNELS.dbQueryTable)(desktopIpcEvent, 'finance-os', 'accounts'),
     { error: 'db_module_unavailable' },
   );
 
@@ -521,11 +530,11 @@ test('database IPC handlers return explicit errors when sqlite or app database p
     BetterSqlite3: function BetterSqlite3() {},
     resolveAppDbPath: async () => null,
   });
-  assert.deepEqual(await withoutDbPath.handlers.get(IPC_CHANNELS.dbListTables)(eventForWebContents(1), 'finance-os'), {
+  assert.deepEqual(await withoutDbPath.handlers.get(IPC_CHANNELS.dbListTables)(desktopIpcEvent, 'finance-os'), {
     error: 'db_file_not_found',
   });
   assert.deepEqual(
-    await withoutDbPath.handlers.get(IPC_CHANNELS.dbQueryTable)(eventForWebContents(1), 'finance-os', 'accounts'),
+    await withoutDbPath.handlers.get(IPC_CHANNELS.dbQueryTable)(desktopIpcEvent, 'finance-os', 'accounts'),
     { error: 'db_file_not_found' },
   );
 });
@@ -571,12 +580,12 @@ test('database IPC handlers list and query sqlite tables with escaped table name
     resolveAppDbPath: async () => '/tmp/finance.sqlite',
   });
 
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.dbListTables)(eventForWebContents(1), 'finance-os'), {
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.dbListTables)(desktopIpcEvent, 'finance-os'), {
     tables: ['accounts', 'weird"name'],
     dbPath: '/tmp/finance.sqlite',
   });
   assert.deepEqual(
-    await handlers.get(IPC_CHANNELS.dbQueryTable)(eventForWebContents(1), 'finance-os', 'weird"name', 5),
+    await handlers.get(IPC_CHANNELS.dbQueryTable)(desktopIpcEvent, 'finance-os', 'weird"name', 5),
     { columns: ['id', 'name'], rows: [[1, 'cash']], total: 1 },
   );
   assert.equal(dbInstances.every((db) => db.options.readonly && db.closed), true);
@@ -590,11 +599,11 @@ test('database IPC handlers list and query sqlite tables with escaped table name
     },
     resolveAppDbPath: async () => '/tmp/finance.sqlite',
   });
-  assert.deepEqual(await failing.handlers.get(IPC_CHANNELS.dbListTables)(eventForWebContents(1), 'finance-os'), {
+  assert.deepEqual(await failing.handlers.get(IPC_CHANNELS.dbListTables)(desktopIpcEvent, 'finance-os'), {
     error: 'sqlite_locked',
   });
   assert.deepEqual(
-    await failing.handlers.get(IPC_CHANNELS.dbQueryTable)(eventForWebContents(1), 'finance-os', 'accounts'),
+    await failing.handlers.get(IPC_CHANNELS.dbQueryTable)(desktopIpcEvent, 'finance-os', 'accounts'),
     { error: 'sqlite_locked' },
   );
 });
@@ -804,27 +813,72 @@ test('agent IPC covers authorized task operations, conversation unavailable bran
   );
 });
 
+test('agent registrations keep app-agent calls app-scoped and Desktop mutations Desktop-scoped', async () => {
+  const appEvent = eventForWebContents(77);
+  const friendWindow = createTrustedMainWindow({ id: 78 });
+  const calls = [];
+  const { handlers } = createDeps({
+    appAgentTaskManager: {
+      start: async (appId, input) => {
+        calls.push(['task', appId, input]);
+        return { runId: 'run-1' };
+      },
+    },
+    automationManager: {
+      create: async (input) => {
+        calls.push(['automation', input]);
+        return { id: 'auto-1' };
+      },
+    },
+    getFriendChatWindows: () => [friendWindow.mainWindow],
+    resolveAppIdForWebContents: (id) => id === 77 ? 'finance-os' : null,
+  });
+
+  assert.deepEqual(
+    await handlers.get(IPC_CHANNELS.appAgentTaskStart)(appEvent, { prompt: 'go' }),
+    { runId: 'run-1' },
+  );
+  for (const event of [desktopIpcEvent, friendWindow.trustedIpcEvent]) {
+    await assert.rejects(
+      handlers.get(IPC_CHANNELS.appAgentTaskStart)(event, { prompt: 'impersonate' }),
+      /app_window_not_authorized/,
+    );
+  }
+  await assert.rejects(
+    handlers.get(IPC_CHANNELS.automationsCreate)(appEvent, { title: 'raw mutation' }),
+    /ipc_sender_not_authorized/,
+  );
+  assert.deepEqual(
+    await handlers.get(IPC_CHANNELS.automationsCreate)(friendWindow.trustedIpcEvent, { title: 'Daily' }),
+    { id: 'auto-1' },
+  );
+  assert.deepEqual(calls, [
+    ['task', 'finance-os', { prompt: 'go' }],
+    ['automation', { title: 'Daily' }],
+  ]);
+});
+
 test('automation IPC handlers expose safe missing-manager fallbacks and delegate when available', async () => {
   const missing = createDeps();
 
-  assert.deepEqual(await missing.handlers.get(IPC_CHANNELS.automationsList)(), []);
+  assert.deepEqual(await missing.handlers.get(IPC_CHANNELS.automationsList)(desktopIpcEvent), []);
   await assert.rejects(
-    missing.handlers.get(IPC_CHANNELS.automationsCreate)(null, { title: 'Daily' }),
+    missing.handlers.get(IPC_CHANNELS.automationsCreate)(desktopIpcEvent, { title: 'Daily' }),
     /automation_manager_unavailable/,
   );
   await assert.rejects(
-    missing.handlers.get(IPC_CHANNELS.automationsUpdate)(null, { id: 'auto-1' }),
+    missing.handlers.get(IPC_CHANNELS.automationsUpdate)(desktopIpcEvent, { id: 'auto-1' }),
     /automation_manager_unavailable/,
   );
-  assert.deepEqual(await missing.handlers.get(IPC_CHANNELS.automationsDelete)(null, 'auto-1'), {
+  assert.deepEqual(await missing.handlers.get(IPC_CHANNELS.automationsDelete)(desktopIpcEvent, 'auto-1'), {
     success: false,
     technicalCode: 'automation_manager_unavailable',
   });
-  await assert.rejects(missing.handlers.get(IPC_CHANNELS.automationsPause)(null, 'auto-1'), /automation_manager_unavailable/);
-  await assert.rejects(missing.handlers.get(IPC_CHANNELS.automationsResume)(null, 'auto-1'), /automation_manager_unavailable/);
-  await assert.rejects(missing.handlers.get(IPC_CHANNELS.automationsRunNow)(null, 'auto-1'), /automation_manager_unavailable/);
-  assert.deepEqual(await missing.handlers.get(IPC_CHANNELS.automationsListRuns)(null, 'auto-1'), []);
-  assert.equal(await missing.handlers.get(IPC_CHANNELS.automationsGetRunTranscript)(null, 'run-1'), null);
+  await assert.rejects(missing.handlers.get(IPC_CHANNELS.automationsPause)(desktopIpcEvent, 'auto-1'), /automation_manager_unavailable/);
+  await assert.rejects(missing.handlers.get(IPC_CHANNELS.automationsResume)(desktopIpcEvent, 'auto-1'), /automation_manager_unavailable/);
+  await assert.rejects(missing.handlers.get(IPC_CHANNELS.automationsRunNow)(desktopIpcEvent, 'auto-1'), /automation_manager_unavailable/);
+  assert.deepEqual(await missing.handlers.get(IPC_CHANNELS.automationsListRuns)(desktopIpcEvent, 'auto-1'), []);
+  assert.equal(await missing.handlers.get(IPC_CHANNELS.automationsGetRunTranscript)(desktopIpcEvent, 'run-1'), null);
 
   const calls = [];
   const manager = {
@@ -867,26 +921,26 @@ test('automation IPC handlers expose safe missing-manager fallbacks and delegate
   };
   const available = createDeps({ automationManager: manager });
 
-  assert.deepEqual(await available.handlers.get(IPC_CHANNELS.automationsList)(), [{ id: 'auto-1' }]);
-  assert.deepEqual(await available.handlers.get(IPC_CHANNELS.automationsCreate)(null, { title: 'Daily' }), {
+  assert.deepEqual(await available.handlers.get(IPC_CHANNELS.automationsList)(desktopIpcEvent), [{ id: 'auto-1' }]);
+  assert.deepEqual(await available.handlers.get(IPC_CHANNELS.automationsCreate)(desktopIpcEvent, { title: 'Daily' }), {
     id: 'auto-created',
   });
-  assert.deepEqual(await available.handlers.get(IPC_CHANNELS.automationsUpdate)(null, { id: 'auto-1' }), {
+  assert.deepEqual(await available.handlers.get(IPC_CHANNELS.automationsUpdate)(desktopIpcEvent, { id: 'auto-1' }), {
     id: 'auto-1',
     updated: true,
   });
-  assert.deepEqual(await available.handlers.get(IPC_CHANNELS.automationsDelete)(null, 'auto-1'), { success: true });
-  assert.deepEqual(await available.handlers.get(IPC_CHANNELS.automationsPause)(null, 'auto-1'), {
+  assert.deepEqual(await available.handlers.get(IPC_CHANNELS.automationsDelete)(desktopIpcEvent, 'auto-1'), { success: true });
+  assert.deepEqual(await available.handlers.get(IPC_CHANNELS.automationsPause)(desktopIpcEvent, 'auto-1'), {
     success: true,
     paused: true,
   });
-  assert.deepEqual(await available.handlers.get(IPC_CHANNELS.automationsResume)(null, 'auto-1'), {
+  assert.deepEqual(await available.handlers.get(IPC_CHANNELS.automationsResume)(desktopIpcEvent, 'auto-1'), {
     success: true,
     paused: false,
   });
-  assert.deepEqual(await available.handlers.get(IPC_CHANNELS.automationsRunNow)(null, 'auto-1'), { id: 'run-now' });
-  assert.deepEqual(await available.handlers.get(IPC_CHANNELS.automationsListRuns)(null, 'auto-1'), [{ id: 'run-1' }]);
-  assert.deepEqual(await available.handlers.get(IPC_CHANNELS.automationsGetRunTranscript)(null, 'run-1'), [
+  assert.deepEqual(await available.handlers.get(IPC_CHANNELS.automationsRunNow)(desktopIpcEvent, 'auto-1'), { id: 'run-now' });
+  assert.deepEqual(await available.handlers.get(IPC_CHANNELS.automationsListRuns)(desktopIpcEvent, 'auto-1'), [{ id: 'run-1' }]);
+  assert.deepEqual(await available.handlers.get(IPC_CHANNELS.automationsGetRunTranscript)(desktopIpcEvent, 'run-1'), [
     { role: 'assistant', content: 'done' },
   ]);
   assert.deepEqual(calls.map((entry) => entry[0]), [
@@ -922,57 +976,57 @@ test('workflow IPC keeps mutations and runs behind the disabled feature gate', a
   });
 
   await assert.rejects(
-    handlers.get(IPC_CHANNELS.workflowsUpsert)({}, { name: 'Daily summary' }),
+    handlers.get(IPC_CHANNELS.workflowsUpsert)(desktopIpcEvent, { name: 'Daily summary' }),
     /workflow_feature_disabled/,
   );
   await assert.rejects(
-    handlers.get(IPC_CHANNELS.workflowsReview)({}, 'workflow-1'),
+    handlers.get(IPC_CHANNELS.workflowsReview)(desktopIpcEvent, 'workflow-1'),
     /workflow_feature_disabled/,
   );
   await assert.rejects(
-    handlers.get(IPC_CHANNELS.workflowsApply)({}, 'workflow-1', {
+    handlers.get(IPC_CHANNELS.workflowsApply)(desktopIpcEvent, 'workflow-1', {
       definitionHash: 'hash-1',
       expectedRevision: 1,
     }),
     /workflow_feature_disabled/,
   );
   await assert.rejects(
-    handlers.get(IPC_CHANNELS.workflowsListRevisions)({}, 'workflow-1'),
+    handlers.get(IPC_CHANNELS.workflowsListRevisions)(desktopIpcEvent, 'workflow-1'),
     /workflow_feature_disabled/,
   );
   await assert.rejects(
-    handlers.get(IPC_CHANNELS.workflowsRestoreRevision)({}, 'workflow-1', {
+    handlers.get(IPC_CHANNELS.workflowsRestoreRevision)(desktopIpcEvent, 'workflow-1', {
       revisionId: 'revision-1',
       expectedRevision: 1,
     }),
     /workflow_feature_disabled/,
   );
   assert.deepEqual(
-    await handlers.get(IPC_CHANNELS.workflowsDelete)({}, 'workflow-1'),
+    await handlers.get(IPC_CHANNELS.workflowsDelete)(desktopIpcEvent, 'workflow-1'),
     { success: false, technicalCode: 'workflow_feature_disabled' },
   );
   await assert.rejects(
-    handlers.get(IPC_CHANNELS.workflowsSetEnabled)({}, 'workflow-1', true),
+    handlers.get(IPC_CHANNELS.workflowsSetEnabled)(desktopIpcEvent, 'workflow-1', true),
     /workflow_feature_disabled/,
   );
   await assert.rejects(
-    handlers.get(IPC_CHANNELS.workflowsRunNow)({}, 'workflow-1'),
+    handlers.get(IPC_CHANNELS.workflowsRunNow)(desktopIpcEvent, 'workflow-1'),
     /workflow_feature_disabled/,
   );
   await assert.rejects(
-    handlers.get(IPC_CHANNELS.workflowsRunNode)({}, 'workflow-1', 'node-1'),
+    handlers.get(IPC_CHANNELS.workflowsRunNode)(desktopIpcEvent, 'workflow-1', 'node-1'),
     /workflow_feature_disabled/,
   );
   await assert.rejects(
-    handlers.get(IPC_CHANNELS.workflowsRetryRun)({}, 'run-1'),
+    handlers.get(IPC_CHANNELS.workflowsRetryRun)(desktopIpcEvent, 'run-1'),
     /workflow_feature_disabled/,
   );
   assert.deepEqual(
-    await handlers.get(IPC_CHANNELS.workflowsCancelRun)({}, 'run-1'),
+    await handlers.get(IPC_CHANNELS.workflowsCancelRun)(desktopIpcEvent, 'run-1'),
     { success: false, technicalCode: 'workflow_feature_disabled' },
   );
   assert.deepEqual(
-    await handlers.get(IPC_CHANNELS.workflowsApproveNode)({}, {
+    await handlers.get(IPC_CHANNELS.workflowsApproveNode)(desktopIpcEvent, {
       runId: 'run-1',
       nodeId: 'node-1',
       approved: true,
@@ -1022,14 +1076,14 @@ test('workflow IPC resolves the current enabled manager for every request', asyn
   });
   currentManager = createManager(currentCalls);
 
-  await handlers.get(IPC_CHANNELS.workflowsList)({});
-  await handlers.get(IPC_CHANNELS.workflowsUpsert)({}, { name: 'Daily summary' });
-  await handlers.get(IPC_CHANNELS.workflowsReview)({}, 'workflow-1');
-  await handlers.get(IPC_CHANNELS.workflowsApply)({}, 'workflow-1', {
+  await handlers.get(IPC_CHANNELS.workflowsList)(desktopIpcEvent);
+  await handlers.get(IPC_CHANNELS.workflowsUpsert)(desktopIpcEvent, { name: 'Daily summary' });
+  await handlers.get(IPC_CHANNELS.workflowsReview)(desktopIpcEvent, 'workflow-1');
+  await handlers.get(IPC_CHANNELS.workflowsApply)(desktopIpcEvent, 'workflow-1', {
     definitionHash: 'hash-1',
     expectedRevision: 1,
   });
-  const publicRevisions = await handlers.get(IPC_CHANNELS.workflowsListRevisions)({}, 'workflow-1');
+  const publicRevisions = await handlers.get(IPC_CHANNELS.workflowsListRevisions)(desktopIpcEvent, 'workflow-1');
   assert.deepEqual(publicRevisions, [{
     id: 'revision-1',
     workflowId: 'workflow-1',
@@ -1038,30 +1092,30 @@ test('workflow IPC resolves the current enabled manager for every request', asyn
     createdAt: '2026-08-10T00:00:00.000Z',
     applied: true,
   }]);
-  await handlers.get(IPC_CHANNELS.workflowsRestoreRevision)({}, 'workflow-1', {
+  await handlers.get(IPC_CHANNELS.workflowsRestoreRevision)(desktopIpcEvent, 'workflow-1', {
     revisionId: 'revision-1',
     expectedRevision: 1,
   });
-  await handlers.get(IPC_CHANNELS.workflowsDelete)({}, 'workflow-1');
-  await handlers.get(IPC_CHANNELS.workflowsSetEnabled)({}, 'workflow-1', true);
-  await handlers.get(IPC_CHANNELS.workflowsRunNow)({}, 'workflow-1');
-  await handlers.get(IPC_CHANNELS.workflowsRunNode)({}, 'workflow-1', 'node-1');
-  await handlers.get(IPC_CHANNELS.workflowsRetryRun)({}, 'run-1');
-  await handlers.get(IPC_CHANNELS.workflowsCancelRun)({}, 'run-1');
-  await handlers.get(IPC_CHANNELS.workflowsApproveNode)({}, {
+  await handlers.get(IPC_CHANNELS.workflowsDelete)(desktopIpcEvent, 'workflow-1');
+  await handlers.get(IPC_CHANNELS.workflowsSetEnabled)(desktopIpcEvent, 'workflow-1', true);
+  await handlers.get(IPC_CHANNELS.workflowsRunNow)(desktopIpcEvent, 'workflow-1');
+  await handlers.get(IPC_CHANNELS.workflowsRunNode)(desktopIpcEvent, 'workflow-1', 'node-1');
+  await handlers.get(IPC_CHANNELS.workflowsRetryRun)(desktopIpcEvent, 'run-1');
+  await handlers.get(IPC_CHANNELS.workflowsCancelRun)(desktopIpcEvent, 'run-1');
+  await handlers.get(IPC_CHANNELS.workflowsApproveNode)(desktopIpcEvent, {
     runId: 'run-1',
     nodeId: 'node-1',
     approved: true,
   });
-  await handlers.get(IPC_CHANNELS.workflowsListRuns)({}, 'workflow-1');
-  await handlers.get(IPC_CHANNELS.workflowsGetRun)({}, 'run-1');
+  await handlers.get(IPC_CHANNELS.workflowsListRuns)(desktopIpcEvent, 'workflow-1');
+  await handlers.get(IPC_CHANNELS.workflowsGetRun)(desktopIpcEvent, 'run-1');
 
   await assert.rejects(
-    handlers.get(IPC_CHANNELS.workflowsSetEnabled)({}, 'workflow-1', 'false'),
+    handlers.get(IPC_CHANNELS.workflowsSetEnabled)(desktopIpcEvent, 'workflow-1', 'false'),
     /workflow_enabled_required/,
   );
   await assert.rejects(
-    handlers.get(IPC_CHANNELS.workflowsApproveNode)({}, {
+    handlers.get(IPC_CHANNELS.workflowsApproveNode)(desktopIpcEvent, {
       runId: 'run-1',
       nodeId: 'node-1',
       approved: 'false',

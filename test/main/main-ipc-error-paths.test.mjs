@@ -6,11 +6,12 @@ import test from 'node:test';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 
-import { createIpcMainRecorder } from './electron-test-helpers.mjs';
+import { createIpcMainRecorder, createTrustedMainWindow } from './electron-test-helpers.mjs';
 
 const require = createRequire(import.meta.url);
 const { IPC_CHANNELS } = require('../../dist-electron/shared/ipc.js');
 const { registerMainIpcHandlers } = require('../../dist-electron/main/ipc/main-handlers.js');
+const { mainWindow: trustedMainWindow, trustedIpcEvent } = createTrustedMainWindow();
 
 const createDeps = async (overrides = {}) => {
   const electronMock = {
@@ -145,7 +146,7 @@ const createDeps = async (overrides = {}) => {
       listAppPrompts: async () => [],
       listCatalogFromBackend: async () => [],
       listLlmProviderProfiles: async () => ({ providers: {}, activeProfileIds: {}, checkedAt: new Date(0).toISOString() }),
-      mainWindow: null,
+      mainWindow: trustedMainWindow,
       normalizeManifestAgentDefaults: () => ({}),
       openInstalledApp: async () => ({ success: true }),
       openOrFocusFriendChatWindow: async () => ({ success: true }),
@@ -190,11 +191,24 @@ const createDeps = async (overrides = {}) => {
       ...overrides,
     };
 
+    if (!Object.hasOwn(overrides, 'getMainWindow')) {
+      deps.getMainWindow = () => deps.mainWindow;
+    }
+    if (!Object.hasOwn(overrides, 'getFriendChatWindows')) {
+      deps.getFriendChatWindows = () => [];
+    }
+
     registerMainIpcHandlers(deps);
     return { deps, handlers, IPC_CHANNELS, logs };
 };
 
-const eventForWebContents = (id = 1) => ({ sender: { id } });
+const eventForWebContents = (id = 101) => {
+  const mainFrame = { routingId: id };
+  return {
+    sender: { id, mainFrame, isDestroyed: () => false },
+    senderFrame: mainFrame,
+  };
+};
 
 test('main IPC backup handlers convert manager failures into user-visible errors and install logs', async () => {
   const error = new Error('disk_full');
@@ -217,7 +231,7 @@ test('main IPC backup handlers convert manager failures into user-visible errors
   });
 
   assert.deepEqual(
-    await handlers.get(IPC_CHANNELS.createBackup)(null, { appId: 'finance-os', reason: 'manual' }),
+    await handlers.get(IPC_CHANNELS.createBackup)(trustedIpcEvent, { appId: 'finance-os', reason: 'manual' }),
     {
       success: false,
       userMessage: 'No pudimos crear el respaldo.',
@@ -225,7 +239,7 @@ test('main IPC backup handlers convert manager failures into user-visible errors
     },
   );
   assert.deepEqual(
-    await handlers.get(IPC_CHANNELS.deleteBackup)(null, { appId: 'finance-os', backupId: 'b1' }),
+    await handlers.get(IPC_CHANNELS.deleteBackup)(trustedIpcEvent, { appId: 'finance-os', backupId: 'b1' }),
     {
       success: false,
       userMessage: 'No pudimos eliminar ese respaldo.',
@@ -233,7 +247,7 @@ test('main IPC backup handlers convert manager failures into user-visible errors
     },
   );
   assert.deepEqual(
-    await handlers.get(IPC_CHANNELS.deleteBackups)(null, { appId: 'finance-os', backupIds: ['b1', 'b2'] }),
+    await handlers.get(IPC_CHANNELS.deleteBackups)(trustedIpcEvent, { appId: 'finance-os', backupIds: ['b1', 'b2'] }),
     {
       success: false,
       userMessage: 'No pudimos eliminar esos respaldos.',
@@ -243,7 +257,7 @@ test('main IPC backup handlers convert manager failures into user-visible errors
     },
   );
   assert.deepEqual(
-    await handlers.get(IPC_CHANNELS.restoreBackup)(null, { appId: 'finance-os', backupId: 'b1' }),
+    await handlers.get(IPC_CHANNELS.restoreBackup)(trustedIpcEvent, { appId: 'finance-os', backupId: 'b1' }),
     {
       success: false,
       userMessage: 'No pudimos restaurar ese respaldo.',
@@ -261,18 +275,18 @@ test('main IPC backup handlers convert manager failures into user-visible errors
 test('main IPC cloud and social handlers return explicit errors when backend services are unavailable', async () => {
   const { handlers, IPC_CHANNELS } = await createDeps();
 
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.listRemoteBackups)(null, 'finance-os'), {
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.listRemoteBackups)(trustedIpcEvent, 'finance-os'), {
     backups: [],
     usage: { usedBytes: 0, limitBytes: 0, backupCount: 0, backupCountLimit: 0 },
   });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.deleteRemoteBackup)(null, 5), {
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.deleteRemoteBackup)(trustedIpcEvent, 5), {
     success: false,
     userMessage: 'Forger Cloud Sync requiere una cuenta de Forger Cloud activa.',
     technicalCode: 'subscription_required',
   });
-  await assert.rejects(handlers.get(IPC_CHANNELS.sendFriendRequest)(null, 'ada'), /backend_client_missing/);
-  await assert.rejects(handlers.get(IPC_CHANNELS.acceptFriendRequest)(null, 1), /backend_client_missing/);
-  await assert.rejects(handlers.get(IPC_CHANNELS.decideAppMessagePermission)(null, 1, 'allow'), /backend_client_missing/);
+  await assert.rejects(handlers.get(IPC_CHANNELS.sendFriendRequest)(trustedIpcEvent, 'ada'), /backend_client_missing/);
+  await assert.rejects(handlers.get(IPC_CHANNELS.acceptFriendRequest)(trustedIpcEvent, 1), /backend_client_missing/);
+  await assert.rejects(handlers.get(IPC_CHANNELS.decideAppMessagePermission)(trustedIpcEvent, 1, 'allow'), /backend_client_missing/);
 });
 
 test('main IPC external link handlers reject unsafe URLs and return diagnostics on shell failures', async () => {
@@ -295,42 +309,42 @@ test('main IPC external link handlers reject unsafe URLs and return diagnostics 
     },
   });
 
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.openExternalUrl)(null, 'javascript:alert(1)'), {
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.openExternalUrl)(trustedIpcEvent, 'javascript:alert(1)'), {
     success: false,
     userMessage: 'No pudimos abrir ese enlace.',
     technicalCode: 'unsupported_url_protocol',
   });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.openExternalUrl)(null, 'relative/file.txt'), {
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.openExternalUrl)(trustedIpcEvent, 'relative/file.txt'), {
     success: false,
     userMessage: 'No pudimos abrir ese enlace.',
     technicalCode: 'unsupported_url_protocol',
   });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.openExternalUrl)(null, 'http://example.com'), {
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.openExternalUrl)(trustedIpcEvent, 'http://example.com'), {
     success: false,
     userMessage: 'No pudimos abrir ese enlace.',
     technicalCode: 'shell_blocked',
   });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.openExternalUrl)(null, 'https://example.com'), {
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.openExternalUrl)(trustedIpcEvent, 'https://example.com'), {
     success: false,
     userMessage: 'No pudimos abrir ese enlace.',
     technicalCode: 'shell_blocked',
   });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.openExternalUrl)(null, `${filePath}:12`), { success: true });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.openExternalUrl)(null, pathToFileURL(filePath).toString()), { success: true });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.openExternalUrl)(null, '~/forger-open-link-missing.txt'), { success: true });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.openExternalUrl)(null, blockedPath), {
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.openExternalUrl)(trustedIpcEvent, `${filePath}:12`), { success: true });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.openExternalUrl)(trustedIpcEvent, pathToFileURL(filePath).toString()), { success: true });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.openExternalUrl)(trustedIpcEvent, '~/forger-open-link-missing.txt'), { success: true });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.openExternalUrl)(trustedIpcEvent, blockedPath), {
     success: false,
     userMessage: 'No pudimos abrir ese enlace.',
     technicalCode: 'open_local_path_failed',
     sensitiveDetails: { error: 'permission denied' },
   });
   assert.deepEqual(openedPaths, [filePath, filePath, homePath, blockedPath]);
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.openCodexUsageDashboard)(), {
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.openCodexUsageDashboard)(trustedIpcEvent), {
     success: false,
     technicalCode: 'shell_blocked',
     userMessage: 'No pudimos abrir el panel de uso de Codex.',
   });
-  assert.equal((await handlers.get(IPC_CHANNELS.getAgentProviderUsage)()).success, true);
+  assert.equal((await handlers.get(IPC_CHANNELS.getAgentProviderUsage)(trustedIpcEvent)).success, true);
 });
 
 test('personal agent IPC filters grants to installed apps and existing official tool actions', async () => {
@@ -378,12 +392,12 @@ test('personal agent IPC filters grants to installed apps and existing official 
     toAppSummary: (record) => ({ id: record.appId, name: record.name, status: 'installed' }),
   });
 
-  await handlers.get(IPC_CHANNELS.personalAgentsCreate)(null, {
+  await handlers.get(IPC_CHANNELS.personalAgentsCreate)(trustedIpcEvent, {
     name: 'Ops',
     appIds: ['finance-os', 'missing-app'],
     toolIds: ['gmail.search_messages', 'forger_chrome_extension.navigate', 'missing.tool'],
   });
-  await handlers.get(IPC_CHANNELS.personalAgentUpdatePermissions)(null, {
+  await handlers.get(IPC_CHANNELS.personalAgentUpdatePermissions)(trustedIpcEvent, {
     agentId: 'agent-1',
     appIds: ['missing-app', 'finance-os'],
     toolIds: ['missing.tool', 'forger_chrome_extension.navigate'],
@@ -535,6 +549,42 @@ test('main IPC app-scoped handlers delegate authorized context, tools, folders, 
   ]);
 });
 
+test('app-runtime and app-cloud IPC remain app-window-only when Desktop windows share the preload', async () => {
+  const appWindow = createTrustedMainWindow({ id: 301 });
+  const friendWindow = createTrustedMainWindow({ id: 302 });
+  const { handlers, IPC_CHANNELS } = await createDeps({
+    getFriendChatWindows: () => [friendWindow.mainWindow],
+    getCodexAuthStatus: async () => ({ authenticated: true }),
+    listLocalCloudMessages: async () => [{ id: 9, friendUserId: 7 }],
+    registry: {
+      apps: {
+        'finance-os': { appId: 'finance-os', installDir: '/apps/finance-os' },
+      },
+    },
+    resolveAppIdForWebContents: (id) => id === appWindow.mainWindow.webContents.id ? 'finance-os' : null,
+    resolveInstalledManifest: async () => ({ cloudMessaging: { enabled: true } }),
+  });
+
+  assert.deepEqual(
+    await handlers.get(IPC_CHANNELS.appAiSubscriptionStatus)(appWindow.trustedIpcEvent),
+    { connected: true },
+  );
+  assert.deepEqual(
+    await handlers.get(IPC_CHANNELS.appMessagesList)(appWindow.trustedIpcEvent, 7),
+    [{ id: 9, friendUserId: 7 }],
+  );
+  for (const event of [trustedIpcEvent, friendWindow.trustedIpcEvent]) {
+    await assert.rejects(
+      handlers.get(IPC_CHANNELS.appAiSubscriptionStatus)(event),
+      /app_window_not_authorized/,
+    );
+    await assert.rejects(
+      handlers.get(IPC_CHANNELS.appMessagesList)(event, 7),
+      /app_window_not_authorized/,
+    );
+  }
+});
+
 test('main IPC app message list enforces manifest opt-in and decrypts backend messages when enabled', async () => {
   const disabled = await createDeps({
     registry: {
@@ -607,24 +657,24 @@ test('main IPC chat handlers use safe fallbacks and sanitize shared files before
   });
 
   const withoutChat = await createDeps();
-  assert.deepEqual(await withoutChat.handlers.get(IPC_CHANNELS.chatStartRun)(null, { prompt: 'hello' }), {
+  assert.deepEqual(await withoutChat.handlers.get(IPC_CHANNELS.chatStartRun)(trustedIpcEvent, { prompt: 'hello' }), {
     runId: '',
     status: 'failed',
   });
-  assert.equal(await withoutChat.handlers.get(IPC_CHANNELS.chatGetRun)(null, { runId: 'run-1' }), null);
-  assert.deepEqual(await withoutChat.handlers.get(IPC_CHANNELS.chatCancelRun)(null, { runId: 'run-1' }), { success: false });
-  assert.deepEqual(await withoutChat.handlers.get(IPC_CHANNELS.chatApprovePermission)(null, { runId: 'run-1' }), { success: false });
-  assert.deepEqual(await withoutChat.handlers.get(IPC_CHANNELS.chatApplyRun)(null, { runId: 'run-1' }), {
+  assert.equal(await withoutChat.handlers.get(IPC_CHANNELS.chatGetRun)(trustedIpcEvent, { runId: 'run-1' }), null);
+  assert.deepEqual(await withoutChat.handlers.get(IPC_CHANNELS.chatCancelRun)(trustedIpcEvent, { runId: 'run-1' }), { success: false });
+  assert.deepEqual(await withoutChat.handlers.get(IPC_CHANNELS.chatApprovePermission)(trustedIpcEvent, { runId: 'run-1' }), { success: false });
+  assert.deepEqual(await withoutChat.handlers.get(IPC_CHANNELS.chatApplyRun)(trustedIpcEvent, { runId: 'run-1' }), {
     success: false,
     technicalCode: 'chat_orchestrator_unavailable',
   });
-  assert.deepEqual(await withoutChat.handlers.get(IPC_CHANNELS.chatUndo)(null, { runId: 'run-1' }), {
+  assert.deepEqual(await withoutChat.handlers.get(IPC_CHANNELS.chatUndo)(trustedIpcEvent, { runId: 'run-1' }), {
     success: false,
     technicalCode: 'chat_orchestrator_unavailable',
   });
 
   assert.deepEqual(
-    await handlers.get(IPC_CHANNELS.chatStartRun)(null, {
+    await handlers.get(IPC_CHANNELS.chatStartRun)(trustedIpcEvent, {
       appId: 'finance-os',
       prompt: 'load files',
       sharedFiles: [
@@ -641,7 +691,7 @@ test('main IPC chat handlers use safe fallbacks and sanitize shared files before
   assert.doesNotMatch(starts[0].prompt, /networkAccess|NETWORK ACCESS/);
   assert.doesNotMatch(starts[0].prompt, /blocked\.txt/);
   assert.deepEqual(
-    await handlers.get(IPC_CHANNELS.chatStartRun)(null, {
+    await handlers.get(IPC_CHANNELS.chatStartRun)(trustedIpcEvent, {
       prompt: 'free chat without internet',
       networkAccess: false,
       sharedFiles: [],
@@ -652,10 +702,10 @@ test('main IPC chat handlers use safe fallbacks and sanitize shared files before
   assert.equal(starts[1].appId, null);
   assert.equal(starts[1].networkAccess, false);
   assert.doesNotMatch(starts[1].prompt, /NETWORK ACCESS/);
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.chatGetRun)(null, { runId: 'run-1' }), { runId: 'run-1' });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.chatCancelRun)(null, { runId: 'run-1' }), { success: true });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.chatApprovePermission)(null, { runId: 'run-1' }), { success: true });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.chatApplyRun)(null, { runId: 'run-1' }), { success: true });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.chatGetRun)(trustedIpcEvent, { runId: 'run-1' }), { runId: 'run-1' });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.chatCancelRun)(trustedIpcEvent, { runId: 'run-1' }), { success: true });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.chatApprovePermission)(trustedIpcEvent, { runId: 'run-1' }), { success: true });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.chatApplyRun)(trustedIpcEvent, { runId: 'run-1' }), { success: true });
 });
 
 test('main IPC chat handlers delegate permissions, undo, conflict resolution, and renderer traces safely', async () => {
@@ -689,7 +739,7 @@ test('main IPC chat handlers delegate permissions, undo, conflict resolution, an
   });
 
   assert.deepEqual(
-    await handlers.get(IPC_CHANNELS.resolveAppUpdateConflict)(null, 'missing-app'),
+    await handlers.get(IPC_CHANNELS.resolveAppUpdateConflict)(trustedIpcEvent, 'missing-app'),
     {
       success: false,
       userMessage: 'No hay una actualizacion en conflicto para resolver.',
@@ -697,7 +747,7 @@ test('main IPC chat handlers delegate permissions, undo, conflict resolution, an
     },
   );
   assert.deepEqual(
-    await handlers.get(IPC_CHANNELS.resolveAppUpdateConflict)(null, 'finance-os'),
+    await handlers.get(IPC_CHANNELS.resolveAppUpdateConflict)(trustedIpcEvent, 'finance-os'),
     { runId: 'run-conflict', status: 'running' },
   );
   assert.equal(starts.length, 1);
@@ -707,17 +757,17 @@ test('main IPC chat handlers delegate permissions, undo, conflict resolution, an
   assert.match(starts[0].prompt, /app tools context/);
 
   assert.deepEqual(
-    await handlers.get(IPC_CHANNELS.chatApprovePermission)(null, { runId: 'run-1', requestId: 'req-1', decision: 'allow' }),
+    await handlers.get(IPC_CHANNELS.chatApprovePermission)(trustedIpcEvent, { runId: 'run-1', requestId: 'req-1', decision: 'allow' }),
     { success: true, approved: true },
   );
   assert.deepEqual(
-    await handlers.get(IPC_CHANNELS.chatUndo)(null, { runId: 'run-1' }),
+    await handlers.get(IPC_CHANNELS.chatUndo)(trustedIpcEvent, { runId: 'run-1' }),
     { success: true, undoRunId: 'run-1' },
   );
 
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.chatTrace)(null, { event: 'unknown_event' }), { success: false });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.chatTrace)(trustedIpcEvent, { event: 'unknown_event' }), { success: false });
   assert.deepEqual(
-    await handlers.get(IPC_CHANNELS.chatTrace)(null, { event: 'chat_run_event_received', runId: 'run-1' }),
+    await handlers.get(IPC_CHANNELS.chatTrace)(trustedIpcEvent, { event: 'chat_run_event_received', runId: 'run-1' }),
     { success: true },
   );
   assert.deepEqual(logs.at(-1), {
@@ -726,53 +776,38 @@ test('main IPC chat handlers delegate permissions, undo, conflict resolution, an
   });
 });
 
-test('main IPC file picker uses the owning window when available and falls back for destroyed windows', async () => {
+test('main IPC file picker uses the owning window and rejects it after destruction', async () => {
   const dialogCalls = [];
-  const pickedPaths = [];
-  const mainWindow = {
-    destroyed: false,
-    isDestroyed() {
-      return this.destroyed;
-    },
-  };
+  let destroyed = false;
+  const pickerWindow = createTrustedMainWindow();
+  pickerWindow.mainWindow.isDestroyed = () => destroyed;
   const { handlers, IPC_CHANNELS } = await createDeps({
     dialog: {
       showOpenDialog: async (...args) => {
         dialogCalls.push(args);
-        return { canceled: false, filePaths: ['/tmp/one.csv', '/tmp/two.csv'] };
+        return { canceled: true, filePaths: [] };
       },
     },
-    getFileLibrary: () => ({
-      pickFileInfo: async (filePaths) => {
-        pickedPaths.push(filePaths);
-        return filePaths.map((filePath) => ({ path: filePath, name: path.basename(filePath) }));
-      },
-    }),
-    mainWindow,
+    mainWindow: pickerWindow.mainWindow,
   });
 
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.filesPickForChat)(), [
-    { path: '/tmp/one.csv', name: 'one.csv' },
-    { path: '/tmp/two.csv', name: 'two.csv' },
-  ]);
-  mainWindow.destroyed = true;
-  await handlers.get(IPC_CHANNELS.filesPickForChat)();
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.filesPickForChat)(pickerWindow.trustedIpcEvent), []);
+  destroyed = true;
+  await assert.rejects(
+    handlers.get(IPC_CHANNELS.filesPickForChat)(pickerWindow.trustedIpcEvent),
+    /ipc_sender_not_authorized/,
+  );
 
-  assert.equal(dialogCalls.length, 2);
-  assert.equal(dialogCalls[0][0], mainWindow);
+  assert.equal(dialogCalls.length, 1);
+  assert.equal(dialogCalls[0][0], pickerWindow.mainWindow);
   assert.deepEqual(dialogCalls[0][1], { properties: ['openFile', 'multiSelections'] });
-  assert.deepEqual(dialogCalls[1][0], { properties: ['openFile', 'multiSelections'] });
-  assert.deepEqual(pickedPaths, [
-    ['/tmp/one.csv', '/tmp/two.csv'],
-    ['/tmp/one.csv', '/tmp/two.csv'],
-  ]);
 
   const canceled = await createDeps({
     dialog: {
       showOpenDialog: async () => ({ canceled: true, filePaths: [] }),
     },
   });
-  assert.deepEqual(await canceled.handlers.get(IPC_CHANNELS.filesPickForChat)(), []);
+  assert.deepEqual(await canceled.handlers.get(IPC_CHANNELS.filesPickForChat)(trustedIpcEvent), []);
 });
 
 test('main IPC remote backup and account handlers preserve safe fallbacks and refresh catalog state', async () => {
@@ -803,7 +838,7 @@ test('main IPC remote backup and account handlers preserve safe fallbacks and re
   });
 
   assert.deepEqual(
-    await handlers.get(IPC_CHANNELS.createRemoteBackup)(null, { appId: 'finance-os' }),
+    await handlers.get(IPC_CHANNELS.createRemoteBackup)(trustedIpcEvent, { appId: 'finance-os' }),
     {
       success: false,
       userMessage: 'No pudimos subir el respaldo a Forger Cloud.',
@@ -811,7 +846,7 @@ test('main IPC remote backup and account handlers preserve safe fallbacks and re
     },
   );
   assert.deepEqual(
-    await handlers.get(IPC_CHANNELS.restoreRemoteBackup)(null, { remoteBackupId: 42 }),
+    await handlers.get(IPC_CHANNELS.restoreRemoteBackup)(trustedIpcEvent, { remoteBackupId: 42 }),
     {
       success: false,
       userMessage: 'No pudimos restaurar el respaldo cloud.',
@@ -824,19 +859,19 @@ test('main IPC remote backup and account handlers preserve safe fallbacks and re
   ]);
 
   assert.deepEqual(
-    await handlers.get(IPC_CHANNELS.loginForgerAccount)(null, { email: 'ada@example.com', password: 'secret' }),
+    await handlers.get(IPC_CHANNELS.loginForgerAccount)(trustedIpcEvent, { email: 'ada@example.com', password: 'secret' }),
     { authenticated: true, success: true, userMessage: 'ok', technicalCode: undefined },
   );
   assert.deepEqual(deps.state.catalogApps, catalog);
   assert.equal(switched[0].account.token, 'token-1');
 
   assert.deepEqual(
-    await handlers.get(IPC_CHANNELS.updateForgerAccountProfile)(null, { username: 'ada' }),
+    await handlers.get(IPC_CHANNELS.updateForgerAccountProfile)(trustedIpcEvent, { username: 'ada' }),
     { authenticated: true, success: true, userMessage: 'saved', technicalCode: undefined },
   );
   assert.equal(switched.at(-1).account.username, 'ada');
 
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.logoutForgerAccount)(), {
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.logoutForgerAccount)(trustedIpcEvent), {
     authenticated: false,
     success: true,
   });
@@ -904,67 +939,67 @@ test('main IPC delegates common service handlers and returns backend-missing fal
     publicForgerAccount: (account) => ({ authenticated: Boolean(account.authenticated) }),
   });
 
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.listInstalledApps)(), [{ id: 'finance-os', name: 'Finance OS' }]);
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.listCatalogApps)(), [{
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.listInstalledApps)(trustedIpcEvent), [{ id: 'finance-os', name: 'Finance OS' }]);
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.listCatalogApps)(trustedIpcEvent), [{
     id: 'finance-os',
     name: 'Finance OS',
     localNetworkShare: { active: true, appId: 'finance-os', url: 'http://192.168.1.20:5555' },
   }]);
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.startLocalNetworkShare)(null, 'finance-os'), {
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.startLocalNetworkShare)(trustedIpcEvent, 'finance-os'), {
     success: true,
     appId: 'finance-os',
     status: { active: true, appId: 'finance-os' },
   });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.stopLocalNetworkShare)(null, 'finance-os'), {
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.stopLocalNetworkShare)(trustedIpcEvent, 'finance-os'), {
     success: true,
     appId: 'finance-os',
     status: { active: false, appId: 'finance-os' },
   });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.getLocalNetworkShareStatus)(null, 'finance-os'), {
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.getLocalNetworkShareStatus)(trustedIpcEvent, 'finance-os'), {
     active: true,
     appId: 'finance-os',
     url: 'http://192.168.1.20:5555',
   });
   assert.equal(calls.some(([name]) => name === 'ensureCatalogStatuses'), true);
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.getCloudSyncSettings)(), { enabled: true });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.getSettings)(), { locale: 'es' });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.listLlmProviderProfiles)(), { providers: {}, activeProfileIds: {}, checkedAt: new Date(0).toISOString() });
-  assert.equal((await handlers.get(IPC_CHANNELS.setActiveLlmProviderProfile)(null, { provider: 'codex', profileId: 'codex:system' })).success, true);
-  assert.equal((await handlers.get(IPC_CHANNELS.updateLlmProviderProfileDefaults)(null, { provider: 'codex', profileId: 'codex:system', model: 'gpt-5' })).success, true);
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.getForgerAccount)(), { authenticated: false });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.getCloudSyncSettings)(trustedIpcEvent), { enabled: true });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.getSettings)(trustedIpcEvent), { locale: 'es' });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.listLlmProviderProfiles)(trustedIpcEvent), { providers: {}, activeProfileIds: {}, checkedAt: new Date(0).toISOString() });
+  assert.equal((await handlers.get(IPC_CHANNELS.setActiveLlmProviderProfile)(trustedIpcEvent, { provider: 'codex', profileId: 'codex:system' })).success, true);
+  assert.equal((await handlers.get(IPC_CHANNELS.updateLlmProviderProfileDefaults)(trustedIpcEvent, { provider: 'codex', profileId: 'codex:system', model: 'gpt-5' })).success, true);
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.getForgerAccount)(trustedIpcEvent), { authenticated: false });
 
-  assert.equal((await handlers.get(IPC_CHANNELS.registerForgerAccount)(null, {})).technicalCode, 'backend_client_missing');
-  assert.equal((await handlers.get(IPC_CHANNELS.loginForgerAccount)(null, {})).technicalCode, 'backend_client_missing');
-  assert.equal((await handlers.get(IPC_CHANNELS.updateForgerAccountProfile)(null, { username: 'ada' })).technicalCode, 'backend_client_missing');
-  assert.equal((await handlers.get(IPC_CHANNELS.submitProductFeedback)(null, {})).technicalCode, 'backend_client_missing');
-  assert.equal((await handlers.get(IPC_CHANNELS.submitUsageEvent)(null, { eventName: 'app_opened' })).technicalCode, 'backend_client_missing');
-  assert.equal((await handlers.get(IPC_CHANNELS.submitDesktopErrorReport)(null, { source: 'main', operation: 'op', message: 'fail' })).technicalCode, 'backend_client_missing');
-  assert.equal((await handlers.get(IPC_CHANNELS.submitAppRating)(null, { appId: 'finance-os' })).technicalCode, 'backend_client_missing');
+  assert.equal((await handlers.get(IPC_CHANNELS.registerForgerAccount)(trustedIpcEvent, {})).technicalCode, 'backend_client_missing');
+  assert.equal((await handlers.get(IPC_CHANNELS.loginForgerAccount)(trustedIpcEvent, {})).technicalCode, 'backend_client_missing');
+  assert.equal((await handlers.get(IPC_CHANNELS.updateForgerAccountProfile)(trustedIpcEvent, { username: 'ada' })).technicalCode, 'backend_client_missing');
+  assert.equal((await handlers.get(IPC_CHANNELS.submitProductFeedback)(trustedIpcEvent, {})).technicalCode, 'backend_client_missing');
+  assert.equal((await handlers.get(IPC_CHANNELS.submitUsageEvent)(trustedIpcEvent, { eventName: 'app_opened' })).technicalCode, 'backend_client_missing');
+  assert.equal((await handlers.get(IPC_CHANNELS.submitDesktopErrorReport)(trustedIpcEvent, { source: 'main', operation: 'op', message: 'fail' })).technicalCode, 'backend_client_missing');
+  assert.equal((await handlers.get(IPC_CHANNELS.submitAppRating)(trustedIpcEvent, { appId: 'finance-os' })).technicalCode, 'backend_client_missing');
 
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.getCloudDevices)(), { connected: true });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.updateCloudDeviceName)(null, { name: 'Studio Mac' }), { success: true, updated: 'Studio Mac' });
-  assert.equal((await handlers.get(IPC_CHANNELS.generateDevicePairingCode)()).pairingCode, 'ABC12345');
-  assert.equal((await handlers.get(IPC_CHANNELS.getCloudIdentity)()).keyFingerprint, 'fingerprint');
-  assert.equal((await handlers.get(IPC_CHANNELS.revealCloudSecretKey)()).privateKey, 'secret');
-  assert.equal((await handlers.get(IPC_CHANNELS.regenerateCloudSecretKey)()).keyFingerprint, 'new-fingerprint');
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.getCloudDevices)(trustedIpcEvent), { connected: true });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.updateCloudDeviceName)(trustedIpcEvent, { name: 'Studio Mac' }), { success: true, updated: 'Studio Mac' });
+  assert.equal((await handlers.get(IPC_CHANNELS.generateDevicePairingCode)(trustedIpcEvent)).pairingCode, 'ABC12345');
+  assert.equal((await handlers.get(IPC_CHANNELS.getCloudIdentity)(trustedIpcEvent)).keyFingerprint, 'fingerprint');
+  assert.equal((await handlers.get(IPC_CHANNELS.revealCloudSecretKey)(trustedIpcEvent)).privateKey, 'secret');
+  assert.equal((await handlers.get(IPC_CHANNELS.regenerateCloudSecretKey)(trustedIpcEvent)).keyFingerprint, 'new-fingerprint');
   assert.equal(calls.some(([name]) => name === 'cloudDeviceStart'), true);
 
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.listUserSecrets)(), [{ id: 'secret-1' }]);
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.connectAppSecret)(null, { appId: 'finance-os', appSecretName: 'API_KEY', userSecretId: 'secret-1' }), { success: true });
-  assert.equal((await handlers.get(IPC_CHANNELS.connectAppSecret)(null, { appId: 'finance-os', appSecretName: 'MISSING', userSecretId: 'secret-1' })).technicalCode, 'app_secret_not_declared');
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.listUserSecrets)(trustedIpcEvent), [{ id: 'secret-1' }]);
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.connectAppSecret)(trustedIpcEvent, { appId: 'finance-os', appSecretName: 'API_KEY', userSecretId: 'secret-1' }), { success: true });
+  assert.equal((await handlers.get(IPC_CHANNELS.connectAppSecret)(trustedIpcEvent, { appId: 'finance-os', appSecretName: 'MISSING', userSecretId: 'secret-1' })).technicalCode, 'app_secret_not_declared');
 
-  assert.deepEqual((await handlers.get(IPC_CHANNELS.memoryList)(null, { scope: 'global' }))[0].access, { caller: 'settings' });
-  assert.equal((await handlers.get(IPC_CHANNELS.memoryCreate)(null, { text: 'Dato' })).input.source, 'settings');
-  assert.equal((await handlers.get(IPC_CHANNELS.memoryUpdate)(null, { id: 'mem-1' })).access.caller, 'settings');
-  assert.equal((await handlers.get(IPC_CHANNELS.memoryDelete)(null, 'mem-1')).success, true);
+  assert.deepEqual((await handlers.get(IPC_CHANNELS.memoryList)(trustedIpcEvent, { scope: 'global' }))[0].access, { caller: 'settings' });
+  assert.equal((await handlers.get(IPC_CHANNELS.memoryCreate)(trustedIpcEvent, { text: 'Dato' })).input.source, 'settings');
+  assert.equal((await handlers.get(IPC_CHANNELS.memoryUpdate)(trustedIpcEvent, { id: 'mem-1' })).access.caller, 'settings');
+  assert.equal((await handlers.get(IPC_CHANNELS.memoryDelete)(trustedIpcEvent, 'mem-1')).success, true);
 
-  assert.equal((await handlers.get(IPC_CHANNELS.getDesktopUpdateState)()).status, 'idle');
-  assert.equal((await handlers.get(IPC_CHANNELS.checkDesktopUpdates)()).status, 'available');
-  assert.equal((await handlers.get(IPC_CHANNELS.downloadDesktopUpdate)()).status, 'downloaded');
-  assert.equal((await handlers.get(IPC_CHANNELS.installDesktopUpdate)()).status, 'installing');
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.desktopUpdateQuitForInstall)(), { success: true });
+  assert.equal((await handlers.get(IPC_CHANNELS.getDesktopUpdateState)(trustedIpcEvent)).status, 'idle');
+  assert.equal((await handlers.get(IPC_CHANNELS.checkDesktopUpdates)(trustedIpcEvent)).status, 'available');
+  assert.equal((await handlers.get(IPC_CHANNELS.downloadDesktopUpdate)(trustedIpcEvent)).status, 'downloaded');
+  assert.equal((await handlers.get(IPC_CHANNELS.installDesktopUpdate)(trustedIpcEvent)).status, 'installing');
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.desktopUpdateQuitForInstall)(trustedIpcEvent), { success: true });
 
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.logoutForgerAccount)(), { authenticated: false, success: true });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.logoutForgerAccount)(trustedIpcEvent), { authenticated: false, success: true });
   assert.equal(deps.state.catalogApps.length, 1);
 });
 
@@ -1042,18 +1077,18 @@ test('main IPC delegates cloud account, social, telemetry, auth, and browser suc
     },
   });
 
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.listRemoteBackups)(null, 'finance-os'), {
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.listRemoteBackups)(trustedIpcEvent, 'finance-os'), {
     backups: [{ id: 1, appId: 'finance-os' }],
     usage: { usedBytes: 5 },
   });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.deleteRemoteBackup)(null, 1), { success: true, id: 1 });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.registerForgerAccount)(null, { email: 'ada@example.com' }), {
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.deleteRemoteBackup)(trustedIpcEvent, 1), { success: true, id: 1 });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.registerForgerAccount)(trustedIpcEvent, { email: 'ada@example.com' }), {
     success: true,
     authenticated: true,
     email: 'ada@example.com',
     token: 'registered',
   });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.loginForgerAccount)(null, { email: 'ada@example.com' }), {
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.loginForgerAccount)(trustedIpcEvent, { email: 'ada@example.com' }), {
     authenticated: false,
     email: undefined,
     success: false,
@@ -1061,7 +1096,7 @@ test('main IPC delegates cloud account, social, telemetry, auth, and browser suc
     technicalCode: 'invalid_credentials',
   });
   assert.deepEqual(deps.state.catalogApps, catalog);
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.updateForgerAccountProfile)(null, { username: 'taken' }), {
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.updateForgerAccountProfile)(trustedIpcEvent, { username: 'taken' }), {
     authenticated: false,
     email: undefined,
     success: false,
@@ -1069,66 +1104,66 @@ test('main IPC delegates cloud account, social, telemetry, auth, and browser suc
     technicalCode: 'username_taken',
   });
 
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.listFriends)(), [{ id: 1, username: 'ada' }]);
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.searchFriends)(null, 'lovelace'), [{ id: 2, username: 'lovelace' }]);
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.sendFriendRequest)(null, 'ada'), { id: 3, username: 'ada', status: 'pending' });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.acceptFriendRequest)(null, 3), { id: 3, status: 'accepted' });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.declineFriendRequest)(null, 3), { id: 3, status: 'declined' });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.cancelFriendRequest)(null, 3), { id: 3, status: 'canceled' });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.markFriendChatRead)(null, 2), { id: 2, friendUserId: 2, unreadCount: 0 });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.listFriends)(trustedIpcEvent), [{ id: 1, username: 'ada' }]);
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.searchFriends)(trustedIpcEvent, 'lovelace'), [{ id: 2, username: 'lovelace' }]);
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.sendFriendRequest)(trustedIpcEvent, 'ada'), { id: 3, username: 'ada', status: 'pending' });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.acceptFriendRequest)(trustedIpcEvent, 3), { id: 3, status: 'accepted' });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.declineFriendRequest)(trustedIpcEvent, 3), { id: 3, status: 'declined' });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.cancelFriendRequest)(trustedIpcEvent, 3), { id: 3, status: 'canceled' });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.markFriendChatRead)(trustedIpcEvent, 2), { id: 2, friendUserId: 2, unreadCount: 0 });
   assert.equal(calls.some(([name]) => name === 'socialEvent'), true);
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.openFriendChatWindow)(null, { id: 2 }), {
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.openFriendChatWindow)(trustedIpcEvent, { id: 2 }), {
     success: true,
     friendship: { id: 2 },
   });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.listCloudMessages)(null, 2), [
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.listCloudMessages)(trustedIpcEvent, 2), [
     { id: 4, friendUserId: 2, body: 'hello', decrypted: true },
   ]);
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.sendCloudMessage)(null, { friendUserId: 2, body: 'hi' }), {
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.sendCloudMessage)(trustedIpcEvent, { friendUserId: 2, body: 'hi' }), {
     id: 9,
     friendUserId: 2,
     body: 'hi',
   });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.decideAppMessagePermission)(null, 5, 'allow'), {
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.decideAppMessagePermission)(trustedIpcEvent, 5, 'allow'), {
     id: 5,
     decision: 'allow',
     decrypted: true,
   });
 
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.submitAppRating)(null, { appId: 'finance-os', rating: 5 }), {
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.submitAppRating)(trustedIpcEvent, { appId: 'finance-os', rating: 5 }), {
     success: true,
     rating: 5,
   });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.submitProductFeedback)(null, { message: 'idea' }), {
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.submitProductFeedback)(trustedIpcEvent, { message: 'idea' }), {
     success: true,
     feedback: { message: 'idea' },
   });
-  assert.equal((await handlers.get(IPC_CHANNELS.submitUsageEvent)(null, { eventName: 'app_opened' })).event.desktopVersion, '0.0.0-test');
-  assert.equal((await handlers.get(IPC_CHANNELS.submitDesktopErrorReport)(null, { source: 'main' })).report.arch, process.arch);
+  assert.equal((await handlers.get(IPC_CHANNELS.submitUsageEvent)(trustedIpcEvent, { eventName: 'app_opened' })).event.desktopVersion, '0.0.0-test');
+  assert.equal((await handlers.get(IPC_CHANNELS.submitDesktopErrorReport)(trustedIpcEvent, { source: 'main' })).report.arch, process.arch);
 
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.openExternalUrl)(null, 'https://example.com/path'), { success: true });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.openExternalUrl)(null, 'http://example.com/path'), { success: true });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.openCodexUsageDashboard)(), { success: true });
-  assert.equal((await handlers.get(IPC_CHANNELS.getAgentProviderUsage)()).providers[0].provider, 'codex');
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.openExternalUrl)(trustedIpcEvent, 'https://example.com/path'), { success: true });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.openExternalUrl)(trustedIpcEvent, 'http://example.com/path'), { success: true });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.openCodexUsageDashboard)(trustedIpcEvent), { success: true });
+  assert.equal((await handlers.get(IPC_CHANNELS.getAgentProviderUsage)(trustedIpcEvent)).providers[0].provider, 'codex');
   assert.deepEqual(calls.filter(([name]) => name === 'openExternal').map((entry) => entry[1]), [
     'https://example.com/path',
     'http://example.com/path',
     'https://platform.openai.com/usage',
   ]);
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.getCodexAuthStatus)(), { installed: true, authenticated: true });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.connectCodexAuth)(), { success: true, provider: 'codex' });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.disconnectCodexAuth)(), { success: true, disconnected: true });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.reinstallCodex)(), { success: true, reinstalled: 'codex' });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.getClaudeAuthStatus)(), { installed: true, authenticated: true, source: 'managed' });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.connectClaudeAuth)(), { success: true, provider: 'claude' });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.reinstallClaude)(), { success: true, reinstalled: 'claude' });
-  assert.equal(Array.isArray(await handlers.get(IPC_CHANNELS.listAgentTools)()), true);
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.getAgentToolSettings)(), { approvals: { gmail: true } });
-  assert.equal((await handlers.get(IPC_CHANNELS.getDesktopUpdateState)()).status, 'idle');
-  assert.equal((await handlers.get(IPC_CHANNELS.checkDesktopUpdates)()).status, 'available');
-  assert.equal((await handlers.get(IPC_CHANNELS.downloadDesktopUpdate)()).status, 'downloaded');
-  assert.equal((await handlers.get(IPC_CHANNELS.installDesktopUpdate)()).status, 'installed');
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.desktopUpdateQuitForInstall)(), { success: true });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.getCodexAuthStatus)(trustedIpcEvent), { installed: true, authenticated: true });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.connectCodexAuth)(trustedIpcEvent), { success: true, provider: 'codex' });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.disconnectCodexAuth)(trustedIpcEvent), { success: true, disconnected: true });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.reinstallCodex)(trustedIpcEvent), { success: true, reinstalled: 'codex' });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.getClaudeAuthStatus)(trustedIpcEvent), { installed: true, authenticated: true, source: 'managed' });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.connectClaudeAuth)(trustedIpcEvent), { success: true, provider: 'claude' });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.reinstallClaude)(trustedIpcEvent), { success: true, reinstalled: 'claude' });
+  assert.equal(Array.isArray(await handlers.get(IPC_CHANNELS.listAgentTools)(trustedIpcEvent)), true);
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.getAgentToolSettings)(trustedIpcEvent), { approvals: { gmail: true } });
+  assert.equal((await handlers.get(IPC_CHANNELS.getDesktopUpdateState)(trustedIpcEvent)).status, 'idle');
+  assert.equal((await handlers.get(IPC_CHANNELS.checkDesktopUpdates)(trustedIpcEvent)).status, 'available');
+  assert.equal((await handlers.get(IPC_CHANNELS.downloadDesktopUpdate)(trustedIpcEvent)).status, 'downloaded');
+  assert.equal((await handlers.get(IPC_CHANNELS.installDesktopUpdate)(trustedIpcEvent)).status, 'installed');
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.desktopUpdateQuitForInstall)(trustedIpcEvent), { success: true });
   assert.equal(quitCalls, 1);
 });
 
@@ -1216,13 +1251,13 @@ test('main IPC covers conflict, backup, memory, secret, cloud-device, and free-c
     resolveInstalledAppSecrets: async () => [{ name: 'API_KEY' }],
   });
 
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.listBackups)(null, 'finance-os'), [{ backupId: 'b1', appId: 'finance-os' }]);
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.createBackup)(null, { appId: 'finance-os' }), {
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.listBackups)(trustedIpcEvent, 'finance-os'), [{ backupId: 'b1', appId: 'finance-os' }]);
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.createBackup)(trustedIpcEvent, { appId: 'finance-os' }), {
     success: true,
     backupId: 'b-created',
   });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.deleteBackup)(null, { appId: 'finance-os', backupId: 'b1' }), { success: true });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.deleteBackups)(null, { appId: 'finance-os', backupIds: ['b1', 'b2'] }), {
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.deleteBackup)(trustedIpcEvent, { appId: 'finance-os', backupId: 'b1' }), { success: true });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.deleteBackups)(trustedIpcEvent, { appId: 'finance-os', backupIds: ['b1', 'b2'] }), {
     success: true,
     deleted: [
       { appId: 'finance-os', backupId: 'b1' },
@@ -1230,7 +1265,7 @@ test('main IPC covers conflict, backup, memory, secret, cloud-device, and free-c
     ],
     failed: [],
   });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.restoreBackup)(null, { appId: 'finance-os', backupId: 'b1' }), { success: true });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.restoreBackup)(trustedIpcEvent, { appId: 'finance-os', backupId: 'b1' }), { success: true });
   assert.deepEqual(backupCalls.map(([name]) => name), ['list', 'create', 'delete', 'deleteMany', 'restore']);
 
   const noChatConflict = await createDeps({
@@ -1240,33 +1275,33 @@ test('main IPC covers conflict, backup, memory, secret, cloud-device, and free-c
       },
     },
   });
-  assert.deepEqual(await noChatConflict.handlers.get(IPC_CHANNELS.resolveAppUpdateConflict)(null, 'finance-os'), {
+  assert.deepEqual(await noChatConflict.handlers.get(IPC_CHANNELS.resolveAppUpdateConflict)(trustedIpcEvent, 'finance-os'), {
     success: false,
     userMessage: 'El agente no esta disponible para resolver el conflicto.',
     technicalCode: 'chat_orchestrator_unavailable',
   });
 
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.getCloudDevices)(), { devices: [], connected: false });
-  assert.equal((await handlers.get(IPC_CHANNELS.updateCloudDeviceName)(null, { name: 'Studio Mac' })).technicalCode, 'cloud_device_manager_missing');
-  assert.equal((await handlers.get(IPC_CHANNELS.generateDevicePairingCode)()).technicalCode, 'cloud_device_manager_missing');
-  assert.equal((await handlers.get(IPC_CHANNELS.createUserSecret)(null, { name: 'API key' })).id, 'secret-created');
-  assert.equal((await handlers.get(IPC_CHANNELS.updateUserSecret)(null, { id: 'secret-1' })).id, 'secret-1');
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.deleteUserSecret)(null, { id: 'secret-1' }), { success: true, id: 'secret-1' });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.getCloudDevices)(trustedIpcEvent), { devices: [], connected: false });
+  assert.equal((await handlers.get(IPC_CHANNELS.updateCloudDeviceName)(trustedIpcEvent, { name: 'Studio Mac' })).technicalCode, 'cloud_device_manager_missing');
+  assert.equal((await handlers.get(IPC_CHANNELS.generateDevicePairingCode)(trustedIpcEvent)).technicalCode, 'cloud_device_manager_missing');
+  assert.equal((await handlers.get(IPC_CHANNELS.createUserSecret)(trustedIpcEvent, { name: 'API key', value: 'secret-value' })).id, 'secret-created');
+  assert.equal((await handlers.get(IPC_CHANNELS.updateUserSecret)(trustedIpcEvent, { id: 'secret-1', name: 'API key' })).id, 'secret-1');
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.deleteUserSecret)(trustedIpcEvent, { id: 'secret-1' }), { success: true, id: 'secret-1' });
   assert.deepEqual(
-    await handlers.get(IPC_CHANNELS.disconnectAppSecret)(null, { appId: 'finance-os', appSecretName: 'API_KEY' }),
+    await handlers.get(IPC_CHANNELS.disconnectAppSecret)(trustedIpcEvent, { appId: 'finance-os', appSecretName: 'API_KEY' }),
     { success: true, appId: 'finance-os', name: 'API_KEY' },
   );
 
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.memoryList)(null), {
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.memoryList)(trustedIpcEvent), {
     input: {},
     access: { caller: 'settings' },
   });
-  assert.equal((await handlers.get(IPC_CHANNELS.memoryCreate)(null, { text: 'Remember this' })).input.source, 'settings');
-  assert.equal((await handlers.get(IPC_CHANNELS.memoryUpdate)(null, { id: 'mem-1', text: 'Updated' })).access.caller, 'settings');
-  assert.equal((await handlers.get(IPC_CHANNELS.memoryDelete)(null, 'mem-1')).success, true);
+  assert.equal((await handlers.get(IPC_CHANNELS.memoryCreate)(trustedIpcEvent, { text: 'Remember this' })).input.source, 'settings');
+  assert.equal((await handlers.get(IPC_CHANNELS.memoryUpdate)(trustedIpcEvent, { id: 'mem-1', text: 'Updated' })).access.caller, 'settings');
+  assert.equal((await handlers.get(IPC_CHANNELS.memoryDelete)(trustedIpcEvent, 'mem-1')).success, true);
 
   assert.deepEqual(
-    await handlers.get(IPC_CHANNELS.chatStartRun)(null, {
+    await handlers.get(IPC_CHANNELS.chatStartRun)(trustedIpcEvent, {
       prompt: 'hello',
       sharedFiles: [
         { path: 'nested/shared.csv', name: undefined, relativePath: undefined, sizeBytes: undefined, modifiedAt: undefined, source: undefined },
@@ -1280,20 +1315,35 @@ test('main IPC covers conflict, backup, memory, secret, cloud-device, and free-c
   assert.match(starts[0].prompt, /shared\.csv/);
 });
 
-test('main IPC delegates app lifecycle, prompt, secret, official-tool, and file-library commands', async () => {
+test('main IPC delegates app lifecycle, prompt, secret, official-tool, and file-library commands', async (t) => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'forger-file-delegation-'));
+  t.after(async () => await fs.rm(tempDir, { recursive: true, force: true }));
+  const stagedPath = path.join(tempDir, 'staged.png');
+  await fs.writeFile(stagedPath, 'image', 'utf8');
   const calls = [];
+  const discardedFileInputs = [];
   const fileLibrary = {
     createCategory: async (input) => ({ op: 'createCategory', input }),
     deleteCategory: async (input) => ({ op: 'deleteCategory', input }),
     deleteFiles: async (input) => ({ op: 'deleteFiles', input }),
-    discardStagedFilesForChat: async (input) => ({ op: 'discard', input }),
+    discardStagedFilesForChat: async (input) => {
+      discardedFileInputs.push(input);
+      return { op: 'discard', input };
+    },
     importFiles: async (input) => ({ op: 'import', input }),
     list: async (input) => ({ op: 'list', input }),
     listCategories: async () => [{ id: 'uncategorized' }],
     moveFiles: async (input) => ({ op: 'move', input }),
     renameCategory: async (input) => ({ op: 'renameCategory', input }),
     renameFile: async (input) => ({ op: 'renameFile', input }),
-    stageFileForChat: async (input) => ({ op: 'stage', input }),
+    stageFileForChat: async () => ({
+      sourcePath: stagedPath,
+      name: 'staged.png',
+      sizeBytes: 5,
+      modifiedAt: (await fs.stat(stagedPath)).mtime.toISOString(),
+      type: 'image',
+      staged: true,
+    }),
   };
   const officialTools = {
     activate: async (toolId, locale) => ({ op: 'activate', toolId, locale }),
@@ -1335,45 +1385,58 @@ test('main IPC delegates app lifecycle, prompt, secret, official-tool, and file-
     validateAppPrompt: async (input) => ({ op: 'validatePrompt', input }),
   });
 
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.installApp)(null, 'finance-os', 'es'), { op: 'install', appId: 'finance-os', locale: 'es' });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.installSocialApp)(null, { appId: 9 }, 'es'), { op: 'installSocial', input: { appId: 9 }, locale: 'es' });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.updateApp)(null, 'finance-os', 'es'), { op: 'update', appId: 'finance-os', locale: 'es' });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.uninstallApp)(null, 'finance-os'), { op: 'uninstall', appId: 'finance-os' });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.openApp)(null, 'finance-os', 'es'), { op: 'open', appId: 'finance-os', locale: 'es' });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.stopApp)(null, 'finance-os'), { op: 'stop', appId: 'finance-os' });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.installWelcome)(null, 'finance-os', 'es'), { op: 'welcome', appId: 'finance-os', userLanguage: 'es' });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.getAppRuntimeStatus)(null, 'finance-os'), { appId: 'finance-os', status: 'running' });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.getAppDetails)(null, 'finance-os'), { appId: 'finance-os', name: 'Finance OS' });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.getAppSecrets)(null, 'finance-os'), { appId: 'finance-os', appSecrets: [] });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.setAppAutoSync)(null, 'finance-os', true), { appId: 'finance-os', autoSync: true });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.restoreAppUserVersion)(null, 'finance-os'), { op: 'restoreUserVersion', appId: 'finance-os' });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.listAppPrompts)(null, 'finance-os'), [{ appId: 'finance-os', id: 'summary' }]);
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.validateAppPrompt)(null, { appId: 'finance-os' }), { op: 'validatePrompt', input: { appId: 'finance-os' } });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.updateAppPrompt)(null, { appId: 'finance-os' }), { op: 'updatePrompt', input: { appId: 'finance-os' } });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.restoreAppPrompt)(null, { appId: 'finance-os' }), { op: 'restorePrompt', input: { appId: 'finance-os' } });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.updateCodexDefaults)(null, { model: 'gpt' }), { op: 'updateCodexDefaults', input: { model: 'gpt' } });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.updateAgentDefaults)(null, { provider: 'codex' }), { op: 'updateAgentDefaults', input: { provider: 'codex' } });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.updateAgentToolApproval)(null, { toolId: 'gmail' }), { op: 'updateAgentToolApproval', input: { toolId: 'gmail' } });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.installApp)(trustedIpcEvent, 'finance-os', 'es'), { op: 'install', appId: 'finance-os', locale: 'es' });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.installSocialApp)(trustedIpcEvent, { appId: 9 }, 'es'), { op: 'installSocial', input: { appId: 9 }, locale: 'es' });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.updateApp)(trustedIpcEvent, 'finance-os', 'es'), { op: 'update', appId: 'finance-os', locale: 'es' });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.uninstallApp)(trustedIpcEvent, 'finance-os'), { op: 'uninstall', appId: 'finance-os' });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.openApp)(trustedIpcEvent, 'finance-os', 'es'), { op: 'open', appId: 'finance-os', locale: 'es' });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.stopApp)(trustedIpcEvent, 'finance-os'), { op: 'stop', appId: 'finance-os' });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.installWelcome)(trustedIpcEvent, 'finance-os', 'es'), { op: 'welcome', appId: 'finance-os', userLanguage: 'es' });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.getAppRuntimeStatus)(trustedIpcEvent, 'finance-os'), { appId: 'finance-os', status: 'running' });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.getAppDetails)(trustedIpcEvent, 'finance-os'), { appId: 'finance-os', name: 'Finance OS' });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.getAppSecrets)(trustedIpcEvent, 'finance-os'), { appId: 'finance-os', appSecrets: [] });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.setAppAutoSync)(trustedIpcEvent, 'finance-os', true), { appId: 'finance-os', autoSync: true });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.restoreAppUserVersion)(trustedIpcEvent, 'finance-os'), { op: 'restoreUserVersion', appId: 'finance-os' });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.listAppPrompts)(trustedIpcEvent, 'finance-os'), [{ appId: 'finance-os', id: 'summary' }]);
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.validateAppPrompt)(trustedIpcEvent, { appId: 'finance-os' }), { op: 'validatePrompt', input: { appId: 'finance-os' } });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.updateAppPrompt)(trustedIpcEvent, { appId: 'finance-os' }), { op: 'updatePrompt', input: { appId: 'finance-os' } });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.restoreAppPrompt)(trustedIpcEvent, { appId: 'finance-os' }), { op: 'restorePrompt', input: { appId: 'finance-os' } });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.updateCodexDefaults)(trustedIpcEvent, { model: 'gpt' }), { op: 'updateCodexDefaults', input: { model: 'gpt' } });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.updateAgentDefaults)(trustedIpcEvent, { provider: 'codex' }), { op: 'updateAgentDefaults', input: { provider: 'codex' } });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.updateAgentToolApproval)(trustedIpcEvent, { toolId: 'gmail' }), { op: 'updateAgentToolApproval', input: { toolId: 'gmail' } });
 
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.listOfficialTools)(null, 'es'), [{ id: 'gmail', locale: 'es' }]);
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.refreshOfficialTools)(null, 'es'), [{ id: 'gmail', refreshed: true, locale: 'es' }]);
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.activateOfficialTool)(null, 'gmail', 'es'), { op: 'activate', toolId: 'gmail', locale: 'es' });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.configureOfficialTool)(null, { toolId: 'gmail' }), { op: 'configure', input: { toolId: 'gmail' } });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.deactivateOfficialTool)(null, 'gmail', 'es'), { op: 'deactivate', toolId: 'gmail', options: { locale: 'es' } });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.getAppToolsInstallGate)(null, 'finance-os', 'es'), { appId: 'finance-os', locale: 'es', connectionRequired: [], connectionOptional: [] });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.setAppToolGrant)(null, { appId: 'finance-os', toolId: 'gmail' }, 'es'), { appId: 'finance-os', locale: 'es', connectionRequired: [], connectionOptional: [] });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.setAppConnectionGrant)(null, { appId: 'finance-os', type: 'gmail', granted: true }, 'es'), { appId: 'finance-os', locale: 'es', connectionRequired: [], connectionOptional: [] });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.listOfficialTools)(trustedIpcEvent, 'es'), [{ id: 'gmail', locale: 'es' }]);
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.refreshOfficialTools)(trustedIpcEvent, 'es'), [{ id: 'gmail', refreshed: true, locale: 'es' }]);
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.activateOfficialTool)(trustedIpcEvent, 'gmail', 'es'), { op: 'activate', toolId: 'gmail', locale: 'es' });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.configureOfficialTool)(trustedIpcEvent, { toolId: 'gmail' }), { op: 'configure', input: { toolId: 'gmail' } });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.deactivateOfficialTool)(trustedIpcEvent, 'gmail', 'es'), { op: 'deactivate', toolId: 'gmail', options: { locale: 'es' } });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.getAppToolsInstallGate)(trustedIpcEvent, 'finance-os', 'es'), { appId: 'finance-os', locale: 'es', connectionRequired: [], connectionOptional: [] });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.setAppToolGrant)(trustedIpcEvent, { appId: 'finance-os', toolId: 'gmail' }, 'es'), { appId: 'finance-os', locale: 'es', connectionRequired: [], connectionOptional: [] });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.setAppConnectionGrant)(trustedIpcEvent, { appId: 'finance-os', type: 'gmail', granted: true }, 'es'), { appId: 'finance-os', locale: 'es', connectionRequired: [], connectionOptional: [] });
 
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.filesStageForChat)(null, { fileId: 'file-1' }), { op: 'stage', input: { fileId: 'file-1' } });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.filesDiscardStagedForChat)(null, { fileId: 'file-1' }), { op: 'discard', input: { fileId: 'file-1' } });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.filesList)(null), { op: 'list', input: {} });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.filesListCategories)(), [{ id: 'uncategorized' }]);
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.filesCreateCategory)(null, { name: 'Docs' }), { op: 'createCategory', input: { name: 'Docs' } });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.filesRenameCategory)(null, { id: 'c1', name: 'Docs' }), { op: 'renameCategory', input: { id: 'c1', name: 'Docs' } });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.filesDeleteCategory)(null, { id: 'c1' }), { op: 'deleteCategory', input: { id: 'c1' } });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.filesImport)(null, { paths: ['/tmp/a.txt'] }), { op: 'import', input: { paths: ['/tmp/a.txt'] } });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.filesMove)(null, { fileIds: ['f1'] }), { op: 'move', input: { fileIds: ['f1'] } });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.filesRename)(null, { fileId: 'f1' }), { op: 'renameFile', input: { fileId: 'f1' } });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.filesDelete)(null, { fileIds: ['f1'] }), { op: 'deleteFiles', input: { fileIds: ['f1'] } });
+  const staged = await handlers.get(IPC_CHANNELS.filesStageForChat)(trustedIpcEvent, { fileId: 'file-1' });
+  assert.equal(staged.name, 'staged.png');
+  assert.equal(typeof staged.grantId, 'string');
+  assert.equal(Object.hasOwn(staged, 'sourcePath'), false);
+  const importResult = await handlers.get(IPC_CHANNELS.filesImport)(trustedIpcEvent, { grantIds: [staged.grantId] });
+  assert.equal(importResult.op, 'import');
+  assert.equal(importResult.input.sources.length, 1);
+  assert.equal(importResult.input.sources[0].grantId, staged.grantId);
+  assert.equal(importResult.input.sources[0].name, 'staged.png');
+  assert.equal(importResult.input.sources[0].staged, true);
+  assert.equal(Object.hasOwn(importResult.input, 'sourcePaths'), false);
+  assert.deepEqual(
+    await handlers.get(IPC_CHANNELS.filesDiscardStagedForChat)(trustedIpcEvent, { grantIds: [staged.grantId] }),
+    { success: true },
+  );
+  assert.deepEqual(discardedFileInputs.at(-1), { sourcePaths: [await fs.realpath(stagedPath)] });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.filesList)(trustedIpcEvent), { op: 'list', input: {} });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.filesListCategories)(trustedIpcEvent), [{ id: 'uncategorized' }]);
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.filesCreateCategory)(trustedIpcEvent, { name: 'Docs' }), { op: 'createCategory', input: { name: 'Docs' } });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.filesRenameCategory)(trustedIpcEvent, { id: 'c1', name: 'Docs' }), { op: 'renameCategory', input: { id: 'c1', name: 'Docs' } });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.filesDeleteCategory)(trustedIpcEvent, { id: 'c1' }), { op: 'deleteCategory', input: { id: 'c1' } });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.filesMove)(trustedIpcEvent, { fileIds: ['f1'] }), { op: 'move', input: { fileIds: ['f1'] } });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.filesRename)(trustedIpcEvent, { fileId: 'f1' }), { op: 'renameFile', input: { fileId: 'f1' } });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.filesDelete)(trustedIpcEvent, { fileIds: ['f1'] }), { op: 'deleteFiles', input: { fileIds: ['f1'] } });
   assert.deepEqual(calls, []);
 });

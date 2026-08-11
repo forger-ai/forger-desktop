@@ -7,15 +7,19 @@ import type { StoredForgerAccount } from '../forger-account-store';
 
 interface PathConfigDeps {
   app: App;
+  e2eProfileRoot?: string;
   forgerAccount: StoredForgerAccount;
   isDev: boolean;
+  isTest?: boolean;
   os: typeof os;
   path: typeof path;
 }
 
 interface ConfigureUserDataDeps {
-  app: Pick<App, 'getPath' | 'setPath'>;
+  app: Pick<App, 'getPath' | 'isPackaged' | 'setPath'>;
+  e2eProfileRoot?: string;
   isDev: boolean;
+  isTest?: boolean;
   path: typeof path;
 }
 
@@ -49,7 +53,26 @@ export const resolveRuntimePlatformAlias = (
 
 export const getDesktopUserDataName = (isDev: boolean): string => (isDev ? 'forger-desktop-dev' : 'forger-desktop');
 
-export const configureDesktopUserDataPath = ({ app, isDev, path }: ConfigureUserDataDeps): string | null => {
+const resolveE2EProfileRoot = ({
+  app,
+  e2eProfileRoot,
+  isTest,
+  path,
+}: Pick<ConfigureUserDataDeps, 'app' | 'e2eProfileRoot' | 'isTest' | 'path'>): string | null => {
+  const candidate = e2eProfileRoot?.trim();
+  if (!candidate || !isTest || app.isPackaged !== false || !path.isAbsolute(candidate)) {
+    return null;
+  }
+  return path.resolve(candidate);
+};
+
+export const configureDesktopUserDataPath = ({ app, e2eProfileRoot, isDev, isTest, path }: ConfigureUserDataDeps): string | null => {
+  const isolatedProfileRoot = resolveE2EProfileRoot({ app, e2eProfileRoot, isTest, path });
+  if (isolatedProfileRoot) {
+    const userDataPath = path.join(isolatedProfileRoot, 'user-data');
+    app.setPath('userData', userDataPath);
+    return userDataPath;
+  }
   if (!isDev) {
     return null;
   }
@@ -59,7 +82,8 @@ export const configureDesktopUserDataPath = ({ app, isDev, path }: ConfigureUser
 };
 
 export const createPathConfigController = (deps: PathConfigDeps) => {
-  const { app, forgerAccount, isDev, os, path } = deps;
+  const { app, e2eProfileRoot, forgerAccount, isDev, isTest, os, path } = deps;
+  const isolatedProfileRoot = resolveE2EProfileRoot({ app, e2eProfileRoot, isTest, path });
 
   const normalizeVersionForFolder = (value: string): string => {
     const normalized = value.trim().replace(/^v/i, '').replace(/[^0-9A-Za-z._-]/g, '-');
@@ -83,7 +107,9 @@ export const createPathConfigController = (deps: PathConfigDeps) => {
   const getTempRoot = () => path.join(app.getPath('userData'), 'tmp');
   const getLogsRoot = () => path.join(app.getPath('userData'), 'logs');
   const getInstallLogPath = () => path.join(getLogsRoot(), 'install.log');
-  const getForgerHomeRoot = () => path.join(os.homedir(), isDev ? 'Forger-dev' : 'Forger');
+  const getForgerHomeRoot = () => isolatedProfileRoot
+    ? path.join(isolatedProfileRoot, 'workspace')
+    : path.join(os.homedir(), isDev ? 'Forger-dev' : 'Forger');
   const getPrivateAppsRoot = () => path.join(getForgerHomeRoot(), 'apps');
   const getPrivateDataRoot = () => path.join(getForgerHomeRoot(), 'data');
   const getBackupsRoot = () => path.join(getForgerHomeRoot(), 'backups');

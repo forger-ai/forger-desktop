@@ -1,11 +1,15 @@
 import type { AnchorHTMLAttributes, MouseEvent } from 'react';
 
 const isOpenableMarkdownHref = (href: string): boolean => {
+  if (href === '~' || /^~[\\/]/.test(href) || href.startsWith('/') || /^[A-Za-z]:[\\/]/.test(href) || href.startsWith('\\\\')) {
+    return true;
+  }
+
   try {
     const protocol = new URL(href).protocol;
     return protocol === 'http:' || protocol === 'https:' || protocol === 'file:';
   } catch {
-    return href === '~' || /^~[\\/]/.test(href) || href.startsWith('/') || /^[A-Za-z]:[\\/]/.test(href) || href.startsWith('\\\\');
+    return false;
   }
 };
 

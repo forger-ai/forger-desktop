@@ -70,7 +70,7 @@ const createController = (overrides = {}) => {
     fs,
     getAgentToolSettingsPath: () => '/tmp/forger-agent-tools.json',
     getForgerMetadataRoot: () => '/tmp/forger-metadata',
-    getInstallLogPath: () => '/tmp/forger-install.log',
+    getInstallLogPath: () => path.join(tmpdir(), 'forger-main-utilities-test-logs', 'install.log'),
     getMainWindow: () => mainWindow,
     installProgressByPhase,
     isDev: true,
@@ -235,6 +235,143 @@ test('main utility chat emit logs send failures without throwing', async () => {
   }
 });
 
+test('main utility redacts embedded secrets from both install and desktop logs', async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), 'forger-install-log-redaction-'));
+  t.after(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+  const installLogDir = path.join(root, 'legacy-logs');
+  const installLogPath = path.join(installLogDir, 'install.log');
+  const metadataRoot = path.join(root, 'metadata');
+  await fs.mkdir(installLogDir, { recursive: true, mode: 0o777 });
+  await fs.writeFile(installLogPath, '', { mode: 0o666 });
+  await fs.chmod(installLogDir, 0o777);
+  await fs.chmod(installLogPath, 0o666);
+  const { controller } = createController({
+    getForgerMetadataRoot: () => metadataRoot,
+    getInstallLogPath: () => installLogPath,
+  });
+
+  await controller.appendInstallLog('install_failed Bearer event-secret', {
+    appId: 'finance-os',
+    note: 'upload failed with Bearer bearer-secret but retry is possible',
+    requestUrl: 'https://example.com/callback?access_token=query-secret&mode=safe',
+    config: 'api_key=key-value-secret status=useful',
+    responseDetails: 'Cookie: session=cookie-secret; theme=dark',
+    runtimeFailure: new Error('runtime failed: password=error-secret; app remains stopped'),
+  });
+
+  const installEntry = JSON.parse((await readFile(installLogPath, 'utf8')).trim());
+  const desktopEntry = JSON.parse((await readFile(
+    path.join(metadataRoot, 'logs', 'forger-desktop.jsonl'),
+    'utf8',
+  )).trim());
+  const installSerialized = JSON.stringify(installEntry);
+  const desktopSerialized = JSON.stringify(desktopEntry);
+  for (const secret of [
+    'event-secret',
+    'bearer-secret',
+    'query-secret',
+    'key-value-secret',
+    'cookie-secret',
+    'error-secret',
+  ]) {
+    assert.equal(installSerialized.includes(secret), false, `install.log leaked ${secret}`);
+    assert.equal(desktopSerialized.includes(secret), false, `desktop log leaked ${secret}`);
+  }
+
+  assert.equal(installEntry.event, 'install_failed Bearer [REDACTED]');
+  assert.equal(installEntry.appId, 'finance-os');
+  assert.equal(installEntry.note, 'upload failed with Bearer [REDACTED] but retry is possible');
+  assert.equal(installEntry.requestUrl, 'https://example.com/callback?access_token=[REDACTED]&mode=safe');
+  assert.equal(installEntry.config, 'api_key=[REDACTED] status=useful');
+  assert.equal(installEntry.responseDetails, 'Cookie: [REDACTED]');
+  assert.match(installEntry.runtimeFailure.message, /runtime failed: password=\[REDACTED\]; app remains stopped/);
+  assert.equal(desktopEntry.event, installEntry.event);
+  assert.equal(desktopEntry.context.appId, installEntry.appId);
+  assert.equal(desktopEntry.context.note, installEntry.note);
+  assert.equal(desktopEntry.context.requestUrl, installEntry.requestUrl);
+  assert.equal(desktopEntry.context.config, installEntry.config);
+  assert.equal(desktopEntry.context.responseDetails, installEntry.responseDetails);
+  assert.equal(desktopEntry.context.runtimeFailure.message, installEntry.runtimeFailure.message);
+  if (process.platform !== 'win32') {
+    assert.equal((await fs.stat(installLogDir)).mode & 0o777, 0o700);
+    assert.equal((await fs.stat(installLogPath)).mode & 0o777, 0o600);
+  }
+});
+
+test('main utility removes escaped-quote secrets from install and desktop logs without dropping safe prose', async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), 'forger-install-log-escaped-secret-'));
+  t.after(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+  const installLogPath = path.join(root, 'legacy-logs', 'install.log');
+  const metadataRoot = path.join(root, 'metadata');
+  const { controller } = createController({
+    getForgerMetadataRoot: () => metadataRoot,
+    getInstallLogPath: () => installLogPath,
+  });
+  const adversarial = String.raw`before {\"token\":\"abc\\\"LEAK-INSTALL\"} after`;
+
+  await controller.appendInstallLog(adversarial, {
+    nested: { message: adversarial },
+    runtimeFailure: new Error(adversarial),
+  });
+
+  const installEntry = JSON.parse((await readFile(installLogPath, 'utf8')).trim());
+  const desktopEntry = JSON.parse((await readFile(
+    path.join(metadataRoot, 'logs', 'forger-desktop.jsonl'),
+    'utf8',
+  )).trim());
+  const expected = String.raw`before {\"token\":\"[REDACTED]\"} after`;
+  for (const entry of [installEntry, desktopEntry]) {
+    assert.equal(JSON.stringify(entry).includes('LEAK-INSTALL'), false);
+    assert.equal(entry.event, expected);
+    const payload = entry.context ?? entry;
+    assert.equal(payload.nested.message, expected);
+    assert.equal(payload.runtimeFailure.message, expected);
+  }
+});
+
+test('main utility applies semantic compound-key redaction consistently to both log sinks', async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), 'forger-install-log-compound-secret-'));
+  t.after(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+  const installLogPath = path.join(root, 'legacy-logs', 'install.log');
+  const metadataRoot = path.join(root, 'metadata');
+  const { controller } = createController({
+    getForgerMetadataRoot: () => metadataRoot,
+    getInstallLogPath: () => installLogPath,
+  });
+  const detail = String.raw`safe author=Ada githubToken=LEAK-COMPOUND escaped={\"stripeSecretKey\":\"LEAK-ESCAPED-COMPOUND\",\"authorizationStatus\":\"connected\"} done`;
+
+  await controller.appendInstallLog('compound_secret_check', {
+    detail,
+    author: 'Ada',
+    authority: 'local',
+    authorizationStatus: 'connected',
+    sessionToken: 'LEAK-STRUCTURED-COMPOUND',
+  });
+
+  const entries = [
+    JSON.parse((await readFile(installLogPath, 'utf8')).trim()),
+    JSON.parse((await readFile(path.join(metadataRoot, 'logs', 'forger-desktop.jsonl'), 'utf8')).trim()),
+  ];
+  for (const entry of entries) {
+    assert.equal(JSON.stringify(entry).includes('LEAK'), false);
+    const payload = entry.context ?? entry;
+    assert.equal(payload.author, 'Ada');
+    assert.equal(payload.authority, 'local');
+    assert.equal(payload.authorizationStatus, 'connected');
+    assert.equal(payload.sessionToken, '[REDACTED]');
+    assert.equal(
+      payload.detail,
+      String.raw`safe author=Ada githubToken=[REDACTED] escaped={\"stripeSecretKey\":\"[REDACTED]\",\"authorizationStatus\":\"connected\"} done`,
+    );
+  }
+});
+
 test('main utility install log and account helpers tolerate no-op failure paths', async () => {
   const warns = [];
   const originalWarn = console.warn;
@@ -244,6 +381,7 @@ test('main utility install log and account helpers tolerate no-op failure paths'
       fs: {
         ...fs,
         mkdir: async () => undefined,
+        chmod: async () => undefined,
         appendFile: async () => {
           throw new Error('disk_full');
         },

@@ -67,6 +67,9 @@ test('preload forwards representative commands to the expected IPC channels with
   await api.updateCodexDefaults({ provider: 'codex', model: 'gpt-5' });
   await api.chatCancelRun({ appId: 'forger', runId: 'run-1' });
   await api.filesStageForChat({ appId: 'finance-os', files: [{ path: '/tmp/input.pdf' }] });
+  await api.filesImport({ grantIds: ['grant-1'], categoryPath: 'Reports', sourcePaths: ['/tmp/never-forward.txt'] });
+  await api.filesDiscardStagedForChat({ grantIds: ['staged-grant'], sourcePaths: ['/tmp/never-delete.txt'] });
+  await api.filesReleaseSelections({ grantIds: ['unused-grant'], sourcePaths: ['/tmp/never-release.txt'] });
   await api.memoryList();
   await api.getLlmRunsSnapshot();
   await api.getAgentProviderUsage();
@@ -90,6 +93,9 @@ test('preload forwards representative commands to the expected IPC channels with
     ['forger:update-codex-defaults', { provider: 'codex', model: 'gpt-5' }],
     ['forger:chat:cancel-run', { appId: 'forger', runId: 'run-1' }],
     ['forger:files:stage-for-chat', { appId: 'finance-os', files: [{ path: '/tmp/input.pdf' }] }],
+    ['forger:files:import', { grantIds: ['grant-1'], categoryPath: 'Reports' }],
+    ['forger:files:discard-staged-for-chat', { grantIds: ['staged-grant'] }],
+    ['forger:files:release-selections', { grantIds: ['unused-grant'] }],
     ['forger:memory:list', {}],
     ['forger:llm-runs:snapshot:get'],
     ['forger:agent-provider-usage:get'],

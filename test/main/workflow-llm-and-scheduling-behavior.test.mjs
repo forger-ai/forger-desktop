@@ -71,7 +71,7 @@ const createManager = async (overrides = {}) => {
     metadataRoot,
     events,
     cleanup: async () => {
-      manager.dispose();
+      await manager.dispose();
       await rm(metadataRoot, { recursive: true, force: true });
     },
   };
@@ -142,7 +142,7 @@ test('llm node runs the provider CLI, injects context, and falls back to the las
     assert.match(transcript, /Work autonomously inside this node/, 'autonomous node work is required');
     assert.match(transcript, /exactly what information is missing/, 'missing-information failures are explicit');
 
-    withCli.manager.dispose();
+    await withCli.manager.dispose();
   } finally {
     await harness.cleanup();
   }
@@ -204,7 +204,7 @@ test('llm node honours MCP completion, schema validation, and reported failures'
     const defaulted = await waitForRunEnd(withCli.manager, defaultSummary.id);
     assert.equal(defaulted.error, 'workflow_node_reported_failure');
 
-    withCli.manager.dispose();
+    await withCli.manager.dispose();
   } finally {
     await harness.cleanup();
   }
@@ -274,7 +274,7 @@ test('forger agent node runs with the personal agent grants and reports missing 
     assert.match(transcript, /Cuidar las finanzas/, 'agent purpose precedes the node prompt');
     assert.match(transcript, /Se muy prolijo/);
 
-    withCli.manager.dispose();
+    await withCli.manager.dispose();
   } finally {
     await harness.cleanup();
   }
@@ -313,12 +313,30 @@ test('provider readiness and CLI resolution failures produce clean node errors',
 test('cancelRun kills a running provider CLI and cancels the run', async () => {
   const harness = await createManager();
   const cliPath = await writeFakeCodexCli(harness.metadataRoot, { sleepMs: 8_000, message: 'nunca llega' });
+  let releaseActivityWrite;
+  let markActivityWriteStarted;
+  let activityWriteCount = 0;
+  let disposal;
+  const activityWriteGate = new Promise((resolve) => {
+    releaseActivityWrite = resolve;
+  });
+  const activityWriteStarted = new Promise((resolve) => {
+    markActivityWriteStarted = resolve;
+  });
+  const activityPath = join(harness.metadataRoot, 'test-activity.json');
+  let withCli;
   try {
-    const withCli = await createManager({
+    withCli = await createManager({
       metadataRoot: harness.metadataRoot,
       options: {
         getCodexAuthenticated: async () => true,
         getCodexCliPath: async () => cliPath,
+        persistAgentRunActivity: async (activity) => {
+          activityWriteCount += 1;
+          markActivityWriteStarted();
+          await activityWriteGate;
+          await writeFile(activityPath, JSON.stringify(activity), 'utf8');
+        },
       },
     });
     const workflow = await withCli.manager.upsert(llmWorkflowInput({ appIds: [] }));
@@ -329,14 +347,30 @@ test('cancelRun kills a running provider CLI and cancels the run', async () => {
     assert.equal(notActive.success, false);
     assert.equal(notActive.technicalCode, 'workflow_run_not_active');
 
-    const canceled = await withCli.manager.cancelRun(summary.id);
-    assert.equal(canceled.success, true);
-
+    await activityWriteStarted;
+    let cancellationSettled = false;
+    const cancellation = withCli.manager.cancelRun(summary.id).then((result) => {
+      cancellationSettled = true;
+      return result;
+    });
     const finished = await waitForRunEnd(withCli.manager, summary.id);
     assert.equal(finished.status, 'canceled');
+    await Promise.resolve();
+    assert.equal(cancellationSettled, false, 'cancelRun waits for queued activity persistence');
 
-    withCli.manager.dispose();
+    releaseActivityWrite();
+    const canceled = await cancellation;
+    assert.equal(canceled.success, true);
+    disposal = withCli.manager.dispose();
+    await disposal;
+    const writesAtDisposal = activityWriteCount;
+    await rm(harness.metadataRoot, { recursive: true, force: true });
+    await Promise.resolve();
+    assert.equal(activityWriteCount, writesAtDisposal, 'no activity write starts after dispose resolves');
+    await assert.rejects(readFile(activityPath, 'utf8'), { code: 'ENOENT' });
   } finally {
+    releaseActivityWrite?.();
+    await (disposal ?? withCli?.manager.dispose());
     await harness.cleanup();
   }
 });
@@ -499,10 +533,16 @@ test('initialize drops corrupt entries, restores schedules, and fails interrupte
     });
     const runSummary = await slowHarness.manager.runNow(workflow.id);
     await waitFor(async () => (await slowHarness.manager.getRun(runSummary.id))?.status === 'running');
-    // Simulate a crash: drop the manager without letting the run finish.
-    slowHarness.manager.dispose();
+    // Preserve the exact durable state a crash would leave, then shut down the
+    // live manager cleanly so it cannot race the reopened instance.
+    const workflowsAtCrash = await readFile(join(metadataRoot, 'workflows.json'), 'utf8');
+    const runPath = join(metadataRoot, 'workflow-runs', `${runSummary.id}.json`);
+    const runAtCrash = await readFile(runPath, 'utf8');
+    await slowHarness.manager.dispose();
+    await writeFile(join(metadataRoot, 'workflows.json'), workflowsAtCrash, 'utf8');
+    await writeFile(runPath, runAtCrash, 'utf8');
 
-    const raw = JSON.parse(await readFile(join(metadataRoot, 'workflows.json'), 'utf8'));
+    const raw = JSON.parse(workflowsAtCrash);
     raw.push({ id: '', name: 'invalido' });
     raw.push({
       id: 'wf-ciclo',
@@ -628,7 +668,7 @@ test('run level failures outside node execution mark the run as failed', async (
     assert.equal(finished.status, 'failed');
     assert.equal(finished.error, 'workflow_not_found');
   } finally {
-    manager.dispose();
+    await manager.dispose();
     await rm(metadataRoot, { recursive: true, force: true });
   }
 });
@@ -709,7 +749,7 @@ test('cancelRun resolves pending approvals and cancels remaining branch nodes', 
     await withItems.manager.cancelRun(forEachRun.id);
     const canceledForEach = await waitForRunEnd(withItems.manager, forEachRun.id);
     assert.equal(canceledForEach.status, 'canceled');
-    withItems.manager.dispose();
+    await withItems.manager.dispose();
   } finally {
     await harness.cleanup();
   }
@@ -818,7 +858,7 @@ test('claude and antigravity nodes run through their provider CLIs', async () =>
     assert.deepEqual(byNode.claude.output, { text: 'Hecho por claude' });
     assert.equal(byNode.agy.status, 'succeeded');
     assert.match(byNode.agy.output.text, /Listo trabajo antigravity/);
-    harness.manager.dispose();
+    await harness.manager.dispose();
   } finally {
     await rm(root, { recursive: true, force: true });
   }

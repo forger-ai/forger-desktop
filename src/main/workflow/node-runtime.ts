@@ -129,13 +129,23 @@ export interface WorkflowNodeRuntimeOptions {
   preflightAppActions?: (nodes: WorkflowAppActionNode[], runId: string) => Promise<void>;
   releaseAppActions?: (runId: string) => void | Promise<void>;
   onAgentRunActivity?: (activity: AgentRunActivity) => void;
+  persistAgentRunActivity?: (activity: AgentRunActivity) => Promise<void>;
 }
 
 export class WorkflowNodeRuntime {
   private nodeContexts = new Map<string, WorkflowMcpNodeContext>();
   private nodeCompletions = new Map<string, WorkflowNodeCompletion>();
+  private activityPersistenceTail: Promise<void> = Promise.resolve();
+  private readonly backgroundFailures: unknown[] = [];
 
   public constructor(private readonly options: WorkflowNodeRuntimeOptions) {}
+
+  public async flushActivityPersistence(): Promise<void> {
+    await this.activityPersistenceTail;
+    if (this.backgroundFailures.length > 0) {
+      throw new AggregateError(this.backgroundFailures, 'workflow_background_task_failed');
+    }
+  }
 
   public getNodeContext(nodeRunKey: string): WorkflowMcpNodeContext | null {
     return this.nodeContexts.get(nodeRunKey) ?? null;
@@ -702,7 +712,13 @@ export class WorkflowNodeRuntime {
     const emitActivity = (next: AgentRunActivity): void => {
       activity = next;
       this.options.onAgentRunActivity?.(activity);
-      void persistAgentRunActivity(this.options.metadataRoot, activity);
+      const persist = this.options.persistAgentRunActivity
+        ?? ((value: AgentRunActivity) => persistAgentRunActivity(this.options.metadataRoot, value));
+      this.activityPersistenceTail = this.activityPersistenceTail
+        .then(() => persist(activity))
+        .catch((error) => {
+          this.backgroundFailures.push(error);
+        });
     };
     emitActivity(activity);
     const inputContext = this.buildAgentInputContext(context);

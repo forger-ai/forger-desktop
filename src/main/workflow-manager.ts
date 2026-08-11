@@ -135,6 +135,7 @@ export class WorkflowManager {
           await Promise.resolve().then(() => this.options.releaseAppActions?.(runId));
         }),
       );
+      await this.nodeRuntime.flushActivityPersistence().catch(() => undefined);
       this.activeRuns.clear();
     })();
     return this.disposePromise;
@@ -551,6 +552,7 @@ export class WorkflowManager {
       return { success: false, technicalCode: 'workflow_run_not_active', userMessage: 'Ese flujo no esta en ejecucion.' };
     }
     this.cancelActiveRun(active);
+    await this.nodeRuntime.flushActivityPersistence().catch(() => undefined);
     return { success: true, userMessage: 'Deteniendo el flujo...' };
   }
 

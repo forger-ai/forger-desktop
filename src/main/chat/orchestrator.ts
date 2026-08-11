@@ -26,6 +26,7 @@ import type {
   PermissionRequest,
 } from '../../shared/types';
 import type { LlmProviderAuthProfileResolver } from '../llm-provider/types';
+import { isTerminalChatRunStatus } from '../../shared/chat-run-state';
 import { buildFailureDiagnostic } from '../../shared/error-diagnostics';
 import { getSharedCopy, normalizeLocale, type Locale } from '../../shared/i18n';
 import {
@@ -1139,6 +1140,9 @@ export class ChatOrchestrator {
   }
 
   private emitRun(run: InternalChatRun): void {
+    if (isTerminalChatRunStatus(run.status)) {
+      this.releaseRunLocks(run);
+    }
     run.activity = this.activityForEmit(run);
     void persistAgentRunActivity(this.options.metadataRoot, run.activity);
     const publicRun = toPublicChatRun(run);

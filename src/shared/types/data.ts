@@ -51,7 +51,7 @@ export interface ForgerFileCategory {
 }
 
 export interface PickedChatFile {
-  sourcePath: string;
+  grantId: string;
   name: string;
   sizeBytes: number;
   modifiedAt: string;
@@ -66,7 +66,11 @@ export interface FilesStageForChatInput {
 }
 
 export interface FilesDiscardStagedForChatInput {
-  sourcePaths: string[];
+  grantIds: string[];
+}
+
+export interface FilesReleaseSelectionsInput {
+  grantIds: string[];
 }
 
 export interface FilesListInput {
@@ -78,7 +82,7 @@ export interface FilesListInput {
 }
 
 export interface FilesImportInput {
-  sourcePaths: string[];
+  grantIds: string[];
   categoryPath?: string;
   appId?: string;
 }

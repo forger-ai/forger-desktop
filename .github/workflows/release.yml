@@ -39,13 +39,24 @@ jobs:
           node-version: 24
           cache: npm
 
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: test/resources/requirements.txt
+
       - run: npm ci
+      - run: python -m pip install -r test/resources/requirements.txt
       - run: |
           node scripts/ensure-electron-installed.mjs
           node -e "require('electron'); console.log('electron ready')"
         shell: bash
       - run: node scripts/validate-release-tag.mjs
-      - run: npm run test:coverage
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run test:coverage:electron:strict
+      - run: npm run test:coverage:renderer
+      - run: npm run test:resources
 
       - id: meta
         run: |
@@ -63,11 +74,11 @@ jobs:
               forger-desktop-macos-arm64.dmg
               forger-desktop-macos-x64.dmg
           - os: ubuntu-latest
-            script: dist:linux
+            script: dist:linux:built
             artifacts: |
               forger-desktop-linux-x64.deb
           - os: windows-latest
-            script: dist:win
+            script: dist:win:built
             artifacts: |
               forger-desktop-windows-x64.exe
     runs-on: ${{ matrix.os }}
@@ -90,12 +101,32 @@ jobs:
           node-version: 24
           cache: npm
 
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: test/resources/requirements.txt
+
       - run: npm ci
+      - run: python -m pip install -r test/resources/requirements.txt
       - run: |
           node scripts/ensure-electron-installed.mjs
           node -e "require('electron'); console.log('electron ready')"
         shell: bash
       - run: npm run typecheck
+      - run: npm run build
+      - run: npm run test:electron:focused:built
+      - run: npm run test:renderer
+      - run: npm run test:resources
+
+      - name: Run Electron smoke under Xvfb
+        if: runner.os == 'Linux'
+        run: xvfb-run --auto-servernum npm run test:e2e:built
+
+      - name: Run Electron smoke
+        if: runner.os != 'Linux'
+        run: npm run test:e2e:built
+
       - run: npm run ${{ matrix.script }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

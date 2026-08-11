@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
+import path from 'node:path';
 import test from 'node:test';
+import { pathToFileURL } from 'node:url';
 
 import {
   clearDistModule,
@@ -211,7 +213,10 @@ test('window bootstrap creates the main BrowserWindow with secure renderer defau
   const calls = [];
   const externalUrls = [];
   const openedPaths = [];
+  const reportPath = path.resolve('report.txt');
+  const reportUrl = pathToFileURL(reportPath).toString();
   let mainWindow = null;
+  let friendWindows = [];
 
   const { IPC_CHANNELS } = await import('../../dist-electron/shared/ipc.js');
   const { createWindowBootstrapController } = await withMockedElectron(
@@ -229,7 +234,13 @@ test('window bootstrap creates the main BrowserWindow with secure renderer defau
     app,
     desktopErrorReporter: { reportRendererProcessGone: (details) => calls.push(['renderer-gone', details]) },
     focusDeepLinkWindow: (window) => calls.push(['focus', window]),
-    getMainProcessIpcDeps: () => ({ marker: 'deps' }),
+    getMainProcessIpcDeps: () => ({
+      desktopIpcMain: { marker: 'trusted-desktop-ipc' },
+      getFriendChatWindows: () => friendWindows,
+      marker: 'deps',
+      mainWindow,
+      getMainWindow: () => mainWindow,
+    }),
     getMainWindow: () => mainWindow,
     getWindowState: () => ({ isMaximized: false, isFullScreen: false, usesCustomFrame: true }),
     ipcMain: ipcRecorder.ipcMain,
@@ -254,9 +265,20 @@ test('window bootstrap creates the main BrowserWindow with secure renderer defau
     useCustomWindowFrame: true,
   });
 
+  controller.registerIpcHandlers();
+  const registeredMainDeps = calls.find((call) => call[0] === 'main-ipc')[1];
+  const registeredAgentDeps = calls.find((call) => call[0] === 'agent-ipc')[1];
+  assert.equal(registeredAgentDeps, registeredMainDeps);
+  assert.equal(registeredAgentDeps.desktopIpcMain.marker, 'trusted-desktop-ipc');
+  assert.equal(registeredMainDeps.mainWindow, null);
+  assert.equal(registeredMainDeps.getMainWindow(), null);
+  assert.deepEqual(registeredMainDeps.getFriendChatWindows(), []);
+
   await controller.createWindow();
   mainWindow = constructedWindows[0];
-  controller.registerIpcHandlers();
+  friendWindows = [{ webContents: { id: 88 } }];
+  assert.equal(registeredMainDeps.getMainWindow(), mainWindow);
+  assert.equal(registeredAgentDeps.getFriendChatWindows(), friendWindows);
   calls.find((call) => call[0] === 'window-ipc')[1].quitApp();
   mainWindow.webContents.events.get('render-process-gone')({}, { reason: 'crashed' });
   const externalNavigation = [];
@@ -270,14 +292,14 @@ test('window bootstrap creates the main BrowserWindow with secure renderer defau
     'http://127.0.0.1:5173/settings',
   );
   assert.deepEqual(mainWindow.webContents.openHandler({ url: 'https://example.com/popup' }), { action: 'deny' });
-  assert.deepEqual(mainWindow.webContents.openHandler({ url: 'file:///tmp/report.txt' }), { action: 'deny' });
+  assert.deepEqual(mainWindow.webContents.openHandler({ url: reportUrl }), { action: 'deny' });
   assert.deepEqual(mainWindow.webContents.openHandler({ url: 'javascript:alert(1)' }), { action: 'deny' });
   assert.deepEqual(mainWindow.webContents.openHandler({ url: 'http://127.0.0.1:5173/help' }), { action: 'deny' });
 
   assert.equal(constructedWindows.length, 1);
   assert.equal(constructedWindows[0].options.frame, false);
   assert.match(
-    constructedWindows[0].options.webPreferences.preload,
+    constructedWindows[0].options.webPreferences.preload.replaceAll('\\', '/'),
     /dist-electron\/main\/core\/\.\.\/\.\.\/preload\/index\.js$/,
   );
   assert.deepEqual(
@@ -293,11 +315,11 @@ test('window bootstrap creates the main BrowserWindow with secure renderer defau
     },
   );
   assert.deepEqual(calls.map((call) => call[0]), [
-    'window-events',
-    'load',
     'main-ipc',
     'agent-ipc',
     'window-ipc',
+    'window-events',
+    'load',
     'renderer-gone',
   ]);
   assert.equal(app.quitCalls, 1);
@@ -305,8 +327,12 @@ test('window bootstrap creates the main BrowserWindow with secure renderer defau
   assert.deepEqual(externalNavigation, ['prevented']);
   assert.deepEqual(internalNavigation, []);
   assert.deepEqual(externalUrls, ['https://example.com/docs', 'https://example.com/popup']);
-  assert.deepEqual(openedPaths, ['/tmp/report.txt']);
+  assert.deepEqual(openedPaths, [reportPath]);
   assert.equal(mainWindow.currentUrl, 'http://127.0.0.1:5173/help');
+
+  const replacementWindow = createWindowDouble();
+  mainWindow = replacementWindow;
+  assert.equal(registeredMainDeps.getMainWindow(), replacementWindow);
 });
 
 test('window bootstrap keeps native frames portable and ignores empty pending deep-link flushes', async () => {

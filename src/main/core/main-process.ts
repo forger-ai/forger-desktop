@@ -57,6 +57,7 @@ import { BackupsManager } from '../backups-manager';
 import { createWindowStateEventRegistrar, createWindowStateReader, registerWindowIpcHandlers } from '../ipc/window';
 import { registerAgentIpcHandlers, type AgentIpcDeps } from '../ipc/agent-handlers';
 import { registerMainIpcHandlers, type MainProcessIpcDeps } from '../ipc/main-handlers';
+import { createTrustedIpcMain } from '../ipc/trusted-ipc';
 import { createInstalledAppRuntimeController } from '../runtime/installed-app-runtime';
 import { createInstalledAppLifecycleController } from '../installed-apps/lifecycle';
 import { createLocalAppCreator } from '../installed-apps/local-app-creator';
@@ -127,8 +128,8 @@ import type {
   UpdateAgentToolApprovalInput, UpdateCodexDefaultsInput, UpdateDeveloperModeInput, UpdateEarlyAccessInput, UpdateLlmProviderProfileDefaultsInput, UpdateUserSecretInput,
 } from '../../shared/types';
 const BetterSqlite3 = loadOptionalBetterSqlite();
-const isDev = Boolean(process.env.VITE_DEV_SERVER_URL);
-configureDesktopUserDataPath({ app, isDev, path });
+const isDev = Boolean(process.env.VITE_DEV_SERVER_URL); const isTest = process.env.NODE_ENV === 'test'; const e2eProfileRoot = process.env.FORGER_E2E_PROFILE_ROOT;
+configureDesktopUserDataPath({ app, e2eProfileRoot, isDev, isTest, path });
 const backendBaseUrl = process.env.FORGER_BACKEND_URL ?? (isDev ? 'http://127.0.0.1:3300' : 'https://platform.forger.cloud');
 let localCatalogJsonUrl: string | undefined;
 const CODEX_MODEL_VALUES = new Set(APP_CODEX_MODEL_OPTIONS.map((option) => option.realModelName));
@@ -254,7 +255,7 @@ desktopErrorReporter = new DesktopErrorReporter({
   getInstalledApp: (appId) => registry.apps[appId],
 });
 let promptOverridesStore: PromptOverridesStore | null = null;
-const createPathConfigDeps = () => ({ app, forgerAccount, isDev, os, path });
+const createPathConfigDeps = () => ({ app, e2eProfileRoot, forgerAccount, isDev, isTest, os, path });
 const getPathConfigController = () => createPathConfigController(createPathConfigDeps());
 const normalizeVersionForFolder = (value: string): string => getPathConfigController().normalizeVersionForFolder(value);
 const normalizeNodeRuntimeVersion = (value?: string | null): string => getPathConfigController().normalizeNodeRuntimeVersion(value);
@@ -1424,12 +1425,11 @@ const getMainProcessIpcDeps = (): MainProcessIpcDeps & AgentIpcDeps => ({
   deleteQuarantinedSocialApp,
   getSocialAppReviewPromptContext,
   installSocialAppRuntime,
-  installWelcome,
-  ipcMain,
-  listAppPrompts,
+  installWelcome, desktopIpcMain: createTrustedIpcMain({ ipcMain, getMainWindow, getAdditionalTrustedWindows: () => [...friendChatWindows.values()] }),
+  ipcMain, listAppPrompts,
   listCatalogFromBackend,
   listLlmProviderProfiles,
-  mainWindow: getMainWindow(),
+  getFriendChatWindows: () => [...friendChatWindows.values()], getMainWindow, mainWindow: getMainWindow(),
   normalizeAgentProvider,
   normalizeClaudeEffort,
   normalizeCodexReasoningEffort,
